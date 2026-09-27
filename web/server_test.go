@@ -142,9 +142,12 @@ func TestValidationAndSecrets(t *testing.T) {
 		t.Errorf("duplicate: %d", rec.Code)
 	}
 	other := env.create("/api/instances", map[string]any{"name": "guest"})
-	otherZone := env.create("/api/zones", map[string]any{"instance_id": other, "name": "lan"})
-	if rec := env.do("POST", "/api/interfaces", map[string]any{"instance_id": inst, "name": "eth0", "zone_id": otherZone}); rec.Code != http.StatusBadRequest {
-		t.Errorf("zone of another instance accepted: %d", rec.Code)
+	env.create("/api/interfaces", map[string]any{"instance_id": other, "name": "eth2"})
+	if rec := env.do("POST", "/api/interface-zones", map[string]any{"instance_id": inst, "name": "lan", "interfaces": []string{"eth2"}}); rec.Code != http.StatusBadRequest {
+		t.Errorf("interface of another instance accepted in a zone: %d", rec.Code)
+	}
+	if rec := env.do("POST", "/api/rules", map[string]any{"instance_id": inst, "chain": "forward", "action": "accept", "in_interfaces": []string{"eth2"}}); rec.Code != http.StatusBadRequest {
+		t.Errorf("interface of another instance accepted in a rule: %d", rec.Code)
 	}
 
 	// WireGuard: keys generated, private key never returned.
@@ -203,13 +206,13 @@ func TestDeployEndToEnd(t *testing.T) {
 	}
 
 	inst := env.create("/api/instances", map[string]any{"name": "main", "dns_enabled": true, "dhcp_enabled": true, "dhcp_domain_name": "home.arpa"})
-	wan := env.create("/api/zones", map[string]any{"instance_id": inst, "name": "wan", "input_policy": "drop", "masquerade": true})
-	lan := env.create("/api/zones", map[string]any{"instance_id": inst, "name": "lan", "input_policy": "accept"})
-	env.create("/api/interfaces", map[string]any{"instance_id": inst, "name": "eth0", "zone_id": wan, "ipv4_mode": "dhcp", "enabled": true})
-	eth1 := env.create("/api/interfaces", map[string]any{"instance_id": inst, "name": "eth1", "zone_id": lan, "enabled": true, "dns_listen": true})
+	env.create("/api/interfaces", map[string]any{"instance_id": inst, "name": "eth0", "ipv4_mode": "dhcp", "enabled": true})
+	eth1 := env.create("/api/interfaces", map[string]any{"instance_id": inst, "name": "eth1", "enabled": true, "dns_listen": true})
+	env.create("/api/interface-zones", map[string]any{"instance_id": inst, "name": "lan", "interfaces": []string{"eth1"}})
 	env.create("/api/ipam/prefixes", map[string]any{"instance_id": inst, "prefix": "192.168.1.0/24", "dhcp_enabled": true, "dhcp_range_start": "192.168.1.100", "dhcp_range_end": "192.168.1.200"})
 	env.create("/api/ipam/addresses", map[string]any{"instance_id": inst, "address": "192.168.1.1", "interface_id": eth1})
-	env.create("/api/rules", map[string]any{"instance_id": inst, "chain": "forward", "src_zone_id": lan, "dst_zone_id": wan, "action": "accept", "enabled": true})
+	env.create("/api/rules", map[string]any{"instance_id": inst, "chain": "forward", "in_interfaces": []string{"lan"}, "out_interfaces": []string{"eth0"}, "action": "accept", "enabled": true})
+	env.create("/api/nat", map[string]any{"instance_id": inst, "kind": "masquerade", "out_interfaces": []string{"eth0"}, "enabled": true})
 
 	// Problems block the deploy.
 	bad := env.create("/api/ipam/addresses", map[string]any{"instance_id": inst, "address": "10.0.0.1", "interface_id": eth1})
@@ -248,6 +251,78 @@ func TestDeployEndToEnd(t *testing.T) {
 	env.do("PUT", "/api/settings", map[string]any{"agent_fingerprint": strings.Repeat("ab", 32)})
 	if rec := env.do("GET", "/api/agent/status", nil); rec.Code != http.StatusBadGateway || !strings.Contains(rec.Body.String(), "fingerprint mismatch") {
 		t.Errorf("wrong pin: %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestInterfaceZones(t *testing.T) {
+	env := newEnv(t)
+	inst := env.create("/api/instances", map[string]any{"name": "main"})
+	other := env.create("/api/instances", map[string]any{"name": "guest"})
+	eth0 := env.create("/api/interfaces", map[string]any{"instance_id": inst, "name": "eth0"})
+	eth1 := env.create("/api/interfaces", map[string]any{"instance_id": inst, "name": "eth1"})
+	link := env.create("/api/links", map[string]any{"name": "up", "instance_a_id": inst, "interface_a": "lk-guest", "instance_b_id": other, "interface_b": "lk-main"})
+
+	// Zero or more interfaces, link ends included; duplicates dropped.
+	env.create("/api/interface-zones", map[string]any{"instance_id": inst, "name": "empty"})
+	zone := env.create("/api/interface-zones", map[string]any{"instance_id": inst, "name": "lan", "interfaces": []string{"eth1", "lk-guest", "eth1"}})
+	var z models.InterfaceZone
+	env.srv.db.First(&z, zone)
+	if strings.Join(z.Interfaces, " ") != "eth1 lk-guest" {
+		t.Errorf("members %v", z.Interfaces)
+	}
+	if rec := env.do("POST", "/api/interface-zones", map[string]any{"instance_id": inst, "name": "eth0"}); rec.Code != http.StatusBadRequest {
+		t.Errorf("zone named like an interface: %d", rec.Code)
+	}
+	if rec := env.do("POST", "/api/interfaces", map[string]any{"instance_id": inst, "name": "lan"}); rec.Code != http.StatusBadRequest {
+		t.Errorf("interface named like a zone: %d", rec.Code)
+	}
+	if rec := env.do("POST", "/api/interface-zones", map[string]any{"instance_id": inst, "name": "x", "interfaces": []string{"lk-main"}}); rec.Code != http.StatusBadRequest {
+		t.Errorf("other instance's link end accepted: %d", rec.Code)
+	}
+
+	rule := env.create("/api/rules", map[string]any{"instance_id": inst, "chain": "forward", "action": "accept", "in_interfaces": []string{"lan", "eth0"}, "out_interfaces": []string{"lk-guest"}})
+	nat := env.create("/api/nat", map[string]any{"instance_id": inst, "kind": "masquerade", "out_interfaces": []string{"eth0"}})
+	if rec := env.do("POST", "/api/rules", map[string]any{"instance_id": inst, "chain": "forward", "action": "accept", "in_interfaces": []string{"nope"}}); rec.Code != http.StatusBadRequest {
+		t.Errorf("unknown interface accepted: %d", rec.Code)
+	}
+	input := env.create("/api/rules", map[string]any{"instance_id": inst, "chain": "input", "action": "accept", "in_interfaces": []string{"lan"}, "out_interfaces": []string{"eth0"}})
+	var in models.Rule
+	env.srv.db.First(&in, input)
+	if len(in.OutInterfaces) != 0 {
+		t.Errorf("input rule kept outgoing interfaces %v", in.OutInterfaces)
+	}
+
+	// Renames follow into zones and rules.
+	env.do("PUT", "/api/interfaces/"+itoa(eth1), map[string]any{"name": "eth9"})
+	env.do("PUT", "/api/interfaces/"+itoa(eth0), map[string]any{"name": "wan0"})
+	env.do("PUT", "/api/interface-zones/"+itoa(zone), map[string]any{"name": "inside"})
+	env.do("PUT", "/api/links/"+itoa(link), map[string]any{"interface_a": "lk-g"})
+	env.srv.db.First(&z, zone)
+	var r models.Rule
+	env.srv.db.First(&r, rule)
+	var n models.NatRule
+	env.srv.db.First(&n, nat)
+	if strings.Join(z.Interfaces, " ") != "eth9 lk-g" || strings.Join(r.InInterfaces, " ") != "inside wan0" ||
+		strings.Join(r.OutInterfaces, " ") != "lk-g" || strings.Join(n.OutInterfaces, " ") != "wan0" {
+		t.Errorf("after rename: zone %v, rule %v -> %v, nat %v", z.Interfaces, r.InInterfaces, r.OutInterfaces, n.OutInterfaces)
+	}
+
+	// In use: refused. Only a zone member: removed from the zone.
+	if rec := env.do("DELETE", "/api/interfaces/"+itoa(eth0), nil); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "NAT rule") {
+		t.Errorf("delete interface in use: %d %s", rec.Code, rec.Body)
+	}
+	if rec := env.do("DELETE", "/api/interface-zones/"+itoa(zone), nil); rec.Code != http.StatusBadRequest {
+		t.Errorf("delete zone in use: %d", rec.Code)
+	}
+	if rec := env.do("DELETE", "/api/links/"+itoa(link), nil); rec.Code != http.StatusBadRequest {
+		t.Errorf("delete link in use: %d", rec.Code)
+	}
+	if rec := env.do("DELETE", "/api/interfaces/"+itoa(eth1), nil); rec.Code != http.StatusNoContent {
+		t.Errorf("delete zone member: %d %s", rec.Code, rec.Body)
+	}
+	env.srv.db.First(&z, zone)
+	if strings.Join(z.Interfaces, " ") != "lk-g" {
+		t.Errorf("deleted interface left in zone: %v", z.Interfaces)
 	}
 }
 

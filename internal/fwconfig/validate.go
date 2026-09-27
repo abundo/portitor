@@ -20,7 +20,7 @@ var (
 	instanceNameRe = regexp.MustCompile(`^[a-z][a-z0-9]{0,11}$`)
 	// Linux IFNAMSIZ is 16 including the NUL.
 	ifnameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,14}$`)
-	// Zone names become nftables chain names.
+	// Interface zone and link names.
 	zoneNameRe = regexp.MustCompile(`^[a-z][a-z0-9_]{0,23}$`)
 	peerNameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9 _.@-]{0,62}$`)
 	dnsLabelRe = regexp.MustCompile(`^(\*|@|[a-zA-Z0-9_]([a-zA-Z0-9_-]{0,61}[a-zA-Z0-9_])?)$`)
@@ -113,25 +113,6 @@ func (d *Document) Validate() error {
 func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 	p := "instance " + in.Name
 
-	zones := map[string]bool{}
-	for _, z := range in.Zones {
-		if !zoneNameRe.MatchString(z.Name) {
-			v.addf("%s: zone %q: name must match %s", p, z.Name, zoneNameRe)
-		}
-		if zones[z.Name] {
-			v.addf("%s: zone %q: duplicate", p, z.Name)
-		}
-		zones[z.Name] = true
-		if !validAction(z.InputPolicy) {
-			v.addf("%s: zone %q: invalid input policy %q", p, z.Name, z.InputPolicy)
-		}
-	}
-	zoneRef := func(what, name string) {
-		if name != "" && !zones[name] {
-			v.addf("%s: %s: unknown zone %q", p, what, name)
-		}
-	}
-
 	ifaces := map[string]*Interface{}
 	for i := range in.Interfaces {
 		ifc := &in.Interfaces[i]
@@ -153,7 +134,6 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 			ifaceOwner[ifc.Name] = in.Name
 		}
 		checkComment(v, ip, ifc.Description)
-		zoneRef("interface "+ifc.Name, ifc.Zone)
 		if ifc.MTU != 0 && (ifc.MTU < 576 || ifc.MTU > 65535) {
 			v.addf("%s: mtu %d out of range", ip, ifc.MTU)
 		}
@@ -208,6 +188,39 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 		}
 	}
 
+	zones := map[string]bool{}
+	for _, z := range in.InterfaceZones {
+		zp := fmt.Sprintf("%s: interface zone %q", p, z.Name)
+		if !zoneNameRe.MatchString(z.Name) {
+			v.addf("%s: name must match %s", zp, zoneNameRe)
+		}
+		if zones[z.Name] {
+			v.addf("%s: duplicate", zp)
+		}
+		if ifaces[z.Name] != nil {
+			v.addf("%s: an interface has the same name", zp)
+		}
+		zones[z.Name] = true
+		seen := map[string]bool{}
+		for _, m := range z.Interfaces {
+			if ifaces[m] == nil {
+				v.addf("%s: member %q is not an interface of this instance", zp, m)
+			}
+			if seen[m] {
+				v.addf("%s: member %q listed twice", zp, m)
+			}
+			seen[m] = true
+		}
+	}
+	// ifaceRefs checks a rule's interface list: interface or zone names.
+	ifaceRefs := func(where string, list []string) {
+		for _, name := range list {
+			if ifaces[name] == nil && !zones[name] {
+				v.addf("%s: unknown interface or interface zone %q", where, name)
+			}
+		}
+	}
+
 	for i, r := range in.Rules {
 		rp := fmt.Sprintf("%s: rule %d", p, i+1)
 		switch r.Chain {
@@ -215,14 +228,14 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 		default:
 			v.addf("%s: invalid chain %q", rp, r.Chain)
 		}
-		if r.Chain == ChainOutput && r.SrcZone != "" {
-			v.addf("%s: output rules have no source zone", rp)
+		if r.Chain == ChainOutput && len(r.InInterfaces) > 0 {
+			v.addf("%s: output rules have no incoming interface", rp)
 		}
-		if r.Chain == ChainInput && r.DstZone != "" {
-			v.addf("%s: input rules have no destination zone", rp)
+		if r.Chain == ChainInput && len(r.OutInterfaces) > 0 {
+			v.addf("%s: input rules have no outgoing interface", rp)
 		}
-		zoneRef(fmt.Sprintf("rule %d", i+1), r.SrcZone)
-		zoneRef(fmt.Sprintf("rule %d", i+1), r.DstZone)
+		ifaceRefs(rp, r.InInterfaces)
+		ifaceRefs(rp, r.OutInterfaces)
 		if !validAction(r.Action) {
 			v.addf("%s: invalid action %q", rp, r.Action)
 		}
@@ -232,8 +245,8 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 
 	for i, n := range in.NAT {
 		np := fmt.Sprintf("%s: nat rule %d", p, i+1)
-		zoneRef(fmt.Sprintf("nat rule %d", i+1), n.InZone)
-		zoneRef(fmt.Sprintf("nat rule %d", i+1), n.OutZone)
+		ifaceRefs(np, n.InInterfaces)
+		ifaceRefs(np, n.OutInterfaces)
 		v.match(np, "", n.Protocol, n.SrcAddrs, n.DstAddrs, n.DstPorts)
 		checkComment(v, np, n.Description)
 		switch n.Kind {
@@ -258,11 +271,11 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 		if n.ToPort != 0 && n.Protocol != "tcp" && n.Protocol != "udp" {
 			v.addf("%s: a target port needs protocol tcp or udp", np)
 		}
-		if n.Kind == NATDNAT && n.OutZone != "" {
-			v.addf("%s: dnat matches the incoming zone, not outgoing", np)
+		if n.Kind == NATDNAT && len(n.OutInterfaces) > 0 {
+			v.addf("%s: dnat matches the incoming interface, not outgoing", np)
 		}
-		if n.Kind != NATDNAT && n.InZone != "" {
-			v.addf("%s: %s matches the outgoing zone, not incoming", np, n.Kind)
+		if n.Kind != NATDNAT && len(n.InInterfaces) > 0 {
+			v.addf("%s: %s matches the outgoing interface, not incoming", np, n.Kind)
 		}
 	}
 

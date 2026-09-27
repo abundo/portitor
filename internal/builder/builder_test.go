@@ -42,15 +42,13 @@ func TestBuildHome(t *testing.T) {
 	main := models.Instance{Name: "main", IsDefault: true, DnsEnabled: true, DnsForwardFromDhcp: true,
 		DhcpEnabled: true, DhcpDomainName: "home.arpa", DhcpLeaseTime: 3600}
 	mustCreate(t, db, &main)
-	wan := models.Zone{InstanceID: main.ID, Name: "wan", InputPolicy: "drop", Masquerade: true}
-	lan := models.Zone{InstanceID: main.ID, Name: "lan", InputPolicy: "accept"}
-	mustCreate(t, db, &wan)
-	mustCreate(t, db, &lan)
+	mustCreate(t, db, &models.InterfaceZone{InstanceID: main.ID, Name: "lan", Interfaces: models.StringList{"eth1", "wg0"}})
+	mustCreate(t, db, &models.InterfaceZone{InstanceID: main.ID, Name: "empty"})
 
-	eth0 := models.Interface{InstanceID: main.ID, Name: "eth0", Kind: "physical", Enabled: true, ZoneID: &wan.ID, Ipv4Mode: "dhcp"}
-	eth1 := models.Interface{InstanceID: main.ID, Name: "eth1", Kind: "physical", Enabled: true, ZoneID: &lan.ID, Ipv4Mode: "static", DnsListen: true}
+	eth0 := models.Interface{InstanceID: main.ID, Name: "eth0", Kind: "physical", Enabled: true, Ipv4Mode: "dhcp"}
+	eth1 := models.Interface{InstanceID: main.ID, Name: "eth1", Kind: "physical", Enabled: true, Ipv4Mode: "static", DnsListen: true}
 	priv, _, _ := wgkeys.Generate()
-	wg0 := models.Interface{InstanceID: main.ID, Name: "wg0", Kind: "wireguard", Enabled: true, ZoneID: &lan.ID, Ipv4Mode: "static", WgPrivateKey: priv, WgListenPort: 51820}
+	wg0 := models.Interface{InstanceID: main.ID, Name: "wg0", Kind: "wireguard", Enabled: true, Ipv4Mode: "static", WgPrivateKey: priv, WgListenPort: 51820}
 	for _, i := range []*models.Interface{&eth0, &eth1, &wg0} {
 		mustCreate(t, db, i)
 	}
@@ -79,10 +77,10 @@ func TestBuildHome(t *testing.T) {
 	mustCreate(t, db, &models.DnsZone{InstanceID: main.ID, Name: "192.168.1.0/24", Type: "reverse4", DnsTemplateID: &tmpl.ID})
 	mustCreate(t, db, &models.DnsRecord{ZoneID: zone.ID, Name: "www", Type: "CNAME", Value: "nas"})
 
-	mustCreate(t, db, &models.Rule{InstanceID: main.ID, Position: 2, Chain: "forward", SrcZoneID: &lan.ID, DstZoneID: &wan.ID, Action: "accept", Enabled: true, Description: "second"})
-	mustCreate(t, db, &models.Rule{InstanceID: main.ID, Position: 1, Chain: "input", SrcZoneID: &wan.ID, Protocol: "icmp", Action: "accept", Enabled: true, Description: "first"})
+	mustCreate(t, db, &models.Rule{InstanceID: main.ID, Position: 2, Chain: "forward", InInterfaces: models.StringList{"lan"}, OutInterfaces: models.StringList{"eth0"}, Action: "accept", Enabled: true, Description: "second"})
+	mustCreate(t, db, &models.Rule{InstanceID: main.ID, Position: 1, Chain: "input", InInterfaces: models.StringList{"eth0"}, Protocol: "icmp", Action: "accept", Enabled: true, Description: "first"})
 	mustCreate(t, db, &models.Rule{InstanceID: main.ID, Position: 3, Chain: "forward", Action: "accept", Enabled: false})
-	mustCreate(t, db, &models.NatRule{InstanceID: main.ID, Kind: "dnat", InZoneID: &wan.ID, Protocol: "tcp", DstPorts: "443", ToAddr: "192.168.1.10", Enabled: true})
+	mustCreate(t, db, &models.NatRule{InstanceID: main.ID, Kind: "dnat", InInterfaces: models.StringList{"eth0"}, Protocol: "tcp", DstPorts: "443", ToAddr: "192.168.1.10", Enabled: true})
 
 	doc, err := Build(db, 42)
 	if err != nil {
@@ -95,8 +93,12 @@ func TestBuildHome(t *testing.T) {
 	if got := in.Interface("eth1").Addresses; len(got) != 1 || got[0] != "192.168.1.1/24" {
 		t.Errorf("eth1 addresses %v: prefix length must come from the deepest IPAM prefix", got)
 	}
-	if in.Interface("eth1").Zone != "lan" {
-		t.Error("zone not resolved")
+	if len(in.InterfaceZones) != 2 || in.InterfaceZones[1].Name != "lan" || strings.Join(in.InterfaceZones[1].Interfaces, " ") != "eth1 wg0" ||
+		in.InterfaceZones[0].Interfaces == nil {
+		t.Errorf("interface zones %+v", in.InterfaceZones)
+	}
+	if r := in.Rules[1]; strings.Join(r.InInterfaces, " ") != "lan" || strings.Join(r.OutInterfaces, " ") != "eth0" {
+		t.Errorf("rule interfaces %+v", r)
 	}
 	if wg := in.Interface("wg0").WireGuard; wg == nil || len(wg.Peers) != 1 {
 		t.Errorf("wireguard peers: %+v (disabled peers must be left out)", wg)
@@ -162,12 +164,8 @@ func TestBuildIPv6AndObjects(t *testing.T) {
 	main := models.Instance{Name: "main", IsDefault: true, DnsEnabled: true, DhcpEnabled: true, DhcpDomainName: "home.arpa",
 		DnsForwarders: models.StringList{"quad9"}}
 	mustCreate(t, db, &main)
-	wan := models.Zone{InstanceID: main.ID, Name: "wan", InputPolicy: "drop"}
-	lan := models.Zone{InstanceID: main.ID, Name: "lan", InputPolicy: "accept"}
-	mustCreate(t, db, &wan)
-	mustCreate(t, db, &lan)
-	mustCreate(t, db, &models.Interface{InstanceID: main.ID, Name: "eth0", Kind: "physical", Enabled: true, ZoneID: &wan.ID, Ipv4Mode: "dhcp", Ipv6AcceptRA: true})
-	eth1 := models.Interface{InstanceID: main.ID, Name: "eth1", Kind: "physical", Enabled: true, ZoneID: &lan.ID, Ipv4Mode: "static", DnsListen: true}
+	mustCreate(t, db, &models.Interface{InstanceID: main.ID, Name: "eth0", Kind: "physical", Enabled: true, Ipv4Mode: "dhcp", Ipv6AcceptRA: true})
+	eth1 := models.Interface{InstanceID: main.ID, Name: "eth1", Kind: "physical", Enabled: true, Ipv4Mode: "static", DnsListen: true}
 	mustCreate(t, db, &eth1)
 
 	mustCreate(t, db, &models.IpamPrefix{InstanceID: main.ID, Prefix: "192.168.1.0/24", DhcpEnabled: true, DhcpRangeStart: "192.168.1.100", DhcpRangeEnd: "192.168.1.199"})
@@ -186,7 +184,7 @@ func TestBuildIPv6AndObjects(t *testing.T) {
 		mustCreate(t, db, &o)
 	}
 	mustCreate(t, db, &models.Rule{InstanceID: main.ID, Chain: "forward", DstAddrs: models.StringList{"nas"}, Protocol: "tcp", DstPorts: "22", Action: "accept", Enabled: true})
-	mustCreate(t, db, &models.NatRule{InstanceID: main.ID, Kind: "dnat", InZoneID: &wan.ID, Protocol: "tcp", DstPorts: "443", ToAddr: "nas", Enabled: true})
+	mustCreate(t, db, &models.NatRule{InstanceID: main.ID, Kind: "dnat", InInterfaces: models.StringList{"eth0"}, Protocol: "tcp", DstPorts: "443", ToAddr: "nas", Enabled: true})
 	mustCreate(t, db, &models.Route{InstanceID: main.ID, Destination: "remote", Gateway: "upstream", Enabled: true})
 
 	doc, err := Build(db, 1)

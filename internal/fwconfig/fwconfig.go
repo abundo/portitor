@@ -12,8 +12,10 @@
 // instances.
 package fwconfig
 
+import "slices"
+
 // Version of the document format. Bump when a field changes meaning.
-const Version = 1
+const Version = 2
 
 type Document struct {
 	Version    int        `json:"version"`
@@ -26,12 +28,13 @@ type Instance struct {
 	Name       string      `json:"name"`
 	Default    bool        `json:"default"` // root network namespace
 	Interfaces []Interface `json:"interfaces"`
-	Zones      []Zone      `json:"zones"`
-	Rules      []Rule      `json:"rules"`
-	NAT        []NATRule   `json:"nat"`
-	Routes     []Route     `json:"routes"`
-	DHCP       DHCPServer  `json:"dhcp"`
-	DNS        DNSServer   `json:"dns"`
+	// InterfaceZones name groups of interfaces for rules to match on.
+	InterfaceZones []InterfaceZone `json:"interface_zones"`
+	Rules          []Rule          `json:"rules"`
+	NAT            []NATRule       `json:"nat"`
+	Routes         []Route         `json:"routes"`
+	DHCP           DHCPServer      `json:"dhcp"`
+	DNS            DNSServer       `json:"dns"`
 	// RA lists the interfaces that send IPv6 router advertisements.
 	RA []RAInterface `json:"ra,omitempty"`
 }
@@ -61,7 +64,6 @@ type Interface struct {
 	VLANID      int      `json:"vlan_id,omitempty"` // vlan
 	Members     []string `json:"members,omitempty"` // bridge
 	MTU         int      `json:"mtu,omitempty"`
-	Zone        string   `json:"zone,omitempty"`
 	IPv4Mode    string   `json:"ipv4_mode"`
 	// Addresses are static addresses in CIDR form (192.168.1.1/24,
 	// 2001:db8::1/64). IPv6 addresses are always static here; IPv6AcceptRA
@@ -86,21 +88,20 @@ type WGPeer struct {
 	Keepalive    int      `json:"keepalive,omitempty"`
 }
 
-// Zone input policies.
+// Rule actions.
 const (
 	ActionAccept = "accept"
 	ActionDrop   = "drop"
 	ActionReject = "reject"
 )
 
-// Zone groups interfaces for filtering. Traffic to the firewall itself from
-// a zone hits that zone's input rules, then InputPolicy. Forwarded traffic
-// is dropped unless a forward rule accepts it. Masquerade source-NATs
-// everything leaving through the zone (typical for WAN).
-type Zone struct {
-	Name        string `json:"name"`
-	InputPolicy string `json:"input_policy"`
-	Masquerade  bool   `json:"masquerade,omitempty"`
+// InterfaceZone is a named group of interfaces of its instance. Rules and
+// NAT rules may name it wherever they list interfaces. A zone may be empty;
+// a rule whose interface list then matches no enabled interface is skipped,
+// never widened to match any interface.
+type InterfaceZone struct {
+	Name       string   `json:"name"`
+	Interfaces []string `json:"interfaces"`
 }
 
 // Rule chains.
@@ -111,22 +112,25 @@ const (
 )
 
 // Rule is one filter rule, evaluated in slice order within its chain.
-// Empty match fields match anything. Address lists may mix IPv4 and IPv6;
+// Empty match fields match anything. InInterfaces/OutInterfaces hold
+// interface and InterfaceZone names of the instance. Address lists may mix IPv4 and IPv6;
 // the rule is then rendered once per IP version, each with that version's
 // addresses. A version is left out when a non-empty list has none of its
 // addresses (Family and an icmp/icmpv6 Protocol narrow it further).
 type Rule struct {
-	Chain       string   `json:"chain"`
-	SrcZone     string   `json:"src_zone,omitempty"`
-	DstZone     string   `json:"dst_zone,omitempty"`
-	Family      string   `json:"family,omitempty"`   // "", ipv4, ipv6
-	Protocol    string   `json:"protocol,omitempty"` // "", tcp, udp, icmp, icmpv6
-	SrcAddrs    []string `json:"src_addrs,omitempty"`
-	DstAddrs    []string `json:"dst_addrs,omitempty"`
-	DstPorts    string   `json:"dst_ports,omitempty"` // "22", "80,443", "1000-2000"
-	Action      string   `json:"action"`
-	Log         bool     `json:"log,omitempty"`
-	Description string   `json:"description,omitempty"`
+	Chain string `json:"chain"`
+	// InInterfaces match the incoming interface (not for output rules),
+	// OutInterfaces the outgoing one (not for input rules).
+	InInterfaces  []string `json:"in_interfaces,omitempty"`
+	OutInterfaces []string `json:"out_interfaces,omitempty"`
+	Family        string   `json:"family,omitempty"`   // "", ipv4, ipv6
+	Protocol      string   `json:"protocol,omitempty"` // "", tcp, udp, icmp, icmpv6
+	SrcAddrs      []string `json:"src_addrs,omitempty"`
+	DstAddrs      []string `json:"dst_addrs,omitempty"`
+	DstPorts      string   `json:"dst_ports,omitempty"` // "22", "80,443", "1000-2000"
+	Action        string   `json:"action"`
+	Log           bool     `json:"log,omitempty"`
+	Description   string   `json:"description,omitempty"`
 }
 
 // NAT kinds.
@@ -136,21 +140,21 @@ const (
 	NATDNAT       = "dnat"
 )
 
-// NATRule is an explicit NAT rule. Zone masquerade covers the common case;
-// use this for port forwards (dnat) and fixed source addresses (snat).
+// NATRule is a NAT rule: masquerade for Internet sharing, port forwards
+// (dnat) and fixed source addresses (snat). Interface lists are as in Rule.
 // snat/dnat match only addresses of ToAddr's IP version. Masquerade
 // applies to the versions in its address lists, IPv4 when they are empty.
 type NATRule struct {
-	Kind        string   `json:"kind"`
-	InZone      string   `json:"in_zone,omitempty"`  // dnat
-	OutZone     string   `json:"out_zone,omitempty"` // snat, masquerade
-	Protocol    string   `json:"protocol,omitempty"` // tcp, udp; required with ports
-	SrcAddrs    []string `json:"src_addrs,omitempty"`
-	DstAddrs    []string `json:"dst_addrs,omitempty"`
-	DstPorts    string   `json:"dst_ports,omitempty"`
-	ToAddr      string   `json:"to_addr,omitempty"`
-	ToPort      int      `json:"to_port,omitempty"`
-	Description string   `json:"description,omitempty"`
+	Kind          string   `json:"kind"`
+	InInterfaces  []string `json:"in_interfaces,omitempty"`  // dnat
+	OutInterfaces []string `json:"out_interfaces,omitempty"` // snat, masquerade
+	Protocol      string   `json:"protocol,omitempty"`       // tcp, udp; required with ports
+	SrcAddrs      []string `json:"src_addrs,omitempty"`
+	DstAddrs      []string `json:"dst_addrs,omitempty"`
+	DstPorts      string   `json:"dst_ports,omitempty"`
+	ToAddr        string   `json:"to_addr,omitempty"`
+	ToPort        int      `json:"to_port,omitempty"`
+	Description   string   `json:"description,omitempty"`
 }
 
 type Route struct {
@@ -302,7 +306,6 @@ type LinkEnd struct {
 	Instance  string   `json:"instance"`
 	Interface string   `json:"interface"`
 	Addresses []string `json:"addresses,omitempty"`
-	Zone      string   `json:"zone,omitempty"`
 }
 
 // Instance returns the named instance, or nil.
@@ -344,7 +347,6 @@ func (d Document) Expand() Document {
 					Kind:        KindLink,
 					Description: "link " + l.Name,
 					Enabled:     true,
-					Zone:        end.Zone,
 					IPv4Mode:    ModeStatic,
 					Addresses:   end.Addresses,
 				})
@@ -361,4 +363,39 @@ func (in *Instance) NetnsName() string {
 		return ""
 	}
 	return "fw-" + in.Name
+}
+
+// InterfaceZone returns the named interface zone, or nil.
+func (in *Instance) InterfaceZone(name string) *InterfaceZone {
+	for i := range in.InterfaceZones {
+		if in.InterfaceZones[i].Name == name {
+			return &in.InterfaceZones[i]
+		}
+	}
+	return nil
+}
+
+// MatchInterfaces resolves a rule's interface list (interface and zone
+// names) to the enabled interfaces it matches, sorted and without
+// duplicates. Call it on an expanded document so link ends are included.
+// A non-empty list can resolve to none (empty zones, disabled interfaces);
+// the rule must then be left out, not rendered without the match.
+func (in *Instance) MatchInterfaces(list []string) []string {
+	var out []string
+	add := func(name string) {
+		if ifc := in.Interface(name); ifc != nil && ifc.Enabled && !slices.Contains(out, name) {
+			out = append(out, name)
+		}
+	}
+	for _, name := range list {
+		if z := in.InterfaceZone(name); z != nil {
+			for _, m := range z.Interfaces {
+				add(m)
+			}
+		} else {
+			add(name)
+		}
+	}
+	slices.Sort(out)
+	return out
 }

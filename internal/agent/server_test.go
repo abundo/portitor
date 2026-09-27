@@ -79,9 +79,9 @@ func TestAuth(t *testing.T) {
 func TestApplyRejectsInvalid(t *testing.T) {
 	_, h := testAgent(t)
 	doc := fwconfig.SampleDocument()
-	doc.Instances[0].Rules[0].SrcZone = "nope"
+	doc.Instances[0].Rules[0].InInterfaces = []string{"nope"}
 	rec := call(t, h, "POST", "/v1/apply", testToken, agentapi.ApplyRequest{Document: doc})
-	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), `unknown zone`) {
+	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), `unknown interface or interface zone`) {
 		t.Errorf("%d %s", rec.Code, rec.Body)
 	}
 }

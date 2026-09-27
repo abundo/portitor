@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package builder turns portitor-web's database into the fwconfig.Document
-// that portitor-agent applies. It resolves references (zone ids to names,
+// that portitor-agent applies. It resolves references (instance ids to names,
 // IPAM addresses to interface CIDRs, DHCP prefixes to serving interfaces)
 // and reports what it cannot resolve; fwconfig.Validate does the rest.
 package builder
@@ -24,7 +24,7 @@ import (
 
 type data struct {
 	instances  []models.Instance
-	zones      []models.Zone
+	ifaceZones []models.InterfaceZone
 	interfaces []models.Interface
 	peers      []models.WgPeer
 	links      []models.Link
@@ -48,7 +48,7 @@ func load(db *gorm.DB) (*data, error) {
 		order string
 	}{
 		{&d.instances, "is_default desc, name"},
-		{&d.zones, "name"},
+		{&d.ifaceZones, "name"},
 		{&d.interfaces, "name"},
 		{&d.peers, "name"},
 		{&d.links, "name"},
@@ -82,16 +82,6 @@ func Build(db *gorm.DB, generation int64) (*fwconfig.Document, error) {
 	var problems []string
 	addf := func(format string, args ...any) { problems = append(problems, fmt.Sprintf(format, args...)) }
 
-	zoneName := map[uint]string{}
-	for _, z := range d.zones {
-		zoneName[z.ID] = z.Name
-	}
-	zn := func(id *uint) string {
-		if id == nil {
-			return ""
-		}
-		return zoneName[*id]
-	}
 	ifaceByID := map[uint]models.Interface{}
 	for _, i := range d.interfaces {
 		ifaceByID[i.ID] = i
@@ -118,7 +108,6 @@ func Build(db *gorm.DB, generation int64) (*fwconfig.Document, error) {
 		in := fwconfig.Instance{
 			Name:    mi.Name,
 			Default: mi.IsDefault,
-			Zones:   []fwconfig.Zone{},
 			Rules:   []fwconfig.Rule{},
 			NAT:     []fwconfig.NATRule{},
 			Routes:  []fwconfig.Route{},
@@ -136,9 +125,10 @@ func Build(db *gorm.DB, generation int64) (*fwconfig.Document, error) {
 			}
 		}
 
-		for _, z := range d.zones {
+		in.InterfaceZones = []fwconfig.InterfaceZone{}
+		for _, z := range d.ifaceZones {
 			if z.InstanceID == mi.ID {
-				in.Zones = append(in.Zones, fwconfig.Zone{Name: z.Name, InputPolicy: z.InputPolicy, Masquerade: z.Masquerade})
+				in.InterfaceZones = append(in.InterfaceZones, fwconfig.InterfaceZone{Name: z.Name, Interfaces: append([]string{}, z.Interfaces...)})
 			}
 		}
 
@@ -156,7 +146,6 @@ func Build(db *gorm.DB, generation int64) (*fwconfig.Document, error) {
 				VLANID:       mif.VlanID,
 				Members:      []string(mif.Members),
 				MTU:          mif.Mtu,
-				Zone:         zn(mif.ZoneID),
 				IPv4Mode:     mif.Ipv4Mode,
 				IPv6AcceptRA: mif.Ipv6AcceptRA,
 			}
@@ -206,17 +195,17 @@ func Build(db *gorm.DB, generation int64) (*fwconfig.Document, error) {
 			where := fmt.Sprintf("instance %s: rule %d", mi.Name, len(in.Rules)+1)
 			failed = false
 			rule := fwconfig.Rule{
-				Chain:       r.Chain,
-				SrcZone:     zn(r.SrcZoneID),
-				DstZone:     zn(r.DstZoneID),
-				Family:      r.Family,
-				Protocol:    r.Protocol,
-				SrcAddrs:    expand(where+": source", objs.Expand, r.SrcAddrs),
-				DstAddrs:    expand(where+": destination", objs.Expand, r.DstAddrs),
-				DstPorts:    r.DstPorts,
-				Action:      r.Action,
-				Log:         r.Log,
-				Description: r.Description,
+				Chain:         r.Chain,
+				InInterfaces:  []string(r.InInterfaces),
+				OutInterfaces: []string(r.OutInterfaces),
+				Family:        r.Family,
+				Protocol:      r.Protocol,
+				SrcAddrs:      expand(where+": source", objs.Expand, r.SrcAddrs),
+				DstAddrs:      expand(where+": destination", objs.Expand, r.DstAddrs),
+				DstPorts:      r.DstPorts,
+				Action:        r.Action,
+				Log:           r.Log,
+				Description:   r.Description,
 			}
 			// An unresolved name must not leave an emptier (wider) match.
 			if !failed {
@@ -230,15 +219,15 @@ func Build(db *gorm.DB, generation int64) (*fwconfig.Document, error) {
 			where := fmt.Sprintf("instance %s: nat rule %d", mi.Name, len(in.NAT)+1)
 			failed = false
 			rule := fwconfig.NATRule{
-				Kind:        n.Kind,
-				InZone:      zn(n.InZoneID),
-				OutZone:     zn(n.OutZoneID),
-				Protocol:    n.Protocol,
-				SrcAddrs:    expand(where+": source", objs.Expand, n.SrcAddrs),
-				DstAddrs:    expand(where+": destination", objs.Expand, n.DstAddrs),
-				DstPorts:    n.DstPorts,
-				ToPort:      n.ToPort,
-				Description: n.Description,
+				Kind:          n.Kind,
+				InInterfaces:  []string(n.InInterfaces),
+				OutInterfaces: []string(n.OutInterfaces),
+				Protocol:      n.Protocol,
+				SrcAddrs:      expand(where+": source", objs.Expand, n.SrcAddrs),
+				DstAddrs:      expand(where+": destination", objs.Expand, n.DstAddrs),
+				DstPorts:      n.DstPorts,
+				ToPort:        n.ToPort,
+				Description:   n.Description,
 			}
 			if failed {
 				continue
@@ -488,8 +477,8 @@ func Build(db *gorm.DB, generation int64) (*fwconfig.Document, error) {
 	for _, l := range d.links {
 		doc.Links = append(doc.Links, fwconfig.Link{
 			Name: l.Name,
-			A:    fwconfig.LinkEnd{Instance: instName[l.InstanceAID], Interface: l.InterfaceA, Addresses: []string(l.AddressesA), Zone: zn(l.ZoneAID)},
-			B:    fwconfig.LinkEnd{Instance: instName[l.InstanceBID], Interface: l.InterfaceB, Addresses: []string(l.AddressesB), Zone: zn(l.ZoneBID)},
+			A:    fwconfig.LinkEnd{Instance: instName[l.InstanceAID], Interface: l.InterfaceA, Addresses: []string(l.AddressesA)},
+			B:    fwconfig.LinkEnd{Instance: instName[l.InstanceBID], Interface: l.InterfaceB, Addresses: []string(l.AddressesB)},
 		})
 	}
 

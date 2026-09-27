@@ -17,11 +17,11 @@ func SampleDocument() Document {
 				Name:    "main",
 				Default: true,
 				Interfaces: []Interface{
-					{Name: "eth0", Kind: KindPhysical, Enabled: true, Zone: "wan", IPv4Mode: ModeDHCP, IPv6AcceptRA: true},
-					{Name: "eth1", Kind: KindPhysical, Enabled: true, Zone: "lan", IPv4Mode: ModeStatic, Addresses: []string{"192.168.1.1/24", "fd00:1::1/64"}},
-					{Name: "eth1.20", Kind: KindVLAN, Parent: "eth1", VLANID: 20, Enabled: true, Zone: "iot", IPv4Mode: ModeStatic, Addresses: []string{"192.168.20.1/24"}},
+					{Name: "eth0", Kind: KindPhysical, Enabled: true, IPv4Mode: ModeDHCP, IPv6AcceptRA: true},
+					{Name: "eth1", Kind: KindPhysical, Enabled: true, IPv4Mode: ModeStatic, Addresses: []string{"192.168.1.1/24", "fd00:1::1/64"}},
+					{Name: "eth1.20", Kind: KindVLAN, Parent: "eth1", VLANID: 20, Enabled: true, IPv4Mode: ModeStatic, Addresses: []string{"192.168.20.1/24"}},
 					{
-						Name: "wg0", Kind: KindWireGuard, Enabled: true, Zone: "vpn", IPv4Mode: ModeStatic,
+						Name: "wg0", Kind: KindWireGuard, Enabled: true, IPv4Mode: ModeStatic,
 						Addresses: []string{"10.99.0.1/24"},
 						WireGuard: &WireGuard{
 							PrivateKey: "YEocP0e2o1WT5GlvBvQzVF7EeR6z9aCk8ZdZ5oPr1Wk=",
@@ -34,25 +34,30 @@ func SampleDocument() Document {
 						},
 					},
 				},
-				Zones: []Zone{
-					{Name: "wan", InputPolicy: ActionDrop, Masquerade: true},
-					{Name: "lan", InputPolicy: ActionAccept},
-					{Name: "iot", InputPolicy: ActionReject},
-					{Name: "vpn", InputPolicy: ActionAccept},
-					{Name: "guest", InputPolicy: ActionDrop},
+				InterfaceZones: []InterfaceZone{
+					{Name: "wan", Interfaces: []string{"eth0"}},
+					{Name: "lan", Interfaces: []string{"eth1"}},
+					{Name: "iot", Interfaces: []string{"eth1.20"}},
+					{Name: "vpn", Interfaces: []string{"wg0"}},
+					{Name: "guest", Interfaces: []string{"lk-guest"}},
+					{Name: "dmz", Interfaces: []string{}},
 				},
 				Rules: []Rule{
-					{Chain: ChainForward, SrcZone: "lan", DstZone: "wan", Action: ActionAccept, Description: "LAN to Internet"},
-					{Chain: ChainForward, SrcZone: "vpn", Action: ActionAccept, Description: "VPN anywhere"},
-					{Chain: ChainForward, SrcZone: "iot", DstZone: "wan", Protocol: "tcp", DstPorts: "80,443,8883", Action: ActionAccept, Description: "IoT cloud"},
-					{Chain: ChainForward, SrcZone: "guest", DstZone: "wan", Action: ActionAccept},
-					{Chain: ChainInput, SrcZone: "wan", Protocol: "icmp", Action: ActionAccept, Description: "ping"},
-					{Chain: ChainInput, SrcZone: "iot", Protocol: "udp", DstPorts: "53,67", Action: ActionAccept},
-					{Chain: ChainForward, SrcZone: "wan", DstAddrs: []string{"192.168.1.0/24"}, Action: ActionDrop, Log: true, Description: `no "direct" access`},
-					{Chain: ChainForward, SrcZone: "vpn", DstAddrs: []string{"192.168.1.10", "fd00:1::10"}, Protocol: "tcp", DstPorts: "22", Action: ActionAccept, Description: "NAS ssh"},
+					{Chain: ChainForward, InInterfaces: []string{"lan"}, OutInterfaces: []string{"wan"}, Action: ActionAccept, Description: "LAN to Internet"},
+					{Chain: ChainForward, InInterfaces: []string{"vpn"}, Action: ActionAccept, Description: "VPN anywhere"},
+					{Chain: ChainForward, InInterfaces: []string{"iot"}, OutInterfaces: []string{"wan"}, Protocol: "tcp", DstPorts: "80,443,8883", Action: ActionAccept, Description: "IoT cloud"},
+					{Chain: ChainForward, InInterfaces: []string{"guest"}, OutInterfaces: []string{"eth0"}, Action: ActionAccept},
+					{Chain: ChainForward, InInterfaces: []string{"dmz"}, Action: ActionAccept, Description: "DMZ (no interfaces yet)"},
+					{Chain: ChainInput, InInterfaces: []string{"wan"}, Protocol: "icmp", Action: ActionAccept, Description: "ping"},
+					{Chain: ChainInput, InInterfaces: []string{"iot"}, Protocol: "udp", DstPorts: "53,67", Action: ActionAccept},
+					{Chain: ChainForward, InInterfaces: []string{"wan"}, DstAddrs: []string{"192.168.1.0/24"}, Action: ActionDrop, Log: true, Description: `no "direct" access`},
+					{Chain: ChainForward, InInterfaces: []string{"vpn"}, DstAddrs: []string{"192.168.1.10", "fd00:1::10"}, Protocol: "tcp", DstPorts: "22", Action: ActionAccept, Description: "NAS ssh"},
+					{Chain: ChainInput, InInterfaces: []string{"lan", "vpn"}, Action: ActionAccept, Description: "trusted"},
+					{Chain: ChainInput, InInterfaces: []string{"iot"}, Action: ActionReject},
 				},
 				NAT: []NATRule{
-					{Kind: NATDNAT, InZone: "wan", Protocol: "tcp", DstPorts: "8443", ToAddr: "192.168.1.10", ToPort: 443, Description: "NAS"},
+					{Kind: NATDNAT, InInterfaces: []string{"wan"}, Protocol: "tcp", DstPorts: "8443", ToAddr: "192.168.1.10", ToPort: 443, Description: "NAS"},
+					{Kind: NATMasquerade, OutInterfaces: []string{"wan"}, Description: "Internet sharing"},
 				},
 				Routes: []Route{
 					{Destination: "10.50.0.0/16", Gateway: "192.168.1.254"},
@@ -102,15 +107,15 @@ func SampleDocument() Document {
 			{
 				Name: "guest",
 				Interfaces: []Interface{
-					{Name: "eth2", Kind: KindPhysical, Enabled: true, Zone: "lan", IPv4Mode: ModeStatic, Addresses: []string{"192.168.50.1/24"}},
-				},
-				Zones: []Zone{
-					{Name: "lan", InputPolicy: ActionAccept},
-					{Name: "up", InputPolicy: ActionDrop, Masquerade: true},
+					{Name: "eth2", Kind: KindPhysical, Enabled: true, IPv4Mode: ModeStatic, Addresses: []string{"192.168.50.1/24"}},
 				},
 				Rules: []Rule{
-					{Chain: ChainForward, SrcZone: "lan", DstZone: "up", DstAddrs: []string{"192.168.0.0/16"}, Action: ActionReject, Description: "no home access"},
-					{Chain: ChainForward, SrcZone: "lan", DstZone: "up", Action: ActionAccept},
+					{Chain: ChainForward, InInterfaces: []string{"eth2"}, OutInterfaces: []string{"lk-main"}, DstAddrs: []string{"192.168.0.0/16"}, Action: ActionReject, Description: "no home access"},
+					{Chain: ChainForward, InInterfaces: []string{"eth2"}, OutInterfaces: []string{"lk-main"}, Action: ActionAccept},
+					{Chain: ChainInput, InInterfaces: []string{"eth2"}, Action: ActionAccept},
+				},
+				NAT: []NATRule{
+					{Kind: NATMasquerade, OutInterfaces: []string{"lk-main"}},
 				},
 				Routes: []Route{{Destination: "default", Gateway: "10.255.0.1"}},
 				DHCP: DHCPServer{Enabled: true, Subnets: []DHCPSubnet{
@@ -120,8 +125,8 @@ func SampleDocument() Document {
 		},
 		Links: []Link{{
 			Name: "guestup",
-			A:    LinkEnd{Instance: "main", Interface: "lk-guest", Addresses: []string{"10.255.0.1/30"}, Zone: "guest"},
-			B:    LinkEnd{Instance: "guest", Interface: "lk-main", Addresses: []string{"10.255.0.2/30"}, Zone: "up"},
+			A:    LinkEnd{Instance: "main", Interface: "lk-guest", Addresses: []string{"10.255.0.1/30"}},
+			B:    LinkEnd{Instance: "guest", Interface: "lk-main", Addresses: []string{"10.255.0.2/30"}},
 		}},
 	}
 }

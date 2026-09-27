@@ -50,8 +50,13 @@ are in [README.md](README.md).
   token, password hashes) never reach the browser. The generic CRUD `PUT` merges the
   body onto the stored row, so those fields can't be overwritten through the API
   either. Deployment history stores a redacted document.
-- **Deleting a zone deletes the rules that reference it** (FK `ON DELETE CASCADE`).
-  A rule with its zone silently removed would otherwise match *any* zone.
+- **Rules match interfaces by name.** Rule and NAT interface lists hold interface
+  names (link ends included) and interface zone names of the instance; an
+  interface zone is a group of zero or more interfaces. An empty list matches
+  *any* interface, so a list must never lose entries silently: renaming an
+  interface, link end or zone rewrites the lists (`web/ifzones.go`), deleting one
+  that a rule uses is refused, and a non-empty list that resolves to no enabled
+  interface (`Instance.MatchInterfaces`) makes the renderer skip the rule.
 - **Named hosts/prefixes never reach the agent.** `builder.Build` expands names
   (`netobj`) and drops a rule it cannot resolve; an object with no addresses is an
   error, never an empty list (an empty address list matches *any*). Entries are

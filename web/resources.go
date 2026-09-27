@@ -37,18 +37,6 @@ func instanceExists(tx *gorm.DB, id uint) error {
 	return nil
 }
 
-// zoneIn checks that an optional zone reference belongs to the instance.
-func zoneIn(tx *gorm.DB, zoneID *uint, instanceID uint, field string) error {
-	if zoneID == nil {
-		return nil
-	}
-	var z models.Zone
-	if tx.First(&z, *zoneID).Error != nil || z.InstanceID != instanceID {
-		return bad(field + " must be a zone of the same instance")
-	}
-	return nil
-}
-
 func cleanList(list models.StringList) models.StringList {
 	out := models.StringList{}
 	for _, s := range list {
@@ -107,23 +95,6 @@ func prepareInstance(tx *gorm.DB, in, old *models.Instance) error {
 	return nil
 }
 
-func prepareZone(tx *gorm.DB, z, old *models.Zone) error {
-	if err := instanceExists(tx, z.InstanceID); err != nil {
-		return err
-	}
-	if old != nil && old.InstanceID != z.InstanceID {
-		return bad("a zone cannot move to another instance")
-	}
-	z.Name = strings.TrimSpace(z.Name)
-	if !fwconfig.ValidZoneName(z.Name) {
-		return bad("name: lowercase letters, digits and _, starting with a letter, at most 24 characters")
-	}
-	if z.InputPolicy == "" {
-		z.InputPolicy = fwconfig.ActionDrop
-	}
-	return oneOf("input policy", z.InputPolicy, fwconfig.ActionAccept, fwconfig.ActionDrop, fwconfig.ActionReject)
-}
-
 func prepareInterface(tx *gorm.DB, i, old *models.Interface) error {
 	if err := instanceExists(tx, i.InstanceID); err != nil {
 		return err
@@ -147,8 +118,13 @@ func prepareInterface(tx *gorm.DB, i, old *models.Interface) error {
 	if err := oneOf("IPv4 mode", i.Ipv4Mode, fwconfig.ModeStatic, fwconfig.ModeDHCP, fwconfig.ModeNone); err != nil {
 		return err
 	}
-	if err := zoneIn(tx, i.ZoneID, i.InstanceID, "zone"); err != nil {
+	if err := checkNewIfaceName(tx, i.InstanceID, i.Name, "name"); err != nil {
 		return err
+	}
+	if old != nil {
+		if err := ifaceMoved(tx, old.InstanceID, old.Name, i.InstanceID, i.Name); err != nil {
+			return err
+		}
 	}
 	i.Members = cleanList(i.Members)
 	switch i.Kind {
@@ -234,7 +210,7 @@ func presentWgPeer(p *models.WgPeer) {
 	p.HasClientKey = p.ClientPrivateKey != ""
 }
 
-func prepareLink(tx *gorm.DB, l, _ *models.Link) error {
+func prepareLink(tx *gorm.DB, l, old *models.Link) error {
 	l.Name = strings.TrimSpace(l.Name)
 	if !fwconfig.ValidZoneName(l.Name) {
 		return bad("name: lowercase letters, digits and _, at most 24 characters")
@@ -242,15 +218,15 @@ func prepareLink(tx *gorm.DB, l, _ *models.Link) error {
 	if l.InstanceAID == l.InstanceBID {
 		return bad("a link connects two different instances")
 	}
+	l.InterfaceA, l.InterfaceB = strings.TrimSpace(l.InterfaceA), strings.TrimSpace(l.InterfaceB)
 	for _, end := range []struct {
 		inst  uint
 		iface string
-		zone  *uint
 		addrs *models.StringList
 		label string
 	}{
-		{l.InstanceAID, l.InterfaceA, l.ZoneAID, &l.AddressesA, "side A"},
-		{l.InstanceBID, l.InterfaceB, l.ZoneBID, &l.AddressesB, "side B"},
+		{l.InstanceAID, l.InterfaceA, &l.AddressesA, "side A"},
+		{l.InstanceBID, l.InterfaceB, &l.AddressesB, "side B"},
 	} {
 		if err := instanceExists(tx, end.inst); err != nil {
 			return bad(end.label + ": instance does not exist")
@@ -258,11 +234,19 @@ func prepareLink(tx *gorm.DB, l, _ *models.Link) error {
 		if !fwconfig.ValidIfname(end.iface) {
 			return bad(end.label + ": interface name is required")
 		}
-		if err := zoneIn(tx, end.zone, end.inst, end.label+" zone"); err != nil {
+		if err := checkNewIfaceName(tx, end.inst, end.iface, end.label+" interface"); err != nil {
 			return err
 		}
 		*end.addrs = cleanList(*end.addrs)
 		if err := checkCIDRs(end.label+" addresses", *end.addrs); err != nil {
+			return err
+		}
+	}
+	if old != nil {
+		if err := ifaceMoved(tx, old.InstanceAID, old.InterfaceA, l.InstanceAID, l.InterfaceA); err != nil {
+			return err
+		}
+		if err := ifaceMoved(tx, old.InstanceBID, old.InterfaceB, l.InstanceBID, l.InterfaceB); err != nil {
 			return err
 		}
 	}
@@ -328,16 +312,17 @@ func prepareRule(tx *gorm.DB, r, old *models.Rule) error {
 	if err := oneOf("protocol", r.Protocol, "", "tcp", "udp", "icmp", "icmpv6"); err != nil {
 		return err
 	}
+	r.InInterfaces, r.OutInterfaces = dedupe(cleanList(r.InInterfaces)), dedupe(cleanList(r.OutInterfaces))
 	if r.Chain == fwconfig.ChainInput {
-		r.DstZoneID = nil
+		r.OutInterfaces = models.StringList{}
 	}
 	if r.Chain == fwconfig.ChainOutput {
-		r.SrcZoneID = nil
+		r.InInterfaces = models.StringList{}
 	}
-	if err := zoneIn(tx, r.SrcZoneID, r.InstanceID, "source zone"); err != nil {
+	if err := checkIfaceList(tx, r.InstanceID, "incoming interfaces", r.InInterfaces); err != nil {
 		return err
 	}
-	if err := zoneIn(tx, r.DstZoneID, r.InstanceID, "destination zone"); err != nil {
+	if err := checkIfaceList(tx, r.InstanceID, "outgoing interfaces", r.OutInterfaces); err != nil {
 		return err
 	}
 	r.SrcAddrs, r.DstAddrs = cleanList(r.SrcAddrs), cleanList(r.DstAddrs)
@@ -372,15 +357,16 @@ func prepareNat(tx *gorm.DB, n, old *models.NatRule) error {
 	if err := oneOf("protocol", n.Protocol, "", "tcp", "udp"); err != nil {
 		return err
 	}
+	n.InInterfaces, n.OutInterfaces = dedupe(cleanList(n.InInterfaces)), dedupe(cleanList(n.OutInterfaces))
 	if n.Kind == fwconfig.NATDNAT {
-		n.OutZoneID = nil
+		n.OutInterfaces = models.StringList{}
 	} else {
-		n.InZoneID = nil
+		n.InInterfaces = models.StringList{}
 	}
-	if err := zoneIn(tx, n.InZoneID, n.InstanceID, "incoming zone"); err != nil {
+	if err := checkIfaceList(tx, n.InstanceID, "incoming interfaces", n.InInterfaces); err != nil {
 		return err
 	}
-	if err := zoneIn(tx, n.OutZoneID, n.InstanceID, "outgoing zone"); err != nil {
+	if err := checkIfaceList(tx, n.InstanceID, "outgoing interfaces", n.OutInterfaces); err != nil {
 		return err
 	}
 	n.SrcAddrs, n.DstAddrs = cleanList(n.SrcAddrs), cleanList(n.DstAddrs)

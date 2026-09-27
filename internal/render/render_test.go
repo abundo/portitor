@@ -57,10 +57,12 @@ func TestNftablesMain(t *testing.T) {
 		`iifname "eth1" oifname "eth0" counter accept comment "rule 1: LAN to Internet"`,
 		`iifname "eth1.20" oifname "eth0" tcp dport { 80, 443, 8883 } counter accept`,
 		`iifname "lk-guest" oifname "eth0" counter accept`,
-		`iifname "eth0" ip daddr 192.168.1.0/24 counter log prefix "fw rule 7 drop: " drop comment "rule 7: no 'direct' access"`,
-		`iifname vmap { "eth0" : drop, "eth1" : accept, "eth1.20" : jump reject_pkt, "lk-guest" : drop, "wg0" : accept }`,
+		`iifname "eth0" ip daddr 192.168.1.0/24 counter log prefix "fw rule 8 drop: " drop comment "rule 8: no 'direct' access"`,
+		"# rule 5 skipped: dmz has no enabled interfaces",
+		`iifname { "eth1", "wg0" } counter accept comment "rule 10: trusted"`,
+		`iifname "eth1.20" counter jump reject_pkt comment "rule 11"`,
 		`iifname "eth0" meta nfproto ipv4 tcp dport 8443 counter dnat ip to 192.168.1.10:443 comment "nat 1: NAS"`,
-		`oifname "eth0" meta nfproto ipv4 counter masquerade comment "zone wan"`,
+		`oifname "eth0" meta nfproto ipv4 counter masquerade comment "nat 2: Internet sharing"`,
 	} {
 		if !strings.Contains(nft, want) {
 			t.Errorf("missing:\n  %s\nin:\n%s", want, nft)
@@ -68,7 +70,7 @@ func TestNftablesMain(t *testing.T) {
 	}
 	// Input rules are in the input chain, forward rules in forward.
 	in := nft[strings.Index(nft, "chain input {"):strings.Index(nft, "chain forward {")]
-	if !strings.Contains(in, "rule 5: ping") || strings.Contains(in, "rule 1:") {
+	if !strings.Contains(in, "rule 6: ping") || strings.Contains(in, "rule 1:") {
 		t.Errorf("rules in wrong chain:\n%s", in)
 	}
 }
@@ -209,8 +211,8 @@ func TestIPv6Services(t *testing.T) {
 	for _, want := range []string{
 		`iifname "eth1" udp dport 547 accept comment "auto: dhcpv6 server"`,
 		// A rule with both IPv4 and IPv6 addresses becomes one per version.
-		`iifname "wg0" ip daddr 192.168.1.10 tcp dport 22 counter accept comment "rule 8: NAS ssh"`,
-		`iifname "wg0" ip6 daddr fd00:1::10 tcp dport 22 counter accept comment "rule 8: NAS ssh"`,
+		`iifname "wg0" ip daddr 192.168.1.10 tcp dport 22 counter accept comment "rule 9: NAS ssh"`,
+		`iifname "wg0" ip6 daddr fd00:1::10 tcp dport 22 counter accept comment "rule 9: NAS ssh"`,
 	} {
 		if !strings.Contains(nft, want) {
 			t.Errorf("missing:\n  %s\nin:\n%s", want, nft)
@@ -286,8 +288,8 @@ func TestNATPerFamily(t *testing.T) {
 	in := &doc.Instances[0]
 	in.NAT = append(in.NAT,
 		// Source list mixes versions; the IPv4 target keeps the IPv4 part.
-		fwconfig.NATRule{Kind: fwconfig.NATSNAT, OutZone: "wan", SrcAddrs: []string{"192.168.1.0/24", "fd00:1::/64"}, ToAddr: "198.51.100.7"},
-		fwconfig.NATRule{Kind: fwconfig.NATMasquerade, OutZone: "wan", SrcAddrs: []string{"fd00:1::/64"}},
+		fwconfig.NATRule{Kind: fwconfig.NATSNAT, OutInterfaces: []string{"wan"}, SrcAddrs: []string{"192.168.1.0/24", "fd00:1::/64"}, ToAddr: "198.51.100.7"},
+		fwconfig.NATRule{Kind: fwconfig.NATMasquerade, OutInterfaces: []string{"wan"}, SrcAddrs: []string{"fd00:1::/64"}},
 	)
 	b, err := Render(doc, Options{Paths: DefaultPaths(), Units: DefaultUnits()})
 	if err != nil {
@@ -295,8 +297,8 @@ func TestNATPerFamily(t *testing.T) {
 	}
 	nft := mustFile(t, b, "/etc/portitor/instances/main/nftables.nft")
 	for _, want := range []string{
-		`oifname "eth0" ip saddr 192.168.1.0/24 counter snat ip to 198.51.100.7 comment "nat 2"`,
-		`oifname "eth0" ip6 saddr fd00:1::/64 counter masquerade comment "nat 3"`,
+		`oifname "eth0" ip saddr 192.168.1.0/24 counter snat ip to 198.51.100.7 comment "nat 3"`,
+		`oifname "eth0" ip6 saddr fd00:1::/64 counter masquerade comment "nat 4"`,
 	} {
 		if !strings.Contains(nft, want) {
 			t.Errorf("missing:\n  %s\nin:\n%s", want, nft)

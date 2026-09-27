@@ -5,9 +5,10 @@
 // CrudPage: a table of one REST resource with a create/edit modal, driven
 // by column and field schemas.
 //
-// Field: { key, label, type: text|number|switch|select|tags|addrs|addr|textarea,
+// Field: { key, label, type: text|number|switch|select|multiselect|tags|addrs|addr|textarea,
 //          items (array or form => array), nullable, placeholder, hint,
 //          required, show: form => bool, disabled: form => bool }
+// multiselect: an array of strings picked from items (strings).
 // addrs/addr: address list / single address; names of hosts/prefixes are
 // suggested and accepted.
 // Column: { key, label, format: row => string, class }
@@ -84,7 +85,8 @@ function fill(src) {
   Object.assign(form, JSON.parse(JSON.stringify(src)))
   for (const f of props.fields) {
     if (f.nullable && form[f.key] == null) form[f.key] = NONE
-    if ((f.type === 'tags' || f.type === 'addrs') && !Array.isArray(form[f.key])) form[f.key] = []
+    if (['tags', 'addrs', 'multiselect'].includes(f.type) && !Array.isArray(form[f.key]))
+      form[f.key] = []
     if (f.type === 'addr' && form[f.key] == null) form[f.key] = ''
   }
 }
@@ -287,6 +289,15 @@ defineExpose({ reload: load, openEdit, openCreate })
               v-model="form[f.key]"
               :items="itemsOf(f)"
               class="w-full"
+              :disabled="f.disabled?.(form)"
+            />
+            <USelectMenu
+              v-else-if="f.type === 'multiselect'"
+              v-model="form[f.key]"
+              multiple
+              :items="[...new Set([...itemsOf(f), ...form[f.key]])]"
+              class="w-full"
+              :placeholder="f.placeholder"
               :disabled="f.disabled?.(form)"
             />
             <UInputTags

@@ -4,15 +4,16 @@
 <script setup>
 // RulesTable: the firewall rules as a compact grid edited in place. Each
 // change saves its row (`save`); rows reorder by dragging the grip (`move`).
-// Address cells take a comma-separated list of addresses, CIDRs or names.
+// Address cells take a comma-separated list of addresses, CIDRs or names;
+// From/To cells a comma-separated list of interfaces and interface zones.
 import { onMounted, ref } from 'vue'
 import { useRowDrag } from '@/composables/useRowDrag'
 import { useObjectStore } from '@/stores/objects'
 
 const props = defineProps({
   rows: { type: Array, required: true },
-  // Zones of the instance as select items ({ label, value }).
-  zones: { type: Array, required: true },
+  // Interface zone and interface names of the instance, for suggestions.
+  ifaces: { type: Array, required: true },
 })
 const emit = defineEmits(['save', 'move', 'edit', 'remove'])
 
@@ -50,16 +51,13 @@ function setText(r, key, event) {
   set(r, key, event.target.value.trim())
 }
 
-function setAddrs(r, key, event) {
+// setList saves a comma-separated cell as a list.
+function setList(r, key, event) {
   set(
     r,
     key,
     event.target.value.split(/[\s,]+/).filter((s) => s),
   )
-}
-
-function setZone(r, key, event) {
-  set(r, key, Number(event.target.value) || null)
 }
 
 // Enter and the up/down arrows move to the same column in the next/previous
@@ -168,27 +166,33 @@ function onKeydown(event, index) {
           </td>
           <td>
             <span v-if="r.chain === 'output'" class="px-1.5 text-muted italic">firewall</span>
-            <select
+            <input
               v-else
-              :value="r.src_zone_id ?? 0"
-              data-col="src_zone_id"
-              @change="setZone(r, 'src_zone_id', $event)"
-            >
-              <option :value="0">any</option>
-              <option v-for="z in zones" :key="z.value" :value="z.value">{{ z.label }}</option>
-            </select>
+              :value="(r.in_interfaces ?? []).join(', ')"
+              data-col="in_interfaces"
+              list="rules-grid-ifaces"
+              placeholder="any"
+              :title="
+                (r.in_interfaces ?? []).join(', ') || 'Incoming interfaces or interface zones'
+              "
+              @change="setList(r, 'in_interfaces', $event)"
+              @keydown="onKeydown($event, i)"
+            />
           </td>
           <td>
             <span v-if="r.chain === 'input'" class="px-1.5 text-muted italic">firewall</span>
-            <select
+            <input
               v-else
-              :value="r.dst_zone_id ?? 0"
-              data-col="dst_zone_id"
-              @change="setZone(r, 'dst_zone_id', $event)"
-            >
-              <option :value="0">any</option>
-              <option v-for="z in zones" :key="z.value" :value="z.value">{{ z.label }}</option>
-            </select>
+              :value="(r.out_interfaces ?? []).join(', ')"
+              data-col="out_interfaces"
+              list="rules-grid-ifaces"
+              placeholder="any"
+              :title="
+                (r.out_interfaces ?? []).join(', ') || 'Outgoing interfaces or interface zones'
+              "
+              @change="setList(r, 'out_interfaces', $event)"
+              @keydown="onKeydown($event, i)"
+            />
           </td>
           <td>
             <select
@@ -227,7 +231,7 @@ function onKeydown(event, index) {
               list="rules-grid-names"
               placeholder="any"
               :title="(r.src_addrs ?? []).join(', ')"
-              @change="setAddrs(r, 'src_addrs', $event)"
+              @change="setList(r, 'src_addrs', $event)"
               @keydown="onKeydown($event, i)"
             />
           </td>
@@ -239,7 +243,7 @@ function onKeydown(event, index) {
               list="rules-grid-names"
               placeholder="any"
               :title="(r.dst_addrs ?? []).join(', ')"
-              @change="setAddrs(r, 'dst_addrs', $event)"
+              @change="setList(r, 'dst_addrs', $event)"
               @keydown="onKeydown($event, i)"
             />
           </td>
@@ -280,6 +284,9 @@ function onKeydown(event, index) {
     </table>
     <datalist id="rules-grid-names">
       <option v-for="n in objects.names" :key="n" :value="n" />
+    </datalist>
+    <datalist id="rules-grid-ifaces">
+      <option v-for="n in ifaces" :key="n" :value="n" />
     </datalist>
   </div>
 </template>

@@ -31,16 +31,15 @@ FP=${AGENT_FINGERPRINT:-$(openssl x509 -in dev/run/agent.crt -outform DER | sha2
 req PUT /settings "{\"agent_url\":\"$AGENT_URL\",\"agent_token\":\"$TOKEN\",\"agent_fingerprint\":\"$FP\",\"confirm_timeout\":120,\"wg_endpoint_host\":\"home.example.org\"}" >/dev/null
 
 MAIN=$(id /instances '{"name":"main","description":"Home","dns_enabled":true,"dns_forward_from_dhcp":true,"dns_forwarders":["9.9.9.9"],"dhcp_enabled":true,"dhcp_domain_name":"home.arpa","dhcp_lease_time":43200}')
-WAN=$(id /zones "{\"instance_id\":$MAIN,\"name\":\"wan\",\"input_policy\":\"drop\",\"masquerade\":true,\"description\":\"Internet\"}")
-LAN=$(id /zones "{\"instance_id\":$MAIN,\"name\":\"lan\",\"input_policy\":\"accept\"}")
-IOT=$(id /zones "{\"instance_id\":$MAIN,\"name\":\"iot\",\"input_policy\":\"reject\",\"description\":\"Untrusted gadgets\"}")
-VPN=$(id /zones "{\"instance_id\":$MAIN,\"name\":\"vpn\",\"input_policy\":\"accept\"}")
-GUESTZ=$(id /zones "{\"instance_id\":$MAIN,\"name\":\"guest\",\"input_policy\":\"drop\"}")
-
-id /interfaces "{\"instance_id\":$MAIN,\"name\":\"eth0\",\"description\":\"ISP\",\"zone_id\":$WAN,\"ipv4_mode\":\"dhcp\",\"ipv6_accept_ra\":true,\"enabled\":true}" >/dev/null
-ETH1=$(id /interfaces "{\"instance_id\":$MAIN,\"name\":\"eth1\",\"description\":\"LAN switch\",\"zone_id\":$LAN,\"enabled\":true,\"dns_listen\":true}")
-VL20=$(id /interfaces "{\"instance_id\":$MAIN,\"name\":\"eth1.20\",\"kind\":\"vlan\",\"parent\":\"eth1\",\"vlan_id\":20,\"zone_id\":$IOT,\"enabled\":true,\"dns_listen\":true}")
-WG0=$(id /interfaces "{\"instance_id\":$MAIN,\"name\":\"wg0\",\"kind\":\"wireguard\",\"wg_listen_port\":51820,\"zone_id\":$VPN,\"enabled\":true,\"dns_listen\":true}")
+id /interfaces "{\"instance_id\":$MAIN,\"name\":\"eth0\",\"description\":\"ISP\",\"ipv4_mode\":\"dhcp\",\"ipv6_accept_ra\":true,\"enabled\":true}" >/dev/null
+ETH1=$(id /interfaces "{\"instance_id\":$MAIN,\"name\":\"eth1\",\"description\":\"LAN switch\",\"enabled\":true,\"dns_listen\":true}")
+VL20=$(id /interfaces "{\"instance_id\":$MAIN,\"name\":\"eth1.20\",\"kind\":\"vlan\",\"parent\":\"eth1\",\"vlan_id\":20,\"enabled\":true,\"dns_listen\":true}")
+WG0=$(id /interfaces "{\"instance_id\":$MAIN,\"name\":\"wg0\",\"kind\":\"wireguard\",\"wg_listen_port\":51820,\"enabled\":true,\"dns_listen\":true}")
+id /interface-zones "{\"instance_id\":$MAIN,\"name\":\"wan\",\"interfaces\":[\"eth0\"],\"description\":\"Internet\"}" >/dev/null
+id /interface-zones "{\"instance_id\":$MAIN,\"name\":\"trusted\",\"interfaces\":[\"eth1\",\"wg0\"],\"description\":\"LAN and VPN clients\"}" >/dev/null
+id /interface-zones "{\"instance_id\":$MAIN,\"name\":\"iot\",\"interfaces\":[\"eth1.20\"],\"description\":\"Untrusted gadgets\"}" >/dev/null
+# Empty until the link to the guest instance exists (below).
+GUESTZ=$(id /interface-zones "{\"instance_id\":$MAIN,\"name\":\"guest\"}")
 
 id /ipam/prefixes "{\"instance_id\":$MAIN,\"prefix\":\"192.168.0.0/16\",\"description\":\"Home\"}" >/dev/null
 id /ipam/prefixes "{\"instance_id\":$MAIN,\"prefix\":\"192.168.1.0/24\",\"description\":\"LAN\",\"dhcp_enabled\":true,\"dhcp_range_start\":\"192.168.1.100\",\"dhcp_range_end\":\"192.168.1.199\"}" >/dev/null
@@ -61,27 +60,32 @@ ZONE=$(id /dns/zones "{\"instance_id\":$MAIN,\"name\":\"home.arpa\",\"type\":\"f
 id /dns/zones "{\"instance_id\":$MAIN,\"name\":\"192.168.1.0/24\",\"type\":\"reverse4\"}" >/dev/null
 id /dns/records "{\"zone_id\":$ZONE,\"name\":\"files\",\"type\":\"CNAME\",\"value\":\"nas\"}" >/dev/null
 
-id /rules "{\"instance_id\":$MAIN,\"chain\":\"forward\",\"src_zone_id\":$LAN,\"dst_zone_id\":$WAN,\"action\":\"accept\",\"enabled\":true,\"description\":\"LAN to Internet\"}" >/dev/null
-id /rules "{\"instance_id\":$MAIN,\"chain\":\"forward\",\"src_zone_id\":$LAN,\"dst_zone_id\":$IOT,\"action\":\"accept\",\"enabled\":true,\"description\":\"LAN manages IoT\"}" >/dev/null
-id /rules "{\"instance_id\":$MAIN,\"chain\":\"forward\",\"src_zone_id\":$IOT,\"dst_zone_id\":$WAN,\"protocol\":\"tcp\",\"dst_ports\":\"443,8883\",\"action\":\"accept\",\"enabled\":true,\"description\":\"IoT cloud only\"}" >/dev/null
-id /rules "{\"instance_id\":$MAIN,\"chain\":\"forward\",\"src_zone_id\":$VPN,\"action\":\"accept\",\"enabled\":true,\"description\":\"VPN clients anywhere\"}" >/dev/null
-id /rules "{\"instance_id\":$MAIN,\"chain\":\"forward\",\"src_zone_id\":$GUESTZ,\"dst_zone_id\":$WAN,\"action\":\"accept\",\"enabled\":true,\"description\":\"Guests to Internet\"}" >/dev/null
-id /rules "{\"instance_id\":$MAIN,\"chain\":\"input\",\"src_zone_id\":$WAN,\"protocol\":\"icmp\",\"action\":\"accept\",\"enabled\":true,\"description\":\"Ping from Internet\"}" >/dev/null
-id /rules "{\"instance_id\":$MAIN,\"chain\":\"forward\",\"src_zone_id\":$VPN,\"dst_addrs\":[\"nas\"],\"protocol\":\"tcp\",\"dst_ports\":\"22\",\"action\":\"accept\",\"enabled\":true,\"description\":\"SSH to the NAS (IPv4 and IPv6)\"}" >/dev/null
-id /nat "{\"instance_id\":$MAIN,\"kind\":\"dnat\",\"in_zone_id\":$WAN,\"protocol\":\"tcp\",\"dst_ports\":\"8443\",\"to_addr\":\"nas\",\"to_port\":443,\"enabled\":true,\"description\":\"NAS web\"}" >/dev/null
+id /rules "{\"instance_id\":$MAIN,\"chain\":\"forward\",\"in_interfaces\":[\"eth1\"],\"out_interfaces\":[\"wan\"],\"action\":\"accept\",\"enabled\":true,\"description\":\"LAN to Internet\"}" >/dev/null
+id /rules "{\"instance_id\":$MAIN,\"chain\":\"forward\",\"in_interfaces\":[\"eth1\"],\"out_interfaces\":[\"iot\"],\"action\":\"accept\",\"enabled\":true,\"description\":\"LAN manages IoT\"}" >/dev/null
+id /rules "{\"instance_id\":$MAIN,\"chain\":\"forward\",\"in_interfaces\":[\"iot\"],\"out_interfaces\":[\"wan\"],\"protocol\":\"tcp\",\"dst_ports\":\"443,8883\",\"action\":\"accept\",\"enabled\":true,\"description\":\"IoT cloud only\"}" >/dev/null
+id /rules "{\"instance_id\":$MAIN,\"chain\":\"forward\",\"in_interfaces\":[\"wg0\"],\"action\":\"accept\",\"enabled\":true,\"description\":\"VPN clients anywhere\"}" >/dev/null
+id /rules "{\"instance_id\":$MAIN,\"chain\":\"forward\",\"in_interfaces\":[\"guest\"],\"out_interfaces\":[\"wan\"],\"action\":\"accept\",\"enabled\":true,\"description\":\"Guests to Internet\"}" >/dev/null
+id /rules "{\"instance_id\":$MAIN,\"chain\":\"input\",\"in_interfaces\":[\"wan\"],\"protocol\":\"icmp\",\"action\":\"accept\",\"enabled\":true,\"description\":\"Ping from Internet\"}" >/dev/null
+id /rules "{\"instance_id\":$MAIN,\"chain\":\"forward\",\"in_interfaces\":[\"wg0\"],\"dst_addrs\":[\"nas\"],\"protocol\":\"tcp\",\"dst_ports\":\"22\",\"action\":\"accept\",\"enabled\":true,\"description\":\"SSH to the NAS (IPv4 and IPv6)\"}" >/dev/null
+id /nat "{\"instance_id\":$MAIN,\"kind\":\"dnat\",\"in_interfaces\":[\"wan\"],\"protocol\":\"tcp\",\"dst_ports\":\"8443\",\"to_addr\":\"nas\",\"to_port\":443,\"enabled\":true,\"description\":\"NAS web\"}" >/dev/null
+id /rules "{\"instance_id\":$MAIN,\"chain\":\"input\",\"in_interfaces\":[\"trusted\"],\"action\":\"accept\",\"enabled\":true,\"description\":\"LAN and VPN to the firewall\"}" >/dev/null
+id /rules "{\"instance_id\":$MAIN,\"chain\":\"input\",\"in_interfaces\":[\"iot\"],\"action\":\"reject\",\"enabled\":true,\"description\":\"IoT to the firewall\"}" >/dev/null
+id /nat "{\"instance_id\":$MAIN,\"kind\":\"masquerade\",\"out_interfaces\":[\"wan\"],\"enabled\":true,\"description\":\"Internet sharing\"}" >/dev/null
 id /wg/peers "{\"interface_id\":$WG0,\"name\":\"phone\",\"allowed_ips\":[\"10.99.0.2/32\"],\"enabled\":true}" >/dev/null
 id /wg/peers "{\"interface_id\":$WG0,\"name\":\"laptop\",\"allowed_ips\":[\"10.99.0.3/32\"],\"enabled\":true}" >/dev/null
 
 GUEST=$(id /instances '{"name":"guest","description":"Guest Wi-Fi, isolated","dhcp_enabled":true}')
-GLAN=$(id /zones "{\"instance_id\":$GUEST,\"name\":\"lan\",\"input_policy\":\"accept\"}")
-GUP=$(id /zones "{\"instance_id\":$GUEST,\"name\":\"up\",\"input_policy\":\"drop\",\"masquerade\":true}")
-ETH2=$(id /interfaces "{\"instance_id\":$GUEST,\"name\":\"eth2\",\"description\":\"Guest AP\",\"zone_id\":$GLAN,\"enabled\":true}")
+ETH2=$(id /interfaces "{\"instance_id\":$GUEST,\"name\":\"eth2\",\"description\":\"Guest AP\",\"enabled\":true}")
 id /ipam/prefixes "{\"instance_id\":$GUEST,\"prefix\":\"192.168.50.0/24\",\"dhcp_enabled\":true,\"dhcp_range_start\":\"192.168.50.100\",\"dhcp_range_end\":\"192.168.50.200\",\"dhcp_dns_servers\":[\"9.9.9.9\"]}" >/dev/null
 id /ipam/addresses "{\"instance_id\":$GUEST,\"address\":\"192.168.50.1\",\"interface_id\":$ETH2}" >/dev/null
-id /rules "{\"instance_id\":$GUEST,\"chain\":\"forward\",\"src_zone_id\":$GLAN,\"dst_zone_id\":$GUP,\"dst_addrs\":[\"192.168.0.0/16\"],\"action\":\"reject\",\"enabled\":true,\"description\":\"No access to home\"}" >/dev/null
-id /rules "{\"instance_id\":$GUEST,\"chain\":\"forward\",\"src_zone_id\":$GLAN,\"dst_zone_id\":$GUP,\"action\":\"accept\",\"enabled\":true}" >/dev/null
+id /links "{\"name\":\"guestup\",\"instance_a_id\":$MAIN,\"interface_a\":\"lk-guest\",\"addresses_a\":[\"10.255.0.1/30\"],\"instance_b_id\":$GUEST,\"interface_b\":\"lk-main\",\"addresses_b\":[\"10.255.0.2/30\"]}" >/dev/null
+req PUT /interface-zones/$GUESTZ '{"interfaces":["lk-guest"]}' >/dev/null
+# The guest instance names its two interfaces directly, without zones.
+id /rules "{\"instance_id\":$GUEST,\"chain\":\"forward\",\"in_interfaces\":[\"eth2\"],\"out_interfaces\":[\"lk-main\"],\"dst_addrs\":[\"192.168.0.0/16\"],\"action\":\"reject\",\"enabled\":true,\"description\":\"No access to home\"}" >/dev/null
+id /rules "{\"instance_id\":$GUEST,\"chain\":\"forward\",\"in_interfaces\":[\"eth2\"],\"out_interfaces\":[\"lk-main\"],\"action\":\"accept\",\"enabled\":true}" >/dev/null
+id /rules "{\"instance_id\":$GUEST,\"chain\":\"input\",\"in_interfaces\":[\"eth2\"],\"action\":\"accept\",\"enabled\":true}" >/dev/null
+id /nat "{\"instance_id\":$GUEST,\"kind\":\"masquerade\",\"out_interfaces\":[\"lk-main\"],\"enabled\":true}" >/dev/null
 id /routes "{\"instance_id\":$GUEST,\"destination\":\"default\",\"gateway\":\"10.255.0.1\",\"enabled\":true}" >/dev/null
-id /links "{\"name\":\"guestup\",\"instance_a_id\":$MAIN,\"interface_a\":\"lk-guest\",\"zone_a_id\":$GUESTZ,\"addresses_a\":[\"10.255.0.1/30\"],\"instance_b_id\":$GUEST,\"interface_b\":\"lk-main\",\"zone_b_id\":$GUP,\"addresses_b\":[\"10.255.0.2/30\"]}" >/dev/null
 
 echo "seeded; deploy check:"
 req GET /deploy/check

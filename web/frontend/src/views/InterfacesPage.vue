@@ -8,7 +8,7 @@ import NeedInstance from '@/components/NeedInstance.vue'
 import { interfaces, ipamAddresses } from '@/api'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
 
-const { store, zoneItems, zoneName, reload } = useInstanceRefs()
+const { store, zonesOf, reload } = useInstanceRefs()
 const addrs = ref([])
 
 async function loadAddrs() {
@@ -35,7 +35,7 @@ const columns = [
     label: 'Kind',
     format: (r) => (r.kind === 'vlan' ? `vlan ${r.vlan_id} on ${r.parent}` : r.kind),
   },
-  { key: 'zone_id', label: 'Zone', format: (r) => zoneName(r.zone_id) },
+  { key: 'zones', label: 'Zones', format: (r) => zonesOf(r.name).join(', ') },
   { key: 'ipv4_mode', label: 'IPv4' },
   { key: 'addresses', label: 'Addresses' },
   { key: 'enabled', label: 'Up' },
@@ -61,13 +61,6 @@ const fields = [
     type: 'tags',
     placeholder: 'eth2',
     show: (f) => f.kind === 'bridge',
-  },
-  {
-    key: 'zone_id',
-    label: 'Firewall zone',
-    type: 'select',
-    items: () => zoneItems.value,
-    nullable: true,
   },
   {
     key: 'ipv4_mode',

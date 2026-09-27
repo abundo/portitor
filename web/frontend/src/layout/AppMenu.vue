@@ -18,7 +18,7 @@ const items = [
   ],
   [
     { label: 'Firewall', type: 'label' },
-    { label: 'Zones', icon: 'i-lucide-layers', to: '/firewall/zones' },
+    { label: 'Interface zones', icon: 'i-lucide-layers', to: '/firewall/zones' },
     { label: 'Rules', icon: 'i-lucide-shield-check', to: '/firewall/rules' },
     { label: 'NAT & port forwards', icon: 'i-lucide-arrow-right-left', to: '/firewall/nat' },
   ],

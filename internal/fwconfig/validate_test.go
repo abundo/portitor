@@ -23,7 +23,15 @@ func TestValidateCatchesProblems(t *testing.T) {
 	}{
 		{"two defaults", func(d *Document) { d.Instances[1].Default = true }, "exactly one instance"},
 		{"bad instance name", func(d *Document) { d.Instances[1].Name = "Guest-Net" }, "name must match"},
-		{"unknown zone", func(d *Document) { d.Instances[0].Rules[0].SrcZone = "dmz" }, `unknown zone "dmz"`},
+		{"unknown interface", func(d *Document) { d.Instances[0].Rules[0].InInterfaces = []string{"eth9"} }, `unknown interface or interface zone "eth9"`},
+		{"nat unknown interface", func(d *Document) { d.Instances[0].NAT[1].OutInterfaces = []string{"up"} }, `unknown interface or interface zone "up"`},
+		{"interface of other instance", func(d *Document) { d.Instances[1].Rules[0].InInterfaces = []string{"eth1"} }, `unknown interface or interface zone "eth1"`},
+		{"input with out interface", func(d *Document) { d.Instances[0].Rules[5].OutInterfaces = []string{"lan"} }, "input rules have no outgoing"},
+		{"dnat with out interface", func(d *Document) { d.Instances[0].NAT[0].OutInterfaces = []string{"lan"} }, "dnat matches the incoming"},
+		{"zone unknown member", func(d *Document) { d.Instances[0].InterfaceZones[0].Interfaces = []string{"eth9"} }, `member "eth9" is not an interface`},
+		{"zone named like interface", func(d *Document) { d.Instances[0].InterfaceZones[0].Name = "eth1" }, "an interface has the same name"},
+		{"zone duplicate", func(d *Document) { d.Instances[0].InterfaceZones[1].Name = "wan" }, "duplicate"},
+		{"zone name injection", func(d *Document) { d.Instances[0].InterfaceZones[0].Name = `wan" accept` }, "name must match"},
 		{"ports without proto", func(d *Document) { d.Instances[0].Rules[0].DstPorts = "22" }, "ports need protocol"},
 		{"bad port range", func(d *Document) { d.Instances[0].Rules[2].DstPorts = "90-80" }, "invalid port range"},
 		{"ifname injection", func(d *Document) { d.Instances[0].Interfaces[1].Name = `eth1" accept` }, "name must match"},
@@ -33,9 +41,9 @@ func TestValidateCatchesProblems(t *testing.T) {
 			d.Instances[0].Rules[0].DstAddrs = []string{"fd00::/8"}
 		}, "no IP version fits"},
 		{"icmp with only v6 addresses", func(d *Document) {
-			d.Instances[0].Rules[4].SrcAddrs = []string{"2001:db8::/32"}
+			d.Instances[0].Rules[5].SrcAddrs = []string{"2001:db8::/32"}
 		}, "no IP version fits"},
-		{"family against protocol", func(d *Document) { d.Instances[0].Rules[4].Family = "ipv6" }, "does not match family"},
+		{"family against protocol", func(d *Document) { d.Instances[0].Rules[5].Family = "ipv6" }, "does not match family"},
 		{"slaac needs /64", func(d *Document) { d.Instances[0].RA[0].Prefixes[0].Prefix = "fd00:1::/56" }, "needs a /64"},
 		{"ra unknown interface", func(d *Document) { d.Instances[0].RA[0].Interface = "eth9" }, "unknown interface"},
 		{"ra v4 dns", func(d *Document) { d.Instances[0].RA[0].RDNSS = []string{"192.168.1.1"} }, "invalid IPv6 dns server"},
@@ -86,13 +94,35 @@ func TestValidateCatchesProblems(t *testing.T) {
 func TestExpandAddsLinkInterfaces(t *testing.T) {
 	doc := SampleDocument().Expand()
 	ifc := doc.Instance("guest").Interface("lk-main")
-	if ifc == nil || ifc.Kind != KindLink || ifc.Zone != "up" {
+	if ifc == nil || ifc.Kind != KindLink || !ifc.Enabled {
 		t.Fatalf("link end not expanded: %+v", ifc)
 	}
 	// Expand must not modify the original.
 	orig := SampleDocument()
 	if orig.Instance("guest").Interface("lk-main") != nil {
 		t.Fatal("original modified")
+	}
+}
+
+func TestMatchInterfaces(t *testing.T) {
+	doc := SampleDocument().Expand()
+	in := doc.Instance("main")
+	in.Interface("eth1.20").Enabled = false
+	cases := []struct {
+		list []string
+		want string
+	}{
+		{nil, ""},
+		{[]string{"wan"}, "eth0"},
+		{[]string{"lan", "vpn", "eth1"}, "eth1 wg0"},
+		{[]string{"guest"}, "lk-guest"},
+		{[]string{"dmz"}, ""},
+		{[]string{"iot"}, ""}, // disabled member
+	}
+	for _, tc := range cases {
+		if got := strings.Join(in.MatchInterfaces(tc.list), " "); got != tc.want {
+			t.Errorf("%v: got %q, want %q", tc.list, got, tc.want)
+		}
 	}
 }
 

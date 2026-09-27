@@ -63,8 +63,7 @@ ip prefix/addresses are handled by a hierarchical tree
 - **Atomic rulesets.** Each ruleset is checked with `nft -c` before anything changes,
   and loaded as a single transaction. A failed apply restores the previous
   configuration.
-- **Default deny.** Input and forward chains drop unless a zone policy or rule
-  accepts. Established/related traffic, ICMP errors, IPv6 neighbour discovery and the
+- **Default deny.** Input and forward chains drop unless a rule accepts. Established/related traffic, ICMP errors, IPv6 neighbour discovery and the
   services you enable (DHCP, DNS, WireGuard ports, the WAN DHCP client) are opened
   automatically.
 - **Agent API.** TLS 1.3 only, bearer token (constant-time compare), client address

@@ -111,13 +111,15 @@ type Instance struct {
 	DhcpLeaseTime  int    `json:"dhcp_lease_time"`
 }
 
-type Zone struct {
+// InterfaceZone is a named group of zero or more interfaces of an
+// instance, by name (link ends included). Rules and NAT rules list
+// interface and interface zone names.
+type InterfaceZone struct {
 	Base
-	InstanceID  uint   `json:"instance_id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	InputPolicy string `json:"input_policy"`
-	Masquerade  bool   `json:"masquerade"`
+	InstanceID  uint       `json:"instance_id"`
+	Name        string     `json:"name"`
+	Description string     `json:"description"`
+	Interfaces  StringList `json:"interfaces"`
 }
 
 type Interface struct {
@@ -131,7 +133,6 @@ type Interface struct {
 	VlanID       int        `json:"vlan_id"`
 	Members      StringList `json:"members"`
 	Mtu          int        `json:"mtu"`
-	ZoneID       *uint      `json:"zone_id"`
 	Ipv4Mode     string     `json:"ipv4_mode"`
 	Ipv6AcceptRA bool       `gorm:"column:ipv6_accept_ra" json:"ipv6_accept_ra"`
 	// DnsListen makes the instance's DNS server answer on this interface.
@@ -167,11 +168,9 @@ type Link struct {
 	Description string     `json:"description"`
 	InstanceAID uint       `gorm:"column:instance_a_id" json:"instance_a_id"`
 	InterfaceA  string     `gorm:"column:interface_a" json:"interface_a"`
-	ZoneAID     *uint      `gorm:"column:zone_a_id" json:"zone_a_id"`
 	AddressesA  StringList `gorm:"column:addresses_a" json:"addresses_a"`
 	InstanceBID uint       `gorm:"column:instance_b_id" json:"instance_b_id"`
 	InterfaceB  string     `gorm:"column:interface_b" json:"interface_b"`
-	ZoneBID     *uint      `gorm:"column:zone_b_id" json:"zone_b_id"`
 	AddressesB  StringList `gorm:"column:addresses_b" json:"addresses_b"`
 }
 
@@ -188,37 +187,39 @@ type Route struct {
 
 type Rule struct {
 	Base
-	InstanceID  uint       `json:"instance_id"`
-	Position    int        `json:"position"`
-	Chain       string     `json:"chain"`
-	SrcZoneID   *uint      `json:"src_zone_id"`
-	DstZoneID   *uint      `json:"dst_zone_id"`
-	Family      string     `json:"family"`
-	Protocol    string     `json:"protocol"`
-	SrcAddrs    StringList `json:"src_addrs"`
-	DstAddrs    StringList `json:"dst_addrs"`
-	DstPorts    string     `json:"dst_ports"`
-	Action      string     `json:"action"`
-	Log         bool       `json:"log"`
-	Enabled     bool       `json:"enabled"`
-	Description string     `json:"description"`
+	InstanceID uint   `json:"instance_id"`
+	Position   int    `json:"position"`
+	Chain      string `json:"chain"`
+	// InInterfaces and OutInterfaces hold interface and interface zone
+	// names of the instance; empty matches any.
+	InInterfaces  StringList `json:"in_interfaces"`
+	OutInterfaces StringList `json:"out_interfaces"`
+	Family        string     `json:"family"`
+	Protocol      string     `json:"protocol"`
+	SrcAddrs      StringList `json:"src_addrs"`
+	DstAddrs      StringList `json:"dst_addrs"`
+	DstPorts      string     `json:"dst_ports"`
+	Action        string     `json:"action"`
+	Log           bool       `json:"log"`
+	Enabled       bool       `json:"enabled"`
+	Description   string     `json:"description"`
 }
 
 type NatRule struct {
 	Base
-	InstanceID  uint       `json:"instance_id"`
-	Position    int        `json:"position"`
-	Kind        string     `json:"kind"`
-	InZoneID    *uint      `json:"in_zone_id"`
-	OutZoneID   *uint      `json:"out_zone_id"`
-	Protocol    string     `json:"protocol"`
-	SrcAddrs    StringList `json:"src_addrs"`
-	DstAddrs    StringList `json:"dst_addrs"`
-	DstPorts    string     `json:"dst_ports"`
-	ToAddr      string     `json:"to_addr"`
-	ToPort      int        `json:"to_port"`
-	Enabled     bool       `json:"enabled"`
-	Description string     `json:"description"`
+	InstanceID    uint       `json:"instance_id"`
+	Position      int        `json:"position"`
+	Kind          string     `json:"kind"`
+	InInterfaces  StringList `json:"in_interfaces"`
+	OutInterfaces StringList `json:"out_interfaces"`
+	Protocol      string     `json:"protocol"`
+	SrcAddrs      StringList `json:"src_addrs"`
+	DstAddrs      StringList `json:"dst_addrs"`
+	DstPorts      string     `json:"dst_ports"`
+	ToAddr        string     `json:"to_addr"`
+	ToPort        int        `json:"to_port"`
+	Enabled       bool       `json:"enabled"`
+	Description   string     `json:"description"`
 }
 
 // IpamPrefix is a node in the prefix tree. Parent/child relations are not
@@ -348,7 +349,7 @@ type Deployment struct {
 // goose migrations).
 func All() []any {
 	return []any{
-		&User{}, &Settings{}, &Instance{}, &Zone{}, &Interface{}, &WgPeer{}, &Link{},
+		&User{}, &Settings{}, &Instance{}, &InterfaceZone{}, &Interface{}, &WgPeer{}, &Link{},
 		&Route{}, &Rule{}, &NatRule{}, &IpamPrefix{}, &IpamAddress{}, &DnsZone{}, &DnsRecord{}, &Deployment{},
 		&AddressObject{}, &DnsSoaTemplate{}, &DnsDnssecPolicy{}, &DnsTemplate{},
 	}

@@ -8,7 +8,7 @@ import RulesTable from '@/components/RulesTable.vue'
 import { rules } from '@/api'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
 
-const { store, zoneItems } = useInstanceRefs()
+const { store, ifaceRefNames } = useInstanceRefs()
 const opt = (list) => list.map((v) => ({ label: v || 'any', value: v }))
 
 const fields = [
@@ -23,20 +23,21 @@ const fields = [
     ],
   },
   {
-    key: 'src_zone_id',
-    label: 'From zone',
-    type: 'select',
-    items: () => zoneItems.value,
-    nullable: true,
+    key: 'in_interfaces',
+    label: 'Incoming interfaces',
+    type: 'multiselect',
+    items: () => ifaceRefNames.value,
+    placeholder: 'any',
     show: (f) => f.chain !== 'output',
   },
   {
-    key: 'dst_zone_id',
-    label: 'To zone',
-    type: 'select',
-    items: () => zoneItems.value,
-    nullable: true,
+    key: 'out_interfaces',
+    label: 'Outgoing interfaces',
+    type: 'multiselect',
+    items: () => ifaceRefNames.value,
+    placeholder: 'any',
     show: (f) => f.chain !== 'input',
+    hint: 'Interfaces and interface zones; empty matches any.',
   },
   {
     key: 'family',
@@ -114,6 +115,8 @@ function clean(b) {
         action: 'accept',
         enabled: true,
         log: false,
+        in_interfaces: [],
+        out_interfaces: [],
         src_addrs: [],
         dst_addrs: [],
       }"
@@ -124,7 +127,7 @@ function clean(b) {
       <template #table="{ rows, openEdit, remove, moveTo, saveRow }">
         <RulesTable
           :rows="rows"
-          :zones="zoneItems"
+          :ifaces="ifaceRefNames"
           @save="saveRow"
           @move="moveTo"
           @edit="openEdit"

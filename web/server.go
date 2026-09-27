@@ -91,10 +91,10 @@ func (s *Server) Echo() *echo.Echo {
 	g.POST("/me/password", s.handleChangePassword)
 
 	(&resource[models.Instance, *models.Instance]{db: s.db, order: "is_default desc, name", prepare: prepareInstance}).register(g, "/instances")
-	(&resource[models.Zone, *models.Zone]{db: s.db, filters: []string{"instance_id"}, order: "name", prepare: prepareZone}).register(g, "/zones")
-	(&resource[models.Interface, *models.Interface]{db: s.db, filters: []string{"instance_id", "zone_id"}, order: "name", prepare: prepareInterface}).register(g, "/interfaces")
+	(&resource[models.InterfaceZone, *models.InterfaceZone]{db: s.db, filters: []string{"instance_id"}, order: "name", prepare: prepareInterfaceZone, beforeDelete: deleteInterfaceZone}).register(g, "/interface-zones")
+	(&resource[models.Interface, *models.Interface]{db: s.db, filters: []string{"instance_id"}, order: "name", prepare: prepareInterface, beforeDelete: deleteInterface}).register(g, "/interfaces")
 	(&resource[models.WgPeer, *models.WgPeer]{db: s.db, filters: []string{"interface_id"}, order: "name", prepare: prepareWgPeer, present: presentWgPeer}).register(g, "/wg/peers")
-	(&resource[models.Link, *models.Link]{db: s.db, order: "name", prepare: prepareLink}).register(g, "/links")
+	(&resource[models.Link, *models.Link]{db: s.db, order: "name", prepare: prepareLink, beforeDelete: deleteLink}).register(g, "/links")
 	(&resource[models.Route, *models.Route]{db: s.db, filters: []string{"instance_id"}, order: "destination", prepare: prepareRoute}).register(g, "/routes")
 	(&resource[models.Rule, *models.Rule]{db: s.db, filters: []string{"instance_id"}, order: "position, id", prepare: prepareRule}).register(g, "/rules")
 	(&resource[models.NatRule, *models.NatRule]{db: s.db, filters: []string{"instance_id"}, order: "position, id", prepare: prepareNat}).register(g, "/nat")

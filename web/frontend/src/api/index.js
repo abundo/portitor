@@ -15,7 +15,7 @@ export function crud(path) {
 }
 
 export const instances = crud('/instances')
-export const zones = crud('/zones')
+export const interfaceZones = crud('/interface-zones')
 export const interfaces = crud('/interfaces')
 export const wgPeers = crud('/wg/peers')
 export const links = crud('/links')

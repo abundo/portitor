@@ -126,7 +126,7 @@ function copy(text) {
       <UAlert
         icon="i-lucide-key-round"
         title="No WireGuard interface in this instance"
-        description="Add an interface of kind WireGuard (e.g. wg0, listen port 51820), give it an address under IP addresses, and put it in a zone."
+        description="Add an interface of kind WireGuard (e.g. wg0, listen port 51820), give it an address under IP addresses, and allow its traffic with firewall rules."
         :actions="[{ label: 'Interfaces', to: '/interfaces' }]"
       />
     </div>

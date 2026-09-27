@@ -5,9 +5,9 @@
 import CrudPage from '@/components/CrudPage.vue'
 import NeedInstance from '@/components/NeedInstance.vue'
 import { nat } from '@/api'
-import { useInstanceRefs } from '@/composables/useInstanceRefs'
+import { ifaceListLabel, useInstanceRefs } from '@/composables/useInstanceRefs'
 
-const { store, zoneItems, zoneName } = useInstanceRefs()
+const { store, ifaceRefNames } = useInstanceRefs()
 
 const kinds = [
   { label: 'Port forward (DNAT)', value: 'dnat' },
@@ -22,12 +22,12 @@ const protos = [
 const columns = [
   { key: 'kind', label: 'Kind' },
   {
-    key: 'zone',
-    label: 'Zone',
+    key: 'ifaces',
+    label: 'Interfaces',
     format: (r) =>
       r.kind === 'dnat'
-        ? `in: ${zoneName(r.in_zone_id) || 'any'}`
-        : `out: ${zoneName(r.out_zone_id) || 'any'}`,
+        ? `in: ${ifaceListLabel(r.in_interfaces)}`
+        : `out: ${ifaceListLabel(r.out_interfaces)}`,
   },
   {
     key: 'match',
@@ -57,21 +57,22 @@ const columns = [
 const fields = [
   { key: 'kind', label: 'Kind', type: 'select', items: kinds },
   {
-    key: 'in_zone_id',
-    label: 'Incoming zone',
-    type: 'select',
-    items: () => zoneItems.value,
-    nullable: true,
+    key: 'in_interfaces',
+    label: 'Incoming interfaces',
+    type: 'multiselect',
+    items: () => ifaceRefNames.value,
+    placeholder: 'any',
     show: (f) => f.kind === 'dnat',
-    hint: 'Usually wan.',
+    hint: 'Interfaces and interface zones; usually the WAN.',
   },
   {
-    key: 'out_zone_id',
-    label: 'Outgoing zone',
-    type: 'select',
-    items: () => zoneItems.value,
-    nullable: true,
+    key: 'out_interfaces',
+    label: 'Outgoing interfaces',
+    type: 'multiselect',
+    items: () => ifaceRefNames.value,
+    placeholder: 'any',
     show: (f) => f.kind !== 'dnat',
+    hint: 'Interfaces and interface zones; for Internet sharing, masquerade out of the WAN.',
   },
   { key: 'protocol', label: 'Protocol', type: 'select', items: protos },
   {
@@ -112,7 +113,7 @@ const api = {
   <NeedInstance>
     <CrudPage
       title="NAT"
-      description="Port forwards and explicit source NAT. Plain Internet sharing only needs Masquerade on the WAN zone. Port-forwarded traffic is allowed through the firewall automatically."
+      description="Internet sharing (masquerade out of the WAN), port forwards and source NAT. Port-forwarded traffic is allowed through the firewall automatically."
       :api="api"
       :params="{ instance_id: store.currentId }"
       :columns="columns"
@@ -121,6 +122,8 @@ const api = {
         kind: 'dnat',
         protocol: 'tcp',
         enabled: true,
+        in_interfaces: [],
+        out_interfaces: [],
         src_addrs: [],
         dst_addrs: [],
         to_port: 0,

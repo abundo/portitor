@@ -12,7 +12,7 @@ const store = useInstanceStore()
     <UAlert
       icon="i-lucide-boxes"
       title="No instance yet"
-      description="Everything (interfaces, zones, rules, DNS, DHCP) belongs to an instance. Create the default instance first."
+      description="Everything (interfaces, interface zones, rules, DNS, DHCP) belongs to an instance. Create the default instance first."
       :actions="[{ label: 'Create instance', to: '/instances' }]"
     />
   </div>
