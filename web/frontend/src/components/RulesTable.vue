@@ -82,6 +82,7 @@ function onKeydown(event, index) {
     <table class="w-full min-w-[72rem] table-fixed border-collapse text-xs">
       <colgroup>
         <col class="w-7" />
+        <col class="w-14" />
         <col class="w-8" />
         <col class="w-8" />
         <col class="w-20" />
@@ -95,10 +96,10 @@ function onKeydown(event, index) {
         <col class="w-18" />
         <col class="w-8" />
         <col />
-        <col class="w-14" />
       </colgroup>
       <thead>
         <tr>
+          <th />
           <th />
           <th title="Evaluated top to bottom">#</th>
           <th title="Enabled">On</th>
@@ -113,7 +114,6 @@ function onKeydown(event, index) {
           <th>Action</th>
           <th title="Log matches">Log</th>
           <th>Description</th>
-          <th />
         </tr>
       </thead>
       <tbody>
@@ -126,6 +126,26 @@ function onKeydown(event, index) {
             >
               <UIcon name="i-lucide-grip-vertical" class="pointer-events-none size-3.5" />
             </span>
+          </td>
+          <td class="keep">
+            <div class="flex justify-center">
+              <UButton
+                size="xs"
+                color="neutral"
+                variant="ghost"
+                icon="i-lucide-pencil"
+                title="Details"
+                @click="emit('edit', r)"
+              />
+              <UButton
+                size="xs"
+                color="error"
+                variant="ghost"
+                icon="i-lucide-trash"
+                title="Delete"
+                @click="emit('remove', r)"
+              />
+            </div>
           </td>
           <td class="text-center text-muted tabular-nums">{{ i + 1 }}</td>
           <td class="keep text-center">
@@ -251,26 +271,6 @@ function onKeydown(event, index) {
               @change="setText(r, 'description', $event)"
               @keydown="onKeydown($event, i)"
             />
-          </td>
-          <td class="keep">
-            <div class="flex justify-end">
-              <UButton
-                size="xs"
-                color="neutral"
-                variant="ghost"
-                icon="i-lucide-pencil"
-                title="Details"
-                @click="emit('edit', r)"
-              />
-              <UButton
-                size="xs"
-                color="error"
-                variant="ghost"
-                icon="i-lucide-trash"
-                title="Delete"
-                @click="emit('remove', r)"
-              />
-            </div>
           </td>
         </tr>
         <tr v-if="!rows.length">
