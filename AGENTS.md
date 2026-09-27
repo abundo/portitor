@@ -1,0 +1,101 @@
+<!-- SPDX-FileCopyrightText: 2026 The Portitor contributors -->
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+
+# AGENTS.md
+
+Architecture and conventions for agents working in this repository. Setup, build
+and test commands are in [DEV.md](DEV.md); the product overview and security model
+are in [README.md](README.md).
+
+## Layout
+
+| Path | What |
+|---|---|
+| `cmd/portitor-web` | GUI/API binary: `start`, `migrate`, `createadmin` |
+| `cmd/portitor-agent` | Agent daemon on the firewall: `start`, `init`, `render`, `netns-exec` |
+| `internal/fwconfig` | The desired-state document and `Validate()`. **The contract between web and agent.** |
+| `internal/render` | Pure functions: document → nftables, WireGuard, named.conf, Kea, dnsmgr2 config |
+| `internal/agent` | Agent: apply/reconcile, commit-confirm, DHCP client, status, API server |
+| `internal/agentapi` | Agent API wire types (shared by agent and client) |
+| `internal/agentclient` | portitor-web's HTTPS client for the agent, with certificate pinning |
+| `internal/builder` | Database → `fwconfig.Document` (resolves ids, IPAM, DHCP scopes, DNS names) |
+| `internal/ipam` | Prefix tree by CIDR containment, next free address |
+| `internal/netobj` | Named hosts/prefixes (`address_objects`): name checks and expansion |
+| `internal/dbmigrate` | goose migrations (the schema's source of truth) |
+| `models` | GORM mapping |
+| `web` | Echo v5 server: auth, generic CRUD (`crud.go`), entry validation (`resources.go`), deploy handlers |
+| `web/frontend` | Vue SPA; `CrudPage.vue` drives most pages from field/column schemas |
+| `deploy` | systemd units and example configs |
+| `dev` | Dev configs and `seed.sh`; `dev/lab` runs a real apply in two podman containers |
+
+## Invariants
+
+- **The agent trusts nothing.** It re-runs `fwconfig.Validate` before rendering.
+  Anything that ends up in a config file must be validated there: names by regex,
+  addresses by `netip`, comments without control characters. nft strings cannot
+  escape quotes, so `render.comment` replaces them.
+- **Rendering is pure** (no I/O) so the preview is exactly what apply writes. Don't
+  put volatile data (timestamps, generation) in rendered files; unchanged config must
+  render byte-identical.
+- **All system changes go through `agent.Runner`** (exec, dry-run, or fakes in
+  tests). Reconcile logic is planned as pure functions over parsed `ip -j` output
+  (`netstate.go`) and unit-tested that way.
+- **The agent owns** the `inet firewall` table in each namespace, every `fw-*`
+  namespace, routes with `proto 99`, and root-namespace virtual interfaces listed in
+  `managed.json`. Leave everything else alone (docker, libvirt, other tables).
+- **Commit-confirm:** the rollback target is the last *confirmed* document; a second
+  apply while one is pending keeps it. `rollback.json` makes a pending change roll
+  back after an agent restart too.
+- **Secrets:** fields tagged `json:"-"` (WireGuard private/preshared keys, agent
+  token, password hashes) never reach the browser. The generic CRUD `PUT` merges the
+  body onto the stored row, so those fields can't be overwritten through the API
+  either. Deployment history stores a redacted document.
+- **Deleting a zone deletes the rules that reference it** (FK `ON DELETE CASCADE`).
+  A rule with its zone silently removed would otherwise match *any* zone.
+- **Named hosts/prefixes never reach the agent.** `builder.Build` expands names
+  (`netobj`) and drops a rule it cannot resolve; an object with no addresses is an
+  error, never an empty list (an empty address list matches *any*). Entries are
+  stored by name, so renaming an object rewrites them (`web/objects.go`) and deleting
+  one in use is refused. A new address field that should accept names must be added
+  to `eachObjectRef` and expanded in the builder.
+- **Dual stack:** rule and NAT address lists may mix IPv4 and IPv6;
+  `fwconfig.MatchFamilies` decides which versions a rule is rendered for, and
+  validation uses the same function.
+- **Schema changes:** a new goose file in `internal/dbmigrate/sql/`, plus the model
+  change. Tests use AutoMigrate on SQLite, so SQL-only constraints are untested there.
+
+## Adding a feature end to end
+
+1. Add fields to `fwconfig` and validate them in `validate.go` (with a test case).
+2. Render them in `internal/render` (with a test; `nft -c` covers syntax).
+3. Apply them in `internal/agent` if they need more than a file.
+4. Migration + model, `builder.Build` mapping, entry checks in `web/resources.go`.
+5. A page or fields in `web/frontend` (most pages are a `CrudPage` schema).
+
+## Licence
+
+AGPL-3.0-or-later. Every new file starts with the same two SPDX lines as the
+existing ones, in its comment syntax, above any `//go:build` line and below any
+shebang. Files that cannot hold a comment go in `REUSE.toml`. Commits carry a DCO
+`Signed-off-by:` line (`git commit -s`); see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Gotchas
+
+- Echo v5 handlers are `func(c *echo.Context) error`. Parse path ids with
+  `echo.PathParam[uint]`, never pass the raw string to GORM (it becomes SQL).
+- Kea 2.6+ only accepts lease files and control sockets in its own directories,
+  hence `paths.kea_data_dir` / `kea_socket_dir`.
+- DHCPv4 goes through dnsmgr2; DHCPv6 (`kea-dhcp6.conf`, reservations included) and
+  radvd are rendered directly, because Kea6 needs each subnet's `interface`, which
+  dnsmgr2 does not write.
+- dnsmgr2 zones require a DNS host template, so DHCP reservations (made from A records
+  with a MAC) need the instance's DNS server enabled. The builder reports this.
+- DNS templates (SOA templates, DNSSEC policies, zone templates) are global in the
+  database; `builder.Build` copies into each instance only the ones its zones use,
+  and zones refer to them by name. A zone without a template gets the built-in
+  localhost SOA/NS. dnsmgr2 writes only `dnssec-policy "<name>"`; the policy body
+  is rendered into `named.conf`.
+- `portitor-agent netns-exec` reads `<state_dir>/instances/<name>/netns`, written on
+  apply; the per-instance systemd units start through it.
+- `pkill -f portitor-web` also matches a shell whose command line contains that text;
+  anchor the pattern (`pkill -f '^./build/portitor-web'`).

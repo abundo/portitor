@@ -1,0 +1,236 @@
+<!-- SPDX-FileCopyrightText: 2026 The Portitor contributors -->
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+
+<script setup>
+import { computed, onMounted, ref } from 'vue'
+import { useToast } from '@nuxt/ui/composables'
+import QRCode from 'qrcode'
+import CrudPage from '@/components/CrudPage.vue'
+import NeedInstance from '@/components/NeedInstance.vue'
+import { api, interfaces, wgPeers } from '@/api'
+import { errMsg } from '@/api/http'
+import { useInstanceStore } from '@/stores/instances'
+import { useDeployStore } from '@/stores/deploy'
+
+const store = useInstanceStore()
+const deploy = useDeployStore()
+const toast = useToast()
+const tunnels = ref([])
+const selectedId = ref(null)
+
+async function load() {
+  tunnels.value = (await interfaces.list({ instance_id: store.currentId })).filter(
+    (i) => i.kind === 'wireguard',
+  )
+  if (!tunnels.value.some((t) => t.id === selectedId.value))
+    selectedId.value = tunnels.value[0]?.id ?? null
+}
+onMounted(load)
+
+const selected = computed(() => tunnels.value.find((t) => t.id === selectedId.value))
+const tunnelItems = computed(() => tunnels.value.map((t) => ({ label: t.name, value: t.id })))
+
+// Handshakes from the agent status, by peer public key.
+const handshakes = computed(() => {
+  const m = {}
+  for (const inst of deploy.status?.instances ?? []) {
+    for (const wg of inst.wireguard ?? []) {
+      for (const p of wg.peers) m[p.public_key] = p
+    }
+  }
+  return m
+})
+function ago(t) {
+  if (!t) return 'never'
+  const s = Math.round((Date.now() - new Date(t).getTime()) / 1000)
+  if (s < 120) return `${s}s ago`
+  if (s < 7200) return `${Math.round(s / 60)}m ago`
+  return `${Math.round(s / 3600)}h ago`
+}
+
+async function rekey() {
+  if (
+    !window.confirm(
+      `Generate a new key for ${selected.value.name}? Every peer needs the new public key.`,
+    )
+  )
+    return
+  try {
+    await api.wgRekey(selected.value.id)
+    await load()
+  } catch (err) {
+    toast.add({ title: errMsg(err), color: 'error' })
+  }
+}
+
+const columns = [
+  { key: 'name', label: 'Peer', class: 'font-medium' },
+  { key: 'allowed_ips', label: 'Tunnel addresses', class: 'font-mono text-xs' },
+  { key: 'endpoint', label: 'Endpoint', class: 'font-mono text-xs' },
+  { key: 'handshake', label: 'Last handshake' },
+  { key: 'enabled', label: 'Enabled' },
+]
+const fields = [
+  { key: 'name', label: 'Name', required: true, placeholder: 'phone' },
+  { key: 'description', label: 'Description' },
+  {
+    key: 'public_key',
+    label: "Peer's public key",
+    placeholder: 'leave empty to generate a key pair here',
+    hint: 'Empty: a key pair and preshared key are generated, and a ready client config can be downloaded.',
+  },
+  {
+    key: 'allowed_ips',
+    label: 'Allowed IPs',
+    type: 'addrs',
+    placeholder: '10.99.0.2/32',
+    hint: "The peer's tunnel address, plus networks behind it for site-to-site.",
+  },
+  {
+    key: 'endpoint',
+    label: 'Endpoint',
+    placeholder: 'host:port (only for peers the firewall dials)',
+  },
+  { key: 'keepalive', label: 'Keepalive (seconds)', type: 'number' },
+  { key: 'enabled', label: 'Enabled', type: 'switch' },
+]
+
+// ----- client config -----
+const cfgOpen = ref(false)
+const cfg = ref({ config: '', warnings: [] })
+const qr = ref('')
+const split = ref(false)
+const cfgPeer = ref(null)
+async function showConfig(peer) {
+  cfgPeer.value = peer
+  await loadConfig()
+  cfgOpen.value = true
+}
+async function loadConfig() {
+  try {
+    cfg.value = await api.wgClientConfig(cfgPeer.value.id, split.value)
+    qr.value = await QRCode.toDataURL(cfg.value.config, { margin: 1, width: 280 })
+  } catch (err) {
+    toast.add({ title: errMsg(err), color: 'error' })
+  }
+}
+function copy(text) {
+  navigator.clipboard?.writeText(text)
+  toast.add({ title: 'Copied', color: 'success' })
+}
+</script>
+
+<template>
+  <NeedInstance>
+    <div v-if="!tunnels.length" class="card">
+      <UAlert
+        icon="i-lucide-key-round"
+        title="No WireGuard interface in this instance"
+        description="Add an interface of kind WireGuard (e.g. wg0, listen port 51820), give it an address under IP addresses, and put it in a zone."
+        :actions="[{ label: 'Interfaces', to: '/interfaces' }]"
+      />
+    </div>
+    <div v-else class="space-y-4">
+      <div class="card flex flex-wrap items-center gap-4">
+        <USelect v-model="selectedId" :items="tunnelItems" class="w-40" />
+        <div v-if="selected" class="min-w-0 text-sm">
+          <div class="text-muted">Public key</div>
+          <div class="flex items-center gap-1 font-mono break-all">
+            {{ selected.wg_public_key }}
+            <UButton
+              size="xs"
+              color="neutral"
+              variant="ghost"
+              icon="i-lucide-copy"
+              @click="copy(selected.wg_public_key)"
+            />
+          </div>
+        </div>
+        <div v-if="selected" class="text-sm">
+          <div class="text-muted">Listen port</div>
+          <div class="font-mono">{{ selected.wg_listen_port || '—' }}</div>
+        </div>
+        <UButton
+          class="ml-auto"
+          color="neutral"
+          variant="outline"
+          icon="i-lucide-refresh-cw"
+          label="New key"
+          @click="rekey"
+        />
+      </div>
+      <CrudPage
+        v-if="selected"
+        :key="selected.id"
+        :title="`Peers of ${selected.name}`"
+        description="Remote devices and sites. Changes take effect on the next deploy."
+        :api="wgPeers"
+        :params="{ interface_id: selected.id }"
+        :columns="columns"
+        :fields="fields"
+        :defaults="{ enabled: true, allowed_ips: [], keepalive: 0, public_key: '' }"
+        new-label="New peer"
+      >
+        <template #cell-handshake="{ row }">
+          <span class="text-xs">{{ ago(handshakes[row.public_key]?.latest_handshake) }}</span>
+        </template>
+        <template #row-actions="{ row }">
+          <UButton
+            size="xs"
+            color="neutral"
+            variant="ghost"
+            icon="i-lucide-qr-code"
+            title="Client config"
+            @click="showConfig(row)"
+          />
+        </template>
+      </CrudPage>
+    </div>
+
+    <UModal
+      v-model:open="cfgOpen"
+      :title="`Client config: ${cfgPeer?.name}`"
+      :ui="{ content: 'max-w-2xl' }"
+    >
+      <template #body>
+        <div class="space-y-3">
+          <UAlert v-for="w in cfg.warnings" :key="w" color="warning" variant="subtle" :title="w" />
+          <USwitch
+            v-model="split"
+            label="Split tunnel (only this instance's networks)"
+            @update:model-value="loadConfig"
+          />
+          <div class="flex flex-wrap gap-4">
+            <img
+              v-if="qr"
+              :src="qr"
+              alt="QR code of the client config"
+              class="rounded bg-white p-2"
+              width="280"
+              height="280"
+            />
+            <pre class="min-w-0 flex-1 overflow-x-auto rounded bg-elevated p-3 text-xs">{{
+              cfg.config
+            }}</pre>
+          </div>
+          <p class="text-xs text-muted">
+            The config contains the client's private key. Scan it with the WireGuard app, or copy it
+            into a .conf file.
+          </p>
+        </div>
+      </template>
+      <template #footer>
+        <div class="flex w-full justify-end gap-2">
+          <UButton
+            color="neutral"
+            variant="outline"
+            icon="i-lucide-copy"
+            label="Copy"
+            @click="copy(cfg.config)"
+          />
+          <UButton label="Close" @click="cfgOpen = false" />
+        </div>
+      </template>
+    </UModal>
+  </NeedInstance>
+</template>

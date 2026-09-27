@@ -1,0 +1,152 @@
+<!-- SPDX-FileCopyrightText: 2026 The Portitor contributors -->
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+
+<script setup>
+import { computed, onMounted } from 'vue'
+import { useDeployStore } from '@/stores/deploy'
+import { useInstanceStore } from '@/stores/instances'
+
+const deploy = useDeployStore()
+const instances = useInstanceStore()
+onMounted(() => deploy.refresh())
+
+const st = computed(() => deploy.status)
+const inst = computed(() => st.value?.instances?.find((i) => i.name === instances.current?.name))
+const wan = computed(() =>
+  (st.value?.dhcp_client_leases ?? []).filter((l) => l.instance === instances.current?.name),
+)
+const peers = computed(() =>
+  (inst.value?.wireguard ?? []).flatMap((w) => w.peers.map((p) => ({ ...p, iface: w.interface }))),
+)
+
+function bytes(n) {
+  const u = ['B', 'KB', 'MB', 'GB', 'TB']
+  let i = 0
+  while (n >= 1024 && i < u.length - 1) {
+    n /= 1024
+    i++
+  }
+  return `${n.toFixed(i ? 1 : 0)} ${u[i]}`
+}
+const ago = (t) =>
+  t ? `${Math.round((Date.now() - new Date(t).getTime()) / 60000)} min ago` : 'never'
+const stateColor = (s) =>
+  s === 'up' || s === 'active' || s === 'unknown'
+    ? 'success'
+    : s === 'down' || s === 'failed'
+      ? 'error'
+      : 'neutral'
+</script>
+
+<template>
+  <div class="space-y-4">
+    <UAlert
+      v-if="deploy.error"
+      color="error"
+      variant="subtle"
+      icon="i-lucide-unplug"
+      title="Cannot reach the firewall agent"
+      :description="deploy.error"
+      :actions="[{ label: 'Settings', to: '/settings' }]"
+    />
+    <div v-if="st" class="grid gap-4 md:grid-cols-3">
+      <div class="card">
+        <div class="text-sm text-muted">Firewall</div>
+        <div class="text-xl font-semibold">{{ st.hostname }}</div>
+        <div class="text-xs text-muted">
+          agent {{ st.version }}<span v-if="st.dry_run"> · dry-run</span>
+        </div>
+      </div>
+      <div class="card">
+        <div class="text-sm text-muted">Running configuration</div>
+        <div class="text-xl font-semibold">generation {{ st.generation }}</div>
+        <div class="text-xs text-muted">
+          {{ st.last_apply ? new Date(st.last_apply).toLocaleString() : 'never applied' }}
+        </div>
+      </div>
+      <div class="card">
+        <div class="text-sm text-muted">Last result</div>
+        <div v-if="st.last_error" class="text-sm text-error">{{ st.last_error }}</div>
+        <div v-else class="flex items-center gap-2 text-xl font-semibold text-success">
+          <UIcon name="i-lucide-circle-check" /> OK
+        </div>
+      </div>
+    </div>
+
+    <div v-if="wan.length" class="card">
+      <div class="mb-2 font-semibold">Internet (DHCP)</div>
+      <div v-for="l in wan" :key="l.interface" class="flex flex-wrap gap-x-6 gap-y-1 text-sm">
+        <span class="font-mono">{{ l.interface }}</span>
+        <UBadge
+          :color="l.state === 'bound' ? 'success' : 'warning'"
+          variant="subtle"
+          :label="l.state"
+        />
+        <span class="font-mono">{{ l.address }}</span>
+        <span
+          >via <span class="font-mono">{{ l.router }}</span></span
+        >
+        <span
+          >DNS <span class="font-mono">{{ l.dns?.join(', ') }}</span></span
+        >
+        <span v-if="l.last_error" class="text-error">{{ l.last_error }}</span>
+      </div>
+    </div>
+
+    <div v-if="inst" class="grid gap-4 xl:grid-cols-2">
+      <div class="card">
+        <div class="mb-2 font-semibold">Interfaces · {{ inst.name }}</div>
+        <table class="w-full text-sm">
+          <tbody>
+            <tr
+              v-for="i in inst.interfaces"
+              :key="i.name"
+              class="border-b border-default last:border-0"
+            >
+              <td class="py-1.5 font-mono">{{ i.name }}</td>
+              <td><UBadge :color="stateColor(i.state)" variant="subtle" :label="i.state" /></td>
+              <td class="font-mono text-xs">{{ i.addresses.join(', ') }}</td>
+              <td class="text-right text-xs text-muted whitespace-nowrap">
+                ↓ {{ bytes(i.rx_bytes) }} ↑ {{ bytes(i.tx_bytes) }}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="space-y-4">
+        <div class="card">
+          <div class="mb-2 font-semibold">Services</div>
+          <div v-if="!Object.keys(inst.services).length" class="text-sm text-muted">
+            No DNS or DHCP server in this instance.
+          </div>
+          <div
+            v-for="(state, unit) in inst.services"
+            :key="unit"
+            class="flex items-center justify-between py-1 text-sm"
+          >
+            <span class="font-mono">{{ unit }}</span>
+            <UBadge :color="stateColor(state)" variant="subtle" :label="state" />
+          </div>
+        </div>
+        <div v-if="peers.length" class="card">
+          <div class="mb-2 font-semibold">WireGuard peers</div>
+          <div
+            v-for="p in peers"
+            :key="p.public_key"
+            class="flex flex-wrap items-center justify-between gap-2 py-1 text-sm"
+          >
+            <span class="font-mono text-xs">{{ p.iface }} · {{ p.allowed_ips.join(', ') }}</span>
+            <span class="text-xs text-muted"
+              >{{ ago(p.latest_handshake) }} · ↓ {{ bytes(p.rx_bytes) }} ↑
+              {{ bytes(p.tx_bytes) }}</span
+            >
+          </div>
+        </div>
+      </div>
+    </div>
+    <div v-else-if="st && !deploy.error" class="card text-sm text-muted">
+      This instance is not on the firewall yet. Configure it and
+      <RouterLink class="text-primary" to="/deploy">deploy</RouterLink>.
+    </div>
+  </div>
+</template>

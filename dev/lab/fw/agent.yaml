@@ -1,0 +1,12 @@
+# SPDX-FileCopyrightText: 2026 The Portitor contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# Lab portitor-agent config: real apply, API on the LAN address.
+listen: 192.168.1.1:8443
+token_file: /etc/portitor/agent.token
+tls_cert: /etc/portitor/agent.crt
+tls_key: /etc/portitor/agent.key
+allow_from:
+  - 192.168.1.0/24
+bind_user: bind
+log_level: debug

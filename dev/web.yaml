@@ -1,0 +1,14 @@
+# SPDX-FileCopyrightText: 2026 The Portitor contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# Development config: `make dev-web`. Not for production.
+bind: 127.0.0.1:8080
+dev: true
+jwt_secret: dev-only-secret-change-me-0123456789abcdef
+db:
+  host: 127.0.0.1
+  port: 55432
+  user: portitor
+  password: portitor-dev
+  name: portitor
+  sslmode: disable

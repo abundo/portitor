@@ -1,0 +1,309 @@
+<!-- SPDX-FileCopyrightText: 2026 The Portitor contributors -->
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+
+<script setup>
+import { computed, onMounted, reactive, ref } from 'vue'
+import { useToast } from '@nuxt/ui/composables'
+import NeedInstance from '@/components/NeedInstance.vue'
+import IpamTreeRows from '@/components/IpamTreeRows.vue'
+import AddrInput from '@/components/AddrInput.vue'
+import { api, ipamAddresses, ipamPrefixes } from '@/api'
+import { errMsg } from '@/api/http'
+import { useInstanceRefs } from '@/composables/useInstanceRefs'
+
+const toast = useToast()
+const { store, ifaceItems, ifaceName } = useInstanceRefs()
+const tree = ref([])
+const collapsed = reactive(new Set())
+const loading = ref(false)
+
+async function load() {
+  if (!store.currentId) return
+  loading.value = true
+  try {
+    tree.value = await api.ipamTree(store.currentId)
+  } catch (err) {
+    toast.add({ title: errMsg(err), color: 'error' })
+  } finally {
+    loading.value = false
+  }
+}
+onMounted(load)
+
+function toggle(k) {
+  if (collapsed.has(k)) collapsed.delete(k)
+  else collapsed.add(k)
+}
+
+// ----- prefix modal -----
+const prefixOpen = ref(false)
+const prefix = reactive({})
+function editPrefix(src) {
+  Object.keys(prefix).forEach((k) => delete prefix[k])
+  Object.assign(prefix, {
+    prefix: '',
+    description: '',
+    dhcp_enabled: false,
+    dhcp_range_start: '',
+    dhcp_range_end: '',
+    dhcp_gateway: '',
+    dhcp_dns_servers: [],
+    ra_enabled: false,
+    ra_slaac: false,
+    ...src,
+  })
+  prefixOpen.value = true
+}
+const prefixIs6 = computed(() => (prefix.prefix ?? '').includes(':'))
+const prefixIs64 = computed(() => (prefix.prefix ?? '').trim().endsWith('/64'))
+async function savePrefix() {
+  try {
+    const body = { ...prefix, instance_id: store.currentId }
+    if (!prefixIs6.value) body.ra_enabled = body.ra_slaac = false
+    else body.dhcp_gateway = ''
+    if (prefix.id) await ipamPrefixes.update(prefix.id, body)
+    else await ipamPrefixes.create(body)
+    prefixOpen.value = false
+    load()
+  } catch (err) {
+    toast.add({ title: errMsg(err), color: 'error' })
+  }
+}
+
+// ----- address modal -----
+const addrOpen = ref(false)
+const addr = reactive({})
+const NONE = 0
+function editAddress(src) {
+  Object.keys(addr).forEach((k) => delete addr[k])
+  Object.assign(addr, {
+    address: '',
+    description: '',
+    dns_name: '',
+    mac: '',
+    ...src,
+    interface_id: src.interface_id ?? NONE,
+  })
+  addrOpen.value = true
+}
+async function saveAddress() {
+  try {
+    const body = {
+      ...addr,
+      instance_id: store.currentId,
+      interface_id: addr.interface_id === NONE ? null : addr.interface_id,
+    }
+    if (addr.id) await ipamAddresses.update(addr.id, body)
+    else await ipamAddresses.create(body)
+    addrOpen.value = false
+    load()
+  } catch (err) {
+    toast.add({ title: errMsg(err), color: 'error' })
+  }
+}
+const ifaceOptions = computed(() => [
+  { label: '— not on a firewall interface', value: NONE },
+  ...ifaceItems.value,
+])
+
+async function onAddAddress(node) {
+  let next = ''
+  try {
+    next = await api.nextFree(node.id)
+  } catch {
+    // full; leave empty
+  }
+  editAddress({ address: next })
+}
+function onAddPrefix(node) {
+  editPrefix({ prefix: node.cidr })
+}
+async function onEdit(node) {
+  if (node.kind === 'prefix') editPrefix(await ipamPrefixes.get(node.id))
+  else editAddress(await ipamAddresses.get(node.id))
+}
+async function onRemove(node) {
+  const what =
+    node.kind === 'prefix' ? `prefix ${node.cidr} (addresses inside stay)` : `address ${node.cidr}`
+  if (!window.confirm(`Delete ${what}?`)) return
+  try {
+    if (node.kind === 'prefix') await ipamPrefixes.remove(node.id)
+    else await ipamAddresses.remove(node.id)
+    load()
+  } catch (err) {
+    toast.add({ title: errMsg(err), color: 'error' })
+  }
+}
+</script>
+
+<template>
+  <NeedInstance>
+    <div class="card">
+      <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div class="text-lg font-semibold">IP addresses</div>
+          <p class="max-w-3xl text-sm text-muted">
+            Prefixes nest by containment. An address assigned to an interface is configured on it,
+            with the length of the smallest prefix around it. Turn on DHCP on a prefix to serve it,
+            and router advertisements (SLAAC) on an IPv6 prefix; an address with a DNS name gets an
+            A/AAAA record, and with a MAC also a fixed DHCP lease.
+          </p>
+        </div>
+        <div class="flex gap-2">
+          <UButton
+            color="neutral"
+            variant="outline"
+            icon="i-lucide-plus"
+            label="Address"
+            @click="editAddress({})"
+          />
+          <UButton icon="i-lucide-plus" label="Prefix" @click="editPrefix({})" />
+        </div>
+      </div>
+      <div v-if="loading" class="flex justify-center p-6">
+        <UIcon name="i-lucide-loader-2" class="size-7 animate-spin" />
+      </div>
+      <div v-else-if="!tree.length" class="py-8 text-center text-muted">
+        No prefixes yet. Start with your LAN, e.g. 192.168.1.0/24.
+      </div>
+      <div v-else class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="border-b border-default text-left text-xs text-muted">
+              <th class="py-2">Prefix / address</th>
+              <th class="px-2">Description</th>
+              <th class="px-2">Use</th>
+              <th class="px-2">Utilisation</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            <IpamTreeRows
+              :nodes="tree"
+              :collapsed="collapsed"
+              :iface-name="ifaceName"
+              @toggle="toggle"
+              @add-prefix="onAddPrefix"
+              @add-address="onAddAddress"
+              @edit="onEdit"
+              @remove="onRemove"
+            />
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <UModal v-model:open="prefixOpen" :title="prefix.id ? 'Edit prefix' : 'New prefix'">
+      <template #body>
+        <form id="prefix-form" class="space-y-3" @submit.prevent="savePrefix">
+          <UFormField label="Prefix" required
+            ><UInput
+              v-model="prefix.prefix"
+              class="w-full font-mono"
+              placeholder="192.168.1.0/24 or fd00:1::/64"
+          /></UFormField>
+          <UFormField label="Description"
+            ><UInput v-model="prefix.description" class="w-full"
+          /></UFormField>
+          <template v-if="prefixIs6">
+            <UFormField
+              label="Send router advertisements"
+              help="Announce this prefix and the firewall as default router on the interface that has an address in it."
+            >
+              <USwitch v-model="prefix.ra_enabled" />
+            </UFormField>
+            <UFormField
+              v-if="prefix.ra_enabled"
+              label="SLAAC: clients pick their own address"
+              :help="prefixIs64 ? '' : 'Needs a /64 prefix.'"
+            >
+              <USwitch v-model="prefix.ra_slaac" :disabled="!prefixIs64" />
+            </UFormField>
+          </template>
+          <UFormField
+            :label="prefixIs6 ? 'Serve DHCPv6 on this prefix' : 'Serve DHCP on this prefix'"
+            :help="
+              prefixIs6
+                ? 'Needs router advertisements (above) and the DHCP server on the instance.'
+                : 'Needs the DHCP server on the instance, and an interface address in the prefix.'
+            "
+          >
+            <USwitch
+              v-model="prefix.dhcp_enabled"
+              :disabled="prefixIs6 && !prefix.ra_enabled && !prefix.dhcp_enabled"
+            />
+          </UFormField>
+          <template v-if="prefix.dhcp_enabled">
+            <div class="grid grid-cols-2 gap-3">
+              <UFormField label="Range start"
+                ><UInput
+                  v-model="prefix.dhcp_range_start"
+                  class="w-full font-mono"
+                  placeholder="192.168.1.100"
+              /></UFormField>
+              <UFormField label="Range end"
+                ><UInput
+                  v-model="prefix.dhcp_range_end"
+                  class="w-full font-mono"
+                  placeholder="192.168.1.199"
+              /></UFormField>
+            </div>
+            <UFormField
+              v-if="!prefixIs6"
+              label="Gateway"
+              help="Empty: the firewall's address in the prefix."
+              ><UInput v-model="prefix.dhcp_gateway" class="w-full font-mono"
+            /></UFormField>
+          </template>
+          <UFormField
+            v-if="prefix.dhcp_enabled || (prefixIs6 && prefix.ra_enabled)"
+            label="DNS servers"
+            help="Addresses or hosts; only those of the prefix's IP version are used. Empty: the firewall, when its DNS server listens on that interface."
+          >
+            <AddrInput v-model="prefix.dhcp_dns_servers" multiple />
+          </UFormField>
+        </form>
+      </template>
+      <template #footer>
+        <div class="flex w-full justify-end gap-2">
+          <UButton color="neutral" variant="ghost" @click="prefixOpen = false">Cancel</UButton>
+          <UButton type="submit" form="prefix-form">Save</UButton>
+        </div>
+      </template>
+    </UModal>
+
+    <UModal v-model:open="addrOpen" :title="addr.id ? 'Edit address' : 'New address'">
+      <template #body>
+        <form id="addr-form" class="space-y-3" @submit.prevent="saveAddress">
+          <UFormField label="Address" required
+            ><UInput v-model="addr.address" class="w-full font-mono" placeholder="192.168.1.10"
+          /></UFormField>
+          <UFormField
+            label="Firewall interface"
+            help="Configure this address on one of the firewall's interfaces."
+          >
+            <USelect v-model="addr.interface_id" :items="ifaceOptions" class="w-full" />
+          </UFormField>
+          <UFormField
+            label="DNS name"
+            help="Fully qualified, inside one of the instance's DNS zones."
+          >
+            <UInput v-model="addr.dns_name" class="w-full font-mono" placeholder="nas.home.arpa" />
+          </UFormField>
+          <UFormField label="MAC address (DHCP reservation)"
+            ><UInput v-model="addr.mac" class="w-full font-mono" placeholder="02:00:00:00:00:10"
+          /></UFormField>
+          <UFormField label="Description"
+            ><UInput v-model="addr.description" class="w-full"
+          /></UFormField>
+        </form>
+      </template>
+      <template #footer>
+        <div class="flex w-full justify-end gap-2">
+          <UButton color="neutral" variant="ghost" @click="addrOpen = false">Cancel</UButton>
+          <UButton type="submit" form="addr-form">Save</UButton>
+        </div>
+      </template>
+    </UModal>
+  </NeedInstance>
+</template>

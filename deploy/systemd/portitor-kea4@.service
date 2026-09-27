@@ -1,0 +1,24 @@
+# SPDX-FileCopyrightText: 2026 The Portitor contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# Kea DHCPv4 for one Portitor instance, inside the instance's network
+# namespace. Started and restarted by portitor-agent; do not enable by hand.
+[Unit]
+Description=Kea DHCPv4 server for Portitor instance %i
+After=portitor-agent.service
+PartOf=portitor-agent.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/portitor-agent netns-exec %i -- /usr/sbin/kea-dhcp4 -c /etc/portitor/instances/%i/kea-dhcp4.conf
+Restart=on-failure
+RestartSec=5
+# Kea 2.6 refuses a control socket directory other than mode 0750. The PID
+# file is named after the config file, the same for every instance, so each
+# instance gets its own directory.
+Environment=KEA_PIDFILE_DIR=/run/kea/%i
+RuntimeDirectory=kea kea/%i
+RuntimeDirectoryMode=0750
+RuntimeDirectoryPreserve=yes
+StateDirectory=kea
+StateDirectoryMode=0750

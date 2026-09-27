@@ -1,0 +1,106 @@
+<!-- SPDX-FileCopyrightText: 2026 The Portitor contributors -->
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+
+The web GUI's frontend is a Vue 3 SPA
+that's either served from disk (dev) or embedded into the `portitor-web`
+binary (release build, `-tags release`).
+
+- Go 1.27+ (go.mod declares 1.26, so 1.26 toolchains build it too)
+- Node.js 22.18+ or 24.12+
+- PostgreSQL (app data, via GORM)
+
+Schema migrations are a dedicated command: `portitor-web migrate`. `start` never
+migrates.
+
+GORM models (`models/`) are the application
+mapping, not the source of schema.
+
+goose is used for migrations: `internal/dbmigrate/sql/NNNNN_name.sql`. Add a new
+file for every schema change and keep `models/` in step.
+
+### Frontend stack
+
+Vue 3, Vite, Vue Router, Pinia, Nuxt UI, Axios, Tailwind CSS 4. Linting via `oxlint` + `eslint`, formatting via `prettier`.
+
+### Development setup
+
+Everything runs on your workstation: a throwaway Postgres container, the agent in
+**dry-run** mode (renders files and logs the commands it would run, changes
+nothing), and the web GUI in dev mode.
+
+```sh
+make dev-db            # postgres:18 in podman/docker on 127.0.0.1:55432
+make dev-agent         # terminal 1: dry-run agent on https://127.0.0.1:8443
+make dev-web           # terminal 2: migrate, then GUI/API on http://127.0.0.1:8080
+make dev-seed          # admin / dev-password-123, a sample home network, agent settings
+cd web/frontend && npm install && npm run dev   # optional: Vite with hot reload on :5173
+```
+
+`dev/agent.yaml` and `dev/web.yaml` are the dev configs; runtime files (token,
+certificate, rendered configs, agent state, logs) go to `dev/run/`. `make dev-db-rm`
+removes the database container.
+
+Render a document without an agent: `portitor-agent render --sample`, or
+`portitor-agent render doc.json`.
+
+### Tests
+
+```sh
+make test              # go test ./...
+make lint              # go vet + oxlint + eslint
+```
+
+- `internal/fwconfig`, `internal/render`: validation and rendering. The render
+  tests also run the generated rulesets through real `nft -c` inside an
+  unprivileged user namespace (`unshare -rn`), and skip when that isn't possible.
+- `internal/agent`: reconcile planning against captured `ip -j` output, and the API
+  (auth, apply, commit-confirm and timed rollback) in dry-run.
+- `internal/builder`, `web`: SQLite in-memory via GORM AutoMigrate (not the goose
+  SQL). `TestDeployEndToEnd` drives portitor-web against a real dry-run agent over
+  TLS with certificate pinning.
+
+Nothing in `make test` runs a real apply as root; the lab below does.
+
+### Lab: a real apply in containers
+
+`dev/lab/lab.sh` starts two systemd containers with rootless podman and installs
+the release build in them, the way README's *Install* does on real machines:
+
+```
+            fwlab-wan 198.51.100.0/24              fwlab-lan 192.168.1.0/24
+  mgmt ─────────────────────────────── fw ─────────────────────────────── mgmt, clients
+  "ISP": dnsmasq DHCP, NAT      eth0 (DHCP client)  eth1 .1                lan0 .2
+                                                    eth2 ── fwlab-guest 192.168.50.0/24 (instance guest)
+```
+
+- **fwlab-fw** runs `portitor-agent` as root and applies for real: nftables, the
+  `fw-guest` namespace, VLAN, WireGuard, veth link, BIND and Kea.
+- **fwlab-mgmt** runs `portitor-web` and PostgreSQL, reaches the agent over the LAN,
+  and plays the ISP on the firewall's WAN (DHCP and NAT to the outside).
+
+```sh
+make lab-up       # images, containers, release build, install; GUI on http://127.0.0.1:28080, admin / admin
+make lab-seed     # the dev/seed.sh network, agent settings
+make lab-deploy   # apply (and confirm, when there is something to roll back to)
+make lab-install  # after code changes: rebuild and reinstall both binaries
+dev/lab/lab.sh client      # a throwaway LAN host with a DHCP lease from the firewall
+dev/lab/lab.sh shell fw    # or mgmt; `logs fw|mgmt` follows the journals
+make lab-down     # remove containers and networks
+```
+
+The lab networks have no podman IPAM: addresses come from the agent, dnsmasq, Kea
+or `portitor-lab-net.service` (the LAN address the agent listens on before the first
+deploy). `LAB_WEB_PORT` changes the published GUI port. Rootless is enough because
+`--privileged` stays inside the user namespace. It needs the `wireguard` kernel
+module loaded on the host for `wg0`.
+
+### Other
+
+initial code for
+- dns, https://github.com/abundo/factum2/tree/main/web/frontend/src/views/dns
+- dhcp, as above
+- prefixtree, https://github.com/abundo/factum2/tree/main/web/frontend/src/views/ipam
+
+- dnsmgr2 can be used as a base for writing dhcp and dns entries https://github.com/abundo/dnsmgr2
+  (used as a library by the agent: `internal/render/dns.go` builds its config,
+  `internal/agent/apply.go` runs `Load` + `Sync`)

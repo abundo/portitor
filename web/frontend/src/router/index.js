@@ -1,0 +1,52 @@
+// SPDX-FileCopyrightText: 2026 The Portitor contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+import { createRouter, createWebHistory } from 'vue-router'
+import AppLayout from '@/layout/AppLayout.vue'
+import { useAuthStore } from '@/stores/auth'
+
+const router = createRouter({
+  history: createWebHistory(),
+  routes: [
+    {
+      path: '/login',
+      name: 'login',
+      component: () => import('@/views/LoginPage.vue'),
+      meta: { public: true },
+    },
+    {
+      path: '/',
+      component: AppLayout,
+      children: [
+        { path: '', name: 'dashboard', component: () => import('@/views/DashboardPage.vue') },
+        { path: 'instances', component: () => import('@/views/InstancesPage.vue') },
+        { path: 'links', component: () => import('@/views/LinksPage.vue') },
+        { path: 'interfaces', component: () => import('@/views/InterfacesPage.vue') },
+        { path: 'routes', component: () => import('@/views/RoutesPage.vue') },
+        { path: 'ipam', component: () => import('@/views/IpamPage.vue') },
+        { path: 'objects', component: () => import('@/views/AddressObjectsPage.vue') },
+        { path: 'firewall/zones', component: () => import('@/views/ZonesPage.vue') },
+        { path: 'firewall/rules', component: () => import('@/views/RulesPage.vue') },
+        { path: 'firewall/nat', component: () => import('@/views/NatPage.vue') },
+        { path: 'dns', component: () => import('@/views/DnsPage.vue') },
+        { path: 'dns/zones/:id', component: () => import('@/views/DnsZoneDetailPage.vue') },
+        { path: 'dns/templates', component: () => import('@/views/DnsTemplatesPage.vue') },
+        { path: 'dhcp', component: () => import('@/views/DhcpPage.vue') },
+        { path: 'wireguard', component: () => import('@/views/WireguardPage.vue') },
+        { path: 'deploy', component: () => import('@/views/DeployPage.vue') },
+        { path: 'settings', component: () => import('@/views/SettingsPage.vue') },
+      ],
+    },
+    { path: '/:pathMatch(.*)*', redirect: '/' },
+  ],
+})
+
+router.beforeEach((to) => {
+  const auth = useAuthStore()
+  if (!to.meta.public && !auth.isAuthenticated) {
+    return { name: 'login', query: to.fullPath !== '/' ? { next: to.fullPath } : {} }
+  }
+  if (to.name === 'login' && auth.isAuthenticated) return { name: 'dashboard' }
+})
+
+export default router

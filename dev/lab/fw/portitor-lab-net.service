@@ -1,0 +1,18 @@
+# SPDX-FileCopyrightText: 2026 The Portitor contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# The LAN address the agent's API listens on, before the first deploy (the
+# installer's job on real hardware). A deploy that keeps 192.168.1.1/24 on eth1
+# takes it over.
+[Unit]
+Description=Lab: bootstrap LAN address
+Before=portitor-agent.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/ip link set eth1 up
+ExecStart=/usr/sbin/ip addr replace 192.168.1.1/24 dev eth1
+
+[Install]
+WantedBy=multi-user.target

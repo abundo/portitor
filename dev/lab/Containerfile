@@ -1,0 +1,38 @@
+# SPDX-FileCopyrightText: 2026 The Portitor contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# Lab images: two systemd "VMs" for trying a real apply. See dev/lab/lab.sh.
+# The binaries are copied in by `lab.sh install`, not baked into the image.
+FROM docker.io/library/debian:trixie AS base
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+		systemd systemd-sysv iproute2 nftables iputils-ping curl ca-certificates \
+		procps less tcpdump \
+	&& rm -rf /var/lib/apt/lists/* \
+	&& systemctl mask sys-kernel-config.mount sys-kernel-debug.mount sys-kernel-tracing.mount \
+		systemd-modules-load.service
+STOPSIGNAL SIGRTMIN+3
+CMD ["/sbin/init"]
+
+# The firewall: portitor-agent applies for real (nftables, netns, BIND, Kea).
+FROM base AS fw
+RUN apt-get update && apt-get install -y --no-install-recommends \
+		wireguard-tools bind9 bind9-utils dnsutils kea-dhcp4-server kea-dhcp6-server radvd \
+	&& rm -rf /var/lib/apt/lists/* \
+	&& systemctl mask named.service kea-dhcp4-server.service kea-dhcp6-server.service radvd.service
+COPY fw/agent.yaml /etc/portitor/agent.yaml
+COPY fw/portitor-lab-net.service /etc/systemd/system/
+RUN chmod 0600 /etc/portitor/agent.yaml && systemctl enable portitor-lab-net.service
+
+# Management host (portitor-web + PostgreSQL), also playing the ISP for the
+# firewall's WAN: DHCP server and NAT to the outside.
+FROM base AS mgmt
+RUN apt-get update && apt-get install -y --no-install-recommends postgresql dnsmasq \
+	&& rm -rf /var/lib/apt/lists/* \
+	&& useradd --system --no-create-home --shell /usr/sbin/nologin portitor
+COPY mgmt/web.yaml /etc/portitor/web.yaml
+COPY mgmt/dnsmasq.conf /etc/dnsmasq.d/lab.conf
+COPY mgmt/nftables.conf /etc/nftables.conf
+COPY mgmt/portitor-lab-net.service /etc/systemd/system/
+RUN chown root:portitor /etc/portitor/web.yaml && chmod 0640 /etc/portitor/web.yaml \
+	&& systemctl enable portitor-lab-net.service nftables.service dnsmasq.service postgresql.service

@@ -1,0 +1,18 @@
+# SPDX-FileCopyrightText: 2026 The Portitor contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# Static addresses on the lab networks (they have no podman IPAM).
+[Unit]
+Description=Lab: WAN (ISP side) and LAN addresses
+Before=dnsmasq.service portitor-web.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/ip link set wan0 up
+ExecStart=/usr/sbin/ip addr replace 198.51.100.1/24 dev wan0
+ExecStart=/usr/sbin/ip link set lan0 up
+ExecStart=/usr/sbin/ip addr replace 192.168.1.2/24 dev lan0
+
+[Install]
+WantedBy=multi-user.target

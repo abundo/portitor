@@ -1,0 +1,21 @@
+# SPDX-FileCopyrightText: 2026 The Portitor contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# /etc/portitor/web.yaml - portitor-web (runs off the firewall).
+
+# Put a TLS reverse proxy in front, or set tls_cert/tls_key.
+bind: 127.0.0.1:8080
+# tls_cert: /etc/portitor/web.crt
+# tls_key: /etc/portitor/web.key
+
+# Signs session cookies. At least 32 random characters:
+#   openssl rand -base64 32
+jwt_secret: CHANGE-ME
+
+db:
+  host: 127.0.0.1
+  port: 5432
+  user: portitor
+  password: CHANGE-ME
+  name: portitor
+  sslmode: prefer

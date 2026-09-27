@@ -1,0 +1,19 @@
+# SPDX-FileCopyrightText: 2026 The Portitor contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# radvd (IPv6 router advertisements) for one Portitor instance, inside the
+# instance's network namespace. Started and reloaded by portitor-agent; do
+# not enable by hand.
+[Unit]
+Description=IPv6 router advertisements for Portitor instance %i
+After=portitor-agent.service
+PartOf=portitor-agent.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/portitor-agent netns-exec %i -- /usr/sbin/radvd --nodaemon --logmethod stderr --config /etc/portitor/instances/%i/radvd.conf --pidfile /run/portitor/radvd-%i.pid
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=5
+RuntimeDirectory=portitor
+RuntimeDirectoryPreserve=yes

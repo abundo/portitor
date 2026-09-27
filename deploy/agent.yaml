@@ -1,0 +1,34 @@
+# SPDX-FileCopyrightText: 2026 The Portitor contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# /etc/portitor/agent.yaml - portitor-agent (runs on the firewall, as root).
+# Create the token and certificate with:
+#   portitor-agent init --host <management address>
+
+# Management API. Bind to the management (LAN) address, never the WAN.
+listen: 192.168.1.1:8443
+token_file: /etc/portitor/agent.token
+tls_cert: /etc/portitor/agent.crt
+tls_key: /etc/portitor/agent.key
+
+# Who may call the API. The same list gets an always-on accept rule for the
+# API port (anti-lockout), whatever rules are deployed.
+allow_from:
+  - 192.168.1.0/24
+
+# anti_lockout: true
+# bind_user: bind          # BIND's user: bind (Debian) or named (Fedora)
+# dry_run: false           # render and log only; change nothing
+# log_level: info
+
+# paths:
+#   etc_dir: /etc/portitor
+#   state_dir: /var/lib/portitor
+#   run_dir: /run/portitor
+#   kea_data_dir: /var/lib/kea
+#   kea_socket_dir: /run/kea
+# units:
+#   named: portitor-named@%s.service
+#   kea4: portitor-kea4@%s.service
+#   kea6: portitor-kea6@%s.service
+#   radvd: portitor-radvd@%s.service

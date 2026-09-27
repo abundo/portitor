@@ -1,0 +1,12 @@
+# SPDX-FileCopyrightText: 2026 The Portitor contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# Licence for files that cannot carry an SPDX header (JSON, generated files).
+# See https://reuse.software/spec/.
+version = 1
+
+[[annotations]]
+path = ["go.sum", "**/*.json", "web/frontend/*.d.ts", "web/frontend/.eslintcache"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 The Portitor contributors"
+SPDX-License-Identifier = "AGPL-3.0-or-later"

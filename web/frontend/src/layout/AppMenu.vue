@@ -1,0 +1,38 @@
+<!-- SPDX-FileCopyrightText: 2026 The Portitor contributors -->
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+
+<script setup>
+const items = [
+  [
+    { label: 'Dashboard', icon: 'i-lucide-gauge', to: '/', exact: true },
+    { label: 'Deploy', icon: 'i-lucide-rocket', to: '/deploy' },
+  ],
+  [
+    { label: 'Network', type: 'label' },
+    { label: 'Instances', icon: 'i-lucide-boxes', to: '/instances' },
+    { label: 'Links', icon: 'i-lucide-cable', to: '/links' },
+    { label: 'Interfaces', icon: 'i-lucide-ethernet-port', to: '/interfaces' },
+    { label: 'Routes', icon: 'i-lucide-route', to: '/routes' },
+    { label: 'IP addresses', icon: 'i-lucide-network', to: '/ipam' },
+    { label: 'Hosts & prefixes', icon: 'i-lucide-tags', to: '/objects' },
+  ],
+  [
+    { label: 'Firewall', type: 'label' },
+    { label: 'Zones', icon: 'i-lucide-layers', to: '/firewall/zones' },
+    { label: 'Rules', icon: 'i-lucide-shield-check', to: '/firewall/rules' },
+    { label: 'NAT & port forwards', icon: 'i-lucide-arrow-right-left', to: '/firewall/nat' },
+  ],
+  [
+    { label: 'Services', type: 'label' },
+    { label: 'DNS zones', icon: 'i-lucide-globe', to: '/dns', exact: true },
+    { label: 'DNS templates', icon: 'i-lucide-file-cog', to: '/dns/templates' },
+    { label: 'DHCP', icon: 'i-lucide-list-ordered', to: '/dhcp' },
+    { label: 'WireGuard', icon: 'i-lucide-key-round', to: '/wireguard' },
+  ],
+  [{ label: 'Settings', icon: 'i-lucide-settings', to: '/settings' }],
+]
+</script>
+
+<template>
+  <UNavigationMenu :items="items" orientation="vertical" class="w-full" />
+</template>

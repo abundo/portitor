@@ -1,0 +1,24 @@
+# SPDX-FileCopyrightText: 2026 The Portitor contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+[Unit]
+Description=Portitor agent (applies configuration from portitor-web)
+Documentation=file:///usr/share/doc/portitor/README.md
+# The agent configures interfaces, addresses and the ruleset itself; start
+# it before anything that expects the network to be up.
+Wants=network-pre.target
+After=network-pre.target
+Before=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/portitor-agent -f /etc/portitor/agent.yaml start
+Restart=on-failure
+RestartSec=5
+RuntimeDirectory=portitor
+RuntimeDirectoryPreserve=yes
+StateDirectory=portitor
+StateDirectoryMode=0711
+
+[Install]
+WantedBy=multi-user.target

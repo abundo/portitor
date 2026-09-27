@@ -1,0 +1,22 @@
+# SPDX-FileCopyrightText: 2026 The Portitor contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# Kea DHCPv6 for one Portitor instance, inside the instance's network
+# namespace. Started and restarted by portitor-agent; do not enable by hand.
+[Unit]
+Description=Kea DHCPv6 server for Portitor instance %i
+After=portitor-agent.service
+PartOf=portitor-agent.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/portitor-agent netns-exec %i -- /usr/sbin/kea-dhcp6 -c /etc/portitor/instances/%i/kea-dhcp6.conf
+Restart=on-failure
+RestartSec=5
+# Same directories as portitor-kea4@ (see there); the PID file names differ.
+Environment=KEA_PIDFILE_DIR=/run/kea/%i
+RuntimeDirectory=kea kea/%i
+RuntimeDirectoryMode=0750
+RuntimeDirectoryPreserve=yes
+StateDirectory=kea
+StateDirectoryMode=0750

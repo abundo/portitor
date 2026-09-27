@@ -1,0 +1,71 @@
+// SPDX-FileCopyrightText: 2026 The Portitor contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+import http from './http'
+
+// crud returns list/create/update/remove for a REST resource.
+export function crud(path) {
+  return {
+    list: (params) => http.get(path, { params }).then((r) => r.data ?? []),
+    get: (id) => http.get(`${path}/${id}`).then((r) => r.data),
+    create: (body) => http.post(path, body).then((r) => r.data),
+    update: (id, body) => http.put(`${path}/${id}`, body).then((r) => r.data),
+    remove: (id) => http.delete(`${path}/${id}`),
+  }
+}
+
+export const instances = crud('/instances')
+export const zones = crud('/zones')
+export const interfaces = crud('/interfaces')
+export const wgPeers = crud('/wg/peers')
+export const links = crud('/links')
+export const routes = crud('/routes')
+export const rules = crud('/rules')
+export const nat = crud('/nat')
+export const ipamPrefixes = crud('/ipam/prefixes')
+export const ipamAddresses = crud('/ipam/addresses')
+export const dnsZones = crud('/dns/zones')
+export const dnsRecords = crud('/dns/records')
+export const dnsTemplates = crud('/dns/templates')
+export const dnsSoaTemplates = crud('/dns/soa-templates')
+export const dnsDnssecPolicies = crud('/dns/dnssec-policies')
+export const addressObjects = crud('/objects')
+
+export const api = {
+  login: (username, password) => http.post('/login', { username, password }).then((r) => r.data),
+  logout: () => http.post('/logout', {}),
+  me: () => http.get('/me').then((r) => r.data),
+  changePassword: (current, next) => http.post('/me/password', { current, new: next }),
+  version: () => http.get('/version').then((r) => r.data),
+
+  ipamTree: (instanceId) =>
+    http.get('/ipam/tree', { params: { instance_id: instanceId } }).then((r) => r.data),
+  // The zone editor saves a zone's whole record grid, in order.
+  saveZoneRecords: (zoneId, records) =>
+    http.put(`/dns/zones/${zoneId}/records`, records).then((r) => r.data),
+  nextFree: (prefixId) =>
+    http.get(`/ipam/prefixes/${prefixId}/next-free`).then((r) => r.data.address),
+  reorder: (kind, ids) => http.post(`/${kind}/reorder`, { ids }),
+  wgClientConfig: (peerId, split) =>
+    http
+      .get(`/wg/peers/${peerId}/config`, { params: split ? { split: 1 } : {} })
+      .then((r) => r.data),
+  wgRekey: (ifaceId) => http.post(`/interfaces/${ifaceId}/wg-rekey`, {}).then((r) => r.data),
+
+  settings: () => http.get('/settings').then((r) => r.data),
+  saveSettings: (body) => http.put('/settings', body).then((r) => r.data),
+  users: () => http.get('/users').then((r) => r.data),
+  createUser: (username, password) =>
+    http.post('/users', { username, password }).then((r) => r.data),
+  deleteUser: (id) => http.delete(`/users/${id}`),
+
+  deployCheck: () => http.get('/deploy/check').then((r) => r.data),
+  deployPreview: () => http.post('/deploy/preview', {}).then((r) => r.data),
+  deployApply: (confirmTimeout) =>
+    http.post('/deploy/apply', { confirm_timeout: confirmTimeout }).then((r) => r.data),
+  deployConfirm: () => http.post('/deploy/confirm', {}).then((r) => r.data),
+  deployRollback: () => http.post('/deploy/rollback', {}).then((r) => r.data),
+  deployments: () => http.get('/deployments').then((r) => r.data),
+  agentStatus: () => http.get('/agent/status').then((r) => r.data),
+  agentLeases: () => http.get('/agent/leases').then((r) => r.data),
+}

@@ -1,0 +1,9 @@
+/* SPDX-FileCopyrightText: 2026 The Portitor contributors */
+/* SPDX-License-Identifier: AGPL-3.0-or-later */
+
+@import 'tailwindcss';
+@import '@nuxt/ui';
+
+@utility card {
+  @apply bg-default rounded-lg border border-default p-4 md:p-6;
+}

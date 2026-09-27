@@ -1,0 +1,13 @@
+# SPDX-FileCopyrightText: 2026 The Portitor contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# Lab portitor-web config. Published on the host as 127.0.0.1:28080.
+bind: 0.0.0.0:8080
+jwt_secret: lab-only-secret-change-me-0123456789abcdef
+db:
+  host: 127.0.0.1
+  port: 5432
+  user: portitor
+  password: portitor-lab
+  name: portitor
+  sslmode: disable

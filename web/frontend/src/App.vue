@@ -1,0 +1,8 @@
+<!-- SPDX-FileCopyrightText: 2026 The Portitor contributors -->
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+
+<template>
+  <UApp>
+    <router-view />
+  </UApp>
+</template>
