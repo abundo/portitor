@@ -11,10 +11,12 @@
 // addrs/addr: address list / single address; names of hosts/prefixes are
 // suggested and accepted.
 // Column: { key, label, format: row => string, class }
-// Cells can be overridden with a `cell-<key>` slot.
+// Cells can be overridden with a `cell-<key>` slot, or the whole table with
+// the `table` slot ({ rows, openEdit, remove, moveTo, saveRow }).
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import AddrInput from '@/components/AddrInput.vue'
+import { useRowDrag } from '@/composables/useRowDrag'
 import { api as rootApi } from '@/api'
 import { errMsg } from '@/api/http'
 
@@ -27,7 +29,7 @@ const props = defineProps({
   fields: { type: Array, required: true },
   defaults: { type: [Object, Function], default: () => ({}) },
   newLabel: { type: String, default: 'Add' },
-  // Resource name for POST /api/<reorder>/reorder; enables up/down.
+  // Resource name for POST /api/<reorder>/reorder; enables drag-and-drop.
   reorder: { type: String, default: '' },
   blockedReason: { type: String, default: '' },
   itemName: { type: Function, default: (row) => row.name ?? `#${row.id}` },
@@ -44,6 +46,7 @@ const form = reactive({})
 const NONE = 0
 
 const tableColumns = computed(() => [
+  ...(props.reorder ? [{ id: 'drag', header: '', meta: { class: { td: 'w-7 px-1' } } }] : []),
   ...props.columns.map((c) => ({ accessorKey: c.key, header: c.label })),
   { id: 'actions', header: '' },
 ])
@@ -131,10 +134,30 @@ async function remove(row) {
   }
 }
 
-async function move(index, delta) {
+// Saves one row edited in place (a custom table); reloads on failure.
+async function saveRow(row) {
+  const body = { ...row }
+  for (const f of props.fields) if (f.nullable && body[f.key] === NONE) body[f.key] = null
+  try {
+    const saved = await props.api.update(row.id, body)
+    const cur = rows.value.find((r) => r.id === row.id)
+    if (cur && saved) Object.assign(cur, saved)
+    emit('changed')
+    return true
+  } catch (err) {
+    toast.add({ title: errMsg(err, 'Save failed'), color: 'error' })
+    await load()
+    return false
+  }
+}
+
+async function moveTo(from, to) {
   const list = [...rows.value]
-  const [item] = list.splice(index, 1)
-  list.splice(index + delta, 0, item)
+  const [item] = list.splice(from, 1)
+  list.splice(to, 0, item)
+  // The server numbers positions like this; keep rows in step so a later
+  // PUT of a row doesn't send back a stale position.
+  list.forEach((r, i) => (r.position = (i + 1) * 10))
   rows.value = list
   try {
     await rootApi.reorder(
@@ -147,6 +170,13 @@ async function move(index, delta) {
     await load()
   }
 }
+
+const tableWrap = ref(null)
+const { onPointerDown } = useRowDrag({
+  wrap: tableWrap,
+  label: (i) => props.itemName(rows.value[i]),
+  onMove: moveTo,
+})
 
 watch(() => JSON.stringify(props.params), load)
 onMounted(load)
@@ -182,53 +212,55 @@ defineExpose({ reload: load, openEdit, openCreate })
     <div v-if="loading" class="flex justify-center p-6">
       <UIcon name="i-lucide-loader-2" class="size-7 animate-spin" />
     </div>
-    <UTable v-else :data="rows" :columns="tableColumns" class="text-sm">
-      <template v-for="col in columns" :key="col.key" #[`${col.key}-cell`]="{ row }">
-        <slot :name="`cell-${col.key}`" :row="row.original">
-          <span :class="col.class">{{ display(col, row.original) }}</span>
-        </slot>
-      </template>
-      <template #actions-cell="{ row }">
-        <div class="flex justify-end gap-1">
-          <slot name="row-actions" :row="row.original" />
-          <template v-if="reorder">
+    <slot
+      v-else-if="$slots.table"
+      name="table"
+      :rows="rows"
+      :open-edit="openEdit"
+      :remove="remove"
+      :move-to="moveTo"
+      :save-row="saveRow"
+    />
+    <div v-else ref="tableWrap">
+      <UTable :data="rows" :columns="tableColumns" class="text-sm">
+        <template #drag-cell="{ row }">
+          <span
+            class="inline-flex cursor-grab touch-none items-center text-muted select-none active:cursor-grabbing"
+            title="Drag to reorder"
+            @pointerdown="onPointerDown(row.index, $event)"
+          >
+            <UIcon name="i-lucide-grip-vertical" class="pointer-events-none size-3.5" />
+          </span>
+        </template>
+        <template v-for="col in columns" :key="col.key" #[`${col.key}-cell`]="{ row }">
+          <slot :name="`cell-${col.key}`" :row="row.original">
+            <span :class="col.class">{{ display(col, row.original) }}</span>
+          </slot>
+        </template>
+        <template #actions-cell="{ row }">
+          <div class="flex justify-end gap-1">
+            <slot name="row-actions" :row="row.original" />
             <UButton
               size="xs"
               color="neutral"
               variant="ghost"
-              icon="i-lucide-arrow-up"
-              :disabled="row.index === 0"
-              @click="move(row.index, -1)"
+              icon="i-lucide-pencil"
+              @click="openEdit(row.original)"
             />
             <UButton
               size="xs"
-              color="neutral"
+              color="error"
               variant="ghost"
-              icon="i-lucide-arrow-down"
-              :disabled="row.index === rows.length - 1"
-              @click="move(row.index, 1)"
+              icon="i-lucide-trash"
+              @click="remove(row.original)"
             />
-          </template>
-          <UButton
-            size="xs"
-            color="neutral"
-            variant="ghost"
-            icon="i-lucide-pencil"
-            @click="openEdit(row.original)"
-          />
-          <UButton
-            size="xs"
-            color="error"
-            variant="ghost"
-            icon="i-lucide-trash"
-            @click="remove(row.original)"
-          />
-        </div>
-      </template>
-      <template #empty>
-        <div class="py-6 text-center text-muted">Nothing here yet.</div>
-      </template>
-    </UTable>
+          </div>
+        </template>
+        <template #empty>
+          <div class="py-6 text-center text-muted">Nothing here yet.</div>
+        </template>
+      </UTable>
+    </div>
   </div>
 
   <UModal

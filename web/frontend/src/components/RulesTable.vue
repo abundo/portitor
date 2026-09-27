@@ -1,0 +1,352 @@
+<!-- SPDX-FileCopyrightText: 2026 The Portitor contributors -->
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+
+<script setup>
+// RulesTable: the firewall rules as a compact grid edited in place. Each
+// change saves its row (`save`); rows reorder by dragging the grip (`move`).
+// Address cells take a comma-separated list of addresses, CIDRs or names.
+import { onMounted, ref } from 'vue'
+import { useRowDrag } from '@/composables/useRowDrag'
+import { useObjectStore } from '@/stores/objects'
+
+const props = defineProps({
+  rows: { type: Array, required: true },
+  // Zones of the instance as select items ({ label, value }).
+  zones: { type: Array, required: true },
+})
+const emit = defineEmits(['save', 'move', 'edit', 'remove'])
+
+const objects = useObjectStore()
+onMounted(() => objects.load().catch(() => {}))
+
+const wrap = ref(null)
+const { onPointerDown } = useRowDrag({
+  wrap,
+  label: (i) => {
+    const r = props.rows[i]
+    return `${i + 1}. ${r.action} ${r.description || ''}`.trim()
+  },
+  onMove: (from, to) => emit('move', from, to),
+})
+
+const chains = ['forward', 'input', 'output']
+const families = [
+  { label: 'any', value: 'any' },
+  { label: 'IPv4', value: 'ipv4' },
+  { label: 'IPv6', value: 'ipv6' },
+]
+const protocols = ['any', 'tcp', 'udp', 'icmp', 'icmpv6']
+const actions = ['accept', 'drop', 'reject']
+const actionClass = { accept: 'text-success', drop: 'text-error', reject: 'text-warning' }
+const hasPorts = (r) => r.protocol === 'tcp' || r.protocol === 'udp'
+
+function set(r, key, value) {
+  r[key] = value
+  if (key === 'protocol' && !hasPorts(r)) r.dst_ports = ''
+  emit('save', r)
+}
+
+function setText(r, key, event) {
+  set(r, key, event.target.value.trim())
+}
+
+function setAddrs(r, key, event) {
+  set(
+    r,
+    key,
+    event.target.value.split(/[\s,]+/).filter((s) => s),
+  )
+}
+
+function setZone(r, key, event) {
+  set(r, key, Number(event.target.value) || null)
+}
+
+// Enter and the up/down arrows move to the same column in the next/previous
+// row, like a spreadsheet; leaving the cell saves it (change event).
+function onKeydown(event, index) {
+  const step = { Enter: 1, ArrowDown: 1, ArrowUp: -1 }[event.key]
+  if (!step || event.isComposing) return
+  const col = event.target.dataset.col
+  const next = wrap.value.querySelector(
+    `tbody > tr:nth-child(${index + 1 + step}) [data-col="${col}"]`,
+  )
+  event.preventDefault()
+  if (next && !next.disabled) next.focus()
+  else event.target.blur()
+}
+</script>
+
+<template>
+  <div ref="wrap" class="rules-grid overflow-auto rounded-md ring ring-default">
+    <table class="w-full min-w-[72rem] table-fixed border-collapse text-xs">
+      <colgroup>
+        <col class="w-7" />
+        <col class="w-8" />
+        <col class="w-8" />
+        <col class="w-20" />
+        <col class="w-28" />
+        <col class="w-28" />
+        <col class="w-14" />
+        <col class="w-18" />
+        <col class="w-24" />
+        <col />
+        <col />
+        <col class="w-18" />
+        <col class="w-8" />
+        <col />
+        <col class="w-14" />
+      </colgroup>
+      <thead>
+        <tr>
+          <th />
+          <th title="Evaluated top to bottom">#</th>
+          <th title="Enabled">On</th>
+          <th>Traffic</th>
+          <th>From</th>
+          <th>To</th>
+          <th>IP</th>
+          <th>Protocol</th>
+          <th>Ports</th>
+          <th>Source</th>
+          <th>Destination</th>
+          <th>Action</th>
+          <th title="Log matches">Log</th>
+          <th>Description</th>
+          <th />
+        </tr>
+      </thead>
+      <tbody>
+        <tr v-for="(r, i) in rows" :key="r.id" :class="{ 'rule-off': !r.enabled }">
+          <td class="keep">
+            <span
+              class="flex h-7 cursor-grab touch-none items-center justify-center text-muted select-none active:cursor-grabbing"
+              title="Drag to reorder"
+              @pointerdown="onPointerDown(i, $event)"
+            >
+              <UIcon name="i-lucide-grip-vertical" class="pointer-events-none size-3.5" />
+            </span>
+          </td>
+          <td class="text-center text-muted tabular-nums">{{ i + 1 }}</td>
+          <td class="keep text-center">
+            <input
+              type="checkbox"
+              class="accent-primary"
+              :checked="r.enabled"
+              title="Enabled"
+              @change="set(r, 'enabled', $event.target.checked)"
+            />
+          </td>
+          <td>
+            <select
+              :value="r.chain"
+              data-col="chain"
+              @change="set(r, 'chain', $event.target.value)"
+            >
+              <option v-for="c in chains" :key="c" :value="c">{{ c }}</option>
+            </select>
+          </td>
+          <td>
+            <span v-if="r.chain === 'output'" class="px-1.5 text-muted italic">firewall</span>
+            <select
+              v-else
+              :value="r.src_zone_id ?? 0"
+              data-col="src_zone_id"
+              @change="setZone(r, 'src_zone_id', $event)"
+            >
+              <option :value="0">any</option>
+              <option v-for="z in zones" :key="z.value" :value="z.value">{{ z.label }}</option>
+            </select>
+          </td>
+          <td>
+            <span v-if="r.chain === 'input'" class="px-1.5 text-muted italic">firewall</span>
+            <select
+              v-else
+              :value="r.dst_zone_id ?? 0"
+              data-col="dst_zone_id"
+              @change="setZone(r, 'dst_zone_id', $event)"
+            >
+              <option :value="0">any</option>
+              <option v-for="z in zones" :key="z.value" :value="z.value">{{ z.label }}</option>
+            </select>
+          </td>
+          <td>
+            <select
+              :value="r.family"
+              data-col="family"
+              @change="set(r, 'family', $event.target.value)"
+            >
+              <option v-for="f in families" :key="f.value" :value="f.value">{{ f.label }}</option>
+            </select>
+          </td>
+          <td>
+            <select
+              :value="r.protocol"
+              data-col="protocol"
+              @change="set(r, 'protocol', $event.target.value)"
+            >
+              <option v-for="p in protocols" :key="p" :value="p">{{ p }}</option>
+            </select>
+          </td>
+          <td>
+            <input
+              :value="r.dst_ports"
+              data-col="dst_ports"
+              class="font-mono"
+              :disabled="!hasPorts(r)"
+              :placeholder="hasPorts(r) ? 'any' : ''"
+              @change="setText(r, 'dst_ports', $event)"
+              @keydown="onKeydown($event, i)"
+            />
+          </td>
+          <td>
+            <input
+              :value="(r.src_addrs ?? []).join(', ')"
+              data-col="src_addrs"
+              class="font-mono"
+              list="rules-grid-names"
+              placeholder="any"
+              :title="(r.src_addrs ?? []).join(', ')"
+              @change="setAddrs(r, 'src_addrs', $event)"
+              @keydown="onKeydown($event, i)"
+            />
+          </td>
+          <td>
+            <input
+              :value="(r.dst_addrs ?? []).join(', ')"
+              data-col="dst_addrs"
+              class="font-mono"
+              list="rules-grid-names"
+              placeholder="any"
+              :title="(r.dst_addrs ?? []).join(', ')"
+              @change="setAddrs(r, 'dst_addrs', $event)"
+              @keydown="onKeydown($event, i)"
+            />
+          </td>
+          <td>
+            <select
+              :value="r.action"
+              data-col="action"
+              class="font-semibold"
+              :class="actionClass[r.action]"
+              @change="set(r, 'action', $event.target.value)"
+            >
+              <option v-for="a in actions" :key="a" :value="a">{{ a }}</option>
+            </select>
+          </td>
+          <td class="text-center">
+            <input
+              type="checkbox"
+              class="accent-primary"
+              :checked="r.log"
+              title="Log matches"
+              @change="set(r, 'log', $event.target.checked)"
+            />
+          </td>
+          <td>
+            <input
+              :value="r.description"
+              data-col="description"
+              :title="r.description"
+              @change="setText(r, 'description', $event)"
+              @keydown="onKeydown($event, i)"
+            />
+          </td>
+          <td class="keep">
+            <div class="flex justify-end">
+              <UButton
+                size="xs"
+                color="neutral"
+                variant="ghost"
+                icon="i-lucide-pencil"
+                title="Details"
+                @click="emit('edit', r)"
+              />
+              <UButton
+                size="xs"
+                color="error"
+                variant="ghost"
+                icon="i-lucide-trash"
+                title="Delete"
+                @click="emit('remove', r)"
+              />
+            </div>
+          </td>
+        </tr>
+        <tr v-if="!rows.length">
+          <td colspan="15" class="py-6 text-center text-muted">Nothing here yet.</td>
+        </tr>
+      </tbody>
+    </table>
+    <datalist id="rules-grid-names">
+      <option v-for="n in objects.names" :key="n" :value="n" />
+    </datalist>
+  </div>
+</template>
+
+<style>
+.rules-grid {
+  max-height: max(24rem, calc(100dvh - 14rem));
+  overscroll-behavior: contain;
+}
+.rules-grid th {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  padding: 0.25rem 0.375rem;
+  text-align: start;
+  font-weight: 500;
+  background: var(--ui-bg-elevated);
+  border-block-end: 1px solid var(--ui-border-accented);
+}
+.rules-grid th,
+.rules-grid td {
+  border-inline-end: 1px solid var(--ui-border-accented);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.rules-grid th:last-child,
+.rules-grid td:last-child {
+  border-inline-end: 0;
+}
+.rules-grid td {
+  padding: 0;
+  height: 1.75rem;
+}
+.rules-grid tbody tr:not(:last-child) td {
+  border-block-end: 1px solid var(--ui-border-accented);
+}
+.rules-grid tbody tr:hover td {
+  background: color-mix(in oklab, var(--ui-bg-elevated) 70%, transparent);
+}
+.rules-grid td:focus-within {
+  position: relative;
+  z-index: 1;
+  background: var(--ui-bg);
+  box-shadow: inset 0 0 0 2px var(--ui-primary);
+}
+.rules-grid td > select,
+.rules-grid td > input:not([type='checkbox']) {
+  display: block;
+  width: 100%;
+  height: 1.75rem;
+  padding-inline: 0.375rem;
+  background: transparent;
+  outline: none;
+  text-overflow: ellipsis;
+}
+.rules-grid td > select {
+  cursor: pointer;
+}
+.rules-grid td > input:disabled {
+  cursor: not-allowed;
+  background: color-mix(in oklab, var(--ui-bg-elevated) 60%, transparent);
+}
+.rules-grid option {
+  background: var(--ui-bg);
+  color: var(--ui-text);
+}
+.rules-grid tr.rule-off > td:not(.keep) {
+  opacity: 0.45;
+}
+</style>

@@ -4,28 +4,12 @@
 <script setup>
 import CrudPage from '@/components/CrudPage.vue'
 import NeedInstance from '@/components/NeedInstance.vue'
+import RulesTable from '@/components/RulesTable.vue'
 import { rules } from '@/api'
-import { actionColor, useInstanceRefs } from '@/composables/useInstanceRefs'
+import { useInstanceRefs } from '@/composables/useInstanceRefs'
 
-const { store, zoneItems, zoneName } = useInstanceRefs()
+const { store, zoneItems } = useInstanceRefs()
 const opt = (list) => list.map((v) => ({ label: v || 'any', value: v }))
-
-const columns = [
-  { key: 'chain', label: 'Chain' },
-  {
-    key: 'from',
-    label: 'From',
-    format: (r) => (r.chain === 'output' ? 'firewall' : zoneName(r.src_zone_id) || 'any'),
-  },
-  {
-    key: 'to',
-    label: 'To',
-    format: (r) => (r.chain === 'input' ? 'firewall' : zoneName(r.dst_zone_id) || 'any'),
-  },
-  { key: 'match', label: 'Match' },
-  { key: 'action', label: 'Action' },
-  { key: 'description', label: 'Description' },
-]
 
 const fields = [
   {
@@ -98,14 +82,12 @@ const fields = [
 // Selects can't hold '' values; map 'any' <-> ''.
 const api = {
   ...rules,
-  list: async (p) =>
-    (await rules.list(p)).map((r) => ({
-      ...r,
-      family: r.family || 'any',
-      protocol: r.protocol || 'any',
-    })),
+  list: async (p) => (await rules.list(p)).map(fromApi),
   create: (b) => rules.create(clean(b)),
-  update: (id, b) => rules.update(id, clean(b)),
+  update: async (id, b) => fromApi(await rules.update(id, clean(b))),
+}
+function fromApi(r) {
+  return { ...r, family: r.family || 'any', protocol: r.protocol || 'any' }
 }
 function clean(b) {
   return {
@@ -114,25 +96,16 @@ function clean(b) {
     protocol: b.protocol === 'any' ? '' : b.protocol,
   }
 }
-
-function match(r) {
-  const parts = []
-  if (r.family !== 'any') parts.push(r.family)
-  if (r.protocol !== 'any') parts.push(r.protocol + (r.dst_ports ? ` ${r.dst_ports}` : ''))
-  if (r.src_addrs?.length) parts.push(`from ${r.src_addrs.join(', ')}`)
-  if (r.dst_addrs?.length) parts.push(`to ${r.dst_addrs.join(', ')}`)
-  return parts.join(' · ') || 'all traffic'
-}
 </script>
 
 <template>
   <NeedInstance>
     <CrudPage
       title="Rules"
-      description="Evaluated top to bottom; the first match decides. Established connections, DHCP/DNS for enabled services and WireGuard ports are allowed automatically. Forwarded traffic that no rule accepts is dropped."
+      description="Evaluated top to bottom; the first match decides. Edit cells in place (changes save at once), drag the grip to reorder. Established connections, DHCP/DNS for enabled services and WireGuard ports are allowed automatically. Forwarded traffic that no rule accepts is dropped."
       :api="api"
       :params="{ instance_id: store.currentId }"
-      :columns="columns"
+      :columns="[]"
       :fields="fields"
       :defaults="{
         chain: 'forward',
@@ -148,15 +121,15 @@ function match(r) {
       reorder="rules"
       :item-name="(r) => `rule ${r.description || r.id}`"
     >
-      <template #cell-match="{ row }">
-        <span class="text-xs">{{ match(row) }}</span>
-      </template>
-      <template #cell-action="{ row }">
-        <div class="flex items-center gap-1">
-          <UBadge :color="actionColor[row.action]" variant="subtle" :label="row.action" />
-          <UIcon v-if="row.log" name="i-lucide-scroll-text" class="text-muted" title="logged" />
-          <UBadge v-if="!row.enabled" color="neutral" variant="outline" label="off" />
-        </div>
+      <template #table="{ rows, openEdit, remove, moveTo, saveRow }">
+        <RulesTable
+          :rows="rows"
+          :zones="zoneItems"
+          @save="saveRow"
+          @move="moveTo"
+          @edit="openEdit"
+          @remove="remove"
+        />
       </template>
     </CrudPage>
   </NeedInstance>
