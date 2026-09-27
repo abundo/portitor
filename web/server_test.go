@@ -478,3 +478,37 @@ func TestZoneRecordsGrid(t *testing.T) {
 		t.Errorf("records after rejected save: %d", n)
 	}
 }
+
+func TestRememberMe(t *testing.T) {
+	env := newEnv(t)
+	if env.cookie.MaxAge != 0 {
+		t.Errorf("without remember: MaxAge %d, want a browser session cookie", env.cookie.MaxAge)
+	}
+	env.cookie = nil
+	rec := env.do("POST", "/api/login", map[string]any{"username": "admin", "password": "correct horse battery", "remember": true})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("login: %d %s", rec.Code, rec.Body)
+	}
+	sessionCookie := func(rec *httptest.ResponseRecorder) *http.Cookie {
+		for _, c := range rec.Result().Cookies() {
+			if c.Name == cookieName {
+				return c
+			}
+		}
+		t.Fatal("no session cookie")
+		return nil
+	}
+	env.cookie = sessionCookie(rec)
+	if want := int(rememberTTL.Seconds()); env.cookie.MaxAge != want {
+		t.Errorf("with remember: MaxAge %d, want %d", env.cookie.MaxAge, want)
+	}
+
+	// A password change reissues the session and keeps remember.
+	rec = env.do("POST", "/api/me/password", map[string]string{"current": "correct horse battery", "new": "another long password"})
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("change password: %d %s", rec.Code, rec.Body)
+	}
+	if c := sessionCookie(rec); c.MaxAge != int(rememberTTL.Seconds()) {
+		t.Errorf("after password change: MaxAge %d", c.MaxAge)
+	}
+}

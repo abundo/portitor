@@ -20,22 +20,33 @@ import (
 const (
 	cookieName     = "fw_session"
 	sessionTTL     = 12 * time.Hour
+	rememberTTL    = 30 * 24 * time.Hour
 	ctxUser        = "user"
+	ctxRemember    = "remember"
 	minPasswordLen = 10
 )
 
 type sessionClaims struct {
 	UserID       uint `json:"uid"`
 	TokenVersion int  `json:"tv"`
+	Remember     bool `json:"rm,omitempty"`
 	jwt.RegisteredClaims
 }
 
-func (s *Server) issueSession(c *echo.Context, u *models.User) error {
+// issueSession sets the session cookie. Without remember it is a browser
+// session cookie (gone when the browser closes) and expires after
+// sessionTTL; with remember it persists for rememberTTL.
+func (s *Server) issueSession(c *echo.Context, u *models.User, remember bool) error {
+	ttl := sessionTTL
+	if remember {
+		ttl = rememberTTL
+	}
 	claims := sessionClaims{
 		UserID:       u.ID,
 		TokenVersion: u.TokenVersion,
+		Remember:     remember,
 		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(sessionTTL)),
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(ttl)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 		},
 	}
@@ -43,15 +54,18 @@ func (s *Server) issueSession(c *echo.Context, u *models.User) error {
 	if err != nil {
 		return err
 	}
-	c.SetCookie(&http.Cookie{
+	cookie := &http.Cookie{
 		Name:     cookieName,
 		Value:    signed,
 		Path:     "/",
 		HttpOnly: true,
 		Secure:   !s.cfg.Dev,
 		SameSite: http.SameSiteStrictMode,
-		MaxAge:   int(sessionTTL.Seconds()),
-	})
+	}
+	if remember {
+		cookie.MaxAge = int(ttl.Seconds())
+	}
+	c.SetCookie(cookie)
 	return nil
 }
 
@@ -79,6 +93,7 @@ func (s *Server) requireAuth(next echo.HandlerFunc) echo.HandlerFunc {
 			return errJSON(c, http.StatusUnauthorized, "session revoked")
 		}
 		c.Set(ctxUser, &u)
+		c.Set(ctxRemember, claims.Remember)
 		return next(c)
 	}
 }
@@ -163,6 +178,7 @@ func (s *Server) handleLogin(c *echo.Context) error {
 	var req struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
+		Remember bool   `json:"remember"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return errJSON(c, http.StatusBadRequest, "invalid request")
@@ -178,7 +194,7 @@ func (s *Server) handleLogin(c *echo.Context) error {
 		return errJSON(c, http.StatusUnauthorized, "wrong username or password")
 	}
 	s.limiter.reset(ip)
-	if err := s.issueSession(c, &u); err != nil {
+	if err := s.issueSession(c, &u, req.Remember); err != nil {
 		return err
 	}
 	return c.JSON(http.StatusOK, u)
@@ -214,7 +230,8 @@ func (s *Server) handleChangePassword(c *echo.Context) error {
 	if err := s.db.Save(u).Error; err != nil {
 		return err
 	}
-	if err := s.issueSession(c, u); err != nil {
+	remember, _ := c.Get(ctxRemember).(bool)
+	if err := s.issueSession(c, u, remember); err != nil {
 		return err
 	}
 	return c.NoContent(http.StatusNoContent)

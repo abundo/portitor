@@ -32,7 +32,8 @@ export const dnsDnssecPolicies = crud('/dns/dnssec-policies')
 export const addressObjects = crud('/objects')
 
 export const api = {
-  login: (username, password) => http.post('/login', { username, password }).then((r) => r.data),
+  login: (username, password, remember) =>
+    http.post('/login', { username, password, remember }).then((r) => r.data),
   logout: () => http.post('/logout', {}),
   me: () => http.get('/me').then((r) => r.data),
   changePassword: (current, next) => http.post('/me/password', { current, new: next }),

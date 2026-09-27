@@ -19,8 +19,8 @@ export const useAuthStore = defineStore('auth', {
         this.loaded = true
       }
     },
-    async login(username, password) {
-      this.user = await api.login(username, password)
+    async login(username, password, remember) {
+      this.user = await api.login(username, password, remember)
     },
     async logout() {
       try {

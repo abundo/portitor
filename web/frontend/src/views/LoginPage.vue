@@ -12,6 +12,7 @@ const router = useRouter()
 const route = useRoute()
 const username = ref('')
 const password = ref('')
+const remember = ref(false)
 const error = ref('')
 const busy = ref(false)
 
@@ -19,7 +20,7 @@ async function submit() {
   busy.value = true
   error.value = ''
   try {
-    await auth.login(username.value, password.value)
+    await auth.login(username.value, password.value, remember.value)
     const next =
       typeof route.query.next === 'string' && route.query.next.startsWith('/')
         ? route.query.next
@@ -54,6 +55,7 @@ async function submit() {
             required
           />
         </UFormField>
+        <UCheckbox v-model="remember" label="Remember me for 30 days" />
         <UAlert v-if="error" color="error" variant="subtle" :title="error" />
         <UButton type="submit" block :loading="busy">Log in</UButton>
       </form>
