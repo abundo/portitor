@@ -504,6 +504,7 @@ func TestNATPerFamily(t *testing.T) {
 		// Source list mixes versions; the IPv4 target keeps the IPv4 part.
 		fwconfig.NATRule{Kind: fwconfig.NATSNAT, OutInterfaces: []string{"wan"}, SrcAddrs: []string{"192.168.1.0/24", "fd00:1::/64"}, ToAddr: "198.51.100.7"},
 		fwconfig.NATRule{Kind: fwconfig.NATMasquerade, OutInterfaces: []string{"wan"}, SrcAddrs: []string{"fd00:1::/64"}},
+		fwconfig.NATRule{Kind: fwconfig.NATDNAT, InInterfaces: []string{"wan"}, Protocol: "tcp,udp", DstPorts: "53", ToAddr: "192.168.1.10", ToPort: 5300},
 	)
 	b, err := Render(doc, Options{Paths: DefaultPaths(), Units: DefaultUnits()})
 	if err != nil {
@@ -513,6 +514,7 @@ func TestNATPerFamily(t *testing.T) {
 	for _, want := range []string{
 		`oifname "eth0" ip saddr 192.168.1.0/24 counter snat ip to 198.51.100.7 comment "nat 3"`,
 		`oifname "eth0" ip6 saddr fd00:1::/64 counter masquerade comment "nat 4"`,
+		`iifname "eth0" meta nfproto ipv4 meta l4proto { tcp, udp } th dport 53 counter dnat ip to 192.168.1.10:5300 comment "nat 5"`,
 	} {
 		if !strings.Contains(nft, want) {
 			t.Errorf("missing:\n  %s\nin:\n%s", want, nft)

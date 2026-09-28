@@ -18,7 +18,9 @@ const protos = [
   { label: 'any', value: 'any' },
   { label: 'tcp', value: 'tcp' },
   { label: 'udp', value: 'udp' },
+  { label: 'tcp+udp', value: 'tcp,udp' },
 ]
+const protoLabel = (p) => (p === 'tcp,udp' ? 'tcp+udp' : p)
 // natIfaces returns the interface list a NAT rule matches on, by its kind.
 const natIfaces = (r) => (r.kind === 'dnat' ? r.in_interfaces : r.out_interfaces)
 const natIfacesLabel = (r) => `${r.kind === 'dnat' ? 'in' : 'out'}: ${ifaceListLabel(natIfaces(r))}`
@@ -51,7 +53,7 @@ const columns = [
     label: 'Match',
     format: (r) =>
       [
-        r.protocol !== 'any' ? r.protocol : '',
+        r.protocol !== 'any' ? protoLabel(r.protocol) : '',
         r.dst_ports,
         r.src_addrs?.length ? `from ${r.src_addrs.join(', ')}` : '',
         r.dst_addrs?.length ? `to ${r.dst_addrs.join(', ')}` : '',

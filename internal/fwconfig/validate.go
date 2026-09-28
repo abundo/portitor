@@ -294,8 +294,8 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 		if n.ToPort < 0 || n.ToPort > 65535 {
 			v.addf("%s: invalid target port %d", np, n.ToPort)
 		}
-		if n.ToPort != 0 && n.Protocol != "tcp" && n.Protocol != "udp" {
-			v.addf("%s: a target port needs protocol tcp or udp", np)
+		if n.ToPort != 0 && n.Protocol != "tcp" && n.Protocol != "udp" && n.Protocol != "tcp,udp" {
+			v.addf("%s: a target port needs protocol tcp, udp or tcp,udp", np)
 		}
 		if n.Kind == NATDNAT && len(n.OutInterfaces) > 0 {
 			v.addf("%s: dnat matches the incoming interface, not outgoing", np)

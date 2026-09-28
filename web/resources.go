@@ -420,7 +420,7 @@ func prepareNat(tx *gorm.DB, n, old *models.NatRule) error {
 	if err := oneOf("kind", n.Kind, fwconfig.NATDNAT, fwconfig.NATSNAT, fwconfig.NATMasquerade); err != nil {
 		return err
 	}
-	if err := oneOf("protocol", n.Protocol, "", "tcp", "udp"); err != nil {
+	if err := oneOf("protocol", n.Protocol, "", "tcp", "udp", "tcp,udp"); err != nil {
 		return err
 	}
 	n.InInterfaces, n.OutInterfaces = dedupe(cleanList(n.InInterfaces)), dedupe(cleanList(n.OutInterfaces))
@@ -453,14 +453,14 @@ func prepareNat(tx *gorm.DB, n, old *models.NatRule) error {
 	n.DstPorts = strings.TrimSpace(n.DstPorts)
 	if n.DstPorts != "" {
 		if n.Protocol == "" {
-			return bad("ports need protocol tcp or udp")
+			return bad("ports need protocol tcp, udp or tcp+udp")
 		}
 		if err := checkPorts(tx, n.DstPorts); err != nil {
 			return err
 		}
 	}
 	if n.ToPort != 0 && n.Protocol == "" {
-		return bad("a target port needs protocol tcp or udp")
+		return bad("a target port needs protocol tcp, udp or tcp+udp")
 	}
 	if old == nil && n.Position == 0 {
 		n.Position = nextPosition(tx, "nat_rules", n.InstanceID)

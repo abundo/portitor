@@ -181,7 +181,7 @@ type NATRule struct {
 	Kind          string   `json:"kind"`
 	InInterfaces  []string `json:"in_interfaces,omitempty"`  // dnat
 	OutInterfaces []string `json:"out_interfaces,omitempty"` // snat, masquerade
-	Protocol      string   `json:"protocol,omitempty"`       // tcp, udp; required with ports
+	Protocol      string   `json:"protocol,omitempty"`       // tcp, udp, tcp,udp; required with ports
 	SrcAddrs      []string `json:"src_addrs,omitempty"`
 	DstAddrs      []string `json:"dst_addrs,omitempty"`
 	DstPorts      string   `json:"dst_ports,omitempty"`
