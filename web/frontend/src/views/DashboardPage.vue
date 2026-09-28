@@ -15,6 +15,8 @@ const inst = computed(() => st.value?.instances?.find((i) => i.name === instance
 const wan = computed(() =>
   (st.value?.dhcp_client_leases ?? []).filter((l) => l.instance === instances.current?.name),
 )
+const missing = computed(() => (st.value?.programs ?? []).filter((p) => !p.path))
+const missingNeeded = computed(() => missing.value.some((p) => p.needed))
 const peers = computed(() =>
   (inst.value?.wireguard ?? []).flatMap((w) => w.peers.map((p) => ({ ...p, iface: w.interface }))),
 )
@@ -49,6 +51,27 @@ const stateColor = (s) =>
       :description="deploy.error"
       :actions="[{ label: 'Settings', to: '/settings' }]"
     />
+    <UAlert
+      v-if="missing.length"
+      :color="missingNeeded ? 'error' : 'warning'"
+      variant="subtle"
+      icon="i-lucide-package-x"
+      :title="
+        missingNeeded
+          ? 'Programs the configuration needs are not installed on the firewall'
+          : 'Some programs are not installed on the firewall'
+      "
+    >
+      <template #description>
+        <ul class="mt-1 space-y-0.5">
+          <li v-for="p in missing" :key="p.name">
+            <span class="font-mono">{{ p.name }}</span> · {{ p.purpose
+            }}<span v-if="p.needed" class="font-semibold"> · in use</span>
+          </li>
+        </ul>
+        <div class="mt-1 text-xs">Deploying a configuration that uses them fails.</div>
+      </template>
+    </UAlert>
     <div v-if="st" class="grid gap-4 md:grid-cols-3">
       <div class="card">
         <div class="text-sm text-muted">Firewall</div>

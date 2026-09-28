@@ -43,7 +43,13 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 	exp := doc.Expand()
 	a.log.Infof("applying generation %d", doc.Generation)
 
-	// Preflight: every ruleset must parse before anything changes.
+	// Preflight: the programs it needs are installed and every ruleset
+	// parses, before anything changes.
+	if !a.cfg.DryRun {
+		if err := checkPrograms(&exp); err != nil {
+			return err
+		}
+	}
 	if err := a.checkRulesets(ctx, &exp, bundle); err != nil {
 		return err
 	}

@@ -66,6 +66,11 @@ func (a *Agent) Start(ctx context.Context) error {
 	if err := os.MkdirAll(a.cfg.Paths.StateDir, 0o711); err != nil {
 		return err
 	}
+	for _, p := range programStatus(nil) {
+		if p.Path == "" {
+			slog.Warn("program not installed", "program", p.Name, "purpose", p.Purpose)
+		}
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 

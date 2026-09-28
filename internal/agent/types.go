@@ -17,4 +17,5 @@ type (
 	Lease          = agentapi.Lease
 	RenderResult   = agentapi.RenderResult
 	ApplyResult    = agentapi.ApplyResult
+	ProgramStatus  = agentapi.ProgramStatus
 )

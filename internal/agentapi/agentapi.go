@@ -46,6 +46,17 @@ type Status struct {
 	Pending    *PendingStatus   `json:"pending,omitempty"`
 	Instances  []InstanceStatus `json:"instances"`
 	DHCPLeases []Lease          `json:"dhcp_client_leases"`
+	Programs   []ProgramStatus  `json:"programs"`
+}
+
+// ProgramStatus is an external program the agent depends on.
+type ProgramStatus struct {
+	Name    string `json:"name"`
+	Purpose string `json:"purpose"`
+	// Path is empty when the program is not installed.
+	Path string `json:"path,omitempty"`
+	// Needed: the applied configuration uses it.
+	Needed bool `json:"needed"`
 }
 
 type PendingStatus struct {

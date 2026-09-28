@@ -41,6 +41,7 @@ func (a *Agent) Status(ctx context.Context) *Status {
 		st.Pending = &PendingStatus{Generation: a.pending.Generation, Deadline: a.pending.Deadline}
 	}
 	a.mu.Unlock()
+	st.Programs = programStatus(doc)
 
 	if doc == nil {
 		return st
