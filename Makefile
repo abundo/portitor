@@ -15,7 +15,7 @@ LDFLAGS := -s -w \
 
 .PHONY: build portitor-web portitor-agent frontend release test lint fmt \
 	install-agent install-web dev-agent dev-web dev-seed \
-	lab-up lab-install lab-seed lab-deploy lab-down clean
+	lab-up lab-install lab-seed lab-deploy lab-down iso iso-test clean
 
 build: portitor-web portitor-agent
 
@@ -77,6 +77,15 @@ dev-seed: portitor-web
 
 lab-up lab-install lab-seed lab-deploy lab-down:
 	dev/lab/lab.sh $(@:lab-%=%)
+
+# ----- installer ISO from this tree (see DEV.md); build.sh runs make release -----
+
+iso:
+	iso/build.sh
+
+# Unattended: erases /dev/vda without asking. For iso/vm.sh only, never real hardware.
+iso-test:
+	iso/build.sh --test
 
 clean:
 	rm -rf $(BUILD_DIR)
