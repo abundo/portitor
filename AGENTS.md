@@ -27,6 +27,7 @@ are in [README.md](README.md).
 | `web/frontend` | Vue SPA; `CrudPage.vue` drives most pages from field/column schemas |
 | `deploy` | systemd units and example configs |
 | `dev` | Dev configs and `seed.sh`; `dev/lab` runs a real apply in two podman containers |
+| `install.py` | Installs/updates web and agent from a GitHub release (`.goreleaser.yaml`) or `--source` |
 
 ## Invariants
 

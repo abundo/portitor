@@ -77,6 +77,27 @@ ip prefix/addresses are handled by a hierarchical tree
 
 ## Install
 
+`install.py` installs and updates both parts from a GitHub release (SHA-256
+verified): portitor-web on the host it runs on, portitor-agent on the firewall over
+SSH as `portitor` (`--ssh-user`; a user with passwordless sudo, or root). If it
+cannot log in, it prints how to create that user and its sudoers entry. Download it
+from a release, then:
+
+```sh
+./install.py --web --agent 192.168.1.1      # first install: binaries, units, example configs
+./install.py                                # later: pick a release; updates what is installed
+./install.py --install latest --yes         # unattended update
+```
+
+On an update it restarts the agent first (it rejects document fields it does not know,
+so it must not be older than the GUI), then stops portitor-web, migrates the database
+and starts it again. It finds the firewall from the agent URL under *Settings*. A
+systemd unit you changed is shown as a diff and kept unless you confirm. `--dry-run`
+shows what would change; `--source` builds and installs a source checkout instead.
+
+A first install creates the configs but starts nothing, and prints what is left to do.
+By hand, it is:
+
 On the **firewall** (Debian/Ubuntu shown; needs nftables, iproute2, wireguard-tools,
 bind9, bind9-utils, kea-dhcp4-server, kea-dhcp6-server, radvd):
 

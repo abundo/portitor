@@ -1,0 +1,62 @@
+# SPDX-FileCopyrightText: 2026 The Portitor contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+# Release archives for install.py: portitor_<version>_linux_<arch>.tar.gz
+# with both binaries, deploy/ (units, example configs) and install.py, plus
+# portitor_<version>_checksums.txt, which install.py verifies against.
+version: 2
+
+project_name: portitor
+
+# portitor-web embeds the built frontend (web/static) with -tags release.
+before:
+  hooks:
+    - npm --prefix web/frontend ci
+    - npm --prefix web/frontend run build
+
+# {{.Version}} is the tag without its v (v1.2.3 -> 1.2.3); the Makefile
+# stamps `git describe` (with the v). install.py treats them as equal.
+builds:
+  - id: portitor-web
+    main: ./cmd/portitor-web
+    binary: portitor-web
+    env: [CGO_ENABLED=0]
+    goos: [linux]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    tags: [release]
+    ldflags:
+      - -s -w -X github.com/abundo/portitor/internal/buildinfo.Version={{.Version}} -X github.com/abundo/portitor/internal/buildinfo.Commit={{.Commit}} -X github.com/abundo/portitor/internal/buildinfo.Date={{.CommitDate}}
+
+  - id: portitor-agent
+    main: ./cmd/portitor-agent
+    binary: portitor-agent
+    env: [CGO_ENABLED=0]
+    goos: [linux]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X github.com/abundo/portitor/internal/buildinfo.Version={{.Version}} -X github.com/abundo/portitor/internal/buildinfo.Commit={{.Commit}} -X github.com/abundo/portitor/internal/buildinfo.Date={{.CommitDate}}
+
+archives:
+  - formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - README.md
+      - install.py
+      - deploy/**/*
+
+checksum:
+  name_template: "{{ .ProjectName }}_{{ .Version }}_checksums.txt"
+
+changelog:
+  sort: asc
+  use: git
+
+release:
+  github:
+    owner: abundo
+    name: portitor
+  name_template: "v{{ .Version }}"

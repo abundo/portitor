@@ -94,6 +94,19 @@ deploy). `LAB_WEB_PORT` changes the published GUI port. Rootless is enough becau
 `--privileged` stays inside the user namespace. It needs the `wireguard` kernel
 module loaded on the host for `wg0`.
 
+### Releases and install.py
+
+Pushing a tag `v*` runs `.github/workflows/release.yml`: tests, then GoReleaser
+(`.goreleaser.yaml`) publishes `portitor_<version>_linux_{amd64,arm64}.tar.gz` (both
+binaries, `deploy/`, `install.py`) and a checksums file. `install.py` installs from
+those. Bump `INSTALLER_VERSION` in it whenever the installer changes: a release's copy
+runs the install unless the running copy's version is higher, and a standalone copy
+updates itself from the latest release.
+
+From a checkout, `./install.py --source` builds (`make release`, CGO off) and installs
+`build/` the same way; add `--dry-run` to see what would change, `--agent HOST` to
+target a firewall. A remote agent of another architecture gets a cross-built binary.
+
 ### Other
 
 initial code for

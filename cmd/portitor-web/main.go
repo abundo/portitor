@@ -20,6 +20,7 @@ import (
 
 	"github.com/abundo/portitor/internal/buildinfo"
 	"github.com/abundo/portitor/internal/dbmigrate"
+	"github.com/abundo/portitor/models"
 	"github.com/abundo/portitor/web"
 )
 
@@ -107,6 +108,30 @@ func main() {
 				return err
 			}
 			fmt.Println("user", args[0], "saved")
+			return nil
+		},
+	})
+
+	root.AddCommand(&cobra.Command{
+		Use:   "agent-url",
+		Short: "Print the agent URL from the settings (install.py updates that host)",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := web.LoadConfig(configFile)
+			if err != nil {
+				return err
+			}
+			db, err := web.ConnectDB(cfg.DB)
+			if err != nil {
+				return err
+			}
+			var urls []string
+			if err := db.Model(&models.Settings{}).Where("id = ?", 1).Pluck("agent_url", &urls).Error; err != nil {
+				return err
+			}
+			if len(urls) > 0 {
+				fmt.Println(urls[0])
+			}
 			return nil
 		},
 	})
