@@ -4,7 +4,8 @@
 """Setup of a firewall installed from the Portitor ISO (portitor-setup).
 
 Runs on tty1 at boot (portitor-firstboot.service) until it has finished
-once. It asks for the LAN and WAN interfaces, the LAN address (static or
+once. It asks for the keyboard layout (applied at once, so the password
+is typed with it), the LAN and WAN interfaces, the LAN address (static or
 DHCP), the WAN address (DHCP, or static with the default gateway), the DNS
 servers, a password and the time zone; before applying, LAN and WAN can be
 swapped. Then it:
@@ -25,7 +26,7 @@ Every step can be repeated; a failed one is retried with the same answers.
 
 Run again (`sudo portitor-setup`) after it has finished, it changes the
 network: the LAN and WAN interfaces (swapped, too) and addresses, the
-default gateway, the DNS servers and the time zone, with the last answers
+default gateway, the DNS servers, the time zone and the keyboard layout, with the last answers
 (SETUP_STATE) as defaults; a password is optional there. It leaves the
 database, the agent and every other interface alone, runs `portitor-web
 bootstrap --reconfigure`, and makes a new GUI certificate when the LAN
@@ -36,7 +37,7 @@ With /etc/portitor/firstboot.answers (an ISO built with `iso/build.sh
 MAC address), address (dhcp for DHCP), wan (a name or MAC address,
 optional), wan_address
 (empty: DHCP), gateway (on the static WAN, else on the LAN), dns (space
-separated), password and timezone. The file is removed when the setup has
+separated), password, timezone and keyboard (an XKB layout, e.g. se). The file is removed when the setup has
 finished.
 """
 
@@ -70,6 +71,15 @@ WEB_KEY = ETC / "web.key"
 WEB_DROPIN = Path("/etc/systemd/system/portitor-web.service.d/firstboot.conf")
 ISSUE = Path("/etc/issue.d/portitor.issue")
 RESOLV_CONF = Path("/etc/resolv.conf")
+KEYBOARD = Path("/etc/default/keyboard")
+XKB_RULES = Path("/usr/share/X11/xkb/rules/base.lst")
+# The layouts the setup lists; any other XKB layout can be typed or searched.
+LAYOUTS = [
+    ("us", "English (US)"), ("gb", "English (UK)"), ("de", "German"), ("fr", "French"),
+    ("es", "Spanish"), ("it", "Italian"), ("pt", "Portuguese"), ("nl", "Dutch"),
+    ("be", "Belgian"), ("ch", "Swiss"), ("se", "Swedish"), ("no", "Norwegian"),
+    ("dk", "Danish"), ("fi", "Finnish"), ("pl", "Polish"), ("cz", "Czech"),
+]
 PUBLIC_DNS = "1.1.1.1 8.8.8.8"
 # The login user the installer created; also the agent's console user.
 CONSOLE_USER = "portitor"
@@ -277,6 +287,75 @@ def ask_password(optional: bool = False) -> str:
         return a
 
 
+def xkb_layouts() -> dict[str, str]:
+    """The XKB layouts, code: name (the "! layout" section of base.lst)."""
+    layouts, section = {}, False
+    try:
+        lines = XKB_RULES.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return dict(LAYOUTS)
+    for line in lines:
+        if line.startswith("!"):
+            section = line.split() == ["!", "layout"]
+        elif section and line.strip():
+            code, _, name = line.strip().partition(" ")
+            layouts[code] = name.strip()
+    return layouts or dict(LAYOUTS)
+
+
+def current_layout() -> str:
+    m = re.search(r'^XKBLAYOUT="?([^",\s]*)', read(KEYBOARD), re.M)
+    return m[1] if m and m[1] else "us"
+
+
+def set_keyboard(layout: str) -> None:
+    """Writes the layout to /etc/default/keyboard and loads it on the console."""
+    text = read(KEYBOARD) or 'XKBMODEL="pc105"\nXKBLAYOUT="us"\nXKBVARIANT=""\nXKBOPTIONS=""\nBACKSPACE="guess"'
+    # A variant belongs to the old layout.
+    values = {"XKBLAYOUT": layout, "XKBVARIANT": ""}
+    lines = []
+    for line in text.splitlines():
+        key = line.partition("=")[0].strip()
+        lines.append(f'{key}="{values.pop(key)}"' if key in values else line)
+    lines += [f'{k}="{v}"' for k, v in values.items()]
+    write(KEYBOARD, "\n".join(lines) + "\n", 0o644)
+    if shutil.which("setupcon"):
+        # Fails without a console (unattended); the layout then applies at the next boot.
+        run(["setupcon", "-k", "--force"], check=False, quiet=True)
+
+
+def ask_keyboard(default: str = "") -> str:
+    """Asks for the keyboard layout and applies it at once."""
+    known = xkb_layouts()
+    default = default or current_layout()
+    say()
+    half = (len(LAYOUTS) + 1) // 2
+    for i in range(half):
+        row = ""
+        for j in (i, i + half):
+            if j < len(LAYOUTS):
+                code, name = LAYOUTS[j]
+                row += f"  {j + 1:>2}  {code:<4} {name:<22}"
+        say(row.rstrip())
+    say()
+    while True:
+        answer = ask(f"Keyboard layout (1-{len(LAYOUTS)}, a layout code, or a word to search)", default)
+        if answer.isdigit() and 1 <= int(answer) <= len(LAYOUTS):
+            answer = LAYOUTS[int(answer) - 1][0]
+        if answer in known:
+            set_keyboard(answer)
+            return answer
+        word = answer.lower()
+        found = [(c, n) for c, n in known.items() if word in c or word in n.lower()]
+        if not found:
+            say(f"  no layout matches {answer}")
+            continue
+        for code, name in found[:20]:
+            say(f"  {code:<8} {name}")
+        if len(found) > 20:
+            say(f"  ... {len(found) - 20} more; search for more of the name")
+
+
 def ask_timezone() -> str:
     current = run(["timedatectl", "show", "-p", "Timezone", "--value"], check=False, quiet=True).stdout.strip() or "Etc/UTC"
     while True:
@@ -317,6 +396,10 @@ def step_dns(a: dict) -> None:
         RESOLV_CONF.unlink()
     write(RESOLV_CONF, "# Written by the Portitor first-boot setup.\n"
           + "".join(f"nameserver {d}\n" for d in a["dns"]), 0o644)
+
+
+def step_keyboard(a: dict) -> None:
+    set_keyboard(a["keyboard"])
 
 
 def step_timezone(a: dict) -> None:
@@ -467,6 +550,7 @@ Certificate SHA-256: {fp}
 
 # The first setup.
 STEPS = [
+    ("Keyboard layout", step_keyboard),
     ("Interfaces", step_links),
     ("DNS servers", step_dns),
     ("Time zone", step_timezone),
@@ -481,6 +565,7 @@ STEPS = [
 
 # Run again: the network only.
 RECONFIGURE_STEPS = [
+    ("Keyboard layout", step_keyboard),
     ("DNS servers", step_dns),
     ("Time zone", step_timezone),
     ("GUI certificate", step_new_cert),
@@ -505,6 +590,10 @@ def read_answers() -> dict:
                 return n["name"]
         raise RuntimeError(f"{ANSWERS}: no {key} interface {raw.get(key)!r}")
 
+    keyboard = raw.get("keyboard") or current_layout()
+    if keyboard not in xkb_layouts():
+        raise RuntimeError(f"{ANSWERS}: no keyboard layout {keyboard!r}")
+
     return {
         "lan": nic("lan"),
         "address": None if raw["address"].lower() == "dhcp" else ipaddress.IPv4Interface(raw["address"]),
@@ -514,6 +603,7 @@ def read_answers() -> dict:
         "dns": parse_dns(raw.get("dns") or PUBLIC_DNS),
         "password": raw["password"],
         "tz": raw.get("timezone") or "Etc/UTC",
+        "keyboard": keyboard,
     }
 
 
@@ -528,7 +618,7 @@ def load_state() -> dict:
 
 def state_of(a: dict) -> dict:
     """The answers as strings, without the password; a DHCP LAN is "dhcp"."""
-    state = {k: str(a[k]) if a[k] else "" for k in ("lan", "wan", "wan_address", "gateway", "tz")}
+    state = {k: str(a[k]) if a[k] else "" for k in ("lan", "wan", "wan_address", "gateway", "tz", "keyboard")}
     state["address"] = str(a["address"] or "dhcp")
     state["dns"] = " ".join(a["dns"])
     return state
@@ -587,6 +677,7 @@ def summary(a: dict) -> None:
     say(f"  Default gateway {a['gateway'] or 'from DHCP'}")
     say(f"  DNS servers     {' '.join(a['dns'])}")
     say(f"  Time zone       {a['tz']}")
+    say(f"  Keyboard        {a['keyboard']}")
     if a.get("reconfigure"):
         say(f"  Password        {'new' if a['password'] else 'unchanged'}")
 
@@ -622,12 +713,15 @@ def reconfigure() -> int:
     say("Portitor setup: change the network")
     say("==================================")
     say("The first setup has run already. This changes the LAN and WAN interfaces and")
-    say("addresses, the default gateway, the DNS servers and the time zone, and deploys")
-    say("at once, without the confirm timeout. Other settings are kept. A session over")
-    say("the old LAN address drops; the console is the safe place to run this.")
+    say("addresses, the default gateway, the DNS servers, the time zone and the keyboard")
+    say("layout, and deploys at once, without the confirm timeout. Other settings are")
+    say("kept. A session over the old LAN address drops; the console is the safe place")
+    say("to run this.")
     # The agent owns the links now: an interface it keeps down shows no link.
     while True:
+        keyboard = ask_keyboard(state.get("keyboard", ""))
         a = ask_network(state)
+        a["keyboard"] = keyboard
         a["tz"] = ask_timezone()
         say()
         say(f"A new password for the GUI user {GUI_USER} and the console login {CONSOLE_USER}?")
@@ -666,7 +760,10 @@ def main() -> int:
     links_up()
     state: dict = {}
     while True:
+        # First: the password is typed with it.
+        keyboard = ask_keyboard(state.get("keyboard", ""))
         a = ask_network(state)
+        a["keyboard"] = keyboard
         say()
         say(f"One password for the GUI user {GUI_USER} and the console login {CONSOLE_USER}.")
         a["password"] = ask_password()

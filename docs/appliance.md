@@ -32,7 +32,11 @@ AppArmor stays on. Debian's profiles for BIND and Kea get Portitor's paths added
 
 ## First-boot setup
 
-The setup lists the network interfaces with their MAC addresses and whether a cable is
+The setup first asks for the **keyboard layout**: a number from the list of common
+layouts, an XKB layout code (e.g. `se`), or a word that searches the layout names. It
+applies at once, so the password is typed with it.
+
+It then lists the network interfaces with their MAC addresses and whether a cable is
 plugged in (*r* reloads the list, so you can plug cables in and watch). It then asks
 for:
 
@@ -81,7 +85,7 @@ run `sudo portitor-setup` after logging in as `portitor` at the console.
 
 `sudo portitor-setup`, run again after the first setup, changes the network: the LAN
 and WAN interfaces (or swaps them), DHCP or a static address on each, the default gateway,
-the DNS servers and the time zone. The last answers are the defaults. A new password
+the DNS servers, the time zone and the keyboard layout. The last answers are the defaults. A new password
 for `admin` and `portitor` is optional; leave it empty to keep the current one. This
 is also the way back in when a change in the GUI has locked you out of it.
 
