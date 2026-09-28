@@ -93,6 +93,12 @@ AGENT_UNITS = (
     "portitor-kea6@.service",
     "portitor-radvd@.service",
 )
+# Debian/Ubuntu confine named and Kea with AppArmor; our rules
+# (deploy/apparmor/<profile>) go in each profile's local include, between
+# markers so the admin's own lines are kept.
+APPARMOR_DIR = "/etc/apparmor.d"
+APPARMOR_BEGIN = "# BEGIN portitor (managed by install.py)"
+APPARMOR_END = "# END portitor"
 LOCAL_NAMES = {"localhost", "127.0.0.1", "::1", ""}
 
 SELF_UPDATED_ENV = "PORTITOR_INSTALL_SELF_UPDATED"
@@ -401,6 +407,7 @@ def install_agent(host: Host, binary: Path, deploy: Path, version: str, assume_y
     host.put(binary, AGENT_BIN, "0755")
     actions = {u: install_unit(host, deploy / "systemd" / u, assume_yes) for u in AGENT_UNITS}
     host.systemctl("daemon-reload")
+    install_apparmor(host, deploy)
     if new_config:
         on = "" if host.local else f" (on {host.name})"
         log(f"==> portitor-agent is installed but not started. Next steps{on}:")
@@ -421,6 +428,50 @@ def install_agent(host: Host, binary: Path, deploy: Path, version: str, assume_y
         if host.run(f"systemctl is-active --quiet {AGENT_UNIT}", check=False, mutate=False).returncode:
             warn(f"{AGENT_UNIT} is not running on {host}; see journalctl -u {AGENT_UNIT}")
     verify_version(host, AGENT_BIN, version)
+
+
+def replace_marked_block(text: str, begin: str, end: str, block: str) -> str:
+    """text with the lines from begin to end replaced by block (appended if absent)."""
+    lines = text.splitlines()
+    try:
+        i = lines.index(begin)
+        j = lines.index(end, i)
+    except ValueError:
+        i = j = -1
+    if i >= 0:
+        del lines[i : j + 1]
+    else:
+        while lines and not lines[-1].strip():
+            lines.pop()
+        if lines:
+            lines.append("")
+        i = len(lines)
+    lines[i:i] = [begin, *block.strip("\n").splitlines(), end]
+    return "\n".join(lines) + "\n"
+
+
+def install_apparmor(host: Host, deploy: Path) -> None:
+    """Let named and Kea (portitor-named@, -kea4@, -kea6@) use Portitor's paths.
+
+    Without this, they fail on Debian/Ubuntu with "permission denied" on
+    their config, PID or lock files. Written whenever /etc/apparmor.d exists,
+    so a package installed later loads the rules with its profile.
+    """
+    src_dir = deploy / "apparmor"
+    if not src_dir.is_dir() or not host.exists(APPARMOR_DIR):
+        return
+    # Not in a chroot (the installer ISO) or without AppArmor in the kernel.
+    active = host.exists("/sys/kernel/security/apparmor/profiles")
+    for src in sorted(src_dir.iterdir()):
+        local = f"{APPARMOR_DIR}/local/{src.name}"
+        current = host.read(local) or ""
+        text = replace_marked_block(current, APPARMOR_BEGIN, APPARMOR_END, src.read_text(encoding="utf-8"))
+        if text == current:
+            continue
+        host.put_text(text, local, "0644")
+        profile = f"{APPARMOR_DIR}/{src.name}"
+        if active and host.exists(profile):
+            host.run(f"apparmor_parser -r {shlex.quote(profile)}", check=False)
 
 
 def install_web(host: Host, binary: Path, deploy: Path, version: str, assume_yes: bool) -> None:

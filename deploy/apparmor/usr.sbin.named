@@ -1,0 +1,14 @@
+# SPDX-FileCopyrightText: 2026 The Portitor contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# BIND per Portitor instance (portitor-named@.service). The AppArmor profile
+# for named on Debian/Ubuntu only allows /etc/bind, /var/lib/bind and
+# /var/cache/bind; install.py adds these rules to the profile's local include
+# (/etc/apparmor.d/local/usr.sbin.named). The paths are the defaults of
+# etc_dir, state_dir and run_dir in /etc/portitor/agent.yaml.
+/etc/portitor/instances/*/named.conf* r,
+/var/lib/portitor/instances/*/bind/ r,
+/var/lib/portitor/instances/*/bind/** rwk,
+/var/lib/portitor/instances/*/zones/ r,
+/var/lib/portitor/instances/*/zones/** rwk,
+/run/portitor/named-*.pid rw,

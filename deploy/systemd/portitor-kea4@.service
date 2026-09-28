@@ -15,8 +15,10 @@ Restart=on-failure
 RestartSec=5
 # Kea 2.6 refuses a control socket directory other than mode 0750. The PID
 # file is named after the config file, the same for every instance, so each
-# instance gets its own directory.
+# instance gets its own directory; the logger's lock file goes there too, as
+# /run/kea/logger_lockfile may belong to Debian's own Kea (user _kea).
 Environment=KEA_PIDFILE_DIR=/run/kea/%i
+Environment=KEA_LOCKFILE_DIR=/run/kea/%i
 RuntimeDirectory=kea kea/%i
 RuntimeDirectoryMode=0750
 RuntimeDirectoryPreserve=yes

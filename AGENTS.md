@@ -120,6 +120,10 @@ shebang. Files that cannot hold a comment go in `REUSE.toml`. Commits carry a DC
   and zones refer to them by name. A zone without a template gets the built-in
   localhost SOA/NS. dnsmgr2 writes only `dnssec-policy "<name>"`; the policy body
   is rendered into `named.conf`.
+- Debian/Ubuntu confine named, Kea, kea-lfc (and `wg`) with AppArmor: a path outside the
+  profile fails as "permission denied" despite the file mode, even as root.
+  `install.py` adds `deploy/apparmor/<profile>` to `/etc/apparmor.d/local/<profile>`;
+  a new path named or Kea reads or writes must be added there.
 - `portitor-agent netns-exec` reads `<state_dir>/instances/<name>/netns`, written on
   apply; the per-instance systemd units start through it.
 - `pkill -f portitor-web` also matches a shell whose command line contains that text;

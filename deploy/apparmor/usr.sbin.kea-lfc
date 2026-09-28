@@ -1,0 +1,9 @@
+# SPDX-FileCopyrightText: 2026 The Portitor contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# The lease file cleanup that kea-dhcp4/kea-dhcp6 start (Px: its own
+# AppArmor profile on Debian/Ubuntu, which only knows Kea's own lease file
+# names). install.py adds these rules to the profile's local include
+# (/etc/apparmor.d/local/usr.sbin.kea-lfc). The path is the default of
+# kea_data_dir in /etc/portitor/agent.yaml.
+/var/lib/kea/kea-leases[46]-*.csv* rw,

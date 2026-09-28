@@ -1,0 +1,17 @@
+# SPDX-FileCopyrightText: 2026 The Portitor contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# Kea DHCPv6 per Portitor instance (portitor-kea6@.service). The AppArmor
+# profile for kea-dhcp6 on Debian/Ubuntu only allows Kea's own file names;
+# install.py adds these rules to the profile's local include
+# (/etc/apparmor.d/local/usr.sbin.kea-dhcp6). The paths are the defaults of
+# etc_dir, kea_data_dir and kea_socket_dir in /etc/portitor/agent.yaml, and
+# the unit's KEA_PIDFILE_DIR and KEA_LOCKFILE_DIR.
+/etc/portitor/instances/*/kea-dhcp6.conf r,
+/etc/portitor/instances/*/kea-dhcp6.dnsmgr2.json r,
+/var/lib/kea/kea-leases6-*.csv* rwk,
+/run/kea/kea6-*.sock rw,
+/run/kea/kea6-*.sock.lock rwk,
+/run/kea/*/ r,
+/run/kea/*/kea-dhcp6.kea-dhcp6.pid rwk,
+/run/kea/*/logger_lockfile rwk,
