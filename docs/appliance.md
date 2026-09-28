@@ -38,13 +38,13 @@ for:
 
 - **LAN interface**: where you reach the GUI from.
 - **LAN address** with its prefix length, e.g. `192.168.1.1/24`.
-- **Default gateway** (optional): only when the firewall reaches the Internet through
-  the LAN for now. Leave it empty if you will configure a WAN interface with DHCP in the
-  GUI.
+- **WAN interface**: where the firewall reaches the Internet, for updates and IP lists.
+- **WAN IPv4**: `dhcp` (the default), which also brings the default gateway, or
+  `static`, which asks for the WAN address with its prefix length and the **default
+  gateway**.
 - **DNS servers** the firewall itself uses, for updates and IP lists. The default is
-  the gateway, or public resolvers without one. They are written to
-  `/etc/resolv.conf`; the agent does not change that file, not even from the WAN's
-  DHCP lease.
+  `1.1.1.1 8.8.8.8`. They are written to `/etc/resolv.conf`; the agent does not change
+  that file, not even from the WAN's DHCP lease.
 - **Password**: for the GUI user `admin` and for the console login `portitor`, who has
   sudo.
 - **Time zone**: used by scheduled tasks.
@@ -53,7 +53,8 @@ Then it creates the database, starts the agent and the GUI, and deploys a first
 configuration:
 
 - the LAN interface with its address,
-- the default route (if you gave one),
+- the WAN interface, with DHCP or its static address,
+- the default route (for a static WAN),
 - two input rules, *portitor-web from the LAN* (TCP 443) and *ping from the LAN*,
 - every other interface as it is (down, no address).
 
@@ -62,9 +63,8 @@ screen shows them too. Open `https://<LAN address>/` from the LAN and log in as 
 The browser warns about the self-signed certificate; compare the fingerprint it shows
 with the one on the screen.
 
-Next steps in the GUI: configure the WAN interface (*Network → Interfaces*, IPv4 mode
-DHCP), a masquerade rule (*Firewall → NAT*), forward rules from the LAN to the WAN, and
-DHCP and DNS for the LAN. See [portitor-web](portitor-web.md).
+Next steps in the GUI: a masquerade rule (*Firewall → NAT*), forward rules from the LAN
+to the WAN, and DHCP and DNS for the LAN. See [portitor-web](portitor-web.md).
 
 If a step fails, the setup shows the error and offers to retry it; its log is
 `/var/log/portitor-firstboot.log`. If you give up, it runs again at the next boot, or

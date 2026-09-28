@@ -138,14 +138,14 @@ func main() {
 	})
 
 	var bo web.BootstrapOptions
-	var tokenFile, address, gateway string
+	var tokenFile, address, wanAddress, gateway string
 	bootstrap := &cobra.Command{
 		Use:   "bootstrap",
 		Short: "Configure and deploy a new firewall that runs portitor-web itself (installer ISO)",
-		Long: `Stores the agent settings, configures the LAN interface with its address
-(and the default route), accepts the GUI port and ping from the LAN, and
-deploys. Every other interface of the firewall is imported as it is.
-Refused once anything has been deployed.`,
+		Long: `Stores the agent settings, configures the LAN interface with its address,
+the WAN interface (static or DHCP) and the default route, accepts the GUI
+port and ping from the LAN, and deploys. Every other interface of the
+firewall is imported as it is. Refused once anything has been deployed.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, srv, err := load()
@@ -159,6 +159,11 @@ Refused once anything has been deployed.`,
 			bo.AgentToken = strings.TrimSpace(string(tok))
 			if bo.Address, err = netip.ParsePrefix(address); err != nil {
 				return fmt.Errorf("--address: %w", err)
+			}
+			if wanAddress != "" {
+				if bo.WANAddress, err = netip.ParsePrefix(wanAddress); err != nil {
+					return fmt.Errorf("--wan-address: %w", err)
+				}
 			}
 			if gateway != "" {
 				if bo.Gateway, err = netip.ParseAddr(gateway); err != nil {
@@ -182,7 +187,9 @@ Refused once anything has been deployed.`,
 	bf.StringVar(&bo.AgentFingerprint, "agent-fingerprint", "", "agent certificate SHA-256 (from portitor-agent init)")
 	bf.StringVar(&bo.LAN, "lan", "", "LAN interface")
 	bf.StringVar(&address, "address", "", "LAN address with prefix length, e.g. 192.168.1.1/24")
-	bf.StringVar(&gateway, "gateway", "", "default gateway (optional)")
+	bf.StringVar(&bo.WAN, "wan", "", "WAN interface (optional)")
+	bf.StringVar(&wanAddress, "wan-address", "", "static WAN address with prefix length (default: DHCP)")
+	bf.StringVar(&gateway, "gateway", "", "default gateway (optional; on the WAN if it is static, else on the LAN)")
 	bf.IntVar(&bo.GUIPort, "gui-port", 443, "port to open for portitor-web on the LAN")
 	for _, f := range []string{"agent-fingerprint", "lan", "address"} {
 		_ = bootstrap.MarkFlagRequired(f)

@@ -4,8 +4,9 @@
 """First-boot setup of a firewall installed from the Portitor ISO.
 
 Runs on tty1 (portitor-firstboot.service) until it has finished once. It
-asks for the LAN interface, its address and the default gateway, the DNS
-servers, a password and the time zone, then:
+asks for the LAN interface and its address, the WAN interface (DHCP, or a
+static address and the default gateway), the DNS servers, a password and
+the time zone, then:
 
   - writes /etc/resolv.conf (the agent does not manage the firewall's own
     resolver; the one from the installation may be unreachable now),
@@ -13,17 +14,18 @@ servers, a password and the time zone, then:
     self-signed certificate for the GUI on port 443,
   - creates the GUI user admin, and sets the console user's password,
   - sets the agent up on 127.0.0.1 (portitor-web runs on the firewall itself),
-  - runs `portitor-web bootstrap`: LAN address, default route, rules for the
-    GUI and ping from the LAN, and deploys,
+  - runs `portitor-web bootstrap`: LAN address, WAN (DHCP or static),
+    default route, rules for the GUI and ping from the LAN, and deploys,
   - starts portitor-web and writes the GUI's address to /etc/issue.d.
 
 Every step can be repeated; a failed one is retried with the same answers.
 
 With /etc/portitor/firstboot.answers (an ISO built with `iso/build.sh
 --test`), nothing is asked: it holds "key: value" lines for lan (a name or
-MAC address), address, gateway, dns (space separated), password and
-timezone. The file is removed
-when the setup has finished.
+MAC address), address, wan (a name or MAC address, optional), wan_address
+(empty: DHCP), gateway (on the static WAN, else on the LAN), dns (space
+separated), password and timezone. The file is removed when the setup has
+finished.
 """
 
 from __future__ import annotations
@@ -53,7 +55,7 @@ WEB_KEY = ETC / "web.key"
 WEB_DROPIN = Path("/etc/systemd/system/portitor-web.service.d/firstboot.conf")
 ISSUE = Path("/etc/issue.d/portitor.issue")
 RESOLV_CONF = Path("/etc/resolv.conf")
-PUBLIC_DNS = "9.9.9.9 1.1.1.1"
+PUBLIC_DNS = "1.1.1.1 8.8.8.8"
 # The login user the installer created; also the agent's console user.
 CONSOLE_USER = "portitor"
 WEB_GROUP = "portitor"
@@ -133,11 +135,7 @@ def ask(prompt: str, default: str = "") -> str:
             return answer or default
 
 
-def ask_lan() -> str:
-    # Links must be up to show whether a cable is plugged in.
-    for n in nics():
-        run(["ip", "link", "set", n["name"], "up"], check=False, quiet=True)
-    time.sleep(2)
+def ask_nic(role: str, explain: str, taken: str = "") -> str:
     while True:
         found = nics()
         if not found:
@@ -148,23 +146,44 @@ def ask_lan() -> str:
         say("  #  Interface        MAC                Link     Driver")
         for i, n in enumerate(found, 1):
             link = "up" if n["carrier"] else "no link"
-            say(f"  {i}  {n['name']:<16} {n['mac']:<18} {link:<8} {n['driver']} {n['speed']}")
+            used = "  (LAN)" if n["name"] == taken else ""
+            say(f"  {i}  {n['name']:<16} {n['mac']:<18} {link:<8} {n['driver']} {n['speed']}{used}")
         say()
-        say("The LAN interface is where you reach the GUI from. Plug in its cable to see")
-        say("which one it is; r reloads the list.")
-        answer = ask(f"LAN interface (1-{len(found)} or name, r reloads)")
+        say(explain)
+        answer = ask(f"{role} interface (1-{len(found)} or name, r reloads)")
         if answer.lower() == "r":
             continue
         if answer.isdigit() and 1 <= int(answer) <= len(found):
-            return found[int(answer) - 1]["name"]
-        if any(n["name"] == answer for n in found):
+            answer = found[int(answer) - 1]["name"]
+        if not any(n["name"] == answer for n in found):
+            say(f"  no interface {answer}")
+        elif answer == taken:
+            say(f"  {answer} is the LAN interface")
+        else:
             return answer
-        say(f"  no interface {answer}")
 
 
-def ask_address() -> ipaddress.IPv4Interface:
+def links_up() -> None:
+    # Links must be up to show whether a cable is plugged in.
+    for n in nics():
+        run(["ip", "link", "set", n["name"], "up"], check=False, quiet=True)
+    time.sleep(2)
+
+
+def ask_lan() -> str:
+    return ask_nic("LAN", "The LAN interface is where you reach the GUI from. Plug in its cable to see\n"
+                   "which one it is; r reloads the list.")
+
+
+def ask_wan(lan: str) -> str:
+    return ask_nic("WAN", "The WAN interface connects to the Internet, which the firewall needs for\n"
+                   "updates. Plug in its cable to see which one it is; r reloads the list.", lan)
+
+
+def ask_address(role: str, default: str = "",
+                other: ipaddress.IPv4Interface | None = None) -> ipaddress.IPv4Interface:
     while True:
-        answer = ask("LAN address with prefix length", "192.168.1.1/24")
+        answer = ask(f"{role} address with prefix length", default)
         try:
             iface = ipaddress.IPv4Interface(answer)
         except ValueError:
@@ -177,17 +196,26 @@ def ask_address() -> ipaddress.IPv4Interface:
             say(f"  {iface.ip} is the network or broadcast address of {net}")
         elif net.prefixlen > 30:
             say("  use a prefix length of 30 or less")
+        elif other and net.overlaps(other.network):
+            say(f"  {net} overlaps the LAN {other.network}")
         else:
             return iface
 
 
-def ask_gateway(addr: ipaddress.IPv4Interface) -> ipaddress.IPv4Address | None:
-    say("The default gateway is optional: leave it empty when the WAN interface will")
-    say("get it by DHCP (configure the WAN in the GUI).")
+def ask_wan_address(lan: ipaddress.IPv4Interface) -> ipaddress.IPv4Interface | None:
+    """None is DHCP."""
     while True:
-        answer = input("Default gateway (empty: none): ").strip()
-        if not answer:
+        answer = ask("WAN IPv4: dhcp or static", "dhcp").lower()
+        if answer == "dhcp":
             return None
+        if answer == "static":
+            return ask_address("WAN", other=lan)
+        say("  dhcp or static")
+
+
+def ask_gateway(addr: ipaddress.IPv4Interface) -> ipaddress.IPv4Address:
+    while True:
+        answer = ask("Default gateway")
         try:
             gw = ipaddress.IPv4Address(answer)
         except ValueError:
@@ -206,10 +234,10 @@ def parse_dns(answer: str) -> list[str]:
     return servers
 
 
-def ask_dns(gateway: ipaddress.IPv4Address | None) -> list[str]:
+def ask_dns() -> list[str]:
     say("DNS servers the firewall itself uses (updates, IP lists).")
     while True:
-        answer = ask("DNS servers", str(gateway) if gateway else PUBLIC_DNS)
+        answer = ask("DNS servers", PUBLIC_DNS)
         try:
             return parse_dns(answer)
         except ValueError:
@@ -256,9 +284,10 @@ def web(*args: str) -> list[str]:
 
 
 def step_links(a: dict) -> None:
-    # Only the LAN stays up; the others are imported as they are, so down.
+    # Only the LAN and the WAN stay up; the others are imported as they
+    # are, so down.
     for n in nics():
-        if n["name"] != a["lan"]:
+        if n["name"] not in (a["lan"], a["wan"]):
             run(["ip", "link", "set", n["name"], "down"], check=False, quiet=True)
 
 
@@ -341,6 +370,10 @@ def step_bootstrap(a: dict) -> None:
         "--agent-fingerprint", a["fingerprint"],
         "--lan", a["lan"], "--address", str(a["address"]), "--gui-port", str(GUI_PORT),
     )
+    if a["wan"]:
+        argv += ["--wan", a["wan"]]
+    if a["wan_address"]:
+        argv += ["--wan-address", str(a["wan_address"])]
     if a["gateway"]:
         argv += ["--gateway", str(a["gateway"])]
     proc = run(argv, stdin=AGENT_TOKEN.read_text(encoding="utf-8"), check=False)
@@ -381,7 +414,7 @@ STEPS = [
     ("portitor-web configuration", step_web_config),
     ("Users", step_users),
     ("portitor-agent", step_agent),
-    ("Deploy the LAN configuration", step_bootstrap),
+    ("Deploy the LAN and WAN configuration", step_bootstrap),
     ("Start portitor-web", step_web),
     ("Login screen", step_issue),
 ]
@@ -394,15 +427,18 @@ def read_answers() -> dict:
         k, sep, v = line.partition(":")
         if sep and not line.lstrip().startswith("#"):
             raw[k.strip()] = v.strip()
-    for n in nics():
-        if raw.get("lan", "").lower() in (n["name"], n["mac"].lower()):
-            lan = n["name"]
-            break
-    else:
-        raise RuntimeError(f"{ANSWERS}: no interface {raw.get('lan')!r}")
+
+    def nic(key: str) -> str:
+        for n in nics():
+            if raw.get(key, "").lower() in (n["name"], n["mac"].lower()):
+                return n["name"]
+        raise RuntimeError(f"{ANSWERS}: no {key} interface {raw.get(key)!r}")
+
     return {
-        "lan": lan,
+        "lan": nic("lan"),
         "address": ipaddress.IPv4Interface(raw["address"]),
+        "wan": nic("wan") if raw.get("wan") else "",
+        "wan_address": ipaddress.IPv4Interface(raw["wan_address"]) if raw.get("wan_address") else None,
         "gateway": ipaddress.IPv4Address(raw["gateway"]) if raw.get("gateway") else None,
         "dns": parse_dns(raw.get("dns") or PUBLIC_DNS),
         "password": raw["password"],
@@ -448,10 +484,15 @@ def main() -> int:
     say()
     say("Portitor first-boot setup")
     say("=========================")
+    links_up()
     lan = ask_lan()
-    address = ask_address()
-    gateway = ask_gateway(address)
-    dns = ask_dns(gateway)
+    address = ask_address("LAN", "192.168.1.1/24")
+    wan = ask_wan(lan)
+    wan_address = ask_wan_address(address)
+    # DHCP brings the default gateway.
+    gateway = ask_gateway(wan_address) if wan_address else None
+    say()
+    dns = ask_dns()
     say()
     say(f"One password for the GUI user {GUI_USER} and the console login {CONSOLE_USER}.")
     password = ask_password()
@@ -459,13 +500,16 @@ def main() -> int:
     say()
     say(f"  LAN interface   {lan}")
     say(f"  LAN address     {address}")
-    say(f"  Default gateway {gateway or '(none)'}")
+    say(f"  WAN interface   {wan}")
+    say(f"  WAN address     {wan_address or 'DHCP'}")
+    say(f"  Default gateway {gateway or 'from DHCP'}")
     say(f"  DNS servers     {' '.join(dns)}")
     say(f"  Time zone       {tz}")
     if ask("Apply? (y/n)", "y").lower() not in ("y", "yes"):
         return main()
 
-    a = {"lan": lan, "address": address, "gateway": gateway, "dns": dns, "password": password, "tz": tz}
+    a = {"lan": lan, "address": address, "wan": wan, "wan_address": wan_address, "gateway": gateway,
+         "dns": dns, "password": password, "tz": tz}
     if not run_steps(a, interactive=True):
         return 1
     say()

@@ -31,7 +31,12 @@ type BootstrapOptions struct {
 	// prefix length) on it.
 	LAN     string
 	Address netip.Prefix
-	// Gateway, if valid, becomes the default route.
+	// WAN, if set, is the interface to the Internet: static with
+	// WANAddress, or DHCP (which brings the default route) without.
+	WAN        string
+	WANAddress netip.Prefix
+	// Gateway, if valid, becomes the default route. It is on the WAN when
+	// that is static, else on the LAN; a DHCP WAN takes none.
 	Gateway netip.Addr
 	// GUIPort is portitor-web's port, opened on the LAN.
 	GUIPort int
@@ -44,26 +49,55 @@ func (o *BootstrapOptions) check() error {
 	if !o.Address.IsValid() {
 		return errors.New("the LAN address is required (address/prefix length)")
 	}
-	a := o.Address.Addr()
-	if !a.IsGlobalUnicast() {
-		return fmt.Errorf("%s is not a unicast address", a)
+	if err := checkHostPrefix("LAN", o.Address); err != nil {
+		return err
 	}
-	if a.Is4() && o.Address.Bits() < 31 {
-		net := o.Address.Masked().Addr()
-		if a == net {
-			return fmt.Errorf("%s is the network address of %s", a, o.Address.Masked())
+	gwNet := o.Address
+	if o.WAN != "" {
+		if !fwconfig.ValidIfname(o.WAN) {
+			return fmt.Errorf("invalid interface name %q", o.WAN)
 		}
-		if a == broadcast(o.Address) {
-			return fmt.Errorf("%s is the broadcast address of %s", a, o.Address.Masked())
+		if o.WAN == o.LAN {
+			return errors.New("the WAN and the LAN must be different interfaces")
 		}
+		if o.WANAddress.IsValid() {
+			if err := checkHostPrefix("WAN", o.WANAddress); err != nil {
+				return err
+			}
+			if o.WANAddress.Overlaps(o.Address) {
+				return fmt.Errorf("the WAN %s overlaps the LAN %s", o.WANAddress.Masked(), o.Address.Masked())
+			}
+			gwNet = o.WANAddress
+		} else if o.Gateway.IsValid() {
+			return errors.New("the WAN uses DHCP, which brings the default gateway")
+		}
+	} else if o.WANAddress.IsValid() {
+		return errors.New("a WAN address needs the WAN interface")
 	}
 	if o.Gateway.IsValid() {
-		if !o.Address.Contains(o.Gateway) || o.Gateway == a {
-			return fmt.Errorf("the gateway %s must be another address in %s", o.Gateway, o.Address.Masked())
+		if !gwNet.Contains(o.Gateway) || o.Gateway == gwNet.Addr() {
+			return fmt.Errorf("the gateway %s must be another address in %s", o.Gateway, gwNet.Masked())
 		}
 	}
 	if o.GUIPort < 1 || o.GUIPort > 65535 {
 		return fmt.Errorf("invalid GUI port %d", o.GUIPort)
+	}
+	return nil
+}
+
+// checkHostPrefix checks an interface address with its prefix length.
+func checkHostPrefix(what string, p netip.Prefix) error {
+	a := p.Addr()
+	if !a.IsGlobalUnicast() {
+		return fmt.Errorf("%s: %s is not a unicast address", what, a)
+	}
+	if a.Is4() && p.Bits() < 31 {
+		if a == p.Masked().Addr() {
+			return fmt.Errorf("%s: %s is the network address of %s", what, a, p.Masked())
+		}
+		if a == broadcast(p) {
+			return fmt.Errorf("%s: %s is the broadcast address of %s", what, a, p.Masked())
+		}
 	}
 	return nil
 }
@@ -78,8 +112,9 @@ func broadcast(p netip.Prefix) netip.Addr {
 }
 
 // Bootstrap configures a new installation and deploys it: the agent
-// settings, the LAN interface with its address, the default route, and
-// rules that let the LAN reach the GUI and ping the firewall. Every other
+// settings, the LAN interface with its address, the WAN interface (static
+// or DHCP), the default route, and rules that let the LAN reach the GUI and
+// ping the firewall. Every other
 // interface is imported as it is (syncNICs). It refuses once anything has
 // been deployed. A failed run can be repeated.
 func Bootstrap(ctx context.Context, s *Server, o BootstrapOptions) (*models.Deployment, error) {
@@ -132,7 +167,7 @@ func Bootstrap(ctx context.Context, s *Server, o BootstrapOptions) (*models.Depl
 		if err := tx.Where("is_default = ?", true).First(&in).Error; err != nil {
 			return err
 		}
-		return bootstrapLAN(tx, in.ID, o)
+		return bootstrapNetwork(tx, in.ID, o)
 	})
 	var br *badRequest
 	if errors.As(err, &br) {
@@ -150,67 +185,21 @@ func Bootstrap(ctx context.Context, s *Server, o BootstrapOptions) (*models.Depl
 		}
 		return dep, err
 	}
-	slog.Info("bootstrap deployed", "lan", o.LAN, "address", o.Address, "generation", dep.Generation)
+	slog.Info("bootstrap deployed", "lan", o.LAN, "address", o.Address, "wan", o.WAN, "generation", dep.Generation)
 	return dep, nil
 }
 
-func bootstrapLAN(tx *gorm.DB, instanceID uint, o BootstrapOptions) error {
-	var ifc models.Interface
-	if err := tx.Where("instance_id = ? AND name = ?", instanceID, o.LAN).First(&ifc).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return bad(fmt.Sprintf("the agent reports no interface %s", o.LAN))
+func bootstrapNetwork(tx *gorm.DB, instanceID uint, o BootstrapOptions) error {
+	if _, err := bootstrapIface(tx, instanceID, o.LAN, o.Address, "LAN", "firewall (GUI)"); err != nil {
+		return err
+	}
+	if o.WAN != "" {
+		if _, err := bootstrapIface(tx, instanceID, o.WAN, o.WANAddress, "WAN", "firewall (WAN)"); err != nil {
+			return err
 		}
-		return err
-	}
-	old := ifc
-	ifc.Enabled = true
-	if o.Address.Addr().Is4() {
-		ifc.Ipv4Mode = fwconfig.ModeStatic
-	}
-	if err := prepareInterface(tx, &ifc, &old); err != nil {
-		return err
-	}
-	if err := tx.Save(&ifc).Error; err != nil {
-		return err
 	}
 
-	prefix := o.Address.Masked().String()
 	var n int64
-	if err := tx.Model(&models.IpamPrefix{}).Where("instance_id = ? AND prefix = ?", instanceID, prefix).Count(&n).Error; err != nil {
-		return err
-	}
-	if n == 0 {
-		p := models.IpamPrefix{InstanceID: instanceID, Prefix: prefix, Description: "LAN", DhcpDnsServers: models.StringList{}}
-		if err := prepareIpamPrefix(tx, &p, nil); err != nil {
-			return err
-		}
-		if err := tx.Create(&p).Error; err != nil {
-			return err
-		}
-	}
-
-	addr := o.Address.Addr().String()
-	var ia models.IpamAddress
-	err := tx.Where("instance_id = ? AND address = ?", instanceID, addr).First(&ia).Error
-	switch {
-	case errors.Is(err, gorm.ErrRecordNotFound):
-		ia = models.IpamAddress{InstanceID: instanceID, Address: addr, InterfaceID: &ifc.ID, Description: "firewall (GUI)"}
-		if err := prepareIpamAddress(tx, &ia, nil); err != nil {
-			return err
-		}
-		if err := tx.Create(&ia).Error; err != nil {
-			return err
-		}
-	case err != nil:
-		return err
-	case ia.InterfaceID != nil && *ia.InterfaceID != ifc.ID:
-		return bad(fmt.Sprintf("%s is assigned to another interface", addr))
-	default:
-		if err := tx.Model(&ia).Update("interface_id", ifc.ID).Error; err != nil {
-			return err
-		}
-	}
-
 	if o.Gateway.IsValid() {
 		dest := "0.0.0.0/0"
 		if o.Gateway.Is6() {
@@ -251,4 +240,71 @@ func bootstrapLAN(tx *gorm.DB, instanceID uint, o BootstrapOptions) error {
 		}
 	}
 	return nil
+}
+
+// bootstrapIface enables an interface: static with address (its prefix and
+// address go into IPAM), or DHCP when address is not valid.
+func bootstrapIface(tx *gorm.DB, instanceID uint, name string, address netip.Prefix, prefixDesc, addrDesc string) (*models.Interface, error) {
+	var ifc models.Interface
+	if err := tx.Where("instance_id = ? AND name = ?", instanceID, name).First(&ifc).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, bad(fmt.Sprintf("the agent reports no interface %s", name))
+		}
+		return nil, err
+	}
+	old := ifc
+	ifc.Enabled = true
+	switch {
+	case !address.IsValid():
+		ifc.Ipv4Mode = fwconfig.ModeDHCP
+	case address.Addr().Is4():
+		ifc.Ipv4Mode = fwconfig.ModeStatic
+	}
+	if err := prepareInterface(tx, &ifc, &old); err != nil {
+		return nil, err
+	}
+	if err := tx.Save(&ifc).Error; err != nil {
+		return nil, err
+	}
+	if !address.IsValid() {
+		return &ifc, nil
+	}
+
+	prefix := address.Masked().String()
+	var n int64
+	if err := tx.Model(&models.IpamPrefix{}).Where("instance_id = ? AND prefix = ?", instanceID, prefix).Count(&n).Error; err != nil {
+		return nil, err
+	}
+	if n == 0 {
+		p := models.IpamPrefix{InstanceID: instanceID, Prefix: prefix, Description: prefixDesc, DhcpDnsServers: models.StringList{}}
+		if err := prepareIpamPrefix(tx, &p, nil); err != nil {
+			return nil, err
+		}
+		if err := tx.Create(&p).Error; err != nil {
+			return nil, err
+		}
+	}
+
+	addr := address.Addr().String()
+	var ia models.IpamAddress
+	err := tx.Where("instance_id = ? AND address = ?", instanceID, addr).First(&ia).Error
+	switch {
+	case errors.Is(err, gorm.ErrRecordNotFound):
+		ia = models.IpamAddress{InstanceID: instanceID, Address: addr, InterfaceID: &ifc.ID, Description: addrDesc}
+		if err := prepareIpamAddress(tx, &ia, nil); err != nil {
+			return nil, err
+		}
+		if err := tx.Create(&ia).Error; err != nil {
+			return nil, err
+		}
+	case err != nil:
+		return nil, err
+	case ia.InterfaceID != nil && *ia.InterfaceID != ifc.ID:
+		return nil, bad(fmt.Sprintf("%s is assigned to another interface", addr))
+	default:
+		if err := tx.Model(&ia).Update("interface_id", ifc.ID).Error; err != nil {
+			return nil, err
+		}
+	}
+	return &ifc, nil
 }

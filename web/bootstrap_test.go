@@ -44,6 +44,15 @@ func TestBootstrap(t *testing.T) {
 		func(o *BootstrapOptions) { o.Address = netip.MustParsePrefix("192.168.1.255/24") },
 		func(o *BootstrapOptions) { o.Gateway = netip.MustParseAddr("10.0.0.1") },
 		func(o *BootstrapOptions) { o.LAN = "eth0; reboot" },
+		func(o *BootstrapOptions) { o.WAN = "enp2s0" },
+		func(o *BootstrapOptions) { o.WAN = "enp1s0" }, // DHCP with a gateway
+		func(o *BootstrapOptions) { o.WANAddress = netip.MustParsePrefix("198.51.100.2/24") },
+		func(o *BootstrapOptions) {
+			o.WAN, o.WANAddress = "enp1s0", netip.MustParsePrefix("192.168.1.2/25")
+		},
+		func(o *BootstrapOptions) { // the gateway must be on the static WAN
+			o.WAN, o.WANAddress = "enp1s0", netip.MustParsePrefix("198.51.100.2/24")
+		},
 	} {
 		o := opts
 		bad(&o)
@@ -98,5 +107,54 @@ func TestBootstrap(t *testing.T) {
 
 	if _, err := Bootstrap(context.Background(), env.srv, opts); err == nil {
 		t.Error("a second bootstrap was accepted")
+	}
+}
+
+func TestBootstrapWAN(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		wanAddr string
+		gateway string
+		mode    string
+		addrs   []string
+		routes  int
+	}{
+		{"dhcp", "", "", fwconfig.ModeDHCP, nil, 0},
+		{"static", "198.51.100.2/24", "198.51.100.1", fwconfig.ModeStatic, []string{"198.51.100.2/24"}, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := newEnv(t)
+			fake := &applyAgent{statusAgent: statusAgent{nics: []agentapi.NICStatus{
+				{Name: "enp1s0", Addresses: []string{}},
+				{Name: "enp2s0", Addresses: []string{}},
+			}}}
+			env.srv.newAgent = func(*models.Settings) (agentAPI, error) { return fake, nil }
+			o := BootstrapOptions{
+				AgentURL: "https://127.0.0.1:8443", AgentToken: strings.Repeat("t", 43), AgentFingerprint: strings.Repeat("ab", 32),
+				LAN: "enp2s0", Address: netip.MustParsePrefix("192.168.1.1/24"), WAN: "enp1s0", GUIPort: 443,
+			}
+			if tc.wanAddr != "" {
+				o.WANAddress = netip.MustParsePrefix(tc.wanAddr)
+			}
+			if tc.gateway != "" {
+				o.Gateway = netip.MustParseAddr(tc.gateway)
+			}
+			if _, err := Bootstrap(context.Background(), env.srv, o); err != nil {
+				t.Fatal(err)
+			}
+			in := fake.applied.Instances[0]
+			var wan *fwconfig.Interface
+			for i := range in.Interfaces {
+				if in.Interfaces[i].Name == "enp1s0" {
+					wan = &in.Interfaces[i]
+				}
+			}
+			if wan == nil || !wan.Enabled || wan.IPv4Mode != tc.mode || !slices.Equal(wan.Addresses, tc.addrs) {
+				t.Errorf("WAN interface %+v", wan)
+			}
+			if len(in.Routes) != tc.routes || (tc.routes == 1 && in.Routes[0].Gateway != tc.gateway) {
+				t.Errorf("routes %+v", in.Routes)
+			}
+		})
 	}
 }
