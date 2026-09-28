@@ -97,6 +97,13 @@ function ifaceTitle(list, empty) {
     .map((n) => (ifaceDesc.value.get(n) ? `${n}: ${ifaceDesc.value.get(n)}` : n))
     .join('\n')
 }
+// ifaceDescs shows a cell's interface descriptions under its names.
+function ifaceDescs(list) {
+  return (list ?? [])
+    .map((n) => ifaceDesc.value.get(n))
+    .filter(Boolean)
+    .join(', ')
+}
 
 // A datalist only offers options that start with the input's text, so the
 // suggestions for a list cell are built from the focused cell's text: the
@@ -212,8 +219,8 @@ function onKeydown(event, index) {
           <col class="w-14" />
           <col class="w-8" />
           <col class="w-8" />
-          <col v-if="hasFrom" class="w-28" />
-          <col v-if="hasTo" class="w-28" />
+          <col v-if="hasFrom" class="w-36" />
+          <col v-if="hasTo" class="w-36" />
           <col class="w-14" />
           <col class="w-18" />
           <col class="w-24" />
@@ -255,6 +262,9 @@ function onKeydown(event, index) {
               <span :class="{ 'text-muted': !a.in_interfaces?.length }">{{
                 a.in_interfaces?.length ? a.in_interfaces.join(', ') : 'any'
               }}</span>
+              <div v-if="ifaceDescs(a.in_interfaces)" class="iface-desc">
+                {{ ifaceDescs(a.in_interfaces) }}
+              </div>
             </td>
             <td v-if="hasTo"><span class="text-muted">any</span></td>
             <td>
@@ -366,6 +376,9 @@ function onKeydown(event, index) {
                   @change="setList(r, 'in_interfaces', $event)"
                   @keydown="onKeydown($event, i)"
                 />
+                <div v-if="ifaceDescs(r.in_interfaces)" class="iface-desc">
+                  {{ ifaceDescs(r.in_interfaces) }}
+                </div>
               </td>
               <td v-if="hasTo">
                 <input
@@ -379,6 +392,9 @@ function onKeydown(event, index) {
                   @change="setList(r, 'out_interfaces', $event)"
                   @keydown="onKeydown($event, i)"
                 />
+                <div v-if="ifaceDescs(r.out_interfaces)" class="iface-desc">
+                  {{ ifaceDescs(r.out_interfaces) }}
+                </div>
               </td>
               <td>
                 <select
@@ -563,6 +579,16 @@ function onKeydown(event, index) {
   display: block;
   padding-inline: 0.375rem;
   line-height: 1.75rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rules-grid .iface-desc {
+  padding-inline: 0.375rem;
+  padding-block-end: 0.125rem;
+  margin-block-start: -0.25rem;
+  font-size: 0.75rem;
+  line-height: 1rem;
+  color: var(--ui-text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
 }

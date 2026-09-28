@@ -19,15 +19,23 @@ const protos = [
   { label: 'tcp', value: 'tcp' },
   { label: 'udp', value: 'udp' },
 ]
+// natIfaces returns the interface list a NAT rule matches on, by its kind.
+const natIfaces = (r) => (r.kind === 'dnat' ? r.in_interfaces : r.out_interfaces)
+const natIfacesLabel = (r) => `${r.kind === 'dnat' ? 'in' : 'out'}: ${ifaceListLabel(natIfaces(r))}`
+const ifaceDescs = (list) => {
+  const desc = new Map(ifaceRefItems.value.map((it) => [it.value, it.description]))
+  return (list ?? [])
+    .map((n) => desc.get(n))
+    .filter(Boolean)
+    .join(', ')
+}
+
 const columns = [
   { key: 'kind', label: 'Kind' },
   {
     key: 'ifaces',
     label: 'Interfaces',
-    format: (r) =>
-      r.kind === 'dnat'
-        ? `in: ${ifaceListLabel(r.in_interfaces)}`
-        : `out: ${ifaceListLabel(r.out_interfaces)}`,
+    format: natIfacesLabel,
   },
   {
     key: 'match',
@@ -131,6 +139,13 @@ const api = {
       new-label="New NAT rule"
       reorder="nat"
       :item-name="(r) => `NAT rule ${r.description || r.id}`"
-    />
+    >
+      <template #cell-ifaces="{ row }">
+        <div>{{ natIfacesLabel(row) }}</div>
+        <div v-if="ifaceDescs(natIfaces(row))" class="text-xs text-muted">
+          {{ ifaceDescs(natIfaces(row)) }}
+        </div>
+      </template>
+    </CrudPage>
   </NeedInstance>
 </template>
