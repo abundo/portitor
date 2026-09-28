@@ -4,11 +4,19 @@
 import { defineStore } from 'pinia'
 import { api } from '@/api'
 
-// Agent status, polled while a change awaits confirmation so the banner
-// can count down and the rollback is noticed. changes says whether the
-// database differs from what is deployed.
+// Agent status, polled every 30 s, every 5 s while a page showing it is open
+// and visible (watch/unwatch), and every 3 s while a change awaits confirmation so the
+// banner can count down and the rollback is noticed. changes says whether
+// the database differs from what is deployed.
 export const useDeployStore = defineStore('deploy', {
-  state: () => ({ status: null, error: null, timer: null, changes: null, changesTimer: null }),
+  state: () => ({
+    status: null,
+    error: null,
+    timer: null,
+    changes: null,
+    changesTimer: null,
+    watchers: 0,
+  }),
   getters: {
     pending: (s) => s.status?.pending ?? null,
     // Physical interfaces in the configuration that the firewall lacks.
@@ -39,7 +47,21 @@ export const useDeployStore = defineStore('deploy', {
     },
     schedule() {
       clearTimeout(this.timer)
-      this.timer = setTimeout(() => this.refresh(), this.pending ? 3000 : 30000)
+      const fast = this.watchers && document.visibilityState === 'visible'
+      const ms = this.pending ? 3000 : fast ? 5000 : 30000
+      this.timer = setTimeout(() => this.refresh(), ms)
+    },
+    watch() {
+      if (!this.watchers++) document.addEventListener('visibilitychange', this.onVisible)
+      this.refresh()
+    },
+    unwatch() {
+      if (!--this.watchers) document.removeEventListener('visibilitychange', this.onVisible)
+      this.schedule()
+    },
+    // A watched page coming back into view refreshes at once.
+    onVisible() {
+      if (document.visibilityState === 'visible') this.refresh()
     },
   },
 })

@@ -2,7 +2,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
 <script setup>
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, onUnmounted } from 'vue'
 import { useDeployStore } from '@/stores/deploy'
 import { useInstanceStore } from '@/stores/instances'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
@@ -11,7 +11,8 @@ import { bytes } from '@/utils/bytes'
 const deploy = useDeployStore()
 const instances = useInstanceStore()
 const { ifaceRefItems } = useInstanceRefs()
-onMounted(() => deploy.refresh())
+onMounted(() => deploy.watch())
+onUnmounted(() => deploy.unwatch())
 
 // Descriptions of the instance's interfaces and link ends, by name.
 const ifaceDesc = computed(
@@ -22,6 +23,11 @@ const st = computed(() => deploy.status)
 const inst = computed(() => st.value?.instances?.find((i) => i.name === instances.current?.name))
 const wan = computed(() =>
   (st.value?.dhcp_client_leases ?? []).filter((l) => l.instance === instances.current?.name),
+)
+const ifaces = computed(() =>
+  [...(inst.value?.interfaces ?? [])].sort((a, b) =>
+    a.name.localeCompare(b.name, undefined, { numeric: true }),
+  ),
 )
 const missing = computed(() => (st.value?.programs ?? []).filter((p) => !p.path))
 const missingNeeded = computed(() => missing.value.some((p) => p.needed))
@@ -114,24 +120,43 @@ const stateColor = (s) =>
       </div>
     </div>
 
-    <div v-if="wan.length" class="card">
+    <div v-if="wan.length" class="card overflow-x-auto">
       <div class="mb-2 font-semibold">Internet (DHCP)</div>
-      <div v-for="l in wan" :key="l.interface" class="flex flex-wrap gap-x-6 gap-y-1 text-sm">
-        <span class="font-mono">{{ l.interface }}</span>
-        <UBadge
-          :color="l.state === 'bound' ? 'success' : 'warning'"
-          variant="subtle"
-          :label="l.state"
-        />
-        <span class="font-mono">{{ l.address }}</span>
-        <span
-          >via <span class="font-mono">{{ l.router }}</span></span
-        >
-        <span
-          >DNS <span class="font-mono">{{ l.dns?.join(', ') }}</span></span
-        >
-        <span v-if="l.last_error" class="text-error">{{ l.last_error }}</span>
-      </div>
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="border-b border-default text-left text-xs text-muted">
+            <th class="py-1.5 pr-4 font-medium">Interface</th>
+            <th class="pr-4 font-medium">Description</th>
+            <th class="pr-4 font-medium">Status</th>
+            <th class="pr-4 font-medium">Address</th>
+            <th class="pr-4 font-medium">Default route</th>
+            <th class="font-medium">DNS</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr
+            v-for="l in wan"
+            :key="l.interface"
+            class="border-b border-default align-top last:border-0"
+          >
+            <td class="py-1.5 pr-4 font-mono">{{ l.interface }}</td>
+            <td class="py-1.5 pr-4">{{ ifaceDesc.get(l.interface) }}</td>
+            <td class="py-1.5 pr-4">
+              <UBadge
+                :color="l.state === 'bound' ? 'success' : 'warning'"
+                variant="subtle"
+                :label="l.state"
+              />
+              <div v-if="l.last_error" class="mt-0.5 text-xs text-error">{{ l.last_error }}</div>
+            </td>
+            <td class="py-1.5 pr-4 font-mono text-xs">{{ l.address }}</td>
+            <td class="py-1.5 pr-4 font-mono text-xs">{{ l.router }}</td>
+            <td class="py-1.5 font-mono text-xs">
+              <div v-for="d in l.dns ?? []" :key="d">{{ d }}</div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
     </div>
 
     <template v-if="inst">
@@ -150,11 +175,7 @@ const stateColor = (s) =>
             </tr>
           </thead>
           <tbody>
-            <tr
-              v-for="i in inst.interfaces"
-              :key="i.name"
-              class="border-b border-default last:border-0"
-            >
+            <tr v-for="i in ifaces" :key="i.name" class="border-b border-default last:border-0">
               <td class="py-1.5 pr-4 font-mono">{{ i.name }}</td>
               <td class="pr-4">{{ ifaceDesc.get(i.name) }}</td>
               <td class="pr-4">
