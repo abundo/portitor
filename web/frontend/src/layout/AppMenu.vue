@@ -49,6 +49,7 @@ const items = computed(() => [
       ],
     },
   ],
+  [{ label: 'Help', icon: 'i-lucide-circle-help', to: '/help' }],
 ])
 </script>
 

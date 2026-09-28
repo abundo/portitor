@@ -27,6 +27,8 @@ export default defineConfig({
     emptyOutDir: true,
   },
   server: {
+    // The Help page bundles ../../docs (src/docs.js).
+    fs: { allow: ['.', '../../docs'] },
     proxy: {
       '/api': { target: 'http://127.0.0.1:8080', changeOrigin: true, ws: true },
     },

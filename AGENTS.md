@@ -28,6 +28,7 @@ are in [README.md](README.md).
 | `models` | GORM mapping |
 | `web` | Echo v5 server: auth, generic CRUD (`crud.go`), entry validation (`resources.go`), deploy handlers |
 | `web/frontend` | Vue SPA; `CrudPage.vue` drives most pages from field/column schemas |
+| `docs` | User guides; every `docs/*.md` is bundled into the GUI's Help page (`src/docs.js`), and links between them stay in the GUI |
 | `deploy` | systemd units and example configs |
 | `dev` | Dev configs and `seed.sh`; `dev/lab` runs a real apply in two podman containers |
 | `install.py` | Installs/updates web and agent from a GitHub release (`.goreleaser.yaml`) or `--source` |

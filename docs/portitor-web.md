@@ -1,0 +1,125 @@
+<!-- SPDX-FileCopyrightText: 2026 The Portitor contributors -->
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+
+# portitor-web
+
+portitor-web is the management GUI and REST API. It keeps the configuration in
+PostgreSQL and pushes it to portitor-agent on the firewall. Run it on another host, not
+on the firewall itself. Installing it is covered in the [README](../README.md#install).
+
+## Configuration
+
+`/etc/portitor/web.yaml` (`-f` picks another file):
+
+| Key | Default | |
+|---|---|---|
+| `bind` | `127.0.0.1:8080` | Listen address. `start --bind` overrides it. |
+| `jwt_secret` | | Signs session cookies. At least 32 characters: `openssl rand -base64 32`. |
+| `tls_cert`, `tls_key` | | Serve HTTPS directly. Set both or neither. |
+| `db.host`, `db.port` | `5432` | PostgreSQL. |
+| `db.user`, `db.password` | | |
+| `db.name` | `portitor` | |
+| `db.sslmode` | `prefer` | As in libpq. |
+| `dev` | `false` | Serves the frontend from disk and drops the cookie's Secure flag. Development only. |
+
+Without `tls_cert`, keep `bind` on localhost and put a TLS reverse proxy in front. The
+session cookie is marked Secure, so the GUI does not work over plain HTTP. The proxy
+must pass WebSocket upgrades for the console.
+
+## Commands
+
+```sh
+portitor-web start                 # serve the GUI and API
+portitor-web migrate               # apply database migrations; start never migrates
+portitor-web createadmin <user>    # create a user, or reset a user's password
+portitor-web agent-url             # print the agent URL from Settings (used by install.py)
+```
+
+`createadmin` asks for the password twice on a terminal, or reads one line from stdin.
+`-d` turns on debug logging. `--version` prints the version.
+
+After an upgrade, run `migrate` before `start`. `install.py` does both.
+
+## First steps
+
+1. Log in with the user from `createadmin`.
+2. On the firewall, run `portitor-agent init --host <address>`. It prints a token and
+   the agent's certificate fingerprint.
+3. *Admin → Settings → General*: enter the agent URL (`https://<address>:8443`), the
+   token and the fingerprint, and save. The badge next to *Save* says whether the agent
+   answers.
+4. portitor-web adds the firewall's physical interfaces to the default instance `main`
+   as they are configured now, and says so. Check them under *Network → Interfaces*.
+5. Configure addresses, rules and services, then deploy.
+
+## The screen
+
+- **Instance selector** (top bar). Most pages show one instance, the one selected here.
+  DNS templates, users and settings are shared by all instances.
+- **Agent badge** (top bar). The generation the agent has applied; yellow if its last
+  apply had an error, red if portitor-web cannot reach it.
+- **Agent log** (terminal icon) opens a panel with the agent's log.
+- **Console window** (square terminal icon) opens a shell on the firewall in a separate
+  window.
+- **Changes banner** (blue). Shows when the configuration differs from what is on the
+  firewall. *Review* opens the Deploy page, *Commit* applies at once with the default
+  auto-rollback.
+- **Confirm banner** (yellow). Shows while an apply waits for confirmation; see below.
+
+## Menu
+
+| Section | Page | What |
+|---|---|---|
+| | Dashboard | The selected instance on the firewall: interfaces, WAN lease, WireGuard peers, missing programs. |
+| | Deploy | Check, preview, apply, history. |
+| Network | Instances | Virtual routers. `main` is the host; others are network namespaces. |
+| | Links | veth pairs between instances. |
+| | Interfaces | Physical, VLAN, bridge, WireGuard interfaces; WAN DHCP client. |
+| | Routes | Static routes. |
+| | IP addresses | The prefix tree: prefixes, addresses, DHCP scopes, router advertisements, DNS names. |
+| | Hosts & prefixes | Named addresses, usable wherever addresses are entered. |
+| Firewall | Interface zones | Named groups of interfaces for rules and NAT. |
+| | Rules | Input, forward and output rules, with per-rule traffic counters. |
+| | NAT & port forwards | Masquerade, SNAT and DNAT. |
+| | IP lists | Downloaded address lists (CrowdSec, blocklists), used as `@name` in rules. See [Blocking with CrowdSec](crowdsec.md). |
+| Services | DNS zones | Zones and records served by the instance's BIND. |
+| | DNS templates | SOA templates, DNSSEC policies and zone templates, shared by all instances. |
+| | DHCP | Scopes (prefixes with DHCP on, set under IP addresses) and active leases. |
+| | WireGuard | Tunnels and peers; generates client configs. |
+| | Dynamic DNS | Keeps records on an external nameserver in step with the WAN address. |
+| | Scheduled tasks | IP list downloads and commands on a cron schedule. |
+| Admin | Console | A shell on the firewall as the agent's `console_user`. |
+| | Settings → General | Agent connection, default auto-rollback, public WireGuard endpoint. |
+| | Settings → Users | GUI users. |
+| | Help | This guide and the other guides in `docs/`. |
+
+Your own name and password are under the user menu (top right).
+
+## Deploying
+
+Edits are saved in the database only. Nothing changes on the firewall until you apply.
+
+On *Deploy*:
+
+1. The top of the page validates the whole configuration. Problems listed there must be
+   fixed first; *Apply* stays disabled until then.
+2. *Preview* renders every file the agent will write and shows the difference from what
+   it runs now.
+3. *Apply* sends the configuration. The agent validates it again, checks the rulesets
+   with `nft -c`, and switches over. The log of what it did is shown below.
+
+**Auto-rollback.** After an apply the yellow banner counts down. Click *Confirm* to
+keep the change; if you do nothing, the agent restores the last confirmed configuration
+when the time runs out. If the change locked you out, wait. The default time is set
+under *Settings*; the field on the Deploy page overrides it for one apply, and `0`
+applies without confirmation. While an apply is pending, you cannot apply another one.
+
+*History* lists every generation with who applied it and its status (applied,
+confirmed, pending, rolled back, failed).
+
+## Secrets
+
+The agent token, WireGuard private and preshared keys, TSIG secrets and IP list
+passwords and API keys are never sent back to the browser. Their fields are empty when
+you open a form. Leave them empty to keep the stored value, or enter a new one to
+replace it.

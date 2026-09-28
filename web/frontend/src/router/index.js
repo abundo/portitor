@@ -40,6 +40,7 @@ const router = createRouter({
         { path: 'console', component: () => import('@/views/ConsolePage.vue') },
         { path: 'settings', component: () => import('@/views/SettingsPage.vue') },
         { path: 'settings/users', component: () => import('@/views/UsersPage.vue') },
+        { path: 'help/:doc?', component: () => import('@/views/HelpPage.vue') },
         { path: 'profile', component: () => import('@/views/ProfilePage.vue') },
         { path: 'profile/password', component: () => import('@/views/ChangePasswordPage.vue') },
       ],
