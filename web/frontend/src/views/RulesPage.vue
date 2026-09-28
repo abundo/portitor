@@ -115,14 +115,18 @@ const fields = [
     key: 'protocol',
     label: 'Protocol',
     type: 'select',
-    items: opt(['any', 'tcp', 'udp', 'icmp', 'icmpv6']),
+    items: [
+      ...opt(['any', 'tcp', 'udp']),
+      { label: 'tcp+udp', value: 'tcp,udp' },
+      ...opt(['icmp', 'icmpv6']),
+    ],
   },
   {
     key: 'dst_ports',
     label: 'Destination ports',
     type: 'ports',
     placeholder: '22, https, 80-90',
-    show: (f) => f.protocol === 'tcp' || f.protocol === 'udp',
+    show: (f) => ['tcp', 'udp', 'tcp,udp'].includes(f.protocol),
   },
   {
     key: 'src_addrs',

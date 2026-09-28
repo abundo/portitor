@@ -627,6 +627,11 @@ func matchExpr(family, src, dst, proto, ports string) []string {
 		} else {
 			parts = append(parts, "meta l4proto "+proto)
 		}
+	case "tcp,udp":
+		parts = append(parts, "meta l4proto { tcp, udp }")
+		if ports != "" {
+			parts = append(parts, "th dport "+portSet(ports))
+		}
 	case "icmp":
 		parts = append(parts, "meta l4proto icmp")
 	case "icmpv6":

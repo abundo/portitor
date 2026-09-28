@@ -15,6 +15,14 @@ func TestSampleIsValid(t *testing.T) {
 	}
 }
 
+func TestValidateTCPUDPPorts(t *testing.T) {
+	doc := SampleDocument()
+	doc.Instances[0].Rules[6].Protocol = "tcp,udp"
+	if err := doc.Validate(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestValidateCatchesProblems(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -38,6 +46,8 @@ func TestValidateCatchesProblems(t *testing.T) {
 		{"zone duplicate", func(d *Document) { d.Instances[0].InterfaceZones[1].Name = "wan" }, "duplicate"},
 		{"zone name injection", func(d *Document) { d.Instances[0].InterfaceZones[0].Name = `wan" accept` }, "name must match"},
 		{"ports without proto", func(d *Document) { d.Instances[0].Rules[0].DstPorts = "22" }, "ports need protocol"},
+		{"ports with icmp", func(d *Document) { d.Instances[0].Rules[5].DstPorts = "22" }, "ports need protocol"},
+		{"bad protocol", func(d *Document) { d.Instances[0].Rules[0].Protocol = "tcp+udp" }, `invalid protocol "tcp+udp"`},
 		{"bad port range", func(d *Document) { d.Instances[0].Rules[2].DstPorts = "90-80" }, "invalid port range"},
 		{"ifname injection", func(d *Document) { d.Instances[0].Interfaces[1].Name = `eth1" accept` }, "name must match"},
 		{"comment with match", func(d *Document) { d.Instances[0].Rules[11].Protocol = "tcp" }, "a comment has only"},

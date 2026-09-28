@@ -154,7 +154,7 @@ type Rule struct {
 	InInterfaces  []string `json:"in_interfaces,omitempty"`
 	OutInterfaces []string `json:"out_interfaces,omitempty"`
 	Family        string   `json:"family,omitempty"`   // "", ipv4, ipv6
-	Protocol      string   `json:"protocol,omitempty"` // "", tcp, udp, icmp, icmpv6
+	Protocol      string   `json:"protocol,omitempty"` // "", tcp, udp, tcp,udp, icmp, icmpv6
 	SrcAddrs      []string `json:"src_addrs,omitempty"`
 	DstAddrs      []string `json:"dst_addrs,omitempty"`
 	DstPorts      string   `json:"dst_ports,omitempty"` // "22", "80,443", "1000-2000"

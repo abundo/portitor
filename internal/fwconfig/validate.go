@@ -602,7 +602,7 @@ func (v *validator) match(p, family, proto string, src, dst []string, ports stri
 		v.addf("%s: invalid family %q", p, family)
 	}
 	switch proto {
-	case "", "tcp", "udp", "icmp", "icmpv6":
+	case "", "tcp", "udp", "tcp,udp", "icmp", "icmpv6":
 	default:
 		v.addf("%s: invalid protocol %q", p, proto)
 	}
@@ -629,8 +629,8 @@ func (v *validator) match(p, family, proto string, src, dst []string, ports stri
 		v.addf("%s: no IP version fits the source and destination addresses, family and protocol together", p)
 	}
 	if ports != "" {
-		if proto != "tcp" && proto != "udp" {
-			v.addf("%s: ports need protocol tcp or udp", p)
+		if proto != "tcp" && proto != "udp" && proto != "tcp,udp" {
+			v.addf("%s: ports need protocol tcp, udp or tcp,udp", p)
 		}
 		if _, err := ParsePorts(ports); err != nil {
 			v.addf("%s: %v", p, err)

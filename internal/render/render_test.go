@@ -94,6 +94,18 @@ func TestNftablesMain(t *testing.T) {
 	}
 }
 
+func TestMatchExprTCPUDP(t *testing.T) {
+	for _, tc := range []struct{ ports, want string }{
+		{"", "ip saddr 10.0.0.0/8 meta l4proto { tcp, udp }"},
+		{"53,5353", "ip saddr 10.0.0.0/8 meta l4proto { tcp, udp } th dport { 53, 5353 }"},
+	} {
+		got := strings.Join(matchExpr("ipv4", "10.0.0.0/8", "", "tcp,udp", tc.ports), " ")
+		if got != tc.want {
+			t.Errorf("ports %q: got %q, want %q", tc.ports, got, tc.want)
+		}
+	}
+}
+
 func TestNftablesGuestHasNoLockout(t *testing.T) {
 	nft := mustFile(t, sampleBundle(t), "/etc/portitor/instances/guest/nftables.nft")
 	if strings.Contains(nft, "anti-lockout") {

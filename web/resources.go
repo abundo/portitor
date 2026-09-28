@@ -375,7 +375,7 @@ func prepareRule(tx *gorm.DB, r, old *models.Rule) error {
 	if err := oneOf("family", r.Family, "", "ipv4", "ipv6"); err != nil {
 		return err
 	}
-	if err := oneOf("protocol", r.Protocol, "", "tcp", "udp", "icmp", "icmpv6"); err != nil {
+	if err := oneOf("protocol", r.Protocol, "", "tcp", "udp", "tcp,udp", "icmp", "icmpv6"); err != nil {
 		return err
 	}
 	r.InInterfaces, r.OutInterfaces = dedupe(cleanList(r.InInterfaces)), dedupe(cleanList(r.OutInterfaces))
@@ -400,8 +400,8 @@ func prepareRule(tx *gorm.DB, r, old *models.Rule) error {
 	}
 	r.DstPorts = strings.TrimSpace(r.DstPorts)
 	if r.DstPorts != "" {
-		if r.Protocol != "tcp" && r.Protocol != "udp" {
-			return bad("ports need protocol tcp or udp")
+		if r.Protocol != "tcp" && r.Protocol != "udp" && r.Protocol != "tcp,udp" {
+			return bad("ports need protocol tcp, udp or tcp+udp")
 		}
 		if err := checkPorts(tx, r.DstPorts); err != nil {
 			return err

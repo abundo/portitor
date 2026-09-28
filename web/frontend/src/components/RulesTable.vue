@@ -326,7 +326,7 @@ function onPortBlur(r, event) {
 }
 // portTitle shows the numbers of the service names in a port cell.
 function portTitle(r) {
-  if (!hasPorts(r)) return 'Ports need protocol tcp or udp'
+  if (!hasPorts(r)) return 'Ports need protocol tcp, udp or tcp+udp'
   const parts = (r.dst_ports ?? '').split(/[\s,]+/).filter((s) => s)
   if (!parts.length) return 'Ports, ranges or service names, such as 22, 8000-8080, https'
   return parts
@@ -373,7 +373,14 @@ const families = [
   { label: 'IPv4', value: 'ipv4' },
   { label: 'IPv6', value: 'ipv6' },
 ]
-const protocols = ['any', 'tcp', 'udp', 'icmp', 'icmpv6']
+const protocols = [
+  { label: 'any', value: 'any' },
+  { label: 'tcp', value: 'tcp' },
+  { label: 'udp', value: 'udp' },
+  { label: 'tcp+udp', value: 'tcp,udp' },
+  { label: 'icmp', value: 'icmp' },
+  { label: 'icmpv6', value: 'icmpv6' },
+]
 const actions = ['accept', 'drop', 'reject']
 const actionClass = { accept: 'text-success', drop: 'text-error', reject: 'text-warning' }
 const autoProtocol = (a) => (a.protocol === 'tcp,udp' ? 'tcp+udp' : a.protocol)
@@ -422,7 +429,7 @@ const dropCount = (reason) => props.drops?.[`${reason}_packets`]
 // The built-in rows log rate limited (render.builtinLogLimit).
 const builtinLogLimit = 'at most 10 packets a second'
 
-const hasPorts = (r) => r.protocol === 'tcp' || r.protocol === 'udp'
+const hasPorts = (r) => ['tcp', 'udp', 'tcp,udp'].includes(r.protocol)
 
 function set(r, key, value) {
   r[key] = value
@@ -761,7 +768,9 @@ function onKeydown(event, index) {
                   data-col="protocol"
                   @change="set(r, 'protocol', $event.target.value)"
                 >
-                  <option v-for="p in protocols" :key="p" :value="p">{{ p }}</option>
+                  <option v-for="p in protocols" :key="p.value" :value="p.value">
+                    {{ p.label }}
+                  </option>
                 </select>
               </td>
               <td>
