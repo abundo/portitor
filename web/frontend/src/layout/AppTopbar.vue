@@ -2,12 +2,13 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
 <script setup>
-import { computed } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useInstanceStore } from '@/stores/instances'
 import { useDeployStore } from '@/stores/deploy'
 import { useLogPanel } from '@/composables/useLogPanel'
+import { api } from '@/api'
 
 defineEmits(['toggle-menu'])
 
@@ -16,6 +17,21 @@ const instances = useInstanceStore()
 const deploy = useDeployStore()
 const router = useRouter()
 const { state: logPanel, toggle: toggleLog } = useLogPanel()
+
+// goreleaser stamps the tag without its v (1.2.3), the Makefile `git describe`.
+const build = ref(null)
+const version = computed(() => {
+  const v = build.value?.version
+  if (!v) return ''
+  return /^\d/.test(v) ? `v${v}` : v
+})
+onMounted(async () => {
+  try {
+    build.value = await api.version()
+  } catch {
+    // the version is cosmetic; leave it out
+  }
+})
 
 const current = computed({
   get: () => instances.currentId ?? undefined,
@@ -74,6 +90,9 @@ const userMenu = computed(() => [
       <UIcon name="i-lucide-shield" class="size-6 text-primary" />
       <span class="hidden sm:inline">Portitor</span>
     </RouterLink>
+    <UTooltip v-if="version" :text="`commit ${build.commit.slice(0, 12)}, ${build.date}`">
+      <span class="hidden font-mono text-xs text-muted sm:inline">{{ version }}</span>
+    </UTooltip>
     <div class="ml-2 flex items-center gap-2">
       <span class="hidden text-sm text-muted md:inline">Instance</span>
       <USelect v-model="current" :items="instances.items" class="w-40" placeholder="none" />
