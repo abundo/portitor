@@ -470,14 +470,16 @@ func ifaceMatch(b *strings.Builder, what string, in *fwconfig.Instance, inList, 
 }
 
 // writeRules renders the rules of one chain. Rules are numbered without
-// the comment rows, which become rules holding only a comment: nft keeps
-// those in the kernel ruleset, unlike # lines.
+// the comment rows, which become rules that only continue to the next one
+// and hold the comment: nft keeps those in the kernel ruleset, unlike #
+// lines. A bare comment line would be the chain's own comment, of which
+// there can be only one.
 func writeRules(b *strings.Builder, in *fwconfig.Instance, chain string) {
 	idx := 0
 	for _, r := range in.Rules {
 		if r.Kind == fwconfig.RuleKindComment {
 			if r.Chain == chain && r.Description != "" {
-				b.WriteString("\t\t" + comment("", r.Description) + "\n")
+				b.WriteString("\t\tcontinue " + comment("", r.Description) + "\n")
 			}
 			continue
 		}
