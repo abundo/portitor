@@ -139,3 +139,26 @@ func TestParseKeaLeases(t *testing.T) {
 		t.Errorf("%+v %v", got, valid)
 	}
 }
+
+func TestParseNICs(t *testing.T) {
+	data := []byte(`[
+{"ifname":"lo","flags":["LOOPBACK","UP"],"mtu":65536,"operstate":"UNKNOWN","addr_info":[]},
+{"ifname":"eth0","flags":["BROADCAST","UP"],"mtu":1500,"operstate":"UP","address":"02:00:00:00:00:01","addr_info":[
+ {"family":"inet","local":"192.0.2.10","prefixlen":24,"scope":"global","dynamic":true},
+ {"family":"inet6","local":"2001:db8::10","prefixlen":64,"scope":"global","dynamic":true},
+ {"family":"inet6","local":"fe80::1","prefixlen":64,"scope":"link"}]},
+{"ifname":"eth1","flags":["BROADCAST"],"mtu":1500,"operstate":"DOWN","addr_info":[
+ {"family":"inet","local":"192.168.1.1","prefixlen":24,"scope":"global"}]},
+{"ifname":"docker0","flags":["UP"],"mtu":1500,"operstate":"DOWN","linkinfo":{"info_kind":"bridge"},"addr_info":[]},
+{"ifname":"veth0","flags":["UP"],"mtu":1500,"operstate":"UP","linkinfo":{"info_kind":"veth"},"addr_info":[]}]`)
+	got := parseNICs("", data, map[string]bool{"veth0": true})
+	if len(got) != 3 || got[0].Name != "eth0" || got[1].Name != "eth1" || got[2].Name != "veth0" {
+		t.Fatalf("got %+v", got)
+	}
+	if e := got[0]; !e.Up || e.State != "up" || !e.DHCPv4 || !e.SLAAC || len(e.Addresses) != 0 || e.MAC != "02:00:00:00:00:01" {
+		t.Errorf("eth0 %+v", e)
+	}
+	if e := got[1]; e.Up || e.DHCPv4 || len(e.Addresses) != 1 || e.Addresses[0] != "192.168.1.1/24" {
+		t.Errorf("eth1 %+v", e)
+	}
+}

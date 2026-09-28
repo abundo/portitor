@@ -333,6 +333,14 @@ const (
 	DnsRecordDomain  = "$DOMAIN"
 )
 
+// KnownInterface is a physical interface the agent has reported
+// (web/nics.go). A new one is imported into the default instance once, so
+// deleting it there sticks.
+type KnownInterface struct {
+	Name      string    `gorm:"primaryKey" json:"name"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 // Deployment is one push to the agent.
 type Deployment struct {
 	Base
@@ -351,6 +359,6 @@ func All() []any {
 	return []any{
 		&User{}, &Settings{}, &Instance{}, &InterfaceZone{}, &Interface{}, &WgPeer{}, &Link{},
 		&Route{}, &Rule{}, &NatRule{}, &IpamPrefix{}, &IpamAddress{}, &DnsZone{}, &DnsRecord{}, &Deployment{},
-		&AddressObject{}, &DnsSoaTemplate{}, &DnsDnssecPolicy{}, &DnsTemplate{},
+		&AddressObject{}, &DnsSoaTemplate{}, &DnsDnssecPolicy{}, &DnsTemplate{}, &KnownInterface{},
 	}
 }

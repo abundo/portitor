@@ -112,6 +112,12 @@ systemctl enable --now portitor-agent
 Take the interfaces you hand to the firewall away from NetworkManager, systemd-networkd
 or netplan; the agent manages their addresses and routes.
 
+When portitor-web reaches the agent, it adds the firewall's physical interfaces it
+has not seen before to the default instance, as they are configured at that moment
+(link state; static addresses go into IPAM), so a first deploy leaves them as they
+are. An interface you delete is not added again. Physical interfaces in the
+configuration that the firewall does not have are shown as a warning.
+
 On the **management host**, with PostgreSQL:
 
 ```sh

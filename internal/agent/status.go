@@ -42,6 +42,7 @@ func (a *Agent) Status(ctx context.Context) *Status {
 	}
 	a.mu.Unlock()
 	st.Programs = programStatus(doc)
+	st.NICs = a.nics(ctx, doc)
 
 	if doc == nil {
 		return st
@@ -136,6 +137,67 @@ func (a *Agent) instanceStatus(ctx context.Context, in *fwconfig.Instance) Insta
 		is.Services[u] = state
 	}
 	return is
+}
+
+// nics lists the physical interfaces in the root namespace and in the
+// namespaces of the applied document's instances.
+func (a *Agent) nics(ctx context.Context, doc *fwconfig.Document) []NICStatus {
+	namespaces := []string{""}
+	declared := map[string]bool{}
+	if doc != nil {
+		for _, in := range doc.Instances {
+			if ns := in.NetnsName(); ns != "" {
+				namespaces = append(namespaces, ns)
+			}
+			for _, ifc := range in.Interfaces {
+				if ifc.Kind == fwconfig.KindPhysical {
+					declared[ifc.Name] = true
+				}
+			}
+		}
+	}
+	out := []NICStatus{}
+	for _, ns := range namespaces {
+		if data, err := a.run.Run(ctx, ns, "ip", "-j", "-d", "addr", "show"); err == nil {
+			out = append(out, parseNICs(ns, data, declared)...)
+		}
+	}
+	return out
+}
+
+// parseNICs picks the physical interfaces out of `ip -j -d addr show`.
+func parseNICs(ns string, data []byte, declared map[string]bool) []NICStatus {
+	var links []struct {
+		ipLink
+		Operstate string `json:"operstate"`
+		Address   string `json:"address"`
+	}
+	if len(data) == 0 || json.Unmarshal(data, &links) != nil {
+		return nil
+	}
+	var out []NICStatus
+	for _, l := range links {
+		if l.Ifname == "lo" || (l.kind() != "" && !declared[l.Ifname]) {
+			continue
+		}
+		n := NICStatus{Name: l.Ifname, Netns: ns, MAC: l.Address, State: strings.ToLower(l.Operstate), Up: l.up(), MTU: l.MTU, Addresses: []string{}}
+		for _, ad := range l.AddrInfo {
+			p, err := ad.prefix()
+			if err != nil || ad.Scope == "link" || ad.Scope == "host" {
+				continue
+			}
+			switch {
+			case !ad.Dynamic:
+				n.Addresses = append(n.Addresses, p.String())
+			case p.Addr().Is4():
+				n.DHCPv4 = true
+			default:
+				n.SLAAC = true
+			}
+		}
+		out = append(out, n)
+	}
+	return out
 }
 
 func toString(v any) string {

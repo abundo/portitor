@@ -7,9 +7,14 @@ import CrudPage from '@/components/CrudPage.vue'
 import NeedInstance from '@/components/NeedInstance.vue'
 import { interfaces, ipamAddresses } from '@/api'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
+import { useDeployStore } from '@/stores/deploy'
 
 const { store, zonesOf, reload } = useInstanceRefs()
 const addrs = ref([])
+const deploy = useDeployStore()
+const isMissing = (row) =>
+  row.kind === 'physical' &&
+  deploy.missingNics.some((n) => n.name === row.name && n.instance === store.current?.name)
 
 async function loadAddrs() {
   if (store.currentId) addrs.value = await ipamAddresses.list({ instance_id: store.currentId })
@@ -107,6 +112,12 @@ function addressesOf(row) {
       new-label="New interface"
       @changed="(reload(), loadAddrs())"
     >
+      <template #cell-name="{ row }">
+        <span class="font-mono font-medium">{{ row.name }}</span>
+        <UTooltip v-if="isMissing(row)" text="Not found on the firewall">
+          <UIcon name="i-lucide-triangle-alert" class="ml-1 align-middle text-warning" />
+        </UTooltip>
+      </template>
       <template #cell-addresses="{ row }">
         <span class="font-mono text-xs">{{ addressesOf(row).join(', ') }}</span>
         <span v-if="row.ipv4_mode === 'dhcp'" class="text-xs text-muted"> (DHCP)</span>

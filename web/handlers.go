@@ -16,6 +16,7 @@ import (
 	"github.com/labstack/echo/v5"
 	"gorm.io/gorm"
 
+	"github.com/abundo/portitor/internal/agentapi"
 	"github.com/abundo/portitor/internal/agentclient"
 	"github.com/abundo/portitor/internal/builder"
 	"github.com/abundo/portitor/internal/fwconfig"
@@ -492,7 +493,14 @@ func (s *Server) handleAgentStatus(c *echo.Context) error {
 		}
 		s.db.Save(dep)
 	}
-	return c.JSON(http.StatusOK, st)
+	sync, err := s.syncNICs(st.NICs)
+	if err != nil {
+		return err
+	}
+	return c.JSON(http.StatusOK, struct {
+		*agentapi.Status
+		NICSync *nicSync `json:"nic_sync"`
+	}{st, sync})
 }
 
 func (s *Server) handleAgentLeases(c *echo.Context) error {

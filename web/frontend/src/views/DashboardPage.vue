@@ -52,6 +52,25 @@ const stateColor = (s) =>
       :actions="[{ label: 'Settings', to: '/settings' }]"
     />
     <UAlert
+      v-if="deploy.missingNics.length"
+      color="warning"
+      variant="subtle"
+      icon="i-lucide-cable"
+      title="Interfaces not found on the firewall"
+      :actions="[{ label: 'Interfaces', to: '/interfaces' }]"
+    >
+      <template #description>
+        <ul class="mt-1 space-y-0.5">
+          <li v-for="n in deploy.missingNics" :key="n.instance + '/' + n.name">
+            <span class="font-mono">{{ n.name }}</span> · instance {{ n.instance }}
+          </li>
+        </ul>
+        <div class="mt-1 text-xs">
+          Deploying a configuration with a physical interface the firewall does not have fails.
+        </div>
+      </template>
+    </UAlert>
+    <UAlert
       v-if="missing.length"
       :color="missingNeeded ? 'error' : 'warning'"
       variant="subtle"

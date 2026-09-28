@@ -47,6 +47,27 @@ type Status struct {
 	Instances  []InstanceStatus `json:"instances"`
 	DHCPLeases []Lease          `json:"dhcp_client_leases"`
 	Programs   []ProgramStatus  `json:"programs"`
+	// NICs are the physical interfaces on the firewall, wherever they are.
+	NICs []NICStatus `json:"nics"`
+}
+
+// NICStatus is a physical interface: a real NIC (no link kind), or one the
+// applied document declares physical (in a container it may be a veth).
+type NICStatus struct {
+	Name string `json:"name"`
+	// Netns is empty for the root namespace.
+	Netns string `json:"netns,omitempty"`
+	MAC   string `json:"mac,omitempty"`
+	State string `json:"state"`
+	// Up is the administrative state (IFF_UP), which the agent sets from
+	// Interface.Enabled; State is the operational one.
+	Up  bool `json:"up"`
+	MTU int  `json:"mtu"`
+	// Addresses are the static addresses (CIDR), link-local excluded.
+	Addresses []string `json:"addresses"`
+	// DHCPv4 and SLAAC: the interface has a dynamic address of that family.
+	DHCPv4 bool `json:"dhcpv4,omitempty"`
+	SLAAC  bool `json:"slaac,omitempty"`
 }
 
 // ProgramStatus is an external program the agent depends on.

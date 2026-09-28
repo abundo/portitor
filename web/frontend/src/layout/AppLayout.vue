@@ -5,6 +5,7 @@
 import { onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { watch } from 'vue'
+import { useToast } from '@nuxt/ui/composables'
 import AppMenu from './AppMenu.vue'
 import AppTopbar from './AppTopbar.vue'
 import ConfirmBanner from '@/components/ConfirmBanner.vue'
@@ -15,10 +16,29 @@ const instances = useInstanceStore()
 const deploy = useDeployStore()
 const mobileMenu = ref(false)
 const route = useRoute()
+const toast = useToast()
 
 watch(
   () => route.path,
   () => (mobileMenu.value = false),
+)
+
+// The status call imports new physical interfaces of the firewall into
+// the default instance; say so once, when it happens.
+watch(
+  () => deploy.status?.nic_sync,
+  (sync) => {
+    if (sync?.imported?.length) {
+      const def = instances.list.find((i) => i.is_default)?.name ?? 'the default instance'
+      toast.add({
+        title: `Found ${sync.imported.join(', ')} on the firewall`,
+        description: `Added to ${def} as it is configured now. Review before deploying.`,
+        color: 'info',
+        actions: [{ label: 'Interfaces', to: '/interfaces' }],
+      })
+    }
+    for (const p of sync?.problems ?? []) toast.add({ title: p, color: 'warning' })
+  },
 )
 
 onMounted(() => {

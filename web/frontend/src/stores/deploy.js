@@ -10,6 +10,8 @@ export const useDeployStore = defineStore('deploy', {
   state: () => ({ status: null, error: null, timer: null }),
   getters: {
     pending: (s) => s.status?.pending ?? null,
+    // Physical interfaces in the configuration that the firewall lacks.
+    missingNics: (s) => s.status?.nic_sync?.missing ?? [],
   },
   actions: {
     async refresh() {

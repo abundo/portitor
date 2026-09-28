@@ -18,4 +18,5 @@ type (
 	RenderResult   = agentapi.RenderResult
 	ApplyResult    = agentapi.ApplyResult
 	ProgramStatus  = agentapi.ProgramStatus
+	NICStatus      = agentapi.NICStatus
 )

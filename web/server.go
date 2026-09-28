@@ -42,6 +42,8 @@ type Server struct {
 	jwtKey   []byte
 	limiter  loginLimiter
 	deployMu sync.Mutex
+	// nicMu serializes syncNICs (every open browser polls the status).
+	nicMu sync.Mutex
 	// newAgent builds a client from the current settings.
 	newAgent func(s *models.Settings) (agentAPI, error)
 	static   fs.FS
