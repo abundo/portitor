@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package buildinfo holds version information set at link time
-// (see Makefile GO_BUILD_FLAGS).
+// (see LDFLAGS in the Makefile, and .goreleaser.yaml).
 package buildinfo
 
 import "runtime"

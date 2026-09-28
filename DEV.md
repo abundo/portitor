@@ -1,11 +1,14 @@
 <!-- SPDX-FileCopyrightText: 2026 The Portitor contributors -->
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
+# Development
+
 The web GUI's frontend is a Vue 3 SPA
 that's either served from disk (dev) or embedded into the `portitor-web`
 binary (release build, `-tags release`).
 
-- Go 1.27+ (go.mod declares 1.26, so 1.26 toolchains build it too)
+- Go 1.26+ (go.mod pins the `toolchain` that CI and releases build with; with the
+  default `GOTOOLCHAIN=auto` an older local Go downloads it)
 - Node.js 22.18+ or 24.12+
 
 Schema migrations are a dedicated command: `portitor-web migrate`. `start` never
@@ -45,7 +48,8 @@ Render a document without an agent: `portitor-agent render --sample`, or
 
 ```sh
 make test              # go test ./...
-make lint              # go vet + oxlint + eslint
+make lint              # go vet + oxlint + eslint (fixes in place)
+make fmt               # gofmt + prettier; CI fails on unformatted files
 ```
 
 - `internal/fwconfig`, `internal/render`: validation and rendering. The render
@@ -57,8 +61,8 @@ make lint              # go vet + oxlint + eslint
   `PORTITOR_NETNS_TEST=1 unshare -rnm sh -c 'mount -t tmpfs none /run && go test -run InNetns ./internal/agent/'`.
 - `internal/dyndns`: the dynamic DNS client against an in-memory nameserver, and
   TSIG against a real one on localhost.
-- `internal/builder`, `web`: SQLite in-memory via GORM AutoMigrate (not the goose
-  SQL). `TestDeployEndToEnd` drives portitor-web against a real dry-run agent over
+- `internal/builder`, `web`: a temporary SQLite database with the real goose
+  migrations and foreign keys enforced. `TestDeployEndToEnd` drives portitor-web against a real dry-run agent over
   TLS with certificate pinning.
 
 Nothing in `make test` runs a real apply as root; the lab below does.
@@ -97,6 +101,10 @@ deploy). `LAB_WEB_PORT` changes the published GUI port. Rootless is enough becau
 module loaded on the host for `wg0`.
 
 ### Releases and install.py
+
+Before tagging: `make test`, `make lint`, `make fmt` leave nothing to commit, and
+`go run golang.org/x/vuln/cmd/govulncheck@latest ./...` reports nothing your code
+calls. For a vulnerability in the standard library, raise `toolchain` in go.mod.
 
 Pushing a tag `v*` runs `.github/workflows/release.yml`: tests, then GoReleaser
 (`.goreleaser.yaml`) publishes `portitor_<version>_linux_{amd64,arm64}.tar.gz` (both

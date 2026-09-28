@@ -74,7 +74,7 @@ screen shows them too; with a DHCP LAN it shows the LAN's current address. Open
 The browser warns about the self-signed certificate; compare the fingerprint it shows
 with the one on the screen.
 
-Next steps in the GUI: a masquerade rule (*Firewall → NAT*), forward rules from the LAN
+Next steps in the GUI: a masquerade rule (*Firewall → NAT & port forwards*), forward rules from the LAN
 to the WAN, and DHCP and DNS for the LAN. See [portitor-web](portitor-web.md).
 
 If a step fails, the setup shows the error and offers to retry it; its log is

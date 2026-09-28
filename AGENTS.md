@@ -11,13 +11,15 @@ are in [README.md](README.md).
 
 | Path | What |
 |---|---|
-| `cmd/portitor-web` | GUI/API binary: `start`, `migrate`, `createadmin` |
+| `cmd/portitor-web` | GUI/API binary: `start`, `migrate`, `createadmin`, `agent-url`, `bootstrap` (ISO first boot) |
 | `cmd/portitor-agent` | Agent daemon on the firewall: `start`, `init`, `render`, `netns-exec` |
 | `internal/fwconfig` | The desired-state document and `Validate()`. **The contract between web and agent.** |
 | `internal/render` | Pure functions: document → nftables, WireGuard, named.conf, Kea, dnsmgr2 config |
 | `internal/agent` | Agent: apply/reconcile, commit-confirm, DHCP client, IP lists, task scheduler, packet log (NFLOG), WireGuard endpoint re-resolving, status, API server |
 | `internal/dyndns` | Dynamic DNS client (RFC 2136, from ifnsupdate); the agent runs it per instance netns |
 | `internal/iplist` | Downloads IP lists (CrowdSec LAPI decisions, plain-text lists) |
+| `internal/wgkeys` | WireGuard key generation (wg(8) base64) |
+| `internal/buildinfo` | Version, commit and date, set at link time (Makefile `LDFLAGS`, `.goreleaser.yaml`) |
 | `internal/cron` | crontab(5) schedule parser for tasks (shared by web and agent) |
 | `internal/agentapi` | Agent API wire types (shared by agent and client) |
 | `internal/agentclient` | portitor-web's HTTPS client for the agent, with certificate pinning |

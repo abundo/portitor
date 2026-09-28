@@ -95,7 +95,12 @@ const fields = [
     :api="instances"
     :columns="columns"
     :fields="fields"
-    :defaults="{ dns_forward_mode: 'first', dns_forwarders: [], dns_allow_recursion: [], dhcp_lease_time: 86400 }"
+    :defaults="{
+      dns_forward_mode: 'first',
+      dns_forwarders: [],
+      dns_allow_recursion: [],
+      dhcp_lease_time: 86400,
+    }"
     new-label="New instance"
     @changed="store.load()"
   />

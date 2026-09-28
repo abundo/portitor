@@ -51,6 +51,7 @@ jobs:
       # Without --fix (npm run lint fixes in place), so CI fails instead.
       - run: npx oxlint .
       - run: npx eslint .
+      - run: npx prettier --check src/
       - run: npm run build
 
   release-check:

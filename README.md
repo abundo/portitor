@@ -6,19 +6,25 @@
 *Portitor* was a Roman customs officer who inspected everything that passed
 through a port. The name is also a pun on network ports.
 
-a web gui for a linux nftables firewall.
-supports DNS server, DHCP server and Wireguard tunnels
-DHCP client for upstream/WAN link
-dynamic DNS: records on an external nameserver follow the WAN addresses (RFC 2136, TSIG)
-IP lists: CrowdSec decisions or downloaded blocklists, used as `@name` in rules
-scheduled tasks: download IP lists or run commands on a cron schedule
-main use cause is residential/home user
+Portitor is a web GUI for a Linux nftables firewall, aimed mainly at home and small
+office networks. It manages:
 
-web gui should not run on the firewall for maxiumum security. the firewall should have a daemon running, which the web gui/backend uses to get things done on the firewall
+- firewall rules (input, forward, output) with named services, hosts and prefixes, and
+  NAT: masquerade, SNAT and port forwards
+- a DNS server (BIND) and a DHCP server (Kea, DHCPv4 and DHCPv6) with router
+  advertisements
+- WireGuard tunnels, for road warriors and site-to-site
+- a DHCP client for the WAN link
+- dynamic DNS: records on an external nameserver follow the WAN addresses (RFC 2136, TSIG)
+- IP lists: CrowdSec decisions or downloaded blocklists, used as `@name` in rules
+- scheduled tasks: download IP lists or run commands on a cron schedule
+- virtual instances, each with its own routing, rules, DHCP and DNS, with optional
+  internal links between them
+- IP prefixes and addresses in a hierarchical tree (IPAM)
 
-support for virtual instances (routing, firewall rules, DHCP, DNS etc) with optional internal links between them
-
-ip prefix/addresses are handled by a hierarchical tree
+For the best security the GUI does not run on the firewall. A small daemon on the
+firewall, the agent, makes the changes the GUI asks for. For a single box, an
+[installer ISO](docs/appliance.md) puts both on the firewall.
 
 ## How it fits together
 
