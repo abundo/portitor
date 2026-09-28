@@ -85,8 +85,10 @@ if [[ -n $release ]]; then
 	[[ -n $want && $(sha256sum "$payload/portitor.tar.gz" | cut -d' ' -f1) == "$want" ]] ||
 		{ echo "checksum mismatch: $archive" >&2; exit 1; }
 	# install.py (in target.sh) needs these; v0.1.0's archive lacked the configs.
+	# (Listed once: grep -q on tar's output would fail it with SIGPIPE.)
+	members=$(tar -tzf "$payload/portitor.tar.gz")
 	for f in install.py portitor-web portitor-agent deploy/agent.yaml deploy/web.yaml; do
-		tar -tzf "$payload/portitor.tar.gz" | grep -qxE "(\./)?$f" ||
+		grep -qxE "(\./)?$f" <<<"$members" ||
 			{ echo "$archive does not contain $f" >&2; exit 1; }
 	done
 	version=v$version
