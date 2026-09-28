@@ -62,13 +62,14 @@ ZONE=$(id /dns/zones "{\"instance_id\":$MAIN,\"name\":\"home.arpa\",\"type\":\"f
 id /dns/zones "{\"instance_id\":$MAIN,\"name\":\"192.168.1.0/24\",\"type\":\"reverse4\"}" >/dev/null
 id /dns/records "{\"zone_id\":$ZONE,\"name\":\"files\",\"type\":\"CNAME\",\"value\":\"nas\"}" >/dev/null
 
+id /custom-services '{"name":"iot-cloud","type":"tcp/udp/sctp","ports":[{"protocol":"tcp","dst_lo":443},{"protocol":"tcp","dst_lo":8883}],"description":"HTTPS and MQTT over TLS"}' >/dev/null
 id /rules "{\"instance_id\":$MAIN,\"chain\":\"forward\",\"in_interfaces\":[\"eth1\"],\"out_interfaces\":[\"wan\"],\"action\":\"accept\",\"enabled\":true,\"description\":\"LAN to Internet\"}" >/dev/null
 id /rules "{\"instance_id\":$MAIN,\"chain\":\"forward\",\"in_interfaces\":[\"eth1\"],\"out_interfaces\":[\"iot\"],\"action\":\"accept\",\"enabled\":true,\"description\":\"LAN manages IoT\"}" >/dev/null
-id /rules "{\"instance_id\":$MAIN,\"chain\":\"forward\",\"in_interfaces\":[\"iot\"],\"out_interfaces\":[\"wan\"],\"protocol\":\"tcp\",\"dst_ports\":\"443,8883\",\"action\":\"accept\",\"enabled\":true,\"description\":\"IoT cloud only\"}" >/dev/null
+id /rules "{\"instance_id\":$MAIN,\"chain\":\"forward\",\"in_interfaces\":[\"iot\"],\"out_interfaces\":[\"wan\"],\"services\":[\"iot-cloud\"],\"action\":\"accept\",\"enabled\":true,\"description\":\"IoT cloud only\"}" >/dev/null
 id /rules "{\"instance_id\":$MAIN,\"chain\":\"forward\",\"in_interfaces\":[\"wg0\"],\"action\":\"accept\",\"enabled\":true,\"description\":\"VPN clients anywhere\"}" >/dev/null
 id /rules "{\"instance_id\":$MAIN,\"chain\":\"forward\",\"in_interfaces\":[\"guest\"],\"out_interfaces\":[\"wan\"],\"action\":\"accept\",\"enabled\":true,\"description\":\"Guests to Internet\"}" >/dev/null
-id /rules "{\"instance_id\":$MAIN,\"chain\":\"input\",\"in_interfaces\":[\"wan\"],\"protocol\":\"icmp\",\"action\":\"accept\",\"enabled\":true,\"description\":\"Ping from Internet\"}" >/dev/null
-id /rules "{\"instance_id\":$MAIN,\"chain\":\"forward\",\"in_interfaces\":[\"wg0\"],\"dst_addrs\":[\"nas\"],\"protocol\":\"tcp\",\"dst_ports\":\"22\",\"action\":\"accept\",\"enabled\":true,\"description\":\"SSH to the NAS (IPv4 and IPv6)\"}" >/dev/null
+id /rules "{\"instance_id\":$MAIN,\"chain\":\"input\",\"in_interfaces\":[\"wan\"],\"services\":[\"ping\",\"ping6\"],\"action\":\"accept\",\"enabled\":true,\"description\":\"Ping from Internet\"}" >/dev/null
+id /rules "{\"instance_id\":$MAIN,\"chain\":\"forward\",\"in_interfaces\":[\"wg0\"],\"dst_addrs\":[\"nas\"],\"services\":[\"ssh\"],\"action\":\"accept\",\"enabled\":true,\"description\":\"SSH to the NAS (IPv4 and IPv6)\"}" >/dev/null
 id /nat "{\"instance_id\":$MAIN,\"kind\":\"dnat\",\"in_interfaces\":[\"wan\"],\"protocol\":\"tcp\",\"dst_ports\":\"8443\",\"to_addr\":\"nas\",\"to_port\":443,\"enabled\":true,\"description\":\"NAS web\"}" >/dev/null
 id /rules "{\"instance_id\":$MAIN,\"chain\":\"input\",\"in_interfaces\":[\"trusted\"],\"action\":\"accept\",\"enabled\":true,\"description\":\"LAN and VPN to the firewall\"}" >/dev/null
 id /rules "{\"instance_id\":$MAIN,\"chain\":\"input\",\"in_interfaces\":[\"iot\"],\"action\":\"reject\",\"enabled\":true,\"description\":\"IoT to the firewall\"}" >/dev/null

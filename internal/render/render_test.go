@@ -94,32 +94,53 @@ func TestNftablesMain(t *testing.T) {
 	}
 }
 
-func TestMatchExprTCPUDP(t *testing.T) {
+func TestProtoExprTCPUDP(t *testing.T) {
 	for _, tc := range []struct{ ports, want string }{
-		{"", "ip saddr 10.0.0.0/8 meta l4proto { tcp, udp }"},
-		{"53,5353", "ip saddr 10.0.0.0/8 meta l4proto { tcp, udp } th dport { 53, 5353 }"},
+		{"", "meta l4proto { tcp, udp }"},
+		{"53,5353", "meta l4proto { tcp, udp } th dport { 53, 5353 }"},
 	} {
-		got := strings.Join(matchExpr("ipv4", "10.0.0.0/8", "", "tcp,udp", tc.ports, nil), " ")
+		got := strings.Join(protoExpr("tcp,udp", tc.ports), " ")
 		if got != tc.want {
 			t.Errorf("ports %q: got %q, want %q", tc.ports, got, tc.want)
 		}
 	}
 }
 
-func TestMatchExprICMPTypes(t *testing.T) {
+func TestServiceExpr(t *testing.T) {
+	code := 4
 	for _, tc := range []struct {
-		family, proto string
-		types         []string
-		want          string
+		s    fwconfig.ServiceMatch
+		want string
 	}{
-		{"ipv4", "icmp", nil, "meta nfproto ipv4 meta l4proto icmp"},
-		{"ipv4", "icmp", []string{"echo-request"}, "meta nfproto ipv4 icmp type echo-request"},
-		{"ipv6", "icmpv6", []string{"echo-request", "nd-neighbor-solicit"}, "meta nfproto ipv6 icmpv6 type { echo-request, nd-neighbor-solicit }"},
+		{fwconfig.ServiceMatch{}, ""},
+		{fwconfig.ServiceMatch{Protocol: "tcp"}, "meta l4proto tcp"},
+		{fwconfig.ServiceMatch{Protocol: "udp", DstPorts: "53,5353"}, "udp dport { 53, 5353 }"},
+		{fwconfig.ServiceMatch{Protocol: "sctp", DstPorts: "5060", SrcPorts: "1024-65535"}, "sctp sport 1024-65535 sctp dport 5060"},
+		{fwconfig.ServiceMatch{Protocol: "icmp"}, "meta l4proto icmp"},
+		{fwconfig.ServiceMatch{Protocol: "icmp", ICMPType: "echo-request"}, "icmp type echo-request"},
+		{fwconfig.ServiceMatch{Protocol: "icmpv6", ICMPType: "destination-unreachable", ICMPCode: &code}, "icmpv6 type destination-unreachable icmpv6 code 4"},
+		{fwconfig.ServiceMatch{Protocol: "icmpv6"}, "meta l4proto ipv6-icmp"},
+		{fwconfig.ServiceMatch{Protocol: "ip"}, ""},
+		{fwconfig.ServiceMatch{Protocol: "ip", IPProtocol: 47}, "meta l4proto 47"},
 	} {
-		got := strings.Join(matchExpr(tc.family, "", "", tc.proto, "", tc.types), " ")
-		if got != tc.want {
-			t.Errorf("%s %v: got %q, want %q", tc.proto, tc.types, got, tc.want)
+		if got := strings.Join(serviceExpr(tc.s), " "); got != tc.want {
+			t.Errorf("%+v: got %q, want %q", tc.s, got, tc.want)
 		}
+	}
+}
+
+// TestRuleServices checks that a rule becomes one nft rule per service
+// match, and that a service of the other IP version is left out.
+func TestRuleServices(t *testing.T) {
+	var b strings.Builder
+	in := &fwconfig.Instance{}
+	writeRule(&b, 0, fwconfig.Rule{Chain: "input", Family: "ipv4", Action: "accept", Services: []fwconfig.ServiceMatch{
+		{Protocol: "tcp", DstPorts: "53"}, {Protocol: "udp", DstPorts: "53"}, {Protocol: "icmpv6"},
+	}}, in)
+	want := "\t\tmeta nfproto ipv4 tcp dport 53 counter accept comment \"rule 1\"\n" +
+		"\t\tmeta nfproto ipv4 udp dport 53 counter accept comment \"rule 1\"\n"
+	if b.String() != want {
+		t.Errorf("got\n%s\nwant\n%s", b.String(), want)
 	}
 }
 

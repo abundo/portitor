@@ -15,7 +15,7 @@ package fwconfig
 import "slices"
 
 // Version of the document format. Bump when a field changes meaning.
-const Version = 2
+const Version = 3
 
 type Document struct {
 	Version    int        `json:"version"`
@@ -172,17 +172,49 @@ type Rule struct {
 	// OutInterfaces the outgoing one (not for input rules).
 	InInterfaces  []string `json:"in_interfaces,omitempty"`
 	OutInterfaces []string `json:"out_interfaces,omitempty"`
-	Family        string   `json:"family,omitempty"`   // "", ipv4, ipv6
-	Protocol      string   `json:"protocol,omitempty"` // "", tcp, udp, tcp,udp, icmp, icmpv6
+	Family        string   `json:"family,omitempty"` // "", ipv4, ipv6
 	SrcAddrs      []string `json:"src_addrs,omitempty"`
 	DstAddrs      []string `json:"dst_addrs,omitempty"`
-	DstPorts      string   `json:"dst_ports,omitempty"` // "22", "80,443", "1000-2000"
-	// ICMPTypes match ICMP (protocol icmp) or ICMPv6 (icmpv6) message types
-	// by name (ICMPTypes, ICMPv6Types); empty matches any.
-	ICMPTypes   []string `json:"icmp_types,omitempty"`
-	Action      string   `json:"action"`
-	Log         bool     `json:"log,omitempty"`
-	Description string   `json:"description,omitempty"`
+	// Services are the protocol matches of the rule, of which a packet
+	// must match one; empty matches any protocol.
+	Services    []ServiceMatch `json:"services,omitempty"`
+	Action      string         `json:"action"`
+	Log         bool           `json:"log,omitempty"`
+	Description string         `json:"description,omitempty"`
+}
+
+// ServiceMatch is one protocol match of a rule. portitor-web expands the
+// services a rule names into these.
+type ServiceMatch struct {
+	// Protocol is tcp, udp or sctp (with ports), icmp or icmpv6 (with a
+	// type and code), or ip (with a protocol number).
+	Protocol string `json:"protocol"`
+	// DstPorts and SrcPorts are port lists ("22", "1000-2000"); empty
+	// matches any.
+	DstPorts string `json:"dst_ports,omitempty"`
+	SrcPorts string `json:"src_ports,omitempty"`
+	// ICMPType is an ICMP or ICMPv6 type by name (ICMPTypes, ICMPv6Types)
+	// and ICMPCode its code; empty or nil matches any. A code needs a type.
+	ICMPType string `json:"icmp_type,omitempty"`
+	ICMPCode *int   `json:"icmp_code,omitempty"`
+	// IPProtocol is an IP protocol number (1-255) with protocol ip; 0
+	// matches any.
+	IPProtocol int `json:"ip_protocol,omitempty"`
+}
+
+// Service match protocols.
+const (
+	ProtoTCP    = "tcp"
+	ProtoUDP    = "udp"
+	ProtoSCTP   = "sctp"
+	ProtoICMP   = "icmp"
+	ProtoICMPv6 = "icmpv6"
+	ProtoIP     = "ip"
+)
+
+// HasPorts reports whether the match's protocol has ports.
+func (s ServiceMatch) HasPorts() bool {
+	return s.Protocol == ProtoTCP || s.Protocol == ProtoUDP || s.Protocol == ProtoSCTP
 }
 
 // RuleKindComment marks a Rule that is a comment row.

@@ -24,6 +24,7 @@ import (
 	"github.com/abundo/portitor/internal/agentclient"
 	"github.com/abundo/portitor/internal/buildinfo"
 	"github.com/abundo/portitor/internal/fwconfig"
+	"github.com/abundo/portitor/internal/netobj"
 	"github.com/abundo/portitor/models"
 )
 
@@ -134,6 +135,7 @@ func (s *Server) Echo() *echo.Echo {
 	g.GET("/ipam/prefixes/:id/next-free", s.handleNextFree)
 	g.GET("/rules/auto", s.handleAutoRules)
 	g.GET("/services", func(c *echo.Context) error { return c.JSON(http.StatusOK, fwconfig.Services) })
+	g.GET("/predefined-services", func(c *echo.Context) error { return c.JSON(http.StatusOK, netobj.Predefined) })
 	g.GET("/icmp-types", func(c *echo.Context) error {
 		return c.JSON(http.StatusOK, map[string][]fwconfig.ICMPType{"icmp": fwconfig.ICMPTypes, "icmpv6": fwconfig.ICMPv6Types})
 	})

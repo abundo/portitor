@@ -115,34 +115,12 @@ const fields = [
     ],
   },
   {
-    key: 'protocol',
-    label: 'Protocol',
-    type: 'select',
-    items: [
-      ...opt(['any', 'tcp', 'udp']),
-      { label: 'tcp+udp', value: 'tcp,udp' },
-      ...opt(['icmp', 'icmpv6']),
-    ],
-  },
-  {
-    key: 'dst_ports',
-    label: 'Destination ports',
-    type: 'ports',
-    placeholder: '22, https, 80-90',
-    show: (f) => ['tcp', 'udp', 'tcp,udp'].includes(f.protocol),
-  },
-  {
-    key: 'icmp_types',
-    label: 'ICMP types',
+    key: 'services',
+    label: 'Services',
     type: 'multiselect',
-    items: (f) =>
-      (objects.icmpTypes[f.protocol] ?? []).map((t) => ({
-        label: t.name,
-        value: t.name,
-        description: `${t.type}: ${t.description}`,
-      })),
+    items: () => objects.serviceItems,
     placeholder: 'any',
-    show: (f) => ['icmp', 'icmpv6'].includes(f.protocol),
+    hint: 'The traffic must match one of them; empty matches any protocol. Services are defined on the Services page.',
   },
   {
     key: 'src_addrs',
@@ -215,15 +193,12 @@ const api = {
   update: async (id, b) => fromApi(await rules.update(id, clean(b))),
 }
 function fromApi(r) {
-  return { ...r, family: r.family || 'any', protocol: r.protocol || 'any' }
+  return { ...r, family: r.family || 'any' }
 }
 function clean(b) {
   return {
     ...b,
     family: b.family === 'any' ? '' : b.family,
-    protocol: b.protocol === 'any' ? '' : b.protocol,
-    // The form keeps hidden fields; ICMP types only go with icmp/icmpv6.
-    icmp_types: ['icmp', 'icmpv6'].includes(b.protocol) ? b.icmp_types : [],
   }
 }
 </script>
@@ -240,7 +215,6 @@ function clean(b) {
       :defaults="{
         chain: 'forward',
         family: 'any',
-        protocol: 'any',
         action: 'accept',
         enabled: false,
         log: false,
@@ -248,7 +222,7 @@ function clean(b) {
         out_interfaces: [],
         src_addrs: [],
         dst_addrs: [],
-        icmp_types: [],
+        services: [],
       }"
       new-label="New rule"
       reorder="rules"

@@ -63,6 +63,58 @@ func (s StringList) MarshalJSON() ([]byte, error) {
 
 func (StringList) GormDataType() string { return "text" }
 
+// ServicePort is one protocol entry of a service of type
+// ServiceTypePorts: a destination port range and optionally a source port
+// range. Lo 0 leaves a range out (any port); Hi 0 is Lo.
+type ServicePort struct {
+	Protocol string `json:"protocol"` // tcp, udp or sctp
+	DstLo    int    `json:"dst_lo"`
+	DstHi    int    `json:"dst_hi"`
+	SrcLo    int    `json:"src_lo"`
+	SrcHi    int    `json:"src_hi"`
+}
+
+// ServicePortList is stored as a JSON array in a TEXT column.
+type ServicePortList []ServicePort
+
+func (s ServicePortList) Value() (driver.Value, error) {
+	if s == nil {
+		return "[]", nil
+	}
+	b, err := json.Marshal([]ServicePort(s))
+	return string(b), err
+}
+
+func (s *ServicePortList) Scan(src any) error {
+	var data []byte
+	switch v := src.(type) {
+	case nil:
+		*s = ServicePortList{}
+		return nil
+	case string:
+		data = []byte(v)
+	case []byte:
+		data = v
+	default:
+		return errors.New("ServicePortList: unsupported type")
+	}
+	var out []ServicePort
+	if err := json.Unmarshal(data, &out); err != nil {
+		return err
+	}
+	*s = out
+	return nil
+}
+
+func (s ServicePortList) MarshalJSON() ([]byte, error) {
+	if s == nil {
+		return []byte("[]"), nil
+	}
+	return json.Marshal([]ServicePort(s))
+}
+
+func (ServicePortList) GormDataType() string { return "text" }
+
 type User struct {
 	Base
 	Username     string `gorm:"uniqueIndex" json:"username"`
@@ -219,13 +271,11 @@ type Rule struct {
 	InInterfaces  StringList `json:"in_interfaces"`
 	OutInterfaces StringList `json:"out_interfaces"`
 	Family        string     `json:"family"`
-	Protocol      string     `json:"protocol"`
 	SrcAddrs      StringList `json:"src_addrs"`
 	DstAddrs      StringList `json:"dst_addrs"`
-	DstPorts      string     `json:"dst_ports"`
-	// IcmpTypes match ICMP or ICMPv6 types by name (protocol icmp or
-	// icmpv6); empty matches any.
-	IcmpTypes   StringList `json:"icmp_types"`
+	// Services holds names of services (custom or predefined); empty
+	// matches any protocol.
+	Services    StringList `json:"services"`
 	Action      string     `json:"action"`
 	Log         bool       `json:"log"`
 	Enabled     bool       `json:"enabled"`
@@ -290,15 +340,31 @@ type AddressObject struct {
 	Description string     `json:"description"`
 }
 
-// Service is a custom port name. Rule and NAT port lists accept it like a
-// built-in one (fwconfig.Services); the builder expands it into Ports, a
-// port list of numbers, ranges and built-in names ("8000-8080", "80, 443").
+// Service is a named protocol match that rules refer to by name, next to
+// the predefined ones (netobj.Predefined); the builder expands the names.
+// Type says which fields apply: Ports (tcp, udp, sctp), IcmpType and
+// IcmpCode (icmp, icmp6), or IpProtocol (ip).
 type Service struct {
 	Base
-	Name        string `gorm:"uniqueIndex" json:"name"`
-	Ports       string `json:"ports"`
-	Description string `json:"description"`
+	Name        string          `gorm:"uniqueIndex" json:"name"`
+	Description string          `json:"description"`
+	Type        string          `json:"type"`
+	Ports       ServicePortList `json:"ports"`
+	// IcmpType is an ICMP or ICMPv6 type name and IcmpCode its code;
+	// empty or nil matches any.
+	IcmpType string `json:"icmp_type"`
+	IcmpCode *int   `json:"icmp_code"`
+	// IpProtocol is an IP protocol number; 0 matches any.
+	IpProtocol int `json:"ip_protocol"`
 }
+
+// Service types.
+const (
+	ServiceTypePorts = "tcp/udp/sctp"
+	ServiceTypeICMP  = "icmp"
+	ServiceTypeICMP6 = "icmp6"
+	ServiceTypeIP    = "ip"
+)
 
 // IpamAddress is a single address. With InterfaceID it is configured on
 // that firewall interface (prefix length from the enclosing IpamPrefix).

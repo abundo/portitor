@@ -55,13 +55,13 @@ func SampleDocument() Document {
 				Rules: []Rule{
 					{Chain: ChainForward, InInterfaces: []string{"lan"}, OutInterfaces: []string{"wan"}, Action: ActionAccept, Description: "LAN to Internet"},
 					{Chain: ChainForward, InInterfaces: []string{"vpn"}, Action: ActionAccept, Description: "VPN anywhere"},
-					{Chain: ChainForward, InInterfaces: []string{"iot"}, OutInterfaces: []string{"wan"}, Protocol: "tcp", DstPorts: "http,https,8883", Action: ActionAccept, Description: "IoT cloud"},
+					{Chain: ChainForward, InInterfaces: []string{"iot"}, OutInterfaces: []string{"wan"}, Services: []ServiceMatch{{Protocol: ProtoTCP, DstPorts: "http,https,8883"}}, Action: ActionAccept, Description: "IoT cloud"},
 					{Chain: ChainForward, InInterfaces: []string{"guest"}, OutInterfaces: []string{"eth0"}, Action: ActionAccept},
 					{Chain: ChainForward, InInterfaces: []string{"dmz"}, Action: ActionAccept, Description: "DMZ (no interfaces yet)"},
-					{Chain: ChainInput, InInterfaces: []string{"wan"}, Protocol: "icmp", ICMPTypes: []string{"echo-request"}, Action: ActionAccept, Description: "ping"},
-					{Chain: ChainInput, InInterfaces: []string{"iot"}, Protocol: "udp", DstPorts: "53,67", Action: ActionAccept},
+					{Chain: ChainInput, InInterfaces: []string{"wan"}, Services: []ServiceMatch{{Protocol: ProtoICMP, ICMPType: "echo-request"}, {Protocol: ProtoICMPv6, ICMPType: "destination-unreachable", ICMPCode: ptr(4)}}, Action: ActionAccept, Description: "ping"},
+					{Chain: ChainInput, InInterfaces: []string{"iot"}, Services: []ServiceMatch{{Protocol: ProtoUDP, DstPorts: "53,67"}, {Protocol: ProtoSCTP, DstPorts: "5060,5000-5100", SrcPorts: "1024-65535"}, {Protocol: ProtoIP, IPProtocol: 47}}, Action: ActionAccept},
 					{Chain: ChainForward, InInterfaces: []string{"wan"}, DstAddrs: []string{"192.168.1.0/24"}, Action: ActionDrop, Log: true, Description: `no "direct" access`},
-					{Chain: ChainForward, InInterfaces: []string{"vpn"}, DstAddrs: []string{"192.168.1.10", "fd00:1::10"}, Protocol: "tcp", DstPorts: "22", Action: ActionAccept, Description: "NAS ssh"},
+					{Chain: ChainForward, InInterfaces: []string{"vpn"}, DstAddrs: []string{"192.168.1.10", "fd00:1::10"}, Services: []ServiceMatch{{Protocol: ProtoTCP, DstPorts: "22"}}, Action: ActionAccept, Description: "NAS ssh"},
 					{Chain: ChainInput, InInterfaces: []string{"lan", "vpn"}, Action: ActionAccept, Description: "trusted"},
 					{Chain: ChainInput, InInterfaces: []string{"iot"}, Action: ActionReject},
 					{Chain: ChainOutput, Kind: RuleKindComment, Description: `"Outbound" is open`},
@@ -167,3 +167,5 @@ func SampleDocument() Document {
 		},
 	}
 }
+
+func ptr[T any](v T) *T { return &v }

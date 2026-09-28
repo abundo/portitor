@@ -371,7 +371,7 @@ func prepareRule(tx *gorm.DB, r, old *models.Rule) error {
 			Base: r.Base, InstanceID: r.InstanceID, Position: r.Position, Chain: r.Chain,
 			Kind: r.Kind, Description: strings.TrimSpace(r.Description), Enabled: true,
 			InInterfaces: models.StringList{}, OutInterfaces: models.StringList{},
-			SrcAddrs: models.StringList{}, DstAddrs: models.StringList{}, IcmpTypes: models.StringList{},
+			SrcAddrs: models.StringList{}, DstAddrs: models.StringList{}, Services: models.StringList{},
 		}
 		if old == nil && r.Position == 0 {
 			r.Position = nextPosition(tx, "rules", r.InstanceID)
@@ -382,9 +382,6 @@ func prepareRule(tx *gorm.DB, r, old *models.Rule) error {
 		return err
 	}
 	if err := oneOf("family", r.Family, "", "ipv4", "ipv6"); err != nil {
-		return err
-	}
-	if err := oneOf("protocol", r.Protocol, "", "tcp", "udp", "tcp,udp", "icmp", "icmpv6"); err != nil {
 		return err
 	}
 	r.InInterfaces, r.OutInterfaces = dedupe(cleanList(r.InInterfaces)), dedupe(cleanList(r.OutInterfaces))
@@ -407,23 +404,9 @@ func prepareRule(tx *gorm.DB, r, old *models.Rule) error {
 	if err := checkEntries(tx, "destination", r.DstAddrs, entryRule); err != nil {
 		return err
 	}
-	r.DstPorts = strings.TrimSpace(r.DstPorts)
-	if r.DstPorts != "" {
-		if r.Protocol != "tcp" && r.Protocol != "udp" && r.Protocol != "tcp,udp" {
-			return bad("ports need protocol tcp, udp or tcp+udp")
-		}
-		if err := checkPorts(tx, r.DstPorts); err != nil {
-			return err
-		}
-	}
-	r.IcmpTypes = dedupe(cleanList(r.IcmpTypes))
-	if len(r.IcmpTypes) > 0 && r.Protocol != "icmp" && r.Protocol != "icmpv6" {
-		return bad("icmp types need protocol icmp or icmpv6")
-	}
-	for _, t := range r.IcmpTypes {
-		if !fwconfig.ValidICMPType(r.Protocol, t) {
-			return bad(fmt.Sprintf("unknown %s type %q", r.Protocol, t))
-		}
+	r.Services = dedupe(cleanList(r.Services))
+	if err := checkServices(tx, r.Services); err != nil {
+		return err
 	}
 	if old == nil && r.Position == 0 {
 		r.Position = nextPosition(tx, "rules", r.InstanceID)
@@ -473,8 +456,8 @@ func prepareNat(tx *gorm.DB, n, old *models.NatRule) error {
 		if n.Protocol == "" {
 			return bad("ports need protocol tcp, udp or tcp+udp")
 		}
-		if err := checkPorts(tx, n.DstPorts); err != nil {
-			return err
+		if _, err := fwconfig.ParsePorts(n.DstPorts); err != nil {
+			return bad(err.Error() + "; use ports (22), ranges (8000-8080) or port names (https)")
 		}
 	}
 	if n.ToPort != 0 && n.Protocol == "" {

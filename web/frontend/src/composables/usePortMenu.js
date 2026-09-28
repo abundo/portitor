@@ -1,34 +1,28 @@
 // SPDX-FileCopyrightText: 2026 The Portitor contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// usePortMenu: a menu of service names and their ports (the custom services
-// and fwconfig.Services) for a port list input, shown by PortMenu; a
-// datalist cannot show a name and its port on one line. While typing it
-// offers the names that start with the last entry, or whose port does; on a
-// click, or when the last entry is complete (a name, port or range), every
-// name, and a pick is added to the list. Names already in the list are left
-// out. The menu ends with an entry that creates a custom service
-// (useServiceDialog), named after the last entry if that is a new name.
+// usePortMenu: a menu of port names and their ports (fwconfig.Services) for
+// a port list input, shown by PortMenu; a datalist cannot show a name and
+// its port on one line. While typing it offers the names that start with
+// the last entry, or whose port does; on a click, or when the last entry is
+// complete (a name, port or range), every name, and a pick is added to the
+// list. Names already in the list are left out.
 // Bind open to the input's click and input events (not focus, so the arrow
 // keys can move into the input without it), close to blur, and give the
 // keys to onKeydown first: with the menu open the arrows move in it, Enter
-// and Tab pick, Escape closes it. A pick, or a created service, completes
-// the last entry or is added after it, and sends an input event, so
+// and Tab pick, Escape closes it. A pick completes the last entry or is added after it, and sends an input event, so
 // v-model sees it. With any, the menu starts with an entry "any" that
 // empties the input. The callers load the object store.
 import { markRaw, onBeforeUnmount, ref } from 'vue'
-import { useServiceDialog } from '@/composables/useServiceDialog'
 import { useObjectStore } from '@/stores/objects'
 
-const nameRe = /^[a-z][a-z0-9_.-]*$/
 const portRe = /^\d+(\s*-\s*\d+)?$/
 
 const anyItem = { name: 'any', port: 'clears the list', any: true }
 
 export function usePortMenu({ any = false } = {}) {
   const objects = useObjectStore()
-  const dialog = useServiceDialog()
-  const menu = ref(null) // { el, top, left, width, items, newName, append, active }
+  const menu = ref(null) // { el, top, left, width, items, append, active }
 
   const isName = (s) => objects.portNames.some((it) => it.name === s)
 
@@ -55,9 +49,8 @@ export function usePortMenu({ any = false } = {}) {
       (it) =>
         !used.has(it.name) && (it.name.startsWith(filter) || String(it.port).startsWith(filter)),
     )
-    const newName = !append && nameRe.test(last) && !isName(last) ? last : ''
-    // Digits that match nothing get no menu; a new name gets the create entry.
-    if (!items.length && !newName && !append) return close()
+    // What matches nothing gets no menu.
+    if (!items.length) return close()
     if (!menu.value) window.addEventListener('scroll', onScroll, true)
     const rect = el.getBoundingClientRect()
     menu.value = {
@@ -66,7 +59,6 @@ export function usePortMenu({ any = false } = {}) {
       left: rect.left,
       width: rect.width,
       items: any ? [anyItem, ...items] : items,
-      newName,
       append,
       active: -1,
     }
@@ -98,30 +90,15 @@ export function usePortMenu({ any = false } = {}) {
     close()
   }
 
-  // create opens the dialog for a new custom service; once it is saved,
-  // its name goes in place of the last entry and the input gets the focus
-  // back. Callers that save on blur skip it while the dialog is open.
-  async function create() {
-    const { el, newName, append } = menu.value
-    close()
-    const svc = await dialog.create(newName)
-    if (!el.isConnected) return
-    if (svc) setLast(el, svc.name, append || !newName)
-    close() // the input event opened it again
-    el.focus()
-  }
-
-  // onKeydown tells whether it handled the key. The create entry comes
-  // after the items.
+  // onKeydown tells whether it handled the key.
   function onKeydown(event) {
     const m = menu.value
-    if (!m || event.isComposing) return false
-    const n = m.items.length + 1
+    if (!m || event.isComposing || !m.items.length) return false
+    const n = m.items.length
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       m.active = (m.active + (event.key === 'ArrowDown' ? 1 : n - 1 + (m.active < 0))) % n
     } else if ((event.key === 'Enter' || event.key === 'Tab') && m.active >= 0) {
-      if (m.active < m.items.length) pick(m.items[m.active])
-      else create()
+      pick(m.items[m.active])
     } else if (event.key === 'Escape') {
       close()
     } else {
@@ -133,5 +110,5 @@ export function usePortMenu({ any = false } = {}) {
     return true
   }
 
-  return { menu, open, close, pick, create, onKeydown }
+  return { menu, open, close, pick, onKeydown }
 }

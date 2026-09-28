@@ -3,23 +3,25 @@
 
 <script setup>
 // ServiceDialog: creates a custom service for useServiceDialog, from the
-// "New service" entry of a port field's menu. Mounted once in AppLayout.
-import { reactive, ref, watch } from 'vue'
+// "New service" entry of a rule's Service cell. Mounted once in AppLayout.
+import { ref, watch } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
+import ServiceOptions from '@/components/ServiceOptions.vue'
 import { customServices } from '@/api'
 import { errMsg } from '@/api/http'
 import { useServiceDialog } from '@/composables/useServiceDialog'
 import { useObjectStore } from '@/stores/objects'
+import { newService } from '@/utils/services'
 
 const { state, done } = useServiceDialog()
 const objects = useObjectStore()
 const toast = useToast()
-const form = reactive({ name: '', ports: '', description: '' })
+const form = ref(newService())
 const saving = ref(false)
 
 watch(
   () => state.open,
-  (open) => open && Object.assign(form, { name: state.name, ports: '', description: '' }),
+  (open) => open && (form.value = newService(state.name)),
 )
 
 function onOpen(open) {
@@ -29,7 +31,7 @@ function onOpen(open) {
 async function save() {
   saving.value = true
   try {
-    const svc = await customServices.create({ ...form })
+    const svc = await customServices.create(form.value)
     await objects.load(true).catch(() => {})
     done(svc)
   } catch (err) {
@@ -44,25 +46,17 @@ async function save() {
   <UModal :open="state.open" title="New service" @update:open="onOpen">
     <template #body>
       <form id="service-form" class="space-y-3" @submit.prevent="save">
-        <UFormField label="Name" required help="Lower case; port fields take it like ssh or https.">
-          <UInput v-model="form.name" class="w-full" required placeholder="unifi" autofocus />
-        </UFormField>
         <UFormField
-          label="Ports"
+          label="Name"
           required
-          help="A port (8443), a range (8000-8080) or several (8080, 8443, 10001). Built-in service names work too."
+          help="Lower case; a rule's Service cell takes it like ssh or ping."
         >
-          <UInput
-            v-model="form.ports"
-            class="w-full"
-            :ui="{ base: 'font-mono' }"
-            required
-            placeholder="8080, 8443"
-          />
+          <UInput v-model="form.name" class="w-full" required placeholder="unifi" autofocus />
         </UFormField>
         <UFormField label="Description">
           <UInput v-model="form.description" class="w-full" />
         </UFormField>
+        <ServiceOptions v-model="form" />
       </form>
     </template>
     <template #footer>

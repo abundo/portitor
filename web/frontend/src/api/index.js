@@ -34,7 +34,7 @@ export const dyndnsClients = crud('/dyndns/clients')
 export const dyndnsRecords = crud('/dyndns/records')
 export const ipLists = crud('/ip-lists')
 export const tasks = crud('/tasks')
-// Custom services: port names port fields accept next to the built-in ones.
+// Custom services: protocol matches rules name next to the predefined ones.
 export const customServices = crud('/custom-services')
 
 export const api = {
@@ -56,9 +56,12 @@ export const api = {
   // Input rules the agent adds for the instance's services, read-only.
   autoRules: (instanceId) =>
     http.get('/rules/auto', { params: { instance_id: instanceId } }).then((r) => r.data ?? []),
-  // Built-in port names that port fields accept ([{ name, port, description }],
-  // fwconfig.Services).
+  // Built-in port names that NAT port fields accept ([{ name, port,
+  // description }], fwconfig.Services).
   services: () => http.get('/services').then((r) => r.data),
+  // The predefined services rules name (netobj.Predefined), shaped like
+  // custom services.
+  predefinedServices: () => http.get('/predefined-services').then((r) => r.data),
   icmpTypes: () => http.get('/icmp-types').then((r) => r.data),
   reorder: (kind, ids) => http.post(`/${kind}/reorder`, { ids }),
   wgClientConfig: (peerId, split) =>

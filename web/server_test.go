@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -23,6 +24,7 @@ import (
 	"github.com/abundo/portitor/internal/agent"
 	"github.com/abundo/portitor/internal/builder"
 	"github.com/abundo/portitor/internal/dbmigrate"
+	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/internal/render"
 	"github.com/abundo/portitor/models"
 )
@@ -586,36 +588,46 @@ func TestAddressObjects(t *testing.T) {
 func TestCustomServices(t *testing.T) {
 	env := newEnv(t)
 	inst := env.create("/api/instances", map[string]any{"name": "main"})
-	svc := env.create("/api/custom-services", map[string]any{"name": " UniFi ", "ports": "8080,8443 ", "description": "controller"})
-	env.create("/api/custom-services", map[string]any{"name": "games", "ports": "27000-27050"})
+	tcp := func(lo, hi int) map[string]any { return map[string]any{"protocol": "tcp", "dst_lo": lo, "dst_hi": hi} }
+	svc := env.create("/api/custom-services", map[string]any{"name": " UniFi ", "type": "tcp/udp/sctp", "description": "controller",
+		"ports": []any{tcp(8080, 8080), tcp(8443, 0)}, "icmp_type": "echo-request", "ip_protocol": 6})
+	env.create("/api/custom-services", map[string]any{"name": "unreach", "type": "icmp", "icmp_type": "destination-unreachable", "icmp_code": 4})
 
 	var s models.Service
 	env.srv.db.First(&s, svc)
-	if s.Name != "unifi" || s.Ports != "8080, 8443" {
-		t.Errorf("not normalised: %q %q", s.Name, s.Ports)
+	if s.Name != "unifi" || len(s.Ports) != 2 || s.Ports[0].DstHi != 0 || s.IcmpType != "" || s.IpProtocol != 0 {
+		t.Errorf("not normalised: %+v", s)
 	}
 	for _, body := range []map[string]any{
-		{"name": "ssh", "ports": "2222"},
-		{"name": "1x", "ports": "1"},
-		{"name": "empty", "ports": ""},
-		{"name": "nested", "ports": "unifi"},
-		{"name": "badrange", "ports": "9000-8000"},
+		{"name": "ssh", "type": "tcp/udp/sctp", "ports": []any{tcp(2222, 0)}},
+		{"name": "1x", "type": "tcp/udp/sctp", "ports": []any{tcp(1, 0)}},
+		{"name": "empty", "type": "tcp/udp/sctp", "ports": []any{}},
+		{"name": "badrange", "type": "tcp/udp/sctp", "ports": []any{tcp(9000, 8000)}},
+		{"name": "badproto", "type": "tcp/udp/sctp", "ports": []any{map[string]any{"protocol": "icmp", "dst_lo": 1}}},
+		{"name": "badtype", "type": "tcp"},
+		{"name": "v6type", "type": "icmp", "icmp_type": "nd-neighbor-solicit"},
+		{"name": "codeonly", "type": "icmp6", "icmp_code": 1},
+		{"name": "bignum", "type": "ip", "ip_protocol": 300},
 	} {
 		if rec := env.do("POST", "/api/custom-services", body); rec.Code != http.StatusBadRequest {
 			t.Errorf("%v: %d %s", body, rec.Code, rec.Body)
 		}
 	}
 
-	rule := env.create("/api/rules", map[string]any{"instance_id": inst, "chain": "forward", "action": "accept", "enabled": true, "protocol": "tcp", "dst_ports": "ssh, unifi"})
-	nat := env.create("/api/nat", map[string]any{"instance_id": inst, "kind": "dnat", "enabled": true, "protocol": "tcp", "dst_ports": "unifi", "to_addr": "192.168.1.10"})
-	if rec := env.do("POST", "/api/rules", map[string]any{"instance_id": inst, "chain": "forward", "action": "accept", "protocol": "tcp", "dst_ports": "ghost"}); rec.Code != http.StatusBadRequest {
+	rule := env.create("/api/rules", map[string]any{"instance_id": inst, "chain": "forward", "action": "accept", "enabled": true, "services": []string{"ssh", "unifi", "unreach", "ssh"}})
+	if rec := env.do("POST", "/api/rules", map[string]any{"instance_id": inst, "chain": "forward", "action": "accept", "services": []string{"ghost"}}); rec.Code != http.StatusBadRequest {
 		t.Errorf("unknown service accepted: %d %s", rec.Code, rec.Body)
 	}
 
 	doc, _ := builder.Build(env.srv.db, 1)
 	in := doc.Instances[0]
-	if last := in.Rules[len(in.Rules)-1]; last.DstPorts != "ssh, 8080, 8443" || len(in.NAT) != 1 || in.NAT[0].DstPorts != "8080, 8443" {
-		t.Errorf("not expanded: %+v %+v", in.Rules, in.NAT)
+	code := 4
+	want := []fwconfig.ServiceMatch{
+		{Protocol: "tcp", DstPorts: "22,8080,8443"},
+		{Protocol: "icmp", ICMPType: "destination-unreachable", ICMPCode: &code},
+	}
+	if last := in.Rules[len(in.Rules)-1]; !reflect.DeepEqual(last.Services, want) {
+		t.Errorf("not expanded: %+v", last.Services)
 	}
 
 	// In use: delete refused. Renamed: references follow.
@@ -627,10 +639,8 @@ func TestCustomServices(t *testing.T) {
 	}
 	var r models.Rule
 	env.srv.db.First(&r, rule)
-	var n models.NatRule
-	env.srv.db.First(&n, nat)
-	if r.DstPorts != "ssh, controller" || n.DstPorts != "controller" {
-		t.Errorf("references not renamed: %q %q", r.DstPorts, n.DstPorts)
+	if strings.Join(r.Services, " ") != "ssh controller unreach" {
+		t.Errorf("references not renamed: %v", r.Services)
 	}
 }
 

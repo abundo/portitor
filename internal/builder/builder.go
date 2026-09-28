@@ -103,7 +103,7 @@ func Build(db *gorm.DB, generation int64) (*fwconfig.Document, error) {
 	}
 	// Named hosts/prefixes are expanded here; the agent sees addresses only.
 	objs := netobj.New(d.objects)
-	failed := false // set by expand and expandPorts; callers drop what they failed on
+	failed := false // set by expand and expandServices; callers drop what they failed on
 	expand := func(where string, fn func([]string) ([]string, error), list []string) []string {
 		out, err := fn(list)
 		if err != nil {
@@ -112,13 +112,10 @@ func Build(db *gorm.DB, generation int64) (*fwconfig.Document, error) {
 		}
 		return out
 	}
-	// So are custom services: the agent knows the built-in names only.
+	// So are services: the agent sees protocol matches only.
 	services := netobj.NewServices(d.services)
-	expandPorts := func(where, ports string) string {
-		if ports == "" {
-			return ""
-		}
-		out, err := services.ExpandPorts(ports)
+	expandServices := func(where string, names []string) []fwconfig.ServiceMatch {
+		out, err := services.Expand(names)
 		if err != nil {
 			addf("%s: %v", where, err)
 			failed = true
@@ -252,11 +249,9 @@ func Build(db *gorm.DB, generation int64) (*fwconfig.Document, error) {
 				InInterfaces:  []string(r.InInterfaces),
 				OutInterfaces: []string(r.OutInterfaces),
 				Family:        r.Family,
-				Protocol:      r.Protocol,
 				SrcAddrs:      expand(where+": source", objs.Expand, r.SrcAddrs),
 				DstAddrs:      expand(where+": destination", objs.Expand, r.DstAddrs),
-				DstPorts:      expandPorts(where+": ports", r.DstPorts),
-				ICMPTypes:     []string(r.IcmpTypes),
+				Services:      expandServices(where+": services", r.Services),
 				Action:        r.Action,
 				Log:           r.Log,
 				Description:   r.Description,
@@ -279,7 +274,7 @@ func Build(db *gorm.DB, generation int64) (*fwconfig.Document, error) {
 				Protocol:      n.Protocol,
 				SrcAddrs:      expand(where+": source", objs.Expand, n.SrcAddrs),
 				DstAddrs:      expand(where+": destination", objs.Expand, n.DstAddrs),
-				DstPorts:      expandPorts(where+": ports", n.DstPorts),
+				DstPorts:      n.DstPorts,
 				ToPort:        n.ToPort,
 				Description:   n.Description,
 			}

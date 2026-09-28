@@ -13,17 +13,16 @@
 // delete it (`remove`).
 // Address cells take a comma-separated list of addresses, CIDRs, names or
 // IP lists (@name); From/To cells a comma-separated list of interfaces and
-// interface zones; the Dst port cell ports, ranges and service names (ssh),
-// or with protocol icmp/icmpv6 a menu to tick ICMP types in (echo-request).
+// interface zones; the Service cell a menu to tick services in (custom and
+// predefined, such as ssh or ping), whose search can create a new one.
 // Each of these offers "any" first, which empties the cell.
 import { computed, onMounted, ref } from 'vue'
-import PortMenu from '@/components/PortMenu.vue'
 import { useColumnResize } from '@/composables/useColumnResize'
-import { usePortMenu } from '@/composables/usePortMenu'
 import { useServiceDialog } from '@/composables/useServiceDialog'
 import { useRowDrag } from '@/composables/useRowDrag'
 import { useObjectStore } from '@/stores/objects'
 import { bytes } from '@/utils/bytes'
+import { serviceMatches } from '@/utils/services'
 
 const props = defineProps({
   rows: { type: Array, required: true },
@@ -320,73 +319,44 @@ const nameSuggestions = computed(() =>
   ),
 )
 
-// ICMP types by protocol ({ label, value, description }), picked in the
-// Dst port cell of icmp and icmpv6 rules.
-const icmpItems = (proto) =>
-  (objects.icmpTypes[proto] ?? []).map((t) => ({
-    label: t.name,
-    value: t.name,
-    description: `${t.type}: ${t.description}`,
-  }))
-// rowIcmpItems adds the types a rule holds that the list lacks, so they
-// stay visible (and can be unticked), after "any", which unticks them all.
-function rowIcmpItems(r) {
-  const list = icmpItems(r.protocol)
+// rowServiceItems adds the services a rule names that the list lacks, so
+// they stay visible (and can be unticked), after "any", which unticks them
+// all.
+function rowServiceItems(r) {
+  const list = objects.serviceItems
   const known = new Set(list.map((it) => it.value))
-  const extra = (r.icmp_types ?? []).filter((t) => !known.has(t))
+  const extra = (r.services ?? []).filter((n) => !known.has(n))
   return [
     { label: 'any', value: 'any', description: 'clears the list' },
     ...list,
-    ...extra.map((t) => ({ label: t, value: t })),
+    ...extra.map((n) => ({ label: n, value: n, description: 'unknown service' })),
   ]
 }
-function setIcmp(r, list) {
-  set(r, 'icmp_types', list.includes('any') ? [] : list)
+function setServices(r, list) {
+  set(r, 'services', list.includes('any') ? [] : list)
 }
-// icmpTitle shows what the ICMP types in a cell are.
-function icmpTitle(r) {
-  const list = r.icmp_types ?? []
-  if (!list.length) return `Any ${r.protocol} type, or types such as echo-request`
-  const desc = new Map(icmpItems(r.protocol).map((it) => [it.value, it.description]))
-  return list.map((n) => (desc.has(n) ? `${n}: ${desc.get(n)}` : n)).join('\n')
-}
-
-const servicePort = computed(() => new Map(objects.portNames.map((it) => [it.name, it.port])))
-// The port cell offers service names with their ports (usePortMenu), in a
-// menu fixed to the viewport so the cell's overflow does not clip it.
-const ports = usePortMenu({ any: true })
-const portMenu = ports.menu
-// A picked name changes the input without a change event, so leaving the
-// cell saves it if it differs; not while the menu's New service dialog has
-// the focus, which returns it to the cell with the new name in.
-const serviceDialog = useServiceDialog()
-function onPortInput(r, event) {
-  onDraft(r, 'dst_ports', event)
-  ports.open(event)
-}
-function onPortBlur(r, event) {
-  ports.close()
-  if (serviceDialog.state.open) return
-  if (event.target.value.trim() !== (r.dst_ports ?? '')) setText(r, 'dst_ports', event)
-  endDraft()
-}
-// portTitle shows the numbers of the service names in a port cell.
-function portTitle(r) {
-  if (!hasPorts(r)) return 'Ports need protocol tcp, udp or tcp+udp, ICMP types icmp or icmpv6'
-  const parts = (r.dst_ports ?? '').split(/[\s,]+/).filter((s) => s)
-  if (!parts.length) return 'Ports, ranges or service names, such as 22, 8000-8080, https'
-  return parts
-    .map((p) =>
-      servicePort.value.has(p.toLowerCase())
-        ? `${p}: ${servicePort.value.get(p.toLowerCase())}`
-        : p,
-    )
+// serviceTitle shows what the services in a cell match.
+function serviceTitle(r) {
+  const list = r.services ?? []
+  if (!list.length) return 'Any protocol; tick services such as ssh or ping'
+  return list
+    .map((n) => {
+      const svc = objects.serviceByName.get(n)
+      return svc ? `${n}: ${serviceMatches(svc).join(', ')}` : `${n}: unknown`
+    })
     .join('\n')
+}
+// createService opens the New service dialog with the name searched for,
+// and adds the service it creates to the rule.
+const serviceDialog = useServiceDialog()
+async function createService(r, name) {
+  const svc = await serviceDialog.create(name.trim().toLowerCase())
+  if (svc) setServices(r, [...(r.services ?? []), svc.name])
 }
 
 const hasFrom = computed(() => props.chain !== 'output')
 const hasTo = computed(() => props.chain !== 'input')
-const colCount = computed(() => 12 + hasFrom.value + hasTo.value)
+const colCount = computed(() => 11 + hasFrom.value + hasTo.value)
 // The columns' default widths (class; none shares the rest). Dragging a
 // header's right edge resizes its column, remembered per chain;
 // double-clicking it goes back to these.
@@ -400,8 +370,7 @@ const columns = computed(() =>
     '',
     '',
     'w-14',
-    'w-18',
-    'w-24',
+    'w-40',
     'w-18',
     'w-8',
     'w-24',
@@ -409,7 +378,7 @@ const columns = computed(() =>
   ].filter((c) => c !== false),
 )
 const table = ref(null)
-const resize = useColumnResize({ table, storageKey: () => `rules-grid-cols-v2-${props.chain}` })
+const resize = useColumnResize({ table, storageKey: () => `rules-grid-cols-v3-${props.chain}` })
 const { widths, total: tableWidth } = resize
 const onHandle = (fn) => (event) => event.target.classList.contains('col-resize') && fn(event)
 const onResizeStart = onHandle(resize.onPointerDown)
@@ -419,18 +388,14 @@ const families = [
   { label: 'IPv4', value: 'ipv4' },
   { label: 'IPv6', value: 'ipv6' },
 ]
-const protocols = [
-  { label: 'any', value: 'any' },
-  { label: 'tcp', value: 'tcp' },
-  { label: 'udp', value: 'udp' },
-  { label: 'tcp+udp', value: 'tcp,udp' },
-  { label: 'icmp', value: 'icmp' },
-  { label: 'icmpv6', value: 'icmpv6' },
-]
 const actions = ['accept', 'drop', 'reject']
 const actionClass = { accept: 'text-success', drop: 'text-error', reject: 'text-warning' }
-const autoProtocol = (a) => (a.protocol === 'tcp,udp' ? 'tcp+udp' : a.protocol)
-const autoPorts = (a) => (a.src_port ? `${a.dst_port} (from ${a.src_port})` : `${a.dst_port}`)
+// autoService shows an auto rule's protocol and ports like a service.
+function autoService(a) {
+  const protos = a.protocol === 'tcp,udp' ? ['tcp', 'udp'] : [a.protocol]
+  const from = a.src_port ? ` from ${a.src_port}` : ''
+  return protos.map((p) => `${p}/${a.dst_port}${from}`).join(', ')
+}
 // autoFamily is the IP versions of an auto rule's source addresses.
 function autoFamily(a) {
   if (!a.source?.length) return 'any'
@@ -475,17 +440,8 @@ const dropCount = (reason) => props.drops?.[`${reason}_packets`]
 // The built-in rows log rate limited (render.builtinLogLimit).
 const builtinLogLimit = 'at most 10 packets a second'
 
-const hasPorts = (r) => ['tcp', 'udp', 'tcp,udp'].includes(r.protocol)
-const hasIcmp = (r) => ['icmp', 'icmpv6'].includes(r.protocol)
-
 function set(r, key, value) {
   r[key] = value
-  if (key === 'protocol') {
-    if (!hasPorts(r)) r.dst_ports = ''
-    // Between icmp and icmpv6, the types both have (echo-request) stay.
-    const known = new Set(icmpItems(r.protocol).map((it) => it.value))
-    r.icmp_types = hasIcmp(r) ? (r.icmp_types ?? []).filter((t) => known.has(t)) : []
-  }
   emit('save', r)
 }
 
@@ -550,9 +506,8 @@ function onKeydown(event, index) {
             <th>Source<span class="col-resize" /></th>
             <th>Destination<span class="col-resize" /></th>
             <th>IP<span class="col-resize" /></th>
-            <th>Protocol<span class="col-resize" /></th>
-            <th title="Destination ports, or the ICMP types of icmp and icmpv6 rules">
-              Dst port<span class="col-resize" />
+            <th title="Services the traffic must match one of; empty matches any protocol">
+              Service<span class="col-resize" />
             </th>
             <th>Action<span class="col-resize" /></th>
             <th title="Log matches">Log<span class="col-resize" /></th>
@@ -621,10 +576,7 @@ function onKeydown(event, index) {
               <span>{{ autoFamily(a) }}</span>
             </td>
             <td>
-              <span>{{ autoProtocol(a) }}</span>
-            </td>
-            <td>
-              <span class="font-mono">{{ autoPorts(a) }}</span>
+              <span class="font-mono">{{ autoService(a) }}</span>
             </td>
             <td><span class="font-semibold text-success">accept</span></td>
             <td class="text-center">
@@ -816,54 +768,22 @@ function onKeydown(event, index) {
                 </select>
               </td>
               <td>
-                <select
-                  :value="r.protocol"
-                  data-col="protocol"
-                  @change="set(r, 'protocol', $event.target.value)"
-                >
-                  <option v-for="p in protocols" :key="p.value" :value="p.value">
-                    {{ p.label }}
-                  </option>
-                </select>
-              </td>
-              <td v-if="hasIcmp(r)">
                 <USelectMenu
-                  :model-value="r.icmp_types ?? []"
+                  :model-value="r.services ?? []"
                   multiple
-                  :items="rowIcmpItems(r)"
+                  :items="rowServiceItems(r)"
                   value-key="value"
                   :filter-fields="['label', 'description']"
+                  :create-item="{ position: 'bottom' }"
                   variant="none"
                   size="xs"
                   placeholder="any"
-                  data-col="dst_ports"
-                  :title="icmpTitle(r)"
-                  class="icmp-select w-full font-mono"
-                  :ui="{ content: 'min-w-80' }"
-                  @update:model-value="setIcmp(r, $event)"
-                />
-              </td>
-              <td v-else>
-                <input
-                  :value="cellText(r, 'dst_ports', r.dst_ports)"
-                  data-col="dst_ports"
-                  :data-row="r.id"
-                  class="font-mono"
-                  :disabled="!hasPorts(r)"
-                  :placeholder="hasPorts(r) ? 'any' : ''"
-                  :title="portTitle(r)"
-                  autocomplete="off"
-                  @click="ports.open"
-                  @input="onPortInput(r, $event)"
-                  @blur="onPortBlur(r, $event)"
-                  @keydown="ports.onKeydown($event) || onKeydown($event, i)"
-                />
-                <PortMenu
-                  v-if="portMenu?.el.dataset.row === String(r.id)"
-                  :menu="portMenu"
-                  fixed
-                  @pick="ports.pick"
-                  @create="ports.create"
+                  data-col="services"
+                  :title="serviceTitle(r)"
+                  class="service-select w-full font-mono"
+                  :ui="{ content: 'min-w-96' }"
+                  @update:model-value="setServices(r, $event)"
+                  @create="createService(r, $event)"
                 />
               </td>
               <td>
@@ -1022,7 +942,7 @@ function onKeydown(event, index) {
 .rules-grid td > select {
   cursor: pointer;
 }
-.rules-grid td > .icmp-select {
+.rules-grid td > .service-select {
   height: 1.75rem;
   padding-inline: 0.375rem;
   font-size: inherit;

@@ -5,6 +5,7 @@ package builder
 
 import (
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -79,8 +80,9 @@ func TestBuildHome(t *testing.T) {
 	mustCreate(t, db, &models.DnsZone{InstanceID: main.ID, Name: "192.168.1.0/24", Type: "reverse4", DnsTemplateID: &tmpl.ID})
 	mustCreate(t, db, &models.DnsRecord{ZoneID: zone.ID, Name: "www", Type: "CNAME", Value: "nas"})
 
+	mustCreate(t, db, &models.Service{Name: "app", Type: models.ServiceTypePorts, Ports: models.ServicePortList{{Protocol: "udp", DstLo: 9000, DstHi: 9010}}})
 	mustCreate(t, db, &models.Rule{InstanceID: main.ID, Position: 2, Chain: "forward", InInterfaces: models.StringList{"lan"}, OutInterfaces: models.StringList{"eth0"}, Action: "accept", Enabled: true, Description: "second"})
-	mustCreate(t, db, &models.Rule{InstanceID: main.ID, Position: 1, Chain: "input", InInterfaces: models.StringList{"eth0"}, Protocol: "icmp", Action: "accept", Enabled: true, Description: "first"})
+	mustCreate(t, db, &models.Rule{InstanceID: main.ID, Position: 1, Chain: "input", InInterfaces: models.StringList{"eth0"}, Services: models.StringList{"ping", "app"}, Action: "accept", Enabled: true, Description: "first"})
 	mustCreate(t, db, &models.Rule{InstanceID: main.ID, Position: 3, Chain: "forward", Action: "accept", Enabled: false})
 	mustCreate(t, db, &models.Rule{InstanceID: main.ID, Position: 4, Chain: "forward", Kind: models.RuleKindComment, Enabled: true, Description: "a comment"})
 	mustCreate(t, db, &models.Rule{InstanceID: main.ID, Position: 5, Chain: "forward", Kind: models.RuleKindGroup, Enabled: true, Description: "LAN"})
@@ -110,6 +112,9 @@ func TestBuildHome(t *testing.T) {
 	if len(in.Rules) != 4 || in.Rules[0].Description != "first" || in.Rules[2].Kind != fwconfig.RuleKindComment || in.Rules[2].Description != "a comment" ||
 		in.Rules[3].Kind != fwconfig.RuleKindComment || in.Rules[3].Description != "group: LAN" {
 		t.Errorf("rules not ordered by position / disabled not skipped / comment or group not kept: %+v", in.Rules)
+	}
+	if got, want := in.Rules[0].Services, []fwconfig.ServiceMatch{{Protocol: "icmp", ICMPType: "echo-request"}, {Protocol: "udp", DstPorts: "9000-9010"}}; !reflect.DeepEqual(got, want) {
+		t.Errorf("services %+v, want %+v", got, want)
 	}
 	if in.Rules[0].ID == 0 || in.Rules[1].ID == 0 || in.Rules[0].ID == in.Rules[1].ID || in.Rules[2].ID != 0 || in.Rules[3].ID != 0 {
 		t.Errorf("rule ids must be the database ids, none on comments: %+v", in.Rules)
@@ -152,7 +157,7 @@ func TestBuildReportsProblems(t *testing.T) {
 	mustCreate(t, db, &eth1)
 	mustCreate(t, db, &models.IpamAddress{InstanceID: main.ID, Address: "192.168.1.1", InterfaceID: &eth1.ID})
 	mustCreate(t, db, &models.IpamAddress{InstanceID: main.ID, Address: "192.168.1.9", Mac: "02:00:00:00:00:09"})
-	mustCreate(t, db, &models.Rule{InstanceID: main.ID, Chain: "input", DstPorts: "22", Action: "accept", Enabled: true})
+	mustCreate(t, db, &models.Rule{InstanceID: main.ID, Chain: "input", Services: models.StringList{"ghost"}, Action: "accept", Enabled: true})
 
 	_, err := Build(db, 1)
 	ve, ok := err.(*fwconfig.ValidationError)
@@ -160,7 +165,7 @@ func TestBuildReportsProblems(t *testing.T) {
 		t.Fatalf("want ValidationError, got %v", err)
 	}
 	joined := strings.Join(ve.Problems, "\n")
-	for _, want := range []string{"not inside any IPAM prefix", "MAC but no DNS name", "ports need protocol"} {
+	for _, want := range []string{"not inside any IPAM prefix", "MAC but no DNS name", `unknown service "ghost"`} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("problems lack %q:\n%s", want, joined)
 		}
@@ -191,7 +196,7 @@ func TestBuildIPv6AndObjects(t *testing.T) {
 	} {
 		mustCreate(t, db, &o)
 	}
-	mustCreate(t, db, &models.Rule{InstanceID: main.ID, Chain: "forward", DstAddrs: models.StringList{"nas"}, Protocol: "tcp", DstPorts: "22", Action: "accept", Enabled: true})
+	mustCreate(t, db, &models.Rule{InstanceID: main.ID, Chain: "forward", DstAddrs: models.StringList{"nas"}, Services: models.StringList{"ssh"}, Action: "accept", Enabled: true})
 	mustCreate(t, db, &models.NatRule{InstanceID: main.ID, Kind: "dnat", InInterfaces: models.StringList{"eth0"}, Protocol: "tcp", DstPorts: "443", ToAddr: "nas", Enabled: true})
 	mustCreate(t, db, &models.Route{InstanceID: main.ID, Destination: "remote", Gateway: "upstream", Enabled: true})
 

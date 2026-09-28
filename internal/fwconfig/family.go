@@ -62,3 +62,32 @@ func AddrFamily(s string) string {
 	}
 	return "ipv6"
 }
+
+// RuleMatch is one nft rule's worth of a Rule: one service match for one
+// IP version (see MatchFamilies).
+type RuleMatch struct {
+	FamilyMatch
+	Service ServiceMatch
+}
+
+// Matches splits a rule into one RuleMatch per service match and IP version
+// it applies to. A rule without services has one match of any protocol
+// (an empty Service). A service of the other IP version than the rule's
+// family (icmp in an ipv6 rule) is left out; an empty result means nothing
+// is left, which Validate reports.
+func (r Rule) Matches() []RuleMatch {
+	services := r.Services
+	if len(services) == 0 {
+		services = []ServiceMatch{{}}
+	}
+	var out []RuleMatch
+	for _, s := range services {
+		if (r.Family == "ipv4" && s.Protocol == ProtoICMPv6) || (r.Family == "ipv6" && s.Protocol == ProtoICMP) {
+			continue
+		}
+		for _, m := range MatchFamilies(r.Family, s.Protocol, r.SrcAddrs, r.DstAddrs) {
+			out = append(out, RuleMatch{FamilyMatch: m, Service: s})
+		}
+	}
+	return out
+}

@@ -7,6 +7,7 @@ import (
 	"context"
 	"net/netip"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -98,7 +99,7 @@ func TestBootstrap(t *testing.T) {
 	}
 	var gui bool
 	for _, r := range in.Rules {
-		if r.Chain == fwconfig.ChainInput && r.Protocol == "tcp" && slices.Equal(r.InInterfaces, []string{"enp2s0"}) {
+		if r.Chain == fwconfig.ChainInput && slices.Equal(r.Services, []fwconfig.ServiceMatch{{Protocol: "tcp", DstPorts: strconv.Itoa(opts.GUIPort)}}) && slices.Equal(r.InInterfaces, []string{"enp2s0"}) {
 			gui = true
 		}
 	}

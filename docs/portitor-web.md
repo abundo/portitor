@@ -94,8 +94,8 @@ After an upgrade, run `migrate` before `start`. `install.py` does both.
 | | IP addresses | The prefix tree: prefixes, addresses, DHCP scopes, router advertisements, DNS names. |
 | | Hosts & prefixes | Named addresses, usable wherever addresses are entered. |
 | Firewall | Interface zones | Named groups of interfaces for rules and NAT. |
-| | Rules | Input, forward and output rules, with per-rule traffic counters and counts of what each chain drops by default (invalid packets, no rule matched); every row, the locked ones included, can log to the log panel's *Logged packets*. icmp and icmpv6 rules can match ICMP types (`echo-request`) in the port column. |
-| | Services | Named ports for the destination ports of rules and NAT: your own (one port, a range or several) and the built-in names such as `ssh` or `https`. The menu of a port field can create one too. |
+| | Rules | Input, forward and output rules, with per-rule traffic counters and counts of what each chain drops by default (invalid packets, no rule matched); every row, the locked ones included, can log to the log panel's *Logged packets*. The Service column names the services a rule matches (empty: any protocol); its search can create a new one. |
+| | Services | What the rules' Service column matches: TCP, UDP or SCTP port ranges (with source ports if wanted), an ICMP or ICMPv6 type and code, or an IP protocol number. Your own next to predefined ones such as `ssh`, `dns`, `ping` or `gre`. Also lists the port names (`https`) that NAT port fields accept. |
 | | NAT & port forwards | Masquerade, SNAT and DNAT. |
 | | IP lists | Downloaded address lists (CrowdSec, blocklists), used as `@name` in rules. See [Blocking with CrowdSec](crowdsec.md). |
 | Services | DNS zones | Zones and records served by the instance's BIND. |

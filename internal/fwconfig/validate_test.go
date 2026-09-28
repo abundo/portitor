@@ -17,7 +17,6 @@ func TestSampleIsValid(t *testing.T) {
 
 func TestValidateTCPUDPPorts(t *testing.T) {
 	doc := SampleDocument()
-	doc.Instances[0].Rules[6].Protocol = "tcp,udp"
 	doc.Instances[0].NAT[0].Protocol = "tcp,udp" // with a target port
 	if err := doc.Validate(); err != nil {
 		t.Fatal(err)
@@ -46,16 +45,23 @@ func TestValidateCatchesProblems(t *testing.T) {
 		{"zone named like interface", func(d *Document) { d.Instances[0].InterfaceZones[0].Name = "eth1" }, "an interface has the same name"},
 		{"zone duplicate", func(d *Document) { d.Instances[0].InterfaceZones[1].Name = "wan" }, "duplicate"},
 		{"zone name injection", func(d *Document) { d.Instances[0].InterfaceZones[0].Name = `wan" accept` }, "name must match"},
-		{"ports without proto", func(d *Document) { d.Instances[0].Rules[0].DstPorts = "22" }, "ports need protocol"},
-		{"ports with icmp", func(d *Document) { d.Instances[0].Rules[5].DstPorts = "22" }, "ports need protocol"},
-		{"icmp types without icmp", func(d *Document) { d.Instances[0].Rules[6].ICMPTypes = []string{"echo-request"} }, "icmp types need protocol"},
-		{"icmpv6 type with icmp", func(d *Document) { d.Instances[0].Rules[5].ICMPTypes = []string{"nd-neighbor-solicit"} }, `invalid icmp type "nd-neighbor-solicit"`},
-		{"icmp type injection", func(d *Document) { d.Instances[0].Rules[5].ICMPTypes = []string{"echo-request accept"} }, "invalid icmp type"},
+		{"ports with icmp", func(d *Document) { d.Instances[0].Rules[5].Services[0].DstPorts = "22" }, "ports need protocol"},
+		{"src ports with ip", func(d *Document) { d.Instances[0].Rules[6].Services[2].SrcPorts = "22" }, "ports need protocol"},
+		{"icmp type without icmp", func(d *Document) { d.Instances[0].Rules[6].Services[0].ICMPType = "echo-request" }, "needs protocol icmp or icmpv6"},
+		{"icmpv6 type with icmp", func(d *Document) { d.Instances[0].Rules[5].Services[0].ICMPType = "nd-neighbor-solicit" }, `invalid icmp type "nd-neighbor-solicit"`},
+		{"icmp type injection", func(d *Document) { d.Instances[0].Rules[5].Services[0].ICMPType = "echo-request accept" }, "invalid icmp type"},
+		{"icmp code without type", func(d *Document) {
+			d.Instances[0].Rules[5].Services[0].ICMPType, d.Instances[0].Rules[5].Services[0].ICMPCode = "", ptr(3)
+		}, "code needs a type"},
+		{"icmp code range", func(d *Document) { d.Instances[0].Rules[5].Services[0].ICMPCode = ptr(256) }, "invalid icmp code 256"},
+		{"ip number without ip", func(d *Document) { d.Instances[0].Rules[6].Services[0].IPProtocol = 6 }, "needs protocol ip"},
+		{"ip number range", func(d *Document) { d.Instances[0].Rules[6].Services[2].IPProtocol = 300 }, "invalid protocol number 300"},
+		{"sctp bad src ports", func(d *Document) { d.Instances[0].Rules[6].Services[1].SrcPorts = "9-1" }, "invalid port range"},
 		{"target port without proto", func(d *Document) { d.Instances[0].NAT[0].Protocol, d.Instances[0].NAT[0].DstPorts = "", "" }, "a target port needs protocol"},
-		{"bad protocol", func(d *Document) { d.Instances[0].Rules[0].Protocol = "tcp+udp" }, `invalid protocol "tcp+udp"`},
-		{"bad port range", func(d *Document) { d.Instances[0].Rules[2].DstPorts = "90-80" }, "invalid port range"},
+		{"bad protocol", func(d *Document) { d.Instances[0].Rules[2].Services[0].Protocol = "tcp,udp" }, `invalid protocol "tcp,udp"`},
+		{"bad port range", func(d *Document) { d.Instances[0].Rules[2].Services[0].DstPorts = "90-80" }, "invalid port range"},
 		{"ifname injection", func(d *Document) { d.Instances[0].Interfaces[1].Name = `eth1" accept` }, "name must match"},
-		{"comment with match", func(d *Document) { d.Instances[0].Rules[11].Protocol = "tcp" }, "a comment has only"},
+		{"comment with match", func(d *Document) { d.Instances[0].Rules[11].Services = []ServiceMatch{{Protocol: ProtoTCP}} }, "a comment has only"},
 		{"duplicate rule id", func(d *Document) { d.Instances[0].Rules[0].ID, d.Instances[1].Rules[0].ID = 7, 7 }, "duplicate id 7"},
 		{"comment with id", func(d *Document) { d.Instances[0].Rules[11].ID = 7 }, "a comment has only"},
 		{"bad rule kind", func(d *Document) { d.Instances[0].Rules[0].Kind = "note" }, `invalid kind "note"`},
@@ -65,9 +71,13 @@ func TestValidateCatchesProblems(t *testing.T) {
 			d.Instances[0].Rules[0].DstAddrs = []string{"fd00::/8"}
 		}, "no IP version fits"},
 		{"icmp with only v6 addresses", func(d *Document) {
+			d.Instances[0].Rules[5].Services = d.Instances[0].Rules[5].Services[:1]
 			d.Instances[0].Rules[5].SrcAddrs = []string{"2001:db8::/32"}
-		}, "no IP version fits"},
-		{"family against protocol", func(d *Document) { d.Instances[0].Rules[5].Family = "ipv6" }, "does not match family"},
+		}, "no service fits"},
+		{"family against protocol", func(d *Document) {
+			d.Instances[0].Rules[5].Services = d.Instances[0].Rules[5].Services[:1]
+			d.Instances[0].Rules[5].Family = "ipv6"
+		}, "no service fits"},
 		{"slaac needs /64", func(d *Document) { d.Instances[0].RA[0].Prefixes[0].Prefix = "fd00:1::/56" }, "needs a /64"},
 		{"ra unknown interface", func(d *Document) { d.Instances[0].RA[0].Interface = "eth9" }, "unknown interface"},
 		{"ra v4 dns", func(d *Document) { d.Instances[0].RA[0].RDNSS = []string{"192.168.1.1"} }, "invalid IPv6 dns server"},

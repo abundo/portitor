@@ -2,8 +2,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
 <script setup>
-// PortMenu: the service names and ports of usePortMenu, each on one line,
-// and last an entry that creates a custom service (`create`).
+// PortMenu: the port names and ports of usePortMenu, each on one line.
 // It goes right after the input: under a `relative` wrapper around it, or
 // with `fixed` in viewport coordinates, clear of an overflow that would clip
 // it (the rules grid's cells).
@@ -13,7 +12,7 @@ const props = defineProps({
   menu: { type: Object, default: null },
   fixed: { type: Boolean, default: false },
 })
-const emit = defineEmits(['pick', 'create'])
+const emit = defineEmits(['pick'])
 
 const list = ref(null)
 watch(
@@ -48,18 +47,6 @@ watch(
     >
       <span>{{ it.name }}</span>
       <span class="port">{{ it.port }}</span>
-    </li>
-    <li
-      role="option"
-      class="create"
-      :aria-selected="menu.active === menu.items.length"
-      :class="{ active: menu.active === menu.items.length }"
-      @pointerdown.prevent="emit('create')"
-    >
-      <span>
-        <UIcon name="i-lucide-plus" class="size-3 align-middle" />
-        New service{{ menu.newName ? ` ${menu.newName}` : '' }}…
-      </span>
     </li>
   </ul>
 </template>
@@ -96,13 +83,6 @@ watch(
 .port-menu li:hover,
 .port-menu li.active {
   background: var(--ui-bg-elevated);
-}
-.port-menu li.create {
-  margin-block-start: 0.25rem;
-  padding-block-start: 0.25rem;
-  border-block-start: 1px solid var(--ui-border);
-  color: var(--ui-primary);
-  font-family: var(--font-sans);
 }
 .port-menu .port {
   color: var(--ui-text-muted);

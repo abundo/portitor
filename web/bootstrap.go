@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/netip"
-	"strconv"
 	"strings"
 	"time"
 
@@ -236,9 +235,30 @@ func bootstrapNetwork(tx *gorm.DB, instanceID uint, o BootstrapOptions) error {
 		}
 	}
 
+	// The GUI's port is a service of its own, kept at the port on
+	// reconfigure.
+	gui := models.Service{Name: "portitor-web", Type: models.ServiceTypePorts, Description: "The portitor-web GUI",
+		Ports: models.ServicePortList{{Protocol: "tcp", DstLo: o.GUIPort}}}
+	var old models.Service
+	switch err := tx.Where("name = ?", gui.Name).First(&old).Error; {
+	case errors.Is(err, gorm.ErrRecordNotFound):
+		if err := prepareService(tx, &gui, nil); err != nil {
+			return err
+		}
+		if err := tx.Create(&gui).Error; err != nil {
+			return err
+		}
+	case err != nil:
+		return err
+	case o.Reconfigure:
+		if err := tx.Model(&old).Update("ports", gui.Ports).Error; err != nil {
+			return err
+		}
+	}
+
 	for _, r := range []models.Rule{
-		{Protocol: "tcp", DstPorts: strconv.Itoa(o.GUIPort), Description: "portitor-web from the LAN"},
-		{Protocol: "icmp", Description: "ping from the LAN"},
+		{Services: models.StringList{gui.Name}, Description: "portitor-web from the LAN"},
+		{Services: models.StringList{"all-icmp"}, Description: "ping from the LAN"},
 	} {
 		if err := tx.Model(&models.Rule{}).Where("instance_id = ? AND description = ?", instanceID, r.Description).Count(&n).Error; err != nil {
 			return err

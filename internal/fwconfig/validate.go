@@ -239,7 +239,7 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 		}
 		if r.Kind == RuleKindComment {
 			if len(r.InInterfaces)+len(r.OutInterfaces)+len(r.SrcAddrs)+len(r.DstAddrs) > 0 ||
-				r.Family != "" || r.Protocol != "" || r.DstPorts != "" || len(r.ICMPTypes) > 0 || r.Action != "" || r.Log || r.ID != 0 {
+				r.Family != "" || len(r.Services) > 0 || r.Action != "" || r.Log || r.ID != 0 {
 				v.addf("%s: a comment has only a chain and a description", rp)
 			}
 			checkComment(v, rp, r.Description)
@@ -265,14 +265,13 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 		if !validAction(r.Action) {
 			v.addf("%s: invalid action %q", rp, r.Action)
 		}
-		v.match(rp, r.Family, r.Protocol, r.SrcAddrs, r.DstAddrs, r.DstPorts, true)
-		if len(r.ICMPTypes) > 0 && r.Protocol != "icmp" && r.Protocol != "icmpv6" {
-			v.addf("%s: icmp types need protocol icmp or icmpv6", rp)
-		} else {
-			for _, t := range r.ICMPTypes {
-				if !ValidICMPType(r.Protocol, t) {
-					v.addf("%s: invalid %s type %q", rp, r.Protocol, t)
-				}
+		if v.match(rp, r.Family, "", r.SrcAddrs, r.DstAddrs, "", true) {
+			valid := true
+			for j, sm := range r.Services {
+				valid = v.service(fmt.Sprintf("%s: service %d", rp, j+1), sm) && valid
+			}
+			if valid && len(r.Services) > 0 && len(r.Matches()) == 0 {
+				v.addf("%s: no service fits the rule's IP version and addresses", rp)
 			}
 		}
 		checkComment(v, rp, r.Description)
@@ -639,19 +638,21 @@ func (v *validator) wireguard(p string, wg *WireGuard) {
 }
 
 // match checks a rule's match fields; with lists, addresses may refer to
-// IP lists.
-func (v *validator) match(p, family, proto string, src, dst []string, ports string, lists bool) {
+// IP lists. It reports whether the addresses and family are valid and fit
+// together.
+func (v *validator) match(p, family, proto string, src, dst []string, ports string, lists bool) bool {
+	valid := true
 	switch family {
 	case "", "ipv4", "ipv6":
 	default:
 		v.addf("%s: invalid family %q", p, family)
+		valid = false
 	}
 	switch proto {
 	case "", "tcp", "udp", "tcp,udp", "icmp", "icmpv6":
 	default:
 		v.addf("%s: invalid protocol %q", p, proto)
 	}
-	valid := true
 	for _, list := range [][]string{src, dst} {
 		for _, a := range list {
 			if name, ok := IPListName(a); ok {
@@ -670,8 +671,10 @@ func (v *validator) match(p, family, proto string, src, dst []string, ports stri
 	}
 	if (family == "ipv4" && proto == "icmpv6") || (family == "ipv6" && proto == "icmp") {
 		v.addf("%s: protocol %s does not match family %s", p, proto, family)
+		valid = false
 	} else if valid && len(MatchFamilies(family, proto, src, dst)) == 0 {
 		v.addf("%s: no IP version fits the source and destination addresses, family and protocol together", p)
+		valid = false
 	}
 	if ports != "" {
 		if proto != "tcp" && proto != "udp" && proto != "tcp,udp" {
@@ -681,6 +684,47 @@ func (v *validator) match(p, family, proto string, src, dst []string, ports stri
 			v.addf("%s: %v", p, err)
 		}
 	}
+	return valid
+}
+
+// service checks one service match of a rule and reports whether it is
+// valid.
+func (v *validator) service(p string, s ServiceMatch) bool {
+	n := len(v.problems)
+	if !s.HasPorts() && (s.DstPorts != "" || s.SrcPorts != "") {
+		v.addf("%s: ports need protocol tcp, udp or sctp", p)
+	}
+	for _, ports := range []string{s.DstPorts, s.SrcPorts} {
+		if ports == "" {
+			continue
+		}
+		if _, err := ParsePorts(ports); err != nil {
+			v.addf("%s: %v", p, err)
+		}
+	}
+	isICMP := s.Protocol == ProtoICMP || s.Protocol == ProtoICMPv6
+	switch {
+	case !isICMP && (s.ICMPType != "" || s.ICMPCode != nil):
+		v.addf("%s: an icmp type or code needs protocol icmp or icmpv6", p)
+	case s.ICMPType != "" && !ValidICMPType(s.Protocol, s.ICMPType):
+		v.addf("%s: invalid %s type %q", p, s.Protocol, s.ICMPType)
+	case s.ICMPCode != nil && s.ICMPType == "":
+		v.addf("%s: an icmp code needs a type", p)
+	case s.ICMPCode != nil && (*s.ICMPCode < 0 || *s.ICMPCode > 255):
+		v.addf("%s: invalid icmp code %d", p, *s.ICMPCode)
+	}
+	switch {
+	case s.Protocol != ProtoIP && s.IPProtocol != 0:
+		v.addf("%s: a protocol number needs protocol ip", p)
+	case s.IPProtocol < 0 || s.IPProtocol > 255:
+		v.addf("%s: invalid protocol number %d", p, s.IPProtocol)
+	}
+	switch s.Protocol {
+	case ProtoTCP, ProtoUDP, ProtoSCTP, ProtoICMP, ProtoICMPv6, ProtoIP:
+	default:
+		v.addf("%s: invalid protocol %q", p, s.Protocol)
+	}
+	return len(v.problems) == n
 }
 
 func (v *validator) dnsRecord(p string, r DNSRecord) {

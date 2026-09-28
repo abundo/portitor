@@ -83,12 +83,16 @@ are in [README.md](README.md).
   stored by name, so renaming an object rewrites them (`web/objects.go`) and deleting
   one in use is refused. A new address field that should accept names must be added
   to `eachObjectRef` and expanded in the builder.
-- **Custom services never reach the agent either.** Port lists take numbers,
-  ranges and service names: the built-in `fwconfig.Services`, which the agent
-  resolves, and custom services (`services` table), which `builder.Build`
-  expands (`netobj.Services`). A custom name can't be a built-in one, and its
-  ports can't name another custom service. Renaming one rewrites the rule and
-  NAT port lists (`web/services.go`); deleting one in use is refused.
+- **Services never reach the agent either.** A rule's `services` list names
+  custom services (`services` table) and predefined ones (`netobj.Predefined`);
+  `builder.Build` expands them into `fwconfig.ServiceMatch`es (tcp/udp/sctp
+  ports, icmp/icmpv6 type and code, ip protocol number) and drops a rule it
+  cannot resolve (an empty list matches *any* protocol). The renderer writes
+  one nft rule per match and IP version (`fwconfig.Rule.Matches`). A custom
+  name can't be a predefined one. Renaming one rewrites the rules
+  (`web/services.go`); deleting one in use is refused. NAT keeps its own
+  protocol and port list, with numbers, ranges and the built-in port names
+  (`fwconfig.Services`), which the agent resolves.
 - **IP lists reach the agent as references.** A filter rule's address list may hold
   `@name` (not NAT, not other address fields): it matches either IP version and
   renders as the list's `name_v4`/`name_v6` set. One nft match takes one operand, so a

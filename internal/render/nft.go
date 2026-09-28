@@ -516,10 +516,10 @@ func writeRule(b *strings.Builder, idx int, r fwconfig.Rule, in *fwconfig.Instan
 		tail = append(tail, "jump reject_pkt")
 	}
 	tail = append(tail, comment(fmt.Sprintf("rule %d", idx+1), r.Description))
-	// One nft rule per IP version when the addresses mix them, and per
-	// address operand (see addrOperands).
-	for _, m := range fwconfig.MatchFamilies(r.Family, r.Protocol, r.SrcAddrs, r.DstAddrs) {
-		for _, match := range matchExprs(m, r.Protocol, r.DstPorts, r.ICMPTypes) {
+	// One nft rule per service match and IP version (fwconfig.Rule.Matches),
+	// and per address operand (see addrOperands).
+	for _, m := range r.Matches() {
+		for _, match := range matchExprs(m.FamilyMatch, serviceExpr(m.Service)) {
 			line := append(append(append([]string(nil), parts...), match...), tail...)
 			b.WriteString("\t\t" + strings.Join(line, " ") + "\n")
 		}
@@ -562,21 +562,21 @@ func writeNAT(b *strings.Builder, idx int, n fwconfig.NATRule, in *fwconfig.Inst
 	}
 	tail = append(tail, comment(fmt.Sprintf("nat %d", idx+1), n.Description))
 	for _, m := range fwconfig.MatchFamilies(family, n.Protocol, n.SrcAddrs, n.DstAddrs) {
-		for _, match := range matchExprs(m, n.Protocol, n.DstPorts, nil) {
+		for _, match := range matchExprs(m, protoExpr(n.Protocol, n.DstPorts)) {
 			line := append(append(append([]string(nil), parts...), match...), tail...)
 			b.WriteString("\t\t" + strings.Join(line, " ") + "\n")
 		}
 	}
 }
 
-// matchExprs renders family / protocol / address / port (or ICMP type)
-// matches for one IP version of a rule: one match per combination of
-// source and destination operand.
-func matchExprs(m fwconfig.FamilyMatch, proto string, ports string, icmpTypes []string) [][]string {
+// matchExprs renders family / address matches for one IP version of a
+// rule, followed by its protocol matches (proto): one match per
+// combination of source and destination operand.
+func matchExprs(m fwconfig.FamilyMatch, proto []string) [][]string {
 	var out [][]string
 	for _, src := range addrOperands(m.Src, m.Family) {
 		for _, dst := range addrOperands(m.Dst, m.Family) {
-			out = append(out, matchExpr(m.Family, src, dst, proto, ports, icmpTypes))
+			out = append(out, append(addrExpr(m.Family, src, dst), proto...))
 		}
 	}
 	return out
@@ -605,7 +605,7 @@ func addrOperands(list []string, family string) []string {
 	return sets
 }
 
-func matchExpr(family, src, dst, proto, ports string, icmpTypes []string) []string {
+func addrExpr(family, src, dst string) []string {
 	var parts []string
 	if src == "" && dst == "" && family != "" {
 		parts = append(parts, "meta nfproto "+family)
@@ -620,6 +620,49 @@ func matchExpr(family, src, dst, proto, ports string, icmpTypes []string) []stri
 	if dst != "" {
 		parts = append(parts, fmt.Sprintf("%s daddr %s", fam, dst))
 	}
+	return parts
+}
+
+// serviceExpr renders a rule's service match; the empty match (any
+// protocol) and ip without a number render nothing.
+func serviceExpr(s fwconfig.ServiceMatch) []string {
+	var parts []string
+	switch s.Protocol {
+	case fwconfig.ProtoTCP, fwconfig.ProtoUDP, fwconfig.ProtoSCTP:
+		if s.SrcPorts != "" {
+			parts = append(parts, fmt.Sprintf("%s sport %s", s.Protocol, portSet(s.SrcPorts)))
+		}
+		if s.DstPorts != "" {
+			parts = append(parts, fmt.Sprintf("%s dport %s", s.Protocol, portSet(s.DstPorts)))
+		}
+		if len(parts) == 0 {
+			parts = append(parts, "meta l4proto "+s.Protocol)
+		}
+	case fwconfig.ProtoICMP, fwconfig.ProtoICMPv6:
+		if s.ICMPType != "" {
+			parts = append(parts, fmt.Sprintf("%s type %s", s.Protocol, s.ICMPType))
+		}
+		if s.ICMPCode != nil {
+			parts = append(parts, fmt.Sprintf("%s code %d", s.Protocol, *s.ICMPCode))
+		}
+		if len(parts) == 0 {
+			l4 := s.Protocol
+			if l4 == fwconfig.ProtoICMPv6 {
+				l4 = "ipv6-icmp"
+			}
+			parts = append(parts, "meta l4proto "+l4)
+		}
+	case fwconfig.ProtoIP:
+		if s.IPProtocol != 0 {
+			parts = append(parts, fmt.Sprintf("meta l4proto %d", s.IPProtocol))
+		}
+	}
+	return parts
+}
+
+// protoExpr renders a NAT rule's protocol and destination port matches.
+func protoExpr(proto, ports string) []string {
+	var parts []string
 	switch proto {
 	case "tcp", "udp":
 		if ports != "" {
@@ -631,18 +674,6 @@ func matchExpr(family, src, dst, proto, ports string, icmpTypes []string) []stri
 		parts = append(parts, "meta l4proto { tcp, udp }")
 		if ports != "" {
 			parts = append(parts, "th dport "+portSet(ports))
-		}
-	case "icmp":
-		if len(icmpTypes) > 0 {
-			parts = append(parts, "icmp type "+nameSet(icmpTypes))
-		} else {
-			parts = append(parts, "meta l4proto icmp")
-		}
-	case "icmpv6":
-		if len(icmpTypes) > 0 {
-			parts = append(parts, "icmpv6 type "+nameSet(icmpTypes))
-		} else {
-			parts = append(parts, "meta l4proto ipv6-icmp")
 		}
 	}
 	return parts
@@ -698,14 +729,6 @@ func portSet(s string) string {
 		return out[0]
 	}
 	return "{ " + strings.Join(out, ", ") + " }"
-}
-
-// nameSet renders validated symbolic constants, such as ICMP types.
-func nameSet(names []string) string {
-	if len(names) == 1 {
-		return names[0]
-	}
-	return "{ " + strings.Join(names, ", ") + " }"
 }
 
 func quotedSet(names []string) string {

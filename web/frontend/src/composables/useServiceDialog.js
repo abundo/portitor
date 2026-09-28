@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: 2026 The Portitor contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// useServiceDialog: the dialog that creates a custom service from a port
-// field (ServiceDialog, mounted once in AppLayout, so it outlives the port
-// menu and stacks over a form's modal). create(name) opens it with a
+// useServiceDialog: the dialog that creates a custom service from a rule's
+// Service cell (ServiceDialog, mounted once in AppLayout, so it outlives the
+// cell's menu and stacks over a form's modal). create(name) opens it with a
 // suggested name and resolves to the created service, or null if the
 // dialog was closed without saving.
 import { reactive } from 'vue'
