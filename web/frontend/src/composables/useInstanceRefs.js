@@ -24,7 +24,9 @@ export function useInstanceRefs() {
   }
   watch(() => store.currentId, load, { immediate: true })
 
-  const ifaceItems = computed(() => ifaceList.value.map((i) => ({ label: i.name, value: i.id })))
+  const ifaceItems = computed(() =>
+    ifaceList.value.map((i) => ({ label: i.name, value: i.id, description: i.description || '' })),
+  )
   const ifaceName = (id) => ifaceList.value.find((i) => i.id === id)?.name ?? ''
 
   // Interface names of the instance: its interfaces and its link ends.

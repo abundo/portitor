@@ -70,6 +70,12 @@ function itemsOf(f) {
   return f.nullable ? [{ label: '—', value: NONE }, ...list] : list
 }
 
+// selectedItem returns the select item the form holds, to show its
+// description next to the chosen name.
+function selectedItem(f) {
+  return itemsOf(f).find((it) => typeof it === 'object' && it.value === form[f.key])
+}
+
 // multiItems returns a multiselect's items as objects, plus values the form
 // holds but items lack, so they stay visible.
 function multiItems(f) {
@@ -336,7 +342,16 @@ defineExpose({ reload: load, openEdit, openCreate })
               :items="itemsOf(f)"
               class="w-full"
               :disabled="f.disabled?.(form)"
-            />
+            >
+              <template v-if="selectedItem(f)" #default>
+                <span class="truncate">
+                  {{ selectedItem(f).label }}
+                  <span v-if="selectedItem(f).description" class="text-muted">
+                    — {{ selectedItem(f).description }}
+                  </span>
+                </span>
+              </template>
+            </USelect>
             <USelectMenu
               v-else-if="f.type === 'multiselect'"
               v-model="form[f.key]"
