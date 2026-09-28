@@ -151,6 +151,7 @@ const stateColor = (s) =>
               <th class="py-1.5 pr-4 font-medium">Name</th>
               <th class="pr-4 font-medium">Description</th>
               <th class="pr-4 font-medium">State</th>
+              <th class="pr-4 font-medium">MAC</th>
               <th class="pr-4 font-medium">Addresses</th>
               <th class="pr-4 text-right font-medium">Received</th>
               <th class="text-right font-medium">Sent</th>
@@ -167,6 +168,7 @@ const stateColor = (s) =>
               <td class="pr-4">
                 <UBadge :color="stateColor(i.state)" variant="subtle" :label="i.state" />
               </td>
+              <td class="pr-4 font-mono text-xs">{{ i.mac }}</td>
               <td class="pr-4 font-mono text-xs">{{ i.addresses.join(', ') }}</td>
               <td class="pr-4 text-right whitespace-nowrap">{{ bytes(i.rx_bytes) }}</td>
               <td class="text-right whitespace-nowrap">{{ bytes(i.tx_bytes) }}</td>

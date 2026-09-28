@@ -15,6 +15,14 @@ const deploy = useDeployStore()
 const isMissing = (row) =>
   row.kind === 'physical' &&
   deploy.missingNics.some((n) => n.name === row.name && n.instance === store.current?.name)
+// The MAC address the firewall reports; a physical port not yet moved into
+// the instance is looked up among all NICs.
+function macOf(row) {
+  const inst = deploy.status?.instances?.find((i) => i.name === store.current?.name)
+  const mac = inst?.interfaces?.find((i) => i.name === row.name)?.mac
+  if (mac || row.kind !== 'physical') return mac ?? ''
+  return deploy.status?.nics?.find((n) => n.name === row.name)?.mac ?? ''
+}
 
 async function loadAddrs() {
   if (store.currentId) addrs.value = await ipamAddresses.list({ instance_id: store.currentId })
@@ -40,6 +48,7 @@ const columns = [
     label: 'Kind',
     format: (r) => (r.kind === 'vlan' ? `vlan ${r.vlan_id} on ${r.parent}` : r.kind),
   },
+  { key: 'mac', label: 'MAC', class: 'font-mono text-xs', format: macOf },
   { key: 'zones', label: 'Zones', format: (r) => zonesOf(r.name).join(', ') },
   { key: 'ipv4_mode', label: 'IPv4' },
   { key: 'addresses', label: 'Addresses' },
