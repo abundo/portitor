@@ -7,12 +7,13 @@ import { onBeforeUnmount } from 'vue'
 // ghost and drop line as the DNS records grid. `wrap` is a ref to an element
 // containing the table (the scroll container, if it scrolls); rows are its
 // tbody's direct <tr>s. `label(index)` is the ghost text; `onMove(from, to)`
-// is called on drop with the row's old and new index.
+// is called on drop with the row's old and new index; the optional
+// `onClick(index)` when the grip is released without dragging.
 const THRESHOLD_PX = 4
 const EDGE_PX = 64
 const MAX_STEP_PX = 24
 
-export function useRowDrag({ wrap, label, onMove }) {
+export function useRowDrag({ wrap, label, onMove, onClick }) {
   let from = null
   let moved = false
   let startY = 0
@@ -121,8 +122,10 @@ export function useRowDrag({ wrap, label, onMove }) {
 
   function onPointerUp(event) {
     const src = from
+    const clicked = !moved && event.type === 'pointerup'
     const gap = moved && event.type === 'pointerup' ? gapAt(event.clientY) : -1
     end()
+    if (src != null && clicked) onClick?.(src)
     if (src == null || gap < 0) return
     const to = gap > src ? gap - 1 : gap
     if (to !== src) onMove(src, to)

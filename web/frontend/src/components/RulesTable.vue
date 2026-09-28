@@ -5,8 +5,10 @@
 // RulesTable: the firewall rules of one chain as a compact grid edited in
 // place. Each change saves its row (`save`); rows reorder by dragging the grip
 // (`move`, with indexes into `rows`). Comment rows (kind 'comment') hold one
-// text across the row. Right-click a row to insert a rule or comment above or
-// below it (`insert(kind, index)`, resolving to a created comment row).
+// text across the row; a click on a rule's grip opens its details (`edit`).
+// Right-click a row to insert a rule or comment above or below it
+// (`insert(kind, index)`, resolving to a created comment row) or to delete it
+// (`remove`).
 // Address cells take a comma-separated list of addresses, CIDRs, names or
 // IP lists (@name); From/To cells a comma-separated list of interfaces and
 // interface zones.
@@ -55,6 +57,7 @@ const { onPointerDown } = useRowDrag({
     return `${ruleNo.value.get(r.id)}. ${r.action} ${r.description || ''}`.trim()
   },
   onMove: (from, to) => emit('move', from, to),
+  onClick: (i) => isComment(props.rows[i]) || emit('edit', props.rows[i]),
 })
 
 const isComment = (r) => r.kind === 'comment'
@@ -67,17 +70,17 @@ const ruleNo = computed(() => {
 
 // The context menu acts on the right-clicked row; outside the rules (the
 // header, the auto rules, an empty table) it inserts at the top.
-let menuIndex = 0
+const menuIndex = ref(-1)
 function captureMenuRow(event) {
   const tr = event.target.closest('tbody.user-rules > tr[data-index]')
-  menuIndex = tr ? Number(tr.dataset.index) : -1
+  menuIndex.value = tr ? Number(tr.dataset.index) : -1
 }
-const at = (below) => (menuIndex < 0 ? 0 : menuIndex + (below ? 1 : 0))
+const at = (below) => (menuIndex.value < 0 ? 0 : menuIndex.value + (below ? 1 : 0))
 async function insertAt(kind, index) {
   const created = await props.insert(kind, index)
   if (created) wrap.value?.querySelector(`[data-comment-id="${created.id}"]`)?.focus()
 }
-const contextItems = [
+const insertItems = [
   [
     {
       label: 'Add rule above',
@@ -103,6 +106,22 @@ const contextItems = [
     },
   ],
 ]
+// A right-clicked rule or comment row can also be deleted.
+const contextItems = computed(() => {
+  const r = props.rows[menuIndex.value]
+  if (!r) return insertItems
+  return [
+    ...insertItems,
+    [
+      {
+        label: isComment(r) ? 'Delete comment' : 'Delete rule',
+        icon: 'i-lucide-trash',
+        color: 'error',
+        onSelect: () => emit('remove', r),
+      },
+    ],
+  ]
+})
 
 // ifaceTitle lists a cell's interfaces with their descriptions.
 const ifaceDesc = computed(() => new Map(props.ifaces.map((it) => [it.value, it.description])))
@@ -157,14 +176,13 @@ const nameSuggestions = computed(() =>
 
 const hasFrom = computed(() => props.chain !== 'output')
 const hasTo = computed(() => props.chain !== 'input')
-const colCount = computed(() => 13 + hasFrom.value + hasTo.value)
+const colCount = computed(() => 12 + hasFrom.value + hasTo.value)
 // The columns' default widths (class; none shares the rest). Dragging a
 // header's right edge resizes its column, remembered per chain;
 // double-clicking it goes back to these.
 const columns = computed(() =>
   [
     'w-7',
-    'w-14',
     'w-8',
     'w-8',
     hasFrom.value && 'w-36',
@@ -181,7 +199,7 @@ const columns = computed(() =>
   ].filter((c) => c !== false),
 )
 const table = ref(null)
-const resize = useColumnResize({ table, storageKey: () => `rules-grid-widths-${props.chain}` })
+const resize = useColumnResize({ table, storageKey: () => `rules-grid-cols-${props.chain}` })
 const { widths, total: tableWidth } = resize
 const onHandle = (fn) => (event) => event.target.classList.contains('col-resize') && fn(event)
 const onResizeStart = onHandle(resize.onPointerDown)
@@ -303,7 +321,6 @@ function onKeydown(event, index) {
         <thead @pointerdown="onResizeStart" @dblclick="resetWidths">
           <tr>
             <th><span class="col-resize" /></th>
-            <th><span class="col-resize" /></th>
             <th title="Evaluated top to bottom">#<span class="col-resize" /></th>
             <th title="Enabled">On<span class="col-resize" /></th>
             <th v-if="hasFrom">From<span class="col-resize" /></th>
@@ -331,8 +348,7 @@ function onKeydown(event, index) {
             <td class="text-center text-muted">
               <UIcon name="i-lucide-lock" class="size-3.5 align-middle" />
             </td>
-            <td class="text-center text-muted">auto</td>
-            <td :colspan="colCount - 6">
+            <td :colspan="colCount - 5">
               <span class="text-muted">invalid: no known connection</span>
             </td>
             <td><span class="font-semibold text-error">drop</span></td>
@@ -351,13 +367,12 @@ function onKeydown(event, index) {
                 <div>{{ dropCount('invalid').toLocaleString() }} pkt</div>
               </template>
             </td>
-            <td><span>invalid packets</span></td>
+            <td><span><span class="text-muted">auto:</span> invalid packets</span></td>
           </tr>
           <tr v-for="a in auto" :key="a.service" :title="autoTitle(a)">
             <td class="text-center text-muted">
               <UIcon name="i-lucide-lock" class="size-3.5 align-middle" />
             </td>
-            <td class="text-center text-muted">auto</td>
             <td />
             <td class="text-center">
               <input type="checkbox" class="accent-primary" checked disabled />
@@ -397,7 +412,7 @@ function onKeydown(event, index) {
             </td>
             <td />
             <td>
-              <span>{{ autoDescription(a) }}</span>
+              <span><span class="text-muted">auto:</span> {{ autoDescription(a) }}</span>
             </td>
           </tr>
         </tbody>
@@ -413,19 +428,7 @@ function onKeydown(event, index) {
                   <UIcon name="i-lucide-grip-vertical" class="pointer-events-none size-3.5" />
                 </span>
               </td>
-              <td class="keep">
-                <div class="flex justify-end">
-                  <UButton
-                    size="xs"
-                    color="error"
-                    variant="ghost"
-                    icon="i-lucide-trash"
-                    title="Delete"
-                    @click="emit('remove', r)"
-                  />
-                </div>
-              </td>
-              <td :colspan="colCount - 2">
+              <td :colspan="colCount - 1">
                 <input
                   :value="r.description"
                   data-col="comment"
@@ -440,32 +443,12 @@ function onKeydown(event, index) {
             <tr v-else :class="{ 'rule-off': !r.enabled }" :data-index="i">
               <td class="keep">
                 <span
-                  class="flex h-7 cursor-grab touch-none items-center justify-center text-muted select-none active:cursor-grabbing"
-                  title="Drag to reorder"
+                  class="flex h-7 cursor-grab touch-none items-center justify-center text-muted select-none hover:text-highlighted active:cursor-grabbing"
+                  title="Click for details, drag to reorder"
                   @pointerdown="onPointerDown(i, $event)"
                 >
                   <UIcon name="i-lucide-grip-vertical" class="pointer-events-none size-3.5" />
                 </span>
-              </td>
-              <td class="keep">
-                <div class="flex justify-center">
-                  <UButton
-                    size="xs"
-                    color="neutral"
-                    variant="ghost"
-                    icon="i-lucide-pencil"
-                    title="Details"
-                    @click="emit('edit', r)"
-                  />
-                  <UButton
-                    size="xs"
-                    color="error"
-                    variant="ghost"
-                    icon="i-lucide-trash"
-                    title="Delete"
-                    @click="emit('remove', r)"
-                  />
-                </div>
               </td>
               <td class="text-center text-muted tabular-nums">{{ ruleNo.get(r.id) }}</td>
               <td class="keep text-center">
@@ -614,8 +597,7 @@ function onKeydown(event, index) {
             <td class="text-center text-muted">
               <UIcon name="i-lucide-lock" class="size-3.5 align-middle" />
             </td>
-            <td class="text-center text-muted">policy</td>
-            <td :colspan="colCount - 6">
+            <td :colspan="colCount - 5">
               <span class="text-muted">no rule matched</span>
             </td>
             <td><span class="font-semibold text-error">drop</span></td>
