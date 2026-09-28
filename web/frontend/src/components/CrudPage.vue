@@ -26,6 +26,8 @@ import { errMsg } from '@/api/http'
 const props = defineProps({
   title: { type: String, required: true },
   description: { type: String, default: '' },
+  // Longer help shown in a popover behind an info icon next to the title.
+  info: { type: String, default: '' },
   api: { type: Object, required: true },
   params: { type: Object, default: () => ({}) },
   columns: { type: Array, required: true },
@@ -51,6 +53,8 @@ const form = reactive({})
 // appends it.
 const insertAt = ref(null)
 const NONE = 0
+// The info popover opens on hover, and on a click for touch screens.
+const infoOpen = ref(false)
 
 const tableColumns = computed(() => [
   ...(props.reorder ? [{ id: 'drag', header: '', meta: { class: { td: 'w-7 px-1' } } }] : []),
@@ -240,7 +244,28 @@ defineExpose({ reload: load, openEdit, openCreate })
   <div class="card">
     <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
       <div>
-        <div class="text-lg font-semibold">{{ title }}</div>
+        <div class="flex items-center gap-1.5">
+          <div class="text-lg font-semibold">{{ title }}</div>
+          <UPopover
+            v-if="info"
+            v-model:open="infoOpen"
+            mode="hover"
+            :open-delay="100"
+            :content="{ side: 'bottom', align: 'start' }"
+          >
+            <UButton
+              size="xs"
+              color="neutral"
+              variant="ghost"
+              icon="i-lucide-info"
+              aria-label="About this page"
+              @click="infoOpen = true"
+            />
+            <template #content>
+              <p class="max-w-md p-3 text-sm text-muted">{{ info }}</p>
+            </template>
+          </UPopover>
+        </div>
         <p v-if="description" class="max-w-3xl text-sm text-muted">{{ description }}</p>
       </div>
       <div class="flex items-center gap-2">

@@ -206,7 +206,7 @@ function clean(b) {
   <NeedInstance>
     <CrudPage
       title="Rules"
-      description="Evaluated top to bottom; the first match decides. Edit cells in place (changes save at once), drag the grip to reorder, right-click a row to insert a rule or comment. Established connections are allowed, and so is what the configured services (DHCP, DNS, WireGuard) need: those input rules are shown locked and follow the services' settings. In the default instance the agent's management port stays open to its allow_from addresses. Invalid packets (of no known connection) and traffic to or through the firewall that no rule accepts are dropped; the locked rows at the top and bottom of each chain count them."
+      info="Evaluated top to bottom; the first match decides. Edit cells in place (changes save at once), drag the grip to reorder, right-click a row to insert a rule or comment. Established connections are allowed, and so is what the configured services (DHCP, DNS, WireGuard) need: those input rules are shown locked and follow the services' settings. In the default instance the agent's management port stays open to its allow_from addresses. Invalid packets (of no known connection) and traffic to or through the firewall that no rule accepts are dropped; the locked rows at the top and bottom of each chain count them."
       :api="api"
       :params="{ instance_id: store.currentId }"
       :columns="[]"
@@ -231,10 +231,10 @@ function clean(b) {
         <div class="space-y-6">
           <section v-for="c in chains" :key="c.value">
             <div class="mb-2 flex items-end justify-between gap-3">
-              <div>
-                <div class="font-semibold">{{ c.title }}</div>
-                <p class="text-sm text-muted">{{ c.text }}</p>
-              </div>
+              <p>
+                <span class="font-semibold">{{ c.title }}</span>
+                <span class="ms-2 text-sm text-muted">{{ c.text }}</span>
+              </p>
               <UButton
                 size="sm"
                 variant="soft"
