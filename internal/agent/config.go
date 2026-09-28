@@ -27,8 +27,8 @@ type Config struct {
 	// same list feeds the anti-lockout rule, so these addresses keep
 	// reaching the API whatever the pushed rules say.
 	AllowFrom []string `yaml:"allow_from"`
-	// AntiLockout adds an input accept rule for Listen's port from
-	// AllowFrom in the default instance. Default true.
+	// AntiLockout adds an input accept rule for Listen's port and SSH
+	// (22) from AllowFrom in the default instance. Default true.
 	AntiLockout *bool `yaml:"anti_lockout"`
 	// DryRun renders and logs, but changes nothing. For development on a
 	// machine that is not the firewall.
@@ -147,5 +147,5 @@ func (c *Config) antiLockout() *render.AntiLockout {
 	if i := strings.LastIndex(c.Listen, ":"); i >= 0 {
 		fmt.Sscanf(c.Listen[i+1:], "%d", &port)
 	}
-	return &render.AntiLockout{Port: port, AllowFrom: c.AllowFrom}
+	return &render.AntiLockout{Port: port, SSHPort: 22, AllowFrom: c.AllowFrom}
 }

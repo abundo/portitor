@@ -75,7 +75,7 @@ func (s *Server) handleAutoRules(c *echo.Context) error {
 	out := []render.AutoRule{}
 	if mi.IsDefault {
 		if l := s.antiLockout(c.Request().Context()); l != nil {
-			out = append(out, l.Rule())
+			out = append(out, l.Rules()...)
 		}
 	}
 	exp := doc.Expand()

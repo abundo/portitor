@@ -75,7 +75,7 @@ ip prefix/addresses are handled by a hierarchical tree
   configuration unless the change is confirmed within the timeout (default 120 s).
   If a rule cuts off the GUI, waiting is enough. An unconfirmed change is also rolled
   back if the agent restarts.
-- **Anti-lockout.** The agent always accepts its API port from `allow_from`,
+- **Anti-lockout.** The agent always accepts its API port and SSH (22) from `allow_from`,
   whatever rules are deployed.
 - **Atomic rulesets.** Each ruleset is checked with `nft -c` before anything changes,
   and loaded as a single transaction. A failed apply restores the previous

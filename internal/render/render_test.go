@@ -23,7 +23,7 @@ func sampleBundle(t *testing.T) *Bundle {
 	b, err := Render(fwconfig.SampleDocument(), Options{
 		Paths:       DefaultPaths(),
 		Units:       DefaultUnits(),
-		AntiLockout: &AntiLockout{Port: 8443, AllowFrom: []string{"192.168.1.0/24", "fd00:1::/64"}},
+		AntiLockout: &AntiLockout{Port: 8443, SSHPort: 22, AllowFrom: []string{"192.168.1.0/24", "fd00:1::/64"}},
 		DHCPDNS:     map[string][]string{"main": {"198.51.100.53"}},
 	})
 	if err != nil {
@@ -49,8 +49,8 @@ func TestNftablesMain(t *testing.T) {
 	nft := mustFile(t, sampleBundle(t), "/etc/portitor/instances/main/nftables.nft")
 	for _, want := range []string{
 		"delete table inet firewall",
-		`ip saddr 192.168.1.0/24 tcp dport 8443 accept comment "anti-lockout"`,
-		`ip6 saddr fd00:1::/64 tcp dport 8443 accept comment "anti-lockout"`,
+		`ip saddr 192.168.1.0/24 tcp dport { 22, 8443 } accept comment "anti-lockout"`,
+		`ip6 saddr fd00:1::/64 tcp dport { 22, 8443 } accept comment "anti-lockout"`,
 		`iifname "eth0" udp sport 67 udp dport 68 accept comment "auto: dhcp client"`,
 		`iifname { "eth1", "eth1.20" } udp dport 67 accept`,
 		`iifname { "eth1", "eth1.20", "wg0" } meta l4proto { tcp, udp } th dport 53 accept`,

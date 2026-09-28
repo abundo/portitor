@@ -419,7 +419,7 @@ const autoDescription = (a) =>
   a.service === 'anti-lockout' ? 'anti-lockout, from portitor-agent config' : a.service
 const autoTitle = (a) =>
   a.service === 'anti-lockout'
-    ? 'Added by portitor-agent so allow_from keeps reaching its API; set anti_lockout in agent.yaml to change it'
+    ? 'Added by portitor-agent so allow_from keeps reaching its API and SSH; set anti_lockout in agent.yaml to change it'
     : 'Added for a configured service; change the service to change this rule'
 
 // The traffic cell shows In above Out. In is what the rule matched plus the

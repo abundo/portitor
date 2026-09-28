@@ -12,7 +12,7 @@ tls_cert: /etc/portitor/agent.crt
 tls_key: /etc/portitor/agent.key
 
 # Who may call the API. The same list gets an always-on accept rule for the
-# API port (anti-lockout), whatever rules are deployed.
+# API port and SSH (22) (anti-lockout), whatever rules are deployed.
 allow_from:
   - 192.168.1.0/24
 

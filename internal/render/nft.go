@@ -18,20 +18,38 @@ import (
 // namespace. Other tables (docker, libvirt, ...) are left alone.
 const TableName = "firewall"
 
-// AntiLockout keeps the agent's management port reachable in the default
-// instance no matter what the rules say.
+// AntiLockout keeps the agent's management port, and SSH, reachable in the
+// default instance no matter what the rules say.
 type AntiLockout struct {
 	Port      int      `json:"port"`
-	AllowFrom []string `json:"allow_from"` // CIDRs; empty disables the rule
+	SSHPort   int      `json:"ssh_port,omitempty"` // 0 leaves SSH out
+	AllowFrom []string `json:"allow_from"`         // CIDRs; empty disables the rule
 }
 
 // AntiLockoutService is the anti-lockout rule's service, as the other auto
 // input rules have (AutoRule.Service); LogAuto names it to log the rule.
 const AntiLockoutService = "anti-lockout"
 
-// Rule describes the anti-lockout rule for the GUI's read-only list.
-func (l *AntiLockout) Rule() AutoRule {
-	return AutoRule{Service: AntiLockoutService, Protocol: "tcp", DstPort: l.Port, Source: l.AllowFrom}
+// Ports are the TCP ports the anti-lockout rule accepts: SSH, then the API.
+func (l *AntiLockout) Ports() []int {
+	var out []int
+	if l.SSHPort > 0 && l.SSHPort != l.Port {
+		out = append(out, l.SSHPort)
+	}
+	if l.Port > 0 {
+		out = append(out, l.Port)
+	}
+	return out
+}
+
+// Rules describe the anti-lockout rule for the GUI's read-only list, one
+// row per port.
+func (l *AntiLockout) Rules() []AutoRule {
+	var out []AutoRule
+	for _, p := range l.Ports() {
+		out = append(out, AutoRule{Service: AntiLockoutService, Protocol: "tcp", DstPort: p, Source: l.AllowFrom})
+	}
+	return out
 }
 
 // Nftables renders the complete ruleset for one instance. The output is fed
@@ -80,13 +98,22 @@ func Nftables(in *fwconfig.Instance, lockout *AntiLockout, paths Paths) string {
 	b.WriteString("\t\tmeta l4proto ipv6-icmp icmpv6 type { nd-router-solicit, nd-router-advert, nd-neighbor-solicit, nd-neighbor-advert, destination-unreachable, packet-too-big, time-exceeded, parameter-problem } accept\n")
 	b.WriteString("\t\tmeta l4proto icmp icmp type { destination-unreachable, time-exceeded, parameter-problem } accept\n")
 	if lockout != nil && in.Default && lockout.Port > 0 {
+		ports := lockout.Ports()
+		dport := strconv.Itoa(ports[0])
+		if len(ports) > 1 {
+			strs := make([]string, len(ports))
+			for i, p := range ports {
+				strs[i] = strconv.Itoa(p)
+			}
+			dport = "{ " + strings.Join(strs, ", ") + " }"
+		}
 		v4, v6 := splitFamilies(lockout.AllowFrom)
 		for _, m := range []struct {
 			key   string
 			addrs []string
 		}{{"ip", v4}, {"ip6", v6}} {
 			if len(m.addrs) > 0 {
-				match := fmt.Sprintf("%s saddr %s tcp dport %d", m.key, set(m.addrs), lockout.Port)
+				match := fmt.Sprintf("%s saddr %s tcp dport %s", m.key, set(m.addrs), dport)
 				writeAutoLog(b, in, AntiLockoutService, match)
 				fmt.Fprintf(b, "\t\t%s accept comment %q\n", match, AntiLockoutService)
 			}

@@ -207,7 +207,7 @@ function clean(b) {
   <NeedInstance>
     <CrudPage
       title="Rules"
-      info="Evaluated top to bottom; the first match decides. Edit cells in place (changes save at once), drag the grip to reorder, right-click a row to insert a rule, comment or group. A group heads the rows below it up to the next group; its chevron folds them away (only in the view: folded rules still apply). Established connections are allowed, and so is what the configured services (DHCP, DNS, WireGuard) need: those input rules are shown locked and follow the services' settings. In the default instance the agent's management port stays open to its allow_from addresses. Invalid packets (of no known connection) and traffic to or through the firewall that no rule accepts are dropped; the locked rows at the top and bottom of each chain count them."
+      info="Evaluated top to bottom; the first match decides. Edit cells in place (changes save at once), drag the grip to reorder, right-click a row to insert a rule, comment or group. A group heads the rows below it up to the next group; its chevron folds them away (only in the view: folded rules still apply). Established connections are allowed, and so is what the configured services (DHCP, DNS, WireGuard) need: those input rules are shown locked and follow the services' settings. In the default instance the agent's management port and SSH stay open to its allow_from addresses. Invalid packets (of no known connection) and traffic to or through the firewall that no rule accepts are dropped; the locked rows at the top and bottom of each chain count them."
       :api="api"
       :params="{ instance_id: store.currentId }"
       :columns="[]"

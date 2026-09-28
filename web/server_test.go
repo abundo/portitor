@@ -420,7 +420,7 @@ func TestAutoRulesAntiLockout(t *testing.T) {
 	var main models.Instance
 	env.srv.db.Where("is_default = ?", true).First(&main)
 	other := env.create("/api/instances", map[string]any{"name": "guest"})
-	fake := &statusAgent{antiLockout: &render.AntiLockout{Port: 8443, AllowFrom: []string{"192.168.1.0/24"}}}
+	fake := &statusAgent{antiLockout: &render.AntiLockout{Port: 8443, SSHPort: 22, AllowFrom: []string{"192.168.1.0/24"}}}
 	env.srv.newAgent = func(*models.Settings) (agentAPI, error) { return fake, nil }
 
 	get := func(id uint) string {
@@ -437,7 +437,7 @@ func TestAutoRulesAntiLockout(t *testing.T) {
 		}
 		return strings.Join(out, "|")
 	}
-	if got, want := get(main.ID), "anti-lockout tcp 8443 [192.168.1.0/24]"; got != want {
+	if got, want := get(main.ID), "anti-lockout tcp 22 [192.168.1.0/24]|anti-lockout tcp 8443 [192.168.1.0/24]"; got != want {
 		t.Errorf("default: got %q, want %q", got, want)
 	}
 	if got := get(other); got != "" {
