@@ -47,8 +47,11 @@ const packetText = (p) =>
     p.out_interface,
     p.family,
     p.protocol,
-    endpoint(p.src, p.src_port),
-    endpoint(p.dst, p.dst_port),
+    p.src,
+    p.src_port,
+    p.dst,
+    p.dst_port,
+    p.dst_service,
     p.info,
   ]
     .join(' ')
@@ -69,10 +72,11 @@ function ruleLabel(p) {
   return p.builtin === 'auto' ? `auto: ${p.service}` : p.builtin
 }
 
-// An address with its port: 192.0.2.1:443, [2001:db8::1]:443.
-function endpoint(addr, port) {
-  if (!port) return addr
-  return addr.includes(':') ? `[${addr}]:${port}` : `${addr}:${port}`
+// A destination port with its name from the agent's /etc/services:
+// "443 (https)".
+function dstPort(p) {
+  if (!p.dst_port) return ''
+  return p.dst_service ? `${p.dst_port} (${p.dst_service})` : String(p.dst_port)
 }
 
 const actionClasses = { accept: 'text-success', drop: 'text-error', reject: 'text-warning' }
@@ -192,7 +196,9 @@ onUnmounted(stop)
             <th>Out</th>
             <th>Proto</th>
             <th>Source</th>
+            <th class="text-right">Port</th>
             <th>Destination</th>
+            <th>Port</th>
             <th>Info</th>
             <th class="text-right">Bytes</th>
           </tr>
@@ -207,13 +213,15 @@ onUnmounted(stop)
             <td>{{ p.in_interface }}</td>
             <td>{{ p.out_interface }}</td>
             <td>{{ p.protocol }}</td>
-            <td class="break-all">{{ endpoint(p.src, p.src_port) }}</td>
-            <td class="break-all">{{ endpoint(p.dst, p.dst_port) }}</td>
+            <td class="break-all">{{ p.src }}</td>
+            <td class="text-right">{{ p.src_port || '' }}</td>
+            <td class="break-all">{{ p.dst }}</td>
+            <td class="whitespace-nowrap">{{ dstPort(p) }}</td>
             <td class="text-muted">{{ p.info }}</td>
             <td class="text-right">{{ p.length }}</td>
           </tr>
           <tr v-if="!packets.length">
-            <td colspan="12" class="text-muted">
+            <td colspan="14" class="text-muted">
               {{
                 state.packets.lines.length
                   ? 'No packets match the filter'

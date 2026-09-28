@@ -289,6 +289,9 @@ type PacketLogEntry struct {
 	Dst          string `json:"dst"`
 	SrcPort      uint16 `json:"src_port,omitempty"`
 	DstPort      uint16 `json:"dst_port,omitempty"`
+	// DstService is the destination port's name in the agent's
+	// /etc/services ("https"), if it has one.
+	DstService string `json:"dst_service,omitempty"`
 	// Info is the TCP flags ("SYN") or the ICMP type and code ("type 8
 	// code 0").
 	Info   string `json:"info,omitempty"`

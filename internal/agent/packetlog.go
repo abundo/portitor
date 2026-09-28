@@ -171,6 +171,7 @@ func (p *packetLog) listen(ctx context.Context, instance, nsName string) error {
 		}
 		e.Instance = instance
 		e.InInterface, e.OutInterface = ifname(a.InDev), ifname(a.OutDev)
+		e.DstService = serviceName(e.Protocol, e.DstPort)
 		p.entries.add(e)
 		return 0
 	}, func(err error) int {

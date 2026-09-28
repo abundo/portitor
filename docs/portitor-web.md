@@ -62,8 +62,10 @@ After an upgrade, run `migrate` before `start`. `install.py` does both.
 - **Log panel** (terminal icon) opens a panel at the bottom with two tabs:
   - *Agent log*: the agent's log.
   - *Logged packets*: the packets of the rules with *Log* ticked on the Rules page, as a
-    table (time, instance, chain, rule, action, interfaces, protocol, addresses and
-    ports, TCP flags or ICMP type). Every row can log, whatever its action: your rules
+    table (time, instance, chain, rule, action, interfaces, protocol, source address and
+    port, destination address and port, TCP flags or ICMP type). The destination port
+    shows its service name from the firewall's `/etc/services`, such as `443 (https)`.
+    Every row can log, whatever its action: your rules
     log every packet they match; the locked rows (invalid packets, the auto rules of
     the services, anti-lockout, and the last row, what no rule matched) log at most 10
     packets a second. The filter keeps the rows that contain every word typed, such as
