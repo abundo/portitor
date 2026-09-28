@@ -41,6 +41,8 @@ type data struct {
 	templates  []models.DnsTemplate
 	dyndns     []models.DyndnsClient
 	dyndnsRecs []models.DyndnsRecord
+	ipLists    []models.IpList
+	tasks      []models.Task
 }
 
 func load(db *gorm.DB) (*data, error) {
@@ -67,6 +69,8 @@ func load(db *gorm.DB) (*data, error) {
 		{&d.templates, "name"},
 		{&d.dyndns, "name"},
 		{&d.dyndnsRecs, "client_id, id"},
+		{&d.ipLists, "name"},
+		{&d.tasks, "name"},
 	} {
 		if err := db.Order(q.order).Find(q.dst).Error; err != nil {
 			return nil, err
@@ -507,6 +511,31 @@ func Build(db *gorm.DB, generation int64) (*fwconfig.Document, error) {
 			A:    fwconfig.LinkEnd{Instance: instName[l.InstanceAID], Interface: l.InterfaceA, Addresses: []string(l.AddressesA)},
 			B:    fwconfig.LinkEnd{Instance: instName[l.InstanceBID], Interface: l.InterfaceB, Addresses: []string(l.AddressesB)},
 		})
+	}
+
+	// IP lists stay references ("@name") in rules; the agent downloads
+	// them.
+	listName := map[uint]string{}
+	for _, l := range d.ipLists {
+		listName[l.ID] = l.Name
+		doc.IPLists = append(doc.IPLists, fwconfig.IPList{
+			Name: l.Name, Source: l.Source, URL: l.Url,
+			Username: l.Username, Password: l.Password, APIKey: l.ApiKey,
+		})
+	}
+	for _, t := range d.tasks {
+		if !t.Enabled {
+			continue
+		}
+		task := fwconfig.Task{Name: t.Name, Schedule: t.Schedule, Kind: t.Kind, Command: t.Command, Timeout: t.Timeout}
+		if t.Kind == fwconfig.TaskIPList {
+			if t.IpListID == nil || listName[*t.IpListID] == "" {
+				addf("task %s: its IP list no longer exists", t.Name)
+				continue
+			}
+			task.IPList = listName[*t.IpListID]
+		}
+		doc.Tasks = append(doc.Tasks, task)
 	}
 
 	if err := doc.Validate(); err != nil {

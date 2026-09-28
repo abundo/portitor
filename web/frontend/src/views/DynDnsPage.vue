@@ -8,6 +8,7 @@ import NeedInstance from '@/components/NeedInstance.vue'
 import { dyndnsClients, dyndnsRecords } from '@/api'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
 import { useDeployStore } from '@/stores/deploy'
+import { ago } from '@/utils/time'
 
 const { store, ifaceItems, ifaceName } = useInstanceRefs()
 const deploy = useDeployStore()
@@ -34,14 +35,6 @@ const states = computed(() => {
   return m
 })
 const stateColor = { ok: 'success', error: 'error' }
-function ago(t) {
-  if (!t) return 'never'
-  const s = Math.round((Date.now() - new Date(t).getTime()) / 1000)
-  if (s < 120) return `${s}s ago`
-  if (s < 7200) return `${Math.round(s / 60)}m ago`
-  if (s < 172800) return `${Math.round(s / 3600)}h ago`
-  return `${Math.round(s / 86400)}d ago`
-}
 
 const clientColumns = [
   { key: 'name', label: 'Name', class: 'font-medium' },

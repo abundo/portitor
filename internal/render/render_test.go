@@ -5,6 +5,7 @@ package render
 
 import (
 	"encoding/json"
+	"net/netip"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -64,9 +65,23 @@ func TestNftablesMain(t *testing.T) {
 		"\t\tcomment \"'Outbound' is open\"\n",
 		`iifname "eth0" meta nfproto ipv4 tcp dport 8443 counter dnat ip to 192.168.1.10:443 comment "nat 1: NAS"`,
 		`oifname "eth0" meta nfproto ipv4 counter masquerade comment "nat 2: Internet sharing"`,
+		"\tset crowdsec_v4 {\n\t\ttype ipv4_addr\n\t\tflags interval\n",
+		"\tset drop_v6 {\n\t\ttype ipv6_addr\n",
+		// A rule with IP lists and addresses: one nft rule per operand.
+		`iifname "eth0" ip saddr 198.51.100.0/24 counter drop comment "rule 12: blocklists"`,
+		`iifname "eth0" ip saddr @crowdsec_v4 counter drop comment "rule 12: blocklists"`,
+		`iifname "eth0" ip saddr @drop_v4 counter drop comment "rule 12: blocklists"`,
+		`iifname "eth0" ip6 saddr @crowdsec_v6 counter drop comment "rule 12: blocklists"`,
+		`oifname "eth0" ip daddr @drop_v4 counter jump reject_pkt comment "rule 13"`,
+		"}\ninclude \"/var/lib/portitor/iplists/crowdsec.nft\"\ninclude \"/var/lib/portitor/iplists/drop.nft\"\n",
 	} {
 		if !strings.Contains(nft, want) {
 			t.Errorf("missing:\n  %s\nin:\n%s", want, nft)
+		}
+	}
+	for _, unwanted := range []string{"ip6 saddr 198.51.100.0/24", "@drop_v6 counter jump"} {
+		if strings.Contains(nft, unwanted) {
+			t.Errorf("unexpected %q in:\n%s", unwanted, nft)
 		}
 	}
 	// Input rules are in the input chain, forward rules in forward.
@@ -80,6 +95,9 @@ func TestNftablesGuestHasNoLockout(t *testing.T) {
 	nft := mustFile(t, sampleBundle(t), "/etc/portitor/instances/guest/nftables.nft")
 	if strings.Contains(nft, "anti-lockout") {
 		t.Error("anti-lockout belongs to the default instance only")
+	}
+	if strings.Contains(nft, "set ") || strings.Contains(nft, "include") {
+		t.Error("the guest rules use no IP lists")
 	}
 	if !strings.Contains(nft, `oifname "lk-main" ip daddr 192.168.0.0/16 counter jump reject_pkt`) {
 		t.Errorf("guest reject rule missing:\n%s", nft)
@@ -98,7 +116,27 @@ func TestNftablesSyntax(t *testing.T) {
 	if out, err := exec.Command("unshare", "-rn", "nft", "list", "ruleset").CombinedOutput(); err != nil {
 		t.Skipf("cannot run nft in a user namespace: %v %s", err, out)
 	}
-	b := sampleBundle(t)
+	// The rulesets include the IP lists' elements files, which the agent
+	// writes: one with entries, one empty.
+	paths := DefaultPaths()
+	paths.StateDir = t.TempDir()
+	for name, content := range map[string]string{
+		"crowdsec": IPListElements("crowdsec", []netip.Prefix{
+			netip.MustParsePrefix("192.0.2.1/32"), netip.MustParsePrefix("198.51.100.0/24"), netip.MustParsePrefix("2001:db8::/32"),
+		}),
+		"drop": IPListElements("drop", nil),
+	} {
+		if err := os.MkdirAll(filepath.Dir(paths.IPListFile(name)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(paths.IPListFile(name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	b, err := Render(fwconfig.SampleDocument(), Options{Paths: paths, Units: DefaultUnits()})
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, f := range b.Files {
 		if !strings.HasSuffix(f.Path, ".nft") {
 			continue
@@ -361,5 +399,31 @@ func TestDnsmgrYAMLRoundTrip(t *testing.T) {
 		if string(g) != string(w) {
 			t.Errorf("%s: dnsmgr2.yaml does not round-trip\ngot\n%s\nwant\n%s", name, g, w)
 		}
+	}
+}
+
+func TestIPListElements(t *testing.T) {
+	var list []netip.Prefix
+	for i := range 1500 {
+		list = append(list, netip.PrefixFrom(netip.AddrFrom4([4]byte{10, byte(i >> 8), byte(i), 0}), 24))
+	}
+	list = append(list, netip.MustParsePrefix("192.0.2.7/32"), netip.MustParsePrefix("2001:db8::/48"))
+	got := IPListElements("bl", list)
+	lines := strings.Split(strings.TrimSpace(got), "\n")
+	if len(lines) != 4 || lines[0] != "# ip list bl: 1501 IPv4 and 1 IPv6 entries. Written by portitor-agent." {
+		t.Fatalf("lines: %q", lines)
+	}
+	if !strings.HasPrefix(lines[1], "add element inet firewall bl_v4 { 10.0.0.0/24, ") || strings.Count(lines[1], ",") != 999 {
+		t.Errorf("first chunk: %.80s...", lines[1])
+	}
+	if !strings.HasSuffix(lines[2], ", 192.0.2.7 }") {
+		t.Errorf("second chunk ends %q", lines[2][len(lines[2])-40:])
+	}
+	if lines[3] != "add element inet firewall bl_v6 { 2001:db8::/48 }" {
+		t.Errorf("v6: %q", lines[3])
+	}
+	want := "flush set inet firewall bl_v4\nflush set inet firewall bl_v6\ninclude \"/var/lib/portitor/iplists/bl.nft\"\n"
+	if got := IPListReload("bl", DefaultPaths()); got != want {
+		t.Errorf("reload:\n%s", got)
 	}
 }

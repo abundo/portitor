@@ -177,12 +177,22 @@ const (
 	entryAny  = iota // address or CIDR
 	entryCIDR        // CIDR
 	entryHost        // single address
+	entryRule        // address, CIDR or IP list ("@name")
 )
 
 // checkEntries checks an address list where names of hosts/prefixes may
 // stand in for literals. The builder expands the names at deploy time.
 func checkEntries(tx *gorm.DB, field string, list models.StringList, kind int) error {
 	for _, s := range list {
+		if name, ok := fwconfig.IPListName(s); ok {
+			if kind != entryRule {
+				return bad(fmt.Sprintf("%s: IP lists (%s) can only be used in firewall rules", field, s))
+			}
+			if err := checkIPListRef(tx, field, name); err != nil {
+				return err
+			}
+			continue
+		}
 		if netobj.IsName(s) {
 			if err := checkObjectName(tx, field, s, kind == entryHost); err != nil {
 				return err
@@ -192,7 +202,7 @@ func checkEntries(tx *gorm.DB, field string, list models.StringList, kind int) e
 		var err error
 		example := "an address or CIDR"
 		switch kind {
-		case entryAny:
+		case entryAny, entryRule:
 			_, err = fwconfig.ParseAddrOrPrefix(s)
 		case entryCIDR:
 			_, err = fwconfig.ParseAddrOrPrefix(s)

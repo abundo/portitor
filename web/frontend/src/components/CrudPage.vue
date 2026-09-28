@@ -11,7 +11,7 @@
 // multiselect: an array of strings picked from items (strings, or
 // { label, value, description } to show a description under each name).
 // addrs/addr: address list / single address; names of hosts/prefixes are
-// suggested and accepted.
+// suggested and accepted, and with `lists: true` IP lists ("@name").
 // Column: { key, label, format: row => string, class }
 // Cells can be overridden with a `cell-<key>` slot, or the whole table with
 // the `table` slot ({ rows, openCreate, openEdit, remove, moveTo, saveRow,
@@ -375,6 +375,7 @@ defineExpose({ reload: load, openEdit, openCreate })
               v-else-if="f.type === 'addrs' || f.type === 'addr'"
               v-model="form[f.key]"
               :multiple="f.type === 'addrs'"
+              :lists="!!f.lists"
               :placeholder="f.placeholder"
               :disabled="f.disabled?.(form)"
             />

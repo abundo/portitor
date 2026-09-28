@@ -20,4 +20,6 @@ type (
 	ProgramStatus  = agentapi.ProgramStatus
 	NICStatus      = agentapi.NICStatus
 	DynDNSStatus   = agentapi.DynDNSStatus
+	IPListStatus   = agentapi.IPListStatus
+	TaskStatus     = agentapi.TaskStatus
 )

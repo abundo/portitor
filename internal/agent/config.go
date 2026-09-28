@@ -39,8 +39,8 @@ type Config struct {
 	Paths    render.Paths `yaml:"paths"`
 	Units    render.Units `yaml:"units"`
 	LogLevel string       `yaml:"log_level"`
-	// ConsoleUser is the account the web console's shell runs as. "none"
-	// turns the console off.
+	// ConsoleUser is the account the web console's shell and command tasks
+	// (fwconfig.TaskCommand) run as. "none" turns both off.
 	ConsoleUser string `yaml:"console_user"`
 
 	token string

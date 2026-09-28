@@ -55,6 +55,8 @@ func SampleDocument() Document {
 					{Chain: ChainInput, InInterfaces: []string{"lan", "vpn"}, Action: ActionAccept, Description: "trusted"},
 					{Chain: ChainInput, InInterfaces: []string{"iot"}, Action: ActionReject},
 					{Chain: ChainOutput, Kind: RuleKindComment, Description: `"Outbound" is open`},
+					{Chain: ChainInput, InInterfaces: []string{"wan"}, SrcAddrs: []string{"@crowdsec", "@drop", "198.51.100.0/24"}, Action: ActionDrop, Description: "blocklists"},
+					{Chain: ChainForward, OutInterfaces: []string{"wan"}, Family: "ipv4", DstAddrs: []string{"@drop"}, Action: ActionReject},
 				},
 				NAT: []NATRule{
 					{Kind: NATDNAT, InInterfaces: []string{"wan"}, Protocol: "tcp", DstPorts: "8443", ToAddr: "192.168.1.10", ToPort: 443, Description: "NAS"},
@@ -142,5 +144,14 @@ func SampleDocument() Document {
 			A:    LinkEnd{Instance: "main", Interface: "lk-guest", Addresses: []string{"10.255.0.1/30"}},
 			B:    LinkEnd{Instance: "guest", Interface: "lk-main", Addresses: []string{"10.255.0.2/30"}},
 		}},
+		IPLists: []IPList{
+			{Name: "crowdsec", Source: IPListCrowdSec, URL: "http://127.0.0.1:8080", APIKey: "0123456789abcdef"},
+			{Name: "drop", Source: IPListURL, URL: "https://www.spamhaus.org/drop/drop.txt"},
+		},
+		Tasks: []Task{
+			{Name: "crowdsec", Schedule: "*/5 * * * *", Kind: TaskIPList, IPList: "crowdsec"},
+			{Name: "drop", Schedule: "@daily", Kind: TaskIPList, IPList: "drop"},
+			{Name: "backup", Schedule: "30 3 * * *", Kind: TaskCommand, Command: "tar czf /tmp/etc.tgz /etc/portitor", Timeout: 600},
+		},
 	}
 }

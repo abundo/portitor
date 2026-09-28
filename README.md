@@ -10,6 +10,8 @@ a web gui for a linux nftables firewall.
 supports DNS server, DHCP server and Wireguard tunnels
 DHCP client for upstream/WAN link
 dynamic DNS: records on an external nameserver follow the WAN addresses (RFC 2136, TSIG)
+IP lists: CrowdSec decisions or downloaded blocklists, used as `@name` in rules
+scheduled tasks: download IP lists or run commands on a cron schedule
 main use cause is residential/home user
 
 web gui should not run on the firewall for maxiumum security. the firewall should have a daemon running, which the web gui/backend uses to get things done on the firewall
@@ -30,6 +32,8 @@ ip prefix/addresses are handled by a hierarchical tree
                   ├─ WireGuard      wg syncconf
                   ├─ DHCP client    in-process, for the WAN
                   ├─ dynamic DNS    in-process RFC 2136 updates (ifnsupdate)
+                  ├─ IP lists       downloads (CrowdSec LAPI, plain text) into nftables sets
+                  ├─ scheduler      cron-style tasks
                   ├─ dnsmgr2        BIND zones + Kea DHCPv4 scopes, one pair per instance
                   └─ Kea DHCPv6, radvd   IPv6 addresses and router advertisements, per instance
 ```
@@ -48,6 +52,17 @@ ip prefix/addresses are handled by a hierarchical tree
   scope (DHCPv4 or DHCPv6). An IPv6 prefix can send router advertisements (radvd),
   optionally with SLAAC; DHCPv6 needs them. An address with a DNS name gets an
   A/AAAA record (PTR generated), and with a MAC also a fixed lease.
+- **IP lists** are address lists the agent downloads: the ban decisions of a CrowdSec
+  Local API (as a bouncer, with its API key), or plain text with one address or prefix
+  per line (a CrowdSec blocklist integration with HTTP basic auth, Spamhaus DROP, ...).
+  A rule uses one as `@name` in its source or destination; it becomes a pair of
+  nftables sets (`name_v4`, `name_v6`) in every instance whose rules use it, loaded in
+  the same transaction as the rules. The agent downloads a list when it is first
+  deployed and whenever a scheduled task says so, from the firewall host (root
+  namespace); a failed download keeps the last good one, which also survives a restart.
+  See [docs/crowdsec.md](docs/crowdsec.md) for blocking with CrowdSec.
+- **Scheduled tasks** run on the firewall on a cron schedule, in its time zone: download
+  an IP list again, or run a shell command as `console_user` (off when the console is).
 - **Hosts & prefixes** are named addresses. A name can be used wherever addresses are
   entered (rules, NAT, routes, DNS, DHCP, WireGuard); portitor-web expands it when it
   builds the document. A host may have an IPv4 and an IPv6 address: a rule with
@@ -80,7 +95,8 @@ ip prefix/addresses are handled by a hierarchical tree
   shell on the firewall that the agent runs as `console_user` in `agent.yaml`
   (default `portitor`; `none` turns it off). The shell has that user's rights,
   which on a host set up by `install.py` include sudo. portitor-web allows the
-  WebSocket from its own origin only, and logs who opened it.
+  WebSocket from its own origin only, and logs who opened it. Command tasks run as the
+  same user, and `none` turns them off too.
 
 ## Install
 

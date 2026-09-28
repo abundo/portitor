@@ -25,6 +25,7 @@ const items = computed(() => [
     { label: 'Interface zones', icon: 'i-lucide-layers', to: '/firewall/zones' },
     { label: 'Rules', icon: 'i-lucide-shield-check', to: '/firewall/rules' },
     { label: 'NAT & port forwards', icon: 'i-lucide-arrow-right-left', to: '/firewall/nat' },
+    { label: 'IP lists', icon: 'i-lucide-list-x', to: '/firewall/ip-lists' },
   ],
   [
     { label: 'Services', type: 'label' },
@@ -33,6 +34,7 @@ const items = computed(() => [
     { label: 'DHCP', icon: 'i-lucide-list-ordered', to: '/dhcp' },
     { label: 'WireGuard', icon: 'i-lucide-key-round', to: '/wireguard' },
     { label: 'Dynamic DNS', icon: 'i-lucide-refresh-ccw-dot', to: '/dyndns' },
+    { label: 'Scheduled tasks', icon: 'i-lucide-calendar-clock', to: '/tasks' },
   ],
   [
     { label: 'Console', icon: 'i-lucide-square-terminal', to: '/console' },

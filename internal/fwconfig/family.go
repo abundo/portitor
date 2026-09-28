@@ -4,7 +4,8 @@
 package fwconfig
 
 // FamilyMatch is a rule's match for one IP version: Family is ipv4 or
-// ipv6, and Src/Dst hold only addresses of that version. Family is the
+// ipv6, and Src/Dst hold only addresses of that version, and IP list
+// references (which render as that version's set). Family is the
 // rule's own (possibly empty) family when the rule has no addresses.
 type FamilyMatch struct {
 	Family   string
@@ -36,10 +37,14 @@ func MatchFamilies(family, proto string, src, dst []string) []FamilyMatch {
 	return out
 }
 
+// filterFamily keeps the entries of one IP version. IP list references
+// stay in both: a list may hold either.
 func filterFamily(list []string, fam string) []string {
 	var out []string
 	for _, a := range list {
-		if p, err := ParseAddrOrPrefix(a); err == nil && p.Addr().Is4() == (fam == "ipv4") {
+		if _, ok := IPListName(a); ok {
+			out = append(out, a)
+		} else if p, err := ParseAddrOrPrefix(a); err == nil && p.Addr().Is4() == (fam == "ipv4") {
 			out = append(out, a)
 		}
 	}

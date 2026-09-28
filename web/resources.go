@@ -362,10 +362,10 @@ func prepareRule(tx *gorm.DB, r, old *models.Rule) error {
 		return err
 	}
 	r.SrcAddrs, r.DstAddrs = cleanList(r.SrcAddrs), cleanList(r.DstAddrs)
-	if err := checkEntries(tx, "source", r.SrcAddrs, entryAny); err != nil {
+	if err := checkEntries(tx, "source", r.SrcAddrs, entryRule); err != nil {
 		return err
 	}
-	if err := checkEntries(tx, "destination", r.DstAddrs, entryAny); err != nil {
+	if err := checkEntries(tx, "destination", r.DstAddrs, entryRule); err != nil {
 		return err
 	}
 	r.DstPorts = strings.TrimSpace(r.DstPorts)

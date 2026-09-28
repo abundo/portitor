@@ -22,6 +22,12 @@ type Document struct {
 	Generation int64      `json:"generation"` // monotonic deploy id, set by portitor-web
 	Instances  []Instance `json:"instances"`
 	Links      []Link     `json:"links"`
+	// IPLists are address lists the agent downloads (CrowdSec, or a URL
+	// with one address per line). Rules refer to one as "@name"; it
+	// becomes an nftables set in each instance whose rules use it.
+	IPLists []IPList `json:"ip_lists,omitempty"`
+	// Tasks run on the firewall on a cron schedule.
+	Tasks []Task `json:"tasks,omitempty"`
 }
 
 type Instance struct {
@@ -115,7 +121,8 @@ const (
 )
 
 // Rule is one filter rule, evaluated in slice order within its chain.
-// Empty match fields match anything. InInterfaces/OutInterfaces hold
+// Empty match fields match anything. SrcAddrs and DstAddrs may also hold
+// IP list references ("@name"), which match either IP version. InInterfaces/OutInterfaces hold
 // interface and InterfaceZone names of the instance. Address lists may mix IPv4 and IPv6;
 // the rule is then rendered once per IP version, each with that version's
 // addresses. A version is left out when a non-empty list has none of its

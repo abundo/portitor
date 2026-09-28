@@ -22,11 +22,13 @@ import (
 )
 
 type Agent struct {
-	cfg  *Config
-	run  Runner
-	log  *OpLog
-	dhcp *dhcpManager
-	ddns *dyndnsManager
+	cfg   *Config
+	run   Runner
+	log   *OpLog
+	dhcp  *dhcpManager
+	ddns  *dyndnsManager
+	lists *ipLists
+	tasks *scheduler
 
 	mu        sync.Mutex // serialises apply / confirm / rollback
 	applied   *fwconfig.Document
@@ -53,6 +55,8 @@ func New(cfg *Config) *Agent {
 	}
 	a.dhcp = newDHCPManager(a.run, cfg.DryRun, a.onDHCPChange)
 	a.ddns = newDyndnsManager(cfg.DryRun)
+	a.lists = newIPLists()
+	a.tasks = newScheduler(a.runTask)
 	return a
 }
 
@@ -109,6 +113,8 @@ func (a *Agent) Start(ctx context.Context) error {
 }
 
 func (a *Agent) Stop() {
+	a.tasks.Stop()
+	a.lists.Stop()
 	a.ddns.Stop()
 	a.dhcp.Stop()
 }

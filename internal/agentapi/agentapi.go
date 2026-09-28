@@ -48,6 +48,8 @@ type Status struct {
 	Instances  []InstanceStatus `json:"instances"`
 	DHCPLeases []Lease          `json:"dhcp_client_leases"`
 	DynDNS     []DynDNSStatus   `json:"dyndns"`
+	IPLists    []IPListStatus   `json:"ip_lists"`
+	Tasks      []TaskStatus     `json:"tasks"`
 	Programs   []ProgramStatus  `json:"programs"`
 	// NICs are the physical interfaces on the firewall, wherever they are.
 	NICs []NICStatus `json:"nics"`
@@ -163,6 +165,46 @@ type DynDNSStatus struct {
 	Name      string `json:"name"`
 	Interface string `json:"interface"`
 	dyndns.Status
+}
+
+// IPListStatus is the state of an IP list's download.
+type IPListStatus struct {
+	Name string `json:"name"`
+	// State: pending (not downloaded yet), fetching, ok, error.
+	State string `json:"state"`
+	// Updated is the last successful download, whose counts follow.
+	Updated *time.Time `json:"updated,omitempty"`
+	IPv4    int        `json:"ipv4"`
+	IPv6    int        `json:"ipv6"`
+	// Skipped entries were not addresses, or not IP/range bans.
+	Skipped     int        `json:"skipped"`
+	LastAttempt *time.Time `json:"last_attempt,omitempty"`
+	LastError   string     `json:"last_error,omitempty"`
+}
+
+// TaskStatus is the state of a scheduled task.
+type TaskStatus struct {
+	Name     string `json:"name"`
+	Kind     string `json:"kind"`
+	Schedule string `json:"schedule"`
+	// Next is when it runs next, in the firewall's time zone; nil when
+	// the schedule never fires.
+	Next    *time.Time `json:"next,omitempty"`
+	Running bool       `json:"running"`
+	// LastStart and LastEnd are of the last run; LastResult is ok or
+	// error (LastError says why).
+	LastStart  *time.Time `json:"last_start,omitempty"`
+	LastEnd    *time.Time `json:"last_end,omitempty"`
+	LastResult string     `json:"last_result,omitempty"`
+	LastError  string     `json:"last_error,omitempty"`
+	// Output is the end of a command's output (stdout and stderr).
+	Output string `json:"output,omitempty"`
+}
+
+// RunRequest names a task to run now (/v1/tasks/run) or an IP list to
+// download now (/v1/iplists/refresh). Both answer 202 once started.
+type RunRequest struct {
+	Name string `json:"name"`
 }
 
 // RenderResult is a preview: the files a document would produce next to

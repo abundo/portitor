@@ -165,6 +165,17 @@ func (c *Client) Rollback(ctx context.Context) (*agentapi.ApplyResult, error) {
 	return &r, c.do(ctx, http.MethodPost, "/v1/rollback", struct{}{}, &r)
 }
 
+// RunTask starts a task of the applied configuration now.
+func (c *Client) RunTask(ctx context.Context, name string) error {
+	return c.do(ctx, http.MethodPost, "/v1/tasks/run", agentapi.RunRequest{Name: name}, nil)
+}
+
+// RefreshIPList starts downloading an IP list of the applied
+// configuration now.
+func (c *Client) RefreshIPList(ctx context.Context, name string) error {
+	return c.do(ctx, http.MethodPost, "/v1/iplists/refresh", agentapi.RunRequest{Name: name}, nil)
+}
+
 // Console opens the agent's console WebSocket (agentapi.ConsoleResize).
 func (c *Client) Console(ctx context.Context) (*websocket.Conn, error) {
 	conn, resp, err := websocket.Dial(ctx, c.baseURL+"/v1/console", &websocket.DialOptions{

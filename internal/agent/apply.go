@@ -50,6 +50,10 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 			return err
 		}
 	}
+	// The rulesets include the IP lists' elements files.
+	if err := a.prepareIPLists(&doc); err != nil {
+		return err
+	}
 	if err := a.checkRulesets(ctx, &exp, bundle); err != nil {
 		return err
 	}
@@ -246,6 +250,8 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 	d := doc
 	a.applied = &d
 	a.lastApply = time.Now()
+	a.reconcileIPLists(&d)
+	a.tasks.Reconcile(d.Tasks)
 	return nil
 }
 

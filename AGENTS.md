@@ -15,8 +15,10 @@ are in [README.md](README.md).
 | `cmd/portitor-agent` | Agent daemon on the firewall: `start`, `init`, `render`, `netns-exec` |
 | `internal/fwconfig` | The desired-state document and `Validate()`. **The contract between web and agent.** |
 | `internal/render` | Pure functions: document → nftables, WireGuard, named.conf, Kea, dnsmgr2 config |
-| `internal/agent` | Agent: apply/reconcile, commit-confirm, DHCP client, status, API server |
+| `internal/agent` | Agent: apply/reconcile, commit-confirm, DHCP client, IP lists, task scheduler, status, API server |
 | `internal/dyndns` | Dynamic DNS client (RFC 2136, from ifnsupdate); the agent runs it per instance netns |
+| `internal/iplist` | Downloads IP lists (CrowdSec LAPI decisions, plain-text lists) |
+| `internal/cron` | crontab(5) schedule parser for tasks (shared by web and agent) |
 | `internal/agentapi` | Agent API wire types (shared by agent and client) |
 | `internal/agentclient` | portitor-web's HTTPS client for the agent, with certificate pinning |
 | `internal/builder` | Database → `fwconfig.Document` (resolves ids, IPAM, DHCP scopes, DNS names) |
@@ -38,7 +40,10 @@ are in [README.md](README.md).
   escape quotes, so `render.comment` replaces them.
 - **Rendering is pure** (no I/O) so the preview is exactly what apply writes. Don't
   put volatile data (timestamps, generation) in rendered files; unchanged config must
-  render byte-identical.
+  render byte-identical. Downloaded IP list contents are volatile: the ruleset only
+  declares the sets and `include`s the list's elements file
+  (`<state_dir>/iplists/<name>.nft`), which the agent writes on download and creates
+  empty before a ruleset that includes it is checked or loaded.
 - **All system changes go through `agent.Runner`** (exec, dry-run, or fakes in
   tests). Reconcile logic is planned as pure functions over parsed `ip -j` output
   (`netstate.go`) and unit-tested that way.
@@ -49,10 +54,12 @@ are in [README.md](README.md).
   apply while one is pending keeps it. `rollback.json` makes a pending change roll
   back after an agent restart too.
 - **Secrets:** fields tagged `json:"-"` (WireGuard private/preshared keys, TSIG
-  secrets, agent token, password hashes) never reach the browser. The generic CRUD
+  secrets, IP list passwords and API keys, agent token, password hashes) never reach
+  the browser. The generic CRUD
   `PUT` merges the body onto the stored row, so those fields can't be overwritten
   through the API either; a secret the user enters comes in through a write-only
-  `gorm:"-"` field that `prepare` copies and `present` clears (`DyndnsClient.NewTsigSecret`).
+  `gorm:"-"` field that `prepare` copies and `present` clears (`DyndnsClient.NewTsigSecret`,
+  `IpList.NewPassword`/`NewApiKey`).
   Deployment history stores a redacted document.
 - **Rules match interfaces by name.** Rule and NAT interface lists hold interface
   names (link ends included) and interface zone names of the instance; an
@@ -67,6 +74,11 @@ are in [README.md](README.md).
   stored by name, so renaming an object rewrites them (`web/objects.go`) and deleting
   one in use is refused. A new address field that should accept names must be added
   to `eachObjectRef` and expanded in the builder.
+- **IP lists reach the agent as references.** A filter rule's address list may hold
+  `@name` (not NAT, not other address fields): it matches either IP version and
+  renders as the list's `name_v4`/`name_v6` set. One nft match takes one operand, so a
+  list with literals and IP lists renders one rule per operand. Renaming a list
+  rewrites the rules (`web/tasks.go`); deleting one a rule or task uses is refused.
 - **Dual stack:** rule and NAT address lists may mix IPv4 and IPv6;
   `fwconfig.MatchFamilies` decides which versions a rule is rendered for, and
   validation uses the same function.

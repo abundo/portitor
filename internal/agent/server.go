@@ -98,6 +98,18 @@ func (a *Agent) Handler() http.Handler {
 		}
 		writeJSONResponse(w, http.StatusOK, res)
 	})
+	mux.HandleFunc("POST /v1/tasks/run", func(w http.ResponseWriter, r *http.Request) {
+		var req agentapi.RunRequest
+		if decode(w, r, &req) {
+			writeStarted(w, req.Name, a.tasks.RunNow(req.Name))
+		}
+	})
+	mux.HandleFunc("POST /v1/iplists/refresh", func(w http.ResponseWriter, r *http.Request) {
+		var req agentapi.RunRequest
+		if decode(w, r, &req) {
+			writeStarted(w, req.Name, a.RefreshIPList(req.Name))
+		}
+	})
 	mux.HandleFunc("GET /v1/console", a.handleConsole)
 	return a.authMiddleware(mux)
 }
@@ -180,6 +192,23 @@ func decode(w http.ResponseWriter, r *http.Request, v any) bool {
 		return false
 	}
 	return true
+}
+
+// writeStarted answers a request to start a task or download: 202, or
+// why it could not start.
+func writeStarted(w http.ResponseWriter, name string, err error) {
+	var nf errNotFound
+	var busy errBusy
+	switch {
+	case errors.As(err, &nf):
+		writeError(w, http.StatusNotFound, err)
+	case errors.As(err, &busy):
+		writeError(w, http.StatusConflict, err)
+	case err != nil:
+		writeError(w, http.StatusInternalServerError, err)
+	default:
+		writeJSONResponse(w, http.StatusAccepted, map[string]any{"started": name})
+	}
 }
 
 func errorBody(err error) agentapi.ErrorResponse {

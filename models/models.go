@@ -381,6 +381,40 @@ type DyndnsRecord struct {
 	Description string `json:"description"`
 }
 
+// IpList is an address list the agent downloads (fwconfig.IPList). Rules
+// use it by name as "@name" in their address lists.
+type IpList struct {
+	Base
+	Name        string `gorm:"uniqueIndex" json:"name"`
+	Description string `json:"description"`
+	Source      string `json:"source"` // fwconfig.IPList*
+	Url         string `json:"url"`
+	Username    string `json:"username"`
+	// Password and ApiKey are set through NewPassword and NewApiKey and
+	// never sent back.
+	Password string `json:"-"`
+	ApiKey   string `json:"-"`
+	// NewPassword and NewApiKey replace the stored secret when not empty.
+	NewPassword string `gorm:"-" json:"password,omitempty"`
+	NewApiKey   string `gorm:"-" json:"api_key,omitempty"`
+	HasPassword bool   `gorm:"-" json:"has_password"`
+	HasApiKey   bool   `gorm:"-" json:"has_api_key"`
+}
+
+// Task runs on the firewall on a cron schedule (fwconfig.Task): it
+// downloads IpListID, or runs Command as the agent's console user.
+type Task struct {
+	Base
+	Name        string `gorm:"uniqueIndex" json:"name"`
+	Description string `json:"description"`
+	Enabled     bool   `json:"enabled"`
+	Schedule    string `json:"schedule"`
+	Kind        string `json:"kind"` // fwconfig.Task*
+	IpListID    *uint  `json:"ip_list_id"`
+	Command     string `json:"command"`
+	Timeout     int    `json:"timeout"` // seconds; 0 is the default
+}
+
 // KnownInterface is a physical interface the agent has reported
 // (web/nics.go). A new one is imported into the default instance once, so
 // deleting it there sticks.
@@ -411,6 +445,6 @@ func All() []any {
 		&User{}, &Settings{}, &Instance{}, &InterfaceZone{}, &Interface{}, &WgPeer{}, &Link{},
 		&Route{}, &Rule{}, &NatRule{}, &IpamPrefix{}, &IpamAddress{}, &DnsZone{}, &DnsRecord{}, &Deployment{},
 		&AddressObject{}, &DnsSoaTemplate{}, &DnsDnssecPolicy{}, &DnsTemplate{}, &KnownInterface{},
-		&DyndnsClient{}, &DyndnsRecord{},
+		&DyndnsClient{}, &DyndnsRecord{}, &IpList{}, &Task{},
 	}
 }

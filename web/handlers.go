@@ -789,5 +789,15 @@ func redactDoc(doc fwconfig.Document) fwconfig.Document {
 		}
 		out.Instances[i] = cp
 	}
+	out.IPLists = make([]fwconfig.IPList, len(doc.IPLists))
+	for i, l := range doc.IPLists {
+		if l.Password != "" {
+			l.Password = "<redacted>"
+		}
+		if l.APIKey != "" {
+			l.APIKey = "<redacted>"
+		}
+		out.IPLists[i] = l
+	}
 	return out
 }

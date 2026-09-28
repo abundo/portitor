@@ -7,8 +7,9 @@
 // (`move`, with indexes into `rows`). Comment rows (kind 'comment') hold one
 // text across the row. Right-click a row to insert a rule or comment above or
 // below it (`insert(kind, index)`, resolving to a created comment row).
-// Address cells take a comma-separated list of addresses, CIDRs or names;
-// From/To cells a comma-separated list of interfaces and interface zones.
+// Address cells take a comma-separated list of addresses, CIDRs, names or
+// IP lists (@name); From/To cells a comma-separated list of interfaces and
+// interface zones.
 import { computed, onMounted, ref } from 'vue'
 import { useRowDrag } from '@/composables/useRowDrag'
 import { useObjectStore } from '@/stores/objects'
@@ -135,7 +136,7 @@ function listSuggestions(names, text) {
 const ifaceSuggestions = computed(() => listSuggestions(props.ifaces, typed.value))
 const nameSuggestions = computed(() =>
   listSuggestions(
-    objects.names.map((n) => ({ value: n })),
+    [...objects.names, ...objects.listRefs].map((n) => ({ value: n })),
     typed.value,
   ),
 )

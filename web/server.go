@@ -36,6 +36,8 @@ type agentAPI interface {
 	Apply(ctx context.Context, doc fwconfig.Document, confirmTimeout int) (*agentapi.ApplyResult, error)
 	Confirm(ctx context.Context, generation int64) error
 	Rollback(ctx context.Context) (*agentapi.ApplyResult, error)
+	RunTask(ctx context.Context, name string) error
+	RefreshIPList(ctx context.Context, name string) error
 	Console(ctx context.Context) (*websocket.Conn, error)
 }
 
@@ -114,6 +116,8 @@ func (s *Server) Echo() *echo.Echo {
 	(&resource[models.DyndnsClient, *models.DyndnsClient]{db: s.db, filters: []string{"instance_id"}, order: "name", prepare: prepareDyndnsClient, present: presentDyndnsClient, beforeDelete: deleteDyndnsClient}).register(g, "/dyndns/clients")
 	(&resource[models.DyndnsRecord, *models.DyndnsRecord]{db: s.db, filters: []string{"client_id"}, order: "id", prepare: prepareDyndnsRecord}).register(g, "/dyndns/records")
 	(&resource[models.AddressObject, *models.AddressObject]{db: s.db, order: "name", prepare: prepareAddressObject, beforeDelete: deleteAddressObject}).register(g, "/objects")
+	(&resource[models.IpList, *models.IpList]{db: s.db, order: "name", prepare: prepareIpList, present: presentIpList, beforeDelete: deleteIpList}).register(g, "/ip-lists")
+	(&resource[models.Task, *models.Task]{db: s.db, order: "name", prepare: prepareTask}).register(g, "/tasks")
 
 	g.PUT("/dns/zones/:id/records", s.handleZoneRecords)
 	g.GET("/ipam/tree", s.handleIpamTree)
@@ -124,6 +128,9 @@ func (s *Server) Echo() *echo.Echo {
 	g.GET("/wg/peers/:id/config", s.handleWgClientConfig)
 	g.POST("/interfaces/:id/wg-rekey", s.handleWgRekey)
 	g.GET("/interfaces/:id/wg-next-free", s.handleWgNextFree)
+	g.POST("/ip-lists/:id/refresh", s.handleIPListRefresh)
+	g.POST("/tasks/:id/run", s.handleTaskRun)
+	g.GET("/schedule/preview", s.handleSchedulePreview)
 
 	g.GET("/settings", s.handleGetSettings)
 	g.PUT("/settings", s.handlePutSettings)

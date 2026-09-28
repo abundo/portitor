@@ -48,6 +48,12 @@ func (p Paths) InstanceState(name string) string {
 	return filepath.Join(p.StateDir, "instances", name)
 }
 
+// IPListFile holds the nft commands that fill an IP list's sets (see
+// IPListElements). The agent writes it; rulesets include it.
+func (p Paths) IPListFile(name string) string {
+	return filepath.Join(p.StateDir, "iplists", name+".nft")
+}
+
 // Units names the systemd units that run an instance's services. %s is
 // the instance name (see deploy/systemd for the template units).
 type Units struct {
@@ -113,7 +119,7 @@ func Render(doc fwconfig.Document, opt Options) (*Bundle, error) {
 	for i := range doc.Instances {
 		in := &doc.Instances[i]
 		etc := opt.Paths.InstanceEtc(in.Name)
-		add(filepath.Join(etc, "nftables.nft"), Nftables(in, opt.AntiLockout), 0o644, false)
+		add(filepath.Join(etc, "nftables.nft"), Nftables(in, opt.AntiLockout, opt.Paths), 0o644, false)
 
 		for j := range in.Interfaces {
 			ifc := &in.Interfaces[j]

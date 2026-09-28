@@ -32,6 +32,8 @@ export const dnsDnssecPolicies = crud('/dns/dnssec-policies')
 export const addressObjects = crud('/objects')
 export const dyndnsClients = crud('/dyndns/clients')
 export const dyndnsRecords = crud('/dyndns/records')
+export const ipLists = crud('/ip-lists')
+export const tasks = crud('/tasks')
 
 export const api = {
   login: (username, password, remember) =>
@@ -59,6 +61,12 @@ export const api = {
       .then((r) => r.data),
   wgRekey: (ifaceId) => http.post(`/interfaces/${ifaceId}/wg-rekey`, {}).then((r) => r.data),
   wgNextFree: (ifaceId) => http.get(`/interfaces/${ifaceId}/wg-next-free`).then((r) => r.data),
+  // Start a deployed task, or the download of a deployed IP list, now.
+  runTask: (id) => http.post(`/tasks/${id}/run`, {}).then((r) => r.data),
+  refreshIPList: (id) => http.post(`/ip-lists/${id}/refresh`, {}).then((r) => r.data),
+  // The next runs of a cron schedule ({ next: [...] } or { error }).
+  schedulePreview: (schedule) =>
+    http.get('/schedule/preview', { params: { schedule } }).then((r) => r.data),
 
   settings: () => http.get('/settings').then((r) => r.data),
   saveSettings: (body) => http.put('/settings', body).then((r) => r.data),

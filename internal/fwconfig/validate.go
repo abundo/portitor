@@ -48,6 +48,8 @@ func (e *ValidationError) Error() string {
 
 type validator struct {
 	problems []string
+	// lists holds the names of the document's IP lists.
+	lists map[string]bool
 }
 
 func (v *validator) addf(format string, args ...any) {
@@ -58,11 +60,13 @@ func (v *validator) addf(format string, args ...any) {
 // sending and again by portitor-agent before rendering; the agent must not
 // trust its input, since every string ends up in a root-owned config file.
 func (d *Document) Validate() error {
-	v := &validator{}
+	v := &validator{lists: map[string]bool{}}
 	if d.Version != Version {
 		v.addf("unsupported document version %d (want %d)", d.Version, Version)
 	}
 	exp := d.Expand()
+	v.ipLists(d.IPLists)
+	v.tasks(d.Tasks)
 
 	defaults := 0
 	instNames := map[string]bool{}
@@ -250,7 +254,7 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 		if !validAction(r.Action) {
 			v.addf("%s: invalid action %q", rp, r.Action)
 		}
-		v.match(rp, r.Family, r.Protocol, r.SrcAddrs, r.DstAddrs, r.DstPorts)
+		v.match(rp, r.Family, r.Protocol, r.SrcAddrs, r.DstAddrs, r.DstPorts, true)
 		checkComment(v, rp, r.Description)
 	}
 
@@ -258,7 +262,7 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 		np := fmt.Sprintf("%s: nat rule %d", p, i+1)
 		ifaceRefs(np, n.InInterfaces)
 		ifaceRefs(np, n.OutInterfaces)
-		v.match(np, "", n.Protocol, n.SrcAddrs, n.DstAddrs, n.DstPorts)
+		v.match(np, "", n.Protocol, n.SrcAddrs, n.DstAddrs, n.DstPorts, false)
 		checkComment(v, np, n.Description)
 		switch n.Kind {
 		case NATMasquerade:
@@ -565,7 +569,9 @@ func (v *validator) wireguard(p string, wg *WireGuard) {
 	}
 }
 
-func (v *validator) match(p, family, proto string, src, dst []string, ports string) {
+// match checks a rule's match fields; with lists, addresses may refer to
+// IP lists.
+func (v *validator) match(p, family, proto string, src, dst []string, ports string, lists bool) {
 	switch family {
 	case "", "ipv4", "ipv6":
 	default:
@@ -579,7 +585,15 @@ func (v *validator) match(p, family, proto string, src, dst []string, ports stri
 	valid := true
 	for _, list := range [][]string{src, dst} {
 		for _, a := range list {
-			if _, err := ParseAddrOrPrefix(a); err != nil {
+			if name, ok := IPListName(a); ok {
+				if !lists {
+					v.addf("%s: ip list %q: only filter rules can use ip lists", p, name)
+					valid = false
+				} else if !v.lists[name] {
+					v.addf("%s: unknown ip list %q", p, name)
+					valid = false
+				}
+			} else if _, err := ParseAddrOrPrefix(a); err != nil {
 				v.addf("%s: invalid address %q", p, a)
 				valid = false
 			}

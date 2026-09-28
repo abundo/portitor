@@ -88,6 +88,25 @@ func TestValidateCatchesProblems(t *testing.T) {
 		{"dyndns cname and other", func(d *Document) { d.Instances[0].DynDNS[0].Records[3].Name = "home" }, "has a CNAME and other records"},
 		{"dyndns A with v6", func(d *Document) { d.Instances[0].DynDNS[0].Records[0].Value = "2001:db8::1" }, "invalid IPv4 address"},
 		{"dyndns txt newline", func(d *Document) { d.Instances[0].DynDNS[0].Records[2].Value = "a\nb" }, "control characters"},
+		{"unknown ip list", func(d *Document) { d.Instances[0].Rules[12].SrcAddrs = []string{"@nope"} }, `unknown ip list "nope"`},
+		{"ip list in nat", func(d *Document) { d.Instances[0].NAT[1].SrcAddrs = []string{"@drop"} }, "only filter rules can use ip lists"},
+		{"ip list name injection", func(d *Document) { d.IPLists[1].Name = `drop" }` }, "name must match"},
+		{"ip list duplicate", func(d *Document) { d.IPLists[1].Name = "crowdsec" }, "duplicate"},
+		{"ip list bad source", func(d *Document) { d.IPLists[1].Source = "file" }, `invalid source "file"`},
+		{"ip list file url", func(d *Document) { d.IPLists[1].URL = "file:///etc/shadow" }, "must start with http"},
+		{"ip list url credentials", func(d *Document) { d.IPLists[1].URL = "https://u:p@example.com/x" }, "own fields"},
+		{"ip list url newline", func(d *Document) { d.IPLists[1].URL = "https://example.com/\nx" }, "control characters"},
+		{"crowdsec without key", func(d *Document) { d.IPLists[0].APIKey = "" }, "needs a bouncer api key"},
+		{"crowdsec with password", func(d *Document) { d.IPLists[0].Username, d.IPLists[0].Password = "u", "p" }, "not a username and password"},
+		{"password without user", func(d *Document) { d.IPLists[1].Password = "p" }, "needs a username"},
+		{"username with colon", func(d *Document) { d.IPLists[1].Username = "a:b" }, "cannot contain ':'"},
+		{"task bad schedule", func(d *Document) { d.Tasks[0].Schedule = "every 5 minutes" }, "schedule: want 5 fields"},
+		{"task unknown list", func(d *Document) { d.Tasks[0].IPList = "nope" }, `unknown ip list "nope"`},
+		{"task bad kind", func(d *Document) { d.Tasks[0].Kind = "reboot" }, `invalid kind "reboot"`},
+		{"task empty command", func(d *Document) { d.Tasks[2].Command = " " }, "command is empty"},
+		{"task command nul", func(d *Document) { d.Tasks[2].Command = "ls\x00" }, "NUL"},
+		{"task timeout", func(d *Document) { d.Tasks[2].Timeout = -1 }, "timeout must be"},
+		{"task duplicate", func(d *Document) { d.Tasks[1].Name = "crowdsec" }, "duplicate"},
 		{"dyndns short retry", func(d *Document) { d.Instances[0].DynDNS[0].RetryInterval = 1 }, "retry interval must be"},
 	}
 	for _, tc := range cases {
@@ -195,6 +214,9 @@ func TestMatchFamilies(t *testing.T) {
 		{"icmp narrows", "", "icmp", nil, dual, []string{"ipv4:|192.168.1.10"}},
 		{"v4 source leaves out v6", "", "", []string{"10.0.0.0/8"}, dual, []string{"ipv4:10.0.0.0/8|192.168.1.10"}},
 		{"nothing in common", "", "", []string{"10.0.0.0/8"}, []string{"fd00::/8"}, nil},
+		{"ip list in both", "", "", []string{"@bl"}, nil, []string{"ipv4:@bl|", "ipv6:@bl|"}},
+		{"ip list with v4 literal", "", "", []string{"@bl", "10.0.0.0/8"}, nil, []string{"ipv4:@bl,10.0.0.0/8|", "ipv6:@bl|"}},
+		{"ip list against v6 destination", "", "", []string{"@bl"}, []string{"fd00::/8"}, []string{"ipv6:@bl|fd00::/8"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
