@@ -37,6 +37,7 @@ const props = defineProps({
   columns: { type: Array, required: true },
   fields: { type: Array, required: true },
   defaults: { type: [Object, Function], default: () => ({}) },
+  // The header's create button; '' leaves it out (the page adds its own).
   newLabel: { type: String, default: 'Add' },
   // Resource name for POST /api/<reorder>/reorder; enables drag-and-drop.
   reorder: { type: String, default: '' },
@@ -282,6 +283,7 @@ defineExpose({ reload: load, openEdit, openCreate })
       <div class="flex items-center gap-2">
         <slot name="toolbar" />
         <UButton
+          v-if="newLabel"
           icon="i-lucide-plus"
           :label="newLabel"
           :disabled="!!blockedReason"

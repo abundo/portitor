@@ -224,7 +224,7 @@ function clean(b) {
         dst_addrs: [],
         services: [],
       }"
-      new-label="New rule"
+      new-label=""
       reorder="rules"
       :item-name="ruleName"
     >
