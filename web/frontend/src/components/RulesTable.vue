@@ -43,6 +43,41 @@ function ifaceTitle(list, empty) {
     .join('\n')
 }
 
+// A datalist only offers options that start with the input's text, so the
+// suggestions for a list cell are built from the focused cell's text: the
+// entries before the last one plus each name (completing the last entry),
+// and, once the last entry is a whole name or followed by a comma, the whole
+// text plus each name not yet in the list.
+const typed = ref('')
+function onFocus(event) {
+  typed.value = event.target.value
+}
+function listSuggestions(names, text) {
+  const parts = text.split(/[\s,]+/)
+  const last = parts.pop()
+  const head = parts.filter((s) => s)
+  const used = new Set(head)
+  const join = (list) => (list.length ? list.join(', ') + ', ' : '')
+  const out = []
+  for (const it of names) {
+    if (!used.has(it.value)) out.push({ ...it, value: join(head) + it.value })
+  }
+  if (last && names.some((it) => it.value === last)) {
+    used.add(last)
+    for (const it of names) {
+      if (!used.has(it.value)) out.push({ ...it, value: join([...head, last]) + it.value })
+    }
+  }
+  return out
+}
+const ifaceSuggestions = computed(() => listSuggestions(props.ifaces, typed.value))
+const nameSuggestions = computed(() =>
+  listSuggestions(
+    objects.names.map((n) => ({ value: n })),
+    typed.value,
+  ),
+)
+
 const hasFrom = computed(() => props.chain !== 'output')
 const hasTo = computed(() => props.chain !== 'input')
 const colCount = computed(() => 12 + hasFrom.value + hasTo.value)
@@ -175,6 +210,8 @@ function onKeydown(event, index) {
               :list="`rules-grid-ifaces-${chain}`"
               placeholder="any"
               :title="ifaceTitle(r.in_interfaces, 'Incoming interfaces or interface zones')"
+              @focus="onFocus"
+              @input="onFocus"
               @change="setList(r, 'in_interfaces', $event)"
               @keydown="onKeydown($event, i)"
             />
@@ -186,6 +223,8 @@ function onKeydown(event, index) {
               :list="`rules-grid-ifaces-${chain}`"
               placeholder="any"
               :title="ifaceTitle(r.out_interfaces, 'Outgoing interfaces or interface zones')"
+              @focus="onFocus"
+              @input="onFocus"
               @change="setList(r, 'out_interfaces', $event)"
               @keydown="onKeydown($event, i)"
             />
@@ -227,6 +266,8 @@ function onKeydown(event, index) {
               :list="`rules-grid-names-${chain}`"
               placeholder="any"
               :title="(r.src_addrs ?? []).join(', ')"
+              @focus="onFocus"
+              @input="onFocus"
               @change="setList(r, 'src_addrs', $event)"
               @keydown="onKeydown($event, i)"
             />
@@ -239,6 +280,8 @@ function onKeydown(event, index) {
               :list="`rules-grid-names-${chain}`"
               placeholder="any"
               :title="(r.dst_addrs ?? []).join(', ')"
+              @focus="onFocus"
+              @input="onFocus"
               @change="setList(r, 'dst_addrs', $event)"
               @keydown="onKeydown($event, i)"
             />
@@ -279,11 +322,11 @@ function onKeydown(event, index) {
       </tbody>
     </table>
     <datalist :id="`rules-grid-names-${chain}`">
-      <option v-for="n in objects.names" :key="n" :value="n" />
+      <option v-for="it in nameSuggestions" :key="it.value" :value="it.value" />
     </datalist>
     <datalist :id="`rules-grid-ifaces-${chain}`">
       <option
-        v-for="it in ifaces"
+        v-for="it in ifaceSuggestions"
         :key="it.value"
         :value="it.value"
         :label="it.description || undefined"
