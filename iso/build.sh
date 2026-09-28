@@ -84,6 +84,11 @@ if [[ -n $release ]]; then
 	want=$(awk -v f="$archive" '$2 == f || $2 == "*" f { print $1 }' "$work/$sums")
 	[[ -n $want && $(sha256sum "$payload/portitor.tar.gz" | cut -d' ' -f1) == "$want" ]] ||
 		{ echo "checksum mismatch: $archive" >&2; exit 1; }
+	# install.py (in target.sh) needs these; v0.1.0's archive lacked the configs.
+	for f in install.py portitor-web portitor-agent deploy/agent.yaml deploy/web.yaml; do
+		tar -tzf "$payload/portitor.tar.gz" | grep -qxE "(\./)?$f" ||
+			{ echo "$archive does not contain $f" >&2; exit 1; }
+	done
 	version=v$version
 else
 	log "Building Portitor (make release)"

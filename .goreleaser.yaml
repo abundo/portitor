@@ -46,6 +46,8 @@ archives:
       - LICENSE
       - README.md
       - install.py
+      # **/* alone skips the files directly in deploy/ (agent.yaml, web.yaml).
+      - deploy/*.yaml
       - deploy/**/*
 
 checksum:

@@ -821,7 +821,8 @@ def download_archive(client: GithubClient, rel: Release, arch: str, checksums: d
 
 
 def is_release_root(path: Path) -> bool:
-    return (path / "portitor-web").is_file() and (path / "portitor-agent").is_file() and (path / "deploy").is_dir()
+    files = ("portitor-web", "portitor-agent", "deploy/agent.yaml", "deploy/web.yaml")
+    return all((path / f).is_file() for f in files)
 
 
 def extract_archive(archive: Path, dest: Path) -> Path:
@@ -841,7 +842,7 @@ def extract_archive(archive: Path, dest: Path) -> Path:
     subs = [p for p in dest.iterdir() if p.is_dir() and is_release_root(p)]
     if len(subs) == 1:
         return subs[0]
-    raise InstallError(f"{archive.name} does not contain portitor-web, portitor-agent and deploy/")
+    raise InstallError(f"{archive.name} does not contain portitor-web, portitor-agent and deploy/{{agent,web}}.yaml")
 
 
 def prepare_roots(client: GithubClient, rel: Release, archs: set[str], work: Path) -> dict[str, Path]:
@@ -1332,7 +1333,7 @@ def main_local(args: argparse.Namespace) -> int:
     try:
         if path.is_dir():
             if not is_release_root(path):
-                raise InstallError(f"{path} does not contain portitor-web, portitor-agent and deploy/")
+                raise InstallError(f"{path} does not contain portitor-web, portitor-agent and deploy/{{agent,web}}.yaml")
             root = path
         elif path.is_file():
             work = Path(tempfile.mkdtemp(prefix="portitor-local-"))
