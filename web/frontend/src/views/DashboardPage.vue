@@ -5,10 +5,17 @@
 import { computed, onMounted } from 'vue'
 import { useDeployStore } from '@/stores/deploy'
 import { useInstanceStore } from '@/stores/instances'
+import { useInstanceRefs } from '@/composables/useInstanceRefs'
 
 const deploy = useDeployStore()
 const instances = useInstanceStore()
+const { ifaceRefItems } = useInstanceRefs()
 onMounted(() => deploy.refresh())
+
+// Descriptions of the instance's interfaces and link ends, by name.
+const ifaceDesc = computed(
+  () => new Map(ifaceRefItems.value.map((it) => [it.value, it.description])),
+)
 
 const st = computed(() => deploy.status)
 const inst = computed(() => st.value?.instances?.find((i) => i.name === instances.current?.name))
@@ -135,27 +142,39 @@ const stateColor = (s) =>
       </div>
     </div>
 
-    <div v-if="inst" class="grid gap-4 xl:grid-cols-2">
-      <div class="card">
+    <template v-if="inst">
+      <div class="card overflow-x-auto">
         <div class="mb-2 font-semibold">Interfaces · {{ inst.name }}</div>
         <table class="w-full text-sm">
+          <thead>
+            <tr class="border-b border-default text-left text-xs text-muted">
+              <th class="py-1.5 pr-4 font-medium">Name</th>
+              <th class="pr-4 font-medium">Description</th>
+              <th class="pr-4 font-medium">State</th>
+              <th class="pr-4 font-medium">Addresses</th>
+              <th class="pr-4 text-right font-medium">Received</th>
+              <th class="text-right font-medium">Sent</th>
+            </tr>
+          </thead>
           <tbody>
             <tr
               v-for="i in inst.interfaces"
               :key="i.name"
               class="border-b border-default last:border-0"
             >
-              <td class="py-1.5 font-mono">{{ i.name }}</td>
-              <td><UBadge :color="stateColor(i.state)" variant="subtle" :label="i.state" /></td>
-              <td class="font-mono text-xs">{{ i.addresses.join(', ') }}</td>
-              <td class="text-right text-xs text-muted whitespace-nowrap">
-                ↓ {{ bytes(i.rx_bytes) }} ↑ {{ bytes(i.tx_bytes) }}
+              <td class="py-1.5 pr-4 font-mono">{{ i.name }}</td>
+              <td class="pr-4">{{ ifaceDesc.get(i.name) }}</td>
+              <td class="pr-4">
+                <UBadge :color="stateColor(i.state)" variant="subtle" :label="i.state" />
               </td>
+              <td class="pr-4 font-mono text-xs">{{ i.addresses.join(', ') }}</td>
+              <td class="pr-4 text-right whitespace-nowrap">{{ bytes(i.rx_bytes) }}</td>
+              <td class="text-right whitespace-nowrap">{{ bytes(i.tx_bytes) }}</td>
             </tr>
           </tbody>
         </table>
       </div>
-      <div class="space-y-4">
+      <div class="grid gap-4 xl:grid-cols-2">
         <div class="card">
           <div class="mb-2 font-semibold">Services</div>
           <div v-if="!Object.keys(inst.services).length" class="text-sm text-muted">
@@ -185,7 +204,7 @@ const stateColor = (s) =>
           </div>
         </div>
       </div>
-    </div>
+    </template>
     <div v-else-if="st && !deploy.error" class="card text-sm text-muted">
       This instance is not on the firewall yet. Configure it and
       <RouterLink class="text-primary" to="/deploy">deploy</RouterLink>.
