@@ -30,7 +30,16 @@ const ifaceDescs = (list) => {
     .join(', ')
 }
 
+// natNo numbers a NAT rule by its place in the list; natName names it like
+// the server's messages: "NAT rule 3 (description)".
+const natNo = (r, rows) => rows.findIndex((x) => x.id === r.id) + 1
+function natName(r, rows) {
+  const name = `NAT rule ${natNo(r, rows)}`
+  return r.description ? `${name} (${r.description})` : name
+}
+
 const columns = [
+  { key: 'no', label: '#', format: natNo, class: 'text-muted tabular-nums' },
   { key: 'kind', label: 'Kind' },
   {
     key: 'ifaces',
@@ -138,7 +147,7 @@ const api = {
       }"
       new-label="New NAT rule"
       reorder="nat"
-      :item-name="(r) => `NAT rule ${r.description || r.id}`"
+      :item-name="natName"
     >
       <template #cell-ifaces="{ row }">
         <div>{{ natIfacesLabel(row) }}</div>

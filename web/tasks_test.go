@@ -82,7 +82,7 @@ func TestIPListsAndTasks(t *testing.T) {
 		t.Errorf("rule after rename: %v", r.SrcAddrs)
 	}
 	rec = env.do("DELETE", "/api/ip-lists/"+csID, nil)
-	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "a rule in main") || !strings.Contains(rec.Body.String(), "task crowdsec") {
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "input rule 1 in main") || !strings.Contains(rec.Body.String(), "task crowdsec") {
 		t.Errorf("delete in use: %d %s", rec.Code, rec.Body)
 	}
 

@@ -144,8 +144,9 @@ func eachIPListRef(tx *gorm.DB, visit func(where string, entry *string) bool) er
 	if err := tx.Order("position, id").Find(&rules).Error; err != nil {
 		return err
 	}
+	names := ruleNamer{}
 	for _, r := range rules {
-		where := fmt.Sprintf("a rule in %s (%s)", instName[r.InstanceID], ruleLabel(r.Description, r.ID))
+		where := fmt.Sprintf("%s in %s", names.rule(r), instName[r.InstanceID])
 		changed := false
 		for _, list := range []models.StringList{r.SrcAddrs, r.DstAddrs} {
 			for i := range list {

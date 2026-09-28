@@ -117,6 +117,15 @@ function insertInChain(rows, chain, { openCreate, createAt }, kind, at) {
   return null
 }
 
+// ruleName names a rule as its chain's table numbers it (comment rows
+// left out), like the server's messages: "forward rule 2 (description)".
+function ruleName(r, rows) {
+  if (r.kind === 'comment') return 'comment'
+  const sub = rows.filter((x) => x.chain === r.chain && x.kind !== 'comment')
+  const name = `${r.chain} rule ${sub.findIndex((x) => x.id === r.id) + 1}`
+  return r.description ? `${name} (${r.description})` : name
+}
+
 // Selects can't hold '' values; map 'any' <-> ''.
 const api = {
   ...rules,
@@ -159,7 +168,7 @@ function clean(b) {
       }"
       new-label="New rule"
       reorder="rules"
-      :item-name="(r) => (r.kind === 'comment' ? 'comment' : `rule ${r.description || r.id}`)"
+      :item-name="ruleName"
     >
       <template #table="{ rows, openCreate, openEdit, remove, moveTo, saveRow, createAt }">
         <div class="space-y-6">

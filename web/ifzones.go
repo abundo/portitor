@@ -132,8 +132,9 @@ func ifaceLists(tx *gorm.DB, instanceID uint, zones bool, visit func(where strin
 	if err := tx.Where("instance_id = ?", instanceID).Order("position, id").Find(&rules).Error; err != nil {
 		return err
 	}
+	names := ruleNamer{}
 	for _, r := range rules {
-		where := "rule " + ruleLabel(r.Description, r.ID)
+		where := names.rule(r)
 		a, b := visit(where, &r.InInterfaces), visit(where, &r.OutInterfaces)
 		if a || b {
 			if err := save(&models.Rule{}, r.ID, map[string]any{"in_interfaces": r.InInterfaces, "out_interfaces": r.OutInterfaces}); err != nil {
@@ -146,7 +147,7 @@ func ifaceLists(tx *gorm.DB, instanceID uint, zones bool, visit func(where strin
 		return err
 	}
 	for _, n := range nat {
-		where := "NAT rule " + ruleLabel(n.Description, n.ID)
+		where := names.nat(n)
 		a, b := visit(where, &n.InInterfaces), visit(where, &n.OutInterfaces)
 		if a || b {
 			if err := save(&models.NatRule{}, n.ID, map[string]any{"in_interfaces": n.InInterfaces, "out_interfaces": n.OutInterfaces}); err != nil {

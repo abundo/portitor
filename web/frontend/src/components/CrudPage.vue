@@ -12,7 +12,7 @@
 // { label, value, description } to show a description under each name).
 // addrs/addr: address list / single address; names of hosts/prefixes are
 // suggested and accepted, and with `lists: true` IP lists ("@name").
-// Column: { key, label, format: row => string, class }
+// Column: { key, label, format: (row, rows) => string, class }
 // Cells can be overridden with a `cell-<key>` slot, or the whole table with
 // the `table` slot ({ rows, openCreate, openEdit, remove, moveTo, saveRow,
 // createAt }).
@@ -35,6 +35,7 @@ const props = defineProps({
   // Resource name for POST /api/<reorder>/reorder; enables drag-and-drop.
   reorder: { type: String, default: '' },
   blockedReason: { type: String, default: '' },
+  // itemName(row, rows) names a row in prompts.
   itemName: { type: Function, default: (row) => row.name ?? `#${row.id}` },
 })
 const emit = defineEmits(['changed'])
@@ -58,7 +59,7 @@ const tableColumns = computed(() => [
 ])
 
 function display(col, row) {
-  if (col.format) return col.format(row)
+  if (col.format) return col.format(row, rows.value)
   const v = row[col.key]
   if (Array.isArray(v)) return v.join(', ')
   if (typeof v === 'boolean') return v ? 'yes' : ''
@@ -151,7 +152,7 @@ async function save() {
 }
 
 async function remove(row) {
-  if (!window.confirm(`Delete ${props.itemName(row)}?`)) return
+  if (!window.confirm(`Delete ${props.itemName(row, rows.value)}?`)) return
   try {
     await props.api.remove(row.id)
     await load()
@@ -226,7 +227,7 @@ async function createAt(body, at) {
 const tableWrap = ref(null)
 const { onPointerDown } = useRowDrag({
   wrap: tableWrap,
-  label: (i) => props.itemName(rows.value[i]),
+  label: (i) => props.itemName(rows.value[i], rows.value),
   onMove: moveTo,
 })
 

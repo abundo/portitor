@@ -105,8 +105,9 @@ func eachObjectRef(tx *gorm.DB, visit func(where string, entry *string) bool) er
 	if err := tx.Order("position, id").Find(&rules).Error; err != nil {
 		return err
 	}
+	names := ruleNamer{}
 	for _, r := range rules {
-		where := fmt.Sprintf("a rule in %s (%s)", instName[r.InstanceID], ruleLabel(r.Description, r.ID))
+		where := fmt.Sprintf("%s in %s", names.rule(r), instName[r.InstanceID])
 		a, b := list(where, r.SrcAddrs), list(where, r.DstAddrs)
 		if a || b {
 			if err := save(&models.Rule{}, r.ID, map[string]any{"src_addrs": r.SrcAddrs, "dst_addrs": r.DstAddrs}); err != nil {
@@ -119,7 +120,7 @@ func eachObjectRef(tx *gorm.DB, visit func(where string, entry *string) bool) er
 		return err
 	}
 	for _, n := range nat {
-		where := fmt.Sprintf("a NAT rule in %s (%s)", instName[n.InstanceID], ruleLabel(n.Description, n.ID))
+		where := fmt.Sprintf("%s in %s", names.nat(n), instName[n.InstanceID])
 		a, b, c := list(where, n.SrcAddrs), list(where, n.DstAddrs), visit(where, &n.ToAddr)
 		if a || b || c {
 			if err := save(&models.NatRule{}, n.ID, map[string]any{"src_addrs": n.SrcAddrs, "dst_addrs": n.DstAddrs, "to_addr": n.ToAddr}); err != nil {
@@ -165,11 +166,30 @@ func eachObjectRef(tx *gorm.DB, visit func(where string, entry *string) bool) er
 	return nil
 }
 
-func ruleLabel(desc string, id uint) string {
-	if desc != "" {
-		return desc
+// ruleNamer names rules the way the Rules page numbers them, per instance
+// and chain in list order with comment rows left out ("forward rule 2"),
+// and NAT rules per instance in list order ("NAT rule 3"); a description
+// is added in parentheses. Rules must be named in list order (position, id).
+type ruleNamer map[string]int
+
+func (n ruleNamer) rule(r models.Rule) string {
+	if r.Kind == models.RuleKindComment {
+		return "comment"
 	}
-	return fmt.Sprintf("#%d", id)
+	return n.next(fmt.Sprintf("%d %s", r.InstanceID, r.Chain), r.Chain+" rule", r.Description)
+}
+
+func (n ruleNamer) nat(r models.NatRule) string {
+	return n.next(fmt.Sprintf("%d nat", r.InstanceID), "NAT rule", r.Description)
+}
+
+func (n ruleNamer) next(key, kind, desc string) string {
+	n[key]++
+	s := fmt.Sprintf("%s %d", kind, n[key])
+	if desc != "" {
+		s += " (" + desc + ")"
+	}
+	return s
 }
 
 // Address entry kinds for checkEntries.
