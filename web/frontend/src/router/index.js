@@ -35,6 +35,8 @@ const router = createRouter({
         { path: 'wireguard', component: () => import('@/views/WireguardPage.vue') },
         { path: 'deploy', component: () => import('@/views/DeployPage.vue') },
         { path: 'settings', component: () => import('@/views/SettingsPage.vue') },
+        { path: 'profile', component: () => import('@/views/ProfilePage.vue') },
+        { path: 'profile/password', component: () => import('@/views/ChangePasswordPage.vue') },
       ],
     },
     { path: '/:pathMatch(.*)*', redirect: '/' },

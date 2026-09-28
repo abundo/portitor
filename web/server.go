@@ -91,6 +91,7 @@ func (s *Server) Echo() *echo.Echo {
 
 	g := api.Group("", s.requireAuth)
 	g.GET("/me", s.handleMe)
+	g.PUT("/me", s.handleUpdateMe)
 	g.POST("/me/password", s.handleChangePassword)
 
 	(&resource[models.Instance, *models.Instance]{db: s.db, order: "is_default desc, name", prepare: prepareInstance}).register(g, "/instances")

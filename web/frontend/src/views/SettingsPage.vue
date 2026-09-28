@@ -22,7 +22,6 @@ const settings = reactive({
 const hasToken = ref(false)
 const users = ref([])
 const newUser = reactive({ username: '', password: '' })
-const pw = reactive({ current: '', next: '' })
 const version = ref(null)
 
 async function load() {
@@ -64,16 +63,6 @@ async function removeUser(u) {
   try {
     await api.deleteUser(u.id)
     users.value = await api.users()
-  } catch (err) {
-    toast.add({ title: errMsg(err), color: 'error' })
-  }
-}
-
-async function changePassword() {
-  try {
-    await api.changePassword(pw.current, pw.next)
-    pw.current = pw.next = ''
-    toast.add({ title: 'Password changed; other sessions are logged out', color: 'success' })
   } catch (err) {
     toast.add({ title: errMsg(err), color: 'error' })
   }
@@ -175,18 +164,6 @@ async function changePassword() {
         </form>
       </div>
 
-      <div class="card">
-        <div class="mb-3 text-lg font-semibold">Change my password</div>
-        <form class="flex flex-wrap items-end gap-2" @submit.prevent="changePassword">
-          <UFormField label="Current"
-            ><UInput v-model="pw.current" type="password" autocomplete="current-password"
-          /></UFormField>
-          <UFormField label="New (10+ characters)"
-            ><UInput v-model="pw.next" type="password" autocomplete="new-password"
-          /></UFormField>
-          <UButton type="submit">Change</UButton>
-        </form>
-      </div>
       <p v-if="version" class="text-xs text-muted">
         portitor-web {{ version.version }} ({{ version.commit.slice(0, 8) }}),
         {{ version.go_version }}

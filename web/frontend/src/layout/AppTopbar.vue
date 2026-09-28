@@ -39,9 +39,16 @@ const agentChip = computed(() => {
 })
 
 const userMenu = computed(() => [
-  [{ label: auth.user?.username, type: 'label' }],
+  [{ label: auth.user?.full_name || auth.user?.username, type: 'label' }],
   [
-    { label: 'Settings', icon: 'i-lucide-settings', onSelect: () => router.push('/settings') },
+    { label: 'My settings', icon: 'i-lucide-user-cog', onSelect: () => router.push('/profile') },
+    {
+      label: 'Change password',
+      icon: 'i-lucide-key-round',
+      onSelect: () => router.push('/profile/password'),
+    },
+  ],
+  [
     {
       label: 'Log out',
       icon: 'i-lucide-log-out',
@@ -56,15 +63,6 @@ const userMenu = computed(() => [
 
 <template>
   <header class="flex h-14 shrink-0 items-center gap-3 border-b border-default px-3 md:px-4">
-    <UTooltip :text="logPanel.open ? 'Hide agent log' : 'Show agent log'">
-      <UButton
-        icon="i-lucide-terminal"
-        color="neutral"
-        :variant="logPanel.open ? 'soft' : 'ghost'"
-        aria-label="Agent log"
-        @click="toggleLog"
-      />
-    </UTooltip>
     <UButton
       class="lg:hidden"
       icon="i-lucide-menu"
@@ -90,8 +88,17 @@ const userMenu = computed(() => [
           @click="router.push('/')"
         />
       </UTooltip>
+      <UTooltip :text="logPanel.open ? 'Hide agent log' : 'Show agent log'">
+        <UButton
+          icon="i-lucide-terminal"
+          color="neutral"
+          :variant="logPanel.open ? 'soft' : 'ghost'"
+          aria-label="Agent log"
+          @click="toggleLog"
+        />
+      </UTooltip>
       <UDropdownMenu :items="userMenu">
-        <UButton icon="i-lucide-user" color="neutral" variant="ghost" />
+        <UButton icon="i-lucide-user" color="neutral" variant="ghost" aria-label="User menu" />
       </UDropdownMenu>
     </div>
   </header>

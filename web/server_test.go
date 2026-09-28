@@ -137,6 +137,30 @@ func TestPasswordChangeRevokesSessions(t *testing.T) {
 	}
 }
 
+func TestUpdateMe(t *testing.T) {
+	env := newEnv(t)
+	rec := env.do("PUT", "/api/me", map[string]string{"username": "root", "full_name": "Ada Admin", "email": "ada@example.org"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+	var me models.User
+	if err := json.Unmarshal(env.do("GET", "/api/me", nil).Body.Bytes(), &me); err != nil {
+		t.Fatal(err)
+	}
+	if me.Username != "root" || me.FullName != "Ada Admin" || me.Email != "ada@example.org" {
+		t.Errorf("got %+v", me)
+	}
+	for _, body := range []map[string]string{
+		{"username": ""},
+		{"username": "root", "email": "not an address"},
+		{"username": "root", "full_name": "a\nb"},
+	} {
+		if rec := env.do("PUT", "/api/me", body); rec.Code != http.StatusBadRequest {
+			t.Errorf("%v: %d", body, rec.Code)
+		}
+	}
+}
+
 func TestValidationAndSecrets(t *testing.T) {
 	env := newEnv(t)
 	if rec := env.do("POST", "/api/instances", map[string]any{"name": "Bad Name"}); rec.Code != http.StatusBadRequest {

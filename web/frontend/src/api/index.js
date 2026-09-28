@@ -36,6 +36,7 @@ export const api = {
     http.post('/login', { username, password, remember }).then((r) => r.data),
   logout: () => http.post('/logout', {}),
   me: () => http.get('/me').then((r) => r.data),
+  updateMe: (body) => http.put('/me', body).then((r) => r.data),
   changePassword: (current, next) => http.post('/me/password', { current, new: next }),
   version: () => http.get('/version').then((r) => r.data),
 

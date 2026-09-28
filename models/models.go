@@ -66,6 +66,8 @@ func (StringList) GormDataType() string { return "jsonb" }
 type User struct {
 	Base
 	Username     string `gorm:"uniqueIndex" json:"username"`
+	FullName     string `json:"full_name"`
+	Email        string `json:"email"`
 	PasswordHash string `json:"-"`
 	// TokenVersion invalidates issued sessions when bumped (password
 	// change, logout everywhere).
