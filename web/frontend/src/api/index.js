@@ -87,6 +87,8 @@ export const api = {
   agentLeases: () => http.get('/agent/leases').then((r) => r.data),
   agentRuleCounters: () => http.get('/agent/rule-counters').then((r) => r.data),
   agentLogs: (after) => http.get('/agent/logs', { params: { after } }).then((r) => r.data),
+  agentPacketLog: (after) =>
+    http.get('/agent/packet-log', { params: { after } }).then((r) => r.data),
 
   // Updates of the firewall's Debian and of Portitor (UpdatesPage).
   system: () => http.get('/system').then((r) => r.data),

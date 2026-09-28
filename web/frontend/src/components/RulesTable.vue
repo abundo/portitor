@@ -28,10 +28,19 @@ const props = defineProps({
   // Traffic per rule id since the last deploy (agentapi.RuleCounters), or
   // null when unknown.
   counters: { type: Object, default: null },
+  // What the chain dropped by itself since the last deploy
+  // (agentapi.ChainDrops; {} when not deployed), or null when unknown.
+  drops: { type: Object, default: null },
+  // What the chain's built-in rows log: { policy, invalid } (the
+  // instance's log_drops and log_invalid hold the chain) and auto, the
+  // services of the auto rules that log (log_auto).
+  logBuiltin: { type: Object, default: () => ({ policy: false, invalid: false, auto: [] }) },
   // insert(kind, index): add a 'rule' or 'comment' at index of rows.
   insert: { type: Function, required: true },
 })
-const emit = defineEmits(['save', 'move', 'edit', 'remove'])
+// log-builtin(builtin, service, on): a built-in row's Log box changed;
+// builtin is 'policy', 'invalid' or 'auto' (with the auto rule's service).
+const emit = defineEmits(['save', 'move', 'edit', 'remove', 'log-builtin'])
 
 const objects = useObjectStore()
 onMounted(() => objects.load().catch(() => {}))
@@ -189,6 +198,19 @@ function counterTitle(r) {
   ].join('\n')
 }
 
+// Drop rows: invalid packets are dropped before the rules, what no rule
+// decided on after them (the chain's policy).
+function dropTitle(reason) {
+  if (!props.drops) return 'Agent not reachable'
+  const n = props.drops[`${reason}_packets`]
+  if (n === undefined) return 'Not deployed'
+  return `${props.drops[`${reason}_bytes`].toLocaleString()} bytes, ${n.toLocaleString()} packets dropped since the last deploy`
+}
+const dropCount = (reason) => props.drops?.[`${reason}_packets`]
+
+// The built-in rows log rate limited (render.builtinLogLimit).
+const builtinLogLimit = 'at most 10 packets a second'
+
 const hasPorts = (r) => r.protocol === 'tcp' || r.protocol === 'udp'
 
 function set(r, key, value) {
@@ -277,7 +299,35 @@ function onKeydown(event, index) {
             <th>Description</th>
           </tr>
         </thead>
-        <tbody v-if="auto.length" class="auto-rules">
+        <tbody class="auto-rules">
+          <tr
+            title="Packets that belong to no known connection, such as a stray TCP packet; dropped before the rules"
+          >
+            <td class="text-center text-muted">
+              <UIcon name="i-lucide-lock" class="size-3.5 align-middle" />
+            </td>
+            <td class="text-center text-muted">auto</td>
+            <td :colspan="colCount - 6">
+              <span class="text-muted">invalid: no known connection</span>
+            </td>
+            <td><span class="font-semibold text-error">drop</span></td>
+            <td class="text-center">
+              <input
+                type="checkbox"
+                class="accent-primary"
+                :checked="logBuiltin.invalid"
+                :title="`Log the invalid packets (${builtinLogLimit}) to the log panel's Logged packets`"
+                @change="emit('log-builtin', 'invalid', '', $event.target.checked)"
+              />
+            </td>
+            <td class="counter" :title="dropTitle('invalid')">
+              <template v-if="dropCount('invalid') !== undefined">
+                <div>{{ bytes(drops.invalid_bytes) }}</div>
+                <div>{{ dropCount('invalid').toLocaleString() }} pkt</div>
+              </template>
+            </td>
+            <td><span>invalid packets</span></td>
+          </tr>
           <tr v-for="a in auto" :key="a.service" :title="autoTitle(a)">
             <td class="text-center text-muted">
               <UIcon name="i-lucide-lock" class="size-3.5 align-middle" />
@@ -311,7 +361,15 @@ function onKeydown(event, index) {
             </td>
             <td><span class="text-muted">any</span></td>
             <td><span class="font-semibold text-success">accept</span></td>
-            <td />
+            <td class="text-center">
+              <input
+                type="checkbox"
+                class="accent-primary"
+                :checked="logBuiltin.auto?.includes(a.service)"
+                :title="`Log what this rule accepts (${builtinLogLimit}) to the log panel's Logged packets`"
+                @change="emit('log-builtin', 'auto', a.service, $event.target.checked)"
+              />
+            </td>
             <td />
             <td>
               <span>{{ autoDescription(a) }}</span>
@@ -522,8 +580,36 @@ function onKeydown(event, index) {
               </td>
             </tr>
           </template>
-          <tr v-if="!rows.length && !auto.length">
+          <tr v-if="!rows.length">
             <td :colspan="colCount" class="py-6 text-center text-muted">Nothing here yet.</td>
+          </tr>
+        </tbody>
+        <tbody class="auto-rules chain-policy">
+          <tr title="Traffic no rule accepted, dropped by the chain's policy">
+            <td class="text-center text-muted">
+              <UIcon name="i-lucide-lock" class="size-3.5 align-middle" />
+            </td>
+            <td class="text-center text-muted">policy</td>
+            <td :colspan="colCount - 6">
+              <span class="text-muted">no rule matched</span>
+            </td>
+            <td><span class="font-semibold text-error">drop</span></td>
+            <td class="text-center">
+              <input
+                type="checkbox"
+                class="accent-primary"
+                :checked="logBuiltin.policy"
+                :title="`Log what no rule matched (${builtinLogLimit}) to the log panel's Logged packets`"
+                @change="emit('log-builtin', 'policy', '', $event.target.checked)"
+              />
+            </td>
+            <td class="counter" :title="dropTitle('policy')">
+              <template v-if="dropCount('policy') !== undefined">
+                <div>{{ bytes(drops.policy_bytes) }}</div>
+                <div>{{ dropCount('policy').toLocaleString() }} pkt</div>
+              </template>
+            </td>
+            <td><span>default drop</span></td>
           </tr>
         </tbody>
       </table>
@@ -617,6 +703,10 @@ function onKeydown(event, index) {
   line-height: 1.75rem;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.rules-grid tbody.chain-policy tr:last-child td {
+  border-block-start: 2px solid var(--ui-border-accented);
+  border-block-end: 0;
 }
 .rules-grid .iface-desc {
   padding-inline: 0.375rem;

@@ -20,6 +20,9 @@ var (
 	instanceNameRe = regexp.MustCompile(`^[a-z][a-z0-9]{0,11}$`)
 	// Linux IFNAMSIZ is 16 including the NUL.
 	ifnameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,14}$`)
+	// An auto input rule's service: words of a name's characters, one
+	// space apart ("dhcp server", "wireguard wg0").
+	autoServiceRe = regexp.MustCompile(`^[a-zA-Z0-9_.-]+( [a-zA-Z0-9_.-]+)*$`)
 	// Interface zone and link names.
 	zoneNameRe = regexp.MustCompile(`^[a-z][a-z0-9_]{0,23}$`)
 	peerNameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9 _.@-]{0,62}$`)
@@ -403,6 +406,19 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 
 	v.dyndns(p, in, ifaces)
 
+	v.logChains(p+": log drops", in.LogDrops)
+	v.logChains(p+": log invalid", in.LogInvalid)
+	seenAuto := map[string]bool{}
+	for _, s := range in.LogAuto {
+		switch {
+		case !ValidAutoService(s):
+			v.addf("%s: log auto: invalid service %q", p, s)
+		case seenAuto[s]:
+			v.addf("%s: log auto: %s listed twice", p, s)
+		}
+		seenAuto[s] = true
+	}
+
 	switch in.DNS.ForwardMode {
 	case "", ForwardFirst, ForwardOnly, ForwardOff:
 	default:
@@ -771,3 +787,22 @@ func ValidDomain(s string) bool       { return validDomain(s) }
 func ValidWGKey(s string) bool        { return validWGKey(s) }
 func ValidMAC(s string) bool          { return macRe.MatchString(s) }
 func ValidEndpoint(s string) bool     { return validEndpoint(s) }
+
+// ValidAutoService checks an auto input rule's service name (LogAuto).
+func ValidAutoService(s string) bool {
+	return len(s) <= 48 && autoServiceRe.MatchString(s)
+}
+
+// logChains checks a list of filter chains (LogDrops, LogInvalid).
+func (v *validator) logChains(what string, chains []string) {
+	seen := map[string]bool{}
+	for _, c := range chains {
+		switch {
+		case c != ChainInput && c != ChainForward && c != ChainOutput:
+			v.addf("%s: invalid chain %q", what, c)
+		case seen[c]:
+			v.addf("%s: %s listed twice", what, c)
+		}
+		seen[c] = true
+	}
+}

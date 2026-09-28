@@ -6,7 +6,9 @@ import CrudPage from '@/components/CrudPage.vue'
 import NeedInstance from '@/components/NeedInstance.vue'
 import RulesTable from '@/components/RulesTable.vue'
 import { onMounted, onUnmounted, ref, watch } from 'vue'
-import { api as backend, rules } from '@/api'
+import { useToast } from '@nuxt/ui/composables'
+import { api as backend, instances, rules } from '@/api'
+import { errMsg } from '@/api/http'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
 
 const { store, ifaceRefItems } = useInstanceRefs()
@@ -19,18 +21,19 @@ async function loadAutoRules() {
   autoRules.value = await backend.autoRules(store.currentId).catch(() => [])
 }
 watch(() => store.currentId, loadAutoRules, { immediate: true })
-// Traffic per rule id since the last deploy (agentapi.RuleCounters),
+// Traffic per rule id since the last deploy (agentapi.RuleCounters) and
+// the chains' own drops per instance name and chain (agentapi.ChainDrops),
 // polled every 5 seconds while the page is open and visible; null when the
 // agent can't be reached.
 const counters = ref(null)
+const drops = ref(null)
 let countersTimer = null
 let polling = false
 async function pollCounters() {
   if (!document.hidden) {
-    counters.value = await backend
-      .agentRuleCounters()
-      .then((r) => r.rules ?? {})
-      .catch(() => null)
+    const r = await backend.agentRuleCounters().catch(() => null)
+    counters.value = r ? (r.rules ?? {}) : null
+    drops.value = r ? (r.drops ?? {}) : null
   }
   if (polling) countersTimer = setTimeout(pollCounters, 5000)
 }
@@ -42,6 +45,31 @@ onUnmounted(() => {
   polling = false
   clearTimeout(countersTimer)
 })
+
+// The locked rows have a Log box too, kept in the instance: log_drops and
+// log_invalid list the chains that log what no rule matched and their
+// invalid packets, log_auto the services of the auto rules that log.
+const toast = useToast()
+const logField = { policy: 'log_drops', invalid: 'log_invalid', auto: 'log_auto' }
+const logBuiltin = (chain) => ({
+  policy: (store.current?.log_drops ?? []).includes(chain),
+  invalid: (store.current?.log_invalid ?? []).includes(chain),
+  auto: store.current?.log_auto ?? [],
+})
+async function setLogBuiltin(chain, builtin, service, on) {
+  const cur = store.current
+  if (!cur) return
+  const field = logField[builtin]
+  const item = builtin === 'auto' ? service : chain
+  const list = (cur[field] ?? []).filter((v) => v !== item)
+  if (on) list.push(item)
+  try {
+    await instances.update(cur.id, { [field]: list })
+  } catch (err) {
+    toast.add({ title: errMsg(err, 'Save failed'), color: 'error' })
+  }
+  await store.load()
+}
 
 const opt = (list) => list.map((v) => ({ label: v || 'any', value: v }))
 
@@ -111,7 +139,12 @@ const fields = [
     hint: 'Addresses, CIDRs, hosts/prefixes or IP lists (@name). With IPv4 and IPv6 entries, or an IP list, the rule applies to both.',
   },
   { key: 'action', label: 'Action', type: 'select', items: opt(['accept', 'drop', 'reject']) },
-  { key: 'log', label: 'Log matches', type: 'switch' },
+  {
+    key: 'log',
+    label: 'Log matches',
+    type: 'switch',
+    hint: "Every packet the rule matches is shown in the log panel's Logged packets tab.",
+  },
   { key: 'enabled', label: 'Enabled', type: 'switch' },
   { key: 'description', label: 'Description' },
 ]
@@ -173,7 +206,7 @@ function clean(b) {
   <NeedInstance>
     <CrudPage
       title="Rules"
-      description="Evaluated top to bottom; the first match decides. Edit cells in place (changes save at once), drag the grip to reorder, right-click a row to insert a rule or comment. Established connections are allowed, and so is what the configured services (DHCP, DNS, WireGuard) need: those input rules are shown locked and follow the services' settings. In the default instance the agent's management port stays open to its allow_from addresses. Traffic to or through the firewall that no rule accepts is dropped."
+      description="Evaluated top to bottom; the first match decides. Edit cells in place (changes save at once), drag the grip to reorder, right-click a row to insert a rule or comment. Established connections are allowed, and so is what the configured services (DHCP, DNS, WireGuard) need: those input rules are shown locked and follow the services' settings. In the default instance the agent's management port stays open to its allow_from addresses. Invalid packets (of no known connection) and traffic to or through the firewall that no rule accepts are dropped; the locked rows at the top and bottom of each chain count them."
       :api="api"
       :params="{ instance_id: store.currentId }"
       :columns="[]"
@@ -216,6 +249,8 @@ function clean(b) {
               :auto="c.value === 'input' ? autoRules : []"
               :ifaces="ifaceRefItems"
               :counters="counters"
+              :drops="drops && (drops[store.current?.name]?.[c.value] ?? {})"
+              :log-builtin="logBuiltin(c.value)"
               :insert="
                 (kind, at) => insertInChain(rows, c.value, { openCreate, createAt }, kind, at)
               "
@@ -223,6 +258,7 @@ function clean(b) {
               @move="(from, to) => moveInChain(rows, c.value, moveTo, from, to)"
               @edit="openEdit"
               @remove="remove"
+              @log-builtin="(kind, service, on) => setLogBuiltin(c.value, kind, service, on)"
             />
           </section>
         </div>

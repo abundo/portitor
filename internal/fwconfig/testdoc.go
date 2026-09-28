@@ -42,6 +42,9 @@ func SampleDocument() Document {
 					{Name: "guest", Interfaces: []string{"lk-guest"}},
 					{Name: "dmz", Interfaces: []string{}},
 				},
+				LogDrops:   []string{ChainForward},
+				LogInvalid: []string{ChainInput},
+				LogAuto:    []string{"dns server", "no such service"},
 				Rules: []Rule{
 					{Chain: ChainForward, InInterfaces: []string{"lan"}, OutInterfaces: []string{"wan"}, Action: ActionAccept, Description: "LAN to Internet"},
 					{Chain: ChainForward, InInterfaces: []string{"vpn"}, Action: ActionAccept, Description: "VPN anywhere"},

@@ -152,6 +152,12 @@ func (c *Client) Logs(ctx context.Context, after int64) (*agentapi.LogsResponse,
 	return &l, c.do(ctx, http.MethodGet, "/v1/logs?after="+strconv.FormatInt(after, 10), nil, &l)
 }
 
+// PacketLog returns the packets the rulesets logged with an id above after.
+func (c *Client) PacketLog(ctx context.Context, after int64) (*agentapi.PacketLogResponse, error) {
+	var l agentapi.PacketLogResponse
+	return &l, c.do(ctx, http.MethodGet, "/v1/packet-log?after="+strconv.FormatInt(after, 10), nil, &l)
+}
+
 func (c *Client) Render(ctx context.Context, doc fwconfig.Document) (*agentapi.RenderResult, error) {
 	var r agentapi.RenderResult
 	return &r, c.do(ctx, http.MethodPost, "/v1/render", agentapi.RenderRequest{Document: doc}, &r)

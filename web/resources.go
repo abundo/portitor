@@ -61,6 +61,24 @@ func prepareInstance(tx *gorm.DB, in, old *models.Instance) error {
 	if !fwconfig.ValidInstanceName(in.Name) {
 		return bad("name: lowercase letters and digits, starting with a letter, at most 12 characters")
 	}
+	in.LogDrops = cleanList(in.LogDrops)
+	for _, c := range in.LogDrops {
+		if err := oneOf("log drops", c, fwconfig.ChainInput, fwconfig.ChainForward, fwconfig.ChainOutput); err != nil {
+			return err
+		}
+	}
+	in.LogInvalid = cleanList(in.LogInvalid)
+	for _, c := range in.LogInvalid {
+		if err := oneOf("log invalid", c, fwconfig.ChainInput, fwconfig.ChainForward, fwconfig.ChainOutput); err != nil {
+			return err
+		}
+	}
+	in.LogAuto = cleanList(in.LogAuto)
+	for _, s := range in.LogAuto {
+		if !fwconfig.ValidAutoService(s) {
+			return bad(fmt.Sprintf("log auto: invalid service %q", s))
+		}
+	}
 	in.DnsForwarders = cleanList(in.DnsForwarders)
 	in.DnsAllowRecursion = cleanList(in.DnsAllowRecursion)
 	if in.DnsForwardMode == "" {

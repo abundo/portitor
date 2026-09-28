@@ -58,7 +58,7 @@ func TestNftablesMain(t *testing.T) {
 		`iifname "eth1" oifname "eth0" counter accept comment "rule 1: LAN to Internet"`,
 		`iifname "eth1.20" oifname "eth0" tcp dport { 80, 443, 8883 } counter accept`,
 		`iifname "lk-guest" oifname "eth0" counter accept`,
-		`iifname "eth0" ip daddr 192.168.1.0/24 counter log prefix "fw rule 8 drop: " drop comment "rule 8: no 'direct' access"`,
+		`iifname "eth0" ip daddr 192.168.1.0/24 counter log prefix "forward rule 8 drop" group 64 drop comment "rule 8: no 'direct' access"`,
 		"# rule 5 skipped: dmz has no enabled interfaces",
 		`iifname { "eth1", "wg0" } counter accept comment "rule 10: trusted"`,
 		`iifname "eth1.20" counter jump reject_pkt comment "rule 11"`,
@@ -207,6 +207,85 @@ func TestParseRuleCounter(t *testing.T) {
 	}
 	for _, bad := range []string{"rule_0_orig", "rule_x_orig", "rule_1_in", "rule_1", "foo", "rule_99999999999_orig"} {
 		if _, _, ok := ParseRuleCounter(bad); ok {
+			t.Errorf("%q parsed", bad)
+		}
+	}
+}
+
+func TestNftablesDropCounters(t *testing.T) {
+	b, err := Render(fwconfig.SampleDocument(), Options{Paths: DefaultPaths(), Units: DefaultUnits()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	nft := mustFile(t, b, "/etc/portitor/instances/main/nftables.nft")
+	for _, want := range []string{
+		"\tcounter drop_input_invalid {\n\t}\n",
+		"\tcounter drop_output_policy {\n\t}\n",
+		`ct state invalid counter name "drop_forward_invalid" drop`,
+		// The policy counter is the chain's last rule.
+		"counter name \"drop_input_policy\" comment \"no rule matched: policy drop\"\n\t}\n",
+		"counter name \"drop_forward_policy\" ", // logged in the sample, see TestNftablesLogDrops
+		"counter name \"drop_output_policy\" comment \"no rule matched: policy drop\"\n\t}\n",
+	} {
+		if !strings.Contains(nft, want) {
+			t.Errorf("missing %q in\n%s", want, nft)
+		}
+	}
+}
+
+func TestNftablesLogBuiltin(t *testing.T) {
+	// The sample logs, in instance main, the forward chain's policy drops,
+	// the input chain's invalid drops and the DNS server's auto rule.
+	b, err := Render(fwconfig.SampleDocument(), Options{Paths: DefaultPaths(), Units: DefaultUnits()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	nft := mustFile(t, b, "/etc/portitor/instances/main/nftables.nft")
+	for _, want := range []string{
+		`counter name "drop_forward_policy" limit rate 10/second burst 20 packets log prefix "forward policy drop" group 64 comment "no rule matched: policy drop"`,
+		// The log rules are separate, so packets over the limit are
+		// still dropped or accepted.
+		"\t\tct state invalid limit rate 10/second burst 20 packets log prefix \"input invalid drop\" group 64\n" +
+			"\t\tct state invalid counter name \"drop_input_invalid\" drop\n",
+		"th dport 53 limit rate 10/second burst 20 packets log prefix \"input auto accept dns server\" group 64\n" +
+			"\t\tiifname { \"eth1\", \"eth1.20\", \"wg0\" } meta l4proto { tcp, udp } th dport 53 accept comment \"auto: dns server\"\n",
+	} {
+		if !strings.Contains(nft, want) {
+			t.Errorf("missing %q in\n%s", want, nft)
+		}
+	}
+	if n := strings.Count(nft, "limit rate 10/second"); n != 3 {
+		t.Errorf("%d rate limited logs, want 3", n)
+	}
+}
+
+func TestParseLogPrefix(t *testing.T) {
+	for _, src := range []LogSource{
+		{Chain: "forward", Builtin: BuiltinPolicy, Action: "drop"},
+		{Chain: "output", Builtin: BuiltinInvalid, Action: "drop"},
+		{Chain: "input", Builtin: BuiltinAuto, Service: "wireguard wg0", Action: "accept"},
+		{Chain: "input", Rule: 8, Action: "reject"},
+		{Chain: "output", Rule: 12, Action: "accept"},
+	} {
+		got, ok := ParseLogPrefix(LogPrefix(src))
+		if !ok || got != src {
+			t.Errorf("round trip %+v: %+v %v", src, got, ok)
+		}
+	}
+	for _, bad := range []string{"", "nat policy drop", "input rule 0 drop", "input rule x drop", "input rule 3 log",
+		"fw rule 8 drop: ", "input policy", "input invalid drop now", "input auto accept", "input other drop"} {
+		if _, ok := ParseLogPrefix(bad); ok {
+			t.Errorf("%q parsed", bad)
+		}
+	}
+}
+
+func TestParseDropCounter(t *testing.T) {
+	if chain, reason, ok := ParseDropCounter(DropCounter("forward", DropPolicy)); !ok || chain != "forward" || reason != DropPolicy {
+		t.Errorf("round trip: %q %q %v", chain, reason, ok)
+	}
+	for _, bad := range []string{"drop_nat_policy", "drop_input_x", "drop_input", "rule_1_orig", "drop__policy"} {
+		if _, _, ok := ParseDropCounter(bad); ok {
 			t.Errorf("%q parsed", bad)
 		}
 	}

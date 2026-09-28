@@ -112,6 +112,13 @@ type Instance struct {
 	DhcpEnabled    bool   `json:"dhcp_enabled"`
 	DhcpDomainName string `json:"dhcp_domain_name"`
 	DhcpLeaseTime  int    `json:"dhcp_lease_time"`
+
+	// LogDrops lists the filter chains whose policy drops are logged,
+	// LogInvalid those whose invalid packet drops are, and LogAuto the auto
+	// input rules (by service) whose matches are.
+	LogDrops   StringList `json:"log_drops"`
+	LogInvalid StringList `json:"log_invalid"`
+	LogAuto    StringList `json:"log_auto"`
 }
 
 // InterfaceZone is a named group of zero or more interfaces of an

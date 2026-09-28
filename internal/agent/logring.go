@@ -4,6 +4,7 @@
 package agent
 
 import (
+	"cmp"
 	"context"
 	"log/slog"
 	"slices"
@@ -18,46 +19,51 @@ var Logs = NewLogRing(2000)
 
 // LogRing is a fixed-size buffer of log records.
 type LogRing struct {
-	mu      sync.Mutex
-	entries []agentapi.LogEntry
-	size    int
-	nextID  int64
+	*ring[agentapi.LogEntry]
 }
 
 func NewLogRing(size int) *LogRing {
-	// Start at the clock so ids keep increasing over a restart, and a
-	// client's "after" from before it doesn't hide the new records.
-	return &LogRing{size: size, nextID: time.Now().UnixMicro()}
+	return &LogRing{newRing(size, func(e *agentapi.LogEntry) *int64 { return &e.ID })}
 }
 
-func (r *LogRing) add(e agentapi.LogEntry) {
+// ring is a fixed-size buffer of entries that get increasing ids as they
+// are added; id points into an entry at its id field.
+type ring[T any] struct {
+	mu      sync.Mutex
+	entries []T
+	size    int
+	nextID  int64
+	id      func(*T) *int64
+}
+
+func newRing[T any](size int, id func(*T) *int64) *ring[T] {
+	// Start at the clock so ids keep increasing over a restart, and a
+	// client's "after" from before it doesn't hide the new entries.
+	return &ring[T]{size: size, nextID: time.Now().UnixMicro(), id: id}
+}
+
+func (r *ring[T]) add(e T) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.nextID++
-	e.ID = r.nextID
+	*r.id(&e) = r.nextID
 	if len(r.entries) >= r.size {
 		r.entries = slices.Delete(r.entries, 0, len(r.entries)-r.size+1)
 	}
 	r.entries = append(r.entries, e)
 }
 
-// After returns the records with an id above after. An id beyond the
+// After returns the entries with an id above after. An id beyond the
 // newest one comes from before a restart with a clock that went back,
 // so it returns everything.
-func (r *LogRing) After(after int64) []agentapi.LogEntry {
+func (r *ring[T]) After(after int64) []T {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if after > r.nextID {
 		after = 0
 	}
-	i, _ := slices.BinarySearchFunc(r.entries, after+1, func(e agentapi.LogEntry, id int64) int {
-		switch {
-		case e.ID < id:
-			return -1
-		case e.ID > id:
-			return 1
-		}
-		return 0
+	i, _ := slices.BinarySearchFunc(r.entries, after+1, func(e T, id int64) int {
+		return cmp.Compare(*r.id(&e), id)
 	})
 	return slices.Clone(r.entries[i:])
 }

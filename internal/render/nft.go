@@ -6,6 +6,7 @@ package render
 import (
 	"fmt"
 	"net/netip"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -24,9 +25,13 @@ type AntiLockout struct {
 	AllowFrom []string `json:"allow_from"` // CIDRs; empty disables the rule
 }
 
+// AntiLockoutService is the anti-lockout rule's service, as the other auto
+// input rules have (AutoRule.Service); LogAuto names it to log the rule.
+const AntiLockoutService = "anti-lockout"
+
 // Rule describes the anti-lockout rule for the GUI's read-only list.
 func (l *AntiLockout) Rule() AutoRule {
-	return AutoRule{Service: "anti-lockout", Protocol: "tcp", DstPort: l.Port, Source: l.AllowFrom}
+	return AutoRule{Service: AntiLockoutService, Protocol: "tcp", DstPort: l.Port, Source: l.AllowFrom}
 }
 
 // Nftables renders the complete ruleset for one instance. The output is fed
@@ -56,6 +61,7 @@ func Nftables(in *fwconfig.Instance, lockout *AntiLockout, paths Paths) string {
 	}
 
 	counted := writeRuleCounters(b, in.Rules)
+	writeDropCounters(b)
 
 	b.WriteString("\tchain reject_pkt {\n")
 	b.WriteString("\t\tmeta l4proto tcp reject with tcp reset\n")
@@ -69,23 +75,29 @@ func Nftables(in *fwconfig.Instance, lockout *AntiLockout, paths Paths) string {
 		b.WriteString(connCountRules)
 	}
 	b.WriteString("\t\tct state established,related accept\n")
-	b.WriteString("\t\tct state invalid drop\n")
+	writeInvalidDrop(b, in, fwconfig.ChainInput)
 	b.WriteString("\t\tiif \"lo\" accept\n")
 	b.WriteString("\t\tmeta l4proto ipv6-icmp icmpv6 type { nd-router-solicit, nd-router-advert, nd-neighbor-solicit, nd-neighbor-advert, destination-unreachable, packet-too-big, time-exceeded, parameter-problem } accept\n")
 	b.WriteString("\t\tmeta l4proto icmp icmp type { destination-unreachable, time-exceeded, parameter-problem } accept\n")
 	if lockout != nil && in.Default && lockout.Port > 0 {
 		v4, v6 := splitFamilies(lockout.AllowFrom)
-		if len(v4) > 0 {
-			fmt.Fprintf(b, "\t\tip saddr %s tcp dport %d accept comment \"anti-lockout\"\n", set(v4), lockout.Port)
-		}
-		if len(v6) > 0 {
-			fmt.Fprintf(b, "\t\tip6 saddr %s tcp dport %d accept comment \"anti-lockout\"\n", set(v6), lockout.Port)
+		for _, m := range []struct {
+			key   string
+			addrs []string
+		}{{"ip", v4}, {"ip6", v6}} {
+			if len(m.addrs) > 0 {
+				match := fmt.Sprintf("%s saddr %s tcp dport %d", m.key, set(m.addrs), lockout.Port)
+				writeAutoLog(b, in, AntiLockoutService, match)
+				fmt.Fprintf(b, "\t\t%s accept comment %q\n", match, AntiLockoutService)
+			}
 		}
 	}
 	for _, r := range AutoInputRules(in) {
-		b.WriteString("\t\t" + r.nft() + "\n")
+		writeAutoLog(b, in, r.Service, r.match())
+		b.WriteString("\t\t" + r.match() + " accept " + comment("auto", r.Service) + "\n")
 	}
 	writeRules(b, in, fwconfig.ChainInput)
+	writePolicyCount(b, in, fwconfig.ChainInput)
 	b.WriteString("\t}\n\n")
 
 	// ----- forward -----
@@ -95,10 +107,11 @@ func Nftables(in *fwconfig.Instance, lockout *AntiLockout, paths Paths) string {
 		b.WriteString(connCountRules)
 	}
 	b.WriteString("\t\tct state established,related accept\n")
-	b.WriteString("\t\tct state invalid drop\n")
+	writeInvalidDrop(b, in, fwconfig.ChainForward)
 	b.WriteString("\t\tct status dnat accept comment \"port forwards\"\n")
 	b.WriteString("\t\tmeta l4proto ipv6-icmp icmpv6 type { destination-unreachable, packet-too-big, time-exceeded, parameter-problem } accept\n")
 	writeRules(b, in, fwconfig.ChainForward)
+	writePolicyCount(b, in, fwconfig.ChainForward)
 	b.WriteString("\t}\n\n")
 
 	// ----- output -----
@@ -108,11 +121,12 @@ func Nftables(in *fwconfig.Instance, lockout *AntiLockout, paths Paths) string {
 		b.WriteString(connCountRules)
 	}
 	b.WriteString("\t\tct state established,related accept\n")
-	b.WriteString("\t\tct state invalid drop\n")
+	writeInvalidDrop(b, in, fwconfig.ChainOutput)
 	b.WriteString("\t\toif \"lo\" accept\n")
 	b.WriteString("\t\tmeta l4proto ipv6-icmp icmpv6 type { nd-router-solicit, nd-router-advert, nd-neighbor-solicit, nd-neighbor-advert, destination-unreachable, packet-too-big, time-exceeded, parameter-problem } accept\n")
 	b.WriteString("\t\tmeta l4proto icmp icmp type { destination-unreachable, time-exceeded, parameter-problem } accept\n")
 	writeRules(b, in, fwconfig.ChainOutput)
+	writePolicyCount(b, in, fwconfig.ChainOutput)
 	b.WriteString("\t}\n\n")
 
 	// ----- NAT -----
@@ -202,6 +216,146 @@ func writeRuleCounters(b *strings.Builder, rules []fwconfig.Rule) bool {
 	return true
 }
 
+// Drop counters. Each filter chain counts, apart from the rules, the
+// packets it drops by itself: DropInvalid those of no known connection
+// (ct state invalid), DropPolicy those no rule decided on, which fall
+// through to the chain's drop policy. They restart from zero on apply, like
+// the rule counters.
+const (
+	DropInvalid = "invalid"
+	DropPolicy  = "policy"
+)
+
+var filterChains = []string{fwconfig.ChainInput, fwconfig.ChainForward, fwconfig.ChainOutput}
+
+// DropCounter is the name of a chain's drop counter for one reason.
+func DropCounter(chain, reason string) string {
+	return "drop_" + chain + "_" + reason
+}
+
+// ParseDropCounter is the inverse of DropCounter.
+func ParseDropCounter(name string) (chain, reason string, ok bool) {
+	rest, found := strings.CutPrefix(name, "drop_")
+	if !found {
+		return "", "", false
+	}
+	chain, reason, found = strings.Cut(rest, "_")
+	if !found || !slices.Contains(filterChains, chain) || (reason != DropInvalid && reason != DropPolicy) {
+		return "", "", false
+	}
+	return chain, reason, true
+}
+
+func writeDropCounters(b *strings.Builder) {
+	for _, chain := range filterChains {
+		for _, reason := range []string{DropInvalid, DropPolicy} {
+			fmt.Fprintf(b, "\tcounter %s {\n\t}\n\n", DropCounter(chain, reason))
+		}
+	}
+}
+
+// writeInvalidDrop drops a chain's invalid packets, after logging them
+// if the instance says so (LogInvalid). The log is a rule of its own: over
+// the rate limit, a rule with the limit would not reach its drop.
+func writeInvalidDrop(b *strings.Builder, in *fwconfig.Instance, chain string) {
+	if slices.Contains(in.LogInvalid, chain) {
+		fmt.Fprintf(b, "\t\tct state invalid %s %s\n", builtinLogLimit,
+			logStmt(LogSource{Chain: chain, Builtin: BuiltinInvalid, Action: fwconfig.ActionDrop}))
+	}
+	fmt.Fprintf(b, "\t\tct state invalid counter name %q drop\n", DropCounter(chain, DropInvalid))
+}
+
+// builtinLogLimit rate limits the log of the built-in rules (a chain's
+// invalid and policy drops, the auto input rules), so a scan or a busy
+// service does not flood the agent's packet log.
+const builtinLogLimit = "limit rate 10/second burst 20 packets"
+
+// writePolicyCount ends a chain with a rule that counts and, if the
+// instance says so (LogDrops), logs: what reaches it is dropped by the
+// chain's policy, so the limit can share the rule.
+func writePolicyCount(b *strings.Builder, in *fwconfig.Instance, chain string) {
+	fmt.Fprintf(b, "\t\tcounter name %q ", DropCounter(chain, DropPolicy))
+	if slices.Contains(in.LogDrops, chain) {
+		fmt.Fprintf(b, "%s %s ", builtinLogLimit,
+			logStmt(LogSource{Chain: chain, Builtin: BuiltinPolicy, Action: fwconfig.ActionDrop}))
+	}
+	b.WriteString("comment \"no rule matched: policy drop\"\n")
+}
+
+// LogGroup is the nflog group every log statement sends its packets to,
+// not the kernel log: the agent listens on it in each namespace whose
+// ruleset logs (see agent.packetLog). A namespace has groups of its own,
+// so one number serves every instance.
+const LogGroup = 64
+
+// Built-in rows of a chain that can log (LogSource.Builtin).
+const (
+	BuiltinPolicy  = "policy"  // what no rule matched
+	BuiltinInvalid = "invalid" // packets of no known connection
+	BuiltinAuto    = "auto"    // an auto input rule; LogSource.Service says which
+)
+
+// LogSource is the rule of a chain that logged a packet: rule Rule
+// (numbered as in the ruleset's comments) or, with Rule 0, a built-in one.
+type LogSource struct {
+	Chain   string
+	Rule    int
+	Builtin string
+	Service string // of an auto input rule
+	Action  string
+}
+
+func logStmt(s LogSource) string {
+	return fmt.Sprintf("log prefix %q group %d", LogPrefix(s), LogGroup)
+}
+
+// LogPrefix is the log prefix of a rule, for the agent (ParseLogPrefix):
+// "forward rule 8 drop", "forward policy drop", "input invalid drop",
+// "input auto accept dhcp server" (the service last, as it has spaces).
+func LogPrefix(s LogSource) string {
+	switch {
+	case s.Rule > 0:
+		return fmt.Sprintf("%s rule %d %s", s.Chain, s.Rule, s.Action)
+	case s.Builtin == BuiltinAuto:
+		return fmt.Sprintf("%s auto %s %s", s.Chain, s.Action, s.Service)
+	}
+	return fmt.Sprintf("%s %s %s", s.Chain, s.Builtin, s.Action)
+}
+
+// ParseLogPrefix is the inverse of LogPrefix.
+func ParseLogPrefix(prefix string) (s LogSource, ok bool) {
+	f := strings.Fields(prefix)
+	if len(f) < 3 {
+		return s, false
+	}
+	s.Chain = f[0]
+	switch f[1] {
+	case "rule":
+		n, err := strconv.Atoi(f[2])
+		if len(f) != 4 || err != nil || n < 1 {
+			return s, false
+		}
+		s.Rule, s.Action = n, f[3]
+	case BuiltinPolicy, BuiltinInvalid:
+		if len(f) != 3 {
+			return s, false
+		}
+		s.Builtin, s.Action = f[1], f[2]
+	case BuiltinAuto:
+		if len(f) < 4 {
+			return s, false
+		}
+		s.Builtin, s.Action, s.Service = f[1], f[2], strings.Join(f[3:], " ")
+	default:
+		return s, false
+	}
+	if !slices.Contains(filterChains, s.Chain) ||
+		(s.Action != fwconfig.ActionAccept && s.Action != fwconfig.ActionDrop && s.Action != fwconfig.ActionReject) {
+		return LogSource{}, false
+	}
+	return s, true
+}
+
 // SetName is the nftables set holding one IP version of an IP list.
 func SetName(list, family string) string {
 	if family == "ipv6" {
@@ -266,8 +420,18 @@ func AutoInputRules(in *fwconfig.Instance) []AutoRule {
 	return out
 }
 
-// nft renders an auto rule as one nft rule.
-func (r AutoRule) nft() string {
+// writeAutoLog logs, if the instance says so (LogAuto), what an auto input
+// rule with this match accepts. The log is a rule of its own, before the
+// accept: over the rate limit, a rule with the limit would not accept.
+func writeAutoLog(b *strings.Builder, in *fwconfig.Instance, service, match string) {
+	if slices.Contains(in.LogAuto, service) {
+		fmt.Fprintf(b, "\t\t%s %s %s\n", match, builtinLogLimit,
+			logStmt(LogSource{Chain: fwconfig.ChainInput, Builtin: BuiltinAuto, Service: service, Action: fwconfig.ActionAccept}))
+	}
+}
+
+// match renders the matches of an auto rule.
+func (r AutoRule) match() string {
 	var parts []string
 	if len(r.InInterfaces) > 0 {
 		parts = append(parts, "iifname "+quotedSet(r.InInterfaces))
@@ -280,7 +444,6 @@ func (r AutoRule) nft() string {
 		}
 		parts = append(parts, fmt.Sprintf("%s dport %d", r.Protocol, r.DstPort))
 	}
-	parts = append(parts, "accept", comment("auto", r.Service))
 	return strings.Join(parts, " ")
 }
 
@@ -337,7 +500,7 @@ func writeRule(b *strings.Builder, idx int, r fwconfig.Rule, in *fwconfig.Instan
 		tail = append(tail, "counter")
 	}
 	if r.Log {
-		tail = append(tail, fmt.Sprintf("log prefix \"fw rule %d %s: \"", idx+1, r.Action))
+		tail = append(tail, logStmt(LogSource{Chain: r.Chain, Rule: idx + 1, Action: r.Action}))
 	}
 	switch r.Action {
 	case fwconfig.ActionAccept:

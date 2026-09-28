@@ -36,6 +36,19 @@ type LeasesResponse struct {
 // (fwconfig.Rule.ID) since it was last applied.
 type RuleCountersResponse struct {
 	Rules map[uint32]RuleCounters `json:"rules"`
+	// Drops is what each instance's filter chains dropped by themselves,
+	// by instance name and then chain (input, forward, output).
+	Drops map[string]map[string]ChainDrops `json:"drops"`
+}
+
+// ChainDrops counts the packets a filter chain dropped outside the rules:
+// Invalid those of no known connection (ct state invalid), Policy those no
+// rule decided on (the chain's drop policy).
+type ChainDrops struct {
+	InvalidPackets uint64 `json:"invalid_packets"`
+	InvalidBytes   uint64 `json:"invalid_bytes"`
+	PolicyPackets  uint64 `json:"policy_packets"`
+	PolicyBytes    uint64 `json:"policy_bytes"`
 }
 
 // RuleCounters counts a rule's traffic: Orig what the rule matched and the
@@ -251,6 +264,40 @@ type LogEntry struct {
 // LogsResponse holds the log entries after the id asked for.
 type LogsResponse struct {
 	Entries []LogEntry `json:"entries"`
+}
+
+// PacketLogEntry is a packet a ruleset logged: by a rule with Log set, or a
+// built-in one the instance logs (a chain's invalid or policy drops, an
+// auto input rule). Ids increase like LogEntry's.
+type PacketLogEntry struct {
+	ID       int64     `json:"id"`
+	Time     time.Time `json:"time"`
+	Instance string    `json:"instance"`
+	Chain    string    `json:"chain"`
+	// Rule is the rule's number, as in the ruleset's comments, or 0 for a
+	// built-in rule: Builtin is then policy, invalid or auto, and Service
+	// the auto input rule's service.
+	Rule         int    `json:"rule,omitempty"`
+	Builtin      string `json:"builtin,omitempty"`
+	Service      string `json:"service,omitempty"`
+	Action       string `json:"action"`
+	InInterface  string `json:"in_interface,omitempty"`
+	OutInterface string `json:"out_interface,omitempty"`
+	Family       string `json:"family"`   // ipv4, ipv6
+	Protocol     string `json:"protocol"` // tcp, udp, icmp, ipv6-icmp, ... or the number
+	Src          string `json:"src"`
+	Dst          string `json:"dst"`
+	SrcPort      uint16 `json:"src_port,omitempty"`
+	DstPort      uint16 `json:"dst_port,omitempty"`
+	// Info is the TCP flags ("SYN") or the ICMP type and code ("type 8
+	// code 0").
+	Info   string `json:"info,omitempty"`
+	Length int    `json:"length"` // of the IP packet
+}
+
+// PacketLogResponse holds the packet log entries after the id asked for.
+type PacketLogResponse struct {
+	Entries []PacketLogEntry `json:"entries"`
 }
 
 // ConsoleResize is the one text message on the console WebSocket

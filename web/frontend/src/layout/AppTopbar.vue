@@ -108,12 +108,12 @@ const userMenu = computed(() => [
           @click="router.push('/')"
         />
       </UTooltip>
-      <UTooltip :text="logPanel.open ? 'Hide agent log' : 'Show agent log'">
+      <UTooltip :text="logPanel.open ? 'Hide log panel' : 'Show agent log and logged packets'">
         <UButton
           icon="i-lucide-terminal"
           color="neutral"
           :variant="logPanel.open ? 'soft' : 'ghost'"
-          aria-label="Agent log"
+          aria-label="Log panel"
           @click="toggleLog"
         />
       </UTooltip>

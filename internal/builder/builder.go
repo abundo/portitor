@@ -121,6 +121,19 @@ func Build(db *gorm.DB, generation int64) (*fwconfig.Document, error) {
 			NAT:     []fwconfig.NATRule{},
 			Routes:  []fwconfig.Route{},
 		}
+		for _, c := range []string{fwconfig.ChainInput, fwconfig.ChainForward, fwconfig.ChainOutput} {
+			if contains(mi.LogDrops, c) {
+				in.LogDrops = append(in.LogDrops, c)
+			}
+			if contains(mi.LogInvalid, c) {
+				in.LogInvalid = append(in.LogInvalid, c)
+			}
+		}
+		for _, svc := range mi.LogAuto {
+			if !contains(in.LogAuto, svc) {
+				in.LogAuto = append(in.LogAuto, svc)
+			}
+		}
 		var prefixes []models.IpamPrefix
 		for _, p := range d.prefixes {
 			if p.InstanceID == mi.ID {

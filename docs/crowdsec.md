@@ -79,7 +79,8 @@ decides:
 - a **forward** rule: the same, for port forwards and anything else reaching your
   network.
 
-Enable *Log matches* on them if you want to see the drops in the kernel log.
+Tick *Log* on them if you want to see the drops in the log panel's *Logged packets*
+tab.
 
 A list matches IPv4 and IPv6, so each rule covers both.
 

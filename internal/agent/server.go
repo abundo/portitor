@@ -41,6 +41,10 @@ func (a *Agent) Handler() http.Handler {
 		after, _ := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
 		writeJSONResponse(w, http.StatusOK, agentapi.LogsResponse{Entries: Logs.After(after)})
 	})
+	mux.HandleFunc("GET /v1/packet-log", func(w http.ResponseWriter, r *http.Request) {
+		after, _ := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
+		writeJSONResponse(w, http.StatusOK, agentapi.PacketLogResponse{Entries: a.pkts.After(after)})
+	})
 	mux.HandleFunc("POST /v1/render", func(w http.ResponseWriter, r *http.Request) {
 		var req agentapi.RenderRequest
 		if !decode(w, r, &req) {

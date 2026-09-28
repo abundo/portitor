@@ -21,6 +21,11 @@ func TestValidateCatchesProblems(t *testing.T) {
 		mutate func(d *Document)
 		want   string
 	}{
+		{"log drops bad chain", func(d *Document) { d.Instances[0].LogDrops = []string{"nat"} }, `log drops: invalid chain "nat"`},
+		{"log drops twice", func(d *Document) { d.Instances[0].LogDrops = []string{"input", "input"} }, "input listed twice"},
+		{"log invalid bad chain", func(d *Document) { d.Instances[0].LogInvalid = []string{"prerouting"} }, `log invalid: invalid chain "prerouting"`},
+		{"log auto bad service", func(d *Document) { d.Instances[0].LogAuto = []string{`dns" server`} }, `log auto: invalid service`},
+		{"log auto double space", func(d *Document) { d.Instances[0].LogAuto = []string{"dns  server"} }, `log auto: invalid service`},
 		{"two defaults", func(d *Document) { d.Instances[1].Default = true }, "exactly one instance"},
 		{"bad instance name", func(d *Document) { d.Instances[1].Name = "Guest-Net" }, "name must match"},
 		{"unknown interface", func(d *Document) { d.Instances[0].Rules[0].InInterfaces = []string{"eth9"} }, `unknown interface or interface zone "eth9"`},

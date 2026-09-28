@@ -12,10 +12,14 @@ import (
 	"github.com/abundo/portitor/internal/render"
 )
 
-// RuleCounters reads the rule counters (render.RuleCounter) of the applied
-// configuration from each instance's ruleset.
+// RuleCounters reads the rule counters (render.RuleCounter) and the chains'
+// drop counters (render.DropCounter) of the applied configuration from each
+// instance's ruleset.
 func (a *Agent) RuleCounters(ctx context.Context) agentapi.RuleCountersResponse {
-	res := agentapi.RuleCountersResponse{Rules: map[uint32]agentapi.RuleCounters{}}
+	res := agentapi.RuleCountersResponse{
+		Rules: map[uint32]agentapi.RuleCounters{},
+		Drops: map[string]map[string]agentapi.ChainDrops{},
+	}
 	a.mu.Lock()
 	var instances []fwconfig.Instance
 	if a.applied != nil {
@@ -23,29 +27,23 @@ func (a *Agent) RuleCounters(ctx context.Context) agentapi.RuleCountersResponse 
 	}
 	a.mu.Unlock()
 	for _, in := range instances {
-		if !hasRuleIDs(in.Rules) {
+		out, err := a.run.Run(ctx, in.NetnsName(), "nft", "-j", "list", "counters", "table", "inet", render.TableName)
+		if err != nil {
 			continue
 		}
-		out, err := a.run.Run(ctx, in.NetnsName(), "nft", "-j", "list", "counters", "table", "inet", render.TableName)
-		if err == nil {
-			parseRuleCounters(out, res.Rules)
+		drops := map[string]agentapi.ChainDrops{}
+		parseCounters(out, res.Rules, drops)
+		if len(drops) > 0 {
+			res.Drops[in.Name] = drops
 		}
 	}
 	return res
 }
 
-func hasRuleIDs(rules []fwconfig.Rule) bool {
-	for _, r := range rules {
-		if r.ID != 0 {
-			return true
-		}
-	}
-	return false
-}
-
-// parseRuleCounters adds the rule counters in `nft -j list counters` output
-// to into; other counters and unparsable output are ignored.
-func parseRuleCounters(out []byte, into map[uint32]agentapi.RuleCounters) {
+// parseCounters adds the rule counters in `nft -j list counters` output
+// to rules and the drop counters to drops (by chain); other counters and
+// unparsable output are ignored.
+func parseCounters(out []byte, rules map[uint32]agentapi.RuleCounters, drops map[string]agentapi.ChainDrops) {
 	var doc struct {
 		Nftables []struct {
 			Counter *struct {
@@ -62,16 +60,26 @@ func parseRuleCounters(out []byte, into map[uint32]agentapi.RuleCounters) {
 		if o.Counter == nil {
 			continue
 		}
+		if chain, reason, ok := render.ParseDropCounter(o.Counter.Name); ok {
+			d := drops[chain]
+			if reason == render.DropInvalid {
+				d.InvalidPackets, d.InvalidBytes = o.Counter.Packets, o.Counter.Bytes
+			} else {
+				d.PolicyPackets, d.PolicyBytes = o.Counter.Packets, o.Counter.Bytes
+			}
+			drops[chain] = d
+			continue
+		}
 		id, dir, ok := render.ParseRuleCounter(o.Counter.Name)
 		if !ok {
 			continue
 		}
-		c := into[id]
+		c := rules[id]
 		if dir == render.CounterOrig {
 			c.OrigPackets, c.OrigBytes = o.Counter.Packets, o.Counter.Bytes
 		} else {
 			c.ReplyPackets, c.ReplyBytes = o.Counter.Packets, o.Counter.Bytes
 		}
-		into[id] = c
+		rules[id] = c
 	}
 }

@@ -61,7 +61,16 @@ After an upgrade, run `migrate` before `start`. `install.py` does both.
   DNS templates, users and settings are shared by all instances.
 - **Agent badge** (top bar). The generation the agent has applied; yellow if its last
   apply had an error, red if portitor-web cannot reach it.
-- **Agent log** (terminal icon) opens a panel with the agent's log.
+- **Log panel** (terminal icon) opens a panel at the bottom with two tabs:
+  - *Agent log*: the agent's log.
+  - *Logged packets*: the packets of the rules with *Log* ticked on the Rules page, as a
+    table (time, instance, chain, rule, action, interfaces, protocol, addresses and
+    ports, TCP flags or ICMP type). Every row can log, whatever its action: your rules
+    log every packet they match; the locked rows (invalid packets, the auto rules of
+    the services, anti-lockout, and the last row, what no rule matched) log at most 10
+    packets a second. The filter keeps the rows that contain every word typed, such as
+    `wan tcp 443`. The agent keeps the latest 2000 packets; they are not written to the
+    kernel log.
 - **Console window** (square terminal icon) opens a shell on the firewall in a separate
   window.
 - **Changes banner** (blue). Shows when the configuration differs from what is on the
@@ -82,7 +91,7 @@ After an upgrade, run `migrate` before `start`. `install.py` does both.
 | | IP addresses | The prefix tree: prefixes, addresses, DHCP scopes, router advertisements, DNS names. |
 | | Hosts & prefixes | Named addresses, usable wherever addresses are entered. |
 | Firewall | Interface zones | Named groups of interfaces for rules and NAT. |
-| | Rules | Input, forward and output rules, with per-rule traffic counters. |
+| | Rules | Input, forward and output rules, with per-rule traffic counters and counts of what each chain drops by default (invalid packets, no rule matched); every row, the locked ones included, can log to the log panel's *Logged packets*. |
 | | NAT & port forwards | Masquerade, SNAT and DNAT. |
 | | IP lists | Downloaded address lists (CrowdSec, blocklists), used as `@name` in rules. See [Blocking with CrowdSec](crowdsec.md). |
 | Services | DNS zones | Zones and records served by the instance's BIND. |

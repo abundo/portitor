@@ -46,6 +46,16 @@ type Instance struct {
 	// DynDNS clients keep records on a nameserver in step with the
 	// addresses of this instance's interfaces.
 	DynDNS []DynDNS `json:"dyndns,omitempty"`
+	// LogDrops lists the filter chains (ChainInput, ...) that log, rate
+	// limited, what no rule decided on before the chain's policy drops it.
+	LogDrops []string `json:"log_drops,omitempty"`
+	// LogInvalid lists the filter chains that log, rate limited, the
+	// invalid packets (of no known connection) they drop.
+	LogInvalid []string `json:"log_invalid,omitempty"`
+	// LogAuto lists the auto input rules (by service: "dhcp server",
+	// "wireguard wg0", "anti-lockout") that log, rate limited, what they
+	// accept. A service the instance doesn't have is ignored.
+	LogAuto []string `json:"log_auto,omitempty"`
 }
 
 // Interface kinds.

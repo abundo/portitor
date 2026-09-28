@@ -15,7 +15,7 @@ are in [README.md](README.md).
 | `cmd/portitor-agent` | Agent daemon on the firewall: `start`, `init`, `render`, `netns-exec` |
 | `internal/fwconfig` | The desired-state document and `Validate()`. **The contract between web and agent.** |
 | `internal/render` | Pure functions: document → nftables, WireGuard, named.conf, Kea, dnsmgr2 config |
-| `internal/agent` | Agent: apply/reconcile, commit-confirm, DHCP client, IP lists, task scheduler, status, API server |
+| `internal/agent` | Agent: apply/reconcile, commit-confirm, DHCP client, IP lists, task scheduler, packet log (NFLOG), status, API server |
 | `internal/dyndns` | Dynamic DNS client (RFC 2136, from ifnsupdate); the agent runs it per instance netns |
 | `internal/iplist` | Downloads IP lists (CrowdSec LAPI decisions, plain-text lists) |
 | `internal/cron` | crontab(5) schedule parser for tasks (shared by web and agent) |
@@ -54,7 +54,9 @@ are in [README.md](README.md).
   `managed.json`. Leave everything else alone (docker, libvirt, other tables).
   Accept rules set the connection mark (`ct mark`) to the rule's id, so the
   rule counters (`render.RuleCounter`) count whole connections; the agent owns
-  `ct mark` in its namespaces.
+  `ct mark` in its namespaces. Log statements send to nflog group
+  `render.LogGroup`, never the kernel log, with a prefix `render.ParseLogPrefix`
+  reads; the agent listens on that group in each namespace whose ruleset logs.
 - **Commit-confirm:** the rollback target is the last *confirmed* document; a second
   apply while one is pending keeps it. `rollback.json` makes a pending change roll
   back after an agent restart too.
