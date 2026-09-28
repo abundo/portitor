@@ -214,8 +214,13 @@ func Build(db *gorm.DB, generation int64) (*fwconfig.Document, error) {
 			if r.InstanceID != mi.ID || !r.Enabled {
 				continue
 			}
-			if r.Kind == models.RuleKindComment {
-				in.Rules = append(in.Rules, fwconfig.Rule{Chain: r.Chain, Kind: fwconfig.RuleKindComment, Description: r.Description})
+			if r.IsNote() {
+				// A group heading reaches the agent as a comment.
+				desc := r.Description
+				if r.Kind == models.RuleKindGroup && desc != "" {
+					desc = "group: " + desc
+				}
+				in.Rules = append(in.Rules, fwconfig.Rule{Chain: r.Chain, Kind: fwconfig.RuleKindComment, Description: desc})
 				continue
 			}
 			where := fmt.Sprintf("instance %s: rule %d", mi.Name, len(in.Rules)+1)

@@ -444,6 +444,12 @@ func TestInterfaceZones(t *testing.T) {
 	if cm.Description != "note" || cm.Action != "" || len(cm.InInterfaces) != 0 || !cm.Enabled {
 		t.Errorf("comment row kept rule fields: %+v", cm)
 	}
+	group := env.create("/api/rules", map[string]any{"instance_id": inst, "chain": "input", "kind": "group", "description": " Admin ", "action": "accept", "src_addrs": []string{"10.0.0.1"}})
+	var gr models.Rule
+	env.srv.db.First(&gr, group)
+	if gr.Description != "Admin" || gr.Action != "" || len(gr.SrcAddrs) != 0 || !gr.Enabled {
+		t.Errorf("group row kept rule fields: %+v", gr)
+	}
 	if rec := env.do("POST", "/api/rules", map[string]any{"instance_id": inst, "chain": "input", "kind": "bogus", "action": "accept"}); rec.Code != http.StatusBadRequest {
 		t.Errorf("unknown rule kind accepted: %d", rec.Code)
 	}

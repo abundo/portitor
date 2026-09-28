@@ -5,15 +5,16 @@ import { onBeforeUnmount } from 'vue'
 
 // Drag-and-drop reordering of table rows by a grip handle, with the same
 // ghost and drop line as the DNS records grid. `wrap` is a ref to an element
-// containing the table (the scroll container, if it scrolls); rows are its
-// tbody's direct <tr>s. `label(index)` is the ghost text; `onMove(from, to)`
+// containing the table (the scroll container, if it scrolls); rows are the
+// <tr>s matching the optional `rowSelector` (by default every tbody's direct
+// <tr>s), hidden ones included so indexes match. `label(index)` is the ghost text; `onMove(from, to)`
 // is called on drop with the row's old and new index; the optional
 // `onClick(index)` when the grip is released without dragging.
 const THRESHOLD_PX = 4
 const EDGE_PX = 64
 const MAX_STEP_PX = 24
 
-export function useRowDrag({ wrap, label, onMove, onClick }) {
+export function useRowDrag({ wrap, label, onMove, onClick, rowSelector = 'tbody > tr' }) {
   let from = null
   let moved = false
   let startY = 0
@@ -24,12 +25,13 @@ export function useRowDrag({ wrap, label, onMove, onClick }) {
   let line = null
 
   function rows() {
-    return [...(wrap.value?.querySelectorAll('tbody > tr') ?? [])]
+    return [...(wrap.value?.querySelectorAll(rowSelector) ?? [])]
   }
 
   function gapAt(clientY) {
     const list = rows()
     for (let i = 0; i < list.length; i++) {
+      if (list[i].hidden) continue
       const { top, bottom } = list[i].getBoundingClientRect()
       if (clientY < (top + bottom) / 2) return i
     }
@@ -50,9 +52,10 @@ export function useRowDrag({ wrap, label, onMove, onClick }) {
     const box = table.getBoundingClientRect()
     const clip = wrap.value.getBoundingClientRect()
     const left = Math.max(box.left, clip.left)
+    const shown = list.filter((tr) => !tr.hidden)
     const lineY =
       gap >= list.length
-        ? list[list.length - 1].getBoundingClientRect().bottom
+        ? shown[shown.length - 1].getBoundingClientRect().bottom
         : list[gap].getBoundingClientRect().top
     line.style.opacity = '1'
     line.style.width = `${Math.min(box.right, clip.right) - left}px`

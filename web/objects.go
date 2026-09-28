@@ -167,14 +167,14 @@ func eachObjectRef(tx *gorm.DB, visit func(where string, entry *string) bool) er
 }
 
 // ruleNamer names rules the way the Rules page numbers them, per instance
-// and chain in list order with comment rows left out ("forward rule 2"),
+// and chain in list order with comment and group rows left out ("forward rule 2"),
 // and NAT rules per instance in list order ("NAT rule 3"); a description
 // is added in parentheses. Rules must be named in list order (position, id).
 type ruleNamer map[string]int
 
 func (n ruleNamer) rule(r models.Rule) string {
-	if r.Kind == models.RuleKindComment {
-		return "comment"
+	if r.IsNote() {
+		return r.Kind
 	}
 	return n.next(fmt.Sprintf("%d %s", r.InstanceID, r.Chain), r.Chain+" rule", r.Description)
 }

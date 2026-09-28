@@ -6,9 +6,11 @@
 // place. Each change saves its row (`save`); rows reorder by dragging the grip
 // (`move`, with indexes into `rows`). Comment rows (kind 'comment') hold one
 // text across the row; a click on a rule's grip opens its details (`edit`).
-// Right-click a row to insert a rule or comment above or below it
-// (`insert(kind, index)`, resolving to a created comment row) or to delete it
-// (`remove`).
+// Group rows (kind 'group') head a section: the rows below them up to the
+// next group, which their chevron folds away (remembered per browser).
+// Right-click a row to insert a rule, comment or group above or below it
+// (`insert(kind, index)`, resolving to a created comment or group row) or to
+// delete it (`remove`).
 // Address cells take a comma-separated list of addresses, CIDRs, names or
 // IP lists (@name); From/To cells a comma-separated list of interfaces and
 // interface zones.
@@ -38,7 +40,7 @@ const props = defineProps({
   // instance's log_drops and log_invalid hold the chain) and auto, the
   // services of the auto rules that log (log_auto).
   logBuiltin: { type: Object, default: () => ({ policy: false, invalid: false, auto: [] }) },
-  // insert(kind, index): add a 'rule' or 'comment' at index of rows.
+  // insert(kind, index): add a 'rule', 'comment' or 'group' at index of rows.
   insert: { type: Function, required: true },
 })
 // log-builtin(builtin, service, on): a built-in row's Log box changed;
@@ -51,22 +53,100 @@ onMounted(() => objects.load().catch(() => {}))
 const wrap = ref(null)
 const { onPointerDown } = useRowDrag({
   wrap,
+  rowSelector: 'tbody.user-rules > tr[data-index]',
   label: (i) => {
     const r = props.rows[i]
     if (isComment(r)) return `# ${r.description}`
+    if (isGroup(r)) return `§ ${r.description}`
     return `${ruleNo.value.get(r.id)}. ${r.action} ${r.description || ''}`.trim()
   },
-  onMove: (from, to) => emit('move', from, to),
-  onClick: (i) => isComment(props.rows[i]) || emit('edit', props.rows[i]),
+  onMove,
+  onClick: (i) => isNote(props.rows[i]) || emit('edit', props.rows[i]),
 })
 
 const isComment = (r) => r.kind === 'comment'
-// ruleNo numbers the rules, leaving out comment rows.
+const isGroup = (r) => r.kind === 'group'
+const isNote = (r) => isComment(r) || isGroup(r)
+// ruleNo numbers the rules, leaving out comment and group rows.
 const ruleNo = computed(() => {
   const m = new Map()
-  for (const r of props.rows) if (!isComment(r)) m.set(r.id, m.size + 1)
+  for (const r of props.rows) if (!isNote(r)) m.set(r.id, m.size + 1)
   return m
 })
+
+// Folded groups by id, kept in the browser (group ids are never reused).
+const collapsedKey = 'rules-collapsed-groups'
+const collapsed = ref(new Set())
+try {
+  collapsed.value = new Set(JSON.parse(localStorage.getItem(collapsedKey)) ?? [])
+} catch {
+  // No storage: every group starts open.
+}
+function setCollapsed(ids) {
+  collapsed.value = new Set(ids)
+  try {
+    localStorage.setItem(collapsedKey, JSON.stringify([...collapsed.value]))
+  } catch {
+    // Folding still works for this page view.
+  }
+}
+function toggleGroup(r) {
+  const ids = new Set(collapsed.value)
+  if (!ids.delete(r.id)) ids.add(r.id)
+  setCollapsed(ids)
+}
+const groups = computed(() => props.rows.filter(isGroup))
+function foldAll(fold) {
+  const ids = new Set(collapsed.value)
+  for (const g of groups.value) {
+    if (fold) ids.add(g.id)
+    else ids.delete(g.id)
+  }
+  setCollapsed(ids)
+}
+// groupAt is the group row that index i of list falls under, if any.
+function groupAt(list, i) {
+  for (let j = Math.min(i, list.length) - 1; j >= 0; j--) if (isGroup(list[j])) return list[j]
+  return null
+}
+// expandAt opens the group that a row placed at index i of list falls under,
+// so a row inserted or dropped into a folded group stays in sight.
+function expandAt(list, i) {
+  const g = groupAt(list, i)
+  if (g && collapsed.value.has(g.id)) toggleGroup(g)
+}
+// hidden[i] tells whether row i is folded away; groupSize counts the rules
+// under each group.
+const folding = computed(() => {
+  const hidden = []
+  const size = new Map()
+  let group = null
+  for (const r of props.rows) {
+    if (isGroup(r)) {
+      group = r
+      size.set(r.id, 0)
+      hidden.push(false)
+      continue
+    }
+    hidden.push(!!group && collapsed.value.has(group.id))
+    if (group && !isComment(r)) size.set(group.id, size.get(group.id) + 1)
+  }
+  return { hidden, size }
+})
+function groupSummary(r) {
+  const n = folding.value.size.get(r.id) ?? 0
+  return `${n} rule${n === 1 ? '' : 's'}`
+}
+
+function onMove(from, to) {
+  if (!isGroup(props.rows[from])) {
+    const list = [...props.rows]
+    const [item] = list.splice(from, 1)
+    list.splice(to, 0, item)
+    expandAt(list, to)
+  }
+  emit('move', from, to)
+}
 
 // The context menu acts on the right-clicked row; outside the rules (the
 // header, the auto rules, an empty table) it inserts at the top.
@@ -77,8 +157,9 @@ function captureMenuRow(event) {
 }
 const at = (below) => (menuIndex.value < 0 ? 0 : menuIndex.value + (below ? 1 : 0))
 async function insertAt(kind, index) {
+  if (kind !== 'group') expandAt(props.rows, index)
   const created = await props.insert(kind, index)
-  if (created) wrap.value?.querySelector(`[data-comment-id="${created.id}"]`)?.focus()
+  if (created) wrap.value?.querySelector(`[data-note-id="${created.id}"]`)?.focus()
 }
 const insertItems = [
   [
@@ -105,22 +186,49 @@ const insertItems = [
       onSelect: () => insertAt('comment', at(true)),
     },
   ],
+  [
+    {
+      label: 'Add group above',
+      icon: 'i-lucide-folder-plus',
+      onSelect: () => insertAt('group', at(false)),
+    },
+    {
+      label: 'Add group below',
+      icon: 'i-lucide-folder-plus',
+      onSelect: () => insertAt('group', at(true)),
+    },
+  ],
 ]
-// A right-clicked rule or comment row can also be deleted.
+// With groups, all of them can be folded or opened; a right-clicked row can
+// also be deleted (a group only as a heading: its rows join the group above).
 const contextItems = computed(() => {
-  const r = props.rows[menuIndex.value]
-  if (!r) return insertItems
-  return [
-    ...insertItems,
-    [
+  const items = [...insertItems]
+  if (groups.value.length) {
+    items.push([
       {
-        label: isComment(r) ? 'Delete comment' : 'Delete rule',
+        label: 'Collapse all groups',
+        icon: 'i-lucide-chevrons-down-up',
+        onSelect: () => foldAll(true),
+      },
+      {
+        label: 'Expand all groups',
+        icon: 'i-lucide-chevrons-up-down',
+        onSelect: () => foldAll(false),
+      },
+    ])
+  }
+  const r = props.rows[menuIndex.value]
+  if (r) {
+    items.push([
+      {
+        label: `Delete ${isNote(r) ? r.kind : 'rule'}`,
         icon: 'i-lucide-trash',
         color: 'error',
         onSelect: () => emit('remove', r),
       },
-    ],
-  ]
+    ])
+  }
+  return items
 })
 
 // ifaceTitle lists a cell's interfaces with their descriptions.
@@ -280,8 +388,8 @@ function setList(r, key, event) {
 }
 
 // Enter and the up/down arrows move to the same column in the next/previous
-// row that has it (comment rows skip rules and the other way round), like a
-// spreadsheet; leaving the cell saves it (change event).
+// shown row that has it (comment rows skip rules and the other way round),
+// like a spreadsheet; leaving the cell saves it (change event).
 function onKeydown(event, index) {
   const step = { Enter: 1, ArrowDown: 1, ArrowUp: -1 }[event.key]
   if (!step || event.isComposing) return
@@ -289,7 +397,7 @@ function onKeydown(event, index) {
   const trs = wrap.value.querySelectorAll('tbody.user-rules > tr')
   let next = null
   for (let i = index + step; !next && i >= 0 && i < trs.length; i += step) {
-    next = trs[i].querySelector(`[data-col="${col}"]`)
+    if (!trs[i].hidden) next = trs[i].querySelector(`[data-col="${col}"]`)
   }
   event.preventDefault()
   if (next && !next.disabled) next.focus()
@@ -367,7 +475,9 @@ function onKeydown(event, index) {
                 <div>{{ dropCount('invalid').toLocaleString() }} pkt</div>
               </template>
             </td>
-            <td><span><span class="text-muted">auto:</span> invalid packets</span></td>
+            <td>
+              <span><span class="text-muted">auto:</span> invalid packets</span>
+            </td>
           </tr>
           <tr v-for="a in auto" :key="a.service" :title="autoTitle(a)">
             <td class="text-center text-muted">
@@ -418,7 +528,52 @@ function onKeydown(event, index) {
         </tbody>
         <tbody class="user-rules">
           <template v-for="(r, i) in rows" :key="r.id">
-            <tr v-if="isComment(r)" class="rule-comment" :data-index="i">
+            <tr v-if="isGroup(r)" class="rule-group" :data-index="i">
+              <td class="keep">
+                <span
+                  class="flex h-7 cursor-grab touch-none items-center justify-center text-muted select-none active:cursor-grabbing"
+                  title="Drag to reorder (the heading only)"
+                  @pointerdown="onPointerDown(i, $event)"
+                >
+                  <UIcon name="i-lucide-grip-vertical" class="pointer-events-none size-3.5" />
+                </span>
+              </td>
+              <td class="keep">
+                <button
+                  type="button"
+                  class="flex h-7 w-full cursor-pointer items-center justify-center text-muted hover:text-highlighted"
+                  :title="collapsed.has(r.id) ? 'Expand group' : 'Collapse group'"
+                  :aria-expanded="!collapsed.has(r.id)"
+                  @click="toggleGroup(r)"
+                >
+                  <UIcon
+                    name="i-lucide-chevron-down"
+                    class="size-4 transition-transform"
+                    :class="{ '-rotate-90': collapsed.has(r.id) }"
+                  />
+                </button>
+              </td>
+              <td :colspan="colCount - 2">
+                <div class="flex items-center">
+                  <input
+                    :value="r.description"
+                    data-col="group"
+                    :data-note-id="r.id"
+                    placeholder="Group name"
+                    :title="r.description"
+                    @change="setText(r, 'description', $event)"
+                    @keydown="onKeydown($event, i)"
+                  />
+                  <span class="group-size">{{ groupSummary(r) }}</span>
+                </div>
+              </td>
+            </tr>
+            <tr
+              v-else-if="isComment(r)"
+              class="rule-comment"
+              :data-index="i"
+              :hidden="folding.hidden[i]"
+            >
               <td class="keep">
                 <span
                   class="flex h-7 cursor-grab touch-none items-center justify-center text-muted select-none active:cursor-grabbing"
@@ -432,7 +587,7 @@ function onKeydown(event, index) {
                 <input
                   :value="r.description"
                   data-col="comment"
-                  :data-comment-id="r.id"
+                  :data-note-id="r.id"
                   placeholder="Comment"
                   :title="r.description"
                   @change="setText(r, 'description', $event)"
@@ -440,7 +595,12 @@ function onKeydown(event, index) {
                 />
               </td>
             </tr>
-            <tr v-else :class="{ 'rule-off': !r.enabled }" :data-index="i">
+            <tr
+              v-else
+              :class="{ 'rule-off': !r.enabled }"
+              :data-index="i"
+              :hidden="folding.hidden[i]"
+            >
               <td class="keep">
                 <span
                   class="flex h-7 cursor-grab touch-none items-center justify-center text-muted select-none hover:text-highlighted active:cursor-grabbing"
@@ -753,6 +913,24 @@ function onKeydown(event, index) {
 }
 .rules-grid tr.rule-comment input {
   font-style: italic;
+  color: var(--ui-text-muted);
+}
+.rules-grid tr.rule-group td {
+  background: color-mix(in oklab, var(--ui-bg-accented) 60%, transparent);
+  border-block-start: 1px solid var(--ui-border-accented);
+}
+.rules-grid tr.rule-group input {
+  flex: 1;
+  min-width: 0;
+  height: 1.75rem;
+  padding-inline: 0.375rem;
+  background: transparent;
+  outline: none;
+  font-weight: 600;
+  text-overflow: ellipsis;
+}
+.rules-grid tr.rule-group .group-size {
+  padding-inline: 0.5rem;
   color: var(--ui-text-muted);
 }
 .rules-grid tr.rule-off > td:not(.keep) {

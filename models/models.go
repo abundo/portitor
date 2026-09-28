@@ -205,8 +205,10 @@ type Rule struct {
 	InstanceID uint   `json:"instance_id"`
 	Position   int    `json:"position"`
 	Chain      string `json:"chain"`
-	// Kind is empty for a rule or RuleKindComment for a comment row, whose
-	// text is Description; comments only annotate the list.
+	// Kind is empty for a rule, RuleKindComment for a comment row or
+	// RuleKindGroup for a group section heading; both keep their text in
+	// Description and only annotate the list. A group holds the rows below
+	// it up to the next group (the GUI folds them).
 	Kind string `json:"kind"`
 	// InInterfaces and OutInterfaces hold interface and interface zone
 	// names of the instance; empty matches any.
@@ -223,8 +225,17 @@ type Rule struct {
 	Description   string     `json:"description"`
 }
 
-// RuleKindComment marks a Rule that is a comment row between rules.
-const RuleKindComment = "comment"
+// Rule kinds besides a rule ("").
+const (
+	RuleKindComment = "comment" // a comment row between rules
+	RuleKindGroup   = "group"   // a group section heading
+)
+
+// IsNote reports whether r is a comment row or group heading rather than a
+// rule.
+func (r Rule) IsNote() bool {
+	return r.Kind == RuleKindComment || r.Kind == RuleKindGroup
+}
 
 type NatRule struct {
 	Base

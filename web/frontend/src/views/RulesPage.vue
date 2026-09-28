@@ -162,23 +162,26 @@ function moveInChain(rows, chain, moveTo, from, to) {
   moveTo(rows.indexOf(sub[from]), rows.indexOf(sub[to]))
 }
 
-// insertInChain adds a rule (through the form) or a comment row at index
-// `at` of one chain's table, placed at the matching spot of the full list.
+// insertInChain adds a rule (through the form), a comment row or a group
+// heading at index `at` of one chain's table, placed at the matching spot of
+// the full list.
 function insertInChain(rows, chain, { openCreate, createAt }, kind, at) {
   const sub = rows.filter((r) => r.chain === chain)
   let index = rows.length
   if (at < sub.length) index = rows.indexOf(sub[at])
   else if (sub.length) index = rows.indexOf(sub[sub.length - 1]) + 1
-  if (kind === 'comment') return createAt({ chain, kind: 'comment', description: '' }, index)
+  if (kind !== 'rule') return createAt({ chain, kind, description: '' }, index)
   openCreate({ chain }, index)
   return null
 }
 
-// ruleName names a rule as its chain's table numbers it (comment rows
-// left out), like the server's messages: "forward rule 2 (description)".
+// ruleName names a rule as its chain's table numbers it (comment and group
+// rows left out), like the server's messages: "forward rule 2 (description)".
+// A group is only its heading: deleting it keeps its rules.
 function ruleName(r, rows) {
   if (r.kind === 'comment') return 'comment'
-  const sub = rows.filter((x) => x.chain === r.chain && x.kind !== 'comment')
+  if (r.kind === 'group') return `group ${r.description || '(unnamed)'} (its rules stay)`
+  const sub = rows.filter((x) => x.chain === r.chain && !x.kind)
   const name = `${r.chain} rule ${sub.findIndex((x) => x.id === r.id) + 1}`
   return r.description ? `${name} (${r.description})` : name
 }
@@ -206,7 +209,7 @@ function clean(b) {
   <NeedInstance>
     <CrudPage
       title="Rules"
-      info="Evaluated top to bottom; the first match decides. Edit cells in place (changes save at once), drag the grip to reorder, right-click a row to insert a rule or comment. Established connections are allowed, and so is what the configured services (DHCP, DNS, WireGuard) need: those input rules are shown locked and follow the services' settings. In the default instance the agent's management port stays open to its allow_from addresses. Invalid packets (of no known connection) and traffic to or through the firewall that no rule accepts are dropped; the locked rows at the top and bottom of each chain count them."
+      info="Evaluated top to bottom; the first match decides. Edit cells in place (changes save at once), drag the grip to reorder, right-click a row to insert a rule, comment or group. A group heads the rows below it up to the next group; its chevron folds them away (only in the view: folded rules still apply). Established connections are allowed, and so is what the configured services (DHCP, DNS, WireGuard) need: those input rules are shown locked and follow the services' settings. In the default instance the agent's management port stays open to its allow_from addresses. Invalid packets (of no known connection) and traffic to or through the firewall that no rule accepts are dropped; the locked rows at the top and bottom of each chain count them."
       :api="api"
       :params="{ instance_id: store.currentId }"
       :columns="[]"
