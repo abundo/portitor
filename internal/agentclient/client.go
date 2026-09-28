@@ -140,6 +140,12 @@ func (c *Client) Leases(ctx context.Context) (*agentapi.LeasesResponse, error) {
 	return &l, c.do(ctx, http.MethodGet, "/v1/leases", nil, &l)
 }
 
+// RuleCounters returns the traffic counted per rule since the last apply.
+func (c *Client) RuleCounters(ctx context.Context) (*agentapi.RuleCountersResponse, error) {
+	var r agentapi.RuleCountersResponse
+	return &r, c.do(ctx, http.MethodGet, "/v1/rule-counters", nil, &r)
+}
+
 // Logs returns the agent's log records with an id above after.
 func (c *Client) Logs(ctx context.Context, after int64) (*agentapi.LogsResponse, error) {
 	var l agentapi.LogsResponse

@@ -13,6 +13,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRowDrag } from '@/composables/useRowDrag'
 import { useObjectStore } from '@/stores/objects'
+import { bytes } from '@/utils/bytes'
 
 const props = defineProps({
   rows: { type: Array, required: true },
@@ -24,6 +25,9 @@ const props = defineProps({
   // Interface zones and interfaces of the instance ({ value, description }),
   // for suggestions.
   ifaces: { type: Array, required: true },
+  // Traffic per rule id since the last deploy (agentapi.RuleCounters), or
+  // null when unknown.
+  counters: { type: Object, default: null },
   // insert(kind, index): add a 'rule' or 'comment' at index of rows.
   insert: { type: Function, required: true },
 })
@@ -143,7 +147,7 @@ const nameSuggestions = computed(() =>
 
 const hasFrom = computed(() => props.chain !== 'output')
 const hasTo = computed(() => props.chain !== 'input')
-const colCount = computed(() => 12 + hasFrom.value + hasTo.value)
+const colCount = computed(() => 13 + hasFrom.value + hasTo.value)
 const families = [
   { label: 'any', value: 'any' },
   { label: 'IPv4', value: 'ipv4' },
@@ -167,6 +171,23 @@ const autoTitle = (a) =>
   a.service === 'anti-lockout'
     ? 'Added by portitor-agent so allow_from keeps reaching its API; set anti_lockout in agent.yaml to change it'
     : 'Added for a configured service; change the service to change this rule'
+
+// The traffic cell shows In above Out. In is what the rule matched plus the
+// rest of the connections it accepted in the same direction, sent by the
+// side that opened them; Out the replies. Rules the agent has no counters
+// for (not deployed, disabled) show nothing.
+const counter = (r) => props.counters?.[r.id]
+function counterTitle(r) {
+  const c = counter(r)
+  if (!c) return props.counters ? 'Not deployed' : 'Agent not reachable'
+  const line = (label, dir, what) =>
+    `${label}: ${c[`${dir}_bytes`].toLocaleString()} bytes, ${c[`${dir}_packets`].toLocaleString()} packets ${what}`
+  return [
+    line('In', 'orig', 'from the side that opened the connection'),
+    line('Out', 'reply', 'of replies'),
+    'since the last deploy',
+  ].join('\n')
+}
 
 const hasPorts = (r) => r.protocol === 'tcp' || r.protocol === 'udp'
 
@@ -214,7 +235,7 @@ function onKeydown(event, index) {
       class="rules-grid overflow-auto rounded-md ring ring-default"
       @contextmenu.capture="captureMenuRow"
     >
-      <table class="w-full min-w-[64rem] table-fixed border-collapse text-xs">
+      <table class="w-full min-w-[68rem] table-fixed border-collapse text-xs">
         <colgroup>
           <col class="w-7" />
           <col class="w-14" />
@@ -229,6 +250,7 @@ function onKeydown(event, index) {
           <col />
           <col class="w-18" />
           <col class="w-8" />
+          <col class="w-24" />
           <col />
         </colgroup>
         <thead>
@@ -246,6 +268,12 @@ function onKeydown(event, index) {
             <th>Destination</th>
             <th>Action</th>
             <th title="Log matches">Log</th>
+            <th
+              class="text-end"
+              title="Bytes since the last deploy. In: sent by the side that opened the connections; out: the replies"
+            >
+              In / Out
+            </th>
             <th>Description</th>
           </tr>
         </thead>
@@ -283,6 +311,7 @@ function onKeydown(event, index) {
             </td>
             <td><span class="text-muted">any</span></td>
             <td><span class="font-semibold text-success">accept</span></td>
+            <td />
             <td />
             <td>
               <span>{{ autoDescription(a) }}</span>
@@ -476,6 +505,12 @@ function onKeydown(event, index) {
                   @change="set(r, 'log', $event.target.checked)"
                 />
               </td>
+              <td class="counter" :title="counterTitle(r)">
+                <template v-if="counter(r)">
+                  <div><span class="dir">in</span>{{ bytes(counter(r).orig_bytes) }}</div>
+                  <div><span class="dir">out</span>{{ bytes(counter(r).reply_bytes) }}</div>
+                </template>
+              </td>
               <td>
                 <input
                   :value="r.description"
@@ -592,6 +627,18 @@ function onKeydown(event, index) {
   color: var(--ui-text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.rules-grid td.counter {
+  padding-inline: 0.375rem;
+  font-size: 0.6875rem;
+  line-height: 0.875rem;
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+  color: var(--ui-text-muted);
+}
+.rules-grid td.counter .dir {
+  float: inline-start;
+  opacity: 0.7;
 }
 .rules-grid tr.rule-comment td {
   background: color-mix(in oklab, var(--ui-bg-elevated) 40%, transparent);

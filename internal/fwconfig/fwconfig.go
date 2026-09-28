@@ -128,6 +128,12 @@ const (
 // addresses. A version is left out when a non-empty list has none of its
 // addresses (Family and an icmp/icmpv6 Protocol narrow it further).
 type Rule struct {
+	// ID identifies the rule across deployments (portitor-web's database
+	// id). A rule with an ID gets named nftables counters and marks the
+	// connections it accepts with it, so their traffic is counted under
+	// the rule (render.RuleCounter); 0 is a plain counter. IDs are unique
+	// in the document and not set on comment rows.
+	ID    uint32 `json:"id,omitempty"`
 	Chain string `json:"chain"`
 	// Kind is empty for a rule or RuleKindComment for a comment row, which
 	// has only Chain and Description and is rendered as a rule that holds

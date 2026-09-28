@@ -31,6 +31,7 @@ import (
 type agentAPI interface {
 	Status(ctx context.Context) (*agentapi.Status, error)
 	Leases(ctx context.Context) (*agentapi.LeasesResponse, error)
+	RuleCounters(ctx context.Context) (*agentapi.RuleCountersResponse, error)
 	Logs(ctx context.Context, after int64) (*agentapi.LogsResponse, error)
 	Render(ctx context.Context, doc fwconfig.Document) (*agentapi.RenderResult, error)
 	Apply(ctx context.Context, doc fwconfig.Document, confirmTimeout int) (*agentapi.ApplyResult, error)
@@ -147,6 +148,7 @@ func (s *Server) Echo() *echo.Echo {
 	g.GET("/deployments", s.handleDeployments)
 	g.GET("/agent/status", s.handleAgentStatus)
 	g.GET("/agent/leases", s.handleAgentLeases)
+	g.GET("/agent/rule-counters", s.handleAgentRuleCounters)
 	g.GET("/agent/logs", s.handleAgentLogs)
 	g.GET("/agent/console", s.handleAgentConsole)
 

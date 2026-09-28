@@ -34,6 +34,9 @@ func (a *Agent) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/leases", func(w http.ResponseWriter, r *http.Request) {
 		writeJSONResponse(w, http.StatusOK, agentapi.LeasesResponse{Client: a.dhcp.Leases(), Server: a.ServerLeases()})
 	})
+	mux.HandleFunc("GET /v1/rule-counters", func(w http.ResponseWriter, r *http.Request) {
+		writeJSONResponse(w, http.StatusOK, a.RuleCounters(r.Context()))
+	})
 	mux.HandleFunc("GET /v1/logs", func(w http.ResponseWriter, r *http.Request) {
 		after, _ := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
 		writeJSONResponse(w, http.StatusOK, agentapi.LogsResponse{Entries: Logs.After(after)})

@@ -740,6 +740,20 @@ func (s *Server) handleAgentLeases(c *echo.Context) error {
 	return c.JSON(http.StatusOK, l)
 }
 
+// handleAgentRuleCounters passes on the traffic per rule (by rule id), for
+// the Rules page.
+func (s *Server) handleAgentRuleCounters(c *echo.Context) error {
+	a, _, err := s.agent()
+	if err != nil {
+		return agentError(c, err)
+	}
+	rc, err := a.RuleCounters(c.Request().Context())
+	if err != nil {
+		return agentError(c, err)
+	}
+	return c.JSON(http.StatusOK, rc)
+}
+
 // handleAgentLogs passes on the agent's log records after ?after=<id>,
 // for the log panel.
 func (s *Server) handleAgentLogs(c *echo.Context) error {

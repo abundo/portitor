@@ -135,22 +135,79 @@ func TestNftablesSyntax(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	b, err := Render(fwconfig.SampleDocument(), Options{Paths: paths, Units: DefaultUnits()})
+	// Rules without and with IDs (named counters, connection marks).
+	for _, doc := range []fwconfig.Document{fwconfig.SampleDocument(), withRuleIDs(fwconfig.SampleDocument())} {
+		b, err := Render(doc, Options{Paths: paths, Units: DefaultUnits()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, f := range b.Files {
+			if !strings.HasSuffix(f.Path, ".nft") {
+				continue
+			}
+			path := filepath.Join(t.TempDir(), "rules.nft")
+			if err := os.WriteFile(path, []byte(f.Content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			// The ruleset refers to the interfaces only by name, and the
+			// leading "delete table" needs the table to exist.
+			if out, err := exec.Command("unshare", "-rn", "nft", "-c", "-f", path).CombinedOutput(); err != nil {
+				t.Errorf("%s: nft -c failed: %v\n%s\n%s", f.Path, err, out, f.Content)
+			}
+		}
+	}
+}
+
+// withRuleIDs numbers the rules of every instance from 1, as the database
+// ids would (unique in the document).
+func withRuleIDs(doc fwconfig.Document) fwconfig.Document {
+	id := uint32(0)
+	for i := range doc.Instances {
+		for j := range doc.Instances[i].Rules {
+			if r := &doc.Instances[i].Rules[j]; r.Kind != fwconfig.RuleKindComment {
+				id++
+				r.ID = id
+			}
+		}
+	}
+	return doc
+}
+
+func TestNftablesRuleCounters(t *testing.T) {
+	doc := withRuleIDs(fwconfig.SampleDocument())
+	b, err := Render(doc, Options{Paths: DefaultPaths(), Units: DefaultUnits()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, f := range b.Files {
-		if !strings.HasSuffix(f.Path, ".nft") {
-			continue
+	nft := mustFile(t, b, "/etc/portitor/instances/main/nftables.nft")
+	for _, want := range []string{
+		"\tcounter rule_1_orig {\n\t}\n",
+		"\tcounter rule_1_reply {\n\t}\n",
+		`elements = { 1 : "rule_1_orig", `,
+		`iifname "eth1" oifname "eth0" counter name "rule_1_orig" ct mark set 1 accept comment "rule 1: LAN to Internet"`,
+		`iifname "eth1.20" counter name "rule_11_orig" jump reject_pkt comment "rule 11"`,
+		"policy drop;\n" + connCountRules + "\t\tct state established,related accept\n",
+	} {
+		if !strings.Contains(nft, want) {
+			t.Errorf("missing %q in\n%s", want, nft)
 		}
-		path := filepath.Join(t.TempDir(), "rules.nft")
-		if err := os.WriteFile(path, []byte(f.Content), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		// The ruleset refers to the interfaces only by name, and the
-		// leading "delete table" needs the table to exist.
-		if out, err := exec.Command("unshare", "-rn", "nft", "-c", "-f", path).CombinedOutput(); err != nil {
-			t.Errorf("%s: nft -c failed: %v\n%s\n%s", f.Path, err, out, f.Content)
+	}
+	// Only accept rules mark connections, so only they are in the maps.
+	if strings.Contains(nft, `11 : "rule_11_orig"`) {
+		t.Errorf("reject rule in the connection maps:\n%s", nft)
+	}
+	if n := strings.Count(nft, connCountRules); n != 3 {
+		t.Errorf("connection count rules in %d chains, want 3", n)
+	}
+}
+
+func TestParseRuleCounter(t *testing.T) {
+	if id, dir, ok := ParseRuleCounter(RuleCounter(42, CounterReply)); !ok || id != 42 || dir != CounterReply {
+		t.Errorf("round trip: %d %q %v", id, dir, ok)
+	}
+	for _, bad := range []string{"rule_0_orig", "rule_x_orig", "rule_1_in", "rule_1", "foo", "rule_99999999999_orig"} {
+		if _, _, ok := ParseRuleCounter(bad); ok {
+			t.Errorf("%q parsed", bad)
 		}
 	}
 }

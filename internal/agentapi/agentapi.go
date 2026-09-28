@@ -32,6 +32,22 @@ type LeasesResponse struct {
 	Server map[string][]ServerLease `json:"server"`
 }
 
+// RuleCountersResponse is the traffic of each rule with an ID
+// (fwconfig.Rule.ID) since it was last applied.
+type RuleCountersResponse struct {
+	Rules map[uint32]RuleCounters `json:"rules"`
+}
+
+// RuleCounters counts a rule's traffic: Orig what the rule matched and the
+// rest of the connections it accepted in the same direction, sent by the
+// side that opened them; Reply the replies. Only accept rules have replies.
+type RuleCounters struct {
+	OrigPackets  uint64 `json:"orig_packets"`
+	OrigBytes    uint64 `json:"orig_bytes"`
+	ReplyPackets uint64 `json:"reply_packets"`
+	ReplyBytes   uint64 `json:"reply_bytes"`
+}
+
 type ErrorResponse struct {
 	Error    string   `json:"error"`
 	Problems []string `json:"problems,omitempty"`

@@ -6,6 +6,7 @@ import { computed, onMounted } from 'vue'
 import { useDeployStore } from '@/stores/deploy'
 import { useInstanceStore } from '@/stores/instances'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
+import { bytes } from '@/utils/bytes'
 
 const deploy = useDeployStore()
 const instances = useInstanceStore()
@@ -28,15 +29,6 @@ const peers = computed(() =>
   (inst.value?.wireguard ?? []).flatMap((w) => w.peers.map((p) => ({ ...p, iface: w.interface }))),
 )
 
-function bytes(n) {
-  const u = ['B', 'KB', 'MB', 'GB', 'TB']
-  let i = 0
-  while (n >= 1024 && i < u.length - 1) {
-    n /= 1024
-    i++
-  }
-  return `${n.toFixed(i ? 1 : 0)} ${u[i]}`
-}
 const ago = (t) =>
   t ? `${Math.round((Date.now() - new Date(t).getTime()) / 60000)} min ago` : 'never'
 const stateColor = (s) =>

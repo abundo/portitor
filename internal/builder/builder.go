@@ -9,6 +9,7 @@ package builder
 
 import (
 	"fmt"
+	"math"
 	"net/netip"
 	"slices"
 	"sort"
@@ -207,6 +208,7 @@ func Build(db *gorm.DB, generation int64) (*fwconfig.Document, error) {
 			where := fmt.Sprintf("instance %s: rule %d", mi.Name, len(in.Rules)+1)
 			failed = false
 			rule := fwconfig.Rule{
+				ID:            ruleID(r.ID),
 				Chain:         r.Chain,
 				InInterfaces:  []string(r.InInterfaces),
 				OutInterfaces: []string(r.OutInterfaces),
@@ -658,4 +660,13 @@ func contains(list []string, s string) bool {
 		}
 	}
 	return false
+}
+
+// ruleID is a rule's database id as its fwconfig.Rule ID (a connection
+// mark, 32 bits); an id that does not fit gets no rule counters.
+func ruleID(id uint) uint32 {
+	if id > math.MaxUint32 {
+		return 0
+	}
+	return uint32(id)
 }

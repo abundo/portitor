@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/netip"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/abundo/portitor/internal/fwconfig"
@@ -54,6 +55,8 @@ func Nftables(in *fwconfig.Instance, lockout *AntiLockout, paths Paths) string {
 		}
 	}
 
+	counted := writeRuleCounters(b, in.Rules)
+
 	b.WriteString("\tchain reject_pkt {\n")
 	b.WriteString("\t\tmeta l4proto tcp reject with tcp reset\n")
 	b.WriteString("\t\treject with icmpx port-unreachable\n")
@@ -62,6 +65,9 @@ func Nftables(in *fwconfig.Instance, lockout *AntiLockout, paths Paths) string {
 	// ----- input -----
 	b.WriteString("\tchain input {\n")
 	b.WriteString("\t\ttype filter hook input priority filter; policy drop;\n")
+	if counted {
+		b.WriteString(connCountRules)
+	}
 	b.WriteString("\t\tct state established,related accept\n")
 	b.WriteString("\t\tct state invalid drop\n")
 	b.WriteString("\t\tiif \"lo\" accept\n")
@@ -85,6 +91,9 @@ func Nftables(in *fwconfig.Instance, lockout *AntiLockout, paths Paths) string {
 	// ----- forward -----
 	b.WriteString("\tchain forward {\n")
 	b.WriteString("\t\ttype filter hook forward priority filter; policy drop;\n")
+	if counted {
+		b.WriteString(connCountRules)
+	}
 	b.WriteString("\t\tct state established,related accept\n")
 	b.WriteString("\t\tct state invalid drop\n")
 	b.WriteString("\t\tct status dnat accept comment \"port forwards\"\n")
@@ -95,6 +104,9 @@ func Nftables(in *fwconfig.Instance, lockout *AntiLockout, paths Paths) string {
 	// ----- output -----
 	b.WriteString("\tchain output {\n")
 	b.WriteString("\t\ttype filter hook output priority filter; policy drop;\n")
+	if counted {
+		b.WriteString(connCountRules)
+	}
 	b.WriteString("\t\tct state established,related accept\n")
 	b.WriteString("\t\tct state invalid drop\n")
 	b.WriteString("\t\toif \"lo\" accept\n")
@@ -126,6 +138,68 @@ func Nftables(in *fwconfig.Instance, lockout *AntiLockout, paths Paths) string {
 		fmt.Fprintf(b, "include %q\n", paths.IPListFile(name))
 	}
 	return b.String()
+}
+
+// Rule counters. A rule with an ID counts the packets it matches in a
+// named counter, and an accept rule marks the connection (ct mark) with the
+// ID, so the rest of the connection is counted under the rule too: the
+// connCountRules at the top of each filter chain look the mark up in the
+// rule_orig/rule_reply maps, before established packets are accepted. The
+// kernel ruleset is replaced on apply, so the counters restart from zero.
+const (
+	CounterOrig  = "orig"  // sent by the side that opened the connection
+	CounterReply = "reply" // the replies
+)
+
+// RuleCounter is the name of a rule's counter for one direction.
+func RuleCounter(id uint32, dir string) string {
+	return fmt.Sprintf("rule_%d_%s", id, dir)
+}
+
+// ParseRuleCounter is the inverse of RuleCounter.
+func ParseRuleCounter(name string) (id uint32, dir string, ok bool) {
+	rest, found := strings.CutPrefix(name, "rule_")
+	if !found {
+		return 0, "", false
+	}
+	num, dir, found := strings.Cut(rest, "_")
+	n, err := strconv.ParseUint(num, 10, 32)
+	if !found || err != nil || n == 0 || (dir != CounterOrig && dir != CounterReply) {
+		return 0, "", false
+	}
+	return uint32(n), dir, true
+}
+
+const connCountRules = "\t\tct direction original counter name ct mark map @rule_orig\n" +
+	"\t\tct direction reply counter name ct mark map @rule_reply\n"
+
+// writeRuleCounters declares the counters of the rules with an ID, and the
+// maps from connection mark to counter for the accept rules. It reports
+// whether there are any maps (and so connCountRules to write).
+func writeRuleCounters(b *strings.Builder, rules []fwconfig.Rule) bool {
+	var orig, reply []string
+	for _, r := range rules {
+		if r.Kind == fwconfig.RuleKindComment || r.ID == 0 {
+			continue
+		}
+		for _, dir := range []string{CounterOrig, CounterReply} {
+			fmt.Fprintf(b, "\tcounter %s {\n\t}\n\n", RuleCounter(r.ID, dir))
+		}
+		if r.Action == fwconfig.ActionAccept {
+			orig = append(orig, fmt.Sprintf("%d : %q", r.ID, RuleCounter(r.ID, CounterOrig)))
+			reply = append(reply, fmt.Sprintf("%d : %q", r.ID, RuleCounter(r.ID, CounterReply)))
+		}
+	}
+	if len(orig) == 0 {
+		return false
+	}
+	for _, m := range []struct {
+		dir   string
+		elems []string
+	}{{CounterOrig, orig}, {CounterReply, reply}} {
+		fmt.Fprintf(b, "\tmap rule_%s {\n\t\ttype mark : counter\n\t\telements = { %s }\n\t}\n\n", m.dir, strings.Join(m.elems, ", "))
+	}
+	return true
 }
 
 // SetName is the nftables set holding one IP version of an IP list.
@@ -257,12 +331,19 @@ func writeRule(b *strings.Builder, idx int, r fwconfig.Rule, in *fwconfig.Instan
 		return
 	}
 	var tail []string
-	tail = append(tail, "counter")
+	if r.ID != 0 {
+		tail = append(tail, fmt.Sprintf("counter name %q", RuleCounter(r.ID, CounterOrig)))
+	} else {
+		tail = append(tail, "counter")
+	}
 	if r.Log {
 		tail = append(tail, fmt.Sprintf("log prefix \"fw rule %d %s: \"", idx+1, r.Action))
 	}
 	switch r.Action {
 	case fwconfig.ActionAccept:
+		if r.ID != 0 {
+			tail = append(tail, fmt.Sprintf("ct mark set %d", r.ID))
+		}
 		tail = append(tail, "accept")
 	case fwconfig.ActionDrop:
 		tail = append(tail, "drop")

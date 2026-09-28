@@ -5,7 +5,7 @@
 import CrudPage from '@/components/CrudPage.vue'
 import NeedInstance from '@/components/NeedInstance.vue'
 import RulesTable from '@/components/RulesTable.vue'
-import { ref, watch } from 'vue'
+import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { api as backend, rules } from '@/api'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
 
@@ -19,6 +19,30 @@ async function loadAutoRules() {
   autoRules.value = await backend.autoRules(store.currentId).catch(() => [])
 }
 watch(() => store.currentId, loadAutoRules, { immediate: true })
+// Traffic per rule id since the last deploy (agentapi.RuleCounters),
+// polled every 5 seconds while the page is open and visible; null when the
+// agent can't be reached.
+const counters = ref(null)
+let countersTimer = null
+let polling = false
+async function pollCounters() {
+  if (!document.hidden) {
+    counters.value = await backend
+      .agentRuleCounters()
+      .then((r) => r.rules ?? {})
+      .catch(() => null)
+  }
+  if (polling) countersTimer = setTimeout(pollCounters, 5000)
+}
+onMounted(() => {
+  polling = true
+  pollCounters()
+})
+onUnmounted(() => {
+  polling = false
+  clearTimeout(countersTimer)
+})
+
 const opt = (list) => list.map((v) => ({ label: v || 'any', value: v }))
 
 const fields = [
@@ -191,6 +215,7 @@ function clean(b) {
               :chain="c.value"
               :auto="c.value === 'input' ? autoRules : []"
               :ifaces="ifaceRefItems"
+              :counters="counters"
               :insert="
                 (kind, at) => insertInChain(rows, c.value, { openCreate, createAt }, kind, at)
               "

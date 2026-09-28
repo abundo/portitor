@@ -50,6 +50,8 @@ type validator struct {
 	problems []string
 	// lists holds the names of the document's IP lists.
 	lists map[string]bool
+	// ruleIDs holds the rule IDs seen so far, document wide.
+	ruleIDs map[uint32]bool
 }
 
 func (v *validator) addf(format string, args ...any) {
@@ -60,7 +62,7 @@ func (v *validator) addf(format string, args ...any) {
 // sending and again by portitor-agent before rendering; the agent must not
 // trust its input, since every string ends up in a root-owned config file.
 func (d *Document) Validate() error {
-	v := &validator{lists: map[string]bool{}}
+	v := &validator{lists: map[string]bool{}, ruleIDs: map[uint32]bool{}}
 	if d.Version != Version {
 		v.addf("unsupported document version %d (want %d)", d.Version, Version)
 	}
@@ -234,7 +236,7 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 		}
 		if r.Kind == RuleKindComment {
 			if len(r.InInterfaces)+len(r.OutInterfaces)+len(r.SrcAddrs)+len(r.DstAddrs) > 0 ||
-				r.Family != "" || r.Protocol != "" || r.DstPorts != "" || r.Action != "" || r.Log {
+				r.Family != "" || r.Protocol != "" || r.DstPorts != "" || r.Action != "" || r.Log || r.ID != 0 {
 				v.addf("%s: a comment has only a chain and a description", rp)
 			}
 			checkComment(v, rp, r.Description)
@@ -242,6 +244,12 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 		}
 		if r.Kind != "" {
 			v.addf("%s: invalid kind %q", rp, r.Kind)
+		}
+		if r.ID != 0 {
+			if v.ruleIDs[r.ID] {
+				v.addf("%s: duplicate id %d", rp, r.ID)
+			}
+			v.ruleIDs[r.ID] = true
 		}
 		if r.Chain == ChainOutput && len(r.InInterfaces) > 0 {
 			v.addf("%s: output rules have no incoming interface", rp)

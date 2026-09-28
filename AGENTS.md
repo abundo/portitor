@@ -50,6 +50,9 @@ are in [README.md](README.md).
 - **The agent owns** the `inet firewall` table in each namespace, every `fw-*`
   namespace, routes with `proto 99`, and root-namespace virtual interfaces listed in
   `managed.json`. Leave everything else alone (docker, libvirt, other tables).
+  Accept rules set the connection mark (`ct mark`) to the rule's id, so the
+  rule counters (`render.RuleCounter`) count whole connections; the agent owns
+  `ct mark` in its namespaces.
 - **Commit-confirm:** the rollback target is the last *confirmed* document; a second
   apply while one is pending keeps it. `rollback.json` makes a pending change roll
   back after an agent restart too.

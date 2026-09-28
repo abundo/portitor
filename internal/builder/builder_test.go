@@ -107,6 +107,9 @@ func TestBuildHome(t *testing.T) {
 	if len(in.Rules) != 3 || in.Rules[0].Description != "first" || in.Rules[2].Kind != fwconfig.RuleKindComment || in.Rules[2].Description != "a comment" {
 		t.Errorf("rules not ordered by position / disabled not skipped / comment not kept: %+v", in.Rules)
 	}
+	if in.Rules[0].ID == 0 || in.Rules[1].ID == 0 || in.Rules[0].ID == in.Rules[1].ID || in.Rules[2].ID != 0 {
+		t.Errorf("rule ids must be the database ids, none on comments: %+v", in.Rules)
+	}
 	if len(in.DHCP.Subnets) != 1 {
 		t.Fatalf("dhcp subnets %+v", in.DHCP.Subnets)
 	}

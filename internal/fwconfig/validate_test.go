@@ -36,6 +36,8 @@ func TestValidateCatchesProblems(t *testing.T) {
 		{"bad port range", func(d *Document) { d.Instances[0].Rules[2].DstPorts = "90-80" }, "invalid port range"},
 		{"ifname injection", func(d *Document) { d.Instances[0].Interfaces[1].Name = `eth1" accept` }, "name must match"},
 		{"comment with match", func(d *Document) { d.Instances[0].Rules[11].Protocol = "tcp" }, "a comment has only"},
+		{"duplicate rule id", func(d *Document) { d.Instances[0].Rules[0].ID, d.Instances[1].Rules[0].ID = 7, 7 }, "duplicate id 7"},
+		{"comment with id", func(d *Document) { d.Instances[0].Rules[11].ID = 7 }, "a comment has only"},
 		{"bad rule kind", func(d *Document) { d.Instances[0].Rules[0].Kind = "note" }, `invalid kind "note"`},
 		{"comment newline", func(d *Document) { d.Instances[0].Rules[0].Description = "a\nflush ruleset" }, "control characters"},
 		{"no common family", func(d *Document) {
