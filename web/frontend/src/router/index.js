@@ -34,11 +34,13 @@ const router = createRouter({
         { path: 'dhcp', component: () => import('@/views/DhcpPage.vue') },
         { path: 'wireguard', component: () => import('@/views/WireguardPage.vue') },
         { path: 'deploy', component: () => import('@/views/DeployPage.vue') },
+        { path: 'console', component: () => import('@/views/ConsolePage.vue') },
         { path: 'settings', component: () => import('@/views/SettingsPage.vue') },
         { path: 'profile', component: () => import('@/views/ProfilePage.vue') },
         { path: 'profile/password', component: () => import('@/views/ChangePasswordPage.vue') },
       ],
     },
+    { path: '/console/window', component: () => import('@/views/ConsoleWindowPage.vue') },
     { path: '/:pathMatch(.*)*', redirect: '/' },
   ],
 })

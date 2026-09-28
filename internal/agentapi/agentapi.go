@@ -184,3 +184,11 @@ type LogEntry struct {
 type LogsResponse struct {
 	Entries []LogEntry `json:"entries"`
 }
+
+// ConsoleResize is the one text message on the console WebSocket
+// (/v1/console, and /api/agent/console in portitor-web, which passes
+// messages through). Binary messages are terminal data both ways.
+type ConsoleResize struct {
+	Cols uint16 `json:"cols"`
+	Rows uint16 `json:"rows"`
+}

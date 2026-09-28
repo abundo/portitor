@@ -21,6 +21,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/coder/websocket"
+
 	"github.com/abundo/portitor/internal/agentapi"
 	"github.com/abundo/portitor/internal/fwconfig"
 )
@@ -161,4 +163,27 @@ func (c *Client) Confirm(ctx context.Context, generation int64) error {
 func (c *Client) Rollback(ctx context.Context) (*agentapi.ApplyResult, error) {
 	var r agentapi.ApplyResult
 	return &r, c.do(ctx, http.MethodPost, "/v1/rollback", struct{}{}, &r)
+}
+
+// Console opens the agent's console WebSocket (agentapi.ConsoleResize).
+func (c *Client) Console(ctx context.Context) (*websocket.Conn, error) {
+	conn, resp, err := websocket.Dial(ctx, c.baseURL+"/v1/console", &websocket.DialOptions{
+		HTTPClient: c.http,
+		HTTPHeader: http.Header{"Authorization": {"Bearer " + c.token}},
+	})
+	if err != nil {
+		if resp != nil && resp.StatusCode != http.StatusSwitchingProtocols {
+			var e agentapi.ErrorResponse
+			if resp.Body != nil {
+				data, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+				_ = json.Unmarshal(data, &e)
+			}
+			if e.Error == "" {
+				e.Error = http.StatusText(resp.StatusCode)
+			}
+			return nil, &Error{Status: resp.StatusCode, Message: e.Error}
+		}
+		return nil, fmt.Errorf("agent unreachable: %w", err)
+	}
+	return conn, nil
 }

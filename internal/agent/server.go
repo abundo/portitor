@@ -98,6 +98,7 @@ func (a *Agent) Handler() http.Handler {
 		}
 		writeJSONResponse(w, http.StatusOK, res)
 	})
+	mux.HandleFunc("GET /v1/console", a.handleConsole)
 	return a.authMiddleware(mux)
 }
 

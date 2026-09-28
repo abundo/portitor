@@ -8,6 +8,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useInstanceStore } from '@/stores/instances'
 import { useDeployStore } from '@/stores/deploy'
 import { useLogPanel } from '@/composables/useLogPanel'
+import { openConsoleWindow } from '@/composables/useConsoleWindow'
 import { api } from '@/api'
 
 defineEmits(['toggle-menu'])
@@ -114,6 +115,15 @@ const userMenu = computed(() => [
           :variant="logPanel.open ? 'soft' : 'ghost'"
           aria-label="Agent log"
           @click="toggleLog"
+        />
+      </UTooltip>
+      <UTooltip text="Open console window">
+        <UButton
+          icon="i-lucide-square-terminal"
+          color="neutral"
+          variant="ghost"
+          aria-label="Console"
+          @click="openConsoleWindow"
         />
       </UTooltip>
       <UDropdownMenu :items="userMenu">

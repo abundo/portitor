@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/coder/websocket"
 	"github.com/labstack/echo/v5"
 	"github.com/labstack/echo/v5/middleware"
 	"gorm.io/gorm"
@@ -35,6 +36,7 @@ type agentAPI interface {
 	Apply(ctx context.Context, doc fwconfig.Document, confirmTimeout int) (*agentapi.ApplyResult, error)
 	Confirm(ctx context.Context, generation int64) error
 	Rollback(ctx context.Context) (*agentapi.ApplyResult, error)
+	Console(ctx context.Context) (*websocket.Conn, error)
 }
 
 type Server struct {
@@ -137,6 +139,7 @@ func (s *Server) Echo() *echo.Echo {
 	g.GET("/agent/status", s.handleAgentStatus)
 	g.GET("/agent/leases", s.handleAgentLeases)
 	g.GET("/agent/logs", s.handleAgentLogs)
+	g.GET("/agent/console", s.handleAgentConsole)
 
 	api.Any("/*", func(c *echo.Context) error { return errJSON(c, http.StatusNotFound, "no such API endpoint") })
 

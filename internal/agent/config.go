@@ -39,6 +39,9 @@ type Config struct {
 	Paths    render.Paths `yaml:"paths"`
 	Units    render.Units `yaml:"units"`
 	LogLevel string       `yaml:"log_level"`
+	// ConsoleUser is the account the web console's shell runs as. "none"
+	// turns the console off.
+	ConsoleUser string `yaml:"console_user"`
 
 	token string
 }
@@ -79,6 +82,9 @@ func (c *Config) applyDefaults() {
 	}
 	if c.BindUser == "" {
 		c.BindUser = "bind"
+	}
+	if c.ConsoleUser == "" {
+		c.ConsoleUser = "portitor"
 	}
 	if c.Paths.EtcDir == "" {
 		c.Paths.EtcDir = def.EtcDir

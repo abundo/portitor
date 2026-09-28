@@ -74,6 +74,11 @@ ip prefix/addresses are handled by a hierarchical tree
 - **GUI.** bcrypt passwords, login rate limiting, HttpOnly SameSite=Strict session
   cookie, JSON-only mutating requests (CSRF), strict CSP. Private keys are never sent
   to the browser, except a generated WireGuard client config.
+- **Console.** *Console* in the menu (or its own window, from the top bar) is a
+  shell on the firewall that the agent runs as `console_user` in `agent.yaml`
+  (default `portitor`; `none` turns it off). The shell has that user's rights,
+  which on a host set up by `install.py` include sudo. portitor-web allows the
+  WebSocket from its own origin only, and logs who opened it.
 
 ## Install
 

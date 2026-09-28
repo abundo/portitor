@@ -7,6 +7,8 @@ go 1.26.0
 
 require (
 	github.com/abundo/dnsmgr2 v1.2.1
+	github.com/coder/websocket v1.8.15
+	github.com/creack/pty v1.1.24
 	github.com/glebarez/sqlite v1.11.0
 	github.com/goccy/go-yaml v1.19.2
 	github.com/golang-jwt/jwt/v5 v5.3.1

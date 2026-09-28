@@ -18,6 +18,7 @@ allow_from:
 
 # anti_lockout: true
 # bind_user: bind          # BIND's user: bind (Debian) or named (Fedora)
+# console_user: portitor  # the web console's shell runs as this user; none = off
 # dry_run: false           # render and log only; change nothing
 # log_level: info
 

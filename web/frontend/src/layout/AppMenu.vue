@@ -29,7 +29,10 @@ const items = [
     { label: 'DHCP', icon: 'i-lucide-list-ordered', to: '/dhcp' },
     { label: 'WireGuard', icon: 'i-lucide-key-round', to: '/wireguard' },
   ],
-  [{ label: 'Settings', icon: 'i-lucide-settings', to: '/settings' }],
+  [
+    { label: 'Console', icon: 'i-lucide-square-terminal', to: '/console' },
+    { label: 'Settings', icon: 'i-lucide-settings', to: '/settings' },
+  ],
 ]
 </script>
 
