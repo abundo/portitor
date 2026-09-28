@@ -33,7 +33,7 @@ portitor-web start                 # serve the GUI and API
 portitor-web migrate               # apply database migrations; start never migrates
 portitor-web createadmin <user>    # create a user, or reset a user's password
 portitor-web agent-url             # print the agent URL from Settings (used by install.py)
-portitor-web bootstrap ...         # first configuration of an ISO install (firstboot.py runs it)
+portitor-web bootstrap ...         # first configuration of an ISO install (portitor-setup runs it)
 ```
 
 `createadmin` asks for the password twice on a terminal, or reads one line from stdin.

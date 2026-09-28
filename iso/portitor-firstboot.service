@@ -3,7 +3,7 @@
 
 # First-boot setup of a firewall installed from the Portitor ISO: asks for
 # the LAN interface and address on tty1, before the login prompt, until it
-# has finished once.
+# has finished once. After that, `sudo portitor-setup` changes the network.
 [Unit]
 Description=Portitor first-boot setup
 ConditionPathExists=!/var/lib/portitor/firstboot.done
@@ -12,7 +12,7 @@ Before=getty@tty1.service
 
 [Service]
 Type=oneshot
-ExecStart=/usr/lib/portitor/firstboot.py
+ExecStart=/usr/bin/portitor-setup
 StandardInput=tty
 StandardOutput=tty
 StandardError=tty

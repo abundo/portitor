@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # SPDX-FileCopyrightText: 2026 The Portitor contributors
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""First-boot setup of a firewall installed from the Portitor ISO.
+"""Setup of a firewall installed from the Portitor ISO (portitor-setup).
 
-Runs on tty1 (portitor-firstboot.service) until it has finished once. It
-asks for the LAN interface and its address, the WAN interface (DHCP, or a
+Runs on tty1 at boot (portitor-firstboot.service) until it has finished
+once. It asks for the LAN interface and its address, the WAN interface (DHCP, or a
 static address and the default gateway), the DNS servers, a password and
 the time zone, then:
 
@@ -20,6 +20,14 @@ the time zone, then:
 
 Every step can be repeated; a failed one is retried with the same answers.
 
+Run again (`sudo portitor-setup`) after it has finished, it changes the
+network: the LAN and WAN interfaces and addresses, DHCP or static WAN, the
+default gateway, the DNS servers and the time zone, with the last answers
+(SETUP_STATE) as defaults; a password is optional there. It leaves the
+database, the agent and every other interface alone, runs `portitor-web
+bootstrap --reconfigure`, and makes a new GUI certificate when the LAN
+address changes.
+
 With /etc/portitor/firstboot.answers (an ISO built with `iso/build.sh
 --test`), nothing is asked: it holds "key: value" lines for lan (a name or
 MAC address), address, wan (a name or MAC address, optional), wan_address
@@ -32,6 +40,7 @@ from __future__ import annotations
 
 import getpass
 import ipaddress
+import json
 import os
 import re
 import secrets
@@ -45,8 +54,10 @@ import urllib.request
 from pathlib import Path
 
 DONE = Path("/var/lib/portitor/firstboot.done")
+# The last answers (no password): the defaults when the setup runs again.
+SETUP_STATE = Path("/var/lib/portitor/setup.json")
 ANSWERS = Path("/etc/portitor/firstboot.answers")
-LOG = Path("/var/log/portitor-firstboot.log")
+LOG = Path("/var/log/portitor-setup.log")
 ETC = Path("/etc/portitor")
 WEB_YAML = ETC / "web.yaml"
 AGENT_YAML = ETC / "agent.yaml"
@@ -135,7 +146,7 @@ def ask(prompt: str, default: str = "") -> str:
             return answer or default
 
 
-def ask_nic(role: str, explain: str, taken: str = "") -> str:
+def ask_nic(role: str, explain: str, taken: str = "", default: str = "") -> str:
     while True:
         found = nics()
         if not found:
@@ -150,7 +161,9 @@ def ask_nic(role: str, explain: str, taken: str = "") -> str:
             say(f"  {i}  {n['name']:<16} {n['mac']:<18} {link:<8} {n['driver']} {n['speed']}{used}")
         say()
         say(explain)
-        answer = ask(f"{role} interface (1-{len(found)} or name, r reloads)")
+        if not any(n["name"] == default for n in found):
+            default = ""
+        answer = ask(f"{role} interface (1-{len(found)} or name, r reloads)", default)
         if answer.lower() == "r":
             continue
         if answer.isdigit() and 1 <= int(answer) <= len(found):
@@ -170,14 +183,14 @@ def links_up() -> None:
     time.sleep(2)
 
 
-def ask_lan() -> str:
+def ask_lan(default: str = "") -> str:
     return ask_nic("LAN", "The LAN interface is where you reach the GUI from. Plug in its cable to see\n"
-                   "which one it is; r reloads the list.")
+                   "which one it is; r reloads the list.", default=default)
 
 
-def ask_wan(lan: str) -> str:
+def ask_wan(lan: str, default: str = "") -> str:
     return ask_nic("WAN", "The WAN interface connects to the Internet, which the firewall needs for\n"
-                   "updates. Plug in its cable to see which one it is; r reloads the list.", lan)
+                   "updates. Plug in its cable to see which one it is; r reloads the list.", lan, default)
 
 
 def ask_address(role: str, default: str = "",
@@ -202,20 +215,21 @@ def ask_address(role: str, default: str = "",
             return iface
 
 
-def ask_wan_address(lan: ipaddress.IPv4Interface) -> ipaddress.IPv4Interface | None:
+def ask_wan_address(lan: ipaddress.IPv4Interface,
+                    default: ipaddress.IPv4Interface | None = None) -> ipaddress.IPv4Interface | None:
     """None is DHCP."""
     while True:
-        answer = ask("WAN IPv4: dhcp or static", "dhcp").lower()
+        answer = ask("WAN IPv4: dhcp or static", "static" if default else "dhcp").lower()
         if answer == "dhcp":
             return None
         if answer == "static":
-            return ask_address("WAN", other=lan)
+            return ask_address("WAN", str(default or ""), other=lan)
         say("  dhcp or static")
 
 
-def ask_gateway(addr: ipaddress.IPv4Interface) -> ipaddress.IPv4Address:
+def ask_gateway(addr: ipaddress.IPv4Interface, default: str = "") -> ipaddress.IPv4Address:
     while True:
-        answer = ask("Default gateway")
+        answer = ask("Default gateway", default)
         try:
             gw = ipaddress.IPv4Address(answer)
         except ValueError:
@@ -234,19 +248,22 @@ def parse_dns(answer: str) -> list[str]:
     return servers
 
 
-def ask_dns() -> list[str]:
+def ask_dns(default: str = PUBLIC_DNS) -> list[str]:
     say("DNS servers the firewall itself uses (updates, IP lists).")
     while True:
-        answer = ask("DNS servers", PUBLIC_DNS)
+        answer = ask("DNS servers", default)
         try:
             return parse_dns(answer)
         except ValueError:
             say("  one to three IP addresses, separated by spaces")
 
 
-def ask_password() -> str:
+def ask_password(optional: bool = False) -> str:
+    """With optional, empty keeps the passwords."""
     while True:
-        a = getpass.getpass(f"Password ({MIN_PASSWORD}+ characters): ")
+        a = getpass.getpass(f"Password ({MIN_PASSWORD}+ characters{', empty keeps it' if optional else ''}): ")
+        if optional and not a:
+            return ""
         if len(a) < MIN_PASSWORD:
             say(f"  at least {MIN_PASSWORD} characters")
             continue
@@ -306,7 +323,7 @@ def step_database(a: dict) -> None:
     run(["install", "-d", "-o", WEB_USER, "-g", WEB_GROUP, "-m", "0700", str(WEB_DB_DIR)])
 
 
-def step_web_config(a: dict) -> None:
+def step_cert(a: dict) -> None:
     host = socket.gethostname()
     run([
         "openssl", "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1",
@@ -317,6 +334,16 @@ def step_web_config(a: dict) -> None:
     for f in (WEB_KEY, WEB_CERT):
         os.chmod(f, 0o640)
         shutil.chown(f, "root", WEB_GROUP)
+
+
+def step_new_cert(a: dict) -> None:
+    # The certificate names the LAN address.
+    if a["new_cert"]:
+        step_cert(a)
+
+
+def step_web_config(a: dict) -> None:
+    step_cert(a)
     write(WEB_YAML, f"""# /etc/portitor/web.yaml - written by the first-boot setup.
 # portitor-web runs on the firewall; the ruleset lets the LAN reach it.
 bind: ":{GUI_PORT}"
@@ -337,6 +364,8 @@ CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 
 
 def step_users(a: dict) -> None:
+    if not a["password"]:
+        return
     run(web("createadmin", GUI_USER), stdin=a["password"] + "\n")
     run(["chpasswd"], stdin=f"{CONSOLE_USER}:{a['password']}\n", quiet=True)
 
@@ -362,14 +391,18 @@ console_user: {CONSOLE_USER}
 
 
 def step_bootstrap(a: dict) -> None:
+    argv = web("bootstrap", "--lan", a["lan"], "--address", str(a["address"]), "--gui-port", str(GUI_PORT))
+    if a.get("reconfigure"):
+        # The agent settings stay as they are.
+        argv.append("--reconfigure")
+        run(argv)
+        return
     # The token file is root's; the web user reads it from stdin.
-    argv = web(
-        "bootstrap",
+    argv += [
         "--agent-url", f"https://{AGENT_LISTEN}",
         "--agent-token-file", "/dev/stdin",
         "--agent-fingerprint", a["fingerprint"],
-        "--lan", a["lan"], "--address", str(a["address"]), "--gui-port", str(GUI_PORT),
-    )
+    ]
     if a["wan"]:
         argv += ["--wan", a["wan"]]
     if a["wan_address"]:
@@ -406,6 +439,7 @@ Certificate SHA-256: {fp}
 """, 0o644)
 
 
+# The first setup.
 STEPS = [
     ("Interfaces", step_links),
     ("DNS servers", step_dns),
@@ -416,6 +450,17 @@ STEPS = [
     ("portitor-agent", step_agent),
     ("Deploy the LAN and WAN configuration", step_bootstrap),
     ("Start portitor-web", step_web),
+    ("Login screen", step_issue),
+]
+
+# Run again: the network only.
+RECONFIGURE_STEPS = [
+    ("DNS servers", step_dns),
+    ("Time zone", step_timezone),
+    ("GUI certificate", step_new_cert),
+    ("Users", step_users),
+    ("Deploy the LAN and WAN configuration", step_bootstrap),
+    ("Restart portitor-web", step_web),
     ("Login screen", step_issue),
 ]
 
@@ -446,10 +491,25 @@ def read_answers() -> dict:
     }
 
 
-def run_steps(a: dict, interactive: bool) -> bool:
+def load_state() -> dict:
+    """The last answers, as strings; empty if there are none."""
+    try:
+        state = json.loads(SETUP_STATE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return state if isinstance(state, dict) else {}
+
+
+def save_state(a: dict) -> None:
+    state = {k: str(a[k]) if a[k] else "" for k in ("lan", "address", "wan", "wan_address", "gateway", "tz")}
+    state["dns"] = " ".join(a["dns"])
+    write(SETUP_STATE, json.dumps(state, indent=2) + "\n", 0o600)
+
+
+def run_steps(a: dict, interactive: bool, steps: list = STEPS) -> bool:
     i = 0
-    while i < len(STEPS):
-        title, fn = STEPS[i]
+    while i < len(steps):
+        title, fn = steps[i]
         say(f"==> {title}")
         try:
             fn(a)
@@ -459,21 +519,99 @@ def run_steps(a: dict, interactive: bool) -> bool:
             say(f"!!  {exc}")
             say(f"    (log: {LOG})")
             if not interactive or ask("Retry this step? (y: retry, n: leave to a shell login)", "y").lower() not in ("y", "yes"):
-                say("The setup runs again at the next boot, or: sudo /usr/lib/portitor/firstboot.py --force")
+                if a.get("reconfigure"):
+                    say("Nothing more was changed. Run sudo portitor-setup again to retry.")
+                else:
+                    say("The setup runs again at the next boot, or: sudo portitor-setup")
                 return False
+    save_state(a)
     DONE.parent.mkdir(parents=True, exist_ok=True)
     DONE.touch()
     ANSWERS.unlink(missing_ok=True)
     return True
 
 
+def ask_network(state: dict) -> dict:
+    """The network questions, with the defaults from state."""
+    lan = ask_lan(state.get("lan", ""))
+    address = ask_address("LAN", state.get("address") or "192.168.1.1/24")
+    wan = ask_wan(lan, state.get("wan", ""))
+    try:
+        wan_default = ipaddress.IPv4Interface(state["wan_address"]) if state.get("wan_address") else None
+    except ValueError:
+        wan_default = None
+    wan_address = ask_wan_address(address, wan_default)
+    # DHCP brings the default gateway.
+    gateway = ask_gateway(wan_address, state.get("gateway", "")) if wan_address else None
+    say()
+    dns = ask_dns(state.get("dns") or PUBLIC_DNS)
+    return {"lan": lan, "address": address, "wan": wan, "wan_address": wan_address, "gateway": gateway, "dns": dns}
+
+
+def summary(a: dict) -> None:
+    say()
+    say(f"  LAN interface   {a['lan']}")
+    say(f"  LAN address     {a['address']}")
+    say(f"  WAN interface   {a['wan']}")
+    say(f"  WAN address     {a['wan_address'] or 'DHCP'}")
+    say(f"  Default gateway {a['gateway'] or 'from DHCP'}")
+    say(f"  DNS servers     {' '.join(a['dns'])}")
+    say(f"  Time zone       {a['tz']}")
+    if a.get("reconfigure"):
+        say(f"  Password        {'new' if a['password'] else 'unchanged'}")
+
+
+def show_gui(a: dict) -> None:
+    say()
+    say("Open the GUI from the LAN:")
+    say()
+    say(f"    {a['url']}    user {GUI_USER}")
+    say()
+    say("The browser warns about the self-signed certificate; its SHA-256 fingerprint is")
+    say(f"    {a['cert_fp']}")
+    say()
+
+
+def reconfigure() -> int:
+    """portitor-setup after the first setup: change the network."""
+    state = load_state()
+    say()
+    say("Portitor setup: change the network")
+    say("==================================")
+    say("The first setup has run already. This changes the LAN and WAN interfaces and")
+    say("addresses, the default gateway, the DNS servers and the time zone, and deploys")
+    say("at once, without the confirm timeout. Other settings are kept. A session over")
+    say("the old LAN address drops; the console is the safe place to run this.")
+    # The agent owns the links now: an interface it keeps down shows no link.
+    while True:
+        a = ask_network(state)
+        a["tz"] = ask_timezone()
+        say()
+        say(f"A new password for the GUI user {GUI_USER} and the console login {CONSOLE_USER}?")
+        a["password"] = ask_password(optional=True)
+        a["reconfigure"] = True
+        a["new_cert"] = str(a["address"]) != state.get("address")
+        summary(a)
+        if ask("Apply? (y/n)", "y").lower() in ("y", "yes"):
+            break
+        state = {k: str(v or "") for k, v in a.items() if k in ("lan", "address", "wan", "wan_address", "gateway", "tz")}
+        state["dns"] = " ".join(a["dns"])
+    if not run_steps(a, interactive=True, steps=RECONFIGURE_STEPS):
+        return 1
+    say()
+    say("Done.")
+    show_gui(a)
+    return 0
+
+
 def main() -> int:
     if os.geteuid() != 0:
+        if shutil.which("sudo"):
+            os.execvp("sudo", ["sudo", sys.executable, os.path.abspath(sys.argv[0]), *sys.argv[1:]])
         say("run as root")
         return 1
-    if DONE.exists() and "--force" not in sys.argv:
-        say(f"The first-boot setup has run already ({DONE}); --force runs it again.")
-        return 0
+    if DONE.exists():
+        return reconfigure()
     if ANSWERS.exists():
         say("Portitor first-boot setup (unattended, from firstboot.answers)")
         a = read_answers()
@@ -485,41 +623,24 @@ def main() -> int:
     say("Portitor first-boot setup")
     say("=========================")
     links_up()
-    lan = ask_lan()
-    address = ask_address("LAN", "192.168.1.1/24")
-    wan = ask_wan(lan)
-    wan_address = ask_wan_address(address)
-    # DHCP brings the default gateway.
-    gateway = ask_gateway(wan_address) if wan_address else None
-    say()
-    dns = ask_dns()
-    say()
-    say(f"One password for the GUI user {GUI_USER} and the console login {CONSOLE_USER}.")
-    password = ask_password()
-    tz = ask_timezone()
-    say()
-    say(f"  LAN interface   {lan}")
-    say(f"  LAN address     {address}")
-    say(f"  WAN interface   {wan}")
-    say(f"  WAN address     {wan_address or 'DHCP'}")
-    say(f"  Default gateway {gateway or 'from DHCP'}")
-    say(f"  DNS servers     {' '.join(dns)}")
-    say(f"  Time zone       {tz}")
-    if ask("Apply? (y/n)", "y").lower() not in ("y", "yes"):
-        return main()
+    state: dict = {}
+    while True:
+        a = ask_network(state)
+        say()
+        say(f"One password for the GUI user {GUI_USER} and the console login {CONSOLE_USER}.")
+        a["password"] = ask_password()
+        a["tz"] = ask_timezone()
+        summary(a)
+        if ask("Apply? (y/n)", "y").lower() in ("y", "yes"):
+            break
+        state = {k: str(v or "") for k, v in a.items() if k in ("lan", "address", "wan", "wan_address", "gateway", "tz")}
+        state["dns"] = " ".join(a["dns"])
 
-    a = {"lan": lan, "address": address, "wan": wan, "wan_address": wan_address, "gateway": gateway,
-         "dns": dns, "password": password, "tz": tz}
     if not run_steps(a, interactive=True):
         return 1
     say()
-    say("Done. Open the GUI from the LAN:")
-    say()
-    say(f"    {a['url']}    user {GUI_USER}")
-    say()
-    say("The browser warns about the self-signed certificate; its SHA-256 fingerprint is")
-    say(f"    {a['cert_fp']}")
-    say()
+    say("Done.")
+    show_gui(a)
     say("Press Enter for the login prompt.")
     try:
         input()

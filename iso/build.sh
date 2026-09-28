@@ -4,7 +4,7 @@
 
 # Builds the Portitor installer ISO (amd64): Debian 13's netinst ISO with
 # a preseed (preseed.cfg), Portitor as a release archive, and the first-boot
-# setup (firstboot.py). See docs/appliance.md.
+# setup (portitor-setup.py). See docs/appliance.md.
 #
 #   iso/build.sh                     Portitor from this tree (make release)
 #   iso/build.sh --release v1.2.0    Portitor from a GitHub release
@@ -95,7 +95,7 @@ else
 	cp -r deploy "$stage/"
 	tar -czf "$payload/portitor.tar.gz" -C "$stage" .
 fi
-cp iso/late.sh iso/target.sh iso/firstboot.py iso/portitor-firstboot.service "$payload/"
+cp iso/late.sh iso/target.sh iso/portitor-setup.py iso/portitor-firstboot.service "$payload/"
 cp iso/preseed.cfg iso/grub.cfg iso/isolinux.cfg "$work/"
 if [[ -n $test ]]; then
 	log "Test ISO: unattended, erases /dev/vda"

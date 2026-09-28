@@ -158,3 +158,80 @@ func TestBootstrapWAN(t *testing.T) {
 		})
 	}
 }
+
+func TestBootstrapReconfigure(t *testing.T) {
+	env := newEnv(t)
+	fake := &applyAgent{statusAgent: statusAgent{nics: []agentapi.NICStatus{
+		{Name: "enp1s0", Addresses: []string{}},
+		{Name: "enp2s0", Addresses: []string{}},
+	}}}
+	env.srv.newAgent = func(*models.Settings) (agentAPI, error) { return fake, nil }
+	o := BootstrapOptions{
+		AgentURL: "https://127.0.0.1:8443", AgentToken: strings.Repeat("t", 43), AgentFingerprint: strings.Repeat("ab", 32),
+		LAN: "enp2s0", Address: netip.MustParsePrefix("192.168.1.1/24"), WAN: "enp1s0", GUIPort: 443,
+	}
+	if _, err := Bootstrap(context.Background(), env.srv, o); err != nil {
+		t.Fatal(err)
+	}
+	iface := func(name string) *fwconfig.Interface {
+		in := fake.applied.Instances[0]
+		for i := range in.Interfaces {
+			if in.Interfaces[i].Name == name {
+				return &in.Interfaces[i]
+			}
+		}
+		t.Fatalf("no interface %s", name)
+		return nil
+	}
+
+	// LAN and WAN swapped, the WAN static; the agent settings are kept.
+	r := BootstrapOptions{
+		LAN: "enp1s0", Address: netip.MustParsePrefix("192.168.1.1/24"),
+		WAN: "enp2s0", WANAddress: netip.MustParsePrefix("198.51.100.2/24"), Gateway: netip.MustParseAddr("198.51.100.1"),
+		GUIPort: 443,
+	}
+	if _, err := Bootstrap(context.Background(), env.srv, r); err == nil {
+		t.Fatal("accepted without the agent fingerprint and Reconfigure")
+	}
+	r.Reconfigure = true
+	if _, err := Bootstrap(context.Background(), env.srv, r); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := env.srv.settings(); st.AgentFingerprint != strings.Repeat("ab", 32) {
+		t.Errorf("agent settings changed: %+v", st)
+	}
+	if lan := iface("enp1s0"); lan.IPv4Mode != fwconfig.ModeStatic || !slices.Equal(lan.Addresses, []string{"192.168.1.1/24"}) {
+		t.Errorf("LAN %+v", lan)
+	}
+	if wan := iface("enp2s0"); wan.IPv4Mode != fwconfig.ModeStatic || !slices.Equal(wan.Addresses, []string{"198.51.100.2/24"}) {
+		t.Errorf("WAN %+v", wan)
+	}
+	in := fake.applied.Instances[0]
+	if len(in.Routes) != 1 || in.Routes[0].Gateway != "198.51.100.1" {
+		t.Errorf("routes %+v", in.Routes)
+	}
+	var rules int
+	for _, r := range in.Rules {
+		if r.Chain == fwconfig.ChainInput {
+			rules++
+			if !slices.Equal(r.InInterfaces, []string{"enp1s0"}) {
+				t.Errorf("rule %+v", r)
+			}
+		}
+	}
+	if rules != 2 {
+		t.Errorf("%d input rules: %+v", rules, in.Rules)
+	}
+
+	// Back to a DHCP WAN: no default route, no WAN address.
+	r.WANAddress, r.Gateway = netip.Prefix{}, netip.Addr{}
+	if _, err := Bootstrap(context.Background(), env.srv, r); err != nil {
+		t.Fatal(err)
+	}
+	if wan := iface("enp2s0"); wan.IPv4Mode != fwconfig.ModeDHCP || len(wan.Addresses) != 0 {
+		t.Errorf("WAN %+v", wan)
+	}
+	if routes := fake.applied.Instances[0].Routes; len(routes) != 0 {
+		t.Errorf("routes %+v", routes)
+	}
+}

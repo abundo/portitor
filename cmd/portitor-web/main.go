@@ -145,18 +145,24 @@ func main() {
 		Long: `Stores the agent settings, configures the LAN interface with its address,
 the WAN interface (static or DHCP) and the default route, accepts the GUI
 port and ping from the LAN, and deploys. Every other interface of the
-firewall is imported as it is. Refused once anything has been deployed.`,
+firewall is imported as it is. Refused once anything has been deployed,
+unless --reconfigure (portitor-setup run again): then the LAN and WAN get
+exactly these settings, the IPv4 default route is --gateway or none, the
+GUI and ping rules move to the LAN, and the agent settings are kept unless
+--agent-fingerprint is given.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, srv, err := load()
 			if err != nil {
 				return err
 			}
-			tok, err := os.ReadFile(tokenFile)
-			if err != nil {
-				return err
+			if bo.AgentFingerprint != "" {
+				tok, err := os.ReadFile(tokenFile)
+				if err != nil {
+					return err
+				}
+				bo.AgentToken = strings.TrimSpace(string(tok))
 			}
-			bo.AgentToken = strings.TrimSpace(string(tok))
 			if bo.Address, err = netip.ParsePrefix(address); err != nil {
 				return fmt.Errorf("--address: %w", err)
 			}
@@ -191,7 +197,8 @@ firewall is imported as it is. Refused once anything has been deployed.`,
 	bf.StringVar(&wanAddress, "wan-address", "", "static WAN address with prefix length (default: DHCP)")
 	bf.StringVar(&gateway, "gateway", "", "default gateway (optional; on the WAN if it is static, else on the LAN)")
 	bf.IntVar(&bo.GUIPort, "gui-port", 443, "port to open for portitor-web on the LAN")
-	for _, f := range []string{"agent-fingerprint", "lan", "address"} {
+	bf.BoolVar(&bo.Reconfigure, "reconfigure", false, "change the LAN and WAN of a deployed installation")
+	for _, f := range []string{"lan", "address"} {
 		_ = bootstrap.MarkFlagRequired(f)
 	}
 	root.AddCommand(bootstrap)

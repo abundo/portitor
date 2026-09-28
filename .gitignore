@@ -4,3 +4,4 @@
 /build/
 /dev/run/
 /web/static/
+__pycache__/

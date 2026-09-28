@@ -121,7 +121,7 @@ GitHub (the ISO uses it). `--list --json` is what the agent runs for *Admin → 
 `iso/build.sh` remasters the Debian 13 netinst ISO with xorriso: `preseed.cfg`, new
 boot menus (`grub.cfg` for UEFI, `isolinux.cfg` for BIOS), and `/portitor` with the
 release archive, `late.sh`/`target.sh` (run at the end of the installation) and the
-first-boot setup `firstboot.py`. See [docs/appliance.md](docs/appliance.md).
+first-boot setup `portitor-setup.py`. See [docs/appliance.md](docs/appliance.md).
 
 To try it end to end without any typing:
 

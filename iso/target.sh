@@ -4,7 +4,7 @@
 
 # Runs in the installed system (chroot) at the end of the installation:
 # installs Portitor from the release archive on the ISO and prepares the
-# first-boot setup (firstboot.py).
+# first-boot setup (portitor-setup.py).
 set -eu
 d=/tmp/portitor-iso
 
@@ -12,10 +12,11 @@ mkdir -p "$d/release"
 tar -xzf "$d/portitor.tar.gz" -C "$d/release"
 root=$(dirname "$(find "$d/release" -maxdepth 2 -name install.py | head -n 1)")
 # Binaries, units, example configs and /usr/lib/portitor/install.py.
-# Nothing is started; firstboot.py configures and starts both.
+# Nothing is started; portitor-setup configures and starts both.
 python3 "$root/install.py" --local "$root" --web --agent --yes
 
-install -D -m 0755 "$d/firstboot.py" /usr/lib/portitor/firstboot.py
+# In PATH, next to the binaries: run again, it changes the LAN and WAN.
+install -D -m 0755 "$d/portitor-setup.py" /usr/bin/portitor-setup
 install -D -m 0644 "$d/portitor-firstboot.service" /etc/systemd/system/portitor-firstboot.service
 systemctl enable portitor-firstboot.service
 # Only in an ISO built with --test: answers, so the setup asks nothing.

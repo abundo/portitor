@@ -67,9 +67,30 @@ Next steps in the GUI: a masquerade rule (*Firewall → NAT*), forward rules fro
 to the WAN, and DHCP and DNS for the LAN. See [portitor-web](portitor-web.md).
 
 If a step fails, the setup shows the error and offers to retry it; its log is
-`/var/log/portitor-firstboot.log`. If you give up, it runs again at the next boot, or
-run `sudo /usr/lib/portitor/firstboot.py --force` after logging in as `portitor` at the
-console.
+`/var/log/portitor-setup.log`. If you give up, it runs again at the next boot, or
+run `sudo portitor-setup` after logging in as `portitor` at the console.
+
+## Changing the network later
+
+`sudo portitor-setup`, run again after the first setup, changes the network: the LAN
+and WAN interfaces, the LAN address, DHCP or a static WAN address, the default gateway,
+the DNS servers and the time zone. The last answers are the defaults. A new password
+for `admin` and `portitor` is optional; leave it empty to keep the current one. This
+is also the way back in when a change in the GUI has locked you out of it.
+
+It then deploys at once, without the confirm timeout:
+
+- the LAN and the WAN get exactly the new settings: their other IPv4 addresses are
+  unassigned (they stay in IPAM), and an address in use on another interface moves;
+- the IPv4 default route is the new gateway, or none with a DHCP WAN;
+- the rules *portitor-web from the LAN* and *ping from the LAN* are enabled and
+  match the new LAN interface;
+- a new GUI certificate is made when the LAN address changes, so the browser warns
+  again; the new fingerprint is shown.
+
+Everything else stays: the database, the agent, other interfaces (an interface that
+was the LAN or WAN before stays enabled), rules, NAT and DHCP. Run it at the console:
+an SSH session over the old LAN address drops.
 
 Do not edit the rules *portitor-web from the LAN* or the LAN interface in a way that
 locks you out. If that happens, the auto-rollback restores the previous configuration

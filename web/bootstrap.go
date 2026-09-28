@@ -40,9 +40,16 @@ type BootstrapOptions struct {
 	Gateway netip.Addr
 	// GUIPort is portitor-web's port, opened on the LAN.
 	GUIPort int
+	// Reconfigure runs after a deploy too (portitor-setup run again): the
+	// LAN and WAN get exactly these settings, the IPv4 default route is the
+	// gateway or none, and the GUI and ping rules move to the LAN.
+	Reconfigure bool
 }
 
 func (o *BootstrapOptions) check() error {
+	if o.AgentFingerprint == "" && !o.Reconfigure {
+		return errors.New("the agent fingerprint is required")
+	}
 	if !fwconfig.ValidIfname(o.LAN) {
 		return fmt.Errorf("invalid interface name %q", o.LAN)
 	}
@@ -116,7 +123,8 @@ func broadcast(p netip.Prefix) netip.Addr {
 // or DHCP), the default route, and rules that let the LAN reach the GUI and
 // ping the firewall. Every other
 // interface is imported as it is (syncNICs). It refuses once anything has
-// been deployed. A failed run can be repeated.
+// been deployed, unless o.Reconfigure. Without an agent fingerprint the
+// stored agent settings are kept. A failed run can be repeated.
 func Bootstrap(ctx context.Context, s *Server, o BootstrapOptions) (*models.Deployment, error) {
 	if err := o.check(); err != nil {
 		return nil, err
@@ -128,14 +136,16 @@ func Bootstrap(ctx context.Context, s *Server, o BootstrapOptions) (*models.Depl
 	if err != nil {
 		return nil, err
 	}
-	if st.Generation > 0 {
-		return nil, errors.New("this installation has been deployed already; configure it in the GUI")
+	if st.Generation > 0 && !o.Reconfigure {
+		return nil, errors.New("this installation has been deployed already; configure it in the GUI, or run portitor-setup")
 	}
-	st.AgentURL = strings.TrimRight(o.AgentURL, "/")
-	st.AgentToken = o.AgentToken
-	st.AgentFingerprint = strings.ToLower(strings.ReplaceAll(o.AgentFingerprint, ":", ""))
-	if err := s.db.Save(st).Error; err != nil {
-		return nil, err
+	if o.AgentFingerprint != "" {
+		st.AgentURL = strings.TrimRight(o.AgentURL, "/")
+		st.AgentToken = o.AgentToken
+		st.AgentFingerprint = strings.ToLower(strings.ReplaceAll(o.AgentFingerprint, ":", ""))
+		if err := s.db.Save(st).Error; err != nil {
+			return nil, err
+		}
 	}
 
 	// The agent has usually just started.
@@ -185,22 +195,26 @@ func Bootstrap(ctx context.Context, s *Server, o BootstrapOptions) (*models.Depl
 		}
 		return dep, err
 	}
-	slog.Info("bootstrap deployed", "lan", o.LAN, "address", o.Address, "wan", o.WAN, "generation", dep.Generation)
+	slog.Info("bootstrap deployed", "lan", o.LAN, "address", o.Address, "wan", o.WAN, "reconfigure", o.Reconfigure, "generation", dep.Generation)
 	return dep, nil
 }
 
 func bootstrapNetwork(tx *gorm.DB, instanceID uint, o BootstrapOptions) error {
-	if _, err := bootstrapIface(tx, instanceID, o.LAN, o.Address, "LAN", "firewall (GUI)"); err != nil {
+	if _, err := bootstrapIface(tx, instanceID, o.LAN, o.Address, "LAN", "firewall (GUI)", o.Reconfigure); err != nil {
 		return err
 	}
 	if o.WAN != "" {
-		if _, err := bootstrapIface(tx, instanceID, o.WAN, o.WANAddress, "WAN", "firewall (WAN)"); err != nil {
+		if _, err := bootstrapIface(tx, instanceID, o.WAN, o.WANAddress, "WAN", "firewall (WAN)", o.Reconfigure); err != nil {
 			return err
 		}
 	}
 
 	var n int64
-	if o.Gateway.IsValid() {
+	if o.Reconfigure {
+		if err := reconfigureDefaultRoute(tx, instanceID, o.Gateway); err != nil {
+			return err
+		}
+	} else if o.Gateway.IsValid() {
 		dest := "0.0.0.0/0"
 		if o.Gateway.Is6() {
 			dest = "::/0"
@@ -227,6 +241,15 @@ func bootstrapNetwork(tx *gorm.DB, instanceID uint, o BootstrapOptions) error {
 			return err
 		}
 		if n > 0 {
+			if !o.Reconfigure {
+				continue
+			}
+			// The GUI stays reachable from the (new) LAN.
+			err := tx.Model(&models.Rule{}).Where("instance_id = ? AND description = ?", instanceID, r.Description).
+				Updates(map[string]any{"in_interfaces": models.StringList{o.LAN}, "enabled": true}).Error
+			if err != nil {
+				return err
+			}
 			continue
 		}
 		r.InstanceID, r.Chain, r.Action, r.Enabled = instanceID, fwconfig.ChainInput, fwconfig.ActionAccept, true
@@ -242,9 +265,50 @@ func bootstrapNetwork(tx *gorm.DB, instanceID uint, o BootstrapOptions) error {
 	return nil
 }
 
+// reconfigureDefaultRoute makes gw the only IPv4 default route, or removes
+// them when gw is not valid (a DHCP WAN brings its own).
+func reconfigureDefaultRoute(tx *gorm.DB, instanceID uint, gw netip.Addr) error {
+	var routes []models.Route
+	if err := tx.Where("instance_id = ? AND destination IN ?", instanceID, []string{"0.0.0.0/0", "default"}).Order("id").Find(&routes).Error; err != nil {
+		return err
+	}
+	kept := false
+	for _, r := range routes {
+		if r.Destination == "default" {
+			if a, err := netip.ParseAddr(r.Gateway); err != nil || !a.Is4() {
+				continue
+			}
+		}
+		if !gw.IsValid() || kept {
+			if err := tx.Delete(&r).Error; err != nil {
+				return err
+			}
+			continue
+		}
+		r.Destination, r.Gateway, r.InterfaceID, r.Enabled = "0.0.0.0/0", gw.String(), nil, true
+		if err := prepareRoute(tx, &r, nil); err != nil {
+			return err
+		}
+		if err := tx.Save(&r).Error; err != nil {
+			return err
+		}
+		kept = true
+	}
+	if !gw.IsValid() || kept {
+		return nil
+	}
+	r := models.Route{InstanceID: instanceID, Destination: "0.0.0.0/0", Gateway: gw.String(), Enabled: true, Description: "default route"}
+	if err := prepareRoute(tx, &r, nil); err != nil {
+		return err
+	}
+	return tx.Create(&r).Error
+}
+
 // bootstrapIface enables an interface: static with address (its prefix and
-// address go into IPAM), or DHCP when address is not valid.
-func bootstrapIface(tx *gorm.DB, instanceID uint, name string, address netip.Prefix, prefixDesc, addrDesc string) (*models.Interface, error) {
+// address go into IPAM), or DHCP when address is not valid. With reconfigure,
+// address becomes the interface's only IPv4 address (the others stay in
+// IPAM, unassigned), taken from another interface if need be.
+func bootstrapIface(tx *gorm.DB, instanceID uint, name string, address netip.Prefix, prefixDesc, addrDesc string, reconfigure bool) (*models.Interface, error) {
 	var ifc models.Interface
 	if err := tx.Where("instance_id = ? AND name = ?", instanceID, name).First(&ifc).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -265,6 +329,21 @@ func bootstrapIface(tx *gorm.DB, instanceID uint, name string, address netip.Pre
 	}
 	if err := tx.Save(&ifc).Error; err != nil {
 		return nil, err
+	}
+	if reconfigure {
+		var assigned []models.IpamAddress
+		if err := tx.Where("interface_id = ?", ifc.ID).Find(&assigned).Error; err != nil {
+			return nil, err
+		}
+		for _, ia := range assigned {
+			a, err := netip.ParseAddr(ia.Address)
+			if err != nil || !a.Is4() || (address.IsValid() && a == address.Addr()) {
+				continue
+			}
+			if err := tx.Model(&ia).Update("interface_id", nil).Error; err != nil {
+				return nil, err
+			}
+		}
 	}
 	if !address.IsValid() {
 		return &ifc, nil
@@ -299,7 +378,7 @@ func bootstrapIface(tx *gorm.DB, instanceID uint, name string, address netip.Pre
 		}
 	case err != nil:
 		return nil, err
-	case ia.InterfaceID != nil && *ia.InterfaceID != ifc.ID:
+	case ia.InterfaceID != nil && *ia.InterfaceID != ifc.ID && !reconfigure:
 		return nil, bad(fmt.Sprintf("%s is assigned to another interface", addr))
 	default:
 		if err := tx.Model(&ia).Update("interface_id", ifc.ID).Error; err != nil {
