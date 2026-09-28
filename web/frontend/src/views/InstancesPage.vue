@@ -8,6 +8,12 @@ import { useInstanceStore } from '@/stores/instances'
 
 const store = useInstanceStore()
 
+const forwardModes = [
+  { label: 'Forwarders first, then the root servers', value: 'first' },
+  { label: 'Forwarders only', value: 'only' },
+  { label: 'Root servers only (no forwarders)', value: 'off' },
+]
+
 const columns = [
   { key: 'name', label: 'Name', class: 'font-medium' },
   { key: 'is_default', label: 'Default' },
@@ -33,18 +39,25 @@ const fields = [
   },
   { key: 'dns_enabled', label: 'DNS server (BIND)', type: 'switch' },
   {
+    key: 'dns_forward_mode',
+    label: 'Upstream DNS',
+    type: 'select',
+    items: forwardModes,
+    show: (f) => f.dns_enabled,
+  },
+  {
     key: 'dns_forwarders',
     label: 'Upstream DNS servers',
     type: 'addrs',
     placeholder: '9.9.9.9',
-    show: (f) => f.dns_enabled,
+    show: (f) => f.dns_enabled && f.dns_forward_mode !== 'off',
     hint: 'Empty: resolve from the root servers.',
   },
   {
     key: 'dns_forward_from_dhcp',
     label: 'Also use DNS servers from the WAN DHCP lease',
     type: 'switch',
-    show: (f) => f.dns_enabled,
+    show: (f) => f.dns_enabled && f.dns_forward_mode !== 'off',
   },
   {
     key: 'dns_allow_recursion',
@@ -82,7 +95,7 @@ const fields = [
     :api="instances"
     :columns="columns"
     :fields="fields"
-    :defaults="{ dns_forwarders: [], dns_allow_recursion: [], dhcp_lease_time: 86400 }"
+    :defaults="{ dns_forward_mode: 'first', dns_forwarders: [], dns_allow_recursion: [], dhcp_lease_time: 86400 }"
     new-label="New instance"
     @changed="store.load()"
   />

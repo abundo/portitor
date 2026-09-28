@@ -148,6 +148,30 @@ func TestNamedConf(t *testing.T) {
 	}
 }
 
+func TestNamedConfForwardMode(t *testing.T) {
+	in := &fwconfig.SampleDocument().Instances[0]
+	dhcp := []string{"198.51.100.53"}
+	for _, tc := range []struct {
+		mode, want string
+		forwarders bool
+	}{
+		{"", "forward first;", true},
+		{fwconfig.ForwardOnly, "forward only;", true},
+		{fwconfig.ForwardOff, "", false},
+	} {
+		in.DNS.ForwardMode = tc.mode
+		named := NamedConf(in, DefaultPaths(), dhcp)
+		if strings.Contains(named, "forwarders") != tc.forwarders || !strings.Contains(named, tc.want) {
+			t.Errorf("mode %q:\n%s", tc.mode, named)
+		}
+	}
+	// No forwarders at all: BIND iterates from its root hints.
+	in.DNS.ForwardMode, in.DNS.Forwarders, in.DNS.ForwardFromDHCP = "", nil, false
+	if named := NamedConf(in, DefaultPaths(), dhcp); strings.Contains(named, "forward") {
+		t.Errorf("no forwarders:\n%s", named)
+	}
+}
+
 func TestDnsmgrAndKea(t *testing.T) {
 	b := sampleBundle(t)
 	cfg := b.Dnsmgr["main"]

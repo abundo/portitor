@@ -63,6 +63,12 @@ func prepareInstance(tx *gorm.DB, in, old *models.Instance) error {
 	}
 	in.DnsForwarders = cleanList(in.DnsForwarders)
 	in.DnsAllowRecursion = cleanList(in.DnsAllowRecursion)
+	if in.DnsForwardMode == "" {
+		in.DnsForwardMode = fwconfig.ForwardFirst
+	}
+	if err := oneOf("DNS forward mode", in.DnsForwardMode, fwconfig.ForwardFirst, fwconfig.ForwardOnly, fwconfig.ForwardOff); err != nil {
+		return err
+	}
 	if err := checkEntries(tx, "DNS forwarders", in.DnsForwarders, entryHost); err != nil {
 		return err
 	}

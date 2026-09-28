@@ -104,6 +104,7 @@ type Instance struct {
 	DnsEnabled         bool       `json:"dns_enabled"`
 	DnsForwarders      StringList `json:"dns_forwarders"`
 	DnsForwardFromDhcp bool       `json:"dns_forward_from_dhcp"`
+	DnsForwardMode     string     `json:"dns_forward_mode"` // fwconfig.Forward*
 	DnsAllowRecursion  StringList `json:"dns_allow_recursion"`
 
 	DhcpEnabled    bool   `json:"dhcp_enabled"`

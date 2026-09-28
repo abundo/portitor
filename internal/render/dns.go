@@ -92,11 +92,18 @@ func NamedConf(in *fwconfig.Instance, p Paths, dhcpDNS []string) string {
 	}
 	recursion = append([]string{"localhost"}, recursion...)
 
-	forwarders := append([]string(nil), in.DNS.Forwarders...)
-	if in.DNS.ForwardFromDHCP {
-		for _, a := range dhcpDNS {
-			forwarders = appendUnique(forwarders, a)
+	var forwarders []string
+	if in.DNS.ForwardMode != fwconfig.ForwardOff {
+		forwarders = append(forwarders, in.DNS.Forwarders...)
+		if in.DNS.ForwardFromDHCP {
+			for _, a := range dhcpDNS {
+				forwarders = appendUnique(forwarders, a)
+			}
 		}
+	}
+	forward := "first"
+	if in.DNS.ForwardMode == fwconfig.ForwardOnly {
+		forward = "only"
 	}
 
 	dir := p.InstanceState(in.Name)
@@ -113,7 +120,7 @@ func NamedConf(in *fwconfig.Instance, p Paths, dhcpDNS []string) string {
 	b.WriteString("\trecursion yes;\n")
 	if len(forwarders) > 0 {
 		fmt.Fprintf(b, "\tforwarders { %s; };\n", strings.Join(forwarders, "; "))
-		b.WriteString("\tforward first;\n")
+		fmt.Fprintf(b, "\tforward %s;\n", forward)
 	}
 	b.WriteString("\tdnssec-validation auto;\n")
 	b.WriteString("\tallow-transfer { none; };\n")

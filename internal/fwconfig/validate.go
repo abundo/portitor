@@ -378,6 +378,11 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 		}
 	}
 
+	switch in.DNS.ForwardMode {
+	case "", ForwardFirst, ForwardOnly, ForwardOff:
+	default:
+		v.addf("%s: dns: invalid forward mode %q", p, in.DNS.ForwardMode)
+	}
 	for _, a := range in.DNS.Forwarders {
 		if _, err := netip.ParseAddr(a); err != nil {
 			v.addf("%s: dns: invalid forwarder %q", p, a)

@@ -205,12 +205,22 @@ type RAPrefix struct {
 	Autonomous bool   `json:"autonomous,omitempty"`
 }
 
+// DNSServer.ForwardMode values.
+const (
+	ForwardFirst = "first" // forwarders, falling back to the root servers ("" too)
+	ForwardOnly  = "only"  // forwarders only
+	ForwardOff   = "off"   // ignore forwarders: resolve from the root servers
+)
+
 type DNSServer struct {
 	Enabled bool `json:"enabled"`
 	// Forwarders are upstream resolvers. ForwardFromDHCP adds the servers
 	// learned by the DHCP client on this instance's WAN interfaces.
+	// ForwardMode says how they are used; with no forwarders, or with
+	// ForwardOff, BIND resolves from the root servers (its built-in hints).
 	Forwarders      []string `json:"forwarders,omitempty"`
 	ForwardFromDHCP bool     `json:"forward_from_dhcp,omitempty"`
+	ForwardMode     string   `json:"forward_mode,omitempty"`
 	// ListenInterfaces are the interfaces BIND answers on (their addresses).
 	ListenInterfaces []string `json:"listen_interfaces,omitempty"`
 	// AllowRecursion lists client CIDRs allowed to recurse. Empty means the

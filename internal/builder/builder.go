@@ -299,6 +299,7 @@ func Build(db *gorm.DB, generation int64) (*fwconfig.Document, error) {
 			Enabled:         mi.DnsEnabled,
 			Forwarders:      expand("instance "+mi.Name+": dns forwarders", objs.Hosts, mi.DnsForwarders),
 			ForwardFromDHCP: mi.DnsForwardFromDhcp,
+			ForwardMode:     mi.DnsForwardMode,
 			AllowRecursion:  expand("instance "+mi.Name+": dns allow recursion", objs.Prefixes, mi.DnsAllowRecursion),
 			Zones:           []fwconfig.DNSZone{},
 		}

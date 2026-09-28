@@ -251,7 +251,7 @@ func (a *Agent) onDHCPChange(instance string) {
 		return
 	}
 	in := a.applied.Instance(instance)
-	if in == nil || !in.DNS.Enabled || !in.DNS.ForwardFromDHCP {
+	if in == nil || !in.DNS.Enabled || !in.DNS.ForwardFromDHCP || in.DNS.ForwardMode == fwconfig.ForwardOff {
 		return
 	}
 	b, err := render.Render(*a.applied, a.renderOptions())
