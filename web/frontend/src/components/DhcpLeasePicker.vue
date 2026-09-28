@@ -8,6 +8,7 @@ import { useToast } from '@nuxt/ui/composables'
 import { computed, h, nextTick, ref, resolveComponent, watch } from 'vue'
 import { api } from '@/api'
 import { errMsg } from '@/api/http'
+import { datetime } from '@/utils/time'
 
 const open = defineModel('open', { type: Boolean, default: false })
 const props = defineProps({
@@ -114,7 +115,7 @@ async function loadLeases() {
           hostname: l.hostname ?? '',
           family,
           familyLabel: family === 'ipv6' ? 'IPv6' : 'IPv4',
-          expires: l.expires ? new Date(l.expires).toLocaleString() : '',
+          expires: datetime(l.expires),
         }
       })
     const match = leases.value.find((l) => props.ip && l.ip === props.ip.trim())

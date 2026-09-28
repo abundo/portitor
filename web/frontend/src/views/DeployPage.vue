@@ -8,6 +8,7 @@ import { diffLines } from 'diff'
 import { api } from '@/api'
 import { errMsg } from '@/api/http'
 import { useDeployStore } from '@/stores/deploy'
+import { datetime } from '@/utils/time'
 
 const toast = useToast()
 const deploy = useDeployStore()
@@ -110,7 +111,6 @@ const statusColor = {
   failed: 'error',
 }
 const fileColor = { same: 'neutral', changed: 'warning', new: 'success', removed: 'error' }
-const fmt = (t) => new Date(t).toLocaleString()
 </script>
 
 <template>
@@ -249,7 +249,7 @@ const fmt = (t) => new Date(t).toLocaleString()
           { accessorKey: 'message', header: 'Message' },
         ]"
       >
-        <template #when-cell="{ row }">{{ fmt(row.original.created_at) }}</template>
+        <template #when-cell="{ row }">{{ datetime(row.original.created_at) }}</template>
         <template #status-cell="{ row }">
           <UBadge
             :color="statusColor[row.original.status] ?? 'neutral'"

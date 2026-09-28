@@ -7,6 +7,7 @@ import NeedInstance from '@/components/NeedInstance.vue'
 import { api, ipamPrefixes } from '@/api'
 import { errMsg } from '@/api/http'
 import { useInstanceStore } from '@/stores/instances'
+import { datetime } from '@/utils/time'
 
 const store = useInstanceStore()
 const prefixes = ref([])
@@ -28,7 +29,6 @@ const serverLeases = computed(() => leases.value?.server?.[store.current?.name] 
 const clientLeases = computed(() =>
   (leases.value?.client ?? []).filter((l) => l.instance === store.current?.name),
 )
-const fmt = (t) => (t ? new Date(t).toLocaleString() : '')
 </script>
 
 <template>
@@ -80,7 +80,7 @@ const fmt = (t) => (t ? new Date(t).toLocaleString() : '')
             { id: 'expires', header: 'Expires' },
           ]"
         >
-          <template #expires-cell="{ row }">{{ fmt(row.original.expires) }}</template>
+          <template #expires-cell="{ row }">{{ datetime(row.original.expires) }}</template>
           <template #empty
             ><div class="py-4 text-center text-muted">No active leases.</div></template
           >
@@ -101,7 +101,7 @@ const fmt = (t) => (t ? new Date(t).toLocaleString() : '')
           ]"
         >
           <template #dns-cell="{ row }">{{ row.original.dns?.join(', ') }}</template>
-          <template #expires-cell="{ row }">{{ fmt(row.original.expires) }}</template>
+          <template #expires-cell="{ row }">{{ datetime(row.original.expires) }}</template>
         </UTable>
       </div>
     </div>

@@ -7,6 +7,7 @@ import { useDeployStore } from '@/stores/deploy'
 import { useInstanceStore } from '@/stores/instances'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
 import { bytes } from '@/utils/bytes'
+import { datetime } from '@/utils/time'
 
 const deploy = useDeployStore()
 const instances = useInstanceStore()
@@ -108,7 +109,7 @@ const stateColor = (s) =>
         <div class="text-sm text-muted">Running configuration</div>
         <div class="text-xl font-semibold">generation {{ st.generation }}</div>
         <div class="text-xs text-muted">
-          {{ st.last_apply ? new Date(st.last_apply).toLocaleString() : 'never applied' }}
+          {{ st.last_apply ? datetime(st.last_apply) : 'never applied' }}
         </div>
       </div>
       <div class="card">

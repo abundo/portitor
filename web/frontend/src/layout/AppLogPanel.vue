@@ -4,6 +4,7 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useLogPanel } from '@/composables/useLogPanel'
+import { logTime } from '@/utils/time'
 
 // The agent's log and the logged packets at the bottom of the layout. It
 // takes its height out of the page (a flex item, not an overlay), so
@@ -89,15 +90,6 @@ function startResize(event) {
   }
   window.addEventListener('mousemove', onMove)
   window.addEventListener('mouseup', onUp)
-}
-
-function formatTime(iso) {
-  const d = new Date(iso)
-  const p = (n, w = 2) => String(n).padStart(w, '0')
-  return (
-    `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ` +
-    `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.${p(d.getMilliseconds(), 3)}`
-  )
 }
 
 function levelClass(level) {
@@ -207,7 +199,7 @@ onUnmounted(stop)
         </thead>
         <tbody>
           <tr v-for="p in packets" :key="p.id">
-            <td class="text-muted">{{ formatTime(p.time) }}</td>
+            <td class="text-muted">{{ logTime(p.time) }}</td>
             <td>{{ p.instance }}</td>
             <td>{{ p.chain }}</td>
             <td>{{ ruleLabel(p) }}</td>
@@ -244,7 +236,7 @@ onUnmounted(stop)
         class="flex flex-wrap gap-x-2"
         :class="levelClass(line.level)"
       >
-        <span class="text-muted">{{ formatTime(line.time) }}</span>
+        <span class="text-muted">{{ logTime(line.time) }}</span>
         <span class="w-11 shrink-0 font-semibold">{{ line.level }}</span>
         <span class="break-all">{{ line.message }}</span>
         <span v-for="[k, v] in attrs(line)" :key="k" class="break-all text-muted"
