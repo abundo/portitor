@@ -14,7 +14,7 @@ const opt = (list) => list.map((v) => ({ label: v || 'any', value: v }))
 const fields = [
   {
     key: 'chain',
-    label: 'Traffic',
+    label: 'Chain',
     type: 'select',
     items: [
       { label: 'forward: through the firewall', value: 'forward' },
@@ -80,6 +80,19 @@ const fields = [
   { key: 'description', label: 'Description' },
 ]
 
+const chains = [
+  { value: 'input', title: 'Input', text: 'Traffic to the firewall itself.' },
+  { value: 'forward', title: 'Forward', text: 'Traffic through the firewall.' },
+  { value: 'output', title: 'Output', text: 'Traffic from the firewall itself.' },
+]
+
+// Each table shows one chain; a move within it becomes a move in the full
+// list (rows keep one order across chains), before or after the target row.
+function moveInChain(rows, chain, moveTo, from, to) {
+  const sub = rows.filter((r) => r.chain === chain)
+  moveTo(rows.indexOf(sub[from]), rows.indexOf(sub[to]))
+}
+
 // Selects can't hold '' values; map 'any' <-> ''.
 const api = {
   ...rules,
@@ -124,15 +137,33 @@ function clean(b) {
       reorder="rules"
       :item-name="(r) => `rule ${r.description || r.id}`"
     >
-      <template #table="{ rows, openEdit, remove, moveTo, saveRow }">
-        <RulesTable
-          :rows="rows"
-          :ifaces="ifaceRefNames"
-          @save="saveRow"
-          @move="moveTo"
-          @edit="openEdit"
-          @remove="remove"
-        />
+      <template #table="{ rows, openCreate, openEdit, remove, moveTo, saveRow }">
+        <div class="space-y-6">
+          <section v-for="c in chains" :key="c.value">
+            <div class="mb-2 flex items-end justify-between gap-3">
+              <div>
+                <div class="font-semibold">{{ c.title }}</div>
+                <p class="text-sm text-muted">{{ c.text }}</p>
+              </div>
+              <UButton
+                size="sm"
+                variant="soft"
+                icon="i-lucide-plus"
+                :label="`New ${c.value} rule`"
+                @click="openCreate({ chain: c.value })"
+              />
+            </div>
+            <RulesTable
+              :rows="rows.filter((r) => r.chain === c.value)"
+              :chain="c.value"
+              :ifaces="ifaceRefNames"
+              @save="saveRow"
+              @move="(from, to) => moveInChain(rows, c.value, moveTo, from, to)"
+              @edit="openEdit"
+              @remove="remove"
+            />
+          </section>
+        </div>
       </template>
     </CrudPage>
   </NeedInstance>

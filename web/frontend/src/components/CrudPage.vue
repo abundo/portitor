@@ -13,7 +13,7 @@
 // suggested and accepted.
 // Column: { key, label, format: row => string, class }
 // Cells can be overridden with a `cell-<key>` slot, or the whole table with
-// the `table` slot ({ rows, openEdit, remove, moveTo, saveRow }).
+// the `table` slot ({ rows, openCreate, openEdit, remove, moveTo, saveRow }).
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import AddrInput from '@/components/AddrInput.vue'
@@ -91,10 +91,11 @@ function fill(src) {
   }
 }
 
-function openCreate() {
+// openCreate opens the form for a new row; `extra` overrides the defaults.
+function openCreate(extra = {}) {
   editing.value = null
   const d = typeof props.defaults === 'function' ? props.defaults() : props.defaults
-  fill({ ...d, ...props.params })
+  fill({ ...d, ...extra, ...props.params })
   open.value = true
 }
 
@@ -199,7 +200,7 @@ defineExpose({ reload: load, openEdit, openCreate })
           :label="newLabel"
           :disabled="!!blockedReason"
           :title="blockedReason || undefined"
-          @click="openCreate"
+          @click="openCreate()"
         />
       </div>
     </div>
@@ -218,6 +219,7 @@ defineExpose({ reload: load, openEdit, openCreate })
       v-else-if="$slots.table"
       name="table"
       :rows="rows"
+      :open-create="openCreate"
       :open-edit="openEdit"
       :remove="remove"
       :move-to="moveTo"

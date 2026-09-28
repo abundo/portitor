@@ -2,16 +2,19 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
 <script setup>
-// RulesTable: the firewall rules as a compact grid edited in place. Each
-// change saves its row (`save`); rows reorder by dragging the grip (`move`).
+// RulesTable: the firewall rules of one chain as a compact grid edited in
+// place. Each change saves its row (`save`); rows reorder by dragging the grip
+// (`move`, with indexes into `rows`).
 // Address cells take a comma-separated list of addresses, CIDRs or names;
 // From/To cells a comma-separated list of interfaces and interface zones.
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRowDrag } from '@/composables/useRowDrag'
 import { useObjectStore } from '@/stores/objects'
 
 const props = defineProps({
   rows: { type: Array, required: true },
+  // input, forward or output: input rules have no To column, output no From.
+  chain: { type: String, required: true },
   // Interface zone and interface names of the instance, for suggestions.
   ifaces: { type: Array, required: true },
 })
@@ -30,7 +33,9 @@ const { onPointerDown } = useRowDrag({
   onMove: (from, to) => emit('move', from, to),
 })
 
-const chains = ['forward', 'input', 'output']
+const hasFrom = computed(() => props.chain !== 'output')
+const hasTo = computed(() => props.chain !== 'input')
+const colCount = computed(() => 12 + hasFrom.value + hasTo.value)
 const families = [
   { label: 'any', value: 'any' },
   { label: 'IPv4', value: 'ipv4' },
@@ -77,15 +82,14 @@ function onKeydown(event, index) {
 
 <template>
   <div ref="wrap" class="rules-grid overflow-auto rounded-md ring ring-default">
-    <table class="w-full min-w-[72rem] table-fixed border-collapse text-xs">
+    <table class="w-full min-w-[64rem] table-fixed border-collapse text-xs">
       <colgroup>
         <col class="w-7" />
         <col class="w-14" />
         <col class="w-8" />
         <col class="w-8" />
-        <col class="w-20" />
-        <col class="w-28" />
-        <col class="w-28" />
+        <col v-if="hasFrom" class="w-28" />
+        <col v-if="hasTo" class="w-28" />
         <col class="w-14" />
         <col class="w-18" />
         <col class="w-24" />
@@ -101,9 +105,8 @@ function onKeydown(event, index) {
           <th />
           <th title="Evaluated top to bottom">#</th>
           <th title="Enabled">On</th>
-          <th>Traffic</th>
-          <th>From</th>
-          <th>To</th>
+          <th v-if="hasFrom">From</th>
+          <th v-if="hasTo">To</th>
           <th>IP</th>
           <th>Protocol</th>
           <th>Ports</th>
@@ -155,22 +158,11 @@ function onKeydown(event, index) {
               @change="set(r, 'enabled', $event.target.checked)"
             />
           </td>
-          <td>
-            <select
-              :value="r.chain"
-              data-col="chain"
-              @change="set(r, 'chain', $event.target.value)"
-            >
-              <option v-for="c in chains" :key="c" :value="c">{{ c }}</option>
-            </select>
-          </td>
-          <td>
-            <span v-if="r.chain === 'output'" class="px-1.5 text-muted italic">firewall</span>
+          <td v-if="hasFrom">
             <input
-              v-else
               :value="(r.in_interfaces ?? []).join(', ')"
               data-col="in_interfaces"
-              list="rules-grid-ifaces"
+              :list="`rules-grid-ifaces-${chain}`"
               placeholder="any"
               :title="
                 (r.in_interfaces ?? []).join(', ') || 'Incoming interfaces or interface zones'
@@ -179,13 +171,11 @@ function onKeydown(event, index) {
               @keydown="onKeydown($event, i)"
             />
           </td>
-          <td>
-            <span v-if="r.chain === 'input'" class="px-1.5 text-muted italic">firewall</span>
+          <td v-if="hasTo">
             <input
-              v-else
               :value="(r.out_interfaces ?? []).join(', ')"
               data-col="out_interfaces"
-              list="rules-grid-ifaces"
+              :list="`rules-grid-ifaces-${chain}`"
               placeholder="any"
               :title="
                 (r.out_interfaces ?? []).join(', ') || 'Outgoing interfaces or interface zones'
@@ -228,7 +218,7 @@ function onKeydown(event, index) {
               :value="(r.src_addrs ?? []).join(', ')"
               data-col="src_addrs"
               class="font-mono"
-              list="rules-grid-names"
+              :list="`rules-grid-names-${chain}`"
               placeholder="any"
               :title="(r.src_addrs ?? []).join(', ')"
               @change="setList(r, 'src_addrs', $event)"
@@ -240,7 +230,7 @@ function onKeydown(event, index) {
               :value="(r.dst_addrs ?? []).join(', ')"
               data-col="dst_addrs"
               class="font-mono"
-              list="rules-grid-names"
+              :list="`rules-grid-names-${chain}`"
               placeholder="any"
               :title="(r.dst_addrs ?? []).join(', ')"
               @change="setList(r, 'dst_addrs', $event)"
@@ -278,14 +268,14 @@ function onKeydown(event, index) {
           </td>
         </tr>
         <tr v-if="!rows.length">
-          <td colspan="15" class="py-6 text-center text-muted">Nothing here yet.</td>
+          <td :colspan="colCount" class="py-6 text-center text-muted">Nothing here yet.</td>
         </tr>
       </tbody>
     </table>
-    <datalist id="rules-grid-names">
+    <datalist :id="`rules-grid-names-${chain}`">
       <option v-for="n in objects.names" :key="n" :value="n" />
     </datalist>
-    <datalist id="rules-grid-ifaces">
+    <datalist :id="`rules-grid-ifaces-${chain}`">
       <option v-for="n in ifaces" :key="n" :value="n" />
     </datalist>
   </div>
