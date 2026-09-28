@@ -145,6 +145,8 @@ type Interface struct {
 	Mtu          int        `json:"mtu"`
 	Ipv4Mode     string     `json:"ipv4_mode"`
 	Ipv6AcceptRA bool       `gorm:"column:ipv6_accept_ra" json:"ipv6_accept_ra"`
+	// DhcpNoDefaultRoute ignores the router of the DHCP lease.
+	DhcpNoDefaultRoute bool `json:"dhcp_no_default_route"`
 	// DnsListen makes the instance's DNS server answer on this interface.
 	DnsListen bool `json:"dns_listen"`
 

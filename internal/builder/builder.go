@@ -185,6 +185,8 @@ func Build(db *gorm.DB, generation int64) (*fwconfig.Document, error) {
 				MTU:          mif.Mtu,
 				IPv4Mode:     mif.Ipv4Mode,
 				IPv6AcceptRA: mif.Ipv6AcceptRA,
+				// Only meaningful for a DHCP client.
+				DHCPNoDefaultRoute: mif.DhcpNoDefaultRoute && mif.Ipv4Mode == fwconfig.ModeDHCP,
 			}
 			for _, a := range addrs {
 				if a.InterfaceID == nil || *a.InterfaceID != mif.ID {

@@ -4,9 +4,10 @@
 """Setup of a firewall installed from the Portitor ISO (portitor-setup).
 
 Runs on tty1 at boot (portitor-firstboot.service) until it has finished
-once. It asks for the LAN interface and its address, the WAN interface (DHCP, or a
-static address and the default gateway), the DNS servers, a password and
-the time zone, then:
+once. It asks for the LAN and WAN interfaces, the LAN address (static or
+DHCP), the WAN address (DHCP, or static with the default gateway), the DNS
+servers, a password and the time zone; before applying, LAN and WAN can be
+swapped. Then it:
 
   - writes /etc/resolv.conf (the agent does not manage the firewall's own
     resolver; the one from the installation may be unreachable now),
@@ -14,14 +15,16 @@ the time zone, then:
     self-signed certificate for the GUI on port 443,
   - creates the GUI user admin, and sets the console user's password,
   - sets the agent up on 127.0.0.1 (portitor-web runs on the firewall itself),
-  - runs `portitor-web bootstrap`: LAN address, WAN (DHCP or static),
-    default route, rules for the GUI and ping from the LAN, and deploys,
-  - starts portitor-web and writes the GUI's address to /etc/issue.d.
+  - runs `portitor-web bootstrap`: LAN (static or DHCP, which then takes no
+    default route), WAN (DHCP or static), default route, rules for the GUI
+    and ping from the LAN, and deploys,
+  - starts portitor-web and writes the GUI's address to /etc/issue.d (with a
+    DHCP LAN, agetty shows its current address).
 
 Every step can be repeated; a failed one is retried with the same answers.
 
 Run again (`sudo portitor-setup`) after it has finished, it changes the
-network: the LAN and WAN interfaces and addresses, DHCP or static WAN, the
+network: the LAN and WAN interfaces (swapped, too) and addresses, the
 default gateway, the DNS servers and the time zone, with the last answers
 (SETUP_STATE) as defaults; a password is optional there. It leaves the
 database, the agent and every other interface alone, runs `portitor-web
@@ -30,7 +33,8 @@ address changes.
 
 With /etc/portitor/firstboot.answers (an ISO built with `iso/build.sh
 --test`), nothing is asked: it holds "key: value" lines for lan (a name or
-MAC address), address, wan (a name or MAC address, optional), wan_address
+MAC address), address (dhcp for DHCP), wan (a name or MAC address,
+optional), wan_address
 (empty: DHCP), gateway (on the static WAN, else on the LAN), dns (space
 separated), password and timezone. The file is removed when the setup has
 finished.
@@ -171,7 +175,7 @@ def ask_nic(role: str, explain: str, taken: str = "", default: str = "") -> str:
         if not any(n["name"] == answer for n in found):
             say(f"  no interface {answer}")
         elif answer == taken:
-            say(f"  {answer} is the LAN interface")
+            say(f"  {answer} is the LAN interface (s at the end swaps LAN and WAN)")
         else:
             return answer
 
@@ -215,15 +219,15 @@ def ask_address(role: str, default: str = "",
             return iface
 
 
-def ask_wan_address(lan: ipaddress.IPv4Interface,
-                    default: ipaddress.IPv4Interface | None = None) -> ipaddress.IPv4Interface | None:
-    """None is DHCP."""
+def ask_ipv4(role: str, default: str, dhcp: bool,
+             other: ipaddress.IPv4Interface | None = None) -> ipaddress.IPv4Interface | None:
+    """A static address, or None for DHCP; dhcp is the default mode."""
     while True:
-        answer = ask("WAN IPv4: dhcp or static", "static" if default else "dhcp").lower()
+        answer = ask(f"{role} IPv4: dhcp or static", "dhcp" if dhcp else "static").lower()
         if answer == "dhcp":
             return None
         if answer == "static":
-            return ask_address("WAN", str(default or ""), other=lan)
+            return ask_address(role, default, other=other)
         say("  dhcp or static")
 
 
@@ -325,10 +329,12 @@ def step_database(a: dict) -> None:
 
 def step_cert(a: dict) -> None:
     host = socket.gethostname()
+    # A DHCP LAN has no fixed address to name.
+    san = f"IP:{a['address'].ip},DNS:{host}" if a["address"] else f"DNS:{host}"
     run([
         "openssl", "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1",
         "-nodes", "-days", "3650", "-subj", f"/CN={host}",
-        "-addext", f"subjectAltName=IP:{a['address'].ip},DNS:{host}",
+        "-addext", f"subjectAltName={san}",
         "-keyout", str(WEB_KEY), "-out", str(WEB_CERT),
     ], quiet=True)
     for f in (WEB_KEY, WEB_CERT):
@@ -391,7 +397,13 @@ console_user: {CONSOLE_USER}
 
 
 def step_bootstrap(a: dict) -> None:
-    argv = web("bootstrap", "--lan", a["lan"], "--address", str(a["address"]), "--gui-port", str(GUI_PORT))
+    argv = web("bootstrap", "--lan", a["lan"], "--address", str(a["address"] or "dhcp"), "--gui-port", str(GUI_PORT))
+    if a["wan"]:
+        argv += ["--wan", a["wan"]]
+    if a["wan_address"]:
+        argv += ["--wan-address", str(a["wan_address"])]
+    if a["gateway"]:
+        argv += ["--gateway", str(a["gateway"])]
     if a.get("reconfigure"):
         # The agent settings stay as they are.
         argv.append("--reconfigure")
@@ -403,12 +415,6 @@ def step_bootstrap(a: dict) -> None:
         "--agent-token-file", "/dev/stdin",
         "--agent-fingerprint", a["fingerprint"],
     ]
-    if a["wan"]:
-        argv += ["--wan", a["wan"]]
-    if a["wan_address"]:
-        argv += ["--wan-address", str(a["wan_address"])]
-    if a["gateway"]:
-        argv += ["--gateway", str(a["gateway"])]
     proc = run(argv, stdin=AGENT_TOKEN.read_text(encoding="utf-8"), check=False)
     if proc.returncode != 0 and "deployed already" not in proc.stdout + proc.stderr:
         raise RuntimeError("portitor-web bootstrap failed (see above)")
@@ -429,11 +435,31 @@ def step_web(a: dict) -> None:
     raise RuntimeError("portitor-web does not answer; see journalctl -u portitor-web")
 
 
+def dhcp_address(nic: str, wait: int = 30) -> str:
+    """The IPv4 address the agent's DHCP client got on nic; empty if none yet."""
+    for _ in range(wait):
+        out = run(["ip", "-j", "-4", "addr", "show", "dev", nic], check=False, quiet=True).stdout
+        try:
+            addrs = [x["local"] for link in json.loads(out or "[]") for x in link.get("addr_info", [])]
+        except (ValueError, KeyError, TypeError):
+            addrs = []
+        if addrs:
+            return addrs[0]
+        time.sleep(1)
+    return ""
+
+
 def step_issue(a: dict) -> None:
     fp = run(["openssl", "x509", "-in", str(WEB_CERT), "-noout", "-fingerprint", "-sha256"], quiet=True).stdout
     fp = fp.strip().split("=", 1)[-1]
-    a["url"], a["cert_fp"] = f"https://{a['address'].ip}/", fp
-    write(ISSUE, f"""Portitor firewall. GUI: {a['url']} (user {GUI_USER})
+    if a["address"]:
+        host = issue_host = str(a["address"].ip)
+    else:
+        # agetty shows the LAN's current address.
+        host = dhcp_address(a["lan"]) or f"<the DHCP address of {a['lan']}>"
+        issue_host = "\\4{" + a["lan"] + "}"
+    a["url"], a["cert_fp"] = f"https://{host}/", fp
+    write(ISSUE, f"""Portitor firewall. GUI: https://{issue_host}/ (user {GUI_USER})
 Certificate SHA-256: {fp}
 
 """, 0o644)
@@ -481,7 +507,7 @@ def read_answers() -> dict:
 
     return {
         "lan": nic("lan"),
-        "address": ipaddress.IPv4Interface(raw["address"]),
+        "address": None if raw["address"].lower() == "dhcp" else ipaddress.IPv4Interface(raw["address"]),
         "wan": nic("wan") if raw.get("wan") else "",
         "wan_address": ipaddress.IPv4Interface(raw["wan_address"]) if raw.get("wan_address") else None,
         "gateway": ipaddress.IPv4Address(raw["gateway"]) if raw.get("gateway") else None,
@@ -500,10 +526,16 @@ def load_state() -> dict:
     return state if isinstance(state, dict) else {}
 
 
-def save_state(a: dict) -> None:
-    state = {k: str(a[k]) if a[k] else "" for k in ("lan", "address", "wan", "wan_address", "gateway", "tz")}
+def state_of(a: dict) -> dict:
+    """The answers as strings, without the password; a DHCP LAN is "dhcp"."""
+    state = {k: str(a[k]) if a[k] else "" for k in ("lan", "wan", "wan_address", "gateway", "tz")}
+    state["address"] = str(a["address"] or "dhcp")
     state["dns"] = " ".join(a["dns"])
-    write(SETUP_STATE, json.dumps(state, indent=2) + "\n", 0o600)
+    return state
+
+
+def save_state(a: dict) -> None:
+    write(SETUP_STATE, json.dumps(state_of(a), indent=2) + "\n", 0o600)
 
 
 def run_steps(a: dict, interactive: bool, steps: list = STEPS) -> bool:
@@ -534,13 +566,11 @@ def run_steps(a: dict, interactive: bool, steps: list = STEPS) -> bool:
 def ask_network(state: dict) -> dict:
     """The network questions, with the defaults from state."""
     lan = ask_lan(state.get("lan", ""))
-    address = ask_address("LAN", state.get("address") or "192.168.1.1/24")
     wan = ask_wan(lan, state.get("wan", ""))
-    try:
-        wan_default = ipaddress.IPv4Interface(state["wan_address"]) if state.get("wan_address") else None
-    except ValueError:
-        wan_default = None
-    wan_address = ask_wan_address(address, wan_default)
+    say()
+    lan_default = state.get("address", "")
+    address = ask_ipv4("LAN", "192.168.1.1/24" if lan_default in ("", "dhcp") else lan_default, lan_default == "dhcp")
+    wan_address = ask_ipv4("WAN", state.get("wan_address", ""), not state.get("wan_address"), other=address)
     # DHCP brings the default gateway.
     gateway = ask_gateway(wan_address, state.get("gateway", "")) if wan_address else None
     say()
@@ -551,7 +581,7 @@ def ask_network(state: dict) -> dict:
 def summary(a: dict) -> None:
     say()
     say(f"  LAN interface   {a['lan']}")
-    say(f"  LAN address     {a['address']}")
+    say(f"  LAN address     {a['address'] or 'DHCP (no default route)'}")
     say(f"  WAN interface   {a['wan']}")
     say(f"  WAN address     {a['wan_address'] or 'DHCP'}")
     say(f"  Default gateway {a['gateway'] or 'from DHCP'}")
@@ -559,6 +589,19 @@ def summary(a: dict) -> None:
     say(f"  Time zone       {a['tz']}")
     if a.get("reconfigure"):
         say(f"  Password        {'new' if a['password'] else 'unchanged'}")
+
+
+def confirm(a: dict) -> bool:
+    """Shows the answers; s swaps the LAN and WAN interfaces. False: ask again."""
+    while True:
+        summary(a)
+        answer = ask("Apply? (y: yes, n: change the answers, s: swap LAN and WAN)", "y").lower()
+        if answer in ("y", "yes"):
+            return True
+        if answer in ("n", "no"):
+            return False
+        if answer in ("s", "swap"):
+            a["lan"], a["wan"] = a["wan"], a["lan"]
 
 
 def show_gui(a: dict) -> None:
@@ -590,12 +633,10 @@ def reconfigure() -> int:
         say(f"A new password for the GUI user {GUI_USER} and the console login {CONSOLE_USER}?")
         a["password"] = ask_password(optional=True)
         a["reconfigure"] = True
-        a["new_cert"] = str(a["address"]) != state.get("address")
-        summary(a)
-        if ask("Apply? (y/n)", "y").lower() in ("y", "yes"):
+        a["new_cert"] = str(a["address"] or "dhcp") != state.get("address")
+        if confirm(a):
             break
-        state = {k: str(v or "") for k, v in a.items() if k in ("lan", "address", "wan", "wan_address", "gateway", "tz")}
-        state["dns"] = " ".join(a["dns"])
+        state = state_of(a)
     if not run_steps(a, interactive=True, steps=RECONFIGURE_STEPS):
         return 1
     say()
@@ -630,11 +671,9 @@ def main() -> int:
         say(f"One password for the GUI user {GUI_USER} and the console login {CONSOLE_USER}.")
         a["password"] = ask_password()
         a["tz"] = ask_timezone()
-        summary(a)
-        if ask("Apply? (y/n)", "y").lower() in ("y", "yes"):
+        if confirm(a):
             break
-        state = {k: str(v or "") for k, v in a.items() if k in ("lan", "address", "wan", "wan_address", "gateway", "tz")}
-        state["dns"] = " ".join(a["dns"])
+        state = state_of(a)
 
     if not run_steps(a, interactive=True):
         return 1

@@ -191,7 +191,7 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 				return err
 			}
 			if ifc.IPv4Mode == fwconfig.ModeDHCP && ifc.Enabled {
-				dhcpWant = append(dhcpWant, dhcpKey{instance: in.Name, netns: ns, iface: ifc.Name})
+				dhcpWant = append(dhcpWant, dhcpKey{instance: in.Name, netns: ns, iface: ifc.Name, noRoute: ifc.DHCPNoDefaultRoute})
 			}
 		}
 

@@ -84,6 +84,9 @@ type Interface struct {
 	Members     []string `json:"members,omitempty"` // bridge
 	MTU         int      `json:"mtu,omitempty"`
 	IPv4Mode    string   `json:"ipv4_mode"`
+	// DHCPNoDefaultRoute makes the DHCP client ignore the lease's router
+	// (a LAN on DHCP: the default route belongs to the WAN).
+	DHCPNoDefaultRoute bool `json:"dhcp_no_default_route,omitempty"`
 	// Addresses are static addresses in CIDR form (192.168.1.1/24,
 	// 2001:db8::1/64). IPv6 addresses are always static here; IPv6AcceptRA
 	// adds SLAAC on top.

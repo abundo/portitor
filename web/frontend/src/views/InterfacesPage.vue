@@ -83,6 +83,13 @@ const fields = [
     items: (f) => (f.kind === 'wireguard' ? modes.filter((m) => m.value !== 'dhcp') : modes),
     hint: 'Static addresses are assigned under IP addresses.',
   },
+  {
+    key: 'dhcp_no_default_route',
+    label: 'No default route from DHCP',
+    type: 'switch',
+    show: (f) => f.ipv4_mode === 'dhcp',
+    hint: 'Ignore the router the DHCP server offers, e.g. on a LAN; the default route comes from the WAN.',
+  },
   { key: 'ipv6_accept_ra', label: 'IPv6 SLAAC (accept router advertisements)', type: 'switch' },
   { key: 'dns_listen', label: 'DNS server answers on this interface', type: 'switch' },
   { key: 'mtu', label: 'MTU', type: 'number', hint: '0 keeps the default.' },

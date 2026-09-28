@@ -28,7 +28,8 @@ type BootstrapOptions struct {
 	AgentToken       string
 	AgentFingerprint string
 	// LAN is the interface the GUI is reached on, with Address (and its
-	// prefix length) on it.
+	// prefix length) on it, or DHCP without. A DHCP LAN takes no default
+	// route when there is a WAN.
 	LAN     string
 	Address netip.Prefix
 	// WAN, if set, is the interface to the Internet: static with
@@ -36,7 +37,7 @@ type BootstrapOptions struct {
 	WAN        string
 	WANAddress netip.Prefix
 	// Gateway, if valid, becomes the default route. It is on the WAN when
-	// that is static, else on the LAN; a DHCP WAN takes none.
+	// that is static, else on the static LAN; DHCP there takes none.
 	Gateway netip.Addr
 	// GUIPort is portitor-web's port, opened on the LAN.
 	GUIPort int
@@ -53,11 +54,10 @@ func (o *BootstrapOptions) check() error {
 	if !fwconfig.ValidIfname(o.LAN) {
 		return fmt.Errorf("invalid interface name %q", o.LAN)
 	}
-	if !o.Address.IsValid() {
-		return errors.New("the LAN address is required (address/prefix length)")
-	}
-	if err := checkHostPrefix("LAN", o.Address); err != nil {
-		return err
+	if o.Address.IsValid() {
+		if err := checkHostPrefix("LAN", o.Address); err != nil {
+			return err
+		}
 	}
 	gwNet := o.Address
 	if o.WAN != "" {
@@ -71,7 +71,7 @@ func (o *BootstrapOptions) check() error {
 			if err := checkHostPrefix("WAN", o.WANAddress); err != nil {
 				return err
 			}
-			if o.WANAddress.Overlaps(o.Address) {
+			if o.Address.IsValid() && o.WANAddress.Overlaps(o.Address) {
 				return fmt.Errorf("the WAN %s overlaps the LAN %s", o.WANAddress.Masked(), o.Address.Masked())
 			}
 			gwNet = o.WANAddress
@@ -82,6 +82,9 @@ func (o *BootstrapOptions) check() error {
 		return errors.New("a WAN address needs the WAN interface")
 	}
 	if o.Gateway.IsValid() {
+		if !gwNet.IsValid() {
+			return errors.New("the LAN uses DHCP, which brings the default gateway")
+		}
 		if !gwNet.Contains(o.Gateway) || o.Gateway == gwNet.Addr() {
 			return fmt.Errorf("the gateway %s must be another address in %s", o.Gateway, gwNet.Masked())
 		}
@@ -200,11 +203,11 @@ func Bootstrap(ctx context.Context, s *Server, o BootstrapOptions) (*models.Depl
 }
 
 func bootstrapNetwork(tx *gorm.DB, instanceID uint, o BootstrapOptions) error {
-	if _, err := bootstrapIface(tx, instanceID, o.LAN, o.Address, "LAN", "firewall (GUI)", o.Reconfigure); err != nil {
+	if _, err := bootstrapIface(tx, instanceID, o.LAN, o.Address, "LAN", "firewall (GUI)", o.WAN != "", o.Reconfigure); err != nil {
 		return err
 	}
 	if o.WAN != "" {
-		if _, err := bootstrapIface(tx, instanceID, o.WAN, o.WANAddress, "WAN", "firewall (WAN)", o.Reconfigure); err != nil {
+		if _, err := bootstrapIface(tx, instanceID, o.WAN, o.WANAddress, "WAN", "firewall (WAN)", false, o.Reconfigure); err != nil {
 			return err
 		}
 	}
@@ -305,10 +308,11 @@ func reconfigureDefaultRoute(tx *gorm.DB, instanceID uint, gw netip.Addr) error 
 }
 
 // bootstrapIface enables an interface: static with address (its prefix and
-// address go into IPAM), or DHCP when address is not valid. With reconfigure,
-// address becomes the interface's only IPv4 address (the others stay in
-// IPAM, unassigned), taken from another interface if need be.
-func bootstrapIface(tx *gorm.DB, instanceID uint, name string, address netip.Prefix, prefixDesc, addrDesc string, reconfigure bool) (*models.Interface, error) {
+// address go into IPAM), or DHCP when address is not valid, without a
+// default route if noRoute. With reconfigure, or DHCP, address becomes the
+// interface's only IPv4 address (the others stay in IPAM, unassigned),
+// taken from another interface if need be.
+func bootstrapIface(tx *gorm.DB, instanceID uint, name string, address netip.Prefix, prefixDesc, addrDesc string, noRoute, reconfigure bool) (*models.Interface, error) {
 	var ifc models.Interface
 	if err := tx.Where("instance_id = ? AND name = ?", instanceID, name).First(&ifc).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -318,6 +322,7 @@ func bootstrapIface(tx *gorm.DB, instanceID uint, name string, address netip.Pre
 	}
 	old := ifc
 	ifc.Enabled = true
+	ifc.DhcpNoDefaultRoute = noRoute
 	switch {
 	case !address.IsValid():
 		ifc.Ipv4Mode = fwconfig.ModeDHCP
@@ -330,7 +335,7 @@ func bootstrapIface(tx *gorm.DB, instanceID uint, name string, address netip.Pre
 	if err := tx.Save(&ifc).Error; err != nil {
 		return nil, err
 	}
-	if reconfigure {
+	if reconfigure || !address.IsValid() {
 		var assigned []models.IpamAddress
 		if err := tx.Where("interface_id = ?", ifc.ID).Find(&assigned).Error; err != nil {
 			return nil, err

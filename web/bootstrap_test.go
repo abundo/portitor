@@ -53,6 +53,7 @@ func TestBootstrap(t *testing.T) {
 		func(o *BootstrapOptions) { // the gateway must be on the static WAN
 			o.WAN, o.WANAddress = "enp1s0", netip.MustParsePrefix("198.51.100.2/24")
 		},
+		func(o *BootstrapOptions) { o.Address = netip.Prefix{} }, // DHCP with a gateway
 	} {
 		o := opts
 		bad(&o)
@@ -233,5 +234,49 @@ func TestBootstrapReconfigure(t *testing.T) {
 	}
 	if routes := fake.applied.Instances[0].Routes; len(routes) != 0 {
 		t.Errorf("routes %+v", routes)
+	}
+}
+
+func TestBootstrapLANDHCP(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		wan     string
+		noRoute bool
+	}{
+		{"with WAN", "enp1s0", true},
+		{"without WAN", "", false}, // the LAN lease brings the default route
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := newEnv(t)
+			fake := &applyAgent{statusAgent: statusAgent{nics: []agentapi.NICStatus{
+				{Name: "enp1s0", Addresses: []string{}},
+				{Name: "enp2s0", Addresses: []string{"192.168.1.5/24"}},
+			}}}
+			env.srv.newAgent = func(*models.Settings) (agentAPI, error) { return fake, nil }
+			o := BootstrapOptions{
+				AgentURL: "https://127.0.0.1:8443", AgentToken: strings.Repeat("t", 43), AgentFingerprint: strings.Repeat("ab", 32),
+				LAN: "enp2s0", WAN: tc.wan, GUIPort: 443,
+			}
+			if _, err := Bootstrap(context.Background(), env.srv, o); err != nil {
+				t.Fatal(err)
+			}
+			in := fake.applied.Instances[0]
+			for _, ifc := range in.Interfaces {
+				switch ifc.Name {
+				case "enp2s0":
+					// The imported static address is unassigned.
+					if ifc.IPv4Mode != fwconfig.ModeDHCP || len(ifc.Addresses) != 0 || ifc.DHCPNoDefaultRoute != tc.noRoute {
+						t.Errorf("LAN %+v", ifc)
+					}
+				case "enp1s0":
+					if tc.wan != "" && (ifc.IPv4Mode != fwconfig.ModeDHCP || ifc.DHCPNoDefaultRoute) {
+						t.Errorf("WAN %+v", ifc)
+					}
+				}
+			}
+			if len(in.Routes) != 0 {
+				t.Errorf("routes %+v", in.Routes)
+			}
+		})
 	}
 }

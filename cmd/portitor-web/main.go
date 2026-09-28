@@ -142,9 +142,10 @@ func main() {
 	bootstrap := &cobra.Command{
 		Use:   "bootstrap",
 		Short: "Configure and deploy a new firewall that runs portitor-web itself (installer ISO)",
-		Long: `Stores the agent settings, configures the LAN interface with its address,
-the WAN interface (static or DHCP) and the default route, accepts the GUI
-port and ping from the LAN, and deploys. Every other interface of the
+		Long: `Stores the agent settings, configures the LAN interface with its address
+(or DHCP, without a default route when there is a WAN), the WAN interface
+(static or DHCP) and the default route, accepts the GUI port and ping from
+the LAN, and deploys. Every other interface of the
 firewall is imported as it is. Refused once anything has been deployed,
 unless --reconfigure (portitor-setup run again): then the LAN and WAN get
 exactly these settings, the IPv4 default route is --gateway or none, the
@@ -163,8 +164,10 @@ GUI and ping rules move to the LAN, and the agent settings are kept unless
 				}
 				bo.AgentToken = strings.TrimSpace(string(tok))
 			}
-			if bo.Address, err = netip.ParsePrefix(address); err != nil {
-				return fmt.Errorf("--address: %w", err)
+			if address != "dhcp" {
+				if bo.Address, err = netip.ParsePrefix(address); err != nil {
+					return fmt.Errorf("--address: %w", err)
+				}
 			}
 			if wanAddress != "" {
 				if bo.WANAddress, err = netip.ParsePrefix(wanAddress); err != nil {
@@ -192,10 +195,10 @@ GUI and ping rules move to the LAN, and the agent settings are kept unless
 	bf.StringVar(&tokenFile, "agent-token-file", "/etc/portitor/agent.token", "agent token")
 	bf.StringVar(&bo.AgentFingerprint, "agent-fingerprint", "", "agent certificate SHA-256 (from portitor-agent init)")
 	bf.StringVar(&bo.LAN, "lan", "", "LAN interface")
-	bf.StringVar(&address, "address", "", "LAN address with prefix length, e.g. 192.168.1.1/24")
+	bf.StringVar(&address, "address", "", "LAN address with prefix length, e.g. 192.168.1.1/24, or dhcp")
 	bf.StringVar(&bo.WAN, "wan", "", "WAN interface (optional)")
 	bf.StringVar(&wanAddress, "wan-address", "", "static WAN address with prefix length (default: DHCP)")
-	bf.StringVar(&gateway, "gateway", "", "default gateway (optional; on the WAN if it is static, else on the LAN)")
+	bf.StringVar(&gateway, "gateway", "", "default gateway (optional; on the WAN if it is static, else on the static LAN)")
 	bf.IntVar(&bo.GUIPort, "gui-port", 443, "port to open for portitor-web on the LAN")
 	bf.BoolVar(&bo.Reconfigure, "reconfigure", false, "change the LAN and WAN of a deployed installation")
 	for _, f := range []string{"lan", "address"} {

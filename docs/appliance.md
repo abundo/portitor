@@ -37,8 +37,10 @@ plugged in (*r* reloads the list, so you can plug cables in and watch). It then 
 for:
 
 - **LAN interface**: where you reach the GUI from.
-- **LAN address** with its prefix length, e.g. `192.168.1.1/24`.
 - **WAN interface**: where the firewall reaches the Internet, for updates and IP lists.
+- **LAN IPv4**: `static` (the default), which asks for the LAN address with its prefix
+  length, e.g. `192.168.1.1/24`, or `dhcp`. A DHCP LAN takes no default route from its
+  lease; the default route belongs to the WAN.
 - **WAN IPv4**: `dhcp` (the default), which also brings the default gateway, or
   `static`, which asks for the WAN address with its prefix length and the **default
   gateway**.
@@ -49,17 +51,22 @@ for:
   sudo.
 - **Time zone**: used by scheduled tasks.
 
+Before it applies anything it shows the answers: *y* applies them, *n* asks again, and
+*s* swaps the LAN and WAN interfaces (the addresses stay with the LAN and the WAN), for
+when you picked them the wrong way round.
+
 Then it creates the database, starts the agent and the GUI, and deploys a first
 configuration:
 
-- the LAN interface with its address,
+- the LAN interface with its address, or DHCP,
 - the WAN interface, with DHCP or its static address,
 - the default route (for a static WAN),
 - two input rules, *portitor-web from the LAN* (TCP 443) and *ping from the LAN*,
 - every other interface as it is (down, no address).
 
 The screen then shows the GUI's address and its certificate fingerprint. The login
-screen shows them too. Open `https://<LAN address>/` from the LAN and log in as `admin`.
+screen shows them too; with a DHCP LAN it shows the LAN's current address. Open
+`https://<LAN address>/` from the LAN and log in as `admin`.
 The browser warns about the self-signed certificate; compare the fingerprint it shows
 with the one on the screen.
 
@@ -73,7 +80,7 @@ run `sudo portitor-setup` after logging in as `portitor` at the console.
 ## Changing the network later
 
 `sudo portitor-setup`, run again after the first setup, changes the network: the LAN
-and WAN interfaces, the LAN address, DHCP or a static WAN address, the default gateway,
+and WAN interfaces (or swaps them), DHCP or a static address on each, the default gateway,
 the DNS servers and the time zone. The last answers are the defaults. A new password
 for `admin` and `portitor` is optional; leave it empty to keep the current one. This
 is also the way back in when a change in the GUI has locked you out of it.
@@ -82,7 +89,8 @@ It then deploys at once, without the confirm timeout:
 
 - the LAN and the WAN get exactly the new settings: their other IPv4 addresses are
   unassigned (they stay in IPAM), and an address in use on another interface moves;
-- the IPv4 default route is the new gateway, or none with a DHCP WAN;
+- the IPv4 default route is the new gateway, or none with a DHCP WAN (whose lease
+  brings it);
 - the rules *portitor-web from the LAN* and *ping from the LAN* are enabled and
   match the new LAN interface;
 - a new GUI certificate is made when the LAN address changes, so the browser warns

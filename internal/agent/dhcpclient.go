@@ -19,7 +19,12 @@ import (
 	"github.com/vishvananda/netns"
 )
 
-type dhcpKey struct{ instance, netns, iface string }
+// dhcpKey is one client; noRoute leaves out the default route (changing
+// it restarts the client).
+type dhcpKey struct {
+	instance, netns, iface string
+	noRoute                bool
+}
 
 // dhcpManager runs one DHCPv4 client goroutine per WAN interface.
 type dhcpManager struct {
@@ -271,6 +276,8 @@ func (m *dhcpManager) installLease(ctx context.Context, k dhcpKey, old, lease *n
 	var router string
 	if routers := ack.Router(); len(routers) > 0 {
 		router = routers[0].String()
+	}
+	if router != "" && !k.noRoute {
 		if _, err := m.run.Run(ctx, k.netns, "ip", "route", "replace", "default", "via", router,
 			"dev", k.iface, "proto", "dhcp", "metric", strconv.Itoa(DHCPRouteMetric)); err != nil {
 			return err
