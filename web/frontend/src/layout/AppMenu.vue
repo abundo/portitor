@@ -37,6 +37,7 @@ const items = computed(() => [
     { label: 'Scheduled tasks', icon: 'i-lucide-calendar-clock', to: '/tasks' },
   ],
   [
+    { label: 'Admin', type: 'label' },
     { label: 'Console', icon: 'i-lucide-square-terminal', to: '/console' },
     {
       label: 'Settings',
