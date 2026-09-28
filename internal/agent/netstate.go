@@ -46,6 +46,25 @@ type ipAddr struct {
 	Dynamic   bool   `json:"dynamic"`
 }
 
+// foreignDHCPAddrs returns the interface's dynamic global IPv4 addresses
+// other than own (the agent's lease, invalid when it has none). The agent
+// adds a lease with a lifetime, so such an address that is not its own was
+// most likely added by another DHCP client (systemd-networkd, NetworkManager,
+// dhclient) on the same interface, which also keeps the ISP from answering
+// the agent.
+func foreignDHCPAddrs(have ipLink, own netip.Prefix) []string {
+	var out []string
+	for _, a := range have.AddrInfo {
+		if a.Family != "inet" || !a.Dynamic || a.Scope != "global" {
+			continue
+		}
+		if p, err := a.prefix(); err == nil && p != own {
+			out = append(out, p.String())
+		}
+	}
+	return out
+}
+
 func (l ipLink) kind() string {
 	if l.LinkInfo == nil {
 		return ""

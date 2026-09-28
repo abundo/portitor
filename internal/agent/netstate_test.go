@@ -4,6 +4,7 @@
 package agent
 
 import (
+	"net/netip"
 	"strings"
 	"testing"
 
@@ -60,6 +61,20 @@ func TestPlanAddresses(t *testing.T) {
 		Addresses: []string{"192.168.1.1/24", "fd00::1/64"}}, have["eth1"]),
 		"fw-guest ip addr del 10.0.0.1/8 dev eth1",
 		"fw-guest ip addr add fd00::1/64 dev eth1")
+}
+
+func TestForeignDHCPAddrs(t *testing.T) {
+	have := observed(t)
+	if got := foreignDHCPAddrs(have["eth0"], netip.Prefix{}); strings.Join(got, ",") != "198.51.100.7/24" {
+		t.Errorf("no lease: got %v", got)
+	}
+	if got := foreignDHCPAddrs(have["eth0"], netip.MustParsePrefix("198.51.100.7/24")); len(got) != 0 {
+		t.Errorf("own lease: got %v", got)
+	}
+	// Static addresses are not a DHCP client's.
+	if got := foreignDHCPAddrs(have["eth1"], netip.Prefix{}); len(got) != 0 {
+		t.Errorf("static: got %v", got)
+	}
 }
 
 func TestPlanCreateRecreatesWrongVLAN(t *testing.T) {

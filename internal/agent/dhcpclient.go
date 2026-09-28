@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -170,7 +171,7 @@ func (m *dhcpManager) loop(ctx context.Context, k dhcpKey) {
 		}
 		cancel()
 		if err != nil {
-			m.fail(k, log, err)
+			m.fail(k, log, m.explain(ctx, k, current, err))
 			if current != nil && time.Now().After(current.CreationTime.Add(current.ACK.IPAddressLeaseTime(time.Hour))) {
 				m.removeLease(k, current)
 				current = nil
@@ -210,7 +211,34 @@ func (m *dhcpManager) fail(k dhcpKey, log *slog.Logger, err error) {
 	})
 }
 
-func (m *dhcpManager) installLease(ctx context.Context, k dhcpKey, old, lease *nclient4.Lease) error {
+// explain adds to a failed request the dynamic addresses on the interface
+// that the agent did not set: another DHCP client there usually is why
+// the server does not answer.
+func (m *dhcpManager) explain(ctx context.Context, k dhcpKey, current *nclient4.Lease, err error) error {
+	out, lerr := m.run.Run(ctx, k.netns, "ip", "-j", "-4", "addr", "show", "dev", k.iface)
+	if lerr != nil {
+		return err
+	}
+	links, lerr := parseLinks(out)
+	if lerr != nil || len(links) != 1 {
+		return err
+	}
+	var own netip.Prefix
+	if current != nil {
+		own = leasePrefix(current)
+	}
+	foreign := foreignDHCPAddrs(links[0], own)
+	if len(foreign) == 0 {
+		return err
+	}
+	return fmt.Errorf("%w (%s has dynamic address %s that portitor did not set: "+
+		"another DHCP client, such as systemd-networkd/netplan, NetworkManager or dhclient, "+
+		"is probably managing it)", err, k.iface, strings.Join(foreign, ", "))
+}
+
+// leasePrefix is the lease's address and prefix length; invalid when it
+// has no IPv4 address.
+func leasePrefix(lease *nclient4.Lease) netip.Prefix {
 	ack := lease.ACK
 	mask := ack.SubnetMask()
 	if mask == nil {
@@ -219,9 +247,17 @@ func (m *dhcpManager) installLease(ctx context.Context, k dhcpKey, old, lease *n
 	ones, _ := mask.Size()
 	addr, ok := netip.AddrFromSlice(ack.YourIPAddr.To4())
 	if !ok {
+		return netip.Prefix{}
+	}
+	return netip.PrefixFrom(addr, ones)
+}
+
+func (m *dhcpManager) installLease(ctx context.Context, k dhcpKey, old, lease *nclient4.Lease) error {
+	ack := lease.ACK
+	pfx := leasePrefix(lease)
+	if !pfx.IsValid() {
 		return fmt.Errorf("lease without IPv4 address")
 	}
-	pfx := netip.PrefixFrom(addr, ones)
 	leaseTime := ack.IPAddressLeaseTime(time.Hour)
 	lft := strconv.Itoa(int(leaseTime.Seconds()))
 
@@ -267,18 +303,13 @@ func (m *dhcpManager) installLease(ctx context.Context, k dhcpKey, old, lease *n
 }
 
 func (m *dhcpManager) removeLease(k dhcpKey, lease *nclient4.Lease) {
-	ack := lease.ACK
-	ones, _ := ack.SubnetMask().Size()
-	if ack.SubnetMask() == nil {
-		ones, _ = ack.YourIPAddr.DefaultMask().Size()
-	}
-	addr, ok := netip.AddrFromSlice(ack.YourIPAddr.To4())
-	if !ok {
+	pfx := leasePrefix(lease)
+	if !pfx.IsValid() {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	_, _ = m.run.Run(ctx, k.netns, "ip", "addr", "del", netip.PrefixFrom(addr, ones).String(), "dev", k.iface)
+	_, _ = m.run.Run(ctx, k.netns, "ip", "addr", "del", pfx.String(), "dev", k.iface)
 	changed := m.update(k, func(l *Lease) {
 		l.Address, l.Router, l.DNS, l.State = "", "", nil, "requesting"
 	})

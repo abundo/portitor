@@ -117,7 +117,21 @@ systemctl enable --now portitor-agent
 ```
 
 Take the interfaces you hand to the firewall away from NetworkManager, systemd-networkd
-or netplan; the agent manages their addresses and routes.
+or netplan; the agent manages their addresses and routes. This matters most for a WAN
+interface in DHCP mode: with a second DHCP client on the same MAC address the ISP often
+answers only that one, and the agent logs `unable to receive an offer` and names the
+address the other client set. On Ubuntu the installer writes a netplan file with
+`dhcp4: true` for the interface. From the console (the interface loses its address),
+remove the interface from `/etc/netplan/*.yaml`, then:
+
+```sh
+netplan apply
+ip addr flush dev ens18 scope global        # networkd may leave its address and route
+ip route del default dev ens18 proto dhcp
+```
+
+Keep netplan entries for interfaces the firewall does not manage (a separate management
+port, say).
 
 When portitor-web reaches the agent, it adds the firewall's physical interfaces it
 has not seen before to the default instance, as they are configured at that moment

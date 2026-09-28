@@ -409,6 +409,8 @@ def install_agent(host: Host, binary: Path, deploy: Path, version: str, assume_y
         log("    portitor-agent init --host <management address>   # token + fingerprint for the GUI")
         log(f"    $EDITOR {AGENT_CONFIG}                     # listen, allow_from, bind_user")
         log("    systemctl disable --now named kea-dhcp4-server kea-dhcp6-server radvd")
+        log("    remove the firewall's interfaces from netplan, NetworkManager or systemd-networkd")
+        log("      (a second DHCP client on the WAN keeps the agent from getting a lease)")
         log(f"    systemctl enable --now {AGENT_UNIT}")
         return
     if actions[AGENT_UNIT] == "installed":
