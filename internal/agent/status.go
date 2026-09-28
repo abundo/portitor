@@ -26,6 +26,7 @@ func (a *Agent) Status(ctx context.Context) *Status {
 		DryRun:      a.cfg.DryRun,
 		LastError:   a.lastError,
 		DHCPLeases:  a.dhcp.Leases(),
+		DynDNS:      a.ddns.Status(),
 		Instances:   []InstanceStatus{},
 		AntiLockout: a.cfg.antiLockout(),
 	}

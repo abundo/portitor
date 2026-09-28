@@ -81,6 +81,19 @@ func SampleDocument() Document {
 					RDNSS:     []string{"fd00:1::1"},
 					DNSSL:     []string{"home.arpa"},
 				}},
+				DynDNS: []DynDNS{{
+					Name:      "home",
+					Interface: "eth0",
+					Server:    "192.0.2.53",
+					Zone:      "example.com",
+					TSIG:      &TSIG{Name: "ddns-key.example.com", Algorithm: "hmac-sha256", Secret: "c2VjcmV0c2VjcmV0c2VjcmV0"},
+					Records: []DynDNSRecord{
+						{Name: "home", Type: "A", TTL: 60},
+						{Name: "home", Type: "AAAA", TTL: 60},
+						{Name: "home", Type: "TXT"},
+						{Name: "www", Type: "CNAME", Value: "home"},
+					},
+				}},
 				DNS: DNSServer{
 					Enabled:          true,
 					Forwarders:       []string{"9.9.9.9"},

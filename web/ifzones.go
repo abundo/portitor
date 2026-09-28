@@ -246,6 +246,9 @@ func ifaceMoved(tx *gorm.DB, oldInst uint, oldName string, inst uint, name strin
 }
 
 func deleteInterface(tx *gorm.DB, i *models.Interface) error {
+	if err := refuseDyndnsIface(tx, i); err != nil {
+		return err
+	}
 	return removeIface(tx, i.InstanceID, i.Name)
 }
 

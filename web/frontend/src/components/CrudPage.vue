@@ -5,7 +5,7 @@
 // CrudPage: a table of one REST resource with a create/edit modal, driven
 // by column and field schemas.
 //
-// Field: { key, label, type: text|number|switch|select|multiselect|tags|addrs|addr|textarea,
+// Field: { key, label, type: text|number|password|switch|select|multiselect|tags|addrs|addr|textarea,
 //          items (array or form => array), nullable, placeholder, hint,
 //          required, show: form => bool, disabled: form => bool }
 // multiselect: an array of strings picked from items (strings, or
@@ -387,7 +387,8 @@ defineExpose({ reload: load, openEdit, openCreate })
             <UInput
               v-else
               v-model="form[f.key]"
-              :type="f.type === 'number' ? 'number' : 'text'"
+              :type="['number', 'password'].includes(f.type) ? f.type : 'text'"
+              :autocomplete="f.type === 'password' ? 'new-password' : undefined"
               class="w-full"
               :placeholder="f.placeholder"
               :required="f.required"

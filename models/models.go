@@ -347,6 +347,40 @@ const (
 	DnsRecordDomain  = "$DOMAIN"
 )
 
+// DyndnsClient keeps DyndnsRecords on the nameserver Server in step with
+// the addresses of an interface of its instance (RFC 2136 UPDATE).
+type DyndnsClient struct {
+	Base
+	InstanceID    uint   `json:"instance_id"`
+	Name          string `json:"name"`
+	Description   string `json:"description"`
+	Enabled       bool   `json:"enabled"`
+	InterfaceID   uint   `json:"interface_id"`
+	Server        string `json:"server"`
+	Zone          string `json:"zone"`
+	TsigName      string `json:"tsig_name"`
+	TsigAlgorithm string `json:"tsig_algorithm"`
+	// TsigSecret is set through NewTsigSecret and never sent back.
+	TsigSecret     string `json:"-"`
+	RetryInterval  int    `json:"retry_interval"`
+	VerifyInterval int    `json:"verify_interval"`
+	// NewTsigSecret replaces the stored secret when not empty.
+	NewTsigSecret string `gorm:"-" json:"tsig_secret,omitempty"`
+	HasTsigSecret bool   `gorm:"-" json:"has_tsig_secret"`
+}
+
+// DyndnsRecord is a record a DyndnsClient maintains. A/AAAA without Value
+// follow the interface; TXT without Value holds the last update time.
+type DyndnsRecord struct {
+	Base
+	ClientID    uint   `json:"client_id"`
+	Name        string `json:"name"`
+	Type        string `json:"type"`
+	Ttl         int    `json:"ttl"`
+	Value       string `json:"value"`
+	Description string `json:"description"`
+}
+
 // KnownInterface is a physical interface the agent has reported
 // (web/nics.go). A new one is imported into the default instance once, so
 // deleting it there sticks.
@@ -377,5 +411,6 @@ func All() []any {
 		&User{}, &Settings{}, &Instance{}, &InterfaceZone{}, &Interface{}, &WgPeer{}, &Link{},
 		&Route{}, &Rule{}, &NatRule{}, &IpamPrefix{}, &IpamAddress{}, &DnsZone{}, &DnsRecord{}, &Deployment{},
 		&AddressObject{}, &DnsSoaTemplate{}, &DnsDnssecPolicy{}, &DnsTemplate{}, &KnownInterface{},
+		&DyndnsClient{}, &DyndnsRecord{},
 	}
 }

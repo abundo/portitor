@@ -16,6 +16,7 @@ are in [README.md](README.md).
 | `internal/fwconfig` | The desired-state document and `Validate()`. **The contract between web and agent.** |
 | `internal/render` | Pure functions: document → nftables, WireGuard, named.conf, Kea, dnsmgr2 config |
 | `internal/agent` | Agent: apply/reconcile, commit-confirm, DHCP client, status, API server |
+| `internal/dyndns` | Dynamic DNS client (RFC 2136, from ifnsupdate); the agent runs it per instance netns |
 | `internal/agentapi` | Agent API wire types (shared by agent and client) |
 | `internal/agentclient` | portitor-web's HTTPS client for the agent, with certificate pinning |
 | `internal/builder` | Database → `fwconfig.Document` (resolves ids, IPAM, DHCP scopes, DNS names) |
@@ -47,10 +48,12 @@ are in [README.md](README.md).
 - **Commit-confirm:** the rollback target is the last *confirmed* document; a second
   apply while one is pending keeps it. `rollback.json` makes a pending change roll
   back after an agent restart too.
-- **Secrets:** fields tagged `json:"-"` (WireGuard private/preshared keys, agent
-  token, password hashes) never reach the browser. The generic CRUD `PUT` merges the
-  body onto the stored row, so those fields can't be overwritten through the API
-  either. Deployment history stores a redacted document.
+- **Secrets:** fields tagged `json:"-"` (WireGuard private/preshared keys, TSIG
+  secrets, agent token, password hashes) never reach the browser. The generic CRUD
+  `PUT` merges the body onto the stored row, so those fields can't be overwritten
+  through the API either; a secret the user enters comes in through a write-only
+  `gorm:"-"` field that `prepare` copies and `present` clears (`DyndnsClient.NewTsigSecret`).
+  Deployment history stores a redacted document.
 - **Rules match interfaces by name.** Rule and NAT interface lists hold interface
   names (link ends included) and interface zone names of the instance; an
   interface zone is a group of zero or more interfaces. An empty list matches

@@ -111,6 +111,7 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 	_ = readJSON(a.managedFile(), &root)
 	var newRoot []string
 	var dhcpWant []dhcpKey
+	var ddnsWant []dyndnsItem
 
 	for i := range exp.Instances {
 		in := &exp.Instances[i]
@@ -189,6 +190,10 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 			}
 		}
 
+		for _, d := range in.DynDNS {
+			ddnsWant = append(ddnsWant, dyndnsItem{instance: in.Name, netns: ns, cfg: d})
+		}
+
 		var routes []ipRoute
 		for _, fam := range []string{"-4", "-6"} {
 			out, err := a.run.Run(ctx, ns, "ip", "-j", fam, "route", "show", "proto", RouteProto)
@@ -216,6 +221,7 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 	}
 
 	a.dhcp.Reconcile(dhcpWant)
+	a.ddns.Reconcile(ddnsWant)
 
 	for i := range exp.Instances {
 		if err := a.applyServices(ctx, &exp.Instances[i], bundle, changed); err != nil {

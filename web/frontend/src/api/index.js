@@ -30,6 +30,8 @@ export const dnsTemplates = crud('/dns/templates')
 export const dnsSoaTemplates = crud('/dns/soa-templates')
 export const dnsDnssecPolicies = crud('/dns/dnssec-policies')
 export const addressObjects = crud('/objects')
+export const dyndnsClients = crud('/dyndns/clients')
+export const dyndnsRecords = crud('/dyndns/records')
 
 export const api = {
   login: (username, password, remember) =>

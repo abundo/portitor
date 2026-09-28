@@ -131,6 +131,11 @@ func prepareInterface(tx *gorm.DB, i, old *models.Interface) error {
 		if err := ifaceMoved(tx, old.InstanceID, old.Name, i.InstanceID, i.Name); err != nil {
 			return err
 		}
+		if old.InstanceID != i.InstanceID {
+			if err := refuseDyndnsIface(tx, old); err != nil {
+				return err
+			}
+		}
 	}
 	i.Members = cleanList(i.Members)
 	switch i.Kind {

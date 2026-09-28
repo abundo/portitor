@@ -37,6 +37,9 @@ type Instance struct {
 	DNS            DNSServer       `json:"dns"`
 	// RA lists the interfaces that send IPv6 router advertisements.
 	RA []RAInterface `json:"ra,omitempty"`
+	// DynDNS clients keep records on a nameserver in step with the
+	// addresses of this instance's interfaces.
+	DynDNS []DynDNS `json:"dyndns,omitempty"`
 }
 
 // Interface kinds.
@@ -310,6 +313,49 @@ type DNSRecord struct {
 	Type  string `json:"type"`
 	Value string `json:"value"`
 	MAC   string `json:"mac,omitempty"` // A/AAAA: DHCP reservation
+}
+
+// DynDNS is a dynamic DNS client (ifnsupdate): it sends RFC 2136 UPDATEs
+// to Server, from inside the instance, whenever Interface's addresses
+// change. A and AAAA records without a Value get the interface's first
+// global address of that family; records with a Value, and CNAMEs, are
+// static and re-verified every VerifyInterval. A TXT record without a
+// Value holds the time of the last update.
+type DynDNS struct {
+	Name      string `json:"name"`
+	Interface string `json:"interface"`
+	// Server is the zone's primary nameserver: an IP address, with an
+	// optional port (192.0.2.53, [2001:db8::53]:5353).
+	Server string `json:"server"`
+	Zone   string `json:"zone"`
+	TSIG   *TSIG  `json:"tsig,omitempty"`
+	// RetryInterval (after a failed update) and VerifyInterval (of the
+	// static records) are in seconds; 0 means 300 and 3600.
+	RetryInterval  int            `json:"retry_interval,omitempty"`
+	VerifyInterval int            `json:"verify_interval,omitempty"`
+	Records        []DynDNSRecord `json:"records"`
+}
+
+// TSIG authenticates dynamic updates. Secret is base64.
+type TSIG struct {
+	Name      string `json:"name"`
+	Algorithm string `json:"algorithm"`
+	Secret    string `json:"secret"`
+}
+
+// TSIGAlgorithms are the algorithms a TSIG key may use.
+var TSIGAlgorithms = []string{"hmac-sha256", "hmac-sha512", "hmac-sha384", "hmac-sha224", "hmac-sha1", "hmac-md5"}
+
+// DynDNS record types.
+var DynDNSRecordTypes = []string{"A", "AAAA", "CNAME", "TXT"}
+
+// DynDNSRecord is a record the client maintains. Name is relative to the
+// zone, "@" for the apex, or a name in the zone ending with a dot.
+type DynDNSRecord struct {
+	Name  string `json:"name"`
+	Type  string `json:"type"`
+	TTL   int    `json:"ttl,omitempty"` // 0 means 300
+	Value string `json:"value,omitempty"`
 }
 
 // Link is a point-to-point veth pair between two instances.

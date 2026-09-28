@@ -389,6 +389,8 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 		}
 	}
 
+	v.dyndns(p, in, ifaces)
+
 	switch in.DNS.ForwardMode {
 	case "", ForwardFirst, ForwardOnly, ForwardOff:
 	default:

@@ -111,6 +111,8 @@ func (s *Server) Echo() *echo.Echo {
 	(&resource[models.DnsSoaTemplate, *models.DnsSoaTemplate]{db: s.db, order: "name", prepare: prepareDnsSoaTemplate, beforeDelete: deleteDnsSoaTemplate}).register(g, "/dns/soa-templates")
 	(&resource[models.DnsDnssecPolicy, *models.DnsDnssecPolicy]{db: s.db, order: "name", prepare: prepareDnsDnssecPolicy, beforeDelete: deleteDnsDnssecPolicy}).register(g, "/dns/dnssec-policies")
 	(&resource[models.DnsTemplate, *models.DnsTemplate]{db: s.db, order: "name", prepare: prepareDnsTemplate, beforeDelete: deleteDnsTemplate}).register(g, "/dns/templates")
+	(&resource[models.DyndnsClient, *models.DyndnsClient]{db: s.db, filters: []string{"instance_id"}, order: "name", prepare: prepareDyndnsClient, present: presentDyndnsClient, beforeDelete: deleteDyndnsClient}).register(g, "/dyndns/clients")
+	(&resource[models.DyndnsRecord, *models.DyndnsRecord]{db: s.db, filters: []string{"client_id"}, order: "id", prepare: prepareDyndnsRecord}).register(g, "/dyndns/records")
 	(&resource[models.AddressObject, *models.AddressObject]{db: s.db, order: "name", prepare: prepareAddressObject, beforeDelete: deleteAddressObject}).register(g, "/objects")
 
 	g.PUT("/dns/zones/:id/records", s.handleZoneRecords)

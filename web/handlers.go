@@ -778,6 +778,15 @@ func redactDoc(doc fwconfig.Document) fwconfig.Document {
 			}
 			cp.Interfaces[j] = ifc
 		}
+		cp.DynDNS = make([]fwconfig.DynDNS, len(in.DynDNS))
+		for j, d := range in.DynDNS {
+			if d.TSIG != nil {
+				t := *d.TSIG
+				t.Secret = "<redacted>"
+				d.TSIG = &t
+			}
+			cp.DynDNS[j] = d
+		}
 		out.Instances[i] = cp
 	}
 	return out

@@ -26,6 +26,7 @@ type Agent struct {
 	run  Runner
 	log  *OpLog
 	dhcp *dhcpManager
+	ddns *dyndnsManager
 
 	mu        sync.Mutex // serialises apply / confirm / rollback
 	applied   *fwconfig.Document
@@ -51,6 +52,7 @@ func New(cfg *Config) *Agent {
 		a.run = &ExecRunner{Log: a.log}
 	}
 	a.dhcp = newDHCPManager(a.run, cfg.DryRun, a.onDHCPChange)
+	a.ddns = newDyndnsManager(cfg.DryRun)
 	return a
 }
 
@@ -107,6 +109,7 @@ func (a *Agent) Start(ctx context.Context) error {
 }
 
 func (a *Agent) Stop() {
+	a.ddns.Stop()
 	a.dhcp.Stop()
 }
 

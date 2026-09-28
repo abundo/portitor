@@ -78,6 +78,17 @@ func TestValidateCatchesProblems(t *testing.T) {
 		{"dnssec bad duration", func(d *Document) { d.Instances[0].DNS.DNSSECPolicies[0].SignaturesValidity = "14d; };" }, "invalid signatures-validity"},
 		{"dnssec unknown policy", func(d *Document) { d.Instances[0].DNS.ZoneTemplates[0].DNSSECPolicy = "x" }, `unknown dnssec policy "x"`},
 		{"dnat family mismatch", func(d *Document) { d.Instances[0].NAT[0].DstAddrs = []string{"2001:db8::1"} }, "differ in family"},
+		{"dyndns unknown interface", func(d *Document) { d.Instances[0].DynDNS[0].Interface = "eth2" }, `unknown interface "eth2"`},
+		{"dyndns server name", func(d *Document) { d.Instances[0].DynDNS[0].Server = "ns1.example.com:53" }, "not an IP address"},
+		{"dyndns bad secret", func(d *Document) { d.Instances[0].DynDNS[0].TSIG.Secret = "not base64!" }, "TSIG secret must be base64"},
+		{"dyndns bad algorithm", func(d *Document) { d.Instances[0].DynDNS[0].TSIG.Algorithm = "gss-tsig" }, "TSIG algorithm must be"},
+		{"dyndns no records", func(d *Document) { d.Instances[0].DynDNS[0].Records = nil }, "at least one record"},
+		{"dyndns name outside zone", func(d *Document) { d.Instances[0].DynDNS[0].Records[0].Name = "home.example.org." }, "not in zone"},
+		{"dyndns duplicate record", func(d *Document) { d.Instances[0].DynDNS[0].Records[1].Type = "A" }, "duplicate (one record per name and type)"},
+		{"dyndns cname and other", func(d *Document) { d.Instances[0].DynDNS[0].Records[3].Name = "home" }, "has a CNAME and other records"},
+		{"dyndns A with v6", func(d *Document) { d.Instances[0].DynDNS[0].Records[0].Value = "2001:db8::1" }, "invalid IPv4 address"},
+		{"dyndns txt newline", func(d *Document) { d.Instances[0].DynDNS[0].Records[2].Value = "a\nb" }, "control characters"},
+		{"dyndns short retry", func(d *Document) { d.Instances[0].DynDNS[0].RetryInterval = 1 }, "retry interval must be"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -125,6 +136,34 @@ func TestMatchInterfaces(t *testing.T) {
 	for _, tc := range cases {
 		if got := strings.Join(in.MatchInterfaces(tc.list), " "); got != tc.want {
 			t.Errorf("%v: got %q, want %q", tc.list, got, tc.want)
+		}
+	}
+}
+
+func TestDynDNSOwner(t *testing.T) {
+	cases := []struct{ name, want string }{
+		{"@", "example.com."},
+		{"home", "home.example.com."},
+		{"Home.Example.com", "home.example.com."},
+		{"home.example.com.", "home.example.com."},
+		{"a.b", "a.b.example.com."},
+		{"x.example.org.", ""},
+	}
+	for _, tc := range cases {
+		got, err := DynDNSOwner(tc.name, "example.com")
+		if tc.want == "" {
+			if err == nil {
+				t.Errorf("%q: expected error, got %q", tc.name, got)
+			}
+			continue
+		}
+		if err != nil || got != tc.want {
+			t.Errorf("%q: got %q %v, want %q", tc.name, got, err, tc.want)
+		}
+	}
+	for s, want := range map[string]string{"192.0.2.53": "192.0.2.53:53", "192.0.2.53:5353": "192.0.2.53:5353", "2001:db8::53": "[2001:db8::53]:53", "[2001:db8::53]:54": "[2001:db8::53]:54"} {
+		if got, err := DynDNSServerAddr(s); err != nil || got.String() != want {
+			t.Errorf("server %q: got %v %v, want %s", s, got, err, want)
 		}
 	}
 }

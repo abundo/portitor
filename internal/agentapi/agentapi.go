@@ -8,6 +8,7 @@ package agentapi
 import (
 	"time"
 
+	"github.com/abundo/portitor/internal/dyndns"
 	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/internal/render"
 )
@@ -46,6 +47,7 @@ type Status struct {
 	Pending    *PendingStatus   `json:"pending,omitempty"`
 	Instances  []InstanceStatus `json:"instances"`
 	DHCPLeases []Lease          `json:"dhcp_client_leases"`
+	DynDNS     []DynDNSStatus   `json:"dyndns"`
 	Programs   []ProgramStatus  `json:"programs"`
 	// NICs are the physical interfaces on the firewall, wherever they are.
 	NICs []NICStatus `json:"nics"`
@@ -153,6 +155,14 @@ type Lease struct {
 	State      string    `json:"state"` // requesting, bound, error
 	LastError  string    `json:"last_error,omitempty"`
 	RenewAfter time.Time `json:"renew_after"`
+}
+
+// DynDNSStatus is the state of a dynamic DNS client.
+type DynDNSStatus struct {
+	Instance  string `json:"instance"`
+	Name      string `json:"name"`
+	Interface string `json:"interface"`
+	dyndns.Status
 }
 
 // RenderResult is a preview: the files a document would produce next to

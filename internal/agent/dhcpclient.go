@@ -288,38 +288,43 @@ func (m *dhcpManager) removeLease(k dhcpKey, lease *nclient4.Lease) {
 }
 
 // newClientInNetns opens the DHCP client's raw socket inside the named
-// network namespace. A socket stays in the namespace it was created in, so
-// only the creation has to happen on a thread switched into it. That runs
-// on a throwaway goroutine that never unlocks its OS thread: when it exits,
-// the Go runtime destroys the thread instead of reusing it in the wrong
-// namespace.
+// network namespace.
 func newClientInNetns(nsName, iface string) (*nclient4.Client, error) {
-	opts := []nclient4.ClientOpt{nclient4.WithTimeout(5 * time.Second), nclient4.WithRetry(3)}
+	var c *nclient4.Client
+	err := withNetns(nsName, func() error {
+		var err error
+		c, err = nclient4.New(iface, nclient4.WithTimeout(5*time.Second), nclient4.WithRetry(3))
+		return err
+	})
+	return c, err
+}
+
+// withNetns runs fn with the calling thread in the named network namespace
+// ("" is the root namespace, where the agent runs: fn runs directly).
+// A socket stays in the namespace it was created in, so fn only has to
+// create its sockets there. It runs on a throwaway goroutine that never
+// unlocks its OS thread: when it exits, the Go runtime destroys the thread
+// instead of reusing it in the wrong namespace.
+func withNetns(nsName string, fn func() error) error {
 	if nsName == "" {
-		return nclient4.New(iface, opts...)
+		return fn()
 	}
-	type result struct {
-		c   *nclient4.Client
-		err error
-	}
-	ch := make(chan result, 1)
+	ch := make(chan error, 1)
 	go func() {
 		runtime.LockOSThread()
 		target, err := netns.GetFromName(nsName)
 		if err != nil {
-			ch <- result{err: fmt.Errorf("netns %s: %w", nsName, err)}
+			ch <- fmt.Errorf("netns %s: %w", nsName, err)
 			return
 		}
 		defer target.Close()
 		if err := netns.Set(target); err != nil {
-			ch <- result{err: err}
+			ch <- err
 			return
 		}
-		c, err := nclient4.New(iface, opts...)
-		ch <- result{c, err}
+		ch <- fn()
 	}()
-	r := <-ch
-	return r.c, r.err
+	return <-ch
 }
 
 func sleepCtx(ctx context.Context, d time.Duration) bool {

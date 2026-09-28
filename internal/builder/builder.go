@@ -39,6 +39,8 @@ type data struct {
 	soas       []models.DnsSoaTemplate
 	policies   []models.DnsDnssecPolicy
 	templates  []models.DnsTemplate
+	dyndns     []models.DyndnsClient
+	dyndnsRecs []models.DyndnsRecord
 }
 
 func load(db *gorm.DB) (*data, error) {
@@ -63,6 +65,8 @@ func load(db *gorm.DB) (*data, error) {
 		{&d.soas, "name"},
 		{&d.policies, "name"},
 		{&d.templates, "name"},
+		{&d.dyndns, "name"},
+		{&d.dyndnsRecs, "client_id, id"},
 	} {
 		if err := db.Order(q.order).Find(q.dst).Error; err != nil {
 			return nil, err
@@ -476,6 +480,24 @@ func Build(db *gorm.DB, generation int64) (*fwconfig.Document, error) {
 			}
 		}
 
+		for _, c := range d.dyndns {
+			if c.InstanceID != mi.ID || !c.Enabled {
+				continue
+			}
+			ifc, ok := ifaceByID[c.InterfaceID]
+			if !ok || ifc.InstanceID != mi.ID {
+				addf("instance %s: dynamic DNS %s: its interface is not in this instance", mi.Name, c.Name)
+				continue
+			}
+			var recs []models.DyndnsRecord
+			for _, r := range d.dyndnsRecs {
+				if r.ClientID == c.ID {
+					recs = append(recs, r)
+				}
+			}
+			in.DynDNS = append(in.DynDNS, DynDNS(&c, ifc.Name, recs))
+		}
+
 		doc.Instances = append(doc.Instances, in)
 	}
 
@@ -501,6 +523,23 @@ func Build(db *gorm.DB, generation int64) (*fwconfig.Document, error) {
 		return doc, &fwconfig.ValidationError{Problems: problems}
 	}
 	return doc, nil
+}
+
+// DynDNS is a dynamic DNS client with its records as the document holds
+// it; iface is the name of its interface.
+func DynDNS(c *models.DyndnsClient, iface string, records []models.DyndnsRecord) fwconfig.DynDNS {
+	d := fwconfig.DynDNS{
+		Name: c.Name, Interface: iface, Server: c.Server, Zone: c.Zone,
+		RetryInterval: c.RetryInterval, VerifyInterval: c.VerifyInterval,
+		Records: []fwconfig.DynDNSRecord{},
+	}
+	if c.TsigName != "" {
+		d.TSIG = &fwconfig.TSIG{Name: c.TsigName, Algorithm: c.TsigAlgorithm, Secret: c.TsigSecret}
+	}
+	for _, r := range records {
+		d.Records = append(d.Records, fwconfig.DynDNSRecord{Name: r.Name, Type: r.Type, TTL: r.Ttl, Value: r.Value})
+	}
+	return d
 }
 
 // zoneFor finds the forward zone a FQDN belongs to (longest suffix match)

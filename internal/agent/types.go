@@ -19,4 +19,5 @@ type (
 	ApplyResult    = agentapi.ApplyResult
 	ProgramStatus  = agentapi.ProgramStatus
 	NICStatus      = agentapi.NICStatus
+	DynDNSStatus   = agentapi.DynDNSStatus
 )

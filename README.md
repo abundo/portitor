@@ -9,6 +9,7 @@ through a port. The name is also a pun on network ports.
 a web gui for a linux nftables firewall.
 supports DNS server, DHCP server and Wireguard tunnels
 DHCP client for upstream/WAN link
+dynamic DNS: records on an external nameserver follow the WAN addresses (RFC 2136, TSIG)
 main use cause is residential/home user
 
 web gui should not run on the firewall for maxiumum security. the firewall should have a daemon running, which the web gui/backend uses to get things done on the firewall
@@ -28,6 +29,7 @@ ip prefix/addresses are handled by a hierarchical tree
                   ├─ ip / netns     interfaces, VLANs, bridges, routes, veth links
                   ├─ WireGuard      wg syncconf
                   ├─ DHCP client    in-process, for the WAN
+                  ├─ dynamic DNS    in-process RFC 2136 updates (ifnsupdate)
                   ├─ dnsmgr2        BIND zones + Kea DHCPv4 scopes, one pair per instance
                   └─ Kea DHCPv6, radvd   IPv6 addresses and router advertisements, per instance
 ```
@@ -72,8 +74,8 @@ ip prefix/addresses are handled by a hierarchical tree
 - **Untrusted input.** Every name, address and comment is validated on both sides
   before it reaches an nftables, BIND, Kea or WireGuard file.
 - **GUI.** bcrypt passwords, login rate limiting, HttpOnly SameSite=Strict session
-  cookie, JSON-only mutating requests (CSRF), strict CSP. Private keys are never sent
-  to the browser, except a generated WireGuard client config.
+  cookie, JSON-only mutating requests (CSRF), strict CSP. Private keys and TSIG
+  secrets are never sent to the browser, except a generated WireGuard client config.
 - **Console.** *Console* in the menu (or its own window, from the top bar) is a
   shell on the firewall that the agent runs as `console_user` in `agent.yaml`
   (default `portitor`; `none` turns it off). The shell has that user's rights,

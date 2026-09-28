@@ -33,6 +33,7 @@ const router = createRouter({
         { path: 'dns/templates', component: () => import('@/views/DnsTemplatesPage.vue') },
         { path: 'dhcp', component: () => import('@/views/DhcpPage.vue') },
         { path: 'wireguard', component: () => import('@/views/WireguardPage.vue') },
+        { path: 'dyndns', component: () => import('@/views/DynDnsPage.vue') },
         { path: 'deploy', component: () => import('@/views/DeployPage.vue') },
         { path: 'console', component: () => import('@/views/ConsolePage.vue') },
         { path: 'settings', component: () => import('@/views/SettingsPage.vue') },
