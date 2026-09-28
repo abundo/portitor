@@ -101,10 +101,12 @@ func (s *Server) requireAuth(next echo.HandlerFunc) echo.HandlerFunc {
 // requireJSON rejects state-changing requests that aren't JSON. Browsers
 // can't send application/json cross-site without a CORS preflight (which
 // is never granted), so together with SameSite=Strict this blocks CSRF.
+// DELETE is exempt: it has no body (axios drops the Content-Type then), and
+// a cross-site DELETE needs a preflight whatever its content type.
 func requireJSON(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		switch c.Request().Method {
-		case http.MethodGet, http.MethodHead, http.MethodOptions:
+		case http.MethodGet, http.MethodHead, http.MethodOptions, http.MethodDelete:
 		default:
 			ct := c.Request().Header.Get("Content-Type")
 			if !strings.HasPrefix(ct, "application/json") {

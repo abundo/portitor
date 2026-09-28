@@ -112,6 +112,16 @@ func TestAuthRequired(t *testing.T) {
 	if rec.Code != http.StatusUnsupportedMediaType {
 		t.Errorf("form post: %d", rec.Code)
 	}
+
+	// A DELETE has no body, so the browser sends no Content-Type.
+	id := env.create("/api/instances", map[string]any{"name": "gone"})
+	req = httptest.NewRequest("DELETE", fmt.Sprintf("/api/instances/%d", id), nil)
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	env.e.ServeHTTP(rec, req)
+	if rec.Code >= 300 {
+		t.Errorf("delete without content type: %d %s", rec.Code, rec.Body)
+	}
 }
 
 func TestPasswordChangeRevokesSessions(t *testing.T) {
