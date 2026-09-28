@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/netip"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -550,7 +551,24 @@ func (s *Server) deploy(ctx context.Context, username string, timeout *int) (*mo
 		return nil, nil, err
 	}
 	gen := st.Generation + 1
-	doc, err := builder.Build(s.db, gen)
+	// Build from the snapshot, so it is exactly what Revert restores even
+	// if an edit comes in meanwhile.
+	snap, err := s.takeSnapshot(gen)
+	if err != nil {
+		return nil, nil, err
+	}
+	kept := false
+	defer func() {
+		if !kept {
+			os.Remove(snap)
+		}
+	}()
+	snapDB, err := openSnapshot(snap)
+	if err != nil {
+		return nil, nil, err
+	}
+	doc, err := builder.Build(snapDB, gen)
+	closeDB(snapDB)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -590,6 +608,10 @@ func (s *Server) deploy(ctx context.Context, username string, timeout *int) (*mo
 	}
 	if err := s.db.Create(&dep).Error; err != nil {
 		return nil, nil, err
+	}
+	if dep.Status != "failed" {
+		s.keepSnapshot(snap, gen)
+		kept = true
 	}
 	return &dep, res, applyErr
 }

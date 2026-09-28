@@ -329,6 +329,28 @@ func TestDeployEndToEnd(t *testing.T) {
 		t.Errorf("deployment %+v", dep)
 	}
 
+	// Revert discards uncommitted edits, new rows included.
+	var nRules, nDeployed int64
+	env.srv.db.Model(&models.Rule{}).Count(&nDeployed)
+	env.do("PUT", "/api/nat/"+itoa(nat), map[string]any{"enabled": false})
+	env.create("/api/rules", map[string]any{"instance_id": inst, "chain": "input", "action": "drop", "enabled": true})
+	if got := changes(); !strings.Contains(got, `"changed":true`) {
+		t.Errorf("changes before revert: %s", got)
+	}
+	if rec := env.do("POST", "/api/deploy/revert", map[string]any{}); rec.Code != http.StatusOK {
+		t.Fatalf("revert: %d %s", rec.Code, rec.Body)
+	}
+	if got := changes(); !strings.Contains(got, `"changed":false`) {
+		t.Errorf("changes after revert: %s", got)
+	}
+	env.srv.db.Model(&models.Rule{}).Count(&nRules)
+	if nRules != nDeployed {
+		t.Errorf("rules after revert: %d, want %d", nRules, nDeployed)
+	}
+	if rec := env.do("GET", "/api/settings", nil); !strings.Contains(rec.Body.String(), ts.URL) {
+		t.Errorf("revert lost the agent settings: %s", rec.Body)
+	}
+
 	// A wrong pin must fail closed.
 	env.do("PUT", "/api/settings", map[string]any{"agent_fingerprint": strings.Repeat("ab", 32)})
 	if rec := env.do("GET", "/api/agent/status", nil); rec.Code != http.StatusBadGateway || !strings.Contains(rec.Body.String(), "fingerprint mismatch") {

@@ -75,7 +75,10 @@ After an upgrade, run `migrate` before `start`. `install.py` does both.
   window.
 - **Changes banner** (blue). Shows when the configuration differs from what is on the
   firewall. *Review* opens the Deploy page, *Commit* applies at once with the default
-  auto-rollback.
+  auto-rollback, and *Revert* discards every uncommitted change: the configuration
+  goes back to what the firewall runs (users and the agent connection stay). Each
+  commit keeps a copy of the database in `deployed/` next to it for this; the last
+  five are kept.
 - **Confirm banner** (yellow). Shows while an apply waits for confirmation; see below.
 
 ## Menu

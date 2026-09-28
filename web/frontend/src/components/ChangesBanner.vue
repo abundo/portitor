@@ -11,6 +11,7 @@ import { useDeployStore } from '@/stores/deploy'
 const deploy = useDeployStore()
 const toast = useToast()
 const busy = ref(false)
+const reverting = ref(false)
 
 const changes = computed(() => deploy.changes)
 const blocked = computed(() => !!changes.value?.problems || !!deploy.pending)
@@ -37,6 +38,28 @@ async function commit() {
     deploy.refresh()
   }
 }
+
+// Revert puts the database back to what the firewall runs; nothing is
+// applied.
+async function revert() {
+  if (
+    !window.confirm(
+      'Revert all uncommitted changes? The configuration goes back to what is committed on the firewall.',
+    )
+  )
+    return
+  reverting.value = true
+  try {
+    const res = await api.deployRevert()
+    toast.add({ title: `Reverted to generation ${res.generation}`, color: 'success' })
+    // Every page and store holds data from before the revert.
+    setTimeout(() => window.location.reload(), 1000)
+  } catch (err) {
+    toast.add({ title: errMsg(err, 'Revert failed'), color: 'error' })
+  } finally {
+    reverting.value = false
+  }
+}
 </script>
 
 <template>
@@ -59,11 +82,22 @@ async function commit() {
         >Review</UButton
       >
       <UButton
+        v-if="changes.deployed"
+        size="sm"
+        color="neutral"
+        variant="outline"
+        icon="i-lucide-undo-2"
+        :loading="reverting"
+        :disabled="busy"
+        @click="revert"
+        >Revert</UButton
+      >
+      <UButton
         size="sm"
         color="info"
         icon="i-lucide-rocket"
         :loading="busy"
-        :disabled="blocked"
+        :disabled="blocked || reverting"
         @click="commit"
         >Commit</UButton
       >

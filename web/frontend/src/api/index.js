@@ -93,6 +93,7 @@ export const api = {
     http.post('/deploy/apply', { confirm_timeout: confirmTimeout }).then((r) => r.data),
   deployConfirm: () => http.post('/deploy/confirm', {}).then((r) => r.data),
   deployRollback: () => http.post('/deploy/rollback', {}).then((r) => r.data),
+  deployRevert: () => http.post('/deploy/revert', {}).then((r) => r.data),
   deployments: () => http.get('/deployments').then((r) => r.data),
   agentStatus: () => http.get('/agent/status').then((r) => r.data),
   agentLeases: () => http.get('/agent/leases').then((r) => r.data),
