@@ -6,6 +6,7 @@ module github.com/abundo/portitor
 go 1.26.0
 
 require (
+	filippo.io/age v1.3.1
 	github.com/abundo/dnsmgr2 v1.2.1
 	github.com/coder/websocket v1.8.15
 	github.com/creack/pty v1.1.24
@@ -28,6 +29,7 @@ require (
 )
 
 require (
+	filippo.io/hpke v0.4.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/gaissmai/bart v0.29.0 // indirect
 	github.com/glebarez/go-sqlite v1.23.0 // indirect

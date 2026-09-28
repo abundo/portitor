@@ -67,7 +67,9 @@ are in [README.md](README.md).
   through the API either; a secret the user enters comes in through a write-only
   `gorm:"-"` field that `prepare` copies and `present` clears (`DyndnsClient.NewTsigSecret`,
   `IpList.NewPassword`/`NewApiKey`).
-  Deployment history stores a redacted document.
+  Deployment history stores a redacted document. The one exception is the
+  backup download (`web/backup.go`): the whole database, age-encrypted with the
+  user's passphrase.
 - **Rules match interfaces by name.** Rule and NAT interface lists hold interface
   names (link ends included) and interface zone names of the instance; an
   interface zone is a group of zero or more interfaces. An empty list matches

@@ -70,6 +70,12 @@ export const api = {
 
   settings: () => http.get('/settings').then((r) => r.data),
   saveSettings: (body) => http.put('/settings', body).then((r) => r.data),
+  // backup returns the axios response: data is a Blob, the file name is in
+  // Content-Disposition.
+  backup: (passphrase) => http.post('/backup', { passphrase }, { responseType: 'blob' }),
+  // data is the backup file, base64 encoded.
+  restore: (data, passphrase) =>
+    http.post('/backup/restore', { data, passphrase }).then((r) => r.data),
   users: () => http.get('/users').then((r) => r.data),
   createUser: (username, password) =>
     http.post('/users', { username, password }).then((r) => r.data),

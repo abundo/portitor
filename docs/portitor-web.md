@@ -102,7 +102,7 @@ After an upgrade, run `migrate` before `start`. `install.py` does both.
 | | Scheduled tasks | IP list downloads and commands on a cron schedule. |
 | Admin | Console | A shell on the firewall as the agent's `console_user`. |
 | | Updates | Debian package upgrades, Portitor releases, reboot. See [Installer ISO and updates](appliance.md#updates). |
-| | Settings → General | Agent connection, default auto-rollback, public WireGuard endpoint. |
+| | Settings → General | Agent connection, default auto-rollback, public WireGuard endpoint, [backup and restore](#backup-and-restore). |
 | | Settings → Users | GUI users. |
 | | Help | This guide and the other guides in `docs/`. |
 
@@ -130,9 +130,30 @@ applies without confirmation. While an apply is pending, you cannot apply anothe
 *History* lists every generation with who applied it and its status (applied,
 confirmed, pending, rolled back, failed).
 
+## Backup and restore
+
+*Settings → General → Backup* downloads the whole configuration database, encrypted with
+a passphrase you choose (at least 10 characters). The file holds every secret (WireGuard
+keys, TSIG secrets, IP list credentials, the agent token), so keep the passphrase safe;
+it cannot be recovered. The file is in [age](https://age-encryption.org) format:
+`age -d portitor-….db.age > portitor.db` gives the SQLite database.
+
+*Restore* takes such a file and its passphrase, or an unencrypted `portitor.db`. It
+checks the file, upgrades a backup from an older Portitor version (a backup from a newer
+version is refused), and replaces the configuration in one step. It keeps:
+
+- the users, so you stay logged in,
+- the deployment history,
+- the agent connection under *Settings* (URL, token, fingerprint), when one is set, so a
+  backup restores onto a reinstalled firewall.
+
+Restore changes only the database. Review the changes on *Deploy* and apply them as
+usual. Restore is refused while an apply waits for confirmation.
+
 ## Secrets
 
 The agent token, WireGuard private and preshared keys, TSIG secrets and IP list
-passwords and API keys are never sent back to the browser. Their fields are empty when
+passwords and API keys are never sent back to the browser, except inside an encrypted
+[backup](#backup-and-restore). Their fields are empty when
 you open a form. Leave them empty to keep the stored value, or enter a new one to
 replace it.

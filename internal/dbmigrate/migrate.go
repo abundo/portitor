@@ -37,16 +37,20 @@ func Open(path string, cfg *gorm.Config) (*gorm.DB, error) {
 	return gorm.Open(sqlite.Open("file:"+path+"?"+q.Encode()), cfg)
 }
 
-func Up(db *gorm.DB) error {
+func provider(db *gorm.DB) (*goose.Provider, error) {
 	sqlDB, err := db.DB()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	fsys, err := fs.Sub(migrationFS, "sql")
 	if err != nil {
-		return err
+		return nil, err
 	}
-	provider, err := goose.NewProvider(goose.DialectSQLite3, sqlDB, fsys)
+	return goose.NewProvider(goose.DialectSQLite3, sqlDB, fsys)
+}
+
+func Up(db *gorm.DB) error {
+	provider, err := provider(db)
 	if err != nil {
 		return err
 	}
@@ -61,4 +65,22 @@ func Up(db *gorm.DB) error {
 		slog.Info("goose", "migration", r.String())
 	}
 	return nil
+}
+
+// Versions returns the database's schema version (0 when it has never
+// been migrated) and the newest migration this binary has.
+func Versions(db *gorm.DB) (current, latest int64, err error) {
+	p, err := provider(db)
+	if err != nil {
+		return 0, 0, err
+	}
+	for _, src := range p.ListSources() {
+		latest = max(latest, src.Version)
+	}
+	var n int64
+	if err := db.Raw("SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'goose_db_version'").Scan(&n).Error; err != nil || n == 0 {
+		return 0, latest, err
+	}
+	current, err = p.GetDBVersion(context.Background())
+	return current, latest, err
 }

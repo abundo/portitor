@@ -85,7 +85,10 @@ func (s *Server) Echo() *echo.Echo {
 		_ = c.JSON(http.StatusInternalServerError, map[string]any{"error": err.Error()})
 	}
 	e.Use(middleware.Recover())
-	e.Use(middleware.BodyLimit(4 << 20))
+	e.Use(middleware.BodyLimitWithConfig(middleware.BodyLimitConfig{
+		LimitBytes: 4 << 20,
+		Skipper:    func(c *echo.Context) bool { return c.Request().URL.Path == restorePath },
+	}))
 	e.Use(middleware.SecureWithConfig(middleware.SecureConfig{
 		XSSProtection:         "0",
 		ContentTypeNosniff:    "nosniff",
@@ -140,6 +143,8 @@ func (s *Server) Echo() *echo.Echo {
 
 	g.GET("/settings", s.handleGetSettings)
 	g.PUT("/settings", s.handlePutSettings)
+	g.POST("/backup", s.handleBackup)
+	g.POST(strings.TrimPrefix(restorePath, "/api"), s.handleRestore, middleware.BodyLimit(backupMaxSize/3*4+1<<20))
 	g.GET("/users", s.handleListUsers)
 	g.POST("/users", s.handleCreateUser)
 	g.DELETE("/users/:id", s.handleDeleteUser)
