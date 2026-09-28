@@ -135,14 +135,3 @@ curl -k https://127.0.0.1:28443/api/version    # after a minute or two
 Log in to the GUI as `admin` / `portitor-test`. Without `VM_SERIAL` the serial
 console is on stdio; after the first boot you can log in there as `portitor`.
 `VM_UEFI=1` boots with OVMF.
-
-### Other
-
-initial code for
-- dns, https://github.com/abundo/factum2/tree/main/web/frontend/src/views/dns
-- dhcp, as above
-- prefixtree, https://github.com/abundo/factum2/tree/main/web/frontend/src/views/ipam
-
-- dnsmgr2 can be used as a base for writing dhcp and dns entries https://github.com/abundo/dnsmgr2
-  (used as a library by the agent: `internal/render/dns.go` builds its config,
-  `internal/agent/apply.go` runs `Load` + `Sync`)
