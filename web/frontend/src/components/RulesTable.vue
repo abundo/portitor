@@ -11,6 +11,7 @@
 // IP lists (@name); From/To cells a comma-separated list of interfaces and
 // interface zones.
 import { computed, onMounted, ref } from 'vue'
+import { useColumnResize } from '@/composables/useColumnResize'
 import { useRowDrag } from '@/composables/useRowDrag'
 import { useObjectStore } from '@/stores/objects'
 import { bytes } from '@/utils/bytes'
@@ -157,6 +158,34 @@ const nameSuggestions = computed(() =>
 const hasFrom = computed(() => props.chain !== 'output')
 const hasTo = computed(() => props.chain !== 'input')
 const colCount = computed(() => 13 + hasFrom.value + hasTo.value)
+// The columns' default widths (class; none shares the rest). Dragging a
+// header's right edge resizes its column, remembered per chain;
+// double-clicking it goes back to these.
+const columns = computed(() =>
+  [
+    'w-7',
+    'w-14',
+    'w-8',
+    'w-8',
+    hasFrom.value && 'w-36',
+    hasTo.value && 'w-36',
+    'w-14',
+    'w-18',
+    'w-24',
+    '',
+    '',
+    'w-18',
+    'w-8',
+    'w-24',
+    '',
+  ].filter((c) => c !== false),
+)
+const table = ref(null)
+const resize = useColumnResize({ table, storageKey: () => `rules-grid-widths-${props.chain}` })
+const { widths, total: tableWidth } = resize
+const onHandle = (fn) => (event) => event.target.classList.contains('col-resize') && fn(event)
+const onResizeStart = onHandle(resize.onPointerDown)
+const resetWidths = onHandle(resize.reset)
 const families = [
   { label: 'any', value: 'any' },
   { label: 'IPv4', value: 'ipv4' },
@@ -257,46 +286,42 @@ function onKeydown(event, index) {
       class="rules-grid overflow-auto rounded-md ring ring-default"
       @contextmenu.capture="captureMenuRow"
     >
-      <table class="w-full min-w-[68rem] table-fixed border-collapse text-xs">
+      <table
+        ref="table"
+        class="table-fixed border-collapse text-xs"
+        :class="{ 'w-full min-w-[68rem]': !widths }"
+        :style="widths ? { width: `${tableWidth}px` } : undefined"
+      >
         <colgroup>
-          <col class="w-7" />
-          <col class="w-14" />
-          <col class="w-8" />
-          <col class="w-8" />
-          <col v-if="hasFrom" class="w-36" />
-          <col v-if="hasTo" class="w-36" />
-          <col class="w-14" />
-          <col class="w-18" />
-          <col class="w-24" />
-          <col />
-          <col />
-          <col class="w-18" />
-          <col class="w-8" />
-          <col class="w-24" />
-          <col />
+          <col
+            v-for="(cls, i) in columns"
+            :key="i"
+            :class="widths ? undefined : cls || undefined"
+            :style="widths ? { width: `${widths[i]}px` } : undefined"
+          />
         </colgroup>
-        <thead>
+        <thead @pointerdown="onResizeStart" @dblclick="resetWidths">
           <tr>
-            <th />
-            <th />
-            <th title="Evaluated top to bottom">#</th>
-            <th title="Enabled">On</th>
-            <th v-if="hasFrom">From</th>
-            <th v-if="hasTo">To</th>
-            <th>IP</th>
-            <th>Protocol</th>
-            <th>Ports</th>
-            <th>Source</th>
-            <th>Destination</th>
-            <th>Action</th>
-            <th title="Log matches">Log</th>
+            <th><span class="col-resize" /></th>
+            <th><span class="col-resize" /></th>
+            <th title="Evaluated top to bottom">#<span class="col-resize" /></th>
+            <th title="Enabled">On<span class="col-resize" /></th>
+            <th v-if="hasFrom">From<span class="col-resize" /></th>
+            <th v-if="hasTo">To<span class="col-resize" /></th>
+            <th>IP<span class="col-resize" /></th>
+            <th>Protocol<span class="col-resize" /></th>
+            <th>Ports<span class="col-resize" /></th>
+            <th>Source<span class="col-resize" /></th>
+            <th>Destination<span class="col-resize" /></th>
+            <th>Action<span class="col-resize" /></th>
+            <th title="Log matches">Log<span class="col-resize" /></th>
             <th
               class="text-end"
               title="Bytes since the last deploy. In: sent by the side that opened the connections; out: the replies"
             >
-              In / Out
+              In / Out<span class="col-resize" />
             </th>
-            <th>Description</th>
+            <th>Description<span class="col-resize" /></th>
           </tr>
         </thead>
         <tbody class="auto-rules">
@@ -642,6 +667,17 @@ function onKeydown(event, index) {
   font-weight: 500;
   background: var(--ui-bg-elevated);
   border-block-end: 1px solid var(--ui-border-accented);
+}
+.rules-grid th .col-resize {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-end: 0;
+  width: 0.375rem;
+  cursor: col-resize;
+  touch-action: none;
+}
+.rules-grid th .col-resize:hover {
+  background: var(--ui-primary);
 }
 .rules-grid th,
 .rules-grid td {
