@@ -2,7 +2,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
 <script setup>
-import { computed } from 'vue'
+import { computed, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Marked } from 'marked'
 import { docs } from '@/docs'
@@ -14,17 +14,39 @@ const REPO = 'https://github.com/abundo/portitor/blob/main/'
 const slugs = new Set(docs.map((d) => d.slug))
 const esc = (s) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')
 
-// Links between the docs stay in the GUI; links to other files of the
-// repository (README.md, ...) go to GitHub, the rest open in a new tab.
+// slug makes a heading's id the way GitHub does, so links to #sections
+// work here as there.
+const slug = (text) =>
+  text
+    .toLowerCase()
+    .trim()
+    .replace(/[^\p{L}\p{N}\s_-]/gu, '')
+    .replace(/\s/g, '-')
+
+// Links between the docs stay in the GUI, with their #section; links to
+// other files of the repository (README.md, ...) go to GitHub, the rest
+// open in a new tab.
+let seen = new Map() // heading ids of the doc being rendered
 const marked = new Marked({
   renderer: {
+    heading({ tokens, depth }) {
+      const text = this.parser.parseInline(tokens)
+      let id = slug(this.parser.parseInline(tokens, this.parser.textRenderer))
+      const n = seen.get(id) ?? 0
+      seen.set(id, n + 1)
+      if (n) id += `-${n}`
+      return `<h${depth} id="${esc(id)}">${text}</h${depth}>\n`
+    },
     link({ href, tokens }) {
       const text = this.parser.parseInline(tokens)
-      const doc = href.match(/^(?:\.\/)?(?:\.\.\/docs\/)?([\w-]+)\.md(#.*)?$/)
-      if (doc && slugs.has(doc[1])) {
-        return `<a href="/help/${doc[1]}" data-help="${doc[1]}">${text}</a>`
+      const doc = href.match(/^(?:\.\/)?(?:\.\.\/docs\/)?([\w-]+)\.md(?:#(.*))?$/)
+      const local = href.match(/^#(.*)$/)
+      if ((doc && slugs.has(doc[1])) || local) {
+        const target = doc ? doc[1] : current.value.slug
+        const hash = (doc ? doc[2] : local[1]) ?? ''
+        return `<a href="/help/${target}${hash ? '#' + esc(hash) : ''}" data-help="${target}" data-hash="${esc(hash)}">${text}</a>`
       }
-      if (!/^[a-z]+:/i.test(href) && !href.startsWith('#')) {
+      if (!/^[a-z]+:/i.test(href)) {
         href =
           REPO + new URL(href, 'http://x/docs/').pathname.slice(1) + (href.match(/#.*/)?.[0] ?? '')
       }
@@ -34,7 +56,11 @@ const marked = new Marked({
 })
 
 const current = computed(() => docs.find((d) => d.slug === route.params.doc) ?? docs[0])
-const html = computed(() => (current.value ? marked.parse(current.value.markdown) : ''))
+const html = computed(() => {
+  if (!current.value) return ''
+  seen = new Map()
+  return marked.parse(current.value.markdown)
+})
 const items = computed(() =>
   docs.map((d) => ({ label: d.title, to: `/help/${d.slug}`, active: d === current.value })),
 )
@@ -43,8 +69,21 @@ function onClick(e) {
   const a = e.target.closest('a[data-help]')
   if (!a) return
   e.preventDefault()
-  router.push(`/help/${a.dataset.help}`)
+  const hash = a.dataset.hash ? `#${a.dataset.hash}` : ''
+  router.push(`/help/${a.dataset.help}${hash}`)
 }
+
+// Scroll to the #section of the URL once the doc is rendered.
+watch(
+  () => [route.params.doc, route.hash],
+  async () => {
+    await nextTick()
+    const id = decodeURIComponent(route.hash.slice(1))
+    const el = id && document.getElementById(id)
+    if (el) el.scrollIntoView()
+  },
+  { immediate: true },
+)
 </script>
 
 <template>

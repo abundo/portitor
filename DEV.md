@@ -27,8 +27,9 @@ Vue 3, Vite, Vue Router, Pinia, Nuxt UI, Axios, Tailwind CSS 4. Linting via `oxl
 ### Development setup
 
 Everything runs on your workstation: the agent in
-**dry-run** mode (renders files and logs the commands it would run, changes
-nothing), and the web GUI in dev mode.
+**dry-run** mode (renders files and logs the commands it would run; it writes only
+its own state, such as the applied configuration and IP list downloads, under its
+`state_dir`, so give it paths of its own), and the web GUI in dev mode.
 
 ```sh
 make dev-agent         # terminal 1: dry-run agent on https://127.0.0.1:8443

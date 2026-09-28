@@ -11,12 +11,14 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/netip"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/abundo/portitor/internal/fwconfig"
 )
@@ -36,6 +38,30 @@ type Result struct {
 	// Skipped counts entries that are not an address or prefix, and
 	// CrowdSec decisions that are not an IP or range ban.
 	Skipped int
+}
+
+// NewClient returns the HTTP client for Fetch: it follows redirects only
+// where the credentials stay safe (CheckRedirect).
+func NewClient(timeout time.Duration) *http.Client {
+	return &http.Client{Timeout: timeout, CheckRedirect: CheckRedirect}
+}
+
+// CheckRedirect refuses a redirect from https to http, and one to another
+// host when the request carries credentials: net/http would pass the
+// X-Api-Key header on to any host.
+func CheckRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return errors.New("stopped after 10 redirects")
+	}
+	first := via[0]
+	if first.URL.Scheme == "https" && req.URL.Scheme != "https" {
+		return fmt.Errorf("refused redirect from https to %s", req.URL.Redacted())
+	}
+	creds := first.Header.Get("X-Api-Key") != "" || first.Header.Get("Authorization") != ""
+	if creds && !strings.EqualFold(req.URL.Host, first.URL.Host) {
+		return fmt.Errorf("refused redirect to %s: it would get the credentials", req.URL.Host)
+	}
+	return nil
 }
 
 // Fetch downloads the list with client.
@@ -77,6 +103,11 @@ func Fetch(ctx context.Context, client *http.Client, l fwconfig.IPList, userAgen
 // ParseText reads one address or prefix per line. "#" and ";" start a
 // comment, and only the first word of a line counts, so lists such as
 // Spamhaus DROP ("192.0.2.0/24 ; SBL123") read as they are.
+//
+// Entries but no address among them is an error, not an empty list: that
+// is what an HTML error or login page served with 200 OK looks like, and
+// it must not replace the last good list. A list of only comments is
+// empty.
 func ParseText(r io.Reader) (*Result, error) {
 	res := &Result{}
 	sc := bufio.NewScanner(r)
@@ -97,28 +128,43 @@ func ParseText(r io.Reader) (*Result, error) {
 	if err := sc.Err(); err != nil {
 		return nil, err
 	}
+	if len(res.Prefixes) == 0 && res.Skipped > 0 {
+		return nil, fmt.Errorf("not an address list: none of its %d entries is an address or prefix", res.Skipped)
+	}
 	res.Prefixes = Normalize(res.Prefixes)
 	return res, nil
 }
 
-// crowdsecStream is the Local API's GET /v1/decisions/stream answer.
-type crowdsecStream struct {
-	New []struct {
-		Scope string `json:"scope"`
-		Type  string `json:"type"`
-		Value string `json:"value"`
-	} `json:"new"`
+// crowdsecDecision is one decision of the Local API's GET
+// /v1/decisions/stream answer: {"new": [...], "deleted": [...]}, where
+// either is null when empty.
+type crowdsecDecision struct {
+	Scope string `json:"scope"`
+	Type  string `json:"type"`
+	Value string `json:"value"`
 }
 
 // ParseCrowdSec reads the ban decisions for IPs and ranges from a
-// decision stream.
+// decision stream. JSON that is not one (neither key there) is an error,
+// so it can't replace the last good list; a stream without decisions is
+// an empty list.
 func ParseCrowdSec(r io.Reader) (*Result, error) {
-	var st crowdsecStream
+	var st map[string]json.RawMessage
 	if err := json.NewDecoder(r).Decode(&st); err != nil {
 		return nil, fmt.Errorf("decision stream: %w", err)
 	}
+	newRaw, hasNew := st["new"]
+	if _, hasDeleted := st["deleted"]; !hasNew && !hasDeleted {
+		return nil, errors.New(`decision stream: no "new" or "deleted" decisions; not a CrowdSec Local API?`)
+	}
+	var decisions []crowdsecDecision
+	if hasNew {
+		if err := json.Unmarshal(newRaw, &decisions); err != nil {
+			return nil, fmt.Errorf("decision stream: %w", err)
+		}
+	}
 	res := &Result{}
-	for _, d := range st.New {
+	for _, d := range decisions {
 		scope := strings.ToLower(d.Scope)
 		if !strings.EqualFold(d.Type, "ban") || (scope != "ip" && scope != "range") {
 			res.Skipped++

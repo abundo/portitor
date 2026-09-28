@@ -84,6 +84,13 @@ func prepareIpList(tx *gorm.DB, l, old *models.IpList) error {
 			l.Password = ""
 		}
 	}
+	if fwconfig.PlainTextCredentials(ipListDoc(l)) {
+		what := "password"
+		if l.Source == fwconfig.IPListCrowdSec {
+			what = "API key"
+		}
+		return bad("URL: http:// would send the " + what + " unencrypted; use https:// (or a loopback address such as 127.0.0.1)")
+	}
 	if err := checkDocPart(fwconfig.Document{IPLists: []fwconfig.IPList{ipListDoc(l)}}, fmt.Sprintf("ip list %q: ", l.Name)); err != nil {
 		return err
 	}

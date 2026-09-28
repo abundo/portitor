@@ -18,8 +18,10 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"gorm.io/gorm"
 
 	"github.com/abundo/portitor/internal/agent"
+	"github.com/abundo/portitor/models"
 )
 
 // consoleEnv runs portitor-web against a real dry-run agent whose console
@@ -133,5 +135,40 @@ func TestConsoleRequiresLogin(t *testing.T) {
 	_, resp, err := dialConsole(ctx, env, ws.URL, "")
 	if err == nil || resp == nil || resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("console without login: err %v, resp %v", err, resp)
+	}
+}
+
+// An open console closes when its session is revoked.
+func TestConsoleClosesOnRevoke(t *testing.T) {
+	old := consoleRecheck
+	consoleRecheck = 50 * time.Millisecond
+	t.Cleanup(func() { consoleRecheck = old })
+	env, ws := consoleEnv(t, "")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	conn, _, err := dialConsole(ctx, env, ws.URL, ws.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.CloseNow()
+	_ = conn.Write(ctx, websocket.MessageText, []byte(`{"cols":80,"rows":24}`))
+
+	// A password change elsewhere revokes every session of the user.
+	if err := env.srv.db.Model(&models.User{}).Where("username = ?", "admin").
+		Update("token_version", gorm.Expr("token_version + 1")).Error; err != nil {
+		t.Fatal(err)
+	}
+	for {
+		_, _, err := conn.Read(ctx)
+		if err == nil {
+			continue
+		}
+		if websocket.CloseStatus(err) != websocket.StatusPolicyViolation {
+			if strings.Contains(err.Error(), "no login shell") {
+				t.Skip(err)
+			}
+			t.Fatalf("got %v, want a close for the revoked session", err)
+		}
+		return
 	}
 }

@@ -346,6 +346,9 @@ func TestDeployEndToEnd(t *testing.T) {
 	if rec := env.do("GET", "/api/agent/status", nil); !strings.Contains(rec.Body.String(), `"pending":{"generation":2`) {
 		t.Fatalf("status: %s", rec.Body)
 	}
+	if rec := env.do("POST", "/api/deploy/apply", map[string]any{}); rec.Code != http.StatusConflict {
+		t.Fatalf("apply while pending: %d %s", rec.Code, rec.Body)
+	}
 	if rec := env.do("POST", "/api/deploy/confirm", map[string]any{}); rec.Code != http.StatusOK {
 		t.Fatalf("confirm: %d %s", rec.Code, rec.Body)
 	}

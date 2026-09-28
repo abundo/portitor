@@ -13,10 +13,10 @@ import (
 
 // DynDNSServerAddr returns a DynDNS server as ip:port, port 53 by default.
 func DynDNSServerAddr(s string) (netip.AddrPort, error) {
-	if ap, err := netip.ParseAddrPort(s); err == nil {
+	if ap, err := netip.ParseAddrPort(s); err == nil && ap.Addr().Zone() == "" {
 		return ap, nil
 	}
-	a, err := netip.ParseAddr(strings.Trim(s, "[]"))
+	a, err := ParseAddr(strings.Trim(s, "[]"))
 	if err != nil {
 		return netip.AddrPort{}, fmt.Errorf("%q is not an IP address with an optional port", s)
 	}

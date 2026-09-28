@@ -146,6 +146,11 @@ func TestValidateCatchesProblems(t *testing.T) {
 		{"task timeout", func(d *Document) { d.Tasks[2].Timeout = -1 }, "timeout must be"},
 		{"task duplicate", func(d *Document) { d.Tasks[1].Name = "crowdsec" }, "duplicate"},
 		{"dyndns short retry", func(d *Document) { d.Instances[0].DynDNS[0].RetryInterval = 1 }, "retry interval must be"},
+		// A zone may hold quotes and newlines: never an address.
+		{"zone in nat target", func(d *Document) { d.Instances[0].NAT[0].ToAddr = "fe80::1%x\nchain evil {" }, "invalid target address"},
+		{"zone in dns forwarder", func(d *Document) { d.Instances[0].DNS.Forwarders = []string{`fe80::1%x"; };`} }, "invalid forwarder"},
+		{"zone in rule address", func(d *Document) { d.Instances[0].Rules[0].SrcAddrs = []string{"fe80::1%x accept"} }, "invalid address"},
+		{"zone in dyndns server", func(d *Document) { d.Instances[0].DynDNS[0].Server = "[fe80::1%x]:53" }, "server"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

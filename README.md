@@ -66,7 +66,8 @@ firewall, the agent, makes the changes the GUI asks for. For a single box, an
   the same transaction as the rules. The agent downloads a list when it is first
   deployed and whenever a scheduled task says so, from the firewall host (root
   namespace); a failed download keeps the last good one, which also survives a restart.
-  See [docs/crowdsec.md](docs/crowdsec.md) for blocking with CrowdSec.
+  A download that is not a list (an HTML error page, JSON that is not a decision
+  stream) counts as failed. A list is *ok* once its sets are loaded. See [docs/crowdsec.md](docs/crowdsec.md) for blocking with CrowdSec.
 - **Scheduled tasks** run on the firewall on a cron schedule, in its time zone: download
   an IP list again, or run a shell command as `console_user` (off when the console is).
 - **Hosts & prefixes** are named addresses. A name can be used wherever addresses are
@@ -79,16 +80,24 @@ firewall, the agent, makes the changes the GUI asks for. For a single box, an
 
 - **Commit-confirm.** After *Apply*, the agent rolls back to the previous
   configuration unless the change is confirmed within the timeout (default 120 s).
-  If a rule cuts off the GUI, waiting is enough. An unconfirmed change is also rolled
-  back if the agent restarts.
+  If a rule cuts off the GUI, waiting is enough. The rollback target is on disk
+  before anything changes, so an unconfirmed change is also rolled back if the agent
+  restarts or crashes; a rollback that fails is tried again every minute and at the
+  next start. The first apply has nothing to roll back to, and a timeout of 0 turns
+  confirmation off.
 - **Anti-lockout.** The agent always accepts its API port and SSH (22) from `allow_from`,
   whatever rules are deployed.
 - **Atomic rulesets.** Each ruleset is checked with `nft -c` before anything changes,
-  and loaded as a single transaction. A failed apply restores the previous
-  configuration.
-- **Default deny.** All chains (input, forward, output) drop unless a rule accepts; new instances start with an "allow all output" rule. Established/related traffic, ICMP errors, IPv6 neighbour discovery and the
-  services you enable (DHCP, DNS, WireGuard ports, the WAN DHCP client) are opened
-  automatically.
+  and loaded as a single transaction, before the instance's interfaces come up or
+  forwarding is turned on. A failed apply restores the previous configuration; if
+  that fails too, the deployment says so.
+- **Default deny.** All chains (input, forward, output) drop unless a rule accepts; new
+  instances start with an "allow all output" rule. Established/related traffic, ICMP
+  errors, IPv6 neighbour discovery and the services you enable (DHCP, DNS, WireGuard
+  ports, the WAN DHCP client) are accepted before the rules. Port forwards are
+  accepted after the forward rules, so a rule can drop what a port forward would let
+  in (an IP list, say). A new drop rule does not end connections that are already
+  established.
 - **Agent API.** TLS 1.3 only, bearer token (constant-time compare), client address
   allowlist. portitor-web pins the agent's self-signed certificate by SHA-256
   fingerprint.
@@ -101,8 +110,9 @@ firewall, the agent, makes the changes the GUI asks for. For a single box, an
   shell on the firewall that the agent runs as `console_user` in `agent.yaml`
   (default `portitor`; `none` turns it off). The shell has that user's rights,
   which on a host set up by `install.py` include sudo. portitor-web allows the
-  WebSocket from its own origin only, and logs who opened it. Command tasks run as the
-  same user, and `none` turns them off too.
+  WebSocket from its own origin only, and logs who opened it. An open console closes
+  when its session expires or is revoked (password changed, user deleted). Command
+  tasks run as the same user, and `none` turns them off too.
 
 ## Install
 
@@ -180,6 +190,10 @@ systemctl enable --now portitor-web
 
 Run portitor-web commands as `portitor`, so the database files SQLite creates stay
 writable for the service; as root it refuses.
+
+portitor-web listens on `127.0.0.1:8080` and its session cookie needs HTTPS: set
+`tls_cert` and `tls_key` in `web.yaml`, or put a TLS reverse proxy in front (see
+[Configuration](docs/portitor-web.md#configuration)).
 
 Then open the GUI. Enter the agent URL, token and fingerprint under *Settings*,
 configure the default instance `main` (created on first start), and deploy.

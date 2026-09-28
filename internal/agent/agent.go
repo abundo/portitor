@@ -109,16 +109,20 @@ func (a *Agent) Start(ctx context.Context) error {
 	var pending pendingConfirm
 	if err := readJSON(a.rollbackFile(), &pending); err == nil {
 		slog.Warn("unconfirmed change found at startup; rolling back", "generation", pending.Generation)
-		os.Remove(a.rollbackFile())
 		if pending.Previous != nil {
+			// The file stays until the previous config is back, so a
+			// failed restore is tried again at the next start.
 			if err := a.applyLocked(ctx, *pending.Previous); err != nil {
-				a.lastError = err.Error()
+				a.lastError = "startup rollback: " + err.Error()
 				return fmt.Errorf("startup rollback: %w", err)
 			}
 			a.log.Take()
-			return nil
+			return a.removeRollback()
 		}
 		// No previous config: stay with the applied one below.
+		if err := a.removeRollback(); err != nil {
+			return err
+		}
 	}
 
 	var doc fwconfig.Document
@@ -189,6 +193,19 @@ func (a *Agent) Apply(ctx context.Context, doc fwconfig.Document, confirmTimeout
 	previous := a.applied
 	if a.pending != nil {
 		previous = a.pending.Previous
+	}
+	confirm := confirmTimeout > 0 && previous != nil
+	var p *pendingConfirm
+	if confirm {
+		// Journal the rollback target before anything changes: a crash
+		// during or after the apply then rolls back at the next start.
+		// Without it there is no safety net, so don't apply.
+		p = &pendingConfirm{Generation: doc.Generation, Deadline: time.Now().Add(confirmTimeout), Previous: previous}
+		if err := writeJSON(a.rollbackFile(), p, 0o600); err != nil {
+			return nil, fmt.Errorf("persist rollback state: %w", err)
+		}
+	}
+	if a.pending != nil {
 		a.pending.timer.Stop()
 		a.pending = nil
 	}
@@ -197,35 +214,54 @@ func (a *Agent) Apply(ctx context.Context, doc fwconfig.Document, confirmTimeout
 	err := a.applyLocked(ctx, doc)
 	if err != nil {
 		a.lastError = err.Error()
-		if previous != nil {
-			a.log.Infof("apply failed, restoring generation %d: %v", previous.Generation, err)
-			if rerr := a.applyLocked(ctx, *previous); rerr != nil {
+		if previous == nil {
+			// Nothing to go back to; no rollback file was written.
+			res.Log = a.log.Take()
+			return res, err
+		}
+		a.log.Infof("apply failed, restoring generation %d: %v", previous.Generation, err)
+		if rerr := a.applyLocked(ctx, *previous); rerr != nil {
+			// The rollback file, if any, stays: the next start tries
+			// again. Without one, applied.json still holds previous.
+			res.RollbackErrors = rerr.Error()
+			a.lastError = fmt.Sprintf("%v; restoring generation %d failed: %v", err, previous.Generation, rerr)
+		} else {
+			res.RolledBack = true
+			if rerr := a.removeRollback(); rerr != nil {
 				res.RollbackErrors = rerr.Error()
 			}
-			res.RolledBack = true
 		}
 		res.Log = a.log.Take()
-		os.Remove(a.rollbackFile())
 		return res, err
 	}
 	a.lastError = ""
 
-	if confirmTimeout > 0 && previous != nil {
-		p := &pendingConfirm{Generation: doc.Generation, Deadline: time.Now().Add(confirmTimeout), Previous: previous}
-		if err := writeJSON(a.rollbackFile(), p, 0o600); err != nil {
-			slog.Error("cannot persist rollback state", "err", err)
-		}
+	if confirm {
 		gen := doc.Generation
 		p.timer = time.AfterFunc(confirmTimeout, func() { a.confirmTimeout(gen) })
 		a.pending = p
 		res.ConfirmBy = &p.Deadline
 		a.log.Infof("generation %d applied; confirm before %s or it is rolled back", gen, p.Deadline.Format(time.RFC3339))
 	} else {
-		os.Remove(a.rollbackFile())
+		if err := a.removeRollback(); err != nil {
+			// A leftover file would roll this config back at the next
+			// start.
+			res.Log = a.log.Take()
+			return res, err
+		}
 		a.log.Infof("generation %d applied", doc.Generation)
 	}
 	res.Log = a.log.Take()
 	return res, nil
+}
+
+// removeRollback removes the rollback file, which marks a change as not
+// confirmed yet, and makes the removal durable.
+func (a *Agent) removeRollback() error {
+	if err := os.Remove(a.rollbackFile()); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("remove rollback state: %w", err)
+	}
+	return syncDir(filepath.Dir(a.rollbackFile()))
 }
 
 func (a *Agent) Confirm(generation int64) error {
@@ -237,9 +273,13 @@ func (a *Agent) Confirm(generation int64) error {
 	if a.pending.Generation != generation {
 		return fmt.Errorf("pending generation is %d, not %d", a.pending.Generation, generation)
 	}
+	// Until the file is gone a restart would roll back, so the change
+	// stays pending if it can't be removed.
+	if err := a.removeRollback(); err != nil {
+		return err
+	}
 	a.pending.timer.Stop()
 	a.pending = nil
-	os.Remove(a.rollbackFile())
 	slog.Info("configuration confirmed", "generation", generation)
 	return nil
 }
@@ -266,18 +306,31 @@ func (a *Agent) confirmTimeout(generation int64) {
 	}
 }
 
+// rollbackRetry is how long a failed rollback waits before it is tried
+// again.
+const rollbackRetry = time.Minute
+
+// rollbackLocked restores the previous config of the pending change. If
+// that fails, the change stays pending (and its rollback file stays), and
+// the rollback is tried again after rollbackRetry.
 func (a *Agent) rollbackLocked(ctx context.Context) (*ApplyResult, error) {
 	p := a.pending
 	p.timer.Stop()
-	a.pending = nil
 	a.log.Take()
 	err := a.applyLocked(ctx, *p.Previous)
-	os.Remove(a.rollbackFile())
-	res := &ApplyResult{Generation: p.Previous.Generation, RolledBack: true, Log: a.log.Take()}
+	if err == nil {
+		err = a.removeRollback()
+	}
+	res := &ApplyResult{Generation: p.Previous.Generation, Log: a.log.Take()}
 	if err != nil {
+		res.RollbackErrors = err.Error()
 		a.lastError = "rollback: " + err.Error()
+		gen := p.Generation
+		p.timer = time.AfterFunc(rollbackRetry, func() { a.confirmTimeout(gen) })
 		return res, err
 	}
+	a.pending = nil
+	res.RolledBack = true
 	a.lastError = fmt.Sprintf("generation %d was rolled back to %d", p.Generation, p.Previous.Generation)
 	return res, nil
 }
@@ -356,5 +409,18 @@ func atomicWrite(path string, data []byte, mode os.FileMode) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmp.Name(), path)
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		return err
+	}
+	return syncDir(filepath.Dir(path))
+}
+
+// syncDir makes a rename or removal in dir durable.
+func syncDir(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	return d.Sync()
 }

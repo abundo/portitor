@@ -95,6 +95,19 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 		}
 	}
 
+	// Each instance's ruleset is loaded before its interfaces move in or
+	// come up, and before forwarding is turned on, so a new namespace
+	// (or the host at boot) never forwards or accepts unfiltered. The
+	// rules match interfaces by name (iifname), which need not exist
+	// yet; only lo is matched by index, and every namespace has it.
+	for i := range exp.Instances {
+		in := &exp.Instances[i]
+		path := filepath.Join(a.cfg.Paths.InstanceEtc(in.Name), "nftables.nft")
+		if err := a.do(ctx, command{Netns: in.NetnsName(), Name: "nft", Args: []string{"-f", path}}); err != nil {
+			return fmt.Errorf("instance %s: %w", in.Name, err)
+		}
+	}
+
 	// Stop services of instances that are going away before their
 	// namespace disappears under them.
 	for _, ns := range existing {
@@ -218,9 +231,6 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 			return err
 		}
 
-		if err := a.do(ctx, command{Netns: ns, Name: "nft", Args: []string{"-f", filepath.Join(etc, "nftables.nft")}}); err != nil {
-			return err
-		}
 	}
 
 	slices.Sort(newRoot)

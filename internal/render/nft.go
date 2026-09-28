@@ -119,6 +119,9 @@ func Nftables(in *fwconfig.Instance, lockout *AntiLockout, paths Paths) string {
 			}
 		}
 	}
+	// What the enabled services need comes before the rules, so a rule
+	// that closes an interface to the firewall doesn't take DHCP or DNS
+	// away from it.
 	for _, r := range AutoInputRules(in) {
 		writeAutoLog(b, in, r.Service, r.match())
 		b.WriteString("\t\t" + r.match() + " accept " + comment("auto", r.Service) + "\n")
@@ -135,9 +138,11 @@ func Nftables(in *fwconfig.Instance, lockout *AntiLockout, paths Paths) string {
 	}
 	b.WriteString("\t\tct state established,related accept\n")
 	writeInvalidDrop(b, in, fwconfig.ChainForward)
-	b.WriteString("\t\tct status dnat accept comment \"port forwards\"\n")
 	b.WriteString("\t\tmeta l4proto ipv6-icmp icmpv6 type { destination-unreachable, packet-too-big, time-exceeded, parameter-problem } accept\n")
+	// Port forwards are accepted after the rules, so a rule can drop
+	// what a DNAT would let in.
 	writeRules(b, in, fwconfig.ChainForward)
+	b.WriteString("\t\tct status dnat accept comment \"port forwards\"\n")
 	writePolicyCount(b, in, fwconfig.ChainForward)
 	b.WriteString("\t}\n\n")
 

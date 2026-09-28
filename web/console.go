@@ -20,6 +20,9 @@ import (
 // console (a shell on the firewall) and passes messages through both ways.
 // Errors after the upgrade reach the browser as the close reason, which is
 // all a browser WebSocket can see.
+//
+// The session is checked again every consoleRecheck: a console closes when
+// its session expires or is revoked (password changed, user deleted).
 func (s *Server) handleAgentConsole(c *echo.Context) error {
 	a, _, err := s.agent()
 	if err != nil {
@@ -63,23 +66,40 @@ func (s *Server) handleAgentConsole(c *echo.Context) error {
 	slog.Info("console opened", "user", user.Username, "remote", c.RealIP())
 	defer slog.Info("console closed", "user", user.Username, "remote", c.RealIP())
 
+	claims, _ := c.Get(ctxClaims).(*sessionClaims)
+	recheck := time.NewTicker(consoleRecheck)
+	defer recheck.Stop()
+
 	fromBrowser := make(chan error, 1)
 	fromAgent := make(chan error, 1)
 	go func() { fromBrowser <- pump(ctx, agent, browser) }()
 	go func() { fromAgent <- pump(ctx, browser, agent) }()
-	select {
-	case <-fromBrowser:
-		agent.Close(websocket.StatusNormalClosure, "")
-	case err := <-fromAgent:
-		var ce websocket.CloseError
-		if errors.As(err, &ce) {
-			browser.Close(ce.Code, ce.Reason)
-		} else {
-			browser.Close(websocket.StatusInternalError, "lost the connection to the agent")
+	for {
+		select {
+		case <-recheck.C:
+			if s.sessionValid(claims) {
+				continue
+			}
+			slog.Info("console session ended", "user", user.Username)
+			// Closing the agent's side ends the shell there.
+			agent.Close(websocket.StatusNormalClosure, "")
+			browser.Close(websocket.StatusPolicyViolation, "session expired or revoked")
+		case <-fromBrowser:
+			agent.Close(websocket.StatusNormalClosure, "")
+		case err := <-fromAgent:
+			var ce websocket.CloseError
+			if errors.As(err, &ce) {
+				browser.Close(ce.Code, ce.Reason)
+			} else {
+				browser.Close(websocket.StatusInternalError, "lost the connection to the agent")
+			}
 		}
+		return nil
 	}
-	return nil
 }
+
+// consoleRecheck is how often an open console checks its session.
+var consoleRecheck = 5 * time.Second
 
 // pump copies messages from src to dst until either fails.
 func pump(ctx context.Context, dst, src *websocket.Conn) error {

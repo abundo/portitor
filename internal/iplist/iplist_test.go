@@ -11,6 +11,7 @@ import (
 	"net/netip"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/abundo/portitor/internal/fwconfig"
 )
@@ -135,5 +136,80 @@ func TestFetchTooLarge(t *testing.T) {
 	l := fwconfig.IPList{Name: "bl", Source: fwconfig.IPListURL, URL: srv.URL}
 	if _, err := Fetch(context.Background(), srv.Client(), l, "test"); err == nil || !strings.Contains(err.Error(), "larger than") {
 		t.Errorf("got %v", err)
+	}
+}
+
+// A 200 OK that is not a list is an error, so the last good list stays;
+// a list that is empty on purpose is empty.
+func TestParseRejectsNonLists(t *testing.T) {
+	for _, body := range []string{
+		"<!DOCTYPE html>\n<html><head><title>Login</title></head>\n<body>Sign in</body></html>\n",
+		"not an address\nnor this\n",
+	} {
+		if res, err := ParseText(strings.NewReader(body)); err == nil {
+			t.Errorf("ParseText(%q) = %+v, want an error", body, res)
+		}
+	}
+	for _, body := range []string{"# only comments\n\n; here\n", ""} {
+		if res, err := ParseText(strings.NewReader(body)); err != nil || len(res.Prefixes) != 0 {
+			t.Errorf("ParseText(%q) = %+v, %v; want an empty list", body, res, err)
+		}
+	}
+	for _, body := range []string{`{}`, `{"message":"access forbidden"}`, `null`, `[]`, `<html></html>`} {
+		if res, err := ParseCrowdSec(strings.NewReader(body)); err == nil {
+			t.Errorf("ParseCrowdSec(%q) = %+v, want an error", body, res)
+		}
+	}
+	for _, body := range []string{`{"new":null,"deleted":null}`, `{"new":[],"deleted":[]}`, `{"deleted":[{"scope":"Ip","type":"ban","value":"192.0.2.1"}]}`} {
+		if res, err := ParseCrowdSec(strings.NewReader(body)); err != nil || len(res.Prefixes) != 0 {
+			t.Errorf("ParseCrowdSec(%q) = %+v, %v; want an empty list", body, res, err)
+		}
+	}
+}
+
+// A redirect never takes the credentials to another host, nor from https
+// to http.
+func TestFetchRedirects(t *testing.T) {
+	var leaked bool
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		leaked = leaked || r.Header.Get("X-Api-Key") != ""
+		fmt.Fprint(w, `{"new":null,"deleted":null}`)
+	}))
+	defer other.Close()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/same" {
+			fmt.Fprint(w, "192.0.2.1\n")
+			return
+		}
+		if r.URL.Path == "/list" {
+			http.Redirect(w, r, "/same", http.StatusFound)
+			return
+		}
+		http.Redirect(w, r, other.URL+r.URL.Path, http.StatusFound)
+	}))
+	defer srv.Close()
+
+	client := NewClient(10 * time.Second)
+	cs := fwconfig.IPList{Name: "cs", Source: fwconfig.IPListCrowdSec, URL: srv.URL, APIKey: "secret"}
+	if _, err := Fetch(context.Background(), client, cs, "test"); err == nil || !strings.Contains(err.Error(), "refused redirect") {
+		t.Errorf("redirect with the key to another host: %v", err)
+	}
+	if leaked {
+		t.Error("the API key reached the other host")
+	}
+	// Without credentials, and on the same host, a redirect is followed.
+	if _, err := Fetch(context.Background(), client, fwconfig.IPList{Name: "l", Source: fwconfig.IPListURL, URL: srv.URL + "/x"}, "test"); err != nil && strings.Contains(err.Error(), "refused") {
+		t.Errorf("redirect without credentials: %v", err)
+	}
+	if res, err := Fetch(context.Background(), client, fwconfig.IPList{Name: "l", Source: fwconfig.IPListURL, URL: srv.URL + "/list", Username: "u", Password: "p"}, "test"); err != nil || prefixes(res) != "192.0.2.1/32" {
+		t.Errorf("redirect on the same host: %v %v", res, err)
+	}
+
+	// https to http.
+	tls := httptest.NewTLSServer(http.RedirectHandler(other.URL+"/list", http.StatusFound))
+	defer tls.Close()
+	client.Transport = tls.Client().Transport
+	if _, err := Fetch(context.Background(), client, fwconfig.IPList{Name: "l", Source: fwconfig.IPListURL, URL: tls.URL}, "test"); err == nil || !strings.Contains(err.Error(), "refused redirect from https") {
+		t.Errorf("https to http: %v", err)
 	}
 }

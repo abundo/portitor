@@ -75,9 +75,15 @@ one; leaving the field empty keeps the stored key.
 decides:
 
 - an **input** rule: incoming interface your WAN (`wan` or its interface zone), source
-  `@crowdsec`, action drop. This protects the firewall itself.
+  `@crowdsec`, action drop. This protects the firewall itself. The locked rows at the
+  top of the input chain come first: the WireGuard port and the WAN DHCP client stay
+  open to listed addresses (WireGuard answers only peers with a valid key).
 - a **forward** rule: the same, for port forwards and anything else reaching your
-  network.
+  network. Port forwards are accepted after your rules, so this rule drops them too.
+
+The anti-lockout rule (the agent's API and SSH from `allow_from`) comes before your
+rules too, and is not blocked. A new ban drops new connections; a connection that was
+already established stays open until it ends.
 
 Tick *Log* on them if you want to see the drops in the log panel's *Logged packets*
 tab.
@@ -117,10 +123,29 @@ again on its schedule.
 ### The engine on another host
 
 The LAPI listens on `127.0.0.1:8080` by default. To run the engine elsewhere, make
-it listen on an address the firewall can reach: set `api.server.listen_uri` in
-`/etc/crowdsec/config.yaml` (for example `0.0.0.0:8080`), restart crowdsec, and allow
-only the firewall to reach that port. In Portitor, use `http://<engine-host>:8080`
-as the URL.
+it listen on an address the firewall can reach, over TLS: the bouncer key goes with
+every request, and the answer decides what the firewall drops. In
+`/etc/crowdsec/config.yaml` on the engine host:
+
+```yaml
+api:
+  server:
+    listen_uri: 0.0.0.0:8080
+    tls:
+      cert_file: /etc/crowdsec/tls/lapi.crt   # a certificate the firewall trusts
+      key_file: /etc/crowdsec/tls/lapi.key
+```
+
+Restart crowdsec, and allow only the firewall to reach that port. In Portitor, use
+`https://<engine-host>:8080` as the URL. The certificate must be valid for that name
+and signed by a CA in the firewall's trust store (`/usr/local/share/ca-certificates`,
+then `update-ca-certificates`).
+
+portitor-web refuses an `http://` URL with a key or password unless it is a loopback
+address (`127.0.0.1`, `::1`, `localhost`). For an engine without TLS, reach it
+through a tunnel (WireGuard, say) and still use https, or run the engine on the
+firewall. A download never follows a redirect from https to http, or to another
+host while it carries a key or password.
 
 The firewall host downloads the list through its own routes, so it needs a route to
 the engine.
@@ -155,4 +180,12 @@ The IP lists page shows the last error of each list:
   the deployed configuration yet. Deploy first.
 
 A failed download keeps the last good list in force, including across an agent
-restart, so a CrowdSec outage doesn't open the firewall.
+restart, so a CrowdSec outage doesn't open the firewall. A download that is not a
+list counts as failed too: an HTML page (a login or error page served with 200 OK),
+text with no address in it, or JSON that is not a decision stream. A valid answer
+without decisions empties the list, since the engine has no bans left.
+
+Until the first download succeeds, a new list is empty. The State column says *ok*
+once the list is loaded into the rulesets; a download that could not be loaded shows
+`load: ...` as its error, and the counts are then those of the file on disk, which the
+next deploy or agent restart loads.

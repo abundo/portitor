@@ -25,7 +25,11 @@ const (
 	rememberTTL    = 30 * 24 * time.Hour
 	ctxUser        = "user"
 	ctxRemember    = "remember"
+	ctxClaims      = "claims"
 	minPasswordLen = 10
+	// loginMaxTracked addresses with failed logins make loginLimiter
+	// prune expired ones.
+	loginMaxTracked = 10000
 )
 
 type sessionClaims struct {
@@ -96,8 +100,20 @@ func (s *Server) requireAuth(next echo.HandlerFunc) echo.HandlerFunc {
 		}
 		c.Set(ctxUser, &u)
 		c.Set(ctxRemember, claims.Remember)
+		c.Set(ctxClaims, &claims)
 		return next(c)
 	}
+}
+
+// sessionValid tells whether a session requireAuth accepted still would:
+// it has not expired, and its user still exists with the same token
+// version. For connections that outlive the request (the console).
+func (s *Server) sessionValid(claims *sessionClaims) bool {
+	if claims == nil || claims.ExpiresAt == nil || !time.Now().Before(claims.ExpiresAt.Time) {
+		return false
+	}
+	var u models.User
+	return s.db.First(&u, claims.UserID).Error == nil && u.TokenVersion == claims.TokenVersion
 }
 
 // requireJSON rejects state-changing requests that aren't JSON. Browsers
@@ -115,6 +131,15 @@ func requireJSON(next echo.HandlerFunc) echo.HandlerFunc {
 				return errJSON(c, http.StatusUnsupportedMediaType, "content type must be application/json")
 			}
 		}
+		return next(c)
+	}
+}
+
+// noStore keeps API answers out of caches: some hold secrets (a backup,
+// a WireGuard client config with its private key).
+func noStore(next echo.HandlerFunc) echo.HandlerFunc {
+	return func(c *echo.Context) error {
+		c.Response().Header().Set("Cache-Control", "no-store")
 		return next(c)
 	}
 }
@@ -147,6 +172,14 @@ func (l *loginLimiter) fail(ip string) {
 	defer l.mu.Unlock()
 	if l.failures == nil {
 		l.failures = map[string][]time.Time{}
+	}
+	// Addresses are pruned when they try again; guessing from many
+	// addresses would grow the map without bound, so prune them all now
+	// and then.
+	if len(l.failures) >= loginMaxTracked {
+		for other := range l.failures {
+			l.prune(other)
+		}
 	}
 	l.failures[ip] = append(l.failures[ip], time.Now())
 }

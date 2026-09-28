@@ -98,7 +98,7 @@ func (s *Server) Echo() *echo.Echo {
 		ContentSecurityPolicy: "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'",
 	}))
 
-	api := e.Group("/api", requireJSON)
+	api := e.Group("/api", requireJSON, noStore)
 	api.POST("/login", s.handleLogin)
 	api.POST("/logout", s.handleLogout)
 	api.GET("/version", func(c *echo.Context) error { return c.JSON(http.StatusOK, buildinfo.Get()) })

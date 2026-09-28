@@ -842,6 +842,23 @@ function onKeydown(event, index) {
           </tr>
         </tbody>
         <tbody class="auto-rules chain-policy">
+          <tr
+            v-if="chain === 'forward'"
+            title="Connections to a port forward (DNAT) that no rule above decided on"
+          >
+            <td class="text-center text-muted">
+              <UIcon name="i-lucide-lock" class="size-3.5 align-middle" />
+            </td>
+            <td :colspan="colCount - 5">
+              <span class="text-muted">to a port forward (NAT)</span>
+            </td>
+            <td><span class="font-semibold text-success">accept</span></td>
+            <td />
+            <td />
+            <td>
+              <span><span class="text-muted">auto:</span> port forwards</span>
+            </td>
+          </tr>
           <tr title="Traffic no rule accepted, dropped by the chain's policy">
             <td class="text-center text-muted">
               <UIcon name="i-lucide-lock" class="size-3.5 align-middle" />

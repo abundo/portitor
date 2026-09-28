@@ -100,14 +100,18 @@ def say(msg: str = "") -> None:
 
 
 def logfile(msg: str) -> None:
-    with LOG.open("a", encoding="utf-8") as f:
+    # Root's only, whatever the umask: it logs command output.
+    fd = os.open(LOG, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+    os.fchmod(fd, 0o600)
+    with open(fd, "a", encoding="utf-8") as f:
         f.write(f"{time.strftime('%F %T')} {msg}\n")
 
 
-def run(argv: list[str], *, stdin: str | None = None, check: bool = True, quiet: bool = False) -> subprocess.CompletedProcess[str]:
+def run(argv: list[str], *, stdin: str | None = None, check: bool = True, quiet: bool = False, secret: bool = False) -> subprocess.CompletedProcess[str]:
+    """secret: stdout holds a secret; only stderr is logged or shown."""
     logfile("$ " + " ".join(argv))
     proc = subprocess.run(argv, input=stdin, capture_output=True, text=True, check=False)
-    out = (proc.stdout + proc.stderr).strip()
+    out = (proc.stderr if secret else proc.stdout + proc.stderr).strip()
     if out:
         logfile(out)
     if check and proc.returncode != 0:
@@ -460,10 +464,11 @@ def step_users(a: dict) -> None:
 
 
 def step_agent(a: dict) -> None:
-    out = run(["portitor-agent", "init", "--host", "127.0.0.1", "--host", "localhost"], quiet=True).stdout
+    # The output holds the agent's token.
+    out = run(["portitor-agent", "init", "--host", "127.0.0.1", "--host", "localhost"], secret=True).stdout
     m = re.search(r"^fingerprint:\s*([0-9a-f]{64})\s*$", out, re.M)
     if not m:
-        raise RuntimeError(f"no fingerprint in the output of portitor-agent init:\n{out}")
+        raise RuntimeError("no fingerprint in the output of portitor-agent init")
     a["fingerprint"] = m[1]
     write(AGENT_YAML, f"""# /etc/portitor/agent.yaml - written by the first-boot setup.
 # portitor-web runs on this host and is the only client of the API.

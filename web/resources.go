@@ -530,7 +530,7 @@ func prepareIpamAddress(tx *gorm.DB, a, _ *models.IpamAddress) error {
 	if err := instanceExists(tx, a.InstanceID); err != nil {
 		return err
 	}
-	ip, err := netip.ParseAddr(strings.TrimSpace(a.Address))
+	ip, err := fwconfig.ParseAddr(strings.TrimSpace(a.Address))
 	if err != nil {
 		return bad("address must be a plain IP address (the prefix length comes from the IPAM prefix)")
 	}

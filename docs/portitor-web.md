@@ -112,6 +112,20 @@ After an upgrade, run `migrate` before `start`. `install.py` does both.
 
 Your own name and password are under the user menu (top right).
 
+## Users and sessions
+
+Every user can do everything: there are no roles. A user can manage the other users,
+deploy, open the console, run tasks, download a backup (with every secret in it),
+update and reboot the firewall. Give an account only to someone you would give root.
+
+A login lasts 12 hours, or 30 days with *Remember me*. Changing your password ends
+your other sessions; deleting a user ends theirs, and so does
+`portitor-web createadmin` for an existing user. An open console closes within a
+few seconds when its session ends or expires. *Log out* only clears the cookie in that
+browser: a copy of the cookie stays valid until it expires. To end every session of a
+user at once, change the password. Changing `jwt_secret` ends every session of every
+user.
+
 ## Deploying
 
 Edits are saved in the database only. Nothing changes on the firewall until you apply.
@@ -129,7 +143,11 @@ On *Deploy*:
 keep the change; if you do nothing, the agent restores the last confirmed configuration
 when the time runs out. If the change locked you out, wait. The default time is set
 under *Settings*; the field on the Deploy page overrides it for one apply, and `0`
-applies without confirmation. While an apply is pending, you cannot apply another one.
+applies without confirmation. While an apply is pending, you cannot apply another one:
+confirm it or roll it back first. The first apply has nothing to roll back to, so it
+never waits for confirmation. If the agent restarts or crashes while a change is
+pending, it rolls back when it starts again. A rollback that fails leaves the change
+pending and is tried again every minute; the agent log says why it failed.
 
 *History* lists every generation with who applied it and its status (applied,
 confirmed, pending, rolled back, failed).
@@ -181,7 +199,10 @@ usual. Restore is refused while an apply waits for confirmation.
 ## Secrets
 
 The agent token, WireGuard private and preshared keys, TSIG secrets and IP list
-passwords and API keys are never sent back to the browser, except inside an encrypted
-[backup](#backup-and-restore). Their fields are empty when
+passwords and API keys are never sent back to the browser, with two exceptions: an
+encrypted [backup](#backup-and-restore), and the config button of a WireGuard peer,
+whose wg-quick config holds the peer's private key (when it was generated here) and
+the preshared key. Treat that config like a password: hand it over securely and
+delete the downloaded copy. Their fields are empty when
 you open a form. Leave them empty to keep the stored value, or enter a new one to
 replace it.

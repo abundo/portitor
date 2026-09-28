@@ -541,6 +541,20 @@ func (s *Server) handleDeployApply(c *echo.Context) error {
 		ConfirmTimeout *int `json:"confirm_timeout"`
 	}
 	_ = c.Bind(&req)
+	// One change at a time: a pending one is confirmed or rolled back
+	// first. The agent is asked, since the history may not know yet that
+	// a change timed out.
+	a, _, err := s.agent()
+	if err != nil {
+		return agentError(c, err)
+	}
+	st, err := a.Status(c.Request().Context())
+	if err != nil {
+		return agentError(c, err)
+	}
+	if st.Pending != nil {
+		return errJSON(c, http.StatusConflict, "a deployment is waiting for confirmation; confirm or roll it back first")
+	}
 	dep, res, err := s.deploy(c.Request().Context(), currentUser(c).Username, req.ConfirmTimeout)
 	var ve *fwconfig.ValidationError
 	switch {
@@ -604,7 +618,10 @@ func (s *Server) deploy(ctx context.Context, username string, timeout *int) (*mo
 		var ae *agentclient.Error
 		if errors.As(applyErr, &ae) && ae.Result != nil {
 			res = ae.Result
-			if ae.Result.RolledBack {
+			switch {
+			case ae.Result.RollbackErrors != "":
+				dep.Message += " (restoring the previous configuration failed: " + ae.Result.RollbackErrors + ")"
+			case ae.Result.RolledBack:
 				dep.Message += " (previous configuration restored)"
 			}
 		}

@@ -35,5 +35,17 @@ Portitor is a firewall, so we are especially interested in:
 - secrets (WireGuard keys, agent token, password hashes) leaking to the browser or
   into deployment history.
 
-The design assumes portitor-web runs on a trusted host other than the firewall and is
-not exposed to the internet. See [Safety](README.md#safety) for the security model.
+Two setups are supported:
+
+- **Split** (`install.py`): portitor-web runs on a trusted host other than the
+  firewall, and reaches the agent API over the network, limited to its address by
+  `allow_from`.
+- **Appliance** (the ISO): portitor-web runs on the firewall itself, and the agent API
+  listens on 127.0.0.1 only. The API does not tell local users apart, so any process
+  on the firewall that can read the agent token (`/etc/portitor/agent.token`, root
+  only) or run as portitor-web's user can reconfigure the firewall. Local accounts on
+  the appliance should be treated as administrators.
+
+In both, portitor-web is not meant to be exposed to the internet, and every GUI user
+has full control (there are no roles). See [Safety](README.md#safety) for the security
+model.

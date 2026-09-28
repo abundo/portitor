@@ -94,6 +94,26 @@ func TestNftablesMain(t *testing.T) {
 	}
 }
 
+// Port forwards are accepted after the rules, so a rule can drop what a
+// DNAT would let in. In input, anti-lockout and the services' auto rules
+// come before the rules.
+func TestNftablesRuleOrder(t *testing.T) {
+	nft := mustFile(t, sampleBundle(t), "/etc/portitor/instances/main/nftables.nft")
+	in := nft[strings.Index(nft, "chain input {"):strings.Index(nft, "chain forward {")]
+	fwd := nft[strings.Index(nft, "chain forward {"):strings.Index(nft, "chain output {")]
+	lockout := strings.Index(in, `"anti-lockout"`)
+	lastAuto := strings.LastIndex(in, `comment "auto: `)
+	firstRule := strings.Index(in, `comment "rule `)
+	if lockout < 0 || lastAuto < 0 || firstRule < 0 || lockout > firstRule || lastAuto > firstRule {
+		t.Errorf("input: anti-lockout at %d, auto rules up to %d, rules from %d:\n%s", lockout, lastAuto, firstRule, in)
+	}
+	lastRule := strings.LastIndex(fwd, `comment "rule `)
+	dnat := strings.Index(fwd, `ct status dnat accept`)
+	if lastRule < 0 || dnat < lastRule {
+		t.Errorf("forward: last rule at %d, port forwards at %d:\n%s", lastRule, dnat, fwd)
+	}
+}
+
 func TestProtoExprTCPUDP(t *testing.T) {
 	for _, tc := range []struct{ ports, want string }{
 		{"", "meta l4proto { tcp, udp }"},

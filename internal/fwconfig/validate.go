@@ -289,7 +289,7 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 				v.addf("%s: masquerade takes no target address", np)
 			}
 		case NATSNAT, NATDNAT:
-			if _, err := netip.ParseAddr(n.ToAddr); err != nil {
+			if _, err := ParseAddr(n.ToAddr); err != nil {
 				v.addf("%s: invalid target address %q", np, n.ToAddr)
 				break
 			}
@@ -350,7 +350,7 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 			}
 		}
 		if r.Gateway != "" {
-			if _, err := netip.ParseAddr(r.Gateway); err != nil {
+			if _, err := ParseAddr(r.Gateway); err != nil {
 				v.addf("%s: invalid gateway %q", rp, r.Gateway)
 			} else if r.Destination != "default" && AddrFamily(r.Destination) != "" && AddrFamily(r.Destination) != AddrFamily(r.Gateway) {
 				v.addf("%s: destination %s and gateway %s differ in family", rp, r.Destination, r.Gateway)
@@ -388,7 +388,7 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 			}
 		}
 		for _, a := range ra.RDNSS {
-			if addr, err := netip.ParseAddr(a); err != nil || !addr.Is6() {
+			if addr, err := ParseAddr(a); err != nil || !addr.Is6() {
 				v.addf("%s: invalid IPv6 dns server %q", rp, a)
 			}
 		}
@@ -416,7 +416,7 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 			if a == "" {
 				continue
 			}
-			addr, err := netip.ParseAddr(a)
+			addr, err := ParseAddr(a)
 			if err != nil || !pfx.Contains(addr) {
 				v.addf("%s: address %q is not inside the prefix", sp, a)
 			}
@@ -425,7 +425,7 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 			v.addf("%s: range needs both start and end", sp)
 		}
 		for _, a := range s.DNSServers {
-			if addr, err := netip.ParseAddr(a); err != nil {
+			if addr, err := ParseAddr(a); err != nil {
 				v.addf("%s: invalid dns server %q", sp, a)
 			} else if addr.Is4() != pfx.Addr().Is4() {
 				v.addf("%s: dns server %s is not of the prefix's IP version", sp, a)
@@ -462,7 +462,7 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 		v.addf("%s: dns: invalid forward mode %q", p, in.DNS.ForwardMode)
 	}
 	for _, a := range in.DNS.Forwarders {
-		if _, err := netip.ParseAddr(a); err != nil {
+		if _, err := ParseAddr(a); err != nil {
 			v.addf("%s: dns: invalid forwarder %q", p, a)
 		}
 	}
@@ -743,11 +743,11 @@ func (v *validator) dnsRecord(p string, r DNSRecord) {
 	}
 	switch r.Type {
 	case "A":
-		if a, err := netip.ParseAddr(r.Value); err != nil || !a.Is4() {
+		if a, err := ParseAddr(r.Value); err != nil || !a.Is4() {
 			v.addf("%s: invalid IPv4 address", rp)
 		}
 	case "AAAA":
-		if a, err := netip.ParseAddr(r.Value); err != nil || !a.Is6() {
+		if a, err := ParseAddr(r.Value); err != nil || !a.Is6() {
 			v.addf("%s: invalid IPv6 address", rp)
 		}
 	case "CNAME", "NS", "PTR":
@@ -814,10 +814,21 @@ func validEndpoint(s string) bool {
 	if err != nil || n < 1 || n > 65535 {
 		return false
 	}
-	if _, err := netip.ParseAddr(host); err == nil {
+	if _, err := ParseAddr(host); err == nil {
 		return true
 	}
 	return hostRe.MatchString(host)
+}
+
+// ParseAddr is netip.ParseAddr without zones: a zone (fe80::1%eth0) may
+// hold any character, quotes and newlines included, and the renderers
+// write addresses as they are given. (netip.ParsePrefix refuses zones.)
+func ParseAddr(s string) (netip.Addr, error) {
+	a, err := netip.ParseAddr(s)
+	if err == nil && a.Zone() != "" {
+		return netip.Addr{}, fmt.Errorf("%q: an address with a zone (%%) is not allowed", s)
+	}
+	return a, err
 }
 
 // ParseAddrOrPrefix accepts "192.0.2.1" or "192.0.2.0/24".
@@ -829,7 +840,7 @@ func ParseAddrOrPrefix(s string) (netip.Prefix, error) {
 		}
 		return p.Masked(), nil
 	}
-	a, err := netip.ParseAddr(s)
+	a, err := ParseAddr(s)
 	if err != nil {
 		return netip.Prefix{}, err
 	}

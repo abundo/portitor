@@ -48,9 +48,22 @@ are in [README.md](README.md).
   declares the sets and `include`s the list's elements file
   (`<state_dir>/iplists/<name>.nft`), which the agent writes on download and creates
   empty before a ruleset that includes it is checked or loaded.
-- **All system changes go through `agent.Runner`** (exec, dry-run, or fakes in
-  tests). Reconcile logic is planned as pure functions over parsed `ip -j` output
-  (`netstate.go`) and unit-tested that way.
+- **All commands that change the system go through `agent.Runner`** (exec, dry-run,
+  or fakes in tests); a dry run, like exec, refuses a finished context. Reconcile
+  logic is planned as pure functions over parsed `ip -j` output (`netstate.go`) and
+  unit-tested that way. Outside the Runner: rendered files (`writeFile`, skipped in
+  dry-run), the agent's own state under `state_dir` (written in dry-run too), and the
+  console and command tasks, which start their processes directly.
+- **Apply order:** each instance's ruleset is loaded right after its namespace
+  exists, before interfaces move in or come up and before forwarding is turned on.
+  Rules match interfaces by name (`iifname`), so they need not exist yet; only `lo`
+  is matched by index.
+- **Rule order in a chain:** established/related, invalid drop, loopback and
+  essential ICMP, anti-lockout and the services' auto accepts
+  (`render.AutoInputRules`), then the user's rules; in forward, the accept of port
+  forwards (`ct status dnat`) comes after the user's rules, so a rule can drop what a
+  DNAT would let in; then the policy. The input auto accepts stay first so a rule
+  that closes an interface to the firewall keeps the DHCP and DNS enabled on it.
 - **The agent owns** the `inet firewall` table in each namespace, every `fw-*`
   namespace, routes with `proto 99`, and root-namespace virtual interfaces listed in
   `managed.json`. Leave everything else alone (docker, libvirt, other tables).
@@ -60,8 +73,12 @@ are in [README.md](README.md).
   `render.LogGroup`, never the kernel log, with a prefix `render.ParseLogPrefix`
   reads; the agent listens on that group in each namespace whose ruleset logs.
 - **Commit-confirm:** the rollback target is the last *confirmed* document; a second
-  apply while one is pending keeps it. `rollback.json` makes a pending change roll
-  back after an agent restart too.
+  apply while one is pending keeps it (portitor-web refuses one, the agent allows
+  it). `rollback.json` is written before an apply with confirmation changes anything
+  (the apply fails if it can't be), and removed only once the target is restored or
+  the change confirmed: a crash or a failed rollback leaves it for the next start. A
+  failed rollback keeps the change pending and retries. `RolledBack` means the
+  restore succeeded; `RollbackErrors` says it didn't.
 - **Secrets:** fields tagged `json:"-"` (WireGuard private/preshared keys, TSIG
   secrets, IP list passwords and API keys, agent token, password hashes) never reach
   the browser. The generic CRUD
@@ -69,9 +86,14 @@ are in [README.md](README.md).
   through the API either; a secret the user enters comes in through a write-only
   `gorm:"-"` field that `prepare` copies and `present` clears (`DyndnsClient.NewTsigSecret`,
   `IpList.NewPassword`/`NewApiKey`).
-  Deployment history stores a redacted document. The one exception is the
-  backup download (`web/backup.go`): the whole database, age-encrypted with the
-  user's passphrase.
+  Deployment history stores a redacted document. The exceptions are the backup
+  download (`web/backup.go`): the whole database, age-encrypted with the user's
+  passphrase; and a WireGuard peer's client config (`render.WireGuardClientConf`),
+  with its generated private key and preshared key. API answers are
+  `Cache-Control: no-store`. IP list credentials go over `http://` only to loopback
+  (`fwconfig.PlainTextCredentials`, checked when saving), and a download never
+  follows a redirect that would take them to another host or from https to http
+  (`iplist.CheckRedirect`).
 - **Rules match interfaces by name.** Rule and NAT interface lists hold interface
   names (link ends included) and interface zone names of the instance; an
   interface zone is a group of zero or more interfaces. An empty list matches

@@ -11,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"os"
 	"slices"
 	"strings"
@@ -59,7 +58,7 @@ type ipListMeta struct {
 }
 
 func newIPLists() *ipLists {
-	client := &http.Client{Timeout: ipListTimeout}
+	client := iplist.NewClient(ipListTimeout)
 	ctx, stop := context.WithCancel(context.Background())
 	return &ipLists{
 		fetch: func(ctx context.Context, l fwconfig.IPList) (*iplist.Result, error) {
@@ -200,7 +199,8 @@ func (a *Agent) refreshIPList(ctx context.Context, name string) error {
 }
 
 // fetchIPList downloads st's list (st.fetching is set), writes its
-// elements file and reloads its sets in every instance that uses it.
+// elements file and reloads its sets in every instance that uses it. The
+// list is "ok" only once its sets are loaded.
 func (a *Agent) fetchIPList(ctx context.Context, st *ipListState) error {
 	m := a.lists
 	m.mu.Lock()
@@ -208,8 +208,10 @@ func (a *Agent) fetchIPList(ctx context.Context, st *ipListState) error {
 	m.mu.Unlock()
 	log := slog.With("ip_list", cfg.Name)
 
-	ctx, cancel := context.WithTimeout(ctx, ipListTimeout)
-	res, err := m.fetch(ctx, cfg)
+	// The download has its own deadline; ctx must stay live for the
+	// reload below.
+	fetchCtx, cancel := context.WithTimeout(ctx, ipListTimeout)
+	res, err := m.fetch(fetchCtx, cfg)
 	cancel()
 	now := time.Now()
 
@@ -219,19 +221,39 @@ func (a *Agent) fetchIPList(ctx context.Context, st *ipListState) error {
 	}
 
 	m.mu.Lock()
-	st.fetching = false
-	st.status.LastAttempt = &now
 	// The list may have been removed by an apply meanwhile; then its
 	// file must not come back.
 	gone := m.lists[cfg.Name] != st
+	written := false
 	if err == nil && !gone {
 		err = a.writeIPList(cfg.Name, res, meta)
+		written = err == nil
 	}
-	if err != nil {
-		st.status.State, st.status.LastError = "error", err.Error()
-	} else if !gone {
-		st.status.State, st.status.LastError = "ok", ""
-		st.setMeta(meta)
+	m.mu.Unlock()
+
+	// loadIPList takes a.mu, which is taken before m.mu, so it runs
+	// without m.mu.
+	var loadErr error
+	if written {
+		log.Info("ip list downloaded", "ipv4", meta.IPv4, "ipv6", meta.IPv6, "skipped", meta.Skipped)
+		if loadErr = a.loadIPList(ctx, cfg.Name); loadErr != nil {
+			err = fmt.Errorf("load: %w", loadErr)
+		}
+	}
+
+	m.mu.Lock()
+	st.fetching = false
+	st.status.LastAttempt = &now
+	gone = m.lists[cfg.Name] != st
+	if !gone {
+		if written {
+			st.setMeta(meta)
+		}
+		if err != nil {
+			st.status.State, st.status.LastError = "error", err.Error()
+		} else {
+			st.status.State, st.status.LastError = "ok", ""
+		}
 	}
 	again := st.again && !gone
 	st.again = false
@@ -240,22 +262,15 @@ func (a *Agent) fetchIPList(ctx context.Context, st *ipListState) error {
 	}
 	m.mu.Unlock()
 
-	if gone {
+	switch {
+	case gone:
 		return nil
-	}
-	if err != nil {
+	case loadErr != nil:
+		log.Error("ip list load failed", "err", loadErr)
+	case err != nil:
 		log.Warn("ip list download failed", "err", err)
-		return err
 	}
-	log.Info("ip list downloaded", "ipv4", meta.IPv4, "ipv6", meta.IPv6, "skipped", meta.Skipped)
-	if err := a.loadIPList(ctx, cfg.Name); err != nil {
-		m.mu.Lock()
-		st.status.State, st.status.LastError = "error", "load: "+err.Error()
-		m.mu.Unlock()
-		log.Error("ip list load failed", "err", err)
-		return err
-	}
-	return nil
+	return err
 }
 
 func (a *Agent) writeIPList(name string, res *iplist.Result, meta ipListMeta) error {

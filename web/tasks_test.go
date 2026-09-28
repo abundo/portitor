@@ -6,6 +6,7 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -37,6 +38,25 @@ func TestIPListsAndTasks(t *testing.T) {
 			t.Errorf("bad %s accepted: %d %s", field, rec.Code, rec.Body)
 		}
 	}
+	// A key or password over http:// only to a loopback address.
+	for _, c := range []map[string]any{
+		{"name": "remote", "source": "crowdsec", "url": "http://192.0.2.10:8080", "api_key": key},
+		{"name": "remote", "url": "http://lists.example/drop.txt", "username": "u", "password": "p"},
+	} {
+		if rec := env.do("POST", "/api/ip-lists", c); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "unencrypted") {
+			t.Errorf("credentials over http accepted: %v: %d %s", c["url"], rec.Code, rec.Body)
+		}
+	}
+	for i, c := range []map[string]any{
+		{"source": "crowdsec", "url": "https://192.0.2.10:8080", "api_key": key},
+		{"source": "crowdsec", "url": "http://localhost:8080", "api_key": key},
+		{"source": "crowdsec", "url": "http://[::1]:8080", "api_key": key},
+		{"url": "http://lists.example/drop.txt"}, // no credentials
+	} {
+		c["name"] = fmt.Sprintf("ok%d", i)
+		env.do("DELETE", "/api/ip-lists/"+itoa(env.create("/api/ip-lists", c)), nil)
+	}
+
 	rec := env.do("POST", "/api/ip-lists", cs)
 	if rec.Code != http.StatusCreated || strings.Contains(rec.Body.String(), key) || !strings.Contains(rec.Body.String(), `"has_api_key":true`) {
 		t.Fatalf("create: %d %s", rec.Code, rec.Body)

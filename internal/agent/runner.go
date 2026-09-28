@@ -76,6 +76,11 @@ func (r *DryRunner) RunInput(ctx context.Context, netns string, stdin []byte, na
 }
 
 func (r *DryRunner) Run(ctx context.Context, netns, name string, args ...string) ([]byte, error) {
+	// ExecRunner can't start a command on a finished context; neither
+	// does a dry run, so tests catch one.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if isQuery(name, args) {
 		if netns != "" || name != "ip" {
 			// Namespaces don't exist in dry-run, and the other queries

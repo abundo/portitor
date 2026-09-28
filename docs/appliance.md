@@ -10,7 +10,10 @@ is enough.
 
 This is less strict than the split setup in the [README](../README.md#install), where
 the GUI runs on another host. Here the agent API listens on 127.0.0.1 only, and the
-ruleset lets the LAN interface reach the GUI; the WAN never does. To move the GUI to
+ruleset lets the LAN interface reach the GUI; the WAN does not. At boot the agent loads
+the ruleset before it brings up the interfaces and turns on forwarding, but there is no
+ruleset before the agent starts: anything else that configures an interface earlier
+(a leftover netplan or DHCP client entry) opens a gap. To move the GUI to
 another host later, install portitor-web there with `install.py`, point it at the
 agent, and change the agent's `listen` and `allow_from` in
 `/etc/portitor/agent.yaml`.
