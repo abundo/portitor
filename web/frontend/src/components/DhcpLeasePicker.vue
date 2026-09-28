@@ -154,8 +154,7 @@ watch(
       <div class="flex min-w-0 flex-col gap-2">
         <div class="flex items-center justify-between gap-2">
           <p class="text-sm text-muted">
-            Current leases from Kea on instance {{ instance }}. Selecting a row copies its MAC onto
-            the DNS record.
+            Current leases from Kea on instance {{ instance }}. Selecting a row copies its MAC.
           </p>
           <UInput
             v-model="filter"

@@ -7,6 +7,7 @@ import { useToast } from '@nuxt/ui/composables'
 import NeedInstance from '@/components/NeedInstance.vue'
 import IpamTreeRows from '@/components/IpamTreeRows.vue'
 import AddrInput from '@/components/AddrInput.vue'
+import DhcpLeasePicker from '@/components/DhcpLeasePicker.vue'
 import { api, ipamAddresses, ipamPrefixes } from '@/api'
 import { errMsg } from '@/api/http'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
@@ -73,6 +74,7 @@ async function savePrefix() {
 // ----- address modal -----
 const addrOpen = ref(false)
 const addr = reactive({})
+const leasePickerOpen = ref(false)
 const NONE = 0
 function editAddress(src) {
   Object.keys(addr).forEach((k) => delete addr[k])
@@ -290,9 +292,21 @@ async function onRemove(node) {
           >
             <UInput v-model="addr.dns_name" class="w-full font-mono" placeholder="nas.home.arpa" />
           </UFormField>
-          <UFormField label="MAC address (DHCP reservation)"
-            ><UInput v-model="addr.mac" class="w-full font-mono" placeholder="02:00:00:00:00:10"
-          /></UFormField>
+          <UFormField label="MAC address (DHCP reservation)">
+            <div class="flex items-center gap-1">
+              <UInput v-model="addr.mac" class="w-full font-mono" placeholder="02:00:00:00:00:10" />
+              <UButton
+                v-if="store.current?.dhcp_enabled"
+                type="button"
+                color="neutral"
+                variant="ghost"
+                icon="i-lucide-list"
+                aria-label="Pick MAC from DHCP leases"
+                title="Pick MAC from DHCP leases"
+                @click="leasePickerOpen = true"
+              />
+            </div>
+          </UFormField>
           <UFormField label="Description"
             ><UInput v-model="addr.description" class="w-full"
           /></UFormField>
@@ -305,5 +319,12 @@ async function onRemove(node) {
         </div>
       </template>
     </UModal>
+
+    <DhcpLeasePicker
+      v-model:open="leasePickerOpen"
+      :instance="store.current?.name ?? ''"
+      :ip="addr.address"
+      @select="(lease) => (addr.mac = lease.mac)"
+    />
   </NeedInstance>
 </template>
