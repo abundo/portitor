@@ -6,11 +6,9 @@ import { onMounted, reactive, ref } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import { api } from '@/api'
 import { errMsg } from '@/api/http'
-import { useAuthStore } from '@/stores/auth'
 import { useDeployStore } from '@/stores/deploy'
 
 const toast = useToast()
-const auth = useAuthStore()
 const deploy = useDeployStore()
 const settings = reactive({
   agent_url: '',
@@ -20,15 +18,12 @@ const settings = reactive({
   wg_endpoint_host: '',
 })
 const hasToken = ref(false)
-const users = ref([])
-const newUser = reactive({ username: '', password: '' })
 const version = ref(null)
 
 async function load() {
   const s = await api.settings()
   Object.assign(settings, s, { agent_token: '' })
   hasToken.value = s.has_agent_token
-  users.value = await api.users()
   version.value = await api.version()
 }
 onMounted(load)
@@ -43,26 +38,6 @@ async function saveSettings() {
     settings.agent_token = ''
     toast.add({ title: 'Settings saved', color: 'success' })
     deploy.refresh()
-  } catch (err) {
-    toast.add({ title: errMsg(err), color: 'error' })
-  }
-}
-
-async function addUser() {
-  try {
-    await api.createUser(newUser.username, newUser.password)
-    newUser.username = newUser.password = ''
-    users.value = await api.users()
-  } catch (err) {
-    toast.add({ title: errMsg(err), color: 'error' })
-  }
-}
-
-async function removeUser(u) {
-  if (!window.confirm(`Delete user ${u.username}?`)) return
-  try {
-    await api.deleteUser(u.id)
-    users.value = await api.users()
   } catch (err) {
     toast.add({ title: errMsg(err), color: 'error' })
   }
@@ -131,39 +106,6 @@ async function removeUser(u) {
     </div>
 
     <div class="space-y-4">
-      <div class="card">
-        <div class="mb-3 text-lg font-semibold">Users</div>
-        <UTable
-          :data="users"
-          :columns="[
-            { accessorKey: 'username', header: 'Username' },
-            { id: 'actions', header: '' },
-          ]"
-        >
-          <template #actions-cell="{ row }">
-            <div class="flex justify-end">
-              <UButton
-                v-if="row.original.id !== auth.user?.id"
-                size="xs"
-                color="error"
-                variant="ghost"
-                icon="i-lucide-trash"
-                @click="removeUser(row.original)"
-              />
-            </div>
-          </template>
-        </UTable>
-        <form class="mt-3 flex flex-wrap items-end gap-2" @submit.prevent="addUser">
-          <UFormField label="New user"
-            ><UInput v-model="newUser.username" placeholder="username"
-          /></UFormField>
-          <UFormField label="Password"
-            ><UInput v-model="newUser.password" type="password" autocomplete="new-password"
-          /></UFormField>
-          <UButton type="submit" icon="i-lucide-user-plus">Add</UButton>
-        </form>
-      </div>
-
       <p v-if="version" class="text-xs text-muted">
         portitor-web {{ version.version }} ({{ version.commit.slice(0, 8) }}),
         {{ version.go_version }}

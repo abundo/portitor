@@ -36,6 +36,7 @@ const router = createRouter({
         { path: 'deploy', component: () => import('@/views/DeployPage.vue') },
         { path: 'console', component: () => import('@/views/ConsolePage.vue') },
         { path: 'settings', component: () => import('@/views/SettingsPage.vue') },
+        { path: 'settings/users', component: () => import('@/views/UsersPage.vue') },
         { path: 'profile', component: () => import('@/views/ProfilePage.vue') },
         { path: 'profile/password', component: () => import('@/views/ChangePasswordPage.vue') },
       ],

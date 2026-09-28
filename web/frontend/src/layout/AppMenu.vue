@@ -2,7 +2,11 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
 <script setup>
-const items = [
+import { computed } from 'vue'
+import { useRoute } from 'vue-router'
+
+const route = useRoute()
+const items = computed(() => [
   [
     { label: 'Dashboard', icon: 'i-lucide-gauge', to: '/', exact: true },
     { label: 'Deploy', icon: 'i-lucide-rocket', to: '/deploy' },
@@ -31,9 +35,17 @@ const items = [
   ],
   [
     { label: 'Console', icon: 'i-lucide-square-terminal', to: '/console' },
-    { label: 'Settings', icon: 'i-lucide-settings', to: '/settings' },
+    {
+      label: 'Settings',
+      icon: 'i-lucide-settings',
+      defaultOpen: route.path.startsWith('/settings'),
+      children: [
+        { label: 'General', icon: 'i-lucide-sliders-horizontal', to: '/settings', exact: true },
+        { label: 'Users', icon: 'i-lucide-users', to: '/settings/users' },
+      ],
+    },
   ],
-]
+])
 </script>
 
 <template>
