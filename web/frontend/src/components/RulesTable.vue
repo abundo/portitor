@@ -15,6 +15,7 @@
 // IP lists (@name); From/To cells a comma-separated list of interfaces and
 // interface zones; the Dst port cell ports, ranges and service names (ssh),
 // or with protocol icmp/icmpv6 a menu to tick ICMP types in (echo-request).
+// Each of these offers "any" first, which empties the cell.
 import { computed, onMounted, ref } from 'vue'
 import PortMenu from '@/components/PortMenu.vue'
 import { useColumnResize } from '@/composables/useColumnResize'
@@ -272,8 +273,17 @@ function cellText(r, key, text) {
 function onDraft(r, key, event) {
   draft.value = { id: r.id, key, text: event.target.value }
 }
-// onType is onDraft for a cell with suggestions.
+// onType is onDraft for a cell with suggestions. Picking "any" from them
+// (a replacement, not typing) empties the cell and saves it.
 function onType(r, key, event) {
+  const picked = !event.inputType || event.inputType === 'insertReplacementText'
+  if (picked && splitList(event.target.value).includes('any')) {
+    event.target.value = ''
+    endDraft()
+    onFocus(event)
+    set(r, key, [])
+    return
+  }
   onDraft(r, key, event)
   onFocus(event)
 }
@@ -298,10 +308,14 @@ function listSuggestions(names, text) {
   }
   return out
 }
-const ifaceSuggestions = computed(() => listSuggestions(props.ifaces, typed.value))
+// "any" comes first in the suggestions; picking it empties the cell.
+const anySuggestion = { value: 'any', description: 'clears the list' }
+const ifaceSuggestions = computed(() =>
+  listSuggestions([anySuggestion, ...props.ifaces], typed.value),
+)
 const nameSuggestions = computed(() =>
   listSuggestions(
-    [...objects.names, ...objects.listRefs].map((n) => ({ value: n })),
+    [anySuggestion, ...[...objects.names, ...objects.listRefs].map((n) => ({ value: n }))],
     typed.value,
   ),
 )
@@ -315,12 +329,19 @@ const icmpItems = (proto) =>
     description: `${t.type}: ${t.description}`,
   }))
 // rowIcmpItems adds the types a rule holds that the list lacks, so they
-// stay visible (and can be unticked).
+// stay visible (and can be unticked), after "any", which unticks them all.
 function rowIcmpItems(r) {
   const list = icmpItems(r.protocol)
   const known = new Set(list.map((it) => it.value))
   const extra = (r.icmp_types ?? []).filter((t) => !known.has(t))
-  return [...list, ...extra.map((t) => ({ label: t, value: t }))]
+  return [
+    { label: 'any', value: 'any', description: 'clears the list' },
+    ...list,
+    ...extra.map((t) => ({ label: t, value: t })),
+  ]
+}
+function setIcmp(r, list) {
+  set(r, 'icmp_types', list.includes('any') ? [] : list)
 }
 // icmpTitle shows what the ICMP types in a cell are.
 function icmpTitle(r) {
@@ -333,7 +354,7 @@ function icmpTitle(r) {
 const servicePort = computed(() => new Map(objects.portNames.map((it) => [it.name, it.port])))
 // The port cell offers service names with their ports (usePortMenu), in a
 // menu fixed to the viewport so the cell's overflow does not clip it.
-const ports = usePortMenu()
+const ports = usePortMenu({ any: true })
 const portMenu = ports.menu
 // A picked name changes the input without a change event, so leaving the
 // cell saves it if it differs; not while the menu's New service dialog has
@@ -472,13 +493,12 @@ function setText(r, key, event) {
   set(r, key, event.target.value.trim())
 }
 
-// setList saves a comma-separated cell as a list.
+const splitList = (text) => text.split(/[\s,]+/).filter((s) => s)
+
+// setList saves a comma-separated cell as a list; "any" in it empties it.
 function setList(r, key, event) {
-  set(
-    r,
-    key,
-    event.target.value.split(/[\s,]+/).filter((s) => s),
-  )
+  const list = splitList(event.target.value)
+  set(r, key, list.includes('any') ? [] : list)
 }
 
 // Enter and the up/down arrows move to the same column in the next/previous
@@ -820,7 +840,7 @@ function onKeydown(event, index) {
                   :title="icmpTitle(r)"
                   class="icmp-select w-full font-mono"
                   :ui="{ content: 'min-w-80' }"
-                  @update:model-value="set(r, 'icmp_types', $event)"
+                  @update:model-value="setIcmp(r, $event)"
                 />
               </td>
               <td v-else>
@@ -918,7 +938,12 @@ function onKeydown(event, index) {
         </tbody>
       </table>
       <datalist :id="`rules-grid-names-${chain}`">
-        <option v-for="it in nameSuggestions" :key="it.value" :value="it.value" />
+        <option
+          v-for="it in nameSuggestions"
+          :key="it.value"
+          :value="it.value"
+          :label="it.description || undefined"
+        />
       </datalist>
       <datalist :id="`rules-grid-ifaces-${chain}`">
         <option

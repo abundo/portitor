@@ -14,7 +14,8 @@
 // keys to onKeydown first: with the menu open the arrows move in it, Enter
 // and Tab pick, Escape closes it. A pick, or a created service, completes
 // the last entry or is added after it, and sends an input event, so
-// v-model sees it. The callers load the object store.
+// v-model sees it. With any, the menu starts with an entry "any" that
+// empties the input. The callers load the object store.
 import { markRaw, onBeforeUnmount, ref } from 'vue'
 import { useServiceDialog } from '@/composables/useServiceDialog'
 import { useObjectStore } from '@/stores/objects'
@@ -22,7 +23,9 @@ import { useObjectStore } from '@/stores/objects'
 const nameRe = /^[a-z][a-z0-9_.-]*$/
 const portRe = /^\d+(\s*-\s*\d+)?$/
 
-export function usePortMenu() {
+const anyItem = { name: 'any', port: 'clears the list', any: true }
+
+export function usePortMenu({ any = false } = {}) {
   const objects = useObjectStore()
   const dialog = useServiceDialog()
   const menu = ref(null) // { el, top, left, width, items, newName, append, active }
@@ -62,7 +65,7 @@ export function usePortMenu() {
       top: rect.bottom,
       left: rect.left,
       width: rect.width,
-      items,
+      items: any ? [anyItem, ...items] : items,
       newName,
       append,
       active: -1,
@@ -85,7 +88,13 @@ export function usePortMenu() {
   }
 
   function pick(it) {
-    setLast(menu.value.el, it.name, menu.value.append)
+    const el = menu.value.el
+    if (it.any) {
+      el.value = ''
+      el.dispatchEvent(new Event('input', { bubbles: true }))
+    } else {
+      setLast(el, it.name, menu.value.append)
+    }
     close()
   }
 
