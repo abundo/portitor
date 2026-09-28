@@ -36,6 +36,13 @@ Where from:
   ./install.py --source       This source tree: `make release` (CGO off), then
                               install build/. Cross-builds the agent when the
                               firewall has another architecture.
+  ./install.py --local PATH   A release archive (.tar.gz) or an extracted release
+                              directory, without GitHub (the installer ISO uses
+                              this).
+
+The agent host also gets a copy of this installer as
+/usr/lib/portitor/install.py: the agent runs it for updates started from the
+GUI (`--list --json`, `--install TAG --yes`).
 """
 
 from __future__ import annotations
@@ -66,8 +73,10 @@ from typing import Sequence
 
 # Bump when the installer itself changes, so a release's copy can tell
 # whether it is newer than the one running.
-INSTALLER_VERSION = 1
+INSTALLER_VERSION = 2
 INSTALLER_FILENAME = "install.py"
+# Where the agent host keeps a copy, for updates from the GUI.
+INSTALLER_DEST = "/usr/lib/portitor/install.py"
 
 REPO_DIR = Path(__file__).resolve().parent
 REPO_DEFAULT = "abundo/portitor"
@@ -112,8 +121,12 @@ class InstallError(Exception):
     """Fatal, already-formatted error for the CLI."""
 
 
+# stderr with --list --json, so stdout holds only the JSON.
+log_stream = sys.stdout
+
+
 def log(msg: str = "") -> None:
-    print(msg, flush=True)
+    print(msg, file=log_stream, flush=True)
 
 
 def warn(msg: str) -> None:
@@ -405,6 +418,7 @@ def install_agent(host: Host, binary: Path, deploy: Path, version: str, assume_y
     if new_config:
         host.put(deploy / "agent.yaml", AGENT_CONFIG, "0600")
     host.put(binary, AGENT_BIN, "0755")
+    host.put(Path(__file__).resolve(), INSTALLER_DEST, "0755", name=INSTALLER_FILENAME)
     actions = {u: install_unit(host, deploy / "systemd" / u, assume_yes) for u in AGENT_UNITS}
     host.systemctl("daemon-reload")
     install_apparmor(host, deploy)
@@ -903,6 +917,28 @@ def print_release_table(releases: list[Release], plan: Plan, installed: dict[str
         log(f"{i + 1:>3} {rel.tag:<16} {format_date(rel.published_at):<12} {notes}")
 
 
+def print_release_json(releases: list[Release], installed: dict[str, str], archs: set[str], include_pre: bool) -> None:
+    """--list --json, for the agent (the GUI's update page)."""
+    latest = latest_stable(releases)
+    cur = primary_version(installed)
+    out = {
+        "installed": installed,
+        "latest": latest.tag if latest else "",
+        "releases": [
+            {
+                "tag": rel.tag,
+                "date": format_date(rel.published_at),
+                "prerelease": rel.prerelease,
+                "notes": release_status(rel, cur, latest.tag if latest else None),
+                "newer": version_newer(rel.tag, cur) and (include_pre or not rel.prerelease),
+                "installable": not missing_archs(rel, archs),
+            }
+            for rel in releases
+        ],
+    }
+    print(json.dumps(out, indent=2))
+
+
 def numbered_select(releases: list[Release], plan: Plan, installed: dict[str, str], archs: set[str]) -> Release | None:
     print_release_table(releases, plan, installed, archs)
     log()
@@ -1167,6 +1203,9 @@ def main_release(args: argparse.Namespace) -> int:
     client = GithubClient(args.repo, token)
     log(f"==> Fetching releases from {args.repo}" + ("" if token else " (no GitHub token)"))
     releases = client.list_releases(args.limit)
+    if args.list and args.json:
+        print_release_json(releases, installed, needed, args.pre)
+        return 0
     if not releases:
         raise InstallError(f"{args.repo} has no releases")
     newer = [r for r in releases if version_newer(r.tag, cur) and (args.pre or not r.prerelease)]
@@ -1281,6 +1320,38 @@ def main_source(args: argparse.Namespace) -> int:
     return 0
 
 
+def main_local(args: argparse.Namespace) -> int:
+    plan = make_plan(args)
+    archs = plan_archs(plan)
+    path = Path(args.local).resolve()
+    work = None
+    try:
+        if path.is_dir():
+            if not is_release_root(path):
+                raise InstallError(f"{path} does not contain portitor-web, portitor-agent and deploy/")
+            root = path
+        elif path.is_file():
+            work = Path(tempfile.mkdtemp(prefix="portitor-local-"))
+            root = extract_archive(path, work)
+        else:
+            raise InstallError(f"{path}: no such file or directory")
+        # The binaries must run here to report their version.
+        for kind, arch in archs.items():
+            if arch != local_arch():
+                raise InstallError(f"--local installs {local_arch()} only; the {kind} host is {arch}")
+        proc = subprocess.run([str(root / "portitor-agent"), "--version"], capture_output=True, text=True, check=False)
+        version = version_of_output(proc.stdout)
+        if proc.returncode != 0 or not version:
+            raise InstallError(f"cannot run {root / 'portitor-agent'} --version (not an {local_arch()} build?)")
+        log(f"==> Local install of {version} from {path}: " + ", ".join(plan.describe()))
+        ensure_sudo(args.dry_run)
+        install(plan, {local_arch(): root}, archs, root / "deploy", version, args.yes)
+    finally:
+        if work:
+            shutil.rmtree(work, ignore_errors=True)
+    return 0
+
+
 def parse_args(argv: list[str]) -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description="Install or update portitor-web and portitor-agent.",
@@ -1293,6 +1364,7 @@ Examples:
   ./install.py --install v1.2.0 --web --agent fw.example.net
   ./install.py --source --dry-run       from this tree, show what would change
   ./install.py --source --agent 192.168.1.1   this tree's agent onto the firewall only
+  ./install.py --local portitor_1.2.0_linux_amd64.tar.gz --web --agent
 
 Environment:
   GITHUB_TOKEN / GH_TOKEN   token for a private repo (else `gh auth token`)
@@ -1310,7 +1382,9 @@ Environment:
     src = p.add_argument_group("where from")
     src.add_argument("--source", action="store_true", help="build and install this source tree")
     src.add_argument("--skip-build", action="store_true", help="with --source, use build/ as it is")
+    src.add_argument("--local", metavar="PATH", help="install a release archive or extracted release directory")
     src.add_argument("--list", action="store_true", help="print GitHub releases and exit")
+    src.add_argument("--json", action="store_true", help="with --list, print JSON (always exit 0)")
     src.add_argument("--install", metavar="TAG", help="release tag to install, or 'latest'")
     src.add_argument("--pre", action="store_true", help="let 'latest' pick a prerelease")
     src.add_argument("--repo", default=os.environ.get("GITHUB_REPO", REPO_DEFAULT), help=f"default {REPO_DEFAULT}")
@@ -1324,17 +1398,26 @@ Environment:
 
 
 def main(argv: list[str] | None = None) -> int:
+    global log_stream
     args = parse_args(sys.argv[1:] if argv is None else argv)
+    if args.json:
+        log_stream = sys.stderr
     if args.no_agent and args.agent is not None:
         raise InstallError("--agent and --no-agent exclude each other")
     if args.skip_build and not args.source:
         raise InstallError("--skip-build needs --source")
-    if args.source and (args.list or args.install or args.self_update):
-        raise InstallError("--source cannot be combined with --list, --install or --self-update")
+    if args.source and args.local:
+        raise InstallError("--source and --local exclude each other")
+    if (args.source or args.local) and (args.list or args.install or args.self_update):
+        raise InstallError("--source and --local cannot be combined with --list, --install or --self-update")
+    if args.json and not args.list:
+        raise InstallError("--json needs --list")
     if args.self_update and args.skip_self_update:
         raise InstallError("--self-update and --skip-self-update exclude each other")
     if args.source:
         return main_source(args)
+    if args.local:
+        return main_local(args)
     maybe_self_update(args)
     if args.self_update and not args.list and args.install is None:
         return 0

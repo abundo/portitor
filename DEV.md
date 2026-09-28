@@ -102,7 +102,9 @@ module loaded on the host for `wg0`.
 
 Pushing a tag `v*` runs `.github/workflows/release.yml`: tests, then GoReleaser
 (`.goreleaser.yaml`) publishes `portitor_<version>_linux_{amd64,arm64}.tar.gz` (both
-binaries, `deploy/`, `install.py`) and a checksums file. `install.py` installs from
+binaries, `deploy/`, `install.py`) and a checksums file. The `iso` job then builds
+the installer ISO from the published amd64 archive (`iso/build.sh --release`) and
+attaches `portitor-<tag>-amd64.iso` and its `.sha256` to the release. `install.py` installs from
 those. Bump `INSTALLER_VERSION` in it whenever the installer changes: a release's copy
 runs the install unless the running copy's version is higher, and a standalone copy
 updates itself from the latest release.
@@ -110,6 +112,31 @@ updates itself from the latest release.
 From a checkout, `./install.py --source` builds (`make release`, CGO off) and installs
 `build/` the same way; add `--dry-run` to see what would change, `--agent HOST` to
 target a firewall. A remote agent of another architecture gets a cross-built binary.
+
+`--local PATH` installs a release archive or an extracted release directory without
+GitHub (the ISO uses it). `--list --json` is what the agent runs for *Admin → Updates*;
+`--install TAG --yes --skip-self-update` is what it runs, in the transient unit
+`portitor-update`, to install one.
+
+### Installer ISO
+
+`iso/build.sh` remasters the Debian 13 netinst ISO with xorriso: `preseed.cfg`, new
+boot menus (`grub.cfg` for UEFI, `isolinux.cfg` for BIOS), and `/portitor` with the
+release archive, `late.sh`/`target.sh` (run at the end of the installation) and the
+first-boot setup `firstboot.py`. See [docs/appliance.md](docs/appliance.md).
+
+To try it end to end without any typing:
+
+```sh
+iso/build.sh --test
+VM_SERIAL=build/vm-install.log iso/vm.sh install build/portitor-<version>-test-amd64.iso
+VM_SERIAL=build/vm.log iso/vm.sh run &
+curl -k https://127.0.0.1:28443/api/version    # after a minute or two
+```
+
+Log in to the GUI as `admin` / `portitor-test`. Without `VM_SERIAL` the serial
+console is on stdio; after the first boot you can log in there as `portitor`.
+`VM_UEFI=1` boots with OVMF.
 
 ### Other
 

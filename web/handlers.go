@@ -525,36 +525,49 @@ func (s *Server) handleDeployPreview(c *echo.Context) error {
 }
 
 func (s *Server) handleDeployApply(c *echo.Context) error {
-	s.deployMu.Lock()
-	defer s.deployMu.Unlock()
 	var req struct {
 		ConfirmTimeout *int `json:"confirm_timeout"`
 	}
 	_ = c.Bind(&req)
+	dep, res, err := s.deploy(c.Request().Context(), currentUser(c).Username, req.ConfirmTimeout)
+	var ve *fwconfig.ValidationError
+	switch {
+	case errors.As(err, &ve):
+		return problemsResponse(c, err)
+	case err != nil:
+		return agentError(c, err)
+	}
+	return c.JSON(http.StatusOK, map[string]any{"deployment": dep, "result": res})
+}
 
+// deploy builds the document, applies it and records the deployment.
+// timeout nil takes the confirm timeout from the settings.
+func (s *Server) deploy(ctx context.Context, username string, timeout *int) (*models.Deployment, *agentapi.ApplyResult, error) {
+	s.deployMu.Lock()
+	defer s.deployMu.Unlock()
 	a, st, err := s.agent()
 	if err != nil {
-		return agentError(c, err)
+		return nil, nil, err
 	}
 	gen := st.Generation + 1
 	doc, err := builder.Build(s.db, gen)
 	if err != nil {
-		return problemsResponse(c, err)
+		return nil, nil, err
 	}
-	timeout := st.ConfirmTimeout
-	if req.ConfirmTimeout != nil {
-		timeout = *req.ConfirmTimeout
+	confirm := st.ConfirmTimeout
+	if timeout != nil {
+		confirm = *timeout
 	}
 	// Burn the generation even if the apply fails, so every attempt the
 	// agent sees has a unique number.
 	st.Generation = gen
 	if err := s.db.Save(st).Error; err != nil {
-		return err
+		return nil, nil, err
 	}
 	docJSON, _ := json.Marshal(redactDoc(*doc))
-	dep := models.Deployment{Generation: gen, Username: currentUser(c).Username, Document: string(docJSON), DocHash: docHash(*doc)}
+	dep := models.Deployment{Generation: gen, Username: username, Document: string(docJSON), DocHash: docHash(*doc)}
 
-	res, applyErr := a.Apply(c.Request().Context(), *doc, timeout)
+	res, applyErr := a.Apply(ctx, *doc, confirm)
 	switch {
 	case applyErr != nil:
 		dep.Status = "failed"
@@ -576,12 +589,9 @@ func (s *Server) handleDeployApply(c *echo.Context) error {
 		dep.Log = strings.Join(res.Log, "\n")
 	}
 	if err := s.db.Create(&dep).Error; err != nil {
-		return err
+		return nil, nil, err
 	}
-	if applyErr != nil {
-		return agentError(c, applyErr)
-	}
-	return c.JSON(http.StatusOK, map[string]any{"deployment": dep, "result": res})
+	return &dep, res, applyErr
 }
 
 func (s *Server) latestDeployment() (*models.Deployment, error) {

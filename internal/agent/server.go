@@ -113,6 +113,28 @@ func (a *Agent) Handler() http.Handler {
 			writeStarted(w, req.Name, a.RefreshIPList(req.Name))
 		}
 	})
+	mux.HandleFunc("GET /v1/system", func(w http.ResponseWriter, r *http.Request) {
+		writeJSONResponse(w, http.StatusOK, a.sys.Status(r.Context()))
+	})
+	mux.HandleFunc("POST /v1/system/jobs", func(w http.ResponseWriter, r *http.Request) {
+		var req agentapi.SystemJobRequest
+		if !decode(w, r, &req) {
+			return
+		}
+		slog.Info("api: update job", "job", req.Job, "release", req.Release, "remote", r.RemoteAddr)
+		err := a.sys.Start(r.Context(), req)
+		var busy errBusy
+		if err != nil && !errors.As(err, &busy) {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		writeStarted(w, req.Job, err)
+	})
+	mux.HandleFunc("POST /v1/system/reboot", func(w http.ResponseWriter, r *http.Request) {
+		slog.Warn("api: reboot requested", "remote", r.RemoteAddr)
+		a.sys.Reboot()
+		writeJSONResponse(w, http.StatusAccepted, map[string]any{"rebooting": true})
+	})
 	mux.HandleFunc("GET /v1/console", a.handleConsole)
 	return a.authMiddleware(mux)
 }

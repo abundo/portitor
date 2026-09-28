@@ -10,6 +10,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/netip"
 	"os"
 	"os/signal"
 	"strings"
@@ -135,6 +136,58 @@ func main() {
 			return nil
 		},
 	})
+
+	var bo web.BootstrapOptions
+	var tokenFile, address, gateway string
+	bootstrap := &cobra.Command{
+		Use:   "bootstrap",
+		Short: "Configure and deploy a new firewall that runs portitor-web itself (installer ISO)",
+		Long: `Stores the agent settings, configures the LAN interface with its address
+(and the default route), accepts the GUI port and ping from the LAN, and
+deploys. Every other interface of the firewall is imported as it is.
+Refused once anything has been deployed.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, srv, err := load()
+			if err != nil {
+				return err
+			}
+			tok, err := os.ReadFile(tokenFile)
+			if err != nil {
+				return err
+			}
+			bo.AgentToken = strings.TrimSpace(string(tok))
+			if bo.Address, err = netip.ParsePrefix(address); err != nil {
+				return fmt.Errorf("--address: %w", err)
+			}
+			if gateway != "" {
+				if bo.Gateway, err = netip.ParseAddr(gateway); err != nil {
+					return fmt.Errorf("--gateway: %w", err)
+				}
+			}
+			dep, err := web.Bootstrap(cmd.Context(), srv, bo)
+			if dep != nil && dep.Log != "" {
+				fmt.Println(dep.Log)
+			}
+			if err != nil {
+				return err
+			}
+			fmt.Println("deployed generation", dep.Generation)
+			return nil
+		},
+	}
+	bf := bootstrap.Flags()
+	bf.StringVar(&bo.AgentURL, "agent-url", "https://127.0.0.1:8443", "agent API")
+	bf.StringVar(&tokenFile, "agent-token-file", "/etc/portitor/agent.token", "agent token")
+	bf.StringVar(&bo.AgentFingerprint, "agent-fingerprint", "", "agent certificate SHA-256 (from portitor-agent init)")
+	bf.StringVar(&bo.LAN, "lan", "", "LAN interface")
+	bf.StringVar(&address, "address", "", "LAN address with prefix length, e.g. 192.168.1.1/24")
+	bf.StringVar(&gateway, "gateway", "", "default gateway (optional)")
+	bf.IntVar(&bo.GUIPort, "gui-port", 443, "port to open for portitor-web on the LAN")
+	for _, f := range []string{"agent-fingerprint", "lan", "address"} {
+		_ = bootstrap.MarkFlagRequired(f)
+	}
+	root.AddCommand(bootstrap)
 
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, "Error:", err)

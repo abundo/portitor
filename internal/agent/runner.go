@@ -104,7 +104,11 @@ func isQuery(name string, args []string) bool {
 	case "wg":
 		return len(args) > 0 && args[0] == "show"
 	case "systemctl":
-		return len(args) > 0 && (args[0] == "is-active" || args[0] == "is-enabled")
+		return len(args) > 0 && (args[0] == "is-active" || args[0] == "is-enabled" || args[0] == "show")
+	case "journalctl":
+		return true
+	case "apt-get":
+		return len(args) > 0 && args[0] == "-s"
 	case "nft":
 		return len(args) > 0 && (args[0] == "-c" || args[0] == "list" || (args[0] == "-j" && len(args) > 1 && args[1] == "list"))
 	}

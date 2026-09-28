@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 
@@ -40,6 +41,9 @@ type agentAPI interface {
 	RunTask(ctx context.Context, name string) error
 	RefreshIPList(ctx context.Context, name string) error
 	Console(ctx context.Context) (*websocket.Conn, error)
+	System(ctx context.Context) (*agentapi.SystemStatus, error)
+	StartSystemJob(ctx context.Context, req agentapi.SystemJobRequest) error
+	Reboot(ctx context.Context) error
 }
 
 type Server struct {
@@ -151,6 +155,9 @@ func (s *Server) Echo() *echo.Echo {
 	g.GET("/agent/rule-counters", s.handleAgentRuleCounters)
 	g.GET("/agent/logs", s.handleAgentLogs)
 	g.GET("/agent/console", s.handleAgentConsole)
+	g.GET("/system", s.handleSystem)
+	g.POST("/system/jobs", s.handleSystemJob)
+	g.POST("/system/reboot", s.handleSystemReboot)
 
 	api.Any("/*", func(c *echo.Context) error { return errJSON(c, http.StatusNotFound, "no such API endpoint") })
 
@@ -180,7 +187,13 @@ func (s *Server) Serve(ctx context.Context) error {
 	slog.Info("portitor-web listening", "addr", s.cfg.Bind, "dev", s.cfg.Dev, "tls", s.cfg.TLSCert != "")
 	var err error
 	if s.cfg.TLSCert != "" {
-		err = sc.StartTLS(ctx, e, s.cfg.TLSCert, s.cfg.TLSKey)
+		// Echo reads file names relative to the working directory
+		// (os.DirFS("."), which refuses absolute paths); pass the contents.
+		cert, key, rerr := readFiles(s.cfg.TLSCert, s.cfg.TLSKey)
+		if rerr != nil {
+			return rerr
+		}
+		err = sc.StartTLS(ctx, e, cert, key)
 	} else {
 		err = sc.Start(ctx, e)
 	}
@@ -188,6 +201,15 @@ func (s *Server) Serve(ctx context.Context) error {
 		return nil
 	}
 	return err
+}
+
+func readFiles(a, b string) ([]byte, []byte, error) {
+	da, err := os.ReadFile(a)
+	if err != nil {
+		return nil, nil, err
+	}
+	db, err := os.ReadFile(b)
+	return da, db, err
 }
 
 // DefaultInstanceName is the instance created on start when there is none.

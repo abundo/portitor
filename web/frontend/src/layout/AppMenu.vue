@@ -39,6 +39,7 @@ const items = computed(() => [
   [
     { label: 'Admin', type: 'label' },
     { label: 'Console', icon: 'i-lucide-square-terminal', to: '/console' },
+    { label: 'Updates', icon: 'i-lucide-package-check', to: '/updates' },
     {
       label: 'Settings',
       icon: 'i-lucide-settings',

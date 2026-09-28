@@ -1,7 +1,8 @@
 # SPDX-FileCopyrightText: 2026 The Portitor contributors
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-# Pushing a tag v* builds the release archives install.py installs from.
+# Pushing a tag v* builds the release archives install.py installs from, and
+# the installer ISO (amd64) from them.
 name: release
 
 on:
@@ -47,3 +48,24 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # The installer ISO, built from the archive just published (so it holds
+  # exactly the release's binaries) and attached to the same release.
+  iso:
+    needs: goreleaser
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: sudo apt-get update -q && sudo apt-get install -y -q xorriso
+      - run: iso/build.sh --release "$GITHUB_REF_NAME" -o "build/portitor-$GITHUB_REF_NAME-amd64.iso"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPO: ${{ github.repository }}
+      - name: Upload to the release
+        run: |
+          cd build
+          iso=portitor-$GITHUB_REF_NAME-amd64.iso
+          sha256sum "$iso" >"$iso.sha256"
+          gh release upload "$GITHUB_REF_NAME" "$iso" "$iso.sha256" --clobber -R "$GITHUB_REPOSITORY"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

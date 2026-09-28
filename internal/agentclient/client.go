@@ -182,6 +182,22 @@ func (c *Client) RefreshIPList(ctx context.Context, name string) error {
 	return c.do(ctx, http.MethodPost, "/v1/iplists/refresh", agentapi.RunRequest{Name: name}, nil)
 }
 
+// System returns the operating system, its updates and the update jobs.
+func (c *Client) System(ctx context.Context) (*agentapi.SystemStatus, error) {
+	var st agentapi.SystemStatus
+	return &st, c.do(ctx, http.MethodGet, "/v1/system", nil, &st)
+}
+
+// StartSystemJob starts an update job (agentapi.JobCheck, ...).
+func (c *Client) StartSystemJob(ctx context.Context, req agentapi.SystemJobRequest) error {
+	return c.do(ctx, http.MethodPost, "/v1/system/jobs", req, nil)
+}
+
+// Reboot restarts the firewall.
+func (c *Client) Reboot(ctx context.Context) error {
+	return c.do(ctx, http.MethodPost, "/v1/system/reboot", struct{}{}, nil)
+}
+
 // Console opens the agent's console WebSocket (agentapi.ConsoleResize).
 func (c *Client) Console(ctx context.Context) (*websocket.Conn, error) {
 	conn, resp, err := websocket.Dial(ctx, c.baseURL+"/v1/console", &websocket.DialOptions{

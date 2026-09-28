@@ -100,7 +100,13 @@ ip prefix/addresses are handled by a hierarchical tree
 
 ## Install
 
-`install.py` installs and updates both parts from a GitHub release (SHA-256
+**Single box, from the ISO.** The installer ISO (amd64) installs Debian 13 with
+everything on it, the GUI included. At the first boot it asks for the LAN interface,
+its address and a password, then you continue in the GUI. See
+[docs/appliance.md](docs/appliance.md), which also covers updating Debian and Portitor
+from the GUI (*Admin → Updates*) and building the ISO (`iso/build.sh`).
+
+**GUI on another host.** `install.py` installs and updates both parts from a GitHub release (SHA-256
 verified): portitor-web on the host it runs on, portitor-agent on the firewall over
 SSH as `portitor` (`--ssh-user`; a user with passwordless sudo, or root). If it
 cannot log in, it prints how to create that user and its sudoers entry. Download it

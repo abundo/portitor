@@ -1,0 +1,6 @@
+
+  Portitor installer (Debian 13)
+
+  install   install Portitor (default, starts in 10 seconds)
+  expert    the same, asking every question the preseed leaves open
+

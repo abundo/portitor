@@ -31,7 +31,8 @@ are in [README.md](README.md).
 | `docs` | User guides; every `docs/*.md` is bundled into the GUI's Help page (`src/docs.js`), and links between them stay in the GUI |
 | `deploy` | systemd units and example configs |
 | `dev` | Dev configs and `seed.sh`; `dev/lab` runs a real apply in two podman containers |
-| `install.py` | Installs/updates web and agent from a GitHub release (`.goreleaser.yaml`) or `--source` |
+| `install.py` | Installs/updates web and agent from a GitHub release (`.goreleaser.yaml`), `--source` or `--local`; the agent runs its copy in `/usr/lib/portitor` for GUI updates |
+| `iso` | Installer ISO: Debian netinst + preseed (`build.sh`), first-boot setup (`firstboot.py`, runs `portitor-web bootstrap`), QEMU test VM (`vm.sh`) |
 
 ## Invariants
 
@@ -88,6 +89,11 @@ are in [README.md](README.md).
   validation uses the same function.
 - **Schema changes:** a new goose file in `internal/dbmigrate/sql/`, plus the model
   change. Tests use AutoMigrate on SQLite, so SQL-only constraints are untested there.
+- **Updates from the GUI** (`internal/agent/system.go`): the Debian upgrade and the
+  Portitor update run as transient systemd units (`systemd-run`), never as children
+  of the agent, because the update restarts the agent. The release tag is checked
+  against a regex before it becomes an argument to `install.py`. `install.py
+  --list --json` is the interface between agent and installer; keep its fields stable.
 
 ## Adding a feature end to end
 

@@ -38,6 +38,7 @@ const router = createRouter({
         { path: 'tasks', component: () => import('@/views/TasksPage.vue') },
         { path: 'deploy', component: () => import('@/views/DeployPage.vue') },
         { path: 'console', component: () => import('@/views/ConsolePage.vue') },
+        { path: 'updates', component: () => import('@/views/UpdatesPage.vue') },
         { path: 'settings', component: () => import('@/views/SettingsPage.vue') },
         { path: 'settings/users', component: () => import('@/views/UsersPage.vue') },
         { path: 'help/:doc?', component: () => import('@/views/HelpPage.vue') },

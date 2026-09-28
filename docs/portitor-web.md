@@ -6,6 +6,8 @@
 portitor-web is the management GUI and REST API. It keeps the configuration in
 PostgreSQL and pushes it to portitor-agent on the firewall. Run it on another host, not
 on the firewall itself. Installing it is covered in the [README](../README.md#install).
+The [installer ISO](appliance.md) is the exception: it puts portitor-web on the
+firewall, for a single-box setup.
 
 ## Configuration
 
@@ -33,6 +35,7 @@ portitor-web start                 # serve the GUI and API
 portitor-web migrate               # apply database migrations; start never migrates
 portitor-web createadmin <user>    # create a user, or reset a user's password
 portitor-web agent-url             # print the agent URL from Settings (used by install.py)
+portitor-web bootstrap ...         # first configuration of an ISO install (firstboot.py runs it)
 ```
 
 `createadmin` asks for the password twice on a terminal, or reads one line from stdin.
@@ -89,6 +92,7 @@ After an upgrade, run `migrate` before `start`. `install.py` does both.
 | | Dynamic DNS | Keeps records on an external nameserver in step with the WAN address. |
 | | Scheduled tasks | IP list downloads and commands on a cron schedule. |
 | Admin | Console | A shell on the firewall as the agent's `console_user`. |
+| | Updates | Debian package upgrades, Portitor releases, reboot. See [Installer ISO and updates](appliance.md#updates). |
 | | Settings → General | Agent connection, default auto-rollback, public WireGuard endpoint. |
 | | Settings → Users | GUI users. |
 | | Help | This guide and the other guides in `docs/`. |

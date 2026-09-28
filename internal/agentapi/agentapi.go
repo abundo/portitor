@@ -260,3 +260,81 @@ type ConsoleResize struct {
 	Cols uint16 `json:"cols"`
 	Rows uint16 `json:"rows"`
 }
+
+// SystemStatus is the firewall's operating system, the package upgrades apt
+// offers, the Portitor releases from the last check, and the update jobs
+// (GET /v1/system).
+type SystemStatus struct {
+	OS             string     `json:"os"`
+	Kernel         string     `json:"kernel"`
+	BootTime       *time.Time `json:"boot_time,omitempty"`
+	RebootRequired bool       `json:"reboot_required"`
+	// Packages are the upgrades in apt's package lists (as of the last
+	// `apt-get update`, which a check runs).
+	Packages []PackageUpgrade `json:"packages"`
+	// Releases is `install.py --list --json` from the last check; nil
+	// before one, or when it failed (ReleasesError).
+	Releases      *Releases `json:"releases,omitempty"`
+	ReleasesError string    `json:"releases_error,omitempty"`
+	// Installer tells whether /usr/lib/portitor/install.py is there.
+	Installer bool        `json:"installer"`
+	Jobs      []SystemJob `json:"jobs"`
+}
+
+type PackageUpgrade struct {
+	Name     string `json:"name"`
+	From     string `json:"from"`
+	To       string `json:"to"`
+	Security bool   `json:"security"`
+}
+
+// Releases is install.py's `--list --json` output.
+type Releases struct {
+	// Installed maps "web" and "agent" to the version installed on the
+	// firewall host (only the parts that are installed there).
+	Installed map[string]string `json:"installed"`
+	Latest    string            `json:"latest"`
+	Releases  []Release         `json:"releases"`
+}
+
+type Release struct {
+	Tag         string `json:"tag"`
+	Date        string `json:"date"`
+	Prerelease  bool   `json:"prerelease"`
+	Notes       string `json:"notes"`
+	Newer       bool   `json:"newer"`
+	Installable bool   `json:"installable"`
+}
+
+// Update jobs.
+const (
+	// JobCheck runs apt-get update and lists the Portitor releases.
+	JobCheck = "check"
+	// JobUpgrade upgrades the Debian packages.
+	JobUpgrade = "upgrade"
+	// JobUpdate installs a Portitor release (SystemJobRequest.Release).
+	JobUpdate = "update"
+)
+
+// Job states.
+const (
+	JobRunning   = "running"
+	JobSucceeded = "succeeded"
+	JobFailed    = "failed"
+)
+
+// SystemJob is the latest run of an update job.
+type SystemJob struct {
+	Name     string     `json:"name"`
+	State    string     `json:"state"`
+	Started  *time.Time `json:"started,omitempty"`
+	Finished *time.Time `json:"finished,omitempty"`
+	// Output is the end of what the job printed.
+	Output string `json:"output"`
+}
+
+// SystemJobRequest starts an update job (POST /v1/system/jobs).
+type SystemJobRequest struct {
+	Job     string `json:"job"`
+	Release string `json:"release,omitempty"`
+}

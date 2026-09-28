@@ -1,0 +1,26 @@
+# SPDX-FileCopyrightText: 2026 The Portitor contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# First-boot setup of a firewall installed from the Portitor ISO: asks for
+# the LAN interface and address on tty1, before the login prompt, until it
+# has finished once.
+[Unit]
+Description=Portitor first-boot setup
+ConditionPathExists=!/var/lib/portitor/firstboot.done
+After=systemd-user-sessions.service postgresql.service
+Before=getty@tty1.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/portitor/firstboot.py
+StandardInput=tty
+StandardOutput=tty
+StandardError=tty
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+TimeoutStartSec=infinity
+
+[Install]
+WantedBy=multi-user.target

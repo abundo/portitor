@@ -29,6 +29,7 @@ type Agent struct {
 	ddns  *dyndnsManager
 	lists *ipLists
 	tasks *scheduler
+	sys   *systemManager
 
 	mu        sync.Mutex // serialises apply / confirm / rollback
 	applied   *fwconfig.Document
@@ -57,6 +58,13 @@ func New(cfg *Config) *Agent {
 	a.ddns = newDyndnsManager(cfg.DryRun)
 	a.lists = newIPLists()
 	a.tasks = newScheduler(a.runTask)
+	// Updates have a runner of their own: their commands are not part of
+	// an apply's log.
+	if cfg.DryRun {
+		a.sys = newSystemManager(&DryRunner{})
+	} else {
+		a.sys = newSystemManager(&ExecRunner{})
+	}
 	return a
 }
 
