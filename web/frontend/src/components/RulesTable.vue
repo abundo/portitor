@@ -13,7 +13,8 @@
 // delete it (`remove`).
 // Address cells take a comma-separated list of addresses, CIDRs, names or
 // IP lists (@name); From/To cells a comma-separated list of interfaces and
-// interface zones; the Dst port cell ports, ranges and service names (ssh).
+// interface zones; the Dst port cell ports, ranges and service names (ssh),
+// or with protocol icmp/icmpv6 a menu to tick ICMP types in (echo-request).
 import { computed, onMounted, ref } from 'vue'
 import PortMenu from '@/components/PortMenu.vue'
 import { useColumnResize } from '@/composables/useColumnResize'
@@ -305,6 +306,30 @@ const nameSuggestions = computed(() =>
   ),
 )
 
+// ICMP types by protocol ({ label, value, description }), picked in the
+// Dst port cell of icmp and icmpv6 rules.
+const icmpItems = (proto) =>
+  (objects.icmpTypes[proto] ?? []).map((t) => ({
+    label: t.name,
+    value: t.name,
+    description: `${t.type}: ${t.description}`,
+  }))
+// rowIcmpItems adds the types a rule holds that the list lacks, so they
+// stay visible (and can be unticked).
+function rowIcmpItems(r) {
+  const list = icmpItems(r.protocol)
+  const known = new Set(list.map((it) => it.value))
+  const extra = (r.icmp_types ?? []).filter((t) => !known.has(t))
+  return [...list, ...extra.map((t) => ({ label: t, value: t }))]
+}
+// icmpTitle shows what the ICMP types in a cell are.
+function icmpTitle(r) {
+  const list = r.icmp_types ?? []
+  if (!list.length) return `Any ${r.protocol} type, or types such as echo-request`
+  const desc = new Map(icmpItems(r.protocol).map((it) => [it.value, it.description]))
+  return list.map((n) => (desc.has(n) ? `${n}: ${desc.get(n)}` : n)).join('\n')
+}
+
 const servicePort = computed(() => new Map(objects.portNames.map((it) => [it.name, it.port])))
 // The port cell offers service names with their ports (usePortMenu), in a
 // menu fixed to the viewport so the cell's overflow does not clip it.
@@ -326,7 +351,7 @@ function onPortBlur(r, event) {
 }
 // portTitle shows the numbers of the service names in a port cell.
 function portTitle(r) {
-  if (!hasPorts(r)) return 'Ports need protocol tcp, udp or tcp+udp'
+  if (!hasPorts(r)) return 'Ports need protocol tcp, udp or tcp+udp, ICMP types icmp or icmpv6'
   const parts = (r.dst_ports ?? '').split(/[\s,]+/).filter((s) => s)
   if (!parts.length) return 'Ports, ranges or service names, such as 22, 8000-8080, https'
   return parts
@@ -430,10 +455,16 @@ const dropCount = (reason) => props.drops?.[`${reason}_packets`]
 const builtinLogLimit = 'at most 10 packets a second'
 
 const hasPorts = (r) => ['tcp', 'udp', 'tcp,udp'].includes(r.protocol)
+const hasIcmp = (r) => ['icmp', 'icmpv6'].includes(r.protocol)
 
 function set(r, key, value) {
   r[key] = value
-  if (key === 'protocol' && !hasPorts(r)) r.dst_ports = ''
+  if (key === 'protocol') {
+    if (!hasPorts(r)) r.dst_ports = ''
+    // Between icmp and icmpv6, the types both have (echo-request) stay.
+    const known = new Set(icmpItems(r.protocol).map((it) => it.value))
+    r.icmp_types = hasIcmp(r) ? (r.icmp_types ?? []).filter((t) => known.has(t)) : []
+  }
   emit('save', r)
 }
 
@@ -500,7 +531,9 @@ function onKeydown(event, index) {
             <th>Destination<span class="col-resize" /></th>
             <th>IP<span class="col-resize" /></th>
             <th>Protocol<span class="col-resize" /></th>
-            <th title="Destination ports">Dst port<span class="col-resize" /></th>
+            <th title="Destination ports, or the ICMP types of icmp and icmpv6 rules">
+              Dst port<span class="col-resize" />
+            </th>
             <th>Action<span class="col-resize" /></th>
             <th title="Log matches">Log<span class="col-resize" /></th>
             <th
@@ -773,7 +806,24 @@ function onKeydown(event, index) {
                   </option>
                 </select>
               </td>
-              <td>
+              <td v-if="hasIcmp(r)">
+                <USelectMenu
+                  :model-value="r.icmp_types ?? []"
+                  multiple
+                  :items="rowIcmpItems(r)"
+                  value-key="value"
+                  :filter-fields="['label', 'description']"
+                  variant="none"
+                  size="xs"
+                  placeholder="any"
+                  data-col="dst_ports"
+                  :title="icmpTitle(r)"
+                  class="icmp-select w-full font-mono"
+                  :ui="{ content: 'min-w-80' }"
+                  @update:model-value="set(r, 'icmp_types', $event)"
+                />
+              </td>
+              <td v-else>
                 <input
                   :value="cellText(r, 'dst_ports', r.dst_ports)"
                   data-col="dst_ports"
@@ -945,6 +995,12 @@ function onKeydown(event, index) {
   text-overflow: ellipsis;
 }
 .rules-grid td > select {
+  cursor: pointer;
+}
+.rules-grid td > .icmp-select {
+  height: 1.75rem;
+  padding-inline: 0.375rem;
+  font-size: inherit;
   cursor: pointer;
 }
 .rules-grid td > input:disabled {

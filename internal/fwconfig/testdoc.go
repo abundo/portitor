@@ -58,7 +58,7 @@ func SampleDocument() Document {
 					{Chain: ChainForward, InInterfaces: []string{"iot"}, OutInterfaces: []string{"wan"}, Protocol: "tcp", DstPorts: "http,https,8883", Action: ActionAccept, Description: "IoT cloud"},
 					{Chain: ChainForward, InInterfaces: []string{"guest"}, OutInterfaces: []string{"eth0"}, Action: ActionAccept},
 					{Chain: ChainForward, InInterfaces: []string{"dmz"}, Action: ActionAccept, Description: "DMZ (no interfaces yet)"},
-					{Chain: ChainInput, InInterfaces: []string{"wan"}, Protocol: "icmp", Action: ActionAccept, Description: "ping"},
+					{Chain: ChainInput, InInterfaces: []string{"wan"}, Protocol: "icmp", ICMPTypes: []string{"echo-request"}, Action: ActionAccept, Description: "ping"},
 					{Chain: ChainInput, InInterfaces: []string{"iot"}, Protocol: "udp", DstPorts: "53,67", Action: ActionAccept},
 					{Chain: ChainForward, InInterfaces: []string{"wan"}, DstAddrs: []string{"192.168.1.0/24"}, Action: ActionDrop, Log: true, Description: `no "direct" access`},
 					{Chain: ChainForward, InInterfaces: []string{"vpn"}, DstAddrs: []string{"192.168.1.10", "fd00:1::10"}, Protocol: "tcp", DstPorts: "22", Action: ActionAccept, Description: "NAS ssh"},

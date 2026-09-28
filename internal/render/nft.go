@@ -519,7 +519,7 @@ func writeRule(b *strings.Builder, idx int, r fwconfig.Rule, in *fwconfig.Instan
 	// One nft rule per IP version when the addresses mix them, and per
 	// address operand (see addrOperands).
 	for _, m := range fwconfig.MatchFamilies(r.Family, r.Protocol, r.SrcAddrs, r.DstAddrs) {
-		for _, match := range matchExprs(m, r.Protocol, r.DstPorts) {
+		for _, match := range matchExprs(m, r.Protocol, r.DstPorts, r.ICMPTypes) {
 			line := append(append(append([]string(nil), parts...), match...), tail...)
 			b.WriteString("\t\t" + strings.Join(line, " ") + "\n")
 		}
@@ -562,21 +562,21 @@ func writeNAT(b *strings.Builder, idx int, n fwconfig.NATRule, in *fwconfig.Inst
 	}
 	tail = append(tail, comment(fmt.Sprintf("nat %d", idx+1), n.Description))
 	for _, m := range fwconfig.MatchFamilies(family, n.Protocol, n.SrcAddrs, n.DstAddrs) {
-		for _, match := range matchExprs(m, n.Protocol, n.DstPorts) {
+		for _, match := range matchExprs(m, n.Protocol, n.DstPorts, nil) {
 			line := append(append(append([]string(nil), parts...), match...), tail...)
 			b.WriteString("\t\t" + strings.Join(line, " ") + "\n")
 		}
 	}
 }
 
-// matchExprs renders family / protocol / address / port matches for one
-// IP version of a rule: one match per combination of source and
-// destination operand.
-func matchExprs(m fwconfig.FamilyMatch, proto string, ports string) [][]string {
+// matchExprs renders family / protocol / address / port (or ICMP type)
+// matches for one IP version of a rule: one match per combination of
+// source and destination operand.
+func matchExprs(m fwconfig.FamilyMatch, proto string, ports string, icmpTypes []string) [][]string {
 	var out [][]string
 	for _, src := range addrOperands(m.Src, m.Family) {
 		for _, dst := range addrOperands(m.Dst, m.Family) {
-			out = append(out, matchExpr(m.Family, src, dst, proto, ports))
+			out = append(out, matchExpr(m.Family, src, dst, proto, ports, icmpTypes))
 		}
 	}
 	return out
@@ -605,7 +605,7 @@ func addrOperands(list []string, family string) []string {
 	return sets
 }
 
-func matchExpr(family, src, dst, proto, ports string) []string {
+func matchExpr(family, src, dst, proto, ports string, icmpTypes []string) []string {
 	var parts []string
 	if src == "" && dst == "" && family != "" {
 		parts = append(parts, "meta nfproto "+family)
@@ -633,9 +633,17 @@ func matchExpr(family, src, dst, proto, ports string) []string {
 			parts = append(parts, "th dport "+portSet(ports))
 		}
 	case "icmp":
-		parts = append(parts, "meta l4proto icmp")
+		if len(icmpTypes) > 0 {
+			parts = append(parts, "icmp type "+nameSet(icmpTypes))
+		} else {
+			parts = append(parts, "meta l4proto icmp")
+		}
 	case "icmpv6":
-		parts = append(parts, "meta l4proto ipv6-icmp")
+		if len(icmpTypes) > 0 {
+			parts = append(parts, "icmpv6 type "+nameSet(icmpTypes))
+		} else {
+			parts = append(parts, "meta l4proto ipv6-icmp")
+		}
 	}
 	return parts
 }
@@ -690,6 +698,14 @@ func portSet(s string) string {
 		return out[0]
 	}
 	return "{ " + strings.Join(out, ", ") + " }"
+}
+
+// nameSet renders validated symbolic constants, such as ICMP types.
+func nameSet(names []string) string {
+	if len(names) == 1 {
+		return names[0]
+	}
+	return "{ " + strings.Join(names, ", ") + " }"
 }
 
 func quotedSet(names []string) string {

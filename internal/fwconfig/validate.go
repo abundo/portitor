@@ -239,7 +239,7 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 		}
 		if r.Kind == RuleKindComment {
 			if len(r.InInterfaces)+len(r.OutInterfaces)+len(r.SrcAddrs)+len(r.DstAddrs) > 0 ||
-				r.Family != "" || r.Protocol != "" || r.DstPorts != "" || r.Action != "" || r.Log || r.ID != 0 {
+				r.Family != "" || r.Protocol != "" || r.DstPorts != "" || len(r.ICMPTypes) > 0 || r.Action != "" || r.Log || r.ID != 0 {
 				v.addf("%s: a comment has only a chain and a description", rp)
 			}
 			checkComment(v, rp, r.Description)
@@ -266,6 +266,15 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 			v.addf("%s: invalid action %q", rp, r.Action)
 		}
 		v.match(rp, r.Family, r.Protocol, r.SrcAddrs, r.DstAddrs, r.DstPorts, true)
+		if len(r.ICMPTypes) > 0 && r.Protocol != "icmp" && r.Protocol != "icmpv6" {
+			v.addf("%s: icmp types need protocol icmp or icmpv6", rp)
+		} else {
+			for _, t := range r.ICMPTypes {
+				if !ValidICMPType(r.Protocol, t) {
+					v.addf("%s: invalid %s type %q", rp, r.Protocol, t)
+				}
+			}
+		}
 		checkComment(v, rp, r.Description)
 	}
 

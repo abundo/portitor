@@ -10,8 +10,11 @@ import { useToast } from '@nuxt/ui/composables'
 import { api as backend, instances, rules } from '@/api'
 import { errMsg } from '@/api/http'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
+import { useObjectStore } from '@/stores/objects'
 
 const { store, ifaceRefItems } = useInstanceRefs()
+const objects = useObjectStore()
+onMounted(() => objects.load().catch(() => {}))
 
 // Input rules for DHCP, DNS and WireGuard come from the services'
 // configuration; they are shown read-only above the input rules.
@@ -129,6 +132,19 @@ const fields = [
     show: (f) => ['tcp', 'udp', 'tcp,udp'].includes(f.protocol),
   },
   {
+    key: 'icmp_types',
+    label: 'ICMP types',
+    type: 'multiselect',
+    items: (f) =>
+      (objects.icmpTypes[f.protocol] ?? []).map((t) => ({
+        label: t.name,
+        value: t.name,
+        description: `${t.type}: ${t.description}`,
+      })),
+    placeholder: 'any',
+    show: (f) => ['icmp', 'icmpv6'].includes(f.protocol),
+  },
+  {
     key: 'src_addrs',
     label: 'Source addresses',
     type: 'addrs',
@@ -206,6 +222,8 @@ function clean(b) {
     ...b,
     family: b.family === 'any' ? '' : b.family,
     protocol: b.protocol === 'any' ? '' : b.protocol,
+    // The form keeps hidden fields; ICMP types only go with icmp/icmpv6.
+    icmp_types: ['icmp', 'icmpv6'].includes(b.protocol) ? b.icmp_types : [],
   }
 }
 </script>
@@ -230,6 +248,7 @@ function clean(b) {
         out_interfaces: [],
         src_addrs: [],
         dst_addrs: [],
+        icmp_types: [],
       }"
       new-label="New rule"
       reorder="rules"

@@ -99,9 +99,26 @@ func TestMatchExprTCPUDP(t *testing.T) {
 		{"", "ip saddr 10.0.0.0/8 meta l4proto { tcp, udp }"},
 		{"53,5353", "ip saddr 10.0.0.0/8 meta l4proto { tcp, udp } th dport { 53, 5353 }"},
 	} {
-		got := strings.Join(matchExpr("ipv4", "10.0.0.0/8", "", "tcp,udp", tc.ports), " ")
+		got := strings.Join(matchExpr("ipv4", "10.0.0.0/8", "", "tcp,udp", tc.ports, nil), " ")
 		if got != tc.want {
 			t.Errorf("ports %q: got %q, want %q", tc.ports, got, tc.want)
+		}
+	}
+}
+
+func TestMatchExprICMPTypes(t *testing.T) {
+	for _, tc := range []struct {
+		family, proto string
+		types         []string
+		want          string
+	}{
+		{"ipv4", "icmp", nil, "meta nfproto ipv4 meta l4proto icmp"},
+		{"ipv4", "icmp", []string{"echo-request"}, "meta nfproto ipv4 icmp type echo-request"},
+		{"ipv6", "icmpv6", []string{"echo-request", "nd-neighbor-solicit"}, "meta nfproto ipv6 icmpv6 type { echo-request, nd-neighbor-solicit }"},
+	} {
+		got := strings.Join(matchExpr(tc.family, "", "", tc.proto, "", tc.types), " ")
+		if got != tc.want {
+			t.Errorf("%s %v: got %q, want %q", tc.proto, tc.types, got, tc.want)
 		}
 	}
 }

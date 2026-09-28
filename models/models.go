@@ -223,10 +223,13 @@ type Rule struct {
 	SrcAddrs      StringList `json:"src_addrs"`
 	DstAddrs      StringList `json:"dst_addrs"`
 	DstPorts      string     `json:"dst_ports"`
-	Action        string     `json:"action"`
-	Log           bool       `json:"log"`
-	Enabled       bool       `json:"enabled"`
-	Description   string     `json:"description"`
+	// IcmpTypes match ICMP or ICMPv6 types by name (protocol icmp or
+	// icmpv6); empty matches any.
+	IcmpTypes   StringList `json:"icmp_types"`
+	Action      string     `json:"action"`
+	Log         bool       `json:"log"`
+	Enabled     bool       `json:"enabled"`
+	Description string     `json:"description"`
 }
 
 // Rule kinds besides a rule ("").

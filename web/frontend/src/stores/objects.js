@@ -6,9 +6,17 @@ import { addressObjects, api, customServices, ipLists } from '@/api'
 
 // Named hosts and prefixes, offered as suggestions in address fields, and
 // IP lists, which rules take as "@name", and the port names port fields
-// accept: the built-in services and the custom ones.
+// accept: the built-in services and the custom ones; and the ICMP and
+// ICMPv6 types rules match ({ icmp: [...], icmpv6: [...] }, fwconfig.ICMPTypes).
 export const useObjectStore = defineStore('objects', {
-  state: () => ({ list: [], ipLists: [], services: [], customServices: [], loaded: false }),
+  state: () => ({
+    list: [],
+    ipLists: [],
+    services: [],
+    customServices: [],
+    icmpTypes: { icmp: [], icmpv6: [] },
+    loaded: false,
+  }),
   getters: {
     names: (s) => s.list.map((o) => o.name),
     listRefs: (s) => s.ipLists.map((l) => `@${l.name}`),
@@ -28,12 +36,14 @@ export const useObjectStore = defineStore('objects', {
   actions: {
     async load(force = false) {
       if (this.loaded && !force) return
-      ;[this.list, this.ipLists, this.services, this.customServices] = await Promise.all([
-        addressObjects.list(),
-        ipLists.list(),
-        api.services(),
-        customServices.list(),
-      ])
+      ;[this.list, this.ipLists, this.services, this.customServices, this.icmpTypes] =
+        await Promise.all([
+          addressObjects.list(),
+          ipLists.list(),
+          api.services(),
+          customServices.list(),
+          api.icmpTypes(),
+        ])
       this.loaded = true
     },
   },

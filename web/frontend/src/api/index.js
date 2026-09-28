@@ -59,6 +59,7 @@ export const api = {
   // Built-in port names that port fields accept ([{ name, port, description }],
   // fwconfig.Services).
   services: () => http.get('/services').then((r) => r.data),
+  icmpTypes: () => http.get('/icmp-types').then((r) => r.data),
   reorder: (kind, ids) => http.post(`/${kind}/reorder`, { ids }),
   wgClientConfig: (peerId, split) =>
     http

@@ -256,6 +256,7 @@ func Build(db *gorm.DB, generation int64) (*fwconfig.Document, error) {
 				SrcAddrs:      expand(where+": source", objs.Expand, r.SrcAddrs),
 				DstAddrs:      expand(where+": destination", objs.Expand, r.DstAddrs),
 				DstPorts:      expandPorts(where+": ports", r.DstPorts),
+				ICMPTypes:     []string(r.IcmpTypes),
 				Action:        r.Action,
 				Log:           r.Log,
 				Description:   r.Description,

@@ -177,9 +177,12 @@ type Rule struct {
 	SrcAddrs      []string `json:"src_addrs,omitempty"`
 	DstAddrs      []string `json:"dst_addrs,omitempty"`
 	DstPorts      string   `json:"dst_ports,omitempty"` // "22", "80,443", "1000-2000"
-	Action        string   `json:"action"`
-	Log           bool     `json:"log,omitempty"`
-	Description   string   `json:"description,omitempty"`
+	// ICMPTypes match ICMP (protocol icmp) or ICMPv6 (icmpv6) message types
+	// by name (ICMPTypes, ICMPv6Types); empty matches any.
+	ICMPTypes   []string `json:"icmp_types,omitempty"`
+	Action      string   `json:"action"`
+	Log         bool     `json:"log,omitempty"`
+	Description string   `json:"description,omitempty"`
 }
 
 // RuleKindComment marks a Rule that is a comment row.

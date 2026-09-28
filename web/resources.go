@@ -371,7 +371,7 @@ func prepareRule(tx *gorm.DB, r, old *models.Rule) error {
 			Base: r.Base, InstanceID: r.InstanceID, Position: r.Position, Chain: r.Chain,
 			Kind: r.Kind, Description: strings.TrimSpace(r.Description), Enabled: true,
 			InInterfaces: models.StringList{}, OutInterfaces: models.StringList{},
-			SrcAddrs: models.StringList{}, DstAddrs: models.StringList{},
+			SrcAddrs: models.StringList{}, DstAddrs: models.StringList{}, IcmpTypes: models.StringList{},
 		}
 		if old == nil && r.Position == 0 {
 			r.Position = nextPosition(tx, "rules", r.InstanceID)
@@ -414,6 +414,15 @@ func prepareRule(tx *gorm.DB, r, old *models.Rule) error {
 		}
 		if err := checkPorts(tx, r.DstPorts); err != nil {
 			return err
+		}
+	}
+	r.IcmpTypes = dedupe(cleanList(r.IcmpTypes))
+	if len(r.IcmpTypes) > 0 && r.Protocol != "icmp" && r.Protocol != "icmpv6" {
+		return bad("icmp types need protocol icmp or icmpv6")
+	}
+	for _, t := range r.IcmpTypes {
+		if !fwconfig.ValidICMPType(r.Protocol, t) {
+			return bad(fmt.Sprintf("unknown %s type %q", r.Protocol, t))
 		}
 	}
 	if old == nil && r.Position == 0 {

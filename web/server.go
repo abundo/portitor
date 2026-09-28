@@ -134,6 +134,9 @@ func (s *Server) Echo() *echo.Echo {
 	g.GET("/ipam/prefixes/:id/next-free", s.handleNextFree)
 	g.GET("/rules/auto", s.handleAutoRules)
 	g.GET("/services", func(c *echo.Context) error { return c.JSON(http.StatusOK, fwconfig.Services) })
+	g.GET("/icmp-types", func(c *echo.Context) error {
+		return c.JSON(http.StatusOK, map[string][]fwconfig.ICMPType{"icmp": fwconfig.ICMPTypes, "icmpv6": fwconfig.ICMPv6Types})
+	})
 	g.POST("/rules/reorder", s.handleReorder("rules"))
 	g.POST("/nat/reorder", s.handleReorder("nat_rules"))
 	g.GET("/wg/peers/:id/config", s.handleWgClientConfig)
