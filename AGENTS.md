@@ -24,7 +24,7 @@ are in [README.md](README.md).
 | `internal/builder` | Database → `fwconfig.Document` (resolves ids, IPAM, DHCP scopes, DNS names) |
 | `internal/ipam` | Prefix tree by CIDR containment, next free address |
 | `internal/netobj` | Named hosts/prefixes (`address_objects`): name checks and expansion |
-| `internal/dbmigrate` | goose migrations (the schema's source of truth) |
+| `internal/dbmigrate` | Opens the SQLite database; goose migrations (the schema's source of truth) |
 | `models` | GORM mapping |
 | `web` | Echo v5 server: auth, generic CRUD (`crud.go`), entry validation (`resources.go`), deploy handlers |
 | `web/frontend` | Vue SPA; `CrudPage.vue` drives most pages from field/column schemas |
@@ -89,8 +89,16 @@ are in [README.md](README.md).
 - **Dual stack:** rule and NAT address lists may mix IPv4 and IPv6;
   `fwconfig.MatchFamilies` decides which versions a rule is rendered for, and
   validation uses the same function.
-- **Schema changes:** a new goose file in `internal/dbmigrate/sql/`, plus the model
-  change. Tests use AutoMigrate on SQLite, so SQL-only constraints are untested there.
+- **Schema changes:** a new goose file in `internal/dbmigrate/sql/` (SQLite), plus
+  the model change. Tests run the real migrations, with foreign keys enforced as in
+  production; a test checks every model field has a column. SQLite's `ALTER TABLE`
+  only adds, drops and renames columns; anything else rebuilds the table (create,
+  copy, drop, rename) in a `-- +goose NO TRANSACTION` migration that turns
+  `foreign_keys` off around it. Ids are `AUTOINCREMENT` so a deleted row's id is
+  never reused (rule ids mark connections).
+- **Database files:** portitor-web refuses to run as root against a database
+  directory owned by another user; root would leave root-owned `-wal`/`-shm` files.
+  Scripts run it as the service user (`runuser -u portitor --`).
 - **Updates from the GUI** (`internal/agent/system.go`): the Debian upgrade and the
   Portitor update run as transient systemd units (`systemd-run`), never as children
   of the agent, because the update restarts the agent. The release tag is checked

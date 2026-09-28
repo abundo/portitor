@@ -191,9 +191,9 @@ func dbError(c *echo.Context, err error) error {
 	}
 	msg := err.Error()
 	switch {
-	case strings.Contains(msg, "duplicate key") || strings.Contains(msg, "UNIQUE constraint"):
+	case strings.Contains(msg, "UNIQUE constraint"):
 		return errJSON(c, http.StatusConflict, "an entry with that name/value already exists")
-	case strings.Contains(msg, "foreign key") || strings.Contains(msg, "FOREIGN KEY"):
+	case strings.Contains(msg, "FOREIGN KEY constraint"):
 		return errJSON(c, http.StatusConflict, "referenced by, or referring to, another entry")
 	}
 	return err

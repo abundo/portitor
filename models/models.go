@@ -22,7 +22,7 @@ type Base struct {
 func (b *Base) GetID() uint   { return b.ID }
 func (b *Base) SetID(id uint) { b.ID = id }
 
-// StringList is stored as a JSON array (jsonb in Postgres).
+// StringList is stored as a JSON array in a TEXT column.
 type StringList []string
 
 func (s StringList) Value() (driver.Value, error) {
@@ -61,7 +61,7 @@ func (s StringList) MarshalJSON() ([]byte, error) {
 	return json.Marshal([]string(s))
 }
 
-func (StringList) GormDataType() string { return "jsonb" }
+func (StringList) GormDataType() string { return "text" }
 
 type User struct {
 	Base
@@ -438,15 +438,15 @@ type Deployment struct {
 	// Status: applied, pending, confirmed, rolled_back, failed.
 	Status   string `json:"status"`
 	Message  string `json:"message"`
-	Document string `gorm:"type:jsonb" json:"-"`
+	Document string `json:"-"`
 	// DocHash is docHash of the unredacted document; empty on rows older
 	// than the column.
 	DocHash string `json:"-"`
 	Log     string `json:"log"`
 }
 
-// All lists every model, for AutoMigrate in tests (production uses the
-// goose migrations).
+// All lists every model; a dbmigrate test checks that the migrated schema
+// has a column for every field.
 func All() []any {
 	return []any{
 		&User{}, &Settings{}, &Instance{}, &InterfaceZone{}, &Interface{}, &WgPeer{}, &Link{},

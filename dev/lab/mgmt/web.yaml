@@ -5,9 +5,4 @@
 bind: 0.0.0.0:8080
 jwt_secret: lab-only-secret-change-me-0123456789abcdef
 db:
-  host: 127.0.0.1
-  port: 5432
-  user: portitor
-  password: portitor-lab
-  name: portitor
-  sslmode: disable
+  path: /var/lib/portitor-web/portitor.db

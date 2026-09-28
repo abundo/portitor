@@ -4,13 +4,14 @@
 package builder
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
+	"github.com/abundo/portitor/internal/dbmigrate"
 	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/internal/wgkeys"
 	"github.com/abundo/portitor/models"
@@ -18,11 +19,11 @@ import (
 
 func testDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{Logger: logger.Discard})
+	db, err := dbmigrate.Open(filepath.Join(t.TempDir(), "db.sqlite"), &gorm.Config{Logger: logger.Discard})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(models.All()...); err != nil {
+	if err := dbmigrate.Up(db); err != nil {
 		t.Fatal(err)
 	}
 	return db
@@ -54,7 +55,8 @@ func TestBuildHome(t *testing.T) {
 	}
 	_, peerPub, _ := wgkeys.Generate()
 	mustCreate(t, db, &models.WgPeer{InterfaceID: wg0.ID, Name: "phone", Enabled: true, PublicKey: peerPub, AllowedIPs: models.StringList{"10.99.0.2/32"}})
-	mustCreate(t, db, &models.WgPeer{InterfaceID: wg0.ID, Name: "old", Enabled: false, PublicKey: peerPub})
+	_, oldPub, _ := wgkeys.Generate()
+	mustCreate(t, db, &models.WgPeer{InterfaceID: wg0.ID, Name: "old", Enabled: false, PublicKey: oldPub})
 
 	mustCreate(t, db, &models.IpamPrefix{InstanceID: main.ID, Prefix: "192.168.0.0/16"})
 	mustCreate(t, db, &models.IpamPrefix{InstanceID: main.ID, Prefix: "192.168.1.0/24", DhcpEnabled: true, DhcpRangeStart: "192.168.1.100", DhcpRangeEnd: "192.168.1.199"})

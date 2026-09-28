@@ -7,7 +7,7 @@
 #
 #   fwlab-fw    portitor-agent as root, not dry-run. eth0 WAN (DHCP from mgmt),
 #               eth1 LAN 192.168.1.1/24, eth2 guest.
-#   fwlab-mgmt  portitor-web + PostgreSQL on lan0 192.168.1.2, GUI published on
+#   fwlab-mgmt  portitor-web on lan0 192.168.1.2, GUI published on
 #               http://127.0.0.1:$LAB_WEB_PORT. Also the ISP: DHCP and NAT on
 #               wan0 198.51.100.1/24.
 #
@@ -94,15 +94,10 @@ cmd_install() {
 	log "installing portitor-web on mgmt"
 	$RT cp build/portitor-web "$PREFIX-mgmt:/usr/bin/portitor-web"
 	$RT cp deploy/systemd/portitor-web.service "$PREFIX-mgmt:/etc/systemd/system/portitor-web.service"
-	ex mgmt sh -c 'until pg_isready -q; do sleep 1; done
-		cd /tmp
-		runuser -u postgres -- psql -tAc "select 1 from pg_roles where rolname = '\''portitor'\''" | grep -q 1 ||
-			runuser -u postgres -- psql -qc "create role portitor login password '\''portitor-lab'\''"
-		runuser -u postgres -- psql -tAc "select 1 from pg_database where datname = '\''portitor'\''" | grep -q 1 ||
-			runuser -u postgres -- createdb -O portitor portitor'
+	ex mgmt install -d -o portitor -g portitor -m 0700 /var/lib/portitor-web
 	ex mgmt runuser -u portitor -- portitor-web migrate
 	openssl rand -hex 16 | $RT exec -i "$PREFIX-mgmt" runuser -u portitor -- portitor-web createadmin admin >/dev/null
-	ex mgmt runuser -u postgres -- psql -d portitor -qc \
+	ex mgmt runuser -u portitor -- sqlite3 /var/lib/portitor-web/portitor.db \
 		"update users set password_hash = '$ADMIN_HASH' where username = 'admin'"
 	ex mgmt systemctl daemon-reload
 	ex mgmt systemctl enable portitor-web.service

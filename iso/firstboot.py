@@ -9,7 +9,7 @@ servers, a password and the time zone, then:
 
   - writes /etc/resolv.conf (the agent does not manage the firewall's own
     resolver; the one from the installation may be unreachable now),
-  - creates the PostgreSQL database and writes /etc/portitor/web.yaml, with a
+  - creates the SQLite database and writes /etc/portitor/web.yaml, with a
     self-signed certificate for the GUI on port 443,
   - creates the GUI user admin, and sets the console user's password,
   - sets the agent up on 127.0.0.1 (portitor-web runs on the firewall itself),
@@ -57,6 +57,11 @@ PUBLIC_DNS = "9.9.9.9 1.1.1.1"
 # The login user the installer created; also the agent's console user.
 CONSOLE_USER = "portitor"
 WEB_GROUP = "portitor"
+# portitor-web's service user; it runs every portitor-web command, so the
+# database files stay writable for the service.
+WEB_USER = "portitor"
+WEB_DB_DIR = Path("/var/lib/portitor-web")
+AGENT_TOKEN = ETC / "agent.token"
 GUI_USER = "admin"
 GUI_PORT = 443
 AGENT_LISTEN = "127.0.0.1:8443"
@@ -79,7 +84,8 @@ def run(argv: list[str], *, stdin: str | None = None, check: bool = True, quiet:
     if out:
         logfile(out)
     if check and proc.returncode != 0:
-        raise RuntimeError(f"{' '.join(argv[:3])} failed ({proc.returncode}):\n{out}")
+        shown = argv[3:] if argv[0] == "runuser" else argv
+        raise RuntimeError(f"{' '.join(shown[:3])} failed ({proc.returncode}):\n{out}")
     if out and not quiet:
         for line in out.splitlines()[-15:]:
             say(f"    {line}")
@@ -245,8 +251,8 @@ def write(path: Path, text: str, mode: int, group: str = "root") -> None:
     tmp.replace(path)
 
 
-def psql(sql: str) -> str:
-    return run(["runuser", "-u", "postgres", "--", "psql", "-v", "ON_ERROR_STOP=1", "-tAq"], stdin=sql, quiet=True).stdout.strip()
+def web(*args: str) -> list[str]:
+    return ["runuser", "-u", WEB_USER, "--", "portitor-web", "-f", str(WEB_YAML), *args]
 
 
 def step_links(a: dict) -> None:
@@ -268,16 +274,7 @@ def step_timezone(a: dict) -> None:
 
 
 def step_database(a: dict) -> None:
-    run(["systemctl", "start", "postgresql"])
-    for _ in range(30):
-        if run(["pg_isready", "-q"], check=False, quiet=True).returncode == 0:
-            break
-        time.sleep(1)
-    a["db_password"] = secrets.token_urlsafe(24)  # [A-Za-z0-9_-]: safe inside quotes
-    verb = "ALTER" if psql("SELECT 1 FROM pg_roles WHERE rolname = 'portitor'") == "1" else "CREATE"
-    psql(f"{verb} ROLE portitor LOGIN PASSWORD '{a['db_password']}'")
-    if psql("SELECT 1 FROM pg_database WHERE datname = 'portitor'") != "1":
-        psql("CREATE DATABASE portitor OWNER portitor")
+    run(["install", "-d", "-o", WEB_USER, "-g", WEB_GROUP, "-m", "0700", str(WEB_DB_DIR)])
 
 
 def step_web_config(a: dict) -> None:
@@ -299,12 +296,7 @@ tls_key: {WEB_KEY}
 jwt_secret: "{secrets.token_urlsafe(32)}"
 
 db:
-  host: 127.0.0.1
-  port: 5432
-  user: portitor
-  password: "{a['db_password']}"
-  name: portitor
-  sslmode: prefer
+  path: {WEB_DB_DIR}/portitor.db
 """, 0o640, WEB_GROUP)
     # Port 443 as the unprivileged service user.
     write(WEB_DROPIN, """[Service]
@@ -312,11 +304,11 @@ AmbientCapabilities=CAP_NET_BIND_SERVICE
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 """, 0o644)
     run(["systemctl", "daemon-reload"])
-    run(["portitor-web", "-f", str(WEB_YAML), "migrate"])
+    run(web("migrate"))
 
 
 def step_users(a: dict) -> None:
-    run(["portitor-web", "-f", str(WEB_YAML), "createadmin", GUI_USER], stdin=a["password"] + "\n")
+    run(web("createadmin", GUI_USER), stdin=a["password"] + "\n")
     run(["chpasswd"], stdin=f"{CONSOLE_USER}:{a['password']}\n", quiet=True)
 
 
@@ -341,15 +333,17 @@ console_user: {CONSOLE_USER}
 
 
 def step_bootstrap(a: dict) -> None:
-    argv = [
-        "portitor-web", "-f", str(WEB_YAML), "bootstrap",
+    # The token file is root's; the web user reads it from stdin.
+    argv = web(
+        "bootstrap",
         "--agent-url", f"https://{AGENT_LISTEN}",
+        "--agent-token-file", "/dev/stdin",
         "--agent-fingerprint", a["fingerprint"],
         "--lan", a["lan"], "--address", str(a["address"]), "--gui-port", str(GUI_PORT),
-    ]
+    )
     if a["gateway"]:
         argv += ["--gateway", str(a["gateway"])]
-    proc = run(argv, check=False)
+    proc = run(argv, stdin=AGENT_TOKEN.read_text(encoding="utf-8"), check=False)
     if proc.returncode != 0 and "deployed already" not in proc.stdout + proc.stderr:
         raise RuntimeError("portitor-web bootstrap failed (see above)")
 

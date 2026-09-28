@@ -6,9 +6,4 @@ bind: 127.0.0.1:8080
 dev: true
 jwt_secret: dev-only-secret-change-me-0123456789abcdef
 db:
-  host: 127.0.0.1
-  port: 55432
-  user: portitor
-  password: portitor-dev
-  name: portitor
-  sslmode: disable
+  path: dev/run/portitor.db

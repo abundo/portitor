@@ -3,7 +3,7 @@
 
 [Unit]
 Description=Portitor management GUI
-After=network-online.target postgresql.service
+After=network-online.target
 Wants=network-online.target
 
 [Service]
@@ -18,6 +18,9 @@ ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
 PrivateDevices=yes
+# The SQLite database (db.path in web.yaml).
+StateDirectory=portitor-web
+StateDirectoryMode=0700
 
 [Install]
 WantedBy=multi-user.target

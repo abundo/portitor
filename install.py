@@ -13,7 +13,8 @@ An update stops portitor-web, runs `portitor-web migrate` and restarts it,
 and restarts portitor-agent (its per-instance units follow). The agent is
 updated first: it rejects document fields it does not know, so it must never
 be older than portitor-web. On a first install, when a config was just
-created, nothing is started; the installer prints the remaining steps.
+created, the database is created but nothing is started; the installer
+prints the remaining steps.
 
 What gets installed:
   (default)       whatever is installed on this host. When that includes
@@ -91,6 +92,10 @@ WEB_CONFIG = f"{ETC_DIR}/web.yaml"
 AGENT_CONFIG = f"{ETC_DIR}/agent.yaml"
 SYSTEMD_DIR = "/etc/systemd/system"
 WEB_USER = "portitor"
+# The SQLite database's directory (db.path in web.yaml, and the unit's
+# StateDirectory). portitor-web touches the database only as WEB_USER, so
+# the files SQLite creates stay writable for the service.
+WEB_DB_DIR = "/var/lib/portitor-web"
 SSH_USER_DEFAULT = "portitor"
 WEB_UNIT = "portitor-web.service"
 AGENT_UNIT = "portitor-agent.service"
@@ -501,23 +506,21 @@ def install_web(host: Host, binary: Path, deploy: Path, version: str, assume_yes
         example = (deploy / "web.yaml").read_text(encoding="utf-8")
         secret = secrets.token_urlsafe(32)
         text = example.replace("jwt_secret: CHANGE-ME", f'jwt_secret: "{secret}"')
-        # The service runs as portitor; the file holds the database password.
+        # The service runs as portitor; the file holds the JWT secret.
         host.put_text(text, WEB_CONFIG, "0640", group=WEB_USER)
+    host.run(f"install -d -o {WEB_USER} -g {WEB_USER} -m 0700 {WEB_DB_DIR}")
     # Migrations must not run under a serving GUI. The unit is missing on a
     # first install, hence no check.
     host.run(f"systemctl stop {WEB_UNIT} 2>/dev/null || true", desc=f"systemctl stop {WEB_UNIT}")
     host.put(binary, WEB_BIN, "0755")
     action = install_unit(host, deploy / "systemd" / WEB_UNIT, assume_yes)
     host.systemctl("daemon-reload")
+    host.run(f"runuser -u {WEB_USER} -- {WEB_BIN} -f {WEB_CONFIG} migrate", desc="portitor-web migrate")
     if new_config:
         log("==> portitor-web is installed but not started. Next steps:")
-        log("    create a PostgreSQL role and database for portitor")
-        log(f"    $EDITOR {WEB_CONFIG}      # db settings (jwt_secret is generated)")
-        log("    portitor-web migrate")
-        log("    portitor-web createadmin admin")
+        log(f"    sudo -u {WEB_USER} portitor-web createadmin admin")
         log(f"    systemctl enable --now {WEB_UNIT}")
         return
-    host.run(f"{WEB_BIN} -f {WEB_CONFIG} migrate", desc="portitor-web migrate")
     if action == "installed":
         host.systemctl("enable", WEB_UNIT)
     host.systemctl("restart", WEB_UNIT)
@@ -546,7 +549,8 @@ def agent_host_from_settings() -> str | None:
     """Host part of the agent URL in the installed portitor-web's settings."""
     if not (Path(WEB_BIN).exists() and Path(WEB_CONFIG).exists()):
         return None
-    cmd = (["sudo"] if need_sudo() else []) + [WEB_BIN, "-f", WEB_CONFIG, "agent-url"]
+    as_web = ["sudo", "-u", WEB_USER] if need_sudo() else ["runuser", "-u", WEB_USER, "--"]
+    cmd = as_web + [WEB_BIN, "-f", WEB_CONFIG, "agent-url"]
     proc = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=30)
     if proc.returncode != 0:
         raise InstallError(

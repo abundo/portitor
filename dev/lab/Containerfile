@@ -24,10 +24,10 @@ COPY fw/agent.yaml /etc/portitor/agent.yaml
 COPY fw/portitor-lab-net.service /etc/systemd/system/
 RUN chmod 0600 /etc/portitor/agent.yaml && systemctl enable portitor-lab-net.service
 
-# Management host (portitor-web + PostgreSQL), also playing the ISP for the
+# Management host (portitor-web), also playing the ISP for the
 # firewall's WAN: DHCP server and NAT to the outside.
 FROM base AS mgmt
-RUN apt-get update && apt-get install -y --no-install-recommends postgresql dnsmasq \
+RUN apt-get update && apt-get install -y --no-install-recommends sqlite3 dnsmasq \
 	&& rm -rf /var/lib/apt/lists/* \
 	&& useradd --system --no-create-home --shell /usr/sbin/nologin portitor
 COPY mgmt/web.yaml /etc/portitor/web.yaml
@@ -35,4 +35,4 @@ COPY mgmt/dnsmasq.conf /etc/dnsmasq.d/lab.conf
 COPY mgmt/nftables.conf /etc/nftables.conf
 COPY mgmt/portitor-lab-net.service /etc/systemd/system/
 RUN chown root:portitor /etc/portitor/web.yaml && chmod 0640 /etc/portitor/web.yaml \
-	&& systemctl enable portitor-lab-net.service nftables.service dnsmasq.service postgresql.service
+	&& systemctl enable portitor-lab-net.service nftables.service dnsmasq.service

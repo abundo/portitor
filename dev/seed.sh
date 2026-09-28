@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 # Seed a dev database with a typical home setup through the API, and point
-# portitor-web at the dev agent. Run after `make dev-db dev-agent dev-web`.
+# portitor-web at the dev agent. Run after `make dev-agent dev-web`.
 #
 #   dev/seed.sh [url] [user] [password]
 #

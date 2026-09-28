@@ -4,7 +4,7 @@
 # portitor-web
 
 portitor-web is the management GUI and REST API. It keeps the configuration in
-PostgreSQL and pushes it to portitor-agent on the firewall. Run it on another host, not
+an SQLite database and pushes it to portitor-agent on the firewall. Run it on another host, not
 on the firewall itself. Installing it is covered in the [README](../README.md#install).
 The [installer ISO](appliance.md) is the exception: it puts portitor-web on the
 firewall, for a single-box setup.
@@ -18,10 +18,7 @@ firewall, for a single-box setup.
 | `bind` | `127.0.0.1:8080` | Listen address. `start --bind` overrides it. |
 | `jwt_secret` | | Signs session cookies. At least 32 characters: `openssl rand -base64 32`. |
 | `tls_cert`, `tls_key` | | Serve HTTPS directly. Set both or neither. |
-| `db.host`, `db.port` | `5432` | PostgreSQL. |
-| `db.user`, `db.password` | | |
-| `db.name` | `portitor` | |
-| `db.sslmode` | `prefer` | As in libpq. |
+| `db.path` | `/var/lib/portitor-web/portitor.db` | SQLite database. Its directory must be writable by the service user (`-wal` and `-shm` files go next to it). |
 | `dev` | `false` | Serves the frontend from disk and drops the cookie's Secure flag. Development only. |
 
 Without `tls_cert`, keep `bind` on localhost and put a TLS reverse proxy in front. The
@@ -31,6 +28,7 @@ must pass WebSocket upgrades for the console.
 ## Commands
 
 ```sh
+# as the service user (sudo -u portitor ...); as root it refuses
 portitor-web start                 # serve the GUI and API
 portitor-web migrate               # apply database migrations; start never migrates
 portitor-web createadmin <user>    # create a user, or reset a user's password

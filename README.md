@@ -23,7 +23,7 @@ ip prefix/addresses are handled by a hierarchical tree
 ## How it fits together
 
 ```
- browser ──► portitor-web (Vue GUI + REST API, PostgreSQL)      runs anywhere but the firewall
+ browser ──► portitor-web (Vue GUI + REST API, SQLite)          runs anywhere but the firewall
                   │  HTTPS, bearer token, pinned certificate
                   ▼
              portitor-agent (root daemon)                         runs on the firewall
@@ -38,7 +38,7 @@ ip prefix/addresses are handled by a hierarchical tree
                   └─ Kea DHCPv6, radvd   IPv6 addresses and router advertisements, per instance
 ```
 
-- **portitor-web** holds the configuration in PostgreSQL. On *Deploy* it builds a
+- **portitor-web** holds the configuration in an SQLite database. On *Deploy* it builds a
   complete desired-state document (`internal/fwconfig`) and sends it to the agent.
 - **portitor-agent** validates the document again, renders every config file
   (`internal/render`) and makes the system match. It never reads the web database.
@@ -161,15 +161,19 @@ has not seen before to the default instance, as they are configured at that mome
 are. An interface you delete is not added again. Physical interfaces in the
 configuration that the firewall does not have are shown as a warning.
 
-On the **management host**, with PostgreSQL:
+On the **management host**, with a system user `portitor`:
 
 ```sh
 make install-web                            # embedded frontend
-$EDITOR /etc/portitor/web.yaml              # database, jwt_secret
-portitor-web migrate
-portitor-web createadmin admin
+$EDITOR /etc/portitor/web.yaml              # jwt_secret
+install -d -o portitor -g portitor -m 0700 /var/lib/portitor-web
+sudo -u portitor portitor-web migrate
+sudo -u portitor portitor-web createadmin admin
 systemctl enable --now portitor-web
 ```
+
+Run portitor-web commands as `portitor`, so the database files SQLite creates stay
+writable for the service; as root it refuses.
 
 Then open the GUI. Enter the agent URL, token and fingerprint under *Settings*,
 configure the default instance `main` (created on first start), and deploy.

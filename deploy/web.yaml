@@ -12,10 +12,6 @@ bind: 127.0.0.1:8080
 #   openssl rand -base64 32
 jwt_secret: CHANGE-ME
 
+# SQLite database file. The unit's StateDirectory creates its directory.
 db:
-  host: 127.0.0.1
-  port: 5432
-  user: portitor
-  password: CHANGE-ME
-  name: portitor
-  sslmode: prefer
+  path: /var/lib/portitor-web/portitor.db

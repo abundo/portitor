@@ -1,9 +1,10 @@
 // SPDX-FileCopyrightText: 2026 The Portitor contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// Package dbmigrate applies the versioned Postgres schema (goose SQL under
-// sql/). This is the schema's source of truth; the GORM models only map it.
-// Run with `portitor-web migrate`; `start` never migrates.
+// Package dbmigrate opens portitor-web's SQLite database and applies the
+// versioned schema (goose SQL under sql/). This is the schema's source of
+// truth; the GORM models only map it. Run with `portitor-web migrate`;
+// `start` never migrates.
 package dbmigrate
 
 import (
@@ -12,13 +13,29 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"net/url"
 
+	"github.com/glebarez/sqlite"
 	"github.com/pressly/goose/v3"
 	"gorm.io/gorm"
 )
 
 //go:embed sql/*.sql
 var migrationFS embed.FS
+
+// Open opens the database file at path. Every connection enforces foreign
+// keys (the schema's ON DELETE actions depend on it), waits for a lock
+// instead of failing, and takes the write lock when a transaction begins,
+// so two transactions that read and then write cannot deadlock.
+func Open(path string, cfg *gorm.Config) (*gorm.DB, error) {
+	q := url.Values{}
+	q.Add("_pragma", "foreign_keys(1)")
+	q.Add("_pragma", "journal_mode(WAL)")
+	q.Add("_pragma", "synchronous(NORMAL)")
+	q.Add("_pragma", "busy_timeout(10000)")
+	q.Set("_txlock", "immediate")
+	return gorm.Open(sqlite.Open("file:"+path+"?"+q.Encode()), cfg)
+}
 
 func Up(db *gorm.DB) error {
 	sqlDB, err := db.DB()
@@ -29,7 +46,7 @@ func Up(db *gorm.DB) error {
 	if err != nil {
 		return err
 	}
-	provider, err := goose.NewProvider(goose.DialectPostgres, sqlDB, fsys)
+	provider, err := goose.NewProvider(goose.DialectSQLite3, sqlDB, fsys)
 	if err != nil {
 		return err
 	}

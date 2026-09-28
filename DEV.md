@@ -7,7 +7,6 @@ binary (release build, `-tags release`).
 
 - Go 1.27+ (go.mod declares 1.26, so 1.26 toolchains build it too)
 - Node.js 22.18+ or 24.12+
-- PostgreSQL (app data, via GORM)
 
 Schema migrations are a dedicated command: `portitor-web migrate`. `start` never
 migrates.
@@ -24,12 +23,11 @@ Vue 3, Vite, Vue Router, Pinia, Nuxt UI, Axios, Tailwind CSS 4. Linting via `oxl
 
 ### Development setup
 
-Everything runs on your workstation: a throwaway Postgres container, the agent in
+Everything runs on your workstation: the agent in
 **dry-run** mode (renders files and logs the commands it would run, changes
 nothing), and the web GUI in dev mode.
 
 ```sh
-make dev-db            # postgres:18 in podman/docker on 127.0.0.1:55432
 make dev-agent         # terminal 1: dry-run agent on https://127.0.0.1:8443
 make dev-web           # terminal 2: migrate, then GUI/API on http://127.0.0.1:8080
 make dev-seed          # admin / dev-password-123, a sample home network, agent settings
@@ -37,8 +35,8 @@ cd web/frontend && npm install && npm run dev   # optional: Vite with hot reload
 ```
 
 `dev/agent.yaml` and `dev/web.yaml` are the dev configs; runtime files (token,
-certificate, rendered configs, agent state, logs) go to `dev/run/`. `make dev-db-rm`
-removes the database container.
+certificate, rendered configs, agent state, logs, the SQLite database
+`portitor.db`) go to `dev/run/`. Delete `dev/run/portitor.db*` for an empty database.
 
 Render a document without an agent: `portitor-agent render --sample`, or
 `portitor-agent render doc.json`.
@@ -79,7 +77,7 @@ the release build in them, the way README's *Install* does on real machines:
 
 - **fwlab-fw** runs `portitor-agent` as root and applies for real: nftables, the
   `fw-guest` namespace, VLAN, WireGuard, veth link, BIND and Kea.
-- **fwlab-mgmt** runs `portitor-web` and PostgreSQL, reaches the agent over the LAN,
+- **fwlab-mgmt** runs `portitor-web`, reaches the agent over the LAN,
   and plays the ISP on the firewall's WAN (DHCP and NAT to the outside).
 
 ```sh

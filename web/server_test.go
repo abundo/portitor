@@ -16,13 +16,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/glebarez/sqlite"
 	"github.com/labstack/echo/v5"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
 	"github.com/abundo/portitor/internal/agent"
 	"github.com/abundo/portitor/internal/builder"
+	"github.com/abundo/portitor/internal/dbmigrate"
 	"github.com/abundo/portitor/internal/render"
 	"github.com/abundo/portitor/models"
 )
@@ -36,11 +36,11 @@ type testEnv struct {
 
 func newEnv(t *testing.T) *testEnv {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "db.sqlite")), &gorm.Config{Logger: logger.Discard})
+	db, err := dbmigrate.Open(filepath.Join(t.TempDir(), "db.sqlite"), &gorm.Config{Logger: logger.Discard})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(models.All()...); err != nil {
+	if err := dbmigrate.Up(db); err != nil {
 		t.Fatal(err)
 	}
 	cfg := &Config{JWTSecret: strings.Repeat("s", 32), Dev: true}
