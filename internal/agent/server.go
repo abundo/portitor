@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"strconv"
 	"time"
 
 	"github.com/abundo/portitor/internal/agentapi"
@@ -32,6 +33,10 @@ func (a *Agent) Handler() http.Handler {
 	})
 	mux.HandleFunc("GET /v1/leases", func(w http.ResponseWriter, r *http.Request) {
 		writeJSONResponse(w, http.StatusOK, agentapi.LeasesResponse{Client: a.dhcp.Leases(), Server: a.ServerLeases()})
+	})
+	mux.HandleFunc("GET /v1/logs", func(w http.ResponseWriter, r *http.Request) {
+		after, _ := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
+		writeJSONResponse(w, http.StatusOK, agentapi.LogsResponse{Entries: Logs.After(after)})
 	})
 	mux.HandleFunc("POST /v1/render", func(w http.ResponseWriter, r *http.Request) {
 		var req agentapi.RenderRequest

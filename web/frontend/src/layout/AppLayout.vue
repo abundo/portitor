@@ -8,14 +8,17 @@ import { watch } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import AppMenu from './AppMenu.vue'
 import AppTopbar from './AppTopbar.vue'
+import AppLogPanel from './AppLogPanel.vue'
 import ChangesBanner from '@/components/ChangesBanner.vue'
 import ConfirmBanner from '@/components/ConfirmBanner.vue'
 import { useInstanceStore } from '@/stores/instances'
 import { useDeployStore } from '@/stores/deploy'
+import { useLogPanel } from '@/composables/useLogPanel'
 
 const instances = useInstanceStore()
 const deploy = useDeployStore()
 const mobileMenu = ref(false)
+const { state: logPanel } = useLogPanel()
 const route = useRoute()
 const toast = useToast()
 
@@ -61,6 +64,7 @@ onMounted(() => {
         <router-view :key="instances.currentId ?? 0" />
       </main>
     </div>
+    <AppLogPanel v-if="logPanel.open" />
   </div>
   <USlideover v-model:open="mobileMenu" side="left" title="Menu">
     <template #body>

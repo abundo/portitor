@@ -73,4 +73,5 @@ export const api = {
   deployments: () => http.get('/deployments').then((r) => r.data),
   agentStatus: () => http.get('/agent/status').then((r) => r.data),
   agentLeases: () => http.get('/agent/leases').then((r) => r.data),
+  agentLogs: (after) => http.get('/agent/logs', { params: { after } }).then((r) => r.data),
 }

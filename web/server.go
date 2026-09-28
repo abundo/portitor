@@ -30,6 +30,7 @@ import (
 type agentAPI interface {
 	Status(ctx context.Context) (*agentapi.Status, error)
 	Leases(ctx context.Context) (*agentapi.LeasesResponse, error)
+	Logs(ctx context.Context, after int64) (*agentapi.LogsResponse, error)
 	Render(ctx context.Context, doc fwconfig.Document) (*agentapi.RenderResult, error)
 	Apply(ctx context.Context, doc fwconfig.Document, confirmTimeout int) (*agentapi.ApplyResult, error)
 	Confirm(ctx context.Context, generation int64) error
@@ -133,6 +134,7 @@ func (s *Server) Echo() *echo.Echo {
 	g.GET("/deployments", s.handleDeployments)
 	g.GET("/agent/status", s.handleAgentStatus)
 	g.GET("/agent/leases", s.handleAgentLeases)
+	g.GET("/agent/logs", s.handleAgentLogs)
 
 	api.Any("/*", func(c *echo.Context) error { return errJSON(c, http.StatusNotFound, "no such API endpoint") })
 

@@ -599,6 +599,21 @@ func (s *Server) handleAgentLeases(c *echo.Context) error {
 	return c.JSON(http.StatusOK, l)
 }
 
+// handleAgentLogs passes on the agent's log records after ?after=<id>,
+// for the log panel.
+func (s *Server) handleAgentLogs(c *echo.Context) error {
+	after, _ := strconv.ParseInt(c.QueryParam("after"), 10, 64)
+	a, _, err := s.agent()
+	if err != nil {
+		return agentError(c, err)
+	}
+	l, err := a.Logs(c.Request().Context(), after)
+	if err != nil {
+		return agentError(c, err)
+	}
+	return c.JSON(http.StatusOK, l)
+}
+
 // redactDoc strips key material before a document is stored in the
 // deployment history.
 func redactDoc(doc fwconfig.Document) fwconfig.Document {

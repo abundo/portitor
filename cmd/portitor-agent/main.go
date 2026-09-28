@@ -140,5 +140,5 @@ func setupLog(level string) {
 	if err := l.UnmarshalText([]byte(level)); err != nil {
 		l = slog.LevelInfo
 	}
-	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: l})))
+	slog.SetDefault(slog.New(agent.Logs.Handler(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: l}))))
 }

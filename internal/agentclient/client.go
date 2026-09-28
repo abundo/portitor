@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -135,6 +136,12 @@ func (c *Client) Status(ctx context.Context) (*agentapi.Status, error) {
 func (c *Client) Leases(ctx context.Context) (*agentapi.LeasesResponse, error) {
 	var l agentapi.LeasesResponse
 	return &l, c.do(ctx, http.MethodGet, "/v1/leases", nil, &l)
+}
+
+// Logs returns the agent's log records with an id above after.
+func (c *Client) Logs(ctx context.Context, after int64) (*agentapi.LogsResponse, error) {
+	var l agentapi.LogsResponse
+	return &l, c.do(ctx, http.MethodGet, "/v1/logs?after="+strconv.FormatInt(after, 10), nil, &l)
 }
 
 func (c *Client) Render(ctx context.Context, doc fwconfig.Document) (*agentapi.RenderResult, error) {

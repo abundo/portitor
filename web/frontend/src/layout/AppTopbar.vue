@@ -7,6 +7,7 @@ import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useInstanceStore } from '@/stores/instances'
 import { useDeployStore } from '@/stores/deploy'
+import { useLogPanel } from '@/composables/useLogPanel'
 
 defineEmits(['toggle-menu'])
 
@@ -14,6 +15,7 @@ const auth = useAuthStore()
 const instances = useInstanceStore()
 const deploy = useDeployStore()
 const router = useRouter()
+const { state: logPanel, toggle: toggleLog } = useLogPanel()
 
 const current = computed({
   get: () => instances.currentId ?? undefined,
@@ -54,6 +56,15 @@ const userMenu = computed(() => [
 
 <template>
   <header class="flex h-14 shrink-0 items-center gap-3 border-b border-default px-3 md:px-4">
+    <UTooltip :text="logPanel.open ? 'Hide agent log' : 'Show agent log'">
+      <UButton
+        icon="i-lucide-terminal"
+        color="neutral"
+        :variant="logPanel.open ? 'soft' : 'ghost'"
+        aria-label="Agent log"
+        @click="toggleLog"
+      />
+    </UTooltip>
     <UButton
       class="lg:hidden"
       icon="i-lucide-menu"

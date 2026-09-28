@@ -166,3 +166,18 @@ type ApplyResult struct {
 	RolledBack     bool       `json:"rolled_back,omitempty"`
 	RollbackErrors string     `json:"rollback_error,omitempty"`
 }
+
+// LogEntry is one record of the agent's log. Ids increase across agent
+// restarts (they start at the start time in microseconds).
+type LogEntry struct {
+	ID      int64             `json:"id"`
+	Time    time.Time         `json:"time"`
+	Level   string            `json:"level"`
+	Message string            `json:"message"`
+	Attrs   map[string]string `json:"attrs,omitempty"`
+}
+
+// LogsResponse holds the log entries after the id asked for.
+type LogsResponse struct {
+	Entries []LogEntry `json:"entries"`
+}
