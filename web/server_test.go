@@ -537,6 +537,57 @@ func TestAddressObjects(t *testing.T) {
 	}
 }
 
+func TestCustomServices(t *testing.T) {
+	env := newEnv(t)
+	inst := env.create("/api/instances", map[string]any{"name": "main"})
+	svc := env.create("/api/custom-services", map[string]any{"name": " UniFi ", "ports": "8080,8443 ", "description": "controller"})
+	env.create("/api/custom-services", map[string]any{"name": "games", "ports": "27000-27050"})
+
+	var s models.Service
+	env.srv.db.First(&s, svc)
+	if s.Name != "unifi" || s.Ports != "8080, 8443" {
+		t.Errorf("not normalised: %q %q", s.Name, s.Ports)
+	}
+	for _, body := range []map[string]any{
+		{"name": "ssh", "ports": "2222"},
+		{"name": "1x", "ports": "1"},
+		{"name": "empty", "ports": ""},
+		{"name": "nested", "ports": "unifi"},
+		{"name": "badrange", "ports": "9000-8000"},
+	} {
+		if rec := env.do("POST", "/api/custom-services", body); rec.Code != http.StatusBadRequest {
+			t.Errorf("%v: %d %s", body, rec.Code, rec.Body)
+		}
+	}
+
+	rule := env.create("/api/rules", map[string]any{"instance_id": inst, "chain": "forward", "action": "accept", "enabled": true, "protocol": "tcp", "dst_ports": "ssh, unifi"})
+	nat := env.create("/api/nat", map[string]any{"instance_id": inst, "kind": "dnat", "enabled": true, "protocol": "tcp", "dst_ports": "unifi", "to_addr": "192.168.1.10"})
+	if rec := env.do("POST", "/api/rules", map[string]any{"instance_id": inst, "chain": "forward", "action": "accept", "protocol": "tcp", "dst_ports": "ghost"}); rec.Code != http.StatusBadRequest {
+		t.Errorf("unknown service accepted: %d %s", rec.Code, rec.Body)
+	}
+
+	doc, _ := builder.Build(env.srv.db, 1)
+	in := doc.Instances[0]
+	if last := in.Rules[len(in.Rules)-1]; last.DstPorts != "ssh, 8080, 8443" || len(in.NAT) != 1 || in.NAT[0].DstPorts != "8080, 8443" {
+		t.Errorf("not expanded: %+v %+v", in.Rules, in.NAT)
+	}
+
+	// In use: delete refused. Renamed: references follow.
+	if rec := env.do("DELETE", fmt.Sprintf("/api/custom-services/%d", svc), nil); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "used by") {
+		t.Errorf("delete in use: %d %s", rec.Code, rec.Body)
+	}
+	if rec := env.do("PUT", fmt.Sprintf("/api/custom-services/%d", svc), map[string]any{"name": "controller"}); rec.Code != http.StatusOK {
+		t.Fatalf("rename: %d %s", rec.Code, rec.Body)
+	}
+	var r models.Rule
+	env.srv.db.First(&r, rule)
+	var n models.NatRule
+	env.srv.db.First(&n, nat)
+	if r.DstPorts != "ssh, controller" || n.DstPorts != "controller" {
+		t.Errorf("references not renamed: %q %q", r.DstPorts, n.DstPorts)
+	}
+}
+
 func TestIpv6PrefixChecks(t *testing.T) {
 	env := newEnv(t)
 	inst := env.create("/api/instances", map[string]any{"name": "main"})

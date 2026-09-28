@@ -83,6 +83,12 @@ are in [README.md](README.md).
   stored by name, so renaming an object rewrites them (`web/objects.go`) and deleting
   one in use is refused. A new address field that should accept names must be added
   to `eachObjectRef` and expanded in the builder.
+- **Custom services never reach the agent either.** Port lists take numbers,
+  ranges and service names: the built-in `fwconfig.Services`, which the agent
+  resolves, and custom services (`services` table), which `builder.Build`
+  expands (`netobj.Services`). A custom name can't be a built-in one, and its
+  ports can't name another custom service. Renaming one rewrites the rule and
+  NAT port lists (`web/services.go`); deleting one in use is refused.
 - **IP lists reach the agent as references.** A filter rule's address list may hold
   `@name` (not NAT, not other address fields): it matches either IP version and
   renders as the list's `name_v4`/`name_v6` set. One nft match takes one operand, so a

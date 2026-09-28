@@ -92,6 +92,7 @@ After an upgrade, run `migrate` before `start`. `install.py` does both.
 | | Hosts & prefixes | Named addresses, usable wherever addresses are entered. |
 | Firewall | Interface zones | Named groups of interfaces for rules and NAT. |
 | | Rules | Input, forward and output rules, with per-rule traffic counters and counts of what each chain drops by default (invalid packets, no rule matched); every row, the locked ones included, can log to the log panel's *Logged packets*. |
+| | Services | Named ports for the destination ports of rules and NAT: your own (one port, a range or several) and the built-in names such as `ssh` or `https`. The menu of a port field can create one too. |
 | | NAT & port forwards | Masquerade, SNAT and DNAT. |
 | | IP lists | Downloaded address lists (CrowdSec, blocklists), used as `@name` in rules. See [Blocking with CrowdSec](crowdsec.md). |
 | Services | DNS zones | Zones and records served by the instance's BIND. |

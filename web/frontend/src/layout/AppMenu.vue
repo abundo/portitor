@@ -24,6 +24,7 @@ const items = computed(() => [
     { label: 'Firewall', type: 'label' },
     { label: 'Interface zones', icon: 'i-lucide-layers', to: '/firewall/zones' },
     { label: 'Rules', icon: 'i-lucide-shield-check', to: '/firewall/rules' },
+    { label: 'Services', icon: 'i-lucide-plug', to: '/firewall/services' },
     { label: 'NAT & port forwards', icon: 'i-lucide-arrow-right-left', to: '/firewall/nat' },
     { label: 'IP lists', icon: 'i-lucide-list-x', to: '/firewall/ip-lists' },
   ],

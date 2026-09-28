@@ -403,8 +403,8 @@ func prepareRule(tx *gorm.DB, r, old *models.Rule) error {
 		if r.Protocol != "tcp" && r.Protocol != "udp" {
 			return bad("ports need protocol tcp or udp")
 		}
-		if _, err := fwconfig.ParsePorts(r.DstPorts); err != nil {
-			return bad(err.Error())
+		if err := checkPorts(tx, r.DstPorts); err != nil {
+			return err
 		}
 	}
 	if old == nil && r.Position == 0 {
@@ -450,12 +450,13 @@ func prepareNat(tx *gorm.DB, n, old *models.NatRule) error {
 	} else if err := checkHost(tx, "target address", n.ToAddr); err != nil {
 		return err
 	}
+	n.DstPorts = strings.TrimSpace(n.DstPorts)
 	if n.DstPorts != "" {
 		if n.Protocol == "" {
 			return bad("ports need protocol tcp or udp")
 		}
-		if _, err := fwconfig.ParsePorts(n.DstPorts); err != nil {
-			return bad(err.Error())
+		if err := checkPorts(tx, n.DstPorts); err != nil {
+			return err
 		}
 	}
 	if n.ToPort != 0 && n.Protocol == "" {

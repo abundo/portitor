@@ -12,7 +12,8 @@
 // { label, value, description } to show a description under each name).
 // addrs/addr: address list / single address; names of hosts/prefixes are
 // suggested and accepted, and with `lists: true` IP lists ("@name").
-// ports: a port list, with service names and their ports suggested.
+// ports: a port list, with service names and their ports suggested, and a
+// menu entry that creates a custom service.
 // Column: { key, label, format: (row, rows) => string, class }
 // Cells can be overridden with a `cell-<key>` slot, or the whole table with
 // the `table` slot ({ rows, openCreate, openEdit, remove, moveTo, saveRow,
@@ -429,7 +430,7 @@ defineExpose({ reload: load, openEdit, openCreate })
                 @blur="ports.close"
                 @keydown="ports.onKeydown"
               />
-              <PortMenu :menu="portMenu" @pick="ports.pick" />
+              <PortMenu :menu="portMenu" @pick="ports.pick" @create="ports.create" />
             </div>
             <UTextarea
               v-else-if="f.type === 'textarea'"

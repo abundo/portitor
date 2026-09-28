@@ -127,6 +127,7 @@ func (s *Server) Echo() *echo.Echo {
 	(&resource[models.AddressObject, *models.AddressObject]{db: s.db, order: "name", prepare: prepareAddressObject, beforeDelete: deleteAddressObject}).register(g, "/objects")
 	(&resource[models.IpList, *models.IpList]{db: s.db, order: "name", prepare: prepareIpList, present: presentIpList, beforeDelete: deleteIpList}).register(g, "/ip-lists")
 	(&resource[models.Task, *models.Task]{db: s.db, order: "name", prepare: prepareTask}).register(g, "/tasks")
+	(&resource[models.Service, *models.Service]{db: s.db, order: "name", prepare: prepareService, beforeDelete: deleteService}).register(g, "/custom-services")
 
 	g.PUT("/dns/zones/:id/records", s.handleZoneRecords)
 	g.GET("/ipam/tree", s.handleIpamTree)

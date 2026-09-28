@@ -283,6 +283,16 @@ type AddressObject struct {
 	Description string     `json:"description"`
 }
 
+// Service is a custom port name. Rule and NAT port lists accept it like a
+// built-in one (fwconfig.Services); the builder expands it into Ports, a
+// port list of numbers, ranges and built-in names ("8000-8080", "80, 443").
+type Service struct {
+	Base
+	Name        string `gorm:"uniqueIndex" json:"name"`
+	Ports       string `json:"ports"`
+	Description string `json:"description"`
+}
+
 // IpamAddress is a single address. With InterfaceID it is configured on
 // that firewall interface (prefix length from the enclosing IpamPrefix).
 // With DnsName it gets an A/AAAA record; with Mac also a DHCP reservation.
@@ -463,6 +473,6 @@ func All() []any {
 		&User{}, &Settings{}, &Instance{}, &InterfaceZone{}, &Interface{}, &WgPeer{}, &Link{},
 		&Route{}, &Rule{}, &NatRule{}, &IpamPrefix{}, &IpamAddress{}, &DnsZone{}, &DnsRecord{}, &Deployment{},
 		&AddressObject{}, &DnsSoaTemplate{}, &DnsDnssecPolicy{}, &DnsTemplate{}, &KnownInterface{},
-		&DyndnsClient{}, &DyndnsRecord{}, &IpList{}, &Task{},
+		&DyndnsClient{}, &DyndnsRecord{}, &IpList{}, &Task{}, &Service{},
 	}
 }

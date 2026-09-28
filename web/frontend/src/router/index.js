@@ -27,6 +27,7 @@ const router = createRouter({
         { path: 'objects', component: () => import('@/views/AddressObjectsPage.vue') },
         { path: 'firewall/zones', component: () => import('@/views/InterfaceZonesPage.vue') },
         { path: 'firewall/rules', component: () => import('@/views/RulesPage.vue') },
+        { path: 'firewall/services', component: () => import('@/views/ServicesPage.vue') },
         { path: 'firewall/nat', component: () => import('@/views/NatPage.vue') },
         { path: 'firewall/ip-lists', component: () => import('@/views/IpListsPage.vue') },
         { path: 'dns', component: () => import('@/views/DnsPage.vue') },

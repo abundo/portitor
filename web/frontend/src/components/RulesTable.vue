@@ -18,6 +18,7 @@ import { computed, onMounted, ref } from 'vue'
 import PortMenu from '@/components/PortMenu.vue'
 import { useColumnResize } from '@/composables/useColumnResize'
 import { usePortMenu } from '@/composables/usePortMenu'
+import { useServiceDialog } from '@/composables/useServiceDialog'
 import { useRowDrag } from '@/composables/useRowDrag'
 import { useObjectStore } from '@/stores/objects'
 import { bytes } from '@/utils/bytes'
@@ -258,6 +259,26 @@ const typed = ref('')
 function onFocus(event) {
   typed.value = event.target.value
 }
+
+// The text of the cell being edited, as typed. The table re-renders as a
+// whole (suggestions, the port menu), and Vue then writes every input's
+// bound value back into it, which would wipe what has not been saved yet;
+// so the cell being edited is bound to its draft until it loses the focus.
+const draft = ref(null) // { id, key, text }
+function cellText(r, key, text) {
+  return draft.value?.id === r.id && draft.value.key === key ? draft.value.text : text
+}
+function onDraft(r, key, event) {
+  draft.value = { id: r.id, key, text: event.target.value }
+}
+// onType is onDraft for a cell with suggestions.
+function onType(r, key, event) {
+  onDraft(r, key, event)
+  onFocus(event)
+}
+function endDraft() {
+  draft.value = null
+}
 function listSuggestions(names, text) {
   const parts = text.split(/[\s,]+/)
   const last = parts.pop()
@@ -284,16 +305,24 @@ const nameSuggestions = computed(() =>
   ),
 )
 
-const servicePort = computed(() => new Map(objects.services.map((it) => [it.name, it.port])))
+const servicePort = computed(() => new Map(objects.portNames.map((it) => [it.name, it.port])))
 // The port cell offers service names with their ports (usePortMenu), in a
 // menu fixed to the viewport so the cell's overflow does not clip it.
 const ports = usePortMenu()
 const portMenu = ports.menu
 // A picked name changes the input without a change event, so leaving the
-// cell saves it if it differs.
+// cell saves it if it differs; not while the menu's New service dialog has
+// the focus, which returns it to the cell with the new name in.
+const serviceDialog = useServiceDialog()
+function onPortInput(r, event) {
+  onDraft(r, 'dst_ports', event)
+  ports.open(event)
+}
 function onPortBlur(r, event) {
   ports.close()
+  if (serviceDialog.state.open) return
   if (event.target.value.trim() !== (r.dst_ports ?? '')) setText(r, 'dst_ports', event)
+  endDraft()
 }
 // portTitle shows the numbers of the service names in a port cell.
 function portTitle(r) {
@@ -583,12 +612,14 @@ function onKeydown(event, index) {
               <td :colspan="colCount - 2">
                 <div class="flex items-center">
                   <input
-                    :value="r.description"
+                    :value="cellText(r, 'description', r.description)"
                     data-col="group"
                     :data-note-id="r.id"
                     placeholder="Group name"
                     :title="r.description"
+                    @input="onDraft(r, 'description', $event)"
                     @change="setText(r, 'description', $event)"
+                    @blur="endDraft"
                     @keydown="onKeydown($event, i)"
                   />
                   <span class="group-size">{{ groupSummary(r) }}</span>
@@ -612,12 +643,14 @@ function onKeydown(event, index) {
               </td>
               <td :colspan="colCount - 1">
                 <input
-                  :value="r.description"
+                  :value="cellText(r, 'description', r.description)"
                   data-col="comment"
                   :data-note-id="r.id"
                   placeholder="Comment"
                   :title="r.description"
+                  @input="onDraft(r, 'description', $event)"
                   @change="setText(r, 'description', $event)"
+                  @blur="endDraft"
                   @keydown="onKeydown($event, i)"
                 />
               </td>
@@ -649,14 +682,15 @@ function onKeydown(event, index) {
               </td>
               <td v-if="hasFrom">
                 <input
-                  :value="(r.in_interfaces ?? []).join(', ')"
+                  :value="cellText(r, 'in_interfaces', (r.in_interfaces ?? []).join(', '))"
                   data-col="in_interfaces"
                   :list="`rules-grid-ifaces-${chain}`"
                   placeholder="any"
                   :title="ifaceTitle(r.in_interfaces, 'Incoming interfaces or interface zones')"
                   @focus="onFocus"
-                  @input="onFocus"
+                  @input="onType(r, 'in_interfaces', $event)"
                   @change="setList(r, 'in_interfaces', $event)"
+                  @blur="endDraft"
                   @keydown="onKeydown($event, i)"
                 />
                 <div v-if="ifaceDescs(r.in_interfaces)" class="iface-desc">
@@ -665,14 +699,15 @@ function onKeydown(event, index) {
               </td>
               <td v-if="hasTo">
                 <input
-                  :value="(r.out_interfaces ?? []).join(', ')"
+                  :value="cellText(r, 'out_interfaces', (r.out_interfaces ?? []).join(', '))"
                   data-col="out_interfaces"
                   :list="`rules-grid-ifaces-${chain}`"
                   placeholder="any"
                   :title="ifaceTitle(r.out_interfaces, 'Outgoing interfaces or interface zones')"
                   @focus="onFocus"
-                  @input="onFocus"
+                  @input="onType(r, 'out_interfaces', $event)"
                   @change="setList(r, 'out_interfaces', $event)"
+                  @blur="endDraft"
                   @keydown="onKeydown($event, i)"
                 />
                 <div v-if="ifaceDescs(r.out_interfaces)" class="iface-desc">
@@ -681,29 +716,31 @@ function onKeydown(event, index) {
               </td>
               <td>
                 <input
-                  :value="(r.src_addrs ?? []).join(', ')"
+                  :value="cellText(r, 'src_addrs', (r.src_addrs ?? []).join(', '))"
                   data-col="src_addrs"
                   class="font-mono"
                   :list="`rules-grid-names-${chain}`"
                   placeholder="any"
                   :title="(r.src_addrs ?? []).join(', ')"
                   @focus="onFocus"
-                  @input="onFocus"
+                  @input="onType(r, 'src_addrs', $event)"
                   @change="setList(r, 'src_addrs', $event)"
+                  @blur="endDraft"
                   @keydown="onKeydown($event, i)"
                 />
               </td>
               <td>
                 <input
-                  :value="(r.dst_addrs ?? []).join(', ')"
+                  :value="cellText(r, 'dst_addrs', (r.dst_addrs ?? []).join(', '))"
                   data-col="dst_addrs"
                   class="font-mono"
                   :list="`rules-grid-names-${chain}`"
                   placeholder="any"
                   :title="(r.dst_addrs ?? []).join(', ')"
                   @focus="onFocus"
-                  @input="onFocus"
+                  @input="onType(r, 'dst_addrs', $event)"
                   @change="setList(r, 'dst_addrs', $event)"
+                  @blur="endDraft"
                   @keydown="onKeydown($event, i)"
                 />
               </td>
@@ -729,7 +766,7 @@ function onKeydown(event, index) {
               </td>
               <td>
                 <input
-                  :value="r.dst_ports"
+                  :value="cellText(r, 'dst_ports', r.dst_ports)"
                   data-col="dst_ports"
                   :data-row="r.id"
                   class="font-mono"
@@ -738,7 +775,7 @@ function onKeydown(event, index) {
                   :title="portTitle(r)"
                   autocomplete="off"
                   @click="ports.open"
-                  @input="ports.open"
+                  @input="onPortInput(r, $event)"
                   @blur="onPortBlur(r, $event)"
                   @keydown="ports.onKeydown($event) || onKeydown($event, i)"
                 />
@@ -747,6 +784,7 @@ function onKeydown(event, index) {
                   :menu="portMenu"
                   fixed
                   @pick="ports.pick"
+                  @create="ports.create"
                 />
               </td>
               <td>
@@ -777,10 +815,12 @@ function onKeydown(event, index) {
               </td>
               <td>
                 <input
-                  :value="r.description"
+                  :value="cellText(r, 'description', r.description)"
                   data-col="description"
                   :title="r.description"
+                  @input="onDraft(r, 'description', $event)"
                   @change="setText(r, 'description', $event)"
+                  @blur="endDraft"
                   @keydown="onKeydown($event, i)"
                 />
               </td>
