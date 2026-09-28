@@ -171,7 +171,8 @@ func (s *Server) handleWgRekey(c *echo.Context) error {
 
 // handleWgClientConfig renders a wg-quick config for the remote side of a
 // peer. ?split=1 routes only the instance's IPAM prefixes through the
-// tunnel instead of everything.
+// tunnel instead of everything. A site peer (one with networks) always
+// gets those prefixes, less the ones behind it, and no DNS.
 func (s *Server) handleWgClientConfig(c *echo.Context) error {
 	id, err := echo.PathParam[uint](c, "id")
 	if err != nil {
@@ -214,20 +215,27 @@ func (s *Server) handleWgClientConfig(c *echo.Context) error {
 		}
 		cc.Endpoint = fmt.Sprintf("%s:%d", host, ifc.WgListenPort)
 	}
-	if inst.DnsEnabled && ifc.DnsListen {
+	site := len(peer.Networks) > 0
+	if inst.DnsEnabled && ifc.DnsListen && !site {
 		var addrs []models.IpamAddress
 		s.db.Where("interface_id = ?", ifc.ID).Find(&addrs)
 		for _, a := range addrs {
 			cc.DNS = append(cc.DNS, a.Address)
 		}
 	}
-	if c.QueryParam("split") == "1" {
+	if site || c.QueryParam("split") == "1" {
+		remote, err := netobj.New(objs).Prefixes(peer.Networks)
+		if err != nil {
+			return errJSON(c, http.StatusBadRequest, err.Error())
+		}
 		var prefixes []models.IpamPrefix
 		s.db.Where("instance_id = ?", ifc.InstanceID).Find(&prefixes)
 		roots := ipam.Tree(prefixes, nil)
 		cc.AllowedIPs = nil
 		for _, r := range roots {
-			cc.AllowedIPs = append(cc.AllowedIPs, r.CIDR)
+			if !insideAny(r.CIDR, remote) {
+				cc.AllowedIPs = append(cc.AllowedIPs, r.CIDR)
+			}
 		}
 	}
 	var warnings []string
@@ -237,7 +245,10 @@ func (s *Server) handleWgClientConfig(c *echo.Context) error {
 	if cc.Endpoint == "" {
 		warnings = append(warnings, "Set the public endpoint on the interface (or the endpoint host under Settings, and a listen port on the interface).")
 	}
-	return c.JSON(http.StatusOK, map[string]any{"config": render.WireGuardClientConf(cc), "warnings": warnings})
+	if site && len(cc.AllowedIPs) == 0 {
+		warnings = append(warnings, "This instance has no prefixes under IP addresses, so the config routes nothing to this side.")
+	}
+	return c.JSON(http.StatusOK, map[string]any{"config": render.WireGuardClientConf(cc), "warnings": warnings, "site": site})
 }
 
 // handleWgNextFree suggests allowed IPs for a new peer: per address family
@@ -861,4 +872,18 @@ func redactDoc(doc fwconfig.Document) fwconfig.Document {
 		out.IPLists[i] = l
 	}
 	return out
+}
+
+// insideAny reports whether prefix cidr lies within one of the prefixes.
+func insideAny(cidr string, prefixes []string) bool {
+	p, err := netip.ParsePrefix(cidr)
+	if err != nil {
+		return false
+	}
+	for _, s := range prefixes {
+		if q, err := netip.ParsePrefix(s); err == nil && q.Bits() <= p.Bits() && q.Contains(p.Addr()) {
+			return true
+		}
+	}
+	return false
 }

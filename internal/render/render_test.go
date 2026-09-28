@@ -310,7 +310,8 @@ func TestWireGuard(t *testing.T) {
 	if f == nil || f.Mode != 0o600 || !f.Secret {
 		t.Fatalf("wg0.conf: %+v", f)
 	}
-	for _, want := range []string{"ListenPort = 51820", "# phone", "AllowedIPs = 10.99.0.2/32"} {
+	for _, want := range []string{"ListenPort = 51820", "# phone", "AllowedIPs = 10.99.0.2/32",
+		"# office", "Endpoint = office.example.org:51820", "AllowedIPs = 10.99.0.3/32, 192.168.50.0/24", "PersistentKeepalive = 25"} {
 		if !strings.Contains(f.Content, want) {
 			t.Errorf("missing %q in\n%s", want, f.Content)
 		}

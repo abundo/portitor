@@ -107,7 +107,23 @@ type WGPeer struct {
 	PresharedKey string   `json:"preshared_key,omitempty"`
 	Endpoint     string   `json:"endpoint,omitempty"`
 	AllowedIPs   []string `json:"allowed_ips"`
-	Keepalive    int      `json:"keepalive,omitempty"`
+	// Networks are the networks behind a site peer. They are allowed
+	// IPs too, and the agent routes them through the interface
+	// (WireGuardRoutes); AllowedIPs are not routed.
+	Networks  []string `json:"networks,omitempty"`
+	Keepalive int      `json:"keepalive,omitempty"`
+}
+
+// AllAllowedIPs is the peer's AllowedIPs followed by its Networks, without
+// duplicates: what wg(8) gets.
+func (p *WGPeer) AllAllowedIPs() []string {
+	out := slices.Clone(p.AllowedIPs)
+	for _, n := range p.Networks {
+		if !slices.Contains(out, n) {
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 // Rule actions.
@@ -452,6 +468,24 @@ func (in *Instance) NetnsName() string {
 		return ""
 	}
 	return "fw-" + in.Name
+}
+
+// WireGuardRoutes are the routes to the networks behind the site peers of
+// the instance's enabled WireGuard interfaces, through the interface with
+// metric 0. The agent installs them with the static routes.
+func (in *Instance) WireGuardRoutes() []Route {
+	var out []Route
+	for _, ifc := range in.Interfaces {
+		if ifc.Kind != KindWireGuard || !ifc.Enabled || ifc.WireGuard == nil {
+			continue
+		}
+		for _, p := range ifc.WireGuard.Peers {
+			for _, n := range p.Networks {
+				out = append(out, Route{Destination: n, Interface: ifc.Name})
+			}
+		}
+	}
+	return out
 }
 
 // InterfaceZone returns the named interface zone, or nil.

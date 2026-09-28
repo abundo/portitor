@@ -249,6 +249,15 @@ func prepareWgPeer(tx *gorm.DB, p, old *models.WgPeer) error {
 	if err := checkEntries(tx, "allowed IPs", p.AllowedIPs, entryCIDR); err != nil {
 		return err
 	}
+	p.Networks = cleanList(p.Networks)
+	if err := checkEntries(tx, "networks", p.Networks, entryCIDR); err != nil {
+		return err
+	}
+	for _, n := range p.Networks {
+		if pfx, err := netip.ParsePrefix(n); err == nil && pfx.Bits() == 0 {
+			return bad("networks: " + n + " would be a default route; add a static route through the interface instead")
+		}
+	}
 	if p.Keepalive < 0 || p.Keepalive > 65535 {
 		return bad("keepalive must be 0-65535")
 	}

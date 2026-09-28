@@ -214,7 +214,7 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 			}
 			routes = append(routes, r...)
 		}
-		if err := a.doAll(ctx, planRoutes(ns, in.Routes, routes)); err != nil {
+		if err := a.doAll(ctx, planRoutes(ns, slices.Concat(in.Routes, in.WireGuardRoutes()), routes)); err != nil {
 			return err
 		}
 

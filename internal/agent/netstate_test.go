@@ -114,12 +114,14 @@ func TestPlanRoutes(t *testing.T) {
 		{Destination: "10.50.0.0/16", Gateway: "192.168.1.254"},
 		{Destination: "default", Gateway: "10.255.0.1"},
 		{Destination: "fd00:2::/64", Gateway: "fd00:1::2"},
+		{Destination: "192.168.50.0/24", Interface: "wg0"},
 	}
 	equal(t, planRoutes("", want, have),
 		"ip route del 10.60.0.0/16 via 192.168.1.254 dev eth1 metric 0 proto 99",
 		"ip route replace 10.50.0.0/16 via 192.168.1.254 metric 0 proto 99",
 		"ip route replace default via 10.255.0.1 metric 0 proto 99",
-		"ip -6 route replace fd00:2::/64 via fd00:1::2 metric 0 proto 99")
+		"ip -6 route replace fd00:2::/64 via fd00:1::2 metric 0 proto 99",
+		"ip route replace 192.168.50.0/24 dev wg0 metric 0 proto 99")
 }
 
 func TestParseWGDump(t *testing.T) {

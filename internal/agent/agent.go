@@ -22,15 +22,21 @@ import (
 )
 
 type Agent struct {
-	cfg   *Config
-	run   Runner
-	log   *OpLog
+	cfg *Config
+	run Runner
+	log *OpLog
+	// bg runs the background commands (endpoint re-resolving), which are
+	// not part of an apply's log.
+	bg    Runner
 	dhcp  *dhcpManager
 	ddns  *dyndnsManager
 	pkts  *packetLog
 	lists *ipLists
 	tasks *scheduler
 	sys   *systemManager
+
+	stopBg context.CancelFunc
+	bgDone sync.WaitGroup
 
 	mu        sync.Mutex // serialises apply / confirm / rollback
 	applied   *fwconfig.Document
@@ -60,12 +66,14 @@ func New(cfg *Config) *Agent {
 	a.pkts = newPacketLog(cfg.DryRun)
 	a.lists = newIPLists()
 	a.tasks = newScheduler(a.runTask)
-	// Updates have a runner of their own: their commands are not part of
-	// an apply's log.
+	// Updates and background work have runners of their own: their
+	// commands are not part of an apply's log.
 	if cfg.DryRun {
 		a.sys = newSystemManager(&DryRunner{})
+		a.bg = &DryRunner{}
 	} else {
 		a.sys = newSystemManager(&ExecRunner{})
+		a.bg = &ExecRunner{}
 	}
 	return a
 }
@@ -87,6 +95,14 @@ func (a *Agent) Start(ctx context.Context) error {
 			slog.Warn("program not installed", "program", p.Name, "purpose", p.Purpose)
 		}
 	}
+	bgCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	a.stopBg = cancel
+	a.bgDone.Add(1)
+	go func() {
+		defer a.bgDone.Done()
+		a.resolveLoop(bgCtx)
+	}()
+
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -123,6 +139,10 @@ func (a *Agent) Start(ctx context.Context) error {
 }
 
 func (a *Agent) Stop() {
+	if a.stopBg != nil {
+		a.stopBg()
+		a.bgDone.Wait()
+	}
 	a.tasks.Stop()
 	a.lists.Stop()
 	a.ddns.Stop()

@@ -101,7 +101,7 @@ After an upgrade, run `migrate` before `start`. `install.py` does both.
 | Services | DNS zones | Zones and records served by the instance's BIND. |
 | | DNS templates | SOA templates, DNSSEC policies and zone templates, shared by all instances. |
 | | DHCP | Scopes (prefixes with DHCP on, set under IP addresses) and active leases. |
-| | WireGuard | Tunnels and peers; generates client configs. |
+| | WireGuard | Tunnels, road-warrior and [site-to-site](#site-to-site-wireguard) peers; generates client and site configs. |
 | | Dynamic DNS | Keeps records on an external nameserver in step with the WAN address. |
 | | Scheduled tasks | IP list downloads and commands on a cron schedule. |
 | Admin | Console | A shell on the firewall as the agent's `console_user`. |
@@ -133,6 +133,30 @@ applies without confirmation. While an apply is pending, you cannot apply anothe
 
 *History* lists every generation with who applied it and its status (applied,
 confirmed, pending, rolled back, failed).
+
+## Site-to-site WireGuard
+
+A WireGuard interface serves road warriors (phones, laptops) and other sites alike. A
+peer is a site when it has *Networks*: the networks behind it, e.g. the other office's
+LAN `192.168.50.0/24`.
+
+- *Allowed IPs* holds the peer's tunnel address only. Its networks are allowed through
+  the tunnel too, and the agent routes them to the WireGuard interface; you add no
+  static route. A network can't be `0.0.0.0/0` (add a static route through the
+  interface for that) or be routed twice, by two peers or by a static route with
+  metric 0.
+- *Endpoint* makes this firewall connect to the site, with *Keepalive* (e.g. 25) to keep
+  the tunnel up through NAT. Leave the endpoint empty on the side that waits. When the
+  endpoint is a name, the agent looks it up again while the peer has had no handshake
+  for over two minutes, so a site on a dynamic address (with dynamic DNS) is found
+  again.
+- The config button of a site peer gives a wg-quick config for the router at the other
+  site: this instance's prefixes under *IP addresses* as its AllowedIPs, without the
+  peer's own networks, and no DNS. If the other side is a Portitor too, enter the
+  values there instead: its own WireGuard interface, and this firewall as a site peer
+  with this side's networks.
+- Allow the traffic with forward rules between the WireGuard interface (or its interface
+  zone) and the LAN, in both directions as needed. NAT is not needed between sites.
 
 ## Backup and restore
 

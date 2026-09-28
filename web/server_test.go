@@ -234,6 +234,30 @@ func TestValidationAndSecrets(t *testing.T) {
 	if rec := env.do("PUT", "/api/interfaces/"+itoa(ifc.ID), map[string]any{"wg_endpoint": "no-port"}); rec.Code != http.StatusBadRequest {
 		t.Errorf("endpoint without port accepted: %d", rec.Code)
 	}
+
+	// A site peer: its networks are refused as a default route, and its
+	// config routes this instance's prefixes (not those behind it), with
+	// no DNS.
+	if rec := env.do("POST", "/api/wg/peers", map[string]any{"interface_id": ifc.ID, "name": "all", "allowed_ips": []string{"10.99.0.9/32"}, "networks": []string{"0.0.0.0/0"}, "enabled": true}); rec.Code != http.StatusBadRequest {
+		t.Errorf("default route as network accepted: %d", rec.Code)
+	}
+	env.create("/api/ipam/prefixes", map[string]any{"instance_id": inst, "prefix": "192.168.50.0/24"})
+	site := env.do("POST", "/api/wg/peers", map[string]any{"interface_id": ifc.ID, "name": "office", "allowed_ips": []string{"10.99.0.5/32"}, "networks": []string{"192.168.50.0/24"}, "enabled": true})
+	if site.Code != http.StatusCreated {
+		t.Fatalf("site peer: %d %s", site.Code, site.Body)
+	}
+	var sp models.WgPeer
+	env.srv.db.Where("name = ?", "office").First(&sp)
+	rec := env.do("GET", "/api/wg/peers/"+itoa(sp.ID)+"/config", nil)
+	var sc struct {
+		Config string `json:"config"`
+		Site   bool   `json:"site"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &sc)
+	if !sc.Site || !strings.Contains(sc.Config, "Address = 10.99.0.5/32\n") || strings.Contains(sc.Config, "192.168.50.0/24") ||
+		!strings.Contains(sc.Config, "10.99.0.0/24") || strings.Contains(sc.Config, "0.0.0.0/0") || strings.Contains(sc.Config, "DNS =") {
+		t.Errorf("site config: %s", rec.Body)
+	}
 }
 
 func itoa(n uint) string {

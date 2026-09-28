@@ -21,7 +21,8 @@ func WireGuardConf(ifc *fwconfig.Interface) string {
 	if wg.ListenPort > 0 {
 		fmt.Fprintf(b, "ListenPort = %d\n", wg.ListenPort)
 	}
-	for _, p := range wg.Peers {
+	for i := range wg.Peers {
+		p := &wg.Peers[i]
 		fmt.Fprintf(b, "\n# %s\n[Peer]\n", p.Name)
 		fmt.Fprintf(b, "PublicKey = %s\n", p.PublicKey)
 		if p.PresharedKey != "" {
@@ -30,8 +31,8 @@ func WireGuardConf(ifc *fwconfig.Interface) string {
 		if p.Endpoint != "" {
 			fmt.Fprintf(b, "Endpoint = %s\n", p.Endpoint)
 		}
-		if len(p.AllowedIPs) > 0 {
-			fmt.Fprintf(b, "AllowedIPs = %s\n", strings.Join(p.AllowedIPs, ", "))
+		if ips := p.AllAllowedIPs(); len(ips) > 0 {
+			fmt.Fprintf(b, "AllowedIPs = %s\n", strings.Join(ips, ", "))
 		}
 		if p.Keepalive > 0 {
 			fmt.Fprintf(b, "PersistentKeepalive = %d\n", p.Keepalive)

@@ -4,10 +4,10 @@
 package fwconfig
 
 // SampleDocument is a typical home setup: a default instance with a DHCP
-// WAN, a LAN with DHCP/DNS, a WireGuard road-warrior interface and a port
-// forward, plus a "guest" instance linked to the default one. The LAN is
-// dual-stack: SLAAC and DHCPv6 on fd00:1::/64. Used by tests
-// in several packages and by `portitor-agent render --sample`.
+// WAN, a LAN with DHCP/DNS, a WireGuard interface with a road warrior and a
+// site, and a port forward, plus a "guest" instance linked to the default
+// one. The LAN is dual-stack: SLAAC and DHCPv6 on fd00:1::/64. Used by
+// tests in several packages and by `portitor-agent render --sample`.
 func SampleDocument() Document {
 	return Document{
 		Version:    Version,
@@ -30,6 +30,13 @@ func SampleDocument() Document {
 								Name:       "phone",
 								PublicKey:  "xTIBA5rboUvnH4htodjb6e697QjLERt1NAB4mZqp8Dg=",
 								AllowedIPs: []string{"10.99.0.2/32"},
+							}, {
+								Name:       "office",
+								PublicKey:  "SIKnAouqB3jjF6shpAaGd0Ylc68P5jM4bPVMyg5qWCg=",
+								Endpoint:   "office.example.org:51820",
+								AllowedIPs: []string{"10.99.0.3/32"},
+								Networks:   []string{"192.168.50.0/24"},
+								Keepalive:  25,
 							}},
 						},
 					},

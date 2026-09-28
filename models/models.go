@@ -170,7 +170,9 @@ type WgPeer struct {
 	PresharedKey string     `json:"-"`
 	Endpoint     string     `json:"endpoint"`
 	AllowedIPs   StringList `gorm:"column:allowed_ips" json:"allowed_ips"`
-	Keepalive    int        `json:"keepalive"`
+	// Networks behind a site peer: routed through the interface.
+	Networks  StringList `json:"networks"`
+	Keepalive int        `json:"keepalive"`
 	// ClientPrivateKey is kept only when the key pair was generated
 	// here, so a complete client config can be exported.
 	ClientPrivateKey string `json:"-"`

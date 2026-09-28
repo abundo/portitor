@@ -47,7 +47,13 @@ async function loadFree() {
 }
 watch(selectedId, loadFree)
 function peerDefaults() {
-  return { enabled: true, allowed_ips: [...freeAddrs.value], keepalive: 0, public_key: '' }
+  return {
+    enabled: true,
+    allowed_ips: [...freeAddrs.value],
+    networks: [],
+    keepalive: 0,
+    public_key: '',
+  }
 }
 const tunnelItems = computed(() => tunnels.value.map((t) => ({ label: t.name, value: t.id })))
 
@@ -87,6 +93,7 @@ async function rekey() {
 const columns = [
   { key: 'name', label: 'Peer', class: 'font-medium' },
   { key: 'allowed_ips', label: 'Tunnel addresses', class: 'font-mono text-xs' },
+  { key: 'networks', label: 'Networks', class: 'font-mono text-xs' },
   { key: 'endpoint', label: 'Endpoint', class: 'font-mono text-xs' },
   { key: 'handshake', label: 'Last handshake' },
   { key: 'enabled', label: 'Enabled' },
@@ -118,7 +125,14 @@ const fields = computed(() => [
     label: 'Allowed IPs',
     type: 'addrs',
     placeholder: '10.99.0.2/32',
-    hint: "The peer's tunnel address, plus networks behind it for site-to-site. New peers get the next free addresses of the interface's prefixes.",
+    hint: "The peer's tunnel address. New peers get the next free addresses of the interface's prefixes.",
+  },
+  {
+    key: 'networks',
+    label: 'Networks',
+    type: 'addrs',
+    placeholder: '192.168.50.0/24',
+    hint: 'Site-to-site: the networks behind the peer. They are allowed through the tunnel and routed to it. Empty for phones and laptops.',
   },
   {
     key: 'endpoint',
@@ -149,7 +163,9 @@ async function showConfig(peer) {
 async function loadConfig() {
   try {
     cfg.value = await api.wgClientConfig(cfgPeer.value.id, split.value)
-    qr.value = await QRCode.toDataURL(cfg.value.config, { margin: 1, width: 280 })
+    qr.value = cfg.value.site
+      ? ''
+      : await QRCode.toDataURL(cfg.value.config, { margin: 1, width: 280 })
   } catch (err) {
     toast.add({ title: errMsg(err), color: 'error' })
   }
@@ -243,7 +259,7 @@ function copy(text) {
             color="neutral"
             variant="ghost"
             icon="i-lucide-qr-code"
-            title="Client config"
+            :title="row.networks?.length ? 'Site config' : 'Client config'"
             @click="showConfig(row)"
           />
         </template>
@@ -252,13 +268,14 @@ function copy(text) {
 
     <UModal
       v-model:open="cfgOpen"
-      :title="`Client config: ${cfgPeer?.name}`"
+      :title="`${cfg.site ? 'Site' : 'Client'} config: ${cfgPeer?.name}`"
       :ui="{ content: 'max-w-2xl' }"
     >
       <template #body>
         <div class="space-y-3">
           <UAlert v-for="w in cfg.warnings" :key="w" color="warning" variant="subtle" :title="w" />
           <USwitch
+            v-if="!cfg.site"
             v-model="split"
             label="Split tunnel (only this instance's networks)"
             @update:model-value="loadConfig"
@@ -276,7 +293,13 @@ function copy(text) {
               cfg.config
             }}</pre>
           </div>
-          <p class="text-xs text-muted">
+          <p v-if="cfg.site" class="text-xs text-muted">
+            A wg-quick config for the router at the other site: it routes this instance's networks
+            through the tunnel. On another Portitor, enter the same values instead: a WireGuard
+            interface with the address above, and this firewall as a peer with the public key and
+            endpoint above and this instance's networks (AllowedIPs) as its networks.
+          </p>
+          <p v-else class="text-xs text-muted">
             The config contains the client's private key. Scan it with the WireGuard app, or copy it
             into a .conf file.
           </p>

@@ -74,6 +74,12 @@ func TestValidateCatchesProblems(t *testing.T) {
 		{"route gateway family", func(d *Document) { d.Instances[0].Routes[0].Gateway = "fd00:1::fe" }, "differ in family"},
 		{"dhcp range outside", func(d *Document) { d.Instances[0].DHCP.Subnets[0].RangeEnd = "10.0.0.1" }, "not inside the prefix"},
 		{"bad wg key", func(d *Document) { d.Instances[0].Interfaces[3].WireGuard.PrivateKey = "nope" }, "invalid private key"},
+		{"bad wg network", func(d *Document) { d.Instances[0].Interfaces[3].WireGuard.Peers[1].Networks = []string{"192.168.50.1"} }, `invalid network "192.168.50.1"`},
+		{"wg network default", func(d *Document) { d.Instances[0].Interfaces[3].WireGuard.Peers[1].Networks = []string{"0.0.0.0/0"} }, "a default route through a peer"},
+		{"wg network in two peers", func(d *Document) {
+			d.Instances[0].Interfaces[3].WireGuard.Peers[0].Networks = []string{"192.168.50.0/24"}
+		}, `wg0 peer "office": network 192.168.50.0/24: wg0 peer "phone" already routes it`},
+		{"wg network as static route", func(d *Document) { d.Instances[0].Routes[0].Destination = "192.168.50.0/24" }, "route 1 already routes it"},
 		{"link same instance", func(d *Document) { d.Links[0].B.Instance = "main" }, "both ends"},
 		{"physical in two instances", func(d *Document) { d.Instances[1].Interfaces[0].Name = "eth0" }, "already used by instance"},
 		{"dns record injection", func(d *Document) {
@@ -265,5 +271,22 @@ func TestMatchFamilies(t *testing.T) {
 				t.Errorf("got %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestWireGuardRoutes(t *testing.T) {
+	doc := SampleDocument()
+	in := &doc.Instances[0]
+	got := in.WireGuardRoutes()
+	if len(got) != 1 || got[0] != (Route{Destination: "192.168.50.0/24", Interface: "wg0"}) {
+		t.Errorf("routes %+v", got)
+	}
+	peer := &in.Interfaces[3].WireGuard.Peers[1]
+	if ips := peer.AllAllowedIPs(); strings.Join(ips, ",") != "10.99.0.3/32,192.168.50.0/24" {
+		t.Errorf("allowed ips %v", ips)
+	}
+	in.Interfaces[3].Enabled = false
+	if got := in.WireGuardRoutes(); len(got) != 0 {
+		t.Errorf("disabled interface routed: %+v", got)
 	}
 }

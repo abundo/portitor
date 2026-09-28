@@ -305,6 +305,35 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 		}
 	}
 
+	// Two routes to the same network with the same metric replace each
+	// other; a network behind two peers would also move between them in
+	// wg(8).
+	routeDst := map[string]string{}
+	for i, r := range in.Routes {
+		if pfx, err := netip.ParsePrefix(r.Destination); err == nil && r.Metric == 0 {
+			routeDst[pfx.Masked().String()] = fmt.Sprintf("route %d", i+1)
+		}
+	}
+	for _, ifc := range in.Interfaces {
+		if ifc.Kind != KindWireGuard || ifc.WireGuard == nil {
+			continue
+		}
+		for _, peer := range ifc.WireGuard.Peers {
+			for _, n := range peer.Networks {
+				pfx, err := netip.ParsePrefix(n)
+				if err != nil {
+					continue
+				}
+				where := fmt.Sprintf("%s peer %q", ifc.Name, peer.Name)
+				if other, ok := routeDst[pfx.Masked().String()]; ok {
+					v.addf("%s: %s: network %s: %s already routes it", p, where, n, other)
+				} else {
+					routeDst[pfx.Masked().String()] = where
+				}
+			}
+		}
+	}
+
 	for i, r := range in.Routes {
 		rp := fmt.Sprintf("%s: route %d", p, i+1)
 		if r.Destination != "default" {
@@ -585,6 +614,13 @@ func (v *validator) wireguard(p string, wg *WireGuard) {
 		for _, a := range peer.AllowedIPs {
 			if _, err := netip.ParsePrefix(a); err != nil {
 				v.addf("%s: invalid allowed ip %q", pp, a)
+			}
+		}
+		for _, n := range peer.Networks {
+			if pfx, err := netip.ParsePrefix(n); err != nil {
+				v.addf("%s: invalid network %q", pp, n)
+			} else if pfx.Bits() == 0 {
+				v.addf("%s: network %s: a default route through a peer is a static route, not a site network", pp, n)
 			}
 		}
 		if peer.Keepalive < 0 || peer.Keepalive > 65535 {

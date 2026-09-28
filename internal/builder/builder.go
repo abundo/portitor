@@ -216,11 +216,15 @@ func Build(db *gorm.DB, generation int64) (*fwconfig.Document, error) {
 						PresharedKey: p.PresharedKey,
 						Endpoint:     p.Endpoint,
 						AllowedIPs:   []string(p.AllowedIPs),
+						Networks:     []string(p.Networks),
 						Keepalive:    p.Keepalive,
 					})
 				}
 				for i := range wg.Peers {
 					wg.Peers[i].AllowedIPs = expand(fmt.Sprintf("instance %s: %s peer %s: allowed IPs", mi.Name, mif.Name, wg.Peers[i].Name), objs.Prefixes, wg.Peers[i].AllowedIPs)
+					if len(wg.Peers[i].Networks) > 0 {
+						wg.Peers[i].Networks = expand(fmt.Sprintf("instance %s: %s peer %s: networks", mi.Name, mif.Name, wg.Peers[i].Name), objs.Prefixes, wg.Peers[i].Networks)
+					}
 				}
 				ifc.WireGuard = wg
 			}

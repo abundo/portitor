@@ -146,8 +146,9 @@ func eachObjectRef(tx *gorm.DB, visit func(where string, entry *string) bool) er
 		return err
 	}
 	for _, p := range peers {
-		if list("WireGuard peer "+p.Name, p.AllowedIPs) {
-			if err := save(&models.WgPeer{}, p.ID, map[string]any{"allowed_ips": p.AllowedIPs}); err != nil {
+		a, b := list("WireGuard peer "+p.Name, p.AllowedIPs), list("WireGuard peer "+p.Name, p.Networks)
+		if a || b {
+			if err := save(&models.WgPeer{}, p.ID, map[string]any{"allowed_ips": p.AllowedIPs, "networks": p.Networks}); err != nil {
 				return err
 			}
 		}
