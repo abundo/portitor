@@ -412,7 +412,7 @@ def step_bootstrap(a: dict) -> None:
     # The token file is root's; the web user reads it from stdin.
     argv += [
         "--agent-url", f"https://{AGENT_LISTEN}",
-        "--agent-token-file", "/dev/stdin",
+        "--agent-token-file", "-",
         "--agent-fingerprint", a["fingerprint"],
     ]
     proc = run(argv, stdin=AGENT_TOKEN.read_text(encoding="utf-8"), check=False)

@@ -9,6 +9,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/netip"
 	"os"
@@ -158,7 +159,14 @@ GUI and ping rules move to the LAN, and the agent settings are kept unless
 				return err
 			}
 			if bo.AgentFingerprint != "" {
-				tok, err := os.ReadFile(tokenFile)
+				var tok []byte
+				if tokenFile == "-" {
+					// The inherited stdin: another user can't reopen root's
+					// pipe through /dev/stdin.
+					tok, err = io.ReadAll(os.Stdin)
+				} else {
+					tok, err = os.ReadFile(tokenFile)
+				}
 				if err != nil {
 					return err
 				}
@@ -192,7 +200,7 @@ GUI and ping rules move to the LAN, and the agent settings are kept unless
 	}
 	bf := bootstrap.Flags()
 	bf.StringVar(&bo.AgentURL, "agent-url", "https://127.0.0.1:8443", "agent API")
-	bf.StringVar(&tokenFile, "agent-token-file", "/etc/portitor/agent.token", "agent token")
+	bf.StringVar(&tokenFile, "agent-token-file", "/etc/portitor/agent.token", "agent token file, - for stdin")
 	bf.StringVar(&bo.AgentFingerprint, "agent-fingerprint", "", "agent certificate SHA-256 (from portitor-agent init)")
 	bf.StringVar(&bo.LAN, "lan", "", "LAN interface")
 	bf.StringVar(&address, "address", "", "LAN address with prefix length, e.g. 192.168.1.1/24, or dhcp")
