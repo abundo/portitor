@@ -295,11 +295,11 @@ const columns = computed(() =>
     'w-8',
     hasFrom.value && 'w-36',
     hasTo.value && 'w-36',
+    '',
+    '',
     'w-14',
     'w-18',
     'w-24',
-    '',
-    '',
     'w-18',
     'w-8',
     'w-24',
@@ -307,7 +307,7 @@ const columns = computed(() =>
   ].filter((c) => c !== false),
 )
 const table = ref(null)
-const resize = useColumnResize({ table, storageKey: () => `rules-grid-cols-${props.chain}` })
+const resize = useColumnResize({ table, storageKey: () => `rules-grid-cols-v2-${props.chain}` })
 const { widths, total: tableWidth } = resize
 const onHandle = (fn) => (event) => event.target.classList.contains('col-resize') && fn(event)
 const onResizeStart = onHandle(resize.onPointerDown)
@@ -433,11 +433,11 @@ function onKeydown(event, index) {
             <th title="Enabled">On<span class="col-resize" /></th>
             <th v-if="hasFrom">From<span class="col-resize" /></th>
             <th v-if="hasTo">To<span class="col-resize" /></th>
-            <th>IP<span class="col-resize" /></th>
-            <th>Protocol<span class="col-resize" /></th>
-            <th>Ports<span class="col-resize" /></th>
             <th>Source<span class="col-resize" /></th>
             <th>Destination<span class="col-resize" /></th>
+            <th>IP<span class="col-resize" /></th>
+            <th>Protocol<span class="col-resize" /></th>
+            <th title="Destination ports">Dst port<span class="col-resize" /></th>
             <th>Action<span class="col-resize" /></th>
             <th title="Log matches">Log<span class="col-resize" /></th>
             <th
@@ -496,6 +496,11 @@ function onKeydown(event, index) {
               </div>
             </td>
             <td v-if="hasTo"><span class="text-muted">any</span></td>
+            <td :title="a.source?.join(', ')">
+              <span v-if="a.source?.length" class="font-mono">{{ a.source.join(', ') }}</span>
+              <span v-else class="text-muted">any</span>
+            </td>
+            <td><span class="text-muted">any</span></td>
             <td>
               <span>{{ autoFamily(a) }}</span>
             </td>
@@ -505,11 +510,6 @@ function onKeydown(event, index) {
             <td>
               <span class="font-mono">{{ autoPorts(a) }}</span>
             </td>
-            <td :title="a.source?.join(', ')">
-              <span v-if="a.source?.length" class="font-mono">{{ a.source.join(', ') }}</span>
-              <span v-else class="text-muted">any</span>
-            </td>
-            <td><span class="text-muted">any</span></td>
             <td><span class="font-semibold text-success">accept</span></td>
             <td class="text-center">
               <input
@@ -653,6 +653,34 @@ function onKeydown(event, index) {
                 </div>
               </td>
               <td>
+                <input
+                  :value="(r.src_addrs ?? []).join(', ')"
+                  data-col="src_addrs"
+                  class="font-mono"
+                  :list="`rules-grid-names-${chain}`"
+                  placeholder="any"
+                  :title="(r.src_addrs ?? []).join(', ')"
+                  @focus="onFocus"
+                  @input="onFocus"
+                  @change="setList(r, 'src_addrs', $event)"
+                  @keydown="onKeydown($event, i)"
+                />
+              </td>
+              <td>
+                <input
+                  :value="(r.dst_addrs ?? []).join(', ')"
+                  data-col="dst_addrs"
+                  class="font-mono"
+                  :list="`rules-grid-names-${chain}`"
+                  placeholder="any"
+                  :title="(r.dst_addrs ?? []).join(', ')"
+                  @focus="onFocus"
+                  @input="onFocus"
+                  @change="setList(r, 'dst_addrs', $event)"
+                  @keydown="onKeydown($event, i)"
+                />
+              </td>
+              <td>
                 <select
                   :value="r.family"
                   data-col="family"
@@ -680,34 +708,6 @@ function onKeydown(event, index) {
                   :disabled="!hasPorts(r)"
                   :placeholder="hasPorts(r) ? 'any' : ''"
                   @change="setText(r, 'dst_ports', $event)"
-                  @keydown="onKeydown($event, i)"
-                />
-              </td>
-              <td>
-                <input
-                  :value="(r.src_addrs ?? []).join(', ')"
-                  data-col="src_addrs"
-                  class="font-mono"
-                  :list="`rules-grid-names-${chain}`"
-                  placeholder="any"
-                  :title="(r.src_addrs ?? []).join(', ')"
-                  @focus="onFocus"
-                  @input="onFocus"
-                  @change="setList(r, 'src_addrs', $event)"
-                  @keydown="onKeydown($event, i)"
-                />
-              </td>
-              <td>
-                <input
-                  :value="(r.dst_addrs ?? []).join(', ')"
-                  data-col="dst_addrs"
-                  class="font-mono"
-                  :list="`rules-grid-names-${chain}`"
-                  placeholder="any"
-                  :title="(r.dst_addrs ?? []).join(', ')"
-                  @focus="onFocus"
-                  @input="onFocus"
-                  @change="setList(r, 'dst_addrs', $event)"
                   @keydown="onKeydown($event, i)"
                 />
               </td>
