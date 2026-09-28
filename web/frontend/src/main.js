@@ -8,8 +8,9 @@ import ui from '@nuxt/ui/vue-plugin'
 
 import App from './App.vue'
 import router from './router'
-import { setUnauthorizedHandler } from './api/http'
+import { setMutationHandler, setUnauthorizedHandler } from './api/http'
 import { useAuthStore } from './stores/auth'
+import { useDeployStore } from './stores/deploy'
 
 import '@/assets/tailwind.css'
 
@@ -26,6 +27,8 @@ setUnauthorizedHandler(() => {
   auth.user = null
   if (router.currentRoute.value.name !== 'login') router.push({ name: 'login' })
 })
+const deploy = useDeployStore()
+setMutationHandler(() => auth.user && deploy.changed())
 
 app.use(router)
 app.use(ui)

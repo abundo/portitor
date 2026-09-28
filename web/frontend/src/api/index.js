@@ -61,6 +61,7 @@ export const api = {
   deleteUser: (id) => http.delete(`/users/${id}`),
 
   deployCheck: () => http.get('/deploy/check').then((r) => r.data),
+  deployChanges: () => http.get('/deploy/changes').then((r) => r.data),
   deployPreview: () => http.post('/deploy/preview', {}).then((r) => r.data),
   deployApply: (confirmTimeout) =>
     http.post('/deploy/apply', { confirm_timeout: confirmTimeout }).then((r) => r.data),

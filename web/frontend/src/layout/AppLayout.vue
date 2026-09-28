@@ -8,6 +8,7 @@ import { watch } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import AppMenu from './AppMenu.vue'
 import AppTopbar from './AppTopbar.vue'
+import ChangesBanner from '@/components/ChangesBanner.vue'
 import ConfirmBanner from '@/components/ConfirmBanner.vue'
 import { useInstanceStore } from '@/stores/instances'
 import { useDeployStore } from '@/stores/deploy'
@@ -51,6 +52,7 @@ onMounted(() => {
   <div class="flex h-screen flex-col overflow-hidden">
     <AppTopbar @toggle-menu="mobileMenu = !mobileMenu" />
     <ConfirmBanner />
+    <ChangesBanner />
     <div class="flex min-h-0 flex-1">
       <aside class="hidden w-60 shrink-0 overflow-y-auto border-r border-default p-3 lg:block">
         <AppMenu />

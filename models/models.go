@@ -350,7 +350,10 @@ type Deployment struct {
 	Status   string `json:"status"`
 	Message  string `json:"message"`
 	Document string `gorm:"type:jsonb" json:"-"`
-	Log      string `json:"log"`
+	// DocHash is docHash of the unredacted document; empty on rows older
+	// than the column.
+	DocHash string `json:"-"`
+	Log     string `json:"log"`
 }
 
 // All lists every model, for AutoMigrate in tests (production uses the

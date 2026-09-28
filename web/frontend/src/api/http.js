@@ -16,8 +16,18 @@ export function setUnauthorizedHandler(fn) {
   onUnauthorized = fn
 }
 
+// onMutation runs after every successful write, so the "uncommitted
+// changes" banner follows edits without polling.
+let onMutation = () => {}
+export function setMutationHandler(fn) {
+  onMutation = fn
+}
+
 http.interceptors.response.use(
-  (res) => res,
+  (res) => {
+    if (res.config.method !== 'get' && !/\/(login|logout)$/.test(res.config.url ?? '')) onMutation()
+    return res
+  },
   (err) => {
     if (err.response?.status === 401 && !err.config.url?.endsWith('/login')) {
       onUnauthorized()

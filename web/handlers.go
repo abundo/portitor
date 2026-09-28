@@ -4,6 +4,8 @@
 package web
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -385,7 +387,7 @@ func (s *Server) handleDeployApply(c *echo.Context) error {
 		return err
 	}
 	docJSON, _ := json.Marshal(redactDoc(*doc))
-	dep := models.Deployment{Generation: gen, Username: currentUser(c).Username, Document: string(docJSON)}
+	dep := models.Deployment{Generation: gen, Username: currentUser(c).Username, Document: string(docJSON), DocHash: docHash(*doc)}
 
 	res, applyErr := a.Apply(c.Request().Context(), *doc, timeout)
 	switch {
@@ -424,6 +426,64 @@ func (s *Server) latestDeployment() (*models.Deployment, error) {
 		return nil, nil
 	}
 	return &dep, err
+}
+
+// docHash identifies a document's content, whatever its generation.
+func docHash(doc fwconfig.Document) string {
+	doc.Generation = 0
+	b, _ := json.Marshal(doc)
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
+}
+
+// liveDeployment is the latest deployment the firewall runs (or runs
+// pending confirmation); a failed or rolled back one left the previous
+// one in place.
+func (s *Server) liveDeployment() (*models.Deployment, error) {
+	var dep models.Deployment
+	err := s.db.Where("status IN ?", []string{"applied", "pending", "confirmed"}).Order("generation desc, id desc").First(&dep).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	return &dep, err
+}
+
+// handleDeployChanges tells whether the database differs from what is
+// deployed, for the "uncommitted changes" banner.
+func (s *Server) handleDeployChanges(c *echo.Context) error {
+	resp := struct {
+		Changed  bool `json:"changed"`
+		Deployed bool `json:"deployed"`
+		Problems int  `json:"problems"`
+	}{}
+	live, err := s.liveDeployment()
+	if err != nil {
+		return err
+	}
+	resp.Deployed = live != nil
+	doc, err := builder.Build(s.db, 0)
+	var ve *fwconfig.ValidationError
+	switch {
+	case errors.As(err, &ve):
+		// What is deployed was valid, so this is a change.
+		resp.Changed, resp.Problems = true, len(ve.Problems)
+	case err != nil:
+		return err
+	case live == nil:
+		resp.Changed = true
+	case live.DocHash != "":
+		resp.Changed = live.DocHash != docHash(*doc)
+	default:
+		// Older rows only have the redacted document, so key changes go
+		// unnoticed there.
+		var old fwconfig.Document
+		if json.Unmarshal([]byte(live.Document), &old) != nil {
+			resp.Changed = true
+			break
+		}
+		resp.Changed = docHash(old) != docHash(redactDoc(*doc))
+	}
+	return c.JSON(http.StatusOK, resp)
 }
 
 func (s *Server) handleDeployConfirm(c *echo.Context) error {

@@ -212,7 +212,7 @@ func TestDeployEndToEnd(t *testing.T) {
 	env.create("/api/ipam/prefixes", map[string]any{"instance_id": inst, "prefix": "192.168.1.0/24", "dhcp_enabled": true, "dhcp_range_start": "192.168.1.100", "dhcp_range_end": "192.168.1.200"})
 	env.create("/api/ipam/addresses", map[string]any{"instance_id": inst, "address": "192.168.1.1", "interface_id": eth1})
 	env.create("/api/rules", map[string]any{"instance_id": inst, "chain": "forward", "in_interfaces": []string{"lan"}, "out_interfaces": []string{"eth0"}, "action": "accept", "enabled": true})
-	env.create("/api/nat", map[string]any{"instance_id": inst, "kind": "masquerade", "out_interfaces": []string{"eth0"}, "enabled": true})
+	nat := env.create("/api/nat", map[string]any{"instance_id": inst, "kind": "masquerade", "out_interfaces": []string{"eth0"}, "enabled": true})
 
 	// Problems block the deploy.
 	bad := env.create("/api/ipam/addresses", map[string]any{"instance_id": inst, "address": "10.0.0.1", "interface_id": eth1})
@@ -226,10 +226,29 @@ func TestDeployEndToEnd(t *testing.T) {
 		t.Fatalf("preview: %d %s", rec.Code, rec.Body)
 	}
 
+	changes := func() string {
+		t.Helper()
+		return env.do("GET", "/api/deploy/changes", nil).Body.String()
+	}
+	if got := changes(); !strings.Contains(got, `"changed":true,"deployed":false`) {
+		t.Errorf("changes before first deploy: %s", got)
+	}
+
 	// Apply 1 has nothing to roll back to, so it is not pending.
 	rec = env.do("POST", "/api/deploy/apply", map[string]any{})
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"status":"applied"`) {
 		t.Fatalf("apply 1: %d %s", rec.Code, rec.Body)
+	}
+	if got := changes(); !strings.Contains(got, `"changed":false`) {
+		t.Errorf("changes after deploy: %s", got)
+	}
+	env.do("PUT", "/api/nat/"+itoa(nat), map[string]any{"enabled": false})
+	if got := changes(); !strings.Contains(got, `"changed":true`) {
+		t.Errorf("changes after edit: %s", got)
+	}
+	env.do("PUT", "/api/nat/"+itoa(nat), map[string]any{"enabled": true})
+	if got := changes(); !strings.Contains(got, `"changed":false`) {
+		t.Errorf("changes after undoing the edit: %s", got)
 	}
 	rec = env.do("POST", "/api/deploy/apply", map[string]any{})
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"status":"pending"`) {
