@@ -126,6 +126,9 @@ const userMenu = computed(() => [
           @click="openConsoleWindow"
         />
       </UTooltip>
+      <UTooltip text="Switch between dark and light mode">
+        <UColorModeButton />
+      </UTooltip>
       <UDropdownMenu :items="userMenu">
         <UButton icon="i-lucide-user" color="neutral" variant="ghost" aria-label="User menu" />
       </UDropdownMenu>
