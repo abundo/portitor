@@ -10,17 +10,19 @@ import (
 	"testing"
 
 	"github.com/abundo/portitor/internal/agentapi"
+	"github.com/abundo/portitor/internal/render"
 	"github.com/abundo/portitor/models"
 )
 
-// statusAgent answers Status with a fixed list of NICs.
+// statusAgent answers Status with a fixed list of NICs and anti-lockout rule.
 type statusAgent struct {
 	agentAPI
-	nics []agentapi.NICStatus
+	nics        []agentapi.NICStatus
+	antiLockout *render.AntiLockout
 }
 
 func (f *statusAgent) Status(context.Context) (*agentapi.Status, error) {
-	return &agentapi.Status{NICs: f.nics}, nil
+	return &agentapi.Status{NICs: f.nics, AntiLockout: f.antiLockout}, nil
 }
 
 func TestSyncNICs(t *testing.T) {

@@ -19,8 +19,13 @@ const TableName = "firewall"
 // AntiLockout keeps the agent's management port reachable in the default
 // instance no matter what the rules say.
 type AntiLockout struct {
-	Port      int
-	AllowFrom []string // CIDRs; empty disables the rule
+	Port      int      `json:"port"`
+	AllowFrom []string `json:"allow_from"` // CIDRs; empty disables the rule
+}
+
+// Rule describes the anti-lockout rule for the GUI's read-only list.
+func (l *AntiLockout) Rule() AutoRule {
+	return AutoRule{Service: "anti-lockout", Protocol: "tcp", DstPort: l.Port, Source: l.AllowFrom}
 }
 
 // Nftables renders the complete ruleset for one instance. The output is fed
@@ -124,6 +129,10 @@ type AutoRule struct {
 	Protocol     string   `json:"protocol"` // tcp, udp, or "tcp,udp"
 	SrcPort      int      `json:"src_port,omitempty"`
 	DstPort      int      `json:"dst_port"`
+	// Source limits the source addresses. Only the anti-lockout rule
+	// (AntiLockout.Rule) sets it; AutoInputRules never does, and nft()
+	// does not render it.
+	Source []string `json:"source,omitempty"`
 }
 
 // AutoInputRules opens what the configured services need, so a user who

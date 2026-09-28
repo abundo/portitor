@@ -23,6 +23,7 @@ import (
 
 	"github.com/abundo/portitor/internal/agent"
 	"github.com/abundo/portitor/internal/builder"
+	"github.com/abundo/portitor/internal/render"
 	"github.com/abundo/portitor/models"
 )
 
@@ -332,6 +333,43 @@ func TestAutoRules(t *testing.T) {
 	}
 	if rec := env.do("GET", "/api/rules/auto?instance_id=999", nil); rec.Code != http.StatusNotFound {
 		t.Errorf("unknown instance: %d", rec.Code)
+	}
+}
+
+func TestAutoRulesAntiLockout(t *testing.T) {
+	env := newEnv(t)
+	if err := env.srv.ensureDefaultInstance(); err != nil {
+		t.Fatal(err)
+	}
+	var main models.Instance
+	env.srv.db.Where("is_default = ?", true).First(&main)
+	other := env.create("/api/instances", map[string]any{"name": "guest"})
+	fake := &statusAgent{antiLockout: &render.AntiLockout{Port: 8443, AllowFrom: []string{"192.168.1.0/24"}}}
+	env.srv.newAgent = func(*models.Settings) (agentAPI, error) { return fake, nil }
+
+	get := func(id uint) string {
+		t.Helper()
+		rec := env.do("GET", fmt.Sprintf("/api/rules/auto?instance_id=%d", id), nil)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("auto rules: %d %s", rec.Code, rec.Body)
+		}
+		var got []render.AutoRule
+		_ = json.Unmarshal(rec.Body.Bytes(), &got)
+		var out []string
+		for _, r := range got {
+			out = append(out, fmt.Sprintf("%s %s %d %v", r.Service, r.Protocol, r.DstPort, r.Source))
+		}
+		return strings.Join(out, "|")
+	}
+	if got, want := get(main.ID), "anti-lockout tcp 8443 [192.168.1.0/24]"; got != want {
+		t.Errorf("default: got %q, want %q", got, want)
+	}
+	if got := get(other); got != "" {
+		t.Errorf("anti-lockout belongs to the default instance only: %q", got)
+	}
+	fake.antiLockout = nil
+	if got := get(main.ID); got != "" {
+		t.Errorf("disabled: %q", got)
 	}
 }
 

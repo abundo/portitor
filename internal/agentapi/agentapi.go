@@ -49,6 +49,9 @@ type Status struct {
 	Programs   []ProgramStatus  `json:"programs"`
 	// NICs are the physical interfaces on the firewall, wherever they are.
 	NICs []NICStatus `json:"nics"`
+	// AntiLockout is the input rule the agent adds in the default
+	// instance for its API port; nil when disabled.
+	AntiLockout *render.AntiLockout `json:"anti_lockout,omitempty"`
 }
 
 // NICStatus is a physical interface: a real NIC (no link kind), or one the

@@ -22,11 +22,12 @@ import (
 func (a *Agent) Status(ctx context.Context) *Status {
 	a.mu.Lock()
 	st := &Status{
-		Version:    buildinfo.Version,
-		DryRun:     a.cfg.DryRun,
-		LastError:  a.lastError,
-		DHCPLeases: a.dhcp.Leases(),
-		Instances:  []InstanceStatus{},
+		Version:     buildinfo.Version,
+		DryRun:      a.cfg.DryRun,
+		LastError:   a.lastError,
+		DHCPLeases:  a.dhcp.Leases(),
+		Instances:   []InstanceStatus{},
+		AntiLockout: a.cfg.antiLockout(),
 	}
 	st.Hostname, _ = os.Hostname()
 	var doc *fwconfig.Document

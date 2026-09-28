@@ -4,6 +4,7 @@
 package web
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -53,7 +54,9 @@ func (s *Server) handleIpamTree(c *echo.Context) error {
 
 // handleAutoRules lists the input rules the agent adds for an instance's
 // services (DHCP, DNS, WireGuard), rendered from the current database. A
-// configuration with problems still lists what it can.
+// configuration with problems still lists what it can. For the default
+// instance it also asks the agent for its anti-lockout rule, which comes
+// from agent.yaml; an unreachable agent just leaves it out.
 func (s *Server) handleAutoRules(c *echo.Context) error {
 	id, err := echo.QueryParam[uint](c, "instance_id")
 	if err != nil {
@@ -68,11 +71,33 @@ func (s *Server) handleAutoRules(c *echo.Context) error {
 	if err != nil && !errors.As(err, &ve) {
 		return err
 	}
+	out := []render.AutoRule{}
+	if mi.IsDefault {
+		if l := s.antiLockout(c.Request().Context()); l != nil {
+			out = append(out, l.Rule())
+		}
+	}
 	exp := doc.Expand()
 	if in := exp.Instance(mi.Name); in != nil {
-		return c.JSON(http.StatusOK, render.AutoInputRules(in))
+		out = append(out, render.AutoInputRules(in)...)
 	}
-	return c.JSON(http.StatusOK, []render.AutoRule{})
+	return c.JSON(http.StatusOK, out)
+}
+
+// antiLockout returns the agent's anti-lockout rule, or nil when it is
+// disabled or the agent cannot be asked.
+func (s *Server) antiLockout(ctx context.Context) *render.AntiLockout {
+	a, _, err := s.agent()
+	if err != nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	st, err := a.Status(ctx)
+	if err != nil || st.AntiLockout == nil || st.AntiLockout.Port <= 0 || len(st.AntiLockout.AllowFrom) == 0 {
+		return nil
+	}
+	return st.AntiLockout
 }
 
 func (s *Server) handleNextFree(c *echo.Context) error {

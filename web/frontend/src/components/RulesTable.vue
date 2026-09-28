@@ -15,8 +15,8 @@ const props = defineProps({
   rows: { type: Array, required: true },
   // input, forward or output: input rules have no To column, output no From.
   chain: { type: String, required: true },
-  // Rules the agent adds for configured services (render.AutoRule), shown
-  // read-only above the others.
+  // Rules the agent adds for configured services and its anti-lockout rule
+  // (render.AutoRule), shown read-only above the others.
   auto: { type: Array, default: () => [] },
   // Interface zones and interfaces of the instance ({ value, description }),
   // for suggestions.
@@ -94,6 +94,20 @@ const actions = ['accept', 'drop', 'reject']
 const actionClass = { accept: 'text-success', drop: 'text-error', reject: 'text-warning' }
 const autoProtocol = (a) => (a.protocol === 'tcp,udp' ? 'tcp+udp' : a.protocol)
 const autoPorts = (a) => (a.src_port ? `${a.dst_port} (from ${a.src_port})` : `${a.dst_port}`)
+// autoFamily is the IP versions of an auto rule's source addresses.
+function autoFamily(a) {
+  if (!a.source?.length) return 'any'
+  const v6 = a.source.filter((s) => s.includes(':')).length
+  if (v6 === 0) return 'IPv4'
+  return v6 === a.source.length ? 'IPv6' : 'any'
+}
+const autoDescription = (a) =>
+  a.service === 'anti-lockout' ? 'anti-lockout, from portitor-agent config' : a.service
+const autoTitle = (a) =>
+  a.service === 'anti-lockout'
+    ? 'Added by portitor-agent so allow_from keeps reaching its API; set anti_lockout in agent.yaml to change it'
+    : 'Added for a configured service; change the service to change this rule'
+
 const hasPorts = (r) => r.protocol === 'tcp' || r.protocol === 'udp'
 
 function set(r, key, value) {
@@ -168,11 +182,7 @@ function onKeydown(event, index) {
         </tr>
       </thead>
       <tbody v-if="auto.length" class="auto-rules">
-        <tr
-          v-for="a in auto"
-          :key="a.service"
-          title="Added for a configured service; change the service to change this rule"
-        >
+        <tr v-for="a in auto" :key="a.service" :title="autoTitle(a)">
           <td class="text-center text-muted">
             <UIcon name="i-lucide-lock" class="size-3.5 align-middle" />
           </td>
@@ -187,19 +197,24 @@ function onKeydown(event, index) {
             }}</span>
           </td>
           <td v-if="hasTo"><span class="text-muted">any</span></td>
-          <td><span>any</span></td>
+          <td>
+            <span>{{ autoFamily(a) }}</span>
+          </td>
           <td>
             <span>{{ autoProtocol(a) }}</span>
           </td>
           <td>
             <span class="font-mono">{{ autoPorts(a) }}</span>
           </td>
-          <td><span class="text-muted">any</span></td>
+          <td :title="a.source?.join(', ')">
+            <span v-if="a.source?.length" class="font-mono">{{ a.source.join(', ') }}</span>
+            <span v-else class="text-muted">any</span>
+          </td>
           <td><span class="text-muted">any</span></td>
           <td><span class="font-semibold text-success">accept</span></td>
           <td />
           <td>
-            <span>{{ a.service }}</span>
+            <span>{{ autoDescription(a) }}</span>
           </td>
         </tr>
       </tbody>
