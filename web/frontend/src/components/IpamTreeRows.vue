@@ -15,11 +15,6 @@ const key = (n) => `${n.kind}:${n.id}`
 function pct(n) {
   return Math.round(n.used_frac * 100)
 }
-// Re-emit from nested levels.
-const fwd =
-  (name) =>
-  (...args) =>
-    emit(name, ...args)
 </script>
 
 <template>
@@ -112,11 +107,11 @@ const fwd =
       :depth="depth + 1"
       :collapsed="collapsed"
       :iface-name="ifaceName"
-      @toggle="fwd('toggle')"
-      @add-prefix="fwd('add-prefix')"
-      @add-address="fwd('add-address')"
-      @edit="fwd('edit')"
-      @remove="fwd('remove')"
+      @toggle="emit('toggle', $event)"
+      @add-prefix="emit('add-prefix', $event)"
+      @add-address="emit('add-address', $event)"
+      @edit="emit('edit', $event)"
+      @remove="emit('remove', $event)"
     />
   </template>
 </template>
