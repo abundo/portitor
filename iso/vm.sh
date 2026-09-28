@@ -13,6 +13,8 @@
 # The serial console goes to stdio, or to $VM_SERIAL: a file, or unix:PATH for
 # a socket to drive it from a script. An ISO
 # from `iso/build.sh --test` installs and sets itself up without questions.
+# The QEMU guest agent is on build/vm/qga.sock (try: socat - unix:build/vm/qga.sock,
+# then {"execute":"guest-ping"}).
 #
 # VM_UEFI=1 boots with OVMF instead of the BIOS.
 set -euo pipefail
@@ -28,6 +30,9 @@ args=(
 	-nic "user,model=virtio-net-pci,mac=52:54:00:00:00:01"
 	-nic "user,model=virtio-net-pci,mac=52:54:00:00:00:02,net=192.168.1.0/24,host=192.168.1.2,hostfwd=tcp:127.0.0.1:$GUI_PORT-192.168.1.1:443"
 	-display none
+	-device virtio-serial
+	-chardev "socket,path=$DIR/qga.sock,server=on,wait=off,id=qga0"
+	-device "virtserialport,chardev=qga0,name=org.qemu.guest_agent.0"
 )
 if [[ ${VM_SERIAL:-} == unix:* ]]; then
 	args+=(-serial "$VM_SERIAL,server=on,wait=off")
@@ -56,7 +61,7 @@ run)
 	exec qemu-system-x86_64 "${args[@]}"
 	;;
 *)
-	sed -n '5,17p' "$0" | sed 's/^# \{0,1\}//'
+	sed -n '5,19p' "$0" | sed 's/^# \{0,1\}//'
 	exit 2
 	;;
 esac
