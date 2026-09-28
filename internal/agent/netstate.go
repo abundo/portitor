@@ -104,6 +104,7 @@ type command struct {
 	Netns string
 	Name  string
 	Args  []string
+	Stdin []byte
 }
 
 func ipCmd(ns string, args ...string) command {

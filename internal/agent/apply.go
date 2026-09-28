@@ -147,8 +147,14 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 
 		for _, ifc := range in.Interfaces {
 			if ifc.Kind == fwconfig.KindWireGuard {
-				conf := filepath.Join(etc, "wireguard", ifc.Name+".conf")
-				if err := a.do(ctx, command{Netns: ns, Name: "wg", Args: []string{"syncconf", ifc.Name, conf}}); err != nil {
+				// Fed on stdin: the AppArmor profile for wg (Ubuntu,
+				// Debian) only lets it open files under /etc/wireguard,
+				// and pipes are not path-mediated.
+				conf := bundle.File(filepath.Join(etc, "wireguard", ifc.Name+".conf"))
+				if conf == nil {
+					return fmt.Errorf("instance %s: %s: no rendered WireGuard config", in.Name, ifc.Name)
+				}
+				if err := a.do(ctx, command{Netns: ns, Name: "wg", Args: []string{"syncconf", ifc.Name, "/dev/stdin"}, Stdin: []byte(conf.Content)}); err != nil {
 					return err
 				}
 			}
@@ -303,7 +309,7 @@ func (a *Agent) writeFile(f render.File) (bool, error) {
 }
 
 func (a *Agent) do(ctx context.Context, c command) error {
-	_, err := a.run.Run(ctx, c.Netns, c.Name, c.Args...)
+	_, err := a.run.RunInput(ctx, c.Netns, c.Stdin, c.Name, c.Args...)
 	return err
 }
 

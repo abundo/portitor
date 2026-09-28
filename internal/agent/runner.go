@@ -19,6 +19,8 @@ import (
 // and tests can swap it out.
 type Runner interface {
 	Run(ctx context.Context, netns, name string, args ...string) ([]byte, error)
+	// RunInput is Run with stdin fed from the given bytes.
+	RunInput(ctx context.Context, netns string, stdin []byte, name string, args ...string) ([]byte, error)
 }
 
 // ExecRunner runs real commands.
@@ -27,10 +29,17 @@ type ExecRunner struct {
 }
 
 func (r *ExecRunner) Run(ctx context.Context, netns, name string, args ...string) ([]byte, error) {
+	return r.RunInput(ctx, netns, nil, name, args...)
+}
+
+func (r *ExecRunner) RunInput(ctx context.Context, netns string, stdin []byte, name string, args ...string) ([]byte, error) {
 	argv := inNetns(netns, append([]string{name}, args...))
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	if stdin != nil {
+		cmd.Stdin = bytes.NewReader(stdin)
+	}
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
@@ -60,6 +69,10 @@ func inNetns(netns string, argv []string) []string {
 // the real system when the host has the tools.
 type DryRunner struct {
 	Log *OpLog
+}
+
+func (r *DryRunner) RunInput(ctx context.Context, netns string, stdin []byte, name string, args ...string) ([]byte, error) {
+	return r.Run(ctx, netns, name, args...)
 }
 
 func (r *DryRunner) Run(ctx context.Context, netns, name string, args ...string) ([]byte, error) {
