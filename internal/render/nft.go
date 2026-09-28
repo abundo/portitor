@@ -67,11 +67,7 @@ func Nftables(in *fwconfig.Instance, lockout *AntiLockout) string {
 	for _, r := range AutoInputRules(in) {
 		b.WriteString("\t\t" + r.nft() + "\n")
 	}
-	for i, r := range in.Rules {
-		if r.Chain == fwconfig.ChainInput {
-			writeRule(b, i, r, in)
-		}
-	}
+	writeRules(b, in, fwconfig.ChainInput)
 	b.WriteString("\t}\n\n")
 
 	// ----- forward -----
@@ -81,21 +77,13 @@ func Nftables(in *fwconfig.Instance, lockout *AntiLockout) string {
 	b.WriteString("\t\tct state invalid drop\n")
 	b.WriteString("\t\tct status dnat accept comment \"port forwards\"\n")
 	b.WriteString("\t\tmeta l4proto ipv6-icmp icmpv6 type { destination-unreachable, packet-too-big, time-exceeded, parameter-problem } accept\n")
-	for i, r := range in.Rules {
-		if r.Chain == fwconfig.ChainForward {
-			writeRule(b, i, r, in)
-		}
-	}
+	writeRules(b, in, fwconfig.ChainForward)
 	b.WriteString("\t}\n\n")
 
 	// ----- output -----
 	b.WriteString("\tchain output {\n")
 	b.WriteString("\t\ttype filter hook output priority filter; policy accept;\n")
-	for i, r := range in.Rules {
-		if r.Chain == fwconfig.ChainOutput {
-			writeRule(b, i, r, in)
-		}
-	}
+	writeRules(b, in, fwconfig.ChainOutput)
 	b.WriteString("\t}\n\n")
 
 	// ----- NAT -----
@@ -214,6 +202,25 @@ func ifaceMatch(b *strings.Builder, what string, in *fwconfig.Instance, inList, 
 		parts = append(parts, m.key+" "+quotedSet(ifs))
 	}
 	return parts, true
+}
+
+// writeRules renders the rules of one chain. Rules are numbered without
+// the comment rows, which become rules holding only a comment: nft keeps
+// those in the kernel ruleset, unlike # lines.
+func writeRules(b *strings.Builder, in *fwconfig.Instance, chain string) {
+	idx := 0
+	for _, r := range in.Rules {
+		if r.Kind == fwconfig.RuleKindComment {
+			if r.Chain == chain && r.Description != "" {
+				b.WriteString("\t\t" + comment("", r.Description) + "\n")
+			}
+			continue
+		}
+		if r.Chain == chain {
+			writeRule(b, idx, r, in)
+		}
+		idx++
+	}
 }
 
 func writeRule(b *strings.Builder, idx int, r fwconfig.Rule, in *fwconfig.Instance) {
@@ -379,10 +386,13 @@ func quotedSet(names []string) string {
 }
 
 // comment renders an nft comment. nft strings cannot escape quotes, so
-// they are replaced; control characters were rejected by validation.
+// they are replaced; control characters were rejected by validation. An
+// empty prefix renders desc alone.
 func comment(prefix, desc string) string {
 	s := prefix
-	if desc != "" {
+	if s == "" {
+		s = desc
+	} else if desc != "" {
 		s += ": " + desc
 	}
 	s = strings.NewReplacer(`"`, "'", `\`, "/").Replace(s)

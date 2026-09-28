@@ -103,6 +103,18 @@ function moveInChain(rows, chain, moveTo, from, to) {
   moveTo(rows.indexOf(sub[from]), rows.indexOf(sub[to]))
 }
 
+// insertInChain adds a rule (through the form) or a comment row at index
+// `at` of one chain's table, placed at the matching spot of the full list.
+function insertInChain(rows, chain, { openCreate, createAt }, kind, at) {
+  const sub = rows.filter((r) => r.chain === chain)
+  let index = rows.length
+  if (at < sub.length) index = rows.indexOf(sub[at])
+  else if (sub.length) index = rows.indexOf(sub[sub.length - 1]) + 1
+  if (kind === 'comment') return createAt({ chain, kind: 'comment', description: '' }, index)
+  openCreate({ chain }, index)
+  return null
+}
+
 // Selects can't hold '' values; map 'any' <-> ''.
 const api = {
   ...rules,
@@ -126,7 +138,7 @@ function clean(b) {
   <NeedInstance>
     <CrudPage
       title="Rules"
-      description="Evaluated top to bottom; the first match decides. Edit cells in place (changes save at once), drag the grip to reorder. Established connections are allowed, and so is what the configured services (DHCP, DNS, WireGuard) need: those input rules are shown locked and follow the services' settings. In the default instance the agent's management port stays open to its allow_from addresses. Traffic to or through the firewall that no rule accepts is dropped."
+      description="Evaluated top to bottom; the first match decides. Edit cells in place (changes save at once), drag the grip to reorder, right-click a row to insert a rule or comment. Established connections are allowed, and so is what the configured services (DHCP, DNS, WireGuard) need: those input rules are shown locked and follow the services' settings. In the default instance the agent's management port stays open to its allow_from addresses. Traffic to or through the firewall that no rule accepts is dropped."
       :api="api"
       :params="{ instance_id: store.currentId }"
       :columns="[]"
@@ -136,7 +148,7 @@ function clean(b) {
         family: 'any',
         protocol: 'any',
         action: 'accept',
-        enabled: true,
+        enabled: false,
         log: false,
         in_interfaces: [],
         out_interfaces: [],
@@ -145,9 +157,9 @@ function clean(b) {
       }"
       new-label="New rule"
       reorder="rules"
-      :item-name="(r) => `rule ${r.description || r.id}`"
+      :item-name="(r) => (r.kind === 'comment' ? 'comment' : `rule ${r.description || r.id}`)"
     >
-      <template #table="{ rows, openCreate, openEdit, remove, moveTo, saveRow }">
+      <template #table="{ rows, openCreate, openEdit, remove, moveTo, saveRow, createAt }">
         <div class="space-y-6">
           <section v-for="c in chains" :key="c.value">
             <div class="mb-2 flex items-end justify-between gap-3">
@@ -168,6 +180,9 @@ function clean(b) {
               :chain="c.value"
               :auto="c.value === 'input' ? autoRules : []"
               :ifaces="ifaceRefItems"
+              :insert="
+                (kind, at) => insertInChain(rows, c.value, { openCreate, createAt }, kind, at)
+              "
               @save="saveRow"
               @move="(from, to) => moveInChain(rows, c.value, moveTo, from, to)"
               @edit="openEdit"

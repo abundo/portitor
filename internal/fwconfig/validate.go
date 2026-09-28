@@ -228,6 +228,17 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 		default:
 			v.addf("%s: invalid chain %q", rp, r.Chain)
 		}
+		if r.Kind == RuleKindComment {
+			if len(r.InInterfaces)+len(r.OutInterfaces)+len(r.SrcAddrs)+len(r.DstAddrs) > 0 ||
+				r.Family != "" || r.Protocol != "" || r.DstPorts != "" || r.Action != "" || r.Log {
+				v.addf("%s: a comment has only a chain and a description", rp)
+			}
+			checkComment(v, rp, r.Description)
+			continue
+		}
+		if r.Kind != "" {
+			v.addf("%s: invalid kind %q", rp, r.Kind)
+		}
 		if r.Chain == ChainOutput && len(r.InInterfaces) > 0 {
 			v.addf("%s: output rules have no incoming interface", rp)
 		}

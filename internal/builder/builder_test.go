@@ -80,6 +80,7 @@ func TestBuildHome(t *testing.T) {
 	mustCreate(t, db, &models.Rule{InstanceID: main.ID, Position: 2, Chain: "forward", InInterfaces: models.StringList{"lan"}, OutInterfaces: models.StringList{"eth0"}, Action: "accept", Enabled: true, Description: "second"})
 	mustCreate(t, db, &models.Rule{InstanceID: main.ID, Position: 1, Chain: "input", InInterfaces: models.StringList{"eth0"}, Protocol: "icmp", Action: "accept", Enabled: true, Description: "first"})
 	mustCreate(t, db, &models.Rule{InstanceID: main.ID, Position: 3, Chain: "forward", Action: "accept", Enabled: false})
+	mustCreate(t, db, &models.Rule{InstanceID: main.ID, Position: 4, Chain: "forward", Kind: models.RuleKindComment, Enabled: true, Description: "a comment"})
 	mustCreate(t, db, &models.NatRule{InstanceID: main.ID, Kind: "dnat", InInterfaces: models.StringList{"eth0"}, Protocol: "tcp", DstPorts: "443", ToAddr: "192.168.1.10", Enabled: true})
 
 	doc, err := Build(db, 42)
@@ -103,8 +104,8 @@ func TestBuildHome(t *testing.T) {
 	if wg := in.Interface("wg0").WireGuard; wg == nil || len(wg.Peers) != 1 {
 		t.Errorf("wireguard peers: %+v (disabled peers must be left out)", wg)
 	}
-	if len(in.Rules) != 2 || in.Rules[0].Description != "first" {
-		t.Errorf("rules not ordered by position / disabled not skipped: %+v", in.Rules)
+	if len(in.Rules) != 3 || in.Rules[0].Description != "first" || in.Rules[2].Kind != fwconfig.RuleKindComment || in.Rules[2].Description != "a comment" {
+		t.Errorf("rules not ordered by position / disabled not skipped / comment not kept: %+v", in.Rules)
 	}
 	if len(in.DHCP.Subnets) != 1 {
 		t.Fatalf("dhcp subnets %+v", in.DHCP.Subnets)

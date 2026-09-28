@@ -193,6 +193,9 @@ type Rule struct {
 	InstanceID uint   `json:"instance_id"`
 	Position   int    `json:"position"`
 	Chain      string `json:"chain"`
+	// Kind is empty for a rule or RuleKindComment for a comment row, whose
+	// text is Description; comments only annotate the list.
+	Kind string `json:"kind"`
 	// InInterfaces and OutInterfaces hold interface and interface zone
 	// names of the instance; empty matches any.
 	InInterfaces  StringList `json:"in_interfaces"`
@@ -207,6 +210,9 @@ type Rule struct {
 	Enabled       bool       `json:"enabled"`
 	Description   string     `json:"description"`
 }
+
+// RuleKindComment marks a Rule that is a comment row between rules.
+const RuleKindComment = "comment"
 
 type NatRule struct {
 	Base

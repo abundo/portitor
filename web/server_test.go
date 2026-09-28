@@ -410,6 +410,15 @@ func TestInterfaceZones(t *testing.T) {
 	if len(in.OutInterfaces) != 0 {
 		t.Errorf("input rule kept outgoing interfaces %v", in.OutInterfaces)
 	}
+	comment := env.create("/api/rules", map[string]any{"instance_id": inst, "chain": "input", "kind": "comment", "description": " note ", "action": "bogus", "in_interfaces": []string{"lan"}})
+	var cm models.Rule
+	env.srv.db.First(&cm, comment)
+	if cm.Description != "note" || cm.Action != "" || len(cm.InInterfaces) != 0 || !cm.Enabled {
+		t.Errorf("comment row kept rule fields: %+v", cm)
+	}
+	if rec := env.do("POST", "/api/rules", map[string]any{"instance_id": inst, "chain": "input", "kind": "bogus", "action": "accept"}); rec.Code != http.StatusBadRequest {
+		t.Errorf("unknown rule kind accepted: %d", rec.Code)
+	}
 
 	// Renames follow into zones and rules.
 	env.do("PUT", "/api/interfaces/"+itoa(eth1), map[string]any{"name": "eth9"})

@@ -61,6 +61,7 @@ func TestNftablesMain(t *testing.T) {
 		"# rule 5 skipped: dmz has no enabled interfaces",
 		`iifname { "eth1", "wg0" } counter accept comment "rule 10: trusted"`,
 		`iifname "eth1.20" counter jump reject_pkt comment "rule 11"`,
+		"\t\tcomment \"'Outbound' is open\"\n",
 		`iifname "eth0" meta nfproto ipv4 tcp dport 8443 counter dnat ip to 192.168.1.10:443 comment "nat 1: NAS"`,
 		`oifname "eth0" meta nfproto ipv4 counter masquerade comment "nat 2: Internet sharing"`,
 	} {

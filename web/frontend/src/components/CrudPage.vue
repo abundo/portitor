@@ -14,8 +14,9 @@
 // suggested and accepted.
 // Column: { key, label, format: row => string, class }
 // Cells can be overridden with a `cell-<key>` slot, or the whole table with
-// the `table` slot ({ rows, openCreate, openEdit, remove, moveTo, saveRow }).
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+// the `table` slot ({ rows, openCreate, openEdit, remove, moveTo, saveRow,
+// createAt }).
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import AddrInput from '@/components/AddrInput.vue'
 import { useRowDrag } from '@/composables/useRowDrag'
@@ -45,6 +46,9 @@ const open = ref(false)
 const saving = ref(false)
 const editing = ref(null)
 const form = reactive({})
+// Index in rows where the row being created goes (with `reorder`); null
+// appends it.
+const insertAt = ref(null)
 const NONE = 0
 
 const tableColumns = computed(() => [
@@ -100,9 +104,11 @@ function fill(src) {
   }
 }
 
-// openCreate opens the form for a new row; `extra` overrides the defaults.
-function openCreate(extra = {}) {
+// openCreate opens the form for a new row; `extra` overrides the defaults
+// and `at` is the index in rows to insert it at.
+function openCreate(extra = {}, at = null) {
   editing.value = null
+  insertAt.value = at
   const d = typeof props.defaults === 'function' ? props.defaults() : props.defaults
   fill({ ...d, ...extra, ...props.params })
   open.value = true
@@ -124,7 +130,10 @@ async function save() {
   }
   try {
     if (editing.value) await props.api.update(editing.value.id, body)
-    else await props.api.create(body)
+    else {
+      const created = await props.api.create(body)
+      if (insertAt.value != null) await placeAt(created, insertAt.value)
+    }
     open.value = false
     await load()
     emit('changed')
@@ -183,6 +192,31 @@ async function moveTo(from, to) {
   }
 }
 
+// placeAt moves a just created row to index `at` of rows.
+async function placeAt(created, at) {
+  const ids = rows.value.map((r) => r.id)
+  ids.splice(at, 0, created.id)
+  await rootApi.reorder(props.reorder, ids)
+}
+
+// createAt creates a row without the form and inserts it at index `at` of
+// rows; it resolves to the created row (null on failure) once the table
+// shows it.
+async function createAt(body, at) {
+  try {
+    const created = await props.api.create({ ...body, ...props.params })
+    await placeAt(created, at)
+    rows.value = await props.api.list(props.params)
+    emit('changed')
+    await nextTick()
+    return created
+  } catch (err) {
+    toast.add({ title: errMsg(err, 'Save failed'), color: 'error' })
+    await load()
+    return null
+  }
+}
+
 const tableWrap = ref(null)
 const { onPointerDown } = useRowDrag({
   wrap: tableWrap,
@@ -233,6 +267,7 @@ defineExpose({ reload: load, openEdit, openCreate })
       :remove="remove"
       :move-to="moveTo"
       :save-row="saveRow"
+      :create-at="createAt"
     />
     <div v-else ref="tableWrap">
       <UTable :data="rows" :columns="tableColumns" class="text-sm">

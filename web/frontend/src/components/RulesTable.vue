@@ -4,7 +4,9 @@
 <script setup>
 // RulesTable: the firewall rules of one chain as a compact grid edited in
 // place. Each change saves its row (`save`); rows reorder by dragging the grip
-// (`move`, with indexes into `rows`).
+// (`move`, with indexes into `rows`). Comment rows (kind 'comment') hold one
+// text across the row. Right-click a row to insert a rule or comment above or
+// below it (`insert(kind, index)`, resolving to a created comment row).
 // Address cells take a comma-separated list of addresses, CIDRs or names;
 // From/To cells a comma-separated list of interfaces and interface zones.
 import { computed, onMounted, ref } from 'vue'
@@ -21,6 +23,8 @@ const props = defineProps({
   // Interface zones and interfaces of the instance ({ value, description }),
   // for suggestions.
   ifaces: { type: Array, required: true },
+  // insert(kind, index): add a 'rule' or 'comment' at index of rows.
+  insert: { type: Function, required: true },
 })
 const emit = defineEmits(['save', 'move', 'edit', 'remove'])
 
@@ -32,10 +36,58 @@ const { onPointerDown } = useRowDrag({
   wrap,
   label: (i) => {
     const r = props.rows[i]
-    return `${i + 1}. ${r.action} ${r.description || ''}`.trim()
+    if (isComment(r)) return `# ${r.description}`
+    return `${ruleNo.value.get(r.id)}. ${r.action} ${r.description || ''}`.trim()
   },
   onMove: (from, to) => emit('move', from, to),
 })
+
+const isComment = (r) => r.kind === 'comment'
+// ruleNo numbers the rules, leaving out comment rows.
+const ruleNo = computed(() => {
+  const m = new Map()
+  for (const r of props.rows) if (!isComment(r)) m.set(r.id, m.size + 1)
+  return m
+})
+
+// The context menu acts on the right-clicked row; outside the rules (the
+// header, the auto rules, an empty table) it inserts at the top.
+let menuIndex = 0
+function captureMenuRow(event) {
+  const tr = event.target.closest('tbody.user-rules > tr[data-index]')
+  menuIndex = tr ? Number(tr.dataset.index) : -1
+}
+const at = (below) => (menuIndex < 0 ? 0 : menuIndex + (below ? 1 : 0))
+async function insertAt(kind, index) {
+  const created = await props.insert(kind, index)
+  if (created) wrap.value?.querySelector(`[data-comment-id="${created.id}"]`)?.focus()
+}
+const contextItems = [
+  [
+    {
+      label: 'Add rule above',
+      icon: 'i-lucide-arrow-up-to-line',
+      onSelect: () => insertAt('rule', at(false)),
+    },
+    {
+      label: 'Add rule below',
+      icon: 'i-lucide-arrow-down-to-line',
+      onSelect: () => insertAt('rule', at(true)),
+    },
+  ],
+  [
+    {
+      label: 'Add comment above',
+      icon: 'i-lucide-message-square',
+      onSelect: () => insertAt('comment', at(false)),
+    },
+    {
+      label: 'Add comment below',
+      icon: 'i-lucide-message-square',
+      onSelect: () => insertAt('comment', at(true)),
+    },
+  ],
+]
 
 // ifaceTitle lists a cell's interfaces with their descriptions.
 const ifaceDesc = computed(() => new Map(props.ifaces.map((it) => [it.value, it.description])))
@@ -130,14 +182,17 @@ function setList(r, key, event) {
 }
 
 // Enter and the up/down arrows move to the same column in the next/previous
-// row, like a spreadsheet; leaving the cell saves it (change event).
+// row that has it (comment rows skip rules and the other way round), like a
+// spreadsheet; leaving the cell saves it (change event).
 function onKeydown(event, index) {
   const step = { Enter: 1, ArrowDown: 1, ArrowUp: -1 }[event.key]
   if (!step || event.isComposing) return
   const col = event.target.dataset.col
-  const next = wrap.value.querySelector(
-    `tbody.user-rules > tr:nth-child(${index + 1 + step}) [data-col="${col}"]`,
-  )
+  const trs = wrap.value.querySelectorAll('tbody.user-rules > tr')
+  let next = null
+  for (let i = index + step; !next && i >= 0 && i < trs.length; i += step) {
+    next = trs[i].querySelector(`[data-col="${col}"]`)
+  }
   event.preventDefault()
   if (next && !next.disabled) next.focus()
   else event.target.blur()
@@ -145,250 +200,294 @@ function onKeydown(event, index) {
 </script>
 
 <template>
-  <div ref="wrap" class="rules-grid overflow-auto rounded-md ring ring-default">
-    <table class="w-full min-w-[64rem] table-fixed border-collapse text-xs">
-      <colgroup>
-        <col class="w-7" />
-        <col class="w-14" />
-        <col class="w-8" />
-        <col class="w-8" />
-        <col v-if="hasFrom" class="w-28" />
-        <col v-if="hasTo" class="w-28" />
-        <col class="w-14" />
-        <col class="w-18" />
-        <col class="w-24" />
-        <col />
-        <col />
-        <col class="w-18" />
-        <col class="w-8" />
-        <col />
-      </colgroup>
-      <thead>
-        <tr>
-          <th />
-          <th />
-          <th title="Evaluated top to bottom">#</th>
-          <th title="Enabled">On</th>
-          <th v-if="hasFrom">From</th>
-          <th v-if="hasTo">To</th>
-          <th>IP</th>
-          <th>Protocol</th>
-          <th>Ports</th>
-          <th>Source</th>
-          <th>Destination</th>
-          <th>Action</th>
-          <th title="Log matches">Log</th>
-          <th>Description</th>
-        </tr>
-      </thead>
-      <tbody v-if="auto.length" class="auto-rules">
-        <tr v-for="a in auto" :key="a.service" :title="autoTitle(a)">
-          <td class="text-center text-muted">
-            <UIcon name="i-lucide-lock" class="size-3.5 align-middle" />
-          </td>
-          <td class="text-center text-muted">auto</td>
-          <td />
-          <td class="text-center">
-            <input type="checkbox" class="accent-primary" checked disabled />
-          </td>
-          <td v-if="hasFrom" :title="ifaceTitle(a.in_interfaces, 'any')">
-            <span :class="{ 'text-muted': !a.in_interfaces?.length }">{{
-              a.in_interfaces?.length ? a.in_interfaces.join(', ') : 'any'
-            }}</span>
-          </td>
-          <td v-if="hasTo"><span class="text-muted">any</span></td>
-          <td>
-            <span>{{ autoFamily(a) }}</span>
-          </td>
-          <td>
-            <span>{{ autoProtocol(a) }}</span>
-          </td>
-          <td>
-            <span class="font-mono">{{ autoPorts(a) }}</span>
-          </td>
-          <td :title="a.source?.join(', ')">
-            <span v-if="a.source?.length" class="font-mono">{{ a.source.join(', ') }}</span>
-            <span v-else class="text-muted">any</span>
-          </td>
-          <td><span class="text-muted">any</span></td>
-          <td><span class="font-semibold text-success">accept</span></td>
-          <td />
-          <td>
-            <span>{{ autoDescription(a) }}</span>
-          </td>
-        </tr>
-      </tbody>
-      <tbody class="user-rules">
-        <tr v-for="(r, i) in rows" :key="r.id" :class="{ 'rule-off': !r.enabled }">
-          <td class="keep">
-            <span
-              class="flex h-7 cursor-grab touch-none items-center justify-center text-muted select-none active:cursor-grabbing"
-              title="Drag to reorder"
-              @pointerdown="onPointerDown(i, $event)"
-            >
-              <UIcon name="i-lucide-grip-vertical" class="pointer-events-none size-3.5" />
-            </span>
-          </td>
-          <td class="keep">
-            <div class="flex justify-center">
-              <UButton
-                size="xs"
-                color="neutral"
-                variant="ghost"
-                icon="i-lucide-pencil"
-                title="Details"
-                @click="emit('edit', r)"
-              />
-              <UButton
-                size="xs"
-                color="error"
-                variant="ghost"
-                icon="i-lucide-trash"
-                title="Delete"
-                @click="emit('remove', r)"
-              />
-            </div>
-          </td>
-          <td class="text-center text-muted tabular-nums">{{ i + 1 }}</td>
-          <td class="keep text-center">
-            <input
-              type="checkbox"
-              class="accent-primary"
-              :checked="r.enabled"
-              title="Enabled"
-              @change="set(r, 'enabled', $event.target.checked)"
-            />
-          </td>
-          <td v-if="hasFrom">
-            <input
-              :value="(r.in_interfaces ?? []).join(', ')"
-              data-col="in_interfaces"
-              :list="`rules-grid-ifaces-${chain}`"
-              placeholder="any"
-              :title="ifaceTitle(r.in_interfaces, 'Incoming interfaces or interface zones')"
-              @focus="onFocus"
-              @input="onFocus"
-              @change="setList(r, 'in_interfaces', $event)"
-              @keydown="onKeydown($event, i)"
-            />
-          </td>
-          <td v-if="hasTo">
-            <input
-              :value="(r.out_interfaces ?? []).join(', ')"
-              data-col="out_interfaces"
-              :list="`rules-grid-ifaces-${chain}`"
-              placeholder="any"
-              :title="ifaceTitle(r.out_interfaces, 'Outgoing interfaces or interface zones')"
-              @focus="onFocus"
-              @input="onFocus"
-              @change="setList(r, 'out_interfaces', $event)"
-              @keydown="onKeydown($event, i)"
-            />
-          </td>
-          <td>
-            <select
-              :value="r.family"
-              data-col="family"
-              @change="set(r, 'family', $event.target.value)"
-            >
-              <option v-for="f in families" :key="f.value" :value="f.value">{{ f.label }}</option>
-            </select>
-          </td>
-          <td>
-            <select
-              :value="r.protocol"
-              data-col="protocol"
-              @change="set(r, 'protocol', $event.target.value)"
-            >
-              <option v-for="p in protocols" :key="p" :value="p">{{ p }}</option>
-            </select>
-          </td>
-          <td>
-            <input
-              :value="r.dst_ports"
-              data-col="dst_ports"
-              class="font-mono"
-              :disabled="!hasPorts(r)"
-              :placeholder="hasPorts(r) ? 'any' : ''"
-              @change="setText(r, 'dst_ports', $event)"
-              @keydown="onKeydown($event, i)"
-            />
-          </td>
-          <td>
-            <input
-              :value="(r.src_addrs ?? []).join(', ')"
-              data-col="src_addrs"
-              class="font-mono"
-              :list="`rules-grid-names-${chain}`"
-              placeholder="any"
-              :title="(r.src_addrs ?? []).join(', ')"
-              @focus="onFocus"
-              @input="onFocus"
-              @change="setList(r, 'src_addrs', $event)"
-              @keydown="onKeydown($event, i)"
-            />
-          </td>
-          <td>
-            <input
-              :value="(r.dst_addrs ?? []).join(', ')"
-              data-col="dst_addrs"
-              class="font-mono"
-              :list="`rules-grid-names-${chain}`"
-              placeholder="any"
-              :title="(r.dst_addrs ?? []).join(', ')"
-              @focus="onFocus"
-              @input="onFocus"
-              @change="setList(r, 'dst_addrs', $event)"
-              @keydown="onKeydown($event, i)"
-            />
-          </td>
-          <td>
-            <select
-              :value="r.action"
-              data-col="action"
-              class="font-semibold"
-              :class="actionClass[r.action]"
-              @change="set(r, 'action', $event.target.value)"
-            >
-              <option v-for="a in actions" :key="a" :value="a">{{ a }}</option>
-            </select>
-          </td>
-          <td class="text-center">
-            <input
-              type="checkbox"
-              class="accent-primary"
-              :checked="r.log"
-              title="Log matches"
-              @change="set(r, 'log', $event.target.checked)"
-            />
-          </td>
-          <td>
-            <input
-              :value="r.description"
-              data-col="description"
-              :title="r.description"
-              @change="setText(r, 'description', $event)"
-              @keydown="onKeydown($event, i)"
-            />
-          </td>
-        </tr>
-        <tr v-if="!rows.length && !auto.length">
-          <td :colspan="colCount" class="py-6 text-center text-muted">Nothing here yet.</td>
-        </tr>
-      </tbody>
-    </table>
-    <datalist :id="`rules-grid-names-${chain}`">
-      <option v-for="it in nameSuggestions" :key="it.value" :value="it.value" />
-    </datalist>
-    <datalist :id="`rules-grid-ifaces-${chain}`">
-      <option
-        v-for="it in ifaceSuggestions"
-        :key="it.value"
-        :value="it.value"
-        :label="it.description || undefined"
-      />
-    </datalist>
-  </div>
+  <UContextMenu :items="contextItems">
+    <div
+      ref="wrap"
+      class="rules-grid overflow-auto rounded-md ring ring-default"
+      @contextmenu.capture="captureMenuRow"
+    >
+      <table class="w-full min-w-[64rem] table-fixed border-collapse text-xs">
+        <colgroup>
+          <col class="w-7" />
+          <col class="w-14" />
+          <col class="w-8" />
+          <col class="w-8" />
+          <col v-if="hasFrom" class="w-28" />
+          <col v-if="hasTo" class="w-28" />
+          <col class="w-14" />
+          <col class="w-18" />
+          <col class="w-24" />
+          <col />
+          <col />
+          <col class="w-18" />
+          <col class="w-8" />
+          <col />
+        </colgroup>
+        <thead>
+          <tr>
+            <th />
+            <th />
+            <th title="Evaluated top to bottom">#</th>
+            <th title="Enabled">On</th>
+            <th v-if="hasFrom">From</th>
+            <th v-if="hasTo">To</th>
+            <th>IP</th>
+            <th>Protocol</th>
+            <th>Ports</th>
+            <th>Source</th>
+            <th>Destination</th>
+            <th>Action</th>
+            <th title="Log matches">Log</th>
+            <th>Description</th>
+          </tr>
+        </thead>
+        <tbody v-if="auto.length" class="auto-rules">
+          <tr v-for="a in auto" :key="a.service" :title="autoTitle(a)">
+            <td class="text-center text-muted">
+              <UIcon name="i-lucide-lock" class="size-3.5 align-middle" />
+            </td>
+            <td class="text-center text-muted">auto</td>
+            <td />
+            <td class="text-center">
+              <input type="checkbox" class="accent-primary" checked disabled />
+            </td>
+            <td v-if="hasFrom" :title="ifaceTitle(a.in_interfaces, 'any')">
+              <span :class="{ 'text-muted': !a.in_interfaces?.length }">{{
+                a.in_interfaces?.length ? a.in_interfaces.join(', ') : 'any'
+              }}</span>
+            </td>
+            <td v-if="hasTo"><span class="text-muted">any</span></td>
+            <td>
+              <span>{{ autoFamily(a) }}</span>
+            </td>
+            <td>
+              <span>{{ autoProtocol(a) }}</span>
+            </td>
+            <td>
+              <span class="font-mono">{{ autoPorts(a) }}</span>
+            </td>
+            <td :title="a.source?.join(', ')">
+              <span v-if="a.source?.length" class="font-mono">{{ a.source.join(', ') }}</span>
+              <span v-else class="text-muted">any</span>
+            </td>
+            <td><span class="text-muted">any</span></td>
+            <td><span class="font-semibold text-success">accept</span></td>
+            <td />
+            <td>
+              <span>{{ autoDescription(a) }}</span>
+            </td>
+          </tr>
+        </tbody>
+        <tbody class="user-rules">
+          <template v-for="(r, i) in rows" :key="r.id">
+            <tr v-if="isComment(r)" class="rule-comment" :data-index="i">
+              <td class="keep">
+                <span
+                  class="flex h-7 cursor-grab touch-none items-center justify-center text-muted select-none active:cursor-grabbing"
+                  title="Drag to reorder"
+                  @pointerdown="onPointerDown(i, $event)"
+                >
+                  <UIcon name="i-lucide-grip-vertical" class="pointer-events-none size-3.5" />
+                </span>
+              </td>
+              <td class="keep">
+                <div class="flex justify-end">
+                  <UButton
+                    size="xs"
+                    color="error"
+                    variant="ghost"
+                    icon="i-lucide-trash"
+                    title="Delete"
+                    @click="emit('remove', r)"
+                  />
+                </div>
+              </td>
+              <td :colspan="colCount - 2">
+                <input
+                  :value="r.description"
+                  data-col="comment"
+                  :data-comment-id="r.id"
+                  placeholder="Comment"
+                  :title="r.description"
+                  @change="setText(r, 'description', $event)"
+                  @keydown="onKeydown($event, i)"
+                />
+              </td>
+            </tr>
+            <tr v-else :class="{ 'rule-off': !r.enabled }" :data-index="i">
+              <td class="keep">
+                <span
+                  class="flex h-7 cursor-grab touch-none items-center justify-center text-muted select-none active:cursor-grabbing"
+                  title="Drag to reorder"
+                  @pointerdown="onPointerDown(i, $event)"
+                >
+                  <UIcon name="i-lucide-grip-vertical" class="pointer-events-none size-3.5" />
+                </span>
+              </td>
+              <td class="keep">
+                <div class="flex justify-center">
+                  <UButton
+                    size="xs"
+                    color="neutral"
+                    variant="ghost"
+                    icon="i-lucide-pencil"
+                    title="Details"
+                    @click="emit('edit', r)"
+                  />
+                  <UButton
+                    size="xs"
+                    color="error"
+                    variant="ghost"
+                    icon="i-lucide-trash"
+                    title="Delete"
+                    @click="emit('remove', r)"
+                  />
+                </div>
+              </td>
+              <td class="text-center text-muted tabular-nums">{{ ruleNo.get(r.id) }}</td>
+              <td class="keep text-center">
+                <input
+                  type="checkbox"
+                  class="accent-primary"
+                  :checked="r.enabled"
+                  title="Enabled"
+                  @change="set(r, 'enabled', $event.target.checked)"
+                />
+              </td>
+              <td v-if="hasFrom">
+                <input
+                  :value="(r.in_interfaces ?? []).join(', ')"
+                  data-col="in_interfaces"
+                  :list="`rules-grid-ifaces-${chain}`"
+                  placeholder="any"
+                  :title="ifaceTitle(r.in_interfaces, 'Incoming interfaces or interface zones')"
+                  @focus="onFocus"
+                  @input="onFocus"
+                  @change="setList(r, 'in_interfaces', $event)"
+                  @keydown="onKeydown($event, i)"
+                />
+              </td>
+              <td v-if="hasTo">
+                <input
+                  :value="(r.out_interfaces ?? []).join(', ')"
+                  data-col="out_interfaces"
+                  :list="`rules-grid-ifaces-${chain}`"
+                  placeholder="any"
+                  :title="ifaceTitle(r.out_interfaces, 'Outgoing interfaces or interface zones')"
+                  @focus="onFocus"
+                  @input="onFocus"
+                  @change="setList(r, 'out_interfaces', $event)"
+                  @keydown="onKeydown($event, i)"
+                />
+              </td>
+              <td>
+                <select
+                  :value="r.family"
+                  data-col="family"
+                  @change="set(r, 'family', $event.target.value)"
+                >
+                  <option v-for="f in families" :key="f.value" :value="f.value">
+                    {{ f.label }}
+                  </option>
+                </select>
+              </td>
+              <td>
+                <select
+                  :value="r.protocol"
+                  data-col="protocol"
+                  @change="set(r, 'protocol', $event.target.value)"
+                >
+                  <option v-for="p in protocols" :key="p" :value="p">{{ p }}</option>
+                </select>
+              </td>
+              <td>
+                <input
+                  :value="r.dst_ports"
+                  data-col="dst_ports"
+                  class="font-mono"
+                  :disabled="!hasPorts(r)"
+                  :placeholder="hasPorts(r) ? 'any' : ''"
+                  @change="setText(r, 'dst_ports', $event)"
+                  @keydown="onKeydown($event, i)"
+                />
+              </td>
+              <td>
+                <input
+                  :value="(r.src_addrs ?? []).join(', ')"
+                  data-col="src_addrs"
+                  class="font-mono"
+                  :list="`rules-grid-names-${chain}`"
+                  placeholder="any"
+                  :title="(r.src_addrs ?? []).join(', ')"
+                  @focus="onFocus"
+                  @input="onFocus"
+                  @change="setList(r, 'src_addrs', $event)"
+                  @keydown="onKeydown($event, i)"
+                />
+              </td>
+              <td>
+                <input
+                  :value="(r.dst_addrs ?? []).join(', ')"
+                  data-col="dst_addrs"
+                  class="font-mono"
+                  :list="`rules-grid-names-${chain}`"
+                  placeholder="any"
+                  :title="(r.dst_addrs ?? []).join(', ')"
+                  @focus="onFocus"
+                  @input="onFocus"
+                  @change="setList(r, 'dst_addrs', $event)"
+                  @keydown="onKeydown($event, i)"
+                />
+              </td>
+              <td>
+                <select
+                  :value="r.action"
+                  data-col="action"
+                  class="font-semibold"
+                  :class="actionClass[r.action]"
+                  @change="set(r, 'action', $event.target.value)"
+                >
+                  <option v-for="a in actions" :key="a" :value="a">{{ a }}</option>
+                </select>
+              </td>
+              <td class="text-center">
+                <input
+                  type="checkbox"
+                  class="accent-primary"
+                  :checked="r.log"
+                  title="Log matches"
+                  @change="set(r, 'log', $event.target.checked)"
+                />
+              </td>
+              <td>
+                <input
+                  :value="r.description"
+                  data-col="description"
+                  :title="r.description"
+                  @change="setText(r, 'description', $event)"
+                  @keydown="onKeydown($event, i)"
+                />
+              </td>
+            </tr>
+          </template>
+          <tr v-if="!rows.length && !auto.length">
+            <td :colspan="colCount" class="py-6 text-center text-muted">Nothing here yet.</td>
+          </tr>
+        </tbody>
+      </table>
+      <datalist :id="`rules-grid-names-${chain}`">
+        <option v-for="it in nameSuggestions" :key="it.value" :value="it.value" />
+      </datalist>
+      <datalist :id="`rules-grid-ifaces-${chain}`">
+        <option
+          v-for="it in ifaceSuggestions"
+          :key="it.value"
+          :value="it.value"
+          :label="it.description || undefined"
+        />
+      </datalist>
+    </div>
+  </UContextMenu>
 </template>
 
 <style>
@@ -466,6 +565,13 @@ function onKeydown(event, index) {
   line-height: 1.75rem;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.rules-grid tr.rule-comment td {
+  background: color-mix(in oklab, var(--ui-bg-elevated) 40%, transparent);
+}
+.rules-grid tr.rule-comment input {
+  font-style: italic;
+  color: var(--ui-text-muted);
 }
 .rules-grid tr.rule-off > td:not(.keep) {
   opacity: 0.45;

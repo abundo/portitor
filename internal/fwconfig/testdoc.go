@@ -54,6 +54,7 @@ func SampleDocument() Document {
 					{Chain: ChainForward, InInterfaces: []string{"vpn"}, DstAddrs: []string{"192.168.1.10", "fd00:1::10"}, Protocol: "tcp", DstPorts: "22", Action: ActionAccept, Description: "NAS ssh"},
 					{Chain: ChainInput, InInterfaces: []string{"lan", "vpn"}, Action: ActionAccept, Description: "trusted"},
 					{Chain: ChainInput, InInterfaces: []string{"iot"}, Action: ActionReject},
+					{Chain: ChainOutput, Kind: RuleKindComment, Description: `"Outbound" is open`},
 				},
 				NAT: []NATRule{
 					{Kind: NATDNAT, InInterfaces: []string{"wan"}, Protocol: "tcp", DstPorts: "8443", ToAddr: "192.168.1.10", ToPort: 443, Description: "NAS"},

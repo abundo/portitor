@@ -386,7 +386,11 @@ func (s *Server) handleDeployCheck(c *echo.Context) error {
 	counts := map[string]int{"instances": len(doc.Instances), "links": len(doc.Links)}
 	for _, in := range doc.Instances {
 		counts["interfaces"] += len(in.Interfaces)
-		counts["rules"] += len(in.Rules)
+		for _, r := range in.Rules {
+			if r.Kind != fwconfig.RuleKindComment {
+				counts["rules"]++
+			}
+		}
 		counts["nat"] += len(in.NAT)
 	}
 	return c.JSON(http.StatusOK, map[string]any{"problems": problems, "counts": counts, "generation": st.Generation})

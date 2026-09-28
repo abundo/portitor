@@ -309,6 +309,22 @@ func prepareRule(tx *gorm.DB, r, old *models.Rule) error {
 	if err := oneOf("chain", r.Chain, fwconfig.ChainInput, fwconfig.ChainForward, fwconfig.ChainOutput); err != nil {
 		return err
 	}
+	if err := oneOf("kind", r.Kind, "", models.RuleKindComment); err != nil {
+		return err
+	}
+	if r.Kind == models.RuleKindComment {
+		// A comment keeps only its chain, place and text.
+		*r = models.Rule{
+			Base: r.Base, InstanceID: r.InstanceID, Position: r.Position, Chain: r.Chain,
+			Kind: r.Kind, Description: strings.TrimSpace(r.Description), Enabled: true,
+			InInterfaces: models.StringList{}, OutInterfaces: models.StringList{},
+			SrcAddrs: models.StringList{}, DstAddrs: models.StringList{},
+		}
+		if old == nil && r.Position == 0 {
+			r.Position = nextPosition(tx, "rules", r.InstanceID)
+		}
+		return nil
+	}
 	if err := oneOf("action", r.Action, fwconfig.ActionAccept, fwconfig.ActionDrop, fwconfig.ActionReject); err != nil {
 		return err
 	}

@@ -119,6 +119,10 @@ const (
 // addresses (Family and an icmp/icmpv6 Protocol narrow it further).
 type Rule struct {
 	Chain string `json:"chain"`
+	// Kind is empty for a rule or RuleKindComment for a comment row, which
+	// has only Chain and Description and is rendered as a rule that holds
+	// nothing but an nft comment.
+	Kind string `json:"kind,omitempty"`
 	// InInterfaces match the incoming interface (not for output rules),
 	// OutInterfaces the outgoing one (not for input rules).
 	InInterfaces  []string `json:"in_interfaces,omitempty"`
@@ -132,6 +136,9 @@ type Rule struct {
 	Log           bool     `json:"log,omitempty"`
 	Description   string   `json:"description,omitempty"`
 }
+
+// RuleKindComment marks a Rule that is a comment row.
+const RuleKindComment = "comment"
 
 // NAT kinds.
 const (
