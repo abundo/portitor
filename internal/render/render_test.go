@@ -73,6 +73,8 @@ func TestNftablesMain(t *testing.T) {
 		`iifname "eth0" ip saddr @drop_v4 counter drop comment "rule 12: blocklists"`,
 		`iifname "eth0" ip6 saddr @crowdsec_v6 counter drop comment "rule 12: blocklists"`,
 		`oifname "eth0" ip daddr @drop_v4 counter jump reject_pkt comment "rule 13"`,
+		"type filter hook output priority filter; policy drop;",
+		`counter accept comment "rule 14: allow all output"`,
 		"}\ninclude \"/var/lib/portitor/iplists/crowdsec.nft\"\ninclude \"/var/lib/portitor/iplists/drop.nft\"\n",
 	} {
 		if !strings.Contains(nft, want) {

@@ -98,7 +98,7 @@ func (s *Server) Echo() *echo.Echo {
 	g.PUT("/me", s.handleUpdateMe)
 	g.POST("/me/password", s.handleChangePassword)
 
-	(&resource[models.Instance, *models.Instance]{db: s.db, order: "is_default desc, name", prepare: prepareInstance}).register(g, "/instances")
+	(&resource[models.Instance, *models.Instance]{db: s.db, order: "is_default desc, name", prepare: prepareInstance, afterCreate: seedInstance}).register(g, "/instances")
 	(&resource[models.InterfaceZone, *models.InterfaceZone]{db: s.db, filters: []string{"instance_id"}, order: "name", prepare: prepareInterfaceZone, beforeDelete: deleteInterfaceZone}).register(g, "/interface-zones")
 	(&resource[models.Interface, *models.Interface]{db: s.db, filters: []string{"instance_id"}, order: "name", prepare: prepareInterface, beforeDelete: deleteInterface}).register(g, "/interfaces")
 	(&resource[models.WgPeer, *models.WgPeer]{db: s.db, filters: []string{"interface_id"}, order: "name", prepare: prepareWgPeer, present: presentWgPeer}).register(g, "/wg/peers")
@@ -204,6 +204,9 @@ func (s *Server) ensureDefaultInstance() error {
 			return err
 		}
 		if err := tx.Create(&in).Error; err != nil {
+			return err
+		}
+		if err := seedInstance(tx, &in); err != nil {
 			return err
 		}
 		slog.Info("created default instance", "name", in.Name)

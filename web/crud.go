@@ -35,6 +35,9 @@ type resource[T any, PT model[T]] struct {
 	// prepare validates and normalises a row before it is saved, inside
 	// the save transaction. old is nil on create.
 	prepare func(tx *gorm.DB, item, old PT) error
+	// afterCreate runs after a new row is inserted (it has its id), inside
+	// the save transaction.
+	afterCreate func(tx *gorm.DB, item PT) error
 	// present adjusts rows before they are returned (derived fields).
 	present func(item PT)
 	// beforeDelete may refuse a delete, inside the delete transaction.
@@ -142,7 +145,13 @@ func (r *resource[T, PT]) save(c *echo.Context, item, old PT, status int) error 
 			}
 		}
 		if old == nil {
-			return tx.Create(item).Error
+			if err := tx.Create(item).Error; err != nil {
+				return err
+			}
+			if r.afterCreate != nil {
+				return r.afterCreate(tx, item)
+			}
+			return nil
 		}
 		return tx.Save(item).Error
 	})

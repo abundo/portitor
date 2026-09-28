@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/netip"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -146,8 +147,12 @@ func TestIPListsFollowApply(t *testing.T) {
 	doc.IPLists = doc.IPLists[:1]
 	doc.Tasks = doc.Tasks[:1]
 	in := &doc.Instances[0]
-	in.Rules = in.Rules[:len(in.Rules)-1]
-	in.Rules[len(in.Rules)-1].SrcAddrs = []string{"@crowdsec"}
+	in.Rules = slices.DeleteFunc(in.Rules, func(r fwconfig.Rule) bool { return slices.Equal(r.DstAddrs, []string{"@drop"}) })
+	for i := range in.Rules {
+		if slices.Contains(in.Rules[i].SrcAddrs, "@drop") {
+			in.Rules[i].SrcAddrs = []string{"@crowdsec"}
+		}
+	}
 	if _, err := a.Apply(ctx, doc, 0); err != nil {
 		t.Fatal(err)
 	}

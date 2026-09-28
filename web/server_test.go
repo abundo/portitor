@@ -681,4 +681,9 @@ func TestEnsureDefaultInstance(t *testing.T) {
 	if len(got) != 1 || got[0].Name != DefaultInstanceName || !got[0].IsDefault || got[0].DhcpLeaseTime != 86400 {
 		t.Errorf("instances: %+v", got)
 	}
+	var rules []models.Rule
+	env.srv.db.Find(&rules)
+	if len(rules) != 1 || rules[0].Chain != "output" || rules[0].Action != "accept" || !rules[0].Enabled || len(rules[0].OutInterfaces) != 0 {
+		t.Errorf("seeded rules: %+v", rules)
+	}
 }

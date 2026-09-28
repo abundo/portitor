@@ -57,6 +57,7 @@ func SampleDocument() Document {
 					{Chain: ChainOutput, Kind: RuleKindComment, Description: `"Outbound" is open`},
 					{Chain: ChainInput, InInterfaces: []string{"wan"}, SrcAddrs: []string{"@crowdsec", "@drop", "198.51.100.0/24"}, Action: ActionDrop, Description: "blocklists"},
 					{Chain: ChainForward, OutInterfaces: []string{"wan"}, Family: "ipv4", DstAddrs: []string{"@drop"}, Action: ActionReject},
+					{Chain: ChainOutput, Action: ActionAccept, Description: "allow all output"},
 				},
 				NAT: []NATRule{
 					{Kind: NATDNAT, InInterfaces: []string{"wan"}, Protocol: "tcp", DstPorts: "8443", ToAddr: "192.168.1.10", ToPort: 443, Description: "NAS"},

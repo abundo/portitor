@@ -96,7 +96,7 @@ func TestIPListsAndTasks(t *testing.T) {
 	if len(doc.Tasks) != 2 || doc.Tasks[0].Name != "backup" || doc.Tasks[1].IPList != "cs" || doc.Tasks[1].Schedule != "*/5 * * * *" || doc.Tasks[1].Command != "" {
 		t.Errorf("tasks: %+v", doc.Tasks)
 	}
-	if got := doc.Instances[0].Rules[0].SrcAddrs; strings.Join(got, " ") != "@cs @drop 192.0.2.0/24" {
+	if got := doc.Instances[0].Rules[1].SrcAddrs; strings.Join(got, " ") != "@cs @drop 192.0.2.0/24" {
 		t.Errorf("rule addresses: %v", got)
 	}
 	red := redactDoc(*doc)

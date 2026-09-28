@@ -101,6 +101,18 @@ func prepareInstance(tx *gorm.DB, in, old *models.Instance) error {
 	return nil
 }
 
+// seedInstance adds the rules a new instance starts with. The output chain
+// drops by default, so an explicit rule keeps the firewall's own traffic
+// open until the user narrows it.
+func seedInstance(tx *gorm.DB, in *models.Instance) error {
+	return tx.Create(&models.Rule{
+		InstanceID: in.ID, Position: nextPosition(tx, "rules", in.ID), Chain: fwconfig.ChainOutput,
+		Action: fwconfig.ActionAccept, Enabled: true, Description: "allow all output",
+		InInterfaces: models.StringList{}, OutInterfaces: models.StringList{},
+		SrcAddrs: models.StringList{}, DstAddrs: models.StringList{},
+	}).Error
+}
+
 func prepareInterface(tx *gorm.DB, i, old *models.Interface) error {
 	if err := instanceExists(tx, i.InstanceID); err != nil {
 		return err

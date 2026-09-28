@@ -94,7 +94,12 @@ func Nftables(in *fwconfig.Instance, lockout *AntiLockout, paths Paths) string {
 
 	// ----- output -----
 	b.WriteString("\tchain output {\n")
-	b.WriteString("\t\ttype filter hook output priority filter; policy accept;\n")
+	b.WriteString("\t\ttype filter hook output priority filter; policy drop;\n")
+	b.WriteString("\t\tct state established,related accept\n")
+	b.WriteString("\t\tct state invalid drop\n")
+	b.WriteString("\t\toif \"lo\" accept\n")
+	b.WriteString("\t\tmeta l4proto ipv6-icmp icmpv6 type { nd-router-solicit, nd-router-advert, nd-neighbor-solicit, nd-neighbor-advert, destination-unreachable, packet-too-big, time-exceeded, parameter-problem } accept\n")
+	b.WriteString("\t\tmeta l4proto icmp icmp type { destination-unreachable, time-exceeded, parameter-problem } accept\n")
 	writeRules(b, in, fwconfig.ChainOutput)
 	b.WriteString("\t}\n\n")
 
