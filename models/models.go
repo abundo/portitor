@@ -144,6 +144,11 @@ type Interface struct {
 	WgPrivateKey string `json:"-"`
 	WgPublicKey  string `json:"wg_public_key"`
 	WgListenPort int    `json:"wg_listen_port"`
+	// WgEndpoint (host:port) and WgKeepalive go into generated client
+	// configs. An empty endpoint falls back to Settings.WgEndpointHost
+	// and the listen port.
+	WgEndpoint  string `json:"wg_endpoint"`
+	WgKeepalive int    `json:"wg_keepalive"`
 }
 
 type WgPeer struct {

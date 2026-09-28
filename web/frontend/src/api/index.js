@@ -56,6 +56,7 @@ export const api = {
       .get(`/wg/peers/${peerId}/config`, { params: split ? { split: 1 } : {} })
       .then((r) => r.data),
   wgRekey: (ifaceId) => http.post(`/interfaces/${ifaceId}/wg-rekey`, {}).then((r) => r.data),
+  wgNextFree: (ifaceId) => http.get(`/interfaces/${ifaceId}/wg-next-free`).then((r) => r.data),
 
   settings: () => http.get('/settings').then((r) => r.data),
   saveSettings: (body) => http.put('/settings', body).then((r) => r.data),

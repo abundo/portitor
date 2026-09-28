@@ -2,7 +2,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import QRCode from 'qrcode'
 import CrudPage from '@/components/CrudPage.vue'
@@ -28,6 +28,27 @@ async function load() {
 onMounted(load)
 
 const selected = computed(() => tunnels.value.find((t) => t.id === selectedId.value))
+
+// Suggested tunnel addresses for the next new peer, one free address per
+// address family of the interface.
+const freeAddrs = ref([])
+const freeWarnings = ref([])
+async function loadFree() {
+  freeAddrs.value = []
+  freeWarnings.value = []
+  if (!selectedId.value) return
+  try {
+    const r = await api.wgNextFree(selectedId.value)
+    freeAddrs.value = r.addresses
+    freeWarnings.value = r.warnings ?? []
+  } catch {
+    // no suggestion; the field stays empty
+  }
+}
+watch(selectedId, loadFree)
+function peerDefaults() {
+  return { enabled: true, allowed_ips: [...freeAddrs.value], keepalive: 0, public_key: '' }
+}
 const tunnelItems = computed(() => tunnels.value.map((t) => ({ label: t.name, value: t.id })))
 
 // Handshakes from the agent status, by peer public key.
@@ -70,7 +91,20 @@ const columns = [
   { key: 'handshake', label: 'Last handshake' },
   { key: 'enabled', label: 'Enabled' },
 ]
-const fields = [
+// What the generated client config uses when the peer leaves endpoint and
+// keepalive empty: the interface's client defaults.
+const clientEndpoint = computed(() => {
+  const t = selected.value
+  if (!t) return ''
+  if (t.wg_endpoint) return t.wg_endpoint
+  return t.wg_listen_port
+    ? `the endpoint host under Settings, port ${t.wg_listen_port}`
+    : 'none set'
+})
+const clientKeepalive = computed(() =>
+  selected.value?.wg_keepalive ? `${selected.value.wg_keepalive}s` : 'off',
+)
+const fields = computed(() => [
   { key: 'name', label: 'Name', required: true, placeholder: 'phone' },
   { key: 'description', label: 'Description' },
   {
@@ -84,16 +118,22 @@ const fields = [
     label: 'Allowed IPs',
     type: 'addrs',
     placeholder: '10.99.0.2/32',
-    hint: "The peer's tunnel address, plus networks behind it for site-to-site.",
+    hint: "The peer's tunnel address, plus networks behind it for site-to-site. New peers get the next free addresses of the interface's prefixes.",
   },
   {
     key: 'endpoint',
     label: 'Endpoint',
     placeholder: 'host:port (only for peers the firewall dials)',
+    hint: `Empty: the firewall waits for the peer to connect. The client config uses the interface default (${clientEndpoint.value}).`,
   },
-  { key: 'keepalive', label: 'Keepalive (seconds)', type: 'number' },
+  {
+    key: 'keepalive',
+    label: 'Keepalive (seconds)',
+    type: 'number',
+    hint: `0: the firewall sends no keepalives. The client config uses the interface default (${clientKeepalive.value}).`,
+  },
   { key: 'enabled', label: 'Enabled', type: 'switch' },
-]
+])
 
 // ----- client config -----
 const cfgOpen = ref(false)
@@ -150,6 +190,16 @@ function copy(text) {
           <div class="text-muted">Listen port</div>
           <div class="font-mono">{{ selected.wg_listen_port || '—' }}</div>
         </div>
+        <div v-if="selected" class="text-sm">
+          <div class="text-muted">Client endpoint</div>
+          <div class="font-mono">{{ selected.wg_endpoint || '—' }}</div>
+        </div>
+        <div v-if="selected" class="text-sm">
+          <div class="text-muted">Client keepalive</div>
+          <div class="font-mono">
+            {{ selected.wg_keepalive ? `${selected.wg_keepalive}s` : 'off' }}
+          </div>
+        </div>
         <UButton
           class="ml-auto"
           color="neutral"
@@ -159,6 +209,14 @@ function copy(text) {
           @click="rekey"
         />
       </div>
+      <UAlert
+        v-for="w in freeWarnings"
+        :key="w"
+        color="warning"
+        variant="subtle"
+        icon="i-lucide-triangle-alert"
+        :title="w"
+      />
       <CrudPage
         v-if="selected"
         :key="selected.id"
@@ -168,8 +226,9 @@ function copy(text) {
         :params="{ interface_id: selected.id }"
         :columns="columns"
         :fields="fields"
-        :defaults="{ enabled: true, allowed_ips: [], keepalive: 0, public_key: '' }"
+        :defaults="peerDefaults"
         new-label="New peer"
+        @changed="loadFree"
       >
         <template #cell-handshake="{ row }">
           <span class="text-xs">{{ ago(handshakes[row.public_key]?.latest_handshake) }}</span>

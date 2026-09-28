@@ -11,6 +11,7 @@ import (
 	"math"
 	"net/netip"
 	"sort"
+	"strings"
 
 	"github.com/abundo/portitor/models"
 )
@@ -174,50 +175,101 @@ func Enclosing(prefixes []models.IpamPrefix, addr netip.Addr) (netip.Prefix, boo
 // broadcast addresses are skipped (except /31, /32); for IPv6 the
 // subnet-router anycast address (except /127, /128).
 func NextFree(prefix models.IpamPrefix, prefixes []models.IpamPrefix, addrs []models.IpamAddress) (netip.Addr, error) {
-	pfx, err := netip.ParsePrefix(prefix.Prefix)
+	ips, err := NextFreeCommon([]models.IpamPrefix{prefix}, prefixes, addrs)
 	if err != nil {
 		return netip.Addr{}, err
 	}
-	pfx = pfx.Masked()
+	return ips[0], nil
+}
+
+// NextFreeCommon is NextFree over several prefixes at once: it picks the
+// lowest host number that is free in every one of them, so a dual-stack
+// peer gets e.g. 10.99.0.2 and fd99::2. It returns one address per prefix.
+func NextFreeCommon(targets []models.IpamPrefix, prefixes []models.IpamPrefix, addrs []models.IpamAddress) ([]netip.Addr, error) {
 	used := map[netip.Addr]bool{}
 	for _, a := range addrs {
 		if ip, err := netip.ParseAddr(a.Address); err == nil {
 			used[ip] = true
 		}
 	}
-	var children []netip.Prefix
-	for _, p := range prefixes {
-		if c, err := netip.ParsePrefix(p.Prefix); err == nil && contains(pfx, c.Masked()) {
-			children = append(children, c.Masked())
-		}
+	type target struct {
+		pfx      netip.Prefix
+		children []netip.Prefix
+		rs, re   netip.Addr
 	}
-	var rs, re netip.Addr
-	if prefix.DhcpEnabled {
-		rs, _ = netip.ParseAddr(prefix.DhcpRangeStart)
-		re, _ = netip.ParseAddr(prefix.DhcpRangeEnd)
-	}
-	ip := pfx.Addr()
-	if (pfx.Addr().Is4() && pfx.Bits() < 31) || (pfx.Addr().Is6() && pfx.Bits() < 127) {
-		ip = ip.Next()
-	}
-	for i := 0; i < 1<<16 && pfx.Contains(ip); i++ {
-		if pfx.Addr().Is4() && pfx.Bits() < 31 && !pfx.Contains(ip.Next()) {
-			break // broadcast
+	var ts []target
+	var names []string
+	for _, p := range targets {
+		pfx, err := netip.ParsePrefix(p.Prefix)
+		if err != nil {
+			return nil, err
 		}
-		free := !used[ip]
-		if rs.IsValid() && re.IsValid() && ip.Compare(rs) >= 0 && ip.Compare(re) <= 0 {
-			free = false
-		}
-		for _, c := range children {
-			if c.Contains(ip) {
-				free = false
-				break
+		t := target{pfx: pfx.Masked()}
+		for _, q := range prefixes {
+			if c, err := netip.ParsePrefix(q.Prefix); err == nil && contains(t.pfx, c.Masked()) {
+				t.children = append(t.children, c.Masked())
 			}
 		}
-		if free {
-			return ip, nil
+		if p.DhcpEnabled {
+			t.rs, _ = netip.ParseAddr(p.DhcpRangeStart)
+			t.re, _ = netip.ParseAddr(p.DhcpRangeEnd)
 		}
-		ip = ip.Next()
+		ts = append(ts, t)
+		names = append(names, t.pfx.String())
 	}
-	return netip.Addr{}, fmt.Errorf("no free address in %s", pfx)
+	if len(ts) == 0 {
+		return nil, fmt.Errorf("no prefix")
+	}
+	// free reports whether host number n of t is a usable, unused address;
+	// ok is false once n is past the end of the prefix.
+	free := func(t target, n int) (ip netip.Addr, isFree, ok bool) {
+		ip = addHost(t.pfx.Addr(), n)
+		if !ip.IsValid() || !t.pfx.Contains(ip) {
+			return ip, false, false
+		}
+		small := (ip.Is4() && t.pfx.Bits() >= 31) || (ip.Is6() && t.pfx.Bits() >= 127)
+		if !small && (n == 0 || (ip.Is4() && !t.pfx.Contains(ip.Next()))) {
+			return ip, false, true // network/anycast or broadcast
+		}
+		if used[ip] || (t.rs.IsValid() && t.re.IsValid() && ip.Compare(t.rs) >= 0 && ip.Compare(t.re) <= 0) {
+			return ip, false, true
+		}
+		for _, c := range t.children {
+			if c.Contains(ip) {
+				return ip, false, true
+			}
+		}
+		return ip, true, true
+	}
+	for n := 0; n < 1<<16; n++ {
+		out := make([]netip.Addr, len(ts))
+		all := true
+		for i, t := range ts {
+			ip, isFree, ok := free(t, n)
+			if !ok {
+				return nil, fmt.Errorf("no free address in %s", strings.Join(names, ", "))
+			}
+			out[i] = ip
+			all = all && isFree
+		}
+		if all {
+			return out, nil
+		}
+	}
+	return nil, fmt.Errorf("no free address in %s", strings.Join(names, ", "))
+}
+
+// addHost returns a+n, or the zero Addr on overflow.
+func addHost(a netip.Addr, n int) netip.Addr {
+	b := a.AsSlice()
+	carry := n
+	for i := len(b) - 1; i >= 0 && carry > 0; i-- {
+		v := int(b[i]) + carry
+		b[i], carry = byte(v), v>>8
+	}
+	if carry > 0 {
+		return netip.Addr{}
+	}
+	out, _ := netip.AddrFromSlice(b)
+	return out
 }

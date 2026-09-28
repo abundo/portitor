@@ -203,9 +203,10 @@ func (s *Server) handleWgClientConfig(c *echo.Context) error {
 		ServerPublicKey: ifc.WgPublicKey,
 		PresharedKey:    peer.PresharedKey,
 		AllowedIPs:      []string{"0.0.0.0/0", "::/0"},
-		Keepalive:       25,
+		Keepalive:       ifc.WgKeepalive,
+		Endpoint:        ifc.WgEndpoint,
 	}
-	if st.WgEndpointHost != "" && ifc.WgListenPort > 0 {
+	if cc.Endpoint == "" && st.WgEndpointHost != "" && ifc.WgListenPort > 0 {
 		host := st.WgEndpointHost
 		if a, err := netip.ParseAddr(host); err == nil && a.Is6() {
 			host = "[" + host + "]"
@@ -233,9 +234,120 @@ func (s *Server) handleWgClientConfig(c *echo.Context) error {
 		warnings = append(warnings, "The client's private key is not stored here (its public key was pasted); fill it in on the client.")
 	}
 	if cc.Endpoint == "" {
-		warnings = append(warnings, "Set the public endpoint host under Settings, and a listen port on the interface.")
+		warnings = append(warnings, "Set the public endpoint on the interface (or the endpoint host under Settings, and a listen port on the interface).")
 	}
 	return c.JSON(http.StatusOK, map[string]any{"config": render.WireGuardClientConf(cc), "warnings": warnings})
+}
+
+// handleWgNextFree suggests allowed IPs for a new peer: per address family
+// of the WireGuard interface, a host address of the IPAM prefix holding
+// the interface's address that is neither in IPAM nor in the allowed IPs of
+// a peer of the instance. Both families get the same host number if one is
+// free in both (10.99.0.2/32 and fd99::2/128).
+func (s *Server) handleWgNextFree(c *echo.Context) error {
+	id, err := echo.PathParam[uint](c, "id")
+	if err != nil {
+		return errJSON(c, http.StatusNotFound, "not found")
+	}
+	var ifc models.Interface
+	if err := s.db.First(&ifc, id).Error; err != nil || ifc.Kind != fwconfig.KindWireGuard {
+		return errJSON(c, http.StatusNotFound, "no such WireGuard interface")
+	}
+	var prefixes []models.IpamPrefix
+	var addrs []models.IpamAddress
+	s.db.Where("instance_id = ?", ifc.InstanceID).Find(&prefixes)
+	s.db.Where("instance_id = ?", ifc.InstanceID).Find(&addrs)
+
+	// Peers' allowed IPs count as used: hosts as addresses, networks
+	// behind a peer as prefixes.
+	var peers []models.WgPeer
+	s.db.Where("interface_id IN (?)", s.db.Model(&models.Interface{}).Select("id").Where("instance_id = ?", ifc.InstanceID)).Find(&peers)
+	var objs []models.AddressObject
+	s.db.Find(&objs)
+	set := netobj.New(objs)
+	used, usedPrefixes := addrs, prefixes
+	for _, p := range peers {
+		list, err := set.Prefixes(p.AllowedIPs)
+		if err != nil {
+			continue
+		}
+		for _, e := range list {
+			pfx, err := netip.ParsePrefix(e)
+			if err != nil {
+				continue
+			}
+			if pfx.IsSingleIP() {
+				used = append(used, models.IpamAddress{Address: pfx.Addr().String()})
+			} else {
+				usedPrefixes = append(usedPrefixes, models.IpamPrefix{Prefix: pfx.Masked().String()})
+			}
+		}
+	}
+
+	// One prefix per address family, IPv4 first: the interface's first
+	// address in each family decides it.
+	var targets []models.IpamPrefix
+	var warnings []string
+	seen := map[bool]bool{} // by Is4
+	for _, a := range addrs {
+		if a.InterfaceID == nil || *a.InterfaceID != ifc.ID {
+			continue
+		}
+		ip, err := netip.ParseAddr(a.Address)
+		if err != nil {
+			continue
+		}
+		pfx, ok := ipam.Enclosing(prefixes, ip)
+		if !ok {
+			warnings = append(warnings, fmt.Sprintf("%s on %s is not inside any IPAM prefix; add its prefix (e.g. %s) under IP addresses to get a suggestion.", ip, ifc.Name, suggestPrefix(ip)))
+			continue
+		}
+		if seen[ip.Is4()] {
+			continue
+		}
+		for _, p := range prefixes {
+			if q, err := netip.ParsePrefix(p.Prefix); err == nil && q.Masked() == pfx {
+				seen[ip.Is4()] = true
+				if ip.Is4() {
+					targets = append([]models.IpamPrefix{p}, targets...)
+				} else {
+					targets = append(targets, p)
+				}
+				break
+			}
+		}
+	}
+	out := []string{}
+	if len(targets) > 0 {
+		// The same host number in every family if possible, else each
+		// family on its own.
+		ips, err := ipam.NextFreeCommon(targets, usedPrefixes, used)
+		if err != nil {
+			ips = nil
+			for _, t := range targets {
+				ip, err := ipam.NextFree(t, usedPrefixes, used)
+				if err != nil {
+					warnings = append(warnings, err.Error())
+					continue
+				}
+				ips = append(ips, ip)
+			}
+		}
+		for _, ip := range ips {
+			out = append(out, netip.PrefixFrom(ip, ip.BitLen()).String())
+		}
+	}
+	return c.JSON(http.StatusOK, map[string]any{"addresses": out, "warnings": warnings})
+}
+
+// suggestPrefix is the usual subnet around a tunnel address: /24 for
+// IPv4, /64 for IPv6.
+func suggestPrefix(ip netip.Addr) string {
+	bits := 64
+	if ip.Is4() {
+		bits = 24
+	}
+	return netip.PrefixFrom(ip, bits).Masked().String()
 }
 
 // ----- settings & users -----

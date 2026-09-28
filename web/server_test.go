@@ -205,6 +205,35 @@ func TestValidationAndSecrets(t *testing.T) {
 	if peer.Code != http.StatusCreated || !strings.Contains(peer.Body.String(), `"has_client_key":true`) {
 		t.Fatalf("peer: %d %s", peer.Code, peer.Body)
 	}
+
+	// Free peer addresses follow the interface's addresses, skipping IPAM
+	// and existing peers.
+	env.create("/api/ipam/prefixes", map[string]any{"instance_id": inst, "prefix": "10.99.0.0/24"})
+	env.create("/api/ipam/prefixes", map[string]any{"instance_id": inst, "prefix": "fd99::/64"})
+	env.create("/api/ipam/addresses", map[string]any{"instance_id": inst, "address": "10.99.0.1", "interface_id": ifc.ID})
+	env.create("/api/ipam/addresses", map[string]any{"instance_id": inst, "address": "fd99::1", "interface_id": ifc.ID})
+	env.create("/api/ipam/addresses", map[string]any{"instance_id": inst, "address": "10.99.0.3"})
+	env.create("/api/ipam/addresses", map[string]any{"instance_id": inst, "address": "172.25.34.1", "interface_id": ifc.ID})
+	free := env.do("GET", "/api/interfaces/"+itoa(ifc.ID)+"/wg-next-free", nil)
+	if !strings.Contains(free.Body.String(), "172.25.34.1 on wg0 is not inside any IPAM prefix") {
+		t.Errorf("no warning for an address outside IPAM prefixes: %s", free.Body)
+	}
+	if !strings.Contains(free.Body.String(), `"addresses":["10.99.0.4/32","fd99::4/128"]`) {
+		t.Errorf("next free: %d %s", free.Code, free.Body)
+	}
+	// Client config uses the interface's endpoint and keepalive.
+	if rec := env.do("PUT", "/api/interfaces/"+itoa(ifc.ID), map[string]any{"wg_endpoint": "vpn.example.org:4500", "wg_keepalive": 15}); rec.Code != http.StatusOK {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+	var p models.WgPeer
+	env.srv.db.Where("name = ?", "phone").First(&p)
+	conf := env.do("GET", "/api/wg/peers/"+itoa(p.ID)+"/config", nil).Body.String()
+	if !strings.Contains(conf, "Endpoint = vpn.example.org:4500") || !strings.Contains(conf, "PersistentKeepalive = 15") {
+		t.Errorf("client config: %s", conf)
+	}
+	if rec := env.do("PUT", "/api/interfaces/"+itoa(ifc.ID), map[string]any{"wg_endpoint": "no-port"}); rec.Code != http.StatusBadRequest {
+		t.Errorf("endpoint without port accepted: %d", rec.Code)
+	}
 }
 
 func itoa(n uint) string {

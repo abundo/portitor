@@ -70,3 +70,19 @@ func TestNextFree(t *testing.T) {
 		t.Fatal("expected full (.7 is broadcast)")
 	}
 }
+
+func TestNextFreeCommon(t *testing.T) {
+	v4 := models.IpamPrefix{Prefix: "10.99.0.0/24"}
+	v6 := models.IpamPrefix{Prefix: "fd99::/64"}
+	addrs := []models.IpamAddress{{Address: "10.99.0.1"}, {Address: "fd99::1"}}
+	ips, err := NextFreeCommon([]models.IpamPrefix{v4, v6}, nil, addrs)
+	if err != nil || ips[0].String() != "10.99.0.2" || ips[1].String() != "fd99::2" {
+		t.Fatalf("%v %v", ips, err)
+	}
+	// .2 is taken in IPv4 only, ::3 in IPv6 only: both move to 4.
+	addrs = append(addrs, models.IpamAddress{Address: "10.99.0.2"}, models.IpamAddress{Address: "fd99::3"})
+	ips, err = NextFreeCommon([]models.IpamPrefix{v4, v6}, nil, addrs)
+	if err != nil || ips[0].String() != "10.99.0.4" || ips[1].String() != "fd99::4" {
+		t.Fatalf("%v %v", ips, err)
+	}
+}

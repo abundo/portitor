@@ -84,6 +84,20 @@ const fields = [
     show: (f) => f.kind === 'wireguard',
     hint: 'Opened automatically in the firewall. 0 for outgoing-only tunnels.',
   },
+  {
+    key: 'wg_endpoint',
+    label: 'Public endpoint for clients',
+    placeholder: 'vpn.example.org:51820',
+    show: (f) => f.kind === 'wireguard',
+    hint: 'host:port written into generated client configs. Empty: the endpoint host under Settings and the listen port.',
+  },
+  {
+    key: 'wg_keepalive',
+    label: 'Client keepalive (seconds)',
+    type: 'number',
+    show: (f) => f.kind === 'wireguard',
+    hint: 'PersistentKeepalive in generated client configs; 0 disables it.',
+  },
 ]
 
 function addressesOf(row) {
@@ -108,6 +122,8 @@ function addressesOf(row) {
         mtu: 0,
         vlan_id: 0,
         wg_listen_port: 0,
+        wg_endpoint: '',
+        wg_keepalive: 25,
       }"
       new-label="New interface"
       @changed="(reload(), loadAddrs())"

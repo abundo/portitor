@@ -155,6 +155,15 @@ func prepareInterface(tx *gorm.DB, i, old *models.Interface) error {
 		if i.WgListenPort < 0 || i.WgListenPort > 65535 {
 			return bad("listen port must be 0-65535")
 		}
+		i.WgEndpoint = strings.TrimSpace(i.WgEndpoint)
+		if i.WgEndpoint != "" && !fwconfig.ValidEndpoint(i.WgEndpoint) {
+			return bad("public endpoint must be host:port")
+		}
+		if i.WgKeepalive < 0 || i.WgKeepalive > 65535 {
+			return bad("keepalive must be 0-65535")
+		}
+	default:
+		i.WgEndpoint, i.WgKeepalive = "", 0
 	}
 	if i.Kind != fwconfig.KindVLAN {
 		i.Parent, i.VlanID = "", 0

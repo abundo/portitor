@@ -119,6 +119,7 @@ func (s *Server) Echo() *echo.Echo {
 	g.POST("/nat/reorder", s.handleReorder("nat_rules"))
 	g.GET("/wg/peers/:id/config", s.handleWgClientConfig)
 	g.POST("/interfaces/:id/wg-rekey", s.handleWgRekey)
+	g.GET("/interfaces/:id/wg-next-free", s.handleWgNextFree)
 
 	g.GET("/settings", s.handleGetSettings)
 	g.PUT("/settings", s.handlePutSettings)
