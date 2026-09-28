@@ -273,6 +273,34 @@ func TestDeployEndToEnd(t *testing.T) {
 	}
 }
 
+func TestAutoRules(t *testing.T) {
+	env := newEnv(t)
+	inst := env.create("/api/instances", map[string]any{"name": "main"})
+	env.create("/api/interfaces", map[string]any{"instance_id": inst, "name": "wan", "kind": "physical", "enabled": true, "ipv4_mode": "dhcp"})
+	env.create("/api/interfaces", map[string]any{"instance_id": inst, "name": "wg0", "kind": "wireguard", "enabled": true, "ipv4_mode": "none", "wg_listen_port": 51820})
+
+	rec := env.do("GET", fmt.Sprintf("/api/rules/auto?instance_id=%d", inst), nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("auto rules: %d %s", rec.Code, rec.Body)
+	}
+	var got []struct {
+		Service      string   `json:"service"`
+		InInterfaces []string `json:"in_interfaces"`
+		DstPort      int      `json:"dst_port"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &got)
+	var names []string
+	for _, r := range got {
+		names = append(names, fmt.Sprintf("%s %v %d", r.Service, r.InInterfaces, r.DstPort))
+	}
+	if want := "dhcp client [wan] 68|wireguard wg0 [] 51820"; strings.Join(names, "|") != want {
+		t.Errorf("got %q, want %q", strings.Join(names, "|"), want)
+	}
+	if rec := env.do("GET", "/api/rules/auto?instance_id=999", nil); rec.Code != http.StatusNotFound {
+		t.Errorf("unknown instance: %d", rec.Code)
+	}
+}
+
 func TestInterfaceZones(t *testing.T) {
 	env := newEnv(t)
 	inst := env.create("/api/instances", map[string]any{"name": "main"})

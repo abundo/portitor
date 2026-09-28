@@ -59,8 +59,8 @@ func Nftables(in *fwconfig.Instance, lockout *AntiLockout) string {
 			fmt.Fprintf(b, "\t\tip6 saddr %s tcp dport %d accept comment \"anti-lockout\"\n", set(v6), lockout.Port)
 		}
 	}
-	for _, line := range autoInputRules(in) {
-		b.WriteString("\t\t" + line + "\n")
+	for _, r := range AutoInputRules(in) {
+		b.WriteString("\t\t" + r.nft() + "\n")
 	}
 	for i, r := range in.Rules {
 		if r.Chain == fwconfig.ChainInput {
@@ -115,10 +115,21 @@ func Nftables(in *fwconfig.Instance, lockout *AntiLockout) string {
 	return b.String()
 }
 
-// autoInputRules opens what the configured services need, so a user who
+// AutoRule is an input accept rule for a configured service, added in
+// front of the user's input rules. The GUI lists them read-only.
+type AutoRule struct {
+	Service string `json:"service"`
+	// InInterfaces limits the rule to these interfaces; empty is any.
+	InInterfaces []string `json:"in_interfaces"`
+	Protocol     string   `json:"protocol"` // tcp, udp, or "tcp,udp"
+	SrcPort      int      `json:"src_port,omitempty"`
+	DstPort      int      `json:"dst_port"`
+}
+
+// AutoInputRules opens what the configured services need, so a user who
 // enables the DHCP server on lan doesn't also have to write the rule.
-func autoInputRules(in *fwconfig.Instance) []string {
-	var out []string
+func AutoInputRules(in *fwconfig.Instance) []AutoRule {
+	out := []AutoRule{}
 	var dhcpClient []string
 	for _, ifc := range in.Interfaces {
 		if ifc.Enabled && ifc.IPv4Mode == fwconfig.ModeDHCP {
@@ -126,7 +137,7 @@ func autoInputRules(in *fwconfig.Instance) []string {
 		}
 	}
 	if len(dhcpClient) > 0 {
-		out = append(out, fmt.Sprintf("iifname %s udp sport 67 udp dport 68 accept comment \"auto: dhcp client\"", quotedSet(dhcpClient)))
+		out = append(out, AutoRule{Service: "dhcp client", InInterfaces: dhcpClient, Protocol: "udp", SrcPort: 67, DstPort: 68})
 	}
 	if in.DHCP.Enabled {
 		var ifs []string
@@ -137,23 +148,41 @@ func autoInputRules(in *fwconfig.Instance) []string {
 		}
 		sort.Strings(ifs)
 		if len(ifs) > 0 {
-			out = append(out, fmt.Sprintf("iifname %s udp dport 67 accept comment \"auto: dhcp server\"", quotedSet(ifs)))
+			out = append(out, AutoRule{Service: "dhcp server", InInterfaces: ifs, Protocol: "udp", DstPort: 67})
 		}
 		if ifs6 := dhcp6Interfaces(in); len(ifs6) > 0 {
-			out = append(out, fmt.Sprintf("iifname %s udp dport 547 accept comment \"auto: dhcpv6 server\"", quotedSet(ifs6)))
+			out = append(out, AutoRule{Service: "dhcpv6 server", InInterfaces: ifs6, Protocol: "udp", DstPort: 547})
 		}
 	}
 	if in.DNS.Enabled && len(in.DNS.ListenInterfaces) > 0 {
 		ifs := append([]string(nil), in.DNS.ListenInterfaces...)
 		sort.Strings(ifs)
-		out = append(out, fmt.Sprintf("iifname %s meta l4proto { tcp, udp } th dport 53 accept comment \"auto: dns server\"", quotedSet(ifs)))
+		out = append(out, AutoRule{Service: "dns server", InInterfaces: ifs, Protocol: "tcp,udp", DstPort: 53})
 	}
 	for _, ifc := range in.Interfaces {
 		if ifc.Enabled && ifc.Kind == fwconfig.KindWireGuard && ifc.WireGuard != nil && ifc.WireGuard.ListenPort > 0 {
-			out = append(out, fmt.Sprintf("udp dport %d accept comment \"auto: wireguard %s\"", ifc.WireGuard.ListenPort, ifc.Name))
+			out = append(out, AutoRule{Service: "wireguard " + ifc.Name, Protocol: "udp", DstPort: ifc.WireGuard.ListenPort})
 		}
 	}
 	return out
+}
+
+// nft renders an auto rule as one nft rule.
+func (r AutoRule) nft() string {
+	var parts []string
+	if len(r.InInterfaces) > 0 {
+		parts = append(parts, "iifname "+quotedSet(r.InInterfaces))
+	}
+	if r.Protocol == "tcp,udp" {
+		parts = append(parts, fmt.Sprintf("meta l4proto { tcp, udp } th dport %d", r.DstPort))
+	} else {
+		if r.SrcPort > 0 {
+			parts = append(parts, fmt.Sprintf("%s sport %d", r.Protocol, r.SrcPort))
+		}
+		parts = append(parts, fmt.Sprintf("%s dport %d", r.Protocol, r.DstPort))
+	}
+	parts = append(parts, "accept", comment("auto", r.Service))
+	return strings.Join(parts, " ")
 }
 
 // ifaceMatch renders the iifname/oifname matches of a rule. ok is false

@@ -46,6 +46,9 @@ export const api = {
     http.put(`/dns/zones/${zoneId}/records`, records).then((r) => r.data),
   nextFree: (prefixId) =>
     http.get(`/ipam/prefixes/${prefixId}/next-free`).then((r) => r.data.address),
+  // Input rules the agent adds for the instance's services, read-only.
+  autoRules: (instanceId) =>
+    http.get('/rules/auto', { params: { instance_id: instanceId } }).then((r) => r.data ?? []),
   reorder: (kind, ids) => http.post(`/${kind}/reorder`, { ids }),
   wgClientConfig: (peerId, split) =>
     http

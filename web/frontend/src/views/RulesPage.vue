@@ -5,10 +5,20 @@
 import CrudPage from '@/components/CrudPage.vue'
 import NeedInstance from '@/components/NeedInstance.vue'
 import RulesTable from '@/components/RulesTable.vue'
-import { rules } from '@/api'
+import { ref, watch } from 'vue'
+import { api as backend, rules } from '@/api'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
 
 const { store, ifaceRefItems } = useInstanceRefs()
+
+// Input rules for DHCP, DNS and WireGuard come from the services'
+// configuration; they are shown read-only above the input rules.
+const autoRules = ref([])
+async function loadAutoRules() {
+  if (!store.currentId) return
+  autoRules.value = await backend.autoRules(store.currentId).catch(() => [])
+}
+watch(() => store.currentId, loadAutoRules, { immediate: true })
 const opt = (list) => list.map((v) => ({ label: v || 'any', value: v }))
 
 const fields = [
@@ -116,7 +126,7 @@ function clean(b) {
   <NeedInstance>
     <CrudPage
       title="Rules"
-      description="Evaluated top to bottom; the first match decides. Edit cells in place (changes save at once), drag the grip to reorder. Established connections, DHCP/DNS for enabled services and WireGuard ports are allowed automatically. Forwarded traffic that no rule accepts is dropped."
+      description="Evaluated top to bottom; the first match decides. Edit cells in place (changes save at once), drag the grip to reorder. Established connections are allowed, and so is what the configured services (DHCP, DNS, WireGuard) need: those input rules are shown locked and follow the services' settings. In the default instance the agent's management port stays open to its allow_from addresses. Traffic to or through the firewall that no rule accepts is dropped."
       :api="api"
       :params="{ instance_id: store.currentId }"
       :columns="[]"
@@ -156,6 +166,7 @@ function clean(b) {
             <RulesTable
               :rows="rows.filter((r) => r.chain === c.value)"
               :chain="c.value"
+              :auto="c.value === 'input' ? autoRules : []"
               :ifaces="ifaceRefItems"
               @save="saveRow"
               @move="(from, to) => moveInChain(rows, c.value, moveTo, from, to)"

@@ -51,6 +51,30 @@ func (s *Server) handleIpamTree(c *echo.Context) error {
 	return c.JSON(http.StatusOK, tree)
 }
 
+// handleAutoRules lists the input rules the agent adds for an instance's
+// services (DHCP, DNS, WireGuard), rendered from the current database. A
+// configuration with problems still lists what it can.
+func (s *Server) handleAutoRules(c *echo.Context) error {
+	id, err := echo.QueryParam[uint](c, "instance_id")
+	if err != nil {
+		return errJSON(c, http.StatusBadRequest, "instance_id is required")
+	}
+	var mi models.Instance
+	if err := s.db.First(&mi, id).Error; err != nil {
+		return errJSON(c, http.StatusNotFound, "not found")
+	}
+	doc, err := builder.Build(s.db, 0)
+	var ve *fwconfig.ValidationError
+	if err != nil && !errors.As(err, &ve) {
+		return err
+	}
+	exp := doc.Expand()
+	if in := exp.Instance(mi.Name); in != nil {
+		return c.JSON(http.StatusOK, render.AutoInputRules(in))
+	}
+	return c.JSON(http.StatusOK, []render.AutoRule{})
+}
+
 func (s *Server) handleNextFree(c *echo.Context) error {
 	id, err := echo.PathParam[uint](c, "id")
 	if err != nil {

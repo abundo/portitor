@@ -15,6 +15,9 @@ const props = defineProps({
   rows: { type: Array, required: true },
   // input, forward or output: input rules have no To column, output no From.
   chain: { type: String, required: true },
+  // Rules the agent adds for configured services (render.AutoRule), shown
+  // read-only above the others.
+  auto: { type: Array, default: () => [] },
   // Interface zones and interfaces of the instance ({ value, description }),
   // for suggestions.
   ifaces: { type: Array, required: true },
@@ -89,6 +92,8 @@ const families = [
 const protocols = ['any', 'tcp', 'udp', 'icmp', 'icmpv6']
 const actions = ['accept', 'drop', 'reject']
 const actionClass = { accept: 'text-success', drop: 'text-error', reject: 'text-warning' }
+const autoProtocol = (a) => (a.protocol === 'tcp,udp' ? 'tcp+udp' : a.protocol)
+const autoPorts = (a) => (a.src_port ? `${a.dst_port} (from ${a.src_port})` : `${a.dst_port}`)
 const hasPorts = (r) => r.protocol === 'tcp' || r.protocol === 'udp'
 
 function set(r, key, value) {
@@ -117,7 +122,7 @@ function onKeydown(event, index) {
   if (!step || event.isComposing) return
   const col = event.target.dataset.col
   const next = wrap.value.querySelector(
-    `tbody > tr:nth-child(${index + 1 + step}) [data-col="${col}"]`,
+    `tbody.user-rules > tr:nth-child(${index + 1 + step}) [data-col="${col}"]`,
   )
   event.preventDefault()
   if (next && !next.disabled) next.focus()
@@ -162,7 +167,43 @@ function onKeydown(event, index) {
           <th>Description</th>
         </tr>
       </thead>
-      <tbody>
+      <tbody v-if="auto.length" class="auto-rules">
+        <tr
+          v-for="a in auto"
+          :key="a.service"
+          title="Added for a configured service; change the service to change this rule"
+        >
+          <td class="text-center text-muted">
+            <UIcon name="i-lucide-lock" class="size-3.5 align-middle" />
+          </td>
+          <td class="text-center text-muted">auto</td>
+          <td />
+          <td class="text-center">
+            <input type="checkbox" class="accent-primary" checked disabled />
+          </td>
+          <td v-if="hasFrom" :title="ifaceTitle(a.in_interfaces, 'any')">
+            <span :class="{ 'text-muted': !a.in_interfaces?.length }">{{
+              a.in_interfaces?.length ? a.in_interfaces.join(', ') : 'any'
+            }}</span>
+          </td>
+          <td v-if="hasTo"><span class="text-muted">any</span></td>
+          <td><span>any</span></td>
+          <td>
+            <span>{{ autoProtocol(a) }}</span>
+          </td>
+          <td>
+            <span class="font-mono">{{ autoPorts(a) }}</span>
+          </td>
+          <td><span class="text-muted">any</span></td>
+          <td><span class="text-muted">any</span></td>
+          <td><span class="font-semibold text-success">accept</span></td>
+          <td />
+          <td>
+            <span>{{ a.service }}</span>
+          </td>
+        </tr>
+      </tbody>
+      <tbody class="user-rules">
         <tr v-for="(r, i) in rows" :key="r.id" :class="{ 'rule-off': !r.enabled }">
           <td class="keep">
             <span
@@ -316,7 +357,7 @@ function onKeydown(event, index) {
             />
           </td>
         </tr>
-        <tr v-if="!rows.length">
+        <tr v-if="!rows.length && !auto.length">
           <td :colspan="colCount" class="py-6 text-center text-muted">Nothing here yet.</td>
         </tr>
       </tbody>
@@ -396,6 +437,20 @@ function onKeydown(event, index) {
 .rules-grid option {
   background: var(--ui-bg);
   color: var(--ui-text);
+}
+.rules-grid tbody.auto-rules td {
+  background: color-mix(in oklab, var(--ui-bg-elevated) 50%, transparent);
+  border-block-end: 1px solid var(--ui-border-accented);
+}
+.rules-grid tbody.auto-rules tr:last-child td {
+  border-block-end: 2px solid var(--ui-border-accented);
+}
+.rules-grid tbody.auto-rules td > span {
+  display: block;
+  padding-inline: 0.375rem;
+  line-height: 1.75rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .rules-grid tr.rule-off > td:not(.keep) {
   opacity: 0.45;

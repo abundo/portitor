@@ -112,6 +112,7 @@ func (s *Server) Echo() *echo.Echo {
 	g.PUT("/dns/zones/:id/records", s.handleZoneRecords)
 	g.GET("/ipam/tree", s.handleIpamTree)
 	g.GET("/ipam/prefixes/:id/next-free", s.handleNextFree)
+	g.GET("/rules/auto", s.handleAutoRules)
 	g.POST("/rules/reorder", s.handleReorder("rules"))
 	g.POST("/nat/reorder", s.handleReorder("nat_rules"))
 	g.GET("/wg/peers/:id/config", s.handleWgClientConfig)
