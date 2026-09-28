@@ -173,6 +173,10 @@ function copy(text) {
     <div v-else class="space-y-4">
       <div class="card flex flex-wrap items-center gap-4">
         <USelect v-model="selectedId" :items="tunnelItems" class="w-40" />
+        <div v-if="selected?.description" class="min-w-0 text-sm">
+          <div class="text-muted">Description</div>
+          <div>{{ selected.description }}</div>
+        </div>
         <div v-if="selected" class="min-w-0 text-sm">
           <div class="text-muted">Public key</div>
           <div class="flex items-center gap-1 font-mono break-all">
