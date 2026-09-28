@@ -148,13 +148,12 @@ func TestUpdateMe(t *testing.T) {
 	if err := json.Unmarshal(env.do("GET", "/api/me", nil).Body.Bytes(), &me); err != nil {
 		t.Fatal(err)
 	}
-	if me.Username != "root" || me.FullName != "Ada Admin" || me.Email != "ada@example.org" {
+	if me.Username != "admin" || me.FullName != "Ada Admin" || me.Email != "ada@example.org" {
 		t.Errorf("got %+v", me)
 	}
 	for _, body := range []map[string]string{
-		{"username": ""},
-		{"username": "root", "email": "not an address"},
-		{"username": "root", "full_name": "a\nb"},
+		{"email": "not an address"},
+		{"full_name": "a\nb"},
 	} {
 		if rec := env.do("PUT", "/api/me", body); rec.Code != http.StatusBadRequest {
 			t.Errorf("%v: %d", body, rec.Code)

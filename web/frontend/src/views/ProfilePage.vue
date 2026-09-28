@@ -10,7 +10,6 @@ import { useAuthStore } from '@/stores/auth'
 const toast = useToast()
 const auth = useAuthStore()
 const form = reactive({
-  username: auth.user?.username ?? '',
   full_name: auth.user?.full_name ?? '',
   email: auth.user?.email ?? '',
 })
@@ -30,7 +29,7 @@ async function save() {
     <div class="mb-3 text-lg font-semibold">My settings</div>
     <form class="space-y-3" @submit.prevent="save">
       <UFormField label="Username" help="Used to log in.">
-        <UInput v-model="form.username" class="w-full" autocomplete="username" />
+        <UInput :model-value="auth.user?.username" class="w-full" autocomplete="username" disabled />
       </UFormField>
       <UFormField label="Full name">
         <UInput v-model="form.full_name" class="w-full" autocomplete="name" />

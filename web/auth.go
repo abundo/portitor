@@ -213,23 +213,19 @@ func (s *Server) handleMe(c *echo.Context) error {
 	return c.JSON(http.StatusOK, currentUser(c))
 }
 
-// handleUpdateMe changes the caller's own username, full name and email.
+// handleUpdateMe changes the caller's own full name and email. The username
+// cannot be changed here.
 func (s *Server) handleUpdateMe(c *echo.Context) error {
 	var req struct {
-		Username string `json:"username"`
 		FullName string `json:"full_name"`
 		Email    string `json:"email"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return errJSON(c, http.StatusBadRequest, "invalid request")
 	}
-	req.Username = strings.TrimSpace(req.Username)
 	req.FullName = strings.TrimSpace(req.FullName)
 	req.Email = strings.TrimSpace(req.Email)
-	if req.Username == "" {
-		return errJSON(c, http.StatusBadRequest, "username is required")
-	}
-	if strings.ContainsFunc(req.Username+req.FullName, unicode.IsControl) {
+	if strings.ContainsFunc(req.FullName, unicode.IsControl) {
 		return errJSON(c, http.StatusBadRequest, "control characters are not allowed")
 	}
 	if req.Email != "" {
@@ -239,7 +235,7 @@ func (s *Server) handleUpdateMe(c *echo.Context) error {
 	}
 	u := currentUser(c)
 	err := s.db.Model(u).Updates(map[string]any{
-		"username": req.Username, "full_name": req.FullName, "email": req.Email,
+		"full_name": req.FullName, "email": req.Email,
 	}).Error
 	if err != nil {
 		return dbError(c, err)
