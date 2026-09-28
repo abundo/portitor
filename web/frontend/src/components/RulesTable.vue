@@ -321,17 +321,29 @@ const nameSuggestions = computed(() =>
 
 // rowServiceItems adds the services a rule names that the list lacks, so
 // they stay visible (and can be unticked), after "any", which unticks them
-// all.
+// all. The same list is returned until it changes: the page re-renders on
+// every log line, and new items make an open menu scroll back to the top.
+const baseServiceItems = computed(() => [
+  { label: 'any', value: 'any', description: 'clears the list' },
+  ...objects.serviceItems,
+])
+const knownServices = computed(() => new Set(objects.serviceItems.map((it) => it.value)))
+let extraServiceItems = { base: null, byKey: new Map() }
 function rowServiceItems(r) {
-  const list = objects.serviceItems
-  const known = new Set(list.map((it) => it.value))
-  const extra = (r.services ?? []).filter((n) => !known.has(n))
-  return [
-    { label: 'any', value: 'any', description: 'clears the list' },
-    ...list,
-    ...extra.map((n) => ({ label: n, value: n, description: 'unknown service' })),
-  ]
+  const base = baseServiceItems.value
+  const extra = (r.services ?? []).filter((n) => !knownServices.value.has(n))
+  if (!extra.length) return base
+  if (extraServiceItems.base !== base) extraServiceItems = { base, byKey: new Map() }
+  const key = extra.join(',')
+  let items = extraServiceItems.byKey.get(key)
+  if (!items) {
+    items = [...base, ...extra.map((n) => ({ label: n, value: n, description: 'unknown service' }))]
+    extraServiceItems.byKey.set(key, items)
+  }
+  return items
 }
+const serviceFilterFields = ['label', 'description']
+const serviceSelectUi = { content: 'min-w-96' }
 function setServices(r, list) {
   set(r, 'services', list.includes('any') ? [] : list)
 }
@@ -773,7 +785,7 @@ function onKeydown(event, index) {
                   multiple
                   :items="rowServiceItems(r)"
                   value-key="value"
-                  :filter-fields="['label', 'description']"
+                  :filter-fields="serviceFilterFields"
                   :create-item="{ position: 'bottom' }"
                   variant="none"
                   size="xs"
@@ -781,7 +793,7 @@ function onKeydown(event, index) {
                   data-col="services"
                   :title="serviceTitle(r)"
                   class="service-select w-full font-mono"
-                  :ui="{ content: 'min-w-96' }"
+                  :ui="serviceSelectUi"
                   @update:model-value="setServices(r, $event)"
                   @create="createService(r, $event)"
                 />
