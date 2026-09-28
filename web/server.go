@@ -150,6 +150,9 @@ func (s *Server) Serve(ctx context.Context) error {
 	if err := s.cfg.validateForServe(); err != nil {
 		return err
 	}
+	if err := s.ensureDefaultInstance(); err != nil {
+		return err
+	}
 	e := s.Echo()
 	sc := echo.StartConfig{Address: s.cfg.Bind, HideBanner: true}
 	slog.Info("portitor-web listening", "addr", s.cfg.Bind, "dev", s.cfg.Dev, "tls", s.cfg.TLSCert != "")
@@ -163,6 +166,29 @@ func (s *Server) Serve(ctx context.Context) error {
 		return nil
 	}
 	return err
+}
+
+// DefaultInstanceName is the instance created on start when there is none.
+const DefaultInstanceName = "main"
+
+// ensureDefaultInstance creates the default instance if there are no
+// instances, since everything else belongs to one.
+func (s *Server) ensureDefaultInstance() error {
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		var n int64
+		if err := tx.Model(&models.Instance{}).Count(&n).Error; err != nil || n > 0 {
+			return err
+		}
+		in := models.Instance{Name: DefaultInstanceName, IsDefault: true}
+		if err := prepareInstance(tx, &in, nil); err != nil {
+			return err
+		}
+		if err := tx.Create(&in).Error; err != nil {
+			return err
+		}
+		slog.Info("created default instance", "name", in.Name)
+		return nil
+	})
 }
 
 func (s *Server) settings() (*models.Settings, error) {

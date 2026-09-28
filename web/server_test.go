@@ -512,3 +512,17 @@ func TestRememberMe(t *testing.T) {
 		t.Errorf("after password change: MaxAge %d", c.MaxAge)
 	}
 }
+
+func TestEnsureDefaultInstance(t *testing.T) {
+	env := newEnv(t)
+	for range 2 {
+		if err := env.srv.ensureDefaultInstance(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var got []models.Instance
+	env.srv.db.Find(&got)
+	if len(got) != 1 || got[0].Name != DefaultInstanceName || !got[0].IsDefault || got[0].DhcpLeaseTime != 86400 {
+		t.Errorf("instances: %+v", got)
+	}
+}

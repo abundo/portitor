@@ -123,7 +123,7 @@ systemctl enable --now portitor-web
 ```
 
 Then open the GUI. Enter the agent URL, token and fingerprint under *Settings*,
-create the default instance, and deploy.
+configure the default instance `main` (created on first start), and deploy.
 
 ## Not yet supported
 
