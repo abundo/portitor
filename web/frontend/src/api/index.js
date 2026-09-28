@@ -54,6 +54,8 @@ export const api = {
   // Input rules the agent adds for the instance's services, read-only.
   autoRules: (instanceId) =>
     http.get('/rules/auto', { params: { instance_id: instanceId } }).then((r) => r.data ?? []),
+  // Port names that port fields accept ([{ name, port }], fwconfig.Services).
+  services: () => http.get('/services').then((r) => r.data),
   reorder: (kind, ids) => http.post(`/${kind}/reorder`, { ids }),
   wgClientConfig: (peerId, split) =>
     http

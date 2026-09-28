@@ -2,12 +2,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { defineStore } from 'pinia'
-import { addressObjects, ipLists } from '@/api'
+import { addressObjects, api, ipLists } from '@/api'
 
 // Named hosts and prefixes, offered as suggestions in address fields, and
-// IP lists, which rules take as "@name".
+// IP lists, which rules take as "@name", and the port names port fields
+// accept.
 export const useObjectStore = defineStore('objects', {
-  state: () => ({ list: [], ipLists: [], loaded: false }),
+  state: () => ({ list: [], ipLists: [], services: [], loaded: false }),
   getters: {
     names: (s) => s.list.map((o) => o.name),
     listRefs: (s) => s.ipLists.map((l) => `@${l.name}`),
@@ -15,7 +16,11 @@ export const useObjectStore = defineStore('objects', {
   actions: {
     async load(force = false) {
       if (this.loaded && !force) return
-      ;[this.list, this.ipLists] = await Promise.all([addressObjects.list(), ipLists.list()])
+      ;[this.list, this.ipLists, this.services] = await Promise.all([
+        addressObjects.list(),
+        ipLists.list(),
+        api.services(),
+      ])
       this.loaded = true
     },
   },

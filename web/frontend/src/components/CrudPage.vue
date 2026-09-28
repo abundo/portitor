@@ -5,13 +5,14 @@
 // CrudPage: a table of one REST resource with a create/edit modal, driven
 // by column and field schemas.
 //
-// Field: { key, label, type: text|number|password|switch|select|multiselect|tags|addrs|addr|textarea,
+// Field: { key, label, type: text|number|password|switch|select|multiselect|tags|addrs|addr|ports|textarea,
 //          items (array or form => array), nullable, placeholder, hint,
 //          required, show: form => bool, disabled: form => bool }
 // multiselect: an array of strings picked from items (strings, or
 // { label, value, description } to show a description under each name).
 // addrs/addr: address list / single address; names of hosts/prefixes are
 // suggested and accepted, and with `lists: true` IP lists ("@name").
+// ports: a port list, with service names and their ports suggested.
 // Column: { key, label, format: (row, rows) => string, class }
 // Cells can be overridden with a `cell-<key>` slot, or the whole table with
 // the `table` slot ({ rows, openCreate, openEdit, remove, moveTo, saveRow,
@@ -19,9 +20,12 @@
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import AddrInput from '@/components/AddrInput.vue'
+import PortMenu from '@/components/PortMenu.vue'
+import { usePortMenu } from '@/composables/usePortMenu'
 import { useRowDrag } from '@/composables/useRowDrag'
 import { api as rootApi } from '@/api'
 import { errMsg } from '@/api/http'
+import { useObjectStore } from '@/stores/objects'
 
 const props = defineProps({
   title: { type: String, required: true },
@@ -236,7 +240,14 @@ const { onPointerDown } = useRowDrag({
 })
 
 watch(() => JSON.stringify(props.params), load)
-onMounted(load)
+const ports = usePortMenu()
+const portMenu = ports.menu
+const objects = useObjectStore()
+
+onMounted(() => {
+  load()
+  if (props.fields.some((f) => f.type === 'ports')) objects.load().catch(() => {})
+})
 defineExpose({ reload: load, openEdit, openCreate })
 </script>
 
@@ -405,6 +416,21 @@ defineExpose({ reload: load, openEdit, openCreate })
               :placeholder="f.placeholder"
               :disabled="f.disabled?.(form)"
             />
+            <div v-else-if="f.type === 'ports'" class="relative">
+              <UInput
+                v-model="form[f.key]"
+                class="w-full"
+                :ui="{ base: 'font-mono' }"
+                autocomplete="off"
+                :placeholder="f.placeholder"
+                :disabled="f.disabled?.(form)"
+                @click="ports.open"
+                @input="ports.open"
+                @blur="ports.close"
+                @keydown="ports.onKeydown"
+              />
+              <PortMenu :menu="portMenu" @pick="ports.pick" />
+            </div>
             <UTextarea
               v-else-if="f.type === 'textarea'"
               v-model="form[f.key]"

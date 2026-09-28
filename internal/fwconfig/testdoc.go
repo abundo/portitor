@@ -48,7 +48,7 @@ func SampleDocument() Document {
 				Rules: []Rule{
 					{Chain: ChainForward, InInterfaces: []string{"lan"}, OutInterfaces: []string{"wan"}, Action: ActionAccept, Description: "LAN to Internet"},
 					{Chain: ChainForward, InInterfaces: []string{"vpn"}, Action: ActionAccept, Description: "VPN anywhere"},
-					{Chain: ChainForward, InInterfaces: []string{"iot"}, OutInterfaces: []string{"wan"}, Protocol: "tcp", DstPorts: "80,443,8883", Action: ActionAccept, Description: "IoT cloud"},
+					{Chain: ChainForward, InInterfaces: []string{"iot"}, OutInterfaces: []string{"wan"}, Protocol: "tcp", DstPorts: "http,https,8883", Action: ActionAccept, Description: "IoT cloud"},
 					{Chain: ChainForward, InInterfaces: []string{"guest"}, OutInterfaces: []string{"eth0"}, Action: ActionAccept},
 					{Chain: ChainForward, InInterfaces: []string{"dmz"}, Action: ActionAccept, Description: "DMZ (no interfaces yet)"},
 					{Chain: ChainInput, InInterfaces: []string{"wan"}, Protocol: "icmp", Action: ActionAccept, Description: "ping"},

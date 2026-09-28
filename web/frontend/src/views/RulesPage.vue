@@ -120,7 +120,8 @@ const fields = [
   {
     key: 'dst_ports',
     label: 'Destination ports',
-    placeholder: '22, 80-90',
+    type: 'ports',
+    placeholder: '22, https, 80-90',
     show: (f) => f.protocol === 'tcp' || f.protocol === 'udp',
   },
   {

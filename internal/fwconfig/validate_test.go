@@ -199,9 +199,27 @@ func TestParsePorts(t *testing.T) {
 	if err != nil || len(got) != 3 || got[1] != (PortRange{80, 90}) {
 		t.Fatalf("got %v %v", got, err)
 	}
-	for _, bad := range []string{"", "0", "65536", "a", "5-", "1,,2"} {
+	got, err = ParsePorts("ssh, SNMP,netbios-ns,8000-8080")
+	if err != nil || len(got) != 4 || got[0] != (PortRange{22, 22}) || got[1] != (PortRange{161, 161}) ||
+		got[2] != (PortRange{137, 137}) || got[3] != (PortRange{8000, 8080}) {
+		t.Fatalf("names: got %v %v", got, err)
+	}
+	for _, bad := range []string{"", "0", "65536", "a", "5-", "1,,2", "nosuchservice", "ssh-https"} {
 		if _, err := ParsePorts(bad); err == nil {
 			t.Errorf("%q: expected error", bad)
+		}
+	}
+}
+
+func TestServices(t *testing.T) {
+	seen := map[string]bool{}
+	for i, s := range Services {
+		if seen[s.Name] {
+			t.Errorf("duplicate service %q", s.Name)
+		}
+		seen[s.Name] = true
+		if s.Port < 1 || s.Port > 65535 || (i > 0 && s.Port < Services[i-1].Port) {
+			t.Errorf("service %q: port %d out of range or order", s.Name, s.Port)
 		}
 	}
 }

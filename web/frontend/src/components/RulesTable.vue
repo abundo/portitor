@@ -13,9 +13,11 @@
 // delete it (`remove`).
 // Address cells take a comma-separated list of addresses, CIDRs, names or
 // IP lists (@name); From/To cells a comma-separated list of interfaces and
-// interface zones.
+// interface zones; the Dst port cell ports, ranges and service names (ssh).
 import { computed, onMounted, ref } from 'vue'
+import PortMenu from '@/components/PortMenu.vue'
 import { useColumnResize } from '@/composables/useColumnResize'
+import { usePortMenu } from '@/composables/usePortMenu'
 import { useRowDrag } from '@/composables/useRowDrag'
 import { useObjectStore } from '@/stores/objects'
 import { bytes } from '@/utils/bytes'
@@ -281,6 +283,31 @@ const nameSuggestions = computed(() =>
     typed.value,
   ),
 )
+
+const servicePort = computed(() => new Map(objects.services.map((it) => [it.name, it.port])))
+// The port cell offers service names with their ports (usePortMenu), in a
+// menu fixed to the viewport so the cell's overflow does not clip it.
+const ports = usePortMenu()
+const portMenu = ports.menu
+// A picked name changes the input without a change event, so leaving the
+// cell saves it if it differs.
+function onPortBlur(r, event) {
+  ports.close()
+  if (event.target.value.trim() !== (r.dst_ports ?? '')) setText(r, 'dst_ports', event)
+}
+// portTitle shows the numbers of the service names in a port cell.
+function portTitle(r) {
+  if (!hasPorts(r)) return 'Ports need protocol tcp or udp'
+  const parts = (r.dst_ports ?? '').split(/[\s,]+/).filter((s) => s)
+  if (!parts.length) return 'Ports, ranges or service names, such as 22, 8000-8080, https'
+  return parts
+    .map((p) =>
+      servicePort.value.has(p.toLowerCase())
+        ? `${p}: ${servicePort.value.get(p.toLowerCase())}`
+        : p,
+    )
+    .join('\n')
+}
 
 const hasFrom = computed(() => props.chain !== 'output')
 const hasTo = computed(() => props.chain !== 'input')
@@ -704,11 +731,22 @@ function onKeydown(event, index) {
                 <input
                   :value="r.dst_ports"
                   data-col="dst_ports"
+                  :data-row="r.id"
                   class="font-mono"
                   :disabled="!hasPorts(r)"
                   :placeholder="hasPorts(r) ? 'any' : ''"
-                  @change="setText(r, 'dst_ports', $event)"
-                  @keydown="onKeydown($event, i)"
+                  :title="portTitle(r)"
+                  autocomplete="off"
+                  @click="ports.open"
+                  @input="ports.open"
+                  @blur="onPortBlur(r, $event)"
+                  @keydown="ports.onKeydown($event) || onKeydown($event, i)"
+                />
+                <PortMenu
+                  v-if="portMenu?.el.dataset.row === String(r.id)"
+                  :menu="portMenu"
+                  fixed
+                  @pick="ports.pick"
                 />
               </td>
               <td>

@@ -95,7 +95,8 @@ const fields = [
   {
     key: 'dst_ports',
     label: 'Destination ports',
-    placeholder: '8443',
+    type: 'ports',
+    placeholder: '8443 or https',
     show: (f) => f.protocol !== 'any',
   },
   { key: 'src_addrs', label: 'Source addresses', type: 'addrs' },

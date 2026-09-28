@@ -132,6 +132,7 @@ func (s *Server) Echo() *echo.Echo {
 	g.GET("/ipam/tree", s.handleIpamTree)
 	g.GET("/ipam/prefixes/:id/next-free", s.handleNextFree)
 	g.GET("/rules/auto", s.handleAutoRules)
+	g.GET("/services", func(c *echo.Context) error { return c.JSON(http.StatusOK, fwconfig.Services) })
 	g.POST("/rules/reorder", s.handleReorder("rules"))
 	g.POST("/nat/reorder", s.handleReorder("nat_rules"))
 	g.GET("/wg/peers/:id/config", s.handleWgClientConfig)

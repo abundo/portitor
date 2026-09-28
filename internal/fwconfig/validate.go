@@ -750,11 +750,16 @@ func ParseAddrOrPrefix(s string) (netip.Prefix, error) {
 // PortRange is an inclusive port range; Lo == Hi for a single port.
 type PortRange struct{ Lo, Hi int }
 
-// ParsePorts parses "22", "80,443", "1000-2000,3000".
+// ParsePorts parses "22", "80,443", "1000-2000,3000"; a port may also be
+// a name from Services ("ssh, https").
 func ParsePorts(s string) ([]PortRange, error) {
 	var out []PortRange
 	for _, part := range strings.Split(s, ",") {
 		part = strings.TrimSpace(part)
+		if p, ok := ServicePort(strings.ToLower(part)); ok {
+			out = append(out, PortRange{p, p})
+			continue
+		}
 		lo, hi, isRange := strings.Cut(part, "-")
 		a, err := strconv.Atoi(strings.TrimSpace(lo))
 		if err != nil {
