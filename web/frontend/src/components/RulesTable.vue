@@ -15,7 +15,8 @@ const props = defineProps({
   rows: { type: Array, required: true },
   // input, forward or output: input rules have no To column, output no From.
   chain: { type: String, required: true },
-  // Interface zone and interface names of the instance, for suggestions.
+  // Interface zones and interfaces of the instance ({ value, description }),
+  // for suggestions.
   ifaces: { type: Array, required: true },
 })
 const emit = defineEmits(['save', 'move', 'edit', 'remove'])
@@ -32,6 +33,15 @@ const { onPointerDown } = useRowDrag({
   },
   onMove: (from, to) => emit('move', from, to),
 })
+
+// ifaceTitle lists a cell's interfaces with their descriptions.
+const ifaceDesc = computed(() => new Map(props.ifaces.map((it) => [it.value, it.description])))
+function ifaceTitle(list, empty) {
+  if (!list?.length) return empty
+  return list
+    .map((n) => (ifaceDesc.value.get(n) ? `${n}: ${ifaceDesc.value.get(n)}` : n))
+    .join('\n')
+}
 
 const hasFrom = computed(() => props.chain !== 'output')
 const hasTo = computed(() => props.chain !== 'input')
@@ -164,9 +174,7 @@ function onKeydown(event, index) {
               data-col="in_interfaces"
               :list="`rules-grid-ifaces-${chain}`"
               placeholder="any"
-              :title="
-                (r.in_interfaces ?? []).join(', ') || 'Incoming interfaces or interface zones'
-              "
+              :title="ifaceTitle(r.in_interfaces, 'Incoming interfaces or interface zones')"
               @change="setList(r, 'in_interfaces', $event)"
               @keydown="onKeydown($event, i)"
             />
@@ -177,9 +185,7 @@ function onKeydown(event, index) {
               data-col="out_interfaces"
               :list="`rules-grid-ifaces-${chain}`"
               placeholder="any"
-              :title="
-                (r.out_interfaces ?? []).join(', ') || 'Outgoing interfaces or interface zones'
-              "
+              :title="ifaceTitle(r.out_interfaces, 'Outgoing interfaces or interface zones')"
               @change="setList(r, 'out_interfaces', $event)"
               @keydown="onKeydown($event, i)"
             />
@@ -276,7 +282,12 @@ function onKeydown(event, index) {
       <option v-for="n in objects.names" :key="n" :value="n" />
     </datalist>
     <datalist :id="`rules-grid-ifaces-${chain}`">
-      <option v-for="n in ifaces" :key="n" :value="n" />
+      <option
+        v-for="it in ifaces"
+        :key="it.value"
+        :value="it.value"
+        :label="it.description || undefined"
+      />
     </datalist>
   </div>
 </template>

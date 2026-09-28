@@ -8,7 +8,8 @@
 // Field: { key, label, type: text|number|switch|select|multiselect|tags|addrs|addr|textarea,
 //          items (array or form => array), nullable, placeholder, hint,
 //          required, show: form => bool, disabled: form => bool }
-// multiselect: an array of strings picked from items (strings).
+// multiselect: an array of strings picked from items (strings, or
+// { label, value, description } to show a description under each name).
 // addrs/addr: address list / single address; names of hosts/prefixes are
 // suggested and accepted.
 // Column: { key, label, format: row => string, class }
@@ -63,6 +64,14 @@ function display(col, row) {
 function itemsOf(f) {
   const list = typeof f.items === 'function' ? f.items(form) : (f.items ?? [])
   return f.nullable ? [{ label: '—', value: NONE }, ...list] : list
+}
+
+// multiItems returns a multiselect's items as objects, plus values the form
+// holds but items lack, so they stay visible.
+function multiItems(f) {
+  const list = itemsOf(f).map((it) => (typeof it === 'object' ? it : { label: it, value: it }))
+  const known = new Set(list.map((it) => it.value))
+  return [...list, ...form[f.key].filter((v) => !known.has(v)).map((v) => ({ label: v, value: v }))]
 }
 
 function visible(f) {
@@ -297,7 +306,9 @@ defineExpose({ reload: load, openEdit, openCreate })
               v-else-if="f.type === 'multiselect'"
               v-model="form[f.key]"
               multiple
-              :items="[...new Set([...itemsOf(f), ...form[f.key]])]"
+              :items="multiItems(f)"
+              value-key="value"
+              :filter-fields="['label', 'description']"
               class="w-full"
               :placeholder="f.placeholder"
               :disabled="f.disabled?.(form)"

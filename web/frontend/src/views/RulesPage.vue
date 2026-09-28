@@ -8,7 +8,7 @@ import RulesTable from '@/components/RulesTable.vue'
 import { rules } from '@/api'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
 
-const { store, ifaceRefNames } = useInstanceRefs()
+const { store, ifaceRefItems } = useInstanceRefs()
 const opt = (list) => list.map((v) => ({ label: v || 'any', value: v }))
 
 const fields = [
@@ -26,7 +26,7 @@ const fields = [
     key: 'in_interfaces',
     label: 'Incoming interfaces',
     type: 'multiselect',
-    items: () => ifaceRefNames.value,
+    items: () => ifaceRefItems.value,
     placeholder: 'any',
     show: (f) => f.chain !== 'output',
   },
@@ -34,7 +34,7 @@ const fields = [
     key: 'out_interfaces',
     label: 'Outgoing interfaces',
     type: 'multiselect',
-    items: () => ifaceRefNames.value,
+    items: () => ifaceRefItems.value,
     placeholder: 'any',
     show: (f) => f.chain !== 'input',
     hint: 'Interfaces and interface zones; empty matches any.',
@@ -156,7 +156,7 @@ function clean(b) {
             <RulesTable
               :rows="rows.filter((r) => r.chain === c.value)"
               :chain="c.value"
-              :ifaces="ifaceRefNames"
+              :ifaces="ifaceRefItems"
               @save="saveRow"
               @move="(from, to) => moveInChain(rows, c.value, moveTo, from, to)"
               @edit="openEdit"

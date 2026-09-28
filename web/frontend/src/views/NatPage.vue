@@ -7,7 +7,7 @@ import NeedInstance from '@/components/NeedInstance.vue'
 import { nat } from '@/api'
 import { ifaceListLabel, useInstanceRefs } from '@/composables/useInstanceRefs'
 
-const { store, ifaceRefNames } = useInstanceRefs()
+const { store, ifaceRefItems } = useInstanceRefs()
 
 const kinds = [
   { label: 'Port forward (DNAT)', value: 'dnat' },
@@ -60,7 +60,7 @@ const fields = [
     key: 'in_interfaces',
     label: 'Incoming interfaces',
     type: 'multiselect',
-    items: () => ifaceRefNames.value,
+    items: () => ifaceRefItems.value,
     placeholder: 'any',
     show: (f) => f.kind === 'dnat',
     hint: 'Interfaces and interface zones; usually the WAN.',
@@ -69,7 +69,7 @@ const fields = [
     key: 'out_interfaces',
     label: 'Outgoing interfaces',
     type: 'multiselect',
-    items: () => ifaceRefNames.value,
+    items: () => ifaceRefItems.value,
     placeholder: 'any',
     show: (f) => f.kind !== 'dnat',
     hint: 'Interfaces and interface zones; for Internet sharing, masquerade out of the WAN.',

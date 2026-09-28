@@ -41,6 +41,24 @@ export function useInstanceRefs() {
     ...ifaceZoneList.value.map((z) => z.name),
     ...ifaceNames.value,
   ])
+  // The same as select items ({ label, value, description }), so pickers can
+  // show each interface's and zone's description next to its name.
+  const ifaceRefItems = computed(() => {
+    const id = store.currentId
+    const desc = new Map(ifaceList.value.map((i) => [i.name, i.description]))
+    for (const l of linkList.value) {
+      if (l.instance_a_id === id) desc.set(l.interface_a, l.description)
+      if (l.instance_b_id === id) desc.set(l.interface_b, l.description)
+    }
+    return [
+      ...ifaceZoneList.value.map((z) => ({
+        label: z.name,
+        value: z.name,
+        description: z.description ? `zone: ${z.description}` : 'zone',
+      })),
+      ...ifaceNames.value.map((n) => ({ label: n, value: n, description: desc.get(n) || '' })),
+    ]
+  })
   const zonesOf = (name) =>
     ifaceZoneList.value.filter((z) => z.interfaces?.includes(name)).map((z) => z.name)
 
@@ -52,6 +70,7 @@ export function useInstanceRefs() {
     ifaceName,
     ifaceNames,
     ifaceRefNames,
+    ifaceRefItems,
     zonesOf,
     reload: load,
   }
