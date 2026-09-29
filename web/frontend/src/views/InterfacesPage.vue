@@ -127,6 +127,14 @@ const fields = [
 function addressesOf(row) {
   return addrs.value.filter((a) => a.interface_id === row.id).map((a) => a.address)
 }
+// The address the DHCP client holds on the interface, if it has one.
+function dhcpAddressOf(row) {
+  if (row.ipv4_mode !== 'dhcp') return ''
+  const lease = deploy.status?.dhcp_client_leases?.find(
+    (l) => l.instance === store.current?.name && l.interface === row.name,
+  )
+  return lease?.state === 'bound' ? lease.address : ''
+}
 </script>
 
 <template>
@@ -159,8 +167,13 @@ function addressesOf(row) {
         </UTooltip>
       </template>
       <template #cell-addresses="{ row }">
-        <span class="font-mono text-xs">{{ addressesOf(row).join(', ') }}</span>
-        <span v-if="row.ipv4_mode === 'dhcp'" class="text-xs text-muted"> (DHCP)</span>
+        <div
+          v-for="a in [dhcpAddressOf(row), ...addressesOf(row)].filter(Boolean)"
+          :key="a"
+          class="font-mono text-xs"
+        >
+          {{ a }}
+        </div>
       </template>
       <template #cell-enabled="{ row }">
         <UIcon
