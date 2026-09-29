@@ -16,6 +16,8 @@
 // interface zones; the Service cell a menu to tick services in (custom and
 // predefined, such as ssh or ping), whose search can create a new one.
 // Each of these offers "any" first, which empties the cell.
+// The search box above the grid shows only the rows with a cell containing
+// its text, with the groups they are in open, and highlights the matches.
 import { computed, onMounted, ref } from 'vue'
 import { useColumnResize } from '@/composables/useColumnResize'
 import { useServiceDialog } from '@/composables/useServiceDialog'
@@ -97,6 +99,7 @@ function setCollapsed(ids) {
   }
 }
 function toggleGroup(r) {
+  if (searching.value) return
   const ids = new Set(collapsed.value)
   if (!ids.delete(r.id)) ids.add(r.id)
   setCollapsed(ids)
@@ -121,24 +124,95 @@ function expandAt(list, i) {
   const g = groupAt(list, i)
   if (g && collapsed.value.has(g.id)) toggleGroup(g)
 }
-// hidden[i] tells whether row i is folded away; groupSize counts the rules
-// under each group.
+
+// Search: a row matches when one of its shown text cells contains the
+// search text, in any case. While searching, every group is open (the folded
+// ones fold again once the search is cleared), rows that don't match are
+// hidden, and so are groups with no match; a group whose name matches shows
+// all its rows.
+const search = ref('')
+const needle = computed(() => search.value.trim().toLowerCase())
+const searching = computed(() => needle.value !== '')
+const listText = (list) => (list ?? []).join(', ')
+function searchCells(r) {
+  if (isNote(r)) return { description: r.description }
+  const cells = {
+    src_addrs: listText(r.src_addrs),
+    dst_addrs: listText(r.dst_addrs),
+    services: listText(r.services),
+    action: r.action,
+    description: r.description,
+  }
+  if (hasFrom.value) cells.in_interfaces = listText(r.in_interfaces)
+  if (hasTo.value) cells.out_interfaces = listText(r.out_interfaces)
+  return cells
+}
+// matches maps the id of each matching row to the keys of its matching cells.
+const matches = computed(() => {
+  const m = new Map()
+  if (!searching.value) return m
+  for (const r of props.rows) {
+    const keys = new Set()
+    for (const [key, text] of Object.entries(searchCells(r))) {
+      if (text?.toLowerCase().includes(needle.value)) keys.add(key)
+    }
+    if (keys.size) m.set(r.id, keys)
+  }
+  return m
+})
+const isHit = (r, key) => !!matches.value.get(r.id)?.has(key)
+const ruleHits = computed(() => {
+  let n = 0
+  for (const r of props.rows) if (!isNote(r) && matches.value.has(r.id)) n++
+  return n
+})
+const escapeHtml = (text) =>
+  text.replace(
+    /[&<>"']/g,
+    (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c],
+  )
+// highlight is the cell text as HTML with the matches in <mark>s, drawn
+// behind the (transparent) input showing the same text.
+function highlight(text) {
+  const lower = text.toLowerCase()
+  const n = needle.value.length
+  let out = ''
+  let from = 0
+  for (let at = lower.indexOf(needle.value); at >= 0; at = lower.indexOf(needle.value, from)) {
+    out += escapeHtml(text.slice(from, at)) + `<mark>${escapeHtml(text.slice(at, at + n))}</mark>`
+    from = at + n
+  }
+  return out + escapeHtml(text.slice(from))
+}
+const isOpen = (r) => searching.value || !collapsed.value.has(r.id)
+
+// hidden[i] tells whether row i is folded away or, while searching, doesn't
+// match; groupSize counts the rules under each group.
 const folding = computed(() => {
   const hidden = []
   const size = new Map()
   let group = null
-  for (const r of props.rows) {
+  let head = -1
+  props.rows.forEach((r, i) => {
     if (isGroup(r)) {
       group = r
+      head = i
       size.set(r.id, 0)
-      hidden.push(false)
-      continue
+      hidden.push(searching.value && !matches.value.has(r.id))
+      return
     }
-    hidden.push(!!group && collapsed.value.has(group.id))
     if (group && !isComment(r)) size.set(group.id, size.get(group.id) + 1)
-  }
+    if (!searching.value) {
+      hidden.push(!!group && collapsed.value.has(group.id))
+      return
+    }
+    const shown = matches.value.has(r.id) || (!!group && matches.value.has(group.id))
+    hidden.push(!shown)
+    if (shown && group) hidden[head] = false
+  })
   return { hidden, size }
 })
+const noneShown = computed(() => props.rows.length > 0 && folding.value.hidden.every((h) => h))
 function groupSummary(r) {
   const n = folding.value.size.get(r.id) ?? 0
   return `${n} rule${n === 1 ? '' : 's'}`
@@ -164,6 +238,8 @@ function captureMenuRow(event) {
 }
 const at = (below) => (menuIndex.value < 0 ? 0 : menuIndex.value + (below ? 1 : 0))
 async function insertAt(kind, index) {
+  // A new row matches no search: clear it so the row shows.
+  search.value = ''
   if (kind !== 'group') expandAt(props.rows, index)
   const created = await props.insert(kind, index)
   if (created) wrap.value?.querySelector(`[data-note-id="${created.id}"]`)?.focus()
@@ -492,437 +568,519 @@ function onKeydown(event, index) {
 </script>
 
 <template>
-  <UContextMenu :items="contextItems">
-    <div
-      ref="wrap"
-      class="rules-grid overflow-auto rounded-md ring ring-default"
-      @contextmenu.capture="captureMenuRow"
-    >
-      <table
-        ref="table"
-        class="table-fixed border-collapse text-xs"
-        :class="{ 'w-full min-w-[68rem]': !widths }"
-        :style="widths ? { width: `${tableWidth}px` } : undefined"
+  <div>
+    <div class="mb-2 flex items-center gap-3">
+      <UInput
+        v-model="search"
+        icon="i-lucide-search"
+        placeholder="Search rules"
+        size="sm"
+        class="w-64"
+        :ui="{ trailing: 'pe-1' }"
+        @keydown.esc="search = ''"
       >
-        <colgroup>
-          <col
-            v-for="(cls, i) in columns"
-            :key="i"
-            :class="widths ? undefined : cls || undefined"
-            :style="widths ? { width: `${widths[i]}px` } : undefined"
+        <template v-if="search" #trailing>
+          <UButton
+            color="neutral"
+            variant="link"
+            size="sm"
+            icon="i-lucide-x"
+            aria-label="Clear search"
+            title="Clear search"
+            @click="search = ''"
           />
-        </colgroup>
-        <thead @pointerdown="onResizeStart" @dblclick="resetWidths">
-          <tr>
-            <th><span class="col-resize" /></th>
-            <th title="Evaluated top to bottom">#<span class="col-resize" /></th>
-            <th title="Enabled">On<span class="col-resize" /></th>
-            <th v-if="hasFrom">From<span class="col-resize" /></th>
-            <th v-if="hasTo">To<span class="col-resize" /></th>
-            <th>Source<span class="col-resize" /></th>
-            <th>Destination<span class="col-resize" /></th>
-            <th>IP<span class="col-resize" /></th>
-            <th title="Services the traffic must match one of; empty matches any protocol">
-              Service<span class="col-resize" />
-            </th>
-            <th>Action<span class="col-resize" /></th>
-            <th title="Log matches">Log<span class="col-resize" /></th>
-            <th
-              class="text-end"
-              title="Bytes since the last deploy. In: sent by the side that opened the connections; out: the replies"
+        </template>
+      </UInput>
+      <span v-if="searching" class="text-sm text-muted">
+        {{ ruleHits }} rule{{ ruleHits === 1 ? '' : 's' }} match
+      </span>
+    </div>
+    <UContextMenu :items="contextItems">
+      <div
+        ref="wrap"
+        class="rules-grid overflow-auto rounded-md ring ring-default"
+        @contextmenu.capture="captureMenuRow"
+      >
+        <table
+          ref="table"
+          class="table-fixed border-collapse text-xs"
+          :class="{ 'w-full min-w-[68rem]': !widths }"
+          :style="widths ? { width: `${tableWidth}px` } : undefined"
+        >
+          <colgroup>
+            <col
+              v-for="(cls, i) in columns"
+              :key="i"
+              :class="widths ? undefined : cls || undefined"
+              :style="widths ? { width: `${widths[i]}px` } : undefined"
+            />
+          </colgroup>
+          <thead @pointerdown="onResizeStart" @dblclick="resetWidths">
+            <tr>
+              <th><span class="col-resize" /></th>
+              <th title="Evaluated top to bottom">#<span class="col-resize" /></th>
+              <th title="Enabled">On<span class="col-resize" /></th>
+              <th v-if="hasFrom">From<span class="col-resize" /></th>
+              <th v-if="hasTo">To<span class="col-resize" /></th>
+              <th>Source<span class="col-resize" /></th>
+              <th>Destination<span class="col-resize" /></th>
+              <th>IP<span class="col-resize" /></th>
+              <th title="Services the traffic must match one of; empty matches any protocol">
+                Service<span class="col-resize" />
+              </th>
+              <th>Action<span class="col-resize" /></th>
+              <th title="Log matches">Log<span class="col-resize" /></th>
+              <th
+                class="text-end"
+                title="Bytes since the last deploy. In: sent by the side that opened the connections; out: the replies"
+              >
+                In / Out<span class="col-resize" />
+              </th>
+              <th>Description<span class="col-resize" /></th>
+            </tr>
+          </thead>
+          <tbody class="auto-rules">
+            <tr
+              title="Packets that belong to no known connection, such as a stray TCP packet; dropped before the rules"
             >
-              In / Out<span class="col-resize" />
-            </th>
-            <th>Description<span class="col-resize" /></th>
-          </tr>
-        </thead>
-        <tbody class="auto-rules">
-          <tr
-            title="Packets that belong to no known connection, such as a stray TCP packet; dropped before the rules"
-          >
-            <td class="text-center text-muted">
-              <UIcon name="i-lucide-lock" class="size-3.5 align-middle" />
-            </td>
-            <td :colspan="colCount - 5">
-              <span class="text-muted">invalid: no known connection</span>
-            </td>
-            <td><span class="font-semibold text-error">drop</span></td>
-            <td class="text-center">
-              <input
-                :disabled="readOnly"
-                type="checkbox"
-                class="accent-primary"
-                :checked="logBuiltin.invalid"
-                :title="`Log the invalid packets (${builtinLogLimit}) to the log panel's Logged packets`"
-                @change="emit('log-builtin', 'invalid', '', $event.target.checked)"
-              />
-            </td>
-            <td class="counter" :title="dropTitle('invalid')">
-              <template v-if="dropCount('invalid') !== undefined">
-                <div>{{ bytes(drops.invalid_bytes) }}</div>
-                <div>{{ dropCount('invalid').toLocaleString() }} pkt</div>
-              </template>
-            </td>
-            <td>
-              <span><span class="text-muted">auto:</span> invalid packets</span>
-            </td>
-          </tr>
-          <tr v-for="a in auto" :key="a.service" :title="autoTitle(a)">
-            <td class="text-center text-muted">
-              <UIcon name="i-lucide-lock" class="size-3.5 align-middle" />
-            </td>
-            <td />
-            <td class="text-center">
-              <input type="checkbox" class="accent-primary" checked disabled />
-            </td>
-            <td v-if="hasFrom" :title="ifaceTitle(a.in_interfaces, 'any')">
-              <span :class="{ 'text-muted': !a.in_interfaces?.length }">{{
-                a.in_interfaces?.length ? a.in_interfaces.join(', ') : 'any'
-              }}</span>
-              <div v-if="ifaceDescs(a.in_interfaces)" class="iface-desc">
-                {{ ifaceDescs(a.in_interfaces) }}
-              </div>
-            </td>
-            <td v-if="hasTo"><span class="text-muted">any</span></td>
-            <td :title="a.source?.join(', ')">
-              <span v-if="a.source?.length" class="font-mono">{{ a.source.join(', ') }}</span>
-              <span v-else class="text-muted">any</span>
-            </td>
-            <td><span class="text-muted">any</span></td>
-            <td>
-              <span>{{ autoFamily(a) }}</span>
-            </td>
-            <td>
-              <span class="font-mono">{{ autoService(a) }}</span>
-            </td>
-            <td><span class="font-semibold text-success">accept</span></td>
-            <td class="text-center">
-              <input
-                :disabled="readOnly"
-                type="checkbox"
-                class="accent-primary"
-                :checked="logBuiltin.auto?.includes(a.service)"
-                :title="`Log what this rule accepts (${builtinLogLimit}) to the log panel's Logged packets`"
-                @change="emit('log-builtin', 'auto', a.service, $event.target.checked)"
-              />
-            </td>
-            <td />
-            <td>
-              <span><span class="text-muted">auto:</span> {{ autoDescription(a) }}</span>
-            </td>
-          </tr>
-        </tbody>
-        <tbody class="user-rules">
-          <template v-for="(r, i) in rows" :key="r.id">
-            <tr v-if="isGroup(r)" class="rule-group" :data-index="i">
-              <td class="keep">
-                <span
-                  class="flex h-7 cursor-grab touch-none items-center justify-center text-muted select-none active:cursor-grabbing"
-                  title="Drag to reorder (the heading only)"
-                  @pointerdown="onPointerDown(i, $event)"
-                >
-                  <UIcon name="i-lucide-grip-vertical" class="pointer-events-none size-3.5" />
-                </span>
+              <td class="text-center text-muted">
+                <UIcon name="i-lucide-lock" class="size-3.5 align-middle" />
               </td>
-              <td class="keep">
-                <button
-                  type="button"
-                  class="flex h-7 w-full cursor-pointer items-center justify-center text-muted hover:text-highlighted"
-                  :title="collapsed.has(r.id) ? 'Expand group' : 'Collapse group'"
-                  :aria-expanded="!collapsed.has(r.id)"
-                  @click="toggleGroup(r)"
-                >
-                  <UIcon
-                    name="i-lucide-chevron-down"
-                    class="size-4 transition-transform"
-                    :class="{ '-rotate-90': collapsed.has(r.id) }"
+              <td :colspan="colCount - 5">
+                <span class="text-muted">invalid: no known connection</span>
+              </td>
+              <td><span class="font-semibold text-error">drop</span></td>
+              <td class="text-center">
+                <input
+                  :disabled="readOnly"
+                  type="checkbox"
+                  class="accent-primary"
+                  :checked="logBuiltin.invalid"
+                  :title="`Log the invalid packets (${builtinLogLimit}) to the log panel's Logged packets`"
+                  @change="emit('log-builtin', 'invalid', '', $event.target.checked)"
+                />
+              </td>
+              <td class="counter" :title="dropTitle('invalid')">
+                <template v-if="dropCount('invalid') !== undefined">
+                  <div>{{ bytes(drops.invalid_bytes) }}</div>
+                  <div>{{ dropCount('invalid').toLocaleString() }} pkt</div>
+                </template>
+              </td>
+              <td>
+                <span><span class="text-muted">auto:</span> invalid packets</span>
+              </td>
+            </tr>
+            <tr v-for="a in auto" :key="a.service" :title="autoTitle(a)">
+              <td class="text-center text-muted">
+                <UIcon name="i-lucide-lock" class="size-3.5 align-middle" />
+              </td>
+              <td />
+              <td class="text-center">
+                <input type="checkbox" class="accent-primary" checked disabled />
+              </td>
+              <td v-if="hasFrom" :title="ifaceTitle(a.in_interfaces, 'any')">
+                <span :class="{ 'text-muted': !a.in_interfaces?.length }">{{
+                  a.in_interfaces?.length ? a.in_interfaces.join(', ') : 'any'
+                }}</span>
+                <div v-if="ifaceDescs(a.in_interfaces)" class="iface-desc">
+                  {{ ifaceDescs(a.in_interfaces) }}
+                </div>
+              </td>
+              <td v-if="hasTo"><span class="text-muted">any</span></td>
+              <td :title="a.source?.join(', ')">
+                <span v-if="a.source?.length" class="font-mono">{{ a.source.join(', ') }}</span>
+                <span v-else class="text-muted">any</span>
+              </td>
+              <td><span class="text-muted">any</span></td>
+              <td>
+                <span>{{ autoFamily(a) }}</span>
+              </td>
+              <td>
+                <span class="font-mono">{{ autoService(a) }}</span>
+              </td>
+              <td><span class="font-semibold text-success">accept</span></td>
+              <td class="text-center">
+                <input
+                  :disabled="readOnly"
+                  type="checkbox"
+                  class="accent-primary"
+                  :checked="logBuiltin.auto?.includes(a.service)"
+                  :title="`Log what this rule accepts (${builtinLogLimit}) to the log panel's Logged packets`"
+                  @change="emit('log-builtin', 'auto', a.service, $event.target.checked)"
+                />
+              </td>
+              <td />
+              <td>
+                <span><span class="text-muted">auto:</span> {{ autoDescription(a) }}</span>
+              </td>
+            </tr>
+          </tbody>
+          <tbody class="user-rules">
+            <template v-for="(r, i) in rows" :key="r.id">
+              <tr v-if="isGroup(r)" class="rule-group" :data-index="i" :hidden="folding.hidden[i]">
+                <td class="keep">
+                  <span
+                    class="flex h-7 cursor-grab touch-none items-center justify-center text-muted select-none active:cursor-grabbing"
+                    title="Drag to reorder (the heading only)"
+                    @pointerdown="onPointerDown(i, $event)"
+                  >
+                    <UIcon name="i-lucide-grip-vertical" class="pointer-events-none size-3.5" />
+                  </span>
+                </td>
+                <td class="keep">
+                  <button
+                    type="button"
+                    class="flex h-7 w-full cursor-pointer items-center justify-center text-muted hover:text-highlighted disabled:cursor-default disabled:hover:text-muted"
+                    :title="
+                      searching
+                        ? 'Groups stay open while searching'
+                        : isOpen(r)
+                          ? 'Collapse group'
+                          : 'Expand group'
+                    "
+                    :aria-expanded="isOpen(r)"
+                    :disabled="searching"
+                    @click="toggleGroup(r)"
+                  >
+                    <UIcon
+                      name="i-lucide-chevron-down"
+                      class="size-4 transition-transform"
+                      :class="{ '-rotate-90': !isOpen(r) }"
+                    />
+                  </button>
+                </td>
+                <td :colspan="colCount - 2">
+                  <div class="flex items-center">
+                    <div class="group-name">
+                      <div
+                        v-if="isHit(r, 'description')"
+                        class="search-mirror"
+                        aria-hidden="true"
+                        v-html="highlight(r.description)"
+                      />
+                      <input
+                        :readonly="readOnly"
+                        :value="cellText(r, 'description', r.description)"
+                        data-col="group"
+                        :data-note-id="r.id"
+                        placeholder="Group name"
+                        :title="r.description"
+                        @input="onDraft(r, 'description', $event)"
+                        @change="setText(r, 'description', $event)"
+                        @blur="endDraft"
+                        @keydown="onKeydown($event, i)"
+                      />
+                    </div>
+                    <span class="group-size">{{ groupSummary(r) }}</span>
+                  </div>
+                </td>
+              </tr>
+              <tr
+                v-else-if="isComment(r)"
+                class="rule-comment"
+                :data-index="i"
+                :hidden="folding.hidden[i]"
+              >
+                <td class="keep">
+                  <span
+                    class="flex h-7 cursor-grab touch-none items-center justify-center text-muted select-none active:cursor-grabbing"
+                    title="Drag to reorder"
+                    @pointerdown="onPointerDown(i, $event)"
+                  >
+                    <UIcon name="i-lucide-grip-vertical" class="pointer-events-none size-3.5" />
+                  </span>
+                </td>
+                <td :colspan="colCount - 1">
+                  <div
+                    v-if="isHit(r, 'description')"
+                    class="search-mirror"
+                    aria-hidden="true"
+                    v-html="highlight(r.description)"
                   />
-                </button>
-              </td>
-              <td :colspan="colCount - 2">
-                <div class="flex items-center">
                   <input
                     :readonly="readOnly"
                     :value="cellText(r, 'description', r.description)"
-                    data-col="group"
+                    data-col="comment"
                     :data-note-id="r.id"
-                    placeholder="Group name"
+                    placeholder="Comment"
                     :title="r.description"
                     @input="onDraft(r, 'description', $event)"
                     @change="setText(r, 'description', $event)"
                     @blur="endDraft"
                     @keydown="onKeydown($event, i)"
                   />
-                  <span class="group-size">{{ groupSummary(r) }}</span>
-                </div>
+                </td>
+              </tr>
+              <tr
+                v-else
+                :class="{ 'rule-off': !r.enabled }"
+                :data-index="i"
+                :hidden="folding.hidden[i]"
+              >
+                <td class="keep">
+                  <span
+                    class="flex h-7 cursor-grab touch-none items-center justify-center text-muted select-none hover:text-highlighted active:cursor-grabbing"
+                    title="Click for details, drag to reorder"
+                    @pointerdown="onPointerDown(i, $event)"
+                  >
+                    <UIcon name="i-lucide-grip-vertical" class="pointer-events-none size-3.5" />
+                  </span>
+                </td>
+                <td class="text-center text-muted tabular-nums">{{ ruleNo.get(r.id) }}</td>
+                <td class="keep text-center">
+                  <input
+                    :disabled="readOnly"
+                    type="checkbox"
+                    class="accent-primary"
+                    :checked="r.enabled"
+                    title="Enabled"
+                    @change="set(r, 'enabled', $event.target.checked)"
+                  />
+                </td>
+                <td v-if="hasFrom">
+                  <div
+                    v-if="isHit(r, 'in_interfaces')"
+                    class="search-mirror"
+                    aria-hidden="true"
+                    v-html="highlight(listText(r.in_interfaces))"
+                  />
+                  <input
+                    :readonly="readOnly"
+                    :value="cellText(r, 'in_interfaces', (r.in_interfaces ?? []).join(', '))"
+                    data-col="in_interfaces"
+                    :list="`rules-grid-ifaces-${chain}`"
+                    placeholder="any"
+                    :title="ifaceTitle(r.in_interfaces, 'Incoming interfaces or interface zones')"
+                    @focus="onFocus"
+                    @input="onType(r, 'in_interfaces', $event)"
+                    @change="setList(r, 'in_interfaces', $event)"
+                    @blur="endDraft"
+                    @keydown="onKeydown($event, i)"
+                  />
+                  <div v-if="ifaceDescs(r.in_interfaces)" class="iface-desc">
+                    {{ ifaceDescs(r.in_interfaces) }}
+                  </div>
+                </td>
+                <td v-if="hasTo">
+                  <div
+                    v-if="isHit(r, 'out_interfaces')"
+                    class="search-mirror"
+                    aria-hidden="true"
+                    v-html="highlight(listText(r.out_interfaces))"
+                  />
+                  <input
+                    :readonly="readOnly"
+                    :value="cellText(r, 'out_interfaces', (r.out_interfaces ?? []).join(', '))"
+                    data-col="out_interfaces"
+                    :list="`rules-grid-ifaces-${chain}`"
+                    placeholder="any"
+                    :title="ifaceTitle(r.out_interfaces, 'Outgoing interfaces or interface zones')"
+                    @focus="onFocus"
+                    @input="onType(r, 'out_interfaces', $event)"
+                    @change="setList(r, 'out_interfaces', $event)"
+                    @blur="endDraft"
+                    @keydown="onKeydown($event, i)"
+                  />
+                  <div v-if="ifaceDescs(r.out_interfaces)" class="iface-desc">
+                    {{ ifaceDescs(r.out_interfaces) }}
+                  </div>
+                </td>
+                <td>
+                  <div
+                    v-if="isHit(r, 'src_addrs')"
+                    class="search-mirror font-mono"
+                    aria-hidden="true"
+                    v-html="highlight(listText(r.src_addrs))"
+                  />
+                  <input
+                    :readonly="readOnly"
+                    :value="cellText(r, 'src_addrs', (r.src_addrs ?? []).join(', '))"
+                    data-col="src_addrs"
+                    class="font-mono"
+                    :list="`rules-grid-names-${chain}`"
+                    placeholder="any"
+                    :title="(r.src_addrs ?? []).join(', ')"
+                    @focus="onFocus"
+                    @input="onType(r, 'src_addrs', $event)"
+                    @change="setList(r, 'src_addrs', $event)"
+                    @blur="endDraft"
+                    @keydown="onKeydown($event, i)"
+                  />
+                </td>
+                <td>
+                  <div
+                    v-if="isHit(r, 'dst_addrs')"
+                    class="search-mirror font-mono"
+                    aria-hidden="true"
+                    v-html="highlight(listText(r.dst_addrs))"
+                  />
+                  <input
+                    :readonly="readOnly"
+                    :value="cellText(r, 'dst_addrs', (r.dst_addrs ?? []).join(', '))"
+                    data-col="dst_addrs"
+                    class="font-mono"
+                    :list="`rules-grid-names-${chain}`"
+                    placeholder="any"
+                    :title="(r.dst_addrs ?? []).join(', ')"
+                    @focus="onFocus"
+                    @input="onType(r, 'dst_addrs', $event)"
+                    @change="setList(r, 'dst_addrs', $event)"
+                    @blur="endDraft"
+                    @keydown="onKeydown($event, i)"
+                  />
+                </td>
+                <td>
+                  <select
+                    :disabled="readOnly"
+                    :value="r.family"
+                    data-col="family"
+                    @change="set(r, 'family', $event.target.value)"
+                  >
+                    <option v-for="f in families" :key="f.value" :value="f.value">
+                      {{ f.label }}
+                    </option>
+                  </select>
+                </td>
+                <td :class="{ 'search-hit': isHit(r, 'services') }">
+                  <USelectMenu
+                    :disabled="readOnly"
+                    :model-value="r.services ?? []"
+                    multiple
+                    :items="rowServiceItems(r)"
+                    value-key="value"
+                    :filter-fields="serviceFilterFields"
+                    :create-item="{ position: 'bottom' }"
+                    variant="none"
+                    size="xs"
+                    placeholder="any"
+                    data-col="services"
+                    :title="serviceTitle(r)"
+                    class="service-select w-full font-mono"
+                    :ui="serviceSelectUi"
+                    @update:model-value="setServices(r, $event)"
+                    @create="createService(r, $event)"
+                  />
+                </td>
+                <td :class="{ 'search-hit': isHit(r, 'action') }">
+                  <select
+                    :disabled="readOnly"
+                    :value="r.action"
+                    data-col="action"
+                    class="font-semibold"
+                    :class="actionClass[r.action]"
+                    @change="set(r, 'action', $event.target.value)"
+                  >
+                    <option v-for="a in actions" :key="a" :value="a">{{ a }}</option>
+                  </select>
+                </td>
+                <td class="text-center">
+                  <input
+                    :disabled="readOnly"
+                    type="checkbox"
+                    class="accent-primary"
+                    :checked="r.log"
+                    title="Log matches"
+                    @change="set(r, 'log', $event.target.checked)"
+                  />
+                </td>
+                <td class="counter" :title="counterTitle(r)">
+                  <template v-if="counter(r)">
+                    <div><span class="dir">in</span>{{ bytes(counter(r).orig_bytes) }}</div>
+                    <div><span class="dir">out</span>{{ bytes(counter(r).reply_bytes) }}</div>
+                  </template>
+                </td>
+                <td>
+                  <div
+                    v-if="isHit(r, 'description')"
+                    class="search-mirror"
+                    aria-hidden="true"
+                    v-html="highlight(r.description)"
+                  />
+                  <input
+                    :readonly="readOnly"
+                    :value="cellText(r, 'description', r.description)"
+                    data-col="description"
+                    :title="r.description"
+                    @input="onDraft(r, 'description', $event)"
+                    @change="setText(r, 'description', $event)"
+                    @blur="endDraft"
+                    @keydown="onKeydown($event, i)"
+                  />
+                </td>
+              </tr>
+            </template>
+            <tr v-if="!rows.length">
+              <td :colspan="colCount" class="py-6 text-center text-muted">Nothing here yet.</td>
+            </tr>
+            <tr v-else-if="noneShown">
+              <td :colspan="colCount" class="py-6 text-center text-muted">No rule matches.</td>
+            </tr>
+          </tbody>
+          <tbody class="auto-rules chain-policy">
+            <tr
+              v-if="chain === 'forward'"
+              title="Connections to a port forward (DNAT) that no rule above decided on"
+            >
+              <td class="text-center text-muted">
+                <UIcon name="i-lucide-lock" class="size-3.5 align-middle" />
+              </td>
+              <td :colspan="colCount - 5">
+                <span class="text-muted">to a port forward (NAT)</span>
+              </td>
+              <td><span class="font-semibold text-success">accept</span></td>
+              <td />
+              <td />
+              <td>
+                <span><span class="text-muted">auto:</span> port forwards</span>
               </td>
             </tr>
-            <tr
-              v-else-if="isComment(r)"
-              class="rule-comment"
-              :data-index="i"
-              :hidden="folding.hidden[i]"
-            >
-              <td class="keep">
-                <span
-                  class="flex h-7 cursor-grab touch-none items-center justify-center text-muted select-none active:cursor-grabbing"
-                  title="Drag to reorder"
-                  @pointerdown="onPointerDown(i, $event)"
-                >
-                  <UIcon name="i-lucide-grip-vertical" class="pointer-events-none size-3.5" />
-                </span>
+            <tr title="Traffic no rule accepted, dropped by the chain's policy">
+              <td class="text-center text-muted">
+                <UIcon name="i-lucide-lock" class="size-3.5 align-middle" />
               </td>
-              <td :colspan="colCount - 1">
-                <input
-                  :readonly="readOnly"
-                  :value="cellText(r, 'description', r.description)"
-                  data-col="comment"
-                  :data-note-id="r.id"
-                  placeholder="Comment"
-                  :title="r.description"
-                  @input="onDraft(r, 'description', $event)"
-                  @change="setText(r, 'description', $event)"
-                  @blur="endDraft"
-                  @keydown="onKeydown($event, i)"
-                />
+              <td :colspan="colCount - 5">
+                <span class="text-muted">no rule matched</span>
               </td>
-            </tr>
-            <tr
-              v-else
-              :class="{ 'rule-off': !r.enabled }"
-              :data-index="i"
-              :hidden="folding.hidden[i]"
-            >
-              <td class="keep">
-                <span
-                  class="flex h-7 cursor-grab touch-none items-center justify-center text-muted select-none hover:text-highlighted active:cursor-grabbing"
-                  title="Click for details, drag to reorder"
-                  @pointerdown="onPointerDown(i, $event)"
-                >
-                  <UIcon name="i-lucide-grip-vertical" class="pointer-events-none size-3.5" />
-                </span>
-              </td>
-              <td class="text-center text-muted tabular-nums">{{ ruleNo.get(r.id) }}</td>
-              <td class="keep text-center">
-                <input
-                  :disabled="readOnly"
-                  type="checkbox"
-                  class="accent-primary"
-                  :checked="r.enabled"
-                  title="Enabled"
-                  @change="set(r, 'enabled', $event.target.checked)"
-                />
-              </td>
-              <td v-if="hasFrom">
-                <input
-                  :readonly="readOnly"
-                  :value="cellText(r, 'in_interfaces', (r.in_interfaces ?? []).join(', '))"
-                  data-col="in_interfaces"
-                  :list="`rules-grid-ifaces-${chain}`"
-                  placeholder="any"
-                  :title="ifaceTitle(r.in_interfaces, 'Incoming interfaces or interface zones')"
-                  @focus="onFocus"
-                  @input="onType(r, 'in_interfaces', $event)"
-                  @change="setList(r, 'in_interfaces', $event)"
-                  @blur="endDraft"
-                  @keydown="onKeydown($event, i)"
-                />
-                <div v-if="ifaceDescs(r.in_interfaces)" class="iface-desc">
-                  {{ ifaceDescs(r.in_interfaces) }}
-                </div>
-              </td>
-              <td v-if="hasTo">
-                <input
-                  :readonly="readOnly"
-                  :value="cellText(r, 'out_interfaces', (r.out_interfaces ?? []).join(', '))"
-                  data-col="out_interfaces"
-                  :list="`rules-grid-ifaces-${chain}`"
-                  placeholder="any"
-                  :title="ifaceTitle(r.out_interfaces, 'Outgoing interfaces or interface zones')"
-                  @focus="onFocus"
-                  @input="onType(r, 'out_interfaces', $event)"
-                  @change="setList(r, 'out_interfaces', $event)"
-                  @blur="endDraft"
-                  @keydown="onKeydown($event, i)"
-                />
-                <div v-if="ifaceDescs(r.out_interfaces)" class="iface-desc">
-                  {{ ifaceDescs(r.out_interfaces) }}
-                </div>
-              </td>
-              <td>
-                <input
-                  :readonly="readOnly"
-                  :value="cellText(r, 'src_addrs', (r.src_addrs ?? []).join(', '))"
-                  data-col="src_addrs"
-                  class="font-mono"
-                  :list="`rules-grid-names-${chain}`"
-                  placeholder="any"
-                  :title="(r.src_addrs ?? []).join(', ')"
-                  @focus="onFocus"
-                  @input="onType(r, 'src_addrs', $event)"
-                  @change="setList(r, 'src_addrs', $event)"
-                  @blur="endDraft"
-                  @keydown="onKeydown($event, i)"
-                />
-              </td>
-              <td>
-                <input
-                  :readonly="readOnly"
-                  :value="cellText(r, 'dst_addrs', (r.dst_addrs ?? []).join(', '))"
-                  data-col="dst_addrs"
-                  class="font-mono"
-                  :list="`rules-grid-names-${chain}`"
-                  placeholder="any"
-                  :title="(r.dst_addrs ?? []).join(', ')"
-                  @focus="onFocus"
-                  @input="onType(r, 'dst_addrs', $event)"
-                  @change="setList(r, 'dst_addrs', $event)"
-                  @blur="endDraft"
-                  @keydown="onKeydown($event, i)"
-                />
-              </td>
-              <td>
-                <select
-                  :disabled="readOnly"
-                  :value="r.family"
-                  data-col="family"
-                  @change="set(r, 'family', $event.target.value)"
-                >
-                  <option v-for="f in families" :key="f.value" :value="f.value">
-                    {{ f.label }}
-                  </option>
-                </select>
-              </td>
-              <td>
-                <USelectMenu
-                  :disabled="readOnly"
-                  :model-value="r.services ?? []"
-                  multiple
-                  :items="rowServiceItems(r)"
-                  value-key="value"
-                  :filter-fields="serviceFilterFields"
-                  :create-item="{ position: 'bottom' }"
-                  variant="none"
-                  size="xs"
-                  placeholder="any"
-                  data-col="services"
-                  :title="serviceTitle(r)"
-                  class="service-select w-full font-mono"
-                  :ui="serviceSelectUi"
-                  @update:model-value="setServices(r, $event)"
-                  @create="createService(r, $event)"
-                />
-              </td>
-              <td>
-                <select
-                  :disabled="readOnly"
-                  :value="r.action"
-                  data-col="action"
-                  class="font-semibold"
-                  :class="actionClass[r.action]"
-                  @change="set(r, 'action', $event.target.value)"
-                >
-                  <option v-for="a in actions" :key="a" :value="a">{{ a }}</option>
-                </select>
-              </td>
+              <td><span class="font-semibold text-error">drop</span></td>
               <td class="text-center">
                 <input
                   :disabled="readOnly"
                   type="checkbox"
                   class="accent-primary"
-                  :checked="r.log"
-                  title="Log matches"
-                  @change="set(r, 'log', $event.target.checked)"
+                  :checked="logBuiltin.policy"
+                  :title="`Log what no rule matched (${builtinLogLimit}) to the log panel's Logged packets`"
+                  @change="emit('log-builtin', 'policy', '', $event.target.checked)"
                 />
               </td>
-              <td class="counter" :title="counterTitle(r)">
-                <template v-if="counter(r)">
-                  <div><span class="dir">in</span>{{ bytes(counter(r).orig_bytes) }}</div>
-                  <div><span class="dir">out</span>{{ bytes(counter(r).reply_bytes) }}</div>
+              <td class="counter" :title="dropTitle('policy')">
+                <template v-if="dropCount('policy') !== undefined">
+                  <div>{{ bytes(drops.policy_bytes) }}</div>
+                  <div>{{ dropCount('policy').toLocaleString() }} pkt</div>
                 </template>
               </td>
-              <td>
-                <input
-                  :readonly="readOnly"
-                  :value="cellText(r, 'description', r.description)"
-                  data-col="description"
-                  :title="r.description"
-                  @input="onDraft(r, 'description', $event)"
-                  @change="setText(r, 'description', $event)"
-                  @blur="endDraft"
-                  @keydown="onKeydown($event, i)"
-                />
-              </td>
+              <td><span>default drop</span></td>
             </tr>
-          </template>
-          <tr v-if="!rows.length">
-            <td :colspan="colCount" class="py-6 text-center text-muted">Nothing here yet.</td>
-          </tr>
-        </tbody>
-        <tbody class="auto-rules chain-policy">
-          <tr
-            v-if="chain === 'forward'"
-            title="Connections to a port forward (DNAT) that no rule above decided on"
-          >
-            <td class="text-center text-muted">
-              <UIcon name="i-lucide-lock" class="size-3.5 align-middle" />
-            </td>
-            <td :colspan="colCount - 5">
-              <span class="text-muted">to a port forward (NAT)</span>
-            </td>
-            <td><span class="font-semibold text-success">accept</span></td>
-            <td />
-            <td />
-            <td>
-              <span><span class="text-muted">auto:</span> port forwards</span>
-            </td>
-          </tr>
-          <tr title="Traffic no rule accepted, dropped by the chain's policy">
-            <td class="text-center text-muted">
-              <UIcon name="i-lucide-lock" class="size-3.5 align-middle" />
-            </td>
-            <td :colspan="colCount - 5">
-              <span class="text-muted">no rule matched</span>
-            </td>
-            <td><span class="font-semibold text-error">drop</span></td>
-            <td class="text-center">
-              <input
-                :disabled="readOnly"
-                type="checkbox"
-                class="accent-primary"
-                :checked="logBuiltin.policy"
-                :title="`Log what no rule matched (${builtinLogLimit}) to the log panel's Logged packets`"
-                @change="emit('log-builtin', 'policy', '', $event.target.checked)"
-              />
-            </td>
-            <td class="counter" :title="dropTitle('policy')">
-              <template v-if="dropCount('policy') !== undefined">
-                <div>{{ bytes(drops.policy_bytes) }}</div>
-                <div>{{ dropCount('policy').toLocaleString() }} pkt</div>
-              </template>
-            </td>
-            <td><span>default drop</span></td>
-          </tr>
-        </tbody>
-      </table>
-      <datalist :id="`rules-grid-names-${chain}`">
-        <option
-          v-for="it in nameSuggestions"
-          :key="it.value"
-          :value="it.value"
-          :label="it.description || undefined"
-        />
-      </datalist>
-      <datalist :id="`rules-grid-ifaces-${chain}`">
-        <option
-          v-for="it in ifaceSuggestions"
-          :key="it.value"
-          :value="it.value"
-          :label="it.description || undefined"
-        />
-      </datalist>
-    </div>
-  </UContextMenu>
+          </tbody>
+        </table>
+        <datalist :id="`rules-grid-names-${chain}`">
+          <option
+            v-for="it in nameSuggestions"
+            :key="it.value"
+            :value="it.value"
+            :label="it.description || undefined"
+          />
+        </datalist>
+        <datalist :id="`rules-grid-ifaces-${chain}`">
+          <option
+            v-for="it in ifaceSuggestions"
+            :key="it.value"
+            :value="it.value"
+            :label="it.description || undefined"
+          />
+        </datalist>
+      </div>
+    </UContextMenu>
+  </div>
 </template>
 
 <style>
@@ -962,6 +1120,7 @@ function onKeydown(event, index) {
   border-inline-end: 0;
 }
 .rules-grid td {
+  position: relative;
   padding: 0;
   height: 1.75rem;
 }
@@ -989,6 +1148,42 @@ function onKeydown(event, index) {
 }
 .rules-grid td > select {
   cursor: pointer;
+}
+.rules-grid td > input:not([type='checkbox']),
+.rules-grid .group-name > input {
+  position: relative;
+}
+/* The search matches, drawn behind a transparent input with the same text
+   and metrics; hidden while the cell is edited, as the input may scroll. */
+.rules-grid .search-mirror {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline: 0;
+  height: 1.75rem;
+  padding-inline: 0.375rem;
+  line-height: 1.75rem;
+  white-space: pre;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: transparent;
+  pointer-events: none;
+}
+.rules-grid .search-mirror mark {
+  color: transparent;
+  border-radius: 0.125rem;
+  background: color-mix(in oklab, var(--ui-warning) 45%, transparent);
+}
+.rules-grid :focus-within > .search-mirror {
+  display: none;
+}
+.rules-grid tr.rule-group .search-mirror {
+  font-weight: 600;
+}
+.rules-grid tr.rule-comment .search-mirror {
+  font-style: italic;
+}
+.rules-grid tbody tr td.search-hit {
+  background: color-mix(in oklab, var(--ui-warning) 22%, transparent);
 }
 .rules-grid td > .service-select {
   height: 1.75rem;
@@ -1055,9 +1250,13 @@ function onKeydown(event, index) {
   background: color-mix(in oklab, var(--ui-bg-accented) 60%, transparent);
   border-block-start: 1px solid var(--ui-border-accented);
 }
-.rules-grid tr.rule-group input {
+.rules-grid tr.rule-group .group-name {
+  position: relative;
   flex: 1;
   min-width: 0;
+}
+.rules-grid tr.rule-group input {
+  width: 100%;
   height: 1.75rem;
   padding-inline: 0.375rem;
   background: transparent;
