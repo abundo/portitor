@@ -34,9 +34,9 @@ req PUT /settings "{\"agent_url\":\"$AGENT_URL\",\"agent_token\":\"$TOKEN\",\"ag
 MAIN=$(req GET /instances | grep -oE '"id":[0-9]+,[^}]*"name":"main"' | sed -E 's/"id":([0-9]+).*/\1/')
 req PUT /instances/$MAIN '{"name":"main","description":"Home","dns_enabled":true,"dns_forward_from_dhcp":true,"dns_forwarders":["9.9.9.9"],"dhcp_enabled":true,"dhcp_domain_name":"home.arpa","dhcp_lease_time":43200}' >/dev/null
 id /interfaces "{\"instance_id\":$MAIN,\"name\":\"eth0\",\"description\":\"ISP\",\"ipv4_mode\":\"dhcp\",\"ipv6_accept_ra\":true,\"enabled\":true}" >/dev/null
-ETH1=$(id /interfaces "{\"instance_id\":$MAIN,\"name\":\"eth1\",\"description\":\"LAN switch\",\"enabled\":true,\"dns_listen\":true}")
-VL20=$(id /interfaces "{\"instance_id\":$MAIN,\"name\":\"eth1.20\",\"kind\":\"vlan\",\"parent\":\"eth1\",\"vlan_id\":20,\"enabled\":true,\"dns_listen\":true}")
-WG0=$(id /interfaces "{\"instance_id\":$MAIN,\"name\":\"wg0\",\"kind\":\"wireguard\",\"wg_listen_port\":51820,\"enabled\":true,\"dns_listen\":true}")
+id /interfaces "{\"instance_id\":$MAIN,\"name\":\"eth1\",\"description\":\"LAN switch\",\"enabled\":true,\"dns_listen\":true,\"addresses\":[\"192.168.1.1/24\",\"fd00:1::1/64\"]}" >/dev/null
+id /interfaces "{\"instance_id\":$MAIN,\"name\":\"eth1.20\",\"kind\":\"vlan\",\"parent\":\"eth1\",\"vlan_id\":20,\"enabled\":true,\"dns_listen\":true,\"addresses\":[\"192.168.20.1/24\"]}" >/dev/null
+WG0=$(id /interfaces "{\"instance_id\":$MAIN,\"name\":\"wg0\",\"kind\":\"wireguard\",\"wg_listen_port\":51820,\"enabled\":true,\"dns_listen\":true,\"addresses\":[\"10.99.0.1/24\"]}")
 id /interface-zones "{\"instance_id\":$MAIN,\"name\":\"wan\",\"interfaces\":[\"eth0\"],\"description\":\"Internet\"}" >/dev/null
 id /interface-zones "{\"instance_id\":$MAIN,\"name\":\"trusted\",\"interfaces\":[\"eth1\",\"wg0\"],\"description\":\"LAN and VPN clients\"}" >/dev/null
 id /interface-zones "{\"instance_id\":$MAIN,\"name\":\"iot\",\"interfaces\":[\"eth1.20\"],\"description\":\"Untrusted gadgets\"}" >/dev/null
@@ -48,13 +48,10 @@ id /ipam/prefixes "{\"instance_id\":$MAIN,\"prefix\":\"192.168.1.0/24\",\"descri
 id /ipam/prefixes "{\"instance_id\":$MAIN,\"prefix\":\"192.168.20.0/24\",\"description\":\"IoT\",\"dhcp_enabled\":true,\"dhcp_range_start\":\"192.168.20.100\",\"dhcp_range_end\":\"192.168.20.199\"}" >/dev/null
 id /ipam/prefixes "{\"instance_id\":$MAIN,\"prefix\":\"10.99.0.0/24\",\"description\":\"WireGuard\"}" >/dev/null
 id /ipam/prefixes "{\"instance_id\":$MAIN,\"prefix\":\"10.255.0.0/30\",\"description\":\"link to guest\"}" >/dev/null
-id /ipam/addresses "{\"instance_id\":$MAIN,\"address\":\"192.168.1.1\",\"interface_id\":$ETH1,\"dns_name\":\"gw.home.arpa\"}" >/dev/null
-id /ipam/addresses "{\"instance_id\":$MAIN,\"address\":\"192.168.20.1\",\"interface_id\":$VL20}" >/dev/null
-id /ipam/addresses "{\"instance_id\":$MAIN,\"address\":\"10.99.0.1\",\"interface_id\":$WG0}" >/dev/null
+id /ipam/addresses "{\"instance_id\":$MAIN,\"address\":\"192.168.1.1\",\"dns_name\":\"gw.home.arpa\"}" >/dev/null
 id /ipam/addresses "{\"instance_id\":$MAIN,\"address\":\"192.168.1.10\",\"dns_name\":\"nas.home.arpa\",\"mac\":\"02:00:00:00:00:10\",\"description\":\"NAS\"}" >/dev/null
 # IPv6 on the LAN: router advertisements with SLAAC, plus DHCPv6.
 id /ipam/prefixes "{\"instance_id\":$MAIN,\"prefix\":\"fd00:1::/64\",\"description\":\"LAN IPv6\",\"ra_enabled\":true,\"ra_slaac\":true,\"dhcp_enabled\":true,\"dhcp_range_start\":\"fd00:1::1000\",\"dhcp_range_end\":\"fd00:1::1fff\"}" >/dev/null
-id /ipam/addresses "{\"instance_id\":$MAIN,\"address\":\"fd00:1::1\",\"interface_id\":$ETH1}" >/dev/null
 id /ipam/addresses "{\"instance_id\":$MAIN,\"address\":\"fd00:1::10\",\"dns_name\":\"nas.home.arpa\",\"mac\":\"02:00:00:00:00:10\"}" >/dev/null
 id /objects '{"name":"nas","addresses":["192.168.1.10","fd00:1::10"],"description":"NAS, both IP versions"}' >/dev/null
 
@@ -78,9 +75,8 @@ id /wg/peers "{\"interface_id\":$WG0,\"name\":\"phone\",\"allowed_ips\":[\"10.99
 id /wg/peers "{\"interface_id\":$WG0,\"name\":\"laptop\",\"allowed_ips\":[\"10.99.0.3/32\"],\"enabled\":true}" >/dev/null
 
 GUEST=$(id /instances '{"name":"guest","description":"Guest Wi-Fi, isolated","dhcp_enabled":true}')
-ETH2=$(id /interfaces "{\"instance_id\":$GUEST,\"name\":\"eth2\",\"description\":\"Guest AP\",\"enabled\":true}")
+id /interfaces "{\"instance_id\":$GUEST,\"name\":\"eth2\",\"description\":\"Guest AP\",\"enabled\":true,\"addresses\":[\"192.168.50.1/24\"]}" >/dev/null
 id /ipam/prefixes "{\"instance_id\":$GUEST,\"prefix\":\"192.168.50.0/24\",\"dhcp_enabled\":true,\"dhcp_range_start\":\"192.168.50.100\",\"dhcp_range_end\":\"192.168.50.200\",\"dhcp_dns_servers\":[\"9.9.9.9\"]}" >/dev/null
-id /ipam/addresses "{\"instance_id\":$GUEST,\"address\":\"192.168.50.1\",\"interface_id\":$ETH2}" >/dev/null
 id /links "{\"name\":\"guestup\",\"instance_a_id\":$MAIN,\"interface_a\":\"lk-guest\",\"addresses_a\":[\"10.255.0.1/30\"],\"instance_b_id\":$GUEST,\"interface_b\":\"lk-main\",\"addresses_b\":[\"10.255.0.2/30\"]}" >/dev/null
 req PUT /interface-zones/$GUESTZ '{"interfaces":["lk-guest"]}' >/dev/null
 # The guest instance names its two interfaces directly, without zones.

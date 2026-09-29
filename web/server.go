@@ -117,7 +117,7 @@ func (s *Server) Echo() *echo.Echo {
 	(&resource[models.Rule, *models.Rule]{db: s.db, filters: []string{"instance_id"}, order: "position, id", prepare: prepareRule}).register(g, "/rules")
 	(&resource[models.NatRule, *models.NatRule]{db: s.db, filters: []string{"instance_id"}, order: "position, id", prepare: prepareNat}).register(g, "/nat")
 	(&resource[models.IpamPrefix, *models.IpamPrefix]{db: s.db, filters: []string{"instance_id"}, order: "prefix", prepare: prepareIpamPrefix}).register(g, "/ipam/prefixes")
-	(&resource[models.IpamAddress, *models.IpamAddress]{db: s.db, filters: []string{"instance_id", "interface_id"}, order: "address", prepare: prepareIpamAddress}).register(g, "/ipam/addresses")
+	(&resource[models.IpamAddress, *models.IpamAddress]{db: s.db, filters: []string{"instance_id"}, order: "address", prepare: prepareIpamAddress}).register(g, "/ipam/addresses")
 	(&resource[models.DnsZone, *models.DnsZone]{db: s.db, filters: []string{"instance_id"}, order: "name", prepare: prepareDnsZone}).register(g, "/dns/zones")
 	(&resource[models.DnsRecord, *models.DnsRecord]{db: s.db, filters: []string{"zone_id"}, order: "rank, id", prepare: prepareDnsRecord}).register(g, "/dns/records")
 	(&resource[models.DnsSoaTemplate, *models.DnsSoaTemplate]{db: s.db, order: "name", prepare: prepareDnsSoaTemplate, beforeDelete: deleteDnsSoaTemplate}).register(g, "/dns/soa-templates")

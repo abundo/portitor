@@ -133,10 +133,11 @@ func NamedConf(in *fwconfig.Instance, p Paths, dhcpDNS []string) string {
 	return b.String()
 }
 
-// DnsmgrConfig builds the dnsmgr2 configuration for an instance. Returns
-// ok=false when the instance runs neither DNS nor DHCP.
+// DnsmgrConfig builds the dnsmgr2 configuration for an instance: its DNS
+// zones (Kea's configs are rendered in full, see kea.go). Returns ok=false
+// when the instance runs no DNS server.
 func DnsmgrConfig(in *fwconfig.Instance, p Paths, u Units) (dnsmgr.ConfigRoot, bool) {
-	if !in.DNS.Enabled && !in.DHCP.Enabled {
+	if !in.DNS.Enabled {
 		return dnsmgr.ConfigRoot{}, false
 	}
 	etc := p.InstanceEtc(in.Name)
@@ -150,104 +151,70 @@ func DnsmgrConfig(in *fwconfig.Instance, p Paths, u Units) (dnsmgr.ConfigRoot, b
 	}
 	group := dnsmgr.ConfigDataType{}
 
-	if in.DNS.Enabled {
-		named := u.Named(in.Name)
-		cfg.DNS = dnsmgr.ConfigDNS{
-			HostTemplates: map[string]dnsmgr.ConfigDNS_HostTemplate{
-				dnsmgrHostTemplate: {
-					Type:          "isc_bind",
-					Configdir:     etc,
-					IncludeFile:   "named.conf.dnsmgr2",
-					ZonesDir:      filepath.Join(state, "zones"),
-					Zonesfile:     "{zone}",
-					Tmpdir:        tmp,
-					CmdReloadAll:  "systemctl reload-or-restart " + named,
-					CmdReloadZone: "systemctl reload-or-restart " + named,
-					CmdRestart:    "systemctl restart " + named,
-					CmdStatus:     "systemctl is-active " + named,
-				},
+	named := u.Named(in.Name)
+	cfg.DNS = dnsmgr.ConfigDNS{
+		HostTemplates: map[string]dnsmgr.ConfigDNS_HostTemplate{
+			dnsmgrHostTemplate: {
+				Type:          "isc_bind",
+				Configdir:     etc,
+				IncludeFile:   "named.conf.dnsmgr2",
+				ZonesDir:      filepath.Join(state, "zones"),
+				Zonesfile:     "{zone}",
+				Tmpdir:        tmp,
+				CmdReloadAll:  "systemctl reload-or-restart " + named,
+				CmdReloadZone: "systemctl reload-or-restart " + named,
+				CmdRestart:    "systemctl restart " + named,
+				CmdStatus:     "systemctl is-active " + named,
 			},
-			SOATemplates: map[string]dnsmgr.ConfigDNS_SOA_template{
-				dnsmgrSOATemplate: {
-					Mname:        "localhost.",
-					Rname:        "hostmaster.localhost.",
-					SerialFormat: "date_serial",
-					Refresh:      3600,
-					Retry:        600,
-					Expire:       604800,
-					Minimum:      300,
-				},
-			},
-			ZoneTemplates: map[string]dnsmgr.ConfigDNS_ZoneTemplate{
-				dnsmgrZoneTemplate: {
-					SOA:        dnsmgrSOATemplate,
-					DefaultTTL: "300",
-					NS:         []dnsmgr.ConfigDNS_TemplateNS{{Name: "@", Type: "NS", Value: "localhost."}},
-				},
-			},
-		}
-		for _, s := range in.DNS.SOATemplates {
-			cfg.DNS.SOATemplates[dnsmgrSOAPrefix+s.Name] = dnsmgr.ConfigDNS_SOA_template{
-				Mname:        fqdn(s.MName),
-				Rname:        fqdn(s.RName),
+		},
+		SOATemplates: map[string]dnsmgr.ConfigDNS_SOA_template{
+			dnsmgrSOATemplate: {
+				Mname:        "localhost.",
+				Rname:        "hostmaster.localhost.",
 				SerialFormat: "date_serial",
-				Refresh:      int(s.Refresh),
-				Retry:        int(s.Retry),
-				Expire:       int(s.Expire),
-				Minimum:      int(s.Minimum),
-			}
-		}
-		for _, t := range in.DNS.ZoneTemplates {
-			zt := dnsmgr.ConfigDNS_ZoneTemplate{
-				SOA:          dnsmgrSOAPrefix + t.SOA,
-				DefaultTTL:   strconv.FormatInt(t.DefaultTTL, 10),
-				DNSSECpolicy: t.DNSSECPolicy,
-			}
-			for _, ns := range t.Nameservers {
-				zt.NS = append(zt.NS, dnsmgr.ConfigDNS_TemplateNS{Name: "@", Type: "NS", Value: fqdn(ns)})
-			}
-			cfg.DNS.ZoneTemplates[dnsmgrZonePrefix+t.Name] = zt
-		}
-		group.HostDnsTemplate = dnsmgrHostTemplate
-		for _, z := range in.DNS.Zones {
-			tmpl := dnsmgrZoneTemplate
-			if z.Template != "" {
-				tmpl = dnsmgrZonePrefix + z.Template
-			}
-			group.Zones = append(group.Zones, dnsmgr.ConfigZone{Name: z.Name, Type: z.Type, DnsTemplate: tmpl})
+				Refresh:      3600,
+				Retry:        600,
+				Expire:       604800,
+				Minimum:      300,
+			},
+		},
+		ZoneTemplates: map[string]dnsmgr.ConfigDNS_ZoneTemplate{
+			dnsmgrZoneTemplate: {
+				SOA:        dnsmgrSOATemplate,
+				DefaultTTL: "300",
+				NS:         []dnsmgr.ConfigDNS_TemplateNS{{Name: "@", Type: "NS", Value: "localhost."}},
+			},
+		},
+	}
+	for _, s := range in.DNS.SOATemplates {
+		cfg.DNS.SOATemplates[dnsmgrSOAPrefix+s.Name] = dnsmgr.ConfigDNS_SOA_template{
+			Mname:        fqdn(s.MName),
+			Rname:        fqdn(s.RName),
+			SerialFormat: "date_serial",
+			Refresh:      int(s.Refresh),
+			Retry:        int(s.Retry),
+			Expire:       int(s.Expire),
+			Minimum:      int(s.Minimum),
 		}
 	}
-
-	if in.DHCP.Enabled {
-		kea := u.Kea4(in.Name)
-		cfg.DHCP = dnsmgr.ConfigDHCP{
-			DomainName: in.DHCP.DomainName,
-			HostTemplates: map[string]dnsmgr.ConfigHostDHCPtemplate{
-				dnsmgrHostTemplate: {
-					Type: "isc_kea",
-					IPv4: dnsmgr.ConfigDHCPtemplateProtocol{
-						Enable:      true,
-						Configdir:   etc,
-						IncludeFile: "kea-dhcp4.dnsmgr2.json",
-						Tmpdir:      tmp,
-						CmdRestart:  "systemctl restart " + kea,
-						CmdStatus:   "systemctl is-active " + kea,
-					},
-				},
-			},
+	for _, t := range in.DNS.ZoneTemplates {
+		zt := dnsmgr.ConfigDNS_ZoneTemplate{
+			SOA:          dnsmgrSOAPrefix + t.SOA,
+			DefaultTTL:   strconv.FormatInt(t.DefaultTTL, 10),
+			DNSSECpolicy: t.DNSSECPolicy,
 		}
-		group.HostDhcpTemplate = dnsmgrHostTemplate
-		for _, s := range in.DHCP.Subnets {
-			pfx, err := netip.ParsePrefix(s.Prefix)
-			if err != nil || !pfx.Addr().Is4() {
-				continue // DHCPv6: see KeaDhcp6Conf
-			}
-			cp := dnsmgr.ConfigPrefix{Name: pfx.Masked().String(), Gateway: s.Gateway, DNSServers: s.DNSServers}
-			if s.RangeStart != "" {
-				cp.Range = s.RangeStart + "-" + s.RangeEnd
-			}
-			group.Prefixes = append(group.Prefixes, cp)
+		for _, ns := range t.Nameservers {
+			zt.NS = append(zt.NS, dnsmgr.ConfigDNS_TemplateNS{Name: "@", Type: "NS", Value: fqdn(ns)})
 		}
+		cfg.DNS.ZoneTemplates[dnsmgrZonePrefix+t.Name] = zt
+	}
+	group.HostDnsTemplate = dnsmgrHostTemplate
+	for _, z := range in.DNS.Zones {
+		tmpl := dnsmgrZoneTemplate
+		if z.Template != "" {
+			tmpl = dnsmgrZonePrefix + z.Template
+		}
+		group.Zones = append(group.Zones, dnsmgr.ConfigZone{Name: z.Name, Type: z.Type, DnsTemplate: tmpl})
 	}
 
 	cfg.Dnsmgr2 = dnsmgr.ConfigDataGroups{group}
@@ -291,47 +258,4 @@ func RecordsJSON(in *fwconfig.Instance) string {
 	}
 	data, _ := json.MarshalIndent(out, "", "  ")
 	return string(data) + "\n"
-}
-
-// KeaDhcp4Conf renders Kea's main DHCPv4 config. The subnet list is
-// dnsmgr2's include file, so pools and reservations stay dnsmgr2's job.
-func KeaDhcp4Conf(in *fwconfig.Instance, p Paths) string {
-	var ifaces []string
-	for _, s := range in.DHCP.Subnets {
-		if pfx, err := netip.ParsePrefix(s.Prefix); err == nil && pfx.Addr().Is4() {
-			ifaces = appendUnique(ifaces, s.Interface)
-		}
-	}
-	sort.Strings(ifaces)
-	lease := in.DHCP.LeaseTime
-	if lease <= 0 {
-		lease = 86400
-	}
-	ifJSON, _ := json.Marshal(ifaces)
-	b := &strings.Builder{}
-	fmt.Fprintf(b, "// Generated by portitor-agent, instance %s. Do not edit.\n", in.Name)
-	fmt.Fprintf(b, `{
-  "Dhcp4": {
-    "interfaces-config": { "interfaces": %s },
-    "control-socket": { "socket-type": "unix", "socket-name": %q },
-    "lease-database": { "type": "memfile", "persist": true, "lfc-interval": 3600, "name": %q },
-    "valid-lifetime": %d,
-    "renew-timer": %d,
-    "rebind-timer": %d,
-    "subnet4": <?include %q?>,
-    "loggers": [ { "name": "kea-dhcp4", "output-options": [ { "output": "stdout" } ], "severity": "INFO" } ]
-  }
-}
-`, ifJSON,
-		filepath.Join(p.KeaSocketDir, "kea4-"+in.Name+".sock"),
-		KeaLeaseFile(in.Name, p),
-		lease, lease/2, lease*7/8,
-		filepath.Join(p.InstanceEtc(in.Name), "kea-dhcp4.dnsmgr2.json"))
-	return b.String()
-}
-
-// KeaLeaseFile is where Kea keeps an instance's v4 leases. Kea 2.6+
-// refuses lease files outside its data directory, hence KeaDataDir.
-func KeaLeaseFile(instance string, p Paths) string {
-	return filepath.Join(p.KeaDataDir, "kea-leases4-"+instance+".csv")
 }

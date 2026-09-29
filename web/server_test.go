@@ -216,17 +216,15 @@ func TestValidationAndSecrets(t *testing.T) {
 		t.Fatalf("peer: %d %s", peer.Code, peer.Body)
 	}
 
-	// Free peer addresses follow the interface's addresses, skipping IPAM
-	// and existing peers.
-	env.create("/api/ipam/prefixes", map[string]any{"instance_id": inst, "prefix": "10.99.0.0/24"})
-	env.create("/api/ipam/prefixes", map[string]any{"instance_id": inst, "prefix": "fd99::/64"})
-	env.create("/api/ipam/addresses", map[string]any{"instance_id": inst, "address": "10.99.0.1", "interface_id": ifc.ID})
-	env.create("/api/ipam/addresses", map[string]any{"instance_id": inst, "address": "fd99::1", "interface_id": ifc.ID})
+	// Free peer addresses follow the prefixes of the interface's
+	// addresses, skipping IPAM and existing peers.
+	if rec := env.do("PUT", "/api/interfaces/"+itoa(ifc.ID), map[string]any{"addresses": []string{"172.25.34.1/32", "10.99.0.1/24", "fd99::1/64"}}); rec.Code != http.StatusOK {
+		t.Fatalf("addresses: %d %s", rec.Code, rec.Body)
+	}
 	env.create("/api/ipam/addresses", map[string]any{"instance_id": inst, "address": "10.99.0.3"})
-	env.create("/api/ipam/addresses", map[string]any{"instance_id": inst, "address": "172.25.34.1", "interface_id": ifc.ID})
 	free := env.do("GET", "/api/interfaces/"+itoa(ifc.ID)+"/wg-next-free", nil)
-	if !strings.Contains(free.Body.String(), "172.25.34.1 on wg0 is not inside any IPAM prefix") {
-		t.Errorf("no warning for an address outside IPAM prefixes: %s", free.Body)
+	if !strings.Contains(free.Body.String(), "172.25.34.1/32 on wg0 is a single address") {
+		t.Errorf("no warning for a single address: %s", free.Body)
 	}
 	if !strings.Contains(free.Body.String(), `"addresses":["10.99.0.4/32","fd99::4/128"]`) {
 		t.Errorf("next free: %d %s", free.Code, free.Body)
@@ -304,19 +302,18 @@ func TestDeployEndToEnd(t *testing.T) {
 
 	inst := env.create("/api/instances", map[string]any{"name": "main", "dns_enabled": true, "dhcp_enabled": true, "dhcp_domain_name": "home.arpa"})
 	env.create("/api/interfaces", map[string]any{"instance_id": inst, "name": "eth0", "ipv4_mode": "dhcp", "enabled": true})
-	eth1 := env.create("/api/interfaces", map[string]any{"instance_id": inst, "name": "eth1", "enabled": true, "dns_listen": true})
+	env.create("/api/interfaces", map[string]any{"instance_id": inst, "name": "eth1", "enabled": true, "dns_listen": true, "addresses": []string{"192.168.1.1/24"}})
 	env.create("/api/interface-zones", map[string]any{"instance_id": inst, "name": "lan", "interfaces": []string{"eth1"}})
 	env.create("/api/ipam/prefixes", map[string]any{"instance_id": inst, "prefix": "192.168.1.0/24", "dhcp_enabled": true, "dhcp_range_start": "192.168.1.100", "dhcp_range_end": "192.168.1.200"})
-	env.create("/api/ipam/addresses", map[string]any{"instance_id": inst, "address": "192.168.1.1", "interface_id": eth1})
 	env.create("/api/rules", map[string]any{"instance_id": inst, "chain": "forward", "in_interfaces": []string{"lan"}, "out_interfaces": []string{"eth0"}, "action": "accept", "enabled": true})
 	nat := env.create("/api/nat", map[string]any{"instance_id": inst, "kind": "masquerade", "out_interfaces": []string{"eth0"}, "enabled": true})
 
 	// Problems block the deploy.
-	bad := env.create("/api/ipam/addresses", map[string]any{"instance_id": inst, "address": "10.0.0.1", "interface_id": eth1})
-	if rec := env.do("POST", "/api/deploy/apply", map[string]any{}); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "not inside any IPAM prefix") {
+	bad := env.create("/api/ipam/prefixes", map[string]any{"instance_id": inst, "prefix": "10.5.0.0/24", "dhcp_enabled": true})
+	if rec := env.do("POST", "/api/deploy/apply", map[string]any{}); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "no interface has an address in it") {
 		t.Fatalf("expected problems: %d %s", rec.Code, rec.Body)
 	}
-	env.do("DELETE", "/api/ipam/addresses/"+itoa(bad), nil)
+	env.do("DELETE", "/api/ipam/prefixes/"+itoa(bad), nil)
 
 	rec := env.do("POST", "/api/deploy/preview", map[string]any{})
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `oifname \"eth0\" meta nfproto ipv4 counter masquerade`) {
@@ -886,7 +883,7 @@ func TestInterfaceMove(t *testing.T) {
 	env := newEnv(t)
 	inst := env.create("/api/instances", map[string]any{"name": "main"})
 	other := env.create("/api/instances", map[string]any{"name": "guest"})
-	eth1 := env.create("/api/interfaces", map[string]any{"instance_id": inst, "name": "eth1"})
+	eth1 := env.create("/api/interfaces", map[string]any{"instance_id": inst, "name": "eth1", "addresses": []string{"10.9.9.1/24"}})
 	zone := env.create("/api/interface-zones", map[string]any{"instance_id": inst, "name": "lan", "interfaces": []string{"eth1"}})
 	vlan := env.create("/api/interfaces", map[string]any{"instance_id": inst, "name": "eth1.10", "kind": "vlan", "parent": "eth1", "vlan_id": 10})
 	route := env.create("/api/routes", map[string]any{"instance_id": inst, "destination": "10.9.0.0/16", "gateway": "", "interface_id": eth1})
@@ -914,7 +911,54 @@ func TestInterfaceMove(t *testing.T) {
 	env.srv.db.First(&i, eth1)
 	var z models.InterfaceZone
 	env.srv.db.First(&z, zone)
-	if i.InstanceID != other || len(z.Interfaces) != 0 {
-		t.Errorf("after move: instance %d, old zone %v", i.InstanceID, z.Interfaces)
+	if i.InstanceID != other || len(z.Interfaces) != 0 || len(i.Addresses) != 1 {
+		t.Errorf("after move: instance %d, old zone %v, addresses %v (they move along)", i.InstanceID, z.Interfaces, i.Addresses)
+	}
+}
+
+func TestInterfaceAddresses(t *testing.T) {
+	env := newEnv(t)
+	inst := env.create("/api/instances", map[string]any{"name": "main"})
+	eth1 := env.create("/api/interfaces", map[string]any{"instance_id": inst, "name": "eth1",
+		"addresses": []string{" 192.168.1.1/24 ", "fd00:1:0::1/64", "192.168.1.1/24", "10.0.0.0/31", ""}})
+	var i models.Interface
+	env.srv.db.First(&i, eth1)
+	if got := strings.Join(i.Addresses, " "); got != "192.168.1.1/24 fd00:1::1/64 10.0.0.0/31" {
+		t.Errorf("addresses stored as %q, want canonical, without repeats", got)
+	}
+	for _, c := range []struct {
+		body map[string]any
+		want string
+	}{
+		{map[string]any{"name": "eth2", "addresses": []string{"192.168.2.0/24"}}, "network address"},
+		{map[string]any{"name": "eth2", "addresses": []string{"fd00:2::/64"}}, "network address"},
+		{map[string]any{"name": "eth2", "addresses": []string{"192.168.2.1"}}, "with a prefix length"},
+		{map[string]any{"name": "eth2", "addresses": []string{"192.168.1.1/25"}}, "192.168.1.1 is already on eth1"},
+		{map[string]any{"name": "eth2", "ipv4_mode": "dhcp", "addresses": []string{"192.168.2.1/24"}}, "IPv4 comes from the DHCP client"},
+	} {
+		c.body["instance_id"] = inst
+		if rec := env.do("POST", "/api/interfaces", c.body); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), c.want) {
+			t.Errorf("%v: %d %s, want %q", c.body, rec.Code, rec.Body, c.want)
+		}
+	}
+	env.create("/api/interfaces", map[string]any{"instance_id": inst, "name": "eth0", "ipv4_mode": "dhcp", "addresses": []string{"2001:db8::2/64"}})
+
+	// The tree shows the interfaces' prefixes and addresses without IPAM
+	// entries.
+	tree := env.do("GET", "/api/ipam/tree?instance_id="+itoa(inst), nil).Body.String()
+	for _, want := range []string{
+		`"kind":"prefix","id":0,"auto":true,"cidr":"192.168.1.0/24"`,
+		`"kind":"address","id":0,"auto":true,"cidr":"192.168.1.1","interface_id":` + itoa(eth1),
+		`"cidr":"2001:db8::/64"`,
+		`"cidr":"fd00:1::/64"`,
+	} {
+		if !strings.Contains(tree, want) {
+			t.Errorf("tree lacks %s:\n%s", want, tree)
+		}
+	}
+	// Next free skips the interface's address.
+	pfx := env.create("/api/ipam/prefixes", map[string]any{"instance_id": inst, "prefix": "192.168.1.0/24"})
+	if got := env.do("GET", "/api/ipam/prefixes/"+itoa(pfx)+"/next-free", nil).Body.String(); !strings.Contains(got, `"192.168.1.2"`) {
+		t.Errorf("next free: %s", got)
 	}
 }

@@ -101,6 +101,11 @@ are in [README.md](README.md).
   interface, link end or zone rewrites the lists (`web/ifzones.go`), deleting one
   that a rule uses is refused, and a non-empty list that resolves to no enabled
   interface (`Instance.MatchInterfaces`) makes the renderer skip the rule.
+- **Interface addresses** are on the interface (`interfaces.addresses`): CIDRs with a
+  host part (`fwconfig.ParseInterfaceAddress`; any address of a /31, /32, /127,
+  /128), unique within the instance. IPAM does not assign them; `ipam.Tree` lists
+  them, and their prefixes, as `auto` nodes (id 0). A DHCP or RA prefix is served on
+  the interface with an address of the same prefix.
 - **Named hosts/prefixes never reach the agent.** `builder.Build` expands names
   (`netobj`) and drops a rule it cannot resolve; an object with no addresses is an
   error, never an empty list (an empty address list matches *any*). Entries are
@@ -131,7 +136,9 @@ are in [README.md](README.md).
   only adds, drops and renames columns; anything else rebuilds the table (create,
   copy, drop, rename) in a `-- +goose NO TRANSACTION` migration that turns
   `foreign_keys` off around it. Ids are `AUTOINCREMENT` so a deleted row's id is
-  never reused (rule ids mark connections).
+  never reused (rule ids mark connections). A data move SQL cannot compute (prefix
+  containment, say) is a Go migration registered in `dbmigrate.provider`
+  (`interface_addresses.go`).
 - **Roles:** a user is `admin` or `viewer` (`models.RoleAdmin`/`RoleViewer`).
   `requireRole` (`web/auth.go`) denies by default: a viewer gets GET routes except
   those in `viewerDenied` (secrets, console, users) and only the writes in
@@ -167,11 +174,13 @@ shebang. Files that cannot hold a comment go in `REUSE.toml`. Commits carry a DC
   `echo.PathParam[uint]`, never pass the raw string to GORM (it becomes SQL).
 - Kea 2.6+ only accepts lease files and control sockets in its own directories,
   hence `paths.kea_data_dir` / `kea_socket_dir`.
-- DHCPv4 goes through dnsmgr2; DHCPv6 (`kea-dhcp6.conf`, reservations included) and
-  radvd are rendered directly, because Kea6 needs each subnet's `interface`, which
-  dnsmgr2 does not write.
-- dnsmgr2 zones require a DNS host template, so DHCP reservations (made from A records
-  with a MAC) need the instance's DNS server enabled. The builder reports this.
+- dnsmgr2 does DNS only. Kea (`render/kea.go`: `kea-dhcp4.conf`, `kea-dhcp6.conf`,
+  reservations from A/AAAA records with a MAC included) and radvd are rendered
+  directly: the DHCP subnets of one IP version on an interface form a Kea shared
+  network named after it, so clients get addresses from all of them, and Kea6 needs
+  each subnet's `interface`; dnsmgr2 writes neither. Subnet ids follow the prefixes
+  sorted as text, as dnsmgr2 numbered them. Kea refuses a config that names an
+  interface that is missing.
 - DNS templates (SOA templates, DNSSEC policies, zone templates) are global in the
   database; `builder.Build` copies into each instance only the ones its zones use,
   and zones refer to them by name. A zone without a template gets the built-in

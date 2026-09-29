@@ -2,7 +2,8 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
 <script setup>
-// Recursive rows of the IPAM tree.
+// Recursive rows of the IPAM tree. An `auto` node is there only because an
+// interface has the address: it has no IPAM entry to delete (id 0).
 defineOptions({ name: 'IpamTreeRows' })
 defineProps({
   nodes: { type: Array, required: true },
@@ -13,7 +14,7 @@ defineProps({
   readOnly: { type: Boolean, default: false },
 })
 const emit = defineEmits(['toggle', 'add-prefix', 'add-address', 'edit', 'remove'])
-const key = (n) => `${n.kind}:${n.id}`
+const key = (n) => `${n.kind}:${n.cidr}`
 function pct(n) {
   return Math.round(n.used_frac * 100)
 }
@@ -45,6 +46,9 @@ function pct(n) {
       <td class="px-2 text-sm">
         {{ n.description }}
         <span v-if="n.dns_name" class="font-mono text-xs text-muted">{{ n.dns_name }}</span>
+        <span v-if="n.auto && !n.description && !n.dns_name" class="text-xs text-muted">{{
+          n.kind === 'prefix' ? 'from an interface address' : 'interface address'
+        }}</span>
       </td>
       <td class="px-2 text-xs">
         <UBadge
@@ -95,13 +99,14 @@ function pct(n) {
           @click="emit('edit', n)"
         />
         <UButton
-          v-if="!readOnly"
+          v-if="!readOnly && !n.auto"
           size="xs"
           color="error"
           variant="ghost"
           icon="i-lucide-trash"
           @click="emit('remove', n)"
         />
+        <span v-else-if="!readOnly" class="inline-block w-6" />
       </td>
     </tr>
     <IpamTreeRows

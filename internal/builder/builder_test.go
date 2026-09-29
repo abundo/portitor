@@ -48,9 +48,11 @@ func TestBuildHome(t *testing.T) {
 	mustCreate(t, db, &models.InterfaceZone{InstanceID: main.ID, Name: "empty"})
 
 	eth0 := models.Interface{InstanceID: main.ID, Name: "eth0", Kind: "physical", Enabled: true, Ipv4Mode: "dhcp"}
-	eth1 := models.Interface{InstanceID: main.ID, Name: "eth1", Kind: "physical", Enabled: true, Ipv4Mode: "static", DnsListen: true}
+	eth1 := models.Interface{InstanceID: main.ID, Name: "eth1", Kind: "physical", Enabled: true, Ipv4Mode: "static", DnsListen: true,
+		Addresses: models.StringList{"192.168.1.1/24"}}
 	priv, _, _ := wgkeys.Generate()
-	wg0 := models.Interface{InstanceID: main.ID, Name: "wg0", Kind: "wireguard", Enabled: true, Ipv4Mode: "static", WgPrivateKey: priv, WgListenPort: 51820}
+	wg0 := models.Interface{InstanceID: main.ID, Name: "wg0", Kind: "wireguard", Enabled: true, Ipv4Mode: "static", WgPrivateKey: priv, WgListenPort: 51820,
+		Addresses: models.StringList{"10.99.0.1/24"}}
 	for _, i := range []*models.Interface{&eth0, &eth1, &wg0} {
 		mustCreate(t, db, i)
 	}
@@ -62,8 +64,7 @@ func TestBuildHome(t *testing.T) {
 	mustCreate(t, db, &models.IpamPrefix{InstanceID: main.ID, Prefix: "192.168.0.0/16"})
 	mustCreate(t, db, &models.IpamPrefix{InstanceID: main.ID, Prefix: "192.168.1.0/24", DhcpEnabled: true, DhcpRangeStart: "192.168.1.100", DhcpRangeEnd: "192.168.1.199"})
 	mustCreate(t, db, &models.IpamPrefix{InstanceID: main.ID, Prefix: "10.99.0.0/24"})
-	mustCreate(t, db, &models.IpamAddress{InstanceID: main.ID, Address: "192.168.1.1", InterfaceID: &eth1.ID, DnsName: "gw.home.arpa"})
-	mustCreate(t, db, &models.IpamAddress{InstanceID: main.ID, Address: "10.99.0.1", InterfaceID: &wg0.ID})
+	mustCreate(t, db, &models.IpamAddress{InstanceID: main.ID, Address: "192.168.1.1", DnsName: "gw.home.arpa"})
 	mustCreate(t, db, &models.IpamAddress{InstanceID: main.ID, Address: "192.168.1.10", DnsName: "nas.home.arpa", Mac: "02:00:00:00:00:10"})
 
 	soa := models.DnsSoaTemplate{Name: "home", Mname: "gw.home.arpa", Rname: "hostmaster.home.arpa", Refresh: 86400, Retry: 7200, Expire: 3600000, Minimum: 3600}
@@ -97,7 +98,7 @@ func TestBuildHome(t *testing.T) {
 		t.Fatalf("%+v", doc)
 	}
 	if got := in.Interface("eth1").Addresses; len(got) != 1 || got[0] != "192.168.1.1/24" {
-		t.Errorf("eth1 addresses %v: prefix length must come from the deepest IPAM prefix", got)
+		t.Errorf("eth1 addresses %v", got)
 	}
 	if len(in.InterfaceZones) != 2 || in.InterfaceZones[1].Name != "lan" || strings.Join(in.InterfaceZones[1].Interfaces, " ") != "eth1 wg0" ||
 		in.InterfaceZones[0].Interfaces == nil {
@@ -153,9 +154,8 @@ func TestBuildReportsProblems(t *testing.T) {
 	db := testDB(t)
 	main := models.Instance{Name: "main", IsDefault: true}
 	mustCreate(t, db, &main)
-	eth1 := models.Interface{InstanceID: main.ID, Name: "eth1", Kind: "physical", Enabled: true, Ipv4Mode: "static"}
-	mustCreate(t, db, &eth1)
-	mustCreate(t, db, &models.IpamAddress{InstanceID: main.ID, Address: "192.168.1.1", InterfaceID: &eth1.ID})
+	mustCreate(t, db, &models.Interface{InstanceID: main.ID, Name: "eth1", Kind: "physical", Enabled: true, Ipv4Mode: "static",
+		Addresses: models.StringList{"192.168.1.0/24"}})
 	mustCreate(t, db, &models.IpamAddress{InstanceID: main.ID, Address: "192.168.1.9", Mac: "02:00:00:00:00:09"})
 	mustCreate(t, db, &models.Rule{InstanceID: main.ID, Chain: "input", Services: models.StringList{"ghost"}, Action: "accept", Enabled: true})
 
@@ -165,7 +165,7 @@ func TestBuildReportsProblems(t *testing.T) {
 		t.Fatalf("want ValidationError, got %v", err)
 	}
 	joined := strings.Join(ve.Problems, "\n")
-	for _, want := range []string{"not inside any IPAM prefix", "MAC but no DNS name", `unknown service "ghost"`} {
+	for _, want := range []string{"192.168.1.0 is the network address", "MAC but no DNS name", `unknown service "ghost"`} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("problems lack %q:\n%s", want, joined)
 		}
@@ -178,13 +178,11 @@ func TestBuildIPv6AndObjects(t *testing.T) {
 		DnsForwarders: models.StringList{"quad9"}}
 	mustCreate(t, db, &main)
 	mustCreate(t, db, &models.Interface{InstanceID: main.ID, Name: "eth0", Kind: "physical", Enabled: true, Ipv4Mode: "dhcp", Ipv6AcceptRA: true})
-	eth1 := models.Interface{InstanceID: main.ID, Name: "eth1", Kind: "physical", Enabled: true, Ipv4Mode: "static", DnsListen: true}
-	mustCreate(t, db, &eth1)
+	mustCreate(t, db, &models.Interface{InstanceID: main.ID, Name: "eth1", Kind: "physical", Enabled: true, Ipv4Mode: "static", DnsListen: true,
+		Addresses: models.StringList{"192.168.1.1/24", "fd00:1::1/64"}})
 
 	mustCreate(t, db, &models.IpamPrefix{InstanceID: main.ID, Prefix: "192.168.1.0/24", DhcpEnabled: true, DhcpRangeStart: "192.168.1.100", DhcpRangeEnd: "192.168.1.199"})
 	mustCreate(t, db, &models.IpamPrefix{InstanceID: main.ID, Prefix: "fd00:1::/64", RaEnabled: true, RaSlaac: true, DhcpEnabled: true, DhcpRangeStart: "fd00:1::1000", DhcpRangeEnd: "fd00:1::1fff"})
-	mustCreate(t, db, &models.IpamAddress{InstanceID: main.ID, Address: "192.168.1.1", InterfaceID: &eth1.ID})
-	mustCreate(t, db, &models.IpamAddress{InstanceID: main.ID, Address: "fd00:1::1", InterfaceID: &eth1.ID})
 	mustCreate(t, db, &models.IpamAddress{InstanceID: main.ID, Address: "fd00:1::10", DnsName: "nas.home.arpa", Mac: "02:00:00:00:00:10"})
 	mustCreate(t, db, &models.DnsZone{InstanceID: main.ID, Name: "home.arpa", Type: "forward"})
 
@@ -237,6 +235,33 @@ func TestBuildIPv6AndObjects(t *testing.T) {
 	if ra.Interface != "eth1" || len(ra.Prefixes) != 1 || !ra.Prefixes[0].Autonomous || !ra.Managed || !ra.Other ||
 		strings.Join(ra.RDNSS, " ") != "fd00:1::1" || strings.Join(ra.DNSSL, " ") != "home.arpa" {
 		t.Errorf("ra: %+v", ra)
+	}
+}
+
+// Two DHCP prefixes on one interface are both served there, each with the
+// interface's address in it as gateway (the renderer makes them a Kea
+// shared network). A DHCPv4 reservation no longer needs the DNS server.
+func TestBuildTwoPrefixesOnInterface(t *testing.T) {
+	db := testDB(t)
+	main := models.Instance{Name: "main", IsDefault: true, DhcpEnabled: true}
+	mustCreate(t, db, &main)
+	mustCreate(t, db, &models.Interface{InstanceID: main.ID, Name: "eth1", Kind: "physical", Enabled: true, Ipv4Mode: "static",
+		Addresses: models.StringList{"192.168.1.1/24", "10.1.2.1/24"}})
+	mustCreate(t, db, &models.IpamPrefix{InstanceID: main.ID, Prefix: "192.168.1.0/24", DhcpEnabled: true, DhcpRangeStart: "192.168.1.100", DhcpRangeEnd: "192.168.1.199"})
+	mustCreate(t, db, &models.IpamPrefix{InstanceID: main.ID, Prefix: "10.1.2.0/24", DhcpEnabled: true, DhcpRangeStart: "10.1.2.100", DhcpRangeEnd: "10.1.2.199"})
+	mustCreate(t, db, &models.DnsZone{InstanceID: main.ID, Name: "home.arpa", Type: "forward"})
+	mustCreate(t, db, &models.IpamAddress{InstanceID: main.ID, Address: "10.1.2.10", DnsName: "tv.home.arpa", Mac: "02:00:00:00:00:10"})
+
+	doc, err := Build(db, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, s := range doc.Instance("main").DHCP.Subnets {
+		got = append(got, s.Prefix+" on "+s.Interface+" via "+s.Gateway)
+	}
+	if strings.Join(got, ", ") != "10.1.2.0/24 on eth1 via 10.1.2.1, 192.168.1.0/24 on eth1 via 192.168.1.1" {
+		t.Errorf("dhcp subnets: %v", got)
 	}
 }
 

@@ -13,7 +13,6 @@ import (
 
 	"github.com/abundo/portitor/internal/agentapi"
 	"github.com/abundo/portitor/internal/fwconfig"
-	"github.com/abundo/portitor/internal/ipam"
 	"github.com/abundo/portitor/models"
 )
 
@@ -38,7 +37,7 @@ type missingNIC struct {
 // physical interfaces in the database that the firewall does not have.
 //
 // An imported interface mirrors what is configured now (link state,
-// static addresses into IPAM), so that deploying does not take down, say,
+// static addresses), so that deploying does not take down, say,
 // the management port. Each name is imported once (models.KnownInterface):
 // deleting the interface afterwards sticks. Interfaces in instance
 // namespaces were put there by a deploy, so they are declared already.
@@ -128,15 +127,33 @@ func (s *Server) syncNICs(nics []agentapi.NICStatus) (*nicSync, error) {
 }
 
 // importNIC creates a physical interface in the instance as the agent
-// found it. Its static addresses go into IPAM, with a prefix of the same
-// length when there is none. It returns notes on addresses it could not
-// carry over exactly.
+// found it, with its static addresses. It returns notes on addresses it
+// could not carry over.
 func importNIC(tx *gorm.DB, instanceID uint, n agentapi.NICStatus) ([]string, error) {
-	var addrs []netip.Prefix
+	var others []models.Interface
+	if err := tx.Where("instance_id = ?", instanceID).Find(&others).Error; err != nil {
+		return nil, err
+	}
+	taken := map[netip.Addr]string{}
+	for _, o := range others {
+		for _, a := range o.Addresses {
+			if p, err := netip.ParsePrefix(a); err == nil {
+				taken[p.Addr()] = o.Name
+			}
+		}
+	}
+	var notes []string
+	addrs := models.StringList{}
 	has4 := false
 	for _, a := range n.Addresses {
-		if p, err := netip.ParsePrefix(a); err == nil {
-			addrs = append(addrs, p)
+		p, err := fwconfig.ParseInterfaceAddress(a)
+		switch {
+		case err != nil:
+			notes = append(notes, fmt.Sprintf("%s: %s not added: %v", n.Name, a, err))
+		case taken[p.Addr()] != "":
+			notes = append(notes, fmt.Sprintf("%s: %s is on %s in the configuration; not added", n.Name, p, taken[p.Addr()]))
+		default:
+			addrs = append(addrs, p.String())
 			has4 = has4 || p.Addr().Is4()
 		}
 	}
@@ -147,6 +164,7 @@ func importNIC(tx *gorm.DB, instanceID uint, n agentapi.NICStatus) ([]string, er
 		Description:  "found on the firewall",
 		Enabled:      n.Up,
 		Ipv4Mode:     fwconfig.ModeStatic,
+		Addresses:    addrs,
 		Ipv6AcceptRA: n.SLAAC,
 		Members:      models.StringList{},
 	}
@@ -160,55 +178,6 @@ func importNIC(tx *gorm.DB, instanceID uint, n agentapi.NICStatus) ([]string, er
 	}
 	if err := tx.Create(&ifc).Error; err != nil {
 		return nil, err
-	}
-
-	var prefixes []models.IpamPrefix
-	if err := tx.Where("instance_id = ?", instanceID).Find(&prefixes).Error; err != nil {
-		return nil, err
-	}
-	var notes []string
-	for _, p := range addrs {
-		masked := p.Masked().String()
-		exists := false
-		for _, have := range prefixes {
-			if pp, err := netip.ParsePrefix(have.Prefix); err == nil && pp.Masked().String() == masked {
-				exists = true
-			}
-		}
-		if !exists {
-			np := models.IpamPrefix{InstanceID: instanceID, Prefix: masked, Description: "found on " + n.Name, DhcpDnsServers: models.StringList{}}
-			if err := prepareIpamPrefix(tx, &np, nil); err != nil {
-				return nil, err
-			}
-			if err := tx.Create(&np).Error; err != nil {
-				return nil, err
-			}
-			prefixes = append(prefixes, np)
-		}
-		if enc, _ := ipam.Enclosing(prefixes, p.Addr()); enc.Bits() != p.Bits() {
-			notes = append(notes, fmt.Sprintf("%s: %s would be deployed as /%d (IPAM prefix %s)", n.Name, p, enc.Bits(), enc))
-		}
-
-		var a models.IpamAddress
-		err := tx.Where("instance_id = ? AND address = ?", instanceID, p.Addr().String()).First(&a).Error
-		switch {
-		case errors.Is(err, gorm.ErrRecordNotFound):
-			a = models.IpamAddress{InstanceID: instanceID, Address: p.Addr().String(), InterfaceID: &ifc.ID}
-			if err := prepareIpamAddress(tx, &a, nil); err != nil {
-				return nil, err
-			}
-			if err := tx.Create(&a).Error; err != nil {
-				return nil, err
-			}
-		case err != nil:
-			return nil, err
-		case a.InterfaceID == nil:
-			if err := tx.Model(&a).Update("interface_id", ifc.ID).Error; err != nil {
-				return nil, err
-			}
-		case *a.InterfaceID != ifc.ID:
-			notes = append(notes, fmt.Sprintf("%s: %s is assigned to another interface in IPAM; not added", n.Name, p.Addr()))
-		}
 	}
 	return notes, nil
 }

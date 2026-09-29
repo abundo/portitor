@@ -3,8 +3,8 @@
 
 // Package builder turns portitor-web's database into the fwconfig.Document
 // that portitor-agent applies. It resolves references (instance ids to names,
-// IPAM addresses to interface CIDRs, DHCP prefixes to serving interfaces)
-// and reports what it cannot resolve; fwconfig.Validate does the rest.
+// DHCP prefixes to serving interfaces, names of hosts and services) and
+// reports what it cannot resolve; fwconfig.Validate does the rest.
 package builder
 
 import (
@@ -18,7 +18,6 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/abundo/portitor/internal/fwconfig"
-	"github.com/abundo/portitor/internal/ipam"
 	"github.com/abundo/portitor/internal/netobj"
 	"github.com/abundo/portitor/models"
 )
@@ -166,7 +165,6 @@ func Build(db *gorm.DB, generation int64) (*fwconfig.Document, error) {
 			}
 		}
 
-		// Interfaces with their addresses from IPAM.
 		for _, mif := range d.interfaces {
 			if mif.InstanceID != mi.ID {
 				continue
@@ -181,25 +179,10 @@ func Build(db *gorm.DB, generation int64) (*fwconfig.Document, error) {
 				Members:      []string(mif.Members),
 				MTU:          mif.Mtu,
 				IPv4Mode:     mif.Ipv4Mode,
+				Addresses:    []string(mif.Addresses),
 				IPv6AcceptRA: mif.Ipv6AcceptRA,
 				// Only meaningful for a DHCP client.
 				DHCPNoDefaultRoute: mif.DhcpNoDefaultRoute && mif.Ipv4Mode == fwconfig.ModeDHCP,
-			}
-			for _, a := range addrs {
-				if a.InterfaceID == nil || *a.InterfaceID != mif.ID {
-					continue
-				}
-				ip, err := netip.ParseAddr(a.Address)
-				if err != nil {
-					addf("instance %s: IPAM address %q is invalid", mi.Name, a.Address)
-					continue
-				}
-				enc, ok := ipam.Enclosing(prefixes, ip)
-				if !ok {
-					addf("instance %s: address %s on %s is not inside any IPAM prefix (the prefix gives its length)", mi.Name, ip, mif.Name)
-					continue
-				}
-				ifc.Addresses = append(ifc.Addresses, netip.PrefixFrom(ip, enc.Bits()).String())
 			}
 			if mif.Kind == fwconfig.KindWireGuard {
 				wg := &fwconfig.WireGuard{PrivateKey: mif.WgPrivateKey, ListenPort: mif.WgListenPort, Peers: []fwconfig.WGPeer{}}
@@ -424,21 +407,11 @@ func Build(db *gorm.DB, generation int64) (*fwconfig.Document, error) {
 			}
 			zone.Records = append(zone.Records, fwconfig.DNSRecord{Name: label, Type: typ, Value: ip.String(), MAC: a.Mac})
 		}
-		if !mi.DnsEnabled {
-			for _, z := range in.DNS.Zones {
-				for _, r := range z.Records {
-					// DHCPv4 reservations go through dnsmgr2 and BIND's
-					// records; DHCPv6 ones are rendered directly.
-					if r.MAC != "" && r.Type == "A" {
-						addf("instance %s: DHCP reservation for %s needs the DNS server enabled (reservations are generated from DNS records)", mi.Name, r.Value)
-					}
-				}
-			}
-		}
 
 		// DHCP and IPv6 router advertisements: IPAM prefixes with DHCP or
 		// RA on, served on the interface that has an address inside the
-		// prefix (with the prefix's length).
+		// prefix (with the prefix's length). Several on one interface
+		// become a Kea shared network (render.KeaDhcp4Conf).
 		in.DHCP = fwconfig.DHCPServer{Enabled: mi.DhcpEnabled, DomainName: mi.DhcpDomainName, LeaseTime: mi.DhcpLeaseTime, Subnets: []fwconfig.DHCPSubnet{}}
 		raIndex := map[string]int{}
 		for _, p := range prefixes {

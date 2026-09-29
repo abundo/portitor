@@ -48,10 +48,40 @@ func cleanList(list models.StringList) models.StringList {
 	return out
 }
 
-func checkCIDRs(field string, list models.StringList) error {
-	for _, s := range list {
-		if _, err := netip.ParsePrefix(s); err != nil {
-			return bad(fmt.Sprintf("%s: %q is not a CIDR (e.g. 192.168.1.0/24)", field, s))
+// ifaceAddrs checks interface addresses (192.168.1.1/24): each is a host
+// of its prefix. It returns them in canonical form, without repeats.
+func ifaceAddrs(field string, list models.StringList) (models.StringList, error) {
+	out := models.StringList{}
+	for _, s := range cleanList(list) {
+		p, err := fwconfig.ParseInterfaceAddress(s)
+		if err != nil {
+			if _, perr := netip.ParsePrefix(s); perr != nil {
+				return nil, bad(fmt.Sprintf("%s: %q is not an address with a prefix length (e.g. 192.168.1.1/24)", field, s))
+			}
+			return nil, bad(fmt.Sprintf("%s: %v", field, err))
+		}
+		if !slices.Contains(out, p.String()) {
+			out = append(out, p.String())
+		}
+	}
+	return out, nil
+}
+
+// checkAddrsFree refuses an address of interface i that another interface
+// of its instance has.
+func checkAddrsFree(tx *gorm.DB, i *models.Interface) error {
+	var others []models.Interface
+	if err := tx.Where("instance_id = ? AND id <> ?", i.InstanceID, i.ID).Find(&others).Error; err != nil {
+		return err
+	}
+	for _, a := range i.Addresses {
+		ip := netip.MustParsePrefix(a).Addr()
+		for _, o := range others {
+			for _, b := range o.Addresses {
+				if p, err := netip.ParsePrefix(b); err == nil && p.Addr() == ip {
+					return bad(fmt.Sprintf("%s is already on %s", ip, o.Name))
+				}
+			}
 		}
 	}
 	return nil
@@ -160,6 +190,19 @@ func prepareInterface(tx *gorm.DB, i, old *models.Interface) error {
 		return err
 	}
 	if err := checkNewIfaceName(tx, i.InstanceID, i.Name, "name"); err != nil {
+		return err
+	}
+	addrs, err := ifaceAddrs("addresses", i.Addresses)
+	if err != nil {
+		return err
+	}
+	i.Addresses = addrs
+	for _, a := range i.Addresses {
+		if i.Ipv4Mode == fwconfig.ModeDHCP && netip.MustParsePrefix(a).Addr().Is4() {
+			return bad(fmt.Sprintf("addresses: %s is an IPv4 address, and IPv4 comes from the DHCP client; remove it or make IPv4 static", a))
+		}
+	}
+	if err := checkAddrsFree(tx, i); err != nil {
 		return err
 	}
 	if old != nil {
@@ -304,10 +347,11 @@ func prepareLink(tx *gorm.DB, l, old *models.Link) error {
 		if err := checkNewIfaceName(tx, end.inst, end.iface, end.label+" interface"); err != nil {
 			return err
 		}
-		*end.addrs = cleanList(*end.addrs)
-		if err := checkCIDRs(end.label+" addresses", *end.addrs); err != nil {
+		addrs, err := ifaceAddrs(end.label+" addresses", *end.addrs)
+		if err != nil {
 			return err
 		}
+		*end.addrs = addrs
 	}
 	if old != nil {
 		if err := ifaceMoved(tx, old.InstanceAID, old.InterfaceA, l.InstanceAID, l.InterfaceA); err != nil {
@@ -540,15 +584,9 @@ func prepareIpamAddress(tx *gorm.DB, a, _ *models.IpamAddress) error {
 	}
 	ip, err := fwconfig.ParseAddr(strings.TrimSpace(a.Address))
 	if err != nil {
-		return bad("address must be a plain IP address (the prefix length comes from the IPAM prefix)")
+		return bad("address must be a plain IP address, e.g. 192.168.1.10")
 	}
 	a.Address = ip.String()
-	if a.InterfaceID != nil {
-		var i models.Interface
-		if tx.First(&i, *a.InterfaceID).Error != nil || i.InstanceID != a.InstanceID {
-			return bad("interface must belong to the same instance")
-		}
-	}
 	a.DnsName = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(a.DnsName), "."))
 	if a.DnsName != "" && !fwconfig.ValidDomain(a.DnsName) {
 		return bad("DNS name must be a fully qualified name, e.g. nas.home.arpa")

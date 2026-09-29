@@ -8,7 +8,6 @@
 # etc_dir, kea_data_dir and kea_socket_dir in /etc/portitor/agent.yaml, and
 # the unit's KEA_PIDFILE_DIR and KEA_LOCKFILE_DIR.
 /etc/portitor/instances/*/kea-dhcp6.conf r,
-/etc/portitor/instances/*/kea-dhcp6.dnsmgr2.json r,
 /var/lib/kea/kea-leases6-*.csv* rwk,
 /run/kea/kea6-*.sock rw,
 /run/kea/kea6-*.sock.lock rwk,

@@ -2,15 +2,13 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
 <script setup>
-import { onMounted, ref } from 'vue'
 import CrudPage from '@/components/CrudPage.vue'
 import NeedInstance from '@/components/NeedInstance.vue'
-import { interfaces, ipamAddresses } from '@/api'
+import { interfaces } from '@/api'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
 import { useDeployStore } from '@/stores/deploy'
 
 const { store, ifaceList, ifaceText, zonesOf, reload } = useInstanceRefs()
-const addrs = ref([])
 const deploy = useDeployStore()
 const isMissing = (row) =>
   row.kind === 'physical' &&
@@ -24,11 +22,6 @@ function macOf(row) {
   return deploy.status?.nics?.find((n) => n.name === row.name)?.mac ?? ''
 }
 
-async function loadAddrs() {
-  if (store.currentId) addrs.value = await ipamAddresses.list({ instance_id: store.currentId })
-}
-onMounted(loadAddrs)
-
 const kinds = [
   { label: 'Physical', value: 'physical' },
   { label: 'VLAN', value: 'vlan' },
@@ -36,7 +29,7 @@ const kinds = [
   { label: 'WireGuard', value: 'wireguard' },
 ]
 const modes = [
-  { label: 'Static (from IP addresses)', value: 'static' },
+  { label: 'Static', value: 'static' },
   { label: 'DHCP client', value: 'dhcp' },
   { label: 'None', value: 'none' },
 ]
@@ -88,7 +81,7 @@ const fields = [
     type: 'select',
     items: () => store.items,
     show: () => store.list.length > 1,
-    hint: 'Changing it moves the interface to that instance. Its rules, routes, IP addresses and VLANs must go first; it leaves its interface zones.',
+    hint: 'Changing it moves the interface to that instance, with its addresses. Its rules, routes and VLANs must go first; it leaves its interface zones.',
   },
   { key: 'kind', label: 'Kind', type: 'select', items: kinds, disabled: (f) => !!f.id },
   { key: 'description', label: 'Description' },
@@ -113,7 +106,7 @@ const fields = [
     label: 'IPv4',
     type: 'select',
     items: (f) => (f.kind === 'wireguard' ? modes.filter((m) => m.value !== 'dhcp') : modes),
-    hint: 'Static addresses are assigned under IP addresses.',
+    hint: 'Static: the IPv4 addresses below. DHCP client: IPv4 from a DHCP server, and only IPv6 addresses below.',
   },
   {
     key: 'dhcp_no_default_route',
@@ -121,6 +114,13 @@ const fields = [
     type: 'switch',
     show: (f) => f.ipv4_mode === 'dhcp',
     hint: 'Ignore the router the DHCP server offers, e.g. on a LAN; the default route comes from the WAN.',
+  },
+  {
+    key: 'addresses',
+    label: 'IP addresses',
+    type: 'tags',
+    placeholder: '192.168.1.1/24',
+    hint: 'Addresses of the firewall on this interface with their prefix length, IPv4 and IPv6, as many as needed: 192.168.1.1/24, fd00:1::1/64. Their prefixes appear under IP addresses, where DHCP and router advertisements are turned on per prefix.',
   },
   { key: 'ipv6_accept_ra', label: 'IPv6 SLAAC (accept router advertisements)', type: 'switch' },
   { key: 'dns_listen', label: 'DNS server answers on this interface', type: 'switch' },
@@ -148,9 +148,6 @@ const fields = [
   },
 ]
 
-function addressesOf(row) {
-  return addrs.value.filter((a) => a.interface_id === row.id).map((a) => a.address)
-}
 // The address the DHCP client holds on the interface, if it has one.
 function dhcpAddressOf(row) {
   if (row.ipv4_mode !== 'dhcp') return ''
@@ -176,6 +173,7 @@ function dhcpAddressOf(row) {
         label: '',
         enabled: true,
         ipv4_mode: 'static',
+        addresses: [],
         members: [],
         mtu: 0,
         vlan_id: 0,
@@ -184,7 +182,7 @@ function dhcpAddressOf(row) {
         wg_keepalive: 25,
       }"
       new-label="New interface"
-      @changed="(reload(), loadAddrs())"
+      @changed="reload()"
     >
       <template #cell-name="{ row }">
         <span class="font-mono font-medium">{{ row.name }}</span>
@@ -194,7 +192,7 @@ function dhcpAddressOf(row) {
       </template>
       <template #cell-addresses="{ row }">
         <div
-          v-for="a in [dhcpAddressOf(row), ...addressesOf(row)].filter(Boolean)"
+          v-for="a in [dhcpAddressOf(row), ...(row.addresses ?? [])].filter(Boolean)"
           :key="a"
           class="font-mono text-xs"
         >

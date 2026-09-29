@@ -40,13 +40,17 @@ func (s *Server) handleIpamTree(c *echo.Context) error {
 	}
 	var prefixes []models.IpamPrefix
 	var addrs []models.IpamAddress
+	var ifaces []models.Interface
 	if err := s.db.Where("instance_id = ?", id).Find(&prefixes).Error; err != nil {
 		return err
 	}
 	if err := s.db.Where("instance_id = ?", id).Find(&addrs).Error; err != nil {
 		return err
 	}
-	tree := ipam.Tree(prefixes, addrs)
+	if err := s.db.Where("instance_id = ?", id).Find(&ifaces).Error; err != nil {
+		return err
+	}
+	tree := ipam.Tree(prefixes, addrs, ifaces)
 	if tree == nil {
 		tree = []*ipam.Node{}
 	}
@@ -112,9 +116,11 @@ func (s *Server) handleNextFree(c *echo.Context) error {
 	}
 	var prefixes []models.IpamPrefix
 	var addrs []models.IpamAddress
+	var ifaces []models.Interface
 	s.db.Where("instance_id = ?", p.InstanceID).Find(&prefixes)
 	s.db.Where("instance_id = ?", p.InstanceID).Find(&addrs)
-	ip, err := ipam.NextFree(p, prefixes, addrs)
+	s.db.Where("instance_id = ?", p.InstanceID).Find(&ifaces)
+	ip, err := ipam.NextFree(p, prefixes, ipam.Used(addrs, ifaces))
 	if err != nil {
 		return errJSON(c, http.StatusConflict, err.Error())
 	}
@@ -170,8 +176,8 @@ func (s *Server) handleWgRekey(c *echo.Context) error {
 }
 
 // handleWgClientConfig renders a wg-quick config for the remote side of a
-// peer. ?split=1 routes only the instance's IPAM prefixes through the
-// tunnel instead of everything. A site peer (one with networks) always
+// peer. ?split=1 routes only the instance's prefixes (IPAM's and its
+// interfaces') through the tunnel instead of everything. A site peer (one with networks) always
 // gets those prefixes, less the ones behind it, and no DNS.
 func (s *Server) handleWgClientConfig(c *echo.Context) error {
 	id, err := echo.PathParam[uint](c, "id")
@@ -217,10 +223,10 @@ func (s *Server) handleWgClientConfig(c *echo.Context) error {
 	}
 	site := len(peer.Networks) > 0
 	if inst.DnsEnabled && ifc.DnsListen && !site {
-		var addrs []models.IpamAddress
-		s.db.Where("interface_id = ?", ifc.ID).Find(&addrs)
-		for _, a := range addrs {
-			cc.DNS = append(cc.DNS, a.Address)
+		for _, a := range ifc.Addresses {
+			if p, err := netip.ParsePrefix(a); err == nil {
+				cc.DNS = append(cc.DNS, p.Addr().String())
+			}
 		}
 	}
 	if site || c.QueryParam("split") == "1" {
@@ -229,11 +235,13 @@ func (s *Server) handleWgClientConfig(c *echo.Context) error {
 			return errJSON(c, http.StatusBadRequest, err.Error())
 		}
 		var prefixes []models.IpamPrefix
+		var ifaces []models.Interface
 		s.db.Where("instance_id = ?", ifc.InstanceID).Find(&prefixes)
-		roots := ipam.Tree(prefixes, nil)
+		s.db.Where("instance_id = ?", ifc.InstanceID).Find(&ifaces)
+		roots := ipam.Tree(prefixes, nil, ifaces)
 		cc.AllowedIPs = nil
 		for _, r := range roots {
-			if !insideAny(r.CIDR, remote) {
+			if r.Kind == "prefix" && !insideAny(r.CIDR, remote) {
 				cc.AllowedIPs = append(cc.AllowedIPs, r.CIDR)
 			}
 		}
@@ -246,16 +254,16 @@ func (s *Server) handleWgClientConfig(c *echo.Context) error {
 		warnings = append(warnings, "Set the public endpoint on the interface (or the endpoint host under Settings, and a listen port on the interface).")
 	}
 	if site && len(cc.AllowedIPs) == 0 {
-		warnings = append(warnings, "This instance has no prefixes under IP addresses, so the config routes nothing to this side.")
+		warnings = append(warnings, "This instance has no prefixes (under IP addresses or on its interfaces), so the config routes nothing to this side.")
 	}
 	return c.JSON(http.StatusOK, map[string]any{"config": render.WireGuardClientConf(cc), "warnings": warnings, "site": site})
 }
 
 // handleWgNextFree suggests allowed IPs for a new peer: per address family
-// of the WireGuard interface, a host address of the IPAM prefix holding
-// the interface's address that is neither in IPAM nor in the allowed IPs of
-// a peer of the instance. Both families get the same host number if one is
-// free in both (10.99.0.2/32 and fd99::2/128).
+// of the WireGuard interface, a host address of the prefix of the
+// interface's address that is neither in IPAM, on an interface nor in the
+// allowed IPs of a peer of the instance. Both families get the same host
+// number if one is free in both (10.99.0.2/32 and fd99::2/128).
 func (s *Server) handleWgNextFree(c *echo.Context) error {
 	id, err := echo.PathParam[uint](c, "id")
 	if err != nil {
@@ -267,8 +275,10 @@ func (s *Server) handleWgNextFree(c *echo.Context) error {
 	}
 	var prefixes []models.IpamPrefix
 	var addrs []models.IpamAddress
+	var ifaces []models.Interface
 	s.db.Where("instance_id = ?", ifc.InstanceID).Find(&prefixes)
 	s.db.Where("instance_id = ?", ifc.InstanceID).Find(&addrs)
+	s.db.Where("instance_id = ?", ifc.InstanceID).Find(&ifaces)
 
 	// Peers' allowed IPs count as used: hosts as addresses, networks
 	// behind a peer as prefixes.
@@ -277,7 +287,7 @@ func (s *Server) handleWgNextFree(c *echo.Context) error {
 	var objs []models.AddressObject
 	s.db.Find(&objs)
 	set := netobj.New(objs)
-	used, usedPrefixes := addrs, prefixes
+	used, usedPrefixes := ipam.Used(addrs, ifaces), prefixes
 	for _, p := range peers {
 		list, err := set.Prefixes(p.AllowedIPs)
 		if err != nil {
@@ -297,36 +307,33 @@ func (s *Server) handleWgNextFree(c *echo.Context) error {
 	}
 
 	// One prefix per address family, IPv4 first: the interface's first
-	// address in each family decides it.
+	// address in each family decides it. The IPAM prefix of the same CIDR,
+	// if there is one, adds its DHCP range as taken.
 	var targets []models.IpamPrefix
 	var warnings []string
 	seen := map[bool]bool{} // by Is4
-	for _, a := range addrs {
-		if a.InterfaceID == nil || *a.InterfaceID != ifc.ID {
+	for _, a := range ifc.Addresses {
+		p, err := netip.ParsePrefix(a)
+		if err != nil || seen[p.Addr().Is4()] {
 			continue
 		}
-		ip, err := netip.ParseAddr(a.Address)
-		if err != nil {
+		pfx := p.Masked()
+		if pfx.IsSingleIP() {
+			warnings = append(warnings, fmt.Sprintf("%s on %s is a single address; give it a prefix length (e.g. %s) to get a suggestion.", p, ifc.Name, netip.PrefixFrom(p.Addr(), suggestBits(p.Addr()))))
 			continue
 		}
-		pfx, ok := ipam.Enclosing(prefixes, ip)
-		if !ok {
-			warnings = append(warnings, fmt.Sprintf("%s on %s is not inside any IPAM prefix; add its prefix (e.g. %s) under IP addresses to get a suggestion.", ip, ifc.Name, suggestPrefix(ip)))
-			continue
-		}
-		if seen[ip.Is4()] {
-			continue
-		}
-		for _, p := range prefixes {
-			if q, err := netip.ParsePrefix(p.Prefix); err == nil && q.Masked() == pfx {
-				seen[ip.Is4()] = true
-				if ip.Is4() {
-					targets = append([]models.IpamPrefix{p}, targets...)
-				} else {
-					targets = append(targets, p)
-				}
+		seen[p.Addr().Is4()] = true
+		t := models.IpamPrefix{Prefix: pfx.String()}
+		for _, q := range prefixes {
+			if qp, err := netip.ParsePrefix(q.Prefix); err == nil && qp.Masked() == pfx {
+				t = q
 				break
 			}
+		}
+		if p.Addr().Is4() {
+			targets = append([]models.IpamPrefix{t}, targets...)
+		} else {
+			targets = append(targets, t)
 		}
 	}
 	out := []string{}
@@ -352,14 +359,13 @@ func (s *Server) handleWgNextFree(c *echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{"addresses": out, "warnings": warnings})
 }
 
-// suggestPrefix is the usual subnet around a tunnel address: /24 for
+// suggestBits is the usual prefix length of a tunnel address: /24 for
 // IPv4, /64 for IPv6.
-func suggestPrefix(ip netip.Addr) string {
-	bits := 64
+func suggestBits(ip netip.Addr) int {
 	if ip.Is4() {
-		bits = 24
+		return 24
 	}
-	return netip.PrefixFrom(ip, bits).Masked().String()
+	return 64
 }
 
 // ----- settings & users -----

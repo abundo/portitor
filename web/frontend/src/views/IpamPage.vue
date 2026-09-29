@@ -15,7 +15,7 @@ import { useAuthStore } from '@/stores/auth'
 
 const toast = useToast()
 const auth = useAuthStore()
-const { store, ifaceItems, ifaceName } = useInstanceRefs()
+const { store, ifaceName } = useInstanceRefs()
 const tree = ref([])
 const collapsed = reactive(new Set())
 const loading = ref(false)
@@ -76,9 +76,10 @@ async function savePrefix() {
 // ----- address modal -----
 const addrOpen = ref(false)
 const addr = reactive({})
+// The interface the address is configured on (from the tree), if any.
+const addrIface = ref(null)
 const leasePickerOpen = ref(false)
-const NONE = 0
-function editAddress(src) {
+function editAddress(src, ifaceId = null) {
   Object.keys(addr).forEach((k) => delete addr[k])
   Object.assign(addr, {
     address: '',
@@ -86,17 +87,13 @@ function editAddress(src) {
     dns_name: '',
     mac: '',
     ...src,
-    interface_id: src.interface_id ?? NONE,
   })
+  addrIface.value = ifaceId
   addrOpen.value = true
 }
 async function saveAddress() {
   try {
-    const body = {
-      ...addr,
-      instance_id: store.currentId,
-      interface_id: addr.interface_id === NONE ? null : addr.interface_id,
-    }
+    const body = { ...addr, instance_id: store.currentId }
     if (addr.id) await ipamAddresses.update(addr.id, body)
     else await ipamAddresses.create(body)
     addrOpen.value = false
@@ -105,30 +102,37 @@ async function saveAddress() {
     toast.add({ title: errMsg(err), color: 'error' })
   }
 }
-const ifaceOptions = computed(() => [
-  { label: '— not on a firewall interface', value: NONE },
-  ...ifaceItems.value,
-])
 
 async function onAddAddress(node) {
   let next = ''
-  try {
-    next = await api.nextFree(node.id)
-  } catch {
-    // full; leave empty
+  if (!node.auto) {
+    try {
+      next = await api.nextFree(node.id)
+    } catch {
+      // full; leave empty
+    }
   }
   editAddress({ address: next })
 }
 function onAddPrefix(node) {
   editPrefix({ prefix: node.cidr })
 }
+// An auto node has no IPAM entry yet: editing it creates one, for DHCP or
+// router advertisements on a prefix, a DNS name or MAC on an address.
 async function onEdit(node) {
-  if (node.kind === 'prefix') editPrefix(await ipamPrefixes.get(node.id))
-  else editAddress(await ipamAddresses.get(node.id))
+  if (node.kind === 'prefix')
+    editPrefix(node.auto ? { prefix: node.cidr } : await ipamPrefixes.get(node.id))
+  else
+    editAddress(
+      node.auto ? { address: node.cidr } : await ipamAddresses.get(node.id),
+      node.interface_id,
+    )
 }
 async function onRemove(node) {
   const what =
-    node.kind === 'prefix' ? `prefix ${node.cidr} (addresses inside stay)` : `address ${node.cidr}`
+    node.kind === 'prefix'
+      ? `prefix ${node.cidr} (addresses inside stay; a prefix of an interface address stays listed, without its settings)`
+      : `address ${node.cidr}`
   if (!window.confirm(`Delete ${what}?`)) return
   try {
     if (node.kind === 'prefix') await ipamPrefixes.remove(node.id)
@@ -147,10 +151,12 @@ async function onRemove(node) {
         <div>
           <div class="text-lg font-semibold">IP addresses</div>
           <p class="max-w-3xl text-sm text-muted">
-            Prefixes nest by containment. An address assigned to an interface is configured on it,
-            with the length of the smallest prefix around it. Turn on DHCP on a prefix to serve it,
-            and router advertisements (SLAAC) on an IPv6 prefix; an address with a DNS name gets an
-            A/AAAA record, and with a MAC also a fixed DHCP lease.
+            Prefixes nest by containment. The addresses of the firewall's interfaces (set under
+            <RouterLink to="/interfaces" class="text-primary">Interfaces</RouterLink>) and their
+            prefixes are listed automatically. Turn on DHCP on a prefix to serve it on the interface
+            with an address in it, and router advertisements (SLAAC) on an IPv6 prefix; several DHCP
+            prefixes on one interface share it, and clients get addresses from all of them. An
+            address with a DNS name gets an A/AAAA record, and with a MAC also a fixed DHCP lease.
           </p>
         </div>
         <div v-if="auth.isAdmin" class="flex gap-2">
@@ -168,7 +174,7 @@ async function onRemove(node) {
         <UIcon name="i-lucide-loader-2" class="size-7 animate-spin" />
       </div>
       <div v-else-if="!tree.length" class="py-8 text-center text-muted">
-        No prefixes yet. Start with your LAN, e.g. 192.168.1.0/24.
+        No prefixes yet. Give an interface an address, e.g. 192.168.1.1/24, or add a prefix.
       </div>
       <div v-else class="overflow-x-auto">
         <table class="w-full text-sm">
@@ -200,7 +206,7 @@ async function onRemove(node) {
 
     <UModal
       v-model:open="prefixOpen"
-      :title="!auth.isAdmin ? 'Prefix' : prefix.id ? 'Edit prefix' : 'New prefix'"
+      :title="!auth.isAdmin ? 'Prefix' : prefix.id ? 'Edit prefix' : 'Prefix settings'"
     >
       <template #body>
         <form id="prefix-form" @submit.prevent="savePrefix">
@@ -292,14 +298,16 @@ async function onRemove(node) {
         <form id="addr-form" @submit.prevent="saveAddress">
           <fieldset :disabled="!auth.isAdmin" class="space-y-3">
             <UFormField label="Address" required
-              ><UInput v-model="addr.address" class="w-full font-mono" placeholder="192.168.1.10"
+              ><UInput
+                v-model="addr.address"
+                class="w-full font-mono"
+                placeholder="192.168.1.10"
+                :disabled="!!addrIface"
             /></UFormField>
-            <UFormField
-              label="Firewall interface"
-              help="Configure this address on one of the firewall's interfaces."
-            >
-              <USelect v-model="addr.interface_id" :items="ifaceOptions" class="w-full" />
-            </UFormField>
+            <p v-if="addrIface" class="text-sm text-muted">
+              The firewall's address on {{ ifaceName(addrIface) }}; it is set under
+              <RouterLink to="/interfaces" class="text-primary">Interfaces</RouterLink>.
+            </p>
             <UFormField
               label="DNS name"
               help="Fully qualified, inside one of the instance's DNS zones."

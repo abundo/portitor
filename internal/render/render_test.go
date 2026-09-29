@@ -5,6 +5,7 @@ package render
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/netip"
 	"os"
 	"os/exec"
@@ -424,7 +425,8 @@ func TestNamedConfForwardMode(t *testing.T) {
 func TestDnsmgrAndKea(t *testing.T) {
 	b := sampleBundle(t)
 	cfg := b.Dnsmgr["main"]
-	if len(cfg.Dnsmgr2) != 1 || len(cfg.Dnsmgr2[0].Zones) != 2 || len(cfg.Dnsmgr2[0].Prefixes) != 2 {
+	// DHCP is not dnsmgr2's: Kea's configs are rendered in full.
+	if len(cfg.Dnsmgr2) != 1 || len(cfg.Dnsmgr2[0].Zones) != 2 || len(cfg.Dnsmgr2[0].Prefixes) != 0 || cfg.Dnsmgr2[0].HostDhcpTemplate != "" {
 		t.Fatalf("dnsmgr2 config: %+v", cfg.Dnsmgr2)
 	}
 	// home.arpa uses the "home" template; the reverse zone the built-in one.
@@ -440,13 +442,9 @@ func TestDnsmgrAndKea(t *testing.T) {
 	if soa := cfg.DNS.SOATemplates["soa-home"]; soa.Mname != "gw.home.arpa." || soa.Rname != "hostmaster.home.arpa." || soa.Minimum != 3600 {
 		t.Errorf("soa template: %+v", soa)
 	}
-	if got := cfg.Dnsmgr2[0].Prefixes[0].Range; got != "192.168.1.100-192.168.1.199" {
-		t.Errorf("range %q", got)
-	}
-	// Guest runs DHCP without DNS: no zones, no DNS host template.
-	g := b.Dnsmgr["guest"]
-	if g.Dnsmgr2[0].HostDnsTemplate != "" || len(g.Dnsmgr2[0].Zones) != 0 {
-		t.Errorf("guest dnsmgr2: %+v", g.Dnsmgr2[0])
+	// Guest runs DHCP without DNS: no dnsmgr2 at all.
+	if _, ok := b.Dnsmgr["guest"]; ok {
+		t.Error("guest has DNS disabled but got a dnsmgr2 config")
 	}
 	if b.File("/etc/portitor/instances/guest/named.conf") != nil {
 		t.Error("guest has DNS disabled but got a named.conf")
@@ -465,16 +463,121 @@ func TestDnsmgrAndKea(t *testing.T) {
 		t.Errorf("records: %+v", records)
 	}
 
-	kea := mustFile(t, b, "/etc/portitor/instances/main/kea-dhcp4.conf")
+	conf := mustFile(t, b, "/etc/portitor/instances/main/kea-dhcp4.conf")
 	for _, want := range []string{
 		`"interfaces": ["eth1","eth1.20"]`,
 		`"valid-lifetime": 43200`,
 		`"name": "/var/lib/kea/kea-leases4-main.csv"`,
-		`<?include "/etc/portitor/instances/main/kea-dhcp4.dnsmgr2.json"?>`,
 	} {
-		if !strings.Contains(kea, want) {
-			t.Errorf("missing %q in\n%s", want, kea)
+		if !strings.Contains(conf, want) {
+			t.Errorf("missing %q in\n%s", want, conf)
 		}
+	}
+	d := parseKea(t, conf).Dhcp4
+	if len(d.Subnet4) != 2 || len(d.SharedNetworks) != 0 {
+		t.Fatalf("subnet4: %+v, shared networks: %+v", d.Subnet4, d.SharedNetworks)
+	}
+	sn := d.Subnet4[0]
+	if sn.ID != 1 || sn.Subnet != "192.168.1.0/24" || sn.Interface != "" || len(sn.Pools) != 1 || sn.Pools[0].Pool != "192.168.1.100 - 192.168.1.199" {
+		t.Errorf("subnet: %+v", sn)
+	}
+	if fmt.Sprint(sn.OptionData) != "[{routers 192.168.1.1} {domain-name-servers 192.168.1.1} {domain-name home.arpa}]" {
+		t.Errorf("options: %+v", sn.OptionData)
+	}
+	if len(sn.Reservations) != 1 || sn.Reservations[0].HWAddress != "02:00:00:00:00:10" ||
+		sn.Reservations[0].IPAddress != "192.168.1.10" || sn.Reservations[0].Hostname != "nas.home.arpa" {
+		t.Errorf("reservations: %+v", sn.Reservations)
+	}
+	if d.Subnet4[1].ID != 2 || d.Subnet4[1].Subnet != "192.168.20.0/24" || len(d.Subnet4[1].Reservations) != 0 {
+		t.Errorf("second subnet: %+v", d.Subnet4[1])
+	}
+	// Guest runs DHCPv4 without a DNS server.
+	if g := parseKea(t, mustFile(t, b, "/etc/portitor/instances/guest/kea-dhcp4.conf")).Dhcp4; len(g.Subnet4) != 1 {
+		t.Errorf("guest subnet4: %+v", g.Subnet4)
+	}
+}
+
+type keaTestSubnet struct {
+	ID           int
+	Subnet       string
+	Interface    string
+	Pools        []struct{ Pool string }
+	OptionData   []struct{ Name, Data string } `json:"option-data"`
+	Reservations []struct {
+		HWAddress   string   `json:"hw-address"`
+		IPAddress   string   `json:"ip-address"`
+		IPAddresses []string `json:"ip-addresses"`
+		Hostname    string
+	}
+}
+
+type keaTestDaemon struct {
+	InterfacesConfig struct{ Interfaces []string } `json:"interfaces-config"`
+	LeaseDatabase    struct{ Name string }         `json:"lease-database"`
+	Subnet4          []keaTestSubnet
+	Subnet6          []keaTestSubnet
+	SharedNetworks   []struct {
+		Name, Interface string
+		Subnet4         []keaTestSubnet
+		Subnet6         []keaTestSubnet
+	} `json:"shared-networks"`
+}
+
+// parseKea parses a rendered Kea config; Kea allows the leading comment
+// line, encoding/json does not.
+func parseKea(t *testing.T, conf string) (k struct{ Dhcp4, Dhcp6 keaTestDaemon }) {
+	t.Helper()
+	if err := json.Unmarshal([]byte(conf[strings.Index(conf, "\n"):]), &k); err != nil {
+		t.Fatalf("Kea config is not JSON: %v\n%s", err, conf)
+	}
+	return k
+}
+
+// Several DHCP prefixes on one interface form a Kea shared network, per IP
+// version; a prefix alone on its interface stays a plain subnet. Subnet ids
+// follow the sorted prefixes either way. (Kea 2.6 accepts these configs,
+// checked by hand with kea-dhcp4 -t and kea-dhcp6 -t.)
+func TestKeaSharedNetworks(t *testing.T) {
+	doc := fwconfig.SampleDocument()
+	in := &doc.Instances[0]
+	eth1 := &in.Interfaces[1]
+	eth1.Addresses = append(eth1.Addresses, "192.168.2.1/24", "fd00:2::1/64")
+	in.DHCP.Subnets = append(in.DHCP.Subnets,
+		fwconfig.DHCPSubnet{Prefix: "192.168.2.0/24", Interface: "eth1", RangeStart: "192.168.2.100", RangeEnd: "192.168.2.199", Gateway: "192.168.2.1"},
+		fwconfig.DHCPSubnet{Prefix: "fd00:2::/64", Interface: "eth1", RangeStart: "fd00:2::1000", RangeEnd: "fd00:2::1fff"},
+	)
+	in.RA[0].Prefixes = append(in.RA[0].Prefixes, fwconfig.RAPrefix{Prefix: "fd00:2::/64"})
+	b, err := Render(doc, Options{Paths: DefaultPaths(), Units: DefaultUnits()})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	d4 := parseKea(t, mustFile(t, b, "/etc/portitor/instances/main/kea-dhcp4.conf")).Dhcp4
+	if len(d4.Subnet4) != 1 || d4.Subnet4[0].Subnet != "192.168.20.0/24" || d4.Subnet4[0].ID != 3 {
+		t.Errorf("subnet4: %+v", d4.Subnet4)
+	}
+	if len(d4.SharedNetworks) != 1 {
+		t.Fatalf("shared networks: %+v", d4.SharedNetworks)
+	}
+	sh := d4.SharedNetworks[0]
+	// DHCPv4 names no interface: Kea4 finds the subnet by the interface's
+	// address.
+	if sh.Name != "eth1" || sh.Interface != "" || len(sh.Subnet4) != 2 ||
+		sh.Subnet4[0].Subnet != "192.168.1.0/24" || sh.Subnet4[0].ID != 1 || sh.Subnet4[0].Interface != "" ||
+		sh.Subnet4[1].Subnet != "192.168.2.0/24" || sh.Subnet4[1].ID != 2 {
+		t.Errorf("shared network: %+v", sh)
+	}
+	if len(sh.Subnet4[0].Reservations) != 1 || len(sh.Subnet4[1].Reservations) != 0 {
+		t.Errorf("reservations stay with their subnet: %+v", sh.Subnet4)
+	}
+	if len(d4.InterfacesConfig.Interfaces) != 2 {
+		t.Errorf("interfaces: %v", d4.InterfacesConfig.Interfaces)
+	}
+
+	d6 := parseKea(t, mustFile(t, b, "/etc/portitor/instances/main/kea-dhcp6.conf")).Dhcp6
+	if len(d6.Subnet6) != 0 || len(d6.SharedNetworks) != 1 || len(d6.SharedNetworks[0].Subnet6) != 2 ||
+		d6.SharedNetworks[0].Interface != "eth1" || d6.SharedNetworks[0].Subnet6[1].Subnet != "fd00:2::/64" {
+		t.Errorf("dhcp6: %+v", d6)
 	}
 }
 
@@ -506,30 +609,7 @@ func TestIPv6Services(t *testing.T) {
 		}
 	}
 
-	conf := mustFile(t, b, "/etc/portitor/instances/main/kea-dhcp6.conf")
-	var kea struct {
-		Dhcp6 struct {
-			InterfacesConfig struct{ Interfaces []string } `json:"interfaces-config"`
-			LeaseDatabase    struct{ Name string }         `json:"lease-database"`
-			Subnet6          []struct {
-				ID           int
-				Subnet       string
-				Interface    string
-				Pools        []struct{ Pool string }
-				OptionData   []struct{ Name, Data string } `json:"option-data"`
-				Reservations []struct {
-					HWAddress   string   `json:"hw-address"`
-					IPAddresses []string `json:"ip-addresses"`
-					Hostname    string
-				}
-			}
-		}
-	}
-	// Kea allows the leading comment line; encoding/json does not.
-	if err := json.Unmarshal([]byte(conf[strings.Index(conf, "\n"):]), &kea); err != nil {
-		t.Fatalf("kea-dhcp6.conf is not JSON: %v\n%s", err, conf)
-	}
-	d := kea.Dhcp6
+	d := parseKea(t, mustFile(t, b, "/etc/portitor/instances/main/kea-dhcp6.conf")).Dhcp6
 	if len(d.InterfacesConfig.Interfaces) != 1 || d.InterfacesConfig.Interfaces[0] != "eth1" || d.LeaseDatabase.Name != "/var/lib/kea/kea-leases6-main.csv" {
 		t.Errorf("dhcp6 globals: %+v", d)
 	}

@@ -102,7 +102,7 @@ is also the way back in when a change in the GUI has locked you out of it.
 It then deploys at once, without the confirm timeout:
 
 - the LAN and the WAN get exactly the new settings: their other IPv4 addresses are
-  unassigned (they stay in IPAM), and an address in use on another interface moves;
+  removed, and an address in use on another interface moves;
 - the IPv4 default route is the new gateway, or none with a DHCP WAN (whose lease
   brings it);
 - the rules *portitor-web from the LAN*, *SSH from the LAN* and *ping from the LAN*

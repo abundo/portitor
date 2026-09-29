@@ -483,7 +483,7 @@ func (a *Agent) placeLinks(ctx context.Context, doc fwconfig.Document) error {
 func (a *Agent) applyServices(ctx context.Context, in *fwconfig.Instance, b *render.Bundle, changed map[string]bool) error {
 	etc := a.cfg.Paths.InstanceEtc(in.Name)
 	state := a.cfg.Paths.InstanceState(in.Name)
-	named, kea := a.cfg.Units.Named(in.Name), a.cfg.Units.Kea4(in.Name)
+	named := a.cfg.Units.Named(in.Name)
 
 	cfg, ok := b.Dnsmgr[in.Name]
 	if ok {
@@ -495,20 +495,12 @@ func (a *Agent) applyServices(ctx context.Context, in *fwconfig.Instance, b *ren
 			}
 			a.chownBind(filepath.Join(state, "bind"))
 			a.chownBind(filepath.Join(state, "zones"))
-			// named and kea include files dnsmgr2 writes on its first
-			// sync; make sure they exist before the daemons start.
+			// named's include file dnsmgr2 writes on its first sync;
+			// make sure it exists before named starts.
 			ensureFile(filepath.Join(etc, "named.conf.dnsmgr2"), "")
-			ensureFile(filepath.Join(etc, "kea-dhcp4.dnsmgr2.json"), "[]\n")
 		}
-		if in.DNS.Enabled {
-			if err := a.do(ctx, command{Name: "systemctl", Args: []string{"enable", "--now", named}}); err != nil {
-				return err
-			}
-		}
-		if in.DHCP.Enabled {
-			if err := a.do(ctx, command{Name: "systemctl", Args: []string{"enable", "--now", kea}}); err != nil {
-				return err
-			}
+		if err := a.do(ctx, command{Name: "systemctl", Args: []string{"enable", "--now", named}}); err != nil {
+			return err
 		}
 		if err := a.dnsmgrSync(cfg); err != nil {
 			return fmt.Errorf("instance %s: dnsmgr2: %w", in.Name, err)
@@ -524,23 +516,15 @@ func (a *Agent) applyServices(ctx context.Context, in *fwconfig.Instance, b *ren
 	} else {
 		a.disable(ctx, named)
 	}
-	if in.DHCP.Enabled {
-		if changed[filepath.Join(etc, "kea-dhcp4.conf")] {
-			if err := a.do(ctx, command{Name: "systemctl", Args: []string{"restart", kea}}); err != nil {
-				return err
-			}
-		}
-	} else {
-		a.disable(ctx, kea)
-	}
 
-	// DHCPv6 and router advertisements are rendered in full (no dnsmgr2).
-	kea6, radvd := a.cfg.Units.Kea6(in.Name), a.cfg.Units.Radvd(in.Name)
+	// Kea and radvd are rendered in full (no dnsmgr2).
+	kea4, kea6, radvd := a.cfg.Units.Kea4(in.Name), a.cfg.Units.Kea6(in.Name), a.cfg.Units.Radvd(in.Name)
 	for _, svc := range []struct {
 		unit, conf string
 		on         bool
 		reload     string
 	}{
+		{kea4, "kea-dhcp4.conf", in.DHCP.Enabled, "restart"},
 		{kea6, "kea-dhcp6.conf", len(render.DHCP6Subnets(in)) > 0, "restart"},
 		{radvd, "radvd.conf", len(in.RA) > 0, "reload-or-restart"},
 	} {

@@ -425,17 +425,10 @@ func AutoInputRules(in *fwconfig.Instance) []AutoRule {
 		out = append(out, AutoRule{Service: "dhcp client", InInterfaces: dhcpClient, Protocol: "udp", SrcPort: 67, DstPort: 68})
 	}
 	if in.DHCP.Enabled {
-		var ifs []string
-		for _, s := range in.DHCP.Subnets {
-			if fwconfig.AddrFamily(s.Prefix) == "ipv4" {
-				ifs = appendUnique(ifs, s.Interface)
-			}
-		}
-		sort.Strings(ifs)
-		if len(ifs) > 0 {
+		if ifs := subnetInterfaces(DHCP4Subnets(in)); len(ifs) > 0 {
 			out = append(out, AutoRule{Service: "dhcp server", InInterfaces: ifs, Protocol: "udp", DstPort: 67})
 		}
-		if ifs6 := dhcp6Interfaces(in); len(ifs6) > 0 {
+		if ifs6 := subnetInterfaces(DHCP6Subnets(in)); len(ifs6) > 0 {
 			out = append(out, AutoRule{Service: "dhcpv6 server", InInterfaces: ifs6, Protocol: "udp", DstPort: 547})
 		}
 	}

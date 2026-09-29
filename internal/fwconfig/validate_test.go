@@ -15,6 +15,15 @@ func TestSampleIsValid(t *testing.T) {
 	}
 }
 
+// Every address of a /31 or /32 (/127, /128) is a host address.
+func TestValidatePointToPointAddresses(t *testing.T) {
+	doc := SampleDocument()
+	doc.Instances[0].Interfaces[1].Addresses = append(doc.Instances[0].Interfaces[1].Addresses, "10.0.0.0/31", "10.0.1.0/32", "fd00:9::/127")
+	if err := doc.Validate(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestValidateTCPUDPPorts(t *testing.T) {
 	doc := SampleDocument()
 	doc.Instances[0].NAT[0].Protocol = "tcp,udp" // with a target port
@@ -57,6 +66,20 @@ func TestValidateCatchesProblems(t *testing.T) {
 		{"ip number without ip", func(d *Document) { d.Instances[0].Rules[6].Services[0].IPProtocol = 6 }, "needs protocol ip"},
 		{"ip number range", func(d *Document) { d.Instances[0].Rules[6].Services[2].IPProtocol = 300 }, "invalid protocol number 300"},
 		{"sctp bad src ports", func(d *Document) { d.Instances[0].Rules[6].Services[1].SrcPorts = "9-1" }, "invalid port range"},
+		{"network address on interface", func(d *Document) { d.Instances[0].Interfaces[1].Addresses[0] = "192.168.1.0/24" }, "is the network address"},
+		{"ipv6 subnet-router address", func(d *Document) { d.Instances[0].Interfaces[1].Addresses[1] = "fd00:1::/64" }, "is the network address"},
+		{"address on two interfaces", func(d *Document) { d.Instances[0].Interfaces[2].Addresses = []string{"192.168.1.1/25"} }, "192.168.1.1 is also on eth1"},
+		{"dhcp subnet twice", func(d *Document) {
+			d.Instances[0].DHCP.Subnets = append(d.Instances[0].DHCP.Subnets, DHCPSubnet{Prefix: "192.168.1.0/24", Interface: "eth1"})
+		}, "dhcp subnet 192.168.1.0/24: duplicate"},
+		{"reservation address twice", func(d *Document) {
+			z := &d.Instances[0].DNS.Zones[0]
+			z.Records = append(z.Records, DNSRecord{Name: "tv", Type: "A", Value: "192.168.1.10", MAC: "02:00:00:00:00:11"})
+		}, "192.168.1.10 is reserved for both"},
+		{"reservation mac twice", func(d *Document) {
+			z := &d.Instances[0].DNS.Zones[0]
+			z.Records = append(z.Records, DNSRecord{Name: "nas2", Type: "A", Value: "192.168.1.11", MAC: "02:00:00:00:00:10"})
+		}, "02:00:00:00:00:10 has reservations for both"},
 		{"target port without proto", func(d *Document) { d.Instances[0].NAT[0].Protocol, d.Instances[0].NAT[0].DstPorts = "", "" }, "a target port needs protocol"},
 		{"bad protocol", func(d *Document) { d.Instances[0].Rules[2].Services[0].Protocol = "tcp,udp" }, `invalid protocol "tcp,udp"`},
 		{"bad port range", func(d *Document) { d.Instances[0].Rules[2].Services[0].DstPorts = "90-80" }, "invalid port range"},

@@ -5,13 +5,9 @@
 # profile for kea-dhcp4 on Debian/Ubuntu only allows Kea's own file names;
 # install.py adds these rules to the profile's local include
 # (/etc/apparmor.d/local/usr.sbin.kea-dhcp4). The paths are the defaults of
-# etc_dir, state_dir, kea_data_dir and kea_socket_dir in
-# /etc/portitor/agent.yaml, and the unit's KEA_PIDFILE_DIR and
-# KEA_LOCKFILE_DIR.
+# etc_dir, kea_data_dir and kea_socket_dir in /etc/portitor/agent.yaml, and
+# the unit's KEA_PIDFILE_DIR and KEA_LOCKFILE_DIR.
 /etc/portitor/instances/*/kea-dhcp4.conf r,
-/etc/portitor/instances/*/kea-dhcp4.dnsmgr2.json r,
-# dnsmgr2 writes and checks (kea-dhcp4 -t) new files in tmp/ first.
-/var/lib/portitor/instances/*/tmp/kea-dhcp4.* r,
 /var/lib/kea/kea-leases4-*.csv* rwk,
 /run/kea/kea4-*.sock rw,
 /run/kea/kea4-*.sock.lock rwk,

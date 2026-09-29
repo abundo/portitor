@@ -204,11 +204,11 @@ func Bootstrap(ctx context.Context, s *Server, o BootstrapOptions) (*models.Depl
 }
 
 func bootstrapNetwork(tx *gorm.DB, instanceID uint, o BootstrapOptions) error {
-	if _, err := bootstrapIface(tx, instanceID, o.LAN, o.Address, "LAN", "firewall (GUI)", o.WAN != "", o.Reconfigure); err != nil {
+	if _, err := bootstrapIface(tx, instanceID, o.LAN, o.Address, "LAN", o.WAN != "", o.Reconfigure); err != nil {
 		return err
 	}
 	if o.WAN != "" {
-		if _, err := bootstrapIface(tx, instanceID, o.WAN, o.WANAddress, "WAN", "firewall (WAN)", false, o.Reconfigure); err != nil {
+		if _, err := bootstrapIface(tx, instanceID, o.WAN, o.WANAddress, "WAN", false, o.Reconfigure); err != nil {
 			return err
 		}
 	}
@@ -372,13 +372,12 @@ func reconfigureDefaultRoute(tx *gorm.DB, instanceID uint, gw netip.Addr) error 
 	return tx.Create(&r).Error
 }
 
-// bootstrapIface enables an interface, described as prefixDesc (LAN or
-// WAN) unless the user described it: static with address (its prefix and
-// address go into IPAM), or DHCP when address is not valid, without a
-// default route if noRoute. With reconfigure, or DHCP, address becomes the
-// interface's only IPv4 address (the others stay in IPAM, unassigned),
-// taken from another interface if need be.
-func bootstrapIface(tx *gorm.DB, instanceID uint, name string, address netip.Prefix, prefixDesc, addrDesc string, noRoute, reconfigure bool) (*models.Interface, error) {
+// bootstrapIface enables an interface, labelled role (LAN or WAN) unless
+// the user labelled it: static with address (its prefix goes into IPAM,
+// described as role), or DHCP when address is not valid, without a default
+// route if noRoute. With reconfigure, or DHCP, address becomes the
+// interface's only IPv4 address, taken from another interface if need be.
+func bootstrapIface(tx *gorm.DB, instanceID uint, name string, address netip.Prefix, role string, noRoute, reconfigure bool) (*models.Interface, error) {
 	var ifc models.Interface
 	if err := tx.Where("instance_id = ? AND name = ?", instanceID, name).First(&ifc).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -394,7 +393,7 @@ func bootstrapIface(tx *gorm.DB, instanceID uint, name string, address netip.Pre
 	// put the role there).
 	switch ifc.Label {
 	case "", "LAN", "WAN":
-		ifc.Label = prefixDesc
+		ifc.Label = role
 	}
 	switch ifc.Description {
 	case "found on the firewall", "LAN", "WAN":
@@ -406,26 +405,30 @@ func bootstrapIface(tx *gorm.DB, instanceID uint, name string, address netip.Pre
 	case address.Addr().Is4():
 		ifc.Ipv4Mode = fwconfig.ModeStatic
 	}
+
+	// The addresses to keep: with reconfigure or DHCP no other IPv4 one,
+	// and none with the new address's IP (it comes back with its length).
+	addrs := models.StringList{}
+	for _, a := range ifc.Addresses {
+		p, err := netip.ParsePrefix(a)
+		if err != nil || (address.IsValid() && p.Addr() == address.Addr()) ||
+			(p.Addr().Is4() && (reconfigure || !address.IsValid())) {
+			continue
+		}
+		addrs = append(addrs, a)
+	}
+	if address.IsValid() {
+		addrs = append(addrs, address.String())
+		if err := takeAddress(tx, &ifc, address.Addr(), reconfigure); err != nil {
+			return nil, err
+		}
+	}
+	ifc.Addresses = addrs
 	if err := prepareInterface(tx, &ifc, &old); err != nil {
 		return nil, err
 	}
 	if err := tx.Save(&ifc).Error; err != nil {
 		return nil, err
-	}
-	if reconfigure || !address.IsValid() {
-		var assigned []models.IpamAddress
-		if err := tx.Where("interface_id = ?", ifc.ID).Find(&assigned).Error; err != nil {
-			return nil, err
-		}
-		for _, ia := range assigned {
-			a, err := netip.ParseAddr(ia.Address)
-			if err != nil || !a.Is4() || (address.IsValid() && a == address.Addr()) {
-				continue
-			}
-			if err := tx.Model(&ia).Update("interface_id", nil).Error; err != nil {
-				return nil, err
-			}
-		}
 	}
 	if !address.IsValid() {
 		return &ifc, nil
@@ -436,8 +439,8 @@ func bootstrapIface(tx *gorm.DB, instanceID uint, name string, address netip.Pre
 	if err := tx.Model(&models.IpamPrefix{}).Where("instance_id = ? AND prefix = ?", instanceID, prefix).Count(&n).Error; err != nil {
 		return nil, err
 	}
-	if n == 0 {
-		p := models.IpamPrefix{InstanceID: instanceID, Prefix: prefix, Description: prefixDesc, DhcpDnsServers: models.StringList{}}
+	if n == 0 && !address.IsSingleIP() {
+		p := models.IpamPrefix{InstanceID: instanceID, Prefix: prefix, Description: role, DhcpDnsServers: models.StringList{}}
 		if err := prepareIpamPrefix(tx, &p, nil); err != nil {
 			return nil, err
 		}
@@ -445,27 +448,32 @@ func bootstrapIface(tx *gorm.DB, instanceID uint, name string, address netip.Pre
 			return nil, err
 		}
 	}
+	return &ifc, nil
+}
 
-	addr := address.Addr().String()
-	var ia models.IpamAddress
-	err := tx.Where("instance_id = ? AND address = ?", instanceID, addr).First(&ia).Error
-	switch {
-	case errors.Is(err, gorm.ErrRecordNotFound):
-		ia = models.IpamAddress{InstanceID: instanceID, Address: addr, InterfaceID: &ifc.ID, Description: addrDesc}
-		if err := prepareIpamAddress(tx, &ia, nil); err != nil {
-			return nil, err
+// takeAddress removes ip from the other interfaces of ifc's instance, with
+// reconfigure; without, an address on another interface is an error.
+func takeAddress(tx *gorm.DB, ifc *models.Interface, ip netip.Addr, reconfigure bool) error {
+	var others []models.Interface
+	if err := tx.Where("instance_id = ? AND id <> ?", ifc.InstanceID, ifc.ID).Find(&others).Error; err != nil {
+		return err
+	}
+	for _, o := range others {
+		keep := models.StringList{}
+		for _, a := range o.Addresses {
+			if p, err := netip.ParsePrefix(a); err != nil || p.Addr() != ip {
+				keep = append(keep, a)
+			}
 		}
-		if err := tx.Create(&ia).Error; err != nil {
-			return nil, err
+		if len(keep) == len(o.Addresses) {
+			continue
 		}
-	case err != nil:
-		return nil, err
-	case ia.InterfaceID != nil && *ia.InterfaceID != ifc.ID && !reconfigure:
-		return nil, bad(fmt.Sprintf("%s is assigned to another interface", addr))
-	default:
-		if err := tx.Model(&ia).Update("interface_id", ifc.ID).Error; err != nil {
-			return nil, err
+		if !reconfigure {
+			return bad(fmt.Sprintf("%s is on another interface (%s)", ip, o.Name))
+		}
+		if err := tx.Model(&o).Update("addresses", keep).Error; err != nil {
+			return err
 		}
 	}
-	return &ifc, nil
+	return nil
 }

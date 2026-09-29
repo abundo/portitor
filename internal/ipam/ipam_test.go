@@ -4,6 +4,7 @@
 package ipam
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/abundo/portitor/models"
@@ -11,6 +12,50 @@ import (
 
 func pfx(id uint, s string) models.IpamPrefix {
 	return models.IpamPrefix{Base: models.Base{ID: id}, Prefix: s}
+}
+
+// Interface addresses show up in the tree with their prefix, which is added
+// (Auto) when IPAM lacks it; an IPAM address on an interface gets its id.
+func TestTreeInterfaceAddresses(t *testing.T) {
+	prefixes := []models.IpamPrefix{pfx(1, "192.168.1.0/24")}
+	addrs := []models.IpamAddress{
+		{Base: models.Base{ID: 10}, Address: "192.168.1.1", DnsName: "gw.home.arpa"},
+		{Base: models.Base{ID: 11}, Address: "192.168.1.10"},
+	}
+	ifaces := []models.Interface{
+		{Base: models.Base{ID: 7}, Name: "eth1", Addresses: models.StringList{"192.168.1.1/24", "192.168.2.1/24", "fd00:1::1/64"}},
+		{Base: models.Base{ID: 8}, Name: "wg0", Addresses: models.StringList{"10.99.0.1/32"}},
+	}
+	roots := Tree(prefixes, addrs, ifaces)
+	var got []string
+	for _, r := range roots {
+		got = append(got, r.CIDR)
+	}
+	if want := "[10.99.0.1 192.168.1.0/24 192.168.2.0/24 fd00:1::/64]"; fmt.Sprint(got) != want {
+		t.Fatalf("roots %v, want %s", got, want)
+	}
+	if r := roots[0]; r.Kind != "address" || !r.Auto || r.ID != 0 || *r.InterfaceID != 8 {
+		t.Errorf("/32 interface address: %+v", r)
+	}
+	lan := roots[1]
+	if lan.Auto || lan.ID != 1 || lan.InterfaceID == nil || *lan.InterfaceID != 7 || len(lan.Children) != 2 {
+		t.Fatalf("stored prefix: %+v", lan)
+	}
+	if gw := lan.Children[0]; gw.ID != 10 || gw.Auto || gw.InterfaceID == nil || *gw.InterfaceID != 7 || gw.DnsName != "gw.home.arpa" {
+		t.Errorf("IPAM address on an interface: %+v", gw)
+	}
+	if nas := lan.Children[1]; nas.InterfaceID != nil {
+		t.Errorf("IPAM address on no interface: %+v", nas)
+	}
+	for _, r := range roots[2:] {
+		if r.Kind != "prefix" || !r.Auto || r.ID != 0 || *r.InterfaceID != 7 || len(r.Children) != 1 || !r.Children[0].Auto {
+			t.Errorf("interface prefix: %+v", r)
+		}
+	}
+	used := Used(addrs, ifaces)
+	if len(used) != 6 {
+		t.Errorf("used: %+v", used)
+	}
 }
 
 func TestTreeNesting(t *testing.T) {
@@ -27,7 +72,7 @@ func TestTreeNesting(t *testing.T) {
 		{Base: models.Base{ID: 11}, Address: "192.168.1.200"},
 		{Base: models.Base{ID: 12}, Address: "172.16.0.1"},
 	}
-	roots := Tree(prefixes, addrs)
+	roots := Tree(prefixes, addrs, nil)
 	var got []string
 	for _, r := range roots {
 		got = append(got, r.CIDR)

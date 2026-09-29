@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/abundo/portitor/internal/agentapi"
@@ -39,7 +40,7 @@ func TestSyncNICs(t *testing.T) {
 
 	fake := &statusAgent{nics: []agentapi.NICStatus{
 		{Name: "eth0", Up: true, DHCPv4: true, SLAAC: true, Addresses: []string{}},
-		{Name: "eth1", Up: false, Addresses: []string{"10.1.2.1/24", "2001:db8::1/64"}},
+		{Name: "eth1", Up: false, Addresses: []string{"10.1.2.1/24", "2001:db8::1/64", "10.1.3.0/24"}},
 		{Name: "eth3", Netns: "fw-lan", Up: true, Addresses: []string{}},
 		{Name: "eth4", Netns: "fw-lan", Up: true, Addresses: []string{}},
 	}}
@@ -58,7 +59,8 @@ func TestSyncNICs(t *testing.T) {
 	}
 
 	got := status()
-	if len(got.Imported) != 2 || got.Imported[0] != "eth0" || got.Imported[1] != "eth1" || len(got.Problems) != 0 {
+	if len(got.Imported) != 2 || got.Imported[0] != "eth0" || got.Imported[1] != "eth1" ||
+		len(got.Problems) != 1 || !strings.Contains(got.Problems[0], "10.1.3.0/24 not added") {
 		t.Fatalf("first sync: %+v", got)
 	}
 	if len(got.Missing) != 1 || got.Missing[0] != (missingNIC{Instance: "lan", Name: "eth9"}) {
@@ -75,15 +77,15 @@ func TestSyncNICs(t *testing.T) {
 	if e := ifaces[1]; e.Enabled || e.Ipv4Mode != "static" || e.Ipv6AcceptRA {
 		t.Errorf("eth1: %+v", e)
 	}
-	var prefixes []models.IpamPrefix
-	env.srv.db.Where("instance_id = ?", main.ID).Order("prefix").Find(&prefixes)
-	if len(prefixes) != 3 || prefixes[0].Prefix != "10.0.0.0/8" || prefixes[1].Prefix != "10.1.2.0/24" || prefixes[2].Prefix != "2001:db8::/64" {
-		t.Errorf("prefixes: %+v", prefixes)
+	// The addresses go on the interface; IPAM is left alone.
+	if got := strings.Join(ifaces[1].Addresses, " "); got != "10.1.2.1/24 2001:db8::1/64" {
+		t.Errorf("eth1 addresses: %s", got)
 	}
-	var addrs []models.IpamAddress
-	env.srv.db.Where("interface_id = ?", ifaces[1].ID).Order("address").Find(&addrs)
-	if len(addrs) != 2 || addrs[0].Address != "10.1.2.1" || addrs[1].Address != "2001:db8::1" {
-		t.Errorf("addresses: %+v", addrs)
+	var prefixes, addrs int64
+	env.srv.db.Model(&models.IpamPrefix{}).Count(&prefixes)
+	env.srv.db.Model(&models.IpamAddress{}).Count(&addrs)
+	if prefixes != 1 || addrs != 0 {
+		t.Errorf("IPAM: %d prefixes, %d addresses", prefixes, addrs)
 	}
 
 	// A deleted interface is not imported again; a new one is.

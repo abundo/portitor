@@ -247,20 +247,15 @@ func ifaceMoved(tx *gorm.DB, oldInst uint, oldName string, inst uint, name strin
 }
 
 // refuseIfaceMove refuses to move an interface to another instance while
-// its old instance still refers to it: routes and IP addresses (by id,
-// they belong to that instance) and VLANs and bridges (by name). Rules
-// and zones are handled by ifaceMoved.
+// its old instance still refers to it: routes (by id, they belong to that
+// instance) and VLANs and bridges (by name). Rules and zones are handled
+// by ifaceMoved; the interface's addresses move with it.
 func refuseIfaceMove(tx *gorm.DB, i *models.Interface) error {
 	var users []string
 	var routes []string
 	tx.Model(&models.Route{}).Where("interface_id = ?", i.ID).Order("destination").Pluck("destination", &routes)
 	for _, r := range routes {
 		users = append(users, "route "+r)
-	}
-	var addrs []string
-	tx.Model(&models.IpamAddress{}).Where("interface_id = ?", i.ID).Order("address").Pluck("address", &addrs)
-	for _, a := range addrs {
-		users = append(users, "IP address "+a)
 	}
 	var others []models.Interface
 	if err := tx.Where("instance_id = ? AND id <> ?", i.InstanceID, i.ID).Order("name").Find(&others).Error; err != nil {

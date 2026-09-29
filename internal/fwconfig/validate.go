@@ -123,6 +123,7 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 	p := "instance " + in.Name
 
 	ifaces := map[string]*Interface{}
+	addrOwner := map[netip.Addr]string{} // address -> interface
 	for i := range in.Interfaces {
 		ifc := &in.Interfaces[i]
 		ip := fmt.Sprintf("%s: interface %q", p, ifc.Name)
@@ -156,11 +157,15 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 			v.addf("%s: invalid ipv4 mode %q", ip, ifc.IPv4Mode)
 		}
 		for _, a := range ifc.Addresses {
-			pfx, err := netip.ParsePrefix(a)
+			pfx, err := ParseInterfaceAddress(a)
 			if err != nil {
 				v.addf("%s: address %q: %v", ip, a, err)
 				continue
 			}
+			if other, ok := addrOwner[pfx.Addr()]; ok {
+				v.addf("%s: address %s is also on %s", ip, pfx.Addr(), other)
+			}
+			addrOwner[pfx.Addr()] = ifc.Name
 			if pfx.Addr().Is4() && ifc.IPv4Mode == ModeDHCP {
 				v.addf("%s: static IPv4 address %s together with dhcp", ip, a)
 			}
@@ -402,6 +407,7 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 	if in.DHCP.DomainName != "" && !validDomain(in.DHCP.DomainName) {
 		v.addf("%s: dhcp: invalid domain name %q", p, in.DHCP.DomainName)
 	}
+	subnets := map[netip.Prefix]bool{}
 	for _, s := range in.DHCP.Subnets {
 		sp := fmt.Sprintf("%s: dhcp subnet %s", p, s.Prefix)
 		pfx, err := netip.ParsePrefix(s.Prefix)
@@ -409,6 +415,10 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 			v.addf("%s: %v", sp, err)
 			continue
 		}
+		if subnets[pfx.Masked()] {
+			v.addf("%s: duplicate", sp)
+		}
+		subnets[pfx.Masked()] = true
 		if ifaces[s.Interface] == nil {
 			v.addf("%s: unknown interface %q", sp, s.Interface)
 		}
@@ -439,6 +449,9 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 				v.addf("%s: DHCPv6 needs router advertisements on %s", sp, s.Interface)
 			}
 		}
+	}
+	if in.DHCP.Enabled {
+		v.reservations(p, in, subnets)
 	}
 
 	v.dyndns(p, in, ifaces)
@@ -771,6 +784,40 @@ func (v *validator) dnsRecord(p string, r DNSRecord) {
 	}
 }
 
+// reservations checks the DHCP reservations (A/AAAA records with a MAC
+// inside a DHCP subnet): Kea refuses a config with an address reserved
+// twice, or a MAC with two reservations of the same IP version.
+func (v *validator) reservations(p string, in *Instance, subnets map[netip.Prefix]bool) {
+	inSubnet := func(a netip.Addr) bool {
+		for s := range subnets {
+			if s.Contains(a) {
+				return true
+			}
+		}
+		return false
+	}
+	byAddr := map[netip.Addr]string{}
+	byMAC := map[string]netip.Addr{} // "4 mac" / "6 mac" -> address
+	for _, z := range in.DNS.Zones {
+		for _, r := range z.Records {
+			a, err := ParseAddr(r.Value)
+			if r.MAC == "" || (r.Type != "A" && r.Type != "AAAA") || err != nil || !inSubnet(a) {
+				continue
+			}
+			mac := strings.ToLower(strings.ReplaceAll(r.MAC, "-", ":"))
+			if prev, ok := byAddr[a]; ok && prev != mac {
+				v.addf("%s: dhcp: %s is reserved for both %s and %s", p, a, prev, mac)
+			}
+			byAddr[a] = mac
+			key := r.Type + " " + mac
+			if prev, ok := byMAC[key]; ok && prev != a {
+				v.addf("%s: dhcp: %s has reservations for both %s and %s", p, mac, prev, a)
+			}
+			byMAC[key] = a
+		}
+	}
+}
+
 func checkComment(v *validator, p, s string) {
 	if len(s) > 128 {
 		v.addf("%s: description longer than 128 characters", p)
@@ -829,6 +876,21 @@ func ParseAddr(s string) (netip.Addr, error) {
 		return netip.Addr{}, fmt.Errorf("%q: an address with a zone (%%) is not allowed", s)
 	}
 	return a, err
+}
+
+// ParseInterfaceAddress parses an interface address in CIDR form
+// (192.168.1.1/24). The address must be a host of its prefix, not its
+// network address, except on /31 and /32 (/127 and /128 for IPv6), where
+// every address is one.
+func ParseInterfaceAddress(s string) (netip.Prefix, error) {
+	p, err := netip.ParsePrefix(s)
+	if err != nil {
+		return p, err
+	}
+	if p.Bits() < p.Addr().BitLen()-1 && p.Addr() == p.Masked().Addr() {
+		return p, fmt.Errorf("%s is the network address of the prefix; give the interface's own address, e.g. %s", p.Addr(), netip.PrefixFrom(p.Addr().Next(), p.Bits()))
+	}
+	return p, nil
 }
 
 // ParseAddrOrPrefix accepts "192.0.2.1" or "192.0.2.0/24".

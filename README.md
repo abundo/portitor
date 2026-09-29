@@ -52,12 +52,15 @@ firewall, the agent, makes the changes the GUI asks for. For a single box, an
   other instance is a Linux network namespace (`fw-<name>`) with its own interfaces,
   routing table, nftables ruleset, BIND and Kea. **Links** are veth pairs between
   instances.
+- **Interfaces** carry their own addresses, IPv4 and IPv6 mixed, as many as needed,
+  each with its prefix length (`192.168.1.1/24`, `fd00:1::1/64`).
 - **IP addresses** live in a prefix tree per instance. Nesting follows from CIDR
-  containment. An address assigned to an interface is configured on it, with the
-  prefix length of the smallest enclosing prefix. A prefix with DHCP on becomes a Kea
-  scope (DHCPv4 or DHCPv6). An IPv6 prefix can send router advertisements (radvd),
-  optionally with SLAAC; DHCPv6 needs them. An address with a DNS name gets an
-  A/AAAA record (PTR generated), and with a MAC also a fixed lease.
+  containment; the interfaces' addresses and their prefixes appear in it by
+  themselves. A prefix with DHCP on becomes a Kea scope (DHCPv4 or DHCPv6) on the
+  interface with an address in it; several scopes on one interface form a Kea shared
+  network, so clients get addresses from all of them. An IPv6 prefix can send router
+  advertisements (radvd), optionally with SLAAC; DHCPv6 needs them. An address with
+  a DNS name gets an A/AAAA record (PTR generated), and with a MAC also a fixed lease.
 - **IP lists** are address lists the agent downloads: the ban decisions of a CrowdSec
   Local API (as a bouncer, with its API key), or plain text with one address or prefix
   per line (a CrowdSec blocklist integration with HTTP basic auth, Spamhaus DROP, ...).
@@ -173,9 +176,9 @@ port, say).
 
 When portitor-web reaches the agent, it adds the firewall's physical interfaces it
 has not seen before to the default instance, as they are configured at that moment
-(link state; static addresses go into IPAM), so a first deploy leaves them as they
-are. An interface you delete is not added again. Physical interfaces in the
-configuration that the firewall does not have are shown as a warning.
+(link state and static addresses), so a first deploy leaves them as they are. An
+interface you delete is not added again. Physical interfaces in the configuration
+that the firewall does not have are shown as a warning.
 
 On the **management host**, with a system user `portitor`:
 

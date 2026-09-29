@@ -199,15 +199,18 @@ type Interface struct {
 	InstanceID uint   `json:"instance_id"`
 	Name       string `json:"name"`
 	// Label is a short name the GUI shows before the interface name.
-	Label        string     `json:"label"`
-	Kind         string     `json:"kind"`
-	Description  string     `json:"description"`
-	Enabled      bool       `json:"enabled"`
-	Parent       string     `json:"parent"`
-	VlanID       int        `json:"vlan_id"`
-	Members      StringList `json:"members"`
-	Mtu          int        `json:"mtu"`
-	Ipv4Mode     string     `json:"ipv4_mode"`
+	Label       string     `json:"label"`
+	Kind        string     `json:"kind"`
+	Description string     `json:"description"`
+	Enabled     bool       `json:"enabled"`
+	Parent      string     `json:"parent"`
+	VlanID      int        `json:"vlan_id"`
+	Members     StringList `json:"members"`
+	Mtu         int        `json:"mtu"`
+	Ipv4Mode    string     `json:"ipv4_mode"`
+	// Addresses are the interface's static addresses in CIDR form with a
+	// host part (192.168.1.1/24, fd00:1::1/64), IPv4 and IPv6 mixed.
+	Addresses    StringList `json:"addresses"`
 	Ipv6AcceptRA bool       `gorm:"column:ipv6_accept_ra" json:"ipv6_accept_ra"`
 	// DhcpNoDefaultRoute ignores the router of the DHCP lease.
 	DhcpNoDefaultRoute bool `json:"dhcp_no_default_route"`
@@ -378,14 +381,13 @@ const (
 	ServiceTypeIP    = "ip"
 )
 
-// IpamAddress is a single address. With InterfaceID it is configured on
-// that firewall interface (prefix length from the enclosing IpamPrefix).
-// With DnsName it gets an A/AAAA record; with Mac also a DHCP reservation.
+// IpamAddress is a single address. With DnsName it gets an A/AAAA record;
+// with Mac also a DHCP reservation. The firewall's own addresses are
+// configured on the interface (Interface.Addresses).
 type IpamAddress struct {
 	Base
 	InstanceID  uint   `json:"instance_id"`
 	Address     string `json:"address"`
-	InterfaceID *uint  `json:"interface_id"`
 	DnsName     string `json:"dns_name"`
 	Mac         string `json:"mac"`
 	Description string `json:"description"`

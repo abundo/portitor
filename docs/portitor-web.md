@@ -89,9 +89,9 @@ After an upgrade, run `migrate` before `start`. `install.py` does both.
 | | Deploy | Check, preview, apply, history. |
 | Network | Instances | Virtual routers. `main` is the host; others are network namespaces. |
 | | Links | veth pairs between instances. |
-| | Interfaces | Physical, VLAN, bridge, WireGuard interfaces; WAN DHCP client. A *Label* such as WAN is shown before the name wherever an interface is picked: WAN (ens18). The *Instance* field moves one to another instance. |
+| | Interfaces | Physical, VLAN, bridge, WireGuard interfaces with their IP addresses (IPv4 and IPv6, as many as needed, each with its prefix length: `192.168.1.1/24`); WAN DHCP client. A *Label* such as WAN is shown before the name wherever an interface is picked: WAN (ens18). The *Instance* field moves one, with its addresses, to another instance. |
 | | Routes | Static routes. |
-| | IP addresses | The prefix tree: prefixes, addresses, DHCP scopes, router advertisements, DNS names. |
+| | IP addresses | The prefix tree: prefixes, addresses, DHCP scopes, router advertisements, DNS names. The interfaces' addresses and their prefixes are listed automatically; turn on DHCP by editing the prefix. |
 | | Hosts & prefixes | Named addresses, usable wherever addresses are entered. |
 | Firewall | Interface zones | Named groups of interfaces for rules and NAT. |
 | | Rules | Input, forward and output rules, with per-rule traffic counters and counts of what each chain drops by default (invalid packets, no rule matched); every row, the locked ones included, can log to the log panel's *Logged packets*. The Service column names the services a rule matches (empty: any protocol); its search can create a new one. |
@@ -100,7 +100,7 @@ After an upgrade, run `migrate` before `start`. `install.py` does both.
 | | IP lists | Downloaded address lists (CrowdSec, blocklists), used as `@name` in rules. See [Blocking with CrowdSec](crowdsec.md). |
 | Services | DNS zones | Zones and records served by the instance's BIND. |
 | | DNS templates | SOA templates, DNSSEC policies and zone templates, shared by all instances. |
-| | DHCP | Scopes (prefixes with DHCP on, set under IP addresses) and active leases. |
+| | DHCP | Scopes (prefixes with DHCP on, set under IP addresses) and active leases. Several scopes on one interface form a Kea shared network: clients get addresses from all of them. |
 | | WireGuard | Tunnels, road-warrior and [site-to-site](#site-to-site-wireguard) peers; generates client and site configs. |
 | | Dynamic DNS | Keeps records on an external nameserver in step with the WAN address. |
 | | Scheduled tasks | IP list downloads and commands on a cron schedule. |
@@ -181,7 +181,7 @@ LAN `192.168.50.0/24`.
   for over two minutes, so a site on a dynamic address (with dynamic DNS) is found
   again.
 - The config button of a site peer gives a wg-quick config for the router at the other
-  site: this instance's prefixes under *IP addresses* as its AllowedIPs, without the
+  site: this instance's prefixes under *IP addresses* (its interfaces' included) as its AllowedIPs, without the
   peer's own networks, and no DNS. If the other side is a Portitor too, enter the
   values there instead: its own WireGuard interface, and this firewall as a site peer
   with this side's networks.

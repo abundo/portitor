@@ -87,9 +87,9 @@ type Interface struct {
 	// DHCPNoDefaultRoute makes the DHCP client ignore the lease's router
 	// (a LAN on DHCP: the default route belongs to the WAN).
 	DHCPNoDefaultRoute bool `json:"dhcp_no_default_route,omitempty"`
-	// Addresses are static addresses in CIDR form (192.168.1.1/24,
-	// 2001:db8::1/64). IPv6 addresses are always static here; IPv6AcceptRA
-	// adds SLAAC on top.
+	// Addresses are static addresses in CIDR form with a host part
+	// (192.168.1.1/24, 2001:db8::1/64; ParseInterfaceAddress). IPv6
+	// addresses are always static here; IPv6AcceptRA adds SLAAC on top.
 	Addresses    []string   `json:"addresses,omitempty"`
 	IPv6AcceptRA bool       `json:"ipv6_accept_ra,omitempty"`
 	WireGuard    *WireGuard `json:"wireguard,omitempty"`
@@ -258,10 +258,11 @@ type DHCPServer struct {
 	Subnets    []DHCPSubnet `json:"subnets"`
 }
 
-// DHCPSubnet is served on Interface: IPv4 prefixes by Kea DHCPv4 through
-// dnsmgr2, IPv6 prefixes by Kea DHCPv6. Reservations come from DNS A/AAAA
-// records that carry a MAC (dnsmgr2 convention). IPv6 subnets have no
-// Gateway; clients learn the router from router advertisements.
+// DHCPSubnet is served on Interface by Kea DHCPv4 or DHCPv6. The subnets
+// of one IP version on the same interface form a Kea shared network, so
+// clients get addresses from all of them. Reservations come from DNS
+// A/AAAA records that carry a MAC (dnsmgr2 convention). IPv6 subnets have
+// no Gateway; clients learn the router from router advertisements.
 type DHCPSubnet struct {
 	Prefix     string   `json:"prefix"`
 	Interface  string   `json:"interface"`

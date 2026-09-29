@@ -16,9 +16,15 @@ import (
 	"github.com/abundo/portitor/models"
 )
 
+// Node is a prefix or address of the tree. ID is its IpamPrefix or
+// IpamAddress id, or 0 when it is there only because an interface has the
+// address (Auto): a prefix of an interface address, or the address itself.
+// InterfaceID is the interface an address is configured on, or a prefix
+// of one of its addresses (the first such interface).
 type Node struct {
 	Kind        string  `json:"kind"` // prefix | address
 	ID          uint    `json:"id"`
+	Auto        bool    `json:"auto,omitempty"`
 	CIDR        string  `json:"cidr"` // prefix, or address without length
 	Description string  `json:"description,omitempty"`
 	DnsName     string  `json:"dns_name,omitempty"`
@@ -34,10 +40,12 @@ type Node struct {
 	poolSize float64 // DHCP pool addresses, counted as used
 }
 
-// Tree nests an instance's prefixes and addresses. Addresses that fall in
-// no prefix are returned at the top level.
-func Tree(prefixes []models.IpamPrefix, addrs []models.IpamAddress) []*Node {
+// Tree nests an instance's prefixes and addresses, with its interfaces'
+// addresses and their prefixes. Addresses that fall in no prefix are
+// returned at the top level.
+func Tree(prefixes []models.IpamPrefix, addrs []models.IpamAddress, ifaces []models.Interface) []*Node {
 	var nodes []*Node
+	stored := map[netip.Prefix]*Node{}
 	for _, p := range prefixes {
 		pfx, err := netip.ParsePrefix(p.Prefix)
 		if err != nil {
@@ -50,6 +58,25 @@ func Tree(prefixes []models.IpamPrefix, addrs []models.IpamAddress) []*Node {
 			n.poolSize = rangeSize(p.DhcpRangeStart, p.DhcpRangeEnd)
 		}
 		nodes = append(nodes, n)
+		stored[n.pfx] = n
+	}
+	onIface := map[netip.Addr]uint{}
+	for _, ia := range InterfaceAddresses(ifaces) {
+		onIface[ia.Prefix.Addr()] = ia.InterfaceID
+		pfx := ia.Prefix.Masked()
+		id := ia.InterfaceID
+		if n := stored[pfx]; n != nil {
+			if n.InterfaceID == nil {
+				n.InterfaceID = &id
+			}
+			continue
+		}
+		if pfx.IsSingleIP() {
+			continue
+		}
+		n := &Node{Kind: "prefix", Auto: true, CIDR: pfx.String(), InterfaceID: &id, Children: []*Node{}, pfx: pfx}
+		nodes = append(nodes, n)
+		stored[pfx] = n
 	}
 	sortPrefixes(nodes)
 
@@ -70,14 +97,26 @@ func Tree(prefixes []models.IpamPrefix, addrs []models.IpamAddress) []*Node {
 		stack = append(stack, n)
 	}
 
+	var addrNodes []*Node
 	for _, a := range addrs {
 		addr, err := netip.ParseAddr(a.Address)
 		if err != nil {
 			continue
 		}
 		n := &Node{Kind: "address", ID: a.ID, CIDR: addr.String(), Description: a.Description, DnsName: a.DnsName,
-			Mac: a.Mac, InterfaceID: a.InterfaceID, Children: []*Node{}, pfx: netip.PrefixFrom(addr, addr.BitLen())}
-		if parent := deepest(roots, addr); parent != nil {
+			Mac: a.Mac, Children: []*Node{}, pfx: netip.PrefixFrom(addr, addr.BitLen())}
+		if id, ok := onIface[addr]; ok {
+			n.InterfaceID = &id
+			delete(onIface, addr)
+		}
+		addrNodes = append(addrNodes, n)
+	}
+	for addr, id := range onIface {
+		addrNodes = append(addrNodes, &Node{Kind: "address", Auto: true, CIDR: addr.String(), InterfaceID: &id,
+			Children: []*Node{}, pfx: netip.PrefixFrom(addr, addr.BitLen())})
+	}
+	for _, n := range addrNodes {
+		if parent := deepest(roots, n.pfx.Addr()); parent != nil {
 			parent.Children = append(parent.Children, n)
 		} else {
 			roots = append(roots, n)
@@ -153,21 +192,33 @@ func rangeSize(start, end string) float64 {
 	return u(e) - u(s) + 1
 }
 
-// Enclosing returns the longest prefix containing addr, if any.
-func Enclosing(prefixes []models.IpamPrefix, addr netip.Addr) (netip.Prefix, bool) {
-	best := netip.Prefix{}
-	found := false
-	for _, p := range prefixes {
-		pfx, err := netip.ParsePrefix(p.Prefix)
-		if err != nil {
-			continue
-		}
-		pfx = pfx.Masked()
-		if pfx.Contains(addr) && (!found || pfx.Bits() > best.Bits()) {
-			best, found = pfx, true
+// IfaceAddress is an address configured on an interface.
+type IfaceAddress struct {
+	InterfaceID uint
+	Prefix      netip.Prefix // the address with its prefix length
+}
+
+// InterfaceAddresses returns the valid addresses of ifaces.
+func InterfaceAddresses(ifaces []models.Interface) []IfaceAddress {
+	var out []IfaceAddress
+	for _, i := range ifaces {
+		for _, a := range i.Addresses {
+			if p, err := netip.ParsePrefix(a); err == nil {
+				out = append(out, IfaceAddress{i.ID, p})
+			}
 		}
 	}
-	return best, found
+	return out
+}
+
+// Used returns addrs with the interfaces' addresses added, as NextFree
+// takes them: addresses that are taken.
+func Used(addrs []models.IpamAddress, ifaces []models.Interface) []models.IpamAddress {
+	out := append([]models.IpamAddress{}, addrs...)
+	for _, ia := range InterfaceAddresses(ifaces) {
+		out = append(out, models.IpamAddress{Address: ia.Prefix.Addr().String()})
+	}
+	return out
 }
 
 // NextFree returns the first host address in prefix that is not used by an

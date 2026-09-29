@@ -38,8 +38,9 @@ const clientLeases = computed(() =>
         <div class="mb-2 text-lg font-semibold">DHCP scopes</div>
         <p class="mb-3 text-sm text-muted">
           Scopes are prefixes with DHCP turned on, under
-          <RouterLink to="/ipam" class="text-primary">IP addresses</RouterLink>. Fixed leases are
-          IPAM addresses with a MAC and a DNS name.
+          <RouterLink to="/ipam" class="text-primary">IP addresses</RouterLink>, served on the
+          interface with an address in the prefix; several on one interface form a shared network.
+          Fixed leases are IPAM addresses with a MAC and a DNS name.
         </p>
         <UAlert
           v-if="store.current && !store.current.dhcp_enabled"

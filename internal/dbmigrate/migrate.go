@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package dbmigrate opens portitor-web's SQLite database and applies the
-// versioned schema (goose SQL under sql/). This is the schema's source of
-// truth; the GORM models only map it. Run with `portitor-web migrate`;
-// `start` never migrates.
+// versioned schema (goose SQL under sql/, and Go migrations for data moves
+// SQL cannot compute, such as interface_addresses.go). This is the
+// schema's source of truth; the GORM models only map it. Run with
+// `portitor-web migrate`; `start` never migrates.
 package dbmigrate
 
 import (
@@ -46,7 +47,7 @@ func provider(db *gorm.DB) (*goose.Provider, error) {
 	if err != nil {
 		return nil, err
 	}
-	return goose.NewProvider(goose.DialectSQLite3, sqlDB, fsys)
+	return goose.NewProvider(goose.DialectSQLite3, sqlDB, fsys, goose.WithGoMigrations(interfaceAddresses))
 }
 
 func Up(db *gorm.DB) error {
