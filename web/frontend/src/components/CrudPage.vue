@@ -46,12 +46,24 @@ const props = defineProps({
   // Row actions (edit, delete) in the first column rather than the last, so
   // they stay in view on a wide table.
   actionsFirst: { type: Boolean, default: false },
+  // Form labels beside their fields (stacked again on a narrow screen), in
+  // a wider modal.
+  inlineLabels: { type: Boolean, default: false },
   // itemName(row, rows) names a row in prompts.
   itemName: { type: Function, default: (row) => row.name ?? `#${row.id}` },
 })
 const emit = defineEmits(['changed'])
 
 const toast = useToast()
+const fieldUi = computed(() =>
+  props.inlineLabels
+    ? {
+        root: 'sm:grid sm:grid-cols-[11rem_minmax(0,1fr)] sm:gap-x-4',
+        labelWrapper: 'sm:pt-1.5',
+        container: 'mt-1 sm:mt-0',
+      }
+    : undefined,
+)
 // A viewer sees the table and the form, read-only.
 const auth = useAuthStore()
 const readOnly = computed(() => !auth.isAdmin)
@@ -373,6 +385,7 @@ defineExpose({ reload: load, openEdit, openCreate })
   <UModal
     v-model:open="open"
     :title="(readOnly ? '' : editing ? 'Edit ' : 'New ') + title.replace(/s$/, '').toLowerCase()"
+    :ui="inlineLabels ? { content: 'sm:max-w-2xl' } : undefined"
   >
     <template #body>
       <form id="crud-form" class="space-y-3" @submit.prevent="save">
@@ -384,6 +397,7 @@ defineExpose({ reload: load, openEdit, openCreate })
               :hint="f.hintRight"
               :help="f.hint"
               :required="f.required"
+              :ui="fieldUi"
             >
               <USwitch
                 v-if="f.type === 'switch'"
@@ -422,6 +436,7 @@ defineExpose({ reload: load, openEdit, openCreate })
                 v-model="form[f.key]"
                 class="w-full"
                 :placeholder="f.placeholder"
+                :disabled="f.disabled?.(form)"
                 add-on-blur
                 add-on-paste
               />

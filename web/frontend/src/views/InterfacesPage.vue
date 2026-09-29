@@ -106,7 +106,7 @@ const fields = [
     label: 'IPv4',
     type: 'select',
     items: (f) => (f.kind === 'wireguard' ? modes.filter((m) => m.value !== 'dhcp') : modes),
-    hint: 'Static: the IPv4 addresses below. DHCP client: IPv4 from a DHCP server, and only IPv6 addresses below.',
+    hint: 'Static: the addresses below. DHCP client: IPv4 from a DHCP server, and no addresses below.',
   },
   {
     key: 'dhcp_no_default_route',
@@ -120,6 +120,7 @@ const fields = [
     label: 'IP addresses',
     type: 'tags',
     placeholder: '192.168.1.1/24',
+    disabled: (f) => f.ipv4_mode === 'dhcp',
     hint: 'Addresses of the firewall on this interface with their prefix length, IPv4 and IPv6, as many as needed: 192.168.1.1/24, fd00:1::1/64. Their prefixes appear under IP addresses, where DHCP and router advertisements are turned on per prefix.',
   },
   { key: 'ipv6_accept_ra', label: 'IPv6 SLAAC (accept router advertisements)', type: 'switch' },
@@ -168,6 +169,7 @@ function dhcpAddressOf(row) {
       :columns="columns"
       :fields="fields"
       actions-first
+      inline-labels
       :defaults="{
         kind: 'physical',
         label: '',
