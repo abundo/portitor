@@ -803,3 +803,73 @@ func TestEnsureDefaultInstance(t *testing.T) {
 		t.Errorf("seeded rules: %+v", rules)
 	}
 }
+
+// login switches env to a new session for username.
+func (env *testEnv) login(username, password string) {
+	env.t.Helper()
+	env.cookie = nil
+	rec := env.do("POST", "/api/login", map[string]string{"username": username, "password": password})
+	if rec.Code != http.StatusOK {
+		env.t.Fatalf("login %s: %d %s", username, rec.Code, rec.Body)
+	}
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == cookieName {
+			env.cookie = c
+		}
+	}
+}
+
+func TestViewerRole(t *testing.T) {
+	env := newEnv(t)
+	id := env.create("/api/users", map[string]string{"username": "ann", "password": "a long password", "role": "viewer"})
+	if rec := env.do("POST", "/api/users", map[string]string{"username": "bob", "password": "a long password", "role": "root"}); rec.Code != http.StatusBadRequest {
+		t.Errorf("bad role: %d", rec.Code)
+	}
+	env.login("ann", "a long password")
+
+	if rec := env.do("GET", "/api/instances", nil); rec.Code != http.StatusOK {
+		t.Errorf("viewer read: %d %s", rec.Code, rec.Body)
+	}
+	if rec := env.do("PUT", "/api/me", map[string]string{"full_name": "Ann", "role": "admin"}); rec.Code != http.StatusOK {
+		t.Errorf("viewer profile: %d %s", rec.Code, rec.Body)
+	}
+	var me models.User
+	_ = json.Unmarshal(env.do("GET", "/api/me", nil).Body.Bytes(), &me)
+	if me.Role != models.RoleViewer {
+		t.Errorf("viewer became %q", me.Role)
+	}
+	// Every route that isn't a plain read is refused, except the few a
+	// viewer needs; so is every read that hands out secrets.
+	checked := 0
+	for _, r := range env.e.Router().Routes() {
+		if !strings.HasPrefix(r.Path, "/api/") || r.Path == "/api/*" || r.Path == "/api/login" || r.Path == "/api/logout" || r.Path == "/api/version" {
+			continue
+		}
+		read := r.Method == http.MethodGet || r.Method == http.MethodHead
+		want := !read && !viewerWrites[r.Method+" "+r.Path] || read && viewerDenied[r.Path]
+		path := strings.ReplaceAll(r.Path, ":id", "1")
+		rec := env.do(r.Method, path, map[string]any{})
+		if got := rec.Code == http.StatusForbidden && strings.Contains(rec.Body.String(), "read-only"); got != want {
+			t.Errorf("%s %s: %d %s", r.Method, r.Path, rec.Code, rec.Body)
+		}
+		checked++
+	}
+	if checked < 50 {
+		t.Errorf("only %d routes checked", checked)
+	}
+
+	// Promoting ann ends her session.
+	env.login("admin", "correct horse battery")
+	if rec := env.do("PUT", fmt.Sprintf("/api/users/%d", id), map[string]string{"role": "admin"}); rec.Code != http.StatusOK {
+		t.Fatalf("promote: %d %s", rec.Code, rec.Body)
+	}
+	var admin models.User
+	_ = json.Unmarshal(env.do("GET", "/api/me", nil).Body.Bytes(), &admin)
+	if rec := env.do("PUT", fmt.Sprintf("/api/users/%d", admin.ID), map[string]string{"role": "viewer"}); rec.Code != http.StatusBadRequest {
+		t.Errorf("own role: %d", rec.Code)
+	}
+	var ann models.User
+	if err := env.srv.db.First(&ann, id).Error; err != nil || ann.Role != models.RoleAdmin || ann.TokenVersion == 0 {
+		t.Errorf("ann: %+v %v", ann, err)
+	}
+}

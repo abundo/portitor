@@ -46,6 +46,8 @@ const props = defineProps({
   logBuiltin: { type: Object, default: () => ({ policy: false, invalid: false, auto: [] }) },
   // insert(kind, index): add a 'rule', 'comment' or 'group' at index of rows.
   insert: { type: Function, required: true },
+  // readOnly shows the rules without letting them change (a viewer).
+  readOnly: { type: Boolean, default: false },
 })
 // log-builtin(builtin, service, on): a built-in row's Log box changed;
 // builtin is 'policy', 'invalid' or 'auto' (with the auto rule's service).
@@ -143,6 +145,7 @@ function groupSummary(r) {
 }
 
 function onMove(from, to) {
+  if (props.readOnly) return
   if (!isGroup(props.rows[from])) {
     const list = [...props.rows]
     const [item] = list.splice(from, 1)
@@ -206,7 +209,7 @@ const insertItems = [
 // With groups, all of them can be folded or opened; a right-clicked row can
 // also be deleted (a group only as a heading: its rows join the group above).
 const contextItems = computed(() => {
-  const items = [...insertItems]
+  const items = props.readOnly ? [] : [...insertItems]
   if (groups.value.length) {
     items.push([
       {
@@ -222,7 +225,7 @@ const contextItems = computed(() => {
     ])
   }
   const r = props.rows[menuIndex.value]
-  if (r) {
+  if (r && !props.readOnly) {
     items.push([
       {
         label: `Delete ${isNote(r) ? r.kind : 'rule'}`,
@@ -453,6 +456,7 @@ const dropCount = (reason) => props.drops?.[`${reason}_packets`]
 const builtinLogLimit = 'at most 10 packets a second'
 
 function set(r, key, value) {
+  if (props.readOnly) return
   r[key] = value
   emit('save', r)
 }
@@ -545,6 +549,7 @@ function onKeydown(event, index) {
             <td><span class="font-semibold text-error">drop</span></td>
             <td class="text-center">
               <input
+                :disabled="readOnly"
                 type="checkbox"
                 class="accent-primary"
                 :checked="logBuiltin.invalid"
@@ -593,6 +598,7 @@ function onKeydown(event, index) {
             <td><span class="font-semibold text-success">accept</span></td>
             <td class="text-center">
               <input
+                :disabled="readOnly"
                 type="checkbox"
                 class="accent-primary"
                 :checked="logBuiltin.auto?.includes(a.service)"
@@ -636,6 +642,7 @@ function onKeydown(event, index) {
               <td :colspan="colCount - 2">
                 <div class="flex items-center">
                   <input
+                    :readonly="readOnly"
                     :value="cellText(r, 'description', r.description)"
                     data-col="group"
                     :data-note-id="r.id"
@@ -667,6 +674,7 @@ function onKeydown(event, index) {
               </td>
               <td :colspan="colCount - 1">
                 <input
+                  :readonly="readOnly"
                   :value="cellText(r, 'description', r.description)"
                   data-col="comment"
                   :data-note-id="r.id"
@@ -697,6 +705,7 @@ function onKeydown(event, index) {
               <td class="text-center text-muted tabular-nums">{{ ruleNo.get(r.id) }}</td>
               <td class="keep text-center">
                 <input
+                  :disabled="readOnly"
                   type="checkbox"
                   class="accent-primary"
                   :checked="r.enabled"
@@ -706,6 +715,7 @@ function onKeydown(event, index) {
               </td>
               <td v-if="hasFrom">
                 <input
+                  :readonly="readOnly"
                   :value="cellText(r, 'in_interfaces', (r.in_interfaces ?? []).join(', '))"
                   data-col="in_interfaces"
                   :list="`rules-grid-ifaces-${chain}`"
@@ -723,6 +733,7 @@ function onKeydown(event, index) {
               </td>
               <td v-if="hasTo">
                 <input
+                  :readonly="readOnly"
                   :value="cellText(r, 'out_interfaces', (r.out_interfaces ?? []).join(', '))"
                   data-col="out_interfaces"
                   :list="`rules-grid-ifaces-${chain}`"
@@ -740,6 +751,7 @@ function onKeydown(event, index) {
               </td>
               <td>
                 <input
+                  :readonly="readOnly"
                   :value="cellText(r, 'src_addrs', (r.src_addrs ?? []).join(', '))"
                   data-col="src_addrs"
                   class="font-mono"
@@ -755,6 +767,7 @@ function onKeydown(event, index) {
               </td>
               <td>
                 <input
+                  :readonly="readOnly"
                   :value="cellText(r, 'dst_addrs', (r.dst_addrs ?? []).join(', '))"
                   data-col="dst_addrs"
                   class="font-mono"
@@ -770,6 +783,7 @@ function onKeydown(event, index) {
               </td>
               <td>
                 <select
+                  :disabled="readOnly"
                   :value="r.family"
                   data-col="family"
                   @change="set(r, 'family', $event.target.value)"
@@ -781,6 +795,7 @@ function onKeydown(event, index) {
               </td>
               <td>
                 <USelectMenu
+                  :disabled="readOnly"
                   :model-value="r.services ?? []"
                   multiple
                   :items="rowServiceItems(r)"
@@ -800,6 +815,7 @@ function onKeydown(event, index) {
               </td>
               <td>
                 <select
+                  :disabled="readOnly"
                   :value="r.action"
                   data-col="action"
                   class="font-semibold"
@@ -811,6 +827,7 @@ function onKeydown(event, index) {
               </td>
               <td class="text-center">
                 <input
+                  :disabled="readOnly"
                   type="checkbox"
                   class="accent-primary"
                   :checked="r.log"
@@ -826,6 +843,7 @@ function onKeydown(event, index) {
               </td>
               <td>
                 <input
+                  :readonly="readOnly"
                   :value="cellText(r, 'description', r.description)"
                   data-col="description"
                   :title="r.description"
@@ -869,6 +887,7 @@ function onKeydown(event, index) {
             <td><span class="font-semibold text-error">drop</span></td>
             <td class="text-center">
               <input
+                :disabled="readOnly"
                 type="checkbox"
                 class="accent-primary"
                 :checked="logBuiltin.policy"

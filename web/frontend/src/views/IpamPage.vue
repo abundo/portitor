@@ -11,8 +11,10 @@ import DhcpLeasePicker from '@/components/DhcpLeasePicker.vue'
 import { api, ipamAddresses, ipamPrefixes } from '@/api'
 import { errMsg } from '@/api/http'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
+import { useAuthStore } from '@/stores/auth'
 
 const toast = useToast()
+const auth = useAuthStore()
 const { store, ifaceItems, ifaceName } = useInstanceRefs()
 const tree = ref([])
 const collapsed = reactive(new Set())
@@ -151,7 +153,7 @@ async function onRemove(node) {
             A/AAAA record, and with a MAC also a fixed DHCP lease.
           </p>
         </div>
-        <div class="flex gap-2">
+        <div v-if="auth.isAdmin" class="flex gap-2">
           <UButton
             color="neutral"
             variant="outline"
@@ -184,6 +186,7 @@ async function onRemove(node) {
               :nodes="tree"
               :collapsed="collapsed"
               :iface-name="ifaceName"
+              :read-only="!auth.isAdmin"
               @toggle="toggle"
               @add-prefix="onAddPrefix"
               @add-address="onAddAddress"
@@ -195,127 +198,149 @@ async function onRemove(node) {
       </div>
     </div>
 
-    <UModal v-model:open="prefixOpen" :title="prefix.id ? 'Edit prefix' : 'New prefix'">
+    <UModal
+      v-model:open="prefixOpen"
+      :title="!auth.isAdmin ? 'Prefix' : prefix.id ? 'Edit prefix' : 'New prefix'"
+    >
       <template #body>
-        <form id="prefix-form" class="space-y-3" @submit.prevent="savePrefix">
-          <UFormField label="Prefix" required
-            ><UInput
-              v-model="prefix.prefix"
-              class="w-full font-mono"
-              placeholder="192.168.1.0/24 or fd00:1::/64"
-          /></UFormField>
-          <UFormField label="Description"
-            ><UInput v-model="prefix.description" class="w-full"
-          /></UFormField>
-          <template v-if="prefixIs6">
-            <UFormField
-              label="Send router advertisements"
-              help="Announce this prefix and the firewall as default router on the interface that has an address in it."
-            >
-              <USwitch v-model="prefix.ra_enabled" />
-            </UFormField>
-            <UFormField
-              v-if="prefix.ra_enabled"
-              label="SLAAC: clients pick their own address"
-              :help="prefixIs64 ? '' : 'Needs a /64 prefix.'"
-            >
-              <USwitch v-model="prefix.ra_slaac" :disabled="!prefixIs64" />
-            </UFormField>
-          </template>
-          <UFormField
-            :label="prefixIs6 ? 'Serve DHCPv6 on this prefix' : 'Serve DHCP on this prefix'"
-            :help="
-              prefixIs6
-                ? 'Needs router advertisements (above) and the DHCP server on the instance.'
-                : 'Needs the DHCP server on the instance, and an interface address in the prefix.'
-            "
-          >
-            <USwitch
-              v-model="prefix.dhcp_enabled"
-              :disabled="prefixIs6 && !prefix.ra_enabled && !prefix.dhcp_enabled"
-            />
-          </UFormField>
-          <template v-if="prefix.dhcp_enabled">
-            <div class="grid grid-cols-2 gap-3">
-              <UFormField label="Range start"
-                ><UInput
-                  v-model="prefix.dhcp_range_start"
-                  class="w-full font-mono"
-                  placeholder="192.168.1.100"
-              /></UFormField>
-              <UFormField label="Range end"
-                ><UInput
-                  v-model="prefix.dhcp_range_end"
-                  class="w-full font-mono"
-                  placeholder="192.168.1.199"
-              /></UFormField>
-            </div>
-            <UFormField
-              v-if="!prefixIs6"
-              label="Gateway"
-              help="Empty: the firewall's address in the prefix."
-              ><UInput v-model="prefix.dhcp_gateway" class="w-full font-mono"
+        <form id="prefix-form" @submit.prevent="savePrefix">
+          <fieldset :disabled="!auth.isAdmin" class="space-y-3">
+            <UFormField label="Prefix" required
+              ><UInput
+                v-model="prefix.prefix"
+                class="w-full font-mono"
+                placeholder="192.168.1.0/24 or fd00:1::/64"
             /></UFormField>
-          </template>
-          <UFormField
-            v-if="prefix.dhcp_enabled || (prefixIs6 && prefix.ra_enabled)"
-            label="DNS servers"
-            help="Addresses or hosts; only those of the prefix's IP version are used. Empty: the firewall, when its DNS server listens on that interface."
-          >
-            <AddrInput v-model="prefix.dhcp_dns_servers" multiple />
-          </UFormField>
+            <UFormField label="Description"
+              ><UInput v-model="prefix.description" class="w-full"
+            /></UFormField>
+            <template v-if="prefixIs6">
+              <UFormField
+                label="Send router advertisements"
+                help="Announce this prefix and the firewall as default router on the interface that has an address in it."
+              >
+                <USwitch v-model="prefix.ra_enabled" />
+              </UFormField>
+              <UFormField
+                v-if="prefix.ra_enabled"
+                label="SLAAC: clients pick their own address"
+                :help="prefixIs64 ? '' : 'Needs a /64 prefix.'"
+              >
+                <USwitch v-model="prefix.ra_slaac" :disabled="!prefixIs64" />
+              </UFormField>
+            </template>
+            <UFormField
+              :label="prefixIs6 ? 'Serve DHCPv6 on this prefix' : 'Serve DHCP on this prefix'"
+              :help="
+                prefixIs6
+                  ? 'Needs router advertisements (above) and the DHCP server on the instance.'
+                  : 'Needs the DHCP server on the instance, and an interface address in the prefix.'
+              "
+            >
+              <USwitch
+                v-model="prefix.dhcp_enabled"
+                :disabled="prefixIs6 && !prefix.ra_enabled && !prefix.dhcp_enabled"
+              />
+            </UFormField>
+            <template v-if="prefix.dhcp_enabled">
+              <div class="grid grid-cols-2 gap-3">
+                <UFormField label="Range start"
+                  ><UInput
+                    v-model="prefix.dhcp_range_start"
+                    class="w-full font-mono"
+                    placeholder="192.168.1.100"
+                /></UFormField>
+                <UFormField label="Range end"
+                  ><UInput
+                    v-model="prefix.dhcp_range_end"
+                    class="w-full font-mono"
+                    placeholder="192.168.1.199"
+                /></UFormField>
+              </div>
+              <UFormField
+                v-if="!prefixIs6"
+                label="Gateway"
+                help="Empty: the firewall's address in the prefix."
+                ><UInput v-model="prefix.dhcp_gateway" class="w-full font-mono"
+              /></UFormField>
+            </template>
+            <UFormField
+              v-if="prefix.dhcp_enabled || (prefixIs6 && prefix.ra_enabled)"
+              label="DNS servers"
+              help="Addresses or hosts; only those of the prefix's IP version are used. Empty: the firewall, when its DNS server listens on that interface."
+            >
+              <AddrInput v-model="prefix.dhcp_dns_servers" multiple />
+            </UFormField>
+          </fieldset>
         </form>
       </template>
       <template #footer>
         <div class="flex w-full justify-end gap-2">
-          <UButton color="neutral" variant="ghost" @click="prefixOpen = false">Cancel</UButton>
-          <UButton type="submit" form="prefix-form">Save</UButton>
+          <UButton color="neutral" variant="ghost" @click="prefixOpen = false">{{
+            auth.isAdmin ? 'Cancel' : 'Close'
+          }}</UButton>
+          <UButton v-if="auth.isAdmin" type="submit" form="prefix-form">Save</UButton>
         </div>
       </template>
     </UModal>
 
-    <UModal v-model:open="addrOpen" :title="addr.id ? 'Edit address' : 'New address'">
+    <UModal
+      v-model:open="addrOpen"
+      :title="!auth.isAdmin ? 'Address' : addr.id ? 'Edit address' : 'New address'"
+    >
       <template #body>
-        <form id="addr-form" class="space-y-3" @submit.prevent="saveAddress">
-          <UFormField label="Address" required
-            ><UInput v-model="addr.address" class="w-full font-mono" placeholder="192.168.1.10"
-          /></UFormField>
-          <UFormField
-            label="Firewall interface"
-            help="Configure this address on one of the firewall's interfaces."
-          >
-            <USelect v-model="addr.interface_id" :items="ifaceOptions" class="w-full" />
-          </UFormField>
-          <UFormField
-            label="DNS name"
-            help="Fully qualified, inside one of the instance's DNS zones."
-          >
-            <UInput v-model="addr.dns_name" class="w-full font-mono" placeholder="nas.home.arpa" />
-          </UFormField>
-          <UFormField label="MAC address (DHCP reservation)">
-            <div class="flex items-center gap-1">
-              <UInput v-model="addr.mac" class="w-full font-mono" placeholder="02:00:00:00:00:10" />
-              <UButton
-                v-if="store.current?.dhcp_enabled"
-                type="button"
-                color="neutral"
-                variant="ghost"
-                icon="i-lucide-list"
-                aria-label="Pick MAC from DHCP leases"
-                title="Pick MAC from DHCP leases"
-                @click="leasePickerOpen = true"
+        <form id="addr-form" @submit.prevent="saveAddress">
+          <fieldset :disabled="!auth.isAdmin" class="space-y-3">
+            <UFormField label="Address" required
+              ><UInput v-model="addr.address" class="w-full font-mono" placeholder="192.168.1.10"
+            /></UFormField>
+            <UFormField
+              label="Firewall interface"
+              help="Configure this address on one of the firewall's interfaces."
+            >
+              <USelect v-model="addr.interface_id" :items="ifaceOptions" class="w-full" />
+            </UFormField>
+            <UFormField
+              label="DNS name"
+              help="Fully qualified, inside one of the instance's DNS zones."
+            >
+              <UInput
+                v-model="addr.dns_name"
+                class="w-full font-mono"
+                placeholder="nas.home.arpa"
               />
-            </div>
-          </UFormField>
-          <UFormField label="Description"
-            ><UInput v-model="addr.description" class="w-full"
-          /></UFormField>
+            </UFormField>
+            <UFormField label="MAC address (DHCP reservation)">
+              <div class="flex items-center gap-1">
+                <UInput
+                  v-model="addr.mac"
+                  class="w-full font-mono"
+                  placeholder="02:00:00:00:00:10"
+                />
+                <UButton
+                  v-if="store.current?.dhcp_enabled"
+                  type="button"
+                  color="neutral"
+                  variant="ghost"
+                  icon="i-lucide-list"
+                  aria-label="Pick MAC from DHCP leases"
+                  title="Pick MAC from DHCP leases"
+                  @click="leasePickerOpen = true"
+                />
+              </div>
+            </UFormField>
+            <UFormField label="Description"
+              ><UInput v-model="addr.description" class="w-full"
+            /></UFormField>
+          </fieldset>
         </form>
       </template>
       <template #footer>
         <div class="flex w-full justify-end gap-2">
-          <UButton color="neutral" variant="ghost" @click="addrOpen = false">Cancel</UButton>
-          <UButton type="submit" form="addr-form">Save</UButton>
+          <UButton color="neutral" variant="ghost" @click="addrOpen = false">{{
+            auth.isAdmin ? 'Cancel' : 'Close'
+          }}</UButton>
+          <UButton v-if="auth.isAdmin" type="submit" form="addr-form">Save</UButton>
         </div>
       </template>
     </UModal>

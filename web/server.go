@@ -103,7 +103,7 @@ func (s *Server) Echo() *echo.Echo {
 	api.POST("/logout", s.handleLogout)
 	api.GET("/version", func(c *echo.Context) error { return c.JSON(http.StatusOK, buildinfo.Get()) })
 
-	g := api.Group("", s.requireAuth)
+	g := api.Group("", s.requireAuth, requireRole)
 	g.GET("/me", s.handleMe)
 	g.PUT("/me", s.handleUpdateMe)
 	g.POST("/me/password", s.handleChangePassword)
@@ -154,6 +154,7 @@ func (s *Server) Echo() *echo.Echo {
 	g.POST(strings.TrimPrefix(restorePath, "/api"), s.handleRestore, middleware.BodyLimit(backupMaxSize/3*4+1<<20))
 	g.GET("/users", s.handleListUsers)
 	g.POST("/users", s.handleCreateUser)
+	g.PUT("/users/:id", s.handleUpdateUser)
 	g.DELETE("/users/:id", s.handleDeleteUser)
 
 	g.GET("/deploy/check", s.handleDeployCheck)

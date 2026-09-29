@@ -9,7 +9,9 @@ import { api } from '@/api'
 import { errMsg } from '@/api/http'
 import { useDeployStore } from '@/stores/deploy'
 import { datetime } from '@/utils/time'
+import { useAuthStore } from '@/stores/auth'
 
+const auth = useAuthStore()
 const toast = useToast()
 const deploy = useDeployStore()
 const check = ref(null)
@@ -137,6 +139,7 @@ const fileColor = { same: 'neutral', changed: 'warning', new: 'success', removed
             @click="runPreview"
           />
           <UButton
+            v-if="auth.isAdmin"
             icon="i-lucide-rocket"
             label="Apply"
             :loading="busy"

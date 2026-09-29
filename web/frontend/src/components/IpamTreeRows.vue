@@ -9,6 +9,8 @@ defineProps({
   depth: { type: Number, default: 0 },
   collapsed: { type: Object, required: true },
   ifaceName: { type: Function, required: true },
+  // readOnly leaves out the add and delete buttons (a viewer).
+  readOnly: { type: Boolean, default: false },
 })
 const emit = defineEmits(['toggle', 'add-prefix', 'add-address', 'edit', 'remove'])
 const key = (n) => `${n.kind}:${n.id}`
@@ -67,7 +69,7 @@ function pct(n) {
         </div>
       </td>
       <td class="py-1 text-right whitespace-nowrap">
-        <template v-if="n.kind === 'prefix'">
+        <template v-if="n.kind === 'prefix' && !readOnly">
           <UButton
             size="xs"
             color="neutral"
@@ -89,10 +91,11 @@ function pct(n) {
           size="xs"
           color="neutral"
           variant="ghost"
-          icon="i-lucide-pencil"
+          :icon="readOnly ? 'i-lucide-eye' : 'i-lucide-pencil'"
           @click="emit('edit', n)"
         />
         <UButton
+          v-if="!readOnly"
           size="xs"
           color="error"
           variant="ghost"
@@ -107,6 +110,7 @@ function pct(n) {
       :depth="depth + 1"
       :collapsed="collapsed"
       :iface-name="ifaceName"
+      :read-only="readOnly"
       @toggle="emit('toggle', $event)"
       @add-prefix="emit('add-prefix', $event)"
       @add-address="emit('add-address', $event)"

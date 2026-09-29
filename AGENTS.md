@@ -132,6 +132,11 @@ are in [README.md](README.md).
   copy, drop, rename) in a `-- +goose NO TRANSACTION` migration that turns
   `foreign_keys` off around it. Ids are `AUTOINCREMENT` so a deleted row's id is
   never reused (rule ids mark connections).
+- **Roles:** a user is `admin` or `viewer` (`models.RoleAdmin`/`RoleViewer`).
+  `requireRole` (`web/auth.go`) denies by default: a viewer gets GET routes except
+  those in `viewerDenied` (secrets, console, users) and only the writes in
+  `viewerWrites`. A new route is admin-only for writes automatically; a new GET that
+  hands out secrets must go in `viewerDenied`. `TestViewerRole` sweeps every route.
 - **Database files:** portitor-web refuses to run as root against a database
   directory owned by another user; root would leave root-owned `-wal`/`-shm` files.
   Scripts run it as the service user (`runuser -u portitor --`).

@@ -7,7 +7,9 @@ import { useToast } from '@nuxt/ui/composables'
 import { api } from '@/api'
 import { errMsg } from '@/api/http'
 import { useDeployStore } from '@/stores/deploy'
+import { useAuthStore } from '@/stores/auth'
 
+const auth = useAuthStore()
 const deploy = useDeployStore()
 const toast = useToast()
 const busy = ref(false)
@@ -82,7 +84,7 @@ async function revert() {
         >Review</UButton
       >
       <UButton
-        v-if="changes.deployed"
+        v-if="changes.deployed && auth.isAdmin"
         size="sm"
         color="neutral"
         variant="outline"
@@ -93,6 +95,7 @@ async function revert() {
         >Revert</UButton
       >
       <UButton
+        v-if="auth.isAdmin"
         size="sm"
         color="info"
         icon="i-lucide-rocket"

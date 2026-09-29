@@ -7,7 +7,9 @@ import { useToast } from '@nuxt/ui/composables'
 import { api } from '@/api'
 import { errMsg } from '@/api/http'
 import { useDeployStore } from '@/stores/deploy'
+import { useAuthStore } from '@/stores/auth'
 
+const auth = useAuthStore()
 const deploy = useDeployStore()
 const toast = useToast()
 const now = ref(Date.now())
@@ -58,7 +60,7 @@ async function rollback() {
       <b class="tabular-nums">{{ secondsLeft }}s</b> unless you confirm it. If this page still
       works, the change didn't lock you out.
     </span>
-    <div class="ml-auto flex gap-2">
+    <div v-if="auth.isAdmin" class="ml-auto flex gap-2">
       <UButton size="sm" color="neutral" variant="outline" :loading="busy" @click="rollback"
         >Roll back now</UButton
       >

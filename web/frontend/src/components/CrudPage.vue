@@ -25,6 +25,7 @@ import { usePortMenu } from '@/composables/usePortMenu'
 import { useRowDrag } from '@/composables/useRowDrag'
 import { api as rootApi } from '@/api'
 import { errMsg } from '@/api/http'
+import { useAuthStore } from '@/stores/auth'
 import { useObjectStore } from '@/stores/objects'
 
 const props = defineProps({
@@ -48,6 +49,9 @@ const props = defineProps({
 const emit = defineEmits(['changed'])
 
 const toast = useToast()
+// A viewer sees the table and the form, read-only.
+const auth = useAuthStore()
+const readOnly = computed(() => !auth.isAdmin)
 const rows = ref([])
 const loading = ref(true)
 const open = ref(false)
@@ -62,7 +66,9 @@ const NONE = 0
 const infoOpen = ref(false)
 
 const tableColumns = computed(() => [
-  ...(props.reorder ? [{ id: 'drag', header: '', meta: { class: { td: 'w-7 px-1' } } }] : []),
+  ...(props.reorder && !readOnly.value
+    ? [{ id: 'drag', header: '', meta: { class: { td: 'w-7 px-1' } } }]
+    : []),
   ...props.columns.map((c) => ({ accessorKey: c.key, header: c.label })),
   { id: 'actions', header: '' },
 ])
@@ -283,7 +289,7 @@ defineExpose({ reload: load, openEdit, openCreate })
       <div class="flex items-center gap-2">
         <slot name="toolbar" />
         <UButton
-          v-if="newLabel"
+          v-if="newLabel && !readOnly"
           icon="i-lucide-plus"
           :label="newLabel"
           :disabled="!!blockedReason"
@@ -337,10 +343,11 @@ defineExpose({ reload: load, openEdit, openCreate })
               size="xs"
               color="neutral"
               variant="ghost"
-              icon="i-lucide-pencil"
+              :icon="readOnly ? 'i-lucide-eye' : 'i-lucide-pencil'"
               @click="openEdit(row.original)"
             />
             <UButton
+              v-if="!readOnly"
               size="xs"
               color="error"
               variant="ghost"
@@ -358,106 +365,110 @@ defineExpose({ reload: load, openEdit, openCreate })
 
   <UModal
     v-model:open="open"
-    :title="(editing ? 'Edit ' : 'New ') + title.replace(/s$/, '').toLowerCase()"
+    :title="(readOnly ? '' : editing ? 'Edit ' : 'New ') + title.replace(/s$/, '').toLowerCase()"
   >
     <template #body>
       <form id="crud-form" class="space-y-3" @submit.prevent="save">
-        <template v-for="f in fields" :key="f.key">
-          <UFormField
-            v-if="visible(f)"
-            :label="f.label"
-            :hint="f.hintRight"
-            :help="f.hint"
-            :required="f.required"
-          >
-            <USwitch
-              v-if="f.type === 'switch'"
-              v-model="form[f.key]"
-              :disabled="f.disabled?.(form)"
-            />
-            <USelect
-              v-else-if="f.type === 'select'"
-              v-model="form[f.key]"
-              :items="itemsOf(f)"
-              class="w-full"
-              :disabled="f.disabled?.(form)"
+        <fieldset :disabled="readOnly" class="space-y-3">
+          <template v-for="f in fields" :key="f.key">
+            <UFormField
+              v-if="visible(f)"
+              :label="f.label"
+              :hint="f.hintRight"
+              :help="f.hint"
+              :required="f.required"
             >
-              <template v-if="selectedItem(f)" #default>
-                <span class="truncate">
-                  {{ selectedItem(f).label }}
-                  <span v-if="selectedItem(f).description" class="text-muted">
-                    — {{ selectedItem(f).description }}
-                  </span>
-                </span>
-              </template>
-            </USelect>
-            <USelectMenu
-              v-else-if="f.type === 'multiselect'"
-              v-model="form[f.key]"
-              multiple
-              :items="multiItems(f)"
-              value-key="value"
-              :filter-fields="['label', 'description']"
-              class="w-full"
-              :placeholder="f.placeholder"
-              :disabled="f.disabled?.(form)"
-            />
-            <UInputTags
-              v-else-if="f.type === 'tags'"
-              v-model="form[f.key]"
-              class="w-full"
-              :placeholder="f.placeholder"
-              add-on-blur
-              add-on-paste
-            />
-            <AddrInput
-              v-else-if="f.type === 'addrs' || f.type === 'addr'"
-              v-model="form[f.key]"
-              :multiple="f.type === 'addrs'"
-              :lists="!!f.lists"
-              :placeholder="f.placeholder"
-              :disabled="f.disabled?.(form)"
-            />
-            <div v-else-if="f.type === 'ports'" class="relative">
-              <UInput
+              <USwitch
+                v-if="f.type === 'switch'"
                 v-model="form[f.key]"
+                :disabled="f.disabled?.(form)"
+              />
+              <USelect
+                v-else-if="f.type === 'select'"
+                v-model="form[f.key]"
+                :items="itemsOf(f)"
                 class="w-full"
-                :ui="{ base: 'font-mono' }"
-                autocomplete="off"
+                :disabled="f.disabled?.(form)"
+              >
+                <template v-if="selectedItem(f)" #default>
+                  <span class="truncate">
+                    {{ selectedItem(f).label }}
+                    <span v-if="selectedItem(f).description" class="text-muted">
+                      — {{ selectedItem(f).description }}
+                    </span>
+                  </span>
+                </template>
+              </USelect>
+              <USelectMenu
+                v-else-if="f.type === 'multiselect'"
+                v-model="form[f.key]"
+                multiple
+                :items="multiItems(f)"
+                value-key="value"
+                :filter-fields="['label', 'description']"
+                class="w-full"
                 :placeholder="f.placeholder"
                 :disabled="f.disabled?.(form)"
-                @click="ports.open"
-                @input="ports.open"
-                @blur="ports.close"
-                @keydown="ports.onKeydown"
               />
-              <PortMenu :menu="portMenu" @pick="ports.pick" />
-            </div>
-            <UTextarea
-              v-else-if="f.type === 'textarea'"
-              v-model="form[f.key]"
-              class="w-full"
-              :rows="3"
-            />
-            <UInput
-              v-else
-              v-model="form[f.key]"
-              :type="['number', 'password'].includes(f.type) ? f.type : 'text'"
-              :autocomplete="f.type === 'password' ? 'new-password' : undefined"
-              class="w-full"
-              :placeholder="f.placeholder"
-              :required="f.required"
-              :disabled="f.disabled?.(form)"
-            />
-          </UFormField>
-        </template>
-        <slot name="form-extra" :form="form" :editing="editing" />
+              <UInputTags
+                v-else-if="f.type === 'tags'"
+                v-model="form[f.key]"
+                class="w-full"
+                :placeholder="f.placeholder"
+                add-on-blur
+                add-on-paste
+              />
+              <AddrInput
+                v-else-if="f.type === 'addrs' || f.type === 'addr'"
+                v-model="form[f.key]"
+                :multiple="f.type === 'addrs'"
+                :lists="!!f.lists"
+                :placeholder="f.placeholder"
+                :disabled="f.disabled?.(form)"
+              />
+              <div v-else-if="f.type === 'ports'" class="relative">
+                <UInput
+                  v-model="form[f.key]"
+                  class="w-full"
+                  :ui="{ base: 'font-mono' }"
+                  autocomplete="off"
+                  :placeholder="f.placeholder"
+                  :disabled="f.disabled?.(form)"
+                  @click="ports.open"
+                  @input="ports.open"
+                  @blur="ports.close"
+                  @keydown="ports.onKeydown"
+                />
+                <PortMenu :menu="portMenu" @pick="ports.pick" />
+              </div>
+              <UTextarea
+                v-else-if="f.type === 'textarea'"
+                v-model="form[f.key]"
+                class="w-full"
+                :rows="3"
+              />
+              <UInput
+                v-else
+                v-model="form[f.key]"
+                :type="['number', 'password'].includes(f.type) ? f.type : 'text'"
+                :autocomplete="f.type === 'password' ? 'new-password' : undefined"
+                class="w-full"
+                :placeholder="f.placeholder"
+                :required="f.required"
+                :disabled="f.disabled?.(form)"
+              />
+            </UFormField>
+          </template>
+          <slot name="form-extra" :form="form" :editing="editing" />
+        </fieldset>
       </form>
     </template>
     <template #footer>
       <div class="flex w-full justify-end gap-2">
-        <UButton color="neutral" variant="ghost" @click="open = false">Cancel</UButton>
-        <UButton type="submit" form="crud-form" :loading="saving">Save</UButton>
+        <UButton color="neutral" variant="ghost" @click="open = false">{{
+          readOnly ? 'Close' : 'Cancel'
+        }}</UButton>
+        <UButton v-if="!readOnly" type="submit" form="crud-form" :loading="saving">Save</UButton>
       </div>
     </template>
   </UModal>

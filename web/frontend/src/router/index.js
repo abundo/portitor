@@ -38,16 +38,36 @@ const router = createRouter({
         { path: 'dyndns', component: () => import('@/views/DynDnsPage.vue') },
         { path: 'tasks', component: () => import('@/views/TasksPage.vue') },
         { path: 'deploy', component: () => import('@/views/DeployPage.vue') },
-        { path: 'console', component: () => import('@/views/ConsolePage.vue') },
-        { path: 'updates', component: () => import('@/views/UpdatesPage.vue') },
-        { path: 'settings', component: () => import('@/views/SettingsPage.vue') },
-        { path: 'settings/users', component: () => import('@/views/UsersPage.vue') },
+        {
+          path: 'console',
+          component: () => import('@/views/ConsolePage.vue'),
+          meta: { admin: true },
+        },
+        {
+          path: 'updates',
+          component: () => import('@/views/UpdatesPage.vue'),
+          meta: { admin: true },
+        },
+        {
+          path: 'settings',
+          component: () => import('@/views/SettingsPage.vue'),
+          meta: { admin: true },
+        },
+        {
+          path: 'settings/users',
+          component: () => import('@/views/UsersPage.vue'),
+          meta: { admin: true },
+        },
         { path: 'help/:doc?', component: () => import('@/views/HelpPage.vue') },
         { path: 'profile', component: () => import('@/views/ProfilePage.vue') },
         { path: 'profile/password', component: () => import('@/views/ChangePasswordPage.vue') },
       ],
     },
-    { path: '/console/window', component: () => import('@/views/ConsoleWindowPage.vue') },
+    {
+      path: '/console/window',
+      component: () => import('@/views/ConsoleWindowPage.vue'),
+      meta: { admin: true },
+    },
     { path: '/:pathMatch(.*)*', redirect: '/' },
   ],
 })
@@ -58,6 +78,7 @@ router.beforeEach((to) => {
     return { name: 'login', query: to.fullPath !== '/' ? { next: to.fullPath } : {} }
   }
   if (to.name === 'login' && auth.isAuthenticated) return { name: 'dashboard' }
+  if (to.matched.some((r) => r.meta.admin) && !auth.isAdmin) return { name: 'dashboard' }
 })
 
 export default router

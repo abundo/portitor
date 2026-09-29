@@ -11,9 +11,11 @@ import { api as backend, instances, rules } from '@/api'
 import { errMsg } from '@/api/http'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
 import { useObjectStore } from '@/stores/objects'
+import { useAuthStore } from '@/stores/auth'
 
 const { store, ifaceRefItems } = useInstanceRefs()
 const objects = useObjectStore()
+const auth = useAuthStore()
 onMounted(() => objects.load().catch(() => {}))
 
 // Input rules for DHCP, DNS and WireGuard come from the services'
@@ -236,6 +238,7 @@ function clean(b) {
             <div class="mb-2 flex items-end justify-between gap-3 pt-2">
               <p class="text-sm text-muted">{{ c.text }}</p>
               <UButton
+                v-if="auth.isAdmin"
                 size="sm"
                 variant="soft"
                 icon="i-lucide-plus"
@@ -251,6 +254,7 @@ function clean(b) {
               :counters="counters"
               :drops="drops && (drops[store.current?.name]?.[c.value] ?? {})"
               :log-builtin="logBuiltin(c.value)"
+              :read-only="!auth.isAdmin"
               :insert="
                 (kind, at) => insertInChain(rows, c.value, { openCreate, createAt }, kind, at)
               "

@@ -10,7 +10,9 @@ import { api, ipLists, tasks } from '@/api'
 import { errMsg } from '@/api/http'
 import { useDeployStore } from '@/stores/deploy'
 import { ago, when } from '@/utils/time'
+import { useAuthStore } from '@/stores/auth'
 
+const auth = useAuthStore()
 const toast = useToast()
 const deploy = useDeployStore()
 const lists = ref([])
@@ -138,6 +140,7 @@ async function runNow(row) {
     </template>
     <template #row-actions="{ row }">
       <UButton
+        v-if="auth.isAdmin"
         size="xs"
         color="neutral"
         variant="ghost"

@@ -8,6 +8,8 @@ export const useAuthStore = defineStore('auth', {
   state: () => ({ user: null, loaded: false }),
   getters: {
     isAuthenticated: (s) => s.user !== null,
+    // A viewer (role 'viewer') only reads; the server refuses their changes.
+    isAdmin: (s) => s.user?.role === 'admin',
   },
   actions: {
     async fetchCurrentUser() {

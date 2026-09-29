@@ -116,6 +116,44 @@ func (s *Server) sessionValid(claims *sessionClaims) bool {
 	return s.db.First(&u, claims.UserID).Error == nil && u.TokenVersion == claims.TokenVersion
 }
 
+// viewerDenied are the GET routes a viewer may not use: they hand out
+// secrets (a WireGuard client config with its private key), a root shell,
+// or the user list.
+var viewerDenied = map[string]bool{
+	"/api/users":               true,
+	"/api/wg/peers/:id/config": true,
+	"/api/agent/console":       true,
+}
+
+// viewerWrites are the requests other than GET a viewer may make: their own
+// profile and password, and the deploy preview, which changes nothing.
+var viewerWrites = map[string]bool{
+	"PUT /api/me":              true,
+	"POST /api/me/password":    true,
+	"POST /api/deploy/preview": true,
+}
+
+// requireRole lets an admin through and limits a viewer to reading. It runs
+// after requireAuth and matches the route pattern, so it cannot be dodged
+// with another spelling of the path.
+func requireRole(next echo.HandlerFunc) echo.HandlerFunc {
+	return func(c *echo.Context) error {
+		u := currentUser(c)
+		if u != nil && u.Role == models.RoleAdmin {
+			return next(c)
+		}
+		method, path := c.Request().Method, c.Path()
+		allowed := viewerWrites[method+" "+path]
+		if method == http.MethodGet || method == http.MethodHead {
+			allowed = !viewerDenied[path]
+		}
+		if !allowed {
+			return errJSON(c, http.StatusForbidden, "your user is read-only")
+		}
+		return next(c)
+	}
+}
+
 // requireJSON rejects state-changing requests that aren't JSON. Browsers
 // can't send application/json cross-site without a CORS preflight (which
 // is never granted), so together with SameSite=Strict this blocks CSRF.
@@ -319,11 +357,12 @@ func setPassword(u *models.User, password string) error {
 	return nil
 }
 
-// CreateUser adds or resets a user (portitor-web createadmin).
+// CreateUser adds or resets an admin (portitor-web createadmin).
 func CreateUser(s *Server, username, password string) error {
 	var u models.User
 	s.db.Where("username = ?", username).First(&u)
 	u.Username = username
+	u.Role = models.RoleAdmin
 	if err := setPassword(&u, password); err != nil {
 		return err
 	}

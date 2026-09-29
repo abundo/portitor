@@ -4,8 +4,10 @@
 <script setup>
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
+import { useAuthStore } from '@/stores/auth'
 
 const route = useRoute()
+const auth = useAuthStore()
 const items = computed(() => [
   [
     { label: 'Dashboard', icon: 'i-lucide-gauge', to: '/', exact: true },
@@ -37,20 +39,29 @@ const items = computed(() => [
     { label: 'Dynamic DNS', icon: 'i-lucide-refresh-ccw-dot', to: '/dyndns' },
     { label: 'Scheduled tasks', icon: 'i-lucide-calendar-clock', to: '/tasks' },
   ],
-  [
-    { label: 'Admin', type: 'label' },
-    { label: 'Console', icon: 'i-lucide-square-terminal', to: '/console' },
-    { label: 'Updates', icon: 'i-lucide-package-check', to: '/updates' },
-    {
-      label: 'Settings',
-      icon: 'i-lucide-settings',
-      defaultOpen: route.path.startsWith('/settings'),
-      children: [
-        { label: 'General', icon: 'i-lucide-sliders-horizontal', to: '/settings', exact: true },
-        { label: 'Users', icon: 'i-lucide-users', to: '/settings/users' },
-      ],
-    },
-  ],
+  ...(auth.isAdmin
+    ? [
+        [
+          { label: 'Admin', type: 'label' },
+          { label: 'Console', icon: 'i-lucide-square-terminal', to: '/console' },
+          { label: 'Updates', icon: 'i-lucide-package-check', to: '/updates' },
+          {
+            label: 'Settings',
+            icon: 'i-lucide-settings',
+            defaultOpen: route.path.startsWith('/settings'),
+            children: [
+              {
+                label: 'General',
+                icon: 'i-lucide-sliders-horizontal',
+                to: '/settings',
+                exact: true,
+              },
+              { label: 'Users', icon: 'i-lucide-users', to: '/settings/users' },
+            ],
+          },
+        ],
+      ]
+    : []),
   [{ label: 'Help', icon: 'i-lucide-circle-help', to: '/help' }],
 ])
 </script>

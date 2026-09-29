@@ -31,7 +31,7 @@ must pass WebSocket upgrades for the console.
 # as the service user (sudo -u portitor ...); as root it refuses
 portitor-web start                 # serve the GUI and API
 portitor-web migrate               # apply database migrations; start never migrates
-portitor-web createadmin <user>    # create a user, or reset a user's password
+portitor-web createadmin <user>    # create an admin, or reset a user's password and make them admin
 portitor-web agent-url             # print the agent URL from Settings (used by install.py)
 portitor-web bootstrap ...         # first configuration of an ISO install (portitor-setup runs it)
 ```
@@ -107,19 +107,31 @@ After an upgrade, run `migrate` before `start`. `install.py` does both.
 | Admin | Console | A shell on the firewall as the agent's `console_user`. |
 | | Updates | Debian package upgrades, Portitor releases, reboot. See [Installer ISO and updates](appliance.md#updates). |
 | | Settings → General | Agent connection, default auto-rollback, public WireGuard endpoint, [backup and restore](#backup-and-restore). |
-| | Settings → Users | GUI users. |
+| | Settings → Users | GUI users and their roles. |
 | | Help | This guide and the other guides in `docs/`. |
 
 Your own name and password are under the user menu (top right).
 
 ## Users and sessions
 
-Every user can do everything: there are no roles. A user can manage the other users,
-deploy, open the console, run tasks, download a backup (with every secret in it),
-update and reboot the firewall. Give an account only to someone you would give root.
+A user is an **admin** or a **viewer**.
+
+- An admin can do everything: manage the other users, deploy, open the console, run
+  tasks, download a backup (with every secret in it), update and reboot the firewall.
+  Give this role only to someone you would give root.
+- A viewer can read the configuration of every instance, the deploy preview, the
+  firewall's status, leases, rule counters and logs. A viewer can't change anything
+  except their own name and password. They can't see WireGuard client configs, which
+  hold private keys, and they can't use the console, Updates, Settings or Users.
+  Portitor-web refuses a viewer's changes; the GUI hides the buttons for them and
+  shows *Read-only* in the top bar.
+
+New users get the role you pick in Settings → Users. Users that existed before roles
+were added are admins. You can't change your own role, so at least one admin always
+remains. Changing another user's role ends their sessions.
 
 A login lasts 12 hours, or 30 days with *Remember me*. Changing your password ends
-your other sessions; deleting a user ends theirs, and so does
+your other sessions; deleting a user or changing their role ends theirs, and so does
 `portitor-web createadmin` for an existing user. An open console closes within a
 few seconds when its session ends or expires. *Log out* only clears the cookie in that
 browser: a copy of the cookie stays valid until it expires. To end every session of a

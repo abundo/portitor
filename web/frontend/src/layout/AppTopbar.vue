@@ -99,6 +99,9 @@ const userMenu = computed(() => [
       <USelect v-model="current" :items="instances.items" class="w-40" placeholder="none" />
     </div>
     <div class="ml-auto flex items-center gap-2">
+      <UTooltip v-if="!auth.isAdmin" text="Your user can look but not change anything">
+        <UBadge color="neutral" variant="outline" icon="i-lucide-eye" label="Read-only" />
+      </UTooltip>
       <UTooltip :text="agentChip.title ?? ''">
         <UBadge
           :color="agentChip.color"
@@ -117,7 +120,7 @@ const userMenu = computed(() => [
           @click="toggleLog"
         />
       </UTooltip>
-      <UTooltip text="Open console window">
+      <UTooltip v-if="auth.isAdmin" text="Open console window">
         <UButton
           icon="i-lucide-square-terminal"
           color="neutral"

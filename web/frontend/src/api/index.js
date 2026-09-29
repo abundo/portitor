@@ -86,8 +86,10 @@ export const api = {
   restore: (data, passphrase) =>
     http.post('/backup/restore', { data, passphrase }).then((r) => r.data),
   users: () => http.get('/users').then((r) => r.data),
-  createUser: (username, password) =>
-    http.post('/users', { username, password }).then((r) => r.data),
+  createUser: (username, password, role) =>
+    http.post('/users', { username, password, role }).then((r) => r.data),
+  // Changing a user's role ends their sessions.
+  setUserRole: (id, role) => http.put(`/users/${id}`, { role }).then((r) => r.data),
   deleteUser: (id) => http.delete(`/users/${id}`),
 
   deployCheck: () => http.get('/deploy/check').then((r) => r.data),

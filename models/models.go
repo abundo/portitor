@@ -121,10 +121,20 @@ type User struct {
 	FullName     string `json:"full_name"`
 	Email        string `json:"email"`
 	PasswordHash string `json:"-"`
+	// Role is RoleAdmin or RoleViewer.
+	Role string `json:"role"`
 	// TokenVersion invalidates issued sessions when bumped (password
-	// change, logout everywhere).
+	// change, role change, logout everywhere).
 	TokenVersion int `json:"-"`
 }
+
+const (
+	// RoleAdmin may do everything.
+	RoleAdmin = "admin"
+	// RoleViewer reads the configuration and status but changes nothing
+	// except their own profile and password.
+	RoleViewer = "viewer"
+)
 
 // Settings is a single row (ID 1).
 type Settings struct {

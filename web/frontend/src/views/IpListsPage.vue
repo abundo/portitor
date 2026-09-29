@@ -10,7 +10,9 @@ import { errMsg } from '@/api/http'
 import { useDeployStore } from '@/stores/deploy'
 import { useObjectStore } from '@/stores/objects'
 import { ago } from '@/utils/time'
+import { useAuthStore } from '@/stores/auth'
 
+const auth = useAuthStore()
 const toast = useToast()
 const deploy = useDeployStore()
 const objects = useObjectStore()
@@ -118,6 +120,7 @@ async function refresh(row) {
     </template>
     <template #row-actions="{ row }">
       <UButton
+        v-if="auth.isAdmin"
         size="xs"
         color="neutral"
         variant="ghost"

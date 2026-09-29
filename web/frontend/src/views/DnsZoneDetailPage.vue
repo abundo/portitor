@@ -12,7 +12,9 @@ import { useInstanceStore } from '@/stores/instances'
 import { builtinTemplate, zoneTypes } from '@/utils/dns'
 import { formatZoneFile, parseZoneFile } from '@/utils/zoneFile'
 import { fromApiRecord, toApiRecords, validateZoneRecords } from '@/utils/zoneRecords'
+import { useAuthStore } from '@/stores/auth'
 
+const auth = useAuthStore()
 const route = useRoute()
 const toast = useToast()
 const store = useInstanceStore()
@@ -224,31 +226,35 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', onBeforeUnload)
     <div class="card">
       <UTabs v-model="activeTab" :items="tabItems" :unmount-on-hide="false">
         <template #info>
-          <form class="space-y-4 pt-4" @submit.prevent="save">
-            <div class="grid gap-x-4 gap-y-3 sm:grid-cols-2">
-              <UFormField label="Name" required>
-                <UInput v-model="form.name" class="w-full font-mono" />
+          <form class="pt-4" @submit.prevent="save">
+            <fieldset :disabled="!auth.isAdmin" class="space-y-4">
+              <div class="grid gap-x-4 gap-y-3 sm:grid-cols-2">
+                <UFormField label="Name" required>
+                  <UInput v-model="form.name" class="w-full font-mono" />
+                </UFormField>
+                <UFormField
+                  label="DNS template"
+                  help="SOA, NS and default TTL come from the template."
+                >
+                  <USelect v-model="form.dns_template_id" :items="templateItems" class="w-full" />
+                </UFormField>
+              </div>
+              <UFormField label="Description">
+                <UTextarea v-model="form.description" class="w-full" :rows="3" />
               </UFormField>
-              <UFormField
-                label="DNS template"
-                help="SOA, NS and default TTL come from the template."
-              >
-                <USelect v-model="form.dns_template_id" :items="templateItems" class="w-full" />
-              </UFormField>
-            </div>
-            <UFormField label="Description">
-              <UTextarea v-model="form.description" class="w-full" :rows="3" />
-            </UFormField>
-            <div class="flex gap-2">
-              <UButton type="submit" :loading="saving" :disabled="!dirty">Save</UButton>
-              <UButton
-                to="/dns/templates"
-                color="neutral"
-                variant="ghost"
-                icon="i-lucide-file-cog"
-                label="Edit templates"
-              />
-            </div>
+              <div class="flex gap-2">
+                <UButton v-if="auth.isAdmin" type="submit" :loading="saving" :disabled="!dirty"
+                  >Save</UButton
+                >
+                <UButton
+                  to="/dns/templates"
+                  color="neutral"
+                  variant="ghost"
+                  icon="i-lucide-file-cog"
+                  label="Edit templates"
+                />
+              </div>
+            </fieldset>
           </form>
         </template>
 
@@ -330,9 +336,11 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', onBeforeUnload)
                 v-model="records"
                 :show-mac="!!instance?.dhcp_enabled"
                 :instance="instance?.name ?? ''"
+                :disabled="!auth.isAdmin"
               >
                 <template #leading-actions>
                   <UButton
+                    v-if="auth.isAdmin"
                     type="button"
                     :loading="savingRecords"
                     :disabled="!recordsDirty"
@@ -353,6 +361,7 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', onBeforeUnload)
                     Export
                   </UButton>
                   <UButton
+                    v-if="auth.isAdmin"
                     type="button"
                     color="neutral"
                     variant="outline"

@@ -11,7 +11,9 @@ import { api, interfaces, wgPeers } from '@/api'
 import { errMsg } from '@/api/http'
 import { useInstanceStore } from '@/stores/instances'
 import { useDeployStore } from '@/stores/deploy'
+import { useAuthStore } from '@/stores/auth'
 
+const auth = useAuthStore()
 const store = useInstanceStore()
 const deploy = useDeployStore()
 const toast = useToast()
@@ -221,6 +223,7 @@ function copy(text) {
           </div>
         </div>
         <UButton
+          v-if="auth.isAdmin"
           class="ml-auto"
           color="neutral"
           variant="outline"
@@ -255,6 +258,7 @@ function copy(text) {
         </template>
         <template #row-actions="{ row }">
           <UButton
+            v-if="auth.isAdmin"
             size="xs"
             color="neutral"
             variant="ghost"

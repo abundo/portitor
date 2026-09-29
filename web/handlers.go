@@ -439,6 +439,7 @@ func (s *Server) handleCreateUser(c *echo.Context) error {
 	var req struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
+		Role     string `json:"role"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return errJSON(c, http.StatusBadRequest, "invalid request")
@@ -447,7 +448,13 @@ func (s *Server) handleCreateUser(c *echo.Context) error {
 	if req.Username == "" {
 		return errJSON(c, http.StatusBadRequest, "username is required")
 	}
-	u := models.User{Username: req.Username}
+	if req.Role == "" {
+		req.Role = models.RoleViewer
+	}
+	if !validRole(req.Role) {
+		return errJSON(c, http.StatusBadRequest, "role must be admin or viewer")
+	}
+	u := models.User{Username: req.Username, Role: req.Role}
 	if err := setPassword(&u, req.Password); err != nil {
 		return errJSON(c, http.StatusBadRequest, err.Error())
 	}
@@ -455,6 +462,44 @@ func (s *Server) handleCreateUser(c *echo.Context) error {
 		return dbError(c, err)
 	}
 	return c.JSON(http.StatusCreated, u)
+}
+
+func validRole(role string) bool {
+	return role == models.RoleAdmin || role == models.RoleViewer
+}
+
+// handleUpdateUser changes another user's role and ends their sessions, so
+// a demoted admin loses an open console too. The caller's own role cannot
+// change, which keeps at least one admin.
+func (s *Server) handleUpdateUser(c *echo.Context) error {
+	id, err := echo.PathParam[uint](c, "id")
+	if err != nil {
+		return errJSON(c, http.StatusNotFound, "not found")
+	}
+	var req struct {
+		Role string `json:"role"`
+	}
+	if err := c.Bind(&req); err != nil {
+		return errJSON(c, http.StatusBadRequest, "invalid request")
+	}
+	if !validRole(req.Role) {
+		return errJSON(c, http.StatusBadRequest, "role must be admin or viewer")
+	}
+	if id == currentUser(c).ID {
+		return errJSON(c, http.StatusBadRequest, "you cannot change your own role")
+	}
+	var u models.User
+	if err := s.db.First(&u, id).Error; err != nil {
+		return errJSON(c, http.StatusNotFound, "not found")
+	}
+	if u.Role != req.Role {
+		u.Role = req.Role
+		u.TokenVersion++
+		if err := s.db.Save(&u).Error; err != nil {
+			return err
+		}
+	}
+	return c.JSON(http.StatusOK, u)
 }
 
 func (s *Server) handleDeleteUser(c *echo.Context) error {
