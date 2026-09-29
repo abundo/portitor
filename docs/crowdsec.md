@@ -57,7 +57,7 @@ It prints an API key, and shows it only once. Copy it.
 
 ### 3. Add the IP list in Portitor
 
-*Firewall → IP lists → New IP list*:
+*Network → Hosts & prefixes*, button *+ IP list*:
 
 | Field | Value |
 |---|---|
@@ -109,8 +109,8 @@ community blocklist itself changes less often.
 Deploy. The agent downloads the list right away; after that, the task downloads it
 again on its schedule.
 
-- *Firewall → IP lists* shows the state, the number of IPv4 and IPv6 entries, and when
-  the list was last downloaded. The refresh button downloads it now.
+- *Network → Hosts & prefixes*, under *IP lists*, shows the state, the number of IPv4
+  and IPv6 entries, and when the list was last downloaded. The refresh button downloads it now.
 - *Services → Scheduled tasks* shows the next run and the result of the last one. The
   play button runs the task now.
 - On the firewall, compare the counts with the engine's decisions:
@@ -156,7 +156,7 @@ the engine.
 2. Under *Blocklists → Integrations*, create an integration for a generic firewall /
    raw IP list, and subscribe the blocklists to it. The Console shows an endpoint URL,
    a username and a password.
-3. In Portitor, *Firewall → IP lists → New IP list*:
+3. In Portitor, *Network → Hosts & prefixes*, button *+ IP list*:
 
    | Field | Value |
    |---|---|
@@ -169,7 +169,7 @@ the engine.
 
 ## When something goes wrong
 
-The IP lists page shows the last error of each list:
+Hosts & prefixes shows, under IP lists, the last error of each list:
 
 - `connection refused`: the LAPI isn't listening where the URL says. Check
   `sudo systemctl status crowdsec` and the listen address.

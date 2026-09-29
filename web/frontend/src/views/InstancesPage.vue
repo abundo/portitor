@@ -71,7 +71,7 @@ const fields = [
     key: 'dhcp_enabled',
     label: 'DHCP server (Kea)',
     type: 'switch',
-    hint: 'DHCPv4 and DHCPv6 scopes are set per prefix under IP addresses.',
+    hint: 'DHCPv4 and DHCPv6 scopes are set per prefix under Hosts & prefixes.',
   },
   {
     key: 'dhcp_domain_name',

@@ -121,7 +121,7 @@ const fields = [
     type: 'tags',
     placeholder: '192.168.1.1/24',
     disabled: (f) => f.ipv4_mode === 'dhcp',
-    hint: 'Addresses of the firewall on this interface with their prefix length, IPv4 and IPv6, as many as needed: 192.168.1.1/24, fd00:1::1/64. Their prefixes appear under IP addresses, where DHCP and router advertisements are turned on per prefix.',
+    hint: 'Addresses of the firewall on this interface with their prefix length, IPv4 and IPv6, as many as needed: 192.168.1.1/24, fd00:1::1/64. Their prefixes appear under Hosts & prefixes, where DHCP and router advertisements are turned on per prefix.',
   },
   { key: 'ipv6_accept_ra', label: 'IPv6 SLAAC (accept router advertisements)', type: 'switch' },
   { key: 'dns_listen', label: 'DNS server answers on this interface', type: 'switch' },

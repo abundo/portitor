@@ -20,9 +20,7 @@ const items = computed(() => [
     { label: 'Links', icon: 'i-lucide-cable', to: '/links' },
     { label: 'Interfaces', icon: 'i-lucide-ethernet-port', to: '/interfaces' },
     { label: 'Routes', icon: 'i-lucide-route', to: '/routes' },
-    { label: 'IP addresses', icon: 'i-lucide-network', to: '/ipam' },
     { label: 'Hosts & prefixes', icon: 'i-lucide-tags', to: '/objects' },
-    { label: 'IP lists', icon: 'i-lucide-list-x', to: '/firewall/ip-lists' },
   ],
   [
     { label: 'Firewall', type: 'label' },

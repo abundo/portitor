@@ -3,7 +3,7 @@
 
 <script setup>
 // Recursive rows of the IPAM tree. The actions are the first column; an
-// entry is deleted from its dialog (IpamPage).
+// entry is deleted from its dialog (HostsPrefixesPage).
 defineOptions({ name: 'IpamTreeRows' })
 defineProps({
   nodes: { type: Array, required: true },
