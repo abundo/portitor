@@ -6,6 +6,7 @@ import { reactive } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import { errMsg } from '@/api/http'
 import { useAuthStore } from '@/stores/auth'
+import { usePageForm } from '@/composables/useFormGuard'
 import { dateFormat, datetime } from '@/utils/time'
 
 const toast = useToast()
@@ -14,6 +15,9 @@ const form = reactive({
   full_name: auth.user?.full_name ?? '',
   email: auth.user?.email ?? '',
 })
+
+const profileForm = usePageForm(form)
+profileForm.mark()
 
 const now = new Date()
 const dateFormats = [
@@ -27,6 +31,7 @@ const dateFormats = [
 async function save() {
   try {
     await auth.updateProfile({ ...form })
+    profileForm.mark()
     toast.add({ title: 'Profile saved', color: 'success' })
   } catch (err) {
     toast.add({ title: errMsg(err), color: 'error' })

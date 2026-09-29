@@ -2,8 +2,8 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
-import { onBeforeRouteLeave, useRoute } from 'vue-router'
+import { computed, onMounted, reactive, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { useToast } from '@nuxt/ui/composables'
 import ZoneRecordsTable from '@/components/ZoneRecordsTable.vue'
 import { api, dnsDnssecPolicies, dnsRecords, dnsSoaTemplates, dnsTemplates, dnsZones } from '@/api'
@@ -13,6 +13,7 @@ import { builtinTemplate, zoneTypes } from '@/utils/dns'
 import { formatZoneFile, parseZoneFile } from '@/utils/zoneFile'
 import { fromApiRecord, toApiRecords, validateZoneRecords } from '@/utils/zoneRecords'
 import { useAuthStore } from '@/stores/auth'
+import { useUnsaved } from '@/composables/useFormGuard'
 
 const auth = useAuthStore()
 const route = useRoute()
@@ -203,12 +204,7 @@ async function onImportFile(event) {
   }
 }
 
-onBeforeRouteLeave(() => !recordsDirty.value || window.confirm('Discard unsaved record changes?'))
-function onBeforeUnload(e) {
-  if (recordsDirty.value) e.preventDefault()
-}
-window.addEventListener('beforeunload', onBeforeUnload)
-onBeforeUnmount(() => window.removeEventListener('beforeunload', onBeforeUnload))
+useUnsaved(() => !!dirty.value || recordsDirty.value)
 </script>
 
 <template>

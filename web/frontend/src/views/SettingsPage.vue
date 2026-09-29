@@ -7,6 +7,7 @@ import { useToast } from '@nuxt/ui/composables'
 import { api } from '@/api'
 import { errMsg } from '@/api/http'
 import { useDeployStore } from '@/stores/deploy'
+import { usePageForm } from '@/composables/useFormGuard'
 
 const toast = useToast()
 const deploy = useDeployStore()
@@ -17,6 +18,9 @@ const settings = reactive({
   confirm_timeout: 120,
   wg_endpoint_host: '',
 })
+// Only the settings count as unsaved changes, not the backup and restore
+// fields.
+const settingsForm = usePageForm(settings)
 const hasToken = ref(false)
 const version = ref(null)
 
@@ -24,6 +28,7 @@ async function load() {
   const s = await api.settings()
   Object.assign(settings, s, { agent_token: '' })
   hasToken.value = s.has_agent_token
+  settingsForm.mark()
   version.value = await api.version()
 }
 onMounted(load)
@@ -116,6 +121,7 @@ async function saveSettings() {
     })
     hasToken.value = s.has_agent_token
     settings.agent_token = ''
+    settingsForm.mark()
     toast.add({ title: 'Settings saved', color: 'success' })
     deploy.refresh()
   } catch (err) {

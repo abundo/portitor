@@ -4,11 +4,12 @@
 <script setup>
 // ServiceDialog: creates a custom service for useServiceDialog, from the
 // "New service" entry of a rule's Service cell. Mounted once in AppLayout.
-import { ref, watch } from 'vue'
+import { ref, toRef, watch } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import ServiceOptions from '@/components/ServiceOptions.vue'
 import { customServices } from '@/api'
 import { errMsg } from '@/api/http'
+import { useFormGuard } from '@/composables/useFormGuard'
 import { useServiceDialog } from '@/composables/useServiceDialog'
 import { useObjectStore } from '@/stores/objects'
 import { newService } from '@/utils/services'
@@ -25,9 +26,7 @@ watch(
   (open) => open && (form.value = newService(state.name)),
 )
 
-function onOpen(open) {
-  if (!open) done(null)
-}
+const guard = useFormGuard(form, toRef(state, 'open'), () => done(null))
 
 async function save() {
   saving.value = true
@@ -44,7 +43,13 @@ async function save() {
 </script>
 
 <template>
-  <UModal :open="state.open" title="New service" :ui="wideModal" @update:open="onOpen">
+  <UModal
+    :open="state.open"
+    title="New service"
+    :ui="wideModal"
+    :dismissible="false"
+    @update:open="guard.onUpdateOpen"
+  >
     <template #body>
       <form id="service-form" class="space-y-3" @submit.prevent="save">
         <UFormField
@@ -63,7 +68,7 @@ async function save() {
     </template>
     <template #footer>
       <div class="flex w-full justify-end gap-2">
-        <UButton color="neutral" variant="ghost" @click="done(null)">Cancel</UButton>
+        <UButton color="neutral" variant="ghost" @click="guard.close">Cancel</UButton>
         <UButton type="submit" form="service-form" :loading="saving">Save</UButton>
       </div>
     </template>

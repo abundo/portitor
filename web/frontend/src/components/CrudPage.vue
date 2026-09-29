@@ -31,6 +31,7 @@ import { errMsg } from '@/api/http'
 import { useAuthStore } from '@/stores/auth'
 import { useObjectStore } from '@/stores/objects'
 import { useConfirm } from '@/composables/useConfirm'
+import { useFormGuard } from '@/composables/useFormGuard'
 import { inlineField, wideModal } from '@/utils/form'
 
 const props = defineProps({
@@ -81,6 +82,7 @@ const insertAt = ref(null)
 const NONE = 0
 // The info popover opens on hover, and on a click for touch screens.
 const infoOpen = ref(false)
+const guard = useFormGuard(form, open)
 
 const tableColumns = computed(() => [
   ...(props.reorder && !readOnly.value
@@ -381,7 +383,13 @@ defineExpose({ reload: load, openEdit, openCreate })
     </div>
   </div>
 
-  <UModal v-model:open="open" :title="formTitle" :ui="wideModal">
+  <UModal
+    :open="open"
+    :title="formTitle"
+    :ui="wideModal"
+    :dismissible="false"
+    @update:open="guard.onUpdateOpen"
+  >
     <template #body>
       <form id="crud-form" class="space-y-3" @submit.prevent="save">
         <fieldset :disabled="readOnly" class="space-y-3">
@@ -490,7 +498,7 @@ defineExpose({ reload: load, openEdit, openCreate })
           label="Delete"
           @click="removeEditing"
         />
-        <UButton class="ms-auto" color="neutral" variant="ghost" @click="open = false">{{
+        <UButton class="ms-auto" color="neutral" variant="ghost" @click="guard.close">{{
           readOnly ? 'Close' : 'Cancel'
         }}</UButton>
         <UButton v-if="!readOnly" type="submit" form="crud-form" :loading="saving">Save</UButton>

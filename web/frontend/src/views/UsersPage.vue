@@ -8,6 +8,7 @@ import { api } from '@/api'
 import { errMsg } from '@/api/http'
 import { useAuthStore } from '@/stores/auth'
 import { useConfirm } from '@/composables/useConfirm'
+import { useFormGuard } from '@/composables/useFormGuard'
 import { inlineField, wideModal } from '@/utils/form'
 
 const toast = useToast()
@@ -30,6 +31,7 @@ const open = ref(false)
 const saving = ref(false)
 const editing = ref(null)
 const form = reactive({ username: '', password: '', role: 'viewer' })
+const guard = useFormGuard(form, open)
 const isSelf = computed(() => editing.value?.id === auth.user?.id)
 
 function openCreate() {
@@ -105,7 +107,13 @@ async function remove() {
     </div>
   </div>
 
-  <UModal v-model:open="open" :title="editing ? 'Edit user' : 'New user'" :ui="wideModal">
+  <UModal
+    :open="open"
+    :title="editing ? 'Edit user' : 'New user'"
+    :ui="wideModal"
+    :dismissible="false"
+    @update:open="guard.onUpdateOpen"
+  >
     <template #body>
       <form id="user-form" class="space-y-3" @submit.prevent="save">
         <UFormField :ui="inlineField" label="Username" required>
@@ -145,7 +153,7 @@ async function remove() {
           label="Delete"
           @click="remove"
         />
-        <UButton class="ms-auto" color="neutral" variant="ghost" @click="open = false">
+        <UButton class="ms-auto" color="neutral" variant="ghost" @click="guard.close">
           Cancel
         </UButton>
         <UButton type="submit" form="user-form" :loading="saving">Save</UButton>

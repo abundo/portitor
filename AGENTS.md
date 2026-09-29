@@ -158,7 +158,8 @@ are in [README.md](README.md).
 Apply these to every page, `CrudPage` and custom pages alike. `CrudPage` does
 them itself (give it a `noun` or `item-name` when the title doesn't make a good
 singular); a custom page uses `useConfirm().confirmDelete` for the Yes / No
-prompt and `inlineField` / `wideModal` (`utils/form.js`) for its dialog forms.
+prompt, `inlineField` / `wideModal` (`utils/form.js`) for its dialog forms and
+`useFormGuard` for their Cancel and X.
 
 - **Tables:** the Edit button is the first column, so it stays visible when the
   table is wider than the screen. Tables have no Delete button.
@@ -167,6 +168,15 @@ prompt and `inlineField` / `wideModal` (`utils/form.js`) for its dialog forms.
 - **Forms and dialogs** are wide when the screen allows: each label sits on the
   same row as its value. On a narrow screen they fall back to one column, with the
   label above the value.
+- **Dialogs don't close by accident:** every `UModal` has `:dismissible="false"`,
+  so a click outside it (or Escape) never closes it; only its buttons and X do. A
+  form's Cancel and X go through `useFormGuard` (`composables/useFormGuard.js`),
+  which asks "Discard them?" with Yes / No when the form has unsaved changes.
+- **Unsaved changes are never lost silently:** every form registers with
+  `composables/useFormGuard.js` (`useFormGuard` for a dialog, `usePageForm` or
+  `useUnsaved` for a form on the page). Leaving the page (a router guard),
+  switching instance and logging out ask the same question first
+  (`confirmDiscard`); closing or reloading the tab gets the browser's warning.
 - **Exceptions:** the rules list (`RulesTable`: a click opens the rule, the
   context menu deletes) and the DNS zone records grid (`ZoneRecordsTable`: edited
   in place, no detail view) are exempt from the table rules. The rule's form is

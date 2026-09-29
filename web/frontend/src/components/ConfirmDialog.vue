@@ -13,7 +13,13 @@ const ui = { overlay: 'z-60', content: 'z-60' }
 </script>
 
 <template>
-  <UModal :open="state.open" :title="state.title" :ui="ui" @update:open="(o) => o || done(false)">
+  <UModal
+    :open="state.open"
+    :title="state.title"
+    :ui="ui"
+    :dismissible="false"
+    @update:open="(o) => o || done(false)"
+  >
     <template #body>
       <p class="text-sm">{{ state.message }}</p>
       <p v-if="state.detail" class="mt-2 text-sm text-muted">{{ state.detail }}</p>

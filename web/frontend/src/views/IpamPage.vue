@@ -13,6 +13,7 @@ import { errMsg } from '@/api/http'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
 import { useAuthStore } from '@/stores/auth'
 import { useConfirm } from '@/composables/useConfirm'
+import { useFormGuard } from '@/composables/useFormGuard'
 import { inlineField, wideModal } from '@/utils/form'
 
 const toast = useToast()
@@ -44,6 +45,7 @@ function toggle(k) {
 // ----- prefix modal -----
 const prefixOpen = ref(false)
 const prefix = reactive({})
+const prefixGuard = useFormGuard(prefix, prefixOpen)
 function editPrefix(src) {
   Object.keys(prefix).forEach((k) => delete prefix[k])
   Object.assign(prefix, {
@@ -79,6 +81,7 @@ async function savePrefix() {
 // ----- address modal -----
 const addrOpen = ref(false)
 const addr = reactive({})
+const addrGuard = useFormGuard(addr, addrOpen)
 // The interface the address is configured on (from the tree), if any.
 const addrIface = ref(null)
 const leasePickerOpen = ref(false)
@@ -217,9 +220,11 @@ async function removeAddress() {
     </div>
 
     <UModal
-      v-model:open="prefixOpen"
+      :open="prefixOpen"
       :title="!auth.isAdmin ? 'Prefix' : prefix.id ? 'Edit prefix' : 'Prefix settings'"
       :ui="wideModal"
+      :dismissible="false"
+      @update:open="prefixGuard.onUpdateOpen"
     >
       <template #body>
         <form id="prefix-form" @submit.prevent="savePrefix">
@@ -311,7 +316,7 @@ async function removeAddress() {
             label="Delete"
             @click="removePrefix"
           />
-          <UButton class="ms-auto" color="neutral" variant="ghost" @click="prefixOpen = false">{{
+          <UButton class="ms-auto" color="neutral" variant="ghost" @click="prefixGuard.close">{{
             auth.isAdmin ? 'Cancel' : 'Close'
           }}</UButton>
           <UButton v-if="auth.isAdmin" type="submit" form="prefix-form">Save</UButton>
@@ -320,9 +325,11 @@ async function removeAddress() {
     </UModal>
 
     <UModal
-      v-model:open="addrOpen"
+      :open="addrOpen"
       :title="!auth.isAdmin ? 'Address' : addr.id ? 'Edit address' : 'New address'"
       :ui="wideModal"
+      :dismissible="false"
+      @update:open="addrGuard.onUpdateOpen"
     >
       <template #body>
         <form id="addr-form" @submit.prevent="saveAddress">
@@ -384,7 +391,7 @@ async function removeAddress() {
             label="Delete"
             @click="removeAddress"
           />
-          <UButton class="ms-auto" color="neutral" variant="ghost" @click="addrOpen = false">{{
+          <UButton class="ms-auto" color="neutral" variant="ghost" @click="addrGuard.close">{{
             auth.isAdmin ? 'Cancel' : 'Close'
           }}</UButton>
           <UButton v-if="auth.isAdmin" type="submit" form="addr-form">Save</UButton>

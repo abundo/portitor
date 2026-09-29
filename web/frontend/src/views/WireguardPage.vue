@@ -278,6 +278,7 @@ function copy(text) {
       v-model:open="cfgOpen"
       :title="`${cfg.site ? 'Site' : 'Client'} config: ${cfgPeer?.name}`"
       :ui="{ content: 'max-w-2xl' }"
+      :dismissible="false"
     >
       <template #body>
         <div class="space-y-3">

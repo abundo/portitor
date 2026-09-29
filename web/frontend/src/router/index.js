@@ -4,6 +4,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import AppLayout from '@/layout/AppLayout.vue'
 import { useAuthStore } from '@/stores/auth'
+import { confirmDiscard } from '@/composables/useFormGuard'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -79,6 +80,13 @@ router.beforeEach((to) => {
   }
   if (to.name === 'login' && auth.isAuthenticated) return { name: 'dashboard' }
   if (to.matched.some((r) => r.meta.admin) && !auth.isAdmin) return { name: 'dashboard' }
+})
+
+// Leaving a page with unsaved changes asks first; a query change keeps the
+// page, and the login page comes after a logout or an expired session.
+router.beforeEach(async (to, from) => {
+  if (to.name === 'login' || to.path === from.path) return
+  if (!(await confirmDiscard())) return false
 })
 
 export default router

@@ -6,9 +6,12 @@ import { reactive } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import { api } from '@/api'
 import { errMsg } from '@/api/http'
+import { usePageForm } from '@/composables/useFormGuard'
 
 const toast = useToast()
 const pw = reactive({ current: '', next: '', repeat: '' })
+// Empty is saved: anything typed is unsaved until the password changes.
+usePageForm(pw).mark()
 
 async function changePassword() {
   if (pw.next !== pw.repeat) {

@@ -9,6 +9,7 @@ import { useInstanceStore } from '@/stores/instances'
 import { useDeployStore } from '@/stores/deploy'
 import { useLogPanel } from '@/composables/useLogPanel'
 import { openConsoleWindow } from '@/composables/useConsoleWindow'
+import { confirmDiscard } from '@/composables/useFormGuard'
 import { api } from '@/api'
 
 defineEmits(['toggle-menu'])
@@ -36,7 +37,8 @@ onMounted(async () => {
 
 const current = computed({
   get: () => instances.currentId ?? undefined,
-  set: (v) => instances.select(v),
+  // The page is remounted for the new instance: unsaved changes are lost.
+  set: async (v) => (await confirmDiscard()) && instances.select(v),
 })
 
 const agentChip = computed(() => {
@@ -70,6 +72,7 @@ const userMenu = computed(() => [
       label: 'Log out',
       icon: 'i-lucide-log-out',
       onSelect: async () => {
+        if (!(await confirmDiscard())) return
         await auth.logout()
         router.push('/login')
       },
