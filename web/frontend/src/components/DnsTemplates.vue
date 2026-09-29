@@ -6,6 +6,8 @@ import { onMounted, ref } from 'vue'
 import CrudPage from '@/components/CrudPage.vue'
 import { dnsDnssecPolicies, dnsSoaTemplates, dnsTemplates } from '@/api'
 
+const emit = defineEmits(['changed'])
+
 // SOA templates and DNSSEC policies feed the DNS templates' selects.
 const soas = ref([])
 const policies = ref([])
@@ -177,6 +179,7 @@ const templateDefaults = () => ({
       :defaults="templateDefaults"
       new-label="New template"
       :blocked-reason="soas.length ? '' : 'Create an SOA template first.'"
+      @changed="emit('changed')"
     />
     <CrudPage
       title="SOA templates"

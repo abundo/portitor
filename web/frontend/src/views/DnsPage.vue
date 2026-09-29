@@ -3,9 +3,11 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useToast } from '@nuxt/ui/composables'
 import AddrInput from '@/components/AddrInput.vue'
 import CrudPage from '@/components/CrudPage.vue'
+import DnsTemplates from '@/components/DnsTemplates.vue'
 import NeedInstance from '@/components/NeedInstance.vue'
 import { dnsTemplates, dnsZones, instances, interfaces } from '@/api'
 import { errMsg } from '@/api/http'
@@ -17,14 +19,17 @@ import { zoneTypes } from '@/utils/dns'
 import { inlineField } from '@/utils/form'
 
 const toast = useToast()
+const route = useRoute()
+const router = useRouter()
 const auth = useAuthStore()
 const store = useInstanceStore()
 const readOnly = computed(() => !auth.isAdmin)
 const templates = ref([])
 
-onMounted(async () => {
+async function loadTemplates() {
   templates.value = await dnsTemplates.list()
-})
+}
+onMounted(loadTemplates)
 
 // The DNS server: the instance's dns_* fields, and per interface whether
 // BIND answers on it and whether its DHCP lease gives the upstream servers.
@@ -136,11 +141,16 @@ const zoneFields = [
 ]
 const zoneDefaults = () => ({ type: 'forward', dns_template_id: templates.value[0]?.id ?? null })
 
-const tab = ref('zones')
 const tabs = [
   { label: 'DNS zones', value: 'zones', slot: 'zones', icon: 'i-lucide-globe' },
+  { label: 'DNS templates', value: 'templates', slot: 'templates', icon: 'i-lucide-file-cog' },
   { label: 'DNS server', value: 'server', slot: 'server', icon: 'i-lucide-server' },
 ]
+// The tab is in the URL (?tab=templates), so links can open one.
+const tab = computed({
+  get: () => (tabs.some((t) => t.value === route.query.tab) ? route.query.tab : 'zones'),
+  set: (v) => router.replace({ query: { ...route.query, tab: v === 'zones' ? undefined : v } }),
+})
 </script>
 
 <template>
@@ -167,21 +177,18 @@ const tabs = [
             :defaults="zoneDefaults"
             new-label="New zone"
           >
-            <template #toolbar>
-              <UButton
-                to="/dns/templates"
-                color="neutral"
-                variant="outline"
-                icon="i-lucide-file-cog"
-                label="Templates"
-              />
-            </template>
             <template #cell-name="{ row }">
               <RouterLink class="font-mono font-medium text-primary" :to="`/dns/zones/${row.id}`">
                 {{ row.name }}
               </RouterLink>
             </template>
           </CrudPage>
+        </div>
+      </template>
+
+      <template #templates>
+        <div class="pt-2">
+          <DnsTemplates @changed="loadTemplates" />
         </div>
       </template>
 

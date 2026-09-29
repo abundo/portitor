@@ -96,8 +96,7 @@ After an upgrade, run `migrate` before `start`. `install.py` does both.
 | | Rules | Input, forward and output rules, with per-rule traffic counters and counts of what each chain drops by default (invalid packets, no rule matched); every row, the locked ones included, can log to the log panel's *Logged packets*. The Service column names the services a rule matches (empty: any protocol); its search can create a new one. |
 | | Services | What the rules' Service column matches: TCP, UDP or SCTP port ranges (with source ports if wanted), an ICMP or ICMPv6 type and code, or an IP protocol number. Your own next to predefined ones such as `ssh`, `dns`, `ping` or `gre`. Also lists the port names (`https`) that NAT port fields accept. |
 | | NAT & port forwards | Masquerade, SNAT and DNAT. |
-| Services | DNS | The instance's DNS server (BIND): on or off; its upstream (forwarders, the root servers, or the DNS servers from the DHCP lease on one interface); the interfaces it answers on; and the zones and records it serves. |
-| | DNS templates | SOA templates, DNSSEC policies and zone templates, shared by all instances. |
+| Services | DNS | Three tabs. *DNS zones*: the zones and records the instance serves. *DNS templates*: SOA templates, DNSSEC policies and zone templates, shared by all instances. *DNS server*: the instance's DNS server (BIND) on or off; its upstream (forwarders, the root servers, or the DNS servers from the DHCP lease on one interface); the interfaces it answers on. |
 | | DHCP | Scopes (prefixes with DHCP on, set under Hosts & prefixes) and active leases. Several scopes on one interface form a Kea shared network: clients get addresses from all of them. |
 | | WireGuard | Tunnels, road-warrior and [site-to-site](#site-to-site-wireguard) peers; generates client and site configs. |
 | | Dynamic DNS | Keeps records on an external nameserver in step with the WAN address. |
