@@ -76,6 +76,7 @@ var Predefined = []models.Service{
 	named("dhcp6", ports("DHCPv6", udp(546, 547))),
 	named("dns", ports("DNS", both(53, 0)...)),
 	named("dns-over-tls", ports("DNS over TLS", tcp(853, 0))),
+	named("dns-over-quic", ports("DNS over QUIC", udp(853, 0))),
 	named("esp", ipProto(50, "IPsec encapsulating security payload")),
 	named("ftp", ports("FTP control", tcp(21, 0))),
 	named("gre", ipProto(47, "Generic routing encapsulation")),

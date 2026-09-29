@@ -56,7 +56,7 @@ var Services = []Service{
 	{"submission", 587, "Mail submission"},
 	{"ipp", 631, "Internet printing (IPP, CUPS)"},
 	{"ldaps", 636, "LDAP over TLS"},
-	{"domain-s", 853, "DNS over TLS"},
+	{"domain-s", 853, "DNS over TLS or QUIC"},
 	{"rsync", 873, "rsync daemon"},
 	{"ftps", 990, "FTP over TLS"},
 	{"imaps", 993, "IMAP over TLS"},
