@@ -148,11 +148,13 @@ const fields = [
   { key: 'description', label: 'Description' },
 ]
 
+// One tab per chain; forward opens first.
 const chains = [
-  { value: 'input', title: 'Input', text: 'Traffic to the firewall itself.' },
-  { value: 'forward', title: 'Forward', text: 'Traffic through the firewall.' },
-  { value: 'output', title: 'Output', text: 'Traffic from the firewall itself.' },
+  { value: 'input', label: 'Input', text: 'Traffic to the firewall itself.' },
+  { value: 'forward', label: 'Forward', text: 'Traffic through the firewall.' },
+  { value: 'output', label: 'Output', text: 'Traffic from the firewall itself.' },
 ]
+const chainTab = ref('forward')
 
 // Each table shows one chain; a move within it becomes a move in the full
 // list (rows keep one order across chains), before or after the target row.
@@ -229,13 +231,10 @@ function clean(b) {
       :item-name="ruleName"
     >
       <template #table="{ rows, openCreate, openEdit, remove, moveTo, saveRow, createAt }">
-        <div class="space-y-6">
-          <section v-for="c in chains" :key="c.value">
-            <div class="mb-2 flex items-end justify-between gap-3">
-              <p>
-                <span class="font-semibold">{{ c.title }}</span>
-                <span class="ms-2 text-sm text-muted">{{ c.text }}</span>
-              </p>
+        <UTabs v-model="chainTab" :items="chains">
+          <template #content="{ item: c }">
+            <div class="mb-2 flex items-end justify-between gap-3 pt-2">
+              <p class="text-sm text-muted">{{ c.text }}</p>
               <UButton
                 size="sm"
                 variant="soft"
@@ -261,8 +260,8 @@ function clean(b) {
               @remove="remove"
               @log-builtin="(kind, service, on) => setLogBuiltin(c.value, kind, service, on)"
             />
-          </section>
-        </div>
+          </template>
+        </UTabs>
       </template>
     </CrudPage>
   </NeedInstance>
