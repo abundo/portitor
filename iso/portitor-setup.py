@@ -17,8 +17,11 @@ swapped. Then it:
   - creates the GUI user admin, and sets the console user's password,
   - sets the agent up on 127.0.0.1 (portitor-web runs on the firewall itself),
   - runs `portitor-web bootstrap`: LAN (static or DHCP, which then takes no
-    default route), WAN (DHCP or static), default route, rules for the GUI
-    and ping from the LAN, and deploys,
+    default route; the default route belongs to the WAN) and WAN (DHCP or
+    static), described as LAN and WAN, default route, input rules for the
+    GUI, SSH and ping from the LAN, a forward rule from the LAN to the WAN,
+    masquerade on the WAN, and deploys (output has the instance's allow all
+    output rule),
   - starts portitor-web and writes the GUI's address to /etc/issue.d (with a
     DHCP LAN, agetty shows its current address).
 

@@ -122,8 +122,10 @@ func broadcast(p netip.Prefix) netip.Addr {
 
 // Bootstrap configures a new installation and deploys it: the agent
 // settings, the LAN interface with its address, the WAN interface (static
-// or DHCP), the default route, and rules that let the LAN reach the GUI and
-// ping the firewall. Every other
+// or DHCP), the default route, rules that let the LAN reach the GUI and SSH
+// and ping the firewall and forward from the LAN to the WAN, and a
+// masquerade on the WAN (the instance's "allow all output" rule lets the
+// firewall's own traffic out). Every other
 // interface is imported as it is (syncNICs). It refuses once anything has
 // been deployed, unless o.Reconfigure. Without an agent fingerprint the
 // stored agent settings are kept. A failed run can be repeated.
@@ -256,27 +258,47 @@ func bootstrapNetwork(tx *gorm.DB, instanceID uint, o BootstrapOptions) error {
 		}
 	}
 
-	for _, r := range []models.Rule{
-		{Services: models.StringList{gui.Name}, Description: "portitor-web from the LAN"},
-		{Services: models.StringList{"all-icmp"}, Description: "ping from the LAN"},
-	} {
-		if err := tx.Model(&models.Rule{}).Where("instance_id = ? AND description = ?", instanceID, r.Description).Count(&n).Error; err != nil {
+	lan, wan := models.StringList{o.LAN}, models.StringList{o.WAN}
+	rules := []models.Rule{
+		{Chain: fwconfig.ChainInput, InInterfaces: lan, Services: models.StringList{gui.Name}, Description: "portitor-web from the LAN"},
+		{Chain: fwconfig.ChainInput, InInterfaces: lan, Services: models.StringList{"ssh"}, Description: "SSH from the LAN"},
+		{Chain: fwconfig.ChainInput, InInterfaces: lan, Services: models.StringList{"all-icmp"}, Description: "ping from the LAN"},
+	}
+	if o.WAN != "" {
+		rules = append(rules, models.Rule{Chain: fwconfig.ChainForward, InInterfaces: lan, OutInterfaces: wan, Description: "LAN to WAN"})
+	}
+	for _, r := range rules {
+		// The input rules are the LAN's way in: reconfigure enables them,
+		// and creates them if missing. The forward rule is created by the
+		// first bootstrap only; reconfigure moves it to the new LAN and WAN.
+		keep := r.Chain == fwconfig.ChainInput
+		if r.OutInterfaces == nil {
+			r.OutInterfaces = models.StringList{}
+		}
+		same := func() *gorm.DB {
+			return tx.Model(&models.Rule{}).Where("instance_id = ? AND chain = ? AND description = ?", instanceID, r.Chain, r.Description)
+		}
+		if err := same().Count(&n).Error; err != nil {
 			return err
 		}
 		if n > 0 {
 			if !o.Reconfigure {
 				continue
 			}
-			// The GUI stays reachable from the (new) LAN.
-			err := tx.Model(&models.Rule{}).Where("instance_id = ? AND description = ?", instanceID, r.Description).
-				Updates(map[string]any{"in_interfaces": models.StringList{o.LAN}, "enabled": true}).Error
-			if err != nil {
+			// The rules follow the (new) LAN and WAN.
+			updates := map[string]any{"in_interfaces": r.InInterfaces, "out_interfaces": r.OutInterfaces}
+			if keep {
+				updates["enabled"] = true
+			}
+			if err := same().Updates(updates).Error; err != nil {
 				return err
 			}
 			continue
 		}
-		r.InstanceID, r.Chain, r.Action, r.Enabled = instanceID, fwconfig.ChainInput, fwconfig.ActionAccept, true
-		r.InInterfaces, r.OutInterfaces = models.StringList{o.LAN}, models.StringList{}
+		if o.Reconfigure && !keep {
+			continue
+		}
+		r.InstanceID, r.Action, r.Enabled = instanceID, fwconfig.ActionAccept, true
 		r.SrcAddrs, r.DstAddrs = models.StringList{}, models.StringList{}
 		if err := prepareRule(tx, &r, nil); err != nil {
 			return err
@@ -285,7 +307,30 @@ func bootstrapNetwork(tx *gorm.DB, instanceID uint, o BootstrapOptions) error {
 			return err
 		}
 	}
-	return nil
+
+	if o.WAN == "" {
+		return nil
+	}
+	// The LAN reaches the Internet through the WAN's address.
+	const natDesc = "masquerade to the WAN"
+	masq := func() *gorm.DB {
+		return tx.Model(&models.NatRule{}).Where("instance_id = ? AND kind = ? AND description = ?", instanceID, fwconfig.NATMasquerade, natDesc)
+	}
+	if err := masq().Count(&n).Error; err != nil {
+		return err
+	}
+	switch {
+	case n > 0 && o.Reconfigure:
+		return masq().Update("out_interfaces", wan).Error
+	case n > 0 || o.Reconfigure:
+		return nil
+	}
+	nat := models.NatRule{InstanceID: instanceID, Kind: fwconfig.NATMasquerade, InInterfaces: models.StringList{}, OutInterfaces: wan,
+		SrcAddrs: models.StringList{}, DstAddrs: models.StringList{}, Enabled: true, Description: natDesc}
+	if err := prepareNat(tx, &nat, nil); err != nil {
+		return err
+	}
+	return tx.Create(&nat).Error
 }
 
 // reconfigureDefaultRoute makes gw the only IPv4 default route, or removes
@@ -327,7 +372,8 @@ func reconfigureDefaultRoute(tx *gorm.DB, instanceID uint, gw netip.Addr) error 
 	return tx.Create(&r).Error
 }
 
-// bootstrapIface enables an interface: static with address (its prefix and
+// bootstrapIface enables an interface, described as prefixDesc (LAN or
+// WAN) unless the user described it: static with address (its prefix and
 // address go into IPAM), or DHCP when address is not valid, without a
 // default route if noRoute. With reconfigure, or DHCP, address becomes the
 // interface's only IPv4 address (the others stay in IPAM, unassigned),
@@ -343,6 +389,11 @@ func bootstrapIface(tx *gorm.DB, instanceID uint, name string, address netip.Pre
 	old := ifc
 	ifc.Enabled = true
 	ifc.DhcpNoDefaultRoute = noRoute
+	// The role, unless the user has described the interface.
+	switch ifc.Description {
+	case "", "found on the firewall", "LAN", "WAN":
+		ifc.Description = prefixDesc
+	}
 	switch {
 	case !address.IsValid():
 		ifc.Ipv4Mode = fwconfig.ModeDHCP

@@ -106,6 +106,17 @@ func TestBootstrap(t *testing.T) {
 	if !gui {
 		t.Errorf("no GUI rule in %+v", in.Rules)
 	}
+	if lan.Description != "LAN" {
+		t.Errorf("LAN description %q", lan.Description)
+	}
+	for _, r := range in.Rules {
+		if r.Chain == fwconfig.ChainForward {
+			t.Errorf("forward rule without a WAN: %+v", r)
+		}
+	}
+	if len(in.NAT) != 0 {
+		t.Errorf("NAT without a WAN: %+v", in.NAT)
+	}
 
 	if _, err := Bootstrap(context.Background(), env.srv, opts); err == nil {
 		t.Error("a second bootstrap was accepted")
@@ -156,6 +167,28 @@ func TestBootstrapWAN(t *testing.T) {
 			}
 			if len(in.Routes) != tc.routes || (tc.routes == 1 && in.Routes[0].Gateway != tc.gateway) {
 				t.Errorf("routes %+v", in.Routes)
+			}
+			if wan.Description != "WAN" {
+				t.Errorf("WAN description %q", wan.Description)
+			}
+			var ssh, forward, output bool
+			for _, r := range in.Rules {
+				switch {
+				case r.Chain == fwconfig.ChainInput && slices.Equal(r.Services, []fwconfig.ServiceMatch{{Protocol: "tcp", DstPorts: "22"}}):
+					ssh = slices.Equal(r.InInterfaces, []string{"enp2s0"})
+				case r.Chain == fwconfig.ChainForward:
+					forward = r.Action == fwconfig.ActionAccept && len(r.Services) == 0 && len(r.SrcAddrs) == 0 && len(r.DstAddrs) == 0 &&
+						slices.Equal(r.InInterfaces, []string{"enp2s0"}) && slices.Equal(r.OutInterfaces, []string{"enp1s0"})
+				case r.Chain == fwconfig.ChainOutput:
+					output = r.Action == fwconfig.ActionAccept && len(r.Services) == 0 && len(r.OutInterfaces) == 0
+				}
+			}
+			if !ssh || !forward || !output {
+				t.Errorf("ssh %v, forward %v, output %v: %+v", ssh, forward, output, in.Rules)
+			}
+			if len(in.NAT) != 1 || in.NAT[0].Kind != fwconfig.NATMasquerade || !slices.Equal(in.NAT[0].OutInterfaces, []string{"enp1s0"}) ||
+				in.NAT[0].Protocol != "" || len(in.NAT[0].SrcAddrs) != 0 || len(in.NAT[0].DstAddrs) != 0 {
+				t.Errorf("NAT %+v", in.NAT)
 			}
 		})
 	}
@@ -212,17 +245,29 @@ func TestBootstrapReconfigure(t *testing.T) {
 	if len(in.Routes) != 1 || in.Routes[0].Gateway != "198.51.100.1" {
 		t.Errorf("routes %+v", in.Routes)
 	}
-	var rules int
+	var rules, forward int
 	for _, r := range in.Rules {
-		if r.Chain == fwconfig.ChainInput {
+		switch r.Chain {
+		case fwconfig.ChainInput:
 			rules++
 			if !slices.Equal(r.InInterfaces, []string{"enp1s0"}) {
 				t.Errorf("rule %+v", r)
 			}
+		case fwconfig.ChainForward:
+			forward++
+			if !slices.Equal(r.InInterfaces, []string{"enp1s0"}) || !slices.Equal(r.OutInterfaces, []string{"enp2s0"}) {
+				t.Errorf("forward rule %+v", r)
+			}
 		}
 	}
-	if rules != 2 {
-		t.Errorf("%d input rules: %+v", rules, in.Rules)
+	if rules != 3 || forward != 1 {
+		t.Errorf("%d input and %d forward rules: %+v", rules, forward, in.Rules)
+	}
+	if len(in.NAT) != 1 || !slices.Equal(in.NAT[0].OutInterfaces, []string{"enp2s0"}) {
+		t.Errorf("NAT %+v", in.NAT)
+	}
+	if lan, wan := iface("enp1s0"), iface("enp2s0"); lan.Description != "LAN" || wan.Description != "WAN" {
+		t.Errorf("descriptions %q %q", lan.Description, wan.Description)
 	}
 
 	// Back to a DHCP WAN: no default route, no WAN address.

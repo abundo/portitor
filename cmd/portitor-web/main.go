@@ -145,13 +145,15 @@ func main() {
 		Short: "Configure and deploy a new firewall that runs portitor-web itself (installer ISO)",
 		Long: `Stores the agent settings, configures the LAN interface with its address
 (or DHCP, without a default route when there is a WAN), the WAN interface
-(static or DHCP) and the default route, accepts the GUI port and ping from
-the LAN, and deploys. Every other interface of the
-firewall is imported as it is. Refused once anything has been deployed,
-unless --reconfigure (portitor-setup run again): then the LAN and WAN get
-exactly these settings, the IPv4 default route is --gateway or none, the
-GUI and ping rules move to the LAN, and the agent settings are kept unless
---agent-fingerprint is given.`,
+(static or DHCP) and the default route, describes them as LAN and WAN,
+accepts the GUI port, SSH and ping from the LAN and forwarding from the LAN
+to the WAN, masquerades on the WAN, and deploys.
+Every other interface of the firewall is imported as it is. Refused once
+anything has been deployed, unless --reconfigure (portitor-setup run again):
+then the LAN and WAN get exactly these settings, the IPv4 default route is
+--gateway or none, the GUI, SSH and ping rules are enabled on the LAN, the
+forward and masquerade rules move to the new LAN and WAN, and the agent
+settings are kept unless --agent-fingerprint is given.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, srv, err := load()

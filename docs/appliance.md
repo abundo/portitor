@@ -65,11 +65,18 @@ when you picked them the wrong way round.
 Then it creates the database, starts the agent and the GUI, and deploys a first
 configuration:
 
-- the LAN interface with its address, or DHCP,
-- the WAN interface, with DHCP or its static address,
+- the LAN interface with its address, or DHCP, described as *LAN*,
+- the WAN interface, with DHCP or its static address, described as *WAN*,
 - the default route (for a static WAN),
-- two input rules, *portitor-web from the LAN* (TCP 443) and *ping from the LAN*,
+- three input rules, *portitor-web from the LAN* (TCP 443), *SSH from the LAN* and
+  *ping from the LAN*,
+- a forward rule, *LAN to WAN*, that accepts everything from the LAN to the WAN,
+- a NAT rule, *masquerade to the WAN*: any source, destination and protocol out of
+  the WAN gets the WAN's address,
 - every other interface as it is (down, no address).
+
+Output keeps the instance's *allow all output* rule: the chain's policy drops, and
+the rule lets everything the firewall itself sends out.
 
 The screen then shows the GUI's address and its certificate fingerprint. The login
 screen shows them too; with a DHCP LAN it shows the LAN's current address. Open
@@ -77,8 +84,8 @@ screen shows them too; with a DHCP LAN it shows the LAN's current address. Open
 The browser warns about the self-signed certificate; compare the fingerprint it shows
 with the one on the screen.
 
-Next steps in the GUI: a masquerade rule (*Firewall → NAT & port forwards*), forward rules from the LAN
-to the WAN, and DHCP and DNS for the LAN. See [portitor-web](portitor-web.md).
+Next steps in the GUI: DHCP and DNS for the LAN, and narrower rules than *LAN to WAN* if
+you want them. See [portitor-web](portitor-web.md).
 
 If a step fails, the setup shows the error and offers to retry it; its log is
 `/var/log/portitor-setup.log`. If you give up, it runs again at the next boot, or
@@ -98,8 +105,11 @@ It then deploys at once, without the confirm timeout:
   unassigned (they stay in IPAM), and an address in use on another interface moves;
 - the IPv4 default route is the new gateway, or none with a DHCP WAN (whose lease
   brings it);
-- the rules *portitor-web from the LAN* and *ping from the LAN* are enabled and
-  match the new LAN interface;
+- the rules *portitor-web from the LAN*, *SSH from the LAN* and *ping from the LAN*
+  are enabled and match the new LAN interface; the rule *LAN to WAN* and the NAT rule
+  *masquerade to the WAN*, if they are still there, match the new LAN and WAN;
+- the LAN and WAN are described as *LAN* and *WAN*, unless you gave them another
+  description;
 - a new GUI certificate is made when the LAN address changes, so the browser warns
   again; the new fingerprint is shown.
 
