@@ -23,6 +23,9 @@ func prepareAddressObject(tx *gorm.DB, o, old *models.AddressObject) error {
 	if !netobj.ValidName(o.Name) {
 		return bad("name: letters, digits, _ . -, starting with a letter, at most 63 characters (not \"default\" or \"any\")")
 	}
+	if err := itemFolder(tx, &o.FolderID, models.ObjectFolderHosts); err != nil {
+		return err
+	}
 	o.Addresses = cleanList(o.Addresses)
 	if len(o.Addresses) == 0 {
 		return bad("at least one address or prefix")

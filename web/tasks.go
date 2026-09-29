@@ -55,6 +55,9 @@ func prepareIpList(tx *gorm.DB, l, old *models.IpList) error {
 	if !fwconfig.ValidZoneName(l.Name) {
 		return bad("name: lowercase letters, digits and _, at most 24 characters")
 	}
+	if err := itemFolder(tx, &l.FolderID, models.ObjectFolderIpLists); err != nil {
+		return err
+	}
 	if l.Source == "" {
 		l.Source = fwconfig.IPListURL
 	}

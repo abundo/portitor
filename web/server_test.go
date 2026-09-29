@@ -593,6 +593,54 @@ func TestAddressObjects(t *testing.T) {
 	}
 }
 
+func TestObjectFolders(t *testing.T) {
+	env := newEnv(t)
+	top := env.create("/api/object-folders", map[string]any{"kind": "hosts", "name": " Servers "})
+	sub := env.create("/api/object-folders", map[string]any{"kind": "hosts", "name": "NAS", "parent_id": top})
+	lists := env.create("/api/object-folders", map[string]any{"kind": "ip_lists", "name": "Servers"})
+	for _, body := range []map[string]any{
+		{"kind": "hosts", "name": ""},
+		{"kind": "rules", "name": "x"},
+		{"kind": "hosts", "name": "Servers"},                    // same name, same place
+		{"kind": "hosts", "name": "x", "parent_id": lists},      // other kind
+		{"kind": "ip_lists", "name": "x", "parent_id": 1 << 20}, // missing
+	} {
+		if rec := env.do("POST", "/api/object-folders", body); rec.Code != http.StatusBadRequest {
+			t.Errorf("%v: %d %s", body, rec.Code, rec.Body)
+		}
+	}
+	if rec := env.do("PUT", fmt.Sprintf("/api/object-folders/%d", top), map[string]any{"parent_id": sub}); rec.Code != http.StatusBadRequest {
+		t.Errorf("folder into its own subfolder: %d %s", rec.Code, rec.Body)
+	}
+	if rec := env.do("PUT", fmt.Sprintf("/api/object-folders/%d", top), map[string]any{"kind": "ip_lists"}); rec.Code != http.StatusBadRequest {
+		t.Errorf("kind changed: %d %s", rec.Code, rec.Body)
+	}
+
+	host := env.create("/api/objects", map[string]any{"name": "nas", "addresses": []string{"192.168.1.10"}, "folder_id": sub})
+	if rec := env.do("POST", "/api/objects", map[string]any{"name": "x", "addresses": []string{"10.0.0.1"}, "folder_id": lists}); rec.Code != http.StatusBadRequest {
+		t.Errorf("host in an IP list folder: %d %s", rec.Code, rec.Body)
+	}
+	if rec := env.do("POST", "/api/ip-lists", map[string]any{"name": "bl", "source": "url", "url": "https://example.com/bl.txt", "folder_id": top}); rec.Code != http.StatusBadRequest {
+		t.Errorf("IP list in a host folder: %d %s", rec.Code, rec.Body)
+	}
+	env.create("/api/ip-lists", map[string]any{"name": "bl", "source": "url", "url": "https://example.com/bl.txt", "folder_id": lists})
+
+	// Not empty: delete refused. Moved out: allowed.
+	for _, id := range []uint{top, sub, lists} {
+		if rec := env.do("DELETE", fmt.Sprintf("/api/object-folders/%d", id), nil); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "not empty") {
+			t.Errorf("delete folder %d: %d %s", id, rec.Code, rec.Body)
+		}
+	}
+	if rec := env.do("PUT", fmt.Sprintf("/api/objects/%d", host), map[string]any{"folder_id": nil}); rec.Code != http.StatusOK {
+		t.Fatalf("move host out: %d %s", rec.Code, rec.Body)
+	}
+	for _, id := range []uint{sub, top} {
+		if rec := env.do("DELETE", fmt.Sprintf("/api/object-folders/%d", id), nil); rec.Code != http.StatusNoContent && rec.Code != http.StatusOK {
+			t.Errorf("delete empty folder %d: %d %s", id, rec.Code, rec.Body)
+		}
+	}
+}
+
 func TestCustomServices(t *testing.T) {
 	env := newEnv(t)
 	inst := env.create("/api/instances", map[string]any{"name": "main"})

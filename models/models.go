@@ -356,7 +356,24 @@ type AddressObject struct {
 	Name        string     `gorm:"uniqueIndex" json:"name"`
 	Addresses   StringList `json:"addresses"`
 	Description string     `json:"description"`
+	FolderID    *uint      `json:"folder_id"`
 }
+
+// ObjectFolder is a folder in the GUI for hosts (AddressObject.FolderID)
+// or IP lists (IpList.FolderID), by Kind. Folders nest (ParentID, nil at
+// the top) and mean nothing to the firewall.
+type ObjectFolder struct {
+	Base
+	Kind     string `json:"kind"` // ObjectFolder*
+	ParentID *uint  `json:"parent_id"`
+	Name     string `json:"name"`
+}
+
+// Kinds of ObjectFolder.
+const (
+	ObjectFolderHosts   = "hosts"
+	ObjectFolderIpLists = "ip_lists"
+)
 
 // Service is a named protocol match that rules refer to by name, next to
 // the predefined ones (netobj.Predefined); the builder expands the names.
@@ -506,6 +523,7 @@ type IpList struct {
 	Name        string `gorm:"uniqueIndex" json:"name"`
 	Description string `json:"description"`
 	Source      string `json:"source"` // fwconfig.IPList*
+	FolderID    *uint  `json:"folder_id"`
 	Url         string `json:"url"`
 	Username    string `json:"username"`
 	// Password and ApiKey are set through NewPassword and NewApiKey and
@@ -563,6 +581,6 @@ func All() []any {
 		&User{}, &Settings{}, &Instance{}, &InterfaceZone{}, &Interface{}, &WgPeer{}, &Link{},
 		&Route{}, &Rule{}, &NatRule{}, &IpamPrefix{}, &IpamAddress{}, &DnsZone{}, &DnsRecord{}, &Deployment{},
 		&AddressObject{}, &DnsSoaTemplate{}, &DnsDnssecPolicy{}, &DnsTemplate{}, &KnownInterface{},
-		&DyndnsClient{}, &DyndnsRecord{}, &IpList{}, &Task{}, &Service{},
+		&DyndnsClient{}, &DyndnsRecord{}, &IpList{}, &Task{}, &Service{}, &ObjectFolder{},
 	}
 }

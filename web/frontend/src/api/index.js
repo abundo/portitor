@@ -33,6 +33,8 @@ export const addressObjects = crud('/objects')
 export const dyndnsClients = crud('/dyndns/clients')
 export const dyndnsRecords = crud('/dyndns/records')
 export const ipLists = crud('/ip-lists')
+// Folders of hosts (kind hosts) and IP lists (kind ip_lists), for the GUI only.
+export const objectFolders = crud('/object-folders')
 export const tasks = crud('/tasks')
 // Custom services: protocol matches rules name next to the predefined ones.
 export const customServices = crud('/custom-services')

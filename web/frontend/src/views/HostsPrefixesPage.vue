@@ -3,7 +3,9 @@
 
 <script setup>
 // Hosts & prefixes: one tree of the named hosts and prefixes, the IP lists
-// and the instance's prefix tree (IPAM), each a top-level node.
+// and the instance's prefix tree (IPAM), each a top-level node. Hosts and
+// IP lists can be sorted into folders (object_folders), which only
+// structure the page.
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import IpamTreeRows from '@/components/IpamTreeRows.vue'
@@ -11,7 +13,8 @@ import AddrInput from '@/components/AddrInput.vue'
 import DhcpLeasePicker from '@/components/DhcpLeasePicker.vue'
 import HostDialog from '@/components/HostDialog.vue'
 import IpListDialog from '@/components/IpListDialog.vue'
-import { addressObjects, api, ipamAddresses, ipamPrefixes, ipLists } from '@/api'
+import FolderDialog from '@/components/FolderDialog.vue'
+import { addressObjects, api, ipamAddresses, ipamPrefixes, ipLists, objectFolders } from '@/api'
 import { errMsg } from '@/api/http'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
 import { useAuthStore } from '@/stores/auth'
@@ -30,9 +33,10 @@ const deploy = useDeployStore()
 const objects = useObjectStore()
 const hosts = ref([])
 const lists = ref([])
+const folders = ref([])
 const tree = ref([])
-// Keys of the collapsed nodes: the top-level nodes (group:*) and the
-// prefixes (IpamTreeRows).
+// Keys of the collapsed nodes: the top-level nodes (group:*), the folders
+// (folder:<id>) and the prefixes (IpamTreeRows).
 const collapsed = reactive(new Set())
 const loading = ref(true)
 const infoOpen = ref(false)
@@ -44,13 +48,16 @@ async function loadHosts() {
 async function loadLists() {
   lists.value = (await ipLists.list()).sort(byName)
 }
+async function loadFolders() {
+  folders.value = (await objectFolders.list()).sort(byName)
+}
 async function loadTree() {
   if (store.currentId) tree.value = await api.ipamTree(store.currentId)
 }
 onMounted(async () => {
   deploy.refresh()
   try {
-    await Promise.all([loadHosts(), loadLists(), loadTree()])
+    await Promise.all([loadHosts(), loadLists(), loadFolders(), loadTree()])
   } catch (err) {
     toast.add({ title: errMsg(err), color: 'error' })
   } finally {
@@ -68,12 +75,43 @@ function reloadLists() {
   loadLists().catch(showError)
   objects.load(true).catch(() => {})
 }
+function reloadFolders() {
+  loadFolders().catch(showError)
+}
 function reloadTree() {
   loadTree().catch(showError)
 }
 
 const hostDialog = ref(null)
 const listDialog = ref(null)
+const folderDialog = ref(null)
+
+// The rows of the Hosts or IP lists group: in each folder its folders,
+// then its items, both by name; nothing inside a collapsed folder. count
+// is the items a folder holds, those in its folders included.
+function folderRows(kind, items) {
+  const parent = (x) => x.parent_id ?? 0
+  const count = (id) =>
+    items.filter((i) => (i.folder_id ?? 0) === id).length +
+    folders.value
+      .filter((f) => f.kind === kind && parent(f) === id)
+      .reduce((n, f) => n + count(f.id), 0)
+  const out = []
+  const walk = (id, depth) => {
+    for (const f of folders.value.filter((f) => f.kind === kind && parent(f) === id)) {
+      const key = `folder:${f.id}`
+      out.push({ key, folder: f, depth, count: count(f.id) })
+      if (!collapsed.has(key)) walk(f.id, depth + 1)
+    }
+    for (const item of items.filter((i) => (i.folder_id ?? 0) === id))
+      out.push({ key: `${kind}:${item.id}`, item, depth })
+  }
+  walk(0, 1)
+  return out
+}
+const hostRows = computed(() => folderRows('hosts', hosts.value))
+const listRows = computed(() => folderRows('ip_lists', lists.value))
+const indent = (depth) => ({ paddingLeft: `${depth * 1.25}rem` })
 
 // A host has only single addresses (/32, /128); anything else is a prefix.
 const single = (a) => !a.includes('/') || a.endsWith('/32') || a.endsWith('/128')
@@ -286,6 +324,11 @@ async function removeAddress() {
                     download stays in force if a later one fails.
                   </p>
                   <p>
+                    <b>Folders</b> sort hosts and IP lists; they mean nothing to the firewall. Move
+                    an entry by choosing its folder in its form. Only an empty folder can be
+                    deleted.
+                  </p>
+                  <p>
                     <b>Prefixes & IP addresses</b> nest by containment. The addresses of the
                     firewall's interfaces and their prefixes are listed automatically. Turn on DHCP
                     on a prefix to serve it on the interface with an address in it, and router
@@ -335,24 +378,42 @@ async function removeAddress() {
               <tr class="border-b border-default bg-elevated/40">
                 <td class="w-px py-1 pr-2 whitespace-nowrap">
                   <template v-if="auth.isAdmin">
-                    <UButton
-                      v-if="g.key === 'group:hosts'"
-                      size="xs"
-                      color="neutral"
-                      variant="ghost"
-                      icon="i-lucide-plus"
-                      title="Add host"
-                      @click="hostDialog.edit()"
-                    />
-                    <UButton
-                      v-else-if="g.key === 'group:lists'"
-                      size="xs"
-                      color="neutral"
-                      variant="ghost"
-                      icon="i-lucide-plus"
-                      title="Add IP list"
-                      @click="listDialog.edit()"
-                    />
+                    <template v-if="g.key === 'group:hosts'">
+                      <UButton
+                        size="xs"
+                        color="neutral"
+                        variant="ghost"
+                        icon="i-lucide-plus"
+                        title="Add host"
+                        @click="hostDialog.edit()"
+                      />
+                      <UButton
+                        size="xs"
+                        color="neutral"
+                        variant="ghost"
+                        icon="i-lucide-folder-plus"
+                        title="Add folder"
+                        @click="folderDialog.edit({ kind: 'hosts' })"
+                      />
+                    </template>
+                    <template v-else-if="g.key === 'group:lists'">
+                      <UButton
+                        size="xs"
+                        color="neutral"
+                        variant="ghost"
+                        icon="i-lucide-plus"
+                        title="Add IP list"
+                        @click="listDialog.edit()"
+                      />
+                      <UButton
+                        size="xs"
+                        color="neutral"
+                        variant="ghost"
+                        icon="i-lucide-folder-plus"
+                        title="Add folder"
+                        @click="folderDialog.edit({ kind: 'ip_lists' })"
+                      />
+                    </template>
                     <template v-else-if="store.currentId">
                       <UButton
                         size="xs"
@@ -401,112 +462,236 @@ async function removeAddress() {
 
               <template v-if="!collapsed.has(g.key)">
                 <template v-if="g.key === 'group:hosts'">
-                  <tr
-                    v-for="h in hosts"
-                    :key="`host:${h.id}`"
-                    class="border-b border-default hover:bg-elevated/50"
-                  >
-                    <td class="py-1 pr-2 whitespace-nowrap">
-                      <UButton
-                        size="xs"
-                        color="neutral"
-                        variant="ghost"
-                        :icon="auth.isAdmin ? 'i-lucide-pencil' : 'i-lucide-eye'"
-                        :aria-label="auth.isAdmin ? 'Edit' : 'View'"
-                        :title="auth.isAdmin ? 'Edit' : 'View'"
-                        @click="hostDialog.edit(h)"
-                      />
-                    </td>
-                    <td class="py-1.5 pr-2">
-                      <div class="flex items-center gap-1 pl-5">
-                        <span class="inline-block w-6" />
-                        <UIcon
-                          :name="hostKind(h) === 'host' ? 'i-lucide-server' : 'i-lucide-network'"
-                          class="text-muted"
+                  <template v-for="r in hostRows" :key="r.key">
+                    <tr v-if="r.folder" class="border-b border-default hover:bg-elevated/50">
+                      <td class="py-1 pr-2 whitespace-nowrap">
+                        <UButton
+                          size="xs"
+                          color="neutral"
+                          variant="ghost"
+                          :icon="auth.isAdmin ? 'i-lucide-pencil' : 'i-lucide-eye'"
+                          :aria-label="auth.isAdmin ? 'Edit' : 'View'"
+                          :title="auth.isAdmin ? 'Edit' : 'View'"
+                          @click="folderDialog.edit(r.folder)"
                         />
-                        <span class="font-medium">{{ h.name }}</span>
-                      </div>
-                    </td>
-                    <td class="px-2 text-sm">{{ h.description }}</td>
-                    <td class="px-2 font-mono text-xs">{{ h.addresses?.join(', ') }}</td>
-                    <td class="px-2 text-xs whitespace-nowrap">
-                      <UBadge
-                        :color="hostKind(h) === 'host' ? 'primary' : 'neutral'"
-                        variant="subtle"
-                        :label="hostKind(h)"
-                      />
-                      <span class="ms-1 text-muted">{{ versions(h) }}</span>
-                    </td>
-                  </tr>
-                  <tr v-if="!hosts.length" class="border-b border-default">
+                        <template v-if="auth.isAdmin">
+                          <UButton
+                            size="xs"
+                            color="neutral"
+                            variant="ghost"
+                            icon="i-lucide-plus"
+                            title="Add host here"
+                            @click="hostDialog.edit({ folder_id: r.folder.id })"
+                          />
+                          <UButton
+                            size="xs"
+                            color="neutral"
+                            variant="ghost"
+                            icon="i-lucide-folder-plus"
+                            title="Add folder"
+                            @click="folderDialog.edit({ kind: 'hosts', parent_id: r.folder.id })"
+                          />
+                        </template>
+                      </td>
+                      <td class="py-1.5 pr-2">
+                        <div class="flex items-center gap-1" :style="indent(r.depth)">
+                          <UButton
+                            size="xs"
+                            color="neutral"
+                            variant="ghost"
+                            :icon="
+                              collapsed.has(r.key)
+                                ? 'i-lucide-chevron-right'
+                                : 'i-lucide-chevron-down'
+                            "
+                            :aria-label="collapsed.has(r.key) ? 'Expand' : 'Collapse'"
+                            @click="toggle(r.key)"
+                          />
+                          <UIcon
+                            :name="
+                              collapsed.has(r.key) ? 'i-lucide-folder' : 'i-lucide-folder-open'
+                            "
+                            class="text-primary"
+                          />
+                          <span class="font-medium whitespace-nowrap">{{ r.folder.name }}</span>
+                          <UBadge
+                            color="neutral"
+                            variant="subtle"
+                            size="sm"
+                            :label="String(r.count)"
+                          />
+                        </div>
+                      </td>
+                      <td colspan="3" />
+                    </tr>
+                    <tr v-else class="border-b border-default hover:bg-elevated/50">
+                      <td class="py-1 pr-2 whitespace-nowrap">
+                        <UButton
+                          size="xs"
+                          color="neutral"
+                          variant="ghost"
+                          :icon="auth.isAdmin ? 'i-lucide-pencil' : 'i-lucide-eye'"
+                          :aria-label="auth.isAdmin ? 'Edit' : 'View'"
+                          :title="auth.isAdmin ? 'Edit' : 'View'"
+                          @click="hostDialog.edit(r.item)"
+                        />
+                      </td>
+                      <td class="py-1.5 pr-2">
+                        <div class="flex items-center gap-1" :style="indent(r.depth)">
+                          <span class="inline-block w-6" />
+                          <UIcon
+                            :name="
+                              hostKind(r.item) === 'host' ? 'i-lucide-server' : 'i-lucide-network'
+                            "
+                            class="text-muted"
+                          />
+                          <span class="font-medium">{{ r.item.name }}</span>
+                        </div>
+                      </td>
+                      <td class="px-2 text-sm">{{ r.item.description }}</td>
+                      <td class="px-2 font-mono text-xs">{{ r.item.addresses?.join(', ') }}</td>
+                      <td class="px-2 text-xs whitespace-nowrap">
+                        <UBadge
+                          :color="hostKind(r.item) === 'host' ? 'primary' : 'neutral'"
+                          variant="subtle"
+                          :label="hostKind(r.item)"
+                        />
+                        <span class="ms-1 text-muted">{{ versions(r.item) }}</span>
+                      </td>
+                    </tr>
+                  </template>
+                  <tr v-if="!hostRows.length" class="border-b border-default">
                     <td />
                     <td colspan="4" class="py-2 pl-12 text-muted">No hosts yet.</td>
                   </tr>
                 </template>
 
                 <template v-else-if="g.key === 'group:lists'">
-                  <tr
-                    v-for="l in lists"
-                    :key="`list:${l.id}`"
-                    class="border-b border-default hover:bg-elevated/50"
-                  >
-                    <td class="py-1 pr-2 whitespace-nowrap">
-                      <UButton
-                        size="xs"
-                        color="neutral"
-                        variant="ghost"
-                        :icon="auth.isAdmin ? 'i-lucide-pencil' : 'i-lucide-eye'"
-                        :aria-label="auth.isAdmin ? 'Edit' : 'View'"
-                        :title="auth.isAdmin ? 'Edit' : 'View'"
-                        @click="listDialog.edit(l)"
-                      />
-                      <UButton
-                        v-if="auth.isAdmin"
-                        size="xs"
-                        color="neutral"
-                        variant="ghost"
-                        icon="i-lucide-refresh-cw"
-                        title="Download now"
-                        :disabled="!states[l.name] || states[l.name].state === 'fetching'"
-                        @click="refreshList(l)"
-                      />
-                    </td>
-                    <td class="py-1.5 pr-2">
-                      <div class="flex items-center gap-1 pl-5">
-                        <span class="inline-block w-6" />
-                        <UIcon name="i-lucide-list" class="text-muted" />
-                        <span class="font-medium">@{{ l.name }}</span>
-                      </div>
-                    </td>
-                    <td class="px-2 text-sm">{{ l.description }}</td>
-                    <td class="px-2 text-xs">
-                      {{ sourceLabel[l.source] ?? l.source }}
-                      <span class="font-mono break-all text-muted">{{ l.url }}</span>
-                    </td>
-                    <td class="px-2 py-1">
-                      <div v-if="states[l.name]" class="space-y-0.5 text-xs">
-                        <UBadge
-                          :color="stateColor[states[l.name].state] ?? 'neutral'"
-                          variant="subtle"
-                          size="sm"
-                        >
-                          {{ states[l.name].state }}
-                        </UBadge>
-                        <div v-if="states[l.name].updated">
-                          {{ states[l.name].ipv4 }} IPv4, {{ states[l.name].ipv6 }} IPv6
-                          <span v-if="states[l.name].skipped" class="text-muted">
-                            ({{ states[l.name].skipped }} skipped)
-                          </span>
+                  <template v-for="r in listRows" :key="r.key">
+                    <tr v-if="r.folder" class="border-b border-default hover:bg-elevated/50">
+                      <td class="py-1 pr-2 whitespace-nowrap">
+                        <UButton
+                          size="xs"
+                          color="neutral"
+                          variant="ghost"
+                          :icon="auth.isAdmin ? 'i-lucide-pencil' : 'i-lucide-eye'"
+                          :aria-label="auth.isAdmin ? 'Edit' : 'View'"
+                          :title="auth.isAdmin ? 'Edit' : 'View'"
+                          @click="folderDialog.edit(r.folder)"
+                        />
+                        <template v-if="auth.isAdmin">
+                          <UButton
+                            size="xs"
+                            color="neutral"
+                            variant="ghost"
+                            icon="i-lucide-plus"
+                            title="Add IP list here"
+                            @click="listDialog.edit({ folder_id: r.folder.id })"
+                          />
+                          <UButton
+                            size="xs"
+                            color="neutral"
+                            variant="ghost"
+                            icon="i-lucide-folder-plus"
+                            title="Add folder"
+                            @click="folderDialog.edit({ kind: 'ip_lists', parent_id: r.folder.id })"
+                          />
+                        </template>
+                      </td>
+                      <td class="py-1.5 pr-2">
+                        <div class="flex items-center gap-1" :style="indent(r.depth)">
+                          <UButton
+                            size="xs"
+                            color="neutral"
+                            variant="ghost"
+                            :icon="
+                              collapsed.has(r.key)
+                                ? 'i-lucide-chevron-right'
+                                : 'i-lucide-chevron-down'
+                            "
+                            :aria-label="collapsed.has(r.key) ? 'Expand' : 'Collapse'"
+                            @click="toggle(r.key)"
+                          />
+                          <UIcon
+                            :name="
+                              collapsed.has(r.key) ? 'i-lucide-folder' : 'i-lucide-folder-open'
+                            "
+                            class="text-primary"
+                          />
+                          <span class="font-medium whitespace-nowrap">{{ r.folder.name }}</span>
+                          <UBadge
+                            color="neutral"
+                            variant="subtle"
+                            size="sm"
+                            :label="String(r.count)"
+                          />
                         </div>
-                        <div class="text-muted">updated {{ ago(states[l.name].updated) }}</div>
-                        <div v-if="states[l.name].last_error" class="text-error">
-                          {{ states[l.name].last_error }}
+                      </td>
+                      <td colspan="3" />
+                    </tr>
+                    <tr v-else class="border-b border-default hover:bg-elevated/50">
+                      <td class="py-1 pr-2 whitespace-nowrap">
+                        <UButton
+                          size="xs"
+                          color="neutral"
+                          variant="ghost"
+                          :icon="auth.isAdmin ? 'i-lucide-pencil' : 'i-lucide-eye'"
+                          :aria-label="auth.isAdmin ? 'Edit' : 'View'"
+                          :title="auth.isAdmin ? 'Edit' : 'View'"
+                          @click="listDialog.edit(r.item)"
+                        />
+                        <UButton
+                          v-if="auth.isAdmin"
+                          size="xs"
+                          color="neutral"
+                          variant="ghost"
+                          icon="i-lucide-refresh-cw"
+                          title="Download now"
+                          :disabled="
+                            !states[r.item.name] || states[r.item.name].state === 'fetching'
+                          "
+                          @click="refreshList(r.item)"
+                        />
+                      </td>
+                      <td class="py-1.5 pr-2">
+                        <div class="flex items-center gap-1" :style="indent(r.depth)">
+                          <span class="inline-block w-6" />
+                          <UIcon name="i-lucide-list" class="text-muted" />
+                          <span class="font-medium">@{{ r.item.name }}</span>
                         </div>
-                      </div>
-                      <span v-else class="text-xs text-muted">not deployed</span>
-                    </td>
-                  </tr>
-                  <tr v-if="!lists.length" class="border-b border-default">
+                      </td>
+                      <td class="px-2 text-sm">{{ r.item.description }}</td>
+                      <td class="px-2 text-xs">
+                        {{ sourceLabel[r.item.source] ?? r.item.source }}
+                        <span class="font-mono break-all text-muted">{{ r.item.url }}</span>
+                      </td>
+                      <td class="px-2 py-1">
+                        <div v-if="states[r.item.name]" class="space-y-0.5 text-xs">
+                          <UBadge
+                            :color="stateColor[states[r.item.name].state] ?? 'neutral'"
+                            variant="subtle"
+                            size="sm"
+                          >
+                            {{ states[r.item.name].state }}
+                          </UBadge>
+                          <div v-if="states[r.item.name].updated">
+                            {{ states[r.item.name].ipv4 }} IPv4, {{ states[r.item.name].ipv6 }} IPv6
+                            <span v-if="states[r.item.name].skipped" class="text-muted">
+                              ({{ states[r.item.name].skipped }} skipped)
+                            </span>
+                          </div>
+                          <div class="text-muted">
+                            updated {{ ago(states[r.item.name].updated) }}
+                          </div>
+                          <div v-if="states[r.item.name].last_error" class="text-error">
+                            {{ states[r.item.name].last_error }}
+                          </div>
+                        </div>
+                        <span v-else class="text-xs text-muted">not deployed</span>
+                      </td>
+                    </tr>
+                  </template>
+                  <tr v-if="!listRows.length" class="border-b border-default">
                     <td />
                     <td colspan="4" class="py-2 pl-12 text-muted">No IP lists yet.</td>
                   </tr>
@@ -547,8 +732,9 @@ async function removeAddress() {
       </div>
     </div>
 
-    <HostDialog ref="hostDialog" @changed="reloadHosts" />
-    <IpListDialog ref="listDialog" @changed="reloadLists" />
+    <HostDialog ref="hostDialog" :folders="folders" @changed="reloadHosts" />
+    <IpListDialog ref="listDialog" :folders="folders" @changed="reloadLists" />
+    <FolderDialog ref="folderDialog" :folders="folders" @changed="reloadFolders" />
 
     <UModal
       :open="prefixOpen"
