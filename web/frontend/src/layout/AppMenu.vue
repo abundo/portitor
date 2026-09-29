@@ -21,6 +21,7 @@ const items = computed(() => [
     { label: 'Routes', icon: 'i-lucide-route', to: '/routes' },
     { label: 'IP addresses', icon: 'i-lucide-network', to: '/ipam' },
     { label: 'Hosts & prefixes', icon: 'i-lucide-tags', to: '/objects' },
+    { label: 'IP lists', icon: 'i-lucide-list-x', to: '/firewall/ip-lists' },
   ],
   [
     { label: 'Firewall', type: 'label' },
@@ -28,7 +29,6 @@ const items = computed(() => [
     { label: 'Rules', icon: 'i-lucide-shield-check', to: '/firewall/rules' },
     { label: 'Services', icon: 'i-lucide-plug', to: '/firewall/services' },
     { label: 'NAT & port forwards', icon: 'i-lucide-arrow-right-left', to: '/firewall/nat' },
-    { label: 'IP lists', icon: 'i-lucide-list-x', to: '/firewall/ip-lists' },
   ],
   [
     { label: 'Services', type: 'label' },
