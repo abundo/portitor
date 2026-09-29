@@ -165,6 +165,9 @@ func prepareInterface(tx *gorm.DB, i, old *models.Interface) error {
 			if err := refuseDyndnsIface(tx, old); err != nil {
 				return err
 			}
+			if err := refuseIfaceMove(tx, old); err != nil {
+				return err
+			}
 		}
 	}
 	i.Members = cleanList(i.Members)

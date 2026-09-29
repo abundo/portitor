@@ -873,3 +873,40 @@ func TestViewerRole(t *testing.T) {
 		t.Errorf("ann: %+v %v", ann, err)
 	}
 }
+
+func TestInterfaceMove(t *testing.T) {
+	env := newEnv(t)
+	inst := env.create("/api/instances", map[string]any{"name": "main"})
+	other := env.create("/api/instances", map[string]any{"name": "guest"})
+	eth1 := env.create("/api/interfaces", map[string]any{"instance_id": inst, "name": "eth1"})
+	zone := env.create("/api/interface-zones", map[string]any{"instance_id": inst, "name": "lan", "interfaces": []string{"eth1"}})
+	vlan := env.create("/api/interfaces", map[string]any{"instance_id": inst, "name": "eth1.10", "kind": "vlan", "parent": "eth1", "vlan_id": 10})
+	route := env.create("/api/routes", map[string]any{"instance_id": inst, "destination": "10.9.0.0/16", "gateway": "", "interface_id": eth1})
+	rule := env.create("/api/rules", map[string]any{"instance_id": inst, "chain": "forward", "action": "accept", "in_interfaces": []string{"eth1"}})
+
+	move := func() *httptest.ResponseRecorder {
+		return env.do("PUT", "/api/interfaces/"+itoa(eth1), map[string]any{"instance_id": other})
+	}
+	for _, step := range []struct{ path, want string }{
+		{"/api/rules/" + itoa(rule), "rule"},
+		{"/api/interfaces/" + itoa(vlan), "interface eth1.10"},
+		{"/api/routes/" + itoa(route), "route 10.9.0.0/16"},
+	} {
+		if rec := move(); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), step.want) {
+			t.Fatalf("move while used by %s: %d %s", step.want, rec.Code, rec.Body)
+		}
+		if rec := env.do("DELETE", step.path, nil); rec.Code != http.StatusNoContent {
+			t.Fatalf("delete %s: %d %s", step.path, rec.Code, rec.Body)
+		}
+	}
+	if rec := move(); rec.Code != http.StatusOK {
+		t.Fatalf("move: %d %s", rec.Code, rec.Body)
+	}
+	var i models.Interface
+	env.srv.db.First(&i, eth1)
+	var z models.InterfaceZone
+	env.srv.db.First(&z, zone)
+	if i.InstanceID != other || len(z.Interfaces) != 0 {
+		t.Errorf("after move: instance %d, old zone %v", i.InstanceID, z.Interfaces)
+	}
+}

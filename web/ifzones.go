@@ -246,6 +246,40 @@ func ifaceMoved(tx *gorm.DB, oldInst uint, oldName string, inst uint, name strin
 	}
 }
 
+// refuseIfaceMove refuses to move an interface to another instance while
+// its old instance still refers to it: routes and IP addresses (by id,
+// they belong to that instance) and VLANs and bridges (by name). Rules
+// and zones are handled by ifaceMoved.
+func refuseIfaceMove(tx *gorm.DB, i *models.Interface) error {
+	var users []string
+	var routes []string
+	tx.Model(&models.Route{}).Where("interface_id = ?", i.ID).Order("destination").Pluck("destination", &routes)
+	for _, r := range routes {
+		users = append(users, "route "+r)
+	}
+	var addrs []string
+	tx.Model(&models.IpamAddress{}).Where("interface_id = ?", i.ID).Order("address").Pluck("address", &addrs)
+	for _, a := range addrs {
+		users = append(users, "IP address "+a)
+	}
+	var others []models.Interface
+	if err := tx.Where("instance_id = ? AND id <> ?", i.InstanceID, i.ID).Order("name").Find(&others).Error; err != nil {
+		return err
+	}
+	for _, o := range others {
+		if (o.Kind == fwconfig.KindVLAN && o.Parent == i.Name) || (o.Kind == fwconfig.KindBridge && slices.Contains(o.Members, i.Name)) {
+			users = append(users, "interface "+o.Name)
+		}
+	}
+	if len(users) == 0 {
+		return nil
+	}
+	if len(users) > 5 {
+		users = append(users[:5], "...")
+	}
+	return bad(fmt.Sprintf("%s cannot move to another instance while it is used by %s", i.Name, strings.Join(users, ", ")))
+}
+
 func deleteInterface(tx *gorm.DB, i *models.Interface) error {
 	if err := refuseDyndnsIface(tx, i); err != nil {
 		return err
