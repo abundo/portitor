@@ -122,6 +122,12 @@ func TestValidateCatchesProblems(t *testing.T) {
 			d.Instances[0].DNS.Zones[0].Records[0].Value = "1.2.3.4\n@ NS evil."
 		}, "newline"},
 		{"dns forward mode", func(d *Document) { d.Instances[0].DNS.ForwardMode = "last" }, `invalid forward mode "last"`},
+		{"dns upstream", func(d *Document) { d.Instances[0].DNS.Upstream = "peer" }, `invalid upstream "peer"`},
+		{"dns upstream dhcp no interface", func(d *Document) { d.Instances[0].DNS.Upstream = UpstreamDHCP }, "needs the interface"},
+		{"dns upstream dhcp static", func(d *Document) {
+			d.Instances[0].DNS.Upstream, d.Instances[0].DNS.DHCPInterface = UpstreamDHCP, "eth1"
+		}, "eth1 is not a DHCP client"},
+		{"dns dhcp interface not dhcp upstream", func(d *Document) { d.Instances[0].DNS.DHCPInterface = "eth0" }, "only for upstream dhcp"},
 		{"dns unknown template", func(d *Document) { d.Instances[0].DNS.Zones[0].Template = "work" }, `unknown template "work"`},
 		{"dns template unknown soa", func(d *Document) { d.Instances[0].DNS.ZoneTemplates[0].SOA = "x" }, `unknown soa template "x"`},
 		{"dns template no ns", func(d *Document) { d.Instances[0].DNS.ZoneTemplates[0].Nameservers = nil }, "at least one nameserver"},

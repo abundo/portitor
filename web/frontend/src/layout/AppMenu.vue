@@ -31,7 +31,7 @@ const items = computed(() => [
   ],
   [
     { label: 'Services', type: 'label' },
-    { label: 'DNS zones', icon: 'i-lucide-globe', to: '/dns', exact: true },
+    { label: 'DNS', icon: 'i-lucide-globe', to: '/dns', exact: true },
     { label: 'DNS templates', icon: 'i-lucide-file-cog', to: '/dns/templates' },
     { label: 'DHCP', icon: 'i-lucide-list-ordered', to: '/dhcp' },
     { label: 'WireGuard', icon: 'i-lucide-key-round', to: '/wireguard' },

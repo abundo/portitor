@@ -102,20 +102,19 @@ func (m *dhcpManager) Leases() []Lease {
 	return out
 }
 
-// DNSServers returns DNS servers learned per instance.
-func (m *dhcpManager) DNSServers() map[string][]string {
+// DNSServers returns DNS servers learned per instance and interface.
+func (m *dhcpManager) DNSServers() map[string]map[string][]string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	out := map[string][]string{}
+	out := map[string]map[string][]string{}
 	for k, l := range m.leases {
-		for _, d := range l.DNS {
-			if !slices.Contains(out[k.instance], d) {
-				out[k.instance] = append(out[k.instance], d)
-			}
+		if len(l.DNS) == 0 {
+			continue
 		}
-	}
-	for _, v := range out {
-		slices.Sort(v)
+		if out[k.instance] == nil {
+			out[k.instance] = map[string][]string{}
+		}
+		out[k.instance][k.iface] = slices.Clone(l.DNS)
 	}
 	return out
 }

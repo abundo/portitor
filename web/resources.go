@@ -112,10 +112,16 @@ func prepareInstance(tx *gorm.DB, in, old *models.Instance) error {
 	}
 	in.DnsForwarders = cleanList(in.DnsForwarders)
 	in.DnsAllowRecursion = cleanList(in.DnsAllowRecursion)
+	if in.DnsUpstream == "" {
+		in.DnsUpstream = fwconfig.UpstreamForward
+	}
+	if err := oneOf("upstream DNS", in.DnsUpstream, fwconfig.UpstreamForward, fwconfig.UpstreamRoot, fwconfig.UpstreamDHCP); err != nil {
+		return err
+	}
 	if in.DnsForwardMode == "" {
 		in.DnsForwardMode = fwconfig.ForwardFirst
 	}
-	if err := oneOf("DNS forward mode", in.DnsForwardMode, fwconfig.ForwardFirst, fwconfig.ForwardOnly, fwconfig.ForwardOff); err != nil {
+	if err := oneOf("DNS forward mode", in.DnsForwardMode, fwconfig.ForwardFirst, fwconfig.ForwardOnly); err != nil {
 		return err
 	}
 	if err := checkEntries(tx, "DNS forwarders", in.DnsForwarders, entryHost); err != nil {
@@ -204,6 +210,15 @@ func prepareInterface(tx *gorm.DB, i, old *models.Interface) error {
 	}
 	if err := checkAddrsFree(tx, i); err != nil {
 		return err
+	}
+	if i.Ipv4Mode != fwconfig.ModeDHCP {
+		i.DnsFromDhcp = false
+	}
+	if i.DnsFromDhcp {
+		// One per instance: taking the flag moves it here.
+		if err := tx.Model(&models.Interface{}).Where("instance_id = ? AND id <> ?", i.InstanceID, i.ID).Update("dns_from_dhcp", false).Error; err != nil {
+			return err
+		}
 	}
 	if old != nil {
 		if err := ifaceMoved(tx, old.InstanceID, old.Name, i.InstanceID, i.Name); err != nil {

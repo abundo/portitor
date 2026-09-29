@@ -469,6 +469,26 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 		seenAuto[s] = true
 	}
 
+	switch in.DNS.Upstream {
+	case "", UpstreamForward, UpstreamRoot:
+		if in.DNS.DHCPInterface != "" {
+			v.addf("%s: dns: a DHCP interface is only for upstream %s", p, UpstreamDHCP)
+		}
+	case UpstreamDHCP:
+		switch ifc := ifaces[in.DNS.DHCPInterface]; {
+		case in.DNS.DHCPInterface == "":
+			if !in.DNS.Enabled {
+				break
+			}
+			v.addf("%s: dns: upstream %s needs the interface whose DHCP lease gives the DNS servers", p, UpstreamDHCP)
+		case ifc == nil:
+			v.addf("%s: dns: unknown DHCP interface %q", p, in.DNS.DHCPInterface)
+		case ifc.IPv4Mode != ModeDHCP:
+			v.addf("%s: dns: interface %s is not a DHCP client", p, in.DNS.DHCPInterface)
+		}
+	default:
+		v.addf("%s: dns: invalid upstream %q", p, in.DNS.Upstream)
+	}
 	switch in.DNS.ForwardMode {
 	case "", ForwardFirst, ForwardOnly, ForwardOff:
 	default:

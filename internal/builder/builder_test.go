@@ -41,13 +41,13 @@ func ptr(v uint) *uint { return &v }
 
 func TestBuildHome(t *testing.T) {
 	db := testDB(t)
-	main := models.Instance{Name: "main", IsDefault: true, DnsEnabled: true, DnsForwardFromDhcp: true,
+	main := models.Instance{Name: "main", IsDefault: true, DnsEnabled: true, DnsUpstream: "dhcp",
 		DhcpEnabled: true, DhcpDomainName: "home.arpa", DhcpLeaseTime: 3600}
 	mustCreate(t, db, &main)
 	mustCreate(t, db, &models.InterfaceZone{InstanceID: main.ID, Name: "lan", Interfaces: models.StringList{"eth1", "wg0"}})
 	mustCreate(t, db, &models.InterfaceZone{InstanceID: main.ID, Name: "empty"})
 
-	eth0 := models.Interface{InstanceID: main.ID, Name: "eth0", Kind: "physical", Enabled: true, Ipv4Mode: "dhcp"}
+	eth0 := models.Interface{InstanceID: main.ID, Name: "eth0", Kind: "physical", Enabled: true, Ipv4Mode: "dhcp", DnsFromDhcp: true}
 	eth1 := models.Interface{InstanceID: main.ID, Name: "eth1", Kind: "physical", Enabled: true, Ipv4Mode: "static", DnsListen: true,
 		Addresses: models.StringList{"192.168.1.1/24"}}
 	priv, _, _ := wgkeys.Generate()
@@ -132,6 +132,9 @@ func TestBuildHome(t *testing.T) {
 		t.Errorf("dns templates: %+v %+v %+v (want only the used ones, once)", dns.ZoneTemplates, dns.SOATemplates, dns.DNSSECPolicies)
 	} else if zt := dns.ZoneTemplates[0]; zt.SOA != "home" || zt.DNSSECPolicy != "signed" || zt.DefaultTTL != 600 {
 		t.Errorf("zone template %+v", zt)
+	}
+	if in.DNS.Upstream != "dhcp" || in.DNS.DHCPInterface != "eth0" || in.DNS.Forwarders != nil {
+		t.Errorf("dns upstream %q %q %v", in.DNS.Upstream, in.DNS.DHCPInterface, in.DNS.Forwarders)
 	}
 	fwd := in.DNS.Zones[1] // zones are ordered by name
 	if fwd.Name != "home.arpa" || fwd.Template != "home" {

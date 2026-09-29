@@ -165,11 +165,11 @@ type Instance struct {
 	Description string `json:"description"`
 	IsDefault   bool   `json:"is_default"`
 
-	DnsEnabled         bool       `json:"dns_enabled"`
-	DnsForwarders      StringList `json:"dns_forwarders"`
-	DnsForwardFromDhcp bool       `json:"dns_forward_from_dhcp"`
-	DnsForwardMode     string     `json:"dns_forward_mode"` // fwconfig.Forward*
-	DnsAllowRecursion  StringList `json:"dns_allow_recursion"`
+	DnsEnabled        bool       `json:"dns_enabled"`
+	DnsUpstream       string     `json:"dns_upstream"` // fwconfig.Upstream*
+	DnsForwarders     StringList `json:"dns_forwarders"`
+	DnsForwardMode    string     `json:"dns_forward_mode"` // fwconfig.ForwardFirst or ForwardOnly
+	DnsAllowRecursion StringList `json:"dns_allow_recursion"`
 
 	DhcpEnabled    bool   `json:"dhcp_enabled"`
 	DhcpDomainName string `json:"dhcp_domain_name"`
@@ -216,6 +216,9 @@ type Interface struct {
 	DhcpNoDefaultRoute bool `json:"dhcp_no_default_route"`
 	// DnsListen makes the instance's DNS server answer on this interface.
 	DnsListen bool `json:"dns_listen"`
+	// DnsFromDhcp: with DNS upstream dhcp, the DNS servers of this
+	// interface's DHCP lease are the forwarders. At most one per instance.
+	DnsFromDhcp bool `json:"dns_from_dhcp"`
 
 	WgPrivateKey string `json:"-"`
 	WgPublicKey  string `json:"wg_public_key"`

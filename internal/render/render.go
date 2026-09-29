@@ -81,9 +81,9 @@ type Options struct {
 	Paths       Paths
 	Units       Units
 	AntiLockout *AntiLockout
-	// DHCPDNS holds DNS servers learned by the DHCP client, per instance,
-	// for DNSServer.ForwardFromDHCP.
-	DHCPDNS map[string][]string
+	// DHCPDNS holds DNS servers learned by the DHCP client, per instance
+	// and interface, for DNSServer.Upstream UpstreamDHCP.
+	DHCPDNS map[string]map[string][]string
 }
 
 type File struct {

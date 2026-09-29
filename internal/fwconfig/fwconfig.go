@@ -293,22 +293,36 @@ type RAPrefix struct {
 	Autonomous bool   `json:"autonomous,omitempty"`
 }
 
+// DNSServer.Upstream values: where BIND sends the queries it can't
+// answer from its own zones.
+const (
+	UpstreamForward = "forward" // the Forwarders ("" too)
+	UpstreamRoot    = "root"    // resolve from the root servers
+	UpstreamDHCP    = "dhcp"    // the DNS servers of DHCPInterface's lease
+)
+
 // DNSServer.ForwardMode values.
 const (
 	ForwardFirst = "first" // forwarders, falling back to the root servers ("" too)
 	ForwardOnly  = "only"  // forwarders only
-	ForwardOff   = "off"   // ignore forwarders: resolve from the root servers
+	// ForwardOff ignores the forwarders: resolve from the root servers.
+	// Documents from before Upstream use it; new ones say UpstreamRoot.
+	ForwardOff = "off"
 )
 
 type DNSServer struct {
 	Enabled bool `json:"enabled"`
-	// Forwarders are upstream resolvers. ForwardFromDHCP adds the servers
-	// learned by the DHCP client on this instance's WAN interfaces.
-	// ForwardMode says how they are used; with no forwarders, or with
-	// ForwardOff, BIND resolves from the root servers (its built-in hints).
-	Forwarders      []string `json:"forwarders,omitempty"`
-	ForwardFromDHCP bool     `json:"forward_from_dhcp,omitempty"`
-	ForwardMode     string   `json:"forward_mode,omitempty"`
+	// Upstream picks the forwarders: Forwarders, the DNS servers of the
+	// DHCP lease on DHCPInterface (an IPv4 DHCP client interface), or none.
+	// ForwardMode says how they are used; with no forwarders BIND resolves
+	// from the root servers (its built-in hints).
+	Upstream      string   `json:"upstream,omitempty"`
+	Forwarders    []string `json:"forwarders,omitempty"`
+	DHCPInterface string   `json:"dhcp_interface,omitempty"`
+	ForwardMode   string   `json:"forward_mode,omitempty"`
+	// ForwardFromDHCP, in documents from before Upstream, adds the DNS
+	// servers of every DHCP lease of the instance to the Forwarders.
+	ForwardFromDHCP bool `json:"forward_from_dhcp,omitempty"`
 	// ListenInterfaces are the interfaces BIND answers on (their addresses).
 	ListenInterfaces []string `json:"listen_interfaces,omitempty"`
 	// AllowRecursion lists client CIDRs allowed to recurse. Empty means the

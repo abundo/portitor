@@ -328,12 +328,24 @@ func Build(db *gorm.DB, generation int64) (*fwconfig.Document, error) {
 
 		// DNS: zones, records from the zone and from IPAM names.
 		in.DNS = fwconfig.DNSServer{
-			Enabled:         mi.DnsEnabled,
-			Forwarders:      expand("instance "+mi.Name+": dns forwarders", objs.Hosts, mi.DnsForwarders),
-			ForwardFromDHCP: mi.DnsForwardFromDhcp,
-			ForwardMode:     mi.DnsForwardMode,
-			AllowRecursion:  expand("instance "+mi.Name+": dns allow recursion", objs.Prefixes, mi.DnsAllowRecursion),
-			Zones:           []fwconfig.DNSZone{},
+			Enabled:        mi.DnsEnabled,
+			Upstream:       mi.DnsUpstream,
+			ForwardMode:    mi.DnsForwardMode,
+			AllowRecursion: expand("instance "+mi.Name+": dns allow recursion", objs.Prefixes, mi.DnsAllowRecursion),
+			Zones:          []fwconfig.DNSZone{},
+		}
+		switch mi.DnsUpstream {
+		case fwconfig.UpstreamForward, "":
+			in.DNS.Forwarders = expand("instance "+mi.Name+": dns forwarders", objs.Hosts, mi.DnsForwarders)
+		case fwconfig.UpstreamDHCP:
+			for _, mif := range d.interfaces {
+				if mif.InstanceID == mi.ID && mif.DnsFromDhcp && mif.Ipv4Mode == fwconfig.ModeDHCP {
+					in.DNS.DHCPInterface = mif.Name
+				}
+			}
+			if mi.DnsEnabled && in.DNS.DHCPInterface == "" {
+				addf("instance %s: DNS upstream is the DHCP lease of an interface, but no DHCP client interface is chosen", mi.Name)
+			}
 		}
 		// interface -> its first IPv4 and first global IPv6 address, which
 		// DHCP and router advertisements hand out as the DNS server.

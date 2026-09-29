@@ -25,7 +25,7 @@ func sampleBundle(t *testing.T) *Bundle {
 		Paths:       DefaultPaths(),
 		Units:       DefaultUnits(),
 		AntiLockout: &AntiLockout{Port: 8443, SSHPort: 22, AllowFrom: []string{"192.168.1.0/24", "fd00:1::/64"}},
-		DHCPDNS:     map[string][]string{"main": {"198.51.100.53"}},
+		DHCPDNS:     map[string]map[string][]string{"main": {"eth0": {"198.51.100.53"}}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -388,7 +388,7 @@ func TestNamedConf(t *testing.T) {
 		"listen-on port 53 { 127.0.0.1; 192.168.1.1; 192.168.20.1; 10.99.0.1; };",
 		"listen-on-v6 port 53 { ::1; fd00:1::1; };",
 		"allow-recursion { localhost; 192.168.1.0/24; fd00:1::/64; 192.168.20.0/24; 10.99.0.0/24; };",
-		"forwarders { 9.9.9.9; 198.51.100.53; };",
+		"forwarders { 9.9.9.9; };",
 		`include "/etc/portitor/instances/main/named.conf.dnsmgr2";`,
 		"dnssec-policy \"signed\" {\n\tkeys {\n\t\tksk lifetime unlimited algorithm ecdsap256sha256;\n\t\tzsk lifetime P90D algorithm ecdsap256sha256;\n\t};\n\tsignatures-validity 14d;\n};",
 	} {
@@ -400,23 +400,29 @@ func TestNamedConf(t *testing.T) {
 
 func TestNamedConfForwardMode(t *testing.T) {
 	in := &fwconfig.SampleDocument().Instances[0]
-	dhcp := []string{"198.51.100.53"}
+	dhcp := map[string][]string{"eth0": {"198.51.100.53"}, "eth9": {"203.0.113.53"}}
 	for _, tc := range []struct {
-		mode, want string
-		forwarders bool
+		upstream, iface, mode string
+		legacyDHCP            bool
+		want                  string
 	}{
-		{"", "forward first;", true},
-		{fwconfig.ForwardOnly, "forward only;", true},
-		{fwconfig.ForwardOff, "", false},
+		{"", "", "", false, "forwarders { 9.9.9.9; };\n\tforward first;"},
+		{fwconfig.UpstreamForward, "", fwconfig.ForwardOnly, false, "forwarders { 9.9.9.9; };\n\tforward only;"},
+		{fwconfig.UpstreamRoot, "", "", false, ""},
+		{fwconfig.UpstreamDHCP, "eth0", "", false, "forwarders { 198.51.100.53; };\n\tforward first;"},
+		{fwconfig.UpstreamDHCP, "eth1", "", false, ""}, // no lease yet
+		// Documents from before Upstream.
+		{"", "", fwconfig.ForwardOff, false, ""},
+		{"", "", "", true, "forwarders { 9.9.9.9; 198.51.100.53; 203.0.113.53; };"},
 	} {
-		in.DNS.ForwardMode = tc.mode
+		in.DNS.Upstream, in.DNS.DHCPInterface, in.DNS.ForwardMode, in.DNS.ForwardFromDHCP = tc.upstream, tc.iface, tc.mode, tc.legacyDHCP
 		named := NamedConf(in, DefaultPaths(), dhcp)
-		if strings.Contains(named, "forwarders") != tc.forwarders || !strings.Contains(named, tc.want) {
-			t.Errorf("mode %q:\n%s", tc.mode, named)
+		if tc.want == "" && strings.Contains(named, "forward") || !strings.Contains(named, tc.want) {
+			t.Errorf("%+v:\n%s", tc, named)
 		}
 	}
 	// No forwarders at all: BIND iterates from its root hints.
-	in.DNS.ForwardMode, in.DNS.Forwarders, in.DNS.ForwardFromDHCP = "", nil, false
+	in.DNS.Upstream, in.DNS.ForwardMode, in.DNS.Forwarders, in.DNS.ForwardFromDHCP = "", "", nil, false
 	if named := NamedConf(in, DefaultPaths(), dhcp); strings.Contains(named, "forward") {
 		t.Errorf("no forwarders:\n%s", named)
 	}

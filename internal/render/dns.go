@@ -6,8 +6,10 @@ package render
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/netip"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -65,8 +67,9 @@ func dnssecPolicies(b *strings.Builder, policies []fwconfig.DNSSECPolicy) {
 
 // NamedConf renders BIND's main config for an instance. Zones come from
 // dnsmgr2 through named.conf.dnsmgr2; this file carries the resolver
-// options (listen addresses, recursion ACL, forwarders).
-func NamedConf(in *fwconfig.Instance, p Paths, dhcpDNS []string) string {
+// options (listen addresses, recursion ACL, forwarders). dhcpDNS holds the
+// DNS servers of the instance's DHCP leases by interface.
+func NamedConf(in *fwconfig.Instance, p Paths, dhcpDNS map[string][]string) string {
 	listen4, listen6 := []string{"127.0.0.1"}, []string{"::1"}
 	var recursion []string
 	for _, name := range in.DNS.ListenInterfaces {
@@ -93,11 +96,18 @@ func NamedConf(in *fwconfig.Instance, p Paths, dhcpDNS []string) string {
 	recursion = append([]string{"localhost"}, recursion...)
 
 	var forwarders []string
-	if in.DNS.ForwardMode != fwconfig.ForwardOff {
+	switch {
+	case in.DNS.Upstream == fwconfig.UpstreamRoot || in.DNS.ForwardMode == fwconfig.ForwardOff:
+	case in.DNS.Upstream == fwconfig.UpstreamDHCP:
+		forwarders = append(forwarders, dhcpDNS[in.DNS.DHCPInterface]...)
+	default:
 		forwarders = append(forwarders, in.DNS.Forwarders...)
 		if in.DNS.ForwardFromDHCP {
-			for _, a := range dhcpDNS {
-				forwarders = appendUnique(forwarders, a)
+			ifaces := slices.Sorted(maps.Keys(dhcpDNS))
+			for _, name := range ifaces {
+				for _, a := range dhcpDNS[name] {
+					forwarders = appendUnique(forwarders, a)
+				}
 			}
 		}
 	}

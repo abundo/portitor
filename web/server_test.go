@@ -916,6 +916,32 @@ func TestInterfaceMove(t *testing.T) {
 	}
 }
 
+func TestDnsFromDhcp(t *testing.T) {
+	env := newEnv(t)
+	inst := env.create("/api/instances", map[string]any{"name": "main", "dns_upstream": "dhcp"})
+	wan1 := env.create("/api/interfaces", map[string]any{"instance_id": inst, "name": "eth0", "ipv4_mode": "dhcp", "dns_from_dhcp": true})
+	wan2 := env.create("/api/interfaces", map[string]any{"instance_id": inst, "name": "eth1", "ipv4_mode": "dhcp"})
+	lan := env.create("/api/interfaces", map[string]any{"instance_id": inst, "name": "eth2", "dns_from_dhcp": true})
+	flag := func(id uint) bool {
+		var i models.Interface
+		env.srv.db.First(&i, id)
+		return i.DnsFromDhcp
+	}
+	if !flag(wan1) || flag(lan) {
+		t.Fatalf("a static interface can't give DNS from DHCP: eth0 %v, eth2 %v", flag(wan1), flag(lan))
+	}
+	// One per instance: taking the flag moves it.
+	if rec := env.do("PUT", "/api/interfaces/"+itoa(wan2), map[string]any{"dns_from_dhcp": true}); rec.Code != http.StatusOK {
+		t.Fatalf("put: %d %s", rec.Code, rec.Body)
+	}
+	if flag(wan1) || !flag(wan2) {
+		t.Errorf("after moving the flag: eth0 %v, eth1 %v", flag(wan1), flag(wan2))
+	}
+	if rec := env.do("PUT", "/api/instances/"+itoa(inst), map[string]any{"dns_upstream": "peer"}); rec.Code != http.StatusBadRequest {
+		t.Errorf("bad upstream: %d %s", rec.Code, rec.Body)
+	}
+}
+
 func TestInterfaceAddresses(t *testing.T) {
 	env := newEnv(t)
 	inst := env.create("/api/instances", map[string]any{"name": "main"})

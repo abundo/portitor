@@ -110,8 +110,8 @@ func SampleDocument() Document {
 				}},
 				DNS: DNSServer{
 					Enabled:          true,
+					Upstream:         UpstreamForward,
 					Forwarders:       []string{"9.9.9.9"},
-					ForwardFromDHCP:  true,
 					ListenInterfaces: []string{"eth1", "eth1.20", "wg0"},
 					Zones: []DNSZone{
 						{Name: "home.arpa", Type: ZoneForward, Template: "home", Records: []DNSRecord{

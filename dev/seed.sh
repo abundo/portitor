@@ -32,7 +32,7 @@ req PUT /settings "{\"agent_url\":\"$AGENT_URL\",\"agent_token\":\"$TOKEN\",\"ag
 
 # portitor-web start creates the default instance "main"; update it.
 MAIN=$(req GET /instances | grep -oE '"id":[0-9]+,[^}]*"name":"main"' | sed -E 's/"id":([0-9]+).*/\1/')
-req PUT /instances/$MAIN '{"name":"main","description":"Home","dns_enabled":true,"dns_forward_from_dhcp":true,"dns_forwarders":["9.9.9.9"],"dhcp_enabled":true,"dhcp_domain_name":"home.arpa","dhcp_lease_time":43200}' >/dev/null
+req PUT /instances/$MAIN '{"name":"main","description":"Home","dns_enabled":true,"dns_upstream":"forward","dns_forwarders":["9.9.9.9"],"dhcp_enabled":true,"dhcp_domain_name":"home.arpa","dhcp_lease_time":43200}' >/dev/null
 id /interfaces "{\"instance_id\":$MAIN,\"name\":\"eth0\",\"description\":\"ISP\",\"ipv4_mode\":\"dhcp\",\"ipv6_accept_ra\":true,\"enabled\":true}" >/dev/null
 id /interfaces "{\"instance_id\":$MAIN,\"name\":\"eth1\",\"description\":\"LAN switch\",\"enabled\":true,\"dns_listen\":true,\"addresses\":[\"192.168.1.1/24\",\"fd00:1::1/64\"]}" >/dev/null
 id /interfaces "{\"instance_id\":$MAIN,\"name\":\"eth1.20\",\"kind\":\"vlan\",\"parent\":\"eth1\",\"vlan_id\":20,\"enabled\":true,\"dns_listen\":true,\"addresses\":[\"192.168.20.1/24\"]}" >/dev/null

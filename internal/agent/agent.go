@@ -344,7 +344,8 @@ func (a *Agent) onDHCPChange(instance string) {
 		return
 	}
 	in := a.applied.Instance(instance)
-	if in == nil || !in.DNS.Enabled || !in.DNS.ForwardFromDHCP || in.DNS.ForwardMode == fwconfig.ForwardOff {
+	if in == nil || !in.DNS.Enabled || in.DNS.ForwardMode == fwconfig.ForwardOff ||
+		in.DNS.Upstream != fwconfig.UpstreamDHCP && !in.DNS.ForwardFromDHCP {
 		return
 	}
 	b, err := render.Render(*a.applied, a.renderOptions())
