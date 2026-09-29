@@ -15,9 +15,13 @@ const items = computed(() => [
     { label: 'Deploy', icon: 'i-lucide-rocket', to: '/deploy' },
   ],
   [
-    { label: 'Network', type: 'label' },
+    { label: 'Globals', type: 'label' },
     { label: 'Instances', icon: 'i-lucide-boxes', to: '/instances' },
     { label: 'Links', icon: 'i-lucide-cable', to: '/links' },
+    { label: 'DNS templates', icon: 'i-lucide-file-cog', to: '/dns-templates' },
+  ],
+  [
+    { label: 'Network', type: 'label' },
     { label: 'Interfaces', icon: 'i-lucide-ethernet-port', to: '/interfaces' },
     { label: 'Routes', icon: 'i-lucide-route', to: '/routes' },
     { label: 'Hosts & prefixes', icon: 'i-lucide-tags', to: '/objects' },

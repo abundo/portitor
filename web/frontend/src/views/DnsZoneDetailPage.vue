@@ -243,7 +243,7 @@ useUnsaved(() => !!dirty.value || recordsDirty.value)
                   >Save</UButton
                 >
                 <UButton
-                  to="/dns?tab=templates"
+                  to="/dns-templates"
                   color="neutral"
                   variant="ghost"
                   icon="i-lucide-file-cog"

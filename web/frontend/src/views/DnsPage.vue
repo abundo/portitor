@@ -7,7 +7,6 @@ import { useRoute, useRouter } from 'vue-router'
 import { useToast } from '@nuxt/ui/composables'
 import AddrInput from '@/components/AddrInput.vue'
 import CrudPage from '@/components/CrudPage.vue'
-import DnsTemplates from '@/components/DnsTemplates.vue'
 import NeedInstance from '@/components/NeedInstance.vue'
 import { dnsTemplates, dnsZones, instances, interfaces } from '@/api'
 import { errMsg } from '@/api/http'
@@ -143,10 +142,9 @@ const zoneDefaults = () => ({ type: 'forward', dns_template_id: templates.value[
 
 const tabs = [
   { label: 'DNS zones', value: 'zones', slot: 'zones', icon: 'i-lucide-globe' },
-  { label: 'DNS templates', value: 'templates', slot: 'templates', icon: 'i-lucide-file-cog' },
   { label: 'DNS server', value: 'server', slot: 'server', icon: 'i-lucide-server' },
 ]
-// The tab is in the URL (?tab=templates), so links can open one.
+// The tab is in the URL (?tab=server), so links can open one.
 const tab = computed({
   get: () => (tabs.some((t) => t.value === route.query.tab) ? route.query.tab : 'zones'),
   set: (v) => router.replace({ query: { ...route.query, tab: v === 'zones' ? undefined : v } }),
@@ -183,12 +181,6 @@ const tab = computed({
               </RouterLink>
             </template>
           </CrudPage>
-        </div>
-      </template>
-
-      <template #templates>
-        <div class="pt-2">
-          <DnsTemplates @changed="loadTemplates" />
         </div>
       </template>
 
