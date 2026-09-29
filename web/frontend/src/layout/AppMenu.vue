@@ -5,6 +5,7 @@
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { openConsoleWindow } from '@/composables/useConsoleWindow'
 
 const route = useRoute()
 const auth = useAuthStore()
@@ -43,7 +44,7 @@ const items = computed(() => [
     ? [
         [
           { label: 'Admin', type: 'label' },
-          { label: 'Console', icon: 'i-lucide-square-terminal', to: '/console' },
+          { label: 'Console', icon: 'i-lucide-square-terminal', to: '/console', slot: 'console' },
           { label: 'Updates', icon: 'i-lucide-package-check', to: '/updates' },
           {
             label: 'Settings',
@@ -67,5 +68,18 @@ const items = computed(() => [
 </script>
 
 <template>
-  <UNavigationMenu :items="items" orientation="vertical" class="w-full" />
+  <UNavigationMenu :items="items" orientation="vertical" class="w-full">
+    <template #console-trailing>
+      <UTooltip text="Open console window">
+        <UButton
+          icon="i-lucide-plus"
+          size="xs"
+          color="neutral"
+          variant="ghost"
+          aria-label="Open console window"
+          @click.stop.prevent="openConsoleWindow"
+        />
+      </UTooltip>
+    </template>
+  </UNavigationMenu>
 </template>
