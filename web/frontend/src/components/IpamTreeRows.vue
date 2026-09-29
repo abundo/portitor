@@ -2,18 +2,19 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
 <script setup>
-// Recursive rows of the IPAM tree. The actions are the first column; an
-// entry is deleted from its dialog (HostsPrefixesPage).
+// Recursive rows of the IPAM tree. Edit is the first column; the adds are
+// in the page's context menu (menu: a right click on a row), and an entry
+// is deleted from its dialog (HostsPrefixesPage).
 defineOptions({ name: 'IpamTreeRows' })
 defineProps({
   nodes: { type: Array, required: true },
   depth: { type: Number, default: 0 },
   collapsed: { type: Object, required: true },
   ifaceName: { type: Function, required: true },
-  // readOnly leaves out the add buttons (a viewer).
+  // readOnly: a viewer, who views instead of edits.
   readOnly: { type: Boolean, default: false },
 })
-const emit = defineEmits(['toggle', 'add-prefix', 'add-address', 'edit'])
+const emit = defineEmits(['toggle', 'edit', 'menu'])
 const key = (n) => `${n.kind}:${n.cidr}`
 function pct(n) {
   return Math.round(n.used_frac * 100)
@@ -22,7 +23,7 @@ function pct(n) {
 
 <template>
   <template v-for="n in nodes" :key="key(n)">
-    <tr class="border-b border-default hover:bg-elevated/50">
+    <tr class="border-b border-default hover:bg-elevated/50" @contextmenu="emit('menu', $event, n)">
       <td class="py-1 pr-2 whitespace-nowrap">
         <UButton
           size="xs"
@@ -33,24 +34,6 @@ function pct(n) {
           :title="readOnly ? 'View' : 'Edit'"
           @click="emit('edit', n)"
         />
-        <template v-if="n.kind === 'prefix' && !readOnly">
-          <UButton
-            size="xs"
-            color="neutral"
-            variant="ghost"
-            icon="i-lucide-plus"
-            title="Add address"
-            @click="emit('add-address', n)"
-          />
-          <UButton
-            size="xs"
-            color="neutral"
-            variant="ghost"
-            icon="i-lucide-git-branch-plus"
-            title="Add sub-prefix"
-            @click="emit('add-prefix', n)"
-          />
-        </template>
       </td>
       <td class="py-1.5 pr-2">
         <div class="flex items-center gap-1" :style="{ paddingLeft: `${depth * 1.25}rem` }">
@@ -110,9 +93,8 @@ function pct(n) {
       :iface-name="ifaceName"
       :read-only="readOnly"
       @toggle="emit('toggle', $event)"
-      @add-prefix="emit('add-prefix', $event)"
-      @add-address="emit('add-address', $event)"
       @edit="emit('edit', $event)"
+      @menu="(e, node) => emit('menu', e, node)"
     />
   </template>
 </template>

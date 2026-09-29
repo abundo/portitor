@@ -249,6 +249,74 @@ async function onAddAddress(node) {
 function onAddPrefix(node) {
   editPrefix({ prefix: node.cidr })
 }
+// ----- context menu (right click on a row): the adds -----
+const menuItems = ref([])
+// The row's handler runs before the UContextMenu's: a row with nothing to
+// add (or a viewer) stops the event and gets the browser's own menu.
+function openMenu(event, items) {
+  if (!auth.isAdmin || !items.length) {
+    event.stopPropagation()
+    return
+  }
+  menuItems.value = items
+}
+const addHost = (folderId) => ({
+  label: 'Add host',
+  icon: 'i-lucide-plus',
+  onSelect: () => hostDialog.value.edit({ folder_id: folderId }),
+})
+const addList = (folderId) => ({
+  label: 'Add IP list',
+  icon: 'i-lucide-plus',
+  onSelect: () => listDialog.value.edit({ folder_id: folderId }),
+})
+const addFolder = (kind, parentId) => ({
+  label: 'Add folder',
+  icon: 'i-lucide-folder-plus',
+  onSelect: () => folderDialog.value.edit({ kind, parent_id: parentId }),
+})
+// A folder's menu adds into it; an item's adds next to it (its folder).
+function folderMenu(kind, folderId = null) {
+  return [[kind === 'hosts' ? addHost(folderId) : addList(folderId), addFolder(kind, folderId)]]
+}
+function listMenu(item) {
+  const menu = folderMenu('ip_lists', item.folder_id)
+  const s = states.value[item.name]
+  menu.unshift([
+    {
+      label: 'Download now',
+      icon: 'i-lucide-refresh-cw',
+      disabled: !s || s.state === 'fetching',
+      onSelect: () => refreshList(item),
+    },
+  ])
+  return menu
+}
+function groupMenu(key) {
+  if (key === 'group:hosts') return folderMenu('hosts')
+  if (key === 'group:lists') return folderMenu('ip_lists')
+  if (!store.currentId) return []
+  return [
+    [
+      { label: 'Add prefix', icon: 'i-lucide-git-branch-plus', onSelect: () => editPrefix({}) },
+      { label: 'Add address', icon: 'i-lucide-plus', onSelect: () => editAddress({}) },
+    ],
+  ]
+}
+function nodeMenu(node) {
+  if (node.kind !== 'prefix') return []
+  return [
+    [
+      { label: 'Add address', icon: 'i-lucide-plus', onSelect: () => onAddAddress(node) },
+      {
+        label: 'Add sub-prefix',
+        icon: 'i-lucide-git-branch-plus',
+        onSelect: () => onAddPrefix(node),
+      },
+    ],
+  ]
+}
+
 // An auto node has no IPAM entry yet: editing it creates one, for DHCP or
 // router advertisements on a prefix, a DNS name or MAC on an address.
 async function onEdit(node) {
@@ -342,7 +410,7 @@ async function removeAddress() {
           </div>
           <p class="max-w-3xl text-sm text-muted">
             Named hosts and prefixes, downloaded IP lists, and the instance's prefixes and addresses
-            with their DHCP and DNS settings.
+            with their DHCP and DNS settings. Right-click a row to add to it.
           </p>
         </div>
         <div v-if="auth.isAdmin" class="flex gap-2">
@@ -371,365 +439,293 @@ async function removeAddress() {
       <div v-if="loading" class="flex justify-center p-6">
         <UIcon name="i-lucide-loader-2" class="size-7 animate-spin" />
       </div>
-      <div v-else class="overflow-x-auto">
-        <table class="w-full text-sm">
-          <tbody>
-            <template v-for="g in groups" :key="g.key">
-              <tr class="border-b border-default bg-elevated/40">
-                <td class="w-px py-1 pr-2 whitespace-nowrap">
-                  <template v-if="auth.isAdmin">
-                    <template v-if="g.key === 'group:hosts'">
+      <UContextMenu v-else :items="menuItems">
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <tbody>
+              <template v-for="g in groups" :key="g.key">
+                <tr
+                  class="border-b border-default bg-elevated/40"
+                  @contextmenu="openMenu($event, groupMenu(g.key))"
+                >
+                  <td class="w-px py-1 pr-2 whitespace-nowrap"></td>
+                  <td class="py-1.5 pr-2">
+                    <div class="flex items-center gap-1">
                       <UButton
                         size="xs"
                         color="neutral"
                         variant="ghost"
-                        icon="i-lucide-plus"
-                        title="Add host"
-                        @click="hostDialog.edit()"
+                        :icon="
+                          collapsed.has(g.key) ? 'i-lucide-chevron-right' : 'i-lucide-chevron-down'
+                        "
+                        :aria-label="collapsed.has(g.key) ? 'Expand' : 'Collapse'"
+                        @click="toggle(g.key)"
                       />
-                      <UButton
-                        size="xs"
+                      <UIcon :name="g.icon" class="text-primary" />
+                      <span class="font-semibold whitespace-nowrap">{{ g.label }}</span>
+                      <UBadge
+                        v-if="g.count !== undefined"
                         color="neutral"
-                        variant="ghost"
-                        icon="i-lucide-folder-plus"
-                        title="Add folder"
-                        @click="folderDialog.edit({ kind: 'hosts' })"
+                        variant="subtle"
+                        size="sm"
+                        :label="String(g.count)"
                       />
-                    </template>
-                    <template v-else-if="g.key === 'group:lists'">
-                      <UButton
-                        size="xs"
-                        color="neutral"
-                        variant="ghost"
-                        icon="i-lucide-plus"
-                        title="Add IP list"
-                        @click="listDialog.edit()"
-                      />
-                      <UButton
-                        size="xs"
-                        color="neutral"
-                        variant="ghost"
-                        icon="i-lucide-folder-plus"
-                        title="Add folder"
-                        @click="folderDialog.edit({ kind: 'ip_lists' })"
-                      />
-                    </template>
-                    <template v-else-if="store.currentId">
-                      <UButton
-                        size="xs"
-                        color="neutral"
-                        variant="ghost"
-                        icon="i-lucide-plus"
-                        title="Add address"
-                        @click="editAddress({})"
-                      />
-                      <UButton
-                        size="xs"
-                        color="neutral"
-                        variant="ghost"
-                        icon="i-lucide-git-branch-plus"
-                        title="Add prefix"
-                        @click="editPrefix({})"
-                      />
-                    </template>
-                  </template>
-                </td>
-                <td class="py-1.5 pr-2">
-                  <div class="flex items-center gap-1">
-                    <UButton
-                      size="xs"
-                      color="neutral"
-                      variant="ghost"
-                      :icon="
-                        collapsed.has(g.key) ? 'i-lucide-chevron-right' : 'i-lucide-chevron-down'
-                      "
-                      :aria-label="collapsed.has(g.key) ? 'Expand' : 'Collapse'"
-                      @click="toggle(g.key)"
-                    />
-                    <UIcon :name="g.icon" class="text-primary" />
-                    <span class="font-semibold whitespace-nowrap">{{ g.label }}</span>
-                    <UBadge
-                      v-if="g.count !== undefined"
-                      color="neutral"
-                      variant="subtle"
-                      size="sm"
-                      :label="String(g.count)"
-                    />
-                  </div>
-                </td>
-                <td colspan="3" class="px-2 text-xs text-muted">{{ g.description }}</td>
-              </tr>
+                    </div>
+                  </td>
+                  <td colspan="3" class="px-2 text-xs text-muted">{{ g.description }}</td>
+                </tr>
 
-              <template v-if="!collapsed.has(g.key)">
-                <template v-if="g.key === 'group:hosts'">
-                  <template v-for="r in hostRows" :key="r.key">
-                    <tr v-if="r.folder" class="border-b border-default hover:bg-elevated/50">
-                      <td class="py-1 pr-2 whitespace-nowrap">
-                        <UButton
-                          size="xs"
-                          color="neutral"
-                          variant="ghost"
-                          :icon="auth.isAdmin ? 'i-lucide-pencil' : 'i-lucide-eye'"
-                          :aria-label="auth.isAdmin ? 'Edit' : 'View'"
-                          :title="auth.isAdmin ? 'Edit' : 'View'"
-                          @click="folderDialog.edit(r.folder)"
-                        />
-                        <template v-if="auth.isAdmin">
+                <template v-if="!collapsed.has(g.key)">
+                  <template v-if="g.key === 'group:hosts'">
+                    <template v-for="r in hostRows" :key="r.key">
+                      <tr
+                        v-if="r.folder"
+                        class="border-b border-default hover:bg-elevated/50"
+                        @contextmenu="openMenu($event, folderMenu('hosts', r.folder.id))"
+                      >
+                        <td class="py-1 pr-2 whitespace-nowrap">
                           <UButton
                             size="xs"
                             color="neutral"
                             variant="ghost"
-                            icon="i-lucide-plus"
-                            title="Add host here"
-                            @click="hostDialog.edit({ folder_id: r.folder.id })"
+                            :icon="auth.isAdmin ? 'i-lucide-pencil' : 'i-lucide-eye'"
+                            :aria-label="auth.isAdmin ? 'Edit' : 'View'"
+                            :title="auth.isAdmin ? 'Edit' : 'View'"
+                            @click="folderDialog.edit(r.folder)"
                           />
+                        </td>
+                        <td class="py-1.5 pr-2">
+                          <div class="flex items-center gap-1" :style="indent(r.depth)">
+                            <UButton
+                              size="xs"
+                              color="neutral"
+                              variant="ghost"
+                              :icon="
+                                collapsed.has(r.key)
+                                  ? 'i-lucide-chevron-right'
+                                  : 'i-lucide-chevron-down'
+                              "
+                              :aria-label="collapsed.has(r.key) ? 'Expand' : 'Collapse'"
+                              @click="toggle(r.key)"
+                            />
+                            <UIcon
+                              :name="
+                                collapsed.has(r.key) ? 'i-lucide-folder' : 'i-lucide-folder-open'
+                              "
+                              class="text-primary"
+                            />
+                            <span class="font-medium whitespace-nowrap">{{ r.folder.name }}</span>
+                            <UBadge
+                              color="neutral"
+                              variant="subtle"
+                              size="sm"
+                              :label="String(r.count)"
+                            />
+                          </div>
+                        </td>
+                        <td colspan="3" />
+                      </tr>
+                      <tr
+                        v-else
+                        class="border-b border-default hover:bg-elevated/50"
+                        @contextmenu="openMenu($event, folderMenu('hosts', r.item.folder_id))"
+                      >
+                        <td class="py-1 pr-2 whitespace-nowrap">
                           <UButton
                             size="xs"
                             color="neutral"
                             variant="ghost"
-                            icon="i-lucide-folder-plus"
-                            title="Add folder"
-                            @click="folderDialog.edit({ kind: 'hosts', parent_id: r.folder.id })"
+                            :icon="auth.isAdmin ? 'i-lucide-pencil' : 'i-lucide-eye'"
+                            :aria-label="auth.isAdmin ? 'Edit' : 'View'"
+                            :title="auth.isAdmin ? 'Edit' : 'View'"
+                            @click="hostDialog.edit(r.item)"
                           />
+                        </td>
+                        <td class="py-1.5 pr-2">
+                          <div class="flex items-center gap-1" :style="indent(r.depth)">
+                            <span class="inline-block w-6" />
+                            <UIcon
+                              :name="
+                                hostKind(r.item) === 'host' ? 'i-lucide-server' : 'i-lucide-network'
+                              "
+                              class="text-muted"
+                            />
+                            <span class="font-medium">{{ r.item.name }}</span>
+                          </div>
+                        </td>
+                        <td class="px-2 text-sm">{{ r.item.description }}</td>
+                        <td class="px-2 font-mono text-xs">{{ r.item.addresses?.join(', ') }}</td>
+                        <td class="px-2 text-xs whitespace-nowrap">
+                          <UBadge
+                            :color="hostKind(r.item) === 'host' ? 'primary' : 'neutral'"
+                            variant="subtle"
+                            :label="hostKind(r.item)"
+                          />
+                          <span class="ms-1 text-muted">{{ versions(r.item) }}</span>
+                        </td>
+                      </tr>
+                    </template>
+                    <tr v-if="!hostRows.length" class="border-b border-default">
+                      <td />
+                      <td colspan="4" class="py-2 pl-12 text-muted">No hosts yet.</td>
+                    </tr>
+                  </template>
+
+                  <template v-else-if="g.key === 'group:lists'">
+                    <template v-for="r in listRows" :key="r.key">
+                      <tr
+                        v-if="r.folder"
+                        class="border-b border-default hover:bg-elevated/50"
+                        @contextmenu="openMenu($event, folderMenu('ip_lists', r.folder.id))"
+                      >
+                        <td class="py-1 pr-2 whitespace-nowrap">
+                          <UButton
+                            size="xs"
+                            color="neutral"
+                            variant="ghost"
+                            :icon="auth.isAdmin ? 'i-lucide-pencil' : 'i-lucide-eye'"
+                            :aria-label="auth.isAdmin ? 'Edit' : 'View'"
+                            :title="auth.isAdmin ? 'Edit' : 'View'"
+                            @click="folderDialog.edit(r.folder)"
+                          />
+                        </td>
+                        <td class="py-1.5 pr-2">
+                          <div class="flex items-center gap-1" :style="indent(r.depth)">
+                            <UButton
+                              size="xs"
+                              color="neutral"
+                              variant="ghost"
+                              :icon="
+                                collapsed.has(r.key)
+                                  ? 'i-lucide-chevron-right'
+                                  : 'i-lucide-chevron-down'
+                              "
+                              :aria-label="collapsed.has(r.key) ? 'Expand' : 'Collapse'"
+                              @click="toggle(r.key)"
+                            />
+                            <UIcon
+                              :name="
+                                collapsed.has(r.key) ? 'i-lucide-folder' : 'i-lucide-folder-open'
+                              "
+                              class="text-primary"
+                            />
+                            <span class="font-medium whitespace-nowrap">{{ r.folder.name }}</span>
+                            <UBadge
+                              color="neutral"
+                              variant="subtle"
+                              size="sm"
+                              :label="String(r.count)"
+                            />
+                          </div>
+                        </td>
+                        <td colspan="3" />
+                      </tr>
+                      <tr
+                        v-else
+                        class="border-b border-default hover:bg-elevated/50"
+                        @contextmenu="openMenu($event, listMenu(r.item))"
+                      >
+                        <td class="py-1 pr-2 whitespace-nowrap">
+                          <UButton
+                            size="xs"
+                            color="neutral"
+                            variant="ghost"
+                            :icon="auth.isAdmin ? 'i-lucide-pencil' : 'i-lucide-eye'"
+                            :aria-label="auth.isAdmin ? 'Edit' : 'View'"
+                            :title="auth.isAdmin ? 'Edit' : 'View'"
+                            @click="listDialog.edit(r.item)"
+                          />
+                          <UButton
+                            v-if="auth.isAdmin"
+                            size="xs"
+                            color="neutral"
+                            variant="ghost"
+                            icon="i-lucide-refresh-cw"
+                            title="Download now"
+                            :disabled="
+                              !states[r.item.name] || states[r.item.name].state === 'fetching'
+                            "
+                            @click="refreshList(r.item)"
+                          />
+                        </td>
+                        <td class="py-1.5 pr-2">
+                          <div class="flex items-center gap-1" :style="indent(r.depth)">
+                            <span class="inline-block w-6" />
+                            <UIcon name="i-lucide-list" class="text-muted" />
+                            <span class="font-medium">@{{ r.item.name }}</span>
+                          </div>
+                        </td>
+                        <td class="px-2 text-sm">{{ r.item.description }}</td>
+                        <td class="px-2 text-xs">
+                          {{ sourceLabel[r.item.source] ?? r.item.source }}
+                          <span class="font-mono break-all text-muted">{{ r.item.url }}</span>
+                        </td>
+                        <td class="px-2 py-1">
+                          <div v-if="states[r.item.name]" class="space-y-0.5 text-xs">
+                            <UBadge
+                              :color="stateColor[states[r.item.name].state] ?? 'neutral'"
+                              variant="subtle"
+                              size="sm"
+                            >
+                              {{ states[r.item.name].state }}
+                            </UBadge>
+                            <div v-if="states[r.item.name].updated">
+                              {{ states[r.item.name].ipv4 }} IPv4,
+                              {{ states[r.item.name].ipv6 }} IPv6
+                              <span v-if="states[r.item.name].skipped" class="text-muted">
+                                ({{ states[r.item.name].skipped }} skipped)
+                              </span>
+                            </div>
+                            <div class="text-muted">
+                              updated {{ ago(states[r.item.name].updated) }}
+                            </div>
+                            <div v-if="states[r.item.name].last_error" class="text-error">
+                              {{ states[r.item.name].last_error }}
+                            </div>
+                          </div>
+                          <span v-else class="text-xs text-muted">not deployed</span>
+                        </td>
+                      </tr>
+                    </template>
+                    <tr v-if="!listRows.length" class="border-b border-default">
+                      <td />
+                      <td colspan="4" class="py-2 pl-12 text-muted">No IP lists yet.</td>
+                    </tr>
+                  </template>
+
+                  <template v-else>
+                    <IpamTreeRows
+                      v-if="tree.length"
+                      :nodes="tree"
+                      :depth="1"
+                      :collapsed="collapsed"
+                      :iface-name="ifaceName"
+                      :read-only="!auth.isAdmin"
+                      @toggle="toggle"
+                      @edit="onEdit"
+                      @menu="(e, node) => openMenu(e, nodeMenu(node))"
+                    />
+                    <tr v-else>
+                      <td />
+                      <td colspan="4" class="py-2 pl-12 text-muted">
+                        <template v-if="store.currentId">
+                          No prefixes yet. Give an interface an address under
+                          <RouterLink to="/interfaces" class="text-primary">Interfaces</RouterLink>,
+                          e.g. 192.168.1.1/24, or add a prefix.
+                        </template>
+                        <template v-else>
+                          No instance yet: create one under
+                          <RouterLink to="/instances" class="text-primary">Instances</RouterLink>.
                         </template>
                       </td>
-                      <td class="py-1.5 pr-2">
-                        <div class="flex items-center gap-1" :style="indent(r.depth)">
-                          <UButton
-                            size="xs"
-                            color="neutral"
-                            variant="ghost"
-                            :icon="
-                              collapsed.has(r.key)
-                                ? 'i-lucide-chevron-right'
-                                : 'i-lucide-chevron-down'
-                            "
-                            :aria-label="collapsed.has(r.key) ? 'Expand' : 'Collapse'"
-                            @click="toggle(r.key)"
-                          />
-                          <UIcon
-                            :name="
-                              collapsed.has(r.key) ? 'i-lucide-folder' : 'i-lucide-folder-open'
-                            "
-                            class="text-primary"
-                          />
-                          <span class="font-medium whitespace-nowrap">{{ r.folder.name }}</span>
-                          <UBadge
-                            color="neutral"
-                            variant="subtle"
-                            size="sm"
-                            :label="String(r.count)"
-                          />
-                        </div>
-                      </td>
-                      <td colspan="3" />
-                    </tr>
-                    <tr v-else class="border-b border-default hover:bg-elevated/50">
-                      <td class="py-1 pr-2 whitespace-nowrap">
-                        <UButton
-                          size="xs"
-                          color="neutral"
-                          variant="ghost"
-                          :icon="auth.isAdmin ? 'i-lucide-pencil' : 'i-lucide-eye'"
-                          :aria-label="auth.isAdmin ? 'Edit' : 'View'"
-                          :title="auth.isAdmin ? 'Edit' : 'View'"
-                          @click="hostDialog.edit(r.item)"
-                        />
-                      </td>
-                      <td class="py-1.5 pr-2">
-                        <div class="flex items-center gap-1" :style="indent(r.depth)">
-                          <span class="inline-block w-6" />
-                          <UIcon
-                            :name="
-                              hostKind(r.item) === 'host' ? 'i-lucide-server' : 'i-lucide-network'
-                            "
-                            class="text-muted"
-                          />
-                          <span class="font-medium">{{ r.item.name }}</span>
-                        </div>
-                      </td>
-                      <td class="px-2 text-sm">{{ r.item.description }}</td>
-                      <td class="px-2 font-mono text-xs">{{ r.item.addresses?.join(', ') }}</td>
-                      <td class="px-2 text-xs whitespace-nowrap">
-                        <UBadge
-                          :color="hostKind(r.item) === 'host' ? 'primary' : 'neutral'"
-                          variant="subtle"
-                          :label="hostKind(r.item)"
-                        />
-                        <span class="ms-1 text-muted">{{ versions(r.item) }}</span>
-                      </td>
                     </tr>
                   </template>
-                  <tr v-if="!hostRows.length" class="border-b border-default">
-                    <td />
-                    <td colspan="4" class="py-2 pl-12 text-muted">No hosts yet.</td>
-                  </tr>
-                </template>
-
-                <template v-else-if="g.key === 'group:lists'">
-                  <template v-for="r in listRows" :key="r.key">
-                    <tr v-if="r.folder" class="border-b border-default hover:bg-elevated/50">
-                      <td class="py-1 pr-2 whitespace-nowrap">
-                        <UButton
-                          size="xs"
-                          color="neutral"
-                          variant="ghost"
-                          :icon="auth.isAdmin ? 'i-lucide-pencil' : 'i-lucide-eye'"
-                          :aria-label="auth.isAdmin ? 'Edit' : 'View'"
-                          :title="auth.isAdmin ? 'Edit' : 'View'"
-                          @click="folderDialog.edit(r.folder)"
-                        />
-                        <template v-if="auth.isAdmin">
-                          <UButton
-                            size="xs"
-                            color="neutral"
-                            variant="ghost"
-                            icon="i-lucide-plus"
-                            title="Add IP list here"
-                            @click="listDialog.edit({ folder_id: r.folder.id })"
-                          />
-                          <UButton
-                            size="xs"
-                            color="neutral"
-                            variant="ghost"
-                            icon="i-lucide-folder-plus"
-                            title="Add folder"
-                            @click="folderDialog.edit({ kind: 'ip_lists', parent_id: r.folder.id })"
-                          />
-                        </template>
-                      </td>
-                      <td class="py-1.5 pr-2">
-                        <div class="flex items-center gap-1" :style="indent(r.depth)">
-                          <UButton
-                            size="xs"
-                            color="neutral"
-                            variant="ghost"
-                            :icon="
-                              collapsed.has(r.key)
-                                ? 'i-lucide-chevron-right'
-                                : 'i-lucide-chevron-down'
-                            "
-                            :aria-label="collapsed.has(r.key) ? 'Expand' : 'Collapse'"
-                            @click="toggle(r.key)"
-                          />
-                          <UIcon
-                            :name="
-                              collapsed.has(r.key) ? 'i-lucide-folder' : 'i-lucide-folder-open'
-                            "
-                            class="text-primary"
-                          />
-                          <span class="font-medium whitespace-nowrap">{{ r.folder.name }}</span>
-                          <UBadge
-                            color="neutral"
-                            variant="subtle"
-                            size="sm"
-                            :label="String(r.count)"
-                          />
-                        </div>
-                      </td>
-                      <td colspan="3" />
-                    </tr>
-                    <tr v-else class="border-b border-default hover:bg-elevated/50">
-                      <td class="py-1 pr-2 whitespace-nowrap">
-                        <UButton
-                          size="xs"
-                          color="neutral"
-                          variant="ghost"
-                          :icon="auth.isAdmin ? 'i-lucide-pencil' : 'i-lucide-eye'"
-                          :aria-label="auth.isAdmin ? 'Edit' : 'View'"
-                          :title="auth.isAdmin ? 'Edit' : 'View'"
-                          @click="listDialog.edit(r.item)"
-                        />
-                        <UButton
-                          v-if="auth.isAdmin"
-                          size="xs"
-                          color="neutral"
-                          variant="ghost"
-                          icon="i-lucide-refresh-cw"
-                          title="Download now"
-                          :disabled="
-                            !states[r.item.name] || states[r.item.name].state === 'fetching'
-                          "
-                          @click="refreshList(r.item)"
-                        />
-                      </td>
-                      <td class="py-1.5 pr-2">
-                        <div class="flex items-center gap-1" :style="indent(r.depth)">
-                          <span class="inline-block w-6" />
-                          <UIcon name="i-lucide-list" class="text-muted" />
-                          <span class="font-medium">@{{ r.item.name }}</span>
-                        </div>
-                      </td>
-                      <td class="px-2 text-sm">{{ r.item.description }}</td>
-                      <td class="px-2 text-xs">
-                        {{ sourceLabel[r.item.source] ?? r.item.source }}
-                        <span class="font-mono break-all text-muted">{{ r.item.url }}</span>
-                      </td>
-                      <td class="px-2 py-1">
-                        <div v-if="states[r.item.name]" class="space-y-0.5 text-xs">
-                          <UBadge
-                            :color="stateColor[states[r.item.name].state] ?? 'neutral'"
-                            variant="subtle"
-                            size="sm"
-                          >
-                            {{ states[r.item.name].state }}
-                          </UBadge>
-                          <div v-if="states[r.item.name].updated">
-                            {{ states[r.item.name].ipv4 }} IPv4, {{ states[r.item.name].ipv6 }} IPv6
-                            <span v-if="states[r.item.name].skipped" class="text-muted">
-                              ({{ states[r.item.name].skipped }} skipped)
-                            </span>
-                          </div>
-                          <div class="text-muted">
-                            updated {{ ago(states[r.item.name].updated) }}
-                          </div>
-                          <div v-if="states[r.item.name].last_error" class="text-error">
-                            {{ states[r.item.name].last_error }}
-                          </div>
-                        </div>
-                        <span v-else class="text-xs text-muted">not deployed</span>
-                      </td>
-                    </tr>
-                  </template>
-                  <tr v-if="!listRows.length" class="border-b border-default">
-                    <td />
-                    <td colspan="4" class="py-2 pl-12 text-muted">No IP lists yet.</td>
-                  </tr>
-                </template>
-
-                <template v-else>
-                  <IpamTreeRows
-                    v-if="tree.length"
-                    :nodes="tree"
-                    :depth="1"
-                    :collapsed="collapsed"
-                    :iface-name="ifaceName"
-                    :read-only="!auth.isAdmin"
-                    @toggle="toggle"
-                    @add-prefix="onAddPrefix"
-                    @add-address="onAddAddress"
-                    @edit="onEdit"
-                  />
-                  <tr v-else>
-                    <td />
-                    <td colspan="4" class="py-2 pl-12 text-muted">
-                      <template v-if="store.currentId">
-                        No prefixes yet. Give an interface an address under
-                        <RouterLink to="/interfaces" class="text-primary">Interfaces</RouterLink>,
-                        e.g. 192.168.1.1/24, or add a prefix.
-                      </template>
-                      <template v-else>
-                        No instance yet: create one under
-                        <RouterLink to="/instances" class="text-primary">Instances</RouterLink>.
-                      </template>
-                    </td>
-                  </tr>
                 </template>
               </template>
-            </template>
-          </tbody>
-        </table>
-      </div>
+            </tbody>
+          </table>
+        </div>
+      </UContextMenu>
     </div>
 
     <HostDialog ref="hostDialog" :folders="folders" @changed="reloadHosts" />
