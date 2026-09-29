@@ -43,6 +43,7 @@ const modes = [
 
 const columns = [
   { key: 'name', label: 'Interface', class: 'font-mono font-medium' },
+  { key: 'description', label: 'Description' },
   {
     key: 'kind',
     label: 'Kind',
@@ -53,7 +54,6 @@ const columns = [
   { key: 'ipv4_mode', label: 'IPv4' },
   { key: 'addresses', label: 'Addresses' },
   { key: 'enabled', label: 'Up' },
-  { key: 'description', label: 'Description' },
 ]
 
 const fields = [
