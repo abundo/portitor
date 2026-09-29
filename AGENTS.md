@@ -153,6 +153,22 @@ are in [README.md](README.md).
   against a regex before it becomes an argument to `install.py`. `install.py
   --list --json` is the interface between agent and installer; keep its fields stable.
 
+## GUI design rules
+
+Apply these to every page, `CrudPage` and custom pages alike.
+
+- **Tables:** the Edit button is the first column, so it stays visible when the
+  table is wider than the screen. Tables have no Delete button.
+- **Delete** lives in the detail view (Edit → the form). It asks for confirmation
+  and names what will be deleted ("Delete interface WAN (ens18)?"), with Yes / No.
+- **Forms and dialogs** are wide when the screen allows: each label sits on the
+  same row as its value. On a narrow screen they fall back to one column, with the
+  label above the value.
+- **Exceptions:** the rules list (`RulesTable`: a click opens the rule, the
+  context menu deletes) and the DNS zone records grid (`ZoneRecordsTable`: edited
+  in place, no detail view) are exempt from the table rules. The rule's form is
+  not: it follows the form and delete rules.
+
 ## Adding a feature end to end
 
 1. Add fields to `fwconfig` and validate them in `validate.go` (with a test case).
