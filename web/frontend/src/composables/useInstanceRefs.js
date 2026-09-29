@@ -24,10 +24,21 @@ export function useInstanceRefs() {
   }
   watch(() => store.currentId, load, { immediate: true })
 
+  // ifaceText shows an interface name of the instance with its label:
+  // "WAN (ens18)", or the bare name when it has none (link ends, zones).
+  const labels = computed(() => new Map(ifaceList.value.map((i) => [i.name, i.label])))
+  const ifaceText = (name) => withLabel(labels.value.get(name), name)
+  // ifaceListText renders a rule's interface list; empty matches any interface.
+  const ifaceListText = (list) => (list?.length ? list.map(ifaceText).join(', ') : 'any')
+
   const ifaceItems = computed(() =>
-    ifaceList.value.map((i) => ({ label: i.name, value: i.id, description: i.description || '' })),
+    ifaceList.value.map((i) => ({
+      label: ifaceText(i.name),
+      value: i.id,
+      description: i.description || '',
+    })),
   )
-  const ifaceName = (id) => ifaceList.value.find((i) => i.id === id)?.name ?? ''
+  const ifaceName = (id) => ifaceText(ifaceList.value.find((i) => i.id === id)?.name ?? '')
 
   // Interface names of the instance: its interfaces and its link ends.
   const ifaceNames = computed(() => {
@@ -44,7 +55,7 @@ export function useInstanceRefs() {
     ...ifaceNames.value,
   ])
   // The same as select items ({ label, value, description }), so pickers can
-  // show each interface's and zone's description next to its name.
+  // show each interface's label and each interface's and zone's description.
   const ifaceRefItems = computed(() => {
     const id = store.currentId
     const desc = new Map(ifaceList.value.map((i) => [i.name, i.description]))
@@ -58,7 +69,11 @@ export function useInstanceRefs() {
         value: z.name,
         description: z.description ? `zone: ${z.description}` : 'zone',
       })),
-      ...ifaceNames.value.map((n) => ({ label: n, value: n, description: desc.get(n) || '' })),
+      ...ifaceNames.value.map((n) => ({
+        label: ifaceText(n),
+        value: n,
+        description: desc.get(n) || '',
+      })),
     ]
   })
   const zonesOf = (name) =>
@@ -70,6 +85,8 @@ export function useInstanceRefs() {
     ifaceList,
     ifaceItems,
     ifaceName,
+    ifaceText,
+    ifaceListText,
     ifaceNames,
     ifaceRefNames,
     ifaceRefItems,
@@ -80,5 +97,5 @@ export function useInstanceRefs() {
 
 export const actionColor = { accept: 'success', drop: 'error', reject: 'warning' }
 
-// ifaceListLabel renders a rule's interface list; empty matches any interface.
-export const ifaceListLabel = (list) => (list?.length ? list.join(', ') : 'any')
+// withLabel shows a name after its label: "WAN (ens18)".
+export const withLabel = (label, name) => (label && name ? `${label} (${name})` : name)

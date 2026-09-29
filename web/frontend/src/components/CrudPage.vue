@@ -43,6 +43,9 @@ const props = defineProps({
   // Resource name for POST /api/<reorder>/reorder; enables drag-and-drop.
   reorder: { type: String, default: '' },
   blockedReason: { type: String, default: '' },
+  // Row actions (edit, delete) in the first column rather than the last, so
+  // they stay in view on a wide table.
+  actionsFirst: { type: Boolean, default: false },
   // itemName(row, rows) names a row in prompts.
   itemName: { type: Function, default: (row) => row.name ?? `#${row.id}` },
 })
@@ -65,13 +68,17 @@ const NONE = 0
 // The info popover opens on hover, and on a click for touch screens.
 const infoOpen = ref(false)
 
-const tableColumns = computed(() => [
-  ...(props.reorder && !readOnly.value
-    ? [{ id: 'drag', header: '', meta: { class: { td: 'w-7 px-1' } } }]
-    : []),
-  ...props.columns.map((c) => ({ accessorKey: c.key, header: c.label })),
-  { id: 'actions', header: '' },
-])
+const tableColumns = computed(() => {
+  const actions = { id: 'actions', header: '' }
+  return [
+    ...(props.reorder && !readOnly.value
+      ? [{ id: 'drag', header: '', meta: { class: { td: 'w-7 px-1' } } }]
+      : []),
+    ...(props.actionsFirst ? [actions] : []),
+    ...props.columns.map((c) => ({ accessorKey: c.key, header: c.label })),
+    ...(props.actionsFirst ? [] : [actions]),
+  ]
+})
 
 function display(col, row) {
   if (col.format) return col.format(row, rows.value)
@@ -337,7 +344,7 @@ defineExpose({ reload: load, openEdit, openCreate })
           </slot>
         </template>
         <template #actions-cell="{ row }">
-          <div class="flex justify-end gap-1">
+          <div class="flex gap-1" :class="actionsFirst ? 'justify-start' : 'justify-end'">
             <slot name="row-actions" :row="row.original" />
             <UButton
               size="xs"

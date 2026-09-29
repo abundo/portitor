@@ -178,7 +178,15 @@ func TestValidationAndSecrets(t *testing.T) {
 		t.Errorf("duplicate: %d", rec.Code)
 	}
 	other := env.create("/api/instances", map[string]any{"name": "guest"})
-	env.create("/api/interfaces", map[string]any{"instance_id": other, "name": "eth2"})
+	env.create("/api/interfaces", map[string]any{"instance_id": other, "name": "eth2", "label": " LAN "})
+	var eth2 models.Interface
+	env.srv.db.Where("name = ?", "eth2").First(&eth2)
+	if eth2.Label != "LAN" {
+		t.Errorf("label %q", eth2.Label)
+	}
+	if rec := env.do("POST", "/api/interfaces", map[string]any{"instance_id": other, "name": "eth3", "label": "a\nb"}); rec.Code != http.StatusBadRequest {
+		t.Errorf("label with a newline accepted: %d", rec.Code)
+	}
 	if rec := env.do("POST", "/api/interface-zones", map[string]any{"instance_id": inst, "name": "lan", "interfaces": []string{"eth2"}}); rec.Code != http.StatusBadRequest {
 		t.Errorf("interface of another instance accepted in a zone: %d", rec.Code)
 	}

@@ -7,7 +7,7 @@ import NeedInstance from '@/components/NeedInstance.vue'
 import { interfaceZones } from '@/api'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
 
-const { store, ifaceNames, reload } = useInstanceRefs()
+const { store, ifaceNames, ifaceText, reload } = useInstanceRefs()
 const columns = [
   { key: 'name', label: 'Zone', class: 'font-medium' },
   { key: 'interfaces', label: 'Interfaces' },
@@ -20,7 +20,7 @@ const fields = [
     key: 'interfaces',
     label: 'Interfaces',
     type: 'multiselect',
-    items: () => ifaceNames.value,
+    items: () => ifaceNames.value.map((n) => ({ label: ifaceText(n), value: n })),
     placeholder: 'none',
     hint: 'Zero or more interfaces of this instance, link ends included. An interface may be in several zones.',
   },
@@ -42,7 +42,7 @@ const fields = [
     >
       <template #cell-interfaces="{ row }">
         <span v-if="row.interfaces?.length" class="font-mono text-xs">{{
-          row.interfaces.join(', ')
+          row.interfaces.map(ifaceText).join(', ')
         }}</span>
         <span v-else class="text-xs text-muted italic">empty</span>
       </template>

@@ -196,8 +196,10 @@ type InterfaceZone struct {
 
 type Interface struct {
 	Base
-	InstanceID   uint       `json:"instance_id"`
-	Name         string     `json:"name"`
+	InstanceID uint   `json:"instance_id"`
+	Name       string `json:"name"`
+	// Label is a short name the GUI shows before the interface name.
+	Label        string     `json:"label"`
 	Kind         string     `json:"kind"`
 	Description  string     `json:"description"`
 	Enabled      bool       `json:"enabled"`

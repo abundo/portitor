@@ -9,7 +9,7 @@ import { interfaces, ipamAddresses } from '@/api'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
 import { useDeployStore } from '@/stores/deploy'
 
-const { store, zonesOf, reload } = useInstanceRefs()
+const { store, ifaceList, ifaceText, zonesOf, reload } = useInstanceRefs()
 const addrs = ref([])
 const deploy = useDeployStore()
 const isMissing = (row) =>
@@ -43,18 +43,30 @@ const modes = [
 
 const columns = [
   { key: 'name', label: 'Interface', class: 'font-mono font-medium' },
-  { key: 'description', label: 'Description' },
+  { key: 'label', label: 'Label', class: 'font-medium' },
   {
     key: 'kind',
     label: 'Kind',
-    format: (r) => (r.kind === 'vlan' ? `vlan ${r.vlan_id} on ${r.parent}` : r.kind),
+    format: (r) => (r.kind === 'vlan' ? `vlan ${r.vlan_id} on ${ifaceText(r.parent)}` : r.kind),
   },
   { key: 'mac', label: 'MAC', class: 'font-mono text-xs', format: macOf },
   { key: 'zones', label: 'Zones', format: (r) => zonesOf(r.name).join(', ') },
   { key: 'ipv4_mode', label: 'IPv4' },
   { key: 'addresses', label: 'Addresses' },
   { key: 'enabled', label: 'Up' },
+  { key: 'description', label: 'Description' },
 ]
+
+// Other interfaces of the instance, as items that show their labels, for a
+// VLAN's parent and a bridge's members; a name the form holds but the
+// instance lacks stays listed.
+function otherIfaces(f, keep = []) {
+  const names = ifaceList.value.filter((i) => i.id !== f.id).map((i) => i.name)
+  return [...new Set([...names, ...keep.filter(Boolean)])].map((n) => ({
+    label: ifaceText(n),
+    value: n,
+  }))
+}
 
 const fields = [
   {
@@ -63,6 +75,12 @@ const fields = [
     required: true,
     placeholder: 'eth0',
     hint: 'The Linux interface name.',
+  },
+  {
+    key: 'label',
+    label: 'Label',
+    placeholder: 'WAN',
+    hint: 'A short name shown before the interface name wherever an interface is picked: WAN (ens18).',
   },
   {
     key: 'instance_id',
@@ -75,13 +93,19 @@ const fields = [
   { key: 'kind', label: 'Kind', type: 'select', items: kinds, disabled: (f) => !!f.id },
   { key: 'description', label: 'Description' },
   { key: 'enabled', label: 'Enabled', type: 'switch' },
-  { key: 'parent', label: 'Parent interface', placeholder: 'eth1', show: (f) => f.kind === 'vlan' },
+  {
+    key: 'parent',
+    label: 'Parent interface',
+    type: 'select',
+    items: (f) => otherIfaces(f, [f.parent]),
+    show: (f) => f.kind === 'vlan',
+  },
   { key: 'vlan_id', label: 'VLAN id', type: 'number', show: (f) => f.kind === 'vlan' },
   {
     key: 'members',
     label: 'Bridge members',
-    type: 'tags',
-    placeholder: 'eth2',
+    type: 'multiselect',
+    items: (f) => otherIfaces(f),
     show: (f) => f.kind === 'bridge',
   },
   {
@@ -146,8 +170,10 @@ function dhcpAddressOf(row) {
       :params="{ instance_id: store.currentId }"
       :columns="columns"
       :fields="fields"
+      actions-first
       :defaults="{
         kind: 'physical',
+        label: '',
         enabled: true,
         ipv4_mode: 'static',
         members: [],

@@ -389,10 +389,16 @@ func bootstrapIface(tx *gorm.DB, instanceID uint, name string, address netip.Pre
 	old := ifc
 	ifc.Enabled = true
 	ifc.DhcpNoDefaultRoute = noRoute
-	// The role, unless the user has described the interface.
+	// The role as label, unless the user has labelled the interface; the
+	// description goes if the user has not written one (bootstrap used to
+	// put the role there).
+	switch ifc.Label {
+	case "", "LAN", "WAN":
+		ifc.Label = prefixDesc
+	}
 	switch ifc.Description {
-	case "", "found on the firewall", "LAN", "WAN":
-		ifc.Description = prefixDesc
+	case "found on the firewall", "LAN", "WAN":
+		ifc.Description = ""
 	}
 	switch {
 	case !address.IsValid():

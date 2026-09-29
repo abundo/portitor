@@ -5,9 +5,9 @@
 import CrudPage from '@/components/CrudPage.vue'
 import NeedInstance from '@/components/NeedInstance.vue'
 import { nat } from '@/api'
-import { ifaceListLabel, useInstanceRefs } from '@/composables/useInstanceRefs'
+import { useInstanceRefs } from '@/composables/useInstanceRefs'
 
-const { store, ifaceRefItems } = useInstanceRefs()
+const { store, ifaceRefItems, ifaceListText } = useInstanceRefs()
 
 const kinds = [
   { label: 'Port forward (DNAT)', value: 'dnat' },
@@ -23,14 +23,7 @@ const protos = [
 const protoLabel = (p) => (p === 'tcp,udp' ? 'tcp+udp' : p)
 // natIfaces returns the interface list a NAT rule matches on, by its kind.
 const natIfaces = (r) => (r.kind === 'dnat' ? r.in_interfaces : r.out_interfaces)
-const natIfacesLabel = (r) => `${r.kind === 'dnat' ? 'in' : 'out'}: ${ifaceListLabel(natIfaces(r))}`
-const ifaceDescs = (list) => {
-  const desc = new Map(ifaceRefItems.value.map((it) => [it.value, it.description]))
-  return (list ?? [])
-    .map((n) => desc.get(n))
-    .filter(Boolean)
-    .join(', ')
-}
+const natIfacesLabel = (r) => `${r.kind === 'dnat' ? 'in' : 'out'}: ${ifaceListText(natIfaces(r))}`
 
 // natNo numbers a NAT rule by its place in the list; natName names it like
 // the server's messages: "NAT rule 3 (description)".
@@ -152,12 +145,6 @@ const api = {
       reorder="nat"
       :item-name="natName"
     >
-      <template #cell-ifaces="{ row }">
-        <div>{{ natIfacesLabel(row) }}</div>
-        <div v-if="ifaceDescs(natIfaces(row))" class="text-xs text-muted">
-          {{ ifaceDescs(natIfaces(row)) }}
-        </div>
-      </template>
     </CrudPage>
   </NeedInstance>
 </template>

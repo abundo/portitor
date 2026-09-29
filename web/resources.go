@@ -8,6 +8,7 @@ import (
 	"net/netip"
 	"slices"
 	"strings"
+	"unicode"
 
 	"gorm.io/gorm"
 
@@ -138,6 +139,10 @@ func prepareInterface(tx *gorm.DB, i, old *models.Interface) error {
 	i.Name = strings.TrimSpace(i.Name)
 	if !fwconfig.ValidIfname(i.Name) || i.Name == "lo" {
 		return bad("name: a Linux interface name (at most 15 characters, no spaces)")
+	}
+	i.Label = strings.TrimSpace(i.Label)
+	if len(i.Label) > 32 || strings.ContainsFunc(i.Label, unicode.IsControl) {
+		return bad("label: at most 32 characters, no control characters")
 	}
 	if i.Kind == "" {
 		i.Kind = fwconfig.KindPhysical

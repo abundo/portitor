@@ -8,6 +8,7 @@ import QRCode from 'qrcode'
 import CrudPage from '@/components/CrudPage.vue'
 import NeedInstance from '@/components/NeedInstance.vue'
 import { api, interfaces, wgPeers } from '@/api'
+import { withLabel } from '@/composables/useInstanceRefs'
 import { errMsg } from '@/api/http'
 import { useInstanceStore } from '@/stores/instances'
 import { useDeployStore } from '@/stores/deploy'
@@ -57,7 +58,9 @@ function peerDefaults() {
     public_key: '',
   }
 }
-const tunnelItems = computed(() => tunnels.value.map((t) => ({ label: t.name, value: t.id })))
+const tunnelItems = computed(() =>
+  tunnels.value.map((t) => ({ label: withLabel(t.label, t.name), value: t.id })),
+)
 
 // Handshakes from the agent status, by peer public key.
 const handshakes = computed(() => {
@@ -80,7 +83,7 @@ function ago(t) {
 async function rekey() {
   if (
     !window.confirm(
-      `Generate a new key for ${selected.value.name}? Every peer needs the new public key.`,
+      `Generate a new key for ${withLabel(selected.value.label, selected.value.name)}? Every peer needs the new public key.`,
     )
   )
     return
@@ -243,7 +246,7 @@ function copy(text) {
       <CrudPage
         v-if="selected"
         :key="selected.id"
-        :title="`Peers of ${selected.name}`"
+        :title="`Peers of ${withLabel(selected.label, selected.name)}`"
         description="Remote devices and sites. Changes take effect on the next deploy."
         :api="wgPeers"
         :params="{ interface_id: selected.id }"

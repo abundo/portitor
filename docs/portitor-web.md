@@ -89,7 +89,7 @@ After an upgrade, run `migrate` before `start`. `install.py` does both.
 | | Deploy | Check, preview, apply, history. |
 | Network | Instances | Virtual routers. `main` is the host; others are network namespaces. |
 | | Links | veth pairs between instances. |
-| | Interfaces | Physical, VLAN, bridge, WireGuard interfaces; WAN DHCP client. The *Instance* field moves one to another instance. |
+| | Interfaces | Physical, VLAN, bridge, WireGuard interfaces; WAN DHCP client. A *Label* such as WAN is shown before the name wherever an interface is picked: WAN (ens18). The *Instance* field moves one to another instance. |
 | | Routes | Static routes. |
 | | IP addresses | The prefix tree: prefixes, addresses, DHCP scopes, router advertisements, DNS names. |
 | | Hosts & prefixes | Named addresses, usable wherever addresses are entered. |

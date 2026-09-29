@@ -27,6 +27,17 @@ func (f *applyAgent) Apply(_ context.Context, doc fwconfig.Document, _ int) (*ag
 	return &agentapi.ApplyResult{Generation: doc.Generation}, nil
 }
 
+// ifaceLabel returns the label of an interface in the database; the label
+// stays there, so the applied document lacks it.
+func ifaceLabel(t *testing.T, s *Server, name string) string {
+	t.Helper()
+	var ifc models.Interface
+	if err := s.db.Where("name = ?", name).First(&ifc).Error; err != nil {
+		t.Fatal(err)
+	}
+	return ifc.Label
+}
+
 func TestBootstrap(t *testing.T) {
 	env := newEnv(t)
 	fake := &applyAgent{statusAgent: statusAgent{nics: []agentapi.NICStatus{
@@ -106,8 +117,8 @@ func TestBootstrap(t *testing.T) {
 	if !gui {
 		t.Errorf("no GUI rule in %+v", in.Rules)
 	}
-	if lan.Description != "LAN" {
-		t.Errorf("LAN description %q", lan.Description)
+	if l := ifaceLabel(t, env.srv, "enp2s0"); l != "LAN" {
+		t.Errorf("LAN label %q", l)
 	}
 	for _, r := range in.Rules {
 		if r.Chain == fwconfig.ChainForward {
@@ -168,8 +179,8 @@ func TestBootstrapWAN(t *testing.T) {
 			if len(in.Routes) != tc.routes || (tc.routes == 1 && in.Routes[0].Gateway != tc.gateway) {
 				t.Errorf("routes %+v", in.Routes)
 			}
-			if wan.Description != "WAN" {
-				t.Errorf("WAN description %q", wan.Description)
+			if l := ifaceLabel(t, env.srv, "enp1s0"); l != "WAN" {
+				t.Errorf("WAN label %q", l)
 			}
 			var ssh, forward, output bool
 			for _, r := range in.Rules {
@@ -266,8 +277,8 @@ func TestBootstrapReconfigure(t *testing.T) {
 	if len(in.NAT) != 1 || !slices.Equal(in.NAT[0].OutInterfaces, []string{"enp2s0"}) {
 		t.Errorf("NAT %+v", in.NAT)
 	}
-	if lan, wan := iface("enp1s0"), iface("enp2s0"); lan.Description != "LAN" || wan.Description != "WAN" {
-		t.Errorf("descriptions %q %q", lan.Description, wan.Description)
+	if lan, wan := ifaceLabel(t, env.srv, "enp1s0"), ifaceLabel(t, env.srv, "enp2s0"); lan != "LAN" || wan != "WAN" {
+		t.Errorf("labels %q %q", lan, wan)
 	}
 
 	// Back to a DHCP WAN: no default route, no WAN address.

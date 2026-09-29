@@ -11,7 +11,7 @@ import { datetime } from '@/utils/time'
 
 const deploy = useDeployStore()
 const instances = useInstanceStore()
-const { ifaceRefItems } = useInstanceRefs()
+const { ifaceRefItems, ifaceText } = useInstanceRefs()
 onMounted(() => deploy.watch())
 onUnmounted(() => deploy.unwatch())
 
@@ -140,7 +140,7 @@ const stateColor = (s) =>
             :key="l.interface"
             class="border-b border-default align-top last:border-0"
           >
-            <td class="py-1.5 pr-4 font-mono">{{ l.interface }}</td>
+            <td class="py-1.5 pr-4 font-mono">{{ ifaceText(l.interface) }}</td>
             <td class="py-1.5 pr-4">{{ ifaceDesc.get(l.interface) }}</td>
             <td class="py-1.5 pr-4">
               <UBadge
@@ -177,7 +177,7 @@ const stateColor = (s) =>
           </thead>
           <tbody>
             <tr v-for="i in ifaces" :key="i.name" class="border-b border-default last:border-0">
-              <td class="py-1.5 pr-4 font-mono">{{ i.name }}</td>
+              <td class="py-1.5 pr-4 font-mono">{{ ifaceText(i.name) }}</td>
               <td class="pr-4">{{ ifaceDesc.get(i.name) }}</td>
               <td class="pr-4">
                 <UBadge :color="stateColor(i.state)" variant="subtle" :label="i.state" />

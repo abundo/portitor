@@ -65,8 +65,8 @@ when you picked them the wrong way round.
 Then it creates the database, starts the agent and the GUI, and deploys a first
 configuration:
 
-- the LAN interface with its address, or DHCP, described as *LAN*,
-- the WAN interface, with DHCP or its static address, described as *WAN*,
+- the LAN interface with its address, or DHCP, labelled *LAN*,
+- the WAN interface, with DHCP or its static address, labelled *WAN*,
 - the default route (for a static WAN),
 - three input rules, *portitor-web from the LAN* (TCP 443), *SSH from the LAN* and
   *ping from the LAN*,
@@ -108,8 +108,8 @@ It then deploys at once, without the confirm timeout:
 - the rules *portitor-web from the LAN*, *SSH from the LAN* and *ping from the LAN*
   are enabled and match the new LAN interface; the rule *LAN to WAN* and the NAT rule
   *masquerade to the WAN*, if they are still there, match the new LAN and WAN;
-- the LAN and WAN are described as *LAN* and *WAN*, unless you gave them another
-  description;
+- the LAN and WAN are labelled *LAN* and *WAN*, unless you gave them another
+  label;
 - a new GUI certificate is made when the LAN address changes, so the browser warns
   again; the new fingerprint is shown.
 

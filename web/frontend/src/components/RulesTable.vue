@@ -33,8 +33,9 @@ const props = defineProps({
   // Rules the agent adds for configured services and its anti-lockout rule
   // (render.AutoRule), shown read-only above the others.
   auto: { type: Array, default: () => [] },
-  // Interface zones and interfaces of the instance ({ value, description }),
-  // for suggestions.
+  // Interface zones and interfaces of the instance ({ label, value,
+  // description }; label is "WAN (ens18)" for a labelled interface), for
+  // suggestions and the label line under a cell.
   ifaces: { type: Array, required: true },
   // Traffic per rule id since the last deploy (agentapi.RuleCounters), or
   // null when unknown.
@@ -143,8 +144,14 @@ function searchCells(r) {
     action: r.action,
     description: r.description,
   }
-  if (hasFrom.value) cells.in_interfaces = listText(r.in_interfaces)
-  if (hasTo.value) cells.out_interfaces = listText(r.out_interfaces)
+  if (hasFrom.value) {
+    cells.in_interfaces = listText(r.in_interfaces)
+    cells.in_labels = ifaceLabels(r.in_interfaces)
+  }
+  if (hasTo.value) {
+    cells.out_interfaces = listText(r.out_interfaces)
+    cells.out_labels = ifaceLabels(r.out_interfaces)
+  }
   return cells
 }
 // matches maps the id of each matching row to the keys of its matching cells.
@@ -314,20 +321,23 @@ const contextItems = computed(() => {
   return items
 })
 
-// ifaceTitle lists a cell's interfaces with their descriptions.
-const ifaceDesc = computed(() => new Map(props.ifaces.map((it) => [it.value, it.description])))
+// ifaceTitle lists a cell's interfaces with their labels and descriptions.
+const ifaceItem = computed(() => new Map(props.ifaces.map((it) => [it.value, it])))
+const ifaceLabel = (n) => ifaceItem.value.get(n)?.label || n
 function ifaceTitle(list, empty) {
   if (!list?.length) return empty
   return list
-    .map((n) => (ifaceDesc.value.get(n) ? `${n}: ${ifaceDesc.value.get(n)}` : n))
+    .map((n) => {
+      const desc = ifaceItem.value.get(n)?.description
+      return desc ? `${ifaceLabel(n)}: ${desc}` : ifaceLabel(n)
+    })
     .join('\n')
 }
-// ifaceDescs shows a cell's interface descriptions under its names.
-function ifaceDescs(list) {
-  return (list ?? [])
-    .map((n) => ifaceDesc.value.get(n))
-    .filter(Boolean)
-    .join(', ')
+// ifaceLabels shows a cell's interfaces as "WAN (ens18)" under the names
+// the cell holds; '' when none of them has a label.
+function ifaceLabels(list) {
+  if (!(list ?? []).some((n) => ifaceLabel(n) !== n)) return ''
+  return list.map(ifaceLabel).join(', ')
 }
 
 // A datalist only offers options that start with the input's text, so the
@@ -385,6 +395,12 @@ function listSuggestions(names, text) {
     }
   }
   return out
+}
+// suggestionLabel shows an interface suggestion's label, if it has one
+// besides its name, and its description.
+function suggestionLabel(it) {
+  const label = it.label && !it.value.endsWith(it.label) ? it.label : ''
+  return [label, it.description].filter(Boolean).join(' — ') || undefined
 }
 // "any" comes first in the suggestions; picking it empties the cell.
 const anySuggestion = { value: 'any', description: 'clears the list' }
@@ -682,8 +698,8 @@ function onKeydown(event, index) {
                 <span :class="{ 'text-muted': !a.in_interfaces?.length }">{{
                   a.in_interfaces?.length ? a.in_interfaces.join(', ') : 'any'
                 }}</span>
-                <div v-if="ifaceDescs(a.in_interfaces)" class="iface-desc">
-                  {{ ifaceDescs(a.in_interfaces) }}
+                <div v-if="ifaceLabels(a.in_interfaces)" class="iface-desc">
+                  {{ ifaceLabels(a.in_interfaces) }}
                 </div>
               </td>
               <td v-if="hasTo"><span class="text-muted">any</span></td>
@@ -857,8 +873,13 @@ function onKeydown(event, index) {
                     @blur="endDraft"
                     @keydown="onKeydown($event, i)"
                   />
-                  <div v-if="ifaceDescs(r.in_interfaces)" class="iface-desc">
-                    {{ ifaceDescs(r.in_interfaces) }}
+                  <div
+                    v-if="isHit(r, 'in_labels')"
+                    class="iface-desc"
+                    v-html="highlight(ifaceLabels(r.in_interfaces))"
+                  />
+                  <div v-else-if="ifaceLabels(r.in_interfaces)" class="iface-desc">
+                    {{ ifaceLabels(r.in_interfaces) }}
                   </div>
                 </td>
                 <td v-if="hasTo">
@@ -881,8 +902,13 @@ function onKeydown(event, index) {
                     @blur="endDraft"
                     @keydown="onKeydown($event, i)"
                   />
-                  <div v-if="ifaceDescs(r.out_interfaces)" class="iface-desc">
-                    {{ ifaceDescs(r.out_interfaces) }}
+                  <div
+                    v-if="isHit(r, 'out_labels')"
+                    class="iface-desc"
+                    v-html="highlight(ifaceLabels(r.out_interfaces))"
+                  />
+                  <div v-else-if="ifaceLabels(r.out_interfaces)" class="iface-desc">
+                    {{ ifaceLabels(r.out_interfaces) }}
                   </div>
                 </td>
                 <td>
@@ -1075,7 +1101,7 @@ function onKeydown(event, index) {
             v-for="it in ifaceSuggestions"
             :key="it.value"
             :value="it.value"
-            :label="it.description || undefined"
+            :label="suggestionLabel(it)"
           />
         </datalist>
       </div>
