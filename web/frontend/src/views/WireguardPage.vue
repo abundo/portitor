@@ -247,6 +247,7 @@ function copy(text) {
         v-if="selected"
         :key="selected.id"
         :title="`Peers of ${withLabel(selected.label, selected.name)}`"
+        noun="peer"
         description="Remote devices and sites. Changes take effect on the next deploy."
         :api="wgPeers"
         :params="{ interface_id: selected.id }"

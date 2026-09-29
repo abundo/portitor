@@ -169,6 +169,7 @@ const templateDefaults = () => ({
     <CrudPage
       ref="templatesPage"
       title="DNS templates"
+      noun="DNS template"
       description="A zone's template gives it its SOA, default TTL, NS records and optional DNSSEC policy. Templates are shared by all instances."
       :api="dnsTemplates"
       :columns="templateColumns"
@@ -179,6 +180,7 @@ const templateDefaults = () => ({
     />
     <CrudPage
       title="SOA templates"
+      noun="SOA template"
       description="Start of authority for the zones whose DNS template uses it. The serial is set by dnsmgr2 on each change (YYYYMMDDnn)."
       :api="dnsSoaTemplates"
       :columns="soaColumns"
@@ -189,6 +191,7 @@ const templateDefaults = () => ({
     />
     <CrudPage
       title="DNSSEC policies"
+      noun="DNSSEC policy"
       description="BIND dnssec-policy statements. Zones whose DNS template has a policy are signed by BIND (inline signing); keys are kept in the instance's BIND directory."
       :api="dnsDnssecPolicies"
       :columns="policyColumns"

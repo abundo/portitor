@@ -17,6 +17,9 @@
 // Cells can be overridden with a `cell-<key>` slot, or the whole table with
 // the `table` slot ({ rows, openCreate, openEdit, remove, moveTo, saveRow,
 // createAt }).
+// Layout (AGENTS.md, GUI design rules): the row actions are the first
+// column, Delete is in the form and asks Yes/No, and the form's labels sit
+// beside their fields on a wide screen.
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import AddrInput from '@/components/AddrInput.vue'
@@ -27,6 +30,8 @@ import { api as rootApi } from '@/api'
 import { errMsg } from '@/api/http'
 import { useAuthStore } from '@/stores/auth'
 import { useObjectStore } from '@/stores/objects'
+import { useConfirm } from '@/composables/useConfirm'
+import { inlineField, wideModal } from '@/utils/form'
 
 const props = defineProps({
   title: { type: String, required: true },
@@ -43,27 +48,24 @@ const props = defineProps({
   // Resource name for POST /api/<reorder>/reorder; enables drag-and-drop.
   reorder: { type: String, default: '' },
   blockedReason: { type: String, default: '' },
-  // Row actions (edit, delete) in the first column rather than the last, so
-  // they stay in view on a wide table.
-  actionsFirst: { type: Boolean, default: false },
-  // Form labels beside their fields (stacked again on a narrow screen), in
-  // a wider modal.
-  inlineLabels: { type: Boolean, default: false },
-  // itemName(row, rows) names a row in prompts.
-  itemName: { type: Function, default: (row) => row.name ?? `#${row.id}` },
+  // One row in words ("interface", "DNS zone"), for the form's title and
+  // the delete prompt; default: the title without its plural s.
+  noun: { type: String, default: '' },
+  // itemName(row, rows) names a row in the delete prompt, with what it is
+  // ("NAT rule 3"); default: the noun and the row's name.
+  itemName: { type: Function, default: null },
 })
 const emit = defineEmits(['changed'])
 
 const toast = useToast()
-const fieldUi = computed(() =>
-  props.inlineLabels
-    ? {
-        root: 'sm:grid sm:grid-cols-[11rem_minmax(0,1fr)] sm:gap-x-4',
-        labelWrapper: 'sm:pt-1.5',
-        container: 'mt-1 sm:mt-0',
-      }
-    : undefined,
-)
+const { confirmDelete } = useConfirm()
+const noun = computed(() => props.noun || props.title.replace(/s$/, '').toLowerCase())
+const describe = (row) =>
+  props.itemName ? props.itemName(row, rows.value) : `${noun.value} ${row.name ?? `#${row.id}`}`
+const formTitle = computed(() => {
+  const t = (readOnly.value ? '' : editing.value ? 'Edit ' : 'New ') + noun.value
+  return t.charAt(0).toUpperCase() + t.slice(1)
+})
 // A viewer sees the table and the form, read-only.
 const auth = useAuthStore()
 const readOnly = computed(() => !auth.isAdmin)
@@ -80,17 +82,13 @@ const NONE = 0
 // The info popover opens on hover, and on a click for touch screens.
 const infoOpen = ref(false)
 
-const tableColumns = computed(() => {
-  const actions = { id: 'actions', header: '' }
-  return [
-    ...(props.reorder && !readOnly.value
-      ? [{ id: 'drag', header: '', meta: { class: { td: 'w-7 px-1' } } }]
-      : []),
-    ...(props.actionsFirst ? [actions] : []),
-    ...props.columns.map((c) => ({ accessorKey: c.key, header: c.label })),
-    ...(props.actionsFirst ? [] : [actions]),
-  ]
-})
+const tableColumns = computed(() => [
+  ...(props.reorder && !readOnly.value
+    ? [{ id: 'drag', header: '', meta: { class: { td: 'w-7 px-1' } } }]
+    : []),
+  { id: 'actions', header: '' },
+  ...props.columns.map((c) => ({ accessorKey: c.key, header: c.label })),
+])
 
 function display(col, row) {
   if (col.format) return col.format(row, rows.value)
@@ -185,15 +183,22 @@ async function save() {
   }
 }
 
+// remove deletes a row after asking; it resolves to true if it did.
 async function remove(row) {
-  if (!window.confirm(`Delete ${props.itemName(row, rows.value)}?`)) return
+  if (!(await confirmDelete(describe(row)))) return false
   try {
     await props.api.remove(row.id)
     await load()
     emit('changed')
+    return true
   } catch (err) {
     toast.add({ title: errMsg(err, 'Delete failed'), color: 'error' })
+    return false
   }
+}
+
+async function removeEditing() {
+  if (await remove(editing.value)) open.value = false
 }
 
 // Saves one row edited in place (a custom table); reloads on failure.
@@ -356,23 +361,17 @@ defineExpose({ reload: load, openEdit, openCreate })
           </slot>
         </template>
         <template #actions-cell="{ row }">
-          <div class="flex gap-1" :class="actionsFirst ? 'justify-start' : 'justify-end'">
-            <slot name="row-actions" :row="row.original" />
+          <div class="flex gap-1">
             <UButton
               size="xs"
               color="neutral"
               variant="ghost"
               :icon="readOnly ? 'i-lucide-eye' : 'i-lucide-pencil'"
+              :aria-label="readOnly ? 'View' : 'Edit'"
+              :title="readOnly ? 'View' : 'Edit'"
               @click="openEdit(row.original)"
             />
-            <UButton
-              v-if="!readOnly"
-              size="xs"
-              color="error"
-              variant="ghost"
-              icon="i-lucide-trash"
-              @click="remove(row.original)"
-            />
+            <slot name="row-actions" :row="row.original" />
           </div>
         </template>
         <template #empty>
@@ -382,11 +381,7 @@ defineExpose({ reload: load, openEdit, openCreate })
     </div>
   </div>
 
-  <UModal
-    v-model:open="open"
-    :title="(readOnly ? '' : editing ? 'Edit ' : 'New ') + title.replace(/s$/, '').toLowerCase()"
-    :ui="inlineLabels ? { content: 'sm:max-w-2xl' } : undefined"
-  >
+  <UModal v-model:open="open" :title="formTitle" :ui="wideModal">
     <template #body>
       <form id="crud-form" class="space-y-3" @submit.prevent="save">
         <fieldset :disabled="readOnly" class="space-y-3">
@@ -397,7 +392,7 @@ defineExpose({ reload: load, openEdit, openCreate })
               :hint="f.hintRight"
               :help="f.hint"
               :required="f.required"
-              :ui="fieldUi"
+              :ui="inlineField"
             >
               <USwitch
                 v-if="f.type === 'switch'"
@@ -486,8 +481,16 @@ defineExpose({ reload: load, openEdit, openCreate })
       </form>
     </template>
     <template #footer>
-      <div class="flex w-full justify-end gap-2">
-        <UButton color="neutral" variant="ghost" @click="open = false">{{
+      <div class="flex w-full gap-2">
+        <UButton
+          v-if="editing && !readOnly"
+          color="error"
+          variant="ghost"
+          icon="i-lucide-trash"
+          label="Delete"
+          @click="removeEditing"
+        />
+        <UButton class="ms-auto" color="neutral" variant="ghost" @click="open = false">{{
           readOnly ? 'Close' : 'Cancel'
         }}</UButton>
         <UButton v-if="!readOnly" type="submit" form="crud-form" :loading="saving">Save</UButton>

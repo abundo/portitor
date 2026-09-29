@@ -155,7 +155,10 @@ are in [README.md](README.md).
 
 ## GUI design rules
 
-Apply these to every page, `CrudPage` and custom pages alike.
+Apply these to every page, `CrudPage` and custom pages alike. `CrudPage` does
+them itself (give it a `noun` or `item-name` when the title doesn't make a good
+singular); a custom page uses `useConfirm().confirmDelete` for the Yes / No
+prompt and `inlineField` / `wideModal` (`utils/form.js`) for its dialog forms.
 
 - **Tables:** the Edit button is the first column, so it stays visible when the
   table is wider than the screen. Tables have no Delete button.

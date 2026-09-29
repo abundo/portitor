@@ -60,7 +60,7 @@ const fields = [
       :fields="fields"
       :defaults="{ enabled: true, metric: 0 }"
       new-label="New route"
-      :item-name="(r) => r.destination"
+      :item-name="(r) => `route ${r.destination}`"
     />
   </NeedInstance>
 </template>

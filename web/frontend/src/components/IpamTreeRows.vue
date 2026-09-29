@@ -2,18 +2,18 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
 <script setup>
-// Recursive rows of the IPAM tree. An `auto` node is there only because an
-// interface has the address: it has no IPAM entry to delete (id 0).
+// Recursive rows of the IPAM tree. The actions are the first column; an
+// entry is deleted from its dialog (IpamPage).
 defineOptions({ name: 'IpamTreeRows' })
 defineProps({
   nodes: { type: Array, required: true },
   depth: { type: Number, default: 0 },
   collapsed: { type: Object, required: true },
   ifaceName: { type: Function, required: true },
-  // readOnly leaves out the add and delete buttons (a viewer).
+  // readOnly leaves out the add buttons (a viewer).
   readOnly: { type: Boolean, default: false },
 })
-const emit = defineEmits(['toggle', 'add-prefix', 'add-address', 'edit', 'remove'])
+const emit = defineEmits(['toggle', 'add-prefix', 'add-address', 'edit'])
 const key = (n) => `${n.kind}:${n.cidr}`
 function pct(n) {
   return Math.round(n.used_frac * 100)
@@ -23,6 +23,35 @@ function pct(n) {
 <template>
   <template v-for="n in nodes" :key="key(n)">
     <tr class="border-b border-default hover:bg-elevated/50">
+      <td class="py-1 pr-2 whitespace-nowrap">
+        <UButton
+          size="xs"
+          color="neutral"
+          variant="ghost"
+          :icon="readOnly ? 'i-lucide-eye' : 'i-lucide-pencil'"
+          :aria-label="readOnly ? 'View' : 'Edit'"
+          :title="readOnly ? 'View' : 'Edit'"
+          @click="emit('edit', n)"
+        />
+        <template v-if="n.kind === 'prefix' && !readOnly">
+          <UButton
+            size="xs"
+            color="neutral"
+            variant="ghost"
+            icon="i-lucide-plus"
+            title="Add address"
+            @click="emit('add-address', n)"
+          />
+          <UButton
+            size="xs"
+            color="neutral"
+            variant="ghost"
+            icon="i-lucide-git-branch-plus"
+            title="Add sub-prefix"
+            @click="emit('add-prefix', n)"
+          />
+        </template>
+      </td>
       <td class="py-1.5 pr-2">
         <div class="flex items-center gap-1" :style="{ paddingLeft: `${depth * 1.25}rem` }">
           <UButton
@@ -72,42 +101,6 @@ function pct(n) {
           <span class="text-xs text-muted tabular-nums">{{ pct(n) }}%</span>
         </div>
       </td>
-      <td class="py-1 text-right whitespace-nowrap">
-        <template v-if="n.kind === 'prefix' && !readOnly">
-          <UButton
-            size="xs"
-            color="neutral"
-            variant="ghost"
-            icon="i-lucide-plus"
-            title="Add address"
-            @click="emit('add-address', n)"
-          />
-          <UButton
-            size="xs"
-            color="neutral"
-            variant="ghost"
-            icon="i-lucide-git-branch-plus"
-            title="Add sub-prefix"
-            @click="emit('add-prefix', n)"
-          />
-        </template>
-        <UButton
-          size="xs"
-          color="neutral"
-          variant="ghost"
-          :icon="readOnly ? 'i-lucide-eye' : 'i-lucide-pencil'"
-          @click="emit('edit', n)"
-        />
-        <UButton
-          v-if="!readOnly && !n.auto"
-          size="xs"
-          color="error"
-          variant="ghost"
-          icon="i-lucide-trash"
-          @click="emit('remove', n)"
-        />
-        <span v-else-if="!readOnly" class="inline-block w-6" />
-      </td>
     </tr>
     <IpamTreeRows
       v-if="n.children.length && !collapsed.has(key(n))"
@@ -120,7 +113,6 @@ function pct(n) {
       @add-prefix="emit('add-prefix', $event)"
       @add-address="emit('add-address', $event)"
       @edit="emit('edit', $event)"
-      @remove="emit('remove', $event)"
     />
   </template>
 </template>

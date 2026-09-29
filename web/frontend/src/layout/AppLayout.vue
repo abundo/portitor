@@ -11,6 +11,7 @@ import AppTopbar from './AppTopbar.vue'
 import AppLogPanel from './AppLogPanel.vue'
 import ChangesBanner from '@/components/ChangesBanner.vue'
 import ConfirmBanner from '@/components/ConfirmBanner.vue'
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import ServiceDialog from '@/components/ServiceDialog.vue'
 import { useInstanceStore } from '@/stores/instances'
 import { useDeployStore } from '@/stores/deploy'
@@ -73,4 +74,5 @@ onMounted(() => {
     </template>
   </USlideover>
   <ServiceDialog />
+  <ConfirmDialog />
 </template>

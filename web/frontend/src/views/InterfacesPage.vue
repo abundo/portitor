@@ -5,7 +5,7 @@
 import CrudPage from '@/components/CrudPage.vue'
 import NeedInstance from '@/components/NeedInstance.vue'
 import { interfaces } from '@/api'
-import { useInstanceRefs } from '@/composables/useInstanceRefs'
+import { useInstanceRefs, withLabel } from '@/composables/useInstanceRefs'
 import { useDeployStore } from '@/stores/deploy'
 
 const { store, ifaceList, ifaceText, zonesOf, reload } = useInstanceRefs()
@@ -168,8 +168,7 @@ function dhcpAddressOf(row) {
       :params="{ instance_id: store.currentId }"
       :columns="columns"
       :fields="fields"
-      actions-first
-      inline-labels
+      :item-name="(r) => `interface ${withLabel(r.label, r.name)}`"
       :defaults="{
         kind: 'physical',
         label: '',

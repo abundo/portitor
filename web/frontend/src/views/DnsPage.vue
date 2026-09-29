@@ -62,6 +62,7 @@ const zoneDefaults = () => ({ type: 'forward', dns_template_id: templates.value[
       />
       <CrudPage
         title="DNS zones"
+        noun="DNS zone"
         description="Zones served by this instance's DNS server (BIND, via dnsmgr2). Names of IPAM addresses go into the matching forward zone; PTRs in reverse zones are generated. Open a zone to edit its records."
         :api="dnsZones"
         :params="{ instance_id: store.currentId }"

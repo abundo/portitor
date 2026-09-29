@@ -91,13 +91,14 @@ async function refresh(row) {
 <template>
   <CrudPage
     title="IP lists"
+    noun="IP list"
     description="Address lists the firewall downloads: the ban decisions of a CrowdSec engine, or any list with one address or prefix per line. Use a list as @name in a rule's source or destination, say to drop everything from @crowdsec; it becomes an nftables set in each instance whose rules use it, and matches IPv4 and IPv6. A list is downloaded when it is first deployed and whenever a scheduled task says so; the last download stays in force if a later one fails."
     :api="ipLists"
     :columns="columns"
     :fields="fields"
     :defaults="{ source: 'crowdsec' }"
     new-label="New IP list"
-    :item-name="(r) => `@${r.name}`"
+    :item-name="(r) => `IP list @${r.name}`"
     @changed="objects.load(true)"
   >
     <template #cell-state="{ row }">

@@ -126,6 +126,7 @@ const api = {
   <NeedInstance>
     <CrudPage
       title="NAT"
+      noun="NAT rule"
       description="Internet sharing (masquerade out of the WAN), port forwards and source NAT. Port-forwarded traffic is allowed through the firewall automatically."
       :api="api"
       :params="{ instance_id: store.currentId }"

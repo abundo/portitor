@@ -11,6 +11,7 @@
 import { computed, ref, watch } from 'vue'
 import { useObjectStore } from '@/stores/objects'
 import { newPort, portProtocols, serviceTypes } from '@/utils/services'
+import { inlineField } from '@/utils/form'
 
 const svc = defineModel({ type: Object, required: true })
 const objects = useObjectStore()
@@ -75,7 +76,7 @@ const show = (n) => (n ? n : '')
 <template>
   <div class="space-y-3">
     <div class="border-b border-default pb-1 text-sm font-medium text-muted">Protocol options</div>
-    <UFormField label="Protocol type" required>
+    <UFormField :ui="inlineField" label="Protocol type" required>
       <USelect
         :model-value="svc.type"
         :items="serviceTypes"
@@ -86,6 +87,7 @@ const show = (n) => (n ? n : '')
 
     <template v-if="svc.type === 'tcp/udp/sctp'">
       <UFormField
+        :ui="inlineField"
         label="Destination ports"
         help="Low alone is one port; both empty match any port of the protocol."
       >
@@ -164,13 +166,13 @@ const show = (n) => (n ? n : '')
           />
         </div>
       </UFormField>
-      <UFormField label="Specify source ports">
+      <UFormField :ui="inlineField" label="Specify source ports">
         <USwitch :model-value="withSource" @update:model-value="setWithSource" />
       </UFormField>
     </template>
 
     <template v-else-if="svc.type === 'icmp' || svc.type === 'icmp6'">
-      <UFormField label="Type" help="Empty matches any type.">
+      <UFormField :ui="inlineField" label="Type" help="Empty matches any type.">
         <USelectMenu
           :model-value="svc.icmp_type || 'any'"
           :items="icmpItems"
@@ -180,7 +182,7 @@ const show = (n) => (n ? n : '')
           @update:model-value="setIcmpType"
         />
       </UFormField>
-      <UFormField label="Code" help="Empty matches any code; needs a type.">
+      <UFormField :ui="inlineField" label="Code" help="Empty matches any code; needs a type.">
         <UInput
           type="number"
           :model-value="svc.icmp_code ?? ''"
@@ -195,6 +197,7 @@ const show = (n) => (n ? n : '')
     </template>
 
     <UFormField
+      :ui="inlineField"
       v-else-if="svc.type === 'ip'"
       label="Protocol number"
       help="0 or empty matches any protocol, such as 47 for GRE or 50 for ESP."

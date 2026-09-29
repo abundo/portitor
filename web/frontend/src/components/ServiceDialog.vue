@@ -12,6 +12,7 @@ import { errMsg } from '@/api/http'
 import { useServiceDialog } from '@/composables/useServiceDialog'
 import { useObjectStore } from '@/stores/objects'
 import { newService } from '@/utils/services'
+import { inlineField, wideModal } from '@/utils/form'
 
 const { state, done } = useServiceDialog()
 const objects = useObjectStore()
@@ -43,17 +44,18 @@ async function save() {
 </script>
 
 <template>
-  <UModal :open="state.open" title="New service" @update:open="onOpen">
+  <UModal :open="state.open" title="New service" :ui="wideModal" @update:open="onOpen">
     <template #body>
       <form id="service-form" class="space-y-3" @submit.prevent="save">
         <UFormField
+          :ui="inlineField"
           label="Name"
           required
           help="Lower case; a rule's Service cell takes it like ssh or ping."
         >
           <UInput v-model="form.name" class="w-full" required placeholder="unifi" autofocus />
         </UFormField>
-        <UFormField label="Description">
+        <UFormField :ui="inlineField" label="Description">
           <UInput v-model="form.description" class="w-full" />
         </UFormField>
         <ServiceOptions v-model="form" />

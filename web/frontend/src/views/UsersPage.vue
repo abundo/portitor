@@ -2,50 +2,68 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import { api } from '@/api'
 import { errMsg } from '@/api/http'
 import { useAuthStore } from '@/stores/auth'
+import { useConfirm } from '@/composables/useConfirm'
+import { inlineField, wideModal } from '@/utils/form'
 
 const toast = useToast()
 const auth = useAuthStore()
+const { confirmDelete } = useConfirm()
 const users = ref([])
-const newUser = reactive({ username: '', password: '', role: 'viewer' })
 const roles = [
   { label: 'Admin', value: 'admin', description: 'Changes and deploys everything' },
   { label: 'Viewer', value: 'viewer', description: 'Reads the configuration and status' },
 ]
+const roleLabel = (role) => roles.find((r) => r.value === role)?.label ?? role
 
 async function load() {
   users.value = await api.users()
 }
 onMounted(load)
 
-async function addUser() {
+// The dialog adds a user, or changes an existing user's role (not your own).
+const open = ref(false)
+const saving = ref(false)
+const editing = ref(null)
+const form = reactive({ username: '', password: '', role: 'viewer' })
+const isSelf = computed(() => editing.value?.id === auth.user?.id)
+
+function openCreate() {
+  editing.value = null
+  Object.assign(form, { username: '', password: '', role: 'viewer' })
+  open.value = true
+}
+
+function openEdit(u) {
+  editing.value = u
+  Object.assign(form, { username: u.username, password: '', role: u.role })
+  open.value = true
+}
+
+async function save() {
+  saving.value = true
   try {
-    await api.createUser(newUser.username, newUser.password, newUser.role)
-    newUser.username = newUser.password = ''
+    if (!editing.value) await api.createUser(form.username, form.password, form.role)
+    else if (!isSelf.value && form.role !== editing.value.role)
+      await api.setUserRole(editing.value.id, form.role)
+    open.value = false
     await load()
   } catch (err) {
     toast.add({ title: errMsg(err), color: 'error' })
+  } finally {
+    saving.value = false
   }
 }
 
-async function setRole(u, role) {
-  if (role === u.role) return
+async function remove() {
+  if (!(await confirmDelete(`user ${editing.value.username}`))) return
   try {
-    await api.setUserRole(u.id, role)
-  } catch (err) {
-    toast.add({ title: errMsg(err), color: 'error' })
-  }
-  await load()
-}
-
-async function removeUser(u) {
-  if (!window.confirm(`Delete user ${u.username}?`)) return
-  try {
-    await api.deleteUser(u.id)
+    await api.deleteUser(editing.value.id)
+    open.value = false
     await load()
   } catch (err) {
     toast.add({ title: errMsg(err), color: 'error' })
@@ -56,51 +74,82 @@ async function removeUser(u) {
 <template>
   <div class="grid gap-4 xl:grid-cols-2">
     <div class="card">
-      <div class="mb-3 text-lg font-semibold">Users</div>
+      <div class="mb-3 flex items-center justify-between gap-3">
+        <div class="text-lg font-semibold">Users</div>
+        <UButton icon="i-lucide-user-plus" label="Add" @click="openCreate" />
+      </div>
       <UTable
         :data="users"
         :columns="[
+          { id: 'actions', header: '' },
           { accessorKey: 'username', header: 'Username' },
           { id: 'role', header: 'Role' },
-          { id: 'actions', header: '' },
         ]"
       >
-        <template #role-cell="{ row }">
-          <span v-if="row.original.id === auth.user?.id" class="text-sm">Admin (you)</span>
-          <USelect
-            v-else
-            :model-value="row.original.role"
-            :items="roles"
+        <template #actions-cell="{ row }">
+          <UButton
             size="xs"
-            class="w-28"
-            @update:model-value="(role) => setRole(row.original, role)"
+            color="neutral"
+            variant="ghost"
+            icon="i-lucide-pencil"
+            aria-label="Edit"
+            title="Edit"
+            @click="openEdit(row.original)"
           />
         </template>
-        <template #actions-cell="{ row }">
-          <div class="flex justify-end">
-            <UButton
-              v-if="row.original.id !== auth.user?.id"
-              size="xs"
-              color="error"
-              variant="ghost"
-              icon="i-lucide-trash"
-              @click="removeUser(row.original)"
-            />
-          </div>
+        <template #role-cell="{ row }">
+          {{ roleLabel(row.original.role) }}
+          <span v-if="row.original.id === auth.user?.id" class="text-muted">(you)</span>
         </template>
       </UTable>
-      <form class="mt-3 flex flex-wrap items-end gap-2" @submit.prevent="addUser">
-        <UFormField label="New user"
-          ><UInput v-model="newUser.username" placeholder="username"
-        /></UFormField>
-        <UFormField label="Password"
-          ><UInput v-model="newUser.password" type="password" autocomplete="new-password"
-        /></UFormField>
-        <UFormField label="Role"
-          ><USelect v-model="newUser.role" :items="roles" class="w-28"
-        /></UFormField>
-        <UButton type="submit" icon="i-lucide-user-plus">Add</UButton>
-      </form>
     </div>
   </div>
+
+  <UModal v-model:open="open" :title="editing ? 'Edit user' : 'New user'" :ui="wideModal">
+    <template #body>
+      <form id="user-form" class="space-y-3" @submit.prevent="save">
+        <UFormField :ui="inlineField" label="Username" required>
+          <UInput
+            v-model="form.username"
+            class="w-full"
+            placeholder="username"
+            :disabled="!!editing"
+            required
+          />
+        </UFormField>
+        <UFormField v-if="!editing" :ui="inlineField" label="Password" required>
+          <UInput
+            v-model="form.password"
+            type="password"
+            autocomplete="new-password"
+            class="w-full"
+            required
+          />
+        </UFormField>
+        <UFormField
+          :ui="inlineField"
+          label="Role"
+          :help="isSelf ? 'You cannot change your own role.' : ''"
+        >
+          <USelect v-model="form.role" :items="roles" class="w-full" :disabled="isSelf" />
+        </UFormField>
+      </form>
+    </template>
+    <template #footer>
+      <div class="flex w-full gap-2">
+        <UButton
+          v-if="editing && !isSelf"
+          color="error"
+          variant="ghost"
+          icon="i-lucide-trash"
+          label="Delete"
+          @click="remove"
+        />
+        <UButton class="ms-auto" color="neutral" variant="ghost" @click="open = false">
+          Cancel
+        </UButton>
+        <UButton type="submit" form="user-form" :loading="saving">Save</UButton>
+      </div>
+    </template>
+  </UModal>
 </template>

@@ -40,6 +40,7 @@ const fields = [
 <template>
   <CrudPage
     title="Hosts & prefixes"
+    noun="host or prefix"
     description="Named addresses. Use the name wherever addresses are entered: rules, NAT, routes, DNS, DHCP and WireGuard. A rule whose addresses include IPv4 and IPv6 is applied to both. Renaming updates every use; a name in use cannot be deleted."
     :api="addressObjects"
     :columns="columns"

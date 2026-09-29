@@ -147,6 +147,7 @@ const recordFields = [
     <div class="space-y-4">
       <CrudPage
         title="Dynamic DNS"
+        noun="dynamic DNS client"
         description="Keep records on a nameserver in step with an interface's addresses, by RFC 2136 dynamic update (TSIG signed). Records are checked when the addresses change and updated only when they differ."
         :api="dyndnsClients"
         :params="{ instance_id: store.currentId }"
@@ -191,6 +192,7 @@ const recordFields = [
         v-if="selected"
         :key="selected.id"
         :title="`Records of ${selected.name}`"
+        noun="record"
         description="One record per name and type; an update replaces the whole RRset. A name with a CNAME can have no other records."
         :api="dyndnsRecords"
         :params="{ client_id: selected.id }"
@@ -198,7 +200,7 @@ const recordFields = [
         :fields="recordFields"
         :defaults="{ type: 'A', ttl: 0 }"
         new-label="New record"
-        :item-name="(r) => `${r.name} ${r.type}`"
+        :item-name="(r) => `record ${r.name} ${r.type}`"
       />
     </div>
   </NeedInstance>

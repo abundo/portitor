@@ -12,9 +12,12 @@ import { api, ipamAddresses, ipamPrefixes } from '@/api'
 import { errMsg } from '@/api/http'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
 import { useAuthStore } from '@/stores/auth'
+import { useConfirm } from '@/composables/useConfirm'
+import { inlineField, wideModal } from '@/utils/form'
 
 const toast = useToast()
 const auth = useAuthStore()
+const { confirmDelete } = useConfirm()
 const { store, ifaceName } = useInstanceRefs()
 const tree = ref([])
 const collapsed = reactive(new Set())
@@ -128,15 +131,25 @@ async function onEdit(node) {
       node.interface_id,
     )
 }
-async function onRemove(node) {
-  const what =
-    node.kind === 'prefix'
-      ? `prefix ${node.cidr} (addresses inside stay; a prefix of an interface address stays listed, without its settings)`
-      : `address ${node.cidr}`
-  if (!window.confirm(`Delete ${what}?`)) return
+async function removePrefix() {
+  const ok = await confirmDelete(
+    `prefix ${prefix.prefix}`,
+    'Addresses inside stay; a prefix of an interface address stays listed, without its settings.',
+  )
+  if (!ok) return
   try {
-    if (node.kind === 'prefix') await ipamPrefixes.remove(node.id)
-    else await ipamAddresses.remove(node.id)
+    await ipamPrefixes.remove(prefix.id)
+    prefixOpen.value = false
+    load()
+  } catch (err) {
+    toast.add({ title: errMsg(err), color: 'error' })
+  }
+}
+async function removeAddress() {
+  if (!(await confirmDelete(`address ${addr.address}`))) return
+  try {
+    await ipamAddresses.remove(addr.id)
+    addrOpen.value = false
     load()
   } catch (err) {
     toast.add({ title: errMsg(err), color: 'error' })
@@ -180,11 +193,11 @@ async function onRemove(node) {
         <table class="w-full text-sm">
           <thead>
             <tr class="border-b border-default text-left text-xs text-muted">
+              <th />
               <th class="py-2">Prefix / address</th>
               <th class="px-2">Description</th>
               <th class="px-2">Use</th>
               <th class="px-2">Utilisation</th>
-              <th />
             </tr>
           </thead>
           <tbody>
@@ -197,7 +210,6 @@ async function onRemove(node) {
               @add-prefix="onAddPrefix"
               @add-address="onAddAddress"
               @edit="onEdit"
-              @remove="onRemove"
             />
           </tbody>
         </table>
@@ -207,27 +219,30 @@ async function onRemove(node) {
     <UModal
       v-model:open="prefixOpen"
       :title="!auth.isAdmin ? 'Prefix' : prefix.id ? 'Edit prefix' : 'Prefix settings'"
+      :ui="wideModal"
     >
       <template #body>
         <form id="prefix-form" @submit.prevent="savePrefix">
           <fieldset :disabled="!auth.isAdmin" class="space-y-3">
-            <UFormField label="Prefix" required
+            <UFormField :ui="inlineField" label="Prefix" required
               ><UInput
                 v-model="prefix.prefix"
                 class="w-full font-mono"
                 placeholder="192.168.1.0/24 or fd00:1::/64"
             /></UFormField>
-            <UFormField label="Description"
+            <UFormField :ui="inlineField" label="Description"
               ><UInput v-model="prefix.description" class="w-full"
             /></UFormField>
             <template v-if="prefixIs6">
               <UFormField
+                :ui="inlineField"
                 label="Send router advertisements"
                 help="Announce this prefix and the firewall as default router on the interface that has an address in it."
               >
                 <USwitch v-model="prefix.ra_enabled" />
               </UFormField>
               <UFormField
+                :ui="inlineField"
                 v-if="prefix.ra_enabled"
                 label="SLAAC: clients pick their own address"
                 :help="prefixIs64 ? '' : 'Needs a /64 prefix.'"
@@ -236,6 +251,7 @@ async function onRemove(node) {
               </UFormField>
             </template>
             <UFormField
+              :ui="inlineField"
               :label="prefixIs6 ? 'Serve DHCPv6 on this prefix' : 'Serve DHCP on this prefix'"
               :help="
                 prefixIs6
@@ -249,21 +265,25 @@ async function onRemove(node) {
               />
             </UFormField>
             <template v-if="prefix.dhcp_enabled">
-              <div class="grid grid-cols-2 gap-3">
-                <UFormField label="Range start"
-                  ><UInput
+              <UFormField :ui="inlineField" label="Range">
+                <div class="flex items-center gap-2">
+                  <UInput
                     v-model="prefix.dhcp_range_start"
-                    class="w-full font-mono"
+                    class="min-w-0 flex-1 font-mono"
                     placeholder="192.168.1.100"
-                /></UFormField>
-                <UFormField label="Range end"
-                  ><UInput
+                    aria-label="Range start"
+                  />
+                  <span class="text-muted">-</span>
+                  <UInput
                     v-model="prefix.dhcp_range_end"
-                    class="w-full font-mono"
+                    class="min-w-0 flex-1 font-mono"
                     placeholder="192.168.1.199"
-                /></UFormField>
-              </div>
+                    aria-label="Range end"
+                  />
+                </div>
+              </UFormField>
               <UFormField
+                :ui="inlineField"
                 v-if="!prefixIs6"
                 label="Gateway"
                 help="Empty: the firewall's address in the prefix."
@@ -271,6 +291,7 @@ async function onRemove(node) {
               /></UFormField>
             </template>
             <UFormField
+              :ui="inlineField"
               v-if="prefix.dhcp_enabled || (prefixIs6 && prefix.ra_enabled)"
               label="DNS servers"
               help="Addresses or hosts; only those of the prefix's IP version are used. Empty: the firewall, when its DNS server listens on that interface."
@@ -281,8 +302,16 @@ async function onRemove(node) {
         </form>
       </template>
       <template #footer>
-        <div class="flex w-full justify-end gap-2">
-          <UButton color="neutral" variant="ghost" @click="prefixOpen = false">{{
+        <div class="flex w-full gap-2">
+          <UButton
+            v-if="prefix.id && auth.isAdmin"
+            color="error"
+            variant="ghost"
+            icon="i-lucide-trash"
+            label="Delete"
+            @click="removePrefix"
+          />
+          <UButton class="ms-auto" color="neutral" variant="ghost" @click="prefixOpen = false">{{
             auth.isAdmin ? 'Cancel' : 'Close'
           }}</UButton>
           <UButton v-if="auth.isAdmin" type="submit" form="prefix-form">Save</UButton>
@@ -293,11 +322,12 @@ async function onRemove(node) {
     <UModal
       v-model:open="addrOpen"
       :title="!auth.isAdmin ? 'Address' : addr.id ? 'Edit address' : 'New address'"
+      :ui="wideModal"
     >
       <template #body>
         <form id="addr-form" @submit.prevent="saveAddress">
           <fieldset :disabled="!auth.isAdmin" class="space-y-3">
-            <UFormField label="Address" required
+            <UFormField :ui="inlineField" label="Address" required
               ><UInput
                 v-model="addr.address"
                 class="w-full font-mono"
@@ -309,6 +339,7 @@ async function onRemove(node) {
               <RouterLink to="/interfaces" class="text-primary">Interfaces</RouterLink>.
             </p>
             <UFormField
+              :ui="inlineField"
               label="DNS name"
               help="Fully qualified, inside one of the instance's DNS zones."
             >
@@ -318,7 +349,7 @@ async function onRemove(node) {
                 placeholder="nas.home.arpa"
               />
             </UFormField>
-            <UFormField label="MAC address (DHCP reservation)">
+            <UFormField :ui="inlineField" label="MAC address (DHCP reservation)">
               <div class="flex items-center gap-1">
                 <UInput
                   v-model="addr.mac"
@@ -337,15 +368,23 @@ async function onRemove(node) {
                 />
               </div>
             </UFormField>
-            <UFormField label="Description"
+            <UFormField :ui="inlineField" label="Description"
               ><UInput v-model="addr.description" class="w-full"
             /></UFormField>
           </fieldset>
         </form>
       </template>
       <template #footer>
-        <div class="flex w-full justify-end gap-2">
-          <UButton color="neutral" variant="ghost" @click="addrOpen = false">{{
+        <div class="flex w-full gap-2">
+          <UButton
+            v-if="addr.id && auth.isAdmin"
+            color="error"
+            variant="ghost"
+            icon="i-lucide-trash"
+            label="Delete"
+            @click="removeAddress"
+          />
+          <UButton class="ms-auto" color="neutral" variant="ghost" @click="addrOpen = false">{{
             auth.isAdmin ? 'Cancel' : 'Close'
           }}</UButton>
           <UButton v-if="auth.isAdmin" type="submit" form="addr-form">Save</UButton>
