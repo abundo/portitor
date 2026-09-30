@@ -19,12 +19,15 @@
 // the `table` slot ({ rows, openCreate, openEdit, remove, moveTo, saveRow,
 // createAt }).
 // Layout (AGENTS.md, GUI design rules): the row actions are the first
-// column, Delete is in the form and asks Yes/No, and the form's labels sit
-// beside their fields on a wide screen.
+// column, a search field above the table filters its rows (by the columns'
+// text, plus searchText(row)), Delete is in the form and asks Yes/No, and
+// the form's labels sit beside their fields on a wide screen. The `table`
+// slot brings its own search.
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import AddrInput from '@/components/AddrInput.vue'
 import PortMenu from '@/components/PortMenu.vue'
+import SearchInput from '@/components/SearchInput.vue'
 import { usePortMenu } from '@/composables/usePortMenu'
 import { useRowDrag } from '@/composables/useRowDrag'
 import { api as rootApi } from '@/api'
@@ -34,6 +37,7 @@ import { useObjectStore } from '@/stores/objects'
 import { useConfirm } from '@/composables/useConfirm'
 import { useFormGuard } from '@/composables/useFormGuard'
 import { inlineField, wideModal } from '@/utils/form'
+import { useSearch, valuesText } from '@/utils/search'
 
 const props = defineProps({
   title: { type: String, required: true },
@@ -59,6 +63,9 @@ const props = defineProps({
   // editTo(row) is a route: Edit opens that page instead of the form (the
   // page then holds the row's Delete).
   editTo: { type: Function, default: null },
+  // searchText(row) is more text the search finds a row by, for a column
+  // whose cell slot shows what display() does not.
+  searchText: { type: Function, default: null },
 })
 const emit = defineEmits(['changed'])
 
@@ -88,8 +95,17 @@ const NONE = 0
 const infoOpen = ref(false)
 const guard = useFormGuard(form, open)
 
+// While searching, rows can't be dragged: the table's indices are then not
+// those of rows.
+const { search, filtered: shownRows } = useSearch(rows, (row) =>
+  valuesText(
+    props.columns.map((c) => display(c, row)),
+    props.searchText?.(row),
+  ),
+)
+
 const tableColumns = computed(() => [
-  ...(props.reorder && !readOnly.value
+  ...(props.reorder && !readOnly.value && !search.value.trim()
     ? [{ id: 'drag', header: '', meta: { class: { td: 'w-7 px-1' } } }]
     : []),
   { id: 'actions', header: '' },
@@ -351,7 +367,10 @@ defineExpose({ reload: load, openEdit, openCreate })
       :create-at="createAt"
     />
     <div v-else ref="tableWrap">
-      <UTable :data="rows" :columns="tableColumns" class="text-sm">
+      <div class="mb-2">
+        <SearchInput v-model="search" />
+      </div>
+      <UTable :data="shownRows" :columns="tableColumns" class="text-sm">
         <template #drag-cell="{ row }">
           <span
             class="inline-flex cursor-grab touch-none items-center text-muted select-none active:cursor-grabbing"
@@ -382,7 +401,9 @@ defineExpose({ reload: load, openEdit, openCreate })
           </div>
         </template>
         <template #empty>
-          <div class="py-6 text-center text-muted">Nothing here yet.</div>
+          <div class="py-6 text-center text-muted">
+            {{ rows.length ? 'Nothing matches the search.' : 'Nothing here yet.' }}
+          </div>
         </template>
       </UTable>
     </div>

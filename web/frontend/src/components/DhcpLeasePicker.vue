@@ -9,6 +9,7 @@ import { computed, h, nextTick, ref, resolveComponent, watch } from 'vue'
 import { api } from '@/api'
 import { errMsg } from '@/api/http'
 import { datetime } from '@/utils/time'
+import SearchInput from '@/components/SearchInput.vue'
 
 const open = defineModel('open', { type: Boolean, default: false })
 const props = defineProps({
@@ -162,13 +163,7 @@ watch(
           <p class="text-sm text-muted">
             Current leases from Kea on instance {{ instance }}. Selecting a row copies its MAC.
           </p>
-          <UInput
-            v-model="filter"
-            icon="i-lucide-search"
-            placeholder="Search"
-            size="sm"
-            class="w-56 shrink-0"
-          />
+          <SearchInput v-model="filter" class="shrink-0" />
         </div>
         <UTable
           ref="table"

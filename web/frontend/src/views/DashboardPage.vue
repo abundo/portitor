@@ -3,11 +3,13 @@
 
 <script setup>
 import { computed, onMounted, onUnmounted } from 'vue'
+import SearchInput from '@/components/SearchInput.vue'
 import { useDeployStore } from '@/stores/deploy'
 import { useInstanceStore } from '@/stores/instances'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
 import { bytes } from '@/utils/bytes'
 import { datetime } from '@/utils/time'
+import { useSearch, valuesText } from '@/utils/search'
 
 const deploy = useDeployStore()
 const instances = useInstanceStore()
@@ -29,6 +31,20 @@ const ifaces = computed(() =>
   [...(inst.value?.interfaces ?? [])].sort((a, b) =>
     a.name.localeCompare(b.name, undefined, { numeric: true }),
   ),
+)
+const { search: wanSearch, filtered: shownWan } = useSearch(wan, (l) =>
+  valuesText(
+    ifaceText(l.interface),
+    ifaceDesc.value.get(l.interface),
+    l.state,
+    l.last_error,
+    l.address,
+    l.router,
+    l.dns,
+  ),
+)
+const { search: ifaceSearch, filtered: shownIfaces } = useSearch(ifaces, (i) =>
+  valuesText(ifaceText(i.name), ifaceDesc.value.get(i.name), i.state, i.mac, i.addresses),
 )
 const missing = computed(() => (st.value?.programs ?? []).filter((p) => !p.path))
 const missingNeeded = computed(() => missing.value.some((p) => p.needed))
@@ -123,6 +139,9 @@ const stateColor = (s) =>
 
     <div v-if="wan.length" class="card overflow-x-auto">
       <div class="mb-2 font-semibold">Internet (DHCP)</div>
+      <div class="mb-2">
+        <SearchInput v-model="wanSearch" />
+      </div>
       <table class="w-full text-sm">
         <thead>
           <tr class="border-b border-default text-left text-xs text-muted">
@@ -136,7 +155,7 @@ const stateColor = (s) =>
         </thead>
         <tbody>
           <tr
-            v-for="l in wan"
+            v-for="l in shownWan"
             :key="l.interface"
             class="border-b border-default align-top last:border-0"
           >
@@ -156,6 +175,9 @@ const stateColor = (s) =>
               <div v-for="d in l.dns ?? []" :key="d">{{ d }}</div>
             </td>
           </tr>
+          <tr v-if="!shownWan.length">
+            <td colspan="6" class="py-2 text-muted">No interface matches.</td>
+          </tr>
         </tbody>
       </table>
     </div>
@@ -163,6 +185,9 @@ const stateColor = (s) =>
     <template v-if="inst">
       <div class="card overflow-x-auto">
         <div class="mb-2 font-semibold">Interfaces · {{ inst.name }}</div>
+        <div class="mb-2">
+          <SearchInput v-model="ifaceSearch" />
+        </div>
         <table class="w-full text-sm">
           <thead>
             <tr class="border-b border-default text-left text-xs text-muted">
@@ -176,7 +201,11 @@ const stateColor = (s) =>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="i in ifaces" :key="i.name" class="border-b border-default last:border-0">
+            <tr
+              v-for="i in shownIfaces"
+              :key="i.name"
+              class="border-b border-default last:border-0"
+            >
               <td class="py-1.5 pr-4 font-mono">{{ ifaceText(i.name) }}</td>
               <td class="pr-4">{{ ifaceDesc.get(i.name) }}</td>
               <td class="pr-4">
@@ -186,6 +215,9 @@ const stateColor = (s) =>
               <td class="pr-4 font-mono text-xs">{{ i.addresses.join(', ') }}</td>
               <td class="pr-4 text-right whitespace-nowrap">{{ bytes(i.rx_bytes) }}</td>
               <td class="text-right whitespace-nowrap">{{ bytes(i.tx_bytes) }}</td>
+            </tr>
+            <tr v-if="!shownIfaces.length">
+              <td colspan="7" class="py-2 text-muted">No interface matches.</td>
             </tr>
           </tbody>
         </table>

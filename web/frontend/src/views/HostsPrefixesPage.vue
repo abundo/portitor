@@ -14,6 +14,7 @@ import DhcpLeasePicker from '@/components/DhcpLeasePicker.vue'
 import HostDialog from '@/components/HostDialog.vue'
 import IpListDialog from '@/components/IpListDialog.vue'
 import FolderDialog from '@/components/FolderDialog.vue'
+import SearchInput from '@/components/SearchInput.vue'
 import { addressObjects, api, ipamAddresses, ipamPrefixes, ipLists, objectFolders } from '@/api'
 import { errMsg } from '@/api/http'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
@@ -24,6 +25,7 @@ import { ago } from '@/utils/time'
 import { useConfirm } from '@/composables/useConfirm'
 import { useFormGuard } from '@/composables/useFormGuard'
 import { inlineField, wideModal } from '@/utils/form'
+import { matchesWords, searchWords, valuesText } from '@/utils/search'
 
 const toast = useToast()
 const router = useRouter()
@@ -39,6 +41,16 @@ const tree = ref([])
 // Keys of the collapsed nodes: the top-level nodes (group:*), the folders
 // (folder:<id>) and the prefixes (IpamTreeRows).
 const collapsed = reactive(new Set())
+// Search: a host, IP list, folder, prefix or address matches when its row
+// has every word typed. While searching, the rows that match are shown with
+// the folders and prefixes above them, all open (the folded ones fold again
+// once the search is cleared); a folder or prefix that matches shows all it
+// holds.
+const search = ref('')
+const words = computed(() => searchWords(search.value))
+const searching = computed(() => words.value.length > 0)
+const noneFolded = new Set()
+const folded = computed(() => (searching.value ? noneFolded : collapsed))
 const loading = ref(true)
 const infoOpen = ref(false)
 
@@ -135,6 +147,26 @@ const shownTree = computed(() => {
   }
   return nodes
 })
+
+// The tree as the search finds it: a node that matches, with all it
+// holds, or one holding a node that matches.
+function nodeText(n) {
+  return valuesText(
+    n.cidr,
+    n.description,
+    n.dns_name,
+    n.interface_id ? ifaceName(n.interface_id) : '',
+    n.mac,
+  )
+}
+function pruneTree(nodes) {
+  return nodes.flatMap((n) => {
+    if (matchesWords(nodeText(n), words.value)) return [n]
+    const children = pruneTree(n.children)
+    return children.length ? [{ ...n, children }] : []
+  })
+}
+const foundTree = computed(() => (searching.value ? pruneTree(shownTree.value) : shownTree.value))
 onMounted(async () => {
   deploy.refresh()
   try {
@@ -169,29 +201,52 @@ const folderDialog = ref(null)
 
 // The rows of the Hosts or IP lists group: in each folder its folders,
 // then its items, both by name; nothing inside a collapsed folder. count
-// is the items a folder holds, those in its folders included.
-function folderRows(kind, items) {
+// is the items a folder holds, those in its folders included. While
+// searching, only the items that match (text(item)) and the folders
+// holding them; a folder whose name matches keeps all it holds.
+function folderRows(kind, items, text) {
   const parent = (x) => x.parent_id ?? 0
+  const subfolders = (id) => folders.value.filter((f) => f.kind === kind && parent(f) === id)
   const count = (id) =>
     items.filter((i) => (i.folder_id ?? 0) === id).length +
-    folders.value
-      .filter((f) => f.kind === kind && parent(f) === id)
-      .reduce((n, f) => n + count(f.id), 0)
+    subfolders(id).reduce((n, f) => n + count(f.id), 0)
+  const hit = (t) => matchesWords(t, words.value)
+  const holdsHit = (id) =>
+    items.some((i) => (i.folder_id ?? 0) === id && hit(text(i))) ||
+    subfolders(id).some((f) => hit(f.name) || holdsHit(f.id))
   const out = []
-  const walk = (id, depth) => {
-    for (const f of folders.value.filter((f) => f.kind === kind && parent(f) === id)) {
+  // all: show everything in the folder (not searching, or it matches).
+  const walk = (id, depth, all) => {
+    for (const f of subfolders(id)) {
       const key = `folder:${f.id}`
+      const fAll = all || hit(f.name)
+      if (!fAll && !holdsHit(f.id)) continue
       out.push({ key, folder: f, depth, count: count(f.id) })
-      if (!collapsed.has(key)) walk(f.id, depth + 1)
+      if (!folded.value.has(key)) walk(f.id, depth + 1, fAll)
     }
     for (const item of items.filter((i) => (i.folder_id ?? 0) === id))
-      out.push({ key: `${kind}:${item.id}`, item, depth })
+      if (all || hit(text(item))) out.push({ key: `${kind}:${item.id}`, item, depth })
   }
-  walk(0, 1)
+  walk(0, 1, !searching.value)
   return out
 }
-const hostRows = computed(() => folderRows('hosts', hosts.value))
-const listRows = computed(() => folderRows('ip_lists', lists.value))
+const hostRows = computed(() =>
+  folderRows('hosts', hosts.value, (o) =>
+    valuesText(o.name, o.description, o.addresses, hostKind(o), versions(o)),
+  ),
+)
+const listRows = computed(() =>
+  folderRows('ip_lists', lists.value, (l) =>
+    valuesText(
+      `@${l.name}`,
+      l.description,
+      sourceLabel[l.source] ?? l.source,
+      l.url,
+      states.value[l.name]?.state ?? 'not deployed',
+      states.value[l.name]?.last_error,
+    ),
+  ),
+)
 const indent = (depth) => ({ paddingLeft: `${depth * 1.25}rem` })
 
 // A host has only single addresses (/32, /128); anything else is a prefix.
@@ -530,6 +585,9 @@ async function removeAddress() {
           />
         </div>
       </div>
+      <div class="mb-2">
+        <SearchInput v-model="search" />
+      </div>
       <div v-if="loading" class="flex justify-center p-6">
         <UIcon name="i-lucide-loader-2" class="size-7 animate-spin" />
       </div>
@@ -550,9 +608,9 @@ async function removeAddress() {
                         color="neutral"
                         variant="ghost"
                         :icon="
-                          collapsed.has(g.key) ? 'i-lucide-chevron-right' : 'i-lucide-chevron-down'
+                          folded.has(g.key) ? 'i-lucide-chevron-right' : 'i-lucide-chevron-down'
                         "
-                        :aria-label="collapsed.has(g.key) ? 'Expand' : 'Collapse'"
+                        :aria-label="folded.has(g.key) ? 'Expand' : 'Collapse'"
                         @click="toggle(g.key)"
                       />
                       <UIcon :name="g.icon" class="text-primary" />
@@ -569,7 +627,7 @@ async function removeAddress() {
                   <td colspan="3" class="px-2 text-xs text-muted">{{ g.description }}</td>
                 </tr>
 
-                <template v-if="!collapsed.has(g.key)">
+                <template v-if="!folded.has(g.key)">
                   <template v-if="g.key === 'group:hosts'">
                     <template v-for="r in hostRows" :key="r.key">
                       <tr
@@ -595,17 +653,15 @@ async function removeAddress() {
                               color="neutral"
                               variant="ghost"
                               :icon="
-                                collapsed.has(r.key)
+                                folded.has(r.key)
                                   ? 'i-lucide-chevron-right'
                                   : 'i-lucide-chevron-down'
                               "
-                              :aria-label="collapsed.has(r.key) ? 'Expand' : 'Collapse'"
+                              :aria-label="folded.has(r.key) ? 'Expand' : 'Collapse'"
                               @click="toggle(r.key)"
                             />
                             <UIcon
-                              :name="
-                                collapsed.has(r.key) ? 'i-lucide-folder' : 'i-lucide-folder-open'
-                              "
+                              :name="folded.has(r.key) ? 'i-lucide-folder' : 'i-lucide-folder-open'"
                               class="text-primary"
                             />
                             <span class="font-medium whitespace-nowrap">{{ r.folder.name }}</span>
@@ -661,7 +717,9 @@ async function removeAddress() {
                     </template>
                     <tr v-if="!hostRows.length" class="border-b border-default">
                       <td />
-                      <td colspan="4" class="py-2 pl-12 text-muted">No hosts yet.</td>
+                      <td colspan="4" class="py-2 pl-12 text-muted">
+                        {{ searching ? 'No host matches.' : 'No hosts yet.' }}
+                      </td>
                     </tr>
                   </template>
 
@@ -690,17 +748,15 @@ async function removeAddress() {
                               color="neutral"
                               variant="ghost"
                               :icon="
-                                collapsed.has(r.key)
+                                folded.has(r.key)
                                   ? 'i-lucide-chevron-right'
                                   : 'i-lucide-chevron-down'
                               "
-                              :aria-label="collapsed.has(r.key) ? 'Expand' : 'Collapse'"
+                              :aria-label="folded.has(r.key) ? 'Expand' : 'Collapse'"
                               @click="toggle(r.key)"
                             />
                             <UIcon
-                              :name="
-                                collapsed.has(r.key) ? 'i-lucide-folder' : 'i-lucide-folder-open'
-                              "
+                              :name="folded.has(r.key) ? 'i-lucide-folder' : 'i-lucide-folder-open'"
                               class="text-primary"
                             />
                             <span class="font-medium whitespace-nowrap">{{ r.folder.name }}</span>
@@ -783,16 +839,18 @@ async function removeAddress() {
                     </template>
                     <tr v-if="!listRows.length" class="border-b border-default">
                       <td />
-                      <td colspan="4" class="py-2 pl-12 text-muted">No IP lists yet.</td>
+                      <td colspan="4" class="py-2 pl-12 text-muted">
+                        {{ searching ? 'No IP list matches.' : 'No IP lists yet.' }}
+                      </td>
                     </tr>
                   </template>
 
                   <template v-else>
                     <IpamTreeRows
-                      v-if="shownTree.length"
-                      :nodes="shownTree"
+                      v-if="foundTree.length"
+                      :nodes="foundTree"
                       :depth="1"
-                      :collapsed="collapsed"
+                      :collapsed="folded"
                       :iface-name="ifaceName"
                       :read-only="!auth.isAdmin"
                       :dns-listen="dnsListen"
@@ -805,7 +863,10 @@ async function removeAddress() {
                     <tr v-else>
                       <td />
                       <td colspan="4" class="py-2 pl-12 text-muted">
-                        <template v-if="store.currentId">
+                        <template v-if="searching && shownTree.length">
+                          No prefix or address matches.
+                        </template>
+                        <template v-else-if="store.currentId">
                           No prefixes yet. Give an interface an address under
                           <RouterLink to="/interfaces" class="text-primary">Interfaces</RouterLink>,
                           e.g. 192.168.1.1/24, or add a prefix.

@@ -7,6 +7,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useToast } from '@nuxt/ui/composables'
 import AddrInput from '@/components/AddrInput.vue'
 import NeedInstance from '@/components/NeedInstance.vue'
+import SearchInput from '@/components/SearchInput.vue'
 import { api, instances, interfaces, ipamPrefixes } from '@/api'
 import { errMsg } from '@/api/http'
 import { withLabel } from '@/composables/useInstanceRefs'
@@ -15,6 +16,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useInstanceStore } from '@/stores/instances'
 import { inlineField, wideModal } from '@/utils/form'
 import { datetime } from '@/utils/time'
+import { useSearch, valuesText } from '@/utils/search'
 
 const toast = useToast()
 const route = useRoute()
@@ -36,6 +38,12 @@ onMounted(async () => {
 const serverLeases = computed(() => leases.value?.server?.[store.current?.name] ?? [])
 const clientLeases = computed(() =>
   (leases.value?.client ?? []).filter((l) => l.instance === store.current?.name),
+)
+const { search: leaseSearch, filtered: shownServerLeases } = useSearch(serverLeases, (l) =>
+  valuesText(l.address, l.mac, l.hostname, datetime(l.expires)),
+)
+const { search: clientSearch, filtered: shownClientLeases } = useSearch(clientLeases, (l) =>
+  valuesText(l.interface, l.state, l.address, l.router, l.dns, datetime(l.expires)),
 )
 
 // The DHCP settings a prefix (ipam_prefixes) holds. A prefix is served on
@@ -178,6 +186,21 @@ const rangeText = (p) =>
   p.dhcp_range_start ? `${p.dhcp_range_start} – ${p.dhcp_range_end}` : 'reservations only'
 const gatewayText = (p) => p.dhcp_gateway || (p.fw_addr ? `firewall (${p.fw_addr})` : 'firewall')
 
+// The DHCP server's interfaces the search finds, by what their rows show.
+const { search: ifaceSearch, filtered: shownIfaces } = useSearch(
+  () => server.ifaces,
+  (i) =>
+    valuesText(
+      withLabel(i.label, i.name),
+      i.description,
+      i.prefixes.map((p) => [
+        p.prefix,
+        p.dhcp_enabled ? [rangeText(p), gatewayText(p)] : [],
+        p.dhcp_dns_servers,
+      ]),
+    ),
+)
+
 const tabs = [
   { label: 'Leases', value: 'info', slot: 'info', icon: 'i-lucide-info' },
   { label: 'DHCP server', value: 'server', slot: 'server', icon: 'i-lucide-server' },
@@ -205,27 +228,36 @@ const tab = computed({
           <div class="card">
             <div class="mb-2 text-lg font-semibold">Active leases</div>
             <UAlert v-if="leaseError" color="error" variant="subtle" :title="leaseError" />
-            <UTable
-              v-else
-              :data="serverLeases"
-              :columns="[
-                { accessorKey: 'address', header: 'Address' },
-                { accessorKey: 'mac', header: 'MAC' },
-                { accessorKey: 'hostname', header: 'Host name' },
-                { id: 'expires', header: 'Expires' },
-              ]"
-            >
-              <template #expires-cell="{ row }">{{ datetime(row.original.expires) }}</template>
-              <template #empty
-                ><div class="py-4 text-center text-muted">No active leases.</div></template
+            <template v-else>
+              <div class="mb-2">
+                <SearchInput v-model="leaseSearch" />
+              </div>
+              <UTable
+                :data="shownServerLeases"
+                :columns="[
+                  { accessorKey: 'address', header: 'Address' },
+                  { accessorKey: 'mac', header: 'MAC' },
+                  { accessorKey: 'hostname', header: 'Host name' },
+                  { id: 'expires', header: 'Expires' },
+                ]"
               >
-            </UTable>
+                <template #expires-cell="{ row }">{{ datetime(row.original.expires) }}</template>
+                <template #empty
+                  ><div class="py-4 text-center text-muted">
+                    {{ serverLeases.length ? 'No lease matches.' : 'No active leases.' }}
+                  </div></template
+                >
+              </UTable>
+            </template>
           </div>
 
           <div v-if="clientLeases.length" class="card">
             <div class="mb-2 text-lg font-semibold">DHCP client</div>
+            <div class="mb-2">
+              <SearchInput v-model="clientSearch" />
+            </div>
             <UTable
-              :data="clientLeases"
+              :data="shownClientLeases"
               :columns="[
                 { accessorKey: 'interface', header: 'Interface' },
                 { accessorKey: 'state', header: 'State' },
@@ -237,6 +269,9 @@ const tab = computed({
             >
               <template #dns-cell="{ row }">{{ row.original.dns?.join(', ') }}</template>
               <template #expires-cell="{ row }">{{ datetime(row.original.expires) }}</template>
+              <template #empty
+                ><div class="py-4 text-center text-muted">No lease matches.</div></template
+              >
             </UTable>
           </div>
         </div>
@@ -280,7 +315,10 @@ const tab = computed({
                 </p>
               </fieldset>
 
-              <div class="mt-4 overflow-x-auto">
+              <div class="mt-4 mb-2">
+                <SearchInput v-model="ifaceSearch" />
+              </div>
+              <div class="overflow-x-auto">
                 <table class="w-full text-sm">
                   <thead>
                     <tr class="border-b border-default text-left text-xs text-muted">
@@ -295,7 +333,7 @@ const tab = computed({
                     </tr>
                   </thead>
                   <tbody>
-                    <template v-for="i in server.ifaces" :key="i.id">
+                    <template v-for="i in shownIfaces" :key="i.id">
                       <tr
                         v-for="(p, idx) in i.prefixes.length ? i.prefixes : [null]"
                         :key="p?.prefix ?? 'none'"
@@ -396,8 +434,14 @@ const tab = computed({
                         </template>
                       </tr>
                     </template>
-                    <tr v-if="!server.ifaces.length">
-                      <td colspan="8" class="py-2 text-muted">This instance has no interfaces.</td>
+                    <tr v-if="!shownIfaces.length">
+                      <td colspan="8" class="py-2 text-muted">
+                        {{
+                          server.ifaces.length
+                            ? 'No interface matches.'
+                            : 'This instance has no interfaces.'
+                        }}
+                      </td>
                     </tr>
                   </tbody>
                 </table>

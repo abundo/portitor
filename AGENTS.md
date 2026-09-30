@@ -157,12 +157,19 @@ are in [README.md](README.md).
 
 Apply these to every page, `CrudPage` and custom pages alike. `CrudPage` does
 them itself (give it a `noun` or `item-name` when the title doesn't make a good
-singular); a custom page uses `useConfirm().confirmDelete` for the Yes / No
-prompt, `inlineField` / `wideModal` (`utils/form.js`) for its dialog forms and
-`useFormGuard` for their Cancel and X.
+singular); a custom page uses `SearchInput` above each table,
+`useConfirm().confirmDelete` for the Yes / No prompt, `inlineField` / `wideModal`
+(`utils/form.js`) for its dialog forms and `useFormGuard` for their Cancel and X.
 
 - **Tables:** the Edit button is the first column, so it stays visible when the
   table is wider than the screen. Tables have no Delete button.
+- **Search:** every table (data tables included) has a search field above it that
+  filters the rows as you type, with an X (cross) in the field that clears it:
+  `SearchInput.vue`, with `useSearch` (`utils/search.js`) for the rows. A row
+  matches when its shown text holds every word typed. `CrudPage` has one (give it
+  `searchText` for a cell slot that shows more than the column's value); while
+  searching, rows can't be dragged. A tree (Hosts & prefixes) shows the matches with
+  the folders and prefixes above them, unfolded.
 - **Delete** lives in the detail view (Edit → the form). It asks for confirmation
   and names what will be deleted ("Delete interface WAN (ens18)?"), with Yes / No.
 - **Forms and dialogs** are wide when the screen allows: each label sits on the

@@ -5,10 +5,12 @@
 import { computed, onMounted, ref } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import { diffLines } from 'diff'
+import SearchInput from '@/components/SearchInput.vue'
 import { api } from '@/api'
 import { errMsg } from '@/api/http'
 import { useDeployStore } from '@/stores/deploy'
 import { datetime } from '@/utils/time'
+import { useSearch } from '@/utils/search'
 import { useAuthStore } from '@/stores/auth'
 
 const auth = useAuthStore()
@@ -30,6 +32,11 @@ async function load() {
   confirmTimeout.value = s.confirm_timeout
 }
 onMounted(load)
+const { search: historySearch, filtered: shownHistory } = useSearch(
+  history,
+  (d) =>
+    `${d.generation} ${datetime(d.created_at)} ${d.username} ${d.status.replace('_', ' ')} ${d.message}`,
+)
 
 async function runPreview() {
   busy.value = true
@@ -242,8 +249,11 @@ const fileColor = { same: 'neutral', changed: 'warning', new: 'success', removed
 
     <div class="card">
       <div class="mb-2 font-semibold">History</div>
+      <div class="mb-2">
+        <SearchInput v-model="historySearch" />
+      </div>
       <UTable
-        :data="history"
+        :data="shownHistory"
         :columns="[
           { accessorKey: 'generation', header: 'Gen' },
           { id: 'when', header: 'When' },
@@ -261,7 +271,9 @@ const fileColor = { same: 'neutral', changed: 'warning', new: 'success', removed
           />
         </template>
         <template #empty
-          ><div class="py-4 text-center text-muted">Nothing deployed yet.</div></template
+          ><div class="py-4 text-center text-muted">
+            {{ history.length ? 'Nothing matches the search.' : 'Nothing deployed yet.' }}
+          </div></template
         >
       </UTable>
     </div>

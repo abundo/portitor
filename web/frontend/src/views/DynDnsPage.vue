@@ -9,6 +9,7 @@ import { dyndnsClients, dyndnsRecords } from '@/api'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
 import { useDeployStore } from '@/stores/deploy'
 import { ago } from '@/utils/time'
+import { valuesText } from '@/utils/search'
 
 const { store, ifaceItems, ifaceName } = useInstanceRefs()
 const deploy = useDeployStore()
@@ -160,6 +161,7 @@ const recordFields = [
           verify_interval: 0,
         }"
         new-label="New client"
+        :search-text="(row) => valuesText(states[row.name])"
         @changed="loadClients"
       >
         <template #cell-state="{ row }">

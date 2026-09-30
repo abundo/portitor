@@ -4,12 +4,14 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
+import SearchInput from '@/components/SearchInput.vue'
 import { api } from '@/api'
 import { errMsg } from '@/api/http'
 import { useAuthStore } from '@/stores/auth'
 import { useConfirm } from '@/composables/useConfirm'
 import { useFormGuard } from '@/composables/useFormGuard'
 import { inlineField, wideModal } from '@/utils/form'
+import { useSearch } from '@/utils/search'
 
 const toast = useToast()
 const auth = useAuthStore()
@@ -25,6 +27,10 @@ async function load() {
   users.value = await api.users()
 }
 onMounted(load)
+const { search, filtered: shownUsers } = useSearch(
+  users,
+  (u) => `${u.username} ${roleLabel(u.role)}`,
+)
 
 // The dialog adds a user, or changes an existing user's role (not your own).
 const open = ref(false)
@@ -113,8 +119,11 @@ async function remove() {
         <div class="text-lg font-semibold">Users</div>
         <UButton icon="i-lucide-user-plus" label="Add" @click="openCreate" />
       </div>
+      <div class="mb-2">
+        <SearchInput v-model="search" />
+      </div>
       <UTable
-        :data="users"
+        :data="shownUsers"
         :columns="[
           { id: 'actions', header: '' },
           { accessorKey: 'username', header: 'Username' },
@@ -135,6 +144,9 @@ async function remove() {
         <template #role-cell="{ row }">
           {{ roleLabel(row.original.role) }}
           <span v-if="row.original.id === auth.user?.id" class="text-muted">(you)</span>
+        </template>
+        <template #empty>
+          <div class="py-6 text-center text-muted">No user matches.</div>
         </template>
       </UTable>
     </div>

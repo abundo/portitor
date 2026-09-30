@@ -6,11 +6,13 @@
 // services are edited here (or created from a rule's Service cell); the
 // predefined ones (netobj.Predefined) are listed below them, and last the
 // built-in port names NAT port fields accept (fwconfig.Services).
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted } from 'vue'
 import CrudPage from '@/components/CrudPage.vue'
+import SearchInput from '@/components/SearchInput.vue'
 import ServiceOptions from '@/components/ServiceOptions.vue'
 import { customServices } from '@/api'
 import { useObjectStore } from '@/stores/objects'
+import { useSearch } from '@/utils/search'
 import { newService, serviceMatches, serviceTypes } from '@/utils/services'
 
 const objects = useObjectStore()
@@ -35,19 +37,9 @@ const fields = [
   { key: 'description', label: 'Description' },
 ]
 
-// filtered keeps the rows that have every word typed.
-function filtered(list, words, text) {
-  return list.filter((s) => words.every((w) => text(s).toLowerCase().includes(w)))
-}
-
-const filter = ref('')
-const words = computed(() => filter.value.toLowerCase().split(/\s+/).filter(Boolean))
-const predefined = computed(() =>
-  filtered(
-    objects.predefinedServices,
-    words.value,
-    (s) => `${s.name} ${serviceMatches(s).join(' ')} ${s.description}`,
-  ),
+const { search: filter, filtered: predefined } = useSearch(
+  () => objects.predefinedServices,
+  (s) => `${s.name} ${typeLabel(s.type)} ${serviceMatches(s).join(' ')} ${s.description}`,
 )
 const predefinedColumns = [
   { accessorKey: 'name', header: 'Name' },
@@ -56,13 +48,9 @@ const predefinedColumns = [
   { accessorKey: 'description', header: 'Description' },
 ]
 
-const portFilter = ref('')
-const portNames = computed(() =>
-  filtered(
-    [...objects.services].sort((a, b) => a.name.localeCompare(b.name)),
-    portFilter.value.toLowerCase().split(/\s+/).filter(Boolean),
-    (s) => `${s.name} ${s.port} ${s.description}`,
-  ),
+const { search: portFilter, filtered: portNames } = useSearch(
+  computed(() => [...objects.services].sort((a, b) => a.name.localeCompare(b.name))),
+  (s) => `${s.name} ${s.port} ${s.description}`,
 )
 const portColumns = [
   { accessorKey: 'name', header: 'Name' },
@@ -81,6 +69,7 @@ const portColumns = [
       :fields="fields"
       :defaults="newService"
       new-label="New service"
+      :search-text="(row) => serviceMatches(row).join(' ')"
       @changed="objects.load(true)"
     >
       <template #cell-match="{ row }">
@@ -99,7 +88,9 @@ const portColumns = [
             Built in; rules name them like your own services.
           </p>
         </div>
-        <UInput v-model="filter" icon="i-lucide-search" placeholder="Filter" class="w-56" />
+      </div>
+      <div class="mb-2">
+        <SearchInput v-model="filter" />
       </div>
       <UTable :data="predefined" :columns="predefinedColumns" class="text-sm">
         <template #name-cell="{ row }">
@@ -124,7 +115,9 @@ const portColumns = [
             Where Debian and Fedora name a port differently, both names work.
           </p>
         </div>
-        <UInput v-model="portFilter" icon="i-lucide-search" placeholder="Filter" class="w-56" />
+      </div>
+      <div class="mb-2">
+        <SearchInput v-model="portFilter" />
       </div>
       <UTable :data="portNames" :columns="portColumns" class="text-sm">
         <template #name-cell="{ row }">

@@ -8,6 +8,7 @@ import { useToast } from '@nuxt/ui/composables'
 import AddrInput from '@/components/AddrInput.vue'
 import CrudPage from '@/components/CrudPage.vue'
 import NeedInstance from '@/components/NeedInstance.vue'
+import SearchInput from '@/components/SearchInput.vue'
 import { dnsTemplates, dnsZones, instances, interfaces } from '@/api'
 import { errMsg } from '@/api/http'
 import { withLabel } from '@/composables/useInstanceRefs'
@@ -16,6 +17,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useInstanceStore } from '@/stores/instances'
 import { zoneTypes } from '@/utils/dns'
 import { inlineField } from '@/utils/form'
+import { useSearch } from '@/utils/search'
 
 const toast = useToast()
 const route = useRoute()
@@ -85,6 +87,10 @@ const dnssecValidation = computed({
   set: (v) => (server.dns_dnssec_validation = v ? 'auto' : 'no'),
 })
 const dhcpUpstream = computed(() => server.dns_upstream === 'dhcp')
+const { search: ifaceSearch, filtered: shownIfaces } = useSearch(
+  () => server.ifaces,
+  (i) => `${withLabel(i.label, i.name)} ${i.description}`,
+)
 
 // Only one interface gives the upstream servers.
 function setFromDhcp(ifc, on) {
@@ -246,63 +252,73 @@ const tab = computed({
                   >
                     <USwitch v-model="dnssecValidation" />
                   </UFormField>
-
-                  <div class="overflow-x-auto pt-2">
-                    <table class="w-full text-sm">
-                      <thead>
-                        <tr class="border-b border-default text-left text-xs text-muted">
-                          <th class="py-1.5 pr-4 font-medium">Interface</th>
-                          <th class="pr-4 font-medium">Description</th>
-                          <th class="pr-4 font-medium">Respond to DNS queries</th>
-                          <th v-if="dhcpUpstream" class="font-medium">Use DNS from DHCP</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        <tr
-                          v-for="i in server.ifaces"
-                          :key="i.id"
-                          class="border-b border-default last:border-0"
-                        >
-                          <td class="py-1.5 pr-4 font-mono">{{ withLabel(i.label, i.name) }}</td>
-                          <td class="py-1.5 pr-4">{{ i.description }}</td>
-                          <td class="py-1.5 pr-4">
-                            <USwitch
-                              v-model="i.dns_listen"
-                              :aria-label="`Respond to DNS queries on ${i.name}`"
-                            />
-                          </td>
-                          <td v-if="dhcpUpstream" class="py-1.5">
-                            <USwitch
-                              v-if="i.ipv4_mode === 'dhcp'"
-                              :model-value="i.dns_from_dhcp"
-                              :aria-label="`Use DNS servers from the DHCP lease on ${i.name}`"
-                              @update:model-value="(v) => setFromDhcp(i, v)"
-                            />
-                          </td>
-                        </tr>
-                        <tr v-if="!server.ifaces.length">
-                          <td colspan="4" class="py-2 text-muted">
-                            This instance has no interfaces.
-                          </td>
-                        </tr>
-                      </tbody>
-                    </table>
-                    <p
-                      v-if="dhcpUpstream && !server.ifaces.some((i) => i.ipv4_mode === 'dhcp')"
-                      class="mt-2 text-sm text-warning"
-                    >
-                      No interface gets its IPv4 address from DHCP. Make one a DHCP client under
-                      Interfaces, or pick another upstream.
-                    </p>
-                    <p
-                      v-else-if="dhcpUpstream && !server.ifaces.some((i) => i.dns_from_dhcp)"
-                      class="mt-2 text-sm text-warning"
-                    >
-                      Choose the interface whose DHCP lease gives the DNS servers.
-                    </p>
-                  </div>
                 </template>
               </fieldset>
+
+              <!-- Outside the form's fieldset, so a viewer can search too. -->
+              <div v-if="server.dns_enabled" class="pt-5">
+                <div class="mb-2">
+                  <SearchInput v-model="ifaceSearch" />
+                </div>
+                <fieldset :disabled="readOnly" class="min-w-0 overflow-x-auto">
+                  <table class="w-full text-sm">
+                    <thead>
+                      <tr class="border-b border-default text-left text-xs text-muted">
+                        <th class="py-1.5 pr-4 font-medium">Interface</th>
+                        <th class="pr-4 font-medium">Description</th>
+                        <th class="pr-4 font-medium">Respond to DNS queries</th>
+                        <th v-if="dhcpUpstream" class="font-medium">Use DNS from DHCP</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr
+                        v-for="i in shownIfaces"
+                        :key="i.id"
+                        class="border-b border-default last:border-0"
+                      >
+                        <td class="py-1.5 pr-4 font-mono">{{ withLabel(i.label, i.name) }}</td>
+                        <td class="py-1.5 pr-4">{{ i.description }}</td>
+                        <td class="py-1.5 pr-4">
+                          <USwitch
+                            v-model="i.dns_listen"
+                            :aria-label="`Respond to DNS queries on ${i.name}`"
+                          />
+                        </td>
+                        <td v-if="dhcpUpstream" class="py-1.5">
+                          <USwitch
+                            v-if="i.ipv4_mode === 'dhcp'"
+                            :model-value="i.dns_from_dhcp"
+                            :aria-label="`Use DNS servers from the DHCP lease on ${i.name}`"
+                            @update:model-value="(v) => setFromDhcp(i, v)"
+                          />
+                        </td>
+                      </tr>
+                      <tr v-if="!shownIfaces.length">
+                        <td colspan="4" class="py-2 text-muted">
+                          {{
+                            server.ifaces.length
+                              ? 'No interface matches.'
+                              : 'This instance has no interfaces.'
+                          }}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                  <p
+                    v-if="dhcpUpstream && !server.ifaces.some((i) => i.ipv4_mode === 'dhcp')"
+                    class="mt-2 text-sm text-warning"
+                  >
+                    No interface gets its IPv4 address from DHCP. Make one a DHCP client under
+                    Interfaces, or pick another upstream.
+                  </p>
+                  <p
+                    v-else-if="dhcpUpstream && !server.ifaces.some((i) => i.dns_from_dhcp)"
+                    class="mt-2 text-sm text-warning"
+                  >
+                    Choose the interface whose DHCP lease gives the DNS servers.
+                  </p>
+                </fieldset>
+              </div>
               <div v-if="!readOnly" class="mt-4">
                 <UButton type="submit" :loading="saving">Save</UButton>
               </div>

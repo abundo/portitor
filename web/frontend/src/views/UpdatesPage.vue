@@ -4,9 +4,11 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
+import SearchInput from '@/components/SearchInput.vue'
 import { api } from '@/api'
 import { errMsg } from '@/api/http'
 import { ago, when } from '@/utils/time'
+import { useSearch } from '@/utils/search'
 
 const toast = useToast()
 const sys = ref(null)
@@ -26,6 +28,14 @@ const shownReleases = computed(() => {
   const rest = releases.value.filter((r) => !r.newer).slice(0, 5)
   return [...newer, ...rest]
 })
+const { search: releaseSearch, filtered: foundReleases } = useSearch(
+  shownReleases,
+  (r) => `${r.tag} ${r.date} ${r.notes}`,
+)
+const { search: packageSearch, filtered: shownPackages } = useSearch(
+  () => sys.value?.packages ?? [],
+  (p) => `${p.name} ${p.security ? 'security' : ''} ${p.from || 'new'} ${p.to}`,
+)
 const security = computed(() => (sys.value?.packages ?? []).filter((p) => p.security).length)
 
 const jobTitle = {
@@ -171,38 +181,46 @@ async function reboot() {
           <div v-else-if="!releases.length" class="text-sm text-muted">
             No releases are published yet.
           </div>
-          <table v-else class="w-full text-sm">
-            <thead>
-              <tr class="border-b border-default text-left text-xs text-muted">
-                <th class="py-1.5 pr-4 font-medium">Release</th>
-                <th class="pr-4 font-medium">Date</th>
-                <th class="pr-4 font-medium">Notes</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr
-                v-for="r in shownReleases"
-                :key="r.tag"
-                class="border-b border-default last:border-0"
-              >
-                <td class="py-1.5 pr-4 font-mono">{{ r.tag }}</td>
-                <td class="py-1.5 pr-4">{{ r.date }}</td>
-                <td class="py-1.5 pr-4 text-muted">{{ r.notes }}</td>
-                <td class="py-1.5 text-right">
-                  <UButton
-                    v-if="r.installable && !r.notes.includes('current')"
-                    size="xs"
-                    :variant="r.newer ? 'solid' : 'outline'"
-                    :color="r.newer ? 'primary' : 'neutral'"
-                    :disabled="running"
-                    @click="install(r)"
-                    >{{ r.newer ? 'Install' : 'Go back' }}</UButton
-                  >
-                </td>
-              </tr>
-            </tbody>
-          </table>
+          <template v-else>
+            <div class="mb-2">
+              <SearchInput v-model="releaseSearch" />
+            </div>
+            <table class="w-full text-sm">
+              <thead>
+                <tr class="border-b border-default text-left text-xs text-muted">
+                  <th class="py-1.5 pr-4 font-medium">Release</th>
+                  <th class="pr-4 font-medium">Date</th>
+                  <th class="pr-4 font-medium">Notes</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="r in foundReleases"
+                  :key="r.tag"
+                  class="border-b border-default last:border-0"
+                >
+                  <td class="py-1.5 pr-4 font-mono">{{ r.tag }}</td>
+                  <td class="py-1.5 pr-4">{{ r.date }}</td>
+                  <td class="py-1.5 pr-4 text-muted">{{ r.notes }}</td>
+                  <td class="py-1.5 text-right">
+                    <UButton
+                      v-if="r.installable && !r.notes.includes('current')"
+                      size="xs"
+                      :variant="r.newer ? 'solid' : 'outline'"
+                      :color="r.newer ? 'primary' : 'neutral'"
+                      :disabled="running"
+                      @click="install(r)"
+                      >{{ r.newer ? 'Install' : 'Go back' }}</UButton
+                    >
+                  </td>
+                </tr>
+                <tr v-if="!foundReleases.length">
+                  <td colspan="4" class="py-2 text-muted">No release matches.</td>
+                </tr>
+              </tbody>
+            </table>
+          </template>
         </template>
       </div>
 
@@ -227,6 +245,9 @@ async function reboot() {
               :label="`${security} security`"
             />
           </div>
+          <div class="mb-2">
+            <SearchInput v-model="packageSearch" />
+          </div>
           <div class="max-h-80 overflow-auto">
             <table class="w-full text-sm">
               <thead>
@@ -238,7 +259,7 @@ async function reboot() {
               </thead>
               <tbody>
                 <tr
-                  v-for="p in sys.packages"
+                  v-for="p in shownPackages"
                   :key="p.name"
                   class="border-b border-default last:border-0"
                 >
@@ -254,6 +275,9 @@ async function reboot() {
                   </td>
                   <td class="py-1 pr-4 font-mono text-xs">{{ p.from || 'new' }}</td>
                   <td class="py-1 font-mono text-xs">{{ p.to }}</td>
+                </tr>
+                <tr v-if="!shownPackages.length">
+                  <td colspan="3" class="py-2 text-muted">No package matches.</td>
                 </tr>
               </tbody>
             </table>

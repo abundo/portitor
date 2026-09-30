@@ -3,6 +3,7 @@
 
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import SearchInput from '@/components/SearchInput.vue'
 import { useLogPanel } from '@/composables/useLogPanel'
 import { logTime } from '@/utils/time'
 
@@ -136,14 +137,12 @@ onUnmounted(stop)
           @click="state.tab = t.value"
         />
       </div>
-      <UInput
+      <SearchInput
         v-if="state.tab === 'packets'"
         v-model="filter"
-        icon="i-lucide-filter"
         placeholder="Filter: wan tcp 443"
         size="xs"
         class="w-56"
-        aria-label="Filter logged packets"
       />
       <span v-if="state.tab === 'packets' && filter" class="text-xs text-muted"
         >{{ packets.length }} of {{ state.packets.lines.length }}</span
