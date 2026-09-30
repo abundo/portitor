@@ -92,6 +92,8 @@ export const api = {
     http.post('/users', { username, password, role }).then((r) => r.data),
   // Changing a user's role ends their sessions.
   setUserRole: (id, role) => http.put(`/users/${id}`, { role }).then((r) => r.data),
+  // Setting a user's password ends their sessions.
+  setUserPassword: (id, password) => http.post(`/users/${id}/password`, { password }),
   deleteUser: (id) => http.delete(`/users/${id}`),
 
   deployCheck: () => http.get('/deploy/check').then((r) => r.data),

@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	"github.com/labstack/echo/v5"
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
@@ -737,7 +738,7 @@ func TestDnsTemplates(t *testing.T) {
 	var tm models.DnsTemplate
 	env.srv.db.First(&tm, tmpl)
 	if want := (models.DnsNameserverList{{Name: "ns1.example.com"}, {Name: "ns2.example.com", Address: "192.0.2.2"}, {Name: "ns2.example.com", Address: "2001:db8::2"},
-		{Name: "ns2.example.com", Address: "192.0.2.3"}, {Name: "ns2.example.com", Address: "2001:db8::3"}});!reflect.DeepEqual(tm.Nameservers, want) {
+		{Name: "ns2.example.com", Address: "192.0.2.3"}, {Name: "ns2.example.com", Address: "2001:db8::3"}}); !reflect.DeepEqual(tm.Nameservers, want) {
 		t.Errorf("nameservers not normalised: %v", tm.Nameservers)
 	}
 	for path, body := range map[string]map[string]any{
@@ -944,6 +945,22 @@ func TestViewerRole(t *testing.T) {
 	var ann models.User
 	if err := env.srv.db.First(&ann, id).Error; err != nil || ann.Role != models.RoleAdmin || ann.TokenVersion == 0 {
 		t.Errorf("ann: %+v %v", ann, err)
+	}
+
+	// An admin sets ann's password, which ends her sessions; not their own.
+	if rec := env.do("POST", fmt.Sprintf("/api/users/%d/password", id), map[string]string{"password": "short"}); rec.Code != http.StatusBadRequest {
+		t.Errorf("short password: %d", rec.Code)
+	}
+	if rec := env.do("POST", fmt.Sprintf("/api/users/%d/password", admin.ID), map[string]string{"password": "another long password"}); rec.Code != http.StatusBadRequest {
+		t.Errorf("own password: %d", rec.Code)
+	}
+	if rec := env.do("POST", fmt.Sprintf("/api/users/%d/password", id), map[string]string{"password": "another long password"}); rec.Code != http.StatusNoContent {
+		t.Fatalf("set password: %d %s", rec.Code, rec.Body)
+	}
+	var ann2 models.User
+	env.srv.db.First(&ann2, id)
+	if ann2.TokenVersion <= ann.TokenVersion || bcrypt.CompareHashAndPassword([]byte(ann2.PasswordHash), []byte("another long password")) != nil {
+		t.Errorf("ann after reset: %+v", ann2)
 	}
 }
 

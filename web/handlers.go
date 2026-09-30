@@ -508,6 +508,36 @@ func (s *Server) handleUpdateUser(c *echo.Context) error {
 	return c.JSON(http.StatusOK, u)
 }
 
+// handleSetUserPassword sets another user's password and ends their
+// sessions. Your own goes through /me/password, which asks for the current one.
+func (s *Server) handleSetUserPassword(c *echo.Context) error {
+	id, err := echo.PathParam[uint](c, "id")
+	if err != nil {
+		return errJSON(c, http.StatusNotFound, "not found")
+	}
+	var req struct {
+		Password string `json:"password"`
+	}
+	if err := c.Bind(&req); err != nil {
+		return errJSON(c, http.StatusBadRequest, "invalid request")
+	}
+	if id == currentUser(c).ID {
+		return errJSON(c, http.StatusBadRequest, "change your own password under Change password")
+	}
+	var u models.User
+	if err := s.db.First(&u, id).Error; err != nil {
+		return errJSON(c, http.StatusNotFound, "not found")
+	}
+	if err := setPassword(&u, req.Password); err != nil {
+		return errJSON(c, http.StatusBadRequest, err.Error())
+	}
+	u.TokenVersion++
+	if err := s.db.Save(&u).Error; err != nil {
+		return err
+	}
+	return c.NoContent(http.StatusNoContent)
+}
+
 func (s *Server) handleDeleteUser(c *echo.Context) error {
 	id, err := echo.PathParam[uint](c, "id")
 	if err != nil {

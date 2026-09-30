@@ -156,6 +156,7 @@ func (s *Server) Echo() *echo.Echo {
 	g.GET("/users", s.handleListUsers)
 	g.POST("/users", s.handleCreateUser)
 	g.PUT("/users/:id", s.handleUpdateUser)
+	g.POST("/users/:id/password", s.handleSetUserPassword)
 	g.DELETE("/users/:id", s.handleDeleteUser)
 
 	g.GET("/deploy/check", s.handleDeployCheck)

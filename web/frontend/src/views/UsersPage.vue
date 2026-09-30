@@ -61,6 +61,39 @@ async function save() {
   }
 }
 
+// The password dialog sets another user's password (your own is changed
+// under Change password, which asks for the current one).
+const pwOpen = ref(false)
+const pwSaving = ref(false)
+const pw = reactive({ next: '', repeat: '' })
+const pwGuard = useFormGuard(pw, pwOpen)
+const pwMismatch = computed(() => pw.repeat !== '' && pw.next !== pw.repeat)
+
+function openPassword() {
+  Object.assign(pw, { next: '', repeat: '' })
+  pwOpen.value = true
+}
+
+async function savePassword() {
+  if (pw.next !== pw.repeat) {
+    toast.add({ title: 'The passwords do not match', color: 'error' })
+    return
+  }
+  pwSaving.value = true
+  try {
+    await api.setUserPassword(editing.value.id, pw.next)
+    pwOpen.value = false
+    toast.add({
+      title: `Password set for ${editing.value.username}; their sessions are logged out`,
+      color: 'success',
+    })
+  } catch (err) {
+    toast.add({ title: errMsg(err), color: 'error' })
+  } finally {
+    pwSaving.value = false
+  }
+}
+
 async function remove() {
   if (!(await confirmDelete(`user ${editing.value.username}`))) return
   try {
@@ -153,10 +186,70 @@ async function remove() {
           label="Delete"
           @click="remove"
         />
+        <UButton
+          v-if="editing && !isSelf"
+          color="neutral"
+          variant="ghost"
+          icon="i-lucide-key-round"
+          label="Reset password"
+          @click="openPassword"
+        />
         <UButton class="ms-auto" color="neutral" variant="ghost" @click="guard.close">
           Cancel
         </UButton>
         <UButton type="submit" form="user-form" :loading="saving">Save</UButton>
+      </div>
+    </template>
+  </UModal>
+
+  <UModal
+    :open="pwOpen"
+    :title="`Reset password for ${editing?.username}`"
+    description="Their sessions are logged out."
+    :ui="wideModal"
+    :dismissible="false"
+    @update:open="pwGuard.onUpdateOpen"
+  >
+    <template #body>
+      <form id="password-form" class="space-y-3" @submit.prevent="savePassword">
+        <UFormField :ui="inlineField" label="New password" help="At least 10 characters." required>
+          <UInput
+            v-model="pw.next"
+            type="password"
+            autocomplete="new-password"
+            class="w-full"
+            required
+          />
+        </UFormField>
+        <UFormField
+          :ui="inlineField"
+          label="Repeat password"
+          :error="pwMismatch ? 'The passwords do not match' : false"
+          required
+        >
+          <UInput
+            v-model="pw.repeat"
+            type="password"
+            autocomplete="new-password"
+            class="w-full"
+            required
+          />
+        </UFormField>
+      </form>
+    </template>
+    <template #footer>
+      <div class="flex w-full gap-2">
+        <UButton class="ms-auto" color="neutral" variant="ghost" @click="pwGuard.close">
+          Cancel
+        </UButton>
+        <UButton
+          type="submit"
+          form="password-form"
+          :loading="pwSaving"
+          :disabled="!pw.next || pw.next !== pw.repeat"
+        >
+          Set password
+        </UButton>
       </div>
     </template>
   </UModal>

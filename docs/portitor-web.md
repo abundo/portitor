@@ -128,13 +128,17 @@ New users get the role you pick in Settings → Users. Users that existed before
 were added are admins. You can't change your own role, so at least one admin always
 remains. Changing another user's role ends their sessions.
 
+An admin can reset another user's password: open the user and pick *Reset password*,
+then enter the new password twice. Your own password is changed under *Change
+password*, which asks for the current one.
+
 A login lasts 12 hours, or 30 days with *Remember me*. Changing your password ends
-your other sessions; deleting a user or changing their role ends theirs, and so does
-`portitor-web createadmin` for an existing user. An open console closes within a
-few seconds when its session ends or expires. *Log out* only clears the cookie in that
-browser: a copy of the cookie stays valid until it expires. To end every session of a
-user at once, change the password. Changing `jwt_secret` ends every session of every
-user.
+your other sessions; deleting a user, changing their role or resetting their password
+ends theirs, and so does `portitor-web createadmin` for an existing user. An open
+console closes within a few seconds when its session ends or expires. *Log out* only
+clears the cookie in that browser: a copy of the cookie stays valid until it
+expires. To end every session of a user at once, change the password. Changing
+`jwt_secret` ends every session of every user.
 
 ## Deploying
 
