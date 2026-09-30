@@ -34,7 +34,7 @@ are in [README.md](README.md).
 | `deploy` | systemd units and example configs |
 | `dev` | Dev configs and `seed.sh`; `dev/lab` runs a real apply in two podman containers |
 | `install.py` | Installs/updates web and agent from a GitHub release (`.goreleaser.yaml`), `--source` or `--local`; the agent runs its copy in `/usr/lib/portitor` for GUI updates |
-| `iso` | Installer ISO: Debian netinst + preseed (`build.sh`), setup (`portitor-setup.py`, installed as `portitor-setup`: runs `portitor-web bootstrap` at first boot, `--reconfigure` when run again), QEMU test VM (`vm.sh`) |
+| `iso` | Installer ISO: Debian netinst + preseed (`build.sh`), setup (`portitor-setup.py`, installed as `portitor-setup`: runs `portitor-web bootstrap` at first boot, `--reconfigure` when run again; or sets up only the agent, which prints a join string, or only portitor-web, which deploys it with `bootstrap --join`), QEMU test VM (`vm.sh`) |
 
 ## Invariants
 

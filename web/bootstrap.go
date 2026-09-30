@@ -38,7 +38,8 @@ type BootstrapOptions struct {
 	// Gateway, if valid, becomes the default route. It is on the WAN when
 	// that is static, else on the static LAN; DHCP there takes none.
 	Gateway netip.Addr
-	// GUIPort is portitor-web's port, opened on the LAN.
+	// GUIPort is portitor-web's port, opened on the LAN; 0 opens none
+	// (portitor-web runs on another host).
 	GUIPort int
 	// Reconfigure runs after a deploy too (portitor-setup run again): the
 	// LAN and WAN get exactly these settings, the IPv4 default route is the
@@ -88,7 +89,7 @@ func (o *BootstrapOptions) check() error {
 			return fmt.Errorf("the gateway %s must be another address in %s", o.Gateway, gwNet.Masked())
 		}
 	}
-	if o.GUIPort < 1 || o.GUIPort > 65535 {
+	if o.GUIPort < 0 || o.GUIPort > 65535 {
 		return fmt.Errorf("invalid GUI port %d", o.GUIPort)
 	}
 	return nil
@@ -237,33 +238,19 @@ func bootstrapNetwork(tx *gorm.DB, instanceID uint, o BootstrapOptions) error {
 		}
 	}
 
-	// The GUI's port is a service of its own, kept at the port on
-	// reconfigure.
-	gui := models.Service{Name: "portitor-web", Type: models.ServiceTypePorts, Description: "The portitor-web GUI",
-		Ports: models.ServicePortList{{Protocol: "tcp", DstLo: o.GUIPort}}}
-	var old models.Service
-	switch err := tx.Where("name = ?", gui.Name).First(&old).Error; {
-	case errors.Is(err, gorm.ErrRecordNotFound):
-		if err := prepareService(tx, &gui, nil); err != nil {
-			return err
-		}
-		if err := tx.Create(&gui).Error; err != nil {
-			return err
-		}
-	case err != nil:
-		return err
-	case o.Reconfigure:
-		if err := tx.Model(&old).Update("ports", gui.Ports).Error; err != nil {
-			return err
-		}
-	}
-
 	lan, wan := models.StringList{o.LAN}, models.StringList{o.WAN}
-	rules := []models.Rule{
-		{Chain: fwconfig.ChainInput, InInterfaces: lan, Services: models.StringList{gui.Name}, Description: "portitor-web from the LAN"},
-		{Chain: fwconfig.ChainInput, InInterfaces: lan, Services: models.StringList{"ssh"}, Description: "SSH from the LAN"},
-		{Chain: fwconfig.ChainInput, InInterfaces: lan, Services: models.StringList{"all-icmp"}, Description: "ping from the LAN"},
+	var rules []models.Rule
+	if o.GUIPort > 0 {
+		gui, err := bootstrapGUIService(tx, o)
+		if err != nil {
+			return err
+		}
+		rules = append(rules, models.Rule{Chain: fwconfig.ChainInput, InInterfaces: lan, Services: models.StringList{gui}, Description: "portitor-web from the LAN"})
 	}
+	rules = append(rules,
+		models.Rule{Chain: fwconfig.ChainInput, InInterfaces: lan, Services: models.StringList{"ssh"}, Description: "SSH from the LAN"},
+		models.Rule{Chain: fwconfig.ChainInput, InInterfaces: lan, Services: models.StringList{"all-icmp"}, Description: "ping from the LAN"},
+	)
 	if o.WAN != "" {
 		rules = append(rules, models.Rule{Chain: fwconfig.ChainForward, InInterfaces: lan, OutInterfaces: wan, Description: "LAN to WAN"})
 	}
@@ -331,6 +318,30 @@ func bootstrapNetwork(tx *gorm.DB, instanceID uint, o BootstrapOptions) error {
 		return err
 	}
 	return tx.Create(&nat).Error
+}
+
+// bootstrapGUIService returns the name of the GUI port's service, a service
+// of its own, kept at the port on reconfigure.
+func bootstrapGUIService(tx *gorm.DB, o BootstrapOptions) (string, error) {
+	gui := models.Service{Name: "portitor-web", Type: models.ServiceTypePorts, Description: "The portitor-web GUI",
+		Ports: models.ServicePortList{{Protocol: "tcp", DstLo: o.GUIPort}}}
+	var old models.Service
+	switch err := tx.Where("name = ?", gui.Name).First(&old).Error; {
+	case errors.Is(err, gorm.ErrRecordNotFound):
+		if err := prepareService(tx, &gui, nil); err != nil {
+			return "", err
+		}
+		if err := tx.Create(&gui).Error; err != nil {
+			return "", err
+		}
+	case err != nil:
+		return "", err
+	case o.Reconfigure:
+		if err := tx.Model(&old).Update("ports", gui.Ports).Error; err != nil {
+			return "", err
+		}
+	}
+	return gui.Name, nil
 }
 
 // reconfigureDefaultRoute makes gw the only IPv4 default route, or removes

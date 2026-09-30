@@ -16,7 +16,8 @@ ruleset before the agent starts: anything else that configures an interface earl
 (a leftover netplan or DHCP client entry) opens a gap. To move the GUI to
 another host later, install portitor-web there with `install.py`, point it at the
 agent, and change the agent's `listen` and `allow_from` in
-`/etc/portitor/agent.yaml`.
+`/etc/portitor/agent.yaml`. To split them from the start, see
+[Firewall and GUI on separate hosts](#firewall-and-gui-on-separate-hosts).
 
 AppArmor stays on. Debian's profiles for BIND and Kea get Portitor's paths added in
 `/etc/apparmor.d/local/` (by `install.py`, as on any Debian host).
@@ -120,6 +121,63 @@ an SSH session over the old LAN address drops.
 Do not edit the rules *portitor-web from the LAN* or the LAN interface in a way that
 locks you out. If that happens, the auto-rollback restores the previous configuration
 as long as you do not confirm the change.
+
+## Firewall and GUI on separate hosts
+
+The setup first asks what the machine runs:
+
+- **both**: the firewall with its GUI, as above.
+- **agent**: a firewall managed by portitor-web on another host.
+- **web**: portitor-web only, managing a firewall on another host.
+
+Install the firewall first.
+
+**The firewall (agent).** The setup asks the same questions as above, except that the
+LAN address must be static (portitor-web has to find the firewall there), and it asks
+for **portitor-web's address**: an address or a network, by default the LAN network.
+The agent listens on port 8443 and only takes calls from that address; the
+anti-lockout rule keeps port 8443 and SSH open from it whatever the rules say. The
+password is for the console login `portitor` only.
+
+Nothing is deployed yet: until portitor-web deploys a first configuration, the setup
+puts the LAN address on the LAN interface (`portitor-setup-lan.service`, at every boot
+until then). There is no other address and no route, so portitor-web must be on the
+LAN network for the first deploy.
+
+The setup ends with a **join string**, one line that starts with `portitor-join:`. It
+holds the agent's URL, its token and certificate fingerprint, and the LAN and WAN
+answers. The token is a password to the firewall: keep the string to yourself. It is
+too long to type comfortably, so log in over SSH (`ssh portitor@<LAN address>`) and run
+`sudo portitor-setup --show-join` to copy it.
+
+**The GUI host (web).** The setup asks for the host's interface, DHCP or a static
+address with its default gateway, the DNS servers, the password for `admin` and
+`portitor`, and the time zone. The interface is configured in `/etc/network/interfaces`
+and portitor-agent is disabled, so this host has no Portitor firewall of its own. At
+the end, paste the join string, or leave it empty and paste it later: log in over SSH
+and run `sudo portitor-setup --join`.
+
+The join deploys the firewall's first configuration, as for *both*: its LAN and WAN,
+the default route, *SSH from the LAN*, *ping from the LAN*, *LAN to WAN* and the
+masquerade. There is no *portitor-web from the LAN* rule, since the GUI is not on the
+firewall.
+
+A portitor-web installed with `install.py` takes the join string too:
+
+```sh
+sudo runuser -u portitor -- portitor-web -f /etc/portitor/web.yaml bootstrap --join -
+```
+
+Paste the string, then press Enter and Ctrl-D. Both refuse once portitor-web has
+deployed something. You can also enter the agent URL, token and fingerprint by hand in
+*Settings → Agent*, but then configure the firewall's LAN interface with its address
+before the first deploy. Otherwise the deploy takes the LAN address away.
+
+Run again, `sudo portitor-setup` changes less on a split setup. On the firewall it
+changes portitor-web's address, the DNS servers, the time zone, the keyboard layout and
+the console password; the network is portitor-web's to change. On the GUI host it
+changes the host's interface and address, the DNS servers, the time zone, the keyboard
+layout and the password.
 
 ## Updates
 

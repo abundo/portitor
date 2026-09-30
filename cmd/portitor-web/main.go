@@ -139,7 +139,7 @@ func main() {
 	})
 
 	var bo web.BootstrapOptions
-	var tokenFile, address, wanAddress, gateway string
+	var tokenFile, address, wanAddress, gateway, join string
 	bootstrap := &cobra.Command{
 		Use:   "bootstrap",
 		Short: "Configure and deploy a new firewall that runs portitor-web itself (installer ISO)",
@@ -153,12 +153,38 @@ anything has been deployed, unless --reconfigure (portitor-setup run again):
 then the LAN and WAN get exactly these settings, the IPv4 default route is
 --gateway or none, the GUI, SSH and ping rules are enabled on the LAN, the
 forward and masquerade rules move to the new LAN and WAN, and the agent
-settings are kept unless --agent-fingerprint is given.`,
+settings are kept unless --agent-fingerprint is given.
+
+--join takes the join string that portitor-setup shows on a firewall set up
+for the agent only (or - to read it from stdin): the agent's URL, token and
+fingerprint and the LAN and WAN settings. No GUI port is opened on that
+firewall unless --gui-port is given.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, srv, err := load()
 			if err != nil {
 				return err
+			}
+			if join != "" {
+				if join == "-" {
+					b, err := io.ReadAll(os.Stdin)
+					if err != nil {
+						return err
+					}
+					join = string(b)
+				}
+				j, err := web.ParseJoin(join)
+				if err != nil {
+					return err
+				}
+				if cmd.Flags().Changed("gui-port") {
+					j.GUIPort = bo.GUIPort
+				}
+				dep, err := web.Bootstrap(cmd.Context(), srv, j)
+				return printDeployment(dep, err)
+			}
+			if bo.LAN == "" || address == "" {
+				return fmt.Errorf("--lan and --address are required (or --join)")
 			}
 			if bo.AgentFingerprint != "" {
 				var tok []byte
@@ -189,15 +215,7 @@ settings are kept unless --agent-fingerprint is given.`,
 					return fmt.Errorf("--gateway: %w", err)
 				}
 			}
-			dep, err := web.Bootstrap(cmd.Context(), srv, bo)
-			if dep != nil && dep.Log != "" {
-				fmt.Println(dep.Log)
-			}
-			if err != nil {
-				return err
-			}
-			fmt.Println("deployed generation", dep.Generation)
-			return nil
+			return printDeployment(web.Bootstrap(cmd.Context(), srv, bo))
 		},
 	}
 	bf := bootstrap.Flags()
@@ -209,17 +227,27 @@ settings are kept unless --agent-fingerprint is given.`,
 	bf.StringVar(&bo.WAN, "wan", "", "WAN interface (optional)")
 	bf.StringVar(&wanAddress, "wan-address", "", "static WAN address with prefix length (default: DHCP)")
 	bf.StringVar(&gateway, "gateway", "", "default gateway (optional; on the WAN if it is static, else on the static LAN)")
-	bf.IntVar(&bo.GUIPort, "gui-port", 443, "port to open for portitor-web on the LAN")
+	bf.IntVar(&bo.GUIPort, "gui-port", 443, "port to open for portitor-web on the LAN, 0 for none")
 	bf.BoolVar(&bo.Reconfigure, "reconfigure", false, "change the LAN and WAN of a deployed installation")
-	for _, f := range []string{"lan", "address"} {
-		_ = bootstrap.MarkFlagRequired(f)
-	}
+	bf.StringVar(&join, "join", "", "join string from portitor-setup on an agent-only firewall, - for stdin")
 	root.AddCommand(bootstrap)
 
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, "Error:", err)
 		os.Exit(1)
 	}
+}
+
+// printDeployment prints a bootstrap's result.
+func printDeployment(dep *models.Deployment, err error) error {
+	if dep != nil && dep.Log != "" {
+		fmt.Println(dep.Log)
+	}
+	if err != nil {
+		return err
+	}
+	fmt.Println("deployed generation", dep.Generation)
+	return nil
 }
 
 // readPassword prompts on a terminal, or reads one line from stdin.
