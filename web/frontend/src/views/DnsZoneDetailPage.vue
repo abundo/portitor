@@ -37,7 +37,6 @@ const typeLabel = computed(
 )
 const tabItems = computed(() => [
   { label: 'Zone info', value: 'info', slot: 'info' },
-  { label: 'SOA & NS', value: 'soa', slot: 'soa' },
   { label: 'Records', value: 'records', slot: 'records' },
 ])
 const templateItems = computed(() => [
@@ -277,10 +276,8 @@ useUnsaved(() => !deleted.value && (!!dirty.value || recordsDirty.value))
               </div>
             </fieldset>
           </form>
-        </template>
-
-        <template #soa>
-          <div class="space-y-4 pt-4">
+          <div class="mt-6 space-y-4 border-t border-default pt-4">
+            <div class="text-sm font-semibold">SOA &amp; NS</div>
             <p class="text-sm text-muted">
               <template v-if="template"
                 >From DNS template <b>{{ template.name }}</b
