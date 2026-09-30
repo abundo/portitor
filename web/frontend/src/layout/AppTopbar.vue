@@ -83,13 +83,15 @@ const userMenu = computed(() => [
 
 <template>
   <header class="flex h-14 shrink-0 items-center gap-3 border-b border-default px-3 md:px-4">
-    <UButton
-      class="lg:hidden"
-      icon="i-lucide-menu"
-      color="neutral"
-      variant="ghost"
-      @click="$emit('toggle-menu')"
-    />
+    <UTooltip text="Show or hide the menu">
+      <UButton
+        icon="i-lucide-menu"
+        color="neutral"
+        variant="ghost"
+        aria-label="Menu"
+        @click="$emit('toggle-menu')"
+      />
+    </UTooltip>
     <RouterLink to="/" class="flex items-center gap-2 font-semibold">
       <UIcon name="i-lucide-shield" class="size-6 text-primary" />
       <span class="hidden sm:inline">Portitor</span>

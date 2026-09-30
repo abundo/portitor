@@ -20,6 +20,33 @@ import { useLogPanel } from '@/composables/useLogPanel'
 const instances = useInstanceStore()
 const deploy = useDeployStore()
 const mobileMenu = ref(false)
+// On a wide screen the menu is a sidebar the button hides and shows, and the
+// browser remembers which; on a narrow one it is always hidden and the
+// button opens it as a slideover.
+const MENU_KEY = 'menu.open'
+const wide = window.matchMedia('(min-width: 1024px)')
+const sidebar = ref(readSidebar())
+
+function readSidebar() {
+  try {
+    return localStorage.getItem(MENU_KEY) !== 'false'
+  } catch {
+    return true
+  }
+}
+
+function toggleMenu() {
+  if (!wide.matches) {
+    mobileMenu.value = !mobileMenu.value
+    return
+  }
+  sidebar.value = !sidebar.value
+  try {
+    localStorage.setItem(MENU_KEY, String(sidebar.value))
+  } catch {
+    // Not remembered; the toggle works without it.
+  }
+}
 const { state: logPanel } = useLogPanel()
 const route = useRoute()
 const toast = useToast()
@@ -55,11 +82,14 @@ onMounted(() => {
 
 <template>
   <div class="flex h-screen flex-col overflow-hidden">
-    <AppTopbar @toggle-menu="mobileMenu = !mobileMenu" />
+    <AppTopbar @toggle-menu="toggleMenu" />
     <ConfirmBanner />
     <ChangesBanner />
     <div class="flex min-h-0 flex-1">
-      <aside class="hidden w-60 shrink-0 overflow-y-auto border-r border-default p-3 lg:block">
+      <aside
+        v-if="sidebar"
+        class="hidden w-60 shrink-0 overflow-y-auto border-r border-default p-3 lg:block"
+      >
         <AppMenu />
       </aside>
       <main class="min-w-0 flex-1 overflow-auto p-4 md:p-6">
