@@ -10,6 +10,7 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"errors"
+	"slices"
 	"time"
 )
 
@@ -114,6 +115,79 @@ func (s ServicePortList) MarshalJSON() ([]byte, error) {
 }
 
 func (ServicePortList) GormDataType() string { return "text" }
+
+// DnsNameserver is one apex NS of a DnsTemplate, with an optional IPv4 or
+// IPv6 Address; a nameserver with both is listed twice. When Name is in a
+// zone of the instance, the builder adds the address to that zone as an A
+// or AAAA record.
+type DnsNameserver struct {
+	Name    string `json:"name"`
+	Address string `json:"address"`
+}
+
+// UnmarshalJSON also takes a bare name, as nameservers were before they
+// had addresses.
+func (n *DnsNameserver) UnmarshalJSON(b []byte) error {
+	var name string
+	if json.Unmarshal(b, &name) == nil {
+		*n = DnsNameserver{Name: name}
+		return nil
+	}
+	type plain DnsNameserver
+	return json.Unmarshal(b, (*plain)(n))
+}
+
+// DnsNameserverList is stored as a JSON array in a TEXT column.
+type DnsNameserverList []DnsNameserver
+
+func (l DnsNameserverList) Value() (driver.Value, error) {
+	if l == nil {
+		return "[]", nil
+	}
+	b, err := json.Marshal([]DnsNameserver(l))
+	return string(b), err
+}
+
+func (l *DnsNameserverList) Scan(src any) error {
+	var data []byte
+	switch v := src.(type) {
+	case nil:
+		*l = DnsNameserverList{}
+		return nil
+	case string:
+		data = []byte(v)
+	case []byte:
+		data = v
+	default:
+		return errors.New("DnsNameserverList: unsupported type")
+	}
+	var out []DnsNameserver
+	if err := json.Unmarshal(data, &out); err != nil {
+		return err
+	}
+	*l = out
+	return nil
+}
+
+func (l DnsNameserverList) MarshalJSON() ([]byte, error) {
+	if l == nil {
+		return []byte("[]"), nil
+	}
+	return json.Marshal([]DnsNameserver(l))
+}
+
+// Names returns the nameservers' names, each once.
+func (l DnsNameserverList) Names() []string {
+	out := []string{}
+	for _, n := range l {
+		if !slices.Contains(out, n.Name) {
+			out = append(out, n.Name)
+		}
+	}
+	return out
+}
+
+func (DnsNameserverList) GormDataType() string { return "text" }
 
 type User struct {
 	Base
@@ -454,12 +528,12 @@ type DnsDnssecPolicy struct {
 // optional DNSSEC policy. Shared by all instances.
 type DnsTemplate struct {
 	Base
-	Name           string     `json:"name"`
-	SoaTemplateID  uint       `json:"soa_template_id"`
-	DefaultTtl     int64      `json:"default_ttl"`
-	DnssecPolicyID *uint      `json:"dnssec_policy_id"`
-	Nameservers    StringList `json:"nameservers"`
-	Description    string     `json:"description"`
+	Name           string            `json:"name"`
+	SoaTemplateID  uint              `json:"soa_template_id"`
+	DefaultTtl     int64             `json:"default_ttl"`
+	DnssecPolicyID *uint             `json:"dnssec_policy_id"`
+	Nameservers    DnsNameserverList `json:"nameservers"`
+	Description    string            `json:"description"`
 }
 
 // DnsRecord is one row of a zone's record grid, in Rank order. Type

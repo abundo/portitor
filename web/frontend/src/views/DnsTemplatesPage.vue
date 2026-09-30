@@ -22,6 +22,17 @@ onMounted(loadRefs)
 
 const nameOf = (list, id) => list.find((x) => x.id === id)?.name ?? ''
 
+// Nameservers are rows of a name and an optional IPv4 or IPv6 address (a
+// second row of the name for the other); the builder adds the address of
+// one inside a zone to it as an A / AAAA record.
+const newNameserver = () => ({ name: '', address: '' })
+function addNameserver(form) {
+  form.nameservers = [...(form.nameservers ?? []), newNameserver()]
+}
+function removeNameserver(form, i) {
+  form.nameservers = form.nameservers.filter((_, j) => j !== i)
+}
+
 const soaColumns = [
   { key: 'name', label: 'Name', class: 'font-medium' },
   { key: 'mname', label: 'Primary NS (MNAME)', class: 'font-mono' },
@@ -143,9 +154,8 @@ const templateFields = [
   {
     key: 'nameservers',
     label: 'Nameservers (NS)',
-    type: 'tags',
-    placeholder: 'ns1.example.com',
-    hint: 'Written as the NS records of every zone using this template.',
+    type: 'custom',
+    hint: 'Written as the NS records of every zone using this template. The address is optional: a nameserver inside a zone of the instance gets it as an A / AAAA record there. For both an IPv4 and an IPv6 address, add the nameserver twice.',
   },
   {
     key: 'dnssec_policy_id',
@@ -160,7 +170,7 @@ const templateFields = [
 const templateDefaults = () => ({
   soa_template_id: soas.value[0]?.id,
   default_ttl: 3600,
-  nameservers: [],
+  nameservers: [newNameserver()],
 })
 </script>
 
@@ -177,7 +187,53 @@ const templateDefaults = () => ({
       :defaults="templateDefaults"
       new-label="New template"
       :blocked-reason="soas.length ? '' : 'Create an SOA template first.'"
-    />
+    >
+      <template #cell-nameservers="{ row }">
+        <div v-for="(ns, i) in row.nameservers" :key="i" class="font-mono">
+          {{ ns.name }}
+          <span v-if="ns.address" class="text-muted">({{ ns.address }})</span>
+        </div>
+      </template>
+      <template #field-nameservers="{ form }">
+        <div class="space-y-2">
+          <div v-for="(ns, i) in form.nameservers" :key="i" class="flex items-center gap-2">
+            <UInput
+              v-model="ns.name"
+              placeholder="ns1.example.com"
+              class="min-w-0 flex-1"
+              :ui="{ base: 'font-mono' }"
+              aria-label="Nameserver"
+            />
+            <UInput
+              v-model="ns.address"
+              placeholder="IPv4 or IPv6 (optional)"
+              class="min-w-0 flex-1"
+              :ui="{ base: 'font-mono' }"
+              aria-label="Address"
+            />
+            <UButton
+              icon="i-lucide-x"
+              color="neutral"
+              variant="ghost"
+              size="sm"
+              :disabled="form.nameservers.length === 1"
+              title="Remove"
+              aria-label="Remove"
+              @click="removeNameserver(form, i)"
+            />
+          </div>
+          <UButton
+            icon="i-lucide-plus"
+            color="neutral"
+            variant="outline"
+            block
+            aria-label="Add a nameserver"
+            title="Add a nameserver"
+            @click="addNameserver(form)"
+          />
+        </div>
+      </template>
+    </CrudPage>
     <CrudPage
       title="SOA templates"
       noun="SOA template"

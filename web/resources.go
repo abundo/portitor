@@ -726,9 +726,27 @@ func prepareDnsDnssecPolicy(_ *gorm.DB, k, _ *models.DnsDnssecPolicy) error {
 
 func prepareDnsTemplate(tx *gorm.DB, t, _ *models.DnsTemplate) error {
 	t.Name = strings.TrimSpace(t.Name)
-	ns := models.StringList{}
-	for _, n := range cleanList(t.Nameservers) {
-		ns = append(ns, dnsName(n))
+	ns := models.DnsNameserverList{}
+	for _, n := range t.Nameservers {
+		n = models.DnsNameserver{Name: dnsName(n.Name), Address: strings.TrimSpace(n.Address)}
+		if n.Name == "" {
+			if n.Address != "" {
+				return bad("nameservers: an address needs the nameserver's name")
+			}
+			continue
+		}
+		if n.Address != "" {
+			ip, err := fwconfig.ParseAddr(n.Address)
+			if err != nil {
+				return bad(fmt.Sprintf("nameservers: %s: %q is not an IP address", n.Name, n.Address))
+			}
+			n.Address = ip.String()
+		}
+		// A second row of a name adds its other address.
+		if slices.Contains(ns, n) {
+			return bad(fmt.Sprintf("nameservers: %s is listed twice", strings.TrimSpace(n.Name+" "+n.Address)))
+		}
+		ns = append(ns, n)
 	}
 	t.Nameservers = ns
 	if t.DnssecPolicyID != nil && *t.DnssecPolicyID == 0 {
@@ -739,7 +757,7 @@ func prepareDnsTemplate(tx *gorm.DB, t, _ *models.DnsTemplate) error {
 		return bad("pick an SOA template")
 	}
 	dns := fwconfig.DNSServer{SOATemplates: []fwconfig.DNSSOATemplate{soaDoc(&soa)}}
-	zt := fwconfig.DNSZoneTemplate{Name: t.Name, SOA: soa.Name, DefaultTTL: t.DefaultTtl, Nameservers: t.Nameservers}
+	zt := fwconfig.DNSZoneTemplate{Name: t.Name, SOA: soa.Name, DefaultTTL: t.DefaultTtl, Nameservers: t.Nameservers.Names()}
 	if t.DnssecPolicyID != nil {
 		var k models.DnsDnssecPolicy
 		if tx.First(&k, *t.DnssecPolicyID).Error != nil {

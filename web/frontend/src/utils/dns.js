@@ -10,7 +10,7 @@ export const zoneTypes = [
 // What a zone without a DNS template gets (internal/render/dns.go).
 export const builtinTemplate = {
   default_ttl: 300,
-  nameservers: ['localhost'],
+  nameservers: [{ name: 'localhost', address: '' }],
   soa: {
     mname: 'localhost',
     rname: 'hostmaster.localhost',

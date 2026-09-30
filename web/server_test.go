@@ -731,10 +731,13 @@ func TestDnsTemplates(t *testing.T) {
 	}
 	policy := env.create("/api/dns/dnssec-policies", map[string]any{"name": "signed", "ksk_algorithm": "ed25519", "zsk_algorithm": "ed25519", "zsk_lifetime": "30d"})
 	tmpl := env.create("/api/dns/templates", map[string]any{"name": "std", "soa_template_id": soa, "default_ttl": 3600,
-		"dnssec_policy_id": policy, "nameservers": []string{"ns1.example.com.", " ", "ns2.example.com"}})
+		"dnssec_policy_id": policy, "nameservers": []any{"ns1.example.com.", map[string]string{"name": " "},
+			map[string]string{"name": "NS2.example.com", "address": " 192.0.2.2"}, map[string]string{"name": "ns2.example.com.", "address": "2001:DB8::2"},
+			map[string]string{"name": "ns2.example.com", "address": "192.0.2.3"}, map[string]string{"name": "ns2.example.com", "address": "2001:db8::3"}}})
 	var tm models.DnsTemplate
 	env.srv.db.First(&tm, tmpl)
-	if strings.Join(tm.Nameservers, " ") != "ns1.example.com ns2.example.com" {
+	if want := (models.DnsNameserverList{{Name: "ns1.example.com"}, {Name: "ns2.example.com", Address: "192.0.2.2"}, {Name: "ns2.example.com", Address: "2001:db8::2"},
+		{Name: "ns2.example.com", Address: "192.0.2.3"}, {Name: "ns2.example.com", Address: "2001:db8::3"}});!reflect.DeepEqual(tm.Nameservers, want) {
 		t.Errorf("nameservers not normalised: %v", tm.Nameservers)
 	}
 	for path, body := range map[string]map[string]any{
@@ -746,6 +749,20 @@ func TestDnsTemplates(t *testing.T) {
 		if rec := env.do("POST", path, body); rec.Code != http.StatusBadRequest {
 			t.Errorf("POST %s %v: %d %s", path, body, rec.Code, rec.Body)
 		}
+	}
+	for _, ns := range []map[string]string{
+		{"name": "ns1.example.com", "address": "ns1.example.com"},
+		{"name": "ns1.example.com", "address": "192.0.2.1/32"},
+		{"name": "", "address": "192.0.2.1"},
+	} {
+		body := map[string]any{"name": "badns", "soa_template_id": soa, "default_ttl": 3600, "nameservers": []any{ns}}
+		if rec := env.do("POST", "/api/dns/templates", body); rec.Code != http.StatusBadRequest {
+			t.Errorf("POST nameserver %v: %d %s", ns, rec.Code, rec.Body)
+		}
+	}
+	body := map[string]any{"name": "dup", "soa_template_id": soa, "default_ttl": 3600, "nameservers": []string{"ns1.example.com", "NS1.example.com."}}
+	if rec := env.do("POST", "/api/dns/templates", body); rec.Code != http.StatusBadRequest {
+		t.Errorf("POST repeated nameserver: %d %s", rec.Code, rec.Body)
 	}
 	env.create("/api/dns/zones", map[string]any{"instance_id": inst, "name": "example.com", "dns_template_id": tmpl})
 

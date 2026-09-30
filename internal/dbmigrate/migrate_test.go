@@ -125,3 +125,55 @@ func TestInterfaceAddressesMigration(t *testing.T) {
 		t.Errorf("after down, fd00:1::1 is on interface %d, want 1", iface)
 	}
 }
+
+// A DNS template's nameservers go from names to objects with addresses,
+// and back.
+func TestDnsNameserversMigration(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "db.sqlite"), &gorm.Config{Logger: logger.Discard})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := provider(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(context.Background(), 13); err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{
+		`INSERT INTO dns_soa_templates (id, name, mname, rname) VALUES (1, 'std', 'ns1.example.com', 'hostmaster.example.com')`,
+		`INSERT INTO dns_templates (id, name, soa_template_id, nameservers) VALUES
+			(1, 'two', 1, '["ns1.example.com","ns2.example.com"]'), (2, 'none', 1, '[]')`,
+	} {
+		if err := db.Exec(q).Error; err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	if err := Up(db); err != nil {
+		t.Fatal(err)
+	}
+	raw := func(id int) string {
+		var s string
+		db.Raw(`SELECT nameservers FROM dns_templates WHERE id = ?`, id).Scan(&s)
+		return s
+	}
+	if got, want := raw(1), `[{"name":"ns1.example.com","address":""},{"name":"ns2.example.com","address":""}]`; got != want {
+		t.Errorf("nameservers = %s, want %s", got, want)
+	}
+	if got := raw(2); got != "[]" {
+		t.Errorf("empty nameservers = %s", got)
+	}
+	var tm models.DnsTemplate
+	if err := db.First(&tm, 1).Error; err != nil || len(tm.Nameservers) != 2 || tm.Nameservers[1].Name != "ns2.example.com" {
+		t.Errorf("template %+v: %v", tm, err)
+	}
+
+	// A second row of a name (its other address) is one name again after down.
+	db.Exec(`UPDATE dns_templates SET nameservers = json_insert(nameservers, '$[#]', json_object('name', 'ns1.example.com', 'address', '2001:db8::1')) WHERE id = 1`)
+	if _, err := p.DownTo(context.Background(), 13); err != nil {
+		t.Fatalf("down to 13: %v", err)
+	}
+	if got, want := raw(1), `["ns1.example.com","ns2.example.com"]`; got != want {
+		t.Errorf("after down, nameservers = %s, want %s", got, want)
+	}
+}

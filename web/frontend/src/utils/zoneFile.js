@@ -506,6 +506,9 @@ function commentLine(text) {
 
 /**
  * Serialize table rows (and optional SOA / NS from the product) to a BIND zone file.
+ * A nameserver is a name or { name, address }, and may repeat with its other
+ * address; the address of one inside the zone becomes its A / AAAA record, as
+ * the builder adds it.
  */
 export function formatZoneFile({
   origin = '',
@@ -538,9 +541,19 @@ export function formatZoneFile({
     lines.push(`${indent}${soa.expire ?? 1209600}\t; expire`)
     lines.push(`${indent}${soa.ttl ?? 3600}\t; minimum`)
     lines.push(`${indent})`)
-    for (const ns of nameservers || []) {
-      if (!ns) continue
-      lines.push(formatRRLine({ name: '@', type: 'NS', value: ensureDot(ns) }))
+    const list = (nameservers || []).map((ns) => (typeof ns === 'string' ? { name: ns } : ns))
+    const names = [...new Set(list.map((ns) => ns?.name).filter(Boolean))]
+    for (const name of names) {
+      lines.push(formatRRLine({ name: '@', type: 'NS', value: ensureDot(name) }))
+    }
+    for (const ns of list) {
+      const name = ensureDot(ns?.name || '').toLowerCase()
+      if (!zone || !(name === zone.toLowerCase() || name.endsWith(`.${zone.toLowerCase()}`)))
+        continue
+      if (ns.address) {
+        const type = ns.address.includes(':') ? 'AAAA' : 'A'
+        lines.push(formatRRLine({ name, type, value: ns.address }))
+      }
     }
     lines.push('')
   }

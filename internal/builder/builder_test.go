@@ -71,10 +71,13 @@ func TestBuildHome(t *testing.T) {
 	mustCreate(t, db, &soa)
 	policy := models.DnsDnssecPolicy{Name: "signed", KskAlgorithm: "ed25519", ZskAlgorithm: "ed25519"}
 	mustCreate(t, db, &policy)
-	tmpl := models.DnsTemplate{Name: "home", SoaTemplateID: soa.ID, DefaultTtl: 600, DnssecPolicyID: &policy.ID, Nameservers: models.StringList{"gw.home.arpa"}}
+	tmpl := models.DnsTemplate{Name: "home", SoaTemplateID: soa.ID, DefaultTtl: 600, DnssecPolicyID: &policy.ID,
+		// gw's A record comes from IPAM already; ns.example.com is in no zone here.
+		Nameservers: models.DnsNameserverList{{Name: "gw.home.arpa", Address: "192.168.1.1"}, {Name: "gw.home.arpa", Address: "fd00::1"},
+			{Name: "ns1.home.arpa", Address: "192.168.1.2"}, {Name: "ns.example.com", Address: "192.0.2.53"}}}
 	mustCreate(t, db, &tmpl)
 	// Not used by any zone: stays out of the document.
-	mustCreate(t, db, &models.DnsTemplate{Name: "unused", SoaTemplateID: soa.ID, DefaultTtl: 600, Nameservers: models.StringList{"ns.example.com"}})
+	mustCreate(t, db, &models.DnsTemplate{Name: "unused", SoaTemplateID: soa.ID, DefaultTtl: 600, Nameservers: models.DnsNameserverList{{Name: "ns.example.com"}}})
 
 	zone := models.DnsZone{InstanceID: main.ID, Name: "home.arpa", Type: "forward", DnsTemplateID: &tmpl.ID}
 	mustCreate(t, db, &zone)
@@ -146,10 +149,16 @@ func TestBuildHome(t *testing.T) {
 		names = append(names, r.Name+"/"+r.Type+"/"+r.MAC)
 	}
 	joined := strings.Join(names, " ")
-	for _, want := range []string{"www/CNAME/", "gw/A/", "nas/A/02:00:00:00:00:10"} {
+	for _, want := range []string{"www/CNAME/", "gw/A/", "gw/AAAA/", "ns1/A/", "nas/A/02:00:00:00:00:10"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("records %s lack %s", joined, want)
 		}
+	}
+	if strings.Count(joined, "gw/A/") != 1 {
+		t.Errorf("records %s: the nameserver's A record repeats the IPAM one", joined)
+	}
+	if zt := dns.ZoneTemplates[0]; strings.Join(zt.Nameservers, " ") != "gw.home.arpa ns1.home.arpa ns.example.com" {
+		t.Errorf("zone template nameservers %v", zt.Nameservers)
 	}
 }
 

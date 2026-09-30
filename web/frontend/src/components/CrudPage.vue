@@ -5,7 +5,7 @@
 // CrudPage: a table of one REST resource with a create/edit modal, driven
 // by column and field schemas.
 //
-// Field: { key, label, type: text|number|password|switch|select|multiselect|tags|addrs|addr|ports|textarea,
+// Field: { key, label, type: text|number|password|switch|select|multiselect|tags|addrs|addr|ports|textarea|custom,
 //          items (array or form => array), nullable, placeholder, hint,
 //          required, show: form => bool, disabled: form => bool }
 // multiselect: an array of strings picked from items (strings, or
@@ -13,6 +13,7 @@
 // addrs/addr: address list / single address; names of hosts/prefixes are
 // suggested and accepted, and with `lists: true` IP lists ("@name").
 // ports: a port list, with port names and their ports suggested.
+// custom: the page's `field-<key>` slot ({ form }) edits the value.
 // Column: { key, label, format: (row, rows) => string, class }
 // Cells can be overridden with a `cell-<key>` slot, or the whole table with
 // the `table` slot ({ rows, openCreate, openEdit, remove, moveTo, saveRow,
@@ -406,8 +407,9 @@ defineExpose({ reload: load, openEdit, openCreate })
               :required="f.required"
               :ui="inlineField"
             >
+              <slot v-if="f.type === 'custom'" :name="`field-${f.key}`" :form="form" />
               <USwitch
-                v-if="f.type === 'switch'"
+                v-else-if="f.type === 'switch'"
                 v-model="form[f.key]"
                 :disabled="f.disabled?.(form)"
               />

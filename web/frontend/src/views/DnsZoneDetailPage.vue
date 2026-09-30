@@ -327,7 +327,10 @@ useUnsaved(() => !deleted.value && (!!dirty.value || recordsDirty.value))
             <div>
               <div class="mb-1 text-sm font-medium">Nameservers (NS for @)</div>
               <ul class="font-mono text-sm">
-                <li v-for="ns in effective.nameservers" :key="ns">{{ ns }}.</li>
+                <li v-for="(ns, i) in effective.nameservers" :key="i">
+                  {{ ns.name }}.
+                  <span v-if="ns.address" class="text-muted">{{ ns.address }}</span>
+                </li>
               </ul>
             </div>
             <div>

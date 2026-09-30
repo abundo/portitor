@@ -420,6 +420,18 @@ func Build(db *gorm.DB, generation int64) (*fwconfig.Document, error) {
 			}
 			zone.Records = append(zone.Records, fwconfig.DNSRecord{Name: label, Type: typ, Value: ip.String(), MAC: a.Mac})
 		}
+		// The addresses of the templates' nameservers, in the zone their
+		// name is in (glue for a nameserver inside its own zone).
+		for _, z := range d.dnsZones {
+			if z.InstanceID != mi.ID || z.DnsTemplateID == nil {
+				continue
+			}
+			for _, t := range d.templates {
+				if t.ID == *z.DnsTemplateID {
+					addNameserverRecords(forwardZones, t.Nameservers)
+				}
+			}
+		}
 
 		// DHCP and IPv6 router advertisements: IPAM prefixes with DHCP or
 		// RA on, served on the interface that has an address inside the
@@ -625,7 +637,7 @@ func (d *data) addDNSTemplate(dns *fwconfig.DNSServer, id uint) string {
 	if dns.ZoneTemplate(t.Name) != nil {
 		return t.Name
 	}
-	zt := fwconfig.DNSZoneTemplate{Name: t.Name, DefaultTTL: t.DefaultTtl, Nameservers: append([]string{}, t.Nameservers...)}
+	zt := fwconfig.DNSZoneTemplate{Name: t.Name, DefaultTTL: t.DefaultTtl, Nameservers: t.Nameservers.Names()}
 	for _, s := range d.soas {
 		if s.ID != t.SoaTemplateID {
 			continue
@@ -657,6 +669,30 @@ func (d *data) addDNSTemplate(dns *fwconfig.DNSServer, id uint) string {
 	}
 	dns.ZoneTemplates = append(dns.ZoneTemplates, zt)
 	return t.Name
+}
+
+// addNameserverRecords adds an A or AAAA record for the address of each
+// nameserver whose name is in one of zones, unless the zone has it already.
+func addNameserverRecords(zones []*fwconfig.DNSZone, nameservers models.DnsNameserverList) {
+	for _, ns := range nameservers {
+		ip, err := netip.ParseAddr(ns.Address)
+		if err != nil {
+			continue
+		}
+		zone, label := zoneFor(zones, ns.Name)
+		if zone == nil {
+			continue
+		}
+		r := fwconfig.DNSRecord{Name: label, Type: "A", Value: ip.String()}
+		if ip.Is6() {
+			r.Type = "AAAA"
+		}
+		if !slices.ContainsFunc(zone.Records, func(x fwconfig.DNSRecord) bool {
+			return strings.EqualFold(x.Name, r.Name) && x.Type == r.Type && x.Value == r.Value
+		}) {
+			zone.Records = append(zone.Records, r)
+		}
+	}
 }
 
 func zoneFor(zones []*fwconfig.DNSZone, fqdn string) (*fwconfig.DNSZone, string) {
