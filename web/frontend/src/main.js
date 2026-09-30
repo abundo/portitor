@@ -17,6 +17,15 @@ import '@/assets/tailwind.css'
 // Icons are bundled at build time (vite.config.js); never fetch any.
 _api.setFetch(async () => new Response('{}', { status: 404 }))
 
+// Dark mode unless the user has chosen otherwise (UColorModeButton stores the
+// choice under VueUse's key; the ui plugin reads it on install).
+try {
+  if (localStorage.getItem('vueuse-color-scheme') === null)
+    localStorage.setItem('vueuse-color-scheme', 'dark')
+} catch {
+  // no storage: follow the system
+}
+
 const app = createApp(App)
 app.use(createPinia())
 
