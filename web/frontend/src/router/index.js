@@ -47,6 +47,11 @@ const router = createRouter({
           meta: { admin: true },
         },
         {
+          path: 'capture',
+          component: () => import('@/views/CapturePage.vue'),
+          meta: { admin: true },
+        },
+        {
           path: 'updates',
           component: () => import('@/views/UpdatesPage.vue'),
           meta: { admin: true },

@@ -403,3 +403,31 @@ type SystemJobRequest struct {
 	Job     string `json:"job"`
 	Release string `json:"release,omitempty"`
 }
+
+// CaptureRequest starts a packet capture (POST /v1/capture). The answer is
+// the capture as a pcap stream (tcpdump -w -), sent no faster than
+// RateKbps, until MaxPackets or MaxSeconds is reached or the client
+// disconnects. An error before the first packet is a JSON ErrorResponse.
+type CaptureRequest struct {
+	Instance  string `json:"instance"`
+	Interface string `json:"interface"` // an interface of the instance, or "any"
+	// Filter is a pcap-filter(7) expression; empty captures everything.
+	Filter     string `json:"filter,omitempty"`
+	Snaplen    int    `json:"snaplen,omitempty"`     // bytes per packet; 0 is CaptureMaxSnaplen
+	MaxPackets int    `json:"max_packets,omitempty"` // 0 is CaptureMaxPackets
+	MaxSeconds int    `json:"max_seconds,omitempty"` // 0 is CaptureMaxSeconds
+	// RateKbps caps the stream to portitor-web (kbit/s); 0 is unlimited.
+	RateKbps int `json:"rate_kbps,omitempty"`
+}
+
+// Capture limits, enforced by the agent.
+const (
+	CaptureMaxSnaplen   = 65535
+	CaptureMaxPackets   = 1_000_000
+	CaptureMaxSeconds   = 3600
+	CaptureMaxFilterLen = 1024
+	// CaptureMaxSessions is how many captures may run at once.
+	CaptureMaxSessions = 2
+	// CaptureDefaultRateKbps is portitor-web's default stream rate.
+	CaptureDefaultRateKbps = 1000
+)

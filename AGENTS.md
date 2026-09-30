@@ -15,7 +15,7 @@ are in [README.md](README.md).
 | `cmd/portitor-agent` | Agent daemon on the firewall: `start`, `init`, `render`, `netns-exec` |
 | `internal/fwconfig` | The desired-state document and `Validate()`. **The contract between web and agent.** |
 | `internal/render` | Pure functions: document → nftables, WireGuard, named.conf, Kea, dnsmgr2 config |
-| `internal/agent` | Agent: apply/reconcile, commit-confirm, DHCP client, IP lists, task scheduler, packet log (NFLOG), WireGuard endpoint re-resolving, status, API server |
+| `internal/agent` | Agent: apply/reconcile, commit-confirm, DHCP client, IP lists, task scheduler, packet log (NFLOG), WireGuard endpoint re-resolving, packet capture (tcpdump, streamed rate-limited), status, API server |
 | `internal/dyndns` | Dynamic DNS client (RFC 2136, from ifnsupdate); the agent runs it per instance netns |
 | `internal/iplist` | Downloads IP lists (CrowdSec LAPI decisions, plain-text lists) |
 | `internal/wgkeys` | WireGuard key generation (wg(8) base64) |
@@ -186,7 +186,9 @@ singular); a custom page uses `SearchInput` above each table,
   (`confirmDiscard`); closing or reloading the tab gets the browser's warning.
 - **Exceptions:** the rules list (`RulesTable`: a click opens the rule, the
   context menu deletes) and the DNS zone records grid (`ZoneRecordsTable`: edited
-  in place, no detail view) are exempt from the table rules. The rule's form is
+  in place, no detail view) are exempt from the table rules, and so is the
+  packet capture's packet list (`PacketList`: Wireshark's display filter
+  takes the search field's place). The rule's form is
   not: it follows the form and delete rules.
 
 ## Adding a feature end to end
@@ -228,5 +230,14 @@ shebang. Files that cannot hold a comment go in `REUSE.toml`. Commits carry a DC
   a new path named or Kea reads or writes must be added there.
 - `portitor-agent netns-exec` reads `<state_dir>/instances/<name>/netns`, written on
   apply; the per-instance systemd units start through it.
+- The packet capture page runs Wiregasm (Wireshark in WebAssembly) in a worker,
+  `workers/capture.worker.js`, which fetches the capture stream itself and
+  dissects the whole file again as it grows (Wiregasm has no incremental
+  API), up to the last complete pcap record. Wiregasm (GPL-2.0) is a separate
+  program, never bundled or embedded: portitor-web serves it at `/wiregasm/`
+  from `wiregasm_dir`, where `install.py` downloads the pinned npm package
+  (`WIREGASM_VERSION`/`WIREGASM_SHA512`, same as `package-lock.json`,
+  `TestWiregasmPin`); in dev, Vite and portitor-web serve `node_modules`' copy. The worker script alone
+  gets a CSP with `unsafe-eval` and `wasm-unsafe-eval` (`captureWorkerCSP`).
 - `pkill -f portitor-web` also matches a shell whose command line contains that text;
   anchor the pattern (`pkill -f '^./build/portitor-web'`).

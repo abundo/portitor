@@ -17,6 +17,7 @@ const settings = reactive({
   agent_fingerprint: '',
   confirm_timeout: 120,
   wg_endpoint_host: '',
+  capture_rate_kbps: 1000,
 })
 // Only the settings count as unsaved changes, not the backup and restore
 // fields.
@@ -118,6 +119,7 @@ async function saveSettings() {
     const s = await api.saveSettings({
       ...settings,
       confirm_timeout: Number(settings.confirm_timeout),
+      capture_rate_kbps: Number(settings.capture_rate_kbps),
     })
     hasToken.value = s.has_agent_token
     settings.agent_token = ''
@@ -177,6 +179,12 @@ async function saveSettings() {
             class="w-full font-mono"
             placeholder="home.example.org"
           />
+        </UFormField>
+        <UFormField
+          label="Packet capture rate (kbit/s)"
+          help="The most a packet capture sends from the agent to portitor-web. When it falls behind, the firewall drops captured packets rather than slow down. 0 is unlimited."
+        >
+          <UInput v-model="settings.capture_rate_kbps" type="number" min="0" class="w-40" />
         </UFormField>
         <div class="flex items-center gap-3">
           <UButton type="submit">Save</UButton>

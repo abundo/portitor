@@ -94,6 +94,12 @@ cmd_install() {
 	log "installing portitor-web on mgmt"
 	$RT cp build/portitor-web "$PREFIX-mgmt:/usr/bin/portitor-web"
 	$RT cp deploy/systemd/portitor-web.service "$PREFIX-mgmt:/etc/systemd/system/portitor-web.service"
+	# Wiregasm for the packet capture viewer: install.py downloads it, the
+	# lab takes the frontend's npm copy.
+	ex mgmt install -d /usr/share/portitor/wiregasm
+	for f in wiregasm.js wiregasm.wasm.gz wiregasm.data.gz; do
+		$RT cp "web/frontend/node_modules/@goodtools/wiregasm/dist/$f" "$PREFIX-mgmt:/usr/share/portitor/wiregasm/$f"
+	done
 	ex mgmt install -d -o portitor -g portitor -m 0700 /var/lib/portitor-web
 	ex mgmt runuser -u portitor -- portitor-web migrate
 	openssl rand -hex 16 | $RT exec -i "$PREFIX-mgmt" runuser -u portitor -- portitor-web createadmin admin >/dev/null

@@ -8,6 +8,7 @@ package web
 import (
 	"context"
 	"errors"
+	"io"
 	"io/fs"
 	"log/slog"
 	"net/http"
@@ -43,6 +44,7 @@ type agentAPI interface {
 	RunTask(ctx context.Context, name string) error
 	RefreshIPList(ctx context.Context, name string) error
 	Console(ctx context.Context) (*websocket.Conn, error)
+	Capture(ctx context.Context, req agentapi.CaptureRequest) (io.ReadCloser, error)
 	System(ctx context.Context) (*agentapi.SystemStatus, error)
 	StartSystemJob(ctx context.Context, req agentapi.SystemJobRequest) error
 	Reboot(ctx context.Context) error
@@ -97,6 +99,7 @@ func (s *Server) Echo() *echo.Echo {
 		ReferrerPolicy:        "same-origin",
 		ContentSecurityPolicy: "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'",
 	}))
+	e.Use(captureWorkerCSP)
 
 	api := e.Group("/api", requireJSON, noStore)
 	api.POST("/login", s.handleLogin)
@@ -173,9 +176,12 @@ func (s *Server) Echo() *echo.Echo {
 	g.GET("/agent/logs", s.handleAgentLogs)
 	g.GET("/agent/packet-log", s.handleAgentPacketLog)
 	g.GET("/agent/console", s.handleAgentConsole)
+	g.POST("/agent/capture", s.handleAgentCapture)
 	g.GET("/system", s.handleSystem)
 	g.POST("/system/jobs", s.handleSystemJob)
 	g.POST("/system/reboot", s.handleSystemReboot)
+
+	e.GET("/wiregasm/*", s.handleWiregasm)
 
 	api.Any("/*", func(c *echo.Context) error { return errJSON(c, http.StatusNotFound, "no such API endpoint") })
 
@@ -186,7 +192,8 @@ func (s *Server) Echo() *echo.Echo {
 		Root:       ".",
 		HTML5:      true,
 		Skipper: func(c *echo.Context) bool {
-			return strings.HasPrefix(c.Request().URL.Path, "/api/")
+			p := c.Request().URL.Path
+			return strings.HasPrefix(p, "/api/") || strings.HasPrefix(p, "/wiregasm/")
 		},
 	}))
 	return e

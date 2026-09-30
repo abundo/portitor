@@ -49,6 +49,7 @@ GUI (`--list --json`, `--install TAG --yes`).
 from __future__ import annotations
 
 import argparse
+import base64
 import curses
 import difflib
 import hashlib
@@ -74,7 +75,7 @@ from typing import Sequence
 
 # Bump when the installer itself changes, so a release's copy can tell
 # whether it is newer than the one running.
-INSTALLER_VERSION = 2
+INSTALLER_VERSION = 3
 INSTALLER_FILENAME = "install.py"
 # Where the agent host keeps a copy, for updates from the GUI.
 INSTALLER_DEST = "/usr/lib/portitor/install.py"
@@ -114,6 +115,17 @@ APPARMOR_DIR = "/etc/apparmor.d"
 APPARMOR_BEGIN = "# BEGIN portitor (managed by install.py)"
 APPARMOR_END = "# END portitor"
 LOCAL_NAMES = {"localhost", "127.0.0.1", "::1", ""}
+# Wiregasm (Wireshark in WebAssembly, GPL-2.0) for the GUI's packet capture
+# viewer. It is a separate program, never part of a Portitor release: the
+# installer fetches this exact npm package (checked against its integrity
+# hash, the same as web/frontend/package-lock.json's) into WIREGASM_DIR,
+# where portitor-web serves it (wiregasm_dir in web.yaml).
+WIREGASM_VERSION = "1.9.1"
+WIREGASM_URL = f"https://registry.npmjs.org/@goodtools/wiregasm/-/wiregasm-{WIREGASM_VERSION}.tgz"
+WIREGASM_SHA512 = "kV/mDapHD//S0QVqyPwVnOdm3NLSSwHYT6u/b+nenUxofWauZ2Y6LvgCxMMk5Jvw3+++EKIDpRRx9jfnt7lshw=="
+WIREGASM_DIR = "/usr/share/portitor/wiregasm"
+WIREGASM_FILES = ("wiregasm.js", "wiregasm.wasm.gz", "wiregasm.data.gz")
+WIREGASM_SOURCE = "https://github.com/good-tools/wiregasm"
 
 SELF_UPDATED_ENV = "PORTITOR_INSTALL_SELF_UPDATED"
 # Set in the selected release's installer, run by this one: the release is
@@ -431,7 +443,7 @@ def install_agent(host: Host, binary: Path, deploy: Path, version: str, assume_y
         on = "" if host.local else f" (on {host.name})"
         log(f"==> portitor-agent is installed but not started. Next steps{on}:")
         log("    install nftables, iproute2, wireguard-tools, bind9, kea-dhcp4-server,")
-        log("      kea-dhcp6-server and radvd (or your distribution's equivalents)")
+        log("      kea-dhcp6-server, radvd and tcpdump (or your distribution's equivalents)")
         log("    portitor-agent init --host <management address>   # token + fingerprint for the GUI")
         log(f"    $EDITOR {AGENT_CONFIG}                     # listen, allow_from, bind_user")
         log("    systemctl disable --now named kea-dhcp4-server kea-dhcp6-server radvd")
@@ -513,6 +525,7 @@ def install_web(host: Host, binary: Path, deploy: Path, version: str, assume_yes
     # first install, hence no check.
     host.run(f"systemctl stop {WEB_UNIT} 2>/dev/null || true", desc=f"systemctl stop {WEB_UNIT}")
     host.put(binary, WEB_BIN, "0755")
+    install_wiregasm(host)
     action = install_unit(host, deploy / "systemd" / WEB_UNIT, assume_yes)
     host.systemctl("daemon-reload")
     host.run(f"runuser -u {WEB_USER} -- {WEB_BIN} -f {WEB_CONFIG} migrate", desc="portitor-web migrate")
@@ -525,6 +538,71 @@ def install_web(host: Host, binary: Path, deploy: Path, version: str, assume_yes
         host.systemctl("enable", WEB_UNIT)
     host.systemctl("restart", WEB_UNIT)
     verify_version(host, WEB_BIN, version)
+
+
+def fetch_wiregasm() -> Path:
+    """The Wiregasm npm package in the cache, downloaded if needed and checked."""
+    path = cache_dir() / f"wiregasm-{WIREGASM_VERSION}.tgz"
+
+    def ok() -> bool:
+        h = hashlib.sha512()
+        with path.open("rb") as f:
+            for chunk in iter(lambda: f.read(1 << 20), b""):
+                h.update(chunk)
+        return base64.b64encode(h.digest()).decode() == WIREGASM_SHA512
+
+    if path.is_file() and ok():
+        log(f"==> Using cached {path.name}")
+        return path
+    log(f"==> Downloading Wiregasm {WIREGASM_VERSION} ({WIREGASM_URL})")
+    tmp = path.with_name(path.name + ".partial")
+    req = urllib.request.Request(WIREGASM_URL, headers={"User-Agent": USER_AGENT})
+    with urllib.request.urlopen(req, timeout=60) as resp, tmp.open("wb") as out:
+        shutil.copyfileobj(resp, out, 1 << 20)
+    tmp.replace(path)
+    if not ok():
+        path.unlink(missing_ok=True)
+        raise InstallError(f"integrity mismatch for {WIREGASM_URL}")
+    log("    sha512 ok")
+    return path
+
+
+def install_wiregasm(host: Host) -> None:
+    """Put Wiregasm in WIREGASM_DIR on the web host, unless that version is there.
+
+    Without it portitor-web runs, and only the packet capture viewer is
+    missing, so a failed download is a warning, not an error.
+    """
+    stamp = f"{WIREGASM_DIR}/VERSION"
+    if (host.read(stamp) or "").strip() == WIREGASM_VERSION:
+        return
+    if host.dry_run:
+        log(f"    [dry-run] install Wiregasm {WIREGASM_VERSION} in {WIREGASM_DIR}")
+        return
+    try:
+        tgz = fetch_wiregasm()
+    except (OSError, urllib.error.URLError, InstallError) as e:
+        warn(f"Wiregasm not installed ({e}); the packet capture viewer needs it. Run the installer again later.")
+        return
+    wanted = {f"package/dist/{f}": f for f in WIREGASM_FILES} | {"package/LICENSE": "LICENSE"}
+    with tempfile.TemporaryDirectory() as tmp, tarfile.open(tgz) as tar:
+        for m in tar.getmembers():
+            name = wanted.get(m.name)
+            if name and m.isfile():
+                with tar.extractfile(m) as src, open(Path(tmp) / name, "wb") as dst:
+                    shutil.copyfileobj(src, dst, 1 << 20)
+        missing = [n for n in wanted.values() if not (Path(tmp) / n).is_file()]
+        if missing:
+            raise InstallError(f"{tgz.name} lacks {', '.join(missing)}")
+        (Path(tmp) / "SOURCE").write_text(
+            f"Wiregasm {WIREGASM_VERSION}, Wireshark compiled to WebAssembly, licensed under\n"
+            f"the GNU GPL version 2 (LICENSE). It is a separate program, not part of\n"
+            f"Portitor. Source: {WIREGASM_SOURCE} (tag v{WIREGASM_VERSION}).\n",
+            encoding="utf-8",
+        )
+        for name in [*wanted.values(), "SOURCE"]:
+            host.put(Path(tmp) / name, f"{WIREGASM_DIR}/{name}", "0644")
+    host.put_text(WIREGASM_VERSION + "\n", stamp, "0644")
 
 
 def install(

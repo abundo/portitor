@@ -226,3 +226,36 @@ func (c *Client) Console(ctx context.Context) (*websocket.Conn, error) {
 	}
 	return conn, nil
 }
+
+// Capture starts a packet capture and returns its pcap stream; closing it
+// (or cancelling ctx) stops the capture on the agent.
+func (c *Client) Capture(ctx context.Context, req agentapi.CaptureRequest) (io.ReadCloser, error) {
+	data, err := json.Marshal(req)
+	if err != nil {
+		return nil, err
+	}
+	hreq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v1/capture", bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	hreq.Header.Set("Authorization", "Bearer "+c.token)
+	hreq.Header.Set("Content-Type", "application/json")
+	// A capture outlives the client's timeout for requests.
+	hc := *c.http
+	hc.Timeout = 0
+	resp, err := hc.Do(hreq)
+	if err != nil {
+		return nil, fmt.Errorf("agent unreachable: %w", err)
+	}
+	if resp.StatusCode/100 != 2 {
+		defer resp.Body.Close()
+		var e agentapi.ErrorResponse
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+		_ = json.Unmarshal(body, &e)
+		if e.Error == "" {
+			e.Error = strings.TrimSpace(string(body))
+		}
+		return nil, &Error{Status: resp.StatusCode, Message: e.Error}
+	}
+	return resp.Body, nil
+}

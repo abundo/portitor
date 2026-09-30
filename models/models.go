@@ -226,6 +226,9 @@ type Settings struct {
 	// WgEndpointHost is the public name/address road-warrior clients
 	// connect to, for generated client configs.
 	WgEndpointHost string `json:"wg_endpoint_host"`
+	// CaptureRateKbps caps a packet capture's stream from the agent
+	// (kbit/s); 0 is unlimited.
+	CaptureRateKbps int `gorm:"default:1000" json:"capture_rate_kbps"`
 	// Generation is the last deployed document generation.
 	Generation int64     `json:"generation"`
 	UpdatedAt  time.Time `json:"updated_at"`

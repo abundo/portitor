@@ -42,6 +42,12 @@ cd web/frontend && npm install && npm run dev   # optional: Vite with hot reload
 certificate, rendered configs, agent state, logs, the SQLite database
 `portitor.db`) go to `dev/run/`. Delete `dev/run/portitor.db*` for an empty database.
 
+The packet capture page's viewer, Wiregasm (Wireshark in WebAssembly, about 20 MB
+gzipped), is a separate program, never built into the frontend or the binary: in dev
+mode portitor-web and Vite serve the npm package's copy (`web/frontend/node_modules`,
+so run `npm install` first) at `/wiregasm/`. Captures need a real agent (the lab); a
+dry-run agent refuses them.
+
 Render a document without an agent: `portitor-agent render --sample`, or
 `portitor-agent render doc.json`.
 
@@ -119,6 +125,14 @@ updates itself from the latest release.
 From a checkout, `./install.py --source` builds (`make release`, CGO off) and installs
 `build/` the same way; add `--dry-run` to see what would change, `--agent HOST` to
 target a firewall. A remote agent of another architecture gets a cross-built binary.
+
+On the web host, the installer also puts Wiregasm in `/usr/share/portitor/wiregasm`
+(`wiregasm_dir` in web.yaml): the npm package pinned by `WIREGASM_VERSION` and
+`WIREGASM_SHA512`, with its LICENSE and a SOURCE note. It is downloaded, never part of
+a release, so its GPL-2.0 licence stays apart from Portitor's. Upgrading it means
+upgrading the npm package in `web/frontend` and the pin in `install.py`
+(`TestWiregasmPin` checks they match). If the download fails, the install goes on
+without it and only the capture viewer is missing.
 
 `--local PATH` installs a release archive or an extracted release directory without
 GitHub (the ISO uses it). `--list --json` is what the agent runs for *Admin → Updates*;

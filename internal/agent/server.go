@@ -140,6 +140,7 @@ func (a *Agent) Handler() http.Handler {
 		writeJSONResponse(w, http.StatusAccepted, map[string]any{"rebooting": true})
 	})
 	mux.HandleFunc("GET /v1/console", a.handleConsole)
+	mux.HandleFunc("POST /v1/capture", a.handleCapture)
 	return a.authMiddleware(mux)
 }
 

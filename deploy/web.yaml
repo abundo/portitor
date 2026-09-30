@@ -15,3 +15,7 @@ jwt_secret: CHANGE-ME
 # SQLite database file. The unit's StateDirectory creates its directory.
 db:
   path: /var/lib/portitor-web/portitor.db
+
+# Wiregasm (Wireshark in WebAssembly) for the packet capture viewer, a separate
+# program that install.py downloads here.
+# wiregasm_dir: /usr/share/portitor/wiregasm

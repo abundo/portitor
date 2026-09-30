@@ -62,6 +62,7 @@ const sections = computed(() => [
           value: 'admin',
           children: [
             { label: 'Console', icon: 'i-lucide-square-terminal', to: '/console', slot: 'console' },
+            { label: 'Packet capture', icon: 'i-lucide-radio-tower', to: '/capture' },
             { label: 'Updates', icon: 'i-lucide-package-check', to: '/updates' },
             { label: 'Settings', icon: 'i-lucide-settings', to: '/settings', exact: true },
             { label: 'Users', icon: 'i-lucide-users', to: '/settings/users' },

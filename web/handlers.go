@@ -433,6 +433,7 @@ func (s *Server) handlePutSettings(c *echo.Context) error {
 		AgentFingerprint *string `json:"agent_fingerprint"`
 		ConfirmTimeout   *int    `json:"confirm_timeout"`
 		WgEndpointHost   *string `json:"wg_endpoint_host"`
+		CaptureRateKbps  *int    `json:"capture_rate_kbps"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return errJSON(c, http.StatusBadRequest, "invalid request")
@@ -465,6 +466,12 @@ func (s *Server) handlePutSettings(c *echo.Context) error {
 			return errJSON(c, http.StatusBadRequest, "endpoint host must be a host name or IP address")
 		}
 		st.WgEndpointHost = h
+	}
+	if req.CaptureRateKbps != nil {
+		if *req.CaptureRateKbps < 0 || *req.CaptureRateKbps > 10_000_000 {
+			return errJSON(c, http.StatusBadRequest, "capture rate must be 0-10000000 kbit/s")
+		}
+		st.CaptureRateKbps = *req.CaptureRateKbps
 	}
 	if err := s.db.Save(st).Error; err != nil {
 		return err
