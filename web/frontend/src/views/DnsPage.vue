@@ -43,6 +43,7 @@ const server = reactive({
   dns_forwarders: [],
   dns_forward_mode: 'first',
   dns_allow_recursion: [],
+  dns_dnssec_validation: 'auto',
   ifaces: [], // { id, name, label, description, ipv4_mode, dns_listen, dns_from_dhcp }
 })
 const serverForm = usePageForm(server)
@@ -60,6 +61,7 @@ async function load() {
     dns_forwarders: inst.dns_forwarders ?? [],
     dns_forward_mode: inst.dns_forward_mode || 'first',
     dns_allow_recursion: inst.dns_allow_recursion ?? [],
+    dns_dnssec_validation: inst.dns_dnssec_validation || 'auto',
     ifaces: ifs.map((i) => ({
       id: i.id,
       name: i.name,
@@ -77,6 +79,10 @@ watch(() => store.currentId, load, { immediate: true })
 const fallback = computed({
   get: () => server.dns_forward_mode !== 'only',
   set: (v) => (server.dns_forward_mode = v ? 'first' : 'only'),
+})
+const dnssecValidation = computed({
+  get: () => server.dns_dnssec_validation !== 'no',
+  set: (v) => (server.dns_dnssec_validation = v ? 'auto' : 'no'),
 })
 const dhcpUpstream = computed(() => server.dns_upstream === 'dhcp')
 
@@ -232,6 +238,13 @@ const tab = computed({
                       multiple
                       placeholder="192.168.0.0/16"
                     />
+                  </UFormField>
+                  <UFormField
+                    label="DNSSEC validation"
+                    help="Check the signatures of signed zones, with the built-in root key. Off: answers are not validated; turn it off only if an upstream breaks DNSSEC."
+                    :ui="inlineField"
+                  >
+                    <USwitch v-model="dnssecValidation" />
                   </UFormField>
 
                   <div class="overflow-x-auto pt-2">

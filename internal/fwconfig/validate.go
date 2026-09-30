@@ -494,6 +494,11 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 	default:
 		v.addf("%s: dns: invalid forward mode %q", p, in.DNS.ForwardMode)
 	}
+	switch in.DNS.DNSSECValidation {
+	case "", DNSSECValidationAuto, DNSSECValidationNo:
+	default:
+		v.addf("%s: dns: invalid dnssec validation %q", p, in.DNS.DNSSECValidation)
+	}
 	for _, a := range in.DNS.Forwarders {
 		if _, err := ParseAddr(a); err != nil {
 			v.addf("%s: dns: invalid forwarder %q", p, a)

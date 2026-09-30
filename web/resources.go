@@ -124,6 +124,12 @@ func prepareInstance(tx *gorm.DB, in, old *models.Instance) error {
 	if err := oneOf("DNS forward mode", in.DnsForwardMode, fwconfig.ForwardFirst, fwconfig.ForwardOnly); err != nil {
 		return err
 	}
+	if in.DnsDnssecValidation == "" {
+		in.DnsDnssecValidation = fwconfig.DNSSECValidationAuto
+	}
+	if err := oneOf("DNSSEC validation", in.DnsDnssecValidation, fwconfig.DNSSECValidationAuto, fwconfig.DNSSECValidationNo); err != nil {
+		return err
+	}
 	if err := checkEntries(tx, "DNS forwarders", in.DnsForwarders, entryHost); err != nil {
 		return err
 	}

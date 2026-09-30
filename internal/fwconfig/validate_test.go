@@ -122,6 +122,7 @@ func TestValidateCatchesProblems(t *testing.T) {
 			d.Instances[0].DNS.Zones[0].Records[0].Value = "1.2.3.4\n@ NS evil."
 		}, "newline"},
 		{"dns forward mode", func(d *Document) { d.Instances[0].DNS.ForwardMode = "last" }, `invalid forward mode "last"`},
+		{"dns dnssec validation", func(d *Document) { d.Instances[0].DNS.DNSSECValidation = "yes" }, `invalid dnssec validation "yes"`},
 		{"dns upstream", func(d *Document) { d.Instances[0].DNS.Upstream = "peer" }, `invalid upstream "peer"`},
 		{"dns upstream dhcp no interface", func(d *Document) { d.Instances[0].DNS.Upstream = UpstreamDHCP }, "needs the interface"},
 		{"dns upstream dhcp static", func(d *Document) {

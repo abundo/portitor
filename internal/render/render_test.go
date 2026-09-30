@@ -428,6 +428,20 @@ func TestNamedConfForwardMode(t *testing.T) {
 	}
 }
 
+func TestNamedConfDNSSECValidation(t *testing.T) {
+	in := &fwconfig.SampleDocument().Instances[0]
+	for mode, want := range map[string]string{
+		"":                            "dnssec-validation auto;",
+		fwconfig.DNSSECValidationAuto: "dnssec-validation auto;",
+		fwconfig.DNSSECValidationNo:   "dnssec-validation no;",
+	} {
+		in.DNS.DNSSECValidation = mode
+		if named := NamedConf(in, DefaultPaths(), nil); !strings.Contains(named, want) {
+			t.Errorf("%q: missing %q in\n%s", mode, want, named)
+		}
+	}
+}
+
 func TestDnsmgrAndKea(t *testing.T) {
 	b := sampleBundle(t)
 	cfg := b.Dnsmgr["main"]

@@ -111,6 +111,10 @@ func NamedConf(in *fwconfig.Instance, p Paths, dhcpDNS map[string][]string) stri
 			}
 		}
 	}
+	validation := fwconfig.DNSSECValidationAuto
+	if in.DNS.DNSSECValidation == fwconfig.DNSSECValidationNo {
+		validation = fwconfig.DNSSECValidationNo
+	}
 	forward := "first"
 	if in.DNS.ForwardMode == fwconfig.ForwardOnly {
 		forward = "only"
@@ -132,7 +136,7 @@ func NamedConf(in *fwconfig.Instance, p Paths, dhcpDNS map[string][]string) stri
 		fmt.Fprintf(b, "\tforwarders { %s; };\n", strings.Join(forwarders, "; "))
 		fmt.Fprintf(b, "\tforward %s;\n", forward)
 	}
-	b.WriteString("\tdnssec-validation auto;\n")
+	fmt.Fprintf(b, "\tdnssec-validation %s;\n", validation)
 	b.WriteString("\tallow-transfer { none; };\n")
 	b.WriteString("\tversion none;\n")
 	b.WriteString("};\n\n")

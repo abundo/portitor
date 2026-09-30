@@ -165,11 +165,12 @@ type Instance struct {
 	Description string `json:"description"`
 	IsDefault   bool   `json:"is_default"`
 
-	DnsEnabled        bool       `json:"dns_enabled"`
-	DnsUpstream       string     `json:"dns_upstream"` // fwconfig.Upstream*
-	DnsForwarders     StringList `json:"dns_forwarders"`
-	DnsForwardMode    string     `json:"dns_forward_mode"` // fwconfig.ForwardFirst or ForwardOnly
-	DnsAllowRecursion StringList `json:"dns_allow_recursion"`
+	DnsEnabled          bool       `json:"dns_enabled"`
+	DnsUpstream         string     `json:"dns_upstream"` // fwconfig.Upstream*
+	DnsForwarders       StringList `json:"dns_forwarders"`
+	DnsForwardMode      string     `json:"dns_forward_mode"` // fwconfig.ForwardFirst or ForwardOnly
+	DnsAllowRecursion   StringList `json:"dns_allow_recursion"`
+	DnsDnssecValidation string     `json:"dns_dnssec_validation"` // fwconfig.DNSSECValidationAuto or No
 
 	DhcpEnabled    bool   `json:"dhcp_enabled"`
 	DhcpDomainName string `json:"dhcp_domain_name"`

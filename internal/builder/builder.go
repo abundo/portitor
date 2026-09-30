@@ -328,11 +328,12 @@ func Build(db *gorm.DB, generation int64) (*fwconfig.Document, error) {
 
 		// DNS: zones, records from the zone and from IPAM names.
 		in.DNS = fwconfig.DNSServer{
-			Enabled:        mi.DnsEnabled,
-			Upstream:       mi.DnsUpstream,
-			ForwardMode:    mi.DnsForwardMode,
-			AllowRecursion: expand("instance "+mi.Name+": dns allow recursion", objs.Prefixes, mi.DnsAllowRecursion),
-			Zones:          []fwconfig.DNSZone{},
+			Enabled:          mi.DnsEnabled,
+			Upstream:         mi.DnsUpstream,
+			ForwardMode:      mi.DnsForwardMode,
+			DNSSECValidation: mi.DnsDnssecValidation,
+			AllowRecursion:   expand("instance "+mi.Name+": dns allow recursion", objs.Prefixes, mi.DnsAllowRecursion),
+			Zones:            []fwconfig.DNSZone{},
 		}
 		switch mi.DnsUpstream {
 		case fwconfig.UpstreamForward, "":

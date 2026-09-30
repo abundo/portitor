@@ -310,6 +310,12 @@ const (
 	ForwardOff = "off"
 )
 
+// DNSServer.DNSSECValidation values, as BIND's dnssec-validation.
+const (
+	DNSSECValidationAuto = "auto" // validate with the built-in root key ("" too)
+	DNSSECValidationNo   = "no"
+)
+
 type DNSServer struct {
 	Enabled bool `json:"enabled"`
 	// Upstream picks the forwarders: Forwarders, the DNS servers of the
@@ -327,8 +333,10 @@ type DNSServer struct {
 	ListenInterfaces []string `json:"listen_interfaces,omitempty"`
 	// AllowRecursion lists client CIDRs allowed to recurse. Empty means the
 	// prefixes of the listen interfaces.
-	AllowRecursion []string  `json:"allow_recursion,omitempty"`
-	Zones          []DNSZone `json:"zones"`
+	AllowRecursion []string `json:"allow_recursion,omitempty"`
+	// DNSSECValidation is DNSSECValidationAuto or DNSSECValidationNo.
+	DNSSECValidation string    `json:"dnssec_validation,omitempty"`
+	Zones            []DNSZone `json:"zones"`
 	// Templates the zones refer to by name. A zone without a template
 	// gets a built-in SOA and NS pointing at localhost.
 	SOATemplates   []DNSSOATemplate  `json:"soa_templates,omitempty"`
