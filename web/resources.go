@@ -618,12 +618,16 @@ func prepareIpamAddress(tx *gorm.DB, a, _ *models.IpamAddress) error {
 	return nil
 }
 
-func prepareDnsZone(tx *gorm.DB, z, _ *models.DnsZone) error {
+func prepareDnsZone(tx *gorm.DB, z, old *models.DnsZone) error {
 	if err := instanceExists(tx, z.InstanceID); err != nil {
 		return err
 	}
 	if z.Type == "" {
 		z.Type = fwconfig.ZoneForward
+	}
+	// Records belong to forward zones only.
+	if old != nil && old.Type != z.Type {
+		return bad("the type of a zone cannot change; create a new one")
 	}
 	z.Name = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(z.Name), "."))
 	switch z.Type {

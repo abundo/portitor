@@ -173,6 +173,7 @@ const tab = computed({
             :columns="zoneColumns"
             :fields="zoneFields"
             :defaults="zoneDefaults"
+            :edit-to="(row) => `/dns/zones/${row.id}`"
             new-label="New zone"
           >
             <template #cell-name="{ row }">

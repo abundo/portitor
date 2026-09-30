@@ -3,7 +3,7 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useToast } from '@nuxt/ui/composables'
 import ZoneRecordsTable from '@/components/ZoneRecordsTable.vue'
 import { api, dnsDnssecPolicies, dnsRecords, dnsSoaTemplates, dnsTemplates, dnsZones } from '@/api'
@@ -13,10 +13,13 @@ import { builtinTemplate, zoneTypes } from '@/utils/dns'
 import { formatZoneFile, parseZoneFile } from '@/utils/zoneFile'
 import { fromApiRecord, toApiRecords, validateZoneRecords } from '@/utils/zoneRecords'
 import { useAuthStore } from '@/stores/auth'
+import { useConfirm } from '@/composables/useConfirm'
 import { useUnsaved } from '@/composables/useFormGuard'
 
 const auth = useAuthStore()
 const route = useRoute()
+const router = useRouter()
+const { confirmDelete } = useConfirm()
 const toast = useToast()
 const store = useInstanceStore()
 const zone = ref(null)
@@ -105,6 +108,19 @@ async function save() {
     toast.add({ title: errMsg(err, 'Failed to save zone'), color: 'error' })
   } finally {
     saving.value = false
+  }
+}
+
+// Delete lives here, not in the zones table (AGENTS.md, GUI design rules).
+const deleted = ref(false)
+async function remove() {
+  if (!(await confirmDelete(`DNS zone ${zone.value.name}`))) return
+  try {
+    await dnsZones.remove(zone.value.id)
+    deleted.value = true
+    router.push('/dns')
+  } catch (err) {
+    toast.add({ title: errMsg(err, 'Delete failed'), color: 'error' })
   }
 }
 
@@ -204,7 +220,7 @@ async function onImportFile(event) {
   }
 }
 
-useUnsaved(() => !!dirty.value || recordsDirty.value)
+useUnsaved(() => !deleted.value && (!!dirty.value || recordsDirty.value))
 </script>
 
 <template>
@@ -248,6 +264,15 @@ useUnsaved(() => !!dirty.value || recordsDirty.value)
                   variant="ghost"
                   icon="i-lucide-file-cog"
                   label="Edit templates"
+                />
+                <UButton
+                  v-if="auth.isAdmin"
+                  class="ms-auto"
+                  color="error"
+                  variant="ghost"
+                  icon="i-lucide-trash"
+                  label="Delete"
+                  @click="remove"
                 />
               </div>
             </fieldset>

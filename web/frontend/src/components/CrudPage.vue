@@ -55,6 +55,9 @@ const props = defineProps({
   // itemName(row, rows) names a row in the delete prompt, with what it is
   // ("NAT rule 3"); default: the noun and the row's name.
   itemName: { type: Function, default: null },
+  // editTo(row) is a route: Edit opens that page instead of the form (the
+  // page then holds the row's Delete).
+  editTo: { type: Function, default: null },
 })
 const emit = defineEmits(['changed'])
 
@@ -371,7 +374,8 @@ defineExpose({ reload: load, openEdit, openCreate })
               :icon="readOnly ? 'i-lucide-eye' : 'i-lucide-pencil'"
               :aria-label="readOnly ? 'View' : 'Edit'"
               :title="readOnly ? 'View' : 'Edit'"
-              @click="openEdit(row.original)"
+              :to="editTo?.(row.original)"
+              @click="editTo || openEdit(row.original)"
             />
             <slot name="row-actions" :row="row.original" />
           </div>

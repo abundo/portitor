@@ -765,6 +765,9 @@ func TestZoneRecordsGrid(t *testing.T) {
 	inst := env.create("/api/instances", map[string]any{"name": "main", "dns_enabled": true})
 	zone := env.create("/api/dns/zones", map[string]any{"instance_id": inst, "name": "home.arpa"})
 	path := fmt.Sprintf("/api/dns/zones/%d/records", zone)
+	if rec := env.do("PUT", fmt.Sprintf("/api/dns/zones/%d", zone), map[string]any{"type": "reverse4", "name": "192.168.1.0/24"}); rec.Code != http.StatusBadRequest {
+		t.Errorf("zone type change: %d %s", rec.Code, rec.Body)
+	}
 
 	grid := []map[string]any{
 		{"type": "A", "name": "nas", "value": "192.168.1.10", "mac": "0200.0000.0010"},
