@@ -12,7 +12,6 @@ const columns = [
   { key: 'name', label: 'Name', class: 'font-medium' },
   { key: 'is_default', label: 'Default' },
   { key: 'description', label: 'Description' },
-  { key: 'dhcp_enabled', label: 'DHCP server' },
 ]
 
 const fields = [
@@ -30,24 +29,6 @@ const fields = [
     type: 'switch',
     hint: 'The default instance is the host itself (root network namespace). Exactly one.',
   },
-  {
-    key: 'dhcp_enabled',
-    label: 'DHCP server (Kea)',
-    type: 'switch',
-    hint: 'DHCPv4 and DHCPv6 scopes are set per prefix under Hosts & prefixes.',
-  },
-  {
-    key: 'dhcp_domain_name',
-    label: 'DHCP domain name',
-    placeholder: 'home.arpa',
-    show: (f) => f.dhcp_enabled,
-  },
-  {
-    key: 'dhcp_lease_time',
-    label: 'Lease time (seconds)',
-    type: 'number',
-    show: (f) => f.dhcp_enabled,
-  },
 ]
 </script>
 
@@ -58,9 +39,6 @@ const fields = [
     :api="instances"
     :columns="columns"
     :fields="fields"
-    :defaults="{
-      dhcp_lease_time: 86400,
-    }"
     new-label="New instance"
     @changed="store.load()"
   />

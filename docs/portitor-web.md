@@ -98,7 +98,7 @@ After an upgrade, run `migrate` before `start`. `install.py` does both.
 | | Services | What the rules' Service column matches: TCP, UDP or SCTP port ranges (with source ports if wanted), an ICMP or ICMPv6 type and code, or an IP protocol number. Your own next to predefined ones such as `ssh`, `dns`, `ping` or `gre`. Also lists the port names (`https`) that NAT port fields accept. |
 | | NAT & port forwards | Masquerade, SNAT and DNAT. |
 | Services | DNS | Two tabs. *DNS zones*: the zones and records the instance serves; their templates are under *Globals → DNS templates*. *DNS server*: the instance's DNS server (BIND) on or off; its upstream (forwarders, the root servers, or the DNS servers from the DHCP lease on one interface); the interfaces it answers on. |
-| | DHCP | Scopes (prefixes with DHCP on, set under Hosts & prefixes) and active leases. Several scopes on one interface form a Kea shared network: clients get addresses from all of them. |
+| | DHCP | Two tabs. *DHCP info*: scopes (prefixes with DHCP on, set under Hosts & prefixes) and active leases. Several scopes on one interface form a Kea shared network: clients get addresses from all of them. *DHCP server*: the instance's DHCP server (Kea) on or off, its domain name and lease time. |
 | | WireGuard | Tunnels, road-warrior and [site-to-site](#site-to-site-wireguard) peers; generates client and site configs. |
 | | Dynamic DNS | Keeps records on an external nameserver in step with the WAN address. |
 | | Scheduled tasks | IP list downloads and commands on a cron schedule. |
