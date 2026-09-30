@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/netip"
 	"runtime"
 	"slices"
@@ -15,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/insomniacslk/dhcp/dhcpv4"
 	"github.com/insomniacslk/dhcp/dhcpv4/nclient4"
 	"github.com/vishvananda/netns"
 )
@@ -299,13 +301,45 @@ func (m *dhcpManager) installLease(ctx context.Context, k dhcpKey, old, lease *n
 		l.Obtained = lease.CreationTime
 		l.Expires = lease.CreationTime.Add(leaseTime)
 		l.RenewAfter = time.Now().Add(ack.IPAddressRenewalTime(leaseTime / 2))
+		l.RebindAfter = time.Now().Add(ack.IPAddressRebindingTime(leaseTime * 7 / 8))
 		l.State = "bound"
 		l.LastError = ""
+		leaseDetails(l, ack)
 	})
 	if changed && m.onChange != nil {
 		go m.onChange(k.instance)
 	}
 	return nil
+}
+
+// leaseDetails copies into l, for display, the options of ack the agent
+// does not act on, and every option decoded.
+func leaseDetails(l *Lease, ack *dhcpv4.DHCPv4) {
+	l.Domain = ack.DomainName()
+	l.Search = nil
+	if s := ack.DomainSearch(); s != nil {
+		l.Search = slices.Clone(s.Labels)
+	}
+	l.NTP = nil
+	for _, ip := range ack.NTPServers() {
+		l.NTP = append(l.NTP, ip.String())
+	}
+	l.MTU = 0
+	if b := ack.GetOneOption(dhcpv4.OptionInterfaceMTU); len(b) == 2 {
+		l.MTU = int(b[0])<<8 | int(b[1])
+	}
+	l.Routes = nil
+	for _, r := range ack.ClasslessStaticRoute() {
+		l.Routes = append(l.Routes, fmt.Sprintf("%s via %s", r.Dest, r.Router))
+	}
+	l.Options = nil
+	codes := slices.Sorted(maps.Keys(ack.Options))
+	for _, c := range codes {
+		// Summary prints "    <name>: <value>\n".
+		s := strings.TrimSpace(dhcpv4.Options{c: ack.Options[c]}.Summary(nil))
+		name, value, _ := strings.Cut(s, ": ")
+		l.Options = append(l.Options, DHCPOption{Code: int(c), Name: name, Value: value})
+	}
 }
 
 func (m *dhcpManager) removeLease(k dhcpKey, lease *nclient4.Lease) {
@@ -317,7 +351,7 @@ func (m *dhcpManager) removeLease(k dhcpKey, lease *nclient4.Lease) {
 	defer cancel()
 	_, _ = m.run.Run(ctx, k.netns, "ip", "addr", "del", pfx.String(), "dev", k.iface)
 	changed := m.update(k, func(l *Lease) {
-		l.Address, l.Router, l.DNS, l.State = "", "", nil, "requesting"
+		*l = Lease{Instance: l.Instance, Interface: l.Interface, State: "requesting", LastError: l.LastError}
 	})
 	if changed && m.onChange != nil {
 		go m.onChange(k.instance)

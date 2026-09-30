@@ -3,6 +3,7 @@
 
 <script setup>
 import CrudPage from '@/components/CrudPage.vue'
+import DhcpClientLease from '@/components/DhcpClientLease.vue'
 import NeedInstance from '@/components/NeedInstance.vue'
 import { interfaces } from '@/api'
 import { useInstanceRefs, withLabel } from '@/composables/useInstanceRefs'
@@ -148,13 +149,14 @@ const fields = [
   },
 ]
 
-// The address the DHCP client holds on the interface, if it has one.
-function dhcpAddressOf(row) {
-  if (row.ipv4_mode !== 'dhcp') return ''
-  const lease = deploy.status?.dhcp_client_leases?.find(
-    (l) => l.instance === store.current?.name && l.interface === row.name,
+// The DHCP client's lease on the interface, if it runs one.
+function leaseOf(row) {
+  if (row.ipv4_mode !== 'dhcp') return null
+  return (
+    deploy.status?.dhcp_client_leases?.find(
+      (l) => l.instance === store.current?.name && l.interface === row.name,
+    ) ?? null
   )
-  return lease?.state === 'bound' ? lease.address : ''
 }
 </script>
 
@@ -191,11 +193,8 @@ function dhcpAddressOf(row) {
         </UTooltip>
       </template>
       <template #cell-addresses="{ row }">
-        <div
-          v-for="a in [dhcpAddressOf(row), ...(row.addresses ?? [])].filter(Boolean)"
-          :key="a"
-          class="font-mono text-xs"
-        >
+        <DhcpClientLease :lease="leaseOf(row)" :no-default-route="row.dhcp_no_default_route" />
+        <div v-for="a in row.addresses ?? []" :key="a" class="font-mono text-xs">
           {{ a }}
         </div>
       </template>

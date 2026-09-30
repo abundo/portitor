@@ -15,6 +15,7 @@ type (
 	WGPeerStatus   = agentapi.WGPeerStatus
 	ServerLease    = agentapi.ServerLease
 	Lease          = agentapi.Lease
+	DHCPOption     = agentapi.DHCPOption
 	RenderResult   = agentapi.RenderResult
 	ApplyResult    = agentapi.ApplyResult
 	ProgramStatus  = agentapi.ProgramStatus

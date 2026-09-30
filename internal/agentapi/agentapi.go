@@ -175,17 +175,32 @@ type ServerLease struct {
 
 // Lease is what the DHCP client learned on one interface.
 type Lease struct {
-	Instance   string    `json:"instance"`
-	Interface  string    `json:"interface"`
-	Address    string    `json:"address"` // CIDR
-	Router     string    `json:"router,omitempty"`
-	DNS        []string  `json:"dns,omitempty"`
-	Server     string    `json:"server,omitempty"`
-	Obtained   time.Time `json:"obtained"`
-	Expires    time.Time `json:"expires"`
-	State      string    `json:"state"` // requesting, bound, error
-	LastError  string    `json:"last_error,omitempty"`
-	RenewAfter time.Time `json:"renew_after"`
+	Instance    string    `json:"instance"`
+	Interface   string    `json:"interface"`
+	Address     string    `json:"address"` // CIDR
+	Router      string    `json:"router,omitempty"`
+	DNS         []string  `json:"dns,omitempty"`
+	Server      string    `json:"server,omitempty"`
+	Obtained    time.Time `json:"obtained"`
+	Expires     time.Time `json:"expires"`
+	State       string    `json:"state"` // requesting, bound, error
+	LastError   string    `json:"last_error,omitempty"`
+	RenewAfter  time.Time `json:"renew_after"`
+	RebindAfter time.Time `json:"rebind_after"`
+	// More of what the server sent, for display: the agent uses none of it.
+	Domain  string       `json:"domain,omitempty"`
+	Search  []string     `json:"search,omitempty"`
+	NTP     []string     `json:"ntp,omitempty"`
+	MTU     int          `json:"mtu,omitempty"`
+	Routes  []string     `json:"routes,omitempty"`  // classless static routes: "10.0.0.0/8 via 192.0.2.1"
+	Options []DHCPOption `json:"options,omitempty"` // every option in the ACK
+}
+
+// DHCPOption is one option of a DHCP answer, decoded for display.
+type DHCPOption struct {
+	Code  int    `json:"code"`
+	Name  string `json:"name"`
+	Value string `json:"value"`
 }
 
 // DynDNSStatus is the state of a dynamic DNS client.
