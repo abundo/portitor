@@ -28,7 +28,7 @@ import { inlineField, wideModal } from '@/utils/form'
 const toast = useToast()
 const auth = useAuthStore()
 const { confirmDelete } = useConfirm()
-const { store, ifaceName } = useInstanceRefs()
+const { store, ifaceName, ifaceList } = useInstanceRefs()
 const deploy = useDeployStore()
 const objects = useObjectStore()
 const hosts = ref([])
@@ -128,6 +128,13 @@ const states = computed(() =>
 )
 const stateColor = { ok: 'success', error: 'error', fetching: 'info' }
 const sourceLabel = { crowdsec: 'CrowdSec LAPI', url: 'URL' }
+
+// Whether the DNS server listens on the interface's addresses: 'on', 'off'
+// (the interface is set to, the instance's DNS server is disabled) or null.
+function dnsListen(id) {
+  if (!ifaceList.value.find((i) => i.id === id)?.dns_listen) return null
+  return store.current?.dns_enabled ? 'on' : 'off'
+}
 
 async function refreshList(row) {
   try {
@@ -701,6 +708,7 @@ async function removeAddress() {
                       :collapsed="collapsed"
                       :iface-name="ifaceName"
                       :read-only="!auth.isAdmin"
+                      :dns-listen="dnsListen"
                       @toggle="toggle"
                       @edit="onEdit"
                       @menu="(e, node) => openMenu(e, nodeMenu(node))"

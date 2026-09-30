@@ -13,6 +13,9 @@ defineProps({
   ifaceName: { type: Function, required: true },
   // readOnly: a viewer, who views instead of edits.
   readOnly: { type: Boolean, default: false },
+  // dnsListen(interfaceId): 'on' when the DNS server listens on the
+  // interface, 'off' when it is set to but the server is disabled, else null.
+  dnsListen: { type: Function, default: () => null },
 })
 const emit = defineEmits(['toggle', 'edit', 'menu'])
 const key = (n) => `${n.kind}:${n.cidr}`
@@ -69,6 +72,22 @@ function pct(n) {
           variant="subtle"
           :label="ifaceName(n.interface_id)"
         />
+        <template v-if="n.kind === 'address' && n.interface_id">
+          <UBadge
+            v-if="dnsListen(n.interface_id) === 'on'"
+            color="success"
+            variant="subtle"
+            label="DNS"
+            title="The DNS server listens on this address"
+          />
+          <UBadge
+            v-else-if="dnsListen(n.interface_id) === 'off'"
+            color="neutral"
+            variant="subtle"
+            label="DNS"
+            title="Set to listen for DNS, but the instance's DNS server is disabled"
+          />
+        </template>
         <UBadge v-if="n.mac" color="neutral" variant="outline" :label="`reserved ${n.mac}`" />
         <UBadge v-if="n.ra_enabled" color="info" variant="subtle" label="RA" />
         <UBadge
@@ -92,6 +111,7 @@ function pct(n) {
       :collapsed="collapsed"
       :iface-name="ifaceName"
       :read-only="readOnly"
+      :dns-listen="dnsListen"
       @toggle="emit('toggle', $event)"
       @edit="emit('edit', $event)"
       @menu="(e, node) => emit('menu', e, node)"
