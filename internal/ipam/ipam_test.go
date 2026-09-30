@@ -26,7 +26,7 @@ func TestTreeInterfaceAddresses(t *testing.T) {
 		{Base: models.Base{ID: 7}, Name: "eth1", Addresses: models.StringList{"192.168.1.1/24", "192.168.2.1/24", "fd00:1::1/64"}},
 		{Base: models.Base{ID: 8}, Name: "wg0", Addresses: models.StringList{"10.99.0.1/32"}},
 	}
-	roots := Tree(prefixes, addrs, ifaces)
+	roots := Tree(prefixes, addrs, ifaces, nil)
 	var got []string
 	for _, r := range roots {
 		got = append(got, r.CIDR)
@@ -72,7 +72,7 @@ func TestTreeNesting(t *testing.T) {
 		{Base: models.Base{ID: 11}, Address: "192.168.1.200"},
 		{Base: models.Base{ID: 12}, Address: "172.16.0.1"},
 	}
-	roots := Tree(prefixes, addrs, nil)
+	roots := Tree(prefixes, addrs, nil, nil)
 	var got []string
 	for _, r := range roots {
 		got = append(got, r.CIDR)
@@ -129,5 +129,43 @@ func TestNextFreeCommon(t *testing.T) {
 	ips, err = NextFreeCommon([]models.IpamPrefix{v4, v6}, nil, addrs)
 	if err != nil || ips[0].String() != "10.99.0.4" || ips[1].String() != "fd99::4" {
 		t.Fatalf("%v %v", ips, err)
+	}
+}
+
+// A zone's A/AAAA records show up under the deepest prefix that holds their
+// address, merged into the node an address already has; records outside
+// every prefix are left out.
+func TestTreeRecordAddresses(t *testing.T) {
+	prefixes := []models.IpamPrefix{pfx(1, "192.168.0.0/16"), pfx(2, "192.168.1.0/24")}
+	addrs := []models.IpamAddress{{Base: models.Base{ID: 10}, Address: "192.168.1.10", DnsName: "nas.home.arpa"}}
+	records := []RecordAddress{
+		{ZoneID: 5, Name: "printer.home.arpa", Address: "192.168.1.20", Mac: "02:00:00:00:00:20", Description: "hall"},
+		{ZoneID: 5, Name: "files.home.arpa", Address: "192.168.1.10"},
+		{ZoneID: 6, Name: "lp.lab.arpa", Address: "192.168.1.20"},
+		{ZoneID: 5, Name: "cam.home.arpa", Address: "192.168.9.9"},
+		{ZoneID: 5, Name: "www.home.arpa", Address: "203.0.113.1"},
+		{ZoneID: 5, Name: "bad.home.arpa", Address: "nonsense"},
+	}
+	roots := Tree(prefixes, addrs, nil, records)
+	if len(roots) != 1 || roots[0].CIDR != "192.168.0.0/16" {
+		t.Fatalf("roots: %+v", roots)
+	}
+	top := roots[0].Children
+	if len(top) != 2 || top[0].CIDR != "192.168.1.0/24" || top[1].CIDR != "192.168.9.9" {
+		t.Fatalf("children of /16: %+v", top)
+	}
+	if cam := top[1]; !cam.Auto || cam.ZoneID == nil || *cam.ZoneID != 5 || cam.DnsName != "cam.home.arpa" {
+		t.Errorf("record in the /16: %+v", cam)
+	}
+	lan := top[0].Children
+	if len(lan) != 2 {
+		t.Fatalf("children of /24: %+v", lan)
+	}
+	if nas := lan[0]; nas.ID != 10 || nas.Auto || nas.DnsName != "nas.home.arpa, files.home.arpa" || *nas.ZoneID != 5 {
+		t.Errorf("record for an IPAM address: %+v", nas)
+	}
+	if p := lan[1]; !p.Auto || p.ID != 0 || *p.ZoneID != 5 || p.DnsName != "printer.home.arpa, lp.lab.arpa" ||
+		p.Mac != "02:00:00:00:00:20" || p.Description != "hall" {
+		t.Errorf("records for one address: %+v", p)
 	}
 }

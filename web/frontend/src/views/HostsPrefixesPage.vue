@@ -7,6 +7,7 @@
 // IP lists can be sorted into folders (object_folders), which only
 // structure the page.
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { useToast } from '@nuxt/ui/composables'
 import IpamTreeRows from '@/components/IpamTreeRows.vue'
 import AddrInput from '@/components/AddrInput.vue'
@@ -26,6 +27,7 @@ import { useFormGuard } from '@/composables/useFormGuard'
 import { inlineField, wideModal } from '@/utils/form'
 
 const toast = useToast()
+const router = useRouter()
 const auth = useAuthStore()
 const { confirmDelete } = useConfirm()
 const { store, ifaceName, ifaceList } = useInstanceRefs()
@@ -325,9 +327,11 @@ function nodeMenu(node) {
 }
 
 // An auto node has no IPAM entry yet: editing it creates one, for DHCP or
-// router advertisements on a prefix, a DNS name or MAC on an address.
+// router advertisements on a prefix, a DNS name or MAC on an address. An
+// address that is there only for a zone's A/AAAA record opens the zone.
 async function onEdit(node) {
-  if (node.kind === 'prefix')
+  if (node.auto && node.zone_id && !node.interface_id) router.push(`/dns/zones/${node.zone_id}`)
+  else if (node.kind === 'prefix')
     editPrefix(node.auto ? { prefix: node.cidr } : await ipamPrefixes.get(node.id))
   else
     editAddress(
@@ -409,7 +413,8 @@ async function removeAddress() {
                     on a prefix to serve it on the interface with an address in it, and router
                     advertisements (SLAAC) on an IPv6 prefix; several DHCP prefixes on one interface
                     share it. An address with a DNS name gets an A/AAAA record, and with a MAC also
-                    a fixed DHCP lease.
+                    a fixed DHCP lease. The A/AAAA records of the DNS zones are listed under their
+                    prefix; editing one opens its zone.
                   </p>
                 </div>
               </template>

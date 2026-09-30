@@ -26,6 +26,7 @@ import (
 	"github.com/abundo/portitor/internal/builder"
 	"github.com/abundo/portitor/internal/dbmigrate"
 	"github.com/abundo/portitor/internal/fwconfig"
+	"github.com/abundo/portitor/internal/ipam"
 	"github.com/abundo/portitor/internal/render"
 	"github.com/abundo/portitor/models"
 )
@@ -811,6 +812,18 @@ func TestZoneRecordsGrid(t *testing.T) {
 	}
 	if strings.Join(names, " ") != "nas/A lab/A www.lab/CNAME" {
 		t.Errorf("built records: %v", names)
+	}
+
+	// The A records show up in the prefix tree, fully qualified.
+	env.create("/api/ipam/prefixes", map[string]any{"instance_id": inst, "prefix": "192.168.0.0/16"})
+	var tree []ipam.Node
+	_ = json.Unmarshal(env.do("GET", "/api/ipam/tree?instance_id="+itoa(inst), nil).Body.Bytes(), &tree)
+	var addrs []string
+	for _, n := range tree[0].Children {
+		addrs = append(addrs, n.CIDR+"="+n.DnsName)
+	}
+	if strings.Join(addrs, " ") != "192.168.1.10=nas.home.arpa 192.168.2.1=lab.home.arpa" {
+		t.Errorf("tree addresses: %v", addrs)
 	}
 
 	// A bad row rejects the whole grid, naming the row; nothing changes.

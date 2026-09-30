@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"math"
 	"net/netip"
+	"slices"
 	"sort"
 	"strings"
 
@@ -18,7 +19,8 @@ import (
 
 // Node is a prefix or address of the tree. ID is its IpamPrefix or
 // IpamAddress id, or 0 when it is there only because an interface has the
-// address (Auto): a prefix of an interface address, or the address itself.
+// address (Auto): a prefix of an interface address, or the address itself;
+// or because a DNS zone has an A/AAAA record for it (Auto, ZoneID set).
 // InterfaceID is the interface an address is configured on, or a prefix
 // of one of its addresses (the first such interface).
 type Node struct {
@@ -30,6 +32,7 @@ type Node struct {
 	DnsName     string  `json:"dns_name,omitempty"`
 	Mac         string  `json:"mac,omitempty"`
 	InterfaceID *uint   `json:"interface_id,omitempty"`
+	ZoneID      *uint   `json:"zone_id,omitempty"` // zone of the first A/AAAA record for the address
 	DhcpEnabled bool    `json:"dhcp_enabled,omitempty"`
 	RaEnabled   bool    `json:"ra_enabled,omitempty"`
 	DhcpRange   string  `json:"dhcp_range,omitempty"`
@@ -40,10 +43,20 @@ type Node struct {
 	poolSize float64 // DHCP pool addresses, counted as used
 }
 
+// RecordAddress is the address of an A or AAAA record of a DNS zone.
+type RecordAddress struct {
+	ZoneID      uint
+	Name        string // fully qualified, without the trailing dot
+	Address     string
+	Mac         string
+	Description string
+}
+
 // Tree nests an instance's prefixes and addresses, with its interfaces'
-// addresses and their prefixes. Addresses that fall in no prefix are
+// addresses and their prefixes, and the addresses of its A/AAAA records
+// that fall in a prefix. Other addresses that fall in no prefix are
 // returned at the top level.
-func Tree(prefixes []models.IpamPrefix, addrs []models.IpamAddress, ifaces []models.Interface) []*Node {
+func Tree(prefixes []models.IpamPrefix, addrs []models.IpamAddress, ifaces []models.Interface, records []RecordAddress) []*Node {
 	var nodes []*Node
 	stored := map[netip.Prefix]*Node{}
 	for _, p := range prefixes {
@@ -115,11 +128,46 @@ func Tree(prefixes []models.IpamPrefix, addrs []models.IpamAddress, ifaces []mod
 		addrNodes = append(addrNodes, &Node{Kind: "address", Auto: true, CIDR: addr.String(), InterfaceID: &id,
 			Children: []*Node{}, pfx: netip.PrefixFrom(addr, addr.BitLen())})
 	}
+	byAddr := map[netip.Addr]*Node{}
 	for _, n := range addrNodes {
+		byAddr[n.pfx.Addr()] = n
 		if parent := deepest(roots, n.pfx.Addr()); parent != nil {
 			parent.Children = append(parent.Children, n)
 		} else {
 			roots = append(roots, n)
+		}
+	}
+	// A record's address joins the node the address already has, or gets
+	// its own under the deepest prefix that holds it.
+	for _, r := range records {
+		addr, err := netip.ParseAddr(r.Address)
+		if err != nil {
+			continue
+		}
+		addr = addr.Unmap()
+		n := byAddr[addr]
+		if n == nil {
+			parent := deepest(roots, addr)
+			if parent == nil {
+				continue
+			}
+			n = &Node{Kind: "address", Auto: true, CIDR: addr.String(), Children: []*Node{},
+				pfx: netip.PrefixFrom(addr, addr.BitLen())}
+			parent.Children = append(parent.Children, n)
+			byAddr[addr] = n
+		}
+		if n.ZoneID == nil {
+			id := r.ZoneID
+			n.ZoneID = &id
+		}
+		if !slices.Contains(strings.Split(n.DnsName, ", "), r.Name) {
+			n.DnsName = strings.TrimPrefix(n.DnsName+", "+r.Name, ", ")
+		}
+		if n.Mac == "" {
+			n.Mac = r.Mac
+		}
+		if n.Description == "" {
+			n.Description = r.Description
 		}
 	}
 	for _, r := range roots {

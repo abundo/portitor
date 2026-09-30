@@ -50,11 +50,50 @@ func (s *Server) handleIpamTree(c *echo.Context) error {
 	if err := s.db.Where("instance_id = ?", id).Find(&ifaces).Error; err != nil {
 		return err
 	}
-	tree := ipam.Tree(prefixes, addrs, ifaces)
+	records, err := s.zoneAddresses(id)
+	if err != nil {
+		return err
+	}
+	tree := ipam.Tree(prefixes, addrs, ifaces, records)
 	if tree == nil {
 		tree = []*ipam.Node{}
 	}
 	return c.JSON(http.StatusOK, tree)
+}
+
+// zoneAddresses lists the A and AAAA records of an instance's forward
+// zones, with their names fully qualified, in zone and record order.
+func (s *Server) zoneAddresses(instanceID uint) ([]ipam.RecordAddress, error) {
+	var zones []models.DnsZone
+	if err := s.db.Where("instance_id = ? AND type = ?", instanceID, fwconfig.ZoneForward).Order("name").Find(&zones).Error; err != nil {
+		return nil, err
+	}
+	var out []ipam.RecordAddress
+	for _, z := range zones {
+		var records []models.DnsRecord
+		if err := s.db.Where("zone_id = ?", z.ID).Order("rank, id").Find(&records).Error; err != nil {
+			return nil, err
+		}
+		zone := strings.TrimSuffix(z.Name, ".")
+		domain := ""
+		for _, r := range records {
+			switch r.Type {
+			case models.DnsRecordDomain:
+				domain = r.Name
+			case "A", "AAAA":
+				name := builder.RecordName(domain, r.Name)
+				if abs, ok := strings.CutSuffix(name, "."); ok {
+					name = abs
+				} else if name == "@" {
+					name = zone
+				} else {
+					name += "." + zone
+				}
+				out = append(out, ipam.RecordAddress{ZoneID: z.ID, Name: name, Address: r.Value, Mac: r.Mac, Description: r.Description})
+			}
+		}
+	}
+	return out, nil
 }
 
 // handleAutoRules lists the input rules the agent adds for an instance's
@@ -238,7 +277,7 @@ func (s *Server) handleWgClientConfig(c *echo.Context) error {
 		var ifaces []models.Interface
 		s.db.Where("instance_id = ?", ifc.InstanceID).Find(&prefixes)
 		s.db.Where("instance_id = ?", ifc.InstanceID).Find(&ifaces)
-		roots := ipam.Tree(prefixes, nil, ifaces)
+		roots := ipam.Tree(prefixes, nil, ifaces, nil)
 		cc.AllowedIPs = nil
 		for _, r := range roots {
 			if r.Kind == "prefix" && !insideAny(r.CIDR, remote) {

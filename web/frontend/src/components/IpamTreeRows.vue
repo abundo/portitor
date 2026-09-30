@@ -88,6 +88,13 @@ function pct(n) {
             title="Set to listen for DNS, but the instance's DNS server is disabled"
           />
         </template>
+        <UBadge
+          v-if="n.zone_id"
+          color="neutral"
+          variant="subtle"
+          :label="n.cidr.includes(':') ? 'AAAA' : 'A'"
+          title="A DNS zone has an A or AAAA record for this address"
+        />
         <UBadge v-if="n.mac" color="neutral" variant="outline" :label="`reserved ${n.mac}`" />
         <UBadge v-if="n.ra_enabled" color="info" variant="subtle" label="RA" />
         <UBadge
