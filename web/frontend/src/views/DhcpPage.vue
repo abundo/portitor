@@ -89,7 +89,7 @@ const clientLeases = computed(() =>
       </div>
 
       <div v-if="clientLeases.length" class="card">
-        <div class="mb-2 text-lg font-semibold">Upstream (DHCP client)</div>
+        <div class="mb-2 text-lg font-semibold">DHCP client</div>
         <UTable
           :data="clientLeases"
           :columns="[
