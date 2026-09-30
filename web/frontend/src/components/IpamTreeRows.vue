@@ -16,6 +16,11 @@ defineProps({
   // dnsListen(interfaceId): 'on' when the DNS server listens on the
   // interface, 'off' when it is set to but the server is disabled, else null.
   dnsListen: { type: Function, default: () => null },
+  // ifaceClient(interfaceId): the interface's address clients, a subset of
+  // ['dhcp', 'slaac'].
+  ifaceClient: { type: Function, default: () => [] },
+  // dhcpOn: the instance's DHCP server is on.
+  dhcpOn: { type: Boolean, default: false },
 })
 const emit = defineEmits(['toggle', 'edit', 'menu'])
 const key = (n) => `${n.kind}:${n.cidr}`
@@ -87,6 +92,20 @@ function pct(n) {
             label="DNS"
             title="Set to listen for DNS, but the instance's DNS server is disabled"
           />
+          <UBadge
+            v-if="ifaceClient(n.interface_id).includes('dhcp')"
+            color="neutral"
+            variant="subtle"
+            label="DHCP Client"
+            title="The interface also gets an IPv4 address from a DHCP server"
+          />
+          <UBadge
+            v-if="ifaceClient(n.interface_id).includes('slaac')"
+            color="neutral"
+            variant="subtle"
+            label="SLAAC-C"
+            title="The interface also takes an IPv6 address from router advertisements"
+          />
         </template>
         <UBadge
           v-if="n.zone_id"
@@ -96,12 +115,29 @@ function pct(n) {
           title="A DNS zone has an A or AAAA record for this address"
         />
         <UBadge v-if="n.mac" color="neutral" variant="outline" :label="`reserved ${n.mac}`" />
-        <UBadge v-if="n.ra_enabled" color="info" variant="subtle" label="RA" />
         <UBadge
           v-if="n.dhcp_enabled"
+          :color="dhcpOn ? 'success' : 'neutral'"
+          variant="subtle"
+          label="DHCP server"
+          :title="
+            (dhcpOn ? '' : 'Set to serve DHCP, but the instance\'s DHCP server is disabled. ') +
+            (n.dhcp_range ? `Range ${n.dhcp_range}` : 'No range: fixed leases only')
+          "
+        />
+        <UBadge
+          v-if="n.ra_slaac"
           color="info"
           variant="subtle"
-          :label="`${n.cidr.includes(':') ? 'DHCPv6' : 'DHCP'} ${n.dhcp_range || ''}`"
+          label="SLAAC"
+          title="Router advertisements let clients pick their own address"
+        />
+        <UBadge
+          v-else-if="n.ra_enabled"
+          color="info"
+          variant="subtle"
+          label="RA"
+          title="Router advertisements are sent for this prefix"
         />
       </td>
       <td class="w-32 px-2">
@@ -119,6 +155,8 @@ function pct(n) {
       :iface-name="ifaceName"
       :read-only="readOnly"
       :dns-listen="dnsListen"
+      :iface-client="ifaceClient"
+      :dhcp-on="dhcpOn"
       @toggle="emit('toggle', $event)"
       @edit="emit('edit', $event)"
       @menu="(e, node) => emit('menu', e, node)"

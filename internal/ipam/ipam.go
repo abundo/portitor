@@ -35,6 +35,7 @@ type Node struct {
 	ZoneID      *uint   `json:"zone_id,omitempty"` // zone of the first A/AAAA record for the address
 	DhcpEnabled bool    `json:"dhcp_enabled,omitempty"`
 	RaEnabled   bool    `json:"ra_enabled,omitempty"`
+	RaSlaac     bool    `json:"ra_slaac,omitempty"`
 	DhcpRange   string  `json:"dhcp_range,omitempty"`
 	UsedFrac    float64 `json:"used_frac"`
 	Children    []*Node `json:"children"`
@@ -65,7 +66,7 @@ func Tree(prefixes []models.IpamPrefix, addrs []models.IpamAddress, ifaces []mod
 			continue
 		}
 		n := &Node{Kind: "prefix", ID: p.ID, CIDR: pfx.Masked().String(), Description: p.Description,
-			DhcpEnabled: p.DhcpEnabled, RaEnabled: p.RaEnabled, Children: []*Node{}, pfx: pfx.Masked()}
+			DhcpEnabled: p.DhcpEnabled, RaEnabled: p.RaEnabled, RaSlaac: p.RaSlaac, Children: []*Node{}, pfx: pfx.Masked()}
 		if p.DhcpEnabled && p.DhcpRangeStart != "" {
 			n.DhcpRange = p.DhcpRangeStart + " - " + p.DhcpRangeEnd
 			n.poolSize = rangeSize(p.DhcpRangeStart, p.DhcpRangeEnd)

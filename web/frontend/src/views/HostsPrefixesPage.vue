@@ -10,7 +10,6 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useToast } from '@nuxt/ui/composables'
 import IpamTreeRows from '@/components/IpamTreeRows.vue'
-import AddrInput from '@/components/AddrInput.vue'
 import DhcpLeasePicker from '@/components/DhcpLeasePicker.vue'
 import HostDialog from '@/components/HostDialog.vue'
 import IpListDialog from '@/components/IpListDialog.vue'
@@ -53,9 +52,89 @@ async function loadLists() {
 async function loadFolders() {
   folders.value = (await objectFolders.list()).sort(byName)
 }
+// The DHCP clients' leases: the tree lists them next to the static addresses.
+const clientLeases = ref([])
 async function loadTree() {
-  if (store.currentId) tree.value = await api.ipamTree(store.currentId)
+  if (!store.currentId) return
+  const [t, leases] = await Promise.all([
+    api.ipamTree(store.currentId),
+    api.agentLeases().catch(() => null),
+  ])
+  tree.value = t
+  clientLeases.value = leases?.client ?? []
 }
+
+// IPv4 prefix arithmetic, for placing the DHCP leases in the tree.
+const v4num = (a) => a.split('.').reduce((n, o) => n * 256 + Number(o), 0)
+const v4str = (n) => [24, 16, 8, 0].map((s) => Math.floor(n / 2 ** s) % 256).join('.')
+function v4prefix(cidr) {
+  const [a, bits] = cidr.split('/')
+  const size = 2 ** (32 - Number(bits ?? 32))
+  const start = Math.floor(v4num(a) / size) * size
+  return { start, end: start + size - 1, cidr: `${v4str(start)}/${bits ?? 32}` }
+}
+const v4contains = (cidr, addr) => {
+  if (cidr.includes(':')) return false
+  const p = v4prefix(cidr)
+  return addr >= p.start && addr <= p.end
+}
+
+// placeLease returns the deepest prefix of nodes that holds the address,
+// null when none does, or 'listed' when the tree has the address already.
+function placeLease(nodes, ip, n) {
+  if (nodes.some((c) => c.kind === 'address' && c.cidr === ip)) return 'listed'
+  const p = nodes.find((c) => c.kind === 'prefix' && v4contains(c.cidr, n))
+  return p ? (placeLease(p.children, ip, n) ?? p) : null
+}
+
+// The tree with the DHCP client leases of the instance's interfaces:
+// the address under the deepest prefix holding it, or under the lease's
+// own prefix. These nodes (dhcp_lease) have no IPAM entry.
+const shownTree = computed(() => {
+  const nodes = JSON.parse(JSON.stringify(tree.value))
+  for (const l of clientLeases.value) {
+    if (l.instance !== store.current?.name || !l.address || l.address.includes(':')) continue
+    const iface = ifaceList.value.find((i) => i.name === l.interface)
+    if (!iface) continue
+    const [ip] = l.address.split('/')
+    const n = v4num(ip)
+    const addrNode = {
+      kind: 'address',
+      id: 0,
+      auto: true,
+      dhcp_lease: true,
+      cidr: ip,
+      description: `DHCP lease (${l.state})`,
+      interface_id: iface.id,
+      used_frac: 0,
+      children: [],
+    }
+    const place = placeLease(nodes, ip, n)
+    if (place === 'listed') continue
+    if (place) {
+      place.children.push(addrNode)
+      continue
+    }
+    const pfx = v4prefix(l.address)
+    const prefixNode = {
+      kind: 'prefix',
+      id: 0,
+      auto: true,
+      dhcp_lease: true,
+      cidr: pfx.cidr,
+      description: 'from a DHCP lease',
+      interface_id: iface.id,
+      used_frac: 0,
+      children: [addrNode],
+    }
+    // Among the top-level IPv4 prefixes by address; IPv6 ones follow.
+    const at = nodes.findIndex(
+      (c) => c.cidr.includes(':') || (c.kind === 'prefix' && v4prefix(c.cidr).start > pfx.start),
+    )
+    nodes.splice(at < 0 ? nodes.length : at, 0, prefixNode)
+  }
+  return nodes
+})
 onMounted(async () => {
   deploy.refresh()
   try {
@@ -138,6 +217,12 @@ function dnsListen(id) {
   return store.current?.dns_enabled ? 'on' : 'off'
 }
 
+// The addresses the interface gets as a client: DHCP (IPv4), SLAAC (IPv6).
+function ifaceClient(id) {
+  const i = ifaceList.value.find((i) => i.id === id)
+  return [...(i?.ipv4_mode === 'dhcp' ? ['dhcp'] : []), ...(i?.ipv6_accept_ra ? ['slaac'] : [])]
+}
+
 async function refreshList(row) {
   try {
     await api.refreshIPList(row.id)
@@ -186,24 +271,19 @@ function editPrefix(src) {
   Object.assign(prefix, {
     prefix: '',
     description: '',
-    dhcp_enabled: false,
-    dhcp_range_start: '',
-    dhcp_range_end: '',
-    dhcp_gateway: '',
-    dhcp_dns_servers: [],
-    ra_enabled: false,
-    ra_slaac: false,
     ...src,
   })
   prefixOpen.value = true
 }
-const prefixIs6 = computed(() => (prefix.prefix ?? '').includes(':'))
-const prefixIs64 = computed(() => (prefix.prefix ?? '').trim().endsWith('/64'))
+// DHCP and router advertisements are set on the DHCP page; the generic PUT
+// keeps them.
 async function savePrefix() {
   try {
-    const body = { ...prefix, instance_id: store.currentId }
-    if (!prefixIs6.value) body.ra_enabled = body.ra_slaac = false
-    else body.dhcp_gateway = ''
+    const body = {
+      prefix: prefix.prefix,
+      description: prefix.description,
+      instance_id: store.currentId,
+    }
     if (prefix.id) await ipamPrefixes.update(prefix.id, body)
     else await ipamPrefixes.create(body)
     prefixOpen.value = false
@@ -313,7 +393,7 @@ function groupMenu(key) {
   ]
 }
 function nodeMenu(node) {
-  if (node.kind !== 'prefix') return []
+  if (node.kind !== 'prefix' || node.dhcp_lease) return []
   return [
     [
       { label: 'Add address', icon: 'i-lucide-plus', onSelect: () => onAddAddress(node) },
@@ -326,11 +406,13 @@ function nodeMenu(node) {
   ]
 }
 
-// An auto node has no IPAM entry yet: editing it creates one, for DHCP or
-// router advertisements on a prefix, a DNS name or MAC on an address. An
+// An auto node has no IPAM entry yet: editing it creates one, for a
+// description on a prefix, a DNS name or MAC on an address. An
 // address that is there only for a zone's A/AAAA record opens the zone.
 async function onEdit(node) {
-  if (node.auto && node.zone_id && !node.interface_id) router.push(`/dns/zones/${node.zone_id}`)
+  if (node.dhcp_lease) router.push('/dhcp')
+  else if (node.auto && node.zone_id && !node.interface_id)
+    router.push(`/dns/zones/${node.zone_id}`)
   else if (node.kind === 'prefix')
     editPrefix(node.auto ? { prefix: node.cidr } : await ipamPrefixes.get(node.id))
   else
@@ -409,12 +491,12 @@ async function removeAddress() {
                   </p>
                   <p>
                     <b>Prefixes & IP addresses</b> nest by containment. The addresses of the
-                    firewall's interfaces and their prefixes are listed automatically. Turn on DHCP
-                    on a prefix to serve it on the interface with an address in it, and router
-                    advertisements (SLAAC) on an IPv6 prefix; several DHCP prefixes on one interface
-                    share it. An address with a DNS name gets an A/AAAA record, and with a MAC also
-                    a fixed DHCP lease. The A/AAAA records of the DNS zones are listed under their
-                    prefix; editing one opens its zone.
+                    firewall's interfaces and their prefixes are listed automatically. DHCP and
+                    router advertisements (SLAAC) are set per interface under DHCP; a prefix they
+                    serve shows a badge. An address with a DNS name gets an A/AAAA record, and with
+                    a MAC also a fixed DHCP lease. The A/AAAA records of the DNS zones are listed
+                    under their prefix; editing one opens its zone. So is the address of an
+                    interface that is a DHCP client, from its lease.
                   </p>
                 </div>
               </template>
@@ -422,7 +504,7 @@ async function removeAddress() {
           </div>
           <p class="max-w-3xl text-sm text-muted">
             Named hosts and prefixes, downloaded IP lists, and the instance's prefixes and addresses
-            with their DHCP and DNS settings. Right-click a row to add to it.
+            with their DNS names. Right-click a row to add to it.
           </p>
         </div>
         <div v-if="auth.isAdmin" class="flex gap-2">
@@ -707,13 +789,15 @@ async function removeAddress() {
 
                   <template v-else>
                     <IpamTreeRows
-                      v-if="tree.length"
-                      :nodes="tree"
+                      v-if="shownTree.length"
+                      :nodes="shownTree"
                       :depth="1"
                       :collapsed="collapsed"
                       :iface-name="ifaceName"
                       :read-only="!auth.isAdmin"
                       :dns-listen="dnsListen"
+                      :iface-client="ifaceClient"
+                      :dhcp-on="!!store.current?.dhcp_enabled"
                       @toggle="toggle"
                       @edit="onEdit"
                       @menu="(e, node) => openMenu(e, nodeMenu(node))"
@@ -764,71 +848,10 @@ async function removeAddress() {
             <UFormField :ui="inlineField" label="Description"
               ><UInput v-model="prefix.description" class="w-full"
             /></UFormField>
-            <template v-if="prefixIs6">
-              <UFormField
-                :ui="inlineField"
-                label="Send router advertisements"
-                help="Announce this prefix and the firewall as default router on the interface that has an address in it."
-              >
-                <USwitch v-model="prefix.ra_enabled" />
-              </UFormField>
-              <UFormField
-                :ui="inlineField"
-                v-if="prefix.ra_enabled"
-                label="SLAAC: clients pick their own address"
-                :help="prefixIs64 ? '' : 'Needs a /64 prefix.'"
-              >
-                <USwitch v-model="prefix.ra_slaac" :disabled="!prefixIs64" />
-              </UFormField>
-            </template>
-            <UFormField
-              :ui="inlineField"
-              :label="prefixIs6 ? 'Serve DHCPv6 on this prefix' : 'Serve DHCP on this prefix'"
-              :help="
-                prefixIs6
-                  ? 'Needs router advertisements (above) and the DHCP server on the instance.'
-                  : 'Needs the DHCP server on the instance, and an interface address in the prefix.'
-              "
-            >
-              <USwitch
-                v-model="prefix.dhcp_enabled"
-                :disabled="prefixIs6 && !prefix.ra_enabled && !prefix.dhcp_enabled"
-              />
-            </UFormField>
-            <template v-if="prefix.dhcp_enabled">
-              <UFormField :ui="inlineField" label="Range">
-                <div class="flex items-center gap-2">
-                  <UInput
-                    v-model="prefix.dhcp_range_start"
-                    class="min-w-0 flex-1 font-mono"
-                    placeholder="192.168.1.100"
-                    aria-label="Range start"
-                  />
-                  <span class="text-muted">-</span>
-                  <UInput
-                    v-model="prefix.dhcp_range_end"
-                    class="min-w-0 flex-1 font-mono"
-                    placeholder="192.168.1.199"
-                    aria-label="Range end"
-                  />
-                </div>
-              </UFormField>
-              <UFormField
-                :ui="inlineField"
-                v-if="!prefixIs6"
-                label="Gateway"
-                help="Empty: the firewall's address in the prefix."
-                ><UInput v-model="prefix.dhcp_gateway" class="w-full font-mono"
-              /></UFormField>
-            </template>
-            <UFormField
-              :ui="inlineField"
-              v-if="prefix.dhcp_enabled || (prefixIs6 && prefix.ra_enabled)"
-              label="DNS servers"
-              help="Addresses or hosts; only those of the prefix's IP version are used. Empty: the firewall, when its DNS server listens on that interface."
-            >
-              <AddrInput v-model="prefix.dhcp_dns_servers" multiple />
-            </UFormField>
+            <p class="text-sm text-muted">
+              DHCP and router advertisements are set per interface under
+              <RouterLink to="/dhcp?tab=server" class="text-primary">DHCP</RouterLink>.
+            </p>
           </fieldset>
         </form>
       </template>
