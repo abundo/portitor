@@ -12,7 +12,6 @@ const columns = [
   { key: 'name', label: 'Name', class: 'font-medium' },
   { key: 'is_default', label: 'Default' },
   { key: 'description', label: 'Description' },
-  { key: 'dns_enabled', label: 'DNS server' },
   { key: 'dhcp_enabled', label: 'DHCP server' },
 ]
 
@@ -30,12 +29,6 @@ const fields = [
     label: 'Default instance',
     type: 'switch',
     hint: 'The default instance is the host itself (root network namespace). Exactly one.',
-  },
-  {
-    key: 'dns_enabled',
-    label: 'DNS server (BIND)',
-    type: 'switch',
-    hint: 'Its upstream and the interfaces it answers on are set under DNS.',
   },
   {
     key: 'dhcp_enabled',
