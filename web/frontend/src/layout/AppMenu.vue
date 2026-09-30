@@ -46,10 +46,14 @@ const sections = computed(() => [
     children: [
       { label: 'DNS', icon: 'i-lucide-globe', to: '/dns' },
       { label: 'DHCP', icon: 'i-lucide-list-ordered', to: '/dhcp' },
-      { label: 'WireGuard', icon: 'i-lucide-key-round', to: '/wireguard' },
       { label: 'Dynamic DNS', icon: 'i-lucide-refresh-ccw-dot', to: '/dyndns' },
       { label: 'Scheduled tasks', icon: 'i-lucide-calendar-clock', to: '/tasks' },
     ],
+  },
+  {
+    label: 'VPN',
+    value: 'vpn',
+    children: [{ label: 'WireGuard', icon: 'i-lucide-key-round', to: '/wireguard' }],
   },
   ...(auth.isAdmin
     ? [
@@ -76,7 +80,7 @@ const items = computed(() => [
   [{ label: 'Help', icon: 'i-lucide-circle-help', to: '/help' }],
 ])
 
-const open = ref(['network', 'firewall', 'services'])
+const open = ref(['network', 'firewall', 'services', 'vpn'])
 
 function onOpen(value) {
   const next = Array.isArray(value) ? value : []
