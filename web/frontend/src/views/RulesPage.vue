@@ -171,6 +171,7 @@ const fields = [
       { label: 'IPv4', value: 'ipv4' },
       { label: 'IPv6', value: 'ipv6' },
     ],
+    hint: 'The addresses already decide it; needed only when they are any or IP lists.',
   },
   {
     key: 'services',

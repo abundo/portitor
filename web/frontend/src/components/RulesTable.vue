@@ -24,7 +24,7 @@ import { useServiceDialog } from '@/composables/useServiceDialog'
 import { useRowDrag } from '@/composables/useRowDrag'
 import { useObjectStore } from '@/stores/objects'
 import { bytes } from '@/utils/bytes'
-import { autoDescription, autoFamily, autoService, serviceMatches } from '@/utils/services'
+import { autoDescription, autoService, serviceMatches } from '@/utils/services'
 
 const props = defineProps({
   rows: { type: Array, required: true },
@@ -483,7 +483,7 @@ async function createService(r, name) {
 
 const hasFrom = computed(() => props.chain !== 'output')
 const hasTo = computed(() => props.chain !== 'input')
-const colCount = computed(() => 11 + hasFrom.value + hasTo.value)
+const colCount = computed(() => 10 + hasFrom.value + hasTo.value)
 // The columns' default widths (class; none shares the rest). Dragging a
 // header's right edge resizes its column, remembered per chain;
 // double-clicking it goes back to these.
@@ -496,7 +496,6 @@ const columns = computed(() =>
     hasTo.value && 'w-36',
     '',
     '',
-    'w-14',
     'w-40',
     'w-18',
     'w-8',
@@ -505,16 +504,11 @@ const columns = computed(() =>
   ].filter((c) => c !== false),
 )
 const table = ref(null)
-const resize = useColumnResize({ table, storageKey: () => `rules-grid-cols-v3-${props.chain}` })
+const resize = useColumnResize({ table, storageKey: () => `rules-grid-cols-v4-${props.chain}` })
 const { widths, total: tableWidth } = resize
 const onHandle = (fn) => (event) => event.target.classList.contains('col-resize') && fn(event)
 const onResizeStart = onHandle(resize.onPointerDown)
 const resetWidths = onHandle(resize.reset)
-const families = [
-  { label: 'any', value: 'any' },
-  { label: 'IPv4', value: 'ipv4' },
-  { label: 'IPv6', value: 'ipv6' },
-]
 const actions = ['accept', 'drop', 'reject']
 const actionClass = { accept: 'text-success', drop: 'text-error', reject: 'text-warning' }
 const autoTitle = (a) =>
@@ -645,7 +639,6 @@ function onKeydown(event, index) {
               <th v-if="hasTo">To<span class="col-resize" /></th>
               <th>Source<span class="col-resize" /></th>
               <th>Destination<span class="col-resize" /></th>
-              <th>IP<span class="col-resize" /></th>
               <th title="Services the traffic must match one of; empty matches any protocol">
                 Service<span class="col-resize" />
               </th>
@@ -721,9 +714,6 @@ function onKeydown(event, index) {
                 <span v-else class="text-muted">any</span>
               </td>
               <td><span class="text-muted">any</span></td>
-              <td>
-                <span>{{ autoFamily(a) }}</span>
-              </td>
               <td>
                 <span class="font-mono">{{ autoService(a) }}</span>
               </td>
@@ -951,18 +941,6 @@ function onKeydown(event, index) {
                     @blur="endDraft"
                     @keydown="onKeydown($event, i)"
                   />
-                </td>
-                <td>
-                  <select
-                    :disabled="readOnly"
-                    :value="r.family"
-                    data-col="family"
-                    @change="set(r, 'family', $event.target.value)"
-                  >
-                    <option v-for="f in families" :key="f.value" :value="f.value">
-                      {{ f.label }}
-                    </option>
-                  </select>
                 </td>
                 <td :class="{ 'search-hit': isHit(r, 'services') }">
                   <USelectMenu
