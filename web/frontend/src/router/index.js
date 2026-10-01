@@ -76,6 +76,11 @@ const router = createRouter({
       component: () => import('@/views/ConsoleWindowPage.vue'),
       meta: { admin: true },
     },
+    {
+      path: '/capture/window',
+      component: () => import('@/views/CaptureWindowPage.vue'),
+      meta: { admin: true },
+    },
     { path: '/:pathMatch(.*)*', redirect: '/' },
   ],
 })

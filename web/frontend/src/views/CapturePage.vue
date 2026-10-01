@@ -11,10 +11,14 @@ import { bytes } from '@/utils/bytes'
 import PacketList from '@/components/capture/PacketList.vue'
 import PacketTree from '@/components/capture/PacketTree.vue'
 import HexDump from '@/components/capture/HexDump.vue'
+import { openCaptureWindow } from '@/composables/useCaptureWindow'
 
 // Packet capture: tcpdump on the firewall, streamed live through
 // portitor-web (at the rate in Settings) into Wiregasm, Wireshark in
 // WebAssembly, which runs in a worker (workers/capture.worker.js).
+// CaptureWindowPage shows it alone in a popup window (inWindow), so a
+// capture keeps running while the main window moves on.
+const props = defineProps({ inWindow: Boolean })
 const toast = useToast()
 const { store, ifaceNames, ifaceText } = useInstanceRefs()
 const cap = useCaptureWorker()
@@ -110,7 +114,10 @@ const hexSource = computed(() => frame.value?.sources[node.value?.source ?? 0])
 </script>
 
 <template>
-  <div class="flex h-[calc(100vh-7rem)] min-h-[36rem] flex-col gap-3">
+  <div
+    class="flex min-h-[36rem] flex-col gap-3"
+    :class="props.inWindow ? 'h-full' : 'h-[calc(100vh-7rem)]'"
+  >
     <form class="card flex flex-wrap items-end gap-3" @submit.prevent="start">
       <UFormField label="Interface">
         <USelect v-model="form.interface" :items="ifaceItems" class="w-56" :disabled="running" />
@@ -161,6 +168,16 @@ const hexSource = computed(() => frame.value?.sources[node.value?.source ?? 0])
           icon="i-lucide-download"
           @click="download"
           >pcap</UButton
+        >
+        <UButton
+          v-if="!props.inWindow"
+          icon="i-lucide-external-link"
+          color="neutral"
+          variant="ghost"
+          title="Capture in a window of its own, while you use the rest of the GUI"
+          :disabled="!store.currentId"
+          @click="openCaptureWindow(store.currentId)"
+          >Open in window</UButton
         >
       </div>
     </form>
