@@ -16,8 +16,9 @@
 // custom: the page's `field-<key>` slot ({ form }) edits the value.
 // Column: { key, label, format: (row, rows) => string, class }
 // Cells can be overridden with a `cell-<key>` slot, or the whole table with
-// the `table` slot ({ rows, openCreate, openEdit, remove, moveTo, saveRow,
-// createAt }).
+// the `table` slot ({ rows, openCreate, openEdit, openView, remove, moveTo,
+// saveRow, createAt }). openView shows a row read-only, for rows that can't
+// be changed (the rules page's auto rules).
 // Layout (AGENTS.md, GUI design rules): the row actions are the first
 // column, a search field above the table filters its rows (by the columns'
 // text, plus searchText(row)), Delete is in the form and asks Yes/No, and
@@ -84,7 +85,8 @@ const formTitle = computed(() => {
 const auth = useAuthStore()
 // Rows of an instance take its admin; shared ones (templates, services,
 // tasks, links, instances) a global admin.
-const readOnly = computed(() => (props.shared ? !auth.isAdmin : !auth.canEdit))
+const viewing = ref(false)
+const readOnly = computed(() => viewing.value || (props.shared ? !auth.isAdmin : !auth.canEdit))
 const rows = ref([])
 const loading = ref(true)
 const open = ref(false)
@@ -172,6 +174,7 @@ function fill(src) {
 // openCreate opens the form for a new row; `extra` overrides the defaults
 // and `at` is the index in rows to insert it at.
 function openCreate(extra = {}, at = null) {
+  viewing.value = false
   editing.value = null
   insertAt.value = at
   const d = typeof props.defaults === 'function' ? props.defaults() : props.defaults
@@ -180,9 +183,15 @@ function openCreate(extra = {}, at = null) {
 }
 
 function openEdit(row) {
+  viewing.value = false
   editing.value = row
   fill(row)
   open.value = true
+}
+
+function openView(row) {
+  openEdit(row)
+  viewing.value = true
 }
 
 async function save() {
@@ -305,7 +314,7 @@ onMounted(() => {
   load()
   if (props.fields.some((f) => f.type === 'ports')) objects.load().catch(() => {})
 })
-defineExpose({ reload: load, openEdit, openCreate })
+defineExpose({ reload: load, openEdit, openView, openCreate })
 </script>
 
 <template>
@@ -365,6 +374,7 @@ defineExpose({ reload: load, openEdit, openCreate })
       :rows="rows"
       :open-create="openCreate"
       :open-edit="openEdit"
+      :open-view="openView"
       :remove="remove"
       :move-to="moveTo"
       :save-row="saveRow"

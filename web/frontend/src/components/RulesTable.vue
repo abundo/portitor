@@ -24,7 +24,7 @@ import { useServiceDialog } from '@/composables/useServiceDialog'
 import { useRowDrag } from '@/composables/useRowDrag'
 import { useObjectStore } from '@/stores/objects'
 import { bytes } from '@/utils/bytes'
-import { serviceMatches } from '@/utils/services'
+import { autoDescription, autoFamily, autoService, serviceMatches } from '@/utils/services'
 
 const props = defineProps({
   rows: { type: Array, required: true },
@@ -54,7 +54,9 @@ const props = defineProps({
 })
 // log-builtin(builtin, service, on): a built-in row's Log box changed;
 // builtin is 'policy', 'invalid' or 'auto' (with the auto rule's service).
-const emit = defineEmits(['save', 'move', 'edit', 'remove', 'log-builtin'])
+// view(row): a locked row was clicked, to show it read-only: an auto rule,
+// or { builtin } for 'invalid', 'dnat' (port forwards) or 'policy'.
+const emit = defineEmits(['save', 'move', 'edit', 'view', 'remove', 'log-builtin'])
 
 const objects = useObjectStore()
 onMounted(() => objects.load().catch(() => {}))
@@ -497,21 +499,6 @@ const families = [
 ]
 const actions = ['accept', 'drop', 'reject']
 const actionClass = { accept: 'text-success', drop: 'text-error', reject: 'text-warning' }
-// autoService shows an auto rule's protocol and ports like a service.
-function autoService(a) {
-  const protos = a.protocol === 'tcp,udp' ? ['tcp', 'udp'] : [a.protocol]
-  const from = a.src_port ? ` from ${a.src_port}` : ''
-  return protos.map((p) => `${p}/${a.dst_port}${from}`).join(', ')
-}
-// autoFamily is the IP versions of an auto rule's source addresses.
-function autoFamily(a) {
-  if (!a.source?.length) return 'any'
-  const v6 = a.source.filter((s) => s.includes(':')).length
-  if (v6 === 0) return 'IPv4'
-  return v6 === a.source.length ? 'IPv6' : 'any'
-}
-const autoDescription = (a) =>
-  a.service === 'anti-lockout' ? 'anti-lockout, from portitor-agent config' : a.service
 const autoTitle = (a) =>
   a.service === 'anti-lockout'
     ? 'Added by portitor-agent so allow_from keeps reaching its API and SSH; set anti_lockout in agent.yaml to change it'
@@ -657,6 +644,8 @@ function onKeydown(event, index) {
           </thead>
           <tbody class="auto-rules">
             <tr
+              class="cursor-pointer"
+              @click="$event.target.closest('input') || emit('view', { builtin: 'invalid' })"
               title="Packets that belong to no known connection, such as a stray TCP packet; dropped before the rules"
             >
               <td class="text-center text-muted">
@@ -686,7 +675,13 @@ function onKeydown(event, index) {
                 <span><span class="text-muted">auto:</span> invalid packets</span>
               </td>
             </tr>
-            <tr v-for="a in auto" :key="a.service" :title="autoTitle(a)">
+            <tr
+              v-for="a in auto"
+              :key="a.service"
+              :title="autoTitle(a)"
+              class="cursor-pointer"
+              @click="$event.target.closest('input') || emit('view', a)"
+            >
               <td class="text-center text-muted">
                 <UIcon name="i-lucide-lock" class="size-3.5 align-middle" />
               </td>
@@ -1045,6 +1040,8 @@ function onKeydown(event, index) {
           <tbody class="auto-rules chain-policy">
             <tr
               v-if="chain === 'forward'"
+              class="cursor-pointer"
+              @click="$event.target.closest('input') || emit('view', { builtin: 'dnat' })"
               title="Connections to a port forward (DNAT) that no rule above decided on"
             >
               <td class="text-center text-muted">
@@ -1060,7 +1057,11 @@ function onKeydown(event, index) {
                 <span><span class="text-muted">auto:</span> port forwards</span>
               </td>
             </tr>
-            <tr title="Traffic no rule accepted, dropped by the chain's policy">
+            <tr
+              class="cursor-pointer"
+              @click="$event.target.closest('input') || emit('view', { builtin: 'policy' })"
+              title="Traffic no rule accepted, dropped by the chain's policy"
+            >
               <td class="text-center text-muted">
                 <UIcon name="i-lucide-lock" class="size-3.5 align-middle" />
               </td>

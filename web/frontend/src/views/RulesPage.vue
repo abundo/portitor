@@ -12,6 +12,7 @@ import { errMsg } from '@/api/http'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
 import { useObjectStore } from '@/stores/objects'
 import { useAuthStore } from '@/stores/auth'
+import { autoDescription, autoFamily, autoService } from '@/utils/services'
 
 const { store, ifaceRefItems } = useInstanceRefs()
 const objects = useObjectStore()
@@ -26,6 +27,61 @@ async function loadAutoRules() {
   autoRules.value = await backend.autoRules(store.currentId).catch(() => [])
 }
 watch(() => store.currentId, loadAutoRules, { immediate: true })
+// lockedRow shows a locked row of a chain's table in the rule form
+// (read-only): an auto rule, or { builtin } for the invalid packets, the port
+// forwards' accept or the policy. What it matches takes the Services field's
+// place.
+const builtins = {
+  invalid: {
+    match: 'ct state invalid',
+    action: 'drop',
+    description: 'invalid: no known connection, dropped before the rules',
+  },
+  dnat: {
+    match: 'ct status dnat',
+    action: 'accept',
+    description: 'port forwards: connections to a port forward that no rule above decided on',
+  },
+  policy: {
+    match: 'no rule matched',
+    action: 'drop',
+    description: "policy: traffic no rule accepted, dropped by the chain's policy",
+  },
+}
+function lockedRow(chain, a) {
+  const row = {
+    chain,
+    in_interfaces: [],
+    out_interfaces: [],
+    family: 'any',
+    services: [],
+    src_addrs: [],
+    dst_addrs: [],
+    enabled: true,
+  }
+  const b = builtins[a.builtin]
+  if (b) {
+    const log = { invalid: 'log_invalid', policy: 'log_drops' }[a.builtin]
+    return {
+      ...row,
+      match: b.match,
+      action: b.action,
+      log: !!log && (store.current?.[log] ?? []).includes(chain),
+      description: `auto: ${b.description}`,
+    }
+  }
+  const family = autoFamily(a)
+  return {
+    ...row,
+    match: autoService(a),
+    in_interfaces: a.in_interfaces ?? [],
+    family: family === 'any' ? 'any' : family.toLowerCase(),
+    src_addrs: a.source ?? [],
+    action: 'accept',
+    log: (store.current?.log_auto ?? []).includes(a.service),
+    description: `auto: ${autoDescription(a)}`,
+  }
+}
 // Traffic per rule id since the last deploy (agentapi.RuleCounters) and
 // the chains' own drops per instance name and chain (agentapi.ChainDrops),
 // polled every 5 seconds while the page is open and visible; null when the
@@ -122,7 +178,15 @@ const fields = [
     type: 'multiselect',
     items: () => objects.serviceItems,
     placeholder: 'any',
+    show: (f) => !f.match,
     hint: 'The traffic must match one of them; empty matches any protocol. Services are defined on the Services page.',
+  },
+  {
+    key: 'match',
+    label: 'Match',
+    type: 'custom',
+    show: (f) => !!f.match,
+    hint: 'Added by Portitor; the services and the instance settings decide it.',
   },
   {
     key: 'src_addrs',
@@ -232,7 +296,12 @@ function clean(b) {
       reorder="rules"
       :item-name="ruleName"
     >
-      <template #table="{ rows, openCreate, openEdit, remove, moveTo, saveRow, createAt }">
+      <template #field-match="{ form }">
+        <UInput :model-value="form.match" class="w-full" :ui="{ base: 'font-mono' }" />
+      </template>
+      <template
+        #table="{ rows, openCreate, openEdit, openView, remove, moveTo, saveRow, createAt }"
+      >
         <UTabs v-model="chainTab" :items="chains">
           <template #content="{ item: c }">
             <div class="mb-2 flex items-end justify-between gap-3 pt-2">
@@ -261,6 +330,7 @@ function clean(b) {
               @save="saveRow"
               @move="(from, to) => moveInChain(rows, c.value, moveTo, from, to)"
               @edit="openEdit"
+              @view="(a) => openView(lockedRow(c.value, a))"
               @remove="remove"
               @log-builtin="(kind, service, on) => setLogBuiltin(c.value, kind, service, on)"
             />

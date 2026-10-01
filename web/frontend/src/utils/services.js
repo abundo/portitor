@@ -81,3 +81,20 @@ export function newService(name = '') {
 export function newPort(protocol = 'tcp') {
   return { protocol, dst_lo: 0, dst_hi: 0, src_lo: 0, src_hi: 0 }
 }
+
+// Auto rules (render.AutoRule), shown locked in the input chain.
+// autoService shows an auto rule's protocol and ports like a service.
+export function autoService(a) {
+  const protos = a.protocol === 'tcp,udp' ? ['tcp', 'udp'] : [a.protocol]
+  const from = a.src_port ? ` from ${a.src_port}` : ''
+  return protos.map((p) => `${p}/${a.dst_port}${from}`).join(', ')
+}
+// autoFamily is the IP versions of an auto rule's source addresses.
+export function autoFamily(a) {
+  if (!a.source?.length) return 'any'
+  const v6 = a.source.filter((s) => s.includes(':')).length
+  if (v6 === 0) return 'IPv4'
+  return v6 === a.source.length ? 'IPv6' : 'any'
+}
+export const autoDescription = (a) =>
+  a.service === 'anti-lockout' ? 'anti-lockout, from portitor-agent config' : a.service
