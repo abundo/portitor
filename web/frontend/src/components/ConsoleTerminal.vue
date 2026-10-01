@@ -2,7 +2,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
 <script setup>
-import { onMounted, onUnmounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
@@ -10,6 +10,8 @@ import '@xterm/xterm/css/xterm.css'
 // A shell on the firewall: portitor-agent runs it as its console user
 // (portitor) and portitor-web passes the WebSocket through. Binary
 // messages are terminal data both ways; the one text message is a resize.
+// The shell runs in the network namespace of the named instance.
+const props = defineProps({ instance: { type: String, default: '' } })
 const el = ref(null)
 const status = ref('connecting') // connecting, open, closed
 const reason = ref('')
@@ -31,7 +33,8 @@ function connect() {
   status.value = 'connecting'
   reason.value = ''
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
-  ws = new WebSocket(`${proto}//${location.host}/api/agent/console`)
+  const q = props.instance ? `?instance=${encodeURIComponent(props.instance)}` : ''
+  ws = new WebSocket(`${proto}//${location.host}/api/agent/console${q}`)
   ws.binaryType = 'arraybuffer'
   ws.onopen = () => {
     status.value = 'open'
@@ -49,7 +52,10 @@ function connect() {
 }
 
 function reconnect() {
-  ws?.close()
+  if (ws) {
+    ws.onclose = null
+    ws.close()
+  }
   term.reset()
   connect()
 }
@@ -82,6 +88,12 @@ onUnmounted(() => {
   }
   term?.dispose()
 })
+
+// Switching instance starts a new shell in the new namespace.
+watch(
+  () => props.instance,
+  () => term && reconnect(),
+)
 
 defineExpose({ reconnect })
 </script>

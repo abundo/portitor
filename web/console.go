@@ -23,7 +23,13 @@ import (
 //
 // The session is checked again every consoleRecheck: a console closes when
 // its session expires or is revoked (password changed, user deleted).
+//
+// ?instance= names the instance whose network namespace the shell runs in.
 func (s *Server) handleAgentConsole(c *echo.Context) error {
+	instance := c.QueryParam("instance")
+	if instance != "" && !captureName.MatchString(instance) {
+		return errJSON(c, http.StatusBadRequest, "invalid instance name")
+	}
 	a, _, err := s.agent()
 	if err != nil {
 		return agentError(c, err)
@@ -48,7 +54,7 @@ func (s *Server) handleAgentConsole(c *echo.Context) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	dialCtx, dialCancel := context.WithTimeout(ctx, 15*time.Second)
-	agent, err := a.Console(dialCtx)
+	agent, err := a.Console(dialCtx, instance)
 	dialCancel()
 	if err != nil {
 		msg := err.Error()
@@ -63,7 +69,7 @@ func (s *Server) handleAgentConsole(c *echo.Context) error {
 	agent.SetReadLimit(1 << 20)
 
 	user := currentUser(c)
-	slog.Info("console opened", "user", user.Username, "remote", c.RealIP())
+	slog.Info("console opened", "user", user.Username, "instance", instance, "remote", c.RealIP())
 	defer slog.Info("console closed", "user", user.Username, "remote", c.RealIP())
 
 	claims, _ := c.Get(ctxClaims).(*sessionClaims)

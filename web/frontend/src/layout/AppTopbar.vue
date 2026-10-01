@@ -132,7 +132,8 @@ const userMenu = computed(() => [
           color="neutral"
           variant="ghost"
           aria-label="Console"
-          @click="openConsoleWindow"
+          :disabled="!instances.currentId"
+          @click="openConsoleWindow(instances.currentId)"
         />
       </UTooltip>
       <UTooltip v-if="auth.canEdit" text="Open packet capture window">

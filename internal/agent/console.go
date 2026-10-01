@@ -24,17 +24,34 @@ import (
 	"github.com/creack/pty"
 
 	"github.com/abundo/portitor/internal/agentapi"
+	"github.com/abundo/portitor/internal/fwconfig"
 )
 
 // ConsoleDisabled as console_user turns the console off.
 const ConsoleDisabled = "none"
 
 // handleConsole runs a login shell as cfg.ConsoleUser on a pseudo-terminal
-// and connects it to a WebSocket (protocol in agentapi.ConsoleResize).
+// and connects it to a WebSocket (protocol in agentapi.ConsoleResize). With
+// ?instance=, the shell runs in that applied instance's network namespace.
 func (a *Agent) handleConsole(w http.ResponseWriter, r *http.Request) {
 	if a.cfg.ConsoleUser == ConsoleDisabled {
 		writeError(w, http.StatusNotFound, errors.New("the console is disabled (console_user: none)"))
 		return
+	}
+	var netnsName string
+	if name := r.URL.Query().Get("instance"); name != "" {
+		a.mu.Lock()
+		var in *fwconfig.Instance
+		if a.applied != nil {
+			d := a.applied.Expand()
+			in = d.Instance(name)
+		}
+		a.mu.Unlock()
+		if in == nil {
+			writeError(w, http.StatusBadRequest, fmt.Errorf("no applied instance %q", name))
+			return
+		}
+		netnsName = in.NetnsName()
 	}
 	cmd, err := consoleCommand(a.cfg.ConsoleUser, a.cfg.DryRun)
 	if err != nil {
@@ -53,13 +70,18 @@ func (a *Agent) handleConsole(w http.ResponseWriter, r *http.Request) {
 	defer conn.CloseNow()
 	conn.SetReadLimit(1 << 20)
 
-	ptmx, err := pty.Start(cmd)
+	// The shell inherits the namespace of the thread that starts it.
+	var ptmx *os.File
+	err = withNetns(netnsName, func() (err error) {
+		ptmx, err = pty.Start(cmd)
+		return err
+	})
 	if err != nil {
 		slog.Error("console: start shell", "user", a.cfg.ConsoleUser, "err", err)
 		conn.Close(websocket.StatusInternalError, truncateReason("start shell: "+err.Error()))
 		return
 	}
-	slog.Info("console: session started", "user", a.cfg.ConsoleUser, "remote", r.RemoteAddr, "pid", cmd.Process.Pid)
+	slog.Info("console: session started", "user", a.cfg.ConsoleUser, "netns", netnsName, "remote", r.RemoteAddr, "pid", cmd.Process.Pid)
 	defer func() {
 		ptmx.Close() // hangs up the session
 		done := make(chan struct{})

@@ -110,3 +110,11 @@ func TestConsoleSession(t *testing.T) {
 		}
 	}
 }
+
+func TestConsoleUnknownInstance(t *testing.T) {
+	_, h := testAgent(t)
+	rec := call(t, h, http.MethodGet, "/v1/console?instance=nope", testToken, nil)
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "no applied instance") {
+		t.Fatalf("status %d %s, want 400", rec.Code, rec.Body)
+	}
+}

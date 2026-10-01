@@ -4,6 +4,9 @@
 <script setup>
 import ConsoleTerminal from '@/components/ConsoleTerminal.vue'
 import { openConsoleWindow } from '@/composables/useConsoleWindow'
+import { useInstanceStore } from '@/stores/instances'
+
+const instances = useInstanceStore()
 </script>
 
 <template>
@@ -11,10 +14,16 @@ import { openConsoleWindow } from '@/composables/useConsoleWindow'
     <div>
       <div class="text-lg font-semibold">Console</div>
       <p class="text-sm text-muted">
-        A shell on the firewall, as portitor-agent's console user. It ends when you leave this page.
+        A shell on the firewall, as portitor-agent's console user, in the network namespace of
+        instance <span class="font-semibold">{{ instances.current?.name }}</span
+        >. It ends when you leave this page.
       </p>
     </div>
-    <ConsoleTerminal class="min-h-0 flex-1">
+    <ConsoleTerminal
+      v-if="instances.current"
+      :instance="instances.current.name"
+      class="min-h-0 flex-1"
+    >
       <template #actions>
         <UButton
           icon="i-lucide-external-link"
@@ -22,7 +31,7 @@ import { openConsoleWindow } from '@/composables/useConsoleWindow'
           color="neutral"
           variant="ghost"
           label="Open in window"
-          @click="openConsoleWindow"
+          @click="openConsoleWindow(instances.currentId)"
         />
       </template>
     </ConsoleTerminal>

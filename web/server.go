@@ -43,7 +43,7 @@ type agentAPI interface {
 	Rollback(ctx context.Context) (*agentapi.ApplyResult, error)
 	RunTask(ctx context.Context, name string) error
 	RefreshIPList(ctx context.Context, name string) error
-	Console(ctx context.Context) (*websocket.Conn, error)
+	Console(ctx context.Context, instance string) (*websocket.Conn, error)
 	Capture(ctx context.Context, req agentapi.CaptureRequest) (io.ReadCloser, error)
 	System(ctx context.Context) (*agentapi.SystemStatus, error)
 	StartSystemJob(ctx context.Context, req agentapi.SystemJobRequest) error

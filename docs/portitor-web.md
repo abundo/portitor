@@ -71,8 +71,8 @@ After an upgrade, run `migrate` before `start`. `install.py` does both.
     packets a second. The filter keeps the rows that contain every word typed, such as
     `wan tcp 443`. The agent keeps the latest 2000 packets; they are not written to the
     kernel log.
-- **Console window** (square terminal icon) opens a shell on the firewall in a separate
-  window.
+- **Console window** (square terminal icon) opens a shell on the firewall, in the
+  selected instance's network namespace, in a separate window.
 - **Changes banner** (blue). Shows when the configuration differs from what is on the
   firewall. *Review* opens the Deploy page, *Commit* applies at once with the default
   auto-rollback, and *Revert* discards every uncommitted change: the configuration
@@ -102,9 +102,9 @@ After an upgrade, run `migrate` before `start`. `install.py` does both.
 | | WireGuard | Tunnels, road-warrior and [site-to-site](#site-to-site-wireguard) peers; generates client and site configs. |
 | | Dynamic DNS | Keeps records on an external nameserver in step with the WAN address. |
 | | Scheduled tasks | IP list downloads and commands on a cron schedule. |
-| Admin | Console | A shell on the firewall as the agent's `console_user`. |
+| Tools | Console | A shell on the firewall as the agent's `console_user`, in the network namespace of the selected instance (so `ip addr`, `nft list ruleset` and `ping` see that instance). *Open in window* (or the square terminal icon) opens one in a window of its own for that instance. |
 | | Packet capture | Live capture with Wireshark in the browser. tcpdump runs on an interface of the selected instance (or *any*), with a capture filter (pcap syntax) and limits (packets, seconds, bytes per packet); the packets stream in as they are captured, into a packet list with Wireshark's display filters (`dns \|\| tcp.port == 443`), protocol tree and bytes. *Follow* keeps the newest packet in view. *pcap* downloads the capture for Wireshark. *Open in window* runs the capture in a window of its own, for the selected instance, so it keeps going while you use the rest of the GUI; each window is a capture of its own. The stream from the agent is capped at the rate under *Settings* (1000 kbit/s by default); when traffic outruns it, the firewall drops captured packets rather than fall behind. The agent's own API connection is left out, and at most two captures run at once. Wireshark (Wiregasm, about 20 MB) loads when the page opens; it is a separate program (GPL-2.0) that the installer puts in `/usr/share/portitor/wiregasm`. |
-| | Updates | Debian package upgrades, Portitor releases, reboot. See [Installer ISO and updates](appliance.md#updates). |
+| Admin | Updates | Debian package upgrades, Portitor releases, reboot. See [Installer ISO and updates](appliance.md#updates). |
 | | Settings → General | Agent connection, default auto-rollback, public WireGuard endpoint, packet capture rate, [backup and restore](#backup-and-restore). |
 | | Settings → Users | GUI users and their roles. |
 | | Settings → Roles | Groups of users, one per instance and your own; see [Roles](#roles). |

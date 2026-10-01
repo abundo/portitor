@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -204,9 +205,14 @@ func (c *Client) Reboot(ctx context.Context) error {
 	return c.do(ctx, http.MethodPost, "/v1/system/reboot", struct{}{}, nil)
 }
 
-// Console opens the agent's console WebSocket (agentapi.ConsoleResize).
-func (c *Client) Console(ctx context.Context) (*websocket.Conn, error) {
-	conn, resp, err := websocket.Dial(ctx, c.baseURL+"/v1/console", &websocket.DialOptions{
+// Console opens the agent's console WebSocket (agentapi.ConsoleResize), in
+// the namespace of the named instance (empty: the agent's own).
+func (c *Client) Console(ctx context.Context, instance string) (*websocket.Conn, error) {
+	u := c.baseURL + "/v1/console"
+	if instance != "" {
+		u += "?instance=" + url.QueryEscape(instance)
+	}
+	conn, resp, err := websocket.Dial(ctx, u, &websocket.DialOptions{
 		HTTPClient: c.http,
 		HTTPHeader: http.Header{"Authorization": {"Bearer " + c.token}},
 	})

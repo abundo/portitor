@@ -6,11 +6,21 @@ import { computed, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { openConsoleWindow } from '@/composables/useConsoleWindow'
+import { useInstanceStore } from '@/stores/instances'
 
 const route = useRoute()
 const auth = useAuthStore()
+const instances = useInstanceStore()
 // Each section is a collapsible item. Opening one closes the others; the
 // section of the current page is opened when the route changes.
+const tools = computed(() => [
+  ...(auth.isAdmin
+    ? [{ label: 'Console', icon: 'i-lucide-square-terminal', to: '/console', slot: 'console' }]
+    : []),
+  ...(auth.canDeploy
+    ? [{ label: 'Packet capture', icon: 'i-lucide-radio-tower', to: '/capture' }]
+    : []),
+])
 const sections = computed(() => [
   {
     label: 'Globals',
@@ -55,23 +65,13 @@ const sections = computed(() => [
     value: 'vpn',
     children: [{ label: 'WireGuard', icon: 'i-lucide-key-round', to: '/wireguard' }],
   },
-  ...(auth.canDeploy && !auth.isAdmin
-    ? [
-        {
-          label: 'Tools',
-          value: 'tools',
-          children: [{ label: 'Packet capture', icon: 'i-lucide-radio-tower', to: '/capture' }],
-        },
-      ]
-    : []),
+  ...(tools.value.length ? [{ label: 'Tools', value: 'tools', children: tools.value }] : []),
   ...(auth.isAdmin
     ? [
         {
           label: 'Admin',
           value: 'admin',
           children: [
-            { label: 'Console', icon: 'i-lucide-square-terminal', to: '/console', slot: 'console' },
-            { label: 'Packet capture', icon: 'i-lucide-radio-tower', to: '/capture' },
             { label: 'Updates', icon: 'i-lucide-package-check', to: '/updates' },
             { label: 'Settings', icon: 'i-lucide-settings', to: '/settings', exact: true },
             { label: 'Users', icon: 'i-lucide-users', to: '/settings/users' },
@@ -91,7 +91,7 @@ const items = computed(() => [
   [{ label: 'Help', icon: 'i-lucide-circle-help', to: '/help' }],
 ])
 
-const open = ref(['network', 'firewall', 'services', 'vpn'])
+const open = ref(['network', 'firewall', 'services'])
 
 function onOpen(value) {
   const next = Array.isArray(value) ? value : []
@@ -134,7 +134,7 @@ watch(
           color="neutral"
           variant="ghost"
           aria-label="Open console window"
-          @click.stop.prevent="openConsoleWindow"
+          @click.stop.prevent="openConsoleWindow(instances.currentId)"
         />
       </UTooltip>
     </template>
