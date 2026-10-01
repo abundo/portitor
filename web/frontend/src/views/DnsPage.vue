@@ -153,19 +153,87 @@ const zoneFields = [
 const zoneDefaults = () => ({ type: 'forward', dns_template_id: templates.value[0]?.id ?? null })
 
 const tabs = [
+  { label: 'DNS resolver', value: 'resolver', slot: 'resolver', icon: 'i-lucide-search' },
   { label: 'DNS zones', value: 'zones', slot: 'zones', icon: 'i-lucide-globe' },
   { label: 'DNS server', value: 'server', slot: 'server', icon: 'i-lucide-server' },
 ]
 // The tab is in the URL (?tab=server), so links can open one.
 const tab = computed({
-  get: () => (tabs.some((t) => t.value === route.query.tab) ? route.query.tab : 'zones'),
-  set: (v) => router.replace({ query: { ...route.query, tab: v === 'zones' ? undefined : v } }),
+  get: () => (tabs.some((t) => t.value === route.query.tab) ? route.query.tab : 'resolver'),
+  set: (v) => router.replace({ query: { ...route.query, tab: v === 'resolver' ? undefined : v } }),
 })
 </script>
 
 <template>
   <NeedInstance>
     <UTabs v-model="tab" :items="tabs" :unmount-on-hide="false">
+      <template #resolver>
+        <div class="pt-2">
+          <div class="card">
+            <div class="mb-1 text-lg font-semibold">DNS resolver</div>
+            <p class="mb-4 text-sm text-muted">
+              How the DNS server resolves names that are not in its own zones, and for whom.
+            </p>
+            <UAlert
+              v-if="!server.dns_enabled"
+              color="warning"
+              variant="subtle"
+              icon="i-lucide-triangle-alert"
+              title="The DNS server is off for this instance"
+              description="Turn it on on the DNS server tab."
+            />
+            <form v-else @submit.prevent="save">
+              <fieldset :disabled="readOnly" class="space-y-3">
+                <UFormField label="Upstream DNS" :ui="inlineField">
+                  <USelect
+                    v-model="server.dns_upstream"
+                    :items="upstreams"
+                    class="w-full sm:w-96"
+                  />
+                </UFormField>
+                <UFormField
+                  v-if="server.dns_upstream === 'forward'"
+                  label="Forwarders"
+                  help="Empty: resolve from the root servers."
+                  :ui="inlineField"
+                >
+                  <AddrInput v-model="server.dns_forwarders" multiple placeholder="9.9.9.9" />
+                </UFormField>
+                <UFormField
+                  v-if="server.dns_upstream !== 'root'"
+                  label="Fall back to the root servers"
+                  help="When the upstream servers don't answer. Off: never ask anyone else."
+                  :ui="inlineField"
+                >
+                  <USwitch v-model="fallback" />
+                </UFormField>
+                <UFormField
+                  label="Allow recursion from"
+                  help="Empty: the networks of the interfaces it answers on."
+                  :ui="inlineField"
+                >
+                  <AddrInput
+                    v-model="server.dns_allow_recursion"
+                    multiple
+                    placeholder="192.168.0.0/16"
+                  />
+                </UFormField>
+                <UFormField
+                  label="DNSSEC validation"
+                  help="Check the signatures of signed zones, with the built-in root key. Off: answers are not validated; turn it off only if an upstream breaks DNSSEC."
+                  :ui="inlineField"
+                >
+                  <USwitch v-model="dnssecValidation" />
+                </UFormField>
+              </fieldset>
+              <div v-if="!readOnly" class="mt-4">
+                <UButton type="submit" :loading="saving">Save</UButton>
+              </div>
+            </form>
+          </div>
+        </div>
+      </template>
+
       <template #zones>
         <div class="space-y-4 pt-2">
           <UAlert
@@ -203,56 +271,13 @@ const tab = computed({
             <div class="mb-1 text-lg font-semibold">DNS server</div>
             <p class="mb-4 text-sm text-muted">
               BIND, for the clients on this instance's interfaces: it answers from the zones on the
-              DNS zones tab and resolves other names through its upstream.
+              DNS zones tab and resolves other names as set on the DNS resolver tab.
             </p>
             <form @submit.prevent="save">
               <fieldset :disabled="readOnly" class="space-y-3">
                 <UFormField label="DNS server" :ui="inlineField">
                   <USwitch v-model="server.dns_enabled" />
                 </UFormField>
-                <template v-if="server.dns_enabled">
-                  <UFormField label="Upstream DNS" :ui="inlineField">
-                    <USelect
-                      v-model="server.dns_upstream"
-                      :items="upstreams"
-                      class="w-full sm:w-96"
-                    />
-                  </UFormField>
-                  <UFormField
-                    v-if="server.dns_upstream === 'forward'"
-                    label="Forwarders"
-                    help="Empty: resolve from the root servers."
-                    :ui="inlineField"
-                  >
-                    <AddrInput v-model="server.dns_forwarders" multiple placeholder="9.9.9.9" />
-                  </UFormField>
-                  <UFormField
-                    v-if="server.dns_upstream !== 'root'"
-                    label="Fall back to the root servers"
-                    help="When the upstream servers don't answer. Off: never ask anyone else."
-                    :ui="inlineField"
-                  >
-                    <USwitch v-model="fallback" />
-                  </UFormField>
-                  <UFormField
-                    label="Allow recursion from"
-                    help="Empty: the networks of the interfaces it answers on."
-                    :ui="inlineField"
-                  >
-                    <AddrInput
-                      v-model="server.dns_allow_recursion"
-                      multiple
-                      placeholder="192.168.0.0/16"
-                    />
-                  </UFormField>
-                  <UFormField
-                    label="DNSSEC validation"
-                    help="Check the signatures of signed zones, with the built-in root key. Off: answers are not validated; turn it off only if an upstream breaks DNSSEC."
-                    :ui="inlineField"
-                  >
-                    <USwitch v-model="dnssecValidation" />
-                  </UFormField>
-                </template>
               </fieldset>
 
               <!-- Outside the form's fieldset, so a viewer can search too. -->

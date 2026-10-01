@@ -117,7 +117,7 @@ async function remove() {
   try {
     await dnsZones.remove(zone.value.id)
     deleted.value = true
-    router.push('/dns')
+    router.push('/dns?tab=zones')
   } catch (err) {
     toast.add({ title: errMsg(err, 'Delete failed'), color: 'error' })
   }
@@ -225,7 +225,7 @@ useUnsaved(() => !deleted.value && (!!dirty.value || recordsDirty.value))
 <template>
   <div v-if="zone" class="space-y-4">
     <div class="flex flex-wrap items-center gap-2">
-      <UButton to="/dns" color="neutral" variant="ghost" icon="i-lucide-arrow-left" />
+      <UButton to="/dns?tab=zones" color="neutral" variant="ghost" icon="i-lucide-arrow-left" />
       <div class="font-mono text-lg font-semibold">{{ zone.name }}</div>
       <UBadge color="neutral" variant="subtle">{{ typeLabel }}</UBadge>
       <UBadge v-if="effective.policy" color="success" variant="subtle" icon="i-lucide-lock">
