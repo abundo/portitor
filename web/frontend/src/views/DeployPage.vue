@@ -12,10 +12,20 @@ import { useDeployStore } from '@/stores/deploy'
 import { datetime } from '@/utils/time'
 import { useSearch } from '@/utils/search'
 import { useAuthStore } from '@/stores/auth'
+import { useInstanceStore } from '@/stores/instances'
 
 const auth = useAuthStore()
 const toast = useToast()
 const deploy = useDeployStore()
+const instanceStore = useInstanceStore()
+// The instances to deploy; none chosen is everything the user may (a
+// global admin: the whole configuration).
+const chosen = ref([])
+const deployable = computed(() =>
+  instanceStore.list
+    .filter((i) => auth.levelOf(i.id) === 'admin')
+    .map((i) => ({ label: i.name, value: i.name })),
+)
 const check = ref(null)
 const preview = ref(null)
 const previewError = ref(null)
@@ -26,10 +36,15 @@ const applyResult = ref(null)
 const showUnchanged = ref(false)
 
 async function load() {
-  const [c, h, s] = await Promise.all([api.deployCheck(), api.deployments(), api.settings()])
+  // Settings are a global admin's; an instance admin keeps the default timeout.
+  const [c, h, s] = await Promise.all([
+    api.deployCheck(chosen.value),
+    api.deployments(),
+    auth.isAdmin ? api.settings() : null,
+  ])
   check.value = c
   history.value = h
-  confirmTimeout.value = s.confirm_timeout
+  if (s) confirmTimeout.value = s.confirm_timeout
 }
 onMounted(load)
 const { search: historySearch, filtered: shownHistory } = useSearch(
@@ -38,11 +53,17 @@ const { search: historySearch, filtered: shownHistory } = useSearch(
     `${d.generation} ${datetime(d.created_at)} ${d.username} ${d.status.replace('_', ' ')} ${d.message}`,
 )
 
+// A different choice checks again; the preview was of the old one.
+async function onChoose() {
+  preview.value = null
+  check.value = await api.deployCheck(chosen.value)
+}
+
 async function runPreview() {
   busy.value = true
   previewError.value = null
   try {
-    preview.value = await api.deployPreview()
+    preview.value = await api.deployPreview(chosen.value)
   } catch (err) {
     previewError.value = { error: errMsg(err), problems: err.response?.data?.problems ?? [] }
   } finally {
@@ -54,7 +75,7 @@ async function apply() {
   busy.value = true
   applyResult.value = null
   try {
-    const res = await api.deployApply(Number(confirmTimeout.value))
+    const res = await api.deployApply(Number(confirmTimeout.value), chosen.value)
     applyResult.value = { ok: true, ...res }
     toast.add({
       title: `Generation ${res.deployment.generation} ${res.deployment.status}`,
@@ -134,6 +155,27 @@ const fileColor = { same: 'neutral', changed: 'warning', new: 'success', removed
           </p>
         </div>
         <div class="flex flex-wrap items-end gap-2">
+          <UFormField
+            v-if="auth.canDeploy && deployable.length > 1"
+            label="Instances"
+            :help="
+              chosen.length
+                ? 'The others stay as deployed.'
+                : auth.isAdmin
+                  ? 'Everything.'
+                  : 'All yours.'
+            "
+            class="w-56"
+          >
+            <USelectMenu
+              v-model="chosen"
+              :items="deployable"
+              value-key="value"
+              multiple
+              :placeholder="auth.isAdmin ? 'All' : 'All of mine'"
+              @update:model-value="onChoose"
+            />
+          </UFormField>
           <UFormField label="Auto-rollback after (s)" help="0 = no confirmation" class="w-44">
             <UInput v-model="confirmTimeout" type="number" min="0" max="1800" />
           </UFormField>
@@ -146,7 +188,7 @@ const fileColor = { same: 'neutral', changed: 'warning', new: 'success', removed
             @click="runPreview"
           />
           <UButton
-            v-if="auth.isAdmin"
+            v-if="auth.canDeploy"
             icon="i-lucide-rocket"
             label="Apply"
             :loading="busy"

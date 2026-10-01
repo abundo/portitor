@@ -95,12 +95,22 @@ export const api = {
   // Setting a user's password ends their sessions.
   setUserPassword: (id, password) => http.post(`/users/${id}/password`, { password }),
   deleteUser: (id) => http.delete(`/users/${id}`),
+  // A role's members are [{ user_id, level }]; saving replaces them.
+  roles: () => http.get('/roles').then((r) => r.data),
+  createRole: (body) => http.post('/roles', body).then((r) => r.data),
+  updateRole: (id, body) => http.put(`/roles/${id}`, body).then((r) => r.data),
+  deleteRole: (id) => http.delete(`/roles/${id}`),
 
-  deployCheck: () => http.get('/deploy/check').then((r) => r.data),
+  // instances: the names to deploy; empty is everything the user may.
+  deployCheck: (instances = []) =>
+    http
+      .get('/deploy/check', { params: instances.length ? { instances: instances.join(',') } : {} })
+      .then((r) => r.data),
   deployChanges: () => http.get('/deploy/changes').then((r) => r.data),
-  deployPreview: () => http.post('/deploy/preview', {}).then((r) => r.data),
-  deployApply: (confirmTimeout) =>
-    http.post('/deploy/apply', { confirm_timeout: confirmTimeout }).then((r) => r.data),
+  deployPreview: (instances = []) =>
+    http.post('/deploy/preview', { instances }).then((r) => r.data),
+  deployApply: (confirmTimeout, instances = []) =>
+    http.post('/deploy/apply', { confirm_timeout: confirmTimeout, instances }).then((r) => r.data),
   deployConfirm: () => http.post('/deploy/confirm', {}).then((r) => r.data),
   deployRollback: () => http.post('/deploy/rollback', {}).then((r) => r.data),
   deployRevert: () => http.post('/deploy/revert', {}).then((r) => r.data),

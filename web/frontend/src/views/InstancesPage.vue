@@ -37,6 +37,7 @@ const fields = [
     title="Instances"
     description="Virtual routers. Each has its own interfaces, routing table, firewall, DNS and DHCP server. Connect instances with links."
     :api="instances"
+    shared
     :columns="columns"
     :fields="fields"
     new-label="New instance"

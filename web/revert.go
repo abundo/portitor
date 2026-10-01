@@ -90,16 +90,27 @@ func (s *Server) keepSnapshot(tmp string, gen int64) {
 		os.Remove(tmp)
 		return
 	}
+	s.pruneSnapshots()
+}
+
+// pruneSnapshots removes the snapshots and documents of all but the latest
+// live deployments.
+func (s *Server) pruneSnapshots() {
+	dir, err := s.snapshotDir()
+	if err != nil {
+		return
+	}
 	var gens []int64
 	s.db.Table("deployments").Where("status IN ?", []string{"applied", "pending", "confirmed"}).
 		Order("generation desc").Limit(snapshotKeep).Pluck("generation", &gens)
-	keep := map[string]bool{strconv.FormatInt(gen, 10) + ".db": true}
+	keep := map[string]bool{}
 	for _, g := range gens {
-		keep[strconv.FormatInt(g, 10)+".db"] = true
+		keep[strconv.FormatInt(g, 10)] = true
 	}
 	entries, _ := os.ReadDir(dir)
 	for _, e := range entries {
-		if strings.HasSuffix(e.Name(), ".db") && !keep[e.Name()] {
+		gen, ext, ok := strings.Cut(e.Name(), ".")
+		if ok && (ext == "db" || ext == "json") && !keep[gen] {
 			os.Remove(filepath.Join(dir, e.Name()))
 		}
 	}
@@ -123,6 +134,9 @@ func (s *Server) handleDeployRevert(c *echo.Context) error {
 	}
 	src, err := os.Open(snapshotPath(dir, live.Generation))
 	if errors.Is(err, os.ErrNotExist) {
+		if len(live.Instances) > 0 {
+			return errJSON(c, http.StatusConflict, fmt.Sprintf("generation %d deployed only some instances (%s); revert works after a deploy of everything", live.Generation, strings.Join(live.Instances, ", ")))
+		}
 		return errJSON(c, http.StatusConflict, fmt.Sprintf("generation %d has no saved configuration to revert to (it was committed by an older version)", live.Generation))
 	} else if err != nil {
 		return err

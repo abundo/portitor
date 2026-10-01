@@ -65,6 +65,7 @@ const portColumns = [
       title="Services"
       description="What a rule's Service column matches: a protocol with ports (TCP, UDP, SCTP), an ICMP or ICMPv6 type, or an IP protocol number. Next to your own services, the predefined ones below work too. Renaming updates every rule; a service in use cannot be deleted. A rule's Service cell can also create one."
       :api="customServices"
+      shared
       :columns="columns"
       :fields="fields"
       :defaults="newService"

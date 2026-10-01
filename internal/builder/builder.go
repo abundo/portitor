@@ -85,6 +85,19 @@ func load(db *gorm.DB) (*data, error) {
 // resolving the database, and by fwconfig.Validate, come back as a
 // *fwconfig.ValidationError alongside the (possibly incomplete) document.
 func Build(db *gorm.DB, generation int64) (*fwconfig.Document, error) {
+	return build(db, generation, nil)
+}
+
+// BuildInstances builds only the named instances, for a deploy that
+// changes those and keeps the rest as deployed: no links, IP lists or
+// tasks, and no fwconfig.Validate (the caller validates the document it
+// merges them into). Problems resolving the database come back as a
+// *fwconfig.ValidationError alongside the document.
+func BuildInstances(db *gorm.DB, generation int64, only map[string]bool) (*fwconfig.Document, error) {
+	return build(db, generation, only)
+}
+
+func build(db *gorm.DB, generation int64, only map[string]bool) (*fwconfig.Document, error) {
 	d, err := load(db)
 	if err != nil {
 		return nil, err
@@ -125,6 +138,9 @@ func Build(db *gorm.DB, generation int64) (*fwconfig.Document, error) {
 	doc := &fwconfig.Document{Version: fwconfig.Version, Generation: generation, Instances: []fwconfig.Instance{}, Links: []fwconfig.Link{}}
 
 	for _, mi := range d.instances {
+		if only != nil && !only[mi.Name] {
+			continue
+		}
 		in := fwconfig.Instance{
 			Name:    mi.Name,
 			Default: mi.IsDefault,
@@ -546,6 +562,12 @@ func Build(db *gorm.DB, generation int64) (*fwconfig.Document, error) {
 		doc.Instances = append(doc.Instances, in)
 	}
 
+	if only != nil {
+		if len(problems) > 0 {
+			return doc, &fwconfig.ValidationError{Problems: problems}
+		}
+		return doc, nil
+	}
 	for _, l := range d.links {
 		doc.Links = append(doc.Links, fwconfig.Link{
 			Name: l.Name,

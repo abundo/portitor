@@ -36,6 +36,9 @@ func (s *Server) handleZoneRecords(c *echo.Context) error {
 		}
 		return err
 	}
+	if ok, err := allowInstance(c, z.InstanceID, true); !ok {
+		return err
+	}
 	if z.Type != fwconfig.ZoneForward && len(body) > 0 {
 		return errJSON(c, http.StatusBadRequest, "records go in forward zones; reverse zones are generated")
 	}

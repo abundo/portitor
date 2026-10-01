@@ -12,6 +12,7 @@ import PacketList from '@/components/capture/PacketList.vue'
 import PacketTree from '@/components/capture/PacketTree.vue'
 import HexDump from '@/components/capture/HexDump.vue'
 import { openCaptureWindow } from '@/composables/useCaptureWindow'
+import { useAuthStore } from '@/stores/auth'
 
 // Packet capture: tcpdump on the firewall, streamed live through
 // portitor-web (at the rate in Settings) into Wiregasm, Wireshark in
@@ -20,6 +21,8 @@ import { openCaptureWindow } from '@/composables/useCaptureWindow'
 // capture keeps running while the main window moves on.
 const props = defineProps({ inWindow: Boolean })
 const toast = useToast()
+// Capturing takes an admin of the instance.
+const auth = useAuthStore()
 const { store, ifaceNames, ifaceText } = useInstanceRefs()
 const cap = useCaptureWorker()
 const { ready, fatal, columns, running, packets, generation } = cap
@@ -196,7 +199,7 @@ function drag(key, event) {
           v-if="!running"
           type="submit"
           icon="i-lucide-play"
-          :disabled="!store.current || !ready"
+          :disabled="!store.current || !ready || !auth.canEdit"
           >Start</UButton
         >
         <UButton v-else color="error" icon="i-lucide-square" @click="cap.stop()">Stop</UButton>

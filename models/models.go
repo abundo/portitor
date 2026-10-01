@@ -208,7 +208,38 @@ const (
 	// RoleViewer reads the configuration and status but changes nothing
 	// except their own profile and password.
 	RoleViewer = "viewer"
+	// RoleNone has no access of its own: only what the user's roles grant
+	// on instances.
+	RoleNone = "none"
 )
+
+// Role groups users. A role with an InstanceID belongs to that instance:
+// it is created, renamed and removed with the instance, never by hand.
+type Role struct {
+	Base
+	Name        string `gorm:"uniqueIndex" json:"name"`
+	Description string `json:"description"`
+	InstanceID  *uint  `json:"instance_id"`
+	// Members and InstanceIDs (the instances a role made by hand grants)
+	// are filled by the roles API, not stored with the row.
+	Members     []RoleMember `gorm:"-" json:"members"`
+	InstanceIDs []uint       `gorm:"-" json:"instance_ids"`
+}
+
+// RoleInstance grants a role made by hand an instance.
+type RoleInstance struct {
+	Base
+	RoleID     uint `json:"role_id"`
+	InstanceID uint `json:"instance_id"`
+}
+
+// RoleMember puts a user in a role, as RoleAdmin or RoleViewer.
+type RoleMember struct {
+	Base
+	RoleID uint   `json:"role_id"`
+	UserID uint   `json:"user_id"`
+	Level  string `json:"level"`
+}
 
 // Settings is a single row (ID 1).
 type Settings struct {
@@ -655,6 +686,9 @@ type Deployment struct {
 	// than the column.
 	DocHash string `json:"-"`
 	Log     string `json:"log"`
+	// Instances lists the instances built from the database; the others
+	// kept what was deployed. Empty: all of them.
+	Instances StringList `json:"instances"`
 }
 
 // All lists every model; a dbmigrate test checks that the migrated schema
@@ -664,6 +698,6 @@ func All() []any {
 		&User{}, &Settings{}, &Instance{}, &InterfaceZone{}, &Interface{}, &WgPeer{}, &Link{},
 		&Route{}, &Rule{}, &NatRule{}, &IpamPrefix{}, &IpamAddress{}, &DnsZone{}, &DnsRecord{}, &Deployment{},
 		&AddressObject{}, &DnsSoaTemplate{}, &DnsDnssecPolicy{}, &DnsTemplate{}, &KnownInterface{},
-		&DyndnsClient{}, &DyndnsRecord{}, &IpList{}, &Task{}, &Service{}, &ObjectFolder{},
+		&DyndnsClient{}, &DyndnsRecord{}, &IpList{}, &Task{}, &Service{}, &ObjectFolder{}, &Role{}, &RoleMember{}, &RoleInstance{},
 	}
 }

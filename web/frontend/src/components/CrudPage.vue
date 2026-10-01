@@ -45,6 +45,8 @@ const props = defineProps({
   // Longer help shown in a popover behind an info icon next to the title.
   info: { type: String, default: '' },
   api: { type: Object, required: true },
+  // shared: the rows belong to no instance; only a global admin changes them.
+  shared: { type: Boolean, default: false },
   params: { type: Object, default: () => ({}) },
   columns: { type: Array, required: true },
   fields: { type: Array, required: true },
@@ -80,7 +82,9 @@ const formTitle = computed(() => {
 })
 // A viewer sees the table and the form, read-only.
 const auth = useAuthStore()
-const readOnly = computed(() => !auth.isAdmin)
+// Rows of an instance take its admin; shared ones (templates, services,
+// tasks, links, instances) a global admin.
+const readOnly = computed(() => (props.shared ? !auth.isAdmin : !auth.canEdit))
 const rows = ref([])
 const loading = ref(true)
 const open = ref(false)

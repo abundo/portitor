@@ -23,7 +23,7 @@ const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 const store = useInstanceStore()
-const readOnly = computed(() => !auth.isAdmin)
+const readOnly = computed(() => !auth.canEdit)
 const leases = ref(null)
 const leaseError = ref('')
 

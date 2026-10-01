@@ -185,13 +185,16 @@ func prepareInstance(tx *gorm.DB, in, old *models.Instance) error {
 			in.IsDefault = true // the first instance is the default
 		}
 	}
-	return nil
+	return renameInstanceRole(tx, in, old)
 }
 
-// seedInstance adds the rules a new instance starts with. The output chain
-// drops by default, so an explicit rule keeps the firewall's own traffic
-// open until the user narrows it.
+// seedInstance adds the instance's role and the rules a new instance starts
+// with. The output chain drops by default, so an explicit rule keeps the
+// firewall's own traffic open until the user narrows it.
 func seedInstance(tx *gorm.DB, in *models.Instance) error {
+	if err := createInstanceRole(tx, in); err != nil {
+		return err
+	}
 	return tx.Create(&models.Rule{
 		InstanceID: in.ID, Position: nextPosition(tx, "rules", in.ID), Chain: fwconfig.ChainOutput,
 		Action: fwconfig.ActionAccept, Enabled: true, Description: "allow all output",

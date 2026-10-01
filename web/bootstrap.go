@@ -192,7 +192,7 @@ func Bootstrap(ctx context.Context, s *Server, o BootstrapOptions) (*models.Depl
 		return nil, err
 	}
 	noConfirm := 0
-	dep, _, err := s.deploy(ctx, "bootstrap", &noConfirm)
+	dep, _, err := s.deploy(ctx, "bootstrap", &noConfirm, nil)
 	if err != nil {
 		var ve *fwconfig.ValidationError
 		if errors.As(err, &ve) {

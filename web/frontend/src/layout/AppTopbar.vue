@@ -105,7 +105,7 @@ const userMenu = computed(() => [
       <USelect v-model="current" :items="instances.items" class="w-40" placeholder="none" />
     </div>
     <div class="ml-auto flex items-center gap-2">
-      <UTooltip v-if="!auth.isAdmin" text="Your user can look but not change anything">
+      <UTooltip v-if="!auth.canEdit" text="Your user can look at this instance but not change it">
         <UBadge color="neutral" variant="outline" icon="i-lucide-eye" label="Read-only" />
       </UTooltip>
       <UTooltip :text="agentChip.title ?? ''">
@@ -135,7 +135,7 @@ const userMenu = computed(() => [
           @click="openConsoleWindow"
         />
       </UTooltip>
-      <UTooltip text="Open packet capture window">
+      <UTooltip v-if="auth.canEdit" text="Open packet capture window">
         <UButton
           icon="i-lucide-radio-tower"
           color="neutral"

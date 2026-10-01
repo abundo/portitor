@@ -238,7 +238,7 @@ useUnsaved(() => !deleted.value && (!!dirty.value || recordsDirty.value))
       <UTabs v-model="activeTab" :items="tabItems" :unmount-on-hide="false">
         <template #info>
           <form class="pt-4" @submit.prevent="save">
-            <fieldset :disabled="!auth.isAdmin" class="space-y-4">
+            <fieldset :disabled="!auth.canEdit" class="space-y-4">
               <div class="grid gap-x-4 gap-y-3 sm:grid-cols-2">
                 <UFormField label="Name" required>
                   <UInput v-model="form.name" class="w-full font-mono" />
@@ -254,7 +254,7 @@ useUnsaved(() => !deleted.value && (!!dirty.value || recordsDirty.value))
                 <UTextarea v-model="form.description" class="w-full" :rows="3" />
               </UFormField>
               <div class="flex gap-2">
-                <UButton v-if="auth.isAdmin" type="submit" :loading="saving" :disabled="!dirty"
+                <UButton v-if="auth.canEdit" type="submit" :loading="saving" :disabled="!dirty"
                   >Save</UButton
                 >
                 <UButton
@@ -265,7 +265,7 @@ useUnsaved(() => !deleted.value && (!!dirty.value || recordsDirty.value))
                   label="Edit templates"
                 />
                 <UButton
-                  v-if="auth.isAdmin"
+                  v-if="auth.canEdit"
                   class="ms-auto"
                   color="error"
                   variant="ghost"
@@ -357,11 +357,11 @@ useUnsaved(() => !deleted.value && (!!dirty.value || recordsDirty.value))
                 v-model="records"
                 :show-mac="!!instance?.dhcp_enabled"
                 :instance="instance?.name ?? ''"
-                :disabled="!auth.isAdmin"
+                :disabled="!auth.canEdit"
               >
                 <template #leading-actions>
                   <UButton
-                    v-if="auth.isAdmin"
+                    v-if="auth.canEdit"
                     type="button"
                     :loading="savingRecords"
                     :disabled="!recordsDirty"
@@ -382,7 +382,7 @@ useUnsaved(() => !deleted.value && (!!dirty.value || recordsDirty.value))
                     Export
                   </UButton>
                   <UButton
-                    v-if="auth.isAdmin"
+                    v-if="auth.canEdit"
                     type="button"
                     color="neutral"
                     variant="outline"

@@ -936,7 +936,7 @@ func TestViewerRole(t *testing.T) {
 		want := !read && !viewerWrites[r.Method+" "+r.Path] || read && viewerDenied[r.Path]
 		path := strings.ReplaceAll(r.Path, ":id", "1")
 		rec := env.do(r.Method, path, map[string]any{})
-		if got := rec.Code == http.StatusForbidden && strings.Contains(rec.Body.String(), "read-only"); got != want {
+		if got := rec.Code == http.StatusForbidden && strings.Contains(rec.Body.String(), "can't do this"); got != want {
 			t.Errorf("%s %s: %d %s", r.Method, r.Path, rec.Code, rec.Body)
 		}
 		checked++

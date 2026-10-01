@@ -398,7 +398,7 @@ const menuItems = ref([])
 // The row's handler runs before the UContextMenu's: a row with nothing to
 // add (or a viewer) stops the event and gets the browser's own menu.
 function openMenu(event, items) {
-  if (!auth.isAdmin || !items.length) {
+  if (!items.length) {
     event.stopPropagation()
     return
   }
@@ -421,9 +421,11 @@ const addFolder = (kind, parentId) => ({
 })
 // A folder's menu adds into it; an item's adds next to it (its folder).
 function folderMenu(kind, folderId = null) {
+  if (!auth.isAdmin) return []
   return [[kind === 'hosts' ? addHost(folderId) : addList(folderId), addFolder(kind, folderId)]]
 }
 function listMenu(item) {
+  if (!auth.isAdmin) return []
   const menu = folderMenu('ip_lists', item.folder_id)
   const s = states.value[item.name]
   menu.unshift([
@@ -439,7 +441,7 @@ function listMenu(item) {
 function groupMenu(key) {
   if (key === 'group:hosts') return folderMenu('hosts')
   if (key === 'group:lists') return folderMenu('ip_lists')
-  if (!store.currentId) return []
+  if (!store.currentId || !auth.canEdit) return []
   return [
     [
       { label: 'Add prefix', icon: 'i-lucide-git-branch-plus', onSelect: () => editPrefix({}) },
@@ -448,7 +450,7 @@ function groupMenu(key) {
   ]
 }
 function nodeMenu(node) {
-  if (node.kind !== 'prefix' || node.dhcp_lease) return []
+  if (node.kind !== 'prefix' || node.dhcp_lease || !auth.canEdit) return []
   return [
     [
       { label: 'Add address', icon: 'i-lucide-plus', onSelect: () => onAddAddress(node) },
@@ -562,8 +564,9 @@ async function removeAddress() {
             with their DNS names. Right-click a row to add to it.
           </p>
         </div>
-        <div v-if="auth.isAdmin" class="flex gap-2">
+        <div v-if="auth.isAdmin || auth.canEdit" class="flex gap-2">
           <UButton
+            v-if="auth.isAdmin"
             color="neutral"
             variant="outline"
             icon="i-lucide-plus"
@@ -571,6 +574,7 @@ async function removeAddress() {
             @click="hostDialog.edit()"
           />
           <UButton
+            v-if="auth.isAdmin"
             color="neutral"
             variant="outline"
             icon="i-lucide-plus"
@@ -578,6 +582,7 @@ async function removeAddress() {
             @click="listDialog.edit()"
           />
           <UButton
+            v-if="auth.canEdit"
             icon="i-lucide-plus"
             label="Prefix"
             :disabled="!store.currentId"
@@ -852,7 +857,7 @@ async function removeAddress() {
                       :depth="1"
                       :collapsed="folded"
                       :iface-name="ifaceName"
-                      :read-only="!auth.isAdmin"
+                      :read-only="!auth.canEdit"
                       :dns-listen="dnsListen"
                       :iface-client="ifaceClient"
                       :dhcp-on="!!store.current?.dhcp_enabled"
@@ -892,14 +897,14 @@ async function removeAddress() {
 
     <UModal
       :open="prefixOpen"
-      :title="!auth.isAdmin ? 'Prefix' : prefix.id ? 'Edit prefix' : 'Prefix settings'"
+      :title="!auth.canEdit ? 'Prefix' : prefix.id ? 'Edit prefix' : 'Prefix settings'"
       :ui="wideModal"
       :dismissible="false"
       @update:open="prefixGuard.onUpdateOpen"
     >
       <template #body>
         <form id="prefix-form" @submit.prevent="savePrefix">
-          <fieldset :disabled="!auth.isAdmin" class="space-y-3">
+          <fieldset :disabled="!auth.canEdit" class="space-y-3">
             <UFormField :ui="inlineField" label="Prefix" required
               ><UInput
                 v-model="prefix.prefix"
@@ -919,7 +924,7 @@ async function removeAddress() {
       <template #footer>
         <div class="flex w-full gap-2">
           <UButton
-            v-if="prefix.id && auth.isAdmin"
+            v-if="prefix.id && auth.canEdit"
             color="error"
             variant="ghost"
             icon="i-lucide-trash"
@@ -927,23 +932,23 @@ async function removeAddress() {
             @click="removePrefix"
           />
           <UButton class="ms-auto" color="neutral" variant="ghost" @click="prefixGuard.close">{{
-            auth.isAdmin ? 'Cancel' : 'Close'
+            auth.canEdit ? 'Cancel' : 'Close'
           }}</UButton>
-          <UButton v-if="auth.isAdmin" type="submit" form="prefix-form">Save</UButton>
+          <UButton v-if="auth.canEdit" type="submit" form="prefix-form">Save</UButton>
         </div>
       </template>
     </UModal>
 
     <UModal
       :open="addrOpen"
-      :title="!auth.isAdmin ? 'Address' : addr.id ? 'Edit address' : 'New address'"
+      :title="!auth.canEdit ? 'Address' : addr.id ? 'Edit address' : 'New address'"
       :ui="wideModal"
       :dismissible="false"
       @update:open="addrGuard.onUpdateOpen"
     >
       <template #body>
         <form id="addr-form" @submit.prevent="saveAddress">
-          <fieldset :disabled="!auth.isAdmin" class="space-y-3">
+          <fieldset :disabled="!auth.canEdit" class="space-y-3">
             <UFormField :ui="inlineField" label="Address" required
               ><UInput
                 v-model="addr.address"
@@ -994,7 +999,7 @@ async function removeAddress() {
       <template #footer>
         <div class="flex w-full gap-2">
           <UButton
-            v-if="addr.id && auth.isAdmin"
+            v-if="addr.id && auth.canEdit"
             color="error"
             variant="ghost"
             icon="i-lucide-trash"
@@ -1002,9 +1007,9 @@ async function removeAddress() {
             @click="removeAddress"
           />
           <UButton class="ms-auto" color="neutral" variant="ghost" @click="addrGuard.close">{{
-            auth.isAdmin ? 'Cancel' : 'Close'
+            auth.canEdit ? 'Cancel' : 'Close'
           }}</UButton>
-          <UButton v-if="auth.isAdmin" type="submit" form="addr-form">Save</UButton>
+          <UButton v-if="auth.canEdit" type="submit" form="addr-form">Save</UButton>
         </div>
       </template>
     </UModal>

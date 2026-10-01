@@ -20,6 +20,7 @@ const users = ref([])
 const roles = [
   { label: 'Admin', value: 'admin', description: 'Changes and deploys everything' },
   { label: 'Viewer', value: 'viewer', description: 'Reads the configuration and status' },
+  { label: 'None', value: 'none', description: 'Only the instances their roles grant' },
 ]
 const roleLabel = (role) => roles.find((r) => r.value === role)?.label ?? role
 

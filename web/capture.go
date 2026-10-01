@@ -8,14 +8,15 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"slices"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/labstack/echo/v5"
 
 	"github.com/abundo/portitor/internal/agentapi"
+	"github.com/abundo/portitor/models"
 )
 
 // captureName is what an instance or interface name may look like here;
@@ -33,6 +34,15 @@ func (s *Server) handleAgentCapture(c *echo.Context) error {
 	}
 	if !captureName.MatchString(req.Instance) || !captureName.MatchString(req.Interface) {
 		return errJSON(c, http.StatusBadRequest, "invalid instance or interface name")
+	}
+	if !currentAccess(c).isAdmin() {
+		var inst models.Instance
+		if err := s.db.Where("name = ?", req.Instance).First(&inst).Error; err != nil {
+			return errJSON(c, http.StatusNotFound, "no such instance")
+		}
+		if ok, err := allowInstance(c, inst.ID, true); !ok {
+			return err
+		}
 	}
 	a, st, err := s.agent()
 	if err != nil {

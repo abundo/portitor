@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -42,6 +43,15 @@ type resource[T any, PT model[T]] struct {
 	present func(item PT)
 	// beforeDelete may refuse a delete, inside the delete transaction.
 	beforeDelete func(tx *gorm.DB, item PT) error
+	// scope ties rows to instances, which decides who reads them. Without
+	// one the rows are shared: everyone reads them, global admins change
+	// them.
+	scope *scope
+	// tenantWrites are the methods (POST, PUT, DELETE) an admin of the
+	// row's instances may use too.
+	tenantWrites []string
+	// tenantCheck refuses changes only a global admin may make.
+	tenantCheck func(item, old PT) error
 }
 
 // badRequest is a validation failure shown to the user as-is.
@@ -51,7 +61,17 @@ func (e *badRequest) Error() string { return e.msg }
 
 func bad(msg string) error { return &badRequest{msg} }
 
-func (r *resource[T, PT]) register(g *echo.Group, path string) {
+// errForbidden refuses a change the user may not make.
+var errForbidden = errors.New("forbidden")
+
+func (r *resource[T, PT]) register(s *Server, g *echo.Group, path string) {
+	for _, m := range r.tenantWrites {
+		p := path
+		if m != http.MethodPost {
+			p += "/:id"
+		}
+		s.tenantWrites[m+" /api"+p] = true
+	}
 	g.GET(path, r.list)
 	g.GET(path+"/:id", r.get)
 	g.POST(path, r.create)
@@ -61,6 +81,9 @@ func (r *resource[T, PT]) register(g *echo.Group, path string) {
 
 func (r *resource[T, PT]) list(c *echo.Context) error {
 	q := r.db
+	if a := currentAccess(c); r.scope != nil && !a.readsAll() {
+		q = r.scope.list(q, a.readable())
+	}
 	for _, f := range r.filters {
 		if v := c.QueryParam(f); v != "" {
 			id, err := strconv.ParseUint(v, 10, 64)
@@ -97,7 +120,45 @@ func (r *resource[T, PT]) load(c *echo.Context) (PT, error) {
 		}
 		return nil, err
 	}
+	if a := currentAccess(c); r.scope != nil && !a.readsAll() {
+		ids, err := r.scope.of(r.db, item)
+		if err != nil {
+			return nil, err
+		}
+		if !a.canReadAny(ids) {
+			return nil, errJSON(c, http.StatusNotFound, "not found")
+		}
+	}
 	return item, nil
+}
+
+// checkWrite tells whether the user may make this change: a global admin
+// any, an instance admin one of tenantWrites on rows of their instances
+// (before and after the change).
+func (r *resource[T, PT]) checkWrite(c *echo.Context, tx *gorm.DB, item, old PT) error {
+	a := currentAccess(c)
+	if a.isAdmin() {
+		return nil
+	}
+	if r.scope == nil || !slices.Contains(r.tenantWrites, c.Request().Method) {
+		return errForbidden
+	}
+	for _, row := range []PT{item, old} {
+		if row == nil {
+			continue
+		}
+		ids, err := r.scope.of(tx, row)
+		if err != nil {
+			return err
+		}
+		if !a.canWriteAll(ids) {
+			return errForbidden
+		}
+	}
+	if r.tenantCheck != nil {
+		return r.tenantCheck(item, old)
+	}
+	return nil
 }
 
 func (r *resource[T, PT]) get(c *echo.Context) error {
@@ -139,6 +200,9 @@ func (r *resource[T, PT]) update(c *echo.Context) error {
 
 func (r *resource[T, PT]) save(c *echo.Context, item, old PT, status int) error {
 	err := r.db.Transaction(func(tx *gorm.DB) error {
+		if err := r.checkWrite(c, tx, item, old); err != nil {
+			return err
+		}
 		if r.prepare != nil {
 			if err := r.prepare(tx, item, old); err != nil {
 				return err
@@ -170,6 +234,9 @@ func (r *resource[T, PT]) remove(c *echo.Context) error {
 		return err
 	}
 	err = r.db.Transaction(func(tx *gorm.DB) error {
+		if err := r.checkWrite(c, tx, item, nil); err != nil {
+			return err
+		}
 		if r.beforeDelete != nil {
 			if err := r.beforeDelete(tx, item); err != nil {
 				return err
@@ -188,6 +255,9 @@ func dbError(c *echo.Context, err error) error {
 	var br *badRequest
 	if errors.As(err, &br) {
 		return errJSON(c, http.StatusBadRequest, br.msg)
+	}
+	if errors.Is(err, errForbidden) {
+		return errJSON(c, http.StatusForbidden, "you can't change this")
 	}
 	msg := err.Error()
 	switch {

@@ -2,6 +2,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
 <script setup>
+import { useConfirm } from '@/composables/useConfirm'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import SearchInput from '@/components/SearchInput.vue'
@@ -9,6 +10,8 @@ import { api } from '@/api'
 import { errMsg } from '@/api/http'
 import { ago, when } from '@/utils/time'
 import { useSearch } from '@/utils/search'
+
+const { ask } = useConfirm()
 
 const toast = useToast()
 const sys = ref(null)
@@ -81,25 +84,37 @@ async function start(job, release) {
   }
 }
 
-function install(r) {
+async function install(r) {
   const what = r.newer ? 'Install' : 'Go back to'
   if (
-    !window.confirm(
-      `${what} Portitor ${r.tag}? The agent (and portitor-web, if it runs on the firewall) restarts; the GUI is away for a moment.`,
-    )
+    !(await ask({
+      title: 'Update',
+      message: `${what} Portitor ${r.tag}? The agent (and portitor-web, if it runs on the firewall) restarts; the GUI is away for a moment.`,
+    }))
   )
     return
   start('update', r.tag)
 }
 
-function upgrade() {
-  if (!window.confirm(`Upgrade ${sys.value.packages.length} Debian packages on the firewall?`))
+async function upgrade() {
+  if (
+    !(await ask({
+      title: 'Upgrade',
+      message: `Upgrade ${sys.value.packages.length} Debian packages on the firewall?`,
+    }))
+  )
     return
   start('upgrade')
 }
 
 async function reboot() {
-  if (!window.confirm('Reboot the firewall? Traffic stops until it is back up.')) return
+  if (
+    !(await ask({
+      title: 'Reboot',
+      message: 'Reboot the firewall? Traffic stops until it is back up.',
+    }))
+  )
+    return
   try {
     await api.systemReboot()
     toast.add({ title: 'The firewall is rebooting', color: 'warning' })

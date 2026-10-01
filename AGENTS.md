@@ -148,11 +148,22 @@ are in [README.md](README.md).
   never reused (rule ids mark connections). A data move SQL cannot compute (prefix
   containment, say) is a Go migration registered in `dbmigrate.provider`
   (`interface_addresses.go`).
-- **Roles:** a user is `admin` or `viewer` (`models.RoleAdmin`/`RoleViewer`).
-  `requireRole` (`web/auth.go`) denies by default: a viewer gets GET routes except
-  those in `viewerDenied` (secrets, console, users) and only the writes in
-  `viewerWrites`. A new route is admin-only for writes automatically; a new GET that
-  hands out secrets must go in `viewerDenied`. `TestViewerRole` sweeps every route.
+- **Roles:** a user is `admin`, `viewer` or `none` (`models.RoleAdmin`/`RoleViewer`/
+  `RoleNone`): global access. Roles (`roles`, `role_members`, `role_instances`) grant
+  instances at a level (admin/viewer); each instance has its own role, created,
+  renamed and deleted with it (`web/roles.go`). `accessOf` (`web/access.go`) merges
+  them; `requireRole` (`web/auth.go`) denies by default: everyone but a global admin
+  gets GET routes except `viewerDenied` (and `tenantDenied` for `none`), and only
+  the writes in `viewerWrites`, plus `tenantWrites` for an instance admin, whose
+  handlers must check the instance (`allowInstance`). A CRUD `resource` with a
+  `scope` filters lists and checks rows per instance; one without is shared (read by
+  all, written by global admins). A new route is global-admin-only for writes
+  automatically; a new GET of instance data must filter it, and one that hands out
+  secrets must check the instance or go in `viewerDenied`. `TestViewerRole` sweeps
+  every route, `TestTenancy` the instance checks. An instance admin's deploy merges
+  their instances from the database into the live deployment's document
+  (`web/tenancy.go`, `deployed/<gen>.json`); only a full deploy keeps a snapshot
+  for Revert.
 - **Database files:** portitor-web refuses to run as root against a database
   directory owned by another user; root would leave root-owned `-wal`/`-shm` files.
   Scripts run it as the service user (`runuser -u portitor --`).

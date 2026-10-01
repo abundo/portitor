@@ -107,6 +107,7 @@ After an upgrade, run `migrate` before `start`. `install.py` does both.
 | | Updates | Debian package upgrades, Portitor releases, reboot. See [Installer ISO and updates](appliance.md#updates). |
 | | Settings → General | Agent connection, default auto-rollback, public WireGuard endpoint, packet capture rate, [backup and restore](#backup-and-restore). |
 | | Settings → Users | GUI users and their roles. |
+| | Settings → Roles | Groups of users, one per instance and your own; see [Roles](#roles). |
 | | Help | This guide and the other guides in `docs/`. |
 
 Your own name and password are under the user menu (top right).
@@ -128,6 +129,40 @@ A user is an **admin** or a **viewer**.
 New users get the role you pick in Settings → Users. Users that existed before roles
 were added are admins. You can't change your own role, so at least one admin always
 remains. Changing another user's role ends their sessions.
+
+### Roles and instances (multi-tenancy)
+
+Besides admin and viewer, a user's own role can be **none**: no access of their own,
+only the instances their roles grant. Settings → Roles groups users; a user can be
+in any number of roles, and is an **admin** or a **viewer** in each.
+
+- Every instance has a role of its own, `instance-<name>`, which grants that
+  instance. It is added with the instance, renamed with it and removed (members and
+  all) when the instance is deleted; you can't rename or delete it by hand.
+- A role you make yourself grants the instances you pick for it. Names starting with
+  `instance-` are kept for the instances' roles.
+- On each instance a user gets the highest level any of their roles gives; a global
+  viewer reads every instance anyway.
+
+An **instance admin** changes their instance's interfaces (but not which physical
+NICs it has: a global admin adds, renames and removes those), zones, rules, NAT,
+routes, IP addresses, DNS, DHCP, dynamic DNS and WireGuard, its settings (not its
+name, nor which instance is the default), captures its packets (*Tools → Packet
+capture*) and **deploys** it. An
+**instance viewer** reads it. Neither sees the other instances, their status, leases,
+counters or logged packets, nor the agent's log, Settings, Updates, Users or Roles.
+Named hosts and prefixes, services, IP lists, DNS templates, tasks and links are
+shared: everyone reads and uses them, a global admin changes them.
+
+An instance admin's deploy takes their instances from the database and everything
+else as the firewall runs it, so another tenant's unfinished changes stay where they
+are. They can confirm or roll back their own deploy; one change waits for
+confirmation at a time, firewall-wide. A global admin deploys the whole database,
+every tenant's changes included, unless they pick instances under *Instances* on the
+Deploy page: then, like an instance admin's deploy, only those come from the database.
+An instance admin with several instances can pick some of them the same way. Before an instance admin can deploy, a global admin
+must have deployed once. *Revert* (a global admin's) needs the last deploy to be one
+of everything: it restores the database as it was then.
 
 An admin can reset another user's password: open the user and pick *Reset password*,
 then enter the new password twice. Your own password is changed under *Change

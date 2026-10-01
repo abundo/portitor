@@ -2,6 +2,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
 <script setup>
+import { useConfirm } from '@/composables/useConfirm'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import QRCode from 'qrcode'
@@ -13,6 +14,8 @@ import { errMsg } from '@/api/http'
 import { useInstanceStore } from '@/stores/instances'
 import { useDeployStore } from '@/stores/deploy'
 import { useAuthStore } from '@/stores/auth'
+
+const { ask } = useConfirm()
 
 const auth = useAuthStore()
 const store = useInstanceStore()
@@ -82,9 +85,10 @@ function ago(t) {
 
 async function rekey() {
   if (
-    !window.confirm(
-      `Generate a new key for ${withLabel(selected.value.label, selected.value.name)}? Every peer needs the new public key.`,
-    )
+    !(await ask({
+      title: 'New key',
+      message: `Generate a new key for ${withLabel(selected.value.label, selected.value.name)}? Every peer needs the new public key.`,
+    }))
   )
     return
   try {
@@ -226,7 +230,7 @@ function copy(text) {
           </div>
         </div>
         <UButton
-          v-if="auth.isAdmin"
+          v-if="auth.canEdit"
           class="ml-auto"
           color="neutral"
           variant="outline"
@@ -262,7 +266,7 @@ function copy(text) {
         </template>
         <template #row-actions="{ row }">
           <UButton
-            v-if="auth.isAdmin"
+            v-if="auth.canEdit"
             size="xs"
             color="neutral"
             variant="ghost"

@@ -2,12 +2,15 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
 <script setup>
+import { useConfirm } from '@/composables/useConfirm'
 import { onMounted, reactive, ref } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import { api } from '@/api'
 import { errMsg } from '@/api/http'
 import { useDeployStore } from '@/stores/deploy'
 import { usePageForm } from '@/composables/useFormGuard'
+
+const { ask } = useConfirm()
 
 const toast = useToast()
 const deploy = useDeployStore()
@@ -90,9 +93,10 @@ function readBase64(file) {
 
 async function restoreBackup() {
   if (
-    !window.confirm(
-      `Replace the configuration with ${restoreFile.value.name}? Changes made since the backup are lost. Nothing is deployed until you deploy.`,
-    )
+    !(await ask({
+      title: 'Restore backup',
+      message: `Replace the configuration with ${restoreFile.value.name}? Changes made since the backup are lost. Nothing is deployed until you deploy.`,
+    }))
   )
     return
   restoring.value = true

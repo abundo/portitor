@@ -2,12 +2,15 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
 <script setup>
+import { useConfirm } from '@/composables/useConfirm'
 import { computed, ref } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import { api } from '@/api'
 import { errMsg } from '@/api/http'
 import { useDeployStore } from '@/stores/deploy'
 import { useAuthStore } from '@/stores/auth'
+
+const { ask } = useConfirm()
 
 const auth = useAuthStore()
 const deploy = useDeployStore()
@@ -45,9 +48,11 @@ async function commit() {
 // applied.
 async function revert() {
   if (
-    !window.confirm(
-      'Revert all uncommitted changes? The configuration goes back to what is committed on the firewall.',
-    )
+    !(await ask({
+      title: 'Revert',
+      message:
+        'Revert all uncommitted changes? The configuration goes back to what is committed on the firewall.',
+    }))
   )
     return
   reverting.value = true
@@ -95,7 +100,7 @@ async function revert() {
         >Revert</UButton
       >
       <UButton
-        v-if="auth.isAdmin"
+        v-if="auth.canDeploy"
         size="sm"
         color="info"
         icon="i-lucide-rocket"

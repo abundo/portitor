@@ -36,6 +36,7 @@ const fields = [
     title="Links"
     description="Internal point-to-point links between instances (a veth pair). Add a route in each instance through the other side's address, and firewall rules for the link's interfaces (each end is an interface of its instance)."
     :api="links"
+    shared
     :columns="columns"
     :fields="fields"
     :defaults="

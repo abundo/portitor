@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/netip"
 	"os"
@@ -37,6 +38,9 @@ func (s *Server) handleIpamTree(c *echo.Context) error {
 	id, err := echo.QueryParam[uint](c, "instance_id")
 	if err != nil {
 		return errJSON(c, http.StatusBadRequest, "instance_id is required")
+	}
+	if ok, err := allowInstance(c, id, false); !ok {
+		return err
 	}
 	var prefixes []models.IpamPrefix
 	var addrs []models.IpamAddress
@@ -106,6 +110,9 @@ func (s *Server) handleAutoRules(c *echo.Context) error {
 	if err != nil {
 		return errJSON(c, http.StatusBadRequest, "instance_id is required")
 	}
+	if ok, err := allowInstance(c, id, false); !ok {
+		return err
+	}
 	var mi models.Instance
 	if err := s.db.First(&mi, id).Error; err != nil {
 		return errJSON(c, http.StatusNotFound, "not found")
@@ -153,6 +160,9 @@ func (s *Server) handleNextFree(c *echo.Context) error {
 	if err := s.db.First(&p, id).Error; err != nil {
 		return errJSON(c, http.StatusNotFound, "not found")
 	}
+	if ok, err := allowInstance(c, p.InstanceID, false); !ok {
+		return err
+	}
 	var prefixes []models.IpamPrefix
 	var addrs []models.IpamAddress
 	var ifaces []models.Interface
@@ -176,6 +186,15 @@ func (s *Server) handleReorder(table string) echo.HandlerFunc {
 		}
 		if err := c.Bind(&req); err != nil {
 			return errJSON(c, http.StatusBadRequest, "invalid request")
+		}
+		var instances []uint
+		if err := s.db.Table(table).Where("id IN ?", req.IDs).Distinct().Pluck("instance_id", &instances).Error; err != nil {
+			return err
+		}
+		for _, inst := range instances {
+			if ok, err := allowInstance(c, inst, true); !ok {
+				return err
+			}
 		}
 		err := s.db.Transaction(func(tx *gorm.DB) error {
 			for i, id := range req.IDs {
@@ -203,6 +222,9 @@ func (s *Server) handleWgRekey(c *echo.Context) error {
 	if err := s.db.First(&ifc, id).Error; err != nil || ifc.Kind != fwconfig.KindWireGuard {
 		return errJSON(c, http.StatusNotFound, "no such WireGuard interface")
 	}
+	if ok, err := allowInstance(c, ifc.InstanceID, true); !ok {
+		return err
+	}
 	priv, pub, err := wgkeys.Generate()
 	if err != nil {
 		return err
@@ -229,6 +251,10 @@ func (s *Server) handleWgClientConfig(c *echo.Context) error {
 	}
 	var ifc models.Interface
 	if err := s.db.First(&ifc, peer.InterfaceID).Error; err != nil {
+		return err
+	}
+	// The config holds the client's private key: an admin's only.
+	if ok, err := allowInstance(c, ifc.InstanceID, true); !ok {
 		return err
 	}
 	var inst models.Instance
@@ -311,6 +337,9 @@ func (s *Server) handleWgNextFree(c *echo.Context) error {
 	var ifc models.Interface
 	if err := s.db.First(&ifc, id).Error; err != nil || ifc.Kind != fwconfig.KindWireGuard {
 		return errJSON(c, http.StatusNotFound, "no such WireGuard interface")
+	}
+	if ok, err := allowInstance(c, ifc.InstanceID, false); !ok {
+		return err
 	}
 	var prefixes []models.IpamPrefix
 	var addrs []models.IpamAddress
@@ -504,7 +533,7 @@ func (s *Server) handleCreateUser(c *echo.Context) error {
 		req.Role = models.RoleViewer
 	}
 	if !validRole(req.Role) {
-		return errJSON(c, http.StatusBadRequest, "role must be admin or viewer")
+		return errJSON(c, http.StatusBadRequest, "role must be admin, viewer or none")
 	}
 	u := models.User{Username: req.Username, Role: req.Role}
 	if err := setPassword(&u, req.Password); err != nil {
@@ -517,7 +546,12 @@ func (s *Server) handleCreateUser(c *echo.Context) error {
 }
 
 func validRole(role string) bool {
-	return role == models.RoleAdmin || role == models.RoleViewer
+	return role == models.RoleAdmin || role == models.RoleViewer || role == models.RoleNone
+}
+
+// validLevel is a member's level in a role.
+func validLevel(level string) bool {
+	return level == models.RoleAdmin || level == models.RoleViewer
 }
 
 // handleUpdateUser changes another user's role and ends their sessions, so
@@ -535,7 +569,7 @@ func (s *Server) handleUpdateUser(c *echo.Context) error {
 		return errJSON(c, http.StatusBadRequest, "invalid request")
 	}
 	if !validRole(req.Role) {
-		return errJSON(c, http.StatusBadRequest, "role must be admin or viewer")
+		return errJSON(c, http.StatusBadRequest, "role must be admin, viewer or none")
 	}
 	if id == currentUser(c).ID {
 		return errJSON(c, http.StatusBadRequest, "you cannot change your own role")
@@ -626,16 +660,38 @@ func (s *Server) handleDeployCheck(c *echo.Context) error {
 	if err != nil {
 		return err
 	}
-	doc, err := builder.Build(s.db, st.Generation+1)
+	var names []string
+	if q := c.QueryParam("instances"); q != "" {
+		names = strings.Split(q, ",")
+	}
+	only, err := s.chosenScope(currentAccess(c), names, true)
+	if err != nil {
+		return dbError(c, err)
+	}
+	doc, err := s.buildDoc(s.db, st.Generation+1, only)
 	problems := []string{}
 	var ve *fwconfig.ValidationError
-	if errors.As(err, &ve) {
+	var br *badRequest
+	switch {
+	case errors.As(err, &ve):
 		problems = ve.Problems
-	} else if err != nil {
+	case errors.As(err, &br):
+		problems = []string{br.msg}
+		doc = &fwconfig.Document{}
+	case errors.Is(err, errForbidden):
+		problems = []string{"you are not an admin of any instance"}
+		doc = &fwconfig.Document{}
+	case err != nil:
 		return err
 	}
 	counts := map[string]int{"instances": len(doc.Instances), "links": len(doc.Links)}
+	if only != nil {
+		counts = map[string]int{"instances": len(only)}
+	}
 	for _, in := range doc.Instances {
+		if only != nil && !only[in.Name] {
+			continue
+		}
 		counts["interfaces"] += len(in.Interfaces)
 		for _, r := range in.Rules {
 			if r.Kind != fwconfig.RuleKindComment {
@@ -652,7 +708,15 @@ func (s *Server) handleDeployPreview(c *echo.Context) error {
 	if err != nil {
 		return agentError(c, err)
 	}
-	doc, err := builder.Build(s.db, st.Generation+1)
+	var req struct {
+		Instances []string `json:"instances"`
+	}
+	_ = c.Bind(&req)
+	only, err := s.chosenScope(currentAccess(c), req.Instances, true)
+	if err != nil {
+		return dbError(c, err)
+	}
+	doc, err := s.buildDoc(s.db, st.Generation+1, only)
 	if err != nil {
 		return problemsResponse(c, err)
 	}
@@ -660,12 +724,16 @@ func (s *Server) handleDeployPreview(c *echo.Context) error {
 	if err != nil {
 		return agentError(c, err)
 	}
+	if only != nil {
+		res.Files, res.Current = filterFiles(res.Files, only), filterFiles(res.Current, only)
+	}
 	return c.JSON(http.StatusOK, res)
 }
 
 func (s *Server) handleDeployApply(c *echo.Context) error {
 	var req struct {
-		ConfirmTimeout *int `json:"confirm_timeout"`
+		ConfirmTimeout *int     `json:"confirm_timeout"`
+		Instances      []string `json:"instances"`
 	}
 	_ = c.Bind(&req)
 	// One change at a time: a pending one is confirmed or rolled back
@@ -682,7 +750,14 @@ func (s *Server) handleDeployApply(c *echo.Context) error {
 	if st.Pending != nil {
 		return errJSON(c, http.StatusConflict, "a deployment is waiting for confirmation; confirm or roll it back first")
 	}
-	dep, res, err := s.deploy(c.Request().Context(), currentUser(c).Username, req.ConfirmTimeout)
+	only, err := s.chosenScope(currentAccess(c), req.Instances, false)
+	if err != nil {
+		return dbError(c, err)
+	}
+	if only != nil && len(only) == 0 {
+		return errJSON(c, http.StatusForbidden, "you are not an admin of any instance")
+	}
+	dep, res, err := s.deploy(c.Request().Context(), currentUser(c).Username, req.ConfirmTimeout, only)
 	var ve *fwconfig.ValidationError
 	switch {
 	case errors.As(err, &ve):
@@ -694,8 +769,9 @@ func (s *Server) handleDeployApply(c *echo.Context) error {
 }
 
 // deploy builds the document, applies it and records the deployment.
-// timeout nil takes the confirm timeout from the settings.
-func (s *Server) deploy(ctx context.Context, username string, timeout *int) (*models.Deployment, *agentapi.ApplyResult, error) {
+// timeout nil takes the confirm timeout from the settings. only names the
+// instances to deploy from the database (nil: everything); see buildDoc.
+func (s *Server) deploy(ctx context.Context, username string, timeout *int, only map[string]bool) (*models.Deployment, *agentapi.ApplyResult, error) {
 	s.deployMu.Lock()
 	defer s.deployMu.Unlock()
 	a, st, err := s.agent()
@@ -719,7 +795,7 @@ func (s *Server) deploy(ctx context.Context, username string, timeout *int) (*mo
 	if err != nil {
 		return nil, nil, err
 	}
-	doc, err := builder.Build(snapDB, gen)
+	doc, err := s.buildDoc(snapDB, gen, only)
 	closeDB(snapDB)
 	if err != nil {
 		return nil, nil, err
@@ -735,7 +811,10 @@ func (s *Server) deploy(ctx context.Context, username string, timeout *int) (*mo
 		return nil, nil, err
 	}
 	docJSON, _ := json.Marshal(redactDoc(*doc))
-	dep := models.Deployment{Generation: gen, Username: username, Document: string(docJSON), DocHash: docHash(*doc)}
+	dep := models.Deployment{Generation: gen, Username: username, Document: string(docJSON), DocHash: docHash(*doc), Instances: models.StringList{}}
+	if only != nil {
+		dep.Instances = sortedNames(only)
+	}
 
 	res, applyErr := a.Apply(ctx, *doc, confirm)
 	switch {
@@ -765,8 +844,17 @@ func (s *Server) deploy(ctx context.Context, username string, timeout *int) (*mo
 		return nil, nil, err
 	}
 	if dep.Status != "failed" {
-		s.keepSnapshot(snap, gen)
-		kept = true
+		if err := s.keepDocument(doc); err != nil {
+			slog.Warn("keeping the deployed document", "err", err)
+		}
+		// Revert restores a snapshot of the database, which matches
+		// what runs only after a deploy of everything.
+		if only == nil {
+			s.keepSnapshot(snap, gen)
+			kept = true
+		} else {
+			s.pruneSnapshots()
+		}
 	}
 	return &dep, res, applyErr
 }
@@ -813,6 +901,17 @@ func (s *Server) handleDeployChanges(c *echo.Context) error {
 		return err
 	}
 	resp.Deployed = live != nil
+	if a := currentAccess(c); !a.readsAll() {
+		names, err := s.instanceNames(a.readable())
+		if err != nil {
+			return err
+		}
+		resp.Changed, resp.Problems, err = s.instanceChanges(names)
+		if err != nil {
+			return err
+		}
+		return c.JSON(http.StatusOK, resp)
+	}
 	doc, err := builder.Build(s.db, 0)
 	var ve *fwconfig.ValidationError
 	switch {
@@ -850,6 +949,9 @@ func (s *Server) handleDeployConfirm(c *echo.Context) error {
 	if dep == nil || dep.Status != "pending" {
 		return errJSON(c, http.StatusConflict, "no change is waiting for confirmation")
 	}
+	if !s.mayFinish(currentAccess(c), dep) {
+		return errJSON(c, http.StatusForbidden, "this change deployed instances you are not an admin of")
+	}
 	if err := a.Confirm(c.Request().Context(), dep.Generation); err != nil {
 		return agentError(c, err)
 	}
@@ -863,11 +965,18 @@ func (s *Server) handleDeployRollback(c *echo.Context) error {
 	if err != nil {
 		return agentError(c, err)
 	}
+	dep, err := s.latestDeployment()
+	if err != nil {
+		return err
+	}
+	if !s.mayFinish(currentAccess(c), dep) {
+		return errJSON(c, http.StatusForbidden, "only a global admin rolls back a change of instances you are not an admin of")
+	}
 	res, err := a.Rollback(c.Request().Context())
 	if err != nil {
 		return agentError(c, err)
 	}
-	if dep, _ := s.latestDeployment(); dep != nil && dep.Status == "pending" {
+	if dep != nil && dep.Status == "pending" {
 		dep.Status, dep.Message = "rolled_back", "rolled back by "+currentUser(c).Username
 		s.db.Save(dep)
 	}
@@ -882,6 +991,13 @@ func (s *Server) handleDeployments(c *echo.Context) error {
 	deps := []models.Deployment{}
 	if err := s.db.Order("id desc").Limit(limit).Find(&deps).Error; err != nil {
 		return err
+	}
+	names, err := s.readableInstanceNames(c)
+	if err != nil {
+		return err
+	}
+	if names != nil {
+		deps = filterDeployments(deps, names)
 	}
 	return c.JSON(http.StatusOK, deps)
 }
@@ -909,6 +1025,14 @@ func (s *Server) handleAgentStatus(c *echo.Context) error {
 	if err != nil {
 		return err
 	}
+	names, err := s.readableInstanceNames(c)
+	if err != nil {
+		return err
+	}
+	if names != nil {
+		filterStatus(st, names)
+		sync = nil
+	}
 	return c.JSON(http.StatusOK, struct {
 		*agentapi.Status
 		NICSync *nicSync `json:"nic_sync"`
@@ -924,6 +1048,13 @@ func (s *Server) handleAgentLeases(c *echo.Context) error {
 	if err != nil {
 		return agentError(c, err)
 	}
+	names, err := s.readableInstanceNames(c)
+	if err != nil {
+		return err
+	}
+	if names != nil {
+		filterLeases(l, names)
+	}
 	return c.JSON(http.StatusOK, l)
 }
 
@@ -937,6 +1068,15 @@ func (s *Server) handleAgentRuleCounters(c *echo.Context) error {
 	rc, err := a.RuleCounters(c.Request().Context())
 	if err != nil {
 		return agentError(c, err)
+	}
+	names, err := s.readableInstanceNames(c)
+	if err != nil {
+		return err
+	}
+	if names != nil {
+		if err := s.filterRuleCounters(rc, currentAccess(c).readable(), names); err != nil {
+			return err
+		}
 	}
 	return c.JSON(http.StatusOK, rc)
 }
@@ -967,6 +1107,13 @@ func (s *Server) handleAgentPacketLog(c *echo.Context) error {
 	l, err := a.PacketLog(c.Request().Context(), after)
 	if err != nil {
 		return agentError(c, err)
+	}
+	names, err := s.readableInstanceNames(c)
+	if err != nil {
+		return err
+	}
+	if names != nil {
+		filterPacketLog(l, names)
 	}
 	return c.JSON(http.StatusOK, l)
 }

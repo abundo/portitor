@@ -116,13 +116,21 @@ func (s *Server) sessionValid(claims *sessionClaims) bool {
 	return s.db.First(&u, claims.UserID).Error == nil && u.TokenVersion == claims.TokenVersion
 }
 
-// viewerDenied are the GET routes a viewer may not use: they hand out
-// secrets (a WireGuard client config with its private key), a root shell,
-// or the user list.
+// viewerDenied are the GET routes only a global admin may use: they hand
+// out a root shell, or the user and role lists. (A WireGuard client
+// config, with its private key, takes an admin of the peer's instance.)
 var viewerDenied = map[string]bool{
-	"/api/users":               true,
-	"/api/wg/peers/:id/config": true,
-	"/api/agent/console":       true,
+	"/api/users":         true,
+	"/api/roles":         true,
+	"/api/agent/console": true,
+}
+
+// tenantDenied are the GET routes a user without a global role (RoleNone)
+// may not use either: they show the whole firewall, not one instance.
+var tenantDenied = map[string]bool{
+	"/api/settings":   true,
+	"/api/system":     true,
+	"/api/agent/logs": true,
 }
 
 // viewerWrites are the requests other than GET a viewer may make: their own
@@ -133,22 +141,31 @@ var viewerWrites = map[string]bool{
 	"POST /api/deploy/preview": true,
 }
 
-// requireRole lets an admin through and limits a viewer to reading. It runs
-// after requireAuth and matches the route pattern, so it cannot be dodged
-// with another spelling of the path.
-func requireRole(next echo.HandlerFunc) echo.HandlerFunc {
+// requireRole lets a global admin through, limits everyone else to reading,
+// and lets the requests in tenantWrites through to an instance admin, whose
+// handlers check the instance. It runs after requireAuth and matches the
+// route pattern, so it cannot be dodged with another spelling of the path.
+func (s *Server) requireRole(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		u := currentUser(c)
-		if u != nil && u.Role == models.RoleAdmin {
+		if u == nil {
+			return errJSON(c, http.StatusUnauthorized, "not logged in")
+		}
+		a, err := accessOf(s.db, u)
+		if err != nil {
+			return err
+		}
+		c.Set(ctxAccess, a)
+		if a.isAdmin() {
 			return next(c)
 		}
 		method, path := c.Request().Method, c.Path()
-		allowed := viewerWrites[method+" "+path]
+		allowed := viewerWrites[method+" "+path] || s.tenantWrites[method+" "+path] && a.writesAny()
 		if method == http.MethodGet || method == http.MethodHead {
-			allowed = !viewerDenied[path]
+			allowed = !viewerDenied[path] && (a.readsAll() || !tenantDenied[path])
 		}
 		if !allowed {
-			return errJSON(c, http.StatusForbidden, "your user is read-only")
+			return errJSON(c, http.StatusForbidden, "your user can't do this")
 		}
 		return next(c)
 	}
@@ -272,7 +289,7 @@ func (s *Server) handleLogin(c *echo.Context) error {
 	if err := s.issueSession(c, &u, req.Remember); err != nil {
 		return err
 	}
-	return c.JSON(http.StatusOK, u)
+	return s.me(c, &u)
 }
 
 func (s *Server) handleLogout(c *echo.Context) error {
@@ -281,7 +298,21 @@ func (s *Server) handleLogout(c *echo.Context) error {
 }
 
 func (s *Server) handleMe(c *echo.Context) error {
-	return c.JSON(http.StatusOK, currentUser(c))
+	return s.me(c, currentUser(c))
+}
+
+// me answers with the user and their level per instance id (admin or
+// viewer; an instance missing has none), for the GUI to show what they
+// may change.
+func (s *Server) me(c *echo.Context, u *models.User) error {
+	a, err := accessOf(s.db, u)
+	if err != nil {
+		return err
+	}
+	return c.JSON(http.StatusOK, struct {
+		*models.User
+		Access map[uint]string `json:"access"`
+	}{u, a.levels})
 }
 
 // handleUpdateMe changes the caller's own full name and email. The username
@@ -314,7 +345,7 @@ func (s *Server) handleUpdateMe(c *echo.Context) error {
 	if err := s.db.First(u, u.ID).Error; err != nil {
 		return err
 	}
-	return c.JSON(http.StatusOK, u)
+	return s.me(c, u)
 }
 
 // handleChangePassword changes the caller's password and revokes their

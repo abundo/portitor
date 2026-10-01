@@ -3,6 +3,7 @@
 
 import { reactive, watch } from 'vue'
 import { api } from '@/api'
+import { useAuthStore } from '@/stores/auth'
 import { errMsg } from '@/api/http'
 
 // The agent's log and the packets the rulesets logged, each a tab of the
@@ -45,7 +46,9 @@ const state = reactive({
 })
 
 const fetchers = {
-  log: (after) => api.agentLogs(after),
+  // The agent's log tells of every instance: a global reader's only.
+  log: (after) =>
+    useAuthStore().readsAll ? api.agentLogs(after) : Promise.resolve({ entries: [] }),
   packets: (after) => api.agentPacketLog(after),
 }
 

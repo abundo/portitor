@@ -238,7 +238,7 @@ function clean(b) {
             <div class="mb-2 flex items-end justify-between gap-3 pt-2">
               <p class="text-sm text-muted">{{ c.text }}</p>
               <UButton
-                v-if="auth.isAdmin"
+                v-if="auth.canEdit"
                 size="sm"
                 variant="soft"
                 icon="i-lucide-plus"
@@ -254,7 +254,7 @@ function clean(b) {
               :counters="counters"
               :drops="drops && (drops[store.current?.name]?.[c.value] ?? {})"
               :log-builtin="logBuiltin(c.value)"
-              :read-only="!auth.isAdmin"
+              :read-only="!auth.canEdit"
               :insert="
                 (kind, at) => insertInChain(rows, c.value, { openCreate, createAt }, kind, at)
               "

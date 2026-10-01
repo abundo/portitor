@@ -60,7 +60,7 @@ async function rollback() {
       <b class="tabular-nums">{{ secondsLeft }}s</b> unless you confirm it. If this page still
       works, the change didn't lock you out.
     </span>
-    <div v-if="auth.isAdmin" class="ml-auto flex gap-2">
+    <div v-if="auth.canDeploy" class="ml-auto flex gap-2">
       <UButton size="sm" color="neutral" variant="outline" :loading="busy" @click="rollback"
         >Roll back now</UButton
       >

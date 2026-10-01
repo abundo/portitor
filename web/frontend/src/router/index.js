@@ -49,7 +49,7 @@ const router = createRouter({
         {
           path: 'capture',
           component: () => import('@/views/CapturePage.vue'),
-          meta: { admin: true },
+          meta: { deployer: true },
         },
         {
           path: 'updates',
@@ -66,6 +66,11 @@ const router = createRouter({
           component: () => import('@/views/UsersPage.vue'),
           meta: { admin: true },
         },
+        {
+          path: 'settings/roles',
+          component: () => import('@/views/RolesPage.vue'),
+          meta: { admin: true },
+        },
         { path: 'help/:doc?', component: () => import('@/views/HelpPage.vue') },
         { path: 'profile', component: () => import('@/views/ProfilePage.vue') },
         { path: 'profile/password', component: () => import('@/views/ChangePasswordPage.vue') },
@@ -79,7 +84,7 @@ const router = createRouter({
     {
       path: '/capture/window',
       component: () => import('@/views/CaptureWindowPage.vue'),
-      meta: { admin: true },
+      meta: { deployer: true },
     },
     { path: '/:pathMatch(.*)*', redirect: '/' },
   ],
@@ -92,6 +97,8 @@ router.beforeEach((to) => {
   }
   if (to.name === 'login' && auth.isAuthenticated) return { name: 'dashboard' }
   if (to.matched.some((r) => r.meta.admin) && !auth.isAdmin) return { name: 'dashboard' }
+  // An instance admin captures on their instances.
+  if (to.matched.some((r) => r.meta.deployer) && !auth.canDeploy) return { name: 'dashboard' }
 })
 
 // Leaving a page with unsaved changes asks first; a query change keeps the
