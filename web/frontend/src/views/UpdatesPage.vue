@@ -46,6 +46,13 @@ const jobTitle = {
   upgrade: 'Debian upgrade',
   update: 'Portitor update',
 }
+// terminalText shows output as a terminal would: a carriage return (dpkg's
+// "Reading database ... 5%" progress) starts the line over.
+const terminalText = (s) =>
+  s
+    .split('\n')
+    .map((l) => l.replace(/\r+$/, '').split('\r').pop())
+    .join('\n')
 const stateColor = (s) => (s === 'succeeded' ? 'success' : s === 'failed' ? 'error' : 'info')
 
 async function load() {
@@ -313,7 +320,7 @@ async function reboot() {
       <pre
         v-if="j.output"
         class="max-h-96 overflow-auto rounded bg-elevated p-3 font-mono text-xs whitespace-pre-wrap"
-        >{{ j.output }}</pre
+        >{{ terminalText(j.output) }}</pre
       >
       <p v-if="j.name === 'update' && j.state === 'succeeded'" class="mt-2 text-sm text-muted">
         Reload the page to load the new GUI.
