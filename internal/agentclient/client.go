@@ -241,17 +241,28 @@ func (c *Client) Console(ctx context.Context, instance string) (*websocket.Conn,
 // Capture starts a packet capture and returns its pcap stream; closing it
 // (or cancelling ctx) stops the capture on the agent.
 func (c *Client) Capture(ctx context.Context, req agentapi.CaptureRequest) (io.ReadCloser, error) {
+	return c.stream(ctx, "/v1/capture", req)
+}
+
+// Trace starts a traceroute and returns its stream of agentapi.TraceEvents
+// (JSON lines); closing it (or cancelling ctx) stops mtr on the agent.
+func (c *Client) Trace(ctx context.Context, req agentapi.TraceRequest) (io.ReadCloser, error) {
+	return c.stream(ctx, "/v1/trace", req)
+}
+
+// stream posts req and returns the answer's body as it comes.
+func (c *Client) stream(ctx context.Context, path string, req any) (io.ReadCloser, error) {
 	data, err := json.Marshal(req)
 	if err != nil {
 		return nil, err
 	}
-	hreq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v1/capture", bytes.NewReader(data))
+	hreq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(data))
 	if err != nil {
 		return nil, err
 	}
 	hreq.Header.Set("Authorization", "Bearer "+c.token)
 	hreq.Header.Set("Content-Type", "application/json")
-	// A capture outlives the client's timeout for requests.
+	// A stream outlives the client's timeout for requests.
 	hc := *c.http
 	hc.Timeout = 0
 	resp, err := hc.Do(hreq)

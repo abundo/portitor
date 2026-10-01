@@ -144,6 +144,7 @@ func (a *Agent) Handler() http.Handler {
 	})
 	mux.HandleFunc("GET /v1/console", a.handleConsole)
 	mux.HandleFunc("POST /v1/capture", a.handleCapture)
+	mux.HandleFunc("POST /v1/trace", a.handleTrace)
 	return a.authMiddleware(mux)
 }
 

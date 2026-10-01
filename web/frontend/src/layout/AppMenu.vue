@@ -18,7 +18,10 @@ const tools = computed(() => [
     ? [{ label: 'Console', icon: 'i-lucide-square-terminal', to: '/console', slot: 'console' }]
     : []),
   ...(auth.canDeploy
-    ? [{ label: 'Packet capture', icon: 'i-lucide-radio-tower', to: '/capture' }]
+    ? [
+        { label: 'Packet capture', icon: 'i-lucide-radio-tower', to: '/capture' },
+        { label: 'Traceroute', icon: 'i-lucide-waypoints', to: '/traceroute' },
+      ]
     : []),
 ])
 const sections = computed(() => [

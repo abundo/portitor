@@ -498,3 +498,42 @@ type LLDPNeighbour struct {
 	LastSeen  time.Time `json:"last_seen"`
 	Expires   time.Time `json:"expires"`
 }
+
+// TraceRequest starts an MTR-style traceroute (POST /v1/trace): mtr runs
+// in the instance's namespace and the answer is a stream of TraceEvents,
+// one JSON object per line, until Count rounds are sent or the client
+// disconnects. An error before mtr starts is a JSON ErrorResponse.
+type TraceRequest struct {
+	Instance string `json:"instance"`
+	// Interface is the instance interface to send from; empty lets the
+	// routing table decide.
+	Interface string `json:"interface,omitempty"`
+	// Target is an IPv4 or IPv6 address, or a DNS name that the agent
+	// resolves in the instance's namespace (of Family, if given).
+	Target string `json:"target"`
+	Family string `json:"family,omitempty"` // "", "ipv4" or "ipv6"
+	Count  int    `json:"count,omitempty"`  // rounds; 0 is TraceDefaultCount
+}
+
+// TraceEvent is the address traced ("target", first), a hop address's
+// reverse DNS name ("name", when one is found), or one line of
+// mtr --raw: a probe sent to hop Hop ("sent"),
+// the address that answers for a hop ("host"), or a reply ("reply") with
+// its round trip in microseconds. "error" ends a trace that failed.
+type TraceEvent struct {
+	Type  string `json:"type"`
+	Hop   int    `json:"hop"`
+	Seq   int    `json:"seq,omitempty"`
+	Addr  string `json:"addr,omitempty"`
+	RTTus int    `json:"rtt_us,omitempty"`
+	Name  string `json:"name,omitempty"`
+	Error string `json:"error,omitempty"`
+}
+
+// Traceroute limits, enforced by the agent.
+const (
+	TraceDefaultCount = 10
+	TraceMaxCount     = 3600
+	// TraceMaxSessions is how many traces may run at once.
+	TraceMaxSessions = 4
+)

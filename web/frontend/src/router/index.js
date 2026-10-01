@@ -53,6 +53,11 @@ const router = createRouter({
           meta: { deployer: true },
         },
         {
+          path: 'traceroute',
+          component: () => import('@/views/TracePage.vue'),
+          meta: { deployer: true },
+        },
+        {
           path: 'updates',
           component: () => import('@/views/UpdatesPage.vue'),
           meta: { admin: true },

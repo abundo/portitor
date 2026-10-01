@@ -443,7 +443,7 @@ def install_agent(host: Host, binary: Path, deploy: Path, version: str, assume_y
         on = "" if host.local else f" (on {host.name})"
         log(f"==> portitor-agent is installed but not started. Next steps{on}:")
         log("    install nftables, iproute2, wireguard-tools, bind9, kea-dhcp4-server,")
-        log("      kea-dhcp6-server, radvd, tcpdump and tshark (or your distribution's equivalents)")
+        log("      kea-dhcp6-server, radvd, tcpdump, tshark and mtr-tiny (or your distribution's equivalents)")
         log("    portitor-agent init --host <management address>   # token + fingerprint for the GUI")
         log(f"    $EDITOR {AGENT_CONFIG}                     # listen, allow_from, bind_user")
         log("    systemctl disable --now named kea-dhcp4-server kea-dhcp6-server radvd")

@@ -15,7 +15,7 @@ are in [README.md](README.md).
 | `cmd/portitor-agent` | Agent daemon on the firewall: `start`, `init`, `render`, `netns-exec` |
 | `internal/fwconfig` | The desired-state document and `Validate()`. **The contract between web and agent.** |
 | `internal/render` | Pure functions: document → nftables, WireGuard, named.conf, Kea, dnsmgr2 config |
-| `internal/agent` | Agent: apply/reconcile, commit-confirm, DHCP and DHCPv6 (prefix delegation) clients, IP lists, task scheduler, packet log (NFLOG), WireGuard endpoint re-resolving, packet capture (tcpdump, streamed rate-limited), LLDP (sent and heard on raw sockets, `lldp.go`), neighbours (ARP/ND, LLDP), status, API server |
+| `internal/agent` | Agent: apply/reconcile, commit-confirm, DHCP and DHCPv6 (prefix delegation) clients, IP lists, task scheduler, packet log (NFLOG), WireGuard endpoint re-resolving, packet capture (tcpdump, streamed rate-limited), traceroute (`mtr --raw`, streamed as JSON lines, `trace.go`), LLDP (sent and heard on raw sockets, `lldp.go`), neighbours (ARP/ND, LLDP), status, API server |
 | `internal/dyndns` | Dynamic DNS client (RFC 2136, from ifnsupdate); the agent runs it per instance netns |
 | `internal/iplist` | Downloads IP lists (CrowdSec LAPI decisions, plain-text lists) |
 | `internal/wgkeys` | WireGuard key generation (wg(8) base64) |
