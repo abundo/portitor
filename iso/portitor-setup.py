@@ -1041,8 +1041,9 @@ class NetworkPage(Page):
             yield row("Address", Input(st.get("address", "") if static else "", id="address", placeholder="192.168.1.10/24"))
             yield row("Default gateway", Input(st.get("gateway", ""), id="gateway", placeholder="192.168.1.1"))
         yield row("DNS servers", Input(st.get("dns") or PUBLIC_DNS, id="dns"))
-        yield Static("DNS servers " + ("this host uses." if kind == "host" else
-                                       "the firewall itself uses (updates, IP lists)."), classes="hint")
+        yield Static("DNS servers " + ("this host uses" if kind == "host" else "the firewall itself uses")
+                     + ": during the rest of the installation (packages, Portitor) and afterwards for "
+                     + ("updates." if kind == "host" else "updates and IP lists."), classes="hint")
         if role == "agent":
             yield row("portitor-web from", Input(st.get("web_from", ""), id="web_from", placeholder="the LAN network"))
             yield Static(f"portitor-web calls the agent on port {AGENT_PORT} from this address or network; "
