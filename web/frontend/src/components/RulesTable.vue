@@ -13,7 +13,7 @@
 // delete it (`remove`).
 // Address cells take a comma-separated list of addresses, CIDRs, names or
 // IP lists (@name); From/To cells a comma-separated list of interfaces and
-// interface zones; the Service cell a menu to tick services in (custom and
+// interface zones, ticked in a menu; the Service cell a menu to tick services in (custom and
 // predefined, such as ssh or ping), whose search can create a new one.
 // Each of these offers "any" first, which empties the cell.
 // The search box above the grid shows only the rows with a cell containing
@@ -398,17 +398,8 @@ function listSuggestions(names, text) {
   }
   return out
 }
-// suggestionLabel shows an interface suggestion's label, if it has one
-// besides its name, and its description.
-function suggestionLabel(it) {
-  const label = it.label && !it.value.endsWith(it.label) ? it.label : ''
-  return [label, it.description].filter(Boolean).join(' — ') || undefined
-}
 // "any" comes first in the suggestions; picking it empties the cell.
 const anySuggestion = { value: 'any', description: 'clears the list' }
-const ifaceSuggestions = computed(() =>
-  listSuggestions([anySuggestion, ...props.ifaces], typed.value),
-)
 const nameSuggestions = computed(() =>
   listSuggestions(
     [anySuggestion, ...[...objects.names, ...objects.listRefs].map((n) => ({ value: n }))],
@@ -438,6 +429,33 @@ function rowServiceItems(r) {
     extraServiceItems.byKey.set(key, items)
   }
   return items
+}
+// rowIfaceItems is the From/To menu: "any", then one row per interface
+// ("WAN (ens18)") and zone, plus the names the list holds that the instance
+// lacks; cached like rowServiceItems.
+const baseIfaceItems = computed(() => [
+  { label: 'any', value: 'any', description: 'clears the list' },
+  ...props.ifaces.map((it) => ({ ...it, label: it.label || it.value })),
+])
+let extraIfaceItems = { base: null, byKey: new Map() }
+function rowIfaceItems(list) {
+  const base = baseIfaceItems.value
+  const extra = (list ?? []).filter((n) => !ifaceItem.value.has(n))
+  if (!extra.length) return base
+  if (extraIfaceItems.base !== base) extraIfaceItems = { base, byKey: new Map() }
+  const key = extra.join(',')
+  let items = extraIfaceItems.byKey.get(key)
+  if (!items) {
+    items = [
+      ...base,
+      ...extra.map((n) => ({ label: n, value: n, description: 'unknown interface' })),
+    ]
+    extraIfaceItems.byKey.set(key, items)
+  }
+  return items
+}
+function setIfaces(r, key, list) {
+  set(r, key, list.includes('any') ? [] : list)
 }
 const serviceFilterFields = ['label', 'description']
 const serviceSelectUi = { content: 'min-w-96' }
@@ -848,63 +866,47 @@ function onKeydown(event, index) {
                     @change="set(r, 'enabled', $event.target.checked)"
                   />
                 </td>
-                <td v-if="hasFrom">
-                  <div
-                    v-if="isHit(r, 'in_interfaces')"
-                    class="search-mirror"
-                    aria-hidden="true"
-                    v-html="highlight(listText(r.in_interfaces))"
-                  />
-                  <input
-                    :readonly="readOnly"
-                    :value="cellText(r, 'in_interfaces', (r.in_interfaces ?? []).join(', '))"
+                <td
+                  v-if="hasFrom"
+                  :class="{ 'search-hit': isHit(r, 'in_interfaces') || isHit(r, 'in_labels') }"
+                >
+                  <USelectMenu
+                    :disabled="readOnly"
+                    :model-value="r.in_interfaces ?? []"
+                    multiple
+                    :items="rowIfaceItems(r.in_interfaces)"
+                    value-key="value"
+                    :filter-fields="serviceFilterFields"
+                    variant="none"
+                    size="xs"
+                    placeholder="any"
                     data-col="in_interfaces"
-                    :list="`rules-grid-ifaces-${chain}`"
-                    placeholder="any"
                     :title="ifaceTitle(r.in_interfaces, 'Incoming interfaces or interface zones')"
-                    @focus="onFocus"
-                    @input="onType(r, 'in_interfaces', $event)"
-                    @change="setList(r, 'in_interfaces', $event)"
-                    @blur="endDraft"
-                    @keydown="onKeydown($event, i)"
+                    class="service-select w-full"
+                    :ui="serviceSelectUi"
+                    @update:model-value="setIfaces(r, 'in_interfaces', $event)"
                   />
-                  <div
-                    v-if="isHit(r, 'in_labels')"
-                    class="iface-desc"
-                    v-html="highlight(ifaceLabels(r.in_interfaces))"
-                  />
-                  <div v-else-if="ifaceLabels(r.in_interfaces)" class="iface-desc">
-                    {{ ifaceLabels(r.in_interfaces) }}
-                  </div>
                 </td>
-                <td v-if="hasTo">
-                  <div
-                    v-if="isHit(r, 'out_interfaces')"
-                    class="search-mirror"
-                    aria-hidden="true"
-                    v-html="highlight(listText(r.out_interfaces))"
-                  />
-                  <input
-                    :readonly="readOnly"
-                    :value="cellText(r, 'out_interfaces', (r.out_interfaces ?? []).join(', '))"
-                    data-col="out_interfaces"
-                    :list="`rules-grid-ifaces-${chain}`"
+                <td
+                  v-if="hasTo"
+                  :class="{ 'search-hit': isHit(r, 'out_interfaces') || isHit(r, 'out_labels') }"
+                >
+                  <USelectMenu
+                    :disabled="readOnly"
+                    :model-value="r.out_interfaces ?? []"
+                    multiple
+                    :items="rowIfaceItems(r.out_interfaces)"
+                    value-key="value"
+                    :filter-fields="serviceFilterFields"
+                    variant="none"
+                    size="xs"
                     placeholder="any"
+                    data-col="out_interfaces"
                     :title="ifaceTitle(r.out_interfaces, 'Outgoing interfaces or interface zones')"
-                    @focus="onFocus"
-                    @input="onType(r, 'out_interfaces', $event)"
-                    @change="setList(r, 'out_interfaces', $event)"
-                    @blur="endDraft"
-                    @keydown="onKeydown($event, i)"
+                    class="service-select w-full"
+                    :ui="serviceSelectUi"
+                    @update:model-value="setIfaces(r, 'out_interfaces', $event)"
                   />
-                  <div
-                    v-if="isHit(r, 'out_labels')"
-                    class="iface-desc"
-                    v-html="highlight(ifaceLabels(r.out_interfaces))"
-                  />
-                  <div v-else-if="ifaceLabels(r.out_interfaces)" class="iface-desc">
-                    {{ ifaceLabels(r.out_interfaces) }}
-                  </div>
                 </td>
                 <td>
                   <div
@@ -1095,14 +1097,6 @@ function onKeydown(event, index) {
             :key="it.value"
             :value="it.value"
             :label="it.description || undefined"
-          />
-        </datalist>
-        <datalist :id="`rules-grid-ifaces-${chain}`">
-          <option
-            v-for="it in ifaceSuggestions"
-            :key="it.value"
-            :value="it.value"
-            :label="suggestionLabel(it)"
           />
         </datalist>
       </div>
