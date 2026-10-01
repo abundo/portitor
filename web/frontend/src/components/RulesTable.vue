@@ -411,7 +411,11 @@ const nameSuggestions = computed(() =>
 // they stay visible (and can be unticked), after "any", which unticks them
 // all. The same list is returned until it changes: the page re-renders on
 // every log line, and new items make an open menu scroll back to the top.
+// "<create>" opens the New service dialog; it is no service name, as names
+// can't hold angle brackets.
+const createServiceValue = '<create>'
 const baseServiceItems = computed(() => [
+  { label: createServiceValue, value: createServiceValue, description: 'a new service' },
   { label: 'any', value: 'any', description: 'clears the list' },
   ...objects.serviceItems,
 ])
@@ -466,6 +470,10 @@ const serviceSelectUi = {
   itemDescription: 'truncate',
 }
 function setServices(r, list) {
+  if (list.includes(createServiceValue)) {
+    createService(r, '')
+    return
+  }
   set(r, 'services', list.includes('any') ? [] : list)
 }
 // serviceTitle shows what the services in a cell match.
@@ -956,7 +964,7 @@ function onKeydown(event, index) {
                     :items="rowServiceItems(r)"
                     value-key="value"
                     :filter-fields="serviceFilterFields"
-                    :create-item="{ position: 'bottom' }"
+                    :create-item="{ position: 'top', when: 'always' }"
                     variant="none"
                     size="xs"
                     placeholder="any"
