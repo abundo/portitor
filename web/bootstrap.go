@@ -182,7 +182,10 @@ func Bootstrap(ctx context.Context, s *Server, o BootstrapOptions) (*models.Depl
 		if err := tx.Where("is_default = ?", true).First(&in).Error; err != nil {
 			return err
 		}
-		return bootstrapNetwork(tx, in.ID, o)
+		if err := bootstrapNetwork(tx, in.ID, o); err != nil {
+			return err
+		}
+		return bootstrapDNS(tx, in.ID, o)
 	})
 	var br *badRequest
 	if errors.As(err, &br) {
@@ -318,6 +321,55 @@ func bootstrapNetwork(tx *gorm.DB, instanceID uint, o BootstrapOptions) error {
 		return err
 	}
 	return tx.Create(&nat).Error
+}
+
+// bootstrapDNS creates a starting point for DNS where there is none: the
+// SOA template soa-1, the DNS template dns-1 with the firewall as
+// ns1.home.arpa (at the LAN address, if static), and the zone home.arpa.
+func bootstrapDNS(tx *gorm.DB, instanceID uint, o BootstrapOptions) error {
+	var n int64
+	var soa models.DnsSoaTemplate
+	if err := tx.Order("id").Limit(1).Find(&soa).Error; err != nil {
+		return err
+	}
+	if soa.ID == 0 {
+		soa = models.DnsSoaTemplate{Name: "soa-1", Mname: "ns1.home.arpa", Rname: "unknown@home.arpa",
+			Refresh: 86400, Retry: 7200, Expire: 3600000, Minimum: 3600}
+		if err := prepareDnsSoaTemplate(tx, &soa, nil); err != nil {
+			return err
+		}
+		if err := tx.Create(&soa).Error; err != nil {
+			return err
+		}
+	}
+	var tmpl models.DnsTemplate
+	if err := tx.Order("id").Limit(1).Find(&tmpl).Error; err != nil {
+		return err
+	}
+	if tmpl.ID == 0 {
+		ns := models.DnsNameserver{Name: "ns1.home.arpa"}
+		if o.Address.IsValid() {
+			ns.Address = o.Address.Addr().String()
+		}
+		tmpl = models.DnsTemplate{Name: "dns-1", SoaTemplateID: soa.ID, DefaultTtl: 3600, Nameservers: models.DnsNameserverList{ns}}
+		if err := prepareDnsTemplate(tx, &tmpl, nil); err != nil {
+			return err
+		}
+		if err := tx.Create(&tmpl).Error; err != nil {
+			return err
+		}
+	}
+	if err := tx.Model(&models.DnsZone{}).Where("instance_id = ?", instanceID).Count(&n).Error; err != nil {
+		return err
+	}
+	if n > 0 {
+		return nil
+	}
+	z := models.DnsZone{InstanceID: instanceID, Name: "home.arpa", Type: fwconfig.ZoneForward, DnsTemplateID: &tmpl.ID}
+	if err := prepareDnsZone(tx, &z, nil); err != nil {
+		return err
+	}
+	return tx.Create(&z).Error
 }
 
 // bootstrapGUIService returns the name of the GUI port's service, a service
