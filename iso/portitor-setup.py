@@ -108,7 +108,7 @@ ISSUE = Path("/etc/issue.d/portitor.issue")
 RESOLV_CONF = Path("/etc/resolv.conf")
 KEYBOARD = Path("/etc/default/keyboard")
 XKB_RULES = Path("/usr/share/X11/xkb/rules/base.lst")
-# The layouts listed first; every other XKB layout follows.
+# The layouts when base.lst is missing.
 LAYOUTS = [
     ("us", "English (US)"), ("gb", "English (UK)"), ("de", "German"), ("fr", "French"),
     ("es", "Spanish"), ("it", "Italian"), ("pt", "Portuguese"), ("nl", "Dutch"),
@@ -267,6 +267,17 @@ def check_timezone(text: str) -> str:
 
 def current_timezone() -> str:
     return run(["timedatectl", "show", "-p", "Timezone", "--value"], check=False, quiet=True).stdout.strip() or "Etc/UTC"
+
+
+def timezones() -> list[str]:
+    """The time zones timedatectl knows, current() among them."""
+    zones = run(["timedatectl", "list-timezones"], check=False, quiet=True).stdout.split()
+    return zones or ["Etc/UTC"]
+
+
+def tz_region(zone: str) -> str:
+    """Europe for Europe/Stockholm; Etc for a zone without a region (UTC)."""
+    return zone.split("/", 1)[0] if "/" in zone else "Etc"
 
 
 def xkb_layouts() -> dict[str, str]:
@@ -781,18 +792,24 @@ def finish(a: dict) -> None:
     ANSWERS.unlink(missing_ok=True)
 
 
+def nic_label(name: str) -> str:
+    """ens18 (52:54:00:12:34:56)"""
+    mac = next((n["mac"] for n in nics() if n["name"] == name), "")
+    return f"{name} ({mac})" if mac else name
+
+
 def summary(a: dict) -> list[str]:
     out = [f"Runs            {a['role']}: {dict(ROLES)[a['role']]}"]
     if a["role"] == "web":
-        out += [f"Interface       {a['lan']}",
+        out += [f"Interface       {nic_label(a['lan'])}",
                 f"Address         {a['address'] or 'DHCP'}",
                 f"Default gateway {a['gateway'] or 'from DHCP'}"]
     elif a["role"] == "agent" and a.get("reconfigure"):
         out.append(f"portitor-web    {a['web_from']}")
     else:
-        out += [f"LAN interface   {a['lan']}",
+        out += [f"LAN interface   {nic_label(a['lan'])}",
                 f"LAN address     {a['address'] or 'DHCP (no default route)'}",
-                f"WAN interface   {a['wan']}",
+                f"WAN interface   {nic_label(a['wan'])}",
                 f"WAN address     {a['wan_address'] or 'DHCP'}",
                 f"Default gateway {a['gateway'] or 'from DHCP'}"]
         if a["role"] == "agent":
@@ -945,8 +962,8 @@ class KeyboardPage(Page):
 
     def on_mount(self) -> None:
         self.known = xkb_layouts()
-        first = [(c, n) for c, n in LAYOUTS if c in self.known] or LAYOUTS
-        self.ordered = first + sorted((c, n) for c, n in self.known.items() if c not in dict(first))
+        # By name, which mostly starts with the language or country.
+        self.ordered = sorted(self.known.items(), key=lambda cn: (cn[1].casefold(), cn[0]))
         self.fill("", self.state.get("keyboard") or current_layout())
         self.query_one("#layouts").focus()
 
@@ -1126,11 +1143,30 @@ class AccountPage(Page):
             yield Static(f"One password for {who}, {MIN_PASSWORD} characters or more.", classes="text")
         yield row("Password", Input(password=True, id="password"))
         yield row("Again", Input(password=True, id="again"))
-        yield row("Time zone", Input(self.state.get("tz") or current_timezone(), id="tz", placeholder="Europe/Stockholm"))
+        tz = self.state.get("tz") or current_timezone()
+        self.zones = timezones()
+        if tz not in self.zones:
+            self.zones.append(tz)
+        regions = sorted({tz_region(z) for z in self.zones})
+        yield row("Region", Select([(r, r) for r in regions], id="region", allow_blank=False, value=tz_region(tz)))
+        yield row("Time zone", Select(self.zone_options(tz_region(tz)), id="tz", allow_blank=False, value=tz))
         yield Static("Scheduled tasks use the time zone.", classes="hint")
 
     def on_mount(self) -> None:
         self.query_one("#password").focus()
+
+    def zone_options(self, region: str) -> list[tuple[str, str]]:
+        """The region's zones, named without the region (Stockholm)."""
+        return [(z.split("/", 1)[1] if "/" in z else z, z) for z in sorted(self.zones) if tz_region(z) == region]
+
+    @on(Select.Changed, "#region")
+    def _region(self, event: Select.Changed) -> None:
+        select = self.query_one("#tz", Select)
+        current = select.value
+        options = self.zone_options(str(event.value))
+        select.set_options(options)
+        if any(v == current for _, v in options):
+            select.value = current
 
     def save(self) -> None:
         a = self.a
@@ -1141,7 +1177,7 @@ class AccountPage(Page):
             if self.query_one("#again", Input).value != pw:
                 raise ValueError("Password: the passwords differ")
         a["password"] = pw
-        a["tz"] = check_timezone(self.query_one("#tz", Input).value.strip())
+        a["tz"] = check_timezone(str(self.query_one("#tz", Select).value))
         if self.app.reconfigure:
             a["reconfigure"] = True
             a["new_cert"] = str(a["address"] or "dhcp") != self.state.get("address")
@@ -1336,6 +1372,9 @@ Button:focus { text-style: bold; }
 
 class SetupApp(App):
     TITLE = "Portitor setup"
+    # Ctrl-Q does not reach the app in every terminal (xterm.js); priority
+    # so an Input's copy binding does not take it.
+    BINDINGS = [Binding("ctrl+c", "quit", "Quit", priority=True)]
     ENABLE_COMMAND_PALETTE = False
     CSS = """
     #body { padding: 0 2; }
