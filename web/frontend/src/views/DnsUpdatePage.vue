@@ -5,7 +5,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import CrudPage from '@/components/CrudPage.vue'
 import NeedInstance from '@/components/NeedInstance.vue'
-import { dyndnsClients, dyndnsRecords } from '@/api'
+import { api, dyndnsClients, dyndnsRecords } from '@/api'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
 import { useDeployStore } from '@/stores/deploy'
 import { ago } from '@/utils/time'
@@ -14,6 +14,49 @@ import { valuesText } from '@/utils/search'
 const { store, ifaceItems, ifaceName } = useInstanceRefs()
 const deploy = useDeployStore()
 onMounted(() => deploy.refresh())
+
+// DNS hosting providers and their settings (fwconfig.DNSProviders).
+const providers = ref([])
+onMounted(async () => (providers.value = await api.dnsProviders()))
+const RFC2136 = 'rfc2136'
+const isRFC2136 = (f) => !f.provider || f.provider === RFC2136
+const providerLabel = (name) =>
+  providers.value.find((p) => p.name === (name || RFC2136))?.label ?? name
+
+// Saves send only the chosen provider's settings: switching provider in
+// the form leaves the other one's in it.
+function onlyProvider(body) {
+  const fields = providers.value.find((p) => p.name === body.provider)?.fields ?? []
+  const settings = {}
+  for (const f of fields) settings[f.key] = body.provider_settings?.[f.key] ?? ''
+  return { ...body, provider_settings: settings }
+}
+const clientApi = {
+  ...dyndnsClients,
+  create: (body) => dyndnsClients.create(onlyProvider(body)),
+  update: (id, body) => dyndnsClients.update(id, onlyProvider(body)),
+}
+
+// One form row per provider setting, shown for its provider.
+const providerFields = computed(() =>
+  providers.value.flatMap((p) =>
+    (p.fields ?? []).map((f) => ({
+      key: `provider_${p.name}_${f.key}`,
+      label: f.label,
+      type: 'custom',
+      required: f.required,
+      hint: f.secret
+        ? [f.hint, 'Stored on the server and never shown again.'].filter(Boolean).join(' ')
+        : f.hint,
+      show: (form) => form.provider === p.name,
+      setting: f,
+    })),
+  ),
+)
+function settingPlaceholder(form, f) {
+  if (f.secret && form.provider_secrets_set?.includes(f.key)) return 'stored; empty keeps it'
+  return f.placeholder ?? ''
+}
 
 const clients = ref([])
 const selectedId = ref(null)
@@ -41,7 +84,11 @@ const clientColumns = [
   { key: 'name', label: 'Name', class: 'font-medium' },
   { key: 'interface_id', label: 'Interface', format: (r) => ifaceName(r.interface_id) },
   { key: 'zone', label: 'Zone', class: 'font-mono' },
-  { key: 'server', label: 'Nameserver', class: 'font-mono' },
+  {
+    key: 'server',
+    label: 'Provider',
+    format: (r) => (isRFC2136(r) ? r.server : providerLabel(r.provider)),
+  },
   { key: 'state', label: 'State' },
   { key: 'enabled', label: 'Enabled' },
 ]
@@ -53,7 +100,7 @@ const algorithms = [
   'hmac-sha1',
   'hmac-md5',
 ]
-const clientFields = [
+const clientFields = computed(() => [
   { key: 'name', label: 'Name', required: true, placeholder: 'home' },
   { key: 'description', label: 'Description' },
   {
@@ -64,26 +111,36 @@ const clientFields = [
     required: true,
     hint: "A and AAAA records without a value get this interface's first global address.",
   },
+  { key: 'zone', label: 'Zone', required: true, placeholder: 'example.com' },
+  {
+    key: 'provider',
+    label: 'Provider',
+    type: 'select',
+    items: providers.value.map((p) => ({ label: p.label, value: p.name })),
+    hint: 'RFC 2136 updates your own nameserver from this instance. A DNS hosting provider is updated through its API, called from the firewall host.',
+  },
+  ...providerFields.value,
   {
     key: 'server',
     label: 'Nameserver',
     required: true,
-    placeholder: '192.0.2.53 or [2001:db8::53]:53',
-    hint: "The zone's primary nameserver, by IP address. Updates are sent from this instance.",
+    placeholder: '192.0.2.53, [2001:db8::53]:53 or ns1.example.com',
+    hint: "The zone's primary nameserver, by IP address or DNS name, optionally with a port. Updates are sent from this instance, and a name is looked up there.",
+    show: isRFC2136,
   },
-  { key: 'zone', label: 'Zone', required: true, placeholder: 'example.com' },
   {
     key: 'tsig_name',
     label: 'TSIG key name',
     placeholder: 'ddns-key.example.com',
     hint: 'Empty: updates are not signed.',
+    show: isRFC2136,
   },
   {
     key: 'tsig_algorithm',
     label: 'TSIG algorithm',
     type: 'select',
     items: algorithms,
-    show: (f) => !!f.tsig_name,
+    show: (f) => isRFC2136(f) && !!f.tsig_name,
   },
   {
     key: 'tsig_secret',
@@ -91,7 +148,7 @@ const clientFields = [
     type: 'password',
     placeholder: 'base64, as in the key file',
     hint: 'Stored on the server and never shown again. Leave empty to keep the stored secret.',
-    show: (f) => !!f.tsig_name,
+    show: (f) => isRFC2136(f) && !!f.tsig_name,
   },
   {
     key: 'retry_interval',
@@ -106,7 +163,7 @@ const clientFields = [
     hint: 'How often records with a fixed value are checked. 0: 3600.',
   },
   { key: 'enabled', label: 'Enabled', type: 'switch' },
-]
+])
 
 const recordColumns = [
   { key: 'name', label: 'Name', class: 'font-mono' },
@@ -147,15 +204,17 @@ const recordFields = [
   <NeedInstance>
     <div class="space-y-4">
       <CrudPage
-        title="Dynamic DNS"
-        noun="dynamic DNS client"
-        description="Keep records on a nameserver in step with an interface's addresses, by RFC 2136 dynamic update (TSIG signed). Records are checked when the addresses change and updated only when they differ."
-        :api="dyndnsClients"
+        title="DNS update"
+        noun="DNS update client"
+        description="Keep DNS records in step with an interface's addresses: on your own nameserver by RFC 2136 dynamic update (TSIG signed), or at a DNS hosting provider through its API. Records are checked when the addresses change and updated only when they differ."
+        :api="clientApi"
         :params="{ instance_id: store.currentId }"
         :columns="clientColumns"
         :fields="clientFields"
         :defaults="{
           enabled: true,
+          provider: 'rfc2136',
+          provider_settings: {},
           tsig_algorithm: 'hmac-sha256',
           retry_interval: 0,
           verify_interval: 0,
@@ -164,6 +223,15 @@ const recordFields = [
         :search-text="(row) => valuesText(states[row.name])"
         @changed="loadClients"
       >
+        <template v-for="pf in providerFields" :key="pf.key" #[`field-${pf.key}`]="{ form }">
+          <UInput
+            v-model="form.provider_settings[pf.setting.key]"
+            :type="pf.setting.secret ? 'password' : 'text'"
+            :placeholder="settingPlaceholder(form, pf.setting)"
+            autocomplete="off"
+            class="w-full"
+          />
+        </template>
         <template #cell-state="{ row }">
           <div v-if="states[row.name]" class="space-y-0.5 text-xs">
             <UBadge
@@ -175,6 +243,9 @@ const recordFields = [
             </UBadge>
             <div v-if="states[row.name].ipv4 || states[row.name].ipv6" class="font-mono">
               {{ [states[row.name].ipv4, states[row.name].ipv6].filter(Boolean).join(', ') }}
+            </div>
+            <div v-if="states[row.name].server" class="font-mono text-muted">
+              nameserver {{ states[row.name].server }}
             </div>
             <div class="text-muted">updated {{ ago(states[row.name].last_update) }}</div>
             <div v-if="states[row.name].last_error" class="text-error">

@@ -170,9 +170,30 @@ func TestValidateCatchesProblems(t *testing.T) {
 		{"dnssec unknown policy", func(d *Document) { d.Instances[0].DNS.ZoneTemplates[0].DNSSECPolicy = "x" }, `unknown dnssec policy "x"`},
 		{"dnat family mismatch", func(d *Document) { d.Instances[0].NAT[0].DstAddrs = []string{"2001:db8::1"} }, "differ in family"},
 		{"dyndns unknown interface", func(d *Document) { d.Instances[0].DynDNS[0].Interface = "eth2" }, `unknown interface "eth2"`},
-		{"dyndns server name", func(d *Document) { d.Instances[0].DynDNS[0].Server = "ns1.example.com:53" }, "not an IP address"},
+		{"dyndns server bad name", func(d *Document) { d.Instances[0].DynDNS[0].Server = "ns1" }, "not an IP address or DNS name"},
+		{"dyndns server bad port", func(d *Document) { d.Instances[0].DynDNS[0].Server = "ns1.example.com:99999" }, "not an IP address or DNS name"},
 		{"dyndns bad secret", func(d *Document) { d.Instances[0].DynDNS[0].TSIG.Secret = "not base64!" }, "TSIG secret must be base64"},
 		{"dyndns bad algorithm", func(d *Document) { d.Instances[0].DynDNS[0].TSIG.Algorithm = "gss-tsig" }, "TSIG algorithm must be"},
+		{"dyndns unknown provider", func(d *Document) { d.Instances[0].DynDNS[0].Provider = "nope" }, `unknown provider "nope"`},
+		{"dyndns provider with server", func(d *Document) {
+			d.Instances[0].DynDNS[0].Provider = "desec"
+			d.Instances[0].DynDNS[0].ProviderSettings = map[string]string{"token": "t"}
+		}, "for RFC 2136 only"},
+		{"dyndns provider setting missing", func(d *Document) {
+			dd := &d.Instances[0].DynDNS[0]
+			dd.Provider, dd.Server, dd.TSIG = "porkbun", "", nil
+			dd.ProviderSettings = map[string]string{"api_key": "k"}
+		}, "Porkbun needs Secret API key"},
+		{"dyndns provider unknown setting", func(d *Document) {
+			dd := &d.Instances[0].DynDNS[0]
+			dd.Provider, dd.Server, dd.TSIG = "desec", "", nil
+			dd.ProviderSettings = map[string]string{"token": "t", "x": "y"}
+		}, `has no setting "x"`},
+		{"dyndns provider setting newline", func(d *Document) {
+			dd := &d.Instances[0].DynDNS[0]
+			dd.Provider, dd.Server, dd.TSIG = "desec", "", nil
+			dd.ProviderSettings = map[string]string{"token": "a\nb"}
+		}, "control characters"},
 		{"dyndns no records", func(d *Document) { d.Instances[0].DynDNS[0].Records = nil }, "at least one record"},
 		{"dyndns name outside zone", func(d *Document) { d.Instances[0].DynDNS[0].Records[0].Name = "home.example.org." }, "not in zone"},
 		{"dyndns duplicate record", func(d *Document) { d.Instances[0].DynDNS[0].Records[1].Type = "A" }, "duplicate (one record per name and type)"},
@@ -276,9 +297,14 @@ func TestDynDNSOwner(t *testing.T) {
 			t.Errorf("%q: got %q %v, want %q", tc.name, got, err, tc.want)
 		}
 	}
-	for s, want := range map[string]string{"192.0.2.53": "192.0.2.53:53", "192.0.2.53:5353": "192.0.2.53:5353", "2001:db8::53": "[2001:db8::53]:53", "[2001:db8::53]:54": "[2001:db8::53]:54"} {
-		if got, err := DynDNSServerAddr(s); err != nil || got.String() != want {
-			t.Errorf("server %q: got %v %v, want %s", s, got, err, want)
+	for s, want := range map[string]string{
+		"192.0.2.53": "192.0.2.53:53", "192.0.2.53:5353": "192.0.2.53:5353",
+		"2001:db8::53": "[2001:db8::53]:53", "[2001:db8::53]:54": "[2001:db8::53]:54",
+		"NS1.Example.com.": "ns1.example.com:53", "ns1.example.com:5353": "ns1.example.com:5353",
+		"ns1": "", "ns1.example.com:0": "", "a b.example.com": "", "[fe80::1%x]:53": "", "ns1.example.com\n": "",
+	} {
+		if got, err := DynDNSServer(s); got != want || (err == nil) != (want != "") {
+			t.Errorf("server %q: got %q %v, want %q", s, got, err, want)
 		}
 	}
 }

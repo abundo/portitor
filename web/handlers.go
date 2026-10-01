@@ -1169,6 +1169,16 @@ func redactDoc(doc fwconfig.Document) fwconfig.Document {
 				t.Secret = "<redacted>"
 				d.TSIG = &t
 			}
+			if p := fwconfig.FindDNSProvider(d.Provider); p != nil && len(d.ProviderSettings) > 0 {
+				settings := make(map[string]string, len(d.ProviderSettings))
+				for k, v := range d.ProviderSettings {
+					if f := p.Field(k); f == nil || f.Secret {
+						v = "<redacted>"
+					}
+					settings[k] = v
+				}
+				d.ProviderSettings = settings
+			}
 			cp.DynDNS[j] = d
 		}
 		out.Instances[i] = cp

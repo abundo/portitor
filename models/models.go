@@ -64,6 +64,40 @@ func (s StringList) MarshalJSON() ([]byte, error) {
 
 func (StringList) GormDataType() string { return "text" }
 
+// StringMap is stored as a JSON object in a TEXT column.
+type StringMap map[string]string
+
+func (m StringMap) Value() (driver.Value, error) {
+	if m == nil {
+		return "{}", nil
+	}
+	b, err := json.Marshal(map[string]string(m))
+	return string(b), err
+}
+
+func (m *StringMap) Scan(src any) error {
+	var data []byte
+	switch v := src.(type) {
+	case nil:
+		*m = StringMap{}
+		return nil
+	case string:
+		data = []byte(v)
+	case []byte:
+		data = v
+	default:
+		return errors.New("StringMap: unsupported type")
+	}
+	out := map[string]string{}
+	if err := json.Unmarshal(data, &out); err != nil {
+		return err
+	}
+	*m = out
+	return nil
+}
+
+func (StringMap) GormDataType() string { return "text" }
+
 // ServicePort is one protocol entry of a service of type
 // ServiceTypePorts: a destination port range and optionally a source port
 // range. Lo 0 leaves a range out (any port); Hi 0 is Lo.
@@ -599,19 +633,30 @@ const (
 	DnsRecordDomain  = "$DOMAIN"
 )
 
-// DyndnsClient keeps DyndnsRecords on the nameserver Server in step with
-// the addresses of an interface of its instance (RFC 2136 UPDATE).
+// DyndnsClient (a DNS update client) keeps DyndnsRecords in step with the
+// addresses of an interface of its instance: on the nameserver Server by
+// RFC 2136 UPDATE, or through the API of a DNS hosting Provider.
 type DyndnsClient struct {
 	Base
-	InstanceID    uint   `json:"instance_id"`
-	Name          string `json:"name"`
-	Description   string `json:"description"`
-	Enabled       bool   `json:"enabled"`
-	InterfaceID   uint   `json:"interface_id"`
-	Server        string `json:"server"`
-	Zone          string `json:"zone"`
-	TsigName      string `json:"tsig_name"`
-	TsigAlgorithm string `json:"tsig_algorithm"`
+	InstanceID  uint   `json:"instance_id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Enabled     bool   `json:"enabled"`
+	InterfaceID uint   `json:"interface_id"`
+	// Provider is a fwconfig.DNSProviders name.
+	Provider string `json:"provider"`
+	// ProviderSettings are the provider's fields, secrets included; never
+	// sent back. They are written through Settings.
+	ProviderSettings StringMap `json:"-"`
+	// Settings are, written, the fields to store (an empty secret keeps
+	// the stored one) and, read, the fields that are not secret.
+	Settings map[string]string `gorm:"-" json:"provider_settings"`
+	// SecretsSet lists the secret fields that have a stored value.
+	SecretsSet    []string `gorm:"-" json:"provider_secrets_set"`
+	Server        string   `json:"server"`
+	Zone          string   `json:"zone"`
+	TsigName      string   `json:"tsig_name"`
+	TsigAlgorithm string   `json:"tsig_algorithm"`
 	// TsigSecret is set through NewTsigSecret and never sent back.
 	TsigSecret     string `json:"-"`
 	RetryInterval  int    `json:"retry_interval"`

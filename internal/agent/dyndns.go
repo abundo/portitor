@@ -6,8 +6,10 @@ package agent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
+	"net/netip"
 	"reflect"
 	"slices"
 	"strings"
@@ -31,8 +33,8 @@ type dyndnsItem struct {
 	cfg             fwconfig.DynDNS
 }
 
-// dyndnsManager runs one dynamic DNS client per DynDNS entry, in its
-// instance's network namespace.
+// dyndnsManager runs one DNS update client per DynDNS entry. RFC 2136
+// updates are sent from its instance's network namespace.
 type dyndnsManager struct {
 	dryRun bool
 
@@ -89,17 +91,18 @@ func (m *dyndnsManager) start(it dyndnsItem) *dyndnsRun {
 	r := &dyndnsRun{item: it, cancel: cancel}
 	log := slog.With("instance", it.instance, "dyndns", it.cfg.Name, "interface", it.cfg.Interface)
 	if m.dryRun {
-		log.Info("dry-run: not starting dynamic DNS client")
+		log.Info("dry-run: not starting DNS update client")
 		r.state = "dry-run"
 		return r
 	}
 	cfg, err := dyndns.NewConfig(it.cfg)
 	if err != nil {
-		log.Error("dynamic DNS client", "err", err)
+		log.Error("DNS update client", "err", err)
 		r.state, r.err = "error", err.Error()
 		return r
 	}
-	r.client = dyndns.New(cfg, dyndns.Env{
+	// A provider's API is called from the host, like IP list downloads.
+	client, err := dyndns.New(cfg, dyndns.Env{
 		Addrs: func() (net.IP, net.IP, error) { return globalAddrs(it.netns, it.cfg.Interface) },
 		// The nameserver is reached from the instance, through its routes
 		// and firewall.
@@ -111,8 +114,21 @@ func (m *dyndnsManager) start(it dyndnsItem) *dyndnsRun {
 			})
 			return resp, err
 		},
+		// A nameserver given by name is resolved in the instance too.
+		Resolve: func(ctx context.Context, host string) (netip.Addr, error) {
+			if len(host) > 253 || !dnsName.MatchString(host) {
+				return netip.Addr{}, fmt.Errorf("%q is not a DNS name", host)
+			}
+			return resolveName(ctx, it.netns, host, "")
+		},
 		Log: log,
 	})
+	if err != nil {
+		log.Error("DNS update client", "err", err)
+		r.state, r.err = "error", err.Error()
+		return r
+	}
+	r.client = client
 	changed := make(chan struct{}, 1)
 	m.wg.Add(2)
 	go func() {

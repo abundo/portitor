@@ -47,6 +47,7 @@ export const api = {
   updateMe: (body) => http.put('/me', body).then((r) => r.data),
   changePassword: (current, next) => http.post('/me/password', { current, new: next }),
   version: () => http.get('/version').then((r) => r.data),
+  dnsProviders: () => http.get('/dyndns/providers').then((r) => r.data ?? []),
 
   ipamTree: (instanceId) =>
     http.get('/ipam/tree', { params: { instance_id: instanceId } }).then((r) => r.data),

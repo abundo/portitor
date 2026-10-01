@@ -32,7 +32,7 @@ func checkDynDNS(d fwconfig.DynDNS) error {
 	if !ok {
 		return err
 	}
-	prefix := fmt.Sprintf("instance check: dynamic dns %q: ", d.Name)
+	prefix := fmt.Sprintf("instance check: dns update %q: ", d.Name)
 	var msgs []string
 	for _, p := range ve.Problems {
 		if strings.HasSuffix(p, "needs at least one record") {
@@ -46,7 +46,7 @@ func checkDynDNS(d fwconfig.DynDNS) error {
 	return bad(strings.Join(msgs, "; "))
 }
 
-func prepareDyndnsClient(tx *gorm.DB, c, _ *models.DyndnsClient) error {
+func prepareDyndnsClient(tx *gorm.DB, c, old *models.DyndnsClient) error {
 	if err := instanceExists(tx, c.InstanceID); err != nil {
 		return err
 	}
@@ -58,11 +58,26 @@ func prepareDyndnsClient(tx *gorm.DB, c, _ *models.DyndnsClient) error {
 	if tx.First(&ifc, c.InterfaceID).Error != nil || ifc.InstanceID != c.InstanceID {
 		return bad("pick an interface of this instance")
 	}
-	c.Server = strings.TrimSpace(c.Server)
-	if _, err := fwconfig.DynDNSServerAddr(c.Server); err != nil {
-		return bad("server: the nameserver's IP address, optionally with a port (192.0.2.53 or [2001:db8::53]:53)")
+	if c.Provider == "" {
+		c.Provider = fwconfig.ProviderRFC2136
+	}
+	p := fwconfig.FindDNSProvider(c.Provider)
+	if p == nil {
+		return bad(fmt.Sprintf("unknown provider %q", c.Provider))
 	}
 	c.Zone = dnsName(c.Zone)
+	if p.Name != fwconfig.ProviderRFC2136 {
+		c.Server, c.TsigName, c.TsigAlgorithm, c.TsigSecret, c.NewTsigSecret = "", "", "", "", ""
+		if err := mergeProviderSettings(p, c, old); err != nil {
+			return err
+		}
+		return checkDynDNS(builder.DynDNS(c, ifc.Name, nil))
+	}
+	c.ProviderSettings = models.StringMap{}
+	c.Server = strings.TrimSpace(c.Server)
+	if _, err := fwconfig.DynDNSServer(c.Server); err != nil {
+		return bad("server: the nameserver's IP address or DNS name, optionally with a port (192.0.2.53, [2001:db8::53]:53 or ns1.example.com)")
+	}
 	c.TsigName = dnsName(c.TsigName)
 	if secret := strings.TrimSpace(c.NewTsigSecret); secret != "" {
 		if _, err := base64.StdEncoding.DecodeString(secret); err != nil {
@@ -90,9 +105,59 @@ func prepareDyndnsClient(tx *gorm.DB, c, _ *models.DyndnsClient) error {
 	return checkDynDNS(builder.DynDNS(c, ifc.Name, records))
 }
 
+// mergeProviderSettings stores the provider's settings c.Settings holds:
+// the fields that are not secret as given, secrets when not empty (an empty
+// one keeps the stored value). Without Settings (a PUT that leaves them
+// out) the stored ones stay. A changed provider starts afresh.
+func mergeProviderSettings(p *fwconfig.DNSProvider, c, old *models.DyndnsClient) error {
+	stored := c.ProviderSettings
+	if old != nil && old.Provider != c.Provider {
+		stored = nil
+	}
+	if c.Settings == nil && stored != nil {
+		c.Settings = map[string]string{}
+		for k, v := range stored {
+			if f := p.Field(k); f != nil && !f.Secret {
+				c.Settings[k] = v
+			}
+		}
+	}
+	for k := range c.Settings {
+		if p.Field(k) == nil {
+			return bad(fmt.Sprintf("%s has no setting %q", p.Label, k))
+		}
+	}
+	out := models.StringMap{}
+	for _, f := range p.Fields {
+		v := strings.TrimSpace(c.Settings[f.Key])
+		if v == "" && f.Secret {
+			v = stored[f.Key]
+		}
+		if v != "" {
+			out[f.Key] = v
+		}
+	}
+	c.ProviderSettings, c.Settings = out, nil
+	return nil
+}
+
 func presentDyndnsClient(c *models.DyndnsClient) {
 	c.HasTsigSecret = c.TsigSecret != ""
 	c.NewTsigSecret = ""
+	c.Settings, c.SecretsSet = map[string]string{}, []string{}
+	p := fwconfig.FindDNSProvider(c.Provider)
+	if p == nil {
+		return
+	}
+	for _, f := range p.Fields {
+		switch v := c.ProviderSettings[f.Key]; {
+		case v == "":
+		case f.Secret:
+			c.SecretsSet = append(c.SecretsSet, f.Key)
+		default:
+			c.Settings[f.Key] = v
+		}
+	}
 }
 
 func deleteDyndnsClient(tx *gorm.DB, c *models.DyndnsClient) error {
@@ -102,7 +167,7 @@ func deleteDyndnsClient(tx *gorm.DB, c *models.DyndnsClient) error {
 func prepareDyndnsRecord(tx *gorm.DB, r, _ *models.DyndnsRecord) error {
 	var c models.DyndnsClient
 	if tx.First(&c, r.ClientID).Error != nil {
-		return bad("dynamic DNS client does not exist")
+		return bad("DNS update client does not exist")
 	}
 	r.Name = strings.TrimSpace(r.Name)
 	r.Type = strings.ToUpper(strings.TrimSpace(r.Type))
@@ -122,7 +187,8 @@ func prepareDyndnsRecord(tx *gorm.DB, r, _ *models.DyndnsRecord) error {
 	if err := tx.Where("client_id = ? AND id <> ?", r.ClientID, r.ID).Order("id").Find(&records).Error; err != nil {
 		return err
 	}
-	c.TsigName = "" // the key is checked with the client
+	// The key and provider settings are checked with the client.
+	c.TsigName, c.Provider, c.Server = "", fwconfig.ProviderRFC2136, "192.0.2.53"
 	return checkDynDNS(builder.DynDNS(&c, "eth0", append(records, *r)))
 }
 
@@ -133,7 +199,7 @@ func refuseDyndnsIface(tx *gorm.DB, i *models.Interface) error {
 		var names []string
 		tx.Model(&models.DyndnsClient{}).Where("interface_id = ?", i.ID).Order("name").Pluck("name", &names)
 		for j := range names {
-			names[j] = "dynamic DNS " + names[j]
+			names[j] = "DNS update " + names[j]
 		}
 		return names
 	})

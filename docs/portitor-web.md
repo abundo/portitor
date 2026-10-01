@@ -101,7 +101,7 @@ After an upgrade, run `migrate` before `start`. `install.py` does both.
 | Services | DNS | Two tabs. *DNS zones*: the zones and records the instance serves; their templates are under *Globals → DNS templates*. *DNS server*: the instance's DNS server (BIND) on or off; its upstream (forwarders, the root servers, or the DNS servers from the DHCP lease on one interface); the interfaces it answers on. |
 | | DHCP | Two tabs. *Leases*: active leases, and the leases of the firewall's own DHCP clients. *DHCP server*: the instance's DHCP server (Kea) on or off, its domain name and lease time, and the interfaces with the prefixes of their addresses, each with a DHCP switch. Badges on an interface: *DHCP Client* (it gets its IPv4 address by DHCP), *SLAAC-C* (it takes an IPv6 address from router advertisements), *RA* (it sends router advertisements). Edit an interface for its range, gateway and DNS servers, and on IPv6 prefixes router advertisements and SLAAC. Several prefixes with DHCP on one interface form a Kea shared network: clients get addresses from all of them. |
 | | WireGuard | Tunnels, road-warrior and [site-to-site](#site-to-site-wireguard) peers; generates client and site configs. |
-| | Dynamic DNS | Keeps records on an external nameserver in step with the WAN address. |
+| | DNS update | Keeps DNS records in step with an interface's addresses (the WAN, say): on your own nameserver (by IP address or DNS name, looked up in the instance) by RFC 2136 dynamic update (TSIG signed), sent from the instance, or at a DNS hosting provider through its API, called from the firewall host (Bunny DNS, Cloudflare, deSEC, easyDNS, Gandi, GleSYS, GoDaddy, Hetzner DNS, Loopia, Namecheap, NameSilo, netcup, Njalla, OVHcloud, Porkbun). A provider's tokens and keys are stored on the server and never shown again; leave one empty to keep it. |
 | | Scheduled tasks | IP list downloads and commands on a cron schedule. |
 | Tools | Console | A shell on the firewall as the agent's `console_user`, in the network namespace of the selected instance (so `ip addr`, `nft list ruleset` and `ping` see that instance). *Open in window* (or the square terminal icon) opens one in a window of its own for that instance. |
 | | Packet capture | Live capture with Wireshark in the browser. tcpdump runs on an interface of the selected instance (or *any*), with a capture filter (pcap syntax) and limits (packets, seconds, bytes per packet); the packets stream in as they are captured, into a packet list with Wireshark's display filters (`dns \|\| tcp.port == 443`), protocol tree and bytes. *Follow* keeps the newest packet in view. *pcap* downloads the capture for Wireshark. *Open in window* runs the capture in a window of its own, for the selected instance, so it keeps going while you use the rest of the GUI; each window is a capture of its own. The stream from the agent is capped at the rate under *Settings* (1000 kbit/s by default); when traffic outruns it, the firewall drops captured packets rather than fall behind. The agent's own API connection is left out, and at most two captures run at once. Wireshark (Wiregasm, about 20 MB) loads when the page opens; it is a separate program (GPL-2.0) that the installer puts in `/usr/share/portitor/wiregasm`. |
@@ -148,7 +148,7 @@ in any number of roles, and is an **admin** or a **viewer** in each.
 
 An **instance admin** changes their instance's interfaces (but not which physical
 NICs it has: a global admin adds, renames and removes those), zones, rules, NAT,
-routes, IP addresses, DNS, DHCP, dynamic DNS and WireGuard, its settings (not its
+routes, IP addresses, DNS, DHCP, DNS update and WireGuard, its settings (not its
 name, nor which instance is the default), captures its packets (*Tools → Packet
 capture*) and **deploys** it. An
 **instance viewer** reads it. Neither sees the other instances, their status, leases,
@@ -218,7 +218,7 @@ LAN `192.168.50.0/24`.
 - *Endpoint* makes this firewall connect to the site, with *Keepalive* (e.g. 25) to keep
   the tunnel up through NAT. Leave the endpoint empty on the side that waits. When the
   endpoint is a name, the agent looks it up again while the peer has had no handshake
-  for over two minutes, so a site on a dynamic address (with dynamic DNS) is found
+  for over two minutes, so a site on a dynamic address (with DNS update) is found
   again.
 - The config button of a site peer gives a wg-quick config for the router at the other
   site: this instance's prefixes under *Hosts & prefixes* (its interfaces' included) as its AllowedIPs, without the

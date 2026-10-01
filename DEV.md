@@ -64,10 +64,10 @@ make fmt               # gofmt + prettier; CI fails on unformatted files
   unprivileged user namespace (`unshare -rn`), and skip when that isn't possible.
 - `internal/agent`: reconcile planning against captured `ip -j` output, and the API
   (auth, apply, commit-confirm and timed rollback) in dry-run. `TestDyndnsInNetns`
-  runs a dynamic DNS client in a real namespace; it needs root and opt-in:
+  runs a DNS update client in a real namespace; it needs root and opt-in:
   `PORTITOR_NETNS_TEST=1 unshare -rnm sh -c 'mount -t tmpfs none /run && go test -run InNetns ./internal/agent/'`.
-- `internal/dyndns`: the dynamic DNS client against an in-memory nameserver, and
-  TSIG against a real one on localhost.
+- `internal/dyndns`: the DNS update client against an in-memory nameserver and an
+  in-memory libdns provider, and TSIG against a real one on localhost.
 - `internal/builder`, `web`: a temporary SQLite database with the real goose
   migrations and foreign keys enforced. `TestDeployEndToEnd` drives portitor-web against a real dry-run agent over
   TLS with certificate pinning.

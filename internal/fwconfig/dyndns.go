@@ -6,21 +6,43 @@ package fwconfig
 import (
 	"encoding/base64"
 	"fmt"
+	"net"
 	"net/netip"
 	"slices"
+	"strconv"
 	"strings"
 )
 
-// DynDNSServerAddr returns a DynDNS server as ip:port, port 53 by default.
-func DynDNSServerAddr(s string) (netip.AddrPort, error) {
-	if ap, err := netip.ParseAddrPort(s); err == nil && ap.Addr().Zone() == "" {
-		return ap, nil
+// DynDNSServer returns a DynDNS server as host:port, port 53 by default.
+// The host is an IP address or a DNS name with at least one dot (the
+// agent resolves it in the instance): 192.0.2.53, [2001:db8::53]:5353,
+// ns1.example.com, ns1.example.com:5353.
+func DynDNSServer(s string) (string, error) {
+	bad := fmt.Errorf("%q is not an IP address or DNS name with an optional port", s)
+	if ap, err := netip.ParseAddrPort(s); err == nil {
+		if ap.Addr().Zone() != "" || ap.Port() == 0 {
+			return "", bad
+		}
+		return ap.String(), nil
 	}
-	a, err := ParseAddr(strings.Trim(s, "[]"))
-	if err != nil {
-		return netip.AddrPort{}, fmt.Errorf("%q is not an IP address with an optional port", s)
+	if a, err := ParseAddr(strings.Trim(s, "[]")); err == nil {
+		return netip.AddrPortFrom(a, 53).String(), nil
 	}
-	return netip.AddrPortFrom(a, 53), nil
+	host, port := s, "53"
+	if h, p, err := net.SplitHostPort(s); err == nil {
+		host, port = h, p
+	}
+	if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
+		return "", bad
+	}
+	host = strings.ToLower(strings.TrimSuffix(host, "."))
+	if !validDomain(host) || !strings.Contains(host, ".") {
+		return "", bad
+	}
+	if _, err := netip.ParseAddr(host); err == nil {
+		return "", bad // an IPv6 address with a port needs brackets
+	}
+	return net.JoinHostPort(host, port), nil
 }
 
 // DynDNSOwner resolves a record name against zone (both may lack the
@@ -56,7 +78,7 @@ func DynDNSOwner(name, zone string) (string, error) {
 func (v *validator) dyndns(p string, in *Instance, ifaces map[string]*Interface) {
 	names := map[string]bool{}
 	for _, d := range in.DynDNS {
-		dp := fmt.Sprintf("%s: dynamic dns %q", p, d.Name)
+		dp := fmt.Sprintf("%s: dns update %q", p, d.Name)
 		if !zoneNameRe.MatchString(d.Name) {
 			v.addf("%s: name must match %s", dp, zoneNameRe)
 		}
@@ -67,13 +89,11 @@ func (v *validator) dyndns(p string, in *Instance, ifaces map[string]*Interface)
 		if ifaces[d.Interface] == nil {
 			v.addf("%s: unknown interface %q", dp, d.Interface)
 		}
-		if _, err := DynDNSServerAddr(d.Server); err != nil {
-			v.addf("%s: server: %v", dp, err)
-		}
+		v.dnsProvider(dp, d)
 		if !validDomain(d.Zone) {
 			v.addf("%s: invalid zone %q", dp, d.Zone)
 		}
-		if t := d.TSIG; t != nil {
+		if t := d.TSIG; t != nil && (d.Provider == "" || d.Provider == ProviderRFC2136) {
 			if !validDomain(t.Name) {
 				v.addf("%s: invalid TSIG key name %q", dp, t.Name)
 			}
@@ -100,6 +120,38 @@ func (v *validator) dyndns(p string, in *Instance, ifaces map[string]*Interface)
 			if slices.Contains(ts, "CNAME") && len(ts) > 1 {
 				v.addf("%s: %s has a CNAME and other records", dp, owner)
 			}
+		}
+	}
+}
+
+// dnsProvider checks a client's provider and its settings: RFC 2136 needs
+// a server, the others their required fields and no server or TSIG key.
+func (v *validator) dnsProvider(dp string, d DynDNS) {
+	p := FindDNSProvider(d.Provider)
+	if p == nil {
+		v.addf("%s: unknown provider %q", dp, d.Provider)
+		return
+	}
+	if p.Name == ProviderRFC2136 {
+		if _, err := DynDNSServer(d.Server); err != nil {
+			v.addf("%s: server: %v", dp, err)
+		}
+	} else if d.Server != "" || d.TSIG != nil {
+		v.addf("%s: a server and TSIG key are for RFC 2136 only", dp)
+	}
+	for key, val := range d.ProviderSettings {
+		f := p.Field(key)
+		if f == nil {
+			v.addf("%s: %s has no setting %q", dp, p.Label, key)
+			continue
+		}
+		if len(val) > 4096 || strings.ContainsFunc(val, func(c rune) bool { return c < 0x20 || c == 0x7f }) {
+			v.addf("%s: %s: control characters or too long", dp, f.Label)
+		}
+	}
+	for _, f := range p.Fields {
+		if f.Required && d.ProviderSettings[f.Key] == "" {
+			v.addf("%s: %s needs %s", dp, p.Label, f.Label)
 		}
 	}
 }

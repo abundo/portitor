@@ -9,6 +9,7 @@ package builder
 
 import (
 	"fmt"
+	"maps"
 	"math"
 	"net/netip"
 	"slices"
@@ -548,7 +549,7 @@ func build(db *gorm.DB, generation int64, only map[string]bool) (*fwconfig.Docum
 			}
 			ifc, ok := ifaceByID[c.InterfaceID]
 			if !ok || ifc.InstanceID != mi.ID {
-				addf("instance %s: dynamic DNS %s: its interface is not in this instance", mi.Name, c.Name)
+				addf("instance %s: DNS update %s: its interface is not in this instance", mi.Name, c.Name)
 				continue
 			}
 			var recs []models.DyndnsRecord
@@ -618,16 +619,21 @@ func build(db *gorm.DB, generation int64, only map[string]bool) (*fwconfig.Docum
 	return doc, nil
 }
 
-// DynDNS is a dynamic DNS client with its records as the document holds
+// DynDNS is a DNS update client with its records as the document holds
 // it; iface is the name of its interface.
 func DynDNS(c *models.DyndnsClient, iface string, records []models.DyndnsRecord) fwconfig.DynDNS {
 	d := fwconfig.DynDNS{
-		Name: c.Name, Interface: iface, Server: c.Server, Zone: c.Zone,
+		Name: c.Name, Interface: iface, Provider: c.Provider, Zone: c.Zone,
 		RetryInterval: c.RetryInterval, VerifyInterval: c.VerifyInterval,
 		Records: []fwconfig.DynDNSRecord{},
 	}
-	if c.TsigName != "" {
-		d.TSIG = &fwconfig.TSIG{Name: c.TsigName, Algorithm: c.TsigAlgorithm, Secret: c.TsigSecret}
+	if c.Provider == "" || c.Provider == fwconfig.ProviderRFC2136 {
+		d.Server = c.Server
+		if c.TsigName != "" {
+			d.TSIG = &fwconfig.TSIG{Name: c.TsigName, Algorithm: c.TsigAlgorithm, Secret: c.TsigSecret}
+		}
+	} else {
+		d.ProviderSettings = maps.Clone(map[string]string(c.ProviderSettings))
 	}
 	for _, r := range records {
 		d.Records = append(d.Records, fwconfig.DynDNSRecord{Name: r.Name, Type: r.Type, TTL: r.Ttl, Value: r.Value})

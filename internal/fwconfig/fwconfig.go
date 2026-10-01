@@ -428,18 +428,24 @@ type DNSRecord struct {
 	MAC   string `json:"mac,omitempty"` // A/AAAA: DHCP reservation
 }
 
-// DynDNS is a dynamic DNS client (ifnsupdate): it sends RFC 2136 UPDATEs
-// to Server, from inside the instance, whenever Interface's addresses
-// change. A and AAAA records without a Value get the interface's first
+// DynDNS is a DNS update client: whenever Interface's addresses change
+// it updates the records, by RFC 2136 UPDATE to Server (ifnsupdate), sent
+// from inside the instance, or through the API of a DNS hosting Provider
+// (libdns), called from the host. A and AAAA records without a Value get the interface's first
 // global address of that family; records with a Value, and CNAMEs, are
 // static and re-verified every VerifyInterval. A TXT record without a
 // Value holds the time of the last update.
 type DynDNS struct {
 	Name      string `json:"name"`
 	Interface string `json:"interface"`
-	// Server is the zone's primary nameserver: an IP address, with an
-	// optional port (192.0.2.53, [2001:db8::53]:5353).
-	Server string `json:"server"`
+	// Provider is a DNSProviders name; empty is RFC 2136.
+	Provider string `json:"provider,omitempty"`
+	// ProviderSettings are the provider's fields (DNSProvider.Fields), by
+	// key, secrets included.
+	ProviderSettings map[string]string `json:"provider_settings,omitempty"`
+	// Server is the zone's primary nameserver (RFC 2136 only): an IP
+	// address, with an optional port (192.0.2.53, [2001:db8::53]:5353).
+	Server string `json:"server,omitempty"`
 	Zone   string `json:"zone"`
 	TSIG   *TSIG  `json:"tsig,omitempty"`
 	// RetryInterval (after a failed update) and VerifyInterval (of the

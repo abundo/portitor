@@ -8,6 +8,8 @@ import (
 	"errors"
 	"log/slog"
 	"net"
+	"net/netip"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -130,13 +132,16 @@ func testClient(t *testing.T, records []fwconfig.DynDNSRecord) (*Client, *fakeNS
 		t.Fatal(err)
 	}
 	ns, ifc := newFakeNS(), &iface{}
-	c := New(cfg, Env{
+	c, err := New(cfg, Env{
 		Addrs:       ifc.addrs,
 		Exchange:    ns.exchange,
 		Log:         slog.New(slog.DiscardHandler),
 		Now:         func() time.Time { return fixedNow },
 		VerifyDelay: -1,
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	return c, ns, ifc
 }
 
@@ -416,11 +421,14 @@ func TestTSIGAgainstServer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c := New(cfg, Env{
+	c, err := New(cfg, Env{
 		Addrs: func() (net.IP, net.IP, error) { return net.ParseIP("198.51.100.7").To4(), nil, nil },
 		Log:   slog.New(slog.DiscardHandler),
 	})
-	if err := c.performUpdate(cfg.Records, net.ParseIP("198.51.100.7").To4(), nil); err != nil {
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.performUpdate(t.Context(), cfg.Records, net.ParseIP("198.51.100.7").To4(), nil); err != nil {
 		t.Fatal(err)
 	}
 	if rr := <-got; rr != "home.example.com.\t60\tIN\tA\t198.51.100.7" {
@@ -428,8 +436,54 @@ func TestTSIGAgainstServer(t *testing.T) {
 	}
 
 	// A wrong secret is refused.
-	c.cfg.TSIG = &fwconfig.TSIG{Name: keyName, Algorithm: "hmac-sha256", Secret: "d3Jvbmc="}
-	if err := c.performUpdate(cfg.Records, net.ParseIP("198.51.100.7").To4(), nil); err == nil {
+	c.backend.(*rfc2136).tsig = &fwconfig.TSIG{Name: keyName, Algorithm: "hmac-sha256", Secret: "d3Jvbmc="}
+	if err := c.performUpdate(t.Context(), cfg.Records, net.ParseIP("198.51.100.7").To4(), nil); err == nil {
 		t.Fatal("update with a wrong key accepted")
+	}
+}
+
+func TestServerByName(t *testing.T) {
+	cfg, err := NewConfig(fwconfig.DynDNS{Name: "t", Interface: "eth0", Server: "NS1.example.net:5353", Zone: "example.com",
+		Records: []fwconfig.DynDNSRecord{{Name: "home", Type: "A"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ns, ifc := newFakeNS(), &iface{}
+	ifc.set("198.51.100.7", "")
+	var addrs []string
+	resolves, fail := 0, false
+	now := fixedNow
+	c, err := New(cfg, Env{
+		Addrs: ifc.addrs,
+		Exchange: func(cl *dns.Client, m *dns.Msg, addr string) (*dns.Msg, error) {
+			addrs = append(addrs, addr)
+			return ns.exchange(cl, m, addr)
+		},
+		Resolve: func(_ context.Context, host string) (netip.Addr, error) {
+			resolves++
+			if fail || host != "ns1.example.net" {
+				return netip.Addr{}, errors.New("no such host")
+			}
+			return netip.MustParseAddr("192.0.2.53"), nil
+		},
+		Log: slog.New(slog.DiscardHandler), Now: func() time.Time { return now }, VerifyDelay: -1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Sync(t.Context(), false); err != nil {
+		t.Fatal(err)
+	}
+	if len(addrs) != 3 || slices.ContainsFunc(addrs, func(a string) bool { return a != "192.0.2.53:5353" }) || resolves != 1 {
+		t.Errorf("exchanged with %v after %d lookups", addrs, resolves)
+	}
+	if s := c.Status(); s.Server != "192.0.2.53:5353" {
+		t.Errorf("status server %q", s.Server)
+	}
+
+	// Looked up again once the address is old; a failure is an error.
+	now, fail = now.Add(2*resolveTTL), true
+	if err := c.Sync(t.Context(), false); err == nil || !strings.Contains(err.Error(), "resolve nameserver ns1.example.net") {
+		t.Fatalf("err = %v", err)
 	}
 }

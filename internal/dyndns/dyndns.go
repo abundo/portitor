@@ -1,18 +1,21 @@
 // SPDX-FileCopyrightText: 2026 The Portitor contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// Package dyndns keeps DNS records on an authoritative nameserver in step
-// with a network interface's addresses, by RFC 2136 UPDATE (optionally
-// signed with TSIG). It is ifnsupdate (github.com/abundo/ifnsupdate) as a
-// library: the caller supplies the interface's addresses, address change
-// events and a way to reach the nameserver, so the agent can run it inside
-// an instance's network namespace.
+// Package dyndns keeps DNS records in step with a network interface's
+// addresses: on an authoritative nameserver by RFC 2136 UPDATE (optionally
+// signed with TSIG), or at a DNS hosting provider through its API (a
+// libdns provider, providers.go). It is ifnsupdate
+// (github.com/abundo/ifnsupdate) as a library: the caller supplies the
+// interface's addresses, address change events and a way to reach the
+// nameserver, so the agent can run it inside an instance's network
+// namespace.
 //
 // A and AAAA records without a value follow the interface. Records with a
 // value, and CNAMEs, are static: verified at start and then every
 // VerifyInterval. A TXT record without a value holds the time of the last
 // update. Records are only updated when a query shows they differ; an
-// update replaces the whole RRset and is verified by querying again.
+// update replaces the whole RRset and is verified by querying again (for
+// a provider, by reading its records again).
 package dyndns
 
 import (
@@ -20,6 +23,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/netip"
 	"strings"
 	"sync"
 	"time"
@@ -50,12 +54,16 @@ const (
 
 // Config is a validated, normalised client configuration.
 type Config struct {
-	Server         string // ip:port
-	Zone           string // FQDN with the trailing dot
-	TSIG           *fwconfig.TSIG
-	Records        []Record
-	RetryInterval  time.Duration
-	VerifyInterval time.Duration
+	// Provider is a fwconfig.DNSProviders name: RFC 2136 uses Server and
+	// TSIG, the others ProviderSettings.
+	Provider         string
+	ProviderSettings map[string]string
+	Server           string // host:port, RFC 2136 only; the host may be a name
+	Zone             string // FQDN with the trailing dot
+	TSIG             *fwconfig.TSIG
+	Records          []Record
+	RetryInterval    time.Duration
+	VerifyInterval   time.Duration
 }
 
 // Record is a DNS name to maintain; Name is an FQDN with the trailing dot.
@@ -92,17 +100,25 @@ func (r Record) isStatic() bool {
 // NewConfig normalises a document's client: absolute names, default TTLs
 // and intervals, canonical addresses.
 func NewConfig(d fwconfig.DynDNS) (*Config, error) {
-	server, err := fwconfig.DynDNSServerAddr(d.Server)
-	if err != nil {
-		return nil, fmt.Errorf("server: %w", err)
+	p := fwconfig.FindDNSProvider(d.Provider)
+	if p == nil {
+		return nil, fmt.Errorf("unknown provider %q", d.Provider)
 	}
 	cfg := &Config{
-		Server:         server.String(),
-		Zone:           dns.Fqdn(strings.ToLower(d.Zone)),
-		RetryInterval:  seconds(d.RetryInterval, defaultRetryInterval),
-		VerifyInterval: seconds(d.VerifyInterval, defaultVerifyInterval),
+		Provider:         p.Name,
+		ProviderSettings: d.ProviderSettings,
+		Zone:             dns.Fqdn(strings.ToLower(d.Zone)),
+		RetryInterval:    seconds(d.RetryInterval, defaultRetryInterval),
+		VerifyInterval:   seconds(d.VerifyInterval, defaultVerifyInterval),
 	}
-	if d.TSIG != nil {
+	if p.Name == fwconfig.ProviderRFC2136 {
+		server, err := fwconfig.DynDNSServer(d.Server)
+		if err != nil {
+			return nil, fmt.Errorf("server: %w", err)
+		}
+		cfg.Server = server
+	}
+	if d.TSIG != nil && p.Name == fwconfig.ProviderRFC2136 {
 		t := *d.TSIG
 		t.Name = dns.Fqdn(strings.ToLower(t.Name))
 		cfg.TSIG = &t
@@ -162,8 +178,13 @@ type Env struct {
 	// (nil when it has none).
 	Addrs func() (v4, v6 net.IP, err error)
 	// Exchange sends m to the nameserver at addr with c and returns the
-	// reply. Nil uses c.Exchange.
+	// reply (RFC 2136). Nil uses c.Exchange.
 	Exchange func(c *dns.Client, m *dns.Msg, addr string) (*dns.Msg, error)
+	// Resolve looks up a nameserver given by name (RFC 2136). Nil uses the
+	// host's resolver.
+	Resolve func(ctx context.Context, host string) (netip.Addr, error)
+	// Provider replaces the libdns provider Config.Provider names (tests).
+	Provider Provider
 	Log      *slog.Logger
 	// Now is the clock for timestamp TXT records; nil is time.Now.
 	Now func() time.Time
@@ -179,6 +200,8 @@ type Status struct {
 	// IPv4 and IPv6 are the interface addresses last published.
 	IPv4 string `json:"ipv4,omitempty"`
 	IPv6 string `json:"ipv6,omitempty"`
+	// Server is the address the nameserver's name last resolved to.
+	Server string `json:"server,omitempty"`
 	// LastCheck is the last time DNS was verified, LastUpdate the last
 	// UPDATE the nameserver accepted.
 	LastCheck  *time.Time `json:"last_check,omitempty"`
@@ -193,19 +216,31 @@ type lastIPs struct {
 }
 
 type Client struct {
-	cfg *Config
-	env Env
-	log *slog.Logger
+	cfg     *Config
+	env     Env
+	log     *slog.Logger
+	backend backend
 
 	mu     sync.Mutex
 	status Status
 }
 
-func New(cfg *Config, env Env) *Client {
+// New returns a client; it fails when the provider's settings do not
+// make a provider.
+func New(cfg *Config, env Env) (*Client, error) {
 	if env.Exchange == nil {
 		env.Exchange = func(c *dns.Client, m *dns.Msg, addr string) (*dns.Msg, error) {
 			r, _, err := c.Exchange(m, addr)
 			return r, err
+		}
+	}
+	if env.Resolve == nil {
+		env.Resolve = func(ctx context.Context, host string) (netip.Addr, error) {
+			addrs, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+			if err != nil {
+				return netip.Addr{}, err
+			}
+			return addrs[0], nil
 		}
 	}
 	if env.Now == nil {
@@ -217,7 +252,24 @@ func New(cfg *Config, env Env) *Client {
 	if env.Log == nil {
 		env.Log = slog.Default()
 	}
-	return &Client{cfg: cfg, env: env, log: env.Log, status: Status{State: "starting"}}
+	c := &Client{cfg: cfg, env: env, log: env.Log, status: Status{State: "starting"}}
+	if cfg.Provider == fwconfig.ProviderRFC2136 || cfg.Provider == "" {
+		c.backend = &rfc2136{
+			server: cfg.Server, zone: cfg.Zone, tsig: cfg.TSIG,
+			exchange: env.Exchange, resolve: env.Resolve, now: env.Now,
+			resolved: func(addr string) { c.setStatus(func(s *Status) { s.Server = addr }) },
+		}
+		return c, nil
+	}
+	p := env.Provider
+	if p == nil {
+		var err error
+		if p, err = NewProvider(cfg.Provider, cfg.ProviderSettings); err != nil {
+			return nil, err
+		}
+	}
+	c.backend = &libdnsBackend{zone: cfg.Zone, p: p, now: env.Now}
+	return c, nil
 }
 
 func (c *Client) Status() Status {
@@ -285,80 +337,32 @@ func expectedIP(rec Record, v4, v6 net.IP) net.IP {
 	}
 }
 
-// buildRR constructs the dns.RR to publish for rec.
-func (c *Client) buildRR(rec Record, v4, v6 net.IP) (dns.RR, string, error) {
-	var rdata, rrStr string
+// rdata returns the value to publish for rec.
+func (c *Client) rdata(rec Record, v4, v6 net.IP) (string, error) {
 	switch rec.Type {
 	case "A", "AAAA":
 		ip := expectedIP(rec, v4, v6)
 		if ip == nil {
-			return nil, "", fmt.Errorf("no %s address on interface for %s", rec.Type, rec.Name)
+			return "", fmt.Errorf("no %s address on interface for %s", rec.Type, rec.Name)
 		}
-		rdata = ip.String()
-		rrStr = fmt.Sprintf("%s %d IN %s %s", rec.Name, rec.TTL, rec.Type, rdata)
+		return ip.String(), nil
 	case "CNAME":
-		rdata = rec.Value
-		rrStr = fmt.Sprintf("%s %d IN CNAME %s", rec.Name, rec.TTL, rdata)
+		return rec.Value, nil
 	case "TXT":
-		rdata = rec.Value
 		if rec.isTimestamp() {
-			rdata = c.timestampTXTValue()
+			return c.timestampTXTValue(), nil
 		}
-		// Quote so spaces and special characters are valid presentation format.
-		rrStr = fmt.Sprintf("%s %d IN TXT %q", rec.Name, rec.TTL, rdata)
-	default:
-		return nil, "", fmt.Errorf("unsupported type %q", rec.Type)
+		return rec.Value, nil
 	}
-	rr, err := dns.NewRR(rrStr)
-	if err != nil {
-		return nil, "", fmt.Errorf("invalid RR %q: %w", rrStr, err)
-	}
-	return rr, rdata, nil
-}
-
-// dnsQuery exchanges a non-recursive query against the nameserver.
-func (c *Client) dnsQuery(name string, qtype uint16) (*dns.Msg, error) {
-	msg := new(dns.Msg)
-	msg.SetQuestion(dns.Fqdn(name), qtype)
-	msg.RecursionDesired = false
-
-	resp, err := c.env.Exchange(&dns.Client{Net: "udp", Timeout: timeout}, msg, c.cfg.Server)
-	if err != nil {
-		return nil, fmt.Errorf("DNS query %s %s: %w", name, dns.TypeToString[qtype], err)
-	}
-	if resp.Rcode == dns.RcodeNameError {
-		return nil, nil
-	}
-	if resp.Rcode != dns.RcodeSuccess {
-		return nil, fmt.Errorf("DNS query %s %s rejected: %s", name, dns.TypeToString[qtype], dns.RcodeToString[resp.Rcode])
-	}
-	return resp, nil
+	return "", fmt.Errorf("unsupported type %q", rec.Type)
 }
 
 // recordMatches reports whether the nameserver already has exactly the
 // expected RDATA for rec.
-func (c *Client) recordMatches(rec Record, v4, v6 net.IP) (bool, error) {
-	qtype := dns.StringToType[rec.Type]
-	resp, err := c.dnsQuery(rec.Name, qtype)
-	if err != nil || resp == nil {
-		return false, err // resp nil: NXDOMAIN
-	}
-	var got []string
-	for _, rr := range resp.Answer {
-		if rr.Header().Rrtype != qtype {
-			continue
-		}
-		switch r := rr.(type) {
-		case *dns.A:
-			got = append(got, r.A.String())
-		case *dns.AAAA:
-			got = append(got, r.AAAA.String())
-		case *dns.CNAME:
-			got = append(got, strings.ToLower(r.Target))
-		case *dns.TXT:
-			// Concatenated character-strings.
-			got = append(got, strings.Join(r.Txt, ""))
-		}
+func (c *Client) recordMatches(ctx context.Context, rec Record, v4, v6 net.IP) (bool, error) {
+	got, err := c.backend.lookup(ctx, rec.Name, rec.Type)
+	if err != nil {
+		return false, err
 	}
 	if len(got) != 1 {
 		return false, nil
@@ -381,7 +385,7 @@ func (c *Client) recordMatches(rec Record, v4, v6 net.IP) (bool, error) {
 // recordsNeedUpdate queries each record in recs and returns true if any
 // does not already match. A missing interface address for a dynamic
 // A/AAAA, and query failures, count as needing an update.
-func (c *Client) recordsNeedUpdate(recs []Record, v4, v6 net.IP) bool {
+func (c *Client) recordsNeedUpdate(ctx context.Context, recs []Record, v4, v6 net.IP) bool {
 	need := false
 	for _, rec := range recs {
 		if (rec.Type == "A" || rec.Type == "AAAA") && expectedIP(rec, v4, v6) == nil {
@@ -389,7 +393,7 @@ func (c *Client) recordsNeedUpdate(recs []Record, v4, v6 net.IP) bool {
 			need = true
 			continue
 		}
-		ok, err := c.recordMatches(rec, v4, v6)
+		ok, err := c.recordMatches(ctx, rec, v4, v6)
 		if err != nil {
 			c.log.Warn("dyndns verify query failed; will update", "name", rec.Name, "type", rec.Type, "err", err)
 			need = true
@@ -415,7 +419,7 @@ func (c *Client) recordsNeedUpdate(recs []Record, v4, v6 net.IP) bool {
 // the nameserver reflects it. If not, the UPDATE is retried once.
 func (c *Client) updateAndVerify(ctx context.Context, recs []Record, v4, v6 net.IP) error {
 	for attempt := 1; attempt <= maxUpdateAttempts; attempt++ {
-		if err := c.performUpdate(recs, v4, v6); err != nil {
+		if err := c.performUpdate(ctx, recs, v4, v6); err != nil {
 			return err
 		}
 		now := c.env.Now()
@@ -423,7 +427,7 @@ func (c *Client) updateAndVerify(ctx context.Context, recs []Record, v4, v6 net.
 		if c.env.VerifyDelay > 0 && !sleepCtx(ctx, c.env.VerifyDelay) {
 			return ctx.Err()
 		}
-		if !c.recordsNeedUpdate(recs, v4, v6) {
+		if !c.recordsNeedUpdate(ctx, recs, v4, v6) {
 			c.log.Info("dyndns post-update verify succeeded")
 			return nil
 		}
@@ -467,7 +471,7 @@ func (c *Client) reconcile(ctx context.Context, last *lastIPs, force bool, scope
 	now := c.env.Now()
 	c.setStatus(func(s *Status) { s.LastCheck = &now })
 
-	if alwaysUpdate || c.recordsNeedUpdate(recs, v4, v6) {
+	if alwaysUpdate || c.recordsNeedUpdate(ctx, recs, v4, v6) {
 		if err := c.updateAndVerify(ctx, recs, v4, v6); err != nil {
 			return err
 		}
@@ -587,54 +591,19 @@ func (c *Client) Sync(ctx context.Context, force bool) error {
 	return c.reconcile(ctx, &lastIPs{}, true, scopeAll, force)
 }
 
-func (c *Client) performUpdate(recs []Record, v4, v6 net.IP) error {
-	msg := new(dns.Msg)
-	msg.SetUpdate(c.cfg.Zone)
+func (c *Client) performUpdate(ctx context.Context, recs []Record, v4, v6 net.IP) error {
+	sets := make([]rrset, 0, len(recs))
 	for _, rec := range recs {
-		rr, rdata, err := c.buildRR(rec, v4, v6)
+		data, err := c.rdata(rec, v4, v6)
 		if err != nil {
 			return err
 		}
-		// Classic dynamic update: delete the RRset, then insert the record.
-		msg.RemoveRRset([]dns.RR{rr})
-		msg.Insert([]dns.RR{rr})
-		c.log.Info("dyndns will update", "name", rec.Name, "type", rec.Type, "rdata", rdata)
+		sets = append(sets, rrset{Name: rec.Name, Type: rec.Type, TTL: rec.TTL, Data: data})
+		c.log.Info("dyndns will update", "name", rec.Name, "type", rec.Type, "rdata", data)
 	}
-	return c.exchangeUpdate(msg)
-}
-
-// exchangeUpdate sends a prepared UPDATE (with TSIG when configured) and
-// checks for a successful reply.
-func (c *Client) exchangeUpdate(msg *dns.Msg) error {
-	client := &dns.Client{Net: "udp", Timeout: timeout}
-	if t := c.cfg.TSIG; t != nil {
-		client.TsigSecret = map[string]string{t.Name: t.Secret}
-		msg.SetTsig(t.Name, mapAlgorithm(t.Algorithm), 300, c.env.Now().Unix())
+	if err := c.backend.update(ctx, sets); err != nil {
+		return err
 	}
-	resp, err := c.env.Exchange(client, msg, c.cfg.Server)
-	if err != nil {
-		return fmt.Errorf("DNS update: %w", err)
-	}
-	if resp.Rcode != dns.RcodeSuccess {
-		return fmt.Errorf("DNS update rejected: %s", dns.RcodeToString[resp.Rcode])
-	}
-	c.log.Info("dyndns UPDATE successful")
+	c.log.Info("dyndns update successful", "provider", c.cfg.Provider)
 	return nil
-}
-
-func mapAlgorithm(name string) string {
-	switch strings.ToLower(name) {
-	case "hmac-md5":
-		return dns.HmacMD5
-	case "hmac-sha1":
-		return dns.HmacSHA1
-	case "hmac-sha224":
-		return dns.HmacSHA224
-	case "hmac-sha384":
-		return dns.HmacSHA384
-	case "hmac-sha512":
-		return dns.HmacSHA512
-	default:
-		return dns.HmacSHA256
-	}
 }

@@ -207,7 +207,7 @@ type DHCPOption struct {
 	Value string `json:"value"`
 }
 
-// DynDNSStatus is the state of a dynamic DNS client.
+// DynDNSStatus is the state of a DNS update client.
 type DynDNSStatus struct {
 	Instance  string `json:"instance"`
 	Name      string `json:"name"`

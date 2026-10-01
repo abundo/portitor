@@ -167,8 +167,7 @@ func reverseName(ctx context.Context, netns, addr string) string {
 var dnsName = regexp.MustCompile(`^(?i)[a-z0-9_]([a-z0-9_-]{0,62})(\.[a-z0-9_]([a-z0-9_-]{0,62}))*\.?$`)
 
 // resolveTarget replaces a DNS name in req.Target by its first address
-// (of req.Family), resolved with getent in the instance's namespace so
-// the name means what it means to the instance.
+// (of req.Family), resolved in the instance's namespace.
 func resolveTarget(ctx context.Context, netns string, req *agentapi.TraceRequest) error {
 	if _, err := netip.ParseAddr(req.Target); err == nil {
 		return nil
@@ -176,8 +175,21 @@ func resolveTarget(ctx context.Context, netns string, req *agentapi.TraceRequest
 	if len(req.Target) > 253 || !dnsName.MatchString(req.Target) {
 		return fmt.Errorf("target %q is not an IP address or a DNS name", req.Target)
 	}
+	a, err := resolveName(ctx, netns, req.Target, req.Family)
+	if err != nil {
+		return err
+	}
+	req.Target = a.String()
+	return nil
+}
+
+// resolveName returns name's first address of family ("ipv4", "ipv6", or
+// "" for IPv4 first, as for named hosts), resolved with getent in the
+// instance's namespace so the name means what it means to the instance.
+// The caller checks name against dnsName.
+func resolveName(ctx context.Context, netns, name, family string) (netip.Addr, error) {
 	db := "ahosts"
-	switch req.Family {
+	switch family {
 	case "ipv4":
 		db = "ahostsv4"
 	case "ipv6":
@@ -185,7 +197,7 @@ func resolveTarget(ctx context.Context, netns string, req *agentapi.TraceRequest
 	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	argv := inNetns(netns, []string{"getent", db, "--", req.Target})
+	argv := inNetns(netns, []string{"getent", db, "--", name})
 	out, _ := exec.CommandContext(ctx, argv[0], argv[1:]...).Output()
 	var first netip.Addr
 	for _, line := range strings.Split(string(out), "\n") {
@@ -198,8 +210,8 @@ func resolveTarget(ctx context.Context, netns string, req *agentapi.TraceRequest
 			continue
 		}
 		a = a.Unmap()
-		if req.Family == "" && a.Is4() {
-			first = a // IPv4 first, as for named hosts
+		if family == "" && a.Is4() {
+			first = a
 			break
 		}
 		if !first.IsValid() {
@@ -207,10 +219,9 @@ func resolveTarget(ctx context.Context, netns string, req *agentapi.TraceRequest
 		}
 	}
 	if !first.IsValid() {
-		return fmt.Errorf("cannot resolve %s", req.Target)
+		return netip.Addr{}, fmt.Errorf("cannot resolve %s", name)
 	}
-	req.Target = first.String()
-	return nil
+	return first, nil
 }
 
 // traceArgs checks and clamps the request and returns mtr's argv.

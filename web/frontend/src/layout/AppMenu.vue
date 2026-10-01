@@ -60,7 +60,7 @@ const sections = computed(() => [
     children: [
       { label: 'DNS', icon: 'i-lucide-globe', to: '/dns' },
       { label: 'DHCP', icon: 'i-lucide-list-ordered', to: '/dhcp' },
-      { label: 'Dynamic DNS', icon: 'i-lucide-refresh-ccw-dot', to: '/dyndns' },
+      { label: 'DNS update', icon: 'i-lucide-refresh-ccw-dot', to: '/dns-update' },
       { label: 'Scheduled tasks', icon: 'i-lucide-calendar-clock', to: '/tasks' },
     ],
   },
