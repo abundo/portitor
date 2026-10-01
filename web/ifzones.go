@@ -279,6 +279,9 @@ func deleteInterface(tx *gorm.DB, i *models.Interface) error {
 	if err := refuseDyndnsIface(tx, i); err != nil {
 		return err
 	}
+	if err := refuseDelegatedUsers(tx, i, "be deleted"); err != nil {
+		return err
+	}
 	return removeIface(tx, i.InstanceID, i.Name)
 }
 

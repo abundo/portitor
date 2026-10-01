@@ -173,11 +173,15 @@ type ServerLease struct {
 	Expires  time.Time `json:"expires"`
 }
 
-// Lease is what the DHCP client learned on one interface.
+// Lease is what the DHCP client (DHCPv4, or DHCPv6 with Family ipv6)
+// learned on one interface.
 type Lease struct {
-	Instance    string    `json:"instance"`
-	Interface   string    `json:"interface"`
-	Address     string    `json:"address"` // CIDR
+	Instance  string `json:"instance"`
+	Interface string `json:"interface"`
+	Family    string `json:"family,omitempty"` // "" (ipv4) or ipv6
+	Address   string `json:"address"`          // CIDR
+	// Prefixes are the prefixes delegated to a DHCPv6 client (IA_PD).
+	Prefixes    []string  `json:"prefixes,omitempty"`
 	Router      string    `json:"router,omitempty"`
 	DNS         []string  `json:"dns,omitempty"`
 	Server      string    `json:"server,omitempty"`

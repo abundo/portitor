@@ -43,7 +43,16 @@ const { search: leaseSearch, filtered: shownServerLeases } = useSearch(serverLea
   valuesText(l.address, l.mac, l.hostname, datetime(l.expires)),
 )
 const { search: clientSearch, filtered: shownClientLeases } = useSearch(clientLeases, (l) =>
-  valuesText(l.interface, l.state, l.address, l.router, l.dns, datetime(l.expires)),
+  valuesText(
+    l.interface,
+    l.family === 'ipv6' ? 'DHCPv6' : 'DHCPv4',
+    l.state,
+    l.address,
+    l.prefixes,
+    l.router,
+    l.dns,
+    datetime(l.expires),
+  ),
 )
 
 // The DHCP settings a prefix (ipam_prefixes) holds. A prefix is served on
@@ -260,13 +269,19 @@ const tab = computed({
               :data="shownClientLeases"
               :columns="[
                 { accessorKey: 'interface', header: 'Interface' },
+                { id: 'family', header: 'Client' },
                 { accessorKey: 'state', header: 'State' },
                 { accessorKey: 'address', header: 'Address' },
+                { id: 'prefixes', header: 'Delegated prefix' },
                 { accessorKey: 'router', header: 'Gateway' },
                 { id: 'dns', header: 'DNS' },
                 { id: 'expires', header: 'Expires' },
               ]"
             >
+              <template #family-cell="{ row }">{{
+                row.original.family === 'ipv6' ? 'DHCPv6' : 'DHCPv4'
+              }}</template>
+              <template #prefixes-cell="{ row }">{{ row.original.prefixes?.join(', ') }}</template>
               <template #dns-cell="{ row }">{{ row.original.dns?.join(', ') }}</template>
               <template #expires-cell="{ row }">{{ datetime(row.original.expires) }}</template>
               <template #empty

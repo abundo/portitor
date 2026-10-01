@@ -424,6 +424,17 @@ func AutoInputRules(in *fwconfig.Instance) []AutoRule {
 	if len(dhcpClient) > 0 {
 		out = append(out, AutoRule{Service: "dhcp client", InInterfaces: dhcpClient, Protocol: "udp", SrcPort: 67, DstPort: 68})
 	}
+	// A DHCPv6 server answers the multicast solicit from its own address,
+	// which conntrack does not see as a reply.
+	var dhcp6Client []string
+	for _, ifc := range in.Interfaces {
+		if ifc.Enabled && ifc.DHCPv6 {
+			dhcp6Client = append(dhcp6Client, ifc.Name)
+		}
+	}
+	if len(dhcp6Client) > 0 {
+		out = append(out, AutoRule{Service: "dhcpv6 client", InInterfaces: dhcp6Client, Protocol: "udp", SrcPort: 547, DstPort: 546})
+	}
 	if in.DHCP.Enabled {
 		if ifs := subnetInterfaces(DHCP4Subnets(in)); len(ifs) > 0 {
 			out = append(out, AutoRule{Service: "dhcp server", InInterfaces: ifs, Protocol: "udp", DstPort: 67})

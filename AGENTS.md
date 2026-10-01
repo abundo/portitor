@@ -15,7 +15,7 @@ are in [README.md](README.md).
 | `cmd/portitor-agent` | Agent daemon on the firewall: `start`, `init`, `render`, `netns-exec` |
 | `internal/fwconfig` | The desired-state document and `Validate()`. **The contract between web and agent.** |
 | `internal/render` | Pure functions: document → nftables, WireGuard, named.conf, Kea, dnsmgr2 config |
-| `internal/agent` | Agent: apply/reconcile, commit-confirm, DHCP client, IP lists, task scheduler, packet log (NFLOG), WireGuard endpoint re-resolving, packet capture (tcpdump, streamed rate-limited), status, API server |
+| `internal/agent` | Agent: apply/reconcile, commit-confirm, DHCP and DHCPv6 (prefix delegation) clients, IP lists, task scheduler, packet log (NFLOG), WireGuard endpoint re-resolving, packet capture (tcpdump, streamed rate-limited), status, API server |
 | `internal/dyndns` | Dynamic DNS client (RFC 2136, from ifnsupdate); the agent runs it per instance netns |
 | `internal/iplist` | Downloads IP lists (CrowdSec LAPI decisions, plain-text lists) |
 | `internal/wgkeys` | WireGuard key generation (wg(8) base64) |
@@ -106,6 +106,15 @@ are in [README.md](README.md).
   /128), unique within the instance. IPAM does not assign them; `ipam.Tree` lists
   them, and their prefixes, as `auto` nodes (id 0). A DHCP or RA prefix is served on
   the interface with an address of the same prefix.
+- **Delegated addresses** (`fwconfig.Delegated`, `<wan0>:2000::1/64`) are relative
+  to the prefix wan0's DHCPv6 client gets delegated, known only on the agent.
+  They stay in the document; `render.Render` resolves them from
+  `Options.Delegated` (`Document.ResolveDelegated`, which leaves out what is not
+  delegated yet), so rendering stays pure in (document, options). A changed
+  prefix applies the current document again (`Agent.onPDChange`). They are
+  allowed in interface addresses and in RA prefixes and RDNSS (the builder adds
+  an RA with SLAAC for each delegated /64); renaming the delegating interface
+  rewrites them (`web/delegated.go`), deleting or moving it is refused.
 - **Named hosts/prefixes never reach the agent.** `builder.Build` expands names
   (`netobj`) and drops a rule it cannot resolve; an object with no addresses is an
   error, never an empty list (an empty address list matches *any*). Entries are

@@ -36,10 +36,12 @@ func (a *Agent) managedFile() string { return filepath.Join(a.cfg.Paths.StateDir
 
 // applyLocked makes the system match doc. Caller holds a.mu.
 func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
-	bundle, err := render.Render(doc, a.renderOptions())
+	opt := a.renderOptions()
+	bundle, err := render.Render(doc, opt)
 	if err != nil {
 		return err
 	}
+	doc = doc.ResolveDelegated(opt.Delegated)
 	exp := doc.Expand()
 	a.log.Infof("applying generation %d", doc.Generation)
 
@@ -128,6 +130,7 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 	_ = readJSON(a.managedFile(), &root)
 	var newRoot []string
 	var dhcpWant []dhcpKey
+	var dhcp6Want []dhcp6Key
 	var ddnsWant []dyndnsItem
 	pktsWant := map[string]string{}
 
@@ -206,6 +209,9 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 			if ifc.IPv4Mode == fwconfig.ModeDHCP && ifc.Enabled {
 				dhcpWant = append(dhcpWant, dhcpKey{instance: in.Name, netns: ns, iface: ifc.Name, noRoute: ifc.DHCPNoDefaultRoute})
 			}
+			if ifc.DHCPv6 && ifc.Enabled {
+				dhcp6Want = append(dhcp6Want, dhcp6Key{instance: in.Name, netns: ns, iface: ifc.Name, pd: ifc.DHCPv6PD, pdLen: ifc.DHCPv6PDLength})
+			}
 		}
 
 		for _, d := range in.DynDNS {
@@ -239,6 +245,7 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 	}
 
 	a.dhcp.Reconcile(dhcpWant)
+	a.dhcp6.Reconcile(dhcp6Want)
 	a.ddns.Reconcile(ddnsWant)
 	a.pkts.Reconcile(pktsWant)
 

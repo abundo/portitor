@@ -32,7 +32,7 @@ func (a *Agent) Handler() http.Handler {
 		writeJSONResponse(w, http.StatusOK, a.Status(r.Context()))
 	})
 	mux.HandleFunc("GET /v1/leases", func(w http.ResponseWriter, r *http.Request) {
-		writeJSONResponse(w, http.StatusOK, agentapi.LeasesResponse{Client: a.dhcp.Leases(), Server: a.ServerLeases()})
+		writeJSONResponse(w, http.StatusOK, agentapi.LeasesResponse{Client: clientLeases(a.dhcp.Leases(), a.dhcp6.Leases()), Server: a.ServerLeases()})
 	})
 	mux.HandleFunc("GET /v1/rule-counters", func(w http.ResponseWriter, r *http.Request) {
 		writeJSONResponse(w, http.StatusOK, a.RuleCounters(r.Context()))

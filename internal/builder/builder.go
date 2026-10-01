@@ -183,6 +183,11 @@ func Build(db *gorm.DB, generation int64) (*fwconfig.Document, error) {
 				IPv6AcceptRA: mif.Ipv6AcceptRA,
 				// Only meaningful for a DHCP client.
 				DHCPNoDefaultRoute: mif.DhcpNoDefaultRoute && mif.Ipv4Mode == fwconfig.ModeDHCP,
+				DHCPv6:             mif.Dhcpv6,
+				DHCPv6PD:           mif.Dhcpv6 && mif.Dhcpv6Pd,
+			}
+			if ifc.DHCPv6PD {
+				ifc.DHCPv6PDLength = mif.Dhcpv6PdLength
 			}
 			if mif.Kind == fwconfig.KindWireGuard {
 				wg := &fwconfig.WireGuard{PrivateKey: mif.WgPrivateKey, ListenPort: mif.WgListenPort, Peers: []fwconfig.WGPeer{}}
@@ -518,6 +523,7 @@ func Build(db *gorm.DB, generation int64) (*fwconfig.Document, error) {
 				}
 			}
 		}
+		delegatedRA(&in, mi)
 
 		for _, c := range d.dyndns {
 			if c.InstanceID != mi.ID || !c.Enabled {
@@ -726,4 +732,36 @@ func ruleID(id uint) uint32 {
 		return 0
 	}
 	return uint32(id)
+}
+
+// delegatedRA announces with router advertisements (SLAAC) the /64 of
+// each address relative to a delegated prefix: the prefix is not known
+// until the agent gets it, so it cannot be an IPAM prefix. The address is
+// the DNS server announced when DNS listens on the interface.
+func delegatedRA(in *fwconfig.Instance, mi models.Instance) {
+	for _, ifc := range in.Interfaces {
+		for _, a := range ifc.Addresses {
+			d, err := fwconfig.ParseDelegated(a)
+			if err != nil || d.Bits != 64 {
+				continue
+			}
+			i := slices.IndexFunc(in.RA, func(ra fwconfig.RAInterface) bool { return ra.Interface == ifc.Name })
+			if i < 0 {
+				i = len(in.RA)
+				in.RA = append(in.RA, fwconfig.RAInterface{Interface: ifc.Name})
+			}
+			ra := &in.RA[i]
+			pfx := d
+			pfx.Host = 0
+			if !slices.ContainsFunc(ra.Prefixes, func(p fwconfig.RAPrefix) bool { return p.Prefix == pfx.String() }) {
+				ra.Prefixes = append(ra.Prefixes, fwconfig.RAPrefix{Prefix: pfx.String(), Autonomous: true})
+			}
+			if mi.DnsEnabled && contains(in.DNS.ListenInterfaces, ifc.Name) && !contains(ra.RDNSS, a) {
+				ra.RDNSS = append(ra.RDNSS, a)
+			}
+			if mi.DhcpDomainName != "" && !contains(ra.DNSSL, mi.DhcpDomainName) {
+				ra.DNSSL = append(ra.DNSSL, mi.DhcpDomainName)
+			}
+		}
+	}
 }

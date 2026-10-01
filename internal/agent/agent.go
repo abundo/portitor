@@ -29,6 +29,7 @@ type Agent struct {
 	// not part of an apply's log.
 	bg    Runner
 	dhcp  *dhcpManager
+	dhcp6 *dhcp6Manager
 	ddns  *dyndnsManager
 	pkts  *packetLog
 	lists *ipLists
@@ -62,6 +63,7 @@ func New(cfg *Config) *Agent {
 		a.run = &ExecRunner{Log: a.log}
 	}
 	a.dhcp = newDHCPManager(a.run, cfg.DryRun, a.onDHCPChange)
+	a.dhcp6 = newDHCP6Manager(a.run, cfg.DryRun, a.onPDChange)
 	a.ddns = newDyndnsManager(cfg.DryRun)
 	a.pkts = newPacketLog(cfg.DryRun)
 	a.lists = newIPLists()
@@ -152,6 +154,7 @@ func (a *Agent) Stop() {
 	a.ddns.Stop()
 	a.pkts.Stop()
 	a.dhcp.Stop()
+	a.dhcp6.Stop()
 }
 
 func (a *Agent) renderOptions() render.Options {
@@ -160,6 +163,7 @@ func (a *Agent) renderOptions() render.Options {
 		Units:       a.cfg.Units,
 		AntiLockout: a.cfg.antiLockout(),
 		DHCPDNS:     a.dhcp.DNSServers(),
+		Delegated:   a.dhcp6.Prefixes(),
 	}
 }
 
@@ -366,6 +370,28 @@ func (a *Agent) onDHCPChange(instance string) {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cancel()
 		_, _ = a.run.Run(ctx, "", "systemctl", "reload-or-restart", a.cfg.Units.Named(instance))
+	}
+	a.log.Take()
+}
+
+// onPDChange applies the current document again when a prefix delegated
+// to an instance changes: the delegated addresses, and the router
+// advertisements and DNS built on them, move to the new prefix.
+func (a *Agent) onPDChange(instance string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.applied == nil {
+		return
+	}
+	if in := a.applied.Instance(instance); in == nil || !in.UsesDelegated() {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	a.log.Infof("delegated prefix of instance %s changed, applying generation %d again", instance, a.applied.Generation)
+	if err := a.applyLocked(ctx, *a.applied); err != nil {
+		slog.Error("apply after delegated prefix change", "instance", instance, "err", err)
+		a.lastError = err.Error()
 	}
 	a.log.Take()
 }

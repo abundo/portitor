@@ -299,3 +299,31 @@ func TestBuildReportsObjectProblems(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildDelegatedPrefix(t *testing.T) {
+	db := testDB(t)
+	main := models.Instance{Name: "main", IsDefault: true, DnsEnabled: true, DhcpDomainName: "home.arpa"}
+	mustCreate(t, db, &main)
+	mustCreate(t, db, &models.Interface{InstanceID: main.ID, Name: "eth0", Kind: "physical", Enabled: true, Ipv4Mode: "dhcp",
+		Ipv6AcceptRA: true, Dhcpv6: true, Dhcpv6Pd: true, Dhcpv6PdLength: 56})
+	mustCreate(t, db, &models.Interface{InstanceID: main.ID, Name: "eth1", Kind: "physical", Enabled: true, Ipv4Mode: "static", DnsListen: true,
+		Addresses: models.StringList{"192.168.1.1/24", "<eth0>:1::1/64"}})
+
+	doc, err := Build(db, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := doc.Instance("main")
+	if wan := in.Interfaces[0]; !wan.DHCPv6 || !wan.DHCPv6PD || wan.DHCPv6PDLength != 56 {
+		t.Errorf("wan = %+v", wan)
+	}
+	want := []fwconfig.RAInterface{{
+		Interface: "eth1",
+		Prefixes:  []fwconfig.RAPrefix{{Prefix: "<eth0>:1::/64", Autonomous: true}},
+		RDNSS:     []string{"<eth0>:1::1/64"},
+		DNSSL:     []string{"home.arpa"},
+	}}
+	if !reflect.DeepEqual(in.RA, want) {
+		t.Errorf("ra = %+v", in.RA)
+	}
+}

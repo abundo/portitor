@@ -123,7 +123,8 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 	p := "instance " + in.Name
 
 	ifaces := map[string]*Interface{}
-	addrOwner := map[netip.Addr]string{} // address -> interface
+	addrOwner := map[netip.Addr]string{}  // address -> interface
+	delegatedOwner := map[string]string{} // delegated address -> interface
 	for i := range in.Interfaces {
 		ifc := &in.Interfaces[i]
 		ip := fmt.Sprintf("%s: interface %q", p, ifc.Name)
@@ -156,7 +157,32 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 		default:
 			v.addf("%s: invalid ipv4 mode %q", ip, ifc.IPv4Mode)
 		}
+		switch {
+		case ifc.DHCPv6 && (ifc.Kind == KindWireGuard || ifc.Kind == KindLink):
+			v.addf("%s: dhcpv6 client is not supported on %s interfaces", ip, ifc.Kind)
+		case ifc.DHCPv6 && !ifc.IPv6AcceptRA:
+			v.addf("%s: dhcpv6 client needs router advertisements accepted (the default route comes from them)", ip)
+		case ifc.DHCPv6PD && !ifc.DHCPv6:
+			v.addf("%s: prefix delegation needs the dhcpv6 client", ip)
+		}
+		if ifc.DHCPv6PDLength != 0 && (ifc.DHCPv6PDLength < 32 || ifc.DHCPv6PDLength > 64) {
+			v.addf("%s: delegated prefix length %d out of range (32-64)", ip, ifc.DHCPv6PDLength)
+		}
 		for _, a := range ifc.Addresses {
+			if IsDelegated(a) {
+				// The delegating interface is checked once all are known.
+				d, err := ParseDelegated(a)
+				if err != nil {
+					v.addf("%s: address %q: %v", ip, a, err)
+				} else if d.IsPrefix() && d.Bits < 127 {
+					v.addf("%s: address %q is the network address of the prefix; give the interface's own address", ip, a)
+				} else if other, ok := delegatedOwner[d.String()]; ok {
+					v.addf("%s: address %s is also on %s", ip, d, other)
+				} else {
+					delegatedOwner[d.String()] = ifc.Name
+				}
+				continue
+			}
 			pfx, err := ParseInterfaceAddress(a)
 			if err != nil {
 				v.addf("%s: address %q: %v", ip, a, err)
@@ -192,6 +218,13 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 		}
 	}
 	for _, ifc := range in.Interfaces {
+		for _, a := range ifc.Addresses {
+			if d, err := ParseDelegated(a); err == nil {
+				if pd := ifaces[d.Interface]; pd == nil || !pd.DHCPv6PD {
+					v.addf("%s: interface %q: address %s: %s does not get a delegated prefix (dhcpv6 prefix delegation)", p, ifc.Name, a, d.Interface)
+				}
+			}
+		}
 		if ifc.Kind == KindVLAN && ifaces[ifc.Parent] == nil {
 			v.addf("%s: interface %q: parent %q is not in this instance", p, ifc.Name, ifc.Parent)
 		}
@@ -383,6 +416,18 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 		}
 		raOn[ra.Interface] = true
 		for _, rpfx := range ra.Prefixes {
+			if IsDelegated(rpfx.Prefix) {
+				d, err := ParseDelegated(rpfx.Prefix)
+				switch {
+				case err != nil || !d.IsPrefix():
+					v.addf("%s: invalid delegated IPv6 prefix %q", rp, rpfx.Prefix)
+				case ifaces[d.Interface] == nil || !ifaces[d.Interface].DHCPv6PD:
+					v.addf("%s: %s does not get a delegated prefix", rp, d.Interface)
+				case rpfx.Autonomous && d.Bits != 64:
+					v.addf("%s: SLAAC on %s needs a /64", rp, rpfx.Prefix)
+				}
+				continue
+			}
 			pfx, err := netip.ParsePrefix(rpfx.Prefix)
 			if err != nil || !pfx.Addr().Is6() || pfx != pfx.Masked() {
 				v.addf("%s: invalid IPv6 prefix %q", rp, rpfx.Prefix)
@@ -393,6 +438,12 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 			}
 		}
 		for _, a := range ra.RDNSS {
+			if IsDelegated(a) {
+				if d, err := ParseDelegated(a); err != nil || ifaces[d.Interface] == nil || !ifaces[d.Interface].DHCPv6PD {
+					v.addf("%s: invalid delegated IPv6 dns server %q", rp, a)
+				}
+				continue
+			}
 			if addr, err := ParseAddr(a); err != nil || !addr.Is6() {
 				v.addf("%s: invalid IPv6 dns server %q", rp, a)
 			}

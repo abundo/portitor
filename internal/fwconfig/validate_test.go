@@ -69,6 +69,28 @@ func TestValidateCatchesProblems(t *testing.T) {
 		{"network address on interface", func(d *Document) { d.Instances[0].Interfaces[1].Addresses[0] = "192.168.1.0/24" }, "is the network address"},
 		{"ipv6 subnet-router address", func(d *Document) { d.Instances[0].Interfaces[1].Addresses[1] = "fd00:1::/64" }, "is the network address"},
 		{"address on two interfaces", func(d *Document) { d.Instances[0].Interfaces[2].Addresses = []string{"192.168.1.1/25"} }, "192.168.1.1 is also on eth1"},
+		{"delegated without pd", func(d *Document) {
+			d.Instances[0].Interfaces[1].Addresses = append(d.Instances[0].Interfaces[1].Addresses, "<eth0>:1::1/64")
+		}, "eth0 does not get a delegated prefix"},
+		{"delegated bad form", func(d *Document) {
+			d.Instances[0].Interfaces[1].Addresses = append(d.Instances[0].Interfaces[1].Addresses, "<eth0>2000::1/64")
+		}, "expected <interface>:subnet::host/length"},
+		{"delegated network address", func(d *Document) {
+			d.Instances[0].Interfaces[0].DHCPv6, d.Instances[0].Interfaces[0].DHCPv6PD = true, true
+			d.Instances[0].Interfaces[1].Addresses = append(d.Instances[0].Interfaces[1].Addresses, "<eth0>:1::/64")
+		}, "is the network address"},
+		{"delegated twice", func(d *Document) {
+			d.Instances[0].Interfaces[0].DHCPv6, d.Instances[0].Interfaces[0].DHCPv6PD = true, true
+			d.Instances[0].Interfaces[1].Addresses = append(d.Instances[0].Interfaces[1].Addresses, "<eth0>:1::1/64")
+			d.Instances[0].Interfaces[2].Addresses = []string{"<eth0>:01::1/64"}
+		}, "<eth0>:1::1/64 is also on eth1"},
+		{"pd without dhcpv6", func(d *Document) { d.Instances[0].Interfaces[0].DHCPv6PD = true }, "prefix delegation needs the dhcpv6 client"},
+		{"dhcpv6 without ra", func(d *Document) {
+			d.Instances[0].Interfaces[1].DHCPv6 = true
+		}, "needs router advertisements accepted"},
+		{"pd length", func(d *Document) {
+			d.Instances[0].Interfaces[0].DHCPv6, d.Instances[0].Interfaces[0].DHCPv6PD, d.Instances[0].Interfaces[0].DHCPv6PDLength = true, true, 80
+		}, "delegated prefix length 80 out of range"},
 		{"dhcp subnet twice", func(d *Document) {
 			d.Instances[0].DHCP.Subnets = append(d.Instances[0].DHCP.Subnets, DHCPSubnet{Prefix: "192.168.1.0/24", Interface: "eth1"})
 		}, "dhcp subnet 192.168.1.0/24: duplicate"},

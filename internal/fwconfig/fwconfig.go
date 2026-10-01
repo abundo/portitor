@@ -90,9 +90,19 @@ type Interface struct {
 	// Addresses are static addresses in CIDR form with a host part
 	// (192.168.1.1/24, 2001:db8::1/64; ParseInterfaceAddress). IPv6
 	// addresses are always static here; IPv6AcceptRA adds SLAAC on top.
-	Addresses    []string   `json:"addresses,omitempty"`
-	IPv6AcceptRA bool       `json:"ipv6_accept_ra,omitempty"`
-	WireGuard    *WireGuard `json:"wireguard,omitempty"`
+	// An IPv6 address may also be relative to a prefix delegated to
+	// another interface of the instance ("<wan0>:2000::1/64",
+	// Delegated); the agent resolves it (Document.ResolveDelegated).
+	Addresses    []string `json:"addresses,omitempty"`
+	IPv6AcceptRA bool     `json:"ipv6_accept_ra,omitempty"`
+	// DHCPv6 runs a DHCPv6 client that asks for an address (IA_NA) and,
+	// with DHCPv6PD, for a delegated prefix (IA_PD), of DHCPv6PDLength
+	// bits as a hint to the server (0: no hint). The default route comes
+	// from router advertisements (IPv6AcceptRA).
+	DHCPv6         bool       `json:"dhcpv6,omitempty"`
+	DHCPv6PD       bool       `json:"dhcpv6_pd,omitempty"`
+	DHCPv6PDLength int        `json:"dhcpv6_pd_length,omitempty"`
+	WireGuard      *WireGuard `json:"wireguard,omitempty"`
 }
 
 type WireGuard struct {

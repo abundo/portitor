@@ -122,9 +122,30 @@ const fields = [
     type: 'tags',
     placeholder: '192.168.1.1/24',
     disabled: (f) => f.ipv4_mode === 'dhcp',
-    hint: 'Addresses of the firewall on this interface with their prefix length, IPv4 and IPv6, as many as needed: 192.168.1.1/24, fd00:1::1/64. Their prefixes appear under Hosts & prefixes; DHCP and router advertisements are turned on for them under DHCP.',
+    hint: 'Addresses of the firewall on this interface with their prefix length, IPv4 and IPv6, as many as needed: 192.168.1.1/24, fd00:1::1/64. Their prefixes appear under Hosts & prefixes; DHCP and router advertisements are turned on for them under DHCP. An IPv6 address in the prefix delegated to another interface names it: <wan0>:2000::1/64 is subnet 2000 of the prefix wan0 gets, host ::1; its /64 is announced with router advertisements (SLAAC).',
   },
   { key: 'ipv6_accept_ra', label: 'IPv6 SLAAC (accept router advertisements)', type: 'switch' },
+  {
+    key: 'dhcpv6',
+    label: 'DHCPv6 client',
+    type: 'switch',
+    show: (f) => f.kind !== 'wireguard',
+    hint: 'Ask a DHCPv6 server for an IPv6 address. Needs router advertisements accepted: the default route comes from them.',
+  },
+  {
+    key: 'dhcpv6_pd',
+    label: 'Prefix delegation',
+    type: 'switch',
+    show: (f) => f.dhcpv6,
+    hint: 'Also ask for a delegated prefix, for the addresses of other interfaces written as <this interface>:subnet::host/64.',
+  },
+  {
+    key: 'dhcpv6_pd_length',
+    label: 'Delegated prefix length',
+    type: 'number',
+    show: (f) => f.dhcpv6 && f.dhcpv6_pd,
+    hint: 'The prefix length to ask for, e.g. 56; 0 lets the server choose.',
+  },
   { key: 'mtu', label: 'MTU', type: 'number', hint: '0 keeps the default.' },
   {
     key: 'wg_listen_port',
@@ -149,12 +170,16 @@ const fields = [
   },
 ]
 
-// The DHCP client's lease on the interface, if it runs one.
-function leaseOf(row) {
-  if (row.ipv4_mode !== 'dhcp') return null
+// The DHCP client's lease on the interface, if it runs one: DHCPv4
+// (family '') or DHCPv6.
+function leaseOf(row, family = '') {
+  if (family === '' ? row.ipv4_mode !== 'dhcp' : !row.dhcpv6) return null
   return (
     deploy.status?.dhcp_client_leases?.find(
-      (l) => l.instance === store.current?.name && l.interface === row.name,
+      (l) =>
+        l.instance === store.current?.name &&
+        l.interface === row.name &&
+        (l.family ?? '') === family,
     ) ?? null
   )
 }
@@ -182,6 +207,9 @@ function leaseOf(row) {
         wg_listen_port: 0,
         wg_endpoint: '',
         wg_keepalive: 25,
+        dhcpv6: false,
+        dhcpv6_pd: false,
+        dhcpv6_pd_length: 0,
       }"
       new-label="New interface"
       @changed="reload()"
@@ -194,6 +222,7 @@ function leaseOf(row) {
       </template>
       <template #cell-addresses="{ row }">
         <DhcpClientLease :lease="leaseOf(row)" :no-default-route="row.dhcp_no_default_route" />
+        <DhcpClientLease :lease="leaseOf(row, 'ipv6')" />
         <div v-for="a in row.addresses ?? []" :key="a" class="font-mono text-xs">
           {{ a }}
         </div>

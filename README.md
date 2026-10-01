@@ -174,6 +174,39 @@ ip route del default dev ens18 proto dhcp
 Keep netplan entries for interfaces the firewall does not manage (a separate management
 port, say).
 
+An empty netplan config is not always enough. Check which file systemd-networkd uses:
+
+```sh
+networkctl status ens18        # "Network File:"; "unmanaged" is what you want
+```
+
+On Ubuntu releases whose initramfs is built by dracut, `Network File:` can be
+`/run/systemd/network/zzzz-dracut-default.network`: dracut's catch-all, with DHCP
+(IPv4 and IPv6) on every interface, written at every boot. Besides the DHCP lease it
+takes the DHCPv6 client port, so the agent's DHCPv6 client reports `bind: address
+already in use (systemd-network holds the DHCPv6 client port 546 ...)`. Mark the
+firewall's interfaces unmanaged in a file that sorts before it (networkd uses the
+first matching file):
+
+```sh
+cat >/etc/systemd/network/10-portitor-unmanaged.network <<'EOF'
+# The Portitor agent configures these interfaces.
+[Match]
+Name=ens18 ens19
+
+[Link]
+Unmanaged=yes
+EOF
+networkctl reload
+ip addr flush dev ens18 scope global
+ip route del default dev ens18 proto dhcp
+```
+
+List every interface the firewall manages under `Name=` (space separated; globs such
+as `ens*` work), and leave out a management port that networkd should keep.
+The installer ISO does not need this: it is Debian with ifupdown, and neither
+netplan nor dracut is installed.
+
 When portitor-web reaches the agent, it adds the firewall's physical interfaces it
 has not seen before to the default instance, as they are configured at that moment
 (link state and static addresses), so a first deploy leaves them as they are. An

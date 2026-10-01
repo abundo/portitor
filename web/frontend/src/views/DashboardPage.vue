@@ -39,6 +39,7 @@ const { search: wanSearch, filtered: shownWan } = useSearch(wan, (l) =>
     l.state,
     l.last_error,
     l.address,
+    l.prefixes,
     l.router,
     l.dns,
   ),
@@ -156,7 +157,7 @@ const stateColor = (s) =>
         <tbody>
           <tr
             v-for="l in shownWan"
-            :key="l.interface"
+            :key="`${l.interface} ${l.family}`"
             class="border-b border-default align-top last:border-0"
           >
             <td class="py-1.5 pr-4 font-mono">{{ ifaceText(l.interface) }}</td>
@@ -169,7 +170,10 @@ const stateColor = (s) =>
               />
               <div v-if="l.last_error" class="mt-0.5 text-xs text-error">{{ l.last_error }}</div>
             </td>
-            <td class="py-1.5 pr-4 font-mono text-xs">{{ l.address }}</td>
+            <td class="py-1.5 pr-4 font-mono text-xs">
+              <div>{{ l.address }}</div>
+              <div v-for="p in l.prefixes ?? []" :key="p">{{ p }} delegated</div>
+            </td>
             <td class="py-1.5 pr-4 font-mono text-xs">{{ l.router }}</td>
             <td class="py-1.5 font-mono text-xs">
               <div v-for="d in l.dns ?? []" :key="d">{{ d }}</div>

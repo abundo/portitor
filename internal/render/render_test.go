@@ -739,3 +739,14 @@ func TestIPListElements(t *testing.T) {
 		t.Errorf("reload:\n%s", got)
 	}
 }
+
+func TestAutoInputRulesDHCPv6Client(t *testing.T) {
+	doc := fwconfig.SampleDocument()
+	in := &doc.Instances[0]
+	in.Interfaces[0].DHCPv6 = true
+	nft := Nftables(in, nil, Paths{})
+	want := `iifname "eth0" udp sport 547 udp dport 546 accept comment "auto: dhcpv6 client"`
+	if !strings.Contains(nft, want) {
+		t.Errorf("no %q in\n%s", want, nft)
+	}
+}

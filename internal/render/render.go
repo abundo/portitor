@@ -84,6 +84,10 @@ type Options struct {
 	// DHCPDNS holds DNS servers learned by the DHCP client, per instance
 	// and interface, for DNSServer.Upstream UpstreamDHCP.
 	DHCPDNS map[string]map[string][]string
+	// Delegated holds the prefixes delegated to the DHCPv6 clients, which
+	// the document's delegated addresses are resolved from
+	// (fwconfig.Document.ResolveDelegated).
+	Delegated fwconfig.DelegatedPrefixes
 }
 
 type File struct {
@@ -110,7 +114,7 @@ func Render(doc fwconfig.Document, opt Options) (*Bundle, error) {
 	if err := doc.Validate(); err != nil {
 		return nil, err
 	}
-	doc = doc.Expand()
+	doc = doc.ResolveDelegated(opt.Delegated).Expand()
 	b := &Bundle{Dnsmgr: map[string]dnsmgr.ConfigRoot{}}
 	add := func(path, content string, mode os.FileMode, secret bool) {
 		b.Files = append(b.Files, File{Path: path, Content: content, Mode: mode, Secret: secret})

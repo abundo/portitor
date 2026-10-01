@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -25,7 +26,7 @@ func (a *Agent) Status(ctx context.Context) *Status {
 		Version:     buildinfo.Version,
 		DryRun:      a.cfg.DryRun,
 		LastError:   a.lastError,
-		DHCPLeases:  a.dhcp.Leases(),
+		DHCPLeases:  clientLeases(a.dhcp.Leases(), a.dhcp6.Leases()),
 		DynDNS:      a.ddns.Status(),
 		IPLists:     a.lists.Status(),
 		Tasks:       a.tasks.Status(),
@@ -336,4 +337,14 @@ func parseKeaLeases(r io.Reader, fn func(l ServerLease, valid bool)) {
 		// state 0 = default (active); 1 declined, 2 expired-reclaimed.
 		fn(l, get(rec, "state") == "0" || get(rec, "state") == "")
 	}
+}
+
+// clientLeases are the DHCPv4 and DHCPv6 client leases, by instance,
+// interface and family.
+func clientLeases(v4, v6 []Lease) []Lease {
+	out := slices.Concat(v4, v6)
+	slices.SortFunc(out, func(a, b Lease) int {
+		return strings.Compare(a.Instance+"\x00"+a.Interface+"\x00"+a.Family, b.Instance+"\x00"+b.Interface+"\x00"+b.Family)
+	})
+	return out
 }

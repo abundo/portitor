@@ -290,6 +290,11 @@ type Interface struct {
 	// host part (192.168.1.1/24, fd00:1::1/64), IPv4 and IPv6 mixed.
 	Addresses    StringList `json:"addresses"`
 	Ipv6AcceptRA bool       `gorm:"column:ipv6_accept_ra" json:"ipv6_accept_ra"`
+	// Dhcpv6 runs a DHCPv6 client; Dhcpv6Pd also asks for a delegated
+	// prefix, of Dhcpv6PdLength bits (0: the server chooses).
+	Dhcpv6         bool `gorm:"column:dhcpv6" json:"dhcpv6"`
+	Dhcpv6Pd       bool `gorm:"column:dhcpv6_pd" json:"dhcpv6_pd"`
+	Dhcpv6PdLength int  `gorm:"column:dhcpv6_pd_length" json:"dhcpv6_pd_length"`
 	// DhcpNoDefaultRoute ignores the router of the DHCP lease.
 	DhcpNoDefaultRoute bool `json:"dhcp_no_default_route"`
 	// DnsListen makes the instance's DNS server answer on this interface.

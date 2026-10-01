@@ -49,10 +49,25 @@ func cleanList(list models.StringList) models.StringList {
 }
 
 // ifaceAddrs checks interface addresses (192.168.1.1/24): each is a host
-// of its prefix. It returns them in canonical form, without repeats.
-func ifaceAddrs(field string, list models.StringList) (models.StringList, error) {
+// of its prefix. With delegated, an address may also be relative to a
+// delegated prefix (<wan0>:2000::1/64). It returns them in canonical
+// form, without repeats.
+func ifaceAddrs(field string, list models.StringList, delegated bool) (models.StringList, error) {
 	out := models.StringList{}
 	for _, s := range cleanList(list) {
+		if delegated && fwconfig.IsDelegated(s) {
+			d, err := fwconfig.ParseDelegated(s)
+			if err != nil {
+				return nil, bad(fmt.Sprintf("%s: %q: %v (e.g. <wan0>:2000::1/64)", field, s, err))
+			}
+			if d.IsPrefix() && d.Bits < 127 {
+				return nil, bad(fmt.Sprintf("%s: %s is the network address of the prefix; give the interface's own address, e.g. <%s>:%x::1/%d", field, s, d.Interface, d.Subnet, d.Bits))
+			}
+			if !slices.Contains(out, d.String()) {
+				out = append(out, d.String())
+			}
+			continue
+		}
 		p, err := fwconfig.ParseInterfaceAddress(s)
 		if err != nil {
 			if _, perr := netip.ParsePrefix(s); perr != nil {
@@ -75,6 +90,14 @@ func checkAddrsFree(tx *gorm.DB, i *models.Interface) error {
 		return err
 	}
 	for _, a := range i.Addresses {
+		if fwconfig.IsDelegated(a) {
+			for _, o := range others {
+				if slices.Contains(o.Addresses, a) {
+					return bad(fmt.Sprintf("%s is already on %s", a, o.Name))
+				}
+			}
+			continue
+		}
 		ip := netip.MustParsePrefix(a).Addr()
 		for _, o := range others {
 			for _, b := range o.Addresses {
@@ -204,12 +227,18 @@ func prepareInterface(tx *gorm.DB, i, old *models.Interface) error {
 	if err := checkNewIfaceName(tx, i.InstanceID, i.Name, "name"); err != nil {
 		return err
 	}
-	addrs, err := ifaceAddrs("addresses", i.Addresses)
+	addrs, err := ifaceAddrs("addresses", i.Addresses, true)
 	if err != nil {
 		return err
 	}
 	i.Addresses = addrs
+	if err := prepareDHCPv6(tx, i, old); err != nil {
+		return err
+	}
 	for _, a := range i.Addresses {
+		if fwconfig.IsDelegated(a) {
+			continue
+		}
 		if i.Ipv4Mode == fwconfig.ModeDHCP && netip.MustParsePrefix(a).Addr().Is4() {
 			return bad(fmt.Sprintf("addresses: %s is an IPv4 address, and IPv4 comes from the DHCP client; remove it or make IPv4 static", a))
 		}
@@ -368,7 +397,7 @@ func prepareLink(tx *gorm.DB, l, old *models.Link) error {
 		if err := checkNewIfaceName(tx, end.inst, end.iface, end.label+" interface"); err != nil {
 			return err
 		}
-		addrs, err := ifaceAddrs(end.label+" addresses", *end.addrs)
+		addrs, err := ifaceAddrs(end.label+" addresses", *end.addrs, false)
 		if err != nil {
 			return err
 		}

@@ -35,6 +35,7 @@ const rows = computed(() => {
   const r = [['State', l.state]]
   if (l.last_error) r.push(['Last error', l.last_error])
   if (l.address) r.push(['Address', l.address])
+  if (l.prefixes?.length) r.push(['Delegated prefix', l.prefixes.join(', ')])
   if (l.router) r.push(['Router', l.router + (props.noDefaultRoute ? ' (ignored)' : '')])
   if (l.dns?.length) r.push(['DNS', l.dns.join(', ')])
   if (l.domain) r.push(['Domain', l.domain])
@@ -54,7 +55,11 @@ const rows = computed(() => {
 
 <template>
   <div v-if="lease" class="flex items-center gap-1">
-    <span v-if="bound" class="font-mono text-xs">{{ lease.address }}</span>
+    <span v-if="bound" class="font-mono text-xs">{{
+      [lease.address, ...(lease.prefixes ?? []).map((p) => `${p} delegated`)]
+        .filter(Boolean)
+        .join(', ')
+    }}</span>
     <UBadge v-else :color="stateColor" variant="subtle" size="sm" :label="lease.state" />
     <UPopover :content="{ side: 'bottom', align: 'start' }">
       <UButton
@@ -67,7 +72,9 @@ const rows = computed(() => {
       />
       <template #content>
         <div class="max-w-lg p-3 text-sm">
-          <div class="mb-2 font-semibold">DHCP lease</div>
+          <div class="mb-2 font-semibold">
+            {{ lease.family === 'ipv6' ? 'DHCPv6 lease' : 'DHCP lease' }}
+          </div>
           <dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-0.5">
             <template v-for="[k, v] in rows" :key="k">
               <dt class="text-muted">{{ k }}</dt>
