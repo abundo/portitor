@@ -108,6 +108,16 @@ const userMenu = computed(() => [
       <UTooltip v-if="!auth.canEdit" text="Your user can look at this instance but not change it">
         <UBadge color="neutral" variant="outline" icon="i-lucide-eye" label="Read-only" />
       </UTooltip>
+      <UTooltip v-if="deploy.status?.version_mismatch" :text="deploy.status.version_mismatch">
+        <UBadge
+          color="warning"
+          variant="subtle"
+          icon="i-lucide-triangle-alert"
+          label="Version mismatch"
+          class="cursor-pointer"
+          @click="router.push('/updates')"
+        />
+      </UTooltip>
       <UTooltip :text="agentChip.title ?? ''">
         <UBadge
           :color="agentChip.color"

@@ -24,6 +24,7 @@ import (
 	"github.com/abundo/portitor/internal/agentapi"
 	"github.com/abundo/portitor/internal/agentclient"
 	"github.com/abundo/portitor/internal/builder"
+	"github.com/abundo/portitor/internal/buildinfo"
 	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/internal/ipam"
 	"github.com/abundo/portitor/internal/netobj"
@@ -1036,7 +1037,10 @@ func (s *Server) handleAgentStatus(c *echo.Context) error {
 	return c.JSON(http.StatusOK, struct {
 		*agentapi.Status
 		NICSync *nicSync `json:"nic_sync"`
-	}{st, sync})
+		// VersionMismatch says how the agent's version differs from
+		// portitor-web's; empty when they match.
+		VersionMismatch string `json:"version_mismatch,omitempty"`
+	}{st, sync, buildinfo.Mismatch(st.Version)})
 }
 
 func (s *Server) handleAgentLeases(c *echo.Context) error {
