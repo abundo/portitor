@@ -64,6 +64,7 @@ func newSystemManager(run Runner) *systemManager {
 func (m *systemManager) Status(ctx context.Context) agentapi.SystemStatus {
 	st := agentapi.SystemStatus{
 		OS:       osName(),
+		Hostname: readTrim("/proc/sys/kernel/hostname"),
 		Kernel:   readTrim("/proc/sys/kernel/osrelease"),
 		Packages: []agentapi.PackageUpgrade{},
 		Jobs:     []agentapi.SystemJob{},
@@ -178,9 +179,13 @@ func (m *systemManager) runCheck(ctx context.Context) {
 // startUnit runs argv as a transient unit that stays loaded after it
 // exits (RemainAfterExit), so its result can be read until the next run.
 func (m *systemManager) startUnit(ctx context.Context, unit, desc string, argv ...string) error {
-	// Unload the previous run. Errors mean there was none.
-	_, _ = m.run.Run(ctx, "", "systemctl", "stop", unit)
-	_, _ = m.run.Run(ctx, "", "systemctl", "reset-failed", unit)
+	// Unload the previous run, if there is one (a missing unit would only
+	// log failed commands).
+	out, err := m.run.Run(ctx, "", "systemctl", "show", unit, "--property=LoadState")
+	if err != nil || !strings.Contains(string(out), "LoadState=not-found") {
+		_, _ = m.run.Run(ctx, "", "systemctl", "stop", unit)
+		_, _ = m.run.Run(ctx, "", "systemctl", "reset-failed", unit)
+	}
 	args := []string{
 		"--unit=" + unit, "--description=" + desc,
 		"--property=RemainAfterExit=yes",
@@ -189,7 +194,7 @@ func (m *systemManager) startUnit(ctx context.Context, unit, desc string, argv .
 		"--setenv=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
 		"--",
 	}
-	_, err := m.run.Run(ctx, "", "systemd-run", append(args, argv...)...)
+	_, err = m.run.Run(ctx, "", "systemd-run", append(args, argv...)...)
 	return err
 }
 

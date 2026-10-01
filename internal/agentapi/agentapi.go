@@ -362,6 +362,7 @@ type ConsoleResize struct {
 // offers, the Portitor releases from the last check, and the update jobs
 // (GET /v1/system).
 type SystemStatus struct {
+	Hostname       string     `json:"hostname"`
 	OS             string     `json:"os"`
 	Kernel         string     `json:"kernel"`
 	BootTime       *time.Time `json:"boot_time,omitempty"`
