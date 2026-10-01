@@ -9,6 +9,7 @@ import { useInstanceStore } from '@/stores/instances'
 import { useDeployStore } from '@/stores/deploy'
 import { useLogPanel } from '@/composables/useLogPanel'
 import { openConsoleWindow } from '@/composables/useConsoleWindow'
+import { openCaptureWindow } from '@/composables/useCaptureWindow'
 import { confirmDiscard } from '@/composables/useFormGuard'
 import { api } from '@/api'
 
@@ -132,6 +133,16 @@ const userMenu = computed(() => [
           variant="ghost"
           aria-label="Console"
           @click="openConsoleWindow"
+        />
+      </UTooltip>
+      <UTooltip text="Open packet capture window">
+        <UButton
+          icon="i-lucide-radio-tower"
+          color="neutral"
+          variant="ghost"
+          aria-label="Packet capture"
+          :disabled="!instances.currentId"
+          @click="openCaptureWindow(instances.currentId)"
         />
       </UTooltip>
       <UTooltip text="Switch between dark and light mode">
