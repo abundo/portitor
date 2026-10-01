@@ -9,7 +9,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useToast } from '@nuxt/ui/composables'
-import IpamTreeRows from '@/components/IpamTreeRows.vue'
+import ObjectTree from '@/components/ObjectTree.vue'
 import DhcpLeasePicker from '@/components/DhcpLeasePicker.vue'
 import HostDialog from '@/components/HostDialog.vue'
 import IpListDialog from '@/components/IpListDialog.vue'
@@ -39,8 +39,9 @@ const lists = ref([])
 const folders = ref([])
 const tree = ref([])
 // Keys of the collapsed nodes: the top-level nodes (group:*), the folders
-// (folder:<id>) and the prefixes (IpamTreeRows).
-const collapsed = reactive(new Set())
+// (folder:<id>) and the prefixes (prefix:<cidr>). Not reactive: the tree
+// folds itself, this only keeps the state when the nodes are built again.
+const collapsed = new Set()
 // Search: a host, IP list, folder, prefix or address matches when its row
 // has every word typed. While searching, the rows that match are shown with
 // the folders and prefixes above them, all open (the folded ones fold again
@@ -49,8 +50,6 @@ const collapsed = reactive(new Set())
 const search = ref('')
 const words = computed(() => searchWords(search.value))
 const searching = computed(() => words.value.length > 0)
-const noneFolded = new Set()
-const folded = computed(() => (searching.value ? noneFolded : collapsed))
 const loading = ref(true)
 const infoOpen = ref(false)
 
@@ -199,12 +198,12 @@ const hostDialog = ref(null)
 const listDialog = ref(null)
 const folderDialog = ref(null)
 
-// The rows of the Hosts or IP lists group: in each folder its folders,
-// then its items, both by name; nothing inside a collapsed folder. count
-// is the items a folder holds, those in its folders included. While
-// searching, only the items that match (text(item)) and the folders
-// holding them; a folder whose name matches keeps all it holds.
-function folderRows(kind, items, text) {
+// The nodes of the Hosts or IP lists group: in each folder its folders,
+// then its items, both by name. count is the items a folder holds, those
+// in its folders included. While searching, only the items that match
+// (text(item)) and the folders holding them; a folder whose name matches
+// keeps all it holds.
+function folderNodes(kind, items, text, itemNode) {
   const parent = (x) => x.parent_id ?? 0
   const subfolders = (id) => folders.value.filter((f) => f.kind === kind && parent(f) === id)
   const count = (id) =>
@@ -214,40 +213,29 @@ function folderRows(kind, items, text) {
   const holdsHit = (id) =>
     items.some((i) => (i.folder_id ?? 0) === id && hit(text(i))) ||
     subfolders(id).some((f) => hit(f.name) || holdsHit(f.id))
-  const out = []
   // all: show everything in the folder (not searching, or it matches).
-  const walk = (id, depth, all) => {
-    for (const f of subfolders(id)) {
-      const key = `folder:${f.id}`
+  const walk = (id, all) => [
+    ...subfolders(id).flatMap((f) => {
       const fAll = all || hit(f.name)
-      if (!fAll && !holdsHit(f.id)) continue
-      out.push({ key, folder: f, depth, count: count(f.id) })
-      if (!folded.value.has(key)) walk(f.id, depth + 1, fAll)
-    }
-    for (const item of items.filter((i) => (i.folder_id ?? 0) === id))
-      if (all || hit(text(item))) out.push({ key: `${kind}:${item.id}`, item, depth })
-  }
-  walk(0, 1, !searching.value)
-  return out
+      if (!fAll && !holdsHit(f.id)) return []
+      const key = `folder:${f.id}`
+      return [
+        {
+          key,
+          title: f.name,
+          icon: icon('folder', 'text-primary'),
+          expanded: isOpen(key),
+          children: walk(f.id, fAll),
+          cells: { description: badge(String(count(f.id))) },
+          item: { type: 'folder', kind, obj: f },
+        },
+      ]
+    }),
+    ...items.filter((i) => (i.folder_id ?? 0) === id && (all || hit(text(i)))).map(itemNode),
+  ]
+  return walk(0, !searching.value)
 }
-const hostRows = computed(() =>
-  folderRows('hosts', hosts.value, (o) =>
-    valuesText(o.name, o.description, o.addresses, hostKind(o), versions(o)),
-  ),
-)
-const listRows = computed(() =>
-  folderRows('ip_lists', lists.value, (l) =>
-    valuesText(
-      `@${l.name}`,
-      l.description,
-      sourceLabel[l.source] ?? l.source,
-      l.url,
-      states.value[l.name]?.state ?? 'not deployed',
-      states.value[l.name]?.last_error,
-    ),
-  ),
-)
-const indent = (depth) => ({ paddingLeft: `${depth * 1.25}rem` })
+const isOpen = (key) => searching.value || !collapsed.has(key)
 
 // A host has only single addresses (/32, /128); anything else is a prefix.
 const single = (a) => !a.includes('/') || a.endsWith('/32') || a.endsWith('/128')
@@ -288,33 +276,270 @@ async function refreshList(row) {
   }
 }
 
-// The top-level nodes of the tree.
-const groups = computed(() => [
-  {
-    key: 'group:hosts',
-    label: 'Hosts',
-    icon: 'i-lucide-server',
-    count: hosts.value.length,
-    description: 'Named addresses, usable wherever addresses are entered',
-  },
-  {
-    key: 'group:lists',
-    label: 'IP lists',
-    icon: 'i-lucide-list-x',
-    count: lists.value.length,
-    description: 'Downloaded address lists, used as @name in rules',
-  },
-  {
-    key: 'group:prefixes',
-    label: 'Prefixes & IP addresses',
-    icon: 'i-lucide-network',
-    description: store.current ? `The prefix tree of instance ${store.current.name}` : '',
-  },
-])
+// ----- the tree (ObjectTree): nodes with their cells as HTML -----
+const esc = (v) =>
+  String(v ?? '').replace(
+    /[&<>"']/g,
+    (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c],
+  )
+// Lucide icons (@iconify-json/lucide), inline: the tree's cells are HTML.
+const svgPath = {
+  server:
+    '<rect width="20" height="8" x="2" y="2" rx="2" ry="2"/><rect width="20" height="8" x="2" y="14" rx="2" ry="2"/><path d="M6 6h.01M6 18h.01"/>',
+  network:
+    '<rect width="6" height="6" x="16" y="16" rx="1"/><rect width="6" height="6" x="2" y="16" rx="1"/><rect width="6" height="6" x="9" y="2" rx="1"/><path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3m-7-4V8"/>',
+  list: '<path d="M3 5h.01M3 12h.01M3 19h.01M8 5h13M8 12h13M8 19h13"/>',
+  'list-x': '<path d="M16 5H3m8 7H3m13 7H3m12.5-9.5l5 5m0-5l-5 5"/>',
+  folder:
+    '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
+  dot: '<circle cx="12" cy="12" r="1"/>',
+}
+const icon = (name, cls = 'text-muted') =>
+  `<i class="wb-icon ${cls}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${svgPath[name]}</svg></i>`
+// A badge like UBadge's (subtle, or outline).
+const badgeColor = {
+  primary: 'bg-primary/10 text-primary ring-primary/25',
+  success: 'bg-success/10 text-success ring-success/25',
+  info: 'bg-info/10 text-info ring-info/25',
+  error: 'bg-error/10 text-error ring-error/25',
+  neutral: 'bg-elevated text-default ring-accented',
+  outline: 'text-default ring-accented',
+}
+const badge = (label, color = 'neutral', title = '') =>
+  `<span class="me-1 inline-flex items-center rounded-md px-1.5 py-0.5 text-xs font-medium ring ring-inset ${badgeColor[color]}"${title ? ` title="${esc(title)}"` : ''}>${esc(label)}</span>`
+const muted = (text, cls = '') => `<span class="text-muted ${cls}">${esc(text)}</span>`
 
-function toggle(k) {
-  if (collapsed.has(k)) collapsed.delete(k)
-  else collapsed.add(k)
+const columns = [
+  { id: '*', title: 'Name', width: '320px', minWidth: '160px' },
+  { id: 'description', title: 'Description', width: '*', minWidth: '120px' },
+  { id: 'details', title: 'Addresses / source', width: '320px', minWidth: '100px' },
+  { id: 'status', title: 'Status', width: '260px', minWidth: '100px' },
+]
+
+const empty = (key, text) => ({ key, title: text, icon: false, cells: {}, item: { type: 'empty' } })
+
+function hostNode(o) {
+  const kind = hostKind(o)
+  return {
+    key: `hosts:${o.id}`,
+    title: o.name,
+    icon: icon(kind === 'host' ? 'server' : 'network'),
+    cells: {
+      description: esc(o.description),
+      details: `<span class="font-mono text-xs">${esc(o.addresses?.join(', '))}</span>`,
+      status: badge(kind, kind === 'host' ? 'primary' : 'neutral') + muted(versions(o), 'text-xs'),
+    },
+    item: { type: 'host', obj: o },
+  }
+}
+
+function listStatus(l) {
+  const s = states.value[l.name]
+  if (!s) return muted('not deployed', 'text-xs')
+  let html = badge(s.state, stateColor[s.state] ?? 'neutral', s.last_error)
+  if (s.updated) {
+    html += `<span class="text-xs">${s.ipv4} IPv4, ${s.ipv6} IPv6</span>`
+    if (s.skipped) html += muted(` (${s.skipped} skipped)`, 'text-xs')
+    html += muted(` · ${ago(s.updated)}`, 'text-xs')
+  }
+  if (s.last_error)
+    html += ` <span class="text-xs text-error" title="${esc(s.last_error)}">${esc(s.last_error)}</span>`
+  return html
+}
+
+function listNode(l) {
+  return {
+    key: `ip_lists:${l.id}`,
+    title: `@${l.name}`,
+    icon: icon('list'),
+    cells: {
+      description: esc(l.description),
+      details: `<span class="text-xs">${esc(sourceLabel[l.source] ?? l.source)}</span> ${muted(l.url, 'font-mono text-xs')}`,
+      status: listStatus(l),
+    },
+    item: { type: 'list', obj: l },
+  }
+}
+
+// The badges of a prefix or address of the IPAM tree.
+function ipamBadges(n) {
+  let html = ''
+  const id = n.interface_id
+  if (id) html += badge(ifaceName(id), 'primary')
+  if (n.kind === 'address' && id) {
+    const dns = dnsListen(id)
+    if (dns === 'on') html += badge('DNS', 'success', 'The DNS server listens on this address')
+    else if (dns === 'off')
+      html += badge(
+        'DNS',
+        'neutral',
+        "Set to listen for DNS, but the instance's DNS server is disabled",
+      )
+    const client = ifaceClient(id)
+    if (client.includes('dhcp'))
+      html += badge(
+        'DHCP Client',
+        'neutral',
+        'The interface also gets an IPv4 address from a DHCP server',
+      )
+    if (client.includes('slaac'))
+      html += badge(
+        'SLAAC-C',
+        'neutral',
+        'The interface also takes an IPv6 address from router advertisements',
+      )
+  }
+  if (n.zone_id)
+    html += badge(
+      n.cidr.includes(':') ? 'AAAA' : 'A',
+      'neutral',
+      'A DNS zone has an A or AAAA record for this address',
+    )
+  if (n.mac) html += badge(`reserved ${n.mac}`, 'outline')
+  if (n.dhcp_enabled) {
+    const on = !!store.current?.dhcp_enabled
+    html += badge(
+      'DHCP server',
+      on ? 'success' : 'neutral',
+      (on ? '' : "Set to serve DHCP, but the instance's DHCP server is disabled. ") +
+        (n.dhcp_range ? `Range ${n.dhcp_range}` : 'No range: fixed leases only'),
+    )
+  }
+  if (n.ra_slaac)
+    html += badge('SLAAC', 'info', 'Router advertisements let clients pick their own address')
+  else if (n.ra_enabled)
+    html += badge('RA', 'info', 'Router advertisements are sent for this prefix')
+  return html
+}
+
+function ipamNode(n) {
+  const key = `${n.kind}:${n.cidr}`
+  let description = esc(n.description)
+  if (n.dns_name) description += ` ${muted(n.dns_name, 'font-mono text-xs')}`
+  if (n.auto && !n.description && !n.dns_name)
+    description = muted(
+      n.kind === 'prefix' ? 'from an interface address' : 'interface address',
+      'text-xs',
+    )
+  const pct = Math.round(n.used_frac * 100)
+  return {
+    key,
+    title: n.cidr,
+    icon: n.kind === 'prefix' ? icon('network', 'text-primary') : icon('dot'),
+    expanded: isOpen(key),
+    children: n.children.map(ipamNode),
+    cells: {
+      description,
+      details: ipamBadges(n),
+      status:
+        n.kind === 'prefix'
+          ? `<span class="inline-flex items-center gap-2"><span class="inline-block h-1.5 w-16 overflow-hidden rounded-full bg-accented"><span class="block h-full bg-primary" style="width:${pct}%"></span></span>${muted(`${pct}%`, 'text-xs tabular-nums')}</span>`
+          : '',
+    },
+    item: { type: 'ipam', obj: n },
+  }
+}
+
+function groupNode(key, title, iconName, count, description, children) {
+  return {
+    key,
+    title,
+    icon: icon(iconName, 'text-primary'),
+    expanded: isOpen(key),
+    children,
+    cells: {
+      description:
+        (count !== undefined ? badge(String(count)) : '') + muted(description, 'text-xs'),
+    },
+    item: { type: 'group', key },
+  }
+}
+
+function ipamEmpty() {
+  if (searching.value && shownTree.value.length) return 'No prefix or address matches.'
+  if (store.currentId) return 'No prefixes yet: give an interface an address, or add a prefix.'
+  return 'No instance yet: create one under Instances.'
+}
+
+// The top-level nodes of the tree.
+const treeSource = computed(() => {
+  const hostChildren = folderNodes(
+    'hosts',
+    hosts.value,
+    (o) => valuesText(o.name, o.description, o.addresses, hostKind(o), versions(o)),
+    hostNode,
+  )
+  const listChildren = folderNodes(
+    'ip_lists',
+    lists.value,
+    (l) =>
+      valuesText(
+        `@${l.name}`,
+        l.description,
+        sourceLabel[l.source] ?? l.source,
+        l.url,
+        states.value[l.name]?.state ?? 'not deployed',
+        states.value[l.name]?.last_error,
+      ),
+    listNode,
+  )
+  const ipamChildren = foundTree.value.map(ipamNode)
+  return [
+    groupNode(
+      'group:hosts',
+      'Hosts',
+      'server',
+      hosts.value.length,
+      'Named addresses, usable wherever addresses are entered',
+      hostChildren.length
+        ? hostChildren
+        : [empty('empty:hosts', searching.value ? 'No host matches.' : 'No hosts yet.')],
+    ),
+    groupNode(
+      'group:lists',
+      'IP lists',
+      'list-x',
+      lists.value.length,
+      'Downloaded address lists, used as @name in rules',
+      listChildren.length
+        ? listChildren
+        : [empty('empty:lists', searching.value ? 'No IP list matches.' : 'No IP lists yet.')],
+    ),
+    groupNode(
+      'group:prefixes',
+      'Prefixes & IP addresses',
+      'network',
+      undefined,
+      store.current ? `The prefix tree of instance ${store.current.name}` : '',
+      ipamChildren.length ? ipamChildren : [empty('empty:prefixes', ipamEmpty())],
+    ),
+  ]
+})
+
+// While searching, everything is unfolded; the folds come back after.
+function onToggle(key, expanded) {
+  if (searching.value) return
+  if (expanded) collapsed.delete(key)
+  else collapsed.add(key)
+}
+
+// A click on a row opens its form.
+function onOpen(data) {
+  const r = data?.item
+  if (r?.type === 'folder') folderDialog.value.edit(r.obj)
+  else if (r?.type === 'host') hostDialog.value.edit(r.obj)
+  else if (r?.type === 'list') listDialog.value.edit(r.obj)
+  else if (r?.type === 'ipam') onEdit(r.obj)
+}
+
+function rowMenu(data) {
+  const r = data?.item
+  if (r?.type === 'group') return groupMenu(r.key)
+  if (r?.type === 'folder') return folderMenu(r.kind, r.obj.id)
+  if (r?.type === 'host') return folderMenu('hosts', r.obj.folder_id)
+  if (r?.type === 'list') return listMenu(r.obj)
+  if (r?.type === 'ipam') return nodeMenu(r.obj)
+  return []
 }
 
 // ----- prefix modal -----
@@ -561,7 +786,7 @@ async function removeAddress() {
           </div>
           <p class="max-w-3xl text-sm text-muted">
             Named hosts and prefixes, downloaded IP lists, and the instance's prefixes and addresses
-            with their DNS names. Right-click a row to add to it.
+            with their DNS names. Click a row to open it; right-click it to add to it.
           </p>
         </div>
         <div v-if="auth.isAdmin || auth.canEdit" class="flex gap-2">
@@ -597,297 +822,14 @@ async function removeAddress() {
         <UIcon name="i-lucide-loader-2" class="size-7 animate-spin" />
       </div>
       <UContextMenu v-else :items="menuItems">
-        <div class="overflow-x-auto">
-          <table class="w-full text-sm">
-            <tbody>
-              <template v-for="g in groups" :key="g.key">
-                <tr
-                  class="border-b border-default bg-elevated/40"
-                  @contextmenu="openMenu($event, groupMenu(g.key))"
-                >
-                  <td class="w-px py-1 pr-2 whitespace-nowrap"></td>
-                  <td class="py-1.5 pr-2">
-                    <div class="flex items-center gap-1">
-                      <UButton
-                        size="xs"
-                        color="neutral"
-                        variant="ghost"
-                        :icon="
-                          folded.has(g.key) ? 'i-lucide-chevron-right' : 'i-lucide-chevron-down'
-                        "
-                        :aria-label="folded.has(g.key) ? 'Expand' : 'Collapse'"
-                        @click="toggle(g.key)"
-                      />
-                      <UIcon :name="g.icon" class="text-primary" />
-                      <span class="font-semibold whitespace-nowrap">{{ g.label }}</span>
-                      <UBadge
-                        v-if="g.count !== undefined"
-                        color="neutral"
-                        variant="subtle"
-                        size="sm"
-                        :label="String(g.count)"
-                      />
-                    </div>
-                  </td>
-                  <td colspan="3" class="px-2 text-xs text-muted">{{ g.description }}</td>
-                </tr>
-
-                <template v-if="!folded.has(g.key)">
-                  <template v-if="g.key === 'group:hosts'">
-                    <template v-for="r in hostRows" :key="r.key">
-                      <tr
-                        v-if="r.folder"
-                        class="border-b border-default hover:bg-elevated/50"
-                        @contextmenu="openMenu($event, folderMenu('hosts', r.folder.id))"
-                      >
-                        <td class="py-1 pr-2 whitespace-nowrap">
-                          <UButton
-                            size="xs"
-                            color="neutral"
-                            variant="ghost"
-                            :icon="auth.isAdmin ? 'i-lucide-pencil' : 'i-lucide-eye'"
-                            :aria-label="auth.isAdmin ? 'Edit' : 'View'"
-                            :title="auth.isAdmin ? 'Edit' : 'View'"
-                            @click="folderDialog.edit(r.folder)"
-                          />
-                        </td>
-                        <td class="py-1.5 pr-2">
-                          <div class="flex items-center gap-1" :style="indent(r.depth)">
-                            <UButton
-                              size="xs"
-                              color="neutral"
-                              variant="ghost"
-                              :icon="
-                                folded.has(r.key)
-                                  ? 'i-lucide-chevron-right'
-                                  : 'i-lucide-chevron-down'
-                              "
-                              :aria-label="folded.has(r.key) ? 'Expand' : 'Collapse'"
-                              @click="toggle(r.key)"
-                            />
-                            <UIcon
-                              :name="folded.has(r.key) ? 'i-lucide-folder' : 'i-lucide-folder-open'"
-                              class="text-primary"
-                            />
-                            <span class="font-medium whitespace-nowrap">{{ r.folder.name }}</span>
-                            <UBadge
-                              color="neutral"
-                              variant="subtle"
-                              size="sm"
-                              :label="String(r.count)"
-                            />
-                          </div>
-                        </td>
-                        <td colspan="3" />
-                      </tr>
-                      <tr
-                        v-else
-                        class="border-b border-default hover:bg-elevated/50"
-                        @contextmenu="openMenu($event, folderMenu('hosts', r.item.folder_id))"
-                      >
-                        <td class="py-1 pr-2 whitespace-nowrap">
-                          <UButton
-                            size="xs"
-                            color="neutral"
-                            variant="ghost"
-                            :icon="auth.isAdmin ? 'i-lucide-pencil' : 'i-lucide-eye'"
-                            :aria-label="auth.isAdmin ? 'Edit' : 'View'"
-                            :title="auth.isAdmin ? 'Edit' : 'View'"
-                            @click="hostDialog.edit(r.item)"
-                          />
-                        </td>
-                        <td class="py-1.5 pr-2">
-                          <div class="flex items-center gap-1" :style="indent(r.depth)">
-                            <span class="inline-block w-6" />
-                            <UIcon
-                              :name="
-                                hostKind(r.item) === 'host' ? 'i-lucide-server' : 'i-lucide-network'
-                              "
-                              class="text-muted"
-                            />
-                            <span class="font-medium">{{ r.item.name }}</span>
-                          </div>
-                        </td>
-                        <td class="px-2 text-sm">{{ r.item.description }}</td>
-                        <td class="px-2 font-mono text-xs">{{ r.item.addresses?.join(', ') }}</td>
-                        <td class="px-2 text-xs whitespace-nowrap">
-                          <UBadge
-                            :color="hostKind(r.item) === 'host' ? 'primary' : 'neutral'"
-                            variant="subtle"
-                            :label="hostKind(r.item)"
-                          />
-                          <span class="ms-1 text-muted">{{ versions(r.item) }}</span>
-                        </td>
-                      </tr>
-                    </template>
-                    <tr v-if="!hostRows.length" class="border-b border-default">
-                      <td />
-                      <td colspan="4" class="py-2 pl-12 text-muted">
-                        {{ searching ? 'No host matches.' : 'No hosts yet.' }}
-                      </td>
-                    </tr>
-                  </template>
-
-                  <template v-else-if="g.key === 'group:lists'">
-                    <template v-for="r in listRows" :key="r.key">
-                      <tr
-                        v-if="r.folder"
-                        class="border-b border-default hover:bg-elevated/50"
-                        @contextmenu="openMenu($event, folderMenu('ip_lists', r.folder.id))"
-                      >
-                        <td class="py-1 pr-2 whitespace-nowrap">
-                          <UButton
-                            size="xs"
-                            color="neutral"
-                            variant="ghost"
-                            :icon="auth.isAdmin ? 'i-lucide-pencil' : 'i-lucide-eye'"
-                            :aria-label="auth.isAdmin ? 'Edit' : 'View'"
-                            :title="auth.isAdmin ? 'Edit' : 'View'"
-                            @click="folderDialog.edit(r.folder)"
-                          />
-                        </td>
-                        <td class="py-1.5 pr-2">
-                          <div class="flex items-center gap-1" :style="indent(r.depth)">
-                            <UButton
-                              size="xs"
-                              color="neutral"
-                              variant="ghost"
-                              :icon="
-                                folded.has(r.key)
-                                  ? 'i-lucide-chevron-right'
-                                  : 'i-lucide-chevron-down'
-                              "
-                              :aria-label="folded.has(r.key) ? 'Expand' : 'Collapse'"
-                              @click="toggle(r.key)"
-                            />
-                            <UIcon
-                              :name="folded.has(r.key) ? 'i-lucide-folder' : 'i-lucide-folder-open'"
-                              class="text-primary"
-                            />
-                            <span class="font-medium whitespace-nowrap">{{ r.folder.name }}</span>
-                            <UBadge
-                              color="neutral"
-                              variant="subtle"
-                              size="sm"
-                              :label="String(r.count)"
-                            />
-                          </div>
-                        </td>
-                        <td colspan="3" />
-                      </tr>
-                      <tr
-                        v-else
-                        class="border-b border-default hover:bg-elevated/50"
-                        @contextmenu="openMenu($event, listMenu(r.item))"
-                      >
-                        <td class="py-1 pr-2 whitespace-nowrap">
-                          <UButton
-                            size="xs"
-                            color="neutral"
-                            variant="ghost"
-                            :icon="auth.isAdmin ? 'i-lucide-pencil' : 'i-lucide-eye'"
-                            :aria-label="auth.isAdmin ? 'Edit' : 'View'"
-                            :title="auth.isAdmin ? 'Edit' : 'View'"
-                            @click="listDialog.edit(r.item)"
-                          />
-                          <UButton
-                            v-if="auth.isAdmin"
-                            size="xs"
-                            color="neutral"
-                            variant="ghost"
-                            icon="i-lucide-refresh-cw"
-                            title="Download now"
-                            :disabled="
-                              !states[r.item.name] || states[r.item.name].state === 'fetching'
-                            "
-                            @click="refreshList(r.item)"
-                          />
-                        </td>
-                        <td class="py-1.5 pr-2">
-                          <div class="flex items-center gap-1" :style="indent(r.depth)">
-                            <span class="inline-block w-6" />
-                            <UIcon name="i-lucide-list" class="text-muted" />
-                            <span class="font-medium">@{{ r.item.name }}</span>
-                          </div>
-                        </td>
-                        <td class="px-2 text-sm">{{ r.item.description }}</td>
-                        <td class="px-2 text-xs">
-                          {{ sourceLabel[r.item.source] ?? r.item.source }}
-                          <span class="font-mono break-all text-muted">{{ r.item.url }}</span>
-                        </td>
-                        <td class="px-2 py-1">
-                          <div v-if="states[r.item.name]" class="space-y-0.5 text-xs">
-                            <UBadge
-                              :color="stateColor[states[r.item.name].state] ?? 'neutral'"
-                              variant="subtle"
-                              size="sm"
-                            >
-                              {{ states[r.item.name].state }}
-                            </UBadge>
-                            <div v-if="states[r.item.name].updated">
-                              {{ states[r.item.name].ipv4 }} IPv4,
-                              {{ states[r.item.name].ipv6 }} IPv6
-                              <span v-if="states[r.item.name].skipped" class="text-muted">
-                                ({{ states[r.item.name].skipped }} skipped)
-                              </span>
-                            </div>
-                            <div class="text-muted">
-                              updated {{ ago(states[r.item.name].updated) }}
-                            </div>
-                            <div v-if="states[r.item.name].last_error" class="text-error">
-                              {{ states[r.item.name].last_error }}
-                            </div>
-                          </div>
-                          <span v-else class="text-xs text-muted">not deployed</span>
-                        </td>
-                      </tr>
-                    </template>
-                    <tr v-if="!listRows.length" class="border-b border-default">
-                      <td />
-                      <td colspan="4" class="py-2 pl-12 text-muted">
-                        {{ searching ? 'No IP list matches.' : 'No IP lists yet.' }}
-                      </td>
-                    </tr>
-                  </template>
-
-                  <template v-else>
-                    <IpamTreeRows
-                      v-if="foundTree.length"
-                      :nodes="foundTree"
-                      :depth="1"
-                      :collapsed="folded"
-                      :iface-name="ifaceName"
-                      :read-only="!auth.canEdit"
-                      :dns-listen="dnsListen"
-                      :iface-client="ifaceClient"
-                      :dhcp-on="!!store.current?.dhcp_enabled"
-                      @toggle="toggle"
-                      @edit="onEdit"
-                      @menu="(e, node) => openMenu(e, nodeMenu(node))"
-                    />
-                    <tr v-else>
-                      <td />
-                      <td colspan="4" class="py-2 pl-12 text-muted">
-                        <template v-if="searching && shownTree.length">
-                          No prefix or address matches.
-                        </template>
-                        <template v-else-if="store.currentId">
-                          No prefixes yet. Give an interface an address under
-                          <RouterLink to="/interfaces" class="text-primary">Interfaces</RouterLink>,
-                          e.g. 192.168.1.1/24, or add a prefix.
-                        </template>
-                        <template v-else>
-                          No instance yet: create one under
-                          <RouterLink to="/instances" class="text-primary">Instances</RouterLink>.
-                        </template>
-                      </td>
-                    </tr>
-                  </template>
-                </template>
-              </template>
-            </tbody>
-          </table>
-        </div>
+        <ObjectTree
+          :source="treeSource"
+          :columns="columns"
+          class="h-[calc(100vh-16rem)] min-h-96"
+          @open="onOpen"
+          @menu="(e, data) => openMenu(e, rowMenu(data))"
+          @toggle="onToggle"
+        />
       </UContextMenu>
     </div>
 

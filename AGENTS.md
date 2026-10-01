@@ -212,7 +212,9 @@ singular); a custom page uses `SearchInput` above each table,
   context menu deletes) and the DNS zone records grid (`ZoneRecordsTable`: edited
   in place, no detail view) are exempt from the table rules, and so is the
   packet capture's packet list (`PacketList`: Wireshark's display filter
-  takes the search field's place). The rule's form is
+  takes the search field's place), and so is the Hosts & prefixes tree
+  (`ObjectTree`, a Wunderbaum treegrid: a click opens the row's form, the
+  context menu adds). The rule's form is
   not: it follows the form and delete rules.
 
 ## Adding a feature end to end
