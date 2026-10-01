@@ -95,6 +95,10 @@ func SampleDocument() Document {
 					RDNSS:     []string{"fd00:1::1"},
 					DNSSL:     []string{"home.arpa"},
 				}},
+				Certificates: []Certificate{{
+					Name: "www", Domains: []string{"www.example.com", "example.com"}, Email: "admin@example.com",
+					CA: "letsencrypt", KeyType: "ec256", Challenge: ChallengeHTTP01, Interface: "eth0",
+				}},
 				DynDNS: []DynDNS{{
 					Name:      "home",
 					Interface: "eth0",

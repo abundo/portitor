@@ -32,6 +32,7 @@ export const dnsDnssecPolicies = crud('/dns/dnssec-policies')
 export const addressObjects = crud('/objects')
 export const dyndnsClients = crud('/dyndns/clients')
 export const dyndnsRecords = crud('/dyndns/records')
+export const certificates = crud('/certificates')
 export const ipLists = crud('/ip-lists')
 // Folders of hosts (kind hosts) and IP lists (kind ip_lists), for the GUI only.
 export const objectFolders = crud('/object-folders')
@@ -47,6 +48,7 @@ export const api = {
   updateMe: (body) => http.put('/me', body).then((r) => r.data),
   changePassword: (current, next) => http.post('/me/password', { current, new: next }),
   version: () => http.get('/version').then((r) => r.data),
+  acmeCAs: () => http.get('/certificates/cas').then((r) => r.data ?? []),
   dnsProviders: () => http.get('/dyndns/providers').then((r) => r.data ?? []),
 
   ipamTree: (instanceId) =>

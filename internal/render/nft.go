@@ -78,6 +78,10 @@ func Nftables(in *fwconfig.Instance, lockout *AntiLockout, paths Paths) string {
 		}
 	}
 
+	if len(in.Certificates) > 0 {
+		fmt.Fprintf(b, "\tset %s {\n\t\ttype inet_service\n\t}\n\n", ACMEHTTPSet)
+	}
+
 	counted := writeRuleCounters(b, in.Rules)
 	writeDropCounters(b)
 
@@ -409,7 +413,25 @@ type AutoRule struct {
 	// (AntiLockout.Rule) sets it; AutoInputRules never does, and nft()
 	// does not render it.
 	Source []string `json:"source,omitempty"`
+	// PortSet, when set, matches the destination port by this set instead
+	// of DstPort: the rule opens DstPort only while the agent puts it in
+	// the set (ACMEHTTPSet).
+	PortSet string `json:"port_set,omitempty"`
 }
+
+// ACMEHTTPSet is the port set of the HTTP-01 auto rule: empty, except for
+// port 80 while the agent answers an ACME challenge in the instance.
+const ACMEHTTPSet = "acme_http"
+
+// ACMEHTTPService is the HTTP-01 auto rule's service.
+const ACMEHTTPService = "acme http-01"
+
+// ACMEHTTPOpen and ACMEHTTPClose are the nft scripts that open and close
+// port 80 for HTTP-01 challenges.
+var (
+	ACMEHTTPOpen  = fmt.Sprintf("add element inet %s %s { 80 }\n", TableName, ACMEHTTPSet)
+	ACMEHTTPClose = fmt.Sprintf("flush set inet %s %s\n", TableName, ACMEHTTPSet)
+)
 
 // AutoInputRules opens what the configured services need, so a user who
 // enables the DHCP server on lan doesn't also have to write the rule.
@@ -448,6 +470,18 @@ func AutoInputRules(in *fwconfig.Instance) []AutoRule {
 		sort.Strings(ifs)
 		out = append(out, AutoRule{Service: "dns server", InInterfaces: ifs, Protocol: "tcp,udp", DstPort: 53})
 	}
+	// HTTP-01 challenges come in on the certificates' interfaces; the
+	// rule matches only while one is being answered.
+	var acme []string
+	for _, c := range in.Certificates {
+		if !slices.Contains(acme, c.Interface) {
+			acme = append(acme, c.Interface)
+		}
+	}
+	if len(acme) > 0 {
+		sort.Strings(acme)
+		out = append(out, AutoRule{Service: ACMEHTTPService, InInterfaces: acme, Protocol: "tcp", DstPort: 80, PortSet: ACMEHTTPSet})
+	}
 	for _, ifc := range in.Interfaces {
 		if ifc.Enabled && ifc.Kind == fwconfig.KindWireGuard && ifc.WireGuard != nil && ifc.WireGuard.ListenPort > 0 {
 			out = append(out, AutoRule{Service: "wireguard " + ifc.Name, Protocol: "udp", DstPort: ifc.WireGuard.ListenPort})
@@ -478,7 +512,11 @@ func (r AutoRule) match() string {
 		if r.SrcPort > 0 {
 			parts = append(parts, fmt.Sprintf("%s sport %d", r.Protocol, r.SrcPort))
 		}
-		parts = append(parts, fmt.Sprintf("%s dport %d", r.Protocol, r.DstPort))
+		if r.PortSet != "" {
+			parts = append(parts, fmt.Sprintf("%s dport @%s", r.Protocol, r.PortSet))
+		} else {
+			parts = append(parts, fmt.Sprintf("%s dport %d", r.Protocol, r.DstPort))
+		}
 	}
 	return strings.Join(parts, " ")
 }

@@ -77,9 +77,11 @@ type Status struct {
 	Instances  []InstanceStatus `json:"instances"`
 	DHCPLeases []Lease          `json:"dhcp_client_leases"`
 	DynDNS     []DynDNSStatus   `json:"dyndns"`
-	IPLists    []IPListStatus   `json:"ip_lists"`
-	Tasks      []TaskStatus     `json:"tasks"`
-	Programs   []ProgramStatus  `json:"programs"`
+	// Certificates are the ACME certificates.
+	Certificates []CertificateStatus `json:"certificates"`
+	IPLists      []IPListStatus      `json:"ip_lists"`
+	Tasks        []TaskStatus        `json:"tasks"`
+	Programs     []ProgramStatus     `json:"programs"`
 	// NICs are the physical interfaces on the firewall, wherever they are.
 	NICs []NICStatus `json:"nics"`
 	// AntiLockout is the input rule the agent adds in the default
@@ -213,6 +215,25 @@ type DynDNSStatus struct {
 	Name      string `json:"name"`
 	Interface string `json:"interface"`
 	dyndns.Status
+}
+
+// CertificateStatus is the state of an ACME certificate.
+type CertificateStatus struct {
+	Instance string   `json:"instance"`
+	Name     string   `json:"name"`
+	Domains  []string `json:"domains"`
+	// State: pending, issuing, ok, error, dry-run.
+	State     string `json:"state"`
+	LastError string `json:"last_error,omitempty"`
+	// Dir holds the chain and key (fullchain.pem, privkey.pem).
+	Dir string `json:"dir"`
+	// The stored certificate, if any.
+	NotBefore *time.Time `json:"not_before,omitempty"`
+	NotAfter  *time.Time `json:"not_after,omitempty"`
+	Issuer    string     `json:"issuer,omitempty"`
+	// LastAttempt is the last order; NextAttempt the next check or retry.
+	LastAttempt *time.Time `json:"last_attempt,omitempty"`
+	NextAttempt *time.Time `json:"next_attempt,omitempty"`
 }
 
 // IPListStatus is the state of an IP list's download.

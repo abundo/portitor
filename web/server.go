@@ -133,6 +133,7 @@ func (s *Server) Echo() *echo.Echo {
 	(&resource[models.DnsDnssecPolicy, *models.DnsDnssecPolicy]{db: s.db, order: "name", prepare: prepareDnsDnssecPolicy, beforeDelete: deleteDnsDnssecPolicy}).register(s, g, "/dns/dnssec-policies")
 	(&resource[models.DnsTemplate, *models.DnsTemplate]{db: s.db, order: "name", prepare: prepareDnsTemplate, beforeDelete: deleteDnsTemplate}).register(s, g, "/dns/templates")
 	(&resource[models.DyndnsClient, *models.DyndnsClient]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "name", prepare: prepareDyndnsClient, present: presentDyndnsClient, beforeDelete: deleteDyndnsClient}).register(s, g, "/dyndns/clients")
+	(&resource[models.Certificate, *models.Certificate]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "name", prepare: prepareCertificate}).register(s, g, "/certificates")
 	(&resource[models.DyndnsRecord, *models.DyndnsRecord]{db: s.db, scope: byParent("ClientID", "client_id", "dyndns_clients"), tenantWrites: tenantAll, filters: []string{"client_id"}, order: "id", prepare: prepareDyndnsRecord}).register(s, g, "/dyndns/records")
 	(&resource[models.AddressObject, *models.AddressObject]{db: s.db, order: "name", prepare: prepareAddressObject, beforeDelete: deleteAddressObject}).register(s, g, "/objects")
 	(&resource[models.IpList, *models.IpList]{db: s.db, order: "name", prepare: prepareIpList, present: presentIpList, beforeDelete: deleteIpList}).register(s, g, "/ip-lists")
@@ -151,6 +152,7 @@ func (s *Server) Echo() *echo.Echo {
 	g.GET("/ipam/prefixes/:id/next-free", s.handleNextFree)
 	g.GET("/rules/auto", s.handleAutoRules)
 	g.GET("/services", func(c *echo.Context) error { return c.JSON(http.StatusOK, fwconfig.Services) })
+	g.GET("/certificates/cas", func(c *echo.Context) error { return c.JSON(http.StatusOK, fwconfig.ACMECAs) })
 	g.GET("/dyndns/providers", func(c *echo.Context) error { return c.JSON(http.StatusOK, fwconfig.DNSProviders) })
 	g.GET("/predefined-services", func(c *echo.Context) error { return c.JSON(http.StatusOK, netobj.Predefined) })
 	g.GET("/icmp-types", func(c *echo.Context) error {

@@ -54,6 +54,17 @@ func (p Paths) IPListFile(name string) string {
 	return filepath.Join(p.StateDir, "iplists", name+".nft")
 }
 
+// CertificateDir holds an ACME certificate of an instance: the agent
+// writes its chain and key there (acme.FullChainFile, acme.PrivKeyFile).
+func (p Paths) CertificateDir(instance, name string) string {
+	return filepath.Join(p.StateDir, "certificates", instance, name)
+}
+
+// ACMEAccountsDir holds the ACME accounts, one per CA and email.
+func (p Paths) ACMEAccountsDir() string {
+	return filepath.Join(p.StateDir, "acme")
+}
+
 // Units names the systemd units that run an instance's services. %s is
 // the instance name (see deploy/systemd for the template units).
 type Units struct {

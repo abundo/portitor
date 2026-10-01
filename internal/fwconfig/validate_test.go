@@ -194,6 +194,20 @@ func TestValidateCatchesProblems(t *testing.T) {
 			dd.Provider, dd.Server, dd.TSIG = "desec", "", nil
 			dd.ProviderSettings = map[string]string{"token": "a\nb"}
 		}, "control characters"},
+		{"cert unknown interface", func(d *Document) { d.Instances[0].Certificates[0].Interface = "eth9" }, `certificate "www": unknown interface "eth9"`},
+		{"cert wildcard", func(d *Document) { d.Instances[0].Certificates[0].Domains[0] = "*.example.com" }, "cannot validate a wildcard"},
+		{"cert upper case", func(d *Document) { d.Instances[0].Certificates[0].Domains[0] = "WWW.example.com" }, "is not a DNS name"},
+		{"cert single label", func(d *Document) { d.Instances[0].Certificates[0].Domains[0] = "localhost" }, "is not a DNS name"},
+		{"cert address", func(d *Document) { d.Instances[0].Certificates[0].Domains[0] = "192.0.2.1" }, "an IP address"},
+		{"cert duplicate domain", func(d *Document) { d.Instances[0].Certificates[0].Domains[1] = "www.example.com" }, "twice"},
+		{"cert no domains", func(d *Document) { d.Instances[0].Certificates[0].Domains = nil }, "needs 1-100 domains"},
+		{"cert http ca", func(d *Document) { d.Instances[0].Certificates[0].CA = "http://ca.example.com/dir" }, "https URL"},
+		{"cert key type", func(d *Document) { d.Instances[0].Certificates[0].KeyType = "dsa" }, "key type must be"},
+		{"cert challenge", func(d *Document) { d.Instances[0].Certificates[0].Challenge = "dns-01" }, "challenge must be http-01"},
+		{"cert email", func(d *Document) { d.Instances[0].Certificates[0].Email = "a b@example.com" }, "invalid email"},
+		{"cert duplicate", func(d *Document) {
+			d.Instances[0].Certificates = append(d.Instances[0].Certificates, d.Instances[0].Certificates[0])
+		}, `certificate "www": duplicate`},
 		{"dyndns no records", func(d *Document) { d.Instances[0].DynDNS[0].Records = nil }, "at least one record"},
 		{"dyndns name outside zone", func(d *Document) { d.Instances[0].DynDNS[0].Records[0].Name = "home.example.org." }, "not in zone"},
 		{"dyndns duplicate record", func(d *Document) { d.Instances[0].DynDNS[0].Records[1].Type = "A" }, "duplicate (one record per name and type)"},
@@ -385,5 +399,22 @@ func TestWireGuardRoutes(t *testing.T) {
 	in.Interfaces[3].Enabled = false
 	if got := in.WireGuardRoutes(); len(got) != 0 {
 		t.Errorf("disabled interface routed: %+v", got)
+	}
+}
+
+func TestItemNames(t *testing.T) {
+	for name, ok := range map[string]bool{
+		"www.example.com": true, "mail-2026": true, "a_b": true, "1st": true,
+		".": false, "..": false, ".hidden": false, "-x": false, "a/b": false, "WWW": false, "a b": false, "": false,
+	} {
+		if ValidItemName(name) != ok {
+			t.Errorf("%q: want %v", name, ok)
+		}
+		d := SampleDocument()
+		d.Instances[0].Certificates[0].Name = name
+		d.Instances[0].DynDNS[0].Name = name
+		if err := d.Validate(); (err == nil) != ok {
+			t.Errorf("%q: validate %v", name, err)
+		}
 	}
 }

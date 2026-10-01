@@ -97,4 +97,8 @@ export function autoFamily(a) {
   return v6 === a.source.length ? 'IPv6' : 'any'
 }
 export const autoDescription = (a) =>
-  a.service === 'anti-lockout' ? 'anti-lockout, from portitor-agent config' : a.service
+  a.service === 'anti-lockout'
+    ? 'anti-lockout, from portitor-agent config'
+    : a.port_set
+      ? `${a.service}, open only while a certificate is being ordered`
+      : a.service

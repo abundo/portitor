@@ -132,6 +132,7 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 	var dhcpWant []dhcpKey
 	var dhcp6Want []dhcp6Key
 	var ddnsWant []dyndnsItem
+	var certsWant []certItem
 	var lldpWant []lldpKey
 	pktsWant := map[string]string{}
 
@@ -221,6 +222,9 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 		for _, d := range in.DynDNS {
 			ddnsWant = append(ddnsWant, dyndnsItem{instance: in.Name, netns: ns, cfg: d})
 		}
+		for _, c := range in.Certificates {
+			certsWant = append(certsWant, certItem{instance: in.Name, netns: ns, cfg: c})
+		}
 		if logsPackets(in) {
 			pktsWant[in.Name] = ns
 		}
@@ -251,6 +255,7 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 	a.dhcp.Reconcile(dhcpWant)
 	a.dhcp6.Reconcile(dhcp6Want)
 	a.ddns.Reconcile(ddnsWant)
+	a.certs.Reconcile(ctx, certsWant)
 	a.pkts.Reconcile(pktsWant)
 	a.lldp.Reconcile(lldpWant)
 

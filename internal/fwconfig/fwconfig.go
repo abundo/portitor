@@ -46,6 +46,9 @@ type Instance struct {
 	// DynDNS clients keep records on a nameserver in step with the
 	// addresses of this instance's interfaces.
 	DynDNS []DynDNS `json:"dyndns,omitempty"`
+	// Certificates are TLS certificates the agent gets and renews by
+	// ACME (Let's Encrypt).
+	Certificates []Certificate `json:"certificates,omitempty"`
 	// LogDrops lists the filter chains (ChainInput, ...) that log, rate
 	// limited, what no rule decided on before the chain's policy drops it.
 	LogDrops []string `json:"log_drops,omitempty"`

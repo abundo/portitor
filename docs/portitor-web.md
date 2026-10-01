@@ -102,6 +102,7 @@ After an upgrade, run `migrate` before `start`. `install.py` does both.
 | | DHCP | Two tabs. *Leases*: active leases, and the leases of the firewall's own DHCP clients. *DHCP server*: the instance's DHCP server (Kea) on or off, its domain name and lease time, and the interfaces with the prefixes of their addresses, each with a DHCP switch. Badges on an interface: *DHCP Client* (it gets its IPv4 address by DHCP), *SLAAC-C* (it takes an IPv6 address from router advertisements), *RA* (it sends router advertisements). Edit an interface for its range, gateway and DNS servers, and on IPv6 prefixes router advertisements and SLAAC. Several prefixes with DHCP on one interface form a Kea shared network: clients get addresses from all of them. |
 | | WireGuard | Tunnels, road-warrior and [site-to-site](#site-to-site-wireguard) peers; generates client and site configs. |
 | | DNS update | Keeps DNS records in step with an interface's addresses (the WAN, say): on your own nameserver (by IP address or DNS name, looked up in the instance) by RFC 2136 dynamic update (TSIG signed), sent from the instance, or at a DNS hosting provider through its API, called from the firewall host (Bunny DNS, Cloudflare, deSEC, easyDNS, Gandi, GleSYS, GoDaddy, Hetzner DNS, Loopia, Namecheap, NameSilo, netcup, Njalla, OVHcloud, Porkbun). A provider's tokens and keys are stored on the server and never shown again; leave one empty to keep it. |
+| | Certificates | TLS certificates from Let's Encrypt, got and renewed by the firewall; see [Certificates](#certificates). |
 | | Scheduled tasks | IP list downloads and commands on a cron schedule. |
 | Tools | Console | A shell on the firewall as the agent's `console_user`, in the network namespace of the selected instance (so `ip addr`, `nft list ruleset` and `ping` see that instance). *Open in window* (or the square terminal icon) opens one in a window of its own for that instance. |
 | | Packet capture | Live capture with Wireshark in the browser. tcpdump runs on an interface of the selected instance (or *any*), with a capture filter (pcap syntax) and limits (packets, seconds, bytes per packet); the packets stream in as they are captured, into a packet list with Wireshark's display filters (`dns \|\| tcp.port == 443`), protocol tree and bytes. *Follow* keeps the newest packet in view. *pcap* downloads the capture for Wireshark. *Open in window* runs the capture in a window of its own, for the selected instance, so it keeps going while you use the rest of the GUI; each window is a capture of its own. The stream from the agent is capped at the rate under *Settings* (1000 kbit/s by default); when traffic outruns it, the firewall drops captured packets rather than fall behind. The agent's own API connection is left out, and at most two captures run at once. Wireshark (Wiregasm, about 20 MB) loads when the page opens; it is a separate program (GPL-2.0) that the installer puts in `/usr/share/portitor/wiregasm`. |
@@ -227,6 +228,33 @@ LAN `192.168.50.0/24`.
   with this side's networks.
 - Allow the traffic with forward rules between the WireGuard interface (or its interface
   zone) and the LAN, in both directions as needed. NAT is not needed between sites.
+
+## Certificates
+
+*Services → Certificates* gets TLS certificates from Let's Encrypt (ACME) with the
+HTTP-01 challenge: the CA fetches a token from `http://<domain>/.well-known/acme-challenge/`
+for every domain of the certificate.
+
+- Every domain must resolve (A, and AAAA if it has one) to an address of the
+  certificate's *Interface*, the WAN say. DNS update can keep those records.
+- The instance's input chain has an auto rule, *acme http-01*, for TCP port 80 on the
+  interfaces of its certificates. It matches only while the firewall answers a
+  challenge (the port is in the nftables set `acme_http` then; the set is empty the
+  rest of the time), so port 80 is closed otherwise. A port forward (DNAT) of port 80
+  on that interface takes the CA's requests elsewhere: remove it, or get the
+  certificate on the server behind it.
+- The firewall answers in the instance itself, on port 80; the ACME API is called from
+  the firewall host.
+- A certificate is ordered when it is deployed, when its domains, CA or key type
+  change, and renewed when two thirds of its lifetime have passed (30 days before the
+  end of a 90-day one). A failed order is tried again after 10 minutes, then after
+  twice as long each time, up to 12 hours.
+- The chain and key are in `<state_dir>/certificates/<instance>/<name>/`
+  (`fullchain.pem`, `privkey.pem`, root only); the *State* column shows where, until
+  when it is valid, and the last error. ACME accounts, one per CA and email, are in
+  `<state_dir>/acme/`.
+- Try *Let's Encrypt staging* first: its certificates are not trusted, but its rate
+  limits are far higher than production's (5 failed validations per hour per domain).
 
 ## Backup and restore
 

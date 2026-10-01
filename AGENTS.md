@@ -17,6 +17,7 @@ are in [README.md](README.md).
 | `internal/render` | Pure functions: document → nftables, WireGuard, named.conf, Kea, dnsmgr2 config |
 | `internal/agent` | Agent: apply/reconcile, commit-confirm, DHCP and DHCPv6 (prefix delegation) clients, IP lists, task scheduler, packet log (NFLOG), WireGuard endpoint re-resolving, packet capture (tcpdump, streamed rate-limited), traceroute (`mtr --raw`, streamed as JSON lines, `trace.go`), LLDP (sent and heard on raw sockets, `lldp.go`), neighbours (ARP/ND, LLDP), status, API server |
 | `internal/dyndns` | DNS update client ("DNS update" in the GUI): RFC 2136 (from ifnsupdate), sent from the instance netns, or a DNS hosting provider's API through libdns (`providers.go`, matching `fwconfig.DNSProviders`), called from the host |
+| `internal/acme` | ACME certificates through lego: accounts, orders, the stored chain and key (`<state_dir>/certificates/`); the agent's `acme.go` schedules them and answers HTTP-01 in the instance netns, opening port 80 by the `acme_http` set (`render.ACMEHTTPSet`) |
 | `internal/iplist` | Downloads IP lists (CrowdSec LAPI decisions, plain-text lists) |
 | `internal/wgkeys` | WireGuard key generation (wg(8) base64) |
 | `internal/buildinfo` | Version, commit and date, set at link time (Makefile `LDFLAGS`, `.goreleaser.yaml`) |

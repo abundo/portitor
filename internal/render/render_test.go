@@ -750,3 +750,21 @@ func TestAutoInputRulesDHCPv6Client(t *testing.T) {
 		t.Errorf("no %q in\n%s", want, nft)
 	}
 }
+
+func TestACMEHTTPRule(t *testing.T) {
+	doc := fwconfig.SampleDocument()
+	in := &doc.Instances[0]
+	nft := Nftables(in, nil, Paths{})
+	for _, want := range []string{
+		"\tset acme_http {\n\t\ttype inet_service\n\t}\n",
+		`iifname "eth0" tcp dport @acme_http accept comment "auto: acme http-01"`,
+	} {
+		if !strings.Contains(nft, want) {
+			t.Errorf("no %q in\n%s", want, nft)
+		}
+	}
+	in.Certificates = nil
+	if nft := Nftables(in, nil, Paths{}); strings.Contains(nft, "acme_http") {
+		t.Errorf("acme_http without certificates:\n%s", nft)
+	}
+}

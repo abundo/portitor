@@ -666,6 +666,23 @@ type DyndnsClient struct {
 	HasTsigSecret bool   `gorm:"-" json:"has_tsig_secret"`
 }
 
+// Certificate is a TLS certificate the agent gets from an ACME CA (Let's
+// Encrypt) and renews. The CA's HTTP-01 requests come in on Interface.
+type Certificate struct {
+	Base
+	InstanceID  uint       `json:"instance_id"`
+	Name        string     `json:"name"`
+	Description string     `json:"description"`
+	Enabled     bool       `json:"enabled"`
+	Domains     StringList `json:"domains"`
+	Email       string     `json:"email"`
+	// Ca is a fwconfig.ACMECAs name or an ACME directory URL.
+	Ca          string `json:"ca"`
+	KeyType     string `json:"key_type"`
+	Challenge   string `json:"challenge"`
+	InterfaceID uint   `json:"interface_id"`
+}
+
 // DyndnsRecord is a record a DyndnsClient maintains. A/AAAA without Value
 // follow the interface; TXT without Value holds the last update time.
 type DyndnsRecord struct {
@@ -746,6 +763,6 @@ func All() []any {
 		&User{}, &Settings{}, &Instance{}, &InterfaceZone{}, &Interface{}, &WgPeer{}, &Link{},
 		&Route{}, &Rule{}, &NatRule{}, &IpamPrefix{}, &IpamAddress{}, &DnsZone{}, &DnsRecord{}, &Deployment{},
 		&AddressObject{}, &DnsSoaTemplate{}, &DnsDnssecPolicy{}, &DnsTemplate{}, &KnownInterface{},
-		&DyndnsClient{}, &DyndnsRecord{}, &IpList{}, &Task{}, &Service{}, &ObjectFolder{}, &Role{}, &RoleMember{}, &RoleInstance{},
+		&DyndnsClient{}, &DyndnsRecord{}, &Certificate{}, &IpList{}, &Task{}, &Service{}, &ObjectFolder{}, &Role{}, &RoleMember{}, &RoleInstance{},
 	}
 }

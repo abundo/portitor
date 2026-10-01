@@ -25,6 +25,11 @@ var (
 	autoServiceRe = regexp.MustCompile(`^[a-zA-Z0-9_.-]+( [a-zA-Z0-9_.-]+)*$`)
 	// Interface zone and link names.
 	zoneNameRe = regexp.MustCompile(`^[a-z][a-z0-9_]{0,23}$`)
+	// itemNameRe names what never becomes an nft identifier or interface
+	// name (certificates, DNS update clients, tasks), only a log field,
+	// status key or directory name: starting with a letter or digit keeps
+	// out "." and "..".
+	itemNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,62}$`)
 	peerNameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9 _.@-]{0,62}$`)
 	dnsLabelRe = regexp.MustCompile(`^(\*|@|[a-zA-Z0-9_]([a-zA-Z0-9_-]{0,61}[a-zA-Z0-9_])?)$`)
 	hostRe     = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9.-]{0,251}[a-zA-Z0-9])?$`)
@@ -509,6 +514,7 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 	}
 
 	v.dyndns(p, in, ifaces)
+	v.certificates(p, in, ifaces)
 
 	v.logChains(p+": log drops", in.LogDrops)
 	v.logChains(p+": log invalid", in.LogInvalid)
@@ -1029,6 +1035,7 @@ func ParsePorts(s string) ([]PortRange, error) {
 func ValidInstanceName(s string) bool { return instanceNameRe.MatchString(s) }
 func ValidIfname(s string) bool       { return ifnameRe.MatchString(s) }
 func ValidZoneName(s string) bool     { return zoneNameRe.MatchString(s) }
+func ValidItemName(s string) bool     { return itemNameRe.MatchString(s) }
 func ValidDomain(s string) bool       { return validDomain(s) }
 func ValidWGKey(s string) bool        { return validWGKey(s) }
 func ValidMAC(s string) bool          { return macRe.MatchString(s) }

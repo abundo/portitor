@@ -17,6 +17,8 @@ office networks. It manages:
 - a DHCP client for the WAN link
 - DNS update: DNS records follow the WAN addresses, on your own nameserver (RFC 2136, TSIG)
   or at a DNS hosting provider (Cloudflare, Hetzner, deSEC, Loopia, GleSYS and more, via libdns)
+- certificates: Let's Encrypt (ACME, HTTP-01) certificates, renewed automatically; port 80
+  opens only while a challenge is answered
 - IP lists: CrowdSec decisions or downloaded blocklists, used as `@name` in rules
 - scheduled tasks: download IP lists or run commands on a cron schedule
 - virtual instances, each with its own routing, rules, DHCP and DNS, with optional
@@ -39,6 +41,7 @@ firewall, the agent, makes the changes the GUI asks for. For a single box, an
                   ├─ WireGuard      wg syncconf
                   ├─ DHCP client    in-process, for the WAN
                   ├─ DNS update     in-process RFC 2136 updates (ifnsupdate), provider APIs (libdns)
+                  ├─ ACME           Let's Encrypt certificates (lego), HTTP-01 in the instance
                   ├─ IP lists       downloads (CrowdSec LAPI, plain text) into nftables sets
                   ├─ scheduler      cron-style tasks
                   ├─ dnsmgr2        BIND zones + Kea DHCPv4 scopes, one pair per instance

@@ -42,6 +42,7 @@ type data struct {
 	templates  []models.DnsTemplate
 	dyndns     []models.DyndnsClient
 	dyndnsRecs []models.DyndnsRecord
+	certs      []models.Certificate
 	ipLists    []models.IpList
 	tasks      []models.Task
 	services   []models.Service
@@ -71,6 +72,7 @@ func load(db *gorm.DB) (*data, error) {
 		{&d.templates, "name"},
 		{&d.dyndns, "name"},
 		{&d.dyndnsRecs, "client_id, id"},
+		{&d.certs, "name"},
 		{&d.ipLists, "name"},
 		{&d.tasks, "name"},
 		{&d.services, "name"},
@@ -561,6 +563,18 @@ func build(db *gorm.DB, generation int64, only map[string]bool) (*fwconfig.Docum
 			in.DynDNS = append(in.DynDNS, DynDNS(&c, ifc.Name, recs))
 		}
 
+		for _, c := range d.certs {
+			if c.InstanceID != mi.ID || !c.Enabled {
+				continue
+			}
+			ifc, ok := ifaceByID[c.InterfaceID]
+			if !ok || ifc.InstanceID != mi.ID {
+				addf("instance %s: certificate %s: its interface is not in this instance", mi.Name, c.Name)
+				continue
+			}
+			in.Certificates = append(in.Certificates, Certificate(&c, ifc.Name))
+		}
+
 		doc.Instances = append(doc.Instances, in)
 	}
 
@@ -617,6 +631,15 @@ func build(db *gorm.DB, generation int64, only map[string]bool) (*fwconfig.Docum
 		return doc, &fwconfig.ValidationError{Problems: problems}
 	}
 	return doc, nil
+}
+
+// Certificate is a certificate as the document holds it; iface is the
+// name of its interface.
+func Certificate(c *models.Certificate, iface string) fwconfig.Certificate {
+	return fwconfig.Certificate{
+		Name: c.Name, Domains: slices.Clone([]string(c.Domains)), Email: c.Email,
+		CA: c.Ca, KeyType: c.KeyType, Challenge: c.Challenge, Interface: iface,
+	}
 }
 
 // DynDNS is a DNS update client with its records as the document holds

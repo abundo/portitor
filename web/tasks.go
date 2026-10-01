@@ -185,8 +185,8 @@ func checkIPListRef(tx *gorm.DB, field, name string) error {
 
 func prepareTask(tx *gorm.DB, t, _ *models.Task) error {
 	t.Name = strings.TrimSpace(t.Name)
-	if !fwconfig.ValidZoneName(t.Name) {
-		return bad("name: lowercase letters, digits and _, at most 24 characters")
+	if !fwconfig.ValidItemName(t.Name) {
+		return bad("name: lowercase letters, digits, '.', '-' and '_', starting with a letter or digit, at most 63 characters")
 	}
 	t.Schedule = strings.Join(strings.Fields(t.Schedule), " ")
 	if _, err := cron.Parse(t.Schedule); err != nil {

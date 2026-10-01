@@ -195,8 +195,8 @@ func (v *validator) tasks(tasks []Task) {
 	names := map[string]bool{}
 	for _, t := range tasks {
 		tp := fmt.Sprintf("task %q", t.Name)
-		if !zoneNameRe.MatchString(t.Name) {
-			v.addf("%s: name must match %s", tp, zoneNameRe)
+		if !itemNameRe.MatchString(t.Name) {
+			v.addf("%s: name must match %s", tp, itemNameRe)
 		}
 		if names[t.Name] {
 			v.addf("%s: duplicate", tp)

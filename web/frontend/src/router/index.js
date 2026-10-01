@@ -41,6 +41,7 @@ const router = createRouter({
         { path: 'wireguard', component: () => import('@/views/WireguardPage.vue') },
         { path: 'dns-update', component: () => import('@/views/DnsUpdatePage.vue') },
         { path: 'dyndns', redirect: '/dns-update' },
+        { path: 'certificates', component: () => import('@/views/CertificatesPage.vue') },
         { path: 'tasks', component: () => import('@/views/TasksPage.vue') },
         { path: 'deploy', component: () => import('@/views/DeployPage.vue') },
         {
