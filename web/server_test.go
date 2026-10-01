@@ -302,7 +302,7 @@ func TestDeployEndToEnd(t *testing.T) {
 		t.Fatalf("settings: %d %s", rec.Code, rec.Body)
 	}
 
-	inst := env.create("/api/instances", map[string]any{"name": "main", "dns_enabled": true, "dhcp_enabled": true, "dhcp_domain_name": "home.arpa"})
+	inst := env.create("/api/instances", map[string]any{"name": "main", "dns_enabled": true, "dns_upstream": "root", "dhcp_enabled": true, "dhcp_domain_name": "home.arpa"})
 	env.create("/api/interfaces", map[string]any{"instance_id": inst, "name": "eth0", "ipv4_mode": "dhcp", "enabled": true})
 	env.create("/api/interfaces", map[string]any{"instance_id": inst, "name": "eth1", "enabled": true, "dns_listen": true, "addresses": []string{"192.168.1.1/24"}})
 	env.create("/api/interface-zones", map[string]any{"instance_id": inst, "name": "lan", "interfaces": []string{"eth1"}})
@@ -781,7 +781,7 @@ func TestDnsTemplates(t *testing.T) {
 
 func TestZoneRecordsGrid(t *testing.T) {
 	env := newEnv(t)
-	inst := env.create("/api/instances", map[string]any{"name": "main", "dns_enabled": true})
+	inst := env.create("/api/instances", map[string]any{"name": "main", "dns_enabled": true, "dns_upstream": "root"})
 	zone := env.create("/api/dns/zones", map[string]any{"instance_id": inst, "name": "home.arpa"})
 	path := fmt.Sprintf("/api/dns/zones/%d/records", zone)
 	if rec := env.do("PUT", fmt.Sprintf("/api/dns/zones/%d", zone), map[string]any{"type": "reverse4", "name": "192.168.1.0/24"}); rec.Code != http.StatusBadRequest {
@@ -1037,6 +1037,13 @@ func TestDnsFromDhcp(t *testing.T) {
 	}
 	if rec := env.do("PUT", "/api/instances/"+itoa(inst), map[string]any{"dns_upstream": "peer"}); rec.Code != http.StatusBadRequest {
 		t.Errorf("bad upstream: %d %s", rec.Code, rec.Body)
+	}
+	// Forwarding needs a forwarder once the DNS server is on.
+	if rec := env.do("PUT", "/api/instances/"+itoa(inst), map[string]any{"dns_enabled": true, "dns_upstream": "forward", "dns_forwarders": []string{}}); rec.Code != http.StatusBadRequest {
+		t.Errorf("forward without forwarders: %d %s", rec.Code, rec.Body)
+	}
+	if rec := env.do("PUT", "/api/instances/"+itoa(inst), map[string]any{"dns_enabled": true, "dns_upstream": "forward", "dns_forwarders": []string{"9.9.9.9"}}); rec.Code != http.StatusOK {
+		t.Errorf("forward with a forwarder: %d %s", rec.Code, rec.Body)
 	}
 }
 

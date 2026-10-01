@@ -36,9 +36,17 @@ onMounted(loadTemplates)
 // BIND answers on it and whether its DHCP lease gives the upstream servers.
 const upstreams = [
   { label: 'Forward to DNS servers', value: 'forward' },
-  { label: 'Root servers (resolve itself)', value: 'root' },
   { label: 'DNS servers from the DHCP lease on an interface', value: 'dhcp' },
+  { label: 'Root servers (resolve itself)', value: 'root' },
 ]
+// Resolving from the root servers needs the DNS server; picking it doesn't turn it on.
+const upstreamItems = computed(() =>
+  upstreams.map((u) => ({
+    ...u,
+    disabled: u.value === 'root' && !server.dns_enabled,
+    description: u.value === 'root' && !server.dns_enabled ? 'Needs the DNS server on.' : undefined,
+  })),
+)
 const server = reactive({
   dns_enabled: false,
   dns_upstream: 'forward',
@@ -92,12 +100,33 @@ const { search: ifaceSearch, filtered: shownIfaces } = useSearch(
   (i) => `${withLabel(i.label, i.name)} ${i.description}`,
 )
 
+// The interfaces that are DHCP clients, which can give the upstream servers.
+const dhcpIfaces = computed(() => server.ifaces.filter((i) => i.ipv4_mode === 'dhcp'))
+const { search: dhcpSearch, filtered: shownDhcpIfaces } = useSearch(
+  () => dhcpIfaces.value,
+  (i) => `${withLabel(i.label, i.name)} ${i.description}`,
+)
+
+// Root servers need the DNS server: turning it off forwards instead.
+function setEnabled(on) {
+  server.dns_enabled = on
+  if (!on && server.dns_upstream === 'root') server.dns_upstream = 'forward'
+}
+
 // Only one interface gives the upstream servers.
 function setFromDhcp(ifc, on) {
   for (const i of server.ifaces) i.dns_from_dhcp = on && i === ifc
 }
 
+const noForwarders = computed(
+  () => server.dns_upstream === 'forward' && !server.dns_forwarders.length,
+)
+
 async function save() {
+  if (noForwarders.value) {
+    toast.add({ title: 'Forwarders: enter at least one DNS server', color: 'error' })
+    return
+  }
   saving.value = true
   try {
     const { ifaces, ...dns } = server
@@ -153,87 +182,19 @@ const zoneFields = [
 const zoneDefaults = () => ({ type: 'forward', dns_template_id: templates.value[0]?.id ?? null })
 
 const tabs = [
-  { label: 'DNS resolver', value: 'resolver', slot: 'resolver', icon: 'i-lucide-search' },
   { label: 'DNS zones', value: 'zones', slot: 'zones', icon: 'i-lucide-globe' },
   { label: 'DNS server', value: 'server', slot: 'server', icon: 'i-lucide-server' },
 ]
 // The tab is in the URL (?tab=server), so links can open one.
 const tab = computed({
-  get: () => (tabs.some((t) => t.value === route.query.tab) ? route.query.tab : 'resolver'),
-  set: (v) => router.replace({ query: { ...route.query, tab: v === 'resolver' ? undefined : v } }),
+  get: () => (tabs.some((t) => t.value === route.query.tab) ? route.query.tab : 'zones'),
+  set: (v) => router.replace({ query: { ...route.query, tab: v === 'zones' ? undefined : v } }),
 })
 </script>
 
 <template>
   <NeedInstance>
     <UTabs v-model="tab" :items="tabs" :unmount-on-hide="false">
-      <template #resolver>
-        <div class="pt-2">
-          <div class="card">
-            <div class="mb-1 text-lg font-semibold">DNS resolver</div>
-            <p class="mb-4 text-sm text-muted">
-              How the DNS server resolves names that are not in its own zones, and for whom.
-            </p>
-            <UAlert
-              v-if="!server.dns_enabled"
-              color="warning"
-              variant="subtle"
-              icon="i-lucide-triangle-alert"
-              title="The DNS server is off for this instance"
-              description="Turn it on on the DNS server tab."
-            />
-            <form v-else @submit.prevent="save">
-              <fieldset :disabled="readOnly" class="space-y-3">
-                <UFormField label="Upstream DNS" :ui="inlineField">
-                  <USelect
-                    v-model="server.dns_upstream"
-                    :items="upstreams"
-                    class="w-full sm:w-96"
-                  />
-                </UFormField>
-                <UFormField
-                  v-if="server.dns_upstream === 'forward'"
-                  label="Forwarders"
-                  help="Empty: resolve from the root servers."
-                  :ui="inlineField"
-                >
-                  <AddrInput v-model="server.dns_forwarders" multiple placeholder="9.9.9.9" />
-                </UFormField>
-                <UFormField
-                  v-if="server.dns_upstream !== 'root'"
-                  label="Fall back to the root servers"
-                  help="When the upstream servers don't answer. Off: never ask anyone else."
-                  :ui="inlineField"
-                >
-                  <USwitch v-model="fallback" />
-                </UFormField>
-                <UFormField
-                  label="Allow recursion from"
-                  help="Empty: the networks of the interfaces it answers on."
-                  :ui="inlineField"
-                >
-                  <AddrInput
-                    v-model="server.dns_allow_recursion"
-                    multiple
-                    placeholder="192.168.0.0/16"
-                  />
-                </UFormField>
-                <UFormField
-                  label="DNSSEC validation"
-                  help="Check the signatures of signed zones, with the built-in root key. Off: answers are not validated; turn it off only if an upstream breaks DNSSEC."
-                  :ui="inlineField"
-                >
-                  <USwitch v-model="dnssecValidation" />
-                </UFormField>
-              </fieldset>
-              <div v-if="!readOnly" class="mt-4">
-                <UButton type="submit" :loading="saving">Save</UButton>
-              </div>
-            </form>
-          </div>
-        </div>
-      </template>
-
       <template #zones>
         <div class="space-y-4 pt-2">
           <UAlert
@@ -241,9 +202,13 @@ const tab = computed({
             color="warning"
             variant="subtle"
             icon="i-lucide-triangle-alert"
-            title="The DNS server is off for this instance"
-            description="Zones are kept but not served."
-          />
+            title="The DNS server is not enabled"
+          >
+            <template #description>
+              Zones are kept but not served. Turn it on on the
+              <RouterLink to="/dns?tab=server" class="text-primary">DNS server</RouterLink> tab.
+            </template>
+          </UAlert>
           <CrudPage
             title="DNS zones"
             noun="DNS zone"
@@ -268,20 +233,21 @@ const tab = computed({
       <template #server>
         <div class="pt-2">
           <div class="card">
-            <div class="mb-1 text-lg font-semibold">DNS server</div>
-            <p class="mb-4 text-sm text-muted">
-              BIND, for the clients on this instance's interfaces: it answers from the zones on the
-              DNS zones tab and resolves other names as set on the DNS resolver tab.
-            </p>
             <form @submit.prevent="save">
-              <fieldset :disabled="readOnly" class="space-y-3">
-                <UFormField label="DNS server" :ui="inlineField">
-                  <USwitch v-model="server.dns_enabled" />
-                </UFormField>
-              </fieldset>
+              <h2
+                class="flex items-center gap-3 border-b border-default pb-1 mb-2 text-xl font-semibold"
+              >
+                DNS server
+                <USwitch
+                  :model-value="server.dns_enabled"
+                  :disabled="readOnly"
+                  aria-label="DNS server"
+                  @update:model-value="setEnabled"
+                />
+              </h2>
 
               <!-- Outside the form's fieldset, so a viewer can search too. -->
-              <div v-if="server.dns_enabled" class="pt-5">
+              <div v-if="server.dns_enabled" class="pt-3">
                 <div class="mb-2">
                   <SearchInput v-model="ifaceSearch" />
                 </div>
@@ -292,7 +258,6 @@ const tab = computed({
                         <th class="py-1.5 pr-4 font-medium">Interface</th>
                         <th class="pr-4 font-medium">Description</th>
                         <th class="pr-4 font-medium">Respond to DNS queries</th>
-                        <th v-if="dhcpUpstream" class="font-medium">Use DNS from DHCP</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -309,17 +274,9 @@ const tab = computed({
                             :aria-label="`Respond to DNS queries on ${i.name}`"
                           />
                         </td>
-                        <td v-if="dhcpUpstream" class="py-1.5">
-                          <USwitch
-                            v-if="i.ipv4_mode === 'dhcp'"
-                            :model-value="i.dns_from_dhcp"
-                            :aria-label="`Use DNS servers from the DHCP lease on ${i.name}`"
-                            @update:model-value="(v) => setFromDhcp(i, v)"
-                          />
-                        </td>
                       </tr>
                       <tr v-if="!shownIfaces.length">
-                        <td colspan="4" class="py-2 text-muted">
+                        <td colspan="3" class="py-2 text-muted">
                           {{
                             server.ifaces.length
                               ? 'No interface matches.'
@@ -329,10 +286,57 @@ const tab = computed({
                       </tr>
                     </tbody>
                   </table>
-                  <p
-                    v-if="dhcpUpstream && !server.ifaces.some((i) => i.ipv4_mode === 'dhcp')"
-                    class="mt-2 text-sm text-warning"
-                  >
+                </fieldset>
+              </div>
+
+              <h2 class="border-b border-default pb-1 mt-8 mb-2 text-xl font-semibold">
+                DNS resolver
+              </h2>
+              <p class="mb-4 text-sm text-muted">
+                Who resolves the names that are not in this instance's zones.
+              </p>
+              <fieldset :disabled="readOnly" class="space-y-3">
+                <UFormField label="Upstream DNS" :ui="inlineField">
+                  <URadioGroup v-model="server.dns_upstream" :items="upstreamItems" />
+                </UFormField>
+              </fieldset>
+
+              <!-- Outside the form's fieldset, so a viewer can search too. -->
+              <div v-if="dhcpUpstream" class="pt-3">
+                <div class="mb-2">
+                  <SearchInput v-model="dhcpSearch" />
+                </div>
+                <fieldset :disabled="readOnly" class="min-w-0 overflow-x-auto">
+                  <table class="w-full text-sm">
+                    <thead>
+                      <tr class="border-b border-default text-left text-xs text-muted">
+                        <th class="py-1.5 pr-4 font-medium">Interface</th>
+                        <th class="pr-4 font-medium">Description</th>
+                        <th class="font-medium">Use DNS from DHCP</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr
+                        v-for="i in shownDhcpIfaces"
+                        :key="i.id"
+                        class="border-b border-default last:border-0"
+                      >
+                        <td class="py-1.5 pr-4 font-mono">{{ withLabel(i.label, i.name) }}</td>
+                        <td class="py-1.5 pr-4">{{ i.description }}</td>
+                        <td class="py-1.5">
+                          <USwitch
+                            :model-value="i.dns_from_dhcp"
+                            :aria-label="`Use DNS servers from the DHCP lease on ${i.name}`"
+                            @update:model-value="(v) => setFromDhcp(i, v)"
+                          />
+                        </td>
+                      </tr>
+                      <tr v-if="dhcpIfaces.length && !shownDhcpIfaces.length">
+                        <td colspan="3" class="py-2 text-muted">No interface matches.</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                  <p v-if="dhcpUpstream && !dhcpIfaces.length" class="mt-2 text-sm text-warning">
                     No interface gets its IPv4 address from DHCP. Make one a DHCP client under
                     Interfaces, or pick another upstream.
                   </p>
@@ -344,6 +348,58 @@ const tab = computed({
                   </p>
                 </fieldset>
               </div>
+
+              <fieldset :disabled="readOnly" class="mt-3 space-y-3">
+                <UFormField
+                  v-if="server.dns_upstream === 'forward'"
+                  label="Forwarders"
+                  required
+                  :error="noForwarders && 'Enter at least one DNS server.'"
+                  :ui="inlineField"
+                >
+                  <AddrInput v-model="server.dns_forwarders" multiple placeholder="9.9.9.9" />
+                </UFormField>
+                <UFormField
+                  v-if="server.dns_enabled && server.dns_upstream !== 'root'"
+                  label="Fall back to the root servers"
+                  help="When the upstream servers don't answer. Off: never ask anyone else."
+                  :ui="inlineField"
+                >
+                  <USwitch v-model="fallback" />
+                </UFormField>
+                <UFormField
+                  v-if="server.dns_enabled"
+                  label="Allow recursion from"
+                  help="Empty: the networks of the interfaces it Responds on."
+                  :ui="inlineField"
+                >
+                  <AddrInput
+                    v-model="server.dns_allow_recursion"
+                    multiple
+                    placeholder="192.168.0.0/16"
+                  />
+                </UFormField>
+                <UFormField
+                  v-if="server.dns_enabled"
+                  label="DNSSEC validation"
+                  help="Check the signatures of signed zones, with the built-in root key. Off: answers are not validated; turn it off only if an upstream breaks DNSSEC."
+                  :ui="inlineField"
+                >
+                  <USwitch v-model="dnssecValidation" />
+                </UFormField>
+              </fieldset>
+
+              <h2 class="border-b border-default pb-1 mt-8 mb-2 text-xl font-semibold">
+                DNS authoritative server
+              </h2>
+              <p v-if="server.dns_enabled" class="text-sm text-muted">
+                Will answer for the zones under the
+                <RouterLink to="/dns" class="text-primary">DNS zones</RouterLink> tab.
+              </p>
+              <p v-else class="text-sm text-muted">
+                Needs the DNS server enabled: turn it on at the top of this tab.
+              </p>
+
               <div v-if="!readOnly" class="mt-4">
                 <UButton type="submit" :loading="saving">Save</UButton>
               </div>
