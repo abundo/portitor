@@ -225,6 +225,7 @@ AGPL-3.0-or-later. Every new file starts with the same two SPDX lines as the
 existing ones, in its comment syntax, above any `//go:build` line and below any
 shebang. Files that cannot hold a comment go in `REUSE.toml`. Commits carry a DCO
 `Signed-off-by:` line (`git commit -s`); see [CONTRIBUTING.md](CONTRIBUTING.md).
+Committing directly to `main` is fine; no feature branch is needed.
 
 ## Gotchas
 
