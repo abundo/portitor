@@ -4,11 +4,11 @@
 """Setup of a firewall installed from the Portitor ISO (portitor-setup).
 
 Runs on tty1 at boot (portitor-firstboot.service) until it has finished
-once. It asks for the keyboard layout (applied at once, so the password
-is typed with it), the LAN and WAN interfaces, the LAN address (static or
-DHCP), the WAN address (DHCP, or static with the default gateway), the DNS
-servers, a password and the time zone; before applying, LAN and WAN can be
-swapped. Then it:
+once. A text UI (Textual, python3-textual) asks for the keyboard layout
+(applied at once, so the password is typed with it), the LAN and WAN
+interfaces, the LAN address (static or DHCP), the WAN address (DHCP, or
+static with the default gateway), the DNS servers, a password and the time
+zone; before applying, LAN and WAN can be swapped. Then it:
 
   - writes /etc/resolv.conf (the agent does not manage the firewall's own
     resolver; the one from the installation may be unreachable now),
@@ -36,7 +36,8 @@ Split setups: the setup first asks what the machine runs.
          oneshot unit (portitor-setup-lan.service) puts the LAN address on
          the LAN, so portitor-web can reach it. It ends by showing a join
          string: the agent's URL, token and certificate fingerprint and the
-         LAN and WAN answers. `sudo portitor-setup --show-join` shows it again.
+         LAN and WAN answers. `sudo portitor-setup --show-join` prints it
+         again (plain text, to copy over SSH).
   web    portitor-web only, on a host that manages a firewall elsewhere. Its
          one interface goes in /etc/network/interfaces (DHCP or static), the
          agent is disabled, and the join string from the firewall is pasted
@@ -53,9 +54,9 @@ bootstrap --reconfigure`, and makes a new GUI certificate when the LAN
 address changes.
 
 With /etc/portitor/firstboot.answers (an ISO built with `iso/build.sh
---test`), nothing is asked: it holds "key: value" lines for lan (a name or
-MAC address), address (dhcp for DHCP), wan (a name or MAC address,
-optional), wan_address
+--test`), nothing is asked and no text UI runs: it holds "key: value" lines
+for lan (a name or MAC address), address (dhcp for DHCP), wan (a name or MAC
+address, optional), wan_address
 (empty: DHCP), gateway (on the static WAN, else on the LAN), dns (space
 separated), password, timezone and keyboard (an XKB layout, e.g. se). The file is removed when the setup has
 finished. role (both, agent or web) picks the split setups; agent reads
@@ -67,7 +68,7 @@ from __future__ import annotations
 
 import argparse
 import base64
-import getpass
+import functools
 import ipaddress
 import json
 import os
@@ -81,6 +82,16 @@ import sys
 import time
 import urllib.request
 from pathlib import Path
+from typing import Callable
+
+from textual import on, work
+from textual.app import App, ComposeResult
+from textual.binding import Binding
+from textual.containers import Horizontal, VerticalScroll
+from textual.screen import Screen
+from textual.widget import Widget
+from textual.widgets import Button, Footer, Header, Input, Label, OptionList, RichLog, Select, Static
+from textual.widgets.option_list import Option
 
 DONE = Path("/var/lib/portitor/firstboot.done")
 # The last answers (no password): the defaults when the setup runs again.
@@ -97,7 +108,7 @@ ISSUE = Path("/etc/issue.d/portitor.issue")
 RESOLV_CONF = Path("/etc/resolv.conf")
 KEYBOARD = Path("/etc/default/keyboard")
 XKB_RULES = Path("/usr/share/X11/xkb/rules/base.lst")
-# The layouts the setup lists; any other XKB layout can be typed or searched.
+# The layouts listed first; every other XKB layout follows.
 LAYOUTS = [
     ("us", "English (US)"), ("gb", "English (UK)"), ("de", "German"), ("fr", "French"),
     ("es", "Spanish"), ("it", "Italian"), ("pt", "Portuguese"), ("nl", "Dutch"),
@@ -131,8 +142,16 @@ ROLES = [
 MIN_PASSWORD = 10  # portitor-web's minimum
 
 
-def say(msg: str = "") -> None:
+def _print(msg: str) -> None:
     print(msg, flush=True)
+
+
+# Where say() writes: stdout, or the text UI's log while it runs the steps.
+output: Callable[[str], None] = _print
+
+
+def say(msg: str = "") -> None:
+    output(msg)
 
 
 def logfile(msg: str) -> None:
@@ -160,7 +179,7 @@ def run(argv: list[str], *, stdin: str | None = None, check: bool = True, quiet:
 
 
 # ---------------------------------------------------------------------------
-# questions
+# answers: the system's choices and the checks of what is typed
 # ---------------------------------------------------------------------------
 
 
@@ -189,47 +208,6 @@ def nics() -> list[dict[str, str]]:
     return out
 
 
-def ask(prompt: str, default: str = "") -> str:
-    suffix = f" [{default}]" if default else ""
-    while True:
-        try:
-            answer = input(f"{prompt}{suffix}: ").strip()
-        except EOFError:
-            sys.exit(1)
-        if answer or default:
-            return answer or default
-
-
-def ask_nic(role: str, explain: str, taken: str = "", default: str = "") -> str:
-    while True:
-        found = nics()
-        if not found:
-            say("No network interfaces found.")
-            input("Press Enter to look again.")
-            continue
-        say()
-        say("  #  Interface        MAC                Link     Driver")
-        for i, n in enumerate(found, 1):
-            link = "up" if n["carrier"] else "no link"
-            used = "  (LAN)" if n["name"] == taken else ""
-            say(f"  {i}  {n['name']:<16} {n['mac']:<18} {link:<8} {n['driver']} {n['speed']}{used}")
-        say()
-        say(explain)
-        if not any(n["name"] == default for n in found):
-            default = ""
-        answer = ask(f"{role} interface (1-{len(found)} or name, r reloads)", default)
-        if answer.lower() == "r":
-            continue
-        if answer.isdigit() and 1 <= int(answer) <= len(found):
-            answer = found[int(answer) - 1]["name"]
-        if not any(n["name"] == answer for n in found):
-            say(f"  no interface {answer}")
-        elif answer == taken:
-            say(f"  {answer} is the LAN interface (s at the end swaps LAN and WAN)")
-        else:
-            return answer
-
-
 def links_up() -> None:
     # Links must be up to show whether a cable is plugged in.
     for n in nics():
@@ -237,94 +215,58 @@ def links_up() -> None:
     time.sleep(2)
 
 
-def ask_lan(default: str = "") -> str:
-    return ask_nic("LAN", "The LAN interface is where you reach the GUI from. Plug in its cable to see\n"
-                   "which one it is; r reloads the list.", default=default)
+def check_address(text: str, other: ipaddress.IPv4Interface | None = None) -> ipaddress.IPv4Interface:
+    try:
+        iface = ipaddress.IPv4Interface(text)
+    except ValueError:
+        raise ValueError("an IPv4 address with a prefix length, e.g. 192.168.1.1/24") from None
+    net = iface.network
+    if "/" not in text:
+        raise ValueError("add the prefix length, e.g. /24")
+    if net.prefixlen < 31 and iface.ip in (net.network_address, net.broadcast_address):
+        raise ValueError(f"{iface.ip} is the network or broadcast address of {net}")
+    if net.prefixlen > 30:
+        raise ValueError("use a prefix length of 30 or less")
+    if other and net.overlaps(other.network):
+        raise ValueError(f"{net} overlaps the LAN {other.network}")
+    return iface
 
 
-def ask_wan(lan: str, default: str = "") -> str:
-    return ask_nic("WAN", "The WAN interface connects to the Internet, which the firewall needs for\n"
-                   "updates. Plug in its cable to see which one it is; r reloads the list.", lan, default)
-
-
-def ask_address(role: str, default: str = "",
-                other: ipaddress.IPv4Interface | None = None) -> ipaddress.IPv4Interface:
-    while True:
-        answer = ask(f"{role} address with prefix length", default)
-        try:
-            iface = ipaddress.IPv4Interface(answer)
-        except ValueError:
-            say("  an IPv4 address with a prefix length, e.g. 192.168.1.1/24")
-            continue
-        net = iface.network
-        if "/" not in answer:
-            say("  add the prefix length, e.g. /24")
-        elif net.prefixlen < 31 and iface.ip in (net.network_address, net.broadcast_address):
-            say(f"  {iface.ip} is the network or broadcast address of {net}")
-        elif net.prefixlen > 30:
-            say("  use a prefix length of 30 or less")
-        elif other and net.overlaps(other.network):
-            say(f"  {net} overlaps the LAN {other.network}")
-        else:
-            return iface
-
-
-def ask_ipv4(role: str, default: str, dhcp: bool,
-             other: ipaddress.IPv4Interface | None = None) -> ipaddress.IPv4Interface | None:
-    """A static address, or None for DHCP; dhcp is the default mode."""
-    while True:
-        answer = ask(f"{role} IPv4: dhcp or static", "dhcp" if dhcp else "static").lower()
-        if answer == "dhcp":
-            return None
-        if answer == "static":
-            return ask_address(role, default, other=other)
-        say("  dhcp or static")
-
-
-def ask_gateway(addr: ipaddress.IPv4Interface, default: str = "") -> ipaddress.IPv4Address:
-    while True:
-        answer = ask("Default gateway", default)
-        try:
-            gw = ipaddress.IPv4Address(answer)
-        except ValueError:
-            say("  an IPv4 address")
-            continue
-        if gw not in addr.network or gw == addr.ip:
-            say(f"  must be another address in {addr.network}")
-            continue
-        return gw
+def check_gateway(text: str, addr: ipaddress.IPv4Interface) -> ipaddress.IPv4Address:
+    try:
+        gw = ipaddress.IPv4Address(text)
+    except ValueError:
+        raise ValueError("an IPv4 address") from None
+    if gw not in addr.network or gw == addr.ip:
+        raise ValueError(f"must be another address in {addr.network}")
+    return gw
 
 
 def parse_dns(answer: str) -> list[str]:
-    servers = [str(ipaddress.ip_address(a)) for a in answer.replace(",", " ").split()]
+    try:
+        servers = [str(ipaddress.ip_address(a)) for a in answer.replace(",", " ").split()]
+    except ValueError:
+        servers = []
     if not 1 <= len(servers) <= 3:
-        raise ValueError("one to three addresses")
+        raise ValueError("one to three IP addresses, separated by spaces")
     return servers
 
 
-def ask_dns(default: str = PUBLIC_DNS, who: str = "the firewall itself uses (updates, IP lists)") -> list[str]:
-    say(f"DNS servers {who}.")
-    while True:
-        answer = ask("DNS servers", default)
-        try:
-            return parse_dns(answer)
-        except ValueError:
-            say("  one to three IP addresses, separated by spaces")
+def check_web_from(text: str) -> str:
+    try:
+        return str(ipaddress.IPv4Network(text, strict=False))
+    except ValueError:
+        raise ValueError("an IPv4 address, or a network with its prefix length") from None
 
 
-def ask_password(optional: bool = False) -> str:
-    """With optional, empty keeps the passwords."""
-    while True:
-        a = getpass.getpass(f"Password ({MIN_PASSWORD}+ characters{', empty keeps it' if optional else ''}): ")
-        if optional and not a:
-            return ""
-        if len(a) < MIN_PASSWORD:
-            say(f"  at least {MIN_PASSWORD} characters")
-            continue
-        if getpass.getpass("Again: ") != a:
-            say("  the passwords differ")
-            continue
-        return a
+def check_timezone(text: str) -> str:
+    if re.fullmatch(r"[A-Za-z0-9_+-]+(/[A-Za-z0-9_+-]+)*", text) and Path("/usr/share/zoneinfo", text).is_file():
+        return text
+    raise ValueError(f"unknown time zone {text}")
+
+
+def current_timezone() -> str:
+    return run(["timedatectl", "show", "-p", "Timezone", "--value"], check=False, quiet=True).stdout.strip() or "Etc/UTC"
 
 
 def xkb_layouts() -> dict[str, str]:
@@ -364,77 +306,6 @@ def set_keyboard(layout: str) -> None:
         run(["setupcon", "-k", "--force"], check=False, quiet=True)
 
 
-def ask_keyboard(default: str = "") -> str:
-    """Asks for the keyboard layout and applies it at once."""
-    known = xkb_layouts()
-    default = default or current_layout()
-    say()
-    half = (len(LAYOUTS) + 1) // 2
-    for i in range(half):
-        row = ""
-        for j in (i, i + half):
-            if j < len(LAYOUTS):
-                code, name = LAYOUTS[j]
-                row += f"  {j + 1:>2}  {code:<4} {name:<22}"
-        say(row.rstrip())
-    say()
-    while True:
-        answer = ask(f"Keyboard layout (1-{len(LAYOUTS)}, a layout code, or a word to search)", default)
-        if answer.isdigit() and 1 <= int(answer) <= len(LAYOUTS):
-            answer = LAYOUTS[int(answer) - 1][0]
-        if answer in known:
-            set_keyboard(answer)
-            return answer
-        word = answer.lower()
-        found = [(c, n) for c, n in known.items() if word in c or word in n.lower()]
-        if not found:
-            say(f"  no layout matches {answer}")
-            continue
-        for code, name in found[:20]:
-            say(f"  {code:<8} {name}")
-        if len(found) > 20:
-            say(f"  ... {len(found) - 20} more; search for more of the name")
-
-
-def ask_role(default: str = "both") -> str:
-    say()
-    for i, (role, text) in enumerate(ROLES, 1):
-        say(f"  {i}  {role:<6} {text}")
-    say()
-    while True:
-        answer = ask(f"This machine runs (1-{len(ROLES)} or a name)", default).lower()
-        if answer.isdigit() and 1 <= int(answer) <= len(ROLES):
-            answer = ROLES[int(answer) - 1][0]
-        if answer in dict(ROLES):
-            return answer
-        say("  " + ", ".join(r for r, _ in ROLES))
-
-
-def ask_web_from(lan: ipaddress.IPv4Interface, default: str = "") -> str:
-    say("portitor-web calls the agent on port {} from this address or network; SSH is".format(AGENT_PORT))
-    say("always open from it too (anti-lockout). Until the first deploy the firewall has")
-    say(f"no routes: portitor-web must be on the LAN, {lan.network}, for that.")
-    while True:
-        answer = ask("portitor-web's address or network", default or str(lan.network))
-        try:
-            return str(ipaddress.IPv4Network(answer, strict=False))
-        except ValueError:
-            say("  an IPv4 address, or a network with its prefix length")
-
-
-def ask_host(state: dict) -> dict:
-    """portitor-web only: the host's one interface, its address and DNS."""
-    nic = ask_nic("Network", "The interface this host is reached on (the GUI) and reaches the firewall\n"
-                  "through. Plug in its cable to see which one it is; r reloads the list.", default=state.get("lan", ""))
-    say()
-    default = state.get("address", "")
-    address = ask_ipv4("Host", "" if default in ("", "dhcp") else default, default in ("", "dhcp"))
-    gateway = ask_gateway(address, state.get("gateway", "")) if address else None
-    say()
-    dns = ask_dns(state.get("dns") or PUBLIC_DNS, "this host uses")
-    return {"lan": nic, "address": address, "wan": "", "wan_address": None, "gateway": gateway, "dns": dns}
-
-
 def decode_join(text: str) -> dict:
     """The join string's contents (web.ParseJoin checks them again)."""
     text = "".join(text.split())
@@ -448,35 +319,6 @@ def decode_join(text: str) -> dict:
     if not isinstance(d, dict) or not all(d.get(k) for k in ("url", "token", "fingerprint", "lan", "address")):
         raise ValueError("the join string is incomplete; copy it again")
     return d
-
-
-def ask_join(optional: bool) -> str:
-    """The join string from the firewall; empty (with optional) for later."""
-    say("Paste the join string that the firewall's setup showed (sudo portitor-setup")
-    say("--show-join on the firewall shows it again).")
-    while True:
-        try:
-            answer = "".join(input("Join string" + (" (empty: later, sudo portitor-setup --join)" if optional else "") + ": ").split())
-        except EOFError:
-            sys.exit(1)
-        if not answer and optional:
-            return ""
-        try:
-            d = decode_join(answer)
-        except ValueError as exc:
-            say(f"  {exc}")
-            continue
-        say(f"  agent {d['url']}, LAN {d['lan']} {d['address']}, WAN {d.get('wan') or '-'} {d.get('wan_address') or ('DHCP' if d.get('wan') else '')}")
-        return answer
-
-
-def ask_timezone() -> str:
-    current = run(["timedatectl", "show", "-p", "Timezone", "--value"], check=False, quiet=True).stdout.strip() or "Etc/UTC"
-    while True:
-        answer = ask("Time zone (e.g. Europe/Stockholm; scheduled tasks use it)", current)
-        if re.fullmatch(r"[A-Za-z0-9_+-]+(/[A-Za-z0-9_+-]+)*", answer) and Path("/usr/share/zoneinfo", answer).is_file():
-            return answer
-        say(f"  unknown time zone {answer}")
 
 
 # ---------------------------------------------------------------------------
@@ -919,196 +761,652 @@ def save_state(a: dict) -> None:
     write(SETUP_STATE, json.dumps(state_of(a), indent=2) + "\n", 0o600)
 
 
-def run_steps(a: dict, interactive: bool, steps: list) -> bool:
-    i = 0
-    while i < len(steps):
-        title, fn = steps[i]
-        say(f"==> {title}")
-        try:
-            fn(a)
-            i += 1
-        except Exception as exc:  # noqa: BLE001 - shown to the operator, then retried
-            logfile(f"FAILED: {exc}")
-            say(f"!!  {exc}")
-            say(f"    (log: {LOG})")
-            if not interactive or ask("Retry this step? (y: retry, n: leave to a shell login)", "y").lower() not in ("y", "yes"):
-                if a.get("reconfigure"):
-                    say("Nothing more was changed. Run sudo portitor-setup again to retry.")
-                else:
-                    say("The setup runs again at the next boot, or: sudo portitor-setup")
-                return False
+def run_step(a: dict, title: str, fn: Callable[[dict], None]) -> bool:
+    say(f"==> {title}")
+    try:
+        fn(a)
+        return True
+    except Exception as exc:  # noqa: BLE001 - shown to the operator, who may retry
+        logfile(f"FAILED: {exc}")
+        say(f"!!  {exc}")
+        say(f"    (log: {LOG})")
+        return False
+
+
+def finish(a: dict) -> None:
+    """The steps have all run: the setup is done."""
     save_state(a)
     DONE.parent.mkdir(parents=True, exist_ok=True)
     DONE.touch()
     ANSWERS.unlink(missing_ok=True)
-    return True
 
 
-def ask_network(state: dict, static_lan: bool = False) -> dict:
-    """The network questions, with the defaults from state. static_lan: the
-    agent-only firewall, which portitor-web must find at a fixed address."""
-    lan = ask_lan(state.get("lan", ""))
-    wan = ask_wan(lan, state.get("wan", ""))
-    say()
-    lan_default = state.get("address", "")
-    lan_default = "192.168.1.1/24" if lan_default in ("", "dhcp") else lan_default
-    if static_lan:
-        address = ask_address("LAN", lan_default)
-    else:
-        address = ask_ipv4("LAN", lan_default, state.get("address") == "dhcp")
-    wan_address = ask_ipv4("WAN", state.get("wan_address", ""), not state.get("wan_address"), other=address)
-    # DHCP brings the default gateway.
-    gateway = ask_gateway(wan_address, state.get("gateway", "")) if wan_address else None
-    say()
-    dns = ask_dns(state.get("dns") or PUBLIC_DNS)
-    return {"lan": lan, "address": address, "wan": wan, "wan_address": wan_address, "gateway": gateway, "dns": dns}
-
-
-def ask_all(state: dict, role: str, reconfigure: bool) -> dict:
-    """The questions for role, with the defaults from state."""
-    # First: the password is typed with it.
-    keyboard = ask_keyboard(state.get("keyboard", ""))
-    if role == "web":
-        a = ask_host(state)
-    elif role == "agent" and reconfigure:
-        # portitor-web configures the firewall's network now.
-        a = answers_of(state)
-        say()
-        a["dns"] = ask_dns(state.get("dns") or PUBLIC_DNS)
-    else:
-        a = ask_network(state, static_lan=role == "agent")
-    a["role"], a["keyboard"], a["join"] = role, keyboard, ""
-    a["web_from"] = ask_web_from(a["address"], state.get("web_from", "")) if role == "agent" else ""
-    say()
-    who = f"the console login {CONSOLE_USER}" if role == "agent" else f"the GUI user {GUI_USER} and the console login {CONSOLE_USER}"
-    if reconfigure:
-        say(f"A new password for {who}?")
-    else:
-        say(f"One password for {who}.")
-    a["password"] = ask_password(optional=reconfigure)
-    a["tz"] = ask_timezone()
-    if reconfigure:
-        a["reconfigure"] = True
-        a["new_cert"] = str(a["address"] or "dhcp") != state.get("address")
-    return a
-
-
-def summary(a: dict) -> None:
-    say()
-    say(f"  Runs            {a['role']}: {dict(ROLES)[a['role']]}")
+def summary(a: dict) -> list[str]:
+    out = [f"Runs            {a['role']}: {dict(ROLES)[a['role']]}"]
     if a["role"] == "web":
-        say(f"  Interface       {a['lan']}")
-        say(f"  Address         {a['address'] or 'DHCP'}")
-        say(f"  Default gateway {a['gateway'] or 'from DHCP'}")
+        out += [f"Interface       {a['lan']}",
+                f"Address         {a['address'] or 'DHCP'}",
+                f"Default gateway {a['gateway'] or 'from DHCP'}"]
     elif a["role"] == "agent" and a.get("reconfigure"):
-        say(f"  portitor-web    {a['web_from']}")
+        out.append(f"portitor-web    {a['web_from']}")
     else:
-        say(f"  LAN interface   {a['lan']}")
-        say(f"  LAN address     {a['address'] or 'DHCP (no default route)'}")
-        say(f"  WAN interface   {a['wan']}")
-        say(f"  WAN address     {a['wan_address'] or 'DHCP'}")
-        say(f"  Default gateway {a['gateway'] or 'from DHCP'}")
+        out += [f"LAN interface   {a['lan']}",
+                f"LAN address     {a['address'] or 'DHCP (no default route)'}",
+                f"WAN interface   {a['wan']}",
+                f"WAN address     {a['wan_address'] or 'DHCP'}",
+                f"Default gateway {a['gateway'] or 'from DHCP'}"]
         if a["role"] == "agent":
-            say(f"  portitor-web    {a['web_from']}")
-    say(f"  DNS servers     {' '.join(a['dns'])}")
-    say(f"  Time zone       {a['tz']}")
-    say(f"  Keyboard        {a['keyboard']}")
+            out.append(f"portitor-web    {a['web_from']}")
+    out += [f"DNS servers     {' '.join(a['dns'])}",
+            f"Time zone       {a['tz']}",
+            f"Keyboard        {a['keyboard']}"]
     if a.get("reconfigure"):
-        say(f"  Password        {'new' if a['password'] else 'unchanged'}")
+        out.append(f"Password        {'new' if a['password'] else 'unchanged'}")
+    return out
 
 
-def confirm(a: dict) -> bool:
-    """Shows the answers; s swaps the LAN and WAN interfaces. False: ask again."""
-    swap = a["wan"] and not (a["role"] == "agent" and a.get("reconfigure"))
-    while True:
-        summary(a)
-        answer = ask("Apply? (y: yes, n: change the answers" + (", s: swap LAN and WAN)" if swap else ")"), "y").lower()
-        if answer in ("y", "yes"):
-            return True
-        if answer in ("n", "no"):
-            return False
-        if swap and answer in ("s", "swap"):
-            a["lan"], a["wan"] = a["wan"], a["lan"]
+def gui_text(a: dict) -> str:
+    return f"""{"Open the GUI from the LAN:" if a["role"] == "both" else "Open the GUI:"}
+
+    {a['url']}    user {GUI_USER}
+
+The browser warns about the self-signed certificate; its SHA-256 fingerprint is
+    {a['cert_fp']}
+"""
 
 
-def show_gui(a: dict) -> None:
-    say()
-    say("Open the GUI from the LAN:" if a["role"] == "both" else "Open the GUI:")
-    say()
-    say(f"    {a['url']}    user {GUI_USER}")
-    say()
-    say("The browser warns about the self-signed certificate; its SHA-256 fingerprint is")
-    say(f"    {a['cert_fp']}")
-    say()
+def join_text(a: dict) -> str:
+    """Agent only: the join string for portitor-web, and how to use it."""
+    return f"""Run sudo portitor-setup on the portitor-web host (installed from the ISO as
+"web", or later: sudo portitor-setup --join) and paste this join string:
+
+{join_string(a)}
+
+It holds the agent's token: keep it like a password. Easiest is to copy it over
+SSH (ssh {CONSOLE_USER}@{a['address'].ip}, then sudo portitor-setup --show-join). A
+portitor-web installed with install.py takes it too:
+    sudo runuser -u {WEB_USER} -- portitor-web -f {WEB_YAML} bootstrap --join -
+(paste it, Enter, Ctrl-D). By hand, in portitor-web's Settings > Agent:
+    Agent URL    https://{a['address'].ip}:{AGENT_PORT}
+    Fingerprint  {a['fingerprint']}
+    Token        in {AGENT_TOKEN}
+but then configure the LAN interface there before the first deploy.
+"""
 
 
-def show_join(a: dict) -> None:
-    """Agent only: the join string for portitor-web."""
-    text = join_string(a)
-    say()
-    say("Run sudo portitor-setup on the portitor-web host (installed from the ISO as")
-    say("\"web\", or later: sudo portitor-setup --join) and paste this join string:")
-    say()
-    say(text)
-    say()
-    say("It holds the agent's token: keep it like a password. Easiest is to copy it over")
-    say(f"SSH (ssh {CONSOLE_USER}@{a['address'].ip}, then sudo portitor-setup --show-join). A")
-    say("portitor-web installed with install.py takes it too:")
-    say(f"    sudo runuser -u {WEB_USER} -- portitor-web -f {WEB_YAML} bootstrap --join -")
-    say("(paste it, Enter, Ctrl-D). By hand, in portitor-web's Settings > Agent:")
-    say(f"    Agent URL    https://{a['address'].ip}:{AGENT_PORT}")
-    say(f"    Fingerprint  {a['fingerprint']}")
-    say(f"    Token        in {AGENT_TOKEN}")
-    say("but then configure the LAN interface there before the first deploy.")
-    say()
-
-
-def ask_join_and_deploy(a: dict, optional: bool) -> bool:
-    """portitor-web only: asks for the join string until the firewall is deployed."""
-    while True:
-        text = a.pop("join", "") or ask_join(optional)
-        if not text:
-            return True
-        if join(a, text):
-            return True
-        if ask("Try another join string? (y: yes, n: later, sudo portitor-setup --join)", "y").lower() not in ("y", "yes"):
-            return False
-
-
-def reconfigure() -> int:
-    """portitor-setup after the first setup: change the network."""
-    state = load_state()
-    role = state.get("role") or "both"
-    say()
-    say("Portitor setup: change the settings")
-    say("===================================")
-    say("The first setup has run already.")
+def intro(role: str) -> str:
+    """portitor-setup after the first setup: what it changes."""
     if role == "both":
-        say("This changes the LAN and WAN interfaces and")
-        say("addresses, the default gateway, the DNS servers, the time zone and the keyboard")
-        say("layout, and deploys at once, without the confirm timeout. Other settings are")
-        say("kept. A session over the old LAN address drops; the console is the safe place")
-        say("to run this.")
-    elif role == "agent":
-        say("This changes portitor-web's address, the DNS servers, the time")
-        say("zone, the keyboard layout and the console password. portitor-web manages the")
-        say("network. sudo portitor-setup --show-join shows the join string.")
-    else:
-        say("This changes this host's interface and address, the DNS")
-        say("servers, the time zone, the keyboard layout and the password. A session over")
-        say("the old address drops. sudo portitor-setup --join manages another firewall.")
-    # The agent owns the links now: an interface it keeps down shows no link.
-    while True:
-        a = ask_all(state, role, reconfigure=True)
-        if confirm(a):
-            break
-        state = state_of(a)
-    if not run_steps(a, interactive=True, steps=RECONFIGURE[role]):
+        return ("The first setup has run already. This changes the LAN and WAN interfaces and "
+                "addresses, the default gateway, the DNS servers, the time zone and the keyboard "
+                "layout, and deploys at once, without the confirm timeout. Other settings are "
+                "kept. A session over the old LAN address drops; the console is the safe place "
+                "to run this.")
+    if role == "agent":
+        return ("The first setup has run already. This changes portitor-web's address, the DNS "
+                "servers, the time zone, the keyboard layout and the console password. "
+                "portitor-web manages the network. sudo portitor-setup --show-join shows the "
+                "join string.")
+    return ("The first setup has run already. This changes this host's interface and address, "
+            "the DNS servers, the time zone, the keyboard layout and the password. A session "
+            "over the old address drops. sudo portitor-setup --join manages another firewall.")
+
+
+# ---------------------------------------------------------------------------
+# text UI
+# ---------------------------------------------------------------------------
+
+
+def row(label: str, widget: Widget) -> Horizontal:
+    return Horizontal(Label(label, classes="label"), widget, classes="row")
+
+
+def nic_options() -> list[tuple[str, str]]:
+    return [(f"{n['name']:<16} {n['mac']:<18} {'link' if n['carrier'] else 'no link':<8} {n['driver']} {n['speed']}".rstrip(),
+             n["name"]) for n in nics()]
+
+
+def set_nic_options(select: Select, default: str) -> None:
+    """Fills select with the interfaces, keeping its choice (or default)."""
+    current = default if select.is_blank() else select.value
+    options = nic_options()
+    select.set_options(options)
+    if any(v == current for _, v in options):
+        select.value = current
+
+
+class Page(Screen):
+    """A page of the setup: Back and Next, and an error line."""
+
+    BINDINGS = [Binding("escape", "back", "Back")]
+    heading = ""
+    next_label = "Next"
+
+    def compose(self) -> ComposeResult:
+        yield Header(icon=" ")
+        with VerticalScroll(id="body"):
+            yield Static(self.heading, classes="heading")
+            yield from self.body()
+            yield Label("", id="error")
+            with Horizontal(id="buttons"):
+                yield from self.buttons()
+        yield Footer()
+
+    def body(self) -> ComposeResult:
+        yield from ()
+
+    def buttons(self) -> ComposeResult:
+        yield Button("Back", id="back", disabled=len(self.app.screen_stack) <= 2)
+        yield Button(self.next_label, id="next", variant="primary")
+
+    @property
+    def a(self) -> dict:
+        return self.app.a
+
+    @property
+    def state(self) -> dict:
+        return self.app.state
+
+    def save(self) -> None:
+        """Takes the answers into self.a; ValueError says what is wrong."""
+
+    def error(self, msg: str) -> None:
+        self.query_one("#error", Label).update(msg)
+
+    def action_back(self) -> None:
+        if len(self.app.screen_stack) > 2:
+            self.app.pop_screen()
+
+    @on(Button.Pressed, "#back")
+    def _back(self) -> None:
+        self.action_back()
+
+    @on(Button.Pressed, "#next")
+    @on(Input.Submitted)
+    def next(self) -> None:
+        try:
+            self.save()
+        except ValueError as exc:
+            self.error(str(exc))
+            return
+        self.error("")
+        self.app.next_page()
+
+
+class KeyboardPage(Page):
+    heading = "Keyboard layout"
+
+    def body(self) -> ComposeResult:
+        if self.app.reconfigure:
+            yield Static(intro(self.state.get("role") or "both"), classes="text")
+        yield Static("It applies at once, so the password is typed with it. Type to search.", classes="text")
+        yield Input(placeholder="search, e.g. swedish", id="search")
+        yield OptionList(id="layouts")
+
+    def on_mount(self) -> None:
+        self.known = xkb_layouts()
+        first = [(c, n) for c, n in LAYOUTS if c in self.known] or LAYOUTS
+        self.ordered = first + sorted((c, n) for c, n in self.known.items() if c not in dict(first))
+        self.fill("", self.state.get("keyboard") or current_layout())
+        self.query_one("#layouts").focus()
+
+    def fill(self, word: str, select: str = "") -> None:
+        layouts = self.query_one("#layouts", OptionList)
+        layouts.clear_options()
+        word = word.lower()
+        found = [(c, n) for c, n in self.ordered if word in c or word in n.lower()]
+        layouts.add_options([Option(f"{c:<8} {n}", id=c) for c, n in found])
+        codes = [c for c, _ in found]
+        if codes:
+            layouts.highlighted = codes.index(select) if select in codes else 0
+
+    @on(Input.Changed, "#search")
+    def _search(self, event: Input.Changed) -> None:
+        self.fill(event.value)
+
+    @on(OptionList.OptionSelected)
+    def _chosen(self) -> None:
+        self.next()
+
+    def save(self) -> None:
+        layouts = self.query_one("#layouts", OptionList)
+        if layouts.highlighted is None:
+            raise ValueError("no layout matches the search")
+        code = layouts.get_option_at_index(layouts.highlighted).id
+        if code != self.a.get("keyboard"):
+            set_keyboard(code)
+            self.app.refresh(repaint=True)
+        self.a["keyboard"] = code
+
+
+class RolePage(Page):
+    heading = "What this machine runs"
+
+    def body(self) -> ComposeResult:
+        yield OptionList(*[Option(f"{r:<6} {t}", id=r) for r, t in ROLES], id="roles")
+
+    def on_mount(self) -> None:
+        roles = self.query_one("#roles", OptionList)
+        roles.highlighted = [r for r, _ in ROLES].index(self.state.get("role") or "both")
+        roles.focus()
+
+    @on(OptionList.OptionSelected)
+    def _chosen(self) -> None:
+        self.next()
+
+    def save(self) -> None:
+        roles = self.query_one("#roles", OptionList)
+        self.a["role"] = roles.get_option_at_index(roles.highlighted or 0).id
+
+
+MODES = [("Static", "static"), ("DHCP", "dhcp")]
+
+
+class NetworkPage(Page):
+    heading = "Network"
+
+    def kind(self) -> str:
+        """fw: the firewall's LAN and WAN; host: portitor-web only; agent: run again on an agent-only firewall."""
+        role = self.a["role"]
+        if role == "web":
+            return "host"
+        return "agent" if role == "agent" and self.app.reconfigure else "fw"
+
+    def body(self) -> ComposeResult:
+        kind, st, role = self.kind(), self.state, self.a["role"]
+        static = st.get("address", "") not in ("", "dhcp")
+        if kind == "fw":
+            yield Static("The LAN interface is where you reach the GUI from; the WAN interface connects "
+                         "to the Internet, which the firewall needs for updates. Plug in a cable to see "
+                         "which interface it is; Reload updates the link state.", classes="text")
+            yield row("LAN interface", Select([], id="lan", prompt="choose the LAN interface"))
+            yield row("WAN interface", Select([], id="wan", prompt="choose the WAN interface"))
+            yield Button("Reload interfaces", id="reload")
+            if role != "agent":
+                yield row("LAN IPv4", Select(MODES, id="lan_mode", allow_blank=False,
+                                             value="dhcp" if st.get("address") == "dhcp" else "static"))
+            yield row("LAN address", Input(st.get("address") if static else "192.168.1.1/24", id="address",
+                                           placeholder="192.168.1.1/24"))
+            yield row("WAN IPv4", Select(MODES, id="wan_mode", allow_blank=False,
+                                         value="static" if st.get("wan_address") else "dhcp"))
+            yield row("WAN address", Input(st.get("wan_address", ""), id="wan_address", placeholder="203.0.113.2/24"))
+            yield row("Default gateway", Input(st.get("gateway", ""), id="gateway", placeholder="203.0.113.1"))
+        elif kind == "host":
+            yield Static("The interface this host is reached on (the GUI) and reaches the firewall through. "
+                         "Plug in a cable to see which interface it is; Reload updates the link state.",
+                         classes="text")
+            yield row("Interface", Select([], id="lan", prompt="choose the interface"))
+            yield Button("Reload interfaces", id="reload")
+            yield row("IPv4", Select(MODES, id="lan_mode", allow_blank=False, value="static" if static else "dhcp"))
+            yield row("Address", Input(st.get("address", "") if static else "", id="address", placeholder="192.168.1.10/24"))
+            yield row("Default gateway", Input(st.get("gateway", ""), id="gateway", placeholder="192.168.1.1"))
+        yield row("DNS servers", Input(st.get("dns") or PUBLIC_DNS, id="dns"))
+        yield Static("DNS servers " + ("this host uses." if kind == "host" else
+                                       "the firewall itself uses (updates, IP lists)."), classes="hint")
+        if role == "agent":
+            yield row("portitor-web from", Input(st.get("web_from", ""), id="web_from", placeholder="the LAN network"))
+            yield Static(f"portitor-web calls the agent on port {AGENT_PORT} from this address or network; "
+                         "SSH is always open from it too (anti-lockout). Until the first deploy the firewall "
+                         "has no routes: portitor-web must be on the LAN for that.", classes="hint")
+
+    def on_mount(self) -> None:
+        self.reload()
+        self.modes()
+
+    @on(Button.Pressed, "#reload")
+    def reload(self) -> None:
+        for sid, key in (("#lan", "lan"), ("#wan", "wan")):
+            for select in self.query(sid).results(Select):
+                set_nic_options(select, self.state.get(key, ""))
+
+    @on(Select.Changed)
+    def modes(self) -> None:
+        for sid, ids in (("#lan_mode", ["#address"] + (["#gateway"] if self.kind() == "host" else [])),
+                         ("#wan_mode", ["#wan_address", "#gateway"])):
+            for mode in self.query(sid).results(Select):
+                for i in ids:
+                    self.query_one(i).disabled = mode.value == "dhcp"
+
+    def value(self, wid: str) -> str:
+        return self.query_one(wid, Input).value.strip()
+
+    def nic(self, wid: str, name: str) -> str:
+        select = self.query_one(wid, Select)
+        if select.is_blank():
+            raise ValueError(f"choose the {name}")
+        return select.value
+
+    def static(self, wid: str) -> bool:
+        modes = self.query(wid).results(Select)
+        return all(m.value == "static" for m in modes)
+
+    def field(self, name: str, check: Callable, *args):
+        try:
+            return check(*args)
+        except ValueError as exc:
+            raise ValueError(f"{name}: {exc}") from None
+
+    def save(self) -> None:
+        a, kind = self.a, self.kind()
+        if kind == "agent":
+            a.update(answers_of(self.state))
+        elif kind == "host":
+            a["lan"] = self.nic("#lan", "interface")
+            a["address"] = self.field("Address", check_address, self.value("#address")) if self.static("#lan_mode") else None
+            a["gateway"] = self.field("Default gateway", check_gateway, self.value("#gateway"), a["address"]) if a["address"] else None
+            a["wan"], a["wan_address"] = "", None
+        else:
+            a["lan"] = self.nic("#lan", "LAN interface")
+            a["wan"] = self.nic("#wan", "WAN interface")
+            if a["lan"] == a["wan"]:
+                raise ValueError("the LAN and WAN interfaces must differ (Swap on the last page swaps them)")
+            a["address"] = self.field("LAN address", check_address, self.value("#address")) if self.static("#lan_mode") else None
+            a["wan_address"] = (self.field("WAN address", check_address, self.value("#wan_address"), a["address"])
+                                if self.static("#wan_mode") else None)
+            # DHCP brings the default gateway.
+            a["gateway"] = (self.field("Default gateway", check_gateway, self.value("#gateway"), a["wan_address"])
+                            if a["wan_address"] else None)
+        a["dns"] = self.field("DNS servers", parse_dns, self.value("#dns"))
+        a["web_from"] = ""
+        if a["role"] == "agent":
+            a["web_from"] = self.field("portitor-web from", check_web_from,
+                                       self.value("#web_from") or str(a["address"].network))
+
+
+class AccountPage(Page):
+    heading = "Password and time zone"
+
+    def body(self) -> ComposeResult:
+        who = (f"the console login {CONSOLE_USER}" if self.a["role"] == "agent"
+               else f"the GUI user {GUI_USER} and the console login {CONSOLE_USER}")
+        if self.app.reconfigure:
+            yield Static(f"A new password for {who}? Leave it empty to keep it.", classes="text")
+        else:
+            yield Static(f"One password for {who}, {MIN_PASSWORD} characters or more.", classes="text")
+        yield row("Password", Input(password=True, id="password"))
+        yield row("Again", Input(password=True, id="again"))
+        yield row("Time zone", Input(self.state.get("tz") or current_timezone(), id="tz", placeholder="Europe/Stockholm"))
+        yield Static("Scheduled tasks use the time zone.", classes="hint")
+
+    def on_mount(self) -> None:
+        self.query_one("#password").focus()
+
+    def save(self) -> None:
+        a = self.a
+        pw = self.query_one("#password", Input).value
+        if pw or not self.app.reconfigure:
+            if len(pw) < MIN_PASSWORD:
+                raise ValueError(f"Password: at least {MIN_PASSWORD} characters")
+            if self.query_one("#again", Input).value != pw:
+                raise ValueError("Password: the passwords differ")
+        a["password"] = pw
+        a["tz"] = check_timezone(self.query_one("#tz", Input).value.strip())
+        if self.app.reconfigure:
+            a["reconfigure"] = True
+            a["new_cert"] = str(a["address"] or "dhcp") != self.state.get("address")
+
+
+class SummaryPage(Page):
+    heading = "Apply these settings?"
+    next_label = "Apply"
+
+    def body(self) -> ComposeResult:
+        yield Static("\n".join(summary(self.a)), id="summary")
+
+    def buttons(self) -> ComposeResult:
+        yield Button("Change", id="back")
+        if self.a["wan"] and not (self.a["role"] == "agent" and self.a.get("reconfigure")):
+            yield Button("Swap LAN and WAN", id="swap")
+        yield Button(self.next_label, id="next", variant="primary")
+
+    def on_mount(self) -> None:
+        self.query_one("#next").focus()
+
+    @on(Button.Pressed, "#swap")
+    def swap(self) -> None:
+        # The addresses stay with the LAN and the WAN.
+        self.a["lan"], self.a["wan"] = self.a["wan"], self.a["lan"]
+        self.query_one("#summary", Static).update("\n".join(summary(self.a)))
+
+
+class LogPage(Screen):
+    """A page with the output of what runs."""
+
+    BINDINGS = [Binding("ctrl+q", "app.quit", "Quit")]
+
+    def log_to_me(self) -> None:
+        global output
+        log = self.query_one(RichLog)
+        app = self.app
+
+        def write(msg: str) -> None:
+            try:
+                app.call_from_thread(log.write, msg)
+            except RuntimeError:  # on the app's own thread
+                log.write(msg)
+        output = write
+
+
+class ProgressPage(LogPage):
+    """Runs the steps; a failed one can be retried."""
+
+    def compose(self) -> ComposeResult:
+        yield Header(icon=" ")
+        yield Static("Applying the settings", classes="heading")
+        yield RichLog(wrap=True, id="log")
+        with Horizontal(id="buttons"):
+            yield Button("Retry", id="retry", variant="primary", disabled=True)
+            yield Button("Give up", id="giveup", variant="error", disabled=True)
+        yield Footer()
+
+    def on_mount(self) -> None:
+        self.log_to_me()
+        self.steps = RECONFIGURE[self.app.a["role"]] if self.app.reconfigure else FIRST_STEPS[self.app.a["role"]]
+        self.run_from(0)
+
+    @work(thread=True, exclusive=True)
+    def run_from(self, i: int) -> None:
+        a = self.app.a
+        for j in range(i, len(self.steps)):
+            if not run_step(a, *self.steps[j]):
+                self.app.call_from_thread(self.failed, j)
+                return
+        finish(a)
+        self.app.call_from_thread(self.app.steps_done)
+
+    def failed(self, j: int) -> None:
+        self.failed_at = j
+        for b in self.query(Button):
+            b.disabled = False
+        self.query_one("#retry").focus()
+
+    @on(Button.Pressed, "#retry")
+    def retry(self) -> None:
+        for b in self.query(Button):
+            b.disabled = True
+        self.run_from(self.failed_at)
+
+    @on(Button.Pressed, "#giveup")
+    def give_up(self) -> None:
+        self.app.exit(return_code=1, message="Nothing more was changed. Run sudo portitor-setup again to retry."
+                      if self.app.reconfigure else "The setup runs again at the next boot, or: sudo portitor-setup")
+
+
+class JoinPage(LogPage):
+    """portitor-web only: the join string from the firewall, deployed."""
+
+    def __init__(self, optional: bool) -> None:
+        super().__init__()
+        self.optional = optional
+
+    def compose(self) -> ComposeResult:
+        yield Header(icon=" ")
+        yield Static("Manage a firewall", classes="heading")
+        yield Static("Paste the join string that the firewall's setup showed (sudo portitor-setup "
+                     "--show-join on the firewall shows it again)."
+                     + (" Later is fine too: sudo portitor-setup --join." if self.optional else ""), classes="text")
+        yield Input(placeholder=JOIN_PREFIX + "...", id="join")
+        yield Label("", id="error")
+        yield RichLog(wrap=True, id="log")
+        with Horizontal(id="buttons"):
+            if self.optional:
+                yield Button("Later", id="later")
+            yield Button("Deploy", id="deploy", variant="primary")
+        yield Footer()
+
+    def on_mount(self) -> None:
+        self.log_to_me()
+        self.query_one("#join").focus()
+
+    @on(Button.Pressed, "#later")
+    def later(self) -> None:
+        self.app.push_screen(DonePage())
+
+    @on(Button.Pressed, "#deploy")
+    @on(Input.Submitted)
+    def deploy(self) -> None:
+        text = "".join(self.query_one("#join", Input).value.split())
+        try:
+            d = decode_join(text)
+        except ValueError as exc:
+            self.query_one("#error", Label).update(str(exc))
+            return
+        wan = f"WAN {d.get('wan') or '-'} {d.get('wan_address') or ('DHCP' if d.get('wan') else '')}"
+        self.query_one("#error", Label).update(f"agent {d['url']}, LAN {d['lan']} {d['address']}, {wan}")
+        for b in self.query(Button):
+            b.disabled = True
+        self.run_join(text)
+
+    @work(thread=True, exclusive=True)
+    def run_join(self, text: str) -> None:
+        ok = join(self.app.a, text)
+        self.app.call_from_thread(self.joined, ok)
+
+    def joined(self, ok: bool) -> None:
+        if ok:
+            self.app.joined = True
+            self.app.push_screen(DonePage())
+            return
+        self.query_one("#error", Label).update("The deploy failed (see below). Try another join string"
+                                               + (", or Later." if self.optional else "."))
+        for b in self.query(Button):
+            b.disabled = False
+
+
+class DonePage(Screen):
+    BINDINGS = [Binding("ctrl+q", "app.quit", "Quit")]
+
+    def compose(self) -> ComposeResult:
+        a = self.app.a
+        yield Header(icon=" ")
+        yield Static("Done", classes="heading")
+        with VerticalScroll(id="body"):
+            if a.get("role") == "agent":
+                yield Static(join_text(a), classes="text")
+            elif self.app.mode == "join":
+                yield Static("The firewall is managed from here now.", classes="text")
+            else:
+                if self.app.joined:
+                    yield Static("The firewall is managed from here now.", classes="text")
+                yield Static(gui_text(a), classes="text")
+        with Horizontal(id="buttons"):
+            yield Button("Continue to the login prompt" if self.app.mode == "first" else "Exit",
+                         id="exit", variant="primary")
+        yield Footer()
+
+    def on_mount(self) -> None:
+        self.query_one("#exit").focus()
+
+    @on(Button.Pressed, "#exit")
+    def done(self) -> None:
+        self.app.exit(return_code=0)
+
+
+# The Linux console's font has none of the block characters of Textual's
+# borders: plain lines there.
+CONSOLE_CSS = """
+Input, OptionList, SelectCurrent, Button, #log { border: solid $panel-lighten-2; }
+Input:focus, OptionList:focus, Select:focus > SelectCurrent, Button:focus { border: solid $accent; }
+SelectOverlay { border: solid $accent; }
+Button { height: 3; }
+Button:focus { text-style: bold; }
+"""
+
+
+class SetupApp(App):
+    TITLE = "Portitor setup"
+    ENABLE_COMMAND_PALETTE = False
+    CSS = """
+    #body { padding: 0 2; }
+    .heading { text-style: bold; padding: 1 2; }
+    #body > .heading { padding: 1 0; }
+    .text { padding: 0 0 1 0; }
+    .hint { color: $text-muted; padding: 0 0 1 22; }
+    .row { height: auto; }
+    .label { width: 20; padding: 1 1 0 0; }
+    .row Input, .row Select { width: 1fr; }
+    #error { color: $error; padding: 1 0 0 0; }
+    #buttons { height: auto; padding: 1 0; }
+    #buttons Button { margin-right: 2; }
+    #layouts { height: 1fr; min-height: 10; }
+    #log { height: 1fr; border: round $primary; margin: 0 2; }
+    #join { margin: 0 2; }
+    LogPage #error, LogPage .text { padding: 0 2; }
+    """ + (CONSOLE_CSS if os.environ.get("TERM") == "linux" else "")
+
+    def __init__(self, mode: str, state: dict) -> None:
+        """mode: first (the first setup), reconfigure (run again) or join (--join)."""
+        super().__init__()
+        self.mode, self.state = mode, state
+        self.reconfigure = mode == "reconfigure"
+        self.joined = False
+        self.a: dict = {"join": ""}
+        if self.reconfigure:
+            self.a["role"] = state.get("role") or "both"
+            self.pages = [KeyboardPage, NetworkPage, AccountPage, SummaryPage, ProgressPage]
+        else:
+            self.pages = [KeyboardPage, RolePage, NetworkPage, AccountPage, SummaryPage, ProgressPage]
+
+    def on_mount(self) -> None:
+        if self.mode == "join":
+            self.a["role"] = "web"
+            self.push_screen(JoinPage(optional=False))
+        else:
+            self.next_page()
+
+    def next_page(self) -> None:
+        # The default screen is at the bottom of the stack.
+        self.push_screen(self.pages[len(self.screen_stack) - 1]())
+
+    def steps_done(self) -> None:
+        if self.mode == "first" and self.a["role"] == "web":
+            self.push_screen(JoinPage(optional=True))
+        else:
+            self.push_screen(DonePage())
+
+
+def run_tui(mode: str, state: dict) -> int:
+    global output
+    # Until a page shows the output; the commands log theirs anyway.
+    output = logfile
+    app = SetupApp(mode, state)
+    app.run()
+    return app.return_code if app.return_code is not None else 1
+
+
+def unattended() -> int:
+    say("Portitor first-boot setup (unattended, from firstboot.answers)")
+    a = read_answers()
+    steps = FIRST_STEPS[a["role"]]
+    if not all(run_step(a, *s) for s in steps):
+        say("The setup runs again at the next boot, or: sudo portitor-setup")
         return 1
-    say()
-    say("Done.")
-    if role != "agent":
-        show_gui(a)
+    finish(a)
+    if a["role"] == "agent":
+        say(join_text(a))
+    elif a["role"] == "web" and a["join"] and not join(a, a["join"]):
+        return 1
+    say("Done." + (f" GUI: {a['url']}" if a["role"] != "agent" else ""))
     return 0
 
 
@@ -1116,67 +1414,33 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Portitor setup (see the top of this file).")
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--join", action="store_true", help="portitor-web only: manage the firewall of a join string")
-    group.add_argument("--show-join", action="store_true", help="agent only: show the join string for portitor-web")
+    group.add_argument("--show-join", action="store_true", help="agent only: print the join string for portitor-web")
     args = parser.parse_args()
     if os.geteuid() != 0:
         if shutil.which("sudo"):
             os.execvp("sudo", ["sudo", sys.executable, os.path.abspath(sys.argv[0]), *sys.argv[1:]])
         say("run as root")
         return 1
+    state = load_state()
     if args.join or args.show_join:
-        state = load_state()
         want = "web" if args.join else "agent"
         if not DONE.exists() or (state.get("role") or "both") != want:
             say(f"{'--join' if args.join else '--show-join'} is for a machine set up as \"{want}\"")
             return 1
         if args.show_join:
+            # Plain text, to copy over SSH.
             a = {**answers_of(state), "role": "agent"}
             agent_init(a)
-            show_join(a)
+            say(join_text(a))
             return 0
-        return 0 if ask_join_and_deploy({}, optional=False) else 1
+        return run_tui("join", state)
     if DONE.exists():
-        return reconfigure()
+        # The agent owns the links now: an interface it keeps down shows no link.
+        return run_tui("reconfigure", state)
     if ANSWERS.exists():
-        say("Portitor first-boot setup (unattended, from firstboot.answers)")
-        a = read_answers()
-        if not run_steps(a, interactive=False, steps=FIRST_STEPS[a["role"]]):
-            return 1
-        if a["role"] == "agent":
-            show_join(a)
-        elif a["role"] == "web" and a["join"] and not join(a, a["join"]):
-            return 1
-        say("Done." + (f" GUI: {a['url']}" if a["role"] != "agent" else ""))
-        return 0
-    say()
-    say("Portitor first-boot setup")
-    say("=========================")
+        return unattended()
     links_up()
-    state: dict = {}
-    while True:
-        role = ask_role(state.get("role") or "both")
-        a = ask_all(state, role, reconfigure=False)
-        if confirm(a):
-            break
-        state = state_of(a)
-
-    if not run_steps(a, interactive=True, steps=FIRST_STEPS[role]):
-        return 1
-    if role == "web":
-        say()
-        ask_join_and_deploy(a, optional=True)
-    say()
-    say("Done.")
-    if role == "agent":
-        show_join(a)
-    else:
-        show_gui(a)
-    say("Press Enter for the login prompt.")
-    try:
-        input()
-    except EOFError:
-        pass
-    return 0
+    return run_tui("first", {})
 
 
 if __name__ == "__main__":

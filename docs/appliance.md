@@ -36,22 +36,23 @@ AppArmor stays on. Debian's profiles for BIND and Kea get Portitor's paths added
 
 ## First-boot setup
 
-The setup first asks for the **keyboard layout**: a number from the list of common
-layouts, an XKB layout code (e.g. `se`), or a word that searches the layout names. It
+The setup is a text UI of a few pages, with *Back* and *Next* (Tab moves between
+fields, Enter goes on, Escape goes back). It first asks for the **keyboard layout**:
+pick one from the list, or type to search the layout names and codes (e.g. `se`). It
 applies at once, so the password is typed with it.
 
-It then lists the network interfaces with their MAC addresses and whether a cable is
-plugged in (*r* reloads the list, so you can plug cables in and watch). It then asks
-for:
+Next it asks what the machine runs (see [Firewall and GUI on separate hosts](#firewall-and-gui-on-separate-hosts)). The network
+page lists the network interfaces with their MAC addresses and whether a cable is
+plugged in (*Reload interfaces* updates the list, so you can plug cables in and
+watch). It asks for:
 
 - **LAN interface**: where you reach the GUI from.
 - **WAN interface**: where the firewall reaches the Internet, for updates and IP lists.
-- **LAN IPv4**: `static` (the default), which asks for the LAN address with its prefix
-  length, e.g. `192.168.1.1/24`, or `dhcp`. A DHCP LAN takes no default route from its
+- **LAN IPv4**: *Static* (the default), with the LAN address and its prefix
+  length, e.g. `192.168.1.1/24`, or *DHCP*. A DHCP LAN takes no default route from its
   lease; the default route belongs to the WAN.
-- **WAN IPv4**: `dhcp` (the default), which also brings the default gateway, or
-  `static`, which asks for the WAN address with its prefix length and the **default
-  gateway**.
+- **WAN IPv4**: *DHCP* (the default), which also brings the default gateway, or
+  *Static*, with the WAN address and its prefix length and the **default gateway**.
 - **DNS servers** the firewall itself uses, for updates and IP lists. The default is
   `1.1.1.1 8.8.8.8`. They are written to `/etc/resolv.conf`; the agent does not change
   that file, not even from the WAN's DHCP lease.
@@ -59,8 +60,8 @@ for:
   sudo.
 - **Time zone**: used by scheduled tasks.
 
-Before it applies anything it shows the answers: *y* applies them, *n* asks again, and
-*s* swaps the LAN and WAN interfaces (the addresses stay with the LAN and the WAN), for
+Before it applies anything it shows the answers: *Apply* applies them, *Change* goes
+back to them, and *Swap LAN and WAN* swaps the LAN and WAN interfaces (the addresses stay with the LAN and the WAN), for
 when you picked them the wrong way round.
 
 Then it creates the database, starts the agent and the GUI, and deploys a first
@@ -88,7 +89,7 @@ with the one on the screen.
 Next steps in the GUI: DHCP and DNS for the LAN, and narrower rules than *LAN to WAN* if
 you want them. See [portitor-web](portitor-web.md).
 
-If a step fails, the setup shows the error and offers to retry it; its log is
+If a step fails, the setup shows the error with *Retry* and *Give up*; its log is
 `/var/log/portitor-setup.log`. If you give up, it runs again at the next boot, or
 run `sudo portitor-setup` after logging in as `portitor` at the console.
 
@@ -148,13 +149,13 @@ The setup ends with a **join string**, one line that starts with `portitor-join:
 holds the agent's URL, its token and certificate fingerprint, and the LAN and WAN
 answers. The token is a password to the firewall: keep the string to yourself. It is
 too long to type comfortably, so log in over SSH (`ssh portitor@<LAN address>`) and run
-`sudo portitor-setup --show-join` to copy it.
+`sudo portitor-setup --show-join`, which prints it as plain text, to copy it.
 
 **The GUI host (web).** The setup asks for the host's interface, DHCP or a static
 address with its default gateway, the DNS servers, the password for `admin` and
 `portitor`, and the time zone. The interface is configured in `/etc/network/interfaces`
 and portitor-agent is disabled, so this host has no Portitor firewall of its own. At
-the end, paste the join string, or leave it empty and paste it later: log in over SSH
+the end, paste the join string and choose *Deploy*, or choose *Later* and paste it later: log in over SSH
 and run `sudo portitor-setup --join`.
 
 The join deploys the firewall's first configuration, as for *both*: its LAN and WAN,
