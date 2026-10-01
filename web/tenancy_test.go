@@ -4,12 +4,14 @@
 package web
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"slices"
 	"testing"
 
+	"github.com/abundo/portitor/internal/agentapi"
 	"github.com/abundo/portitor/models"
 )
 
@@ -17,7 +19,7 @@ import (
 // instances their roles grant, and deploys only those.
 func TestTenancy(t *testing.T) {
 	env := newEnv(t)
-	fake := &applyAgent{}
+	fake := &neighboursAgent{}
 	env.srv.newAgent = func(*models.Settings) (agentAPI, error) { return fake, nil }
 	a := env.create("/api/instances", map[string]any{"name": "a"})
 	b := env.create("/api/instances", map[string]any{"name": "b"})
@@ -79,6 +81,12 @@ func TestTenancy(t *testing.T) {
 		if rec := env.do(tc.method, tc.path, tc.body); rec.Code != tc.want {
 			t.Errorf("%s %s: %d %s, want %d", tc.method, tc.path, rec.Code, rec.Body, tc.want)
 		}
+	}
+	var nb agentapi.NeighboursResponse
+	_ = json.Unmarshal(env.do("GET", "/api/agent/neighbours", nil).Body.Bytes(), &nb)
+	if len(nb.IP) != 1 || nb.IP[0].Instance != "a" || len(nb.LLDP) != 1 || nb.LLDP[0].Instance != "a" ||
+		len(nb.LLDPPorts) != 1 || nb.LLDPPorts[0].Instance != "a" {
+		t.Errorf("neighbours: %+v", nb)
 	}
 	ruleA := env.create("/api/rules", rule(a, "tina's"))
 	if rec := env.do("PUT", fmt.Sprintf("/api/rules/%d", ruleA), map[string]any{"instance_id": b}); rec.Code != http.StatusForbidden {
@@ -142,4 +150,17 @@ func TestTenancy(t *testing.T) {
 	if rec := env.do("GET", "/api/deploy/check?instances=nope", nil); rec.Code != http.StatusBadRequest {
 		t.Errorf("check unknown instance: %d", rec.Code)
 	}
+}
+
+// neighboursAgent has neighbours in instances a and b.
+type neighboursAgent struct{ applyAgent }
+
+func (*neighboursAgent) Neighbours(context.Context) (*agentapi.NeighboursResponse, error) {
+	n := &agentapi.NeighboursResponse{}
+	for _, inst := range []string{"a", "b"} {
+		n.IP = append(n.IP, agentapi.IPNeighbour{Instance: inst, Interface: "eth0", Address: "192.0.2.1"})
+		n.LLDP = append(n.LLDP, agentapi.LLDPNeighbour{Instance: inst, Interface: "eth0", SystemName: "sw"})
+		n.LLDPPorts = append(n.LLDPPorts, agentapi.LLDPPort{Instance: inst, Interface: "eth0"})
+	}
+	return n, nil
 }

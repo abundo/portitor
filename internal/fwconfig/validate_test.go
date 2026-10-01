@@ -84,6 +84,7 @@ func TestValidateCatchesProblems(t *testing.T) {
 			d.Instances[0].Interfaces[1].Addresses = append(d.Instances[0].Interfaces[1].Addresses, "<eth0>:1::1/64")
 			d.Instances[0].Interfaces[2].Addresses = []string{"<eth0>:01::1/64"}
 		}, "<eth0>:1::1/64 is also on eth1"},
+		{"lldp on wireguard", func(d *Document) { d.Instances[0].Interfaces[3].LLDP = true }, "lldp is not supported on wireguard interfaces"},
 		{"pd without dhcpv6", func(d *Document) { d.Instances[0].Interfaces[0].DHCPv6PD = true }, "prefix delegation needs the dhcpv6 client"},
 		{"dhcpv6 without ra", func(d *Document) {
 			d.Instances[0].Interfaces[1].DHCPv6 = true

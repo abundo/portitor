@@ -23,6 +23,7 @@ const router = createRouter({
         { path: 'instances', component: () => import('@/views/InstancesPage.vue') },
         { path: 'links', component: () => import('@/views/LinksPage.vue') },
         { path: 'interfaces', component: () => import('@/views/InterfacesPage.vue') },
+        { path: 'neighbours', component: () => import('@/views/NeighboursPage.vue') },
         { path: 'routes', component: () => import('@/views/RoutesPage.vue') },
         { path: 'objects', component: () => import('@/views/HostsPrefixesPage.vue') },
         { path: 'ipam', redirect: '/objects' },

@@ -307,6 +307,9 @@ func prepareInterface(tx *gorm.DB, i, old *models.Interface) error {
 	default:
 		i.WgEndpoint, i.WgKeepalive = "", 0
 	}
+	if i.Kind == fwconfig.KindWireGuard {
+		i.Lldp = false
+	}
 	if i.Kind != fwconfig.KindVLAN {
 		i.Parent, i.VlanID = "", 0
 	}

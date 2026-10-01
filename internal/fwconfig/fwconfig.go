@@ -99,10 +99,13 @@ type Interface struct {
 	// with DHCPv6PD, for a delegated prefix (IA_PD), of DHCPv6PDLength
 	// bits as a hint to the server (0: no hint). The default route comes
 	// from router advertisements (IPv6AcceptRA).
-	DHCPv6         bool       `json:"dhcpv6,omitempty"`
-	DHCPv6PD       bool       `json:"dhcpv6_pd,omitempty"`
-	DHCPv6PDLength int        `json:"dhcpv6_pd_length,omitempty"`
-	WireGuard      *WireGuard `json:"wireguard,omitempty"`
+	DHCPv6         bool `json:"dhcpv6,omitempty"`
+	DHCPv6PD       bool `json:"dhcpv6_pd,omitempty"`
+	DHCPv6PDLength int  `json:"dhcpv6_pd_length,omitempty"`
+	// LLDP makes the agent send LLDP frames on the interface and listen
+	// for its neighbours' (ethernet kinds: physical, VLAN, bridge).
+	LLDP      bool       `json:"lldp,omitempty"`
+	WireGuard *WireGuard `json:"wireguard,omitempty"`
 }
 
 type WireGuard struct {

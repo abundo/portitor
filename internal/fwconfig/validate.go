@@ -165,6 +165,9 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 		case ifc.DHCPv6PD && !ifc.DHCPv6:
 			v.addf("%s: prefix delegation needs the dhcpv6 client", ip)
 		}
+		if ifc.LLDP && (ifc.Kind == KindWireGuard || ifc.Kind == KindLink) {
+			v.addf("%s: lldp is not supported on %s interfaces", ip, ifc.Kind)
+		}
 		if ifc.DHCPv6PDLength != 0 && (ifc.DHCPv6PDLength < 32 || ifc.DHCPv6PDLength > 64) {
 			v.addf("%s: delegated prefix length %d out of range (32-64)", ip, ifc.DHCPv6PDLength)
 		}

@@ -201,6 +201,7 @@ func build(db *gorm.DB, generation int64, only map[string]bool) (*fwconfig.Docum
 				DHCPNoDefaultRoute: mif.DhcpNoDefaultRoute && mif.Ipv4Mode == fwconfig.ModeDHCP,
 				DHCPv6:             mif.Dhcpv6,
 				DHCPv6PD:           mif.Dhcpv6 && mif.Dhcpv6Pd,
+				LLDP:               mif.Lldp && mif.Kind != fwconfig.KindWireGuard,
 			}
 			if ifc.DHCPv6PD {
 				ifc.DHCPv6PDLength = mif.Dhcpv6PdLength

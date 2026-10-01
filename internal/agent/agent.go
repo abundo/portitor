@@ -32,6 +32,7 @@ type Agent struct {
 	dhcp6 *dhcp6Manager
 	ddns  *dyndnsManager
 	pkts  *packetLog
+	lldp  *lldpManager
 	lists *ipLists
 	tasks *scheduler
 	sys   *systemManager
@@ -66,6 +67,7 @@ func New(cfg *Config) *Agent {
 	a.dhcp6 = newDHCP6Manager(a.run, cfg.DryRun, a.onPDChange)
 	a.ddns = newDyndnsManager(cfg.DryRun)
 	a.pkts = newPacketLog(cfg.DryRun)
+	a.lldp = newLLDPManager(cfg.DryRun)
 	a.lists = newIPLists()
 	a.tasks = newScheduler(a.runTask)
 	// Updates and background work have runners of their own: their
@@ -153,6 +155,7 @@ func (a *Agent) Stop() {
 	a.lists.Stop()
 	a.ddns.Stop()
 	a.pkts.Stop()
+	a.lldp.Stop()
 	a.dhcp.Stop()
 	a.dhcp6.Stop()
 }

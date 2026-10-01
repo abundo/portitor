@@ -435,3 +435,66 @@ const (
 	// CaptureDefaultRateKbps is portitor-web's default stream rate.
 	CaptureDefaultRateKbps = 1000
 )
+
+// NeighboursResponse is what the instances' interfaces see of their
+// neighbours: the kernel's ARP and ND tables and the LLDP neighbours heard.
+type NeighboursResponse struct {
+	IP   []IPNeighbour   `json:"ip"`
+	LLDP []LLDPNeighbour `json:"lldp"`
+	// LLDPPorts are the interfaces the agent runs LLDP on.
+	LLDPPorts []LLDPPort `json:"lldp_ports"`
+}
+
+// IPNeighbour is an entry of an ARP (IPv4) or ND (IPv6) table, from
+// `ip neigh`.
+type IPNeighbour struct {
+	Instance  string `json:"instance"`
+	Interface string `json:"interface"`
+	Family    string `json:"family"` // ipv4 (ARP) or ipv6 (ND)
+	Address   string `json:"address"`
+	MAC       string `json:"mac,omitempty"`
+	// State is the kernel's NUD state in lower case (reachable, stale,
+	// delay, probe, failed, incomplete, permanent, noarp).
+	State string `json:"state"`
+	// Router: an IPv6 neighbour that announced itself as a router.
+	Router bool `json:"router,omitempty"`
+}
+
+// LLDPPort is an interface LLDP runs on; Error is why it can't, now.
+type LLDPPort struct {
+	Instance  string `json:"instance"`
+	Interface string `json:"interface"`
+	Error     string `json:"error,omitempty"`
+}
+
+// LLDPNeighbour is what a neighbour's last LLDP frame on an interface said
+// (IEEE 802.1AB).
+type LLDPNeighbour struct {
+	Instance  string `json:"instance"`
+	Interface string `json:"interface"`
+	// SourceMAC is the frame's source address.
+	SourceMAC string `json:"source_mac"`
+	// ChassisID and PortID as text, with their subtype's name (mac,
+	// interface name, local, ...).
+	ChassisID         string `json:"chassis_id"`
+	ChassisIDSubtype  string `json:"chassis_id_subtype"`
+	PortID            string `json:"port_id"`
+	PortIDSubtype     string `json:"port_id_subtype"`
+	TTL               int    `json:"ttl"` // seconds, as sent
+	PortDescription   string `json:"port_description,omitempty"`
+	SystemName        string `json:"system_name,omitempty"`
+	SystemDescription string `json:"system_description,omitempty"`
+	// Capabilities the system has and the ones enabled: bridge, router,
+	// station, ...
+	Capabilities        []string `json:"capabilities,omitempty"`
+	EnabledCapabilities []string `json:"enabled_capabilities,omitempty"`
+	ManagementAddresses []string `json:"management_addresses,omitempty"`
+	// PortVLAN is the port's VLAN id (IEEE 802.1 port VLAN id TLV); 0 when
+	// not sent.
+	PortVLAN  int       `json:"port_vlan,omitempty"`
+	VLANNames []string  `json:"vlan_names,omitempty"` // "10 office"
+	MaxFrame  int       `json:"max_frame,omitempty"`  // IEEE 802.3 maximum frame size
+	FirstSeen time.Time `json:"first_seen"`
+	LastSeen  time.Time `json:"last_seen"`
+	Expires   time.Time `json:"expires"`
+}

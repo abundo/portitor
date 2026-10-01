@@ -333,6 +333,9 @@ type Interface struct {
 	// DnsFromDhcp: with DNS upstream dhcp, the DNS servers of this
 	// interface's DHCP lease are the forwarders. At most one per instance.
 	DnsFromDhcp bool `json:"dns_from_dhcp"`
+	// Lldp sends LLDP on the interface and lists its LLDP neighbours
+	// (physical, VLAN and bridge interfaces).
+	Lldp bool `gorm:"column:lldp" json:"lldp"`
 
 	WgPrivateKey string `json:"-"`
 	WgPublicKey  string `json:"wg_public_key"`

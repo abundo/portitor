@@ -132,6 +132,7 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 	var dhcpWant []dhcpKey
 	var dhcp6Want []dhcp6Key
 	var ddnsWant []dyndnsItem
+	var lldpWant []lldpKey
 	pktsWant := map[string]string{}
 
 	for i := range exp.Instances {
@@ -209,6 +210,9 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 			if ifc.IPv4Mode == fwconfig.ModeDHCP && ifc.Enabled {
 				dhcpWant = append(dhcpWant, dhcpKey{instance: in.Name, netns: ns, iface: ifc.Name, noRoute: ifc.DHCPNoDefaultRoute})
 			}
+			if ifc.LLDP && ifc.Enabled {
+				lldpWant = append(lldpWant, lldpKey{instance: in.Name, netns: ns, iface: ifc.Name, descr: ifc.Description})
+			}
 			if ifc.DHCPv6 && ifc.Enabled {
 				dhcp6Want = append(dhcp6Want, dhcp6Key{instance: in.Name, netns: ns, iface: ifc.Name, pd: ifc.DHCPv6PD, pdLen: ifc.DHCPv6PDLength})
 			}
@@ -248,6 +252,7 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 	a.dhcp6.Reconcile(dhcp6Want)
 	a.ddns.Reconcile(ddnsWant)
 	a.pkts.Reconcile(pktsWant)
+	a.lldp.Reconcile(lldpWant)
 
 	for i := range exp.Instances {
 		if err := a.applyServices(ctx, &exp.Instances[i], bundle, changed); err != nil {

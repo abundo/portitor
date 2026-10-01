@@ -300,6 +300,12 @@ func filterLeases(l *agentapi.LeasesResponse, names map[string]bool) {
 	}
 }
 
+func filterNeighbours(n *agentapi.NeighboursResponse, names map[string]bool) {
+	n.IP = slices.DeleteFunc(n.IP, func(x agentapi.IPNeighbour) bool { return !names[x.Instance] })
+	n.LLDP = slices.DeleteFunc(n.LLDP, func(x agentapi.LLDPNeighbour) bool { return !names[x.Instance] })
+	n.LLDPPorts = slices.DeleteFunc(n.LLDPPorts, func(x agentapi.LLDPPort) bool { return !names[x.Instance] })
+}
+
 func (s *Server) filterRuleCounters(rc *agentapi.RuleCountersResponse, ids []uint, names map[string]bool) error {
 	var rules []uint
 	if err := s.db.Model(&models.Rule{}).Where("instance_id IN ?", ids).Pluck("id", &rules).Error; err != nil {

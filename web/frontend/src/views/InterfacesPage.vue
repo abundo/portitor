@@ -29,6 +29,8 @@ const kinds = [
   { label: 'Bridge', value: 'bridge' },
   { label: 'WireGuard', value: 'wireguard' },
 ]
+// LLDP runs on the ethernet kinds.
+const lldpKinds = ['physical', 'vlan', 'bridge']
 const modes = [
   { label: 'Static', value: 'static' },
   { label: 'DHCP client', value: 'dhcp' },
@@ -148,6 +150,13 @@ const fields = [
   },
   { key: 'mtu', label: 'MTU', type: 'number', hint: '0 keeps the default.' },
   {
+    key: 'lldp',
+    label: 'LLDP',
+    type: 'switch',
+    show: (f) => lldpKinds.includes(f.kind),
+    hint: 'Announce the firewall with LLDP on this interface and list the LLDP neighbours heard on it under Neighbours.',
+  },
+  {
     key: 'wg_listen_port',
     label: 'WireGuard listen port',
     type: 'number',
@@ -210,6 +219,7 @@ function leaseOf(row, family = '') {
         dhcpv6: false,
         dhcpv6_pd: false,
         dhcpv6_pd_length: 0,
+        lldp: false,
       }"
       new-label="New interface"
       @changed="reload()"

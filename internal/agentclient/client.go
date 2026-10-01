@@ -136,6 +136,11 @@ func (c *Client) Status(ctx context.Context) (*agentapi.Status, error) {
 	return &st, c.do(ctx, http.MethodGet, "/v1/status", nil, &st)
 }
 
+func (c *Client) Neighbours(ctx context.Context) (*agentapi.NeighboursResponse, error) {
+	var n agentapi.NeighboursResponse
+	return &n, c.do(ctx, http.MethodGet, "/v1/neighbours", nil, &n)
+}
+
 func (c *Client) Leases(ctx context.Context) (*agentapi.LeasesResponse, error) {
 	var l agentapi.LeasesResponse
 	return &l, c.do(ctx, http.MethodGet, "/v1/leases", nil, &l)

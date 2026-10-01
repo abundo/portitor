@@ -38,6 +38,7 @@ const sections = computed(() => [
       { label: 'Interfaces', icon: 'i-lucide-ethernet-port', to: '/interfaces' },
       { label: 'Interface zones', icon: 'i-lucide-layers', to: '/interface-zones' },
       { label: 'Routes', icon: 'i-lucide-route', to: '/routes' },
+      { label: 'Neighbours', icon: 'i-lucide-network', to: '/neighbours' },
       { label: 'Hosts & prefixes', icon: 'i-lucide-tags', to: '/objects' },
     ],
   },

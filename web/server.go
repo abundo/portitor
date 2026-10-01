@@ -34,6 +34,7 @@ import (
 type agentAPI interface {
 	Status(ctx context.Context) (*agentapi.Status, error)
 	Leases(ctx context.Context) (*agentapi.LeasesResponse, error)
+	Neighbours(ctx context.Context) (*agentapi.NeighboursResponse, error)
 	RuleCounters(ctx context.Context) (*agentapi.RuleCountersResponse, error)
 	Logs(ctx context.Context, after int64) (*agentapi.LogsResponse, error)
 	PacketLog(ctx context.Context, after int64) (*agentapi.PacketLogResponse, error)
@@ -186,6 +187,7 @@ func (s *Server) Echo() *echo.Echo {
 	g.GET("/deployments", s.handleDeployments)
 	g.GET("/agent/status", s.handleAgentStatus)
 	g.GET("/agent/leases", s.handleAgentLeases)
+	g.GET("/agent/neighbours", s.handleAgentNeighbours)
 	g.GET("/agent/rule-counters", s.handleAgentRuleCounters)
 	g.GET("/agent/logs", s.handleAgentLogs)
 	g.GET("/agent/packet-log", s.handleAgentPacketLog)

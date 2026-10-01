@@ -1058,6 +1058,27 @@ func (s *Server) handleAgentLeases(c *echo.Context) error {
 	return c.JSON(http.StatusOK, l)
 }
 
+// handleAgentNeighbours passes on the ARP, ND and LLDP neighbours of the
+// instances' interfaces, for the Neighbours page.
+func (s *Server) handleAgentNeighbours(c *echo.Context) error {
+	a, _, err := s.agent()
+	if err != nil {
+		return agentError(c, err)
+	}
+	n, err := a.Neighbours(c.Request().Context())
+	if err != nil {
+		return agentError(c, err)
+	}
+	names, err := s.readableInstanceNames(c)
+	if err != nil {
+		return err
+	}
+	if names != nil {
+		filterNeighbours(n, names)
+	}
+	return c.JSON(http.StatusOK, n)
+}
+
 // handleAgentRuleCounters passes on the traffic per rule (by rule id), for
 // the Rules page.
 func (s *Server) handleAgentRuleCounters(c *echo.Context) error {
