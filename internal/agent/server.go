@@ -9,13 +9,17 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/netip"
+	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 
+	"github.com/abundo/portitor/internal/acme"
 	"github.com/abundo/portitor/internal/agentapi"
 	"github.com/abundo/portitor/internal/fwconfig"
 )
@@ -142,6 +146,7 @@ func (a *Agent) Handler() http.Handler {
 		a.sys.Reboot()
 		writeJSONResponse(w, http.StatusAccepted, map[string]any{"rebooting": true})
 	})
+	mux.HandleFunc("GET /v1/certificates/{instance}/{name}", a.handleCertificate)
 	mux.HandleFunc("GET /v1/console", a.handleConsole)
 	mux.HandleFunc("POST /v1/capture", a.handleCapture)
 	mux.HandleFunc("POST /v1/trace", a.handleTrace)
@@ -262,4 +267,28 @@ func writeJSONResponse(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+// handleCertificate hands out a stored certificate and its key, for
+// portitor-web's tls_certificate. Only a complete one (acme.Load).
+func (a *Agent) handleCertificate(w http.ResponseWriter, r *http.Request) {
+	inst, name := r.PathValue("instance"), r.PathValue("name")
+	if !fwconfig.ValidInstanceName(inst) || !fwconfig.ValidItemName(name) {
+		writeError(w, http.StatusBadRequest, errors.New("bad instance or certificate name"))
+		return
+	}
+	dir := a.cfg.Paths.CertificateDir(inst, name)
+	if acme.Load(dir) == nil {
+		writeError(w, http.StatusNotFound, fmt.Errorf("no certificate %s/%s yet", inst, name))
+		return
+	}
+	chain, err := os.ReadFile(filepath.Join(dir, acme.FullChainFile))
+	if err == nil {
+		var key []byte
+		if key, err = os.ReadFile(filepath.Join(dir, acme.PrivKeyFile)); err == nil {
+			writeJSONResponse(w, http.StatusOK, agentapi.CertificateFiles{FullChain: string(chain), PrivKey: string(key)})
+			return
+		}
+	}
+	writeError(w, http.StatusInternalServerError, err)
 }

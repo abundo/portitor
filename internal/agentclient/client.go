@@ -206,6 +206,13 @@ func (c *Client) StartSystemJob(ctx context.Context, req agentapi.SystemJobReque
 }
 
 // Reboot restarts the firewall.
+// Certificate fetches a stored ACME certificate and its private key.
+func (c *Client) Certificate(ctx context.Context, instance, name string) (*agentapi.CertificateFiles, error) {
+	var out agentapi.CertificateFiles
+	err := c.do(ctx, http.MethodGet, "/v1/certificates/"+url.PathEscape(instance)+"/"+url.PathEscape(name), nil, &out)
+	return &out, err
+}
+
 func (c *Client) Reboot(ctx context.Context) error {
 	return c.do(ctx, http.MethodPost, "/v1/system/reboot", struct{}{}, nil)
 }

@@ -18,10 +18,11 @@ firewall, for a single-box setup.
 | `bind` | `127.0.0.1:8080` | Listen address. `start --bind` overrides it. |
 | `jwt_secret` | | Signs session cookies. At least 32 characters: `openssl rand -base64 32`. |
 | `tls_cert`, `tls_key` | | Serve HTTPS directly. Set both or neither. |
+| `tls_certificate` | | Serve HTTPS with a certificate from *Certificates*: `<instance>/<name>`, such as `main/web`. Instead of `tls_cert`; see [The GUI's own certificate](#the-guis-own-certificate). |
 | `db.path` | `/var/lib/portitor-web/portitor.db` | SQLite database. Its directory must be writable by the service user (`-wal` and `-shm` files go next to it). |
 | `dev` | `false` | Serves the frontend from disk and drops the cookie's Secure flag. Development only. |
 
-Without `tls_cert`, keep `bind` on localhost and put a TLS reverse proxy in front. The
+Without `tls_cert` or `tls_certificate`, keep `bind` on localhost and put a TLS reverse proxy in front. The
 session cookie is marked Secure, so the GUI does not work over plain HTTP. The proxy
 must pass WebSocket upgrades for the console.
 
@@ -255,6 +256,20 @@ for every domain of the certificate.
   `<state_dir>/acme/`.
 - Try *Let's Encrypt staging* first: its certificates are not trusted, but its rate
   limits are far higher than production's (5 failed validations per hour per domain).
+
+### The GUI's own certificate
+
+portitor-web can serve HTTPS with one of these certificates: set
+`tls_certificate: <instance>/<name>` in `web.yaml` (the certificate's name, not a
+domain; `bind` on an address the browser reaches, e.g. `0.0.0.0:443`) and restart it.
+It fetches the chain and key from the agent at start and every hour after, and
+uses a renewed one without a restart. The last one fetched is kept next to the database
+(`tls-certificate.pem`, 0600), so a restart while the agent is unreachable still
+has it; before the first is fetched, portitor-web serves a self-signed certificate
+and tries again every minute. The certificate's domain must be the name you browse
+to. The agent hands out the key to anyone with its token, which portitor-web already holds.
+The service unit lets the `portitor` user listen on port 443
+(`CAP_NET_BIND_SERVICE`).
 
 ## Backup and restore
 

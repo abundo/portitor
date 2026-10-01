@@ -3,10 +3,13 @@
 
 # /etc/portitor/web.yaml - portitor-web (runs off the firewall).
 
-# Put a TLS reverse proxy in front, or set tls_cert/tls_key.
+# Put a TLS reverse proxy in front, or set tls_cert/tls_key, or
+# tls_certificate: a certificate from Services -> Certificates, fetched from the
+# agent and reloaded when renewed.
 bind: 127.0.0.1:8080
 # tls_cert: /etc/portitor/web.crt
 # tls_key: /etc/portitor/web.key
+# tls_certificate: main/web     # <instance>/<certificate name>
 
 # Signs session cookies. At least 32 random characters:
 #   openssl rand -base64 32

@@ -7,6 +7,7 @@ package web
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"io"
 	"io/fs"
@@ -230,9 +231,17 @@ func (s *Server) Serve(ctx context.Context) error {
 	}
 	e := s.Echo()
 	sc := echo.StartConfig{Address: s.cfg.Bind, HideBanner: true}
-	slog.Info("portitor-web listening", "addr", s.cfg.Bind, "dev", s.cfg.Dev, "tls", s.cfg.TLSCert != "")
+	slog.Info("portitor-web listening", "addr", s.cfg.Bind, "dev", s.cfg.Dev, "tls", s.cfg.TLSCert != "" || s.cfg.TLSCertificate != "")
 	var err error
-	if s.cfg.TLSCert != "" {
+	if s.cfg.TLSCertificate != "" {
+		tc, terr := s.newTLSCert()
+		if terr != nil {
+			return terr
+		}
+		go tc.run(ctx)
+		sc.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12, NextProtos: []string{"h2", "http/1.1"}, GetCertificate: tc.get}
+		err = sc.Start(ctx, e)
+	} else if s.cfg.TLSCert != "" {
 		// Echo reads file names relative to the working directory
 		// (os.DirFS("."), which refuses absolute paths); pass the contents.
 		cert, key, rerr := readFiles(s.cfg.TLSCert, s.cfg.TLSKey)

@@ -91,7 +91,9 @@ are in [README.md](README.md).
   Deployment history stores a redacted document. The exceptions are the backup
   download (`web/backup.go`): the whole database, age-encrypted with the user's
   passphrase; and a WireGuard peer's client config (`render.WireGuardClientConf`),
-  with its generated private key and preshared key. API answers are
+  with its generated private key and preshared key; and the agent's
+`GET /v1/certificates/<instance>/<name>`, an ACME certificate with its key for
+portitor-web's `tls_certificate` (`web/tlscert.go`). API answers are
   `Cache-Control: no-store`. IP list credentials go over `http://` only to loopback
   (`fwconfig.PlainTextCredentials`, checked when saving), and a download never
   follows a redirect that would take them to another host or from https to http

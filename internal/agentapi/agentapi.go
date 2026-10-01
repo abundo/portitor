@@ -218,6 +218,13 @@ type DynDNSStatus struct {
 }
 
 // CertificateStatus is the state of an ACME certificate.
+// CertificateFiles is a stored ACME certificate with its private key
+// (GET /v1/certificates/{instance}/{name}), for portitor-web's own HTTPS.
+type CertificateFiles struct {
+	FullChain string `json:"fullchain"`
+	PrivKey   string `json:"privkey"`
+}
+
 type CertificateStatus struct {
 	Instance string   `json:"instance"`
 	Name     string   `json:"name"`
