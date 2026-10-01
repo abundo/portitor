@@ -111,6 +111,44 @@ async function select(n) {
   }
 }
 const hexSource = computed(() => frame.value?.sources[node.value?.source ?? 0])
+
+// The panes are resized by dragging the bars between them (a double click
+// resets); the sizes, in percent, are remembered in this browser.
+const SPLIT_KEY = 'capture-split'
+const split = reactive({ top: 50, left: 50 })
+try {
+  Object.assign(split, JSON.parse(localStorage.getItem(SPLIT_KEY)) ?? {})
+} catch {
+  // defaults
+}
+watch(split, () => {
+  try {
+    localStorage.setItem(SPLIT_KEY, JSON.stringify(split))
+  } catch {
+    // not remembered
+  }
+})
+const panes = ref(null)
+const bottom = ref(null)
+function drag(key, event) {
+  const el = key === 'top' ? panes.value : bottom.value
+  const bar = event.currentTarget
+  bar.setPointerCapture(event.pointerId)
+  const move = (e) => {
+    const r = el.getBoundingClientRect()
+    const pct =
+      key === 'top'
+        ? ((e.clientY - r.top) / r.height) * 100
+        : ((e.clientX - r.left) / r.width) * 100
+    split[key] = Math.min(90, Math.max(10, pct))
+  }
+  const up = () => {
+    bar.removeEventListener('pointermove', move)
+    bar.removeEventListener('pointerup', up)
+  }
+  bar.addEventListener('pointermove', move)
+  bar.addEventListener('pointerup', up)
+}
 </script>
 
 <template>
@@ -223,19 +261,30 @@ const hexSource = computed(() => frame.value?.sources[node.value?.source ?? 0])
       <span v-if="filterError" class="text-sm text-error">{{ filterError }}</span>
     </div>
 
-    <div class="grid min-h-0 flex-1 grid-rows-2 gap-3">
-      <PacketList
-        v-if="ready"
-        v-model:follow="follow"
-        :columns="columns"
-        :load="loadRows"
-        :version="listVersion"
-        :selected="selected"
-        @select="select"
+    <div ref="panes" class="flex min-h-0 flex-1 flex-col">
+      <div class="flex min-h-0 flex-col" :style="{ height: `${split.top}%` }">
+        <PacketList
+          v-if="ready"
+          v-model:follow="follow"
+          :columns="columns"
+          :load="loadRows"
+          :version="listVersion"
+          :selected="selected"
+          @select="select"
+        />
+        <div v-else class="flex-1 rounded border border-default" />
+      </div>
+      <div
+        class="splitter h-3 cursor-row-resize"
+        title="Drag to resize, double-click to reset"
+        @pointerdown.prevent="drag('top', $event)"
+        @dblclick="split.top = 50"
       />
-      <div v-else class="rounded border border-default" />
-      <div class="grid min-h-0 gap-3 lg:grid-cols-2">
-        <div class="min-h-0 overflow-auto rounded border border-default p-2">
+      <div ref="bottom" class="flex min-h-0 flex-1 flex-col gap-3 lg:flex-row lg:gap-0">
+        <div
+          class="min-h-0 flex-1 overflow-auto rounded border border-default p-2 lg:w-(--left) lg:flex-none"
+          :style="{ '--left': `${split.left}%` }"
+        >
           <PacketTree
             v-if="frame"
             :key="frame.number"
@@ -245,7 +294,13 @@ const hexSource = computed(() => frame.value?.sources[node.value?.source ?? 0])
           />
           <div v-else class="p-2 text-sm text-muted">Select a packet.</div>
         </div>
-        <div class="min-h-0 overflow-auto rounded border border-default p-2">
+        <div
+          class="splitter hidden w-3 cursor-col-resize lg:block"
+          title="Drag to resize, double-click to reset"
+          @pointerdown.prevent="drag('left', $event)"
+          @dblclick="split.left = 50"
+        />
+        <div class="min-h-0 min-w-0 flex-1 overflow-auto rounded border border-default p-2">
           <HexDump
             v-if="hexSource"
             :data="hexSource.data"
@@ -257,3 +312,29 @@ const hexSource = computed(() => frame.value?.sources[node.value?.source ?? 0])
     </div>
   </div>
 </template>
+
+<style scoped>
+.splitter {
+  position: relative;
+  touch-action: none;
+}
+.splitter::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  border-radius: 9999px;
+  background: var(--ui-border-accented);
+}
+.splitter.cursor-row-resize::after {
+  width: 3rem;
+  height: 3px;
+}
+.splitter.cursor-col-resize::after {
+  width: 3px;
+  height: 3rem;
+}
+.splitter:hover::after {
+  background: var(--ui-primary);
+}
+</style>
