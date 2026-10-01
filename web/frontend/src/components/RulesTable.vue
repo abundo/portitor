@@ -108,6 +108,44 @@ function toggleGroup(r) {
   setCollapsed(ids)
 }
 const groups = computed(() => props.rows.filter(isGroup))
+
+// The automatic rules (invalid drop, the services' accepts) sit in their own
+// section above the user's rules, folded unless opened (kept in the browser).
+const autoOpenKey = 'rules-auto-open'
+const autoOpen = ref(false)
+try {
+  autoOpen.value = localStorage.getItem(autoOpenKey) === 'true'
+} catch {
+  // No storage: the section starts folded.
+}
+function toggleAuto() {
+  autoOpen.value = !autoOpen.value
+  try {
+    localStorage.setItem(autoOpenKey, String(autoOpen.value))
+  } catch {
+    // Folding still works for this page view.
+  }
+}
+// The rules above the first group form a section with no heading row of its
+// own; naming it inserts a group row at the top.
+const leadingSection = computed(() => !props.rows.length || !isGroup(props.rows[0]))
+const leadingSize = computed(() => {
+  let n = 0
+  for (const r of props.rows) {
+    if (isGroup(r)) break
+    if (!isComment(r)) n++
+  }
+  return n
+})
+async function nameLeading(event) {
+  const name = event.target.value.trim()
+  event.target.value = ''
+  if (props.readOnly || !name) return
+  const created = await props.insert('group', 0)
+  if (!created) return
+  created.description = name
+  emit('save', created)
+}
 function foldAll(fold) {
   const ids = new Set(collapsed.value)
   for (const g of groups.value) {
@@ -585,7 +623,7 @@ function onKeydown(event, index) {
   const step = { Enter: 1, ArrowDown: 1, ArrowUp: -1 }[event.key]
   if (!step || event.isComposing) return
   const col = event.target.dataset.col
-  const trs = wrap.value.querySelectorAll('tbody.user-rules > tr')
+  const trs = wrap.value.querySelectorAll('tbody.user-rules > tr[data-index]')
   let next = null
   for (let i = index + step; !next && i >= 0 && i < trs.length; i += step) {
     if (!trs[i].hidden) next = trs[i].querySelector(`[data-col="${col}"]`)
@@ -668,7 +706,34 @@ function onKeydown(event, index) {
             </tr>
           </thead>
           <tbody class="auto-rules">
+            <tr class="rule-group auto-head">
+              <td class="keep" />
+              <td class="keep">
+                <button
+                  type="button"
+                  class="flex h-7 w-full cursor-pointer items-center justify-center text-muted hover:text-highlighted"
+                  :title="autoOpen ? 'Collapse automatic rules' : 'Expand automatic rules'"
+                  :aria-expanded="autoOpen"
+                  @click="toggleAuto"
+                >
+                  <UIcon
+                    name="i-lucide-chevron-down"
+                    class="size-4 transition-transform"
+                    :class="{ '-rotate-90': !autoOpen }"
+                  />
+                </button>
+              </td>
+              <td :colspan="colCount - 2" class="cursor-pointer" @click="toggleAuto">
+                <div class="flex items-center">
+                  <span class="group-name auto-name">Automatic rules</span>
+                  <span class="group-size">
+                    {{ auto.length + 1 }} rule{{ auto.length ? 's' : '' }}
+                  </span>
+                </div>
+              </td>
+            </tr>
             <tr
+              :hidden="!autoOpen"
               class="cursor-pointer"
               @click="$event.target.closest('input') || emit('view', { builtin: 'invalid' })"
               title="Packets that belong to no known connection, such as a stray TCP packet; dropped before the rules"
@@ -703,6 +768,7 @@ function onKeydown(event, index) {
             <tr
               v-for="a in auto"
               :key="a.service"
+              :hidden="!autoOpen"
               :title="autoTitle(a)"
               class="cursor-pointer"
               @click="$event.target.closest('input') || emit('view', a)"
@@ -749,6 +815,25 @@ function onKeydown(event, index) {
             </tr>
           </tbody>
           <tbody class="user-rules">
+            <tr v-if="leadingSection" class="rule-group">
+              <td class="keep" />
+              <td class="keep" />
+              <td :colspan="colCount - 2">
+                <div class="flex items-center">
+                  <div class="group-name">
+                    <input
+                      :readonly="readOnly"
+                      placeholder="Name this section"
+                      title="Rules above the first group; a name makes this a group"
+                      @change="nameLeading"
+                    />
+                  </div>
+                  <span class="group-size">
+                    {{ leadingSize }} rule{{ leadingSize === 1 ? '' : 's' }}
+                  </span>
+                </div>
+              </td>
+            </tr>
             <template v-for="(r, i) in rows" :key="r.id">
               <tr v-if="isGroup(r)" class="rule-group" :data-index="i" :hidden="folding.hidden[i]">
                 <td class="keep">
@@ -1276,6 +1361,18 @@ function onKeydown(event, index) {
   outline: none;
   font-weight: 600;
   text-overflow: ellipsis;
+}
+.rules-grid tbody.auto-rules tr.auto-head td {
+  border-block-end: 2px solid var(--ui-border-accented);
+}
+.rules-grid tr.rule-group .auto-name {
+  padding-inline: 0.375rem;
+  line-height: 1.75rem;
+  font-weight: 600;
+}
+.rules-grid tr.rule-group input::placeholder {
+  font-weight: 400;
+  font-style: italic;
 }
 .rules-grid tr.rule-group .group-size {
   padding-inline: 0.5rem;
