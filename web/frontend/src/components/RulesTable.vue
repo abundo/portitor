@@ -458,7 +458,13 @@ function setIfaces(r, key, list) {
   set(r, key, list.includes('any') ? [] : list)
 }
 const serviceFilterFields = ['label', 'description']
-const serviceSelectUi = { content: 'min-w-96' }
+// Each menu item is one line: the label, then its description.
+const serviceSelectUi = {
+  content: 'min-w-96',
+  itemWrapper: 'flex-row items-baseline gap-2',
+  itemLabel: 'shrink-0',
+  itemDescription: 'truncate',
+}
 function setServices(r, list) {
   set(r, 'services', list.includes('any') ? [] : list)
 }
