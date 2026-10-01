@@ -14,14 +14,14 @@ const instances = useInstanceStore()
 // Each section is a collapsible item. Opening one closes the others; the
 // section of the current page is opened when the route changes.
 const tools = computed(() => [
+  ...(auth.canDeploy
+    ? [{ label: 'Traceroute', icon: 'i-lucide-waypoints', to: '/traceroute' }]
+    : []),
   ...(auth.isAdmin
     ? [{ label: 'Console', icon: 'i-lucide-square-terminal', to: '/console', slot: 'console' }]
     : []),
   ...(auth.canDeploy
-    ? [
-        { label: 'Packet capture', icon: 'i-lucide-radio-tower', to: '/capture' },
-        { label: 'Traceroute', icon: 'i-lucide-waypoints', to: '/traceroute' },
-      ]
+    ? [{ label: 'Packet capture', icon: 'i-lucide-radio-tower', to: '/capture' }]
     : []),
 ])
 const sections = computed(() => [
