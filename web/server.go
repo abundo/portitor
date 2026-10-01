@@ -293,14 +293,17 @@ func tenantInterfaceCheck(i, old *models.Interface) error {
 const DefaultInstanceName = "main"
 
 // ensureDefaultInstance creates the default instance if there are no
-// instances, since everything else belongs to one.
+// instances, since everything else belongs to one. It logs the policy
+// drops of all three chains.
 func (s *Server) ensureDefaultInstance() error {
 	return s.db.Transaction(func(tx *gorm.DB) error {
 		var n int64
 		if err := tx.Model(&models.Instance{}).Count(&n).Error; err != nil || n > 0 {
 			return err
 		}
-		in := models.Instance{Name: DefaultInstanceName, IsDefault: true}
+		// Log what no rule matched, so a new install shows what it drops.
+		in := models.Instance{Name: DefaultInstanceName, IsDefault: true,
+			LogDrops: models.StringList{fwconfig.ChainInput, fwconfig.ChainForward, fwconfig.ChainOutput}}
 		if err := prepareInstance(tx, &in, nil); err != nil {
 			return err
 		}
