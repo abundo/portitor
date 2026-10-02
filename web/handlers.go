@@ -469,6 +469,7 @@ func (s *Server) handlePutSettings(c *echo.Context) error {
 		CaptureRateKbps  *int    `json:"capture_rate_kbps"`
 		// WebCertificateID: absent keeps, 0 clears.
 		WebCertificateID *uint `json:"web_certificate_id"`
+		VirtualFirewalls *bool `json:"virtual_firewalls"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return errJSON(c, http.StatusBadRequest, "invalid request")
@@ -507,6 +508,21 @@ func (s *Server) handlePutSettings(c *echo.Context) error {
 			return errJSON(c, http.StatusBadRequest, "capture rate must be 0-10000000 kbit/s")
 		}
 		st.CaptureRateKbps = *req.CaptureRateKbps
+	}
+	if req.VirtualFirewalls != nil {
+		if !*req.VirtualFirewalls && st.VirtualFirewalls {
+			var n, links int64
+			if err := s.db.Model(&models.Instance{}).Count(&n).Error; err != nil {
+				return err
+			}
+			if err := s.db.Model(&models.Link{}).Count(&links).Error; err != nil {
+				return err
+			}
+			if n > 1 || links > 0 {
+				return errJSON(c, http.StatusBadRequest, "virtual firewalls can't be turned off while there are more than one, or links")
+			}
+		}
+		st.VirtualFirewalls = *req.VirtualFirewalls
 	}
 	oldCert := st.WebCertificateID
 	if req.WebCertificateID != nil {

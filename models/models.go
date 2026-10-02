@@ -298,6 +298,9 @@ type Settings struct {
 	// serves HTTPS with, when it serves HTTPS itself (tls_cert); nil
 	// serves tls_cert.
 	WebCertificateID *uint `json:"web_certificate_id"`
+	// VirtualFirewalls shows the Virtual firewalls and Links pages and
+	// allows more than one instance; it can't be turned off while there are.
+	VirtualFirewalls bool `json:"virtual_firewalls"`
 	// Generation is the last deployed document generation.
 	Generation int64     `json:"generation"`
 	UpdatedAt  time.Time `json:"updated_at"`

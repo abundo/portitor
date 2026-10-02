@@ -47,6 +47,10 @@ func newEnv(t *testing.T) *testEnv {
 	if err := dbmigrate.Up(db); err != nil {
 		t.Fatal(err)
 	}
+	// Most tests use several instances.
+	if err := db.Save(&models.Settings{ID: 1, ConfirmTimeout: 120, CaptureRateKbps: 1000, VirtualFirewalls: true}).Error; err != nil {
+		t.Fatal(err)
+	}
 	cfg := &Config{JWTSecret: strings.Repeat("s", 32), Dev: true}
 	srv := NewServer(cfg, db)
 	srv.static = os.DirFS(t.TempDir())

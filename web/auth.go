@@ -309,10 +309,15 @@ func (s *Server) me(c *echo.Context, u *models.User) error {
 	if err != nil {
 		return err
 	}
+	st, err := s.settings()
+	if err != nil {
+		return err
+	}
 	return c.JSON(http.StatusOK, struct {
 		*models.User
-		Access map[uint]string `json:"access"`
-	}{u, a.levels})
+		Access           map[uint]string `json:"access"`
+		VirtualFirewalls bool            `json:"virtual_firewalls"`
+	}{u, a.levels, st.VirtualFirewalls})
 }
 
 // handleUpdateMe changes the caller's own full name and email. The username

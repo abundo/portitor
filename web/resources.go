@@ -4,6 +4,7 @@
 package web
 
 import (
+	"errors"
 	"fmt"
 	"net/netip"
 	"slices"
@@ -114,6 +115,19 @@ func prepareInstance(tx *gorm.DB, in, old *models.Instance) error {
 	in.Name = strings.TrimSpace(in.Name)
 	if !fwconfig.ValidInstanceName(in.Name) {
 		return bad("name: lowercase letters and digits, starting with a letter, at most 12 characters")
+	}
+	if old == nil {
+		var st models.Settings
+		var n int64
+		if err := tx.Select("virtual_firewalls").First(&st, 1).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		if err := tx.Model(&models.Instance{}).Count(&n).Error; err != nil {
+			return err
+		}
+		if n > 0 && !st.VirtualFirewalls {
+			return bad("virtual firewalls are turned off (Settings)")
+		}
 	}
 	in.LogDrops = cleanList(in.LogDrops)
 	for _, c := range in.LogDrops {

@@ -9,6 +9,7 @@ import { api, certificates } from '@/api'
 import { errMsg } from '@/api/http'
 import { useDeployStore } from '@/stores/deploy'
 import { useInstanceStore } from '@/stores/instances'
+import { useAuthStore } from '@/stores/auth'
 import { usePageForm } from '@/composables/useFormGuard'
 
 const { ask } = useConfirm()
@@ -16,6 +17,7 @@ const { ask } = useConfirm()
 const toast = useToast()
 const deploy = useDeployStore()
 const instStore = useInstanceStore()
+const auth = useAuthStore()
 const settings = reactive({
   agent_url: '',
   agent_token: '',
@@ -23,6 +25,7 @@ const settings = reactive({
   confirm_timeout: 120,
   capture_rate_kbps: 1000,
   web_certificate_id: 0,
+  virtual_firewalls: false,
 })
 // Only the settings count as unsaved changes, not the backup and restore
 // fields.
@@ -143,6 +146,8 @@ async function saveSettings() {
     hasToken.value = s.has_agent_token
     settings.agent_token = ''
     settings.web_certificate_id = s.web_certificate_id ?? 0
+    settings.virtual_firewalls = s.virtual_firewalls
+    if (auth.user) auth.user.virtual_firewalls = s.virtual_firewalls
     settingsForm.mark()
     toast.add({ title: 'Settings saved', color: 'success' })
     deploy.refresh()
@@ -163,6 +168,15 @@ async function saveSettings() {
         browse to.
       </p>
       <form class="space-y-3" @submit.prevent="saveSettings">
+        <UFormField
+          label="Virtual firewalls"
+          help="Several virtual firewalls, each its own namespace, connected by links. Shows the Virtual firewalls and Links pages. Can't be turned off while there is more than one virtual firewall."
+        >
+          <USwitch
+            v-model="settings.virtual_firewalls"
+            :disabled="settings.virtual_firewalls && instStore.list.length > 1"
+          />
+        </UFormField>
         <UFormField label="Certificate">
           <USelect
             v-model="settings.web_certificate_id"
@@ -179,7 +193,7 @@ async function saveSettings() {
           title="portitor-web does not serve HTTPS itself"
           description="Set tls_cert and tls_key in web.yaml (the ISO's setup does) and restart it to choose a certificate here; behind a reverse proxy, give the proxy the certificate instead."
         />
-        <UButton type="submit" :disabled="!webTLS">Save</UButton>
+        <UButton type="submit">Save</UButton>
       </form>
     </div>
 
