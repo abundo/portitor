@@ -8,7 +8,8 @@ once. A text UI (Textual, python3-textual) asks for the keyboard layout
 (applied at once, so the password is typed with it), the LAN and WAN
 interfaces, the LAN address (static or DHCP), a DHCP server on a static
 LAN (its range), the WAN address (DHCP, or static with the default
-gateway), the DNS servers, a password and the time zone; before applying, LAN and WAN can be swapped. Then it:
+gateway), the DNS servers (by default those the DHCP server on the DHCP WAN,
+or LAN, offers), a password and the time zone; before applying, LAN and WAN can be swapped. Then it:
 
   - writes /etc/resolv.conf (the agent does not manage the firewall's own
     resolver; the one from the installation may be unreachable now),
@@ -216,6 +217,46 @@ def links_up() -> None:
     for n in nics():
         run(["ip", "link", "set", n["name"], "up"], check=False, quiet=True)
     time.sleep(2)
+
+
+def offered_dns(nic: str, timeout: float = 4) -> list[str]:
+    """The IPv4 DNS servers a DHCP server on nic offers; empty if none answers.
+
+    Sends a DHCPDISCOVER only, so no lease is taken (nothing configures the
+    interfaces before the agent runs)."""
+    mac = bytes.fromhex(read(Path("/sys/class/net") / nic / "address").replace(":", ""))
+    if len(mac) != 6:
+        return []
+    run(["ip", "link", "set", nic, "up"], check=False, quiet=True)
+    xid = secrets.token_bytes(4)
+    # BOOTREQUEST, Ethernet, broadcast flag (no address to unicast the offer to).
+    msg = (bytes([1, 1, 6, 0]) + xid + b"\0\0\x80\0" + bytes(16) + mac + bytes(10 + 192)
+           + bytes.fromhex("63825363") + bytes([53, 1, 1, 55, 3, 1, 3, 6, 255]))
+    deadline = time.monotonic() + timeout
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_BINDTODEVICE, nic.encode())
+            s.bind(("", 68))
+            s.sendto(msg, ("255.255.255.255", 67))
+            while (left := deadline - time.monotonic()) > 0:
+                s.settimeout(left)
+                pkt = s.recv(1500)
+                if len(pkt) < 240 or pkt[0] != 2 or pkt[4:8] != xid or pkt[236:240] != msg[236:240]:
+                    continue
+                opts, i = {}, 240
+                while i + 1 < len(pkt) and pkt[i] != 255:
+                    if pkt[i] == 0:
+                        i += 1
+                        continue
+                    opts[pkt[i]] = pkt[i + 2:i + 2 + pkt[i + 1]]
+                    i += 2 + pkt[i + 1]
+                dns = opts.get(6, b"")
+                return [str(ipaddress.IPv4Address(dns[j:j + 4])) for j in range(0, len(dns) - 3, 4)][:3]
+    except OSError:
+        pass
+    return []
 
 
 def check_address(text: str, other: ipaddress.IPv4Interface | None = None) -> ipaddress.IPv4Interface:
@@ -1128,7 +1169,8 @@ class NetworkPage(Page):
         yield row("DNS servers", Input(st.get("dns") or PUBLIC_DNS, id="dns"))
         yield Static("DNS servers " + ("this host uses" if kind == "host" else "the firewall itself uses")
                      + ": during the rest of the installation (packages, Portitor) and afterwards for "
-                     + ("updates." if kind == "host" else "updates and IP lists."), classes="hint")
+                     + ("updates." if kind == "host" else "updates and IP lists.")
+                     + " Filled in from the DHCP server on the DHCP interface, when one answers.", classes="hint")
         if role == "agent":
             yield row("portitor-web from", Input(st.get("web_from", ""), id="web_from", placeholder="the LAN network"))
             yield Static(f"portitor-web calls the agent on port {AGENT_PORT} from this address or network; "
@@ -1136,8 +1178,37 @@ class NetworkPage(Page):
                          "has no routes: portitor-web must be on the LAN for that.", classes="hint")
 
     def on_mount(self) -> None:
+        # The last answers keep their DNS servers.
+        self.dns_auto, self.dns_asked = "", "-" if self.state.get("dns") else ""
         self.reload()
         self.modes()
+
+    def dhcp_nic(self) -> str:
+        """The interface whose DHCP server suggests the DNS servers: the DHCP WAN, else the DHCP LAN."""
+        if self.kind() == "agent":
+            return ""
+        for wid, mode in (("#wan", "#wan_mode"), ("#lan", "#lan_mode")):
+            for select in self.query(wid).results(Select):
+                if not select.is_blank() and not self.static(mode):
+                    return str(select.value)
+        return ""
+
+    def suggest_dns(self) -> None:
+        nic = self.dhcp_nic()
+        if nic and nic != self.dns_asked and self.dns_asked != "-":
+            self.dns_asked = nic
+            self.ask_dns(nic)
+
+    @work(thread=True, exclusive=True, group="dns")
+    def ask_dns(self, nic: str) -> None:
+        if dns := offered_dns(nic):
+            self.app.call_from_thread(self.fill_dns, " ".join(dns))
+
+    def fill_dns(self, dns: str) -> None:
+        """The DHCP server's DNS servers, unless the field was changed."""
+        field = self.query_one("#dns", Input)
+        if field.value.strip() in (PUBLIC_DNS, self.dns_auto):
+            field.value = self.dns_auto = dns
 
     @on(Button.Pressed, "#reload")
     def reload(self) -> None:
@@ -1159,6 +1230,7 @@ class NetworkPage(Page):
             rng.disabled = dhcp.disabled or dhcp.value == "off"
             if not rng.disabled and not rng.value.strip():
                 self.fill_range()
+        self.suggest_dns()
 
     @on(Input.Changed, "#address")
     def fill_range(self) -> None:
