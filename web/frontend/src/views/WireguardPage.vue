@@ -178,6 +178,54 @@ const fields = computed(() => [
   { key: 'enabled', label: 'Enabled', type: 'switch' },
 ])
 
+// ----- import a wg-quick config file -----
+// The interface is named after the file (wg0.conf → wg0).
+const importInput = ref(null)
+async function importFile(ev) {
+  const file = ev.target.files?.[0]
+  ev.target.value = ''
+  if (!file) return
+  const name = file.name.replace(/\.conf$/i, '')
+  try {
+    const config = await file.text()
+    const existing = (await interfaces.list({ instance_id: store.currentId })).find(
+      (i) => i.name === name,
+    )
+    if (existing && existing.kind !== 'wireguard') {
+      toast.add({ title: `${name} exists and is not a WireGuard interface`, color: 'error' })
+      return
+    }
+    const ok = await ask(
+      existing
+        ? {
+            title: 'Overwrite interface',
+            message: `WireGuard interface ${withLabel(existing.label, name)} exists. Overwrite its key, listen port, addresses and peers with ${file.name}?`,
+          }
+        : {
+            title: 'Create interface',
+            message: `WireGuard interface ${name} does not exist. Create it from ${file.name}?`,
+          },
+    )
+    if (!ok) return
+    const r = await api.wgImport({
+      instance_id: store.currentId,
+      name,
+      config,
+      overwrite: !!existing,
+    })
+    await load()
+    selectedId.value = r.interface.id
+    await loadFree()
+    toast.add({
+      title: `Imported ${name} with ${r.peers} peer${r.peers === 1 ? '' : 's'}`,
+      description: r.warnings.join('; ') || undefined,
+      color: r.warnings.length ? 'warning' : 'success',
+    })
+  } catch (err) {
+    toast.add({ title: errMsg(err), color: 'error' })
+  }
+}
+
 // ----- client config -----
 const cfgOpen = ref(false)
 const cfg = ref({ config: '', warnings: [] })
@@ -207,6 +255,7 @@ function copy(text) {
 
 <template>
   <NeedInstance>
+    <input ref="importInput" type="file" accept=".conf,text/plain" hidden @change="importFile" />
     <form v-if="auth.isAdmin" class="card mb-4 space-y-3" @submit.prevent="saveEndpoint">
       <UFormField
         label="Public endpoint host"
@@ -222,12 +271,20 @@ function copy(text) {
         </div>
       </UFormField>
     </form>
-    <div v-if="!tunnels.length" class="card">
+    <div v-if="!tunnels.length" class="card space-y-3">
       <UAlert
         icon="i-lucide-key-round"
         title="No WireGuard interface in this virtual firewall"
         description="Add an interface of kind WireGuard (e.g. wg0, listen port 51820), give it an address (e.g. 10.99.0.1/24), and allow its traffic with firewall rules."
         :actions="[{ label: 'Interfaces', to: '/interfaces' }]"
+      />
+      <UButton
+        v-if="auth.canEdit"
+        color="neutral"
+        variant="outline"
+        icon="i-lucide-file-up"
+        label="Import config"
+        @click="importInput.click()"
       />
     </div>
     <div v-else class="space-y-4">
@@ -267,6 +324,14 @@ function copy(text) {
         <UButton
           v-if="auth.canEdit"
           class="ml-auto"
+          color="neutral"
+          variant="outline"
+          icon="i-lucide-file-up"
+          label="Import config"
+          @click="importInput.click()"
+        />
+        <UButton
+          v-if="auth.canEdit"
           color="neutral"
           variant="outline"
           icon="i-lucide-refresh-cw"
@@ -342,10 +407,10 @@ function copy(text) {
             }}</pre>
           </div>
           <p v-if="cfg.site" class="text-xs text-muted">
-            A wg-quick config for the router at the other site: it routes this virtual firewall's networks
-            through the tunnel. On another Portitor, enter the same values instead: a WireGuard
-            interface with the address above, and this firewall as a peer with the public key and
-            endpoint above and this instance's networks (AllowedIPs) as its networks.
+            A wg-quick config for the router at the other site: it routes this virtual firewall's
+            networks through the tunnel. On another Portitor, enter the same values instead: a
+            WireGuard interface with the address above, and this firewall as a peer with the public
+            key and endpoint above and this instance's networks (AllowedIPs) as its networks.
           </p>
           <p v-else class="text-xs text-muted">
             The config contains the client's private key. Scan it with the WireGuard app, or copy it

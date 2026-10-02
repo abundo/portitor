@@ -76,6 +76,7 @@ export const api = {
       .get(`/wg/peers/${peerId}/config`, { params: split ? { split: 1 } : {} })
       .then((r) => r.data),
   wgRekey: (ifaceId) => http.post(`/interfaces/${ifaceId}/wg-rekey`, {}).then((r) => r.data),
+  wgImport: (body) => http.post('/wg/import', body).then((r) => r.data),
   wgNextFree: (ifaceId) => http.get(`/interfaces/${ifaceId}/wg-next-free`).then((r) => r.data),
   // Start a deployed task, or the download of a deployed IP list, now.
   runTask: (id) => http.post(`/tasks/${id}/run`, {}).then((r) => r.data),

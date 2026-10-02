@@ -149,7 +149,7 @@ func (s *Server) Echo() *echo.Echo {
 
 	// Instance admins use these too; the handlers check the instance.
 	for _, r := range []string{"PUT /api/dns/zones/:id/records", "POST /api/rules/reorder", "POST /api/nat/reorder",
-		"POST /api/interfaces/:id/wg-rekey", "POST /api/agent/capture", "POST /api/agent/trace", "POST /api/agent/connections",
+		"POST /api/interfaces/:id/wg-rekey", "POST /api/wg/import", "POST /api/agent/capture", "POST /api/agent/trace", "POST /api/agent/connections",
 		"POST /api/deploy/apply", "POST /api/deploy/confirm", "POST /api/deploy/rollback"} {
 		s.tenantWrites[r] = true
 	}
@@ -169,6 +169,7 @@ func (s *Server) Echo() *echo.Echo {
 	g.POST("/nat/reorder", s.handleReorder("nat_rules"))
 	g.GET("/wg/peers/:id/config", s.handleWgClientConfig)
 	g.POST("/interfaces/:id/wg-rekey", s.handleWgRekey)
+	g.POST("/wg/import", s.handleWgImport)
 	g.GET("/interfaces/:id/wg-next-free", s.handleWgNextFree)
 	g.POST("/ip-lists/:id/refresh", s.handleIPListRefresh)
 	g.POST("/tasks/:id/run", s.handleTaskRun)
