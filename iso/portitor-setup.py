@@ -62,7 +62,7 @@ for lan (a name or MAC address), address (dhcp for DHCP), wan (a name or MAC
 address, optional), wan_address
 (empty: DHCP), gateway (on the static WAN, else on the LAN), dhcp_range
 (a DHCP server on the static LAN, e.g. 192.168.1.100-192.168.1.199,
-optional), dns (space separated), password, timezone and keyboard (an XKB layout, e.g. se). The file is removed when the setup has
+optional), dns (space separated), password, hostname (default portitor, may include the domain), timezone and keyboard (an XKB layout, e.g. se). The file is removed when the setup has
 finished. role (both, agent or web) picks the split setups; agent reads
 web_from (portitor-web's address or network, default the LAN network), web
 reads lan and address (its own interface), gateway and join (optional).
@@ -110,6 +110,7 @@ WEB_KEY = ETC / "web.key"
 WEB_DROPIN = Path("/etc/systemd/system/portitor-web.service.d/firstboot.conf")
 ISSUE = Path("/etc/issue.d/portitor.issue")
 RESOLV_CONF = Path("/etc/resolv.conf")
+HOSTS = Path("/etc/hosts")
 KEYBOARD = Path("/etc/default/keyboard")
 XKB_RULES = Path("/usr/share/X11/xkb/rules/base.lst")
 # The layouts when base.lst is missing.
@@ -345,6 +346,22 @@ def check_timezone(text: str) -> str:
     raise ValueError(f"unknown time zone {text}")
 
 
+def check_hostname(text: str) -> str:
+    """A host name (RFC 1123), optionally with its domain: labels of letters,
+    digits and hyphens, 1-63 characters, not starting or ending with a hyphen;
+    64 characters in all at most (the kernel's limit). Stored in lower case."""
+    name = text.strip().rstrip(".").lower()
+    label = r"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?"
+    if len(name) <= 64 and re.fullmatch(rf"{label}(\.{label})*", name) and not name.isdigit():
+        return name
+    raise ValueError("letters, digits and hyphens, with dots between the parts of a domain "
+                     "(portitor or fw1.example.com); a part can't start or end with a hyphen")
+
+
+def current_hostname() -> str:
+    return socket.getfqdn() if "." in socket.getfqdn() else socket.gethostname()
+
+
 def current_timezone() -> str:
     return run(["timedatectl", "show", "-p", "Timezone", "--value"], check=False, quiet=True).stdout.strip() or "Etc/UTC"
 
@@ -453,14 +470,28 @@ def step_timezone(a: dict) -> None:
     run(["timedatectl", "set-timezone", a["tz"]])
 
 
+def step_hostname(a: dict) -> None:
+    """The short name in /etc/hostname; /etc/hosts maps 127.0.1.1 to the full
+    and the short name, as the Debian installer does."""
+    fqdn = a["hostname"]
+    short = fqdn.split(".", 1)[0]
+    run(["hostnamectl", "set-hostname", short])
+    names = f"{fqdn} {short}" if fqdn != short else short
+    lines = [ln for ln in read(HOSTS).splitlines() if not ln.startswith("127.0.1.1")]
+    i = next((n + 1 for n, ln in enumerate(lines) if ln.startswith("127.0.0.1")), 0)
+    lines.insert(i, f"127.0.1.1\t{names}")
+    write(HOSTS, "\n".join(lines) + "\n", 0o644)
+
+
 def step_database(a: dict) -> None:
     run(["install", "-d", "-o", WEB_USER, "-g", WEB_GROUP, "-m", "0700", str(WEB_DB_DIR)])
 
 
 def step_cert(a: dict) -> None:
-    host = socket.gethostname()
+    host = a.get("hostname") or socket.gethostname()
+    dns = ",".join(f"DNS:{n}" for n in dict.fromkeys([host, host.split(".", 1)[0]]))
     # A DHCP LAN has no fixed address to name.
-    san = f"IP:{a['address'].ip},DNS:{host}" if a["address"] else f"DNS:{host}"
+    san = f"IP:{a['address'].ip},{dns}" if a["address"] else dns
     run([
         "openssl", "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1",
         "-nodes", "-days", "3650", "-subj", f"/CN={host}",
@@ -720,6 +751,7 @@ STEPS = [
     ("Interfaces", step_links),
     ("DNS servers", step_dns),
     ("Time zone", step_timezone),
+    ("Host name", step_hostname),
     ("Database", step_database),
     ("portitor-web configuration", step_web_config),
     ("Users", step_users),
@@ -734,6 +766,7 @@ AGENT_STEPS = [
     ("Interfaces", step_links),
     ("DNS servers", step_dns),
     ("Time zone", step_timezone),
+    ("Host name", step_hostname),
     ("Users", step_users),
     ("portitor-agent", step_agent),
     ("LAN address until the first deploy", step_lan_unit),
@@ -744,6 +777,7 @@ WEB_STEPS = [
     ("Network", step_host_network),
     ("DNS servers", step_dns),
     ("Time zone", step_timezone),
+    ("Host name", step_hostname),
     ("Database", step_database),
     ("portitor-web configuration", step_web_config),
     ("Users", step_users),
@@ -757,6 +791,7 @@ RECONFIGURE_STEPS = [
     ("Keyboard layout", step_keyboard),
     ("DNS servers", step_dns),
     ("Time zone", step_timezone),
+    ("Host name", step_hostname),
     ("GUI certificate", step_new_cert),
     ("Users", step_users),
     ("Deploy the LAN and WAN configuration", step_bootstrap),
@@ -769,6 +804,7 @@ AGENT_RECONFIGURE_STEPS = [
     ("Keyboard layout", step_keyboard),
     ("DNS servers", step_dns),
     ("Time zone", step_timezone),
+    ("Host name", step_hostname),
     ("Users", step_users),
     ("portitor-agent", step_agent),
 ]
@@ -778,6 +814,7 @@ WEB_RECONFIGURE_STEPS = [
     ("Network", step_host_network),
     ("DNS servers", step_dns),
     ("Time zone", step_timezone),
+    ("Host name", step_hostname),
     ("GUI certificate", step_new_cert),
     ("Users", step_users),
     ("Restart portitor-web", step_web),
@@ -820,6 +857,7 @@ def read_answers() -> dict:
         "dns": parse_dns(raw.get("dns") or PUBLIC_DNS),
         "password": raw["password"],
         "tz": raw.get("timezone") or "Etc/UTC",
+        "hostname": check_hostname(raw.get("hostname") or "portitor"),
         "keyboard": keyboard,
         "web_from": "",
         "join": raw.get("join", ""),
@@ -851,7 +889,7 @@ def load_state() -> dict:
 
 def state_of(a: dict) -> dict:
     """The answers as strings, without the password; a DHCP LAN is "dhcp"."""
-    state = {k: str(a[k]) if a.get(k) else "" for k in ("role", "lan", "wan", "wan_address", "gateway", "tz", "keyboard", "web_from")}
+    state = {k: str(a[k]) if a.get(k) else "" for k in ("role", "lan", "wan", "wan_address", "gateway", "tz", "hostname", "keyboard", "web_from")}
     state["address"] = str(a["address"] or "dhcp")
     state["dns"] = " ".join(a["dns"])
     state["dhcp_range"] = fmt_range(a.get("dhcp_range"))
@@ -919,6 +957,7 @@ def summary(a: dict) -> list[str]:
         if a["role"] == "agent":
             out.append(f"portitor-web    {a['web_from']}")
     out += [f"DNS servers     {' '.join(a['dns'])}",
+            f"Host name       {a['hostname']}",
             f"Time zone       {a['tz']}",
             f"Keyboard        {a['keyboard']}"]
     if a.get("reconfigure"):
@@ -1297,7 +1336,7 @@ class NetworkPage(Page):
 
 
 class AccountPage(Page):
-    heading = "Password and time zone"
+    heading = "Password, host name and time zone"
 
     def body(self) -> ComposeResult:
         who = (f"the console login {CONSOLE_USER}" if self.a["role"] == "agent"
@@ -1308,6 +1347,8 @@ class AccountPage(Page):
             yield Static(f"One password for {who}, {MIN_PASSWORD} characters or more.", classes="text")
         yield row("Password", Input(password=True, id="password"))
         yield row("Again", Input(password=True, id="again"))
+        yield row("Host name", Input(self.state.get("hostname") or current_hostname(), id="hostname"))
+        yield Static("A name (portitor), or with its domain (fw1.example.com).", classes="hint")
         tz = self.state.get("tz") or current_timezone()
         self.zones = timezones()
         if tz not in self.zones:
@@ -1342,10 +1383,13 @@ class AccountPage(Page):
             if self.query_one("#again", Input).value != pw:
                 raise ValueError("Password: the passwords differ")
         a["password"] = pw
+        a["hostname"] = self.field("Host name", check_hostname, self.value("#hostname"))
         a["tz"] = check_timezone(str(self.query_one("#tz", Select).value))
         if self.app.reconfigure:
             a["reconfigure"] = True
-            a["new_cert"] = str(a["address"] or "dhcp") != self.state.get("address")
+            # The certificate names the LAN address and the host name.
+            a["new_cert"] = (str(a["address"] or "dhcp") != self.state.get("address")
+                             or a["hostname"] != (self.state.get("hostname") or current_hostname()))
 
 
 class SummaryPage(Page):
