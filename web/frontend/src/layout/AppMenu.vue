@@ -61,10 +61,10 @@ const sections = computed(() => [
     label: 'Services',
     value: 'services',
     children: [
-      { label: 'DNS', icon: 'i-lucide-globe', to: '/dns' },
-      { label: 'DHCP', icon: 'i-lucide-list-ordered', to: '/dhcp' },
-      { label: 'DNS update', icon: 'i-lucide-refresh-ccw-dot', to: '/dns-update' },
       { label: 'Certificates', icon: 'i-lucide-badge-check', to: '/certificates' },
+      { label: 'DHCP', icon: 'i-lucide-list-ordered', to: '/dhcp' },
+      { label: 'DNS', icon: 'i-lucide-globe', to: '/dns' },
+      { label: 'DNS update', icon: 'i-lucide-refresh-ccw-dot', to: '/dns-update' },
       { label: 'Scheduled tasks', icon: 'i-lucide-calendar-clock', to: '/tasks' },
     ],
   },
@@ -80,8 +80,8 @@ const sections = computed(() => [
           label: 'Admin',
           value: 'admin',
           children: [
-            { label: 'Updates', icon: 'i-lucide-package-check', to: '/updates' },
             { label: 'Settings', icon: 'i-lucide-settings', to: '/settings', exact: true },
+            { label: 'Updates', icon: 'i-lucide-package-check', to: '/updates' },
             { label: 'Users', icon: 'i-lucide-users', to: '/settings/users' },
             { label: 'Roles', icon: 'i-lucide-shield-user', to: '/settings/roles' },
           ],
