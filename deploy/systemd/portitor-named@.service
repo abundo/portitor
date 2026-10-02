@@ -18,8 +18,6 @@ ExecStart=/usr/bin/portitor-agent netns-exec %i -- /usr/sbin/named -f -u bind -c
 ExecReload=+/bin/kill -HUP $MAINPID
 Restart=on-failure
 RestartSec=5
-RuntimeDirectory=portitor
-RuntimeDirectoryPreserve=yes
 # Multitenancy: an instance's daemon sees only its own files and processes.
 # The other instances' config and state are hidden, the rest of the system
 # is read-only, and it gets its own /tmp, IPC and PID namespaces.
@@ -39,5 +37,12 @@ ProtectClock=yes
 ProtectProc=invisible
 TemporaryFileSystem=/etc/portitor /var/lib/portitor
 BindReadOnlyPaths=/etc/portitor/instances/%i
-BindPaths=/var/lib/portitor/instances/%i
-ReadWritePaths=/run/portitor
+BindReadOnlyPaths=/var/lib/portitor/instances/%i
+# Each instance has its own BIND directories, which portitor-agent creates
+# (owned by the BIND user): /var/cache/bind/%i (the working directory:
+# DNSSEC keys, managed keys) and /run/named/%i (PID file, session key) are
+# mounted over /var/cache/bind and /run/named. Zone files keep their host
+# path, /var/lib/bind/%i, as dnsmgr2 writes it into named.conf.dnsmgr2 on
+# the host; a tmpfs hides the other instances' zones.
+TemporaryFileSystem=/var/lib/bind
+BindPaths=/var/cache/bind/%i:/var/cache/bind /run/named/%i:/run/named /var/lib/bind/%i

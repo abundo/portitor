@@ -390,6 +390,9 @@ func TestNamedConf(t *testing.T) {
 		"allow-recursion { localhost; 192.168.1.0/24; fd00:1::/64; 192.168.20.0/24; 10.99.0.0/24; };",
 		"forwarders { 9.9.9.9; };",
 		`include "/etc/portitor/instances/main/named.conf.dnsmgr2";`,
+		`directory "/var/cache/bind";`,
+		`pid-file "/run/named/named.pid";`,
+		`session-keyfile "/run/named/session.key";`,
 		"dnssec-policy \"signed\" {\n\tkeys {\n\t\tksk lifetime unlimited algorithm ecdsap256sha256;\n\t\tzsk lifetime P90D algorithm ecdsap256sha256;\n\t};\n\tsignatures-validity 14d;\n};",
 	} {
 		if !strings.Contains(named, want) {

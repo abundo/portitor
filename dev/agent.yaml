@@ -15,3 +15,6 @@ paths:
   run_dir: dev/run/run
   kea_data_dir: dev/run/kea
   kea_socket_dir: dev/run/kea
+  bind_cache_dir: dev/run/bind/cache
+  bind_zones_dir: dev/run/bind/zones
+  bind_run_dir: dev/run/bind/run

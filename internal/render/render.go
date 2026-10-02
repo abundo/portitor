@@ -28,6 +28,9 @@ type Paths struct {
 	RunDir       string `yaml:"run_dir" json:"run_dir"`
 	KeaDataDir   string `yaml:"kea_data_dir" json:"kea_data_dir"`
 	KeaSocketDir string `yaml:"kea_socket_dir" json:"kea_socket_dir"`
+	BindCacheDir string `yaml:"bind_cache_dir" json:"bind_cache_dir"`
+	BindZonesDir string `yaml:"bind_zones_dir" json:"bind_zones_dir"`
+	BindRunDir   string `yaml:"bind_run_dir" json:"bind_run_dir"`
 }
 
 func DefaultPaths() Paths {
@@ -37,6 +40,9 @@ func DefaultPaths() Paths {
 		RunDir:       "/run/portitor",
 		KeaDataDir:   "/var/lib/kea",
 		KeaSocketDir: "/run/kea",
+		BindCacheDir: "/var/cache/bind",
+		BindZonesDir: "/var/lib/bind",
+		BindRunDir:   "/run/named",
 	}
 }
 
@@ -46,6 +52,14 @@ func (p Paths) InstanceEtc(name string) string {
 
 func (p Paths) InstanceState(name string) string {
 	return filepath.Join(p.StateDir, "instances", name)
+}
+
+// BindZones is the directory of an instance's zone files, the same path
+// on the host and for named: dnsmgr2 runs on the host and writes the
+// zone files' paths into named.conf.dnsmgr2. The instance's named unit
+// sees only its own (a tmpfs over BindZonesDir).
+func (p Paths) BindZones(name string) string {
+	return filepath.Join(p.BindZonesDir, name)
 }
 
 // IPListFile holds the nft commands that fill an IP list's sets (see

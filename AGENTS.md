@@ -251,8 +251,12 @@ Committing directly to `main` is fine; no feature branch is needed.
   hence `paths.kea_data_dir` / `kea_socket_dir`. Each instance's Kea units mount
   `<kea_data_dir>/<instance>` and `<kea_socket_dir>/<instance>` over them, so the
   rendered config names Kea's view (`render.KeaLeaseFile`) and the agent reads
-  the host's (`render.KeaInstanceDir`). `install.py` moves older lease files in
-  (`move_kea_leases`). Kea's and radvd's PID files are in the unit's private
+  the host's (`render.InstanceDir`). named does the same with
+  `paths.bind_cache_dir` (its working directory) and `bind_run_dir`; its zone
+  files are in `<bind_zones_dir>/<instance>` (`Paths.BindZones`) at the same
+  path on the host and for named, because dnsmgr2 writes their paths into
+  `named.conf.dnsmgr2` on the host (a tmpfs hides the other instances').
+  `install.py` moves older files in (`move_kea_leases`, `move_bind_dirs`). Kea's and radvd's PID files are in the unit's private
   /tmp: under `PrivatePIDs` the daemon is always PID 1, so a stale one would read
   as already running.
 - dnsmgr2 does DNS only. Kea (`render/kea.go`: `kea-dhcp4.conf`, `kea-dhcp6.conf`,

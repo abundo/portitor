@@ -446,6 +446,7 @@ def install_agent(host: Host, binary: Path, deploy: Path, version: str, assume_y
     host.put(Path(__file__).resolve(), INSTALLER_DEST, "0755", name=INSTALLER_FILENAME)
     actions = {u: install_unit(host, deploy / "systemd" / u, assume_yes) for u in AGENT_UNITS}
     move_kea_leases(host)
+    move_bind_dirs(host)
     host.systemctl("daemon-reload")
     install_apparmor(host, deploy)
     if new_config:
@@ -490,6 +491,33 @@ def move_kea_leases(host: Host) -> None:
         "fi\n"
         "true",
         desc="move Kea lease files to /var/lib/kea/<instance>",
+    )
+
+
+def move_bind_dirs(host: Host) -> None:
+    """Move BIND's files from before the per-instance BIND directories.
+
+    named's working directory (DNSSEC keys, managed keys) moves from
+    /var/lib/portitor/instances/<instance>/bind to /var/cache/bind/<instance>,
+    and the zone files (with their signed versions and journals) from .../zones
+    to /var/lib/bind/<instance>. The next apply writes named.conf with the new
+    paths and dnsmgr2 rewrites its include.
+    """
+    host.run(
+        "cd /var/lib/portitor/instances 2>/dev/null || exit 0\n"
+        "for d in */; do\n"
+        '  n=${d%/}\n'
+        '  for m in "bind /var/cache/bind" "zones /var/lib/bind"; do\n'
+        '    set -- $m\n'
+        '    [ -d "$n/$1" ] || continue\n'
+        '    install -d -m 0750 "$2/$n"\n'
+        '    chown --reference="$n/$1" "$2/$n"\n'
+        '    find "$n/$1" -mindepth 1 -maxdepth 1 -exec mv -n -t "$2/$n" {} +\n'
+        '    rmdir "$n/$1" 2>/dev/null\n'
+        "  done\n"
+        "done\n"
+        "true",
+        desc="move BIND files to /var/cache/bind/<instance> and /var/lib/bind/<instance>",
     )
 
 

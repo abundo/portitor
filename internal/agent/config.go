@@ -101,6 +101,15 @@ func (c *Config) applyDefaults() {
 	if c.Paths.KeaSocketDir == "" {
 		c.Paths.KeaSocketDir = def.KeaSocketDir
 	}
+	if c.Paths.BindCacheDir == "" {
+		c.Paths.BindCacheDir = def.BindCacheDir
+	}
+	if c.Paths.BindZonesDir == "" {
+		c.Paths.BindZonesDir = def.BindZonesDir
+	}
+	if c.Paths.BindRunDir == "" {
+		c.Paths.BindRunDir = def.BindRunDir
+	}
 	du := render.DefaultUnits()
 	if c.Units.NamedFmt == "" {
 		c.Units.NamedFmt = du.NamedFmt

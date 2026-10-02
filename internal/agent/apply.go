@@ -506,13 +506,22 @@ func (a *Agent) applyServices(ctx context.Context, in *fwconfig.Instance, b *ren
 	cfg, ok := b.Dnsmgr[in.Name]
 	if ok {
 		if !a.cfg.DryRun {
-			for _, d := range []string{filepath.Join(state, "bind"), filepath.Join(state, "zones"), filepath.Join(state, "tmp")} {
+			// named's own directories (the unit mounts them over the
+			// standard ones), and dnsmgr2's scratch directory.
+			p := a.cfg.Paths
+			bindDirs := []string{
+				render.InstanceDir(p.BindCacheDir, in.Name),
+				p.BindZones(in.Name),
+				render.InstanceDir(p.BindRunDir, in.Name),
+			}
+			for _, d := range append(bindDirs, filepath.Join(state, "tmp")) {
 				if err := os.MkdirAll(d, 0o750); err != nil {
 					return err
 				}
 			}
-			a.chownBind(filepath.Join(state, "bind"))
-			a.chownBind(filepath.Join(state, "zones"))
+			for _, d := range bindDirs {
+				a.chownBind(d)
+			}
 			// named's include file dnsmgr2 writes on its first sync;
 			// make sure it exists before named starts.
 			ensureFile(filepath.Join(etc, "named.conf.dnsmgr2"), "")

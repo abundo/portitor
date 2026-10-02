@@ -276,7 +276,7 @@ func (a *Agent) ServerLeases() map[string][]ServerLease {
 		latest := map[string]ServerLease{}
 		var order []string
 		var paths []string
-		dir := render.KeaInstanceDir(a.cfg.Paths.KeaDataDir, name)
+		dir := render.InstanceDir(a.cfg.Paths.KeaDataDir, name)
 		for _, f := range []string{render.KeaLeaseFile(name, a.cfg.Paths), render.KeaLease6File(name, a.cfg.Paths)} {
 			base := filepath.Join(dir, filepath.Base(f))
 			paths = append(paths, base+".2", base+".1", base)
