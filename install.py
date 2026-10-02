@@ -88,6 +88,8 @@ ARCHIVE_OS = "linux"
 BIN_DIR = "/usr/bin"
 WEB_BIN = f"{BIN_DIR}/portitor-web"
 AGENT_BIN = f"{BIN_DIR}/portitor-agent"
+# The portitor command (show lldp neighbours, ...) is the agent run by this name.
+CLI_LINK = f"{BIN_DIR}/portitor"
 ETC_DIR = "/etc/portitor"
 WEB_CONFIG = f"{ETC_DIR}/web.yaml"
 AGENT_CONFIG = f"{ETC_DIR}/agent.yaml"
@@ -435,6 +437,7 @@ def install_agent(host: Host, binary: Path, deploy: Path, version: str, assume_y
     if new_config:
         host.put(deploy / "agent.yaml", AGENT_CONFIG, "0600")
     host.put(binary, AGENT_BIN, "0755")
+    host.run(f"ln -sfn portitor-agent {shlex.quote(CLI_LINK)}", desc=f"ln -s portitor-agent {CLI_LINK}")
     host.put(Path(__file__).resolve(), INSTALLER_DEST, "0755", name=INSTALLER_FILENAME)
     actions = {u: install_unit(host, deploy / "systemd" / u, assume_yes) for u in AGENT_UNITS}
     host.systemctl("daemon-reload")

@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -86,6 +87,21 @@ func New(baseURL, token, fingerprint string) (*Client, error) {
 			Transport: &http.Transport{TLSClientConfig: tlsCfg, ResponseHeaderTimeout: 5 * time.Minute},
 		},
 	}, nil
+}
+
+// NewLocal talks to the agent's local socket (agent.SocketName), on the
+// firewall itself: read-only, no token.
+func NewLocal(socket string) *Client {
+	return &Client{
+		baseURL: "http://agent",
+		http: &http.Client{
+			Timeout: time.Minute,
+			Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+				var d net.Dialer
+				return d.DialContext(ctx, "unix", socket)
+			}},
+		},
+	}
 }
 
 func (c *Client) do(ctx context.Context, method, path string, body, out any) error {

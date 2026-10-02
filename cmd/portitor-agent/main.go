@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 
@@ -24,6 +25,13 @@ import (
 )
 
 func main() {
+	if filepath.Base(os.Args[0]) == "portitor" {
+		if err := cliCommand().Execute(); err != nil {
+			fmt.Fprintln(os.Stderr, "Error:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	var configFile string
 	root := &cobra.Command{
 		Use:           "portitor-agent",

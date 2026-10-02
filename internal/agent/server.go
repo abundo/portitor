@@ -31,6 +31,10 @@ const maxConfirmTimeout = 30 * time.Minute
 
 // Handler returns the management API.
 func (a *Agent) Handler() http.Handler {
+	return a.authMiddleware(a.routes())
+}
+
+func (a *Agent) routes() *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/status", func(w http.ResponseWriter, r *http.Request) {
 		writeJSONResponse(w, http.StatusOK, a.Status(r.Context()))
@@ -150,7 +154,7 @@ func (a *Agent) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/console", a.handleConsole)
 	mux.HandleFunc("POST /v1/capture", a.handleCapture)
 	mux.HandleFunc("POST /v1/trace", a.handleTrace)
-	return a.authMiddleware(mux)
+	return mux
 }
 
 func (a *Agent) authMiddleware(next http.Handler) http.Handler {
@@ -204,7 +208,16 @@ func (a *Agent) Serve(ctx context.Context) error {
 		IdleTimeout:  2 * time.Minute,
 		TLSConfig:    &tls.Config{MinVersion: tls.VersionTLS13},
 	}
-	errc := make(chan error, 1)
+	errc := make(chan error, 2)
+	if a.cfg.DryRun {
+		// A dev agent runs unprivileged; the socket is for the firewall.
+	} else if ln, err := listenSocket(a.SocketPath()); err != nil {
+		slog.Warn("local socket not available", "err", err)
+	} else {
+		local := &http.Server{Handler: localHandler(a.routes()), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
+		go func() { errc <- local.Serve(ln) }()
+		defer local.Close()
+	}
 	go func() {
 		slog.Info("portitor-agent API listening", "addr", a.cfg.Listen, "tls", a.cfg.TLSCert != "", "dry_run", a.cfg.DryRun)
 		if a.cfg.TLSCert != "" {
@@ -221,6 +234,45 @@ func (a *Agent) Serve(ctx context.Context) error {
 		defer cancel()
 		return srv.Shutdown(shutdownCtx)
 	}
+}
+
+// SocketPath is the local API socket the portitor command talks to.
+func (a *Agent) SocketPath() string {
+	return filepath.Join(a.cfg.Paths.RunDir, SocketName)
+}
+
+// SocketName is the local socket's name in run_dir.
+const SocketName = "agent.sock"
+
+// listenSocket listens on a Unix socket only root can connect to: the
+// file mode is the socket's authentication.
+func listenSocket(path string) (net.Listener, error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return nil, err
+	}
+	_ = os.Remove(path)
+	ln, err := net.Listen("unix", path)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		ln.Close()
+		return nil, err
+	}
+	return ln, nil
+}
+
+// localHandler serves the API's GET routes, without the token: the
+// socket's permissions already limit it to root. Changes go through
+// portitor-web.
+func localHandler(api http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeError(w, http.StatusMethodNotAllowed, errors.New("the local socket is read-only"))
+			return
+		}
+		api.ServeHTTP(w, r)
+	})
 }
 
 func decode(w http.ResponseWriter, r *http.Request, v any) bool {
