@@ -910,12 +910,12 @@ def summary(a: dict) -> list[str]:
     elif a["role"] == "agent" and a.get("reconfigure"):
         out.append(f"portitor-web    {a['web_from']}")
     else:
-        out += [f"LAN interface   {nic_label(a['lan'])}",
-                f"LAN address     {a['address'] or 'DHCP (no default route)'}",
-                f"LAN DHCP server {fmt_range(a.get('dhcp_range')) or ('unchanged' if a.get('reconfigure') and a['address'] else 'off')}",
-                f"WAN interface   {nic_label(a['wan'])}",
+        out += [f"WAN interface   {nic_label(a['wan'])}",
                 f"WAN address     {a['wan_address'] or 'DHCP'}",
-                f"Default gateway {a['gateway'] or 'from DHCP'}"]
+                f"Default gateway {a['gateway'] or 'from DHCP'}",
+                f"LAN interface   {nic_label(a['lan'])}",
+                f"LAN address     {a['address'] or 'DHCP (no default route)'}",
+                f"LAN DHCP server {fmt_range(a.get('dhcp_range')) or ('unchanged' if a.get('reconfigure') and a['address'] else 'off')}"]
         if a["role"] == "agent":
             out.append(f"portitor-web    {a['web_from']}")
     out += [f"DNS servers     {' '.join(a['dns'])}",
@@ -1137,12 +1137,16 @@ class NetworkPage(Page):
         kind, st, role = self.kind(), self.state, self.a["role"]
         static = st.get("address", "") not in ("", "dhcp")
         if kind == "fw":
-            yield Static("The LAN interface is where you reach the GUI from; the WAN interface connects "
-                         "to the Internet, which the firewall needs for updates. Plug in a cable to see "
+            yield Static("The WAN interface connects to the Internet, which the firewall needs for updates; "
+                         "the LAN interface is where you reach the GUI from. Plug in a cable to see "
                          "which interface it is; Reload updates the link state.", classes="text")
-            yield row("LAN interface", Select([], id="lan", prompt="choose the LAN interface"))
             yield row("WAN interface", Select([], id="wan", prompt="choose the WAN interface"))
+            yield row("LAN interface", Select([], id="lan", prompt="choose the LAN interface"))
             yield Button("Reload interfaces", id="reload")
+            yield row("WAN IPv4", Select(MODES, id="wan_mode", allow_blank=False,
+                                         value="static" if st.get("wan_address") else "dhcp"))
+            yield row("WAN address", Input(st.get("wan_address", ""), id="wan_address", placeholder="203.0.113.2/24"))
+            yield row("Default gateway", Input(st.get("gateway", ""), id="gateway", placeholder="203.0.113.1"))
             if role != "agent":
                 yield row("LAN IPv4", Select(MODES, id="lan_mode", allow_blank=False,
                                              value="dhcp" if st.get("address") == "dhcp" else "static"))
@@ -1155,10 +1159,6 @@ class NetworkPage(Page):
             yield Static("Hands out addresses on the LAN, with the firewall as gateway and the DNS servers "
                          "below." + (" Off leaves a DHCP server set up in the GUI as it is."
                                      if self.app.reconfigure else ""), classes="hint")
-            yield row("WAN IPv4", Select(MODES, id="wan_mode", allow_blank=False,
-                                         value="static" if st.get("wan_address") else "dhcp"))
-            yield row("WAN address", Input(st.get("wan_address", ""), id="wan_address", placeholder="203.0.113.2/24"))
-            yield row("Default gateway", Input(st.get("gateway", ""), id="gateway", placeholder="203.0.113.1"))
         elif kind == "host":
             yield Static("The interface this host is reached on (the GUI) and reaches the firewall through. "
                          "Plug in a cable to see which interface it is; Reload updates the link state.",
@@ -1277,8 +1277,8 @@ class NetworkPage(Page):
             a["gateway"] = self.field("Default gateway", check_gateway, self.value("#gateway"), a["address"]) if a["address"] else None
             a["wan"], a["wan_address"] = "", None
         else:
-            a["lan"] = self.nic("#lan", "LAN interface")
             a["wan"] = self.nic("#wan", "WAN interface")
+            a["lan"] = self.nic("#lan", "LAN interface")
             if a["lan"] == a["wan"]:
                 raise ValueError("the LAN and WAN interfaces must differ (Swap on the last page swaps them)")
             a["address"] = self.field("LAN address", check_address, self.value("#address")) if self.static("#lan_mode") else None
