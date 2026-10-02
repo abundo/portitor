@@ -351,13 +351,25 @@ type DNSServer struct {
 	// prefixes of the listen interfaces.
 	AllowRecursion []string `json:"allow_recursion,omitempty"`
 	// DNSSECValidation is DNSSECValidationAuto or DNSSECValidationNo.
-	DNSSECValidation string    `json:"dnssec_validation,omitempty"`
-	Zones            []DNSZone `json:"zones"`
+	DNSSECValidation string `json:"dnssec_validation,omitempty"`
+	// QueryLog, when set, logs the queries BIND answers; the agent keeps
+	// those that pass its filters for the GUI's log panel.
+	QueryLog *DNSQueryLog `json:"query_log,omitempty"`
+	Zones    []DNSZone    `json:"zones"`
 	// Templates the zones refer to by name. A zone without a template
 	// gets a built-in SOA and NS pointing at localhost.
 	SOATemplates   []DNSSOATemplate  `json:"soa_templates,omitempty"`
 	ZoneTemplates  []DNSZoneTemplate `json:"zone_templates,omitempty"`
 	DNSSECPolicies []DNSSECPolicy    `json:"dnssec_policies,omitempty"`
+}
+
+// DNSQueryLog filters the logged queries. Each empty list matches any
+// query; a query is kept when it matches all three.
+type DNSQueryLog struct {
+	Clients []string `json:"clients,omitempty"` // client CIDRs
+	// Names are domains: a query for one of them or a name below it.
+	Names []string `json:"names,omitempty"`
+	Types []string `json:"types,omitempty"` // query types: A, AAAA, MX, ...
 }
 
 // DNSSOATemplate is the SOA of every zone whose template uses it. The

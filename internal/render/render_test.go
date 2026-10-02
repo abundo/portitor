@@ -445,6 +445,20 @@ func TestNamedConfDNSSECValidation(t *testing.T) {
 	}
 }
 
+func TestNamedConfQueryLog(t *testing.T) {
+	in := &fwconfig.SampleDocument().Instances[0]
+	if named := NamedConf(in, DefaultPaths(), nil); strings.Contains(named, "querylog") || strings.Contains(named, "logging") {
+		t.Errorf("query log off:\n%s", named)
+	}
+	in.DNS.QueryLog = &fwconfig.DNSQueryLog{Types: []string{"A"}}
+	named := NamedConf(in, DefaultPaths(), nil)
+	for _, want := range []string{"querylog yes;", "category queries { portitor_queries; };"} {
+		if !strings.Contains(named, want) {
+			t.Errorf("missing %q in\n%s", want, named)
+		}
+	}
+}
+
 func TestDnsmgrAndKea(t *testing.T) {
 	b := sampleBundle(t)
 	cfg := b.Dnsmgr["main"]

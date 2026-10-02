@@ -360,6 +360,13 @@ func build(db *gorm.DB, generation int64, only map[string]bool) (*fwconfig.Docum
 			AllowRecursion:   expand("instance "+mi.Name+": dns allow recursion", objs.Prefixes, mi.DnsAllowRecursion),
 			Zones:            []fwconfig.DNSZone{},
 		}
+		if mi.DnsQueryLog {
+			in.DNS.QueryLog = &fwconfig.DNSQueryLog{
+				Clients: expand("instance "+mi.Name+": dns query log clients", objs.Prefixes, mi.DnsQueryLogClients),
+				Names:   mi.DnsQueryLogNames,
+				Types:   mi.DnsQueryLogTypes,
+			}
+		}
 		switch mi.DnsUpstream {
 		case fwconfig.UpstreamForward, "":
 			in.DNS.Forwarders = expand("instance "+mi.Name+": dns forwarders", objs.Hosts, mi.DnsForwarders)

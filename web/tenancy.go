@@ -333,6 +333,10 @@ func (s *Server) filterRuleCounters(rc *agentapi.RuleCountersResponse, ids []uin
 	return nil
 }
 
+func filterDNSQueryLog(l *agentapi.DNSQueryLogResponse, names map[string]bool) {
+	l.Entries = slices.DeleteFunc(l.Entries, func(e agentapi.DNSQueryEntry) bool { return !names[e.Instance] })
+}
+
 func filterPacketLog(l *agentapi.PacketLogResponse, names map[string]bool) {
 	l.Entries = slices.DeleteFunc(l.Entries, func(e agentapi.PacketLogEntry) bool { return !names[e.Instance] })
 }

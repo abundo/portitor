@@ -33,6 +33,7 @@ type Agent struct {
 	ddns  *dyndnsManager
 	certs *certManager
 	pkts  *packetLog
+	dnsq  *queryLog
 	lldp  *lldpManager
 	lists *ipLists
 	tasks *scheduler
@@ -68,6 +69,7 @@ func New(cfg *Config) *Agent {
 	a.dhcp6 = newDHCP6Manager(a.run, cfg.DryRun, a.onPDChange)
 	a.ddns = newDyndnsManager(cfg.DryRun)
 	a.pkts = newPacketLog(cfg.DryRun)
+	a.dnsq = newQueryLog(cfg.DryRun)
 	a.lldp = newLLDPManager(cfg.DryRun)
 	a.lists = newIPLists()
 	a.tasks = newScheduler(a.runTask)
@@ -158,6 +160,7 @@ func (a *Agent) Stop() {
 	a.ddns.Stop()
 	a.certs.Stop()
 	a.pkts.Stop()
+	a.dnsq.Stop()
 	a.lldp.Stop()
 	a.dhcp.Stop()
 	a.dhcp6.Stop()

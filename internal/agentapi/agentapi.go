@@ -350,6 +350,29 @@ type PacketLogResponse struct {
 	Entries []PacketLogEntry `json:"entries"`
 }
 
+// DNSQueryEntry is a query an instance's DNS server answered, logged
+// when the instance has query logging on and the query passed its
+// filters. Ids increase like LogEntry's.
+type DNSQueryEntry struct {
+	ID         int64     `json:"id"`
+	Time       time.Time `json:"time"`
+	Instance   string    `json:"instance"`
+	Client     string    `json:"client"`
+	ClientPort uint16    `json:"client_port,omitempty"`
+	Name       string    `json:"name"`
+	Class      string    `json:"class"` // IN
+	Type       string    `json:"type"`  // A, AAAA, ...
+	// Flags are BIND's: + recursion desired, S signed, E(n) EDNS version,
+	// T TCP, D DO, C CD, V valid cookie, K cookie.
+	Flags  string `json:"flags,omitempty"`
+	Server string `json:"server,omitempty"` // the address asked
+}
+
+// DNSQueryLogResponse holds the logged DNS queries after the id asked for.
+type DNSQueryLogResponse struct {
+	Entries []DNSQueryEntry `json:"entries"`
+}
+
 // ConsoleResize is the one text message on the console WebSocket
 // (/v1/console, and /api/agent/console in portitor-web, which passes
 // messages through). Binary messages are terminal data both ways.

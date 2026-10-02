@@ -176,6 +176,26 @@ func prepareInstance(tx *gorm.DB, in, old *models.Instance) error {
 	if err := checkEntries(tx, "allow recursion", in.DnsAllowRecursion, entryCIDR); err != nil {
 		return err
 	}
+	in.DnsQueryLogClients = cleanList(in.DnsQueryLogClients)
+	if err := checkEntries(tx, "query log clients", in.DnsQueryLogClients, entryCIDR); err != nil {
+		return err
+	}
+	in.DnsQueryLogNames = cleanList(in.DnsQueryLogNames)
+	for i, n := range in.DnsQueryLogNames {
+		n = strings.ToLower(strings.TrimSuffix(n, "."))
+		if !fwconfig.ValidDomain(n) {
+			return bad(fmt.Sprintf("query log names: %q is not a valid domain", n))
+		}
+		in.DnsQueryLogNames[i] = n
+	}
+	in.DnsQueryLogTypes = cleanList(in.DnsQueryLogTypes)
+	for i, t := range in.DnsQueryLogTypes {
+		t = strings.ToUpper(t)
+		if !fwconfig.ValidQueryType(t) {
+			return bad(fmt.Sprintf("query log types: %q is not a DNS query type", t))
+		}
+		in.DnsQueryLogTypes[i] = t
+	}
 	if in.DhcpDomainName != "" && !fwconfig.ValidDomain(in.DhcpDomainName) {
 		return bad("DHCP domain name is not a valid domain")
 	}

@@ -319,6 +319,12 @@ type Instance struct {
 	DnsForwardMode      string     `json:"dns_forward_mode"` // fwconfig.ForwardFirst or ForwardOnly
 	DnsAllowRecursion   StringList `json:"dns_allow_recursion"`
 	DnsDnssecValidation string     `json:"dns_dnssec_validation"` // fwconfig.DNSSECValidationAuto or No
+	// DNS query logging, and its filters (fwconfig.DNSQueryLog); clients
+	// may name hosts/prefixes.
+	DnsQueryLog        bool       `json:"dns_query_log"`
+	DnsQueryLogClients StringList `json:"dns_query_log_clients"`
+	DnsQueryLogNames   StringList `json:"dns_query_log_names"`
+	DnsQueryLogTypes   StringList `json:"dns_query_log_types"`
 
 	DhcpEnabled    bool   `json:"dhcp_enabled"`
 	DhcpDomainName string `json:"dhcp_domain_name"`

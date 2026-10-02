@@ -41,6 +41,7 @@ type agentAPI interface {
 	RuleCounters(ctx context.Context) (*agentapi.RuleCountersResponse, error)
 	Logs(ctx context.Context, after int64) (*agentapi.LogsResponse, error)
 	PacketLog(ctx context.Context, after int64) (*agentapi.PacketLogResponse, error)
+	DNSQueryLog(ctx context.Context, after int64) (*agentapi.DNSQueryLogResponse, error)
 	Render(ctx context.Context, doc fwconfig.Document) (*agentapi.RenderResult, error)
 	Apply(ctx context.Context, doc fwconfig.Document, confirmTimeout int) (*agentapi.ApplyResult, error)
 	Confirm(ctx context.Context, generation int64) error
@@ -204,6 +205,7 @@ func (s *Server) Echo() *echo.Echo {
 	g.GET("/agent/rule-counters", s.handleAgentRuleCounters)
 	g.GET("/agent/logs", s.handleAgentLogs)
 	g.GET("/agent/packet-log", s.handleAgentPacketLog)
+	g.GET("/agent/dns-query-log", s.handleAgentDNSQueryLog)
 	g.GET("/agent/console", s.handleAgentConsole)
 	g.POST("/agent/capture", s.handleAgentCapture)
 	g.POST("/agent/trace", s.handleAgentTrace)

@@ -45,6 +45,10 @@ const server = reactive({
   dns_forward_mode: 'first',
   dns_allow_recursion: [],
   dns_dnssec_validation: 'auto',
+  dns_query_log: false,
+  dns_query_log_clients: [],
+  dns_query_log_names: [],
+  dns_query_log_types: [],
   ifaces: [], // { id, name, label, description, ipv4_mode, dns_listen, dns_from_dhcp }
 })
 const serverForm = usePageForm(server)
@@ -62,6 +66,10 @@ async function load() {
     dns_forward_mode: inst.dns_forward_mode || 'first',
     dns_allow_recursion: inst.dns_allow_recursion ?? [],
     dns_dnssec_validation: inst.dns_dnssec_validation || 'auto',
+    dns_query_log: inst.dns_query_log ?? false,
+    dns_query_log_clients: inst.dns_query_log_clients ?? [],
+    dns_query_log_names: inst.dns_query_log_names ?? [],
+    dns_query_log_types: inst.dns_query_log_types ?? [],
     ifaces: ifs.map((i) => ({
       id: i.id,
       name: i.name,
@@ -100,6 +108,31 @@ const { search: dhcpSearch, filtered: shownDhcpIfaces } = useSearch(
 // Only one interface gives the upstream servers.
 function setFromDhcp(ifc, on) {
   for (const i of server.ifaces) i.dns_from_dhcp = on && i === ifc
+}
+
+// Query types offered for the query log filter; others can be typed.
+const queryTypes = [
+  'A',
+  'AAAA',
+  'ANY',
+  'CNAME',
+  'DS',
+  'DNSKEY',
+  'HTTPS',
+  'MX',
+  'NS',
+  'PTR',
+  'SOA',
+  'SRV',
+  'SVCB',
+  'TXT',
+]
+const queryTypeItems = computed(() => [...new Set([...queryTypes, ...server.dns_query_log_types])])
+function addQueryType(item) {
+  const t = item.trim().toUpperCase()
+  if (t && !server.dns_query_log_types.includes(t)) {
+    server.dns_query_log_types = [...server.dns_query_log_types, t]
+  }
 }
 
 const noForwarders = computed(
@@ -347,6 +380,61 @@ const tab = computed({
                 >
                   <USwitch v-model="dnssecValidation" />
                 </UFormField>
+              </fieldset>
+
+              <h2 class="border-b border-default pb-1 mt-8 mb-2 text-xl font-semibold">
+                Query logging
+              </h2>
+              <p class="mb-4 text-sm text-muted">
+                Log the queries the DNS server answers, shown under DNS queries in the log panel.
+                Each filter left empty matches any query; a query is shown when it matches all of
+                them.
+              </p>
+              <fieldset :disabled="readOnly" class="space-y-3">
+                <UFormField label="Log queries" :ui="inlineField">
+                  <USwitch v-model="server.dns_query_log" />
+                </UFormField>
+                <template v-if="server.dns_query_log">
+                  <UFormField
+                    label="Clients"
+                    help="Only queries from these addresses or prefixes."
+                    :ui="inlineField"
+                  >
+                    <AddrInput
+                      v-model="server.dns_query_log_clients"
+                      multiple
+                      placeholder="192.168.1.0/24"
+                    />
+                  </UFormField>
+                  <UFormField
+                    label="Names"
+                    help="Only queries for these domains and the names below them."
+                    :ui="inlineField"
+                  >
+                    <UInputTags
+                      v-model="server.dns_query_log_names"
+                      class="w-full"
+                      placeholder="example.com"
+                      add-on-blur
+                      add-on-paste
+                    />
+                  </UFormField>
+                  <UFormField
+                    label="Query types"
+                    help="Only queries of these types."
+                    :ui="inlineField"
+                  >
+                    <UInputMenu
+                      v-model="server.dns_query_log_types"
+                      multiple
+                      create-item
+                      class="w-full"
+                      :items="queryTypeItems"
+                      placeholder="A, AAAA"
+                      @create="addQueryType"
+                    />
+                  </UFormField>
+                </template>
               </fieldset>
 
               <h2 class="border-b border-default pb-1 mt-8 mb-2 text-xl font-semibold">

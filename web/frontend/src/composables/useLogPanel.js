@@ -6,10 +6,11 @@ import { api } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import { errMsg } from '@/api/http'
 
-// The agent's log and the packets the rulesets logged, each a tab of the
-// panel; the open tab is polled while the panel is open. State is shared
-// so the top bar's toggle and the panel see the same thing; whether it is
-// open, its tab and its height are remembered in the browser.
+// The agent's log, the packets the rulesets logged and the queries the DNS
+// servers logged, each a tab of the panel; the open tab is polled while the
+// panel is open. State is shared so the top bar's toggle and the panel see
+// the same thing; whether it is open, its tab and its height are
+// remembered in the browser.
 const MAX_LINES = 2000
 const POLL_MS = 2000
 const RETRY_MS = 5000
@@ -38,9 +39,12 @@ const feed = () => ({ lines: [], after: 0 })
 const state = reactive({
   open: load('logPanel.open', false),
   height: load('logPanel.height', 240),
-  tab: load('logPanel.tab', 'log') === 'packets' ? 'packets' : 'log',
+  tab: ['packets', 'dns'].includes(load('logPanel.tab', 'log'))
+    ? load('logPanel.tab', 'log')
+    : 'log',
   log: feed(),
   packets: feed(),
+  dns: feed(),
   error: null,
   paused: false,
 })
@@ -50,6 +54,7 @@ const fetchers = {
   log: (after) =>
     useAuthStore().readsAll ? api.agentLogs(after) : Promise.resolve({ entries: [] }),
   packets: (after) => api.agentPacketLog(after),
+  dns: (after) => api.agentDnsQueryLog(after),
 }
 
 let timer = null

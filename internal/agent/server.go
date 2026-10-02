@@ -55,6 +55,10 @@ func (a *Agent) routes() *http.ServeMux {
 		after, _ := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
 		writeJSONResponse(w, http.StatusOK, agentapi.LogsResponse{Entries: Logs.After(after)})
 	})
+	mux.HandleFunc("GET /v1/dns-query-log", func(w http.ResponseWriter, r *http.Request) {
+		after, _ := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
+		writeJSONResponse(w, http.StatusOK, agentapi.DNSQueryLogResponse{Entries: a.dnsq.After(after)})
+	})
 	mux.HandleFunc("GET /v1/packet-log", func(w http.ResponseWriter, r *http.Request) {
 		after, _ := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
 		writeJSONResponse(w, http.StatusOK, agentapi.PacketLogResponse{Entries: a.pkts.After(after)})

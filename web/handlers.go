@@ -1198,6 +1198,28 @@ func (s *Server) handleAgentPacketLog(c *echo.Context) error {
 	return c.JSON(http.StatusOK, l)
 }
 
+// handleAgentDNSQueryLog passes on the DNS queries logged after
+// ?after=<id>, for the log panel's DNS queries.
+func (s *Server) handleAgentDNSQueryLog(c *echo.Context) error {
+	after, _ := strconv.ParseInt(c.QueryParam("after"), 10, 64)
+	a, _, err := s.agent()
+	if err != nil {
+		return agentError(c, err)
+	}
+	l, err := a.DNSQueryLog(c.Request().Context(), after)
+	if err != nil {
+		return agentError(c, err)
+	}
+	names, err := s.readableInstanceNames(c)
+	if err != nil {
+		return err
+	}
+	if names != nil {
+		filterDNSQueryLog(l, names)
+	}
+	return c.JSON(http.StatusOK, l)
+}
+
 // redactDoc strips key material before a document is stored in the
 // deployment history.
 func redactDoc(doc fwconfig.Document) fwconfig.Document {

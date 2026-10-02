@@ -135,6 +135,7 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 	var certsWant []certItem
 	var lldpWant []lldpKey
 	pktsWant := map[string]string{}
+	dnsqWant := map[string]queryLogItem{}
 
 	for i := range exp.Instances {
 		in := &exp.Instances[i]
@@ -229,6 +230,9 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 		if logsPackets(in) {
 			pktsWant[in.Name] = ns
 		}
+		if in.DNS.Enabled && in.DNS.QueryLog != nil {
+			dnsqWant[in.Name] = queryLogItem{unit: a.cfg.Units.Named(in.Name), filter: *in.DNS.QueryLog}
+		}
 
 		var routes []ipRoute
 		for _, fam := range []string{"-4", "-6"} {
@@ -258,6 +262,7 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 	a.ddns.Reconcile(ddnsWant)
 	a.certs.Reconcile(ctx, certsWant)
 	a.pkts.Reconcile(pktsWant)
+	a.dnsq.Reconcile(dnsqWant)
 	a.lldp.Reconcile(lldpWant)
 
 	for i := range exp.Instances {

@@ -140,7 +140,18 @@ func NamedConf(in *fwconfig.Instance, p Paths, dhcpDNS map[string][]string) stri
 	fmt.Fprintf(b, "\tdnssec-validation %s;\n", validation)
 	b.WriteString("\tallow-transfer { none; };\n")
 	b.WriteString("\tversion none;\n")
+	if in.DNS.QueryLog != nil {
+		b.WriteString("\tquerylog yes;\n")
+	}
 	b.WriteString("};\n\n")
+	if in.DNS.QueryLog != nil {
+		// To the journal, under the instance's named unit, where the
+		// agent reads them (see agent.queryLog); the filters are its.
+		b.WriteString("logging {\n")
+		b.WriteString("\tchannel portitor_queries { syslog daemon; severity info; };\n")
+		b.WriteString("\tcategory queries { portitor_queries; };\n")
+		b.WriteString("};\n\n")
+	}
 	// Reload is SIGHUP from systemd; no rndc channel to secure.
 	b.WriteString("controls { };\n\n")
 	dnssecPolicies(b, in.DNS.DNSSECPolicies)

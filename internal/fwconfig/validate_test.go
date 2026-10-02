@@ -146,6 +146,9 @@ func TestValidateCatchesProblems(t *testing.T) {
 		}, "newline"},
 		{"dns forward mode", func(d *Document) { d.Instances[0].DNS.ForwardMode = "last" }, `invalid forward mode "last"`},
 		{"dns dnssec validation", func(d *Document) { d.Instances[0].DNS.DNSSECValidation = "yes" }, `invalid dnssec validation "yes"`},
+		{"dns query log client", func(d *Document) { d.Instances[0].DNS.QueryLog = &DNSQueryLog{Clients: []string{"10.0.0.1"}} }, `invalid client prefix "10.0.0.1"`},
+		{"dns query log name", func(d *Document) { d.Instances[0].DNS.QueryLog = &DNSQueryLog{Names: []string{"a b"}} }, `invalid name "a b"`},
+		{"dns query log type", func(d *Document) { d.Instances[0].DNS.QueryLog = &DNSQueryLog{Types: []string{"a;"}} }, `invalid query type "a;"`},
 		{"dns upstream", func(d *Document) { d.Instances[0].DNS.Upstream = "peer" }, `invalid upstream "peer"`},
 		{"dns upstream dhcp no interface", func(d *Document) { d.Instances[0].DNS.Upstream = UpstreamDHCP }, "needs the interface"},
 		{"dns upstream dhcp static", func(d *Document) {

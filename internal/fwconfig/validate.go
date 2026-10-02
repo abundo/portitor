@@ -559,6 +559,23 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 	default:
 		v.addf("%s: dns: invalid dnssec validation %q", p, in.DNS.DNSSECValidation)
 	}
+	if q := in.DNS.QueryLog; q != nil {
+		for _, c := range q.Clients {
+			if _, err := netip.ParsePrefix(c); err != nil {
+				v.addf("%s: dns: query log: invalid client prefix %q", p, c)
+			}
+		}
+		for _, n := range q.Names {
+			if !validDomain(n) {
+				v.addf("%s: dns: query log: invalid name %q", p, n)
+			}
+		}
+		for _, t := range q.Types {
+			if !ValidQueryType(t) {
+				v.addf("%s: dns: query log: invalid query type %q", p, t)
+			}
+		}
+	}
 	for _, a := range in.DNS.Forwarders {
 		if _, err := ParseAddr(a); err != nil {
 			v.addf("%s: dns: invalid forwarder %q", p, a)
@@ -1040,6 +1057,12 @@ func ValidDomain(s string) bool       { return validDomain(s) }
 func ValidWGKey(s string) bool        { return validWGKey(s) }
 func ValidMAC(s string) bool          { return macRe.MatchString(s) }
 func ValidEndpoint(s string) bool     { return validEndpoint(s) }
+
+var queryTypeRe = regexp.MustCompile(`^(?:[A-Z][A-Z0-9-]{0,15}|TYPE[0-9]{1,5})$`)
+
+// ValidQueryType reports a DNS query type as BIND writes it: A, AAAA,
+// NSEC3PARAM, TYPE65.
+func ValidQueryType(s string) bool { return queryTypeRe.MatchString(s) }
 
 // ValidAutoService checks an auto input rule's service name (LogAuto).
 func ValidAutoService(s string) bool {

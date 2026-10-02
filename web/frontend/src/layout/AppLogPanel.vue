@@ -7,7 +7,7 @@ import SearchInput from '@/components/SearchInput.vue'
 import { useLogPanel } from '@/composables/useLogPanel'
 import { logTime } from '@/utils/time'
 
-// The agent's log and the logged packets at the bottom of the layout. It
+// The agent's log, the logged packets and DNS queries at the bottom of the layout. It
 // takes its height out of the page (a flex item, not an overlay), so
 // nothing ends up behind it.
 const { state, close, clear, togglePause, setHeight, start, stop } = useLogPanel()
@@ -20,10 +20,22 @@ const tabs = [
     icon: 'i-lucide-list-filter',
     title: 'Packets of the rules with Log ticked on the Rules page, the locked rows included',
   },
+  {
+    value: 'dns',
+    label: 'DNS queries',
+    icon: 'i-lucide-globe',
+    title: 'Queries to the DNS servers with Query logging on (DNS → DNS server)',
+  },
 ]
 
 const body = ref(null)
-const filter = ref('')
+// A filter per tab that has one.
+const filters = ref({ packets: '', dns: '' })
+const filter = computed({
+  get: () => filters.value[state.tab] ?? '',
+  set: (v) => (filters.value[state.tab] = v),
+})
+const placeholders = { packets: 'Filter: wan tcp 443', dns: 'Filter: 192.168.1.10 AAAA' }
 
 // Follow the tail unless paused. Watching the newest id (not the length)
 // keeps following once the buffer is full; the filter and the tab change
@@ -57,14 +69,21 @@ const packetText = (p) =>
   ]
     .join(' ')
     .toLowerCase()
-const packets = computed(() => {
-  const words = filter.value.toLowerCase().split(/\s+/).filter(Boolean)
-  if (!words.length) return state.packets.lines
-  return state.packets.lines.filter((p) => {
-    const text = packetText(p)
-    return words.every((w) => text.includes(w))
+// The lines whose text holds every word of the tab's filter.
+function filtered(lines, text, f) {
+  const words = f.toLowerCase().split(/\s+/).filter(Boolean)
+  if (!words.length) return lines
+  return lines.filter((l) => {
+    const t = text(l)
+    return words.every((w) => t.includes(w))
   })
-})
+}
+const packets = computed(() => filtered(state.packets.lines, packetText, filters.value.packets))
+
+const queryText = (q) =>
+  [q.instance, q.client, q.name, q.class, q.type, q.flags, q.server].join(' ').toLowerCase()
+const queries = computed(() => filtered(state.dns.lines, queryText, filters.value.dns))
+const shown = computed(() => (state.tab === 'dns' ? queries.value : packets.value))
 
 // The row that logged: a rule by number, or a locked row (policy,
 // invalid, or an auto rule by service).
@@ -138,14 +157,14 @@ onUnmounted(stop)
         />
       </div>
       <SearchInput
-        v-if="state.tab === 'packets'"
+        v-if="state.tab !== 'log'"
         v-model="filter"
-        placeholder="Filter: wan tcp 443"
+        :placeholder="placeholders[state.tab]"
         size="xs"
         class="w-56"
       />
-      <span v-if="state.tab === 'packets' && filter" class="text-xs text-muted"
-        >{{ packets.length }} of {{ state.packets.lines.length }}</span
+      <span v-if="state.tab !== 'log' && filter" class="text-xs text-muted"
+        >{{ shown.length }} of {{ state[state.tab].lines.length }}</span
       >
       <UTooltip v-if="state.error" :text="state.error">
         <UBadge color="error" variant="subtle" size="sm" label="agent unreachable" />
@@ -225,6 +244,51 @@ onUnmounted(stop)
                 state.packets.lines.length
                   ? 'No packets match the filter'
                   : 'No packets logged yet. Tick Log on a row of the Rules page and deploy.'
+              }}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div
+      v-else-if="state.tab === 'dns'"
+      ref="body"
+      class="min-h-0 flex-1 overflow-auto font-mono text-xs [overflow-anchor:none]"
+    >
+      <table class="packet-log w-full">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>VF</th>
+            <th>Client</th>
+            <th class="text-right">Port</th>
+            <th>Name</th>
+            <th>Class</th>
+            <th>Type</th>
+            <th title="+ recursion desired, E(n) EDNS, T TCP, D DO, C CD, S signed, K/V cookie">
+              Flags
+            </th>
+            <th>Server</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="q in queries" :key="q.id">
+            <td class="text-muted">{{ logTime(q.time) }}</td>
+            <td>{{ q.instance }}</td>
+            <td class="break-all">{{ q.client }}</td>
+            <td class="text-right">{{ q.client_port || '' }}</td>
+            <td class="break-all">{{ q.name }}</td>
+            <td>{{ q.class }}</td>
+            <td>{{ q.type }}</td>
+            <td class="text-muted">{{ q.flags }}</td>
+            <td class="break-all">{{ q.server }}</td>
+          </tr>
+          <tr v-if="!queries.length">
+            <td colspan="9" class="text-muted">
+              {{
+                state.dns.lines.length
+                  ? 'No queries match the filter'
+                  : 'No DNS queries logged yet. Turn on Query logging under DNS → DNS server and deploy.'
               }}
             </td>
           </tr>

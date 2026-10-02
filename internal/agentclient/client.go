@@ -180,6 +180,12 @@ func (c *Client) Logs(ctx context.Context, after int64) (*agentapi.LogsResponse,
 	return &l, c.do(ctx, http.MethodGet, "/v1/logs?after="+strconv.FormatInt(after, 10), nil, &l)
 }
 
+// DNSQueryLog returns the logged DNS queries with an id above after.
+func (c *Client) DNSQueryLog(ctx context.Context, after int64) (*agentapi.DNSQueryLogResponse, error) {
+	var l agentapi.DNSQueryLogResponse
+	return &l, c.do(ctx, http.MethodGet, "/v1/dns-query-log?after="+strconv.FormatInt(after, 10), nil, &l)
+}
+
 // PacketLog returns the packets the rulesets logged with an id above after.
 func (c *Client) PacketLog(ctx context.Context, after int64) (*agentapi.PacketLogResponse, error) {
 	var l agentapi.PacketLogResponse
