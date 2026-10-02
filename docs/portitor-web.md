@@ -17,12 +17,11 @@ firewall, for a single-box setup.
 |---|---|---|
 | `bind` | `127.0.0.1:8080` | Listen address. `start --bind` overrides it. |
 | `jwt_secret` | | Signs session cookies. At least 32 characters: `openssl rand -base64 32`. |
-| `tls_cert`, `tls_key` | | Serve HTTPS directly. Set both or neither. |
-| `tls_certificate` | | Serve HTTPS with a certificate from *Certificates*: `<instance>/<name>`, such as `main/web`. Instead of `tls_cert`; see [The GUI's own certificate](#the-guis-own-certificate). |
+| `tls_cert`, `tls_key` | | Serve HTTPS directly. Set both or neither. A certificate chosen under *Settings → Portitor web* takes their place; see [The GUI's own certificate](#the-guis-own-certificate). |
 | `db.path` | `/var/lib/portitor-web/portitor.db` | SQLite database. Its directory must be writable by the service user (`-wal` and `-shm` files go next to it). |
 | `dev` | `false` | Serves the frontend from disk and drops the cookie's Secure flag. Development only. |
 
-Without `tls_cert` or `tls_certificate`, keep `bind` on localhost and put a TLS reverse proxy in front. The
+Without `tls_cert`, keep `bind` on localhost and put a TLS reverse proxy in front. The
 session cookie is marked Secure, so the GUI does not work over plain HTTP. The proxy
 must pass WebSocket upgrades for the console.
 
@@ -109,7 +108,7 @@ After an upgrade, run `migrate` before `start`. `install.py` does both.
 | | Packet capture | Live capture with Wireshark in the browser. tcpdump runs on an interface of the selected instance (or *any*), with a capture filter (pcap syntax) and limits (packets, seconds, bytes per packet); the packets stream in as they are captured, into a packet list with Wireshark's display filters (`dns \|\| tcp.port == 443`), protocol tree and bytes. *Follow* keeps the newest packet in view. *pcap* downloads the capture for Wireshark. *Open in window* runs the capture in a window of its own, for the selected instance, so it keeps going while you use the rest of the GUI; each window is a capture of its own. The stream from the agent is capped at the rate under *Settings* (1000 kbit/s by default); when traffic outruns it, the firewall drops captured packets rather than fall behind. The agent's own API connection is left out, and at most two captures run at once. Wireshark (Wiregasm, about 20 MB) loads when the page opens; it is a separate program (GPL-2.0) that the installer puts in `/usr/share/portitor/wiregasm`. |
 | | Traceroute | A traceroute like MTR, run on the firewall in the selected instance with `mtr`. Pick a *source interface* (*None*, the default, lets the routing table decide) and a *destination*: an IPv4 or IPv6 address, a named host or a DNS name, which the firewall resolves (for a name with both, *IP version* picks; IPv4 by default). One probe per hop goes out each second for the given rounds (10 by default); each hop's row shows its address, loss, sent and the last, average, best and worst round trip and its standard deviation, updated as replies come. *Stop* ends it early. |
 | Admin | Updates | Debian package upgrades, Portitor releases, reboot. See [Installer ISO and updates](appliance.md#updates). |
-| | Settings → General | Agent connection, default auto-rollback, public WireGuard endpoint, packet capture rate, [backup and restore](#backup-and-restore). |
+| | Settings → General | The GUI's certificate, agent connection, default auto-rollback, packet capture rate, [backup and restore](#backup-and-restore). |
 | | Settings → Users | GUI users and their roles. |
 | | Settings → Roles | Groups of users, one per instance and your own; see [Roles](#roles). |
 | | Help | This guide and the other guides in `docs/`. |
@@ -259,14 +258,16 @@ for every domain of the certificate.
 
 ### The GUI's own certificate
 
-portitor-web can serve HTTPS with one of these certificates: set
-`tls_certificate: <instance>/<name>` in `web.yaml` (the certificate's name, not a
-domain; `bind` on an address the browser reaches, e.g. `0.0.0.0:443`) and restart it.
-It fetches the chain and key from the agent at start and every hour after, and
-uses a renewed one without a restart. The last one fetched is kept next to the database
+portitor-web can serve HTTPS with one of these certificates: choose it under
+*Settings → Portitor web*. That takes effect without a restart, but needs
+portitor-web to serve HTTPS itself: `tls_cert` and `tls_key` in `web.yaml` (the
+ISO's setup sets them to a self-signed certificate), with `bind` on an address the
+browser reaches, e.g. `0.0.0.0:443`. It fetches the chain and key from the agent
+at once, every hour after and when the choice changes, and uses a renewed one
+without a restart. The last one fetched is kept next to the database
 (`tls-certificate.pem`, 0600), so a restart while the agent is unreachable still
-has it; before the first is fetched, portitor-web serves a self-signed certificate
-and tries again every minute. The certificate's domain must be the name you browse
+has it; before the first is fetched, and when none is chosen, portitor-web serves
+`tls_cert`, and tries again every minute. The certificate's domain must be the name you browse
 to. The agent hands out the key to anyone with its token, which portitor-web already holds.
 The service unit lets the `portitor` user listen on port 443
 (`CAP_NET_BIND_SERVICE`).

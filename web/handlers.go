@@ -442,6 +442,9 @@ func suggestBits(ip netip.Addr) int {
 type settingsView struct {
 	models.Settings
 	HasAgentToken bool `json:"has_agent_token"`
+	// WebTLS says portitor-web serves HTTPS itself (tls_cert), so a
+	// web certificate takes effect.
+	WebTLS bool `json:"web_tls"`
 }
 
 func (s *Server) handleGetSettings(c *echo.Context) error {
@@ -449,7 +452,7 @@ func (s *Server) handleGetSettings(c *echo.Context) error {
 	if err != nil {
 		return err
 	}
-	return c.JSON(http.StatusOK, settingsView{*st, st.AgentToken != ""})
+	return c.JSON(http.StatusOK, settingsView{*st, st.AgentToken != "", s.cfg.TLSCert != ""})
 }
 
 func (s *Server) handlePutSettings(c *echo.Context) error {
@@ -464,6 +467,8 @@ func (s *Server) handlePutSettings(c *echo.Context) error {
 		ConfirmTimeout   *int    `json:"confirm_timeout"`
 		WgEndpointHost   *string `json:"wg_endpoint_host"`
 		CaptureRateKbps  *int    `json:"capture_rate_kbps"`
+		// WebCertificateID: absent keeps, 0 clears.
+		WebCertificateID *uint `json:"web_certificate_id"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return errJSON(c, http.StatusBadRequest, "invalid request")
@@ -503,10 +508,23 @@ func (s *Server) handlePutSettings(c *echo.Context) error {
 		}
 		st.CaptureRateKbps = *req.CaptureRateKbps
 	}
+	oldCert := st.WebCertificateID
+	if req.WebCertificateID != nil {
+		st.WebCertificateID = nil
+		if id := *req.WebCertificateID; id != 0 {
+			if err := s.db.First(&models.Certificate{}, id).Error; err != nil {
+				return errJSON(c, http.StatusBadRequest, "no such certificate")
+			}
+			st.WebCertificateID = &id
+		}
+	}
 	if err := s.db.Save(st).Error; err != nil {
 		return err
 	}
-	return c.JSON(http.StatusOK, settingsView{*st, st.AgentToken != ""})
+	if s.webCert != nil && !equalPtr(oldCert, st.WebCertificateID) {
+		s.webCert.reset()
+	}
+	return c.JSON(http.StatusOK, settingsView{*st, st.AgentToken != "", s.cfg.TLSCert != ""})
 }
 
 func (s *Server) handleListUsers(c *echo.Context) error {
@@ -1212,4 +1230,8 @@ func insideAny(cidr string, prefixes []string) bool {
 		}
 	}
 	return false
+}
+
+func equalPtr[T comparable](a, b *T) bool {
+	return a == b || a != nil && b != nil && *a == *b
 }

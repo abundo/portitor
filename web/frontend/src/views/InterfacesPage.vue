@@ -168,7 +168,7 @@ const fields = [
     label: 'Public endpoint for clients',
     placeholder: 'vpn.example.org:51820',
     show: (f) => f.kind === 'wireguard',
-    hint: 'host:port written into generated client configs. Empty: the endpoint host under Settings and the listen port.',
+    hint: 'host:port written into generated client configs. Empty: the public endpoint host (WireGuard page) and the listen port.',
   },
   {
     key: 'wg_keepalive',

@@ -294,6 +294,10 @@ type Settings struct {
 	// CaptureRateKbps caps a packet capture's stream from the agent
 	// (kbit/s); 0 is unlimited.
 	CaptureRateKbps int `gorm:"default:1000" json:"capture_rate_kbps"`
+	// WebCertificateID is the certificate (Certificates page) portitor-web
+	// serves HTTPS with, when it serves HTTPS itself (tls_cert); nil
+	// serves tls_cert.
+	WebCertificateID *uint `json:"web_certificate_id"`
 	// Generation is the last deployed document generation.
 	Generation int64     `json:"generation"`
 	UpdatedAt  time.Time `json:"updated_at"`

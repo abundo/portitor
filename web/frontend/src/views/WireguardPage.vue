@@ -14,6 +14,7 @@ import { errMsg } from '@/api/http'
 import { useInstanceStore } from '@/stores/instances'
 import { useDeployStore } from '@/stores/deploy'
 import { useAuthStore } from '@/stores/auth'
+import { usePageForm } from '@/composables/useFormGuard'
 
 const { ask } = useConfirm()
 
@@ -32,6 +33,27 @@ async function load() {
     selectedId.value = tunnels.value[0]?.id ?? null
 }
 onMounted(load)
+
+// The public endpoint host (a global setting, for global admins): the
+// client configs' endpoint when an interface has none of its own.
+const endpoint = ref({ wg_endpoint_host: '' })
+const endpointForm = usePageForm(endpoint)
+async function loadEndpoint() {
+  if (!auth.isAdmin) return
+  endpoint.value.wg_endpoint_host = (await api.settings()).wg_endpoint_host
+  endpointForm.mark()
+}
+onMounted(loadEndpoint)
+async function saveEndpoint() {
+  try {
+    const s = await api.saveSettings({ wg_endpoint_host: endpoint.value.wg_endpoint_host })
+    endpoint.value.wg_endpoint_host = s.wg_endpoint_host
+    endpointForm.mark()
+    toast.add({ title: 'Saved', color: 'success' })
+  } catch (err) {
+    toast.add({ title: errMsg(err), color: 'error' })
+  }
+}
 
 const selected = computed(() => tunnels.value.find((t) => t.id === selectedId.value))
 
@@ -113,9 +135,7 @@ const clientEndpoint = computed(() => {
   const t = selected.value
   if (!t) return ''
   if (t.wg_endpoint) return t.wg_endpoint
-  return t.wg_listen_port
-    ? `the endpoint host under Settings, port ${t.wg_listen_port}`
-    : 'none set'
+  return t.wg_listen_port ? `the public endpoint host, port ${t.wg_listen_port}` : 'none set'
 })
 const clientKeepalive = computed(() =>
   selected.value?.wg_keepalive ? `${selected.value.wg_keepalive}s` : 'off',
@@ -187,6 +207,21 @@ function copy(text) {
 
 <template>
   <NeedInstance>
+    <form v-if="auth.isAdmin" class="card mb-4 space-y-3" @submit.prevent="saveEndpoint">
+      <UFormField
+        label="Public endpoint host"
+        help="Name or address clients connect to, in every instance; used in generated client configs when the interface has no client endpoint of its own."
+      >
+        <div class="flex flex-wrap gap-2">
+          <UInput
+            v-model="endpoint.wg_endpoint_host"
+            class="w-full max-w-md font-mono"
+            placeholder="home.example.org"
+          />
+          <UButton type="submit">Save</UButton>
+        </div>
+      </UFormField>
+    </form>
     <div v-if="!tunnels.length" class="card">
       <UAlert
         icon="i-lucide-key-round"

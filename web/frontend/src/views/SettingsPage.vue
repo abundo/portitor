@@ -3,37 +3,52 @@
 
 <script setup>
 import { useConfirm } from '@/composables/useConfirm'
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
-import { api } from '@/api'
+import { api, certificates } from '@/api'
 import { errMsg } from '@/api/http'
 import { useDeployStore } from '@/stores/deploy'
+import { useInstanceStore } from '@/stores/instances'
 import { usePageForm } from '@/composables/useFormGuard'
 
 const { ask } = useConfirm()
 
 const toast = useToast()
 const deploy = useDeployStore()
+const instStore = useInstanceStore()
 const settings = reactive({
   agent_url: '',
   agent_token: '',
   agent_fingerprint: '',
   confirm_timeout: 120,
-  wg_endpoint_host: '',
   capture_rate_kbps: 1000,
+  web_certificate_id: 0,
 })
 // Only the settings count as unsaved changes, not the backup and restore
 // fields.
 const settingsForm = usePageForm(settings)
 const hasToken = ref(false)
+const webTLS = ref(false)
 const version = ref(null)
+
+// Every instance's certificates, for the one portitor-web serves.
+const certs = ref([])
+const certItems = computed(() => [
+  { label: 'None (tls_cert from web.yaml)', value: 0 },
+  ...certs.value.map((c) => ({
+    label: `${instStore.nameOf(c.instance_id)}/${c.name} (${c.domains.join(', ')})`,
+    value: c.id,
+  })),
+])
 
 async function load() {
   const s = await api.settings()
-  Object.assign(settings, s, { agent_token: '' })
+  Object.assign(settings, s, { agent_token: '', web_certificate_id: s.web_certificate_id ?? 0 })
   hasToken.value = s.has_agent_token
+  webTLS.value = s.web_tls
   settingsForm.mark()
   version.value = await api.version()
+  certs.value = await certificates.list()
 }
 onMounted(load)
 
@@ -127,6 +142,7 @@ async function saveSettings() {
     })
     hasToken.value = s.has_agent_token
     settings.agent_token = ''
+    settings.web_certificate_id = s.web_certificate_id ?? 0
     settingsForm.mark()
     toast.add({ title: 'Settings saved', color: 'success' })
     deploy.refresh()
@@ -138,6 +154,35 @@ async function saveSettings() {
 
 <template>
   <div class="grid gap-4 xl:grid-cols-2">
+    <div class="card xl:col-span-2">
+      <div class="mb-1 text-lg font-semibold">Portitor web</div>
+      <p class="mb-4 text-sm text-muted">
+        The certificate the GUI serves HTTPS with, from Services → Certificates. portitor-web
+        fetches it from the agent, and again when it is renewed; until it has it, and when none is
+        chosen, it serves <code class="font-mono">tls_cert</code>. Its domain must be the name you
+        browse to.
+      </p>
+      <form class="space-y-3" @submit.prevent="saveSettings">
+        <UFormField label="Certificate">
+          <USelect
+            v-model="settings.web_certificate_id"
+            :items="certItems"
+            class="w-full max-w-xl"
+            :disabled="!webTLS"
+          />
+        </UFormField>
+        <UAlert
+          v-if="!webTLS"
+          color="neutral"
+          variant="subtle"
+          icon="i-lucide-info"
+          title="portitor-web does not serve HTTPS itself"
+          description="Set tls_cert and tls_key in web.yaml (the ISO's setup does) and restart it to choose a certificate here; behind a reverse proxy, give the proxy the certificate instead."
+        />
+        <UButton type="submit" :disabled="!webTLS">Save</UButton>
+      </form>
+    </div>
+
     <div class="card">
       <div class="mb-1 text-lg font-semibold">Portitor agent</div>
       <p class="mb-4 text-sm text-muted">
@@ -173,16 +218,6 @@ async function saveSettings() {
           help="After an apply, the agent restores the previous configuration unless you confirm within this time. 0 disables it."
         >
           <UInput v-model="settings.confirm_timeout" type="number" class="w-40" />
-        </UFormField>
-        <UFormField
-          label="Public WireGuard endpoint host"
-          help="Name or address clients connect to; used in generated client configs."
-        >
-          <UInput
-            v-model="settings.wg_endpoint_host"
-            class="w-full font-mono"
-            placeholder="home.example.org"
-          />
         </UFormField>
         <UFormField
           label="Packet capture rate (kbit/s)"

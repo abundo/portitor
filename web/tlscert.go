@@ -6,37 +6,33 @@ package web
 import (
 	"bytes"
 	"context"
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
 	"crypto/tls"
-	"crypto/x509"
-	"crypto/x509/pkix"
 	"errors"
 	"fmt"
 	"log/slog"
-	"math/big"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
 
 	"github.com/abundo/portitor/internal/agentapi"
+	"github.com/abundo/portitor/models"
 )
 
-// certAgent is the part of the agent client tls_certificate uses.
+// certAgent is the part of the agent client the web certificate uses.
 type certAgent interface {
 	Certificate(ctx context.Context, instance, name string) (*agentapi.CertificateFiles, error)
 }
 
-// tlsCert serves tls_certificate: a certificate from the Certificates page,
-// fetched from the agent. The last one fetched is kept next to the database
-// (0600), so a restart while the agent is unreachable still has it; until
-// there is one, a self-signed certificate keeps the GUI reachable.
+// tlsCert serves HTTPS for portitor-web: the certificate chosen under
+// Settings (Portitor web, settings.web_certificate_id), fetched from the
+// agent, or tls_cert while none is chosen or fetched yet. The last one
+// fetched is kept next to the database (0600), so a restart while the agent
+// is unreachable still has it.
 type tlsCert struct {
-	s              *Server
-	instance, name string
-	cache          string
+	s     *Server
+	cache string
+	kick  chan struct{}
 
 	mu       sync.Mutex
 	cur      *tls.Certificate
@@ -49,22 +45,17 @@ const (
 	tlsCertRetry   = time.Minute
 )
 
-func (s *Server) newTLSCert() (*tlsCert, error) {
-	inst, name, err := splitTLSCertificate(s.cfg.TLSCertificate)
-	if err != nil {
-		return nil, err
-	}
-	t := &tlsCert{s: s, instance: inst, name: name,
+func (s *Server) newTLSCert(fallback *tls.Certificate) *tlsCert {
+	t := &tlsCert{s: s, fallback: fallback, kick: make(chan struct{}, 1),
 		cache: filepath.Join(filepath.Dir(s.cfg.DB.Path), "tls-certificate.pem")}
-	if data, err := os.ReadFile(t.cache); err == nil {
-		if err := t.set(data); err != nil {
-			slog.Warn("tls_certificate: ignoring the cached certificate", "file", t.cache, "err", err)
+	if st, err := s.settings(); err == nil && st.WebCertificateID != nil {
+		if data, err := os.ReadFile(t.cache); err == nil {
+			if err := t.set(data); err != nil {
+				slog.Warn("web certificate: ignoring the cached certificate", "file", t.cache, "err", err)
+			}
 		}
 	}
-	if t.fallback, err = selfSigned(); err != nil {
-		return nil, err
-	}
-	return t, nil
+	return t
 }
 
 // set parses chain + key (PEM, one after the other) and makes them current.
@@ -79,6 +70,21 @@ func (t *tlsCert) set(data []byte) error {
 	return nil
 }
 
+// reset drops the current certificate and its cache, and fetches the one
+// now chosen: the choice changed.
+func (t *tlsCert) reset() {
+	t.mu.Lock()
+	t.cur, t.pem = nil, nil
+	t.mu.Unlock()
+	if err := os.Remove(t.cache); err != nil && !errors.Is(err, os.ErrNotExist) {
+		slog.Warn("web certificate: removing the cache", "err", err)
+	}
+	select {
+	case t.kick <- struct{}{}:
+	default:
+	}
+}
+
 func (t *tlsCert) get(*tls.ClientHelloInfo) (*tls.Certificate, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -88,78 +94,75 @@ func (t *tlsCert) get(*tls.ClientHelloInfo) (*tls.Certificate, error) {
 	return t.fallback, nil
 }
 
-// run fetches the certificate now and then every tlsCertRefresh, every
-// tlsCertRetry while there is none.
+// run fetches the certificate now, then every tlsCertRefresh (every
+// tlsCertRetry while a chosen one is missing) and when the choice changes.
 func (t *tlsCert) run(ctx context.Context) {
 	for {
-		err := t.fetch(ctx)
+		chosen, err := t.fetch(ctx)
 		if err != nil {
-			slog.Warn("tls_certificate: fetching from the agent", "certificate", t.instance+"/"+t.name, "err", err)
+			slog.Warn("web certificate: fetching from the agent", "err", err)
 		}
 		t.mu.Lock()
 		wait := tlsCertRefresh
-		if t.cur == nil {
+		if chosen && t.cur == nil {
 			wait = tlsCertRetry
 		}
 		t.mu.Unlock()
 		select {
 		case <-ctx.Done():
 			return
+		case <-t.kick:
 		case <-time.After(wait):
 		}
 	}
 }
 
-func (t *tlsCert) fetch(ctx context.Context) error {
+// fetch gets the chosen certificate from the agent; chosen says whether
+// one is chosen.
+func (t *tlsCert) fetch(ctx context.Context) (chosen bool, err error) {
+	st, err := t.s.settings()
+	if err != nil {
+		return false, err
+	}
+	if st.WebCertificateID == nil {
+		return false, nil
+	}
+	var cert models.Certificate
+	if err := t.s.db.First(&cert, *st.WebCertificateID).Error; err != nil {
+		return true, err
+	}
+	var inst models.Instance
+	if err := t.s.db.First(&inst, cert.InstanceID).Error; err != nil {
+		return true, err
+	}
 	a, _, err := t.s.agent()
 	if err != nil {
-		return err
+		return true, err
 	}
 	ca, ok := a.(certAgent)
 	if !ok {
-		return errors.New("agent client cannot fetch certificates")
+		return true, errors.New("agent client cannot fetch certificates")
 	}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	f, err := ca.Certificate(ctx, t.instance, t.name)
+	f, err := ca.Certificate(ctx, inst.Name, cert.Name)
 	if err != nil {
-		return err
+		return true, fmt.Errorf("%s/%s: %w", inst.Name, cert.Name, err)
 	}
 	data := []byte(f.FullChain + f.PrivKey)
 	t.mu.Lock()
 	same := bytes.Equal(data, t.pem)
 	t.mu.Unlock()
 	if same {
-		return nil
+		return true, nil
 	}
 	if err := t.set(data); err != nil {
-		return fmt.Errorf("agent's certificate: %w", err)
+		return true, fmt.Errorf("agent's certificate %s/%s: %w", inst.Name, cert.Name, err)
 	}
-	slog.Info("tls_certificate: loaded", "certificate", t.instance+"/"+t.name)
+	slog.Info("web certificate: loaded", "certificate", inst.Name+"/"+cert.Name)
 	tmp := t.cache + ".tmp"
 	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return err
+		return true, err
 	}
-	return os.Rename(tmp, t.cache)
-}
-
-// selfSigned makes a throwaway certificate for while there is none.
-func selfSigned() (*tls.Certificate, error) {
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		return nil, err
-	}
-	tmpl := &x509.Certificate{
-		SerialNumber: big.NewInt(time.Now().UnixNano()),
-		Subject:      pkix.Name{CommonName: "portitor-web"},
-		NotBefore:    time.Now().Add(-time.Hour),
-		NotAfter:     time.Now().AddDate(1, 0, 0),
-		KeyUsage:     x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-	}
-	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
-	if err != nil {
-		return nil, err
-	}
-	return &tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key}, nil
+	return true, os.Rename(tmp, t.cache)
 }

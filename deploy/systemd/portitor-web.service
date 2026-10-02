@@ -14,7 +14,7 @@ ExecStart=/usr/bin/portitor-web -f /etc/portitor/web.yaml start
 Restart=on-failure
 RestartSec=5
 NoNewPrivileges=yes
-# Ports below 1024 (bind: 0.0.0.0:443 with tls_cert or tls_certificate);
+# Ports below 1024 (bind: 0.0.0.0:443 with tls_cert);
 # nothing else.
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE

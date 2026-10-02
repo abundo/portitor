@@ -8,10 +8,13 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"math/big"
+	"net/http"
 	"os"
 	"testing"
 	"time"
@@ -50,17 +53,23 @@ func testCertFiles(t *testing.T, cn string) *agentapi.CertificateFiles {
 	}
 }
 
-func TestTLSCertificate(t *testing.T) {
+func TestWebCertificate(t *testing.T) {
 	env := newEnv(t)
 	fake := &certFakeAgent{}
 	env.srv.newAgent = func(*models.Settings) (agentAPI, error) { return fake, nil }
-	env.srv.cfg.TLSCertificate = "main/web"
 	env.srv.cfg.DB.Path = t.TempDir() + "/portitor.db"
-
-	tc, err := env.srv.newTLSCert()
+	fb := testCertFiles(t, "fallback.example.com")
+	fallback, err := tls.X509KeyPair([]byte(fb.FullChain), []byte(fb.PrivKey))
 	if err != nil {
 		t.Fatal(err)
 	}
+	inst := env.create("/api/instances", map[string]any{"name": "main"})
+	wan := env.create("/api/interfaces", map[string]any{"instance_id": inst, "name": "wan", "ipv4_mode": "dhcp", "enabled": true})
+	id := env.create("/api/certificates", map[string]any{"instance_id": inst, "name": "web", "enabled": true,
+		"interface_id": wan, "domains": []string{"a.example.com"}})
+
+	tc := env.srv.newTLSCert(&fallback)
+	env.srv.webCert = tc
 	dns := func() string {
 		c, _ := tc.get(nil)
 		x, err := x509.ParseCertificate(c.Certificate[0])
@@ -69,17 +78,27 @@ func TestTLSCertificate(t *testing.T) {
 		}
 		return x.DNSNames[0]
 	}
-	// None yet: the self-signed fallback.
-	if err := tc.fetch(context.Background()); err == nil || dns() != "" {
-		t.Fatalf("no certificate: %v %q", err, dns())
+	// None chosen: tls_cert.
+	if chosen, err := tc.fetch(context.Background()); chosen || err != nil || dns() != "fallback.example.com" {
+		t.Fatalf("none chosen: %v %v %q", chosen, err, dns())
+	}
+	if rec := env.do("PUT", "/api/settings", map[string]any{"web_certificate_id": 9999}); rec.Code != http.StatusBadRequest {
+		t.Fatalf("unknown certificate accepted: %d", rec.Code)
+	}
+	if rec := env.do("PUT", "/api/settings", map[string]any{"web_certificate_id": id}); rec.Code != http.StatusOK {
+		t.Fatalf("choose: %d %s", rec.Code, rec.Body)
+	}
+	// Chosen but not issued yet: still tls_cert.
+	if chosen, err := tc.fetch(context.Background()); !chosen || err == nil || dns() != "fallback.example.com" {
+		t.Fatalf("not issued: %v %v %q", chosen, err, dns())
 	}
 	fake.files = testCertFiles(t, "a.example.com")
-	if err := tc.fetch(context.Background()); err != nil || dns() != "a.example.com" || fake.asked != "main/web" {
+	if _, err := tc.fetch(context.Background()); err != nil || dns() != "a.example.com" || fake.asked != "main/web" {
 		t.Fatalf("fetch: %v %q %q", err, dns(), fake.asked)
 	}
 	// Renewed: swapped in without a restart.
 	fake.files = testCertFiles(t, "b.example.com")
-	if err := tc.fetch(context.Background()); err != nil || dns() != "b.example.com" {
+	if _, err := tc.fetch(context.Background()); err != nil || dns() != "b.example.com" {
 		t.Fatalf("renewed: %v %q", err, dns())
 	}
 	if fi, err := os.Stat(tc.cache); err != nil || fi.Mode().Perm() != 0o600 {
@@ -87,21 +106,24 @@ func TestTLSCertificate(t *testing.T) {
 	}
 	// A restart with the agent down uses the cached one.
 	fake.files = nil
-	tc, err = env.srv.newTLSCert()
-	if err != nil || dns() != "b.example.com" {
-		t.Fatalf("cached: %v %q", err, dns())
+	tc = env.srv.newTLSCert(&fallback)
+	if dns() != "b.example.com" {
+		t.Fatalf("cached: %q", dns())
 	}
-}
-
-func TestTLSCertificateConfig(t *testing.T) {
-	for s, ok := range map[string]bool{"main/web": true, "main": false, "Main/web": false, "main/../x": false} {
-		c := &Config{JWTSecret: "0123456789abcdef0123456789abcdef", TLSCertificate: s}
-		if err := c.validateForServe(); (err == nil) != ok {
-			t.Errorf("%q: %v", s, err)
-		}
+	// Cleared: back to tls_cert at once, cache gone.
+	env.srv.webCert = tc
+	if rec := env.do("PUT", "/api/settings", map[string]any{"web_certificate_id": 0}); rec.Code != http.StatusOK {
+		t.Fatalf("clear: %d %s", rec.Code, rec.Body)
 	}
-	c := &Config{JWTSecret: "0123456789abcdef0123456789abcdef", TLSCertificate: "main/web", TLSCert: "a", TLSKey: "b"}
-	if c.validateForServe() == nil {
-		t.Error("tls_certificate with tls_cert accepted")
+	if _, err := os.Stat(tc.cache); dns() != "fallback.example.com" || !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("cleared: %q %v", dns(), err)
+	}
+	// Deleting the chosen certificate clears the choice.
+	env.do("PUT", "/api/settings", map[string]any{"web_certificate_id": id})
+	if rec := env.do("DELETE", fmt.Sprintf("/api/certificates/%v", id), nil); rec.Code >= 300 {
+		t.Fatalf("delete: %d %s", rec.Code, rec.Body)
+	}
+	if st, _ := env.srv.settings(); st.WebCertificateID != nil {
+		t.Fatalf("choice kept: %v", *st.WebCertificateID)
 	}
 }

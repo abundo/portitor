@@ -257,7 +257,7 @@ const fields = computed(() => [
         <CrudPage
           title="Certificates"
           noun="certificate"
-          description="TLS certificates from Let's Encrypt (ACME), got by the firewall and renewed when two thirds of their lifetime have passed. The CA checks each domain over HTTP on port 80, which the firewall opens on the certificate's interface only while it answers. To serve the GUI itself with one, set tls_certificate: <instance>/<name> in web.yaml."
+          description="TLS certificates from Let's Encrypt (ACME), got by the firewall and renewed when two thirds of their lifetime have passed. The CA checks each domain over HTTP on port 80, which the firewall opens on the certificate's interface only while it answers. To serve the GUI itself with one, choose it under Settings → Portitor web."
           :api="certificates"
           :params="{ instance_id: store.currentId }"
           :columns="columns"

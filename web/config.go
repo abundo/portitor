@@ -11,7 +11,6 @@ import (
 	"os/user"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"syscall"
 	"time"
 
@@ -20,7 +19,6 @@ import (
 	"gorm.io/gorm/logger"
 
 	"github.com/abundo/portitor/internal/dbmigrate"
-	"github.com/abundo/portitor/internal/fwconfig"
 )
 
 const DefaultConfigFile = "/etc/portitor/web.yaml"
@@ -35,13 +33,10 @@ type Config struct {
 	// (plain http://localhost). Never on a reachable address.
 	Dev bool `yaml:"dev"`
 	// TLSCert/TLSKey serve HTTPS directly; otherwise put a reverse proxy
-	// in front.
+	// in front. A certificate chosen under Settings (Portitor web) takes
+	// their place once it is fetched from the agent.
 	TLSCert string `yaml:"tls_cert"`
 	TLSKey  string `yaml:"tls_key"`
-	// TLSCertificate ("<instance>/<name>") serves HTTPS with a certificate
-	// from the Certificates page, fetched from the agent and reloaded when
-	// it is renewed. Instead of tls_cert/tls_key.
-	TLSCertificate string `yaml:"tls_certificate"`
 	// WiregasmDir holds Wiregasm (Wireshark in WebAssembly) for the packet
 	// capture page, served at /wiregasm/. install.py puts it there; it is
 	// not part of Portitor. Dev defaults to the frontend's npm copy.
@@ -92,14 +87,6 @@ func (c *Config) validateForServe() error {
 	if (c.TLSCert == "") != (c.TLSKey == "") {
 		return errors.New("tls_cert and tls_key go together")
 	}
-	if c.TLSCertificate != "" {
-		if c.TLSCert != "" {
-			return errors.New("tls_certificate and tls_cert exclude each other")
-		}
-		if _, _, err := splitTLSCertificate(c.TLSCertificate); err != nil {
-			return err
-		}
-	}
 	return nil
 }
 
@@ -141,13 +128,4 @@ func checkDBOwner(path string) error {
 		name = u.Username
 	}
 	return fmt.Errorf("%s belongs to %s: run portitor-web as that user (sudo -u %s portitor-web ...)", dir, name, name)
-}
-
-// splitTLSCertificate parses tls_certificate: "<instance>/<name>".
-func splitTLSCertificate(s string) (string, string, error) {
-	inst, name, ok := strings.Cut(s, "/")
-	if !ok || !fwconfig.ValidInstanceName(inst) || !fwconfig.ValidItemName(name) {
-		return "", "", fmt.Errorf("tls_certificate %q: want <instance>/<certificate name>", s)
-	}
-	return inst, name, nil
 }

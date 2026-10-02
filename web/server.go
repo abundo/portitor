@@ -9,6 +9,7 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -67,6 +68,8 @@ type Server struct {
 	// newAgent builds a client from the current settings.
 	newAgent func(s *models.Settings) (agentAPI, error)
 	static   fs.FS
+	// webCert serves HTTPS when portitor-web does (tls_cert); nil otherwise.
+	webCert *tlsCert
 }
 
 func NewServer(cfg *Config, db *gorm.DB) *Server {
@@ -232,24 +235,21 @@ func (s *Server) Serve(ctx context.Context) error {
 	}
 	e := s.Echo()
 	sc := echo.StartConfig{Address: s.cfg.Bind, HideBanner: true}
-	slog.Info("portitor-web listening", "addr", s.cfg.Bind, "dev", s.cfg.Dev, "tls", s.cfg.TLSCert != "" || s.cfg.TLSCertificate != "")
+	slog.Info("portitor-web listening", "addr", s.cfg.Bind, "dev", s.cfg.Dev, "tls", s.cfg.TLSCert != "")
 	var err error
-	if s.cfg.TLSCertificate != "" {
-		tc, terr := s.newTLSCert()
-		if terr != nil {
-			return terr
-		}
-		go tc.run(ctx)
-		sc.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12, NextProtos: []string{"h2", "http/1.1"}, GetCertificate: tc.get}
-		err = sc.Start(ctx, e)
-	} else if s.cfg.TLSCert != "" {
-		// Echo reads file names relative to the working directory
-		// (os.DirFS("."), which refuses absolute paths); pass the contents.
+	if s.cfg.TLSCert != "" {
 		cert, key, rerr := readFiles(s.cfg.TLSCert, s.cfg.TLSKey)
 		if rerr != nil {
 			return rerr
 		}
-		err = sc.StartTLS(ctx, e, cert, key)
+		fallback, rerr := tls.X509KeyPair(cert, key)
+		if rerr != nil {
+			return fmt.Errorf("tls_cert: %w", rerr)
+		}
+		s.webCert = s.newTLSCert(&fallback)
+		go s.webCert.run(ctx)
+		sc.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12, NextProtos: []string{"h2", "http/1.1"}, GetCertificate: s.webCert.get}
+		err = sc.Start(ctx, e)
 	} else {
 		err = sc.Start(ctx, e)
 	}
