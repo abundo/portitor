@@ -103,6 +103,8 @@ const loadRows = (skip, limit) => cap.frames(applied.value, skip, limit)
 const selected = ref(null)
 const frame = ref(null)
 const node = ref(null)
+// Unfolded lines of the packet tree, kept from packet to packet.
+const treeOpen = reactive(new Set())
 async function select(n) {
   selected.value = n
   follow.value = false
@@ -293,6 +295,7 @@ function drag(key, event) {
             :key="frame.number"
             :nodes="frame.tree"
             :selected="node"
+            :open="treeOpen"
             @select="node = $event"
           />
           <div v-else class="p-2 text-sm text-muted">Select a packet.</div>
