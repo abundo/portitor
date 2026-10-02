@@ -531,6 +531,10 @@ CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 
 
 def step_users(a: dict) -> None:
+    # tshark (dumpcap) captures without sudo for the wireshark group.
+    run(["debconf-set-selections"], stdin="wireshark-common wireshark-common/install-setuid boolean true\n")
+    run(["dpkg-reconfigure", "-f", "noninteractive", "wireshark-common"])
+    run(["usermod", "-aG", "wireshark", CONSOLE_USER])
     if not a["password"]:
         return
     if a["role"] != "agent":
