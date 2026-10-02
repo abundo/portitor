@@ -15,7 +15,7 @@ or LAN, offers), a password and the time zone; before applying, LAN and WAN can 
     resolver; the one from the installation may be unreachable now),
   - creates the SQLite database and writes /etc/portitor/web.yaml, with a
     self-signed certificate for the GUI on port 443,
-  - creates the GUI user admin, and sets the console user's password,
+  - creates the GUI user portitor, and sets the console user's password,
   - sets the agent up on 127.0.0.1 (portitor-web runs on the firewall itself),
   - runs `portitor-web bootstrap`: LAN (static or DHCP, which then takes no
     default route; the default route belongs to the WAN) and WAN (DHCP or
@@ -129,7 +129,7 @@ WEB_GROUP = "portitor"
 WEB_USER = "portitor"
 WEB_DB_DIR = Path("/var/lib/portitor-web")
 AGENT_TOKEN = ETC / "agent.token"
-GUI_USER = "admin"
+GUI_USER = "portitor"
 GUI_PORT = 443
 AGENT_LISTEN = "127.0.0.1:8443"
 AGENT_PORT = 8443

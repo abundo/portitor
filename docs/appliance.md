@@ -59,8 +59,8 @@ watch). It asks for:
 - **DNS servers** the firewall itself uses, for updates and IP lists. The default is
   `1.1.1.1 8.8.8.8`. They are written to `/etc/resolv.conf`; the agent does not change
   that file, not even from the WAN's DHCP lease.
-- **Password**: for the GUI user `admin` and for the console login `portitor`, who has
-  sudo.
+- **Password**: for the user `portitor`, both in the GUI and as the console login,
+  which has sudo.
 - **Time zone**: used by scheduled tasks.
 
 Before it applies anything it shows the answers: *Apply* applies them, *Change* goes
@@ -86,7 +86,7 @@ the rule lets everything the firewall itself sends out.
 
 The screen then shows the GUI's address and its certificate fingerprint. The login
 screen shows them too; with a DHCP LAN it shows the LAN's current address. Open
-`https://<LAN address>/` from the LAN and log in as `admin`.
+`https://<LAN address>/` from the LAN and log in as `portitor`.
 The browser warns about the self-signed certificate; compare the fingerprint it shows
 with the one on the screen.
 
@@ -102,7 +102,7 @@ run `sudo portitor-setup` after logging in as `portitor` at the console.
 `sudo portitor-setup`, run again after the first setup, changes the network: the LAN
 and WAN interfaces (or swaps them), DHCP or a static address on each, the LAN's DHCP
 server, the default gateway, the DNS servers, the time zone and the keyboard layout. The last answers are the defaults. A new password
-for `admin` and `portitor` is optional; leave it empty to keep the current one. This
+for `portitor` (GUI and console) is optional; leave it empty to keep the current one. This
 is also the way back in when a change in the GUI has locked you out of it.
 
 It then deploys at once, without the confirm timeout:
@@ -158,8 +158,8 @@ too long to type comfortably, so log in over SSH (`ssh portitor@<LAN address>`) 
 `sudo portitor-setup --show-join`, which prints it as plain text, to copy it.
 
 **The GUI host (web).** The setup asks for the host's interface, DHCP or a static
-address with its default gateway, the DNS servers, the password for `admin` and
-`portitor`, and the time zone. The interface is configured in `/etc/network/interfaces`
+address with its default gateway, the DNS servers, the password for
+`portitor` (GUI and console), and the time zone. The interface is configured in `/etc/network/interfaces`
 and portitor-agent is disabled, so this host has no Portitor firewall of its own. At
 the end, paste the join string and choose *Deploy*, or choose *Later* and paste it later: log in over SSH
 and run `sudo portitor-setup --join`.
