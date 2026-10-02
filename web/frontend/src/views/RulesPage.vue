@@ -243,6 +243,17 @@ function insertInChain(rows, chain, { openCreate, createAt }, kind, at) {
   return null
 }
 
+// copyInChain adds a disabled copy of rule r at index `at` of its chain's
+// table, so the copy changes nothing until it is turned on.
+function copyInChain(rows, chain, createAt, r, at) {
+  const sub = rows.filter((x) => x.chain === chain)
+  const index = at < sub.length ? rows.indexOf(sub[at]) : rows.indexOf(sub[sub.length - 1]) + 1
+  const body = { ...r, enabled: false }
+  delete body.id
+  delete body.position
+  return createAt(clean(body), index)
+}
+
 // ruleName names a rule as its chain's table numbers it (comment and group
 // rows left out), like the server's messages: "forward rule 2 (description)".
 // A group is only its heading: deleting it keeps its rules.
@@ -328,6 +339,7 @@ function clean(b) {
               :insert="
                 (kind, at) => insertInChain(rows, c.value, { openCreate, createAt }, kind, at)
               "
+              :copy="(r, at) => copyInChain(rows, c.value, createAt, r, at)"
               @save="saveRow"
               @move="(from, to) => moveInChain(rows, c.value, moveTo, from, to)"
               @edit="openEdit"

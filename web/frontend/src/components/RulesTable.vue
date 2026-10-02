@@ -10,7 +10,8 @@
 // next group, which their chevron folds away (remembered per browser).
 // Right-click a row to insert a rule, comment or group above or below it
 // (`insert(kind, index)`, resolving to a created comment or group row) or to
-// delete it (`remove`).
+// delete it (`remove`); a rule can also be copied, the copy placed below it
+// and disabled (`copy(rule, index)`, resolving to the created row).
 // Address cells take a comma-separated list of addresses, CIDRs, names or
 // IP lists (@name); From/To cells a comma-separated list of interfaces and
 // interface zones, ticked in a menu; the Service cell a menu to tick services in (custom and
@@ -49,6 +50,8 @@ const props = defineProps({
   logBuiltin: { type: Object, default: () => ({ policy: false, invalid: false, auto: [] }) },
   // insert(kind, index): add a 'rule', 'comment' or 'group' at index of rows.
   insert: { type: Function, required: true },
+  // copy(rule, index): add a disabled copy of rule at index of rows.
+  copy: { type: Function, required: true },
   // readOnly shows the rules without letting them change (a viewer).
   readOnly: { type: Boolean, default: false },
 })
@@ -291,6 +294,11 @@ async function insertAt(kind, index) {
   const created = await props.insert(kind, index)
   if (created) wrap.value?.querySelector(`[data-note-id="${created.id}"]`)?.focus()
 }
+async function copyAt(r, index) {
+  search.value = ''
+  expandAt(props.rows, index)
+  await props.copy(r, index)
+}
 const insertItems = [
   [
     {
@@ -349,6 +357,15 @@ const contextItems = computed(() => {
   }
   const r = props.rows[menuIndex.value]
   if (r && !props.readOnly) {
+    if (!isNote(r)) {
+      items.push([
+        {
+          label: 'Copy rule',
+          icon: 'i-lucide-copy',
+          onSelect: () => copyAt(r, menuIndex.value + 1),
+        },
+      ])
+    }
     items.push([
       {
         label: `Delete ${isNote(r) ? r.kind : 'rule'}`,
