@@ -108,7 +108,7 @@ const stateColor = (s) =>
         <table class="w-full text-sm">
           <thead>
             <tr class="border-b border-default text-left text-xs text-muted">
-              <th class="py-1.5 pr-4 font-medium">Name</th>
+              <th class="py-1 pr-4 font-medium">Name</th>
               <th class="pr-4 font-medium">Description</th>
               <th class="pr-4 font-medium">State</th>
               <th class="pr-4 font-medium">Bandwidth, 5 min</th>
@@ -122,7 +122,7 @@ const stateColor = (s) =>
               :key="i.name"
               class="border-b border-default last:border-0"
             >
-              <td class="py-1.5 pr-4 font-mono">{{ ifaceText(i.name) }}</td>
+              <td class="py-1 pr-4 font-mono">{{ ifaceText(i.name) }}</td>
               <td class="pr-4">{{ ifaceDesc.get(i.name) }}</td>
               <td class="pr-4">
                 <UBadge :color="stateColor(i.state)" variant="subtle" :label="i.state" />

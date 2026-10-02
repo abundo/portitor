@@ -344,7 +344,7 @@ const tab = computed({
                 <table class="w-full text-sm">
                   <thead>
                     <tr class="border-b border-default text-left text-xs text-muted">
-                      <th class="w-px py-1.5 pr-2"></th>
+                      <th class="w-px py-1 pr-2"></th>
                       <th class="pr-4 font-medium">Interface</th>
                       <th class="pr-4 font-medium">Description</th>
                       <th class="pr-4 font-medium">Prefix</th>
@@ -375,7 +375,7 @@ const tab = computed({
                               @click="openDetail(withLabel(i.label, i.name), i.prefixes)"
                             />
                           </td>
-                          <td :rowspan="i.prefixes.length || 1" class="py-1.5 pr-4 align-top">
+                          <td :rowspan="i.prefixes.length || 1" class="py-1 pr-4 align-top">
                             <div class="font-mono">{{ withLabel(i.label, i.name) }}</div>
                             <div class="mt-0.5 flex flex-wrap gap-1">
                               <UBadge
@@ -404,11 +404,11 @@ const tab = computed({
                               />
                             </div>
                           </td>
-                          <td :rowspan="i.prefixes.length || 1" class="py-1.5 pr-4 align-top">
+                          <td :rowspan="i.prefixes.length || 1" class="py-1 pr-4 align-top">
                             {{ i.description }}
                           </td>
                         </template>
-                        <td v-if="!p" colspan="5" class="py-1.5 text-muted">
+                        <td v-if="!p" colspan="5" class="py-1 text-muted">
                           {{
                             i.ipv4_mode === 'dhcp'
                               ? 'DHCP client; no static address to serve DHCP on.'
@@ -416,8 +416,8 @@ const tab = computed({
                           }}
                         </td>
                         <template v-else>
-                          <td class="py-1.5 pr-4 font-mono">{{ p.prefix }}</td>
-                          <td class="py-1.5 pr-4">
+                          <td class="py-1 pr-4 font-mono">{{ p.prefix }}</td>
+                          <td class="py-1 pr-4">
                             <div class="flex items-center gap-1.5">
                               <USwitch
                                 v-model="p.dhcp_enabled"
@@ -441,13 +441,13 @@ const tab = computed({
                             </div>
                           </td>
                           <template v-if="p.dhcp_enabled">
-                            <td class="py-1.5 pr-4 font-mono text-xs">{{ rangeText(p) }}</td>
-                            <td class="py-1.5 pr-4 font-mono text-xs">
+                            <td class="py-1 pr-4 font-mono text-xs">{{ rangeText(p) }}</td>
+                            <td class="py-1 pr-4 font-mono text-xs">
                               {{ is6(p) ? 'from RA' : gatewayText(p) }}
                             </td>
                           </template>
                           <td v-else colspan="2" />
-                          <td class="py-1.5 font-mono text-xs">
+                          <td class="py-1 font-mono text-xs">
                             <template v-if="p.dhcp_enabled || p.ra_enabled">{{
                               p.dhcp_dns_servers?.length
                                 ? p.dhcp_dns_servers.join(', ')

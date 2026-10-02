@@ -43,7 +43,11 @@ export default defineConfig({
       // Bundle every icon used in src/ at build time; main.js disables
       // Iconify's network API, so nothing is fetched at runtime.
       icon: { clientBundle: { scan: true } },
-      ui: { colors: { primary: 'emerald', neutral: 'zinc' } },
+      ui: {
+        colors: { primary: 'emerald', neutral: 'zinc' },
+        // Compact tables, so more rows fit on the screen (AGENTS.md).
+        table: { slots: { th: 'px-2 py-1.5', td: 'px-2 py-1' } },
+      },
     }),
   ],
   resolve: {

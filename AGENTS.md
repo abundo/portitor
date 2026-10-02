@@ -193,6 +193,10 @@ singular); a custom page uses `SearchInput` above each table,
 
 - **Tables:** the Edit button is the first column, so it stays visible when the
   table is wider than the screen. Tables have no Delete button.
+- **Compact tables:** rows are dense so many fit on the screen. `UTable`'s cell
+  padding is set once in `vite.config.js` (`ui.table.slots`: `th` `px-2 py-1.5`,
+  `td` `px-2 py-1`); don't add padding back per table. A plain `<table>` uses
+  `py-1` on its cells. `RulesTable` keeps its own grid styling.
 - **Search:** every table (data tables included) has a search field above it that
   filters the rows as you type, with an X (cross) in the field that clears it:
   `SearchInput.vue`, with `useSearch` (`utils/search.js`) for the rows. A row

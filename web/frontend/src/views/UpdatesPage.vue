@@ -212,7 +212,7 @@ async function reboot() {
             <table class="w-full text-sm">
               <thead>
                 <tr class="border-b border-default text-left text-xs text-muted">
-                  <th class="py-1.5 pr-4 font-medium">Release</th>
+                  <th class="py-1 pr-4 font-medium">Release</th>
                   <th class="pr-4 font-medium">Date</th>
                   <th class="pr-4 font-medium">Notes</th>
                   <th></th>
@@ -224,10 +224,10 @@ async function reboot() {
                   :key="r.tag"
                   class="border-b border-default last:border-0"
                 >
-                  <td class="py-1.5 pr-4 font-mono">{{ r.tag }}</td>
-                  <td class="py-1.5 pr-4">{{ r.date }}</td>
-                  <td class="py-1.5 pr-4 text-muted">{{ r.notes }}</td>
-                  <td class="py-1.5 text-right">
+                  <td class="py-1 pr-4 font-mono">{{ r.tag }}</td>
+                  <td class="py-1 pr-4">{{ r.date }}</td>
+                  <td class="py-1 pr-4 text-muted">{{ r.notes }}</td>
+                  <td class="py-1 text-right">
                     <UButton
                       v-if="r.installable && !r.notes.includes('current')"
                       size="xs"
@@ -276,7 +276,7 @@ async function reboot() {
             <table class="w-full text-sm">
               <thead>
                 <tr class="border-b border-default text-left text-xs text-muted">
-                  <th class="py-1.5 pr-4 font-medium">Package</th>
+                  <th class="py-1 pr-4 font-medium">Package</th>
                   <th class="pr-4 font-medium">Installed</th>
                   <th class="font-medium">New</th>
                 </tr>

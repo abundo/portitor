@@ -255,7 +255,7 @@ const tab = computed({
                   <table class="w-full text-sm">
                     <thead>
                       <tr class="border-b border-default text-left text-xs text-muted">
-                        <th class="py-1.5 pr-4 font-medium">Interface</th>
+                        <th class="py-1 pr-4 font-medium">Interface</th>
                         <th class="pr-4 font-medium">Description</th>
                         <th class="pr-4 font-medium">Respond to DNS queries</th>
                       </tr>
@@ -266,9 +266,9 @@ const tab = computed({
                         :key="i.id"
                         class="border-b border-default last:border-0"
                       >
-                        <td class="py-1.5 pr-4 font-mono">{{ withLabel(i.label, i.name) }}</td>
-                        <td class="py-1.5 pr-4">{{ i.description }}</td>
-                        <td class="py-1.5 pr-4">
+                        <td class="py-1 pr-4 font-mono">{{ withLabel(i.label, i.name) }}</td>
+                        <td class="py-1 pr-4">{{ i.description }}</td>
+                        <td class="py-1 pr-4">
                           <USwitch
                             v-model="i.dns_listen"
                             :aria-label="`Respond to DNS queries on ${i.name}`"
@@ -310,7 +310,7 @@ const tab = computed({
                   <table class="w-full text-sm">
                     <thead>
                       <tr class="border-b border-default text-left text-xs text-muted">
-                        <th class="py-1.5 pr-4 font-medium">Interface</th>
+                        <th class="py-1 pr-4 font-medium">Interface</th>
                         <th class="pr-4 font-medium">Description</th>
                         <th class="font-medium">Use DNS from DHCP</th>
                       </tr>
@@ -321,9 +321,9 @@ const tab = computed({
                         :key="i.id"
                         class="border-b border-default last:border-0"
                       >
-                        <td class="py-1.5 pr-4 font-mono">{{ withLabel(i.label, i.name) }}</td>
-                        <td class="py-1.5 pr-4">{{ i.description }}</td>
-                        <td class="py-1.5">
+                        <td class="py-1 pr-4 font-mono">{{ withLabel(i.label, i.name) }}</td>
+                        <td class="py-1 pr-4">{{ i.description }}</td>
+                        <td class="py-1">
                           <USwitch
                             :model-value="i.dns_from_dhcp"
                             :aria-label="`Use DNS servers from the DHCP lease on ${i.name}`"

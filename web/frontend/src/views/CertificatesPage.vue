@@ -184,22 +184,22 @@ const fields = computed(() => [
           <table class="w-full text-sm">
             <thead class="text-left text-muted">
               <tr class="border-b border-default">
-                <th class="py-2 pe-3 font-medium">Name</th>
-                <th class="py-2 pe-3 font-medium">SANs</th>
-                <th class="py-2 pe-3 font-medium">State</th>
-                <th class="py-2 pe-3 font-medium">Valid</th>
-                <th class="py-2 pe-3 font-medium min-w-48">Lifetime left</th>
-                <th class="py-2 font-medium" />
+                <th class="py-1 pe-3 font-medium">Name</th>
+                <th class="py-1 pe-3 font-medium">SANs</th>
+                <th class="py-1 pe-3 font-medium">State</th>
+                <th class="py-1 pe-3 font-medium">Valid</th>
+                <th class="py-1 pe-3 font-medium min-w-48">Lifetime left</th>
+                <th class="py-1 font-medium" />
               </tr>
             </thead>
             <tbody>
               <tr v-for="row in filtered" :key="row.id" class="border-b border-default align-top">
-                <td class="py-2 pe-3 font-medium">
+                <td class="py-1 pe-3 font-medium">
                   {{ row.name }}
                   <div v-if="!row.enabled" class="text-xs text-muted">disabled</div>
                 </td>
-                <td class="py-2 pe-3 font-mono">{{ row.domains.join(', ') }}</td>
-                <td class="py-2 pe-3 text-xs">
+                <td class="py-1 pe-3 font-mono">{{ row.domains.join(', ') }}</td>
+                <td class="py-1 pe-3 text-xs">
                   <template v-if="states[row.name]">
                     <UBadge
                       :color="stateColor[states[row.name].state] ?? 'neutral'"
@@ -217,13 +217,13 @@ const fields = computed(() => [
                   </template>
                   <span v-else class="text-muted">not deployed</span>
                 </td>
-                <td class="py-2 pe-3 text-xs whitespace-nowrap">
+                <td class="py-1 pe-3 text-xs whitespace-nowrap">
                   <template v-if="states[row.name]?.not_after">
                     <div>from {{ when(states[row.name].not_before) }}</div>
                     <div>until {{ when(states[row.name].not_after) }}</div>
                   </template>
                 </td>
-                <td class="py-2 pe-3 text-xs">
+                <td class="py-1 pe-3 text-xs">
                   <template v-if="lifetime(states[row.name])">
                     <div class="h-2 w-full rounded bg-elevated overflow-hidden">
                       <div
@@ -239,7 +239,7 @@ const fields = computed(() => [
                   </template>
                   <span v-else class="text-muted">no certificate</span>
                 </td>
-                <td class="py-2 text-right">
+                <td class="py-1 text-right">
                   <UDropdownMenu v-if="states[row.name]?.not_after" :items="downloadItems(row)">
                     <UButton
                       size="xs"
