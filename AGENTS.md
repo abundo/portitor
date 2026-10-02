@@ -266,7 +266,14 @@ Committing directly to `main` is fine; no feature branch is needed.
   `install.py` adds `deploy/apparmor/<profile>` to `/etc/apparmor.d/local/<profile>`;
   a new path named or Kea reads or writes must be added there.
 - `portitor-agent netns-exec` reads `<state_dir>/instances/<name>/netns`, written on
-  apply; the per-instance systemd units start through it.
+  apply; the per-instance systemd units start through it. It enters the namespace itself and
+  drops CAP_SYS_ADMIN and the like (`droppedCaps`) before the exec, so a daemon
+  can't setns into another instance. The units are sandboxed per instance
+  (multitenancy): they see only their own `etc`/`state` instance directories
+  (`TemporaryFileSystem` + `Bind*Paths`), the rest read-only, with private
+  /tmp, IPC and PID namespaces. A new path a daemon writes goes in its unit's
+  `ReadWritePaths`; `ExecReload` needs the `+` prefix, as `PrivatePIDs` gives
+  each `Exec*` line its own PID namespace.
 - The packet capture page runs Wiregasm (Wireshark in WebAssembly) in a worker,
   `workers/capture.worker.js`, which fetches the capture stream itself and
   dissects the whole file again as it grows (Wiregasm has no incremental

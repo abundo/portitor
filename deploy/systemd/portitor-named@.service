@@ -13,8 +13,31 @@ Type=simple
 # -u: the BIND user (bind on Debian/Ubuntu, named on Fedora/RHEL). Keep in
 # step with bind_user in /etc/portitor/agent.yaml.
 ExecStart=/usr/bin/portitor-agent netns-exec %i -- /usr/sbin/named -f -u bind -c /etc/portitor/instances/%i/named.conf
-ExecReload=/bin/kill -HUP $MAINPID
+# + : outside the sandbox, where $MAINPID is (PrivatePIDs gives each Exec*
+# line a PID namespace of its own).
+ExecReload=+/bin/kill -HUP $MAINPID
 Restart=on-failure
 RestartSec=5
 RuntimeDirectory=portitor
 RuntimeDirectoryPreserve=yes
+# Multitenancy: an instance's daemon sees only its own files and processes.
+# The other instances' config and state are hidden, the rest of the system
+# is read-only, and it gets its own /tmp, IPC and PID namespaces.
+# netns-exec drops CAP_SYS_ADMIN and the like, so it can't enter another
+# instance's network namespace either.
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateIPC=yes
+PrivatePIDs=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectProc=invisible
+TemporaryFileSystem=/etc/portitor /var/lib/portitor
+BindReadOnlyPaths=/etc/portitor/instances/%i
+BindPaths=/var/lib/portitor/instances/%i
+ReadWritePaths=/run/portitor

@@ -18,10 +18,7 @@ import (
 	"math/big"
 	"net"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -96,27 +93,4 @@ func generateCert(certFile, keyFile string, hosts []string) error {
 		return err
 	}
 	return atomicWrite(certFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o644)
-}
-
-// NetnsExec replaces the process with argv run inside an instance's
-// namespace. systemd template units use it (portitor-named@.service, ...)
-// so the daemon's PID stays the unit's main PID. The namespace is read
-// from the file the agent writes on apply; empty means root namespace.
-func NetnsExec(stateDir, instance string, argv []string) error {
-	if len(argv) == 0 {
-		return errors.New("no command")
-	}
-	if strings.ContainsAny(instance, "/.") || instance == "" {
-		return fmt.Errorf("invalid instance %q", instance)
-	}
-	data, err := os.ReadFile(filepath.Join(stateDir, "instances", instance, "netns"))
-	if err != nil {
-		return fmt.Errorf("instance %s is not configured: %w", instance, err)
-	}
-	argv = inNetns(strings.TrimSpace(string(data)), argv)
-	path, err := exec.LookPath(argv[0])
-	if err != nil {
-		return err
-	}
-	return syscall.Exec(path, argv, os.Environ())
 }
