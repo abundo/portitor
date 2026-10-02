@@ -227,8 +227,9 @@ def need_sudo() -> bool:
     return os.geteuid() != 0
 
 
-def ensure_sudo(dry_run: bool) -> None:
-    if dry_run or not need_sudo():
+def ensure_sudo(plan: "Plan", dry_run: bool) -> None:
+    """Asks for the sudo password up front, when a host is this one."""
+    if dry_run or not need_sudo() or not any(h and h.local for h in (plan.web, plan.agent)):
         return
     log("==> Requesting sudo access")
     if subprocess.run(["sudo", "-v"], check=False).returncode != 0:
@@ -1351,7 +1352,7 @@ def main_release(args: argparse.Namespace) -> int:
     if missing := missing_archs(rel, needed):
         raise InstallError(f"{rel.tag} has no archive for {', '.join(missing)}")
     log(f"==> Installing {rel.tag}: " + ", ".join(plan.describe()))
-    ensure_sudo(args.dry_run)
+    ensure_sudo(plan, args.dry_run)
 
     inherited = os.environ.get(RELEASE_WORK_ENV) if os.environ.get(PINNED_ENV) else None
     work = Path(inherited) if inherited else Path(tempfile.mkdtemp(prefix="portitor-rel-"))
@@ -1431,7 +1432,7 @@ def main_source(args: argparse.Namespace) -> int:
     proc = subprocess.run([str(build_dir / "portitor-web"), "--version"], capture_output=True, text=True, check=False)
     version = version_of_output(proc.stdout) or git_describe()
 
-    ensure_sudo(args.dry_run)
+    ensure_sudo(plan, args.dry_run)
     install(plan, roots, archs, REPO_DIR / "deploy", version, args.yes)
     return 0
 
@@ -1460,7 +1461,7 @@ def main_local(args: argparse.Namespace) -> int:
         if proc.returncode != 0 or not version:
             raise InstallError(f"cannot run {root / 'portitor-agent'} --version (not an {local_arch()} build?)")
         log(f"==> Local install of {version} from {path}: " + ", ".join(plan.describe()))
-        ensure_sudo(args.dry_run)
+        ensure_sudo(plan, args.dry_run)
         install(plan, {local_arch(): root}, archs, root / "deploy", version, args.yes)
     finally:
         if work:
