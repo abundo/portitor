@@ -38,5 +38,9 @@ auto lo
 iface lo inet loopback
 IFACES
 
+# Conntrack timestamps (the Connections page's start times) in every
+# namespace: new namespaces take the module's default, not the root's sysctl.
+echo 'options nf_conntrack tstamp=1' >/etc/modprobe.d/portitor-conntrack.conf
+
 # Keep the journal (update jobs are read from it) across reboots.
 mkdir -p /var/log/journal

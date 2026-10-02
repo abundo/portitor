@@ -12,6 +12,7 @@ import { rules } from '@/api'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
 import { useSearch, valuesText } from '@/utils/search'
 import { bytes } from '@/utils/bytes'
+import { ago, when } from '@/utils/time'
 
 const { store } = useInstanceRefs()
 const form = reactive({ interval: 2000, max: 1000 })
@@ -140,6 +141,7 @@ const rows = computed(() =>
       bytes: c.bytes + c.reply_bytes,
       rule: c.mark ? (ruleText.value[c.mark] ?? `#${c.mark}`) : '',
       timeout: c.timeout,
+      start: c.start ? new Date(c.start * 1000).toISOString() : '',
     }
   }),
 )
@@ -156,6 +158,7 @@ const columns = [
   { id: 'packets', header: 'Packets' },
   { id: 'bytes', header: 'Bytes' },
   { accessorKey: 'rule', header: 'Rule' },
+  { id: 'start', header: 'Started' },
   { id: 'timeout', header: 'Expires in' },
 ]
 const updated = computed(() =>
@@ -226,6 +229,11 @@ const updated = computed(() =>
         </template>
         <template #packets-cell="{ row }">{{ row.original.packets.toLocaleString() }}</template>
         <template #bytes-cell="{ row }">{{ bytes(row.original.bytes) }}</template>
+        <template #start-cell="{ row }">
+          <span v-if="row.original.start" :title="when(row.original.start)">{{
+            ago(row.original.start)
+          }}</span>
+        </template>
         <template #timeout-cell="{ row }">{{ row.original.timeout }} s</template>
       </UTable>
     </div>

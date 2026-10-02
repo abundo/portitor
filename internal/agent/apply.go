@@ -192,7 +192,8 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 		}
 
 		// -e: an interface with IPv6 disabled has no accept_ra key.
-		sysctls := []string{"net.ipv4.ip_forward=1", "net.ipv6.conf.all.forwarding=1"}
+		// Conntrack timestamps give the Connections page start times.
+		sysctls := []string{"net.ipv4.ip_forward=1", "net.ipv6.conf.all.forwarding=1", "net.netfilter.nf_conntrack_timestamp=1"}
 		for _, ifc := range in.Interfaces {
 			ra := "0"
 			if ifc.IPv6AcceptRA {
