@@ -49,6 +49,8 @@ export const api = {
   changePassword: (current, next) => http.post('/me/password', { current, new: next }),
   version: () => http.get('/version').then((r) => r.data),
   acmeCAs: () => http.get('/certificates/cas').then((r) => r.data ?? []),
+  certificateDownload: (id, format) =>
+    http.get(`/certificates/${id}/download`, { params: { format }, responseType: 'blob' }),
   dnsProviders: () => http.get('/dyndns/providers').then((r) => r.data ?? []),
 
   ipamTree: (instanceId) =>

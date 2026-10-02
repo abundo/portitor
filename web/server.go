@@ -154,6 +154,7 @@ func (s *Server) Echo() *echo.Echo {
 	g.GET("/rules/auto", s.handleAutoRules)
 	g.GET("/services", func(c *echo.Context) error { return c.JSON(http.StatusOK, fwconfig.Services) })
 	g.GET("/certificates/cas", func(c *echo.Context) error { return c.JSON(http.StatusOK, fwconfig.ACMECAs) })
+	g.GET("/certificates/:id/download", s.handleCertificateDownload)
 	g.GET("/dyndns/providers", func(c *echo.Context) error { return c.JSON(http.StatusOK, fwconfig.DNSProviders) })
 	g.GET("/predefined-services", func(c *echo.Context) error { return c.JSON(http.StatusOK, netobj.Predefined) })
 	g.GET("/icmp-types", func(c *echo.Context) error {
