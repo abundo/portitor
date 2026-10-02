@@ -74,8 +74,8 @@ configuration:
 - the WAN interface, with DHCP or its static address, labelled *WAN*,
 - the default route (for a static WAN),
 - with the LAN DHCP server on, DHCP on the LAN's prefix (in IPAM) with that range,
-- three input rules, *portitor-web from the LAN* (TCP 443), *SSH from the LAN* and
-  *ping from the LAN*,
+- a service, *portitor-mgmt* (TCP 22 and 443), and two input rules, *management
+  from the LAN* (the service *portitor-mgmt*) and *ping from the LAN*,
 - a forward rule, *LAN to WAN*, that accepts everything from the LAN to the WAN,
 - a NAT rule, *masquerade to the WAN*: any source, destination and protocol out of
   the WAN gets the WAN's address,
@@ -111,8 +111,8 @@ It then deploys at once, without the confirm timeout:
   removed, and an address in use on another interface moves;
 - the IPv4 default route is the new gateway, or none with a DHCP WAN (whose lease
   brings it);
-- the rules *portitor-web from the LAN*, *SSH from the LAN* and *ping from the LAN*
-  are enabled and match the new LAN interface; the rule *LAN to WAN* and the NAT rule
+- the service *portitor-mgmt* gets the GUI port again; the rules *management from
+  the LAN* and *ping from the LAN* are enabled and match the new LAN interface; the rule *LAN to WAN* and the NAT rule
   *masquerade to the WAN*, if they are still there, match the new LAN and WAN;
 - the LAN and WAN are labelled *LAN* and *WAN*, unless you gave them another
   label;
@@ -125,7 +125,7 @@ Everything else stays: the database, the agent, other interfaces (an interface t
 was the LAN or WAN before stays enabled), rules, NAT and DHCP. Run it at the console:
 an SSH session over the old LAN address drops.
 
-Do not edit the rules *portitor-web from the LAN* or the LAN interface in a way that
+Do not edit the rule *management from the LAN*, the service *portitor-mgmt* or the LAN interface in a way that
 locks you out. If that happens, the auto-rollback restores the previous configuration
 as long as you do not confirm the change.
 
@@ -165,9 +165,9 @@ the end, paste the join string and choose *Deploy*, or choose *Later* and paste 
 and run `sudo portitor-setup --join`.
 
 The join deploys the firewall's first configuration, as for *both*: its LAN and WAN,
-the default route, *SSH from the LAN*, *ping from the LAN*, *LAN to WAN* and the
-masquerade. There is no *portitor-web from the LAN* rule, since the GUI is not on the
-firewall.
+the default route, *management from the LAN*, *ping from the LAN*, *LAN to WAN* and
+the masquerade. Its service *portitor-mgmt* holds only SSH (TCP 22), since the GUI is
+not on the firewall.
 
 A portitor-web installed with `install.py` takes the join string too:
 

@@ -19,8 +19,8 @@ or LAN, offers), a password and the time zone; before applying, LAN and WAN can 
   - sets the agent up on 127.0.0.1 (portitor-web runs on the firewall itself),
   - runs `portitor-web bootstrap`: LAN (static or DHCP, which then takes no
     default route; the default route belongs to the WAN) and WAN (DHCP or
-    static), described as LAN and WAN, default route, input rules for the
-    GUI, SSH and ping from the LAN, a forward rule from the LAN to the WAN,
+    static), described as LAN and WAN, default route, input rules for
+    management (the portitor-mgmt service: SSH and the GUI) and ping from the LAN, a forward rule from the LAN to the WAN,
     masquerade on the WAN, a DHCP server on the LAN if chosen (handing out
     the DNS servers above), and deploys (output has the instance's allow all
     output rule),
@@ -545,6 +545,8 @@ console_user: {CONSOLE_USER}
 """, 0o600)
     run(["systemctl", "enable", "portitor-agent.service"])
     run(["systemctl", "restart", "portitor-agent.service"])
+    # SSH is open from the LAN (the portitor-mgmt service).
+    run(["systemctl", "enable", "--now", "ssh.service"])
 
 
 def step_lan_unit(a: dict) -> None:

@@ -110,7 +110,7 @@ func TestBootstrap(t *testing.T) {
 	}
 	var gui bool
 	for _, r := range in.Rules {
-		if r.Chain == fwconfig.ChainInput && slices.Equal(r.Services, []fwconfig.ServiceMatch{{Protocol: "tcp", DstPorts: strconv.Itoa(opts.GUIPort)}}) && slices.Equal(r.InInterfaces, []string{"enp2s0"}) {
+		if r.Chain == fwconfig.ChainInput && slices.Equal(r.Services, []fwconfig.ServiceMatch{{Protocol: "tcp", DstPorts: "22," + strconv.Itoa(opts.GUIPort)}}) && slices.Equal(r.InInterfaces, []string{"enp2s0"}) {
 			gui = true
 		}
 	}
@@ -201,7 +201,7 @@ func TestBootstrapWAN(t *testing.T) {
 			var ssh, forward, output bool
 			for _, r := range in.Rules {
 				switch {
-				case r.Chain == fwconfig.ChainInput && slices.Equal(r.Services, []fwconfig.ServiceMatch{{Protocol: "tcp", DstPorts: "22"}}):
+				case r.Chain == fwconfig.ChainInput && r.Description == "management from the LAN" && strings.HasPrefix(r.Services[0].DstPorts, "22"):
 					ssh = slices.Equal(r.InInterfaces, []string{"enp2s0"})
 				case r.Chain == fwconfig.ChainForward:
 					forward = r.Action == fwconfig.ActionAccept && len(r.Services) == 0 && len(r.SrcAddrs) == 0 && len(r.DstAddrs) == 0 &&
@@ -287,7 +287,7 @@ func TestBootstrapReconfigure(t *testing.T) {
 			}
 		}
 	}
-	if rules != 3 || forward != 1 {
+	if rules != 2 || forward != 1 {
 		t.Errorf("%d input and %d forward rules: %+v", rules, forward, in.Rules)
 	}
 	if len(in.NAT) != 1 || !slices.Equal(in.NAT[0].OutInterfaces, []string{"enp2s0"}) {

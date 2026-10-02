@@ -157,7 +157,7 @@ func broadcast(p netip.Prefix) netip.Addr {
 
 // Bootstrap configures a new installation and deploys it: the agent
 // settings, the LAN interface with its address, the WAN interface (static
-// or DHCP), the default route, rules that let the LAN reach the GUI and SSH
+// or DHCP), the default route, rules that let the LAN reach the GUI and SSH (the portitor-mgmt service)
 // and ping the firewall and forward from the LAN to the WAN, and a
 // masquerade on the WAN (the instance's "allow all output" rule lets the
 // firewall's own traffic out). Every other
@@ -279,18 +279,14 @@ func bootstrapNetwork(tx *gorm.DB, instanceID uint, o BootstrapOptions) error {
 	}
 
 	lan, wan := models.StringList{o.LAN}, models.StringList{o.WAN}
-	var rules []models.Rule
-	if o.GUIPort > 0 {
-		gui, err := bootstrapGUIService(tx, o)
-		if err != nil {
-			return err
-		}
-		rules = append(rules, models.Rule{Chain: fwconfig.ChainInput, InInterfaces: lan, Services: models.StringList{gui}, Description: "portitor-web from the LAN"})
+	mgmt, err := bootstrapMgmtService(tx, o)
+	if err != nil {
+		return err
 	}
-	rules = append(rules,
-		models.Rule{Chain: fwconfig.ChainInput, InInterfaces: lan, Services: models.StringList{"ssh"}, Description: "SSH from the LAN"},
-		models.Rule{Chain: fwconfig.ChainInput, InInterfaces: lan, Services: models.StringList{"all-icmp"}, Description: "ping from the LAN"},
-	)
+	rules := []models.Rule{
+		{Chain: fwconfig.ChainInput, InInterfaces: lan, Services: models.StringList{mgmt}, Description: "management from the LAN"},
+		{Chain: fwconfig.ChainInput, InInterfaces: lan, Services: models.StringList{"all-icmp"}, Description: "ping from the LAN"},
+	}
 	if o.WAN != "" {
 		rules = append(rules, models.Rule{Chain: fwconfig.ChainForward, InInterfaces: lan, OutInterfaces: wan, Description: "LAN to WAN"})
 	}
@@ -437,11 +433,15 @@ func bootstrapDNS(tx *gorm.DB, instanceID uint, o BootstrapOptions) error {
 	return tx.Create(&z).Error
 }
 
-// bootstrapGUIService returns the name of the GUI port's service, a service
-// of its own, kept at the port on reconfigure.
-func bootstrapGUIService(tx *gorm.DB, o BootstrapOptions) (string, error) {
-	gui := models.Service{Name: "portitor-web", Type: models.ServiceTypePorts, Description: "The portitor-web GUI",
-		Ports: models.ServicePortList{{Protocol: "tcp", DstLo: o.GUIPort}}}
+// bootstrapMgmtService returns the name of the management service: SSH and
+// the GUI port (when portitor-web runs here), kept at the port on reconfigure.
+func bootstrapMgmtService(tx *gorm.DB, o BootstrapOptions) (string, error) {
+	ports := models.ServicePortList{{Protocol: "tcp", DstLo: 22}}
+	if o.GUIPort > 0 && o.GUIPort != 22 {
+		ports = append(ports, models.ServicePort{Protocol: "tcp", DstLo: o.GUIPort})
+	}
+	gui := models.Service{Name: "portitor-mgmt", Type: models.ServiceTypePorts, Description: "Portitor management: SSH and the portitor-web GUI",
+		Ports: ports}
 	var old models.Service
 	switch err := tx.Where("name = ?", gui.Name).First(&old).Error; {
 	case errors.Is(err, gorm.ErrRecordNotFound):

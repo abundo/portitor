@@ -19,6 +19,8 @@ python3 "$root/install.py" --local "$root" --web --agent --yes
 install -D -m 0755 "$d/portitor-setup.py" /usr/bin/portitor-setup
 install -D -m 0644 "$d/portitor-firstboot.service" /etc/systemd/system/portitor-firstboot.service
 systemctl enable portitor-firstboot.service
+# SSH is open from the LAN (the portitor-mgmt service).
+systemctl enable ssh.service
 # Only in an ISO built with --test: answers, so the setup asks nothing.
 if [ -f "$d/firstboot.answers" ]; then
 	install -m 0600 "$d/firstboot.answers" /etc/portitor/firstboot.answers
