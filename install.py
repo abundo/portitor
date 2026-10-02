@@ -20,7 +20,9 @@ What gets installed:
   (default)       whatever is installed on this host. When that includes
                   portitor-web, also the agent at the host of the agent URL in
                   its settings (`portitor-web agent-url`).
-  --web           portitor-web on this host (plus the agent, as above)
+  --web [HOST]    portitor-web on HOST (default this host), over SSH like
+                  --agent (plus the agent, as above; an agent URL on
+                  localhost then means HOST)
   --agent [HOST]  portitor-agent on HOST (default this host), over SSH as
                   --ssh-user (default portitor, which needs passwordless
                   sudo; the installer prints how to set that up), or root
@@ -75,7 +77,7 @@ from typing import Sequence
 
 # Bump when the installer itself changes, so a release's copy can tell
 # whether it is newer than the one running.
-INSTALLER_VERSION = 3
+INSTALLER_VERSION = 4
 INSTALLER_FILENAME = "install.py"
 # Where the agent host keeps a copy, for updates from the GUI.
 INSTALLER_DEST = "/usr/lib/portitor/install.py"
@@ -289,7 +291,9 @@ class Host:
         mutate: bool = True,
         capture: bool = False,
         stdin_file: Path | None = None,
+        root: bool | None = None,
     ) -> subprocess.CompletedProcess[str]:
+        """root defaults to mutate: a read that needs root passes root=True."""
         where = "" if self.local else f"{self.name}: "
         if mutate:
             if self.dry_run:
@@ -298,7 +302,7 @@ class Host:
             log(f"    $ {where}{desc or script}")
         with (stdin_file.open("rb") if stdin_file else open(os.devnull, "rb")) as stdin:
             proc = subprocess.run(
-                self.argv(script, root=mutate),
+                self.argv(script, root=mutate if root is None else root),
                 stdin=stdin,
                 capture_output=capture,
                 text=True,
@@ -626,13 +630,17 @@ def install(
 # ---------------------------------------------------------------------------
 
 
-def agent_host_from_settings() -> str | None:
-    """Host part of the agent URL in the installed portitor-web's settings."""
-    if not (Path(WEB_BIN).exists() and Path(WEB_CONFIG).exists()):
+def agent_host_from_settings(web: Host) -> str | None:
+    """Host part of the agent URL in the settings of portitor-web on web.
+
+    An agent on localhost is on the web host itself.
+    """
+    if not (web.exists(WEB_BIN) and web.exists(WEB_CONFIG)):
         return None
-    as_web = ["sudo", "-u", WEB_USER] if need_sudo() else ["runuser", "-u", WEB_USER, "--"]
-    cmd = as_web + [WEB_BIN, "-f", WEB_CONFIG, "agent-url"]
-    proc = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=30)
+    proc = web.run(
+        f"runuser -u {WEB_USER} -- {WEB_BIN} -f {WEB_CONFIG} agent-url",
+        check=False, mutate=False, capture=True, root=True,
+    )
     if proc.returncode != 0:
         raise InstallError(
             "could not read the agent URL from portitor-web's settings: "
@@ -645,37 +653,43 @@ def agent_host_from_settings() -> str | None:
     host = urllib.parse.urlsplit(url).hostname
     if not host:
         raise InstallError(f"cannot find a host in the agent URL {url!r}; pass --agent HOST")
+    if not web.local and host in LOCAL_NAMES:
+        return web.name
     return host
 
 
 def make_plan(args: argparse.Namespace) -> Plan:
-    web = args.web
+    web_host: str | None = args.web
     agent_host: str | None = args.agent
-    if not web and agent_host is None:
-        web = Path(WEB_BIN).exists()
-        if not web and Path(AGENT_BIN).exists():
+    if web_host is None and agent_host is None:
+        if Path(WEB_BIN).exists():
+            web_host = "localhost"
+        elif Path(AGENT_BIN).exists():
             agent_host = "localhost"
-        if not web and agent_host is None:
+        if web_host is None and agent_host is None:
             raise InstallError(
                 "Portitor is not installed on this host. For a first install pass "
-                "--web and/or --agent [HOST]."
+                "--web [HOST] and/or --agent [HOST]."
             )
+    web = Host(web_host, args.ssh_user, args.dry_run) if web_host is not None else None
+    if web:
+        check_ssh(web)
     if web and agent_host is None and not args.no_agent:
-        agent_host = agent_host_from_settings()
+        agent_host = agent_host_from_settings(web)
         if agent_host:
             log(f"==> Agent from portitor-web's settings: {agent_host}")
         else:
             log("==> No agent URL in portitor-web's settings; not updating an agent")
     if args.no_agent:
         agent_host = None
-    elif web and agent_host is None and Path(AGENT_BIN).exists():
-        agent_host = "localhost"
+    elif web and agent_host is None and web.exists(AGENT_BIN):
+        agent_host = web.name
     if not web and agent_host is None:
         raise InstallError("nothing to install")
-    return Plan(
-        web=Host("localhost", args.ssh_user, args.dry_run) if web else None,
-        agent=Host(agent_host, args.ssh_user, args.dry_run) if agent_host else None,
-    )
+    agent = Host(agent_host, args.ssh_user, args.dry_run) if agent_host else None
+    if agent:
+        check_ssh(agent)
+    return Plan(web=web, agent=agent)
 
 
 def ssh_setup_help(host: str, user: str) -> str:
@@ -703,17 +717,25 @@ def ssh_setup_help(host: str, user: str) -> str:
     ])
 
 
+def check_ssh(host: Host) -> None:
+    """Fail early, with how to set it up, when host is remote and unreachable as root."""
+    if host.local:
+        return
+    proc = host.run("true", check=False, mutate=False, capture=True, root=True)
+    if proc.returncode != 0:
+        raise InstallError(
+            f"cannot reach {host.name} over SSH as {host.ssh_user} "
+            f"with {'root' if host.ssh_user == 'root' else 'passwordless sudo'}: "
+            f"{(proc.stderr or '').strip()}\n\n"
+            + ssh_setup_help(host.name, host.ssh_user)
+        )
+
+
 def plan_archs(plan: Plan) -> dict[str, str]:
     archs = {"web": local_arch(), "agent": local_arch()}
-    if plan.agent and not plan.agent.local:
-        try:
-            archs["agent"] = plan.agent.arch()
-        except InstallError as exc:
-            raise InstallError(
-                f"cannot reach {plan.agent.name} over SSH as {plan.agent.ssh_user} "
-                f"with {'root' if plan.agent.ssh_user == 'root' else 'passwordless sudo'}: {exc}\n\n"
-                + ssh_setup_help(plan.agent.name, plan.agent.ssh_user)
-            ) from exc
+    for kind, host in (("web", plan.web), ("agent", plan.agent)):
+        if host and not host.local:
+            archs[kind] = host.arch()
     return archs
 
 
@@ -1382,16 +1404,24 @@ def main_source(args: argparse.Namespace) -> int:
         log("==> Building (make release)")
         build(["make", "release"], {"CGO_ENABLED": "0"}, args.dry_run)
     roots = {local_arch(): build_dir}
-    if plan.agent and archs["agent"] != local_arch():
-        arch = archs["agent"]
+    # What each architecture needs: the local one always gets both (make release).
+    needs: dict[str, set[str]] = {local_arch(): {"portitor-web", "portitor-agent"}}
+    for kind, host in (("web", plan.web), ("agent", plan.agent)):
+        if host:
+            needs.setdefault(archs[kind], set()).add(f"portitor-{kind}")
+    for arch, names in needs.items():
+        if arch == local_arch():
+            continue
         cross = build_dir / f"{ARCHIVE_OS}_{arch}"
-        log(f"==> Building portitor-agent for {plan.agent.name} ({arch})")
+        log(f"==> Building {', '.join(sorted(names))} for {arch}")
         if not args.skip_build:
-            build(["make", "portitor-agent", f"BUILD_DIR={cross.relative_to(REPO_DIR)}"],
+            # release builds the frontend into portitor-web, as for this host.
+            target = "release" if "portitor-web" in names else "portitor-agent"
+            build(["make", target, f"BUILD_DIR={cross.relative_to(REPO_DIR)}"],
                   {"CGO_ENABLED": "0", "GOOS": ARCHIVE_OS, "GOARCH": arch}, args.dry_run)
         roots[arch] = cross
     for arch, root in roots.items():
-        for name in ("portitor-web", "portitor-agent"):
+        for name in sorted(needs[arch]):
             if not (root / name).is_file():
                 if args.dry_run:
                     log(f"==> Dry run: {root / name} is not built yet, so nothing more to show")
@@ -1450,6 +1480,7 @@ Examples:
   ./install.py --install v1.2.0 --web --agent fw.example.net
   ./install.py --source --dry-run       from this tree, show what would change
   ./install.py --source --agent 192.168.1.1   this tree's agent onto the firewall only
+  ./install.py --source --web gui.example.net --agent fw.example.net   this tree onto both
   ./install.py --local portitor_1.2.0_linux_amd64.tar.gz --web --agent
 
 Environment:
@@ -1458,12 +1489,13 @@ Environment:
 """,
     )
     what = p.add_argument_group("what to install (default: what is installed on this host)")
-    what.add_argument("--web", action="store_true", help="portitor-web on this host")
+    what.add_argument("--web", nargs="?", const="localhost", metavar="HOST",
+                      help="portitor-web on HOST (default this host)")
     what.add_argument("--agent", nargs="?", const="localhost", metavar="HOST",
                       help="portitor-agent on HOST (default this host)")
     what.add_argument("--no-agent", action="store_true", help="never install or update the agent")
     what.add_argument("--ssh-user", default=os.environ.get("SSH_USER", SSH_USER_DEFAULT),
-                      help="SSH user for a remote agent: root, or a user with passwordless sudo "
+                      help="SSH user for a remote host: root, or a user with passwordless sudo "
                            f"(default {SSH_USER_DEFAULT})")
     src = p.add_argument_group("where from")
     src.add_argument("--source", action="store_true", help="build and install this source tree")
