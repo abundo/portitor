@@ -33,6 +33,11 @@ const router = createRouter({
         { path: 'firewall/services', component: () => import('@/views/ServicesPage.vue') },
         { path: 'firewall/nat', component: () => import('@/views/NatPage.vue') },
         { path: 'firewall/ip-lists', redirect: '/objects' },
+        {
+          path: 'firewall/connections',
+          component: () => import('@/views/ConnectionsPage.vue'),
+          meta: { deployer: true },
+        },
         { path: 'dns', component: () => import('@/views/DnsPage.vue') },
         { path: 'dns/zones/:id', component: () => import('@/views/DnsZoneDetailPage.vue') },
         { path: 'dns-templates', component: () => import('@/views/DnsTemplatesPage.vue') },

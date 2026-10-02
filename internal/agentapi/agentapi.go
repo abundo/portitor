@@ -587,3 +587,58 @@ const (
 	// TraceMaxSessions is how many traces may run at once.
 	TraceMaxSessions = 4
 )
+
+// ConnectionsRequest streams an instance's connection tracking table
+// (POST /v1/connections): the answer is a ConnectionsSnapshot per line,
+// one every IntervalMs at most, until the client disconnects. An error
+// before the first is a JSON ErrorResponse.
+type ConnectionsRequest struct {
+	Instance   string `json:"instance"`
+	IntervalMs int    `json:"interval_ms,omitempty"` // 0 is ConnectionsDefaultIntervalMs
+	Max        int    `json:"max,omitempty"`         // entries per snapshot; 0 is ConnectionsDefaultMax
+}
+
+// ConnectionsSnapshot is the table at one moment: Total entries, of
+// which the first Max (by bytes, largest first) are in Entries. A
+// snapshot that failed has only Error.
+type ConnectionsSnapshot struct {
+	Time    time.Time    `json:"time"`
+	Total   int          `json:"total"`
+	Entries []Connection `json:"entries"`
+	Error   string       `json:"error,omitempty"`
+}
+
+// Connection is one conntrack entry: the original direction (Src, Dst)
+// and the reply's addresses (ReplySrc, ReplyDst), which differ from them
+// under NAT. Mark is the id of the rule that accepted it (render.RuleCounter's
+// ct mark), 0 for none.
+type Connection struct {
+	Family       string `json:"family"` // "ipv4" or "ipv6"
+	Protocol     string `json:"protocol"`
+	Src          string `json:"src"`
+	Dst          string `json:"dst"`
+	SrcPort      uint16 `json:"sport,omitempty"`
+	DstPort      uint16 `json:"dport,omitempty"`
+	ReplySrc     string `json:"reply_src"`
+	ReplyDst     string `json:"reply_dst"`
+	ReplySrcPort uint16 `json:"reply_sport,omitempty"`
+	ReplyDstPort uint16 `json:"reply_dport,omitempty"`
+	State        string `json:"state,omitempty"` // TCP state
+	Packets      uint64 `json:"packets"`
+	Bytes        uint64 `json:"bytes"`
+	ReplyPackets uint64 `json:"reply_packets"`
+	ReplyBytes   uint64 `json:"reply_bytes"`
+	Mark         uint32 `json:"mark,omitempty"`
+	Timeout      uint32 `json:"timeout"`         // seconds left
+	Start        int64  `json:"start,omitempty"` // Unix seconds, when the kernel keeps timestamps
+}
+
+// Connection table limits, enforced by the agent.
+const (
+	ConnectionsDefaultIntervalMs = 2000
+	ConnectionsMinIntervalMs     = 1000
+	ConnectionsDefaultMax        = 1000
+	ConnectionsMaxEntries        = 5000
+	// ConnectionsMaxSessions is how many streams may run at once.
+	ConnectionsMaxSessions = 4
+)

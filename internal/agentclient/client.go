@@ -279,6 +279,13 @@ func (c *Client) Trace(ctx context.Context, req agentapi.TraceRequest) (io.ReadC
 	return c.stream(ctx, "/v1/trace", req)
 }
 
+// Connections streams an instance's conntrack table as
+// agentapi.ConnectionsSnapshots (JSON lines); closing it (or cancelling
+// ctx) ends the stream on the agent.
+func (c *Client) Connections(ctx context.Context, req agentapi.ConnectionsRequest) (io.ReadCloser, error) {
+	return c.stream(ctx, "/v1/connections", req)
+}
+
 // stream posts req and returns the answer's body as it comes.
 func (c *Client) stream(ctx context.Context, path string, req any) (io.ReadCloser, error) {
 	data, err := json.Marshal(req)
