@@ -21,6 +21,10 @@ const web = ref(null)
 // (a Portitor update restarts the agent and portitor-web on the way).
 const expecting = ref(0)
 let timer = null
+// A Portitor update in progress: the modal stays up until portitor-web is back
+// with the new version, then reloads the page (the old GUI's code is stale).
+const updating = ref(null)
+const updateTimeout = 5 * 60 * 1000
 
 const jobs = computed(() => Object.fromEntries((sys.value?.jobs ?? []).map((j) => [j.name, j])))
 const running = computed(() => (sys.value?.jobs ?? []).some((j) => j.state === 'running'))
@@ -62,19 +66,49 @@ async function load() {
   } catch (err) {
     error.value = errMsg(err)
   }
+  let webUp = false
   try {
     web.value = await api.version()
+    webUp = true
   } catch {
     // portitor-web is restarting (an update); the next poll tells.
+    if (updating.value) updating.value.sawDown = true
   }
+  if (checkUpdate(webUp)) return
   schedule()
+}
+
+// checkUpdate follows a Portitor update; it returns true when the page reloads.
+function checkUpdate(webUp) {
+  const u = updating.value
+  if (!u) return false
+  if (webUp && u.webOnFirewall && (web.value.version !== u.from || u.sawDown)) {
+    u.reloading = true
+    window.location.reload()
+    return true
+  }
+  const job = jobs.value.update
+  if (job?.state === 'running') u.sawRunning = true
+  else if (u.sawRunning && job?.state === 'failed') {
+    updating.value = null
+    toast.add({ title: 'Portitor update failed', color: 'error' })
+  } else if (u.sawRunning && job?.state === 'succeeded' && !u.webOnFirewall) {
+    // Only the agent was updated; this GUI is unchanged.
+    updating.value = null
+    toast.add({ title: 'Portitor update finished', color: 'success' })
+  }
+  if (updating.value && Date.now() - u.started > updateTimeout) u.timedOut = true
+  return false
 }
 
 function schedule() {
   clearTimeout(timer)
   if (expecting.value > 0) expecting.value--
-  if (running.value || expecting.value > 0) timer = setTimeout(load, 3000)
+  if (running.value || expecting.value > 0 || (updating.value && !updating.value.timedOut))
+    timer = setTimeout(load, 3000)
 }
+
+const reloadPage = () => window.location.reload()
 
 onMounted(load)
 onUnmounted(() => clearTimeout(timer))
@@ -86,8 +120,10 @@ async function start(job, release) {
     expecting.value = 20
     toast.add({ title: `${jobTitle[job]} started`, color: 'info' })
     load()
+    return true
   } catch (err) {
     toast.add({ title: errMsg(err), color: 'error' })
+    return false
   }
 }
 
@@ -100,7 +136,17 @@ async function install(r) {
     }))
   )
     return
-  start('update', r.tag)
+  updating.value = {
+    tag: r.tag,
+    from: web.value?.version,
+    webOnFirewall: !!installed.value.web,
+    started: Date.now(),
+    sawDown: false,
+    sawRunning: false,
+    timedOut: false,
+    reloading: false,
+  }
+  if (!(await start('update', r.tag))) updating.value = null
 }
 
 async function upgrade() {
@@ -135,6 +181,45 @@ async function reboot() {
 
 <template>
   <div class="space-y-4">
+    <UModal
+      :open="!!updating"
+      :dismissible="false"
+      :close="false"
+      :title="`Updating Portitor to ${updating?.tag ?? ''}`"
+    >
+      <template #body>
+        <div v-if="updating?.timedOut" class="space-y-3">
+          <UAlert
+            color="warning"
+            variant="subtle"
+            icon="i-lucide-triangle-alert"
+            title="Reload the page"
+            description="The update has not finished after 5 minutes, or portitor-web did not come back with a new version. Reload the page (Ctrl+R / Cmd+R) to load the GUI that is running now, and check the update's output below."
+          />
+        </div>
+        <div v-else class="flex items-center gap-3 text-sm">
+          <UIcon name="i-lucide-loader-circle" class="size-5 animate-spin" />
+          <span v-if="updating?.reloading">Reloading…</span>
+          <span v-else-if="updating?.webOnFirewall"
+            >Installing; the agent and portitor-web restart. The page reloads by itself once
+            portitor-web is back.</span
+          >
+          <span v-else>Installing; the agent restarts.</span>
+        </div>
+      </template>
+      <template #footer>
+        <div class="flex w-full justify-end gap-2">
+          <UButton
+            v-if="updating?.timedOut"
+            color="neutral"
+            variant="outline"
+            @click="updating = null"
+            >Close</UButton
+          >
+          <UButton icon="i-lucide-rotate-cw" @click="reloadPage">Reload now</UButton>
+        </div>
+      </template>
+    </UModal>
     <UAlert
       v-if="error"
       color="error"
