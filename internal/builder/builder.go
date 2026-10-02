@@ -353,7 +353,7 @@ func build(db *gorm.DB, generation int64, only map[string]bool) (*fwconfig.Docum
 
 		// DNS: zones, records from the zone and from IPAM names.
 		in.DNS = fwconfig.DNSServer{
-			Enabled:          mi.DnsEnabled,
+			Enabled:          true,
 			Upstream:         mi.DnsUpstream,
 			ForwardMode:      mi.DnsForwardMode,
 			DNSSECValidation: mi.DnsDnssecValidation,
@@ -369,7 +369,7 @@ func build(db *gorm.DB, generation int64, only map[string]bool) (*fwconfig.Docum
 					in.DNS.DHCPInterface = mif.Name
 				}
 			}
-			if mi.DnsEnabled && in.DNS.DHCPInterface == "" {
+			if in.DNS.DHCPInterface == "" {
 				addf("instance %s: DNS upstream is the DHCP lease of an interface, but no DHCP client interface is chosen", mi.Name)
 			}
 		}
@@ -500,7 +500,7 @@ func build(db *gorm.DB, generation int64, only map[string]bool) (*fwconfig.Docum
 					dns = append(dns, a)
 				}
 			}
-			if len(dns) == 0 && mi.DnsEnabled && contains(in.DNS.ListenInterfaces, serveOn) {
+			if len(dns) == 0 && contains(in.DNS.ListenInterfaces, serveOn) {
 				if a := listenAddr[serveOn][pfx.Addr().Is4()]; a != "" {
 					dns = []string{a}
 				}
@@ -808,7 +808,7 @@ func delegatedRA(in *fwconfig.Instance, mi models.Instance) {
 			if !slices.ContainsFunc(ra.Prefixes, func(p fwconfig.RAPrefix) bool { return p.Prefix == pfx.String() }) {
 				ra.Prefixes = append(ra.Prefixes, fwconfig.RAPrefix{Prefix: pfx.String(), Autonomous: true})
 			}
-			if mi.DnsEnabled && contains(in.DNS.ListenInterfaces, ifc.Name) && !contains(ra.RDNSS, a) {
+			if contains(in.DNS.ListenInterfaces, ifc.Name) && !contains(ra.RDNSS, a) {
 				ra.RDNSS = append(ra.RDNSS, a)
 			}
 			if mi.DhcpDomainName != "" && !contains(ra.DNSSL, mi.DhcpDomainName) {

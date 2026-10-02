@@ -41,7 +41,7 @@ func ptr(v uint) *uint { return &v }
 
 func TestBuildHome(t *testing.T) {
 	db := testDB(t)
-	main := models.Instance{Name: "main", IsDefault: true, DnsEnabled: true, DnsUpstream: "dhcp",
+	main := models.Instance{Name: "main", IsDefault: true, DnsUpstream: "dhcp",
 		DhcpEnabled: true, DhcpDomainName: "home.arpa", DhcpLeaseTime: 3600}
 	mustCreate(t, db, &main)
 	mustCreate(t, db, &models.InterfaceZone{InstanceID: main.ID, Name: "lan", Interfaces: models.StringList{"eth1", "wg0"}})
@@ -186,7 +186,7 @@ func TestBuildReportsProblems(t *testing.T) {
 
 func TestBuildIPv6AndObjects(t *testing.T) {
 	db := testDB(t)
-	main := models.Instance{Name: "main", IsDefault: true, DnsEnabled: true, DhcpEnabled: true, DhcpDomainName: "home.arpa",
+	main := models.Instance{Name: "main", IsDefault: true, DhcpEnabled: true, DhcpDomainName: "home.arpa",
 		DnsForwarders: models.StringList{"quad9"}}
 	mustCreate(t, db, &main)
 	mustCreate(t, db, &models.Interface{InstanceID: main.ID, Name: "eth0", Kind: "physical", Enabled: true, Ipv4Mode: "dhcp", Ipv6AcceptRA: true})
@@ -302,7 +302,7 @@ func TestBuildReportsObjectProblems(t *testing.T) {
 
 func TestBuildDelegatedPrefix(t *testing.T) {
 	db := testDB(t)
-	main := models.Instance{Name: "main", IsDefault: true, DnsEnabled: true, DhcpDomainName: "home.arpa"}
+	main := models.Instance{Name: "main", IsDefault: true, DhcpDomainName: "home.arpa"}
 	mustCreate(t, db, &main)
 	mustCreate(t, db, &models.Interface{InstanceID: main.ID, Name: "eth0", Kind: "physical", Enabled: true, Ipv4Mode: "dhcp",
 		Ipv6AcceptRA: true, Dhcpv6: true, Dhcpv6Pd: true, Dhcpv6PdLength: 56})

@@ -136,12 +136,12 @@ func prepareInstance(tx *gorm.DB, in, old *models.Instance) error {
 	in.DnsForwarders = cleanList(in.DnsForwarders)
 	in.DnsAllowRecursion = cleanList(in.DnsAllowRecursion)
 	if in.DnsUpstream == "" {
-		in.DnsUpstream = fwconfig.UpstreamForward
+		in.DnsUpstream = fwconfig.UpstreamRoot
 	}
 	if err := oneOf("upstream DNS", in.DnsUpstream, fwconfig.UpstreamForward, fwconfig.UpstreamRoot, fwconfig.UpstreamDHCP); err != nil {
 		return err
 	}
-	if in.DnsEnabled && in.DnsUpstream == fwconfig.UpstreamForward && len(in.DnsForwarders) == 0 {
+	if in.DnsUpstream == fwconfig.UpstreamForward && len(in.DnsForwarders) == 0 {
 		return bad("DNS forwarders: enter at least one DNS server, or pick another upstream")
 	}
 	if in.DnsForwardMode == "" {

@@ -253,11 +253,9 @@ const states = computed(() =>
 const stateColor = { ok: 'success', error: 'error', fetching: 'info' }
 const sourceLabel = { crowdsec: 'CrowdSec LAPI', url: 'URL' }
 
-// Whether the DNS server listens on the interface's addresses: 'on', 'off'
-// (the interface is set to, the instance's DNS server is disabled) or null.
+// Whether the DNS server listens on the interface's addresses.
 function dnsListen(id) {
-  if (!ifaceList.value.find((i) => i.id === id)?.dns_listen) return null
-  return store.current?.dns_enabled ? 'on' : 'off'
+  return !!ifaceList.value.find((i) => i.id === id)?.dns_listen
 }
 
 // The addresses the interface gets as a client: DHCP (IPv4), SLAAC (IPv6).
@@ -368,13 +366,7 @@ function ipamBadges(n) {
   if (id) html += badge(ifaceName(id), 'primary')
   if (n.kind === 'address' && id) {
     const dns = dnsListen(id)
-    if (dns === 'on') html += badge('DNS', 'success', 'The DNS server listens on this address')
-    else if (dns === 'off')
-      html += badge(
-        'DNS',
-        'neutral',
-        "Set to listen for DNS, but the virtual firewall's DNS server is disabled",
-      )
+    if (dns) html += badge('DNS', 'success', 'The DNS server listens on this address')
     const client = ifaceClient(id)
     if (client.includes('dhcp'))
       html += badge(
@@ -762,9 +754,9 @@ async function removeAddress() {
                     <b>IP lists</b> are address lists the firewall downloads: the ban decisions of a
                     CrowdSec engine, or any list with one address or prefix per line. Use a list as
                     @name in a rule's source or destination; it becomes an nftables set in each
-                    virtual firewall whose rules use it, and matches IPv4 and IPv6. A list is downloaded
-                    when it is first deployed and whenever a scheduled task says so; the last
-                    download stays in force if a later one fails.
+                    virtual firewall whose rules use it, and matches IPv4 and IPv6. A list is
+                    downloaded when it is first deployed and whenever a scheduled task says so; the
+                    last download stays in force if a later one fails.
                   </p>
                   <p>
                     <b>Folders</b> sort hosts and IP lists; they mean nothing to the firewall. Move
@@ -785,8 +777,8 @@ async function removeAddress() {
             </UPopover>
           </div>
           <p class="max-w-3xl text-sm text-muted">
-            Named hosts and prefixes, downloaded IP lists, and the virtual firewall's prefixes and addresses
-            with their DNS names. Click a row to open it; right-click it to add to it.
+            Named hosts and prefixes, downloaded IP lists, and the virtual firewall's prefixes and
+            addresses with their DNS names. Click a row to open it; right-click it to add to it.
           </p>
         </div>
         <div v-if="auth.isAdmin || auth.canEdit" class="flex gap-2">

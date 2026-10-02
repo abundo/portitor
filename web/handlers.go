@@ -288,7 +288,7 @@ func (s *Server) handleWgClientConfig(c *echo.Context) error {
 		cc.Endpoint = fmt.Sprintf("%s:%d", host, ifc.WgListenPort)
 	}
 	site := len(peer.Networks) > 0
-	if inst.DnsEnabled && ifc.DnsListen && !site {
+	if ifc.DnsListen && !site {
 		for _, a := range ifc.Addresses {
 			if p, err := netip.ParsePrefix(a); err == nil {
 				cc.DNS = append(cc.DNS, p.Addr().String())
