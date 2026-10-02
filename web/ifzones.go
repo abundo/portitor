@@ -61,7 +61,7 @@ func checkIfaceList(tx *gorm.DB, instanceID uint, field string, list models.Stri
 	}
 	for _, s := range list {
 		if !names[s] && !ifaceZoneExists(tx, instanceID, s) {
-			return bad(fmt.Sprintf("%s: %q is not an interface or interface zone of this instance", field, s))
+			return bad(fmt.Sprintf("%s: %q is not an interface or interface zone of this virtual firewall", field, s))
 		}
 	}
 	return nil
@@ -92,7 +92,7 @@ func prepareInterfaceZone(tx *gorm.DB, z, old *models.InterfaceZone) error {
 		return err
 	}
 	if old != nil && old.InstanceID != z.InstanceID {
-		return bad("an interface zone cannot move to another instance")
+		return bad("an interface zone cannot move to another virtual firewall")
 	}
 	z.Name = strings.TrimSpace(z.Name)
 	if !fwconfig.ValidZoneName(z.Name) {
@@ -103,12 +103,12 @@ func prepareInterfaceZone(tx *gorm.DB, z, old *models.InterfaceZone) error {
 		return err
 	}
 	if names[z.Name] {
-		return bad(fmt.Sprintf("name: %s is an interface of this instance", z.Name))
+		return bad(fmt.Sprintf("name: %s is an interface of this virtual firewall", z.Name))
 	}
 	z.Interfaces = dedupe(cleanList(z.Interfaces))
 	for _, m := range z.Interfaces {
 		if !names[m] {
-			return bad(fmt.Sprintf("interfaces: %q is not an interface of this instance", m))
+			return bad(fmt.Sprintf("interfaces: %q is not an interface of this virtual firewall", m))
 		}
 	}
 	if old != nil && old.Name != z.Name {
@@ -272,7 +272,7 @@ func refuseIfaceMove(tx *gorm.DB, i *models.Interface) error {
 	if len(users) > 5 {
 		users = append(users[:5], "...")
 	}
-	return bad(fmt.Sprintf("%s cannot move to another instance while it is used by %s", i.Name, strings.Join(users, ", ")))
+	return bad(fmt.Sprintf("%s cannot move to another virtual firewall while it is used by %s", i.Name, strings.Join(users, ", ")))
 }
 
 func deleteInterface(tx *gorm.DB, i *models.Interface) error {

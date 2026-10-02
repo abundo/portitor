@@ -1,7 +1,7 @@
 <!-- SPDX-FileCopyrightText: 2026 The Portitor contributors -->
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
-<!-- Neighbours: what the instance's interfaces see next to them, by
+<!-- Neighbours: what the virtual firewall's interfaces see next to them, by
      interface: the LLDP neighbours heard (an info button shows all their
      frame said), then the ARP (IPv4) and ND (IPv6) entries. -->
 <script setup>
@@ -126,7 +126,7 @@ function lldpRows(n) {
         <div>
           <div class="text-lg font-semibold">Neighbours</div>
           <p class="max-w-3xl text-sm text-muted">
-            What this instance's interfaces see next to them: LLDP neighbours, on the interfaces
+            What this virtual firewall's interfaces see next to them: LLDP neighbours, on the interfaces
             with LLDP turned on under
             <RouterLink to="/interfaces" class="text-primary">Interfaces</RouterLink>, and the ARP
             (IPv4) and ND (IPv6) tables.

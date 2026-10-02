@@ -19,7 +19,7 @@ import (
 
 // instanceRolePrefix starts the name of each instance's role; a role made
 // by hand can't use it.
-const instanceRolePrefix = "instance-"
+const instanceRolePrefix = "vf-"
 
 func instanceRoleName(instance string) string { return instanceRolePrefix + instance }
 
@@ -27,7 +27,7 @@ func instanceRoleName(instance string) string { return instanceRolePrefix + inst
 func createInstanceRole(tx *gorm.DB, in *models.Instance) error {
 	id := in.ID
 	return tx.Create(&models.Role{
-		Name: instanceRoleName(in.Name), Description: "Users of instance " + in.Name, InstanceID: &id,
+		Name: instanceRoleName(in.Name), Description: "Users of virtual firewall " + in.Name, InstanceID: &id,
 	}).Error
 }
 
@@ -124,7 +124,7 @@ func (s *Server) saveRole(c *echo.Context, old *models.Role) error {
 			return errJSON(c, http.StatusBadRequest, "name: 1 to 64 characters, no control characters")
 		}
 		if strings.HasPrefix(req.Name, instanceRolePrefix) {
-			return errJSON(c, http.StatusBadRequest, "name: "+instanceRolePrefix+"… is reserved for the instances' roles")
+			return errJSON(c, http.StatusBadRequest, "name: "+instanceRolePrefix+"… is reserved for the virtual firewalls' roles")
 		}
 		r.Name = req.Name
 	}
@@ -180,7 +180,7 @@ func (s *Server) saveRole(c *echo.Context, old *models.Role) error {
 		for _, id := range req.InstanceIDs {
 			if err := tx.Create(&models.RoleInstance{RoleID: r.ID, InstanceID: id}).Error; err != nil {
 				if strings.Contains(err.Error(), "FOREIGN KEY constraint") {
-					return bad("no such instance")
+					return bad("no such virtual firewall")
 				}
 				return err
 			}
@@ -211,7 +211,7 @@ func (s *Server) handleDeleteRole(c *echo.Context) error {
 		return err
 	}
 	if r.InstanceID != nil {
-		return errJSON(c, http.StatusBadRequest, "an instance's role goes away with the instance")
+		return errJSON(c, http.StatusBadRequest, "a virtual firewall's role goes away with the virtual firewall")
 	}
 	if err := s.db.Delete(&r).Error; err != nil {
 		return err

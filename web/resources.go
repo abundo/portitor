@@ -33,7 +33,7 @@ func instanceExists(tx *gorm.DB, id uint) error {
 	var n int64
 	tx.Model(&models.Instance{}).Where("id = ?", id).Count(&n)
 	if n == 0 {
-		return bad("instance does not exist")
+		return bad("virtual firewall does not exist")
 	}
 	return nil
 }
@@ -177,7 +177,7 @@ func prepareInstance(tx *gorm.DB, in, old *models.Instance) error {
 			return err
 		}
 	} else if old != nil && old.IsDefault {
-		return bad("mark another instance as default instead")
+		return bad("mark another virtual firewall as default instead")
 	} else {
 		var n int64
 		tx.Model(&models.Instance{}).Where("is_default").Count(&n)
@@ -388,7 +388,7 @@ func prepareLink(tx *gorm.DB, l, old *models.Link) error {
 		return bad("name: lowercase letters, digits and _, at most 24 characters")
 	}
 	if l.InstanceAID == l.InstanceBID {
-		return bad("a link connects two different instances")
+		return bad("a link connects two different virtual firewalls")
 	}
 	l.InterfaceA, l.InterfaceB = strings.TrimSpace(l.InterfaceA), strings.TrimSpace(l.InterfaceB)
 	for _, end := range []struct {
@@ -401,7 +401,7 @@ func prepareLink(tx *gorm.DB, l, old *models.Link) error {
 		{l.InstanceBID, l.InterfaceB, &l.AddressesB, "side B"},
 	} {
 		if err := instanceExists(tx, end.inst); err != nil {
-			return bad(end.label + ": instance does not exist")
+			return bad(end.label + ": virtual firewall does not exist")
 		}
 		if !fwconfig.ValidIfname(end.iface) {
 			return bad(end.label + ": interface name is required")
@@ -451,7 +451,7 @@ func prepareRoute(tx *gorm.DB, r, _ *models.Route) error {
 	if r.InterfaceID != nil {
 		var i models.Interface
 		if tx.First(&i, *r.InterfaceID).Error != nil || i.InstanceID != r.InstanceID {
-			return bad("interface must belong to the same instance")
+			return bad("interface must belong to the same virtual firewall")
 		}
 	}
 	if r.Gateway == "" && r.InterfaceID == nil {

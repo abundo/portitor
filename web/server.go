@@ -275,7 +275,7 @@ var tenantAll = []string{http.MethodPost, http.MethodPut, http.MethodDelete}
 // settings, but not its name or which instance is the default.
 func tenantInstanceCheck(in, old *models.Instance) error {
 	if in.Name != old.Name || in.IsDefault != old.IsDefault {
-		return bad("only a global admin renames an instance or changes the default")
+		return bad("only a global admin renames a virtual firewall or changes the default")
 	}
 	return nil
 }

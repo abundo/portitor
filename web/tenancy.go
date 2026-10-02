@@ -53,7 +53,7 @@ func (s *Server) keepDocument(doc *fwconfig.Document) error {
 }
 
 // errNoLiveDocument: nothing deployed to build on.
-var errNoLiveDocument = bad("a global admin has to deploy the whole configuration once before an instance admin can deploy")
+var errNoLiveDocument = bad("a global admin has to deploy the whole configuration once before a virtual firewall admin can deploy")
 
 // liveDocument is the document the firewall runs. Deployments from before
 // documents were kept fall back to their database snapshot.
@@ -204,10 +204,10 @@ func (s *Server) chosenScope(a *access, names []string, preview bool) (map[strin
 	for _, n := range names {
 		var in models.Instance
 		if err := s.db.Where("name = ?", n).First(&in).Error; err != nil {
-			return nil, bad("no such instance: " + n)
+			return nil, bad("no such virtual firewall: " + n)
 		}
 		if !a.canWrite(in.ID) && !(preview && a.canRead(in.ID)) {
-			return nil, bad("you can't deploy instance " + n)
+			return nil, bad("you can't deploy virtual firewall " + n)
 		}
 		out[n] = true
 	}

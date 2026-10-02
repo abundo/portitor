@@ -32,7 +32,7 @@ func TestRoles(t *testing.T) {
 	ann := env.create("/api/users", map[string]string{"username": "ann", "password": "a long password", "role": "viewer"})
 
 	inst := env.create("/api/instances", map[string]any{"name": "lab"})
-	r, ok := env.roles()["instance-lab"]
+	r, ok := env.roles()["vf-lab"]
 	if !ok || r.InstanceID == nil || *r.InstanceID != inst {
 		t.Fatalf("instance role: %+v", env.roles())
 	}
@@ -46,14 +46,14 @@ func TestRoles(t *testing.T) {
 	if rec := env.do("PUT", fmt.Sprintf("/api/instances/%d", inst), map[string]any{"name": "lab2"}); rec.Code != http.StatusOK {
 		t.Fatalf("rename instance: %d %s", rec.Code, rec.Body)
 	}
-	r = env.roles()["instance-lab2"]
+	r = env.roles()["vf-lab2"]
 	if r.ID == 0 || len(r.Members) != 1 || r.Members[0].Level != "admin" {
 		t.Fatalf("renamed instance role: %+v", env.roles())
 	}
 
 	for _, body := range []map[string]any{
 		{"name": ""},
-		{"name": "instance-x"},
+		{"name": "vf-x"},
 		{"name": "ops", "members": []map[string]any{{"user_id": ann, "level": "root"}}},
 		{"name": "ops", "members": []map[string]any{{"user_id": 999, "level": "viewer"}}},
 		{"name": "ops", "members": []map[string]any{{"user_id": ann, "level": "viewer"}, {"user_id": ann, "level": "admin"}}},
@@ -77,7 +77,7 @@ func TestRoles(t *testing.T) {
 	if rec := env.do("DELETE", fmt.Sprintf("/api/instances/%d", inst), nil); rec.Code != http.StatusNoContent {
 		t.Fatalf("delete instance: %d %s", rec.Code, rec.Body)
 	}
-	if _, ok := env.roles()["instance-lab2"]; ok {
+	if _, ok := env.roles()["vf-lab2"]; ok {
 		t.Error("instance role left after delete")
 	}
 	if rec := env.do("DELETE", fmt.Sprintf("/api/roles/%d", ops), nil); rec.Code != http.StatusNoContent {

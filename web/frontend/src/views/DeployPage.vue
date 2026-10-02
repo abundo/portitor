@@ -157,7 +157,7 @@ const fileColor = { same: 'neutral', changed: 'warning', new: 'success', removed
         <div class="flex flex-wrap items-end gap-2">
           <UFormField
             v-if="auth.canDeploy && deployable.length > 1"
-            label="Instances"
+            label="Virtual firewalls"
             :help="
               chosen.length
                 ? 'The others stay as deployed.'

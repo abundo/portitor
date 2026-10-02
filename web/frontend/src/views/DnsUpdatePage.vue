@@ -117,7 +117,7 @@ const clientFields = computed(() => [
     label: 'Provider',
     type: 'select',
     items: providers.value.map((p) => ({ label: p.label, value: p.name })),
-    hint: 'RFC 2136 updates your own nameserver from this instance. A DNS hosting provider is updated through its API, called from the firewall host.',
+    hint: 'RFC 2136 updates your own nameserver from this virtual firewall. A DNS hosting provider is updated through its API, called from the firewall host.',
   },
   ...providerFields.value,
   {
@@ -125,7 +125,7 @@ const clientFields = computed(() => [
     label: 'Nameserver',
     required: true,
     placeholder: '192.0.2.53, [2001:db8::53]:53 or ns1.example.com',
-    hint: "The zone's primary nameserver, by IP address or DNS name, optionally with a port. Updates are sent from this instance, and a name is looked up there.",
+    hint: "The zone's primary nameserver, by IP address or DNS name, optionally with a port. Updates are sent from this virtual firewall, and a name is looked up there.",
     show: isRFC2136,
   },
   {

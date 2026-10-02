@@ -162,7 +162,7 @@ func allowInstance(c *echo.Context, id uint, write bool) (bool, error) {
 	case !a.canRead(id):
 		return false, errJSON(c, http.StatusNotFound, "not found")
 	}
-	return false, errJSON(c, http.StatusForbidden, "you can't change this instance")
+	return false, errJSON(c, http.StatusForbidden, "you can't change this virtual firewall")
 }
 
 // allowRow is allowInstance for the row id of table (with an instance_id).

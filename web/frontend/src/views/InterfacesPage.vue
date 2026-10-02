@@ -80,11 +80,11 @@ const fields = [
   },
   {
     key: 'instance_id',
-    label: 'Instance',
+    label: 'Virtual firewall',
     type: 'select',
     items: () => store.items,
     show: () => store.list.length > 1,
-    hint: 'Changing it moves the interface to that instance, with its addresses. Its rules, routes and VLANs must go first; it leaves its interface zones.',
+    hint: 'Changing it moves the interface to that virtual firewall, with its addresses. Its rules, routes and VLANs must go first; it leaves its interface zones.',
   },
   { key: 'kind', label: 'Kind', type: 'select', items: kinds, disabled: (f) => !!f.id },
   { key: 'description', label: 'Description' },
@@ -198,7 +198,7 @@ function leaseOf(row, family = '') {
   <NeedInstance>
     <CrudPage
       title="Interfaces"
-      description="Physical ports, VLANs, bridges and WireGuard tunnels of this instance. Physical ports are moved into the instance's network namespace."
+      description="Physical ports, VLANs, bridges and WireGuard tunnels of this virtual firewall. Physical ports are moved into the virtual firewall's network namespace."
       :api="interfaces"
       :params="{ instance_id: store.currentId }"
       :columns="columns"

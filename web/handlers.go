@@ -320,7 +320,7 @@ func (s *Server) handleWgClientConfig(c *echo.Context) error {
 		warnings = append(warnings, "Set the public endpoint on the interface (or the endpoint host under Settings, and a listen port on the interface).")
 	}
 	if site && len(cc.AllowedIPs) == 0 {
-		warnings = append(warnings, "This instance has no prefixes (under IP addresses or on its interfaces), so the config routes nothing to this side.")
+		warnings = append(warnings, "This virtual firewall has no prefixes (under IP addresses or on its interfaces), so the config routes nothing to this side.")
 	}
 	return c.JSON(http.StatusOK, map[string]any{"config": render.WireGuardClientConf(cc), "warnings": warnings, "site": site})
 }
@@ -698,7 +698,7 @@ func (s *Server) handleDeployCheck(c *echo.Context) error {
 		problems = []string{br.msg}
 		doc = &fwconfig.Document{}
 	case errors.Is(err, errForbidden):
-		problems = []string{"you are not an admin of any instance"}
+		problems = []string{"you are not an admin of any virtual firewall"}
 		doc = &fwconfig.Document{}
 	case err != nil:
 		return err
@@ -774,7 +774,7 @@ func (s *Server) handleDeployApply(c *echo.Context) error {
 		return dbError(c, err)
 	}
 	if only != nil && len(only) == 0 {
-		return errJSON(c, http.StatusForbidden, "you are not an admin of any instance")
+		return errJSON(c, http.StatusForbidden, "you are not an admin of any virtual firewall")
 	}
 	dep, res, err := s.deploy(c.Request().Context(), currentUser(c).Username, req.ConfirmTimeout, only)
 	var ve *fwconfig.ValidationError
@@ -969,7 +969,7 @@ func (s *Server) handleDeployConfirm(c *echo.Context) error {
 		return errJSON(c, http.StatusConflict, "no change is waiting for confirmation")
 	}
 	if !s.mayFinish(currentAccess(c), dep) {
-		return errJSON(c, http.StatusForbidden, "this change deployed instances you are not an admin of")
+		return errJSON(c, http.StatusForbidden, "this change deployed virtual firewalls you are not an admin of")
 	}
 	if err := a.Confirm(c.Request().Context(), dep.Generation); err != nil {
 		return agentError(c, err)
@@ -989,7 +989,7 @@ func (s *Server) handleDeployRollback(c *echo.Context) error {
 		return err
 	}
 	if !s.mayFinish(currentAccess(c), dep) {
-		return errJSON(c, http.StatusForbidden, "only a global admin rolls back a change of instances you are not an admin of")
+		return errJSON(c, http.StatusForbidden, "only a global admin rolls back a change of virtual firewalls you are not an admin of")
 	}
 	res, err := a.Rollback(c.Request().Context())
 	if err != nil {

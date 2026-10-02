@@ -29,7 +29,7 @@ const sections = computed(() => [
     label: 'Globals',
     value: 'globals',
     children: [
-      { label: 'Instances', icon: 'i-lucide-boxes', to: '/instances' },
+      { label: 'Virtual firewalls', icon: 'i-lucide-boxes', to: '/instances' },
       { label: 'Links', icon: 'i-lucide-cable', to: '/links' },
       { label: 'DNS templates', icon: 'i-lucide-file-cog', to: '/dns-templates' },
     ],

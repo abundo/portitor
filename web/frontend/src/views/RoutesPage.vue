@@ -53,7 +53,7 @@ const fields = [
   <NeedInstance>
     <CrudPage
       title="Routes"
-      description="Static routes of this instance. Connected networks and DHCP default routes are added automatically."
+      description="Static routes of this virtual firewall. Connected networks and DHCP default routes are added automatically."
       :api="routes"
       :params="{ instance_id: store.currentId }"
       :columns="columns"

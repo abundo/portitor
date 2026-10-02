@@ -52,7 +52,7 @@ func prepareDHCPv6(tx *gorm.DB, i, old *models.Interface) error {
 			return err
 		}
 		if n == 0 {
-			return bad(fmt.Sprintf("addresses: %s: %s is not an interface of this instance with DHCPv6 prefix delegation", a, d.Interface))
+			return bad(fmt.Sprintf("addresses: %s: %s is not an interface of this virtual firewall with DHCPv6 prefix delegation", a, d.Interface))
 		}
 	}
 	if old == nil || !old.Dhcpv6Pd {

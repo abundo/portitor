@@ -96,7 +96,7 @@ func eachObjectRef(tx *gorm.DB, visit func(where string, entry *string) bool) er
 	}
 	for _, in := range instances {
 		instName[in.ID] = in.Name
-		where := "instance " + in.Name + " DNS"
+		where := "virtual firewall " + in.Name + " DNS"
 		a, b := list(where, in.DnsForwarders), list(where, in.DnsAllowRecursion)
 		if a || b {
 			if err := save(&models.Instance{}, in.ID, map[string]any{"dns_forwarders": in.DnsForwarders, "dns_allow_recursion": in.DnsAllowRecursion}); err != nil {

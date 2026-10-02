@@ -21,7 +21,7 @@ There are two ways to get the decisions:
 ### 1. Install the engine
 
 Installing it on the firewall host is easiest: the agent downloads lists from the
-host's own network (the default instance), so it reaches the LAPI on `127.0.0.1`.
+host's own network (the default virtual firewall), so it reaches the LAPI on `127.0.0.1`.
 On Debian or Ubuntu:
 
 ```sh

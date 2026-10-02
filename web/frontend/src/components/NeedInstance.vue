@@ -11,9 +11,9 @@ const store = useInstanceStore()
   <div v-else class="card">
     <UAlert
       icon="i-lucide-boxes"
-      title="No instance yet"
-      description="Everything (interfaces, interface zones, rules, DNS, DHCP) belongs to an instance. Create the default instance first."
-      :actions="[{ label: 'Create instance', to: '/instances' }]"
+      title="No virtual firewall yet"
+      description="Everything (interfaces, interface zones, rules, DNS, DHCP) belongs to a virtual firewall. Create the default virtual firewall first."
+      :actions="[{ label: 'Create virtual firewall', to: '/instances' }]"
     />
   </div>
 </template>

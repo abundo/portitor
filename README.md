@@ -21,7 +21,7 @@ office networks. It manages:
   opens only while a challenge is answered
 - IP lists: CrowdSec decisions or downloaded blocklists, used as `@name` in rules
 - scheduled tasks: download IP lists or run commands on a cron schedule
-- virtual instances, each with its own routing, rules, DHCP and DNS, with optional
+- virtual firewalls, each with its own routing, rules, DHCP and DNS, with optional
   internal links between them
 - IP prefixes and addresses in a hierarchical tree (IPAM)
 
@@ -36,29 +36,29 @@ firewall, the agent, makes the changes the GUI asks for. For a single box, an
                   │  HTTPS, bearer token, pinned certificate
                   ▼
              portitor-agent (root daemon)                         runs on the firewall
-                  ├─ nftables       one ruleset per instance
+                  ├─ nftables       one ruleset per virtual firewall
                   ├─ ip / netns     interfaces, VLANs, bridges, routes, veth links
                   ├─ WireGuard      wg syncconf
                   ├─ DHCP client    in-process, for the WAN
                   ├─ DNS update     in-process RFC 2136 updates (ifnsupdate), provider APIs (libdns)
-                  ├─ ACME           Let's Encrypt certificates (lego), HTTP-01 in the instance
+                  ├─ ACME           Let's Encrypt certificates (lego), HTTP-01 in the virtual firewall
                   ├─ IP lists       downloads (CrowdSec LAPI, plain text) into nftables sets
                   ├─ scheduler      cron-style tasks
-                  ├─ dnsmgr2        BIND zones + Kea DHCPv4 scopes, one pair per instance
-                  └─ Kea DHCPv6, radvd   IPv6 addresses and router advertisements, per instance
+                  ├─ dnsmgr2        BIND zones + Kea DHCPv4 scopes, one pair per virtual firewall
+                  └─ Kea DHCPv6, radvd   IPv6 addresses and router advertisements, per virtual firewall
 ```
 
 - **portitor-web** holds the configuration in an SQLite database. On *Deploy* it builds a
   complete desired-state document (`internal/fwconfig`) and sends it to the agent.
 - **portitor-agent** validates the document again, renders every config file
   (`internal/render`) and makes the system match. It never reads the web database.
-- **Instances** are virtual routers. The default instance is the host itself; every
-  other instance is a Linux network namespace (`fw-<name>`) with its own interfaces,
+- **Virtual firewalls** are virtual routers. The default virtual firewall is the host itself; every
+  other virtual firewall is a Linux network namespace (`fw-<name>`) with its own interfaces,
   routing table, nftables ruleset, BIND and Kea. **Links** are veth pairs between
-  instances.
+  virtual firewalls.
 - **Interfaces** carry their own addresses, IPv4 and IPv6 mixed, as many as needed,
   each with its prefix length (`192.168.1.1/24`, `fd00:1::1/64`).
-- **IP addresses** live in a prefix tree per instance. Nesting follows from CIDR
+- **IP addresses** live in a prefix tree per virtual firewall. Nesting follows from CIDR
   containment; the interfaces' addresses and their prefixes appear in it by
   themselves. A prefix with DHCP on becomes a Kea scope (DHCPv4 or DHCPv6) on the
   interface with an address in it; several scopes on one interface form a Kea shared
@@ -69,7 +69,7 @@ firewall, the agent, makes the changes the GUI asks for. For a single box, an
   Local API (as a bouncer, with its API key), or plain text with one address or prefix
   per line (a CrowdSec blocklist integration with HTTP basic auth, Spamhaus DROP, ...).
   A rule uses one as `@name` in its source or destination; it becomes a pair of
-  nftables sets (`name_v4`, `name_v6`) in every instance whose rules use it, loaded in
+  nftables sets (`name_v4`, `name_v6`) in every virtual firewall whose rules use it, loaded in
   the same transaction as the rules. The agent downloads a list when it is first
   deployed and whenever a scheduled task says so, from the firewall host (root
   namespace); a failed download keeps the last good one, which also survives a restart.
@@ -95,11 +95,11 @@ firewall, the agent, makes the changes the GUI asks for. For a single box, an
 - **Anti-lockout.** The agent always accepts its API port and SSH (22) from `allow_from`,
   whatever rules are deployed.
 - **Atomic rulesets.** Each ruleset is checked with `nft -c` before anything changes,
-  and loaded as a single transaction, before the instance's interfaces come up or
+  and loaded as a single transaction, before the virtual firewall's interfaces come up or
   forwarding is turned on. A failed apply restores the previous configuration; if
   that fails too, the deployment says so.
 - **Default deny.** All chains (input, forward, output) drop unless a rule accepts; new
-  instances start with an "allow all output" rule. Established/related traffic, ICMP
+  virtual firewalls start with an "allow all output" rule. Established/related traffic, ICMP
   errors, IPv6 neighbour discovery and the services you enable (DHCP, DNS, WireGuard
   ports, the WAN DHCP client) are accepted before the rules. Port forwards are
   accepted after the forward rules, so a rule can drop what a port forward would let
@@ -212,7 +212,7 @@ The installer ISO does not need this: it is Debian with ifupdown, and neither
 netplan nor dracut is installed.
 
 When portitor-web reaches the agent, it adds the firewall's physical interfaces it
-has not seen before to the default instance, as they are configured at that moment
+has not seen before to the default virtual firewall, as they are configured at that moment
 (link state and static addresses), so a first deploy leaves them as they are. An
 interface you delete is not added again. Physical interfaces in the configuration
 that the firewall does not have are shown as a warning.
@@ -236,7 +236,7 @@ portitor-web listens on `127.0.0.1:8080` and its session cookie needs HTTPS: set
 [Configuration](docs/portitor-web.md#configuration)).
 
 Then open the GUI. Enter the agent URL, token and fingerprint under *Settings*,
-configure the default instance `main` (created on first start), and deploy.
+configure the default virtual firewall `main` (created on first start), and deploy.
 [docs/portitor-web.md](docs/portitor-web.md) describes the configuration file, the
 commands and the GUI.
 

@@ -101,11 +101,11 @@ const userMenu = computed(() => [
       <span class="hidden font-mono text-xs text-muted sm:inline">{{ version }}</span>
     </UTooltip>
     <div class="ml-2 flex items-center gap-2">
-      <span class="hidden text-sm text-muted md:inline">Instance</span>
+      <span class="hidden text-sm text-muted md:inline">VF</span>
       <USelect v-model="current" :items="instances.items" class="w-40" placeholder="none" />
     </div>
     <div class="ml-auto flex items-center gap-2">
-      <UTooltip v-if="!auth.canEdit" text="Your user can look at this instance but not change it">
+      <UTooltip v-if="!auth.canEdit" text="Your user can look at this virtual firewall but not change it">
         <UBadge color="neutral" variant="outline" icon="i-lucide-eye" label="Read-only" />
       </UTooltip>
       <UTooltip v-if="deploy.status?.version_mismatch" :text="deploy.status.version_mismatch">

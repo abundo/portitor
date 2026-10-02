@@ -187,7 +187,7 @@ onUnmounted(stop)
         <thead>
           <tr>
             <th>Time</th>
-            <th>Instance</th>
+            <th>VF</th>
             <th>Chain</th>
             <th>Rule</th>
             <th>Action</th>

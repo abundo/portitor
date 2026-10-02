@@ -35,7 +35,7 @@ onMounted(load)
 const { search, filtered: shownRoles } = useSearch(
   roles,
   (r) =>
-    `${r.name} ${r.description} ${r.instance_id ? 'instance' : ''} ${instancesText(r)} ${memberText(r)}`,
+    `${r.name} ${r.description} ${r.instance_id ? 'virtual firewall' : ''} ${instancesText(r)} ${memberText(r)}`,
 )
 
 // The dialog adds a role or edits one. An instance's role keeps its name
@@ -113,8 +113,8 @@ async function remove() {
         <div class="text-lg font-semibold">Roles</div>
         <div class="text-sm text-muted">
           A role grants its members instances, each member as an admin (changes and deploys them) or
-          a viewer. Each instance has a role of its own, added, renamed and removed with the
-          instance. A user with the global role None sees only what their roles grant.
+          a viewer. Each virtual firewall has a role of its own, added, renamed and removed with the
+          virtual firewall. A user with the global role None sees only what their roles grant.
         </div>
       </div>
       <UButton icon="i-lucide-plus" label="Add" @click="openCreate" />
@@ -128,7 +128,7 @@ async function remove() {
         { id: 'actions', header: '' },
         { accessorKey: 'name', header: 'Name' },
         { accessorKey: 'description', header: 'Description' },
-        { id: 'instances', header: 'Instances' },
+        { id: 'instances', header: 'VFs' },
         { id: 'members', header: 'Members' },
       ]"
     >
@@ -180,7 +180,7 @@ async function remove() {
         <UFormField
           :ui="inlineField"
           label="Name"
-          :help="isInstanceRole ? 'Follows the instance\'s name.' : ''"
+          :help="isInstanceRole ? 'Follows the virtual firewall\'s name.' : ''"
           required
         >
           <UInput v-model="form.name" class="w-full" :disabled="isInstanceRole" required />
@@ -190,11 +190,11 @@ async function remove() {
         </UFormField>
         <UFormField
           :ui="inlineField"
-          label="Instances"
+          label="Virtual firewalls"
           :help="
             isInstanceRole
-              ? 'An instance\'s role grants just that instance.'
-              : 'Members get their level on each of these instances.'
+              ? 'A virtual firewall\'s role grants just that virtual firewall.'
+              : 'Members get their level on each of these virtual firewalls.'
           "
         >
           <USelectMenu
@@ -203,7 +203,7 @@ async function remove() {
             value-key="value"
             multiple
             class="w-full"
-            placeholder="No instances"
+            placeholder="No virtual firewalls"
             :disabled="isInstanceRole"
           />
         </UFormField>

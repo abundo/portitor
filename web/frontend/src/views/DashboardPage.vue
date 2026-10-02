@@ -143,7 +143,7 @@ const stateColor = (s) =>
         <div class="card">
           <div class="mb-2 font-semibold">Services</div>
           <div v-if="!Object.keys(inst.services).length" class="text-sm text-muted">
-            No DNS or DHCP server in this instance.
+            No DNS or DHCP server in this virtual firewall.
           </div>
           <div
             v-for="(state, unit) in inst.services"
@@ -171,7 +171,7 @@ const stateColor = (s) =>
       </div>
     </template>
     <div v-else-if="st && !deploy.error" class="card text-sm text-muted">
-      This instance is not on the firewall yet. Configure it and
+      This virtual firewall is not on the firewall yet. Configure it and
       <RouterLink class="text-primary" to="/deploy">deploy</RouterLink>.
     </div>
   </div>

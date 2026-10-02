@@ -210,7 +210,7 @@ function copy(text) {
     <form v-if="auth.isAdmin" class="card mb-4 space-y-3" @submit.prevent="saveEndpoint">
       <UFormField
         label="Public endpoint host"
-        help="Name or address clients connect to, in every instance; used in generated client configs when the interface has no client endpoint of its own."
+        help="Name or address clients connect to, in every virtual firewall; used in generated client configs when the interface has no client endpoint of its own."
       >
         <div class="flex flex-wrap gap-2">
           <UInput
@@ -225,7 +225,7 @@ function copy(text) {
     <div v-if="!tunnels.length" class="card">
       <UAlert
         icon="i-lucide-key-round"
-        title="No WireGuard interface in this instance"
+        title="No WireGuard interface in this virtual firewall"
         description="Add an interface of kind WireGuard (e.g. wg0, listen port 51820), give it an address (e.g. 10.99.0.1/24), and allow its traffic with firewall rules."
         :actions="[{ label: 'Interfaces', to: '/interfaces' }]"
       />
@@ -325,7 +325,7 @@ function copy(text) {
           <USwitch
             v-if="!cfg.site"
             v-model="split"
-            label="Split tunnel (only this instance's networks)"
+            label="Split tunnel (only this virtual firewall's networks)"
             @update:model-value="loadConfig"
           />
           <div class="flex flex-wrap gap-4">
@@ -342,7 +342,7 @@ function copy(text) {
             }}</pre>
           </div>
           <p v-if="cfg.site" class="text-xs text-muted">
-            A wg-quick config for the router at the other site: it routes this instance's networks
+            A wg-quick config for the router at the other site: it routes this virtual firewall's networks
             through the tunnel. On another Portitor, enter the same values instead: a WireGuard
             interface with the address above, and this firewall as a peer with the public key and
             endpoint above and this instance's networks (AllowedIPs) as its networks.

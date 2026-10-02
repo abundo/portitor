@@ -20,27 +20,27 @@ const fields = [
     label: 'Name',
     required: true,
     placeholder: 'main',
-    hint: 'Lowercase letters and digits, max 12. Non-default instances run in network namespace fw-<name>.',
+    hint: 'Lowercase letters and digits, max 12. Non-default virtual firewalls run in network namespace fw-<name>.',
   },
   { key: 'description', label: 'Description' },
   {
     key: 'is_default',
-    label: 'Default instance',
+    label: 'Default virtual firewall',
     type: 'switch',
-    hint: 'The default instance is the host itself (root network namespace). Exactly one.',
+    hint: 'The default virtual firewall is the host itself (root network namespace). Exactly one.',
   },
 ]
 </script>
 
 <template>
   <CrudPage
-    title="Instances"
-    description="Virtual routers. Each has its own interfaces, routing table, firewall, DNS and DHCP server. Connect instances with links."
+    title="Virtual firewalls"
+    description="Virtual routers. Each has its own interfaces, routing table, firewall, DNS and DHCP server. Connect virtual firewalls with links."
     :api="instances"
     shared
     :columns="columns"
     :fields="fields"
-    new-label="New instance"
+    new-label="New virtual firewall"
     @changed="store.load()"
   />
 </template>

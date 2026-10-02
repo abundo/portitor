@@ -62,7 +62,7 @@ watch(
   () => deploy.status?.nic_sync,
   (sync) => {
     if (sync?.imported?.length) {
-      const def = instances.list.find((i) => i.is_default)?.name ?? 'the default instance'
+      const def = instances.list.find((i) => i.is_default)?.name ?? 'the default virtual firewall'
       toast.add({
         title: `Found ${sync.imported.join(', ')} on the firewall`,
         description: `Added to ${def} as it is configured now. Review before deploying.`,

@@ -238,7 +238,7 @@ const tab = computed({
             color="warning"
             variant="subtle"
             icon="i-lucide-triangle-alert"
-            title="The DHCP server is off for this instance"
+            title="The DHCP server is off for this virtual firewall"
             description="Turn it on, and DHCP on an interface, on the DHCP server tab."
           />
           <div class="card">
@@ -304,7 +304,7 @@ const tab = computed({
           <div class="card">
             <div class="mb-1 text-lg font-semibold">DHCP server</div>
             <p class="mb-4 text-sm text-muted">
-              Kea, for the clients on this instance's interfaces. DHCP is served per prefix of an
+              Kea, for the clients on this virtual firewall's interfaces. DHCP is served per prefix of an
               interface address; several on one interface form a shared network, and clients get
               addresses from all of them. Fixed leases are addresses with a MAC and a DNS name under
               <RouterLink to="/objects" class="text-primary">Hosts & prefixes</RouterLink>.
@@ -462,7 +462,7 @@ const tab = computed({
                         {{
                           server.ifaces.length
                             ? 'No interface matches.'
-                            : 'This instance has no interfaces.'
+                            : 'This virtual firewall has no interfaces.'
                         }}
                       </td>
                     </tr>
@@ -543,8 +543,8 @@ const tab = computed({
                 :label="is6(p) ? 'DHCPv6 server' : 'DHCP server'"
                 :help="
                   is6(p)
-                    ? 'Needs router advertisements (above) and the instance\'s DHCP server.'
-                    : 'Needs the instance\'s DHCP server.'
+                    ? 'Needs router advertisements (above) and the virtual firewall\'s DHCP server.'
+                    : 'Needs the virtual firewall\'s DHCP server.'
                 "
               >
                 <USwitch

@@ -24,7 +24,7 @@ func TestTenancy(t *testing.T) {
 	a := env.create("/api/instances", map[string]any{"name": "a"})
 	b := env.create("/api/instances", map[string]any{"name": "b"})
 	tina := env.create("/api/users", map[string]string{"username": "tina", "password": "a long password", "role": "none"})
-	roleA := env.roles()["instance-a"].ID
+	roleA := env.roles()["vf-a"].ID
 	if rec := env.do("PUT", fmt.Sprintf("/api/roles/%d", roleA), map[string]any{
 		"members": []map[string]any{{"user_id": tina, "level": "admin"}},
 	}); rec.Code != http.StatusOK {

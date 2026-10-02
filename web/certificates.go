@@ -25,7 +25,7 @@ func prepareCertificate(tx *gorm.DB, c, _ *models.Certificate) error {
 	}
 	var ifc models.Interface
 	if tx.First(&ifc, c.InterfaceID).Error != nil || ifc.InstanceID != c.InstanceID {
-		return bad("pick an interface of this instance")
+		return bad("pick an interface of this virtual firewall")
 	}
 	domains := models.StringList{}
 	for _, d := range c.Domains {
@@ -76,7 +76,7 @@ func checkCertificate(cert fwconfig.Certificate) error {
 	if !ok {
 		return err
 	}
-	prefix := fmt.Sprintf("instance check: certificate %q: ", cert.Name)
+	prefix := fmt.Sprintf("virtual firewall check: certificate %q: ", cert.Name)
 	msgs := make([]string, len(ve.Problems))
 	for i, p := range ve.Problems {
 		msgs[i] = strings.TrimPrefix(p, prefix)

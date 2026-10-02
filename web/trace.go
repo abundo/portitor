@@ -41,12 +41,12 @@ func (s *Server) handleAgentTrace(c *echo.Context) error {
 		return errJSON(c, http.StatusBadRequest, "invalid request")
 	}
 	if !captureName.MatchString(body.Instance) || (body.Interface != "" && !captureName.MatchString(body.Interface)) {
-		return errJSON(c, http.StatusBadRequest, "invalid instance or interface name")
+		return errJSON(c, http.StatusBadRequest, "invalid virtual firewall or interface name")
 	}
 	if !currentAccess(c).isAdmin() {
 		var inst models.Instance
 		if err := s.db.Where("name = ?", body.Instance).First(&inst).Error; err != nil {
-			return errJSON(c, http.StatusNotFound, "no such instance")
+			return errJSON(c, http.StatusNotFound, "no such virtual firewall")
 		}
 		if ok, err := allowInstance(c, inst.ID, true); !ok {
 			return err

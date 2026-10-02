@@ -54,7 +54,7 @@ const fields = [
     type: 'select',
     items: () => listItems.value,
     show: (f) => f.kind === 'iplist',
-    hint: 'Downloaded again, and its sets reloaded in every instance whose rules use it.',
+    hint: 'Downloaded again, and its sets reloaded in every virtual firewall whose rules use it.',
   },
   {
     key: 'command',

@@ -32,7 +32,7 @@ func checkDynDNS(d fwconfig.DynDNS) error {
 	if !ok {
 		return err
 	}
-	prefix := fmt.Sprintf("instance check: dns update %q: ", d.Name)
+	prefix := fmt.Sprintf("virtual firewall check: dns update %q: ", d.Name)
 	var msgs []string
 	for _, p := range ve.Problems {
 		if strings.HasSuffix(p, "needs at least one record") {
@@ -56,7 +56,7 @@ func prepareDyndnsClient(tx *gorm.DB, c, old *models.DyndnsClient) error {
 	}
 	var ifc models.Interface
 	if tx.First(&ifc, c.InterfaceID).Error != nil || ifc.InstanceID != c.InstanceID {
-		return bad("pick an interface of this instance")
+		return bad("pick an interface of this virtual firewall")
 	}
 	if c.Provider == "" {
 		c.Provider = fwconfig.ProviderRFC2136

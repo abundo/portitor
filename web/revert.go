@@ -135,7 +135,7 @@ func (s *Server) handleDeployRevert(c *echo.Context) error {
 	src, err := os.Open(snapshotPath(dir, live.Generation))
 	if errors.Is(err, os.ErrNotExist) {
 		if len(live.Instances) > 0 {
-			return errJSON(c, http.StatusConflict, fmt.Sprintf("generation %d deployed only some instances (%s); revert works after a deploy of everything", live.Generation, strings.Join(live.Instances, ", ")))
+			return errJSON(c, http.StatusConflict, fmt.Sprintf("generation %d deployed only some virtual firewalls (%s); revert works after a deploy of everything", live.Generation, strings.Join(live.Instances, ", ")))
 		}
 		return errJSON(c, http.StatusConflict, fmt.Sprintf("generation %d has no saved configuration to revert to (it was committed by an older version)", live.Generation))
 	} else if err != nil {

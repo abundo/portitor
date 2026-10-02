@@ -37,6 +37,11 @@ are in [README.md](README.md).
 | `install.py` | Installs/updates web and agent from a GitHub release (`.goreleaser.yaml`), `--source` or `--local`; the agent runs its copy in `/usr/lib/portitor` for GUI updates |
 | `iso` | Installer ISO: Debian netinst + preseed (`build.sh`), setup (`portitor-setup.py`, installed as `portitor-setup`: runs `portitor-web bootstrap` at first boot, `--reconfigure` when run again; or sets up only the agent, which prints a join string, or only portitor-web, which deploys it with `bootstrap --join`), QEMU test VM (`vm.sh`) |
 
+## Terms
+
+An *instance* (code, API, database) is a **virtual firewall** (short **VF**) in the GUI,
+docs and user-facing messages.
+
 ## Invariants
 
 - **The agent trusts nothing.** It re-runs `fwconfig.Validate` before rendering.

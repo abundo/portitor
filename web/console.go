@@ -28,7 +28,7 @@ import (
 func (s *Server) handleAgentConsole(c *echo.Context) error {
 	instance := c.QueryParam("instance")
 	if instance != "" && !captureName.MatchString(instance) {
-		return errJSON(c, http.StatusBadRequest, "invalid instance name")
+		return errJSON(c, http.StatusBadRequest, "invalid virtual firewall name")
 	}
 	a, _, err := s.agent()
 	if err != nil {

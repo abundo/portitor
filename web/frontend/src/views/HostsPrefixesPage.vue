@@ -373,7 +373,7 @@ function ipamBadges(n) {
       html += badge(
         'DNS',
         'neutral',
-        "Set to listen for DNS, but the instance's DNS server is disabled",
+        "Set to listen for DNS, but the virtual firewall's DNS server is disabled",
       )
     const client = ifaceClient(id)
     if (client.includes('dhcp'))
@@ -401,7 +401,7 @@ function ipamBadges(n) {
     html += badge(
       'DHCP server',
       on ? 'success' : 'neutral',
-      (on ? '' : "Set to serve DHCP, but the instance's DHCP server is disabled. ") +
+      (on ? '' : "Set to serve DHCP, but the virtual firewall's DHCP server is disabled. ") +
         (n.dhcp_range ? `Range ${n.dhcp_range}` : 'No range: fixed leases only'),
     )
   }
@@ -458,7 +458,7 @@ function groupNode(key, title, iconName, count, description, children) {
 function ipamEmpty() {
   if (searching.value && shownTree.value.length) return 'No prefix or address matches.'
   if (store.currentId) return 'No prefixes yet: give an interface an address, or add a prefix.'
-  return 'No instance yet: create one under Instances.'
+  return 'No virtual firewall yet: create one under Virtual firewalls.'
 }
 
 // The top-level nodes of the tree.
@@ -510,7 +510,7 @@ const treeSource = computed(() => {
       'Prefixes & IP addresses',
       'network',
       undefined,
-      store.current ? `The prefix tree of instance ${store.current.name}` : '',
+      store.current ? `The prefix tree of virtual firewall ${store.current.name}` : '',
       ipamChildren.length ? ipamChildren : [empty('empty:prefixes', ipamEmpty())],
     ),
   ]
@@ -762,7 +762,7 @@ async function removeAddress() {
                     <b>IP lists</b> are address lists the firewall downloads: the ban decisions of a
                     CrowdSec engine, or any list with one address or prefix per line. Use a list as
                     @name in a rule's source or destination; it becomes an nftables set in each
-                    instance whose rules use it, and matches IPv4 and IPv6. A list is downloaded
+                    virtual firewall whose rules use it, and matches IPv4 and IPv6. A list is downloaded
                     when it is first deployed and whenever a scheduled task says so; the last
                     download stays in force if a later one fails.
                   </p>
@@ -785,7 +785,7 @@ async function removeAddress() {
             </UPopover>
           </div>
           <p class="max-w-3xl text-sm text-muted">
-            Named hosts and prefixes, downloaded IP lists, and the instance's prefixes and addresses
+            Named hosts and prefixes, downloaded IP lists, and the virtual firewall's prefixes and addresses
             with their DNS names. Click a row to open it; right-click it to add to it.
           </p>
         </div>
@@ -905,7 +905,7 @@ async function removeAddress() {
             <UFormField
               :ui="inlineField"
               label="DNS name"
-              help="Fully qualified, inside one of the instance's DNS zones."
+              help="Fully qualified, inside one of the virtual firewall's DNS zones."
             >
               <UInput
                 v-model="addr.dns_name"

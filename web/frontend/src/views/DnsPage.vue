@@ -212,7 +212,7 @@ const tab = computed({
           <CrudPage
             title="DNS zones"
             noun="DNS zone"
-            description="Zones served by this instance's DNS server (BIND, via dnsmgr2). Names of IPAM addresses go into the matching forward zone; PTRs in reverse zones are generated. Open a zone to edit its records."
+            description="Zones served by this virtual firewall's DNS server (BIND, via dnsmgr2). Names of IPAM addresses go into the matching forward zone; PTRs in reverse zones are generated. Open a zone to edit its records."
             :api="dnsZones"
             :params="{ instance_id: store.currentId }"
             :columns="zoneColumns"
@@ -280,7 +280,7 @@ const tab = computed({
                           {{
                             server.ifaces.length
                               ? 'No interface matches.'
-                              : 'This instance has no interfaces.'
+                              : 'This virtual firewall has no interfaces.'
                           }}
                         </td>
                       </tr>
@@ -293,7 +293,7 @@ const tab = computed({
                 DNS resolver
               </h2>
               <p class="mb-4 text-sm text-muted">
-                Who resolves the names that are not in this instance's zones.
+                Who resolves the names that are not in this virtual firewall's zones.
               </p>
               <fieldset :disabled="readOnly" class="space-y-3">
                 <UFormField label="Upstream DNS" :ui="inlineField">

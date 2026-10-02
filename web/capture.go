@@ -33,12 +33,12 @@ func (s *Server) handleAgentCapture(c *echo.Context) error {
 		return errJSON(c, http.StatusBadRequest, "invalid request")
 	}
 	if !captureName.MatchString(req.Instance) || !captureName.MatchString(req.Interface) {
-		return errJSON(c, http.StatusBadRequest, "invalid instance or interface name")
+		return errJSON(c, http.StatusBadRequest, "invalid virtual firewall or interface name")
 	}
 	if !currentAccess(c).isAdmin() {
 		var inst models.Instance
 		if err := s.db.Where("name = ?", req.Instance).First(&inst).Error; err != nil {
-			return errJSON(c, http.StatusNotFound, "no such instance")
+			return errJSON(c, http.StatusNotFound, "no such virtual firewall")
 		}
 		if ok, err := allowInstance(c, inst.ID, true); !ok {
 			return err

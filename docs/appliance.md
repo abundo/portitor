@@ -81,7 +81,7 @@ configuration:
   the WAN gets the WAN's address,
 - every other interface as it is (down, no address).
 
-Output keeps the instance's *allow all output* rule: the chain's policy drops, and
+Output keeps the virtual firewall's *allow all output* rule: the chain's policy drops, and
 the rule lets everything the firewall itself sends out.
 
 The screen then shows the GUI's address and its certificate fingerprint. The login

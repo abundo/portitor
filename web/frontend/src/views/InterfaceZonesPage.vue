@@ -22,7 +22,7 @@ const fields = [
     type: 'multiselect',
     items: () => ifaceNames.value.map((n) => ({ label: ifaceText(n), value: n })),
     placeholder: 'none',
-    hint: 'Zero or more interfaces of this instance, link ends included. An interface may be in several zones.',
+    hint: 'Zero or more interfaces of this virtual firewall, link ends included. An interface may be in several zones.',
   },
 ]
 </script>

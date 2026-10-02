@@ -155,7 +155,7 @@ const templateFields = [
     key: 'nameservers',
     label: 'Nameservers (NS)',
     type: 'custom',
-    hint: 'Written as the NS records of every zone using this template. The address is optional: a nameserver inside a zone of the instance gets it as an A / AAAA record there. For both an IPv4 and an IPv6 address, add the nameserver twice.',
+    hint: 'Written as the NS records of every zone using this template. The address is optional: a nameserver inside a zone of the virtual firewall gets it as an A / AAAA record there. For both an IPv4 and an IPv6 address, add the nameserver twice.',
   },
   {
     key: 'dnssec_policy_id',
@@ -180,7 +180,7 @@ const templateDefaults = () => ({
       ref="templatesPage"
       title="DNS templates"
       noun="DNS template"
-      description="A zone's template gives it its SOA, default TTL, NS records and optional DNSSEC policy. Templates are shared by all instances."
+      description="A zone's template gives it its SOA, default TTL, NS records and optional DNSSEC policy. Templates are shared by all virtual firewalls."
       :api="dnsTemplates"
       shared
       :columns="templateColumns"
@@ -250,7 +250,7 @@ const templateDefaults = () => ({
     <CrudPage
       title="DNSSEC policies"
       noun="DNSSEC policy"
-      description="BIND dnssec-policy statements. Zones whose DNS template has a policy are signed by BIND (inline signing); keys are kept in the instance's BIND directory."
+      description="BIND dnssec-policy statements. Zones whose DNS template has a policy are signed by BIND (inline signing); keys are kept in the virtual firewall's BIND directory."
       :api="dnsDnssecPolicies"
       shared
       :columns="policyColumns"
