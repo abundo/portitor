@@ -262,7 +262,8 @@ func KeaDhcp4Conf(in *fwconfig.Instance, p Paths) string {
 }
 
 // KeaLeaseFile is where Kea keeps an instance's v4 leases. Kea 2.6+
-// refuses lease files outside its data directory, hence KeaDataDir.
+// refuses lease files outside its data directory, hence KeaDataDir. That
+// is Kea's view: on the host the file is in KeaInstanceDir.
 func KeaLeaseFile(instance string, p Paths) string {
 	return filepath.Join(p.KeaDataDir, "kea-leases4-"+instance+".csv")
 }
@@ -300,4 +301,12 @@ func KeaDhcp6Conf(in *fwconfig.Instance, p Paths) string {
 // KeaLease6File is where Kea keeps an instance's v6 leases.
 func KeaLease6File(instance string, p Paths) string {
 	return filepath.Join(p.KeaDataDir, "kea-leases6-"+instance+".csv")
+}
+
+// KeaInstanceDir is the host's directory of an instance's lease files and
+// control sockets. The instance's Kea units mount it over KeaDataDir and
+// KeaSocketDir (portitor-kea4@.service), so one instance's Kea can neither
+// read another's leases nor reach its control socket.
+func KeaInstanceDir(dir, instance string) string {
+	return filepath.Join(dir, instance)
 }

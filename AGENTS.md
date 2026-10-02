@@ -248,7 +248,13 @@ Committing directly to `main` is fine; no feature branch is needed.
 - Echo v5 handlers are `func(c *echo.Context) error`. Parse path ids with
   `echo.PathParam[uint]`, never pass the raw string to GORM (it becomes SQL).
 - Kea 2.6+ only accepts lease files and control sockets in its own directories,
-  hence `paths.kea_data_dir` / `kea_socket_dir`.
+  hence `paths.kea_data_dir` / `kea_socket_dir`. Each instance's Kea units mount
+  `<kea_data_dir>/<instance>` and `<kea_socket_dir>/<instance>` over them, so the
+  rendered config names Kea's view (`render.KeaLeaseFile`) and the agent reads
+  the host's (`render.KeaInstanceDir`). `install.py` moves older lease files in
+  (`move_kea_leases`). Kea's and radvd's PID files are in the unit's private
+  /tmp: under `PrivatePIDs` the daemon is always PID 1, so a stale one would read
+  as already running.
 - dnsmgr2 does DNS only. Kea (`render/kea.go`: `kea-dhcp4.conf`, `kea-dhcp6.conf`,
   reservations from A/AAAA records with a MAC included) and radvd are rendered
   directly: the DHCP subnets of one IP version on an interface form a Kea shared

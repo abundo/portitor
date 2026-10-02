@@ -13,16 +13,21 @@ Type=simple
 ExecStart=/usr/bin/portitor-agent netns-exec %i -- /usr/sbin/kea-dhcp4 -c /etc/portitor/instances/%i/kea-dhcp4.conf
 Restart=on-failure
 RestartSec=5
-# Kea 2.6 refuses a control socket directory other than mode 0750. The PID
-# file is named after the config file, the same for every instance, so each
-# instance gets its own directory; the logger's lock file goes there too, as
-# /run/kea/logger_lockfile may belong to Debian's own Kea (user _kea).
-Environment=KEA_PIDFILE_DIR=/run/kea/%i
-Environment=KEA_LOCKFILE_DIR=/run/kea/%i
+# Each instance has its own Kea directories, /var/lib/kea/%i and
+# /run/kea/%i, mounted over /var/lib/kea and /run/kea (see the bind mounts
+# below): one instance's Kea can't read another's leases or reach its
+# control socket. Kea 2.6 refuses a control socket directory other than
+# mode 0750. The logger's lock file goes there too, as
+# /run/kea/logger_lockfile on the host may belong to Debian's own Kea. The
+# PID file goes in the private /tmp, new at each start: Kea is always PID 1
+# (PrivatePIDs), so a PID file left by an unclean stop would read as
+# "already running".
+Environment=KEA_PIDFILE_DIR=/tmp
+Environment=KEA_LOCKFILE_DIR=/run/kea
 RuntimeDirectory=kea kea/%i
 RuntimeDirectoryMode=0750
 RuntimeDirectoryPreserve=yes
-StateDirectory=kea
+StateDirectory=kea kea/%i
 StateDirectoryMode=0750
 # Multitenancy: an instance's daemon sees only its own files and processes.
 # The other instances' config and state are hidden, the rest of the system
@@ -44,4 +49,4 @@ ProtectProc=invisible
 TemporaryFileSystem=/etc/portitor /var/lib/portitor
 BindReadOnlyPaths=/etc/portitor/instances/%i
 BindReadOnlyPaths=/var/lib/portitor/instances/%i
-ReadWritePaths=/var/lib/kea /run/kea
+BindPaths=/var/lib/kea/%i:/var/lib/kea /run/kea/%i:/run/kea

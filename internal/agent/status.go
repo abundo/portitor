@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -275,7 +276,9 @@ func (a *Agent) ServerLeases() map[string][]ServerLease {
 		latest := map[string]ServerLease{}
 		var order []string
 		var paths []string
-		for _, base := range []string{render.KeaLeaseFile(name, a.cfg.Paths), render.KeaLease6File(name, a.cfg.Paths)} {
+		dir := render.KeaInstanceDir(a.cfg.Paths.KeaDataDir, name)
+		for _, f := range []string{render.KeaLeaseFile(name, a.cfg.Paths), render.KeaLease6File(name, a.cfg.Paths)} {
+			base := filepath.Join(dir, filepath.Base(f))
 			paths = append(paths, base+".2", base+".1", base)
 		}
 		for _, path := range paths {

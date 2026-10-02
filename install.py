@@ -445,6 +445,7 @@ def install_agent(host: Host, binary: Path, deploy: Path, version: str, assume_y
     host.run(f"ln -sfn portitor-agent {shlex.quote(CLI_LINK)}", desc=f"ln -s portitor-agent {CLI_LINK}")
     host.put(Path(__file__).resolve(), INSTALLER_DEST, "0755", name=INSTALLER_FILENAME)
     actions = {u: install_unit(host, deploy / "systemd" / u, assume_yes) for u in AGENT_UNITS}
+    move_kea_leases(host)
     host.systemctl("daemon-reload")
     install_apparmor(host, deploy)
     if new_config:
@@ -467,6 +468,29 @@ def install_agent(host: Host, binary: Path, deploy: Path, version: str, assume_y
         if host.run(f"systemctl is-active --quiet {AGENT_UNIT}", check=False, mutate=False).returncode:
             warn(f"{AGENT_UNIT} is not running on {host}; see journalctl -u {AGENT_UNIT}")
     verify_version(host, AGENT_BIN, version)
+
+
+def move_kea_leases(host: Host) -> None:
+    """Move lease files from before the per-instance Kea directories.
+
+    The units mount /var/lib/kea/<instance> over /var/lib/kea, so a unit
+    can't do this itself. A running Kea keeps writing to the renamed file;
+    the restart that follows opens it at its new path. The DHCPv6 server
+    id (DUID) goes along, so clients see the same server.
+    """
+    host.run(
+        "cd /var/lib/kea 2>/dev/null || exit 0\n"
+        "for f in kea-leases[46]-*.csv*; do\n"
+        '  [ -e "$f" ] || continue\n'
+        '  n=${f#kea-leases?-}; n=${n%%.csv*}\n'
+        '  mkdir -p -m 0750 "$n" && mv -n "$f" "$n/"\n'
+        "done\n"
+        "if [ -e kea-dhcp6-serverid ]; then\n"
+        '  for d in */; do [ -d "$d" ] && cp -pn kea-dhcp6-serverid "$d"; done\n'
+        "fi\n"
+        "true",
+        desc="move Kea lease files to /var/lib/kea/<instance>",
+    )
 
 
 def replace_marked_block(text: str, begin: str, end: str, block: str) -> str:

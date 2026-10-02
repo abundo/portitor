@@ -14,12 +14,12 @@ ExecStart=/usr/bin/portitor-agent netns-exec %i -- /usr/sbin/kea-dhcp6 -c /etc/p
 Restart=on-failure
 RestartSec=5
 # Same directories as portitor-kea4@ (see there); the PID file names differ.
-Environment=KEA_PIDFILE_DIR=/run/kea/%i
-Environment=KEA_LOCKFILE_DIR=/run/kea/%i
+Environment=KEA_PIDFILE_DIR=/tmp
+Environment=KEA_LOCKFILE_DIR=/run/kea
 RuntimeDirectory=kea kea/%i
 RuntimeDirectoryMode=0750
 RuntimeDirectoryPreserve=yes
-StateDirectory=kea
+StateDirectory=kea kea/%i
 StateDirectoryMode=0750
 # Multitenancy: an instance's daemon sees only its own files and processes.
 # The other instances' config and state are hidden, the rest of the system
@@ -41,4 +41,4 @@ ProtectProc=invisible
 TemporaryFileSystem=/etc/portitor /var/lib/portitor
 BindReadOnlyPaths=/etc/portitor/instances/%i
 BindReadOnlyPaths=/var/lib/portitor/instances/%i
-ReadWritePaths=/var/lib/kea /run/kea
+BindPaths=/var/lib/kea/%i:/var/lib/kea /run/kea/%i:/run/kea

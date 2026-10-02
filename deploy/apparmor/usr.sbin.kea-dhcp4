@@ -6,11 +6,12 @@
 # install.py adds these rules to the profile's local include
 # (/etc/apparmor.d/local/usr.sbin.kea-dhcp4). The paths are the defaults of
 # etc_dir, kea_data_dir and kea_socket_dir in /etc/portitor/agent.yaml, and
-# the unit's KEA_PIDFILE_DIR and KEA_LOCKFILE_DIR.
+# the unit's KEA_PIDFILE_DIR (its private /tmp) and KEA_LOCKFILE_DIR, as Kea sees them: the
+# unit mounts the instance's own directories over /var/lib/kea and /run/kea.
 /etc/portitor/instances/*/kea-dhcp4.conf r,
 /var/lib/kea/kea-leases4-*.csv* rwk,
 /run/kea/kea4-*.sock rw,
 /run/kea/kea4-*.sock.lock rwk,
-/run/kea/*/ r,
-/run/kea/*/kea-dhcp4.kea-dhcp4.pid rwk,
-/run/kea/*/logger_lockfile rwk,
+/run/kea/ r,
+/tmp/kea-dhcp4.kea-dhcp4.pid rwk,
+/run/kea/logger_lockfile rwk,
