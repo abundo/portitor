@@ -157,6 +157,12 @@ func (c *Client) Neighbours(ctx context.Context) (*agentapi.NeighboursResponse, 
 	return &n, c.do(ctx, http.MethodGet, "/v1/neighbours", nil, &n)
 }
 
+// RoutingTable returns the instances' IPv4 and IPv6 routes.
+func (c *Client) RoutingTable(ctx context.Context) (*agentapi.RoutingTableResponse, error) {
+	var t agentapi.RoutingTableResponse
+	return &t, c.do(ctx, http.MethodGet, "/v1/routing-table", nil, &t)
+}
+
 func (c *Client) Leases(ctx context.Context) (*agentapi.LeasesResponse, error) {
 	var l agentapi.LeasesResponse
 	return &l, c.do(ctx, http.MethodGet, "/v1/leases", nil, &l)

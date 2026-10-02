@@ -474,6 +474,27 @@ type NeighboursResponse struct {
 	LLDPPorts []LLDPPort `json:"lldp_ports"`
 }
 
+// RoutingTableResponse is the instances' IPv4 and IPv6 routing tables
+// (the main table, from `ip route`).
+type RoutingTableResponse struct {
+	Routes []RouteEntry `json:"routes"`
+}
+
+// RouteEntry is a route of an instance's main routing table.
+type RouteEntry struct {
+	Instance    string `json:"instance"`
+	Family      string `json:"family"` // ipv4 or ipv6
+	Type        string `json:"type"`   // unicast, unreachable, blackhole, ...
+	Destination string `json:"destination"`
+	Gateway     string `json:"gateway,omitempty"`
+	Interface   string `json:"interface,omitempty"`
+	// Protocol is who added it: kernel, static, dhcp, ra, 99 (the agent), ...
+	Protocol string `json:"protocol,omitempty"`
+	Scope    string `json:"scope,omitempty"`
+	Source   string `json:"source,omitempty"`
+	Metric   int    `json:"metric,omitempty"`
+}
+
 // IPNeighbour is an entry of an ARP (IPv4) or ND (IPv6) table, from
 // `ip neigh`.
 type IPNeighbour struct {

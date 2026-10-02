@@ -1101,6 +1101,27 @@ func (s *Server) handleAgentNeighbours(c *echo.Context) error {
 	return c.JSON(http.StatusOK, n)
 }
 
+// handleAgentRoutingTable passes on the instances' IPv4 and IPv6 routes,
+// for the Routes page.
+func (s *Server) handleAgentRoutingTable(c *echo.Context) error {
+	a, _, err := s.agent()
+	if err != nil {
+		return agentError(c, err)
+	}
+	t, err := a.RoutingTable(c.Request().Context())
+	if err != nil {
+		return agentError(c, err)
+	}
+	names, err := s.readableInstanceNames(c)
+	if err != nil {
+		return err
+	}
+	if names != nil {
+		filterRoutes(t, names)
+	}
+	return c.JSON(http.StatusOK, t)
+}
+
 // handleAgentRuleCounters passes on the traffic per rule (by rule id), for
 // the Rules page.
 func (s *Server) handleAgentRuleCounters(c *echo.Context) error {
