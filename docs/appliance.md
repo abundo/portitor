@@ -51,6 +51,9 @@ watch). It asks for:
 - **LAN IPv4**: *Static* (the default), with the LAN address and its prefix
   length, e.g. `192.168.1.1/24`, or *DHCP*. A DHCP LAN takes no default route from its
   lease; the default route belongs to the WAN.
+- **LAN DHCP server** (static LAN only): *Off* (the default) or *On*, with the
+  **DHCP range** it hands out, e.g. `192.168.1.100-192.168.1.199`. Clients get the
+  LAN address as gateway and the DNS servers below (their IPv4 ones).
 - **WAN IPv4**: *DHCP* (the default), which also brings the default gateway, or
   *Static*, with the WAN address and its prefix length and the **default gateway**.
 - **DNS servers** the firewall itself uses, for updates and IP lists. The default is
@@ -70,6 +73,7 @@ configuration:
 - the LAN interface with its address, or DHCP, labelled *LAN*,
 - the WAN interface, with DHCP or its static address, labelled *WAN*,
 - the default route (for a static WAN),
+- with the LAN DHCP server on, DHCP on the LAN's prefix (in IPAM) with that range,
 - three input rules, *portitor-web from the LAN* (TCP 443), *SSH from the LAN* and
   *ping from the LAN*,
 - a forward rule, *LAN to WAN*, that accepts everything from the LAN to the WAN,
@@ -86,7 +90,7 @@ screen shows them too; with a DHCP LAN it shows the LAN's current address. Open
 The browser warns about the self-signed certificate; compare the fingerprint it shows
 with the one on the screen.
 
-Next steps in the GUI: DHCP and DNS for the LAN, and narrower rules than *LAN to WAN* if
+Next steps in the GUI: DHCP (if not turned on here) and DNS for the LAN, and narrower rules than *LAN to WAN* if
 you want them. See [portitor-web](portitor-web.md).
 
 If a step fails, the setup shows the error with *Retry* and *Give up*; its log is
@@ -96,8 +100,8 @@ run `sudo portitor-setup` after logging in as `portitor` at the console.
 ## Changing the network later
 
 `sudo portitor-setup`, run again after the first setup, changes the network: the LAN
-and WAN interfaces (or swaps them), DHCP or a static address on each, the default gateway,
-the DNS servers, the time zone and the keyboard layout. The last answers are the defaults. A new password
+and WAN interfaces (or swaps them), DHCP or a static address on each, the LAN's DHCP
+server, the default gateway, the DNS servers, the time zone and the keyboard layout. The last answers are the defaults. A new password
 for `admin` and `portitor` is optional; leave it empty to keep the current one. This
 is also the way back in when a change in the GUI has locked you out of it.
 
@@ -112,6 +116,8 @@ It then deploys at once, without the confirm timeout:
   *masquerade to the WAN*, if they are still there, match the new LAN and WAN;
 - the LAN and WAN are labelled *LAN* and *WAN*, unless you gave them another
   label;
+- with the LAN DHCP server on, the LAN's prefix serves the range; *Off* leaves DHCP
+  as it is (turn it off in the GUI);
 - a new GUI certificate is made when the LAN address changes, so the browser warns
   again; the new fingerprint is shown.
 

@@ -139,7 +139,7 @@ func main() {
 	})
 
 	var bo web.BootstrapOptions
-	var tokenFile, address, wanAddress, gateway, join string
+	var tokenFile, address, wanAddress, gateway, dhcpRange, dhcpDNS, join string
 	bootstrap := &cobra.Command{
 		Use:   "bootstrap",
 		Short: "Configure and deploy a new firewall that runs portitor-web itself (installer ISO)",
@@ -147,7 +147,8 @@ func main() {
 (or DHCP, without a default route when there is a WAN), the WAN interface
 (static or DHCP) and the default route, describes them as LAN and WAN,
 accepts the GUI port, SSH and ping from the LAN and forwarding from the LAN
-to the WAN, masquerades on the WAN, and deploys.
+to the WAN, masquerades on the WAN, serves --dhcp-range on the static LAN
+(if given), and deploys.
 Every other interface of the firewall is imported as it is. Refused once
 anything has been deployed, unless --reconfigure (portitor-setup run again):
 then the LAN and WAN get exactly these settings, the IPv4 default route is
@@ -215,6 +216,18 @@ firewall unless --gui-port is given.`,
 					return fmt.Errorf("--gateway: %w", err)
 				}
 			}
+			if dhcpRange != "" {
+				if bo.DHCPStart, bo.DHCPEnd, err = web.ParseDHCPRange(dhcpRange); err != nil {
+					return fmt.Errorf("--dhcp-range: %w", err)
+				}
+			}
+			for _, d := range strings.FieldsFunc(dhcpDNS, func(r rune) bool { return r == ',' || r == ' ' }) {
+				ip, err := netip.ParseAddr(d)
+				if err != nil {
+					return fmt.Errorf("--dhcp-dns: %w", err)
+				}
+				bo.DHCPDNS = append(bo.DHCPDNS, ip)
+			}
 			return printDeployment(web.Bootstrap(cmd.Context(), srv, bo))
 		},
 	}
@@ -227,6 +240,8 @@ firewall unless --gui-port is given.`,
 	bf.StringVar(&bo.WAN, "wan", "", "WAN interface (optional)")
 	bf.StringVar(&wanAddress, "wan-address", "", "static WAN address with prefix length (default: DHCP)")
 	bf.StringVar(&gateway, "gateway", "", "default gateway (optional; on the WAN if it is static, else on the static LAN)")
+	bf.StringVar(&dhcpRange, "dhcp-range", "", "DHCP server on the static LAN, e.g. 192.168.1.100-192.168.1.199 (optional)")
+	bf.StringVar(&dhcpDNS, "dhcp-dns", "", "DNS servers DHCP hands out, comma separated (default: the firewall, if its DNS listens on the LAN)")
 	bf.IntVar(&bo.GUIPort, "gui-port", 443, "port to open for portitor-web on the LAN, 0 for none")
 	bf.BoolVar(&bo.Reconfigure, "reconfigure", false, "change the LAN and WAN of a deployed installation")
 	bf.StringVar(&join, "join", "", "join string from portitor-setup on an agent-only firewall, - for stdin")

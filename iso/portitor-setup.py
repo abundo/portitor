@@ -6,9 +6,9 @@
 Runs on tty1 at boot (portitor-firstboot.service) until it has finished
 once. A text UI (Textual, python3-textual) asks for the keyboard layout
 (applied at once, so the password is typed with it), the LAN and WAN
-interfaces, the LAN address (static or DHCP), the WAN address (DHCP, or
-static with the default gateway), the DNS servers, a password and the time
-zone; before applying, LAN and WAN can be swapped. Then it:
+interfaces, the LAN address (static or DHCP), a DHCP server on a static
+LAN (its range), the WAN address (DHCP, or static with the default
+gateway), the DNS servers, a password and the time zone; before applying, LAN and WAN can be swapped. Then it:
 
   - writes /etc/resolv.conf (the agent does not manage the firewall's own
     resolver; the one from the installation may be unreachable now),
@@ -20,7 +20,8 @@ zone; before applying, LAN and WAN can be swapped. Then it:
     default route; the default route belongs to the WAN) and WAN (DHCP or
     static), described as LAN and WAN, default route, input rules for the
     GUI, SSH and ping from the LAN, a forward rule from the LAN to the WAN,
-    masquerade on the WAN, and deploys (output has the instance's allow all
+    masquerade on the WAN, a DHCP server on the LAN if chosen (handing out
+    the DNS servers above), and deploys (output has the instance's allow all
     output rule),
   - starts portitor-web and writes the GUI's address to /etc/issue.d (with a
     DHCP LAN, agetty shows its current address).
@@ -47,7 +48,8 @@ Split setups: the setup first asks what the machine runs.
 
 Run again (`sudo portitor-setup`) after it has finished, it changes the
 network: the LAN and WAN interfaces (swapped, too) and addresses, the
-default gateway, the DNS servers, the time zone and the keyboard layout, with the last answers
+LAN's DHCP server (turned on or its range changed; off leaves it as it is),
+the default gateway, the DNS servers, the time zone and the keyboard layout, with the last answers
 (SETUP_STATE) as defaults; a password is optional there. It leaves the
 database, the agent and every other interface alone, runs `portitor-web
 bootstrap --reconfigure`, and makes a new GUI certificate when the LAN
@@ -57,8 +59,9 @@ With /etc/portitor/firstboot.answers (an ISO built with `iso/build.sh
 --test`), nothing is asked and no text UI runs: it holds "key: value" lines
 for lan (a name or MAC address), address (dhcp for DHCP), wan (a name or MAC
 address, optional), wan_address
-(empty: DHCP), gateway (on the static WAN, else on the LAN), dns (space
-separated), password, timezone and keyboard (an XKB layout, e.g. se). The file is removed when the setup has
+(empty: DHCP), gateway (on the static WAN, else on the LAN), dhcp_range
+(a DHCP server on the static LAN, e.g. 192.168.1.100-192.168.1.199,
+optional), dns (space separated), password, timezone and keyboard (an XKB layout, e.g. se). The file is removed when the setup has
 finished. role (both, agent or web) picks the split setups; agent reads
 web_from (portitor-web's address or network, default the LAN network), web
 reads lan and address (its own interface), gateway and join (optional).
@@ -240,6 +243,42 @@ def check_gateway(text: str, addr: ipaddress.IPv4Interface) -> ipaddress.IPv4Add
     if gw not in addr.network or gw == addr.ip:
         raise ValueError(f"must be another address in {addr.network}")
     return gw
+
+
+def check_dhcp_range(text: str, addr: ipaddress.IPv4Interface) -> tuple[ipaddress.IPv4Address, ipaddress.IPv4Address]:
+    start, sep, end = text.partition("-")
+    try:
+        if not sep:
+            raise ValueError
+        r = ipaddress.IPv4Address(start.strip()), ipaddress.IPv4Address(end.strip())
+    except ValueError:
+        raise ValueError("start-end, e.g. 192.168.1.100-192.168.1.199") from None
+    net = addr.network
+    for ip in r:
+        if ip not in net or (net.prefixlen < 31 and ip in (net.network_address, net.broadcast_address)):
+            raise ValueError(f"{ip} is not a host address in {net}")
+    if r[0] > r[1]:
+        raise ValueError("the start is after the end")
+    if r[0] <= addr.ip <= r[1]:
+        raise ValueError(f"the range holds the LAN address {addr.ip}")
+    return r
+
+
+def default_dhcp_range(addr: ipaddress.IPv4Interface) -> str:
+    """.100-.199 in a /24 or larger, else the upper half; the other half if the LAN address is in it."""
+    net, base = addr.network, addr.network.network_address
+    if net.prefixlen > 30:
+        return ""
+    if net.prefixlen <= 24 and not base + 100 <= addr.ip <= base + 199:
+        return f"{base + 100}-{base + 199}"
+    mid = base + net.num_addresses // 2
+    if mid <= addr.ip:
+        return f"{base + 1}-{mid - 1}"
+    return f"{mid}-{net.broadcast_address - 1}"
+
+
+def fmt_range(r: tuple | None) -> str:
+    return f"{r[0]}-{r[1]}" if r else ""
 
 
 def parse_dns(answer: str) -> list[str]:
@@ -508,6 +547,9 @@ def join_string(a: dict) -> str:
         d["wan_address"] = str(a["wan_address"])
     if a["gateway"]:
         d["gateway"] = str(a["gateway"])
+    if a.get("dhcp_range"):
+        d["dhcp_range"] = fmt_range(a["dhcp_range"])
+        d["dhcp_dns"] = dhcp_dns(a)
     raw = json.dumps(d, separators=(",", ":")).encode()
     return JOIN_PREFIX + base64.urlsafe_b64encode(raw).decode().rstrip("=")
 
@@ -551,8 +593,17 @@ def join(a: dict, text: str) -> bool:
     return False
 
 
+def dhcp_dns(a: dict) -> list[str]:
+    """The DNS servers the LAN's DHCP server hands out (DHCPv4: IPv4 only)."""
+    return [d for d in a["dns"] if ipaddress.ip_address(d).version == 4]
+
+
 def step_bootstrap(a: dict) -> None:
     argv = web("bootstrap", "--lan", a["lan"], "--address", str(a["address"] or "dhcp"), "--gui-port", str(GUI_PORT))
+    if a.get("dhcp_range"):
+        argv += ["--dhcp-range", fmt_range(a["dhcp_range"])]
+        if dhcp_dns(a):
+            argv += ["--dhcp-dns", ",".join(dhcp_dns(a))]
     if a["wan"]:
         argv += ["--wan", a["wan"]]
     if a["wan_address"]:
@@ -722,6 +773,7 @@ def read_answers() -> dict:
         "wan": nic("wan") if raw.get("wan") and role != "web" else "",
         "wan_address": ipaddress.IPv4Interface(raw["wan_address"]) if raw.get("wan_address") and role != "web" else None,
         "gateway": ipaddress.IPv4Address(raw["gateway"]) if raw.get("gateway") else None,
+        "dhcp_range": None,
         "dns": parse_dns(raw.get("dns") or PUBLIC_DNS),
         "password": raw["password"],
         "tz": raw.get("timezone") or "Etc/UTC",
@@ -733,6 +785,13 @@ def read_answers() -> dict:
         if not a["address"]:
             raise RuntimeError(f"{ANSWERS}: the agent-only firewall needs a static LAN address")
         a["web_from"] = str(ipaddress.IPv4Network(raw.get("web_from") or a["address"].network, strict=False))
+    if raw.get("dhcp_range") and role != "web":
+        if not a["address"]:
+            raise RuntimeError(f"{ANSWERS}: a DHCP server needs a static LAN address")
+        try:
+            a["dhcp_range"] = check_dhcp_range(raw["dhcp_range"], a["address"])
+        except ValueError as exc:
+            raise RuntimeError(f"{ANSWERS}: dhcp_range: {exc}") from None
     if a["join"]:
         decode_join(a["join"])
     return a
@@ -752,6 +811,7 @@ def state_of(a: dict) -> dict:
     state = {k: str(a[k]) if a.get(k) else "" for k in ("role", "lan", "wan", "wan_address", "gateway", "tz", "keyboard", "web_from")}
     state["address"] = str(a["address"] or "dhcp")
     state["dns"] = " ".join(a["dns"])
+    state["dhcp_range"] = fmt_range(a.get("dhcp_range"))
     return state
 
 
@@ -809,6 +869,7 @@ def summary(a: dict) -> list[str]:
     else:
         out += [f"LAN interface   {nic_label(a['lan'])}",
                 f"LAN address     {a['address'] or 'DHCP (no default route)'}",
+                f"LAN DHCP server {fmt_range(a.get('dhcp_range')) or ('unchanged' if a.get('reconfigure') and a['address'] else 'off')}",
                 f"WAN interface   {nic_label(a['wan'])}",
                 f"WAN address     {a['wan_address'] or 'DHCP'}",
                 f"Default gateway {a['gateway'] or 'from DHCP'}"]
@@ -1044,6 +1105,13 @@ class NetworkPage(Page):
                                              value="dhcp" if st.get("address") == "dhcp" else "static"))
             yield row("LAN address", Input(st.get("address") if static else "192.168.1.1/24", id="address",
                                            placeholder="192.168.1.1/24"))
+            yield row("LAN DHCP server", Select([("Off", "off"), ("On", "on")], id="dhcp_mode", allow_blank=False,
+                                                value="on" if st.get("dhcp_range") else "off"))
+            yield row("DHCP range", Input(st.get("dhcp_range", ""), id="dhcp_range",
+                                          placeholder="192.168.1.100-192.168.1.199"))
+            yield Static("Hands out addresses on the LAN, with the firewall as gateway and the DNS servers "
+                         "below." + (" Off leaves a DHCP server set up in the GUI as it is."
+                                     if self.app.reconfigure else ""), classes="hint")
             yield row("WAN IPv4", Select(MODES, id="wan_mode", allow_blank=False,
                                          value="static" if st.get("wan_address") else "dhcp"))
             yield row("WAN address", Input(st.get("wan_address", ""), id="wan_address", placeholder="203.0.113.2/24"))
@@ -1084,6 +1152,26 @@ class NetworkPage(Page):
             for mode in self.query(sid).results(Select):
                 for i in ids:
                     self.query_one(i).disabled = mode.value == "dhcp"
+        # A DHCP server needs the static LAN.
+        for dhcp in self.query("#dhcp_mode").results(Select):
+            dhcp.disabled = not self.static("#lan_mode")
+            rng = self.query_one("#dhcp_range", Input)
+            rng.disabled = dhcp.disabled or dhcp.value == "off"
+            if not rng.disabled and not rng.value.strip():
+                self.fill_range()
+
+    @on(Input.Changed, "#address")
+    def fill_range(self) -> None:
+        """A range in the LAN, while the one there is not (or empty)."""
+        for rng in self.query("#dhcp_range").results(Input):
+            try:
+                addr = check_address(self.value("#address"))
+            except ValueError:
+                return
+            try:
+                check_dhcp_range(rng.value.strip(), addr)
+            except ValueError:
+                rng.value = default_dhcp_range(addr)
 
     def value(self, wid: str) -> str:
         return self.query_one(wid, Input).value.strip()
@@ -1106,6 +1194,7 @@ class NetworkPage(Page):
 
     def save(self) -> None:
         a, kind = self.a, self.kind()
+        a["dhcp_range"] = None
         if kind == "agent":
             a.update(answers_of(self.state))
         elif kind == "host":
@@ -1119,6 +1208,8 @@ class NetworkPage(Page):
             if a["lan"] == a["wan"]:
                 raise ValueError("the LAN and WAN interfaces must differ (Swap on the last page swaps them)")
             a["address"] = self.field("LAN address", check_address, self.value("#address")) if self.static("#lan_mode") else None
+            on = a["address"] and self.query_one("#dhcp_mode", Select).value == "on"
+            a["dhcp_range"] = self.field("DHCP range", check_dhcp_range, self.value("#dhcp_range"), a["address"]) if on else None
             a["wan_address"] = (self.field("WAN address", check_address, self.value("#wan_address"), a["address"])
                                 if self.static("#wan_mode") else None)
             # DHCP brings the default gateway.

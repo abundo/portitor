@@ -353,3 +353,36 @@ func TestBootstrapLANDHCP(t *testing.T) {
 		})
 	}
 }
+
+func TestBootstrapDHCPServer(t *testing.T) {
+	env := newEnv(t)
+	fake := &applyAgent{statusAgent: statusAgent{nics: []agentapi.NICStatus{{Name: "enp2s0", Addresses: []string{}}}}}
+	env.srv.newAgent = func(*models.Settings) (agentAPI, error) { return fake, nil }
+	o := BootstrapOptions{
+		AgentURL: "https://127.0.0.1:8443", AgentToken: strings.Repeat("t", 43), AgentFingerprint: strings.Repeat("ab", 32),
+		LAN: "enp2s0", Address: netip.MustParsePrefix("192.168.1.1/24"), GUIPort: 443,
+		DHCPStart: netip.MustParseAddr("192.168.1.100"), DHCPEnd: netip.MustParseAddr("192.168.1.199"),
+		DHCPDNS: []netip.Addr{netip.MustParseAddr("1.1.1.1")},
+	}
+	for _, bad := range []struct{ start, end string }{
+		{"192.168.1.200", "192.168.1.100"}, // backwards
+		{"192.168.1.1", "192.168.1.10"},    // holds the LAN address
+		{"192.168.2.10", "192.168.2.20"},   // outside the LAN
+		{"192.168.1.10", "192.168.1.255"},  // broadcast
+	} {
+		b := o
+		b.DHCPStart, b.DHCPEnd = netip.MustParseAddr(bad.start), netip.MustParseAddr(bad.end)
+		if err := b.check(); err == nil {
+			t.Errorf("%s-%s accepted", bad.start, bad.end)
+		}
+	}
+	if _, err := Bootstrap(context.Background(), env.srv, o); err != nil {
+		t.Fatal(err)
+	}
+	subs := fake.applied.Instances[0].DHCP.Subnets
+	if len(subs) != 1 || subs[0].Prefix != "192.168.1.0/24" || subs[0].Interface != "enp2s0" ||
+		subs[0].RangeStart != "192.168.1.100" || subs[0].RangeEnd != "192.168.1.199" || subs[0].Gateway != "192.168.1.1" ||
+		!slices.Equal(subs[0].DNSServers, []string{"1.1.1.1"}) || !fake.applied.Instances[0].DHCP.Enabled {
+		t.Errorf("DHCP subnets %+v", subs)
+	}
+}

@@ -19,14 +19,16 @@ const JoinPrefix = "portitor-join:"
 
 // joinData is the join string's JSON, base64url-encoded after JoinPrefix.
 type joinData struct {
-	URL         string `json:"url"`
-	Token       string `json:"token"`
-	Fingerprint string `json:"fingerprint"`
-	LAN         string `json:"lan"`
-	Address     string `json:"address"`
-	WAN         string `json:"wan,omitempty"`
-	WANAddress  string `json:"wan_address,omitempty"`
-	Gateway     string `json:"gateway,omitempty"`
+	URL         string   `json:"url"`
+	Token       string   `json:"token"`
+	Fingerprint string   `json:"fingerprint"`
+	LAN         string   `json:"lan"`
+	Address     string   `json:"address"`
+	WAN         string   `json:"wan,omitempty"`
+	WANAddress  string   `json:"wan_address,omitempty"`
+	Gateway     string   `json:"gateway,omitempty"`
+	DHCPRange   string   `json:"dhcp_range,omitempty"`
+	DHCPDNS     []string `json:"dhcp_dns,omitempty"`
 }
 
 // ParseJoin decodes a join string into bootstrap options for a firewall
@@ -64,5 +66,30 @@ func ParseJoin(s string) (BootstrapOptions, error) {
 			return o, fmt.Errorf("join string: gateway: %w", err)
 		}
 	}
+	if d.DHCPRange != "" {
+		if o.DHCPStart, o.DHCPEnd, err = ParseDHCPRange(d.DHCPRange); err != nil {
+			return o, fmt.Errorf("join string: DHCP range: %w", err)
+		}
+	}
+	for _, a := range d.DHCPDNS {
+		ip, err := netip.ParseAddr(a)
+		if err != nil {
+			return o, fmt.Errorf("join string: DHCP DNS server: %w", err)
+		}
+		o.DHCPDNS = append(o.DHCPDNS, ip)
+	}
 	return o, nil
+}
+
+// ParseDHCPRange parses "192.168.1.100-192.168.1.199".
+func ParseDHCPRange(s string) (start, end netip.Addr, err error) {
+	a, b, ok := strings.Cut(s, "-")
+	if !ok {
+		return start, end, errors.New("start-end, e.g. 192.168.1.100-192.168.1.199")
+	}
+	if start, err = netip.ParseAddr(strings.TrimSpace(a)); err != nil {
+		return start, end, err
+	}
+	end, err = netip.ParseAddr(strings.TrimSpace(b))
+	return start, end, err
 }

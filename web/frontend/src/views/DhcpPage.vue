@@ -15,6 +15,7 @@ import { useFormGuard, usePageForm } from '@/composables/useFormGuard'
 import { useAuthStore } from '@/stores/auth'
 import { useInstanceStore } from '@/stores/instances'
 import { inlineField, wideModal } from '@/utils/form'
+import { suggestDhcpRange } from '@/utils/dhcp'
 import { datetime } from '@/utils/time'
 import { useSearch, valuesText } from '@/utils/search'
 
@@ -81,6 +82,12 @@ function prefixRow(cidr, stored, fwAddr = '') {
     ra_enabled: stored?.ra_enabled ?? false,
     ra_slaac: stored?.ra_slaac ?? false,
   }
+}
+// Turning DHCP on fills in a suggested range, unless there is one.
+function dhcpSwitched(p, on) {
+  if (!on || p.dhcp_range_start || p.dhcp_range_end) return
+  const r = suggestDhcpRange(p.prefix, p.fw_addr)
+  if (r) [p.dhcp_range_start, p.dhcp_range_end] = r
 }
 const is6 = (p) => p.prefix.includes(':')
 const is64 = (p) => p.prefix.endsWith('/64')
@@ -415,6 +422,7 @@ const tab = computed({
                               <USwitch
                                 v-model="p.dhcp_enabled"
                                 :disabled="readOnly || (is6(p) && !p.ra_enabled && !p.dhcp_enabled)"
+                                @update:model-value="(on) => dhcpSwitched(p, on)"
                                 :title="
                                   is6(p) && !p.ra_enabled
                                     ? 'DHCPv6 needs router advertisements: open the interface'
@@ -542,6 +550,7 @@ const tab = computed({
                 <USwitch
                   v-model="p.dhcp_enabled"
                   :disabled="is6(p) && !p.ra_enabled && !p.dhcp_enabled"
+                  @update:model-value="(on) => dhcpSwitched(p, on)"
                 />
               </UFormField>
               <template v-if="p.dhcp_enabled">

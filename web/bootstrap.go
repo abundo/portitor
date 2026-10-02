@@ -41,6 +41,13 @@ type BootstrapOptions struct {
 	// GUIPort is portitor-web's port, opened on the LAN; 0 opens none
 	// (portitor-web runs on another host).
 	GUIPort int
+	// DHCPStart and DHCPEnd, if valid, are a DHCP range on the static LAN:
+	// the LAN prefix serves DHCP, with the LAN address as gateway (and DNS
+	// server, when DNS listens there, unless DHCPDNS). Without them DHCP
+	// stays as it is.
+	DHCPStart, DHCPEnd netip.Addr
+	// DHCPDNS, if set, are the DNS servers DHCP hands out.
+	DHCPDNS []netip.Addr
 	// Reconfigure runs after a deploy too (portitor-setup run again): the
 	// LAN and WAN get exactly these settings, the IPv4 default route is the
 	// gateway or none, and the GUI and ping rules move to the LAN.
@@ -87,6 +94,33 @@ func (o *BootstrapOptions) check() error {
 		}
 		if !gwNet.Contains(o.Gateway) || o.Gateway == gwNet.Addr() {
 			return fmt.Errorf("the gateway %s must be another address in %s", o.Gateway, gwNet.Masked())
+		}
+	}
+	if o.DHCPStart.IsValid() != o.DHCPEnd.IsValid() {
+		return errors.New("the DHCP range needs both start and end")
+	}
+	if o.DHCPStart.IsValid() {
+		if !o.Address.IsValid() || !o.Address.Addr().Is4() {
+			return errors.New("a DHCP server needs a static IPv4 LAN address")
+		}
+		lan := o.Address.Masked()
+		for _, a := range []netip.Addr{o.DHCPStart, o.DHCPEnd} {
+			if !lan.Contains(a) || a == lan.Addr() || (lan.Bits() < 31 && a == broadcast(lan)) {
+				return fmt.Errorf("the DHCP range: %s is not a host address in %s", a, lan)
+			}
+		}
+		if o.DHCPStart.Compare(o.DHCPEnd) > 0 {
+			return errors.New("the DHCP range starts after its end")
+		}
+		if l := o.Address.Addr(); l.Compare(o.DHCPStart) >= 0 && l.Compare(o.DHCPEnd) <= 0 {
+			return fmt.Errorf("the DHCP range holds the LAN address %s", l)
+		}
+	} else if len(o.DHCPDNS) > 0 {
+		return errors.New("DHCP DNS servers need a DHCP range")
+	}
+	for _, a := range o.DHCPDNS {
+		if !a.Is4() {
+			return fmt.Errorf("DHCP DNS server %s is not an IPv4 address", a)
 		}
 	}
 	if o.GUIPort < 0 || o.GUIPort > 65535 {
@@ -211,6 +245,9 @@ func bootstrapNetwork(tx *gorm.DB, instanceID uint, o BootstrapOptions) error {
 	if _, err := bootstrapIface(tx, instanceID, o.LAN, o.Address, "LAN", o.WAN != "", o.Reconfigure); err != nil {
 		return err
 	}
+	if err := bootstrapDHCP(tx, instanceID, o); err != nil {
+		return err
+	}
 	if o.WAN != "" {
 		if _, err := bootstrapIface(tx, instanceID, o.WAN, o.WANAddress, "WAN", false, o.Reconfigure); err != nil {
 			return err
@@ -321,6 +358,34 @@ func bootstrapNetwork(tx *gorm.DB, instanceID uint, o BootstrapOptions) error {
 		return err
 	}
 	return tx.Create(&nat).Error
+}
+
+// bootstrapDHCP serves the DHCP range on the LAN prefix (bootstrapIface
+// created it, or the user did), with the default gateway, and turns the
+// instance's DHCP server on.
+func bootstrapDHCP(tx *gorm.DB, instanceID uint, o BootstrapOptions) error {
+	if !o.DHCPStart.IsValid() {
+		return nil
+	}
+	if err := tx.Model(&models.Instance{}).Where("id = ?", instanceID).Update("dhcp_enabled", true).Error; err != nil {
+		return err
+	}
+	var p models.IpamPrefix
+	if err := tx.Where("instance_id = ? AND prefix = ?", instanceID, o.Address.Masked().String()).First(&p).Error; err != nil {
+		return err
+	}
+	old := p
+	p.DhcpEnabled, p.DhcpRangeStart, p.DhcpRangeEnd = true, o.DHCPStart.String(), o.DHCPEnd.String()
+	if len(o.DHCPDNS) > 0 {
+		p.DhcpDnsServers = models.StringList{}
+		for _, a := range o.DHCPDNS {
+			p.DhcpDnsServers = append(p.DhcpDnsServers, a.String())
+		}
+	}
+	if err := prepareIpamPrefix(tx, &p, &old); err != nil {
+		return err
+	}
+	return tx.Save(&p).Error
 }
 
 // bootstrapDNS creates a starting point for DNS where there is none: the

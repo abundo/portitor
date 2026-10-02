@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/base64"
 	"net/netip"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -22,7 +23,8 @@ func joinString(json string) string {
 func TestParseJoin(t *testing.T) {
 	fp := strings.Repeat("ab", 32)
 	good := joinString(`{"url":"https://192.168.1.1:8443","token":"tok","fingerprint":"` + fp +
-		`","lan":"enp2s0","address":"192.168.1.1/24","wan":"enp1s0","wan_address":"198.51.100.2/24","gateway":"198.51.100.1"}`)
+		`","lan":"enp2s0","address":"192.168.1.1/24","wan":"enp1s0","wan_address":"198.51.100.2/24","gateway":"198.51.100.1",` +
+		`"dhcp_range":"192.168.1.100-192.168.1.199","dhcp_dns":["1.1.1.1"]}`)
 	// Wrapped by a terminal.
 	o, err := ParseJoin(good[:30] + "\n  " + good[30:] + "\n")
 	if err != nil {
@@ -30,8 +32,10 @@ func TestParseJoin(t *testing.T) {
 	}
 	want := BootstrapOptions{AgentURL: "https://192.168.1.1:8443", AgentToken: "tok", AgentFingerprint: fp,
 		LAN: "enp2s0", Address: netip.MustParsePrefix("192.168.1.1/24"), WAN: "enp1s0",
-		WANAddress: netip.MustParsePrefix("198.51.100.2/24"), Gateway: netip.MustParseAddr("198.51.100.1")}
-	if o != want {
+		WANAddress: netip.MustParsePrefix("198.51.100.2/24"), Gateway: netip.MustParseAddr("198.51.100.1"),
+		DHCPStart: netip.MustParseAddr("192.168.1.100"), DHCPEnd: netip.MustParseAddr("192.168.1.199"),
+		DHCPDNS: []netip.Addr{netip.MustParseAddr("1.1.1.1")}}
+	if !reflect.DeepEqual(o, want) {
 		t.Errorf("got %+v", o)
 	}
 
