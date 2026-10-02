@@ -85,7 +85,7 @@ func dhcpSubnets(in *fwconfig.Instance, family string) []fwconfig.DHCPSubnet {
 }
 
 func subnetInterfaces(subs []fwconfig.DHCPSubnet) []string {
-	var ifs []string
+	ifs := []string{} // never nil: Kea rejects "interfaces": null
 	for _, s := range subs {
 		ifs = appendUnique(ifs, s.Interface)
 	}
@@ -219,6 +219,9 @@ func keaSubnets(in *fwconfig.Instance, v6 bool) ([]keaSubnet, []keaSharedNetwork
 // are any, as members of the Dhcp4/Dhcp6 object.
 func keaSubnetsJSON(in *fwconfig.Instance, v6 bool) string {
 	subnets, shared := keaSubnets(in, v6)
+	if subnets == nil {
+		subnets = []keaSubnet{} // Kea rejects null
+	}
 	key := "subnet4"
 	if v6 {
 		key = "subnet6"
