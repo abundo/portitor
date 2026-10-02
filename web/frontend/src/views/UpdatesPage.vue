@@ -148,7 +148,9 @@ async function reboot() {
       color="warning"
       variant="subtle"
       icon="i-lucide-rotate-ccw"
-      :title="sys.hostname ? `Reboot required: firewall ${sys.hostname}` : 'Reboot required: firewall'"
+      :title="
+        sys.hostname ? `Reboot required: firewall ${sys.hostname}` : 'Reboot required: firewall'
+      "
       description="An updated kernel or system library is installed on the firewall (where the agent runs) but not running yet."
       :actions="[{ label: 'Reboot now', color: 'warning', onClick: reboot }]"
     />
