@@ -109,7 +109,7 @@ async function download(row, format) {
 
 const columns = [
   { key: 'name', label: 'Name', class: 'font-medium' },
-  { key: 'domains', label: 'Domains', class: 'font-mono', format: (r) => r.domains.join(', ') },
+  { key: 'domains', label: 'SANs', class: 'font-mono', format: (r) => r.domains.join(', ') },
   { key: 'interface_id', label: 'Interface', format: (r) => ifaceName(r.interface_id) },
   { key: 'ca', label: 'CA', format: (r) => caLabel(r.ca) },
   { key: 'state', label: 'State' },
@@ -120,11 +120,17 @@ const fields = computed(() => [
   { key: 'description', label: 'Description' },
   {
     key: 'domains',
-    label: 'Domains',
+    label: 'Subject Alternative Names (SANs)',
     type: 'tags',
     required: true,
     placeholder: 'www.example.com',
-    hint: 'The DNS names in the certificate, the first one its subject. Each must resolve to an address of the interface below. No wildcards.',
+    hint: 'The DNS names in the certificate; clients check the name they connect to against these. Each must resolve to an address of the interface below. No wildcards.',
+  },
+  {
+    key: 'common_name',
+    label: 'Common name (CN)',
+    placeholder: 'the first SAN',
+    hint: 'Optional, at most 64 characters. Only shown to people inspecting the certificate: clients ignore the CN when matching names. Added to the SANs if missing. Let\'s Encrypt may leave it out.',
   },
   {
     key: 'interface_id',
@@ -179,7 +185,7 @@ const fields = computed(() => [
             <thead class="text-left text-muted">
               <tr class="border-b border-default">
                 <th class="py-2 pe-3 font-medium">Name</th>
-                <th class="py-2 pe-3 font-medium">Domains</th>
+                <th class="py-2 pe-3 font-medium">SANs</th>
                 <th class="py-2 pe-3 font-medium">State</th>
                 <th class="py-2 pe-3 font-medium">Valid</th>
                 <th class="py-2 pe-3 font-medium min-w-48">Lifetime left</th>

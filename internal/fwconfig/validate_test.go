@@ -200,6 +200,7 @@ func TestValidateCatchesProblems(t *testing.T) {
 		{"cert single label", func(d *Document) { d.Instances[0].Certificates[0].Domains[0] = "localhost" }, "is not a DNS name"},
 		{"cert address", func(d *Document) { d.Instances[0].Certificates[0].Domains[0] = "192.0.2.1" }, "an IP address"},
 		{"cert duplicate domain", func(d *Document) { d.Instances[0].Certificates[0].Domains[1] = "www.example.com" }, "twice"},
+		{"cert common name not a domain", func(d *Document) { d.Instances[0].Certificates[0].CommonName = "mail.example.com" }, "not one of the domains"},
 		{"cert no domains", func(d *Document) { d.Instances[0].Certificates[0].Domains = nil }, "needs 1-100 domains"},
 		{"cert http ca", func(d *Document) { d.Instances[0].Certificates[0].CA = "http://ca.example.com/dir" }, "https URL"},
 		{"cert key type", func(d *Document) { d.Instances[0].Certificates[0].KeyType = "dsa" }, "key type must be"},

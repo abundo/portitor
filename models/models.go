@@ -679,6 +679,7 @@ type Certificate struct {
 	Description string     `json:"description"`
 	Enabled     bool       `json:"enabled"`
 	Domains     StringList `json:"domains"`
+	CommonName  string     `json:"common_name"`
 	Email       string     `json:"email"`
 	// Ca is a fwconfig.ACMECAs name or an ACME directory URL.
 	Ca          string `json:"ca"`

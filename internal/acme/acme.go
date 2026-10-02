@@ -54,7 +54,9 @@ type Request struct {
 	Email     string // account contact, may be empty
 	KeyType   string // a KeyTypes key
 	Domains   []string
-	HTTP01    challenge.Provider
+	// CommonName is the subject's CN, one of Domains; empty uses the first.
+	CommonName string
+	HTTP01     challenge.Provider
 }
 
 // Result is a certificate and its key, PEM encoded. Certificate holds the
@@ -100,7 +102,12 @@ func Obtain(accountsDir string, req Request) (*Result, error) {
 			return nil, err
 		}
 	}
-	res, err := client.Certificate.Obtain(certificate.ObtainRequest{Domains: req.Domains, Bundle: true})
+	// lego makes the first domain the CN.
+	domains := slices.Clone(req.Domains)
+	if i := slices.Index(domains, req.CommonName); i > 0 {
+		domains = slices.Insert(slices.Delete(domains, i, i+1), 0, req.CommonName)
+	}
+	res, err := client.Certificate.Obtain(certificate.ObtainRequest{Domains: domains, Bundle: true})
 	if err != nil {
 		return nil, err
 	}
@@ -169,12 +176,14 @@ func (a *account) save() error {
 type Stored struct {
 	// Directory and KeyType are what it was got with: a change gets a
 	// new one.
-	Directory string    `json:"directory"`
-	KeyType   string    `json:"key_type"`
-	Domains   []string  `json:"domains"`
-	NotBefore time.Time `json:"not_before"`
-	NotAfter  time.Time `json:"not_after"`
-	Issuer    string    `json:"issuer"`
+	Directory string   `json:"directory"`
+	KeyType   string   `json:"key_type"`
+	Domains   []string `json:"domains"`
+	// CommonName is the CN asked for (the CA may leave it out).
+	CommonName string    `json:"common_name,omitempty"`
+	NotBefore  time.Time `json:"not_before"`
+	NotAfter   time.Time `json:"not_after"`
+	Issuer     string    `json:"issuer"`
 }
 
 // Files in a certificate's directory.
@@ -192,7 +201,7 @@ func Save(dir string, req Request, res *Result) (*Stored, error) {
 	if err != nil {
 		return nil, err
 	}
-	st.Directory, st.KeyType = req.Directory, req.KeyType
+	st.Directory, st.KeyType, st.CommonName = req.Directory, req.KeyType, req.CommonName
 	if err := os.Remove(filepath.Join(dir, metaFile)); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}
@@ -237,14 +246,15 @@ func parse(chain []byte) (*Stored, error) {
 	return &Stored{Domains: domains, NotBefore: c.NotBefore, NotAfter: c.NotAfter, Issuer: c.Issuer.String()}, nil
 }
 
-// Matches says whether st was got for req: same CA, key type and domains.
+// Matches says whether st was got for req: same CA, key type, domains
+// and common name.
 func (st *Stored) Matches(req Request) bool {
 	want := slices.Clone(req.Domains)
 	for i := range want {
 		want[i] = strings.ToLower(want[i])
 	}
 	slices.Sort(want)
-	return st.Directory == req.Directory && st.KeyType == req.KeyType && slices.Equal(st.Domains, want)
+	return st.Directory == req.Directory && st.KeyType == req.KeyType && st.CommonName == req.CommonName && slices.Equal(st.Domains, want)
 }
 
 // RenewAt is when a certificate is renewed: once two thirds of its

@@ -245,7 +245,7 @@ for every domain of the certificate.
   certificate on the server behind it.
 - The firewall answers in the instance itself, on port 80; the ACME API is called from
   the firewall host.
-- A certificate is ordered when it is deployed, when its domains, CA or key type
+- A certificate is ordered when it is deployed, when its SANs, common name, CA or key type
   change, and renewed when two thirds of its lifetime have passed (30 days before the
   end of a 90-day one). A failed order is tried again after 10 minutes, then after
   twice as long each time, up to 12 hours.

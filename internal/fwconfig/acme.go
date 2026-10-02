@@ -23,9 +23,12 @@ import (
 // otherwise), so port 80 is closed the rest of the time.
 type Certificate struct {
 	Name string `json:"name"`
-	// Domains are the DNS names in the certificate, the first one its
-	// subject. HTTP-01 cannot validate wildcards.
+	// Domains are the DNS names in the certificate (its subject
+	// alternative names). HTTP-01 cannot validate wildcards.
 	Domains []string `json:"domains"`
+	// CommonName is the subject's CN, one of Domains; empty uses the
+	// first. Clients match names only against the SANs.
+	CommonName string `json:"common_name,omitempty"`
 	// Email is the ACME account's contact; empty registers without one.
 	Email string `json:"email,omitempty"`
 	// CA is an ACMECAs name or the https URL of an ACME directory.
@@ -124,6 +127,14 @@ func (v *validator) certificates(p string, in *Instance, ifaces map[string]*Inte
 				v.addf("%s: domain %q twice", cp, d)
 			}
 			seen[d] = true
+		}
+		if c.CommonName != "" {
+			if len(c.CommonName) > 64 {
+				v.addf("%s: common name longer than 64 characters", cp)
+			}
+			if !seen[c.CommonName] {
+				v.addf("%s: common name %q is not one of the domains", cp, c.CommonName)
+			}
 		}
 	}
 }

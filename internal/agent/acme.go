@@ -139,7 +139,7 @@ func (m *certManager) dir(it certItem) string {
 
 func certRequest(c fwconfig.Certificate) (acme.Request, error) {
 	dir, err := fwconfig.ACMEDirectory(c.CA)
-	return acme.Request{Directory: dir, Email: c.Email, KeyType: c.KeyType, Domains: c.Domains}, err
+	return acme.Request{Directory: dir, Email: c.Email, KeyType: c.KeyType, Domains: c.Domains, CommonName: c.CommonName}, err
 }
 
 // loop gets the certificate when there is none for the current settings

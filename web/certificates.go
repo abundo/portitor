@@ -35,7 +35,15 @@ func prepareCertificate(tx *gorm.DB, c, _ *models.Certificate) error {
 	}
 	c.Domains = domains
 	if len(c.Domains) == 0 {
-		return bad("domains: at least one DNS name")
+		return bad("subject alternative names: at least one DNS name")
+	}
+	// The CN must be one of the SANs: add it when it isn't.
+	c.CommonName = dnsName(c.CommonName)
+	if len(c.CommonName) > 64 {
+		return bad("common name: at most 64 characters")
+	}
+	if c.CommonName != "" && !slices.Contains(c.Domains, c.CommonName) {
+		c.Domains = slices.Insert(c.Domains, 0, c.CommonName)
 	}
 	c.Email = strings.TrimSpace(c.Email)
 	c.Ca = strings.TrimSpace(c.Ca)

@@ -637,7 +637,7 @@ func build(db *gorm.DB, generation int64, only map[string]bool) (*fwconfig.Docum
 // name of its interface.
 func Certificate(c *models.Certificate, iface string) fwconfig.Certificate {
 	return fwconfig.Certificate{
-		Name: c.Name, Domains: slices.Clone([]string(c.Domains)), Email: c.Email,
+		Name: c.Name, Domains: slices.Clone([]string(c.Domains)), CommonName: c.CommonName, Email: c.Email,
 		CA: c.Ca, KeyType: c.KeyType, Challenge: c.Challenge, Interface: iface,
 	}
 }
