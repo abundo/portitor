@@ -38,6 +38,9 @@ type BootstrapOptions struct {
 	// Gateway, if valid, becomes the default route. It is on the WAN when
 	// that is static, else on the static LAN; DHCP there takes none.
 	Gateway netip.Addr
+	// DefaultRouteLAN gives the DHCP LAN's default route to the firewall
+	// instead of the DHCP WAN's; only when both use DHCP.
+	DefaultRouteLAN bool
 	// GUIPort is portitor-web's port, opened on the LAN; 0 opens none
 	// (portitor-web runs on another host).
 	GUIPort int
@@ -87,6 +90,9 @@ func (o *BootstrapOptions) check() error {
 		}
 	} else if o.WANAddress.IsValid() {
 		return errors.New("a WAN address needs the WAN interface")
+	}
+	if o.DefaultRouteLAN && (o.Address.IsValid() || o.WAN == "" || o.WANAddress.IsValid()) {
+		return errors.New("the default route from the LAN needs DHCP on both the LAN and the WAN")
 	}
 	if o.Gateway.IsValid() {
 		if !gwNet.IsValid() {
@@ -242,14 +248,14 @@ func Bootstrap(ctx context.Context, s *Server, o BootstrapOptions) (*models.Depl
 }
 
 func bootstrapNetwork(tx *gorm.DB, instanceID uint, o BootstrapOptions) error {
-	if _, err := bootstrapIface(tx, instanceID, o.LAN, o.Address, "LAN", o.WAN != "", o.Reconfigure); err != nil {
+	if _, err := bootstrapIface(tx, instanceID, o.LAN, o.Address, "LAN", o.WAN != "" && !o.DefaultRouteLAN, o.Reconfigure); err != nil {
 		return err
 	}
 	if err := bootstrapDHCP(tx, instanceID, o); err != nil {
 		return err
 	}
 	if o.WAN != "" {
-		if _, err := bootstrapIface(tx, instanceID, o.WAN, o.WANAddress, "WAN", false, o.Reconfigure); err != nil {
+		if _, err := bootstrapIface(tx, instanceID, o.WAN, o.WANAddress, "WAN", o.DefaultRouteLAN, o.Reconfigure); err != nil {
 			return err
 		}
 	}

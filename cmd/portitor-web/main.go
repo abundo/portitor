@@ -139,12 +139,13 @@ func main() {
 	})
 
 	var bo web.BootstrapOptions
-	var tokenFile, address, wanAddress, gateway, dhcpRange, dhcpDNS, join string
+	var tokenFile, address, wanAddress, gateway, dhcpRange, dhcpDNS, defaultRoute, join string
 	bootstrap := &cobra.Command{
 		Use:   "bootstrap",
 		Short: "Configure and deploy a new firewall that runs portitor-web itself (installer ISO)",
 		Long: `Stores the agent settings, configures the LAN interface with its address
-(or DHCP, without a default route when there is a WAN), the WAN interface
+(or DHCP, without a default route when there is a WAN, unless
+--default-route lan with a DHCP WAN, which then takes none), the WAN interface
 (static or DHCP) and the default route, describes them as LAN and WAN,
 accepts the GUI port, SSH and ping from the LAN and forwarding from the LAN
 to the WAN, masquerades on the WAN, serves --dhcp-range on the static LAN
@@ -211,6 +212,13 @@ firewall unless --gui-port is given.`,
 					return fmt.Errorf("--wan-address: %w", err)
 				}
 			}
+			switch defaultRoute {
+			case "wan":
+			case "lan":
+				bo.DefaultRouteLAN = true
+			default:
+				return fmt.Errorf("--default-route: lan or wan, not %q", defaultRoute)
+			}
 			if gateway != "" {
 				if bo.Gateway, err = netip.ParseAddr(gateway); err != nil {
 					return fmt.Errorf("--gateway: %w", err)
@@ -240,6 +248,7 @@ firewall unless --gui-port is given.`,
 	bf.StringVar(&bo.WAN, "wan", "", "WAN interface (optional)")
 	bf.StringVar(&wanAddress, "wan-address", "", "static WAN address with prefix length (default: DHCP)")
 	bf.StringVar(&gateway, "gateway", "", "default gateway (optional; on the WAN if it is static, else on the static LAN)")
+	bf.StringVar(&defaultRoute, "default-route", "wan", "which DHCP interface takes the default route when both the LAN and the WAN use DHCP: lan or wan")
 	bf.StringVar(&dhcpRange, "dhcp-range", "", "DHCP server on the static LAN, e.g. 192.168.1.100-192.168.1.199 (optional)")
 	bf.StringVar(&dhcpDNS, "dhcp-dns", "", "DNS servers DHCP hands out, comma separated (default: the firewall, if its DNS listens on the LAN)")
 	bf.IntVar(&bo.GUIPort, "gui-port", 443, "port to open for portitor-web on the LAN, 0 for none")

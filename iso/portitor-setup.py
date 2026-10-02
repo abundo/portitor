@@ -18,8 +18,8 @@ or LAN, offers), a password and the time zone; before applying, LAN and WAN can 
   - creates the GUI user portitor, and sets the console user's password,
   - sets the agent up on 127.0.0.1 (portitor-web runs on the firewall itself),
   - runs `portitor-web bootstrap`: LAN (static or DHCP, which then takes no
-    default route; the default route belongs to the WAN) and WAN (DHCP or
-    static), described as LAN and WAN, default route, input rules for
+    default route; the default route belongs to the WAN, unless both use
+    DHCP and the LAN is chosen to take it) and WAN (DHCP or static), described as LAN and WAN, default route, input rules for
     management (the portitor-mgmt service: SSH and the GUI) and ping from the LAN, a forward rule from the LAN to the WAN,
     masquerade on the WAN, a DHCP server on the LAN if chosen (handing out
     the DNS servers above), and deploys (output has the instance's allow all
@@ -60,7 +60,8 @@ With /etc/portitor/firstboot.answers (an ISO built with `iso/build.sh
 --test`), nothing is asked and no text UI runs: it holds "key: value" lines
 for lan (a name or MAC address), address (dhcp for DHCP), wan (a name or MAC
 address, optional), wan_address
-(empty: DHCP), gateway (on the static WAN, else on the LAN), dhcp_range
+(empty: DHCP), default_route (lan or wan, default wan: the DHCP
+interface that takes the default route when both use DHCP), gateway (on the static WAN, else on the LAN), dhcp_range
 (a DHCP server on the static LAN, e.g. 192.168.1.100-192.168.1.199,
 optional), dns (space separated), password, hostname (default portitor, may include the domain), timezone and keyboard (an XKB layout, e.g. se). The file is removed when the setup has
 finished. role (both, agent or web) picks the split setups; agent reads
@@ -676,6 +677,12 @@ def dhcp_dns(a: dict) -> list[str]:
     return [d for d in a["dns"] if ipaddress.ip_address(d).version == 4]
 
 
+def route_from(a: dict) -> str:
+    """lan when the DHCP LAN takes the default route instead of the DHCP WAN, else wan."""
+    both = a["wan"] and not a["address"] and not a["wan_address"]
+    return "lan" if both and a.get("default_route") == "lan" else "wan"
+
+
 def step_bootstrap(a: dict) -> None:
     argv = web("bootstrap", "--lan", a["lan"], "--address", str(a["address"] or "dhcp"), "--gui-port", str(GUI_PORT))
     if a.get("dhcp_range"):
@@ -688,6 +695,8 @@ def step_bootstrap(a: dict) -> None:
         argv += ["--wan-address", str(a["wan_address"])]
     if a["gateway"]:
         argv += ["--gateway", str(a["gateway"])]
+    if route_from(a) == "lan":
+        argv += ["--default-route", "lan"]
     if a.get("reconfigure"):
         # The agent settings stay as they are.
         argv.append("--reconfigure")
@@ -858,6 +867,7 @@ def read_answers() -> dict:
         "wan_address": ipaddress.IPv4Interface(raw["wan_address"]) if raw.get("wan_address") and role != "web" else None,
         "gateway": ipaddress.IPv4Address(raw["gateway"]) if raw.get("gateway") else None,
         "dhcp_range": None,
+        "default_route": raw.get("default_route") or "wan",
         "dns": parse_dns(raw.get("dns") or PUBLIC_DNS),
         "password": raw["password"],
         "tz": raw.get("timezone") or "Etc/UTC",
@@ -870,6 +880,10 @@ def read_answers() -> dict:
         if not a["address"]:
             raise RuntimeError(f"{ANSWERS}: the agent-only firewall needs a static LAN address")
         a["web_from"] = str(ipaddress.IPv4Network(raw.get("web_from") or a["address"].network, strict=False))
+    if a["default_route"] not in ("lan", "wan"):
+        raise RuntimeError(f"{ANSWERS}: default_route: lan or wan")
+    if a["default_route"] == "lan" and (a["address"] or not a["wan"] or a["wan_address"]):
+        raise RuntimeError(f"{ANSWERS}: default_route lan needs DHCP on both the LAN and the WAN")
     if raw.get("dhcp_range") and role != "web":
         if not a["address"]:
             raise RuntimeError(f"{ANSWERS}: a DHCP server needs a static LAN address")
@@ -897,6 +911,7 @@ def state_of(a: dict) -> dict:
     state["address"] = str(a["address"] or "dhcp")
     state["dns"] = " ".join(a["dns"])
     state["dhcp_range"] = fmt_range(a.get("dhcp_range"))
+    state["default_route"] = route_from(a)
     return state
 
 
@@ -953,10 +968,10 @@ def summary(a: dict) -> list[str]:
         out.append(f"portitor-web    {a['web_from']}")
     else:
         out += [f"WAN interface   {nic_label(a['wan'])}",
-                f"WAN address     {a['wan_address'] or 'DHCP'}",
-                f"Default gateway {a['gateway'] or 'from DHCP'}",
+                f"WAN address     {a['wan_address'] or ('DHCP (no default route)' if route_from(a) == 'lan' else 'DHCP')}",
+                f"Default gateway {a['gateway'] or ('from DHCP on the LAN' if route_from(a) == 'lan' else 'from DHCP')}",
                 f"LAN interface   {nic_label(a['lan'])}",
-                f"LAN address     {a['address'] or 'DHCP (no default route)'}",
+                f"LAN address     {a['address'] or ('DHCP' if route_from(a) == 'lan' else 'DHCP (no default route)')}",
                 f"LAN DHCP server {fmt_range(a.get('dhcp_range')) or ('unchanged' if a.get('reconfigure') and a['address'] else 'off')}"]
         if a["role"] == "agent":
             out.append(f"portitor-web    {a['web_from']}")
@@ -1193,6 +1208,10 @@ class NetworkPage(Page):
             if role != "agent":
                 yield row("LAN IPv4", Select(MODES, id="lan_mode", allow_blank=False,
                                              value="dhcp" if st.get("address") == "dhcp" else "static"))
+            if role != "agent":
+                yield row("Default route", Select([("From the WAN", "wan"), ("From the LAN", "lan")], id="default_route",
+                                                  allow_blank=False, value=st.get("default_route") or "wan"))
+                yield Static("With DHCP on both, the default route is taken from one of them only.", classes="hint")
             yield row("LAN address", Input(st.get("address") if static else "192.168.1.1/24", id="address",
                                            placeholder="192.168.1.1/24"))
             yield row("LAN DHCP server", Select([("Off", "off"), ("On", "on")], id="dhcp_mode", allow_blank=False,
@@ -1268,6 +1287,9 @@ class NetworkPage(Page):
             for mode in self.query(sid).results(Select):
                 for i in ids:
                     self.query_one(i).disabled = mode.value == "dhcp"
+        # Only one DHCP interface takes the default route.
+        for route in self.query("#default_route").results(Select):
+            route.disabled = self.static("#lan_mode") or self.static("#wan_mode")
         # A DHCP server needs the static LAN.
         for dhcp in self.query("#dhcp_mode").results(Select):
             dhcp.disabled = not self.static("#lan_mode")
@@ -1332,6 +1354,8 @@ class NetworkPage(Page):
             # DHCP brings the default gateway.
             a["gateway"] = (self.field("Default gateway", check_gateway, self.value("#gateway"), a["wan_address"])
                             if a["wan_address"] else None)
+            routes = list(self.query("#default_route").results(Select))
+            a["default_route"] = str(routes[0].value) if routes and not routes[0].disabled else "wan"
         a["dns"] = self.field("DNS servers", parse_dns, self.value("#dns"))
         a["web_from"] = ""
         if a["role"] == "agent":

@@ -312,12 +312,14 @@ func TestBootstrapReconfigure(t *testing.T) {
 
 func TestBootstrapLANDHCP(t *testing.T) {
 	for _, tc := range []struct {
-		name    string
-		wan     string
-		noRoute bool
+		name     string
+		wan      string
+		routeLAN bool
+		noRoute  bool
 	}{
-		{"with WAN", "enp1s0", true},
-		{"without WAN", "", false}, // the LAN lease brings the default route
+		{"with WAN", "enp1s0", false, true},
+		{"route from the LAN", "enp1s0", true, false},
+		{"without WAN", "", false, false}, // the LAN lease brings the default route
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			env := newEnv(t)
@@ -328,7 +330,7 @@ func TestBootstrapLANDHCP(t *testing.T) {
 			env.srv.newAgent = func(*models.Settings) (agentAPI, error) { return fake, nil }
 			o := BootstrapOptions{
 				AgentURL: "https://127.0.0.1:8443", AgentToken: strings.Repeat("t", 43), AgentFingerprint: strings.Repeat("ab", 32),
-				LAN: "enp2s0", WAN: tc.wan, GUIPort: 443,
+				LAN: "enp2s0", WAN: tc.wan, DefaultRouteLAN: tc.routeLAN, GUIPort: 443,
 			}
 			if _, err := Bootstrap(context.Background(), env.srv, o); err != nil {
 				t.Fatal(err)
@@ -342,7 +344,7 @@ func TestBootstrapLANDHCP(t *testing.T) {
 						t.Errorf("LAN %+v", ifc)
 					}
 				case "enp1s0":
-					if tc.wan != "" && (ifc.IPv4Mode != fwconfig.ModeDHCP || ifc.DHCPNoDefaultRoute) {
+					if tc.wan != "" && (ifc.IPv4Mode != fwconfig.ModeDHCP || ifc.DHCPNoDefaultRoute != tc.routeLAN) {
 						t.Errorf("WAN %+v", ifc)
 					}
 				}
@@ -375,6 +377,10 @@ func TestBootstrapDHCPServer(t *testing.T) {
 		if err := b.check(); err == nil {
 			t.Errorf("%s-%s accepted", bad.start, bad.end)
 		}
+	}
+	// The default route from the LAN needs DHCP there.
+	if b := o; func() error { b.WAN, b.DefaultRouteLAN = "enp1s0", true; return b.check() }() == nil {
+		t.Error("default route from a static LAN accepted")
 	}
 	if _, err := Bootstrap(context.Background(), env.srv, o); err != nil {
 		t.Fatal(err)
