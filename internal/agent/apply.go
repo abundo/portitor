@@ -608,17 +608,17 @@ func (a *Agent) applyServices(ctx context.Context, in *fwconfig.Instance, b *ren
 	return a.applyFRR(ctx, in, changed)
 }
 
-// applyFRR starts, reloads or stops FRR (BGP). It is off unless the
-// instance's BGP is enabled. A changed daemons file restarts it; a changed
-// frr.conf is reloaded (frr-reload.py), which keeps the BGP sessions up, or
-// restarted if the reload fails.
+// applyFRR starts, reloads or stops FRR (BGP, OSPF). It is off unless the
+// instance's BGP or OSPF is enabled. A changed daemons file restarts it; a
+// changed frr.conf is reloaded (frr-reload.py), which keeps the sessions
+// and adjacencies up, or restarted if the reload fails.
 func (a *Agent) applyFRR(ctx context.Context, in *fwconfig.Instance, changed map[string]bool) error {
 	files := a.cfg.Paths.Files(in)
 	unit := a.cfg.Units.FRR(in)
-	if !in.BGPRunning() {
+	if !in.FRRRunning() {
 		a.disableService(ctx, in, unit, files.FRRConf)
 		// Like a stale WireGuard config, a stale frr.conf holds secrets (the
-		// neighbours' passwords): remove ours.
+		// neighbours' passwords, OSPF keys): remove ours.
 		if c, err := os.ReadFile(files.FRRConf); err == nil && render.Generated(c) && !a.cfg.DryRun {
 			_ = os.Remove(files.FRRConf)
 		}

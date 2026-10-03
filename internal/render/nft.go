@@ -163,6 +163,11 @@ func Nftables(in *fwconfig.Instance, lockout *AntiLockout, paths Paths) string {
 	b.WriteString("\t\toif \"lo\" accept\n")
 	b.WriteString("\t\tmeta l4proto ipv6-icmp icmpv6 type { nd-router-solicit, nd-router-advert, nd-neighbor-solicit, nd-neighbor-advert, destination-unreachable, packet-too-big, time-exceeded, parameter-problem } accept\n")
 	b.WriteString("\t\tmeta l4proto icmp icmp type { destination-unreachable, time-exceeded, parameter-problem } accept\n")
+	// What OSPF sends: on its interfaces, or to its networks' neighbours
+	// and the OSPF multicast groups.
+	for _, m := range OSPFOutputMatches(in) {
+		fmt.Fprintf(b, "\t\t%s accept %s\n", m.match, comment("auto", m.service))
+	}
 	// The BGP sessions FRR opens to its neighbours.
 	if addrs := BGPNeighborAddrs(in); len(addrs) > 0 {
 		v4, v6 := splitFamilies(addrs)
@@ -429,7 +434,7 @@ type AutoRule struct {
 	Service string `json:"service"`
 	// InInterfaces limits the rule to these interfaces; empty is any.
 	InInterfaces []string `json:"in_interfaces"`
-	Protocol     string   `json:"protocol"` // tcp, udp, or "tcp,udp"
+	Protocol     string   `json:"protocol"` // tcp, udp, "tcp,udp", or OSPF's (OSPFService, OSPF6Service: IPv4 or IPv6, no port)
 	SrcPort      int      `json:"src_port,omitempty"`
 	DstPort      int      `json:"dst_port"`
 	// Source limits the source addresses: the anti-lockout rule's
@@ -513,11 +518,62 @@ func AutoInputRules(in *fwconfig.Instance) []AutoRule {
 	if addrs := BGPNeighborAddrs(in); len(addrs) > 0 {
 		out = append(out, AutoRule{Service: BGPService, Protocol: "tcp", DstPort: 179, Source: addrs})
 	}
+	// OSPF on its interfaces, and (OSPFv2) from its networks.
+	for _, o := range []struct {
+		version int
+		service string
+	}{{2, OSPFService}, {3, OSPF6Service}} {
+		ifs, nets := OSPFActive(in, o.version)
+		if len(ifs) > 0 {
+			out = append(out, AutoRule{Service: o.service, InInterfaces: ifs, Protocol: o.service})
+		}
+		if len(nets) > 0 {
+			out = append(out, AutoRule{Service: o.service, Protocol: o.service, Source: nets})
+		}
+	}
 	return out
 }
 
 // BGPService is the BGP auto rule's service.
 const BGPService = "bgp"
+
+// OSPFService and OSPF6Service are the OSPF auto rules' services and
+// protocols: IP protocol 89 of IPv4 (OSPFv2) or IPv6 (OSPFv3).
+const (
+	OSPFService  = "ospf"
+	OSPF6Service = "ospfv3"
+)
+
+// ospfProto matches an OSPF version's packets.
+func ospfProto(service string) string {
+	if service == OSPF6Service {
+		return "meta nfproto ipv6 meta l4proto 89"
+	}
+	return "meta nfproto ipv4 meta l4proto 89"
+}
+
+// OSPFOutput is an output chain accept of what OSPF sends.
+type OSPFOutput struct{ service, match string }
+
+// OSPFOutputMatches are the output chain's accepts for OSPF: on its
+// interfaces, and for OSPFv2's network statements to their prefixes and
+// the AllSPFRouters and AllDRouters groups.
+func OSPFOutputMatches(in *fwconfig.Instance) []OSPFOutput {
+	var out []OSPFOutput
+	for _, o := range []struct {
+		version int
+		service string
+	}{{2, OSPFService}, {3, OSPF6Service}} {
+		ifs, nets := OSPFActive(in, o.version)
+		if len(ifs) > 0 {
+			out = append(out, OSPFOutput{o.service, "oifname " + quotedSet(ifs) + " " + ospfProto(o.service)})
+		}
+		if len(nets) > 0 {
+			out = append(out, OSPFOutput{o.service, "ip daddr " + set(append(nets, "224.0.0.5", "224.0.0.6")) + " " + ospfProto(o.service)})
+		}
+	}
+	return out
+}
 
 // matches renders an auto rule's matches: one, or with Source one per IP
 // version of its addresses.
@@ -554,9 +610,12 @@ func (r AutoRule) match() string {
 	if len(r.InInterfaces) > 0 {
 		parts = append(parts, "iifname "+quotedSet(r.InInterfaces))
 	}
-	if r.Protocol == "tcp,udp" {
+	switch r.Protocol {
+	case OSPFService, OSPF6Service:
+		parts = append(parts, ospfProto(r.Protocol))
+	case "tcp,udp":
 		parts = append(parts, fmt.Sprintf("meta l4proto { tcp, udp } th dport %d", r.DstPort))
-	} else {
+	default:
 		if r.SrcPort > 0 {
 			parts = append(parts, fmt.Sprintf("%s sport %d", r.Protocol, r.SrcPort))
 		}

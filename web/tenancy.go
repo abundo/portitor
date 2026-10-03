@@ -305,6 +305,10 @@ func filterRoutes(t *agentapi.RoutingTableResponse, names map[string]bool) {
 	t.Routes = slices.DeleteFunc(t.Routes, func(r agentapi.RouteEntry) bool { return !names[r.Instance] })
 }
 
+func filterOSPF(o *agentapi.OSPFResponse, names map[string]bool) {
+	o.Instances = slices.DeleteFunc(o.Instances, func(x agentapi.OSPFInstance) bool { return !names[x.Instance] })
+}
+
 func filterBGP(b *agentapi.BGPResponse, names map[string]bool) {
 	b.Instances = slices.DeleteFunc(b.Instances, func(x agentapi.BGPInstance) bool { return !names[x.Instance] })
 }

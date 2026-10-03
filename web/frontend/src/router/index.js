@@ -27,6 +27,7 @@ const router = createRouter({
         { path: 'routes', component: () => import('@/views/RoutesPage.vue') },
         { path: 'routing/objects', component: () => import('@/views/RoutingObjectsPage.vue') },
         { path: 'routing/bgp', component: () => import('@/views/BgpPage.vue') },
+        { path: 'routing/ospf', component: () => import('@/views/OspfPage.vue') },
         { path: 'objects', component: () => import('@/views/HostsPrefixesPage.vue') },
         { path: 'ipam', redirect: '/objects' },
         { path: 'interface-zones', component: () => import('@/views/InterfaceZonesPage.vue') },

@@ -175,6 +175,10 @@ func ifaceLists(tx *gorm.DB, instanceID uint, zones bool, visit func(where strin
 // renameIfaceRefs rewrites old to name in the instance's rule lists and,
 // for an interface (zones true), in its interface zones.
 func renameIfaceRefs(tx *gorm.DB, instanceID uint, old, name string, zones bool) error {
+	// OSPF runs on interfaces and link ends.
+	if err := tx.Model(&models.OspfInterface{}).Where("instance_id = ? AND name = ?", instanceID, old).UpdateColumn("name", name).Error; err != nil {
+		return err
+	}
 	if zones {
 		// A BGP neighbour's or peer group's update source.
 		for _, m := range []any{&models.BgpNeighbor{}, &models.BgpPeerGroup{}} {
@@ -220,6 +224,7 @@ func refuseIfaceInUse(tx *gorm.DB, instanceID uint, name string) error {
 	for _, g := range groups {
 		users = append(users, "BGP peer group "+g)
 	}
+	users = append(users, ospfIfaceUsers(tx, instanceID, name)...)
 	if len(users) > 0 {
 		if len(users) > 5 {
 			users = append(users[:5], "...")

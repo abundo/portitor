@@ -134,6 +134,10 @@ const defaults = () => ({
   redist_connected_v6_map: '',
   redist_static_v6: false,
   redist_static_v6_map: '',
+  redist_ospf_v4: false,
+  redist_ospf_v4_map: '',
+  redist_ospf_v6: false,
+  redist_ospf_v6_map: '',
 })
 async function loadCfg() {
   if (!store.currentId) return
@@ -181,8 +185,10 @@ const aggregateColumns = [
 const redistributions = [
   { key: 'redist_connected_v4', label: 'IPv4 connected' },
   { key: 'redist_static_v4', label: 'IPv4 static' },
+  { key: 'redist_ospf_v4', label: 'IPv4 OSPF' },
   { key: 'redist_connected_v6', label: 'IPv6 connected' },
   { key: 'redist_static_v6', label: 'IPv6 static' },
+  { key: 'redist_ospf_v6', label: 'IPv6 OSPF' },
 ]
 
 // ----- Peer groups and neighbours.
@@ -553,7 +559,8 @@ const neighborFields = computed(() => [
               </div>
               <p class="text-sm text-muted">
                 Connected: the networks of the interfaces. Static: the static routes (Network &gt;
-                Routing &gt; Static routes). A route map filters or changes what is announced.
+                Routing &gt; Static routes). OSPF: OSPFv2's routes into IPv4, OSPFv3's into IPv6
+                (Network &gt; Routing &gt; OSPF). A route map filters or changes what is announced.
               </p>
               <UFormField
                 v-for="r in redistributions"

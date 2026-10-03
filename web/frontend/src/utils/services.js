@@ -85,12 +85,15 @@ export function newPort(protocol = 'tcp') {
 // Auto rules (render.AutoRule), shown locked in the input chain.
 // autoService shows an auto rule's protocol and ports like a service.
 export function autoService(a) {
+  if (a.protocol === 'ospf' || a.protocol === 'ospfv3') return a.protocol
   const protos = a.protocol === 'tcp,udp' ? ['tcp', 'udp'] : [a.protocol]
   const from = a.src_port ? ` from ${a.src_port}` : ''
   return protos.map((p) => `${p}/${a.dst_port}${from}`).join(', ')
 }
 // autoFamily is the IP versions of an auto rule's source addresses.
 export function autoFamily(a) {
+  if (a.protocol === 'ospf') return 'IPv4'
+  if (a.protocol === 'ospfv3') return 'IPv6'
   if (!a.source?.length) return 'any'
   const v6 = a.source.filter((s) => s.includes(':')).length
   if (v6 === 0) return 'IPv4'

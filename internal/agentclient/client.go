@@ -163,6 +163,12 @@ func (c *Client) BGP(ctx context.Context) (*agentapi.BGPResponse, error) {
 	return &b, c.do(ctx, http.MethodGet, "/v1/bgp", nil, &b)
 }
 
+// OSPF returns the OSPF state of the instances that run it.
+func (c *Client) OSPF(ctx context.Context) (*agentapi.OSPFResponse, error) {
+	var o agentapi.OSPFResponse
+	return &o, c.do(ctx, http.MethodGet, "/v1/ospf", nil, &o)
+}
+
 // RoutingTable returns the instances' IPv4 and IPv6 routes.
 func (c *Client) RoutingTable(ctx context.Context) (*agentapi.RoutingTableResponse, error) {
 	var t agentapi.RoutingTableResponse

@@ -165,3 +165,91 @@ func TestBGPAutoRules(t *testing.T) {
 		t.Error("output rule for shut down neighbours")
 	}
 }
+
+func TestFRROSPF(t *testing.T) {
+	b := sampleBundle(t)
+	conf := mustFile(t, b, "/etc/portitor/instances/guest/frr/frr.conf")
+	for _, want := range []string{
+		// One interface block holds both versions.
+		"interface lk-main\n ip ospf area 0.0.0.0\n ip ospf hello-interval 5\n ip ospf dead-interval 20\n ip ospf network point-to-point\n" +
+			" ip ospf authentication message-digest\n ip ospf message-digest-key 1 md5 k3y\n ipv6 ospf6 area 0.0.0.0\nexit\n",
+		"interface eth2\n ip ospf area 0.0.0.1\n ip ospf cost 100\n ip ospf priority 0\n ip ospf passive\nexit\n",
+		"router ospf\n ospf router-id 10.255.0.2\n log-adjacency-changes\n auto-cost reference-bandwidth 10000\n" +
+			" area 0.0.0.1 stub no-summary\n area 0.0.0.1 range 192.168.50.0/23 cost 10\n summary-address 172.16.0.0/12\n" +
+			" redistribute kernel metric 50 metric-type 1 route-map connected\n redistribute bgp\n default-information originate\nexit\n",
+		"router ospf6\n ospf6 router-id 10.255.0.2\n redistribute connected\nexit\n",
+		// BGP redistributes OSPF.
+		"  redistribute ospf\n",
+	} {
+		if !strings.Contains(conf, want) {
+			t.Errorf("frr.conf lacks %q:\n%s", want, conf)
+		}
+	}
+	daemons := mustFile(t, b, "/etc/portitor/instances/guest/frr/daemons")
+	if !strings.Contains(daemons, "bgpd=yes\nospfd=yes\nospf6d=yes\n") {
+		t.Errorf("daemons:\n%s", daemons)
+	}
+	for _, r := range b.Redacted() {
+		if r.Path == "/etc/portitor/instances/guest/frr/frr.conf" && (strings.Contains(r.Content, "k3y") || !strings.Contains(r.Content, " ip ospf message-digest-key 1 md5 <redacted>\n")) {
+			t.Errorf("OSPF key not redacted:\n%s", r.Content)
+		}
+	}
+
+	// OSPF alone runs FRR, without bgpd; an OSPF key alone makes frr.conf
+	// secret.
+	doc := fwconfig.SampleDocument()
+	in := doc.Instance("guest")
+	in.BGP, in.OSPF6 = nil, nil
+	in.RoutingPolicy.RouteMaps[0].Entries = nil
+	b, err := Render(doc, Options{Paths: DefaultPaths(), Units: DefaultUnits()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := mustFile(t, b, "/etc/portitor/instances/guest/frr/daemons"); !strings.Contains(d, "bgpd=no\nospfd=yes\nospf6d=no\n") {
+		t.Errorf("daemons:\n%s", d)
+	}
+	f := b.File("/etc/portitor/instances/guest/frr/frr.conf")
+	if !f.Secret || strings.Contains(f.Content, "router bgp") || strings.Contains(f.Content, "ipv6 ospf6") {
+		t.Errorf("secret %v:\n%s", f.Secret, f.Content)
+	}
+}
+
+func TestOSPFAutoRules(t *testing.T) {
+	nft := mustFile(t, sampleBundle(t), "/etc/portitor/instances/guest/nftables.nft")
+	for _, want := range []string{
+		`iifname "lk-main" meta nfproto ipv4 meta l4proto 89 accept comment "auto: ospf"`,
+		`iifname "lk-main" meta nfproto ipv6 meta l4proto 89 accept comment "auto: ospfv3"`,
+		`oifname "lk-main" meta nfproto ipv4 meta l4proto 89 accept comment "auto: ospf"`,
+		`oifname "lk-main" meta nfproto ipv6 meta l4proto 89 accept comment "auto: ospfv3"`,
+	} {
+		if !strings.Contains(nft, want) {
+			t.Errorf("ruleset lacks %q", want)
+		}
+	}
+	// A passive interface sends and hears no hellos.
+	if strings.Contains(nft, `"eth2" meta nfproto ipv4 meta l4proto 89`) {
+		t.Error("rule for a passive interface")
+	}
+	// Network statements: from and to their prefixes, and to the OSPF
+	// groups.
+	doc := fwconfig.SampleDocument()
+	in := doc.Instance("guest")
+	in.OSPF.Networks = []fwconfig.OSPFNetwork{{Prefix: "10.255.0.0/30", Area: "0.0.0.0"}}
+	for i := range in.OSPF.Interfaces {
+		in.OSPF.Interfaces[i].Area = ""
+	}
+	in.OSPF6 = nil
+	var rules []string
+	for _, r := range AutoInputRules(in) {
+		if r.Service == OSPFService {
+			rules = append(rules, r.matches()...)
+		}
+	}
+	if len(rules) != 1 || rules[0] != "ip saddr 10.255.0.0/30 meta nfproto ipv4 meta l4proto 89" {
+		t.Errorf("input: %q", rules)
+	}
+	out := OSPFOutputMatches(in)
+	if len(out) != 1 || out[0].match != "ip daddr { 10.255.0.0/30, 224.0.0.5, 224.0.0.6 } meta nfproto ipv4 meta l4proto 89" {
+		t.Errorf("output: %+v", out)
+	}
+}

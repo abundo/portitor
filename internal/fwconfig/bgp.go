@@ -62,12 +62,14 @@ type BGPAggregate struct {
 const (
 	RedistConnected = "connected"
 	RedistStatic    = "static"
+	// RedistOSPF is OSPFv2's routes into IPv4, OSPFv3's into IPv6.
+	RedistOSPF = "ospf"
 )
 
 // BGPRedistribute redistributes a source into an address family.
 type BGPRedistribute struct {
 	Family   string `json:"family"` // ipv4, ipv6
-	Source   string `json:"source"` // RedistConnected, RedistStatic
+	Source   string `json:"source"` // RedistConnected, RedistStatic, RedistOSPF
 	RouteMap string `json:"route_map,omitempty"`
 }
 
@@ -638,7 +640,7 @@ func (v *validator) bgpPeer(p string, peer BGPPeer, refs *policyRefs, ifaces map
 	}
 }
 
-// routing checks an instance's routing policy and BGP.
+// routing checks an instance's routing policy, BGP and OSPF.
 func (v *validator) routing(p string, in *Instance, ifaces map[string]*Interface) {
 	rp := &in.RoutingPolicy
 	seen := map[string]bool{}
@@ -668,6 +670,16 @@ func (v *validator) routing(p string, in *Instance, ifaces map[string]*Interface
 	for _, m := range rp.RouteMaps {
 		dup("route map", m.Name)
 		v.routeMap(fmt.Sprintf("%s: route map %s", p, m.Name), m, refs)
+	}
+
+	for _, o := range []struct {
+		name    string
+		ospf    *OSPF
+		version int
+	}{{"ospf", in.OSPF, 2}, {"ospf6", in.OSPF6, 3}} {
+		if o.ospf != nil {
+			v.ospf(p+": "+o.name, o.ospf, o.version, refs, ifaces)
+		}
 	}
 
 	b := in.BGP
@@ -720,8 +732,8 @@ func (v *validator) routing(p string, in *Instance, ifaces map[string]*Interface
 		if r.Family != "ipv4" && r.Family != "ipv6" {
 			v.addf("%s: family must be ipv4 or ipv6", rp)
 		}
-		if r.Source != RedistConnected && r.Source != RedistStatic {
-			v.addf("%s: source must be connected or static", rp)
+		if r.Source != RedistConnected && r.Source != RedistStatic && r.Source != RedistOSPF {
+			v.addf("%s: source must be connected, static or ospf", rp)
 		}
 		if redist[r.Family+r.Source] {
 			v.addf("%s: listed twice", rp)

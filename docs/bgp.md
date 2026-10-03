@@ -50,7 +50,7 @@ shut down gets none.
 | Graceful restart, Multipath relax, Maximum paths | Restart without dropping routes; load sharing over paths through different ASes, over at most this many paths. |
 | Networks | Prefixes announced while the routing table has them (a connected network, a static route), each with an optional route map. |
 | Aggregate addresses | A shorter prefix announced while a more specific route is in the BGP table. *Summary only* leaves the more specific ones out; *AS set* keeps their ASes in the path. |
-| Redistribute | For IPv4 and IPv6: connected networks (the interfaces' prefixes) and static routes (*Static routes*), each with an optional route map that filters or changes them. |
+| Redistribute | For IPv4 and IPv6: connected networks (the interfaces' prefixes), static routes (*Static routes*) and OSPF's routes (OSPFv2's into IPv4, OSPFv3's into IPv6; see [OSPF](ospf.md)), each with an optional route map that filters or changes them. |
 
 **Peer groups** are settings shared by several neighbours. A neighbour in a group
 takes the group's settings; what the neighbour sets adds to them. Renaming a group

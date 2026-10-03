@@ -1160,6 +1160,27 @@ func (s *Server) handleAgentBGP(c *echo.Context) error {
 	return c.JSON(http.StatusOK, b)
 }
 
+// handleAgentOSPF passes on the OSPF state (areas, interfaces,
+// neighbours, routes) of the instances, for the OSPF page.
+func (s *Server) handleAgentOSPF(c *echo.Context) error {
+	a, _, err := s.agent()
+	if err != nil {
+		return agentError(c, err)
+	}
+	o, err := a.OSPF(c.Request().Context())
+	if err != nil {
+		return agentError(c, err)
+	}
+	names, err := s.readableInstanceNames(c)
+	if err != nil {
+		return err
+	}
+	if names != nil {
+		filterOSPF(o, names)
+	}
+	return c.JSON(http.StatusOK, o)
+}
+
 // handleAgentRuleCounters passes on the traffic per rule (by rule id), for
 // the Rules page.
 func (s *Server) handleAgentRuleCounters(c *echo.Context) error {
@@ -1297,6 +1318,16 @@ func redactDoc(doc fwconfig.Document) fwconfig.Document {
 			}
 			b.PeerGroups, b.Neighbors = redact(b.PeerGroups), redact(b.Neighbors)
 			cp.BGP = &b
+		}
+		if in.OSPF != nil {
+			o := *in.OSPF
+			o.Interfaces = slices.Clone(o.Interfaces)
+			for k := range o.Interfaces {
+				if o.Interfaces[k].AuthKey != "" {
+					o.Interfaces[k].AuthKey = "<redacted>"
+				}
+			}
+			cp.OSPF = &o
 		}
 		out.Instances[i] = cp
 	}

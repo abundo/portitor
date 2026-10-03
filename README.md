@@ -25,6 +25,8 @@ office networks. It manages:
 - IP lists: CrowdSec decisions or downloaded blocklists, used as `@name` in rules
 - BGP (FRR, off by default): neighbours and peer groups, networks, aggregates and
   redistribution, filtered with prefix lists, AS path and community lists and route maps
+- OSPF (FRR, off by default): OSPFv2 (IPv4) and OSPFv3 (IPv6), areas (stub, NSSA),
+  interfaces, area ranges, external summaries and redistribution, MD5 authentication
 - scheduled tasks: download IP lists or run commands on a cron schedule
 - virtual firewalls, each with its own routing, rules, DHCP and DNS, with optional
   internal links between them
@@ -59,7 +61,7 @@ firewall, the agent, makes the changes the GUI asks for. For a single box, an
                   ├─ diagnostics    packet log (NFLOG), DNS query log, conntrack, capture, mtr, LLDP
                   ├─ dnsmgr2, BIND  DNS zones, per virtual firewall
                   ├─ Kea, radvd     DHCPv4, DHCPv6 and router advertisements, per virtual firewall
-                  └─ FRR            BGP, per virtual firewall that turns it on
+                  └─ FRR            BGP and OSPF, per virtual firewall that turns them on
 ```
 
 - **portitor-web** holds the configuration in an SQLite database. On *Deploy* it builds a
@@ -173,7 +175,7 @@ A first install creates the configs but starts nothing, and prints what is left 
 By hand, it is:
 
 On the **firewall** (Debian/Ubuntu shown; needs nftables, iproute2, wireguard-tools,
-bind9, bind9-utils, kea-dhcp4-server, kea-dhcp6-server, radvd; frr and frr-pythontools for BGP; tcpdump,
+bind9, bind9-utils, kea-dhcp4-server, kea-dhcp6-server, radvd; frr and frr-pythontools for BGP and OSPF; tcpdump,
 tshark and mtr-tiny for packet capture and traceroute):
 
 ```sh

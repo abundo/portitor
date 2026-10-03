@@ -117,6 +117,11 @@ type BgpConfig struct {
 	RedistConnectedV6Map string `gorm:"column:redist_connected_v6_map" json:"redist_connected_v6_map"`
 	RedistStaticV6       bool   `gorm:"column:redist_static_v6" json:"redist_static_v6"`
 	RedistStaticV6Map    string `gorm:"column:redist_static_v6_map" json:"redist_static_v6_map"`
+	// OSPFv2's routes into IPv4, OSPFv3's into IPv6.
+	RedistOspfV4    bool   `gorm:"column:redist_ospf_v4" json:"redist_ospf_v4"`
+	RedistOspfV4Map string `gorm:"column:redist_ospf_v4_map" json:"redist_ospf_v4_map"`
+	RedistOspfV6    bool   `gorm:"column:redist_ospf_v6" json:"redist_ospf_v6"`
+	RedistOspfV6Map string `gorm:"column:redist_ospf_v6_map" json:"redist_ospf_v6_map"`
 }
 
 // BgpPeerSettings are what a neighbour and a peer group both have.
@@ -219,4 +224,57 @@ type BgpNeighbor struct {
 	Enabled    bool   `json:"enabled"`
 	PeerGroup  string `json:"peer_group"`
 	BgpPeerSettings
+}
+
+// OspfConfig is an instance's OSPFv2 (Version 2) or OSPFv3 (3): one row
+// per instance and version, made on the first save. It is off (not run)
+// until Enabled.
+type OspfConfig struct {
+	Base
+	InstanceID          uint                                `json:"instance_id"`
+	Version             int                                 `json:"version"`
+	Enabled             bool                                `json:"enabled"`
+	RouterID            string                              `json:"router_id"`
+	ReferenceBandwidth  int                                 `json:"reference_bandwidth"`
+	LogAdjacencyChanges bool                                `json:"log_adjacency_changes"`
+	MaximumPaths        int                                 `json:"maximum_paths"`
+	DefaultOriginate    bool                                `json:"default_originate"`
+	DefaultAlways       bool                                `json:"default_always"`
+	Areas               JSONList[fwconfig.OSPFArea]         `json:"areas"`
+	Ranges              JSONList[fwconfig.OSPFRange]        `json:"ranges"`
+	Summaries           JSONList[fwconfig.OSPFSummary]      `json:"summaries"`
+	Networks            JSONList[fwconfig.OSPFNetwork]      `json:"networks"` // OSPFv2 only
+	Redistribute        JSONList[fwconfig.OSPFRedistribute] `json:"redistribute"`
+}
+
+// OspfInterface is OSPF on an interface of the instance, by name.
+type OspfInterface struct {
+	Base
+	InstanceID    uint   `json:"instance_id"`
+	Version       int    `json:"version"`
+	Name          string `json:"name"`
+	Area          string `json:"area"`
+	Passive       bool   `json:"passive"`
+	Cost          int    `json:"cost"`
+	HelloInterval int    `json:"hello_interval"`
+	DeadInterval  int    `json:"dead_interval"`
+	Priority      *int   `json:"priority"`
+	NetworkType   string `json:"network_type"`
+	AuthKeyID     int    `json:"auth_key_id"`
+	AuthKey       string `json:"-"`
+
+	// The MD5 key (OSPFv2) is write-only: NewAuthKey sets it (empty keeps
+	// it), ClearAuthKey removes it, HasAuthKey tells whether there is one.
+	NewAuthKey   string `gorm:"-" json:"new_auth_key,omitempty"`
+	ClearAuthKey bool   `gorm:"-" json:"clear_auth_key,omitempty"`
+	HasAuthKey   bool   `gorm:"-" json:"has_auth_key"`
+}
+
+// Interface is the interface as the document holds it.
+func (i *OspfInterface) Interface() fwconfig.OSPFInterface {
+	return fwconfig.OSPFInterface{
+		Name: i.Name, Area: i.Area, Passive: i.Passive, Cost: i.Cost,
+		HelloInterval: i.HelloInterval, DeadInterval: i.DeadInterval, Priority: i.Priority,
+		NetworkType: i.NetworkType, AuthKeyID: i.AuthKeyID, AuthKey: i.AuthKey,
+	}
 }

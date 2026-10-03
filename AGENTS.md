@@ -15,7 +15,7 @@ are in [README.md](README.md).
 | `cmd/portitor-agent` | Agent daemon on the firewall: `start`, `init`, `render`, `netns-exec`; run as `portitor` (a symlink, `cli.go`) it is a read-only CLI (`show lldp neighbours`, `show ip neighbours`) over the agent's GET routes on the root-only socket `<run_dir>/agent.sock` |
 | `internal/fwconfig` | The desired-state document and `Validate()`. **The contract between web and agent.** |
 | `internal/render` | Pure functions: document → nftables, WireGuard, named.conf, Kea, dnsmgr2 config, FRR (`frr.go`: frr.conf, daemons, vtysh.conf) |
-| `internal/agent` | Agent: apply/reconcile, commit-confirm, DHCP and DHCPv6 (prefix delegation) clients, IP lists, task scheduler, packet log (NFLOG), DNS query log (BIND logs to the journal, followed with `journalctl`, filtered by the agent, `querylog.go`), WireGuard endpoint re-resolving, packet capture (tcpdump, streamed rate-limited), traceroute (`mtr --raw`, streamed as JSON lines, `trace.go`), LLDP (sent and heard on raw sockets, `lldp.go`), neighbours (ARP/ND, LLDP), BGP state (FRR's JSON through `vtysh`, `bgp.go`), status, API server |
+| `internal/agent` | Agent: apply/reconcile, commit-confirm, DHCP and DHCPv6 (prefix delegation) clients, IP lists, task scheduler, packet log (NFLOG), DNS query log (BIND logs to the journal, followed with `journalctl`, filtered by the agent, `querylog.go`), WireGuard endpoint re-resolving, packet capture (tcpdump, streamed rate-limited), traceroute (`mtr --raw`, streamed as JSON lines, `trace.go`), LLDP (sent and heard on raw sockets, `lldp.go`), neighbours (ARP/ND, LLDP), BGP and OSPF state (FRR's JSON through `vtysh`, `bgp.go`, `ospf.go`), status, API server |
 | `internal/dyndns` | DNS update client ("DNS update" in the GUI): RFC 2136 (from ifnsupdate), sent from the instance netns, or a DNS hosting provider's API through libdns (`providers.go`, matching `fwconfig.DNSProviders`), called from the host |
 | `internal/acme` | ACME certificates through lego: accounts, orders, the stored chain and key (`<state_dir>/certificates/`); the agent's `acme.go` schedules them and answers HTTP-01 in the instance netns, opening port 80 by the `acme_http` set (`render.ACMEHTTPSet`) |
 | `internal/iplist` | Downloads IP lists (CrowdSec LAPI decisions, plain-text lists) |
@@ -29,7 +29,7 @@ are in [README.md](README.md).
 | `internal/netobj` | Named hosts/prefixes (`address_objects`): name checks and expansion |
 | `internal/dbmigrate` | Opens the SQLite database; goose migrations (the schema's source of truth) |
 | `models` | GORM mapping |
-| `web` | Echo v5 server (`server.go`: routes): auth, generic CRUD (`crud.go`), entry validation (`resources.go`), deploy handlers (`handlers.go`), Revert snapshots (`revert.go`), tenancy (`tenancy.go`), roles (`roles.go`, `access.go`), rename/delete reference keeping (`objects.go`, `services.go`, `ifzones.go`, `bgp.go`, `delegated.go`), folders for hosts and IP lists (`folders.go`, GUI only), agent proxies (`console.go`, `capture.go`, `trace.go`, `connections.go`), WireGuard config import (`wgimport.go`), backup/restore (`backup.go`), `web.yaml` (`config.go`) |
+| `web` | Echo v5 server (`server.go`: routes): auth, generic CRUD (`crud.go`), entry validation (`resources.go`), deploy handlers (`handlers.go`), Revert snapshots (`revert.go`), tenancy (`tenancy.go`), roles (`roles.go`, `access.go`), rename/delete reference keeping (`objects.go`, `services.go`, `ifzones.go`, `bgp.go`, `ospf.go`, `delegated.go`), folders for hosts and IP lists (`folders.go`, GUI only), agent proxies (`console.go`, `capture.go`, `trace.go`, `connections.go`), WireGuard config import (`wgimport.go`), backup/restore (`backup.go`), `web.yaml` (`config.go`) |
 | `web/frontend` | Vue SPA; `CrudPage.vue` drives most pages from field/column schemas |
 | `docs` | User guides; every `docs/*.md` is bundled into the GUI's Help page (`src/docs.js`), and links between them stay in the GUI |
 | `deploy` | systemd units and example configs |
@@ -104,12 +104,14 @@ docs and user-facing messages.
   is matched by index.
 - **Rule order in a chain:** established/related, invalid drop, loopback and
   essential ICMP, anti-lockout and the services' auto accepts
-  (`render.AutoInputRules`; BGP's from its neighbours' addresses only), then the user's rules; in forward, the accept of port
+  (`render.AutoInputRules`; BGP's from its neighbours' addresses only, OSPF's on its
+  non-passive interfaces), then the user's rules; in forward, the accept of port
   forwards (`ct status dnat`) comes after the user's rules, so a rule can drop what a
   DNAT would let in; then the policy. The input auto accepts stay first so a rule
   that closes an interface to the firewall keeps the DHCP and DNS enabled on it.
-  The output chain has one auto accept, before the user's rules: the BGP sessions
-  FRR opens to its neighbours (TCP 179).
+  The output chain has auto accepts too, before the user's rules: the BGP sessions
+  FRR opens to its neighbours (TCP 179) and what OSPF sends (IP protocol 89,
+  `render.OSPFOutputMatches`).
 - **The agent owns** the `inet firewall` table in each namespace, every `fw-*`
   namespace, routes with `proto 99`, and root-namespace virtual interfaces listed in
   `managed.json`. Leave everything else alone (docker, libvirt, other tables).
@@ -132,9 +134,10 @@ docs and user-facing messages.
   through the API either; a secret the user enters comes in through a write-only
   `gorm:"-"` field that `prepare` copies and `present` clears (`DyndnsClient.NewTsigSecret`,
   `IpList.NewPassword`/`NewApiKey`, `BgpPeerSettings.NewPassword` with
-  `ClearPassword`; a DNS update provider's secret settings come in
+  `ClearPassword`, `OspfInterface.NewAuthKey` with `ClearAuthKey`; a DNS update provider's secret settings come in
   through `DyndnsClient.Settings`, where an empty one keeps the stored value).
-  A BGP password is in frr.conf, so that is a `Secret` file `Bundle.Redacted` masks.
+  A BGP password or OSPF MD5 key is in frr.conf, so that is a `Secret` file
+  `Bundle.Redacted` masks.
   Deployment history stores a redacted document. The exceptions are the backup
   download (`web/backup.go`): the whole database, age-encrypted with the user's
   passphrase; and a WireGuard peer's client config (`render.WireGuardClientConf`),
@@ -194,11 +197,19 @@ the certificate portitor-web serves, chosen under Settings
   other by name, as FRR does: renaming one rewrites the references
   (`eachRoutingRef`), deleting one in use is refused, a row never moves to another
   instance, and a new reference field goes in `eachRoutingRef`. Off (the default),
-  the builder leaves BGP and the objects out of the document and the agent stops
-  FRR. A neighbour's update source may name an interface; renaming the interface
-  rewrites it (`renameIfaceRefs`). FRR runs zebra and bgpd only; static routes
-  stay the agent's (kernel routes), so "redistribute static" renders as
-  `redistribute kernel`.
+  the builder leaves BGP out of the document; the objects are left out unless BGP
+  or OSPF is on (`Instance.FRRRunning`), and with neither the agent stops FRR. A
+  neighbour's update source may name an interface; renaming the interface
+  rewrites it (`renameIfaceRefs`). FRR runs zebra, bgpd, ospfd and ospf6d as the
+  instance needs them (the daemons file); static routes stay the agent's (kernel
+  routes), so "redistribute static" renders as `redistribute kernel`.
+- **OSPF** (`web/ospf.go`) is per instance and version (2: OSPFv2, IPv4,
+  `Instance.OSPF`; 3: OSPFv3, IPv6, `Instance.OSPF6`): `ospf_configs` (one per
+  instance and version) and `ospf_interfaces`, by interface name (link ends
+  included), which `renameIfaceRefs` rewrites and `refuseIfaceInUse` keeps from
+  being deleted. Its route maps are in `eachRoutingRef`. Area ids are stored
+  dotted. OSPFv2's network statements and interface areas are exclusive, as in
+  FRR.
 - **Dual stack:** rule and NAT address lists may mix IPv4 and IPv6;
   `fwconfig.MatchFamilies` decides which versions a rule is rendered for, and
   validation uses the same function.

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/abundo/portitor/internal/agentapi"
+	"github.com/abundo/portitor/internal/fwconfig"
 )
 
 // BGP asks FRR, through vtysh, for the state of each instance that runs
@@ -31,20 +32,25 @@ func (a *Agent) BGP(ctx context.Context) *agentapi.BGPResponse {
 		if !in.BGPRunning() {
 			continue
 		}
-		vtysh := func(command string) ([]byte, error) {
-			args := []string{}
-			if !in.Default {
-				// The instance is FRR's pathspace (portitor-frr@.service).
-				args = append(args, "-N", in.Name)
-			}
-			args = append(args, "-c", command)
-			cctx, cancel := context.WithTimeout(ctx, 20*time.Second)
-			defer cancel()
-			return a.bg.Run(cctx, "", "vtysh", args...)
-		}
-		resp.Instances = append(resp.Instances, bgpInstance(in.Name, vtysh))
+		resp.Instances = append(resp.Instances, bgpInstance(in.Name, a.vtysh(ctx, in)))
 	}
 	return resp
+}
+
+// vtysh returns a function that runs one vtysh command in the instance's
+// FRR.
+func (a *Agent) vtysh(ctx context.Context, in *fwconfig.Instance) func(string) ([]byte, error) {
+	return func(command string) ([]byte, error) {
+		args := []string{}
+		if !in.Default {
+			// The instance is FRR's pathspace (portitor-frr@.service).
+			args = append(args, "-N", in.Name)
+		}
+		args = append(args, "-c", command)
+		cctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+		defer cancel()
+		return a.bg.Run(cctx, "", "vtysh", args...)
+	}
 }
 
 // bgpInstance gathers one instance's BGP state with vtysh.

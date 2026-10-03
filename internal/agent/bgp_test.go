@@ -162,7 +162,8 @@ func TestAgentBGP(t *testing.T) {
 }
 
 // FRR starts when BGP is turned on, a changed daemons file restarts it, a
-// changed frr.conf reloads it, and it stops when BGP is turned off.
+// changed frr.conf reloads it, and it stops when BGP and OSPF are turned
+// off.
 func TestApplyFRR(t *testing.T) {
 	a, _ := testAgent(t)
 	r := &vtyshRunner{Runner: a.run, active: map[string]bool{}}
@@ -214,8 +215,18 @@ func TestApplyFRR(t *testing.T) {
 		t.Errorf("unchanged: %v", r.calls)
 	}
 
+	// OSPF alone keeps it running.
 	r.calls = nil
 	in.BGP.Enabled = false
+	if err := a.applyFRR(ctx, in, map[string]bool{}); err != nil {
+		t.Fatal(err)
+	}
+	if r.ran("systemctl", "disable", "--now", unit) {
+		t.Errorf("stopped with OSPF on: %v", r.calls)
+	}
+
+	r.calls = nil
+	in.OSPF.Enabled, in.OSPF6.Enabled = false, false
 	if err := a.applyFRR(ctx, in, map[string]bool{}); err != nil {
 		t.Fatal(err)
 	}

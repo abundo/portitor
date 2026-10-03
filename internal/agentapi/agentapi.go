@@ -728,3 +728,86 @@ type BGPRoute struct {
 	Origin    string `json:"origin,omitempty"`
 	PeerID    string `json:"peer,omitempty"`
 }
+
+// OSPFResponse is the OSPF state of the instances that run it, from FRR.
+type OSPFResponse struct {
+	Instances []OSPFInstance `json:"instances"`
+}
+
+// OSPFInstance is one instance's OSPFv2 and OSPFv3 state; nil for a
+// version it does not run.
+type OSPFInstance struct {
+	Instance string     `json:"instance"`
+	V2       *OSPFState `json:"v2,omitempty"`
+	V3       *OSPFState `json:"v3,omitempty"`
+}
+
+// OSPFState is one OSPF version's state. Error says why FRR could not be
+// asked (not running yet, say).
+type OSPFState struct {
+	RouterID   string              `json:"router_id,omitempty"`
+	Error      string              `json:"error,omitempty"`
+	Areas      []OSPFAreaInfo      `json:"areas"`
+	Interfaces []OSPFInterfaceInfo `json:"interfaces"`
+	Neighbors  []OSPFNeighborInfo  `json:"neighbors"`
+	// Routes are OSPF's routing table, at most OSPFMaxRoutes.
+	Routes          []OSPFRoute `json:"routes"`
+	RoutesTruncated bool        `json:"routes_truncated,omitempty"`
+}
+
+// OSPFMaxRoutes caps the routes in an OSPFState.
+const OSPFMaxRoutes = 2000
+
+// OSPFAreaInfo is an area the router is in.
+type OSPFAreaInfo struct {
+	ID         string `json:"id"`
+	Type       string `json:"type,omitempty"` // stub, nssa; empty when normal
+	Interfaces int    `json:"interfaces"`
+	// FullAdjacencies are the neighbours in state Full.
+	FullAdjacencies int `json:"full_adjacencies"`
+	LSAs            int `json:"lsas"`
+}
+
+// OSPFInterfaceInfo is an interface OSPF runs on.
+type OSPFInterfaceInfo struct {
+	Name    string `json:"name"`
+	Area    string `json:"area,omitempty"`
+	Address string `json:"address,omitempty"`
+	// State is the interface state: DR, Backup, DROther, Point-To-Point,
+	// Loopback, Waiting, Down.
+	State       string `json:"state,omitempty"`
+	NetworkType string `json:"network_type,omitempty"`
+	Cost        int64  `json:"cost"`
+	Priority    int64  `json:"priority"`
+	Passive     bool   `json:"passive,omitempty"`
+	Neighbors   int64  `json:"neighbors"`
+	Adjacent    int64  `json:"adjacent"`
+	DR          string `json:"dr,omitempty"`
+	BDR         string `json:"bdr,omitempty"`
+}
+
+// OSPFNeighborInfo is a neighbour on an interface.
+type OSPFNeighborInfo struct {
+	RouterID  string `json:"router_id"`
+	Address   string `json:"address,omitempty"`
+	Interface string `json:"interface,omitempty"`
+	Priority  int64  `json:"priority"`
+	// State is the adjacency's (Full, 2-Way, ExStart, ...); Role the
+	// neighbour's on the link (DR, Backup, DROther).
+	State    string `json:"state"`
+	Role     string `json:"role,omitempty"`
+	Uptime   string `json:"uptime,omitempty"`
+	DeadTime string `json:"dead_time,omitempty"`
+}
+
+// OSPFRoute is a route in OSPF's routing table.
+type OSPFRoute struct {
+	Prefix string `json:"prefix"`
+	// Type: intra-area, inter-area, external 1, external 2 (FRR's N, N IA,
+	// N E1, N E2; Intra-Area, ... for OSPFv3).
+	Type      string   `json:"type,omitempty"`
+	Area      string   `json:"area,omitempty"`
+	Cost      *int64   `json:"cost,omitempty"`
+	NextHops  []string `json:"next_hops"`
+	Interface []string `json:"interfaces,omitempty"`
+}

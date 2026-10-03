@@ -53,6 +53,8 @@ type data struct {
 	bgpConfigs     []models.BgpConfig
 	bgpGroups      []models.BgpPeerGroup
 	bgpNeighbors   []models.BgpNeighbor
+	ospfConfigs    []models.OspfConfig
+	ospfIfaces     []models.OspfInterface
 }
 
 func load(db *gorm.DB) (*data, error) {
@@ -90,6 +92,8 @@ func load(db *gorm.DB) (*data, error) {
 		{&d.bgpConfigs, "id"},
 		{&d.bgpGroups, "name"},
 		{&d.bgpNeighbors, "id"},
+		{&d.ospfConfigs, "id"},
+		{&d.ospfIfaces, "name"},
 	} {
 		if err := db.Order(q.order).Find(q.dst).Error; err != nil {
 			return nil, err
@@ -598,6 +602,10 @@ func build(db *gorm.DB, generation int64, only map[string]bool) (*fwconfig.Docum
 		}
 
 		d.bgp(&in, mi.ID)
+		in.OSPF, in.OSPF6 = d.ospf(mi.ID, 2), d.ospf(mi.ID, 3)
+		if in.FRRRunning() {
+			d.routingPolicy(&in, mi.ID)
+		}
 
 		doc.Instances = append(doc.Instances, in)
 	}
@@ -657,9 +665,7 @@ func build(db *gorm.DB, generation int64, only map[string]bool) (*fwconfig.Docum
 	return doc, nil
 }
 
-// bgp adds the instance's BGP and the routing policy objects it uses,
-// when BGP is enabled: off, FRR does not run and they stay out of the
-// document.
+// bgp adds the instance's BGP when it is enabled.
 func (d *data) bgp(in *fwconfig.Instance, instanceID uint) {
 	var cfg *models.BgpConfig
 	for i := range d.bgpConfigs {
@@ -693,6 +699,8 @@ func (d *data) bgp(in *fwconfig.Instance, instanceID uint) {
 		{cfg.RedistStaticV4, "ipv4", fwconfig.RedistStatic, cfg.RedistStaticV4Map},
 		{cfg.RedistConnectedV6, "ipv6", fwconfig.RedistConnected, cfg.RedistConnectedV6Map},
 		{cfg.RedistStaticV6, "ipv6", fwconfig.RedistStatic, cfg.RedistStaticV6Map},
+		{cfg.RedistOspfV4, "ipv4", fwconfig.RedistOSPF, cfg.RedistOspfV4Map},
+		{cfg.RedistOspfV6, "ipv6", fwconfig.RedistOSPF, cfg.RedistOspfV6Map},
 	} {
 		if r.on {
 			b.Redistribute = append(b.Redistribute, fwconfig.BGPRedistribute{Family: r.family, Source: r.src, RouteMap: r.routeMap})
@@ -713,7 +721,45 @@ func (d *data) bgp(in *fwconfig.Instance, instanceID uint) {
 		}
 	}
 	in.BGP = b
+}
 
+// ospf returns the instance's OSPF of a version when it is enabled, or
+// nil.
+func (d *data) ospf(instanceID uint, version int) *fwconfig.OSPF {
+	var cfg *models.OspfConfig
+	for i := range d.ospfConfigs {
+		if c := &d.ospfConfigs[i]; c.InstanceID == instanceID && c.Version == version {
+			cfg = c
+		}
+	}
+	if cfg == nil || !cfg.Enabled {
+		return nil
+	}
+	o := &fwconfig.OSPF{
+		Enabled:             true,
+		RouterID:            cfg.RouterID,
+		ReferenceBandwidth:  cfg.ReferenceBandwidth,
+		LogAdjacencyChanges: cfg.LogAdjacencyChanges,
+		MaximumPaths:        cfg.MaximumPaths,
+		DefaultOriginate:    cfg.DefaultOriginate,
+		DefaultAlways:       cfg.DefaultAlways,
+		Areas:               slices.Clone([]fwconfig.OSPFArea(cfg.Areas)),
+		Ranges:              slices.Clone([]fwconfig.OSPFRange(cfg.Ranges)),
+		Summaries:           slices.Clone([]fwconfig.OSPFSummary(cfg.Summaries)),
+		Networks:            slices.Clone([]fwconfig.OSPFNetwork(cfg.Networks)),
+		Redistribute:        slices.Clone([]fwconfig.OSPFRedistribute(cfg.Redistribute)),
+	}
+	for i := range d.ospfIfaces {
+		if ifc := &d.ospfIfaces[i]; ifc.InstanceID == instanceID && ifc.Version == version {
+			o.Interfaces = append(o.Interfaces, ifc.Interface())
+		}
+	}
+	return o
+}
+
+// routingPolicy adds the instance's routing policy objects, when FRR runs
+// (BGP or OSPF): off, they stay out of the document.
+func (d *data) routingPolicy(in *fwconfig.Instance, instanceID uint) {
 	rp := &in.RoutingPolicy
 	for _, l := range d.prefixLists {
 		if l.InstanceID == instanceID {

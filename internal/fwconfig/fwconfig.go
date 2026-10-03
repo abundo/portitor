@@ -51,8 +51,12 @@ type Instance struct {
 	Certificates []Certificate `json:"certificates,omitempty"`
 	// BGP runs FRR in the instance; nil when it is off.
 	BGP *BGP `json:"bgp,omitempty"`
+	// OSPF (OSPFv2, IPv4) and OSPF6 (OSPFv3, IPv6) run FRR's ospfd and
+	// ospf6d in the instance; nil when off.
+	OSPF  *OSPF `json:"ospf,omitempty"`
+	OSPF6 *OSPF `json:"ospf6,omitempty"`
 	// RoutingPolicy holds the prefix lists, AS path and community lists
-	// and route maps BGP refers to.
+	// and route maps BGP and OSPF refer to.
 	RoutingPolicy RoutingPolicy `json:"routing_policy,omitzero"`
 	// LogDrops lists the filter chains (ChainInput, ...) that log, rate
 	// limited, what no rule decided on before the chain's policy drops it.

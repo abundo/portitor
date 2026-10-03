@@ -272,6 +272,8 @@ func prepareBgpConfig(tx *gorm.DB, c, old *models.BgpConfig) error {
 		{"redistribute static (IPv4)", c.RedistStaticV4, &c.RedistStaticV4Map},
 		{"redistribute connected (IPv6)", c.RedistConnectedV6, &c.RedistConnectedV6Map},
 		{"redistribute static (IPv6)", c.RedistStaticV6, &c.RedistStaticV6Map},
+		{"redistribute OSPF (IPv4)", c.RedistOspfV4, &c.RedistOspfV4Map},
+		{"redistribute OSPF (IPv6)", c.RedistOspfV6, &c.RedistOspfV6Map},
 	} {
 		if !r.on {
 			*r.value = ""
@@ -461,7 +463,8 @@ func (o *routingObjects) check(where, kind, name, family string) []string {
 }
 
 // eachRoutingRef calls visit for every reference of an instance's route
-// maps, BGP config, peer groups and neighbours to a routing object (or a
+// maps, BGP config, peer groups, neighbours and OSPF configs to a routing
+// object (or a
 // neighbour's to its peer group). Rows where visit changed one are saved.
 func eachRoutingRef(tx *gorm.DB, instanceID uint, visit func(kind, where string, ref *string) bool) error {
 	var maps []models.RouteMap
@@ -500,13 +503,32 @@ func eachRoutingRef(tx *gorm.DB, instanceID uint, visit func(kind, where string,
 				changed = true
 			}
 		}
-		for _, r := range []*string{&c.RedistConnectedV4Map, &c.RedistStaticV4Map, &c.RedistConnectedV6Map, &c.RedistStaticV6Map} {
+		for _, r := range []*string{&c.RedistConnectedV4Map, &c.RedistStaticV4Map, &c.RedistConnectedV6Map, &c.RedistStaticV6Map, &c.RedistOspfV4Map, &c.RedistOspfV6Map} {
 			if *r != "" && visit(refRouteMap, "BGP redistribute", r) {
 				changed = true
 			}
 		}
 		if changed {
-			if err := tx.Model(&models.BgpConfig{}).Where("id = ?", c.ID).Select("networks", "redist_connected_v4_map", "redist_static_v4_map", "redist_connected_v6_map", "redist_static_v6_map").Updates(&c).Error; err != nil {
+			if err := tx.Model(&models.BgpConfig{}).Where("id = ?", c.ID).Select("networks", "redist_connected_v4_map", "redist_static_v4_map", "redist_connected_v6_map", "redist_static_v6_map", "redist_ospf_v4_map", "redist_ospf_v6_map").Updates(&c).Error; err != nil {
+				return err
+			}
+		}
+	}
+
+	var ospfs []models.OspfConfig
+	if err := tx.Where("instance_id = ?", instanceID).Find(&ospfs).Error; err != nil {
+		return err
+	}
+	for _, c := range ospfs {
+		changed := false
+		for i := range c.Redistribute {
+			r := &c.Redistribute[i]
+			if r.RouteMap != "" && visit(refRouteMap, fmt.Sprintf("OSPFv%d redistribute %s", c.Version, r.Source), &r.RouteMap) {
+				changed = true
+			}
+		}
+		if changed {
+			if err := tx.Model(&models.OspfConfig{}).Where("id = ?", c.ID).UpdateColumn("redistribute", c.Redistribute).Error; err != nil {
 				return err
 			}
 		}

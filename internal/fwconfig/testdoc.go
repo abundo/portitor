@@ -157,7 +157,7 @@ func SampleDocument() Document {
 					Enabled: true, ASN: 65010, RouterID: "10.255.0.2", LogNeighborChanges: true,
 					Networks:     []BGPNetwork{{Prefix: "192.168.50.0/24"}},
 					Aggregates:   []BGPAggregate{{Prefix: "192.168.0.0/16", SummaryOnly: true}},
-					Redistribute: []BGPRedistribute{{Family: "ipv4", Source: RedistConnected, RouteMap: "connected"}},
+					Redistribute: []BGPRedistribute{{Family: "ipv4", Source: RedistConnected, RouteMap: "connected"}, {Family: "ipv4", Source: RedistOSPF}},
 					PeerGroups: []BGPPeer{{
 						Name: "upstream", RemoteAS: "65000", Password: "s3cret",
 						IPv4: BGPAddressFamily{Activate: true, RouteMapIn: "from-upstream", PrefixListOut: "ours", SoftReconfiguration: true},
@@ -167,6 +167,23 @@ func SampleDocument() Document {
 						{Address: "2001:db8::1", RemoteAS: "65001", EBGPMultihop: 2, UpdateSource: "eth2",
 							IPv6: BGPAddressFamily{Activate: true, NextHopSelf: true, RemovePrivateAS: true}},
 					},
+				},
+				OSPF: &OSPF{
+					Enabled: true, RouterID: "10.255.0.2", LogAdjacencyChanges: true, ReferenceBandwidth: 10000,
+					DefaultOriginate: true,
+					Areas:            []OSPFArea{{ID: "0.0.0.1", Type: AreaStub, NoSummary: true}},
+					Ranges:           []OSPFRange{{Area: "0.0.0.1", Prefix: "192.168.50.0/23", Cost: 10}},
+					Summaries:        []OSPFSummary{{Prefix: "172.16.0.0/12"}},
+					Interfaces: []OSPFInterface{
+						{Name: "lk-main", Area: "0.0.0.0", NetworkType: OSPFPointToPoint, HelloInterval: 5, DeadInterval: 20, AuthKeyID: 1, AuthKey: "k3y"},
+						{Name: "eth2", Area: "0.0.0.1", Passive: true, Cost: 100, Priority: ptr(0)},
+					},
+					Redistribute: []OSPFRedistribute{{Source: RedistStatic, MetricType: 1, Metric: 50, RouteMap: "connected"}, {Source: RedistBGP}},
+				},
+				OSPF6: &OSPF{
+					Enabled: true, RouterID: "10.255.0.2",
+					Interfaces:   []OSPFInterface{{Name: "lk-main", Area: "0.0.0.0"}},
+					Redistribute: []OSPFRedistribute{{Source: RedistConnected}},
 				},
 				RoutingPolicy: RoutingPolicy{
 					PrefixLists: []PrefixList{

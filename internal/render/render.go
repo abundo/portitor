@@ -334,10 +334,10 @@ func Render(doc fwconfig.Document, opt Options) (*Bundle, error) {
 		if len(in.RA) > 0 {
 			add(f.Radvd, RadvdConf(in), 0o644, false)
 		}
-		if in.BGPRunning() {
+		if in.FRRRunning() {
 			add(f.FRRDaemons, FRRDaemons(in), 0o640, false)
 			add(f.FRRVtysh, FRRVtyshConf(in), 0o644, false)
-			add(f.FRRConf, FRRConf(in), 0o640, hasBGPPassword(in.BGP))
+			add(f.FRRConf, FRRConf(in), 0o640, hasFRRSecret(in))
 		}
 	}
 	sort.SliceStable(b.Files, func(i, j int) bool { return b.Files[i].Path < b.Files[j].Path })
@@ -357,12 +357,24 @@ func (b *Bundle) File(path string) *File {
 var (
 	wgKeyLine       = regexp.MustCompile(`(?m)^(PrivateKey|PresharedKey) = .*$`)
 	frrPasswordLine = regexp.MustCompile(`(?m)^( neighbor \S+` + frrPasswordWord + `).*$`)
+	ospfKeyLine     = regexp.MustCompile(`(?m)^( ip ospf message-digest-key \d+` + ospfKeyWord + `).*$`)
 )
 
-func hasBGPPassword(g *fwconfig.BGP) bool {
-	for _, p := range append(slices.Clone(g.PeerGroups), g.Neighbors...) {
-		if p.Password != "" {
-			return true
+// hasFRRSecret reports whether frr.conf holds a BGP password or an OSPF
+// key.
+func hasFRRSecret(in *fwconfig.Instance) bool {
+	if g := in.BGP; in.BGPRunning() {
+		for _, p := range append(slices.Clone(g.PeerGroups), g.Neighbors...) {
+			if p.Password != "" {
+				return true
+			}
+		}
+	}
+	if in.OSPFRunning(2) {
+		for _, ifc := range in.OSPF.Interfaces {
+			if ifc.AuthKey != "" {
+				return true
+			}
 		}
 	}
 	return false
@@ -376,6 +388,7 @@ func (b *Bundle) Redacted() []File {
 		if f.Secret {
 			out[i].Content = wgKeyLine.ReplaceAllString(f.Content, "$1 = <redacted>")
 			out[i].Content = frrPasswordLine.ReplaceAllString(out[i].Content, "${1}<redacted>")
+			out[i].Content = ospfKeyLine.ReplaceAllString(out[i].Content, "${1}<redacted>")
 		}
 	}
 	return out
