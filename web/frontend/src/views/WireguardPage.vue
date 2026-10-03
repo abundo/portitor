@@ -122,7 +122,7 @@ const editForm = reactive({})
 const editGuard = useFormGuard(editForm, editOpen)
 function editTunnel() {
   const t = selected.value
-  for (const k of editKeys) editForm[k] = structuredClone(t[k] ?? null)
+  for (const k of editKeys) editForm[k] = JSON.parse(JSON.stringify(t[k] ?? null))
   editForm.addresses ??= []
   editOpen.value = true
 }
