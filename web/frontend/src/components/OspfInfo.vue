@@ -2,42 +2,48 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
 <script setup>
-// OspfInfo: one OSPF version's state as FRR has it (agentapi.OSPFState):
-// router id, areas, interfaces, neighbours and routes.
+// OspfInfo: OSPFv2's and OSPFv3's state as FRR has it (agentapi.OSPFState):
+// router ids, then neighbours, interfaces, areas and routes of both versions.
 import { computed } from 'vue'
 import SearchInput from '@/components/SearchInput.vue'
 import { useSearch, valuesText } from '@/utils/search'
 
 const props = defineProps({
-  // OSPFState, or null when the version is not running.
-  state: { type: Object, default: null },
-  version: { type: Number, required: true },
-  // The answer came (state null then means not running).
+  // OSPFState of each version, or null when that version is not running.
+  v2: { type: Object, default: null },
+  v3: { type: Object, default: null },
+  // The answer came (a state null then means not running).
   loaded: { type: Boolean, default: false },
   loading: { type: Boolean, default: false },
 })
 
-const name = computed(() => (props.version === 3 ? 'OSPFv3' : 'OSPFv2'))
-const areas = computed(() => props.state?.areas ?? [])
-const interfaces = computed(() => props.state?.interfaces ?? [])
-const neighbors = computed(() => props.state?.neighbors ?? [])
-const routes = computed(() => props.state?.routes ?? [])
+const versions = computed(() => [
+  { v: 2, name: 'OSPFv2', state: props.v2 },
+  { v: 3, name: 'OSPFv3', state: props.v3 },
+])
+// The rows of both versions in one list, each with its version's name.
+const rows = (k) =>
+  computed(() =>
+    versions.value.flatMap((x) => (x.state?.[k] ?? []).map((r) => ({ ...r, version: x.name }))),
+  )
 
-const ifSearch = useSearch(interfaces, (i) =>
-  valuesText(i.name, i.area, i.address, i.state, i.network_type, i.passive && 'passive'),
+const nbr = useSearch(rows('neighbors'), (n) =>
+  valuesText(n.version, n.router_id, n.address, n.interface, n.state, n.role, n.uptime),
 )
-const nbrSearch = useSearch(neighbors, (n) =>
-  valuesText(n.router_id, n.address, n.interface, n.state, n.role, n.uptime),
+const ifs = useSearch(rows('interfaces'), (i) =>
+  valuesText(i.version, i.name, i.area, i.address, i.state, i.network_type, i.passive && 'passive'),
 )
-const routeSearch = useSearch(routes, (r) =>
-  valuesText(r.prefix, r.type, r.area, r.next_hops, r.interfaces),
+const area = useSearch(rows('areas'), (a) => valuesText(a.version, a.id, a.type || 'normal'))
+const route = useSearch(rows('routes'), (r) =>
+  valuesText(r.version, r.prefix, r.type, r.area, r.next_hops, r.interfaces),
 )
-const areaSearch = useSearch(areas, (a) => valuesText(a.id, a.type || 'normal'))
+const truncated = computed(() => versions.value.filter((x) => x.state?.routes_truncated))
 
 const stateColor = (s) =>
   s === 'Full' ? 'success' : s === '2-Way' ? 'neutral' : s ? 'warning' : 'neutral'
 
 const areaColumns = [
+  { accessorKey: 'version', header: 'Version' },
   { accessorKey: 'id', header: 'Area' },
   { id: 'type', header: 'Type' },
   { accessorKey: 'interfaces', header: 'Interfaces' },
@@ -45,6 +51,7 @@ const areaColumns = [
   { accessorKey: 'lsas', header: 'LSAs' },
 ]
 const ifColumns = [
+  { accessorKey: 'version', header: 'Version' },
   { accessorKey: 'name', header: 'Interface' },
   { accessorKey: 'area', header: 'Area' },
   { accessorKey: 'address', header: 'Address' },
@@ -56,6 +63,7 @@ const ifColumns = [
   { id: 'dr', header: 'DR / BDR' },
 ]
 const nbrColumns = [
+  { accessorKey: 'version', header: 'Version' },
   { accessorKey: 'router_id', header: 'Neighbour' },
   { accessorKey: 'address', header: 'Address' },
   { accessorKey: 'interface', header: 'Interface' },
@@ -66,6 +74,7 @@ const nbrColumns = [
   { accessorKey: 'dead_time', header: 'Dead time' },
 ]
 const routeColumns = [
+  { accessorKey: 'version', header: 'Version' },
   { accessorKey: 'prefix', header: 'Prefix' },
   { accessorKey: 'type', header: 'Type' },
   { accessorKey: 'area', header: 'Area' },
@@ -76,30 +85,27 @@ const routeColumns = [
 
 <template>
   <div>
-    <UAlert
-      v-if="loaded && !state"
-      class="mb-2"
-      color="neutral"
-      variant="subtle"
-      :title="`${name} is not running in this virtual firewall.`"
-      :description="`Turn it on under ${name} config, then commit.`"
-    />
-    <template v-if="state">
+    <template v-for="x in versions" :key="x.v">
       <UAlert
-        v-if="state.error"
+        v-if="x.state?.error"
         class="mb-2"
         color="warning"
         variant="subtle"
-        :title="state.error"
+        :title="`${x.name}: ${x.state.error}`"
       />
-      <dl class="mb-4 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
-        <dt class="text-muted">Router id</dt>
-        <dd class="font-mono">{{ state.router_id }}</dd>
-      </dl>
+    </template>
+    <div v-if="loaded" class="mb-4 flex flex-wrap gap-x-6 gap-y-1 text-sm">
+      <span v-for="x in versions" :key="x.v">
+        <span class="text-muted">{{ x.name }} router id</span>
+        <span v-if="x.state" class="ms-2 font-mono">{{ x.state.router_id }}</span>
+        <span v-else class="ms-2 text-muted">not running</span>
+      </span>
+    </div>
 
-      <div class="mb-2 font-semibold">Neighbours</div>
-      <SearchInput v-model="nbrSearch.search.value" class="mb-2" />
-      <UTable :data="nbrSearch.filtered.value" :columns="nbrColumns" :loading="loading">
+    <div class="mb-2 text-base font-semibold">Neighbours</div>
+    <div class="mb-4">
+      <SearchInput v-model="nbr.search.value" class="mb-2" />
+      <UTable :data="nbr.filtered.value" :columns="nbrColumns" :loading="loading">
         <template #router_id-cell="{ row }">
           <span class="font-mono text-xs">{{ row.original.router_id }}</span>
         </template>
@@ -117,10 +123,12 @@ const routeColumns = [
           <div class="py-4 text-center text-muted">No neighbours.</div>
         </template>
       </UTable>
+    </div>
 
-      <div class="mt-6 mb-2 font-semibold">Interfaces</div>
-      <SearchInput v-model="ifSearch.search.value" class="mb-2" />
-      <UTable :data="ifSearch.filtered.value" :columns="ifColumns">
+    <div class="mt-6 mb-2 text-base font-semibold">Interfaces</div>
+    <div class="mb-4">
+      <SearchInput v-model="ifs.search.value" class="mb-2" />
+      <UTable :data="ifs.filtered.value" :columns="ifColumns">
         <template #name-cell="{ row }">
           {{ row.original.name }}
           <UBadge
@@ -147,10 +155,12 @@ const routeColumns = [
           <div class="py-4 text-center text-muted">No interfaces.</div>
         </template>
       </UTable>
+    </div>
 
-      <div class="mt-6 mb-2 font-semibold">Areas</div>
-      <SearchInput v-model="areaSearch.search.value" class="mb-2" />
-      <UTable :data="areaSearch.filtered.value" :columns="areaColumns">
+    <div class="mt-6 mb-2 text-base font-semibold">Areas</div>
+    <div class="mb-4">
+      <SearchInput v-model="area.search.value" class="mb-2" />
+      <UTable :data="area.filtered.value" :columns="areaColumns">
         <template #id-cell="{ row }">
           <span class="font-mono text-xs">{{ row.original.id }}</span>
         </template>
@@ -159,17 +169,20 @@ const routeColumns = [
           <div class="py-4 text-center text-muted">No areas.</div>
         </template>
       </UTable>
+    </div>
 
-      <div class="mt-6 mb-2 font-semibold">Routes</div>
+    <div class="mt-6 mb-2 text-base font-semibold">Routes</div>
+    <div class="mb-4">
       <UAlert
-        v-if="state.routes_truncated"
+        v-for="x in truncated"
+        :key="x.v"
         class="mb-2"
         color="neutral"
         variant="subtle"
-        title="Only the first 2000 routes are shown. The console's vtysh shows them all."
+        :title="`Only the first 2000 ${x.name} routes are shown. The console's vtysh shows them all.`"
       />
-      <SearchInput v-model="routeSearch.search.value" class="mb-2" />
-      <UTable :data="routeSearch.filtered.value" :columns="routeColumns">
+      <SearchInput v-model="route.search.value" class="mb-2" />
+      <UTable :data="route.filtered.value" :columns="routeColumns">
         <template #prefix-cell="{ row }">
           <span class="font-mono text-xs">{{ row.original.prefix }}</span>
         </template>
@@ -185,6 +198,6 @@ const routeColumns = [
           <div class="py-4 text-center text-muted">No routes.</div>
         </template>
       </UTable>
-    </template>
+    </div>
   </div>
 </template>
