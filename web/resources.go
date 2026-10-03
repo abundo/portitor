@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"reflect"
 	"slices"
 	"strings"
 	"unicode"
@@ -750,9 +751,8 @@ func prepareDnsZone(tx *gorm.DB, z, old *models.DnsZone) error {
 		z.DnsTemplateID = nil
 	}
 	if z.DnsTemplateID != nil {
-		var n int64
-		tx.Model(&models.DnsTemplate{}).Where("id = ?", *z.DnsTemplateID).Count(&n)
-		if n == 0 {
+		var t models.DnsTemplate
+		if tx.First(&t, *z.DnsTemplateID).Error != nil || !usableBy(t.InstanceID, t.Global, z.InstanceID) {
 			return bad("DNS template does not exist")
 		}
 	}
@@ -804,24 +804,109 @@ func dnsName(s string) string {
 	return strings.ToLower(strings.TrimSuffix(strings.TrimSpace(s), "."))
 }
 
-func prepareDnsSoaTemplate(_ *gorm.DB, s, _ *models.DnsSoaTemplate) error {
+// dnsOwner checks the instance and name of an SOA template, DNSSEC policy
+// or DNS template (in table) before it is saved: it stays in its instance,
+// only the default instance's may be global, and its name is unique among
+// those its instance uses (its own and the global ones; a global one's
+// among all, since every instance uses it). oldInstance is 0 on create.
+func dnsOwner(tx *gorm.DB, table string, id, instanceID, oldInstance uint, global bool, name string) error {
+	if oldInstance != 0 && instanceID != oldInstance {
+		return bad("can't move to another virtual firewall")
+	}
+	var in models.Instance
+	if instanceID == 0 || tx.First(&in, instanceID).Error != nil {
+		return bad("virtual firewall does not exist")
+	}
+	if global && !in.IsDefault {
+		return bad("only the default virtual firewall's can be global")
+	}
+	q := tx.Table(table).Where("name = ? AND id <> ?", name, id)
+	if !global {
+		q = q.Where("instance_id = ? OR global", instanceID)
+	}
+	var n int64
+	if err := q.Count(&n).Error; err != nil {
+		return err
+	}
+	if n > 0 {
+		return bad(fmt.Sprintf("name %q is in use", name))
+	}
+	return nil
+}
+
+// oldInstance is the instance a row was in before the change, 0 on create.
+func oldInstance[T models.DnsSoaTemplate | models.DnsDnssecPolicy | models.DnsTemplate](old *T) uint {
+	if old == nil {
+		return 0
+	}
+	return uint(reflect.ValueOf(old).Elem().FieldByName("InstanceID").Uint())
+}
+
+// usableBy tells whether an SOA template, DNSSEC policy or DNS template of
+// instance owner (global or not) may be used by a row of instance user.
+func usableBy(owner uint, global bool, user uint) bool {
+	return global || owner == user
+}
+
+// stillGlobal refuses to make a row local while rows of model elsewhere
+// (another instance, or a global row) refer to it through column.
+func stillGlobal(tx *gorm.DB, what string, model any, column string, id, instanceID uint, name func() []string) error {
+	where := "instance_id <> ?"
+	if _, ok := model.(*models.DnsTemplate); ok {
+		where = "(instance_id <> ? OR global)"
+	}
+	var n int64
+	if err := tx.Model(model).Where(column+" = ? AND "+where, id, instanceID).Count(&n).Error; err != nil {
+		return err
+	}
+	if n > 0 {
+		return bad(fmt.Sprintf("%s stays global: it is used by %s", what, strings.Join(name(), ", ")))
+	}
+	return nil
+}
+
+func prepareDnsSoaTemplate(tx *gorm.DB, s, old *models.DnsSoaTemplate) error {
 	s.Name = strings.TrimSpace(s.Name)
+	if err := dnsOwner(tx, "dns_soa_templates", s.ID, s.InstanceID, oldInstance(old), s.Global, s.Name); err != nil {
+		return err
+	}
+	if old != nil && old.Global && !s.Global {
+		if err := stillGlobal(tx, s.Name, &models.DnsTemplate{}, "soa_template_id", s.ID, s.InstanceID, templateNames(tx, "soa_template_id", s.ID)); err != nil {
+			return err
+		}
+	}
 	s.Mname = dnsName(s.Mname)
 	// Accept the mailbox written as an e-mail address.
 	s.Rname = strings.Replace(dnsName(s.Rname), "@", ".", 1)
 	return checkDNS(fwconfig.DNSServer{SOATemplates: []fwconfig.DNSSOATemplate{soaDoc(s)}})
 }
 
-func prepareDnsDnssecPolicy(_ *gorm.DB, k, _ *models.DnsDnssecPolicy) error {
+func prepareDnsDnssecPolicy(tx *gorm.DB, k, old *models.DnsDnssecPolicy) error {
 	for _, f := range []*string{&k.Name, &k.KskLifetime, &k.KskAlgorithm, &k.ZskLifetime, &k.ZskAlgorithm,
 		&k.PurgeKeys, &k.SignaturesValidity, &k.SignaturesValidityDnskey, &k.SignaturesRefresh} {
 		*f = strings.TrimSpace(*f)
 	}
+	if err := dnsOwner(tx, "dns_dnssec_policies", k.ID, k.InstanceID, oldInstance(old), k.Global, k.Name); err != nil {
+		return err
+	}
+	if old != nil && old.Global && !k.Global {
+		if err := stillGlobal(tx, k.Name, &models.DnsTemplate{}, "dnssec_policy_id", k.ID, k.InstanceID, templateNames(tx, "dnssec_policy_id", k.ID)); err != nil {
+			return err
+		}
+	}
 	return checkDNS(fwconfig.DNSServer{DNSSECPolicies: []fwconfig.DNSSECPolicy{dnssecDoc(k)}})
 }
 
-func prepareDnsTemplate(tx *gorm.DB, t, _ *models.DnsTemplate) error {
+func prepareDnsTemplate(tx *gorm.DB, t, old *models.DnsTemplate) error {
 	t.Name = strings.TrimSpace(t.Name)
+	if err := dnsOwner(tx, "dns_templates", t.ID, t.InstanceID, oldInstance(old), t.Global, t.Name); err != nil {
+		return err
+	}
+	if old != nil && old.Global && !t.Global {
+		if err := stillGlobal(tx, t.Name, &models.DnsZone{}, "dns_template_id", t.ID, t.InstanceID, zoneNames(tx, t.ID)); err != nil {
+			return err
+		}
+	}
 	ns := models.DnsNameserverList{}
 	for _, n := range t.Nameservers {
 		n = models.DnsNameserver{Name: dnsName(n.Name), Address: strings.TrimSpace(n.Address)}
@@ -849,15 +934,21 @@ func prepareDnsTemplate(tx *gorm.DB, t, _ *models.DnsTemplate) error {
 		t.DnssecPolicyID = nil
 	}
 	var soa models.DnsSoaTemplate
-	if tx.First(&soa, t.SoaTemplateID).Error != nil {
+	if tx.First(&soa, t.SoaTemplateID).Error != nil || !usableBy(soa.InstanceID, soa.Global, t.InstanceID) {
 		return bad("pick an SOA template")
+	}
+	if t.Global && !soa.Global {
+		return bad("a global DNS template needs a global SOA template")
 	}
 	dns := fwconfig.DNSServer{SOATemplates: []fwconfig.DNSSOATemplate{soaDoc(&soa)}}
 	zt := fwconfig.DNSZoneTemplate{Name: t.Name, SOA: soa.Name, DefaultTTL: t.DefaultTtl, Nameservers: t.Nameservers.Names()}
 	if t.DnssecPolicyID != nil {
 		var k models.DnsDnssecPolicy
-		if tx.First(&k, *t.DnssecPolicyID).Error != nil {
+		if tx.First(&k, *t.DnssecPolicyID).Error != nil || !usableBy(k.InstanceID, k.Global, t.InstanceID) {
 			return bad("DNSSEC policy does not exist")
+		}
+		if t.Global && !k.Global {
+			return bad("a global DNS template needs a global DNSSEC policy")
 		}
 		dns.DNSSECPolicies = []fwconfig.DNSSECPolicy{dnssecDoc(&k)}
 		zt.DNSSECPolicy = k.Name
@@ -903,12 +994,16 @@ func deleteDnsDnssecPolicy(tx *gorm.DB, k *models.DnsDnssecPolicy) error {
 }
 
 func deleteDnsTemplate(tx *gorm.DB, t *models.DnsTemplate) error {
-	return usedBy(tx, t.Name, &models.DnsZone{}, "dns_template_id", t.ID, func() []string {
+	return usedBy(tx, t.Name, &models.DnsZone{}, "dns_template_id", t.ID, zoneNames(tx, t.ID))
+}
+
+func zoneNames(tx *gorm.DB, templateID uint) func() []string {
+	return func() []string {
 		var names []string
-		tx.Model(&models.DnsZone{}).Where("dns_template_id = ?", t.ID).Order("name").Pluck("name", &names)
+		tx.Model(&models.DnsZone{}).Where("dns_template_id = ?", templateID).Order("name").Pluck("name", &names)
 		for i := range names {
 			names[i] = "zone " + names[i]
 		}
 		return names
-	})
+	}
 }

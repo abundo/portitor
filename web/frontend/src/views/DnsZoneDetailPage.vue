@@ -82,7 +82,7 @@ onMounted(async () => {
       dnsRecords.list({ zone_id: route.params.id }),
     ])
     loadRecords(r)
-    templates.value = t
+    templates.value = t.filter((x) => x.instance_id === z.instance_id || x.global)
     soas.value = s
     policies.value = p
     fill(z)
@@ -258,7 +258,7 @@ useUnsaved(() => !deleted.value && (!!dirty.value || recordsDirty.value))
                   >Save</UButton
                 >
                 <UButton
-                  to="/dns-templates"
+                  to="/dns?tab=templates"
                   color="neutral"
                   variant="ghost"
                   icon="i-lucide-file-cog"

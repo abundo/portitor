@@ -590,21 +590,28 @@ type DnsZone struct {
 	Forwarders StringList `json:"forwarders"`
 }
 
-// DnsSoaTemplate is shared by all instances. Minimum is the SOA minimum
+// DnsSoaTemplate belongs to an instance; Global (the default instance's
+// only) lends it to all, read-only. Minimum is the SOA minimum
 // (negative-caching TTL); the serial is dnsmgr2's.
 type DnsSoaTemplate struct {
 	Base
-	Name    string `json:"name"`
-	Mname   string `json:"mname"`
-	Rname   string `json:"rname"`
-	Refresh int64  `json:"refresh"`
-	Retry   int64  `json:"retry"`
-	Expire  int64  `json:"expire"`
-	Minimum int64  `json:"minimum"`
+	InstanceID uint   `json:"instance_id"`
+	Global     bool   `json:"global"`
+	Name       string `json:"name"`
+	Mname      string `json:"mname"`
+	Rname      string `json:"rname"`
+	Refresh    int64  `json:"refresh"`
+	Retry      int64  `json:"retry"`
+	Expire     int64  `json:"expire"`
+	Minimum    int64  `json:"minimum"`
 }
 
+// DnsDnssecPolicy belongs to an instance, and may be Global as a
+// DnsSoaTemplate.
 type DnsDnssecPolicy struct {
 	Base
+	InstanceID               uint   `json:"instance_id"`
+	Global                   bool   `json:"global"`
 	Name                     string `json:"name"`
 	KskLifetime              string `json:"ksk_lifetime"`
 	KskAlgorithm             string `json:"ksk_algorithm"`
@@ -617,9 +624,13 @@ type DnsDnssecPolicy struct {
 }
 
 // DnsTemplate is a zone template: SOA, default TTL, apex NS and an
-// optional DNSSEC policy. Shared by all instances.
+// optional DNSSEC policy, of its instance or global. It belongs to an
+// instance, and may be Global as a DnsSoaTemplate (then its SOA and policy
+// are global too).
 type DnsTemplate struct {
 	Base
+	InstanceID     uint              `json:"instance_id"`
+	Global         bool              `json:"global"`
 	Name           string            `json:"name"`
 	SoaTemplateID  uint              `json:"soa_template_id"`
 	DefaultTtl     int64             `json:"default_ttl"`

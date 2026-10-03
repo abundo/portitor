@@ -3,11 +3,12 @@
 
 <script setup>
 import TagsInput from '@/components/TagsInput.vue'
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useToast } from '@nuxt/ui/composables'
 import AddrInput from '@/components/AddrInput.vue'
 import CrudPage from '@/components/CrudPage.vue'
+import DnsTemplates from '@/components/DnsTemplates.vue'
 import NeedInstance from '@/components/NeedInstance.vue'
 import SearchInput from '@/components/SearchInput.vue'
 import { dnsTemplates, dnsZones, instances, interfaces } from '@/api'
@@ -28,10 +29,12 @@ const store = useInstanceStore()
 const readOnly = computed(() => !auth.canEdit)
 const templates = ref([])
 
+// The DNS templates a zone can use: the instance's own and the global ones.
 async function loadTemplates() {
-  templates.value = await dnsTemplates.list()
+  const id = store.currentId
+  templates.value = (await dnsTemplates.list()).filter((t) => t.instance_id === id || t.global)
 }
-onMounted(loadTemplates)
+watch(() => store.currentId, loadTemplates, { immediate: true })
 
 // The DNS server: the instance's dns_* fields, and per interface whether
 // BIND answers on it and whether its DHCP lease gives the upstream servers.
@@ -222,6 +225,7 @@ const zoneDefaults = () => ({
 
 const tabs = [
   { label: 'DNS zones', value: 'zones', slot: 'zones', icon: 'i-lucide-globe' },
+  { label: 'DNS templates', value: 'templates', slot: 'templates', icon: 'i-lucide-file-cog' },
   { label: 'DNS server', value: 'server', slot: 'server', icon: 'i-lucide-server' },
 ]
 // The tab is in the URL (?tab=server), so links can open one.
@@ -260,6 +264,10 @@ const tab = computed({
             </template>
           </CrudPage>
         </div>
+      </template>
+
+      <template #templates>
+        <DnsTemplates @changed="loadTemplates" />
       </template>
 
       <template #server>

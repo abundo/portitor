@@ -745,15 +745,15 @@ func TestIpv6PrefixChecks(t *testing.T) {
 func TestDnsTemplates(t *testing.T) {
 	env := newEnv(t)
 	inst := env.create("/api/instances", map[string]any{"name": "main"})
-	soa := env.create("/api/dns/soa-templates", map[string]any{"name": "std", "mname": "NS1.example.com.", "rname": "hostmaster@example.com",
+	soa := env.create("/api/dns/soa-templates", map[string]any{"instance_id": inst, "name": "std", "mname": "NS1.example.com.", "rname": "hostmaster@example.com",
 		"refresh": 86400, "retry": 7200, "expire": 3600000, "minimum": 3600})
 	var s models.DnsSoaTemplate
 	env.srv.db.First(&s, soa)
 	if s.Mname != "ns1.example.com" || s.Rname != "hostmaster.example.com" {
 		t.Errorf("soa not normalised: %+v", s)
 	}
-	policy := env.create("/api/dns/dnssec-policies", map[string]any{"name": "signed", "ksk_algorithm": "ed25519", "zsk_algorithm": "ed25519", "zsk_lifetime": "30d"})
-	tmpl := env.create("/api/dns/templates", map[string]any{"name": "std", "soa_template_id": soa, "default_ttl": 3600,
+	policy := env.create("/api/dns/dnssec-policies", map[string]any{"instance_id": inst, "name": "signed", "ksk_algorithm": "ed25519", "zsk_algorithm": "ed25519", "zsk_lifetime": "30d"})
+	tmpl := env.create("/api/dns/templates", map[string]any{"instance_id": inst, "name": "std", "soa_template_id": soa, "default_ttl": 3600,
 		"dnssec_policy_id": policy, "nameservers": []any{"ns1.example.com.", map[string]string{"name": " "},
 			map[string]string{"name": "NS2.example.com", "address": " 192.0.2.2"}, map[string]string{"name": "ns2.example.com.", "address": "2001:DB8::2"},
 			map[string]string{"name": "ns2.example.com", "address": "192.0.2.3"}, map[string]string{"name": "ns2.example.com", "address": "2001:db8::3"}}})
@@ -764,9 +764,9 @@ func TestDnsTemplates(t *testing.T) {
 		t.Errorf("nameservers not normalised: %v", tm.Nameservers)
 	}
 	for path, body := range map[string]map[string]any{
-		"/api/dns/soa-templates":   {"name": "bad", "mname": "ns1.example.com", "rname": "x.example.com", "refresh": 1, "retry": 0, "expire": 1},
-		"/api/dns/dnssec-policies": {"name": "default", "ksk_algorithm": "ed25519", "zsk_algorithm": "ed25519"},
-		"/api/dns/templates":       {"name": "nons", "soa_template_id": soa, "default_ttl": 3600, "nameservers": []string{}},
+		"/api/dns/soa-templates":   {"instance_id": inst, "name": "bad", "mname": "ns1.example.com", "rname": "x.example.com", "refresh": 1, "retry": 0, "expire": 1},
+		"/api/dns/dnssec-policies": {"instance_id": inst, "name": "default", "ksk_algorithm": "ed25519", "zsk_algorithm": "ed25519"},
+		"/api/dns/templates":       {"instance_id": inst, "name": "nons", "soa_template_id": soa, "default_ttl": 3600, "nameservers": []string{}},
 		"/api/dns/zones":           {"instance_id": inst, "name": "example.com", "dns_template_id": 999},
 	} {
 		if rec := env.do("POST", path, body); rec.Code != http.StatusBadRequest {
@@ -778,12 +778,12 @@ func TestDnsTemplates(t *testing.T) {
 		{"name": "ns1.example.com", "address": "192.0.2.1/32"},
 		{"name": "", "address": "192.0.2.1"},
 	} {
-		body := map[string]any{"name": "badns", "soa_template_id": soa, "default_ttl": 3600, "nameservers": []any{ns}}
+		body := map[string]any{"instance_id": inst, "name": "badns", "soa_template_id": soa, "default_ttl": 3600, "nameservers": []any{ns}}
 		if rec := env.do("POST", "/api/dns/templates", body); rec.Code != http.StatusBadRequest {
 			t.Errorf("POST nameserver %v: %d %s", ns, rec.Code, rec.Body)
 		}
 	}
-	body := map[string]any{"name": "dup", "soa_template_id": soa, "default_ttl": 3600, "nameservers": []string{"ns1.example.com", "NS1.example.com."}}
+	body := map[string]any{"instance_id": inst, "name": "dup", "soa_template_id": soa, "default_ttl": 3600, "nameservers": []string{"ns1.example.com", "NS1.example.com."}}
 	if rec := env.do("POST", "/api/dns/templates", body); rec.Code != http.StatusBadRequest {
 		t.Errorf("POST repeated nameserver: %d %s", rec.Code, rec.Body)
 	}
@@ -1112,5 +1112,66 @@ func TestInterfaceAddresses(t *testing.T) {
 	pfx := env.create("/api/ipam/prefixes", map[string]any{"instance_id": inst, "prefix": "192.168.1.0/24"})
 	if got := env.do("GET", "/api/ipam/prefixes/"+itoa(pfx)+"/next-free", nil).Body.String(); !strings.Contains(got, `"192.168.1.2"`) {
 		t.Errorf("next free: %s", got)
+	}
+}
+
+// DNS templates belong to a virtual firewall; the default one's may be
+// global, used read-only by the others.
+func TestDnsTemplatesGlobal(t *testing.T) {
+	env := newEnv(t)
+	if err := env.srv.ensureDefaultInstance(); err != nil {
+		t.Fatal(err)
+	}
+	var main models.Instance
+	env.srv.db.Where("is_default = ?", true).First(&main)
+	other := env.create("/api/instances", map[string]any{"name": "other"})
+	soaBody := func(inst uint, name string, global bool) map[string]any {
+		return map[string]any{"instance_id": inst, "global": global, "name": name, "mname": "ns1.example.com", "rname": "hostmaster.example.com",
+			"refresh": 86400, "retry": 7200, "expire": 3600000, "minimum": 3600}
+	}
+	local := env.create("/api/dns/soa-templates", soaBody(main.ID, "local", false))
+	global := env.create("/api/dns/soa-templates", soaBody(main.ID, "global", true))
+	tmplBody := func(inst uint, name string, soa uint, global bool) map[string]any {
+		return map[string]any{"instance_id": inst, "global": global, "name": name, "soa_template_id": soa, "default_ttl": 3600,
+			"nameservers": []string{"ns1.example.com"}}
+	}
+	for what, body := range map[string]map[string]any{
+		"global outside the default VF":       soaBody(other, "x", true),
+		"global name taken":                   soaBody(other, "global", false),
+		"global template with a local SOA":    tmplBody(main.ID, "t", local, true),
+		"another VF's SOA":                    tmplBody(other, "t", local, false),
+		"global template name used elsewhere": soaBody(main.ID, "local", true),
+	} {
+		path := "/api/dns/soa-templates"
+		if _, ok := body["soa_template_id"]; ok {
+			path = "/api/dns/templates"
+		}
+		if rec := env.do("POST", path, body); rec.Code != http.StatusBadRequest {
+			t.Errorf("%s: %d %s", what, rec.Code, rec.Body)
+		}
+	}
+	// The same name in two VFs is fine when neither is global.
+	env.create("/api/dns/soa-templates", soaBody(other, "local", false))
+	gt := env.create("/api/dns/templates", tmplBody(main.ID, "gt", global, true))
+	env.create("/api/dns/templates", tmplBody(other, "ot", global, false))
+	env.create("/api/dns/zones", map[string]any{"instance_id": other, "name": "example.com", "dns_template_id": gt})
+
+	if rec := env.do("PUT", fmt.Sprintf("/api/dns/templates/%d", gt), map[string]any{"global": false}); rec.Code != http.StatusBadRequest {
+		t.Errorf("template used by another VF made local: %d %s", rec.Code, rec.Body)
+	}
+	if rec := env.do("PUT", fmt.Sprintf("/api/dns/soa-templates/%d", global), map[string]any{"global": false}); rec.Code != http.StatusBadRequest {
+		t.Errorf("SOA used by a global template made local: %d %s", rec.Code, rec.Body)
+	}
+	if rec := env.do("PUT", fmt.Sprintf("/api/dns/soa-templates/%d", local), map[string]any{"instance_id": other}); rec.Code != http.StatusBadRequest {
+		t.Errorf("SOA moved to another VF: %d %s", rec.Code, rec.Body)
+	}
+	// Deleting a VF deletes its zones and templates.
+	if rec := env.do("DELETE", fmt.Sprintf("/api/instances/%d", other), nil); rec.Code != http.StatusNoContent {
+		t.Fatalf("delete VF: %d %s", rec.Code, rec.Body)
+	}
+	var n int64
+	env.srv.db.Model(&models.DnsSoaTemplate{}).Where("instance_id = ?", other).Count(&n)
+	if n != 0 {
+		t.Errorf("%d SOA templates left of the deleted VF", n)
 	}
 }

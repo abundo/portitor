@@ -78,6 +78,9 @@ const props = defineProps({
   searchText: { type: Function, default: null },
   // rowFilter(row) leaves out the rows the page doesn't show.
   rowFilter: { type: Function, default: null },
+  // rowReadOnly(row): the row is shown, never changed (a global DNS
+  // template in another virtual firewall); Edit opens it read-only.
+  rowReadOnly: { type: Function, default: null },
   // wide: a wider form, for one with a table of entries (EntriesEditor).
   wide: { type: Boolean, default: false },
 })
@@ -208,6 +211,9 @@ function openView(row) {
   openEdit(row)
   viewing.value = true
 }
+
+const viewOnly = (row) => readOnly.value || !!props.rowReadOnly?.(row)
+const openRow = (row) => (props.rowReadOnly?.(row) ? openView(row) : openEdit(row))
 
 async function save() {
   saving.value = true
@@ -421,11 +427,11 @@ defineExpose({ reload: load, openEdit, openView, openCreate })
             <UButton
               size="sm"
               variant="outline"
-              :icon="readOnly ? 'i-lucide-eye' : 'i-lucide-pencil'"
-              :aria-label="readOnly ? 'View' : 'Edit'"
-              :title="readOnly ? 'View' : 'Edit'"
+              :icon="viewOnly(row.original) ? 'i-lucide-eye' : 'i-lucide-pencil'"
+              :aria-label="viewOnly(row.original) ? 'View' : 'Edit'"
+              :title="viewOnly(row.original) ? 'View' : 'Edit'"
               :to="editTo?.(row.original)"
-              @click="editTo?.(row.original) || openEdit(row.original)"
+              @click="editTo?.(row.original) || openRow(row.original)"
             />
             <slot name="row-actions" :row="row.original" />
           </div>

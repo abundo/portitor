@@ -141,6 +141,7 @@ func TestDnsNameserversMigration(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, q := range []string{
+		`INSERT INTO instances (id, name, is_default) VALUES (1, 'main', true)`,
 		`INSERT INTO dns_soa_templates (id, name, mname, rname) VALUES (1, 'std', 'ns1.example.com', 'hostmaster.example.com')`,
 		`INSERT INTO dns_templates (id, name, soa_template_id, nameservers) VALUES
 			(1, 'two', 1, '["ns1.example.com","ns2.example.com"]'), (2, 'none', 1, '[]')`,

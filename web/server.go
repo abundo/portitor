@@ -148,9 +148,9 @@ func (s *Server) Echo() *echo.Echo {
 	(&resource[models.IpamAddress, *models.IpamAddress]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "address", prepare: prepareIpamAddress}).register(s, g, "/ipam/addresses")
 	(&resource[models.DnsZone, *models.DnsZone]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "name", prepare: prepareDnsZone}).register(s, g, "/dns/zones")
 	(&resource[models.DnsRecord, *models.DnsRecord]{db: s.db, scope: byParent("ZoneID", "zone_id", "dns_zones"), tenantWrites: tenantAll, filters: []string{"zone_id"}, order: "rank, id", prepare: prepareDnsRecord}).register(s, g, "/dns/records")
-	(&resource[models.DnsSoaTemplate, *models.DnsSoaTemplate]{db: s.db, order: "name", prepare: prepareDnsSoaTemplate, beforeDelete: deleteDnsSoaTemplate}).register(s, g, "/dns/soa-templates")
-	(&resource[models.DnsDnssecPolicy, *models.DnsDnssecPolicy]{db: s.db, order: "name", prepare: prepareDnsDnssecPolicy, beforeDelete: deleteDnsDnssecPolicy}).register(s, g, "/dns/dnssec-policies")
-	(&resource[models.DnsTemplate, *models.DnsTemplate]{db: s.db, order: "name", prepare: prepareDnsTemplate, beforeDelete: deleteDnsTemplate}).register(s, g, "/dns/templates")
+	(&resource[models.DnsSoaTemplate, *models.DnsSoaTemplate]{db: s.db, scope: globalScope, tenantWrites: tenantAll, order: "name", prepare: prepareDnsSoaTemplate, beforeDelete: deleteDnsSoaTemplate}).register(s, g, "/dns/soa-templates")
+	(&resource[models.DnsDnssecPolicy, *models.DnsDnssecPolicy]{db: s.db, scope: globalScope, tenantWrites: tenantAll, order: "name", prepare: prepareDnsDnssecPolicy, beforeDelete: deleteDnsDnssecPolicy}).register(s, g, "/dns/dnssec-policies")
+	(&resource[models.DnsTemplate, *models.DnsTemplate]{db: s.db, scope: globalScope, tenantWrites: tenantAll, order: "name", prepare: prepareDnsTemplate, beforeDelete: deleteDnsTemplate}).register(s, g, "/dns/templates")
 	(&resource[models.DyndnsClient, *models.DyndnsClient]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "name", prepare: prepareDyndnsClient, present: presentDyndnsClient, beforeDelete: deleteDyndnsClient}).register(s, g, "/dyndns/clients")
 	(&resource[models.Certificate, *models.Certificate]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "name", prepare: prepareCertificate}).register(s, g, "/certificates")
 	(&resource[models.DyndnsRecord, *models.DyndnsRecord]{db: s.db, scope: byParent("ClientID", "client_id", "dyndns_clients"), tenantWrites: tenantAll, filters: []string{"client_id"}, order: "id", prepare: prepareDyndnsRecord}).register(s, g, "/dyndns/records")
@@ -303,9 +303,16 @@ func tenantInstanceCheck(in, old *models.Instance) error {
 }
 
 // deleteInstance refuses to delete the default instance: it is the host.
-func deleteInstance(_ *gorm.DB, in *models.Instance) error {
+func deleteInstance(tx *gorm.DB, in *models.Instance) error {
 	if in.IsDefault {
 		return bad("the default virtual firewall is the host itself and can't be deleted")
+	}
+	// The cascade would delete the DNS templates in any order, and those
+	// in use refuse it: zones first, then templates, then what they use.
+	for _, m := range []any{&models.DnsZone{}, &models.DnsTemplate{}, &models.DnsSoaTemplate{}, &models.DnsDnssecPolicy{}} {
+		if err := tx.Where("instance_id = ?", in.ID).Delete(m).Error; err != nil {
+			return err
+		}
 	}
 	return nil
 }

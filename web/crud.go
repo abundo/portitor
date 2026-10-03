@@ -120,7 +120,7 @@ func (r *resource[T, PT]) load(c *echo.Context) (PT, error) {
 		}
 		return nil, err
 	}
-	if a := currentAccess(c); r.scope != nil && !a.readsAll() {
+	if a := currentAccess(c); r.scope != nil && !a.readsAll() && (r.scope.shared == nil || !r.scope.shared(item)) {
 		ids, err := r.scope.of(r.db, item)
 		if err != nil {
 			return nil, err

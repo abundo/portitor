@@ -182,6 +182,9 @@ type scope struct {
 	of func(tx *gorm.DB, item any) ([]uint, error)
 	// list narrows a list to rows of the given instances.
 	list func(q *gorm.DB, ids []uint) *gorm.DB
+	// shared, if set, tells a row everyone reads (but only writers of its
+	// instances change).
+	shared func(item any) bool
 }
 
 func uintField(item any, name string) uint {
@@ -223,6 +226,16 @@ var linkScope = &scope{
 	list: func(q *gorm.DB, ids []uint) *gorm.DB {
 		return q.Where("instance_a_id IN ? OR instance_b_id IN ?", ids, ids)
 	},
+}
+
+// globalScope: the row has the instance id in instance_id, and everyone
+// reads it if global (a DNS template of the default instance).
+var globalScope = &scope{
+	of: func(_ *gorm.DB, item any) ([]uint, error) { return []uint{uintField(item, "InstanceID")}, nil },
+	list: func(q *gorm.DB, ids []uint) *gorm.DB {
+		return q.Where("instance_id IN ? OR global", ids)
+	},
+	shared: func(item any) bool { return reflect.ValueOf(item).Elem().FieldByName("Global").Bool() },
 }
 
 // instanceScope: an instance is its own.

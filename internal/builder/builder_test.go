@@ -67,17 +67,17 @@ func TestBuildHome(t *testing.T) {
 	mustCreate(t, db, &models.IpamAddress{InstanceID: main.ID, Address: "192.168.1.1", DnsName: "gw.home.arpa"})
 	mustCreate(t, db, &models.IpamAddress{InstanceID: main.ID, Address: "192.168.1.10", DnsName: "nas.home.arpa", Mac: "02:00:00:00:00:10"})
 
-	soa := models.DnsSoaTemplate{Name: "home", Mname: "gw.home.arpa", Rname: "hostmaster.home.arpa", Refresh: 86400, Retry: 7200, Expire: 3600000, Minimum: 3600}
+	soa := models.DnsSoaTemplate{InstanceID: main.ID, Name: "home", Mname: "gw.home.arpa", Rname: "hostmaster.home.arpa", Refresh: 86400, Retry: 7200, Expire: 3600000, Minimum: 3600}
 	mustCreate(t, db, &soa)
-	policy := models.DnsDnssecPolicy{Name: "signed", KskAlgorithm: "ed25519", ZskAlgorithm: "ed25519"}
+	policy := models.DnsDnssecPolicy{InstanceID: main.ID, Name: "signed", KskAlgorithm: "ed25519", ZskAlgorithm: "ed25519"}
 	mustCreate(t, db, &policy)
-	tmpl := models.DnsTemplate{Name: "home", SoaTemplateID: soa.ID, DefaultTtl: 600, DnssecPolicyID: &policy.ID,
+	tmpl := models.DnsTemplate{InstanceID: main.ID, Name: "home", SoaTemplateID: soa.ID, DefaultTtl: 600, DnssecPolicyID: &policy.ID,
 		// gw's A record comes from IPAM already; ns.example.com is in no zone here.
 		Nameservers: models.DnsNameserverList{{Name: "gw.home.arpa", Address: "192.168.1.1"}, {Name: "gw.home.arpa", Address: "fd00::1"},
 			{Name: "ns1.home.arpa", Address: "192.168.1.2"}, {Name: "ns.example.com", Address: "192.0.2.53"}}}
 	mustCreate(t, db, &tmpl)
 	// Not used by any zone: stays out of the document.
-	mustCreate(t, db, &models.DnsTemplate{Name: "unused", SoaTemplateID: soa.ID, DefaultTtl: 600, Nameservers: models.DnsNameserverList{{Name: "ns.example.com"}}})
+	mustCreate(t, db, &models.DnsTemplate{InstanceID: main.ID, Name: "unused", SoaTemplateID: soa.ID, DefaultTtl: 600, Nameservers: models.DnsNameserverList{{Name: "ns.example.com"}}})
 
 	zone := models.DnsZone{InstanceID: main.ID, Name: "home.arpa", Type: "forward", DnsTemplateID: &tmpl.ID}
 	mustCreate(t, db, &zone)

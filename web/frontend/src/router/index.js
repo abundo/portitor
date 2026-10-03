@@ -40,7 +40,7 @@ const router = createRouter({
         },
         { path: 'dns', component: () => import('@/views/DnsPage.vue') },
         { path: 'dns/zones/:id', component: () => import('@/views/DnsZoneDetailPage.vue') },
-        { path: 'dns-templates', component: () => import('@/views/DnsTemplatesPage.vue') },
+        { path: 'dns-templates', redirect: { path: '/dns', query: { tab: 'templates' } } },
         { path: 'dhcp', component: () => import('@/views/DhcpPage.vue') },
         { path: 'wireguard', component: () => import('@/views/WireguardPage.vue') },
         { path: 'dns-update', component: () => import('@/views/DnsUpdatePage.vue') },

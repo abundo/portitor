@@ -56,7 +56,7 @@ After an upgrade, run `migrate` before `start`. `install.py` does both.
 ## The screen
 
 - **Virtual firewall selector** (top bar). Most pages show one virtual firewall, the one selected here.
-  DNS templates, users and settings are shared by all virtual firewalls.
+  Users and settings are shared by all virtual firewalls.
 - **Agent badge** (top bar). The generation the agent has applied; yellow if its last
   apply had an error, red if portitor-web cannot reach it.
 - **Log panel** (terminal icon) opens a panel at the bottom with three tabs:
@@ -97,7 +97,6 @@ After an upgrade, run `migrate` before `start`. `install.py` does both.
 | | Deploy | Check, preview, apply, history. |
 | Globals | Virtual firewalls | Virtual routers. `main` is the host; others are network namespaces. |
 | | Links | veth pairs between virtual firewalls. |
-| | DNS templates | SOA templates, DNSSEC policies and zone templates, shared by all virtual firewalls. |
 | Network | Interfaces | Physical, VLAN, bridge, loopback (a dummy interface that stays up, for a router id or a BGP update source) and WireGuard interfaces with their IP addresses (IPv4 and IPv6, as many as needed, each with its prefix length: `192.168.1.1/24`); WAN DHCP client, and a DHCPv6 client that can also ask for a delegated prefix (prefix delegation). An IPv6 address in another interface's delegated prefix is written relative to it, so a new prefix from the ISP renumbers it: with `2001:db8:1000::/48` delegated to wan0, `<wan0>:2000::1/64` is `2001:db8:1000:2000::1/64` (subnet `2000`, at most 4 hex digits, goes between the delegated prefix and /64; host `::1`). Its /64 is announced with router advertisements (SLAAC) automatically; DHCPv6 service on a delegated prefix is not supported. Until the prefix is delegated, such addresses are left out. A *Label* such as WAN is shown before the name wherever an interface is picked: WAN (ens18). The *Virtual firewall* field moves one, with its addresses, to another virtual firewall. *LLDP* (physical, VLAN and bridge interfaces, off by default) announces the firewall with LLDP on the interface and lists the neighbours it hears there under *Neighbours*. |
 | | Routing → Static routes | Two tabs. *Routes*: static routes. *Routing info*: the virtual firewall's IPv4 and IPv6 routing tables on the firewall. |
 | | Routing → Routing objects | Prefix lists (IPv4 and IPv6), AS path lists, community lists and route maps, which BGP and OSPF use by name. See [BGP](bgp.md). |
@@ -110,7 +109,7 @@ After an upgrade, run `migrate` before `start`. `install.py` does both.
 | | Services | What the rules' Service column matches: TCP, UDP or SCTP port ranges (with source ports if wanted), an ICMP or ICMPv6 type and code, or an IP protocol number. Your own next to predefined ones such as `ssh`, `dns`, `ping` or `gre`. Also lists the port names (`https`) that NAT port fields accept. |
 | | NAT & port forwards | Masquerade, SNAT and DNAT; a DNAT with Hairpin also works from the LAN to the public address. |
 | | Connections | The virtual firewall's connection table (conntrack), streamed from the firewall, with each connection's start time. |
-| Services | DNS | Two tabs. *DNS zones*: the zones and records the virtual firewall serves; their templates are under *Globals → DNS templates*. *DNS server*: the virtual firewall's DNS server (BIND), which always runs; its upstream (forwarders, the root servers, or the DNS servers from the DHCP lease on one interface, configured as BIND's forwarders; forwarding can fall back to the root servers); the interfaces it answers on; query logging, with filters, to the log panel's *DNS queries*. |
+| Services | DNS | Three tabs. *DNS zones*: the zones and records the virtual firewall serves. *DNS templates*: the virtual firewall's SOA templates, DNSSEC policies and zone templates. One of the default virtual firewall (`main`) can be made *Global*: it is then shown, read-only, and usable in all virtual firewalls; a global DNS template needs a global SOA template and DNSSEC policy. A name is unique in a virtual firewall, and a global one in all. *DNS server*: the virtual firewall's DNS server (BIND), which always runs; its upstream (forwarders, the root servers, or the DNS servers from the DHCP lease on one interface, configured as BIND's forwarders; forwarding can fall back to the root servers); the interfaces it answers on; query logging, with filters, to the log panel's *DNS queries*. |
 | | DHCP | Two tabs. *Leases*: active leases, and the leases of the firewall's own DHCP clients. *DHCP server*: the virtual firewall's DHCP server (Kea) on or off, its domain name and lease time, and the interfaces with the prefixes of their addresses, each with a DHCP switch. Badges on an interface: *DHCP Client* (it gets its IPv4 address by DHCP), *SLAAC-C* (it takes an IPv6 address from router advertisements), *RA* (it sends router advertisements). Edit an interface for its range, gateway and DNS servers, and on IPv6 prefixes router advertisements and SLAAC. Several prefixes with DHCP on one interface form a Kea shared network: clients get addresses from all of them. |
 | | WireGuard | Tunnels, road-warrior and [site-to-site](#site-to-site-wireguard) peers; generates client and site configs, and imports a wg-quick config file. |
 | | DNS update | Keeps DNS records in step with an interface's addresses (the WAN, say): on your own nameserver (by IP address or DNS name, looked up in the virtual firewall) by RFC 2136 dynamic update (TSIG signed), sent from the virtual firewall, or at a DNS hosting provider through its API, called from the firewall host (Bunny DNS, Cloudflare, deSEC, easyDNS, Gandi, GleSYS, GoDaddy, Hetzner DNS, Loopia, Namecheap, NameSilo, netcup, Njalla, OVHcloud, Porkbun). A provider's tokens and keys are stored on the server and never shown again; leave one empty to keep it. |
@@ -167,8 +166,10 @@ name, nor which virtual firewall is the default), captures its packets (*Tools �
 capture*) and **deploys** it. An
 **virtual firewall viewer** reads it. Neither sees the other virtual firewalls, their status, leases,
 counters or logged packets, nor the agent's log, Settings, Updates, Users or Roles.
-Named hosts and prefixes, services, IP lists, DNS templates, tasks and links are
-shared: everyone reads and uses them, a global admin changes them.
+Named hosts and prefixes, services, IP lists, tasks and links are
+shared: everyone reads and uses them, a global admin changes them. DNS templates belong to
+a virtual firewall, and its admin changes them; the default virtual firewall's global ones are
+read-only in the others.
 
 A virtual firewall admin's deploy takes their virtual firewalls from the database and everything
 else as the firewall runs it, so another tenant's unfinished changes stay where they

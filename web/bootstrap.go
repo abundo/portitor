@@ -402,15 +402,16 @@ const bootstrapZone = "home.arpa"
 // bootstrapDNS creates a starting point for DNS where there is none: the
 // SOA template soa-1, the DNS template dns-1 with the firewall as
 // ns1.home.arpa (at the LAN address, if static), and the zone home.arpa,
-// with the firewall as fw.home.arpa (bootstrapFwRecord).
+// with the firewall as fw.home.arpa (bootstrapFwRecord). The templates
+// are the instance's, global.
 func bootstrapDNS(tx *gorm.DB, instanceID uint, o BootstrapOptions) error {
 	var n int64
 	var soa models.DnsSoaTemplate
-	if err := tx.Order("id").Limit(1).Find(&soa).Error; err != nil {
+	if err := tx.Where("instance_id = ?", instanceID).Order("id").Limit(1).Find(&soa).Error; err != nil {
 		return err
 	}
 	if soa.ID == 0 {
-		soa = models.DnsSoaTemplate{Name: "soa-1", Mname: "ns1.home.arpa", Rname: "unknown@home.arpa",
+		soa = models.DnsSoaTemplate{InstanceID: instanceID, Global: true, Name: "soa-1", Mname: "ns1.home.arpa", Rname: "unknown@home.arpa",
 			Refresh: 86400, Retry: 7200, Expire: 3600000, Minimum: 3600}
 		if err := prepareDnsSoaTemplate(tx, &soa, nil); err != nil {
 			return err
@@ -421,7 +422,7 @@ func bootstrapDNS(tx *gorm.DB, instanceID uint, o BootstrapOptions) error {
 		}
 	}
 	var tmpl models.DnsTemplate
-	if err := tx.Order("id").Limit(1).Find(&tmpl).Error; err != nil {
+	if err := tx.Where("instance_id = ?", instanceID).Order("id").Limit(1).Find(&tmpl).Error; err != nil {
 		return err
 	}
 	if tmpl.ID == 0 {
@@ -429,7 +430,7 @@ func bootstrapDNS(tx *gorm.DB, instanceID uint, o BootstrapOptions) error {
 		if o.Address.IsValid() {
 			ns.Address = o.Address.Addr().String()
 		}
-		tmpl = models.DnsTemplate{Name: "dns-1", SoaTemplateID: soa.ID, DefaultTtl: 3600, Nameservers: models.DnsNameserverList{ns}}
+		tmpl = models.DnsTemplate{InstanceID: instanceID, Global: true, Name: "dns-1", SoaTemplateID: soa.ID, DefaultTtl: 3600, Nameservers: models.DnsNameserverList{ns}}
 		if err := prepareDnsTemplate(tx, &tmpl, nil); err != nil {
 			return err
 		}

@@ -362,9 +362,14 @@ Committing directly to `main` is fine; no feature branch is needed.
   each subnet's `interface`; dnsmgr2 writes neither. Subnet ids follow the prefixes
   sorted as text, as dnsmgr2 numbered them. Kea refuses a config that names an
   interface that is missing.
-- DNS templates (SOA templates, DNSSEC policies, zone templates) are global in the
-  database; `builder.Build` copies into each instance only the ones its zones use,
-  and zones refer to them by name. A zone without a template gets the built-in
+- DNS templates (SOA templates, DNSSEC policies, zone templates) belong to an
+  instance (`instance_id`); the default instance's may be `global`, read by all and
+  used by any instance's zones and templates, changed only by its own admins
+  (`globalScope` in `web/access.go`, checks in `dnsOwner`/`usableBy`,
+  `web/resources.go`). A global template needs a global SOA and policy, one in use
+  elsewhere stays global, and names are unique per instance and a global one's
+  across all, since the builder copies into each instance only the ones its zones
+  use, and zones refer to them by name. A zone without a template gets the built-in
   localhost SOA/NS. dnsmgr2 writes only `dnssec-policy "<name>"`; the policy body
   is rendered into `named.conf`.
 - Debian/Ubuntu confine named, Kea, kea-lfc (and `wg`) with AppArmor: a path outside the
