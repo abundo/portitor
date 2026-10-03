@@ -372,6 +372,12 @@ func bootstrapDHCP(tx *gorm.DB, instanceID uint, o BootstrapOptions) error {
 	if err := tx.Model(&models.Instance{}).Where("id = ?", instanceID).Update("dhcp_enabled", true).Error; err != nil {
 		return err
 	}
+	// Clients get the domain of the zone that holds fw (bootstrapDNS), so
+	// https://fw reaches the GUI; a domain the user set stays.
+	if err := tx.Model(&models.Instance{}).Where("id = ? AND dhcp_domain_name = ''", instanceID).
+		Update("dhcp_domain_name", bootstrapZone).Error; err != nil {
+		return err
+	}
 	var p models.IpamPrefix
 	if err := tx.Where("instance_id = ? AND prefix = ?", instanceID, o.Address.Masked().String()).First(&p).Error; err != nil {
 		return err
@@ -390,9 +396,13 @@ func bootstrapDHCP(tx *gorm.DB, instanceID uint, o BootstrapOptions) error {
 	return tx.Save(&p).Error
 }
 
+// bootstrapZone is the zone bootstrap creates, and the DHCP domain.
+const bootstrapZone = "home.arpa"
+
 // bootstrapDNS creates a starting point for DNS where there is none: the
 // SOA template soa-1, the DNS template dns-1 with the firewall as
-// ns1.home.arpa (at the LAN address, if static), and the zone home.arpa.
+// ns1.home.arpa (at the LAN address, if static), and the zone home.arpa,
+// with the firewall as fw.home.arpa (bootstrapFwRecord).
 func bootstrapDNS(tx *gorm.DB, instanceID uint, o BootstrapOptions) error {
 	var n int64
 	var soa models.DnsSoaTemplate
@@ -429,14 +439,48 @@ func bootstrapDNS(tx *gorm.DB, instanceID uint, o BootstrapOptions) error {
 	if err := tx.Model(&models.DnsZone{}).Where("instance_id = ?", instanceID).Count(&n).Error; err != nil {
 		return err
 	}
-	if n > 0 {
+	if n == 0 {
+		z := models.DnsZone{InstanceID: instanceID, Name: bootstrapZone, Type: fwconfig.ZoneForward, DnsTemplateID: &tmpl.ID}
+		if err := prepareDnsZone(tx, &z, nil); err != nil {
+			return err
+		}
+		if err := tx.Create(&z).Error; err != nil {
+			return err
+		}
+	}
+	return bootstrapFwRecord(tx, instanceID, o)
+}
+
+// bootstrapFwRecord points fw.home.arpa at the static IPv4 LAN address,
+// if the instance has the zone home.arpa: it creates the A record, or
+// moves it to the new address on reconfigure.
+func bootstrapFwRecord(tx *gorm.DB, instanceID uint, o BootstrapOptions) error {
+	if !o.Address.IsValid() || !o.Address.Addr().Is4() {
 		return nil
 	}
-	z := models.DnsZone{InstanceID: instanceID, Name: "home.arpa", Type: fwconfig.ZoneForward, DnsTemplateID: &tmpl.ID}
-	if err := prepareDnsZone(tx, &z, nil); err != nil {
+	var z models.DnsZone
+	if err := tx.Where("instance_id = ? AND name = ? AND type = ?", instanceID, bootstrapZone, fwconfig.ZoneForward).Limit(1).Find(&z).Error; err != nil || z.ID == 0 {
 		return err
 	}
-	return tx.Create(&z).Error
+	var r models.DnsRecord
+	if err := tx.Where("zone_id = ? AND name = ? AND type = ?", z.ID, "fw", "A").Order("id").Limit(1).Find(&r).Error; err != nil {
+		return err
+	}
+	if r.ID != 0 && !o.Reconfigure {
+		return nil
+	}
+	if r.ID == 0 {
+		var rank int
+		if err := tx.Model(&models.DnsRecord{}).Where("zone_id = ?", z.ID).Select("COALESCE(MAX(rank), 0)").Scan(&rank).Error; err != nil {
+			return err
+		}
+		r = models.DnsRecord{ZoneID: z.ID, Rank: rank + 1, Name: "fw", Type: "A", Description: "the firewall (the GUI)"}
+	}
+	r.Value = o.Address.Addr().String()
+	if err := prepareDnsRecord(tx, &r, nil); err != nil {
+		return err
+	}
+	return tx.Save(&r).Error
 }
 
 // bootstrapMgmtService returns the name of the management service: SSH and
@@ -509,7 +553,7 @@ func reconfigureDefaultRoute(tx *gorm.DB, instanceID uint, gw netip.Addr) error 
 // bootstrapIface enables an interface, labelled role (LAN or WAN) unless
 // the user labelled it: static with address (its prefix goes into IPAM,
 // described as role), or DHCP when address is not valid, without a default
-// route if noRoute. With reconfigure, or DHCP, address becomes the
+// route if noRoute. A static LAN gets DNS listening. With reconfigure, or DHCP, address becomes the
 // interface's only IPv4 address, taken from another interface if need be.
 func bootstrapIface(tx *gorm.DB, instanceID uint, name string, address netip.Prefix, role string, noRoute, reconfigure bool) (*models.Interface, error) {
 	var ifc models.Interface
@@ -532,6 +576,11 @@ func bootstrapIface(tx *gorm.DB, instanceID uint, name string, address netip.Pre
 	switch ifc.Description {
 	case "found on the firewall", "LAN", "WAN":
 		ifc.Description = ""
+	}
+	// The firewall answers DNS on a static LAN, and DHCP hands it out
+	// there, so LAN clients find fw.home.arpa (bootstrapFwRecord).
+	if role == "LAN" && address.IsValid() {
+		ifc.DnsListen = true
 	}
 	switch {
 	case !address.IsValid():

@@ -144,6 +144,16 @@ func TestBootstrap(t *testing.T) {
 	if zone.Name != "home.arpa" || zone.DnsTemplateID == nil || *zone.DnsTemplateID != tmpl.ID {
 		t.Errorf("zone %+v", zone)
 	}
+	var fw models.DnsRecord
+	env.srv.db.Where("zone_id = ? AND name = ?", zone.ID, "fw").First(&fw)
+	if fw.Type != "A" || fw.Value != "192.168.1.1" {
+		t.Errorf("fw record %+v", fw)
+	}
+	var lanIfc models.Interface
+	env.srv.db.Where("name = ?", opts.LAN).First(&lanIfc)
+	if !lanIfc.DnsListen {
+		t.Error("DNS does not listen on the static LAN")
+	}
 
 	if _, err := Bootstrap(context.Background(), env.srv, opts); err == nil {
 		t.Error("a second bootstrap was accepted")
@@ -390,5 +400,8 @@ func TestBootstrapDHCPServer(t *testing.T) {
 		subs[0].RangeStart != "192.168.1.100" || subs[0].RangeEnd != "192.168.1.199" || subs[0].Gateway != "192.168.1.1" ||
 		!slices.Equal(subs[0].DNSServers, []string{"1.1.1.1"}) || !fake.applied.Instances[0].DHCP.Enabled {
 		t.Errorf("DHCP subnets %+v", subs)
+	}
+	if d := fake.applied.Instances[0].DHCP.DomainName; d != "home.arpa" {
+		t.Errorf("DHCP domain %q", d)
 	}
 }

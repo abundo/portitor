@@ -21,8 +21,10 @@ or LAN, offers), a password and the time zone; before applying, LAN and WAN can 
     default route; the default route belongs to the WAN, unless both use
     DHCP and the LAN is chosen to take it) and WAN (DHCP or static), described as LAN and WAN, default route, input rules for
     management (the portitor-mgmt service: SSH and the GUI) and ping from the LAN, a forward rule from the LAN to the WAN,
-    masquerade on the WAN, a DHCP server on the LAN if chosen (handing out
-    the DNS servers above), and deploys (output has the instance's allow all
+    masquerade on the WAN, the DNS zone home.arpa with fw.home.arpa at the
+    static LAN address, DNS answering on the static LAN, a DHCP server on
+    the LAN if chosen (handing out the firewall as DNS server and the
+    domain home.arpa, so https://fw reaches the GUI), and deploys (output has the instance's allow all
     output rule),
   - starts portitor-web and writes the GUI's address to /etc/issue.d (with a
     DHCP LAN, agetty shows its current address).
@@ -490,7 +492,9 @@ def step_database(a: dict) -> None:
 
 def step_cert(a: dict) -> None:
     host = a.get("hostname") or socket.gethostname()
-    dns = ",".join(f"DNS:{n}" for n in dict.fromkeys([host, host.split(".", 1)[0]]))
+    # fw.home.arpa is the firewall's name in the DNS bootstrap sets up.
+    names = [host, host.split(".", 1)[0], "fw", "fw.home.arpa"]
+    dns = ",".join(f"DNS:{n}" for n in dict.fromkeys(names))
     # A DHCP LAN has no fixed address to name.
     san = f"IP:{a['address'].ip},{dns}" if a["address"] else dns
     run([
@@ -628,7 +632,6 @@ def join_string(a: dict) -> str:
         d["gateway"] = str(a["gateway"])
     if a.get("dhcp_range"):
         d["dhcp_range"] = fmt_range(a["dhcp_range"])
-        d["dhcp_dns"] = dhcp_dns(a)
     raw = json.dumps(d, separators=(",", ":")).encode()
     return JOIN_PREFIX + base64.urlsafe_b64encode(raw).decode().rstrip("=")
 
@@ -672,11 +675,6 @@ def join(a: dict, text: str) -> bool:
     return False
 
 
-def dhcp_dns(a: dict) -> list[str]:
-    """The DNS servers the LAN's DHCP server hands out (DHCPv4: IPv4 only)."""
-    return [d for d in a["dns"] if ipaddress.ip_address(d).version == 4]
-
-
 def route_from(a: dict) -> str:
     """lan when the DHCP LAN takes the default route instead of the DHCP WAN, else wan."""
     both = a["wan"] and not a["address"] and not a["wan_address"]
@@ -687,8 +685,6 @@ def step_bootstrap(a: dict) -> None:
     argv = web("bootstrap", "--lan", a["lan"], "--address", str(a["address"] or "dhcp"), "--gui-port", str(GUI_PORT))
     if a.get("dhcp_range"):
         argv += ["--dhcp-range", fmt_range(a["dhcp_range"])]
-        if dhcp_dns(a):
-            argv += ["--dhcp-dns", ",".join(dhcp_dns(a))]
     if a["wan"]:
         argv += ["--wan", a["wan"]]
     if a["wan_address"]:
