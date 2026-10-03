@@ -84,8 +84,23 @@ function peerDefaults() {
   }
 }
 const tunnelItems = computed(() =>
-  tunnels.value.map((t) => ({ label: withLabel(t.label, t.name), value: t.id })),
+  tunnels.value.map((t) => ({
+    label: withLabel(t.label, t.name) + (t.enabled ? '' : ' (disabled)'),
+    value: t.id,
+  })),
 )
+
+// Enables or disables the selected tunnel (its interface); takes effect on
+// the next deploy.
+async function setEnabled(enabled) {
+  const t = selected.value
+  try {
+    Object.assign(t, await interfaces.update(t.id, { enabled }))
+  } catch (err) {
+    toast.add({ title: errMsg(err), color: 'error' })
+    await load()
+  }
+}
 
 // Handshakes from the agent status, by peer public key.
 const handshakes = computed(() => {
@@ -290,6 +305,13 @@ function copy(text) {
     <div v-else class="space-y-4">
       <div class="card flex flex-wrap items-center gap-4">
         <USelect v-model="selectedId" :items="tunnelItems" class="w-40" />
+        <USwitch
+          v-if="selected"
+          :model-value="selected.enabled"
+          :disabled="!auth.canEdit"
+          label="Enabled"
+          @update:model-value="setEnabled"
+        />
         <div v-if="selected?.description" class="min-w-0 text-sm">
           <div class="text-muted">Description</div>
           <div>{{ selected.description }}</div>
