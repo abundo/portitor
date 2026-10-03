@@ -6,6 +6,7 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useToast } from '@nuxt/ui/composables'
 import AddrInput from '@/components/AddrInput.vue'
+import DhcpLeaseInfo from '@/components/DhcpLeaseInfo.vue'
 import NeedInstance from '@/components/NeedInstance.vue'
 import SearchInput from '@/components/SearchInput.vue'
 import { api, instances, interfaces, ipamPrefixes } from '@/api'
@@ -275,6 +276,7 @@ const tab = computed({
             <UTable
               :data="shownClientLeases"
               :columns="[
+                { id: 'info', header: '' },
                 { accessorKey: 'interface', header: 'Interface' },
                 { id: 'family', header: 'Client' },
                 { accessorKey: 'state', header: 'State' },
@@ -285,6 +287,7 @@ const tab = computed({
                 { id: 'expires', header: 'Expires' },
               ]"
             >
+              <template #info-cell="{ row }"><DhcpLeaseInfo :lease="row.original" /></template>
               <template #family-cell="{ row }">{{
                 row.original.family === 'ipv6' ? 'DHCPv6' : 'DHCPv4'
               }}</template>
