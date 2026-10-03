@@ -130,7 +130,7 @@ const fields = computed(() => [
     key: 'common_name',
     label: 'Common name (CN)',
     placeholder: 'the first SAN',
-    hint: 'Optional, at most 64 characters. Only shown to people inspecting the certificate: clients ignore the CN when matching names. Added to the SANs if missing. Let\'s Encrypt may leave it out.',
+    hint: "Optional, at most 64 characters. Only shown to people inspecting the certificate: clients ignore the CN when matching names. Added to the SANs if missing. Let's Encrypt may leave it out.",
   },
   {
     key: 'interface_id',

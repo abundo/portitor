@@ -109,7 +109,10 @@ const fields = [
     key: 'ipv4_mode',
     label: 'IPv4',
     type: 'select',
-    items: (f) => (f.kind === 'wireguard' || f.kind === 'loopback' ? modes.filter((m) => m.value !== 'dhcp') : modes),
+    items: (f) =>
+      f.kind === 'wireguard' || f.kind === 'loopback'
+        ? modes.filter((m) => m.value !== 'dhcp')
+        : modes,
     hint: 'Static: the addresses below. DHCP client: IPv4 from a DHCP server, and no addresses below.',
   },
   {

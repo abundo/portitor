@@ -126,8 +126,8 @@ function lldpRows(n) {
         <div>
           <div class="text-lg font-semibold">Neighbours</div>
           <p class="max-w-3xl text-sm text-muted">
-            What this virtual firewall's interfaces see next to them: LLDP neighbours, on the interfaces
-            with LLDP turned on under
+            What this virtual firewall's interfaces see next to them: LLDP neighbours, on the
+            interfaces with LLDP turned on under
             <RouterLink to="/interfaces" class="text-primary">Interfaces</RouterLink>, and the ARP
             (IPv4) and ND (IPv6) tables.
           </p>

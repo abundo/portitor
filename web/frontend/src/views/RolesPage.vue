@@ -115,8 +115,9 @@ async function remove() {
         <div class="text-lg font-semibold">Roles</div>
         <div class="text-sm text-muted">
           A role grants its members instances, each member as an admin (changes and deploys them) or
-          a viewer. Each virtual firewall but the host has a role of its own, added, renamed and removed with the
-          virtual firewall. A user with the global role None sees only what their roles grant.
+          a viewer. Each virtual firewall but the host has a role of its own, added, renamed and
+          removed with the virtual firewall. A user with the global role None sees only what their
+          roles grant.
         </div>
       </div>
       <UButton icon="i-lucide-plus" label="Add" @click="openCreate" />

@@ -109,7 +109,10 @@ const userMenu = computed(() => [
     <ConfirmBanner />
     <ChangesBanner />
     <div class="ml-auto flex items-center gap-2">
-      <UTooltip v-if="!auth.canEdit" text="Your user can look at this virtual firewall but not change it">
+      <UTooltip
+        v-if="!auth.canEdit"
+        text="Your user can look at this virtual firewall but not change it"
+      >
         <UBadge color="neutral" variant="outline" icon="i-lucide-eye" label="Read-only" />
       </UTooltip>
       <UTooltip v-if="deploy.status?.version_mismatch" :text="deploy.status.version_mismatch">

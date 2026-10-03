@@ -22,10 +22,20 @@ const columns = [
 const fields = [
   { key: 'name', label: 'Name', required: true, placeholder: 'guestup' },
   { key: 'description', label: 'Description' },
-  { key: 'instance_a_id', label: 'Side A virtual firewall', type: 'select', items: () => store.items },
+  {
+    key: 'instance_a_id',
+    label: 'Side A virtual firewall',
+    type: 'select',
+    items: () => store.items,
+  },
   { key: 'interface_a', label: 'Side A interface name', placeholder: 'lk-guest', required: true },
   { key: 'addresses_a', label: 'Side A addresses', type: 'tags', placeholder: '10.255.0.1/30' },
-  { key: 'instance_b_id', label: 'Side B virtual firewall', type: 'select', items: () => store.items },
+  {
+    key: 'instance_b_id',
+    label: 'Side B virtual firewall',
+    type: 'select',
+    items: () => store.items,
+  },
   { key: 'interface_b', label: 'Side B interface name', placeholder: 'lk-main', required: true },
   { key: 'addresses_b', label: 'Side B addresses', type: 'tags', placeholder: '10.255.0.2/30' },
 ]
@@ -49,7 +59,9 @@ const fields = [
     "
     new-label="New link"
     :blocked-reason="
-      store.list.length < 2 ? 'Links connect two virtual firewalls; create a second virtual firewall first.' : ''
+      store.list.length < 2
+        ? 'Links connect two virtual firewalls; create a second virtual firewall first.'
+        : ''
     "
   />
 </template>

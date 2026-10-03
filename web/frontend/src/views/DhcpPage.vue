@@ -304,9 +304,10 @@ const tab = computed({
           <div class="card">
             <div class="mb-1 text-lg font-semibold">DHCP server</div>
             <p class="mb-4 text-sm text-muted">
-              Kea, for the clients on this virtual firewall's interfaces. DHCP is served per prefix of an
-              interface address; several on one interface form a shared network, and clients get
-              addresses from all of them. Fixed leases are addresses with a MAC and a DNS name under
+              Kea, for the clients on this virtual firewall's interfaces. DHCP is served per prefix
+              of an interface address; several on one interface form a shared network, and clients
+              get addresses from all of them. Fixed leases are addresses with a MAC and a DNS name
+              under
               <RouterLink to="/objects" class="text-primary">Hosts & prefixes</RouterLink>.
             </p>
             <form @submit.prevent="save">
