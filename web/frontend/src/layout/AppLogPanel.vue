@@ -4,7 +4,10 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import SearchInput from '@/components/SearchInput.vue'
+import { interfaces } from '@/api'
 import { useLogPanel } from '@/composables/useLogPanel'
+import { withLabel } from '@/composables/useInstanceRefs'
+import { useInstanceStore } from '@/stores/instances'
 import { logTime } from '@/utils/time'
 
 // The agent's log, the logged packets and DNS queries at the bottom of the layout. It
@@ -48,6 +51,29 @@ watch(
   { flush: 'post' },
 )
 
+// Interface labels by instance and name, so a packet shows "WAN (ens18)".
+// Loaded when the Logged packets tab is shown.
+const instStore = useInstanceStore()
+const ifaceLabels = ref(new Map())
+async function loadIfaces() {
+  try {
+    const list = await interfaces.list()
+    ifaceLabels.value = new Map(
+      list
+        .filter((i) => i.label)
+        .map((i) => [`${instStore.nameOf(i.instance_id)}/${i.name}`, i.label]),
+    )
+  } catch {
+    // Bare names are fine.
+  }
+}
+watch(
+  () => state.tab === 'packets',
+  (on) => on && loadIfaces(),
+  { immediate: true },
+)
+const ifaceText = (p, name) => withLabel(ifaceLabels.value.get(`${p.instance}/${name}`), name)
+
 // Logged packets are filtered by words, each of which must be part of
 // some column ("wan tcp 443", "10.1.2.3", "forward policy").
 const packetText = (p) =>
@@ -56,8 +82,8 @@ const packetText = (p) =>
     p.chain,
     ruleLabel(p),
     p.action,
-    p.in_interface,
-    p.out_interface,
+    ifaceText(p, p.in_interface),
+    ifaceText(p, p.out_interface),
     p.family,
     p.protocol,
     p.src,
@@ -228,8 +254,8 @@ onUnmounted(stop)
             <td>{{ p.chain }}</td>
             <td>{{ ruleLabel(p) }}</td>
             <td :class="actionClass(p.action)">{{ p.action }}</td>
-            <td>{{ p.in_interface }}</td>
-            <td>{{ p.out_interface }}</td>
+            <td>{{ ifaceText(p, p.in_interface) }}</td>
+            <td>{{ ifaceText(p, p.out_interface) }}</td>
             <td>{{ p.protocol }}</td>
             <td class="break-all">{{ p.src }}</td>
             <td class="text-right">{{ p.src_port || '' }}</td>
