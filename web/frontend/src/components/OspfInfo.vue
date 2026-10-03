@@ -21,10 +21,10 @@ const versions = computed(() => [
   { v: 2, name: 'OSPFv2', state: props.v2 },
   { v: 3, name: 'OSPFv3', state: props.v3 },
 ])
-// The rows of both versions in one list, each with its version's name.
+// The rows of both versions in one list, each with its version (v2, v3).
 const rows = (k) =>
   computed(() =>
-    versions.value.flatMap((x) => (x.state?.[k] ?? []).map((r) => ({ ...r, version: x.name }))),
+    versions.value.flatMap((x) => (x.state?.[k] ?? []).map((r) => ({ ...r, version: `v${x.v}` }))),
   )
 
 const nbr = useSearch(rows('neighbors'), (n) =>
