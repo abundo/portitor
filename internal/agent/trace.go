@@ -198,7 +198,7 @@ func resolveName(ctx context.Context, netns, name, family string) (netip.Addr, e
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	argv := inNetns(netns, []string{"getent", db, "--", name})
-	out, _ := exec.CommandContext(ctx, argv[0], argv[1:]...).Output()
+	out, runErr := exec.CommandContext(ctx, argv[0], argv[1:]...).Output()
 	var first netip.Addr
 	for _, line := range strings.Split(string(out), "\n") {
 		f := strings.Fields(line)
@@ -219,9 +219,31 @@ func resolveName(ctx context.Context, netns, name, family string) (netip.Addr, e
 		}
 	}
 	if !first.IsValid() {
-		return netip.Addr{}, fmt.Errorf("cannot resolve %s", name)
+		return netip.Addr{}, fmt.Errorf("cannot resolve %s: %s", name, getentReason(ctx, runErr))
 	}
 	return first, nil
+}
+
+// getentReason says why getent found no address. getent(1) exits 2 when
+// the name is not found; other failures print to stderr.
+func getentReason(ctx context.Context, err error) string {
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return "timed out"
+	}
+	var ee *exec.ExitError
+	if !errors.As(err, &ee) {
+		if err != nil {
+			return err.Error()
+		}
+		return "no address"
+	}
+	if msg := strings.TrimSpace(string(ee.Stderr)); msg != "" {
+		return msg
+	}
+	if ee.ExitCode() == 2 {
+		return "not found"
+	}
+	return ee.Error()
 }
 
 // traceArgs checks and clamps the request and returns mtr's argv.
