@@ -190,7 +190,15 @@ const zoneColumns = [
   { key: 'description', label: 'Description' },
 ]
 const zoneFields = [
-  { key: 'type', label: 'Type', type: 'select', items: zoneTypes },
+  // Records belong to forward zones only, so a zone keeps its type; its name can change.
+  {
+    key: 'type',
+    label: 'Type',
+    type: 'select',
+    items: zoneTypes,
+    disabled: (f) => !!f.id,
+    hint: 'Cannot change once the zone exists.',
+  },
   {
     key: 'name',
     label: 'Name',
