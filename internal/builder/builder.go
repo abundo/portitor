@@ -721,7 +721,7 @@ func (d *data) bgp(in *fwconfig.Instance, instanceID uint) {
 	for _, n := range d.bgpNeighbors {
 		if n.InstanceID == instanceID && n.Enabled {
 			p := n.Peer()
-			p.Address, p.PeerGroup = n.Address, n.PeerGroup
+			p.Address, p.PeerGroup, p.Interface = n.Address, n.PeerGroup, n.Interface
 			b.Neighbors = append(b.Neighbors, p)
 		}
 	}

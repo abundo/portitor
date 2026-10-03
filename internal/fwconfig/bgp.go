@@ -79,6 +79,11 @@ type BGPPeer struct {
 	Name      string `json:"name,omitempty"`
 	Address   string `json:"address,omitempty"`
 	PeerGroup string `json:"peer_group,omitempty"`
+	// Interface is the instance's interface a neighbour with a link-local
+	// address (fe80::/10) is reached on, and only that: FRR peers over it
+	// with the extended next hop (RFC 8950), so IPv4 routes go over the
+	// session too, with the neighbour's IPv6 address as their next hop.
+	Interface string `json:"interface,omitempty"`
 	// RemoteAS is an AS number, "internal" or "external"; a neighbour in
 	// a group that has one may leave it empty.
 	RemoteAS    string `json:"remote_as,omitempty"`
@@ -575,8 +580,21 @@ func ValidBGPTimers(keepalive, hold int) bool {
 func (v *validator) bgpPeer(p string, peer BGPPeer, refs *policyRefs, ifaces map[string]*Interface) {
 	if peer.Address != "" {
 		p = fmt.Sprintf("%s: neighbour %s", p, peer.Address)
-		if _, err := ParseAddr(peer.Address); err != nil {
+		a, err := ParseAddr(peer.Address)
+		switch {
+		case err != nil:
 			v.addf("%s: not an IP address", p)
+		case a.Is6() && a.IsLinkLocalUnicast() && peer.Interface == "":
+			v.addf("%s: a link-local neighbour needs its interface", p)
+		case !(a.Is6() && a.IsLinkLocalUnicast()) && peer.Interface != "":
+			v.addf("%s: only a link-local (fe80::/10) neighbour has an interface", p)
+		}
+		switch {
+		case peer.Interface == "":
+		case !ifnameRe.MatchString(peer.Interface):
+			v.addf("%s: invalid interface %q", p, peer.Interface)
+		case ifaces != nil && ifaces[peer.Interface] == nil:
+			v.addf("%s: unknown interface %q", p, peer.Interface)
 		}
 		if peer.PeerGroup != "" && !policyNameRe.MatchString(peer.PeerGroup) {
 			v.addf("%s: invalid peer group %q", p, peer.PeerGroup)
@@ -586,6 +604,9 @@ func (v *validator) bgpPeer(p string, peer BGPPeer, refs *policyRefs, ifaces map
 		v.policyName(p, peer.Name)
 		if peer.PeerGroup != "" {
 			v.addf("%s: a peer group can't be in another", p)
+		}
+		if peer.Interface != "" {
+			v.addf("%s: a peer group has no interface", p)
 		}
 	}
 	if peer.RemoteAS != "" && !validRemoteAS(peer.RemoteAS) {

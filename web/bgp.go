@@ -306,7 +306,7 @@ func preparePeerSettings(tx *gorm.DB, instanceID uint, s, old *models.BgpPeerSet
 		s.V6PrefixListIn, s.V6PrefixListOut, s.V6RouteMapIn, s.V6RouteMapOut = "", "", "", ""
 	}
 	full := s.Peer()
-	full.Name, full.Address, full.PeerGroup = peer.Name, peer.Address, peer.PeerGroup
+	full.Name, full.Address, full.PeerGroup, full.Interface = peer.Name, peer.Address, peer.PeerGroup, peer.Interface
 	if err := problems(fwconfig.CheckBGPPeer(full)); err != nil {
 		return err
 	}
@@ -372,6 +372,17 @@ func prepareNeighbor(tx *gorm.DB, n, old *models.BgpNeighbor) error {
 	}
 	n.Address = a.String()
 	n.PeerGroup = strings.TrimSpace(n.PeerGroup)
+	n.Interface = strings.TrimSpace(n.Interface)
+	if !a.IsLinkLocalUnicast() {
+		n.Interface = "" // the form hides it
+	}
+	if n.Interface != "" {
+		var count int64
+		tx.Model(&models.Interface{}).Where("instance_id = ? AND name = ?", n.InstanceID, n.Interface).Count(&count)
+		if count == 0 {
+			return bad(fmt.Sprintf("interface %q is not an interface of this virtual firewall", n.Interface))
+		}
+	}
 	var group *models.BgpPeerGroup
 	if n.PeerGroup != "" {
 		group = &models.BgpPeerGroup{}
@@ -383,7 +394,7 @@ func prepareNeighbor(tx *gorm.DB, n, old *models.BgpNeighbor) error {
 	if old != nil {
 		oldSettings = &old.BgpPeerSettings
 	}
-	if err := preparePeerSettings(tx, n.InstanceID, &n.BgpPeerSettings, oldSettings, fwconfig.BGPPeer{Address: n.Address, PeerGroup: n.PeerGroup}); err != nil {
+	if err := preparePeerSettings(tx, n.InstanceID, &n.BgpPeerSettings, oldSettings, fwconfig.BGPPeer{Address: n.Address, PeerGroup: n.PeerGroup, Interface: n.Interface}); err != nil {
 		return err
 	}
 	remote := n.RemoteAs

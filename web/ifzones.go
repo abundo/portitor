@@ -186,6 +186,10 @@ func renameIfaceRefs(tx *gorm.DB, instanceID uint, old, name string, zones bool)
 				return err
 			}
 		}
+		// A link-local BGP neighbour's interface.
+		if err := tx.Model(&models.BgpNeighbor{}).Where("instance_id = ? AND interface = ?", instanceID, old).UpdateColumn("interface", name).Error; err != nil {
+			return err
+		}
 	}
 	return ifaceLists(tx, instanceID, zones, func(_ string, list *models.StringList) bool {
 		changed := false
@@ -216,7 +220,7 @@ func refuseIfaceInUse(tx *gorm.DB, instanceID uint, name string) error {
 		return err
 	}
 	var neighbors, groups []string
-	tx.Model(&models.BgpNeighbor{}).Where("instance_id = ? AND update_source = ?", instanceID, name).Order("address").Pluck("address", &neighbors)
+	tx.Model(&models.BgpNeighbor{}).Where("instance_id = ? AND (update_source = ? OR interface = ?)", instanceID, name, name).Order("address").Pluck("address", &neighbors)
 	tx.Model(&models.BgpPeerGroup{}).Where("instance_id = ? AND update_source = ?", instanceID, name).Order("name").Pluck("name", &groups)
 	for _, n := range neighbors {
 		users = append(users, "BGP neighbour "+n)

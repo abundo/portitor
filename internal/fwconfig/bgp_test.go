@@ -23,6 +23,12 @@ func TestValidateBGP(t *testing.T) {
 		{"network unknown route map", func(in *Instance) { in.BGP.Networks[0].RouteMap = "nope" }, `unknown route map "nope"`},
 		{"redistribute bad source", func(in *Instance) { in.BGP.Redistribute[0].Source = "rip" }, "source must be connected, static or ospf"},
 		{"neighbour bad address", func(in *Instance) { in.BGP.Neighbors[0].Address = "10.255.0.1/30" }, "not an IP address"},
+		{"link-local neighbour without interface", func(in *Instance) { in.BGP.Neighbors[1].Address = "fe80::1" }, "needs its interface"},
+		{"link-local neighbour unknown interface", func(in *Instance) {
+			in.BGP.Neighbors[1].Address, in.BGP.Neighbors[1].Interface = "fe80::1", "eth9"
+		}, `unknown interface "eth9"`},
+		{"interface on a global neighbour", func(in *Instance) { in.BGP.Neighbors[1].Interface = "eth2" }, "only a link-local"},
+		{"interface on a peer group", func(in *Instance) { in.BGP.PeerGroups[0].Interface = "eth2" }, "has no interface"},
 		{"neighbour twice", func(in *Instance) { in.BGP.Neighbors[1].Address = "10.255.0.1" }, "listed twice"},
 		{"neighbour unknown group", func(in *Instance) { in.BGP.Neighbors[0].PeerGroup = "nope" }, `unknown peer group "nope"`},
 		{"neighbour no remote AS", func(in *Instance) { in.BGP.Neighbors[1].RemoteAS = "" }, "remote AS is required"},

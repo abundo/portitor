@@ -223,6 +223,8 @@ type BgpNeighbor struct {
 	Address    string `json:"address"`
 	Enabled    bool   `json:"enabled"`
 	PeerGroup  string `json:"peer_group"`
+	// Interface is set for a link-local address (fwconfig.BGPPeer.Interface).
+	Interface string `json:"interface"`
 	BgpPeerSettings
 }
 

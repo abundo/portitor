@@ -60,6 +60,7 @@ renames it in its neighbours; one with neighbours can't be deleted.
 
 | Field | What |
 |---|---|
+| Interface | For a link-local address (`fe80::1`): the interface the neighbour is on. Such a session carries IPv4 routes too (extended next hop, RFC 8950), with the neighbour's IPv6 address as their next hop, so one session announces both IPv4 and IPv6 prefixes; activate both families. The neighbour must support it as well. The interface follows a rename and can't be deleted while a neighbour uses it. |
 | Remote AS | An AS number, `internal` (the local AS: iBGP) or `external` (any other). May be left empty in a peer group that has one. |
 | Password | TCP MD5 signature; never shown again once saved. Leave it empty to keep it, *Remove* to take it away. |
 | eBGP multihop | For an eBGP neighbour that is not directly connected, with the TTL (255 by default). |
@@ -73,6 +74,11 @@ renames it in its neighbours; one with neighbours can't be deleted.
 | Default originate | Send the neighbour a default route. |
 | Route reflector client | Reflect iBGP routes to this neighbour (iBGP only). |
 | Allow own AS in, Maximum prefixes | Accept routes with the local AS in their path (so many times); shut the session down when the neighbour sends more prefixes. |
+
+A neighbour with an IPv4 address can activate IPv6 unicast, and one with an IPv6
+address IPv4 unicast. The next hop sent is then the address of the other version on
+the interface the session leaves through, so that interface needs one (or set it with
+a route map out).
 
 FRR always offers route refresh to its neighbours; it is not a setting.
 

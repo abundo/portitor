@@ -17,6 +17,7 @@ import { api, bgpConfig, bgpNeighbors, bgpPeerGroups } from '@/api'
 import { errMsg } from '@/api/http'
 import { usePageForm } from '@/composables/useFormGuard'
 import { useRoutingObjects } from '@/composables/useRoutingObjects'
+import { useInstanceRefs } from '@/composables/useInstanceRefs'
 import { useAuthStore } from '@/stores/auth'
 import { useInstanceStore } from '@/stores/instances'
 import { inlineField } from '@/utils/form'
@@ -28,6 +29,7 @@ const toast = useToast()
 const auth = useAuthStore()
 const store = useInstanceStore()
 const objects = useRoutingObjects()
+const { ifaceList, ifaceText } = useInstanceRefs()
 const readOnly = computed(() => !auth.canEdit)
 
 const tabs = [
@@ -312,7 +314,12 @@ async function loadNeighborRows() {
 }
 watch(() => store.currentId, loadNeighborRows, { immediate: true })
 const neighborColumns = [
-  { key: 'address', label: 'Address', class: 'font-mono' },
+  {
+    key: 'address',
+    label: 'Address',
+    class: 'font-mono',
+    format: (n) => (n.interface ? `${n.address}%${n.interface}` : n.address),
+  },
   { key: 'description', label: 'Description' },
   {
     key: 'remote_as',
@@ -327,9 +334,24 @@ const neighborColumns = [
   },
   { key: 'enabled', label: 'Enabled' },
 ]
+const isLinkLocal = (a) => /^fe[89ab][0-9a-f]:/i.test((a ?? '').trim())
 const neighborFields = computed(() => [
   { key: 'enabled', label: 'Enabled', type: 'switch' },
-  { key: 'address', label: 'Address', required: true, placeholder: '192.0.2.1 or 2001:db8::1' },
+  {
+    key: 'address',
+    label: 'Address',
+    required: true,
+    placeholder: '192.0.2.1, 2001:db8::1 or fe80::1',
+    hint: 'A link-local address (fe80::) is reached on its interface, and carries IPv4 routes too (extended next hop).',
+  },
+  {
+    key: 'interface',
+    label: 'Interface',
+    type: 'select',
+    items: ifaceList.value.map((i) => ({ label: ifaceText(i.name), value: i.name })),
+    show: (form) => isLinkLocal(form.address),
+    hint: 'The interface the link-local neighbour is on.',
+  },
   {
     key: 'peer_group',
     label: 'Peer group',
@@ -603,7 +625,7 @@ const neighborFields = computed(() => [
             :params="{ instance_id: store.currentId }"
             :columns="neighborColumns"
             :fields="neighborFields"
-            :defaults="{ ...peerDefaults, enabled: true, peer_group: '' }"
+            :defaults="{ ...peerDefaults, enabled: true, peer_group: '', interface: '' }"
             noun="neighbour"
             new-label="New neighbour"
             :item-name="

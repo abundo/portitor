@@ -47,6 +47,32 @@ func TestFRRConf(t *testing.T) {
 	}
 }
 
+// A link-local neighbour peers on its interface, with IPv4 over IPv6.
+func TestFRRLinkLocalNeighbor(t *testing.T) {
+	doc := fwconfig.SampleDocument()
+	g := doc.Instance("guest").BGP
+	g.Neighbors = append(g.Neighbors, fwconfig.BGPPeer{
+		Address: "fe80::1", Interface: "eth2", RemoteAS: "external",
+		IPv4: fwconfig.BGPAddressFamily{Activate: true}, IPv6: fwconfig.BGPAddressFamily{Activate: true},
+	})
+	b, err := Render(doc, Options{Paths: DefaultPaths(), Units: DefaultUnits()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	conf := mustFile(t, b, "/etc/portitor/instances/guest/frr/frr.conf")
+	for _, want := range []string{
+		" neighbor fe80::1 remote-as external\n neighbor fe80::1 interface eth2\n neighbor fe80::1 capability extended-nexthop\n",
+		"  neighbor fe80::1 activate\n",
+	} {
+		if !strings.Contains(conf, want) {
+			t.Errorf("frr.conf lacks %q:\n%s", want, conf)
+		}
+	}
+	if strings.Count(conf, "neighbor fe80::1 activate") != 2 {
+		t.Errorf("not activated in both families:\n%s", conf)
+	}
+}
+
 func TestFRRDefaultInstanceFiles(t *testing.T) {
 	doc := fwconfig.SampleDocument()
 	doc.Instance("main").BGP = &fwconfig.BGP{Enabled: true, ASN: 65000}

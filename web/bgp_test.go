@@ -245,4 +245,35 @@ func TestBGPNeighbors(t *testing.T) {
 	if stored.Password != "" {
 		t.Error("password not cleared")
 	}
+
+	// A link-local neighbour needs its interface, which follows a rename
+	// and can't be deleted; a global address drops one.
+	ll := map[string]any{"instance_id": inst, "address": "fe80::1", "enabled": true, "remote_as": "external", "v4_activate": true, "v6_activate": true}
+	if rec := env.do("POST", "/api/bgp/neighbors", ll); rec.Code != http.StatusBadRequest {
+		t.Errorf("link-local without interface: %d %s", rec.Code, rec.Body)
+	}
+	ll["interface"] = "lo2"
+	llID := env.create("/api/bgp/neighbors", ll)
+	if rec := env.do("PUT", "/api/bgp/neighbors/"+id, map[string]any{"update_source": "", "interface": "lo2"}); rec.Code != http.StatusOK {
+		t.Fatalf("update: %d %s", rec.Code, rec.Body)
+	}
+	env.srv.db.First(&stored, created.ID)
+	if stored.Interface != "" {
+		t.Errorf("interface kept on a global neighbour: %q", stored.Interface)
+	}
+	if rec := env.do("PUT", "/api/interfaces/"+itoa(lo.ID), map[string]any{"name": "lo3"}); rec.Code != http.StatusOK {
+		t.Fatalf("rename interface: %d %s", rec.Code, rec.Body)
+	}
+	var llStored models.BgpNeighbor
+	env.srv.db.First(&llStored, llID)
+	if llStored.Interface != "lo3" {
+		t.Errorf("interface %q", llStored.Interface)
+	}
+	if rec := env.do("DELETE", "/api/interfaces/"+itoa(lo.ID), nil); rec.Code != http.StatusBadRequest {
+		t.Errorf("delete interface of a link-local neighbour: %d %s", rec.Code, rec.Body)
+	}
+	doc, _ = builder.Build(env.srv.db, 1)
+	if p := doc.Instance("main").BGP.Neighbors[1]; p.Address != "fe80::1" || p.Interface != "lo3" {
+		t.Errorf("document neighbour %+v", p)
+	}
 }

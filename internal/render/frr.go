@@ -257,6 +257,12 @@ func writeBGP(b *strings.Builder, g *fwconfig.BGP) {
 		if p.PeerGroup != "" {
 			fmt.Fprintf(b, " neighbor %s peer-group %s\n", ip, p.PeerGroup)
 		}
+		// A link-local neighbour: on its interface, with IPv4 routes over
+		// the IPv6 session (RFC 8950).
+		if p.Interface != "" {
+			fmt.Fprintf(b, " neighbor %s interface %s\n", ip, p.Interface)
+			fmt.Fprintf(b, " neighbor %s capability extended-nexthop\n", ip)
+		}
 		writePeer(b, ip, p, true)
 	}
 	for _, fam := range []string{"ipv4", "ipv6"} {
