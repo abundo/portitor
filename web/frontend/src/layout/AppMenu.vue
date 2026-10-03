@@ -31,7 +31,7 @@ const sections = computed(() => [
     children: [
       ...(auth.user?.virtual_firewalls
         ? [
-            { label: 'Virtual firewalls', icon: 'i-lucide-boxes', to: '/instances' },
+            { label: 'Virtual firewalls', icon: 'i-lucide-boxes', to: '/virtual-firewalls' },
             { label: 'Links', icon: 'i-lucide-cable', to: '/links' },
           ]
         : []),
@@ -49,25 +49,25 @@ const sections = computed(() => [
         icon: 'i-lucide-route',
         defaultOpen: true,
         children: [
-          { label: 'Static routes', icon: 'i-lucide-signpost', to: '/routes' },
-          { label: 'Routing objects', icon: 'i-lucide-list-filter', to: '/routing/objects' },
-          { label: 'BGP', icon: 'i-lucide-share-2', to: '/routing/bgp' },
-          { label: 'OSPF', icon: 'i-lucide-waypoints', to: '/routing/ospf' },
+          { label: 'Static routes', icon: 'i-lucide-signpost', to: '/static-routes' },
+          { label: 'Routing objects', icon: 'i-lucide-list-filter', to: '/routing-objects' },
+          { label: 'BGP', icon: 'i-lucide-share-2', to: '/bgp' },
+          { label: 'OSPF', icon: 'i-lucide-waypoints', to: '/ospf' },
         ],
       },
       { label: 'Neighbours', icon: 'i-lucide-network', to: '/neighbours' },
-      { label: 'Hosts & prefixes', icon: 'i-lucide-tags', to: '/objects' },
+      { label: 'Hosts & prefixes', icon: 'i-lucide-tags', to: '/hosts-prefixes' },
     ],
   },
   {
     label: 'Firewall',
     value: 'firewall',
     children: [
-      { label: 'Rules', icon: 'i-lucide-shield-check', to: '/firewall/rules' },
-      { label: 'Services', icon: 'i-lucide-plug', to: '/firewall/services' },
-      { label: 'NAT & port forwards', icon: 'i-lucide-arrow-right-left', to: '/firewall/nat' },
+      { label: 'Rules', icon: 'i-lucide-shield-check', to: '/rules' },
+      { label: 'Services', icon: 'i-lucide-plug', to: '/services' },
+      { label: 'NAT & port forwards', icon: 'i-lucide-arrow-right-left', to: '/nat' },
       ...(auth.canDeploy
-        ? [{ label: 'Connections', icon: 'i-lucide-activity', to: '/firewall/connections' }]
+        ? [{ label: 'Connections', icon: 'i-lucide-activity', to: '/connections' }]
         : []),
     ],
   },
@@ -79,7 +79,7 @@ const sections = computed(() => [
       { label: 'DHCP', icon: 'i-lucide-list-ordered', to: '/dhcp' },
       { label: 'DNS', icon: 'i-lucide-globe', to: '/dns' },
       { label: 'DNS update', icon: 'i-lucide-refresh-ccw-dot', to: '/dns-update' },
-      { label: 'Scheduled tasks', icon: 'i-lucide-calendar-clock', to: '/tasks' },
+      { label: 'Scheduled tasks', icon: 'i-lucide-calendar-clock', to: '/scheduled-tasks' },
     ],
   },
   {
@@ -96,8 +96,8 @@ const sections = computed(() => [
           children: [
             { label: 'Settings', icon: 'i-lucide-settings', to: '/settings', exact: true },
             { label: 'Updates', icon: 'i-lucide-package-check', to: '/updates' },
-            { label: 'Users', icon: 'i-lucide-users', to: '/settings/users' },
-            { label: 'Roles', icon: 'i-lucide-shield-user', to: '/settings/roles' },
+            { label: 'Users', icon: 'i-lucide-users', to: '/users' },
+            { label: 'Roles', icon: 'i-lucide-shield-user', to: '/roles' },
           ],
         },
       ]

@@ -13,7 +13,7 @@ const store = useInstanceStore()
       icon="i-lucide-boxes"
       title="No virtual firewall yet"
       description="Everything (interfaces, interface zones, rules, DNS, DHCP) belongs to a virtual firewall. Create the default virtual firewall first."
-      :actions="[{ label: 'Create virtual firewall', to: '/instances' }]"
+      :actions="[{ label: 'Create virtual firewall', to: '/virtual-firewalls' }]"
     />
   </div>
 </template>

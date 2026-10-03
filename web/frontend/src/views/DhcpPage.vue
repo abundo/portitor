@@ -308,7 +308,7 @@ const tab = computed({
               of an interface address; several on one interface form a shared network, and clients
               get addresses from all of them. Fixed leases are addresses with a MAC and a DNS name
               under
-              <RouterLink to="/objects" class="text-primary">Hosts & prefixes</RouterLink>.
+              <RouterLink to="/hosts-prefixes" class="text-primary">Hosts & prefixes</RouterLink>.
             </p>
             <form @submit.prevent="save">
               <fieldset :disabled="readOnly" class="space-y-3">
