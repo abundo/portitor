@@ -73,7 +73,8 @@ const rows = computed(() => {
       <template #content>
         <div class="max-w-lg p-3 text-sm">
           <div class="mb-2 font-semibold">
-            {{ lease.family === 'ipv6' ? 'DHCPv6 lease' : 'DHCP lease' }}
+            {{ lease.family === 'ipv6' ? 'DHCPv6 lease' : 'DHCP lease' }} on
+            <span class="font-mono">{{ lease.interface }}</span>
           </div>
           <dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-0.5">
             <template v-for="[k, v] in rows" :key="k">
