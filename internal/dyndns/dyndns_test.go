@@ -487,3 +487,29 @@ func TestServerByName(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+// Without an address on the interface the client waits for one, with no
+// retry, and publishes it when it comes.
+func TestRunWaitsForAddress(t *testing.T) {
+	c, ns, ifc := testClient(t, []fwconfig.DynDNSRecord{{Name: "home", Type: "A"}})
+	c.cfg.RetryInterval = 50 * time.Millisecond
+	changed := make(chan struct{}, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		c.Run(ctx, changed)
+		close(done)
+	}()
+	defer func() {
+		cancel()
+		<-done
+	}()
+	waitFor(t, "waiting state", func() bool { return c.Status().State == "waiting" })
+	if s := c.Status(); s.NextRetry != nil {
+		t.Errorf("retry scheduled while waiting: %+v", s)
+	}
+	ifc.set("198.51.100.7", "")
+	changed <- struct{}{}
+	waitFor(t, "update", func() bool { return len(ns.get("home.example.com.", dns.TypeA)) == 1 })
+	waitFor(t, "state ok", func() bool { return c.Status().State == "ok" })
+}

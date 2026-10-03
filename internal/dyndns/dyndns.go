@@ -20,6 +20,7 @@ package dyndns
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -337,13 +338,25 @@ func expectedIP(rec Record, v4, v6 net.IP) net.IP {
 	}
 }
 
+// noAddressError is an A/AAAA record that has no address on the interface
+// to publish: the client waits for one rather than retrying.
+type noAddressError struct{ typ, name string }
+
+func (e *noAddressError) Error() string {
+	return fmt.Sprintf("no %s address on interface for %s", e.typ, e.name)
+}
+
+// firstRetry is the wait after the first failure; it doubles with each
+// one after that, up to RetryInterval.
+const firstRetry = 10 * time.Second
+
 // rdata returns the value to publish for rec.
 func (c *Client) rdata(rec Record, v4, v6 net.IP) (string, error) {
 	switch rec.Type {
 	case "A", "AAAA":
 		ip := expectedIP(rec, v4, v6)
 		if ip == nil {
-			return "", fmt.Errorf("no %s address on interface for %s", rec.Type, rec.Name)
+			return "", &noAddressError{rec.Type, rec.Name}
 		}
 		return ip.String(), nil
 	case "CNAME":
@@ -495,9 +508,11 @@ func ipString(ip net.IP) string {
 }
 
 // Run keeps DNS in step until ctx is done. A receive on addrChanged means
-// the interface's addresses may have changed. After a failure it retries
-// every RetryInterval, re-reading the addresses each time; address changes
-// are applied at once, also while a retry is pending. Static records are
+// the interface's addresses may have changed. After a failure it retries,
+// re-reading the addresses each time, first after firstRetry and then
+// twice as long each time, up to RetryInterval; address changes are
+// applied at once, also while a retry is pending. While the interface has
+// no address for a record it waits for one (an address change) instead. Static records are
 // verified at start and then every VerifyInterval.
 func (c *Client) Run(ctx context.Context, addrChanged <-chan struct{}) {
 	last := &lastIPs{}
@@ -507,19 +522,30 @@ func (c *Client) Run(ctx context.Context, addrChanged <-chan struct{}) {
 	stopTimer(retry)
 	defer retry.Stop()
 	var retryC <-chan time.Time
+	var delay time.Duration // the last retry's wait; 0 after a success
 
 	apply := func(force bool, scope recordScope) {
 		err := c.reconcile(ctx, last, force, scope, false)
 		if ctx.Err() != nil {
 			return
 		}
-		if err != nil {
-			c.log.Error("dyndns update failed", "err", err, "retry_in", c.cfg.RetryInterval)
+		var noAddr *noAddressError
+		if errors.As(err, &noAddr) {
+			c.log.Info("dyndns waiting for an address", "reason", err)
 			pending = true
 			stopTimer(retry)
-			retry.Reset(c.cfg.RetryInterval)
+			retryC = nil
+			c.setStatus(func(s *Status) { s.State, s.LastError, s.NextRetry = "waiting", err.Error(), nil })
+			return
+		}
+		if err != nil {
+			delay = min(max(2*delay, firstRetry), c.cfg.RetryInterval)
+			c.log.Error("dyndns update failed", "err", err, "retry_in", delay)
+			pending = true
+			stopTimer(retry)
+			retry.Reset(delay)
 			retryC = retry.C
-			next := c.env.Now().Add(c.cfg.RetryInterval)
+			next := c.env.Now().Add(delay)
 			c.setStatus(func(s *Status) { s.State, s.LastError, s.NextRetry = "error", err.Error(), &next })
 			return
 		}
@@ -527,6 +553,7 @@ func (c *Client) Run(ctx context.Context, addrChanged <-chan struct{}) {
 			return // a dynamic failure is still unresolved
 		}
 		pending = false
+		delay = 0
 		stopTimer(retry)
 		retryC = nil
 		c.setStatus(func(s *Status) { s.State, s.LastError, s.NextRetry = "ok", "", nil })

@@ -78,7 +78,7 @@ const states = computed(() => {
   }
   return m
 })
-const stateColor = { ok: 'success', error: 'error' }
+const stateColor = { ok: 'success', error: 'error', waiting: 'warning' }
 
 const clientColumns = [
   { key: 'name', label: 'Name', class: 'font-medium' },
@@ -154,7 +154,7 @@ const clientFields = computed(() => [
     key: 'retry_interval',
     label: 'Retry interval (seconds)',
     type: 'number',
-    hint: 'Wait after a failed update. 0: 300.',
+    hint: 'Longest wait between retries after a failed update: the first is after 10 s, then twice as long each time. 0: 300.',
   },
   {
     key: 'verify_interval',
