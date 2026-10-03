@@ -32,6 +32,11 @@ func testAgent(t *testing.T, allowFrom ...string) (*Agent, http.Handler) {
 			RunDir:       filepath.Join(dir, "run"),
 			KeaDataDir:   filepath.Join(dir, "kea"),
 			KeaSocketDir: filepath.Join(dir, "kea"),
+			NftablesFile: filepath.Join(dir, "std", "nftables.d", "portitor.nft"),
+			WireGuardDir: filepath.Join(dir, "std", "wireguard"),
+			NamedConf:    filepath.Join(dir, "std", "bind", "named.conf"),
+			KeaConfDir:   filepath.Join(dir, "std", "kea"),
+			RadvdConf:    filepath.Join(dir, "std", "radvd.conf"),
 		},
 		token: testToken,
 	}

@@ -365,8 +365,7 @@ func (a *Agent) onDHCPChange(instance string) {
 	if err != nil {
 		return
 	}
-	path := filepath.Join(a.cfg.Paths.InstanceEtc(instance), "named.conf")
-	f := b.File(path)
+	f := b.File(a.cfg.Paths.Files(in).NamedConf)
 	if f == nil {
 		return
 	}
@@ -378,7 +377,7 @@ func (a *Agent) onDHCPChange(instance string) {
 	if changed {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cancel()
-		_, _ = a.run.Run(ctx, "", "systemctl", "reload-or-restart", a.cfg.Units.Named(instance))
+		_, _ = a.run.Run(ctx, "", "systemctl", "reload-or-restart", a.cfg.Units.Named(in))
 	}
 	a.log.Take()
 }

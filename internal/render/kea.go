@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/netip"
-	"path/filepath"
 	"sort"
 	"strings"
 
@@ -257,18 +256,11 @@ func KeaDhcp4Conf(in *fwconfig.Instance, p Paths) string {
   }
 }
 `, ifJSON,
-		filepath.Join(p.KeaSocketDir, "kea4-"+in.Name+".sock"),
-		KeaLeaseFile(in.Name, p),
+		p.Files(in).Kea4Socket,
+		p.Files(in).Kea4Lease,
 		lease, lease/2, lease*7/8,
 		keaSubnetsJSON(in, false))
 	return b.String()
-}
-
-// KeaLeaseFile is where Kea keeps an instance's v4 leases. Kea 2.6+
-// refuses lease files outside its data directory, hence KeaDataDir. That
-// is Kea's view: on the host the file is in InstanceDir.
-func KeaLeaseFile(instance string, p Paths) string {
-	return filepath.Join(p.KeaDataDir, "kea-leases4-"+instance+".csv")
 }
 
 // KeaDhcp6Conf renders Kea's DHCPv6 config.
@@ -294,23 +286,9 @@ func KeaDhcp6Conf(in *fwconfig.Instance, p Paths) string {
   }
 }
 `, ifJSON,
-		filepath.Join(p.KeaSocketDir, "kea6-"+in.Name+".sock"),
-		KeaLease6File(in.Name, p),
+		p.Files(in).Kea6Socket,
+		p.Files(in).Kea6Lease,
 		lease*3/4, lease, lease/2, lease*4/5,
 		keaSubnetsJSON(in, true))
 	return b.String()
-}
-
-// KeaLease6File is where Kea keeps an instance's v6 leases.
-func KeaLease6File(instance string, p Paths) string {
-	return filepath.Join(p.KeaDataDir, "kea-leases6-"+instance+".csv")
-}
-
-// InstanceDir is the host's directory of an instance's lease files and
-// control sockets. The instance's Kea units mount it over KeaDataDir and
-// KeaSocketDir (portitor-kea4@.service), so one instance's Kea can neither
-// read another's leases nor reach its control socket. named's units do the
-// same with BindCacheDir and BindRunDir (portitor-named@.service).
-func InstanceDir(dir, instance string) string {
-	return filepath.Join(dir, instance)
 }

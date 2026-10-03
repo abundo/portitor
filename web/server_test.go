@@ -123,6 +123,7 @@ func TestAuthRequired(t *testing.T) {
 	}
 
 	// A DELETE has no body, so the browser sends no Content-Type.
+	env.create("/api/instances", map[string]any{"name": "main"}) // the default, which stays
 	id := env.create("/api/instances", map[string]any{"name": "gone"})
 	req = httptest.NewRequest("DELETE", fmt.Sprintf("/api/instances/%d", id), nil)
 	req.AddCookie(cookie)
@@ -179,6 +180,22 @@ func TestValidationAndSecrets(t *testing.T) {
 	env.srv.db.First(&got, inst)
 	if !got.IsDefault {
 		t.Error("first instance should become the default")
+	}
+	// The default stays: it can't be deleted, and the flag doesn't move.
+	if rec := env.do("DELETE", fmt.Sprintf("/api/instances/%d", inst), nil); rec.Code != http.StatusBadRequest {
+		t.Errorf("delete the default: %d", rec.Code)
+	}
+	vf := env.create("/api/instances", map[string]any{"name": "other", "is_default": true})
+	if rec := env.do("PUT", fmt.Sprintf("/api/instances/%d", inst), map[string]any{"name": "main", "is_default": false}); rec.Code != http.StatusOK {
+		t.Errorf("PUT main: %d %s", rec.Code, rec.Body)
+	}
+	var defaults []models.Instance
+	env.srv.db.Where("is_default").Find(&defaults)
+	if len(defaults) != 1 || defaults[0].ID != inst {
+		t.Errorf("defaults %+v, want only main", defaults)
+	}
+	if rec := env.do("DELETE", fmt.Sprintf("/api/instances/%d", vf), nil); rec.Code != http.StatusNoContent {
+		t.Errorf("delete other: %d", rec.Code)
 	}
 	if rec := env.do("POST", "/api/instances", map[string]any{"name": "main"}); rec.Code != http.StatusConflict {
 		t.Errorf("duplicate: %d", rec.Code)

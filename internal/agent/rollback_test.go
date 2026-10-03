@@ -219,7 +219,10 @@ func TestRulesetBeforeForwarding(t *testing.T) {
 	}
 	loaded := map[string]int{}
 	for i, l := range res.Log {
-		if strings.Contains(l, "nft -f ") && strings.HasSuffix(l, "nftables.nft") {
+		switch {
+		case strings.Contains(l, "nft -f ") && strings.HasSuffix(l, "/nftables.d/portitor.nft"):
+			loaded["main"] = i // the default instance's, in the standard place
+		case strings.Contains(l, "nft -f ") && strings.HasSuffix(l, "nftables.nft"):
 			loaded[filepath.Base(filepath.Dir(strings.Fields(l)[len(strings.Fields(l))-1]))] = i
 		}
 	}

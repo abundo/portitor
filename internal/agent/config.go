@@ -74,6 +74,7 @@ func LoadConfig(path string) (*Config, error) {
 
 func (c *Config) applyDefaults() {
 	def := render.DefaultPaths()
+	du := render.DefaultUnits()
 	if c.Listen == "" {
 		c.Listen = ":8443"
 	}
@@ -110,7 +111,24 @@ func (c *Config) applyDefaults() {
 	if c.Paths.BindRunDir == "" {
 		c.Paths.BindRunDir = def.BindRunDir
 	}
-	du := render.DefaultUnits()
+	for _, p := range []struct {
+		v *string
+		d string
+	}{
+		{&c.Paths.NftablesFile, def.NftablesFile},
+		{&c.Paths.WireGuardDir, def.WireGuardDir},
+		{&c.Paths.NamedConf, def.NamedConf},
+		{&c.Paths.KeaConfDir, def.KeaConfDir},
+		{&c.Paths.RadvdConf, def.RadvdConf},
+		{&c.Units.DefaultNamed, du.DefaultNamed},
+		{&c.Units.DefaultKea4, du.DefaultKea4},
+		{&c.Units.DefaultKea6, du.DefaultKea6},
+		{&c.Units.DefaultRadvd, du.DefaultRadvd},
+	} {
+		if *p.v == "" {
+			*p.v = p.d
+		}
+	}
 	if c.Units.NamedFmt == "" {
 		c.Units.NamedFmt = du.NamedFmt
 	}

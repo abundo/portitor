@@ -47,7 +47,7 @@ func mustFile(t *testing.T, b *Bundle, path string) string {
 }
 
 func TestNftablesMain(t *testing.T) {
-	nft := mustFile(t, sampleBundle(t), "/etc/portitor/instances/main/nftables.nft")
+	nft := mustFile(t, sampleBundle(t), "/etc/nftables.d/portitor.nft")
 	for _, want := range []string{
 		"delete table inet firewall",
 		`ip saddr 192.168.1.0/24 tcp dport { 22, 8443 } accept comment "anti-lockout"`,
@@ -101,7 +101,7 @@ func TestNftablesMain(t *testing.T) {
 // DNAT would let in. In input, anti-lockout and the services' auto rules
 // come before the rules.
 func TestNftablesRuleOrder(t *testing.T) {
-	nft := mustFile(t, sampleBundle(t), "/etc/portitor/instances/main/nftables.nft")
+	nft := mustFile(t, sampleBundle(t), "/etc/nftables.d/portitor.nft")
 	in := nft[strings.Index(nft, "chain input {"):strings.Index(nft, "chain forward {")]
 	fwd := nft[strings.Index(nft, "chain forward {"):strings.Index(nft, "chain output {")]
 	lockout := strings.Index(in, `"anti-lockout"`)
@@ -253,7 +253,7 @@ func TestNftablesRuleCounters(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	nft := mustFile(t, b, "/etc/portitor/instances/main/nftables.nft")
+	nft := mustFile(t, b, "/etc/nftables.d/portitor.nft")
 	for _, want := range []string{
 		"\tcounter rule_1_orig {\n\t}\n",
 		"\tcounter rule_1_reply {\n\t}\n",
@@ -291,7 +291,7 @@ func TestNftablesDropCounters(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	nft := mustFile(t, b, "/etc/portitor/instances/main/nftables.nft")
+	nft := mustFile(t, b, "/etc/nftables.d/portitor.nft")
 	for _, want := range []string{
 		"\tcounter drop_input_invalid {\n\t}\n",
 		"\tcounter drop_output_policy {\n\t}\n",
@@ -314,7 +314,7 @@ func TestNftablesLogBuiltin(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	nft := mustFile(t, b, "/etc/portitor/instances/main/nftables.nft")
+	nft := mustFile(t, b, "/etc/nftables.d/portitor.nft")
 	for _, want := range []string{
 		`counter name "drop_forward_policy" limit rate 10/second burst 20 packets log prefix "forward policy drop" group 64 comment "no rule matched: policy drop"`,
 		// The log rules are separate, so packets over the limit are
@@ -367,7 +367,7 @@ func TestParseDropCounter(t *testing.T) {
 
 func TestWireGuard(t *testing.T) {
 	b := sampleBundle(t)
-	f := b.File("/etc/portitor/instances/main/wireguard/wg0.conf")
+	f := b.File("/etc/wireguard/wg0.conf")
 	if f == nil || f.Mode != 0o600 || !f.Secret {
 		t.Fatalf("wg0.conf: %+v", f)
 	}
@@ -385,13 +385,13 @@ func TestWireGuard(t *testing.T) {
 }
 
 func TestNamedConf(t *testing.T) {
-	named := mustFile(t, sampleBundle(t), "/etc/portitor/instances/main/named.conf")
+	named := mustFile(t, sampleBundle(t), "/etc/bind/named.conf")
 	for _, want := range []string{
 		"listen-on port 53 { 127.0.0.1; 192.168.1.1; 192.168.20.1; 10.99.0.1; };",
 		"listen-on-v6 port 53 { ::1; fd00:1::1; };",
 		"allow-recursion { localhost; 192.168.1.0/24; fd00:1::/64; 192.168.20.0/24; 10.99.0.0/24; };",
 		"forwarders { 9.9.9.9; };",
-		`include "/etc/portitor/instances/main/named.conf.dnsmgr2";`,
+		`include "/etc/bind/named.conf.dnsmgr2";`,
 		`directory "/var/cache/bind";`,
 		`pid-file "/run/named/named.pid";`,
 		`session-keyfile "/run/named/session.key";`,
@@ -495,18 +495,18 @@ func TestDnsmgrAndKea(t *testing.T) {
 			Records []map[string]any
 		}
 	}
-	if err := json.Unmarshal([]byte(mustFile(t, b, "/etc/portitor/instances/main/records.json")), &records); err != nil {
+	if err := json.Unmarshal([]byte(mustFile(t, b, "/etc/portitor/records.json")), &records); err != nil {
 		t.Fatal(err)
 	}
 	if len(records.Domains) != 1 || records.Domains[0].Records[1]["mac"] != "02:00:00:00:00:10" {
 		t.Errorf("records: %+v", records)
 	}
 
-	conf := mustFile(t, b, "/etc/portitor/instances/main/kea-dhcp4.conf")
+	conf := mustFile(t, b, "/etc/kea/kea-dhcp4.conf")
 	for _, want := range []string{
 		`"interfaces": ["eth1","eth1.20"]`,
 		`"valid-lifetime": 43200`,
-		`"name": "/var/lib/kea/kea-leases4-main.csv"`,
+		`"name": "/var/lib/kea/kea-leases4.csv"`,
 	} {
 		if !strings.Contains(conf, want) {
 			t.Errorf("missing %q in\n%s", want, conf)
@@ -591,7 +591,7 @@ func TestKeaSharedNetworks(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	d4 := parseKea(t, mustFile(t, b, "/etc/portitor/instances/main/kea-dhcp4.conf")).Dhcp4
+	d4 := parseKea(t, mustFile(t, b, "/etc/kea/kea-dhcp4.conf")).Dhcp4
 	if len(d4.Subnet4) != 1 || d4.Subnet4[0].Subnet != "192.168.20.0/24" || d4.Subnet4[0].ID != 3 {
 		t.Errorf("subnet4: %+v", d4.Subnet4)
 	}
@@ -613,7 +613,7 @@ func TestKeaSharedNetworks(t *testing.T) {
 		t.Errorf("interfaces: %v", d4.InterfacesConfig.Interfaces)
 	}
 
-	d6 := parseKea(t, mustFile(t, b, "/etc/portitor/instances/main/kea-dhcp6.conf")).Dhcp6
+	d6 := parseKea(t, mustFile(t, b, "/etc/kea/kea-dhcp6.conf")).Dhcp6
 	if len(d6.Subnet6) != 0 || len(d6.SharedNetworks) != 1 || len(d6.SharedNetworks[0].Subnet6) != 2 ||
 		d6.SharedNetworks[0].Interface != "eth1" || d6.SharedNetworks[0].Subnet6[1].Subnet != "fd00:2::/64" {
 		t.Errorf("dhcp6: %+v", d6)
@@ -622,7 +622,7 @@ func TestKeaSharedNetworks(t *testing.T) {
 
 func TestIPv6Services(t *testing.T) {
 	b := sampleBundle(t)
-	nft := mustFile(t, b, "/etc/portitor/instances/main/nftables.nft")
+	nft := mustFile(t, b, "/etc/nftables.d/portitor.nft")
 	for _, want := range []string{
 		`iifname "eth1" udp dport 547 accept comment "auto: dhcpv6 server"`,
 		// A rule with both IPv4 and IPv6 addresses becomes one per version.
@@ -638,7 +638,7 @@ func TestIPv6Services(t *testing.T) {
 		t.Errorf("dhcpv4 rule changed:\n%s", nft)
 	}
 
-	radvd := mustFile(t, b, "/etc/portitor/instances/main/radvd.conf")
+	radvd := mustFile(t, b, "/etc/radvd.conf")
 	for _, want := range []string{
 		"interface eth1 {", "AdvManagedFlag on;", "AdvOtherConfigFlag on;",
 		"prefix fd00:1::/64 {", "AdvAutonomous on;", "RDNSS fd00:1::1 {", "DNSSL home.arpa {",
@@ -648,8 +648,8 @@ func TestIPv6Services(t *testing.T) {
 		}
 	}
 
-	d := parseKea(t, mustFile(t, b, "/etc/portitor/instances/main/kea-dhcp6.conf")).Dhcp6
-	if len(d.InterfacesConfig.Interfaces) != 1 || d.InterfacesConfig.Interfaces[0] != "eth1" || d.LeaseDatabase.Name != "/var/lib/kea/kea-leases6-main.csv" {
+	d := parseKea(t, mustFile(t, b, "/etc/kea/kea-dhcp6.conf")).Dhcp6
+	if len(d.InterfacesConfig.Interfaces) != 1 || d.InterfacesConfig.Interfaces[0] != "eth1" || d.LeaseDatabase.Name != "/var/lib/kea/kea-leases6.csv" {
 		t.Errorf("dhcp6 globals: %+v", d)
 	}
 	if len(d.Subnet6) != 1 {
@@ -688,7 +688,7 @@ func TestNATPerFamily(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	nft := mustFile(t, b, "/etc/portitor/instances/main/nftables.nft")
+	nft := mustFile(t, b, "/etc/nftables.d/portitor.nft")
 	for _, want := range []string{
 		`oifname "eth0" ip saddr 192.168.1.0/24 counter snat ip to 198.51.100.7 comment "nat 3"`,
 		`oifname "eth0" ip6 saddr fd00:1::/64 counter masquerade comment "nat 4"`,
@@ -717,7 +717,7 @@ func TestDnsmgrYAMLRoundTrip(t *testing.T) {
 	b := sampleBundle(t)
 	for name, want := range b.Dnsmgr {
 		path := filepath.Join(t.TempDir(), "dnsmgr2.yaml")
-		if err := os.WriteFile(path, []byte(mustFile(t, b, "/etc/portitor/instances/"+name+"/dnsmgr2.yaml")), 0o644); err != nil {
+		if err := os.WriteFile(path, []byte(mustFile(t, b, filepath.Join(want.ConfigDir, "dnsmgr2.yaml"))), 0o644); err != nil {
 			t.Fatal(err)
 		}
 		got, err := dnsmgr.LoadConfigFile(path)
@@ -785,5 +785,43 @@ func TestACMEHTTPRule(t *testing.T) {
 	in.Certificates = nil
 	if nft := Nftables(in, nil, Paths{}); strings.Contains(nft, "acme_http") {
 		t.Errorf("acme_http without certificates:\n%s", nft)
+	}
+}
+
+// The default instance's files are in the distribution's places, with
+// Kea's and named's standard names; a virtual firewall's are its own.
+func TestDefaultInstanceLayout(t *testing.T) {
+	b := sampleBundle(t)
+	named := mustFile(t, b, "/etc/bind/named.conf")
+	if strings.Contains(named, "controls { };") {
+		t.Error("the default instance's named turns off rndc, which its distribution unit reloads with")
+	}
+	kea := mustFile(t, b, "/etc/kea/kea-dhcp4.conf")
+	for _, want := range []string{`"/run/kea/kea4-ctrl-socket"`, `"/var/lib/kea/kea-leases4.csv"`} {
+		if !strings.Contains(kea, want) {
+			t.Errorf("default kea-dhcp4.conf lacks %s", want)
+		}
+	}
+	guest := mustFile(t, b, "/etc/portitor/instances/guest/kea-dhcp4.conf")
+	for _, want := range []string{`"/run/kea/kea4-guest.sock"`, `"/var/lib/kea/kea-leases4-guest.csv"`} {
+		if !strings.Contains(guest, want) {
+			t.Errorf("guest kea-dhcp4.conf lacks %s", want)
+		}
+	}
+	for _, f := range b.Files {
+		if strings.HasPrefix(f.Path, "/etc/portitor/instances/main/") {
+			t.Errorf("default instance file under instances/: %s", f.Path)
+		}
+		// records.json is JSON (no comments), read only by dnsmgr2.
+		if filepath.Base(f.Path) != "records.json" && !Generated([]byte(f.Content)) {
+			t.Errorf("%s does not start with the generated mark", f.Path)
+		}
+	}
+	u := DefaultUnits()
+	if got := u.Named(&fwconfig.Instance{Name: "main", Default: true}); got != "named.service" {
+		t.Errorf("default named unit %s", got)
+	}
+	if got := u.Kea4(&fwconfig.Instance{Name: "guest"}); got != "portitor-kea4@guest.service" {
+		t.Errorf("guest kea4 unit %s", got)
 	}
 }

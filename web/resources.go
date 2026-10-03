@@ -205,19 +205,14 @@ func prepareInstance(tx *gorm.DB, in, old *models.Instance) error {
 	if in.DhcpLeaseTime < 300 {
 		return bad("DHCP lease time must be at least 300 seconds")
 	}
-	if in.IsDefault {
-		// Exactly one default: taking the flag moves it here.
-		if err := tx.Model(&models.Instance{}).Where("is_default AND id <> ?", in.ID).Update("is_default", false).Error; err != nil {
-			return err
-		}
-	} else if old != nil && old.IsDefault {
-		return bad("mark another virtual firewall as default instead")
+	// The default instance is the host itself, with its files in the
+	// standard places: it is the first instance, and stays the default.
+	if old != nil {
+		in.IsDefault = old.IsDefault
 	} else {
 		var n int64
 		tx.Model(&models.Instance{}).Where("is_default").Count(&n)
-		if n == 0 {
-			in.IsDefault = true // the first instance is the default
-		}
+		in.IsDefault = n == 0
 	}
 	return renameInstanceRole(tx, in, old)
 }

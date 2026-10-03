@@ -124,7 +124,7 @@ func (s *Server) Echo() *echo.Echo {
 	g.PUT("/me", s.handleUpdateMe)
 	g.POST("/me/password", s.handleChangePassword)
 
-	(&resource[models.Instance, *models.Instance]{db: s.db, scope: instanceScope, tenantWrites: []string{http.MethodPut}, tenantCheck: tenantInstanceCheck, order: "is_default desc, name", prepare: prepareInstance, afterCreate: seedInstance}).register(s, g, "/instances")
+	(&resource[models.Instance, *models.Instance]{db: s.db, scope: instanceScope, tenantWrites: []string{http.MethodPut}, tenantCheck: tenantInstanceCheck, order: "is_default desc, name", prepare: prepareInstance, afterCreate: seedInstance, beforeDelete: deleteInstance}).register(s, g, "/instances")
 	(&resource[models.InterfaceZone, *models.InterfaceZone]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "name", prepare: prepareInterfaceZone, beforeDelete: deleteInterfaceZone}).register(s, g, "/interface-zones")
 	(&resource[models.Interface, *models.Interface]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, tenantCheck: tenantInterfaceCheck, filters: []string{"instance_id"}, order: "name", prepare: prepareInterface, beforeDelete: deleteInterface}).register(s, g, "/interfaces")
 	(&resource[models.WgPeer, *models.WgPeer]{db: s.db, scope: byParent("InterfaceID", "interface_id", "interfaces"), tenantWrites: tenantAll, filters: []string{"interface_id"}, order: "name", prepare: prepareWgPeer, present: presentWgPeer}).register(s, g, "/wg/peers")
@@ -279,10 +279,18 @@ func readFiles(a, b string) ([]byte, []byte, error) {
 var tenantAll = []string{http.MethodPost, http.MethodPut, http.MethodDelete}
 
 // tenantInstanceCheck: an instance admin changes their instance's
-// settings, but not its name or which instance is the default.
+// settings, but not its name.
 func tenantInstanceCheck(in, old *models.Instance) error {
-	if in.Name != old.Name || in.IsDefault != old.IsDefault {
-		return bad("only a global admin renames a virtual firewall or changes the default")
+	if in.Name != old.Name {
+		return bad("only a global admin renames a virtual firewall")
+	}
+	return nil
+}
+
+// deleteInstance refuses to delete the default instance: it is the host.
+func deleteInstance(_ *gorm.DB, in *models.Instance) error {
+	if in.IsDefault {
+		return bad("the default virtual firewall is the host itself and can't be deleted")
 	}
 	return nil
 }

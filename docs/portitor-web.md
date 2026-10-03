@@ -77,7 +77,8 @@ After an upgrade, run `migrate` before `start`. `install.py` does both.
     virtual firewall's filters are kept (clients, names with the names below them, query
     types; an empty filter matches any). The search keeps the rows that contain every
     word typed. The agent keeps the latest 2000 queries; BIND also writes every query to
-    the journal of its unit (`portitor-named@<vf>`).
+    the journal of its unit (`named` for the default virtual firewall,
+    `portitor-named@<vf>` for the others).
 - **Console window** (square terminal icon) opens a shell on the firewall, in the
   selected virtual firewall's network namespace, in a separate window.
 - **Changes banner** (blue). Shows when the configuration differs from what is on the

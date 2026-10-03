@@ -31,8 +31,20 @@ allow_from:
 #   bind_cache_dir: /var/cache/bind
 #   bind_zones_dir: /var/lib/bind
 #   bind_run_dir: /run/named
+#   # The default virtual firewall (the host itself) uses the standard files
+#   # and the distribution's own units; Fedora: named_conf /etc/named.conf,
+#   # bind_cache_dir and bind_zones_dir /var/named.
+#   nftables_file: /etc/nftables.d/portitor.nft
+#   wireguard_dir: /etc/wireguard
+#   named_conf: /etc/bind/named.conf
+#   kea_conf_dir: /etc/kea
+#   radvd_conf: /etc/radvd.conf
 # units:
-#   named: portitor-named@%s.service
+#   named: portitor-named@%s.service      # the other virtual firewalls'
 #   kea4: portitor-kea4@%s.service
 #   kea6: portitor-kea6@%s.service
 #   radvd: portitor-radvd@%s.service
+#   default_named: named.service          # Fedora: kea-dhcp4.service, kea-dhcp6.service
+#   default_kea4: kea-dhcp4-server.service
+#   default_kea6: kea-dhcp6-server.service
+#   default_radvd: radvd.service

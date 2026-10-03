@@ -55,7 +55,13 @@ firewall, the agent, makes the changes the GUI asks for. For a single box, an
 - **Virtual firewalls** are virtual routers. The default virtual firewall is the host itself; every
   other virtual firewall is a Linux network namespace (`fw-<name>`) with its own interfaces,
   routing table, nftables ruleset, BIND and Kea. **Links** are veth pairs between
-  virtual firewalls.
+  virtual firewalls. The default virtual firewall is not listed on the *Virtual firewalls*
+  page and can't be changed or deleted. Its files are where a sysadmin expects them, run by
+  the distribution's own units: `/etc/nftables.d/portitor.nft`, `/etc/wireguard/<if>.conf`,
+  `/etc/bind/named.conf` (`named`), `/etc/kea/kea-dhcp4.conf` and `kea-dhcp6.conf`
+  (`kea-dhcp4-server`, `kea-dhcp6-server`) and `/etc/radvd.conf` (`radvd`); a file it
+  replaces is kept as `<file>.portitor-orig`. Every other virtual firewall's are under
+  `/etc/portitor/instances/<name>`, run by `portitor-*@<name>` units.
 - **Interfaces** carry their own addresses, IPv4 and IPv6 mixed, as many as needed,
   each with its prefix length (`192.168.1.1/24`, `fd00:1::1/64`).
 - **IP addresses** live in a prefix tree per virtual firewall. Nesting follows from CIDR

@@ -69,6 +69,8 @@ const props = defineProps({
   // searchText(row) is more text the search finds a row by, for a column
   // whose cell slot shows what display() does not.
   searchText: { type: Function, default: null },
+  // rowFilter(row) leaves out the rows the page doesn't show.
+  rowFilter: { type: Function, default: null },
 })
 const emit = defineEmits(['changed'])
 
@@ -88,6 +90,7 @@ const auth = useAuthStore()
 const viewing = ref(false)
 const readOnly = computed(() => viewing.value || (props.shared ? !auth.isAdmin : !auth.canEdit))
 const rows = ref([])
+const shown = (list) => (props.rowFilter ? list.filter(props.rowFilter) : list)
 const loading = ref(true)
 const open = ref(false)
 const saving = ref(false)
@@ -152,7 +155,7 @@ function visible(f) {
 async function load() {
   loading.value = true
   try {
-    rows.value = await props.api.list(props.params)
+    rows.value = shown(await props.api.list(props.params))
   } catch (err) {
     toast.add({ title: errMsg(err, `Failed to load ${props.title}`), color: 'error' })
   } finally {
@@ -287,7 +290,7 @@ async function createAt(body, at) {
   try {
     const created = await props.api.create({ ...body, ...props.params })
     await placeAt(created, at)
-    rows.value = await props.api.list(props.params)
+    rows.value = shown(await props.api.list(props.params))
     emit('changed')
     await nextTick()
     return created

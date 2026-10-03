@@ -124,16 +124,16 @@ func (a *Agent) instanceStatus(ctx context.Context, in *fwconfig.Instance) Insta
 
 	units := []string{}
 	if in.DNS.Enabled {
-		units = append(units, a.cfg.Units.Named(in.Name))
+		units = append(units, a.cfg.Units.Named(in))
 	}
 	if in.DHCP.Enabled {
-		units = append(units, a.cfg.Units.Kea4(in.Name))
+		units = append(units, a.cfg.Units.Kea4(in))
 	}
 	if len(render.DHCP6Subnets(in)) > 0 {
-		units = append(units, a.cfg.Units.Kea6(in.Name))
+		units = append(units, a.cfg.Units.Kea6(in))
 	}
 	if len(in.RA) > 0 {
-		units = append(units, a.cfg.Units.Radvd(in.Name))
+		units = append(units, a.cfg.Units.Radvd(in))
 	}
 	for _, u := range units {
 		out, _ := a.run.Run(ctx, "", "systemctl", "is-active", u)
@@ -260,11 +260,11 @@ func parseWGDump(s string) []WGStatus {
 // address wins; lease file cleanup (LFC) spreads it over X.2, X.1 and X.
 func (a *Agent) ServerLeases() map[string][]ServerLease {
 	a.mu.Lock()
-	var instances []string
+	var instances []fwconfig.Instance
 	if a.applied != nil {
 		for _, in := range a.applied.Instances {
 			if in.DHCP.Enabled {
-				instances = append(instances, in.Name)
+				instances = append(instances, in)
 			}
 		}
 	}
@@ -272,12 +272,14 @@ func (a *Agent) ServerLeases() map[string][]ServerLease {
 
 	out := map[string][]ServerLease{}
 	now := time.Now()
-	for _, name := range instances {
+	for _, in := range instances {
+		name := in.Name
 		latest := map[string]ServerLease{}
 		var order []string
 		var paths []string
-		dir := render.InstanceDir(a.cfg.Paths.KeaDataDir, name)
-		for _, f := range []string{render.KeaLeaseFile(name, a.cfg.Paths), render.KeaLease6File(name, a.cfg.Paths)} {
+		files := a.cfg.Paths.Files(&in)
+		dir := files.KeaData
+		for _, f := range []string{files.Kea4Lease, files.Kea6Lease} {
 			base := filepath.Join(dir, filepath.Base(f))
 			paths = append(paths, base+".2", base+".1", base)
 		}

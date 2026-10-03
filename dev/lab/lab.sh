@@ -154,7 +154,7 @@ cmd_shell() { $RT exec -it "$PREFIX-${1:?fw or mgmt}" bash; }
 
 cmd_logs() {
 	case ${1:?fw or mgmt} in
-	fw) ex fw journalctl -f -u portitor-agent -u 'portitor-named@*' -u 'portitor-kea4@*' -u 'portitor-kea6@*' -u 'portitor-radvd@*' ;;
+	fw) ex fw journalctl -f -u portitor-agent -u 'portitor-named@*' -u 'portitor-kea4@*' -u 'portitor-kea6@*' -u 'portitor-radvd@*' -u named -u kea-dhcp4-server -u kea-dhcp6-server -u radvd ;;
 	mgmt) ex mgmt journalctl -f -u portitor-web -u dnsmasq ;;
 	*) echo "fw or mgmt" >&2; exit 2 ;;
 	esac

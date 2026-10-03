@@ -104,7 +104,7 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 	// yet; only lo is matched by index, and every namespace has it.
 	for i := range exp.Instances {
 		in := &exp.Instances[i]
-		path := filepath.Join(a.cfg.Paths.InstanceEtc(in.Name), "nftables.nft")
+		path := a.cfg.Paths.Files(in).Nftables
 		if err := a.do(ctx, command{Netns: in.NetnsName(), Name: "nft", Args: []string{"-f", path}}); err != nil {
 			return fmt.Errorf("instance %s: %w", in.Name, err)
 		}
@@ -140,7 +140,7 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 	for i := range exp.Instances {
 		in := &exp.Instances[i]
 		ns := in.NetnsName()
-		etc := a.cfg.Paths.InstanceEtc(in.Name)
+		files := a.cfg.Paths.Files(in)
 
 		links, err := a.links(ctx, ns)
 		if err != nil {
@@ -175,7 +175,7 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 				// Fed on stdin: the AppArmor profile for wg (Ubuntu,
 				// Debian) only lets it open files under /etc/wireguard,
 				// and pipes are not path-mediated.
-				conf := bundle.File(filepath.Join(etc, "wireguard", ifc.Name+".conf"))
+				conf := bundle.File(filepath.Join(files.WireGuardDir, ifc.Name+".conf"))
 				if conf == nil {
 					return fmt.Errorf("instance %s: %s: no rendered WireGuard config", in.Name, ifc.Name)
 				}
@@ -231,7 +231,7 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 			pktsWant[in.Name] = ns
 		}
 		if in.DNS.Enabled && in.DNS.QueryLog != nil {
-			dnsqWant[in.Name] = queryLogItem{unit: a.cfg.Units.Named(in.Name), filter: *in.DNS.QueryLog}
+			dnsqWant[in.Name] = queryLogItem{unit: a.cfg.Units.Named(in), filter: *in.DNS.QueryLog}
 		}
 
 		var routes []ipRoute
@@ -304,7 +304,7 @@ func (a *Agent) checkRulesets(ctx context.Context, exp *fwconfig.Document, b *re
 	}
 	defer os.RemoveAll(dir)
 	for _, in := range exp.Instances {
-		f := b.File(filepath.Join(a.cfg.Paths.InstanceEtc(in.Name), "nftables.nft"))
+		f := b.File(a.cfg.Paths.Files(&in).Nftables)
 		path := filepath.Join(dir, in.Name+".nft")
 		if err := os.WriteFile(path, []byte(f.Content), 0o600); err != nil {
 			return err
@@ -333,10 +333,17 @@ func (a *Agent) writeBundle(b *render.Bundle) (map[string]bool, error) {
 			changed[f.Path] = true
 		}
 	}
-	// Stale WireGuard configs hold private keys: remove them.
+	// Stale WireGuard configs hold private keys: remove them. In the
+	// standard directory, only ours: the sysadmin may keep wg-quick's there.
 	matches, _ := filepath.Glob(filepath.Join(a.cfg.Paths.EtcDir, "instances", "*", "wireguard", "*.conf"))
+	std, _ := filepath.Glob(filepath.Join(a.cfg.Paths.WireGuardDir, "*.conf"))
+	for _, m := range std {
+		if c, err := os.ReadFile(m); err == nil && render.Generated(c) {
+			matches = append(matches, m)
+		}
+	}
 	for _, m := range matches {
-		if !keep[m] {
+		if !keep[m] && !a.cfg.DryRun {
 			os.Remove(m)
 		}
 	}
@@ -344,12 +351,23 @@ func (a *Agent) writeBundle(b *render.Bundle) (map[string]bool, error) {
 }
 
 func (a *Agent) writeFile(f render.File) (bool, error) {
-	if old, err := os.ReadFile(f.Path); err == nil && bytes.Equal(old, []byte(f.Content)) {
+	old, err := os.ReadFile(f.Path)
+	if err == nil && bytes.Equal(old, []byte(f.Content)) {
 		return false, nil
 	}
 	if a.cfg.DryRun {
 		a.log.Infof("dry-run: would write %s (%d bytes)", f.Path, len(f.Content))
 		return true, nil
+	}
+	// The default instance's files replace the distribution's (or the
+	// sysadmin's): keep the first one we replace.
+	if bak := f.Path + ".portitor-orig"; err == nil && !render.Generated(old) {
+		if _, err := os.Lstat(bak); errors.Is(err, os.ErrNotExist) {
+			if err := os.Rename(f.Path, bak); err != nil {
+				return false, err
+			}
+			a.log.Infof("kept %s as %s", f.Path, bak)
+		}
 	}
 	if err := atomicWrite(f.Path, []byte(f.Content), f.Mode); err != nil {
 		return false, err
@@ -502,36 +520,44 @@ func (a *Agent) placeLinks(ctx context.Context, doc fwconfig.Document) error {
 }
 
 // applyServices runs dnsmgr2 and starts/stops/reloads BIND, Kea and radvd
-// for an instance.
+// for an instance. The default instance's run under the distribution's own
+// units, from the standard files (render.Paths.Files).
 func (a *Agent) applyServices(ctx context.Context, in *fwconfig.Instance, b *render.Bundle, changed map[string]bool) error {
-	etc := a.cfg.Paths.InstanceEtc(in.Name)
+	files := a.cfg.Paths.Files(in)
 	state := a.cfg.Paths.InstanceState(in.Name)
-	named := a.cfg.Units.Named(in.Name)
+	named := a.cfg.Units.Named(in)
+	if in.Default {
+		if err := a.moveDefaultInstance(ctx, in); err != nil {
+			return fmt.Errorf("instance %s: %w", in.Name, err)
+		}
+	}
 
 	cfg, ok := b.Dnsmgr[in.Name]
 	if ok {
 		if !a.cfg.DryRun {
-			// named's own directories (the unit mounts them over the
-			// standard ones), and dnsmgr2's scratch directory.
-			p := a.cfg.Paths
-			bindDirs := []string{
-				render.InstanceDir(p.BindCacheDir, in.Name),
-				p.BindZones(in.Name),
-				render.InstanceDir(p.BindRunDir, in.Name),
-			}
-			for _, d := range append(bindDirs, filepath.Join(state, "tmp")) {
+			// named's own directories (a virtual firewall's unit mounts
+			// them over the standard ones), and dnsmgr2's scratch
+			// directory.
+			// The default instance's are the distribution's: their
+			// owner is left alone if they exist.
+			bindDirs := []string{files.BindCache, files.BindZones, files.BindRun}
+			for _, d := range bindDirs {
+				_, err := os.Stat(d)
 				if err := os.MkdirAll(d, 0o750); err != nil {
 					return err
 				}
+				if err != nil || !in.Default {
+					a.chownBind(d)
+				}
 			}
-			for _, d := range bindDirs {
-				a.chownBind(d)
+			if err := os.MkdirAll(filepath.Join(state, "tmp"), 0o750); err != nil {
+				return err
 			}
 			// named's include file dnsmgr2 writes on its first sync;
 			// make sure it exists before named starts.
-			ensureFile(filepath.Join(etc, "named.conf.dnsmgr2"), "")
+			ensureFile(files.NamedInclude, "")
 		}
-		if err := a.do(ctx, command{Name: "systemctl", Args: []string{"enable", "--now", named}}); err != nil {
+		if err := a.enable(ctx, in, named); err != nil {
 			return err
 		}
 		if err := a.dnsmgrSync(cfg); err != nil {
@@ -540,40 +566,128 @@ func (a *Agent) applyServices(ctx context.Context, in *fwconfig.Instance, b *ren
 	}
 
 	if in.DNS.Enabled {
-		if changed[filepath.Join(etc, "named.conf")] {
+		if changed[files.NamedConf] {
 			if err := a.do(ctx, command{Name: "systemctl", Args: []string{"reload-or-restart", named}}); err != nil {
 				return err
 			}
 		}
 	} else {
-		a.disable(ctx, named)
+		a.disableService(ctx, in, named, files.NamedConf)
 	}
 
 	// Kea and radvd are rendered in full (no dnsmgr2).
-	kea4, kea6, radvd := a.cfg.Units.Kea4(in.Name), a.cfg.Units.Kea6(in.Name), a.cfg.Units.Radvd(in.Name)
 	for _, svc := range []struct {
 		unit, conf string
 		on         bool
 		reload     string
 	}{
-		{kea4, "kea-dhcp4.conf", in.DHCP.Enabled, "restart"},
-		{kea6, "kea-dhcp6.conf", len(render.DHCP6Subnets(in)) > 0, "restart"},
-		{radvd, "radvd.conf", len(in.RA) > 0, "reload-or-restart"},
+		{a.cfg.Units.Kea4(in), files.Kea4, in.DHCP.Enabled, "restart"},
+		{a.cfg.Units.Kea6(in), files.Kea6, len(render.DHCP6Subnets(in)) > 0, "restart"},
+		{a.cfg.Units.Radvd(in), files.Radvd, len(in.RA) > 0, "reload-or-restart"},
 	} {
 		if !svc.on {
-			a.disable(ctx, svc.unit)
+			a.disableService(ctx, in, svc.unit, svc.conf)
 			continue
 		}
-		if err := a.do(ctx, command{Name: "systemctl", Args: []string{"enable", "--now", svc.unit}}); err != nil {
+		if err := a.enable(ctx, in, svc.unit); err != nil {
 			return err
 		}
-		if changed[filepath.Join(etc, svc.conf)] {
+		if changed[svc.conf] {
 			if err := a.do(ctx, command{Name: "systemctl", Args: []string{svc.reload, svc.unit}}); err != nil {
 				return err
 			}
 		}
 	}
 	return nil
+}
+
+// enable enables and starts a unit. The default instance's are the
+// distribution's, which a Portitor install may have masked (iso/target.sh).
+func (a *Agent) enable(ctx context.Context, in *fwconfig.Instance, unit string) error {
+	if in.Default {
+		if out, _ := a.run.Run(ctx, "", "systemctl", "is-enabled", unit); strings.HasPrefix(strings.TrimSpace(string(out)), "masked") {
+			if err := a.do(ctx, command{Name: "systemctl", Args: []string{"unmask", unit}}); err != nil {
+				return err
+			}
+		}
+	}
+	return a.do(ctx, command{Name: "systemctl", Args: []string{"enable", "--now", unit}})
+}
+
+// disableService stops a service the instance no longer runs. The default
+// instance's units are the distribution's: they are left alone unless they
+// run from our file, so a sysadmin's own named, Kea or radvd keeps running.
+func (a *Agent) disableService(ctx context.Context, in *fwconfig.Instance, unit, conf string) {
+	if in.Default {
+		if c, err := os.ReadFile(conf); err != nil || !render.Generated(c) {
+			return
+		}
+	}
+	a.disable(ctx, unit)
+}
+
+// moveDefaultInstance moves a default instance that ran like a virtual
+// firewall (portitor-*@<name> units, files under etc_dir/instances/<name>,
+// before the default instance used the standard places) to the
+// distribution's units and directories: its units stop, Kea's leases and
+// named's keys and zones move to the standard directories, and dnsmgr2
+// starts over so it writes the zones' new paths.
+func (a *Agent) moveDefaultInstance(ctx context.Context, in *fwconfig.Instance) error {
+	etc := a.cfg.Paths.InstanceEtc(in.Name)
+	if _, err := os.Stat(etc); err != nil {
+		return nil
+	}
+	a.log.Infof("instance %s: moving to the standard files and units", in.Name)
+	a.stopServices(ctx, in.Name)
+	// A unit stopped mid-restart is left failed; it is gone for good.
+	for _, u := range a.cfg.Units.All(&fwconfig.Instance{Name: in.Name}) {
+		if out, _ := a.run.Run(ctx, "", "systemctl", "is-failed", u); strings.TrimSpace(string(out)) == "failed" {
+			_, _ = a.run.Run(ctx, "", "systemctl", "reset-failed", u)
+		}
+	}
+	if a.cfg.DryRun {
+		return nil
+	}
+	old := a.cfg.Paths.Files(&fwconfig.Instance{Name: in.Name})
+	cur := a.cfg.Paths.Files(in)
+	for _, d := range []struct{ from, to string }{
+		{old.KeaData, cur.KeaData},
+		{old.BindCache, cur.BindCache},
+		{old.BindZones, cur.BindZones},
+	} {
+		entries, err := os.ReadDir(d.from)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			// kea-leases4-<name>.csv.1 -> kea-leases4.csv.1
+			from := filepath.Join(d.from, e.Name())
+			to := filepath.Join(d.to, strings.Replace(e.Name(), "-"+in.Name+".csv", ".csv", 1))
+			if _, err := os.Lstat(to); err == nil {
+				// A copy of what is there (Kea's server id, which
+				// install.py copied into each instance) goes, and so do
+				// named's trust anchor state, which it keeps itself.
+				if strings.HasPrefix(e.Name(), "managed-keys.bind") {
+					_ = os.Remove(from)
+				} else if x, err := os.ReadFile(from); err == nil {
+					if y, err := os.ReadFile(to); err == nil && bytes.Equal(x, y) {
+						_ = os.Remove(from)
+					}
+				}
+				continue
+			}
+			if err := os.Rename(from, to); err != nil {
+				return err
+			}
+		}
+		_ = os.Remove(d.from) // if empty
+	}
+	_ = os.RemoveAll(old.BindRun)
+	_ = os.RemoveAll(old.KeaSocket)
+	if err := os.Remove(filepath.Join(a.cfg.Paths.InstanceState(in.Name), "dnsmgr2.sqlite")); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return os.RemoveAll(etc)
 }
 
 func (a *Agent) dnsmgrSync(cfg dnsmgr.ConfigRoot) error {
@@ -595,11 +709,11 @@ func (a *Agent) dnsmgrSync(cfg dnsmgr.ConfigRoot) error {
 	return nil
 }
 
+// stopServices stops a virtual firewall's portitor-*@<instance> units.
 func (a *Agent) stopServices(ctx context.Context, instance string) {
-	a.disable(ctx, a.cfg.Units.Named(instance))
-	a.disable(ctx, a.cfg.Units.Kea4(instance))
-	a.disable(ctx, a.cfg.Units.Kea6(instance))
-	a.disable(ctx, a.cfg.Units.Radvd(instance))
+	for _, u := range a.cfg.Units.All(&fwconfig.Instance{Name: instance}) {
+		a.disable(ctx, u)
+	}
 }
 
 // disable stops a unit if it is enabled or running. Errors are ignored:

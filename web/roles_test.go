@@ -31,6 +31,7 @@ func TestRoles(t *testing.T) {
 	env := newEnv(t)
 	ann := env.create("/api/users", map[string]string{"username": "ann", "password": "a long password", "role": "viewer"})
 
+	env.create("/api/instances", map[string]any{"name": "main"}) // the default, which stays
 	inst := env.create("/api/instances", map[string]any{"name": "lab"})
 	r, ok := env.roles()["vf-lab"]
 	if !ok || r.InstanceID == nil || *r.InstanceID != inst {

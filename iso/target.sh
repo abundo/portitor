@@ -26,7 +26,9 @@ if [ -f "$d/firstboot.answers" ]; then
 	install -m 0600 "$d/firstboot.answers" /etc/portitor/firstboot.answers
 fi
 
-# The agent runs BIND, Kea and radvd per instance (portitor-*@ units).
+# The agent runs BIND, Kea and radvd: the default virtual firewall's under
+# these units, which it unmasks when it uses them, the others' under
+# portitor-*@ units.
 systemctl mask named.service kea-dhcp4-server.service kea-dhcp6-server.service \
 	kea-ctrl-agent.service kea-dhcp-ddns-server.service radvd.service
 
