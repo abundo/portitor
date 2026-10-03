@@ -305,6 +305,10 @@ func filterRoutes(t *agentapi.RoutingTableResponse, names map[string]bool) {
 	t.Routes = slices.DeleteFunc(t.Routes, func(r agentapi.RouteEntry) bool { return !names[r.Instance] })
 }
 
+func filterBGP(b *agentapi.BGPResponse, names map[string]bool) {
+	b.Instances = slices.DeleteFunc(b.Instances, func(x agentapi.BGPInstance) bool { return !names[x.Instance] })
+}
+
 func filterNeighbours(n *agentapi.NeighboursResponse, names map[string]bool) {
 	n.IP = slices.DeleteFunc(n.IP, func(x agentapi.IPNeighbour) bool { return !names[x.Instance] })
 	n.LLDP = slices.DeleteFunc(n.LLDP, func(x agentapi.LLDPNeighbour) bool { return !names[x.Instance] })

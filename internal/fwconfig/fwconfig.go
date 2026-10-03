@@ -49,6 +49,11 @@ type Instance struct {
 	// Certificates are TLS certificates the agent gets and renews by
 	// ACME (Let's Encrypt).
 	Certificates []Certificate `json:"certificates,omitempty"`
+	// BGP runs FRR in the instance; nil when it is off.
+	BGP *BGP `json:"bgp,omitempty"`
+	// RoutingPolicy holds the prefix lists, AS path and community lists
+	// and route maps BGP refers to.
+	RoutingPolicy RoutingPolicy `json:"routing_policy,omitzero"`
 	// LogDrops lists the filter chains (ChainInput, ...) that log, rate
 	// limited, what no rule decided on before the chain's policy drops it.
 	LogDrops []string `json:"log_drops,omitempty"`

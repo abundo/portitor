@@ -13,3 +13,6 @@ export const inlineField = {
 
 // wideModal is the `ui` of a UModal holding such a form.
 export const wideModal = { content: 'sm:max-w-2xl' }
+
+// widerModal is wideModal for a form with a table of entries in it.
+export const widerModal = { content: 'sm:max-w-3xl' }

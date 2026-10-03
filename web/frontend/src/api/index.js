@@ -20,6 +20,13 @@ export const interfaces = crud('/interfaces')
 export const wgPeers = crud('/wg/peers')
 export const links = crud('/links')
 export const routes = crud('/routes')
+export const prefixLists = crud('/routing/prefix-lists')
+export const asPathLists = crud('/routing/as-path-lists')
+export const communityLists = crud('/routing/community-lists')
+export const routeMaps = crud('/routing/route-maps')
+export const bgpConfig = crud('/bgp/config')
+export const bgpPeerGroups = crud('/bgp/peer-groups')
+export const bgpNeighbors = crud('/bgp/neighbors')
 export const rules = crud('/rules')
 export const nat = crud('/nat')
 export const ipamPrefixes = crud('/ipam/prefixes')
@@ -125,6 +132,7 @@ export const api = {
   agentLeases: () => http.get('/agent/leases').then((r) => r.data),
   agentNeighbours: () => http.get('/agent/neighbours').then((r) => r.data),
   agentRoutingTable: () => http.get('/agent/routing-table').then((r) => r.data),
+  agentBgp: () => http.get('/agent/bgp').then((r) => r.data),
   agentRuleCounters: () => http.get('/agent/rule-counters').then((r) => r.data),
   agentLogs: (after) => http.get('/agent/logs', { params: { after } }).then((r) => r.data),
   agentPacketLog: (after) =>

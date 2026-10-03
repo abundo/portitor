@@ -1,0 +1,50 @@
+# SPDX-FileCopyrightText: 2026 The Portitor contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# FRR (zebra and bgpd, BGP) for one Portitor instance, inside the
+# instance's network namespace. Started and reloaded by portitor-agent; do
+# not enable by hand. FRR runs with the instance as its pathspace: its
+# config is /etc/frr/%i (the instance's frr directory, mounted there) and
+# its sockets /run/frr/%i, so `vtysh -N %i` talks to it.
+[Unit]
+Description=FRR routing (BGP) for Portitor instance %i
+After=portitor-agent.service
+PartOf=portitor-agent.service
+
+[Service]
+# frrinit.sh starts watchfrr, which starts and watches the daemons.
+Type=forking
+PIDFile=/run/frr/%i/watchfrr.pid
+# zebra and bgpd refuse to start without CAP_SYS_ADMIN in their bounding
+# set (netns-exec --keep-sys-admin); they run as the frr user.
+ExecStart=/usr/bin/portitor-agent netns-exec --keep-sys-admin %i -- /usr/lib/frr/frrinit.sh start %i
+ExecStop=/usr/lib/frr/frrinit.sh stop %i
+# frr-reload.py (frr-pythontools) applies the changes to frr.conf without
+# restarting, through vtysh -N %i (the sockets in /run/frr/%i). Not
+# frrinit.sh reload: it takes no pathspace, and it restarts watchfrr from
+# here, outside the instance's namespace.
+ExecReload=/usr/lib/frr/frr-reload.py --reload --pathspace %i --confdir /etc/frr/%i --rundir /run/frr/%i /etc/frr/%i/frr.conf
+TimeoutSec=2min
+Restart=on-failure
+RestartSec=5
+# Multitenancy: an instance's daemons see only their own files: of FRR's
+# directories only the instance's (pathspace) one, so not the other
+# instances' sockets either. The rest of the system is read-only, with
+# private /tmp and IPC. FRR forks (watchfrr and its daemons), so it has no
+# PID namespace of its own: systemd reads watchfrr's PID from the PID file.
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateIPC=yes
+PrivateDevices=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+TemporaryFileSystem=/etc/portitor /var/lib/portitor /etc/frr /run/frr /var/lib/frr
+BindReadOnlyPaths=/etc/portitor/instances/%i/frr:/etc/frr/%i
+BindReadOnlyPaths=/var/lib/portitor/instances/%i
+# The instance's run and state directories, which the agent makes for the
+# frr user before it starts the unit.
+BindPaths=/run/frr/%i /var/lib/frr/%i
+ReadWritePaths=-/var/tmp/frr -/var/log/frr

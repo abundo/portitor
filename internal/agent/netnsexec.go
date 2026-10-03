@@ -44,7 +44,12 @@ var droppedCaps = []uintptr{
 // It enters the namespace itself rather than through nsenter, so it can
 // drop droppedCaps after the setns: systemd's CapabilityBoundingSet would
 // drop CAP_SYS_ADMIN before it.
-func NetnsExec(stateDir, instance string, argv []string) error {
+//
+// keepSysAdmin keeps CAP_SYS_ADMIN, for FRR: zebra and bgpd refuse to
+// start without it in their bounding set (they ask for it, for VRFs). Its
+// daemons still run as the frr user, with only the capabilities they ask
+// for, and their config is the validated frr.conf.
+func NetnsExec(stateDir, instance string, argv []string, keepSysAdmin bool) error {
 	if len(argv) == 0 {
 		return errors.New("no command")
 	}
@@ -76,6 +81,9 @@ func NetnsExec(stateDir, instance string, argv []string) error {
 		}
 	}
 	for _, c := range droppedCaps {
+		if keepSysAdmin && c == unix.CAP_SYS_ADMIN {
+			continue
+		}
 		// EINVAL: a capability this kernel does not know.
 		if err := unix.Prctl(unix.PR_CAPBSET_DROP, c, 0, 0, 0); err != nil && !errors.Is(err, unix.EINVAL) {
 			return fmt.Errorf("drop capability %d: %w", c, err)

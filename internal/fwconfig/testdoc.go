@@ -153,6 +153,37 @@ func SampleDocument() Document {
 				DHCP: DHCPServer{Enabled: true, Subnets: []DHCPSubnet{
 					{Prefix: "192.168.50.0/24", Interface: "eth2", RangeStart: "192.168.50.100", RangeEnd: "192.168.50.200", DNSServers: []string{"9.9.9.9"}},
 				}},
+				BGP: &BGP{
+					Enabled: true, ASN: 65010, RouterID: "10.255.0.2", LogNeighborChanges: true,
+					Networks:     []BGPNetwork{{Prefix: "192.168.50.0/24"}},
+					Aggregates:   []BGPAggregate{{Prefix: "192.168.0.0/16", SummaryOnly: true}},
+					Redistribute: []BGPRedistribute{{Family: "ipv4", Source: RedistConnected, RouteMap: "connected"}},
+					PeerGroups: []BGPPeer{{
+						Name: "upstream", RemoteAS: "65000", Password: "s3cret",
+						IPv4: BGPAddressFamily{Activate: true, RouteMapIn: "from-upstream", PrefixListOut: "ours", SoftReconfiguration: true},
+					}},
+					Neighbors: []BGPPeer{
+						{Address: "10.255.0.1", PeerGroup: "upstream", Description: "main"},
+						{Address: "2001:db8::1", RemoteAS: "65001", EBGPMultihop: 2, UpdateSource: "eth2",
+							IPv6: BGPAddressFamily{Activate: true, NextHopSelf: true, RemovePrivateAS: true}},
+					},
+				},
+				RoutingPolicy: RoutingPolicy{
+					PrefixLists: []PrefixList{
+						{Name: "ours", Family: "ipv4", Entries: []PrefixListEntry{{Seq: 5, Action: Permit, Prefix: "192.168.0.0/16", LE: 24}}},
+					},
+					ASPathLists: []ASPathList{{Name: "short", Entries: []ASPathEntry{{Action: Permit, Regex: "^65000_[0-9]+$"}}}},
+					CommunityLists: []CommunityList{
+						{Name: "noexport", Kind: CommunityStandard, Entries: []CommunityEntry{{Action: Permit, Value: "65000:666 no-export"}}},
+					},
+					RouteMaps: []RouteMap{
+						{Name: "from-upstream", Entries: []RouteMapEntry{
+							{Seq: 10, Action: Deny, MatchCommunity: "noexport"},
+							{Seq: 20, Action: Permit, MatchASPath: "short", SetLocalPreference: ptr(int64(200)), SetCommunity: "65010:1", SetCommunityAdditive: true},
+						}},
+						{Name: "connected", Entries: []RouteMapEntry{{Seq: 10, Action: Permit, MatchPrefixList: "ours"}}},
+					},
+				},
 			},
 		},
 		Links: []Link{{

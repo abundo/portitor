@@ -279,7 +279,13 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 			if err := a.do(ctx, ipCmd("", "netns", "del", ns)); err != nil {
 				return err
 			}
-			os.RemoveAll(a.cfg.Paths.InstanceEtc(strings.TrimPrefix(ns, netnsPrefix)))
+			name := strings.TrimPrefix(ns, netnsPrefix)
+			os.RemoveAll(a.cfg.Paths.InstanceEtc(name))
+			if !a.cfg.DryRun {
+				files := a.cfg.Paths.Files(&fwconfig.Instance{Name: name})
+				os.RemoveAll(files.FRRRun)
+				os.RemoveAll(files.FRRState)
+			}
 		}
 	}
 
@@ -520,8 +526,8 @@ func (a *Agent) placeLinks(ctx context.Context, doc fwconfig.Document) error {
 	return nil
 }
 
-// applyServices runs dnsmgr2 and starts/stops/reloads BIND, Kea and radvd
-// for an instance. The default instance's run under the distribution's own
+// applyServices runs dnsmgr2 and starts/stops/reloads BIND, Kea, radvd
+// and FRR for an instance. The default instance's run under the distribution's own
 // units, from the standard files (render.Paths.Files).
 func (a *Agent) applyServices(ctx context.Context, in *fwconfig.Instance, b *render.Bundle, changed map[string]bool) error {
 	files := a.cfg.Paths.Files(in)
@@ -597,6 +603,54 @@ func (a *Agent) applyServices(ctx context.Context, in *fwconfig.Instance, b *ren
 			if err := a.do(ctx, command{Name: "systemctl", Args: []string{svc.reload, svc.unit}}); err != nil {
 				return err
 			}
+		}
+	}
+	return a.applyFRR(ctx, in, changed)
+}
+
+// applyFRR starts, reloads or stops FRR (BGP). It is off unless the
+// instance's BGP is enabled. A changed daemons file restarts it; a changed
+// frr.conf is reloaded (frr-reload.py), which keeps the BGP sessions up, or
+// restarted if the reload fails.
+func (a *Agent) applyFRR(ctx context.Context, in *fwconfig.Instance, changed map[string]bool) error {
+	files := a.cfg.Paths.Files(in)
+	unit := a.cfg.Units.FRR(in)
+	if !in.BGPRunning() {
+		a.disableService(ctx, in, unit, files.FRRConf)
+		// Like a stale WireGuard config, a stale frr.conf holds secrets (the
+		// neighbours' passwords): remove ours.
+		if c, err := os.ReadFile(files.FRRConf); err == nil && render.Generated(c) && !a.cfg.DryRun {
+			_ = os.Remove(files.FRRConf)
+		}
+		return nil
+	}
+	if !in.Default && !a.cfg.DryRun {
+		// portitor-frr@.service mounts these over its tmpfs; FRR's daemons
+		// write them as the frr user. The default instance's are the
+		// distribution's.
+		for _, d := range []string{files.FRRRun, files.FRRState} {
+			if err := os.MkdirAll(d, 0o755); err != nil {
+				return err
+			}
+			chownTo("frr", d)
+		}
+	}
+	active, _ := a.run.Run(ctx, "", "systemctl", "is-active", unit)
+	running := strings.TrimSpace(string(active)) == "active"
+	if err := a.enable(ctx, in, unit); err != nil {
+		return err
+	}
+	switch {
+	case !running:
+		// enable --now started it from the new files.
+	case changed[files.FRRDaemons]:
+		return a.do(ctx, command{Name: "systemctl", Args: []string{"restart", unit}})
+	case changed[files.FRRConf]:
+		// The reload needs frr-reload.py (Debian's frr-pythontools); without
+		// it, or when it fails, a restart applies the change.
+		if err := a.do(ctx, command{Name: "systemctl", Args: []string{"reload", unit}}); err != nil {
+			a.log.Infof("instance %s: FRR reload failed, restarting it: %v", in.Name, err)
+			return a.do(ctx, command{Name: "systemctl", Args: []string{"restart", unit}})
 		}
 	}
 	return nil
@@ -717,18 +771,22 @@ func (a *Agent) stopServices(ctx context.Context, instance string) {
 	}
 }
 
-// disable stops a unit if it is enabled or running. Errors are ignored:
+// disable stops a unit if it is enabled or running (or starting). Errors are ignored:
 // the unit may simply not exist.
 func (a *Agent) disable(ctx context.Context, unit string) {
 	enabled, _ := a.run.Run(ctx, "", "systemctl", "is-enabled", unit)
 	active, _ := a.run.Run(ctx, "", "systemctl", "is-active", unit)
-	if strings.TrimSpace(string(enabled)) == "enabled" || strings.TrimSpace(string(active)) == "active" {
+	// A unit that keeps failing and restarting is "activating".
+	if state := strings.TrimSpace(string(active)); strings.TrimSpace(string(enabled)) == "enabled" || state == "active" || state == "activating" || state == "reloading" {
 		_, _ = a.run.Run(ctx, "", "systemctl", "disable", "--now", unit)
 	}
 }
 
-func (a *Agent) chownBind(path string) {
-	u, err := user.Lookup(a.cfg.BindUser)
+func (a *Agent) chownBind(path string) { chownTo(a.cfg.BindUser, path) }
+
+// chownTo gives path to a user and its group, if the user exists.
+func chownTo(name, path string) {
+	u, err := user.Lookup(name)
 	if err != nil {
 		return
 	}

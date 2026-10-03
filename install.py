@@ -111,6 +111,7 @@ AGENT_UNITS = (
     "portitor-kea4@.service",
     "portitor-kea6@.service",
     "portitor-radvd@.service",
+    "portitor-frr@.service",
 )
 # Debian/Ubuntu confine named and Kea with AppArmor; our rules
 # (deploy/apparmor/<profile>) go in each profile's local include, between
@@ -453,10 +454,10 @@ def install_agent(host: Host, binary: Path, deploy: Path, version: str, assume_y
         on = "" if host.local else f" (on {host.name})"
         log(f"==> portitor-agent is installed but not started. Next steps{on}:")
         log("    install nftables, iproute2, wireguard-tools, bind9, kea-dhcp4-server,")
-        log("      kea-dhcp6-server, radvd, tcpdump, tshark and mtr-tiny (or your distribution's equivalents)")
+        log("      kea-dhcp6-server, radvd, frr, frr-pythontools, tcpdump, tshark and mtr-tiny (or your distribution's equivalents)")
         log("    portitor-agent init --host <management address>   # token + fingerprint for the GUI")
         log(f"    $EDITOR {AGENT_CONFIG}                     # listen, allow_from, bind_user")
-        log("    the default virtual firewall (the host) runs the distribution's named, Kea and radvd:")
+        log("    the default virtual firewall (the host) runs the distribution's named, Kea, radvd and FRR:")
         log("      the agent writes their standard config files (keeping the originals as *.portitor-orig)")
         log("      and enables the ones it uses; disable the others if you don't run them yourself")
         log("    remove the firewall's interfaces from netplan, NetworkManager or systemd-networkd")

@@ -175,6 +175,14 @@ func ifaceLists(tx *gorm.DB, instanceID uint, zones bool, visit func(where strin
 // renameIfaceRefs rewrites old to name in the instance's rule lists and,
 // for an interface (zones true), in its interface zones.
 func renameIfaceRefs(tx *gorm.DB, instanceID uint, old, name string, zones bool) error {
+	if zones {
+		// A BGP neighbour's or peer group's update source.
+		for _, m := range []any{&models.BgpNeighbor{}, &models.BgpPeerGroup{}} {
+			if err := tx.Model(m).Where("instance_id = ? AND update_source = ?", instanceID, old).UpdateColumn("update_source", name).Error; err != nil {
+				return err
+			}
+		}
+	}
 	return ifaceLists(tx, instanceID, zones, func(_ string, list *models.StringList) bool {
 		changed := false
 		for i := range *list {
@@ -202,6 +210,15 @@ func refuseIfaceInUse(tx *gorm.DB, instanceID uint, name string) error {
 	})
 	if err != nil {
 		return err
+	}
+	var neighbors, groups []string
+	tx.Model(&models.BgpNeighbor{}).Where("instance_id = ? AND update_source = ?", instanceID, name).Order("address").Pluck("address", &neighbors)
+	tx.Model(&models.BgpPeerGroup{}).Where("instance_id = ? AND update_source = ?", instanceID, name).Order("name").Pluck("name", &groups)
+	for _, n := range neighbors {
+		users = append(users, "BGP neighbour "+n)
+	}
+	for _, g := range groups {
+		users = append(users, "BGP peer group "+g)
 	}
 	if len(users) > 0 {
 		if len(users) > 5 {

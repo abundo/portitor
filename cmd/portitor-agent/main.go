@@ -120,7 +120,7 @@ func main() {
 
 	var stateDir string
 	nsExec := &cobra.Command{
-		Use:                "netns-exec <instance> -- <command> [args...]",
+		Use:                "netns-exec [--keep-sys-admin] <instance> -- <command> [args...]",
 		Short:              "Exec a command in an instance's network namespace (used by systemd units)",
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -128,10 +128,14 @@ func main() {
 				stateDir = strings.TrimPrefix(args[0], "--state-dir=")
 				args = args[1:]
 			}
-			if len(args) < 3 || args[1] != "--" {
-				return fmt.Errorf("usage: portitor-agent netns-exec [--state-dir=DIR] <instance> -- <command> [args...]")
+			keepSysAdmin := len(args) > 0 && args[0] == "--keep-sys-admin"
+			if keepSysAdmin {
+				args = args[1:]
 			}
-			return agent.NetnsExec(stateDir, args[0], args[2:])
+			if len(args) < 3 || args[1] != "--" {
+				return fmt.Errorf("usage: portitor-agent netns-exec [--state-dir=DIR] [--keep-sys-admin] <instance> -- <command> [args...]")
+			}
+			return agent.NetnsExec(stateDir, args[0], args[2:], keepSysAdmin)
 		},
 	}
 	stateDir = render.DefaultPaths().StateDir

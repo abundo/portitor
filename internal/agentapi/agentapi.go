@@ -665,3 +665,66 @@ const (
 	// ConnectionsMaxSessions is how many streams may run at once.
 	ConnectionsMaxSessions = 4
 )
+
+// BGPResponse is the BGP state of the instances that run it, from FRR.
+type BGPResponse struct {
+	Instances []BGPInstance `json:"instances"`
+}
+
+// BGPInstance is one instance's BGP state. Error says why FRR could not
+// be asked (not running yet, say).
+type BGPInstance struct {
+	Instance string        `json:"instance"`
+	RouterID string        `json:"router_id,omitempty"`
+	ASN      uint32        `json:"asn,omitempty"`
+	Error    string        `json:"error,omitempty"`
+	Peers    []BGPPeerInfo `json:"peers"`
+	// Routes are the best and other paths of the BGP table, at most
+	// BGPMaxRoutes per address family.
+	Routes          []BGPRoute `json:"routes"`
+	RoutesTruncated bool       `json:"routes_truncated,omitempty"`
+}
+
+// BGPMaxRoutes caps the routes per address family in a BGPInstance.
+const BGPMaxRoutes = 2000
+
+// BGPPeerInfo is a neighbour's session.
+type BGPPeerInfo struct {
+	Address     string `json:"address"`
+	RemoteAS    uint32 `json:"remote_as"`
+	LocalAS     uint32 `json:"local_as,omitempty"`
+	Description string `json:"description,omitempty"`
+	Hostname    string `json:"hostname,omitempty"`
+	// State is the BGP state (Idle, Connect, Active, OpenSent,
+	// OpenConfirm, Established), or Idle (Admin) when shut down.
+	State string `json:"state"`
+	// Uptime is the time in the state, as FRR writes it (01:02:03, 1d02h).
+	Uptime     string `json:"uptime,omitempty"`
+	UptimeSecs int64  `json:"uptime_secs,omitempty"`
+	MsgRcvd    int64  `json:"msg_rcvd"`
+	MsgSent    int64  `json:"msg_sent"`
+	// Families are the address families' prefix counts, by "ipv4" and
+	// "ipv6".
+	Families  map[string]BGPPeerFamily `json:"families"`
+	LastReset string                   `json:"last_reset,omitempty"`
+}
+
+type BGPPeerFamily struct {
+	PrefixesReceived int64 `json:"prefixes_received"`
+	PrefixesSent     int64 `json:"prefixes_sent"`
+}
+
+// BGPRoute is a path of the BGP table.
+type BGPRoute struct {
+	Family    string `json:"family"`
+	Prefix    string `json:"prefix"`
+	NextHop   string `json:"next_hop,omitempty"`
+	Best      bool   `json:"best,omitempty"`
+	Valid     bool   `json:"valid,omitempty"`
+	Metric    *int64 `json:"metric,omitempty"`
+	LocalPref *int64 `json:"local_pref,omitempty"`
+	Weight    int64  `json:"weight,omitempty"`
+	Path      string `json:"path,omitempty"`
+	Origin    string `json:"origin,omitempty"`
+	PeerID    string `json:"peer,omitempty"`
+}

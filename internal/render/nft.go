@@ -127,8 +127,10 @@ func Nftables(in *fwconfig.Instance, lockout *AntiLockout, paths Paths) string {
 	// that closes an interface to the firewall doesn't take DHCP or DNS
 	// away from it.
 	for _, r := range AutoInputRules(in) {
-		writeAutoLog(b, in, r.Service, r.match())
-		b.WriteString("\t\t" + r.match() + " accept " + comment("auto", r.Service) + "\n")
+		for _, match := range r.matches() {
+			writeAutoLog(b, in, r.Service, match)
+			b.WriteString("\t\t" + match + " accept " + comment("auto", r.Service) + "\n")
+		}
 	}
 	writeRules(b, in, fwconfig.ChainInput)
 	writePolicyCount(b, in, fwconfig.ChainInput)
@@ -161,6 +163,18 @@ func Nftables(in *fwconfig.Instance, lockout *AntiLockout, paths Paths) string {
 	b.WriteString("\t\toif \"lo\" accept\n")
 	b.WriteString("\t\tmeta l4proto ipv6-icmp icmpv6 type { nd-router-solicit, nd-router-advert, nd-neighbor-solicit, nd-neighbor-advert, destination-unreachable, packet-too-big, time-exceeded, parameter-problem } accept\n")
 	b.WriteString("\t\tmeta l4proto icmp icmp type { destination-unreachable, time-exceeded, parameter-problem } accept\n")
+	// The BGP sessions FRR opens to its neighbours.
+	if addrs := BGPNeighborAddrs(in); len(addrs) > 0 {
+		v4, v6 := splitFamilies(addrs)
+		for _, m := range []struct {
+			key   string
+			addrs []string
+		}{{"ip", v4}, {"ip6", v6}} {
+			if len(m.addrs) > 0 {
+				fmt.Fprintf(b, "\t\t%s daddr %s tcp dport 179 accept %s\n", m.key, set(m.addrs), comment("auto", BGPService))
+			}
+		}
+	}
 	writeRules(b, in, fwconfig.ChainOutput)
 	writePolicyCount(b, in, fwconfig.ChainOutput)
 	b.WriteString("\t}\n\n")
@@ -418,9 +432,8 @@ type AutoRule struct {
 	Protocol     string   `json:"protocol"` // tcp, udp, or "tcp,udp"
 	SrcPort      int      `json:"src_port,omitempty"`
 	DstPort      int      `json:"dst_port"`
-	// Source limits the source addresses. Only the anti-lockout rule
-	// (AntiLockout.Rule) sets it; AutoInputRules never does, and nft()
-	// does not render it.
+	// Source limits the source addresses: the anti-lockout rule's
+	// (AntiLockout.Rule, rendered on its own) and the BGP neighbours'.
 	Source []string `json:"source,omitempty"`
 	// PortSet, when set, matches the destination port by this set instead
 	// of DstPort: the rule opens DstPort only while the agent puts it in
@@ -494,6 +507,32 @@ func AutoInputRules(in *fwconfig.Instance) []AutoRule {
 	for _, ifc := range in.Interfaces {
 		if ifc.Enabled && ifc.Kind == fwconfig.KindWireGuard && ifc.WireGuard != nil && ifc.WireGuard.ListenPort > 0 {
 			out = append(out, AutoRule{Service: "wireguard " + ifc.Name, Protocol: "udp", DstPort: ifc.WireGuard.ListenPort})
+		}
+	}
+	// BGP sessions from the neighbours; the ones FRR opens are replies.
+	if addrs := BGPNeighborAddrs(in); len(addrs) > 0 {
+		out = append(out, AutoRule{Service: BGPService, Protocol: "tcp", DstPort: 179, Source: addrs})
+	}
+	return out
+}
+
+// BGPService is the BGP auto rule's service.
+const BGPService = "bgp"
+
+// matches renders an auto rule's matches: one, or with Source one per IP
+// version of its addresses.
+func (r AutoRule) matches() []string {
+	if len(r.Source) == 0 {
+		return []string{r.match()}
+	}
+	var out []string
+	v4, v6 := splitFamilies(r.Source)
+	for _, m := range []struct {
+		key   string
+		addrs []string
+	}{{"ip", v4}, {"ip6", v6}} {
+		if len(m.addrs) > 0 {
+			out = append(out, fmt.Sprintf("%s saddr %s %s", m.key, set(m.addrs), r.match()))
 		}
 	}
 	return out

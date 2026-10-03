@@ -24,28 +24,35 @@ import (
 )
 
 type data struct {
-	instances  []models.Instance
-	ifaceZones []models.InterfaceZone
-	interfaces []models.Interface
-	peers      []models.WgPeer
-	links      []models.Link
-	routes     []models.Route
-	rules      []models.Rule
-	nat        []models.NatRule
-	prefixes   []models.IpamPrefix
-	addrs      []models.IpamAddress
-	dnsZones   []models.DnsZone
-	records    []models.DnsRecord
-	objects    []models.AddressObject
-	soas       []models.DnsSoaTemplate
-	policies   []models.DnsDnssecPolicy
-	templates  []models.DnsTemplate
-	dyndns     []models.DyndnsClient
-	dyndnsRecs []models.DyndnsRecord
-	certs      []models.Certificate
-	ipLists    []models.IpList
-	tasks      []models.Task
-	services   []models.Service
+	instances      []models.Instance
+	ifaceZones     []models.InterfaceZone
+	interfaces     []models.Interface
+	peers          []models.WgPeer
+	links          []models.Link
+	routes         []models.Route
+	rules          []models.Rule
+	nat            []models.NatRule
+	prefixes       []models.IpamPrefix
+	addrs          []models.IpamAddress
+	dnsZones       []models.DnsZone
+	records        []models.DnsRecord
+	objects        []models.AddressObject
+	soas           []models.DnsSoaTemplate
+	policies       []models.DnsDnssecPolicy
+	templates      []models.DnsTemplate
+	dyndns         []models.DyndnsClient
+	dyndnsRecs     []models.DyndnsRecord
+	certs          []models.Certificate
+	ipLists        []models.IpList
+	tasks          []models.Task
+	services       []models.Service
+	prefixLists    []models.RoutePrefixList
+	asPathLists    []models.RouteAsPathList
+	communityLists []models.RouteCommunityList
+	routeMaps      []models.RouteMap
+	bgpConfigs     []models.BgpConfig
+	bgpGroups      []models.BgpPeerGroup
+	bgpNeighbors   []models.BgpNeighbor
 }
 
 func load(db *gorm.DB) (*data, error) {
@@ -76,6 +83,13 @@ func load(db *gorm.DB) (*data, error) {
 		{&d.ipLists, "name"},
 		{&d.tasks, "name"},
 		{&d.services, "name"},
+		{&d.prefixLists, "name"},
+		{&d.asPathLists, "name"},
+		{&d.communityLists, "name"},
+		{&d.routeMaps, "name"},
+		{&d.bgpConfigs, "id"},
+		{&d.bgpGroups, "name"},
+		{&d.bgpNeighbors, "id"},
 	} {
 		if err := db.Order(q.order).Find(q.dst).Error; err != nil {
 			return nil, err
@@ -583,6 +597,8 @@ func build(db *gorm.DB, generation int64, only map[string]bool) (*fwconfig.Docum
 			in.Certificates = append(in.Certificates, Certificate(&c, ifc.Name))
 		}
 
+		d.bgp(&in, mi.ID)
+
 		doc.Instances = append(doc.Instances, in)
 	}
 
@@ -639,6 +655,86 @@ func build(db *gorm.DB, generation int64, only map[string]bool) (*fwconfig.Docum
 		return doc, &fwconfig.ValidationError{Problems: problems}
 	}
 	return doc, nil
+}
+
+// bgp adds the instance's BGP and the routing policy objects it uses,
+// when BGP is enabled: off, FRR does not run and they stay out of the
+// document.
+func (d *data) bgp(in *fwconfig.Instance, instanceID uint) {
+	var cfg *models.BgpConfig
+	for i := range d.bgpConfigs {
+		if d.bgpConfigs[i].InstanceID == instanceID {
+			cfg = &d.bgpConfigs[i]
+		}
+	}
+	if cfg == nil || !cfg.Enabled {
+		return
+	}
+	b := &fwconfig.BGP{
+		Enabled:            true,
+		ASN:                cfg.Asn,
+		RouterID:           cfg.RouterID,
+		Keepalive:          cfg.Keepalive,
+		Hold:               cfg.Hold,
+		EBGPRequiresPolicy: cfg.EbgpRequiresPolicy,
+		LogNeighborChanges: cfg.LogNeighborChanges,
+		GracefulRestart:    cfg.GracefulRestart,
+		MultipathRelax:     cfg.MultipathRelax,
+		MaximumPaths:       cfg.MaximumPaths,
+		Networks:           slices.Clone([]fwconfig.BGPNetwork(cfg.Networks)),
+		Aggregates:         slices.Clone([]fwconfig.BGPAggregate(cfg.Aggregates)),
+	}
+	for _, r := range []struct {
+		on          bool
+		family, src string
+		routeMap    string
+	}{
+		{cfg.RedistConnectedV4, "ipv4", fwconfig.RedistConnected, cfg.RedistConnectedV4Map},
+		{cfg.RedistStaticV4, "ipv4", fwconfig.RedistStatic, cfg.RedistStaticV4Map},
+		{cfg.RedistConnectedV6, "ipv6", fwconfig.RedistConnected, cfg.RedistConnectedV6Map},
+		{cfg.RedistStaticV6, "ipv6", fwconfig.RedistStatic, cfg.RedistStaticV6Map},
+	} {
+		if r.on {
+			b.Redistribute = append(b.Redistribute, fwconfig.BGPRedistribute{Family: r.family, Source: r.src, RouteMap: r.routeMap})
+		}
+	}
+	for _, g := range d.bgpGroups {
+		if g.InstanceID == instanceID {
+			p := g.Peer()
+			p.Name = g.Name
+			b.PeerGroups = append(b.PeerGroups, p)
+		}
+	}
+	for _, n := range d.bgpNeighbors {
+		if n.InstanceID == instanceID && n.Enabled {
+			p := n.Peer()
+			p.Address, p.PeerGroup = n.Address, n.PeerGroup
+			b.Neighbors = append(b.Neighbors, p)
+		}
+	}
+	in.BGP = b
+
+	rp := &in.RoutingPolicy
+	for _, l := range d.prefixLists {
+		if l.InstanceID == instanceID {
+			rp.PrefixLists = append(rp.PrefixLists, fwconfig.PrefixList{Name: l.Name, Family: l.Family, Description: l.Description, Entries: slices.Clone([]fwconfig.PrefixListEntry(l.Entries))})
+		}
+	}
+	for _, l := range d.asPathLists {
+		if l.InstanceID == instanceID {
+			rp.ASPathLists = append(rp.ASPathLists, fwconfig.ASPathList{Name: l.Name, Description: l.Description, Entries: slices.Clone([]fwconfig.ASPathEntry(l.Entries))})
+		}
+	}
+	for _, l := range d.communityLists {
+		if l.InstanceID == instanceID {
+			rp.CommunityLists = append(rp.CommunityLists, fwconfig.CommunityList{Name: l.Name, Kind: l.Kind, Description: l.Description, Entries: slices.Clone([]fwconfig.CommunityEntry(l.Entries))})
+		}
+	}
+	for _, m := range d.routeMaps {
+		if m.InstanceID == instanceID {
+			rp.RouteMaps = append(rp.RouteMaps, fwconfig.RouteMap{Name: m.Name, Description: m.Description, Entries: slices.Clone([]fwconfig.RouteMapEntry(m.Entries))})
+		}
+	}
 }
 
 // Certificate is a certificate as the document holds it; iface is the

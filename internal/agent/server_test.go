@@ -37,6 +37,9 @@ func testAgent(t *testing.T, allowFrom ...string) (*Agent, http.Handler) {
 			NamedConf:    filepath.Join(dir, "std", "bind", "named.conf"),
 			KeaConfDir:   filepath.Join(dir, "std", "kea"),
 			RadvdConf:    filepath.Join(dir, "std", "radvd.conf"),
+			FRRDir:       filepath.Join(dir, "std", "frr"),
+			FRRRunDir:    filepath.Join(dir, "run", "frr"),
+			FRRStateDir:  filepath.Join(dir, "state", "frr"),
 		},
 		token: testToken,
 	}

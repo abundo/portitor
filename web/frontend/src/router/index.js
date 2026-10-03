@@ -25,6 +25,8 @@ const router = createRouter({
         { path: 'interfaces', component: () => import('@/views/InterfacesPage.vue') },
         { path: 'neighbours', component: () => import('@/views/NeighboursPage.vue') },
         { path: 'routes', component: () => import('@/views/RoutesPage.vue') },
+        { path: 'routing/objects', component: () => import('@/views/RoutingObjectsPage.vue') },
+        { path: 'routing/bgp', component: () => import('@/views/BgpPage.vue') },
         { path: 'objects', component: () => import('@/views/HostsPrefixesPage.vue') },
         { path: 'ipam', redirect: '/objects' },
         { path: 'interface-zones', component: () => import('@/views/InterfaceZonesPage.vue') },

@@ -44,7 +44,16 @@ const sections = computed(() => [
     children: [
       { label: 'Interfaces', icon: 'i-lucide-ethernet-port', to: '/interfaces' },
       { label: 'Interface zones', icon: 'i-lucide-layers', to: '/interface-zones' },
-      { label: 'Routing', icon: 'i-lucide-route', to: '/routes' },
+      {
+        label: 'Routing',
+        icon: 'i-lucide-route',
+        defaultOpen: true,
+        children: [
+          { label: 'Static routes', icon: 'i-lucide-signpost', to: '/routes' },
+          { label: 'Routing objects', icon: 'i-lucide-list-filter', to: '/routing/objects' },
+          { label: 'BGP', icon: 'i-lucide-share-2', to: '/routing/bgp' },
+        ],
+      },
       { label: 'Neighbours', icon: 'i-lucide-network', to: '/neighbours' },
       { label: 'Hosts & prefixes', icon: 'i-lucide-tags', to: '/objects' },
     ],
@@ -111,12 +120,15 @@ function onOpen(value) {
   open.value = added.length ? added : next
 }
 
+// matches reports whether a menu item, or one of its children, is the page
+// at path.
+function matches(item, path) {
+  if (item.children) return item.children.some((c) => matches(c, path))
+  return item.exact ? path === item.to : path === item.to || path.startsWith(item.to + '/')
+}
+
 function sectionOf(path) {
-  return sections.value.find((s) =>
-    s.children.some((c) =>
-      c.exact ? path === c.to : path === c.to || path.startsWith(c.to + '/'),
-    ),
-  )?.value
+  return sections.value.find((s) => s.children.some((c) => matches(c, path)))?.value
 }
 
 watch(

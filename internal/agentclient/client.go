@@ -157,6 +157,12 @@ func (c *Client) Neighbours(ctx context.Context) (*agentapi.NeighboursResponse, 
 	return &n, c.do(ctx, http.MethodGet, "/v1/neighbours", nil, &n)
 }
 
+// BGP returns the BGP state of the instances that run it.
+func (c *Client) BGP(ctx context.Context) (*agentapi.BGPResponse, error) {
+	var b agentapi.BGPResponse
+	return &b, c.do(ctx, http.MethodGet, "/v1/bgp", nil, &b)
+}
+
 // RoutingTable returns the instances' IPv4 and IPv6 routes.
 func (c *Client) RoutingTable(ctx context.Context) (*agentapi.RoutingTableResponse, error) {
 	var t agentapi.RoutingTableResponse

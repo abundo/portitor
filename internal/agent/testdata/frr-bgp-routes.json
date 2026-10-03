@@ -1,0 +1,9 @@
+{
+ "vrfId": 0,
+ "vrfName": "default",
+ "tableVersion": 0,
+ "routerId": "10.255.0.2",
+ "defaultLocPrf": 100,
+ "localAS": 65010,
+ "routes": { "192.168.50.0/24": [{"pathFrom":"external","prefix":"192.168.50.0","prefixLen":24,"network":"192.168.50.0/24","version":0,"metric":0,"weight":32768,"peerId":"(unspec)","path":"","origin":"IGP","nexthops":[{"ip":"0.0.0.0","hostname":"632d3381a59c","afi":"ipv4","used":true}]}]
+ } , "totalRoutes": 1, "totalPaths": 1 } 

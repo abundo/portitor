@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -42,6 +43,14 @@ type Paths struct {
 	NamedConf    string `yaml:"named_conf" json:"named_conf"`
 	KeaConfDir   string `yaml:"kea_conf_dir" json:"kea_conf_dir"`
 	RadvdConf    string `yaml:"radvd_conf" json:"radvd_conf"`
+	// FRRDir is FRR's config directory: the default instance's frr.conf
+	// and daemons are in it, and a virtual firewall's unit mounts the
+	// instance's over FRRDir/<instance> (FRR's pathspace).
+	FRRDir string `yaml:"frr_dir" json:"frr_dir"`
+	// FRR's run (sockets, PID files) and state directories; a virtual
+	// firewall's FRR has <instance> directories in them.
+	FRRRunDir   string `yaml:"frr_run_dir" json:"frr_run_dir"`
+	FRRStateDir string `yaml:"frr_state_dir" json:"frr_state_dir"`
 }
 
 func DefaultPaths() Paths {
@@ -59,6 +68,9 @@ func DefaultPaths() Paths {
 		NamedConf:    "/etc/bind/named.conf",
 		KeaConfDir:   "/etc/kea",
 		RadvdConf:    "/etc/radvd.conf",
+		FRRDir:       "/etc/frr",
+		FRRRunDir:    "/run/frr",
+		FRRStateDir:  "/var/lib/frr",
 	}
 }
 
@@ -83,6 +95,17 @@ type InstanceFiles struct {
 	Kea4      string
 	Kea6      string
 	Radvd     string
+	// FRR's integrated config, daemons file and vtysh.conf. A virtual
+	// firewall's unit mounts their directory as FRR's pathspace
+	// Paths.FRRDir/<instance> (portitor-frr@.service).
+	FRRConf    string
+	FRRDaemons string
+	FRRVtysh   string
+	// FRR's run and state directories (the pathspace's, for a virtual
+	// firewall), which the agent makes for the frr user before the unit
+	// mounts them.
+	FRRRun   string
+	FRRState string
 	// The host's directories of Kea's leases and sockets and named's
 	// working, run and zones directories. A virtual firewall's units mount
 	// its own over the standard ones (portitor-kea4@.service,
@@ -116,6 +139,11 @@ func (p Paths) Files(in *fwconfig.Instance) InstanceFiles {
 			Kea4:         filepath.Join(p.KeaConfDir, "kea-dhcp4.conf"),
 			Kea6:         filepath.Join(p.KeaConfDir, "kea-dhcp6.conf"),
 			Radvd:        p.RadvdConf,
+			FRRConf:      filepath.Join(p.FRRDir, "frr.conf"),
+			FRRDaemons:   filepath.Join(p.FRRDir, "daemons"),
+			FRRVtysh:     filepath.Join(p.FRRDir, "vtysh.conf"),
+			FRRRun:       p.FRRRunDir,
+			FRRState:     p.FRRStateDir,
 			KeaData:      p.KeaDataDir,
 			KeaSocket:    p.KeaSocketDir,
 			BindCache:    p.BindCacheDir,
@@ -137,6 +165,11 @@ func (p Paths) Files(in *fwconfig.Instance) InstanceFiles {
 		Kea4:         filepath.Join(etc, "kea-dhcp4.conf"),
 		Kea6:         filepath.Join(etc, "kea-dhcp6.conf"),
 		Radvd:        filepath.Join(etc, "radvd.conf"),
+		FRRConf:      filepath.Join(etc, "frr", "frr.conf"),
+		FRRDaemons:   filepath.Join(etc, "frr", "daemons"),
+		FRRVtysh:     filepath.Join(etc, "frr", "vtysh.conf"),
+		FRRRun:       filepath.Join(p.FRRRunDir, in.Name),
+		FRRState:     filepath.Join(p.FRRStateDir, in.Name),
 		KeaData:      filepath.Join(p.KeaDataDir, in.Name),
 		KeaSocket:    filepath.Join(p.KeaSocketDir, in.Name),
 		BindCache:    filepath.Join(p.BindCacheDir, in.Name),
@@ -183,10 +216,12 @@ type Units struct {
 	Kea4Fmt      string `yaml:"kea4" json:"kea4"`
 	Kea6Fmt      string `yaml:"kea6" json:"kea6"`
 	RadvdFmt     string `yaml:"radvd" json:"radvd"`
+	FRRFmt       string `yaml:"frr" json:"frr"`
 	DefaultNamed string `yaml:"default_named" json:"default_named"`
 	DefaultKea4  string `yaml:"default_kea4" json:"default_kea4"`
 	DefaultKea6  string `yaml:"default_kea6" json:"default_kea6"`
 	DefaultRadvd string `yaml:"default_radvd" json:"default_radvd"`
+	DefaultFRR   string `yaml:"default_frr" json:"default_frr"`
 }
 
 func DefaultUnits() Units {
@@ -195,11 +230,13 @@ func DefaultUnits() Units {
 		Kea4Fmt:  "portitor-kea4@%s.service",
 		Kea6Fmt:  "portitor-kea6@%s.service",
 		RadvdFmt: "portitor-radvd@%s.service",
+		FRRFmt:   "portitor-frr@%s.service",
 		// Debian/Ubuntu's names (Fedora: kea-dhcp4.service, kea-dhcp6.service).
 		DefaultNamed: "named.service",
 		DefaultKea4:  "kea-dhcp4-server.service",
 		DefaultKea6:  "kea-dhcp6-server.service",
 		DefaultRadvd: "radvd.service",
+		DefaultFRR:   "frr.service",
 	}
 }
 
@@ -214,10 +251,11 @@ func (u Units) Named(in *fwconfig.Instance) string { return u.pick(in, u.Default
 func (u Units) Kea4(in *fwconfig.Instance) string  { return u.pick(in, u.DefaultKea4, u.Kea4Fmt) }
 func (u Units) Kea6(in *fwconfig.Instance) string  { return u.pick(in, u.DefaultKea6, u.Kea6Fmt) }
 func (u Units) Radvd(in *fwconfig.Instance) string { return u.pick(in, u.DefaultRadvd, u.RadvdFmt) }
+func (u Units) FRR(in *fwconfig.Instance) string   { return u.pick(in, u.DefaultFRR, u.FRRFmt) }
 
-// All lists the instance's units: named, Kea4, Kea6, radvd.
+// All lists the instance's units: named, Kea4, Kea6, radvd, FRR.
 func (u Units) All(in *fwconfig.Instance) []string {
-	return []string{u.Named(in), u.Kea4(in), u.Kea6(in), u.Radvd(in)}
+	return []string{u.Named(in), u.Kea4(in), u.Kea6(in), u.Radvd(in), u.FRR(in)}
 }
 
 type Options struct {
@@ -296,6 +334,11 @@ func Render(doc fwconfig.Document, opt Options) (*Bundle, error) {
 		if len(in.RA) > 0 {
 			add(f.Radvd, RadvdConf(in), 0o644, false)
 		}
+		if in.BGPRunning() {
+			add(f.FRRDaemons, FRRDaemons(in), 0o640, false)
+			add(f.FRRVtysh, FRRVtyshConf(in), 0o644, false)
+			add(f.FRRConf, FRRConf(in), 0o640, hasBGPPassword(in.BGP))
+		}
 	}
 	sort.SliceStable(b.Files, func(i, j int) bool { return b.Files[i].Path < b.Files[j].Path })
 	return b, nil
@@ -311,7 +354,19 @@ func (b *Bundle) File(path string) *File {
 	return nil
 }
 
-var wgKeyLine = regexp.MustCompile(`(?m)^(PrivateKey|PresharedKey) = .*$`)
+var (
+	wgKeyLine       = regexp.MustCompile(`(?m)^(PrivateKey|PresharedKey) = .*$`)
+	frrPasswordLine = regexp.MustCompile(`(?m)^( neighbor \S+` + frrPasswordWord + `).*$`)
+)
+
+func hasBGPPassword(g *fwconfig.BGP) bool {
+	for _, p := range append(slices.Clone(g.PeerGroups), g.Neighbors...) {
+		if p.Password != "" {
+			return true
+		}
+	}
+	return false
+}
 
 // Redacted returns the files with key material masked, for display.
 func (b *Bundle) Redacted() []File {
@@ -320,6 +375,7 @@ func (b *Bundle) Redacted() []File {
 		out[i] = f
 		if f.Secret {
 			out[i].Content = wgKeyLine.ReplaceAllString(f.Content, "$1 = <redacted>")
+			out[i].Content = frrPasswordLine.ReplaceAllString(out[i].Content, "${1}<redacted>")
 		}
 	}
 	return out

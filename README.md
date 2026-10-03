@@ -23,6 +23,8 @@ office networks. It manages:
 - certificates: Let's Encrypt (ACME, HTTP-01) certificates, renewed automatically; port 80
   opens only while a challenge is answered
 - IP lists: CrowdSec decisions or downloaded blocklists, used as `@name` in rules
+- BGP (FRR, off by default): neighbours and peer groups, networks, aggregates and
+  redistribution, filtered with prefix lists, AS path and community lists and route maps
 - scheduled tasks: download IP lists or run commands on a cron schedule
 - virtual firewalls, each with its own routing, rules, DHCP and DNS, with optional
   internal links between them
@@ -56,7 +58,8 @@ firewall, the agent, makes the changes the GUI asks for. For a single box, an
                   ├─ scheduler      cron-style tasks
                   ├─ diagnostics    packet log (NFLOG), DNS query log, conntrack, capture, mtr, LLDP
                   ├─ dnsmgr2, BIND  DNS zones, per virtual firewall
-                  └─ Kea, radvd     DHCPv4, DHCPv6 and router advertisements, per virtual firewall
+                  ├─ Kea, radvd     DHCPv4, DHCPv6 and router advertisements, per virtual firewall
+                  └─ FRR            BGP, per virtual firewall that turns it on
 ```
 
 - **portitor-web** holds the configuration in an SQLite database. On *Deploy* it builds a
@@ -170,14 +173,14 @@ A first install creates the configs but starts nothing, and prints what is left 
 By hand, it is:
 
 On the **firewall** (Debian/Ubuntu shown; needs nftables, iproute2, wireguard-tools,
-bind9, bind9-utils, kea-dhcp4-server, kea-dhcp6-server, radvd; tcpdump, tshark and
-mtr-tiny for packet capture and traceroute):
+bind9, bind9-utils, kea-dhcp4-server, kea-dhcp6-server, radvd; frr and frr-pythontools for BGP; tcpdump,
+tshark and mtr-tiny for packet capture and traceroute):
 
 ```sh
 make install-agent                          # binary, systemd units, /etc/portitor/agent.yaml
 portitor-agent init --host 192.168.1.1      # prints token + certificate fingerprint
 $EDITOR /etc/portitor/agent.yaml            # listen address, allow_from
-systemctl disable --now named kea-dhcp4-server kea-dhcp6-server radvd   # the agent starts them when the default VF uses them
+systemctl disable --now named kea-dhcp4-server kea-dhcp6-server radvd frr   # the agent starts them when the default VF uses them
 systemctl enable --now portitor-agent
 ```
 

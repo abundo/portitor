@@ -625,6 +625,7 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 		}
 	}
 	v.dnsTemplates(p, &in.DNS)
+	v.routing(p, in, ifaces)
 }
 
 func (v *validator) dnsTemplates(p string, d *DNSServer) {

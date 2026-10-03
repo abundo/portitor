@@ -48,6 +48,9 @@ func (a *Agent) routes() *http.ServeMux {
 	mux.HandleFunc("GET /v1/routing-table", func(w http.ResponseWriter, r *http.Request) {
 		writeJSONResponse(w, http.StatusOK, a.RoutingTable(r.Context()))
 	})
+	mux.HandleFunc("GET /v1/bgp", func(w http.ResponseWriter, r *http.Request) {
+		writeJSONResponse(w, http.StatusOK, a.BGP(r.Context()))
+	})
 	mux.HandleFunc("GET /v1/rule-counters", func(w http.ResponseWriter, r *http.Request) {
 		writeJSONResponse(w, http.StatusOK, a.RuleCounters(r.Context()))
 	})

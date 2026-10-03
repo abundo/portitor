@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/netip"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -1138,6 +1139,27 @@ func (s *Server) handleAgentRoutingTable(c *echo.Context) error {
 	return c.JSON(http.StatusOK, t)
 }
 
+// handleAgentBGP passes on the BGP state (neighbours, BGP table) of the
+// instances, for the BGP page.
+func (s *Server) handleAgentBGP(c *echo.Context) error {
+	a, _, err := s.agent()
+	if err != nil {
+		return agentError(c, err)
+	}
+	b, err := a.BGP(c.Request().Context())
+	if err != nil {
+		return agentError(c, err)
+	}
+	names, err := s.readableInstanceNames(c)
+	if err != nil {
+		return err
+	}
+	if names != nil {
+		filterBGP(b, names)
+	}
+	return c.JSON(http.StatusOK, b)
+}
+
 // handleAgentRuleCounters passes on the traffic per rule (by rule id), for
 // the Rules page.
 func (s *Server) handleAgentRuleCounters(c *echo.Context) error {
@@ -1261,6 +1283,20 @@ func redactDoc(doc fwconfig.Document) fwconfig.Document {
 				d.ProviderSettings = settings
 			}
 			cp.DynDNS[j] = d
+		}
+		if in.BGP != nil {
+			b := *in.BGP
+			redact := func(peers []fwconfig.BGPPeer) []fwconfig.BGPPeer {
+				out := slices.Clone(peers)
+				for k := range out {
+					if out[k].Password != "" {
+						out[k].Password = "<redacted>"
+					}
+				}
+				return out
+			}
+			b.PeerGroups, b.Neighbors = redact(b.PeerGroups), redact(b.Neighbors)
+			cp.BGP = &b
 		}
 		out.Instances[i] = cp
 	}

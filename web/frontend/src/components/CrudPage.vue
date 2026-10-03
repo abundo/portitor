@@ -5,9 +5,12 @@
 // CrudPage: a table of one REST resource with a create/edit modal, driven
 // by column and field schemas.
 //
-// Field: { key, label, type: text|number|password|switch|select|multiselect|tags|addrs|addr|ports|textarea|custom,
+// Field: { key, label, type: text|number|password|switch|select|multiselect|tags|addrs|addr|ports|textarea|custom|heading,
 //          items (array or form => array), nullable, placeholder, hint,
 //          required, show: form => bool, disabled: form => bool }
+// nullable: a select with a "—" choice, saved as null, or as '' with
+// `text: true` (a name; null would leave the stored value as it is).
+// heading: a section title in the form (label), with no value.
 // multiselect: an array of strings picked from items (strings, or
 // { label, value, description } to show a description under each name).
 // addrs/addr: address list / single address; names of hosts/prefixes are
@@ -38,7 +41,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useObjectStore } from '@/stores/objects'
 import { useConfirm } from '@/composables/useConfirm'
 import { useFormGuard } from '@/composables/useFormGuard'
-import { inlineField, wideModal } from '@/utils/form'
+import { inlineField, wideModal, widerModal } from '@/utils/form'
 import { useSearch, valuesText } from '@/utils/search'
 
 const props = defineProps({
@@ -72,6 +75,8 @@ const props = defineProps({
   searchText: { type: Function, default: null },
   // rowFilter(row) leaves out the rows the page doesn't show.
   rowFilter: { type: Function, default: null },
+  // wide: a wider form, for one with a table of entries (EntriesEditor).
+  wide: { type: Boolean, default: false },
 })
 const emit = defineEmits(['changed'])
 
@@ -168,7 +173,7 @@ function fill(src) {
   for (const k of Object.keys(form)) delete form[k]
   Object.assign(form, JSON.parse(JSON.stringify(src)))
   for (const f of props.fields) {
-    if (f.nullable && form[f.key] == null) form[f.key] = NONE
+    if (f.nullable && (form[f.key] == null || (f.text && form[f.key] === ''))) form[f.key] = NONE
     if (['tags', 'addrs', 'multiselect'].includes(f.type) && !Array.isArray(form[f.key]))
       form[f.key] = []
     if (f.type === 'addr' && form[f.key] == null) form[f.key] = ''
@@ -202,7 +207,8 @@ async function save() {
   saving.value = true
   const body = { ...form }
   for (const f of props.fields) {
-    if (f.nullable && body[f.key] === NONE) body[f.key] = null
+    if (f.type === 'heading') delete body[f.key]
+    if (f.nullable && body[f.key] === NONE) body[f.key] = f.text ? '' : null
     if (f.type === 'number' && body[f.key] !== null && body[f.key] !== '')
       body[f.key] = Number(body[f.key] ?? 0)
   }
@@ -243,7 +249,8 @@ async function removeEditing() {
 // Saves one row edited in place (a custom table); reloads on failure.
 async function saveRow(row) {
   const body = { ...row }
-  for (const f of props.fields) if (f.nullable && body[f.key] === NONE) body[f.key] = null
+  for (const f of props.fields)
+    if (f.nullable && body[f.key] === NONE) body[f.key] = f.text ? '' : null
   try {
     const saved = await props.api.update(row.id, body)
     const cur = rows.value.find((r) => r.id === row.id)
@@ -430,7 +437,7 @@ defineExpose({ reload: load, openEdit, openView, openCreate })
   <UModal
     :open="open"
     :title="formTitle"
-    :ui="wideModal"
+    :ui="wide ? widerModal : wideModal"
     :dismissible="false"
     @update:open="guard.onUpdateOpen"
   >
@@ -438,8 +445,14 @@ defineExpose({ reload: load, openEdit, openView, openCreate })
       <form id="crud-form" class="space-y-3" @submit.prevent="save">
         <fieldset :disabled="readOnly" class="space-y-3">
           <template v-for="f in fields" :key="f.key">
+            <div
+              v-if="f.type === 'heading' && visible(f)"
+              class="border-b border-default pt-2 pb-1 text-sm font-semibold"
+            >
+              {{ f.label }}
+            </div>
             <UFormField
-              v-if="visible(f)"
+              v-else-if="visible(f)"
               :label="f.label"
               :hint="f.hintRight"
               :help="f.hint"
