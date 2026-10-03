@@ -415,6 +415,7 @@ func bootstrapDNS(tx *gorm.DB, instanceID uint, o BootstrapOptions) error {
 		if err := prepareDnsSoaTemplate(tx, &soa, nil); err != nil {
 			return err
 		}
+		soa.Mname += "." // prepare trims the dot; the default is shown fully qualified
 		if err := tx.Create(&soa).Error; err != nil {
 			return err
 		}
@@ -431,6 +432,9 @@ func bootstrapDNS(tx *gorm.DB, instanceID uint, o BootstrapOptions) error {
 		tmpl = models.DnsTemplate{Name: "dns-1", SoaTemplateID: soa.ID, DefaultTtl: 3600, Nameservers: models.DnsNameserverList{ns}}
 		if err := prepareDnsTemplate(tx, &tmpl, nil); err != nil {
 			return err
+		}
+		for i := range tmpl.Nameservers {
+			tmpl.Nameservers[i].Name += "."
 		}
 		if err := tx.Create(&tmpl).Error; err != nil {
 			return err

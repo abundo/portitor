@@ -134,11 +134,11 @@ func TestBootstrap(t *testing.T) {
 	env.srv.db.First(&soa)
 	env.srv.db.First(&tmpl)
 	env.srv.db.First(&zone)
-	if soa.Name != "soa-1" || soa.Mname != "ns1.home.arpa" || soa.Rname != "unknown.home.arpa" || soa.Refresh != 86400 {
+	if soa.Name != "soa-1" || soa.Mname != "ns1.home.arpa." || soa.Rname != "unknown.home.arpa" || soa.Refresh != 86400 {
 		t.Errorf("SOA template %+v", soa)
 	}
 	if tmpl.Name != "dns-1" || tmpl.SoaTemplateID != soa.ID ||
-		!slices.Equal(tmpl.Nameservers, models.DnsNameserverList{{Name: "ns1.home.arpa", Address: "192.168.1.1"}}) {
+		!slices.Equal(tmpl.Nameservers, models.DnsNameserverList{{Name: "ns1.home.arpa.", Address: "192.168.1.1"}}) {
 		t.Errorf("DNS template %+v", tmpl)
 	}
 	if zone.Name != "home.arpa" || zone.DnsTemplateID == nil || *zone.DnsTemplateID != tmpl.ID {
