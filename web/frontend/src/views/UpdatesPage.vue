@@ -409,9 +409,6 @@ async function reboot() {
         class="max-h-96 overflow-auto rounded bg-elevated p-3 font-mono text-xs whitespace-pre-wrap"
         >{{ terminalText(j.output) }}</pre
       >
-      <p v-if="j.name === 'update' && j.state === 'succeeded'" class="mt-2 text-sm text-muted">
-        Reload the page to load the new GUI.
-      </p>
     </div>
   </div>
 </template>
