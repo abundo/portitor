@@ -88,6 +88,7 @@ const stateColor = (s) =>
   s === 'Established' ? 'success' : s.startsWith('Idle') ? 'neutral' : 'warning'
 const peerColumns = [
   { accessorKey: 'address', header: 'Neighbour' },
+  { accessorKey: 'description', header: 'Description' },
   { accessorKey: 'remote_as', header: 'Remote AS' },
   { accessorKey: 'state', header: 'State' },
   { accessorKey: 'uptime', header: 'Up' },
@@ -401,9 +402,6 @@ const neighborFields = computed(() => [
             >
               <template #address-cell="{ row }">
                 <span class="font-mono text-xs">{{ row.original.address }}</span>
-                <span v-if="row.original.description" class="ms-1 text-muted">
-                  {{ row.original.description }}
-                </span>
               </template>
               <template #state-cell="{ row }">
                 <UBadge
