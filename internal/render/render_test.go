@@ -67,6 +67,8 @@ func TestNftablesMain(t *testing.T) {
 		"\t\tcontinue comment \"group: admin\"\n",
 		`iifname "eth0" meta nfproto ipv4 tcp dport 8443 counter dnat ip to 192.168.1.10:443 comment "nat 1: NAS"`,
 		`oifname "eth0" meta nfproto ipv4 counter masquerade comment "nat 2: Internet sharing"`,
+		`iifname != "eth0" fib daddr type local meta nfproto ipv4 tcp dport 8443 counter meta mark set 0x4870 dnat ip to 192.168.1.10:443 comment "nat 1: hairpin NAS"`,
+		`meta mark 0x4870 counter masquerade comment "hairpin"`,
 		"\tset crowdsec_v4 {\n\t\ttype ipv4_addr\n\t\tflags interval\n",
 		"\tset drop_v6 {\n\t\ttype ipv6_addr\n",
 		// A rule with IP lists and addresses: one nft rule per operand.

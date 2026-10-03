@@ -111,6 +111,13 @@ const fields = [
     show: (f) => f.kind === 'dnat' && f.protocol !== 'any',
     hint: '0 keeps the original port.',
   },
+  {
+    key: 'hairpin',
+    label: 'Hairpin',
+    type: 'switch',
+    show: (f) => f.kind === 'dnat',
+    hint: "Also forward connections from the other interfaces to the firewall's own addresses (the LAN reaching a server by its public address), masqueraded so replies return through the firewall.",
+  },
   { key: 'enabled', label: 'Enabled', type: 'switch' },
   { key: 'description', label: 'Description' },
 ]
@@ -141,6 +148,7 @@ const api = {
         src_addrs: [],
         dst_addrs: [],
         to_port: 0,
+        hairpin: false,
       }"
       new-label="New NAT rule"
       reorder="nat"

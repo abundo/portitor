@@ -354,6 +354,9 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 		if n.Kind == NATDNAT && len(n.OutInterfaces) > 0 {
 			v.addf("%s: dnat matches the incoming interface, not outgoing", np)
 		}
+		if n.Hairpin && (n.Kind != NATDNAT || len(n.InInterfaces) == 0) {
+			v.addf("%s: hairpin needs a dnat with incoming interfaces", np)
+		}
 		if n.Kind != NATDNAT && len(n.InInterfaces) > 0 {
 			v.addf("%s: %s matches the outgoing interface, not incoming", np, n.Kind)
 		}

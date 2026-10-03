@@ -171,12 +171,21 @@ func Nftables(in *fwconfig.Instance, lockout *AntiLockout, paths Paths) string {
 	for i, n := range in.NAT {
 		if n.Kind == fwconfig.NATDNAT {
 			writeNAT(b, i, n, in)
+			if n.Hairpin {
+				writeHairpin(b, i, n, in)
+			}
 		}
 	}
 	b.WriteString("\t}\n\n")
 
 	b.WriteString("\tchain postrouting_nat {\n")
 	b.WriteString("\t\ttype nat hook postrouting priority srcnat; policy accept;\n")
+	for _, n := range in.NAT {
+		if n.Hairpin {
+			fmt.Fprintf(b, "\t\tmeta mark %#x counter masquerade comment \"hairpin\"\n", HairpinMark)
+			break
+		}
+	}
 	for i, n := range in.NAT {
 		if n.Kind != fwconfig.NATDNAT {
 			writeNAT(b, i, n, in)
@@ -597,6 +606,36 @@ func writeRule(b *strings.Builder, idx int, r fwconfig.Rule, in *fwconfig.Instan
 			line := append(append(append([]string(nil), parts...), match...), tail...)
 			b.WriteString("\t\t" + strings.Join(line, " ") + "\n")
 		}
+	}
+}
+
+// HairpinMark is the packet mark a hairpin port forward sets (in
+// prerouting) for postrouting to masquerade it; NAT sees only a
+// connection's first packet, which carries it through both chains.
+const HairpinMark = 0x4870
+
+// writeHairpin renders a port forward's hairpin: the same match from the
+// other interfaces, to an address of the firewall's own, marked so
+// postrouting masquerades it and the target replies through the firewall.
+func writeHairpin(b *strings.Builder, idx int, n fwconfig.NATRule, in *fwconfig.Instance) {
+	ifs := in.MatchInterfaces(n.InInterfaces)
+	if len(ifs) == 0 {
+		return // writeNAT says why
+	}
+	h := n
+	h.InInterfaces = nil
+	h.Hairpin = false
+	h.Description = strings.TrimSpace("hairpin " + n.Description)
+	var sub strings.Builder
+	writeNAT(&sub, idx, h, in)
+	prefix := fmt.Sprintf("iifname != %s fib daddr type local ", quotedSet(ifs))
+	for _, line := range strings.SplitAfter(sub.String(), "\n") {
+		if line == "" {
+			continue
+		}
+		line = strings.TrimPrefix(line, "\t\t")
+		line = strings.Replace(line, " counter dnat ", fmt.Sprintf(" counter meta mark set %#x dnat ", HairpinMark), 1)
+		b.WriteString("\t\t" + prefix + line)
 	}
 }
 

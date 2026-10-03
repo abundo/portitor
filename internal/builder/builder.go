@@ -284,6 +284,7 @@ func build(db *gorm.DB, generation int64, only map[string]bool) (*fwconfig.Docum
 				DstAddrs:      expand(where+": destination", objs.Expand, n.DstAddrs),
 				DstPorts:      n.DstPorts,
 				ToPort:        n.ToPort,
+				Hairpin:       n.Hairpin,
 				Description:   n.Description,
 			}
 			if failed {

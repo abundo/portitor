@@ -488,6 +488,7 @@ type NatRule struct {
 	DstPorts      string     `json:"dst_ports"`
 	ToAddr        string     `json:"to_addr"`
 	ToPort        int        `json:"to_port"`
+	Hairpin       bool       `json:"hairpin"`
 	Enabled       bool       `json:"enabled"`
 	Description   string     `json:"description"`
 }

@@ -257,7 +257,11 @@ type NATRule struct {
 	DstPorts      string   `json:"dst_ports,omitempty"`
 	ToAddr        string   `json:"to_addr,omitempty"`
 	ToPort        int      `json:"to_port,omitempty"`
-	Description   string   `json:"description,omitempty"`
+	// Hairpin (dnat) also forwards connections from the other interfaces
+	// to the firewall's own addresses, masqueraded so replies come back
+	// through the firewall.
+	Hairpin     bool   `json:"hairpin,omitempty"`
+	Description string `json:"description,omitempty"`
 }
 
 type Route struct {

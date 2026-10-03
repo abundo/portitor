@@ -608,6 +608,11 @@ func prepareNat(tx *gorm.DB, n, old *models.NatRule) error {
 			return bad(err.Error() + "; use ports (22), ranges (8000-8080) or port names (https)")
 		}
 	}
+	if n.Kind != fwconfig.NATDNAT {
+		n.Hairpin = false
+	} else if n.Hairpin && len(n.InInterfaces) == 0 {
+		return bad("hairpin needs incoming interfaces (the WAN)")
+	}
 	if n.ToPort != 0 && n.Protocol == "" {
 		return bad("a target port needs protocol tcp, udp or tcp+udp")
 	}

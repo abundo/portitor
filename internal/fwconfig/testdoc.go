@@ -71,7 +71,7 @@ func SampleDocument() Document {
 					{Chain: ChainOutput, Kind: RuleKindComment, Description: "group: admin"},
 				},
 				NAT: []NATRule{
-					{Kind: NATDNAT, InInterfaces: []string{"wan"}, Protocol: "tcp", DstPorts: "8443", ToAddr: "192.168.1.10", ToPort: 443, Description: "NAS"},
+					{Kind: NATDNAT, InInterfaces: []string{"wan"}, Protocol: "tcp", DstPorts: "8443", ToAddr: "192.168.1.10", ToPort: 443, Hairpin: true, Description: "NAS"},
 					{Kind: NATMasquerade, OutInterfaces: []string{"wan"}, Description: "Internet sharing"},
 				},
 				Routes: []Route{
