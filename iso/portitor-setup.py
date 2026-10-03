@@ -31,6 +31,10 @@ or LAN, offers), a password and the time zone; before applying, LAN and WAN can 
 
 Every step can be repeated; a failed one is retried with the same answers.
 
+The text UI has the steps in a list on the left and the form of the selected
+one on the right; Up and Down in the list switch step, Enter or Tab move into
+the form, Escape back to the list. Run again, every step is open at once.
+
 Split setups: the setup first asks what the machine runs.
 
   both   the above: the firewall with its GUI.
@@ -95,7 +99,7 @@ from typing import Callable
 from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, VerticalScroll
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
 from textual.widget import Widget
 from textual.widgets import Button, Footer, Header, Input, Label, OptionList, RichLog, Select, Static
@@ -1062,28 +1066,28 @@ def set_nic_options(select: Select, default: str) -> None:
         select.value = current
 
 
-class Page(Screen):
-    """A page of the setup: Back and Next, and an error line."""
+class Page(VerticalScroll):
+    """A page of the setup, shown on the right of the step list: Back and
+    Next, and an error line."""
 
-    BINDINGS = [Binding("escape", "back", "Back")]
+    title = ""  # in the step list
     heading = ""
     next_label = "Next"
+    primary = ""  # selector of the widget that takes the focus
+    first = False
 
     def compose(self) -> ComposeResult:
-        yield Header(icon=" ")
-        with VerticalScroll(id="body"):
-            yield Static(self.heading, classes="heading")
-            yield from self.body()
-            yield Label("", id="error")
-            with Horizontal(id="buttons"):
-                yield from self.buttons()
-        yield Footer()
+        yield Static(self.heading, classes="heading")
+        yield from self.body()
+        yield Label("", id="error")
+        with Horizontal(id="buttons"):
+            yield from self.buttons()
 
     def body(self) -> ComposeResult:
         yield from ()
 
     def buttons(self) -> ComposeResult:
-        yield Button("Back", id="back", disabled=len(self.app.screen_stack) <= 2)
+        yield Button("Back", id="back", disabled=self.first)
         yield Button(self.next_label, id="next", variant="primary")
 
     @property
@@ -1109,28 +1113,26 @@ class Page(Screen):
     def error(self, msg: str) -> None:
         self.query_one("#error", Label).update(msg)
 
-    def action_back(self) -> None:
-        if len(self.app.screen_stack) > 2:
-            self.app.pop_screen()
+    def focus_primary(self) -> None:
+        for w in self.query(self.primary or "Input, Select, OptionList, Button"):
+            if w.focusable:
+                w.focus()
+                return
 
     @on(Button.Pressed, "#back")
-    def _back(self) -> None:
-        self.action_back()
+    async def _back(self) -> None:
+        await self.screen.go(self.screen.index_of(self) - 1, focus=True)
 
     @on(Button.Pressed, "#next")
     @on(Input.Submitted)
-    def next(self) -> None:
-        try:
-            self.save()
-        except ValueError as exc:
-            self.error(str(exc))
-            return
-        self.error("")
-        self.app.next_page()
+    async def next(self) -> None:
+        await self.screen.go(self.screen.index_of(self) + 1, focus=True)
 
 
 class KeyboardPage(Page):
+    title = "Keyboard layout"
     heading = "Keyboard layout"
+    primary = "#layouts"
 
     def body(self) -> ComposeResult:
         if self.app.reconfigure:
@@ -1144,7 +1146,6 @@ class KeyboardPage(Page):
         # By name, which mostly starts with the language or country.
         self.ordered = sorted(self.known.items(), key=lambda cn: (cn[1].casefold(), cn[0]))
         self.fill("", self.state.get("keyboard") or current_layout())
-        self.query_one("#layouts").focus()
 
     def fill(self, word: str, select: str = "") -> None:
         layouts = self.query_one("#layouts", OptionList)
@@ -1161,8 +1162,8 @@ class KeyboardPage(Page):
         self.fill(event.value)
 
     @on(OptionList.OptionSelected)
-    def _chosen(self) -> None:
-        self.next()
+    async def _chosen(self) -> None:
+        await self.next()
 
     def save(self) -> None:
         layouts = self.query_one("#layouts", OptionList)
@@ -1176,7 +1177,9 @@ class KeyboardPage(Page):
 
 
 class RolePage(Page):
+    title = "Machine type"
     heading = "What this machine runs"
+    primary = "#roles"
 
     def body(self) -> ComposeResult:
         yield OptionList(*[Option(f"{r:<6} {t}", id=r) for r, t in ROLES], id="roles")
@@ -1184,11 +1187,10 @@ class RolePage(Page):
     def on_mount(self) -> None:
         roles = self.query_one("#roles", OptionList)
         roles.highlighted = [r for r, _ in ROLES].index(self.state.get("role") or "both")
-        roles.focus()
 
     @on(OptionList.OptionSelected)
-    def _chosen(self) -> None:
-        self.next()
+    async def _chosen(self) -> None:
+        await self.next()
 
     def save(self) -> None:
         roles = self.query_one("#roles", OptionList)
@@ -1199,6 +1201,7 @@ MODES = [("Static", "static"), ("DHCP", "dhcp")]
 
 
 class NetworkPage(Page):
+    title = "Network"
     heading = "Network"
 
     def kind(self) -> str:
@@ -1372,7 +1375,9 @@ class NetworkPage(Page):
 
 
 class AccountPage(Page):
+    title = "Account"
     heading = "Password, host name and time zone"
+    primary = "#password"
 
     def body(self) -> ComposeResult:
         who = (f"the console login {CONSOLE_USER}" if self.a["role"] == "agent"
@@ -1393,9 +1398,6 @@ class AccountPage(Page):
         yield row("Region", Select([(r, r) for r in regions], id="region", allow_blank=False, value=tz_region(tz)))
         yield row("Time zone", Select(self.zone_options(tz_region(tz)), id="tz", allow_blank=False, value=tz))
         yield Static("Scheduled tasks use the time zone.", classes="hint")
-
-    def on_mount(self) -> None:
-        self.query_one("#password").focus()
 
     def zone_options(self, region: str) -> list[tuple[str, str]]:
         """The region's zones, named without the region (Stockholm)."""
@@ -1429,7 +1431,9 @@ class AccountPage(Page):
 
 
 class SummaryPage(Page):
+    title = "Apply"
     heading = "Apply these settings?"
+    primary = "#next"
     next_label = "Apply"
 
     def body(self) -> ComposeResult:
@@ -1441,14 +1445,146 @@ class SummaryPage(Page):
             yield Button("Swap LAN and WAN", id="swap")
         yield Button(self.next_label, id="next", variant="primary")
 
-    def on_mount(self) -> None:
-        self.query_one("#next").focus()
-
     @on(Button.Pressed, "#swap")
     def swap(self) -> None:
         # The addresses stay with the LAN and the WAN.
         self.a["lan"], self.a["wan"] = self.a["wan"], self.a["lan"]
         self.query_one("#summary", Static).update("\n".join(summary(self.a)))
+
+
+class Steps(OptionList):
+    """The step list: up and down switch step at once."""
+
+    BINDINGS = [Binding("down", "move(1)", "Next step", show=False), Binding("up", "move(-1)", "Previous step", show=False)]
+
+    async def action_move(self, delta: int) -> None:
+        wizard = self.screen
+        if 0 <= wizard.at + delta <= wizard.reached:
+            await wizard.go(wizard.at + delta)
+
+
+class Wizard(Screen):
+    """The steps on the left, the form of the selected step on the right.
+
+    Up and down in the list switch step (Enter, a click or Tab move into the form;
+    Escape back to the list). Going on to a later step takes the answers of
+    the current one first; going back does not. A first setup opens a step
+    after the one before it was answered; run again, every step is open."""
+
+    BINDINGS = [Binding("escape", "steps", "Steps")]
+
+    def __init__(self, kinds: list[type[Page]], reconfigure: bool) -> None:
+        super().__init__()
+        self.reconfigure = reconfigure
+        self.kinds = kinds
+        self.forms: list[Page | None] = [None] * len(kinds)
+        self.at = 0
+        self.reached = len(kinds) - 1 if reconfigure else 0
+        self.marked = self.reached if reconfigure else -1
+
+    def compose(self) -> ComposeResult:
+        yield Header(icon=" ")
+        with Horizontal(id="wizard"):
+            yield Steps(*[Option(f"{i + 1}. {c.title}", id=f"step{i}") for i, c in enumerate(self.kinds)], id="steps")
+            yield Vertical(id="pages")
+        yield Footer()
+
+    async def on_mount(self) -> None:
+        # Run again, the forms are all there at once, so Apply takes them all.
+        for i in range(len(self.kinds) - 1 if self.reconfigure else 0):
+            await self.ensure(i)
+        await self.show(0, focus=not self.reconfigure)
+        if self.reconfigure:
+            self.action_steps()
+
+    def index_of(self, page: Page) -> int:
+        return self.forms.index(page)
+
+    async def ensure(self, i: int) -> Page:
+        page = self.forms[i]
+        if page is None:
+            page = self.forms[i] = self.kinds[i]()
+            page.first = i == 0
+            page.display = False
+            await self.query_one("#pages").mount(page)
+        return page
+
+    def mark(self) -> None:
+        """Opens the steps up to the one reached."""
+        if self.marked == self.reached:
+            return
+        self.marked = self.reached
+        steps = self.query_one("#steps", OptionList)
+        for i in range(len(self.kinds)):
+            if i > self.reached:
+                steps.disable_option_at_index(i)
+            else:
+                steps.enable_option_at_index(i)
+
+    async def show(self, i: int, focus: bool = False) -> None:
+        if i == len(self.kinds) - 1 and self.forms[i]:
+            # The summary is made again from the answers.
+            await self.forms[i].remove()
+            self.forms[i] = None
+        page = await self.ensure(i)
+        for j, p in enumerate(self.forms):
+            if p:
+                p.display = j == i
+        self.at = i
+        self.mark()
+        self.query_one("#steps", OptionList).highlighted = i
+        if focus:
+            page.focus_primary()
+
+    async def save_page(self, i: int) -> bool:
+        """Takes the answers of step i; on an error, shows it on that step."""
+        page = await self.ensure(i)
+        a = self.app.a
+        role = a.get("role")
+        try:
+            page.save()
+        except ValueError as exc:
+            await self.show(i)
+            page.error(str(exc))
+            return False
+        page.error("")
+        if a.get("role") != role:
+            # The later forms were made for another role.
+            for j in range(i + 1, len(self.kinds)):
+                if self.forms[j]:
+                    await self.forms[j].remove()
+                    self.forms[j] = None
+            self.reached = min(self.reached, i + 1)
+            self.mark()
+        return True
+
+    async def go(self, i: int, focus: bool = False) -> bool:
+        """Shows step i (past the last: applies); False if the answers of a step before it are wrong."""
+        last = len(self.kinds) - 1
+        if i < 0 or i == self.at:
+            return i == self.at
+        if i > last:
+            self.app.apply()
+            return True
+        if i == last:
+            for j in range(last):
+                if not await self.save_page(j):
+                    return False
+        elif i > self.at and not await self.save_page(self.at):
+            return False
+        self.reached = max(self.reached, i)
+        await self.show(i, focus)
+        return True
+
+    @on(OptionList.OptionSelected, "#steps")
+    async def _selected(self, event: OptionList.OptionSelected) -> None:
+        """Enter, or a click: the step's form takes the focus."""
+        i = event.option_index
+        if i == self.at or i <= self.reached:
+            await self.go(i, focus=True)
+
+    def action_steps(self) -> None:
+        self.query_one("#steps", OptionList).focus()
 
 
 class LogPage(Screen):
@@ -1629,6 +1765,11 @@ class SetupApp(App):
 
     CSS = """
     #body { padding: 0 2; }
+    #wizard { height: 1fr; }
+    #steps { width: 26; height: 100%; margin: 1 0 0 1; }
+    #pages { width: 1fr; height: 100%; }
+    Page { height: 100%; padding: 0 2; }
+    Page > .heading { padding: 1 0; }
     .heading { text-style: bold; padding: 1 2; }
     #body > .heading { padding: 1 0; }
     .text { padding: 0 0 1 0; }
@@ -1654,20 +1795,19 @@ class SetupApp(App):
         self.a: dict = {"join": ""}
         if self.reconfigure:
             self.a["role"] = state.get("role") or "both"
-            self.pages = [KeyboardPage, NetworkPage, AccountPage, SummaryPage, ProgressPage]
+            self.pages = [KeyboardPage, NetworkPage, AccountPage, SummaryPage]
         else:
-            self.pages = [KeyboardPage, RolePage, NetworkPage, AccountPage, SummaryPage, ProgressPage]
+            self.pages = [KeyboardPage, RolePage, NetworkPage, AccountPage, SummaryPage]
 
     def on_mount(self) -> None:
         if self.mode == "join":
             self.a["role"] = "web"
             self.push_screen(JoinPage(optional=False))
         else:
-            self.next_page()
+            self.push_screen(Wizard(self.pages, self.reconfigure))
 
-    def next_page(self) -> None:
-        # The default screen is at the bottom of the stack.
-        self.push_screen(self.pages[len(self.screen_stack) - 1]())
+    def apply(self) -> None:
+        self.push_screen(ProgressPage())
 
     def steps_done(self) -> None:
         if self.mode == "first" and self.a["role"] == "web":
