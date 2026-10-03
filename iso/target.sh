@@ -15,6 +15,12 @@ root=$(dirname "$(find "$d/release" -maxdepth 2 -name install.py | head -n 1)")
 # Nothing is started; portitor-setup configures and starts both.
 python3 "$root/install.py" --local "$root" --web --agent --yes
 
+# In a VM the host owns the CPU microcode; the installer adds it by CPU vendor
+# regardless. Purged before update-grub so no microcode initrd stays listed.
+if grep -qw hypervisor /proc/cpuinfo; then
+    apt-get purge -y intel-microcode amd64-microcode 2>/dev/null || true
+fi
+
 # In PATH, next to the binaries: run again, it changes the LAN and WAN.
 install -D -m 0755 "$d/portitor-setup.py" /usr/bin/portitor-setup
 install -D -m 0644 "$d/portitor-firstboot.service" /etc/systemd/system/portitor-firstboot.service
