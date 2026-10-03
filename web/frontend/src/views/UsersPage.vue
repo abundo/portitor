@@ -37,23 +37,28 @@ const { search, filtered: shownUsers } = useSearch(
 const open = ref(false)
 const saving = ref(false)
 const editing = ref(null)
-const form = reactive({ username: '', password: '', role: 'viewer' })
+const form = reactive({ username: '', password: '', repeat: '', role: 'viewer' })
 const guard = useFormGuard(form, open)
 const isSelf = computed(() => editing.value?.id === auth.user?.id)
+const formMismatch = computed(() => form.repeat !== '' && form.password !== form.repeat)
 
 function openCreate() {
   editing.value = null
-  Object.assign(form, { username: '', password: '', role: 'viewer' })
+  Object.assign(form, { username: '', password: '', repeat: '', role: 'viewer' })
   open.value = true
 }
 
 function openEdit(u) {
   editing.value = u
-  Object.assign(form, { username: u.username, password: '', role: u.role })
+  Object.assign(form, { username: u.username, password: '', repeat: '', role: u.role })
   open.value = true
 }
 
 async function save() {
+  if (!editing.value && form.password !== form.repeat) {
+    toast.add({ title: 'The passwords do not match', color: 'error' })
+    return
+  }
   saving.value = true
   try {
     if (!editing.value) await api.createUser(form.username, form.password, form.role)
@@ -180,6 +185,21 @@ async function remove() {
           />
         </UFormField>
         <UFormField
+          v-if="!editing"
+          :ui="inlineField"
+          label="Repeat password"
+          :error="formMismatch ? 'The passwords do not match' : false"
+          required
+        >
+          <UInput
+            v-model="form.repeat"
+            type="password"
+            autocomplete="new-password"
+            class="w-full"
+            required
+          />
+        </UFormField>
+        <UFormField
           :ui="inlineField"
           label="Role"
           :help="isSelf ? 'You cannot change your own role.' : ''"
@@ -209,7 +229,14 @@ async function remove() {
         <UButton class="ms-auto" color="neutral" variant="ghost" @click="guard.close">
           Cancel
         </UButton>
-        <UButton type="submit" form="user-form" :loading="saving">Save</UButton>
+        <UButton
+          type="submit"
+          form="user-form"
+          :loading="saving"
+          :disabled="!editing && form.password !== form.repeat"
+        >
+          Save
+        </UButton>
       </div>
     </template>
   </UModal>
