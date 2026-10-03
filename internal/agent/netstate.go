@@ -140,6 +140,8 @@ func virtualMatches(want fwconfig.Interface, have ipLink) bool {
 		return have.kind() == "bridge"
 	case fwconfig.KindWireGuard:
 		return have.kind() == "wireguard"
+	case fwconfig.KindLoopback:
+		return have.kind() == "dummy"
 	case fwconfig.KindLink:
 		return have.kind() == "veth"
 	}
@@ -159,7 +161,7 @@ func planCreate(ns string, want []fwconfig.Interface, have map[string]ipLink) []
 	})
 	for _, ifc := range order {
 		switch ifc.Kind {
-		case fwconfig.KindVLAN, fwconfig.KindBridge, fwconfig.KindWireGuard:
+		case fwconfig.KindVLAN, fwconfig.KindBridge, fwconfig.KindWireGuard, fwconfig.KindLoopback:
 		default:
 			continue
 		}
@@ -176,6 +178,8 @@ func planCreate(ns string, want []fwconfig.Interface, have map[string]ipLink) []
 			cmds = append(cmds, ipCmd(ns, "link", "add", "name", ifc.Name, "type", "bridge"))
 		case fwconfig.KindWireGuard:
 			cmds = append(cmds, ipCmd(ns, "link", "add", "name", ifc.Name, "type", "wireguard"))
+		case fwconfig.KindLoopback:
+			cmds = append(cmds, ipCmd(ns, "link", "add", "name", ifc.Name, "type", "dummy"))
 		}
 	}
 	return cmds

@@ -21,7 +21,7 @@ import (
 // prepareDHCPv6 checks the DHCPv6 client settings of i and the
 // interfaces its delegated addresses name.
 func prepareDHCPv6(tx *gorm.DB, i, old *models.Interface) error {
-	if i.Dhcpv6 && (i.Kind == fwconfig.KindWireGuard || i.Kind == fwconfig.KindLink) {
+	if i.Dhcpv6 && (i.Kind == fwconfig.KindWireGuard || i.Kind == fwconfig.KindLink || i.Kind == fwconfig.KindLoopback) {
 		return bad(fmt.Sprintf("%s interfaces have no DHCPv6 client", i.Kind))
 	}
 	if i.Dhcpv6 && !i.Ipv6AcceptRA {

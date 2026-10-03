@@ -247,7 +247,7 @@ func prepareInterface(tx *gorm.DB, i, old *models.Interface) error {
 	if i.Kind == "" {
 		i.Kind = fwconfig.KindPhysical
 	}
-	if err := oneOf("kind", i.Kind, fwconfig.KindPhysical, fwconfig.KindVLAN, fwconfig.KindBridge, fwconfig.KindWireGuard); err != nil {
+	if err := oneOf("kind", i.Kind, fwconfig.KindPhysical, fwconfig.KindVLAN, fwconfig.KindBridge, fwconfig.KindWireGuard, fwconfig.KindLoopback); err != nil {
 		return err
 	}
 	if old != nil && old.Kind != i.Kind {
@@ -315,6 +315,10 @@ func prepareInterface(tx *gorm.DB, i, old *models.Interface) error {
 		if !fwconfig.ValidIfname(i.Parent) {
 			return bad("VLAN parent interface is required")
 		}
+	case fwconfig.KindLoopback:
+		if i.Ipv4Mode == fwconfig.ModeDHCP {
+			return bad("loopback interfaces have static addresses")
+		}
 	case fwconfig.KindWireGuard:
 		if i.Ipv4Mode == fwconfig.ModeDHCP {
 			return bad("WireGuard interfaces have static addresses")
@@ -339,7 +343,7 @@ func prepareInterface(tx *gorm.DB, i, old *models.Interface) error {
 	default:
 		i.WgEndpoint, i.WgKeepalive = "", 0
 	}
-	if i.Kind == fwconfig.KindWireGuard {
+	if i.Kind == fwconfig.KindWireGuard || i.Kind == fwconfig.KindLoopback {
 		i.Lldp = false
 	}
 	if i.Kind != fwconfig.KindVLAN {

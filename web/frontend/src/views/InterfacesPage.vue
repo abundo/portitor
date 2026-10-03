@@ -28,6 +28,7 @@ const kinds = [
   { label: 'VLAN', value: 'vlan' },
   { label: 'Bridge', value: 'bridge' },
   { label: 'WireGuard', value: 'wireguard' },
+  { label: 'Loopback', value: 'loopback' },
 ]
 // LLDP runs on the ethernet kinds.
 const lldpKinds = ['physical', 'vlan', 'bridge']
@@ -108,7 +109,7 @@ const fields = [
     key: 'ipv4_mode',
     label: 'IPv4',
     type: 'select',
-    items: (f) => (f.kind === 'wireguard' ? modes.filter((m) => m.value !== 'dhcp') : modes),
+    items: (f) => (f.kind === 'wireguard' || f.kind === 'loopback' ? modes.filter((m) => m.value !== 'dhcp') : modes),
     hint: 'Static: the addresses below. DHCP client: IPv4 from a DHCP server, and no addresses below.',
   },
   {
@@ -131,7 +132,7 @@ const fields = [
     key: 'dhcpv6',
     label: 'DHCPv6 client',
     type: 'switch',
-    show: (f) => f.kind !== 'wireguard',
+    show: (f) => f.kind !== 'wireguard' && f.kind !== 'loopback',
     hint: 'Ask a DHCPv6 server for an IPv6 address. Needs router advertisements accepted: the default route comes from them.',
   },
   {
@@ -198,7 +199,7 @@ function leaseOf(row, family = '') {
   <NeedInstance>
     <CrudPage
       title="Interfaces"
-      description="Physical ports, VLANs, bridges and WireGuard tunnels of this virtual firewall. Physical ports are moved into the virtual firewall's network namespace."
+      description="Physical ports, VLANs, bridges, loopbacks and WireGuard tunnels of this virtual firewall. Physical ports are moved into the virtual firewall's network namespace."
       :api="interfaces"
       :params="{ instance_id: store.currentId }"
       :columns="columns"

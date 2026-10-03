@@ -156,21 +156,21 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 		switch ifc.IPv4Mode {
 		case ModeStatic, ModeNone:
 		case ModeDHCP:
-			if ifc.Kind == KindWireGuard || ifc.Kind == KindLink {
+			if ifc.Kind == KindWireGuard || ifc.Kind == KindLink || ifc.Kind == KindLoopback {
 				v.addf("%s: dhcp client is not supported on %s interfaces", ip, ifc.Kind)
 			}
 		default:
 			v.addf("%s: invalid ipv4 mode %q", ip, ifc.IPv4Mode)
 		}
 		switch {
-		case ifc.DHCPv6 && (ifc.Kind == KindWireGuard || ifc.Kind == KindLink):
+		case ifc.DHCPv6 && (ifc.Kind == KindWireGuard || ifc.Kind == KindLink || ifc.Kind == KindLoopback):
 			v.addf("%s: dhcpv6 client is not supported on %s interfaces", ip, ifc.Kind)
 		case ifc.DHCPv6 && !ifc.IPv6AcceptRA:
 			v.addf("%s: dhcpv6 client needs router advertisements accepted (the default route comes from them)", ip)
 		case ifc.DHCPv6PD && !ifc.DHCPv6:
 			v.addf("%s: prefix delegation needs the dhcpv6 client", ip)
 		}
-		if ifc.LLDP && (ifc.Kind == KindWireGuard || ifc.Kind == KindLink) {
+		if ifc.LLDP && (ifc.Kind == KindWireGuard || ifc.Kind == KindLink || ifc.Kind == KindLoopback) {
 			v.addf("%s: lldp is not supported on %s interfaces", ip, ifc.Kind)
 		}
 		if ifc.DHCPv6PDLength != 0 && (ifc.DHCPv6PDLength < 32 || ifc.DHCPv6PDLength > 64) {
@@ -205,7 +205,7 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 			}
 		}
 		switch ifc.Kind {
-		case KindPhysical, KindLink:
+		case KindPhysical, KindLink, KindLoopback:
 		case KindVLAN:
 			if ifc.VLANID < 1 || ifc.VLANID > 4094 {
 				v.addf("%s: vlan id %d out of range", ip, ifc.VLANID)

@@ -76,7 +76,8 @@ const (
 	KindVLAN      = "vlan"
 	KindBridge    = "bridge"
 	KindWireGuard = "wireguard"
-	KindLink      = "link" // one end of a veth Link, generated from Document.Links
+	KindLoopback  = "loopback" // a dummy interface for addresses that stay up (router id, BGP update source)
+	KindLink      = "link"     // one end of a veth Link, generated from Document.Links
 )
 
 // IPv4 addressing modes.
