@@ -246,6 +246,9 @@ the certificate portitor-web serves, chosen under Settings
   of the agent, because the update restarts the agent. The release tag is checked
   against a regex before it becomes an argument to `install.py`. `install.py
   --list --json` is the interface between agent and installer; keep its fields stable.
+  An update installs the Debian packages in `install.py`'s `AGENT_PACKAGES` that are
+  missing (masking their distribution units first); a release that needs a new
+  package adds it there and to `iso/preseed.cfg`.
 
 ## GUI design rules
 

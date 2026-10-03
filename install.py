@@ -77,7 +77,7 @@ from typing import Sequence
 
 # Bump when the installer itself changes, so a release's copy can tell
 # whether it is newer than the one running.
-INSTALLER_VERSION = 4
+INSTALLER_VERSION = 5
 INSTALLER_FILENAME = "install.py"
 # Where the agent host keeps a copy, for updates from the GUI.
 INSTALLER_DEST = "/usr/lib/portitor/install.py"
@@ -113,6 +113,27 @@ AGENT_UNITS = (
     "portitor-radvd@.service",
     "portitor-frr@.service",
 )
+# The Debian packages the agent runs (iso/preseed.cfg has the same). An
+# update installs the ones missing (a release can need a new one, as 0.4.0
+# needs FRR), with the distribution units listed masked first, as
+# iso/target.sh masks them: the agent unmasks the ones it uses, so a new
+# package's daemon never starts with the distribution's default config.
+AGENT_PACKAGES = {
+    "nftables": (),
+    "iproute2": (),
+    "wireguard-tools": (),
+    "bind9": ("named.service",),
+    "bind9-utils": (),
+    "bind9-dnsutils": (),
+    "kea-dhcp4-server": ("kea-dhcp4-server.service",),
+    "kea-dhcp6-server": ("kea-dhcp6-server.service",),
+    "radvd": ("radvd.service",),
+    "frr": ("frr.service",),
+    "frr-pythontools": (),
+    "tcpdump": (),
+    "tshark": (),
+    "mtr-tiny": (),
+}
 # Debian/Ubuntu confine named and Kea with AppArmor; our rules
 # (deploy/apparmor/<profile>) go in each profile's local include, between
 # markers so the admin's own lines are kept.
@@ -464,6 +485,7 @@ def install_agent(host: Host, binary: Path, deploy: Path, version: str, assume_y
         log("      (a second DHCP client on the WAN keeps the agent from getting a lease)")
         log(f"    systemctl enable --now {AGENT_UNIT}")
         return
+    install_packages(host)
     if actions[AGENT_UNIT] == "installed":
         host.systemctl("enable", AGENT_UNIT)
     host.systemctl("restart", AGENT_UNIT)
@@ -472,6 +494,30 @@ def install_agent(host: Host, binary: Path, deploy: Path, version: str, assume_y
         if host.run(f"systemctl is-active --quiet {AGENT_UNIT}", check=False, mutate=False).returncode:
             warn(f"{AGENT_UNIT} is not running on {host}; see journalctl -u {AGENT_UNIT}")
     verify_version(host, AGENT_BIN, version)
+
+
+def install_packages(host: Host) -> None:
+    """Install the agent's packages that are missing, on a host with apt."""
+    if host.run("command -v apt-get dpkg-query", check=False, mutate=False).returncode:
+        return
+    names = " ".join(AGENT_PACKAGES)
+    proc = host.run(
+        f"dpkg-query -W -f '${{Package}} ${{db:Status-Status}}\\n' {names} 2>/dev/null",
+        check=False, mutate=False, capture=True,
+    )
+    have = {f[0] for f in (l.split() for l in proc.stdout.splitlines()) if len(f) == 2 and f[1] == "installed"}
+    missing = [p for p in AGENT_PACKAGES if p not in have]
+    if not missing:
+        return
+    log(f"==> Installing packages on {host}: {' '.join(missing)}")
+    units = [u for p in missing for u in AGENT_PACKAGES[p]]
+    if units:
+        host.systemctl("mask", *units)
+    host.run("apt-get update -q", check=False)
+    host.run(
+        "DEBIAN_FRONTEND=noninteractive apt-get install -y -q " + " ".join(missing),
+        desc=f"apt-get install {' '.join(missing)}",
+    )
 
 
 def move_kea_leases(host: Host) -> None:
