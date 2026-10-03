@@ -1,0 +1,21 @@
+# SPDX-FileCopyrightText: 2026 The Portitor contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# Booted by the "Portitor password recovery" GRUB entry (systemd.unit=): only
+# the basic system comes up, then this on the console. Not enabled.
+[Unit]
+Description=Portitor password recovery
+After=basic.target
+Conflicts=getty@tty1.service
+After=getty@tty1.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/portitor-recover
+StandardInput=tty-force
+StandardOutput=tty
+StandardError=tty
+TTYPath=/dev/console
+TTYReset=yes
+TTYVHangup=yes
+TimeoutStartSec=infinity

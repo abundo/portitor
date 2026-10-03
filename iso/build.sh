@@ -102,7 +102,8 @@ else
 	cp -r deploy "$stage/"
 	tar -czf "$payload/portitor.tar.gz" -C "$stage" .
 fi
-cp iso/late.sh iso/target.sh iso/portitor-setup.py iso/portitor-firstboot.service "$payload/"
+cp iso/late.sh iso/target.sh iso/portitor-setup.py iso/portitor-firstboot.service \
+	iso/portitor-recover.sh iso/portitor-recovery.service iso/42_portitor_recovery "$payload/"
 cp iso/preseed.cfg iso/grub.cfg iso/isolinux.cfg "$work/"
 if [[ -n $test ]]; then
 	log "Test ISO: unattended, erases /dev/vda"

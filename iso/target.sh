@@ -19,6 +19,12 @@ python3 "$root/install.py" --local "$root" --web --agent --yes
 install -D -m 0755 "$d/portitor-setup.py" /usr/bin/portitor-setup
 install -D -m 0644 "$d/portitor-firstboot.service" /etc/systemd/system/portitor-firstboot.service
 systemctl enable portitor-firstboot.service
+# Password recovery: a GRUB entry that boots into portitor-recover (no root
+# login exists). The unit is not enabled; the entry starts it.
+install -D -m 0755 "$d/portitor-recover.sh" /usr/sbin/portitor-recover
+install -D -m 0644 "$d/portitor-recovery.service" /etc/systemd/system/portitor-recovery.service
+install -D -m 0755 "$d/42_portitor_recovery" /etc/grub.d/42_portitor_recovery
+update-grub
 # SSH is open from the LAN (the portitor-mgmt service).
 systemctl enable ssh.service
 # Only in an ISO built with --test: answers, so the setup asks nothing.

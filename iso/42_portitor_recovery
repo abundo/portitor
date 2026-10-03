@@ -1,0 +1,23 @@
+#!/bin/sh
+# SPDX-FileCopyrightText: 2026 The Portitor contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# grub-mkconfig script: a boot menu entry that starts portitor-recovery.service
+# instead of the system (see portitor-recover.sh).
+set -e
+. /usr/share/grub/grub-mkconfig_lib
+
+kernel=$(ls /boot/vmlinuz-* 2>/dev/null | sort -V | tail -n 1)
+[ -n "$kernel" ] || exit 0
+version=${kernel#/boot/vmlinuz-}
+initrd=/boot/initrd.img-$version
+[ -e "$initrd" ] || exit 0
+
+boot_device=$(${grub_probe} --target=device /boot)
+cat <<MENU
+menuentry 'Portitor password recovery' --class gnu-linux --class os {
+$(prepare_grub_to_access_device "$boot_device" | sed 's/^/	/')
+	linux	$(make_system_path_relative_to_its_root "$kernel") root=UUID=${GRUB_DEVICE_UUID} rw quiet systemd.unit=portitor-recovery.service
+	initrd	$(make_system_path_relative_to_its_root "$initrd")
+}
+MENU
