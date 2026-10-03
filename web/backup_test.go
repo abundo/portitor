@@ -46,6 +46,20 @@ func TestBackupRestore(t *testing.T) {
 	env := newEnv(t)
 	env.create("/api/objects", map[string]any{"name": "nas", "addresses": []string{"192.168.1.10"}})
 	env.do("PUT", "/api/settings", map[string]any{"wg_endpoint_host": "old.example.com", "agent_url": "https://10.0.0.1:8443"})
+	// Role memberships come back; one of a user deleted since the backup
+	// goes with that user.
+	if err := CreateUser(env.srv, "stays", "another long password"); err != nil {
+		t.Fatal(err)
+	}
+	if err := CreateUser(env.srv, "gone", "another long password"); err != nil {
+		t.Fatal(err)
+	}
+	if err := env.srv.db.Exec("INSERT INTO roles (name) VALUES ('ops')").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := env.srv.db.Exec("INSERT INTO role_members (role_id, user_id, level) SELECT r.id, u.id, 'viewer' FROM roles r, users u WHERE u.username IN ('stays', 'gone')"); err.Error != nil || err.RowsAffected != 2 {
+		t.Fatalf("role member: %v %d", err.Error, err.RowsAffected)
+	}
 	data := env.backup()
 
 	// The download is age encrypted with the passphrase.
@@ -63,6 +77,9 @@ func TestBackupRestore(t *testing.T) {
 	env.create("/api/objects", map[string]any{"name": "printer", "addresses": []string{"192.168.1.20"}})
 	env.do("PUT", "/api/settings", map[string]any{"wg_endpoint_host": "new.example.com", "agent_url": "https://10.0.0.2:8443", "agent_token": "new-token"})
 	env.srv.db.Model(&models.Settings{}).Where("id = 1").Update("generation", 7)
+	if err := env.srv.db.Exec("DELETE FROM users WHERE username = 'gone'").Error; err != nil {
+		t.Fatal(err)
+	}
 	if err := CreateUser(env.srv, "later", "another long password"); err != nil {
 		t.Fatal(err)
 	}
@@ -98,6 +115,11 @@ func TestBackupRestore(t *testing.T) {
 	env.srv.db.Model(&models.User{}).Where("username = ?", "later").Count(&n)
 	if n != 1 {
 		t.Error("restore replaced the users")
+	}
+	var members []string
+	env.srv.db.Raw("SELECT u.username FROM role_members m JOIN users u ON u.id = m.user_id").Scan(&members)
+	if strings.Join(members, ",") != "stays" {
+		t.Errorf("role members after restore: %v", members)
 	}
 	if rec := env.do("GET", "/api/me", nil); rec.Code != http.StatusOK {
 		t.Errorf("session after restore: %d", rec.Code)

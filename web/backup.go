@@ -255,20 +255,32 @@ func restoreDatabase(ctx context.Context, db *gorm.DB, path string) (*restoreRes
 	if _, err := tx.ExecContext(ctx, "PRAGMA defer_foreign_keys = ON"); err != nil {
 		return nil, err
 	}
+	// Every table is cleared before any is filled: ON DELETE CASCADE acts
+	// at once, and would empty a table already filled.
+	for _, t := range tables {
+		if _, ok := cols[t]; !ok {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM main."`+t+`"`); err != nil {
+			return nil, fmt.Errorf("clear %s: %w", t, err)
+		}
+	}
 	for _, t := range tables {
 		c, ok := cols[t]
 		if !ok {
 			continue
 		}
 		list := `"` + strings.Join(c, `", "`) + `"`
-		if _, err := tx.ExecContext(ctx, `DELETE FROM main."`+t+`"`); err != nil {
-			return nil, fmt.Errorf("clear %s: %w", t, err)
-		}
 		// AUTOINCREMENT keeps its counter, so the ids of rows deleted
 		// here are not reused (rule ids mark connections).
 		if _, err := tx.ExecContext(ctx, `INSERT INTO main."`+t+`" (`+list+`) SELECT `+list+` FROM bk."`+t+`"`); err != nil {
 			return nil, fmt.Errorf("restore %s: %w", t, err)
 		}
+	}
+	// Users stay those of this installation: a membership of a user
+	// deleted since the backup goes with that user.
+	if _, err := tx.ExecContext(ctx, `DELETE FROM main.role_members WHERE user_id NOT IN (SELECT id FROM main.users)`); err != nil {
+		return nil, err
 	}
 	gen := `UPDATE main.settings SET generation = max(generation, ?) WHERE id = 1`
 	args := []any{cur.Generation}
