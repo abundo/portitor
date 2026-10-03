@@ -3,7 +3,7 @@
 
 <script setup>
 import { useConfirm } from '@/composables/useConfirm'
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import QRCode from 'qrcode'
 import CrudPage from '@/components/CrudPage.vue'
@@ -14,7 +14,9 @@ import { errMsg } from '@/api/http'
 import { useInstanceStore } from '@/stores/instances'
 import { useDeployStore } from '@/stores/deploy'
 import { useAuthStore } from '@/stores/auth'
-import { usePageForm } from '@/composables/useFormGuard'
+import { useFormGuard, usePageForm } from '@/composables/useFormGuard'
+import TagsInput from '@/components/TagsInput.vue'
+import { inlineField, wideModal } from '@/utils/form'
 
 const { ask } = useConfirm()
 
@@ -99,6 +101,42 @@ async function setEnabled(enabled) {
   } catch (err) {
     toast.add({ title: errMsg(err), color: 'error' })
     await load()
+  }
+}
+
+// ----- edit the selected tunnel (its interface) -----
+// The name, kind and virtual firewall are changed under Interfaces.
+const editKeys = [
+  'label',
+  'description',
+  'enabled',
+  'addresses',
+  'wg_listen_port',
+  'wg_endpoint',
+  'wg_keepalive',
+  'mtu',
+]
+const editOpen = ref(false)
+const editSaving = ref(false)
+const editForm = reactive({})
+const editGuard = useFormGuard(editForm, editOpen)
+function editTunnel() {
+  const t = selected.value
+  for (const k of editKeys) editForm[k] = structuredClone(t[k] ?? null)
+  editForm.addresses ??= []
+  editOpen.value = true
+}
+async function saveTunnel() {
+  editSaving.value = true
+  try {
+    const t = selected.value
+    Object.assign(t, await interfaces.update(t.id, { ...editForm }))
+    editOpen.value = false
+    await loadFree()
+  } catch (err) {
+    toast.add({ title: errMsg(err, 'Save failed'), color: 'error' })
+  } finally {
+    editSaving.value = false
   }
 }
 
@@ -344,8 +382,16 @@ function copy(text) {
           </div>
         </div>
         <UButton
-          v-if="auth.canEdit"
+          v-if="selected"
           class="ml-auto"
+          color="neutral"
+          variant="outline"
+          :icon="auth.canEdit ? 'i-lucide-pencil' : 'i-lucide-eye'"
+          :label="auth.canEdit ? 'Edit' : 'Details'"
+          @click="editTunnel"
+        />
+        <UButton
+          v-if="auth.canEdit"
           color="neutral"
           variant="outline"
           icon="i-lucide-file-up"
@@ -399,6 +445,88 @@ function copy(text) {
         </template>
       </CrudPage>
     </div>
+
+    <UModal
+      :open="editOpen"
+      :title="`${auth.canEdit ? 'Edit' : 'Interface'} ${selected ? withLabel(selected.label, selected.name) : ''}`"
+      :ui="wideModal"
+      :dismissible="false"
+      @update:open="editGuard.onUpdateOpen"
+    >
+      <template #body>
+        <form id="wg-tunnel-form" @submit.prevent="saveTunnel">
+          <fieldset :disabled="!auth.canEdit" class="space-y-3">
+            <UFormField
+              :ui="inlineField"
+              label="Label"
+              help="A short name shown before the interface name: VPN (wg0)."
+            >
+              <UInput v-model="editForm.label" class="w-full" placeholder="VPN" />
+            </UFormField>
+            <UFormField :ui="inlineField" label="Description">
+              <UInput v-model="editForm.description" class="w-full" />
+            </UFormField>
+            <UFormField :ui="inlineField" label="Enabled">
+              <USwitch v-model="editForm.enabled" />
+            </UFormField>
+            <UFormField
+              :ui="inlineField"
+              label="IP addresses"
+              help="The firewall's tunnel addresses with their prefix length: 10.99.0.1/24, fd00:99::1/64. New peers get free addresses of these prefixes."
+            >
+              <TagsInput
+                v-model="editForm.addresses"
+                class="w-full font-mono"
+                placeholder="10.99.0.1/24"
+                :disabled="!auth.canEdit"
+              />
+            </UFormField>
+            <UFormField
+              :ui="inlineField"
+              label="Listen port"
+              help="Opened automatically in the firewall. 0 for outgoing-only tunnels."
+            >
+              <UInput v-model.number="editForm.wg_listen_port" type="number" class="w-40" />
+            </UFormField>
+            <UFormField
+              :ui="inlineField"
+              label="Public endpoint for clients"
+              help="host:port written into generated client configs. Empty: the public endpoint host and the listen port."
+            >
+              <UInput
+                v-model="editForm.wg_endpoint"
+                class="w-full font-mono"
+                placeholder="vpn.example.org:51820"
+              />
+            </UFormField>
+            <UFormField
+              :ui="inlineField"
+              label="Client keepalive (seconds)"
+              help="PersistentKeepalive in generated client configs; 0 disables it."
+            >
+              <UInput v-model.number="editForm.wg_keepalive" type="number" class="w-40" />
+            </UFormField>
+            <UFormField :ui="inlineField" label="MTU" help="0 keeps the default.">
+              <UInput v-model.number="editForm.mtu" type="number" class="w-40" />
+            </UFormField>
+            <p class="text-xs text-muted">
+              The name is changed, and the interface deleted, under
+              <ULink to="/interfaces" class="underline">Interfaces</ULink>.
+            </p>
+          </fieldset>
+        </form>
+      </template>
+      <template #footer>
+        <div class="flex w-full justify-end gap-2">
+          <UButton color="neutral" variant="ghost" @click="editGuard.close">{{
+            auth.canEdit ? 'Cancel' : 'Close'
+          }}</UButton>
+          <UButton v-if="auth.canEdit" type="submit" form="wg-tunnel-form" :loading="editSaving"
+            >Save</UButton
+          >
+        </div>
+      </template>
+    </UModal>
 
     <UModal
       v-model:open="cfgOpen"
