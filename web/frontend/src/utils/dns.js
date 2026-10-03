@@ -5,6 +5,7 @@ export const zoneTypes = [
   { label: 'Forward (names)', value: 'forward' },
   { label: 'Reverse IPv4 (PTR, generated)', value: 'reverse4' },
   { label: 'Reverse IPv6 (PTR, generated)', value: 'reverse6' },
+  { label: 'Forward only (to other DNS servers)', value: 'forward-only' },
 ]
 
 // What a zone without a DNS template gets (internal/render/dns.go).

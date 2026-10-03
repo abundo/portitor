@@ -138,6 +138,21 @@ func NamedConf(in *fwconfig.Instance, p Paths, dhcpDNS map[string][]string) stri
 		fmt.Fprintf(b, "\tforward %s;\n", forward)
 	}
 	fmt.Fprintf(b, "\tdnssec-validation %s;\n", validation)
+	var forwardOnly []fwconfig.DNSZone
+	for _, z := range in.DNS.Zones {
+		if z.Type == fwconfig.ZoneForwardOnly {
+			forwardOnly = append(forwardOnly, z)
+		}
+	}
+	if len(forwardOnly) > 0 && validation != fwconfig.DNSSECValidationNo {
+		// Typically internal names under a signed public domain: their
+		// answers can't be validated.
+		names := make([]string, len(forwardOnly))
+		for i, z := range forwardOnly {
+			names[i] = fmt.Sprintf("%q", z.Name)
+		}
+		fmt.Fprintf(b, "\tvalidate-except { %s; };\n", strings.Join(names, "; "))
+	}
 	b.WriteString("\tallow-transfer { none; };\n")
 	b.WriteString("\tversion none;\n")
 	if in.DNS.QueryLog != nil {
@@ -161,6 +176,10 @@ func NamedConf(in *fwconfig.Instance, p Paths, dhcpDNS map[string][]string) stri
 		b.WriteString("controls { };\n\n")
 	}
 	dnssecPolicies(b, in.DNS.DNSSECPolicies)
+	for _, z := range forwardOnly {
+		fmt.Fprintf(b, "zone %q {\n\ttype forward;\n\tforward only;\n", z.Name)
+		fmt.Fprintf(b, "\tforwarders { %s; };\n};\n\n", strings.Join(z.Forwarders, "; "))
+	}
 	fmt.Fprintf(b, "include %q;\n", p.Files(in).NamedInclude)
 	return b.String()
 }
@@ -243,6 +262,9 @@ func DnsmgrConfig(in *fwconfig.Instance, p Paths, u Units) (dnsmgr.ConfigRoot, b
 	}
 	group.HostDnsTemplate = dnsmgrHostTemplate
 	for _, z := range in.DNS.Zones {
+		if z.Type == fwconfig.ZoneForwardOnly {
+			continue // in named.conf
+		}
 		tmpl := dnsmgrZoneTemplate
 		if z.Template != "" {
 			tmpl = dnsmgrZonePrefix + z.Template

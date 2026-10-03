@@ -585,6 +585,9 @@ type DnsZone struct {
 	// DnsTemplateID nil: built-in SOA and NS (localhost).
 	DnsTemplateID *uint  `json:"dns_template_id"`
 	Description   string `json:"description"`
+	// Forwarders: the DNS servers of a forward-only zone (addresses or
+	// named hosts).
+	Forwarders StringList `json:"forwarders"`
 }
 
 // DnsSoaTemplate is shared by all instances. Minimum is the SOA minimum

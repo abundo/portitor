@@ -439,6 +439,9 @@ const (
 	ZoneForward  = "forward"
 	ZoneReverse4 = "reverse4"
 	ZoneReverse6 = "reverse6"
+	// ZoneForwardOnly is not served: BIND forwards its queries to the
+	// zone's Forwarders (rendered in named.conf, not by dnsmgr2).
+	ZoneForwardOnly = "forward-only"
 )
 
 type DNSZone struct {
@@ -446,6 +449,8 @@ type DNSZone struct {
 	Type     string      `json:"type"`
 	Template string      `json:"template,omitempty"` // a ZoneTemplates name
 	Records  []DNSRecord `json:"records,omitempty"`  // forward zones only
+	// Forwarders are the DNS servers of a forward-only zone.
+	Forwarders []string `json:"forwarders,omitempty"`
 }
 
 type DNSRecord struct {

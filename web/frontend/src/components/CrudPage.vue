@@ -67,7 +67,8 @@ const props = defineProps({
   // itemName(row, rows) names a row in the delete prompt, with what it is
   // ("NAT rule 3"); default: the noun and the row's name.
   itemName: { type: Function, default: null },
-  // editTo(row) is a route: Edit opens that page instead of the form (the
+  // editTo(row) is a route: Edit opens that page instead of the form (no
+  // route: the form; the
   // page then holds the row's Delete).
   editTo: { type: Function, default: null },
   // searchText(row) is more text the search finds a row by, for a column
@@ -419,7 +420,7 @@ defineExpose({ reload: load, openEdit, openView, openCreate })
               :aria-label="readOnly ? 'View' : 'Edit'"
               :title="readOnly ? 'View' : 'Edit'"
               :to="editTo?.(row.original)"
-              @click="editTo || openEdit(row.original)"
+              @click="editTo?.(row.original) || openEdit(row.original)"
             />
             <slot name="row-actions" :row="row.original" />
           </div>

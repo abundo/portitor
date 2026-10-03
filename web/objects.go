@@ -161,6 +161,17 @@ func eachObjectRef(tx *gorm.DB, visit func(where string, entry *string) bool) er
 	if err := tx.Find(&prefixes).Error; err != nil {
 		return err
 	}
+	var zones []models.DnsZone
+	if err := tx.Where("type = ?", fwconfig.ZoneForwardOnly).Find(&zones).Error; err != nil {
+		return err
+	}
+	for _, z := range zones {
+		if list(fmt.Sprintf("DNS zone %s in %s", z.Name, instName[z.InstanceID]), z.Forwarders) {
+			if err := save(&models.DnsZone{}, z.ID, map[string]any{"forwarders": z.Forwarders}); err != nil {
+				return err
+			}
+		}
+	}
 	for _, p := range prefixes {
 		if list(fmt.Sprintf("prefix %s in %s", p.Prefix, instName[p.InstanceID]), p.DhcpDnsServers) {
 			if err := save(&models.IpamPrefix{}, p.ID, map[string]any{"dhcp_dns_servers": p.DhcpDnsServers}); err != nil {

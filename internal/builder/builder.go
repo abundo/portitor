@@ -423,6 +423,11 @@ func build(db *gorm.DB, generation int64, only map[string]bool) (*fwconfig.Docum
 				continue
 			}
 			dz := fwconfig.DNSZone{Name: z.Name, Type: z.Type}
+			if z.Type == fwconfig.ZoneForwardOnly {
+				dz.Forwarders = expand("instance "+mi.Name+": dns zone "+z.Name+" forwarders", objs.Hosts, z.Forwarders)
+				in.DNS.Zones = append(in.DNS.Zones, dz)
+				continue
+			}
 			if z.DnsTemplateID != nil {
 				dz.Template = d.addDNSTemplate(&in.DNS, *z.DnsTemplateID)
 				if dz.Template == "" {

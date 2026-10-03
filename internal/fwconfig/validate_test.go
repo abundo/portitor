@@ -156,6 +156,13 @@ func TestValidateCatchesProblems(t *testing.T) {
 		}, "eth1 is not a DHCP client"},
 		{"dns dhcp interface not dhcp upstream", func(d *Document) { d.Instances[0].DNS.DHCPInterface = "eth0" }, "only for upstream dhcp"},
 		{"dns unknown template", func(d *Document) { d.Instances[0].DNS.Zones[0].Template = "work" }, `unknown template "work"`},
+		{"dns forward-only no forwarders", func(d *Document) {
+			d.Instances[0].DNS.Zones = append(d.Instances[0].DNS.Zones, DNSZone{Name: "int.example.com", Type: ZoneForwardOnly})
+		}, "needs forwarders"},
+		{"dns forward-only bad forwarder", func(d *Document) {
+			d.Instances[0].DNS.Zones = append(d.Instances[0].DNS.Zones, DNSZone{Name: "int.example.com", Type: ZoneForwardOnly, Forwarders: []string{"1.2.3.4; }; evil"}})
+		}, "invalid forwarder"},
+		{"dns forwarders on a forward zone", func(d *Document) { d.Instances[0].DNS.Zones[0].Forwarders = []string{"1.2.3.4"} }, "only forward-only zones"},
 		{"dns template unknown soa", func(d *Document) { d.Instances[0].DNS.ZoneTemplates[0].SOA = "x" }, `unknown soa template "x"`},
 		{"dns template no ns", func(d *Document) { d.Instances[0].DNS.ZoneTemplates[0].Nameservers = nil }, "at least one nameserver"},
 		{"dns template ns injection", func(d *Document) {

@@ -447,6 +447,26 @@ func TestNamedConfDNSSECValidation(t *testing.T) {
 	}
 }
 
+func TestNamedConfForwardOnlyZone(t *testing.T) {
+	in := &fwconfig.SampleDocument().Instances[0]
+	in.DNS.Zones = append(in.DNS.Zones, fwconfig.DNSZone{Name: "int.example.com", Type: fwconfig.ZoneForwardOnly, Forwarders: []string{"172.25.130.32", "172.25.130.33"}})
+	named := NamedConf(in, DefaultPaths(), nil)
+	for _, want := range []string{
+		"zone \"int.example.com\" {\n\ttype forward;\n\tforward only;\n\tforwarders { 172.25.130.32; 172.25.130.33; };\n};",
+		`validate-except { "int.example.com"; };`,
+	} {
+		if !strings.Contains(named, want) {
+			t.Errorf("missing %q in\n%s", want, named)
+		}
+	}
+	cfg, _ := DnsmgrConfig(in, DefaultPaths(), DefaultUnits())
+	for _, z := range cfg.Dnsmgr2[0].Zones {
+		if z.Name == "int.example.com" {
+			t.Errorf("forward-only zone given to dnsmgr2")
+		}
+	}
+}
+
 func TestNamedConfQueryLog(t *testing.T) {
 	in := &fwconfig.SampleDocument().Instances[0]
 	if named := NamedConf(in, DefaultPaths(), nil); strings.Contains(named, "querylog") || strings.Contains(named, "logging") {

@@ -722,8 +722,25 @@ func prepareDnsZone(tx *gorm.DB, z, old *models.DnsZone) error {
 			return bad("a reverse zone is named by its prefix, e.g. 192.168.1.0/24")
 		}
 		z.Name = p.Masked().String()
+	case fwconfig.ZoneForwardOnly:
+		if !fwconfig.ValidDomain(z.Name) {
+			return bad("name must be a domain, e.g. int.example.com")
+		}
 	default:
-		return oneOf("type", z.Type, fwconfig.ZoneForward, fwconfig.ZoneReverse4, fwconfig.ZoneReverse6)
+		return oneOf("type", z.Type, fwconfig.ZoneForward, fwconfig.ZoneReverse4, fwconfig.ZoneReverse6, fwconfig.ZoneForwardOnly)
+	}
+	z.Forwarders = cleanList(z.Forwarders)
+	if z.Type == fwconfig.ZoneForwardOnly {
+		// No SOA or NS: nothing is served.
+		z.DnsTemplateID = nil
+		if len(z.Forwarders) == 0 {
+			return bad("forwarders: enter at least one DNS server")
+		}
+		if err := checkEntries(tx, "forwarders", z.Forwarders, entryHost); err != nil {
+			return err
+		}
+	} else {
+		z.Forwarders = nil
 	}
 	if z.DnsTemplateID != nil && *z.DnsTemplateID == 0 {
 		z.DnsTemplateID = nil
@@ -744,7 +761,7 @@ func prepareDnsRecord(tx *gorm.DB, r, _ *models.DnsRecord) error {
 		return bad("zone does not exist")
 	}
 	if z.Type != fwconfig.ZoneForward {
-		return bad("records go in forward zones; reverse zones are generated")
+		return bad("records go in forward zones; reverse zones are generated, forward-only zones are forwarded")
 	}
 	return checkRecord(&z, r, "")
 }

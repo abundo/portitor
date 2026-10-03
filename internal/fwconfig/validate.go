@@ -614,8 +614,26 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 			if len(z.Records) > 0 {
 				v.addf("%s: reverse zones are generated from forward records", zp)
 			}
+		case ZoneForwardOnly:
+			if !validDomain(z.Name) {
+				v.addf("%s: invalid domain name", zp)
+			}
+			if len(z.Forwarders) == 0 {
+				v.addf("%s: a forward-only zone needs forwarders", zp)
+			}
+			if len(z.Records) > 0 || z.Template != "" {
+				v.addf("%s: a forward-only zone has no records or template", zp)
+			}
 		default:
 			v.addf("%s: invalid type %q", zp, z.Type)
+		}
+		if z.Type != ZoneForwardOnly && len(z.Forwarders) > 0 {
+			v.addf("%s: only forward-only zones have forwarders", zp)
+		}
+		for _, a := range z.Forwarders {
+			if _, err := ParseAddr(a); err != nil {
+				v.addf("%s: invalid forwarder %q", zp, a)
+			}
 		}
 		for _, r := range z.Records {
 			v.dnsRecord(zp, r)

@@ -169,14 +169,21 @@ async function save() {
 }
 
 const typeLabel = (t) => zoneTypes.find((x) => x.value === t)?.label ?? t
+// A forward-only zone has no records: Edit opens its form.
+const forwardOnly = (z) => z.type === 'forward-only'
+const zoneLink = (z) => (forwardOnly(z) ? null : `/dns/zones/${z.id}`)
 const zoneColumns = [
   { key: 'name', label: 'Zone', class: 'font-mono font-medium' },
   { key: 'type', label: 'Type', format: (r) => typeLabel(r.type) },
   {
     key: 'template',
     label: 'DNS template',
-    format: (r) => templates.value.find((t) => t.id === r.dns_template_id)?.name ?? 'built-in',
+    format: (r) =>
+      forwardOnly(r)
+        ? ''
+        : (templates.value.find((t) => t.id === r.dns_template_id)?.name ?? 'built-in'),
   },
+  { key: 'forwarders', label: 'Forwarders', format: (r) => (r.forwarders ?? []).join(', ') },
   { key: 'description', label: 'Description' },
 ]
 const zoneFields = [
@@ -194,10 +201,24 @@ const zoneFields = [
     nullable: true,
     items: () => templates.value.map((t) => ({ label: t.name, value: t.id })),
     hint: 'SOA, NS and default TTL come from the template. —: built-in (NS localhost).',
+    show: (f) => !forwardOnly(f),
+  },
+  {
+    key: 'forwarders',
+    label: 'Forwarders',
+    type: 'addrs',
+    required: true,
+    placeholder: '172.25.130.32',
+    hint: 'The DNS servers the queries for this zone are sent to: addresses or named hosts.',
+    show: forwardOnly,
   },
   { key: 'description', label: 'Description' },
 ]
-const zoneDefaults = () => ({ type: 'forward', dns_template_id: templates.value[0]?.id ?? null })
+const zoneDefaults = () => ({
+  type: 'forward',
+  dns_template_id: templates.value[0]?.id ?? null,
+  forwarders: [],
+})
 
 const tabs = [
   { label: 'DNS zones', value: 'zones', slot: 'zones', icon: 'i-lucide-globe' },
@@ -218,19 +239,24 @@ const tab = computed({
           <CrudPage
             title="DNS zones"
             noun="DNS zone"
-            description="Zones served by this virtual firewall's DNS server (BIND, via dnsmgr2). Names of IPAM addresses go into the matching forward zone; PTRs in reverse zones are generated. Open a zone to edit its records."
+            description="Zones served by this virtual firewall's DNS server (BIND, via dnsmgr2). Names of IPAM addresses go into the matching forward zone; PTRs in reverse zones are generated. Open a zone to edit its records. A forward-only zone has no records: its queries go to its forwarders."
             :api="dnsZones"
             :params="{ instance_id: store.currentId }"
             :columns="zoneColumns"
             :fields="zoneFields"
             :defaults="zoneDefaults"
-            :edit-to="(row) => `/dns/zones/${row.id}`"
+            :edit-to="zoneLink"
             new-label="New zone"
           >
             <template #cell-name="{ row }">
-              <RouterLink class="font-mono font-medium text-primary" :to="`/dns/zones/${row.id}`">
+              <RouterLink
+                v-if="zoneLink(row)"
+                class="font-mono font-medium text-primary"
+                :to="zoneLink(row)"
+              >
                 {{ row.name }}
               </RouterLink>
+              <span v-else class="font-mono font-medium">{{ row.name }}</span>
             </template>
           </CrudPage>
         </div>
