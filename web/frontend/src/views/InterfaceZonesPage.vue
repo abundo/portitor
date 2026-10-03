@@ -19,9 +19,8 @@ const fields = [
   {
     key: 'interfaces',
     label: 'Interfaces',
-    type: 'multiselect',
+    type: 'transfer',
     items: () => ifaceNames.value.map((n) => ({ label: ifaceText(n), value: n })),
-    placeholder: 'none',
     hint: 'Zero or more interfaces of this virtual firewall, link ends included. An interface may be in several zones.',
   },
 ]

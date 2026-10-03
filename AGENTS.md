@@ -288,6 +288,9 @@ singular); a custom page uses `SearchInput` above each table,
   `TagsInput.vue` (a `CrudPage` field `type: 'tags'`), never `UInputTags`
   directly: a click on a tag puts it back in the input to edit, and Enter or
   leaving the field returns it to its place.
+- **Picking from a known set** (an interface zone's interfaces) uses the dual
+  listbox `TransferList.vue` (a `CrudPage` field `type: 'transfer'`): Available
+  and Selected, moved with the arrow buttons, a double-click or drag and drop.
 - **Dialogs don't close by accident:** every `UModal` has `:dismissible="false"`,
   so a click outside it (or Escape) never closes it; only its buttons and X do. A
   form's Cancel and X go through `useFormGuard` (`composables/useFormGuard.js`),

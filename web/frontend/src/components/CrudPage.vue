@@ -5,7 +5,7 @@
 // CrudPage: a table of one REST resource with a create/edit modal, driven
 // by column and field schemas.
 //
-// Field: { key, label, type: text|number|password|switch|select|multiselect|tags|addrs|addr|ports|textarea|custom|heading,
+// Field: { key, label, type: text|number|password|switch|select|multiselect|transfer|tags|addrs|addr|ports|textarea|custom|heading,
 //          items (array or form => array), nullable, placeholder, hint,
 //          required, show: form => bool, disabled: form => bool }
 // nullable: a select with a "—" choice, saved as null, or as '' with
@@ -13,6 +13,7 @@
 // heading: a section title in the form (label), with no value.
 // multiselect: an array of strings picked from items (strings, or
 // { label, value, description } to show a description under each name).
+// transfer: the same, picked in a dual listbox (TransferList).
 // addrs/addr: address list / single address; names of hosts/prefixes are
 // suggested and accepted, and with `lists: true` IP lists ("@name").
 // ports: a port list, with port names and their ports suggested.
@@ -33,6 +34,7 @@ import AddrInput from '@/components/AddrInput.vue'
 import PortMenu from '@/components/PortMenu.vue'
 import SearchInput from '@/components/SearchInput.vue'
 import TagsInput from '@/components/TagsInput.vue'
+import TransferList from '@/components/TransferList.vue'
 import { usePortMenu } from '@/composables/usePortMenu'
 import { useRowDrag } from '@/composables/useRowDrag'
 import { api as rootApi } from '@/api'
@@ -175,7 +177,10 @@ function fill(src) {
   Object.assign(form, JSON.parse(JSON.stringify(src)))
   for (const f of props.fields) {
     if (f.nullable && (form[f.key] == null || (f.text && form[f.key] === ''))) form[f.key] = NONE
-    if (['tags', 'addrs', 'multiselect'].includes(f.type) && !Array.isArray(form[f.key]))
+    if (
+      ['tags', 'addrs', 'multiselect', 'transfer'].includes(f.type) &&
+      !Array.isArray(form[f.key])
+    )
       form[f.key] = []
     if (f.type === 'addr' && form[f.key] == null) form[f.key] = ''
   }
@@ -491,6 +496,12 @@ defineExpose({ reload: load, openEdit, openView, openCreate })
                 class="w-full"
                 :placeholder="f.placeholder"
                 :disabled="f.disabled?.(form)"
+              />
+              <TransferList
+                v-else-if="f.type === 'transfer'"
+                v-model="form[f.key]"
+                :items="itemsOf(f)"
+                :disabled="!!f.disabled?.(form)"
               />
               <TagsInput
                 v-else-if="f.type === 'tags'"
