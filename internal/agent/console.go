@@ -58,6 +58,13 @@ func (a *Agent) handleConsole(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnprocessableEntity, err)
 		return
 	}
+	if netnsName != "" {
+		// Debian's bash prompts (/etc/bash.bashrc, the skeleton
+		// ~/.bashrc) show $debian_chroot in parentheses first, which a
+		// login shell's PS1 from the environment would not survive.
+		name := r.URL.Query().Get("instance")
+		cmd.Env = append(cmd.Env, "debian_chroot="+name, "PORTITOR_VF="+name)
+	}
 	// The server's read/write timeouts are for requests, not a session.
 	rc := http.NewResponseController(w)
 	_ = rc.SetReadDeadline(time.Time{})
