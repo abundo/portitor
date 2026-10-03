@@ -145,16 +145,33 @@ func (c *Config) validate() error {
 	return nil
 }
 
+// isLoopback reports whether every address of p is a loopback address
+// (127.0.0.0/8, ::1).
+func isLoopback(p netip.Prefix) bool {
+	if !p.Masked().Addr().IsLoopback() {
+		return false
+	}
+	return p.Bits() >= 8 && (p.Addr().Is4() || p.Bits() == 128)
+}
+
 func (c *Config) antiLockout() *render.AntiLockout {
 	if c.AntiLockout != nil && !*c.AntiLockout {
 		return nil
 	}
-	if len(c.AllowFrom) == 0 {
+	// Loopback needs no rule: the input chain accepts iif "lo" first.
+	var from []string
+	for _, a := range c.AllowFrom {
+		if p, err := netip.ParsePrefix(a); err == nil && isLoopback(p) {
+			continue
+		}
+		from = append(from, a)
+	}
+	if len(from) == 0 {
 		return nil
 	}
 	port := 8443
 	if i := strings.LastIndex(c.Listen, ":"); i >= 0 {
 		fmt.Sscanf(c.Listen[i+1:], "%d", &port)
 	}
-	return &render.AntiLockout{Port: port, SSHPort: 22, AllowFrom: c.AllowFrom}
+	return &render.AntiLockout{Port: port, SSHPort: 22, AllowFrom: from}
 }
