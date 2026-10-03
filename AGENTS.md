@@ -14,8 +14,8 @@ are in [README.md](README.md).
 | `cmd/portitor-web` | GUI/API binary: `start`, `migrate`, `createadmin`, `agent-url`, `bootstrap` (ISO first boot) |
 | `cmd/portitor-agent` | Agent daemon on the firewall: `start`, `init`, `render`, `netns-exec`; run as `portitor` (a symlink, `cli.go`) it is a read-only CLI (`show lldp neighbours`, `show ip neighbours`) over the agent's GET routes on the root-only socket `<run_dir>/agent.sock` |
 | `internal/fwconfig` | The desired-state document and `Validate()`. **The contract between web and agent.** |
-| `internal/render` | Pure functions: document → nftables, WireGuard, named.conf, Kea, dnsmgr2 config |
-| `internal/agent` | Agent: apply/reconcile, commit-confirm, DHCP and DHCPv6 (prefix delegation) clients, IP lists, task scheduler, packet log (NFLOG), DNS query log (BIND logs to the journal, followed with `journalctl`, filtered by the agent, `querylog.go`), WireGuard endpoint re-resolving, packet capture (tcpdump, streamed rate-limited), traceroute (`mtr --raw`, streamed as JSON lines, `trace.go`), LLDP (sent and heard on raw sockets, `lldp.go`), neighbours (ARP/ND, LLDP), status, API server |
+| `internal/render` | Pure functions: document → nftables, WireGuard, named.conf, Kea, dnsmgr2 config, FRR (`frr.go`: frr.conf, daemons, vtysh.conf) |
+| `internal/agent` | Agent: apply/reconcile, commit-confirm, DHCP and DHCPv6 (prefix delegation) clients, IP lists, task scheduler, packet log (NFLOG), DNS query log (BIND logs to the journal, followed with `journalctl`, filtered by the agent, `querylog.go`), WireGuard endpoint re-resolving, packet capture (tcpdump, streamed rate-limited), traceroute (`mtr --raw`, streamed as JSON lines, `trace.go`), LLDP (sent and heard on raw sockets, `lldp.go`), neighbours (ARP/ND, LLDP), BGP state (FRR's JSON through `vtysh`, `bgp.go`), status, API server |
 | `internal/dyndns` | DNS update client ("DNS update" in the GUI): RFC 2136 (from ifnsupdate), sent from the instance netns, or a DNS hosting provider's API through libdns (`providers.go`, matching `fwconfig.DNSProviders`), called from the host |
 | `internal/acme` | ACME certificates through lego: accounts, orders, the stored chain and key (`<state_dir>/certificates/`); the agent's `acme.go` schedules them and answers HTTP-01 in the instance netns, opening port 80 by the `acme_http` set (`render.ACMEHTTPSet`) |
 | `internal/iplist` | Downloads IP lists (CrowdSec LAPI decisions, plain-text lists) |
@@ -66,10 +66,12 @@ docs and user-facing messages.
   is matched by index.
 - **Rule order in a chain:** established/related, invalid drop, loopback and
   essential ICMP, anti-lockout and the services' auto accepts
-  (`render.AutoInputRules`), then the user's rules; in forward, the accept of port
+  (`render.AutoInputRules`; BGP's from its neighbours' addresses only), then the user's rules; in forward, the accept of port
   forwards (`ct status dnat`) comes after the user's rules, so a rule can drop what a
   DNAT would let in; then the policy. The input auto accepts stay first so a rule
   that closes an interface to the firewall keeps the DHCP and DNS enabled on it.
+  The output chain has one auto accept, before the user's rules: the BGP sessions
+  FRR opens to its neighbours (TCP 179).
 - **The agent owns** the `inet firewall` table in each namespace, every `fw-*`
   namespace, routes with `proto 99`, and root-namespace virtual interfaces listed in
   `managed.json`. Leave everything else alone (docker, libvirt, other tables).
@@ -91,8 +93,10 @@ docs and user-facing messages.
   `PUT` merges the body onto the stored row, so those fields can't be overwritten
   through the API either; a secret the user enters comes in through a write-only
   `gorm:"-"` field that `prepare` copies and `present` clears (`DyndnsClient.NewTsigSecret`,
-  `IpList.NewPassword`/`NewApiKey`; a DNS update provider's secret settings come in
+  `IpList.NewPassword`/`NewApiKey`, `BgpPeerSettings.NewPassword` with
+  `ClearPassword`; a DNS update provider's secret settings come in
   through `DyndnsClient.Settings`, where an empty one keeps the stored value).
+  A BGP password is in frr.conf, so that is a `Secret` file `Bundle.Redacted` masks.
   Deployment history stores a redacted document. The exceptions are the backup
   download (`web/backup.go`): the whole database, age-encrypted with the user's
   passphrase; and a WireGuard peer's client config (`render.WireGuardClientConf`),
@@ -146,6 +150,17 @@ the certificate portitor-web serves, chosen under Settings
   renders as the list's `name_v4`/`name_v6` set. One nft match takes one operand, so a
   list with literals and IP lists renders one rule per operand. Renaming a list
   rewrites the rules (`web/tasks.go`); deleting one a rule or task uses is refused.
+- **Routing objects and BGP** (`web/bgp.go`) are per instance: prefix lists, AS
+  path and community lists and route maps (`route_*` tables, entries as JSON),
+  `bgp_configs` (one per instance), peer groups and neighbours. They refer to each
+  other by name, as FRR does: renaming one rewrites the references
+  (`eachRoutingRef`), deleting one in use is refused, a row never moves to another
+  instance, and a new reference field goes in `eachRoutingRef`. Off (the default),
+  the builder leaves BGP and the objects out of the document and the agent stops
+  FRR. A neighbour's update source may name an interface; renaming the interface
+  rewrites it (`renameIfaceRefs`). FRR runs zebra and bgpd only; static routes
+  stay the agent's (kernel routes), so "redistribute static" renders as
+  `redistribute kernel`.
 - **Dual stack:** rule and NAT address lists may mix IPv4 and IPv6;
   `fwconfig.MatchFamilies` decides which versions a rule is rendered for, and
   validation uses the same function.
@@ -160,8 +175,8 @@ the certificate portitor-web serves, chosen under Settings
   (`interface_addresses.go`).
 - **Roles:** a user is `admin`, `viewer` or `none` (`models.RoleAdmin`/`RoleViewer`/
   `RoleNone`): global access. Roles (`roles`, `role_members`, `role_instances`) grant
-  instances at a level (admin/viewer); each instance has its own role, created,
-  renamed and deleted with it (`web/roles.go`). `accessOf` (`web/access.go`) merges
+  instances at a level (admin/viewer); each instance but the default has its own
+  role, created, renamed and deleted with it (`web/roles.go`). `accessOf` (`web/access.go`) merges
   them; `requireRole` (`web/auth.go`) denies by default: everyone but a global admin
   gets GET routes except `viewerDenied` (and `tenantDenied` for `none`), and only
   the writes in `viewerWrites`, plus `tenantWrites` for an instance admin, whose
@@ -209,6 +224,12 @@ singular); a custom page uses `SearchInput` above each table,
 - **Forms and dialogs** are wide when the screen allows: each label sits on the
   same row as its value. On a narrow screen they fall back to one column, with the
   label above the value.
+- **Lists of entries** with several fields (a prefix list's entries, BGP networks)
+  are edited in place in the form with `EntriesEditor.vue`, one row per entry with
+  a remove button (and up/down where order decides); route map entries, which
+  have many fields, with `RouteMapEntries.vue`: Edit opens an entry's own dialog,
+  which holds its Delete. A select that may name nothing uses `NameSelect.vue`
+  (`''` is none), or a `CrudPage` field `nullable` with `text: true`.
 - **Lists of values** (addresses, names) are entered as tags with
   `TagsInput.vue` (a `CrudPage` field `type: 'tags'`), never `UInputTags`
   directly: a click on a tag puts it back in the input to edit, and Enter or
@@ -296,7 +317,11 @@ Committing directly to `main` is fine; no feature branch is needed.
 - `portitor-agent netns-exec` reads `<state_dir>/instances/<name>/netns`, written on
   apply; the per-instance systemd units start through it. It enters the namespace itself and
   drops CAP_SYS_ADMIN and the like (`droppedCaps`) before the exec, so a daemon
-  can't setns into another instance. The units are sandboxed per instance
+  can't setns into another instance. FRR is the exception
+  (`netns-exec --keep-sys-admin`, `portitor-frr@.service`): zebra and bgpd refuse to
+  start without CAP_SYS_ADMIN; they run as the frr user from the validated
+  frr.conf. FRR forks, so its unit has no `PrivatePIDs`; it runs with the instance
+  as FRR's pathspace (`/etc/frr/<instance>`, `vtysh -N <instance>`). The units are sandboxed per instance
   (multitenancy): they see only their own `etc`/`state` instance directories
   (`TemporaryFileSystem` + `Bind*Paths`), the rest read-only, with private
   /tmp, IPC and PID namespaces. A new path a daemon writes goes in its unit's

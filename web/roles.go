@@ -23,8 +23,12 @@ const instanceRolePrefix = "vf-"
 
 func instanceRoleName(instance string) string { return instanceRolePrefix + instance }
 
-// createInstanceRole adds the role of a new instance.
+// createInstanceRole adds the role of a new instance. The default instance,
+// the host itself, has none: only global admins manage it.
 func createInstanceRole(tx *gorm.DB, in *models.Instance) error {
+	if in.IsDefault {
+		return nil
+	}
 	id := in.ID
 	return tx.Create(&models.Role{
 		Name: instanceRoleName(in.Name), Description: "Users of virtual firewall " + in.Name, InstanceID: &id,
