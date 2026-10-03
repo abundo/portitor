@@ -9,12 +9,15 @@ through a port. The name is also a pun on network ports.
 Portitor is a web GUI for a Linux nftables firewall, aimed mainly at home and small
 office networks. It manages:
 
-- firewall rules (input, forward, output) with named services, hosts and prefixes, and
-  NAT: masquerade, SNAT and port forwards
+- firewall rules (input, forward, output) with named services, hosts and prefixes,
+  interface zones and per-rule connection counters; NAT: masquerade, SNAT and port
+  forwards with hairpin NAT
 - a DNS server (BIND) and a DHCP server (Kea, DHCPv4 and DHCPv6) with router
   advertisements
-- WireGuard tunnels, for road warriors and site-to-site
-- a DHCP client for the WAN link
+- WireGuard tunnels, for road warriors and site-to-site; client configs generated,
+  wg-quick files imported
+- DHCP and DHCPv6 clients for the WAN link, with IPv6 prefix delegation: LAN
+  addresses and router advertisements follow the delegated prefix
 - DNS update: DNS records follow the WAN addresses, on your own nameserver (RFC 2136, TSIG)
   or at a DNS hosting provider (Cloudflare, Hetzner, deSEC, Loopia, GleSYS and more, via libdns)
 - certificates: Let's Encrypt (ACME, HTTP-01) certificates, renewed automatically; port 80
@@ -24,6 +27,13 @@ office networks. It manages:
 - virtual firewalls, each with its own routing, rules, DHCP and DNS, with optional
   internal links between them
 - IP prefixes and addresses in a hierarchical tree (IPAM)
+- troubleshooting from the GUI: logged packets, DNS query log, connection table
+  (conntrack), routing tables, ARP/ND and LLDP neighbours, packet capture viewed with
+  Wireshark (Wiregasm) in the browser, traceroute (mtr), and a console on the firewall
+- users and roles: global admins and viewers, and per-virtual-firewall admins
+  (multitenancy), each virtual firewall's daemons sandboxed apart
+- encrypted backups, deployment history with revert, and Debian and Portitor updates
+  from the GUI
 
 For the best security the GUI does not run on the firewall. A small daemon on the
 firewall, the agent, makes the changes the GUI asks for. For a single box, an
@@ -39,13 +49,14 @@ firewall, the agent, makes the changes the GUI asks for. For a single box, an
                   ├─ nftables       one ruleset per virtual firewall
                   ├─ ip / netns     interfaces, VLANs, bridges, routes, veth links
                   ├─ WireGuard      wg syncconf
-                  ├─ DHCP client    in-process, for the WAN
+                  ├─ DHCP clients   in-process DHCPv4 and DHCPv6 (prefix delegation), for the WAN
                   ├─ DNS update     in-process RFC 2136 updates (ifnsupdate), provider APIs (libdns)
                   ├─ ACME           Let's Encrypt certificates (lego), HTTP-01 in the virtual firewall
                   ├─ IP lists       downloads (CrowdSec LAPI, plain text) into nftables sets
                   ├─ scheduler      cron-style tasks
-                  ├─ dnsmgr2        BIND zones + Kea DHCPv4 scopes, one pair per virtual firewall
-                  └─ Kea DHCPv6, radvd   IPv6 addresses and router advertisements, per virtual firewall
+                  ├─ diagnostics    packet log (NFLOG), DNS query log, conntrack, capture, mtr, LLDP
+                  ├─ dnsmgr2, BIND  DNS zones, per virtual firewall
+                  └─ Kea, radvd     DHCPv4, DHCPv6 and router advertisements, per virtual firewall
 ```
 
 - **portitor-web** holds the configuration in an SQLite database. On *Deploy* it builds a
@@ -63,7 +74,9 @@ firewall, the agent, makes the changes the GUI asks for. For a single box, an
   replaces is kept as `<file>.portitor-orig`. Every other virtual firewall's are under
   `/etc/portitor/instances/<name>`, run by `portitor-*@<name>` units.
 - **Interfaces** carry their own addresses, IPv4 and IPv6 mixed, as many as needed,
-  each with its prefix length (`192.168.1.1/24`, `fd00:1::1/64`).
+  each with its prefix length (`192.168.1.1/24`, `fd00:1::1/64`). An IPv6 address can be
+  relative to the prefix a WAN interface gets delegated (`<wan0>:1::1/64`); the agent
+  fills in the prefix, and applies again when it changes.
 - **IP addresses** live in a prefix tree per virtual firewall. Nesting follows from CIDR
   containment; the interfaces' addresses and their prefixes appear in it by
   themselves. A prefix with DHCP on becomes a Kea scope (DHCPv4 or DHCPv6) on the
@@ -157,13 +170,14 @@ A first install creates the configs but starts nothing, and prints what is left 
 By hand, it is:
 
 On the **firewall** (Debian/Ubuntu shown; needs nftables, iproute2, wireguard-tools,
-bind9, bind9-utils, kea-dhcp4-server, kea-dhcp6-server, radvd):
+bind9, bind9-utils, kea-dhcp4-server, kea-dhcp6-server, radvd; tcpdump, tshark and
+mtr-tiny for packet capture and traceroute):
 
 ```sh
 make install-agent                          # binary, systemd units, /etc/portitor/agent.yaml
 portitor-agent init --host 192.168.1.1      # prints token + certificate fingerprint
 $EDITOR /etc/portitor/agent.yaml            # listen address, allow_from
-systemctl disable --now named kea-dhcp4-server kea-dhcp6-server radvd   # the agent runs its own per-instance units
+systemctl disable --now named kea-dhcp4-server kea-dhcp6-server radvd   # the agent starts them when the default VF uses them
 systemctl enable --now portitor-agent
 ```
 
@@ -244,12 +258,12 @@ portitor-web listens on `127.0.0.1:8080` and its session cookie needs HTTPS: set
 Then open the GUI. Enter the agent URL, token and fingerprint under *Settings*,
 configure the default virtual firewall `main` (created on first start), and deploy.
 [docs/portitor-web.md](docs/portitor-web.md) describes the configuration file, the
-commands and the GUI.
+commands and the GUI. [docs/rules.md](docs/rules.md) is a guide to writing firewall rules,
+port forwards and hairpin NAT.
 
 ## Not yet supported
 
-A DHCPv6 client and prefix delegation on the WAN (IPv6 on the WAN is SLAAC only, so LAN
-prefixes are static), PPPoE, and a boot-time ruleset in place before the agent starts.
+PPPoE, and a boot-time ruleset in place before the agent starts.
 
 See [DEV.md](DEV.md) for development and [AGENTS.md](AGENTS.md) for the code layout.
 
