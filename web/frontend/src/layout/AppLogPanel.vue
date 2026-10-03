@@ -104,11 +104,21 @@ function filtered(lines, text, f) {
     return words.every((w) => t.includes(w))
   })
 }
-const packets = computed(() => filtered(state.packets.lines, packetText, filters.value.packets))
+// Every tab shows the selected VF's lines only; the default VF (the
+// host) shows them all. An agent log line names its VF in its attrs, if any.
+const vfName = computed(() =>
+  instStore.current?.is_default ? '' : (instStore.current?.name ?? ''),
+)
+const ofVF = (lines, inst) => (vfName.value ? lines.filter((l) => inst(l) === vfName.value) : lines)
+const logLines = computed(() => ofVF(state.log.lines, (l) => l.attrs?.instance))
+const packetLines = computed(() => ofVF(state.packets.lines, (p) => p.instance))
+const dnsLines = computed(() => ofVF(state.dns.lines, (q) => q.instance))
+
+const packets = computed(() => filtered(packetLines.value, packetText, filters.value.packets))
 
 const queryText = (q) =>
   [q.instance, q.client, q.name, q.class, q.type, q.flags, q.server].join(' ').toLowerCase()
-const queries = computed(() => filtered(state.dns.lines, queryText, filters.value.dns))
+const queries = computed(() => filtered(dnsLines.value, queryText, filters.value.dns))
 const shown = computed(() => (state.tab === 'dns' ? queries.value : packets.value))
 
 // The row that logged: a rule by number, or a locked row (policy,
@@ -190,7 +200,7 @@ onUnmounted(stop)
         class="w-56"
       />
       <span v-if="state.tab !== 'log' && filter" class="text-xs text-muted"
-        >{{ shown.length }} of {{ state[state.tab].lines.length }}</span
+        >{{ shown.length }} of {{ (state.tab === 'dns' ? dnsLines : packetLines).length }}</span
       >
       <UTooltip v-if="state.error" :text="state.error">
         <UBadge color="error" variant="subtle" size="sm" label="agent unreachable" />
@@ -267,7 +277,7 @@ onUnmounted(stop)
           <tr v-if="!packets.length">
             <td colspan="14" class="text-muted">
               {{
-                state.packets.lines.length
+                packetLines.length
                   ? 'No packets match the filter'
                   : 'No packets logged yet. Tick Log on a row of the Rules page and deploy.'
               }}
@@ -312,7 +322,7 @@ onUnmounted(stop)
           <tr v-if="!queries.length">
             <td colspan="9" class="text-muted">
               {{
-                state.dns.lines.length
+                dnsLines.length
                   ? 'No queries match the filter'
                   : 'No DNS queries logged yet. Turn on Query logging under DNS → DNS server and deploy.'
               }}
@@ -326,9 +336,9 @@ onUnmounted(stop)
       ref="body"
       class="min-h-0 flex-1 overflow-auto px-3 py-2 font-mono text-xs [overflow-anchor:none]"
     >
-      <div v-if="!state.log.lines.length" class="text-muted">No log lines yet</div>
+      <div v-if="!logLines.length" class="text-muted">No log lines yet</div>
       <div
-        v-for="line in state.log.lines"
+        v-for="line in logLines"
         :key="line.id"
         class="flex flex-wrap gap-x-2"
         :class="levelClass(line.level)"
