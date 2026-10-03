@@ -29,7 +29,7 @@ are in [README.md](README.md).
 | `internal/netobj` | Named hosts/prefixes (`address_objects`): name checks and expansion |
 | `internal/dbmigrate` | Opens the SQLite database; goose migrations (the schema's source of truth) |
 | `models` | GORM mapping |
-| `web` | Echo v5 server: auth, generic CRUD (`crud.go`), entry validation (`resources.go`), deploy handlers |
+| `web` | Echo v5 server (`server.go`: routes): auth, generic CRUD (`crud.go`), entry validation (`resources.go`), deploy handlers (`handlers.go`), Revert snapshots (`revert.go`), tenancy (`tenancy.go`), roles (`roles.go`, `access.go`), rename/delete reference keeping (`objects.go`, `services.go`, `ifzones.go`, `bgp.go`, `delegated.go`), folders for hosts and IP lists (`folders.go`, GUI only), agent proxies (`console.go`, `capture.go`, `trace.go`, `connections.go`), WireGuard config import (`wgimport.go`), backup/restore (`backup.go`), `web.yaml` (`config.go`) |
 | `web/frontend` | Vue SPA; `CrudPage.vue` drives most pages from field/column schemas |
 | `docs` | User guides; every `docs/*.md` is bundled into the GUI's Help page (`src/docs.js`), and links between them stay in the GUI |
 | `deploy` | systemd units and example configs |
@@ -41,6 +41,44 @@ are in [README.md](README.md).
 
 An *instance* (code, API, database) is a **virtual firewall** (short **VF**) in the GUI,
 docs and user-facing messages.
+
+## How it fits together
+
+- **Two processes.** portitor-web owns the SQLite database and the GUI; the
+  agent runs as root on the firewall and owns the system. They talk over the
+  agent's HTTPS API (`internal/agent/server.go`, `/v1/...`; wire types in
+  `agentapi`): a bearer token (`token_file` in `agent.yaml`) and a pinned
+  certificate fingerprint (`agentclient.New`). On the firewall, the root-only
+  socket `<run_dir>/agent.sock` serves the GET routes without the token
+  (`localHandler`), for the `portitor` CLI. The join string (`web/join.go`)
+  carries what portitor-web needs to reach an agent on another host.
+- **Deploy ("commit" in the GUI)**: `web/handlers.go` `deploy` takes a database
+  snapshot (`web/revert.go`), `buildDoc` (`web/tenancy.go`) runs
+  `builder.Build` on it (merged into the live document for an instance
+  admin), and the document goes to `POST /v1/apply` with a confirm timeout.
+  `Generation` is the monotonic deploy id. The agent validates, renders
+  (`render.Render` → `Bundle`), preflights (programs installed, `nft -c` on
+  every ruleset), then `applyLocked` (`internal/agent/apply.go`) creates
+  namespaces, loads rulesets, moves and configures interfaces, writes files and
+  reloads or restarts the units whose files changed (`applyServices`,
+  `applyFRR`). The browser then confirms
+  (`/v1/confirm`) or the agent rolls back on timeout. `POST /v1/render` is the
+  preview, with the same code and no apply. Only one change can be pending at a
+  time (`deployMu`, and the agent is asked).
+- **Revert** discards uncommitted database edits by restoring the live
+  deployment's snapshot (`<db dir>/deployed/<gen>.db`); the newest
+  `snapshotKeep` are kept. A document can't be turned back into rows.
+- **Live data** (status, leases, neighbours, counters, logs) is fetched from the
+  agent per request and filtered per tenant (`filter*` in `web/tenancy.go`).
+  Logs are polled with `after` cursors from the agent's ring buffers
+  (`logring.go`). Streams (capture, trace, connections) are proxied as
+  they come, and the console is a WebSocket passed through both ways
+  (`web/console.go`).
+- **Frontend serving:** a dev build reads `web/static` from disk (`fs_dev.go`),
+  so `npm run build` takes effect without a Go rebuild; `-tags release` embeds
+  it (`fs_release.go`). Pinia stores (`stores/`): `auth`, `deploy` (polls the
+  agent's status and rule counters, and the uncommitted changes, which a write
+  rechecks through `changed()`), `instances` (the selected VF), `objects`.
 
 ## Invariants
 
