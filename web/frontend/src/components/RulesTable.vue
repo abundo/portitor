@@ -715,7 +715,7 @@ function onKeydown(event, index) {
               <th title="Log matches">Log<span class="col-resize" /></th>
               <th
                 class="text-end"
-                title="Bytes since the last deploy. In: sent by the side that opened the connections; out: the replies"
+                title="Bytes since the last commit. In: sent by the side that opened the connections; out: the replies"
               >
                 In / Out<span class="col-resize" />
               </th>

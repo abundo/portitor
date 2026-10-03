@@ -374,7 +374,7 @@ function copy(text) {
         :key="selected.id"
         :title="`Peers of ${withLabel(selected.label, selected.name)}`"
         noun="peer"
-        description="Remote devices and sites. Changes take effect on the next deploy."
+        description="Remote devices and sites. Changes take effect on the next commit."
         :api="wgPeers"
         :params="{ interface_id: selected.id }"
         :columns="columns"

@@ -102,7 +102,7 @@ async function save() {
         description: form.description,
       }),
     )
-    toast.add({ title: 'Zone saved. Deploy to apply.', color: 'success' })
+    toast.add({ title: 'Zone saved. Commit to apply.', color: 'success' })
   } catch (err) {
     toast.add({ title: errMsg(err, 'Failed to save zone'), color: 'error' })
   } finally {
@@ -164,7 +164,7 @@ async function saveRecords() {
   savingRecords.value = true
   try {
     loadRecords(await api.saveZoneRecords(zone.value.id, toApiRecords(records.value)))
-    toast.add({ title: 'Records saved. Deploy to apply.', color: 'success' })
+    toast.add({ title: 'Records saved. Commit to apply.', color: 'success' })
   } catch (err) {
     toast.add({ title: errMsg(err, 'Failed to save records'), color: 'error' })
   } finally {

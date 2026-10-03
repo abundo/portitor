@@ -124,7 +124,7 @@ async function restoreBackup() {
       title: res.migrated
         ? `Backup restored (upgraded from schema ${res.schema_version})`
         : 'Backup restored',
-      description: 'Review the changes and deploy.',
+      description: 'Review the changes and commit.',
       color: 'success',
     })
     // Every page and store holds data from before the restore.

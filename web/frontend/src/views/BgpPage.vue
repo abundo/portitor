@@ -156,7 +156,7 @@ async function saveCfg() {
     const saved = cfg.id ? await bgpConfig.update(cfg.id, body) : await bgpConfig.create(body)
     Object.assign(cfg, saved)
     cfgForm.mark()
-    toast.add({ title: 'BGP saved; deploy to apply it.', color: 'success' })
+    toast.add({ title: 'BGP saved; commit to apply it.', color: 'success' })
   } catch (err) {
     toast.add({ title: errMsg(err, 'Save failed'), color: 'error' })
   } finally {
@@ -370,7 +370,7 @@ const neighborFields = computed(() => [
             color="neutral"
             variant="subtle"
             title="BGP is not running in this virtual firewall."
-            description="Turn it on under Configuration, then deploy."
+            description="Turn it on under Configuration, then commit."
           />
           <template v-if="mine">
             <UAlert
