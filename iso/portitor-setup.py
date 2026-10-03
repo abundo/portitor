@@ -87,6 +87,7 @@ import ssl
 import subprocess
 import sys
 import time
+import traceback
 import urllib.request
 from pathlib import Path
 from typing import Callable
@@ -535,6 +536,12 @@ CapabilityBoundingSet=CAP_NET_BIND_SERVICE
     run(web("migrate"))
 
 
+def step_console_password(a: dict) -> None:
+    """First of the steps, so a later one that fails leaves a login to retry from."""
+    if a["password"]:
+        run(["chpasswd"], stdin=f"{CONSOLE_USER}:{a['password']}\n", quiet=True)
+
+
 def step_users(a: dict) -> None:
     # tshark (dumpcap) captures without sudo for the wireshark group.
     run(["debconf-set-selections"], stdin="wireshark-common wireshark-common/install-setuid boolean true\n")
@@ -544,7 +551,6 @@ def step_users(a: dict) -> None:
         return
     if a["role"] != "agent":
         run(web("createadmin", GUI_USER), stdin=a["password"] + "\n")
-    run(["chpasswd"], stdin=f"{CONSOLE_USER}:{a['password']}\n", quiet=True)
 
 
 def agent_init(a: dict) -> None:
@@ -756,6 +762,7 @@ Certificate SHA-256: {fp}
 
 # The first setup, by role.
 STEPS = [
+    ("Console password", step_console_password),
     ("Keyboard layout", step_keyboard),
     ("Interfaces", step_links),
     ("DNS servers", step_dns),
@@ -771,6 +778,7 @@ STEPS = [
 ]
 
 AGENT_STEPS = [
+    ("Console password", step_console_password),
     ("Keyboard layout", step_keyboard),
     ("Interfaces", step_links),
     ("DNS servers", step_dns),
@@ -782,6 +790,7 @@ AGENT_STEPS = [
 ]
 
 WEB_STEPS = [
+    ("Console password", step_console_password),
     ("Keyboard layout", step_keyboard),
     ("Network", step_host_network),
     ("DNS servers", step_dns),
@@ -797,6 +806,7 @@ WEB_STEPS = [
 
 # Run again: the network only.
 RECONFIGURE_STEPS = [
+    ("Console password", step_console_password),
     ("Keyboard layout", step_keyboard),
     ("DNS servers", step_dns),
     ("Time zone", step_timezone),
@@ -810,6 +820,7 @@ RECONFIGURE_STEPS = [
 
 # Run again, agent only: the network belongs to portitor-web now.
 AGENT_RECONFIGURE_STEPS = [
+    ("Console password", step_console_password),
     ("Keyboard layout", step_keyboard),
     ("DNS servers", step_dns),
     ("Time zone", step_timezone),
@@ -819,6 +830,7 @@ AGENT_RECONFIGURE_STEPS = [
 ]
 
 WEB_RECONFIGURE_STEPS = [
+    ("Console password", step_console_password),
     ("Keyboard layout", step_keyboard),
     ("Network", step_host_network),
     ("DNS servers", step_dns),
@@ -1082,6 +1094,15 @@ class Page(Screen):
     def state(self) -> dict:
         return self.app.state
 
+    def value(self, wid: str) -> str:
+        return self.query_one(wid, Input).value.strip()
+
+    def field(self, name: str, check: Callable, *args):
+        try:
+            return check(*args)
+        except ValueError as exc:
+            raise ValueError(f"{name}: {exc}") from None
+
     def save(self) -> None:
         """Takes the answers into self.a; ValueError says what is wrong."""
 
@@ -1308,9 +1329,6 @@ class NetworkPage(Page):
             except ValueError:
                 rng.value = default_dhcp_range(addr)
 
-    def value(self, wid: str) -> str:
-        return self.query_one(wid, Input).value.strip()
-
     def nic(self, wid: str, name: str) -> str:
         select = self.query_one(wid, Select)
         if select.is_blank():
@@ -1320,12 +1338,6 @@ class NetworkPage(Page):
     def static(self, wid: str) -> bool:
         modes = self.query(wid).results(Select)
         return all(m.value == "static" for m in modes)
-
-    def field(self, name: str, check: Callable, *args):
-        try:
-            return check(*args)
-        except ValueError as exc:
-            raise ValueError(f"{name}: {exc}") from None
 
     def save(self) -> None:
         a, kind = self.a, self.kind()
@@ -1609,6 +1621,12 @@ class SetupApp(App):
     # so an Input's copy binding does not take it.
     BINDINGS = [Binding("ctrl+c", "quit", "Quit", priority=True)]
     ENABLE_COMMAND_PALETTE = False
+
+    def _handle_exception(self, error: Exception) -> None:
+        # The traceback Textual prints on exit is lost with tty1's screen.
+        logfile("CRASHED:\n" + "".join(traceback.format_exception(error)))
+        super()._handle_exception(error)
+
     CSS = """
     #body { padding: 0 2; }
     .heading { text-style: bold; padding: 1 2; }
