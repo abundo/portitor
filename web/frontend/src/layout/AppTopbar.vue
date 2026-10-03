@@ -12,6 +12,8 @@ import { openConsoleWindow } from '@/composables/useConsoleWindow'
 import { openCaptureWindow } from '@/composables/useCaptureWindow'
 import { confirmDiscard } from '@/composables/useFormGuard'
 import { api } from '@/api'
+import ConfirmBanner from '@/components/ConfirmBanner.vue'
+import ChangesBanner from '@/components/ChangesBanner.vue'
 
 defineEmits(['toggle-menu'])
 
@@ -104,6 +106,8 @@ const userMenu = computed(() => [
       <span class="hidden text-sm text-muted md:inline">VF</span>
       <USelect v-model="current" :items="instances.items" class="w-40" placeholder="none" />
     </div>
+    <ConfirmBanner />
+    <ChangesBanner />
     <div class="ml-auto flex items-center gap-2">
       <UTooltip v-if="!auth.canEdit" text="Your user can look at this virtual firewall but not change it">
         <UBadge color="neutral" variant="outline" icon="i-lucide-eye" label="Read-only" />

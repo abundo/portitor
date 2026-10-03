@@ -50,23 +50,30 @@ async function rollback() {
 </script>
 
 <template>
-  <div
-    v-if="deploy.pending"
-    class="flex flex-wrap items-center gap-3 border-b border-warning/40 bg-warning/10 px-4 py-2 text-sm"
-  >
-    <UIcon name="i-lucide-timer" class="size-5 text-warning" />
-    <span>
-      Generation {{ deploy.pending.generation }} is live and rolls back in
-      <b class="tabular-nums">{{ secondsLeft }}s</b> unless you confirm it. If this page still
-      works, the change didn't lock you out.
-    </span>
-    <div v-if="auth.canDeploy" class="ml-auto flex gap-2">
-      <UButton size="sm" color="neutral" variant="outline" :loading="busy" @click="rollback"
-        >Roll back now</UButton
+  <div v-if="deploy.pending" class="flex items-center gap-2">
+    <UTooltip
+      :text="`Generation ${deploy.pending.generation} is live and rolls back in ${secondsLeft}s unless you confirm it. If this page still works, the change didn't lock you out.`"
+    >
+      <span class="flex items-center gap-1 text-sm text-warning">
+        <UIcon name="i-lucide-timer" class="size-5" />
+        <span class="hidden xl:inline">Gen {{ deploy.pending.generation }} rolls back in</span>
+        <b class="tabular-nums">{{ secondsLeft }}s</b>
+      </span>
+    </UTooltip>
+    <template v-if="auth.canDeploy">
+      <UButton
+        size="sm"
+        color="neutral"
+        variant="outline"
+        icon="i-lucide-undo-2"
+        aria-label="Roll back now"
+        :loading="busy"
+        @click="rollback"
+        ><span class="hidden lg:inline">Roll back</span></UButton
       >
       <UButton size="sm" color="warning" :loading="busy" icon="i-lucide-check" @click="confirm"
         >Confirm</UButton
       >
-    </div>
+    </template>
   </div>
 </template>

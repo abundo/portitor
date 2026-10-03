@@ -19,6 +19,19 @@ const busy = ref(false)
 const reverting = ref(false)
 
 const changes = computed(() => deploy.changes)
+// The topbar shows a short label; the full sentence is its tooltip.
+const label = computed(() =>
+  changes.value?.problems ? `${changes.value.problems} problem(s)` : 'Uncommitted changes',
+)
+const detail = computed(() => {
+  const c = changes.value
+  if (c?.problems)
+    return `There are uncommitted changes with ${c.problems} problem(s) to fix before they can be committed.`
+  if (deploy.pending)
+    return 'There are uncommitted changes. Confirm or roll back the pending generation first.'
+  if (!c?.deployed) return 'Nothing has been committed to the firewall yet.'
+  return 'There are uncommitted changes that are not on the firewall yet.'
+})
 const blocked = computed(() => !!changes.value?.problems || !!deploy.pending)
 
 // Commit applies with the configured auto-rollback, so a change that locks
@@ -70,45 +83,46 @@ async function revert() {
 </script>
 
 <template>
-  <div
-    v-if="changes?.changed"
-    class="flex flex-wrap items-center gap-3 border-b border-info/40 bg-info/10 px-4 py-2 text-sm"
-  >
-    <UIcon name="i-lucide-circle-alert" class="size-5 text-info" />
-    <span v-if="changes.problems">
-      There are uncommitted changes with {{ changes.problems }} problem(s) to fix before they can be
-      committed.
-    </span>
-    <span v-else-if="deploy.pending">
-      There are uncommitted changes. Confirm or roll back the pending generation first.
-    </span>
-    <span v-else-if="!changes.deployed"> Nothing has been committed to the firewall yet. </span>
-    <span v-else>There are uncommitted changes that are not on the firewall yet.</span>
-    <div class="ml-auto flex gap-2">
-      <UButton size="sm" color="neutral" variant="outline" to="/deploy" icon="i-lucide-file-diff"
-        >Review</UButton
+  <div v-if="changes?.changed" class="flex items-center gap-2">
+    <UTooltip :text="detail">
+      <span
+        class="flex items-center gap-1 text-sm"
+        :class="changes.problems ? 'text-warning' : 'text-info'"
       >
-      <UButton
-        v-if="changes.deployed && auth.isAdmin"
-        size="sm"
-        color="neutral"
-        variant="outline"
-        icon="i-lucide-undo-2"
-        :loading="reverting"
-        :disabled="busy"
-        @click="revert"
-        >Revert</UButton
-      >
-      <UButton
-        v-if="auth.canDeploy"
-        size="sm"
-        color="info"
-        icon="i-lucide-rocket"
-        :loading="busy"
-        :disabled="blocked || reverting"
-        @click="commit"
-        >Commit</UButton
-      >
-    </div>
+        <UIcon name="i-lucide-circle-alert" class="size-5" />
+        <span class="hidden xl:inline">{{ label }}</span>
+      </span>
+    </UTooltip>
+    <UButton
+      size="sm"
+      color="neutral"
+      variant="outline"
+      to="/deploy"
+      icon="i-lucide-file-diff"
+      aria-label="Review"
+      ><span class="hidden lg:inline">Review</span></UButton
+    >
+    <UButton
+      v-if="changes.deployed && auth.isAdmin"
+      size="sm"
+      color="neutral"
+      variant="outline"
+      icon="i-lucide-undo-2"
+      aria-label="Revert"
+      :loading="reverting"
+      :disabled="busy"
+      @click="revert"
+      ><span class="hidden lg:inline">Revert</span></UButton
+    >
+    <UButton
+      v-if="auth.canDeploy"
+      size="sm"
+      color="info"
+      icon="i-lucide-rocket"
+      :loading="busy"
+      :disabled="blocked || reverting"
+      @click="commit"
+      >Commit</UButton
+    >
   </div>
 </template>

@@ -9,8 +9,6 @@ import { useToast } from '@nuxt/ui/composables'
 import AppMenu from './AppMenu.vue'
 import AppTopbar from './AppTopbar.vue'
 import AppLogPanel from './AppLogPanel.vue'
-import ChangesBanner from '@/components/ChangesBanner.vue'
-import ConfirmBanner from '@/components/ConfirmBanner.vue'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import ServiceDialog from '@/components/ServiceDialog.vue'
 import { useInstanceStore } from '@/stores/instances'
@@ -83,8 +81,6 @@ onMounted(() => {
 <template>
   <div class="flex h-screen flex-col overflow-hidden">
     <AppTopbar @toggle-menu="toggleMenu" />
-    <ConfirmBanner />
-    <ChangesBanner />
     <div class="flex min-h-0 flex-1">
       <aside
         v-if="sidebar"
