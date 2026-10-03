@@ -52,8 +52,8 @@ func ipListDoc(l *models.IpList) fwconfig.IPList {
 
 func prepareIpList(tx *gorm.DB, l, old *models.IpList) error {
 	l.Name = strings.TrimSpace(l.Name)
-	if !fwconfig.ValidZoneName(l.Name) {
-		return bad("name: lowercase letters, digits and _, at most 24 characters")
+	if !fwconfig.ValidName(l.Name) || strings.HasPrefix(l.Name, "@") {
+		return bad("name: no control characters, not starting with @")
 	}
 	if err := itemFolder(tx, &l.FolderID, models.ObjectFolderIpLists); err != nil {
 		return err
@@ -185,8 +185,8 @@ func checkIPListRef(tx *gorm.DB, field, name string) error {
 
 func prepareTask(tx *gorm.DB, t, _ *models.Task) error {
 	t.Name = strings.TrimSpace(t.Name)
-	if !fwconfig.ValidItemName(t.Name) {
-		return bad("name: lowercase letters, digits, '.', '-' and '_', starting with a letter or digit, at most 63 characters")
+	if !fwconfig.ValidFileName(t.Name) {
+		return bad("name: no control characters or /, not . or .., at most 255 bytes")
 	}
 	t.Schedule = strings.Join(strings.Fields(t.Schedule), " ")
 	if _, err := cron.Parse(t.Schedule); err != nil {

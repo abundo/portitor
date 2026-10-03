@@ -79,8 +79,8 @@ func (v *validator) dyndns(p string, in *Instance, ifaces map[string]*Interface)
 	names := map[string]bool{}
 	for _, d := range in.DynDNS {
 		dp := fmt.Sprintf("%s: dns update %q", p, d.Name)
-		if !itemNameRe.MatchString(d.Name) {
-			v.addf("%s: name must match %s", dp, itemNameRe)
+		if !ValidFileName(d.Name) {
+			v.addf("%s: invalid name", dp)
 		}
 		if names[d.Name] {
 			v.addf("%s: duplicate", dp)

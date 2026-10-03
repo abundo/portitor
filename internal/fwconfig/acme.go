@@ -93,8 +93,8 @@ func (v *validator) certificates(p string, in *Instance, ifaces map[string]*Inte
 	names := map[string]bool{}
 	for _, c := range in.Certificates {
 		cp := fmt.Sprintf("%s: certificate %q", p, c.Name)
-		if !itemNameRe.MatchString(c.Name) {
-			v.addf("%s: name must match %s", cp, itemNameRe)
+		if !ValidFileName(c.Name) {
+			v.addf("%s: invalid name", cp)
 		}
 		if names[c.Name] {
 			v.addf("%s: duplicate", cp)

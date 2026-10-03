@@ -147,8 +147,8 @@ func PlainTextCredentials(l IPList) bool {
 func (v *validator) ipLists(lists []IPList) {
 	for _, l := range lists {
 		lp := fmt.Sprintf("ip list %q", l.Name)
-		if !zoneNameRe.MatchString(l.Name) {
-			v.addf("%s: name must match %s", lp, zoneNameRe)
+		if !ValidName(l.Name) || strings.HasPrefix(l.Name, "@") {
+			v.addf("%s: invalid name", lp)
 		}
 		if v.lists[l.Name] {
 			v.addf("%s: duplicate", lp)
@@ -195,8 +195,8 @@ func (v *validator) tasks(tasks []Task) {
 	names := map[string]bool{}
 	for _, t := range tasks {
 		tp := fmt.Sprintf("task %q", t.Name)
-		if !itemNameRe.MatchString(t.Name) {
-			v.addf("%s: name must match %s", tp, itemNameRe)
+		if !ValidFileName(t.Name) {
+			v.addf("%s: invalid name", tp)
 		}
 		if names[t.Name] {
 			v.addf("%s: duplicate", tp)

@@ -23,20 +23,9 @@ var (
 	// An auto input rule's service: words of a name's characters, one
 	// space apart ("dhcp server", "wireguard wg0").
 	autoServiceRe = regexp.MustCompile(`^[a-zA-Z0-9_.-]+( [a-zA-Z0-9_.-]+)*$`)
-	// Interface zone and link names.
-	zoneNameRe = regexp.MustCompile(`^[a-z][a-z0-9_]{0,23}$`)
-	// itemNameRe names what never becomes an nft identifier or interface
-	// name (certificates, DNS update clients, tasks), only a log field,
-	// status key or directory name: starting with a letter or digit keeps
-	// out "." and "..".
-	itemNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,62}$`)
-	peerNameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9 _.@-]{0,62}$`)
-	dnsLabelRe = regexp.MustCompile(`^(\*|@|[a-zA-Z0-9_]([a-zA-Z0-9_-]{0,61}[a-zA-Z0-9_])?)$`)
-	hostRe     = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9.-]{0,251}[a-zA-Z0-9])?$`)
-	macRe      = regexp.MustCompile(`^[0-9a-fA-F]{2}([:-][0-9a-fA-F]{2}){5}$`)
-	// DNS template and DNSSEC policy names become dnsmgr2 template keys
-	// and a quoted string in named.conf.
-	dnsTemplateNameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,62}$`)
+	dnsLabelRe    = regexp.MustCompile(`^(\*|@|[a-zA-Z0-9_]([a-zA-Z0-9_-]{0,61}[a-zA-Z0-9_])?)$`)
+	hostRe        = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9.-]{0,251}[a-zA-Z0-9])?$`)
+	macRe         = regexp.MustCompile(`^[0-9a-fA-F]{2}([:-][0-9a-fA-F]{2}){5}$`)
 	// BIND durations: ISO 8601 (P1Y, PT12H) or TTL style (30d, 1w2d).
 	durationRe = regexp.MustCompile(`^([0-9]+[smhdwSMHDW]?)+$|^[Pp]([0-9]+[YyMmWwDd])*([Tt]([0-9]+[HhMmSs])+)?$`)
 )
@@ -101,8 +90,8 @@ func (d *Document) Validate() error {
 
 	linkNames := map[string]bool{}
 	for _, l := range d.Links {
-		if !zoneNameRe.MatchString(l.Name) {
-			v.addf("link %q: name must match %s", l.Name, zoneNameRe)
+		if !ValidName(l.Name) {
+			v.addf("link %q: invalid name", l.Name)
 		}
 		if linkNames[l.Name] {
 			v.addf("link %q: duplicate name", l.Name)
@@ -246,8 +235,8 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 	zones := map[string]bool{}
 	for _, z := range in.InterfaceZones {
 		zp := fmt.Sprintf("%s: interface zone %q", p, z.Name)
-		if !zoneNameRe.MatchString(z.Name) {
-			v.addf("%s: name must match %s", zp, zoneNameRe)
+		if !ValidName(z.Name) {
+			v.addf("%s: invalid name", zp)
 		}
 		if zones[z.Name] {
 			v.addf("%s: duplicate", zp)
@@ -648,8 +637,8 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 
 func (v *validator) dnsTemplates(p string, d *DNSServer) {
 	name := func(what, n string, seen map[string]bool) {
-		if !dnsTemplateNameRe.MatchString(n) {
-			v.addf("%s: dns %s %q: name must match %s", p, what, n, dnsTemplateNameRe)
+		if !ValidDNSTemplateName(n) {
+			v.addf("%s: dns %s %q: invalid name (no \" or \\)", p, what, n)
 		}
 		if seen[n] {
 			v.addf("%s: dns %s %q: duplicate", p, what, n)
@@ -740,7 +729,7 @@ func (v *validator) wireguard(p string, wg *WireGuard) {
 	keys := map[string]bool{}
 	for _, peer := range wg.Peers {
 		pp := fmt.Sprintf("%s: peer %q", p, peer.Name)
-		if !peerNameRe.MatchString(peer.Name) {
+		if !ValidName(peer.Name) {
 			v.addf("%s: invalid name", pp)
 		}
 		if !validWGKey(peer.PublicKey) {
@@ -1073,8 +1062,6 @@ func ParsePorts(s string) ([]PortRange, error) {
 
 func ValidInstanceName(s string) bool { return instanceNameRe.MatchString(s) }
 func ValidIfname(s string) bool       { return ifnameRe.MatchString(s) }
-func ValidZoneName(s string) bool     { return zoneNameRe.MatchString(s) }
-func ValidItemName(s string) bool     { return itemNameRe.MatchString(s) }
 func ValidDomain(s string) bool       { return validDomain(s) }
 func ValidWGKey(s string) bool        { return validWGKey(s) }
 func ValidMAC(s string) bool          { return macRe.MatchString(s) }

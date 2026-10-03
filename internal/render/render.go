@@ -193,7 +193,7 @@ func (p Paths) InstanceState(name string) string {
 // IPListFile holds the nft commands that fill an IP list's sets (see
 // IPListElements). The agent writes it; rulesets include it.
 func (p Paths) IPListFile(name string) string {
-	return filepath.Join(p.StateDir, "iplists", name+".nft")
+	return filepath.Join(p.StateDir, "iplists", IPListKey(name)+".nft")
 }
 
 // CertificateDir holds an ACME certificate of an instance: the agent

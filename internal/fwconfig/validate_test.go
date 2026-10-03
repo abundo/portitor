@@ -53,7 +53,7 @@ func TestValidateCatchesProblems(t *testing.T) {
 		{"zone unknown member", func(d *Document) { d.Instances[0].InterfaceZones[0].Interfaces = []string{"eth9"} }, `member "eth9" is not an interface`},
 		{"zone named like interface", func(d *Document) { d.Instances[0].InterfaceZones[0].Name = "eth1" }, "an interface has the same name"},
 		{"zone duplicate", func(d *Document) { d.Instances[0].InterfaceZones[1].Name = "wan" }, "duplicate"},
-		{"zone name injection", func(d *Document) { d.Instances[0].InterfaceZones[0].Name = `wan" accept` }, "name must match"},
+		{"zone name newline", func(d *Document) { d.Instances[0].InterfaceZones[0].Name = "wan\naccept" }, "invalid name"},
 		{"ports with icmp", func(d *Document) { d.Instances[0].Rules[5].Services[0].DstPorts = "22" }, "ports need protocol"},
 		{"src ports with ip", func(d *Document) { d.Instances[0].Rules[6].Services[2].SrcPorts = "22" }, "ports need protocol"},
 		{"icmp type without icmp", func(d *Document) { d.Instances[0].Rules[6].Services[0].ICMPType = "echo-request" }, "needs protocol icmp or icmpv6"},
@@ -168,7 +168,7 @@ func TestValidateCatchesProblems(t *testing.T) {
 		{"dns template ns injection", func(d *Document) {
 			d.Instances[0].DNS.ZoneTemplates[0].Nameservers = []string{"ns1.\n@ A 1.2.3.4"}
 		}, "invalid nameserver"},
-		{"dns template name injection", func(d *Document) { d.Instances[0].DNS.ZoneTemplates[0].Name = `a"; };` }, "name must match"},
+		{"dns template name injection", func(d *Document) { d.Instances[0].DNS.ZoneTemplates[0].Name = `a"; };` }, "invalid name"},
 		{"soa bad mailbox", func(d *Document) { d.Instances[0].DNS.SOATemplates[0].RName = "admin@home.arpa" }, "invalid mailbox"},
 		{"soa zero retry", func(d *Document) { d.Instances[0].DNS.SOATemplates[0].Retry = 0 }, "retry must be"},
 		{"dnssec builtin name", func(d *Document) {
@@ -227,7 +227,7 @@ func TestValidateCatchesProblems(t *testing.T) {
 		{"dyndns txt newline", func(d *Document) { d.Instances[0].DynDNS[0].Records[2].Value = "a\nb" }, "control characters"},
 		{"unknown ip list", func(d *Document) { d.Instances[0].Rules[12].SrcAddrs = []string{"@nope"} }, `unknown ip list "nope"`},
 		{"ip list in nat", func(d *Document) { d.Instances[0].NAT[1].SrcAddrs = []string{"@drop"} }, "only filter rules can use ip lists"},
-		{"ip list name injection", func(d *Document) { d.IPLists[1].Name = `drop" }` }, "name must match"},
+		{"ip list name newline", func(d *Document) { d.IPLists[1].Name = "drop\n}" }, "invalid name"},
 		{"ip list duplicate", func(d *Document) { d.IPLists[1].Name = "crowdsec" }, "duplicate"},
 		{"ip list bad source", func(d *Document) { d.IPLists[1].Source = "file" }, `invalid source "file"`},
 		{"ip list file url", func(d *Document) { d.IPLists[1].URL = "file:///etc/shadow" }, "must start with http"},
@@ -416,9 +416,10 @@ func TestWireGuardRoutes(t *testing.T) {
 func TestItemNames(t *testing.T) {
 	for name, ok := range map[string]bool{
 		"www.example.com": true, "mail-2026": true, "a_b": true, "1st": true,
-		".": false, "..": false, ".hidden": false, "-x": false, "a/b": false, "WWW": false, "a b": false, "": false,
+		".hidden": true, "-x": true, "WWW": true, "a b": true, "Kontor Göteborg": true,
+		".": false, "..": false, "a/b": false, "": false, " a": false, "a\nb": false,
 	} {
-		if ValidItemName(name) != ok {
+		if ValidFileName(name) != ok {
 			t.Errorf("%q: want %v", name, ok)
 		}
 		d := SampleDocument()

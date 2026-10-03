@@ -95,8 +95,8 @@ func prepareInterfaceZone(tx *gorm.DB, z, old *models.InterfaceZone) error {
 		return bad("an interface zone cannot move to another virtual firewall")
 	}
 	z.Name = strings.TrimSpace(z.Name)
-	if !fwconfig.ValidZoneName(z.Name) {
-		return bad("name: lowercase letters, digits and _, starting with a letter, at most 24 characters")
+	if !fwconfig.ValidName(z.Name) {
+		return bad("name: no control characters")
 	}
 	names, err := ifaceNames(tx, z.InstanceID)
 	if err != nil {

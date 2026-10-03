@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -843,5 +844,22 @@ func TestDefaultInstanceLayout(t *testing.T) {
 	}
 	if got := u.Kea4(&fwconfig.Instance{Name: "guest"}); got != "portitor-kea4@guest.service" {
 		t.Errorf("guest kea4 unit %s", got)
+	}
+}
+
+// TestIPListKey checks that any IP list name gives a set and file name
+// nft and the file system take, and that plain names keep theirs.
+func TestIPListKey(t *testing.T) {
+	if got := IPListKey("crowdsec"); got != "crowdsec" {
+		t.Errorf("plain name changed: %q", got)
+	}
+	for _, name := range []string{"Bad IPs", `drop" }`, "a/b", "Göteborg", "x"} {
+		k := IPListKey(name)
+		if !regexp.MustCompile(`^L[0-9a-f]{24}$`).MatchString(k) && k != name {
+			t.Errorf("%q: key %q", name, k)
+		}
+	}
+	if IPListKey("a b") == IPListKey("a  b") {
+		t.Error("keys collide")
 	}
 }

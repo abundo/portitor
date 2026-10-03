@@ -51,8 +51,8 @@ func prepareDyndnsClient(tx *gorm.DB, c, old *models.DyndnsClient) error {
 		return err
 	}
 	c.Name = strings.TrimSpace(c.Name)
-	if !fwconfig.ValidItemName(c.Name) {
-		return bad("name: lowercase letters, digits, '.', '-' and '_', starting with a letter or digit, at most 63 characters")
+	if !fwconfig.ValidFileName(c.Name) {
+		return bad("name: no control characters or /, not . or .., at most 255 bytes")
 	}
 	var ifc models.Interface
 	if tx.First(&ifc, c.InterfaceID).Error != nil || ifc.InstanceID != c.InstanceID {

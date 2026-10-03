@@ -243,9 +243,6 @@ type RouteMapEntry struct {
 }
 
 var (
-	// policyNameRe is a routing policy object or peer group name (FRR's
-	// WORD; no spaces, no "!").
-	policyNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$`)
 	// bgpRegexRe are the characters of an AS path or expanded community
 	// regular expression: the rest of FRR's line is the expression.
 	bgpRegexRe       = regexp.MustCompile(`^[A-Za-z0-9_^$.*+?()\[\]{}|\\:, -]{1,200}$`)
@@ -258,7 +255,13 @@ var (
 // WellKnownCommunities may stand for a standard community.
 var WellKnownCommunities = []string{"internet", "local-AS", "no-advertise", "no-export", "graceful-shutdown", "blackhole", "no-peer", "accept-own", "no-llgr", "llgr-stale"}
 
-func ValidPolicyName(s string) bool { return policyNameRe.MatchString(s) }
+// ValidPolicyName checks a routing policy object or peer group name: one
+// word in frr.conf, and not an address, which FRR would read as a
+// neighbour.
+func ValidPolicyName(s string) bool {
+	_, err := netip.ParseAddr(s)
+	return ValidWord(s) && err != nil
+}
 
 // ParseASN reads an AS number (1-4294967295, asplain).
 func ParseASN(s string) (uint32, bool) {
@@ -334,8 +337,8 @@ func CheckBGPPeer(peer BGPPeer) []string {
 }
 
 func (v *validator) policyName(p, name string) {
-	if !policyNameRe.MatchString(name) {
-		v.addf("%s: name must be letters, digits, _ . -, starting with a letter or digit, at most 63 characters", p)
+	if !ValidPolicyName(name) {
+		v.addf("%s: name must be one word without control characters, not an address, not starting with ! or #, without ?", p)
 	}
 }
 
@@ -498,7 +501,7 @@ func (v *validator) routeMap(p string, m RouteMap, refs *policyRefs) {
 			{"match prefix list", e.MatchPrefixList}, {"match next hop", e.MatchNextHop},
 			{"match as path", e.MatchASPath}, {"match community", e.MatchCommunity},
 		} {
-			if ref.name != "" && !policyNameRe.MatchString(ref.name) {
+			if ref.name != "" && !ValidPolicyName(ref.name) {
 				v.addf("%s: %s: invalid name %q", ep, ref.what, ref.name)
 			}
 		}
@@ -596,7 +599,7 @@ func (v *validator) bgpPeer(p string, peer BGPPeer, refs *policyRefs, ifaces map
 		case ifaces != nil && ifaces[peer.Interface] == nil:
 			v.addf("%s: unknown interface %q", p, peer.Interface)
 		}
-		if peer.PeerGroup != "" && !policyNameRe.MatchString(peer.PeerGroup) {
+		if peer.PeerGroup != "" && !ValidPolicyName(peer.PeerGroup) {
 			v.addf("%s: invalid peer group %q", p, peer.PeerGroup)
 		}
 	} else {
@@ -644,7 +647,7 @@ func (v *validator) bgpPeer(p string, peer BGPPeer, refs *policyRefs, ifaces map
 			v.addf("%s: filter out by a prefix list or a route map, not both", ap)
 		}
 		for _, n := range []string{af.s.PrefixListIn, af.s.PrefixListOut, af.s.RouteMapIn, af.s.RouteMapOut} {
-			if n != "" && !policyNameRe.MatchString(n) {
+			if n != "" && !ValidPolicyName(n) {
 				v.addf("%s: invalid filter name %q", ap, n)
 			}
 		}

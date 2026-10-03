@@ -12,25 +12,31 @@ import (
 	"net/netip"
 	"regexp"
 	"slices"
+	"strings"
 
 	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/models"
 )
 
-// Names start with a letter and have no ':' or '/', so they can never be
-// read as an address or prefix. "default" and "any" are taken by routes
-// and the GUI.
-var nameRe = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_.-]{0,62}$`)
+// addrLike is what an address or prefix is written with, a mistyped one
+// included: hex digits, ".", ":" and "/", with a digit and one of the
+// separators. Such text is never a name, so a typo is reported as a bad
+// address rather than an unknown name.
+var addrLike = regexp.MustCompile(`^[0-9a-fA-F.:/]*[0-9][0-9a-fA-F.:/]*$`)
 
+// ValidName reports whether s can name a host/prefix: any name
+// (fwconfig.ValidName) that can't be read as an address or prefix, nor
+// as an IP list ("@"). "default" and "any" are taken by routes and the
+// GUI.
 func ValidName(s string) bool {
-	return nameRe.MatchString(s) && s != "default" && s != "any"
+	return IsName(s) && s != "default" && s != "any"
 }
 
 // IsName reports whether an entry refers to an object rather than being a
-// literal address or prefix.
+// literal address or prefix, or an IP list.
 func IsName(s string) bool {
-	_, err := fwconfig.ParseAddrOrPrefix(s)
-	return err != nil && nameRe.MatchString(s)
+	return fwconfig.ValidName(s) && !strings.HasPrefix(s, "@") &&
+		!(addrLike.MatchString(s) && strings.ContainsAny(s, ".:/"))
 }
 
 // Set maps object names to their entries.

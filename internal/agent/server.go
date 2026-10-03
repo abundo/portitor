@@ -340,7 +340,7 @@ func writeJSONResponse(w http.ResponseWriter, status int, v any) {
 // portitor-web's tls_certificate. Only a complete one (acme.Load).
 func (a *Agent) handleCertificate(w http.ResponseWriter, r *http.Request) {
 	inst, name := r.PathValue("instance"), r.PathValue("name")
-	if !fwconfig.ValidInstanceName(inst) || !fwconfig.ValidItemName(name) {
+	if !fwconfig.ValidInstanceName(inst) || !fwconfig.ValidFileName(name) {
 		writeError(w, http.StatusBadRequest, errors.New("bad instance or certificate name"))
 		return
 	}

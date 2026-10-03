@@ -30,7 +30,7 @@ func TestDynDNS(t *testing.T) {
 		"server":       "ns1",
 		"interface_id": eth9,
 		"tsig_secret":  "not base64!",
-		"name":         "Home Net",
+		"name":         "..",
 	} {
 		c := map[string]any{}
 		for k, x := range client {

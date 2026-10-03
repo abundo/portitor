@@ -14,6 +14,7 @@ import (
 	"github.com/labstack/echo/v5"
 	"gorm.io/gorm"
 
+	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/models"
 )
 
@@ -124,8 +125,8 @@ func (s *Server) saveRole(c *echo.Context, old *models.Role) error {
 	}
 	req.Name = strings.TrimSpace(req.Name)
 	if r.InstanceID == nil {
-		if req.Name == "" || len(req.Name) > 64 || strings.ContainsFunc(req.Name, unicode.IsControl) {
-			return errJSON(c, http.StatusBadRequest, "name: 1 to 64 characters, no control characters")
+		if !fwconfig.ValidName(req.Name) {
+			return errJSON(c, http.StatusBadRequest, "name: not empty, no control characters")
 		}
 		if strings.HasPrefix(req.Name, instanceRolePrefix) {
 			return errJSON(c, http.StatusBadRequest, "name: "+instanceRolePrefix+"… is reserved for the virtual firewalls' roles")

@@ -6,10 +6,10 @@ package web
 import (
 	"fmt"
 	"strings"
-	"unicode"
 
 	"gorm.io/gorm"
 
+	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/models"
 )
 
@@ -19,8 +19,8 @@ import (
 
 func prepareObjectFolder(tx *gorm.DB, f, old *models.ObjectFolder) error {
 	f.Name = strings.TrimSpace(f.Name)
-	if f.Name == "" || len(f.Name) > 63 || strings.ContainsFunc(f.Name, unicode.IsControl) {
-		return bad("name: 1 to 63 characters")
+	if !fwconfig.ValidName(f.Name) {
+		return bad("name: not empty, no control characters")
 	}
 	if old != nil && old.Kind != f.Kind {
 		return bad("a folder cannot change kind")

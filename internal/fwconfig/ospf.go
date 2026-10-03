@@ -331,7 +331,7 @@ func (v *validator) ospf(p string, o *OSPF, version int, refs *policyRefs, iface
 		if r.MetricType != 0 && r.MetricType != 1 && r.MetricType != 2 {
 			v.addf("%s: metric type must be 1 or 2", rp)
 		}
-		if r.RouteMap != "" && !policyNameRe.MatchString(r.RouteMap) {
+		if r.RouteMap != "" && !ValidPolicyName(r.RouteMap) {
 			v.addf("%s: invalid route map name %q", rp, r.RouteMap)
 		}
 		refs.routeMap(v, rp, "route map", r.RouteMap)

@@ -5,6 +5,7 @@ package netobj
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/abundo/portitor/internal/fwconfig"
@@ -12,12 +13,12 @@ import (
 )
 
 func TestServiceNames(t *testing.T) {
-	for _, s := range []string{"myapp", "web-alt", "a.b_c", "unifi2"} {
+	for _, s := range []string{"myapp", "web-alt", "a.b_c", "unifi2", "MyApp", "1app", "a b", "a,b", "8000-8080"} {
 		if !ValidServiceName(s) {
 			t.Errorf("%q should be a valid service name", s)
 		}
 	}
-	for _, s := range []string{"", "ssh", "https", "ping", "any", "MyApp", "1app", "a b", "a,b", "8000-8080"} {
+	for _, s := range []string{"", "ssh", "SSH", "https", "ping", "any", "Any", " a", "a\nb"} {
 		if ValidServiceName(s) {
 			t.Errorf("%q should not be a valid service name", s)
 		}
@@ -30,7 +31,7 @@ func TestPredefined(t *testing.T) {
 	seen := map[string]bool{}
 	var names []string
 	for _, s := range Predefined {
-		if !serviceNameRe.MatchString(s.Name) || seen[s.Name] {
+		if !fwconfig.ValidName(s.Name) || s.Name != strings.ToLower(s.Name) || seen[s.Name] {
 			t.Errorf("bad or duplicate name %q", s.Name)
 		}
 		seen[s.Name] = true

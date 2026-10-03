@@ -24,7 +24,7 @@ func TestIPListsAndTasks(t *testing.T) {
 	const key = "bouncer-key-0123456789"
 	cs := map[string]any{"name": "crowdsec", "source": "crowdsec", "url": "http://127.0.0.1:8080", "api_key": key}
 	for field, v := range map[string]any{
-		"name":    "Crowd Sec",
+		"name":    "Crowd\nSec",
 		"source":  "file",
 		"url":     "ftp://example.com/list",
 		"api_key": "",

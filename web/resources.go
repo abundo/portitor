@@ -417,8 +417,8 @@ func presentWgPeer(p *models.WgPeer) {
 
 func prepareLink(tx *gorm.DB, l, old *models.Link) error {
 	l.Name = strings.TrimSpace(l.Name)
-	if !fwconfig.ValidZoneName(l.Name) {
-		return bad("name: lowercase letters, digits and _, at most 24 characters")
+	if !fwconfig.ValidName(l.Name) {
+		return bad("name: no control characters")
 	}
 	if l.InstanceAID == l.InstanceBID {
 		return bad("a link connects two different virtual firewalls")

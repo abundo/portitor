@@ -33,7 +33,7 @@ func TestCertificates(t *testing.T) {
 		"key_type":     "dsa",
 		"challenge":    "dns-01",
 		"email":        "nobody",
-		"name":         "Web Server",
+		"name":         "web/server",
 	} {
 		c := map[string]any{}
 		for k, x := range cert {

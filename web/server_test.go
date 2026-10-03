@@ -679,7 +679,7 @@ func TestCustomServices(t *testing.T) {
 	}
 	for _, body := range []map[string]any{
 		{"name": "ssh", "type": "tcp/udp/sctp", "ports": []any{tcp(2222, 0)}},
-		{"name": "1x", "type": "tcp/udp/sctp", "ports": []any{tcp(1, 0)}},
+		{"name": "SSH", "type": "tcp/udp/sctp", "ports": []any{tcp(1, 0)}},
 		{"name": "empty", "type": "tcp/udp/sctp", "ports": []any{}},
 		{"name": "badrange", "type": "tcp/udp/sctp", "ports": []any{tcp(9000, 8000)}},
 		{"name": "badproto", "type": "tcp/udp/sctp", "ports": []any{map[string]any{"protocol": "icmp", "dst_lo": 1}}},

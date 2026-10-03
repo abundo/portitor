@@ -90,7 +90,7 @@ docs and user-facing messages.
   put volatile data (timestamps, generation) in rendered files; unchanged config must
   render byte-identical. Downloaded IP list contents are volatile: the ruleset only
   declares the sets and `include`s the list's elements file
-  (`<state_dir>/iplists/<name>.nft`), which the agent writes on download and creates
+  (`<state_dir>/iplists/<key>.nft`, `render.IPListKey`), which the agent writes on download and creates
   empty before a ruleset that includes it is checked or loaded.
 - **All commands that change the system go through `agent.Runner`** (exec, dry-run,
   or fakes in tests); a dry run, like exec, refuses a finished context. Reconcile
@@ -188,7 +188,7 @@ the certificate portitor-web serves, chosen under Settings
   (`fwconfig.Services`), which the agent resolves.
 - **IP lists reach the agent as references.** A filter rule's address list may hold
   `@name` (not NAT, not other address fields): it matches either IP version and
-  renders as the list's `name_v4`/`name_v6` set. One nft match takes one operand, so a
+  renders as the list's `<key>_v4`/`<key>_v6` set (`render.IPListKey`: the name, or a hash of a name nft would not take). One nft match takes one operand, so a
   list with literals and IP lists renders one rule per operand. Renaming a list
   rewrites the rules (`web/tasks.go`); deleting one a rule or task uses is refused.
 - **Routing objects and BGP** (`web/bgp.go`) are per instance: prefix lists, AS

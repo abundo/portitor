@@ -4,8 +4,11 @@
 package render
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"net/netip"
+	"regexp"
 	"slices"
 	"sort"
 	"strconv"
@@ -423,9 +426,25 @@ func ParseLogPrefix(prefix string) (s LogSource, ok bool) {
 // SetName is the nftables set holding one IP version of an IP list.
 func SetName(list, family string) string {
 	if family == "ipv6" {
-		return list + "_v6"
+		return IPListKey(list) + "_v6"
 	}
-	return list + "_v4"
+	return IPListKey(list) + "_v4"
+}
+
+// ipListKeyRe are the names an IP list kept as its key, from when they
+// were all a list could be called.
+var ipListKeyRe = regexp.MustCompile(`^[a-z][a-z0-9_]{0,23}$`)
+
+// IPListKey is what names an IP list's sets and files. An IP list may be
+// called anything, but nft identifiers and file names may not hold
+// everything: a name that isn't a plain one is replaced by a hash of it
+// ("L" and hex; upper case, so never a plain name).
+func IPListKey(name string) string {
+	if ipListKeyRe.MatchString(name) {
+		return name
+	}
+	sum := sha256.Sum256([]byte(name))
+	return "L" + hex.EncodeToString(sum[:12])
 }
 
 // AutoRule is an input accept rule for a configured service, added in

@@ -11,12 +11,12 @@ import (
 )
 
 func TestNames(t *testing.T) {
-	for _, s := range []string{"nas", "web-1", "Office_LAN", "a.b"} {
+	for _, s := range []string{"nas", "web-1", "Office_LAN", "a.b", "1host", "a b", "x/y", "Kontor Göteborg", "be.ef"} {
 		if !ValidName(s) || !IsName(s) {
 			t.Errorf("%q should be a name", s)
 		}
 	}
-	for _, s := range []string{"", "1host", "default", "any", "a b", "fd00::1", "10.0.0.0/8", "x/y"} {
+	for _, s := range []string{"", "default", "any", "fd00::1", "10.0.0.0/8", "10.0.0.256", "@list", " a", "a\tb"} {
 		if ValidName(s) {
 			t.Errorf("%q should not be a valid name", s)
 		}

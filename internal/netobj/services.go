@@ -6,7 +6,6 @@ package netobj
 import (
 	"errors"
 	"fmt"
-	"regexp"
 	"slices"
 	"strings"
 
@@ -14,14 +13,11 @@ import (
 	"github.com/abundo/portitor/models"
 )
 
-// Service names are lower case and start with a letter.
-var serviceNameRe = regexp.MustCompile(`^[a-z][a-z0-9_.-]{0,62}$`)
-
-// ValidServiceName reports whether s can name a custom service: it must not
-// be a predefined name either.
+// ValidServiceName reports whether s can name a custom service: any name
+// (fwconfig.ValidName) but a predefined one or "any", in any case.
 func ValidServiceName(s string) bool {
-	_, predefined := predefinedByName[s]
-	return serviceNameRe.MatchString(s) && !predefined && s != "any"
+	_, predefined := predefinedByName[strings.ToLower(s)]
+	return fwconfig.ValidName(s) && !predefined && !strings.EqualFold(s, "any")
 }
 
 func ports(desc string, list ...models.ServicePort) models.Service {
