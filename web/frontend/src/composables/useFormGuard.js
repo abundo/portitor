@@ -17,7 +17,7 @@
 //
 // usePageForm(source): a form on the page itself. mark() records the form
 // as saved: call it once the form is loaded and after each save.
-import { nextTick, onScopeDispose, toValue, watch } from 'vue'
+import { nextTick, onScopeDispose, shallowRef, toValue, watch } from 'vue'
 import { useConfirm } from '@/composables/useConfirm'
 
 // forms holds the mounted forms: { dirty: () => bool, discard: () => void }.
@@ -53,13 +53,15 @@ export function useUnsaved(dirty, discard = () => {}) {
 }
 
 // tracker records a snapshot of source and compares against it.
+// saved is a ref so a render that called dirty() before mark() renders again
+// after it (the fields may be in child slots that the render doesn't track).
 function tracker(source) {
-  let saved = null
+  const saved = shallowRef(null)
   const snapshot = () => JSON.stringify(toValue(source))
   return {
-    mark: () => (saved = snapshot()),
-    clear: () => (saved = null),
-    dirty: () => saved !== null && snapshot() !== saved,
+    mark: () => (saved.value = snapshot()),
+    clear: () => (saved.value = null),
+    dirty: () => saved.value !== null && snapshot() !== saved.value,
   }
 }
 
