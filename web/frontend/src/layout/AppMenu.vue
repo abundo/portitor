@@ -114,7 +114,15 @@ const items = computed(() => [
 
 const open = ref(['network', 'firewall', 'services'])
 
+// A nested item (Routing) has its own accordion, but NavigationMenu forwards
+// its update:modelValue too; ignore those so it doesn't close its section.
+let nested = false
+function onClickCapture(e) {
+  nested = !!e.target.closest?.('[data-slot="childList"]')
+}
+
 function onOpen(value) {
+  if (nested) return
   const next = Array.isArray(value) ? value : []
   const added = next.filter((v) => !open.value.includes(v))
   open.value = added.length ? added : next
@@ -148,6 +156,7 @@ watch(
     type="multiple"
     orientation="vertical"
     class="w-full"
+    @click.capture="onClickCapture"
     @update:model-value="onOpen"
   >
     <template #console-trailing>
