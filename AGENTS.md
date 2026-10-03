@@ -207,7 +207,9 @@ singular); a custom page uses `SearchInput` above each table,
 (`utils/form.js`) for its dialog forms and `useFormGuard` for their Cancel and X.
 
 - **Tables:** the Edit button is the first column, so it stays visible when the
-  table is wider than the screen. Tables have no Delete button.
+  table is wider than the screen. Tables have no Delete button. The Edit button
+  is `<UButton icon="i-lucide-pencil" variant="outline" size="sm" />` (with
+  `i-lucide-eye` instead when read-only), in every table and data table.
 - **Compact tables:** rows are dense so many fit on the screen. `UTable`'s cell
   padding is set once in `vite.config.js` (`ui.table.slots`: `th` `px-2 py-1.5`,
   `td` `px-2 py-1`); don't add padding back per table. A plain `<table>` uses

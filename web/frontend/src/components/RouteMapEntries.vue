@@ -155,9 +155,8 @@ async function remove() {
         <tr v-for="{ e, i } in sorted" :key="i" class="align-top">
           <td class="py-1">
             <UButton
-              size="xs"
-              color="neutral"
-              variant="ghost"
+              size="sm"
+              variant="outline"
               :icon="disabled ? 'i-lucide-eye' : 'i-lucide-pencil'"
               :aria-label="disabled ? 'View' : 'Edit'"
               @click="openEdit(i)"

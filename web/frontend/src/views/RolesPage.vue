@@ -136,9 +136,8 @@ async function remove() {
     >
       <template #actions-cell="{ row }">
         <UButton
-          size="xs"
-          color="neutral"
-          variant="ghost"
+          size="sm"
+          variant="outline"
           icon="i-lucide-pencil"
           aria-label="Edit"
           title="Edit"

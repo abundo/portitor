@@ -365,9 +365,8 @@ const tab = computed({
                           <td :rowspan="i.prefixes.length || 1" class="py-1 pr-2 align-top">
                             <UButton
                               v-if="i.prefixes.length"
-                              size="xs"
-                              color="neutral"
-                              variant="ghost"
+                              size="sm"
+                              variant="outline"
                               :icon="readOnly ? 'i-lucide-eye' : 'i-lucide-pencil'"
                               :aria-label="readOnly ? 'View' : 'Edit'"
                               :title="readOnly ? 'View' : 'Edit'"

@@ -413,9 +413,8 @@ defineExpose({ reload: load, openEdit, openView, openCreate })
         <template #actions-cell="{ row }">
           <div class="flex gap-1">
             <UButton
-              size="xs"
-              color="neutral"
-              variant="ghost"
+              size="sm"
+              variant="outline"
               :icon="readOnly ? 'i-lucide-eye' : 'i-lucide-pencil'"
               :aria-label="readOnly ? 'View' : 'Edit'"
               :title="readOnly ? 'View' : 'Edit'"
