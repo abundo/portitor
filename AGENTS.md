@@ -209,6 +209,10 @@ singular); a custom page uses `SearchInput` above each table,
 - **Forms and dialogs** are wide when the screen allows: each label sits on the
   same row as its value. On a narrow screen they fall back to one column, with the
   label above the value.
+- **Lists of values** (addresses, names) are entered as tags with
+  `TagsInput.vue` (a `CrudPage` field `type: 'tags'`), never `UInputTags`
+  directly: a click on a tag puts it back in the input to edit, and Enter or
+  leaving the field returns it to its place.
 - **Dialogs don't close by accident:** every `UModal` has `:dismissible="false"`,
   so a click outside it (or Escape) never closes it; only its buttons and X do. A
   form's Cancel and X go through `useFormGuard` (`composables/useFormGuard.js`),

@@ -2,6 +2,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
 <script setup>
+import TagsInput from '@/components/TagsInput.vue'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useToast } from '@nuxt/ui/composables'
@@ -411,13 +412,7 @@ const tab = computed({
                     help="Only queries for these domains and the names below them."
                     :ui="inlineField"
                   >
-                    <UInputTags
-                      v-model="server.dns_query_log_names"
-                      class="w-full"
-                      placeholder="example.com"
-                      add-on-blur
-                      add-on-paste
-                    />
+                    <TagsInput v-model="server.dns_query_log_names" placeholder="example.com" />
                   </UFormField>
                   <UFormField
                     label="Query types"

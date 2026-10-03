@@ -4,6 +4,7 @@
 <script setup>
 // The form of a named host or prefix (address_objects). edit(row) opens it,
 // edit() for a new one; `changed` follows a save or delete.
+import TagsInput from '@/components/TagsInput.vue'
 import { computed, reactive, ref, toRaw } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import { addressObjects } from '@/api'
@@ -80,13 +81,7 @@ defineExpose({ edit })
             label="Addresses and prefixes"
             help="Give a host both its IPv4 and IPv6 address: a rule using it then covers both."
           >
-            <UInputTags
-              v-model="form.addresses"
-              class="w-full"
-              placeholder="192.168.1.10, fd00:1::10"
-              add-on-blur
-              add-on-paste
-            />
+            <TagsInput v-model="form.addresses" placeholder="192.168.1.10, fd00:1::10" />
           </UFormField>
           <UFormField :ui="inlineField" label="Description">
             <UInput v-model="form.description" class="w-full" />

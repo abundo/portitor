@@ -29,6 +29,7 @@ import { useToast } from '@nuxt/ui/composables'
 import AddrInput from '@/components/AddrInput.vue'
 import PortMenu from '@/components/PortMenu.vue'
 import SearchInput from '@/components/SearchInput.vue'
+import TagsInput from '@/components/TagsInput.vue'
 import { usePortMenu } from '@/composables/usePortMenu'
 import { useRowDrag } from '@/composables/useRowDrag'
 import { api as rootApi } from '@/api'
@@ -478,14 +479,11 @@ defineExpose({ reload: load, openEdit, openView, openCreate })
                 :placeholder="f.placeholder"
                 :disabled="f.disabled?.(form)"
               />
-              <UInputTags
+              <TagsInput
                 v-else-if="f.type === 'tags'"
                 v-model="form[f.key]"
-                class="w-full"
                 :placeholder="f.placeholder"
-                :disabled="f.disabled?.(form)"
-                add-on-blur
-                add-on-paste
+                :disabled="!!f.disabled?.(form)"
               />
               <AddrInput
                 v-else-if="f.type === 'addrs' || f.type === 'addr'"
