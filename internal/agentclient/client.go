@@ -305,6 +305,11 @@ func (c *Client) Connections(ctx context.Context, req agentapi.ConnectionsReques
 }
 
 // stream posts req and returns the answer's body as it comes.
+// FlushConnections empties an instance's conntrack table.
+func (c *Client) FlushConnections(ctx context.Context, instance string) error {
+	return c.do(ctx, http.MethodPost, "/v1/connections/flush", agentapi.ConnectionsFlushRequest{Instance: instance}, nil)
+}
+
 func (c *Client) stream(ctx context.Context, path string, req any) (io.ReadCloser, error) {
 	data, err := json.Marshal(req)
 	if err != nil {

@@ -22,6 +22,45 @@ type connectionsRequest struct {
 	Max        int    `json:"max"`
 }
 
+// allowInstanceName checks the virtual firewall's name and that the user
+// may write to it; false means the error is already answered.
+func (s *Server) allowInstanceName(c *echo.Context, name string) (bool, error) {
+	if !captureName.MatchString(name) {
+		return false, errJSON(c, http.StatusBadRequest, "invalid virtual firewall name")
+	}
+	if currentAccess(c).isAdmin() {
+		return true, nil
+	}
+	var inst models.Instance
+	if err := s.db.Where("name = ?", name).First(&inst).Error; err != nil {
+		return false, errJSON(c, http.StatusNotFound, "no such virtual firewall")
+	}
+	return allowInstance(c, inst.ID, true)
+}
+
+// handleAgentConnectionsFlush empties the instance's conntrack table,
+// which cuts its established connections.
+func (s *Server) handleAgentConnectionsFlush(c *echo.Context) error {
+	var body struct {
+		Instance string `json:"instance"`
+	}
+	if err := c.Bind(&body); err != nil {
+		return errJSON(c, http.StatusBadRequest, "invalid request")
+	}
+	if ok, err := s.allowInstanceName(c, body.Instance); !ok {
+		return err
+	}
+	a, _, err := s.agent()
+	if err != nil {
+		return agentError(c, err)
+	}
+	if err := a.FlushConnections(c.Request().Context(), body.Instance); err != nil {
+		return agentError(c, err)
+	}
+	slog.Info("connection table flushed", "user", currentUser(c).Username, "instance", body.Instance)
+	return c.JSON(http.StatusOK, map[string]any{"flushed": body.Instance})
+}
+
 // handleAgentConnections streams the instance's conntrack table from the
 // agent (JSON lines, one snapshot each) to the browser as it comes. The
 // browser closing the request ends it.
@@ -30,17 +69,8 @@ func (s *Server) handleAgentConnections(c *echo.Context) error {
 	if err := c.Bind(&body); err != nil {
 		return errJSON(c, http.StatusBadRequest, "invalid request")
 	}
-	if !captureName.MatchString(body.Instance) {
-		return errJSON(c, http.StatusBadRequest, "invalid virtual firewall name")
-	}
-	if !currentAccess(c).isAdmin() {
-		var inst models.Instance
-		if err := s.db.Where("name = ?", body.Instance).First(&inst).Error; err != nil {
-			return errJSON(c, http.StatusNotFound, "no such virtual firewall")
-		}
-		if ok, err := allowInstance(c, inst.ID, true); !ok {
-			return err
-		}
+	if ok, err := s.allowInstanceName(c, body.Instance); !ok {
+		return err
 	}
 	a, _, err := s.agent()
 	if err != nil {

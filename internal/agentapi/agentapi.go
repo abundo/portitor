@@ -621,6 +621,14 @@ type ConnectionsRequest struct {
 	Max        int    `json:"max,omitempty"`         // entries per snapshot; 0 is ConnectionsDefaultMax
 }
 
+// ConnectionsFlushRequest empties an instance's connection tracking table
+// (POST /v1/connections/flush, 200 when done): every tracked connection is
+// forgotten, so established ones are cut unless their next packet starts a
+// new, allowed connection.
+type ConnectionsFlushRequest struct {
+	Instance string `json:"instance"`
+}
+
 // ConnectionsSnapshot is the table at one moment: Total entries, of
 // which the first Max (by bytes, largest first) are in Entries. A
 // snapshot that failed has only Error.

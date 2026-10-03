@@ -9,12 +9,17 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import NeedInstance from '@/components/NeedInstance.vue'
 import SearchInput from '@/components/SearchInput.vue'
 import { rules } from '@/api'
+import http, { errMsg } from '@/api/http'
+import { useToast } from '@nuxt/ui/composables'
+import { useConfirm } from '@/composables/useConfirm'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
 import { useSearch, valuesText } from '@/utils/search'
 import { bytes } from '@/utils/bytes'
 import { ago, when } from '@/utils/time'
 
 const { store } = useInstanceRefs()
+const toast = useToast()
+const { ask } = useConfirm()
 const form = reactive({ interval: 2000, max: 1000 })
 const intervalItems = [1000, 2000, 5000, 10000].map((ms) => ({
   label: `${ms / 1000} s`,
@@ -98,6 +103,28 @@ function stop() {
   controller?.abort()
   controller = null
   running.value = false
+}
+
+// Flushing conntrack forgets every tracked connection, so established ones
+// are cut (and NATed ones with them).
+const flushing = ref(false)
+async function flush() {
+  if (!store.current) return
+  const name = store.current.name
+  const ok = await ask({
+    title: 'Reset connections',
+    message: `Reset the connection table of ${name}? Every active connection through it is dropped; established connections stop working until the clients reconnect.`,
+  })
+  if (!ok) return
+  flushing.value = true
+  try {
+    await http.post('/agent/connections/flush', { instance: name })
+    toast.add({ title: 'Connection table reset', color: 'info' })
+  } catch (err) {
+    toast.add({ title: errMsg(err), color: 'error' })
+  } finally {
+    flushing.value = false
+  }
 }
 
 onMounted(() => {
@@ -199,6 +226,14 @@ const updated = computed(() =>
             variant="outline"
             label="Start"
             @click="start"
+          />
+          <UButton
+            icon="i-lucide-trash-2"
+            color="error"
+            variant="outline"
+            label="Reset"
+            :loading="flushing"
+            @click="flush"
           />
         </div>
       </div>

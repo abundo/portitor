@@ -39,13 +39,7 @@ func (a *Agent) handleConnections(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, errors.New("connections are not available in dry-run mode"))
 		return
 	}
-	a.mu.Lock()
-	var in *fwconfig.Instance
-	if a.applied != nil {
-		d := a.applied.Expand()
-		in = d.Instance(req.Instance)
-	}
-	a.mu.Unlock()
+	in := a.appliedInstance(req.Instance)
 	if in == nil {
 		writeError(w, http.StatusBadRequest, fmt.Errorf("no applied instance %q", req.Instance))
 		return
@@ -91,6 +85,47 @@ func (a *Agent) handleConnections(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 	}
+}
+
+// appliedInstance is the named instance of the applied document, nil if
+// there is none.
+func (a *Agent) appliedInstance(name string) *fwconfig.Instance {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.applied == nil {
+		return nil
+	}
+	d := a.applied.Expand()
+	return d.Instance(name)
+}
+
+// handleConnectionsFlush empties the instance's conntrack table.
+func (a *Agent) handleConnectionsFlush(w http.ResponseWriter, r *http.Request) {
+	var req agentapi.ConnectionsFlushRequest
+	if !decode(w, r, &req) {
+		return
+	}
+	if a.cfg.DryRun {
+		writeError(w, http.StatusServiceUnavailable, errors.New("connections are not available in dry-run mode"))
+		return
+	}
+	in := a.appliedInstance(req.Instance)
+	if in == nil {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("no applied instance %q", req.Instance))
+		return
+	}
+	h, err := conntrackHandle(in.NetnsName())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Errorf("conntrack: %w", err))
+		return
+	}
+	defer h.Close()
+	if err := h.ConntrackTableFlush(netlink.ConntrackTable); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Errorf("conntrack flush: %w", err))
+		return
+	}
+	slog.Info("connection table flushed", "instance", req.Instance, "remote", r.RemoteAddr)
+	writeJSONResponse(w, http.StatusOK, map[string]any{"flushed": req.Instance})
 }
 
 // conntrackHandle opens a netfilter netlink socket in the namespace; ""
