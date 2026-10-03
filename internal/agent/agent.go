@@ -65,8 +65,8 @@ func New(cfg *Config) *Agent {
 	} else {
 		a.run = &ExecRunner{Log: a.log}
 	}
-	a.dhcp = newDHCPManager(a.run, cfg.DryRun, a.onDHCPChange)
-	a.dhcp6 = newDHCP6Manager(a.run, cfg.DryRun, a.onPDChange)
+	a.dhcp = newDHCPManager(a.run, cfg.DryRun, filepath.Join(cfg.Paths.StateDir, "dhcp4"), a.onDHCPChange)
+	a.dhcp6 = newDHCP6Manager(a.run, cfg.DryRun, filepath.Join(cfg.Paths.StateDir, "dhcp6"), a.onPDChange)
 	a.ddns = newDyndnsManager(cfg.DryRun)
 	a.pkts = newPacketLog(cfg.DryRun)
 	a.dnsq = newQueryLog(cfg.DryRun)

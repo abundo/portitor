@@ -5,6 +5,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -32,31 +33,70 @@ type dhcpKey struct {
 type dhcpManager struct {
 	run      Runner
 	dryRun   bool
+	dir      string                // saved leases; "" saves none
 	onChange func(instance string) // called when a lease's DNS servers change
 
 	mu      sync.Mutex
-	clients map[dhcpKey]context.CancelFunc
+	clients map[dhcpKey]context.CancelCauseFunc
 	leases  map[dhcpKey]*Lease
-	wg      sync.WaitGroup
+	// restored are the unexpired leases saved by the last run, until the
+	// first Reconcile hands them to their clients.
+	restored map[leaseID]*nclient4.Lease
+	wg       sync.WaitGroup
 }
 
-func newDHCPManager(run Runner, dryRun bool, onChange func(string)) *dhcpManager {
-	return &dhcpManager{
+func newDHCPManager(run Runner, dryRun bool, dir string, onChange func(string)) *dhcpManager {
+	m := &dhcpManager{
 		run:      run,
 		dryRun:   dryRun,
+		dir:      dir,
 		onChange: onChange,
-		clients:  map[dhcpKey]context.CancelFunc{},
+		clients:  map[dhcpKey]context.CancelCauseFunc{},
 		leases:   map[dhcpKey]*Lease{},
+		restored: map[leaseID]*nclient4.Lease{},
 	}
+	if dryRun {
+		m.dir = ""
+	}
+	for id, s := range savedLeases(m.dir) {
+		if l := lease4FromSaved(s); l != nil {
+			m.restored[id] = l
+		} else {
+			dropLease(m.dir, id)
+		}
+	}
+	return m
 }
 
-// Reconcile starts clients for new keys and stops removed ones.
+// lease4FromSaved parses a saved lease; nil when it is broken or expired.
+func lease4FromSaved(s savedLease) *nclient4.Lease {
+	offer, err := dhcpv4.FromBytes(s.Offer)
+	if err != nil {
+		return nil
+	}
+	ack, err := dhcpv4.FromBytes(s.ACK)
+	if err != nil {
+		return nil
+	}
+	l := &nclient4.Lease{Offer: offer, ACK: ack, CreationTime: s.Obtained}
+	if !leasePrefix(l).IsValid() || !time.Now().Before(leaseExpiry(l)) {
+		return nil
+	}
+	return l
+}
+
+func leaseExpiry(l *nclient4.Lease) time.Time {
+	return l.CreationTime.Add(l.ACK.IPAddressLeaseTime(time.Hour))
+}
+
+// Reconcile starts clients for new keys and stops removed ones. A new
+// client starts from the lease the last run saved for its interface.
 func (m *dhcpManager) Reconcile(want []dhcpKey) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for k, cancel := range m.clients {
 		if !slices.Contains(want, k) {
-			cancel()
+			cancel(nil)
 			delete(m.clients, k)
 			delete(m.leases, k)
 		}
@@ -65,19 +105,38 @@ func (m *dhcpManager) Reconcile(want []dhcpKey) {
 		if _, ok := m.clients[k]; ok {
 			continue
 		}
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancelCause(context.Background())
 		m.clients[k] = cancel
-		m.leases[k] = &Lease{Instance: k.instance, Interface: k.iface, State: "requesting"}
+		l := &Lease{Instance: k.instance, Interface: k.iface, State: "requesting"}
+		id := leaseID{k.instance, k.iface}
+		saved := m.restored[id]
+		delete(m.restored, id)
+		if saved != nil {
+			leaseStatus(l, saved)
+		}
+		m.leases[k] = l
 		m.wg.Add(1)
 		go func() {
 			defer m.wg.Done()
-			m.loop(ctx, k)
+			m.loop(ctx, k, saved)
 		}()
 	}
+	// A saved lease no client took is for an interface no longer in DHCP
+	// mode.
+	for id := range m.restored {
+		dropLease(m.dir, id)
+	}
+	clear(m.restored)
 }
 
+// Stop stops the clients and keeps their leases (errStopping).
 func (m *dhcpManager) Stop() {
-	m.Reconcile(nil)
+	m.mu.Lock()
+	for k, cancel := range m.clients {
+		cancel(errStopping)
+		delete(m.clients, k)
+	}
+	m.mu.Unlock()
 	m.wg.Wait()
 }
 
@@ -104,11 +163,22 @@ func (m *dhcpManager) Leases() []Lease {
 	return out
 }
 
-// DNSServers returns DNS servers learned per instance and interface.
+// DNSServers returns DNS servers learned per instance and interface;
+// before the first Reconcile, those of the leases the last run saved.
 func (m *dhcpManager) DNSServers() map[string]map[string][]string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	out := map[string]map[string][]string{}
+	for id, saved := range m.restored {
+		var l Lease
+		leaseStatus(&l, saved)
+		if len(l.DNS) > 0 {
+			if out[id.instance] == nil {
+				out[id.instance] = map[string][]string{}
+			}
+			out[id.instance][id.iface] = l.DNS
+		}
+	}
 	for k, l := range m.leases {
 		if len(l.DNS) == 0 {
 			continue
@@ -133,7 +203,10 @@ func (m *dhcpManager) update(k dhcpKey, fn func(l *Lease)) (dnsChanged bool) {
 	return !slices.Equal(before, l.DNS)
 }
 
-func (m *dhcpManager) loop(ctx context.Context, k dhcpKey) {
+// loop runs k's client, starting from saved (nil: none) with a Renew.
+// Cancelled with errStopping it keeps the lease; otherwise it releases it
+// and removes the address.
+func (m *dhcpManager) loop(ctx context.Context, k dhcpKey, saved *nclient4.Lease) {
 	log := slog.With("instance", k.instance, "interface", k.iface)
 	if m.dryRun {
 		log.Info("dry-run: not starting DHCP client")
@@ -141,16 +214,26 @@ func (m *dhcpManager) loop(ctx context.Context, k dhcpKey) {
 		return
 	}
 	backoff := 5 * time.Second
-	var current *nclient4.Lease
+	current := saved
 	var client *nclient4.Client
+	id := leaseID{k.instance, k.iface}
 	defer func() {
-		if client != nil {
-			if current != nil {
-				_ = client.Release(current)
-				m.removeLease(k, current)
+		if errors.Is(context.Cause(ctx), errStopping) {
+			if client != nil {
+				client.Close()
 			}
+			return
+		}
+		if current != nil {
+			if client != nil {
+				_ = client.Release(current)
+			}
+			m.removeLease(k, current)
+		}
+		if client != nil {
 			client.Close()
 		}
+		dropLease(m.dir, id)
 	}()
 
 	for ctx.Err() == nil {
@@ -178,8 +261,9 @@ func (m *dhcpManager) loop(ctx context.Context, k dhcpKey) {
 		cancel()
 		if err != nil {
 			m.fail(k, log, m.explain(ctx, k, current, err))
-			if current != nil && time.Now().After(current.CreationTime.Add(current.ACK.IPAddressLeaseTime(time.Hour))) {
+			if current != nil && time.Now().After(leaseExpiry(current)) {
 				m.removeLease(k, current)
+				dropLease(m.dir, id)
 				current = nil
 			}
 			// The interface may have gone away (moved namespace); reopen.
@@ -195,6 +279,7 @@ func (m *dhcpManager) loop(ctx context.Context, k dhcpKey) {
 			m.fail(k, log, err)
 		}
 		current = lease
+		saveLease(m.dir, id, savedLease{Offer: lease.Offer.ToBytes(), ACK: lease.ACK.ToBytes(), Obtained: lease.CreationTime})
 		leaseTime := lease.ACK.IPAddressLeaseTime(time.Hour)
 		renew := lease.ACK.IPAddressRenewalTime(leaseTime / 2)
 		if renew <= 0 || renew > leaseTime {
@@ -284,32 +369,38 @@ func (m *dhcpManager) installLease(ctx context.Context, k dhcpKey, old, lease *n
 			return err
 		}
 	}
-	var dns []string
-	for _, ip := range ack.DNS() {
-		dns = append(dns, ip.String())
-	}
-	slices.Sort(dns)
-	var server string
-	if s := ack.ServerIdentifier(); s != nil {
-		server = s.String()
-	}
-	changed := m.update(k, func(l *Lease) {
-		l.Address = pfx.String()
-		l.Router = router
-		l.DNS = dns
-		l.Server = server
-		l.Obtained = lease.CreationTime
-		l.Expires = lease.CreationTime.Add(leaseTime)
-		l.RenewAfter = time.Now().Add(ack.IPAddressRenewalTime(leaseTime / 2))
-		l.RebindAfter = time.Now().Add(ack.IPAddressRebindingTime(leaseTime * 7 / 8))
-		l.State = "bound"
-		l.LastError = ""
-		leaseDetails(l, ack)
-	})
+	changed := m.update(k, func(l *Lease) { leaseStatus(l, lease) })
 	if changed && m.onChange != nil {
 		go m.onChange(k.instance)
 	}
 	return nil
+}
+
+// leaseStatus fills l, bound, from lease.
+func leaseStatus(l *Lease, lease *nclient4.Lease) {
+	ack := lease.ACK
+	leaseTime := ack.IPAddressLeaseTime(time.Hour)
+	l.Address = leasePrefix(lease).String()
+	l.Router = ""
+	if routers := ack.Router(); len(routers) > 0 {
+		l.Router = routers[0].String()
+	}
+	l.DNS = nil
+	for _, ip := range ack.DNS() {
+		l.DNS = append(l.DNS, ip.String())
+	}
+	slices.Sort(l.DNS)
+	l.Server = ""
+	if s := ack.ServerIdentifier(); s != nil {
+		l.Server = s.String()
+	}
+	l.Obtained = lease.CreationTime
+	l.Expires = lease.CreationTime.Add(leaseTime)
+	l.RenewAfter = lease.CreationTime.Add(ack.IPAddressRenewalTime(leaseTime / 2))
+	l.RebindAfter = lease.CreationTime.Add(ack.IPAddressRebindingTime(leaseTime * 7 / 8))
+	l.State = "bound"
+	l.LastError = ""
+	leaseDetails(l, ack)
 }
 
 // leaseDetails copies into l, for display, the options of ack the agent

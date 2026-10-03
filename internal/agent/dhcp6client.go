@@ -41,34 +41,66 @@ type dhcp6Key struct {
 type dhcp6Manager struct {
 	run      Runner
 	dryRun   bool
+	dir      string                // saved leases; "" saves none
 	onChange func(instance string) // called when a delegated prefix changes
 
 	mu      sync.Mutex
-	clients map[dhcp6Key]context.CancelFunc
+	clients map[dhcp6Key]context.CancelCauseFunc
 	leases  map[dhcp6Key]*Lease
 	pds     map[dhcp6Key]netip.Prefix
-	wg      sync.WaitGroup
-	stopped atomic.Bool // no onChange while the agent stops
+	// restored are the unexpired leases saved by the last run, until the
+	// first Reconcile hands them to their clients.
+	restored map[leaseID]*lease6
+	wg       sync.WaitGroup
+	stopped  atomic.Bool // no onChange while the agent stops
 }
 
-func newDHCP6Manager(run Runner, dryRun bool, onChange func(string)) *dhcp6Manager {
-	return &dhcp6Manager{
+func newDHCP6Manager(run Runner, dryRun bool, dir string, onChange func(string)) *dhcp6Manager {
+	m := &dhcp6Manager{
 		run:      run,
 		dryRun:   dryRun,
+		dir:      dir,
 		onChange: onChange,
-		clients:  map[dhcp6Key]context.CancelFunc{},
+		restored: map[leaseID]*lease6{},
+		clients:  map[dhcp6Key]context.CancelCauseFunc{},
 		leases:   map[dhcp6Key]*Lease{},
 		pds:      map[dhcp6Key]netip.Prefix{},
 	}
+	if dryRun {
+		m.dir = ""
+	}
+	for id, s := range savedLeases(m.dir) {
+		if l := lease6FromSaved(s); l != nil {
+			m.restored[id] = l
+		} else {
+			dropLease(m.dir, id)
+		}
+	}
+	return m
 }
 
-// Reconcile starts clients for new keys and stops removed ones.
+// lease6FromSaved parses a saved lease; nil when it is broken or expired.
+func lease6FromSaved(s savedLease) *lease6 {
+	r, err := dhcpv6.MessageFromBytes(s.Reply)
+	if err != nil {
+		return nil
+	}
+	l, err := parseReply6(r, s.Obtained)
+	if err != nil || !time.Now().Before(l.expires) {
+		return nil
+	}
+	return l
+}
+
+// Reconcile starts clients for new keys and stops removed ones. A new
+// client starts from the lease the last run saved for its interface, when
+// it asked for what the key asks for (a prefix or not).
 func (m *dhcp6Manager) Reconcile(want []dhcp6Key) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for k, cancel := range m.clients {
 		if !slices.Contains(want, k) {
-			cancel()
+			cancel(nil)
 			delete(m.clients, k)
 			delete(m.leases, k)
 		}
@@ -77,20 +109,45 @@ func (m *dhcp6Manager) Reconcile(want []dhcp6Key) {
 		if _, ok := m.clients[k]; ok {
 			continue
 		}
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancelCause(context.Background())
 		m.clients[k] = cancel
-		m.leases[k] = &Lease{Instance: k.instance, Interface: k.iface, Family: "ipv6", State: "requesting"}
+		ls := &Lease{Instance: k.instance, Interface: k.iface, Family: "ipv6", State: "requesting"}
+		id := leaseID{k.instance, k.iface}
+		saved := m.restored[id]
+		delete(m.restored, id)
+		if saved != nil && saved.pd.IsValid() != k.pd {
+			dropLease(m.dir, id)
+			saved = nil
+		}
+		if saved != nil {
+			lease6Status(ls, saved)
+			if saved.pd.IsValid() {
+				m.pds[k] = saved.pd
+			}
+		}
+		m.leases[k] = ls
 		m.wg.Add(1)
 		go func() {
 			defer m.wg.Done()
-			m.loop(ctx, k)
+			m.loop(ctx, k, saved)
 		}()
 	}
+	// A saved lease no client took is for an interface without DHCPv6.
+	for id := range m.restored {
+		dropLease(m.dir, id)
+	}
+	clear(m.restored)
 }
 
+// Stop stops the clients and keeps their leases (errStopping).
 func (m *dhcp6Manager) Stop() {
 	m.stopped.Store(true)
-	m.Reconcile(nil)
+	m.mu.Lock()
+	for k, cancel := range m.clients {
+		cancel(errStopping)
+		delete(m.clients, k)
+	}
+	m.mu.Unlock()
 	m.wg.Wait()
 }
 
@@ -105,11 +162,21 @@ func (m *dhcp6Manager) Leases() []Lease {
 	return out
 }
 
-// Prefixes returns the delegated prefixes per instance and interface.
+// Prefixes returns the delegated prefixes per instance and interface;
+// before the first Reconcile, those of the leases the last run saved.
 func (m *dhcp6Manager) Prefixes() fwconfig.DelegatedPrefixes {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	out := fwconfig.DelegatedPrefixes{}
+	for id, l := range m.restored {
+		if !l.pd.IsValid() {
+			continue
+		}
+		if out[id.instance] == nil {
+			out[id.instance] = map[string]netip.Prefix{}
+		}
+		out[id.instance][id.iface] = l.pd
+	}
 	for k, p := range m.pds {
 		if out[k.instance] == nil {
 			out[k.instance] = map[string]netip.Prefix{}
@@ -147,7 +214,10 @@ func (m *dhcp6Manager) changed(k dhcp6Key) {
 	}
 }
 
-func (m *dhcp6Manager) loop(ctx context.Context, k dhcp6Key) {
+// loop runs k's client, starting from saved (nil: none) with a Renew.
+// Cancelled with errStopping it keeps the lease; otherwise it releases it
+// and removes the address and the prefix's route.
+func (m *dhcp6Manager) loop(ctx context.Context, k dhcp6Key, saved *lease6) {
 	log := slog.With("instance", k.instance, "interface", k.iface)
 	if m.dryRun {
 		log.Info("dry-run: not starting DHCPv6 client")
@@ -155,16 +225,26 @@ func (m *dhcp6Manager) loop(ctx context.Context, k dhcp6Key) {
 		return
 	}
 	backoff := 5 * time.Second
-	var current *lease6
+	current := saved
 	var client *nclient6.Client
+	id := leaseID{k.instance, k.iface}
 	defer func() {
-		if client != nil {
-			if current != nil {
-				m.release(client, current)
-				m.removeLease(k, current)
+		if errors.Is(context.Cause(ctx), errStopping) {
+			if client != nil {
+				client.Close()
 			}
+			return
+		}
+		if current != nil {
+			if client != nil {
+				m.release(client, current)
+			}
+			m.removeLease(k, current)
+		}
+		if client != nil {
 			client.Close()
 		}
+		dropLease(m.dir, id)
 		if m.setPD(k, netip.Prefix{}) {
 			m.changed(k)
 		}
@@ -201,6 +281,7 @@ func (m *dhcp6Manager) loop(ctx context.Context, k dhcp6Key) {
 			m.fail(k, log, err)
 			if current != nil && time.Now().After(current.expires) {
 				m.removeLease(k, current)
+				dropLease(m.dir, id)
 				current = nil
 			}
 			// The interface may have gone away (moved namespace); reopen.
@@ -216,6 +297,7 @@ func (m *dhcp6Manager) loop(ctx context.Context, k dhcp6Key) {
 			m.fail(k, log, err)
 		}
 		current = l
+		saveLease(m.dir, id, savedLease{Reply: l.reply.ToBytes(), Obtained: l.obtained})
 		log.Info("dhcpv6 lease bound", "address", l.addr, "prefix", l.pd, "renew", l.renew)
 		if !sleepCtx(ctx, l.renew) {
 			return
@@ -426,24 +508,27 @@ func (m *dhcp6Manager) installLease(ctx context.Context, k dhcp6Key, old, l *lea
 			return err
 		}
 	}
-	m.update(k, func(ls *Lease) {
-		ls.Address = ""
-		if l.addr.IsValid() {
-			ls.Address = netip.PrefixFrom(l.addr, 128).String()
-		}
-		ls.Prefixes = nil
-		if l.pd.IsValid() {
-			ls.Prefixes = []string{l.pd.String()}
-		}
-		ls.DNS, ls.Search, ls.Server = l.dns, l.search, l.server
-		ls.Obtained, ls.Expires = l.obtained, l.expires
-		ls.RenewAfter, ls.RebindAfter = l.obtained.Add(l.renew), l.obtained.Add(l.rebind)
-		ls.State, ls.LastError = "bound", ""
-	})
+	m.update(k, func(ls *Lease) { lease6Status(ls, l) })
 	if m.setPD(k, l.pd) {
 		m.changed(k)
 	}
 	return nil
+}
+
+// lease6Status fills ls, bound, from l.
+func lease6Status(ls *Lease, l *lease6) {
+	ls.Address = ""
+	if l.addr.IsValid() {
+		ls.Address = netip.PrefixFrom(l.addr, 128).String()
+	}
+	ls.Prefixes = nil
+	if l.pd.IsValid() {
+		ls.Prefixes = []string{l.pd.String()}
+	}
+	ls.DNS, ls.Search, ls.Server = l.dns, l.search, l.server
+	ls.Obtained, ls.Expires = l.obtained, l.expires
+	ls.RenewAfter, ls.RebindAfter = l.obtained.Add(l.renew), l.obtained.Add(l.rebind)
+	ls.State, ls.LastError = "bound", ""
 }
 
 func (m *dhcp6Manager) delAddr(k dhcp6Key, a netip.Addr) {
