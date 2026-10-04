@@ -26,7 +26,26 @@ const dateFormats = [
     label: `Browser language (${now.toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'medium' })})`,
   },
   { value: 'iso', label: 'YYYY-MM-DD HH:MM:SS' },
+  { value: 'mdy', label: 'MM-DD-YYYY HH:MM:SS' },
+  { value: 'dmy', label: 'DD-MM-YYYY HH:MM:SS' },
 ]
+
+// saveDateFormat stores the format on the user at once; the saved name and
+// email go with it, so unsaved edits in the form above stay unsaved.
+async function saveDateFormat(v) {
+  const before = dateFormat.value
+  dateFormat.value = v
+  try {
+    await auth.updateProfile({
+      full_name: auth.user?.full_name ?? '',
+      email: auth.user?.email ?? '',
+      date_format: v,
+    })
+  } catch (err) {
+    dateFormat.value = before
+    toast.add({ title: errMsg(err), color: 'error' })
+  }
+}
 
 async function save() {
   try {
@@ -68,11 +87,13 @@ async function save() {
     </div>
     <div class="card">
       <div class="mb-3 text-lg font-semibold">Display</div>
-      <UFormField
-        label="Date and time format"
-        :help="`Remembered in this browser. Now: ${datetime(now)}`"
-      >
-        <USelect v-model="dateFormat" :items="dateFormats" class="w-full" />
+      <UFormField label="Date and time format" :help="`Saved for your user. Now: ${datetime(now)}`">
+        <USelect
+          :model-value="dateFormat"
+          :items="dateFormats"
+          class="w-full"
+          @update:model-value="saveDateFormat"
+        />
       </UFormField>
     </div>
   </div>

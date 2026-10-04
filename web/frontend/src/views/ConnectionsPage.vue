@@ -15,7 +15,7 @@ import { useConfirm } from '@/composables/useConfirm'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
 import { useSearch, valuesText } from '@/utils/search'
 import { bytes } from '@/utils/bytes'
-import { ago, when } from '@/utils/time'
+import { ago, clock, when } from '@/utils/time'
 
 const { store } = useInstanceRefs()
 const toast = useToast()
@@ -188,9 +188,7 @@ const columns = [
   { id: 'start', header: 'Started' },
   { id: 'timeout', header: 'Expires in' },
 ]
-const updated = computed(() =>
-  snapshot.value ? new Date(snapshot.value.time).toLocaleTimeString() : '',
-)
+const updated = computed(() => (snapshot.value ? clock(snapshot.value.time) : ''))
 </script>
 
 <template>

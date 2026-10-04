@@ -225,9 +225,11 @@ func (DnsNameserverList) GormDataType() string { return "text" }
 
 type User struct {
 	Base
-	Username     string `gorm:"uniqueIndex" json:"username"`
-	FullName     string `json:"full_name"`
-	Email        string `json:"email"`
+	Username string `gorm:"uniqueIndex" json:"username"`
+	FullName string `json:"full_name"`
+	Email    string `json:"email"`
+	// DateFormat is how the GUI shows dates and times, one of DateFormats.
+	DateFormat   string `gorm:"default:locale" json:"date_format"`
 	PasswordHash string `json:"-"`
 	// Role is RoleAdmin or RoleViewer.
 	Role string `json:"role"`
@@ -235,6 +237,10 @@ type User struct {
 	// change, role change, logout everywhere).
 	TokenVersion int `json:"-"`
 }
+
+// DateFormats are the values of User.DateFormat: the browser's language,
+// YYYY-MM-DD, MM-DD-YYYY and DD-MM-YYYY (with a 24-hour time).
+var DateFormats = []string{"locale", "iso", "mdy", "dmy"}
 
 const (
 	// RoleAdmin may do everything.

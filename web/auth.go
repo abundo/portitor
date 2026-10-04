@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/mail"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -320,12 +321,13 @@ func (s *Server) me(c *echo.Context, u *models.User) error {
 	}{u, a.levels, st.VirtualFirewalls})
 }
 
-// handleUpdateMe changes the caller's own full name and email. The username
-// cannot be changed here.
+// handleUpdateMe changes the caller's own full name, email and date format
+// (kept when left out). The username cannot be changed here.
 func (s *Server) handleUpdateMe(c *echo.Context) error {
 	var req struct {
-		FullName string `json:"full_name"`
-		Email    string `json:"email"`
+		FullName   string  `json:"full_name"`
+		Email      string  `json:"email"`
+		DateFormat *string `json:"date_format"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return errJSON(c, http.StatusBadRequest, "invalid request")
@@ -340,10 +342,15 @@ func (s *Server) handleUpdateMe(c *echo.Context) error {
 			return errJSON(c, http.StatusBadRequest, "invalid email address")
 		}
 	}
+	fields := map[string]any{"full_name": req.FullName, "email": req.Email}
+	if req.DateFormat != nil {
+		if !slices.Contains(models.DateFormats, *req.DateFormat) {
+			return errJSON(c, http.StatusBadRequest, "invalid date format")
+		}
+		fields["date_format"] = *req.DateFormat
+	}
 	u := currentUser(c)
-	err := s.db.Model(u).Updates(map[string]any{
-		"full_name": req.FullName, "email": req.Email,
-	}).Error
+	err := s.db.Model(u).Updates(fields).Error
 	if err != nil {
 		return dbError(c, err)
 	}

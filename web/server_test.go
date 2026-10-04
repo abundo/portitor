@@ -149,7 +149,7 @@ func TestPasswordChangeRevokesSessions(t *testing.T) {
 
 func TestUpdateMe(t *testing.T) {
 	env := newEnv(t)
-	rec := env.do("PUT", "/api/me", map[string]string{"username": "root", "full_name": "Ada Admin", "email": "ada@example.org"})
+	rec := env.do("PUT", "/api/me", map[string]string{"username": "root", "full_name": "Ada Admin", "email": "ada@example.org", "date_format": "dmy"})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("%d %s", rec.Code, rec.Body)
 	}
@@ -157,12 +157,13 @@ func TestUpdateMe(t *testing.T) {
 	if err := json.Unmarshal(env.do("GET", "/api/me", nil).Body.Bytes(), &me); err != nil {
 		t.Fatal(err)
 	}
-	if me.Username != "admin" || me.FullName != "Ada Admin" || me.Email != "ada@example.org" {
+	if me.Username != "admin" || me.FullName != "Ada Admin" || me.Email != "ada@example.org" || me.DateFormat != "dmy" {
 		t.Errorf("got %+v", me)
 	}
 	for _, body := range []map[string]string{
 		{"email": "not an address"},
 		{"full_name": "a\nb"},
+		{"date_format": "yyyy"},
 	} {
 		if rec := env.do("PUT", "/api/me", body); rec.Code != http.StatusBadRequest {
 			t.Errorf("%v: %d", body, rec.Code)

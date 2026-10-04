@@ -4,6 +4,7 @@
 import { defineStore } from 'pinia'
 import { api } from '@/api'
 import { useInstanceStore } from '@/stores/instances'
+import { dateFormat } from '@/utils/time'
 
 export const useAuthStore = defineStore('auth', {
   state: () => ({ user: null, loaded: false }),
@@ -30,26 +31,31 @@ export const useAuthStore = defineStore('auth', {
       s.user?.role === 'admin' || Object.values(s.user?.access ?? {}).includes('admin'),
   },
   actions: {
+    // setUser keeps the user and applies their date format.
+    setUser(u) {
+      this.user = u
+      dateFormat.value = u?.date_format || 'locale'
+    },
     async fetchCurrentUser() {
       try {
-        this.user = await api.me()
+        this.setUser(await api.me())
       } catch {
-        this.user = null
+        this.setUser(null)
       } finally {
         this.loaded = true
       }
     },
     async login(username, password, remember) {
-      this.user = await api.login(username, password, remember)
+      this.setUser(await api.login(username, password, remember))
     },
     async updateProfile(body) {
-      this.user = await api.updateMe(body)
+      this.setUser(await api.updateMe(body))
     },
     async logout() {
       try {
         await api.logout()
       } finally {
-        this.user = null
+        this.setUser(null)
       }
     },
   },
