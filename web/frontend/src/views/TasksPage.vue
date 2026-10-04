@@ -61,7 +61,7 @@ const fields = [
     label: 'Command',
     type: 'textarea',
     show: (f) => f.kind === 'command',
-    hint: "Run with /bin/sh -c on the firewall host as the agent's console user (console_user in agent.yaml), in its home directory. Refused when the console is off.",
+    hint: "Run with /bin/bash -c on the firewall host as the agent's console user (console_user in agent.yaml), in its home directory. Refused when the console is off.",
   },
   {
     key: 'timeout',

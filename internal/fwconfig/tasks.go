@@ -76,7 +76,7 @@ func (in *Instance) UsedIPLists() []string {
 const (
 	// TaskIPList downloads an IP list again and reloads its sets.
 	TaskIPList = "iplist"
-	// TaskCommand runs Command with /bin/sh -c as the agent's console
+	// TaskCommand runs Command with /bin/bash -c as the agent's console
 	// user, in the root network namespace. The agent refuses it when its
 	// console is off (console_user: none).
 	TaskCommand = "command"

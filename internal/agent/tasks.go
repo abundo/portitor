@@ -220,7 +220,7 @@ func (a *Agent) runTask(ctx context.Context, t fwconfig.Task) (string, error) {
 	return "", fmt.Errorf("unknown task kind %q", t.Kind)
 }
 
-// runCommand runs a command task with /bin/sh -c as the console user, in
+// runCommand runs a command task with /bin/bash -c as the console user, in
 // its home directory. All of its processes are killed at the timeout.
 func (a *Agent) runCommand(ctx context.Context, t fwconfig.Task) (string, error) {
 	if a.cfg.ConsoleUser == ConsoleDisabled {
@@ -241,7 +241,7 @@ func (a *Agent) runCommand(ctx context.Context, t fwconfig.Task) (string, error)
 	if err != nil {
 		return "", err
 	}
-	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", t.Command)
+	cmd := exec.CommandContext(ctx, "/bin/bash", "-c", t.Command)
 	cmd.Dir, cmd.Env = login.Dir, login.Env
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if login.SysProcAttr != nil {
