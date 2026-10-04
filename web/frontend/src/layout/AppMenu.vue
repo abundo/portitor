@@ -46,7 +46,6 @@ const sections = computed(() => [
       {
         label: 'Routing',
         icon: 'i-lucide-route',
-        defaultOpen: true,
         children: [
           { label: 'Routing objects', icon: 'i-lucide-list-filter', to: '/routing-objects' },
           { label: 'Static routes', icon: 'i-lucide-signpost', to: '/static-routes' },
@@ -113,7 +112,7 @@ const items = computed(() => [
   [{ label: 'Help', icon: 'i-lucide-circle-help', to: '/help' }],
 ])
 
-const open = ref(['network', 'firewall', 'services'])
+const open = ref([])
 
 // A nested item (Routing) has its own accordion, but NavigationMenu forwards
 // its update:modelValue too; ignore those so it doesn't close its section.
