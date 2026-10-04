@@ -86,6 +86,34 @@ const peerSearch = useSearch(peers, (p) =>
 const routeSearch = useSearch(bgpRoutes, (r) =>
   valuesText(r.prefix, r.next_hop, r.path, r.origin, r.best && 'best'),
 )
+// peerGroupOf is the peer group of a session's neighbour (configured), or
+// '' for none. FRR names a link-local neighbour by its interface or as
+// address%interface.
+const peerGroupOf = (p) =>
+  neighborRows.value.find(
+    (n) =>
+      n.address === p.address ||
+      (n.interface && (p.address === n.interface || p.address === `${n.address}%${n.interface}`)),
+  )?.peer_group ?? ''
+// peerSections are the sessions by peer group (in name order), then those
+// of neighbours without one.
+const peerSections = computed(() => {
+  const by = new Map()
+  for (const p of peerSearch.filtered.value) {
+    const g = peerGroupOf(p)
+    if (!by.has(g)) by.set(g, [])
+    by.get(g).push(p)
+  }
+  const named = [...by.keys()].filter(Boolean).sort()
+  const sections = named.map((g) => ({ key: g, title: `Peer group ${g}`, rows: by.get(g) }))
+  if (by.has('') || !sections.length)
+    sections.push({
+      key: '',
+      title: sections.length ? 'Without a peer group' : '',
+      rows: by.get('') ?? [],
+    })
+  return sections
+})
 const stateColor = (s) =>
   s === 'Established' ? 'success' : s.startsWith('Idle') ? 'neutral' : 'warning'
 const peerColumns = [
@@ -424,30 +452,29 @@ const neighborFields = computed(() => [
             </dl>
             <div class="mb-2 font-semibold">Neighbours</div>
             <SearchInput v-model="peerSearch.search.value" class="mb-2" />
-            <UTable
-              :data="peerSearch.filtered.value"
-              :columns="peerColumns"
-              :loading="loading && !status"
-            >
-              <template #address-cell="{ row }">
-                <span class="font-mono text-xs">{{ row.original.address }}</span>
-              </template>
-              <template #state-cell="{ row }">
-                <UBadge
-                  :color="stateColor(row.original.state)"
-                  variant="subtle"
-                  :label="row.original.state"
-                />
-              </template>
-              <template #v4-cell="{ row }">{{ prefixes(row.original, 'ipv4') }}</template>
-              <template #v6-cell="{ row }">{{ prefixes(row.original, 'ipv6') }}</template>
-              <template #msgs-cell="{ row }">
-                {{ row.original.msg_rcvd }} / {{ row.original.msg_sent }}
-              </template>
-              <template #empty>
-                <div class="py-4 text-center text-muted">No neighbours.</div>
-              </template>
-            </UTable>
+            <div v-for="sec in peerSections" :key="sec.key" class="mb-3">
+              <div v-if="sec.title" class="mb-1 text-sm font-medium">{{ sec.title }}</div>
+              <UTable :data="sec.rows" :columns="peerColumns" :loading="loading && !status">
+                <template #address-cell="{ row }">
+                  <span class="font-mono text-xs">{{ row.original.address }}</span>
+                </template>
+                <template #state-cell="{ row }">
+                  <UBadge
+                    :color="stateColor(row.original.state)"
+                    variant="subtle"
+                    :label="row.original.state"
+                  />
+                </template>
+                <template #v4-cell="{ row }">{{ prefixes(row.original, 'ipv4') }}</template>
+                <template #v6-cell="{ row }">{{ prefixes(row.original, 'ipv6') }}</template>
+                <template #msgs-cell="{ row }">
+                  {{ row.original.msg_rcvd }} / {{ row.original.msg_sent }}
+                </template>
+                <template #empty>
+                  <div class="py-4 text-center text-muted">No neighbours.</div>
+                </template>
+              </UTable>
+            </div>
 
             <div class="mt-6 mb-2 font-semibold">BGP table</div>
             <UAlert
