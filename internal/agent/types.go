@@ -6,22 +6,23 @@ package agent
 import "github.com/abundo/portitor/internal/agentapi"
 
 type (
-	Status            = agentapi.Status
-	PendingStatus     = agentapi.PendingStatus
-	InstanceStatus    = agentapi.InstanceStatus
-	IfaceStatus       = agentapi.IfaceStatus
-	RouteStatus       = agentapi.RouteStatus
-	WGStatus          = agentapi.WGStatus
-	WGPeerStatus      = agentapi.WGPeerStatus
-	ServerLease       = agentapi.ServerLease
-	Lease             = agentapi.Lease
-	DHCPOption        = agentapi.DHCPOption
-	RenderResult      = agentapi.RenderResult
-	ApplyResult       = agentapi.ApplyResult
-	ProgramStatus     = agentapi.ProgramStatus
-	NICStatus         = agentapi.NICStatus
-	DynDNSStatus      = agentapi.DynDNSStatus
-	CertificateStatus = agentapi.CertificateStatus
-	IPListStatus      = agentapi.IPListStatus
-	TaskStatus        = agentapi.TaskStatus
+	Status              = agentapi.Status
+	PendingStatus       = agentapi.PendingStatus
+	InstanceStatus      = agentapi.InstanceStatus
+	IfaceStatus         = agentapi.IfaceStatus
+	RouteStatus         = agentapi.RouteStatus
+	WGStatus            = agentapi.WGStatus
+	WGPeerStatus        = agentapi.WGPeerStatus
+	ServerLease         = agentapi.ServerLease
+	Lease               = agentapi.Lease
+	DHCPOption          = agentapi.DHCPOption
+	RenderResult        = agentapi.RenderResult
+	ParseNftablesResult = agentapi.ParseNftablesResult
+	ApplyResult         = agentapi.ApplyResult
+	ProgramStatus       = agentapi.ProgramStatus
+	NICStatus           = agentapi.NICStatus
+	DynDNSStatus        = agentapi.DynDNSStatus
+	CertificateStatus   = agentapi.CertificateStatus
+	IPListStatus        = agentapi.IPListStatus
+	TaskStatus          = agentapi.TaskStatus
 )

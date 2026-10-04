@@ -6,6 +6,7 @@
 package agentapi
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/abundo/portitor/internal/dyndns"
@@ -281,6 +282,20 @@ type TaskStatus struct {
 // download now (/v1/iplists/refresh). Both answer 202 once started.
 type RunRequest struct {
 	Name string `json:"name"`
+}
+
+// ParseNftablesRequest is an nftables file to read (/v1/nftables/parse),
+// for the import into a virtual firewall.
+type ParseNftablesRequest struct {
+	Text string `json:"text"`
+}
+
+// ParseNftablesResult is the file as nft read it: `nft -j list ruleset`
+// (JSON) and `nft -a list ruleset` (Text, with rule handles), from a
+// network namespace of its own.
+type ParseNftablesResult struct {
+	JSON json.RawMessage `json:"json"`
+	Text string          `json:"text"`
 }
 
 // RenderResult is a preview: the files a document would produce next to

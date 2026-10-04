@@ -160,6 +160,48 @@ Example: each guest at most 20 Mbit/s (forward), with *guest host* policing
 - **Locked rows** open read-only. Their *Log* box still works, so you can log the
   invalid packets, an auto rule or what the policy drops.
 
+## Exporting and importing nftables
+
+**Export nftables** on the Rules page downloads the virtual firewall's ruleset as
+`<name>.nft`. You can download the live ruleset or the one with your uncommitted changes.
+It is the whole file the firewall loads, the locked rows included. Rules that use an
+IP list `include` the list's file on the firewall, so the file loads as it is only there.
+
+**Import nftables** (for administrators) reads an nftables file, such as
+`/etc/nftables.conf` from another firewall, into this virtual firewall:
+
+1. Choose the file or paste it, then click *Preview*. The firewall reads it with
+   `nft` in a network namespace of its own, so variables (`define`) work and syntax
+   errors show with their line. `include` statements are refused: paste the included
+   files in their place.
+2. Map the file's interface names to this virtual firewall's interfaces or zones.
+   Rules on an interface you leave unmapped are left out.
+3. Check what would be created and the list of what is left out, each with the
+   reason. *Replace* deletes this virtual firewall's rules and NAT rules first;
+   otherwise the imported rules come after the existing ones.
+4. Click *Import*. The rules are an uncommitted change: review them, then commit,
+   or revert to discard them.
+
+What is imported:
+
+- Rules of filter chains on the input, forward and output hooks, in order. A chain's
+  `policy accept` becomes a final accept rule, since Portitor's chains drop what no rule
+  accepts.
+- Matches on interfaces (`iifname`, `oifname`), addresses, destination ports, protocols,
+  ICMP types and the IP version; `accept`, `drop`, `reject` and `log`. A rule's
+  comment becomes its description.
+- `dnat` in prerouting and `snat` and `masquerade` in postrouting nat chains, as
+  port forwards and source NAT.
+- A named set of addresses becomes a host/prefix of the same name. If a different one
+  of that name exists, the new one is named `<name>-imported`. Ports and ICMP types
+  become predefined services where one fits exactly (`ssh`, `dns`), and new services
+  otherwise (`tcp-8080`).
+
+What is left out: `ct state established,related accept`, `ct state invalid drop` and
+loopback accepts, which Portitor adds itself; regular chains reached by `jump` or
+`goto`; negated matches (`!=`); source ports; `limit` (use a [rate limit](#rate-limits));
+interface wildcards; dynamic sets, maps and other statements.
+
 ## Examples
 
 Internet access from the LAN (forward):

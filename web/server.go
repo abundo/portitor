@@ -45,6 +45,7 @@ type agentAPI interface {
 	PacketLog(ctx context.Context, after int64) (*agentapi.PacketLogResponse, error)
 	DNSQueryLog(ctx context.Context, after int64) (*agentapi.DNSQueryLogResponse, error)
 	Render(ctx context.Context, doc fwconfig.Document) (*agentapi.RenderResult, error)
+	ParseNftables(ctx context.Context, text string) (*agentapi.ParseNftablesResult, error)
 	Apply(ctx context.Context, doc fwconfig.Document, confirmTimeout int) (*agentapi.ApplyResult, error)
 	Confirm(ctx context.Context, generation int64) error
 	Rollback(ctx context.Context) (*agentapi.ApplyResult, error)
@@ -208,6 +209,7 @@ func (s *Server) Echo() *echo.Echo {
 	g.GET("/deploy/changes", s.handleDeployChanges)
 	g.POST("/deploy/preview", s.handleDeployPreview)
 	g.GET("/deploy/nftables", s.handleExportNftables)
+	g.POST("/import/nftables", s.handleImportNftables)
 	g.POST("/deploy/apply", s.handleDeployApply)
 	g.POST("/deploy/confirm", s.handleDeployConfirm)
 	g.POST("/deploy/rollback", s.handleDeployRollback)

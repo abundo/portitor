@@ -4,6 +4,7 @@
 <script setup>
 import CrudPage from '@/components/CrudPage.vue'
 import NatTable from '@/components/NatTable.vue'
+import NftImportDialog from '@/components/NftImportDialog.vue'
 import NeedInstance from '@/components/NeedInstance.vue'
 import RulesTable from '@/components/RulesTable.vue'
 import { onMounted, onUnmounted, ref, watch } from 'vue'
@@ -13,11 +14,13 @@ import { errMsg } from '@/api/http'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
 import { useObjectStore } from '@/stores/objects'
 import { useAuthStore } from '@/stores/auth'
+import { useDeployStore } from '@/stores/deploy'
 import { autoDescription, autoFamily, autoService } from '@/utils/services'
 
 const { store, ifaceRefItems } = useInstanceRefs()
 const objects = useObjectStore()
 const auth = useAuthStore()
+const deploy = useDeployStore()
 onMounted(() => objects.load().catch(() => {}))
 
 // Input rules for DHCP, DNS and WireGuard come from the services'
@@ -127,6 +130,16 @@ const exportItems = [
     { label: 'With uncommitted changes', onSelect: () => exportNftables('') },
   ],
 ]
+// Import (a global admin's: it creates shared hosts/prefixes and services).
+const importOpen = ref(false)
+const page = ref(null)
+const natKey = ref(0)
+async function imported() {
+  await page.value?.reload()
+  natKey.value++
+  deploy.changed()
+}
+
 async function exportNftables(from) {
   const name = store.current?.name
   if (!name) return
@@ -141,7 +154,12 @@ async function exportNftables(from) {
   } catch (err) {
     let msg = errMsg(err)
     const data = err?.response?.data
-    if (data instanceof Blob) msg = (await data.text().then((t) => JSON.parse(t).error).catch(() => null)) ?? msg
+    if (data instanceof Blob)
+      msg =
+        (await data
+          .text()
+          .then((t) => JSON.parse(t).error)
+          .catch(() => null)) ?? msg
     toast.add({ title: msg, color: 'error' })
   }
 }
@@ -346,6 +364,7 @@ function clean(b) {
 <template>
   <NeedInstance>
     <CrudPage
+      ref="page"
       title="Rules"
       info="Evaluated top to bottom; the first match decides. Edit cells in place (changes save at once), drag the grip to reorder, right-click a row to insert a rule, comment or group. Prerouting and postrouting hold the NAT rules: port forwards, and source NAT and masquerade. A group heads the rows below it up to the next group; its chevron folds them away (only in the view: folded rules still apply). Established connections are allowed, and so is what the configured services (DHCP, DNS, WireGuard) need: those input rules are shown locked and follow the services' settings. In the default virtual firewall the agent's management port and SSH stay open to its allow_from addresses. Port forwards are accepted after the forward rules (the locked row above the last one), so a forward rule can drop what a port forward would let in. Invalid packets (of no known connection) and traffic to or through the firewall that no rule accepts are dropped; the locked rows at the top and bottom of each chain count them."
       :api="api"
@@ -370,6 +389,13 @@ function clean(b) {
       :item-name="ruleName"
     >
       <template #toolbar>
+        <UButton
+          v-if="auth.isAdmin"
+          icon="i-lucide-upload"
+          label="Import nftables"
+          variant="outline"
+          @click="importOpen = true"
+        />
         <UDropdownMenu :items="exportItems">
           <UButton icon="i-lucide-download" label="Export nftables" variant="outline" />
         </UDropdownMenu>
@@ -382,7 +408,7 @@ function clean(b) {
       >
         <UTabs v-model="chainTab" :items="chains">
           <template #content="{ item: c }">
-            <NatTable v-if="natHook(c)" :hook="c.value" :description="c.text" />
+            <NatTable v-if="natHook(c)" :key="natKey" :hook="c.value" :description="c.text" />
             <template v-else>
               <div class="mb-2 flex items-end justify-between gap-3 pt-2">
                 <p class="text-sm text-muted">{{ c.text }}</p>
@@ -420,5 +446,12 @@ function clean(b) {
         </UTabs>
       </template>
     </CrudPage>
+    <NftImportDialog
+      v-if="store.currentId"
+      v-model:open="importOpen"
+      :instance-id="store.currentId"
+      :ifaces="ifaceRefItems"
+      @imported="imported"
+    />
   </NeedInstance>
 </template>

@@ -114,6 +114,9 @@ func isQuery(name string, args []string) bool {
 		return len(args) > 0 && (args[0] == "is-active" || args[0] == "is-enabled" || args[0] == "show")
 	case "journalctl":
 		return true
+	case "unshare":
+		// An nftables import, read in a namespace of its own.
+		return len(args) > 0 && args[0] == "--net"
 	case "vtysh":
 		// BGP and OSPF info: vtysh [-N <instance>] -c "show ...".
 		return len(args) >= 2 && args[len(args)-2] == "-c" &&

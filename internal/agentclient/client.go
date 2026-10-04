@@ -209,6 +209,12 @@ func (c *Client) Render(ctx context.Context, doc fwconfig.Document) (*agentapi.R
 	return &r, c.do(ctx, http.MethodPost, "/v1/render", agentapi.RenderRequest{Document: doc}, &r)
 }
 
+// ParseNftables has the agent read an nftables file for an import.
+func (c *Client) ParseNftables(ctx context.Context, text string) (*agentapi.ParseNftablesResult, error) {
+	var r agentapi.ParseNftablesResult
+	return &r, c.do(ctx, http.MethodPost, "/v1/nftables/parse", agentapi.ParseNftablesRequest{Text: text}, &r)
+}
+
 func (c *Client) Apply(ctx context.Context, doc fwconfig.Document, confirmTimeout int) (*agentapi.ApplyResult, error) {
 	var r agentapi.ApplyResult
 	return &r, c.do(ctx, http.MethodPost, "/v1/apply", agentapi.ApplyRequest{Document: doc, ConfirmTimeoutSeconds: confirmTimeout}, &r)

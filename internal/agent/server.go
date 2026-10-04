@@ -81,6 +81,18 @@ func (a *Agent) routes() *http.ServeMux {
 		}
 		writeJSONResponse(w, http.StatusOK, res)
 	})
+	mux.HandleFunc("POST /v1/nftables/parse", func(w http.ResponseWriter, r *http.Request) {
+		var req agentapi.ParseNftablesRequest
+		if !decode(w, r, &req) {
+			return
+		}
+		res, err := a.ParseNftables(r.Context(), req.Text)
+		if err != nil {
+			writeError(w, http.StatusUnprocessableEntity, err)
+			return
+		}
+		writeJSONResponse(w, http.StatusOK, res)
+	})
 	mux.HandleFunc("POST /v1/apply", func(w http.ResponseWriter, r *http.Request) {
 		var req agentapi.ApplyRequest
 		if !decode(w, r, &req) {
