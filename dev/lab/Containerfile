@@ -17,9 +17,9 @@ CMD ["/sbin/init"]
 # The firewall: portitor-agent applies for real (nftables, netns, BIND, Kea, FRR).
 FROM base AS fw
 RUN apt-get update && apt-get install -y --no-install-recommends \
-		wireguard-tools bind9 bind9-utils dnsutils kea-dhcp4-server kea-dhcp6-server radvd frr frr-pythontools chrony \
+		wireguard-tools bind9 bind9-utils dnsutils kea-dhcp4-server kea-dhcp6-server radvd frr frr-pythontools chrony snmpd \
 	&& rm -rf /var/lib/apt/lists/* \
-	&& systemctl mask named.service kea-dhcp4-server.service kea-dhcp6-server.service radvd.service frr.service chrony.service
+	&& systemctl mask named.service kea-dhcp4-server.service kea-dhcp6-server.service radvd.service frr.service chrony.service snmpd.service
 COPY fw/agent.yaml /etc/portitor/agent.yaml
 COPY fw/portitor-lab-net.service /etc/systemd/system/
 RUN chmod 0600 /etc/portitor/agent.yaml && systemctl enable portitor-lab-net.service

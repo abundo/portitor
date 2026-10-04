@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package render turns a validated fwconfig.Document into the files the
-// firewall runs from: one nftables ruleset, BIND/Kea/radvd/chrony configs and a
+// firewall runs from: one nftables ruleset, BIND/Kea/radvd/chrony/snmpd configs and a
 // dnsmgr2 config per instance, and one wg(8) config per WireGuard interface.
 //
 // Rendering is pure (no filesystem, no commands) so the same code serves
@@ -44,6 +44,7 @@ type Paths struct {
 	KeaConfDir   string `yaml:"kea_conf_dir" json:"kea_conf_dir"`
 	RadvdConf    string `yaml:"radvd_conf" json:"radvd_conf"`
 	ChronyConf   string `yaml:"chrony_conf" json:"chrony_conf"`
+	SnmpdConf    string `yaml:"snmpd_conf" json:"snmpd_conf"`
 	// FRRDir is FRR's config directory: the default instance's frr.conf
 	// and daemons are in it, and a virtual firewall's unit mounts the
 	// instance's over FRRDir/<instance> (FRR's pathspace).
@@ -70,6 +71,7 @@ func DefaultPaths() Paths {
 		KeaConfDir:   "/etc/kea",
 		RadvdConf:    "/etc/radvd.conf",
 		ChronyConf:   "/etc/chrony/chrony.conf",
+		SnmpdConf:    "/etc/snmp/snmpd.conf",
 		FRRDir:       "/etc/frr",
 		FRRRunDir:    "/run/frr",
 		FRRStateDir:  "/var/lib/frr",
@@ -102,6 +104,12 @@ type InstanceFiles struct {
 	// directory its unit alone mounts (portitor-chrony@.service); the
 	// default instance's is chrony's own (empty).
 	ChronySocket string
+	Snmpd        string
+	// SnmpdPersist is a virtual firewall's snmpd persistent directory
+	// (engine id, boots), which its unit alone mounts
+	// (portitor-snmpd@.service); the default instance's is net-snmp's
+	// own (empty).
+	SnmpdPersist string
 	// FRR's integrated config, daemons file and vtysh.conf. A virtual
 	// firewall's unit mounts their directory as FRR's pathspace
 	// Paths.FRRDir/<instance> (portitor-frr@.service).
@@ -147,6 +155,7 @@ func (p Paths) Files(in *fwconfig.Instance) InstanceFiles {
 			Kea6:         filepath.Join(p.KeaConfDir, "kea-dhcp6.conf"),
 			Radvd:        p.RadvdConf,
 			Chrony:       p.ChronyConf,
+			Snmpd:        p.SnmpdConf,
 			FRRConf:      filepath.Join(p.FRRDir, "frr.conf"),
 			FRRDaemons:   filepath.Join(p.FRRDir, "daemons"),
 			FRRVtysh:     filepath.Join(p.FRRDir, "vtysh.conf"),
@@ -175,6 +184,8 @@ func (p Paths) Files(in *fwconfig.Instance) InstanceFiles {
 		Radvd:        filepath.Join(etc, "radvd.conf"),
 		Chrony:       filepath.Join(etc, "chrony.conf"),
 		ChronySocket: filepath.Join(p.RunDir, "chrony", in.Name, "chronyd.sock"),
+		Snmpd:        filepath.Join(etc, "snmpd.conf"),
+		SnmpdPersist: filepath.Join(p.StateDir, "snmp", in.Name),
 		FRRConf:      filepath.Join(etc, "frr", "frr.conf"),
 		FRRDaemons:   filepath.Join(etc, "frr", "daemons"),
 		FRRVtysh:     filepath.Join(etc, "frr", "vtysh.conf"),
@@ -228,12 +239,14 @@ type Units struct {
 	RadvdFmt      string `yaml:"radvd" json:"radvd"`
 	FRRFmt        string `yaml:"frr" json:"frr"`
 	ChronyFmt     string `yaml:"chrony" json:"chrony"`
+	SnmpdFmt      string `yaml:"snmpd" json:"snmpd"`
 	DefaultNamed  string `yaml:"default_named" json:"default_named"`
 	DefaultKea4   string `yaml:"default_kea4" json:"default_kea4"`
 	DefaultKea6   string `yaml:"default_kea6" json:"default_kea6"`
 	DefaultRadvd  string `yaml:"default_radvd" json:"default_radvd"`
 	DefaultFRR    string `yaml:"default_frr" json:"default_frr"`
 	DefaultChrony string `yaml:"default_chrony" json:"default_chrony"`
+	DefaultSnmpd  string `yaml:"default_snmpd" json:"default_snmpd"`
 }
 
 func DefaultUnits() Units {
@@ -244,6 +257,7 @@ func DefaultUnits() Units {
 		RadvdFmt:  "portitor-radvd@%s.service",
 		FRRFmt:    "portitor-frr@%s.service",
 		ChronyFmt: "portitor-chrony@%s.service",
+		SnmpdFmt:  "portitor-snmpd@%s.service",
 		// Debian/Ubuntu's names (Fedora: kea-dhcp4.service, kea-dhcp6.service).
 		DefaultNamed: "named.service",
 		DefaultKea4:  "kea-dhcp4-server.service",
@@ -252,6 +266,7 @@ func DefaultUnits() Units {
 		DefaultFRR:   "frr.service",
 		// Fedora: chronyd.service.
 		DefaultChrony: "chrony.service",
+		DefaultSnmpd:  "snmpd.service",
 	}
 }
 
@@ -270,10 +285,12 @@ func (u Units) FRR(in *fwconfig.Instance) string   { return u.pick(in, u.Default
 func (u Units) Chrony(in *fwconfig.Instance) string {
 	return u.pick(in, u.DefaultChrony, u.ChronyFmt)
 }
+func (u Units) Snmpd(in *fwconfig.Instance) string { return u.pick(in, u.DefaultSnmpd, u.SnmpdFmt) }
 
-// All lists the instance's units: named, Kea4, Kea6, radvd, FRR, chrony.
+// All lists the instance's units: named, Kea4, Kea6, radvd, FRR, chrony,
+// snmpd.
 func (u Units) All(in *fwconfig.Instance) []string {
-	return []string{u.Named(in), u.Kea4(in), u.Kea6(in), u.Radvd(in), u.FRR(in), u.Chrony(in)}
+	return []string{u.Named(in), u.Kea4(in), u.Kea6(in), u.Radvd(in), u.FRR(in), u.Chrony(in), u.Snmpd(in)}
 }
 
 type Options struct {
@@ -355,6 +372,9 @@ func Render(doc fwconfig.Document, opt Options) (*Bundle, error) {
 		if in.NTP != nil {
 			add(f.Chrony, ChronyConf(in, f), 0o644, false)
 		}
+		if in.SNMP != nil {
+			add(f.Snmpd, SnmpdConf(in), 0o600, hasSNMPSecret(in))
+		}
 		if in.FRRRunning() {
 			add(f.FRRDaemons, FRRDaemons(in), 0o640, false)
 			add(f.FRRVtysh, FRRVtyshConf(in), 0o644, false)
@@ -410,6 +430,7 @@ func (b *Bundle) Redacted() []File {
 			out[i].Content = wgKeyLine.ReplaceAllString(f.Content, "$1 = <redacted>")
 			out[i].Content = frrPasswordLine.ReplaceAllString(out[i].Content, "${1}<redacted>")
 			out[i].Content = ospfKeyLine.ReplaceAllString(out[i].Content, "${1}<redacted>")
+			out[i].Content = redactSnmpd(out[i].Content)
 		}
 	}
 	return out

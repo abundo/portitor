@@ -99,6 +99,7 @@ const autoListDescriptions = {
   bgp_neighbours: 'BGP neighbours, allowed to TCP port 179',
   ospf_networks: 'OSPFv2 networks, allowed to send OSPF',
   ospf6_networks: 'OSPFv3 networks, allowed to send OSPF',
+  snmp_clients: 'SNMP allowed clients, allowed to UDP port 161',
 }
 const autoLists = computed(() => {
   const out = []

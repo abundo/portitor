@@ -1,0 +1,43 @@
+# SPDX-FileCopyrightText: 2026 The Portitor contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# SNMP agent (net-snmp) for one Portitor instance, inside the instance's
+# network namespace: it sees the instance's interfaces and addresses.
+# Started and restarted by portitor-agent; do not enable by hand.
+[Unit]
+Description=SNMP agent for Portitor instance %i
+After=portitor-agent.service
+PartOf=portitor-agent.service
+
+[Service]
+Type=simple
+# Only the instance's snmpd.conf (-C), read as root before snmpd drops to
+# Debian-snmp. The PID file is in the private /tmp: snmpd is PID 1
+# (PrivatePIDs), so a stale one would read as "already running".
+ExecStart=/usr/bin/portitor-agent netns-exec %i -- /usr/sbin/snmpd -f -LOw -u Debian-snmp -g Debian-snmp -I -smux,mteTrigger,mteTriggerConf -C -c /etc/portitor/instances/%i/snmpd.conf -p /tmp/snmpd.pid
+# The engine id and boot count, which SNMPv3 managers know the agent by.
+Environment=SNMP_PERSISTENT_DIR=/var/lib/portitor/snmp/%i
+Restart=on-failure
+RestartSec=5
+# Multitenancy: an instance's daemon sees only its own files and processes.
+# The other instances' config and state are hidden, the rest of the system
+# is read-only, and it gets its own /tmp, IPC and PID namespaces.
+# netns-exec drops CAP_SYS_ADMIN and the like, so it can't enter another
+# instance's network namespace.
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateIPC=yes
+PrivatePIDs=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectProc=invisible
+TemporaryFileSystem=/etc/portitor /var/lib/portitor
+BindReadOnlyPaths=/etc/portitor/instances/%i
+BindReadOnlyPaths=/var/lib/portitor/instances/%i
+# Made by the agent for Debian-snmp.
+BindPaths=/var/lib/portitor/snmp/%i

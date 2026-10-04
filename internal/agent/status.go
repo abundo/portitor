@@ -138,6 +138,9 @@ func (a *Agent) instanceStatus(ctx context.Context, in *fwconfig.Instance) Insta
 	if in.NTP != nil {
 		units = append(units, a.cfg.Units.Chrony(in))
 	}
+	if in.SNMP != nil {
+		units = append(units, a.cfg.Units.Snmpd(in))
+	}
 	if in.FRRRunning() {
 		units = append(units, a.cfg.Units.FRR(in))
 	}

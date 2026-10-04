@@ -121,6 +121,16 @@ func SampleDocument() Document {
 					Interfaces: []string{"eth1"},
 					Allow:      []string{"192.168.1.0/24", "fd00:1::/64"},
 				},
+				SNMP: &SNMP{
+					Location: "Server room 1", Contact: "noc@example.com",
+					Interfaces: []string{"eth1"},
+					Allow:      []string{"192.168.1.0/24", "fd00:1::/64"},
+					Community:  "s3cret",
+					Users: []SNMPUser{
+						{Name: "monitor", AuthProtocol: "SHA-256", AuthPassword: "authpass1", PrivProtocol: "AES", PrivPassword: "privpass1"},
+						{Name: "ro", AuthProtocol: "SHA", AuthPassword: "authpass2"},
+					},
+				},
 				Certificates: []Certificate{{
 					Name: "www", Domains: []string{"www.example.com", "example.com"}, Email: "admin@example.com",
 					CA: "letsencrypt", KeyType: "ec256", Challenge: ChallengeHTTP01, Interface: "eth0",

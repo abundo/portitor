@@ -953,3 +953,60 @@ func TestChronyConf(t *testing.T) {
 		t.Errorf("no interfaces: ntp server rule in\n%s", nft)
 	}
 }
+
+func TestSnmpdConf(t *testing.T) {
+	doc := fwconfig.SampleDocument()
+	in := &doc.Instances[0]
+	conf := SnmpdConf(in)
+	for _, want := range []string{
+		"agentAddress udp:161,udp6:161\n",
+		"sysLocation Server room 1\nsysContact noc@example.com\n",
+		"rocommunity s3cret 192.168.1.0/24\nrocommunity6 s3cret fd00:1::/64\n",
+		"createUser monitor SHA-256 authpass1 AES privpass1\nrouser -s usm monitor priv\n",
+		"createUser ro SHA authpass2\nrouser -s usm ro auth\n",
+	} {
+		if !strings.Contains(conf, want) {
+			t.Errorf("missing %q in\n%s", want, conf)
+		}
+	}
+	nft := Nftables(in, nil, DefaultPaths())
+	for _, want := range []string{"set AUTO_snmp_clients_v4", `ip saddr @AUTO_snmp_clients_v4 iifname "eth1" udp dport 161`, `ip6 saddr @AUTO_snmp_clients_v6 iifname "eth1" udp dport 161`} {
+		if !strings.Contains(nft, want) {
+			t.Errorf("missing %q in\n%s", want, nft)
+		}
+	}
+
+	b, err := Render(doc, Options{Paths: DefaultPaths()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := DefaultPaths().Files(in)
+	for _, file := range b.Redacted() {
+		if file.Path != f.Snmpd {
+			continue
+		}
+		if !file.Secret || file.Mode != 0o600 {
+			t.Errorf("snmpd.conf secret %v mode %o", file.Secret, file.Mode)
+		}
+		for _, secret := range []string{"s3cret", "authpass", "privpass"} {
+			if strings.Contains(file.Content, secret) {
+				t.Errorf("redacted snmpd.conf holds %q:\n%s", secret, file.Content)
+			}
+		}
+		if !strings.Contains(file.Content, "createUser monitor SHA-256 <redacted> AES <redacted>\n") {
+			t.Errorf("redacted:\n%s", file.Content)
+		}
+	}
+
+	in.SNMP.Allow = nil
+	if conf := SnmpdConf(in); !strings.Contains(conf, "rocommunity s3cret default\nrocommunity6 s3cret default\n") {
+		t.Errorf("no allow:\n%s", conf)
+	}
+	if nft := Nftables(in, nil, DefaultPaths()); !strings.Contains(nft, `iifname "eth1" udp dport 161 accept`) || strings.Contains(nft, "AUTO_snmp") {
+		t.Errorf("no allow: rule in\n%s", nft)
+	}
+	in.SNMP.Interfaces = nil
+	if nft := Nftables(in, nil, DefaultPaths()); strings.Contains(nft, "dport 161") {
+		t.Errorf("no interfaces: snmp rule in\n%s", nft)
+	}
+}

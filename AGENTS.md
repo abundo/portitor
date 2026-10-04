@@ -14,7 +14,7 @@ are in [README.md](README.md).
 | `cmd/portitor-web` | GUI/API binary: `start`, `migrate`, `createadmin`, `agent-url`, `bootstrap` (ISO first boot) |
 | `cmd/portitor-agent` | Agent daemon on the firewall: `start`, `init`, `render`, `netns-exec`; run as `portitor` (a symlink, `cli.go`) it is a read-only CLI (`show lldp neighbours`, `show ip neighbours`) over the agent's GET routes on the root-only socket `<run_dir>/agent.sock` |
 | `internal/fwconfig` | The desired-state document and `Validate()`. **The contract between web and agent.** |
-| `internal/render` | Pure functions: document → nftables, WireGuard, named.conf, Kea, chrony.conf (`chrony.go`), dnsmgr2 config, FRR (`frr.go`: frr.conf with BGP, OSPF, VRRP and BFD, daemons, vtysh.conf) |
+| `internal/render` | Pure functions: document → nftables, WireGuard, named.conf, Kea, chrony.conf (`chrony.go`), snmpd.conf (`snmpd.go`), dnsmgr2 config, FRR (`frr.go`: frr.conf with BGP, OSPF, VRRP and BFD, daemons, vtysh.conf) |
 | `internal/agent` | Agent: apply/reconcile, commit-confirm, DHCP and DHCPv6 (prefix delegation) clients, IP lists, task scheduler, packet log (NFLOG), DNS query log (BIND logs to the journal, followed with `journalctl`, filtered by the agent, `querylog.go`), WireGuard endpoint re-resolving, packet capture (tcpdump, streamed rate-limited), traceroute (`mtr --raw`, streamed as JSON lines, `trace.go`), LLDP (sent and heard on raw sockets, `lldp.go`), neighbours (ARP/ND, LLDP), NAT64 (a Jool instance per namespace, `nat64.go`), traffic shaping (CAKE, IFB devices for receiving, HTB classes for the rate limits that shape (`fwconfig.Instance.Shapers`) by packet mark `render.ShaperMark`; planned from `tc -j` output, `shaping.go`), BGP, OSPF, VRRP and BFD state (FRR's JSON through `vtysh`, `bgp.go`, `ospf.go`, `vrrp.go`, `bfd.go`), VRRP's macvlan devices (`vrrp.go`), status, API server |
 | `internal/dyndns` | DNS update client ("DNS update" in the GUI): RFC 2136 (from ifnsupdate), sent from the instance netns, or a DNS hosting provider's API through libdns (`providers.go`, matching `fwconfig.DNSProviders`), called from the host |
 | `internal/acme` | ACME certificates through lego: accounts, orders, the stored chain and key (`<state_dir>/certificates/`); the agent's `acme.go` schedules them and answers HTTP-01 in the instance netns, opening port 80 by the `acme_http` set (`render.ACMEHTTPSet`) |
@@ -141,10 +141,11 @@ docs and user-facing messages.
   through the API either; a secret the user enters comes in through a write-only
   `gorm:"-"` field that `prepare` copies and `present` clears (`DyndnsClient.NewTsigSecret`,
   `IpList.NewPassword`/`NewApiKey`, `BgpPeerSettings.NewPassword` with
-  `ClearPassword`, `OspfInterface.NewAuthKey` with `ClearAuthKey`, `Certificate.NewPrivKey` for an imported certificate; a DNS update provider's secret settings come in
+  `ClearPassword`, `Instance.NewSnmpCommunity` with `ClearSnmpCommunity`,
+  `SnmpUser.NewAuthPassword`/`NewPrivPassword`, `OspfInterface.NewAuthKey` with `ClearAuthKey`, `Certificate.NewPrivKey` for an imported certificate; a DNS update provider's secret settings come in
   through `DyndnsClient.Settings`, where an empty one keeps the stored value).
   A BGP password or OSPF MD5 key is in frr.conf, so that is a `Secret` file
-  `Bundle.Redacted` masks.
+  `Bundle.Redacted` masks; so is snmpd.conf.
   Deployment history stores a redacted document. The exceptions are the backup
   download (`web/backup.go`): the whole database, age-encrypted with the user's
   passphrase; and a WireGuard peer's client config (`render.WireGuardClientConf`),
@@ -268,6 +269,17 @@ the certificate portitor-web serves, chosen under Settings
   command socket (`InstanceFiles.ChronySocket`, a VF's in
   `<run_dir>/chrony/<instance>`, made by the agent for the chrony user and
   mounted into that instance's unit alone).
+- **SNMP** (`fwconfig/snmp.go`, `render/snmpd.go`, `web/snmp.go`): net-snmp's snmpd
+  per instance, read-only (`instances.snmp_*`, `snmp_users` for SNMPv3). The default
+  instance's runs as `snmpd.service`; a virtual firewall's `portitor-snmpd@` in its
+  namespace, with its persistent directory (engine id) `<state_dir>/snmp/<instance>`,
+  made by the agent for `Debian-snmp`. It answers on the interfaces with
+  `snmp_serve` (the auto input rule "snmp"), from the `snmp_allow` prefixes (the
+  rule's source set `snmp_clients`, and the community's sources; names expanded by
+  the builder, in `eachObjectRef`). The community and the users' passwords are
+  write-only secrets (`NewSnmpCommunity`/`ClearSnmpCommunity`, `SnmpUser.NewAuthPassword`/
+  `NewPrivPassword`); snmpd.conf is a `Secret` file (0600, read by snmpd as root
+  before it drops to its user, so a change restarts it), removed when SNMP is off.
 - **Dual stack:** rule and NAT address lists may mix IPv4 and IPv6;
   `fwconfig.MatchFamilies` decides which versions a rule is rendered for, and
   validation uses the same function.

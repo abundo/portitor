@@ -579,6 +579,16 @@ func AutoInputRules(in *fwconfig.Instance) []AutoRule {
 		sort.Strings(ifs)
 		out = append(out, AutoRule{Service: "ntp server", InInterfaces: ifs, Protocol: "udp", DstPort: fwconfig.NTPPort})
 	}
+	// SNMP requests on its interfaces, from the allowed clients if listed.
+	if in.SNMP != nil && len(in.SNMP.Interfaces) > 0 {
+		ifs := append([]string(nil), in.SNMP.Interfaces...)
+		sort.Strings(ifs)
+		r := AutoRule{Service: SNMPService, InInterfaces: ifs, Protocol: "udp", DstPort: fwconfig.SNMPPort}
+		if src := SNMPClients(in); len(src) > 0 {
+			r.Source, r.SourceSet = src, SNMPSet
+		}
+		out = append(out, r)
+	}
 	// HTTP-01 challenges come in on the certificates' interfaces; the
 	// rule matches only while one is being answered.
 	var acme []string

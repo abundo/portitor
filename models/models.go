@@ -348,6 +348,21 @@ type Instance struct {
 	NtpEnabled bool                         `json:"ntp_enabled"`
 	NtpServers JSONList[fwconfig.NTPServer] `json:"ntp_servers"`
 	NtpAllow   StringList                   `json:"ntp_allow"`
+	// SnmpEnabled runs snmpd, read-only, answering clients in SnmpAllow
+	// (any when empty, hosts/prefixes by name) on the interfaces with
+	// SnmpServe, with the SNMPv2c SnmpCommunity (none when empty) and the
+	// instance's SnmpUsers (SNMPv3).
+	SnmpEnabled  bool       `json:"snmp_enabled"`
+	SnmpLocation string     `json:"snmp_location"`
+	SnmpContact  string     `json:"snmp_contact"`
+	SnmpAllow    StringList `json:"snmp_allow"`
+	// The community is write-only: NewSnmpCommunity sets it (empty keeps
+	// it), ClearSnmpCommunity removes it, HasSnmpCommunity tells whether
+	// there is one.
+	SnmpCommunity      string `json:"-"`
+	NewSnmpCommunity   string `gorm:"-" json:"new_snmp_community,omitempty"`
+	ClearSnmpCommunity bool   `gorm:"-" json:"clear_snmp_community,omitempty"`
+	HasSnmpCommunity   bool   `gorm:"-" json:"has_snmp_community"`
 
 	DhcpEnabled    bool   `json:"dhcp_enabled"`
 	DhcpDomainName string `json:"dhcp_domain_name"`
@@ -410,6 +425,8 @@ type Interface struct {
 	Xlat464 bool `gorm:"column:xlat464" json:"xlat464"`
 	// NtpServe answers NTP clients on this interface (Instance.NtpAllow).
 	NtpServe bool `json:"ntp_serve"`
+	// SnmpServe answers SNMP requests on this interface (Instance.SnmpAllow).
+	SnmpServe bool `json:"snmp_serve"`
 	// ShapeEgress and ShapeIngress shape what the interface sends and
 	// receives with CAKE, in Mbit/s; 0 is not shaped.
 	ShapeEgress  int `json:"shape_egress"`
@@ -875,5 +892,36 @@ func All() []any {
 		&DyndnsClient{}, &DyndnsRecord{}, &Certificate{}, &IpList{}, &Task{}, &Service{}, &RateLimit{}, &ObjectFolder{}, &Role{}, &RoleMember{}, &RoleInstance{},
 		&RoutePrefixList{}, &RouteAsPathList{}, &RouteCommunityList{}, &RouteMap{}, &BgpConfig{}, &BgpPeerGroup{}, &BgpNeighbor{},
 		&OspfConfig{}, &OspfInterface{}, &VrrpRouter{}, &BfdInterface{}, &AddressList{},
+		&SnmpUser{},
+	}
+}
+
+// SnmpUser is a read-only SNMPv3 user of an instance. Disabled, it is left
+// out.
+type SnmpUser struct {
+	Base
+	InstanceID   uint   `json:"instance_id"`
+	Name         string `json:"name"`
+	Enabled      bool   `json:"enabled"`
+	Description  string `json:"description"`
+	AuthProtocol string `json:"auth_protocol"`
+	AuthPassword string `json:"-"`
+	// PrivProtocol empty: authentication only (authNoPriv).
+	PrivProtocol string `json:"priv_protocol"`
+	PrivPassword string `json:"-"`
+
+	// The passwords are write-only: NewAuthPassword and NewPrivPassword
+	// set them (empty keeps them), Has* tell whether there is one.
+	NewAuthPassword string `gorm:"-" json:"new_auth_password,omitempty"`
+	NewPrivPassword string `gorm:"-" json:"new_priv_password,omitempty"`
+	HasAuthPassword bool   `gorm:"-" json:"has_auth_password"`
+	HasPrivPassword bool   `gorm:"-" json:"has_priv_password"`
+}
+
+// User is the user as the document holds it.
+func (u *SnmpUser) User() fwconfig.SNMPUser {
+	return fwconfig.SNMPUser{
+		Name: u.Name, AuthProtocol: u.AuthProtocol, AuthPassword: u.AuthPassword,
+		PrivProtocol: u.PrivProtocol, PrivPassword: u.PrivPassword,
 	}
 }

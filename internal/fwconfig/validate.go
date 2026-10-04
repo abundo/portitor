@@ -652,6 +652,9 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 	if in.NTP != nil {
 		v.ntp(p, in.NTP, ifaces)
 	}
+	if in.SNMP != nil {
+		v.snmp(p, in.SNMP, ifaces)
+	}
 	if in.DNS.DNS64 != "" {
 		if err := CheckNAT64Prefix(in.DNS.DNS64); err != nil {
 			v.addf("%s: dns64: %v", p, err)

@@ -56,6 +56,9 @@ type Instance struct {
 	// NTP, when set, runs chrony: an NTP client, and a server on its
 	// interfaces.
 	NTP *NTP `json:"ntp,omitempty"`
+	// SNMP, when set, runs snmpd: read-only SNMP for management
+	// platforms.
+	SNMP *SNMP `json:"snmp,omitempty"`
 	// DynDNS clients keep records on a nameserver in step with the
 	// addresses of this instance's interfaces.
 	DynDNS []DynDNS `json:"dyndns,omitempty"`

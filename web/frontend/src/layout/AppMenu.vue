@@ -81,6 +81,7 @@ const sections = computed(() => [
       { label: 'DHCP', icon: 'i-lucide-list-ordered', to: '/dhcp' },
       { label: 'DNS', icon: 'i-lucide-globe', to: '/dns' },
       { label: 'NTP', icon: 'i-lucide-clock', to: '/ntp' },
+      { label: 'SNMP', icon: 'i-lucide-activity', to: '/snmp' },
       { label: 'Scheduled tasks', icon: 'i-lucide-calendar-clock', to: '/scheduled-tasks' },
     ],
   },

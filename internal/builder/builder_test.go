@@ -188,11 +188,14 @@ func TestBuildIPv6AndObjects(t *testing.T) {
 	db := testDB(t)
 	main := models.Instance{Name: "main", IsDefault: true, DhcpEnabled: true, DhcpDomainName: "home.arpa",
 		DnsForwarders: models.StringList{"quad9"}, Nat64Prefix: "64:ff9b::/96", Dns64: true, Nat64: true,
-		NtpEnabled: true, NtpServers: models.JSONList[fwconfig.NTPServer]{{Address: "pool.ntp.org", Pool: true, IBurst: true}}, NtpAllow: models.StringList{"10.0.0.0/8"}}
+		NtpEnabled: true, NtpServers: models.JSONList[fwconfig.NTPServer]{{Address: "pool.ntp.org", Pool: true, IBurst: true}}, NtpAllow: models.StringList{"10.0.0.0/8"},
+		SnmpEnabled: true, SnmpLocation: "rack 1", SnmpCommunity: "s3cret", SnmpAllow: models.StringList{"10.0.0.0/8"}}
 	mustCreate(t, db, &main)
 	mustCreate(t, db, &models.Interface{InstanceID: main.ID, Name: "eth0", Kind: "physical", Enabled: true, Ipv4Mode: "dhcp", Ipv6AcceptRA: true})
-	mustCreate(t, db, &models.Interface{InstanceID: main.ID, Name: "eth1", Kind: "physical", Enabled: true, Ipv4Mode: "static", DnsListen: true, Xlat464: true, NtpServe: true,
+	mustCreate(t, db, &models.Interface{InstanceID: main.ID, Name: "eth1", Kind: "physical", Enabled: true, Ipv4Mode: "static", DnsListen: true, Xlat464: true, NtpServe: true, SnmpServe: true,
 		Addresses: models.StringList{"192.168.1.1/24", "fd00:1::1/64"}})
+	mustCreate(t, db, &models.SnmpUser{InstanceID: main.ID, Name: "mon", Enabled: true, AuthProtocol: "SHA-256", AuthPassword: "authpass1", PrivProtocol: "AES", PrivPassword: "privpass1"})
+	mustCreate(t, db, &models.SnmpUser{InstanceID: main.ID, Name: "off", AuthProtocol: "SHA", AuthPassword: "authpass1"})
 
 	mustCreate(t, db, &models.IpamPrefix{InstanceID: main.ID, Prefix: "192.168.1.0/24", DhcpEnabled: true, DhcpRangeStart: "192.168.1.100", DhcpRangeEnd: "192.168.1.199"})
 	mustCreate(t, db, &models.IpamPrefix{InstanceID: main.ID, Prefix: "fd00:1::/64", RaEnabled: true, RaSlaac: true, DhcpEnabled: true, DhcpRangeStart: "fd00:1::1000", DhcpRangeEnd: "fd00:1::1fff"})
@@ -257,6 +260,10 @@ func TestBuildIPv6AndObjects(t *testing.T) {
 	}
 	if in.NTP == nil || len(in.NTP.Servers) != 1 || !in.NTP.Servers[0].Pool || strings.Join(in.NTP.Interfaces, " ") != "eth1" || strings.Join(in.NTP.Allow, " ") != "10.0.0.0/8" {
 		t.Errorf("ntp %+v", in.NTP)
+	}
+	if in.SNMP == nil || in.SNMP.Community != "s3cret" || in.SNMP.Location != "rack 1" || strings.Join(in.SNMP.Interfaces, " ") != "eth1" ||
+		strings.Join(in.SNMP.Allow, " ") != "10.0.0.0/8" || len(in.SNMP.Users) != 1 || in.SNMP.Users[0].Name != "mon" {
+		t.Errorf("snmp %+v", in.SNMP)
 	}
 	if in.DNS.DNS64 != "64:ff9b::/96" {
 		t.Errorf("dns64 %q", in.DNS.DNS64)

@@ -596,7 +596,7 @@ func (a *Agent) placeLinks(ctx context.Context, doc fwconfig.Document) error {
 }
 
 // applyServices runs dnsmgr2 and starts/stops/reloads BIND, Kea, radvd,
-// chrony and FRR for an instance. The default instance's run under the distribution's own
+// chrony, snmpd and FRR for an instance. The default instance's run under the distribution's own
 // units, from the standard files (render.Paths.Files).
 func (a *Agent) applyServices(ctx context.Context, in *fwconfig.Instance, b *render.Bundle, changed map[string]bool) error {
 	files := a.cfg.Paths.Files(in)
@@ -664,8 +664,19 @@ func (a *Agent) applyServices(ctx context.Context, in *fwconfig.Instance, b *ren
 		}
 	}
 
-	// Kea, radvd and chrony are rendered in full (no dnsmgr2). chronyd
-	// can't reload its config.
+	if in.SNMP != nil && !in.Default && !a.cfg.DryRun {
+		// portitor-snmpd@.service mounts the persistent directory (the
+		// engine id SNMPv3 managers know it by), which snmpd writes as
+		// its user.
+		if err := os.MkdirAll(files.SnmpdPersist, 0o700); err != nil {
+			return err
+		}
+		chownTo(snmpdUser, files.SnmpdPersist)
+	}
+
+	// Kea, radvd, chrony and snmpd are rendered in full (no dnsmgr2).
+	// chronyd can't reload its config; snmpd re-reads it on SIGHUP, but as
+	// its user, and the file holds secrets (root's alone).
 	for _, svc := range []struct {
 		unit, conf string
 		on         bool
@@ -675,6 +686,7 @@ func (a *Agent) applyServices(ctx context.Context, in *fwconfig.Instance, b *ren
 		{a.cfg.Units.Kea6(in), files.Kea6, len(render.DHCP6Subnets(in)) > 0, "restart"},
 		{a.cfg.Units.Radvd(in), files.Radvd, len(in.RA) > 0, "reload-or-restart"},
 		{a.cfg.Units.Chrony(in), files.Chrony, in.NTP != nil, "restart"},
+		{a.cfg.Units.Snmpd(in), files.Snmpd, in.SNMP != nil, "restart"},
 	} {
 		if !svc.on {
 			a.disableService(ctx, in, svc.unit, svc.conf)
@@ -687,6 +699,13 @@ func (a *Agent) applyServices(ctx context.Context, in *fwconfig.Instance, b *ren
 			if err := a.do(ctx, command{Name: "systemctl", Args: []string{svc.reload, svc.unit}}); err != nil {
 				return err
 			}
+		}
+	}
+	if in.SNMP == nil {
+		// Like a stale frr.conf, a stale snmpd.conf holds secrets (the
+		// community, the users' passwords): remove ours.
+		if c, err := os.ReadFile(files.Snmpd); err == nil && render.Generated(c) && !a.cfg.DryRun {
+			_ = os.Remove(files.Snmpd)
 		}
 	}
 	return a.applyFRR(ctx, in, changed)

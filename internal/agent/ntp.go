@@ -18,6 +18,10 @@ import (
 // chronyUsers are the users chronyd drops to: Debian's, then Fedora's.
 var chronyUsers = []string{"_chrony", "chrony"}
 
+// snmpdUser is the user a virtual firewall's snmpd drops to
+// (portitor-snmpd@.service): Debian's.
+const snmpdUser = "Debian-snmp"
+
 // NTP gathers the sources and statistics of the instances' chronyd, with
 // chronyc through each one's command socket (render.InstanceFiles.ChronySocket;
 // the default instance's is chrony's own).

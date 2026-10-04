@@ -113,6 +113,7 @@ AGENT_UNITS = (
     "portitor-radvd@.service",
     "portitor-frr@.service",
     "portitor-chrony@.service",
+    "portitor-snmpd@.service",
 )
 # The Debian packages the agent runs (iso/preseed.cfg has the same). An
 # update installs the ones missing (a release can need a new one, as 0.4.0
@@ -137,6 +138,8 @@ AGENT_PACKAGES = {
     # NTP. Not masked: it replaces systemd-timesyncd and keeps the host's
     # clock with Debian's config until the default virtual firewall has NTP.
     "chrony": (),
+    # SNMP; the default virtual firewall's runs under snmpd.service.
+    "snmpd": ("snmpd.service",),
     # NAT64; DKMS builds the kernel module with the kernel headers
     # (agent_packages adds them for the architecture).
     "jool-dkms": (),

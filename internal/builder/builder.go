@@ -59,6 +59,7 @@ type data struct {
 	ospfIfaces     []models.OspfInterface
 	vrrpRouters    []models.VrrpRouter
 	bfdIfaces      []models.BfdInterface
+	snmpUsers      []models.SnmpUser
 }
 
 func load(db *gorm.DB) (*data, error) {
@@ -102,6 +103,7 @@ func load(db *gorm.DB) (*data, error) {
 		{&d.ospfIfaces, "name"},
 		{&d.vrrpRouters, "interface, vrid"},
 		{&d.bfdIfaces, "interface"},
+		{&d.snmpUsers, "name"},
 	} {
 		if err := db.Order(q.order).Find(q.dst).Error; err != nil {
 			return nil, err
@@ -652,6 +654,25 @@ func build(db *gorm.DB, generation int64, only map[string]bool) (*fwconfig.Docum
 			for _, ifc := range in.Interfaces {
 				if mif, ok := ifaceByName(d.interfaces, mi.ID, ifc.Name); ok && mif.NtpServe {
 					in.NTP.Interfaces = append(in.NTP.Interfaces, ifc.Name)
+				}
+			}
+		}
+
+		if mi.SnmpEnabled {
+			in.SNMP = &fwconfig.SNMP{
+				Location:  mi.SnmpLocation,
+				Contact:   mi.SnmpContact,
+				Allow:     expand("instance "+mi.Name+": snmp allow", objs.Prefixes, mi.SnmpAllow),
+				Community: mi.SnmpCommunity,
+			}
+			for _, ifc := range in.Interfaces {
+				if mif, ok := ifaceByName(d.interfaces, mi.ID, ifc.Name); ok && mif.SnmpServe {
+					in.SNMP.Interfaces = append(in.SNMP.Interfaces, ifc.Name)
+				}
+			}
+			for i := range d.snmpUsers {
+				if u := &d.snmpUsers[i]; u.InstanceID == mi.ID && u.Enabled {
+					in.SNMP.Users = append(in.SNMP.Users, u.User())
 				}
 			}
 		}

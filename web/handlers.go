@@ -1463,6 +1463,20 @@ func redactDoc(doc fwconfig.Document) fwconfig.Document {
 			}
 			cp.OSPF = &o
 		}
+		if in.SNMP != nil {
+			s := *in.SNMP
+			if s.Community != "" {
+				s.Community = "<redacted>"
+			}
+			s.Users = slices.Clone(s.Users)
+			for k := range s.Users {
+				s.Users[k].AuthPassword = "<redacted>"
+				if s.Users[k].PrivPassword != "" {
+					s.Users[k].PrivPassword = "<redacted>"
+				}
+			}
+			cp.SNMP = &s
+		}
 		out.Instances[i] = cp
 	}
 	out.IPLists = make([]fwconfig.IPList, len(doc.IPLists))

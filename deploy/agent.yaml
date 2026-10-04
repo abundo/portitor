@@ -40,14 +40,17 @@ allow_from:
 #   kea_conf_dir: /etc/kea
 #   radvd_conf: /etc/radvd.conf
 #   chrony_conf: /etc/chrony/chrony.conf  # Fedora: /etc/chrony.conf
+#   snmpd_conf: /etc/snmp/snmpd.conf
 # units:
 #   named: portitor-named@%s.service      # the other virtual firewalls'
 #   kea4: portitor-kea4@%s.service
 #   kea6: portitor-kea6@%s.service
 #   radvd: portitor-radvd@%s.service
 #   chrony: portitor-chrony@%s.service
+#   snmpd: portitor-snmpd@%s.service
 #   default_named: named.service          # Fedora: kea-dhcp4.service, kea-dhcp6.service
 #   default_kea4: kea-dhcp4-server.service
 #   default_kea6: kea-dhcp6-server.service
 #   default_radvd: radvd.service
 #   default_chrony: chrony.service        # Fedora: chronyd.service
+#   default_snmpd: snmpd.service
