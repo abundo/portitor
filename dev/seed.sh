@@ -28,7 +28,7 @@ req POST /login "{\"username\":\"$USER\",\"password\":\"$PASS\"}" >/dev/null
 AGENT_URL=${AGENT_URL:-https://127.0.0.1:8443}
 TOKEN=${AGENT_TOKEN:-$(cat dev/run/agent.token)}
 FP=${AGENT_FINGERPRINT:-$(openssl x509 -in dev/run/agent.crt -outform DER | sha256sum | cut -d' ' -f1)}
-req PUT /settings "{\"agent_url\":\"$AGENT_URL\",\"agent_token\":\"$TOKEN\",\"agent_fingerprint\":\"$FP\",\"confirm_timeout\":120,\"wg_endpoint_host\":\"home.example.org\"}" >/dev/null
+req PUT /settings "{\"agent_url\":\"$AGENT_URL\",\"agent_token\":\"$TOKEN\",\"agent_fingerprint\":\"$FP\",\"confirm_timeout\":120,\"wg_endpoint_host\":\"home.example.org\",\"virtual_firewalls\":true}" >/dev/null
 
 # portitor-web start creates the default instance "main"; update it.
 MAIN=$(req GET /instances | grep -oE '"id":[0-9]+,[^}]*"name":"main"' | sed -E 's/"id":([0-9]+).*/\1/')
