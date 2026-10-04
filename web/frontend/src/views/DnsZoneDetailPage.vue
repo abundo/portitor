@@ -36,8 +36,8 @@ const typeLabel = computed(
   () => zoneTypes.find((t) => t.value === zone.value?.type)?.label ?? zone.value?.type,
 )
 const tabItems = computed(() => [
-  { label: 'Zone info', value: 'info', slot: 'info' },
   { label: 'Records', value: 'records', slot: 'records' },
+  { label: 'Zone configuration', value: 'info', slot: 'info' },
 ])
 const templateItems = computed(() => [
   { label: '— built-in (NS localhost)', value: NONE },
@@ -86,7 +86,6 @@ onMounted(async () => {
     soas.value = s
     policies.value = p
     fill(z)
-    if (z.type !== 'forward') activeTab.value = 'info'
   } catch (err) {
     toast.add({ title: errMsg(err, 'Failed to load zone'), color: 'error' })
   }
