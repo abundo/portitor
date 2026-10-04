@@ -32,6 +32,7 @@ const router = createRouter({
         { path: 'vrrp', component: () => import('@/views/VrrpPage.vue') },
         { path: 'bfd', component: () => import('@/views/BfdPage.vue') },
         { path: 'nat64', component: () => import('@/views/Nat64Page.vue') },
+        { path: 'ntp', component: () => import('@/views/NtpPage.vue') },
         { path: 'hosts-prefixes', component: () => import('@/views/HostsPrefixesPage.vue') },
         { path: 'interface-zones', component: () => import('@/views/InterfaceZonesPage.vue') },
         { path: 'rules', component: () => import('@/views/RulesPage.vue') },

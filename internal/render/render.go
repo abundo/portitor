@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package render turns a validated fwconfig.Document into the files the
-// firewall runs from: one nftables ruleset, BIND/Kea/radvd configs and a
+// firewall runs from: one nftables ruleset, BIND/Kea/radvd/chrony configs and a
 // dnsmgr2 config per instance, and one wg(8) config per WireGuard interface.
 //
 // Rendering is pure (no filesystem, no commands) so the same code serves
@@ -43,6 +43,7 @@ type Paths struct {
 	NamedConf    string `yaml:"named_conf" json:"named_conf"`
 	KeaConfDir   string `yaml:"kea_conf_dir" json:"kea_conf_dir"`
 	RadvdConf    string `yaml:"radvd_conf" json:"radvd_conf"`
+	ChronyConf   string `yaml:"chrony_conf" json:"chrony_conf"`
 	// FRRDir is FRR's config directory: the default instance's frr.conf
 	// and daemons are in it, and a virtual firewall's unit mounts the
 	// instance's over FRRDir/<instance> (FRR's pathspace).
@@ -68,6 +69,7 @@ func DefaultPaths() Paths {
 		NamedConf:    "/etc/bind/named.conf",
 		KeaConfDir:   "/etc/kea",
 		RadvdConf:    "/etc/radvd.conf",
+		ChronyConf:   "/etc/chrony/chrony.conf",
 		FRRDir:       "/etc/frr",
 		FRRRunDir:    "/run/frr",
 		FRRStateDir:  "/var/lib/frr",
@@ -95,6 +97,11 @@ type InstanceFiles struct {
 	Kea4      string
 	Kea6      string
 	Radvd     string
+	Chrony    string
+	// ChronySocket is a virtual firewall's chronyd command socket, in a
+	// directory its unit alone mounts (portitor-chrony@.service); the
+	// default instance's is chrony's own (empty).
+	ChronySocket string
 	// FRR's integrated config, daemons file and vtysh.conf. A virtual
 	// firewall's unit mounts their directory as FRR's pathspace
 	// Paths.FRRDir/<instance> (portitor-frr@.service).
@@ -139,6 +146,7 @@ func (p Paths) Files(in *fwconfig.Instance) InstanceFiles {
 			Kea4:         filepath.Join(p.KeaConfDir, "kea-dhcp4.conf"),
 			Kea6:         filepath.Join(p.KeaConfDir, "kea-dhcp6.conf"),
 			Radvd:        p.RadvdConf,
+			Chrony:       p.ChronyConf,
 			FRRConf:      filepath.Join(p.FRRDir, "frr.conf"),
 			FRRDaemons:   filepath.Join(p.FRRDir, "daemons"),
 			FRRVtysh:     filepath.Join(p.FRRDir, "vtysh.conf"),
@@ -165,6 +173,8 @@ func (p Paths) Files(in *fwconfig.Instance) InstanceFiles {
 		Kea4:         filepath.Join(etc, "kea-dhcp4.conf"),
 		Kea6:         filepath.Join(etc, "kea-dhcp6.conf"),
 		Radvd:        filepath.Join(etc, "radvd.conf"),
+		Chrony:       filepath.Join(etc, "chrony.conf"),
+		ChronySocket: filepath.Join(p.RunDir, "chrony", in.Name, "chronyd.sock"),
 		FRRConf:      filepath.Join(etc, "frr", "frr.conf"),
 		FRRDaemons:   filepath.Join(etc, "frr", "daemons"),
 		FRRVtysh:     filepath.Join(etc, "frr", "vtysh.conf"),
@@ -212,31 +222,36 @@ func (p Paths) ACMEAccountsDir() string {
 // default instance's run under the distribution's own units (Default*),
 // which read the standard files (Paths.Files).
 type Units struct {
-	NamedFmt     string `yaml:"named" json:"named"`
-	Kea4Fmt      string `yaml:"kea4" json:"kea4"`
-	Kea6Fmt      string `yaml:"kea6" json:"kea6"`
-	RadvdFmt     string `yaml:"radvd" json:"radvd"`
-	FRRFmt       string `yaml:"frr" json:"frr"`
-	DefaultNamed string `yaml:"default_named" json:"default_named"`
-	DefaultKea4  string `yaml:"default_kea4" json:"default_kea4"`
-	DefaultKea6  string `yaml:"default_kea6" json:"default_kea6"`
-	DefaultRadvd string `yaml:"default_radvd" json:"default_radvd"`
-	DefaultFRR   string `yaml:"default_frr" json:"default_frr"`
+	NamedFmt      string `yaml:"named" json:"named"`
+	Kea4Fmt       string `yaml:"kea4" json:"kea4"`
+	Kea6Fmt       string `yaml:"kea6" json:"kea6"`
+	RadvdFmt      string `yaml:"radvd" json:"radvd"`
+	FRRFmt        string `yaml:"frr" json:"frr"`
+	ChronyFmt     string `yaml:"chrony" json:"chrony"`
+	DefaultNamed  string `yaml:"default_named" json:"default_named"`
+	DefaultKea4   string `yaml:"default_kea4" json:"default_kea4"`
+	DefaultKea6   string `yaml:"default_kea6" json:"default_kea6"`
+	DefaultRadvd  string `yaml:"default_radvd" json:"default_radvd"`
+	DefaultFRR    string `yaml:"default_frr" json:"default_frr"`
+	DefaultChrony string `yaml:"default_chrony" json:"default_chrony"`
 }
 
 func DefaultUnits() Units {
 	return Units{
-		NamedFmt: "portitor-named@%s.service",
-		Kea4Fmt:  "portitor-kea4@%s.service",
-		Kea6Fmt:  "portitor-kea6@%s.service",
-		RadvdFmt: "portitor-radvd@%s.service",
-		FRRFmt:   "portitor-frr@%s.service",
+		NamedFmt:  "portitor-named@%s.service",
+		Kea4Fmt:   "portitor-kea4@%s.service",
+		Kea6Fmt:   "portitor-kea6@%s.service",
+		RadvdFmt:  "portitor-radvd@%s.service",
+		FRRFmt:    "portitor-frr@%s.service",
+		ChronyFmt: "portitor-chrony@%s.service",
 		// Debian/Ubuntu's names (Fedora: kea-dhcp4.service, kea-dhcp6.service).
 		DefaultNamed: "named.service",
 		DefaultKea4:  "kea-dhcp4-server.service",
 		DefaultKea6:  "kea-dhcp6-server.service",
 		DefaultRadvd: "radvd.service",
 		DefaultFRR:   "frr.service",
+		// Fedora: chronyd.service.
+		DefaultChrony: "chrony.service",
 	}
 }
 
@@ -252,10 +267,13 @@ func (u Units) Kea4(in *fwconfig.Instance) string  { return u.pick(in, u.Default
 func (u Units) Kea6(in *fwconfig.Instance) string  { return u.pick(in, u.DefaultKea6, u.Kea6Fmt) }
 func (u Units) Radvd(in *fwconfig.Instance) string { return u.pick(in, u.DefaultRadvd, u.RadvdFmt) }
 func (u Units) FRR(in *fwconfig.Instance) string   { return u.pick(in, u.DefaultFRR, u.FRRFmt) }
+func (u Units) Chrony(in *fwconfig.Instance) string {
+	return u.pick(in, u.DefaultChrony, u.ChronyFmt)
+}
 
-// All lists the instance's units: named, Kea4, Kea6, radvd, FRR.
+// All lists the instance's units: named, Kea4, Kea6, radvd, FRR, chrony.
 func (u Units) All(in *fwconfig.Instance) []string {
-	return []string{u.Named(in), u.Kea4(in), u.Kea6(in), u.Radvd(in), u.FRR(in)}
+	return []string{u.Named(in), u.Kea4(in), u.Kea6(in), u.Radvd(in), u.FRR(in), u.Chrony(in)}
 }
 
 type Options struct {
@@ -333,6 +351,9 @@ func Render(doc fwconfig.Document, opt Options) (*Bundle, error) {
 		}
 		if len(in.RA) > 0 {
 			add(f.Radvd, RadvdConf(in), 0o644, false)
+		}
+		if in.NTP != nil {
+			add(f.Chrony, ChronyConf(in, f), 0o644, false)
 		}
 		if in.FRRRunning() {
 			add(f.FRRDaemons, FRRDaemons(in), 0o640, false)

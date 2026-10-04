@@ -190,6 +190,25 @@ func prepareInstance(tx *gorm.DB, in, old *models.Instance) error {
 			return bad(fmt.Sprintf("NAT64 IPv4 pool: %q is not an IPv4 prefix", s))
 		}
 	}
+	seen := map[string]bool{}
+	for i := range in.NtpServers {
+		s := &in.NtpServers[i]
+		s.Address = strings.TrimSpace(s.Address)
+		if !fwconfig.ValidNTPServer(s.Address) {
+			return bad(fmt.Sprintf("NTP servers: %q is not an address or host name", s.Address))
+		}
+		if seen[s.Address] {
+			return bad(fmt.Sprintf("NTP servers: %s is listed twice", s.Address))
+		}
+		seen[s.Address] = true
+	}
+	if in.NtpEnabled && len(in.NtpServers) == 0 {
+		return bad("NTP: enter at least one server")
+	}
+	in.NtpAllow = cleanList(in.NtpAllow)
+	if err := checkEntries(tx, "NTP allowed clients", in.NtpAllow, entryCIDR); err != nil {
+		return err
+	}
 	in.DnsQueryLogClients = cleanList(in.DnsQueryLogClients)
 	if err := checkEntries(tx, "query log clients", in.DnsQueryLogClients, entryCIDR); err != nil {
 		return err

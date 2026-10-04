@@ -1,0 +1,13 @@
+# SPDX-FileCopyrightText: 2026 The Portitor contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# chrony per Portitor instance (portitor-chrony@.service). The AppArmor
+# profile for chronyd on Debian/Ubuntu only allows /etc/chrony and
+# /run/chrony; install.py adds these rules to the profile's local include
+# (/etc/apparmor.d/local/usr.sbin.chronyd). The path is the default of
+# etc_dir in /etc/portitor/agent.yaml; the PID file is in the unit's
+# private /tmp, its command socket under run_dir.
+/etc/portitor/instances/*/chrony.conf r,
+/tmp/chronyd.pid rw,
+/run/portitor/chrony/*/ rw,
+/run/portitor/chrony/*/chronyd.sock rw,

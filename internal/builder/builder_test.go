@@ -187,10 +187,11 @@ func TestBuildReportsProblems(t *testing.T) {
 func TestBuildIPv6AndObjects(t *testing.T) {
 	db := testDB(t)
 	main := models.Instance{Name: "main", IsDefault: true, DhcpEnabled: true, DhcpDomainName: "home.arpa",
-		DnsForwarders: models.StringList{"quad9"}, Nat64Prefix: "64:ff9b::/96", Dns64: true, Nat64: true}
+		DnsForwarders: models.StringList{"quad9"}, Nat64Prefix: "64:ff9b::/96", Dns64: true, Nat64: true,
+		NtpEnabled: true, NtpServers: models.JSONList[fwconfig.NTPServer]{{Address: "pool.ntp.org", Pool: true, IBurst: true}}, NtpAllow: models.StringList{"10.0.0.0/8"}}
 	mustCreate(t, db, &main)
 	mustCreate(t, db, &models.Interface{InstanceID: main.ID, Name: "eth0", Kind: "physical", Enabled: true, Ipv4Mode: "dhcp", Ipv6AcceptRA: true})
-	mustCreate(t, db, &models.Interface{InstanceID: main.ID, Name: "eth1", Kind: "physical", Enabled: true, Ipv4Mode: "static", DnsListen: true, Xlat464: true,
+	mustCreate(t, db, &models.Interface{InstanceID: main.ID, Name: "eth1", Kind: "physical", Enabled: true, Ipv4Mode: "static", DnsListen: true, Xlat464: true, NtpServe: true,
 		Addresses: models.StringList{"192.168.1.1/24", "fd00:1::1/64"}})
 
 	mustCreate(t, db, &models.IpamPrefix{InstanceID: main.ID, Prefix: "192.168.1.0/24", DhcpEnabled: true, DhcpRangeStart: "192.168.1.100", DhcpRangeEnd: "192.168.1.199"})
@@ -253,6 +254,9 @@ func TestBuildIPv6AndObjects(t *testing.T) {
 	}
 	if in.NAT64 == nil || in.NAT64.Prefix != "64:ff9b::/96" || len(in.NAT64.Pool4) != 0 || strings.Join(in.NAT64.Interfaces, " ") != "eth1" {
 		t.Errorf("nat64 %+v", in.NAT64)
+	}
+	if in.NTP == nil || len(in.NTP.Servers) != 1 || !in.NTP.Servers[0].Pool || strings.Join(in.NTP.Interfaces, " ") != "eth1" || strings.Join(in.NTP.Allow, " ") != "10.0.0.0/8" {
+		t.Errorf("ntp %+v", in.NTP)
 	}
 	if in.DNS.DNS64 != "64:ff9b::/96" {
 		t.Errorf("dns64 %q", in.DNS.DNS64)

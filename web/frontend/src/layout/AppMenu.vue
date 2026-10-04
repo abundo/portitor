@@ -80,6 +80,7 @@ const sections = computed(() => [
       { label: 'Certificates', icon: 'i-lucide-badge-check', to: '/certificates' },
       { label: 'DHCP', icon: 'i-lucide-list-ordered', to: '/dhcp' },
       { label: 'DNS', icon: 'i-lucide-globe', to: '/dns' },
+      { label: 'NTP', icon: 'i-lucide-clock', to: '/ntp' },
       { label: 'Scheduled tasks', icon: 'i-lucide-calendar-clock', to: '/scheduled-tasks' },
     ],
   },

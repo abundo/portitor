@@ -1288,6 +1288,27 @@ func (s *Server) handleAgentBFD(c *echo.Context) error {
 	return c.JSON(http.StatusOK, b)
 }
 
+// handleAgentNTP passes on the instances' NTP sources and statistics, for
+// the NTP page.
+func (s *Server) handleAgentNTP(c *echo.Context) error {
+	a, _, err := s.agent()
+	if err != nil {
+		return agentError(c, err)
+	}
+	n, err := a.NTP(c.Request().Context())
+	if err != nil {
+		return agentError(c, err)
+	}
+	names, err := s.readableInstanceNames(c)
+	if err != nil {
+		return err
+	}
+	if names != nil {
+		filterNTP(n, names)
+	}
+	return c.JSON(http.StatusOK, n)
+}
+
 // handleAgentRuleCounters passes on the traffic per rule (by rule id), for
 // the Rules page.
 func (s *Server) handleAgentRuleCounters(c *echo.Context) error {

@@ -120,6 +120,7 @@ func (c *Config) applyDefaults() {
 		{&c.Paths.NamedConf, def.NamedConf},
 		{&c.Paths.KeaConfDir, def.KeaConfDir},
 		{&c.Paths.RadvdConf, def.RadvdConf},
+		{&c.Paths.ChronyConf, def.ChronyConf},
 		{&c.Paths.FRRDir, def.FRRDir},
 		{&c.Paths.FRRRunDir, def.FRRRunDir},
 		{&c.Paths.FRRStateDir, def.FRRStateDir},
@@ -128,6 +129,7 @@ func (c *Config) applyDefaults() {
 		{&c.Units.DefaultKea6, du.DefaultKea6},
 		{&c.Units.DefaultRadvd, du.DefaultRadvd},
 		{&c.Units.DefaultFRR, du.DefaultFRR},
+		{&c.Units.DefaultChrony, du.DefaultChrony},
 	} {
 		if *p.v == "" {
 			*p.v = p.d
@@ -148,6 +150,9 @@ func (c *Config) applyDefaults() {
 	if c.Units.FRRFmt == "" {
 		c.Units.FRRFmt = du.FRRFmt
 	}
+	if c.Units.ChronyFmt == "" {
+		c.Units.ChronyFmt = du.ChronyFmt
+	}
 }
 
 func (c *Config) validate() error {
@@ -162,7 +167,7 @@ func (c *Config) validate() error {
 			return fmt.Errorf("allow_from %q: %w", a, err)
 		}
 	}
-	for _, f := range []string{c.Units.NamedFmt, c.Units.Kea4Fmt, c.Units.Kea6Fmt, c.Units.RadvdFmt, c.Units.FRRFmt} {
+	for _, f := range []string{c.Units.NamedFmt, c.Units.Kea4Fmt, c.Units.Kea6Fmt, c.Units.RadvdFmt, c.Units.FRRFmt, c.Units.ChronyFmt} {
 		if strings.Count(f, "%s") != 1 {
 			return fmt.Errorf("unit %q must contain exactly one %%s", f)
 		}

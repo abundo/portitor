@@ -177,6 +177,12 @@ func (c *Client) VRRP(ctx context.Context) (*agentapi.VRRPResponse, error) {
 	return &v, c.do(ctx, http.MethodGet, "/v1/vrrp", nil, &v)
 }
 
+// NTP returns the instances' NTP sources and statistics.
+func (c *Client) NTP(ctx context.Context) (*agentapi.NTPResponse, error) {
+	var n agentapi.NTPResponse
+	return &n, c.do(ctx, http.MethodGet, "/v1/ntp", nil, &n)
+}
+
 // BFD returns the instances' BFD sessions.
 func (c *Client) BFD(ctx context.Context) (*agentapi.BFDResponse, error) {
 	var b agentapi.BFDResponse

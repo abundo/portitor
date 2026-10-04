@@ -53,6 +53,9 @@ type Instance struct {
 	RA []RAInterface `json:"ra,omitempty"`
 	// NAT64, when set, translates IPv6 to IPv4 (stateful NAT64, Jool).
 	NAT64 *NAT64 `json:"nat64,omitempty"`
+	// NTP, when set, runs chrony: an NTP client, and a server on its
+	// interfaces.
+	NTP *NTP `json:"ntp,omitempty"`
 	// DynDNS clients keep records on a nameserver in step with the
 	// addresses of this instance's interfaces.
 	DynDNS []DynDNS `json:"dyndns,omitempty"`

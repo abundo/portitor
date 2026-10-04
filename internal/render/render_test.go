@@ -913,3 +913,43 @@ func TestIPListKey(t *testing.T) {
 		t.Error("keys collide")
 	}
 }
+
+func TestChronyConf(t *testing.T) {
+	in := &fwconfig.SampleDocument().Instances[0]
+	in.Default = true
+	conf := ChronyConf(in, DefaultPaths().Files(in))
+	for _, want := range []string{
+		"server time.cloudflare.com iburst nts\npool 2.debian.pool.ntp.org iburst\n",
+		"driftfile /var/lib/chrony/chrony.drift\n",
+		"cmdport 0\n",
+		"allow 192.168.1.0/24\nallow fd00:1::/64\n",
+	} {
+		if !strings.Contains(conf, want) {
+			t.Errorf("default: missing %q in\n%s", want, conf)
+		}
+	}
+	nft := Nftables(in, nil, DefaultPaths())
+	if !strings.Contains(nft, `iifname "eth1" udp dport 123`) {
+		t.Errorf("no ntp server rule in\n%s", nft)
+	}
+
+	in.Default = false
+	in.NTP.Allow = nil
+	conf = ChronyConf(in, DefaultPaths().Files(in))
+	for _, want := range []string{"pidfile /tmp/chronyd.pid\n", "bindcmdaddress /run/portitor/chrony/main/chronyd.sock\n", "allow all\n"} {
+		if !strings.Contains(conf, want) {
+			t.Errorf("virtual firewall: missing %q in\n%s", want, conf)
+		}
+	}
+	if strings.Contains(conf, "driftfile") {
+		t.Errorf("virtual firewall: driftfile in\n%s", conf)
+	}
+
+	in.NTP.Interfaces = nil
+	if conf := ChronyConf(in, DefaultPaths().Files(in)); strings.Contains(conf, "allow") {
+		t.Errorf("no interfaces: serves:\n%s", conf)
+	}
+	if nft := Nftables(in, nil, DefaultPaths()); strings.Contains(nft, "ntp server") {
+		t.Errorf("no interfaces: ntp server rule in\n%s", nft)
+	}
+}

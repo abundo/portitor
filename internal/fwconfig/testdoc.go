@@ -116,6 +116,11 @@ func SampleDocument() Document {
 					NAT64Prefix: NAT64WellKnownPrefix,
 				}},
 				NAT64: &NAT64{Prefix: NAT64WellKnownPrefix, Interfaces: []string{"eth1"}},
+				NTP: &NTP{
+					Servers:    []NTPServer{{Address: "time.cloudflare.com", IBurst: true, NTS: true}, {Address: "2.debian.pool.ntp.org", Pool: true, IBurst: true}},
+					Interfaces: []string{"eth1"},
+					Allow:      []string{"192.168.1.0/24", "fd00:1::/64"},
+				},
 				Certificates: []Certificate{{
 					Name: "www", Domains: []string{"www.example.com", "example.com"}, Email: "admin@example.com",
 					CA: "letsencrypt", KeyType: "ec256", Challenge: ChallengeHTTP01, Interface: "eth0",

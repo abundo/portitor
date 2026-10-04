@@ -595,8 +595,8 @@ func (a *Agent) placeLinks(ctx context.Context, doc fwconfig.Document) error {
 	return nil
 }
 
-// applyServices runs dnsmgr2 and starts/stops/reloads BIND, Kea, radvd
-// and FRR for an instance. The default instance's run under the distribution's own
+// applyServices runs dnsmgr2 and starts/stops/reloads BIND, Kea, radvd,
+// chrony and FRR for an instance. The default instance's run under the distribution's own
 // units, from the standard files (render.Paths.Files).
 func (a *Agent) applyServices(ctx context.Context, in *fwconfig.Instance, b *render.Bundle, changed map[string]bool) error {
 	files := a.cfg.Paths.Files(in)
@@ -651,7 +651,21 @@ func (a *Agent) applyServices(ctx context.Context, in *fwconfig.Instance, b *ren
 		a.disableService(ctx, in, named, files.NamedConf)
 	}
 
-	// Kea and radvd are rendered in full (no dnsmgr2).
+	if in.NTP != nil && !in.Default && !a.cfg.DryRun {
+		// portitor-chrony@.service mounts the socket's directory, which
+		// chronyd wants owned by its user and closed to others.
+		dir := filepath.Dir(files.ChronySocket)
+		if err := os.MkdirAll(dir, 0o770); err != nil {
+			return err
+		}
+		_ = os.Chmod(dir, 0o770)
+		for _, u := range chronyUsers {
+			chownTo(u, dir)
+		}
+	}
+
+	// Kea, radvd and chrony are rendered in full (no dnsmgr2). chronyd
+	// can't reload its config.
 	for _, svc := range []struct {
 		unit, conf string
 		on         bool
@@ -660,6 +674,7 @@ func (a *Agent) applyServices(ctx context.Context, in *fwconfig.Instance, b *ren
 		{a.cfg.Units.Kea4(in), files.Kea4, in.DHCP.Enabled, "restart"},
 		{a.cfg.Units.Kea6(in), files.Kea6, len(render.DHCP6Subnets(in)) > 0, "restart"},
 		{a.cfg.Units.Radvd(in), files.Radvd, len(in.RA) > 0, "reload-or-restart"},
+		{a.cfg.Units.Chrony(in), files.Chrony, in.NTP != nil, "restart"},
 	} {
 		if !svc.on {
 			a.disableService(ctx, in, svc.unit, svc.conf)

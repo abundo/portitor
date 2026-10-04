@@ -14,7 +14,7 @@ are in [README.md](README.md).
 | `cmd/portitor-web` | GUI/API binary: `start`, `migrate`, `createadmin`, `agent-url`, `bootstrap` (ISO first boot) |
 | `cmd/portitor-agent` | Agent daemon on the firewall: `start`, `init`, `render`, `netns-exec`; run as `portitor` (a symlink, `cli.go`) it is a read-only CLI (`show lldp neighbours`, `show ip neighbours`) over the agent's GET routes on the root-only socket `<run_dir>/agent.sock` |
 | `internal/fwconfig` | The desired-state document and `Validate()`. **The contract between web and agent.** |
-| `internal/render` | Pure functions: document → nftables, WireGuard, named.conf, Kea, dnsmgr2 config, FRR (`frr.go`: frr.conf with BGP, OSPF, VRRP and BFD, daemons, vtysh.conf) |
+| `internal/render` | Pure functions: document → nftables, WireGuard, named.conf, Kea, chrony.conf (`chrony.go`), dnsmgr2 config, FRR (`frr.go`: frr.conf with BGP, OSPF, VRRP and BFD, daemons, vtysh.conf) |
 | `internal/agent` | Agent: apply/reconcile, commit-confirm, DHCP and DHCPv6 (prefix delegation) clients, IP lists, task scheduler, packet log (NFLOG), DNS query log (BIND logs to the journal, followed with `journalctl`, filtered by the agent, `querylog.go`), WireGuard endpoint re-resolving, packet capture (tcpdump, streamed rate-limited), traceroute (`mtr --raw`, streamed as JSON lines, `trace.go`), LLDP (sent and heard on raw sockets, `lldp.go`), neighbours (ARP/ND, LLDP), NAT64 (a Jool instance per namespace, `nat64.go`), traffic shaping (CAKE, IFB devices for receiving, HTB classes for the rate limits that shape (`fwconfig.Instance.Shapers`) by packet mark `render.ShaperMark`; planned from `tc -j` output, `shaping.go`), BGP, OSPF, VRRP and BFD state (FRR's JSON through `vtysh`, `bgp.go`, `ospf.go`, `vrrp.go`, `bfd.go`), VRRP's macvlan devices (`vrrp.go`), status, API server |
 | `internal/dyndns` | DNS update client ("DNS update" in the GUI): RFC 2136 (from ifnsupdate), sent from the instance netns, or a DNS hosting provider's API through libdns (`providers.go`, matching `fwconfig.DNSProviders`), called from the host |
 | `internal/acme` | ACME certificates through lego: accounts, orders, the stored chain and key (`<state_dir>/certificates/`); the agent's `acme.go` schedules them and answers HTTP-01 in the instance netns, opening port 80 by the `acme_http` set (`render.ACMEHTTPSet`) |
@@ -256,6 +256,18 @@ the certificate portitor-web serves, chosen under Settings
   `prerouting_nat64` chain (priority mangle) drops the rest. The agent makes Jool's
   instance again when the NAT64 differs from `<state>/nat64.json` or it isn't running
   (`planNAT64`).
+- **NTP** (`fwconfig/ntp.go`, `render/chrony.go`): chrony per instance
+  (`instances.ntp_*`), its servers JSON. The default instance's chrony.service sets
+  the host's clock; a virtual firewall's `portitor-chrony@` runs `chronyd -x` (the
+  clock is the host's; netns-exec drops CAP_SYS_TIME). It answers clients on the
+  interfaces with `ntp_serve` (the auto input rule "ntp server", like
+  `dns_listen`), of those the `ntp_allow` prefixes (chrony `allow`; names expanded
+  by the builder, in `eachObjectRef`), or `allow all` when empty. chronyd can't
+  reload: a changed chrony.conf restarts it. The NTP page's Info tab is `GET
+  /v1/ntp` (`internal/agent/ntp.go`): chronyc on the host through each chronyd's
+  command socket (`InstanceFiles.ChronySocket`, a VF's in
+  `<run_dir>/chrony/<instance>`, made by the agent for the chrony user and
+  mounted into that instance's unit alone).
 - **Dual stack:** rule and NAT address lists may mix IPv4 and IPv6;
   `fwconfig.MatchFamilies` decides which versions a rule is rendered for, and
   validation uses the same function.

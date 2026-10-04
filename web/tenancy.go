@@ -317,6 +317,10 @@ func filterBFD(b *agentapi.BFDResponse, names map[string]bool) {
 	b.Instances = slices.DeleteFunc(b.Instances, func(x agentapi.BFDInstance) bool { return !names[x.Instance] })
 }
 
+func filterNTP(n *agentapi.NTPResponse, names map[string]bool) {
+	n.Instances = slices.DeleteFunc(n.Instances, func(x agentapi.NTPInstance) bool { return !names[x.Instance] })
+}
+
 func filterBGP(b *agentapi.BGPResponse, names map[string]bool) {
 	b.Instances = slices.DeleteFunc(b.Instances, func(x agentapi.BGPInstance) bool { return !names[x.Instance] })
 }

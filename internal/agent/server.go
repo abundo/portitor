@@ -66,6 +66,9 @@ func (a *Agent) routes() *http.ServeMux {
 	mux.HandleFunc("GET /v1/vrrp", func(w http.ResponseWriter, r *http.Request) {
 		writeJSONResponse(w, http.StatusOK, a.VRRP(r.Context()))
 	})
+	mux.HandleFunc("GET /v1/ntp", func(w http.ResponseWriter, r *http.Request) {
+		writeJSONResponse(w, http.StatusOK, a.NTP(r.Context()))
+	})
 	mux.HandleFunc("GET /v1/bfd", func(w http.ResponseWriter, r *http.Request) {
 		writeJSONResponse(w, http.StatusOK, a.BFD(r.Context()))
 	})

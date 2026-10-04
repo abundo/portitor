@@ -51,6 +51,7 @@ install-agent: portitor-agent
 	install -D -m 0644 deploy/systemd/portitor-kea4@.service $(DESTDIR)/etc/systemd/system/portitor-kea4@.service
 	install -D -m 0644 deploy/systemd/portitor-kea6@.service $(DESTDIR)/etc/systemd/system/portitor-kea6@.service
 	install -D -m 0644 deploy/systemd/portitor-radvd@.service $(DESTDIR)/etc/systemd/system/portitor-radvd@.service
+	install -D -m 0644 deploy/systemd/portitor-chrony@.service $(DESTDIR)/etc/systemd/system/portitor-chrony@.service
 	install -D -m 0644 deploy/systemd/portitor-frr@.service $(DESTDIR)/etc/systemd/system/portitor-frr@.service
 	test -e $(DESTDIR)/etc/portitor/agent.yaml || install -D -m 0600 deploy/agent.yaml $(DESTDIR)/etc/portitor/agent.yaml
 

@@ -949,3 +949,50 @@ type BFDPeerInfo struct {
 	RemoteReceiveInterval  int `json:"remote_receive_interval"`
 	RemoteTransmitInterval int `json:"remote_transmit_interval"`
 }
+
+// NTPResponse is the NTP state of the instances that run chrony.
+type NTPResponse struct {
+	Instances []NTPInstance `json:"instances"`
+}
+
+// NTPInstance is one instance's chronyd: its sources, how it keeps time
+// (tracking) and what it served (serverstats), the last two as chronyc
+// prints them. Error says why chronyd could not be asked.
+type NTPInstance struct {
+	Instance    string      `json:"instance"`
+	Error       string      `json:"error,omitempty"`
+	Sources     []NTPSource `json:"sources"`
+	Tracking    []NTPField  `json:"tracking"`
+	ServerStats []NTPField  `json:"server_stats"`
+}
+
+// NTPSource is a time source as chronyd has it. Times are in seconds,
+// Frequency and FreqSkew in ppm.
+type NTPSource struct {
+	Address string `json:"address"`
+	// Name is the server or pool name in chrony.conf the address is from;
+	// empty for an address configured as one (or chrony before 4.4).
+	Name    string  `json:"name,omitempty"`
+	Mode    string  `json:"mode"`  // server, peer, refclock
+	State   string  `json:"state"` // selected, combined, not combined, unusable, falseticker, too variable
+	Stratum int     `json:"stratum"`
+	Poll    float64 `json:"poll"`
+	// Reach is the register of the last 8 polls answered (0377: all).
+	Reach     int     `json:"reach"`
+	LastRx    int64   `json:"last_rx"`
+	Offset    float64 `json:"offset"`
+	Error     float64 `json:"error"`
+	Samples   int     `json:"samples"`
+	Span      int64   `json:"span"`
+	Frequency float64 `json:"frequency"`
+	FreqSkew  float64 `json:"freq_skew"`
+	StdDev    float64 `json:"std_dev"`
+	// Auth is NTS or SK (a symmetric key); empty when none.
+	Auth string `json:"auth,omitempty"`
+}
+
+// NTPField is one line of chronyc's output.
+type NTPField struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}

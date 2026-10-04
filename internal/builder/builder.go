@@ -644,6 +644,18 @@ func build(db *gorm.DB, generation int64, only map[string]bool) (*fwconfig.Docum
 			}
 		}
 
+		if mi.NtpEnabled {
+			in.NTP = &fwconfig.NTP{
+				Servers: slices.Clone([]fwconfig.NTPServer(mi.NtpServers)),
+				Allow:   expand("instance "+mi.Name+": ntp allow", objs.Prefixes, mi.NtpAllow),
+			}
+			for _, ifc := range in.Interfaces {
+				if mif, ok := ifaceByName(d.interfaces, mi.ID, ifc.Name); ok && mif.NtpServe {
+					in.NTP.Interfaces = append(in.NTP.Interfaces, ifc.Name)
+				}
+			}
+		}
+
 		for _, c := range d.dyndns {
 			if c.InstanceID != mi.ID || !c.Enabled {
 				continue

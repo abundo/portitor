@@ -278,6 +278,11 @@ func TestValidateCatchesProblems(t *testing.T) {
 		{"nat64 pool", func(d *Document) { d.Instances[0].NAT64.Pool4 = []string{"2001:db8::/64"} }, "invalid IPv4 pool prefix"},
 		{"nat64 pool host bits", func(d *Document) { d.Instances[0].NAT64.Pool4 = []string{"192.0.2.1/24"} }, "invalid IPv4 pool prefix"},
 		{"nat64 interface", func(d *Document) { d.Instances[0].NAT64.Interfaces = []string{"eth9"} }, `nat64: unknown interface "eth9"`},
+		{"ntp no servers", func(d *Document) { d.Instances[0].NTP.Servers = nil }, "ntp: no servers"},
+		{"ntp server injection", func(d *Document) { d.Instances[0].NTP.Servers[0].Address = "x\nallow all" }, "ntp: invalid server"},
+		{"ntp duplicate", func(d *Document) { d.Instances[0].NTP.Servers[1].Address = "time.cloudflare.com" }, "ntp: duplicate server"},
+		{"ntp interface", func(d *Document) { d.Instances[0].NTP.Interfaces = []string{"eth9"} }, `ntp: unknown interface "eth9"`},
+		{"ntp allow", func(d *Document) { d.Instances[0].NTP.Allow = []string{"all"} }, "ntp: invalid allow prefix"},
 		{"task duplicate", func(d *Document) { d.Tasks[1].Name = "crowdsec" }, "duplicate"},
 		{"dyndns short retry", func(d *Document) { d.Instances[0].DynDNS[0].RetryInterval = 1 }, "retry interval must be"},
 		// A zone may hold quotes and newlines: never an address.

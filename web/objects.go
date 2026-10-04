@@ -234,8 +234,9 @@ func eachObjectRef(tx *gorm.DB, visit func(where string, entry *string) bool) er
 		where := "virtual firewall " + in.Name + " DNS"
 		a, b := list(where, in.DnsForwarders), list(where, in.DnsAllowRecursion)
 		c := list(where+" query log", in.DnsQueryLogClients)
-		if a || b || c {
-			if err := save(&models.Instance{}, in.ID, map[string]any{"dns_forwarders": in.DnsForwarders, "dns_allow_recursion": in.DnsAllowRecursion, "dns_query_log_clients": in.DnsQueryLogClients}); err != nil {
+		n := list("virtual firewall "+in.Name+" NTP", in.NtpAllow)
+		if a || b || c || n {
+			if err := save(&models.Instance{}, in.ID, map[string]any{"dns_forwarders": in.DnsForwarders, "dns_allow_recursion": in.DnsAllowRecursion, "dns_query_log_clients": in.DnsQueryLogClients, "ntp_allow": in.NtpAllow}); err != nil {
 				return err
 			}
 		}

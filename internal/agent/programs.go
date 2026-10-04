@@ -41,6 +41,7 @@ var programs = []program{
 	{name: "kea-dhcp4", purpose: "DHCPv4 server (Kea)", needed: func(in *fwconfig.Instance) bool { return in.DHCP.Enabled }},
 	{name: "kea-dhcp6", purpose: "DHCPv6 server (Kea)", needed: func(in *fwconfig.Instance) bool { return len(render.DHCP6Subnets(in)) > 0 }},
 	{name: "radvd", purpose: "router advertisements (radvd)", needed: func(in *fwconfig.Instance) bool { return len(in.RA) > 0 }},
+	{name: "chronyd", purpose: "NTP (chrony)", needed: func(in *fwconfig.Instance) bool { return in.NTP != nil }},
 	{name: "jool", purpose: "NAT64 (Jool)", needed: func(in *fwconfig.Instance) bool { return in.NAT64 != nil }},
 	// FRR's daemons are in /usr/lib/frr, off the PATH; vtysh comes with them.
 	{name: "vtysh", purpose: "BGP, OSPF, VRRP and BFD (FRR)", needed: func(in *fwconfig.Instance) bool { return in.FRRRunning() }},

@@ -154,6 +154,7 @@ export const api = {
   agentOspf: () => http.get('/agent/ospf').then((r) => r.data),
   agentVrrp: () => http.get('/agent/vrrp').then((r) => r.data),
   agentBfd: () => http.get('/agent/bfd').then((r) => r.data),
+  agentNtp: () => http.get('/agent/ntp').then((r) => r.data),
   agentRuleCounters: () => http.get('/agent/rule-counters').then((r) => r.data),
   agentLogs: (after) => http.get('/agent/logs', { params: { after } }).then((r) => r.data),
   agentPacketLog: (after) =>

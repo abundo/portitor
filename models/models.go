@@ -12,6 +12,8 @@ import (
 	"errors"
 	"slices"
 	"time"
+
+	"github.com/abundo/portitor/internal/fwconfig"
 )
 
 type Base struct {
@@ -340,6 +342,12 @@ type Instance struct {
 	// IPv4 prefixes, or the outgoing interface's address when empty.
 	Nat64      bool       `json:"nat64"`
 	Nat64Pool4 StringList `json:"nat64_pool4"`
+	// NtpEnabled runs chrony with NtpServers as its time sources; it
+	// answers clients in NtpAllow (any when empty, hosts/prefixes by name)
+	// on the interfaces with NtpServe.
+	NtpEnabled bool                         `json:"ntp_enabled"`
+	NtpServers JSONList[fwconfig.NTPServer] `json:"ntp_servers"`
+	NtpAllow   StringList                   `json:"ntp_allow"`
 
 	DhcpEnabled    bool   `json:"dhcp_enabled"`
 	DhcpDomainName string `json:"dhcp_domain_name"`
@@ -400,6 +408,8 @@ type Interface struct {
 	// Xlat464 announces the instance's NAT64 prefix in the interface's
 	// router advertisements (PREF64), for clients with a 464XLAT CLAT.
 	Xlat464 bool `gorm:"column:xlat464" json:"xlat464"`
+	// NtpServe answers NTP clients on this interface (Instance.NtpAllow).
+	NtpServe bool `json:"ntp_serve"`
 	// ShapeEgress and ShapeIngress shape what the interface sends and
 	// receives with CAKE, in Mbit/s; 0 is not shaped.
 	ShapeEgress  int `json:"shape_egress"`

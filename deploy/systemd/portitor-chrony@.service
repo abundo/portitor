@@ -1,0 +1,46 @@
+# SPDX-FileCopyrightText: 2026 The Portitor contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# chrony (NTP client and server) for one Portitor instance, inside the
+# instance's network namespace. It keeps time without setting the clock
+# (-x), which is the host's: the default instance's chrony.service sets it.
+# Started and restarted by portitor-agent; do not enable by hand.
+[Unit]
+Description=NTP for Portitor instance %i
+After=portitor-agent.service
+PartOf=portitor-agent.service
+
+[Service]
+Type=simple
+# The PID file is in the private /tmp (chrony.conf): chronyd is PID 1
+# (PrivatePIDs), so a stale one would read as "already running".
+ExecStart=/usr/bin/portitor-agent netns-exec %i -- /usr/sbin/chronyd -d -x -f /etc/portitor/instances/%i/chrony.conf
+Restart=on-failure
+RestartSec=5
+RuntimeDirectory=portitor
+RuntimeDirectoryPreserve=yes
+# Multitenancy: an instance's daemon sees only its own files and processes.
+# The other instances' config and state are hidden, the rest of the system
+# is read-only, and it gets its own /tmp, IPC and PID namespaces.
+# netns-exec drops CAP_SYS_ADMIN and CAP_SYS_TIME and the like, so it can't
+# enter another instance's network namespace or set the clock either.
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateIPC=yes
+PrivatePIDs=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectProc=invisible
+TemporaryFileSystem=/etc/portitor /var/lib/portitor
+BindReadOnlyPaths=/etc/portitor/instances/%i
+BindReadOnlyPaths=/var/lib/portitor/instances/%i
+ReadWritePaths=/run/portitor
+# The command socket (chrony.conf bindcmdaddress), which the agent asks for
+# the sources and statistics: only the instance's own directory, made by the
+# agent, so one instance's chronyd can't command another's.
+TemporaryFileSystem=/run/portitor/chrony
+BindPaths=/run/portitor/chrony/%i

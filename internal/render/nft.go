@@ -574,6 +574,11 @@ func AutoInputRules(in *fwconfig.Instance) []AutoRule {
 		sort.Strings(ifs)
 		out = append(out, AutoRule{Service: "dns server", InInterfaces: ifs, Protocol: "tcp,udp", DstPort: 53})
 	}
+	if in.NTP != nil && len(in.NTP.Interfaces) > 0 {
+		ifs := append([]string(nil), in.NTP.Interfaces...)
+		sort.Strings(ifs)
+		out = append(out, AutoRule{Service: "ntp server", InInterfaces: ifs, Protocol: "udp", DstPort: fwconfig.NTPPort})
+	}
 	// HTTP-01 challenges come in on the certificates' interfaces; the
 	// rule matches only while one is being answered.
 	var acme []string
