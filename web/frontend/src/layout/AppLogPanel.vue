@@ -33,12 +33,16 @@ const tabs = [
 
 const body = ref(null)
 // A filter per tab that has one.
-const filters = ref({ packets: '', dns: '' })
+const filters = ref({ log: '', packets: '', dns: '' })
 const filter = computed({
   get: () => filters.value[state.tab] ?? '',
   set: (v) => (filters.value[state.tab] = v),
 })
-const placeholders = { packets: 'Filter: wan tcp 443', dns: 'Filter: 192.168.1.10 AAAA' }
+const placeholders = {
+  log: 'Filter: warn instance=office',
+  packets: 'Filter: wan tcp 443',
+  dns: 'Filter: 192.168.1.10 AAAA',
+}
 
 // Follow the tail unless paused. Watching the newest id (not the length)
 // keeps following once the buffer is full; the filter and the tab change
@@ -111,6 +115,10 @@ const vfName = computed(() =>
 )
 const ofVF = (lines, inst) => (vfName.value ? lines.filter((l) => inst(l) === vfName.value) : lines)
 const logLines = computed(() => ofVF(state.log.lines, (l) => l.attrs?.instance))
+// Agent log lines by level, message and attrs ("error wg0", "instance=office").
+const logText = (l) =>
+  [l.level, l.message, ...attrs(l).map(([k, v]) => `${k}=${v}`)].join(' ').toLowerCase()
+const logShown = computed(() => filtered(logLines.value, logText, filters.value.log))
 const packetLines = computed(() => ofVF(state.packets.lines, (p) => p.instance))
 const dnsLines = computed(() => ofVF(state.dns.lines, (q) => q.instance))
 
@@ -119,7 +127,13 @@ const packets = computed(() => filtered(packetLines.value, packetText, filters.v
 const queryText = (q) =>
   [q.instance, q.client, q.name, q.class, q.type, q.flags, q.server].join(' ').toLowerCase()
 const queries = computed(() => filtered(dnsLines.value, queryText, filters.value.dns))
-const shown = computed(() => (state.tab === 'dns' ? queries.value : packets.value))
+const shown = computed(
+  () => ({ log: logShown.value, packets: packets.value, dns: queries.value })[state.tab],
+)
+const total = computed(
+  () =>
+    ({ log: logLines.value, packets: packetLines.value, dns: dnsLines.value })[state.tab].length,
+)
 
 // The row that logged: a rule by number, or a locked row (policy,
 // invalid, or an auto rule by service).
@@ -192,16 +206,8 @@ onUnmounted(stop)
           @click="state.tab = t.value"
         />
       </div>
-      <SearchInput
-        v-if="state.tab !== 'log'"
-        v-model="filter"
-        :placeholder="placeholders[state.tab]"
-        size="xs"
-        class="w-56"
-      />
-      <span v-if="state.tab !== 'log' && filter" class="text-xs text-muted"
-        >{{ shown.length }} of {{ (state.tab === 'dns' ? dnsLines : packetLines).length }}</span
-      >
+      <SearchInput v-model="filter" :placeholder="placeholders[state.tab]" size="xs" class="w-56" />
+      <span v-if="filter" class="text-xs text-muted">{{ shown.length }} of {{ total }}</span>
       <UTooltip v-if="state.error" :text="state.error">
         <UBadge color="error" variant="subtle" size="sm" label="agent unreachable" />
       </UTooltip>
@@ -336,9 +342,11 @@ onUnmounted(stop)
       ref="body"
       class="min-h-0 flex-1 overflow-auto px-3 py-2 font-mono text-xs [overflow-anchor:none]"
     >
-      <div v-if="!logLines.length" class="text-muted">No log lines yet</div>
+      <div v-if="!logShown.length" class="text-muted">
+        {{ logLines.length ? 'No log lines match the filter' : 'No log lines yet' }}
+      </div>
       <div
-        v-for="line in logLines"
+        v-for="line in logShown"
         :key="line.id"
         class="flex flex-wrap gap-x-2"
         :class="levelClass(line.level)"
