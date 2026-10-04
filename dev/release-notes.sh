@@ -19,5 +19,9 @@ if [ -z "$(echo "$notes" | tr -d '[:space:]')" ]; then
 	echo "CHANGELOG.md has no section \"## $tag\"" >&2
 	exit 1
 fi
-# Without the blank lines around the section.
-echo "$notes" | sed -e '/./,$!d' | sed -e ':a' -e '/^\n*$/{$d;N;ba' -e '}'
+# Without the blank lines around the section, and with each list item's
+# wrapped lines joined: GitHub shows a release's line breaks as they are.
+echo "$notes" | sed -e '/./,$!d' | sed -e ':a' -e '/^\n*$/{$d;N;ba' -e '}' |
+	awk '/^  [^ ]/ && prev != "" { sub(/^ +/, ""); prev = prev " " $0; next }
+		{ if (started) print prev; prev = $0; started = 1 }
+		END { if (started) print prev }'
