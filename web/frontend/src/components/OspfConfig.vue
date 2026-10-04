@@ -111,7 +111,7 @@ const sources = [
   {
     source: 'static',
     label: 'Static',
-    hint: 'The static routes (Network > Routing > Static routes).',
+    hint: 'The static routes (Network > Routing > Static).',
   },
   { source: 'bgp', label: 'BGP', hint: "BGP's routes (Network > Routing > BGP)." },
 ]

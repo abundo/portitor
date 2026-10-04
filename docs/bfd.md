@@ -28,7 +28,7 @@ BFD is turned on in two places, and runs only where both say so:
    interface*, with the interface and its timers. This is the switch: disable the row
    (or delete it) and nothing uses BFD on that interface any more.
 2. **On what uses it**, with its *BFD* switch:
-   - a static route (*Network → Routing → Static routes*): its gateway is watched;
+   - a static route (*Network → Routing → Static*): its gateway is watched;
    - an OSPF interface (*Network → Routing → OSPF*, tab *Interfaces*): the
      neighbours on it are watched;
    - a BGP neighbour or peer group (*Network → Routing → BGP*): the neighbour is

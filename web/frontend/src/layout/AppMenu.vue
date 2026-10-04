@@ -47,8 +47,9 @@ const sections = computed(() => [
         label: 'Routing',
         icon: 'i-lucide-route',
         children: [
+          { label: 'Routing', icon: 'i-lucide-table', to: '/routing' },
           { label: 'Routing objects', icon: 'i-lucide-list-filter', to: '/routing-objects' },
-          { label: 'Static routes', icon: 'i-lucide-signpost', to: '/static-routes' },
+          { label: 'Static', icon: 'i-lucide-signpost', to: '/static-routes' },
           { label: 'BFD', icon: 'i-lucide-heart-pulse', to: '/bfd' },
           { label: 'VRRP', icon: 'i-lucide-git-fork', to: '/vrrp' },
           { label: 'OSPF', icon: 'i-lucide-waypoints', to: '/ospf' },

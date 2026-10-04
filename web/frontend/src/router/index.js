@@ -24,6 +24,7 @@ const router = createRouter({
         { path: 'links', component: () => import('@/views/LinksPage.vue') },
         { path: 'interfaces', component: () => import('@/views/InterfacesPage.vue') },
         { path: 'neighbours', component: () => import('@/views/NeighboursPage.vue') },
+        { path: 'routing', component: () => import('@/views/RoutingPage.vue') },
         { path: 'static-routes', component: () => import('@/views/RoutesPage.vue') },
         { path: 'routing-objects', component: () => import('@/views/RoutingObjectsPage.vue') },
         { path: 'bgp', component: () => import('@/views/BgpPage.vue') },

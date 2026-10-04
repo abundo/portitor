@@ -6,14 +6,17 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"net/netip"
 
 	"github.com/abundo/portitor/internal/agentapi"
+	"github.com/abundo/portitor/internal/fwconfig"
 )
 
 type RouteEntry = agentapi.RouteEntry
 
 // RoutingTable lists, for each instance of the applied document, the IPv4
-// and IPv6 routes of its main table that go out its interfaces.
+// and IPv6 routes of all its routing tables (main, local, and any other) that
+// go out its interfaces.
 func (a *Agent) RoutingTable(ctx context.Context) *agentapi.RoutingTableResponse {
 	resp := &agentapi.RoutingTableResponse{Routes: []RouteEntry{}}
 	a.mu.Lock()
@@ -22,13 +25,16 @@ func (a *Agent) RoutingTable(ctx context.Context) *agentapi.RoutingTableResponse
 	if doc == nil {
 		return resp
 	}
-	for _, in := range doc.Instances {
+	// Expanded, so the link ends are among the instances' interfaces.
+	d := doc.Expand()
+	owners := addressOwners(d)
+	for _, in := range d.Instances {
 		ifaces := map[string]bool{}
 		for _, ifc := range in.Interfaces {
 			ifaces[ifc.Name] = true
 		}
 		for _, fam := range []string{"-4", "-6"} {
-			out, err := a.bg.Run(ctx, in.NetnsName(), "ip", "-j", fam, "route", "show")
+			out, err := a.bg.Run(ctx, in.NetnsName(), "ip", "-j", fam, "route", "show", "table", "all")
 			if err != nil {
 				continue
 			}
@@ -37,6 +43,11 @@ func (a *Agent) RoutingTable(ctx context.Context) *agentapi.RoutingTableResponse
 				// interfaces that are not the firewall's (docker, ...).
 				if r.Interface == "" || ifaces[r.Interface] {
 					r.Instance = in.Name
+					if gw, err := netip.ParseAddr(r.Gateway); err == nil {
+						if o := owners[gw]; o != "" && o != in.Name {
+							r.PeerInstance = o
+						}
+					}
 					resp.Routes = append(resp.Routes, r)
 				}
 			}
@@ -45,11 +56,29 @@ func (a *Agent) RoutingTable(ctx context.Context) *agentapi.RoutingTableResponse
 	return resp
 }
 
+// addressOwners maps each interface address of the document (link ends
+// included) to its instance, so a route's gateway can name the VF it leads
+// to. Delegated addresses, known only once resolved, are left out.
+func addressOwners(d fwconfig.Document) map[netip.Addr]string {
+	m := map[netip.Addr]string{}
+	for _, in := range d.Instances {
+		for _, ifc := range in.Interfaces {
+			for _, a := range ifc.Addresses {
+				if p, err := netip.ParsePrefix(a); err == nil {
+					m[p.Addr()] = in.Name
+				}
+			}
+		}
+	}
+	return m
+}
+
 // parseIPRoute reads `ip -j route show`.
 func parseIPRoute(data []byte, v6 bool) []RouteEntry {
 	var entries []struct {
 		Type     string `json:"type"`
 		Dst      string `json:"dst"`
+		Table    string `json:"table"`
 		Gateway  string `json:"gateway"`
 		Dev      string `json:"dev"`
 		Protocol string `json:"protocol"`
@@ -73,6 +102,7 @@ func parseIPRoute(data []byte, v6 bool) []RouteEntry {
 		r := RouteEntry{
 			Family:      fam,
 			Type:        e.Type,
+			Table:       e.Table,
 			Destination: e.Dst,
 			Gateway:     e.Gateway,
 			Interface:   e.Dev,
@@ -80,6 +110,9 @@ func parseIPRoute(data []byte, v6 bool) []RouteEntry {
 			Scope:       e.Scope,
 			Source:      e.PrefSrc,
 			Metric:      e.Metric,
+		}
+		if r.Table == "" {
+			r.Table = "main"
 		}
 		if r.Type == "" {
 			r.Type = "unicast"

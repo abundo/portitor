@@ -521,20 +521,25 @@ type NeighboursResponse struct {
 }
 
 // RoutingTableResponse is the instances' IPv4 and IPv6 routing tables
-// (the main table, from `ip route`).
+// (all tables, from `ip route show table all`).
 type RoutingTableResponse struct {
 	Routes []RouteEntry `json:"routes"`
 }
 
-// RouteEntry is a route of an instance's main routing table.
+// RouteEntry is a route of one of an instance's routing tables.
 type RouteEntry struct {
 	Instance    string `json:"instance"`
 	Family      string `json:"family"` // ipv4 or ipv6
+	Table       string `json:"table"`  // main, local, or a name or number
 	Type        string `json:"type"`   // unicast, unreachable, blackhole, ...
 	Destination string `json:"destination"`
 	Gateway     string `json:"gateway,omitempty"`
-	Interface   string `json:"interface,omitempty"`
-	// Protocol is who added it: kernel, static, dhcp, ra, 99 (the agent), ...
+	// PeerInstance is the other instance whose interface has the gateway's
+	// address (a route learned from another VF over a link).
+	PeerInstance string `json:"peer_instance,omitempty"`
+	Interface    string `json:"interface,omitempty"`
+	// Protocol is who added it: kernel, static, dhcp, ra, bgp, ospf, 99
+	// (the agent), ...
 	Protocol string `json:"protocol,omitempty"`
 	Scope    string `json:"scope,omitempty"`
 	Source   string `json:"source,omitempty"`
