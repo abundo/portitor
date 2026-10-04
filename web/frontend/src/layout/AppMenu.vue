@@ -53,6 +53,7 @@ const sections = computed(() => [
           { label: 'BGP', icon: 'i-lucide-share-2', to: '/bgp' },
           { label: 'OSPF', icon: 'i-lucide-waypoints', to: '/ospf' },
           { label: 'VRRP', icon: 'i-lucide-git-fork', to: '/vrrp' },
+          { label: 'BFD', icon: 'i-lucide-heart-pulse', to: '/bfd' },
         ],
       },
       { label: 'Neighbours', icon: 'i-lucide-network', to: '/neighbours' },

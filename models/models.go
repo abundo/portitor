@@ -437,6 +437,9 @@ type Route struct {
 	Gateway     string `json:"gateway"`
 	InterfaceID *uint  `json:"interface_id"`
 	Metric      int    `json:"metric"`
+	// Bfd: withdrawn while the BFD session to the gateway is down, when
+	// the gateway's interface has BFD (fwconfig.Route.BFD).
+	Bfd         bool   `json:"bfd"`
 	Enabled     bool   `json:"enabled"`
 	Description string `json:"description"`
 }
@@ -828,6 +831,6 @@ func All() []any {
 		&AddressObject{}, &DnsSoaTemplate{}, &DnsDnssecPolicy{}, &DnsTemplate{}, &KnownInterface{},
 		&DyndnsClient{}, &DyndnsRecord{}, &Certificate{}, &IpList{}, &Task{}, &Service{}, &RateLimit{}, &ObjectFolder{}, &Role{}, &RoleMember{}, &RoleInstance{},
 		&RoutePrefixList{}, &RouteAsPathList{}, &RouteCommunityList{}, &RouteMap{}, &BgpConfig{}, &BgpPeerGroup{}, &BgpNeighbor{},
-		&OspfConfig{}, &OspfInterface{}, &VrrpRouter{},
+		&OspfConfig{}, &OspfInterface{}, &VrrpRouter{}, &BfdInterface{},
 	}
 }

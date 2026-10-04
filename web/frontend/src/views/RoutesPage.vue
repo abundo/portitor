@@ -97,6 +97,7 @@ const columns = [
   { key: 'gateway', label: 'Gateway', class: 'font-mono' },
   { key: 'interface_id', label: 'Interface', format: (r) => ifaceName(r.interface_id) },
   { key: 'metric', label: 'Metric' },
+  { key: 'bfd', label: 'BFD' },
   { key: 'enabled', label: 'Enabled' },
   { key: 'description', label: 'Description' },
 ]
@@ -126,7 +127,13 @@ const fields = [
     key: 'metric',
     label: 'Metric',
     type: 'number',
-    hint: 'DHCP default routes use metric 100, so a static default with a lower metric wins.',
+    hint: 'DHCP default routes use metric 100, so a static default with a lower metric wins. With BFD: FRR’s administrative distance (0-255).',
+  },
+  {
+    key: 'bfd',
+    label: 'BFD',
+    type: 'switch',
+    hint: 'Withdraws the route while BFD loses the gateway, when the gateway’s interface has BFD (Routing → BFD). The route is then FRR’s.',
   },
   { key: 'enabled', label: 'Enabled', type: 'switch' },
   { key: 'description', label: 'Description' },
@@ -144,7 +151,7 @@ const fields = [
           :params="{ instance_id: store.currentId }"
           :columns="columns"
           :fields="fields"
-          :defaults="{ enabled: true, metric: 0 }"
+          :defaults="{ enabled: true, metric: 0, bfd: false }"
           new-label="New route"
           :item-name="(r) => `route ${r.destination}`"
         />

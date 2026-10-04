@@ -42,7 +42,7 @@ var programs = []program{
 	{name: "kea-dhcp6", purpose: "DHCPv6 server (Kea)", needed: func(in *fwconfig.Instance) bool { return len(render.DHCP6Subnets(in)) > 0 }},
 	{name: "radvd", purpose: "router advertisements (radvd)", needed: func(in *fwconfig.Instance) bool { return len(in.RA) > 0 }},
 	// FRR's daemons are in /usr/lib/frr, off the PATH; vtysh comes with them.
-	{name: "vtysh", purpose: "BGP, OSPF and VRRP (FRR)", needed: func(in *fwconfig.Instance) bool { return in.FRRRunning() }},
+	{name: "vtysh", purpose: "BGP, OSPF, VRRP and BFD (FRR)", needed: func(in *fwconfig.Instance) bool { return in.FRRRunning() }},
 }
 
 // lookPath is exec.LookPath, replaceable in tests.

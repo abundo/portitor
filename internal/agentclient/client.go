@@ -169,6 +169,12 @@ func (c *Client) VRRP(ctx context.Context) (*agentapi.VRRPResponse, error) {
 	return &v, c.do(ctx, http.MethodGet, "/v1/vrrp", nil, &v)
 }
 
+// BFD returns the instances' BFD sessions.
+func (c *Client) BFD(ctx context.Context) (*agentapi.BFDResponse, error) {
+	var b agentapi.BFDResponse
+	return &b, c.do(ctx, http.MethodGet, "/v1/bfd", nil, &b)
+}
+
 // OSPF returns the OSPF state of the instances that run it.
 func (c *Client) OSPF(ctx context.Context) (*agentapi.OSPFResponse, error) {
 	var o agentapi.OSPFResponse

@@ -175,11 +175,14 @@ func ifaceLists(tx *gorm.DB, instanceID uint, zones bool, visit func(where strin
 // renameIfaceRefs rewrites old to name in the instance's rule lists and,
 // for an interface (zones true), in its interface zones.
 func renameIfaceRefs(tx *gorm.DB, instanceID uint, old, name string, zones bool) error {
-	// OSPF and VRRP run on interfaces and link ends.
+	// OSPF, VRRP and BFD run on interfaces and link ends.
 	if err := tx.Model(&models.OspfInterface{}).Where("instance_id = ? AND name = ?", instanceID, old).UpdateColumn("name", name).Error; err != nil {
 		return err
 	}
 	if err := tx.Model(&models.VrrpRouter{}).Where("instance_id = ? AND interface = ?", instanceID, old).UpdateColumn("interface", name).Error; err != nil {
+		return err
+	}
+	if err := tx.Model(&models.BfdInterface{}).Where("instance_id = ? AND interface = ?", instanceID, old).UpdateColumn("interface", name).Error; err != nil {
 		return err
 	}
 	if zones {
@@ -243,9 +246,13 @@ func refuseIfaceInUse(tx *gorm.DB, instanceID uint, name string) error {
 }
 
 // removeIface handles an interface or link end leaving an instance: it is
-// refused while rules use the name, and dropped from interface zones.
+// refused while rules use the name, and dropped from interface zones; its
+// BFD settings go with it.
 func removeIface(tx *gorm.DB, instanceID uint, name string) error {
 	if err := refuseIfaceInUse(tx, instanceID, name); err != nil {
+		return err
+	}
+	if err := tx.Where("instance_id = ? AND interface = ?", instanceID, name).Delete(&models.BfdInterface{}).Error; err != nil {
 		return err
 	}
 	var zs []models.InterfaceZone

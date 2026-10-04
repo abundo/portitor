@@ -1241,6 +1241,26 @@ func (s *Server) handleAgentVRRP(c *echo.Context) error {
 	return c.JSON(http.StatusOK, v)
 }
 
+// handleAgentBFD passes on the instances' BFD sessions, for the BFD page.
+func (s *Server) handleAgentBFD(c *echo.Context) error {
+	a, _, err := s.agent()
+	if err != nil {
+		return agentError(c, err)
+	}
+	b, err := a.BFD(c.Request().Context())
+	if err != nil {
+		return agentError(c, err)
+	}
+	names, err := s.readableInstanceNames(c)
+	if err != nil {
+		return err
+	}
+	if names != nil {
+		filterBFD(b, names)
+	}
+	return c.JSON(http.StatusOK, b)
+}
+
 // handleAgentRuleCounters passes on the traffic per rule (by rule id), for
 // the Rules page.
 func (s *Server) handleAgentRuleCounters(c *echo.Context) error {

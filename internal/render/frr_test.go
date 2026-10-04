@@ -328,3 +328,56 @@ func TestVRRPAutoRules(t *testing.T) {
 		}
 	}
 }
+
+func TestFRRBFD(t *testing.T) {
+	doc := fwconfig.SampleDocument()
+	in := doc.Instance("guest")
+	in.BFD = []fwconfig.BFDInterface{{Name: "lk-main", DetectMultiplier: 5, ReceiveInterval: 100, TransmitInterval: 150, Passive: true}}
+	in.Routes[0].BFD = true
+	in.BGP.PeerGroups[0].BFD = true
+	in.BGP.Neighbors[1].BFD = true // not on an interface with BFD
+	in.OSPF.Interfaces[0].BFD = true
+	in.OSPF6.Interfaces[0].BFD = true
+	in.BGP.Redistribute = append(in.BGP.Redistribute, fwconfig.BGPRedistribute{Family: "ipv4", Source: fwconfig.RedistStatic})
+	b, err := Render(doc, Options{Paths: DefaultPaths(), Units: DefaultUnits()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	conf := mustFile(t, b, "/etc/portitor/instances/guest/frr/frr.conf")
+	for _, want := range []string{
+		"bfd\n profile if-lk-main\n  detect-multiplier 5\n  receive-interval 100\n  transmit-interval 150\n  passive-mode\n exit\n !\nexit\n",
+		"ip route 0.0.0.0/0 10.255.0.1 bfd profile if-lk-main\n",
+		" ip ospf bfd\n ip ospf bfd profile if-lk-main\n",
+		" ipv6 ospf6 bfd\n ipv6 ospf6 bfd profile if-lk-main\n",
+		" neighbor 10.255.0.1 bfd\n neighbor 10.255.0.1 bfd profile if-lk-main\n",
+		"  redistribute kernel\n  redistribute static\n",
+		// OSPF's redistribute static takes staticd's routes too.
+		" redistribute kernel metric 50 metric-type 1 route-map connected\n redistribute static metric 50 metric-type 1 route-map connected\n",
+	} {
+		if !strings.Contains(conf, want) {
+			t.Errorf("frr.conf lacks %q:\n%s", want, conf)
+		}
+	}
+	if strings.Contains(conf, "2001:db8::1 bfd") || strings.Contains(conf, "upstream bfd") {
+		t.Errorf("BFD off its interfaces, or on a peer group:\n%s", conf)
+	}
+	daemons := mustFile(t, b, "/etc/portitor/instances/guest/frr/daemons")
+	if !strings.Contains(daemons, "bfdd=yes\n") || strings.Count(daemons, "bfdd=") != 1 {
+		t.Errorf("daemons:\n%s", daemons)
+	}
+	nft := mustFile(t, b, "/etc/portitor/instances/guest/nftables.nft")
+	for _, want := range []string{
+		`iifname "lk-main" udp dport 3784 accept comment "auto: bfd"`,
+		`oifname "lk-main" udp dport 3784 accept comment "auto: bfd"`,
+	} {
+		if !strings.Contains(nft, want) {
+			t.Errorf("nftables lacks %q", want)
+		}
+	}
+
+	// Without BFD the same document renders as before.
+	plain := mustFile(t, sampleBundle(t), "/etc/portitor/instances/guest/frr/frr.conf")
+	if strings.Contains(plain, "bfd") {
+		t.Errorf("BFD without BFD interfaces:\n%s", plain)
+	}
+}

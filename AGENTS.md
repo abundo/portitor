@@ -14,8 +14,8 @@ are in [README.md](README.md).
 | `cmd/portitor-web` | GUI/API binary: `start`, `migrate`, `createadmin`, `agent-url`, `bootstrap` (ISO first boot) |
 | `cmd/portitor-agent` | Agent daemon on the firewall: `start`, `init`, `render`, `netns-exec`; run as `portitor` (a symlink, `cli.go`) it is a read-only CLI (`show lldp neighbours`, `show ip neighbours`) over the agent's GET routes on the root-only socket `<run_dir>/agent.sock` |
 | `internal/fwconfig` | The desired-state document and `Validate()`. **The contract between web and agent.** |
-| `internal/render` | Pure functions: document → nftables, WireGuard, named.conf, Kea, dnsmgr2 config, FRR (`frr.go`: frr.conf with BGP, OSPF and VRRP, daemons, vtysh.conf) |
-| `internal/agent` | Agent: apply/reconcile, commit-confirm, DHCP and DHCPv6 (prefix delegation) clients, IP lists, task scheduler, packet log (NFLOG), DNS query log (BIND logs to the journal, followed with `journalctl`, filtered by the agent, `querylog.go`), WireGuard endpoint re-resolving, packet capture (tcpdump, streamed rate-limited), traceroute (`mtr --raw`, streamed as JSON lines, `trace.go`), LLDP (sent and heard on raw sockets, `lldp.go`), neighbours (ARP/ND, LLDP), traffic shaping (CAKE, IFB devices for receiving, HTB classes for the rate limits that shape (`fwconfig.Instance.Shapers`) by packet mark `render.ShaperMark`; planned from `tc -j` output, `shaping.go`), BGP, OSPF and VRRP state (FRR's JSON through `vtysh`, `bgp.go`, `ospf.go`, `vrrp.go`), VRRP's macvlan devices (`vrrp.go`), status, API server |
+| `internal/render` | Pure functions: document → nftables, WireGuard, named.conf, Kea, dnsmgr2 config, FRR (`frr.go`: frr.conf with BGP, OSPF, VRRP and BFD, daemons, vtysh.conf) |
+| `internal/agent` | Agent: apply/reconcile, commit-confirm, DHCP and DHCPv6 (prefix delegation) clients, IP lists, task scheduler, packet log (NFLOG), DNS query log (BIND logs to the journal, followed with `journalctl`, filtered by the agent, `querylog.go`), WireGuard endpoint re-resolving, packet capture (tcpdump, streamed rate-limited), traceroute (`mtr --raw`, streamed as JSON lines, `trace.go`), LLDP (sent and heard on raw sockets, `lldp.go`), neighbours (ARP/ND, LLDP), traffic shaping (CAKE, IFB devices for receiving, HTB classes for the rate limits that shape (`fwconfig.Instance.Shapers`) by packet mark `render.ShaperMark`; planned from `tc -j` output, `shaping.go`), BGP, OSPF, VRRP and BFD state (FRR's JSON through `vtysh`, `bgp.go`, `ospf.go`, `vrrp.go`, `bfd.go`), VRRP's macvlan devices (`vrrp.go`), status, API server |
 | `internal/dyndns` | DNS update client ("DNS update" in the GUI): RFC 2136 (from ifnsupdate), sent from the instance netns, or a DNS hosting provider's API through libdns (`providers.go`, matching `fwconfig.DNSProviders`), called from the host |
 | `internal/acme` | ACME certificates through lego: accounts, orders, the stored chain and key (`<state_dir>/certificates/`); the agent's `acme.go` schedules them and answers HTTP-01 in the instance netns, opening port 80 by the `acme_http` set (`render.ACMEHTTPSet`) |
 | `internal/nftimport` | nftables file (`nft -j list ruleset`, read by the agent's `POST /v1/nftables/parse` in a new network namespace, `nftparse.go`) → rules, NAT rules, hosts/prefixes, services, and what it leaves out, with jumped-to chains inlined in groups; written by `web/nftimport.go` through the CRUD's `prepare*` checks, a preview being the same transaction rolled back |
@@ -30,7 +30,7 @@ are in [README.md](README.md).
 | `internal/netobj` | Named hosts/prefixes (`address_objects`): name checks and expansion |
 | `internal/dbmigrate` | Opens the SQLite database; goose migrations (the schema's source of truth) |
 | `models` | GORM mapping |
-| `web` | Echo v5 server (`server.go`: routes): auth, generic CRUD (`crud.go`), entry validation (`resources.go`), deploy handlers (`handlers.go`), Revert snapshots (`revert.go`), tenancy (`tenancy.go`), roles (`roles.go`, `access.go`), rename/delete reference keeping (`objects.go`, `services.go`, `ratelimits.go`, `ifzones.go`, `bgp.go`, `ospf.go`, `vrrp.go`, `delegated.go`), folders for hosts and IP lists (`folders.go`, GUI only), agent proxies (`console.go`, `capture.go`, `trace.go`, `connections.go`), WireGuard config import (`wgimport.go`), backup/restore (`backup.go`), `web.yaml` (`config.go`) |
+| `web` | Echo v5 server (`server.go`: routes): auth, generic CRUD (`crud.go`), entry validation (`resources.go`), deploy handlers (`handlers.go`), Revert snapshots (`revert.go`), tenancy (`tenancy.go`), roles (`roles.go`, `access.go`), rename/delete reference keeping (`objects.go`, `services.go`, `ratelimits.go`, `ifzones.go`, `bgp.go`, `ospf.go`, `vrrp.go`, `bfd.go`, `delegated.go`), folders for hosts and IP lists (`folders.go`, GUI only), agent proxies (`console.go`, `capture.go`, `trace.go`, `connections.go`), WireGuard config import (`wgimport.go`), backup/restore (`backup.go`), `web.yaml` (`config.go`) |
 | `web/frontend` | Vue SPA; `CrudPage.vue` drives most pages from field/column schemas |
 | `docs` | User guides; every `docs/*.md` is bundled into the GUI's Help page (`src/docs.js`), and links between them stay in the GUI |
 | `deploy` | systemd units and example configs |
@@ -112,7 +112,8 @@ docs and user-facing messages.
   that closes an interface to the firewall keeps the DHCP and DNS enabled on it.
   The output chain has auto accepts too, before the user's rules: the BGP sessions
   FRR opens to its neighbours (TCP 179), what OSPF sends (IP protocol 89,
-  `render.OSPFOutputMatches`) and VRRP's advertisements (IP protocol 112).
+  `render.OSPFOutputMatches`), VRRP's advertisements (IP protocol 112) and BFD's
+  control packets (UDP 3784, on the interfaces with BFD).
 - **The agent owns** the `inet firewall` table in each namespace, every `fw-*`
   namespace, routes with `proto 99`, root-namespace virtual interfaces listed in
   `managed.json`, and the root and ingress qdiscs of its instances' interfaces with
@@ -205,9 +206,9 @@ the certificate portitor-web serves, chosen under Settings
   (`eachRoutingRef`), deleting one in use is refused, a row never moves to another
   instance, and a new reference field goes in `eachRoutingRef`. Off (the default),
   the builder leaves BGP out of the document; the objects are left out unless BGP
-  or OSPF is on (`Instance.FRRRunning`), and with neither (nor VRRP) the agent stops FRR. A
+  or OSPF is on (`Instance.FRRRunning`), and with neither (nor VRRP or BFD) the agent stops FRR. A
   neighbour's update source may name an interface; renaming the interface
-  rewrites it (`renameIfaceRefs`). FRR runs zebra, bgpd, ospfd, ospf6d and vrrpd as the
+  rewrites it (`renameIfaceRefs`). FRR runs zebra, staticd, bgpd, ospfd, ospf6d, vrrpd and bfdd as the
   instance needs them (the daemons file); static routes stay the agent's (kernel
   routes), so "redistribute static" renders as `redistribute kernel`.
 - **OSPF** (`web/ospf.go`) is per instance and version (2: OSPFv2, IPv4,
@@ -226,6 +227,16 @@ the certificate portitor-web serves, chosen under Settings
   the addresses as /32 or /128, random link-local), created protodown so vrrpd
   alone turns it on, and sets `arp_ignore` 1 on its interface
   (`internal/agent/vrrp.go`). A disabled row is shut down in FRR, not left out.
+- **BFD** (`web/bfd.go`, `fwconfig/bfd.go`) is per instance: `bfd_interfaces`, by
+  interface name (link ends included; `renameIfaceRefs` rewrites it, removing the
+  interface removes it), each a bfdd profile (`fwconfig.BFDProfile`). Static routes,
+  OSPF interfaces and BGP neighbours and peer groups have a `bfd` flag, used only on
+  an interface with BFD (`Instance.RouteBFD`, `NeighborBFD`, `BFDOn`; a disabled row
+  is left out, so it is the switch); a BGP neighbour gets its peer group's flag per
+  neighbour, never on the group in frr.conf. A static route with BFD is staticd's
+  (frr.conf `ip route ... bfd profile`, its metric the distance), not the agent's
+  kernel route (`Instance.KernelRoutes`), so "redistribute static" then also renders
+  `redistribute static`.
 - **Dual stack:** rule and NAT address lists may mix IPv4 and IPv6;
   `fwconfig.MatchFamilies` decides which versions a rule is rendered for, and
   validation uses the same function.

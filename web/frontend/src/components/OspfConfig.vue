@@ -132,6 +132,7 @@ const ifColumns = computed(() => [
   { key: 'name', label: 'Interface', format: (i) => ifaceText(i.name) },
   { key: 'area', label: 'Area', class: 'font-mono' },
   { key: 'passive', label: 'Passive' },
+  { key: 'bfd', label: 'BFD' },
   { key: 'cost', label: 'Cost', format: (i) => (i.cost ? String(i.cost) : 'auto') },
   {
     key: 'network_type',
@@ -186,6 +187,12 @@ const ifFields = computed(() => [
     hint: "Empty: the interface's. Point-to-point skips the DR election (links, tunnels).",
   },
   ...(v2.value ? [{ key: 'auth_key', label: 'MD5 key', type: 'custom' }] : []),
+  {
+    key: 'bfd',
+    label: 'BFD',
+    type: 'switch',
+    hint: 'Detects a lost neighbour with BFD, in a fraction of the dead interval, when the interface has BFD (Routing → BFD).',
+  },
 ])
 const ifDefaults = computed(() => ({
   version: props.version,
@@ -198,6 +205,7 @@ const ifDefaults = computed(() => ({
   priority: null,
   network_type: '',
   auth_key_id: 0,
+  bfd: false,
 }))
 </script>
 

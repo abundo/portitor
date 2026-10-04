@@ -175,7 +175,50 @@ func cliCommand() *cobra.Command {
 			return nil
 		},
 	})
+	show.AddCommand(&cobra.Command{
+		Use:   "bfd",
+		Short: "BFD sessions and their state",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
+			defer cancel()
+			v, err := client().BFD(ctx)
+			if err != nil {
+				return fmt.Errorf("%w (is portitor-agent running, and are you root?)", err)
+			}
+			var rows []agentapi.BFDInstance
+			for _, in := range v.Instances {
+				if instance == "" || in.Instance == instance {
+					rows = append(rows, in)
+				}
+			}
+			if asJSON {
+				return printJSON(cmd.OutOrStdout(), rows)
+			}
+			printBFD(cmd.OutOrStdout(), rows)
+			return nil
+		},
+	})
 	return root
+}
+
+func printBFD(w io.Writer, rows []agentapi.BFDInstance) {
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "INSTANCE\tINTERFACE\tPEER\tSTATUS\tUPTIME/DOWNTIME\tRX/TX (ms)\tMULTIPLIER\tDIAGNOSTIC")
+	for _, in := range rows {
+		if in.Error != "" {
+			fmt.Fprintf(tw, "%s\t\t\t%s\t\t\t\t\n", in.Instance, clean(in.Error))
+		}
+		for _, p := range in.Peers {
+			t := p.Uptime
+			if p.Status != "up" {
+				t = p.Downtime
+			}
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%d/%d\t%d\t%s\n", in.Instance, clean(p.Interface), clean(p.Peer), clean(p.Status),
+				time.Duration(t)*time.Second, p.ReceiveInterval, p.TransmitInterval, p.DetectMultiplier, clean(p.Diagnostic))
+		}
+	}
+	tw.Flush()
 }
 
 func printVRRP(w io.Writer, rows []agentapi.VRRPInstance) {

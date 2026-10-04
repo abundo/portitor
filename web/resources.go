@@ -500,6 +500,12 @@ func prepareRoute(tx *gorm.DB, r, _ *models.Route) error {
 	if r.Gateway == "" && r.InterfaceID == nil {
 		return bad("a route needs a gateway or an interface")
 	}
+	if r.Bfd && r.Gateway == "" {
+		return bad("BFD watches the gateway: a route with BFD needs one")
+	}
+	if r.Bfd && r.Metric > 255 {
+		return bad("with BFD, the metric is FRR's administrative distance: 0-255")
+	}
 	return nil
 }
 

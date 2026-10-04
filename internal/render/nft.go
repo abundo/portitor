@@ -186,6 +186,10 @@ func Nftables(in *fwconfig.Instance, lockout *AntiLockout, paths Paths) string {
 	if ifs := VRRPInterfaces(in); len(ifs) > 0 {
 		fmt.Fprintf(b, "\t\toifname %s %s accept %s\n", quotedSet(ifs), vrrpProto, comment("auto", VRRPService))
 	}
+	// BFD control packets bfdd sends.
+	if ifs := BFDInterfaces(in); len(ifs) > 0 {
+		fmt.Fprintf(b, "\t\toifname %s udp dport %d accept %s\n", quotedSet(ifs), fwconfig.BFDPort, comment("auto", BFDService))
+	}
 	// The BGP sessions FRR opens to its neighbours.
 	if addrs := BGPNeighborAddrs(in); len(addrs) > 0 {
 		v4, v6 := splitFamilies(addrs)
@@ -569,7 +573,27 @@ func AutoInputRules(in *fwconfig.Instance) []AutoRule {
 	if ifs := VRRPInterfaces(in); len(ifs) > 0 {
 		out = append(out, AutoRule{Service: VRRPService, InInterfaces: ifs, Protocol: VRRPService})
 	}
+	// BFD control packets on the interfaces with BFD.
+	if ifs := BFDInterfaces(in); len(ifs) > 0 {
+		out = append(out, AutoRule{Service: BFDService, InInterfaces: ifs, Protocol: "udp", DstPort: fwconfig.BFDPort})
+	}
 	return out
+}
+
+// BFDService is the BFD auto rules' service.
+const BFDService = "bfd"
+
+// BFDInterfaces are the interfaces with BFD, sorted, with their VRRP
+// devices.
+func BFDInterfaces(in *fwconfig.Instance) []string {
+	var out []string
+	for _, b := range in.BFD {
+		out = append(out, b.Name)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return in.AddVRRPDevices(out)
 }
 
 // VRRPService is the VRRP auto rules' service and protocol.

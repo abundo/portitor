@@ -32,6 +32,7 @@ export const bgpNeighbors = crud('/bgp/neighbors')
 export const ospfConfig = crud('/ospf/config')
 export const ospfInterfaces = crud('/ospf/interfaces')
 export const vrrpRouters = crud('/vrrp/routers')
+export const bfdInterfaces = crud('/bfd/interfaces')
 export const rules = crud('/rules')
 export const nat = crud('/nat')
 export const ipamPrefixes = crud('/ipam/prefixes')
@@ -147,6 +148,7 @@ export const api = {
   agentBgp: () => http.get('/agent/bgp').then((r) => r.data),
   agentOspf: () => http.get('/agent/ospf').then((r) => r.data),
   agentVrrp: () => http.get('/agent/vrrp').then((r) => r.data),
+  agentBfd: () => http.get('/agent/bfd').then((r) => r.data),
   agentRuleCounters: () => http.get('/agent/rule-counters').then((r) => r.data),
   agentLogs: (after) => http.get('/agent/logs', { params: { after } }).then((r) => r.data),
   agentPacketLog: (after) =>

@@ -64,6 +64,9 @@ type Instance struct {
 	// VRRP lists the virtual routers on the instance's interfaces (FRR's
 	// vrrpd).
 	VRRP []VRRP `json:"vrrp,omitempty"`
+	// BFD lists the interfaces with BFD (FRR's bfdd), which static routes,
+	// OSPF and BGP use there.
+	BFD []BFDInterface `json:"bfd,omitempty"`
 	// RoutingPolicy holds the prefix lists, AS path and community lists
 	// and route maps BGP and OSPF refer to.
 	RoutingPolicy RoutingPolicy `json:"routing_policy,omitzero"`
@@ -411,6 +414,10 @@ type Route struct {
 	Gateway     string `json:"gateway,omitempty"`
 	Interface   string `json:"interface,omitempty"`
 	Metric      int    `json:"metric,omitempty"`
+	// BFD makes the route FRR's, withdrawn while the BFD session to the
+	// gateway is down, when the gateway's interface has BFD
+	// (Instance.RouteBFD); else it is an ordinary kernel route.
+	BFD bool `json:"bfd,omitempty"`
 }
 
 type DHCPServer struct {

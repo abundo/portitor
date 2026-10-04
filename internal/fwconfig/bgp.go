@@ -98,9 +98,13 @@ type BGPPeer struct {
 	Keepalive    int    `json:"keepalive,omitempty"`
 	Hold         int    `json:"hold,omitempty"`
 	// Passive waits for the neighbour to connect.
-	Passive bool             `json:"passive,omitempty"`
-	IPv4    BGPAddressFamily `json:"ipv4"`
-	IPv6    BGPAddressFamily `json:"ipv6"`
+	Passive bool `json:"passive,omitempty"`
+	// BFD watches the session with BFD when the neighbour is on an
+	// interface with BFD (Instance.NeighborBFD); a peer group's is its
+	// neighbours'.
+	BFD  bool             `json:"bfd,omitempty"`
+	IPv4 BGPAddressFamily `json:"ipv4"`
+	IPv6 BGPAddressFamily `json:"ipv6"`
 }
 
 // BGPAddressFamily is a peer's settings in one address family (unicast).

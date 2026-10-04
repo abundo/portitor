@@ -135,6 +135,9 @@ type BgpPeerSettings struct {
 	Shutdown     bool   `json:"shutdown"`
 	Keepalive    int    `json:"keepalive"`
 	Hold         int    `json:"hold"`
+	// Bfd: a neighbour's session is watched by BFD on an interface with
+	// it (a peer group's: its neighbours').
+	Bfd bool `json:"bfd"`
 
 	V4Activate             bool   `gorm:"column:v4_activate" json:"v4_activate"`
 	V4PrefixListIn         string `gorm:"column:v4_prefix_list_in" json:"v4_prefix_list_in"`
@@ -181,6 +184,7 @@ func (s *BgpPeerSettings) Peer() fwconfig.BGPPeer {
 		Shutdown:     s.Shutdown,
 		Keepalive:    s.Keepalive,
 		Hold:         s.Hold,
+		BFD:          s.Bfd,
 		IPv4: fwconfig.BGPAddressFamily{
 			Activate: s.V4Activate, PrefixListIn: s.V4PrefixListIn, PrefixListOut: s.V4PrefixListOut,
 			RouteMapIn: s.V4RouteMapIn, RouteMapOut: s.V4RouteMapOut, NextHopSelf: s.V4NextHopSelf,
@@ -264,6 +268,7 @@ type OspfInterface struct {
 	NetworkType   string `json:"network_type"`
 	AuthKeyID     int    `json:"auth_key_id"`
 	AuthKey       string `json:"-"`
+	Bfd           bool   `json:"bfd"` // BFD for the neighbours, if the interface has it
 
 	// The MD5 key (OSPFv2) is write-only: NewAuthKey sets it (empty keeps
 	// it), ClearAuthKey removes it, HasAuthKey tells whether there is one.
@@ -277,7 +282,7 @@ func (i *OspfInterface) Interface() fwconfig.OSPFInterface {
 	return fwconfig.OSPFInterface{
 		Name: i.Name, Area: i.Area, Passive: i.Passive, Cost: i.Cost,
 		HelloInterval: i.HelloInterval, DeadInterval: i.DeadInterval, Priority: i.Priority,
-		NetworkType: i.NetworkType, AuthKeyID: i.AuthKeyID, AuthKey: i.AuthKey,
+		NetworkType: i.NetworkType, AuthKeyID: i.AuthKeyID, AuthKey: i.AuthKey, BFD: i.Bfd,
 	}
 }
 
@@ -305,5 +310,28 @@ func (r *VrrpRouter) Router() fwconfig.VRRP {
 		Interface: r.Interface, VRID: r.Vrid, Version: r.Version, Priority: r.Priority,
 		AdvertisementInterval: r.AdvertisementInterval, NoPreempt: !r.Preempt, Shutdown: !r.Enabled,
 		IPv4: r.Ipv4, IPv6: r.Ipv6,
+	}
+}
+
+// BfdInterface is BFD on an interface of the instance (by name; link ends
+// included), with its timers. Disabled, the interface has no BFD: what
+// asks for BFD there runs without.
+type BfdInterface struct {
+	Base
+	InstanceID       uint   `json:"instance_id"`
+	Interface        string `json:"interface"`
+	Enabled          bool   `json:"enabled"`
+	DetectMultiplier int    `json:"detect_multiplier"`
+	ReceiveInterval  int    `json:"receive_interval"`  // ms
+	TransmitInterval int    `json:"transmit_interval"` // ms
+	Passive          bool   `json:"passive"`
+	Description      string `json:"description"`
+}
+
+// BFD is the interface's BFD as the document holds it.
+func (b *BfdInterface) BFD() fwconfig.BFDInterface {
+	return fwconfig.BFDInterface{
+		Name: b.Interface, DetectMultiplier: b.DetectMultiplier,
+		ReceiveInterval: b.ReceiveInterval, TransmitInterval: b.TransmitInterval, Passive: b.Passive,
 	}
 }

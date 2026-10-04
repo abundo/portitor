@@ -313,6 +313,10 @@ func filterVRRP(v *agentapi.VRRPResponse, names map[string]bool) {
 	v.Instances = slices.DeleteFunc(v.Instances, func(x agentapi.VRRPInstance) bool { return !names[x.Instance] })
 }
 
+func filterBFD(b *agentapi.BFDResponse, names map[string]bool) {
+	b.Instances = slices.DeleteFunc(b.Instances, func(x agentapi.BFDInstance) bool { return !names[x.Instance] })
+}
+
 func filterBGP(b *agentapi.BGPResponse, names map[string]bool) {
 	b.Instances = slices.DeleteFunc(b.Instances, func(x agentapi.BGPInstance) bool { return !names[x.Instance] })
 }

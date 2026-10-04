@@ -888,3 +888,38 @@ type VRRPFamilyInfo struct {
 	AdvertisementsRecv  int64 `json:"advertisements_received"`
 	Transitions         int64 `json:"transitions"`
 }
+
+// BFDResponse is the BFD sessions of the instances that run FRR's bfdd.
+type BFDResponse struct {
+	Instances []BFDInstance `json:"instances"`
+}
+
+// BFDInstance is one instance's BFD sessions. Error says why FRR could not
+// be asked (not running yet, say).
+type BFDInstance struct {
+	Instance string        `json:"instance"`
+	Error    string        `json:"error,omitempty"`
+	Peers    []BFDPeerInfo `json:"peers"`
+}
+
+// BFDPeerInfo is a BFD session, as bfdd has it. Intervals are in
+// milliseconds, Uptime and Downtime in seconds.
+type BFDPeerInfo struct {
+	Peer             string `json:"peer"`
+	Local            string `json:"local,omitempty"`
+	Interface        string `json:"interface,omitempty"`
+	Multihop         bool   `json:"multihop"`
+	Profile          string `json:"profile,omitempty"`
+	Status           string `json:"status"` // up, down, init, shutdown
+	Diagnostic       string `json:"diagnostic,omitempty"`
+	RemoteDiagnostic string `json:"remote_diagnostic,omitempty"`
+	Uptime           int64  `json:"uptime,omitempty"`
+	Downtime         int64  `json:"downtime,omitempty"`
+	// The local and the peer's timers.
+	DetectMultiplier       int `json:"detect_multiplier"`
+	ReceiveInterval        int `json:"receive_interval"`
+	TransmitInterval       int `json:"transmit_interval"`
+	RemoteDetectMultiplier int `json:"remote_detect_multiplier"`
+	RemoteReceiveInterval  int `json:"remote_receive_interval"`
+	RemoteTransmitInterval int `json:"remote_transmit_interval"`
+}

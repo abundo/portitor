@@ -57,6 +57,7 @@ type data struct {
 	ospfConfigs    []models.OspfConfig
 	ospfIfaces     []models.OspfInterface
 	vrrpRouters    []models.VrrpRouter
+	bfdIfaces      []models.BfdInterface
 }
 
 func load(db *gorm.DB) (*data, error) {
@@ -98,6 +99,7 @@ func load(db *gorm.DB) (*data, error) {
 		{&d.ospfConfigs, "id"},
 		{&d.ospfIfaces, "name"},
 		{&d.vrrpRouters, "interface, vrid"},
+		{&d.bfdIfaces, "interface"},
 	} {
 		if err := db.Order(q.order).Find(q.dst).Error; err != nil {
 			return nil, err
@@ -363,7 +365,7 @@ func build(db *gorm.DB, generation int64, only map[string]bool) (*fwconfig.Docum
 			// one route per destination, via the gateway of its version.
 			for _, dst := range dests {
 				fam := fwconfig.AddrFamily(dst)
-				route := fwconfig.Route{Destination: dst, Metric: r.Metric}
+				route := fwconfig.Route{Destination: dst, Metric: r.Metric, BFD: r.Bfd}
 				if r.InterfaceID != nil {
 					route.Interface = ifaceByID[*r.InterfaceID].Name
 				}
@@ -633,6 +635,12 @@ func build(db *gorm.DB, generation int64, only map[string]bool) (*fwconfig.Docum
 		for i := range d.vrrpRouters {
 			if r := &d.vrrpRouters[i]; r.InstanceID == mi.ID {
 				in.VRRP = append(in.VRRP, r.Router())
+			}
+		}
+		// A disabled BFD interface is left out: no BFD there.
+		for i := range d.bfdIfaces {
+			if b := &d.bfdIfaces[i]; b.InstanceID == mi.ID && b.Enabled {
+				in.BFD = append(in.BFD, b.BFD())
 			}
 		}
 		if in.FRRRunning() {
