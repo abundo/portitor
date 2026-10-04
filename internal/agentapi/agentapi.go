@@ -288,6 +288,9 @@ type RunRequest struct {
 type RenderResult struct {
 	Files   []render.File `json:"files"`
 	Current []render.File `json:"current"`
+	// Rulesets is the path of each instance's nftables ruleset, in Files
+	// and Current alike, by instance name.
+	Rulesets map[string]string `json:"rulesets,omitempty"`
 }
 
 type ApplyResult struct {

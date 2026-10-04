@@ -185,7 +185,8 @@ func (a *Agent) Render(doc fwconfig.Document) (*RenderResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	res := &RenderResult{Files: b.Redacted(), Current: []render.File{}}
+	res := &RenderResult{Files: b.Redacted(), Current: []render.File{}, Rulesets: map[string]string{}}
+	paths := a.renderOptions().Paths
 	a.mu.Lock()
 	applied := a.applied
 	a.mu.Unlock()
@@ -193,6 +194,12 @@ func (a *Agent) Render(doc fwconfig.Document) (*RenderResult, error) {
 		if cur, err := render.Render(*applied, a.renderOptions()); err == nil {
 			res.Current = cur.Redacted()
 		}
+		for i := range applied.Instances {
+			res.Rulesets[applied.Instances[i].Name] = paths.Files(&applied.Instances[i]).Nftables
+		}
+	}
+	for i := range doc.Instances {
+		res.Rulesets[doc.Instances[i].Name] = paths.Files(&doc.Instances[i]).Nftables
 	}
 	return res, nil
 }

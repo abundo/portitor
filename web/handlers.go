@@ -766,6 +766,45 @@ func (s *Server) handleDeployPreview(c *echo.Context) error {
 	return c.JSON(http.StatusOK, res)
 }
 
+// handleExportNftables downloads one virtual firewall's nftables ruleset as
+// the agent renders it: the live one (from=live) or the one a commit would
+// load (the default). It is Portitor's output, auto rules included.
+func (s *Server) handleExportNftables(c *echo.Context) error {
+	name := c.QueryParam("instance")
+	if name == "" {
+		return errJSON(c, http.StatusBadRequest, "instance is required")
+	}
+	live := c.QueryParam("from") == "live"
+	a, st, err := s.agent()
+	if err != nil {
+		return agentError(c, err)
+	}
+	only, err := s.chosenScope(currentAccess(c), []string{name}, true)
+	if err != nil {
+		return dbError(c, err)
+	}
+	doc, err := s.buildDoc(s.db, st.Generation+1, only)
+	if err != nil {
+		return problemsResponse(c, err)
+	}
+	res, err := a.Render(c.Request().Context(), *doc)
+	if err != nil {
+		return agentError(c, err)
+	}
+	files := res.Files
+	if live {
+		files = res.Current
+	}
+	path := res.Rulesets[name]
+	i := slices.IndexFunc(files, func(f render.File) bool { return path != "" && f.Path == path })
+	if i < 0 {
+		return errJSON(c, http.StatusNotFound, "no nftables ruleset for "+name)
+	}
+	h := c.Response().Header()
+	h.Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", name+".nft"))
+	return c.Blob(http.StatusOK, "text/plain; charset=utf-8", []byte(files[i].Content))
+}
+
 func (s *Server) handleDeployApply(c *echo.Context) error {
 	var req struct {
 		ConfirmTimeout *int     `json:"confirm_timeout"`

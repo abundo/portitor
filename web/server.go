@@ -207,6 +207,7 @@ func (s *Server) Echo() *echo.Echo {
 	g.GET("/deploy/check", s.handleDeployCheck)
 	g.GET("/deploy/changes", s.handleDeployChanges)
 	g.POST("/deploy/preview", s.handleDeployPreview)
+	g.GET("/deploy/nftables", s.handleExportNftables)
 	g.POST("/deploy/apply", s.handleDeployApply)
 	g.POST("/deploy/confirm", s.handleDeployConfirm)
 	g.POST("/deploy/rollback", s.handleDeployRollback)

@@ -119,6 +119,32 @@ onUnmounted(() => {
 // log_invalid list the chains that log what no rule matched and their
 // invalid packets, log_auto the services of the auto rules that log.
 const toast = useToast()
+
+// Export: the nftables ruleset as the agent renders it, live or uncommitted.
+const exportItems = [
+  [
+    { label: 'Live ruleset', onSelect: () => exportNftables('live') },
+    { label: 'With uncommitted changes', onSelect: () => exportNftables('') },
+  ],
+]
+async function exportNftables(from) {
+  const name = store.current?.name
+  if (!name) return
+  try {
+    const res = await backend.exportNftables(name, from)
+    const url = URL.createObjectURL(res.data)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${name}.nft`
+    a.click()
+    URL.revokeObjectURL(url)
+  } catch (err) {
+    let msg = errMsg(err)
+    const data = err?.response?.data
+    if (data instanceof Blob) msg = (await data.text().then((t) => JSON.parse(t).error).catch(() => null)) ?? msg
+    toast.add({ title: msg, color: 'error' })
+  }
+}
 const logField = { policy: 'log_drops', invalid: 'log_invalid', auto: 'log_auto' }
 const logBuiltin = (chain) => ({
   policy: (store.current?.log_drops ?? []).includes(chain),
@@ -343,6 +369,11 @@ function clean(b) {
       reorder="rules"
       :item-name="ruleName"
     >
+      <template #toolbar>
+        <UDropdownMenu :items="exportItems">
+          <UButton icon="i-lucide-download" label="Export nftables" variant="outline" />
+        </UDropdownMenu>
+      </template>
       <template #field-match="{ form }">
         <UInput :model-value="form.match" class="w-full" :ui="{ base: 'font-mono' }" />
       </template>

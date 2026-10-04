@@ -129,6 +129,9 @@ export const api = {
   deployChanges: () => http.get('/deploy/changes').then((r) => r.data),
   deployPreview: (instances = []) =>
     http.post('/deploy/preview', { instances }).then((r) => r.data),
+  // from: 'live' (deployed) or '' (what a commit would load).
+  exportNftables: (instance, from = '') =>
+    http.get('/deploy/nftables', { params: { instance, from }, responseType: 'blob' }),
   deployApply: (confirmTimeout, instances = []) =>
     http.post('/deploy/apply', { confirm_timeout: confirmTimeout, instances }).then((r) => r.data),
   deployConfirm: () => http.post('/deploy/confirm', {}).then((r) => r.data),
