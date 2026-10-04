@@ -272,6 +272,8 @@ func TestValidateCatchesProblems(t *testing.T) {
 		{"dns64 u octet", func(d *Document) { d.Instances[0].DNS.DNS64 = "2001:db8:0:0:100::/96" }, "bits 64 to 71"},
 		{"pref64 host bits", func(d *Document) { d.Instances[0].RA[0].NAT64Prefix = "64:ff9b::1/96" }, "invalid NAT64 prefix"},
 		{"pref64 injection", func(d *Document) { d.Instances[0].RA[0].NAT64Prefix = "64:ff9b::/96 { }; interface x" }, "invalid NAT64 prefix"},
+		{"ipv6-only short", func(d *Document) { d.Instances[0].DHCP.Subnets[0].IPv6OnlyPreferred = 60 }, "IPv6-only preferred needs"},
+		{"ipv6-only on ipv6", func(d *Document) { d.Instances[0].DHCP.Subnets[2].IPv6OnlyPreferred = 1800 }, "IPv6-only preferred needs"},
 		{"task duplicate", func(d *Document) { d.Tasks[1].Name = "crowdsec" }, "duplicate"},
 		{"dyndns short retry", func(d *Document) { d.Instances[0].DynDNS[0].RetryInterval = 1 }, "retry interval must be"},
 		// A zone may hold quotes and newlines: never an address.

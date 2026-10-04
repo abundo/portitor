@@ -101,7 +101,7 @@ func SampleDocument() Document {
 					DomainName: "home.arpa",
 					LeaseTime:  43200,
 					Subnets: []DHCPSubnet{
-						{Prefix: "192.168.1.0/24", Interface: "eth1", RangeStart: "192.168.1.100", RangeEnd: "192.168.1.199", Gateway: "192.168.1.1", DNSServers: []string{"192.168.1.1"}},
+						{Prefix: "192.168.1.0/24", Interface: "eth1", RangeStart: "192.168.1.100", RangeEnd: "192.168.1.199", Gateway: "192.168.1.1", DNSServers: []string{"192.168.1.1"}, IPv6OnlyPreferred: IPv6OnlyWait},
 						{Prefix: "192.168.20.0/24", Interface: "eth1.20", RangeStart: "192.168.20.100", RangeEnd: "192.168.20.199", Gateway: "192.168.20.1", DNSServers: []string{"192.168.20.1"}},
 						{Prefix: "fd00:1::/64", Interface: "eth1", RangeStart: "fd00:1::1000", RangeEnd: "fd00:1::1fff", DNSServers: []string{"fd00:1::1"}},
 					},

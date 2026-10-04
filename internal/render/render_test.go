@@ -572,7 +572,7 @@ func TestDnsmgrAndKea(t *testing.T) {
 	if sn.ID != 1 || sn.Subnet != "192.168.1.0/24" || sn.Interface != "" || len(sn.Pools) != 1 || sn.Pools[0].Pool != "192.168.1.100 - 192.168.1.199" {
 		t.Errorf("subnet: %+v", sn)
 	}
-	if fmt.Sprint(sn.OptionData) != "[{routers 192.168.1.1} {domain-name-servers 192.168.1.1} {domain-name home.arpa}]" {
+	if fmt.Sprint(sn.OptionData) != "[{routers 192.168.1.1} {domain-name-servers 192.168.1.1} {domain-name home.arpa} {v6-only-preferred 1800}]" {
 		t.Errorf("options: %+v", sn.OptionData)
 	}
 	if len(sn.Reservations) != 1 || sn.Reservations[0].HWAddress != "02:00:00:00:00:10" ||

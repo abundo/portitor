@@ -597,6 +597,9 @@ func build(db *gorm.DB, generation int64, only map[string]bool) (*fwconfig.Docum
 					DNSServers: dns,
 				}
 				if pfx.Addr().Is4() {
+					if mif, ok := ifaceByName(d.interfaces, mi.ID, serveOn); ok && mif.Xlat464 {
+						sub.IPv6OnlyPreferred = fwconfig.IPv6OnlyWait
+					}
 					sub.Gateway = p.DhcpGateway
 					if sub.Gateway == "" {
 						sub.Gateway = gw

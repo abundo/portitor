@@ -442,7 +442,18 @@ type DHCPSubnet struct {
 	RangeEnd   string   `json:"range_end,omitempty"`
 	Gateway    string   `json:"gateway,omitempty"`
 	DNSServers []string `json:"dns_servers,omitempty"`
+	// IPv6OnlyPreferred, in seconds, tells IPv4 clients that can do
+	// without IPv4 (a 464XLAT CLAT) to stop asking for that long (DHCPv4
+	// option 108, RFC 8925); 0 leaves it out.
+	IPv6OnlyPreferred int `json:"ipv6_only_preferred,omitempty"`
 }
+
+// IPv6OnlyWait is the IPv6OnlyPreferred the builder sets: RFC 8925's
+// default V6ONLY_WAIT. MinIPv6OnlyWait is its MIN_V6ONLY_WAIT.
+const (
+	IPv6OnlyWait    = 1800
+	MinIPv6OnlyWait = 300
+)
 
 // RAInterface makes the instance send IPv6 router advertisements on
 // Interface (radvd), announcing itself as the default router.

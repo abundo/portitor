@@ -157,7 +157,7 @@ const fields = [
     label: '464XLAT',
     type: 'switch',
     show: (f) => f.kind !== 'loopback',
-    hint: 'Announce the NAT64 prefix (DNS → Server → NAT64) in the router advertisements on this interface (PREF64), so clients with a CLAT (Android, iOS, macOS) can reach IPv4 over IPv6 only. Needs router advertisements on the interface (DHCP).',
+    hint: 'For clients with a CLAT (Android, iOS, macOS), which reach IPv4 over IPv6 only: router advertisements on this interface announce the NAT64 prefix (DNS → Server → NAT64; PREF64), and its DHCPv4 tells them IPv4 is not needed (option 108, IPv6-only preferred). Needs router advertisements on the interface (DHCP).',
   },
   { key: 'mtu', label: 'MTU', type: 'number', hint: '0 keeps the default.' },
   {

@@ -248,6 +248,9 @@ func TestBuildIPv6AndObjects(t *testing.T) {
 		strings.Join(ra.RDNSS, " ") != "fd00:1::1" || strings.Join(ra.DNSSL, " ") != "home.arpa" || ra.NAT64Prefix != "64:ff9b::/96" {
 		t.Errorf("ra: %+v", ra)
 	}
+	if in.DHCP.Subnets[0].IPv6OnlyPreferred != fwconfig.IPv6OnlyWait || in.DHCP.Subnets[1].IPv6OnlyPreferred != 0 {
+		t.Errorf("ipv6-only preferred: %+v", in.DHCP.Subnets)
+	}
 	if in.DNS.DNS64 != "64:ff9b::/96" {
 		t.Errorf("dns64 %q", in.DNS.DNS64)
 	}

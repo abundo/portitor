@@ -543,6 +543,9 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 		if ifaces[s.Interface] == nil {
 			v.addf("%s: unknown interface %q", sp, s.Interface)
 		}
+		if s.IPv6OnlyPreferred != 0 && (!pfx.Addr().Is4() || s.IPv6OnlyPreferred < MinIPv6OnlyWait) {
+			v.addf("%s: IPv6-only preferred needs an IPv4 subnet and at least %d seconds", sp, MinIPv6OnlyWait)
+		}
 		for _, a := range []string{s.RangeStart, s.RangeEnd, s.Gateway} {
 			if a == "" {
 				continue

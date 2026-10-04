@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/netip"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/abundo/portitor/internal/fwconfig"
@@ -182,6 +183,10 @@ func keaSubnets(in *fwconfig.Instance, v6 bool) ([]keaSubnet, []keaSharedNetwork
 			}
 			if in.DHCP.DomainName != "" {
 				sub.OptionData = append(sub.OptionData, keaOption{Name: "domain-name", Data: in.DHCP.DomainName})
+			}
+			if s.IPv6OnlyPreferred > 0 {
+				// Kea sends it only to clients that ask for it.
+				sub.OptionData = append(sub.OptionData, keaOption{Name: "v6-only-preferred", Data: strconv.Itoa(s.IPv6OnlyPreferred)})
 			}
 		}
 		for j, a := range resAddrs {
