@@ -199,7 +199,7 @@ func TestFRROSPF(t *testing.T) {
 		// One interface block holds both versions.
 		"interface lk-main\n ip ospf area 0.0.0.0\n ip ospf hello-interval 5\n ip ospf dead-interval 20\n ip ospf network point-to-point\n" +
 			" ip ospf authentication message-digest\n ip ospf message-digest-key 1 md5 k3y\n ipv6 ospf6 area 0.0.0.0\nexit\n",
-		"interface eth2\n ip ospf area 0.0.0.1\n ip ospf cost 100\n ip ospf priority 0\n ip ospf passive\nexit\n",
+		"interface eth2\n ip ospf area 0.0.0.1\n ip ospf cost 100\n ip ospf priority 0\n ip ospf passive\n vrrp 50\n",
 		"router ospf\n ospf router-id 10.255.0.2\n log-adjacency-changes\n auto-cost reference-bandwidth 10000\n" +
 			" area 0.0.0.1 stub no-summary\n area 0.0.0.1 range 192.168.50.0/23 cost 10\n summary-address 172.16.0.0/12\n" +
 			" redistribute kernel metric 50 metric-type 1 route-map connected\n redistribute bgp\n default-information originate\nexit\n",
@@ -277,5 +277,54 @@ func TestOSPFAutoRules(t *testing.T) {
 	out := OSPFOutputMatches(in)
 	if len(out) != 1 || out[0].match != "ip daddr { 10.255.0.0/30, 224.0.0.5, 224.0.0.6 } meta nfproto ipv4 meta l4proto 89" {
 		t.Errorf("output: %+v", out)
+	}
+}
+
+func TestFRRVRRP(t *testing.T) {
+	b := sampleBundle(t)
+	conf := mustFile(t, b, "/etc/portitor/instances/guest/frr/frr.conf")
+	// The virtual router is in its interface's block, after OSPF's.
+	want := " ip ospf passive\n vrrp 50\n vrrp 50 priority 200\n vrrp 50 advertisement-interval 500\n" +
+		" vrrp 50 ip 192.168.50.254\n vrrp 50 ipv6 fe80::50\nexit\n"
+	if !strings.Contains(conf, want) {
+		t.Errorf("frr.conf lacks %q:\n%s", want, conf)
+	}
+	daemons := mustFile(t, b, "/etc/portitor/instances/guest/frr/daemons")
+	if !strings.Contains(daemons, "vrrpd=yes\n") || strings.Count(daemons, "vrrpd=") != 1 {
+		t.Errorf("daemons:\n%s", daemons)
+	}
+
+	// VRRP alone runs FRR with vrrpd only; version 2, no preempt, shut down.
+	doc := fwconfig.SampleDocument()
+	in := doc.Instance("guest")
+	in.BGP, in.OSPF, in.OSPF6 = nil, nil, nil
+	in.VRRP[0] = fwconfig.VRRP{Interface: "eth2", VRID: 7, Version: 2, NoPreempt: true, Shutdown: true, IPv4: []string{"192.168.50.254"}}
+	b, err := Render(doc, Options{Paths: DefaultPaths(), Units: DefaultUnits()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	conf = mustFile(t, b, "/etc/portitor/instances/guest/frr/frr.conf")
+	want = "interface eth2\n vrrp 7\n vrrp 7 version 2\n no vrrp 7 preempt\n vrrp 7 ip 192.168.50.254\n vrrp 7 shutdown\nexit\n"
+	if !strings.Contains(conf, want) {
+		t.Errorf("frr.conf lacks %q:\n%s", want, conf)
+	}
+	daemons = mustFile(t, b, "/etc/portitor/instances/guest/frr/daemons")
+	if !strings.Contains(daemons, "bgpd=no\nospfd=no\nospf6d=no\nvrrpd=yes\n") {
+		t.Errorf("daemons:\n%s", daemons)
+	}
+}
+
+func TestVRRPAutoRules(t *testing.T) {
+	nft := mustFile(t, sampleBundle(t), "/etc/portitor/instances/guest/nftables.nft")
+	for _, want := range []string{
+		`iifname { "eth2", "vrrp4-50-eth2", "vrrp6-50-eth2" } meta l4proto 112 accept comment "auto: vrrp"`,
+		`oifname { "eth2", "vrrp4-50-eth2", "vrrp6-50-eth2" } meta l4proto 112 accept comment "auto: vrrp"`,
+		// A rule on the interface also matches what comes to the
+		// virtual router's MAC address, on its devices.
+		`iifname { "eth2", "vrrp4-50-eth2", "vrrp6-50-eth2" } oifname "lk-main" counter accept`,
+	} {
+		if !strings.Contains(nft, want) {
+			t.Errorf("ruleset lacks %q:\n%s", want, nft)
+		}
 	}
 }

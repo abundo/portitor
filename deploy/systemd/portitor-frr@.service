@@ -1,13 +1,13 @@
 # SPDX-FileCopyrightText: 2026 The Portitor contributors
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-# FRR (zebra, bgpd, ospfd, ospf6d: BGP and OSPF) for one Portitor instance, inside the
+# FRR (zebra, bgpd, ospfd, ospf6d, vrrpd: BGP, OSPF, VRRP) for one Portitor instance, inside the
 # instance's network namespace. Started and reloaded by portitor-agent; do
 # not enable by hand. FRR runs with the instance as its pathspace: its
 # config is /etc/frr/%i (the instance's frr directory, mounted there) and
 # its sockets /run/frr/%i, so `vtysh -N %i` talks to it.
 [Unit]
-Description=FRR routing (BGP, OSPF) for Portitor instance %i
+Description=FRR routing (BGP, OSPF, VRRP) for Portitor instance %i
 After=portitor-agent.service
 PartOf=portitor-agent.service
 

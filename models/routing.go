@@ -280,3 +280,30 @@ func (i *OspfInterface) Interface() fwconfig.OSPFInterface {
 		NetworkType: i.NetworkType, AuthKeyID: i.AuthKeyID, AuthKey: i.AuthKey,
 	}
 }
+
+// VrrpRouter is a VRRP virtual router on an interface of the instance (by
+// name; link ends included). Disabled, it is shut down: configured, but
+// always backup.
+type VrrpRouter struct {
+	Base
+	InstanceID            uint       `json:"instance_id"`
+	Interface             string     `json:"interface"`
+	Vrid                  int        `json:"vrid"`
+	Version               int        `json:"version"`
+	Priority              int        `json:"priority"`
+	AdvertisementInterval int        `json:"advertisement_interval"` // ms
+	Preempt               bool       `json:"preempt"`
+	Enabled               bool       `json:"enabled"`
+	Ipv4                  StringList `gorm:"column:ipv4" json:"ipv4"`
+	Ipv6                  StringList `gorm:"column:ipv6" json:"ipv6"`
+	Description           string     `json:"description"`
+}
+
+// Router is the virtual router as the document holds it.
+func (r *VrrpRouter) Router() fwconfig.VRRP {
+	return fwconfig.VRRP{
+		Interface: r.Interface, VRID: r.Vrid, Version: r.Version, Priority: r.Priority,
+		AdvertisementInterval: r.AdvertisementInterval, NoPreempt: !r.Preempt, Shutdown: !r.Enabled,
+		IPv4: r.Ipv4, IPv6: r.Ipv6,
+	}
+}

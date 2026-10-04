@@ -163,6 +163,12 @@ func (c *Client) BGP(ctx context.Context) (*agentapi.BGPResponse, error) {
 	return &b, c.do(ctx, http.MethodGet, "/v1/bgp", nil, &b)
 }
 
+// VRRP returns the state of the instances' virtual routers.
+func (c *Client) VRRP(ctx context.Context) (*agentapi.VRRPResponse, error) {
+	var v agentapi.VRRPResponse
+	return &v, c.do(ctx, http.MethodGet, "/v1/vrrp", nil, &v)
+}
+
 // OSPF returns the OSPF state of the instances that run it.
 func (c *Client) OSPF(ctx context.Context) (*agentapi.OSPFResponse, error) {
 	var o agentapi.OSPFResponse

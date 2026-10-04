@@ -151,7 +151,58 @@ func cliCommand() *cobra.Command {
 			return tw.Flush()
 		},
 	})
+	show.AddCommand(&cobra.Command{
+		Use:   "vrrp",
+		Short: "VRRP virtual routers and their state",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
+			defer cancel()
+			v, err := client().VRRP(ctx)
+			if err != nil {
+				return fmt.Errorf("%w (is portitor-agent running, and are you root?)", err)
+			}
+			var rows []agentapi.VRRPInstance
+			for _, in := range v.Instances {
+				if instance == "" || in.Instance == instance {
+					rows = append(rows, in)
+				}
+			}
+			if asJSON {
+				return printJSON(cmd.OutOrStdout(), rows)
+			}
+			printVRRP(cmd.OutOrStdout(), rows)
+			return nil
+		},
+	})
 	return root
+}
+
+func printVRRP(w io.Writer, rows []agentapi.VRRPInstance) {
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "INSTANCE\tINTERFACE\tVRID\tFAMILY\tSTATE\tPRIORITY\tADDRESSES")
+	for _, in := range rows {
+		if in.Error != "" {
+			fmt.Fprintf(tw, "%s\t\t\t\t%s\t\t\n", in.Instance, clean(in.Error))
+		}
+		for _, r := range in.Routers {
+			for _, f := range []struct {
+				name string
+				info *agentapi.VRRPFamilyInfo
+			}{{"ipv4", r.V4}, {"ipv6", r.V6}} {
+				if f.info == nil {
+					continue
+				}
+				state := f.info.State
+				if r.Shutdown {
+					state += " (shut down)"
+				}
+				fmt.Fprintf(tw, "%s\t%s\t%d\t%s\t%s\t%d\t%s\n", in.Instance, r.Interface, r.VRID, f.name, clean(state),
+					f.info.EffectivePriority, strings.Join(f.info.Addresses, ","))
+			}
+		}
+	}
+	tw.Flush()
 }
 
 func printJSON(w io.Writer, v any) error {

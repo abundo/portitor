@@ -828,6 +828,6 @@ func All() []any {
 		&AddressObject{}, &DnsSoaTemplate{}, &DnsDnssecPolicy{}, &DnsTemplate{}, &KnownInterface{},
 		&DyndnsClient{}, &DyndnsRecord{}, &Certificate{}, &IpList{}, &Task{}, &Service{}, &RateLimit{}, &ObjectFolder{}, &Role{}, &RoleMember{}, &RoleInstance{},
 		&RoutePrefixList{}, &RouteAsPathList{}, &RouteCommunityList{}, &RouteMap{}, &BgpConfig{}, &BgpPeerGroup{}, &BgpNeighbor{},
-		&OspfConfig{}, &OspfInterface{},
+		&OspfConfig{}, &OspfInterface{}, &VrrpRouter{},
 	}
 }

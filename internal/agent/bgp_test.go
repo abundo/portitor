@@ -225,8 +225,18 @@ func TestApplyFRR(t *testing.T) {
 		t.Errorf("stopped with OSPF on: %v", r.calls)
 	}
 
+	// VRRP alone keeps it running too.
 	r.calls = nil
 	in.OSPF.Enabled, in.OSPF6.Enabled = false, false
+	if err := a.applyFRR(ctx, in, map[string]bool{}); err != nil {
+		t.Fatal(err)
+	}
+	if r.ran("systemctl", "disable", "--now", unit) {
+		t.Errorf("stopped with VRRP on: %v", r.calls)
+	}
+
+	r.calls = nil
+	in.VRRP = nil
 	if err := a.applyFRR(ctx, in, map[string]bool{}); err != nil {
 		t.Fatal(err)
 	}

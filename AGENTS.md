@@ -14,8 +14,8 @@ are in [README.md](README.md).
 | `cmd/portitor-web` | GUI/API binary: `start`, `migrate`, `createadmin`, `agent-url`, `bootstrap` (ISO first boot) |
 | `cmd/portitor-agent` | Agent daemon on the firewall: `start`, `init`, `render`, `netns-exec`; run as `portitor` (a symlink, `cli.go`) it is a read-only CLI (`show lldp neighbours`, `show ip neighbours`) over the agent's GET routes on the root-only socket `<run_dir>/agent.sock` |
 | `internal/fwconfig` | The desired-state document and `Validate()`. **The contract between web and agent.** |
-| `internal/render` | Pure functions: document → nftables, WireGuard, named.conf, Kea, dnsmgr2 config, FRR (`frr.go`: frr.conf, daemons, vtysh.conf) |
-| `internal/agent` | Agent: apply/reconcile, commit-confirm, DHCP and DHCPv6 (prefix delegation) clients, IP lists, task scheduler, packet log (NFLOG), DNS query log (BIND logs to the journal, followed with `journalctl`, filtered by the agent, `querylog.go`), WireGuard endpoint re-resolving, packet capture (tcpdump, streamed rate-limited), traceroute (`mtr --raw`, streamed as JSON lines, `trace.go`), LLDP (sent and heard on raw sockets, `lldp.go`), neighbours (ARP/ND, LLDP), traffic shaping (CAKE, IFB devices for receiving, HTB classes for the rate limits that shape (`fwconfig.Instance.Shapers`) by packet mark `render.ShaperMark`; planned from `tc -j` output, `shaping.go`), BGP and OSPF state (FRR's JSON through `vtysh`, `bgp.go`, `ospf.go`), status, API server |
+| `internal/render` | Pure functions: document → nftables, WireGuard, named.conf, Kea, dnsmgr2 config, FRR (`frr.go`: frr.conf with BGP, OSPF and VRRP, daemons, vtysh.conf) |
+| `internal/agent` | Agent: apply/reconcile, commit-confirm, DHCP and DHCPv6 (prefix delegation) clients, IP lists, task scheduler, packet log (NFLOG), DNS query log (BIND logs to the journal, followed with `journalctl`, filtered by the agent, `querylog.go`), WireGuard endpoint re-resolving, packet capture (tcpdump, streamed rate-limited), traceroute (`mtr --raw`, streamed as JSON lines, `trace.go`), LLDP (sent and heard on raw sockets, `lldp.go`), neighbours (ARP/ND, LLDP), traffic shaping (CAKE, IFB devices for receiving, HTB classes for the rate limits that shape (`fwconfig.Instance.Shapers`) by packet mark `render.ShaperMark`; planned from `tc -j` output, `shaping.go`), BGP, OSPF and VRRP state (FRR's JSON through `vtysh`, `bgp.go`, `ospf.go`, `vrrp.go`), VRRP's macvlan devices (`vrrp.go`), status, API server |
 | `internal/dyndns` | DNS update client ("DNS update" in the GUI): RFC 2136 (from ifnsupdate), sent from the instance netns, or a DNS hosting provider's API through libdns (`providers.go`, matching `fwconfig.DNSProviders`), called from the host |
 | `internal/acme` | ACME certificates through lego: accounts, orders, the stored chain and key (`<state_dir>/certificates/`); the agent's `acme.go` schedules them and answers HTTP-01 in the instance netns, opening port 80 by the `acme_http` set (`render.ACMEHTTPSet`) |
 | `internal/nftimport` | nftables file (`nft -j list ruleset`, read by the agent's `POST /v1/nftables/parse` in a new network namespace, `nftparse.go`) → rules, NAT rules, hosts/prefixes, services, and what it leaves out, with jumped-to chains inlined in groups; written by `web/nftimport.go` through the CRUD's `prepare*` checks, a preview being the same transaction rolled back |
@@ -30,7 +30,7 @@ are in [README.md](README.md).
 | `internal/netobj` | Named hosts/prefixes (`address_objects`): name checks and expansion |
 | `internal/dbmigrate` | Opens the SQLite database; goose migrations (the schema's source of truth) |
 | `models` | GORM mapping |
-| `web` | Echo v5 server (`server.go`: routes): auth, generic CRUD (`crud.go`), entry validation (`resources.go`), deploy handlers (`handlers.go`), Revert snapshots (`revert.go`), tenancy (`tenancy.go`), roles (`roles.go`, `access.go`), rename/delete reference keeping (`objects.go`, `services.go`, `ratelimits.go`, `ifzones.go`, `bgp.go`, `ospf.go`, `delegated.go`), folders for hosts and IP lists (`folders.go`, GUI only), agent proxies (`console.go`, `capture.go`, `trace.go`, `connections.go`), WireGuard config import (`wgimport.go`), backup/restore (`backup.go`), `web.yaml` (`config.go`) |
+| `web` | Echo v5 server (`server.go`: routes): auth, generic CRUD (`crud.go`), entry validation (`resources.go`), deploy handlers (`handlers.go`), Revert snapshots (`revert.go`), tenancy (`tenancy.go`), roles (`roles.go`, `access.go`), rename/delete reference keeping (`objects.go`, `services.go`, `ratelimits.go`, `ifzones.go`, `bgp.go`, `ospf.go`, `vrrp.go`, `delegated.go`), folders for hosts and IP lists (`folders.go`, GUI only), agent proxies (`console.go`, `capture.go`, `trace.go`, `connections.go`), WireGuard config import (`wgimport.go`), backup/restore (`backup.go`), `web.yaml` (`config.go`) |
 | `web/frontend` | Vue SPA; `CrudPage.vue` drives most pages from field/column schemas |
 | `docs` | User guides; every `docs/*.md` is bundled into the GUI's Help page (`src/docs.js`), and links between them stay in the GUI |
 | `deploy` | systemd units and example configs |
@@ -111,13 +111,14 @@ docs and user-facing messages.
   DNAT would let in; then the policy. The input auto accepts stay first so a rule
   that closes an interface to the firewall keeps the DHCP and DNS enabled on it.
   The output chain has auto accepts too, before the user's rules: the BGP sessions
-  FRR opens to its neighbours (TCP 179) and what OSPF sends (IP protocol 89,
-  `render.OSPFOutputMatches`).
+  FRR opens to its neighbours (TCP 179), what OSPF sends (IP protocol 89,
+  `render.OSPFOutputMatches`) and VRRP's advertisements (IP protocol 112).
 - **The agent owns** the `inet firewall` table in each namespace, every `fw-*`
   namespace, routes with `proto 99`, root-namespace virtual interfaces listed in
   `managed.json`, and the root and ingress qdiscs of its instances' interfaces with
   their `ifb-<name>` devices (`fwconfig.IFBName`; interface names may not start
-  with `ifb-`). Leave everything else alone (docker, libvirt, other tables).
+  with `ifb-`), and the VRRP macvlan devices (`fwconfig.VRRPDevices`; names may not
+  start with `vrrp4-` or `vrrp6-`). Leave everything else alone (docker, libvirt, other tables).
   Accept rules set the connection mark (`ct mark`) to the rule's id, so the
   rule counters (`render.RuleCounter`) count whole connections; the agent owns
   `ct mark` in its namespaces. Log statements send to nflog group
@@ -158,7 +159,10 @@ the certificate portitor-web serves, chosen under Settings
   *any* interface, so a list must never lose entries silently: renaming an
   interface, link end or zone rewrites the lists (`web/ifzones.go`), deleting one
   that a rule uses is refused, and a non-empty list that resolves to no enabled
-  interface (`Instance.MatchInterfaces`) makes the renderer skip the rule.
+  interface (`Instance.MatchInterfaces`) makes the renderer skip the rule. An
+  interface matches its VRRP devices too (`Instance.AddVRRPDevices`, in
+  `MatchInterfaces` and the auto rules): what is sent to a virtual router's MAC
+  address arrives on its device.
 - **Interface addresses** are on the interface (`interfaces.addresses`): CIDRs with a
   host part (`fwconfig.ParseInterfaceAddress`; any address of a /31, /32, /127,
   /128), unique within the instance. IPAM does not assign them; `ipam.Tree` lists
@@ -201,9 +205,9 @@ the certificate portitor-web serves, chosen under Settings
   (`eachRoutingRef`), deleting one in use is refused, a row never moves to another
   instance, and a new reference field goes in `eachRoutingRef`. Off (the default),
   the builder leaves BGP out of the document; the objects are left out unless BGP
-  or OSPF is on (`Instance.FRRRunning`), and with neither the agent stops FRR. A
+  or OSPF is on (`Instance.FRRRunning`), and with neither (nor VRRP) the agent stops FRR. A
   neighbour's update source may name an interface; renaming the interface
-  rewrites it (`renameIfaceRefs`). FRR runs zebra, bgpd, ospfd and ospf6d as the
+  rewrites it (`renameIfaceRefs`). FRR runs zebra, bgpd, ospfd, ospf6d and vrrpd as the
   instance needs them (the daemons file); static routes stay the agent's (kernel
   routes), so "redistribute static" renders as `redistribute kernel`.
 - **OSPF** (`web/ospf.go`) is per instance and version (2: OSPFv2, IPv4,
@@ -213,6 +217,15 @@ the certificate portitor-web serves, chosen under Settings
   being deleted. Its route maps are in `eachRoutingRef`. Area ids are stored
   dotted. OSPFv2's network statements and interface areas are exclusive, as in
   FRR.
+- **VRRP** (`web/vrrp.go`, `fwconfig/vrrp.go`) is per instance: `vrrp_routers`, on
+  an interface by name (link ends included; `renameIfaceRefs` rewrites it,
+  `refuseIfaceInUse` keeps it from being deleted), with IPv4 and IPv6 virtual
+  addresses in the interface's static prefixes (IPv6 also link-local). FRR's vrrpd
+  runs them (they start FRR, `Instance.FRRRunning`); the agent makes one macvlan
+  device per virtual router and IP version (`fwconfig.VRRPDevices`: virtual MAC,
+  the addresses as /32 or /128, random link-local), created protodown so vrrpd
+  alone turns it on, and sets `arp_ignore` 1 on its interface
+  (`internal/agent/vrrp.go`). A disabled row is shut down in FRR, not left out.
 - **Dual stack:** rule and NAT address lists may mix IPv4 and IPv6;
   `fwconfig.MatchFamilies` decides which versions a rule is rendered for, and
   validation uses the same function.

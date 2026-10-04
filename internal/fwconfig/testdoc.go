@@ -155,6 +155,9 @@ func SampleDocument() Document {
 				Interfaces: []Interface{
 					{Name: "eth2", Kind: KindPhysical, Enabled: true, IPv4Mode: ModeStatic, Addresses: []string{"192.168.50.1/24"}},
 				},
+				VRRP: []VRRP{
+					{Interface: "eth2", VRID: 50, Priority: 200, AdvertisementInterval: 500, IPv4: []string{"192.168.50.254"}, IPv6: []string{"fe80::50"}},
+				},
 				Rules: []Rule{
 					{Chain: ChainForward, InInterfaces: []string{"eth2"}, OutInterfaces: []string{"lk-main"}, DstAddrs: []string{"192.168.0.0/16"}, Action: ActionReject, Description: "no home access"},
 					{Chain: ChainForward, InInterfaces: []string{"eth2"}, OutInterfaces: []string{"lk-main"}, Action: ActionAccept},

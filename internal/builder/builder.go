@@ -56,6 +56,7 @@ type data struct {
 	bgpNeighbors   []models.BgpNeighbor
 	ospfConfigs    []models.OspfConfig
 	ospfIfaces     []models.OspfInterface
+	vrrpRouters    []models.VrrpRouter
 }
 
 func load(db *gorm.DB) (*data, error) {
@@ -96,6 +97,7 @@ func load(db *gorm.DB) (*data, error) {
 		{&d.bgpNeighbors, "id"},
 		{&d.ospfConfigs, "id"},
 		{&d.ospfIfaces, "name"},
+		{&d.vrrpRouters, "interface, vrid"},
 	} {
 		if err := db.Order(q.order).Find(q.dst).Error; err != nil {
 			return nil, err
@@ -628,6 +630,11 @@ func build(db *gorm.DB, generation int64, only map[string]bool) (*fwconfig.Docum
 
 		d.bgp(&in, mi.ID)
 		in.OSPF, in.OSPF6 = d.ospf(mi.ID, 2), d.ospf(mi.ID, 3)
+		for i := range d.vrrpRouters {
+			if r := &d.vrrpRouters[i]; r.InstanceID == mi.ID {
+				in.VRRP = append(in.VRRP, r.Router())
+			}
+		}
 		if in.FRRRunning() {
 			d.routingPolicy(&in, mi.ID)
 		}

@@ -52,6 +52,7 @@ const sections = computed(() => [
           { label: 'Routing objects', icon: 'i-lucide-list-filter', to: '/routing-objects' },
           { label: 'BGP', icon: 'i-lucide-share-2', to: '/bgp' },
           { label: 'OSPF', icon: 'i-lucide-waypoints', to: '/ospf' },
+          { label: 'VRRP', icon: 'i-lucide-git-fork', to: '/vrrp' },
         ],
       },
       { label: 'Neighbours', icon: 'i-lucide-network', to: '/neighbours' },

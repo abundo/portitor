@@ -135,6 +135,8 @@ func Nftables(in *fwconfig.Instance, lockout *AntiLockout, paths Paths) string {
 	// that closes an interface to the firewall doesn't take DHCP or DNS
 	// away from it.
 	for _, r := range AutoInputRules(in) {
+		// What comes to a virtual router's address arrives on its device.
+		r.InInterfaces = in.AddVRRPDevices(r.InInterfaces)
 		for _, match := range r.matches() {
 			writeAutoLog(b, in, r.Service, match)
 			b.WriteString("\t\t" + match + " accept " + comment("auto", r.Service) + "\n")
@@ -179,6 +181,10 @@ func Nftables(in *fwconfig.Instance, lockout *AntiLockout, paths Paths) string {
 	// and the OSPF multicast groups.
 	for _, m := range OSPFOutputMatches(in) {
 		fmt.Fprintf(b, "\t\t%s accept %s\n", m.match, comment("auto", m.service))
+	}
+	// VRRP advertisements, from the virtual routers' devices.
+	if ifs := VRRPInterfaces(in); len(ifs) > 0 {
+		fmt.Fprintf(b, "\t\toifname %s %s accept %s\n", quotedSet(ifs), vrrpProto, comment("auto", VRRPService))
 	}
 	// The BGP sessions FRR opens to its neighbours.
 	if addrs := BGPNeighborAddrs(in); len(addrs) > 0 {
@@ -462,7 +468,7 @@ type AutoRule struct {
 	Service string `json:"service"`
 	// InInterfaces limits the rule to these interfaces; empty is any.
 	InInterfaces []string `json:"in_interfaces"`
-	Protocol     string   `json:"protocol"` // tcp, udp, "tcp,udp", or OSPF's (OSPFService, OSPF6Service: IPv4 or IPv6, no port)
+	Protocol     string   `json:"protocol"` // tcp, udp, "tcp,udp", OSPF's (OSPFService, OSPF6Service: IPv4 or IPv6, no port) or VRRPService (no port)
 	SrcPort      int      `json:"src_port,omitempty"`
 	DstPort      int      `json:"dst_port"`
 	// Source limits the source addresses: the anti-lockout rule's
@@ -559,8 +565,18 @@ func AutoInputRules(in *fwconfig.Instance) []AutoRule {
 			out = append(out, AutoRule{Service: o.service, Protocol: o.service, Source: nets})
 		}
 	}
+	// VRRP advertisements on the interfaces with virtual routers.
+	if ifs := VRRPInterfaces(in); len(ifs) > 0 {
+		out = append(out, AutoRule{Service: VRRPService, InInterfaces: ifs, Protocol: VRRPService})
+	}
 	return out
 }
+
+// VRRPService is the VRRP auto rules' service and protocol.
+const VRRPService = "vrrp"
+
+// vrrpProto matches VRRP packets, of either IP version.
+var vrrpProto = fmt.Sprintf("meta l4proto %d", fwconfig.VRRPProtocol)
 
 // BGPService is the BGP auto rule's service.
 const BGPService = "bgp"
@@ -641,6 +657,8 @@ func (r AutoRule) match() string {
 	switch r.Protocol {
 	case OSPFService, OSPF6Service:
 		parts = append(parts, ospfProto(r.Protocol))
+	case VRRPService:
+		parts = append(parts, vrrpProto)
 	case "tcp,udp":
 		parts = append(parts, fmt.Sprintf("meta l4proto { tcp, udp } th dport %d", r.DstPort))
 	default:

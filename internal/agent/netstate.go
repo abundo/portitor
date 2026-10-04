@@ -27,6 +27,7 @@ type ipLink struct {
 	Ifname   string   `json:"ifname"`
 	Link     string   `json:"link"` // vlan parent / veth peer, when in the same netns
 	Master   string   `json:"master"`
+	Address  string   `json:"address"` // MAC address
 	MTU      int      `json:"mtu"`
 	Flags    []string `json:"flags"`
 	LinkInfo *struct {

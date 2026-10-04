@@ -839,3 +839,52 @@ type OSPFRoute struct {
 	NextHops  []string `json:"next_hops"`
 	Interface []string `json:"interfaces,omitempty"`
 }
+
+// VRRPResponse is the state of the virtual routers of the instances that
+// have them, from FRR's vrrpd.
+type VRRPResponse struct {
+	Instances []VRRPInstance `json:"instances"`
+}
+
+// VRRPInstance is one instance's virtual routers. Error says why FRR could
+// not be asked (not running yet, say).
+type VRRPInstance struct {
+	Instance string           `json:"instance"`
+	Error    string           `json:"error,omitempty"`
+	Routers  []VRRPRouterInfo `json:"routers"`
+}
+
+// VRRPRouterInfo is a virtual router: its settings as vrrpd runs them, and
+// the state of its IPv4 and IPv6 halves (nil when vrrpd has none).
+type VRRPRouterInfo struct {
+	Interface string `json:"interface"`
+	VRID      int    `json:"vrid"`
+	Version   int    `json:"version"`
+	Priority  int    `json:"priority"`
+	Preempt   bool   `json:"preempt"`
+	Shutdown  bool   `json:"shutdown"`
+	// AdvertisementInterval is the configured one, in milliseconds.
+	AdvertisementInterval int             `json:"advertisement_interval"`
+	V4                    *VRRPFamilyInfo `json:"v4,omitempty"`
+	V6                    *VRRPFamilyInfo `json:"v6,omitempty"`
+}
+
+// VRRPFamilyInfo is the state of one IP version of a virtual router.
+type VRRPFamilyInfo struct {
+	// State: Initialize, Backup or Master.
+	State          string   `json:"state"`
+	Device         string   `json:"device,omitempty"` // the macvlan device
+	MAC            string   `json:"mac,omitempty"`
+	PrimaryAddress string   `json:"primary_address,omitempty"`
+	Addresses      []string `json:"addresses"`
+	// EffectivePriority is the priority advertised.
+	EffectivePriority int `json:"effective_priority"`
+	// MasterAdverInterval is the master's advertisement interval (ms),
+	// MasterDownInterval how long (ms) a backup waits before it takes
+	// over.
+	MasterAdverInterval int   `json:"master_adver_interval"`
+	MasterDownInterval  int   `json:"master_down_interval"`
+	AdvertisementsSent  int64 `json:"advertisements_sent"`
+	AdvertisementsRecv  int64 `json:"advertisements_received"`
+	Transitions         int64 `json:"transitions"`
+}

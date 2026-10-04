@@ -1220,6 +1220,27 @@ func (s *Server) handleAgentOSPF(c *echo.Context) error {
 	return c.JSON(http.StatusOK, o)
 }
 
+// handleAgentVRRP passes on the state of the instances' virtual routers,
+// for the VRRP page.
+func (s *Server) handleAgentVRRP(c *echo.Context) error {
+	a, _, err := s.agent()
+	if err != nil {
+		return agentError(c, err)
+	}
+	v, err := a.VRRP(c.Request().Context())
+	if err != nil {
+		return agentError(c, err)
+	}
+	names, err := s.readableInstanceNames(c)
+	if err != nil {
+		return err
+	}
+	if names != nil {
+		filterVRRP(v, names)
+	}
+	return c.JSON(http.StatusOK, v)
+}
+
 // handleAgentRuleCounters passes on the traffic per rule (by rule id), for
 // the Rules page.
 func (s *Server) handleAgentRuleCounters(c *echo.Context) error {

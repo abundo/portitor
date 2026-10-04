@@ -84,7 +84,7 @@ func TestParseOSPFArea(t *testing.T) {
 func TestFRRRunning(t *testing.T) {
 	doc := SampleDocument()
 	in := doc.Instance("guest")
-	in.BGP = nil
+	in.BGP, in.VRRP = nil, nil
 	if !in.FRRRunning() || !in.OSPFRunning(2) || !in.OSPFRunning(3) {
 		t.Fatal("OSPF alone runs FRR")
 	}

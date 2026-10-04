@@ -175,6 +175,13 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 				}
 			}
 		}
+		vrrpDevs := in.VRRPDevices()
+		for _, d := range vrrpDevs {
+			want[d.Name] = true
+			if ns == "" {
+				newRoot = append(newRoot, d.Name)
+			}
+		}
 		for name, l := range links {
 			if want[name] || name == "lo" || l.kind() == "" {
 				continue
@@ -199,6 +206,11 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 					return err
 				}
 			}
+		}
+
+		// The VRRP devices, on their interfaces (created above).
+		if err := a.doAll(ctx, planVRRPCreate(ns, vrrpDevs, links)); err != nil {
+			return err
 		}
 
 		if links, err = a.links(ctx, ns); err != nil {
@@ -248,6 +260,7 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 			}
 			sysctls = append(sysctls, "net.ipv6.conf."+strings.ReplaceAll(ifc.Name, ".", "/")+".accept_ra="+ra)
 		}
+		sysctls = append(sysctls, vrrpSysctls(vrrpDevs)...)
 		if err := a.do(ctx, command{Netns: ns, Name: "sysctl", Args: append([]string{"-q", "-e", "-w"}, sysctls...)}); err != nil {
 			return err
 		}
@@ -265,6 +278,10 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 			if ifc.DHCPv6 && ifc.Enabled {
 				dhcp6Want = append(dhcp6Want, dhcp6Key{instance: in.Name, netns: ns, iface: ifc.Name, pd: ifc.DHCPv6PD, pdLen: ifc.DHCPv6PDLength})
 			}
+		}
+
+		if err := a.doAll(ctx, planVRRPDevices(ns, vrrpDevs, links)); err != nil {
+			return err
 		}
 
 		for _, d := range in.DynDNS {

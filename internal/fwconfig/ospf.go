@@ -348,7 +348,8 @@ func (in *Instance) OSPFRunning(version int) bool {
 	return o != nil && o.Enabled
 }
 
-// FRRRunning reports whether the instance runs FRR: for BGP or OSPF.
+// FRRRunning reports whether the instance runs FRR: for BGP, OSPF or
+// VRRP.
 func (in *Instance) FRRRunning() bool {
-	return in.BGPRunning() || in.OSPFRunning(2) || in.OSPFRunning(3)
+	return in.BGPRunning() || in.OSPFRunning(2) || in.OSPFRunning(3) || in.VRRPRunning()
 }

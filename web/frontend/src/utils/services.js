@@ -85,7 +85,7 @@ export function newPort(protocol = 'tcp') {
 // Auto rules (render.AutoRule), shown locked in the input chain.
 // autoService shows an auto rule's protocol and ports like a service.
 export function autoService(a) {
-  if (a.protocol === 'ospf' || a.protocol === 'ospfv3') return a.protocol
+  if (a.protocol === 'ospf' || a.protocol === 'ospfv3' || a.protocol === 'vrrp') return a.protocol
   const protos = a.protocol === 'tcp,udp' ? ['tcp', 'udp'] : [a.protocol]
   const from = a.src_port ? ` from ${a.src_port}` : ''
   return protos.map((p) => `${p}/${a.dst_port}${from}`).join(', ')

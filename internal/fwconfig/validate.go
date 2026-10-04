@@ -131,6 +131,9 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 		if strings.HasPrefix(ifc.Name, IFBPrefix) {
 			v.addf("%s: %s names are for shaping devices", ip, IFBPrefix)
 		}
+		if isVRRPDeviceName(ifc.Name) {
+			v.addf("%s: %s and %s names are for VRRP devices", ip, VRRPDevicePrefix4, VRRPDevicePrefix6)
+		}
 		if ifc.ShapeEgress < 0 || ifc.ShapeEgress > MaxShapeMbit || ifc.ShapeIngress < 0 || ifc.ShapeIngress > MaxShapeMbit {
 			v.addf("%s: shaping must be 0-%d Mbit/s", ip, MaxShapeMbit)
 		}
@@ -692,6 +695,7 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 	}
 	v.dnsTemplates(p, &in.DNS)
 	v.routing(p, in, ifaces)
+	v.vrrp(p, in, ifaces, addrOwner)
 }
 
 func (v *validator) dnsTemplates(p string, d *DNSServer) {
