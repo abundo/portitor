@@ -64,7 +64,6 @@ const sections = computed(() => [
     children: [
       { label: 'Rules', icon: 'i-lucide-shield-check', to: '/rules' },
       { label: 'Services', icon: 'i-lucide-plug', to: '/services' },
-      { label: 'NAT & port forwards', icon: 'i-lucide-arrow-right-left', to: '/nat' },
       ...(auth.canDeploy
         ? [{ label: 'Connections', icon: 'i-lucide-activity', to: '/connections' }]
         : []),

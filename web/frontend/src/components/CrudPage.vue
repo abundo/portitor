@@ -89,6 +89,8 @@ const props = defineProps({
   // formOnly: no table, only the form, which the page opens through
   // openCreate/openEdit (the rows are listed elsewhere).
   formOnly: { type: Boolean, default: false },
+  // bare: no card and no title, for a table inside another page's tab.
+  bare: { type: Boolean, default: false },
 })
 const emit = defineEmits(['changed'])
 
@@ -348,10 +350,13 @@ defineExpose({ reload: load, openEdit, openView, openCreate })
 </script>
 
 <template>
-  <div v-if="!formOnly" class="card">
-    <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
+  <div v-if="!formOnly" :class="{ card: !bare }">
+    <div
+      class="flex flex-wrap items-start justify-between gap-3"
+      :class="bare ? 'mb-2 items-end pt-2' : 'mb-4'"
+    >
       <div>
-        <div class="flex items-center gap-1.5">
+        <div v-if="!bare" class="flex items-center gap-1.5">
           <div class="text-lg font-semibold">{{ title }}</div>
           <UPopover
             v-if="info"

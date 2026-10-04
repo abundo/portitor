@@ -32,7 +32,7 @@ const router = createRouter({
         { path: 'interface-zones', component: () => import('@/views/InterfaceZonesPage.vue') },
         { path: 'rules', component: () => import('@/views/RulesPage.vue') },
         { path: 'services', component: () => import('@/views/ServicesPage.vue') },
-        { path: 'nat', component: () => import('@/views/NatPage.vue') },
+        { path: 'nat', redirect: '/rules' },
         {
           path: 'connections',
           component: () => import('@/views/ConnectionsPage.vue'),

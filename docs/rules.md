@@ -7,17 +7,24 @@ The *Rules* page (under *Firewall*) decides which traffic each virtual firewall 
 through. This guide explains how the rules are evaluated, what each field means, and
 how to build a rule set that is easy to read and safe to change.
 
-## The three chains
+## The chains
 
-Each virtual firewall has three tabs, one per chain:
+Each virtual firewall has five tabs, one per netfilter hook, in the order a packet
+passes them: prerouting, then input (to the firewall) or forward (through it), output
+for what the firewall itself sends, and postrouting last.
 
 | Chain | Traffic | Typical use |
 |---|---|---|
+| **Prerouting** | as it arrives, before routing | port forwards (DNAT) |
 | **Input** | to the firewall itself | SSH or the GUI from the LAN, ping |
 | **Forward** | through the firewall, from one interface to another | LAN to Internet, access to a DMZ server, port forwards |
 | **Output** | from the firewall itself | usually nothing: leave it open, or limit what the firewall may reach |
+| **Postrouting** | as it leaves, after routing | masquerade (Internet sharing), source NAT |
 
-A packet is checked against one chain only. Traffic from your LAN to the Internet is
+Prerouting and postrouting hold NAT rules, which rewrite addresses; input, forward and
+output hold the filter rules, which accept or drop.
+
+A packet is checked against one filter chain only. Traffic from your LAN to the Internet is
 *forward*; traffic from your LAN to the firewall's own address (its DNS server, say) is
 *input*.
 
@@ -111,7 +118,7 @@ Internet access from the LAN (forward):
 | lan | wan | | | | accept |
 
 A web server in the DMZ, reachable from everywhere (forward; add a port forward on the
-*NAT* page if it has a private address):
+*Prerouting* tab if it has a private address):
 
 | In | Out | Services | Source | Destination | Action |
 |---|---|---|---|---|---|
@@ -141,14 +148,14 @@ fail fast):
 
 A port forward makes a server on an inside network reachable from outside. A
 connection to a port on the firewall's WAN address is sent on to the server's address
-and port. Port forwards are set on the *NAT & port forwards* page, not on the Rules page.
+and port. Port forwards are set on the *Prerouting* tab.
 
 ### How to set it up
 
 Take a web server `192.168.1.10` on the LAN that should answer HTTPS on the WAN
 address:
 
-1. On the *NAT & port forwards* page, add an entry of kind **Port forward (DNAT)**.
+1. On the *Prerouting* tab, add a port forward.
 2. **Incoming interfaces:** `wan`, where the connections come in.
 3. **Protocol:** `tcp`, with **Destination ports** `443`.
 4. **Target address:** `192.168.1.10`. Set a **Target port** only when the server
@@ -178,7 +185,7 @@ would stop matching after the change.
 
 ## Port forwards from inside: hairpin NAT
 
-A port forward (a *dnat* rule on the *NAT* page) normally works only from outside: it
+A port forward (on the *Prerouting* tab) normally works only from outside: it
 matches traffic that comes in on its incoming interfaces, usually the WAN. A LAN
 client that uses the server's public name, say `nas.example.com`, which resolves to the
 WAN address, reaches the firewall itself instead, and the connection fails. *Hairpin*
@@ -186,7 +193,7 @@ makes the port forward work from the inside too.
 
 ### How to set it up
 
-1. On the *NAT* page, open the port forward (kind *dnat*). It must have *Incoming
+1. On the *Prerouting* tab, open the port forward. It must have *Incoming
    interfaces* set, usually `wan`.
 2. Turn on **Hairpin** and save.
 3. Deploy.

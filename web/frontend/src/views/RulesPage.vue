@@ -3,6 +3,7 @@
 
 <script setup>
 import CrudPage from '@/components/CrudPage.vue'
+import NatTable from '@/components/NatTable.vue'
 import NeedInstance from '@/components/NeedInstance.vue'
 import RulesTable from '@/components/RulesTable.vue'
 import { onMounted, onUnmounted, ref, watch } from 'vue'
@@ -215,12 +216,24 @@ const fields = [
   { key: 'description', label: 'Description' },
 ]
 
-// One tab per chain; forward opens first.
+// One tab per hook, in the order packets pass them; forward opens first.
+// Prerouting and postrouting hold the NAT rules.
 const chains = [
+  {
+    value: 'prerouting',
+    label: 'Prerouting',
+    text: 'Before routing: port forwards (DNAT) rewrite the destination. Port-forwarded connections are accepted after the forward rules, so a forward rule can drop them.',
+  },
   { value: 'input', label: 'Input', text: 'Traffic to the firewall itself.' },
   { value: 'forward', label: 'Forward', text: 'Traffic through the firewall.' },
   { value: 'output', label: 'Output', text: 'Traffic from the firewall itself.' },
+  {
+    value: 'postrouting',
+    label: 'Postrouting',
+    text: 'After routing: source NAT and masquerade rewrite the source, as for Internet sharing (masquerade out of the WAN).',
+  },
 ]
+const natHook = (c) => c.value === 'prerouting' || c.value === 'postrouting'
 const chainTab = ref('forward')
 
 // Each table shows one chain; a move within it becomes a move in the full
@@ -287,7 +300,7 @@ function clean(b) {
   <NeedInstance>
     <CrudPage
       title="Rules"
-      info="Evaluated top to bottom; the first match decides. Edit cells in place (changes save at once), drag the grip to reorder, right-click a row to insert a rule, comment or group. A group heads the rows below it up to the next group; its chevron folds them away (only in the view: folded rules still apply). Established connections are allowed, and so is what the configured services (DHCP, DNS, WireGuard) need: those input rules are shown locked and follow the services' settings. In the default virtual firewall the agent's management port and SSH stay open to its allow_from addresses. Port forwards are accepted after the forward rules (the locked row above the last one), so a forward rule can drop what a port forward would let in. Invalid packets (of no known connection) and traffic to or through the firewall that no rule accepts are dropped; the locked rows at the top and bottom of each chain count them."
+      info="Evaluated top to bottom; the first match decides. Edit cells in place (changes save at once), drag the grip to reorder, right-click a row to insert a rule, comment or group. Prerouting and postrouting hold the NAT rules: port forwards, and source NAT and masquerade. A group heads the rows below it up to the next group; its chevron folds them away (only in the view: folded rules still apply). Established connections are allowed, and so is what the configured services (DHCP, DNS, WireGuard) need: those input rules are shown locked and follow the services' settings. In the default virtual firewall the agent's management port and SSH stay open to its allow_from addresses. Port forwards are accepted after the forward rules (the locked row above the last one), so a forward rule can drop what a port forward would let in. Invalid packets (of no known connection) and traffic to or through the firewall that no rule accepts are dropped; the locked rows at the top and bottom of each chain count them."
       :api="api"
       :params="{ instance_id: store.currentId }"
       :columns="[]"
@@ -316,37 +329,40 @@ function clean(b) {
       >
         <UTabs v-model="chainTab" :items="chains">
           <template #content="{ item: c }">
-            <div class="mb-2 flex items-end justify-between gap-3 pt-2">
-              <p class="text-sm text-muted">{{ c.text }}</p>
-              <UButton
-                v-if="auth.canEdit"
-                size="sm"
-                variant="soft"
-                icon="i-lucide-plus"
-                :label="`New ${c.value} rule`"
-                @click="openCreate({ chain: c.value })"
+            <NatTable v-if="natHook(c)" :hook="c.value" :description="c.text" />
+            <template v-else>
+              <div class="mb-2 flex items-end justify-between gap-3 pt-2">
+                <p class="text-sm text-muted">{{ c.text }}</p>
+                <UButton
+                  v-if="auth.canEdit"
+                  size="sm"
+                  variant="soft"
+                  icon="i-lucide-plus"
+                  :label="`New ${c.value} rule`"
+                  @click="openCreate({ chain: c.value })"
+                />
+              </div>
+              <RulesTable
+                :rows="rows.filter((r) => r.chain === c.value)"
+                :chain="c.value"
+                :auto="c.value === 'input' ? autoRules : []"
+                :ifaces="ifaceRefItems"
+                :counters="counters"
+                :drops="drops && (drops[store.current?.name]?.[c.value] ?? {})"
+                :log-builtin="logBuiltin(c.value)"
+                :read-only="!auth.canEdit"
+                :insert="
+                  (kind, at) => insertInChain(rows, c.value, { openCreate, createAt }, kind, at)
+                "
+                :copy="(r, at) => copyInChain(rows, c.value, createAt, r, at)"
+                @save="saveRow"
+                @move="(from, to) => moveInChain(rows, c.value, moveTo, from, to)"
+                @edit="openEdit"
+                @view="(a) => openView(lockedRow(c.value, a))"
+                @remove="remove"
+                @log-builtin="(kind, service, on) => setLogBuiltin(c.value, kind, service, on)"
               />
-            </div>
-            <RulesTable
-              :rows="rows.filter((r) => r.chain === c.value)"
-              :chain="c.value"
-              :auto="c.value === 'input' ? autoRules : []"
-              :ifaces="ifaceRefItems"
-              :counters="counters"
-              :drops="drops && (drops[store.current?.name]?.[c.value] ?? {})"
-              :log-builtin="logBuiltin(c.value)"
-              :read-only="!auth.canEdit"
-              :insert="
-                (kind, at) => insertInChain(rows, c.value, { openCreate, createAt }, kind, at)
-              "
-              :copy="(r, at) => copyInChain(rows, c.value, createAt, r, at)"
-              @save="saveRow"
-              @move="(from, to) => moveInChain(rows, c.value, moveTo, from, to)"
-              @edit="openEdit"
-              @view="(a) => openView(lockedRow(c.value, a))"
-              @remove="remove"
-              @log-builtin="(kind, service, on) => setLogBuiltin(c.value, kind, service, on)"
-            />
+            </template>
           </template>
         </UTabs>
       </template>

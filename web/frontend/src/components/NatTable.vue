@@ -2,18 +2,29 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
 <script setup>
+// NatTable lists the NAT rules of one hook: prerouting holds the port
+// forwards (DNAT), postrouting source NAT and masquerade. The rules page
+// shows each in its tab, in the order packets pass the hooks.
 import CrudPage from '@/components/CrudPage.vue'
-import NeedInstance from '@/components/NeedInstance.vue'
 import { nat } from '@/api'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
 
+const props = defineProps({
+  // 'prerouting' or 'postrouting'
+  hook: { type: String, required: true },
+  description: { type: String, default: '' },
+})
+
 const { store, ifaceRefItems, ifaceListText } = useInstanceRefs()
 
-const kinds = [
-  { label: 'Port forward (DNAT)', value: 'dnat' },
-  { label: 'Source NAT to fixed address (SNAT)', value: 'snat' },
-  { label: 'Masquerade', value: 'masquerade' },
-]
+const pre = props.hook === 'prerouting'
+const kinds = pre
+  ? [{ label: 'Port forward (DNAT)', value: 'dnat' }]
+  : [
+      { label: 'Masquerade', value: 'masquerade' },
+      { label: 'Source NAT to fixed address (SNAT)', value: 'snat' },
+    ]
+const ofHook = (r) => (r.kind === 'dnat') === pre
 const protos = [
   { label: 'any', value: 'any' },
   { label: 'tcp', value: 'tcp' },
@@ -25,17 +36,17 @@ const protoLabel = (p) => (p === 'tcp,udp' ? 'tcp+udp' : p)
 const natIfaces = (r) => (r.kind === 'dnat' ? r.in_interfaces : r.out_interfaces)
 const natIfacesLabel = (r) => `${r.kind === 'dnat' ? 'in' : 'out'}: ${ifaceListText(natIfaces(r))}`
 
-// natNo numbers a NAT rule by its place in the list; natName names it like
-// the server's messages: "NAT rule 3 (description)".
+// natNo numbers a NAT rule by its place in its hook's list; natName names
+// it: "prerouting rule 3 (description)".
 const natNo = (r, rows) => rows.findIndex((x) => x.id === r.id) + 1
 function natName(r, rows) {
-  const name = `NAT rule ${natNo(r, rows)}`
+  const name = `${props.hook} rule ${natNo(r, rows)}`
   return r.description ? `${name} (${r.description})` : name
 }
 
 const columns = [
   { key: 'no', label: '#', format: natNo, class: 'text-muted tabular-nums' },
-  { key: 'kind', label: 'Kind' },
+  ...(pre ? [] : [{ key: 'kind', label: 'Kind' }]),
   {
     key: 'ifaces',
     label: 'Interfaces',
@@ -67,7 +78,7 @@ const columns = [
   { key: 'description', label: 'Description' },
 ]
 const fields = [
-  { key: 'kind', label: 'Kind', type: 'select', items: kinds },
+  ...(pre ? [] : [{ key: 'kind', label: 'Kind', type: 'select', items: kinds }]),
   {
     key: 'in_interfaces',
     label: 'Incoming interfaces',
@@ -130,30 +141,29 @@ const api = {
 </script>
 
 <template>
-  <NeedInstance>
-    <CrudPage
-      title="NAT"
-      noun="NAT rule"
-      description="Internet sharing (masquerade out of the WAN), port forwards and source NAT. Port-forwarded traffic is allowed through the firewall automatically."
-      :api="api"
-      :params="{ instance_id: store.currentId }"
-      :columns="columns"
-      :fields="fields"
-      :defaults="{
-        kind: 'dnat',
-        protocol: 'tcp',
-        enabled: true,
-        in_interfaces: [],
-        out_interfaces: [],
-        src_addrs: [],
-        dst_addrs: [],
-        to_port: 0,
-        hairpin: false,
-      }"
-      new-label="New NAT rule"
-      reorder="nat"
-      :item-name="natName"
-    >
-    </CrudPage>
-  </NeedInstance>
+  <CrudPage
+    bare
+    title="NAT"
+    :noun="pre ? 'port forward' : 'source NAT rule'"
+    :description="description"
+    :api="api"
+    :params="{ instance_id: store.currentId }"
+    :row-filter="ofHook"
+    :columns="columns"
+    :fields="fields"
+    :defaults="{
+      kind: pre ? 'dnat' : 'masquerade',
+      protocol: pre ? 'tcp' : 'any',
+      enabled: true,
+      in_interfaces: [],
+      out_interfaces: [],
+      src_addrs: [],
+      dst_addrs: [],
+      to_port: 0,
+      hairpin: false,
+    }"
+    :new-label="pre ? 'New port forward' : 'New source NAT rule'"
+    reorder="nat"
+    :item-name="natName"
+  />
 </template>
