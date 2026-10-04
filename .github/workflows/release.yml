@@ -41,11 +41,14 @@ jobs:
           node-version: "24"
           cache: npm
           cache-dependency-path: web/frontend/package-lock.json
+      # The release notes are the tag's section of CHANGELOG.md; a tag
+      # without one fails here, before anything is published.
+      - run: dev/release-notes.sh "$GITHUB_REF_NAME" > "$RUNNER_TEMP/notes.md"
       - uses: goreleaser/goreleaser-action@v7
         with:
           distribution: goreleaser
           version: "~> v2"
-          args: release --clean
+          args: release --clean --release-notes ${{ runner.temp }}/notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

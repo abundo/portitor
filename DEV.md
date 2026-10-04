@@ -118,6 +118,9 @@ module loaded on the host for `wg0`.
    `cd web/frontend && npm audit --omit=dev`.
 2. **Docs:** `git log --oneline <last tag>..` against README's feature list,
    `docs/*.md` (bundled into the GUI's Help) and AGENTS.md's layout and invariants.
+   Write the release's section in `CHANGELOG.md` (`## vX.Y.Z`: New, Changed,
+   Fixed, Upgrading): the release notes on GitHub are that section
+   (`dev/release-notes.sh`), and the release workflow fails without one.
 3. **Installer:** if `install.py`, `deploy/` or the packages changed since the last
    tag (`git diff <last tag> -- install.py deploy/ iso/`), `INSTALLER_VERSION` is
    bumped once for the release; a new Debian package is in `AGENT_PACKAGES` and
@@ -139,7 +142,8 @@ module loaded on the host for `wg0`.
    and that *Admin → Updates* on an installed box lists and installs it.
 
 Pushing a tag `v*` runs `.github/workflows/release.yml`: tests, then GoReleaser
-(`.goreleaser.yaml`) publishes `portitor_<version>_linux_{amd64,arm64}.tar.gz` (both
+(`.goreleaser.yaml`), with the tag's section of `CHANGELOG.md` as the release
+notes, publishes `portitor_<version>_linux_{amd64,arm64}.tar.gz` (both
 binaries, `deploy/`, `install.py`) and a checksums file. The `iso` job then builds
 the installer ISO from the published amd64 archive (`iso/build.sh --release`) and
 attaches `portitor-<tag>-amd64.iso` and its `.sha256` to the release. `install.py` installs from
