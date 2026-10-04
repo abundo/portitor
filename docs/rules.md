@@ -190,6 +190,11 @@ What is imported:
 - Matches on interfaces (`iifname`, `oifname`), addresses, destination ports, protocols,
   ICMP types and the IP version; `accept`, `drop`, `reject` and `log`. A rule's
   comment becomes its description.
+- Regular chains reached by `jump` or `goto`, in place: each of their rules gets the
+  jumping rule's matches too, and they go in a group of their own, named after the
+  chain. After a `goto`, a rule applies the chain's policy to what went there, since
+  it doesn't come back. A rule can't match the same field twice (an interface in
+  both the jump and the rule, say); such a rule is left out.
 - `dnat` in prerouting and `snat` and `masquerade` in postrouting nat chains, as
   port forwards and source NAT.
 - A named set of addresses becomes a host/prefix of the same name. If a different one
@@ -198,8 +203,8 @@ What is imported:
   otherwise (`tcp-8080`).
 
 What is left out: `ct state established,related accept`, `ct state invalid drop` and
-loopback accepts, which Portitor adds itself; regular chains reached by `jump` or
-`goto`; negated matches (`!=`); source ports; `limit` (use a [rate limit](#rate-limits));
+loopback accepts, which Portitor adds itself; chains no imported chain jumps to; a
+`return` with matches, and the rest of its chain; negated matches (`!=`); source ports; `limit` (use a [rate limit](#rate-limits));
 interface wildcards; dynamic sets, maps and other statements.
 
 ## Examples

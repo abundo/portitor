@@ -95,7 +95,7 @@ async function run(apply) {
 const counts = computed(() => {
   const r = result.value
   if (!r) return []
-  const by = (chain) => r.rules.filter((x) => x.chain === chain).length
+  const by = (chain) => r.rules.filter((x) => x.chain === chain && !x.kind).length
   return [
     ['Input rules', by('input')],
     ['Forward rules', by('forward')],

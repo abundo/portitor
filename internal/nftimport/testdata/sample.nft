@@ -19,8 +19,16 @@ table inet filter {
     tcp dport @webports counter log prefix "web " accept
     iifname != "eth0" udp dport 123 reject
     jump custom
+    iifname "eth1" goto lan_in
   }
   chain custom { tcp dport 9999 accept; }
+  chain lan_in {
+    udp dport 161 accept
+    iifname "eth0" drop
+    ip saddr 192.168.1.5 return
+    tcp dport 25 accept
+  }
+  chain unused { tcp dport 1 accept; }
   chain forward { type filter hook forward priority 0; policy accept;
     oifname "eth0" ip6 daddr 2001:db8::/32 reject with icmpx admin-prohibited; }
 }

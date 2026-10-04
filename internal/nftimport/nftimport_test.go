@@ -43,6 +43,10 @@ func TestImport(t *testing.T) {
 	}
 	var got []rule
 	for _, r := range res.Rules {
+		if r.Kind == models.RuleKindGroup {
+			got = append(got, rule{chain: r.Chain, action: "group " + r.Description})
+			continue
+		}
 		got = append(got, rule{r.Chain, strings.Join(r.InInterfaces, ","), strings.Join(r.OutInterfaces, ","),
 			strings.Join(r.SrcAddrs, ","), strings.Join(r.DstAddrs, ","), strings.Join(r.Services, ","), r.Action, r.Log})
 	}
@@ -52,6 +56,11 @@ func TestImport(t *testing.T) {
 		{"input", "", "", "", "", "dns", "accept", false},
 		{"input", "", "", "", "", "ping6,icmp6-nd-neighbor-solicit", "accept", false},
 		{"input", "", "", "", "", "http,tcp-443", "accept", true},
+		{chain: "input", action: "group Chain custom (jump from input: jump custom)"},
+		{"input", "", "", "", "", "tcp-9999", "accept", false},
+		{chain: "input", action: `group Chain lan_in (goto from input: iifname "eth1" goto lan_in)`},
+		{"input", "lan", "", "", "", "udp-161", "accept", false},
+		{"input", "lan", "", "", "", "", "drop", false}, // after the goto: input's policy
 		{"forward", "", "wan", "", "2001:db8::/32", "", "reject", false},
 		{"forward", "", "", "", "", "", "accept", false}, // policy accept
 	}
@@ -84,7 +93,7 @@ func TestImport(t *testing.T) {
 	for _, s := range res.Services {
 		svc = append(svc, s.Name)
 	}
-	if !slices.Equal(svc, []string{"tcp-8000-8080", "icmp6-nd-neighbor-solicit", "tcp-443"}) {
+	if !slices.Equal(svc, []string{"tcp-8000-8080", "icmp6-nd-neighbor-solicit", "tcp-443", "tcp-9999", "udp-161"}) {
 		t.Errorf("services: %v", svc)
 	}
 
@@ -102,13 +111,18 @@ func TestImport(t *testing.T) {
 	for text, want := range map[string]string{
 		`icmp type echo-request limit rate 5/second burst 5 packets accept`: "limit",
 		`iifname != "eth0" udp dport 123 reject`:                            "negated",
-		`jump custom`:                                                       "jump",
-		`tcp dport 9999 accept`:                                             "no hook",
+		`iifname "eth0" drop`:                                               "two incoming interface",
+		`ip saddr 192.168.1.5 return`:                                       "return with matches",
+		`tcp dport 25 accept`:                                               "return with matches",
+		`tcp dport 1 accept`:                                                "not reached",
 		`oifname "eth2" snat to 203.0.113.5`:                                "eth2",
 	} {
 		if !strings.Contains(reasons[text], want) {
 			t.Errorf("%s: reason %q, want one with %q", text, reasons[text], want)
 		}
+	}
+	if !slices.ContainsFunc(res.Skipped, func(s Skipped) bool { return s.Where == "inet filter lan_in (from input)" }) {
+		t.Errorf("no rule of lan_in skipped as reached from input: %+v", res.Skipped)
 	}
 	if !slices.Equal(res.Interfaces, []string{"eth0", "eth1", "eth2"}) {
 		t.Errorf("interfaces: %v", res.Interfaces)

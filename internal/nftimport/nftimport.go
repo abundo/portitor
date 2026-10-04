@@ -73,6 +73,9 @@ type nftRule struct {
 	Handle               int
 	Comment              string
 	Expr                 []map[string]json.RawMessage
+	// via is the chains that jumped to reach the rule, outermost first
+	// ("input").
+	via []string
 }
 
 type nftSet struct {
@@ -95,6 +98,7 @@ func Import(js []byte, text string, opt Options) (*Result, error) {
 		opt:      opt,
 		texts:    ruleTexts(text),
 		sets:     map[string]*nftSet{},
+		reached:  map[string]bool{},
 		objects:  map[string]string{},
 		services: map[string]bool{},
 		foreign:  map[string]bool{},
@@ -128,10 +132,20 @@ func Import(js []byte, text string, opt Options) (*Result, error) {
 			}
 		}
 	}
+	im.chains = byName
 	// Chains on the same hook run by priority, then as listed.
 	sort.SliceStable(chains, func(i, j int) bool { return chains[i].Prio < chains[j].Prio })
 	for _, c := range chains {
-		im.chain(c)
+		if c.Hook != "" {
+			im.chain(c)
+		}
+	}
+	for _, c := range chains {
+		if c.Hook == "" && !im.reached[c.Family+" "+c.Table+" "+c.Name] {
+			for _, r := range c.rules {
+				im.skip(r, "chain "+c.Name+" is not reached by a jump from an imported chain", false)
+			}
+		}
 	}
 	for n := range im.foreign {
 		im.res.Interfaces = append(im.res.Interfaces, n)
@@ -147,6 +161,10 @@ type importer struct {
 	opt   Options
 	texts map[string]string
 	sets  map[string]*nftSet
+	// chains are all chains by "family table name"; reached holds the
+	// regular ones a jump reached.
+	chains  map[string]*nftChain
+	reached map[string]bool
 	// objects maps a set ("family table name") to its host/prefix name.
 	objects map[string]string
 	// services holds the names of the new services.
@@ -163,16 +181,21 @@ func (im *importer) chain(c *nftChain) {
 		}
 	}
 	switch {
-	case c.Hook == "":
-		skipAll("chain " + c.Name + " has no hook: chains reached by jump are not imported")
-		return
 	case c.Family != "inet" && c.Family != "ip" && c.Family != "ip6":
 		skipAll("tables of family " + c.Family + " are not imported")
 		return
 	case c.Type == "filter" && (c.Hook == fwconfig.ChainInput || c.Hook == fwconfig.ChainForward || c.Hook == fwconfig.ChainOutput):
-		for _, r := range c.rules {
-			im.filterRule(c, r)
-		}
+		im.walk(c, c.rules, nil, nil, func(r nftRule) { im.filterRule(c, r) }, func(title string) {
+			// A group with nothing in it gives way to the next one.
+			if n := len(im.res.Rules); n > 0 && im.res.Rules[n-1].Kind == models.RuleKindGroup && im.res.Rules[n-1].Chain == c.Hook {
+				im.res.Rules = im.res.Rules[:n-1]
+			}
+			im.res.Rules = append(im.res.Rules, models.Rule{
+				Chain: c.Hook, Kind: models.RuleKindGroup, Description: title, Enabled: true,
+				InInterfaces: models.StringList{}, OutInterfaces: models.StringList{},
+				SrcAddrs: models.StringList{}, DstAddrs: models.StringList{}, Services: models.StringList{},
+			})
+		})
 		if c.Policy != "drop" {
 			// Portitor's chains drop what no rule accepts.
 			im.res.Rules = append(im.res.Rules, models.Rule{
@@ -184,9 +207,7 @@ func (im *importer) chain(c *nftChain) {
 			})
 		}
 	case c.Type == "nat" && (c.Hook == "prerouting" || c.Hook == "postrouting"):
-		for _, r := range c.rules {
-			im.natRule(c, r)
-		}
+		im.walk(c, c.rules, nil, nil, func(r nftRule) { im.natRule(c, r) }, nil)
 	default:
 		skipAll("chains of type " + c.Type + " on hook " + c.Hook + " are not imported")
 	}
@@ -194,9 +215,103 @@ func (im *importer) chain(c *nftChain) {
 
 func (im *importer) skip(r nftRule, reason string, builtin bool) {
 	text := im.texts[r.Family+" "+r.Table+" "+r.Chain+" "+strconv.Itoa(r.Handle)]
-	im.res.Skipped = append(im.res.Skipped, Skipped{
-		Where: r.Family + " " + r.Table + " " + r.Chain, Text: text, Reason: reason, Builtin: builtin,
-	})
+	where := r.Family + " " + r.Table + " " + r.Chain
+	if len(r.via) > 0 {
+		where += " (from " + strings.Join(r.via, ", ") + ")"
+	}
+	im.res.Skipped = append(im.res.Skipped, Skipped{Where: where, Text: text, Reason: reason, Builtin: builtin})
+}
+
+// maxJumpDepth bounds nested jumps (nft allows 16).
+const maxJumpDepth = 16
+
+// walk passes a chain's rules to emit, following jumps: the rules of a
+// regular chain a rule jumps to take its place, each with the jumping
+// rule's matches (prefix) before its own, so they match what reached them.
+// A goto doesn't come back, so a rule with its matches and the base
+// chain's policy follows. An unconditional return ends the chain; a
+// conditional one can't be flattened, so the rest of the chain is left out.
+// With group (filter chains), each jumped-to chain's rules go in a group
+// of their own, and a group named after the calling chain holds what
+// follows the jump.
+func (im *importer) walk(base *nftChain, rules []nftRule, prefix []map[string]json.RawMessage, via []string, emit func(nftRule), group func(string)) {
+	for i, r := range rules {
+		r.via = via
+		last := ""
+		var lastVal json.RawMessage
+		if n := len(r.Expr); n > 0 {
+			for k, v := range r.Expr[n-1] {
+				last, lastVal = k, v
+			}
+		}
+		own := r.Expr
+		if last == "jump" || last == "goto" || last == "return" {
+			own = r.Expr[:len(r.Expr)-1]
+		}
+		matches := append(slices.Clone(prefix), own...)
+		switch last {
+		case "return":
+			if len(via) == 0 {
+				im.skip(r, "return in a base chain is not supported", false)
+				continue
+			}
+			if len(own) == 0 {
+				return // what follows is never reached
+			}
+			for _, rest := range rules[i:] {
+				rest.via = via
+				im.skip(rest, "a return with matches can't be flattened; the rest of the chain is left out", false)
+			}
+			return
+		case "jump", "goto":
+			var t struct{ Target string }
+			_ = json.Unmarshal(lastVal, &t)
+			key := r.Family + " " + r.Table + " " + t.Target
+			target := im.chains[key]
+			switch {
+			case target == nil:
+				im.skip(r, "chain "+t.Target+" is not in the file", false)
+				continue
+			case target.Hook != "":
+				im.skip(r, last+" to base chain "+t.Target+" is not supported", false)
+				continue
+			case t.Target == r.Chain || slices.Contains(via, t.Target) || len(via) >= maxJumpDepth:
+				im.skip(r, last+" to chain "+t.Target+" loops", false)
+				continue
+			case last == "goto" && base.Type == "nat":
+				im.skip(r, "goto in nat chains is not supported", false)
+				continue
+			}
+			im.reached[key] = true
+			caller := r.Chain
+			if group != nil {
+				title := "Chain " + t.Target + " (" + last + " from " + caller
+				if text := im.texts[r.Family+" "+r.Table+" "+r.Chain+" "+strconv.Itoa(r.Handle)]; text != "" {
+					title += ": " + text
+				}
+				group(title + ")")
+			}
+			im.walk(base, target.rules, matches, append(slices.Clone(via), r.Chain), emit, group)
+			if last == "goto" {
+				policy := fwconfig.ActionAccept
+				if base.Policy == "drop" {
+					policy = fwconfig.ActionDrop
+				}
+				g := r
+				g.Expr = append(slices.Clone(matches), map[string]json.RawMessage{policy: json.RawMessage("null")})
+				g.Comment = "After goto " + t.Target + ": the policy of " + base.Name
+				emit(g)
+			}
+			// What follows (in the calling chain, or the base chain's
+			// policy row) leaves the jump's group.
+			if group != nil && (i < len(rules)-1 || len(via) == 0 && base.Policy != "drop") {
+				group("Chain " + caller)
+			}
+		default:
+			r.Expr = matches
+			emit(r)
+		}
+	}
 }
 
 // match is a rule's matches and statements, gathered.
@@ -291,10 +406,8 @@ func (im *importer) expr(r nftRule, m *match, e map[string]json.RawMessage) {
 				panic(unsupported("masquerade with options is not supported"))
 			}
 			m.nat = k
-		case "jump", "goto":
-			var t struct{ Target string }
-			_ = json.Unmarshal(v, &t)
-			panic(unsupported(k + " to chain " + t.Target + ": chains reached by jump are not imported"))
+		case "jump", "goto", "return":
+			panic(unsupported(k + " must end the rule"))
 		case "limit":
 			panic(unsupported("limit: rate limits are not imported; add one under Rate limits"))
 		case "xt":
@@ -347,9 +460,11 @@ func (im *importer) matchExpr(r nftRule, m *match, raw json.RawMessage) {
 			}
 		}
 		if left.Key[0] == 'i' {
+			once("incoming interface", m.in)
 			m.in = append(m.in, names...)
 			m.loopback = len(names) == 1 && names[0] == "lo"
 		} else {
+			once("outgoing interface", m.out)
 			m.out = append(m.out, names...)
 		}
 	case kind == "meta" && left.Key == "nfproto":
@@ -364,6 +479,7 @@ func (im *importer) matchExpr(r nftRule, m *match, raw json.RawMessage) {
 		if left.Protocol != "" {
 			m.setFamily(familyOf(left.Protocol))
 		}
+		once("protocol", m.protos)
 		for _, it := range im.items(r, mt.Right, "protocol") {
 			if it.isNum {
 				m.protos = append(m.protos, strconv.Itoa(it.num))
@@ -375,8 +491,10 @@ func (im *importer) matchExpr(r nftRule, m *match, raw json.RawMessage) {
 		m.setFamily(familyOf(left.Protocol))
 		addrs := im.addresses(r, mt.Right)
 		if left.Field == "saddr" {
+			once("source address", m.src)
 			m.src = append(m.src, addrs...)
 		} else {
+			once("destination address", m.dst)
 			m.dst = append(m.dst, addrs...)
 		}
 	case kind == "payload" && left.Field == "dport" && slices.Contains([]string{"tcp", "udp", "sctp", "th"}, left.Protocol):
@@ -399,6 +517,7 @@ func (im *importer) matchExpr(r nftRule, m *match, raw json.RawMessage) {
 			}
 		}
 	case kind == "payload" && (left.Protocol == "icmp" || left.Protocol == "icmpv6") && left.Field == "type":
+		once("ICMP type", m.icmpTypes)
 		m.icmpProto = left.Protocol
 		m.icmpTypes = append(m.icmpTypes, im.strings(r, mt.Right, "ICMP type")...)
 	case kind == "ct" && left.Key == "state":
@@ -407,6 +526,14 @@ func (im *importer) matchExpr(r nftRule, m *match, raw json.RawMessage) {
 		panic(unsupported("source port matches are not supported"))
 	default:
 		panic(unsupported("matches on " + strings.Join(strings.Fields(what), " ") + " are not supported"))
+	}
+}
+
+// once refuses a second match on a field, from the rule or the jump to its
+// chain: both must hold, and a list would match either.
+func once(field string, have []string) {
+	if len(have) > 0 {
+		panic(unsupported("two " + field + " matches in one rule (with the jump to its chain) are not supported"))
 	}
 }
 

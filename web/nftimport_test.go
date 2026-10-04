@@ -45,7 +45,7 @@ func TestImportNftables(t *testing.T) {
 	var res nftimport.Result
 	rec := env.do("POST", "/api/import/nftables", body)
 	_ = json.Unmarshal(rec.Body.Bytes(), &res)
-	if rec.Code != http.StatusOK || len(res.Rules) != 7 || len(res.NAT) != 3 {
+	if rec.Code != http.StatusOK || len(res.Rules) != 12 || len(res.NAT) != 3 {
 		t.Fatalf("preview: %d %s", rec.Code, rec.Body)
 	}
 	if count(&models.Rule{}) != before || count(&models.AddressObject{}) != 0 || count(&models.Service{}) != 0 {
@@ -56,10 +56,10 @@ func TestImportNftables(t *testing.T) {
 	if rec := env.do("POST", "/api/import/nftables", body); rec.Code != http.StatusOK {
 		t.Fatalf("import: %d %s", rec.Code, rec.Body)
 	}
-	if n := count(&models.Rule{}); n != before+7 {
-		t.Errorf("%d rules, want %d + 7", n, before)
+	if n := count(&models.Rule{}); n != before+12 {
+		t.Errorf("%d rules, want %d + 12", n, before)
 	}
-	if count(&models.NatRule{}) != 3 || count(&models.AddressObject{}) != 1 || count(&models.Service{}) != 3 {
+	if count(&models.NatRule{}) != 3 || count(&models.AddressObject{}) != 1 || count(&models.Service{}) != 5 {
 		t.Errorf("NAT, objects or services missing")
 	}
 
@@ -68,7 +68,7 @@ func TestImportNftables(t *testing.T) {
 	if rec := env.do("POST", "/api/import/nftables", body); rec.Code != http.StatusOK {
 		t.Fatalf("replace: %d %s", rec.Code, rec.Body)
 	}
-	if count(&models.Rule{}) != 7 || count(&models.NatRule{}) != 3 || count(&models.AddressObject{}) != 1 || count(&models.Service{}) != 3 {
+	if count(&models.Rule{}) != 12 || count(&models.NatRule{}) != 3 || count(&models.AddressObject{}) != 1 || count(&models.Service{}) != 5 {
 		t.Errorf("replace: rules %d, NAT %d, objects %d, services %d",
 			count(&models.Rule{}), count(&models.NatRule{}), count(&models.AddressObject{}), count(&models.Service{}))
 	}
