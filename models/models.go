@@ -336,6 +336,10 @@ type Instance struct {
 	// Xlat464 announces it.
 	Nat64Prefix string `json:"nat64_prefix"`
 	Dns64       bool   `json:"dns64"`
+	// Nat64 translates the prefix to IPv4 here (Jool), from Nat64Pool4's
+	// IPv4 prefixes, or the outgoing interface's address when empty.
+	Nat64      bool       `json:"nat64"`
+	Nat64Pool4 StringList `json:"nat64_pool4"`
 
 	DhcpEnabled    bool   `json:"dhcp_enabled"`
 	DhcpDomainName string `json:"dhcp_domain_name"`

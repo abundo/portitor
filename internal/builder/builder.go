@@ -635,6 +635,14 @@ func build(db *gorm.DB, generation int64, only map[string]bool) (*fwconfig.Docum
 				in.RA[i].NAT64Prefix = mi.Nat64Prefix
 			}
 		}
+		if mi.Nat64 {
+			in.NAT64 = &fwconfig.NAT64{Prefix: mi.Nat64Prefix, Pool4: mi.Nat64Pool4}
+			for _, ifc := range in.Interfaces {
+				if mif, ok := ifaceByName(d.interfaces, mi.ID, ifc.Name); ok && mif.Xlat464 {
+					in.NAT64.Interfaces = append(in.NAT64.Interfaces, ifc.Name)
+				}
+			}
+		}
 
 		for _, c := range d.dyndns {
 			if c.InstanceID != mi.ID || !c.Enabled {

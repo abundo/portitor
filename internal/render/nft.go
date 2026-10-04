@@ -222,6 +222,8 @@ func Nftables(in *fwconfig.Instance, lockout *AntiLockout, paths Paths) string {
 	writePolicyCount(b, in, fwconfig.ChainOutput)
 	b.WriteString("\t}\n\n")
 
+	writeNAT64Guard(b, in)
+
 	// ----- NAT -----
 	b.WriteString("\tchain prerouting_nat {\n")
 	b.WriteString("\t\ttype nat hook prerouting priority dstnat; policy accept;\n")
@@ -1340,4 +1342,25 @@ func appendUnique(list []string, s string) []string {
 		}
 	}
 	return append(list, s)
+}
+
+// NAT64GuardPriority runs the NAT64 guard before Jool, which takes the
+// packets it translates at prerouting priority dstnat + 25.
+const NAT64GuardPriority = "mangle"
+
+// writeNAT64Guard drops IPv6 packets to the NAT64 prefix that don't come in
+// on an interface with 464XLAT: Jool translates them before the forward
+// chain could.
+func writeNAT64Guard(b *strings.Builder, in *fwconfig.Instance) {
+	if in.NAT64 == nil {
+		return
+	}
+	b.WriteString("\tchain prerouting_nat64 {\n")
+	fmt.Fprintf(b, "\t\ttype filter hook prerouting priority %s; policy accept;\n", NAT64GuardPriority)
+	match := ""
+	if ifaces := in.AddVRRPDevices(in.NAT64.Interfaces); len(ifaces) > 0 {
+		match = " iifname != " + quotedSet(ifaces)
+	}
+	fmt.Fprintf(b, "\t\tip6 daddr %s%s counter drop comment \"nat64\"\n", in.NAT64.Prefix, match)
+	b.WriteString("\t}\n\n")
 }

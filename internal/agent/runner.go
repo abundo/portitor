@@ -114,6 +114,8 @@ func isQuery(name string, args []string) bool {
 		return len(args) > 0 && (args[0] == "is-active" || args[0] == "is-enabled" || args[0] == "show")
 	case "journalctl":
 		return true
+	case "jool":
+		return len(args) > 0 && (args[len(args)-1] == "status" || args[len(args)-1] == "display")
 	case "unshare":
 		// An nftables import, read in a namespace of its own.
 		return len(args) > 0 && args[0] == "--net"

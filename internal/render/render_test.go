@@ -468,6 +468,24 @@ func TestNamedConfDNSSECValidation(t *testing.T) {
 	}
 }
 
+func TestNftablesNAT64Guard(t *testing.T) {
+	in := &fwconfig.SampleDocument().Instances[0]
+	nft := Nftables(in, nil, DefaultPaths())
+	want := "\tchain prerouting_nat64 {\n\t\ttype filter hook prerouting priority mangle; policy accept;\n" +
+		"\t\tip6 daddr 64:ff9b::/96 iifname != \"eth1\" counter drop comment \"nat64\"\n\t}\n"
+	if !strings.Contains(nft, want) {
+		t.Errorf("missing guard in\n%s", nft)
+	}
+	in.NAT64.Interfaces = nil
+	if nft := Nftables(in, nil, DefaultPaths()); !strings.Contains(nft, "\t\tip6 daddr 64:ff9b::/96 counter drop") {
+		t.Errorf("no interfaces: all dropped:\n%s", nft)
+	}
+	in.NAT64 = nil
+	if nft := Nftables(in, nil, DefaultPaths()); strings.Contains(nft, "nat64") {
+		t.Errorf("nat64 off:\n%s", nft)
+	}
+}
+
 func TestNamedConfDNS64(t *testing.T) {
 	in := &fwconfig.SampleDocument().Instances[0]
 	if named := NamedConf(in, DefaultPaths(), nil); !strings.Contains(named, "\tdns64 64:ff9b::/96 {\n\t};\n") {

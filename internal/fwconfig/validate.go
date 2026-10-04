@@ -646,6 +646,9 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 			v.addf("%s: dns: invalid forwarder %q", p, a)
 		}
 	}
+	if in.NAT64 != nil {
+		v.nat64(p, in.NAT64, ifaces)
+	}
 	if in.DNS.DNS64 != "" {
 		if err := CheckNAT64Prefix(in.DNS.DNS64); err != nil {
 			v.addf("%s: dns64: %v", p, err)

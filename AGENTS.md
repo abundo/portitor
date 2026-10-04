@@ -15,7 +15,7 @@ are in [README.md](README.md).
 | `cmd/portitor-agent` | Agent daemon on the firewall: `start`, `init`, `render`, `netns-exec`; run as `portitor` (a symlink, `cli.go`) it is a read-only CLI (`show lldp neighbours`, `show ip neighbours`) over the agent's GET routes on the root-only socket `<run_dir>/agent.sock` |
 | `internal/fwconfig` | The desired-state document and `Validate()`. **The contract between web and agent.** |
 | `internal/render` | Pure functions: document → nftables, WireGuard, named.conf, Kea, dnsmgr2 config, FRR (`frr.go`: frr.conf with BGP, OSPF, VRRP and BFD, daemons, vtysh.conf) |
-| `internal/agent` | Agent: apply/reconcile, commit-confirm, DHCP and DHCPv6 (prefix delegation) clients, IP lists, task scheduler, packet log (NFLOG), DNS query log (BIND logs to the journal, followed with `journalctl`, filtered by the agent, `querylog.go`), WireGuard endpoint re-resolving, packet capture (tcpdump, streamed rate-limited), traceroute (`mtr --raw`, streamed as JSON lines, `trace.go`), LLDP (sent and heard on raw sockets, `lldp.go`), neighbours (ARP/ND, LLDP), traffic shaping (CAKE, IFB devices for receiving, HTB classes for the rate limits that shape (`fwconfig.Instance.Shapers`) by packet mark `render.ShaperMark`; planned from `tc -j` output, `shaping.go`), BGP, OSPF, VRRP and BFD state (FRR's JSON through `vtysh`, `bgp.go`, `ospf.go`, `vrrp.go`, `bfd.go`), VRRP's macvlan devices (`vrrp.go`), status, API server |
+| `internal/agent` | Agent: apply/reconcile, commit-confirm, DHCP and DHCPv6 (prefix delegation) clients, IP lists, task scheduler, packet log (NFLOG), DNS query log (BIND logs to the journal, followed with `journalctl`, filtered by the agent, `querylog.go`), WireGuard endpoint re-resolving, packet capture (tcpdump, streamed rate-limited), traceroute (`mtr --raw`, streamed as JSON lines, `trace.go`), LLDP (sent and heard on raw sockets, `lldp.go`), neighbours (ARP/ND, LLDP), NAT64 (a Jool instance per namespace, `nat64.go`), traffic shaping (CAKE, IFB devices for receiving, HTB classes for the rate limits that shape (`fwconfig.Instance.Shapers`) by packet mark `render.ShaperMark`; planned from `tc -j` output, `shaping.go`), BGP, OSPF, VRRP and BFD state (FRR's JSON through `vtysh`, `bgp.go`, `ospf.go`, `vrrp.go`, `bfd.go`), VRRP's macvlan devices (`vrrp.go`), status, API server |
 | `internal/dyndns` | DNS update client ("DNS update" in the GUI): RFC 2136 (from ifnsupdate), sent from the instance netns, or a DNS hosting provider's API through libdns (`providers.go`, matching `fwconfig.DNSProviders`), called from the host |
 | `internal/acme` | ACME certificates through lego: accounts, orders, the stored chain and key (`<state_dir>/certificates/`); the agent's `acme.go` schedules them and answers HTTP-01 in the instance netns, opening port 80 by the `acme_http` set (`render.ACMEHTTPSet`) |
 | `internal/nftimport` | nftables file (`nft -j list ruleset`, read by the agent's `POST /v1/nftables/parse` in a new network namespace, `nftparse.go`) → rules, NAT rules, hosts/prefixes, services, and what it leaves out, with jumped-to chains inlined in groups; written by `web/nftimport.go` through the CRUD's `prepare*` checks, a preview being the same transaction rolled back |
@@ -120,7 +120,8 @@ docs and user-facing messages.
   `managed.json`, and the root and ingress qdiscs of its instances' interfaces with
   their `ifb-<name>` devices (`fwconfig.IFBName`; interface names may not start
   with `ifb-`), and the VRRP macvlan devices (`fwconfig.VRRPDevices`; names may not
-  start with `vrrp4-` or `vrrp6-`). Leave everything else alone (docker, libvirt, other tables).
+  start with `vrrp4-` or `vrrp6-`), and the Jool instance `fwconfig.JoolInstance` in
+  each namespace. Leave everything else alone (docker, libvirt, other tables).
   Accept rules set the connection mark (`ct mark`) to the rule's id, so the
   rule counters (`render.RuleCounter`) count whole connections; the agent owns
   `ct mark` in its namespaces. Log statements send to nflog group
@@ -248,6 +249,13 @@ the certificate portitor-web serves, chosen under Settings
   (frr.conf `ip route ... bfd profile`, its metric the distance), not the agent's
   kernel route (`Instance.KernelRoutes`), so "redistribute static" then also renders
   `redistribute static`.
+- **NAT64** (`fwconfig/nat64.go`): one prefix per instance, used by DNS64 (named.conf),
+  PREF64 (radvd) and Jool. An interface's `xlat464` flag puts PREF64 and DHCPv4
+  option 108 on it, and, with Jool, is where packets to the prefix may come in: Jool
+  takes them at prerouting (dstnat + 25), before the forward chain, so the ruleset's
+  `prerouting_nat64` chain (priority mangle) drops the rest. The agent makes Jool's
+  instance again when the NAT64 differs from `<state>/nat64.json` or it isn't running
+  (`planNAT64`).
 - **Dual stack:** rule and NAT address lists may mix IPv4 and IPv6;
   `fwconfig.MatchFamilies` decides which versions a rule is rendered for, and
   validation uses the same function.

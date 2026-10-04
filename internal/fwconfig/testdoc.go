@@ -115,6 +115,7 @@ func SampleDocument() Document {
 					DNSSL:       []string{"home.arpa"},
 					NAT64Prefix: NAT64WellKnownPrefix,
 				}},
+				NAT64: &NAT64{Prefix: NAT64WellKnownPrefix, Interfaces: []string{"eth1"}},
 				Certificates: []Certificate{{
 					Name: "www", Domains: []string{"www.example.com", "example.com"}, Email: "admin@example.com",
 					CA: "letsencrypt", KeyType: "ec256", Challenge: ChallengeHTTP01, Interface: "eth0",

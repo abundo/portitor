@@ -267,6 +267,9 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 		if err := a.do(ctx, command{Netns: ns, Name: "sysctl", Args: append([]string{"-q", "-e", "-w"}, sysctls...)}); err != nil {
 			return err
 		}
+		if err := a.applyNAT64(ctx, in, ns); err != nil {
+			return err
+		}
 
 		for _, ifc := range in.Interfaces {
 			if err := a.doAll(ctx, planAddresses(ns, ifc, links[ifc.Name])); err != nil {

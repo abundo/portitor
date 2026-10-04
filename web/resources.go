@@ -184,6 +184,12 @@ func prepareInstance(tx *gorm.DB, in, old *models.Instance) error {
 	if err := fwconfig.CheckNAT64Prefix(in.Nat64Prefix); err != nil {
 		return bad(err.Error())
 	}
+	in.Nat64Pool4 = cleanList(in.Nat64Pool4)
+	for _, s := range in.Nat64Pool4 {
+		if pfx, err := netip.ParsePrefix(s); err != nil || !pfx.Addr().Is4() || pfx != pfx.Masked() {
+			return bad(fmt.Sprintf("NAT64 IPv4 pool: %q is not an IPv4 prefix", s))
+		}
+	}
 	in.DnsQueryLogClients = cleanList(in.DnsQueryLogClients)
 	if err := checkEntries(tx, "query log clients", in.DnsQueryLogClients, entryCIDR); err != nil {
 		return err

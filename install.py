@@ -133,6 +133,10 @@ AGENT_PACKAGES = {
     "tcpdump": (),
     "tshark": (),
     "mtr-tiny": (),
+    # NAT64; DKMS builds the kernel module with the kernel headers
+    # (agent_packages adds them for the architecture).
+    "jool-dkms": (),
+    "jool-tools": (),
 }
 # BIND 9 stable from ISC's Debian repository
 # (https://kb.isc.org/docs/isc-packages-for-bind-9), newer than the
@@ -522,6 +526,15 @@ def add_bind_repo(host: Host, deploy: Path) -> bool:
     return True
 
 
+def agent_packages(host: Host) -> dict[str, tuple[str, ...]]:
+    """AGENT_PACKAGES with the kernel headers for jool-dkms: the metapackage
+    that follows the kernel, Debian's for the architecture or Ubuntu's."""
+    for headers in (f"linux-headers-{host.arch()}", "linux-headers-generic"):
+        if host.run(f"apt-cache show {headers} >/dev/null 2>&1", check=False, mutate=False).returncode == 0:
+            return {**AGENT_PACKAGES, headers: ()}
+    return dict(AGENT_PACKAGES)
+
+
 def install_packages(host: Host, deploy: Path) -> None:
     """Install the agent's packages that are missing, on a host with apt.
 
@@ -530,21 +543,22 @@ def install_packages(host: Host, deploy: Path) -> None:
     """
     if host.run("command -v apt-get dpkg-query", check=False, mutate=False).returncode:
         return
-    names = " ".join(AGENT_PACKAGES)
+    packages = agent_packages(host)
+    names = " ".join(packages)
     proc = host.run(
         f"dpkg-query -W -f '${{Package}} ${{db:Status-Status}}\\n' {names} 2>/dev/null",
         check=False, mutate=False, capture=True,
     )
     have = {f[0] for f in (l.split() for l in proc.stdout.splitlines()) if len(f) == 2 and f[1] == "installed"}
-    missing = [p for p in AGENT_PACKAGES if p not in have]
-    upgrade = [p for p in AGENT_PACKAGES if p.startswith("bind9") and p in have] if add_bind_repo(host, deploy) else []
+    missing = [p for p in packages if p not in have]
+    upgrade = [p for p in packages if p.startswith("bind9") and p in have] if add_bind_repo(host, deploy) else []
     if not missing and not upgrade:
         return
     if missing:
         log(f"==> Installing packages on {host}: {' '.join(missing)}")
     if upgrade:
         log(f"==> Upgrading BIND from ISC's repository on {host}: {' '.join(upgrade)}")
-    units = [u for p in missing for u in AGENT_PACKAGES[p]]
+    units = [u for p in missing for u in packages[p]]
     if units:
         host.systemctl("mask", *units)
     host.run("apt-get update -q", check=False)

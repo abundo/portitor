@@ -6,7 +6,48 @@ package fwconfig
 import (
 	"fmt"
 	"net/netip"
+	"slices"
 )
+
+// NAT64 is the instance's stateful NAT64 (the PLAT of 464XLAT), run by Jool
+// in its namespace: IPv6 packets to Prefix leave as IPv4 from Pool4.
+type NAT64 struct {
+	Prefix string `json:"prefix"`
+	// Pool4 lists the IPv4 prefixes translated packets leave from. Empty
+	// uses the address of the interface they leave on, ports 61001-65535.
+	Pool4 []string `json:"pool4,omitempty"`
+	// Interfaces are where packets to Prefix are translated (the ones with
+	// 464XLAT); they are dropped from anywhere else.
+	Interfaces []string `json:"interfaces,omitempty"`
+}
+
+// Jool's instance in each namespace.
+const JoolInstance = "portitor"
+
+// Equal reports whether two NAT64 configs make the same Jool instance (the
+// Interfaces are the ruleset's); nil is none.
+func (n *NAT64) Equal(o *NAT64) bool {
+	if n == nil || o == nil {
+		return n == o
+	}
+	return n.Prefix == o.Prefix && slices.Equal(n.Pool4, o.Pool4)
+}
+
+func (v *validator) nat64(p string, n *NAT64, ifaces map[string]*Interface) {
+	if err := CheckNAT64Prefix(n.Prefix); err != nil {
+		v.addf("%s: nat64: %v", p, err)
+	}
+	for _, s := range n.Pool4 {
+		if pfx, err := netip.ParsePrefix(s); err != nil || !pfx.Addr().Is4() || pfx != pfx.Masked() {
+			v.addf("%s: nat64: invalid IPv4 pool prefix %q", p, s)
+		}
+	}
+	for _, name := range n.Interfaces {
+		if ifaces[name] == nil {
+			v.addf("%s: nat64: unknown interface %q", p, name)
+		}
+	}
+}
 
 // NAT64WellKnownPrefix is the well-known NAT64 prefix (RFC 6052).
 const NAT64WellKnownPrefix = "64:ff9b::/96"

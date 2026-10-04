@@ -187,7 +187,7 @@ func TestBuildReportsProblems(t *testing.T) {
 func TestBuildIPv6AndObjects(t *testing.T) {
 	db := testDB(t)
 	main := models.Instance{Name: "main", IsDefault: true, DhcpEnabled: true, DhcpDomainName: "home.arpa",
-		DnsForwarders: models.StringList{"quad9"}, Nat64Prefix: "64:ff9b::/96", Dns64: true}
+		DnsForwarders: models.StringList{"quad9"}, Nat64Prefix: "64:ff9b::/96", Dns64: true, Nat64: true}
 	mustCreate(t, db, &main)
 	mustCreate(t, db, &models.Interface{InstanceID: main.ID, Name: "eth0", Kind: "physical", Enabled: true, Ipv4Mode: "dhcp", Ipv6AcceptRA: true})
 	mustCreate(t, db, &models.Interface{InstanceID: main.ID, Name: "eth1", Kind: "physical", Enabled: true, Ipv4Mode: "static", DnsListen: true, Xlat464: true,
@@ -250,6 +250,9 @@ func TestBuildIPv6AndObjects(t *testing.T) {
 	}
 	if in.DHCP.Subnets[0].IPv6OnlyPreferred != fwconfig.IPv6OnlyWait || in.DHCP.Subnets[1].IPv6OnlyPreferred != 0 {
 		t.Errorf("ipv6-only preferred: %+v", in.DHCP.Subnets)
+	}
+	if in.NAT64 == nil || in.NAT64.Prefix != "64:ff9b::/96" || len(in.NAT64.Pool4) != 0 || strings.Join(in.NAT64.Interfaces, " ") != "eth1" {
+		t.Errorf("nat64 %+v", in.NAT64)
 	}
 	if in.DNS.DNS64 != "64:ff9b::/96" {
 		t.Errorf("dns64 %q", in.DNS.DNS64)

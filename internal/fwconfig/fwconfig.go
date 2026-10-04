@@ -51,6 +51,8 @@ type Instance struct {
 	DNS        DNSServer   `json:"dns"`
 	// RA lists the interfaces that send IPv6 router advertisements.
 	RA []RAInterface `json:"ra,omitempty"`
+	// NAT64, when set, translates IPv6 to IPv4 (stateful NAT64, Jool).
+	NAT64 *NAT64 `json:"nat64,omitempty"`
 	// DynDNS clients keep records on a nameserver in step with the
 	// addresses of this instance's interfaces.
 	DynDNS []DynDNS `json:"dyndns,omitempty"`
