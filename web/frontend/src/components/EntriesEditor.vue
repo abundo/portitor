@@ -5,8 +5,12 @@
 // EntriesEditor: a list of entries edited in place inside a form (a prefix
 // list's entries, BGP networks), one row per entry. Like TagsInput it is a
 // field's value, not a page table: each row has a remove button, and with
-// `ordered` up/down buttons, since the order of the entries is what
-// decides (AS path and community lists).
+// `ordered` up/down buttons and a grip to drag a row by, since the order of
+// the entries is what decides (AS path and community lists). With `seqKey`
+// (prefix lists) a move renumbers the entries with the sequence numbers they
+// had, so the order stays the one shown; all 0 (auto) stay 0.
+import { ref } from 'vue'
+
 //
 // Column: { key, label, type: text|number|select|switch, items (array or
 // row => array; a select's '' value shows as "—"), placeholder, class }
@@ -16,6 +20,7 @@ const props = defineProps({
   // newEntry() is the row Add appends.
   newEntry: { type: Function, required: true },
   ordered: { type: Boolean, default: false },
+  seqKey: { type: String, default: '' },
   disabled: { type: Boolean, default: false },
   addLabel: { type: String, default: 'Add entry' },
   empty: { type: String, default: 'No entries.' },
@@ -52,10 +57,51 @@ function remove(i) {
 }
 
 function move(i, d) {
+  moveTo(i, i + d)
+}
+
+// moveTo moves row from to position to (in the list without it).
+function moveTo(from, to) {
   const list = [...model.value]
-  const [row] = list.splice(i, 1)
-  list.splice(i + d, 0, row)
-  model.value = list
+  const [row] = list.splice(from, 1)
+  list.splice(to, 0, row)
+  const k = props.seqKey
+  if (k && list.some((r) => r[k])) {
+    let seqs = list.map((r) => r[k] || 0).sort((a, b) => a - b)
+    if (new Set(seqs).size !== seqs.length || seqs.includes(0))
+      seqs = seqs.map((_, j) => (j + 1) * 10)
+    model.value = list.map((r, j) => ({ ...r, [k]: seqs[j] }))
+  } else model.value = list
+}
+
+// Drag and drop: dropAt is the gap before that row (model.length after the
+// last).
+const rowEls = ref([])
+const dragFrom = ref(null)
+const dropAt = ref(null)
+
+function onPointerDown(i, ev) {
+  if (ev.button !== 0) return
+  ev.preventDefault()
+  ev.currentTarget.setPointerCapture(ev.pointerId)
+  dragFrom.value = i
+  dropAt.value = null
+}
+
+function onPointerMove(ev) {
+  if (dragFrom.value == null) return
+  dropAt.value = rowEls.value.filter((el) => {
+    const r = el.getBoundingClientRect()
+    return r.top + r.height / 2 < ev.clientY
+  }).length
+}
+
+function onPointerUp() {
+  const from = dragFrom.value
+  const to = dropAt.value
+  dragFrom.value = dropAt.value = null
+  if (from == null || to == null || to === from || to === from + 1) return
+  moveTo(from, to > from ? to - 1 : to)
 }
 </script>
 
@@ -65,6 +111,7 @@ function move(i, d) {
       <table class="w-full text-sm">
         <thead>
           <tr class="text-left text-xs text-muted">
+            <th v-if="ordered && !disabled" class="w-px" />
             <th v-for="col in columns" :key="col.key" class="px-1 py-1 font-medium">
               {{ col.label }}
             </th>
@@ -72,7 +119,28 @@ function move(i, d) {
           </tr>
         </thead>
         <tbody>
-          <tr v-for="(row, i) in model" :key="i">
+          <tr
+            v-for="(row, i) in model"
+            :key="i"
+            ref="rowEls"
+            :class="{
+              'opacity-50': dragFrom === i,
+              'border-t-2 border-t-primary': dropAt === i,
+              'border-b-2 border-b-primary': dropAt === model.length && i === model.length - 1,
+            }"
+          >
+            <td v-if="ordered && !disabled" class="w-px py-1 pe-1">
+              <span
+                class="inline-flex cursor-grab touch-none items-center text-muted select-none active:cursor-grabbing"
+                title="Drag to reorder"
+                @pointerdown="onPointerDown(i, $event)"
+                @pointermove="onPointerMove"
+                @pointerup="onPointerUp"
+                @pointercancel="dragFrom = dropAt = null"
+              >
+                <UIcon name="i-lucide-grip-vertical" class="pointer-events-none size-3.5" />
+              </span>
+            </td>
             <td v-for="col in columns" :key="col.key" class="px-1 py-1" :class="col.class">
               <USwitch
                 v-if="col.type === 'switch'"

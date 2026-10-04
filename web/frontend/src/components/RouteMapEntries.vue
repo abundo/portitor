@@ -4,7 +4,8 @@
 <script setup>
 // RouteMapEntries: a route map's entries, a field of the route map's form.
 // The list shows each entry's match and set clauses; Edit opens the entry
-// in a dialog of its own, which holds its Delete.
+// in a dialog of its own, which holds its Delete. Dragging an entry by its
+// grip moves it, renumbering the entries with the sequence numbers they had.
 import { computed, reactive, ref } from 'vue'
 import NameSelect from '@/components/NameSelect.vue'
 import { useConfirm } from '@/composables/useConfirm'
@@ -24,6 +25,44 @@ const { confirmDelete } = useConfirm()
 const sorted = computed(() =>
   model.value.map((e, i) => ({ e, i })).sort((a, b) => (a.e.seq || 0) - (b.e.seq || 0)),
 )
+
+// Drag and drop: from and drop are positions in sorted; drop is the gap
+// before that row (sorted.length after the last).
+const rowEls = ref([])
+const dragFrom = ref(null)
+const dropAt = ref(null)
+
+function onPointerDown(k, ev) {
+  if (ev.button !== 0) return
+  ev.preventDefault()
+  ev.currentTarget.setPointerCapture(ev.pointerId)
+  dragFrom.value = k
+  dropAt.value = null
+}
+
+function onPointerMove(ev) {
+  if (dragFrom.value == null) return
+  dropAt.value = rowEls.value.filter((el) => {
+    const r = el.getBoundingClientRect()
+    return r.top + r.height / 2 < ev.clientY
+  }).length
+}
+
+function onPointerUp() {
+  const from = dragFrom.value
+  const to = dropAt.value
+  dragFrom.value = dropAt.value = null
+  if (from == null || to == null || to === from || to === from + 1) return
+  const order = sorted.value.map(({ e }) => e)
+  const [moved] = order.splice(from, 1)
+  order.splice(to > from ? to - 1 : to, 0, moved)
+  // The same sequence numbers in the new order; spaced by 10 if they were
+  // not distinct.
+  let seqs = sorted.value.map(({ e }) => e.seq || 0)
+  if (new Set(seqs).size !== seqs.length || seqs.includes(0))
+    seqs = seqs.map((_, k) => (k + 1) * 10)
+  model.value = order.map((e, k) => ({ ...e, seq: seqs[k] }))
+}
 
 const numberFields = [
   ['match_metric', 'metric'],
@@ -144,6 +183,7 @@ async function remove() {
     <table v-if="model.length" class="w-full text-sm">
       <thead>
         <tr class="text-left text-xs text-muted">
+          <th v-if="!disabled" class="w-px" />
           <th class="w-px" />
           <th class="px-1 py-1 font-medium">Seq</th>
           <th class="px-1 py-1 font-medium">Action</th>
@@ -152,7 +192,29 @@ async function remove() {
         </tr>
       </thead>
       <tbody>
-        <tr v-for="{ e, i } in sorted" :key="i" class="align-top">
+        <tr
+          v-for="({ e, i }, k) in sorted"
+          :key="i"
+          ref="rowEls"
+          class="align-top"
+          :class="{
+            'opacity-50': dragFrom === k,
+            'border-t-2 border-t-primary': dropAt === k,
+            'border-b-2 border-b-primary': dropAt === sorted.length && k === sorted.length - 1,
+          }"
+        >
+          <td v-if="!disabled" class="w-px py-1 pe-1 align-middle">
+            <span
+              class="inline-flex cursor-grab touch-none items-center text-muted select-none active:cursor-grabbing"
+              title="Drag to reorder"
+              @pointerdown="onPointerDown(k, $event)"
+              @pointermove="onPointerMove"
+              @pointerup="onPointerUp"
+              @pointercancel="dragFrom = dropAt = null"
+            >
+              <UIcon name="i-lucide-grip-vertical" class="pointer-events-none size-3.5" />
+            </span>
+          </td>
           <td class="py-1">
             <UButton
               size="sm"

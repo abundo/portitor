@@ -185,6 +185,8 @@ const readOnly = computed(() => !auth.canEdit)
               v-model="form.entries"
               :columns="prefixEntryColumns"
               :new-entry="() => ({ seq: 0, action: 'permit', prefix: '', ge: 0, le: 0 })"
+              ordered
+              seq-key="seq"
               :disabled="readOnly"
             />
           </template>
