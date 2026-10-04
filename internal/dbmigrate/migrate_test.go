@@ -229,3 +229,33 @@ func TestRateLimitShapeMigration(t *testing.T) {
 		t.Error("shapers left behind")
 	}
 }
+
+// A database from the development build of 44, with instances.pref64 and
+// no interfaces.xlat464, gets the released schema.
+func TestXlat464Migration(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "db.sqlite"), &gorm.Config{Logger: logger.Discard})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := provider(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(context.Background(), 45); err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range []string{
+		`ALTER TABLE interfaces DROP COLUMN xlat464`,
+		`ALTER TABLE instances ADD COLUMN pref64 BOOLEAN NOT NULL DEFAULT false`,
+	} {
+		if err := db.Exec(s).Error; err != nil {
+			t.Fatalf("%s: %v", s, err)
+		}
+	}
+	if err := Up(db); err != nil {
+		t.Fatal(err)
+	}
+	if !db.Migrator().HasColumn("interfaces", "xlat464") || db.Migrator().HasColumn("instances", "pref64") {
+		t.Error("schema not repaired")
+	}
+}
