@@ -331,6 +331,11 @@ type Instance struct {
 	DnsQueryLogClients StringList `json:"dns_query_log_clients"`
 	DnsQueryLogNames   StringList `json:"dns_query_log_names"`
 	DnsQueryLogTypes   StringList `json:"dns_query_log_types"`
+	// Nat64Prefix is the prefix of the NAT64 serving the instance's
+	// clients; Dns64 synthesizes AAAA records in it, and an interface's
+	// Xlat464 announces it.
+	Nat64Prefix string `json:"nat64_prefix"`
+	Dns64       bool   `json:"dns64"`
 
 	DhcpEnabled    bool   `json:"dhcp_enabled"`
 	DhcpDomainName string `json:"dhcp_domain_name"`
@@ -388,6 +393,9 @@ type Interface struct {
 	// Lldp sends LLDP on the interface and lists its LLDP neighbours
 	// (physical, VLAN and bridge interfaces).
 	Lldp bool `gorm:"column:lldp" json:"lldp"`
+	// Xlat464 announces the instance's NAT64 prefix in the interface's
+	// router advertisements (PREF64), for clients with a 464XLAT CLAT.
+	Xlat464 bool `gorm:"column:xlat464" json:"xlat464"`
 	// ShapeEgress and ShapeIngress shape what the interface sends and
 	// receives with CAKE, in Mbit/s; 0 is not shaped.
 	ShapeEgress  int `json:"shape_egress"`

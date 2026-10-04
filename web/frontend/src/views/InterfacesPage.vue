@@ -152,6 +152,13 @@ const fields = [
     show: (f) => f.dhcpv6 && f.dhcpv6_pd,
     hint: 'The prefix length to ask for, e.g. 56; 0 lets the server choose.',
   },
+  {
+    key: 'xlat464',
+    label: '464XLAT',
+    type: 'switch',
+    show: (f) => f.kind !== 'loopback',
+    hint: 'Announce the NAT64 prefix (DNS → Server → NAT64) in the router advertisements on this interface (PREF64), so clients with a CLAT (Android, iOS, macOS) can reach IPv4 over IPv6 only. Needs router advertisements on the interface (DHCP).',
+  },
   { key: 'mtu', label: 'MTU', type: 'number', hint: '0 keeps the default.' },
   {
     key: 'lldp',
@@ -238,6 +245,7 @@ function leaseOf(row, family = '') {
         dhcpv6_pd: false,
         dhcpv6_pd_length: 0,
         lldp: false,
+        xlat464: false,
         shape_egress: 0,
         shape_ingress: 0,
       }"

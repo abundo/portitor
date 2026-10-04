@@ -468,6 +468,17 @@ func TestNamedConfDNSSECValidation(t *testing.T) {
 	}
 }
 
+func TestNamedConfDNS64(t *testing.T) {
+	in := &fwconfig.SampleDocument().Instances[0]
+	if named := NamedConf(in, DefaultPaths(), nil); !strings.Contains(named, "\tdns64 64:ff9b::/96 {\n\t};\n") {
+		t.Errorf("missing dns64 in\n%s", named)
+	}
+	in.DNS.DNS64 = ""
+	if named := NamedConf(in, DefaultPaths(), nil); strings.Contains(named, "dns64") {
+		t.Errorf("dns64 off:\n%s", named)
+	}
+}
+
 func TestNamedConfForwardOnlyZone(t *testing.T) {
 	in := &fwconfig.SampleDocument().Instances[0]
 	in.DNS.Zones = append(in.DNS.Zones, fwconfig.DNSZone{Name: "int.example.com", Type: fwconfig.ZoneForwardOnly, Forwarders: []string{"172.25.130.32", "172.25.130.33"}})
@@ -683,6 +694,7 @@ func TestIPv6Services(t *testing.T) {
 	for _, want := range []string{
 		"interface eth1 {", "AdvManagedFlag on;", "AdvOtherConfigFlag on;",
 		"prefix fd00:1::/64 {", "AdvAutonomous on;", "RDNSS fd00:1::1 {", "DNSSL home.arpa {",
+		"nat64prefix 64:ff9b::/96 {",
 	} {
 		if !strings.Contains(radvd, want) {
 			t.Errorf("radvd.conf lacks %q:\n%s", want, radvd)

@@ -187,10 +187,10 @@ func TestBuildReportsProblems(t *testing.T) {
 func TestBuildIPv6AndObjects(t *testing.T) {
 	db := testDB(t)
 	main := models.Instance{Name: "main", IsDefault: true, DhcpEnabled: true, DhcpDomainName: "home.arpa",
-		DnsForwarders: models.StringList{"quad9"}}
+		DnsForwarders: models.StringList{"quad9"}, Nat64Prefix: "64:ff9b::/96", Dns64: true}
 	mustCreate(t, db, &main)
 	mustCreate(t, db, &models.Interface{InstanceID: main.ID, Name: "eth0", Kind: "physical", Enabled: true, Ipv4Mode: "dhcp", Ipv6AcceptRA: true})
-	mustCreate(t, db, &models.Interface{InstanceID: main.ID, Name: "eth1", Kind: "physical", Enabled: true, Ipv4Mode: "static", DnsListen: true,
+	mustCreate(t, db, &models.Interface{InstanceID: main.ID, Name: "eth1", Kind: "physical", Enabled: true, Ipv4Mode: "static", DnsListen: true, Xlat464: true,
 		Addresses: models.StringList{"192.168.1.1/24", "fd00:1::1/64"}})
 
 	mustCreate(t, db, &models.IpamPrefix{InstanceID: main.ID, Prefix: "192.168.1.0/24", DhcpEnabled: true, DhcpRangeStart: "192.168.1.100", DhcpRangeEnd: "192.168.1.199"})
@@ -245,8 +245,11 @@ func TestBuildIPv6AndObjects(t *testing.T) {
 	}
 	ra := in.RA[0]
 	if ra.Interface != "eth1" || len(ra.Prefixes) != 1 || !ra.Prefixes[0].Autonomous || !ra.Managed || !ra.Other ||
-		strings.Join(ra.RDNSS, " ") != "fd00:1::1" || strings.Join(ra.DNSSL, " ") != "home.arpa" {
+		strings.Join(ra.RDNSS, " ") != "fd00:1::1" || strings.Join(ra.DNSSL, " ") != "home.arpa" || ra.NAT64Prefix != "64:ff9b::/96" {
 		t.Errorf("ra: %+v", ra)
+	}
+	if in.DNS.DNS64 != "64:ff9b::/96" {
+		t.Errorf("dns64 %q", in.DNS.DNS64)
 	}
 }
 

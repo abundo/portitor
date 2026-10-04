@@ -267,6 +267,11 @@ func TestValidateCatchesProblems(t *testing.T) {
 		{"task empty command", func(d *Document) { d.Tasks[2].Command = " " }, "command is empty"},
 		{"task command nul", func(d *Document) { d.Tasks[2].Command = "ls\x00" }, "NUL"},
 		{"task timeout", func(d *Document) { d.Tasks[2].Timeout = -1 }, "timeout must be"},
+		{"dns64 length", func(d *Document) { d.Instances[0].DNS.DNS64 = "64:ff9b::/80" }, "the length must be"},
+		{"dns64 ipv4", func(d *Document) { d.Instances[0].DNS.DNS64 = "10.0.0.0/8" }, "invalid NAT64 prefix"},
+		{"dns64 u octet", func(d *Document) { d.Instances[0].DNS.DNS64 = "2001:db8:0:0:100::/96" }, "bits 64 to 71"},
+		{"pref64 host bits", func(d *Document) { d.Instances[0].RA[0].NAT64Prefix = "64:ff9b::1/96" }, "invalid NAT64 prefix"},
+		{"pref64 injection", func(d *Document) { d.Instances[0].RA[0].NAT64Prefix = "64:ff9b::/96 { }; interface x" }, "invalid NAT64 prefix"},
 		{"task duplicate", func(d *Document) { d.Tasks[1].Name = "crowdsec" }, "duplicate"},
 		{"dyndns short retry", func(d *Document) { d.Instances[0].DynDNS[0].RetryInterval = 1 }, "retry interval must be"},
 		// A zone may hold quotes and newlines: never an address.

@@ -38,6 +38,9 @@ func RadvdConf(in *fwconfig.Instance) string {
 		if len(ra.DNSSL) > 0 {
 			fmt.Fprintf(b, "\n\tDNSSL %s {\n\t};\n", strings.Join(ra.DNSSL, " "))
 		}
+		if ra.NAT64Prefix != "" {
+			fmt.Fprintf(b, "\n\tnat64prefix %s {\n\t};\n", ra.NAT64Prefix)
+		}
 		b.WriteString("};\n")
 	}
 	return b.String()

@@ -456,6 +456,9 @@ type RAInterface struct {
 	// RDNSS and DNSSL announce DNS servers and search domains (RFC 8106).
 	RDNSS []string `json:"rdnss,omitempty"`
 	DNSSL []string `json:"dnssl,omitempty"`
+	// NAT64Prefix announces the NAT64 prefix (PREF64, RFC 8781), so a
+	// client's CLAT (464XLAT) finds it without DNS64.
+	NAT64Prefix string `json:"nat64_prefix,omitempty"`
 }
 
 // RAPrefix is an on-link prefix. Autonomous lets clients configure their
@@ -508,6 +511,9 @@ type DNSServer struct {
 	AllowRecursion []string `json:"allow_recursion,omitempty"`
 	// DNSSECValidation is DNSSECValidationAuto or DNSSECValidationNo.
 	DNSSECValidation string `json:"dnssec_validation,omitempty"`
+	// DNS64, a NAT64 prefix, makes BIND synthesize AAAA records in it for
+	// names that have only A records (RFC 6147).
+	DNS64 string `json:"dns64,omitempty"`
 	// QueryLog, when set, logs the queries BIND answers; the agent keeps
 	// those that pass its filters for the GUI's log panel.
 	QueryLog *DNSQueryLog `json:"query_log,omitempty"`

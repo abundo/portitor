@@ -107,12 +107,13 @@ func SampleDocument() Document {
 					},
 				},
 				RA: []RAInterface{{
-					Interface: "eth1",
-					Prefixes:  []RAPrefix{{Prefix: "fd00:1::/64", Autonomous: true}},
-					Managed:   true,
-					Other:     true,
-					RDNSS:     []string{"fd00:1::1"},
-					DNSSL:     []string{"home.arpa"},
+					Interface:   "eth1",
+					Prefixes:    []RAPrefix{{Prefix: "fd00:1::/64", Autonomous: true}},
+					Managed:     true,
+					Other:       true,
+					RDNSS:       []string{"fd00:1::1"},
+					DNSSL:       []string{"home.arpa"},
+					NAT64Prefix: NAT64WellKnownPrefix,
 				}},
 				Certificates: []Certificate{{
 					Name: "www", Domains: []string{"www.example.com", "example.com"}, Email: "admin@example.com",
@@ -136,6 +137,7 @@ func SampleDocument() Document {
 					Upstream:         UpstreamForward,
 					Forwarders:       []string{"9.9.9.9"},
 					ListenInterfaces: []string{"eth1", "eth1.20", "wg0"},
+					DNS64:            NAT64WellKnownPrefix,
 					Zones: []DNSZone{
 						{Name: "home.arpa", Type: ZoneForward, Template: "home", Records: []DNSRecord{
 							{Name: "gw", Type: "A", Value: "192.168.1.1"},

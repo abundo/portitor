@@ -518,6 +518,11 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 				v.addf("%s: invalid search domain %q", rp, d)
 			}
 		}
+		if ra.NAT64Prefix != "" {
+			if err := CheckNAT64Prefix(ra.NAT64Prefix); err != nil {
+				v.addf("%s: %v", rp, err)
+			}
+		}
 	}
 
 	if in.DHCP.DomainName != "" && !validDomain(in.DHCP.DomainName) {
@@ -636,6 +641,11 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 	for _, a := range in.DNS.Forwarders {
 		if _, err := ParseAddr(a); err != nil {
 			v.addf("%s: dns: invalid forwarder %q", p, a)
+		}
+	}
+	if in.DNS.DNS64 != "" {
+		if err := CheckNAT64Prefix(in.DNS.DNS64); err != nil {
+			v.addf("%s: dns64: %v", p, err)
 		}
 	}
 	for _, a := range in.DNS.AllowRecursion {

@@ -138,6 +138,10 @@ func NamedConf(in *fwconfig.Instance, p Paths, dhcpDNS map[string][]string) stri
 		fmt.Fprintf(b, "\tforward %s;\n", forward)
 	}
 	fmt.Fprintf(b, "\tdnssec-validation %s;\n", validation)
+	if in.DNS.DNS64 != "" {
+		// Recursion is already limited to allow-recursion's clients.
+		fmt.Fprintf(b, "\tdns64 %s {\n\t};\n", in.DNS.DNS64)
+	}
 	var forwardOnly []fwconfig.DNSZone
 	for _, z := range in.DNS.Zones {
 		if z.Type == fwconfig.ZoneForwardOnly {

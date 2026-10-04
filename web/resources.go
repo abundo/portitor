@@ -177,6 +177,13 @@ func prepareInstance(tx *gorm.DB, in, old *models.Instance) error {
 	if err := checkEntries(tx, "allow recursion", in.DnsAllowRecursion, entryCIDR); err != nil {
 		return err
 	}
+	in.Nat64Prefix = strings.TrimSpace(in.Nat64Prefix)
+	if in.Nat64Prefix == "" {
+		in.Nat64Prefix = fwconfig.NAT64WellKnownPrefix
+	}
+	if err := fwconfig.CheckNAT64Prefix(in.Nat64Prefix); err != nil {
+		return bad(err.Error())
+	}
 	in.DnsQueryLogClients = cleanList(in.DnsQueryLogClients)
 	if err := checkEntries(tx, "query log clients", in.DnsQueryLogClients, entryCIDR); err != nil {
 		return err

@@ -428,6 +428,9 @@ func build(db *gorm.DB, generation int64, only map[string]bool) (*fwconfig.Docum
 			AllowRecursion:   expand("instance "+mi.Name+": dns allow recursion", objs.Prefixes, mi.DnsAllowRecursion),
 			Zones:            []fwconfig.DNSZone{},
 		}
+		if mi.Dns64 {
+			in.DNS.DNS64 = mi.Nat64Prefix
+		}
 		if mi.DnsQueryLog {
 			in.DNS.QueryLog = &fwconfig.DNSQueryLog{
 				Clients: expand("instance "+mi.Name+": dns query log clients", objs.Prefixes, mi.DnsQueryLogClients),
@@ -624,6 +627,11 @@ func build(db *gorm.DB, generation int64, only map[string]bool) (*fwconfig.Docum
 			}
 		}
 		delegatedRA(&in, mi)
+		for i, ra := range in.RA {
+			if mif, ok := ifaceByName(d.interfaces, mi.ID, ra.Interface); ok && mif.Xlat464 {
+				in.RA[i].NAT64Prefix = mi.Nat64Prefix
+			}
+		}
 
 		for _, c := range d.dyndns {
 			if c.InstanceID != mi.ID || !c.Enabled {
@@ -1041,4 +1049,14 @@ func delegatedRA(in *fwconfig.Instance, mi models.Instance) {
 			}
 		}
 	}
+}
+
+// ifaceByName finds an instance's interface row by name.
+func ifaceByName(ifaces []models.Interface, instanceID uint, name string) (models.Interface, bool) {
+	for _, i := range ifaces {
+		if i.InstanceID == instanceID && i.Name == name {
+			return i, true
+		}
+	}
+	return models.Interface{}, false
 }
