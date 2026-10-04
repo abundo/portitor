@@ -43,22 +43,22 @@ const sections = computed(() => [
     children: [
       { label: 'Interfaces', icon: 'i-lucide-ethernet-port', to: '/interfaces' },
       { label: 'Interface zones', icon: 'i-lucide-layers', to: '/interface-zones' },
-      {
-        label: 'Routing',
-        icon: 'i-lucide-route',
-        children: [
-          { label: 'Routing', icon: 'i-lucide-table', to: '/routing' },
-          { label: 'Routing objects', icon: 'i-lucide-list-filter', to: '/routing-objects' },
-          { label: 'Static', icon: 'i-lucide-signpost', to: '/static-routes' },
-          { label: 'BFD', icon: 'i-lucide-heart-pulse', to: '/bfd' },
-          { label: 'VRRP', icon: 'i-lucide-git-fork', to: '/vrrp' },
-          { label: 'OSPF', icon: 'i-lucide-waypoints', to: '/ospf' },
-          { label: 'BGP', icon: 'i-lucide-share-2', to: '/bgp' },
-        ],
-      },
       { label: 'Neighbours', icon: 'i-lucide-network', to: '/neighbours' },
       { label: 'Hosts & prefixes', icon: 'i-lucide-tags', to: '/hosts-prefixes' },
       { label: 'NAT64', icon: 'i-lucide-arrow-left-right', to: '/nat64' },
+    ],
+  },
+  {
+    label: 'Routing',
+    value: 'routing',
+    children: [
+      { label: 'Routing', icon: 'i-lucide-table', to: '/routing' },
+      { label: 'Routing objects', icon: 'i-lucide-list-filter', to: '/routing-objects' },
+      { label: 'Static', icon: 'i-lucide-signpost', to: '/static-routes' },
+      { label: 'BFD', icon: 'i-lucide-heart-pulse', to: '/bfd' },
+      { label: 'VRRP', icon: 'i-lucide-git-fork', to: '/vrrp' },
+      { label: 'OSPF', icon: 'i-lucide-waypoints', to: '/ospf' },
+      { label: 'BGP', icon: 'i-lucide-share-2', to: '/bgp' },
     ],
   },
   {
@@ -118,24 +118,15 @@ const items = computed(() => [
 
 const open = ref([])
 
-// A nested item (Routing) has its own accordion, but NavigationMenu forwards
-// its update:modelValue too; ignore those so it doesn't close its section.
-let nested = false
-function onClickCapture(e) {
-  nested = !!e.target.closest?.('[data-slot="childList"]')
-}
-
 function onOpen(value) {
-  if (nested) return
   const next = Array.isArray(value) ? value : []
   const added = next.filter((v) => !open.value.includes(v))
   open.value = added.length ? added : next
 }
 
-// matches reports whether a menu item, or one of its children, is the page
+// matches reports whether a menu item is the page
 // at path.
 function matches(item, path) {
-  if (item.children) return item.children.some((c) => matches(c, path))
   return item.exact ? path === item.to : path === item.to || path.startsWith(item.to + '/')
 }
 
@@ -160,7 +151,6 @@ watch(
     type="multiple"
     orientation="vertical"
     class="w-full"
-    @click.capture="onClickCapture"
     @update:model-value="onOpen"
   >
     <template #console-trailing>

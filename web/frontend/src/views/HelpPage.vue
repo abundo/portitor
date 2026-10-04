@@ -65,10 +65,8 @@ const html = computed(() => {
 // a doc not listed here goes under Other.
 const TOPICS = [
   { label: 'General', children: ['portitor-web', 'appliance'] },
-  {
-    label: 'Network',
-    children: [{ label: 'Routing', children: ['bfd', 'vrrp', 'ospf', 'bgp'] }, 'nat64'],
-  },
+  { label: 'Network', children: ['nat64'] },
+  { label: 'Routing', children: ['bfd', 'vrrp', 'ospf', 'bgp'] },
   { label: 'Firewall', children: ['rules', 'shaping', 'crowdsec'] },
   { label: 'Services', children: ['ntp', 'snmp'] },
 ]
