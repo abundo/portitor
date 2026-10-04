@@ -19,6 +19,7 @@
 #   dev/lab/lab.sh shell fw|mgmt
 #   dev/lab/lab.sh logs  fw|mgmt
 #   dev/lab/lab.sh down      remove containers and networks
+#   dev/lab/lab.sh clean     down, and remove the images
 set -euo pipefail
 
 cd "$(dirname "$0")/../.."
@@ -169,8 +170,14 @@ cmd_down() {
 	done
 }
 
+cmd_clean() {
+	cmd_down
+	log "removing images"
+	$RT rmi -f "$PREFIX-fw" "$PREFIX-mgmt" >/dev/null 2>&1 || true
+}
+
 cmd=${1:-}
 case $cmd in
-up | image | start | install | seed | deploy | client | shell | logs | down) shift; "cmd_$cmd" "$@" ;;
+up | image | start | install | seed | deploy | client | shell | logs | down | clean) shift; "cmd_$cmd" "$@" ;;
 *) sed -n '2,/^set -e/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 2 ;;
 esac

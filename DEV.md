@@ -99,6 +99,7 @@ make lab-install  # after code changes: rebuild and reinstall both binaries
 dev/lab/lab.sh client      # a throwaway LAN host with a DHCP lease from the firewall
 dev/lab/lab.sh shell fw    # or mgmt; `logs fw|mgmt` follows the journals
 make lab-down     # remove containers and networks
+make lab-clean    # lab-down, remove the images, stop the ISO test VM, rm -rf build
 ```
 
 The lab networks have no podman IPAM: addresses come from the agent, dnsmasq, Kea

@@ -15,7 +15,7 @@ LDFLAGS := -s -w \
 
 .PHONY: build portitor-web portitor-agent frontend release test lint fmt \
 	install-agent install-web dev-agent dev-web dev-seed \
-	lab-up lab-install lab-seed lab-deploy lab-down iso iso-test iso-e2e clean
+	lab-up lab-install lab-seed lab-deploy lab-down lab-clean iso iso-test iso-e2e clean
 
 build: portitor-web portitor-agent
 
@@ -79,6 +79,14 @@ dev-seed: portitor-web
 
 lab-up lab-install lab-seed lab-deploy lab-down:
 	dev/lab/lab.sh $(@:lab-%=%)
+
+# Removes the lab's containers, networks and images, stops iso/vm.sh's virtual
+# machine (KEEP=1 of iso-e2e leaves it running) and deletes the build directory
+# with its disk.
+lab-clean:
+	dev/lab/lab.sh clean
+	pkill -f '^qemu-system-x86_64 .*$(BUILD_DIR)/vm/disk\.qcow2' || true
+	rm -rf $(BUILD_DIR)
 
 # ----- installer ISO from this tree (see DEV.md); build.sh runs make release -----
 
