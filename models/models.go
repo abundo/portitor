@@ -719,21 +719,31 @@ type DyndnsClient struct {
 }
 
 // Certificate is a TLS certificate the agent gets from an ACME CA (Let's
-// Encrypt) and renews. The CA's HTTP-01 requests come in on Interface.
+// Encrypt) and renews, the CA's HTTP-01 requests coming in on Interface;
+// or one imported with its key (Source fwconfig.CertSourceImport), which
+// has no ACME settings and no interface.
 type Certificate struct {
 	Base
-	InstanceID  uint       `json:"instance_id"`
-	Name        string     `json:"name"`
-	Description string     `json:"description"`
-	Enabled     bool       `json:"enabled"`
-	Domains     StringList `json:"domains"`
-	CommonName  string     `json:"common_name"`
-	Email       string     `json:"email"`
+	InstanceID  uint   `json:"instance_id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Enabled     bool   `json:"enabled"`
+	Source      string `json:"source"`
+	// Domains of an imported certificate are its SANs, read from it.
+	Domains    StringList `json:"domains"`
+	CommonName string     `json:"common_name"`
+	Email      string     `json:"email"`
 	// Ca is a fwconfig.ACMECAs name or an ACME directory URL.
 	Ca          string `json:"ca"`
 	KeyType     string `json:"key_type"`
 	Challenge   string `json:"challenge"`
-	InterfaceID uint   `json:"interface_id"`
+	InterfaceID *uint  `json:"interface_id"`
+	// FullChain and PrivKey are an imported certificate's PEM chain and
+	// key. The key is set through NewPrivKey and never shown.
+	FullChain  string `json:"fullchain"`
+	PrivKey    string `json:"-"`
+	NewPrivKey string `gorm:"-" json:"privkey,omitempty"`
+	HasPrivKey bool   `gorm:"-" json:"has_privkey"`
 }
 
 // DyndnsRecord is a record a DyndnsClient maintains. A/AAAA without Value

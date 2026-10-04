@@ -10,12 +10,16 @@ import NeedInstance from '@/components/NeedInstance.vue'
 import SearchInput from '@/components/SearchInput.vue'
 import { api, certificates } from '@/api'
 import { errMsg } from '@/api/http'
+import { useFormGuard } from '@/composables/useFormGuard'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
+import { useAuthStore } from '@/stores/auth'
 import { useDeployStore } from '@/stores/deploy'
+import { inlineField, wideModal } from '@/utils/form'
 import { ago, when } from '@/utils/time'
 import { useSearch, valuesText } from '@/utils/search'
 
 const { store, ifaceItems, ifaceName } = useInstanceRefs()
+const auth = useAuthStore()
 const deploy = useDeployStore()
 onMounted(() => deploy.refresh())
 
@@ -32,7 +36,8 @@ const states = computed(() => {
   }
   return m
 })
-const stateColor = { ok: 'success', error: 'error', issuing: 'info' }
+const stateColor = { ok: 'success', error: 'error', expired: 'error', issuing: 'info' }
+const imported = (row) => row.source === 'import'
 
 const route = useRoute()
 const router = useRouter()
@@ -107,19 +112,89 @@ async function download(row, format) {
   }
 }
 
+// Import: a certificate with its key, from PEM files or pasted. A file's
+// CERTIFICATE blocks go to the chain, a PRIVATE KEY block to the key, so
+// one file may hold both.
+const importOpen = ref(false)
+const importSaving = ref(false)
+const importForm = ref({})
+const importGuard = useFormGuard(importForm, importOpen)
+const fileInput = ref(null)
+function openImport() {
+  importForm.value = { name: '', description: '', enabled: true, fullchain: '', privkey: '' }
+  importOpen.value = true
+}
+const pemBlocks = (text) =>
+  text.match(/-----BEGIN ([A-Z0-9 ]+)-----[\s\S]*?-----END \1-----/g) ?? []
+async function loadFiles(e) {
+  const certs = []
+  let key = ''
+  for (const file of e.target.files) {
+    for (const b of pemBlocks(await file.text())) {
+      if (b.startsWith('-----BEGIN CERTIFICATE-----')) certs.push(b)
+      else if (/^-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(b)) key = b
+    }
+    if (!importForm.value.name) importForm.value.name = file.name.replace(/\.[^.]*$/, '')
+  }
+  e.target.value = ''
+  if (!certs.length && !key) {
+    toast.add({ title: 'No PEM certificate or private key in the file', color: 'error' })
+    return
+  }
+  if (certs.length) importForm.value.fullchain = certs.join('\n') + '\n'
+  if (key) importForm.value.privkey = key + '\n'
+}
+async function saveImport() {
+  importSaving.value = true
+  try {
+    await certificates.create({
+      ...importForm.value,
+      instance_id: store.currentId,
+      source: 'import',
+    })
+    importOpen.value = false
+    toast.add({ title: `Certificate ${importForm.value.name} imported`, color: 'success' })
+    await loadRows()
+  } catch (err) {
+    toast.add({ title: errMsg(err), color: 'error' })
+  } finally {
+    importSaving.value = false
+  }
+}
+
 const columns = [
   { key: 'name', label: 'Name', class: 'font-medium' },
   { key: 'domains', label: 'SANs', class: 'font-mono', format: (r) => r.domains.join(', ') },
-  { key: 'interface_id', label: 'Interface', format: (r) => ifaceName(r.interface_id) },
-  { key: 'ca', label: 'CA', format: (r) => caLabel(r.ca) },
+  {
+    key: 'interface_id',
+    label: 'Interface',
+    format: (r) => (imported(r) ? '' : ifaceName(r.interface_id)),
+  },
+  { key: 'ca', label: 'CA', format: (r) => (imported(r) ? 'Imported' : caLabel(r.ca)) },
   { key: 'state', label: 'State' },
   { key: 'enabled', label: 'Enabled' },
 ]
+const acme = (form) => form.source !== 'import'
 const fields = computed(() => [
   { key: 'name', label: 'Name', required: true, placeholder: 'www' },
   { key: 'description', label: 'Description' },
   {
+    key: 'fullchain',
+    label: 'Certificate (PEM)',
+    type: 'textarea',
+    show: imported,
+    hint: 'The certificate, then its intermediates. A new one must match the key.',
+  },
+  {
+    key: 'privkey',
+    label: 'Private key (PEM)',
+    type: 'textarea',
+    show: imported,
+    hint: 'Leave empty to keep the stored key, which is never shown.',
+  },
+  {
     key: 'domains',
+    show: acme,
     label: 'Subject Alternative Names (SANs)',
     type: 'tags',
     required: true,
@@ -128,12 +203,14 @@ const fields = computed(() => [
   },
   {
     key: 'common_name',
+    show: acme,
     label: 'Common name (CN)',
     placeholder: 'the first SAN',
     hint: "Optional, at most 64 characters. Only shown to people inspecting the certificate: clients ignore the CN when matching names. Added to the SANs if missing. Let's Encrypt may leave it out.",
   },
   {
     key: 'interface_id',
+    show: acme,
     label: 'Interface',
     type: 'select',
     items: () => ifaceItems.value,
@@ -142,12 +219,14 @@ const fields = computed(() => [
   },
   {
     key: 'email',
+    show: acme,
     label: 'Email',
     placeholder: 'admin@example.com',
     hint: "The ACME account's contact. Optional.",
   },
   {
     key: 'ca',
+    show: acme,
     label: 'CA',
     type: 'select',
     items: cas.value.map((c) => ({ label: c.label, value: c.name })),
@@ -155,6 +234,7 @@ const fields = computed(() => [
   },
   {
     key: 'key_type',
+    show: acme,
     label: 'Key type',
     type: 'select',
     items: [
@@ -167,6 +247,7 @@ const fields = computed(() => [
   },
   {
     key: 'challenge',
+    show: acme,
     label: 'Challenge',
     type: 'select',
     items: [{ label: 'HTTP-01 (port 80)', value: 'http-01' }],
@@ -180,7 +261,15 @@ const fields = computed(() => [
     <UTabs v-model="tab" :items="tabs">
       <template #store>
         <div class="space-y-3 pt-2">
-          <SearchInput v-model="search" />
+          <div class="flex items-center gap-2">
+            <SearchInput v-model="search" class="flex-1" />
+            <UButton
+              v-if="auth.canEdit"
+              icon="i-lucide-upload"
+              label="Import certificate"
+              @click="openImport"
+            />
+          </div>
           <table class="w-full text-sm">
             <thead class="text-left text-muted">
               <tr class="border-b border-default">
@@ -196,6 +285,7 @@ const fields = computed(() => [
               <tr v-for="row in filtered" :key="row.id" class="border-b border-default align-top">
                 <td class="py-1 pe-3 font-medium">
                   {{ row.name }}
+                  <div v-if="imported(row)" class="text-xs text-muted">imported</div>
                   <div v-if="!row.enabled" class="text-xs text-muted">disabled</div>
                 </td>
                 <td class="py-1 pe-3 font-mono">{{ row.domains.join(', ') }}</td>
@@ -263,7 +353,7 @@ const fields = computed(() => [
         <CrudPage
           title="Certificates"
           noun="certificate"
-          description="TLS certificates from Let's Encrypt (ACME), got by the firewall and renewed when two thirds of their lifetime have passed. The CA checks each domain over HTTP on port 80, which the firewall opens on the certificate's interface only while it answers. To serve the GUI itself with one, choose it under Settings → Portitor web."
+          description="TLS certificates from Let's Encrypt (ACME), got by the firewall and renewed when two thirds of their lifetime have passed. The CA checks each domain over HTTP on port 80, which the firewall opens on the certificate's interface only while it answers. A certificate from elsewhere is imported with its key on the Store tab, and is never renewed. To serve the GUI itself with one, choose it under Settings → Portitor web."
           :api="certificates"
           :params="{ instance_id: store.currentId }"
           :columns="columns"
@@ -306,5 +396,81 @@ const fields = computed(() => [
         </CrudPage>
       </template>
     </UTabs>
+
+    <UModal
+      :open="importOpen"
+      title="Import certificate"
+      :ui="wideModal"
+      :dismissible="false"
+      @update:open="importGuard.onUpdateOpen"
+    >
+      <template #body>
+        <form id="cert-import-form" class="space-y-3" @submit.prevent="saveImport">
+          <p class="text-sm text-muted">
+            A certificate with its private key, in PEM. It is stored on the firewall at the next
+            commit and never renewed: import a new one before it expires.
+          </p>
+          <UFormField :ui="inlineField" label="Name" required>
+            <UInput v-model="importForm.name" class="w-full" placeholder="www" required />
+          </UFormField>
+          <UFormField :ui="inlineField" label="Description">
+            <UInput v-model="importForm.description" class="w-full" />
+          </UFormField>
+          <UFormField :ui="inlineField" label="Enabled">
+            <USwitch v-model="importForm.enabled" />
+          </UFormField>
+          <UFormField
+            :ui="inlineField"
+            label="Files"
+            help="PEM files with the certificate, its intermediates and the key; one file may hold them all."
+          >
+            <UButton
+              icon="i-lucide-file-up"
+              color="neutral"
+              variant="outline"
+              label="Load files…"
+              @click="fileInput.click()"
+            />
+            <input
+              ref="fileInput"
+              type="file"
+              multiple
+              accept=".pem,.crt,.cer,.key,text/plain"
+              hidden
+              @change="loadFiles"
+            />
+          </UFormField>
+          <UFormField
+            :ui="inlineField"
+            label="Certificate (PEM)"
+            help="The certificate first, then its intermediates."
+            required
+          >
+            <UTextarea
+              v-model="importForm.fullchain"
+              class="w-full font-mono"
+              :rows="5"
+              placeholder="-----BEGIN CERTIFICATE-----"
+              required
+            />
+          </UFormField>
+          <UFormField :ui="inlineField" label="Private key (PEM)" required>
+            <UTextarea
+              v-model="importForm.privkey"
+              class="w-full font-mono"
+              :rows="5"
+              placeholder="-----BEGIN PRIVATE KEY-----"
+              required
+            />
+          </UFormField>
+        </form>
+      </template>
+      <template #footer>
+        <div class="flex w-full justify-end gap-2">
+          <UButton color="neutral" variant="ghost" @click="importGuard.close">Cancel</UButton>
+          <UButton type="submit" form="cert-import-form" :loading="importSaving">Import</UButton>
+        </div>
+      </template>
+    </UModal>
   </NeedInstance>
 </template>

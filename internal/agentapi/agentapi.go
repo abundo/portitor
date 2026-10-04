@@ -218,19 +218,21 @@ type DynDNSStatus struct {
 	dyndns.Status
 }
 
-// CertificateStatus is the state of an ACME certificate.
-// CertificateFiles is a stored ACME certificate with its private key
+// CertificateFiles is a stored certificate with its private key
 // (GET /v1/certificates/{instance}/{name}), for portitor-web's own HTTPS.
 type CertificateFiles struct {
 	FullChain string `json:"fullchain"`
 	PrivKey   string `json:"privkey"`
 }
 
+// CertificateStatus is the state of a certificate, got by ACME or
+// imported.
 type CertificateStatus struct {
 	Instance string   `json:"instance"`
 	Name     string   `json:"name"`
 	Domains  []string `json:"domains"`
-	// State: pending, issuing, ok, error, dry-run.
+	// State: pending, issuing, ok, error, dry-run; expired for an
+	// imported certificate past its end.
 	State     string `json:"state"`
 	LastError string `json:"last_error,omitempty"`
 	// Dir holds the chain and key (fullchain.pem, privkey.pem).

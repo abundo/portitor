@@ -218,6 +218,27 @@ func Save(dir string, req Request, res *Result) (*Stored, error) {
 	return st, writeFile(filepath.Join(dir, metaFile), data, 0o644)
 }
 
+// Imported is Stored.Directory for an imported certificate.
+const Imported = "import"
+
+// SaveImported writes an imported certificate to dir as Save does, unless
+// the same chain and key are there already.
+func SaveImported(dir, chain, key string) (*Stored, error) {
+	st, err := parse([]byte(chain))
+	if err != nil {
+		return nil, err
+	}
+	st.Directory = Imported
+	if old := Load(dir); old != nil && old.Directory == Imported {
+		c, _ := os.ReadFile(filepath.Join(dir, FullChainFile))
+		k, _ := os.ReadFile(filepath.Join(dir, PrivKeyFile))
+		if string(c) == chain && string(k) == key {
+			return old, nil
+		}
+	}
+	return Save(dir, Request{Directory: Imported}, &Result{Certificate: []byte(chain), PrivateKey: []byte(key)})
+}
+
 // Load reads what Save wrote; nil without a (complete) certificate.
 func Load(dir string) *Stored {
 	data, err := os.ReadFile(filepath.Join(dir, metaFile))

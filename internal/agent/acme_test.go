@@ -155,3 +155,29 @@ func TestHTTP01Serve(t *testing.T) {
 		}
 	}
 }
+
+func TestCertManagerImported(t *testing.T) {
+	paths := render.Paths{StateDir: t.TempDir()}
+	m := newCertManager(false, paths, &nftRunner{})
+	m.obtain = func(string, acme.Request) (*acme.Result, error) {
+		t.Error("imported certificate ordered")
+		return nil, errors.New("no")
+	}
+	res := testCert(t, []string{"www.example.com"})
+	item := certItem{instance: "main", netns: "fw-main", cfg: fwconfig.Certificate{
+		Name: "www", Source: fwconfig.CertSourceImport, FullChain: string(res.Certificate), PrivKey: string(res.PrivateKey),
+	}}
+	m.Reconcile(context.Background(), []certItem{item})
+	st := waitState(t, m, "ok")
+	if st.NotAfter == nil || len(st.Domains) != 1 || st.Domains[0] != "www.example.com" {
+		t.Errorf("status %+v", st)
+	}
+	key, err := os.ReadFile(filepath.Join(st.Dir, acme.PrivKeyFile))
+	if err != nil || string(key) != item.cfg.PrivKey {
+		t.Errorf("key %q %v", key, err)
+	}
+	if acme.Load(st.Dir) == nil {
+		t.Error("not loadable")
+	}
+	m.Stop()
+}

@@ -120,6 +120,19 @@ func (m *certManager) Stop() {
 func (m *certManager) start(it certItem) *certRun {
 	ctx, cancel := context.WithCancel(context.Background())
 	r := &certRun{item: it, cancel: cancel, stored: acme.Load(m.dir(it))}
+	if it.cfg.Imported() {
+		// Stored as it is, never ordered: the agent's own state, so
+		// written in a dry run too.
+		cancel()
+		st, err := acme.SaveImported(m.dir(it), it.cfg.FullChain, it.cfg.PrivKey)
+		if err != nil {
+			r.state, r.err = "error", err.Error()
+			slog.Error("imported certificate", "instance", it.instance, "certificate", it.cfg.Name, "err", err)
+			return r
+		}
+		r.stored, r.state = st, "ok"
+		return r
+	}
 	if m.dryRun {
 		r.state = "dry-run"
 		return r
@@ -323,6 +336,12 @@ func (m *certManager) Status() []CertificateStatus {
 			LastAttempt: timePtr(r.lastAttempt), NextAttempt: timePtr(r.next),
 		}
 		if st := r.stored; st != nil {
+			if r.item.cfg.Imported() && r.state == "ok" && time.Now().After(st.NotAfter) {
+				s.State = "expired"
+			}
+			if r.item.cfg.Imported() {
+				s.Domains = st.Domains
+			}
 			s.NotBefore, s.NotAfter, s.Issuer = timePtr(st.NotBefore), timePtr(st.NotAfter), st.Issuer
 		}
 		out = append(out, s)

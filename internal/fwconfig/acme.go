@@ -4,6 +4,10 @@
 package fwconfig
 
 import (
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/pem"
+	"errors"
 	"fmt"
 	"net/netip"
 	"net/url"
@@ -21,8 +25,18 @@ import (
 // of its certificates that matches only while the agent is answering a
 // challenge (render.ACMEHTTPSet holds the port then, and is empty
 // otherwise), so port 80 is closed the rest of the time.
+//
+// An imported certificate (Source CertSourceImport) comes with its chain
+// and key, which the agent stores as they are and never renews; the ACME
+// fields are empty.
 type Certificate struct {
 	Name string `json:"name"`
+	// Source is CertSourceACME (empty) or CertSourceImport.
+	Source string `json:"source,omitempty"`
+	// FullChain and PrivKey are an imported certificate: the leaf first,
+	// then any intermediates, and its private key, PEM.
+	FullChain string `json:"fullchain,omitempty"`
+	PrivKey   string `json:"privkey,omitempty"`
 	// Domains are the DNS names in the certificate (its subject
 	// alternative names). HTTP-01 cannot validate wildcards.
 	Domains []string `json:"domains"`
@@ -42,6 +56,40 @@ type Certificate struct {
 
 // Challenges.
 const ChallengeHTTP01 = "http-01"
+
+// Certificate sources.
+const (
+	CertSourceACME   = "acme"
+	CertSourceImport = "import"
+)
+
+// Imported says whether a certificate is imported rather than got by ACME.
+func (c *Certificate) Imported() bool { return c.Source == CertSourceImport }
+
+// ParseImported checks an imported certificate: a PEM chain whose first
+// certificate matches the PEM private key. It returns the leaf.
+func ParseImported(chain, key string) (*x509.Certificate, error) {
+	if strings.TrimSpace(chain) == "" {
+		return nil, errors.New("no certificate")
+	}
+	if strings.TrimSpace(key) == "" {
+		return nil, errors.New("no private key")
+	}
+	for rest := []byte(chain); ; {
+		var b *pem.Block
+		if b, rest = pem.Decode(rest); b == nil {
+			break
+		}
+		if b.Type != "CERTIFICATE" {
+			return nil, fmt.Errorf("certificate: a %s block in the chain", b.Type)
+		}
+	}
+	pair, err := tls.X509KeyPair([]byte(chain), []byte(key))
+	if err != nil {
+		return nil, err
+	}
+	return x509.ParseCertificate(pair.Certificate[0])
+}
 
 // ACMECA is an ACME certificate authority by name.
 type ACMECA struct {
@@ -100,6 +148,23 @@ func (v *validator) certificates(p string, in *Instance, ifaces map[string]*Inte
 			v.addf("%s: duplicate", cp)
 		}
 		names[c.Name] = true
+		switch c.Source {
+		case "", CertSourceACME:
+		case CertSourceImport:
+			if _, err := ParseImported(c.FullChain, c.PrivKey); err != nil {
+				v.addf("%s: %v", cp, err)
+			}
+			if c.Interface != "" || c.CA != "" || c.KeyType != "" || c.Challenge != "" || c.Email != "" || c.CommonName != "" || len(c.Domains) > 0 {
+				v.addf("%s: an imported certificate has no ACME settings", cp)
+			}
+			continue
+		default:
+			v.addf("%s: source must be %s or %s", cp, CertSourceACME, CertSourceImport)
+			continue
+		}
+		if c.FullChain != "" || c.PrivKey != "" {
+			v.addf("%s: an ACME certificate has no imported chain or key", cp)
+		}
 		if c.Challenge != ChallengeHTTP01 {
 			v.addf("%s: challenge must be %s", cp, ChallengeHTTP01)
 		}

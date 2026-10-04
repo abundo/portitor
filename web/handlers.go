@@ -1325,6 +1325,12 @@ func redactDoc(doc fwconfig.Document) fwconfig.Document {
 			}
 			cp.Interfaces[j] = ifc
 		}
+		cp.Certificates = slices.Clone(in.Certificates)
+		for j := range cp.Certificates {
+			if cp.Certificates[j].PrivKey != "" {
+				cp.Certificates[j].PrivKey = "<redacted>"
+			}
+		}
 		cp.DynDNS = make([]fwconfig.DynDNS, len(in.DynDNS))
 		for j, d := range in.DynDNS {
 			if d.TSIG != nil {

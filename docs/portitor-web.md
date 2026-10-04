@@ -269,6 +269,17 @@ for every domain of the certificate.
 - Try *Let's Encrypt staging* first: its certificates are not trusted, but its rate
   limits are far higher than production's (5 failed validations per hour per domain).
 
+### Imported certificates
+
+A certificate from another CA is imported with its key: *Import certificate* on the
+*Store* tab takes PEM files (the certificate, its intermediates and the private key;
+one file may hold them all) or pasted PEM. The key must match the certificate; the
+SANs and common name are read from it. It is written to the same directory at the
+next commit, has no interface and opens no port, and is never renewed: its state
+turns *expired* once past its end. To replace it, edit it on the *Overview* tab and
+paste the new certificate (and a new key, unless it reuses the old one). The key is
+never shown again, and the deployment history keeps it redacted.
+
 ### The GUI's own certificate
 
 portitor-web can serve HTTPS with one of these certificates: choose it under
@@ -289,7 +300,7 @@ The service unit lets the `portitor` user listen on port 443
 
 *Settings → General → Backup* downloads the whole configuration database, encrypted with
 a passphrase you choose (at least 10 characters). The file holds every secret (WireGuard
-keys, TSIG secrets, IP list credentials, the agent token), so keep the passphrase safe;
+keys, TSIG secrets, IP list credentials, imported certificates' keys, the agent token), so keep the passphrase safe;
 it cannot be recovered. The file is in [age](https://age-encryption.org) format:
 `age -d portitor-….db.age > portitor.db` gives the SQLite database.
 

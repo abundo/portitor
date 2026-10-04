@@ -15,7 +15,7 @@ import (
 	"github.com/abundo/portitor/models"
 )
 
-func prepareCertificate(tx *gorm.DB, c, _ *models.Certificate) error {
+func prepareCertificate(tx *gorm.DB, c, old *models.Certificate) error {
 	if err := instanceExists(tx, c.InstanceID); err != nil {
 		return err
 	}
@@ -23,8 +23,21 @@ func prepareCertificate(tx *gorm.DB, c, _ *models.Certificate) error {
 	if !fwconfig.ValidFileName(c.Name) {
 		return bad("name: no control characters or /, not . or .., at most 255 bytes")
 	}
+	if c.Source == "" {
+		c.Source = fwconfig.CertSourceACME
+	}
+	if old != nil && old.Source != c.Source {
+		return bad("source: can't change; add a new certificate")
+	}
+	if c.Source == fwconfig.CertSourceImport {
+		return prepareImported(c)
+	}
+	if c.Source != fwconfig.CertSourceACME {
+		return bad("source: acme or import")
+	}
+	c.FullChain, c.PrivKey, c.NewPrivKey = "", "", ""
 	var ifc models.Interface
-	if tx.First(&ifc, c.InterfaceID).Error != nil || ifc.InstanceID != c.InstanceID {
+	if c.InterfaceID == nil || tx.First(&ifc, *c.InterfaceID).Error != nil || ifc.InstanceID != c.InstanceID {
 		return bad("pick an interface of this virtual firewall")
 	}
 	domains := models.StringList{}
@@ -59,13 +72,39 @@ func prepareCertificate(tx *gorm.DB, c, _ *models.Certificate) error {
 	return checkCertificate(builder.Certificate(c, ifc.Name))
 }
 
+// prepareImported checks an imported certificate's chain and key (a new
+// key replaces the stored one, and a new chain must match the key) and
+// takes its SANs from it.
+func prepareImported(c *models.Certificate) error {
+	if key := strings.TrimSpace(c.NewPrivKey); key != "" {
+		c.PrivKey = key + "\n"
+	}
+	c.NewPrivKey = ""
+	c.FullChain = strings.TrimSpace(c.FullChain) + "\n"
+	leaf, err := fwconfig.ParseImported(c.FullChain, c.PrivKey)
+	if err != nil {
+		return bad("certificate and key: " + err.Error())
+	}
+	c.Domains = models.StringList(slices.Clone(leaf.DNSNames))
+	for _, ip := range leaf.IPAddresses {
+		c.Domains = append(c.Domains, ip.String())
+	}
+	c.CommonName = leaf.Subject.CommonName
+	c.Email, c.Ca, c.KeyType, c.Challenge, c.InterfaceID = "", "", "", "", nil
+	return checkCertificate(builder.Certificate(c, ""))
+}
+
+// presentCertificate hides an imported certificate's key.
+func presentCertificate(c *models.Certificate) {
+	c.HasPrivKey, c.NewPrivKey = c.PrivKey != "", ""
+}
+
 // checkCertificate runs fwconfig's validation of a certificate, for a
 // quick answer when an entry is saved.
 func checkCertificate(cert fwconfig.Certificate) error {
-	in := fwconfig.Instance{
-		Name: "check", Default: true,
-		Interfaces:   []fwconfig.Interface{{Name: cert.Interface, Kind: fwconfig.KindPhysical, Enabled: true, IPv4Mode: fwconfig.ModeNone}},
-		Certificates: []fwconfig.Certificate{cert},
+	in := fwconfig.Instance{Name: "check", Default: true, Certificates: []fwconfig.Certificate{cert}}
+	if cert.Interface != "" {
+		in.Interfaces = []fwconfig.Interface{{Name: cert.Interface, Kind: fwconfig.KindPhysical, Enabled: true, IPv4Mode: fwconfig.ModeNone}}
 	}
 	doc := fwconfig.Document{Version: fwconfig.Version, Instances: []fwconfig.Instance{in}}
 	err := doc.Validate()

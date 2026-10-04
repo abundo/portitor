@@ -611,8 +611,15 @@ func build(db *gorm.DB, generation int64, only map[string]bool) (*fwconfig.Docum
 			if c.InstanceID != mi.ID || !c.Enabled {
 				continue
 			}
-			ifc, ok := ifaceByID[c.InterfaceID]
-			if !ok || ifc.InstanceID != mi.ID {
+			if c.Source == fwconfig.CertSourceImport {
+				in.Certificates = append(in.Certificates, Certificate(&c, ""))
+				continue
+			}
+			var ifc models.Interface
+			if c.InterfaceID != nil {
+				ifc = ifaceByID[*c.InterfaceID]
+			}
+			if ifc.ID == 0 || ifc.InstanceID != mi.ID {
 				addf("instance %s: certificate %s: its interface is not in this instance", mi.Name, c.Name)
 				continue
 			}
@@ -804,6 +811,9 @@ func (d *data) routingPolicy(in *fwconfig.Instance, instanceID uint) {
 // Certificate is a certificate as the document holds it; iface is the
 // name of its interface.
 func Certificate(c *models.Certificate, iface string) fwconfig.Certificate {
+	if c.Source == fwconfig.CertSourceImport {
+		return fwconfig.Certificate{Name: c.Name, Source: c.Source, FullChain: c.FullChain, PrivKey: c.PrivKey}
+	}
 	return fwconfig.Certificate{
 		Name: c.Name, Domains: slices.Clone([]string(c.Domains)), CommonName: c.CommonName, Email: c.Email,
 		CA: c.Ca, KeyType: c.KeyType, Challenge: c.Challenge, Interface: iface,

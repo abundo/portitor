@@ -137,7 +137,7 @@ docs and user-facing messages.
   through the API either; a secret the user enters comes in through a write-only
   `gorm:"-"` field that `prepare` copies and `present` clears (`DyndnsClient.NewTsigSecret`,
   `IpList.NewPassword`/`NewApiKey`, `BgpPeerSettings.NewPassword` with
-  `ClearPassword`, `OspfInterface.NewAuthKey` with `ClearAuthKey`; a DNS update provider's secret settings come in
+  `ClearPassword`, `OspfInterface.NewAuthKey` with `ClearAuthKey`, `Certificate.NewPrivKey` for an imported certificate; a DNS update provider's secret settings come in
   through `DyndnsClient.Settings`, where an empty one keeps the stored value).
   A BGP password or OSPF MD5 key is in frr.conf, so that is a `Secret` file
   `Bundle.Redacted` masks.

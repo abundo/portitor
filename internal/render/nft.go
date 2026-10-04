@@ -81,7 +81,7 @@ func Nftables(in *fwconfig.Instance, lockout *AntiLockout, paths Paths) string {
 		}
 	}
 
-	if len(in.Certificates) > 0 {
+	if slices.ContainsFunc(in.Certificates, func(c fwconfig.Certificate) bool { return !c.Imported() }) {
 		fmt.Fprintf(b, "\tset %s {\n\t\ttype inet_service\n\t}\n\n", ACMEHTTPSet)
 	}
 
@@ -529,7 +529,7 @@ func AutoInputRules(in *fwconfig.Instance) []AutoRule {
 	// rule matches only while one is being answered.
 	var acme []string
 	for _, c := range in.Certificates {
-		if !slices.Contains(acme, c.Interface) {
+		if !c.Imported() && !slices.Contains(acme, c.Interface) {
 			acme = append(acme, c.Interface)
 		}
 	}
