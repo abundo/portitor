@@ -108,6 +108,8 @@ func isQuery(name string, args []string) bool {
 		return len(args) >= 2 && args[0] == "netns" && args[1] == "list"
 	case "wg":
 		return len(args) > 0 && args[0] == "show"
+	case "tc":
+		return len(args) > 0 && args[0] == "-j"
 	case "systemctl":
 		return len(args) > 0 && (args[0] == "is-active" || args[0] == "is-enabled" || args[0] == "show")
 	case "journalctl":

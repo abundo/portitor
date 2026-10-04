@@ -24,6 +24,7 @@ type program struct {
 
 var programs = []program{
 	{name: "ip", purpose: "interfaces and routes (iproute2)"},
+	{name: "tc", purpose: "traffic shaping (iproute2)"},
 	{name: "nft", purpose: "firewall rules (nftables)"},
 	{name: "sysctl", purpose: "forwarding settings (procps)"},
 	{name: "systemctl", purpose: "service management (systemd)"},

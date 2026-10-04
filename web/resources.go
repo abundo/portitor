@@ -241,6 +241,9 @@ func prepareInterface(tx *gorm.DB, i, old *models.Interface) error {
 	if !fwconfig.ValidIfname(i.Name) || i.Name == "lo" {
 		return bad("name: a Linux interface name (at most 15 characters, no spaces)")
 	}
+	if strings.HasPrefix(i.Name, fwconfig.IFBPrefix) {
+		return bad("name: " + fwconfig.IFBPrefix + " names are for the shaping devices")
+	}
 	i.Label = strings.TrimSpace(i.Label)
 	if len(i.Label) > 32 || strings.ContainsFunc(i.Label, unicode.IsControl) {
 		return bad("label: at most 32 characters, no control characters")
@@ -346,6 +349,12 @@ func prepareInterface(tx *gorm.DB, i, old *models.Interface) error {
 	}
 	if i.Kind == fwconfig.KindWireGuard || i.Kind == fwconfig.KindLoopback {
 		i.Lldp = false
+	}
+	if i.Kind == fwconfig.KindLoopback {
+		i.ShapeEgress, i.ShapeIngress = 0, 0
+	}
+	if i.ShapeEgress < 0 || i.ShapeEgress > fwconfig.MaxShapeMbit || i.ShapeIngress < 0 || i.ShapeIngress > fwconfig.MaxShapeMbit {
+		return bad(fmt.Sprintf("shaping: 0-%d Mbit/s", fwconfig.MaxShapeMbit))
 	}
 	if i.Kind != fwconfig.KindVLAN {
 		i.Parent, i.VlanID = "", 0
@@ -554,6 +563,10 @@ func prepareRule(tx *gorm.DB, r, old *models.Rule) error {
 	}
 	r.Services = dedupe(cleanList(r.Services))
 	if err := checkServices(tx, r.Services); err != nil {
+		return err
+	}
+	r.RateLimit = strings.TrimSpace(r.RateLimit)
+	if err := checkRateLimit(tx, r.InstanceID, r.RateLimit, r.Action); err != nil {
 		return err
 	}
 	if old == nil && r.Position == 0 {

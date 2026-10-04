@@ -150,6 +150,16 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 			return err
 		}
 
+		// Shaping that is no longer wanted goes first: an IFB device
+		// below must not be removed while traffic is redirected to it.
+		qdiscs, err := a.qdiscs(ctx, ns)
+		if err != nil {
+			return err
+		}
+		if err := a.doAll(ctx, planUnshape(ns, in.Interfaces, in.Shapers(), links, qdiscs)); err != nil {
+			return err
+		}
+
 		// Remove stale virtual interfaces: anything non-physical in our
 		// own namespaces, and in root only what we created earlier.
 		want := map[string]bool{}
@@ -157,6 +167,12 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 			want[ifc.Name] = true
 			if ns == "" && ifc.Kind != fwconfig.KindPhysical {
 				newRoot = append(newRoot, ifc.Name)
+			}
+			if _, ingress := shapes(ifc); ingress {
+				want[fwconfig.IFBName(ifc.Name)] = true
+				if ns == "" {
+					newRoot = append(newRoot, fwconfig.IFBName(ifc.Name))
+				}
 			}
 		}
 		for name, l := range links {
@@ -189,6 +205,35 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 			return err
 		}
 		if err := a.doAll(ctx, planLinkSettings(ns, in.Interfaces, links)); err != nil {
+			return err
+		}
+		if qdiscs, err = a.qdiscs(ctx, ns); err != nil {
+			return err
+		}
+		redirect, err := a.redirects(ctx, ns, in.Interfaces, qdiscs)
+		if err != nil {
+			return err
+		}
+		if a.shaped == nil {
+			a.shaped = map[string]string{}
+		}
+		built := map[string]string{}
+		for _, ifc := range in.Interfaces {
+			if t, ok := a.shaped[ns+"/"+ifc.Name]; ok {
+				built[ifc.Name] = t
+			}
+		}
+		plan := planShape(ns, in.Interfaces, in.Shapers(), links, qdiscs, redirect, built)
+		for _, ifc := range in.Interfaces {
+			delete(a.shaped, ns+"/"+ifc.Name)
+		}
+		err = a.doAll(ctx, plan)
+		for dev, t := range built {
+			if err == nil {
+				a.shaped[ns+"/"+dev] = t
+			}
+		}
+		if err != nil {
 			return err
 		}
 

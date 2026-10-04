@@ -16,6 +16,8 @@ export function crud(path) {
 
 export const instances = crud('/instances')
 export const interfaceZones = crud('/interface-zones')
+// Rate limits rules name, per instance.
+export const rateLimits = crud('/rate-limits')
 export const interfaces = crud('/interfaces')
 export const wgPeers = crud('/wg/peers')
 export const links = crud('/links')

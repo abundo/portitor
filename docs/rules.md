@@ -62,6 +62,7 @@ locked rows show where the built-in parts sit:
 | Source addresses | Addresses, CIDRs, names from *Hosts & prefixes*, or IP lists as `@name`. Empty matches any. |
 | Destination addresses | The same, for the destination. |
 | Action | **accept** lets it through; **drop** discards it silently; **reject** discards it and tells the sender (TCP reset, or ICMP port unreachable), so a client fails at once instead of waiting for a timeout. |
+| Rate limit | A rate from the *Rate limits* page, which limits or shapes the rule's traffic. See [Rate limits](#rate-limits). |
 | Log matches | Every packet the rule matches shows in the log panel's *Logged packets* tab. |
 | Enabled | A disabled rule stays in the list but is not deployed. New rules start disabled. |
 | Description | Shown in the table, in the log and in the ruleset's comments. |
@@ -90,8 +91,58 @@ A host in *Hosts & prefixes* with both an IPv4 and an IPv6 address covers both.
 - **Services** (*Firewall → Services*) name protocols and ports. Predefined ones cover
   the common cases (`ssh`, `dns`, `https`, `ping`, `gre`); add your own for an
   application's ports. You can create one from the Service column's search too.
+- **Rate limits** (*Firewall → Rate limits*) cap how often a rule matches; see
+  [Rate limits](#rate-limits).
 - **IP lists** (`@name`) are downloaded address lists, such as CrowdSec decisions or a
   blocklist; see [Blocking with CrowdSec](crowdsec.md).
+
+## Rate limits
+
+A rate limit (*Firewall → Rate limits*) is a rate a rule names in its *Rate limit*
+field. When the rule matches, its traffic goes through the rate limit. Its *Mode*
+says what happens to the traffic over the rate:
+
+- **Police** drops it.
+- **Shape** queues it, so the connections slow down without losing packets; see
+  [Traffic shaping](shaping.md#shaping-a-rule). Mbit/s or kbit/s.
+
+Police counts **Mbit/s** (bandwidth) or **packets per second**, with a burst: what
+is allowed at once above the rate, in the same unit (0 is the default). It applies
+to one of two things:
+
+- **Whole connections** (the default): all the traffic, both ways, of the
+  connections the rule accepts. Only an accept rule can name it. Use it to cap a
+  host, a network or a service: "each guest at most 20 Mbit/s".
+- **The packets the rule matches**, with *Whole connections* off. Established
+  connections are accepted before the rules, so on an accept rule these are the
+  **new connections**: slowing down SSH password guessing, or ping and connection
+  floods. In packets per second.
+
+- **Per source address** gives each source address its own rate, so one noisy
+  client doesn't use up everyone's. For whole connections the address is the one
+  that opened the connection, so a guest's downloads count against that guest. Off,
+  all the traffic shares one rate.
+- Rules that name the same rate limit share it.
+- Renaming a rate limit updates the rules; deleting one a rule uses is refused.
+
+Policing drops: TCP slows down when it loses packets, but it gets there by losing
+them. To queue instead, use *Shape*, or shape the whole interface; see
+[Traffic shaping](shaping.md).
+
+Example: at most 1 new SSH connection a second from each address on the WAN (input),
+with *ssh* policing 1 packet/s, burst 3, per source address, *Whole connections*
+off:
+
+| In | Out | Services | Source | Destination | Action | Rate limit |
+|---|---|---|---|---|---|---|
+| wan | | ssh | | | accept | ssh |
+
+Example: each guest at most 20 Mbit/s (forward), with *guest host* policing
+20 Mbit/s, whole connections, per source address:
+
+| In | Out | Services | Source | Destination | Action | Rate limit |
+|---|---|---|---|---|---|---|
+| guest | wan | | | | accept | guest host |
 
 ## Working on the Rules page
 

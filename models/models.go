@@ -382,6 +382,10 @@ type Interface struct {
 	// Lldp sends LLDP on the interface and lists its LLDP neighbours
 	// (physical, VLAN and bridge interfaces).
 	Lldp bool `gorm:"column:lldp" json:"lldp"`
+	// ShapeEgress and ShapeIngress shape what the interface sends and
+	// receives with CAKE, in Mbit/s; 0 is not shaped.
+	ShapeEgress  int `json:"shape_egress"`
+	ShapeIngress int `json:"shape_ingress"`
 
 	WgPrivateKey string `json:"-"`
 	WgPublicKey  string `json:"wg_public_key"`
@@ -456,11 +460,32 @@ type Rule struct {
 	DstAddrs      StringList `json:"dst_addrs"`
 	// Services holds names of services (custom or predefined); empty
 	// matches any protocol.
-	Services    StringList `json:"services"`
-	Action      string     `json:"action"`
-	Log         bool       `json:"log"`
-	Enabled     bool       `json:"enabled"`
-	Description string     `json:"description"`
+	Services StringList `json:"services"`
+	Action   string     `json:"action"`
+	Log      bool       `json:"log"`
+	// RateLimit names one of the instance's rate limits; empty is none.
+	RateLimit   string `json:"rate_limit"`
+	Enabled     bool   `json:"enabled"`
+	Description string `json:"description"`
+}
+
+// RateLimit limits the traffic of the rules that name it
+// (fwconfig.RateLimit).
+type RateLimit struct {
+	Base
+	InstanceID  uint   `json:"instance_id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Rate        int    `json:"rate"`
+	Unit        string `json:"unit"` // "" (packets), bytes, kbytes, mbytes, kbit, mbit
+	Per         string `json:"per"`
+	Burst       int    `json:"burst"`
+	PerSource   bool   `json:"per_source"`
+	// Connections polices all the traffic of the connections the rules
+	// accept, and drops what is over the limit (fwconfig.RateLimit).
+	Connections bool `json:"connections"`
+	// Shape queues the traffic of those connections to the rate instead.
+	Shape bool `json:"shape"`
 }
 
 // Rule kinds besides a rule ("").
@@ -791,7 +816,7 @@ func All() []any {
 		&User{}, &Settings{}, &Instance{}, &InterfaceZone{}, &Interface{}, &WgPeer{}, &Link{},
 		&Route{}, &Rule{}, &NatRule{}, &IpamPrefix{}, &IpamAddress{}, &DnsZone{}, &DnsRecord{}, &Deployment{},
 		&AddressObject{}, &DnsSoaTemplate{}, &DnsDnssecPolicy{}, &DnsTemplate{}, &KnownInterface{},
-		&DyndnsClient{}, &DyndnsRecord{}, &Certificate{}, &IpList{}, &Task{}, &Service{}, &ObjectFolder{}, &Role{}, &RoleMember{}, &RoleInstance{},
+		&DyndnsClient{}, &DyndnsRecord{}, &Certificate{}, &IpList{}, &Task{}, &Service{}, &RateLimit{}, &ObjectFolder{}, &Role{}, &RoleMember{}, &RoleInstance{},
 		&RoutePrefixList{}, &RouteAsPathList{}, &RouteCommunityList{}, &RouteMap{}, &BgpConfig{}, &BgpPeerGroup{}, &BgpNeighbor{},
 		&OspfConfig{}, &OspfInterface{},
 	}

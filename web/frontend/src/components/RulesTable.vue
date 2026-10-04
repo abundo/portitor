@@ -184,7 +184,7 @@ function searchCells(r) {
     src_addrs: listText(r.src_addrs),
     dst_addrs: listText(r.dst_addrs),
     services: listText(r.services),
-    action: r.action,
+    action: [r.action, r.rate_limit].filter(Boolean).join(' '),
     description: r.description,
   }
   if (hasFrom.value) {
@@ -1089,6 +1089,16 @@ function onKeydown(event, index) {
                   >
                     <option v-for="a in actions" :key="a" :value="a">{{ a }}</option>
                   </select>
+                  <UBadge
+                    v-if="r.rate_limit"
+                    color="neutral"
+                    variant="subtle"
+                    size="sm"
+                    icon="i-lucide-gauge"
+                    :label="r.rate_limit"
+                    class="ml-1"
+                    :title="`Rate limit ${r.rate_limit}`"
+                  />
                 </td>
                 <td class="text-center">
                   <input

@@ -178,3 +178,54 @@ func TestDnsNameserversMigration(t *testing.T) {
 		t.Errorf("after down, nameservers = %s, want %s", got, want)
 	}
 }
+
+// TestRateLimitShapeMigration upgrades a database a development build
+// left at 38: rate_limits without unit, connections and shape, and a
+// shapers table that rules named.
+func TestRateLimitShapeMigration(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "db.sqlite"), &gorm.Config{Logger: logger.Discard})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := provider(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(context.Background(), 37); err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range []string{
+		`ALTER TABLE rate_limits DROP COLUMN shape`,
+		`ALTER TABLE rate_limits DROP COLUMN connections`,
+		`CREATE TABLE shapers (id INTEGER PRIMARY KEY AUTOINCREMENT, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, instance_id INTEGER NOT NULL REFERENCES instances(id) ON DELETE CASCADE,
+			name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', mbit INTEGER NOT NULL DEFAULT 10, UNIQUE (instance_id, name))`,
+		`ALTER TABLE rules ADD COLUMN shaper TEXT NOT NULL DEFAULT ''`,
+		`INSERT INTO goose_db_version (version_id, is_applied) VALUES (38, true)`,
+		`INSERT INTO instances (id, name) VALUES (1, 'main')`,
+		`INSERT INTO shapers (instance_id, name, mbit) VALUES (1, 'guests', 20)`,
+		`INSERT INTO rules (instance_id, chain, action, shaper) VALUES (1, 'forward', 'accept', 'guests')`,
+	} {
+		if err := db.Exec(s).Error; err != nil {
+			t.Fatalf("%s: %v", s, err)
+		}
+	}
+	if err := Up(db); err != nil {
+		t.Fatal(err)
+	}
+	var l models.RateLimit
+	if err := db.Where("name = ?", "guests").First(&l).Error; err != nil {
+		t.Fatal(err)
+	}
+	if !l.Shape || l.Rate != 20 || l.Unit != "mbit" || l.Per != "second" {
+		t.Errorf("shaper became %+v", l)
+	}
+	var r models.Rule
+	db.First(&r)
+	if r.RateLimit != "guests" {
+		t.Errorf("rule names %q", r.RateLimit)
+	}
+	if db.Migrator().HasTable("shapers") || db.Migrator().HasColumn("rules", "shaper") {
+		t.Error("shapers left behind")
+	}
+}

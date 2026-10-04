@@ -8,7 +8,7 @@ import NeedInstance from '@/components/NeedInstance.vue'
 import RulesTable from '@/components/RulesTable.vue'
 import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
-import { api as backend, instances, rules } from '@/api'
+import { api as backend, instances, rateLimits, rules } from '@/api'
 import { errMsg } from '@/api/http'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
 import { useObjectStore } from '@/stores/objects'
@@ -28,6 +28,13 @@ async function loadAutoRules() {
   autoRules.value = await backend.autoRules(store.currentId).catch(() => [])
 }
 watch(() => store.currentId, loadAutoRules, { immediate: true })
+// The instance's rate limits, for the rule form (Rate limits page).
+const limits = ref([])
+async function loadLimits() {
+  if (!store.currentId) return
+  limits.value = await rateLimits.list({ instance_id: store.currentId }).catch(() => [])
+}
+watch(() => store.currentId, loadLimits, { immediate: true })
 // lockedRow shows a locked row of a chain's table in the rule form
 // (read-only): an auto rule, or { builtin } for the invalid packets, the port
 // forwards' accept or the policy. What it matches takes the Services field's
@@ -207,6 +214,20 @@ const fields = [
   },
   { key: 'action', label: 'Action', type: 'select', items: opt(['accept', 'drop', 'reject']) },
   {
+    key: 'rate_limit',
+    label: 'Rate limit',
+    type: 'select',
+    nullable: true,
+    text: true,
+    items: () =>
+      limits.value.map((l) => ({
+        label: `${l.name} (${l.shape ? 'shape' : 'police'} ${l.rate} ${l.unit === 'mbit' ? 'Mbit' : l.unit === 'kbit' ? 'kbit' : l.unit || 'packets'}/s)`,
+        value: l.name,
+      })),
+    show: (f) => !f.match,
+    hint: 'When the rule matches, its traffic goes through the rate limit. Police drops what is over the rate; Shape (accept rules only) queues it. Rate limits are defined on the Rate limits page.',
+  },
+  {
     key: 'log',
     label: 'Log matches',
     type: 'switch',
@@ -316,6 +337,7 @@ function clean(b) {
         src_addrs: [],
         dst_addrs: [],
         services: [],
+        rate_limit: '',
       }"
       new-label=""
       reorder="rules"

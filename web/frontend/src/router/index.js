@@ -32,6 +32,7 @@ const router = createRouter({
         { path: 'interface-zones', component: () => import('@/views/InterfaceZonesPage.vue') },
         { path: 'rules', component: () => import('@/views/RulesPage.vue') },
         { path: 'services', component: () => import('@/views/ServicesPage.vue') },
+        { path: 'rate-limits', component: () => import('@/views/RateLimitsPage.vue') },
         { path: 'nat', redirect: '/rules' },
         {
           path: 'connections',

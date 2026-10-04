@@ -17,7 +17,7 @@ func SampleDocument() Document {
 				Name:    "main",
 				Default: true,
 				Interfaces: []Interface{
-					{Name: "eth0", Kind: KindPhysical, Enabled: true, IPv4Mode: ModeDHCP, IPv6AcceptRA: true},
+					{Name: "eth0", Kind: KindPhysical, Enabled: true, IPv4Mode: ModeDHCP, IPv6AcceptRA: true, ShapeEgress: 40, ShapeIngress: 400},
 					{Name: "eth1", Kind: KindPhysical, Enabled: true, IPv4Mode: ModeStatic, Addresses: []string{"192.168.1.1/24", "fd00:1::1/64"}},
 					{Name: "eth1.20", Kind: KindVLAN, Parent: "eth1", VLANID: 20, Enabled: true, IPv4Mode: ModeStatic, Addresses: []string{"192.168.20.1/24"}},
 					{
@@ -69,6 +69,20 @@ func SampleDocument() Document {
 					{Chain: ChainForward, OutInterfaces: []string{"wan"}, Family: "ipv4", DstAddrs: []string{"@drop"}, Action: ActionReject},
 					{Chain: ChainOutput, Action: ActionAccept, Description: "allow all output"},
 					{Chain: ChainOutput, Kind: RuleKindComment, Description: "group: admin"},
+					{Chain: ChainInput, InInterfaces: []string{"wan"}, Services: []ServiceMatch{{Protocol: ProtoTCP, DstPorts: "22"}}, Action: ActionAccept, RateLimit: "ssh", Description: "ssh, limited"},
+					{Chain: ChainForward, InInterfaces: []string{"wan"}, DstAddrs: []string{"192.168.1.10"}, Services: []ServiceMatch{{Protocol: ProtoICMP, ICMPType: "echo-request"}}, Action: ActionAccept, RateLimit: "ping flood"},
+					{ID: 2000, Chain: ChainForward, InInterfaces: []string{"guest"}, OutInterfaces: []string{"wan"}, Action: ActionAccept, RateLimit: "guest host", Description: "guests, policed"},
+					{ID: 2002, Chain: ChainInput, InInterfaces: []string{"lan"}, Services: []ServiceMatch{{Protocol: ProtoTCP, DstPorts: "445"}}, Action: ActionAccept, RateLimit: "shared", Description: "file share"},
+					{ID: 2001, Chain: ChainOutput, Services: []ServiceMatch{{Protocol: ProtoTCP, DstPorts: "443"}}, Action: ActionAccept, RateLimit: "updates"},
+				},
+				RateLimits: []RateLimit{
+					{Name: "ssh", Rate: 4, Per: RatePerMinute, Burst: 2, PerSource: true},
+					{Name: "ping flood", Rate: 10, Per: RatePerSecond},
+					{Name: "guest host", Rate: 2, Unit: RateUnitMBytes, Per: RatePerSecond, Burst: 1, PerSource: true, Connections: true},
+					{Name: "updates", Rate: 500, Unit: RateUnitKBytes, Per: RatePerSecond, Connections: true},
+					{Name: "bulk", Rate: 100, Unit: RateUnitMBit, Per: RatePerSecond, Shape: true},
+					{Name: "shared", Rate: 2, Unit: RateUnitMBytes, Per: RatePerSecond, Shape: true},
+					{Name: "cap", Rate: 10, Unit: RateUnitMBit, Per: RatePerSecond, Burst: 1, Connections: true},
 				},
 				NAT: []NATRule{
 					{Kind: NATDNAT, InInterfaces: []string{"wan"}, Protocol: "tcp", DstPorts: "8443", ToAddr: "192.168.1.10", ToPort: 443, Hairpin: true, Description: "NAS"},

@@ -128,6 +128,12 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 		if ifc.Name == "lo" {
 			v.addf("%s: loopback is managed automatically", ip)
 		}
+		if strings.HasPrefix(ifc.Name, IFBPrefix) {
+			v.addf("%s: %s names are for shaping devices", ip, IFBPrefix)
+		}
+		if ifc.ShapeEgress < 0 || ifc.ShapeEgress > MaxShapeMbit || ifc.ShapeIngress < 0 || ifc.ShapeIngress > MaxShapeMbit {
+			v.addf("%s: shaping must be 0-%d Mbit/s", ip, MaxShapeMbit)
+		}
 		if ifaces[ifc.Name] != nil {
 			v.addf("%s: duplicate", ip)
 		}
@@ -256,6 +262,53 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 			seen[m] = true
 		}
 	}
+	rateLimits := map[string]bool{}
+	connLimits := map[string]bool{}
+	shaping := 0
+	for _, l := range in.RateLimits {
+		lp := fmt.Sprintf("%s: rate limit %q", p, l.Name)
+		if !ValidName(l.Name) {
+			v.addf("%s: invalid name", lp)
+		}
+		if rateLimits[l.Name] {
+			v.addf("%s: duplicate", lp)
+		}
+		rateLimits[l.Name] = true
+		if l.Rate < 1 || l.Rate > MaxRate {
+			v.addf("%s: rate must be 1-%d", lp, MaxRate)
+		}
+		if l.Burst < 0 || l.Burst > MaxRate {
+			v.addf("%s: burst must be 0-%d", lp, MaxRate)
+		}
+		switch l.Per {
+		case RatePerSecond, RatePerMinute, RatePerHour, RatePerDay:
+		default:
+			v.addf("%s: invalid period %q", lp, l.Per)
+		}
+		switch l.Unit {
+		case "":
+			if l.Shape {
+				v.addf("%s: shaping needs a rate in bytes or bits", lp)
+			}
+		case RateUnitBytes, RateUnitKBytes, RateUnitMBytes, RateUnitKBit, RateUnitMBit:
+			if !l.Marks() {
+				v.addf("%s: a limit in %s needs connections", lp, l.Unit)
+			}
+		default:
+			v.addf("%s: invalid unit %q", lp, l.Unit)
+		}
+		if l.Shape {
+			shaping++
+			if l.Per != RatePerSecond || l.Burst != 0 || l.PerSource || l.Connections {
+				v.addf("%s: shaping takes a rate per second only", lp)
+			}
+		}
+		connLimits[l.Name] = l.Marks()
+	}
+	if shaping > MaxShapers {
+		v.addf("%s: at most %d shaping rate limits", p, MaxShapers)
+	}
+
 	// ifaceRefs checks a rule's interface list: interface or zone names.
 	ifaceRefs := func(where string, list []string) {
 		for _, name := range list {
@@ -274,7 +327,7 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 		}
 		if r.Kind == RuleKindComment {
 			if len(r.InInterfaces)+len(r.OutInterfaces)+len(r.SrcAddrs)+len(r.DstAddrs) > 0 ||
-				r.Family != "" || len(r.Services) > 0 || r.Action != "" || r.Log || r.ID != 0 {
+				r.Family != "" || len(r.Services) > 0 || r.Action != "" || r.Log || r.ID != 0 || r.RateLimit != "" {
 				v.addf("%s: a comment has only a chain and a description", rp)
 			}
 			checkComment(v, rp, r.Description)
@@ -299,6 +352,12 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 		ifaceRefs(rp, r.OutInterfaces)
 		if !validAction(r.Action) {
 			v.addf("%s: invalid action %q", rp, r.Action)
+		}
+		if r.RateLimit != "" && !rateLimits[r.RateLimit] {
+			v.addf("%s: unknown rate limit %q", rp, r.RateLimit)
+		}
+		if connLimits[r.RateLimit] && (r.Action != ActionAccept || r.ID == 0) {
+			v.addf("%s: rate limit %q limits or shapes connections, which only an accept rule with an id has", rp, r.RateLimit)
 		}
 		if v.match(rp, r.Family, "", r.SrcAddrs, r.DstAddrs, "", true) {
 			valid := true

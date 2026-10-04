@@ -161,6 +161,20 @@ const fields = [
     hint: 'Announce the firewall with LLDP on this interface and list the LLDP neighbours heard on it under Neighbours.',
   },
   {
+    key: 'shape_egress',
+    label: 'Shape upload (Mbit/s)',
+    type: 'number',
+    show: (f) => f.kind !== 'loopback',
+    hint: 'Shapes what the interface sends with CAKE, a little below the line speed (95%), so the queue stays here instead of in the modem; 0 is off. When rules use a rate limit that shapes, an HTB tree at this rate replaces CAKE.',
+  },
+  {
+    key: 'shape_ingress',
+    label: 'Shape download (Mbit/s)',
+    type: 'number',
+    show: (f) => f.kind !== 'loopback',
+    hint: 'Shapes what the interface receives (through an IFB device, ifb-<name>); 0 is off.',
+  },
+  {
     key: 'wg_listen_port',
     label: 'WireGuard listen port',
     type: 'number',
@@ -224,6 +238,8 @@ function leaseOf(row, family = '') {
         dhcpv6_pd: false,
         dhcpv6_pd_length: 0,
         lldp: false,
+        shape_egress: 0,
+        shape_ingress: 0,
       }"
       new-label="New interface"
       @changed="reload()"

@@ -85,6 +85,10 @@ func Nftables(in *fwconfig.Instance, lockout *AntiLockout, paths Paths) string {
 		fmt.Fprintf(b, "\tset %s {\n\t\ttype inet_service\n\t}\n\n", ACMEHTTPSet)
 	}
 
+	for _, l := range in.RateLimits {
+		writeRateLimit(b, l)
+	}
+
 	counted := writeRuleCounters(b, in.Rules)
 	writeDropCounters(b)
 
@@ -96,6 +100,7 @@ func Nftables(in *fwconfig.Instance, lockout *AntiLockout, paths Paths) string {
 	// ----- input -----
 	b.WriteString("\tchain input {\n")
 	b.WriteString("\t\ttype filter hook input priority filter; policy drop;\n")
+	writePolicers(b, in, fwconfig.ChainInput)
 	if counted {
 		b.WriteString(connCountRules)
 	}
@@ -142,6 +147,8 @@ func Nftables(in *fwconfig.Instance, lockout *AntiLockout, paths Paths) string {
 	// ----- forward -----
 	b.WriteString("\tchain forward {\n")
 	b.WriteString("\t\ttype filter hook forward priority filter; policy drop;\n")
+	writePolicers(b, in, fwconfig.ChainForward)
+	writeShaperMarks(b, in, fwconfig.ChainForward)
 	if counted {
 		b.WriteString(connCountRules)
 	}
@@ -158,6 +165,8 @@ func Nftables(in *fwconfig.Instance, lockout *AntiLockout, paths Paths) string {
 	// ----- output -----
 	b.WriteString("\tchain output {\n")
 	b.WriteString("\t\ttype filter hook output priority filter; policy drop;\n")
+	writePolicers(b, in, fwconfig.ChainOutput)
+	writeShaperMarks(b, in, fwconfig.ChainOutput)
 	if counted {
 		b.WriteString(connCountRules)
 	}
@@ -716,14 +725,205 @@ func writeRule(b *strings.Builder, idx int, r fwconfig.Rule, in *fwconfig.Instan
 		tail = append(tail, "jump reject_pkt")
 	}
 	tail = append(tail, comment(fmt.Sprintf("rule %d", idx+1), r.Description))
+	limit := rateLimit(in, r.RateLimit)
 	// One nft rule per service match and IP version (fwconfig.Rule.Matches),
-	// and per address operand (see addrOperands).
+	// and per address operand (see addrOperands). A rate limit on the
+	// packets the rule matches drops what is over it first, with the same
+	// match; one per source address splits a match of either IP version in
+	// two.
 	for _, m := range r.Matches() {
 		for _, match := range matchExprs(m.FamilyMatch, serviceExpr(m.Service)) {
+			for _, lim := range limitExprs(limit, m) {
+				line := append(append(append([]string(nil), parts...), match...), lim...)
+				line = append(line, "drop", comment(fmt.Sprintf("rule %d", idx+1), "rate limit "+limit.Name))
+				b.WriteString("\t\t" + strings.Join(line, " ") + "\n")
+			}
 			line := append(append(append([]string(nil), parts...), match...), tail...)
 			b.WriteString("\t\t" + strings.Join(line, " ") + "\n")
 		}
 	}
+}
+
+// writePolicers drops what is over the rate limits that police the
+// connections of the chain's rules: by the connection's mark (the rule's
+// ID, set by its accept), per address of the side that opened it with a
+// limit per source. They come before the established accept, which would
+// let the rest of a connection through.
+func writePolicers(b *strings.Builder, in *fwconfig.Instance, chain string) {
+	idx := 0
+	for _, r := range in.Rules {
+		if r.Kind == fwconfig.RuleKindComment {
+			continue
+		}
+		idx++
+		l := rateLimit(in, r.RateLimit)
+		if r.Chain != chain || l == nil || !l.Connections || r.ID == 0 {
+			continue
+		}
+		c := comment(fmt.Sprintf("rule %d", idx), "rate limit "+l.Name)
+		if !l.PerSource {
+			fmt.Fprintf(b, "\t\tct mark %d limit name %q drop %s\n", r.ID, RateLimitKey(l.Name), c)
+			continue
+		}
+		for _, f := range []struct{ fam, key string }{{"ipv4", "ip"}, {"ipv6", "ip6"}} {
+			fmt.Fprintf(b, "\t\tmeta nfproto %s ct mark %d update @%s { ct original %s saddr limit %s } drop %s\n",
+				f.fam, r.ID, RateLimitSet(l.Name, f.fam), f.key, limitRate(*l), c)
+		}
+	}
+}
+
+// Shapers: the rate limits that shape (fwconfig.RateLimit.Shape). A
+// packet of a connection a rule with a shaper accepted (its ct mark is the
+// rule's ID) gets the shaper's packet mark, which the
+// agent's HTB filters on every interface of the instance classify by
+// (ShaperClass); a packet with a mark already (the hairpin's) keeps it.
+// Packets are marked where they leave: in forward, and in
+// output for the input and output rules (an input rule's connections
+// answer from the firewall). What an interface receives is queued before
+// the firewall sees it, so a shaper queues each direction where it goes out.
+
+// ShaperMarkBase is the packet mark of the first shaper; the hairpin's
+// (HairpinMark) is below it.
+const ShaperMarkBase = 0x5300
+
+// ShaperMark is the packet mark of the instance's i-th shaper.
+func ShaperMark(i int) int { return ShaperMarkBase + i }
+
+// ShaperClass is the HTB class of the instance's i-th shaper.
+func ShaperClass(i int) string { return fmt.Sprintf("1:%x", i+0x10) }
+
+func writeShaperMarks(b *strings.Builder, in *fwconfig.Instance, chain string) {
+	index := map[string]int{}
+	for i, s := range in.Shapers() {
+		index[s.Name] = i
+	}
+	idx := 0
+	for _, r := range in.Rules {
+		if r.Kind == fwconfig.RuleKindComment {
+			continue
+		}
+		idx++
+		i, ok := index[r.RateLimit]
+		if !ok || r.ID == 0 {
+			continue
+		}
+		if c := r.Chain; c != chain && !(chain == fwconfig.ChainOutput && c == fwconfig.ChainInput) {
+			continue
+		}
+		fmt.Fprintf(b, "\t\tct mark %d meta mark 0 meta mark set %#x %s\n", r.ID, ShaperMark(i),
+			comment(fmt.Sprintf("rule %d", idx), "shaper "+r.RateLimit))
+	}
+}
+
+// Rate limits. One shared by all sources is a named limit object; one per
+// source address is a set of each IP version (RateLimitSet) that keeps a
+// limit for each address it has seen, until the address is quiet for
+// rateLimitTimeout.
+
+// RateLimitKey names a rate limit's nft objects, as IPListKey does an IP
+// list's ("R" and hex for a name that isn't a plain one).
+func RateLimitKey(name string) string {
+	if ipListKeyRe.MatchString(name) {
+		return "rl_" + name
+	}
+	sum := sha256.Sum256([]byte(name))
+	return "R" + hex.EncodeToString(sum[:12])
+}
+
+// RateLimitSet is the set of a per-source rate limit for one IP version.
+func RateLimitSet(name, family string) string {
+	if family == "ipv6" {
+		return RateLimitKey(name) + "_v6"
+	}
+	return RateLimitKey(name) + "_v4"
+}
+
+// rateLimitTimeout is how long a per-source set keeps a quiet address:
+// longer than the limit's period, so waiting doesn't reset it early.
+var rateLimitTimeout = map[string]string{
+	fwconfig.RatePerSecond: "1m",
+	fwconfig.RatePerMinute: "10m",
+	fwconfig.RatePerHour:   "2h",
+	fwconfig.RatePerDay:    "2d",
+}
+
+// limitRate renders a limit's token bucket, matching what is over it, to
+// drop it.
+func limitRate(l fwconfig.RateLimit) string {
+	s := "rate over " + nftAmount(l.Rate, l.Unit, false) + "/" + l.Per
+	if l.Burst > 0 {
+		s += " burst " + nftAmount(l.Burst, l.Unit, true)
+	}
+	return s
+}
+
+// nftAmount renders n of a rate limit unit as nft takes it: bits as bytes
+// (1 kbit is 125 bytes); a burst names packets too.
+func nftAmount(n int, unit string, burst bool) string {
+	switch unit {
+	case "":
+		if burst {
+			return fmt.Sprintf("%d packets", n)
+		}
+		return strconv.Itoa(n)
+	case fwconfig.RateUnitKBit:
+		return fmt.Sprintf("%d bytes", n*125)
+	case fwconfig.RateUnitMBit:
+		return fmt.Sprintf("%d kbytes", n*125)
+	}
+	return fmt.Sprintf("%d %s", n, unit)
+}
+
+func writeRateLimit(b *strings.Builder, l fwconfig.RateLimit) {
+	if l.Shape {
+		return // the agent's HTB classes (writeShaperMarks)
+	}
+	if !l.PerSource {
+		fmt.Fprintf(b, "\tlimit %s {\n\t\t%s\n\t}\n\n", RateLimitKey(l.Name), limitRate(l))
+		return
+	}
+	for _, fam := range []string{"ipv4", "ipv6"} {
+		fmt.Fprintf(b, "\tset %s {\n\t\ttype %s_addr\n\t\tsize 65535\n\t\tflags dynamic,timeout\n\t\ttimeout %s\n\t}\n\n",
+			RateLimitSet(l.Name, fam), fam, rateLimitTimeout[l.Per])
+	}
+}
+
+func rateLimit(in *fwconfig.Instance, name string) *fwconfig.RateLimit {
+	if name == "" {
+		return nil
+	}
+	for i := range in.RateLimits {
+		if in.RateLimits[i].Name == name {
+			return &in.RateLimits[i]
+		}
+	}
+	return nil // Validate refuses it
+}
+
+// limitExprs renders what of a rule's matches is over its rate limit on
+// the packets it matches: one match, or one per IP version for a limit
+// per source address on a match of either version. None for no such limit.
+func limitExprs(l *fwconfig.RateLimit, m fwconfig.RuleMatch) [][]string {
+	if l == nil || l.Marks() { // writePolicers, writeShaperMarks
+		return nil
+	}
+	if !l.PerSource {
+		return [][]string{{fmt.Sprintf("limit name %q", RateLimitKey(l.Name))}}
+	}
+	var out [][]string
+	for _, fam := range []string{"ipv4", "ipv6"} {
+		if m.Family != "" && m.Family != fam ||
+			m.Service.Protocol == fwconfig.ProtoICMP && fam != "ipv4" ||
+			m.Service.Protocol == fwconfig.ProtoICMPv6 && fam != "ipv6" {
+			continue
+		}
+		key := "ip"
+		if fam == "ipv6" {
+			key = "ip6"
+		}
+		out = append(out, []string{fmt.Sprintf("update @%s { %s saddr limit %s }", RateLimitSet(l.Name, fam), key, limitRate(*l))})
+	}
+	return out
 }
 
 // HairpinMark is the packet mark a hairpin port forward sets (in

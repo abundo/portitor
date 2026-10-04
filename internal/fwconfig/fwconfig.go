@@ -12,7 +12,11 @@
 // instances.
 package fwconfig
 
-import "slices"
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"slices"
+)
 
 // Version of the document format. Bump when a field changes meaning.
 const Version = 3
@@ -37,10 +41,12 @@ type Instance struct {
 	// InterfaceZones name groups of interfaces for rules to match on.
 	InterfaceZones []InterfaceZone `json:"interface_zones"`
 	Rules          []Rule          `json:"rules"`
-	NAT            []NATRule       `json:"nat"`
-	Routes         []Route         `json:"routes"`
-	DHCP           DHCPServer      `json:"dhcp"`
-	DNS            DNSServer       `json:"dns"`
+	// RateLimits are the rate limits the rules name (Rule.RateLimit).
+	RateLimits []RateLimit `json:"rate_limits,omitempty"`
+	NAT        []NATRule   `json:"nat"`
+	Routes     []Route     `json:"routes"`
+	DHCP       DHCPServer  `json:"dhcp"`
+	DNS        DNSServer   `json:"dns"`
 	// RA lists the interfaces that send IPv6 router advertisements.
 	RA []RAInterface `json:"ra,omitempty"`
 	// DynDNS clients keep records on a nameserver in step with the
@@ -117,8 +123,31 @@ type Interface struct {
 	DHCPv6PDLength int  `json:"dhcpv6_pd_length,omitempty"`
 	// LLDP makes the agent send LLDP frames on the interface and listen
 	// for its neighbours' (ethernet kinds: physical, VLAN, bridge).
-	LLDP      bool       `json:"lldp,omitempty"`
-	WireGuard *WireGuard `json:"wireguard,omitempty"`
+	LLDP bool `json:"lldp,omitempty"`
+	// ShapeEgress and ShapeIngress shape what the interface sends and
+	// receives to that many Mbit/s with CAKE (0: not shaped). Receiving
+	// is shaped on an IFB device (IFBName) the interface's traffic is
+	// redirected to.
+	ShapeEgress  int        `json:"shape_egress,omitempty"`
+	ShapeIngress int        `json:"shape_ingress,omitempty"`
+	WireGuard    *WireGuard `json:"wireguard,omitempty"`
+}
+
+// MaxShapeMbit bounds an interface's shaped bandwidth (Mbit/s).
+const MaxShapeMbit = 400000
+
+// IFBPrefix starts the names of the IFB devices that shape what an
+// interface receives; no interface may be called that.
+const IFBPrefix = "ifb-"
+
+// IFBName is the IFB device that shapes what interface name receives:
+// "ifb-" and the name, or a hash of it when that is too long.
+func IFBName(name string) string {
+	if len(IFBPrefix)+len(name) <= 15 {
+		return IFBPrefix + name
+	}
+	sum := sha256.Sum256([]byte(name))
+	return IFBPrefix + hex.EncodeToString(sum[:])[:11]
 }
 
 type WireGuard struct {
@@ -203,11 +232,111 @@ type Rule struct {
 	DstAddrs      []string `json:"dst_addrs,omitempty"`
 	// Services are the protocol matches of the rule, of which a packet
 	// must match one; empty matches any protocol.
-	Services    []ServiceMatch `json:"services,omitempty"`
-	Action      string         `json:"action"`
-	Log         bool           `json:"log,omitempty"`
-	Description string         `json:"description,omitempty"`
+	Services []ServiceMatch `json:"services,omitempty"`
+	Action   string         `json:"action"`
+	Log      bool           `json:"log,omitempty"`
+	// RateLimit names one of the instance's RateLimits, which limits or
+	// shapes the rule's traffic (RateLimit).
+	RateLimit   string `json:"rate_limit,omitempty"`
+	Description string `json:"description,omitempty"`
 }
+
+// RateLimit is a token bucket: Rate units per Per, with Burst units
+// above it allowed at once (0: nftables' default). The rules that name it
+// share it; PerSource keeps a bucket for each source address instead of
+// one for all.
+//
+// Without Connections it polices the packets a rule matches, dropping
+// what is over the limit before the rule: established connections are
+// accepted before the rules, so on an accept rule it limits new
+// connections. With Connections it polices all the traffic, both ways, of the
+// connections the rules accept (by their ct mark, before the established
+// accept), and drops what is over the limit; a rule naming it must be an
+// accept rule with an ID. Byte and bit units need Connections.
+//
+// With Shape it queues instead: the traffic of the connections the rules
+// accept is held to Rate (bytes or bits per second), in each direction,
+// where it leaves the firewall: an HTB class on each interface of the
+// instance, which the packets reach by their mark (render.ShaperMark).
+// A rule naming it must be an accept rule with an ID; Per is second, and
+// Burst, PerSource and Connections are not set.
+type RateLimit struct {
+	Name        string `json:"name"`
+	Rate        int    `json:"rate"`
+	Unit        string `json:"unit,omitempty"` // RateUnit*; "" is packets
+	Per         string `json:"per"`            // RatePer*
+	Burst       int    `json:"burst,omitempty"`
+	PerSource   bool   `json:"per_source,omitempty"`
+	Connections bool   `json:"connections,omitempty"`
+	Shape       bool   `json:"shape,omitempty"`
+}
+
+// Rate limit units besides packets (""): bytes and bits (k and m are
+// 1000 and 1000000).
+const (
+	RateUnitBytes  = "bytes"
+	RateUnitKBytes = "kbytes"
+	RateUnitMBytes = "mbytes"
+	RateUnitKBit   = "kbit"
+	RateUnitMBit   = "mbit"
+)
+
+// MaxShapers bounds the rate limits of an instance that shape (marks and
+// HTB classes).
+const MaxShapers = 200
+
+// Marks reports whether the limit needs the connections of the rules
+// that name it marked: it polices or shapes them.
+func (l RateLimit) Marks() bool { return l.Connections || l.Shape }
+
+// Bits is the rate in bits per second, for a limit in bytes or bits.
+func (l RateLimit) Bits() int64 {
+	n := int64(l.Rate)
+	switch l.Unit {
+	case RateUnitBytes:
+		return n * 8
+	case RateUnitKBytes:
+		return n * 8000
+	case RateUnitMBytes:
+		return n * 8000000
+	case RateUnitKBit:
+		return n * 1000
+	case RateUnitMBit:
+		return n * 1000000
+	}
+	return 0
+}
+
+// Shapers returns the rate limits that shape, when a rule names one;
+// nil otherwise. A shaper's index in it numbers its mark and class.
+func (in *Instance) Shapers() []RateLimit {
+	used := false
+	var out []RateLimit
+	for _, l := range in.RateLimits {
+		if !l.Shape {
+			continue
+		}
+		out = append(out, l)
+		for _, r := range in.Rules {
+			used = used || r.RateLimit == l.Name
+		}
+	}
+	if !used {
+		return nil
+	}
+	return out
+}
+
+// Rate limit periods.
+const (
+	RatePerSecond = "second"
+	RatePerMinute = "minute"
+	RatePerHour   = "hour"
+	RatePerDay    = "day"
+)
+
+// MaxRate bounds a rate limit's rate and burst.
+const MaxRate = 1000000
 
 // ServiceMatch is one protocol match of a rule. portitor-web expands the
 // services a rule names into these.

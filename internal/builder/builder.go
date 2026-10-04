@@ -46,6 +46,7 @@ type data struct {
 	ipLists        []models.IpList
 	tasks          []models.Task
 	services       []models.Service
+	rateLimits     []models.RateLimit
 	prefixLists    []models.RoutePrefixList
 	asPathLists    []models.RouteAsPathList
 	communityLists []models.RouteCommunityList
@@ -85,6 +86,7 @@ func load(db *gorm.DB) (*data, error) {
 		{&d.ipLists, "name"},
 		{&d.tasks, "name"},
 		{&d.services, "name"},
+		{&d.rateLimits, "name"},
 		{&d.prefixLists, "name"},
 		{&d.asPathLists, "name"},
 		{&d.communityLists, "name"},
@@ -223,6 +225,8 @@ func build(db *gorm.DB, generation int64, only map[string]bool) (*fwconfig.Docum
 				DHCPv6:             mif.Dhcpv6,
 				DHCPv6PD:           mif.Dhcpv6 && mif.Dhcpv6Pd,
 				LLDP:               mif.Lldp && mif.Kind != fwconfig.KindWireGuard && mif.Kind != fwconfig.KindLoopback,
+				ShapeEgress:        mif.ShapeEgress,
+				ShapeIngress:       mif.ShapeIngress,
 			}
 			if ifc.DHCPv6PD {
 				ifc.DHCPv6PDLength = mif.Dhcpv6PdLength
@@ -280,11 +284,20 @@ func build(db *gorm.DB, generation int64, only map[string]bool) (*fwconfig.Docum
 				Services:      expandServices(where+": services", r.Services),
 				Action:        r.Action,
 				Log:           r.Log,
+				RateLimit:     r.RateLimit,
 				Description:   r.Description,
 			}
 			// An unresolved name must not leave an emptier (wider) match.
 			if !failed {
 				in.Rules = append(in.Rules, rule)
+			}
+		}
+		for _, l := range d.rateLimits {
+			if l.InstanceID == mi.ID {
+				in.RateLimits = append(in.RateLimits, fwconfig.RateLimit{
+					Name: l.Name, Rate: l.Rate, Unit: l.Unit, Per: l.Per, Burst: l.Burst,
+					PerSource: l.PerSource, Connections: l.Connections, Shape: l.Shape,
+				})
 			}
 		}
 		for _, n := range d.nat {

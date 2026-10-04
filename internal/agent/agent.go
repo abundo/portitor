@@ -47,6 +47,10 @@ type Agent struct {
 	pending   *pendingConfirm
 	lastApply time.Time
 	lastError string
+	// shaped holds the HTB tree (htbTree) set up on each "<netns>/<dev>",
+	// so an apply that changes nothing about it leaves it alone. Lost on
+	// restart, which builds the trees once more.
+	shaped map[string]string
 }
 
 // pendingConfirm is an applied document that rolls back to Previous

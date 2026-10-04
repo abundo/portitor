@@ -58,6 +58,21 @@ func TestNftablesMain(t *testing.T) {
 		`iifname { "eth1", "eth1.20", "wg0" } meta l4proto { tcp, udp } th dport 53 accept`,
 		`udp dport 51820 accept comment "auto: wireguard wg0"`,
 		`iifname "eth1" oifname "eth0" counter accept comment "rule 1: LAN to Internet"`,
+		"set rl_ssh_v4 {\n\t\ttype ipv4_addr\n\t\tsize 65535\n\t\tflags dynamic,timeout\n\t\ttimeout 10m\n",
+		// Over the limit is dropped before the rule.
+		"\t\tiifname \"eth0\" tcp dport 22 update @rl_ssh_v4 { ip saddr limit rate over 4/minute burst 2 packets } drop comment \"rule 15: rate limit ssh\"\n" +
+			"\t\tiifname \"eth0\" tcp dport 22 update @rl_ssh_v6 { ip6 saddr limit rate over 4/minute burst 2 packets } drop comment \"rule 15: rate limit ssh\"\n" +
+			"\t\tiifname \"eth0\" tcp dport 22 counter accept comment \"rule 15: ssh, limited\"\n",
+		"limit " + RateLimitKey("ping flood") + " {\n\t\trate over 10/second\n\t}",
+		`icmp type echo-request limit name "` + RateLimitKey("ping flood") + `" drop comment "rule 16: rate limit ping flood"`,
+		`icmp type echo-request counter accept comment "rule 16"`,
+		"limit rl_updates {\n\t\trate over 500 kbytes/second\n\t}",
+		"\t\tct mark 2001 limit name \"rl_updates\" drop comment \"rule 19: rate limit updates\"\n",
+		`meta nfproto ipv6 ct mark 2000 update @` + RateLimitSet("guest host", "ipv6") + ` { ct original ip6 saddr limit rate over 2 mbytes/second burst 1 mbytes } drop`,
+		`oifname "eth0" counter name "rule_2000_orig" ct mark set 2000 accept comment "rule 17: guests, policed"`,
+		`limit rl_cap {` + "\n\t\trate over 1250 kbytes/second burst 125 kbytes\n",
+		// An input rule's connections are shaped where the firewall answers.
+		"chain output {\n\t\ttype filter hook output priority filter; policy drop;\n\t\tct mark 2001 limit name \"rl_updates\" drop comment \"rule 19: rate limit updates\"\n\t\tct mark 2002 meta mark 0 meta mark set 0x5301 comment \"rule 18: shaper shared\"\n",
 		`iifname "eth1.20" oifname "eth0" tcp dport { 80, 443, 8883 } counter accept`,
 		`iifname "lk-guest" oifname "eth0" counter accept`,
 		`iifname "eth0" ip daddr 192.168.1.0/24 counter log prefix "forward rule 8 drop" group 64 drop comment "rule 8: no 'direct' access"`,
