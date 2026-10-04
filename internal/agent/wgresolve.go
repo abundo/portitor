@@ -124,3 +124,37 @@ func namedEndpoint(ep string) bool {
 	_, err = netip.ParseAddr(host)
 	return err != nil
 }
+
+// withoutNamedEndpoints drops the Endpoint lines of a rendered WireGuard
+// config whose endpoint is a name. syncconf keeps a peer's current
+// endpoint when the config has none.
+func withoutNamedEndpoints(conf string) string {
+	var b strings.Builder
+	for line := range strings.Lines(conf) {
+		if k, v, ok := strings.Cut(line, "="); ok && strings.TrimSpace(k) == "Endpoint" && namedEndpoint(strings.TrimSpace(v)) {
+			continue
+		}
+		b.WriteString(line)
+	}
+	return b.String()
+}
+
+// setNamedEndpoints sets the endpoints that are names, which apply leaves
+// out of syncconf, once the instance's addresses and routes are set. A
+// name that does not resolve (no DNS yet, at boot) is only logged: the
+// rest of the instance must still come up, and resolveLoop tries again.
+func (a *Agent) setNamedEndpoints(ctx context.Context, in *fwconfig.Instance) {
+	for _, ifc := range in.Interfaces {
+		if ifc.Kind != fwconfig.KindWireGuard || ifc.WireGuard == nil {
+			continue
+		}
+		for _, p := range ifc.WireGuard.Peers {
+			if !namedEndpoint(p.Endpoint) {
+				continue
+			}
+			if err := a.do(ctx, command{Netns: in.NetnsName(), Name: "wg", Args: []string{"set", ifc.Name, "peer", p.PublicKey, "endpoint", p.Endpoint}}); err != nil {
+				slog.Warn("set WireGuard endpoint", "netns", in.NetnsName(), "interface", ifc.Name, "endpoint", p.Endpoint, "err", err)
+			}
+		}
+	}
+}

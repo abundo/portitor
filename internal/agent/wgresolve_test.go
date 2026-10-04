@@ -29,3 +29,11 @@ func TestPlanReresolve(t *testing.T) {
 		"fw-x wg set wg0 peer STALE endpoint b.example.org:51820",
 		"fw-x wg set wg0 peer NEVER endpoint c.example.org:51820")
 }
+
+func TestWithoutNamedEndpoints(t *testing.T) {
+	in := "[Peer]\nPublicKey = a\nEndpoint = vpn.example.com:51820\n\n[Peer]\nPublicKey = b\nEndpoint = 192.0.2.1:51820\n\n[Peer]\nPublicKey = c\nEndpoint = [2001:db8::1]:51820\n"
+	want := "[Peer]\nPublicKey = a\n\n[Peer]\nPublicKey = b\nEndpoint = 192.0.2.1:51820\n\n[Peer]\nPublicKey = c\nEndpoint = [2001:db8::1]:51820\n"
+	if got := withoutNamedEndpoints(in); got != want {
+		t.Errorf("got\n%s\nwant\n%s", got, want)
+	}
+}

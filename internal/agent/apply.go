@@ -202,7 +202,10 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 				if conf == nil {
 					return fmt.Errorf("instance %s: %s: no rendered WireGuard config", in.Name, ifc.Name)
 				}
-				if err := a.do(ctx, command{Netns: ns, Name: "wg", Args: []string{"syncconf", ifc.Name, "/dev/stdin"}, Stdin: []byte(conf.Content)}); err != nil {
+				// Without the endpoints that are names: resolving them
+				// needs the addresses and routes set below, and a failure
+				// would stop the apply before them (setNamedEndpoints).
+				if err := a.do(ctx, command{Netns: ns, Name: "wg", Args: []string{"syncconf", ifc.Name, "/dev/stdin"}, Stdin: []byte(withoutNamedEndpoints(conf.Content))}); err != nil {
 					return err
 				}
 			}
@@ -312,6 +315,7 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 		if err := a.doAll(ctx, planRoutes(ns, slices.Concat(in.KernelRoutes(), in.WireGuardRoutes()), routes)); err != nil {
 			return err
 		}
+		a.setNamedEndpoints(ctx, in)
 
 	}
 
