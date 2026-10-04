@@ -942,6 +942,9 @@ class Release:
     published_at: str
     prerelease: bool
     assets: list[Asset] = field(default_factory=list)
+    # Why the release must not be installed: a "Broken: <reason>" line in its
+    # GitHub release notes, which can be added after publishing.
+    broken: str = ""
 
     def archive(self, arch: str) -> Asset | None:
         suffix = f"_{ARCHIVE_OS}_{arch}.tar.gz"
@@ -949,6 +952,11 @@ class Release:
 
     def checksums(self) -> Asset | None:
         return next((a for a in self.assets if a.name.endswith("_checksums.txt")), None)
+
+
+def broken_reason(body: str) -> str:
+    m = re.search(r"^\W*broken\W*:\s*(.*)$", body, re.IGNORECASE | re.MULTILINE)
+    return (m[1].strip(" *_") or "marked broken") if m else ""
 
 
 class GithubClient:
@@ -991,6 +999,7 @@ class GithubClient:
                         tag=item.get("tag_name") or "",
                         published_at=item.get("published_at") or "",
                         prerelease=bool(item.get("prerelease")),
+                        broken=broken_reason(item.get("body") or ""),
                         assets=[
                             Asset(a["name"], int(a.get("size") or 0), a.get("browser_download_url") or "", a.get("url") or "")
                             for a in item.get("assets") or []
@@ -1103,7 +1112,7 @@ def roots_from_work(work: Path) -> dict[str, Path]:
 
 
 def latest_stable(releases: list[Release], include_pre: bool = False) -> Release | None:
-    return next((r for r in releases if include_pre or not r.prerelease), None)
+    return next((r for r in releases if (include_pre or not r.prerelease) and not r.broken), None)
 
 
 def pick_release(releases: list[Release], spec: str, include_pre: bool) -> Release:
@@ -1137,6 +1146,8 @@ def release_status(rel: Release, installed: str, latest_tag: str | None) -> str:
         bits.append("older")
     if rel.prerelease:
         bits.append("pre")
+    if rel.broken:
+        bits.append(f"BROKEN: {rel.broken}")
     return "  ".join(bits)
 
 
@@ -1175,7 +1186,8 @@ def print_release_json(releases: list[Release], installed: dict[str, str], archs
                 "date": format_date(rel.published_at),
                 "prerelease": rel.prerelease,
                 "notes": release_status(rel, cur, latest.tag if latest else None),
-                "newer": version_newer(rel.tag, cur) and (include_pre or not rel.prerelease),
+                "newer": version_newer(rel.tag, cur) and (include_pre or not rel.prerelease) and not rel.broken,
+                "broken": rel.broken,
                 "installable": not missing_archs(rel, archs),
             }
             for rel in releases
@@ -1210,6 +1222,8 @@ def confirm_text(rel: Release, plan: Plan, installed: dict[str, str], assume_yes
         raise InstallError("refusing to install without a TTY; pass --yes")
     log()
     log(f"Install {rel.tag} ({format_date(rel.published_at)})")
+    if rel.broken:
+        log(f"  WARNING: {rel.tag} is marked broken: {rel.broken}")
     for line in summary_lines(plan, installed):
         log(f"  {line}")
     try:
@@ -1265,8 +1279,9 @@ def curses_select(releases: list[Release], plan: Plan, installed: dict[str, str]
                               (4, curses.COLOR_MAGENTA, -1), (5, curses.COLOR_BLACK, curses.COLOR_CYAN),
                               (6, curses.COLOR_RED, -1)):
                 curses.init_pair(n, fg, bg)
-        newer = sum(1 for r in releases if version_newer(r.tag, cur) and not r.prerelease)
-        idx = next((i for i, r in enumerate(releases) if version_newer(r.tag, cur) and not r.prerelease), None)
+        newer = sum(1 for r in releases if version_newer(r.tag, cur) and not r.prerelease and not r.broken)
+        idx = next((i for i, r in enumerate(releases)
+                    if version_newer(r.tag, cur) and not r.prerelease and not r.broken), None)
         if idx is None:
             idx = next((i for i, r in enumerate(releases) if versions_equal(r.tag, cur)), 0)
         offset = 0
@@ -1302,6 +1317,8 @@ def curses_select(releases: list[Release], plan: Plan, installed: dict[str, str]
                     attr = pair(3)
                 if rel.prerelease and not missing:
                     attr = pair(4)
+                if rel.broken:
+                    attr = pair(6)
                 if i == idx:
                     attr = (pair(5) or curses.A_REVERSE) | curses.A_BOLD
                     line = ">" + line[1:]
@@ -1453,7 +1470,7 @@ def main_release(args: argparse.Namespace) -> int:
         return 0
     if not releases:
         raise InstallError(f"{args.repo} has no releases")
-    newer = [r for r in releases if version_newer(r.tag, cur) and (args.pre or not r.prerelease)]
+    newer = [r for r in releases if version_newer(r.tag, cur) and (args.pre or not r.prerelease) and not r.broken]
 
     if args.list:
         print_release_table(releases, plan, installed, needed)
@@ -1487,6 +1504,8 @@ def main_release(args: argparse.Namespace) -> int:
 
     if missing := missing_archs(rel, needed):
         raise InstallError(f"{rel.tag} has no archive for {', '.join(missing)}")
+    if rel.broken:
+        warn(f"{rel.tag} is marked broken: {rel.broken}")
     log(f"==> Installing {rel.tag}: " + ", ".join(plan.describe()))
     ensure_sudo(plan, args.dry_run)
 

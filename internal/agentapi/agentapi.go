@@ -445,6 +445,9 @@ type Release struct {
 	Notes       string `json:"notes"`
 	Newer       bool   `json:"newer"`
 	Installable bool   `json:"installable"`
+	// Broken is why the release must not be installed (a "Broken:" line in
+	// its release notes), or empty.
+	Broken string `json:"broken,omitempty"`
 }
 
 // Update jobs.

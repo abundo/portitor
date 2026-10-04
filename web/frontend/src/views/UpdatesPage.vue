@@ -37,7 +37,7 @@ const shownReleases = computed(() => {
 })
 const { search: releaseSearch, filtered: foundReleases } = useSearch(
   shownReleases,
-  (r) => `${r.tag} ${r.date} ${r.notes}`,
+  (r) => `${r.tag} ${r.date} ${r.notes} ${r.broken ? `broken ${r.broken}` : ''}`,
 )
 const { search: packageSearch, filtered: shownPackages } = useSearch(
   () => sys.value?.packages ?? [],
@@ -129,10 +129,11 @@ async function start(job, release) {
 
 async function install(r) {
   const what = r.newer ? 'Install' : 'Go back to'
+  const warning = r.broken ? `${r.tag} is marked broken: ${r.broken}. ` : ''
   if (
     !(await ask({
-      title: 'Update',
-      message: `${what} Portitor ${r.tag}? The agent (and portitor-web, if it runs on the firewall) restarts; the GUI is away for a moment.`,
+      title: r.broken ? 'Install a broken release' : 'Update',
+      message: `${warning}${what} Portitor ${r.tag}${r.broken ? ' anyway' : ''}? The agent (and portitor-web, if it runs on the firewall) restarts; the GUI is away for a moment.`,
     }))
   )
     return
@@ -311,16 +312,22 @@ async function reboot() {
                 >
                   <td class="py-1 pr-4 font-mono">{{ r.tag }}</td>
                   <td class="py-1 pr-4">{{ r.date }}</td>
-                  <td class="py-1 pr-4 text-muted">{{ r.notes }}</td>
+                  <td class="py-1 pr-4 text-muted">
+                    {{ r.notes.replace(/\s*BROKEN:.*$/, '') }}
+                    <div v-if="r.broken" class="flex items-start gap-1 text-error">
+                      <UBadge color="error" variant="subtle" size="sm" label="broken" />
+                      <span>{{ r.broken }}</span>
+                    </div>
+                  </td>
                   <td class="py-1 text-right">
                     <UButton
                       v-if="r.installable && !r.notes.includes('current')"
                       size="xs"
                       :variant="r.newer ? 'solid' : 'outline'"
-                      :color="r.newer ? 'primary' : 'neutral'"
+                      :color="r.broken ? 'error' : r.newer ? 'primary' : 'neutral'"
                       :disabled="running"
                       @click="install(r)"
-                      >{{ r.newer ? 'Install' : 'Go back' }}</UButton
+                      >{{ r.newer || r.broken ? 'Install' : 'Go back' }}</UButton
                     >
                   </td>
                 </tr>
