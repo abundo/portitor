@@ -134,6 +134,14 @@ AGENT_PACKAGES = {
     "tshark": (),
     "mtr-tiny": (),
 }
+# BIND 9 stable from ISC's Debian repository
+# (https://kb.isc.org/docs/isc-packages-for-bind-9), newer than the
+# distribution's; iso/preseed.cfg adds it too. Signed by the deb.sury.org key
+# in deploy/apt/isc-bind.asc (15058500A0235D97F5D10063B188E2B695BD4743).
+ISC_BIND_REPO = "https://bind.debian.net/bind"
+ISC_BIND_SUITES = ("bullseye", "bookworm", "trixie", "jammy", "noble", "resolute")
+ISC_BIND_KEYRING = "/usr/share/keyrings/isc-bind.asc"
+ISC_BIND_LIST = "/etc/apt/sources.list.d/isc-bind.list"
 # Debian/Ubuntu confine named and Kea with AppArmor; our rules
 # (deploy/apparmor/<profile>) go in each profile's local include, between
 # markers so the admin's own lines are kept.
@@ -485,7 +493,7 @@ def install_agent(host: Host, binary: Path, deploy: Path, version: str, assume_y
         log("      (a second DHCP client on the WAN keeps the agent from getting a lease)")
         log(f"    systemctl enable --now {AGENT_UNIT}")
         return
-    install_packages(host)
+    install_packages(host, deploy)
     if actions[AGENT_UNIT] == "installed":
         host.systemctl("enable", AGENT_UNIT)
     host.systemctl("restart", AGENT_UNIT)
@@ -496,8 +504,30 @@ def install_agent(host: Host, binary: Path, deploy: Path, version: str, assume_y
     verify_version(host, AGENT_BIN, version)
 
 
-def install_packages(host: Host) -> None:
-    """Install the agent's packages that are missing, on a host with apt."""
+def add_bind_repo(host: Host, deploy: Path) -> bool:
+    """Add ISC's BIND repository if the release has one; True if it was added."""
+    proc = host.run('. /etc/os-release && echo "$VERSION_CODENAME"', check=False, mutate=False, capture=True)
+    suite = proc.stdout.strip()
+    if proc.returncode or suite not in ISC_BIND_SUITES:
+        return False
+    # The ISO's installer adds it to sources.list (apt-setup/local0).
+    if not host.run(
+        "grep -rEqs 'bind\\.debian\\.net/bind/?( |$)' /etc/apt/sources.list /etc/apt/sources.list.d",
+        check=False, mutate=False,
+    ).returncode:
+        return False
+    log(f"==> Adding ISC's BIND repository on {host}")
+    host.put(deploy / "apt" / "isc-bind.asc", ISC_BIND_KEYRING, "0644")
+    host.put_text(f"deb [signed-by={ISC_BIND_KEYRING}] {ISC_BIND_REPO} {suite} main\n", ISC_BIND_LIST, "0644")
+    return True
+
+
+def install_packages(host: Host, deploy: Path) -> None:
+    """Install the agent's packages that are missing, on a host with apt.
+
+    BIND comes from ISC's repository; when that is added, the installed
+    bind9 packages are upgraded from it.
+    """
     if host.run("command -v apt-get dpkg-query", check=False, mutate=False).returncode:
         return
     names = " ".join(AGENT_PACKAGES)
@@ -507,16 +537,21 @@ def install_packages(host: Host) -> None:
     )
     have = {f[0] for f in (l.split() for l in proc.stdout.splitlines()) if len(f) == 2 and f[1] == "installed"}
     missing = [p for p in AGENT_PACKAGES if p not in have]
-    if not missing:
+    upgrade = [p for p in AGENT_PACKAGES if p.startswith("bind9") and p in have] if add_bind_repo(host, deploy) else []
+    if not missing and not upgrade:
         return
-    log(f"==> Installing packages on {host}: {' '.join(missing)}")
+    if missing:
+        log(f"==> Installing packages on {host}: {' '.join(missing)}")
+    if upgrade:
+        log(f"==> Upgrading BIND from ISC's repository on {host}: {' '.join(upgrade)}")
     units = [u for p in missing for u in AGENT_PACKAGES[p]]
     if units:
         host.systemctl("mask", *units)
     host.run("apt-get update -q", check=False)
+    pkgs = " ".join(missing + upgrade)
     host.run(
-        "DEBIAN_FRONTEND=noninteractive apt-get install -y -q " + " ".join(missing),
-        desc=f"apt-get install {' '.join(missing)}",
+        "DEBIAN_FRONTEND=noninteractive apt-get install -y -q " + pkgs,
+        desc=f"apt-get install {pkgs}",
     )
 
 

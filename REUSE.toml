@@ -6,7 +6,7 @@
 version = 1
 
 [[annotations]]
-path = ["go.sum", "**/*.json", "web/frontend/*.d.ts", "web/frontend/.eslintcache", "iso/portitor.txt", "internal/nftimport/testdata/*.txt"]
+path = ["go.sum", "**/*.json", "web/frontend/*.d.ts", "web/frontend/.eslintcache", "iso/portitor.txt", "internal/nftimport/testdata/*.txt", "deploy/apt/isc-bind.asc"]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 The Portitor contributors"
 SPDX-License-Identifier = "AGPL-3.0-or-later"

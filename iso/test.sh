@@ -107,6 +107,7 @@ done
 check "no failed units" sh -c 'test -z "$(systemctl list-units --failed --plain --no-legend)" || { systemctl list-units --failed --plain --no-legend; false; }'
 check "LAN has $LAN_ADDRESS" sh -c "ip -o addr show | grep -qF ' $LAN_ADDRESS '"
 check "nftables firewall table loaded" nft list table inet firewall
+check "bind9 from ISC's repository" sh -c "apt-cache policy bind9 | grep -A1 '^ \\*\\*\\*' | grep -qF bind.debian.net"
 
 jar=$DIR/cookies
 rm -f "$jar"

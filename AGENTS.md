@@ -287,6 +287,9 @@ the certificate portitor-web serves, chosen under Settings
   An update installs the Debian packages in `install.py`'s `AGENT_PACKAGES` that are
   missing (masking their distribution units first); a release that needs a new
   package adds it there and to `iso/preseed.cfg`.
+  BIND comes from ISC's Debian repository (`bind.debian.net/bind`, key in
+  `deploy/apt/isc-bind.asc`): the ISO's preseed adds it (`apt-setup/local0`), an
+  update adds it where the release has a suite (`add_bind_repo`).
 
 ## GUI design rules
 
