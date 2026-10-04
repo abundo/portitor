@@ -264,6 +264,36 @@ function drag(key, event) {
         {{ captured.interface }}
       </span>
       <span v-if="filterError" class="text-sm text-error">{{ filterError }}</span>
+      <span class="ms-auto text-sm text-muted">
+        <UIcon name="i-lucide-circle-help" class="align-middle" />
+        Help:
+        <a
+          href="https://wiki.wireshark.org/CaptureFilters"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-primary hover:underline"
+          title="Capture filters (pcap-filter syntax): applied on the firewall, decide which packets are captured at all"
+          >capture filters</a
+        >
+        ·
+        <a
+          href="https://wiki.wireshark.org/DisplayFilters"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-primary hover:underline"
+          title="Display filters (Wireshark syntax): applied in the browser, only hide packets already captured"
+          >display filters</a
+        >
+        ·
+        <a
+          href="https://www.wireshark.org/docs/wsug_html_chunked/ChCapCaptureFilterSection.html"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-primary hover:underline"
+          title="Wireshark User's Guide: capture filters use a different syntax from display filters"
+          >the difference</a
+        >
+      </span>
     </div>
 
     <div ref="panes" class="flex min-h-0 flex-1 flex-col">
