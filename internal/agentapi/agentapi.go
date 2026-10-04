@@ -808,6 +808,13 @@ type BGPNeighborRoutes struct {
 	Notes            []string   `json:"notes,omitempty"`
 }
 
+// BGPNeighborDetail is FRR's JSON of one BGP neighbour (`show bgp
+// neighbors <n> json`), passed on as it is.
+type BGPNeighborDetail struct {
+	Neighbor string          `json:"neighbor"`
+	Detail   json.RawMessage `json:"detail"`
+}
+
 // BGPMaxNeighborRoutes caps each list of BGPNeighborRoutes per address
 // family.
 const BGPMaxNeighborRoutes = 50000

@@ -316,3 +316,34 @@ func TestBGPNeighborRoutes(t *testing.T) {
 		t.Errorf("unknown neighbour: %v, calls %v", err, calls)
 	}
 }
+
+func TestBGPNeighborDetail(t *testing.T) {
+	neighbors := `{"192.0.2.1":{"remoteAs":65001,"bgpState":"Established"},
+		"2001:db8::1":{"remoteAs":65002,"bgpState":"Active"}}`
+	var calls []string
+	vtysh := func(cmd string) ([]byte, error) {
+		calls = append(calls, cmd)
+		switch cmd {
+		case "show bgp neighbors json":
+			return []byte(neighbors), nil
+		case "show bgp neighbors 192.0.2.1 json":
+			return []byte(`{"192.0.2.1":{"remoteAs":65001,"bgpState":"Established","hostname":"r1"}}`), nil
+		case "show bgp neighbors 2001:db8::1 json":
+			return []byte(`{"2001:db8::1":{"remoteAs":65002,"bgpState":"Active"}}`), nil
+		}
+		return nil, errors.New("unexpected " + cmd)
+	}
+	for _, n := range []string{"192.0.2.1", "2001:db8::1"} {
+		res, err := bgpNeighborDetail(vtysh, n)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.Neighbor != n || !strings.Contains(string(res.Detail), `"remoteAs"`) {
+			t.Errorf("%s: %+v", n, res)
+		}
+	}
+	calls = nil
+	if _, err := bgpNeighborDetail(vtysh, "192.0.2.1 json; x"); err == nil || len(calls) != 1 {
+		t.Errorf("unknown neighbour: %v, calls %v", err, calls)
+	}
+}

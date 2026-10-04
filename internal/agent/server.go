@@ -60,6 +60,15 @@ func (a *Agent) routes() *http.ServeMux {
 		}
 		writeJSONResponse(w, http.StatusOK, res)
 	})
+	mux.HandleFunc("GET /v1/bgp/neighbor", func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		res, err := a.BGPNeighborDetail(r.Context(), q.Get("instance"), q.Get("neighbor"))
+		if err != nil {
+			writeError(w, http.StatusNotFound, err)
+			return
+		}
+		writeJSONResponse(w, http.StatusOK, res)
+	})
 	mux.HandleFunc("GET /v1/ospf", func(w http.ResponseWriter, r *http.Request) {
 		writeJSONResponse(w, http.StatusOK, a.OSPF(r.Context()))
 	})

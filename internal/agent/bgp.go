@@ -321,6 +321,53 @@ func bgpNeighborRoutes(vtysh func(string) ([]byte, error), neighbor string) (*ag
 	return res, nil
 }
 
+// BGPNeighborDetail asks FRR for everything it has on one BGP neighbour
+// of an instance (`show bgp neighbors <n> json`): timers, capabilities,
+// message counters, address families. The neighbour must be one FRR has,
+// as for BGPNeighborRoutes.
+func (a *Agent) BGPNeighborDetail(ctx context.Context, instance, neighbor string) (*agentapi.BGPNeighborDetail, error) {
+	a.mu.Lock()
+	doc := a.applied
+	a.mu.Unlock()
+	var in *fwconfig.Instance
+	if doc != nil {
+		in = doc.Instance(instance)
+	}
+	if in == nil || !in.BGPRunning() {
+		return nil, fmt.Errorf("BGP is not running in %q", instance)
+	}
+	return bgpNeighborDetail(a.vtysh(ctx, in), neighbor)
+}
+
+func bgpNeighborDetail(vtysh func(string) ([]byte, error), neighbor string) (*agentapi.BGPNeighborDetail, error) {
+	out, err := vtysh("show bgp neighbors json")
+	if err != nil {
+		return nil, errors.New(vtyshError(out, err))
+	}
+	var all map[string]json.RawMessage
+	if err := json.Unmarshal(out, &all); err != nil {
+		return nil, fmt.Errorf("unexpected answer from vtysh: %v", err)
+	}
+	if _, ok := all[neighbor]; !ok {
+		return nil, fmt.Errorf("no BGP neighbour %q", neighbor)
+	}
+	// Asked again for the one neighbour, as FRR then adds what it leaves
+	// out of the list (the address families' policies, say).
+	out, err = vtysh("show bgp neighbors " + neighbor + " json")
+	if err != nil {
+		return nil, errors.New(vtyshError(out, err))
+	}
+	var one map[string]json.RawMessage
+	if err := json.Unmarshal(out, &one); err != nil {
+		return nil, fmt.Errorf("unexpected answer from vtysh: %v", err)
+	}
+	detail, ok := one[neighbor]
+	if !ok {
+		detail = all[neighbor]
+	}
+	return &agentapi.BGPNeighborDetail{Neighbor: neighbor, Detail: detail}, nil
+}
+
 // parseBGPAdjRoutes reads `show bgp <afi> unicast neighbors <n>
 // advertised-routes|received-routes|filtered-routes json`: routes by
 // prefix. warn is FRR's complaint instead of routes (soft reconfiguration

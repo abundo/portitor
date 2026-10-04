@@ -1226,6 +1226,31 @@ func (s *Server) handleAgentBGPRoutes(c *echo.Context) error {
 	return c.JSON(http.StatusOK, r)
 }
 
+// handleAgentBGPNeighbor passes on FRR's view of one BGP neighbour
+// (?instance=&neighbor=), for the BGP page.
+func (s *Server) handleAgentBGPNeighbor(c *echo.Context) error {
+	inst, nbr := c.QueryParam("instance"), c.QueryParam("neighbor")
+	if inst == "" || nbr == "" {
+		return errJSON(c, http.StatusBadRequest, "instance and neighbor are required")
+	}
+	names, err := s.readableInstanceNames(c)
+	if err != nil {
+		return err
+	}
+	if names != nil && !names[inst] {
+		return errJSON(c, http.StatusForbidden, "forbidden")
+	}
+	a, _, err := s.agent()
+	if err != nil {
+		return agentError(c, err)
+	}
+	r, err := a.BGPNeighborDetail(c.Request().Context(), inst, nbr)
+	if err != nil {
+		return agentError(c, err)
+	}
+	return c.JSON(http.StatusOK, r)
+}
+
 // handleAgentOSPF passes on the OSPF state (areas, interfaces,
 // neighbours, routes) of the instances, for the OSPF page.
 func (s *Server) handleAgentOSPF(c *echo.Context) error {

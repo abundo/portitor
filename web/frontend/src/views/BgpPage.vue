@@ -8,6 +8,7 @@
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useToast } from '@nuxt/ui/composables'
+import BgpNeighborDetail from '@/components/BgpNeighborDetail.vue'
 import BgpNeighborRoutes from '@/components/BgpNeighborRoutes.vue'
 import BgpPeerTable from '@/components/BgpPeerTable.vue'
 import EntriesEditor from '@/components/EntriesEditor.vue'
@@ -131,6 +132,8 @@ const peerColumns = [
 ]
 // routesOf is the session whose prefixes are shown, or null.
 const routesOf = ref(null)
+// detailOf is the session whose neighbour information is shown, or null.
+const detailOf = ref(null)
 const routeColumns = [
   { accessorKey: 'prefix', header: 'Prefix' },
   { accessorKey: 'next_hop', header: 'Next hop' },
@@ -460,15 +463,26 @@ const neighborFields = computed(() => [
               <div v-if="sec.title" class="mb-1 text-sm font-medium">{{ sec.title }}</div>
               <UTable :data="sec.rows" :columns="peerColumns" :loading="loading && !status">
                 <template #routes-cell="{ row }">
-                  <UTooltip text="Prefixes received, filtered and advertised">
-                    <UButton
-                      icon="i-lucide-list"
-                      variant="outline"
-                      size="sm"
-                      aria-label="Prefixes"
-                      @click="routesOf = row.original"
-                    />
-                  </UTooltip>
+                  <div class="flex gap-1">
+                    <UTooltip text="Neighbour information">
+                      <UButton
+                        icon="i-lucide-info"
+                        variant="outline"
+                        size="sm"
+                        aria-label="Neighbour information"
+                        @click="detailOf = row.original"
+                      />
+                    </UTooltip>
+                    <UTooltip text="Prefixes received, filtered and advertised">
+                      <UButton
+                        icon="i-lucide-list"
+                        variant="outline"
+                        size="sm"
+                        aria-label="Prefixes"
+                        @click="routesOf = row.original"
+                      />
+                    </UTooltip>
+                  </div>
                 </template>
                 <template #address-cell="{ row }">
                   <span class="font-mono text-xs">{{ row.original.address }}</span>
@@ -699,6 +713,11 @@ const neighborFields = computed(() => [
       :instance="store.current?.name ?? ''"
       :neighbor="routesOf"
       @close="routesOf = null"
+    />
+    <BgpNeighborDetail
+      :instance="store.current?.name ?? ''"
+      :neighbor="detailOf"
+      @close="detailOf = null"
     />
   </NeedInstance>
 </template>

@@ -171,6 +171,13 @@ func (c *Client) BGPNeighborRoutes(ctx context.Context, instance, neighbor strin
 	return &b, c.do(ctx, http.MethodGet, "/v1/bgp/routes?"+q.Encode(), nil, &b)
 }
 
+// BGPNeighborDetail returns FRR's view of one instance's BGP neighbour.
+func (c *Client) BGPNeighborDetail(ctx context.Context, instance, neighbor string) (*agentapi.BGPNeighborDetail, error) {
+	var b agentapi.BGPNeighborDetail
+	q := url.Values{"instance": {instance}, "neighbor": {neighbor}}
+	return &b, c.do(ctx, http.MethodGet, "/v1/bgp/neighbor?"+q.Encode(), nil, &b)
+}
+
 // VRRP returns the state of the instances' virtual routers.
 func (c *Client) VRRP(ctx context.Context) (*agentapi.VRRPResponse, error) {
 	var v agentapi.VRRPResponse
