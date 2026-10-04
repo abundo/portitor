@@ -197,6 +197,7 @@ func (a *Agent) routes() *http.ServeMux {
 	mux.HandleFunc("GET /v1/console", a.handleConsole)
 	mux.HandleFunc("POST /v1/capture", a.handleCapture)
 	mux.HandleFunc("POST /v1/trace", a.handleTrace)
+	mux.HandleFunc("POST /v1/servicelog", a.handleServiceLog)
 	mux.HandleFunc("POST /v1/connections", a.handleConnections)
 	mux.HandleFunc("POST /v1/connections/flush", a.handleConnectionsFlush)
 	return mux

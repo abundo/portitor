@@ -639,6 +639,23 @@ const (
 	TraceMaxSessions = 4
 )
 
+// ServiceLogRequest follows a service's journal (POST /v1/servicelog):
+// the answer is journalctl's text, a line per entry, starting with the
+// last ServiceLogLines entries, until the client disconnects. Unit must be
+// one of the instance's services in its status. An error before
+// journalctl starts is a JSON ErrorResponse.
+type ServiceLogRequest struct {
+	Instance string `json:"instance"`
+	Unit     string `json:"unit"`
+}
+
+const (
+	// ServiceLogLines is how many earlier entries a service log starts with.
+	ServiceLogLines = 200
+	// ServiceLogMaxSessions is how many service logs may be followed at once.
+	ServiceLogMaxSessions = 8
+)
+
 // ConnectionsRequest streams an instance's connection tracking table
 // (POST /v1/connections): the answer is a ConnectionsSnapshot per line,
 // one every IntervalMs at most, until the client disconnects. An error

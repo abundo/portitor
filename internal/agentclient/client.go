@@ -329,6 +329,12 @@ func (c *Client) Trace(ctx context.Context, req agentapi.TraceRequest) (io.ReadC
 	return c.stream(ctx, "/v1/trace", req)
 }
 
+// ServiceLog follows a service's journal as text; closing it (or
+// cancelling ctx) stops journalctl on the agent.
+func (c *Client) ServiceLog(ctx context.Context, req agentapi.ServiceLogRequest) (io.ReadCloser, error) {
+	return c.stream(ctx, "/v1/servicelog", req)
+}
+
 // Connections streams an instance's conntrack table as
 // agentapi.ConnectionsSnapshots (JSON lines); closing it (or cancelling
 // ctx) ends the stream on the agent.

@@ -2,9 +2,11 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
 <script setup>
-import { computed, onMounted, onUnmounted } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import RateSparkline from '@/components/RateSparkline.vue'
 import SearchInput from '@/components/SearchInput.vue'
+import ServiceLogDialog from '@/components/ServiceLogDialog.vue'
+import { useAuthStore } from '@/stores/auth'
 import { useDeployStore } from '@/stores/deploy'
 import { useInstanceStore } from '@/stores/instances'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
@@ -13,6 +15,7 @@ import { useSearch, valuesText } from '@/utils/search'
 
 const deploy = useDeployStore()
 const instances = useInstanceStore()
+const auth = useAuthStore()
 const { ifaceRefItems, ifaceText } = useInstanceRefs()
 onMounted(() => deploy.watch())
 onUnmounted(() => deploy.unwatch())
@@ -37,6 +40,16 @@ const missingNeeded = computed(() => missing.value.some((p) => p.needed))
 const peers = computed(() =>
   (inst.value?.wireguard ?? []).flatMap((w) => w.peers.map((p) => ({ ...p, iface: w.interface }))),
 )
+
+// The service whose log is shown, '' for none. Following a log is a POST
+// the server allows only an admin of the instance.
+const logUnit = ref('')
+const logOpen = computed({
+  get: () => logUnit.value !== '',
+  set: (o) => {
+    if (!o) logUnit.value = ''
+  },
+})
 
 const ago = (t) =>
   t ? `${Math.round((Date.now() - new Date(t).getTime()) / 60000)} min ago` : 'never'
@@ -151,7 +164,17 @@ const stateColor = (s) =>
             class="flex items-center justify-between py-1 text-sm"
           >
             <span class="font-mono">{{ unit }}</span>
-            <UBadge :color="stateColor(state)" variant="subtle" :label="state" />
+            <span class="flex items-center gap-2">
+              <UBadge :color="stateColor(state)" variant="subtle" :label="state" />
+              <UButton
+                v-if="auth.canEdit"
+                icon="i-lucide-scroll-text"
+                size="sm"
+                variant="outline"
+                label="Show log"
+                @click="logUnit = unit"
+              />
+            </span>
           </div>
         </div>
         <div v-if="peers.length" class="card">
@@ -169,6 +192,7 @@ const stateColor = (s) =>
           </div>
         </div>
       </div>
+      <ServiceLogDialog v-model:open="logOpen" :instance="inst.name" :unit="logUnit" />
     </template>
     <div v-else-if="st && !deploy.error" class="card text-sm text-muted">
       This virtual firewall is not on the firewall yet. Configure it and

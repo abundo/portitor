@@ -122,28 +122,7 @@ func (a *Agent) instanceStatus(ctx context.Context, in *fwconfig.Instance) Insta
 		is.WireGuard = parseWGDump(string(out))
 	}
 
-	units := []string{}
-	if in.DNS.Enabled {
-		units = append(units, a.cfg.Units.Named(in))
-	}
-	if in.DHCP.Enabled {
-		units = append(units, a.cfg.Units.Kea4(in))
-	}
-	if len(render.DHCP6Subnets(in)) > 0 {
-		units = append(units, a.cfg.Units.Kea6(in))
-	}
-	if len(in.RA) > 0 {
-		units = append(units, a.cfg.Units.Radvd(in))
-	}
-	if in.NTP != nil {
-		units = append(units, a.cfg.Units.Chrony(in))
-	}
-	if in.SNMP != nil {
-		units = append(units, a.cfg.Units.Snmpd(in))
-	}
-	if in.FRRRunning() {
-		units = append(units, a.cfg.Units.FRR(in))
-	}
+	units := a.serviceUnits(in)
 	for _, u := range units {
 		out, _ := a.run.Run(ctx, "", "systemctl", "is-active", u)
 		state := strings.TrimSpace(string(out))
@@ -362,4 +341,31 @@ func clientLeases(v4, v6 []Lease) []Lease {
 		return strings.Compare(a.Instance+"\x00"+a.Interface+"\x00"+a.Family, b.Instance+"\x00"+b.Interface+"\x00"+b.Family)
 	})
 	return out
+}
+
+// serviceUnits lists the systemd units of the instance's services.
+func (a *Agent) serviceUnits(in *fwconfig.Instance) []string {
+	units := []string{}
+	if in.DNS.Enabled {
+		units = append(units, a.cfg.Units.Named(in))
+	}
+	if in.DHCP.Enabled {
+		units = append(units, a.cfg.Units.Kea4(in))
+	}
+	if len(render.DHCP6Subnets(in)) > 0 {
+		units = append(units, a.cfg.Units.Kea6(in))
+	}
+	if len(in.RA) > 0 {
+		units = append(units, a.cfg.Units.Radvd(in))
+	}
+	if in.NTP != nil {
+		units = append(units, a.cfg.Units.Chrony(in))
+	}
+	if in.SNMP != nil {
+		units = append(units, a.cfg.Units.Snmpd(in))
+	}
+	if in.FRRRunning() {
+		units = append(units, a.cfg.Units.FRR(in))
+	}
+	return units
 }

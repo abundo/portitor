@@ -58,6 +58,7 @@ type agentAPI interface {
 	Console(ctx context.Context, instance string) (*websocket.Conn, error)
 	Capture(ctx context.Context, req agentapi.CaptureRequest) (io.ReadCloser, error)
 	Trace(ctx context.Context, req agentapi.TraceRequest) (io.ReadCloser, error)
+	ServiceLog(ctx context.Context, req agentapi.ServiceLogRequest) (io.ReadCloser, error)
 	Connections(ctx context.Context, req agentapi.ConnectionsRequest) (io.ReadCloser, error)
 	FlushConnections(ctx context.Context, instance string) error
 	System(ctx context.Context) (*agentapi.SystemStatus, error)
@@ -172,7 +173,7 @@ func (s *Server) Echo() *echo.Echo {
 
 	// Instance admins use these too; the handlers check the instance.
 	for _, r := range []string{"PUT /api/dns/zones/:id/records", "PUT /api/dyndns/clients/:id/records", "POST /api/rules/reorder", "POST /api/nat/reorder",
-		"POST /api/interfaces/:id/wg-rekey", "POST /api/wg/import", "POST /api/agent/capture", "POST /api/agent/trace", "POST /api/agent/connections", "POST /api/agent/connections/flush",
+		"POST /api/interfaces/:id/wg-rekey", "POST /api/wg/import", "POST /api/agent/capture", "POST /api/agent/trace", "POST /api/agent/servicelog", "POST /api/agent/connections", "POST /api/agent/connections/flush",
 		"POST /api/deploy/apply", "POST /api/deploy/confirm", "POST /api/deploy/rollback"} {
 		s.tenantWrites[r] = true
 	}
@@ -240,6 +241,7 @@ func (s *Server) Echo() *echo.Echo {
 	g.GET("/agent/console", s.handleAgentConsole)
 	g.POST("/agent/capture", s.handleAgentCapture)
 	g.POST("/agent/trace", s.handleAgentTrace)
+	g.POST("/agent/servicelog", s.handleAgentServiceLog)
 	g.POST("/agent/connections", s.handleAgentConnections)
 	g.POST("/agent/connections/flush", s.handleAgentConnectionsFlush)
 	g.GET("/system", s.handleSystem)
