@@ -74,6 +74,11 @@ func SampleDocument() Document {
 					{ID: 2000, Chain: ChainForward, InInterfaces: []string{"guest"}, OutInterfaces: []string{"wan"}, Action: ActionAccept, RateLimit: "guest host", Description: "guests, policed"},
 					{ID: 2002, Chain: ChainInput, InInterfaces: []string{"lan"}, Services: []ServiceMatch{{Protocol: ProtoTCP, DstPorts: "445"}}, Action: ActionAccept, RateLimit: "shared", Description: "file share"},
 					{ID: 2001, Chain: ChainOutput, Services: []ServiceMatch{{Protocol: ProtoTCP, DstPorts: "443"}}, Action: ActionAccept, RateLimit: "updates"},
+					{Chain: ChainForward, InInterfaces: []string{"lan"}, SrcAddrs: []string{"$admins", "192.168.1.99"}, DstAddrs: []string{"$servers"}, Action: ActionAccept, Description: "admins to servers"},
+				},
+				AddressSets: []AddressSet{
+					{Name: "admins", Addresses: []string{"192.168.1.20", "192.168.1.21", "fd00:1::20"}},
+					{Name: "servers", Addresses: []string{"192.168.1.10", "192.168.2.0/24"}},
 				},
 				RateLimits: []RateLimit{
 					{Name: "ssh", Rate: 4, Per: RatePerMinute, Burst: 2, PerSource: true},

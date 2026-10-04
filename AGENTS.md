@@ -27,7 +27,7 @@ are in [README.md](README.md).
 | `internal/agentclient` | portitor-web's HTTPS client for the agent, with certificate pinning |
 | `internal/builder` | Database → `fwconfig.Document` (resolves ids, IPAM, DHCP scopes, DNS names) |
 | `internal/ipam` | Prefix tree by CIDR containment, next free address |
-| `internal/netobj` | Named hosts/prefixes (`address_objects`): name checks and expansion |
+| `internal/netobj` | Named hosts/prefixes (`address_objects`) and address lists (`address_lists`): name checks and expansion |
 | `internal/dbmigrate` | Opens the SQLite database; goose migrations (the schema's source of truth) |
 | `models` | GORM mapping |
 | `web` | Echo v5 server (`server.go`: routes): auth, generic CRUD (`crud.go`), entry validation (`resources.go`), deploy handlers (`handlers.go`), Revert snapshots (`revert.go`), tenancy (`tenancy.go`), roles (`roles.go`, `access.go`), rename/delete reference keeping (`objects.go`, `services.go`, `ratelimits.go`, `ifzones.go`, `bgp.go`, `ospf.go`, `vrrp.go`, `bfd.go`, `delegated.go`), folders for hosts and IP lists (`folders.go`, GUI only), agent proxies (`console.go`, `capture.go`, `trace.go`, `connections.go`), WireGuard config import (`wgimport.go`), backup/restore (`backup.go`), `web.yaml` (`config.go`) |
@@ -184,6 +184,16 @@ the certificate portitor-web serves, chosen under Settings
   stored by name, so renaming an object rewrites them (`web/objects.go`) and deleting
   one in use is refused. A new address field that should accept names must be added
   to `eachObjectRef` and expanded in the builder.
+- **Address lists** (`address_lists`, `web/objects.go`) hold addresses, CIDRs and
+  names of hosts and other lists; they share one namespace with `address_objects`
+  (`nameFree`), so any address field takes either by name, and `netobj.New(objs,
+  lists...)` resolves both (a loop is an error). In a filter rule's source or
+  destination the builder writes a list as `$name` and adds it, expanded, to
+  `Instance.AddressSets`; the renderer declares one set per IP version
+  (`render.AddressSetName`) and leaves out a version the list has nothing of
+  (`dropEmptySets`). Anywhere else it is expanded like a host. Renaming one, or a
+  host it holds, rewrites the entries (`eachObjectRef` visits the lists); deleting
+  one in use is refused.
 - **Services never reach the agent either.** A rule's `services` list names
   custom services (`services` table) and predefined ones (`netobj.Predefined`);
   `builder.Build` expands them into `fwconfig.ServiceMatch`es (tcp/udp/sctp

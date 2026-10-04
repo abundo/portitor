@@ -59,7 +59,7 @@ locked rows show where the built-in parts sit:
 | Outgoing interfaces | Where the packet leaves (not in input). Empty matches any. |
 | IP version | any, IPv4 or IPv6. Addresses already decide it; set it only when the addresses are *any* or IP lists. |
 | Services | What the traffic must match: `ssh`, `https`, `ping`, your own from the *Services* page. One of them must match; empty matches any protocol. |
-| Source addresses | Addresses, CIDRs, names from *Hosts & prefixes*, or IP lists as `@name`. Empty matches any. |
+| Source addresses | Addresses, CIDRs, names of hosts and address lists from *Hosts & prefixes*, or IP lists as `@name`. Empty matches any. |
 | Destination addresses | The same, for the destination. |
 | Action | **accept** lets it through; **drop** discards it silently; **reject** discards it and tells the sender (TCP reset, or ICMP port unreachable), so a client fails at once instead of waiting for a timeout. |
 | Rate limit | A rate from the *Rate limits* page, which limits or shapes the rule's traffic. See [Rate limits](#rate-limits). |
@@ -88,6 +88,12 @@ A host in *Hosts & prefixes* with both an IPv4 and an IPv6 address covers both.
   of its zone.
 - **Hosts & prefixes** give addresses names: `nas` instead of `192.168.1.10`. Change
   the address once and every rule follows on the next deploy.
+- **Address lists** (*Hosts & prefixes*) name a group: addresses, prefixes, hosts by
+  name and other address lists, IPv4 and IPv6 together. In a rule's source or
+  destination a list becomes an nftables set (`A_<name>_v4` and `_v6`), so a long
+  list is one fast lookup and one rule; a rule with an IPv4-only list is not rendered
+  for IPv6. Used anywhere else (NAT, routes, DNS) a list stands for its addresses,
+  like a host.
 - **Services** (*Firewall → Services*) name protocols and ports. Predefined ones cover
   the common cases (`ssh`, `dns`, `https`, `ping`, `gre`); add your own for an
   application's ports. You can create one from the Service column's search too.

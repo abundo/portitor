@@ -1,10 +1,12 @@
 // SPDX-FileCopyrightText: 2026 The Portitor contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// Package netobj resolves named hosts and prefixes (models.AddressObject).
-// Wherever the GUI takes addresses, an entry may be an object's name
-// instead; portitor-web expands names when it builds the document, so the
-// agent only ever sees addresses.
+// Package netobj resolves named hosts and prefixes (models.AddressObject)
+// and address lists (models.AddressList), which share one set of names.
+// Wherever the GUI takes addresses, an entry may be a name instead;
+// portitor-web expands names when it builds the document, so the agent
+// only ever sees addresses (a filter rule's address lists reach it as
+// fwconfig.AddressSets, expanded too).
 package netobj
 
 import (
@@ -39,11 +41,19 @@ func IsName(s string) bool {
 		!(addrLike.MatchString(s) && strings.ContainsAny(s, ".:/"))
 }
 
-// Set maps object names to their entries.
-type Set map[string][]netip.Prefix
+// Set maps the names of hosts and address lists to their addresses.
+type Set struct {
+	entries map[string][]netip.Prefix
+	lists   map[string]bool
+	// bad holds why an address list can't be resolved (a cycle, an
+	// unknown name), reported when it is used.
+	bad map[string]error
+}
 
-func New(objs []models.AddressObject) Set {
-	s := Set{}
+// New resolves hosts and address lists. A list's entries are addresses,
+// prefixes, and names of hosts and other lists, resolved recursively.
+func New(objs []models.AddressObject, lists ...models.AddressList) Set {
+	s := Set{entries: map[string][]netip.Prefix{}, lists: map[string]bool{}, bad: map[string]error{}}
 	for _, o := range objs {
 		var entries []netip.Prefix
 		for _, a := range o.Addresses {
@@ -51,9 +61,66 @@ func New(objs []models.AddressObject) Set {
 				entries = append(entries, p)
 			}
 		}
-		s[o.Name] = entries
+		s.entries[o.Name] = entries
+	}
+	byName := map[string]models.AddressList{}
+	for _, l := range lists {
+		byName[l.Name] = l
+		s.lists[l.Name] = true
+	}
+	var resolve func(name string, path []string) ([]netip.Prefix, error)
+	resolve = func(name string, path []string) ([]netip.Prefix, error) {
+		if err := s.bad[name]; err != nil {
+			return nil, err
+		}
+		if out, ok := s.entries[name]; ok {
+			return out, nil
+		}
+		l, ok := byName[name]
+		if !ok {
+			return nil, fmt.Errorf("unknown host/prefix name %q", name)
+		}
+		if slices.Contains(path, name) {
+			return nil, fmt.Errorf("address list %s contains itself (%s)", name, strings.Join(append(path, name), " → "))
+		}
+		var out []netip.Prefix
+		for _, e := range l.Entries {
+			if !IsName(e) {
+				if p, err := fwconfig.ParseAddrOrPrefix(e); err == nil && !slices.Contains(out, p) {
+					out = append(out, p)
+				}
+				continue
+			}
+			sub, err := resolve(e, append(path, name))
+			if err != nil {
+				return nil, err
+			}
+			for _, p := range sub {
+				if !slices.Contains(out, p) {
+					out = append(out, p)
+				}
+			}
+		}
+		s.entries[name] = out
+		return out, nil
+	}
+	for _, l := range lists {
+		if _, err := resolve(l.Name, nil); err != nil {
+			s.bad[l.Name] = err
+		}
 	}
 	return s
+}
+
+// IsList reports whether name is an address list.
+func (s Set) IsList(name string) bool {
+	return s.lists[name]
+}
+
+// Has reports whether name is a host or an address list.
+func (s Set) Has(name string) bool {
+	_, ok := s.entries[name]
+	return ok || s.lists[name]
 }
 
 // Expand replaces object names in list by their entries, written as
@@ -117,7 +184,10 @@ func (s Set) expand(list []string, conv func(name string, p netip.Prefix) (strin
 			out = append(out, e)
 			continue
 		}
-		entries, ok := s[e]
+		if err := s.bad[e]; err != nil {
+			return nil, err
+		}
+		entries, ok := s.entries[e]
 		if !ok {
 			return nil, fmt.Errorf("unknown host/prefix name %q", e)
 		}

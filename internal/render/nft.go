@@ -66,7 +66,9 @@ func (l *AntiLockout) Rules() []AutoRule {
 // Each IP list the rules use gets a named set per IP version, filled by an
 // include of the list's elements file (paths.IPListFile), which the agent
 // writes when it downloads the list. The sets are thus loaded in the same
-// transaction as the rules that use them, never empty in between.
+// transaction as the rules that use them, never empty in between. Each
+// address set (fwconfig.AddressSet) gets a named set per IP version too,
+// with its elements written in.
 func Nftables(in *fwconfig.Instance, lockout *AntiLockout, paths Paths) string {
 	b := &strings.Builder{}
 
@@ -78,6 +80,16 @@ func Nftables(in *fwconfig.Instance, lockout *AntiLockout, paths Paths) string {
 	for _, name := range lists {
 		for _, fam := range []string{"ipv4", "ipv6"} {
 			fmt.Fprintf(b, "\tset %s {\n\t\ttype %s_addr\n\t\tflags interval\n\t\tauto-merge\n\t}\n\n", SetName(name, fam), fam)
+		}
+	}
+
+	for _, as := range in.AddressSets {
+		for _, fam := range []string{"ipv4", "ipv6"} {
+			fmt.Fprintf(b, "\tset %s {\n\t\ttype %s_addr\n\t\tflags interval\n\t\tauto-merge\n", AddressSetName(as.Name, fam), fam)
+			if elems := as.Families(fam); len(elems) > 0 {
+				fmt.Fprintf(b, "\t\telements = { %s }\n", strings.Trim(set(elems), "{ }"))
+			}
+			b.WriteString("\t}\n\n")
 		}
 	}
 
@@ -450,6 +462,23 @@ func SetName(list, family string) string {
 	return IPListKey(list) + "_v4"
 }
 
+// AddressSetName is the nftables set holding one IP version of an address
+// set: "A_" and the name, or "A" and a hash of a name nft would not take.
+// Upper case, so never an IP list's set (IPListKey).
+func AddressSetName(name, family string) string {
+	key := "A_" + name
+	if !addressSetKeyRe.MatchString(name) {
+		sum := sha256.Sum256([]byte(name))
+		key = "A" + hex.EncodeToString(sum[:12])
+	}
+	if family == "ipv6" {
+		return key + "_v6"
+	}
+	return key + "_v4"
+}
+
+var addressSetKeyRe = regexp.MustCompile(`^[A-Za-z0-9_]{1,40}$`)
+
 // ipListKeyRe are the names an IP list kept as its key, from when they
 // were all a list could be called.
 var ipListKeyRe = regexp.MustCompile(`^[a-z][a-z0-9_]{0,23}$`)
@@ -774,6 +803,10 @@ func writeRule(b *strings.Builder, idx int, r fwconfig.Rule, in *fwconfig.Instan
 	// match; one per source address splits a match of either IP version in
 	// two.
 	for _, m := range r.Matches() {
+		var ok bool
+		if m.FamilyMatch, ok = dropEmptySets(in, m.FamilyMatch); !ok {
+			continue
+		}
 		for _, match := range matchExprs(m.FamilyMatch, serviceExpr(m.Service)) {
 			for _, lim := range limitExprs(limit, m) {
 				line := append(append(append([]string(nil), parts...), match...), lim...)
@@ -1054,9 +1087,32 @@ func matchExprs(m fwconfig.FamilyMatch, proto []string) [][]string {
 	return out
 }
 
+// dropEmptySets leaves out of a match the address sets that hold nothing
+// of its IP version (an IPv4-only list in the IPv6 match). It reports false
+// when that leaves the source or destination with nothing to match: the
+// list would then match nothing of this version, so the match is left out.
+func dropEmptySets(in *fwconfig.Instance, m fwconfig.FamilyMatch) (fwconfig.FamilyMatch, bool) {
+	keep := func(list []string) ([]string, bool) {
+		var out []string
+		for _, a := range list {
+			if name, ok := fwconfig.AddressSetName(a); ok {
+				if as := in.AddressSet(name); as == nil || len(as.Families(m.Family)) == 0 {
+					continue
+				}
+			}
+			out = append(out, a)
+		}
+		return out, len(list) == 0 || len(out) > 0
+	}
+	src, ok1 := keep(m.Src)
+	dst, ok2 := keep(m.Dst)
+	m.Src, m.Dst = src, dst
+	return m, ok1 && ok2
+}
+
 // addrOperands renders an address list of one IP version as the operands
 // of an saddr/daddr match: an anonymous set of the literal addresses, and
-// each IP list's named set. One nft match takes one operand, so a list
+// each IP list's and address set's named set. One nft match takes one operand, so a list
 // with several is rendered as one rule per operand (same verdict). An
 // empty list is one empty operand: no match.
 func addrOperands(list []string, family string) []string {
@@ -1067,6 +1123,8 @@ func addrOperands(list []string, family string) []string {
 	for _, a := range list {
 		if name, ok := fwconfig.IPListName(a); ok {
 			sets = append(sets, "@"+SetName(name, family))
+		} else if name, ok := fwconfig.AddressSetName(a); ok {
+			sets = append(sets, "@"+AddressSetName(name, family))
 		} else {
 			lits = append(lits, a)
 		}

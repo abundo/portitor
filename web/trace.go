@@ -102,19 +102,20 @@ func (s *Server) traceTarget(target, family string) (string, string) {
 	if family != "" && family != "ipv4" && family != "ipv6" {
 		return "", "family must be ipv4 or ipv6"
 	}
-	var objs []models.AddressObject
+	var objs netobj.Set
 	if netobj.IsName(target) {
-		if err := s.db.Where("name = ?", target).Find(&objs).Error; err != nil {
+		var err error
+		if objs, err = nameSet(s.db); err != nil {
 			return "", "cannot look up " + target
 		}
 	}
-	if len(objs) == 0 {
+	if !objs.Has(target) {
 		if !traceDNSName.MatchString(target) || len(target) > 253 {
 			return "", "the target must be an IP address, a named host or a DNS name"
 		}
 		return target, ""
 	}
-	addrs, err := netobj.New(objs).Host(target)
+	addrs, err := objs.Host(target)
 	if err != nil {
 		return "", err.Error()
 	}

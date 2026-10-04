@@ -2,17 +2,18 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { defineStore } from 'pinia'
-import { addressObjects, api, customServices, ipLists } from '@/api'
+import { addressLists, addressObjects, api, customServices, ipLists } from '@/api'
 import { serviceSummary } from '@/utils/services'
 
-// Named hosts and prefixes, offered as suggestions in address fields, and
-// IP lists, which rules take as "@name"; the services rules name, custom
+// Named hosts and prefixes and address lists, offered as suggestions in
+// address fields, and IP lists, which rules take as "@name"; the services rules name, custom
 // and predefined; the built-in port names NAT port fields accept; and the
 // ICMP and ICMPv6 types services match ({ icmp: [...], icmpv6: [...] },
 // fwconfig.ICMPTypes).
 export const useObjectStore = defineStore('objects', {
   state: () => ({
     list: [],
+    addressLists: [],
     ipLists: [],
     services: [],
     customServices: [],
@@ -21,7 +22,7 @@ export const useObjectStore = defineStore('objects', {
     loaded: false,
   }),
   getters: {
-    names: (s) => s.list.map((o) => o.name),
+    names: (s) => [...s.list, ...s.addressLists].map((o) => o.name),
     listRefs: (s) => s.ipLists.map((l) => `@${l.name}`),
     // portNames: the built-in port names, as { name, port, description }.
     portNames: (s) => s.services,
@@ -50,6 +51,7 @@ export const useObjectStore = defineStore('objects', {
       if (this.loaded && !force) return
       ;[
         this.list,
+        this.addressLists,
         this.ipLists,
         this.services,
         this.customServices,
@@ -57,6 +59,7 @@ export const useObjectStore = defineStore('objects', {
         this.icmpTypes,
       ] = await Promise.all([
         addressObjects.list(),
+        addressLists.list(),
         ipLists.list(),
         api.services(),
         customServices.list(),

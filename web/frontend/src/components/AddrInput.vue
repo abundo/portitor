@@ -2,9 +2,9 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
 <script setup>
-// AddrInput: addresses/CIDRs, with the names of hosts/prefixes suggested,
-// and with `lists` IP lists ("@name") too. With `multiple` the model is an
-// array of entries, otherwise a string.
+// AddrInput: addresses/CIDRs, with the names of hosts/prefixes and address
+// lists suggested, and with `lists` IP lists ("@name") too. With `multiple`
+// the model is an array of entries, otherwise a string.
 import { computed, onMounted } from 'vue'
 import { useObjectStore } from '@/stores/objects'
 

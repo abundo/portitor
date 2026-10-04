@@ -83,6 +83,14 @@ func (s *Server) importOptions(req nftImportRequest) (nftimport.Options, error) 
 	for _, o := range objs {
 		opt.Objects[o.Name] = o.Addresses
 	}
+	// Address lists share the names; one with the same literals is used.
+	var lists []models.AddressList
+	if err := s.db.Find(&lists).Error; err != nil {
+		return opt, err
+	}
+	for _, l := range lists {
+		opt.Objects[l.Name] = l.Entries
+	}
 	var svcs []models.Service
 	if err := s.db.Find(&svcs).Error; err != nil {
 		return opt, err

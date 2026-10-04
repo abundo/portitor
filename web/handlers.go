@@ -28,7 +28,6 @@ import (
 	"github.com/abundo/portitor/internal/buildinfo"
 	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/internal/ipam"
-	"github.com/abundo/portitor/internal/netobj"
 	"github.com/abundo/portitor/internal/render"
 	"github.com/abundo/portitor/internal/wgkeys"
 	"github.com/abundo/portitor/models"
@@ -266,9 +265,11 @@ func (s *Server) handleWgClientConfig(c *echo.Context) error {
 		return err
 	}
 
-	var objs []models.AddressObject
-	s.db.Find(&objs)
-	addrs, err := netobj.New(objs).Prefixes(peer.AllowedIPs)
+	objs, err := nameSet(s.db)
+	if err != nil {
+		return err
+	}
+	addrs, err := objs.Prefixes(peer.AllowedIPs)
 	if err != nil {
 		return errJSON(c, http.StatusBadRequest, err.Error())
 	}
@@ -297,7 +298,7 @@ func (s *Server) handleWgClientConfig(c *echo.Context) error {
 		}
 	}
 	if site || c.QueryParam("split") == "1" {
-		remote, err := netobj.New(objs).Prefixes(peer.Networks)
+		remote, err := objs.Prefixes(peer.Networks)
 		if err != nil {
 			return errJSON(c, http.StatusBadRequest, err.Error())
 		}
@@ -354,9 +355,10 @@ func (s *Server) handleWgNextFree(c *echo.Context) error {
 	// behind a peer as prefixes.
 	var peers []models.WgPeer
 	s.db.Where("interface_id IN (?)", s.db.Model(&models.Interface{}).Select("id").Where("instance_id = ?", ifc.InstanceID)).Find(&peers)
-	var objs []models.AddressObject
-	s.db.Find(&objs)
-	set := netobj.New(objs)
+	set, err := nameSet(s.db)
+	if err != nil {
+		return err
+	}
 	used, usedPrefixes := ipam.Used(addrs, ifaces), prefixes
 	for _, p := range peers {
 		list, err := set.Prefixes(p.AllowedIPs)

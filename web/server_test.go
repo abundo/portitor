@@ -616,6 +616,94 @@ func TestAddressObjects(t *testing.T) {
 	}
 }
 
+func TestAddressLists(t *testing.T) {
+	env := newEnv(t)
+	inst := env.create("/api/instances", map[string]any{"name": "main"})
+	host := env.create("/api/objects", map[string]any{"name": "nas", "addresses": []string{"192.168.1.10", "fd00::10"}})
+	servers := env.create("/api/address-lists", map[string]any{"name": "servers", "entries": []string{"nas", " 10.0.0.0/8 ", "192.168.1.11/32"}})
+	all := env.create("/api/address-lists", map[string]any{"name": "all", "entries": []string{"servers", "198.51.100.1"}})
+
+	var l models.AddressList
+	env.srv.db.First(&l, servers)
+	if strings.Join(l.Entries, " ") != "nas 10.0.0.0/8 192.168.1.11" {
+		t.Errorf("entries not normalised: %v", l.Entries)
+	}
+	for _, body := range []map[string]any{
+		{"name": "nas", "entries": []string{"10.0.0.1"}},   // a host's name
+		{"name": "empty", "entries": []string{}},           // nothing
+		{"name": "ghost", "entries": []string{"nobody"}},   // unknown name
+		{"name": "iplist", "entries": []string{"@drop"}},   // IP lists can't be in one
+		{"name": "self", "entries": []string{"self"}},      // itself
+		{"name": "bad", "entries": []string{"10.0.0.300"}}, // not an address
+	} {
+		if rec := env.do("POST", "/api/address-lists", body); rec.Code != http.StatusBadRequest {
+			t.Errorf("%v: %d %s", body, rec.Code, rec.Body)
+		}
+	}
+	if rec := env.do("POST", "/api/objects", map[string]any{"name": "servers", "addresses": []string{"10.0.0.1"}}); rec.Code != http.StatusBadRequest {
+		t.Errorf("host named like a list: %d %s", rec.Code, rec.Body)
+	}
+	// A loop through another list.
+	if rec := env.do("PUT", fmt.Sprintf("/api/address-lists/%d", servers), map[string]any{"entries": []string{"all"}}); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "contains itself") {
+		t.Errorf("loop: %d %s", rec.Code, rec.Body)
+	}
+
+	rule := env.create("/api/rules", map[string]any{"instance_id": inst, "chain": "forward", "action": "accept", "enabled": true, "src_addrs": []string{"all", "nas"}, "dst_addrs": []string{"servers"}})
+	// Elsewhere a list is expanded: a route gateway needs one address per version.
+	if rec := env.do("POST", "/api/routes", map[string]any{"instance_id": inst, "destination": "default", "gateway": "servers"}); rec.Code != http.StatusBadRequest {
+		t.Errorf("list of prefixes as gateway: %d %s", rec.Code, rec.Body)
+	}
+	env.create("/api/nat", map[string]any{"instance_id": inst, "kind": "masquerade", "enabled": true, "src_addrs": []string{"servers"}})
+
+	doc, err := builder.Build(env.srv.db, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := doc.Instance("main")
+	var got fwconfig.Rule
+	for _, r := range in.Rules {
+		if r.Kind == "" {
+			got = r
+		}
+	}
+	if strings.Join(got.SrcAddrs, " ") != "$all 192.168.1.10 fd00::10" || strings.Join(got.DstAddrs, " ") != "$servers" {
+		t.Errorf("rule addresses: %v %v", got.SrcAddrs, got.DstAddrs)
+	}
+	if len(in.AddressSets) != 2 || in.AddressSets[0].Name != "all" ||
+		strings.Join(in.AddressSets[0].Addresses, " ") != "192.168.1.10 fd00::10 10.0.0.0/8 192.168.1.11 198.51.100.1" {
+		t.Errorf("address sets: %+v", in.AddressSets)
+	}
+	if len(in.NAT) != 1 || strings.Join(in.NAT[0].SrcAddrs, " ") != "192.168.1.10 fd00::10 10.0.0.0/8 192.168.1.11" {
+		t.Errorf("NAT not expanded: %+v", in.NAT)
+	}
+	if err := doc.Validate(); err != nil {
+		t.Errorf("validate: %v", err)
+	}
+
+	// In use: delete refused, for the list and the host in it. Renamed:
+	// references follow, in rules and in other lists.
+	for _, path := range []string{fmt.Sprintf("/api/address-lists/%d", servers), fmt.Sprintf("/api/objects/%d", host)} {
+		if rec := env.do("DELETE", path, nil); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "used by") {
+			t.Errorf("delete %s in use: %d %s", path, rec.Code, rec.Body)
+		}
+	}
+	if rec := env.do("PUT", fmt.Sprintf("/api/address-lists/%d", servers), map[string]any{"name": "srv"}); rec.Code != http.StatusOK {
+		t.Fatalf("rename: %d %s", rec.Code, rec.Body)
+	}
+	if rec := env.do("PUT", fmt.Sprintf("/api/objects/%d", host), map[string]any{"name": "fileserver"}); rec.Code != http.StatusOK {
+		t.Fatalf("rename host: %d %s", rec.Code, rec.Body)
+	}
+	var r models.Rule
+	env.srv.db.First(&r, rule)
+	var al, sl models.AddressList
+	env.srv.db.First(&al, all)
+	env.srv.db.First(&sl, servers)
+	if strings.Join(r.DstAddrs, " ") != "srv" || strings.Join(r.SrcAddrs, " ") != "all fileserver" ||
+		strings.Join(al.Entries, " ") != "srv 198.51.100.1" || strings.Join(sl.Entries, " ") != "fileserver 10.0.0.0/8 192.168.1.11" {
+		t.Errorf("references not renamed: %v %v %v %v", r.SrcAddrs, r.DstAddrs, al.Entries, sl.Entries)
+	}
+}
+
 func TestObjectFolders(t *testing.T) {
 	env := newEnv(t)
 	top := env.create("/api/object-folders", map[string]any{"kind": "hosts", "name": " Servers "})

@@ -5,6 +5,7 @@ package web
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"gorm.io/gorm"
@@ -14,14 +15,17 @@ import (
 	"github.com/abundo/portitor/models"
 )
 
-// Named hosts and prefixes. Other rows refer to them by name inside their
-// address lists; renaming an object rewrites those references, and an
-// object in use cannot be deleted.
+// Named hosts and prefixes, and address lists, which share their names.
+// Other rows refer to them by name inside their address lists; renaming
+// one rewrites those references, and one in use cannot be deleted.
 
 func prepareAddressObject(tx *gorm.DB, o, old *models.AddressObject) error {
 	o.Name = strings.TrimSpace(o.Name)
 	if !netobj.ValidName(o.Name) {
 		return bad("name: letters, digits, _ . -, starting with a letter, at most 63 characters (not \"default\" or \"any\")")
+	}
+	if err := nameFree(tx, o.Name, &models.AddressList{}, 0); err != nil {
+		return err
 	}
 	if err := itemFolder(tx, &o.FolderID, models.ObjectFolderHosts); err != nil {
 		return err
@@ -54,9 +58,107 @@ func prepareAddressObject(tx *gorm.DB, o, old *models.AddressObject) error {
 }
 
 func deleteAddressObject(tx *gorm.DB, o *models.AddressObject) error {
+	return refuseNameInUse(tx, o.Name)
+}
+
+// prepareAddressList checks an address list: addresses, CIDRs and the
+// names of hosts and other address lists, without a list that holds
+// itself.
+func prepareAddressList(tx *gorm.DB, l, old *models.AddressList) error {
+	l.Name = strings.TrimSpace(l.Name)
+	if !netobj.ValidName(l.Name) {
+		return bad("name: letters, digits, _ . -, starting with a letter, at most 63 characters (not \"default\" or \"any\")")
+	}
+	var id uint
+	if old != nil {
+		id = old.ID
+	}
+	if err := nameFree(tx, l.Name, &models.AddressObject{}, 0); err != nil {
+		return err
+	}
+	if err := nameFree(tx, l.Name, &models.AddressList{}, id); err != nil {
+		return err
+	}
+	if err := itemFolder(tx, &l.FolderID, models.ObjectFolderAddressLists); err != nil {
+		return err
+	}
+	l.Entries = cleanList(l.Entries)
+	if len(l.Entries) == 0 {
+		return bad("at least one entry")
+	}
+	for i, e := range l.Entries {
+		if _, ok := fwconfig.IPListName(e); ok {
+			return bad(fmt.Sprintf("%q: an address list cannot hold IP lists; use both in the rule", e))
+		}
+		if netobj.IsName(e) {
+			if e == l.Name || (old != nil && e == old.Name) {
+				return bad(fmt.Sprintf("%s cannot contain itself", l.Name))
+			}
+			continue
+		}
+		p, err := fwconfig.ParseAddrOrPrefix(e)
+		if err != nil {
+			return bad(fmt.Sprintf("%q is not an address, CIDR, or the name of a host or address list", e))
+		}
+		if p.IsSingleIP() {
+			l.Entries[i] = p.Addr().String()
+		} else {
+			l.Entries[i] = p.String()
+		}
+	}
+	// Resolve the list as saved, with the others: an unknown name or a
+	// loop through other lists is refused.
+	objs, lists, err := loadNames(tx)
+	if err != nil {
+		return err
+	}
+	lists = slices.DeleteFunc(lists, func(x models.AddressList) bool { return x.ID == id && id != 0 })
+	if old != nil && old.Name != l.Name {
+		for i := range lists {
+			for j, e := range lists[i].Entries {
+				if e == old.Name {
+					lists[i].Entries[j] = l.Name
+				}
+			}
+		}
+	}
+	if _, err := netobj.New(objs, append(lists, *l)...).Expand([]string{l.Name}); err != nil {
+		return bad(err.Error())
+	}
+	if old != nil && old.Name != l.Name {
+		return eachObjectRef(tx, func(_ string, entry *string) bool {
+			if *entry == old.Name {
+				*entry = l.Name
+				return true
+			}
+			return false
+		})
+	}
+	return nil
+}
+
+func deleteAddressList(tx *gorm.DB, l *models.AddressList) error {
+	return refuseNameInUse(tx, l.Name)
+}
+
+// nameFree checks that no row of model (a host or address list table)
+// other than id has the name: the two share their names.
+func nameFree(tx *gorm.DB, name string, model any, id uint) error {
+	var n int64
+	if err := tx.Model(model).Where("name = ? AND id <> ?", name, id).Count(&n).Error; err != nil {
+		return err
+	}
+	if n > 0 {
+		return bad(fmt.Sprintf("there is already a host or address list named %s", name))
+	}
+	return nil
+}
+
+// refuseNameInUse refuses to delete a host or address list in use.
+func refuseNameInUse(tx *gorm.DB, name string) error {
 	var users []string
 	err := eachObjectRef(tx, func(where string, entry *string) bool {
-		if *entry == o.Name && (len(users) == 0 || users[len(users)-1] != where) {
+		if *entry == name && (len(users) == 0 || users[len(users)-1] != where) {
 			users = append(users, where)
 		}
 		return false
@@ -68,9 +170,31 @@ func deleteAddressObject(tx *gorm.DB, o *models.AddressObject) error {
 		if len(users) > 5 {
 			users = append(users[:5], "...")
 		}
-		return bad(fmt.Sprintf("%s is used by %s", o.Name, strings.Join(users, ", ")))
+		return bad(fmt.Sprintf("%s is used by %s", name, strings.Join(users, ", ")))
 	}
 	return nil
+}
+
+// loadNames loads every host and address list.
+func loadNames(tx *gorm.DB) ([]models.AddressObject, []models.AddressList, error) {
+	var objs []models.AddressObject
+	if err := tx.Find(&objs).Error; err != nil {
+		return nil, nil, err
+	}
+	var lists []models.AddressList
+	if err := tx.Find(&lists).Error; err != nil {
+		return nil, nil, err
+	}
+	return objs, lists, nil
+}
+
+// nameSet resolves every host and address list.
+func nameSet(tx *gorm.DB) (netobj.Set, error) {
+	objs, lists, err := loadNames(tx)
+	if err != nil {
+		return netobj.Set{}, err
+	}
+	return netobj.New(objs, lists...), nil
 }
 
 // eachObjectRef calls visit for every entry that can hold an object name.
@@ -90,6 +214,17 @@ func eachObjectRef(tx *gorm.DB, visit func(where string, entry *string) bool) er
 	}
 	instName := map[uint]string{}
 
+	var lists []models.AddressList
+	if err := tx.Order("name").Find(&lists).Error; err != nil {
+		return err
+	}
+	for _, l := range lists {
+		if list("address list "+l.Name, l.Entries) {
+			if err := save(&models.AddressList{}, l.ID, map[string]any{"entries": l.Entries}); err != nil {
+				return err
+			}
+		}
+	}
 	var instances []models.Instance
 	if err := tx.Find(&instances).Error; err != nil {
 		return err
@@ -254,7 +389,7 @@ func checkEntries(tx *gorm.DB, field string, list models.StringList, kind int) e
 			example = "an IP address"
 		}
 		if err != nil {
-			return bad(fmt.Sprintf("%s: %q is not %s, or the name of a host/prefix", field, s, example))
+			return bad(fmt.Sprintf("%s: %q is not %s, or the name of a host/prefix or address list", field, s, example))
 		}
 	}
 	return nil
@@ -266,26 +401,34 @@ func checkHost(tx *gorm.DB, field, s string) error {
 	if !netobj.IsName(s) {
 		return checkEntries(tx, field, models.StringList{s}, entryHost)
 	}
-	if err := checkObjectName(tx, field, s, true); err != nil {
+	set, err := nameSet(tx)
+	if err != nil {
 		return err
 	}
-	var o models.AddressObject
-	tx.Where("name = ?", s).First(&o)
-	if _, err := netobj.New([]models.AddressObject{o}).Host(s); err != nil {
+	if !set.Has(s) {
+		return bad(fmt.Sprintf("%s: no host/prefix or address list named %q", field, s))
+	}
+	if _, err := set.Host(s); err != nil {
 		return bad(field + ": " + err.Error())
 	}
 	return nil
 }
 
 func checkObjectName(tx *gorm.DB, field, name string, hostOnly bool) error {
-	var o models.AddressObject
-	if tx.Where("name = ?", name).First(&o).Error != nil {
-		return bad(fmt.Sprintf("%s: no host/prefix named %q", field, name))
+	set, err := nameSet(tx)
+	if err != nil {
+		return err
+	}
+	if !set.Has(name) {
+		return bad(fmt.Sprintf("%s: no host/prefix or address list named %q", field, name))
 	}
 	if hostOnly {
-		if _, err := netobj.New([]models.AddressObject{o}).Hosts([]string{name}); err != nil {
-			return bad(field + ": " + err.Error())
-		}
+		_, err = set.Hosts([]string{name})
+	} else {
+		_, err = set.Expand([]string{name})
+	}
+	if err != nil {
+		return bad(field + ": " + err.Error())
 	}
 	return nil
 }

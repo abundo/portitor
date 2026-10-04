@@ -25,7 +25,7 @@ func prepareObjectFolder(tx *gorm.DB, f, old *models.ObjectFolder) error {
 	if old != nil && old.Kind != f.Kind {
 		return bad("a folder cannot change kind")
 	}
-	if err := oneOf("kind", f.Kind, models.ObjectFolderHosts, models.ObjectFolderIpLists); err != nil {
+	if err := oneOf("kind", f.Kind, models.ObjectFolderHosts, models.ObjectFolderAddressLists, models.ObjectFolderIpLists); err != nil {
 		return err
 	}
 	if f.ParentID != nil && *f.ParentID == 0 {
@@ -65,6 +65,9 @@ func deleteObjectFolder(tx *gorm.DB, f *models.ObjectFolder) error {
 	tx.Model(&models.ObjectFolder{}).Where("parent_id = ?", f.ID).Count(&n)
 	if n == 0 {
 		tx.Model(&models.AddressObject{}).Where("folder_id = ?", f.ID).Count(&n)
+	}
+	if n == 0 {
+		tx.Model(&models.AddressList{}).Where("folder_id = ?", f.ID).Count(&n)
 	}
 	if n == 0 {
 		tx.Model(&models.IpList{}).Where("folder_id = ?", f.ID).Count(&n)

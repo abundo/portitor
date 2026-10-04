@@ -41,6 +41,8 @@ type Instance struct {
 	// InterfaceZones name groups of interfaces for rules to match on.
 	InterfaceZones []InterfaceZone `json:"interface_zones"`
 	Rules          []Rule          `json:"rules"`
+	// AddressSets are the address lists the rules use ("$name").
+	AddressSets []AddressSet `json:"address_sets,omitempty"`
 	// RateLimits are the rate limits the rules name (Rule.RateLimit).
 	RateLimits []RateLimit `json:"rate_limits,omitempty"`
 	NAT        []NATRule   `json:"nat"`
@@ -212,7 +214,8 @@ const (
 
 // Rule is one filter rule, evaluated in slice order within its chain.
 // Empty match fields match anything. SrcAddrs and DstAddrs may also hold
-// IP list references ("@name"), which match either IP version. InInterfaces/OutInterfaces hold
+// IP list references ("@name"), which match either IP version, and address
+// set references ("$name", Instance.AddressSets). InInterfaces/OutInterfaces hold
 // interface and InterfaceZone names of the instance. Address lists may mix IPv4 and IPv6;
 // the rule is then rendered once per IP version, each with that version's
 // addresses. A version is left out when a non-empty list has none of its

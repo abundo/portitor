@@ -56,3 +56,33 @@ func TestExpand(t *testing.T) {
 		t.Error("unknown name must fail")
 	}
 }
+
+func TestLists(t *testing.T) {
+	objs := []models.AddressObject{
+		{Name: "nas", Addresses: models.StringList{"192.168.1.10", "fd00::10"}},
+		{Name: "web", Addresses: models.StringList{"192.168.1.11"}},
+	}
+	s := New(objs,
+		models.AddressList{Name: "servers", Entries: models.StringList{"nas", "web", "10.0.0.0/8"}},
+		models.AddressList{Name: "all", Entries: models.StringList{"servers", "192.168.1.10", "198.51.100.1"}},
+		models.AddressList{Name: "loop1", Entries: models.StringList{"loop2"}},
+		models.AddressList{Name: "loop2", Entries: models.StringList{"loop1"}},
+		models.AddressList{Name: "ghost", Entries: models.StringList{"nobody"}},
+	)
+	if !s.IsList("all") || s.IsList("nas") || !s.Has("nas") || s.Has("nobody") {
+		t.Error("IsList/Has misclassify")
+	}
+	got, err := s.Expand([]string{"all"})
+	if err != nil || strings.Join(got, " ") != "192.168.1.10 fd00::10 192.168.1.11 10.0.0.0/8 198.51.100.1" {
+		t.Errorf("Expand(all): %v %v", got, err)
+	}
+	if _, err := s.Expand([]string{"loop1"}); err == nil || !strings.Contains(err.Error(), "contains itself") {
+		t.Errorf("cycle: %v", err)
+	}
+	if _, err := s.Expand([]string{"ghost"}); err == nil || !strings.Contains(err.Error(), `"nobody"`) {
+		t.Errorf("unknown entry: %v", err)
+	}
+	if _, err := s.Hosts([]string{"servers"}); err == nil {
+		t.Error("a list with a prefix is not hosts")
+	}
+}

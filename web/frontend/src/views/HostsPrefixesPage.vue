@@ -2,10 +2,10 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
 <script setup>
-// Hosts & prefixes: one tree of the named hosts and prefixes, the IP lists
-// and the instance's prefix tree (IPAM), each a top-level node. Hosts and
-// IP lists can be sorted into folders (object_folders), which only
-// structure the page.
+// Hosts & prefixes: one tree of the named hosts and prefixes, the address
+// lists, the IP lists and the instance's prefix tree (IPAM), each a
+// top-level node. Hosts and address and IP lists can be sorted into folders
+// (object_folders), which only structure the page.
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useToast } from '@nuxt/ui/composables'
@@ -13,9 +13,18 @@ import ObjectTree from '@/components/ObjectTree.vue'
 import DhcpLeasePicker from '@/components/DhcpLeasePicker.vue'
 import HostDialog from '@/components/HostDialog.vue'
 import IpListDialog from '@/components/IpListDialog.vue'
+import AddressListDialog from '@/components/AddressListDialog.vue'
 import FolderDialog from '@/components/FolderDialog.vue'
 import SearchInput from '@/components/SearchInput.vue'
-import { addressObjects, api, ipamAddresses, ipamPrefixes, ipLists, objectFolders } from '@/api'
+import {
+  addressLists,
+  addressObjects,
+  api,
+  ipamAddresses,
+  ipamPrefixes,
+  ipLists,
+  objectFolders,
+} from '@/api'
 import { errMsg } from '@/api/http'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
 import { useAuthStore } from '@/stores/auth'
@@ -35,6 +44,7 @@ const { store, ifaceName, ifaceList } = useInstanceRefs()
 const deploy = useDeployStore()
 const objects = useObjectStore()
 const hosts = ref([])
+const addrLists = ref([])
 const lists = ref([])
 const folders = ref([])
 const tree = ref([])
@@ -56,6 +66,9 @@ const infoOpen = ref(false)
 const byName = (a, b) => a.name.localeCompare(b.name)
 async function loadHosts() {
   hosts.value = (await addressObjects.list()).sort(byName)
+}
+async function loadAddrLists() {
+  addrLists.value = (await addressLists.list()).sort(byName)
 }
 async function loadLists() {
   lists.value = (await ipLists.list()).sort(byName)
@@ -169,7 +182,7 @@ const foundTree = computed(() => (searching.value ? pruneTree(shownTree.value) :
 onMounted(async () => {
   deploy.refresh()
   try {
-    await Promise.all([loadHosts(), loadLists(), loadFolders(), loadTree()])
+    await Promise.all([loadHosts(), loadAddrLists(), loadLists(), loadFolders(), loadTree()])
   } catch (err) {
     toast.add({ title: errMsg(err), color: 'error' })
   } finally {
@@ -178,9 +191,14 @@ onMounted(async () => {
 })
 
 const showError = (err) => toast.add({ title: errMsg(err), color: 'error' })
-// Hosts and IP lists are also offered in address fields (the object store).
+// Hosts and address and IP lists are also offered in address fields (the
+// object store).
 function reloadHosts() {
   loadHosts().catch(showError)
+  objects.load(true).catch(() => {})
+}
+function reloadAddrLists() {
+  loadAddrLists().catch(showError)
   objects.load(true).catch(() => {})
 }
 function reloadLists() {
@@ -195,6 +213,7 @@ function reloadTree() {
 }
 
 const hostDialog = ref(null)
+const addrListDialog = ref(null)
 const listDialog = ref(null)
 const folderDialog = ref(null)
 
@@ -331,6 +350,20 @@ function hostNode(o) {
   }
 }
 
+function addrListNode(l) {
+  return {
+    key: `address_lists:${l.id}`,
+    title: l.name,
+    icon: icon('list'),
+    cells: {
+      description: esc(l.description),
+      details: `<span class="font-mono text-xs">${esc(l.entries?.join(', '))}</span>`,
+      status: badge(`${l.entries?.length ?? 0} entries`, 'neutral'),
+    },
+    item: { type: 'addrlist', obj: l },
+  }
+}
+
 function listStatus(l) {
   const s = states.value[l.name]
   if (!s) return muted('not deployed', 'text-xs')
@@ -461,6 +494,12 @@ const treeSource = computed(() => {
     (o) => valuesText(o.name, o.description, o.addresses, hostKind(o), versions(o)),
     hostNode,
   )
+  const addrListChildren = folderNodes(
+    'address_lists',
+    addrLists.value,
+    (l) => valuesText(l.name, l.description, l.entries),
+    addrListNode,
+  )
   const listChildren = folderNodes(
     'ip_lists',
     lists.value,
@@ -486,6 +525,21 @@ const treeSource = computed(() => {
       hostChildren.length
         ? hostChildren
         : [empty('empty:hosts', searching.value ? 'No host matches.' : 'No hosts yet.')],
+    ),
+    groupNode(
+      'group:addrlists',
+      'Address lists',
+      'list',
+      addrLists.value.length,
+      'Addresses, prefixes and hosts by name; an nftables set in rules',
+      addrListChildren.length
+        ? addrListChildren
+        : [
+            empty(
+              'empty:addrlists',
+              searching.value ? 'No address list matches.' : 'No address lists yet.',
+            ),
+          ],
     ),
     groupNode(
       'group:lists',
@@ -520,6 +574,7 @@ function onOpen(data) {
   const r = data?.item
   if (r?.type === 'folder') folderDialog.value.edit(r.obj)
   else if (r?.type === 'host') hostDialog.value.edit(r.obj)
+  else if (r?.type === 'addrlist') addrListDialog.value.edit(r.obj)
   else if (r?.type === 'list') listDialog.value.edit(r.obj)
   else if (r?.type === 'ipam') onEdit(r.obj)
 }
@@ -529,6 +584,7 @@ function rowMenu(data) {
   if (r?.type === 'group') return groupMenu(r.key)
   if (r?.type === 'folder') return folderMenu(r.kind, r.obj.id)
   if (r?.type === 'host') return folderMenu('hosts', r.obj.folder_id)
+  if (r?.type === 'addrlist') return folderMenu('address_lists', r.obj.folder_id)
   if (r?.type === 'list') return listMenu(r.obj)
   if (r?.type === 'ipam') return nodeMenu(r.obj)
   return []
@@ -626,6 +682,11 @@ const addHost = (folderId) => ({
   icon: 'i-lucide-plus',
   onSelect: () => hostDialog.value.edit({ folder_id: folderId }),
 })
+const addAddrList = (folderId) => ({
+  label: 'Add address list',
+  icon: 'i-lucide-plus',
+  onSelect: () => addrListDialog.value.edit({ folder_id: folderId }),
+})
 const addList = (folderId) => ({
   label: 'Add IP list',
   icon: 'i-lucide-plus',
@@ -639,7 +700,8 @@ const addFolder = (kind, parentId) => ({
 // A folder's menu adds into it; an item's adds next to it (its folder).
 function folderMenu(kind, folderId = null) {
   if (!auth.isAdmin) return []
-  return [[kind === 'hosts' ? addHost(folderId) : addList(folderId), addFolder(kind, folderId)]]
+  const add = { hosts: addHost, address_lists: addAddrList, ip_lists: addList }[kind]
+  return [[add(folderId), addFolder(kind, folderId)]]
 }
 function listMenu(item) {
   if (!auth.isAdmin) return []
@@ -657,6 +719,7 @@ function listMenu(item) {
 }
 function groupMenu(key) {
   if (key === 'group:hosts') return folderMenu('hosts')
+  if (key === 'group:addrlists') return folderMenu('address_lists')
   if (key === 'group:lists') return folderMenu('ip_lists')
   if (!store.currentId || !auth.canEdit) return []
   return [
@@ -751,6 +814,12 @@ async function removeAddress() {
                     deleted.
                   </p>
                   <p>
+                    <b>Address lists</b> hold addresses, prefixes and the names of hosts and other
+                    address lists, which they follow as they change. In a rule's source or
+                    destination a list becomes an nftables set (one per IP version) in the virtual
+                    firewall; anywhere else it is used like a host, by its addresses.
+                  </p>
+                  <p>
                     <b>IP lists</b> are address lists the firewall downloads: the ban decisions of a
                     CrowdSec engine, or any list with one address or prefix per line. Use a list as
                     @name in a rule's source or destination; it becomes an nftables set in each
@@ -759,9 +828,9 @@ async function removeAddress() {
                     last download stays in force if a later one fails.
                   </p>
                   <p>
-                    <b>Folders</b> sort hosts and IP lists; they mean nothing to the firewall. Move
-                    an entry by choosing its folder in its form. Only an empty folder can be
-                    deleted.
+                    <b>Folders</b> sort hosts, address lists and IP lists; they mean nothing to the
+                    firewall. Move an entry by choosing its folder in its form. Only an empty folder
+                    can be deleted.
                   </p>
                   <p>
                     <b>Prefixes & IP addresses</b> nest by containment. The addresses of the
@@ -777,8 +846,9 @@ async function removeAddress() {
             </UPopover>
           </div>
           <p class="max-w-3xl text-sm text-muted">
-            Named hosts and prefixes, downloaded IP lists, and the virtual firewall's prefixes and
-            addresses with their DNS names. Click a row to open it; right-click it to add to it.
+            Named hosts and prefixes, address lists, downloaded IP lists, and the virtual firewall's
+            prefixes and addresses with their DNS names. Click a row to open it; right-click it to
+            add to it.
           </p>
         </div>
         <div v-if="auth.isAdmin || auth.canEdit" class="flex gap-2">
@@ -789,6 +859,14 @@ async function removeAddress() {
             icon="i-lucide-plus"
             label="Host"
             @click="hostDialog.edit()"
+          />
+          <UButton
+            v-if="auth.isAdmin"
+            color="neutral"
+            variant="outline"
+            icon="i-lucide-plus"
+            label="Address list"
+            @click="addrListDialog.edit()"
           />
           <UButton
             v-if="auth.isAdmin"
@@ -826,6 +904,7 @@ async function removeAddress() {
     </div>
 
     <HostDialog ref="hostDialog" :folders="folders" @changed="reloadHosts" />
+    <AddressListDialog ref="addrListDialog" :folders="folders" @changed="reloadAddrLists" />
     <IpListDialog ref="listDialog" :folders="folders" @changed="reloadLists" />
     <FolderDialog ref="folderDialog" :folders="folders" @changed="reloadFolders" />
 

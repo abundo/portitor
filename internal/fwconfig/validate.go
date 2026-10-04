@@ -47,6 +47,8 @@ type validator struct {
 	problems []string
 	// lists holds the names of the document's IP lists.
 	lists map[string]bool
+	// sets holds the names of the current instance's address sets.
+	sets map[string]bool
 	// ruleIDs holds the rule IDs seen so far, document wide.
 	ruleIDs map[uint32]bool
 }
@@ -265,6 +267,7 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 			seen[m] = true
 		}
 	}
+	v.addressSets(p, in)
 	rateLimits := map[string]bool{}
 	connLimits := map[string]bool{}
 	shaping := 0
@@ -828,8 +831,8 @@ func (v *validator) wireguard(p string, wg *WireGuard) {
 }
 
 // match checks a rule's match fields; with lists, addresses may refer to
-// IP lists. It reports whether the addresses and family are valid and fit
-// together.
+// IP lists and address sets. It reports whether the addresses and family
+// are valid and fit together.
 func (v *validator) match(p, family, proto string, src, dst []string, ports string, lists bool) bool {
 	valid := true
 	switch family {
@@ -851,6 +854,14 @@ func (v *validator) match(p, family, proto string, src, dst []string, ports stri
 					valid = false
 				} else if !v.lists[name] {
 					v.addf("%s: unknown ip list %q", p, name)
+					valid = false
+				}
+			} else if name, ok := AddressSetName(a); ok {
+				if !lists {
+					v.addf("%s: address list %q: only filter rules can use address lists", p, name)
+					valid = false
+				} else if !v.sets[name] {
+					v.addf("%s: unknown address list %q", p, name)
 					valid = false
 				}
 			} else if _, err := ParseAddrOrPrefix(a); err != nil {

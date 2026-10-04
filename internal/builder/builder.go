@@ -37,6 +37,7 @@ type data struct {
 	dnsZones       []models.DnsZone
 	records        []models.DnsRecord
 	objects        []models.AddressObject
+	addressLists   []models.AddressList
 	soas           []models.DnsSoaTemplate
 	policies       []models.DnsDnssecPolicy
 	templates      []models.DnsTemplate
@@ -79,6 +80,7 @@ func load(db *gorm.DB) (*data, error) {
 		{&d.dnsZones, "name"},
 		{&d.records, "zone_id, rank, id"},
 		{&d.objects, "name"},
+		{&d.addressLists, "name"},
 		{&d.soas, "name"},
 		{&d.policies, "name"},
 		{&d.templates, "name"},
@@ -141,7 +143,7 @@ func build(db *gorm.DB, generation int64, only map[string]bool) (*fwconfig.Docum
 		instName[in.ID] = in.Name
 	}
 	// Named hosts/prefixes are expanded here; the agent sees addresses only.
-	objs := netobj.New(d.objects)
+	objs := netobj.New(d.objects, d.addressLists...)
 	failed := false // set by expand and expandServices; callers drop what they failed on
 	expand := func(where string, fn func([]string) ([]string, error), list []string) []string {
 		out, err := fn(list)
@@ -262,6 +264,36 @@ func build(db *gorm.DB, generation int64, only map[string]bool) (*fwconfig.Docum
 			in.Interfaces = append(in.Interfaces, ifc)
 		}
 
+		// A filter rule's address lists become the instance's address sets
+		// ("$name"), each expanded once; other names expand into the rule.
+		ruleAddrs := func(list []string) ([]string, error) {
+			var out []string
+			for _, e := range list {
+				if !objs.IsList(e) {
+					x, err := objs.Expand([]string{e})
+					if err != nil {
+						return nil, err
+					}
+					for _, a := range x {
+						if !slices.Contains(out, a) {
+							out = append(out, a)
+						}
+					}
+					continue
+				}
+				if in.AddressSet(e) == nil {
+					addrs, err := objs.Expand([]string{e})
+					if err != nil {
+						return nil, err
+					}
+					in.AddressSets = append(in.AddressSets, fwconfig.AddressSet{Name: e, Addresses: addrs})
+				}
+				if ref := fwconfig.AddressSetRef + e; !slices.Contains(out, ref) {
+					out = append(out, ref)
+				}
+			}
+			return out, nil
+		}
 		for _, r := range d.rules {
 			if r.InstanceID != mi.ID || !r.Enabled {
 				continue
@@ -283,8 +315,8 @@ func build(db *gorm.DB, generation int64, only map[string]bool) (*fwconfig.Docum
 				InInterfaces:  []string(r.InInterfaces),
 				OutInterfaces: []string(r.OutInterfaces),
 				Family:        r.Family,
-				SrcAddrs:      expand(where+": source", objs.Expand, r.SrcAddrs),
-				DstAddrs:      expand(where+": destination", objs.Expand, r.DstAddrs),
+				SrcAddrs:      expand(where+": source", ruleAddrs, r.SrcAddrs),
+				DstAddrs:      expand(where+": destination", ruleAddrs, r.DstAddrs),
 				Services:      expandServices(where+": services", r.Services),
 				Action:        r.Action,
 				Log:           r.Log,

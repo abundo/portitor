@@ -43,11 +43,14 @@ export const dnsTemplates = crud('/dns/templates')
 export const dnsSoaTemplates = crud('/dns/soa-templates')
 export const dnsDnssecPolicies = crud('/dns/dnssec-policies')
 export const addressObjects = crud('/objects')
+// Address lists: addresses, prefixes and names of hosts and other lists.
+export const addressLists = crud('/address-lists')
 export const dyndnsClients = crud('/dyndns/clients')
 export const dyndnsRecords = crud('/dyndns/records')
 export const certificates = crud('/certificates')
 export const ipLists = crud('/ip-lists')
-// Folders of hosts (kind hosts) and IP lists (kind ip_lists), for the GUI only.
+// Folders of hosts (kind hosts), address lists (kind address_lists) and IP
+// lists (kind ip_lists), for the GUI only.
 export const objectFolders = crud('/object-folders')
 export const tasks = crud('/tasks')
 // Custom services: protocol matches rules name next to the predefined ones.

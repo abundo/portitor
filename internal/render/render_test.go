@@ -93,6 +93,11 @@ func TestNftablesMain(t *testing.T) {
 		`iifname "eth0" ip saddr @drop_v4 counter drop comment "rule 12: blocklists"`,
 		`iifname "eth0" ip6 saddr @crowdsec_v6 counter drop comment "rule 12: blocklists"`,
 		`oifname "eth0" ip daddr @drop_v4 counter jump reject_pkt comment "rule 13"`,
+		"\tset A_admins_v4 {\n\t\ttype ipv4_addr\n\t\tflags interval\n\t\tauto-merge\n\t\telements = { 192.168.1.20, 192.168.1.21 }\n\t}\n",
+		"\tset A_admins_v6 {\n\t\ttype ipv6_addr\n\t\tflags interval\n\t\tauto-merge\n\t\telements = { fd00:1::20 }\n\t}\n",
+		"\tset A_servers_v6 {\n\t\ttype ipv6_addr\n\t\tflags interval\n\t\tauto-merge\n\t}\n",
+		`iifname "eth1" ip saddr @A_admins_v4 ip daddr @A_servers_v4 counter accept comment "rule `,
+		`iifname "eth1" ip saddr 192.168.1.99 ip daddr @A_servers_v4 counter accept comment "rule `,
 		"type filter hook output priority filter; policy drop;",
 		`counter accept comment "rule 14: allow all output"`,
 		"}\ninclude \"/var/lib/portitor/iplists/crowdsec.nft\"\ninclude \"/var/lib/portitor/iplists/drop.nft\"\n",
@@ -101,7 +106,7 @@ func TestNftablesMain(t *testing.T) {
 			t.Errorf("missing:\n  %s\nin:\n%s", want, nft)
 		}
 	}
-	for _, unwanted := range []string{"ip6 saddr 198.51.100.0/24", "@drop_v6 counter jump"} {
+	for _, unwanted := range []string{"ip6 saddr 198.51.100.0/24", "@drop_v6 counter jump", "@A_servers_v6 counter"} {
 		if strings.Contains(nft, unwanted) {
 			t.Errorf("unexpected %q in:\n%s", unwanted, nft)
 		}

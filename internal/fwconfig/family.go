@@ -37,12 +37,15 @@ func MatchFamilies(family, proto string, src, dst []string) []FamilyMatch {
 	return out
 }
 
-// filterFamily keeps the entries of one IP version. IP list references
-// stay in both: a list may hold either.
+// filterFamily keeps the entries of one IP version. IP list and address
+// set references stay in both: a list may hold either (the renderer leaves
+// out an address set's empty version).
 func filterFamily(list []string, fam string) []string {
 	var out []string
 	for _, a := range list {
 		if _, ok := IPListName(a); ok {
+			out = append(out, a)
+		} else if _, ok := AddressSetName(a); ok {
 			out = append(out, a)
 		} else if p, err := ParseAddrOrPrefix(a); err == nil && p.Addr().Is4() == (fam == "ipv4") {
 			out = append(out, a)

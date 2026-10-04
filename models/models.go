@@ -551,8 +551,22 @@ type AddressObject struct {
 	FolderID    *uint      `json:"folder_id"`
 }
 
-// ObjectFolder is a folder in the GUI for hosts (AddressObject.FolderID)
-// or IP lists (IpList.FolderID), by Kind. Folders nest (ParentID, nil at
+// AddressList is a named list of addresses, prefixes and the names of
+// hosts (AddressObject) or other address lists, which it holds as they
+// change. Its name is unique among hosts and address lists together, so
+// address fields refer to either by plain name. A filter rule using one
+// matches it as an nftables set; anywhere else it is expanded.
+type AddressList struct {
+	Base
+	Name        string     `gorm:"uniqueIndex" json:"name"`
+	Entries     StringList `json:"entries"`
+	Description string     `json:"description"`
+	FolderID    *uint      `json:"folder_id"`
+}
+
+// ObjectFolder is a folder in the GUI for hosts (AddressObject.FolderID),
+// address lists (AddressList.FolderID) or IP lists (IpList.FolderID), by
+// Kind. Folders nest (ParentID, nil at
 // the top) and mean nothing to the firewall.
 type ObjectFolder struct {
 	Base
@@ -563,8 +577,9 @@ type ObjectFolder struct {
 
 // Kinds of ObjectFolder.
 const (
-	ObjectFolderHosts   = "hosts"
-	ObjectFolderIpLists = "ip_lists"
+	ObjectFolderHosts        = "hosts"
+	ObjectFolderAddressLists = "address_lists"
+	ObjectFolderIpLists      = "ip_lists"
 )
 
 // Service is a named protocol match that rules refer to by name, next to
@@ -831,6 +846,6 @@ func All() []any {
 		&AddressObject{}, &DnsSoaTemplate{}, &DnsDnssecPolicy{}, &DnsTemplate{}, &KnownInterface{},
 		&DyndnsClient{}, &DyndnsRecord{}, &Certificate{}, &IpList{}, &Task{}, &Service{}, &RateLimit{}, &ObjectFolder{}, &Role{}, &RoleMember{}, &RoleInstance{},
 		&RoutePrefixList{}, &RouteAsPathList{}, &RouteCommunityList{}, &RouteMap{}, &BgpConfig{}, &BgpPeerGroup{}, &BgpNeighbor{},
-		&OspfConfig{}, &OspfInterface{}, &VrrpRouter{}, &BfdInterface{},
+		&OspfConfig{}, &OspfInterface{}, &VrrpRouter{}, &BfdInterface{}, &AddressList{},
 	}
 }
