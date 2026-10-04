@@ -19,12 +19,12 @@ const router = useRouter()
 const { store, ifaceNames, ifaceText } = useInstanceRefs()
 
 const tabs = [
-  { label: 'Virtual routers', value: 'routers', slot: 'routers', icon: 'i-lucide-git-fork' },
   { label: 'VRRP info', value: 'info', slot: 'info', icon: 'i-lucide-info' },
+  { label: 'Virtual routers', value: 'routers', slot: 'routers', icon: 'i-lucide-git-fork' },
 ]
 const tab = computed({
-  get: () => (tabs.some((t) => t.value === route.query.tab) ? route.query.tab : 'routers'),
-  set: (v) => router.replace({ query: { ...route.query, tab: v === 'routers' ? undefined : v } }),
+  get: () => (tabs.some((t) => t.value === route.query.tab) ? route.query.tab : 'info'),
+  set: (v) => router.replace({ query: { ...route.query, tab: v === 'info' ? undefined : v } }),
 })
 
 // ----- Info: loaded, and refreshed every 5 s, while its tab is open.

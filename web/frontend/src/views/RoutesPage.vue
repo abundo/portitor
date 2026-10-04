@@ -19,13 +19,13 @@ const router = useRouter()
 const { store, ifaceItems, ifaceName, ifaceText } = useInstanceRefs()
 
 const tabs = [
-  { label: 'Routes', value: 'routes', slot: 'routes', icon: 'i-lucide-route' },
   { label: 'Routing info', value: 'info', slot: 'info', icon: 'i-lucide-info' },
+  { label: 'Routes', value: 'routes', slot: 'routes', icon: 'i-lucide-route' },
 ]
-// The tab is in the URL (?tab=info), so links can open one.
+// The tab is in the URL (?tab=routes), so links can open one.
 const tab = computed({
-  get: () => (tabs.some((t) => t.value === route.query.tab) ? route.query.tab : 'routes'),
-  set: (v) => router.replace({ query: { ...route.query, tab: v === 'routes' ? undefined : v } }),
+  get: () => (tabs.some((t) => t.value === route.query.tab) ? route.query.tab : 'info'),
+  set: (v) => router.replace({ query: { ...route.query, tab: v === 'info' ? undefined : v } }),
 })
 
 // Routing info: loaded, and refreshed every 10 s, while its tab is open.

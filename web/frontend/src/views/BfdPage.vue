@@ -21,13 +21,12 @@ const router = useRouter()
 const { store, ifaceNames, ifaceText } = useInstanceRefs()
 
 const tabs = [
-  { label: 'Interfaces', value: 'interfaces', slot: 'interfaces', icon: 'i-lucide-heart-pulse' },
   { label: 'BFD info', value: 'info', slot: 'info', icon: 'i-lucide-info' },
+  { label: 'Interfaces', value: 'interfaces', slot: 'interfaces', icon: 'i-lucide-heart-pulse' },
 ]
 const tab = computed({
-  get: () => (tabs.some((t) => t.value === route.query.tab) ? route.query.tab : 'interfaces'),
-  set: (v) =>
-    router.replace({ query: { ...route.query, tab: v === 'interfaces' ? undefined : v } }),
+  get: () => (tabs.some((t) => t.value === route.query.tab) ? route.query.tab : 'info'),
+  set: (v) => router.replace({ query: { ...route.query, tab: v === 'info' ? undefined : v } }),
 })
 
 // ----- Info: loaded, and refreshed every 5 s, while its tab is open.
