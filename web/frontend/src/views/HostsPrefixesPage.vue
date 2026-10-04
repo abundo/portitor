@@ -80,13 +80,39 @@ async function loadFolders() {
 const clientLeases = ref([])
 async function loadTree() {
   if (!store.currentId) return
-  const [t, leases] = await Promise.all([
+  const [t, leases, auto] = await Promise.all([
     api.ipamTree(store.currentId),
     api.agentLeases().catch(() => null),
+    api.autoRules(store.currentId).catch(() => []),
   ])
   tree.value = t
   clientLeases.value = leases?.client ?? []
+  autoRules.value = auto
 }
+
+// The sources of the auto input rules of BGP (its neighbours, TCP 179) and
+// OSPF (OSPFv2's networks): nftables sets of their own (AutoRule.SourceSet,
+// render.AutoSetName), shown read-only among the address lists. They come
+// from the current configuration and are not rows: rules can't name them.
+const autoRules = ref([])
+const autoListDescriptions = {
+  bgp_neighbours: 'BGP neighbours, allowed to TCP port 179',
+  ospf_networks: 'OSPFv2 networks, allowed to send OSPF',
+  ospf6_networks: 'OSPFv3 networks, allowed to send OSPF',
+}
+const autoLists = computed(() => {
+  const out = []
+  for (const r of autoRules.value) {
+    if (!r.source_set || !r.source?.length) continue
+    out.push({
+      name: r.source_set,
+      description: autoListDescriptions[r.source_set] ?? '',
+      entries: [...r.source],
+      auto: true,
+    })
+  }
+  return out
+})
 
 // IPv4 prefix arithmetic, for placing the DHCP leases in the tree.
 const v4num = (a) => a.split('.').reduce((n, o) => n * 256 + Number(o), 0)
@@ -364,6 +390,22 @@ function addrListNode(l) {
   }
 }
 
+function autoListNode(l) {
+  return {
+    key: `auto_lists:${l.name}`,
+    title: l.name,
+    icon: icon('lock'),
+    cells: {
+      description: esc(l.description),
+      details: `<span class="font-mono text-xs">${esc(l.entries.join(', '))}</span>`,
+      status:
+        badge('auto', 'info', 'From the configuration; read-only') +
+        badge(`${l.entries.length} entries`, 'neutral'),
+    },
+    item: { type: 'autolist', obj: l },
+  }
+}
+
 function listStatus(l) {
   const s = states.value[l.name]
   if (!s) return muted('not deployed', 'text-xs')
@@ -500,6 +542,15 @@ const treeSource = computed(() => {
     (l) => valuesText(l.name, l.description, l.entries),
     addrListNode,
   )
+  addrListChildren.push(
+    ...autoLists.value
+      .filter(
+        (l) =>
+          !searching.value ||
+          matchesWords(valuesText(l.name, l.description, l.entries, 'auto'), words.value),
+      )
+      .map(autoListNode),
+  )
   const listChildren = folderNodes(
     'ip_lists',
     lists.value,
@@ -530,7 +581,7 @@ const treeSource = computed(() => {
       'group:addrlists',
       'Address lists',
       'list',
-      addrLists.value.length,
+      addrLists.value.length + autoLists.value.length,
       'Addresses, prefixes and hosts by name; an nftables set in rules',
       addrListChildren.length
         ? addrListChildren
@@ -575,6 +626,7 @@ function onOpen(data) {
   if (r?.type === 'folder') folderDialog.value.edit(r.obj)
   else if (r?.type === 'host') hostDialog.value.edit(r.obj)
   else if (r?.type === 'addrlist') addrListDialog.value.edit(r.obj)
+  else if (r?.type === 'autolist') addrListDialog.value.edit(r.obj, { readonly: true })
   else if (r?.type === 'list') listDialog.value.edit(r.obj)
   else if (r?.type === 'ipam') onEdit(r.obj)
 }

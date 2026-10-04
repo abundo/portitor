@@ -193,7 +193,7 @@ func TestNftablesGuestHasNoLockout(t *testing.T) {
 	if strings.Contains(nft, "anti-lockout") {
 		t.Error("anti-lockout belongs to the default instance only")
 	}
-	if strings.Contains(nft, "set ") || strings.Contains(nft, "include") {
+	if strings.Contains(strings.ReplaceAll(nft, "set AUTO_", ""), "set ") || strings.Contains(nft, "include") {
 		t.Error("the guest rules use no IP lists")
 	}
 	if !strings.Contains(nft, `oifname "lk-main" ip daddr 192.168.0.0/16 counter jump reject_pkt`) {

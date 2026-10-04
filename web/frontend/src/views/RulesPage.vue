@@ -87,7 +87,7 @@ function lockedRow(chain, a) {
     match: autoService(a),
     in_interfaces: a.in_interfaces ?? [],
     family: family === 'any' ? 'any' : family.toLowerCase(),
-    src_addrs: a.source ?? [],
+    src_addrs: a.source_set ? [a.source_set] : (a.source ?? []),
     action: 'accept',
     log: (store.current?.log_auto ?? []).includes(a.service),
     description: `auto: ${autoDescription(a)}`,

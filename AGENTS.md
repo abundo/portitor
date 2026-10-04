@@ -106,7 +106,8 @@ docs and user-facing messages.
 - **Rule order in a chain:** established/related, invalid drop, loopback and
   essential ICMP, anti-lockout and the services' auto accepts
   (`render.AutoInputRules`; BGP's from its neighbours' addresses only, OSPF's on its
-  non-passive interfaces), then the user's rules; in forward, the accept of port
+  non-passive interfaces; their sources are sets `render.AutoSetName`, which Hosts &
+  prefixes lists read-only), then the user's rules; in forward, the accept of port
   forwards (`ct status dnat`) comes after the user's rules, so a rule can drop what a
   DNAT would let in; then the policy. The input auto accepts stay first so a rule
   that closes an interface to the firewall keeps the DHCP and DNS enabled on it.

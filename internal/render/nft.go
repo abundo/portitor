@@ -93,6 +93,10 @@ func Nftables(in *fwconfig.Instance, lockout *AntiLockout, paths Paths) string {
 		}
 	}
 
+	for _, r := range AutoInputRules(in) {
+		writeAutoSet(b, r)
+	}
+
 	if slices.ContainsFunc(in.Certificates, func(c fwconfig.Certificate) bool { return !c.Imported() }) {
 		fmt.Fprintf(b, "\tset %s {\n\t\ttype inet_service\n\t}\n\n", ACMEHTTPSet)
 	}
@@ -206,11 +210,11 @@ func Nftables(in *fwconfig.Instance, lockout *AntiLockout, paths Paths) string {
 	if addrs := BGPNeighborAddrs(in); len(addrs) > 0 {
 		v4, v6 := splitFamilies(addrs)
 		for _, m := range []struct {
-			key   string
-			addrs []string
-		}{{"ip", v4}, {"ip6", v6}} {
+			key, fam string
+			addrs    []string
+		}{{"ip", "ipv4", v4}, {"ip6", "ipv6", v6}} {
 			if len(m.addrs) > 0 {
-				fmt.Fprintf(b, "\t\t%s daddr %s tcp dport 179 accept %s\n", m.key, set(m.addrs), comment("auto", BGPService))
+				fmt.Fprintf(b, "\t\t%s daddr @%s tcp dport 179 accept %s\n", m.key, AutoSetName(BGPNeighborsSet, m.fam), comment("auto", BGPService))
 			}
 		}
 	}
@@ -505,8 +509,12 @@ type AutoRule struct {
 	SrcPort      int      `json:"src_port,omitempty"`
 	DstPort      int      `json:"dst_port"`
 	// Source limits the source addresses: the anti-lockout rule's
-	// (AntiLockout.Rule, rendered on its own) and the BGP neighbours'.
+	// (AntiLockout.Rule, rendered on its own), the BGP neighbours' and
+	// OSPFv2's networks, which Hosts & prefixes lists read-only.
 	Source []string `json:"source,omitempty"`
+	// SourceSet, with Source, names the sets the rule matches Source by
+	// (AutoSetName); Hosts & prefixes shows it as a read-only address list.
+	SourceSet string `json:"source_set,omitempty"`
 	// PortSet, when set, matches the destination port by this set instead
 	// of DstPort: the rule opens DstPort only while the agent puts it in
 	// the set (ACMEHTTPSet).
@@ -583,19 +591,20 @@ func AutoInputRules(in *fwconfig.Instance) []AutoRule {
 	}
 	// BGP sessions from the neighbours; the ones FRR opens are replies.
 	if addrs := BGPNeighborAddrs(in); len(addrs) > 0 {
-		out = append(out, AutoRule{Service: BGPService, Protocol: "tcp", DstPort: 179, Source: addrs})
+		out = append(out, AutoRule{Service: BGPService, Protocol: "tcp", DstPort: 179, Source: addrs, SourceSet: BGPNeighborsSet})
 	}
 	// OSPF on its interfaces, and (OSPFv2) from its networks.
 	for _, o := range []struct {
 		version int
 		service string
-	}{{2, OSPFService}, {3, OSPF6Service}} {
+		set     string
+	}{{2, OSPFService, "ospf_networks"}, {3, OSPF6Service, "ospf6_networks"}} {
 		ifs, nets := OSPFActive(in, o.version)
 		if len(ifs) > 0 {
 			out = append(out, AutoRule{Service: o.service, InInterfaces: ifs, Protocol: o.service})
 		}
 		if len(nets) > 0 {
-			out = append(out, AutoRule{Service: o.service, Protocol: o.service, Source: nets})
+			out = append(out, AutoRule{Service: o.service, Protocol: o.service, Source: nets, SourceSet: o.set})
 		}
 	}
 	// VRRP advertisements on the interfaces with virtual routers.
@@ -672,8 +681,39 @@ func OSPFOutputMatches(in *fwconfig.Instance) []OSPFOutput {
 	return out
 }
 
+// BGPNeighborsSet is the auto set of the BGP neighbours' addresses.
+const BGPNeighborsSet = "bgp_neighbours"
+
+// AutoSetName is the nftables set holding one IP version of an auto rule's
+// sources: "AUTO_" and the name. Never an IP list's set (IPListKey: lower
+// case) or an address set's (AddressSetName: "A_" or "A" and hex).
+func AutoSetName(name, family string) string {
+	if family == "ipv6" {
+		return "AUTO_" + name + "_v6"
+	}
+	return "AUTO_" + name + "_v4"
+}
+
+// writeAutoSet declares the sets of an auto rule's sources, one per IP
+// version it has addresses of.
+func writeAutoSet(b *strings.Builder, r AutoRule) {
+	if r.SourceSet == "" {
+		return
+	}
+	v4, v6 := splitFamilies(r.Source)
+	for _, m := range []struct {
+		fam   string
+		addrs []string
+	}{{"ipv4", v4}, {"ipv6", v6}} {
+		if len(m.addrs) > 0 {
+			fmt.Fprintf(b, "\tset %s {\n\t\ttype %s_addr\n\t\tflags interval\n\t\tauto-merge\n\t\telements = { %s }\n\t}\n\n",
+				AutoSetName(r.SourceSet, m.fam), m.fam, strings.Trim(set(m.addrs), "{ }"))
+		}
+	}
+}
+
 // matches renders an auto rule's matches: one, or with Source one per IP
-// version of its addresses.
+// version of its addresses, by its set if it has one.
 func (r AutoRule) matches() []string {
 	if len(r.Source) == 0 {
 		return []string{r.match()}
@@ -681,11 +721,15 @@ func (r AutoRule) matches() []string {
 	var out []string
 	v4, v6 := splitFamilies(r.Source)
 	for _, m := range []struct {
-		key   string
-		addrs []string
-	}{{"ip", v4}, {"ip6", v6}} {
+		key, fam string
+		addrs    []string
+	}{{"ip", "ipv4", v4}, {"ip6", "ipv6", v6}} {
 		if len(m.addrs) > 0 {
-			out = append(out, fmt.Sprintf("%s saddr %s %s", m.key, set(m.addrs), r.match()))
+			src := set(m.addrs)
+			if r.SourceSet != "" {
+				src = "@" + AutoSetName(r.SourceSet, m.fam)
+			}
+			out = append(out, fmt.Sprintf("%s saddr %s %s", m.key, src, r.match()))
 		}
 	}
 	return out

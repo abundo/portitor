@@ -807,7 +807,10 @@ function onKeydown(event, index) {
               </td>
               <td v-if="hasTo"><span class="text-muted">any</span></td>
               <td :title="a.source?.join(', ')">
-                <span v-if="a.source?.length" class="font-mono">{{ a.source.join(', ') }}</span>
+                <span v-if="a.source_set" class="font-mono">{{ a.source_set }}</span>
+                <span v-else-if="a.source?.length" class="font-mono">{{
+                  a.source.join(', ')
+                }}</span>
                 <span v-else class="text-muted">any</span>
               </td>
               <td><span class="text-muted">any</span></td>

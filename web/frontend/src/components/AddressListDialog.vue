@@ -26,9 +26,13 @@ const open = ref(false)
 const saving = ref(false)
 const form = reactive({})
 const guard = useFormGuard(form, open)
+// An auto list (BGP's or OSPF's auto rule sources) is shown read-only.
+const readonly = ref(false)
+const canEdit = computed(() => auth.isAdmin && !readonly.value)
 const folderItems = computed(() => folderOptions(props.folders, 'address_lists'))
 
-function edit(src = {}) {
+function edit(src = {}, opts = {}) {
+  readonly.value = !!opts.readonly
   Object.keys(form).forEach((k) => delete form[k])
   Object.assign(form, { name: '', entries: [], description: '' }, structuredClone(toRaw(src)))
   form.folder_id ??= 0
@@ -66,14 +70,14 @@ defineExpose({ edit })
 <template>
   <UModal
     :open="open"
-    :title="!auth.isAdmin ? 'Address list' : form.id ? 'Edit address list' : 'New address list'"
+    :title="!canEdit ? 'Address list' : form.id ? 'Edit address list' : 'New address list'"
     :ui="wideModal"
     :dismissible="false"
     @update:open="guard.onUpdateOpen"
   >
     <template #body>
       <form id="addrlist-form" @submit.prevent="save">
-        <fieldset :disabled="!auth.isAdmin" class="space-y-3">
+        <fieldset :disabled="!canEdit" class="space-y-3">
           <UFormField :ui="inlineField" label="Name" required>
             <UInput v-model="form.name" class="w-full" placeholder="servers" required />
           </UFormField>
@@ -85,23 +89,26 @@ defineExpose({ edit })
             <AddrInput
               v-model="form.entries"
               multiple
-              :disabled="!auth.isAdmin"
+              :disabled="!canEdit"
               placeholder="nas, 192.168.10.0/24, fd00:1::10"
             />
           </UFormField>
           <UFormField :ui="inlineField" label="Description">
             <UInput v-model="form.description" class="w-full" />
           </UFormField>
-          <UFormField :ui="inlineField" label="Folder">
+          <UFormField v-if="!readonly" :ui="inlineField" label="Folder">
             <USelect v-model="form.folder_id" :items="folderItems" class="w-full" />
           </UFormField>
+          <p v-if="readonly" class="text-sm text-muted">
+            Made from the configuration for an auto input rule; it changes with it.
+          </p>
         </fieldset>
       </form>
     </template>
     <template #footer>
       <div class="flex w-full gap-2">
         <UButton
-          v-if="form.id && auth.isAdmin"
+          v-if="form.id && canEdit"
           color="error"
           variant="ghost"
           icon="i-lucide-trash"
@@ -109,11 +116,9 @@ defineExpose({ edit })
           @click="remove"
         />
         <UButton class="ms-auto" color="neutral" variant="ghost" @click="guard.close">{{
-          auth.isAdmin ? 'Cancel' : 'Close'
+          canEdit ? 'Cancel' : 'Close'
         }}</UButton>
-        <UButton v-if="auth.isAdmin" type="submit" form="addrlist-form" :loading="saving"
-          >Save</UButton
-        >
+        <UButton v-if="canEdit" type="submit" form="addrlist-form" :loading="saving">Save</UButton>
       </div>
     </template>
   </UModal>

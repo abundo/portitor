@@ -167,10 +167,12 @@ func TestFRRRouteMapSets(t *testing.T) {
 func TestBGPAutoRules(t *testing.T) {
 	nft := mustFile(t, sampleBundle(t), "/etc/portitor/instances/guest/nftables.nft")
 	for _, want := range []string{
-		`ip saddr 10.255.0.1 tcp dport 179 accept comment "auto: bgp"`,
-		`ip6 saddr 2001:db8::1 tcp dport 179 accept comment "auto: bgp"`,
-		`ip daddr 10.255.0.1 tcp dport 179 accept comment "auto: bgp"`,
-		`ip6 daddr 2001:db8::1 tcp dport 179 accept comment "auto: bgp"`,
+		"set AUTO_bgp_neighbours_v4 {\n\t\ttype ipv4_addr\n\t\tflags interval\n\t\tauto-merge\n\t\telements = { 10.255.0.1 }\n\t}",
+		"set AUTO_bgp_neighbours_v6 {\n\t\ttype ipv6_addr\n\t\tflags interval\n\t\tauto-merge\n\t\telements = { 2001:db8::1 }\n\t}",
+		`ip saddr @AUTO_bgp_neighbours_v4 tcp dport 179 accept comment "auto: bgp"`,
+		`ip6 saddr @AUTO_bgp_neighbours_v6 tcp dport 179 accept comment "auto: bgp"`,
+		`ip daddr @AUTO_bgp_neighbours_v4 tcp dport 179 accept comment "auto: bgp"`,
+		`ip6 daddr @AUTO_bgp_neighbours_v6 tcp dport 179 accept comment "auto: bgp"`,
 	} {
 		if !strings.Contains(nft, want) {
 			t.Errorf("ruleset lacks %q", want)
@@ -271,7 +273,7 @@ func TestOSPFAutoRules(t *testing.T) {
 			rules = append(rules, r.matches()...)
 		}
 	}
-	if len(rules) != 1 || rules[0] != "ip saddr 10.255.0.0/30 meta nfproto ipv4 meta l4proto 89" {
+	if len(rules) != 1 || rules[0] != "ip saddr @AUTO_ospf_networks_v4 meta nfproto ipv4 meta l4proto 89" {
 		t.Errorf("input: %q", rules)
 	}
 	out := OSPFOutputMatches(in)
