@@ -24,6 +24,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
+	"github.com/abundo/portitor/internal/buildinfo"
 	"github.com/abundo/portitor/internal/dbmigrate"
 	"github.com/abundo/portitor/models"
 )
@@ -67,7 +68,11 @@ func (s *Server) handleBackup(c *echo.Context) error {
 	if err := encryptBackup(&out, snap, req.Passphrase); err != nil {
 		return err
 	}
-	name := "portitor-" + time.Now().Format("20060102-150405") + ".db.age"
+	ver := buildinfo.Version
+	if ver != "dev" && !strings.HasPrefix(ver, "v") {
+		ver = "v" + ver
+	}
+	name := "portitor-" + ver + "-" + time.Now().Format("20060102-150405") + ".db.age"
 	c.Response().Header().Set(echo.HeaderContentDisposition, `attachment; filename="`+name+`"`)
 	slog.Info("backup downloaded", "user", currentUser(c).Username, "bytes", out.Len())
 	return c.Stream(http.StatusOK, "application/octet-stream", &out)
