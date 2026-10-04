@@ -10,9 +10,12 @@ Portitor is a web GUI for a Linux nftables firewall, aimed mainly at home and sm
 office networks. It manages:
 
 - firewall rules (input, forward, output) with named services, hosts and prefixes,
-  interface zones and per-rule connection counters; NAT: masquerade, SNAT and port
-  forwards with hairpin NAT
-- a DNS server (BIND) and a DHCP server (Kea, DHCPv4 and DHCPv6) with router
+  address lists, interface zones and per-rule connection counters; NAT: masquerade,
+  SNAT and port forwards with hairpin NAT; an existing nftables ruleset imported, a
+  virtual firewall's ruleset exported
+- rate limits (police or shape) and traffic shaping per interface (CAKE)
+- a DNS server (BIND 9 stable from ISC's Debian repository; zones with DNSSEC,
+  forward-only zones) and a DHCP server (Kea, DHCPv4 and DHCPv6) with router
   advertisements
 - WireGuard tunnels, for road warriors and site-to-site; client configs generated,
   wg-quick files imported
@@ -21,7 +24,7 @@ office networks. It manages:
 - DNS update: DNS records follow the WAN addresses, on your own nameserver (RFC 2136, TSIG)
   or at a DNS hosting provider (Cloudflare, Hetzner, deSEC, Loopia, GleSYS and more, via libdns)
 - certificates: Let's Encrypt (ACME, HTTP-01) certificates, renewed automatically; port 80
-  opens only while a challenge is answered
+  opens only while a challenge is answered; or a certificate imported with its key
 - IP lists: CrowdSec decisions or downloaded blocklists, used as `@name` in rules
 - BGP (FRR, off by default): neighbours and peer groups, networks, aggregates and
   redistribution, filtered with prefix lists, AS path and community lists and route maps

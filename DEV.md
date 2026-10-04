@@ -110,9 +110,33 @@ module loaded on the host for `wg0`.
 
 ### Releases and install.py
 
-Before tagging: `make test`, `make lint`, `make fmt` leave nothing to commit, and
-`go run golang.org/x/vuln/cmd/govulncheck@latest ./...` reports nothing your code
-calls. For a vulnerability in the standard library, raise `toolchain` in go.mod.
+#### Release checklist
+
+1. **Checks:** `make test`, `make lint` and `make fmt` pass and leave nothing to
+   commit; `go run golang.org/x/vuln/cmd/govulncheck@latest ./...` reports nothing
+   our code calls (for the standard library, raise `toolchain` in go.mod);
+   `cd web/frontend && npm audit --omit=dev`.
+2. **Docs:** `git log --oneline <last tag>..` against README's feature list,
+   `docs/*.md` (bundled into the GUI's Help) and AGENTS.md's layout and invariants.
+3. **Installer:** if `install.py`, `deploy/` or the packages changed since the last
+   tag (`git diff <last tag> -- install.py deploy/ iso/`), `INSTALLER_VERSION` is
+   bumped once for the release; a new Debian package is in `AGENT_PACKAGES` and
+   `iso/preseed.cfg`; a new path named or Kea uses is in `deploy/apparmor/`.
+4. **Lab** (a real apply as root): `make lab-clean lab-up lab-seed lab-deploy`, then
+   in the GUI deploy a change and let it roll back, deploy and confirm, and check
+   with `dev/lab/lab.sh client` that a LAN host gets a lease, resolves names and
+   reaches the WAN. Try what changed in this release (BGP/OSPF/VRRP/BFD state
+   pages, shaping, nftables import, packet capture, traceroute, console).
+5. **Upgrade path:** install the previous release in the lab
+   (`./install.py --install <last tag>`), deploy, then update with `--source`:
+   migrations run on a populated database, the agent accepts the old document,
+   and a deploy afterwards renders nothing unexpected (Preview).
+6. **ISO:** `make iso-e2e` (20-40 minutes) installs a test ISO in a VM and checks
+   the first-boot setup, the units and the GUI's reach to the agent.
+7. **Backup:** download a backup and restore it.
+8. **Tag:** `git tag -s vX.Y.Z && git push origin vX.Y.Z`; follow the release
+   workflow, then check the release has both archives, the checksums and the ISO,
+   and that *Admin → Updates* on an installed box lists and installs it.
 
 Pushing a tag `v*` runs `.github/workflows/release.yml`: tests, then GoReleaser
 (`.goreleaser.yaml`) publishes `portitor_<version>_linux_{amd64,arm64}.tar.gz` (both
@@ -147,7 +171,10 @@ boot menus (`grub.cfg` for UEFI, `isolinux.cfg` for BIOS), and `/portitor` with 
 release archive, `late.sh`/`target.sh` (run at the end of the installation) and the
 first-boot setup `portitor-setup.py`. See [docs/appliance.md](docs/appliance.md).
 
-To try it end to end without any typing:
+`make iso-e2e` (`iso/test.sh`) does it all and checks the result: builds a test
+ISO, installs and boots it, then checks through the QEMU guest agent and the GUI that
+the setup finished, the units run, the LAN address is set and the admin can log in
+and reach the agent (logs in `build/vm/`, `KEEP=1` leaves the VM running). By hand:
 
 ```sh
 iso/build.sh --test
