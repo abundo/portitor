@@ -11,7 +11,7 @@ import { useRoute, useRouter } from 'vue-router'
 import CrudPage from '@/components/CrudPage.vue'
 import NeedInstance from '@/components/NeedInstance.vue'
 import SearchInput from '@/components/SearchInput.vue'
-import { api, bfdInterfaces } from '@/api'
+import { api, bfdInterfaces, bgpNeighbors, bgpPeerGroups, ospfInterfaces, routes } from '@/api'
 import { errMsg } from '@/api/http'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
 import { useSearch, valuesText } from '@/utils/search'
@@ -34,10 +34,23 @@ const tab = computed({
 const status = ref(null)
 const statusError = ref('')
 const loading = ref(false)
+// What asks for BFD: static routes, BGP neighbours (or their peer group) and
+// OSPF interfaces with it on, loaded with the sessions.
+const users = ref({ routes: [], neighbors: [], groups: [], ospf: [] })
+async function loadUsers() {
+  const params = { instance_id: store.currentId }
+  const [r, n, g, o] = await Promise.all([
+    routes.list(params),
+    bgpNeighbors.list(params),
+    bgpPeerGroups.list(params),
+    ospfInterfaces.list(params),
+  ])
+  users.value = { routes: r, neighbors: n, groups: g, ospf: o }
+}
 async function loadStatus() {
   loading.value = true
   try {
-    status.value = await api.agentBfd()
+    ;[status.value] = await Promise.all([api.agentBfd(), loadUsers()])
     statusError.value = ''
   } catch (err) {
     statusError.value = errMsg(err)
@@ -64,8 +77,36 @@ const mine = computed(() =>
   status.value?.instances?.find((i) => i.instance === store.current?.name),
 )
 const peers = computed(() => mine.value?.peers ?? [])
+// usedBy lists the protocols a session serves: a static route by its
+// gateway, a BGP neighbour by its address, OSPF by the session's interface
+// (OSPFv2 for an IPv4 peer, OSPFv3 for IPv6).
+const sameAddr = (a, b) => !!a && !!b && a.toLowerCase() === b.toLowerCase()
+function usedBy(p) {
+  const u = users.value
+  const out = []
+  if (u.routes.some((r) => r.enabled && r.bfd && sameAddr(r.gateway, p.peer))) out.push('Static')
+  const groupBfd = new Set(u.groups.filter((g) => g.bfd).map((g) => g.name))
+  if (
+    u.neighbors.some(
+      (n) => n.enabled && (n.bfd || groupBfd.has(n.peer_group)) && sameAddr(n.address, p.peer),
+    )
+  )
+    out.push('BGP')
+  const version = p.peer?.includes(':') ? 3 : 2
+  if (u.ospf.some((o) => o.bfd && o.version === version && o.name === p.interface))
+    out.push(version === 3 ? 'OSPFv3' : 'OSPF')
+  return out
+}
 const info = useSearch(peers, (p) =>
-  valuesText(ifaceText(p.interface), p.peer, p.local, p.status, p.diagnostic, p.profile),
+  valuesText(
+    ifaceText(p.interface),
+    p.peer,
+    p.local,
+    p.status,
+    p.diagnostic,
+    p.profile,
+    ...usedBy(p),
+  ),
 )
 const statusColor = (s) => (s === 'up' ? 'success' : s === 'down' ? 'error' : 'warning')
 function duration(s) {
@@ -82,6 +123,7 @@ const infoColumns = [
   { accessorKey: 'peer', header: 'Peer' },
   { accessorKey: 'local', header: 'Local address' },
   { id: 'status', header: 'Status' },
+  { id: 'used_by', header: 'Used by' },
   { id: 'time', header: 'Up / down for' },
   { id: 'local_timers', header: 'Rx / tx (ms) × multiplier' },
   { id: 'remote_timers', header: 'Peer rx / tx (ms) × multiplier' },
@@ -169,7 +211,7 @@ const defaults = {
               <div class="text-lg font-semibold">BFD info</div>
               <p class="max-w-3xl text-sm text-muted">
                 The BFD sessions of this virtual firewall as FRR has them: one per neighbour or
-                gateway that uses BFD.
+                gateway that uses BFD, with the protocols (static routes, BGP, OSPF) that use it.
               </p>
             </div>
             <UButton
@@ -203,6 +245,17 @@ const defaults = {
                 variant="subtle"
                 :label="row.original.status"
               />
+            </template>
+            <template #used_by-cell="{ row }">
+              <div class="flex flex-wrap gap-1">
+                <UBadge
+                  v-for="u in usedBy(row.original)"
+                  :key="u"
+                  color="neutral"
+                  variant="outline"
+                  :label="u"
+                />
+              </div>
             </template>
             <template #time-cell="{ row }">
               {{
