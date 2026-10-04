@@ -149,6 +149,8 @@ export const api = {
   agentNeighbours: () => http.get('/agent/neighbours').then((r) => r.data),
   agentRoutingTable: () => http.get('/agent/routing-table').then((r) => r.data),
   agentBgp: () => http.get('/agent/bgp').then((r) => r.data),
+  agentBgpRoutes: (instance, neighbor) =>
+    http.get('/agent/bgp/routes', { params: { instance, neighbor } }).then((r) => r.data),
   agentOspf: () => http.get('/agent/ospf').then((r) => r.data),
   agentVrrp: () => http.get('/agent/vrrp').then((r) => r.data),
   agentBfd: () => http.get('/agent/bfd').then((r) => r.data),

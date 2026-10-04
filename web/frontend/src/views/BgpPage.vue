@@ -8,6 +8,7 @@
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useToast } from '@nuxt/ui/composables'
+import BgpNeighborRoutes from '@/components/BgpNeighborRoutes.vue'
 import BgpPeerTable from '@/components/BgpPeerTable.vue'
 import EntriesEditor from '@/components/EntriesEditor.vue'
 import NameSelect from '@/components/NameSelect.vue'
@@ -117,6 +118,7 @@ const peerSections = computed(() => {
 const stateColor = (s) =>
   s === 'Established' ? 'success' : s.startsWith('Idle') ? 'neutral' : 'warning'
 const peerColumns = [
+  { id: 'routes', header: '' },
   { accessorKey: 'address', header: 'Neighbour' },
   { accessorKey: 'description', header: 'Description' },
   { accessorKey: 'remote_as', header: 'Remote AS' },
@@ -127,6 +129,8 @@ const peerColumns = [
   { id: 'msgs', header: 'Messages rcvd / sent' },
   { accessorKey: 'last_reset', header: 'Last reset' },
 ]
+// routesOf is the session whose prefixes are shown, or null.
+const routesOf = ref(null)
 const routeColumns = [
   { accessorKey: 'prefix', header: 'Prefix' },
   { accessorKey: 'next_hop', header: 'Next hop' },
@@ -455,6 +459,17 @@ const neighborFields = computed(() => [
             <div v-for="sec in peerSections" :key="sec.key" class="mb-3">
               <div v-if="sec.title" class="mb-1 text-sm font-medium">{{ sec.title }}</div>
               <UTable :data="sec.rows" :columns="peerColumns" :loading="loading && !status">
+                <template #routes-cell="{ row }">
+                  <UTooltip text="Prefixes received, filtered and advertised">
+                    <UButton
+                      icon="i-lucide-list"
+                      variant="outline"
+                      size="sm"
+                      aria-label="Prefixes"
+                      @click="routesOf = row.original"
+                    />
+                  </UTooltip>
+                </template>
                 <template #address-cell="{ row }">
                   <span class="font-mono text-xs">{{ row.original.address }}</span>
                 </template>
@@ -485,7 +500,14 @@ const neighborFields = computed(() => [
               title="The BGP table is too large to show here (over 2000 routes in an address family); that family is left out. The console's vtysh shows it all."
             />
             <SearchInput v-model="routeSearch.search.value" class="mb-2" />
-            <UTable :data="routeSearch.filtered.value" :columns="routeColumns">
+            <!-- Virtual scroll: the table can hold thousands of routes. -->
+            <UTable
+              :data="routeSearch.filtered.value"
+              :columns="routeColumns"
+              :virtualize="{ estimateSize: 29 }"
+              sticky
+              class="max-h-[70vh]"
+            >
               <template #prefix-cell="{ row }">
                 <span class="font-mono text-xs">{{ row.original.prefix }}</span>
               </template>
@@ -613,8 +635,8 @@ const neighborFields = computed(() => [
               </div>
               <p class="text-sm text-muted">
                 Connected: the networks of the interfaces. Static: the static routes (Network &gt;
-                Routing &gt; Static routes). OSPF: OSPFv2's routes into IPv4, OSPFv3's into IPv6
-                (Network &gt; Routing &gt; OSPF). A route map filters or changes what is announced.
+                Routing &gt; Static). OSPF: OSPFv2's routes into IPv4, OSPFv3's into IPv6 (Network
+                &gt; Routing &gt; OSPF). A route map filters or changes what is announced.
               </p>
               <UFormField
                 v-for="r in redistributions"
@@ -673,5 +695,10 @@ const neighborFields = computed(() => [
         </div>
       </template>
     </UTabs>
+    <BgpNeighborRoutes
+      :instance="store.current?.name ?? ''"
+      :neighbor="routesOf"
+      @close="routesOf = null"
+    />
   </NeedInstance>
 </template>

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -240,4 +241,142 @@ func parseBGPRoutes(data []byte, fam string) []agentapi.BGPRoute {
 		return out[i].Best && !out[j].Best
 	})
 	return out
+}
+
+// BGPNeighborRoutes asks FRR for the prefixes received, filtered and
+// advertised of one BGP neighbour of an instance. The neighbour must be
+// one FRR has, as `show bgp neighbors` names it, so nothing else reaches
+// the vtysh command.
+func (a *Agent) BGPNeighborRoutes(ctx context.Context, instance, neighbor string) (*agentapi.BGPNeighborRoutes, error) {
+	a.mu.Lock()
+	doc := a.applied
+	a.mu.Unlock()
+	var in *fwconfig.Instance
+	if doc != nil {
+		in = doc.Instance(instance)
+	}
+	if in == nil || !in.BGPRunning() {
+		return nil, fmt.Errorf("BGP is not running in %q", instance)
+	}
+	return bgpNeighborRoutes(a.vtysh(ctx, in), neighbor)
+}
+
+func bgpNeighborRoutes(vtysh func(string) ([]byte, error), neighbor string) (*agentapi.BGPNeighborRoutes, error) {
+	out, err := vtysh("show bgp neighbors json")
+	if err != nil {
+		return nil, errors.New(vtyshError(out, err))
+	}
+	peers, err := parseBGPNeighbors(out)
+	if err != nil {
+		return nil, err
+	}
+	i := slices.IndexFunc(peers, func(p agentapi.BGPPeerInfo) bool { return p.Address == neighbor })
+	if i < 0 {
+		return nil, fmt.Errorf("no BGP neighbour %q", neighbor)
+	}
+	peer := peers[i]
+	res := &agentapi.BGPNeighborRoutes{
+		Received: []agentapi.BGPRoute{}, Filtered: []agentapi.BGPRoute{}, Advertised: []agentapi.BGPRoute{},
+	}
+	names := map[string]string{"ipv4": "IPv4", "ipv6": "IPv6"}
+	for _, fam := range []string{"ipv4", "ipv6"} {
+		counts, ok := peer.Families[fam]
+		if !ok {
+			continue
+		}
+		cmd := "show bgp " + fam + " unicast neighbors " + neighbor + " "
+		if counts.PrefixesSent > agentapi.BGPMaxNeighborRoutes {
+			res.Notes = append(res.Notes, fmt.Sprintf("%s: over %d prefixes advertised, too many to show here.", names[fam], agentapi.BGPMaxNeighborRoutes))
+		} else if out, err := vtysh(cmd + "advertised-routes json"); err != nil {
+			res.Notes = append(res.Notes, names[fam]+" advertised: "+vtyshError(out, err))
+		} else if routes, warn := parseBGPAdjRoutes(out, fam); warn != "" {
+			res.Notes = append(res.Notes, names[fam]+" advertised: "+warn)
+		} else {
+			res.Advertised = append(res.Advertised, routes...)
+		}
+		if counts.PrefixesReceived > agentapi.BGPMaxNeighborRoutes {
+			res.Notes = append(res.Notes, fmt.Sprintf("%s: over %d prefixes received, too many to show here.", names[fam], agentapi.BGPMaxNeighborRoutes))
+			continue
+		}
+		// Received and filtered need soft reconfiguration inbound;
+		// without it, the accepted routes stand in for the received.
+		out, err := vtysh(cmd + "received-routes json")
+		routes, warn := parseBGPAdjRoutes(out, fam)
+		if err == nil && warn == "" {
+			res.Received = append(res.Received, routes...)
+			if out, err := vtysh(cmd + "filtered-routes json"); err == nil {
+				if routes, warn := parseBGPAdjRoutes(out, fam); warn == "" {
+					res.Filtered = append(res.Filtered, routes...)
+				}
+			}
+			continue
+		}
+		res.ReceivedAccepted = true
+		if out, err := vtysh(cmd + "routes json"); err != nil {
+			res.Notes = append(res.Notes, names[fam]+" received: "+vtyshError(out, err))
+		} else {
+			res.Received = append(res.Received, parseBGPRoutes(out, fam)...)
+		}
+	}
+	return res, nil
+}
+
+// parseBGPAdjRoutes reads `show bgp <afi> unicast neighbors <n>
+// advertised-routes|received-routes|filtered-routes json`: routes by
+// prefix. warn is FRR's complaint instead of routes (soft reconfiguration
+// not enabled, say).
+func parseBGPAdjRoutes(data []byte, fam string) (routes []agentapi.BGPRoute, warn string) {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		if msg := strings.TrimSpace(string(data)); msg != "" {
+			return nil, msg
+		}
+		return nil, "unexpected answer from vtysh"
+	}
+	var table json.RawMessage
+	for _, k := range []string{"advertisedRoutes", "receivedRoutes", "filteredRoutes"} {
+		if raw[k] != nil {
+			table = raw[k]
+			break
+		}
+	}
+	if table == nil {
+		for _, k := range []string{"warning", "error"} {
+			var msg string
+			if json.Unmarshal(raw[k], &msg) == nil && msg != "" {
+				return nil, msg
+			}
+		}
+		return []agentapi.BGPRoute{}, ""
+	}
+	var entries map[string]struct {
+		Network       string `json:"network"`
+		NextHop       string `json:"nextHop"`
+		NextHopGlobal string `json:"nextHopGlobal"`
+		Metric        *int64 `json:"metric"`
+		LocPrf        *int64 `json:"locPrf"`
+		Weight        int64  `json:"weight"`
+		Path          string `json:"path"`
+		Origin        string `json:"origin"`
+	}
+	if json.Unmarshal(table, &entries) != nil {
+		return nil, "unexpected answer from vtysh"
+	}
+	routes = []agentapi.BGPRoute{}
+	for key, e := range entries {
+		r := agentapi.BGPRoute{
+			Family: fam, Prefix: key, NextHop: e.NextHop, Valid: true,
+			Metric: e.Metric, LocalPref: e.LocPrf, Weight: e.Weight,
+			Path: e.Path, Origin: e.Origin,
+		}
+		if e.Network != "" {
+			r.Prefix = e.Network
+		}
+		if e.NextHopGlobal != "" {
+			r.NextHop = e.NextHopGlobal
+		}
+		routes = append(routes, r)
+	}
+	sort.Slice(routes, func(i, j int) bool { return routes[i].Prefix < routes[j].Prefix })
+	return routes, ""
 }

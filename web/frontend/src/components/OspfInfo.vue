@@ -182,7 +182,14 @@ const routeColumns = [
         :title="`Only the first 2000 ${x.name} routes are shown. The console's vtysh shows them all.`"
       />
       <SearchInput v-model="route.search.value" class="mb-2" />
-      <UTable :data="route.filtered.value" :columns="routeColumns">
+      <!-- Virtual scroll: the table can hold thousands of routes. -->
+      <UTable
+        :data="route.filtered.value"
+        :columns="routeColumns"
+        :virtualize="{ estimateSize: 29 }"
+        sticky
+        class="max-h-[70vh]"
+      >
         <template #prefix-cell="{ row }">
           <span class="font-mono text-xs">{{ row.original.prefix }}</span>
         </template>

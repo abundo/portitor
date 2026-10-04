@@ -261,3 +261,58 @@ func TestApplyFRR(t *testing.T) {
 		t.Error("someone else's frr.conf removed")
 	}
 }
+
+// A neighbour's routes: advertised and, with soft reconfiguration, received
+// and filtered; without it, the accepted routes. A neighbour FRR does not
+// have is refused before any route command.
+func TestBGPNeighborRoutes(t *testing.T) {
+	neighbors := `{"192.0.2.1":{"remoteAs":65001,"bgpState":"Established",
+		"addressFamilyInfo":{"ipv4Unicast":{"acceptedPrefixCounter":1,"sentPrefixCounter":1}}}}`
+	adv := `{"advertisedRoutes":{"198.51.100.0/24":{"network":"198.51.100.0/24","nextHop":"0.0.0.0","weight":32768,"path":"","origin":"IGP"}},"totalPrefixCounter":1}`
+	rcvd := `{"receivedRoutes":{"203.0.113.0/24":{"nextHop":"192.0.2.1","metric":0,"path":"65001","origin":"IGP"},"10.0.0.0/8":{"nextHop":"192.0.2.1","path":"65001"}}}`
+	filt := `{"receivedRoutes":{"10.0.0.0/8":{"nextHop":"192.0.2.1","path":"65001"}}}`
+	accepted := `{"routes":{"203.0.113.0/24":[{"valid":true,"bestpath":true,"path":"65001","nexthops":[{"ip":"192.0.2.1"}]}]}}`
+	soft := true
+	var calls []string
+	vtysh := func(cmd string) ([]byte, error) {
+		calls = append(calls, cmd)
+		p := "show bgp ipv4 unicast neighbors 192.0.2.1 "
+		switch cmd {
+		case "show bgp neighbors json":
+			return []byte(neighbors), nil
+		case p + "advertised-routes json":
+			return []byte(adv), nil
+		case p + "received-routes json":
+			if !soft {
+				return []byte(`{"warning":"Inbound soft reconfiguration not enabled"}`), nil
+			}
+			return []byte(rcvd), nil
+		case p + "filtered-routes json":
+			return []byte(filt), nil
+		case p + "routes json":
+			return []byte(accepted), nil
+		}
+		return nil, errors.New("unexpected " + cmd)
+	}
+	res, err := bgpNeighborRoutes(vtysh, "192.0.2.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Advertised) != 1 || res.Advertised[0].Prefix != "198.51.100.0/24" ||
+		len(res.Received) != 2 || res.Received[0].Prefix != "10.0.0.0/8" ||
+		len(res.Filtered) != 1 || res.ReceivedAccepted || len(res.Notes) != 0 {
+		t.Errorf("%+v", res)
+	}
+	soft = false
+	res, err = bgpNeighborRoutes(vtysh, "192.0.2.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.ReceivedAccepted || len(res.Received) != 1 || res.Received[0].NextHop != "192.0.2.1" || len(res.Filtered) != 0 {
+		t.Errorf("%+v", res)
+	}
+	calls = nil
+	if _, err := bgpNeighborRoutes(vtysh, "192.0.2.1 json; x"); err == nil || len(calls) != 1 {
+		t.Errorf("unknown neighbour: %v, calls %v", err, calls)
+	}
+}

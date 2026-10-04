@@ -765,6 +765,24 @@ type BGPRoute struct {
 	PeerID    string `json:"peer,omitempty"`
 }
 
+// BGPNeighborRoutes are the prefixes of one BGP neighbour, in IPv4 and
+// IPv6 unicast: received (before the inbound policy), filtered (received
+// and denied by it) and advertised (after the outbound policy). Received
+// and Filtered need soft reconfiguration inbound; without it, Received
+// holds the accepted routes (ReceivedAccepted) and Filtered is empty. Notes
+// say what FRR could not show (a family left out as too large, say).
+type BGPNeighborRoutes struct {
+	Received         []BGPRoute `json:"received"`
+	ReceivedAccepted bool       `json:"received_accepted,omitempty"`
+	Filtered         []BGPRoute `json:"filtered"`
+	Advertised       []BGPRoute `json:"advertised"`
+	Notes            []string   `json:"notes,omitempty"`
+}
+
+// BGPMaxNeighborRoutes caps each list of BGPNeighborRoutes per address
+// family.
+const BGPMaxNeighborRoutes = 50000
+
 // OSPFResponse is the OSPF state of the instances that run it, from FRR.
 type OSPFResponse struct {
 	Instances []OSPFInstance `json:"instances"`
