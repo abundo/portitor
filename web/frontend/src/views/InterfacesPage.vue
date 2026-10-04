@@ -5,9 +5,13 @@
 import CrudPage from '@/components/CrudPage.vue'
 import DhcpClientLease from '@/components/DhcpClientLease.vue'
 import NeedInstance from '@/components/NeedInstance.vue'
+import SearchInput from '@/components/SearchInput.vue'
+import { computed, ref } from 'vue'
 import { interfaces } from '@/api'
 import { useInstanceRefs, withLabel } from '@/composables/useInstanceRefs'
 import { useDeployStore } from '@/stores/deploy'
+import { bytes } from '@/utils/bytes'
+import { useSearch } from '@/utils/search'
 
 const { store, ifaceList, ifaceText, zonesOf, reload } = useInstanceRefs()
 const deploy = useDeployStore()
@@ -217,6 +221,34 @@ function leaseOf(row, family = '') {
     ) ?? null
   )
 }
+
+// Interface statistics as the firewall reports them (the deploy store polls
+// the agent's status), for the Statistics dialog.
+const statsOpen = ref(false)
+const statsRows = computed(() => {
+  const inst = deploy.status?.instances?.find((i) => i.name === store.current?.name)
+  return (inst?.interfaces ?? [])
+    .map((i) => ({ ...i, label: ifaceText(i.name) }))
+    .sort((a, b) => a.name.localeCompare(b.name))
+})
+// The counters, received then sent; bad ones show in warning colour when
+// not zero.
+const statsCols = [
+  { key: 'rx_bytes', label: 'Bytes', bytes: true, first: true },
+  { key: 'rx_packets', label: 'Packets' },
+  { key: 'rx_errors', label: 'Errors', bad: true },
+  { key: 'rx_dropped', label: 'Dropped', bad: true },
+  { key: 'rx_over_errors', label: 'Overruns', bad: true },
+  { key: 'rx_multicast', label: 'Multicast' },
+  { key: 'tx_bytes', label: 'Bytes', bytes: true, first: true },
+  { key: 'tx_packets', label: 'Packets' },
+  { key: 'tx_errors', label: 'Errors', bad: true },
+  { key: 'tx_dropped', label: 'Dropped', bad: true },
+  { key: 'tx_carrier_errors', label: 'Carrier', bad: true },
+  { key: 'tx_collisions', label: 'Collisions', bad: true },
+]
+const count = (n) => (n ?? 0).toLocaleString()
+const { search: statsSearch, filtered: statsFiltered } = useSearch(statsRows)
 </script>
 
 <template>
@@ -252,6 +284,15 @@ function leaseOf(row, family = '') {
       new-label="New interface"
       @changed="reload()"
     >
+      <template #toolbar-end>
+        <UButton
+          icon="i-lucide-chart-column"
+          label="Statistics"
+          color="neutral"
+          variant="outline"
+          @click="statsOpen = true"
+        />
+      </template>
       <template #cell-name="{ row }">
         <span class="font-mono font-medium">{{ row.name }}</span>
         <UTooltip v-if="isMissing(row)" text="Not found on the firewall">
@@ -272,5 +313,84 @@ function leaseOf(row, family = '') {
         />
       </template>
     </CrudPage>
+    <UModal
+      v-model:open="statsOpen"
+      title="Interface statistics"
+      :dismissible="false"
+      :ui="{
+        content:
+          'w-[calc(100vw-2rem)] max-w-none sm:max-w-none sm:w-[calc(100vw-4rem)] h-[calc(100dvh-2rem)] sm:h-[calc(100dvh-4rem)]',
+        body: 'overflow-y-auto',
+      }"
+    >
+      <template #body>
+        <div class="space-y-3">
+          <SearchInput v-model="statsSearch" />
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm whitespace-nowrap">
+              <thead class="text-muted">
+                <tr>
+                  <th colspan="4" />
+                  <th colspan="6" class="border-l border-default px-2 py-1 text-center">
+                    Received
+                  </th>
+                  <th colspan="6" class="border-l border-default px-2 py-1 text-center">Sent</th>
+                </tr>
+                <tr class="border-b border-default text-left">
+                  <th class="px-2 py-1">Interface</th>
+                  <th class="px-2 py-1">Kind</th>
+                  <th class="px-2 py-1">State</th>
+                  <th class="px-2 py-1">MTU</th>
+                  <th
+                    v-for="c in statsCols"
+                    :key="c.key"
+                    class="px-2 py-1 text-right"
+                    :class="{ 'border-l border-default': c.first }"
+                  >
+                    {{ c.label }}
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="i in statsFiltered" :key="i.name" class="border-b border-default">
+                  <td class="px-2 py-1 font-mono font-medium">{{ i.label }}</td>
+                  <td class="px-2 py-1">{{ i.kind }}</td>
+                  <td class="px-2 py-1">
+                    <span :class="i.state === 'up' ? 'text-success' : 'text-muted'">
+                      {{ i.state }}
+                    </span>
+                  </td>
+                  <td class="px-2 py-1">{{ i.mtu }}</td>
+                  <td
+                    v-for="c in statsCols"
+                    :key="c.key"
+                    class="px-2 py-1 text-right font-mono"
+                    :class="{
+                      'border-l border-default': c.first,
+                      'text-warning': c.bad && i[c.key],
+                      'text-muted': !i[c.key],
+                    }"
+                  >
+                    {{ c.bytes ? bytes(i[c.key] ?? 0) : count(i[c.key]) }}
+                  </td>
+                </tr>
+                <tr v-if="!statsFiltered.length">
+                  <td colspan="16" class="px-2 py-3 text-center text-muted">
+                    {{
+                      statsRows.length ? 'No matching interfaces.' : 'No status from the firewall.'
+                    }}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </template>
+      <template #footer>
+        <div class="flex w-full justify-end">
+          <UButton label="Close" color="neutral" variant="outline" @click="statsOpen = false" />
+        </div>
+      </template>
+    </UModal>
   </NeedInstance>
 </template>

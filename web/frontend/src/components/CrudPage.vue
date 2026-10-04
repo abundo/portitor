@@ -390,6 +390,7 @@ defineExpose({ reload: load, openEdit, openView, openCreate })
           :title="blockedReason || undefined"
           @click="openCreate()"
         />
+        <slot name="toolbar-end" />
       </div>
     </div>
     <UAlert

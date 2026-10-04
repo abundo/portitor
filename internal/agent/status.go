@@ -71,10 +71,20 @@ func (a *Agent) instanceStatus(ctx context.Context, in *fwconfig.Instance) Insta
 			Address   string `json:"address"`
 			Stats64   struct {
 				Rx struct {
-					Bytes uint64 `json:"bytes"`
+					Bytes      uint64 `json:"bytes"`
+					Packets    uint64 `json:"packets"`
+					Errors     uint64 `json:"errors"`
+					Dropped    uint64 `json:"dropped"`
+					OverErrors uint64 `json:"over_errors"`
+					Multicast  uint64 `json:"multicast"`
 				} `json:"rx"`
 				Tx struct {
-					Bytes uint64 `json:"bytes"`
+					Bytes         uint64 `json:"bytes"`
+					Packets       uint64 `json:"packets"`
+					Errors        uint64 `json:"errors"`
+					Dropped       uint64 `json:"dropped"`
+					CarrierErrors uint64 `json:"carrier_errors"`
+					Collisions    uint64 `json:"collisions"`
 				} `json:"tx"`
 			} `json:"stats64"`
 		}
@@ -84,7 +94,12 @@ func (a *Agent) instanceStatus(ctx context.Context, in *fwconfig.Instance) Insta
 					continue
 				}
 				s := IfaceStatus{Name: l.Ifname, Kind: l.kind(), State: strings.ToLower(l.Operstate), MTU: l.MTU, MAC: l.Address,
-					Addresses: []string{}, RxBytes: l.Stats64.Rx.Bytes, TxBytes: l.Stats64.Tx.Bytes}
+					Addresses: []string{}, RxBytes: l.Stats64.Rx.Bytes, TxBytes: l.Stats64.Tx.Bytes,
+					RxPackets: l.Stats64.Rx.Packets, TxPackets: l.Stats64.Tx.Packets,
+					RxErrors: l.Stats64.Rx.Errors, TxErrors: l.Stats64.Tx.Errors,
+					RxDropped: l.Stats64.Rx.Dropped, TxDropped: l.Stats64.Tx.Dropped,
+					RxOverErrors: l.Stats64.Rx.OverErrors, RxMulticast: l.Stats64.Rx.Multicast,
+					TxCarrierErrors: l.Stats64.Tx.CarrierErrors, TxCollisions: l.Stats64.Tx.Collisions}
 				for _, ad := range l.AddrInfo {
 					if p, err := ad.prefix(); err == nil {
 						s.Addresses = append(s.Addresses, p.String())

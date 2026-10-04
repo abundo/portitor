@@ -142,6 +142,18 @@ type IfaceStatus struct {
 	Addresses []string `json:"addresses"`
 	RxBytes   uint64   `json:"rx_bytes"`
 	TxBytes   uint64   `json:"tx_bytes"`
+	// Counters from ip -s: packets, errors and drops each way, received
+	// multicast and overruns, sent carrier errors and collisions.
+	RxPackets       uint64 `json:"rx_packets"`
+	TxPackets       uint64 `json:"tx_packets"`
+	RxErrors        uint64 `json:"rx_errors"`
+	TxErrors        uint64 `json:"tx_errors"`
+	RxDropped       uint64 `json:"rx_dropped"`
+	TxDropped       uint64 `json:"tx_dropped"`
+	RxOverErrors    uint64 `json:"rx_over_errors"`
+	RxMulticast     uint64 `json:"rx_multicast"`
+	TxCarrierErrors uint64 `json:"tx_carrier_errors"`
+	TxCollisions    uint64 `json:"tx_collisions"`
 }
 
 type RouteStatus struct {
