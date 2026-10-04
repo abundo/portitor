@@ -58,10 +58,6 @@ const server = reactive({
   dns_query_log_clients: [],
   dns_query_log_names: [],
   dns_query_log_types: [],
-  nat64_prefix: '64:ff9b::/96',
-  dns64: false,
-  nat64: false,
-  nat64_pool4: [],
   ifaces: [], // { id, name, label, description, ipv4_mode, dns_listen, dns_from_dhcp }
 })
 const serverForm = usePageForm(server)
@@ -83,10 +79,6 @@ async function load() {
     dns_query_log_clients: inst.dns_query_log_clients ?? [],
     dns_query_log_names: inst.dns_query_log_names ?? [],
     dns_query_log_types: inst.dns_query_log_types ?? [],
-    nat64_prefix: inst.nat64_prefix || '64:ff9b::/96',
-    dns64: inst.dns64 ?? false,
-    nat64: inst.nat64 ?? false,
-    nat64_pool4: inst.nat64_pool4 ?? [],
     ifaces: ifs.map((i) => ({
       id: i.id,
       name: i.name,
@@ -537,44 +529,6 @@ const tab = computed({
                     />
                   </UFormField>
                 </template>
-              </fieldset>
-
-              <h2 class="border-b border-default pb-1 mt-8 mb-2 text-xl font-semibold">NAT64</h2>
-              <p class="mb-4 text-sm text-muted">
-                For IPv6-only clients: IPv6 packets to the NAT64 prefix are translated to IPv4, here
-                or by another router (PLAT). Turn on 464XLAT per interface under Interfaces; only
-                packets coming in on those interfaces are translated.
-              </p>
-              <fieldset :disabled="readOnly" class="space-y-3">
-                <UFormField
-                  label="NAT64 prefix"
-                  help="The well-known prefix 64:ff9b::/96, or a network-specific one of length 32, 40, 48, 56, 64 or 96."
-                  :ui="inlineField"
-                >
-                  <UInput v-model="server.nat64_prefix" class="w-full" placeholder="64:ff9b::/96" />
-                </UFormField>
-                <UFormField
-                  label="Translate here"
-                  help="Translate to IPv4 on this firewall (Jool). Off: another router is the NAT64 gateway."
-                  :ui="inlineField"
-                >
-                  <USwitch v-model="server.nat64" />
-                </UFormField>
-                <UFormField
-                  v-if="server.nat64"
-                  label="IPv4 pool"
-                  help="IPv4 prefixes the translated packets leave from, routed to this firewall. Empty: the address of the interface they leave on (the WAN), ports 61001-65535."
-                  :ui="inlineField"
-                >
-                  <TagsInput v-model="server.nat64_pool4" placeholder="192.0.2.0/28" />
-                </UFormField>
-                <UFormField
-                  label="DNS64"
-                  help="Answer a name that has only IPv4 addresses with IPv6 addresses in the NAT64 prefix."
-                  :ui="inlineField"
-                >
-                  <USwitch v-model="server.dns64" />
-                </UFormField>
               </fieldset>
 
               <h2 class="border-b border-default pb-1 mt-8 mb-2 text-xl font-semibold">

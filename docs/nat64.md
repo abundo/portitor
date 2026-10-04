@@ -22,7 +22,7 @@ router that does it.
 
 ## Settings
 
-Under *Services → DNS → DNS server → NAT64*, per virtual firewall:
+Under *Network → NAT64*, per virtual firewall:
 
 - **NAT64 prefix**: `64:ff9b::/96`, or a network-specific prefix of length 32, 40,
   48, 56, 64 or 96. Use a network-specific one if the clients must reach IPv4
