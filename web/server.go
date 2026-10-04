@@ -161,12 +161,13 @@ func (s *Server) Echo() *echo.Echo {
 	(&resource[models.Service, *models.Service]{db: s.db, order: "name", prepare: prepareService, beforeDelete: deleteService}).register(s, g, "/custom-services")
 
 	// Instance admins use these too; the handlers check the instance.
-	for _, r := range []string{"PUT /api/dns/zones/:id/records", "POST /api/rules/reorder", "POST /api/nat/reorder",
+	for _, r := range []string{"PUT /api/dns/zones/:id/records", "PUT /api/dyndns/clients/:id/records", "POST /api/rules/reorder", "POST /api/nat/reorder",
 		"POST /api/interfaces/:id/wg-rekey", "POST /api/wg/import", "POST /api/agent/capture", "POST /api/agent/trace", "POST /api/agent/connections", "POST /api/agent/connections/flush",
 		"POST /api/deploy/apply", "POST /api/deploy/confirm", "POST /api/deploy/rollback"} {
 		s.tenantWrites[r] = true
 	}
 	g.PUT("/dns/zones/:id/records", s.handleZoneRecords)
+	g.PUT("/dyndns/clients/:id/records", s.handleDyndnsRecords)
 	g.GET("/ipam/tree", s.handleIpamTree)
 	g.GET("/ipam/prefixes/:id/next-free", s.handleNextFree)
 	g.GET("/rules/auto", s.handleAutoRules)

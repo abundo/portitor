@@ -19,7 +19,7 @@
         {{ t('zoneRecords.add') }}
       </UButton>
       <UButton
-        v-if="!disabled"
+        v-if="!disabled && !simple"
         type="button"
         color="neutral"
         variant="outline"
@@ -29,7 +29,7 @@
         {{ t('zoneRecords.addComment') }}
       </UButton>
       <UButton
-        v-if="!disabled"
+        v-if="!disabled && !simple"
         type="button"
         color="neutral"
         variant="outline"
@@ -441,6 +441,10 @@ const props = defineProps({
   showMac: { type: Boolean, default: false },
   // Instance whose Kea leases the MAC picker lists.
   instance: { type: String, default: '' },
+  // The record types offered; all by default.
+  types: { type: Array, default: () => ZONE_RECORD_TYPES },
+  // No comment or $DOMAIN rows (a dynamic zone's records).
+  simple: { type: Boolean, default: false },
 })
 const dhcpEnabled = computed(() => props.showMac)
 
@@ -474,10 +478,11 @@ const colWidths = reactive({
   description: 200,
 })
 
-const typeItems = ZONE_RECORD_TYPES.map((type) => ({
-  label: type,
-  value: type,
-}))
+const typeItems = computed(() =>
+  props.types
+    .filter((type) => !props.simple || type !== COMMENT_TYPE)
+    .map((type) => ({ label: type, value: type })),
+)
 
 const resizeHeaderCols = computed(() => {
   const cols = [
@@ -506,31 +511,37 @@ const contextItems = computed(() => [
       onSelect: () => insertRowAt(menuRowIndex + 1),
     },
   ],
-  [
-    {
-      label: t('zoneRecords.insertCommentAbove'),
-      icon: 'i-lucide-message-square',
-      onSelect: () => insertCommentAt(menuRowIndex),
-    },
-    {
-      label: t('zoneRecords.insertCommentBelow'),
-      icon: 'i-lucide-message-square',
-      onSelect: () => insertCommentAt(menuRowIndex + 1),
-    },
-  ],
-  [
-    {
-      label: t('zoneRecords.insertDomainAbove'),
-      icon: 'i-lucide-folder-plus',
-      onSelect: () => insertDomainAt(menuRowIndex),
-    },
-    {
-      label: t('zoneRecords.insertDomainBelow'),
-      icon: 'i-lucide-folder-plus',
-      onSelect: () => insertDomainAt(menuRowIndex + 1),
-    },
-  ],
+  ...(props.simple ? [] : extraContextItems()),
 ])
+
+function extraContextItems() {
+  return [
+    [
+      {
+        label: t('zoneRecords.insertCommentAbove'),
+        icon: 'i-lucide-message-square',
+        onSelect: () => insertCommentAt(menuRowIndex),
+      },
+      {
+        label: t('zoneRecords.insertCommentBelow'),
+        icon: 'i-lucide-message-square',
+        onSelect: () => insertCommentAt(menuRowIndex + 1),
+      },
+    ],
+    [
+      {
+        label: t('zoneRecords.insertDomainAbove'),
+        icon: 'i-lucide-folder-plus',
+        onSelect: () => insertDomainAt(menuRowIndex),
+      },
+      {
+        label: t('zoneRecords.insertDomainBelow'),
+        icon: 'i-lucide-folder-plus',
+        onSelect: () => insertDomainAt(menuRowIndex + 1),
+      },
+    ],
+  ]
+}
 
 const cellFieldUi = {
   root: 'w-full',
@@ -692,15 +703,13 @@ function matchRecordType(query, current) {
   const q = query.toUpperCase()
   const isRepeated = q.length > 1 && [...q].every((c) => c === q[0])
   const needle = isRepeated ? q[0] : q
+  const types = typeItems.value.map((i) => i.value)
   if (needle.length === 1) {
-    const start = ZONE_RECORD_TYPES.indexOf(current)
-    const ordered =
-      start < 0
-        ? ZONE_RECORD_TYPES
-        : [...ZONE_RECORD_TYPES.slice(start + 1), ...ZONE_RECORD_TYPES.slice(0, start + 1)]
+    const start = types.indexOf(current)
+    const ordered = start < 0 ? types : [...types.slice(start + 1), ...types.slice(0, start + 1)]
     return ordered.find((t) => t.startsWith(needle)) || null
   }
-  return ZONE_RECORD_TYPES.find((t) => t.startsWith(needle)) || null
+  return types.find((t) => t.startsWith(needle)) || null
 }
 
 function spanningSkipClass(cell) {
@@ -757,7 +766,7 @@ function setRowType(row, type) {
 
 function onTypeKeydown(event, row) {
   if (event.ctrlKey || event.altKey || event.metaKey) return
-  if (event.key === ';') {
+  if (event.key === ';' && !props.simple) {
     typeQuery = ''
     setRowType(row, COMMENT_TYPE)
     event.preventDefault()
@@ -1068,6 +1077,7 @@ function addDomain() {
 function onNameKeydown(event, row) {
   if (
     event.key === ';' &&
+    !props.simple &&
     !event.ctrlKey &&
     !event.altKey &&
     !event.metaKey &&

@@ -73,6 +73,9 @@ const props = defineProps({
   // route: the form; the
   // page then holds the row's Delete).
   editTo: { type: Function, default: null },
+  // editRow(row) opens the row its own way (another form) and returns true;
+  // false leaves it to editTo or the form.
+  editRow: { type: Function, default: null },
   // searchText(row) is more text the search finds a row by, for a column
   // whose cell slot shows what display() does not.
   searchText: { type: Function, default: null },
@@ -83,6 +86,9 @@ const props = defineProps({
   rowReadOnly: { type: Function, default: null },
   // wide: a wider form, for one with a table of entries (EntriesEditor).
   wide: { type: Boolean, default: false },
+  // formOnly: no table, only the form, which the page opens through
+  // openCreate/openEdit (the rows are listed elsewhere).
+  formOnly: { type: Boolean, default: false },
 })
 const emit = defineEmits(['changed'])
 
@@ -165,6 +171,7 @@ function visible(f) {
 }
 
 async function load() {
+  if (props.formOnly) return
   loading.value = true
   try {
     rows.value = shown(await props.api.list(props.params))
@@ -341,7 +348,7 @@ defineExpose({ reload: load, openEdit, openView, openCreate })
 </script>
 
 <template>
-  <div class="card">
+  <div v-if="!formOnly" class="card">
     <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
       <div>
         <div class="flex items-center gap-1.5">
@@ -431,7 +438,7 @@ defineExpose({ reload: load, openEdit, openView, openCreate })
               :aria-label="viewOnly(row.original) ? 'View' : 'Edit'"
               :title="viewOnly(row.original) ? 'View' : 'Edit'"
               :to="editTo?.(row.original)"
-              @click="editTo?.(row.original) || openRow(row.original)"
+              @click="editRow?.(row.original) || editTo?.(row.original) || openRow(row.original)"
             />
             <slot name="row-actions" :row="row.original" />
           </div>

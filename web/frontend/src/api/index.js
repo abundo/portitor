@@ -67,6 +67,9 @@ export const api = {
   // The zone editor saves a zone's whole record grid, in order.
   saveZoneRecords: (zoneId, records) =>
     http.put(`/dns/zones/${zoneId}/records`, records).then((r) => r.data),
+  // The dynamic zone editor saves a DNS update client's whole record grid.
+  saveDyndnsRecords: (clientId, records) =>
+    http.put(`/dyndns/clients/${clientId}/records`, records).then((r) => r.data),
   nextFree: (prefixId) =>
     http.get(`/ipam/prefixes/${prefixId}/next-free`).then((r) => r.data.address),
   // Input rules the agent adds for the instance's services, read-only.

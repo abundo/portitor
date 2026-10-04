@@ -77,7 +77,6 @@ const sections = computed(() => [
       { label: 'Certificates', icon: 'i-lucide-badge-check', to: '/certificates' },
       { label: 'DHCP', icon: 'i-lucide-list-ordered', to: '/dhcp' },
       { label: 'DNS', icon: 'i-lucide-globe', to: '/dns' },
-      { label: 'DNS update', icon: 'i-lucide-refresh-ccw-dot', to: '/dns-update' },
       { label: 'Scheduled tasks', icon: 'i-lucide-calendar-clock', to: '/scheduled-tasks' },
     ],
   },

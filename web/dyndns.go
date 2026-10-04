@@ -5,9 +5,13 @@ package web
 
 import (
 	"encoding/base64"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 
+	"github.com/labstack/echo/v5"
 	"gorm.io/gorm"
 
 	"github.com/abundo/portitor/internal/builder"
@@ -203,4 +207,74 @@ func refuseDyndnsIface(tx *gorm.DB, i *models.Interface) error {
 		}
 		return names
 	})
+}
+
+// handleDyndnsRecords is PUT /api/dyndns/clients/:id/records: the dynamic
+// zone editor saves the whole grid, in order, replacing the client's records.
+func (s *Server) handleDyndnsRecords(c *echo.Context) error {
+	id, err := echo.PathParam[uint](c, "id")
+	if err != nil {
+		return errJSON(c, http.StatusNotFound, "not found")
+	}
+	var body []models.DyndnsRecord
+	if err := json.NewDecoder(c.Request().Body).Decode(&body); err != nil {
+		return errJSON(c, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	}
+	var cl models.DyndnsClient
+	if err := s.db.First(&cl, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return errJSON(c, http.StatusNotFound, "not found")
+		}
+		return err
+	}
+	if ok, err := allowInstance(c, cl.InstanceID, true); !ok {
+		return err
+	}
+	for i := range body {
+		r := &body[i]
+		r.ID, r.ClientID = 0, cl.ID
+		r.Name = strings.TrimSpace(r.Name)
+		if r.Name == "" {
+			r.Name = "@"
+		}
+		r.Type = strings.ToUpper(strings.TrimSpace(r.Type))
+		r.Value = strings.TrimSpace(r.Value)
+		if r.Type == "A" || r.Type == "AAAA" {
+			r.Value = strings.ToLower(r.Value)
+		}
+		r.Description = strings.TrimSpace(r.Description)
+		if r.Ttl < 0 {
+			r.Ttl = 0
+		}
+		if err := oneOf("type", r.Type, fwconfig.DynDNSRecordTypes...); err != nil {
+			return errJSON(c, http.StatusBadRequest, fmt.Sprintf("record %d: %v", i+1, err))
+		}
+		if r.Type == "CNAME" && r.Value == "" {
+			return errJSON(c, http.StatusBadRequest, fmt.Sprintf("record %d: a CNAME needs its target", i+1))
+		}
+	}
+	// Checked together, as prepareDyndnsRecord does; the key and provider
+	// settings are checked with the client.
+	check := cl
+	check.TsigName, check.Provider, check.Server = "", fwconfig.ProviderRFC2136, "192.0.2.53"
+	if err := checkDynDNS(builder.DynDNS(&check, "eth0", body)); err != nil {
+		return errJSON(c, http.StatusBadRequest, err.Error())
+	}
+	err = s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("client_id = ?", cl.ID).Delete(&models.DyndnsRecord{}).Error; err != nil {
+			return err
+		}
+		if len(body) == 0 {
+			return nil
+		}
+		return tx.Create(&body).Error
+	})
+	if err != nil {
+		return dbError(c, err)
+	}
+	out := []models.DyndnsRecord{}
+	if err := s.db.Where("client_id = ?", cl.ID).Order("id").Find(&out).Error; err != nil {
+		return err
+	}
+	return c.JSON(http.StatusOK, out)
 }

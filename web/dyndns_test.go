@@ -217,3 +217,32 @@ func TestDNSUpdateProvider(t *testing.T) {
 		t.Errorf("providers: %d", rec.Code)
 	}
 }
+
+// The dynamic zone editor replaces a client's records in one PUT.
+func TestDynDNSRecordsReplace(t *testing.T) {
+	env := newEnv(t)
+	inst := env.create("/api/instances", map[string]any{"name": "main"})
+	eth0 := env.create("/api/interfaces", map[string]any{"instance_id": inst, "name": "eth0", "ipv4_mode": "dhcp", "enabled": true})
+	id := env.create("/api/dyndns/clients", map[string]any{
+		"instance_id": inst, "name": "home", "enabled": true, "interface_id": eth0, "server": "192.0.2.53", "zone": "example.com",
+	})
+	path := "/api/dyndns/clients/" + itoa(id) + "/records"
+	for what, body := range map[string][]map[string]any{
+		"duplicate":      {{"name": "home", "type": "A"}, {"name": "home", "type": "a"}},
+		"cname conflict": {{"name": "www", "type": "CNAME", "value": "home"}, {"name": "www", "type": "TXT"}},
+		"bad type":       {{"name": "mx", "type": "MX", "value": "10 mail"}},
+		"cname target":   {{"name": "www", "type": "CNAME"}},
+	} {
+		if rec := env.do("PUT", path, body); rec.Code != http.StatusBadRequest {
+			t.Errorf("%s accepted: %d %s", what, rec.Code, rec.Body)
+		}
+	}
+	rec := env.do("PUT", path, []map[string]any{{"name": "", "type": "a", "ttl": 60}, {"name": "www", "type": "CNAME", "value": "@"}})
+	var out []models.DyndnsRecord
+	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &out) != nil || len(out) != 2 || out[0].Name != "@" || out[0].Type != "A" || out[1].Type != "CNAME" {
+		t.Fatalf("replace: %d %s", rec.Code, rec.Body)
+	}
+	if rec := env.do("PUT", path, []map[string]any{}); rec.Code != http.StatusOK || strings.TrimSpace(rec.Body.String()) != "[]" {
+		t.Fatalf("clear: %d %s", rec.Code, rec.Body)
+	}
+}

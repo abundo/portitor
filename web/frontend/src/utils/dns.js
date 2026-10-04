@@ -8,6 +8,11 @@ export const zoneTypes = [
   { label: 'Forward only (to other DNS servers)', value: 'forward-only' },
 ]
 
+// A DNS update client's zone, listed with the zones (DnsPage) but kept on
+// another nameserver; its records are the client's.
+export const DYNAMIC_ZONE = 'dynamic'
+export const dynamicZoneLabel = 'Forward dynamic (DNS update)'
+
 // What a zone without a DNS template gets (internal/render/dns.go).
 export const builtinTemplate = {
   default_ttl: 300,

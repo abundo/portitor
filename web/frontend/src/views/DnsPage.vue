@@ -3,21 +3,24 @@
 
 <script setup>
 import TagsInput from '@/components/TagsInput.vue'
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useToast } from '@nuxt/ui/composables'
 import AddrInput from '@/components/AddrInput.vue'
 import CrudPage from '@/components/CrudPage.vue'
 import DnsTemplates from '@/components/DnsTemplates.vue'
+import DyndnsClientForm from '@/components/DyndnsClientForm.vue'
+import DyndnsState from '@/components/DyndnsState.vue'
 import NeedInstance from '@/components/NeedInstance.vue'
 import SearchInput from '@/components/SearchInput.vue'
-import { dnsTemplates, dnsZones, instances, interfaces } from '@/api'
+import { dnsTemplates, dnsZones, dyndnsClients, instances, interfaces } from '@/api'
 import { errMsg } from '@/api/http'
 import { withLabel } from '@/composables/useInstanceRefs'
 import { usePageForm } from '@/composables/useFormGuard'
 import { useAuthStore } from '@/stores/auth'
+import { useDeployStore } from '@/stores/deploy'
 import { useInstanceStore } from '@/stores/instances'
-import { zoneTypes } from '@/utils/dns'
+import { DYNAMIC_ZONE, dynamicZoneLabel, zoneTypes } from '@/utils/dns'
 import { inlineField } from '@/utils/form'
 import { useSearch } from '@/utils/search'
 
@@ -26,6 +29,8 @@ const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 const store = useInstanceStore()
+const deploy = useDeployStore()
+onMounted(() => deploy.refresh())
 const readOnly = computed(() => !auth.canEdit)
 const templates = ref([])
 
@@ -171,10 +176,45 @@ async function save() {
   }
 }
 
-const typeLabel = (t) => zoneTypes.find((x) => x.value === t)?.label ?? t
+const typeLabel = (t) =>
+  t === DYNAMIC_ZONE ? dynamicZoneLabel : (zoneTypes.find((x) => x.value === t)?.label ?? t)
 // A forward-only zone has no records: Edit opens its form.
 const forwardOnly = (z) => z.type === 'forward-only'
-const zoneLink = (z) => (forwardOnly(z) ? null : `/dns/zones/${z.id}`)
+const dynamic = (z) => z.type === DYNAMIC_ZONE
+// A zone's name opens its records; a dynamic zone's Edit opens its settings
+// form instead.
+const recordsLink = (z) =>
+  dynamic(z) ? `/dns/dynamic/${z.client_id}` : forwardOnly(z) ? null : `/dns/zones/${z.id}`
+const zoneLink = (z) => (dynamic(z) ? null : recordsLink(z))
+async function editDynamic(z) {
+  if (!dynamic(z)) return false
+  const client = await dyndnsClients.get(z.client_id)
+  if (readOnly.value) dynamicForm.value.openView(client)
+  else dynamicForm.value.openEdit(client)
+  return true
+}
+
+// The zones of the instance's DNS update clients are listed too, as dynamic
+// zones; they live on another nameserver and open their records' page.
+const zonesPage = ref(null)
+const dynamicForm = ref(null)
+const zonesApi = {
+  ...dnsZones,
+  list: async (params) => {
+    const [zones, clients] = await Promise.all([dnsZones.list(params), dyndnsClients.list(params)])
+    return [
+      ...zones,
+      ...clients.map((c) => ({
+        id: `dyndns-${c.id}`,
+        client_id: c.id,
+        name: c.zone,
+        type: DYNAMIC_ZONE,
+        client_name: c.name,
+        description: c.description || `DNS update ${c.name}`,
+      })),
+    ]
+  },
+}
 const zoneColumns = [
   { key: 'name', label: 'Zone', class: 'font-mono font-medium' },
   { key: 'type', label: 'Type', format: (r) => typeLabel(r.type) },
@@ -182,11 +222,12 @@ const zoneColumns = [
     key: 'template',
     label: 'DNS template',
     format: (r) =>
-      forwardOnly(r)
+      forwardOnly(r) || dynamic(r)
         ? ''
         : (templates.value.find((t) => t.id === r.dns_template_id)?.name ?? 'built-in'),
   },
   { key: 'forwarders', label: 'Forwarders', format: (r) => (r.forwarders ?? []).join(', ') },
+  { key: 'state', label: 'State', format: () => '' },
   { key: 'description', label: 'Description' },
 ]
 const zoneFields = [
@@ -249,28 +290,44 @@ const tab = computed({
       <template #zones>
         <div class="space-y-4 pt-2">
           <CrudPage
+            ref="zonesPage"
             title="DNS zones"
             noun="DNS zone"
-            description="Zones served by this virtual firewall's DNS server (BIND, via dnsmgr2). Names of IPAM addresses go into the matching forward zone; PTRs in reverse zones are generated. Open a zone to edit its records. A forward-only zone has no records: its queries go to its forwarders."
-            :api="dnsZones"
+            description="Zones served by this virtual firewall's DNS server (BIND, via dnsmgr2). Names of IPAM addresses go into the matching forward zone; PTRs in reverse zones are generated. Open a zone to edit its records. A forward-only zone has no records: its queries go to its forwarders. A forward dynamic zone is kept on another nameserver by DNS updates (RFC 2136 or a DNS hosting provider's API), its A and AAAA records following an interface's addresses."
+            :api="zonesApi"
             :params="{ instance_id: store.currentId }"
             :columns="zoneColumns"
             :fields="zoneFields"
             :defaults="zoneDefaults"
             :edit-to="zoneLink"
+            :edit-row="(z) => dynamic(z) && (editDynamic(z), true)"
             new-label="New zone"
           >
+            <template #toolbar>
+              <UButton
+                v-if="!readOnly"
+                icon="i-lucide-plus"
+                label="New dynamic zone"
+                color="neutral"
+                variant="outline"
+                @click="dynamicForm.openCreate()"
+              />
+            </template>
+            <template #cell-state="{ row }">
+              <DyndnsState v-if="dynamic(row)" :name="row.client_name" />
+            </template>
             <template #cell-name="{ row }">
               <RouterLink
-                v-if="zoneLink(row)"
+                v-if="recordsLink(row)"
                 class="font-mono font-medium text-primary"
-                :to="zoneLink(row)"
+                :to="recordsLink(row)"
               >
                 {{ row.name }}
               </RouterLink>
               <span v-else class="font-mono font-medium">{{ row.name }}</span>
             </template>
           </CrudPage>
+          <DyndnsClientForm ref="dynamicForm" @changed="zonesPage.reload()" />
         </div>
       </template>
 

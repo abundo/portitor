@@ -109,10 +109,9 @@ After an upgrade, run `migrate` before `start`. `install.py` does both.
 | | Services | What the rules' Service column matches: TCP, UDP or SCTP port ranges (with source ports if wanted), an ICMP or ICMPv6 type and code, or an IP protocol number. Your own next to predefined ones such as `ssh`, `dns`, `ping` or `gre`. Also lists the port names (`https`) that NAT port fields accept. |
 | | NAT & port forwards | Masquerade, SNAT and DNAT; a DNAT with Hairpin also works from the LAN to the public address. |
 | | Connections | The virtual firewall's connection table (conntrack), streamed from the firewall, with each connection's start time. |
-| Services | DNS | Three tabs. *DNS zones*: the zones and records the virtual firewall serves. *DNS templates*: the virtual firewall's SOA templates, DNSSEC policies and zone templates. One of the default virtual firewall (`main`) can be made *Global*: it is then shown, read-only, and usable in all virtual firewalls; a global DNS template needs a global SOA template and DNSSEC policy. A name is unique in a virtual firewall, and a global one in all. *DNS server*: the virtual firewall's DNS server (BIND), which always runs; its upstream (forwarders, the root servers, or the DNS servers from the DHCP lease on one interface, configured as BIND's forwarders; forwarding can fall back to the root servers); the interfaces it answers on; query logging, with filters, to the log panel's *DNS queries*. |
+| Services | DNS | Three tabs. *DNS zones*: the zones and records the virtual firewall serves. *DNS templates*: the virtual firewall's SOA templates, DNSSEC policies and zone templates. One of the default virtual firewall (`main`) can be made *Global*: it is then shown, read-only, and usable in all virtual firewalls; a global DNS template needs a global SOA template and DNSSEC policy. A name is unique in a virtual firewall, and a global one in all. *DNS server*: the virtual firewall's DNS server (BIND), which always runs; its upstream (forwarders, the root servers, or the DNS servers from the DHCP lease on one interface, configured as BIND's forwarders; forwarding can fall back to the root servers); the interfaces it answers on; query logging, with filters, to the log panel's *DNS queries*. *New dynamic zone* (dynamic DNS) keeps the records of a zone on another nameserver in step with an interface's addresses (the WAN, say): on your own nameserver (by IP address or DNS name, looked up in the virtual firewall) by RFC 2136 dynamic update (TSIG signed), sent from the virtual firewall, or at a DNS hosting provider through its API, called from the firewall host (Bunny DNS, Cloudflare, deSEC, easyDNS, Gandi, GleSYS, GoDaddy, Hetzner DNS, Loopia, Namecheap, NameSilo, netcup, Njalla, OVHcloud, Porkbun). A provider's tokens and keys are stored on the server and never shown again; leave one empty to keep it. Its records are edited like a zone's, its nameserver or provider under *Settings*. |
 | | DHCP | Two tabs. *Leases*: active leases, and the leases of the firewall's own DHCP clients. *DHCP server*: the virtual firewall's DHCP server (Kea) on or off, its domain name and lease time, and the interfaces with the prefixes of their addresses, each with a DHCP switch. Badges on an interface: *DHCP Client* (it gets its IPv4 address by DHCP), *SLAAC-C* (it takes an IPv6 address from router advertisements), *RA* (it sends router advertisements). Edit an interface for its range, gateway and DNS servers, and on IPv6 prefixes router advertisements and SLAAC. Several prefixes with DHCP on one interface form a Kea shared network: clients get addresses from all of them. |
 | | WireGuard | Tunnels, road-warrior and [site-to-site](#site-to-site-wireguard) peers; generates client and site configs, and imports a wg-quick config file. |
-| | DNS update | Keeps DNS records in step with an interface's addresses (the WAN, say): on your own nameserver (by IP address or DNS name, looked up in the virtual firewall) by RFC 2136 dynamic update (TSIG signed), sent from the virtual firewall, or at a DNS hosting provider through its API, called from the firewall host (Bunny DNS, Cloudflare, deSEC, easyDNS, Gandi, GleSYS, GoDaddy, Hetzner DNS, Loopia, Namecheap, NameSilo, netcup, Njalla, OVHcloud, Porkbun). A provider's tokens and keys are stored on the server and never shown again; leave one empty to keep it. |
 | | Certificates | TLS certificates from Let's Encrypt, got and renewed by the firewall; see [Certificates](#certificates). |
 | | Scheduled tasks | IP list downloads and commands on a cron schedule. |
 | Tools | Console | A shell on the firewall as the agent's `console_user`, in the network namespace of the selected virtual firewall (so `ip addr`, `nft list ruleset` and `ping` see that virtual firewall). *Open in window* (or the square terminal icon) opens one in a window of its own for that virtual firewall. |
@@ -161,7 +160,7 @@ in any number of roles, and is an **admin** or a **viewer** in each.
 
 A **virtual firewall admin** changes their virtual firewall's interfaces (but not which physical
 NICs it has: a global admin adds, renames and removes those), zones, rules, NAT,
-routes, IP addresses, DNS, DHCP, DNS update and WireGuard, its settings (not its
+routes, IP addresses, DNS (dynamic zones included), DHCP and WireGuard, its settings (not its
 name, nor which virtual firewall is the default), captures its packets (*Tools → Packet
 capture*) and **deploys** it. An
 **virtual firewall viewer** reads it. Neither sees the other virtual firewalls, their status, leases,
@@ -233,7 +232,7 @@ LAN `192.168.50.0/24`.
 - *Endpoint* makes this firewall connect to the site, with *Keepalive* (e.g. 25) to keep
   the tunnel up through NAT. Leave the endpoint empty on the side that waits. When the
   endpoint is a name, the agent looks it up again while the peer has had no handshake
-  for over two minutes, so a site on a dynamic address (with DNS update) is found
+  for over two minutes, so a site on a dynamic address (with a dynamic DNS zone) is found
   again.
 - The config button of a site peer gives a wg-quick config for the router at the other
   site: this virtual firewall's prefixes under *Hosts & prefixes* (its interfaces' included) as its AllowedIPs, without the
@@ -250,7 +249,8 @@ HTTP-01 challenge: the CA fetches a token from `http://<domain>/.well-known/acme
 for every domain of the certificate.
 
 - Every domain must resolve (A, and AAAA if it has one) to an address of the
-  certificate's *Interface*, the WAN say. DNS update can keep those records.
+  certificate's *Interface*, the WAN say. A dynamic DNS zone (DNS, *New dynamic zone*)
+  can keep those records.
 - The virtual firewall's input chain has an auto rule, *acme http-01*, for TCP port 80 on the
   interfaces of its certificates. It matches only while the firewall answers a
   challenge (the port is in the nftables set `acme_http` then; the set is empty the
