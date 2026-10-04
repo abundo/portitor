@@ -168,15 +168,6 @@ async function saveSettings() {
         browse to.
       </p>
       <form class="space-y-3" @submit.prevent="saveSettings">
-        <UFormField
-          label="Virtual firewalls"
-          help="Several virtual firewalls, each its own namespace, connected by links. Shows the Virtual firewalls and Links pages. Can't be turned off while there is more than one virtual firewall."
-        >
-          <USwitch
-            v-model="settings.virtual_firewalls"
-            :disabled="settings.virtual_firewalls && instStore.list.length > 1"
-          />
-        </UFormField>
         <UFormField label="Certificate">
           <USelect
             v-model="settings.web_certificate_id"
@@ -193,6 +184,15 @@ async function saveSettings() {
           title="portitor-web does not serve HTTPS itself"
           description="Set tls_cert and tls_key in web.yaml (the ISO's setup does) and restart it to choose a certificate here; behind a reverse proxy, give the proxy the certificate instead."
         />
+        <UFormField
+          label="Virtual firewalls"
+          help="Several virtual firewalls, each its own namespace, connected by links. Shows the Virtual firewalls and Links pages. Can't be turned off while there is more than one virtual firewall."
+        >
+          <USwitch
+            v-model="settings.virtual_firewalls"
+            :disabled="settings.virtual_firewalls && instStore.list.length > 1"
+          />
+        </UFormField>
         <UButton type="submit">Save</UButton>
       </form>
     </div>
