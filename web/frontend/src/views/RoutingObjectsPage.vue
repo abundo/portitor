@@ -1,8 +1,8 @@
 <!-- SPDX-FileCopyrightText: 2026 The Portitor contributors -->
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
-<!-- Routing objects: the prefix lists, AS path lists, community lists and
-     route maps of this virtual firewall, which BGP refers to by name. -->
+<!-- Routing objects: the route maps, prefix lists, community lists and
+     AS path lists of this virtual firewall, which BGP refers to by name. -->
 <script setup>
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -22,14 +22,14 @@ const auth = useAuthStore()
 const objects = useRoutingObjects()
 
 const tabs = [
-  { label: 'Prefix lists', value: 'prefix', slot: 'prefix', icon: 'i-lucide-list' },
-  { label: 'AS path lists', value: 'aspath', slot: 'aspath', icon: 'i-lucide-route' },
-  { label: 'Community lists', value: 'community', slot: 'community', icon: 'i-lucide-tags' },
   { label: 'Route maps', value: 'maps', slot: 'maps', icon: 'i-lucide-map' },
+  { label: 'Prefix lists', value: 'prefix', slot: 'prefix', icon: 'i-lucide-list' },
+  { label: 'Community lists', value: 'community', slot: 'community', icon: 'i-lucide-tags' },
+  { label: 'AS path lists', value: 'aspath', slot: 'aspath', icon: 'i-lucide-route' },
 ]
 const tab = computed({
-  get: () => (tabs.some((t) => t.value === route.query.tab) ? route.query.tab : 'prefix'),
-  set: (v) => router.replace({ query: { ...route.query, tab: v === 'prefix' ? undefined : v } }),
+  get: () => (tabs.some((t) => t.value === route.query.tab) ? route.query.tab : 'maps'),
+  set: (v) => router.replace({ query: { ...route.query, tab: v === 'maps' ? undefined : v } }),
 })
 
 const actions = ['permit', 'deny'].map((a) => ({ label: a, value: a }))
