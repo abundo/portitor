@@ -242,7 +242,8 @@ func restoreDatabase(ctx context.Context, db *gorm.DB, path string) (*restoreRes
 			return nil, err
 		}
 		if !slices.Equal(mine, theirs) {
-			return nil, restoreError(fmt.Sprintf("the backup's table %s does not match this version's schema", t))
+			return nil, restoreError(fmt.Sprintf("the backup's table %s does not match this version's schema (only in the backup: %s; only here: %s)",
+				t, missing(theirs, mine), missing(mine, theirs)))
 		}
 		var kind string
 		if err := conn.QueryRowContext(ctx, "SELECT type FROM bk.sqlite_master WHERE name = ?", t).Scan(&kind); err != nil || kind != "table" {
@@ -355,6 +356,20 @@ func prepareRestore(path string) (*restoreResult, error) {
 		return nil, restoreError(fmt.Sprintf("the backup has %d rows with broken references", len(bad)))
 	}
 	return res, nil
+}
+
+// missing lists the names in a that b lacks, or "none".
+func missing(a, b []string) string {
+	var out []string
+	for _, n := range a {
+		if !slices.Contains(b, n) {
+			out = append(out, n)
+		}
+	}
+	if len(out) == 0 {
+		return "none"
+	}
+	return strings.Join(out, ", ")
 }
 
 func queryStrings(ctx context.Context, conn *sql.Conn, query string, args ...any) ([]string, error) {
