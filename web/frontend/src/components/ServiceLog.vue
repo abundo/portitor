@@ -2,19 +2,19 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
 <script setup>
-// ServiceLogDialog: a service's journal (journalctl --follow on the
-// agent) as it comes, with a filter over the lines. Closing the dialog
-// stops it.
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+// ServiceLog: a service's journal (journalctl --follow on the agent) as
+// it comes, with a filter over the lines. It follows while mounted.
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import SearchInput from '@/components/SearchInput.vue'
 
 const props = defineProps({
   instance: { type: String, default: '' },
   unit: { type: String, default: '' },
+  // active is false while the log is in a hidden tab, which can't scroll.
+  active: { type: Boolean, default: true },
 })
-const open = defineModel('open', { type: Boolean, default: false })
 
-// maxLines is how many lines the dialog keeps.
+// maxLines is how many lines are kept.
 const maxLines = 5000
 
 const lines = ref([])
@@ -87,21 +87,12 @@ function stop() {
   running.value = false
 }
 
-watch(
-  open,
-  (o) => {
-    if (o) {
-      filter.value = ''
-      follow.value = true
-      start()
-    } else stop()
-  },
-  { immediate: true },
-)
+onMounted(start)
 
-// Keep the newest line in view unless the user scrolled up.
-watch(shown, async () => {
-  if (!follow.value) return
+// While Follow is checked, keep the newest line in view. Scrolling up
+// unchecks it, scrolling back to the bottom checks it again.
+watch([shown, follow, wrap, () => props.active], async () => {
+  if (!follow.value || !props.active) return
   await nextTick()
   if (box.value) box.value.scrollTop = box.value.scrollHeight
 })
@@ -117,47 +108,42 @@ function lineStyle(l) {
 
 function onScroll() {
   const el = box.value
+  if (!props.active) return
   follow.value = el.scrollHeight - el.scrollTop - el.clientHeight < 20
 }
 </script>
 
 <template>
-  <UModal
-    v-model:open="open"
-    :title="`Log · ${unit}`"
-    :dismissible="false"
-    :ui="{ content: 'max-w-[90vw] w-[90vw] h-[85vh]', body: 'flex flex-col min-h-0 flex-1' }"
-  >
-    <template #body>
-      <div class="mb-2 flex flex-wrap items-center gap-2">
-        <SearchInput v-model="filter" placeholder="Filter" />
-        <span class="text-xs text-muted">
-          {{ shown.length }} of {{ lines.length }} lines
-          <template v-if="running"> · following</template>
-        </span>
-        <UCheckbox v-model="wrap" label="Wrap long lines" />
-        <UButton
-          v-if="!running"
-          icon="i-lucide-refresh-cw"
-          size="sm"
-          variant="outline"
-          label="Restart"
-          class="ml-auto"
-          @click="start"
-        />
+  <div class="flex min-h-0 flex-1 flex-col">
+    <div class="mb-2 flex flex-wrap items-center gap-2">
+      <SearchInput v-model="filter" placeholder="Filter" />
+      <span class="text-xs text-muted">
+        {{ shown.length }} of {{ lines.length }} lines
+        <template v-if="running"> · following</template>
+      </span>
+      <UCheckbox v-model="follow" label="Follow" />
+      <UCheckbox v-model="wrap" label="Wrap long lines" />
+      <UButton
+        v-if="!running"
+        icon="i-lucide-refresh-cw"
+        size="sm"
+        variant="outline"
+        label="Restart"
+        class="ml-auto"
+        @click="start"
+      />
+    </div>
+    <UAlert v-if="error" color="error" variant="subtle" :description="error" class="mb-2" />
+    <div
+      ref="box"
+      class="min-h-0 flex-1 overflow-auto rounded border border-default bg-elevated p-2 font-mono text-xs"
+      :class="wrap ? 'break-all whitespace-pre-wrap' : 'whitespace-pre'"
+      @scroll="onScroll"
+    >
+      <div v-for="(l, i) in shown" :key="i" :style="lineStyle(l)">{{ l }}</div>
+      <div v-if="!shown.length" class="text-muted">
+        {{ lines.length ? 'No line matches.' : running ? 'Waiting for the log…' : 'No lines.' }}
       </div>
-      <UAlert v-if="error" color="error" variant="subtle" :description="error" class="mb-2" />
-      <div
-        ref="box"
-        class="min-h-0 flex-1 overflow-auto rounded border border-default bg-elevated p-2 font-mono text-xs"
-        :class="wrap ? 'break-all whitespace-pre-wrap' : 'whitespace-pre'"
-        @scroll="onScroll"
-      >
-        <div v-for="(l, i) in shown" :key="i" :style="lineStyle(l)">{{ l }}</div>
-        <div v-if="!shown.length" class="text-muted">
-          {{ lines.length ? 'No line matches.' : running ? 'Waiting for the log…' : 'No lines.' }}
-        </div>
-      </div>
-    </template>
-  </UModal>
+    </div>
+  </div>
 </template>

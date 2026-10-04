@@ -2,14 +2,14 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
 <script setup>
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted } from 'vue'
 import RateSparkline from '@/components/RateSparkline.vue'
 import SearchInput from '@/components/SearchInput.vue'
-import ServiceLogDialog from '@/components/ServiceLogDialog.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useDeployStore } from '@/stores/deploy'
 import { useInstanceStore } from '@/stores/instances'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
+import { openServiceLogWindow } from '@/composables/useServiceLogWindow'
 import { bytes } from '@/utils/bytes'
 import { useSearch, valuesText } from '@/utils/search'
 
@@ -41,15 +41,9 @@ const peers = computed(() =>
   (inst.value?.wireguard ?? []).flatMap((w) => w.peers.map((p) => ({ ...p, iface: w.interface }))),
 )
 
-// The service whose log is shown, '' for none. Following a log is a POST
-// the server allows only an admin of the instance.
-const logUnit = ref('')
-const logOpen = computed({
-  get: () => logUnit.value !== '',
-  set: (o) => {
-    if (!o) logUnit.value = ''
-  },
-})
+// Following a service's log is a POST the server allows only an admin of
+// the instance.
+const units = computed(() => Object.keys(inst.value?.services ?? {}))
 
 const ago = (t) =>
   t ? `${Math.round((Date.now() - new Date(t).getTime()) / 60000)} min ago` : 'never'
@@ -154,8 +148,19 @@ const stateColor = (s) =>
       </div>
       <div class="grid gap-4 xl:grid-cols-2">
         <div class="card">
-          <div class="mb-2 font-semibold">Services</div>
-          <div v-if="!Object.keys(inst.services).length" class="text-sm text-muted">
+          <div class="mb-2 flex items-center gap-2">
+            <span class="font-semibold">Services</span>
+            <UButton
+              v-if="auth.canEdit && units.length"
+              icon="i-lucide-external-link"
+              size="sm"
+              variant="outline"
+              label="Show logs"
+              title="The services' logs in a window of their own, while you use the rest of the GUI"
+              @click="openServiceLogWindow(instances.currentId)"
+            />
+          </div>
+          <div v-if="!units.length" class="text-sm text-muted">
             No DNS or DHCP server in this virtual firewall.
           </div>
           <div
@@ -164,17 +169,7 @@ const stateColor = (s) =>
             class="flex items-center justify-between py-1 text-sm"
           >
             <span class="font-mono">{{ unit }}</span>
-            <span class="flex items-center gap-2">
-              <UBadge :color="stateColor(state)" variant="subtle" :label="state" />
-              <UButton
-                v-if="auth.canEdit"
-                icon="i-lucide-scroll-text"
-                size="sm"
-                variant="outline"
-                label="Show log"
-                @click="logUnit = unit"
-              />
-            </span>
+            <UBadge :color="stateColor(state)" variant="subtle" :label="state" />
           </div>
         </div>
         <div v-if="peers.length" class="card">
@@ -192,7 +187,6 @@ const stateColor = (s) =>
           </div>
         </div>
       </div>
-      <ServiceLogDialog v-model:open="logOpen" :instance="inst.name" :unit="logUnit" />
     </template>
     <div v-else-if="st && !deploy.error" class="card text-sm text-muted">
       This virtual firewall is not on the firewall yet. Configure it and

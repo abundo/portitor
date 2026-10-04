@@ -105,6 +105,11 @@ const router = createRouter({
       component: () => import('@/views/CaptureWindowPage.vue'),
       meta: { deployer: true },
     },
+    {
+      path: '/servicelog/window',
+      component: () => import('@/views/ServiceLogWindowPage.vue'),
+      meta: { deployer: true },
+    },
     { path: '/:pathMatch(.*)*', redirect: '/' },
   ],
 })
