@@ -63,9 +63,11 @@ func planNAT64(ns string, want, have *fwconfig.NAT64, running bool) []command {
 		command{Name: "modprobe", Args: []string{"jool"}},
 		jool("instance", "add", fwconfig.JoolInstance, "--netfilter", "--pool6", want.Prefix),
 	)
+	// The pool is the NAT64's alone: every port (ICMP id), which Jool
+	// wants given.
 	for _, p := range want.Pool4 {
 		for _, proto := range []string{"--tcp", "--udp", "--icmp"} {
-			cmds = append(cmds, jool("-i", fwconfig.JoolInstance, "pool4", "add", proto, p))
+			cmds = append(cmds, jool("-i", fwconfig.JoolInstance, "pool4", "add", proto, p, "1-65535"))
 		}
 	}
 	return cmds

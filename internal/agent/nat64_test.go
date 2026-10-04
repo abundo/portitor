@@ -29,9 +29,9 @@ func TestPlanNAT64(t *testing.T) {
 		"jool instance remove portitor",
 		"modprobe jool",
 		"jool instance add portitor --netfilter --pool6 64:ff9b::/96",
-		"jool -i portitor pool4 add --tcp 192.0.2.0/28",
-		"jool -i portitor pool4 add --udp 192.0.2.0/28",
-		"jool -i portitor pool4 add --icmp 192.0.2.0/28",
+		"jool -i portitor pool4 add --tcp 192.0.2.0/28 1-65535",
+		"jool -i portitor pool4 add --udp 192.0.2.0/28 1-65535",
+		"jool -i portitor pool4 add --icmp 192.0.2.0/28 1-65535",
 	)
 	equal(t, planNAT64("", nil, wk, true), "jool instance remove portitor")
 	equal(t, planNAT64("", nil, nil, false))
