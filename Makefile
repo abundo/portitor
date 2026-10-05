@@ -15,7 +15,7 @@ LDFLAGS := -s -w \
 
 .PHONY: build portitor-web portitor-agent frontend release test lint fmt \
 	install-agent install-web dev-agent dev-web dev-seed \
-	lab-up lab-install lab-seed lab-deploy lab-down lab-clean iso iso-test iso-e2e iso-e2e-split release-check clean
+	lab-up lab-install lab-seed lab-deploy lab-down lab-clean iso iso-test iso-e2e iso-e2e-split test-all release-check clean
 
 build: portitor-web portitor-agent
 
@@ -110,14 +110,10 @@ iso-e2e:
 iso-e2e-split:
 	iso/test-split.sh
 
-# Every check DEV.md's release checklist can run unattended, before tagging:
-# make release-check TAG=v1.2.0. Takes about 20 minutes (the lab and both ISO
-# tests); stops at the first failure.
-release-check:
-	@test -n "$(TAG)" || { echo "usage: make release-check TAG=vX.Y.Z" >&2; exit 1; }
-	@test -z "$$(git status --porcelain)" || { echo "working tree is not clean" >&2; exit 1; }
-	@! git rev-parse -q --verify "refs/tags/$(TAG)" >/dev/null || { echo "tag $(TAG) already exists" >&2; exit 1; }
-	dev/release-notes.sh "$(TAG)" >/dev/null
+# Every test there is, unattended, before tagging: about 20 minutes (the lab
+# and both ISO tests); stops at the first failure. Needs no tag or CHANGELOG
+# section, and runs on an uncommitted tree too.
+test-all:
 	@out=$$(gofmt -l cmd internal models web/*.go); test -z "$$out" || { echo "not gofmt'ed:"; echo "$$out"; exit 1; } >&2
 	cd web/frontend && npm ci && npx prettier --check src/
 	$(MAKE) lint test
@@ -129,6 +125,16 @@ release-check:
 	$(MAKE) lab-down
 	$(MAKE) iso-e2e
 	$(MAKE) iso-e2e-split
+	@echo "test-all: OK"
+
+# test-all plus what a release needs before its tag is pushed:
+# make release-check TAG=v1.2.0.
+release-check:
+	@test -n "$(TAG)" || { echo "usage: make release-check TAG=vX.Y.Z" >&2; exit 1; }
+	@test -z "$$(git status --porcelain)" || { echo "working tree is not clean" >&2; exit 1; }
+	@! git rev-parse -q --verify "refs/tags/$(TAG)" >/dev/null || { echo "tag $(TAG) already exists" >&2; exit 1; }
+	dev/release-notes.sh "$(TAG)" >/dev/null
+	$(MAKE) test-all
 	@echo "release-check $(TAG): OK. Still by hand: DEV.md's release checklist."
 
 clean:
