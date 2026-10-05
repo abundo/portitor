@@ -168,6 +168,7 @@ func Nftables(in *fwconfig.Instance, lockout *AntiLockout, paths Paths) string {
 	// ----- forward -----
 	b.WriteString("\tchain forward {\n")
 	b.WriteString("\t\ttype filter hook forward priority filter; policy drop;\n")
+	writeNAT64LoopDrop(b, in)
 	writePolicers(b, in, fwconfig.ChainForward)
 	writeShaperMarks(b, in, fwconfig.ChainForward)
 	if counted {
@@ -231,7 +232,7 @@ func Nftables(in *fwconfig.Instance, lockout *AntiLockout, paths Paths) string {
 	writePolicyCount(b, in, fwconfig.ChainOutput)
 	b.WriteString("\t}\n\n")
 
-	writeNAT64Guard(b, in)
+	writeNAT64(b, in, counted)
 
 	// ----- NAT -----
 	b.WriteString("\tchain prerouting_nat {\n")
@@ -259,6 +260,7 @@ func Nftables(in *fwconfig.Instance, lockout *AntiLockout, paths Paths) string {
 			writeNAT(b, i, n, in)
 		}
 	}
+	writeNAT64Masquerade(b, in)
 	b.WriteString("\t}\n")
 	b.WriteString("}\n")
 	for _, name := range lists {
@@ -1426,23 +1428,93 @@ func appendUnique(list []string, s string) []string {
 	return append(list, s)
 }
 
-// NAT64GuardPriority runs the NAT64 guard before Jool, which takes the
+// NAT64Priority runs the NAT64 chain before Jool, which takes the
 // packets it translates at prerouting priority dstnat + 25.
-const NAT64GuardPriority = "mangle"
+const NAT64Priority = "mangle"
 
-// writeNAT64Guard drops IPv6 packets to the NAT64 prefix that don't come in
-// on an interface with 464XLAT: Jool translates them before the forward
-// chain could.
-func writeNAT64Guard(b *strings.Builder, in *fwconfig.Instance) {
+// NAT64ReplyChain counts, polices and shapes the replies of the
+// connections translated by NAT64 (fwconfig.NAT64): Jool takes them at
+// prerouting, so the forward chain never sees them.
+const NAT64ReplyChain = "nat64_reply"
+
+// writeNAT64 renders the NAT64 chain, before Jool:
+//   - IPv6 packets to the NAT64 prefix that don't come in on an interface
+//     with 464XLAT are dropped;
+//   - the others get their interface's mark, which chooses its loop
+//     device's pool4 address in Jool;
+//   - the translated packets coming in on a loop device lose the mark
+//     again, as a shaper marks only unmarked packets;
+//   - replies to the pool4 addresses go through NAT64ReplyChain.
+func writeNAT64(b *strings.Builder, in *fwconfig.Instance, counted bool) {
 	if in.NAT64 == nil {
 		return
 	}
+	devs := in.NAT64Devices()
+	var reply strings.Builder
+	writePolicers(&reply, in, fwconfig.ChainForward)
+	writeShaperMarks(&reply, in, fwconfig.ChainForward)
+	if counted {
+		reply.WriteString("\t\tct direction reply counter name ct mark map @rule_reply\n")
+	}
+	if reply.Len() > 0 && len(devs) > 0 {
+		fmt.Fprintf(b, "\tchain %s {\n%s\t}\n\n", NAT64ReplyChain, reply.String())
+	}
+
 	b.WriteString("\tchain prerouting_nat64 {\n")
-	fmt.Fprintf(b, "\t\ttype filter hook prerouting priority %s; policy accept;\n", NAT64GuardPriority)
+	fmt.Fprintf(b, "\t\ttype filter hook prerouting priority %s; policy accept;\n", NAT64Priority)
 	match := ""
 	if ifaces := in.AddVRRPDevices(in.NAT64.Interfaces); len(ifaces) > 0 {
 		match = " iifname != " + quotedSet(ifaces)
 	}
 	fmt.Fprintf(b, "\t\tip6 daddr %s%s counter drop comment \"nat64\"\n", in.NAT64.Prefix, match)
+	for _, d := range devs {
+		fmt.Fprintf(b, "\t\tiifname %s ip6 daddr %s meta mark set %#x %s\n",
+			quotedSet(in.AddVRRPDevices([]string{d.Parent})), in.NAT64.Prefix, d.Mark, comment("nat64", d.Parent))
+	}
+	if len(devs) > 0 {
+		fmt.Fprintf(b, "\t\tiifname %s meta mark set 0 comment \"nat64 loop\"\n", quotedSet(nat64DeviceNames(devs)))
+		if reply.Len() > 0 {
+			fmt.Fprintf(b, "\t\tct direction reply ct original ip saddr %s jump %s\n", nat64Addrs(devs), NAT64ReplyChain)
+		}
+	}
 	b.WriteString("\t}\n\n")
+}
+
+// writeNAT64LoopDrop drops what comes back round a loop device to its
+// pool4 address: a reply Jool had no session for, which would go round
+// again.
+func writeNAT64LoopDrop(b *strings.Builder, in *fwconfig.Instance) {
+	if devs := in.NAT64Devices(); len(devs) > 0 {
+		fmt.Fprintf(b, "\t\tiifname %s ip daddr %s counter drop comment \"nat64 loop\"\n", quotedSet(nat64DeviceNames(devs)), nat64Addrs(devs))
+	}
+}
+
+// writeNAT64Masquerade masquerades the default pool's addresses, which
+// are never routed, where they leave, after the NAT rules. A pool set by
+// the user is the NAT rules' alone.
+func writeNAT64Masquerade(b *strings.Builder, in *fwconfig.Instance) {
+	if devs := in.NAT64Devices(); len(devs) > 0 && len(in.NAT64.Pool4) == 0 {
+		fmt.Fprintf(b, "\t\tip saddr %s oifname != %s counter masquerade comment \"nat64\"\n", nat64Addrs(devs), quotedSet(nat64DeviceNames(devs)))
+	}
+}
+
+func nat64DeviceNames(devs []fwconfig.NAT64Device) []string {
+	var out []string
+	for _, d := range devs {
+		out = append(out, d.Name)
+	}
+	slices.Sort(out)
+	return out
+}
+
+// nat64Addrs is the loop devices' pool4 addresses, as an nft operand.
+func nat64Addrs(devs []fwconfig.NAT64Device) string {
+	var out []string
+	for _, d := range devs {
+		out = append(out, d.Address)
+	}
+	if len(out) == 1 {
+		return out[0]
+	}
+	return "{ " + strings.Join(out, ", ") + " }"
 }

@@ -183,6 +183,12 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 				newRoot = append(newRoot, d.Name)
 			}
 		}
+		for _, d := range in.NAT64Devices() {
+			want[d.Name] = true
+			if ns == "" {
+				newRoot = append(newRoot, d.Name)
+			}
+		}
 		for name, l := range links {
 			if want[name] || name == "lo" || l.kind() == "" || fallbackDevice(l) {
 				continue
@@ -321,7 +327,7 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 			}
 			routes = append(routes, r...)
 		}
-		if err := a.doAll(ctx, planRoutes(ns, slices.Concat(in.KernelRoutes(), in.WireGuardRoutes()), routes)); err != nil {
+		if err := a.doAll(ctx, planRoutes(ns, slices.Concat(in.KernelRoutes(), in.WireGuardRoutes(), nat64Routes(in)), routes)); err != nil {
 			return err
 		}
 		a.setNamedEndpoints(ctx, in)

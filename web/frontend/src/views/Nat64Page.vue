@@ -87,10 +87,10 @@ async function save() {
           <UFormField
             v-if="form.nat64"
             label="IPv4 pool"
-            help="IPv4 prefixes the translated packets leave from, routed to this firewall. Empty: the address of the interface they leave on (the WAN), ports 61001-65535."
+            help="One address for each interface with 464XLAT, used inside the firewall; the NAT rules then apply as to any IPv4 client. Empty: 192.0.0.0/29 (RFC 7335), masqueraded where it leaves, for up to 8 interfaces. A pool of your own must not overlap an address or route of the firewall."
             :ui="inlineField"
           >
-            <TagsInput v-model="form.nat64_pool4" placeholder="192.0.2.0/28" />
+            <TagsInput v-model="form.nat64_pool4" placeholder="198.18.0.0/24" />
           </UFormField>
           <UFormField
             label="DNS64"

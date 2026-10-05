@@ -61,7 +61,8 @@ func TestNftablesMain(t *testing.T) {
 		`ip daddr 216.66.80.90 meta l4proto 41 accept comment "auto: 6in4 he0"`,
 		"\tset tunnelbroker_ping {\n\t\ttype ipv4_addr\n\t\tflags timeout\n\t}\n",
 		`ip daddr @tunnelbroker_ping icmp type echo-request accept comment "auto: tunnel broker ping"`,
-		`iifname "eth1" oifname "eth0" counter accept comment "rule 1: LAN to Internet"`,
+		// eth1 has 464XLAT: its translated IPv4 comes in on n64-eth1.
+		`iifname { "eth1", "n64-eth1" } oifname "eth0" counter accept comment "rule 1: LAN to Internet"`,
 		"set rl_ssh_v4 {\n\t\ttype ipv4_addr\n\t\tsize 65535\n\t\tflags dynamic,timeout\n\t\ttimeout 10m\n",
 		// Over the limit is dropped before the rule.
 		"\t\tiifname \"eth0\" tcp dport 22 update @rl_ssh_v4 { ip saddr limit rate over 4/minute burst 2 packets } drop comment \"rule 15: rate limit ssh\"\n" +
@@ -81,7 +82,7 @@ func TestNftablesMain(t *testing.T) {
 		`iifname "lk-guest" oifname "eth0" counter accept`,
 		`iifname "eth0" ip daddr 192.168.1.0/24 counter log prefix "forward rule 8 drop" group 64 drop comment "rule 8: no 'direct' access"`,
 		"# rule 5 skipped: dmz has no enabled interfaces",
-		`iifname { "eth1", "wg0" } counter accept comment "rule 10: trusted"`,
+		`iifname { "eth1", "n64-eth1", "wg0" } counter accept comment "rule 10: trusted"`,
 		`iifname "eth1.20" counter jump reject_pkt comment "rule 11"`,
 		"\t\tcontinue comment \"'Outbound' is open\"\n",
 		"\t\tcontinue comment \"group: admin\"\n",
@@ -100,8 +101,8 @@ func TestNftablesMain(t *testing.T) {
 		"\tset A_admins_v4 {\n\t\ttype ipv4_addr\n\t\tflags interval\n\t\tauto-merge\n\t\telements = { 192.168.1.20, 192.168.1.21 }\n\t}\n",
 		"\tset A_admins_v6 {\n\t\ttype ipv6_addr\n\t\tflags interval\n\t\tauto-merge\n\t\telements = { fd00:1::20 }\n\t}\n",
 		"\tset A_servers_v6 {\n\t\ttype ipv6_addr\n\t\tflags interval\n\t\tauto-merge\n\t}\n",
-		`iifname "eth1" ip saddr @A_admins_v4 ip daddr @A_servers_v4 counter accept comment "rule `,
-		`iifname "eth1" ip saddr 192.168.1.99 ip daddr @A_servers_v4 counter accept comment "rule `,
+		`iifname { "eth1", "n64-eth1" } ip saddr @A_admins_v4 ip daddr @A_servers_v4 counter accept comment "rule `,
+		`iifname { "eth1", "n64-eth1" } ip saddr 192.168.1.99 ip daddr @A_servers_v4 counter accept comment "rule `,
 		"type filter hook output priority filter; policy drop;",
 		`counter accept comment "rule 14: allow all output"`,
 		"}\ninclude \"/var/lib/portitor/iplists/crowdsec.nft\"\ninclude \"/var/lib/portitor/iplists/drop.nft\"\n",
@@ -283,7 +284,7 @@ func TestNftablesRuleCounters(t *testing.T) {
 		"\tcounter rule_1_orig {\n\t}\n",
 		"\tcounter rule_1_reply {\n\t}\n",
 		`elements = { 1 : "rule_1_orig", `,
-		`iifname "eth1" oifname "eth0" counter name "rule_1_orig" ct mark set 1 accept comment "rule 1: LAN to Internet"`,
+		`iifname { "eth1", "n64-eth1" } oifname "eth0" counter name "rule_1_orig" ct mark set 1 accept comment "rule 1: LAN to Internet"`,
 		`iifname "eth1.20" counter name "rule_11_orig" jump reject_pkt comment "rule 11"`,
 		"policy drop;\n" + connCountRules + "\t\tct state established,related accept\n",
 	} {
@@ -472,16 +473,45 @@ func TestNamedConfDNSSECValidation(t *testing.T) {
 	}
 }
 
-func TestNftablesNAT64Guard(t *testing.T) {
-	in := &fwconfig.SampleDocument().Instances[0]
+func TestNftablesNAT64(t *testing.T) {
+	doc := withRuleIDs(fwconfig.SampleDocument())
+	in := &doc.Instances[0]
+	in.Rules[0].RateLimit = "shared" // rule 1, eth1 to eth0: shaped
 	nft := Nftables(in, nil, DefaultPaths())
-	want := "\tchain prerouting_nat64 {\n\t\ttype filter hook prerouting priority mangle; policy accept;\n" +
-		"\t\tip6 daddr 64:ff9b::/96 iifname != \"eth1\" counter drop comment \"nat64\"\n\t}\n"
-	if !strings.Contains(nft, want) {
-		t.Errorf("missing guard in\n%s", nft)
+	for _, want := range []string{
+		// Packets to the prefix from eth1 get its mark, which chooses its
+		// pool4 address in Jool; the translations coming back in on its
+		// loop device lose it again.
+		"\tchain prerouting_nat64 {\n\t\ttype filter hook prerouting priority mangle; policy accept;\n" +
+			"\t\tip6 daddr 64:ff9b::/96 iifname != \"eth1\" counter drop comment \"nat64\"\n" +
+			"\t\tiifname \"eth1\" ip6 daddr 64:ff9b::/96 meta mark set 0x5000 comment \"nat64: eth1\"\n" +
+			"\t\tiifname \"n64-eth1\" meta mark set 0 comment \"nat64 loop\"\n" +
+			"\t\tct direction reply ct original ip saddr 192.0.0.0 jump nat64_reply\n\t}\n",
+		// Jool takes the replies before forward: they are policed,
+		// shaped and counted here.
+		"\tchain nat64_reply {\n",
+		"\t\tct mark 1 meta mark 0 meta mark set 0x5301 comment \"rule 1: shaper shared\"\n",
+		"\t\tct direction reply counter name ct mark map @rule_reply\n\t}\n",
+		"policy drop;\n\t\tiifname \"n64-eth1\" ip daddr 192.0.0.0 counter drop comment \"nat64 loop\"\n",
+		`iifname { "eth1", "n64-eth1" } oifname "eth0" counter name "rule_1_orig" ct mark set 1 accept`,
+		// The default pool is masqueraded after the NAT rules.
+		"\t\tip saddr 192.0.0.0 oifname != \"n64-eth1\" counter masquerade comment \"nat64\"\n\t}\n}\n",
+	} {
+		if !strings.Contains(nft, want) {
+			t.Errorf("missing:\n%s\nin:\n%s", want, nft)
+		}
 	}
+
+	// A pool of the user's own is the NAT rules'.
+	in.NAT64.Pool4 = []string{"198.18.0.0/24"}
+	nft = Nftables(in, nil, DefaultPaths())
+	if !strings.Contains(nft, "ct original ip saddr 198.18.0.0 jump") || strings.Contains(nft, `masquerade comment "nat64"`) {
+		t.Errorf("own pool:\n%s", nft)
+	}
+
 	in.NAT64.Interfaces = nil
-	if nft := Nftables(in, nil, DefaultPaths()); !strings.Contains(nft, "\t\tip6 daddr 64:ff9b::/96 counter drop") {
+	nft = Nftables(in, nil, DefaultPaths())
+	if !strings.Contains(nft, "\t\tip6 daddr 64:ff9b::/96 counter drop") || strings.Contains(nft, "n64-") {
 		t.Errorf("no interfaces: all dropped:\n%s", nft)
 	}
 	in.NAT64 = nil

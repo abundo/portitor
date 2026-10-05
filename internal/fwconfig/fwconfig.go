@@ -781,7 +781,7 @@ func (in *Instance) InterfaceZone(name string) *InterfaceZone {
 
 // MatchInterfaces resolves a rule's interface list (interface and zone
 // names) to the enabled interfaces it matches, with their VRRP devices
-// (AddVRRPDevices), sorted and without duplicates. Call it on an expanded document so link ends are included.
+// (AddVRRPDevices) and NAT64 loop devices (AddNAT64Devices), sorted and without duplicates. Call it on an expanded document so link ends are included.
 // A non-empty list can resolve to none (empty zones, disabled interfaces);
 // the rule must then be left out, not rendered without the match.
 func (in *Instance) MatchInterfaces(list []string) []string {
@@ -800,5 +800,5 @@ func (in *Instance) MatchInterfaces(list []string) []string {
 			add(name)
 		}
 	}
-	return in.AddVRRPDevices(out)
+	return in.AddNAT64Devices(in.AddVRRPDevices(out))
 }

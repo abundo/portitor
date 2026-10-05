@@ -121,7 +121,7 @@ docs and user-facing messages.
   their `ifb-<name>` devices (`fwconfig.IFBName`; interface names may not start
   with `ifb-`), and the VRRP macvlan devices (`fwconfig.VRRPDevices`; names may not
   start with `vrrp4-` or `vrrp6-`), and the Jool instance `fwconfig.JoolInstance` in
-  each namespace. Leave everything else alone (docker, libvirt, other tables).
+  each namespace, its loop devices (`n64-*`) and the IPv4 `ip rule`s with protocol 99. Leave everything else alone (docker, libvirt, other tables).
   Accept rules set the connection mark (`ct mark`) to the rule's id, so the
   rule counters (`render.RuleCounter`) count whole connections; the agent owns
   `ct mark` in its namespaces. Log statements send to nflog group
@@ -254,9 +254,22 @@ the certificate portitor-web serves, chosen under Settings
   PREF64 (radvd) and Jool. An interface's `xlat464` flag puts PREF64 and DHCPv4
   option 108 on it, and, with Jool, is where packets to the prefix may come in: Jool
   takes them at prerouting (dstnat + 25), before the forward chain, so the ruleset's
-  `prerouting_nat64` chain (priority mangle) drops the rest. The agent makes Jool's
-  instance again when the NAT64 differs from `<state>/nat64.json` or it isn't running
-  (`planNAT64`).
+  `prerouting_nat64` chain (priority mangle) drops the rest. Each such interface has
+  a loop device (`fwconfig.NAT64Devices`, `n64-<name>`; interface names may not start
+  with `n64-`): a dummy whose tc egress redirects to its own ingress, a pool4 address
+  (from `Pool4`, default `192.0.0.0/29`) that Jool picks by the packet mark the
+  NAT64 chain sets on the interface's packets, and a rule `from <address> iif lo`
+  (proto 99, table and preference `NAT64TableBase` + i) routing Jool's output into
+  the device. The translated IPv4 comes back in on it and is forwarded like any
+  other: `MatchInterfaces` adds the loop device to a rule naming its interface. The
+  mark is cleared there (a shaper marks only unmarked packets). Replies don't loop:
+  the reverse NAT at dstnat gives them the pool4 address and Jool takes them, so the
+  NAT64 chain sends them through `nat64_reply` (the forward chain's policers, shaper
+  marks and reply counters; Jool keeps the mark). The default pool is masqueraded
+  (`writeNAT64Masquerade`); one of the user's is the NAT rules'. The agent makes
+  Jool's instance again when the NAT64 (prefix, pool, interfaces) differs from
+  `<state>/nat64.json` or it isn't running (`planNAT64`), and keeps the devices,
+  rules and tables (`planNAT64Devices`, `planNAT64Rules`).
 - **NTP** (`fwconfig/ntp.go`, `render/chrony.go`): chrony per instance
   (`instances.ntp_*`), its servers JSON. The default instance's chrony.service sets
   the host's clock; a virtual firewall's `portitor-chrony@` runs `chronyd -x` (the

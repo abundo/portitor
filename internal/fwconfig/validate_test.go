@@ -4,6 +4,7 @@
 package fwconfig
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -278,6 +279,19 @@ func TestValidateCatchesProblems(t *testing.T) {
 		{"nat64 pool", func(d *Document) { d.Instances[0].NAT64.Pool4 = []string{"2001:db8::/64"} }, "invalid IPv4 pool prefix"},
 		{"nat64 pool host bits", func(d *Document) { d.Instances[0].NAT64.Pool4 = []string{"192.0.2.1/24"} }, "invalid IPv4 pool prefix"},
 		{"nat64 interface", func(d *Document) { d.Instances[0].NAT64.Interfaces = []string{"eth9"} }, `nat64: unknown interface "eth9"`},
+		{"nat64 device name", func(d *Document) { d.Instances[0].Interfaces[1].Name = "n64-x" }, "n64- names are for NAT64 devices"},
+		{"nat64 pool too small", func(d *Document) {
+			d.Instances[0].NAT64.Pool4 = []string{"198.18.0.0/32"}
+			d.Instances[0].NAT64.Interfaces = []string{"eth1", "eth1.20"}
+		}, "nat64: 2 interfaces with 464XLAT need 2 IPv4 pool addresses, one each; the IPv4 pool has 1"},
+		{"nat64 default pool too small", func(d *Document) {
+			for i := range 9 {
+				name := fmt.Sprintf("x%d", i)
+				d.Instances[0].Interfaces = append(d.Instances[0].Interfaces, Interface{Name: name, Kind: KindPhysical, Enabled: true})
+				d.Instances[0].NAT64.Interfaces = append(d.Instances[0].NAT64.Interfaces, name)
+			}
+		}, "the default pool 192.0.0.0/29 has; set the NAT64 IPv4 pool, it has 8"},
+		{"nat64 pool overlaps an address", func(d *Document) { d.Instances[0].NAT64.Pool4 = []string{"192.168.1.0/28"} }, "nat64: IPv4 pool 192.168.1.0/28 overlaps interface eth1's address 192.168.1.1/24"},
 		{"ntp no servers", func(d *Document) { d.Instances[0].NTP.Servers = nil }, "ntp: no servers"},
 		{"ntp server injection", func(d *Document) { d.Instances[0].NTP.Servers[0].Address = "x\nallow all" }, "ntp: invalid server"},
 		{"ntp duplicate", func(d *Document) { d.Instances[0].NTP.Servers[1].Address = "time.cloudflare.com" }, "ntp: duplicate server"},
@@ -349,7 +363,7 @@ func TestMatchInterfaces(t *testing.T) {
 	}{
 		{nil, ""},
 		{[]string{"wan"}, "eth0"},
-		{[]string{"lan", "vpn", "eth1"}, "eth1 wg0"},
+		{[]string{"lan", "vpn", "eth1"}, "eth1 n64-eth1 wg0"}, // eth1 has 464XLAT
 		{[]string{"guest"}, "lk-guest"},
 		{[]string{"dmz"}, ""},
 		{[]string{"iot"}, ""}, // disabled member

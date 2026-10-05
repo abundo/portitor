@@ -136,6 +136,9 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 		if isVRRPDeviceName(ifc.Name) {
 			v.addf("%s: %s and %s names are for VRRP devices", ip, VRRPDevicePrefix4, VRRPDevicePrefix6)
 		}
+		if strings.HasPrefix(ifc.Name, NAT64DevicePrefix) {
+			v.addf("%s: %s names are for NAT64 devices", ip, NAT64DevicePrefix)
+		}
 		if ifc.ShapeEgress < 0 || ifc.ShapeEgress > MaxShapeMbit || ifc.ShapeIngress < 0 || ifc.ShapeIngress > MaxShapeMbit {
 			v.addf("%s: shaping must be 0-%d Mbit/s", ip, MaxShapeMbit)
 		}
@@ -649,7 +652,7 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 		}
 	}
 	if in.NAT64 != nil {
-		v.nat64(p, in.NAT64, ifaces)
+		v.nat64(p, in, ifaces)
 	}
 	if in.NTP != nil {
 		v.ntp(p, in.NTP, ifaces)
