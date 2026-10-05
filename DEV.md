@@ -112,6 +112,12 @@ module loaded on the host for `wg0`.
 
 #### Release checklist
 
+`make release-check TAG=vX.Y.Z` runs what needs no one at the GUI, about 20
+minutes, stopping at the first failure: a clean tree, the CHANGELOG section,
+gofmt and prettier, `make lint test`, govulncheck, `npm audit`, a GoReleaser
+snapshot, the lab's apply (`lab-clean lab-up lab-seed lab-deploy`), `make iso-e2e`
+and `make iso-e2e-split`. The rest of the list is by hand.
+
 1. **Checks:** `make test`, `make lint` and `make fmt` pass and leave nothing to
    commit; `go run golang.org/x/vuln/cmd/govulncheck@latest ./...` reports nothing
    our code calls (for the standard library, raise `toolchain` in go.mod);
