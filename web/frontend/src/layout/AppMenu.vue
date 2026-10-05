@@ -46,6 +46,7 @@ const sections = computed(() => [
       { label: 'Neighbours', icon: 'i-lucide-network', to: '/neighbours' },
       { label: 'Hosts & prefixes', icon: 'i-lucide-tags', to: '/hosts-prefixes' },
       { label: 'NAT64', icon: 'i-lucide-arrow-left-right', to: '/nat64' },
+      { label: 'Tunnels', icon: 'i-lucide-train-front-tunnel', to: '/tunnels' },
     ],
   },
   {

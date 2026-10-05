@@ -268,6 +268,55 @@ func seedInstance(tx *gorm.DB, in *models.Instance) error {
 	}).Error
 }
 
+// prepareTunnel checks a 6in4 interface's tunnel and tunnel broker
+// account; other kinds have none.
+func prepareTunnel(i *models.Interface) error {
+	newKey := strings.TrimSpace(i.NewHeUpdateKey)
+	i.NewHeUpdateKey = ""
+	if i.Kind != fwconfig.Kind6in4 {
+		i.TunnelRemote, i.TunnelLocal, i.HeTunnelID, i.HeUsername, i.HeUpdateKey = "", "", "", "", ""
+		i.TunnelDefaultRoute = false
+		return nil
+	}
+	if i.Ipv4Mode == fwconfig.ModeDHCP {
+		return bad("6in4 tunnels have static addresses")
+	}
+	i.TunnelRemote, i.TunnelLocal = strings.TrimSpace(i.TunnelRemote), strings.TrimSpace(i.TunnelLocal)
+	if !fwconfig.ValidTunnelEndpoint(i.TunnelRemote) {
+		return bad("tunnel server: the server's IPv4 address (Server IPv4 Address at tunnelbroker.net)")
+	}
+	if i.TunnelLocal != "" && !fwconfig.ValidTunnelEndpoint(i.TunnelLocal) {
+		return bad("local address: an IPv4 address of the firewall, or empty for any")
+	}
+	i.HeTunnelID, i.HeUsername = strings.TrimSpace(i.HeTunnelID), strings.TrimSpace(i.HeUsername)
+	if i.HeTunnelID == "" {
+		i.HeUsername, i.HeUpdateKey = "", ""
+		return nil
+	}
+	if !fwconfig.ValidTunnelID(i.HeTunnelID) {
+		return bad("tunnel id: the number tunnelbroker.net shows as Tunnel ID")
+	}
+	if !fwconfig.ValidTunnelUser(i.HeUsername) {
+		return bad("user name: the tunnelbroker.net account's user name")
+	}
+	if newKey != "" {
+		if !fwconfig.ValidUpdateKey(newKey) {
+			return bad("update key: at most 128 characters, no spaces")
+		}
+		i.HeUpdateKey = newKey
+	}
+	if i.HeUpdateKey == "" {
+		return bad("update key: the tunnel's Update Key (Advanced tab at tunnelbroker.net)")
+	}
+	return nil
+}
+
+// presentInterface hides the tunnel broker update key.
+func presentInterface(i *models.Interface) {
+	i.HasHeUpdateKey = i.HeUpdateKey != ""
+	i.NewHeUpdateKey = ""
+}
+
 func prepareInterface(tx *gorm.DB, i, old *models.Interface) error {
 	if err := instanceExists(tx, i.InstanceID); err != nil {
 		return err
@@ -286,7 +335,7 @@ func prepareInterface(tx *gorm.DB, i, old *models.Interface) error {
 	if i.Kind == "" {
 		i.Kind = fwconfig.KindPhysical
 	}
-	if err := oneOf("kind", i.Kind, fwconfig.KindPhysical, fwconfig.KindVLAN, fwconfig.KindBridge, fwconfig.KindWireGuard, fwconfig.KindLoopback); err != nil {
+	if err := oneOf("kind", i.Kind, fwconfig.KindPhysical, fwconfig.KindVLAN, fwconfig.KindBridge, fwconfig.KindWireGuard, fwconfig.KindLoopback, fwconfig.Kind6in4); err != nil {
 		return err
 	}
 	if old != nil && old.Kind != i.Kind {
@@ -382,7 +431,10 @@ func prepareInterface(tx *gorm.DB, i, old *models.Interface) error {
 	default:
 		i.WgEndpoint, i.WgKeepalive = "", 0
 	}
-	if i.Kind == fwconfig.KindWireGuard || i.Kind == fwconfig.KindLoopback {
+	if err := prepareTunnel(i); err != nil {
+		return err
+	}
+	if i.Kind == fwconfig.KindWireGuard || i.Kind == fwconfig.KindLoopback || i.Kind == fwconfig.Kind6in4 {
 		i.Lldp = false
 	}
 	if i.Kind == fwconfig.KindLoopback {

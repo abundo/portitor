@@ -1437,6 +1437,12 @@ func redactDoc(doc fwconfig.Document) fwconfig.Document {
 				}
 				ifc.WireGuard = &wg
 			}
+			if ifc.Tunnel != nil && ifc.Tunnel.TunnelBroker != nil {
+				t, tb := *ifc.Tunnel, *ifc.Tunnel.TunnelBroker
+				tb.UpdateKey = "<redacted>"
+				t.TunnelBroker = &tb
+				ifc.Tunnel = &t
+			}
 			cp.Interfaces[j] = ifc
 		}
 		cp.Certificates = slices.Clone(in.Certificates)

@@ -57,6 +57,10 @@ func TestNftablesMain(t *testing.T) {
 		`iifname { "eth1", "eth1.20" } udp dport 67 accept`,
 		`iifname { "eth1", "eth1.20", "wg0" } meta l4proto { tcp, udp } th dport 53 accept`,
 		`udp dport 51820 accept comment "auto: wireguard wg0"`,
+		`ip saddr 216.66.80.90 meta l4proto 41 accept comment "auto: 6in4 he0"`,
+		`ip daddr 216.66.80.90 meta l4proto 41 accept comment "auto: 6in4 he0"`,
+		"\tset tunnelbroker_ping {\n\t\ttype ipv4_addr\n\t\tflags timeout\n\t}\n",
+		`ip daddr @tunnelbroker_ping icmp type echo-request accept comment "auto: tunnel broker ping"`,
 		`iifname "eth1" oifname "eth0" counter accept comment "rule 1: LAN to Internet"`,
 		"set rl_ssh_v4 {\n\t\ttype ipv4_addr\n\t\tsize 65535\n\t\tflags dynamic,timeout\n\t\ttimeout 10m\n",
 		// Over the limit is dropped before the rule.

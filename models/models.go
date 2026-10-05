@@ -440,6 +440,20 @@ type Interface struct {
 	// and the listen port.
 	WgEndpoint  string `json:"wg_endpoint"`
 	WgKeepalive int    `json:"wg_keepalive"`
+
+	// A 6in4 tunnel's server (IPv4) and local address (empty: any).
+	TunnelRemote string `json:"tunnel_remote"`
+	TunnelLocal  string `json:"tunnel_local"`
+	// TunnelDefaultRoute routes IPv6 (::/0) through the tunnel.
+	TunnelDefaultRoute bool `json:"tunnel_default_route"`
+	// The Hurricane Electric tunnel broker account that keeps the tunnel's
+	// endpoint up to date; an empty HeTunnelID is none. HeUpdateKey is a
+	// secret, set through NewHeUpdateKey (empty keeps it).
+	HeTunnelID     string `gorm:"column:he_tunnel_id" json:"he_tunnel_id"`
+	HeUsername     string `json:"he_username"`
+	HeUpdateKey    string `json:"-"`
+	NewHeUpdateKey string `gorm:"-" json:"new_he_update_key"`
+	HasHeUpdateKey bool   `gorm:"-" json:"has_he_update_key"`
 }
 
 type WgPeer struct {

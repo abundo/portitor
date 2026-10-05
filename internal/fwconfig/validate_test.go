@@ -301,6 +301,14 @@ func TestValidateCatchesProblems(t *testing.T) {
 		{"zone in nat target", func(d *Document) { d.Instances[0].NAT[0].ToAddr = "fe80::1%x\nchain evil {" }, "invalid target address"},
 		{"zone in dns forwarder", func(d *Document) { d.Instances[0].DNS.Forwarders = []string{`fe80::1%x"; };`} }, "invalid forwarder"},
 		{"zone in rule address", func(d *Document) { d.Instances[0].Rules[0].SrcAddrs = []string{"fe80::1%x accept"} }, "invalid address"},
+		{"6in4 without settings", func(d *Document) { d.Instances[0].Interfaces[4].Tunnel = nil }, "6in4 settings missing"},
+		{"6in4 bad remote", func(d *Document) { d.Instances[0].Interfaces[4].Tunnel.Remote = "2001:db8::1" }, "invalid tunnel server address"},
+		{"6in4 bad local", func(d *Document) { d.Instances[0].Interfaces[4].Tunnel.Local = "0.0.0.0" }, "invalid local address"},
+		{"6in4 dhcp", func(d *Document) { d.Instances[0].Interfaces[4].IPv4Mode = ModeDHCP }, "dhcp client is not supported on 6in4"},
+		{"6in4 lldp", func(d *Document) { d.Instances[0].Interfaces[4].LLDP = true }, "lldp is not supported on 6in4"},
+		{"6in4 bad tunnel id", func(d *Document) { d.Instances[0].Interfaces[4].Tunnel.TunnelBroker.TunnelID = "12&myip=1" }, "invalid tunnel broker tunnel id"},
+		{"6in4 bad user", func(d *Document) { d.Instances[0].Interfaces[4].Tunnel.TunnelBroker.Username = "a b" }, "invalid tunnel broker user name"},
+		{"6in4 empty key", func(d *Document) { d.Instances[0].Interfaces[4].Tunnel.TunnelBroker.UpdateKey = "" }, "invalid tunnel broker update key"},
 		{"zone in dyndns server", func(d *Document) { d.Instances[0].DynDNS[0].Server = "[fe80::1%x]:53" }, "server"},
 	}
 	for _, tc := range cases {

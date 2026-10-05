@@ -22,6 +22,7 @@ type (
 	ProgramStatus       = agentapi.ProgramStatus
 	NICStatus           = agentapi.NICStatus
 	DynDNSStatus        = agentapi.DynDNSStatus
+	TunnelBrokerStatus  = agentapi.TunnelBrokerStatus
 	CertificateStatus   = agentapi.CertificateStatus
 	IPListStatus        = agentapi.IPListStatus
 	TaskStatus          = agentapi.TaskStatus

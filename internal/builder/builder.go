@@ -232,7 +232,7 @@ func build(db *gorm.DB, generation int64, only map[string]bool) (*fwconfig.Docum
 				DHCPNoDefaultRoute: mif.DhcpNoDefaultRoute && mif.Ipv4Mode == fwconfig.ModeDHCP,
 				DHCPv6:             mif.Dhcpv6,
 				DHCPv6PD:           mif.Dhcpv6 && mif.Dhcpv6Pd,
-				LLDP:               mif.Lldp && mif.Kind != fwconfig.KindWireGuard && mif.Kind != fwconfig.KindLoopback,
+				LLDP:               mif.Lldp && mif.Kind != fwconfig.KindWireGuard && mif.Kind != fwconfig.KindLoopback && mif.Kind != fwconfig.Kind6in4,
 				ShapeEgress:        mif.ShapeEgress,
 				ShapeIngress:       mif.ShapeIngress,
 			}
@@ -262,6 +262,12 @@ func build(db *gorm.DB, generation int64, only map[string]bool) (*fwconfig.Docum
 					}
 				}
 				ifc.WireGuard = wg
+			}
+			if mif.Kind == fwconfig.Kind6in4 {
+				ifc.Tunnel = &fwconfig.Tunnel6in4{Remote: mif.TunnelRemote, Local: mif.TunnelLocal}
+				if mif.HeTunnelID != "" {
+					ifc.Tunnel.TunnelBroker = &fwconfig.TunnelBroker{TunnelID: mif.HeTunnelID, Username: mif.HeUsername, UpdateKey: mif.HeUpdateKey}
+				}
 			}
 			in.Interfaces = append(in.Interfaces, ifc)
 		}
@@ -376,6 +382,13 @@ func build(db *gorm.DB, generation int64, only map[string]bool) (*fwconfig.Docum
 					continue // the match addresses leave out this version
 				}
 				in.NAT = append(in.NAT, r)
+			}
+		}
+		// A 6in4 tunnel's default route: the tunnel is point to point, so
+		// no gateway.
+		for _, mif := range d.interfaces {
+			if mif.InstanceID == mi.ID && mif.Kind == fwconfig.Kind6in4 && mif.TunnelDefaultRoute && mif.Enabled {
+				in.Routes = append(in.Routes, fwconfig.Route{Destination: "::/0", Interface: mif.Name, Metric: fwconfig.TunnelRouteMetric})
 			}
 		}
 		for _, r := range d.routes {

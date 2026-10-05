@@ -34,6 +34,9 @@ type ipLink struct {
 		InfoKind string `json:"info_kind"`
 		InfoData struct {
 			ID int `json:"id"`
+			// A tunnel's endpoints (sit): addresses, or "any".
+			Local  string `json:"local"`
+			Remote string `json:"remote"`
 		} `json:"info_data"`
 	} `json:"linkinfo"`
 	AddrInfo []ipAddr `json:"addr_info"`
@@ -71,6 +74,19 @@ func (l ipLink) kind() string {
 		return ""
 	}
 	return l.LinkInfo.InfoKind
+}
+
+// fallbackDevices are the devices a tunnel module adds to every network
+// namespace once loaded (sit0 with the sit module); they can't be deleted.
+var fallbackDevices = map[string]string{
+	"sit0": "sit", "tunl0": "ipip", "ip6tnl0": "ip6tnl", "gre0": "gre",
+	"gretap0": "gretap", "erspan0": "erspan", "ip6gre0": "ip6gre",
+	"ip_vti0": "vti", "ip6_vti0": "vti6",
+}
+
+func fallbackDevice(l ipLink) bool {
+	k, ok := fallbackDevices[l.Ifname]
+	return ok && l.kind() == k
 }
 
 func (l ipLink) up() bool {
@@ -143,10 +159,22 @@ func virtualMatches(want fwconfig.Interface, have ipLink) bool {
 		return have.kind() == "wireguard"
 	case fwconfig.KindLoopback:
 		return have.kind() == "dummy"
+	case fwconfig.Kind6in4:
+		return have.kind() == "sit" && want.Tunnel != nil &&
+			have.LinkInfo.InfoData.Remote == want.Tunnel.Remote &&
+			have.LinkInfo.InfoData.Local == sitLocal(want.Tunnel)
 	case fwconfig.KindLink:
 		return have.kind() == "veth"
 	}
 	return true
+}
+
+// sitLocal is a 6in4 tunnel's local address as ip(8) takes and shows it.
+func sitLocal(t *fwconfig.Tunnel6in4) string {
+	if t.Local == "" {
+		return "any"
+	}
+	return t.Local
 }
 
 // planCreate returns commands creating the virtual interfaces of one
@@ -162,7 +190,7 @@ func planCreate(ns string, want []fwconfig.Interface, have map[string]ipLink) []
 	})
 	for _, ifc := range order {
 		switch ifc.Kind {
-		case fwconfig.KindVLAN, fwconfig.KindBridge, fwconfig.KindWireGuard, fwconfig.KindLoopback:
+		case fwconfig.KindVLAN, fwconfig.KindBridge, fwconfig.KindWireGuard, fwconfig.KindLoopback, fwconfig.Kind6in4:
 		default:
 			continue
 		}
@@ -181,6 +209,11 @@ func planCreate(ns string, want []fwconfig.Interface, have map[string]ipLink) []
 			cmds = append(cmds, ipCmd(ns, "link", "add", "name", ifc.Name, "type", "wireguard"))
 		case fwconfig.KindLoopback:
 			cmds = append(cmds, ipCmd(ns, "link", "add", "name", ifc.Name, "type", "dummy"))
+		case fwconfig.Kind6in4:
+			if ifc.Tunnel == nil {
+				continue
+			}
+			cmds = append(cmds, ipCmd(ns, "link", "add", "name", ifc.Name, "type", "sit", "remote", ifc.Tunnel.Remote, "local", sitLocal(ifc.Tunnel), "ttl", "255"))
 		}
 	}
 	return cmds

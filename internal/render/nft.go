@@ -100,6 +100,9 @@ func Nftables(in *fwconfig.Instance, lockout *AntiLockout, paths Paths) string {
 	if slices.ContainsFunc(in.Certificates, func(c fwconfig.Certificate) bool { return !c.Imported() }) {
 		fmt.Fprintf(b, "\tset %s {\n\t\ttype inet_service\n\t}\n\n", ACMEHTTPSet)
 	}
+	if hasTunnelBroker(in) {
+		fmt.Fprintf(b, "\tset %s {\n\t\ttype ipv4_addr\n\t\tflags timeout\n\t}\n\n", TunnelBrokerPingSet)
+	}
 
 	for _, l := range in.RateLimits {
 		writeRateLimit(b, l)
@@ -205,6 +208,12 @@ func Nftables(in *fwconfig.Instance, lockout *AntiLockout, paths Paths) string {
 	// BFD control packets bfdd sends.
 	if ifs := BFDInterfaces(in); len(ifs) > 0 {
 		fmt.Fprintf(b, "\t\toifname %s udp dport %d accept %s\n", quotedSet(ifs), fwconfig.BFDPort, comment("auto", BFDService))
+	}
+	// 6in4 packets to the tunnel servers.
+	for _, ifc := range in.Interfaces {
+		if t := tunnelOf(ifc); t != nil {
+			fmt.Fprintf(b, "\t\tip daddr %s %s accept %s\n", t.Remote, tunnel6in4Proto, comment("auto", Tunnel6in4Service+" "+ifc.Name))
+		}
 	}
 	// The BGP sessions FRR opens to its neighbours.
 	if addrs := BGPNeighborAddrs(in); len(addrs) > 0 {
@@ -606,6 +615,17 @@ func AutoInputRules(in *fwconfig.Instance) []AutoRule {
 			out = append(out, AutoRule{Service: "wireguard " + ifc.Name, Protocol: "udp", DstPort: ifc.WireGuard.ListenPort})
 		}
 	}
+	// 6in4 packets from the tunnel servers.
+	for _, ifc := range in.Interfaces {
+		if t := tunnelOf(ifc); t != nil {
+			out = append(out, AutoRule{Service: Tunnel6in4Service + " " + ifc.Name, Protocol: Tunnel6in4Service, Source: []string{t.Remote}})
+		}
+	}
+	// The tunnel broker's ping of a new endpoint, answered only while the
+	// agent updates it.
+	if hasTunnelBroker(in) {
+		out = append(out, AutoRule{Service: TunnelBrokerPingService, Protocol: TunnelBrokerPingService})
+	}
 	// BGP sessions from the neighbours; the ones FRR opens are replies.
 	if addrs := BGPNeighborAddrs(in); len(addrs) > 0 {
 		out = append(out, AutoRule{Service: BGPService, Protocol: "tcp", DstPort: 179, Source: addrs, SourceSet: BGPNeighborsSet})
@@ -633,6 +653,49 @@ func AutoInputRules(in *fwconfig.Instance) []AutoRule {
 		out = append(out, AutoRule{Service: BFDService, InInterfaces: ifs, Protocol: "udp", DstPort: fwconfig.BFDPort})
 	}
 	return out
+}
+
+// Tunnel6in4Service is the 6in4 auto rules' protocol, and their service
+// with the interface name.
+const Tunnel6in4Service = "6in4"
+
+// tunnel6in4Proto matches 6in4 packets.
+var tunnel6in4Proto = fmt.Sprintf("meta l4proto %d", fwconfig.Protocol6in4)
+
+// TunnelBrokerPingService is the auto rule that answers the tunnel
+// broker's ping of a new endpoint, and its protocol.
+const TunnelBrokerPingService = "tunnel broker ping"
+
+// TunnelBrokerPingSet holds the IPv4 addresses the agent is telling a
+// tunnel broker, each for TunnelBrokerPingTimeout: pings to them are
+// accepted, from anyone, as the broker's address is not known.
+const TunnelBrokerPingSet = "tunnelbroker_ping"
+
+// TunnelBrokerPingTimeout is how long pings to an endpoint are answered
+// after the agent starts an update.
+const TunnelBrokerPingTimeout = "45s"
+
+// TunnelBrokerPingOpen is the nft script that answers pings to addr for
+// TunnelBrokerPingTimeout.
+func TunnelBrokerPingOpen(addr string) string {
+	return fmt.Sprintf("add element inet %s %s { %s timeout %s }\n", TableName, TunnelBrokerPingSet, addr, TunnelBrokerPingTimeout)
+}
+
+// hasTunnelBroker reports whether an enabled 6in4 tunnel of the instance
+// has a tunnel broker account.
+func hasTunnelBroker(in *fwconfig.Instance) bool {
+	return slices.ContainsFunc(in.Interfaces, func(ifc fwconfig.Interface) bool {
+		t := tunnelOf(ifc)
+		return t != nil && t.TunnelBroker != nil
+	})
+}
+
+// tunnelOf is an enabled 6in4 interface's tunnel, or nil.
+func tunnelOf(ifc fwconfig.Interface) *fwconfig.Tunnel6in4 {
+	if ifc.Enabled && ifc.Kind == fwconfig.Kind6in4 {
+		return ifc.Tunnel
+	}
+	return nil
 }
 
 // BFDService is the BFD auto rules' service.
@@ -773,6 +836,10 @@ func (r AutoRule) match() string {
 		parts = append(parts, ospfProto(r.Protocol))
 	case VRRPService:
 		parts = append(parts, vrrpProto)
+	case Tunnel6in4Service:
+		parts = append(parts, tunnel6in4Proto)
+	case TunnelBrokerPingService:
+		parts = append(parts, "ip daddr @"+TunnelBrokerPingSet+" icmp type echo-request")
 	case "tcp,udp":
 		parts = append(parts, fmt.Sprintf("meta l4proto { tcp, udp } th dport %d", r.DstPort))
 	default:

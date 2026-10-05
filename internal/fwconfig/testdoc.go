@@ -40,6 +40,13 @@ func SampleDocument() Document {
 							}},
 						},
 					},
+					{
+						Name: "he0", Kind: Kind6in4, Enabled: true, IPv4Mode: ModeNone,
+						Addresses: []string{"2001:470:1f0a:12::2/64"},
+						Tunnel: &Tunnel6in4{Remote: "216.66.80.90", TunnelBroker: &TunnelBroker{
+							TunnelID: "123456", Username: "example", UpdateKey: "s3cretKey",
+						}},
+					},
 				},
 				InterfaceZones: []InterfaceZone{
 					{Name: "wan", Interfaces: []string{"eth0"}},

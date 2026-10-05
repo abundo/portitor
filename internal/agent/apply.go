@@ -132,6 +132,7 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 	var dhcpWant []dhcpKey
 	var dhcp6Want []dhcp6Key
 	var ddnsWant []dyndnsItem
+	var tbWant []tunnelBrokerItem
 	var certsWant []certItem
 	var lldpWant []lldpKey
 	pktsWant := map[string]string{}
@@ -183,7 +184,7 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 			}
 		}
 		for name, l := range links {
-			if want[name] || name == "lo" || l.kind() == "" {
+			if want[name] || name == "lo" || l.kind() == "" || fallbackDevice(l) {
 				continue
 			}
 			if ns != "" || slices.Contains(root.RootVirtual, name) {
@@ -293,6 +294,11 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 		for _, d := range in.DynDNS {
 			ddnsWant = append(ddnsWant, dyndnsItem{instance: in.Name, netns: ns, cfg: d})
 		}
+		for _, ifc := range in.Interfaces {
+			if ifc.Kind == fwconfig.Kind6in4 && ifc.Enabled && ifc.Tunnel != nil && ifc.Tunnel.TunnelBroker != nil {
+				tbWant = append(tbWant, tunnelBrokerItem{instance: in.Name, netns: ns, iface: ifc.Name, tunnel: *ifc.Tunnel, broker: *ifc.Tunnel.TunnelBroker})
+			}
+		}
 		for _, c := range in.Certificates {
 			certsWant = append(certsWant, certItem{instance: in.Name, netns: ns, cfg: c})
 		}
@@ -330,6 +336,7 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 	a.dhcp.Reconcile(dhcpWant)
 	a.dhcp6.Reconcile(dhcp6Want)
 	a.ddns.Reconcile(ddnsWant)
+	a.tbroker.Reconcile(tbWant)
 	a.certs.Reconcile(ctx, certsWant)
 	a.pkts.Reconcile(pktsWant)
 	a.dnsq.Reconcile(dnsqWant)

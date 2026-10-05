@@ -31,13 +31,15 @@ type Agent struct {
 	dhcp  *dhcpManager
 	dhcp6 *dhcp6Manager
 	ddns  *dyndnsManager
-	certs *certManager
-	pkts  *packetLog
-	dnsq  *queryLog
-	lldp  *lldpManager
-	lists *ipLists
-	tasks *scheduler
-	sys   *systemManager
+	// tbroker updates the 6in4 tunnels' endpoints at the tunnel broker.
+	tbroker *tunnelBrokerManager
+	certs   *certManager
+	pkts    *packetLog
+	dnsq    *queryLog
+	lldp    *lldpManager
+	lists   *ipLists
+	tasks   *scheduler
+	sys     *systemManager
 
 	stopBg context.CancelFunc
 	bgDone sync.WaitGroup
@@ -87,6 +89,7 @@ func New(cfg *Config) *Agent {
 		a.bg = &ExecRunner{}
 	}
 	a.certs = newCertManager(cfg.DryRun, cfg.Paths, a.bg)
+	a.tbroker = newTunnelBrokerManager(cfg.DryRun, a.bg)
 	return a
 }
 
@@ -162,6 +165,7 @@ func (a *Agent) Stop() {
 	a.tasks.Stop()
 	a.lists.Stop()
 	a.ddns.Stop()
+	a.tbroker.Stop()
 	a.certs.Stop()
 	a.pkts.Stop()
 	a.dnsq.Stop()

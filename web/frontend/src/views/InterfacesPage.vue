@@ -255,12 +255,13 @@ const { search: statsSearch, filtered: statsFiltered } = useSearch(statsRows)
   <NeedInstance>
     <CrudPage
       title="Interfaces"
-      description="Physical ports, VLANs, bridges, loopbacks and WireGuard tunnels of this virtual firewall. Physical ports are moved into the virtual firewall's network namespace."
+      description="Physical ports, VLANs, bridges, loopbacks, WireGuard and 6in4 tunnels (Network → Tunnels) of this virtual firewall. Physical ports are moved into the virtual firewall's network namespace."
       :api="interfaces"
       :params="{ instance_id: store.currentId }"
       :columns="columns"
       :fields="fields"
       :item-name="(r) => `interface ${withLabel(r.label, r.name)}`"
+      :edit-to="(r) => (r.kind === '6in4' ? '/tunnels' : null)"
       :defaults="{
         kind: 'physical',
         label: '',

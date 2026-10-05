@@ -78,6 +78,9 @@ type Status struct {
 	Instances  []InstanceStatus `json:"instances"`
 	DHCPLeases []Lease          `json:"dhcp_client_leases"`
 	DynDNS     []DynDNSStatus   `json:"dyndns"`
+	// TunnelBroker is the endpoint updating of the 6in4 tunnels with a
+	// tunnel broker account.
+	TunnelBroker []TunnelBrokerStatus `json:"tunnel_broker"`
 	// Certificates are the ACME certificates.
 	Certificates []CertificateStatus `json:"certificates"`
 	IPLists      []IPListStatus      `json:"ip_lists"`
@@ -228,6 +231,19 @@ type DynDNSStatus struct {
 	Name      string `json:"name"`
 	Interface string `json:"interface"`
 	dyndns.Status
+}
+
+// TunnelBrokerStatus is the state of a 6in4 tunnel's endpoint updating
+// at the tunnel broker (Hurricane Electric).
+type TunnelBrokerStatus struct {
+	Instance  string `json:"instance"`
+	Interface string `json:"interface"`
+	// State: pending, ok, error, dry-run.
+	State string `json:"state"`
+	// Address is the IPv4 endpoint the broker last confirmed.
+	Address    string     `json:"address,omitempty"`
+	LastUpdate *time.Time `json:"last_update,omitempty"`
+	LastError  string     `json:"last_error,omitempty"`
 }
 
 // CertificateFiles is a stored certificate with its private key

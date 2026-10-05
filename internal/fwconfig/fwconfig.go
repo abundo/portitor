@@ -100,6 +100,7 @@ const (
 	KindWireGuard = "wireguard"
 	KindLoopback  = "loopback" // a dummy interface for addresses that stay up (router id, BGP update source)
 	KindLink      = "link"     // one end of a veth Link, generated from Document.Links
+	Kind6in4      = "6in4"     // an IPv6-in-IPv4 tunnel (sit), Tunnel
 )
 
 // IPv4 addressing modes.
@@ -147,6 +148,8 @@ type Interface struct {
 	ShapeEgress  int        `json:"shape_egress,omitempty"`
 	ShapeIngress int        `json:"shape_ingress,omitempty"`
 	WireGuard    *WireGuard `json:"wireguard,omitempty"`
+	// Tunnel holds a 6in4 interface's settings.
+	Tunnel *Tunnel6in4 `json:"tunnel,omitempty"`
 }
 
 // MaxShapeMbit bounds an interface's shaped bandwidth (Mbit/s).
