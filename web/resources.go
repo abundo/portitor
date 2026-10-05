@@ -369,6 +369,9 @@ func prepareInterface(tx *gorm.DB, i, old *models.Interface) error {
 	if err := checkAddrsFree(tx, i); err != nil {
 		return err
 	}
+	if err := renumberPrefixes(tx, old, i); err != nil {
+		return err
+	}
 	if i.Ipv4Mode != fwconfig.ModeDHCP {
 		i.DnsFromDhcp = false
 	}

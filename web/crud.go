@@ -186,8 +186,12 @@ func (r *resource[T, PT]) update(c *echo.Context) error {
 	if item == nil {
 		return err
 	}
-	old := PT(new(T))
-	*old = *item
+	// A second load, not a copy: decoding into item reuses its slices'
+	// arrays, which a shallow copy would share.
+	old, err := r.load(c)
+	if old == nil {
+		return err
+	}
 	id := item.GetID()
 	// Merge: fields absent from the body keep their stored value, and
 	// json:"-" fields (secrets) can't be set through the API at all.
