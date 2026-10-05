@@ -62,6 +62,7 @@ type agentAPI interface {
 	ServiceLog(ctx context.Context, req agentapi.ServiceLogRequest) (io.ReadCloser, error)
 	Connections(ctx context.Context, req agentapi.ConnectionsRequest) (io.ReadCloser, error)
 	FlushConnections(ctx context.Context, instance string) error
+	RenewDHCP(ctx context.Context, req agentapi.DHCPRenewRequest) error
 	System(ctx context.Context) (*agentapi.SystemStatus, error)
 	StartSystemJob(ctx context.Context, req agentapi.SystemJobRequest) error
 	Reboot(ctx context.Context) error
@@ -174,7 +175,7 @@ func (s *Server) Echo() *echo.Echo {
 
 	// Instance admins use these too; the handlers check the instance.
 	for _, r := range []string{"PUT /api/dns/zones/:id/records", "PUT /api/dyndns/clients/:id/records", "POST /api/rules/reorder", "POST /api/nat/reorder",
-		"POST /api/interfaces/:id/wg-rekey", "POST /api/wg/import", "POST /api/agent/capture", "POST /api/agent/trace", "POST /api/agent/servicelog", "POST /api/agent/connections", "POST /api/agent/connections/flush",
+		"POST /api/interfaces/:id/wg-rekey", "POST /api/wg/import", "POST /api/agent/capture", "POST /api/agent/trace", "POST /api/agent/servicelog", "POST /api/agent/connections", "POST /api/agent/connections/flush", "POST /api/agent/dhcp/renew",
 		"POST /api/deploy/apply", "POST /api/deploy/confirm", "POST /api/deploy/rollback"} {
 		s.tenantWrites[r] = true
 	}
@@ -246,6 +247,7 @@ func (s *Server) Echo() *echo.Echo {
 	g.POST("/agent/servicelog", s.handleAgentServiceLog)
 	g.POST("/agent/connections", s.handleAgentConnections)
 	g.POST("/agent/connections/flush", s.handleAgentConnectionsFlush)
+	g.POST("/agent/dhcp/renew", s.handleAgentDHCPRenew)
 	g.GET("/system", s.handleSystem)
 	g.POST("/system/jobs", s.handleSystemJob)
 	g.POST("/system/reboot", s.handleSystemReboot)

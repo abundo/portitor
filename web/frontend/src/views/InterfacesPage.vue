@@ -8,13 +8,17 @@ import NeedInstance from '@/components/NeedInstance.vue'
 import SearchInput from '@/components/SearchInput.vue'
 import { computed, ref } from 'vue'
 import { interfaces } from '@/api'
+import http, { errMsg } from '@/api/http'
+import { useToast } from '@nuxt/ui/composables'
 import { useInstanceRefs, withLabel } from '@/composables/useInstanceRefs'
+import { useAuthStore } from '@/stores/auth'
 import { useDeployStore } from '@/stores/deploy'
 import { bytes } from '@/utils/bytes'
 import { useSearch } from '@/utils/search'
 
 const { store, ifaceList, ifaceText, zonesOf, reload } = useInstanceRefs()
 const deploy = useDeployStore()
+const auth = useAuthStore()
 const isMissing = (row) =>
   row.kind === 'physical' &&
   deploy.missingNics.some((n) => n.name === row.name && n.instance === store.current?.name)
@@ -299,6 +303,30 @@ function leaseOf(row, family = '') {
   )
 }
 
+// Asks the agent's DHCP (family '') or DHCPv6 client on the interface to
+// renew its lease now; the new lease shows with the next status poll.
+const toast = useToast()
+const renewing = ref('')
+async function renew(row, family = '') {
+  const key = `${row.name}/${family}`
+  renewing.value = key
+  try {
+    await http.post('/agent/dhcp/renew', {
+      instance: store.current?.name,
+      interface: row.name,
+      family,
+    })
+    toast.add({
+      title: `${family ? 'DHCPv6' : 'DHCP'} renew sent on ${withLabel(row.label, row.name)}`,
+      color: 'info',
+    })
+  } catch (err) {
+    toast.add({ title: errMsg(err), color: 'error' })
+  } finally {
+    if (renewing.value === key) renewing.value = ''
+  }
+}
+
 // Interface statistics as the firewall reports them (the deploy store polls
 // the agent's status), for the Statistics dialog.
 const statsOpen = ref(false)
@@ -396,8 +424,24 @@ const { search: statsSearch, filtered: statsFiltered } = useSearch(statsRows)
         </UTooltip>
       </template>
       <template #cell-addresses="{ row }">
-        <DhcpClientLease :lease="leaseOf(row)" :no-default-route="row.dhcp_no_default_route" />
-        <DhcpClientLease :lease="leaseOf(row, 'ipv6')" />
+        <div v-for="fam in ['', 'ipv6']" :key="fam" class="flex items-center gap-1">
+          <DhcpClientLease
+            :lease="leaseOf(row, fam)"
+            :no-default-route="fam === '' && row.dhcp_no_default_route"
+          />
+          <UTooltip v-if="leaseOf(row, fam)" :text="fam ? 'Renew DHCPv6' : 'Renew DHCP'">
+            <UButton
+              icon="i-lucide-refresh-cw"
+              color="neutral"
+              variant="ghost"
+              size="xs"
+              :label="fam ? 'v6' : 'v4'"
+              :loading="renewing === `${row.name}/${fam}`"
+              :disabled="!auth.canEdit"
+              @click.stop="renew(row, fam)"
+            />
+          </UTooltip>
+        </div>
         <div v-for="a in row.addresses ?? []" :key="a" class="font-mono text-xs">
           {{ a }}
         </div>

@@ -38,6 +38,7 @@ type dhcpManager struct {
 
 	mu      sync.Mutex
 	clients map[dhcpKey]context.CancelCauseFunc
+	wake    map[dhcpKey]chan struct{} // Renew asks the client to renew now
 	leases  map[dhcpKey]*Lease
 	// restored are the unexpired leases saved by the last run, until the
 	// first Reconcile hands them to their clients.
@@ -52,6 +53,7 @@ func newDHCPManager(run Runner, dryRun bool, dir string, onChange func(string)) 
 		dir:      dir,
 		onChange: onChange,
 		clients:  map[dhcpKey]context.CancelCauseFunc{},
+		wake:     map[dhcpKey]chan struct{}{},
 		leases:   map[dhcpKey]*Lease{},
 		restored: map[leaseID]*nclient4.Lease{},
 	}
@@ -98,6 +100,7 @@ func (m *dhcpManager) Reconcile(want []dhcpKey) {
 		if !slices.Contains(want, k) {
 			cancel(nil)
 			delete(m.clients, k)
+			delete(m.wake, k)
 			delete(m.leases, k)
 		}
 	}
@@ -107,6 +110,8 @@ func (m *dhcpManager) Reconcile(want []dhcpKey) {
 		}
 		ctx, cancel := context.WithCancelCause(context.Background())
 		m.clients[k] = cancel
+		wake := make(chan struct{}, 1)
+		m.wake[k] = wake
 		l := &Lease{Instance: k.instance, Interface: k.iface, State: "requesting"}
 		id := leaseID{k.instance, k.iface}
 		saved := m.restored[id]
@@ -118,7 +123,7 @@ func (m *dhcpManager) Reconcile(want []dhcpKey) {
 		m.wg.Add(1)
 		go func() {
 			defer m.wg.Done()
-			m.loop(ctx, k, saved)
+			m.loop(ctx, k, saved, wake)
 		}()
 	}
 	// A saved lease no client took is for an interface no longer in DHCP
@@ -129,12 +134,30 @@ func (m *dhcpManager) Reconcile(want []dhcpKey) {
 	clear(m.restored)
 }
 
+// Renew wakes the DHCPv4 client of the instance's interface, which then
+// renews its lease (or asks for one) at once; false when there is none.
+func (m *dhcpManager) Renew(instance, iface string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for k, wake := range m.wake {
+		if k.instance == instance && k.iface == iface {
+			select {
+			case wake <- struct{}{}:
+			default:
+			}
+			return true
+		}
+	}
+	return false
+}
+
 // Stop stops the clients and keeps their leases (errStopping).
 func (m *dhcpManager) Stop() {
 	m.mu.Lock()
 	for k, cancel := range m.clients {
 		cancel(errStopping)
 		delete(m.clients, k)
+		delete(m.wake, k)
 	}
 	m.mu.Unlock()
 	m.wg.Wait()
@@ -206,7 +229,7 @@ func (m *dhcpManager) update(k dhcpKey, fn func(l *Lease)) (dnsChanged bool) {
 // loop runs k's client, starting from saved (nil: none) with a Renew.
 // Cancelled with errStopping it keeps the lease; otherwise it releases it
 // and removes the address.
-func (m *dhcpManager) loop(ctx context.Context, k dhcpKey, saved *nclient4.Lease) {
+func (m *dhcpManager) loop(ctx context.Context, k dhcpKey, saved *nclient4.Lease, wake <-chan struct{}) {
 	log := slog.With("instance", k.instance, "interface", k.iface)
 	if m.dryRun {
 		log.Info("dry-run: not starting DHCP client")
@@ -241,7 +264,7 @@ func (m *dhcpManager) loop(ctx context.Context, k dhcpKey, saved *nclient4.Lease
 			c, err := newClientInNetns(k.netns, k.iface)
 			if err != nil {
 				m.fail(k, log, err)
-				if !sleepCtx(ctx, backoff) {
+				if !sleepWake(ctx, backoff, wake) {
 					return
 				}
 				continue
@@ -269,7 +292,7 @@ func (m *dhcpManager) loop(ctx context.Context, k dhcpKey, saved *nclient4.Lease
 			// The interface may have gone away (moved namespace); reopen.
 			client.Close()
 			client = nil
-			if !sleepCtx(ctx, backoff) {
+			if !sleepWake(ctx, backoff, wake) {
 				return
 			}
 			continue
@@ -286,7 +309,7 @@ func (m *dhcpManager) loop(ctx context.Context, k dhcpKey, saved *nclient4.Lease
 			renew = leaseTime / 2
 		}
 		log.Info("dhcp lease bound", "address", lease.ACK.YourIPAddr, "lease", leaseTime, "renew", renew)
-		if !sleepCtx(ctx, renew) {
+		if !sleepWake(ctx, renew, wake) {
 			return
 		}
 	}
@@ -487,6 +510,19 @@ func withNetns(nsName string, fn func() error) error {
 		ch <- fn()
 	}()
 	return <-ch
+}
+
+// sleepWake is sleepCtx that a send on wake cuts short.
+func sleepWake(ctx context.Context, d time.Duration, wake <-chan struct{}) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-t.C:
+	case <-wake:
+	}
+	return true
 }
 
 func sleepCtx(ctx context.Context, d time.Duration) bool {

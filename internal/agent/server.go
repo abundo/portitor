@@ -180,6 +180,28 @@ func (a *Agent) routes() *http.ServeMux {
 			writeStarted(w, req.Name, a.RefreshIPList(req.Name))
 		}
 	})
+	mux.HandleFunc("POST /v1/dhcp/renew", func(w http.ResponseWriter, r *http.Request) {
+		var req agentapi.DHCPRenewRequest
+		if !decode(w, r, &req) {
+			return
+		}
+		var ok bool
+		switch req.Family {
+		case "":
+			ok = a.dhcp.Renew(req.Instance, req.Interface)
+		case "ipv6":
+			ok = a.dhcp6.Renew(req.Instance, req.Interface)
+		default:
+			writeError(w, http.StatusBadRequest, fmt.Errorf("unknown family %q", req.Family))
+			return
+		}
+		if !ok {
+			writeError(w, http.StatusNotFound, fmt.Errorf("no DHCP client on %s in %s", req.Interface, req.Instance))
+			return
+		}
+		slog.Info("api: dhcp renew", "instance", req.Instance, "interface", req.Interface, "family", req.Family, "remote", r.RemoteAddr)
+		writeJSONResponse(w, http.StatusOK, map[string]any{"renewing": req.Interface})
+	})
 	mux.HandleFunc("GET /v1/system", func(w http.ResponseWriter, r *http.Request) {
 		writeJSONResponse(w, http.StatusOK, a.sys.Status(r.Context()))
 	})

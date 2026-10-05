@@ -702,6 +702,15 @@ type ConnectionsFlushRequest struct {
 	Instance string `json:"instance"`
 }
 
+// DHCPRenewRequest asks the DHCP client of an instance's interface to
+// renew its lease now (POST /v1/dhcp/renew, 200 when asked; 404 when the
+// interface runs no such client): Family "" is DHCPv4, "ipv6" DHCPv6.
+type DHCPRenewRequest struct {
+	Instance  string `json:"instance"`
+	Interface string `json:"interface"`
+	Family    string `json:"family,omitempty"`
+}
+
 // ConnectionsSnapshot is the table at one moment: Total entries, of
 // which the first Max (by bytes, largest first) are in Entries. A
 // snapshot that failed has only Error.

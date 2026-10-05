@@ -61,6 +61,27 @@ func (s *Server) handleAgentConnectionsFlush(c *echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{"flushed": body.Instance})
 }
 
+// handleAgentDHCPRenew asks the agent's DHCP (or DHCPv6) client on an
+// interface to renew its lease now.
+func (s *Server) handleAgentDHCPRenew(c *echo.Context) error {
+	var body agentapi.DHCPRenewRequest
+	if err := c.Bind(&body); err != nil {
+		return errJSON(c, http.StatusBadRequest, "invalid request")
+	}
+	if ok, err := s.allowInstanceName(c, body.Instance); !ok {
+		return err
+	}
+	a, _, err := s.agent()
+	if err != nil {
+		return agentError(c, err)
+	}
+	if err := a.RenewDHCP(c.Request().Context(), body); err != nil {
+		return agentError(c, err)
+	}
+	slog.Info("dhcp renew", "user", currentUser(c).Username, "instance", body.Instance, "interface", body.Interface, "family", body.Family)
+	return c.JSON(http.StatusOK, map[string]any{"renewing": body.Interface})
+}
+
 // handleAgentConnections streams the instance's conntrack table from the
 // agent (JSON lines, one snapshot each) to the browser as it comes. The
 // browser closing the request ends it.

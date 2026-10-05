@@ -46,6 +46,7 @@ type dhcp6Manager struct {
 
 	mu      sync.Mutex
 	clients map[dhcp6Key]context.CancelCauseFunc
+	wake    map[dhcp6Key]chan struct{} // Renew asks the client to renew now
 	leases  map[dhcp6Key]*Lease
 	pds     map[dhcp6Key]netip.Prefix
 	// restored are the unexpired leases saved by the last run, until the
@@ -63,6 +64,7 @@ func newDHCP6Manager(run Runner, dryRun bool, dir string, onChange func(string))
 		onChange: onChange,
 		restored: map[leaseID]*lease6{},
 		clients:  map[dhcp6Key]context.CancelCauseFunc{},
+		wake:     map[dhcp6Key]chan struct{}{},
 		leases:   map[dhcp6Key]*Lease{},
 		pds:      map[dhcp6Key]netip.Prefix{},
 	}
@@ -102,6 +104,7 @@ func (m *dhcp6Manager) Reconcile(want []dhcp6Key) {
 		if !slices.Contains(want, k) {
 			cancel(nil)
 			delete(m.clients, k)
+			delete(m.wake, k)
 			delete(m.leases, k)
 		}
 	}
@@ -111,6 +114,8 @@ func (m *dhcp6Manager) Reconcile(want []dhcp6Key) {
 		}
 		ctx, cancel := context.WithCancelCause(context.Background())
 		m.clients[k] = cancel
+		wake := make(chan struct{}, 1)
+		m.wake[k] = wake
 		ls := &Lease{Instance: k.instance, Interface: k.iface, Family: "ipv6", State: "requesting"}
 		id := leaseID{k.instance, k.iface}
 		saved := m.restored[id]
@@ -129,7 +134,7 @@ func (m *dhcp6Manager) Reconcile(want []dhcp6Key) {
 		m.wg.Add(1)
 		go func() {
 			defer m.wg.Done()
-			m.loop(ctx, k, saved)
+			m.loop(ctx, k, saved, wake)
 		}()
 	}
 	// A saved lease no client took is for an interface without DHCPv6.
@@ -139,6 +144,23 @@ func (m *dhcp6Manager) Reconcile(want []dhcp6Key) {
 	clear(m.restored)
 }
 
+// Renew wakes the DHCPv6 client of the instance's interface, which then
+// renews its lease (or asks for one) at once; false when there is none.
+func (m *dhcp6Manager) Renew(instance, iface string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for k, wake := range m.wake {
+		if k.instance == instance && k.iface == iface {
+			select {
+			case wake <- struct{}{}:
+			default:
+			}
+			return true
+		}
+	}
+	return false
+}
+
 // Stop stops the clients and keeps their leases (errStopping).
 func (m *dhcp6Manager) Stop() {
 	m.stopped.Store(true)
@@ -146,6 +168,7 @@ func (m *dhcp6Manager) Stop() {
 	for k, cancel := range m.clients {
 		cancel(errStopping)
 		delete(m.clients, k)
+		delete(m.wake, k)
 	}
 	m.mu.Unlock()
 	m.wg.Wait()
@@ -217,7 +240,7 @@ func (m *dhcp6Manager) changed(k dhcp6Key) {
 // loop runs k's client, starting from saved (nil: none) with a Renew.
 // Cancelled with errStopping it keeps the lease; otherwise it releases it
 // and removes the address and the prefix's route.
-func (m *dhcp6Manager) loop(ctx context.Context, k dhcp6Key, saved *lease6) {
+func (m *dhcp6Manager) loop(ctx context.Context, k dhcp6Key, saved *lease6, wake <-chan struct{}) {
 	log := slog.With("instance", k.instance, "interface", k.iface)
 	if m.dryRun {
 		log.Info("dry-run: not starting DHCPv6 client")
@@ -255,7 +278,7 @@ func (m *dhcp6Manager) loop(ctx context.Context, k dhcp6Key, saved *lease6) {
 			c, err := newClient6InNetns(k.netns, k.iface)
 			if err != nil {
 				m.fail(k, log, m.explainBind(ctx, k, err))
-				if !sleepCtx(ctx, backoff) {
+				if !sleepWake(ctx, backoff, wake) {
 					return
 				}
 				continue
@@ -287,7 +310,7 @@ func (m *dhcp6Manager) loop(ctx context.Context, k dhcp6Key, saved *lease6) {
 			// The interface may have gone away (moved namespace); reopen.
 			client.Close()
 			client = nil
-			if !sleepCtx(ctx, backoff) {
+			if !sleepWake(ctx, backoff, wake) {
 				return
 			}
 			continue
@@ -299,7 +322,7 @@ func (m *dhcp6Manager) loop(ctx context.Context, k dhcp6Key, saved *lease6) {
 		current = l
 		saveLease(m.dir, id, savedLease{Reply: l.reply.ToBytes(), Obtained: l.obtained})
 		log.Info("dhcpv6 lease bound", "address", l.addr, "prefix", l.pd, "renew", l.renew)
-		if !sleepCtx(ctx, l.renew) {
+		if !sleepWake(ctx, l.renew, wake) {
 			return
 		}
 	}

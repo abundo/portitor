@@ -350,6 +350,11 @@ func (c *Client) Connections(ctx context.Context, req agentapi.ConnectionsReques
 }
 
 // stream posts req and returns the answer's body as it comes.
+// RenewDHCP asks the DHCP client of an instance's interface to renew now.
+func (c *Client) RenewDHCP(ctx context.Context, req agentapi.DHCPRenewRequest) error {
+	return c.do(ctx, http.MethodPost, "/v1/dhcp/renew", req, nil)
+}
+
 // FlushConnections empties an instance's conntrack table.
 func (c *Client) FlushConnections(ctx context.Context, instance string) error {
 	return c.do(ctx, http.MethodPost, "/v1/connections/flush", agentapi.ConnectionsFlushRequest{Instance: instance}, nil)
