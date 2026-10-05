@@ -12,6 +12,8 @@ LDFLAGS := -s -w \
 	-X github.com/abundo/portitor/internal/buildinfo.Commit=$(COMMIT) \
 	-X github.com/abundo/portitor/internal/buildinfo.Date=$(DATE)
 
+# go install puts it in $(go env GOPATH)/bin, which need not be on PATH.
+GORELEASER ?= $(or $(shell command -v goreleaser),$(shell go env GOPATH)/bin/goreleaser)
 
 .PHONY: build portitor-web portitor-agent frontend release test lint fmt \
 	install-agent install-web dev-agent dev-web dev-seed \
@@ -119,8 +121,8 @@ test-all:
 	$(MAKE) lint test
 	go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 	cd web/frontend && npm audit --omit=dev
-	goreleaser check
-	goreleaser release --snapshot --clean
+	$(GORELEASER) check
+	$(GORELEASER) release --snapshot --clean
 	$(MAKE) lab-clean lab-up lab-seed lab-deploy
 	$(MAKE) lab-down
 	$(MAKE) iso-e2e

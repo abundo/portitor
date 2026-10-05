@@ -5,3 +5,4 @@
 /dev/run/
 /web/static/
 __pycache__/
+/dist/
