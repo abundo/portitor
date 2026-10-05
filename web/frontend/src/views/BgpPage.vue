@@ -5,7 +5,9 @@
      (BGP info), and the configuration: BGP itself, peer groups and
      neighbours (Configuration). -->
 <script setup>
-import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
+import AutoRefreshButton from '@/components/AutoRefreshButton.vue'
+import { useAutoRefresh } from '@/composables/useAutoRefresh'
+import { computed, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useToast } from '@nuxt/ui/composables'
 import BgpNeighborDetail from '@/components/BgpNeighborDetail.vue'
@@ -58,20 +60,7 @@ async function loadStatus() {
     loading.value = false
   }
 }
-let timer = null
-watch(
-  tab,
-  (t) => {
-    clearInterval(timer)
-    timer = null
-    if (t === 'info') {
-      loadStatus()
-      timer = setInterval(loadStatus, 10000)
-    }
-  },
-  { immediate: true },
-)
-onBeforeUnmount(() => clearInterval(timer))
+const auto = useAutoRefresh(loadStatus, { seconds: 10, active: () => tab.value === 'info' })
 
 const mine = computed(() =>
   status.value?.instances?.find((i) => i.instance === store.current?.name),
@@ -419,14 +408,7 @@ const neighborFields = computed(() => [
                 The BGP sessions and the BGP table of this virtual firewall, as FRR has them.
               </p>
             </div>
-            <UButton
-              icon="i-lucide-refresh-cw"
-              color="neutral"
-              variant="outline"
-              label="Refresh"
-              :loading="loading"
-              @click="loadStatus"
-            />
+            <AutoRefreshButton :auto="auto" :loading="loading" />
           </div>
           <UAlert
             v-if="statusError"

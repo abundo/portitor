@@ -2,6 +2,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
 <script setup>
+import AutoRefreshButton from '@/components/AutoRefreshButton.vue'
 import { useConfirm } from '@/composables/useConfirm'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
@@ -13,6 +14,7 @@ import { withLabel } from '@/composables/useInstanceRefs'
 import { errMsg } from '@/api/http'
 import { useInstanceStore } from '@/stores/instances'
 import { useDeployStore } from '@/stores/deploy'
+import { useStatusRefresh } from '@/composables/useAutoRefresh'
 import { useAuthStore } from '@/stores/auth'
 import { useFormGuard, usePageForm } from '@/composables/useFormGuard'
 import TagsInput from '@/components/TagsInput.vue'
@@ -140,6 +142,8 @@ async function saveTunnel() {
   }
 }
 
+// The agent's status, for the peers' handshakes, refreshed every 5 s.
+const { auto: autoStatus, loading: statusLoading } = useStatusRefresh()
 // Handshakes from the agent status, by peer public key.
 const handshakes = computed(() => {
   const m = {}
@@ -429,6 +433,9 @@ function copy(text) {
         new-label="New peer"
         @changed="loadFree"
       >
+        <template #toolbar-end>
+          <AutoRefreshButton :auto="autoStatus" :loading="statusLoading" />
+        </template>
         <template #cell-handshake="{ row }">
           <span class="text-xs">{{ ago(handshakes[row.public_key]?.latest_handshake) }}</span>
         </template>

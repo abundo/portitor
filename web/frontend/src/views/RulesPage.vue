@@ -2,12 +2,14 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
 <script setup>
+import AutoRefreshButton from '@/components/AutoRefreshButton.vue'
+import { useAutoRefresh } from '@/composables/useAutoRefresh'
 import CrudPage from '@/components/CrudPage.vue'
 import NatTable from '@/components/NatTable.vue'
 import NftImportDialog from '@/components/NftImportDialog.vue'
 import NeedInstance from '@/components/NeedInstance.vue'
 import RulesTable from '@/components/RulesTable.vue'
-import { onMounted, onUnmounted, ref, watch } from 'vue'
+import { onMounted, ref, watch } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import { api as backend, instances, rateLimits, rules } from '@/api'
 import { errMsg } from '@/api/http'
@@ -95,28 +97,19 @@ function lockedRow(chain, a) {
 }
 // Traffic per rule id since the last deploy (agentapi.RuleCounters) and
 // the chains' own drops per instance name and chain (agentapi.ChainDrops),
-// polled every 5 seconds while the page is open and visible; null when the
+// polled every 5 seconds while the page is open and visible, for an hour; null when the
 // agent can't be reached.
 const counters = ref(null)
 const drops = ref(null)
-let countersTimer = null
-let polling = false
-async function pollCounters() {
-  if (!document.hidden) {
-    const r = await backend.agentRuleCounters().catch(() => null)
-    counters.value = r ? (r.rules ?? {}) : null
-    drops.value = r ? (r.drops ?? {}) : null
-  }
-  if (polling) countersTimer = setTimeout(pollCounters, 5000)
+const countersLoading = ref(false)
+async function loadCounters() {
+  countersLoading.value = true
+  const r = await backend.agentRuleCounters().catch(() => null)
+  countersLoading.value = false
+  counters.value = r ? (r.rules ?? {}) : null
+  drops.value = r ? (r.drops ?? {}) : null
 }
-onMounted(() => {
-  polling = true
-  pollCounters()
-})
-onUnmounted(() => {
-  polling = false
-  clearTimeout(countersTimer)
-})
+const autoCounters = useAutoRefresh(loadCounters, { seconds: 5 })
 
 // The locked rows have a Log box too, kept in the instance: log_drops and
 // log_invalid list the chains that log what no rule matched and their
@@ -389,6 +382,7 @@ function clean(b) {
       :item-name="ruleName"
     >
       <template #toolbar>
+        <AutoRefreshButton :auto="autoCounters" :loading="countersLoading" />
         <UButton
           v-if="auth.isAdmin"
           icon="i-lucide-upload"

@@ -395,6 +395,12 @@ singular); a custom page uses `SearchInput` above each table,
   `useUnsaved` for a form on the page). Leaving the page (a router guard),
   switching instance and logging out ask the same question first
   (`confirmDiscard`); closing or reloading the tab gets the browser's warning.
+- **Automatic refresh:** a view that refreshes itself uses `useAutoRefresh`
+  (`composables/useAutoRefresh.js`; `useStatusRefresh` for the deploy store's
+  agent status) and shows `AutoRefreshButton.vue` in place of a plain Refresh
+  button: its icon turns slowly and its label names the interval
+  ("Auto · 10 s"). It stops after an hour ("Auto stopped"); a click refreshes
+  at once, and starts another hour when stopped.
 - **Messages** (errors, warnings, information) are shown as toasts with
   `useToast().add`, never another way: `AppLayout` copies every toast (title
   and description) into the log panel's Agent log tab (`useLogPanel().note`,

@@ -2,7 +2,9 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
 <script setup>
-import { computed, onMounted, onUnmounted } from 'vue'
+import { computed } from 'vue'
+import AutoRefreshButton from '@/components/AutoRefreshButton.vue'
+import { useStatusRefresh } from '@/composables/useAutoRefresh'
 import RateSparkline from '@/components/RateSparkline.vue'
 import SearchInput from '@/components/SearchInput.vue'
 import { useAuthStore } from '@/stores/auth'
@@ -17,8 +19,7 @@ const deploy = useDeployStore()
 const instances = useInstanceStore()
 const auth = useAuthStore()
 const { ifaceRefItems, ifaceText } = useInstanceRefs()
-onMounted(() => deploy.watch())
-onUnmounted(() => deploy.unwatch())
+const { auto, loading } = useStatusRefresh()
 
 // Descriptions of the instance's interfaces and link ends, by name.
 const ifaceDesc = computed(
@@ -57,6 +58,9 @@ const stateColor = (s) =>
 
 <template>
   <div class="space-y-4">
+    <div class="flex justify-end">
+      <AutoRefreshButton :auto="auto" :loading="loading" />
+    </div>
     <UAlert
       v-if="deploy.error"
       color="error"

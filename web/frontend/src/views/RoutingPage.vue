@@ -4,7 +4,9 @@
 <!-- Routing: the virtual firewall's IPv4 and IPv6 routes in all its routing
      tables as the kernel has them, with who added each (protocol). -->
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import AutoRefreshButton from '@/components/AutoRefreshButton.vue'
+import { useAutoRefresh } from '@/composables/useAutoRefresh'
+import { computed, ref } from 'vue'
 import NeedInstance from '@/components/NeedInstance.vue'
 import SearchInput from '@/components/SearchInput.vue'
 import { api } from '@/api'
@@ -29,12 +31,7 @@ async function load() {
     loading.value = false
   }
 }
-let timer = null
-onMounted(() => {
-  load()
-  timer = setInterval(load, 10000)
-})
-onBeforeUnmount(() => clearInterval(timer))
+const auto = useAutoRefresh(load, { seconds: 10 })
 
 // rt_protos names, and the agent's own number.
 const protocolLabel = {
@@ -102,14 +99,7 @@ const columns = [
             static (with BFD) routes.
           </p>
         </div>
-        <UButton
-          icon="i-lucide-refresh-cw"
-          color="neutral"
-          variant="outline"
-          label="Refresh"
-          :loading="loading"
-          @click="load"
-        />
+        <AutoRefreshButton :auto="auto" :loading="loading" />
       </div>
       <UAlert v-if="error" class="mb-2" color="error" variant="subtle" :title="error" />
       <div class="mb-2 flex items-center gap-3">

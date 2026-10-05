@@ -2,6 +2,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
 <script setup>
+import AutoRefreshButton from '@/components/AutoRefreshButton.vue'
 import CrudPage from '@/components/CrudPage.vue'
 import DhcpClientLease from '@/components/DhcpClientLease.vue'
 import NeedInstance from '@/components/NeedInstance.vue'
@@ -10,6 +11,7 @@ import { computed, ref } from 'vue'
 import { interfaces } from '@/api'
 import http, { errMsg } from '@/api/http'
 import { useToast } from '@nuxt/ui/composables'
+import { useStatusRefresh } from '@/composables/useAutoRefresh'
 import { useInstanceRefs, withLabel } from '@/composables/useInstanceRefs'
 import { useAuthStore } from '@/stores/auth'
 import { useDeployStore } from '@/stores/deploy'
@@ -327,8 +329,12 @@ async function renew(row, family = '') {
   }
 }
 
-// Interface statistics as the firewall reports them (the deploy store polls
-// the agent's status), for the Statistics dialog.
+// The agent's status (state, MAC, leases, statistics), refreshed every 5 s
+// on the page and in the Statistics dialog.
+const { auto, loading } = useStatusRefresh()
+
+// Interface statistics as the firewall reports them, for the Statistics
+// dialog.
 const statsOpen = ref(false)
 const statsRows = computed(() => {
   const inst = deploy.status?.instances?.find((i) => i.name === store.current?.name)
@@ -409,6 +415,7 @@ const { search: statsSearch, filtered: statsFiltered } = useSearch(statsRows)
       @changed="reload()"
     >
       <template #toolbar-end>
+        <AutoRefreshButton :auto="auto" :loading="loading" />
         <UButton
           icon="i-lucide-chart-column"
           label="Statistics"
@@ -485,7 +492,10 @@ const { search: statsSearch, filtered: statsFiltered } = useSearch(statsRows)
     >
       <template #body>
         <div class="space-y-3">
-          <SearchInput v-model="statsSearch" />
+          <div class="flex items-center justify-between gap-3">
+            <SearchInput v-model="statsSearch" />
+            <AutoRefreshButton :auto="auto" :loading="loading" />
+          </div>
           <div class="overflow-x-auto">
             <table class="w-full text-sm whitespace-nowrap">
               <thead class="text-muted">

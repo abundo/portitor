@@ -5,7 +5,9 @@
      interface: the LLDP neighbours heard (an info button shows all their
      frame said), then the ARP (IPv4) and ND (IPv6) entries. -->
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import AutoRefreshButton from '@/components/AutoRefreshButton.vue'
+import { useAutoRefresh } from '@/composables/useAutoRefresh'
+import { computed, ref } from 'vue'
 import NeedInstance from '@/components/NeedInstance.vue'
 import SearchInput from '@/components/SearchInput.vue'
 import { api } from '@/api'
@@ -30,12 +32,7 @@ async function load() {
     loading.value = false
   }
 }
-let timer = null
-onMounted(() => {
-  load()
-  timer = setInterval(load, 10000)
-})
-onBeforeUnmount(() => clearInterval(timer))
+const auto = useAutoRefresh(load, { seconds: 10 })
 
 const mine = (x) => x.instance === store.current?.name
 const lldpPorts = computed(() => (data.value?.lldp_ports ?? []).filter(mine))
@@ -132,14 +129,7 @@ function lldpRows(n) {
             (IPv4) and ND (IPv6) tables.
           </p>
         </div>
-        <UButton
-          icon="i-lucide-refresh-cw"
-          color="neutral"
-          variant="outline"
-          label="Refresh"
-          :loading="loading"
-          @click="load"
-        />
+        <AutoRefreshButton :auto="auto" :loading="loading" />
       </div>
 
       <div class="mb-2 space-y-2">

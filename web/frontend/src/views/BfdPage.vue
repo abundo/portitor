@@ -6,7 +6,9 @@
      info). Static routes, OSPF interfaces and BGP neighbours turn BFD on
      for themselves; it runs on the interfaces listed here. -->
 <script setup>
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import AutoRefreshButton from '@/components/AutoRefreshButton.vue'
+import { useAutoRefresh } from '@/composables/useAutoRefresh'
+import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import CrudPage from '@/components/CrudPage.vue'
 import NeedInstance from '@/components/NeedInstance.vue'
@@ -57,20 +59,7 @@ async function loadStatus() {
     loading.value = false
   }
 }
-let timer = null
-watch(
-  tab,
-  (t) => {
-    clearInterval(timer)
-    timer = null
-    if (t === 'info') {
-      loadStatus()
-      timer = setInterval(loadStatus, 5000)
-    }
-  },
-  { immediate: true },
-)
-onBeforeUnmount(() => clearInterval(timer))
+const auto = useAutoRefresh(loadStatus, { seconds: 5, active: () => tab.value === 'info' })
 
 const mine = computed(() =>
   status.value?.instances?.find((i) => i.instance === store.current?.name),
@@ -213,14 +202,7 @@ const defaults = {
                 gateway that uses BFD, with the protocols (static routes, BGP, OSPF) that use it.
               </p>
             </div>
-            <UButton
-              icon="i-lucide-refresh-cw"
-              color="neutral"
-              variant="outline"
-              label="Refresh"
-              :loading="loading"
-              @click="loadStatus"
-            />
+            <AutoRefreshButton :auto="auto" :loading="loading" />
           </div>
           <UAlert
             v-if="statusError || mine?.error"

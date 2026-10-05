@@ -4,7 +4,9 @@
 <!-- OSPF (FRR): the state of OSPFv2 (IPv4) and OSPFv3 (IPv6) as FRR has it
      (info), and each version's configuration (config). -->
 <script setup>
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import AutoRefreshButton from '@/components/AutoRefreshButton.vue'
+import { useAutoRefresh } from '@/composables/useAutoRefresh'
+import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import NeedInstance from '@/components/NeedInstance.vue'
 import OspfConfig from '@/components/OspfConfig.vue'
@@ -43,20 +45,7 @@ async function loadStatus() {
     loading.value = false
   }
 }
-let timer = null
-watch(
-  infoTab,
-  (on) => {
-    clearInterval(timer)
-    timer = null
-    if (on) {
-      loadStatus()
-      timer = setInterval(loadStatus, 10000)
-    }
-  },
-  { immediate: true },
-)
-onBeforeUnmount(() => clearInterval(timer))
+const auto = useAutoRefresh(loadStatus, { seconds: 10, active: () => infoTab.value })
 
 const mine = computed(() =>
   status.value?.instances?.find((i) => i.instance === store.current?.name),
@@ -77,14 +66,7 @@ const mine = computed(() =>
                 virtual firewall, as FRR has them.
               </p>
             </div>
-            <UButton
-              icon="i-lucide-refresh-cw"
-              color="neutral"
-              variant="outline"
-              label="Refresh"
-              :loading="loading"
-              @click="loadStatus"
-            />
+            <AutoRefreshButton :auto="auto" :loading="loading" />
           </div>
           <UAlert
             v-if="statusError"

@@ -2,7 +2,9 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
 <script setup>
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import AutoRefreshButton from '@/components/AutoRefreshButton.vue'
+import { useAutoRefresh } from '@/composables/useAutoRefresh'
+import { computed, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useToast } from '@nuxt/ui/composables'
 import AddrInput from '@/components/AddrInput.vue'
@@ -29,13 +31,18 @@ const readOnly = computed(() => !auth.canEdit)
 const leases = ref(null)
 const leaseError = ref('')
 
-onMounted(async () => {
+const leasesLoading = ref(false)
+async function loadLeases() {
+  leasesLoading.value = true
   try {
     leases.value = await api.agentLeases()
+    leaseError.value = ''
   } catch (err) {
     leaseError.value = errMsg(err)
+  } finally {
+    leasesLoading.value = false
   }
-})
+}
 
 const serverLeases = computed(() => leases.value?.server?.[store.current?.name] ?? [])
 const clientLeases = computed(() =>
@@ -227,6 +234,8 @@ const tab = computed({
   get: () => (tabs.some((t) => t.value === route.query.tab) ? route.query.tab : 'info'),
   set: (v) => router.replace({ query: { ...route.query, tab: v === 'info' ? undefined : v } }),
 })
+// The leases refresh every 10 s while their tab is open.
+const autoLeases = useAutoRefresh(loadLeases, { seconds: 10, active: () => tab.value === 'info' })
 </script>
 
 <template>
@@ -243,7 +252,10 @@ const tab = computed({
             description="Turn it on, and DHCP on an interface, on the DHCP server tab."
           />
           <div class="card">
-            <div class="mb-2 text-lg font-semibold">Active leases</div>
+            <div class="mb-2 flex items-center justify-between gap-3">
+              <div class="text-lg font-semibold">Active leases</div>
+              <AutoRefreshButton :auto="autoLeases" :loading="leasesLoading" />
+            </div>
             <UAlert v-if="leaseError" color="error" variant="subtle" :title="leaseError" />
             <template v-else>
               <div class="mb-2">
