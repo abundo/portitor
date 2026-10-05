@@ -77,6 +77,11 @@ const router = createRouter({
           meta: { admin: true },
         },
         {
+          path: 'backup',
+          component: () => import('@/views/BackupPage.vue'),
+          meta: { admin: true },
+        },
+        {
           path: 'settings',
           component: () => import('@/views/SettingsPage.vue'),
           meta: { admin: true },

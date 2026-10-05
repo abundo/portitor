@@ -100,6 +100,7 @@ const sections = computed(() => [
           children: [
             { label: 'Settings', icon: 'i-lucide-settings', to: '/settings', exact: true },
             { label: 'Updates', icon: 'i-lucide-package-check', to: '/updates' },
+            { label: 'Backup & restore', icon: 'i-lucide-archive', to: '/backup' },
             { label: 'Users', icon: 'i-lucide-users', to: '/users' },
             { label: 'Roles', icon: 'i-lucide-shield-user', to: '/roles' },
           ],
