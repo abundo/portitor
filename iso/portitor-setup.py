@@ -667,7 +667,8 @@ iface lo inet loopback
 
 auto {nic}
 {stanza}""", 0o644)
-    run(["ifup", nic])
+    # ifdown -a took lo down too.
+    run(["ifup", "lo", nic])
 
 
 def step_no_agent(a: dict) -> None:

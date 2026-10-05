@@ -15,7 +15,7 @@ LDFLAGS := -s -w \
 
 .PHONY: build portitor-web portitor-agent frontend release test lint fmt \
 	install-agent install-web dev-agent dev-web dev-seed \
-	lab-up lab-install lab-seed lab-deploy lab-down lab-clean iso iso-test iso-e2e clean
+	lab-up lab-install lab-seed lab-deploy lab-down lab-clean iso iso-test iso-e2e iso-e2e-split clean
 
 build: portitor-web portitor-agent
 
@@ -83,11 +83,11 @@ lab-up lab-install lab-seed lab-deploy lab-down:
 	dev/lab/lab.sh $(@:lab-%=%)
 
 # Removes the lab's containers, networks and images, stops iso/vm.sh's virtual
-# machine (KEEP=1 of iso-e2e leaves it running) and deletes the build directory
-# with its disk.
+# machines (KEEP=1 of iso-e2e and iso-e2e-split leaves them running) and
+# deletes the build directory with their disks.
 lab-clean:
 	dev/lab/lab.sh clean
-	pkill -f '^qemu-system-x86_64 .*$(BUILD_DIR)/vm/disk\.qcow2' || true
+	pkill -f '^qemu-system-x86_64 .*$(BUILD_DIR)/vm(-fw|-web)?/disk\.qcow2' || true
 	rm -rf $(BUILD_DIR)
 
 # ----- installer ISO from this tree (see DEV.md); build.sh runs make release -----
@@ -100,9 +100,15 @@ iso-test:
 	iso/build.sh --test
 
 # Builds a test ISO, installs it in iso/vm.sh's virtual machine and checks the
-# first-boot setup (20-40 minutes). KEEP=1 leaves the VM running.
+# first-boot setup (about 5 minutes). KEEP=1 leaves the VM running.
 iso-e2e:
 	iso/test.sh
+
+# The split setup: the agent and portitor-web in two virtual machines on a LAN
+# of their own; portitor-web joins the firewall and reaches its agent (about
+# 7 minutes). KEEP=1 leaves both running.
+iso-e2e-split:
+	iso/test-split.sh
 
 clean:
 	rm -rf $(BUILD_DIR)

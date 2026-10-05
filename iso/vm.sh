@@ -17,18 +17,35 @@
 # then {"execute":"guest-ping"}).
 #
 # VM_UEFI=1 boots with OVMF instead of the BIOS.
+#
+# For several virtual machines at once (iso/test-split.sh): VM_DIR (default
+# build/vm) holds the disk and sockets, VM_ID=N (0-9, default 0) makes the
+# MAC addresses 52:54:00:00:0N:01 and :02, and VM_LAN=LOCAL,REMOTE puts NIC 2
+# on a link to another virtual machine instead: unix datagram sockets, this
+# one's and the other's (the other's VM_LAN swapped), without QEMU's router
+# and GUI forward.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-DIR=build/vm
+DIR=${VM_DIR:-build/vm}
 DISK=$DIR/disk.qcow2
 GUI_PORT=${VM_GUI_PORT:-28443}
+MAC=52:54:00:00:0${VM_ID:-0}
+
+if [[ -n ${VM_LAN:-} ]]; then
+	lan_local=${VM_LAN%%,*} lan_remote=${VM_LAN#*,}
+	rm -f "$lan_local"
+	lan=(-netdev "dgram,id=lan,local.type=unix,local.path=$lan_local,remote.type=unix,remote.path=$lan_remote"
+		-device "virtio-net-pci,netdev=lan,mac=$MAC:02")
+else
+	lan=(-nic "user,model=virtio-net-pci,mac=$MAC:02,net=192.168.1.0/24,host=192.168.1.2,hostfwd=tcp:127.0.0.1:$GUI_PORT-192.168.1.1:443")
+fi
 
 args=(
 	-machine q35,accel=kvm:tcg -cpu max -m 2048 -smp 2
 	-drive "file=$DISK,if=virtio,format=qcow2"
-	-nic "user,model=virtio-net-pci,mac=52:54:00:00:00:01"
-	-nic "user,model=virtio-net-pci,mac=52:54:00:00:00:02,net=192.168.1.0/24,host=192.168.1.2,hostfwd=tcp:127.0.0.1:$GUI_PORT-192.168.1.1:443"
+	-nic "user,model=virtio-net-pci,mac=$MAC:01"
+	"${lan[@]}"
 	-display none
 	-device virtio-serial
 	-chardev "socket,path=$DIR/qga.sock,server=on,wait=off,id=qga0"
@@ -57,11 +74,11 @@ install)
 	;;
 run)
 	[[ -f $DISK ]] || { echo "no $DISK; run iso/vm.sh install ISO first" >&2; exit 1; }
-	echo "GUI: https://127.0.0.1:$GUI_PORT/" >&2
+	[[ -n ${VM_LAN:-} ]] || echo "GUI: https://127.0.0.1:$GUI_PORT/" >&2
 	exec qemu-system-x86_64 "${args[@]}"
 	;;
 *)
-	sed -n '5,19p' "$0" | sed 's/^# \{0,1\}//'
+	sed -n '5,26p' "$0" | sed 's/^# \{0,1\}//'
 	exit 2
 	;;
 esac

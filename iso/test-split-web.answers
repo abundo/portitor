@@ -1,0 +1,15 @@
+# SPDX-FileCopyrightText: 2026 The Portitor contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# First-boot answers of iso/test-split.sh's portitor-web: on the firewall's
+# LAN (VM_ID=2 of iso/vm.sh, NIC 2), which is its gateway. iso/test-split.sh
+# joins the firewall afterwards.
+role: web
+lan: 52:54:00:00:02:02
+address: 192.168.1.10/24
+gateway: 192.168.1.1
+dns: 192.168.1.1
+password: portitor-test
+hostname: gui
+timezone: Europe/Stockholm
+keyboard: se

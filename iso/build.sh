@@ -13,6 +13,7 @@
 #   iso/build.sh --test              unattended, for iso/vm.sh: erases /dev/vda without
 #                                    asking, serial console, first-boot answers from
 #                                    iso/test.answers (never for real hardware)
+#   iso/build.sh --answers FILE      --test with these first-boot answers
 #
 # Needs xorriso, curl, sha256sum; --source also go and npm. --release uses gh
 # when it is logged in (a private repository), else curl.
@@ -24,7 +25,7 @@ REPO=${GITHUB_REPO:-abundo/portitor}
 CACHE=${XDG_CACHE_HOME:-$HOME/.cache}/portitor-iso
 ARCH=amd64
 
-release="" debian_iso="" out="" test=""
+release="" debian_iso="" out="" test="" answers=iso/test.answers
 while (($#)); do
 	case $1 in
 	--source) release="" ;;
@@ -32,7 +33,8 @@ while (($#)); do
 	--debian-iso) debian_iso=${2:?}; shift ;;
 	-o) out=${2:?}; shift ;;
 	--test) test=1 ;;
-	-h | --help) sed -n '5,18p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+	--answers) answers=${2:?--answers needs a file}; test=1; shift ;;
+	-h | --help) sed -n '5,19p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
 	*) echo "unknown argument $1" >&2; exit 2 ;;
 	esac
 	shift
@@ -107,7 +109,7 @@ cp iso/late.sh iso/target.sh iso/portitor-setup.py iso/portitor-firstboot.servic
 cp iso/preseed.cfg iso/grub.cfg iso/isolinux.cfg "$work/"
 if [[ -n $test ]]; then
 	log "Test ISO: unattended, erases /dev/vda"
-	cp iso/test.answers "$payload/firstboot.answers"
+	cp "$answers" "$payload/firstboot.answers"
 	cat >>"$work/preseed.cfg" <<'PRESEED'
 
 # --test: no questions at all.

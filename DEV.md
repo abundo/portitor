@@ -134,7 +134,7 @@ module loaded on the host for `wg0`.
    (`./install.py --install <last tag>`), deploy, then update with `--source`:
    migrations run on a populated database, the agent accepts the old document,
    and a deploy afterwards renders nothing unexpected (Preview).
-6. **ISO:** `make iso-e2e` (20-40 minutes) installs a test ISO in a VM and checks
+6. **ISO:** `make iso-e2e` (about 5 minutes) installs a test ISO in a VM and checks
    the first-boot setup, the units and the GUI's reach to the agent.
 7. **Backup:** download a backup and restore it.
 8. **Tag:** `git tag -s vX.Y.Z && git push origin vX.Y.Z`; follow the release
@@ -186,6 +186,13 @@ VM_SERIAL=build/vm-install.log iso/vm.sh install build/portitor-<version>-test-a
 VM_SERIAL=build/vm.log iso/vm.sh run &
 curl -k https://127.0.0.1:28443/api/version    # after a minute or two
 ```
+
+`make iso-e2e-split` (`iso/test-split.sh`) tests the split setup the same way: two
+VMs (`build/vm-fw`, role agent, and `build/vm-web`, role web, answers in
+`iso/test-split-*.answers`) on a LAN of their own (`VM_LAN` of `iso/vm.sh`: a QEMU
+datagram link between their second NICs). portitor-web joins the firewall with the
+join string of `portitor-setup --show-join`, then the checks run in both VMs,
+including the GUI login and the agent's status from the web VM.
 
 Log in to the GUI as `admin` / `portitor-test`. Without `VM_SERIAL` the serial
 console is on stdio; after the first boot you can log in there as `portitor`.

@@ -1,0 +1,17 @@
+# SPDX-FileCopyrightText: 2026 The Portitor contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# First-boot answers of iso/test-split.sh's firewall: the agent only,
+# managed by portitor-web in the other virtual machine (VM_ID=1 of iso/vm.sh;
+# NIC 2 is the link to that one).
+role: agent
+lan: 52:54:00:00:01:02
+address: 192.168.1.1/24
+wan: 52:54:00:00:01:01
+web_from: 192.168.1.0/24
+# QEMU's resolver on the WAN network
+dns: 10.0.2.3
+password: portitor-test
+hostname: fw
+timezone: Europe/Stockholm
+keyboard: se
