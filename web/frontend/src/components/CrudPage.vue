@@ -468,7 +468,7 @@ defineExpose({ reload: load, openEdit, openView, openCreate })
     <template #body>
       <form id="crud-form" class="space-y-3" @submit.prevent="save">
         <fieldset :disabled="readOnly" class="space-y-3">
-          <template v-for="f in fields" :key="f.key">
+          <template v-for="(f, i) in fields" :key="`${f.key}-${i}`">
             <div
               v-if="f.type === 'heading' && visible(f)"
               class="border-b border-default pt-2 pb-1 text-sm font-semibold"

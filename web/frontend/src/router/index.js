@@ -51,7 +51,6 @@ const router = createRouter({
         { path: 'dns-templates', redirect: { path: '/dns', query: { tab: 'templates' } } },
         { path: 'dhcp', component: () => import('@/views/DhcpPage.vue') },
         { path: 'wireguard', component: () => import('@/views/WireguardPage.vue') },
-        { path: 'tunnels', component: () => import('@/views/TunnelsPage.vue') },
         { path: 'dns-update', redirect: '/dns' },
         { path: 'certificates', component: () => import('@/views/CertificatesPage.vue') },
         { path: 'scheduled-tasks', component: () => import('@/views/TasksPage.vue') },

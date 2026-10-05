@@ -9,8 +9,9 @@ such tunnels away at [tunnelbroker.net](https://tunnelbroker.net), each with a
 routed /64 (and a /48 on request).
 
 A tunnel is an interface of the virtual firewall (kind `6in4`, a Linux `sit`
-device). It is listed under *Network → Interfaces* as well, and is used in rules,
-interface zones and routes like any other interface.
+device). It is created under *Network → Interfaces* with the kind *6in4 tunnel
+(Hurricane Electric)*, and is used in rules, interface zones and routes like any
+other interface.
 
 ## Create the tunnel at tunnelbroker.net
 
@@ -27,7 +28,8 @@ Address**, the **Server IPv6 Address** and the **Client IPv6 Address**, and unde
 
 ## Settings
 
-Under *Network → Tunnels*, per virtual firewall:
+Under *Network → Interfaces*, *New interface*, kind *6in4 tunnel (Hurricane
+Electric)*; the form then shows the tunnel's fields:
 
 - **Name**: the interface name, such as `he0`.
 - **Server IPv4 address**: the tunnel server (*Server IPv4 Address*). IPv6-in-IPv4
@@ -75,7 +77,7 @@ address. It sends the firewall's address when that is public; behind NAT (or wit
 a private or carrier-grade NAT address) it sends none, and Hurricane Electric
 takes the address the request comes from.
 
-The *Endpoint update* column shows the state: `ok` with the address Hurricane
+The *Endpoint update* column of the interfaces list shows the state: `ok` with the address Hurricane
 Electric has, or `error` and why. A wrong user name or update key, an unknown
 tunnel id or a block for too many updates is not retried until the address or the
 settings change. "IP is not ICMP pingable" means Hurricane Electric's ping did

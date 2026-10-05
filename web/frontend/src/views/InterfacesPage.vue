@@ -33,7 +33,9 @@ const kinds = [
   { label: 'Bridge', value: 'bridge' },
   { label: 'WireGuard', value: 'wireguard' },
   { label: 'Loopback', value: 'loopback' },
+  { label: '6in4 tunnel (Hurricane Electric)', value: '6in4' },
 ]
+const is6in4 = (f) => f.kind === '6in4'
 // LLDP runs on the ethernet kinds.
 const lldpKinds = ['physical', 'vlan', 'bridge']
 const modes = [
@@ -48,11 +50,17 @@ const columns = [
   {
     key: 'kind',
     label: 'Kind',
-    format: (r) => (r.kind === 'vlan' ? `vlan ${r.vlan_id} on ${ifaceText(r.parent)}` : r.kind),
+    format: (r) =>
+      r.kind === 'vlan'
+        ? `vlan ${r.vlan_id} on ${ifaceText(r.parent)}`
+        : r.kind === '6in4'
+          ? `6in4 to ${r.tunnel_remote}`
+          : r.kind,
   },
   { key: 'mac', label: 'MAC', class: 'font-mono text-xs', format: macOf },
   { key: 'zones', label: 'Zones', format: (r) => zonesOf(r.name).join(', ') },
-  { key: 'ipv4_mode', label: 'IPv4' },
+  { key: 'ipv4_mode', label: 'IPv4', format: (r) => (is6in4(r) ? '' : r.ipv4_mode) },
+  { key: 'broker', label: 'Endpoint update' },
   { key: 'addresses', label: 'Addresses' },
   { key: 'enabled', label: 'Up' },
   { key: 'description', label: 'Description' },
@@ -117,6 +125,7 @@ const fields = [
       f.kind === 'wireguard' || f.kind === 'loopback'
         ? modes.filter((m) => m.value !== 'dhcp')
         : modes,
+    show: (f) => !is6in4(f),
     hint: 'Static: the addresses below. DHCP client: IPv4 from a DHCP server, and no addresses below.',
   },
   {
@@ -132,14 +141,28 @@ const fields = [
     type: 'tags',
     placeholder: '192.168.1.1/24',
     disabled: (f) => f.ipv4_mode === 'dhcp',
+    show: (f) => !is6in4(f),
     hint: 'Addresses of the firewall on this interface with their prefix length, IPv4 and IPv6, as many as needed: 192.168.1.1/24, fd00:1::1/64. Their prefixes appear under Hosts & prefixes; DHCP and router advertisements are turned on for them under DHCP. An IPv6 address in the prefix delegated to another interface names it: <wan0>:2000::1/64 is subnet 2000 of the prefix wan0 gets, host ::1; its /64 is announced with router advertisements (SLAAC).',
   },
-  { key: 'ipv6_accept_ra', label: 'IPv6 SLAAC (accept router advertisements)', type: 'switch' },
+  {
+    key: 'addresses',
+    label: 'IPv6 addresses',
+    type: 'tags',
+    placeholder: '2001:470:1f0a:12::2/64',
+    show: is6in4,
+    hint: "The firewall's end of the tunnel, with its prefix length (Client IPv6 Address). The routed prefixes go on LAN interfaces.",
+  },
+  {
+    key: 'ipv6_accept_ra',
+    label: 'IPv6 SLAAC (accept router advertisements)',
+    type: 'switch',
+    show: (f) => !is6in4(f),
+  },
   {
     key: 'dhcpv6',
     label: 'DHCPv6 client',
     type: 'switch',
-    show: (f) => f.kind !== 'wireguard' && f.kind !== 'loopback',
+    show: (f) => !['wireguard', 'loopback', '6in4'].includes(f.kind),
     hint: 'Ask a DHCPv6 server for an IPv6 address. Needs router advertisements accepted: the default route comes from them.',
   },
   {
@@ -160,10 +183,15 @@ const fields = [
     key: 'xlat464',
     label: '464XLAT',
     type: 'switch',
-    show: (f) => f.kind !== 'loopback',
+    show: (f) => f.kind !== 'loopback' && !is6in4(f),
     hint: 'For clients with a CLAT (Android, iOS, macOS), which reach IPv4 over IPv6 only: router advertisements on this interface announce the NAT64 prefix (Network → NAT64; PREF64), and its DHCPv4 tells them IPv4 is not needed (option 108, IPv6-only preferred). Needs router advertisements on the interface (DHCP).',
   },
-  { key: 'mtu', label: 'MTU', type: 'number', hint: '0 keeps the default.' },
+  {
+    key: 'mtu',
+    label: 'MTU',
+    type: 'number',
+    hint: '0 keeps the default (1480 for a 6in4 tunnel, which must match the MTU set at tunnelbroker.net, Advanced tab).',
+  },
   {
     key: 'lldp',
     label: 'LLDP',
@@ -184,6 +212,55 @@ const fields = [
     type: 'number',
     show: (f) => f.kind !== 'loopback',
     hint: 'Shapes what the interface receives (through an IFB device, ifb-<name>); 0 is off.',
+  },
+  { key: 'tunnel_heading', label: 'Tunnel', type: 'heading', show: is6in4 },
+  {
+    key: 'tunnel_remote',
+    label: 'Server IPv4 address',
+    required: true,
+    placeholder: '216.66.80.90',
+    show: is6in4,
+    hint: "The tunnel server's IPv4 address (Server IPv4 Address on the tunnel's page at tunnelbroker.net). IPv6 in IPv4 (protocol 41) from and to it is accepted automatically.",
+  },
+  {
+    key: 'tunnel_local',
+    label: 'Local IPv4 address',
+    placeholder: 'any',
+    show: is6in4,
+    hint: "The firewall's IPv4 address the tunnel uses. Empty (any) for an address from DHCP, or behind NAT, where the router in front must forward protocol 41 to the firewall.",
+  },
+  {
+    key: 'tunnel_default_route',
+    label: 'IPv6 default route',
+    type: 'switch',
+    show: is6in4,
+    hint: 'Route IPv6 (::/0) through the tunnel, with metric 512: a static ::/0 under Routing → Static (metric 0) still wins, one from router advertisements (1024) loses.',
+  },
+  {
+    key: 'broker_heading',
+    label: 'Hurricane Electric tunnel broker',
+    type: 'heading',
+    show: is6in4,
+  },
+  {
+    key: 'he_tunnel_id',
+    label: 'Tunnel ID',
+    placeholder: '123456',
+    show: is6in4,
+    hint: "Tells tunnelbroker.net the firewall's IPv4 address whenever it changes, so the tunnel follows a dynamic address. Empty turns it off. The Tunnel ID is on the tunnel's page.",
+  },
+  {
+    key: 'he_username',
+    label: 'User name',
+    show: (f) => is6in4(f) && !!f.he_tunnel_id,
+    hint: 'The tunnelbroker.net account’s user name.',
+  },
+  {
+    key: 'new_he_update_key',
+    label: 'Update key',
+    type: 'password',
+    show: (f) => is6in4(f) && !!f.he_tunnel_id,
+    hint: "The tunnel's Update Key (Advanced tab). Stored on the server, never shown again; leave empty to keep the stored key.",
   },
   {
     key: 'wg_listen_port',
@@ -247,6 +324,16 @@ const statsCols = [
   { key: 'tx_carrier_errors', label: 'Carrier', bad: true },
   { key: 'tx_collisions', label: 'Collisions', bad: true },
 ]
+// The agent's endpoint updating of a 6in4 tunnel, if it has an account.
+function brokerOf(row) {
+  return (
+    deploy.status?.tunnel_broker?.find(
+      (t) => t.instance === store.current?.name && t.interface === row.name,
+    ) ?? null
+  )
+}
+const stateColor = { ok: 'success', error: 'error', pending: 'neutral', 'dry-run': 'neutral' }
+
 const count = (n) => (n ?? 0).toLocaleString()
 const { search: statsSearch, filtered: statsFiltered } = useSearch(statsRows)
 </script>
@@ -255,13 +342,15 @@ const { search: statsSearch, filtered: statsFiltered } = useSearch(statsRows)
   <NeedInstance>
     <CrudPage
       title="Interfaces"
-      description="Physical ports, VLANs, bridges, loopbacks, WireGuard and 6in4 tunnels (Network → Tunnels) of this virtual firewall. Physical ports are moved into the virtual firewall's network namespace."
+      description="Physical ports, VLANs, bridges, loopbacks, WireGuard and 6in4 tunnels (such as Hurricane Electric's tunnel broker) of this virtual firewall. Physical ports are moved into the virtual firewall's network namespace."
       :api="interfaces"
       :params="{ instance_id: store.currentId }"
       :columns="columns"
       :fields="fields"
       :item-name="(r) => `interface ${withLabel(r.label, r.name)}`"
-      :edit-to="(r) => (r.kind === '6in4' ? '/tunnels' : null)"
+      :search-text="
+        (r) => [brokerOf(r)?.address, brokerOf(r)?.last_error].filter(Boolean).join(' ')
+      "
       :defaults="{
         kind: 'physical',
         label: '',
@@ -281,6 +370,12 @@ const { search: statsSearch, filtered: statsFiltered } = useSearch(statsRows)
         xlat464: false,
         shape_egress: 0,
         shape_ingress: 0,
+        tunnel_remote: '',
+        tunnel_local: '',
+        tunnel_default_route: true,
+        he_tunnel_id: '',
+        he_username: '',
+        new_he_update_key: '',
       }"
       new-label="New interface"
       @changed="reload()"
@@ -306,6 +401,26 @@ const { search: statsSearch, filtered: statsFiltered } = useSearch(statsRows)
         <div v-for="a in row.addresses ?? []" :key="a" class="font-mono text-xs">
           {{ a }}
         </div>
+      </template>
+      <template #cell-broker="{ row }">
+        <template v-if="is6in4(row)">
+          <span v-if="!row.he_tunnel_id" class="text-muted">off</span>
+          <span v-else-if="!brokerOf(row)" class="text-muted">not deployed</span>
+          <div v-else class="space-y-0.5">
+            <UBadge
+              :label="brokerOf(row).state"
+              :color="stateColor[brokerOf(row).state] ?? 'neutral'"
+              variant="subtle"
+              size="sm"
+            />
+            <span v-if="brokerOf(row).address" class="ml-1 font-mono text-xs">
+              {{ brokerOf(row).address }}
+            </span>
+            <div v-if="brokerOf(row).last_error" class="text-xs text-error">
+              {{ brokerOf(row).last_error }}
+            </div>
+          </div>
+        </template>
       </template>
       <template #cell-enabled="{ row }">
         <UIcon

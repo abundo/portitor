@@ -293,7 +293,7 @@ the certificate portitor-web serves, chosen under Settings
   write-only secrets (`NewSnmpCommunity`/`ClearSnmpCommunity`, `SnmpUser.NewAuthPassword`/
   `NewPrivPassword`); snmpd.conf is a `Secret` file (0600, read by snmpd as root
   before it drops to its user, so a change restarts it), removed when SNMP is off.
-- **6in4 tunnels** (`fwconfig/tunnel.go`, Network → Tunnels): interfaces of kind
+- **6in4 tunnels** (`fwconfig/tunnel.go`, Network → Interfaces, kind 6in4): interfaces of kind
   `6in4` (a `sit` device, `remote`/`local any`, recreated when either changes), with
   auto rules for IP protocol 41 from and to the server (input and output). With a
   Hurricane Electric account (`TunnelBroker`; the update key is a write-only secret,
