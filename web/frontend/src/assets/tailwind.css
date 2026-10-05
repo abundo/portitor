@@ -5,7 +5,7 @@
 @import '@nuxt/ui';
 
 @utility card {
-  @apply bg-default rounded-lg border border-default p-4 md:p-6;
+  @apply bg-default;
 }
 
 /* Row drag-and-drop (composables/useRowDrag.js). */
