@@ -35,11 +35,13 @@ const detail = computed(() => {
 const blocked = computed(() => !!changes.value?.problems || !!deploy.pending)
 
 // Commit applies with the configured auto-rollback, so a change that locks
-// the GUI out still undoes itself.
+// the GUI out still undoes itself. With no changes it applies the deployed
+// config again, which the rollback would only apply once more, so it is
+// confirmed at once (timeout 0).
 async function commit() {
   busy.value = true
   try {
-    const res = await api.deployApply()
+    const res = await api.deployApply(changes.value?.changed ? undefined : 0)
     toast.add({
       title: `Generation ${res.deployment.generation} ${res.deployment.status}`,
       color: 'success',
@@ -83,37 +85,40 @@ async function revert() {
 </script>
 
 <template>
-  <div v-if="changes?.changed" class="flex items-center gap-2">
-    <UTooltip :text="detail">
-      <span
-        class="flex items-center gap-1 text-sm"
-        :class="changes.problems ? 'text-warning' : 'text-info'"
+  <div class="flex items-center gap-2">
+    <template v-if="changes?.changed">
+      <UTooltip :text="detail">
+        <span
+          class="flex items-center gap-1 text-sm"
+          :class="changes.problems ? 'text-warning' : 'text-info'"
+        >
+          <UIcon name="i-lucide-circle-alert" class="size-5" />
+          <span class="hidden xl:inline">{{ label }}</span>
+        </span>
+      </UTooltip>
+      <UButton
+        size="sm"
+        color="neutral"
+        variant="outline"
+        to="/deploy"
+        icon="i-lucide-file-diff"
+        aria-label="Review"
+        ><span class="hidden lg:inline">Review</span></UButton
       >
-        <UIcon name="i-lucide-circle-alert" class="size-5" />
-        <span class="hidden xl:inline">{{ label }}</span>
-      </span>
-    </UTooltip>
-    <UButton
-      size="sm"
-      color="neutral"
-      variant="outline"
-      to="/deploy"
-      icon="i-lucide-file-diff"
-      aria-label="Review"
-      ><span class="hidden lg:inline">Review</span></UButton
-    >
-    <UButton
-      v-if="changes.deployed && auth.isAdmin"
-      size="sm"
-      color="neutral"
-      variant="outline"
-      icon="i-lucide-undo-2"
-      aria-label="Revert"
-      :loading="reverting"
-      :disabled="busy"
-      @click="revert"
-      ><span class="hidden lg:inline">Revert</span></UButton
-    >
+      <UButton
+        v-if="changes.deployed && auth.isAdmin"
+        size="sm"
+        color="neutral"
+        variant="outline"
+        icon="i-lucide-undo-2"
+        aria-label="Revert"
+        :loading="reverting"
+        :disabled="busy"
+        @click="revert"
+        ><span class="hidden lg:inline">Revert</span></UButton
+      >
+    </template>
+    <!-- Always there: with no changes, a commit applies the current config again. -->
     <UButton
       v-if="auth.canDeploy"
       size="sm"
