@@ -114,7 +114,10 @@ const vfName = computed(() =>
   instStore.current?.is_default ? '' : (instStore.current?.name ?? ''),
 )
 const ofVF = (lines, inst) => (vfName.value ? lines.filter((l) => inst(l) === vfName.value) : lines)
-const logLines = computed(() => ofVF(state.log.lines, (l) => l.attrs?.instance))
+// The GUI's own messages (source=gui) show on every VF.
+const logLines = computed(() =>
+  ofVF(state.log.lines, (l) => (l.attrs?.source === 'gui' ? vfName.value : l.attrs?.instance)),
+)
 // Agent log lines by level, message and attrs ("error wg0", "instance=office").
 const logText = (l) =>
   [l.level, l.message, ...attrs(l).map(([k, v]) => `${k}=${v}`)].join(' ').toLowerCase()

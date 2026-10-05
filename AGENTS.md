@@ -395,6 +395,10 @@ singular); a custom page uses `SearchInput` above each table,
   `useUnsaved` for a form on the page). Leaving the page (a router guard),
   switching instance and logging out ask the same question first
   (`confirmDiscard`); closing or reloading the tab gets the browser's warning.
+- **Messages** (errors, warnings, information) are shown as toasts with
+  `useToast().add`, never another way: `AppLayout` copies every toast (title
+  and description) into the log panel's Agent log tab (`useLogPanel().note`,
+  `source=gui`), where it stays and can be copied.
 - **Exceptions:** the rules list (`RulesTable`: a click opens the rule, the
   context menu deletes) and the DNS zone records grid (`ZoneRecordsTable`: edited
   in place, no detail view) are exempt from the table rules, and so is the

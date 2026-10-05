@@ -101,6 +101,25 @@ async function poll() {
   if (running) timer = setTimeout(poll, delay)
 }
 
+// The GUI's own messages (the toasts in the corner) go into the Agent log
+// tab too, where they stay and can be copied. Their ids are strings, so
+// they never collide with the agent's.
+const toastLevels = { error: 'ERROR', warning: 'WARN' }
+let noted = 0
+function note(t) {
+  const message = [t.title, t.description].filter(Boolean).join(': ')
+  if (!message) return
+  const f = state.log
+  f.lines.push({
+    id: `gui-${++noted}`,
+    time: new Date().toISOString(),
+    level: toastLevels[t.color] ?? 'INFO',
+    message,
+    attrs: { source: 'gui' },
+  })
+  if (f.lines.length > MAX_LINES) f.lines.splice(0, f.lines.length - MAX_LINES)
+}
+
 function maxHeight() {
   return Math.max(MIN_HEIGHT, Math.floor(window.innerHeight * 0.8))
 }
@@ -108,6 +127,7 @@ function maxHeight() {
 export function useLogPanel() {
   return {
     state,
+    note,
     toggle: () => (state.open = !state.open),
     close: () => (state.open = false),
     clear: () => (state[state.tab].lines = []),

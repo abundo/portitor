@@ -45,9 +45,23 @@ function toggleMenu() {
     // Not remembered; the toggle works without it.
   }
 }
-const { state: logPanel } = useLogPanel()
+const { state: logPanel, note } = useLogPanel()
 const route = useRoute()
 const toast = useToast()
+
+// Every toast also goes into the log panel's Agent log tab, which keeps it.
+const seenToasts = new Set()
+watch(
+  () => toast.toasts.value.map((t) => t.id),
+  () => {
+    for (const t of toast.toasts.value) {
+      if (seenToasts.has(t.id)) continue
+      seenToasts.add(t.id)
+      note(t)
+    }
+  },
+  { immediate: true },
+)
 
 watch(
   () => route.path,
