@@ -6,6 +6,54 @@
 The major changes in each release. A release's notes on GitHub are its section
 here (`dev/release-notes.sh`); the full list is `git log <previous tag>..<tag>`.
 
+## v0.6.0
+
+### New
+
+- **NAT64:** DNS64 and Jool translation per virtual firewall, on its own page
+  under Network; translated traffic goes through the forward rules, NAT and
+  shapers.
+- **464XLAT:** per interface, PREF64 in router advertisements and DHCPv4
+  option 108 (IPv6-only preferred).
+- **NTP:** chrony per virtual firewall under Services, with an Info tab.
+- **SNMP:** read-only net-snmp (v2c community, v3 users) per virtual firewall
+  under Services.
+- **6in4 tunnels:** an interface kind on the Interfaces page, with endpoint
+  updates at Hurricane Electric's tunnel broker.
+- **Interfaces:** renew a DHCP/DHCPv6 lease, and a Statistics dialog with
+  packet, error and drop counters.
+- **BGP info:** a neighbour's prefixes received, filtered and advertised, and
+  its full neighbour information.
+- **Routing page:** all routing tables, with protocol and the VF a gateway
+  belongs to.
+- **Dashboard:** each service's log (`journalctl --follow`) in a window of its
+  own, one tab per service.
+- **Updates:** a release marked broken ("Broken: <reason>" in its notes) is
+  shown with a warning and never offered as the update.
+- **ISO:** end-to-end test of the split setup in two VMs
+  (`make iso-e2e-split`).
+
+### Changed
+
+- Commit is always shown; with no changes it applies the deployed config
+  again, without a confirm.
+- DHCP and RA settings follow a renumbered interface address.
+- Menu: Routing is a top-level section after Network, all sections start
+  collapsed, and Help's topics are grouped the same way.
+- Backup & restore is its own page under Admin.
+- GUI: automatic refresh is shown on its button and stops after an hour;
+  every message is also kept in the log panel's Agent log tab, which has a
+  filter; pages have no box around their content.
+- DNS zone: the Records tab comes first; "Zone info" is now "Zone
+  configuration".
+
+### Upgrading
+
+- An update installs the new Debian packages: chrony (replacing
+  systemd-timesyncd), snmpd, jool-dkms and jool-tools with the kernel headers
+  (DKMS builds Jool's module, which takes a while).
+- Database migrations 44 to 50 run on update.
+
 ## v0.5.1
 
 ### Fixed
