@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -147,6 +148,8 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 		if err != nil {
 			return err
 		}
+		// Whether an interface may join or leave a VRF (below).
+		vrfs := in.HasVRF() || slices.ContainsFunc(slices.Collect(maps.Values(links)), func(l ipLink) bool { return l.kind() == "vrf" })
 		if err := a.doAll(ctx, planCreate(ns, in.Interfaces, links)); err != nil {
 			return err
 		}
@@ -239,6 +242,14 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 		if err := a.doAll(ctx, planVXLAN(ns, in, links, fdbs)); err != nil {
 			return err
 		}
+		if vrfs {
+			// Joining or leaving a VRF cycles an interface, which takes
+			// its IPv6 addresses away: the addresses are planned from
+			// what it has now.
+			if links, err = a.links(ctx, ns); err != nil {
+				return err
+			}
+		}
 		if qdiscs, err = a.qdiscs(ctx, ns); err != nil {
 			return err
 		}
@@ -281,6 +292,11 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 			sysctls = append(sysctls, "net.ipv6.conf."+strings.ReplaceAll(ifc.Name, ".", "/")+".accept_ra="+ra)
 		}
 		sysctls = append(sysctls, vrrpSysctls(vrrpDevs)...)
+		if in.HasVRF() {
+			// The firewall's own services (in the default VRF) answer
+			// connections that come in on a VRF's member.
+			sysctls = append(sysctls, "net.ipv4.tcp_l3mdev_accept=1", "net.ipv4.udp_l3mdev_accept=1")
+		}
 		if err := a.do(ctx, command{Netns: ns, Name: "sysctl", Args: append([]string{"-q", "-e", "-w"}, sysctls...)}); err != nil {
 			return err
 		}
@@ -293,7 +309,8 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 				return err
 			}
 			if ifc.IPv4Mode == fwconfig.ModeDHCP && ifc.Enabled {
-				dhcpWant = append(dhcpWant, dhcpKey{instance: in.Name, netns: ns, iface: ifc.Name, noRoute: ifc.DHCPNoDefaultRoute})
+				dhcpWant = append(dhcpWant, dhcpKey{instance: in.Name, netns: ns, iface: ifc.Name, noRoute: ifc.DHCPNoDefaultRoute,
+					table: in.RouteTable(fwconfig.Route{Interface: ifc.Name})})
 			}
 			if ifc.LLDP && ifc.Enabled {
 				lldpWant = append(lldpWant, lldpKey{instance: in.Name, netns: ns, iface: ifc.Name, descr: ifc.Description})
@@ -325,19 +342,30 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 			dnsqWant[in.Name] = queryLogItem{unit: a.cfg.Units.Named(in), filter: *in.DNS.QueryLog}
 		}
 
+		// The main table's and the VRFs' (not the NAT64 tables, which
+		// are applyNAT64's).
 		var routes []ipRoute
-		for _, fam := range []string{"-4", "-6"} {
-			out, err := a.run.Run(ctx, ns, "ip", "-j", fam, "route", "show", "proto", RouteProto)
-			if err != nil {
-				return err
+		for _, table := range append([]string{""}, in.VRFTables()...) {
+			for _, fam := range []string{"-4", "-6"} {
+				args := []string{"-j", fam, "route", "show", "proto", RouteProto}
+				if table != "" {
+					args = append(args, "table", table)
+				}
+				out, err := a.run.Run(ctx, ns, "ip", args...)
+				if err != nil {
+					return err
+				}
+				r, err := parseRoutes(out)
+				if err != nil {
+					return err
+				}
+				for i := range r {
+					r[i].Table = table
+				}
+				routes = append(routes, r...)
 			}
-			r, err := parseRoutes(out)
-			if err != nil {
-				return err
-			}
-			routes = append(routes, r...)
 		}
-		if err := a.doAll(ctx, planRoutes(ns, slices.Concat(in.KernelRoutes(), in.WireGuardRoutes(), nat64Routes(in)), routes)); err != nil {
+		if err := a.doAll(ctx, planRoutes(ns, slices.Concat(in.KernelRoutes(), in.WireGuardRoutes(), nat64Routes(in)), routes, in.RouteTable)); err != nil {
 			return err
 		}
 		a.setNamedEndpoints(ctx, in)

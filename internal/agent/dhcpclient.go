@@ -37,6 +37,8 @@ const (
 type dhcpKey struct {
 	instance, netns, iface string
 	noRoute                bool
+	// table is the routing table of the interface's VRF, "" for main.
+	table string
 }
 
 // dhcpManager runs one DHCPv4 client goroutine per WAN interface.
@@ -400,8 +402,11 @@ func (m *dhcpManager) installLease(ctx context.Context, k dhcpKey, old, lease *n
 		router = routers[0].String()
 	}
 	if router != "" && !k.noRoute {
-		if _, err := m.run.Run(ctx, k.netns, "ip", "route", "replace", "default", "via", router,
-			"dev", k.iface, "proto", "dhcp", "metric", strconv.Itoa(DHCPRouteMetric)); err != nil {
+		args := []string{"route", "replace", "default", "via", router, "dev", k.iface, "proto", "dhcp", "metric", strconv.Itoa(DHCPRouteMetric)}
+		if k.table != "" {
+			args = append(args, "table", k.table)
+		}
+		if _, err := m.run.Run(ctx, k.netns, "ip", args...); err != nil {
 			return err
 		}
 	}

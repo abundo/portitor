@@ -187,6 +187,8 @@ func SampleDocument() Document {
 					{Name: "vx200", Kind: KindVXLAN, Enabled: true, IPv4Mode: ModeNone,
 						VXLAN: &VXLAN{VNI: 200, Local: "192.168.50.1", Device: "eth2", Remotes: []string{"192.168.50.2", "192.168.50.3"}}},
 					{Name: "br200", Kind: KindBridge, Enabled: true, IPv4Mode: ModeNone, Members: []string{"vx200"}},
+					{Name: "eth3", Kind: KindPhysical, Enabled: true, IPv4Mode: ModeStatic, Addresses: []string{"172.16.3.1/24"}},
+					{Name: "blue", Kind: KindVRF, Enabled: true, IPv4Mode: ModeNone, VRFTable: 100, Members: []string{"eth3"}},
 				},
 				VRRP: []VRRP{
 					{Interface: "eth2", VRID: 50, Priority: 200, AdvertisementInterval: 500, IPv4: []string{"192.168.50.254"}, IPv6: []string{"fe80::50"}},
@@ -195,6 +197,7 @@ func SampleDocument() Document {
 					{Chain: ChainForward, InInterfaces: []string{"eth2"}, OutInterfaces: []string{"lk-main"}, DstAddrs: []string{"192.168.0.0/16"}, Action: ActionReject, Description: "no home access"},
 					{Chain: ChainForward, InInterfaces: []string{"eth2"}, OutInterfaces: []string{"lk-main"}, Action: ActionAccept},
 					{Chain: ChainInput, InInterfaces: []string{"eth2"}, Action: ActionAccept},
+					{Chain: ChainForward, InInterfaces: []string{"eth2", "eth3"}, OutInterfaces: []string{"eth3"}, Action: ActionAccept, Description: "into the vrf"},
 				},
 				NAT: []NATRule{
 					{Kind: NATMasquerade, OutInterfaces: []string{"lk-main"}},

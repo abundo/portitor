@@ -1044,3 +1044,21 @@ func TestSnmpdConf(t *testing.T) {
 		t.Errorf("no interfaces: snmp rule in\n%s", nft)
 	}
 }
+
+// A rule's VRF members are matched by meta sdifname in input and forward,
+// where the VRF device is the input interface: a rule naming members and
+// other interfaces is two.
+func TestRenderVRFMembers(t *testing.T) {
+	nft := mustFile(t, sampleBundle(t), "/etc/portitor/instances/guest/nftables.nft")
+	for _, want := range []string{
+		`iifname { "eth2", "vrrp4-50-eth2", "vrrp6-50-eth2" } oifname "eth3" counter accept comment "rule 4: into the vrf"`,
+		`meta sdifname "eth3" oifname "eth3" counter accept comment "rule 4: into the vrf"`,
+	} {
+		if !strings.Contains(nft, want) {
+			t.Errorf("missing %q in\n%s", want, nft)
+		}
+	}
+	if strings.Contains(nft, `"eth2", "eth3"`) {
+		t.Error("eth3 matched by iifname")
+	}
+}

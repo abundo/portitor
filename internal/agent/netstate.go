@@ -44,6 +44,8 @@ type ipLink struct {
 			Port     int    `json:"port"`
 			Link     string `json:"link"`
 			Learning *bool  `json:"learning"`
+			// A vrf's routing table.
+			Table int `json:"table"`
 		} `json:"info_data"`
 		// A bridge port's settings.
 		InfoSlaveKind string `json:"info_slave_kind"`
@@ -120,6 +122,8 @@ func (a ipAddr) prefix() (netip.Prefix, error) {
 }
 
 type ipRoute struct {
+	// Table is the table it was read from, "" for main.
+	Table   string `json:"-"`
 	Dst     string `json:"dst"`
 	Gateway string `json:"gateway"`
 	Dev     string `json:"dev"`
@@ -183,6 +187,8 @@ func virtualMatches(want fwconfig.Interface, have ipLink) bool {
 			d.InfoData.Port == want.VXLAN.UDPPort() && d.InfoData.Link == want.VXLAN.Device
 	case fwconfig.KindLink:
 		return have.kind() == "veth"
+	case fwconfig.KindVRF:
+		return have.kind() == "vrf" && have.LinkInfo.InfoData.Table == want.VRFTable
 	}
 	return true
 }
@@ -215,7 +221,7 @@ func planCreate(ns string, want []fwconfig.Interface, have map[string]ipLink) []
 	sort.SliceStable(order, func(i, j int) bool { return rank(order[i].Kind) < rank(order[j].Kind) })
 	for _, ifc := range order {
 		switch ifc.Kind {
-		case fwconfig.KindVLAN, fwconfig.KindBridge, fwconfig.KindWireGuard, fwconfig.KindLoopback, fwconfig.Kind6in4, fwconfig.KindVXLAN:
+		case fwconfig.KindVLAN, fwconfig.KindBridge, fwconfig.KindWireGuard, fwconfig.KindLoopback, fwconfig.Kind6in4, fwconfig.KindVXLAN, fwconfig.KindVRF:
 		default:
 			continue
 		}
@@ -234,6 +240,8 @@ func planCreate(ns string, want []fwconfig.Interface, have map[string]ipLink) []
 			cmds = append(cmds, ipCmd(ns, "link", "add", "name", ifc.Name, "type", "wireguard"))
 		case fwconfig.KindLoopback:
 			cmds = append(cmds, ipCmd(ns, "link", "add", "name", ifc.Name, "type", "dummy"))
+		case fwconfig.KindVRF:
+			cmds = append(cmds, ipCmd(ns, "link", "add", "name", ifc.Name, "type", "vrf", "table", strconv.Itoa(ifc.VRFTable)))
 		case fwconfig.Kind6in4:
 			if ifc.Tunnel == nil {
 				continue
@@ -258,12 +266,12 @@ func planCreate(ns string, want []fwconfig.Interface, have map[string]ipLink) []
 	return cmds
 }
 
-// planLinkSettings sets bridge membership, MTU and admin state.
+// planLinkSettings sets bridge and VRF membership, MTU and admin state.
 func planLinkSettings(ns string, want []fwconfig.Interface, have map[string]ipLink) []command {
 	var cmds []command
 	master := map[string]string{}
 	for _, ifc := range want {
-		if ifc.Kind == fwconfig.KindBridge {
+		if ifc.Kind == fwconfig.KindBridge || ifc.Kind == fwconfig.KindVRF {
 			for _, m := range ifc.Members {
 				master[m] = ifc.Name
 			}
@@ -273,8 +281,8 @@ func planLinkSettings(ns string, want []fwconfig.Interface, have map[string]ipLi
 		l, exists := have[ifc.Name]
 		if m := master[ifc.Name]; m != "" && (!exists || l.Master != m) {
 			cmds = append(cmds, ipCmd(ns, "link", "set", "dev", ifc.Name, "master", m))
-		} else if m == "" && exists && l.Master != "" && have[l.Master].kind() == "bridge" {
-			if isOurBridge(want, l.Master) {
+		} else if m == "" && exists && l.Master != "" && (have[l.Master].kind() == "bridge" || have[l.Master].kind() == "vrf") {
+			if isOurMaster(want, l.Master) {
 				cmds = append(cmds, ipCmd(ns, "link", "set", "dev", ifc.Name, "nomaster"))
 			}
 		}
@@ -292,9 +300,9 @@ func planLinkSettings(ns string, want []fwconfig.Interface, have map[string]ipLi
 	return cmds
 }
 
-func isOurBridge(want []fwconfig.Interface, name string) bool {
+func isOurMaster(want []fwconfig.Interface, name string) bool {
 	for _, ifc := range want {
-		if ifc.Name == name && ifc.Kind == fwconfig.KindBridge {
+		if ifc.Name == name && (ifc.Kind == fwconfig.KindBridge || ifc.Kind == fwconfig.KindVRF) {
 			return true
 		}
 	}
@@ -340,10 +348,21 @@ func planAddresses(ns string, ifc fwconfig.Interface, have ipLink) []command {
 	return cmds
 }
 
-// planRoutes reconciles the agent's own (proto 99) routes.
-func planRoutes(ns string, want []fwconfig.Route, have []ipRoute) []command {
-	key := func(dst, gw, dev string, metric int) string {
-		return fmt.Sprintf("%s|%s|%s|%d", dst, gw, dev, metric)
+// planRoutes reconciles the agent's own (proto 99) routes, of the main
+// table and the VRFs' (have read from each). table gives a route's table,
+// "" for main; nil puts all in main.
+func planRoutes(ns string, want []fwconfig.Route, have []ipRoute, table func(fwconfig.Route) string) []command {
+	if table == nil {
+		table = func(fwconfig.Route) string { return "" }
+	}
+	key := func(t, dst, gw, dev string, metric int) string {
+		return fmt.Sprintf("%s|%s|%s|%s|%d", t, dst, gw, dev, metric)
+	}
+	withTable := func(args []string, t string) []string {
+		if t != "" {
+			args = append(args, "table", t)
+		}
+		return args
 	}
 	wantKeys := map[string]bool{}
 	var cmds []command
@@ -355,7 +374,7 @@ func planRoutes(ns string, want []fwconfig.Route, have []ipRoute) []command {
 				dst = "default"
 			}
 		}
-		wantKeys[key(dst, r.Gateway, r.Interface, r.Metric)] = true
+		wantKeys[key(table(r), dst, r.Gateway, r.Interface, r.Metric)] = true
 	}
 	for _, r := range have {
 		dst := r.Dst
@@ -364,12 +383,12 @@ func planRoutes(ns string, want []fwconfig.Route, have []ipRoute) []command {
 		} else if a, err := netip.ParseAddr(dst); err == nil {
 			dst = netip.PrefixFrom(a, a.BitLen()).String()
 		}
-		if wantKeys[key(dst, r.Gateway, r.Dev, r.Metric)] {
+		if wantKeys[key(r.Table, dst, r.Gateway, r.Dev, r.Metric)] {
 			continue
 		}
 		// A route whose dev isn't in the desired set still matches when
 		// the desired route didn't name an interface.
-		if wantKeys[key(dst, r.Gateway, "", r.Metric)] {
+		if wantKeys[key(r.Table, dst, r.Gateway, "", r.Metric)] {
 			continue
 		}
 		args := []string{"route", "del", dst}
@@ -379,7 +398,7 @@ func planRoutes(ns string, want []fwconfig.Route, have []ipRoute) []command {
 		if r.Dev != "" {
 			args = append(args, "dev", r.Dev)
 		}
-		args = append(args, "metric", strconv.Itoa(r.Metric), "proto", RouteProto)
+		args = withTable(append(args, "metric", strconv.Itoa(r.Metric), "proto", RouteProto), r.Table)
 		if isV6(dst, r.Gateway) {
 			args = append([]string{"-6"}, args...)
 		}
@@ -393,7 +412,7 @@ func planRoutes(ns string, want []fwconfig.Route, have []ipRoute) []command {
 		if r.Interface != "" {
 			args = append(args, "dev", r.Interface)
 		}
-		args = append(args, "metric", strconv.Itoa(r.Metric), "proto", RouteProto)
+		args = withTable(append(args, "metric", strconv.Itoa(r.Metric), "proto", RouteProto), table(r))
 		if isV6(r.Destination, r.Gateway) {
 			args = append([]string{"-6"}, args...)
 		}

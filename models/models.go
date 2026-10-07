@@ -462,6 +462,8 @@ type Interface struct {
 	VxlanDevice  string     `json:"vxlan_device"`
 	VxlanPort    int        `json:"vxlan_port"`
 	VxlanRemotes StringList `json:"vxlan_remotes"`
+	// VrfTable is a VRF's routing table (kind vrf; fwconfig.Interface.VRFTable).
+	VrfTable int `json:"vrf_table"`
 }
 
 type WgPeer struct {
@@ -504,6 +506,8 @@ type Route struct {
 	Gateway     string `json:"gateway"`
 	InterfaceID *uint  `json:"interface_id"`
 	Metric      int    `json:"metric"`
+	// VrfID puts the route in that VRF interface's table (fwconfig.Route.VRF).
+	VrfID *uint `json:"vrf_id"`
 	// Bfd: withdrawn while the BFD session to the gateway is down, when
 	// the gateway's interface has BFD (fwconfig.Route.BFD).
 	Bfd         bool   `json:"bfd"`

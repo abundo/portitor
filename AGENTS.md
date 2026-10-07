@@ -313,6 +313,19 @@ the certificate portitor-web serves, chosen under Settings
   bridge port don't learn, the port has `neigh_suppress`, and the FDB is zebra's;
   `Remotes` then only filter the sources. L2VNIs only (no VRFs). The underlay
   follows a rename and is refused on delete (`web/ifzones.go`).
+- **VRFs** (`fwconfig/vrf.go`, Network → Interfaces, kind vrf): a `vrf` device
+  per interface (`VRFTable`, unique in the instance, below `NAT64TableBase`; the
+  namespace makes names and tables per instance), its `Members` enslaved as a
+  bridge's (an interface has at most one bridge or VRF). A route goes in the table
+  of its `VRF` or of its interface's VRF (`Instance.RouteTable`), and so does a
+  DHCP default route; the agent reads and plans the proto 99 routes of main and
+  each VRF table. In input and forward a member's packets have the VRF device as
+  `iifname`, so the renderer matches members by `meta sdifname`
+  (`iifMatches`; a mixed list becomes two rules); NAT keeps `iifname`
+  (prerouting's first pass). With a VRF, `tcp_l3mdev_accept`/`udp_l3mdev_accept`
+  let the firewall's services answer on members. Renaming or deleting an
+  interface rewrites bridge and VRF member lists (`memberLists`). FRR stays in the
+  default VRF.
 - **Dual stack:** rule and NAT address lists may mix IPv4 and IPv6;
   `fwconfig.MatchFamilies` decides which versions a rule is rendered for, and
   validation uses the same function.

@@ -156,7 +156,7 @@ func Nftables(in *fwconfig.Instance, lockout *AntiLockout, paths Paths) string {
 	for _, r := range AutoInputRules(in) {
 		// What comes to a virtual router's address arrives on its device.
 		r.InInterfaces = in.AddVRRPDevices(r.InInterfaces)
-		for _, match := range r.matches() {
+		for _, match := range r.matches(in) {
 			writeAutoLog(b, in, r.Service, match)
 			b.WriteString("\t\t" + match + " accept " + comment("auto", r.Service) + "\n")
 		}
@@ -830,10 +830,22 @@ func writeAutoSet(b *strings.Builder, r AutoRule) {
 }
 
 // matches renders an auto rule's matches: one, or with Source one per IP
-// version of its addresses, by its set if it has one.
-func (r AutoRule) matches() []string {
+// version of its addresses, by its set if it has one; and one per input
+// interface match (iifMatches).
+func (r AutoRule) matches(in *fwconfig.Instance) []string {
+	var out []string
+	if len(r.InInterfaces) == 0 {
+		out = r.sourceMatches("")
+	}
+	for _, iif := range iifMatches(in, r.InInterfaces, true) {
+		out = append(out, r.sourceMatches(iif)...)
+	}
+	return out
+}
+
+func (r AutoRule) sourceMatches(iif string) []string {
 	if len(r.Source) == 0 {
-		return []string{r.match()}
+		return []string{r.match(iif)}
 	}
 	var out []string
 	v4, v6 := splitFamilies(r.Source)
@@ -846,7 +858,7 @@ func (r AutoRule) matches() []string {
 			if r.SourceSet != "" {
 				src = "@" + AutoSetName(r.SourceSet, m.fam)
 			}
-			out = append(out, fmt.Sprintf("%s saddr %s %s", m.key, src, r.match()))
+			out = append(out, fmt.Sprintf("%s saddr %s %s", m.key, src, r.match(iif)))
 		}
 	}
 	return out
@@ -862,11 +874,12 @@ func writeAutoLog(b *strings.Builder, in *fwconfig.Instance, service, match stri
 	}
 }
 
-// match renders the matches of an auto rule.
-func (r AutoRule) match() string {
+// match renders the matches of an auto rule, after iif, its input
+// interface match.
+func (r AutoRule) match(iif string) string {
 	var parts []string
-	if len(r.InInterfaces) > 0 {
-		parts = append(parts, "iifname "+quotedSet(r.InInterfaces))
+	if iif != "" {
+		parts = append(parts, iif)
 	}
 	switch r.Protocol {
 	case OSPFService, OSPF6Service:
@@ -892,15 +905,19 @@ func (r AutoRule) match() string {
 	return strings.Join(parts, " ")
 }
 
-// ifaceMatch renders the iifname/oifname matches of a rule. ok is false
-// when a non-empty interface list matches no enabled interface: the rule
-// is then skipped (with a comment saying so), since dropping the match
-// would widen it to every interface.
-func ifaceMatch(b *strings.Builder, what string, in *fwconfig.Instance, inList, outList []string) (parts []string, ok bool) {
+// ifaceMatch renders the iifname/oifname matches of a rule: one or more
+// alternatives (iifMatches), each rendered as a rule of its own. ok is
+// false when a non-empty interface list matches no enabled interface: the
+// rule is then skipped (with a comment saying so), since dropping the
+// match would widen it to every interface. sdif is for the input and
+// forward chains.
+func ifaceMatch(b *strings.Builder, what string, in *fwconfig.Instance, inList, outList []string, sdif bool) (alts [][]string, ok bool) {
+	var iifs []string
+	var oif string
 	for _, m := range []struct {
-		key  string
+		in   bool
 		list []string
-	}{{"iifname", inList}, {"oifname", outList}} {
+	}{{true, inList}, {false, outList}} {
 		if len(m.list) == 0 {
 			continue
 		}
@@ -909,9 +926,49 @@ func ifaceMatch(b *strings.Builder, what string, in *fwconfig.Instance, inList, 
 			fmt.Fprintf(b, "\t\t# %s skipped: %s has no enabled interfaces\n", what, strings.Join(m.list, ", "))
 			return nil, false
 		}
-		parts = append(parts, m.key+" "+quotedSet(ifs))
+		if m.in {
+			iifs = iifMatches(in, ifs, sdif)
+		} else {
+			oif = "oifname " + quotedSet(ifs)
+		}
 	}
-	return parts, true
+	if len(iifs) == 0 {
+		iifs = []string{""}
+	}
+	for _, iif := range iifs {
+		var parts []string
+		for _, p := range []string{iif, oif} {
+			if p != "" {
+				parts = append(parts, p)
+			}
+		}
+		alts = append(alts, parts)
+	}
+	return alts, true
+}
+
+// iifMatches renders the match of the input interfaces ifs. In the input
+// and forward chains (sdif) a packet that arrived on a VRF's member has
+// the VRF device as its input interface, and the member as meta sdifname:
+// the members are matched that way, the others by iifname, in two matches
+// (nft has no "or", and no empty sdifname to put both in one set).
+func iifMatches(in *fwconfig.Instance, ifs []string, sdif bool) []string {
+	var plain, members []string
+	for _, n := range ifs {
+		if sdif && in.VRFOf(n) != nil {
+			members = append(members, n)
+		} else {
+			plain = append(plain, n)
+		}
+	}
+	var out []string
+	if len(plain) > 0 {
+		out = append(out, "iifname "+quotedSet(plain))
+	}
+	if len(members) > 0 {
+		out = append(out, "meta sdifname "+quotedSet(members))
+	}
+	return out
 }
 
 // writeRules renders the rules of one chain. Rules are numbered without
@@ -936,7 +993,8 @@ func writeRules(b *strings.Builder, in *fwconfig.Instance, chain string) {
 }
 
 func writeRule(b *strings.Builder, idx int, r fwconfig.Rule, in *fwconfig.Instance) {
-	parts, ok := ifaceMatch(b, fmt.Sprintf("rule %d", idx+1), in, r.InInterfaces, r.OutInterfaces)
+	alts, ok := ifaceMatch(b, fmt.Sprintf("rule %d", idx+1), in, r.InInterfaces, r.OutInterfaces,
+		r.Chain == fwconfig.ChainInput || r.Chain == fwconfig.ChainForward)
 	if !ok {
 		return
 	}
@@ -967,6 +1025,12 @@ func writeRule(b *strings.Builder, idx int, r fwconfig.Rule, in *fwconfig.Instan
 	// packets the rule matches drops what is over it first, with the same
 	// match; one per source address splits a match of either IP version in
 	// two.
+	for _, parts := range alts {
+		writeRuleMatches(b, idx, r, in, parts, limit, tail)
+	}
+}
+
+func writeRuleMatches(b *strings.Builder, idx int, r fwconfig.Rule, in *fwconfig.Instance, parts []string, limit *fwconfig.RateLimit, tail []string) {
 	for _, m := range r.Matches() {
 		var ok bool
 		if m.FamilyMatch, ok = dropEmptySets(in, m.FamilyMatch); !ok {
@@ -1197,10 +1261,14 @@ func writeHairpin(b *strings.Builder, idx int, n fwconfig.NATRule, in *fwconfig.
 }
 
 func writeNAT(b *strings.Builder, idx int, n fwconfig.NATRule, in *fwconfig.Instance) {
-	parts, ok := ifaceMatch(b, fmt.Sprintf("nat rule %d", idx+1), in, n.InInterfaces, n.OutInterfaces)
+	// NAT is in prerouting and postrouting, where a packet from a VRF's
+	// member has the member as its input interface (prerouting's first
+	// pass, where the NAT is decided): one match.
+	alts, ok := ifaceMatch(b, fmt.Sprintf("nat rule %d", idx+1), in, n.InInterfaces, n.OutInterfaces, false)
 	if !ok {
 		return
 	}
+	parts := alts[0]
 	// snat/dnat match the target's IP version; masquerade the versions of
 	// its addresses, IPv4 without any.
 	family := fwconfig.AddrFamily(n.ToAddr)

@@ -6,15 +6,21 @@
 <script setup>
 import CrudPage from '@/components/CrudPage.vue'
 import NeedInstance from '@/components/NeedInstance.vue'
+import { computed } from 'vue'
 import { routes } from '@/api'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
 
-const { store, ifaceItems, ifaceName } = useInstanceRefs()
+const { store, ifaceList, ifaceItems, ifaceName } = useInstanceRefs()
+
+const vrfItems = computed(() =>
+  ifaceItems.value.filter((i) => ifaceList.value.find((x) => x.id === i.value)?.kind === 'vrf'),
+)
 
 const columns = [
   { key: 'destination', label: 'Destination', class: 'font-mono' },
   { key: 'gateway', label: 'Gateway', class: 'font-mono' },
   { key: 'interface_id', label: 'Interface', format: (r) => ifaceName(r.interface_id) },
+  { key: 'vrf_id', label: 'VRF', format: (r) => (r.vrf_id ? ifaceName(r.vrf_id) : '') },
   { key: 'metric', label: 'Metric' },
   { key: 'bfd', label: 'BFD' },
   { key: 'enabled', label: 'Enabled' },
@@ -41,6 +47,15 @@ const fields = [
     type: 'select',
     items: () => ifaceItems.value,
     nullable: true,
+  },
+  {
+    key: 'vrf_id',
+    label: 'VRF',
+    type: 'select',
+    items: () => vrfItems.value,
+    nullable: true,
+    show: (f) => vrfItems.value.length > 0 || !!f.vrf_id,
+    hint: 'Puts the route in the VRF’s table. — : the table of the interface’s VRF, or the main table.',
   },
   {
     key: 'metric',

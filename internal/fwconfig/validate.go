@@ -228,6 +228,8 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 			v.tunnel6in4(ip, ifc)
 		case KindVXLAN:
 			v.vxlan(ip, ifc)
+		case KindVRF:
+			v.vrf(ip, ifc)
 		default:
 			v.addf("%s: invalid kind %q", ip, ifc.Kind)
 		}
@@ -245,11 +247,12 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 		}
 		for _, m := range ifc.Members {
 			if ifaces[m] == nil {
-				v.addf("%s: bridge %q: member %q is not in this instance", p, ifc.Name, m)
+				v.addf("%s: %s %q: member %q is not in this instance", p, ifc.Kind, ifc.Name, m)
 			}
 		}
 	}
 	v.vxlanInstance(p, in, ifaces)
+	v.vrfInstance(p, in, ifaces)
 
 	zones := map[string]bool{}
 	for _, z := range in.InterfaceZones {

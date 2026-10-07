@@ -102,6 +102,7 @@ const (
 	KindLink      = "link"     // one end of a veth Link, generated from Document.Links
 	Kind6in4      = "6in4"     // an IPv6-in-IPv4 tunnel (sit), Tunnel
 	KindVXLAN     = "vxlan"    // a VXLAN (ethernet in UDP), VXLAN
+	KindVRF       = "vrf"      // a VRF: Members routed by table VRFTable
 )
 
 // IPv4 addressing modes.
@@ -118,9 +119,11 @@ type Interface struct {
 	Enabled     bool     `json:"enabled"`
 	Parent      string   `json:"parent,omitempty"`  // vlan
 	VLANID      int      `json:"vlan_id,omitempty"` // vlan
-	Members     []string `json:"members,omitempty"` // bridge
-	MTU         int      `json:"mtu,omitempty"`
-	IPv4Mode    string   `json:"ipv4_mode"`
+	Members     []string `json:"members,omitempty"` // bridge, vrf
+	// VRFTable is a VRF's routing table (vrf.go).
+	VRFTable int    `json:"vrf_table,omitempty"`
+	MTU      int    `json:"mtu,omitempty"`
+	IPv4Mode string `json:"ipv4_mode"`
 	// DHCPNoDefaultRoute makes the DHCP client ignore the lease's router
 	// (a LAN on DHCP: the default route belongs to the WAN).
 	DHCPNoDefaultRoute bool `json:"dhcp_no_default_route,omitempty"`
@@ -435,6 +438,8 @@ type Route struct {
 	// gateway is down, when the gateway's interface has BFD
 	// (Instance.RouteBFD); else it is an ordinary kernel route.
 	BFD bool `json:"bfd,omitempty"`
+	// VRF puts the route in that VRF interface's table (Instance.RouteTable).
+	VRF string `json:"vrf,omitempty"`
 }
 
 type DHCPServer struct {
@@ -765,7 +770,7 @@ func (in *Instance) WireGuardRoutes() []Route {
 		}
 		for _, p := range ifc.WireGuard.Peers {
 			for _, n := range p.Networks {
-				out = append(out, Route{Destination: n, Interface: ifc.Name})
+				out = append(out, Route{Destination: n, Interface: ifc.Name}) // in its VRF's table, if any
 			}
 		}
 	}

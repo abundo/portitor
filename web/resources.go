@@ -336,6 +336,47 @@ func prepareVXLAN(i *models.Interface) error {
 	return nil
 }
 
+// prepareVRF checks a VRF's table, unique in the instance, and its
+// members: interfaces of the instance, in no other bridge or VRF.
+func prepareVRF(tx *gorm.DB, i *models.Interface) error {
+	if i.Kind != fwconfig.KindVRF {
+		i.VrfTable = 0
+		return nil
+	}
+	if i.Ipv4Mode == fwconfig.ModeDHCP {
+		return bad("a VRF has static addresses")
+	}
+	i.Dhcpv6, i.Dhcpv6Pd, i.ShapeEgress, i.ShapeIngress = false, false, 0, 0
+	if msg := fwconfig.CheckVRFTable(i.VrfTable); msg != "" {
+		return bad(msg)
+	}
+	var others []models.Interface
+	if err := tx.Where("instance_id = ? AND id <> ?", i.InstanceID, i.ID).Find(&others).Error; err != nil {
+		return err
+	}
+	kinds := map[string]string{}
+	for _, o := range others {
+		kinds[o.Name] = o.Kind
+		if o.Kind == fwconfig.KindVRF && o.VrfTable == i.VrfTable {
+			return bad(fmt.Sprintf("table %d is %s's", i.VrfTable, o.Name))
+		}
+	}
+	for _, m := range i.Members {
+		switch kinds[m] {
+		case "":
+			return bad(fmt.Sprintf("members: %s is not an interface of this virtual firewall", m))
+		case fwconfig.KindVRF:
+			return bad(fmt.Sprintf("members: %s is a VRF", m))
+		}
+		for _, o := range others {
+			if (o.Kind == fwconfig.KindBridge || o.Kind == fwconfig.KindVRF) && slices.Contains(o.Members, m) {
+				return bad(fmt.Sprintf("members: %s is a member of %s", m, o.Name))
+			}
+		}
+	}
+	return nil
+}
+
 // presentInterface hides the tunnel broker update key.
 func presentInterface(i *models.Interface) {
 	i.HasHeUpdateKey = i.HeUpdateKey != ""
@@ -363,7 +404,7 @@ func prepareInterface(tx *gorm.DB, i, old *models.Interface) error {
 	if i.Kind == "" {
 		i.Kind = fwconfig.KindPhysical
 	}
-	if err := oneOf("kind", i.Kind, fwconfig.KindPhysical, fwconfig.KindVLAN, fwconfig.KindBridge, fwconfig.KindWireGuard, fwconfig.KindLoopback, fwconfig.Kind6in4, fwconfig.KindVXLAN); err != nil {
+	if err := oneOf("kind", i.Kind, fwconfig.KindPhysical, fwconfig.KindVLAN, fwconfig.KindBridge, fwconfig.KindWireGuard, fwconfig.KindLoopback, fwconfig.Kind6in4, fwconfig.KindVXLAN, fwconfig.KindVRF); err != nil {
 		return err
 	}
 	if old != nil && old.Kind != i.Kind {
@@ -468,7 +509,10 @@ func prepareInterface(tx *gorm.DB, i, old *models.Interface) error {
 	if err := prepareVXLAN(i); err != nil {
 		return err
 	}
-	if i.Kind == fwconfig.KindWireGuard || i.Kind == fwconfig.KindLoopback || i.Kind == fwconfig.Kind6in4 {
+	if err := prepareVRF(tx, i); err != nil {
+		return err
+	}
+	if i.Kind == fwconfig.KindWireGuard || i.Kind == fwconfig.KindLoopback || i.Kind == fwconfig.Kind6in4 || i.Kind == fwconfig.KindVRF {
 		i.Lldp = false
 	}
 	if i.Kind == fwconfig.KindLoopback {
@@ -480,7 +524,7 @@ func prepareInterface(tx *gorm.DB, i, old *models.Interface) error {
 	if i.Kind != fwconfig.KindVLAN {
 		i.Parent, i.VlanID = "", 0
 	}
-	if i.Kind != fwconfig.KindBridge {
+	if i.Kind != fwconfig.KindBridge && i.Kind != fwconfig.KindVRF {
 		i.Members = models.StringList{}
 	}
 	return nil
@@ -616,6 +660,15 @@ func prepareRoute(tx *gorm.DB, r, _ *models.Route) error {
 		var i models.Interface
 		if tx.First(&i, *r.InterfaceID).Error != nil || i.InstanceID != r.InstanceID {
 			return bad("interface must belong to the same virtual firewall")
+		}
+	}
+	if r.VrfID != nil {
+		var v models.Interface
+		if tx.First(&v, *r.VrfID).Error != nil || v.InstanceID != r.InstanceID || v.Kind != fwconfig.KindVRF {
+			return bad("VRF must be a VRF of the same virtual firewall")
+		}
+		if r.Bfd {
+			return bad("a route with BFD can't be in a VRF")
 		}
 	}
 	if r.Gateway == "" && r.InterfaceID == nil {

@@ -224,6 +224,7 @@ func build(db *gorm.DB, generation int64, only map[string]bool) (*fwconfig.Docum
 				Parent:       mif.Parent,
 				VLANID:       mif.VlanID,
 				Members:      []string(mif.Members),
+				VRFTable:     mif.VrfTable,
 				MTU:          mif.Mtu,
 				IPv4Mode:     mif.Ipv4Mode,
 				Addresses:    []string(mif.Addresses),
@@ -419,6 +420,9 @@ func build(db *gorm.DB, generation int64, only map[string]bool) (*fwconfig.Docum
 				route := fwconfig.Route{Destination: dst, Metric: r.Metric, BFD: r.Bfd}
 				if r.InterfaceID != nil {
 					route.Interface = ifaceByID[*r.InterfaceID].Name
+				}
+				if r.VrfID != nil {
+					route.VRF = ifaceByID[*r.VrfID].Name
 				}
 				if len(gateways) == 0 {
 					in.Routes = append(in.Routes, route)

@@ -317,7 +317,7 @@ func TestOSPFAutoRules(t *testing.T) {
 	var rules []string
 	for _, r := range AutoInputRules(in) {
 		if r.Service == OSPFService {
-			rules = append(rules, r.matches()...)
+			rules = append(rules, r.matches(in)...)
 		}
 	}
 	if len(rules) != 1 || rules[0] != "ip saddr @AUTO_ospf_networks_v4 meta nfproto ipv4 meta l4proto 89" {
