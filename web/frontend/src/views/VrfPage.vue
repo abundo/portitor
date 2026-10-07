@@ -9,13 +9,22 @@ import NeedInstance from '@/components/NeedInstance.vue'
 import { vrfs } from '@/api'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
 
-const { store, ifaceList, ifaceText, reload } = useInstanceRefs()
+const { store, ifaceList, vrfList, ifaceText, reload } = useInstanceRefs()
 
 const membersOf = (name) =>
   ifaceList.value
     .filter((i) => i.vrf === name)
     .map((i) => ifaceText(i.name))
     .join(', ')
+
+// The lowest table no VRF of the virtual firewall has, skipping the
+// kernel's own (253-255): suggested for a new VRF.
+function freeTable() {
+  const used = new Set(vrfList.value.map((v) => v.route_table))
+  let t = 1
+  while (used.has(t) || (t >= 253 && t <= 255)) t++
+  return t
+}
 
 const columns = [
   { key: 'name', label: 'Name', class: 'font-mono font-medium' },
@@ -36,7 +45,7 @@ const fields = [
     label: 'Table',
     type: 'number',
     required: true,
-    hint: 'Its routing table, 1-6399 (not 253-255), unique in the virtual firewall. Other virtual firewalls may use the same name and table.',
+    hint: 'Its routing table, 1-6399 (not 253-255), unique in the virtual firewall; a new VRF gets the lowest free one. Other virtual firewalls may use the same name and table.',
   },
   { key: 'description', label: 'Description' },
 ]
@@ -53,7 +62,7 @@ const fields = [
       :columns="columns"
       :fields="fields"
       :search-text="(r) => membersOf(r.name)"
-      :defaults="{ name: '', route_table: 0, description: '' }"
+      :defaults="() => ({ name: '', route_table: freeTable(), description: '' })"
       new-label="New VRF"
       :item-name="(r) => `VRF ${r.name}`"
       @changed="reload()"
