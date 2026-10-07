@@ -123,6 +123,15 @@ func isQuery(name string, args []string) bool {
 		// BGP and OSPF info: vtysh [-N <instance>] -c "show ...".
 		return len(args) >= 2 && args[len(args)-2] == "-c" &&
 			strings.HasPrefix(args[len(args)-1], "show ")
+	case "chronyc":
+		// NTP info: chronyc [-h <socket>] [-c -n] <report> [address].
+		for _, a := range args {
+			switch a {
+			case "sources", "sourcestats", "authdata", "tracking", "serverstats", "sourcename":
+				return true
+			}
+		}
+		return false
 	case "apt-get":
 		return len(args) > 0 && args[0] == "-s"
 	case "nft":
