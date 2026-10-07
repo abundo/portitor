@@ -6,6 +6,21 @@
 The major changes in each release. A release's notes on GitHub are its section
 here (`dev/release-notes.sh`); the full list is `git log <previous tag>..<tag>`.
 
+## v0.6.1
+
+### New
+
+- **WireGuard page:** Info and Configuration tabs.
+
+### Changed
+
+- Interface rate sparklines show bit/s instead of bytes/s.
+
+### Fixed
+
+- Kea is restarted on the first apply after the agent starts.
+- The NTP Info tab works when the agent runs in dry-run.
+
 ## v0.6.0
 
 ### New
