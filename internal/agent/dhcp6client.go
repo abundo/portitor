@@ -240,7 +240,7 @@ func (m *dhcp6Manager) changed(k dhcp6Key) {
 // loop runs k's client, starting from saved (nil: none) with a Renew.
 // Cancelled with errStopping it keeps the lease; otherwise it releases it
 // and removes the address and the prefix's route.
-func (m *dhcp6Manager) loop(ctx context.Context, k dhcp6Key, saved *lease6, wake <-chan struct{}) {
+func (m *dhcp6Manager) loop(ctx context.Context, k dhcp6Key, saved *lease6, wake chan struct{}) {
 	log := slog.With("instance", k.instance, "interface", k.iface)
 	if m.dryRun {
 		log.Info("dry-run: not starting DHCPv6 client")
@@ -251,6 +251,7 @@ func (m *dhcp6Manager) loop(ctx context.Context, k dhcp6Key, saved *lease6, wake
 	current := saved
 	var client *nclient6.Client
 	id := leaseID{k.instance, k.iface}
+	go watchCarrier(ctx, k.netns, k.iface, wake, log)
 	defer func() {
 		if errors.Is(context.Cause(ctx), errStopping) {
 			if client != nil {
@@ -288,14 +289,16 @@ func (m *dhcp6Manager) loop(ctx context.Context, k dhcp6Key, saved *lease6, wake
 
 		var reply *dhcpv6.Message
 		var err error
-		reqCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		if current != nil {
-			reply, err = m.exchange(reqCtx, client, dhcpv6.MessageTypeRenew, current.reply)
+			renewCtx, cancel := context.WithTimeout(ctx, renewTimeout)
+			reply, err = m.exchange(renewCtx, client, dhcpv6.MessageTypeRenew, current.reply)
+			cancel()
 		}
 		if current == nil || err != nil {
+			reqCtx, cancel := context.WithTimeout(ctx, requestTimeout)
 			reply, err = m.solicit(reqCtx, client, k)
+			cancel()
 		}
-		cancel()
 		var l *lease6
 		if err == nil {
 			l, err = parseReply6(reply, time.Now())

@@ -22,6 +22,16 @@ import (
 	"github.com/vishvananda/netns"
 )
 
+// A client tries to renew the lease it has (after a restart, the saved
+// one) for renewTimeout, then asks for a new one for requestTimeout. Each
+// exchange takes up to 35 s (5 s, doubled per try, 3 tries) and a request
+// is two of them; a renew the server ignores (the link was not up yet, or
+// it does not take renews after a reboot) must leave the request its time.
+const (
+	renewTimeout   = 15 * time.Second
+	requestTimeout = 75 * time.Second
+)
+
 // dhcpKey is one client; noRoute leaves out the default route (changing
 // it restarts the client).
 type dhcpKey struct {
@@ -229,7 +239,7 @@ func (m *dhcpManager) update(k dhcpKey, fn func(l *Lease)) (dnsChanged bool) {
 // loop runs k's client, starting from saved (nil: none) with a Renew.
 // Cancelled with errStopping it keeps the lease; otherwise it releases it
 // and removes the address.
-func (m *dhcpManager) loop(ctx context.Context, k dhcpKey, saved *nclient4.Lease, wake <-chan struct{}) {
+func (m *dhcpManager) loop(ctx context.Context, k dhcpKey, saved *nclient4.Lease, wake chan struct{}) {
 	log := slog.With("instance", k.instance, "interface", k.iface)
 	if m.dryRun {
 		log.Info("dry-run: not starting DHCP client")
@@ -239,6 +249,7 @@ func (m *dhcpManager) loop(ctx context.Context, k dhcpKey, saved *nclient4.Lease
 	backoff := 5 * time.Second
 	current := saved
 	var client *nclient4.Client
+	go watchCarrier(ctx, k.netns, k.iface, wake, log)
 	id := leaseID{k.instance, k.iface}
 	defer func() {
 		if errors.Is(context.Cause(ctx), errStopping) {
@@ -274,14 +285,16 @@ func (m *dhcpManager) loop(ctx context.Context, k dhcpKey, saved *nclient4.Lease
 
 		var lease *nclient4.Lease
 		var err error
-		reqCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		if current != nil {
-			lease, err = client.Renew(reqCtx, current)
+			renewCtx, cancel := context.WithTimeout(ctx, renewTimeout)
+			lease, err = client.Renew(renewCtx, current)
+			cancel()
 		}
 		if current == nil || err != nil {
+			reqCtx, cancel := context.WithTimeout(ctx, requestTimeout)
 			lease, err = client.Request(reqCtx)
+			cancel()
 		}
-		cancel()
 		if err != nil {
 			m.fail(k, log, m.explain(ctx, k, current, err))
 			if current != nil && time.Now().After(leaseExpiry(current)) {
