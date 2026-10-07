@@ -3,7 +3,7 @@
 
 <script setup>
 import { computed } from 'vue'
-import { bytes } from '@/utils/bytes'
+import { bitRate } from '@/utils/bytes'
 
 // A receive/send rate sparkline over a fixed time window (the newest sample at
 // the right edge), with the current rates beside it.
@@ -27,7 +27,7 @@ const path = (key) => {
     .join(' ')
 }
 const last = computed(() => props.samples.at(-1))
-const rate = (v) => `${bytes(v)}/s`
+const rate = bitRate
 const title = computed(() =>
   last.value
     ? `Last 5 minutes, peak ${rate(max.value)}\n↓ ${rate(last.value.rx)}  ↑ ${rate(last.value.tx)}`
