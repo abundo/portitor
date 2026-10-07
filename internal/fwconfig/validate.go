@@ -226,6 +226,8 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 			v.wireguard(ip, ifc.WireGuard)
 		case Kind6in4:
 			v.tunnel6in4(ip, ifc)
+		case KindVXLAN:
+			v.vxlan(ip, ifc)
 		default:
 			v.addf("%s: invalid kind %q", ip, ifc.Kind)
 		}
@@ -247,6 +249,7 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 			}
 		}
 	}
+	v.vxlanInstance(p, in, ifaces)
 
 	zones := map[string]bool{}
 	for _, z := range in.InterfaceZones {

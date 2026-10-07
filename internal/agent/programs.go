@@ -37,6 +37,7 @@ var programs = []program{
 		}
 		return false
 	}},
+	{name: "bridge", purpose: "VXLAN (iproute2)", needed: func(in *fwconfig.Instance) bool { return len(in.VXLANs()) > 0 }},
 	{name: "named", purpose: "DNS server (BIND 9)", needed: func(in *fwconfig.Instance) bool { return in.DNS.Enabled }},
 	{name: "kea-dhcp4", purpose: "DHCPv4 server (Kea)", needed: func(in *fwconfig.Instance) bool { return in.DHCP.Enabled }},
 	{name: "kea-dhcp6", purpose: "DHCPv6 server (Kea)", needed: func(in *fwconfig.Instance) bool { return len(render.DHCP6Subnets(in)) > 0 }},

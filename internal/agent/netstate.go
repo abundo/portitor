@@ -34,10 +34,23 @@ type ipLink struct {
 		InfoKind string `json:"info_kind"`
 		InfoData struct {
 			ID int `json:"id"`
-			// A tunnel's endpoints (sit): addresses, or "any".
+			// A tunnel's endpoints (sit): addresses, or "any". A vxlan's
+			// local address is Local or Local6.
 			Local  string `json:"local"`
 			Remote string `json:"remote"`
+			// A vxlan's IPv6 local address, UDP port, underlay device and
+			// whether it learns remote MAC addresses.
+			Local6   string `json:"local6"`
+			Port     int    `json:"port"`
+			Link     string `json:"link"`
+			Learning *bool  `json:"learning"`
 		} `json:"info_data"`
+		// A bridge port's settings.
+		InfoSlaveKind string `json:"info_slave_kind"`
+		InfoSlaveData struct {
+			Learning      *bool `json:"learning"`
+			NeighSuppress *bool `json:"neigh_suppress"`
+		} `json:"info_slave_data"`
 	} `json:"linkinfo"`
 	AddrInfo []ipAddr `json:"addr_info"`
 }
@@ -163,6 +176,11 @@ func virtualMatches(want fwconfig.Interface, have ipLink) bool {
 		return have.kind() == "sit" && want.Tunnel != nil &&
 			have.LinkInfo.InfoData.Remote == want.Tunnel.Remote &&
 			have.LinkInfo.InfoData.Local == sitLocal(want.Tunnel)
+	case fwconfig.KindVXLAN:
+		d := have.LinkInfo
+		return have.kind() == "vxlan" && want.VXLAN != nil &&
+			uint32(d.InfoData.ID) == want.VXLAN.VNI && d.InfoData.Local+d.InfoData.Local6 == want.VXLAN.Local &&
+			d.InfoData.Port == want.VXLAN.UDPPort() && d.InfoData.Link == want.VXLAN.Device
 	case fwconfig.KindLink:
 		return have.kind() == "veth"
 	}
@@ -183,14 +201,21 @@ func sitLocal(t *fwconfig.Tunnel6in4) string {
 func planCreate(ns string, want []fwconfig.Interface, have map[string]ipLink) []command {
 	var cmds []command
 	// Bridges and wireguard first, VLANs after (a VLAN parent may be a
-	// bridge).
+	// bridge), VXLANs last (the underlay may be a VLAN).
 	order := append([]fwconfig.Interface(nil), want...)
-	sort.SliceStable(order, func(i, j int) bool {
-		return order[i].Kind != fwconfig.KindVLAN && order[j].Kind == fwconfig.KindVLAN
-	})
+	rank := func(kind string) int {
+		switch kind {
+		case fwconfig.KindVLAN:
+			return 1
+		case fwconfig.KindVXLAN:
+			return 2
+		}
+		return 0
+	}
+	sort.SliceStable(order, func(i, j int) bool { return rank(order[i].Kind) < rank(order[j].Kind) })
 	for _, ifc := range order {
 		switch ifc.Kind {
-		case fwconfig.KindVLAN, fwconfig.KindBridge, fwconfig.KindWireGuard, fwconfig.KindLoopback, fwconfig.Kind6in4:
+		case fwconfig.KindVLAN, fwconfig.KindBridge, fwconfig.KindWireGuard, fwconfig.KindLoopback, fwconfig.Kind6in4, fwconfig.KindVXLAN:
 		default:
 			continue
 		}
@@ -214,6 +239,20 @@ func planCreate(ns string, want []fwconfig.Interface, have map[string]ipLink) []
 				continue
 			}
 			cmds = append(cmds, ipCmd(ns, "link", "add", "name", ifc.Name, "type", "sit", "remote", ifc.Tunnel.Remote, "local", sitLocal(ifc.Tunnel), "ttl", "255"))
+		case fwconfig.KindVXLAN:
+			if ifc.VXLAN == nil {
+				continue
+			}
+			x := ifc.VXLAN
+			args := []string{"link", "add", "name", ifc.Name, "type", "vxlan", "id", strconv.FormatUint(uint64(x.VNI), 10)}
+			if x.Local != "" {
+				args = append(args, "local", x.Local)
+			}
+			args = append(args, "dstport", strconv.Itoa(x.UDPPort()))
+			if x.Device != "" {
+				args = append(args, "dev", x.Device)
+			}
+			cmds = append(cmds, ipCmd(ns, args...))
 		}
 	}
 	return cmds

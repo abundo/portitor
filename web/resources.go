@@ -311,6 +311,31 @@ func prepareTunnel(i *models.Interface) error {
 	return nil
 }
 
+// prepareVXLAN checks a VXLAN interface's settings; other kinds have
+// none. Whether the underlay exists and the VNI is unique is checked on
+// commit (fwconfig.Validate), like a VLAN's parent.
+func prepareVXLAN(i *models.Interface) error {
+	if i.Kind != fwconfig.KindVXLAN {
+		i.VxlanVni, i.VxlanLocal, i.VxlanDevice, i.VxlanPort, i.VxlanRemotes = 0, "", "", 0, models.StringList{}
+		return nil
+	}
+	i.VxlanLocal, i.VxlanDevice = strings.TrimSpace(i.VxlanLocal), strings.TrimSpace(i.VxlanDevice)
+	i.VxlanRemotes = cleanList(i.VxlanRemotes)
+	for j, r := range i.VxlanRemotes {
+		if a, err := netip.ParseAddr(r); err == nil {
+			i.VxlanRemotes[j] = a.String()
+		}
+	}
+	if a, err := netip.ParseAddr(i.VxlanLocal); err == nil {
+		i.VxlanLocal = a.String()
+	}
+	x := &fwconfig.VXLAN{VNI: i.VxlanVni, Local: i.VxlanLocal, Device: i.VxlanDevice, Port: i.VxlanPort, Remotes: i.VxlanRemotes}
+	if problems := fwconfig.CheckVXLAN(i.Name, x); len(problems) > 0 {
+		return bad(strings.Join(problems, "; "))
+	}
+	return nil
+}
+
 // presentInterface hides the tunnel broker update key.
 func presentInterface(i *models.Interface) {
 	i.HasHeUpdateKey = i.HeUpdateKey != ""
@@ -338,7 +363,7 @@ func prepareInterface(tx *gorm.DB, i, old *models.Interface) error {
 	if i.Kind == "" {
 		i.Kind = fwconfig.KindPhysical
 	}
-	if err := oneOf("kind", i.Kind, fwconfig.KindPhysical, fwconfig.KindVLAN, fwconfig.KindBridge, fwconfig.KindWireGuard, fwconfig.KindLoopback, fwconfig.Kind6in4); err != nil {
+	if err := oneOf("kind", i.Kind, fwconfig.KindPhysical, fwconfig.KindVLAN, fwconfig.KindBridge, fwconfig.KindWireGuard, fwconfig.KindLoopback, fwconfig.Kind6in4, fwconfig.KindVXLAN); err != nil {
 		return err
 	}
 	if old != nil && old.Kind != i.Kind {
@@ -438,6 +463,9 @@ func prepareInterface(tx *gorm.DB, i, old *models.Interface) error {
 		i.WgEndpoint, i.WgKeepalive = "", 0
 	}
 	if err := prepareTunnel(i); err != nil {
+		return err
+	}
+	if err := prepareVXLAN(i); err != nil {
 		return err
 	}
 	if i.Kind == fwconfig.KindWireGuard || i.Kind == fwconfig.KindLoopback || i.Kind == fwconfig.Kind6in4 {

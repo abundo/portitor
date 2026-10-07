@@ -336,6 +336,7 @@ func writeBGP(b *strings.Builder, in *fwconfig.Instance) {
 	for _, fam := range []string{"ipv4", "ipv6"} {
 		writeAddressFamily(b, g, fam, in.HasBFDRoutes())
 	}
+	writeEVPNFamily(b, g)
 	b.WriteString("exit\n!\n")
 }
 
@@ -444,6 +445,38 @@ func writeAddressFamily(b *strings.Builder, g *fwconfig.BGP, fam string, staticR
 	fmt.Fprintf(b, " !\n address-family %s unicast\n", fam)
 	b.WriteString(af.String())
 	b.WriteString(" exit-address-family\n")
+}
+
+// writeEVPNFamily writes the L2VPN EVPN address family: the peers that
+// activate it and, with EVPN on, the VNIs of the vxlan devices zebra finds
+// as bridge members.
+func writeEVPNFamily(b *strings.Builder, g *fwconfig.BGP) {
+	af := &strings.Builder{}
+	for _, p := range g.PeerGroups {
+		writePeerEVPN(af, p.Name, p.EVPN)
+	}
+	for _, p := range g.Neighbors {
+		writePeerEVPN(af, canonAddr(p.Address), p.EVPN)
+	}
+	if g.EVPN {
+		af.WriteString("  advertise-all-vni\n")
+	}
+	if af.Len() == 0 {
+		return
+	}
+	b.WriteString(" !\n address-family l2vpn evpn\n")
+	b.WriteString(af.String())
+	b.WriteString(" exit-address-family\n")
+}
+
+func writePeerEVPN(b *strings.Builder, id string, s fwconfig.BGPEVPNFamily) {
+	if !s.Activate {
+		return
+	}
+	fmt.Fprintf(b, "  neighbor %s activate\n", id)
+	if s.RouteReflectorClient {
+		fmt.Fprintf(b, "  neighbor %s route-reflector-client\n", id)
+	}
 }
 
 // frrSource is FRR's name of a redistribute source in an IP version.

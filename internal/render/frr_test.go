@@ -194,6 +194,53 @@ func TestBGPAutoRules(t *testing.T) {
 	}
 }
 
+func TestFRREVPN(t *testing.T) {
+	// Off and no peer activates it: no address family.
+	if conf := mustFile(t, sampleBundle(t), "/etc/portitor/instances/guest/frr/frr.conf"); strings.Contains(conf, "l2vpn evpn") {
+		t.Errorf("evpn family without evpn:\n%s", conf)
+	}
+	doc := fwconfig.SampleDocument()
+	g := doc.Instance("guest").BGP
+	g.EVPN = true
+	g.PeerGroups[0].EVPN = fwconfig.BGPEVPNFamily{Activate: true}
+	g.Neighbors = append(g.Neighbors, fwconfig.BGPPeer{Address: "10.255.0.9", RemoteAS: "internal",
+		EVPN: fwconfig.BGPEVPNFamily{Activate: true, RouteReflectorClient: true}})
+	b, err := Render(doc, Options{Paths: DefaultPaths(), Units: DefaultUnits()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	conf := mustFile(t, b, "/etc/portitor/instances/guest/frr/frr.conf")
+	want := " !\n address-family l2vpn evpn\n  neighbor upstream activate\n  neighbor 10.255.0.9 activate\n  neighbor 10.255.0.9 route-reflector-client\n  advertise-all-vni\n exit-address-family\n"
+	if !strings.Contains(conf, want) {
+		t.Errorf("frr.conf lacks %q:\n%s", want, conf)
+	}
+}
+
+func TestVXLANAutoRules(t *testing.T) {
+	nft := mustFile(t, sampleBundle(t), "/etc/portitor/instances/guest/nftables.nft")
+	for _, want := range []string{
+		`ip saddr { 192.168.50.2, 192.168.50.3 } iifname { "eth2", "vrrp4-50-eth2", "vrrp6-50-eth2" } udp dport 4789 accept comment "auto: vxlan vx200"`,
+		`oifname "eth2" ip daddr { 192.168.50.2, 192.168.50.3 } udp dport 4789 accept comment "auto: vxlan vx200"`,
+	} {
+		if !strings.Contains(nft, want) {
+			t.Errorf("ruleset lacks %q:\n%s", want, nft)
+		}
+	}
+	// With EVPN and no remotes, from any VTEP.
+	doc := fwconfig.SampleDocument()
+	in := doc.Instance("guest")
+	x := in.Interface("vx200").VXLAN
+	x.Remotes, x.Device, x.Port = nil, "", 8472
+	nft = Nftables(in, nil, DefaultPaths())
+	for _, want := range []string{
+		`udp dport 8472 accept comment "auto: vxlan vx200"`,
+	} {
+		if strings.Count(nft, want) != 2 {
+			t.Errorf("ruleset lacks input and output %q:\n%s", want, nft)
+		}
+	}
+}
+
 func TestFRROSPF(t *testing.T) {
 	b := sampleBundle(t)
 	conf := mustFile(t, b, "/etc/portitor/instances/guest/frr/frr.conf")

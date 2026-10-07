@@ -40,10 +40,12 @@ const kinds = [
   { label: 'WireGuard', value: 'wireguard' },
   { label: 'Loopback', value: 'loopback' },
   { label: '6in4 tunnel (Hurricane Electric)', value: '6in4' },
+  { label: 'VXLAN', value: 'vxlan' },
 ]
 const is6in4 = (f) => f.kind === '6in4'
+const isVxlan = (f) => f.kind === 'vxlan'
 // LLDP runs on the ethernet kinds.
-const lldpKinds = ['physical', 'vlan', 'bridge']
+const lldpKinds = ['physical', 'vlan', 'bridge', 'vxlan']
 const modes = [
   { label: 'Static', value: 'static' },
   { label: 'DHCP client', value: 'dhcp' },
@@ -61,7 +63,9 @@ const columns = [
         ? `vlan ${r.vlan_id} on ${ifaceText(r.parent)}`
         : r.kind === '6in4'
           ? `6in4 to ${r.tunnel_remote}`
-          : r.kind,
+          : r.kind === 'vxlan'
+            ? `vxlan ${r.vxlan_vni}${r.vxlan_device ? ` on ${ifaceText(r.vxlan_device)}` : ''}`
+            : r.kind,
   },
   { key: 'mac', label: 'MAC', class: 'font-mono text-xs', format: macOf },
   { key: 'zones', label: 'Zones', format: (r) => zonesOf(r.name).join(', ') },
@@ -218,6 +222,47 @@ const fields = [
     type: 'number',
     show: (f) => f.kind !== 'loopback',
     hint: 'Shapes what the interface receives (through an IFB device, ifb-<name>); 0 is off.',
+  },
+  { key: 'vxlan_heading', label: 'VXLAN', type: 'heading', show: isVxlan },
+  {
+    key: 'vxlan_vni',
+    label: 'VNI',
+    type: 'number',
+    required: true,
+    show: isVxlan,
+    hint: 'The VXLAN network identifier (1-16777215), the same on every VTEP of the segment and unique in the virtual firewall.',
+  },
+  {
+    key: 'vxlan_local',
+    label: 'Local address',
+    placeholder: '192.0.2.1',
+    show: isVxlan,
+    hint: "The firewall's VTEP address, the source of the VXLAN packets (an address of the virtual firewall, often a loopback's). EVPN and IPv6 remotes need it.",
+  },
+  {
+    key: 'vxlan_device',
+    label: 'Underlay interface',
+    type: 'select',
+    nullable: true,
+    text: true,
+    items: (f) => otherIfaces(f, [f.vxlan_device]),
+    show: isVxlan,
+    hint: 'The interface the VXLAN packets leave by, and the only one they are accepted on. — : as routed, accepted on any.',
+  },
+  {
+    key: 'vxlan_port',
+    label: 'UDP port',
+    type: 'number',
+    show: isVxlan,
+    hint: '0 is the standard port, 4789.',
+  },
+  {
+    key: 'vxlan_remotes',
+    label: 'Remote VTEPs',
+    type: 'tags',
+    placeholder: '192.0.2.2',
+    show: isVxlan,
+    hint: "The other VTEPs' addresses: broadcast and unknown frames are sent to each. With EVPN (Routing → BGP) BGP finds the VTEPs, and this lists the ones allowed to send (empty: any). VXLAN packets from them are accepted automatically. Put the VXLAN in a bridge to join it to a LAN.",
   },
   { key: 'tunnel_heading', label: 'Tunnel', type: 'heading', show: is6in4 },
   {
@@ -376,7 +421,7 @@ const { search: statsSearch, filtered: statsFiltered } = useSearch(statsRows)
   <NeedInstance>
     <CrudPage
       title="Interfaces"
-      description="Physical ports, VLANs, bridges, loopbacks, WireGuard and 6in4 tunnels (such as Hurricane Electric's tunnel broker) of this virtual firewall. Physical ports are moved into the virtual firewall's network namespace."
+      description="Physical ports, VLANs, bridges, loopbacks, WireGuard, 6in4 tunnels (such as Hurricane Electric's tunnel broker) and VXLANs of this virtual firewall. Physical ports are moved into the virtual firewall's network namespace."
       :api="interfaces"
       :params="{ instance_id: store.currentId }"
       :columns="columns"
@@ -410,6 +455,11 @@ const { search: statsSearch, filtered: statsFiltered } = useSearch(statsRows)
         he_tunnel_id: '',
         he_username: '',
         new_he_update_key: '',
+        vxlan_vni: 0,
+        vxlan_local: '',
+        vxlan_device: '',
+        vxlan_port: 0,
+        vxlan_remotes: [],
       }"
       new-label="New interface"
       @changed="reload()"

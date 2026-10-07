@@ -122,6 +122,8 @@ type BgpConfig struct {
 	RedistOspfV4Map string `gorm:"column:redist_ospf_v4_map" json:"redist_ospf_v4_map"`
 	RedistOspfV6    bool   `gorm:"column:redist_ospf_v6" json:"redist_ospf_v6"`
 	RedistOspfV6Map string `gorm:"column:redist_ospf_v6_map" json:"redist_ospf_v6_map"`
+	// Evpn advertises the VNIs of the instance's VXLANs (advertise-all-vni).
+	Evpn bool `json:"evpn"`
 }
 
 // BgpPeerSettings are what a neighbour and a peer group both have.
@@ -165,6 +167,10 @@ type BgpPeerSettings struct {
 	V6AllowasIn            int    `gorm:"column:v6_allowas_in" json:"v6_allowas_in"`
 	V6MaximumPrefix        int    `gorm:"column:v6_maximum_prefix" json:"v6_maximum_prefix"`
 
+	// The L2VPN EVPN address family.
+	EvpnActivate             bool `json:"evpn_activate"`
+	EvpnRouteReflectorClient bool `json:"evpn_route_reflector_client"`
+
 	// The password is write-only: NewPassword sets it (empty keeps it),
 	// ClearPassword removes it, HasPassword tells whether there is one.
 	NewPassword   string `gorm:"-" json:"new_password,omitempty"`
@@ -199,6 +205,7 @@ func (s *BgpPeerSettings) Peer() fwconfig.BGPPeer {
 			DefaultOriginate: s.V6DefaultOriginate, RouteReflectorClient: s.V6RouteReflectorClient,
 			AllowASIn: s.V6AllowasIn, MaximumPrefix: s.V6MaximumPrefix,
 		},
+		EVPN: fwconfig.BGPEVPNFamily{Activate: s.EvpnActivate, RouteReflectorClient: s.EvpnRouteReflectorClient},
 	}
 }
 

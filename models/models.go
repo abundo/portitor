@@ -454,6 +454,14 @@ type Interface struct {
 	HeUpdateKey    string `json:"-"`
 	NewHeUpdateKey string `gorm:"-" json:"new_he_update_key"`
 	HasHeUpdateKey bool   `gorm:"-" json:"has_he_update_key"`
+
+	// A VXLAN's VNI, local VTEP address, underlay interface (empty: as
+	// routed), UDP port (0: 4789) and remote VTEPs (fwconfig.VXLAN).
+	VxlanVni     uint32     `json:"vxlan_vni"`
+	VxlanLocal   string     `json:"vxlan_local"`
+	VxlanDevice  string     `json:"vxlan_device"`
+	VxlanPort    int        `json:"vxlan_port"`
+	VxlanRemotes StringList `json:"vxlan_remotes"`
 }
 
 type WgPeer struct {

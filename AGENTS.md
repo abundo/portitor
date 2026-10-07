@@ -15,7 +15,7 @@ are in [README.md](README.md).
 | `cmd/portitor-agent` | Agent daemon on the firewall: `start`, `init`, `render`, `netns-exec`; run as `portitor` (a symlink, `cli.go`) it is a read-only CLI (`show lldp neighbours`, `show ip neighbours`) over the agent's GET routes on the root-only socket `<run_dir>/agent.sock` |
 | `internal/fwconfig` | The desired-state document and `Validate()`. **The contract between web and agent.** |
 | `internal/render` | Pure functions: document → nftables, WireGuard, named.conf, Kea, chrony.conf (`chrony.go`), snmpd.conf (`snmpd.go`), dnsmgr2 config, FRR (`frr.go`: frr.conf with BGP, OSPF, VRRP and BFD, daemons, vtysh.conf) |
-| `internal/agent` | Agent: apply/reconcile, commit-confirm, DHCP and DHCPv6 (prefix delegation) clients (woken when their interface gets a carrier, `linkwatch.go`), IP lists, task scheduler, packet log (NFLOG), DNS query log (BIND logs to the journal, followed with `journalctl`, filtered by the agent, `querylog.go`), WireGuard endpoint re-resolving, packet capture (tcpdump, streamed rate-limited), traceroute (`mtr --raw`, streamed as JSON lines, `trace.go`), service logs (`journalctl --follow` of a status service unit, streamed as text, `servicelog.go`), LLDP (sent and heard on raw sockets, `lldp.go`), neighbours (ARP/ND, LLDP), NAT64 (a Jool instance per namespace, `nat64.go`), traffic shaping (CAKE, IFB devices for receiving, HTB classes for the rate limits that shape (`fwconfig.Instance.Shapers`) by packet mark `render.ShaperMark`; planned from `tc -j` output, `shaping.go`), BGP, OSPF, VRRP and BFD state (FRR's JSON through `vtysh`, `bgp.go`, `ospf.go`, `vrrp.go`, `bfd.go`), VRRP's macvlan devices (`vrrp.go`), 6in4 tunnels' endpoint updates at Hurricane Electric's tunnel broker (from the instance netns, on address changes, `tunnelbroker.go`), status, API server |
+| `internal/agent` | Agent: apply/reconcile, commit-confirm, DHCP and DHCPv6 (prefix delegation) clients (woken when their interface gets a carrier, `linkwatch.go`), IP lists, task scheduler, packet log (NFLOG), DNS query log (BIND logs to the journal, followed with `journalctl`, filtered by the agent, `querylog.go`), WireGuard endpoint re-resolving, packet capture (tcpdump, streamed rate-limited), traceroute (`mtr --raw`, streamed as JSON lines, `trace.go`), service logs (`journalctl --follow` of a status service unit, streamed as text, `servicelog.go`), LLDP (sent and heard on raw sockets, `lldp.go`), neighbours (ARP/ND, LLDP), NAT64 (a Jool instance per namespace, `nat64.go`), traffic shaping (CAKE, IFB devices for receiving, HTB classes for the rate limits that shape (`fwconfig.Instance.Shapers`) by packet mark `render.ShaperMark`; planned from `tc -j` output, `shaping.go`), BGP, OSPF, VRRP and BFD state (FRR's JSON through `vtysh`, `bgp.go`, `ospf.go`, `vrrp.go`, `bfd.go`), VRRP's macvlan devices (`vrrp.go`), 6in4 tunnels' endpoint updates at Hurricane Electric's tunnel broker (from the instance netns, on address changes, `tunnelbroker.go`), VXLANs' learning, EVPN bridge port flags and static flood lists (`vxlan.go`), status, API server |
 | `internal/dyndns` | DNS update client ("DNS update" in the GUI): RFC 2136 (from ifnsupdate), sent from the instance netns, or a DNS hosting provider's API through libdns (`providers.go`, matching `fwconfig.DNSProviders`), called from the host |
 | `internal/acme` | ACME certificates through lego: accounts, orders, the stored chain and key (`<state_dir>/certificates/`); the agent's `acme.go` schedules them and answers HTTP-01 in the instance netns, opening port 80 by the `acme_http` set (`render.ACMEHTTPSet`) |
 | `internal/nftimport` | nftables file (`nft -j list ruleset`, read by the agent's `POST /v1/nftables/parse` in a new network namespace, `nftparse.go`) → rules, NAT rules, hosts/prefixes, services, and what it leaves out, with jumped-to chains inlined in groups; written by `web/nftimport.go` through the CRUD's `prepare*` checks, a preview being the same transaction rolled back |
@@ -121,7 +121,8 @@ docs and user-facing messages.
   their `ifb-<name>` devices (`fwconfig.IFBName`; interface names may not start
   with `ifb-`), and the VRRP macvlan devices (`fwconfig.VRRPDevices`; names may not
   start with `vrrp4-` or `vrrp6-`), and the Jool instance `fwconfig.JoolInstance` in
-  each namespace, its loop devices (`n64-*`) and the IPv4 `ip rule`s with protocol 99. Leave everything else alone (docker, libvirt, other tables).
+  each namespace, its loop devices (`n64-*`) and the IPv4 `ip rule`s with protocol 99,
+  and, without EVPN, the all-zero forwarding entries (flood list) of its vxlan devices. Leave everything else alone (docker, libvirt, other tables).
   Accept rules set the connection mark (`ct mark`) to the rule's id, so the
   rule counters (`render.RuleCounter`) count whole connections; the agent owns
   `ct mark` in its namespaces. Log statements send to nflog group
@@ -302,6 +303,16 @@ the certificate portitor-web serves, chosen under Settings
   around it (`render.TunnelBrokerPingSet`, a timeout set: HE's pinger is unknown). Loading `sit` adds `sit0` to every
   namespace; the stale-device cleanup skips such fallback devices
   (`fallbackDevice`).
+- **VXLAN and EVPN** (`fwconfig/vxlan.go`, Network → Interfaces, kind vxlan): a
+  `vxlan` device per interface (VNI, local VTEP address, underlay `Device`, UDP
+  port; recreated when one changes), with auto rules for its UDP port from and to
+  `Remotes` (any, when empty) on the underlay. Without EVPN the device learns and
+  the agent keeps one all-zero FDB entry per remote (`planVXLAN`). With EVPN
+  (`BGP.EVPN`: `advertise-all-vni`; peers activate `l2vpn evpn` per
+  `BGPPeer.EVPN`) each VXLAN needs a local address and a bridge, the device and its
+  bridge port don't learn, the port has `neigh_suppress`, and the FDB is zebra's;
+  `Remotes` then only filter the sources. L2VNIs only (no VRFs). The underlay
+  follows a rename and is refused on delete (`web/ifzones.go`).
 - **Dual stack:** rule and NAT address lists may mix IPv4 and IPv6;
   `fwconfig.MatchFamilies` decides which versions a rule is rendered for, and
   validation uses the same function.

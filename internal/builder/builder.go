@@ -263,6 +263,10 @@ func build(db *gorm.DB, generation int64, only map[string]bool) (*fwconfig.Docum
 				}
 				ifc.WireGuard = wg
 			}
+			if mif.Kind == fwconfig.KindVXLAN {
+				ifc.VXLAN = &fwconfig.VXLAN{VNI: mif.VxlanVni, Local: mif.VxlanLocal, Device: mif.VxlanDevice, Port: mif.VxlanPort,
+					Remotes: slices.Clone([]string(mif.VxlanRemotes))}
+			}
 			if mif.Kind == fwconfig.Kind6in4 {
 				ifc.Tunnel = &fwconfig.Tunnel6in4{Remote: mif.TunnelRemote, Local: mif.TunnelLocal}
 				if mif.HeTunnelID != "" {
@@ -824,6 +828,7 @@ func (d *data) bgp(in *fwconfig.Instance, instanceID uint) {
 		GracefulRestart:    cfg.GracefulRestart,
 		MultipathRelax:     cfg.MultipathRelax,
 		MaximumPaths:       cfg.MaximumPaths,
+		EVPN:               cfg.Evpn,
 		Networks:           slices.Clone([]fwconfig.BGPNetwork(cfg.Networks)),
 		Aggregates:         slices.Clone([]fwconfig.BGPAggregate(cfg.Aggregates)),
 	}

@@ -106,6 +106,8 @@ func isQuery(name string, args []string) bool {
 			return true
 		}
 		return len(args) >= 2 && args[0] == "netns" && args[1] == "list"
+	case "bridge":
+		return len(args) > 0 && args[0] == "-j"
 	case "wg":
 		return len(args) > 0 && args[0] == "show"
 	case "tc":

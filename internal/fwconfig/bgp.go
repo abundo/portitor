@@ -43,6 +43,10 @@ type BGP struct {
 	Redistribute []BGPRedistribute `json:"redistribute,omitempty"`
 	PeerGroups   []BGPPeer         `json:"peer_groups,omitempty"`
 	Neighbors    []BGPPeer         `json:"neighbors,omitempty"`
+	// EVPN advertises the VNIs of the instance's VXLAN interfaces (and
+	// their MAC addresses) in the L2VPN EVPN address family
+	// (advertise-all-vni), to the peers that activate it.
+	EVPN bool `json:"evpn,omitempty"`
 }
 
 // BGPNetwork is a network statement, of its prefix's IP version.
@@ -105,6 +109,13 @@ type BGPPeer struct {
 	BFD  bool             `json:"bfd,omitempty"`
 	IPv4 BGPAddressFamily `json:"ipv4"`
 	IPv6 BGPAddressFamily `json:"ipv6"`
+	EVPN BGPEVPNFamily    `json:"evpn"`
+}
+
+// BGPEVPNFamily is a peer's settings in the L2VPN EVPN address family.
+type BGPEVPNFamily struct {
+	Activate             bool `json:"activate,omitempty"`
+	RouteReflectorClient bool `json:"route_reflector_client,omitempty"`
 }
 
 // BGPAddressFamily is a peer's settings in one address family (unicast).
@@ -811,6 +822,9 @@ func (v *validator) routing(p string, in *Instance, ifaces map[string]*Interface
 				v.addf("%s: neighbour %s: %s: a route reflector client must be an iBGP neighbour (remote AS internal or %d)", bp, n.Address, af.fam, b.ASN)
 			}
 		}
+		if (n.EVPN.RouteReflectorClient || group.EVPN.RouteReflectorClient) && !b.internal(remote) {
+			v.addf("%s: neighbour %s: evpn: a route reflector client must be an iBGP neighbour (remote AS internal or %d)", bp, n.Address, b.ASN)
+		}
 		b.externalOnly(v, fmt.Sprintf("%s: neighbour %s", bp, n.Address), n, remote)
 	}
 	for _, g := range b.PeerGroups {
@@ -826,7 +840,7 @@ func CheckBGPSession(asn uint32, peer BGPPeer, remote string) []string {
 	b := &BGP{ASN: asn}
 	if asn != 0 || remote == "internal" {
 		b.externalOnly(v, "bgp", peer, remote)
-		if (peer.IPv4.RouteReflectorClient || peer.IPv6.RouteReflectorClient) && remote != "" && !b.internal(remote) {
+		if (peer.IPv4.RouteReflectorClient || peer.IPv6.RouteReflectorClient || peer.EVPN.RouteReflectorClient) && remote != "" && !b.internal(remote) {
 			v.addf("a route reflector client must be an iBGP neighbour (remote AS internal or the local AS)")
 		}
 	}

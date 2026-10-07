@@ -51,6 +51,7 @@ shut down gets none.
 | Networks | Prefixes announced while the routing table has them (a connected network, a static route), each with an optional route map. |
 | Aggregate addresses | A shorter prefix announced while a more specific route is in the BGP table. *Summary only* leaves the more specific ones out; *AS set* keeps their ASes in the path. |
 | Redistribute | For IPv4 and IPv6: connected networks (the interfaces' prefixes), static routes (*Static routes*) and OSPF's routes (OSPFv2's into IPv4, OSPFv3's into IPv6; see [OSPF](ospf.md)), each with an optional route map that filters or changes them. |
+| EVPN | Advertise the VNIs of the VXLAN interfaces and the MAC addresses behind them in the L2VPN EVPN address family, to the neighbours that activate it; see [VXLAN and EVPN](vxlan.md). |
 
 **Peer groups** are settings shared by several neighbours. A neighbour in a group
 takes the group's settings; what the neighbour sets adds to them. Renaming a group
@@ -73,6 +74,7 @@ renames it in its neighbours; one with neighbours can't be deleted.
 | Soft reconfiguration | Keep the routes received before the filter, so a changed filter applies without resetting the session. |
 | Default originate | Send the neighbour a default route. |
 | Route reflector client | Reflect iBGP routes to this neighbour (iBGP only). |
+| L2VPN EVPN: Activate, Route reflector client | Exchange EVPN routes with the neighbour; reflect them to it (iBGP only). See [VXLAN and EVPN](vxlan.md). |
 | Allow own AS in, Maximum prefixes | Accept routes with the local AS in their path (so many times); shut the session down when the neighbour sends more prefixes. |
 
 A neighbour with an IPv4 address can activate IPv6 unicast, and one with an IPv6

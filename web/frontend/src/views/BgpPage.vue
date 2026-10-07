@@ -151,6 +151,7 @@ const defaults = () => ({
   graceful_restart: false,
   multipath_relax: false,
   maximum_paths: 0,
+  evpn: false,
   networks: [],
   aggregates: [],
   redist_connected_v4: false,
@@ -231,7 +232,9 @@ function groupsChanged() {
 }
 const groupOf = (n) => groups.value.find((g) => g.name === n.peer_group)
 const families = (p) =>
-  [p.v4_activate && 'IPv4', p.v6_activate && 'IPv6'].filter(Boolean).join(', ')
+  [p.v4_activate && 'IPv4', p.v6_activate && 'IPv6', p.evpn_activate && 'EVPN']
+    .filter(Boolean)
+    .join(', ')
 
 // peerFields are the fields of a neighbour and a peer group alike.
 function peerFields() {
@@ -309,6 +312,19 @@ function peerFields() {
     { key: 'hold', label: 'Hold time (s)', type: 'number', hint: '0: three times the keepalive.' },
     ...fam('v4', 'IPv4 unicast', '0.0.0.0/0'),
     ...fam('v6', 'IPv6 unicast', '::/0'),
+    { key: 'evpn_heading', label: 'L2VPN EVPN', type: 'heading' },
+    {
+      key: 'evpn_activate',
+      label: 'Activate',
+      type: 'switch',
+      hint: "Exchanges EVPN routes (the VXLANs' VTEPs and MAC addresses) with the neighbour.",
+    },
+    {
+      key: 'evpn_route_reflector_client',
+      label: 'Route reflector client',
+      type: 'switch',
+      show: (form) => form.evpn_activate,
+    },
   ]
 }
 const peerDefaults = {
@@ -323,6 +339,8 @@ const peerDefaults = {
   hold: 0,
   v4_activate: true,
   v6_activate: false,
+  evpn_activate: false,
+  evpn_route_reflector_client: false,
 }
 
 const groupColumns = [
@@ -594,6 +612,14 @@ const neighborFields = computed(() => [
                 help="ECMP paths installed; 0: FRR's default."
               >
                 <UInput v-model="cfg.maximum_paths" type="number" class="w-28" />
+              </UFormField>
+
+              <UFormField
+                label="EVPN"
+                :ui="inlineField"
+                help="Advertises the VNIs of the VXLAN interfaces in bridges (Network → Interfaces) and their MAC addresses to the neighbours with L2VPN EVPN activated, and learns theirs."
+              >
+                <USwitch v-model="cfg.evpn" />
               </UFormField>
 
               <div class="border-b border-default pt-2 pb-1 text-sm font-semibold">Networks</div>

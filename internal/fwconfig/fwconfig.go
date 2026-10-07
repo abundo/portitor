@@ -101,6 +101,7 @@ const (
 	KindLoopback  = "loopback" // a dummy interface for addresses that stay up (router id, BGP update source)
 	KindLink      = "link"     // one end of a veth Link, generated from Document.Links
 	Kind6in4      = "6in4"     // an IPv6-in-IPv4 tunnel (sit), Tunnel
+	KindVXLAN     = "vxlan"    // a VXLAN (ethernet in UDP), VXLAN
 )
 
 // IPv4 addressing modes.
@@ -139,7 +140,7 @@ type Interface struct {
 	DHCPv6PD       bool `json:"dhcpv6_pd,omitempty"`
 	DHCPv6PDLength int  `json:"dhcpv6_pd_length,omitempty"`
 	// LLDP makes the agent send LLDP frames on the interface and listen
-	// for its neighbours' (ethernet kinds: physical, VLAN, bridge).
+	// for its neighbours' (ethernet kinds: physical, VLAN, bridge, VXLAN).
 	LLDP bool `json:"lldp,omitempty"`
 	// ShapeEgress and ShapeIngress shape what the interface sends and
 	// receives to that many Mbit/s with CAKE (0: not shaped). Receiving
@@ -150,6 +151,8 @@ type Interface struct {
 	WireGuard    *WireGuard `json:"wireguard,omitempty"`
 	// Tunnel holds a 6in4 interface's settings.
 	Tunnel *Tunnel6in4 `json:"tunnel,omitempty"`
+	// VXLAN holds a vxlan interface's settings.
+	VXLAN *VXLAN `json:"vxlan,omitempty"`
 }
 
 // MaxShapeMbit bounds an interface's shaped bandwidth (Mbit/s).

@@ -229,6 +229,16 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 		if err := a.doAll(ctx, planLinkSettings(ns, in.Interfaces, links)); err != nil {
 			return err
 		}
+		// The vxlans' learning, bridge port flags and flood lists, from
+		// the state before the bridge membership above: a port that only
+		// just joined its bridge gets its flags set.
+		fdbs, err := a.vxlanFDBs(ctx, ns, in, links)
+		if err != nil {
+			return err
+		}
+		if err := a.doAll(ctx, planVXLAN(ns, in, links, fdbs)); err != nil {
+			return err
+		}
 		if qdiscs, err = a.qdiscs(ctx, ns); err != nil {
 			return err
 		}

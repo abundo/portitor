@@ -192,6 +192,10 @@ func renameIfaceRefs(tx *gorm.DB, instanceID uint, old, name string, zones bool)
 				return err
 			}
 		}
+		// A VXLAN's underlay.
+		if err := tx.Model(&models.Interface{}).Where("instance_id = ? AND kind = ? AND vxlan_device = ?", instanceID, fwconfig.KindVXLAN, old).UpdateColumn("vxlan_device", name).Error; err != nil {
+			return err
+		}
 		// A link-local BGP neighbour's interface.
 		if err := tx.Model(&models.BgpNeighbor{}).Where("instance_id = ? AND interface = ?", instanceID, old).UpdateColumn("interface", name).Error; err != nil {
 			return err
@@ -233,6 +237,11 @@ func refuseIfaceInUse(tx *gorm.DB, instanceID uint, name string) error {
 	}
 	for _, g := range groups {
 		users = append(users, "BGP peer group "+g)
+	}
+	var vxlans []string
+	tx.Model(&models.Interface{}).Where("instance_id = ? AND kind = ? AND vxlan_device = ?", instanceID, fwconfig.KindVXLAN, name).Order("name").Pluck("name", &vxlans)
+	for _, x := range vxlans {
+		users = append(users, "VXLAN "+x)
 	}
 	users = append(users, ospfIfaceUsers(tx, instanceID, name)...)
 	users = append(users, vrrpIfaceUsers(tx, instanceID, name)...)
@@ -299,7 +308,8 @@ func refuseIfaceMove(tx *gorm.DB, i *models.Interface) error {
 		return err
 	}
 	for _, o := range others {
-		if (o.Kind == fwconfig.KindVLAN && o.Parent == i.Name) || (o.Kind == fwconfig.KindBridge && slices.Contains(o.Members, i.Name)) {
+		if (o.Kind == fwconfig.KindVLAN && o.Parent == i.Name) || (o.Kind == fwconfig.KindBridge && slices.Contains(o.Members, i.Name)) ||
+			(o.Kind == fwconfig.KindVXLAN && o.VxlanDevice == i.Name) {
 			users = append(users, "interface "+o.Name)
 		}
 	}

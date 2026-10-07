@@ -216,6 +216,10 @@ func Nftables(in *fwconfig.Instance, lockout *AntiLockout, paths Paths) string {
 			fmt.Fprintf(b, "\t\tip daddr %s %s accept %s\n", t.Remote, tunnel6in4Proto, comment("auto", Tunnel6in4Service+" "+ifc.Name))
 		}
 	}
+	// VXLAN packets to the remote VTEPs (any, with EVPN and no remotes).
+	for _, ifc := range in.VXLANs() {
+		fmt.Fprintf(b, "\t\t%s accept %s\n", vxlanOutputMatch(ifc.VXLAN), comment("auto", VXLANService+" "+ifc.Name))
+	}
 	// The BGP sessions FRR opens to its neighbours.
 	if addrs := BGPNeighborAddrs(in); len(addrs) > 0 {
 		v4, v6 := splitFamilies(addrs)
@@ -623,6 +627,15 @@ func AutoInputRules(in *fwconfig.Instance) []AutoRule {
 			out = append(out, AutoRule{Service: Tunnel6in4Service + " " + ifc.Name, Protocol: Tunnel6in4Service, Source: []string{t.Remote}})
 		}
 	}
+	// VXLAN packets from the remote VTEPs, on the underlay interface.
+	for _, ifc := range in.VXLANs() {
+		x := ifc.VXLAN
+		r := AutoRule{Service: VXLANService + " " + ifc.Name, Protocol: "udp", DstPort: x.UDPPort(), Source: x.Remotes}
+		if x.Device != "" {
+			r.InInterfaces = in.AddVRRPDevices([]string{x.Device})
+		}
+		out = append(out, r)
+	}
 	// The tunnel broker's ping of a new endpoint, answered only while the
 	// agent updates it.
 	if hasTunnelBroker(in) {
@@ -663,6 +676,28 @@ const Tunnel6in4Service = "6in4"
 
 // tunnel6in4Proto matches 6in4 packets.
 var tunnel6in4Proto = fmt.Sprintf("meta l4proto %d", fwconfig.Protocol6in4)
+
+// VXLANService starts the VXLAN auto rules' services, followed by the
+// interface name.
+const VXLANService = "vxlan"
+
+// vxlanOutputMatch matches the VXLAN packets a vxlan device sends.
+func vxlanOutputMatch(x *fwconfig.VXLAN) string {
+	var parts []string
+	if x.Device != "" {
+		parts = append(parts, "oifname "+quotedSet([]string{x.Device}))
+	}
+	if len(x.Remotes) > 0 {
+		v4, v6 := splitFamilies(x.Remotes)
+		if len(v4) > 0 {
+			parts = append(parts, "ip daddr "+set(v4))
+		} else {
+			parts = append(parts, "ip6 daddr "+set(v6))
+		}
+	}
+	parts = append(parts, fmt.Sprintf("udp dport %d", x.UDPPort()))
+	return strings.Join(parts, " ")
+}
 
 // TunnelBrokerPingService is the auto rule that answers the tunnel
 // broker's ping of a new endpoint, and its protocol.
