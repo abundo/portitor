@@ -53,6 +53,11 @@ type Agent struct {
 	// so an apply that changes nothing about it leaves it alone. Lost on
 	// restart, which builds the trees once more.
 	shaped map[string]string
+	// started holds the Kea units this process has (re)started. At boot
+	// the distribution's start before the agent has brought the
+	// interfaces up, and Kea gives up on a down interface; the first
+	// apply restarts them.
+	started map[string]bool
 }
 
 // pendingConfirm is an applied document that rolls back to Previous

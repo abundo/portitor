@@ -694,12 +694,15 @@ func (a *Agent) applyServices(ctx context.Context, in *fwconfig.Instance, b *ren
 		unit, conf string
 		on         bool
 		reload     string
+		// once: restarted on this process's first apply too (Kea, which
+		// opens no socket on an interface that was down when it started).
+		once bool
 	}{
-		{a.cfg.Units.Kea4(in), files.Kea4, in.DHCP.Enabled, "restart"},
-		{a.cfg.Units.Kea6(in), files.Kea6, len(render.DHCP6Subnets(in)) > 0, "restart"},
-		{a.cfg.Units.Radvd(in), files.Radvd, len(in.RA) > 0, "reload-or-restart"},
-		{a.cfg.Units.Chrony(in), files.Chrony, in.NTP != nil, "restart"},
-		{a.cfg.Units.Snmpd(in), files.Snmpd, in.SNMP != nil, "restart"},
+		{a.cfg.Units.Kea4(in), files.Kea4, in.DHCP.Enabled, "restart", true},
+		{a.cfg.Units.Kea6(in), files.Kea6, len(render.DHCP6Subnets(in)) > 0, "restart", true},
+		{a.cfg.Units.Radvd(in), files.Radvd, len(in.RA) > 0, "reload-or-restart", false},
+		{a.cfg.Units.Chrony(in), files.Chrony, in.NTP != nil, "restart", false},
+		{a.cfg.Units.Snmpd(in), files.Snmpd, in.SNMP != nil, "restart", false},
 	} {
 		if !svc.on {
 			a.disableService(ctx, in, svc.unit, svc.conf)
@@ -708,10 +711,16 @@ func (a *Agent) applyServices(ctx context.Context, in *fwconfig.Instance, b *ren
 		if err := a.enable(ctx, in, svc.unit); err != nil {
 			return err
 		}
-		if changed[svc.conf] {
+		if changed[svc.conf] || (svc.once && !a.started[svc.unit]) {
 			if err := a.do(ctx, command{Name: "systemctl", Args: []string{svc.reload, svc.unit}}); err != nil {
 				return err
 			}
+		}
+		if svc.once {
+			if a.started == nil {
+				a.started = map[string]bool{}
+			}
+			a.started[svc.unit] = true
 		}
 	}
 	if in.SNMP == nil {
