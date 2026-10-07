@@ -19,6 +19,11 @@ import { useAuthStore } from '@/stores/auth'
 import { useFormGuard, usePageForm } from '@/composables/useFormGuard'
 import TagsInput from '@/components/TagsInput.vue'
 import { inlineField, wideModal } from '@/utils/form'
+import SearchInput from '@/components/SearchInput.vue'
+import { useSearch, valuesText } from '@/utils/search'
+import { bytes } from '@/utils/bytes'
+import { ago, datetime } from '@/utils/time'
+import { useRoute, useRouter } from 'vue-router'
 
 const { ask } = useConfirm()
 
@@ -28,6 +33,17 @@ const deploy = useDeployStore()
 const toast = useToast()
 const tunnels = ref([])
 const selectedId = ref(null)
+const route = useRoute()
+const router = useRouter()
+
+const tabs = [
+  { label: 'Info', value: 'info', slot: 'info', icon: 'i-lucide-info' },
+  { label: 'Configuration', value: 'config', slot: 'config', icon: 'i-lucide-settings' },
+]
+const tab = computed({
+  get: () => (tabs.some((t) => t.value === route.query.tab) ? route.query.tab : 'info'),
+  set: (v) => router.replace({ query: { ...route.query, tab: v === 'info' ? undefined : v } }),
+})
 
 async function load() {
   tunnels.value = (await interfaces.list({ instance_id: store.currentId })).filter(
@@ -142,25 +158,78 @@ async function saveTunnel() {
   }
 }
 
-// The agent's status, for the peers' handshakes, refreshed every 5 s.
+// The agent's status, for the Info tab, refreshed every 5 s.
 const { auto: autoStatus, loading: statusLoading } = useStatusRefresh()
-// Handshakes from the agent status, by peer public key.
-const handshakes = computed(() => {
-  const m = {}
-  for (const inst of deploy.status?.instances ?? []) {
-    for (const wg of inst.wireguard ?? []) {
-      for (const p of wg.peers) m[p.public_key] = p
-    }
-  }
-  return m
-})
-function ago(t) {
-  if (!t) return 'never'
-  const s = Math.round((Date.now() - new Date(t).getTime()) / 1000)
-  if (s < 120) return `${s}s ago`
-  if (s < 7200) return `${Math.round(s / 60)}m ago`
-  return `${Math.round(s / 3600)}h ago`
+
+// ----- Info: the selected interface as configured and as the agent sees
+// it (wg show, ip addr), with its peers. Never a private or preshared key.
+const peers = ref([])
+async function loadPeers() {
+  peers.value = selectedId.value ? await wgPeers.list({ interface_id: selectedId.value }) : []
 }
+watch([selectedId, tab], () => tab.value === 'info' && loadPeers().catch(() => {}), {
+  immediate: true,
+})
+const live = computed(() => {
+  const name = selected.value?.name
+  const inst = deploy.status?.instances?.find((i) => i.name === store.current?.name)
+  return {
+    wg: inst?.wireguard?.find((w) => w.interface === name),
+    iface: inst?.interfaces?.find((i) => i.name === name),
+  }
+})
+// The configured peers by public key, with the live ones the database
+// doesn't know (shown with their key only).
+const peerRows = computed(() => {
+  const livePeers = live.value.wg?.peers ?? []
+  const byKey = Object.fromEntries(livePeers.map((p) => [p.public_key, p]))
+  const rows = peers.value.map((p) => ({ cfg: p, live: byKey[p.public_key] }))
+  const known = new Set(peers.value.map((p) => p.public_key))
+  for (const p of livePeers) if (!known.has(p.public_key)) rows.push({ cfg: null, live: p })
+  return rows
+})
+const { search: peerSearch, filtered: shownPeers } = useSearch(peerRows, (r) =>
+  valuesText(
+    r.cfg?.name,
+    r.cfg?.description,
+    r.live?.public_key ?? r.cfg?.public_key,
+    r.cfg?.allowed_ips,
+    r.cfg?.networks,
+    r.live?.allowed_ips,
+    r.live?.endpoint ?? r.cfg?.endpoint,
+  ),
+)
+const infoRows = computed(() => {
+  const t = selected.value
+  if (!t) return []
+  const { wg, iface } = live.value
+  return [
+    ['Name', t.name],
+    ['Label', t.label || '—'],
+    ['Description', t.description || '—'],
+    ['Enabled', t.enabled ? 'yes' : 'no'],
+    ['State', iface ? iface.state : 'not running'],
+    ['Public key', wg?.public_key ?? t.wg_public_key, true],
+    ...(wg && wg.public_key !== t.wg_public_key
+      ? [['Public key (configured, not deployed)', t.wg_public_key, true]]
+      : []),
+    ['Listen port', String(wg?.listen_port ?? (t.wg_listen_port || '—'))],
+    ['Firewall mark', wg?.fwmark || 'off'],
+    ['Addresses', (iface?.addresses ?? t.addresses ?? []).join(', ') || '—'],
+    ['MTU', String(iface?.mtu ?? (t.mtu || 'default'))],
+    ['Client endpoint', t.wg_endpoint || '—'],
+    ['Client keepalive', t.wg_keepalive ? `${t.wg_keepalive}s` : 'off'],
+    ['Peers', `${peers.value.length} configured, ${wg?.peers?.length ?? 0} running`],
+    ...(iface
+      ? [
+          ['Received', `${bytes(iface.rx_bytes)}, ${iface.rx_packets} packets`],
+          ['Sent', `${bytes(iface.tx_bytes)}, ${iface.tx_packets} packets`],
+          ['Errors (rx / tx)', `${iface.rx_errors} / ${iface.tx_errors}`],
+          ['Dropped (rx / tx)', `${iface.rx_dropped} / ${iface.tx_dropped}`],
+        ]
+      : []),
+  ]
+})
 
 async function rekey() {
   if (
@@ -183,7 +252,6 @@ const columns = [
   { key: 'allowed_ips', label: 'Tunnel addresses', class: 'font-mono text-xs' },
   { key: 'networks', label: 'Networks', class: 'font-mono text-xs' },
   { key: 'endpoint', label: 'Endpoint', class: 'font-mono text-xs' },
-  { key: 'handshake', label: 'Last handshake' },
   { key: 'enabled', label: 'Enabled' },
 ]
 // What the generated client config uses when the peer leaves endpoint and
@@ -313,145 +381,256 @@ function copy(text) {
 <template>
   <NeedInstance>
     <input ref="importInput" type="file" accept=".conf,text/plain" hidden @change="importFile" />
-    <form v-if="auth.isAdmin" class="card mb-4 space-y-3" @submit.prevent="saveEndpoint">
-      <UFormField
-        label="Public endpoint host"
-        help="Name or address clients connect to, in every virtual firewall; used in generated client configs when the interface has no client endpoint of its own."
-      >
-        <div class="flex flex-wrap gap-2">
-          <UInput
-            v-model="endpoint.wg_endpoint_host"
-            class="w-full max-w-md font-mono"
-            placeholder="home.example.org"
-          />
-          <UButton type="submit">Save</UButton>
-        </div>
-      </UFormField>
-    </form>
-    <div v-if="!tunnels.length" class="card space-y-3">
-      <UAlert
-        icon="i-lucide-key-round"
-        title="No WireGuard interface in this virtual firewall"
-        description="Add an interface of kind WireGuard (e.g. wg0, listen port 51820), give it an address (e.g. 10.99.0.1/24), and allow its traffic with firewall rules."
-        :actions="[{ label: 'Interfaces', to: '/interfaces' }]"
-      />
-      <UButton
-        v-if="auth.canEdit"
-        color="neutral"
-        variant="outline"
-        icon="i-lucide-file-up"
-        label="Import config"
-        @click="importInput.click()"
-      />
-    </div>
-    <div v-else class="space-y-4">
-      <div class="card flex flex-wrap items-center gap-4">
-        <USelect v-model="selectedId" :items="tunnelItems" class="w-40" />
-        <USwitch
-          v-if="selected"
-          :model-value="selected.enabled"
-          :disabled="!auth.canEdit"
-          label="Enabled"
-          @update:model-value="setEnabled"
-        />
-        <div v-if="selected?.description" class="min-w-0 text-sm">
-          <div class="text-muted">Description</div>
-          <div>{{ selected.description }}</div>
-        </div>
-        <div v-if="selected" class="min-w-0 text-sm">
-          <div class="text-muted">Public key</div>
-          <div class="flex items-center gap-1 font-mono break-all">
-            {{ selected.wg_public_key }}
-            <UButton
-              size="xs"
-              color="neutral"
-              variant="ghost"
-              icon="i-lucide-copy"
-              @click="copy(selected.wg_public_key)"
+    <UTabs v-model="tab" :items="tabs" :unmount-on-hide="false">
+      <template #info>
+        <div class="space-y-4 pt-2">
+          <div v-if="!tunnels.length" class="card">
+            <UAlert
+              icon="i-lucide-key-round"
+              title="No WireGuard interface in this virtual firewall"
+              description="Add one on the Configuration tab or under Interfaces."
             />
           </div>
+          <template v-else>
+            <div class="card space-y-3">
+              <div class="flex flex-wrap items-center justify-between gap-3">
+                <USelect v-model="selectedId" :items="tunnelItems" class="w-56" />
+                <AutoRefreshButton :auto="autoStatus" :loading="statusLoading" />
+              </div>
+              <table v-if="selected" class="text-sm">
+                <tbody>
+                  <tr v-for="[k, v, key] in infoRows" :key="k">
+                    <td class="py-1 pr-6 align-top text-muted">{{ k }}</td>
+                    <td class="py-1" :class="key ? 'font-mono break-all' : ''">
+                      {{ v }}
+                      <UButton
+                        v-if="key"
+                        size="xs"
+                        color="neutral"
+                        variant="ghost"
+                        icon="i-lucide-copy"
+                        @click="copy(v)"
+                      />
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="card">
+              <div class="mb-2 text-lg font-semibold">Peers</div>
+              <SearchInput v-model="peerSearch" class="mb-2" />
+              <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                  <thead>
+                    <tr class="text-left text-muted">
+                      <th class="py-1 pr-3">Peer</th>
+                      <th class="py-1 pr-3">Public key</th>
+                      <th class="py-1 pr-3">Allowed IPs</th>
+                      <th class="py-1 pr-3">Endpoint</th>
+                      <th class="py-1 pr-3">Last handshake</th>
+                      <th class="py-1 pr-3">Received</th>
+                      <th class="py-1 pr-3">Sent</th>
+                      <th class="py-1 pr-3">Keepalive</th>
+                      <th class="py-1 pr-3">Preshared key</th>
+                      <th class="py-1 pr-3">Enabled</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr
+                      v-for="r in shownPeers"
+                      :key="r.cfg?.id ?? r.live.public_key"
+                      class="border-t border-default align-top"
+                    >
+                      <td class="py-1 pr-3">
+                        <div class="font-medium">{{ r.cfg?.name ?? '(not configured)' }}</div>
+                        <div v-if="r.cfg?.description" class="text-xs text-muted">
+                          {{ r.cfg.description }}
+                        </div>
+                      </td>
+                      <td class="py-1 pr-3 font-mono text-xs break-all">
+                        {{ r.live?.public_key ?? r.cfg?.public_key }}
+                      </td>
+                      <td class="py-1 pr-3 font-mono text-xs">
+                        <div
+                          v-for="a in r.live?.allowed_ips ?? [
+                            ...(r.cfg?.allowed_ips ?? []),
+                            ...(r.cfg?.networks ?? []),
+                          ]"
+                          :key="a"
+                        >
+                          {{ a }}
+                        </div>
+                      </td>
+                      <td class="py-1 pr-3 font-mono text-xs">
+                        {{ r.live?.endpoint || r.cfg?.endpoint || '—' }}
+                      </td>
+                      <td class="py-1 pr-3 text-xs" :title="datetime(r.live?.latest_handshake)">
+                        {{ r.live ? ago(r.live.latest_handshake) : 'not running' }}
+                      </td>
+                      <td class="py-1 pr-3 text-xs">{{ r.live ? bytes(r.live.rx_bytes) : '—' }}</td>
+                      <td class="py-1 pr-3 text-xs">{{ r.live ? bytes(r.live.tx_bytes) : '—' }}</td>
+                      <td class="py-1 pr-3 text-xs">
+                        {{
+                          (r.live?.keepalive ?? r.cfg?.keepalive)
+                            ? `${r.live?.keepalive ?? r.cfg.keepalive}s`
+                            : 'off'
+                        }}
+                      </td>
+                      <td class="py-1 pr-3 text-xs">
+                        {{ r.live ? (r.live.preshared_key ? 'yes' : 'no') : '—' }}
+                      </td>
+                      <td class="py-1 pr-3 text-xs">
+                        {{ r.cfg ? (r.cfg.enabled ? 'yes' : 'no') : '—' }}
+                      </td>
+                    </tr>
+                    <tr v-if="!shownPeers.length">
+                      <td colspan="10" class="py-2 text-muted">No peers.</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </template>
         </div>
-        <div v-if="selected" class="text-sm">
-          <div class="text-muted">Listen port</div>
-          <div class="font-mono">{{ selected.wg_listen_port || '—' }}</div>
-        </div>
-        <div v-if="selected" class="text-sm">
-          <div class="text-muted">Client endpoint</div>
-          <div class="font-mono">{{ selected.wg_endpoint || '—' }}</div>
-        </div>
-        <div v-if="selected" class="text-sm">
-          <div class="text-muted">Client keepalive</div>
-          <div class="font-mono">
-            {{ selected.wg_keepalive ? `${selected.wg_keepalive}s` : 'off' }}
+      </template>
+      <template #config>
+        <div class="pt-2">
+          <form v-if="auth.isAdmin" class="card mb-4 space-y-3" @submit.prevent="saveEndpoint">
+            <UFormField
+              label="Public endpoint host"
+              help="Name or address clients connect to, in every virtual firewall; used in generated client configs when the interface has no client endpoint of its own."
+            >
+              <div class="flex flex-wrap gap-2">
+                <UInput
+                  v-model="endpoint.wg_endpoint_host"
+                  class="w-full max-w-md font-mono"
+                  placeholder="home.example.org"
+                />
+                <UButton type="submit">Save</UButton>
+              </div>
+            </UFormField>
+          </form>
+          <div v-if="!tunnels.length" class="card space-y-3">
+            <UAlert
+              icon="i-lucide-key-round"
+              title="No WireGuard interface in this virtual firewall"
+              description="Add an interface of kind WireGuard (e.g. wg0, listen port 51820), give it an address (e.g. 10.99.0.1/24), and allow its traffic with firewall rules."
+              :actions="[{ label: 'Interfaces', to: '/interfaces' }]"
+            />
+            <UButton
+              v-if="auth.canEdit"
+              color="neutral"
+              variant="outline"
+              icon="i-lucide-file-up"
+              label="Import config"
+              @click="importInput.click()"
+            />
+          </div>
+          <div v-else class="space-y-4">
+            <div class="card flex flex-wrap items-center gap-4">
+              <USelect v-model="selectedId" :items="tunnelItems" class="w-40" />
+              <USwitch
+                v-if="selected"
+                :model-value="selected.enabled"
+                :disabled="!auth.canEdit"
+                label="Enabled"
+                @update:model-value="setEnabled"
+              />
+              <div v-if="selected?.description" class="min-w-0 text-sm">
+                <div class="text-muted">Description</div>
+                <div>{{ selected.description }}</div>
+              </div>
+              <div v-if="selected" class="min-w-0 text-sm">
+                <div class="text-muted">Public key</div>
+                <div class="flex items-center gap-1 font-mono break-all">
+                  {{ selected.wg_public_key }}
+                  <UButton
+                    size="xs"
+                    color="neutral"
+                    variant="ghost"
+                    icon="i-lucide-copy"
+                    @click="copy(selected.wg_public_key)"
+                  />
+                </div>
+              </div>
+              <div v-if="selected" class="text-sm">
+                <div class="text-muted">Listen port</div>
+                <div class="font-mono">{{ selected.wg_listen_port || '—' }}</div>
+              </div>
+              <div v-if="selected" class="text-sm">
+                <div class="text-muted">Client endpoint</div>
+                <div class="font-mono">{{ selected.wg_endpoint || '—' }}</div>
+              </div>
+              <div v-if="selected" class="text-sm">
+                <div class="text-muted">Client keepalive</div>
+                <div class="font-mono">
+                  {{ selected.wg_keepalive ? `${selected.wg_keepalive}s` : 'off' }}
+                </div>
+              </div>
+              <UButton
+                v-if="selected"
+                class="ml-auto"
+                color="neutral"
+                variant="outline"
+                :icon="auth.canEdit ? 'i-lucide-pencil' : 'i-lucide-eye'"
+                :label="auth.canEdit ? 'Edit' : 'Details'"
+                @click="editTunnel"
+              />
+              <UButton
+                v-if="auth.canEdit"
+                color="neutral"
+                variant="outline"
+                icon="i-lucide-file-up"
+                label="Import config"
+                @click="importInput.click()"
+              />
+              <UButton
+                v-if="auth.canEdit"
+                color="neutral"
+                variant="outline"
+                icon="i-lucide-refresh-cw"
+                label="New key"
+                @click="rekey"
+              />
+            </div>
+            <UAlert
+              v-for="w in freeWarnings"
+              :key="w"
+              color="warning"
+              variant="subtle"
+              icon="i-lucide-triangle-alert"
+              :title="w"
+            />
+            <CrudPage
+              v-if="selected"
+              :key="selected.id"
+              :title="`Peers of ${withLabel(selected.label, selected.name)}`"
+              noun="peer"
+              description="Remote devices and sites. Changes take effect on the next commit."
+              :api="wgPeers"
+              :params="{ interface_id: selected.id }"
+              :columns="columns"
+              :fields="fields"
+              :defaults="peerDefaults"
+              new-label="New peer"
+              @changed="loadFree"
+            >
+              <template #row-actions="{ row }">
+                <UButton
+                  v-if="auth.canEdit"
+                  size="xs"
+                  color="neutral"
+                  variant="ghost"
+                  icon="i-lucide-qr-code"
+                  :title="row.networks?.length ? 'Site config' : 'Client config'"
+                  @click="showConfig(row)"
+                />
+              </template>
+            </CrudPage>
           </div>
         </div>
-        <UButton
-          v-if="selected"
-          class="ml-auto"
-          color="neutral"
-          variant="outline"
-          :icon="auth.canEdit ? 'i-lucide-pencil' : 'i-lucide-eye'"
-          :label="auth.canEdit ? 'Edit' : 'Details'"
-          @click="editTunnel"
-        />
-        <UButton
-          v-if="auth.canEdit"
-          color="neutral"
-          variant="outline"
-          icon="i-lucide-file-up"
-          label="Import config"
-          @click="importInput.click()"
-        />
-        <UButton
-          v-if="auth.canEdit"
-          color="neutral"
-          variant="outline"
-          icon="i-lucide-refresh-cw"
-          label="New key"
-          @click="rekey"
-        />
-      </div>
-      <UAlert
-        v-for="w in freeWarnings"
-        :key="w"
-        color="warning"
-        variant="subtle"
-        icon="i-lucide-triangle-alert"
-        :title="w"
-      />
-      <CrudPage
-        v-if="selected"
-        :key="selected.id"
-        :title="`Peers of ${withLabel(selected.label, selected.name)}`"
-        noun="peer"
-        description="Remote devices and sites. Changes take effect on the next commit."
-        :api="wgPeers"
-        :params="{ interface_id: selected.id }"
-        :columns="columns"
-        :fields="fields"
-        :defaults="peerDefaults"
-        new-label="New peer"
-        @changed="loadFree"
-      >
-        <template #toolbar-end>
-          <AutoRefreshButton :auto="autoStatus" :loading="statusLoading" />
-        </template>
-        <template #cell-handshake="{ row }">
-          <span class="text-xs">{{ ago(handshakes[row.public_key]?.latest_handshake) }}</span>
-        </template>
-        <template #row-actions="{ row }">
-          <UButton
-            v-if="auth.canEdit"
-            size="xs"
-            color="neutral"
-            variant="ghost"
-            icon="i-lucide-qr-code"
-            :title="row.networks?.length ? 'Site config' : 'Client config'"
-            @click="showConfig(row)"
-          />
-        </template>
-      </CrudPage>
-    </div>
+      </template>
+    </UTabs>
 
     <UModal
       :open="editOpen"

@@ -136,7 +136,10 @@ func TestParseWGDump(t *testing.T) {
 	if p1.Endpoint != "203.0.113.9:4500" || p1.LatestHandshake == nil || p1.RxBytes != 1234 {
 		t.Errorf("peer1 %+v", p1)
 	}
-	if p2.LatestHandshake != nil || len(p2.AllowedIPs) != 2 {
+	if got[0].FwMark != "" || p1.Keepalive != 0 || p1.PresharedKey {
+		t.Errorf("fwmark %q, peer1 %+v", got[0].FwMark, p1)
+	}
+	if p2.LatestHandshake != nil || len(p2.AllowedIPs) != 2 || p2.Keepalive != 25 {
 		t.Errorf("peer2 %+v", p2)
 	}
 }

@@ -171,6 +171,7 @@ type WGStatus struct {
 	Interface  string         `json:"interface"`
 	PublicKey  string         `json:"public_key"`
 	ListenPort int            `json:"listen_port"`
+	FwMark     string         `json:"fwmark,omitempty"` // "" when off
 	Peers      []WGPeerStatus `json:"peers"`
 }
 
@@ -181,6 +182,8 @@ type WGPeerStatus struct {
 	LatestHandshake *time.Time `json:"latest_handshake,omitempty"`
 	RxBytes         uint64     `json:"rx_bytes"`
 	TxBytes         uint64     `json:"tx_bytes"`
+	Keepalive       int        `json:"keepalive,omitempty"` // seconds, 0 off
+	PresharedKey    bool       `json:"preshared_key"`       // whether one is set (never the key)
 }
 
 // ServerLease is an active lease handed out by Kea.

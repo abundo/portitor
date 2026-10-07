@@ -234,13 +234,17 @@ func parseWGDump(s string) []WGStatus {
 		case 5:
 			port, _ := strconv.Atoi(f[3])
 			idx[f[0]] = len(out)
-			out = append(out, WGStatus{Interface: f[0], PublicKey: f[2], ListenPort: port, Peers: []WGPeerStatus{}})
+			st := WGStatus{Interface: f[0], PublicKey: f[2], ListenPort: port, Peers: []WGPeerStatus{}}
+			if f[4] != "off" {
+				st.FwMark = f[4]
+			}
+			out = append(out, st)
 		case 9:
 			i, ok := idx[f[0]]
 			if !ok {
 				continue
 			}
-			p := WGPeerStatus{PublicKey: f[1], AllowedIPs: []string{}}
+			p := WGPeerStatus{PublicKey: f[1], AllowedIPs: []string{}, PresharedKey: f[2] != "(none)"}
 			if f[3] != "(none)" {
 				p.Endpoint = f[3]
 			}
@@ -253,6 +257,7 @@ func parseWGDump(s string) []WGStatus {
 			}
 			p.RxBytes, _ = strconv.ParseUint(f[6], 10, 64)
 			p.TxBytes, _ = strconv.ParseUint(f[7], 10, 64)
+			p.Keepalive, _ = strconv.Atoi(f[8])
 			out[i].Peers = append(out[i].Peers, p)
 		}
 	}
