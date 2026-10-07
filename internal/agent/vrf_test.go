@@ -48,10 +48,10 @@ func TestPlanVRF(t *testing.T) {
 }
 
 func TestPlanRoutesVRF(t *testing.T) {
-	in := &fwconfig.Instance{Interfaces: []fwconfig.Interface{
-		{Name: "eth3", Kind: fwconfig.KindPhysical},
-		{Name: "blue", Kind: fwconfig.KindVRF, VRFTable: 100, Members: []string{"eth3"}},
-	}}
+	in := &fwconfig.Instance{
+		Interfaces: []fwconfig.Interface{{Name: "eth3", Kind: fwconfig.KindPhysical, VRF: "blue"}},
+		VRFs:       []fwconfig.VRF{{Name: "blue", Table: 100}},
+	}
 	have := []ipRoute{
 		{Table: "100", Dst: "default", Gateway: "172.16.3.254", Dev: "eth3"},
 		{Table: "100", Dst: "10.7.0.0/16", Gateway: "172.16.3.7", Dev: "eth3"},

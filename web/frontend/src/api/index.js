@@ -33,6 +33,8 @@ export const ospfConfig = crud('/ospf/config')
 export const ospfInterfaces = crud('/ospf/interfaces')
 export const vrrpRouters = crud('/vrrp/routers')
 export const bfdInterfaces = crud('/bfd/interfaces')
+// VRFs of an instance (Routing → VRF).
+export const vrfs = crud('/vrfs')
 export const snmpUsers = crud('/snmp/users')
 export const rules = crud('/rules')
 export const nat = crud('/nat')

@@ -10,17 +10,16 @@ import { computed } from 'vue'
 import { routes } from '@/api'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
 
-const { store, ifaceList, ifaceItems, ifaceName } = useInstanceRefs()
+const { store, vrfList, ifaceItems, ifaceName } = useInstanceRefs()
 
-const vrfItems = computed(() =>
-  ifaceItems.value.filter((i) => ifaceList.value.find((x) => x.id === i.value)?.kind === 'vrf'),
-)
+const vrfItems = computed(() => vrfList.value.map((v) => ({ label: v.name, value: v.id })))
+const vrfName = (id) => vrfList.value.find((v) => v.id === id)?.name ?? ''
 
 const columns = [
   { key: 'destination', label: 'Destination', class: 'font-mono' },
   { key: 'gateway', label: 'Gateway', class: 'font-mono' },
   { key: 'interface_id', label: 'Interface', format: (r) => ifaceName(r.interface_id) },
-  { key: 'vrf_id', label: 'VRF', format: (r) => (r.vrf_id ? ifaceName(r.vrf_id) : '') },
+  { key: 'vrf_id', label: 'VRF', format: (r) => vrfName(r.vrf_id) },
   { key: 'metric', label: 'Metric' },
   { key: 'bfd', label: 'BFD' },
   { key: 'enabled', label: 'Enabled' },

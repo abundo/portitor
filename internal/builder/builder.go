@@ -59,6 +59,7 @@ type data struct {
 	ospfIfaces     []models.OspfInterface
 	vrrpRouters    []models.VrrpRouter
 	bfdIfaces      []models.BfdInterface
+	vrfs           []models.Vrf
 	snmpUsers      []models.SnmpUser
 }
 
@@ -103,6 +104,7 @@ func load(db *gorm.DB) (*data, error) {
 		{&d.ospfIfaces, "name"},
 		{&d.vrrpRouters, "interface, vrid"},
 		{&d.bfdIfaces, "interface"},
+		{&d.vrfs, "name"},
 		{&d.snmpUsers, "name"},
 	} {
 		if err := db.Order(q.order).Find(q.dst).Error; err != nil {
@@ -224,7 +226,7 @@ func build(db *gorm.DB, generation int64, only map[string]bool) (*fwconfig.Docum
 				Parent:       mif.Parent,
 				VLANID:       mif.VlanID,
 				Members:      []string(mif.Members),
-				VRFTable:     mif.VrfTable,
+				VRF:          mif.Vrf,
 				MTU:          mif.Mtu,
 				IPv4Mode:     mif.Ipv4Mode,
 				Addresses:    []string(mif.Addresses),
@@ -396,6 +398,13 @@ func build(db *gorm.DB, generation int64, only map[string]bool) (*fwconfig.Docum
 				in.Routes = append(in.Routes, fwconfig.Route{Destination: "::/0", Interface: mif.Name, Metric: fwconfig.TunnelRouteMetric})
 			}
 		}
+		vrfName := map[uint]string{}
+		for _, v := range d.vrfs {
+			if v.InstanceID == mi.ID {
+				vrfName[v.ID] = v.Name
+				in.VRFs = append(in.VRFs, fwconfig.VRF{Name: v.Name, Table: v.RouteTable, Description: v.Description})
+			}
+		}
 		for _, r := range d.routes {
 			if r.InstanceID != mi.ID || !r.Enabled {
 				continue
@@ -422,7 +431,7 @@ func build(db *gorm.DB, generation int64, only map[string]bool) (*fwconfig.Docum
 					route.Interface = ifaceByID[*r.InterfaceID].Name
 				}
 				if r.VrfID != nil {
-					route.VRF = ifaceByID[*r.VrfID].Name
+					route.VRF = vrfName[*r.VrfID]
 				}
 				if len(gateways) == 0 {
 					in.Routes = append(in.Routes, route)

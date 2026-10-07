@@ -84,6 +84,9 @@ func checkNewIfaceName(tx *gorm.DB, instanceID uint, name, field string) error {
 	if ifaceZoneExists(tx, instanceID, name) {
 		return bad(fmt.Sprintf("%s: an interface zone is named %s", field, name))
 	}
+	if vrfExists(tx, instanceID, name) {
+		return bad(fmt.Sprintf("%s: a VRF is named %s", field, name))
+	}
 	return nil
 }
 
@@ -104,6 +107,9 @@ func prepareInterfaceZone(tx *gorm.DB, z, old *models.InterfaceZone) error {
 	}
 	if names[z.Name] {
 		return bad(fmt.Sprintf("name: %s is an interface of this virtual firewall", z.Name))
+	}
+	if vrfExists(tx, z.InstanceID, z.Name) {
+		return bad(fmt.Sprintf("name: a VRF is named %s", z.Name))
 	}
 	z.Interfaces = dedupe(cleanList(z.Interfaces))
 	for _, m := range z.Interfaces {
@@ -196,7 +202,7 @@ func renameIfaceRefs(tx *gorm.DB, instanceID uint, old, name string, zones bool)
 		if err := tx.Model(&models.Interface{}).Where("instance_id = ? AND kind = ? AND vxlan_device = ?", instanceID, fwconfig.KindVXLAN, old).UpdateColumn("vxlan_device", name).Error; err != nil {
 			return err
 		}
-		// A bridge's or VRF's members.
+		// A bridge's members.
 		if err := memberLists(tx, instanceID, func(list *models.StringList) bool {
 			i := slices.Index(*list, old)
 			if i >= 0 {
@@ -274,7 +280,7 @@ func removeIface(tx *gorm.DB, instanceID uint, name string) error {
 	if err := tx.Where("instance_id = ? AND interface = ?", instanceID, name).Delete(&models.BfdInterface{}).Error; err != nil {
 		return err
 	}
-	// It leaves its bridge or VRF.
+	// It leaves its bridge.
 	if err := memberLists(tx, instanceID, func(list *models.StringList) bool {
 		i := slices.Index(*list, name)
 		if i >= 0 {
@@ -319,7 +325,7 @@ func ifaceMoved(tx *gorm.DB, oldInst uint, oldName string, inst uint, name strin
 func refuseIfaceMove(tx *gorm.DB, i *models.Interface) error {
 	var users []string
 	var routes []string
-	tx.Model(&models.Route{}).Where("interface_id = ? OR vrf_id = ?", i.ID, i.ID).Order("destination").Pluck("destination", &routes)
+	tx.Model(&models.Route{}).Where("interface_id = ?", i.ID).Order("destination").Pluck("destination", &routes)
 	for _, r := range routes {
 		users = append(users, "route "+r)
 	}
@@ -328,7 +334,7 @@ func refuseIfaceMove(tx *gorm.DB, i *models.Interface) error {
 		return err
 	}
 	for _, o := range others {
-		if (o.Kind == fwconfig.KindVLAN && o.Parent == i.Name) || ((o.Kind == fwconfig.KindBridge || o.Kind == fwconfig.KindVRF) && slices.Contains(o.Members, i.Name)) ||
+		if (o.Kind == fwconfig.KindVLAN && o.Parent == i.Name) || (o.Kind == fwconfig.KindBridge && slices.Contains(o.Members, i.Name)) ||
 			(o.Kind == fwconfig.KindVXLAN && o.VxlanDevice == i.Name) {
 			users = append(users, "interface "+o.Name)
 		}
@@ -362,11 +368,11 @@ func deleteLink(tx *gorm.DB, l *models.Link) error {
 	return removeIface(tx, l.InstanceBID, l.InterfaceB)
 }
 
-// memberLists visits the member lists of the instance's bridges and VRFs,
-// saving those visit changes.
+// memberLists visits the member lists of the instance's bridges, saving
+// those visit changes.
 func memberLists(tx *gorm.DB, instanceID uint, visit func(list *models.StringList) bool) error {
 	var masters []models.Interface
-	if err := tx.Where("instance_id = ? AND kind IN ?", instanceID, []string{fwconfig.KindBridge, fwconfig.KindVRF}).Find(&masters).Error; err != nil {
+	if err := tx.Where("instance_id = ? AND kind = ?", instanceID, fwconfig.KindBridge).Find(&masters).Error; err != nil {
 		return err
 	}
 	for _, m := range masters {

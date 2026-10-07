@@ -18,7 +18,7 @@ import { useDeployStore } from '@/stores/deploy'
 import { bytes } from '@/utils/bytes'
 import { useSearch } from '@/utils/search'
 
-const { store, ifaceList, ifaceText, zonesOf, reload } = useInstanceRefs()
+const { store, ifaceList, vrfList, ifaceText, zonesOf, reload } = useInstanceRefs()
 const deploy = useDeployStore()
 const auth = useAuthStore()
 const isMissing = (row) =>
@@ -41,7 +41,6 @@ const kinds = [
   { label: 'Loopback', value: 'loopback' },
   { label: '6in4 tunnel (Hurricane Electric)', value: '6in4' },
   { label: 'VXLAN', value: 'vxlan' },
-  { label: 'VRF', value: 'vrf' },
 ]
 const is6in4 = (f) => f.kind === '6in4'
 const isVxlan = (f) => f.kind === 'vxlan'
@@ -66,12 +65,11 @@ const columns = [
           ? `6in4 to ${r.tunnel_remote}`
           : r.kind === 'vxlan'
             ? `vxlan ${r.vxlan_vni}${r.vxlan_device ? ` on ${ifaceText(r.vxlan_device)}` : ''}`
-            : r.kind === 'vrf'
-              ? `vrf table ${r.vrf_table}`
-              : r.kind,
+            : r.kind,
   },
   { key: 'mac', label: 'MAC', class: 'font-mono text-xs', format: macOf },
   { key: 'zones', label: 'Zones', format: (r) => zonesOf(r.name).join(', ') },
+  { key: 'vrf', label: 'VRF', class: 'font-mono' },
   { key: 'ipv4_mode', label: 'IPv4', format: (r) => (is6in4(r) ? '' : r.ipv4_mode) },
   { key: 'broker', label: 'Endpoint update' },
   { key: 'addresses', label: 'Addresses' },
@@ -131,27 +129,24 @@ const fields = [
     show: (f) => f.kind === 'bridge',
   },
   {
-    key: 'vrf_table',
-    label: 'Table',
-    type: 'number',
-    required: true,
-    show: (f) => f.kind === 'vrf',
-    hint: 'The routing table of the VRF (1-6399, not 253-255), unique in the virtual firewall. Other virtual firewalls may use the same name and table.',
-  },
-  {
-    key: 'members',
-    label: 'VRF members',
-    type: 'transfer',
-    items: (f) => otherIfaces(f, f.members),
-    show: (f) => f.kind === 'vrf',
-    hint: 'The interfaces routed by the VRF’s table, apart from the other interfaces. Rules name them as usual; static routes go in the VRF by its interface or their VRF field. The firewall’s own services answer TCP on them.',
+    key: 'vrf',
+    label: 'VRF',
+    type: 'select',
+    nullable: true,
+    text: true,
+    items: (f) =>
+      [...new Set([...vrfList.value.map((v) => v.name), f.vrf].filter(Boolean))].map((n) => ({
+        label: n,
+        value: n,
+      })),
+    hint: 'The VRF (Routing → VRF) whose table routes this interface; — : the main table. Changing it moves the interface to that VRF. A bridge’s member goes with its bridge.',
   },
   {
     key: 'ipv4_mode',
     label: 'IPv4',
     type: 'select',
     items: (f) =>
-      f.kind === 'wireguard' || f.kind === 'loopback' || f.kind === 'vrf'
+      f.kind === 'wireguard' || f.kind === 'loopback'
         ? modes.filter((m) => m.value !== 'dhcp')
         : modes,
     show: (f) => !is6in4(f),
@@ -191,7 +186,7 @@ const fields = [
     key: 'dhcpv6',
     label: 'DHCPv6 client',
     type: 'switch',
-    show: (f) => !['wireguard', 'loopback', '6in4', 'vrf'].includes(f.kind),
+    show: (f) => !['wireguard', 'loopback', '6in4'].includes(f.kind),
     hint: 'Ask a DHCPv6 server for an IPv6 address. Needs router advertisements accepted: the default route comes from them.',
   },
   {
@@ -232,14 +227,14 @@ const fields = [
     key: 'shape_egress',
     label: 'Shape upload (Mbit/s)',
     type: 'number',
-    show: (f) => f.kind !== 'loopback' && f.kind !== 'vrf',
+    show: (f) => f.kind !== 'loopback',
     hint: 'Shapes what the interface sends with CAKE, a little below the line speed (95%), so the queue stays here instead of in the modem; 0 is off. When rules use a rate limit that shapes, an HTB tree at this rate replaces CAKE.',
   },
   {
     key: 'shape_ingress',
     label: 'Shape download (Mbit/s)',
     type: 'number',
-    show: (f) => f.kind !== 'loopback' && f.kind !== 'vrf',
+    show: (f) => f.kind !== 'loopback',
     hint: 'Shapes what the interface receives (through an IFB device, ifb-<name>); 0 is off.',
   },
   { key: 'vxlan_heading', label: 'VXLAN', type: 'heading', show: isVxlan },
@@ -440,7 +435,7 @@ const { search: statsSearch, filtered: statsFiltered } = useSearch(statsRows)
   <NeedInstance>
     <CrudPage
       title="Interfaces"
-      description="Physical ports, VLANs, bridges, loopbacks, WireGuard, 6in4 tunnels (such as Hurricane Electric's tunnel broker), VXLANs and VRFs of this virtual firewall. Physical ports are moved into the virtual firewall's network namespace."
+      description="Physical ports, VLANs, bridges, loopbacks, WireGuard, 6in4 tunnels (such as Hurricane Electric's tunnel broker) and VXLANs of this virtual firewall. Physical ports are moved into the virtual firewall's network namespace."
       :api="interfaces"
       :params="{ instance_id: store.currentId }"
       :columns="columns"
@@ -456,7 +451,7 @@ const { search: statsSearch, filtered: statsFiltered } = useSearch(statsRows)
         ipv4_mode: 'static',
         addresses: [],
         members: [],
-        vrf_table: 0,
+        vrf: '',
         mtu: 0,
         vlan_id: 0,
         wg_listen_port: 0,

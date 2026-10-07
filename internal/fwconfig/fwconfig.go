@@ -38,6 +38,8 @@ type Instance struct {
 	Name       string      `json:"name"`
 	Default    bool        `json:"default"` // root network namespace
 	Interfaces []Interface `json:"interfaces"`
+	// VRFs are the instance's VRFs; Expand makes each a device (KindVRF).
+	VRFs []VRF `json:"vrfs,omitempty"`
 	// InterfaceZones name groups of interfaces for rules to match on.
 	InterfaceZones []InterfaceZone `json:"interface_zones"`
 	Rules          []Rule          `json:"rules"`
@@ -102,7 +104,7 @@ const (
 	KindLink      = "link"     // one end of a veth Link, generated from Document.Links
 	Kind6in4      = "6in4"     // an IPv6-in-IPv4 tunnel (sit), Tunnel
 	KindVXLAN     = "vxlan"    // a VXLAN (ethernet in UDP), VXLAN
-	KindVRF       = "vrf"      // a VRF: Members routed by table VRFTable
+	KindVRF       = "vrf"      // a VRF's device, generated from Instance.VRFs
 )
 
 // IPv4 addressing modes.
@@ -119,8 +121,10 @@ type Interface struct {
 	Enabled     bool     `json:"enabled"`
 	Parent      string   `json:"parent,omitempty"`  // vlan
 	VLANID      int      `json:"vlan_id,omitempty"` // vlan
-	Members     []string `json:"members,omitempty"` // bridge, vrf
-	// VRFTable is a VRF's routing table (vrf.go).
+	Members     []string `json:"members,omitempty"` // bridge; a VRF device's, generated
+	// VRF is the VRF (Instance.VRFs) the interface is in; "" is main.
+	VRF string `json:"vrf,omitempty"`
+	// VRFTable is a generated VRF device's routing table (vrf.go).
 	VRFTable int    `json:"vrf_table,omitempty"`
 	MTU      int    `json:"mtu,omitempty"`
 	IPv4Mode string `json:"ipv4_mode"`
@@ -746,6 +750,9 @@ func (d Document) Expand() Document {
 				})
 			}
 		}
+	}
+	for i := range out.Instances {
+		out.Instances[i].addVRFDevices()
 	}
 	return out
 }

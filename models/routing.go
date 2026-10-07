@@ -342,3 +342,15 @@ func (b *BfdInterface) BFD() fwconfig.BFDInterface {
 		ReceiveInterval: b.ReceiveInterval, TransmitInterval: b.TransmitInterval, Passive: b.Passive,
 	}
 }
+
+// Vrf is a VRF of an instance (fwconfig.VRF): interfaces are put in it by
+// name (Interface.Vrf), routes by id (Route.VrfID).
+type Vrf struct {
+	Base
+	InstanceID  uint   `json:"instance_id"`
+	Name        string `json:"name"`
+	RouteTable  int    `json:"route_table"`
+	Description string `json:"description"`
+}
+
+func (Vrf) TableName() string { return "vrfs" }

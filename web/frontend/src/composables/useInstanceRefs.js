@@ -2,24 +2,26 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { computed, ref, watch } from 'vue'
-import { interfaceZones, interfaces, links } from '@/api'
+import { interfaceZones, interfaces, links, vrfs } from '@/api'
 import { useInstanceStore } from '@/stores/instances'
 
-// Interfaces and interface zones of the selected instance, as select items,
+// Interfaces, interface zones and VRFs of the selected instance, as select items,
 // id -> name lookups and the names rules may list.
 export function useInstanceRefs() {
   const store = useInstanceStore()
   const ifaceZoneList = ref([])
   const ifaceList = ref([])
   const linkList = ref([])
+  const vrfList = ref([])
 
   async function load() {
     if (!store.currentId) return
     const params = { instance_id: store.currentId }
-    ;[ifaceZoneList.value, ifaceList.value, linkList.value] = await Promise.all([
+    ;[ifaceZoneList.value, ifaceList.value, linkList.value, vrfList.value] = await Promise.all([
       interfaceZones.list(params),
       interfaces.list(params),
       links.list(),
+      vrfs.list(params),
     ])
   }
   watch(() => store.currentId, load, { immediate: true })
@@ -83,6 +85,7 @@ export function useInstanceRefs() {
     store,
     ifaceZoneList,
     ifaceList,
+    vrfList,
     ifaceItems,
     ifaceName,
     ifaceText,

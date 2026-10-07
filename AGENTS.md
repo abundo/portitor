@@ -30,7 +30,7 @@ are in [README.md](README.md).
 | `internal/netobj` | Named hosts/prefixes (`address_objects`) and address lists (`address_lists`): name checks and expansion |
 | `internal/dbmigrate` | Opens the SQLite database; goose migrations (the schema's source of truth) |
 | `models` | GORM mapping |
-| `web` | Echo v5 server (`server.go`: routes): auth, generic CRUD (`crud.go`), entry validation (`resources.go`), deploy handlers (`handlers.go`), Revert snapshots (`revert.go`), tenancy (`tenancy.go`), roles (`roles.go`, `access.go`), rename/delete reference keeping (`objects.go`, `services.go`, `ratelimits.go`, `ifzones.go`, `bgp.go`, `ospf.go`, `vrrp.go`, `bfd.go`, `delegated.go`), folders for hosts and IP lists (`folders.go`, GUI only), agent proxies (`console.go`, `capture.go`, `trace.go`, `servicelog.go`, `connections.go`), WireGuard config import (`wgimport.go`), backup/restore (`backup.go`), `web.yaml` (`config.go`) |
+| `web` | Echo v5 server (`server.go`: routes): auth, generic CRUD (`crud.go`), entry validation (`resources.go`), deploy handlers (`handlers.go`), Revert snapshots (`revert.go`), tenancy (`tenancy.go`), roles (`roles.go`, `access.go`), VRFs (`vrf.go`), rename/delete reference keeping (`objects.go`, `services.go`, `ratelimits.go`, `ifzones.go`, `bgp.go`, `ospf.go`, `vrrp.go`, `bfd.go`, `delegated.go`), folders for hosts and IP lists (`folders.go`, GUI only), agent proxies (`console.go`, `capture.go`, `trace.go`, `servicelog.go`, `connections.go`), WireGuard config import (`wgimport.go`), backup/restore (`backup.go`), `web.yaml` (`config.go`) |
 | `web/frontend` | Vue SPA; `CrudPage.vue` drives most pages from field/column schemas |
 | `docs` | User guides; every `docs/*.md` is bundled into the GUI's Help page (`src/docs.js`), and links between them stay in the GUI |
 | `deploy` | systemd units and example configs |
@@ -313,19 +313,22 @@ the certificate portitor-web serves, chosen under Settings
   bridge port don't learn, the port has `neigh_suppress`, and the FDB is zebra's;
   `Remotes` then only filter the sources. L2VNIs only (no VRFs). The underlay
   follows a rename and is refused on delete (`web/ifzones.go`).
-- **VRFs** (`fwconfig/vrf.go`, Network → Interfaces, kind vrf): a `vrf` device
-  per interface (`VRFTable`, unique in the instance, below `NAT64TableBase`; the
-  namespace makes names and tables per instance), its `Members` enslaved as a
-  bridge's (an interface has at most one bridge or VRF). A route goes in the table
-  of its `VRF` or of its interface's VRF (`Instance.RouteTable`), and so does a
-  DHCP default route; the agent reads and plans the proto 99 routes of main and
-  each VRF table. In input and forward a member's packets have the VRF device as
-  `iifname`, so the renderer matches members by `meta sdifname`
-  (`iifMatches`; a mixed list becomes two rules); NAT keeps `iifname`
-  (prerouting's first pass). With a VRF, `tcp_l3mdev_accept`/`udp_l3mdev_accept`
-  let the firewall's services answer on members. Renaming or deleting an
-  interface rewrites bridge and VRF member lists (`memberLists`). FRR stays in the
-  default VRF.
+- **VRFs** (`fwconfig/vrf.go`, `web/vrf.go`, Routing → VRF) are per instance
+  (`vrfs`: name, `route_table`, unique in the instance; the namespace makes them
+  per instance), not interfaces: an interface is in one by name
+  (`interfaces.vrf`, `Interface.VRF`, "" is main; a rename rewrites it, a VRF in
+  use can't be deleted), a route by id (`routes.vrf_id`, `Route.VRF`). A VRF's
+  name is its device's, so it may not be an interface's, link end's or zone's.
+  `Document.Expand` makes each VRF a device (`KindVRF`, its interfaces as
+  `Members`, `VRFTable`), which the agent creates and enslaves to as a bridge's
+  (a bridge's member can't be in a VRF). A route goes in the table of its VRF or
+  of its interface's (`Instance.RouteTable`), and so does a DHCP default route;
+  the agent plans the proto 99 routes of main and each VRF table. In input and
+  forward an interface in a VRF has the VRF device as `iifname`, so the renderer
+  matches it by `meta sdifname` (`iifMatches`; a mixed list becomes two rules);
+  NAT keeps `iifname` (prerouting's first pass). With a VRF,
+  `tcp_l3mdev_accept`/`udp_l3mdev_accept` let the firewall's services answer on
+  them. FRR stays in the default VRF.
 - **Dual stack:** rule and NAT address lists may mix IPv4 and IPv6;
   `fwconfig.MatchFamilies` decides which versions a rule is rendered for, and
   validation uses the same function.

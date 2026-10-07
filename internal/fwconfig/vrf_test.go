@@ -8,37 +8,37 @@ import (
 	"testing"
 )
 
-// The sample's guest instance has VRF blue (table 100) with eth3.
+// The sample's guest instance has VRF blue (table 100) with eth3 in it.
 func TestValidateVRF(t *testing.T) {
 	// Another instance may have a VRF of the same name and table.
 	same := SampleDocument()
 	main := same.Instance("main")
-	main.Interfaces = append(main.Interfaces, Interface{Name: "blue", Kind: KindVRF, Enabled: true, IPv4Mode: ModeNone, VRFTable: 100})
+	main.VRFs = []VRF{{Name: "blue", Table: 100}}
 	main.Routes = append(main.Routes, Route{Destination: "10.9.0.0/16", Interface: "blue"}, Route{Destination: "10.8.0.0/16", Gateway: "192.168.1.9", VRF: "blue"})
 	if err := same.Validate(); err != nil {
 		t.Fatal(err)
 	}
 
-	vrf := func(in *Instance) *Interface { return in.Interface("blue") }
 	cases := []struct {
 		name   string
 		mutate func(in *Instance)
 		want   string
 	}{
-		{"table 0", func(in *Instance) { vrf(in).VRFTable = 0 }, "table 0 out of range"},
-		{"main table", func(in *Instance) { vrf(in).VRFTable = 254 }, "table 254 out of range"},
-		{"nat64 table", func(in *Instance) { vrf(in).VRFTable = NAT64TableBase }, "out of range"},
-		{"duplicate table", func(in *Instance) {
-			in.Interfaces = append(in.Interfaces, Interface{Name: "red", Kind: KindVRF, IPv4Mode: ModeNone, VRFTable: 100})
-		}, "table 100 is also blue's"},
-		{"two masters", func(in *Instance) { vrf(in).Members = append(vrf(in).Members, "vx200") }, "member of both br200 and blue"},
-		{"vrf in vrf", func(in *Instance) {
-			in.Interfaces = append(in.Interfaces, Interface{Name: "red", Kind: KindVRF, IPv4Mode: ModeNone, VRFTable: 101, Members: []string{"blue"}})
-		}, `member "blue" is a vrf`},
-		{"own member", func(in *Instance) { vrf(in).Members = []string{"blue"} }, "its own member"},
-		{"unknown member", func(in *Instance) { vrf(in).Members = []string{"eth9"} }, `member "eth9" is not in this instance`},
-		{"dhcp", func(in *Instance) { vrf(in).IPv4Mode = ModeDHCP }, "no dhcp client"},
-		{"route to no vrf", func(in *Instance) { in.Routes = append(in.Routes, Route{Destination: "default", Gateway: "10.0.0.1", VRF: "eth2"}) }, `vrf "eth2" is not a vrf`},
+		{"table 0", func(in *Instance) { in.VRFs[0].Table = 0 }, "table 0 out of range"},
+		{"main table", func(in *Instance) { in.VRFs[0].Table = 254 }, "table 254 out of range"},
+		{"nat64 table", func(in *Instance) { in.VRFs[0].Table = NAT64TableBase }, "out of range"},
+		{"duplicate table", func(in *Instance) { in.VRFs = append(in.VRFs, VRF{Name: "red", Table: 100}) }, "table 100 is also blue's"},
+		{"duplicate name", func(in *Instance) { in.VRFs = append(in.VRFs, VRF{Name: "blue", Table: 101}) }, "duplicate"},
+		{"interface's name", func(in *Instance) { in.VRFs[0].Name = "eth2"; in.Interface("eth3").VRF = "eth2" }, "an interface has the same name"},
+		{"bad name", func(in *Instance) { in.VRFs[0].Name = "a b"; in.Interface("eth3").VRF = "a b" }, "invalid"},
+		{"unknown vrf", func(in *Instance) { in.Interface("eth2").VRF = "red" }, `vrf "red" is not a vrf`},
+		{"bridge member", func(in *Instance) { in.Interface("vx200").VRF = "blue" }, "member of bridge br200"},
+		{"vrf device given", func(in *Instance) {
+			in.Interfaces = append(in.Interfaces, Interface{Name: "red", Kind: KindVRF, IPv4Mode: ModeNone, VRFTable: 7})
+		}, "a vrf device without a vrf"},
+		{"route to no vrf", func(in *Instance) {
+			in.Routes = append(in.Routes, Route{Destination: "default", Gateway: "10.0.0.1", VRF: "eth2"})
+		}, `vrf "eth2" is not a vrf`},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -52,9 +52,13 @@ func TestValidateVRF(t *testing.T) {
 	}
 }
 
-func TestRouteTable(t *testing.T) {
-	d := SampleDocument()
+func TestExpandVRF(t *testing.T) {
+	d := SampleDocument().Expand()
 	in := d.Instance("guest")
+	dev := in.Interface("blue")
+	if dev == nil || dev.Kind != KindVRF || dev.VRFTable != 100 || len(dev.Members) != 1 || dev.Members[0] != "eth3" {
+		t.Fatalf("vrf device: %+v", dev)
+	}
 	for _, c := range []struct {
 		r    Route
 		want string

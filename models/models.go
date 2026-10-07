@@ -462,8 +462,8 @@ type Interface struct {
 	VxlanDevice  string     `json:"vxlan_device"`
 	VxlanPort    int        `json:"vxlan_port"`
 	VxlanRemotes StringList `json:"vxlan_remotes"`
-	// VrfTable is a VRF's routing table (kind vrf; fwconfig.Interface.VRFTable).
-	VrfTable int `json:"vrf_table"`
+	// Vrf is the name of the VRF the interface is in; "" is main.
+	Vrf string `json:"vrf"`
 }
 
 type WgPeer struct {
@@ -506,7 +506,7 @@ type Route struct {
 	Gateway     string `json:"gateway"`
 	InterfaceID *uint  `json:"interface_id"`
 	Metric      int    `json:"metric"`
-	// VrfID puts the route in that VRF interface's table (fwconfig.Route.VRF).
+	// VrfID puts the route in that VRF's table (fwconfig.Route.VRF).
 	VrfID *uint `json:"vrf_id"`
 	// Bfd: withdrawn while the BFD session to the gateway is down, when
 	// the gateway's interface has BFD (fwconfig.Route.BFD).
@@ -918,7 +918,7 @@ func All() []any {
 		&DyndnsClient{}, &DyndnsRecord{}, &Certificate{}, &IpList{}, &Task{}, &Service{}, &RateLimit{}, &ObjectFolder{}, &Role{}, &RoleMember{}, &RoleInstance{},
 		&RoutePrefixList{}, &RouteAsPathList{}, &RouteCommunityList{}, &RouteMap{}, &BgpConfig{}, &BgpPeerGroup{}, &BgpNeighbor{},
 		&OspfConfig{}, &OspfInterface{}, &VrrpRouter{}, &BfdInterface{}, &AddressList{},
-		&SnmpUser{},
+		&SnmpUser{}, &Vrf{},
 	}
 }
 
