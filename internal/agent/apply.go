@@ -150,9 +150,6 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 		}
 		// Whether an interface may join or leave a VRF (below).
 		vrfs := in.HasVRF() || slices.ContainsFunc(slices.Collect(maps.Values(links)), func(l ipLink) bool { return l.kind() == "vrf" })
-		if err := a.doAll(ctx, planCreate(ns, in.Interfaces, links)); err != nil {
-			return err
-		}
 
 		// Shaping that is no longer wanted goes first: an IFB device
 		// below must not be removed while traffic is redirected to it.
@@ -201,6 +198,12 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 					return err
 				}
 			}
+		}
+
+		// Created after the stale ones are gone: a renamed VLAN or VXLAN
+		// would otherwise clash with its old device (same parent and id).
+		if err := a.doAll(ctx, planCreate(ns, in.Interfaces, links)); err != nil {
+			return err
 		}
 
 		for _, ifc := range in.Interfaces {
