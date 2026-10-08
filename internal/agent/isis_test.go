@@ -59,3 +59,26 @@ func TestISISInstance(t *testing.T) {
 		t.Error("no error")
 	}
 }
+
+// FRR 10.3: an array of areas, levels as keys, nextHop in camelCase.
+func TestParseISISRoutesFRR10(t *testing.T) {
+	data := []byte(`[{"area":"portitor","algorithm":0,"level-1":{"area":"portitor"},
+"level-2":{"area":"portitor",
+ "ipv4-paths":[{"vertex":"10.0.1.0/24","type":"IP TE","metric":20,"nextHop":"fwdev","interface":"main-isis-test","parent":"fwdev(4)"}],
+ "ipv4":[
+  {"prefix":"10.0.0.0/24","metric":0,"interface":"-","nextHop":"-","label(s)":"-"},
+  {"prefix":"10.0.1.0/24","metric":20,"interface":"main-isis-test","nextHop":"10.0.1.2","label(s)":"-"}]},
+"vrf_id":0}]`)
+	got := parseISISRoutes(data)
+	if len(got) != 2 {
+		t.Fatalf("got %d routes, want 2: %+v", len(got), got)
+	}
+	r := got[1]
+	if r.Prefix != "10.0.1.0/24" || r.Level != "L2" || r.Metric == nil || *r.Metric != 20 ||
+		len(r.NextHops) != 1 || r.NextHops[0] != "10.0.1.2" || len(r.Interface) != 1 || r.Interface[0] != "main-isis-test" {
+		t.Errorf("route = %+v", r)
+	}
+	if got[0].NextHops[0] != "directly attached" {
+		t.Errorf("connected route = %+v", got[0])
+	}
+}

@@ -5,6 +5,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/netip"
 	"sort"
@@ -180,10 +181,13 @@ func parseISISInterfaces(data []byte) []agentapi.ISISInterfaceInfo {
 // parseISISRoutes reads `show isis route json`: rows of FRR's tables
 // (Prefix, Metric, Interface, Nexthop) under the levels of each area. A
 // route with several next hops has rows without a prefix after its first.
+// FRR 10 answers with an array of areas, each with "level-1" and "level-2"
+// objects holding "ipv4"/"ipv6" rows (prefix, metric, interface, nextHop);
+// the "*-paths" rows (SPF vertices) have no prefix and are skipped.
 func parseISISRoutes(data []byte) []agentapi.ISISRoute {
-	root, err := parseJSONObj(data)
+	var root any
 	out := []agentapi.ISISRoute{}
-	if err != nil {
+	if err := json.Unmarshal(data, &root); err != nil {
 		return out
 	}
 	var walk func(v any, level string)
@@ -200,7 +204,7 @@ func parseISISRoutes(data []byte) []agentapi.ISISRoute {
 			}
 			if _, isRow := v["Prefix"]; isRow || v["prefix"] != nil {
 				prefix := x.str("Prefix", "prefix")
-				nh := x.str("Nexthop", "nexthop", "Next-Hop")
+				nh := x.str("Nexthop", "nexthop", "nextHop", "Next-Hop")
 				ifc := x.str("Interface", "interface")
 				if prefix == "" {
 					// Another next hop of the route above.
@@ -232,11 +236,18 @@ func parseISISRoutes(data []byte) []agentapi.ISISRoute {
 			}
 			sort.Strings(keys)
 			for _, k := range keys {
-				walk(v[k], level)
+				l := level
+				switch k {
+				case "level-1":
+					l = "L1"
+				case "level-2":
+					l = "L2"
+				}
+				walk(v[k], l)
 			}
 		}
 	}
-	walk(map[string]any(root), "")
+	walk(root, "")
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].Prefix != out[j].Prefix {
 			return out[i].Prefix < out[j].Prefix
