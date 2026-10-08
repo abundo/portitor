@@ -7,6 +7,10 @@
     iso/qga.py SOCKET CMD...
 
 prints its output and exits with its status (255: no guest agent).
+
+    iso/qga.py SOCKET --put LOCAL REMOTE
+
+copies the file LOCAL to REMOTE in the guest (exit 255 on failure).
 """
 
 import base64
@@ -34,6 +38,15 @@ try:
 
     # Drop replies left on the socket by an earlier, timed out client.
     call("guest-sync", id=4711)
+    if cmd[0] == "--put":
+        local, remote = cmd[1], cmd[2]
+        s.settimeout(60)
+        h = call("guest-file-open", path=remote, mode="wb")
+        with open(local, "rb") as src:
+            while chunk := src.read(1 << 18):
+                call("guest-file-write", handle=h, **{"buf-b64": base64.b64encode(chunk).decode()})
+        call("guest-file-close", handle=h)
+        sys.exit(0)
     pid = call("guest-exec", path=cmd[0], arg=cmd[1:], **{"capture-output": True})["pid"]
     while not (st := call("guest-exec-status", pid=pid))["exited"]:
         time.sleep(0.5)

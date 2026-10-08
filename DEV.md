@@ -201,6 +201,15 @@ datagram link between their second NICs). portitor-web joins the firewall with t
 join string of `portitor-setup --show-join`, then the checks run in both VMs,
 including the GUI login and the agent's status from the web VM.
 
+`make iso-e2e-update` (`iso/test-update.sh`, `FROM=vX.Y.Z`, default the latest
+GitHub release) tests an update to this tree in `build/vm-update` (GUI on port
+28444): it installs a test ISO of the old release, runs the update page's check and
+a deploy through the API, copies this tree's release archive in (`iso/qga.py
+--put`) and installs it with its `install.py --local` in a transient unit, then
+checks both versions, the units, that the interfaces survived the migrations, the
+check (installed version) and a deploy again. The GUI's own update job installs
+GitHub releases only, so it can't install this tree.
+
 Log in to the GUI as `admin` / `portitor-test`. Without `VM_SERIAL` the serial
 console is on stdio; after the first boot you can log in there as `portitor`.
 `VM_UEFI=1` boots with OVMF.

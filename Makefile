@@ -17,7 +17,7 @@ GORELEASER ?= $(or $(shell command -v goreleaser),$(shell go env GOPATH)/bin/gor
 
 .PHONY: build portitor-web portitor-agent frontend release test lint fmt \
 	install-agent install-web dev-agent dev-web dev-seed \
-	lab-up lab-install lab-seed lab-deploy lab-down lab-clean iso iso-test iso-e2e iso-e2e-split test-all release-check clean
+	lab-up lab-install lab-seed lab-deploy lab-down lab-clean iso iso-test iso-e2e iso-e2e-split iso-e2e-update test-all release-check clean
 
 build: portitor-web portitor-agent
 
@@ -85,11 +85,11 @@ lab-up lab-install lab-seed lab-deploy lab-down:
 	dev/lab/lab.sh $(@:lab-%=%)
 
 # Removes the lab's containers, networks and images, stops iso/vm.sh's virtual
-# machines (KEEP=1 of iso-e2e and iso-e2e-split leaves them running) and
+# machines (KEEP=1 of the iso-e2e tests leaves them running) and
 # deletes the build directory with their disks.
 lab-clean:
 	dev/lab/lab.sh clean
-	pkill -f '^qemu-system-x86_64 .*$(BUILD_DIR)/vm(-fw|-web)?/disk\.qcow2' || true
+	pkill -f '^qemu-system-x86_64 .*$(BUILD_DIR)/vm(-fw|-web|-update)?/disk\.qcow2' || true
 	rm -rf $(BUILD_DIR)
 
 # ----- installer ISO from this tree (see DEV.md); build.sh runs make release -----
@@ -111,6 +111,13 @@ iso-e2e:
 # 7 minutes). KEEP=1 leaves both running.
 iso-e2e-split:
 	iso/test-split.sh
+
+# An update from the latest GitHub release (FROM=vX.Y.Z for another) to this
+# tree: installs the old release's ISO, checks and deploys, updates with this
+# tree's install.py --local, then checks and deploys again. KEEP=1 leaves the
+# virtual machine running.
+iso-e2e-update:
+	iso/test-update.sh $(FROM)
 
 # Every test there is, unattended, before tagging: about 20 minutes (the lab
 # and both ISO tests); stops at the first failure. Needs no tag or CHANGELOG
