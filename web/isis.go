@@ -27,6 +27,19 @@ func prepareIsisConfig(tx *gorm.DB, c, old *models.IsisConfig) error {
 		return err
 	}
 	c.Net, _ = fwconfig.ParseISISNet(c.Net)
+	var oldArea, oldDomain string
+	if old != nil {
+		oldArea, oldDomain = old.AreaPassword, old.DomainPassword
+	}
+	c.AreaPassword = newSecret(c.NewAreaPassword, c.ClearAreaPassword, oldArea)
+	c.DomainPassword = newSecret(c.NewDomainPassword, c.ClearDomainPassword, oldDomain)
+	c.NewAreaPassword, c.ClearAreaPassword, c.NewDomainPassword, c.ClearDomainPassword = "", false, "", false
+	if c.AreaPasswordType == "" {
+		c.AreaPasswordType = fwconfig.ISISAuthMD5
+	}
+	if c.DomainPasswordType == "" {
+		c.DomainPasswordType = fwconfig.ISISAuthMD5
+	}
 	if c.Enabled && c.Net == "" {
 		return bad("a NET is required (49.0001.1921.6800.1001.00: area, system id, 00)")
 	}
@@ -44,6 +57,8 @@ func prepareIsisConfig(tx *gorm.DB, c, old *models.IsisConfig) error {
 	}
 	s := &fwconfig.ISIS{
 		NET: c.Net, Level: c.Level, MetricStyle: c.MetricStyle, IPv6Topology: c.IPv6Topology,
+		AreaPassword: c.AreaPassword, AreaPasswordType: c.AreaPasswordType,
+		DomainPassword: c.DomainPassword, DomainPasswordType: c.DomainPasswordType,
 		DefaultOriginate: c.DefaultOriginate, Redistribute: c.Redistribute,
 	}
 	if s.NET == "" {
@@ -90,6 +105,15 @@ func prepareIsisInterface(tx *gorm.DB, i, old *models.IsisInterface) error {
 	if !names[i.Name] {
 		return bad(fmt.Sprintf("%q is not an interface of this virtual firewall", i.Name))
 	}
+	var oldPassword string
+	if old != nil {
+		oldPassword = old.Password
+	}
+	i.Password = newSecret(i.NewPassword, i.ClearPassword, oldPassword)
+	i.NewPassword, i.ClearPassword = "", false
+	if i.PasswordType == "" {
+		i.PasswordType = fwconfig.ISISAuthMD5
+	}
 	var ifc models.Interface
 	if tx.Where("instance_id = ? AND name = ?", i.InstanceID, i.Name).First(&ifc).Error == nil && fwconfig.ISISLayer3(ifc.Kind) && !i.Passive {
 		return bad(fmt.Sprintf("%s is a %s interface, which carries no IS-IS (IS-IS is not IP); it can only be passive, to announce its networks", i.Name, ifc.Kind))
@@ -97,6 +121,28 @@ func prepareIsisInterface(tx *gorm.DB, i, old *models.IsisInterface) error {
 	var cfg models.IsisConfig
 	tx.Where("instance_id = ?", i.InstanceID).First(&cfg)
 	return problems(fwconfig.CheckISISInterface(i.Interface(), cfg.MetricStyle))
+}
+
+// newSecret is a write-only secret after a save: the new value, none
+// when cleared, or else the stored one.
+func newSecret(value string, clear bool, stored string) string {
+	switch {
+	case clear:
+		return ""
+	case value != "":
+		return value
+	}
+	return stored
+}
+
+func presentIsisConfig(c *models.IsisConfig) {
+	c.HasAreaPassword, c.HasDomainPassword = c.AreaPassword != "", c.DomainPassword != ""
+	c.NewAreaPassword, c.ClearAreaPassword, c.NewDomainPassword, c.ClearDomainPassword = "", false, "", false
+}
+
+func presentIsisInterface(i *models.IsisInterface) {
+	i.HasPassword = i.Password != ""
+	i.NewPassword, i.ClearPassword = "", false
 }
 
 // isisIfaceUsers lists IS-IS when it runs on the interface named name.

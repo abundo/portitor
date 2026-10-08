@@ -274,6 +274,8 @@ func prepareBgpConfig(tx *gorm.DB, c, old *models.BgpConfig) error {
 		{"redistribute static (IPv6)", c.RedistStaticV6, &c.RedistStaticV6Map},
 		{"redistribute OSPF (IPv4)", c.RedistOspfV4, &c.RedistOspfV4Map},
 		{"redistribute OSPF (IPv6)", c.RedistOspfV6, &c.RedistOspfV6Map},
+		{"redistribute IS-IS (IPv4)", c.RedistIsisV4, &c.RedistIsisV4Map},
+		{"redistribute IS-IS (IPv6)", c.RedistIsisV6, &c.RedistIsisV6Map},
 	} {
 		if !r.on {
 			*r.value = ""
@@ -514,13 +516,13 @@ func eachRoutingRef(tx *gorm.DB, instanceID uint, visit func(kind, where string,
 				changed = true
 			}
 		}
-		for _, r := range []*string{&c.RedistConnectedV4Map, &c.RedistStaticV4Map, &c.RedistConnectedV6Map, &c.RedistStaticV6Map, &c.RedistOspfV4Map, &c.RedistOspfV6Map} {
+		for _, r := range []*string{&c.RedistConnectedV4Map, &c.RedistStaticV4Map, &c.RedistConnectedV6Map, &c.RedistStaticV6Map, &c.RedistOspfV4Map, &c.RedistOspfV6Map, &c.RedistIsisV4Map, &c.RedistIsisV6Map} {
 			if *r != "" && visit(refRouteMap, "BGP redistribute", r) {
 				changed = true
 			}
 		}
 		if changed {
-			if err := tx.Model(&models.BgpConfig{}).Where("id = ?", c.ID).Select("networks", "redist_connected_v4_map", "redist_static_v4_map", "redist_connected_v6_map", "redist_static_v6_map", "redist_ospf_v4_map", "redist_ospf_v6_map").Updates(&c).Error; err != nil {
+			if err := tx.Model(&models.BgpConfig{}).Where("id = ?", c.ID).Select("networks", "redist_connected_v4_map", "redist_static_v4_map", "redist_connected_v6_map", "redist_static_v6_map", "redist_ospf_v4_map", "redist_ospf_v6_map", "redist_isis_v4_map", "redist_isis_v6_map").Updates(&c).Error; err != nil {
 				return err
 			}
 		}

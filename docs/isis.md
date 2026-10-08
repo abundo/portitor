@@ -44,6 +44,8 @@ VXLANs and the link ends between virtual firewalls all work.
 | IPv6 topology | Multi-topology (RFC 5120): IPv6 gets a topology of its own, so a link may run IPv4 or IPv6 alone. Every router of the area must agree; needs wide metrics. |
 | Log adjacency changes | Logs neighbours coming and going. |
 | Overload | Sets the overload bit: the other routers stop routing through this one, for maintenance. |
+| Area password | Authenticates the level-1 link-state packets (LSPs and SNPs), clear text or HMAC-MD5. The same on every router of the area. |
+| Domain password | The same for level 2, on every level-2 router. |
 | Default originate | Announces a default route (IPv4 or IPv6) into level 1 or 2, while the routing table has one, or with *Always* in any case; optionally with a metric and a route map. |
 | Redistribute | Connected networks, static routes (*Static*), BGP's or OSPF's routes (OSPFv2's into IPv4, OSPFv3's into IPv6), each into level 1 or 2, with an optional metric and route map. |
 
@@ -60,6 +62,11 @@ between virtual firewalls included:
 | Hello interval / multiplier | Seconds between hellos (3), and how many may be missed before a neighbour is taken as gone (10). |
 | Priority | In the election of the DIS on a LAN (64). |
 | BFD | Detects a lost neighbour with [BFD](bfd.md), when the interface has it. |
+| Hello password | Authenticates the hellos on the interface, clear text or HMAC-MD5; the neighbour needs the same. |
+
+Passwords are never shown again once saved: leave the field empty to keep one,
+*Remove* to take it away. In the committed configuration's preview and the
+deployment history they read `<redacted>`.
 
 Renaming an interface renames it here; an interface IS-IS uses can't be deleted. A
 route map IS-IS uses can't be deleted either, and renaming it rewrites IS-IS's
@@ -75,8 +82,12 @@ the other protocols' sessions); other changes are reloaded with `frr-reload.py`.
 *Static* in *Redistribute* means the static routes Portitor installs: FRR's
 `redistribute kernel`.
 
-Authentication (area and domain passwords, hello authentication) is not
-configurable yet.
+## With BGP and OSPF
+
+BGP's *Redistribute* has *IPv4 IS-IS* and *IPv6 IS-IS*, and OSPF's has *IS-IS*
+(IPv4 routes into OSPFv2, IPv6 into OSPFv3). IS-IS's own *Redistribute* has *BGP*
+and *OSPF*. Redistributing both ways on more than one router can loop routes;
+filter them with route maps.
 
 On the firewall, as root, `vtysh` (`vtysh -N <name>` for a virtual firewall) shows
 everything FRR has: `show isis neighbor`, `show isis interface`, `show isis

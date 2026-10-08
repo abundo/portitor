@@ -114,6 +114,7 @@ const sources = [
     hint: 'The static routes (Network > Routing > Static).',
   },
   { source: 'bgp', label: 'BGP', hint: "BGP's routes (Network > Routing > BGP)." },
+  { source: 'isis', label: 'IS-IS', hint: "IS-IS's routes (Routing > IS-IS)." },
 ]
 const redist = (source) => cfg.redistribute?.find((r) => r.source === source)
 function setRedist(source, on) {

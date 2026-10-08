@@ -27,7 +27,7 @@ func TestFRRConf(t *testing.T) {
 		" neighbor 2001:db8::1 remote-as 65001\n neighbor 2001:db8::1 ebgp-multihop 2\n neighbor 2001:db8::1 update-source eth2\n",
 		" address-family ipv4 unicast\n  network 192.168.50.0/24\n  aggregate-address 192.168.0.0/16 summary-only\n  redistribute connected route-map connected\n",
 		"  neighbor upstream activate\n  neighbor upstream soft-reconfiguration inbound\n  neighbor upstream prefix-list ours out\n  neighbor upstream route-map from-upstream in\n",
-		" address-family ipv6 unicast\n  neighbor 2001:db8::1 activate\n  neighbor 2001:db8::1 next-hop-self\n  neighbor 2001:db8::1 remove-private-AS\n exit-address-family\n",
+		" address-family ipv6 unicast\n  redistribute isis\n  neighbor 2001:db8::1 activate\n  neighbor 2001:db8::1 next-hop-self\n  neighbor 2001:db8::1 remove-private-AS\n exit-address-family\n",
 	} {
 		if !strings.Contains(conf, want) {
 			t.Errorf("frr.conf lacks %q:\n%s", want, conf)
@@ -248,14 +248,16 @@ func TestFRROSPF(t *testing.T) {
 		// One interface block holds both versions.
 		"interface lk-main\n ip ospf area 0.0.0.0\n ip ospf hello-interval 5\n ip ospf dead-interval 20\n ip ospf network point-to-point\n" +
 			" ip ospf authentication message-digest\n ip ospf message-digest-key 1 md5 k3y\n ipv6 ospf6 area 0.0.0.0\n" +
-			" ip router isis portitor\n ipv6 router isis portitor\n isis network point-to-point\n isis hello-interval 1\n isis hello-multiplier 5\nexit\n",
+			" ip router isis portitor\n ipv6 router isis portitor\n isis network point-to-point\n isis hello-interval 1\n isis hello-multiplier 5\n isis password md5 h3llo\nexit\n",
 		"interface eth2\n ip ospf area 0.0.0.1\n ip ospf cost 100\n ip ospf priority 0\n ip ospf passive\n ip router isis portitor\n isis circuit-type level-2-only\n isis passive\n isis metric 100\n isis priority 100\n vrrp 50\n",
 		"router ospf\n ospf router-id 10.255.0.2\n log-adjacency-changes\n auto-cost reference-bandwidth 10000\n" +
 			" area 0.0.0.1 stub no-summary\n area 0.0.0.1 range 192.168.50.0/23 cost 10\n summary-address 172.16.0.0/12\n" +
 			" redistribute kernel metric 50 metric-type 1 route-map connected\n redistribute bgp\n default-information originate\nexit\n",
-		"router ospf6\n ospf6 router-id 10.255.0.2\n redistribute connected\nexit\n",
+		"router ospf6\n ospf6 router-id 10.255.0.2\n redistribute connected\n redistribute isis\nexit\n",
 		// BGP redistributes OSPF.
 		"  redistribute ospf\n",
+		// and IS-IS.
+		"  redistribute isis\n",
 	} {
 		if !strings.Contains(conf, want) {
 			t.Errorf("frr.conf lacks %q:\n%s", want, conf)
@@ -436,7 +438,7 @@ func TestFRRISIS(t *testing.T) {
 	b := sampleBundle(t)
 	conf := mustFile(t, b, "/etc/portitor/instances/guest/frr/frr.conf")
 	want := "router isis portitor\n net 49.0001.0102.5500.0002.00\n is-type level-2-only\n metric-style wide\n log-adjacency-changes\n" +
-		" topology ipv6-unicast\n default-information originate ipv4 level-2 always\n" +
+		" topology ipv6-unicast\n area-password md5 ar3a\n domain-password clear d0main\n default-information originate ipv4 level-2 always\n" +
 		" redistribute ipv4 kernel level-2 metric 20 route-map connected\n redistribute ipv6 ospf6 level-2\nexit\n"
 	if !strings.Contains(conf, want) {
 		t.Errorf("frr.conf lacks %q:\n%s", want, conf)
@@ -444,12 +446,27 @@ func TestFRRISIS(t *testing.T) {
 	if d := mustFile(t, b, "/etc/portitor/instances/guest/frr/daemons"); !strings.Contains(d, "isisd=yes\n") || !strings.Contains(d, "isisd_options=") {
 		t.Errorf("daemons:\n%s", d)
 	}
+	for _, r := range b.Redacted() {
+		if r.Path == "/etc/portitor/instances/guest/frr/frr.conf" {
+			for _, want := range []string{" area-password md5 <redacted>\n", " domain-password clear <redacted>\n", " isis password md5 <redacted>\n"} {
+				if !strings.Contains(r.Content, want) {
+					t.Errorf("redacted lacks %q", want)
+				}
+			}
+			for _, pw := range []string{"ar3a", "d0main", "h3llo"} {
+				if strings.Contains(r.Content, pw) {
+					t.Errorf("%s not redacted", pw)
+				}
+			}
+		}
+	}
 
 	// IS-IS alone runs FRR; BFD on an interface with BFD.
 	doc := fwconfig.SampleDocument()
 	in := doc.Instance("guest")
 	in.BGP, in.OSPF, in.OSPF6, in.VRRP = nil, nil, nil, nil
 	in.ISIS.Interfaces[0].BFD = true
+	in.ISIS.AreaPassword, in.ISIS.DomainPassword, in.ISIS.Interfaces[0].Password = "", "", ""
 	in.BFD = []fwconfig.BFDInterface{{Name: "lk-main"}}
 	b, err := Render(doc, Options{Paths: DefaultPaths(), Units: DefaultUnits()})
 	if err != nil {
@@ -458,6 +475,9 @@ func TestFRRISIS(t *testing.T) {
 	conf = mustFile(t, b, "/etc/portitor/instances/guest/frr/frr.conf")
 	if !strings.Contains(conf, " isis bfd\n isis bfd profile if-lk-main\n") || strings.Contains(conf, "router ospf") {
 		t.Errorf("frr.conf:\n%s", conf)
+	}
+	if f := b.File("/etc/portitor/instances/guest/frr/frr.conf"); f.Secret {
+		t.Error("frr.conf secret without passwords")
 	}
 	if d := mustFile(t, b, "/etc/portitor/instances/guest/frr/daemons"); !strings.Contains(d, "bgpd=no\nospfd=no\nospf6d=no\nisisd=yes\n") {
 		t.Errorf("daemons:\n%s", d)

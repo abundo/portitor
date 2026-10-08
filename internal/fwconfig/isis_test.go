@@ -14,6 +14,9 @@ func TestValidateISIS(t *testing.T) {
 		mutate func(s *ISIS)
 		want   string
 	}{
+		{"area password space", func(s *ISIS) { s.AreaPassword = "two words" }, "area password: 1-64"},
+		{"domain password type", func(s *ISIS) { s.DomainPassword, s.DomainPasswordType = "x", "sha1" }, "domain password type must be"},
+		{"hello password long", func(s *ISIS) { s.Interfaces[0].Password = strings.Repeat("p", 65) }, "password: 1-64"},
 		{"bad net", func(s *ISIS) { s.NET = "49.0001.0102.5500.0002" }, "NET"},
 		{"net upper case", func(s *ISIS) { s.NET = "49.000A.0102.5500.0002.00" }, "NET"},
 		{"net nsel", func(s *ISIS) { s.NET = "49.0001.0102.5500.0002.01" }, "NET"},

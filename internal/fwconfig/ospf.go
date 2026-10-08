@@ -41,7 +41,8 @@ type OSPF struct {
 	Networks   []OSPFNetwork   `json:"networks,omitempty"`
 	Interfaces []OSPFInterface `json:"interfaces,omitempty"`
 	// Redistribute announces connected networks, the static routes (the
-	// kernel routes the agent installs) or BGP's routes as external.
+	// kernel routes the agent installs), BGP's or IS-IS's routes as
+	// external.
 	Redistribute []OSPFRedistribute `json:"redistribute,omitempty"`
 }
 
@@ -127,7 +128,7 @@ type OSPFRedistribute struct {
 }
 
 // OSPFRedistSources are what OSPF redistributes.
-var OSPFRedistSources = []string{RedistConnected, RedistStatic, RedistBGP}
+var OSPFRedistSources = []string{RedistConnected, RedistStatic, RedistBGP, RedistISIS}
 
 // ospfAuthKeyRe: printable, no spaces; MD5 keys are up to 16 characters.
 var ospfAuthKeyRe = regexp.MustCompile(`^[!-~]{1,16}$`)
@@ -320,9 +321,9 @@ func (v *validator) ospf(p string, o *OSPF, version int, refs *policyRefs, iface
 	for _, r := range o.Redistribute {
 		rp := fmt.Sprintf("%s: redistribute %s", p, r.Source)
 		switch r.Source {
-		case RedistConnected, RedistStatic, RedistBGP:
+		case RedistConnected, RedistStatic, RedistBGP, RedistISIS:
 		default:
-			v.addf("%s: source must be connected, static or bgp", rp)
+			v.addf("%s: source must be connected, static, bgp or isis", rp)
 		}
 		if redist[r.Source] {
 			v.addf("%s: listed twice", rp)

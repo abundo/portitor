@@ -39,7 +39,7 @@ func TestValidateOSPF(t *testing.T) {
 		{"networks with interface areas", func(in *Instance) {
 			in.OSPF.Networks = []OSPFNetwork{{Prefix: "10.255.0.0/30", Area: "0.0.0.0"}}
 		}, "can't be used together"},
-		{"bad redistribute source", func(in *Instance) { in.OSPF.Redistribute[1].Source = "rip" }, "source must be connected, static or bgp"},
+		{"bad redistribute source", func(in *Instance) { in.OSPF.Redistribute[1].Source = "rip" }, "source must be connected, static, bgp or isis"},
 		{"redistribute twice", func(in *Instance) { in.OSPF.Redistribute[1].Source = RedistStatic }, "listed twice"},
 		{"bad metric type", func(in *Instance) { in.OSPF.Redistribute[0].MetricType = 3 }, "metric type must be 1 or 2"},
 		{"unknown route map", func(in *Instance) { in.OSPF.Redistribute[0].RouteMap = "nope" }, `unknown route map "nope"`},

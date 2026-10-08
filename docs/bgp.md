@@ -50,7 +50,7 @@ shut down gets none.
 | Graceful restart, Multipath relax, Maximum paths | Restart without dropping routes; load sharing over paths through different ASes, over at most this many paths. |
 | Networks | Prefixes announced while the routing table has them (a connected network, a static route), each with an optional route map. |
 | Aggregate addresses | A shorter prefix announced while a more specific route is in the BGP table. *Summary only* leaves the more specific ones out; *AS set* keeps their ASes in the path. |
-| Redistribute | For IPv4 and IPv6: connected networks (the interfaces' prefixes), static routes (*Static routes*) and OSPF's routes (OSPFv2's into IPv4, OSPFv3's into IPv6; see [OSPF](ospf.md)), each with an optional route map that filters or changes them. |
+| Redistribute | For IPv4 and IPv6: connected networks (the interfaces' prefixes), static routes (*Static routes*), OSPF's routes (OSPFv2's into IPv4, OSPFv3's into IPv6; see [OSPF](ospf.md)) and IS-IS's routes ([IS-IS](isis.md)), each with an optional route map that filters or changes them. |
 | EVPN | Advertise the VNIs of the VXLAN interfaces and the MAC addresses behind them in the L2VPN EVPN address family, to the neighbours that activate it; see [VXLAN and EVPN](vxlan.md). |
 
 **Peer groups** are settings shared by several neighbours. A neighbour in a group

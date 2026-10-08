@@ -31,6 +31,13 @@ type ISIS struct {
 	// Overload (the overload bit) keeps the other routers from routing
 	// through this one.
 	Overload bool `json:"overload,omitempty"`
+	// AreaPassword authenticates the level-1 LSPs and SNPs, DomainPassword
+	// the level-2 ones; each of type ISISAuthClear or ISISAuthMD5 ("" is
+	// MD5). Empty: no authentication.
+	AreaPassword       string `json:"area_password,omitempty"`
+	AreaPasswordType   string `json:"area_password_type,omitempty"`
+	DomainPassword     string `json:"domain_password,omitempty"`
+	DomainPasswordType string `json:"domain_password_type,omitempty"`
 	// DefaultOriginate announces a default route into a level.
 	DefaultOriginate []ISISDefault      `json:"default_originate,omitempty"`
 	Redistribute     []ISISRedistribute `json:"redistribute,omitempty"`
@@ -101,6 +108,38 @@ type ISISInterface struct {
 	// BFD watches the neighbours on the interface with BFD, when the
 	// interface has it.
 	BFD bool `json:"bfd,omitempty"`
+	// Password authenticates the hellos on the interface (PasswordType as
+	// ISIS.AreaPasswordType).
+	Password     string `json:"password,omitempty"`
+	PasswordType string `json:"password_type,omitempty"`
+}
+
+// IS-IS password types.
+const (
+	ISISAuthClear = "clear"
+	ISISAuthMD5   = "md5"
+)
+
+// isisPasswordRe: printable, no spaces, as FRR takes a word.
+var isisPasswordRe = regexp.MustCompile(`^[!-~]{1,64}$`)
+
+func (v *validator) isisPassword(p, what, pw, typ string) {
+	switch typ {
+	case "", ISISAuthClear, ISISAuthMD5:
+	default:
+		v.addf("%s: %s type must be clear or md5", p, what)
+	}
+	if pw != "" && !isisPasswordRe.MatchString(pw) {
+		v.addf("%s: %s: 1-64 printable characters, no spaces", p, what)
+	}
+}
+
+// ISISAuthType is FRR's keyword of a password type ("" is md5).
+func ISISAuthType(t string) string {
+	if t == "" {
+		return ISISAuthMD5
+	}
+	return t
 }
 
 // isisNetRe: an AFI byte, 0-12 more area bytes in groups of two, a 6-byte
@@ -178,6 +217,7 @@ func (v *validator) isisInterface(p string, ifc ISISInterface, style string, ifa
 	if ifc.Priority != nil && (*ifc.Priority < 0 || *ifc.Priority > 127) {
 		v.addf("%s: priority out of range (0-127)", p)
 	}
+	v.isisPassword(p, "password", ifc.Password, ifc.PasswordType)
 }
 
 // isis checks an IS-IS configuration. refs and ifaces, when not nil, check
@@ -197,6 +237,8 @@ func (v *validator) isis(p string, s *ISIS, refs *policyRefs, ifaces map[string]
 	if s.MetricStyle == ISISMetricNarrow && s.IPv6Topology {
 		v.addf("%s: the IPv6 topology needs wide metrics", p)
 	}
+	v.isisPassword(p, "area password", s.AreaPassword, s.AreaPasswordType)
+	v.isisPassword(p, "domain password", s.DomainPassword, s.DomainPasswordType)
 	max := ISISMaxMetric(s.MetricStyle)
 	family := func(p, f string) {
 		if f != "ipv4" && f != "ipv6" {

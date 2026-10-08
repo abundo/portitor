@@ -847,6 +847,9 @@ func writeISISInterface(b *strings.Builder, in *fwconfig.Instance, ifc *fwconfig
 	if ifc.Priority != nil {
 		fmt.Fprintf(b, " isis priority %d\n", *ifc.Priority)
 	}
+	if ifc.Password != "" {
+		fmt.Fprintf(b, " isis password %s %s\n", fwconfig.ISISAuthType(ifc.PasswordType), ifc.Password)
+	}
 	if ifc.BFD && in.BFDOn(ifc.Name) != nil {
 		b.WriteString(" isis bfd\n")
 		fmt.Fprintf(b, " isis bfd profile %s\n", fwconfig.BFDProfile(ifc.Name))
@@ -873,6 +876,12 @@ func writeISIS(b *strings.Builder, in *fwconfig.Instance, s *fwconfig.ISIS) {
 	}
 	if s.IPv6Topology {
 		b.WriteString(" topology ipv6-unicast\n")
+	}
+	if s.AreaPassword != "" {
+		fmt.Fprintf(b, " area-password %s %s\n", fwconfig.ISISAuthType(s.AreaPasswordType), s.AreaPassword)
+	}
+	if s.DomainPassword != "" {
+		fmt.Fprintf(b, " domain-password %s %s\n", fwconfig.ISISAuthType(s.DomainPasswordType), s.DomainPassword)
 	}
 	for _, d := range s.DefaultOriginate {
 		fmt.Fprintf(b, " default-information originate %s %s", d.Family, d.Level)

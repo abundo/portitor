@@ -1515,6 +1515,22 @@ func redactDoc(doc fwconfig.Document) fwconfig.Document {
 			}
 			cp.OSPF = &o
 		}
+		if in.ISIS != nil {
+			s := *in.ISIS
+			if s.AreaPassword != "" {
+				s.AreaPassword = "<redacted>"
+			}
+			if s.DomainPassword != "" {
+				s.DomainPassword = "<redacted>"
+			}
+			s.Interfaces = slices.Clone(s.Interfaces)
+			for k := range s.Interfaces {
+				if s.Interfaces[k].Password != "" {
+					s.Interfaces[k].Password = "<redacted>"
+				}
+			}
+			cp.ISIS = &s
+		}
 		if in.SNMP != nil {
 			s := *in.SNMP
 			if s.Community != "" {

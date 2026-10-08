@@ -122,6 +122,11 @@ type BgpConfig struct {
 	RedistOspfV4Map string `gorm:"column:redist_ospf_v4_map" json:"redist_ospf_v4_map"`
 	RedistOspfV6    bool   `gorm:"column:redist_ospf_v6" json:"redist_ospf_v6"`
 	RedistOspfV6Map string `gorm:"column:redist_ospf_v6_map" json:"redist_ospf_v6_map"`
+	// IS-IS's routes, per IP version.
+	RedistIsisV4    bool   `gorm:"column:redist_isis_v4" json:"redist_isis_v4"`
+	RedistIsisV4Map string `gorm:"column:redist_isis_v4_map" json:"redist_isis_v4_map"`
+	RedistIsisV6    bool   `gorm:"column:redist_isis_v6" json:"redist_isis_v6"`
+	RedistIsisV6Map string `gorm:"column:redist_isis_v6_map" json:"redist_isis_v6_map"`
 	// Evpn advertises the VNIs of the instance's VXLANs (advertise-all-vni).
 	Evpn bool `json:"evpn"`
 }
@@ -307,6 +312,19 @@ type IsisConfig struct {
 	Overload            bool                                `json:"overload"`
 	DefaultOriginate    JSONList[fwconfig.ISISDefault]      `json:"default_originate"`
 	Redistribute        JSONList[fwconfig.ISISRedistribute] `json:"redistribute"`
+	AreaPassword        string                              `json:"-"`
+	AreaPasswordType    string                              `json:"area_password_type"`
+	DomainPassword      string                              `json:"-"`
+	DomainPasswordType  string                              `json:"domain_password_type"`
+
+	// The passwords are write-only: New* sets one (empty keeps it), Clear*
+	// removes it, Has* tells whether there is one.
+	NewAreaPassword     string `gorm:"-" json:"new_area_password,omitempty"`
+	ClearAreaPassword   bool   `gorm:"-" json:"clear_area_password,omitempty"`
+	HasAreaPassword     bool   `gorm:"-" json:"has_area_password"`
+	NewDomainPassword   string `gorm:"-" json:"new_domain_password,omitempty"`
+	ClearDomainPassword bool   `gorm:"-" json:"clear_domain_password,omitempty"`
+	HasDomainPassword   bool   `gorm:"-" json:"has_domain_password"`
 }
 
 // IsisInterface is IS-IS on an interface of the instance, by name.
@@ -324,6 +342,13 @@ type IsisInterface struct {
 	HelloMultiplier int    `json:"hello_multiplier"`
 	Priority        *int   `json:"priority"`
 	Bfd             bool   `json:"bfd"` // BFD for the neighbours, if the interface has it
+	Password        string `json:"-"`
+	PasswordType    string `json:"password_type"`
+
+	// The hello password is write-only, as IsisConfig's.
+	NewPassword   string `gorm:"-" json:"new_password,omitempty"`
+	ClearPassword bool   `gorm:"-" json:"clear_password,omitempty"`
+	HasPassword   bool   `gorm:"-" json:"has_password"`
 }
 
 // Interface is the interface as the document holds it.
@@ -331,7 +356,7 @@ func (i *IsisInterface) Interface() fwconfig.ISISInterface {
 	return fwconfig.ISISInterface{
 		Name: i.Name, IPv4: i.IPv4, IPv6: i.IPv6, CircuitType: i.CircuitType, PointToPoint: i.PointToPoint,
 		Passive: i.Passive, Metric: i.Metric, HelloInterval: i.HelloInterval, HelloMultiplier: i.HelloMultiplier,
-		Priority: i.Priority, BFD: i.Bfd,
+		Priority: i.Priority, BFD: i.Bfd, Password: i.Password, PasswordType: i.PasswordType,
 	}
 }
 

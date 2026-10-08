@@ -861,6 +861,8 @@ func (d *data) bgp(in *fwconfig.Instance, instanceID uint) {
 		{cfg.RedistStaticV6, "ipv6", fwconfig.RedistStatic, cfg.RedistStaticV6Map},
 		{cfg.RedistOspfV4, "ipv4", fwconfig.RedistOSPF, cfg.RedistOspfV4Map},
 		{cfg.RedistOspfV6, "ipv6", fwconfig.RedistOSPF, cfg.RedistOspfV6Map},
+		{cfg.RedistIsisV4, "ipv4", fwconfig.RedistISIS, cfg.RedistIsisV4Map},
+		{cfg.RedistIsisV6, "ipv6", fwconfig.RedistISIS, cfg.RedistIsisV6Map},
 	} {
 		if r.on {
 			b.Redistribute = append(b.Redistribute, fwconfig.BGPRedistribute{Family: r.family, Source: r.src, RouteMap: r.routeMap})
@@ -936,6 +938,10 @@ func (d *data) isis(instanceID uint) *fwconfig.ISIS {
 		LogAdjacencyChanges: cfg.LogAdjacencyChanges,
 		IPv6Topology:        cfg.IPv6Topology,
 		Overload:            cfg.Overload,
+		AreaPassword:        cfg.AreaPassword,
+		AreaPasswordType:    cfg.AreaPasswordType,
+		DomainPassword:      cfg.DomainPassword,
+		DomainPasswordType:  cfg.DomainPasswordType,
 		DefaultOriginate:    slices.Clone([]fwconfig.ISISDefault(cfg.DefaultOriginate)),
 		Redistribute:        slices.Clone([]fwconfig.ISISRedistribute(cfg.Redistribute)),
 	}

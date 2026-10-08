@@ -21,7 +21,7 @@ func TestValidateBGP(t *testing.T) {
 		{"network not a prefix", func(in *Instance) { in.BGP.Networks[0].Prefix = "192.168.50.1/24" }, "is not a network prefix"},
 		{"network twice", func(in *Instance) { in.BGP.Networks = append(in.BGP.Networks, in.BGP.Networks[0]) }, "listed twice"},
 		{"network unknown route map", func(in *Instance) { in.BGP.Networks[0].RouteMap = "nope" }, `unknown route map "nope"`},
-		{"redistribute bad source", func(in *Instance) { in.BGP.Redistribute[0].Source = "rip" }, "source must be connected, static or ospf"},
+		{"redistribute bad source", func(in *Instance) { in.BGP.Redistribute[0].Source = "rip" }, "source must be connected, static, ospf or isis"},
 		{"neighbour bad address", func(in *Instance) { in.BGP.Neighbors[0].Address = "10.255.0.1/30" }, "not an IP address"},
 		{"link-local neighbour without interface", func(in *Instance) { in.BGP.Neighbors[1].Address = "fe80::1" }, "needs its interface"},
 		{"link-local neighbour unknown interface", func(in *Instance) {

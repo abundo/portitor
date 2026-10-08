@@ -143,9 +143,9 @@ docs and user-facing messages.
   `gorm:"-"` field that `prepare` copies and `present` clears (`DyndnsClient.NewTsigSecret`,
   `IpList.NewPassword`/`NewApiKey`, `BgpPeerSettings.NewPassword` with
   `ClearPassword`, `Instance.NewSnmpCommunity` with `ClearSnmpCommunity`,
-  `SnmpUser.NewAuthPassword`/`NewPrivPassword`, `OspfInterface.NewAuthKey` with `ClearAuthKey`, `Certificate.NewPrivKey` for an imported certificate; a DNS update provider's secret settings come in
+  `SnmpUser.NewAuthPassword`/`NewPrivPassword`, `OspfInterface.NewAuthKey` with `ClearAuthKey`, `IsisConfig.NewAreaPassword`/`NewDomainPassword` and `IsisInterface.NewPassword` with their `Clear*`, `Certificate.NewPrivKey` for an imported certificate; a DNS update provider's secret settings come in
   through `DyndnsClient.Settings`, where an empty one keeps the stored value).
-  A BGP password or OSPF MD5 key is in frr.conf, so that is a `Secret` file
+  A BGP password, OSPF MD5 key or IS-IS password is in frr.conf, so that is a `Secret` file
   `Bundle.Redacted` masks; so is snmpd.conf.
   Deployment history stores a redacted document. The exceptions are the backup
   download (`web/backup.go`): the whole database, age-encrypted with the user's

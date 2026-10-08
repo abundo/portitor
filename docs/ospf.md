@@ -48,7 +48,7 @@ interface gets none.
 | Networks (OSPFv2) | Runs OSPF on the interfaces with an address in the prefix, in its area: the other way to enable OSPFv2 than an interface's area. FRR does not allow both: with network statements, leave the interfaces' areas empty and list an interface only to set its options. |
 | Area ranges | On a router in more than one area: the area's networks inside the prefix are announced to the other areas as the prefix alone (with the cost given, or the highest inside), or not at all. |
 | External summaries | Redistributed routes inside the prefix are announced as the prefix alone, or not at all. |
-| Redistribute | Connected networks, static routes (*Static routes*) and BGP's routes, announced as external routes, each with an optional route map, a metric (its cost; empty: 20) and a metric type (type 2 keeps the metric as it is; type 1 adds the cost of the way to this router). |
+| Redistribute | Connected networks, static routes (*Static routes*), BGP's and IS-IS's routes, announced as external routes, each with an optional route map, a metric (its cost; empty: 20) and a metric type (type 2 keeps the metric as it is; type 1 adds the cost of the way to this router). |
 
 Area ids are written dotted (`0.0.0.1`); a number (`1`) is turned into that form.
 

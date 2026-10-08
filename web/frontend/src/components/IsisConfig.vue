@@ -35,6 +35,14 @@ const defaults = () => ({
   log_adjacency_changes: true,
   ipv6_topology: false,
   overload: false,
+  area_password_type: 'md5',
+  domain_password_type: 'md5',
+  has_area_password: false,
+  has_domain_password: false,
+  new_area_password: '',
+  new_domain_password: '',
+  clear_area_password: false,
+  clear_domain_password: false,
   default_originate: [],
   redistribute: [],
 })
@@ -56,7 +64,13 @@ async function save() {
   const body = { ...cfg, instance_id: store.currentId }
   try {
     const saved = cfg.id ? await isisConfig.update(cfg.id, body) : await isisConfig.create(body)
-    Object.assign(cfg, saved)
+    // The passwords are write-only: the inputs empty again after a save.
+    Object.assign(cfg, saved, {
+      new_area_password: '',
+      new_domain_password: '',
+      clear_area_password: false,
+      clear_domain_password: false,
+    })
     cfgForm.mark()
     toast.add({ title: 'IS-IS saved; commit to apply it.', color: 'success' })
   } catch (err) {
@@ -86,6 +100,24 @@ const selectModel = (key) =>
   })
 const level = selectModel('level')
 const metricStyle = selectModel('metric_style')
+
+const authTypes = [
+  { label: 'HMAC-MD5', value: 'md5' },
+  { label: 'clear text', value: 'clear' },
+]
+// The area (level 1) and domain (level 2) passwords.
+const passwords = [
+  {
+    key: 'area',
+    label: 'Area password',
+    help: 'Authenticates the level-1 link-state packets (LSPs and SNPs). The same on every router of the area.',
+  },
+  {
+    key: 'domain',
+    label: 'Domain password',
+    help: 'Authenticates the level-2 link-state packets. The same on every level-2 router.',
+  },
+]
 
 const familyItems = [
   { label: 'IPv4', value: 'ipv4' },
@@ -130,6 +162,7 @@ const ifColumns = [
   { key: 'point_to_point', label: 'Point-to-point' },
   { key: 'passive', label: 'Passive' },
   { key: 'bfd', label: 'BFD' },
+  { key: 'auth', label: 'Password', format: (i) => (i.has_password ? 'yes' : '') },
   { key: 'metric', label: 'Metric', format: (i) => (i.metric ? String(i.metric) : '10') },
 ]
 const ifFields = computed(() => [
@@ -190,6 +223,7 @@ const ifFields = computed(() => [
     hint: 'Hellos missed before the neighbour is down; 0: 10.',
   },
   { key: 'priority', label: 'Priority', type: 'custom' },
+  { key: 'password', label: 'Hello password', type: 'custom' },
   {
     key: 'bfd',
     label: 'BFD',
@@ -209,6 +243,8 @@ const ifDefaults = {
   hello_multiplier: 0,
   priority: null,
   bfd: false,
+  password_type: 'md5',
+  new_password: '',
 }
 </script>
 
@@ -280,6 +316,37 @@ const ifDefaults = {
           <USwitch v-model="cfg.overload" />
         </UFormField>
 
+        <div class="border-b border-default pt-2 pb-1 text-sm font-semibold">Authentication</div>
+        <UFormField
+          v-for="p in passwords"
+          :key="p.key"
+          :label="p.label"
+          :help="p.help"
+          :ui="inlineField"
+        >
+          <div class="flex w-full flex-wrap items-center gap-2">
+            <UInput
+              v-model="cfg[`new_${p.key}_password`]"
+              type="password"
+              autocomplete="new-password"
+              class="min-w-48 flex-1"
+              :disabled="cfg[`clear_${p.key}_password`]"
+              :placeholder="cfg[`has_${p.key}_password`] ? 'set; leave empty to keep it' : 'none'"
+            />
+            <USelect
+              v-model="cfg[`${p.key}_password_type`]"
+              :items="authTypes"
+              class="w-36"
+              :disabled="cfg[`clear_${p.key}_password`]"
+            />
+            <USwitch
+              v-if="cfg[`has_${p.key}_password`]"
+              v-model="cfg[`clear_${p.key}_password`]"
+              label="Remove"
+            />
+          </div>
+        </UFormField>
+
         <div class="border-b border-default pt-2 pb-1 text-sm font-semibold">Default route</div>
         <UFormField
           label="Default originate"
@@ -345,6 +412,28 @@ const ifDefaults = {
           @update:model-value="(v) => (form.priority = v === '' || v == null ? null : Number(v))"
         />
         <span class="ms-2 text-sm text-muted">In the DIS election on a LAN (0-127).</span>
+      </template>
+      <template #field-password="{ form }">
+        <div class="flex w-full flex-wrap items-center gap-2">
+          <UInput
+            v-model="form.new_password"
+            type="password"
+            autocomplete="new-password"
+            class="min-w-48 flex-1"
+            :disabled="form.clear_password"
+            :placeholder="form.has_password ? 'set; leave empty to keep it' : 'none'"
+          />
+          <USelect
+            v-model="form.password_type"
+            :items="authTypes"
+            class="w-36"
+            :disabled="form.clear_password"
+          />
+          <USwitch v-if="form.has_password" v-model="form.clear_password" label="Remove" />
+        </div>
+        <span class="text-sm text-muted">
+          Authenticates the hellos on the interface; the neighbour needs the same.
+        </span>
       </template>
     </CrudPage>
   </div>

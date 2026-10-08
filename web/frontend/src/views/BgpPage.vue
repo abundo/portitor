@@ -166,6 +166,10 @@ const defaults = () => ({
   redist_ospf_v4_map: '',
   redist_ospf_v6: false,
   redist_ospf_v6_map: '',
+  redist_isis_v4: false,
+  redist_isis_v4_map: '',
+  redist_isis_v6: false,
+  redist_isis_v6_map: '',
 })
 async function loadCfg() {
   if (!store.currentId) return
@@ -214,9 +218,11 @@ const redistributions = [
   { key: 'redist_connected_v4', label: 'IPv4 connected' },
   { key: 'redist_static_v4', label: 'IPv4 static' },
   { key: 'redist_ospf_v4', label: 'IPv4 OSPF' },
+  { key: 'redist_isis_v4', label: 'IPv4 IS-IS' },
   { key: 'redist_connected_v6', label: 'IPv6 connected' },
   { key: 'redist_static_v6', label: 'IPv6 static' },
   { key: 'redist_ospf_v6', label: 'IPv6 OSPF' },
+  { key: 'redist_isis_v6', label: 'IPv6 IS-IS' },
 ]
 
 // ----- Peer groups and neighbours.
@@ -658,7 +664,8 @@ const neighborFields = computed(() => [
               <p class="text-sm text-muted">
                 Connected: the networks of the interfaces. Static: the static routes (Network &gt;
                 Routing &gt; Static). OSPF: OSPFv2's routes into IPv4, OSPFv3's into IPv6 (Network
-                &gt; Routing &gt; OSPF). A route map filters or changes what is announced.
+                &gt; Routing &gt; OSPF). IS-IS: its routes of the IP version (Routing &gt; IS-IS). A
+                route map filters or changes what is announced.
               </p>
               <UFormField
                 v-for="r in redistributions"

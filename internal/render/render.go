@@ -399,10 +399,11 @@ var (
 	wgKeyLine       = regexp.MustCompile(`(?m)^(PrivateKey|PresharedKey) = .*$`)
 	frrPasswordLine = regexp.MustCompile(`(?m)^( neighbor \S+` + frrPasswordWord + `).*$`)
 	ospfKeyLine     = regexp.MustCompile(`(?m)^( ip ospf message-digest-key \d+` + ospfKeyWord + `).*$`)
+	isisPassLine    = regexp.MustCompile(`(?m)^( (?:area-password|domain-password|isis password) (?:clear|md5) ).*$`)
 )
 
-// hasFRRSecret reports whether frr.conf holds a BGP password or an OSPF
-// key.
+// hasFRRSecret reports whether frr.conf holds a BGP password, an OSPF
+// key or an IS-IS password.
 func hasFRRSecret(in *fwconfig.Instance) bool {
 	if g := in.BGP; in.BGPRunning() {
 		for _, p := range append(slices.Clone(g.PeerGroups), g.Neighbors...) {
@@ -414,6 +415,16 @@ func hasFRRSecret(in *fwconfig.Instance) bool {
 	if in.OSPFRunning(2) {
 		for _, ifc := range in.OSPF.Interfaces {
 			if ifc.AuthKey != "" {
+				return true
+			}
+		}
+	}
+	if s := in.ISIS; in.ISISRunning() {
+		if s.AreaPassword != "" || s.DomainPassword != "" {
+			return true
+		}
+		for _, ifc := range s.Interfaces {
+			if ifc.Password != "" {
 				return true
 			}
 		}
@@ -430,6 +441,7 @@ func (b *Bundle) Redacted() []File {
 			out[i].Content = wgKeyLine.ReplaceAllString(f.Content, "$1 = <redacted>")
 			out[i].Content = frrPasswordLine.ReplaceAllString(out[i].Content, "${1}<redacted>")
 			out[i].Content = ospfKeyLine.ReplaceAllString(out[i].Content, "${1}<redacted>")
+			out[i].Content = isisPassLine.ReplaceAllString(out[i].Content, "${1}<redacted>")
 			out[i].Content = redactSnmpd(out[i].Content)
 		}
 	}

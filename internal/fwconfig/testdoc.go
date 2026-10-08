@@ -210,7 +210,7 @@ func SampleDocument() Document {
 					Enabled: true, ASN: 65010, RouterID: "10.255.0.2", LogNeighborChanges: true,
 					Networks:     []BGPNetwork{{Prefix: "192.168.50.0/24"}},
 					Aggregates:   []BGPAggregate{{Prefix: "192.168.0.0/16", SummaryOnly: true}},
-					Redistribute: []BGPRedistribute{{Family: "ipv4", Source: RedistConnected, RouteMap: "connected"}, {Family: "ipv4", Source: RedistOSPF}},
+					Redistribute: []BGPRedistribute{{Family: "ipv4", Source: RedistConnected, RouteMap: "connected"}, {Family: "ipv4", Source: RedistOSPF}, {Family: "ipv6", Source: RedistISIS}},
 					PeerGroups: []BGPPeer{{
 						Name: "upstream", RemoteAS: "65000", Password: "s3cret",
 						IPv4: BGPAddressFamily{Activate: true, RouteMapIn: "from-upstream", PrefixListOut: "ours", SoftReconfiguration: true},
@@ -236,14 +236,15 @@ func SampleDocument() Document {
 				OSPF6: &OSPF{
 					Enabled: true, RouterID: "10.255.0.2",
 					Interfaces:   []OSPFInterface{{Name: "lk-main", Area: "0.0.0.0"}},
-					Redistribute: []OSPFRedistribute{{Source: RedistConnected}},
+					Redistribute: []OSPFRedistribute{{Source: RedistConnected}, {Source: RedistISIS}},
 				},
 				ISIS: &ISIS{
 					Enabled: true, NET: "49.0001.0102.5500.0002.00", Level: ISISLevel2, LogAdjacencyChanges: true, IPv6Topology: true,
+					AreaPassword: "ar3a", DomainPassword: "d0main", DomainPasswordType: ISISAuthClear,
 					DefaultOriginate: []ISISDefault{{Family: "ipv4", Level: "level-2", Always: true}},
 					Redistribute:     []ISISRedistribute{{Family: "ipv4", Source: RedistStatic, Level: "level-2", Metric: 20, RouteMap: "connected"}, {Family: "ipv6", Source: RedistOSPF, Level: "level-2"}},
 					Interfaces: []ISISInterface{
-						{Name: "lk-main", IPv4: true, IPv6: true, PointToPoint: true, HelloInterval: 1, HelloMultiplier: 5},
+						{Name: "lk-main", IPv4: true, IPv6: true, PointToPoint: true, HelloInterval: 1, HelloMultiplier: 5, Password: "h3llo"},
 						{Name: "eth2", IPv4: true, Passive: true, Metric: 100, CircuitType: ISISLevel2, Priority: ptr(100)},
 					},
 				},

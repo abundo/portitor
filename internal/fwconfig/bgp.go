@@ -68,12 +68,14 @@ const (
 	RedistStatic    = "static"
 	// RedistOSPF is OSPFv2's routes into IPv4, OSPFv3's into IPv6.
 	RedistOSPF = "ospf"
+	// RedistISIS is IS-IS's routes of the IP version.
+	RedistISIS = "isis"
 )
 
 // BGPRedistribute redistributes a source into an address family.
 type BGPRedistribute struct {
 	Family   string `json:"family"` // ipv4, ipv6
-	Source   string `json:"source"` // RedistConnected, RedistStatic, RedistOSPF
+	Source   string `json:"source"` // RedistConnected, RedistStatic, RedistOSPF, RedistISIS
 	RouteMap string `json:"route_map,omitempty"`
 }
 
@@ -774,8 +776,10 @@ func (v *validator) routing(p string, in *Instance, ifaces map[string]*Interface
 		if r.Family != "ipv4" && r.Family != "ipv6" {
 			v.addf("%s: family must be ipv4 or ipv6", rp)
 		}
-		if r.Source != RedistConnected && r.Source != RedistStatic && r.Source != RedistOSPF {
-			v.addf("%s: source must be connected, static or ospf", rp)
+		switch r.Source {
+		case RedistConnected, RedistStatic, RedistOSPF, RedistISIS:
+		default:
+			v.addf("%s: source must be connected, static, ospf or isis", rp)
 		}
 		if redist[r.Family+r.Source] {
 			v.addf("%s: listed twice", rp)
