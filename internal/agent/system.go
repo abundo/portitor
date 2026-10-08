@@ -180,11 +180,16 @@ func (m *systemManager) runCheck(ctx context.Context) {
 // exits (RemainAfterExit), so its result can be read until the next run.
 func (m *systemManager) startUnit(ctx context.Context, unit, desc string, argv ...string) error {
 	// Unload the previous run, if there is one (a missing unit would only
-	// log failed commands).
-	out, err := m.run.Run(ctx, "", "systemctl", "show", unit, "--property=LoadState")
-	if err != nil || !strings.Contains(string(out), "LoadState=not-found") {
-		_, _ = m.run.Run(ctx, "", "systemctl", "stop", unit)
+	// log failed commands). Stopping a transient unit unloads it unless it
+	// failed, and a failed one is unloaded by reset-failed alone, so only one
+	// of the two is sent.
+	out, err := m.run.Run(ctx, "", "systemctl", "show", unit, "--property=LoadState,ActiveState")
+	switch {
+	case err == nil && strings.Contains(string(out), "LoadState=not-found"):
+	case err == nil && strings.Contains(string(out), "ActiveState=failed"):
 		_, _ = m.run.Run(ctx, "", "systemctl", "reset-failed", unit)
+	default:
+		_, _ = m.run.Run(ctx, "", "systemctl", "stop", unit)
 	}
 	args := []string{
 		"--unit=" + unit, "--description=" + desc,
