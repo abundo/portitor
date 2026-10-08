@@ -94,7 +94,13 @@ onMounted(start)
 watch([shown, follow, wrap, () => props.active], async () => {
   if (!follow.value || !props.active) return
   await nextTick()
-  if (box.value) box.value.scrollTop = box.value.scrollHeight
+  // A tab just shown may still be hidden after the render: scroll once
+  // more on the next frame.
+  const toBottom = () => {
+    if (box.value && follow.value && props.active) box.value.scrollTop = box.value.scrollHeight
+  }
+  toBottom()
+  requestAnimationFrame(toBottom)
 })
 onBeforeUnmount(stop)
 
