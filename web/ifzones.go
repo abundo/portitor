@@ -193,6 +193,9 @@ func renameIfaceRefs(tx *gorm.DB, instanceID uint, old, name string, zones bool)
 	if err := tx.Model(&models.BfdInterface{}).Where("instance_id = ? AND interface = ?", instanceID, old).UpdateColumn("interface", name).Error; err != nil {
 		return err
 	}
+	if err := tx.Model(&models.IsisConfig{}).Where("instance_id = ? AND net_interface = ?", instanceID, old).UpdateColumn("net_interface", name).Error; err != nil {
+		return err
+	}
 	if zones {
 		// A BGP neighbour's or peer group's update source.
 		for _, m := range []any{&models.BgpNeighbor{}, &models.BgpPeerGroup{}} {

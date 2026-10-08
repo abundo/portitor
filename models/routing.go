@@ -302,9 +302,13 @@ func (i *OspfInterface) Interface() fwconfig.OSPFInterface {
 // first save. It is off (not run) until Enabled.
 type IsisConfig struct {
 	Base
-	InstanceID          uint                                `json:"instance_id"`
-	Enabled             bool                                `json:"enabled"`
-	Net                 string                              `gorm:"column:net" json:"net"`
+	InstanceID uint   `json:"instance_id"`
+	Enabled    bool   `json:"enabled"`
+	Net        string `gorm:"column:net" json:"net"`
+	// NetInterface makes the NET from that interface's first IPv4 address,
+	// in the area NetArea (fwconfig.ISISNetFromIPv4); empty: Net is entered.
+	NetInterface        string                              `json:"net_interface"`
+	NetArea             string                              `json:"net_area"`
 	Level               string                              `json:"level"`
 	MetricStyle         string                              `json:"metric_style"`
 	LogAdjacencyChanges bool                                `json:"log_adjacency_changes"`

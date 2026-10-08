@@ -75,3 +75,12 @@ func TestParseISISNet(t *testing.T) {
 		}
 	}
 }
+
+func TestISISNetFromAddresses(t *testing.T) {
+	if n, ok := ISISNetFromAddresses("49.0001", []string{"fd00::1/128", "192.168.1.1/32"}); !ok || n != "49.0001.1921.6800.1001.00" {
+		t.Errorf("got %q %v", n, ok)
+	}
+	if _, ok := ISISNetFromAddresses("49.0001", []string{"fd00::1/128"}); ok {
+		t.Error("no IPv4 made a NET")
+	}
+}

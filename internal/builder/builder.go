@@ -945,6 +945,17 @@ func (d *data) isis(instanceID uint) *fwconfig.ISIS {
 		DefaultOriginate:    slices.Clone([]fwconfig.ISISDefault(cfg.DefaultOriginate)),
 		Redistribute:        slices.Clone([]fwconfig.ISISRedistribute(cfg.Redistribute)),
 	}
+	if cfg.NetInterface != "" {
+		// The NET follows the interface's IPv4 address; without one, the
+		// NET made when it was saved.
+		for _, ifc := range d.interfaces {
+			if ifc.InstanceID == instanceID && ifc.Name == cfg.NetInterface {
+				if net, ok := fwconfig.ISISNetFromAddresses(cfg.NetArea, ifc.Addresses); ok {
+					s.NET = net
+				}
+			}
+		}
+	}
 	for i := range d.isisIfaces {
 		if ifc := &d.isisIfaces[i]; ifc.InstanceID == instanceID {
 			s.Interfaces = append(s.Interfaces, ifc.Interface())

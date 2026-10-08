@@ -27,6 +27,27 @@ func prepareIsisConfig(tx *gorm.DB, c, old *models.IsisConfig) error {
 		return err
 	}
 	c.Net, _ = fwconfig.ParseISISNet(c.Net)
+	c.NetInterface = strings.TrimSpace(c.NetInterface)
+	if c.NetInterface == "" {
+		c.NetArea = ""
+	} else {
+		// The NET from the interface's IPv4 address; the builder makes it
+		// again on deploy, so it follows the address.
+		area, ok := fwconfig.ParseISISArea(c.NetArea)
+		if !ok {
+			return bad(fmt.Sprintf("area %q must be an AFI byte and up to 12 more bytes in groups of two (49.0001)", c.NetArea))
+		}
+		c.NetArea = area
+		var ifc models.Interface
+		if err := tx.Where("instance_id = ? AND name = ?", c.InstanceID, c.NetInterface).First(&ifc).Error; err != nil {
+			return bad(fmt.Sprintf("%q is not an interface of this virtual firewall", c.NetInterface))
+		}
+		net, ok := fwconfig.ISISNetFromAddresses(area, ifc.Addresses)
+		if !ok {
+			return bad(fmt.Sprintf("%s has no static IPv4 address to make the NET from", c.NetInterface))
+		}
+		c.Net = net
+	}
 	var oldArea, oldDomain string
 	if old != nil {
 		oldArea, oldDomain = old.AreaPassword, old.DomainPassword
@@ -147,10 +168,15 @@ func presentIsisInterface(i *models.IsisInterface) {
 
 // isisIfaceUsers lists IS-IS when it runs on the interface named name.
 func isisIfaceUsers(tx *gorm.DB, instanceID uint, name string) []string {
+	var users []string
 	var n int64
 	tx.Model(&models.IsisInterface{}).Where("instance_id = ? AND name = ?", instanceID, name).Count(&n)
 	if n > 0 {
-		return []string{"IS-IS"}
+		users = append(users, "IS-IS")
 	}
-	return nil
+	tx.Model(&models.IsisConfig{}).Where("instance_id = ? AND net_interface = ?", instanceID, name).Count(&n)
+	if n > 0 {
+		users = append(users, "IS-IS's NET")
+	}
+	return users
 }

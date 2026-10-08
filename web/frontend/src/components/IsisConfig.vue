@@ -19,7 +19,7 @@ import { inlineField } from '@/utils/form'
 const toast = useToast()
 const auth = useAuthStore()
 const objects = useRoutingObjects()
-const { store, ifaceNames, ifaceText } = useInstanceRefs()
+const { store, ifaceList, ifaceNames, ifaceText } = useInstanceRefs()
 const readOnly = computed(() => !auth.canEdit)
 
 // ----- IS-IS itself.
@@ -30,6 +30,8 @@ const defaults = () => ({
   id: 0,
   enabled: false,
   net: '',
+  net_interface: '',
+  net_area: '49.0001',
   level: '',
   metric_style: '',
   log_adjacency_changes: true,
@@ -79,6 +81,30 @@ async function save() {
     saving.value = false
   }
 }
+
+// The NET made from an interface's first IPv4 address (a loopback, say),
+// as the server makes it: each octet as three digits, in groups of four.
+const netFromIface = computed({
+  get: () => !!cfg.net_interface,
+  set: (on) => {
+    cfg.net_interface = on ? (netIfaceItems.value[0]?.value ?? '') : ''
+    if (on && !cfg.net_area) cfg.net_area = '49.0001'
+  },
+})
+const netIfaceItems = computed(() =>
+  ifaceList.value.map((i) => ({ label: ifaceText(i.name), value: i.name })),
+)
+const generatedNet = computed(() => {
+  const ifc = ifaceList.value.find((i) => i.name === cfg.net_interface)
+  const v4 = ifc?.addresses?.find((a) => /^\d+\.\d+\.\d+\.\d+\//.test(a))
+  if (!v4) return ''
+  const d = v4
+    .split('/')[0]
+    .split('.')
+    .map((o) => o.padStart(3, '0'))
+    .join('')
+  return `${(cfg.net_area || '').trim().toLowerCase()}.${d.slice(0, 4)}.${d.slice(4, 8)}.${d.slice(8)}.00`
+})
 
 const levelItems = [
   { label: 'level-1-2 (FRR’s)', value: '' },
@@ -273,6 +299,35 @@ const ifDefaults = {
           <USwitch v-model="cfg.enabled" />
         </UFormField>
         <UFormField
+          label="NET from interface"
+          :ui="inlineField"
+          help="Makes the NET from an interface's IPv4 address, typically a loopback's: 192.168.1.1 becomes system id 1921.6800.1001. It follows the address on each commit."
+        >
+          <USwitch v-model="netFromIface" />
+        </UFormField>
+        <template v-if="netFromIface">
+          <UFormField label="Interface" :ui="inlineField">
+            <USelect v-model="cfg.net_interface" :items="netIfaceItems" class="w-72" />
+          </UFormField>
+          <UFormField
+            label="Area"
+            :ui="inlineField"
+            help="The NET's area: an AFI byte (49) and more."
+          >
+            <UInput
+              v-model="cfg.net_area"
+              class="w-48"
+              placeholder="49.0001"
+              :ui="{ base: 'font-mono' }"
+            />
+          </UFormField>
+          <UFormField label="NET" :ui="inlineField">
+            <span v-if="generatedNet" class="font-mono text-sm">{{ generatedNet }}</span>
+            <span v-else class="text-sm text-error">The interface has no static IPv4 address.</span>
+          </UFormField>
+        </template>
+        <UFormField
+          v-else
           label="NET"
           :ui="inlineField"
           help="Network entity title: the area (49.0001), the system id (unique per router; 1921.6800.1001 from 192.168.1.1) and 00."

@@ -5,6 +5,7 @@ package fwconfig
 
 import (
 	"fmt"
+	"net/netip"
 	"regexp"
 	"strings"
 )
@@ -150,6 +151,35 @@ var isisNetRe = regexp.MustCompile(`^[0-9a-f]{2}(\.[0-9a-f]{4}){0,6}(\.[0-9a-f]{
 func ParseISISNet(s string) (string, bool) {
 	s = strings.ToLower(strings.TrimSpace(s))
 	return s, isisNetRe.MatchString(s)
+}
+
+// isisAreaRe: an AFI byte and 0-12 more area bytes in groups of two.
+var isisAreaRe = regexp.MustCompile(`^[0-9a-f]{2}(\.[0-9a-f]{4}){0,6}$`)
+
+// ParseISISArea reads a NET's area (49.0001) and returns it in lower case.
+func ParseISISArea(s string) (string, bool) {
+	s = strings.ToLower(strings.TrimSpace(s))
+	return s, isisAreaRe.MatchString(s)
+}
+
+// ISISNetFromIPv4 makes a NET in area from an IPv4 address, its octets
+// zero-padded to three digits as the system id: 192.168.1.1 in 49.0001 is
+// 49.0001.1921.6800.1001.00.
+func ISISNetFromIPv4(area string, a netip.Addr) string {
+	b := a.As4()
+	d := fmt.Sprintf("%03d%03d%03d%03d", b[0], b[1], b[2], b[3])
+	return fmt.Sprintf("%s.%s.%s.%s.00", area, d[0:4], d[4:8], d[8:12])
+}
+
+// ISISNetFromAddresses makes the NET from the first IPv4 address of an
+// interface's addresses (CIDRs), or reports there is none.
+func ISISNetFromAddresses(area string, addrs []string) (string, bool) {
+	for _, s := range addrs {
+		if p, err := ParseInterfaceAddress(s); err == nil && p.Addr().Is4() {
+			return ISISNetFromIPv4(area, p.Addr()), true
+		}
+	}
+	return "", false
 }
 
 // ISISLayer3 reports whether an interface kind carries IP alone (a

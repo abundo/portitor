@@ -48,6 +48,19 @@ func TestISIS(t *testing.T) {
 	if rec := env.do("POST", "/api/isis/config", map[string]any{"instance_id": inst}); rec.Code < 400 {
 		t.Errorf("second config: %d", rec.Code)
 	}
+	// The NET made from an interface's IPv4 address.
+	if rec := env.do("PUT", "/api/isis/config/"+itoa(cfg.ID), map[string]any{"net_interface": "eth9", "net_area": "49.0002"}); rec.Code != http.StatusBadRequest {
+		t.Errorf("unknown NET interface: %d", rec.Code)
+	}
+	if rec := env.do("PUT", "/api/isis/config/"+itoa(cfg.ID), map[string]any{"net_interface": "eth1", "net_area": "49.2"}); rec.Code != http.StatusBadRequest {
+		t.Errorf("bad area: %d", rec.Code)
+	}
+	rec = env.do("PUT", "/api/isis/config/"+itoa(cfg.ID), map[string]any{"net_interface": "eth1", "net_area": "49.0002"})
+	_ = json.Unmarshal(rec.Body.Bytes(), &cfg)
+	if rec.Code != http.StatusOK || cfg.Net != "49.0002.0100.0000.0001.00" {
+		t.Errorf("NET from eth1: %d %q", rec.Code, cfg.Net)
+	}
+	env.do("PUT", "/api/isis/config/"+itoa(cfg.ID), map[string]any{"net_interface": "", "net": "49.0001.0a00.0000.0001.00"})
 
 	for what, body := range map[string]map[string]any{
 		"unknown interface": {"instance_id": inst, "name": "eth9", "ipv4": true},
