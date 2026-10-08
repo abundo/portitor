@@ -463,6 +463,9 @@ shebang. Files that cannot hold a comment go in `REUSE.toml`. Commits carry a DC
 `Signed-off-by:` line (`git commit -s`); see [CONTRIBUTING.md](CONTRIBUTING.md).
 Committing directly to `main` is fine; no feature branch is needed.
 
+**Never commit on your own.** Leave changes uncommitted so the maintainer can test
+them first; commit only when asked to, each time.
+
 ## Gotchas
 
 - Echo v5 handlers are `func(c *echo.Context) error`. Parse path ids with
