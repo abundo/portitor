@@ -11,6 +11,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/json"
 	"encoding/pem"
+	"maps"
 	"math/big"
 	"net/http"
 	"slices"
@@ -157,5 +158,70 @@ func TestCertificateImport(t *testing.T) {
 	}
 	if red := redactDoc(*doc); red.Instance("main").Certificates[0].PrivKey != "<redacted>" || main.Certificates[0].PrivKey != key {
 		t.Error("key not redacted, or redacted in place")
+	}
+}
+
+// A DNS-01 certificate writes through a DNS update client of its VF,
+// which may be off and without records (one that only holds credentials).
+func TestCertificateDNS01(t *testing.T) {
+	env := newEnv(t)
+	inst := env.create("/api/instances", map[string]any{"name": "main"})
+	wan := env.create("/api/interfaces", map[string]any{"instance_id": inst, "name": "wan", "ipv4_mode": "dhcp", "enabled": true})
+	dc := env.create("/api/dyndns/clients", map[string]any{
+		"instance_id": inst, "name": "acme", "enabled": false, "interface_id": wan,
+		"server": "192.0.2.53", "zone": "acme.example.net",
+		"tsig_name": "acme-key", "tsig_algorithm": "hmac-sha256", "tsig_secret": "c2VjcmV0",
+	})
+	other := env.create("/api/instances", map[string]any{"name": "lab"})
+	eth9 := env.create("/api/interfaces", map[string]any{"instance_id": other, "name": "eth9", "enabled": true})
+	labDC := env.create("/api/dyndns/clients", map[string]any{
+		"instance_id": other, "name": "lab", "interface_id": eth9, "server": "192.0.2.53", "zone": "example.org",
+	})
+
+	cert := map[string]any{
+		"instance_id": inst, "name": "wild", "enabled": true, "challenge": "dns-01", "dyndns_client_id": dc,
+		"interface_id": wan, "domains": []string{"*.example.com", "example.com"},
+	}
+	for field, v := range map[string]any{"dyndns_client_id": labDC, "challenge": "tls-alpn-01"} {
+		c := maps.Clone(cert)
+		c[field] = v
+		if rec := env.do("POST", "/api/certificates", c); rec.Code != http.StatusBadRequest {
+			t.Errorf("bad %s accepted: %d %s", field, rec.Code, rec.Body)
+		}
+	}
+	rec := env.do("POST", "/api/certificates", cert)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", rec.Code, rec.Body)
+	}
+	var created models.Certificate
+	_ = json.Unmarshal(rec.Body.Bytes(), &created)
+	if created.InterfaceID != nil || created.DyndnsClientID == nil || *created.DyndnsClientID != dc {
+		t.Errorf("stored: %+v", created)
+	}
+
+	doc, err := builder.Build(env.srv.db, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	main := doc.Instance("main")
+	if main == nil || len(main.Certificates) != 1 || len(main.DynDNS) != 0 {
+		t.Fatalf("document: %+v", main)
+	}
+	c := main.Certificates[0]
+	if d := c.DNS01; c.Interface != "" || d == nil || d.Client != "acme" || d.Zone != "acme.example.net" || d.Server != "192.0.2.53" || d.TSIG == nil || d.TSIG.Secret != "c2VjcmV0" {
+		t.Errorf("certificate: %+v %+v", c, c.DNS01)
+	}
+	for _, r := range render.AutoInputRules(main) {
+		if r.Service == render.ACMEHTTPService {
+			t.Errorf("HTTP-01 auto rule for DNS-01: %+v", r)
+		}
+	}
+	red := redactDoc(*doc)
+	if r := red.Instance("main").Certificates[0].DNS01; r.TSIG.Secret != "<redacted>" || c.DNS01.TSIG.Secret != "c2VjcmV0" {
+		t.Errorf("redacted: %+v, original %+v", r.TSIG, c.DNS01.TSIG)
+	}
+
+	if rec := env.do("DELETE", "/api/dyndns/clients/"+itoa(dc), nil); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "certificate wild") {
+		t.Errorf("delete of a client in use: %d %s", rec.Code, rec.Body)
 	}
 }

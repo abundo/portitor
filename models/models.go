@@ -823,10 +823,13 @@ type Certificate struct {
 	CommonName string     `json:"common_name"`
 	Email      string     `json:"email"`
 	// Ca is a fwconfig.ACMECAs name or an ACME directory URL.
-	Ca          string `json:"ca"`
-	KeyType     string `json:"key_type"`
-	Challenge   string `json:"challenge"`
-	InterfaceID *uint  `json:"interface_id"`
+	Ca        string `json:"ca"`
+	KeyType   string `json:"key_type"`
+	Challenge string `json:"challenge"`
+	// InterfaceID is HTTP-01's, DyndnsClientID DNS-01's: the DNS update
+	// client whose provider writes the TXT records.
+	InterfaceID    *uint `json:"interface_id"`
+	DyndnsClientID *uint `json:"dyndns_client_id"`
 	// FullChain and PrivKey are an imported certificate's PEM chain and
 	// key. The key is set through NewPrivKey and never shown.
 	FullChain  string `json:"fullchain"`

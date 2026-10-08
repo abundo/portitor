@@ -1472,24 +1472,15 @@ func redactDoc(doc fwconfig.Document) fwconfig.Document {
 			if cp.Certificates[j].PrivKey != "" {
 				cp.Certificates[j].PrivKey = "<redacted>"
 			}
+			if d := cp.Certificates[j].DNS01; d != nil {
+				r := *d
+				r.TSIG, r.ProviderSettings = redactTSIG(d.TSIG), redactProviderSettings(d.Provider, d.ProviderSettings)
+				cp.Certificates[j].DNS01 = &r
+			}
 		}
 		cp.DynDNS = make([]fwconfig.DynDNS, len(in.DynDNS))
 		for j, d := range in.DynDNS {
-			if d.TSIG != nil {
-				t := *d.TSIG
-				t.Secret = "<redacted>"
-				d.TSIG = &t
-			}
-			if p := fwconfig.FindDNSProvider(d.Provider); p != nil && len(d.ProviderSettings) > 0 {
-				settings := make(map[string]string, len(d.ProviderSettings))
-				for k, v := range d.ProviderSettings {
-					if f := p.Field(k); f == nil || f.Secret {
-						v = "<redacted>"
-					}
-					settings[k] = v
-				}
-				d.ProviderSettings = settings
-			}
+			d.TSIG, d.ProviderSettings = redactTSIG(d.TSIG), redactProviderSettings(d.Provider, d.ProviderSettings)
 			cp.DynDNS[j] = d
 		}
 		cp.BGP, cp.OSPF, cp.ISIS = redactBGP(in.BGP), redactOSPF(in.OSPF), redactISIS(in.ISIS)
@@ -1523,6 +1514,32 @@ func redactDoc(doc fwconfig.Document) fwconfig.Document {
 			l.APIKey = "<redacted>"
 		}
 		out.IPLists[i] = l
+	}
+	return out
+}
+
+func redactTSIG(t *fwconfig.TSIG) *fwconfig.TSIG {
+	if t == nil {
+		return nil
+	}
+	r := *t
+	r.Secret = "<redacted>"
+	return &r
+}
+
+// redactProviderSettings masks a DNS provider's secret settings, and any
+// it doesn't know.
+func redactProviderSettings(provider string, settings map[string]string) map[string]string {
+	p := fwconfig.FindDNSProvider(provider)
+	if p == nil || len(settings) == 0 {
+		return settings
+	}
+	out := make(map[string]string, len(settings))
+	for k, v := range settings {
+		if f := p.Field(k); f == nil || f.Secret {
+			v = "<redacted>"
+		}
+		out[k] = v
 	}
 	return out
 }

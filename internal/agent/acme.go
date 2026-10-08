@@ -19,6 +19,7 @@ import (
 	"github.com/go-acme/lego/v4/challenge/http01"
 
 	"github.com/abundo/portitor/internal/acme"
+	"github.com/abundo/portitor/internal/dyndns"
 	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/internal/render"
 )
@@ -45,6 +46,8 @@ const (
 // from its ACME CA. Orders run one at a time; the CA's HTTP-01 requests
 // are answered by a server in the instance's namespace, on port 80, which
 // the instance's ruleset opens only while it runs (render.ACMEHTTPSet).
+// DNS-01's TXT records are written through the certificate's DNS update
+// client (instanceDNSEnv).
 type certManager struct {
 	dryRun bool
 	paths  render.Paths
@@ -216,10 +219,22 @@ func (m *certManager) order1(ctx context.Context, it certItem, req acme.Request)
 	done := make(chan result, 1)
 	go func() {
 		defer func() { <-m.order }()
-		p := &http01Server{m: m, netns: it.netns, tokens: map[string]string{}}
-		req.HTTP01 = p
-		res, err := m.obtain(m.paths.ACMEAccountsDir(), req)
-		p.close()
+		var res *acme.Result
+		var err error
+		if d := it.cfg.DNS01; it.cfg.Challenge == fwconfig.ChallengeDNS01 && d != nil {
+			var u *dyndns.TXTUpdater
+			if u, err = dyndns.NewTXTUpdater(*d, instanceDNSEnv(it.netns)); err == nil {
+				req.DNS01 = acme.NewDNS01(u)
+				res, err = m.obtain(m.paths.ACMEAccountsDir(), req)
+			} else {
+				err = fmt.Errorf("DNS update %s: %w", d.Client, err)
+			}
+		} else {
+			p := &http01Server{m: m, netns: it.netns, tokens: map[string]string{}}
+			req.HTTP01 = p
+			res, err = m.obtain(m.paths.ACMEAccountsDir(), req)
+			p.close()
+		}
 		var st *acme.Stored
 		if err == nil {
 			st, err = acme.Save(m.dir(it), req, res)

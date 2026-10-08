@@ -737,6 +737,19 @@ func build(db *gorm.DB, generation int64, only map[string]bool) (*fwconfig.Docum
 				in.Certificates = append(in.Certificates, Certificate(&c, ""))
 				continue
 			}
+			if c.Challenge == fwconfig.ChallengeDNS01 {
+				i := slices.IndexFunc(d.dyndns, func(dc models.DyndnsClient) bool {
+					return c.DyndnsClientID != nil && dc.ID == *c.DyndnsClientID && dc.InstanceID == mi.ID
+				})
+				if i < 0 {
+					addf("instance %s: certificate %s: its DNS update client is not in this instance", mi.Name, c.Name)
+					continue
+				}
+				cert := Certificate(&c, "")
+				cert.DNS01 = DNS01(&d.dyndns[i])
+				in.Certificates = append(in.Certificates, cert)
+				continue
+			}
 			var ifc models.Interface
 			if c.InterfaceID != nil {
 				ifc = ifaceByID[*c.InterfaceID]
@@ -1048,11 +1061,24 @@ func Certificate(c *models.Certificate, iface string) fwconfig.Certificate {
 // DynDNS is a DNS update client with its records as the document holds
 // it; iface is the name of its interface.
 func DynDNS(c *models.DyndnsClient, iface string, records []models.DyndnsRecord) fwconfig.DynDNS {
+	p := DNS01(c)
 	d := fwconfig.DynDNS{
 		Name: c.Name, Interface: iface, Provider: c.Provider, Zone: c.Zone,
+		ProviderSettings: p.ProviderSettings, Server: p.Server, TSIG: p.TSIG,
 		RetryInterval: c.RetryInterval, VerifyInterval: c.VerifyInterval,
 		Records: []fwconfig.DynDNSRecord{},
 	}
+	for _, r := range records {
+		d.Records = append(d.Records, fwconfig.DynDNSRecord{Name: r.Name, Type: r.Type, TTL: r.Ttl, Value: r.Value})
+	}
+	return d
+}
+
+// DNS01 is a DNS update client's provider and zone, as a certificate's
+// DNS-01 challenge uses them. The client need not be enabled: one that
+// only holds the credentials for certificates can be off.
+func DNS01(c *models.DyndnsClient) *fwconfig.DNS01 {
+	d := &fwconfig.DNS01{Client: c.Name, Provider: c.Provider, Zone: c.Zone}
 	if c.Provider == "" || c.Provider == fwconfig.ProviderRFC2136 {
 		d.Server = c.Server
 		if c.TsigName != "" {
@@ -1060,9 +1086,6 @@ func DynDNS(c *models.DyndnsClient, iface string, records []models.DyndnsRecord)
 		}
 	} else {
 		d.ProviderSettings = maps.Clone(map[string]string(c.ProviderSettings))
-	}
-	for _, r := range records {
-		d.Records = append(d.Records, fwconfig.DynDNSRecord{Name: r.Name, Type: r.Type, TTL: r.Ttl, Value: r.Value})
 	}
 	return d
 }

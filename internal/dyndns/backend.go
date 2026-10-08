@@ -133,6 +133,11 @@ func (b *rfc2136) update(ctx context.Context, sets []rrset) error {
 		msg.RemoveRRset([]dns.RR{rr})
 		msg.Insert([]dns.RR{rr})
 	}
+	return b.send(msg, addr)
+}
+
+// send sends an UPDATE, signed with the TSIG key if there is one.
+func (b *rfc2136) send(msg *dns.Msg, addr string) error {
 	client := &dns.Client{Net: "udp", Timeout: timeout}
 	if t := b.tsig; t != nil {
 		client.TsigSecret = map[string]string{t.Name: t.Secret}

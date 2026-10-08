@@ -246,9 +246,17 @@ LAN `192.168.50.0/24`.
 
 ## Certificates
 
-*Services → Certificates* gets TLS certificates from Let's Encrypt (ACME) with the
-HTTP-01 challenge: the CA fetches a token from `http://<domain>/.well-known/acme-challenge/`
-for every domain of the certificate.
+*Services → Certificates* gets TLS certificates from Let's Encrypt (ACME). The CA
+checks each domain of the certificate with one of two challenges:
+
+- **HTTP-01**: the CA fetches a token from
+  `http://<domain>/.well-known/acme-challenge/`, so every domain must reach the
+  firewall from the Internet. See below.
+- **DNS-01**: the firewall puts a TXT record at `_acme-challenge.<domain>`, so the
+  domains need not be reachable at all: internal names, and wildcards
+  (`*.example.com`), work. See [DNS-01](#dns-01).
+
+With HTTP-01:
 
 - Every domain must resolve (A, and AAAA if it has one) to an address of the
   certificate's *Interface*, the WAN say. A dynamic DNS zone (DNS, *New dynamic zone*)
@@ -272,13 +280,45 @@ for every domain of the certificate.
 - Try *Let's Encrypt staging* first: its certificates are not trusted, but its rate
   limits are far higher than production's (5 failed validations per hour per domain).
 
+### DNS-01
+
+A DNS-01 certificate names a *DNS update client* (*Services → DNS update*) of the
+same virtual firewall, whose provider (RFC 2136 or a DNS hosting provider's API)
+and credentials write the TXT records, in the client's zone. Its records, interface
+and switch don't matter here: a client kept only for certificates can be disabled
+and have no records. While a client is used by a certificate, it can't be deleted.
+
+- **Names in another zone (CNAME).** The record is put where
+  `_acme-challenge.<domain>` leads: a CNAME there (or a chain of them) is followed,
+  as the CA follows it. So the zones of your internal names need no API or
+  credentials on the firewall; one CNAME per name, made once, points into a zone
+  the client can write:
+
+  ```
+  _acme-challenge.nas.corp.example.com.  CNAME  nas.acme.example.net.
+  _acme-challenge.corp.example.com.      CNAME  corp.acme.example.net.   ; also *.corp.example.com
+  ```
+
+  with the DNS update client's zone `acme.example.net`. Without a CNAME the name
+  `_acme-challenge.<domain>` itself must be in the client's zone. A name that leads
+  elsewhere fails the order with a message naming where the CNAME leads.
+- The CNAMEs are looked up through the firewall host's resolvers
+  (`/etc/resolv.conf`), and the CA looks them up in public DNS: both must see them.
+  So must Let's Encrypt see the TXT record, so the client's zone must be public.
+- A TXT value is added to the name's records and removed when the order is done,
+  so `example.com` and `*.example.com`, which share `_acme-challenge.example.com`,
+  can be in one certificate. The firewall waits up to 5 minutes for the zone's
+  nameservers to have the record before the CA checks it.
+- An RFC 2136 nameserver is reached from the virtual firewall, through its routes and
+  rules, as the client's updates are; a provider's API from the firewall host.
+
 ### Imported certificates
 
 A certificate from another CA is imported with its key: *Import certificate* on the
 *Store* tab takes PEM files (the certificate, its intermediates and the private key;
 one file may hold them all) or pasted PEM. The key must match the certificate; the
 SANs and common name are read from it. It is written to the same directory at the
-next commit, has no interface and opens no port, and is never renewed: its state
+next commit, has no challenge and opens no port, and is never renewed: its state
 turns *expired* once past its end. To replace it, edit it on the *Overview* tab and
 paste the new certificate (and a new key, unless it reuses the old one). The key is
 never shown again, and the deployment history keeps it redacted.

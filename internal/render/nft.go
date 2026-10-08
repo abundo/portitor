@@ -97,7 +97,7 @@ func Nftables(in *fwconfig.Instance, lockout *AntiLockout, paths Paths) string {
 		writeAutoSet(b, r)
 	}
 
-	if slices.ContainsFunc(in.Certificates, func(c fwconfig.Certificate) bool { return !c.Imported() }) {
+	if slices.ContainsFunc(in.Certificates, func(c fwconfig.Certificate) bool { return c.HTTP01() }) {
 		fmt.Fprintf(b, "\tset %s {\n\t\ttype inet_service\n\t}\n\n", ACMEHTTPSet)
 	}
 	if hasTunnelBroker(in) {
@@ -641,7 +641,7 @@ func AutoInputRules(in *fwconfig.Instance) []AutoRule {
 	// rule matches only while one is being answered.
 	var acme []string
 	for _, c := range in.Certificates {
-		if !c.Imported() && !slices.Contains(acme, c.Interface) {
+		if c.HTTP01() && !slices.Contains(acme, c.Interface) {
 			acme = append(acme, c.Interface)
 		}
 	}

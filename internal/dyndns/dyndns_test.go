@@ -82,9 +82,15 @@ func (f *fakeNS) exchange(_ *dns.Client, m *dns.Msg, _ string) (*dns.Msg, error)
 		}
 		for _, rr := range m.Ns {
 			k := key(rr.Header().Name, rr.Header().Rrtype)
-			if rr.Header().Class == dns.ClassANY {
+			switch rr.Header().Class {
+			case dns.ClassANY:
 				delete(f.rrsets, k)
-			} else {
+			case dns.ClassNONE: // delete one RR
+				data := strings.TrimPrefix(rr.String(), rr.Header().String())
+				f.rrsets[k] = slices.DeleteFunc(f.rrsets[k], func(o dns.RR) bool {
+					return strings.TrimPrefix(o.String(), o.Header().String()) == data
+				})
+			default:
 				f.rrsets[k] = append(f.rrsets[k], rr)
 			}
 		}

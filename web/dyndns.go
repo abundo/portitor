@@ -165,6 +165,9 @@ func presentDyndnsClient(c *models.DyndnsClient) {
 }
 
 func deleteDyndnsClient(tx *gorm.DB, c *models.DyndnsClient) error {
+	if err := refuseCertificateDyndns(tx, c); err != nil {
+		return err
+	}
 	return tx.Where("client_id = ?", c.ID).Delete(&models.DyndnsRecord{}).Error
 }
 

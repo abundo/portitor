@@ -93,17 +93,7 @@ func (v *validator) dyndns(p string, in *Instance, ifaces map[string]*Interface)
 		if !validDomain(d.Zone) {
 			v.addf("%s: invalid zone %q", dp, d.Zone)
 		}
-		if t := d.TSIG; t != nil && (d.Provider == "" || d.Provider == ProviderRFC2136) {
-			if !validDomain(t.Name) {
-				v.addf("%s: invalid TSIG key name %q", dp, t.Name)
-			}
-			if !slices.Contains(TSIGAlgorithms, t.Algorithm) {
-				v.addf("%s: TSIG algorithm must be one of %s", dp, strings.Join(TSIGAlgorithms, ", "))
-			}
-			if b, err := base64.StdEncoding.DecodeString(t.Secret); err != nil || len(b) == 0 {
-				v.addf("%s: TSIG secret must be base64", dp)
-			}
-		}
+		v.tsig(dp, d.Provider, d.TSIG)
 		for field, n := range map[string]int{"retry interval": d.RetryInterval, "verify interval": d.VerifyInterval} {
 			if n != 0 && (n < 10 || n > 7*86400) {
 				v.addf("%s: %s must be 10-604800 seconds (0 for the default)", dp, field)
@@ -121,6 +111,22 @@ func (v *validator) dyndns(p string, in *Instance, ifaces map[string]*Interface)
 				v.addf("%s: %s has a CNAME and other records", dp, owner)
 			}
 		}
+	}
+}
+
+// tsig checks an RFC 2136 client's TSIG key.
+func (v *validator) tsig(dp, provider string, t *TSIG) {
+	if t == nil || provider != "" && provider != ProviderRFC2136 {
+		return
+	}
+	if !validDomain(t.Name) {
+		v.addf("%s: invalid TSIG key name %q", dp, t.Name)
+	}
+	if !slices.Contains(TSIGAlgorithms, t.Algorithm) {
+		v.addf("%s: TSIG algorithm must be one of %s", dp, strings.Join(TSIGAlgorithms, ", "))
+	}
+	if b, err := base64.StdEncoding.DecodeString(t.Secret); err != nil || len(b) == 0 {
+		v.addf("%s: TSIG secret must be base64", dp)
 	}
 }
 

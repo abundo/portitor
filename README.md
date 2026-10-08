@@ -23,8 +23,9 @@ office networks. It manages:
   addresses and router advertisements follow the delegated prefix
 - DNS update: DNS records follow the WAN addresses, on your own nameserver (RFC 2136, TSIG)
   or at a DNS hosting provider (Cloudflare, Hetzner, deSEC, Loopia, GleSYS and more, via libdns)
-- certificates: Let's Encrypt (ACME, HTTP-01) certificates, renewed automatically; port 80
-  opens only while a challenge is answered; or a certificate imported with its key
+- certificates: Let's Encrypt (ACME) certificates, renewed automatically: HTTP-01, with port 80
+  open only while a challenge is answered, or DNS-01 through a DNS update client (internal
+  names and wildcards; `_acme-challenge` CNAMEs followed); or a certificate imported with its key
 - IP lists: CrowdSec decisions or downloaded blocklists, used as `@name` in rules
 - BGP (FRR, off by default): neighbours and peer groups, networks, aggregates and
   redistribution, filtered with prefix lists, AS path and community lists and route maps
@@ -64,7 +65,7 @@ firewall, the agent, makes the changes the GUI asks for. For a single box, an
                   ├─ WireGuard      wg syncconf
                   ├─ DHCP clients   in-process DHCPv4 and DHCPv6 (prefix delegation), for the WAN
                   ├─ DNS update     in-process RFC 2136 updates (ifnsupdate), provider APIs (libdns)
-                  ├─ ACME           Let's Encrypt certificates (lego), HTTP-01 in the virtual firewall
+                  ├─ ACME           Let's Encrypt certificates (lego), HTTP-01 in the virtual firewall, DNS-01
                   ├─ IP lists       downloads (CrowdSec LAPI, plain text) into nftables sets
                   ├─ scheduler      cron-style tasks
                   ├─ diagnostics    packet log (NFLOG), DNS query log, conntrack, capture, mtr, LLDP

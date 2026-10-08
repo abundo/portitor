@@ -102,27 +102,10 @@ func (m *dyndnsManager) start(it dyndnsItem) *dyndnsRun {
 		return r
 	}
 	// A provider's API is called from the host, like IP list downloads.
-	client, err := dyndns.New(cfg, dyndns.Env{
-		Addrs: func() (net.IP, net.IP, error) { return globalAddrs(it.netns, it.cfg.Interface) },
-		// The nameserver is reached from the instance, through its routes
-		// and firewall.
-		Exchange: func(c *dns.Client, msg *dns.Msg, addr string) (resp *dns.Msg, err error) {
-			err = withNetns(it.netns, func() error {
-				var e error
-				resp, _, e = c.Exchange(msg, addr)
-				return e
-			})
-			return resp, err
-		},
-		// A nameserver given by name is resolved in the instance too.
-		Resolve: func(ctx context.Context, host string) (netip.Addr, error) {
-			if len(host) > 253 || !dnsName.MatchString(host) {
-				return netip.Addr{}, fmt.Errorf("%q is not a DNS name", host)
-			}
-			return resolveName(ctx, it.netns, host, "")
-		},
-		Log: log,
-	})
+	env := instanceDNSEnv(it.netns)
+	env.Addrs = func() (net.IP, net.IP, error) { return globalAddrs(it.netns, it.cfg.Interface) }
+	env.Log = log
+	client, err := dyndns.New(cfg, env)
 	if err != nil {
 		log.Error("DNS update client", "err", err)
 		r.state, r.err = "error", err.Error()
@@ -283,5 +266,28 @@ func notify(ch chan<- struct{}) {
 	select {
 	case ch <- struct{}{}:
 	default:
+	}
+}
+
+// instanceDNSEnv is how a DNS update client, or a certificate's DNS-01
+// challenge, reaches its nameserver: a provider's API is called from the
+// host, like IP list downloads, and an RFC 2136 nameserver from the
+// instance, through its routes and firewall (a name resolved there too).
+func instanceDNSEnv(netns string) dyndns.Env {
+	return dyndns.Env{
+		Exchange: func(c *dns.Client, msg *dns.Msg, addr string) (resp *dns.Msg, err error) {
+			err = withNetns(netns, func() error {
+				var e error
+				resp, _, e = c.Exchange(msg, addr)
+				return e
+			})
+			return resp, err
+		},
+		Resolve: func(ctx context.Context, host string) (netip.Addr, error) {
+			if len(host) > 253 || !dnsName.MatchString(host) {
+				return netip.Addr{}, fmt.Errorf("%q is not a DNS name", host)
+			}
+			return resolveName(ctx, netns, host, "")
+		},
 	}
 }

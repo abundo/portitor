@@ -224,7 +224,7 @@ func TestValidateCatchesProblems(t *testing.T) {
 			dd.ProviderSettings = map[string]string{"token": "a\nb"}
 		}, "control characters"},
 		{"cert unknown interface", func(d *Document) { d.Instances[0].Certificates[0].Interface = "eth9" }, `certificate "www": unknown interface "eth9"`},
-		{"cert wildcard", func(d *Document) { d.Instances[0].Certificates[0].Domains[0] = "*.example.com" }, "cannot validate a wildcard"},
+		{"cert wildcard", func(d *Document) { d.Instances[0].Certificates[0].Domains[0] = "*.example.com" }, "only DNS-01 can validate a wildcard"},
 		{"cert upper case", func(d *Document) { d.Instances[0].Certificates[0].Domains[0] = "WWW.example.com" }, "is not a DNS name"},
 		{"cert single label", func(d *Document) { d.Instances[0].Certificates[0].Domains[0] = "localhost" }, "is not a DNS name"},
 		{"cert address", func(d *Document) { d.Instances[0].Certificates[0].Domains[0] = "192.0.2.1" }, "an IP address"},
@@ -233,7 +233,16 @@ func TestValidateCatchesProblems(t *testing.T) {
 		{"cert no domains", func(d *Document) { d.Instances[0].Certificates[0].Domains = nil }, "needs 1-100 domains"},
 		{"cert http ca", func(d *Document) { d.Instances[0].Certificates[0].CA = "http://ca.example.com/dir" }, "https URL"},
 		{"cert key type", func(d *Document) { d.Instances[0].Certificates[0].KeyType = "dsa" }, "key type must be"},
-		{"cert challenge", func(d *Document) { d.Instances[0].Certificates[0].Challenge = "dns-01" }, "challenge must be http-01"},
+		{"cert challenge", func(d *Document) { d.Instances[0].Certificates[0].Challenge = "tls-alpn-01" }, "challenge must be one of http-01, dns-01"},
+		{"cert dns-01 no client", func(d *Document) { d.Instances[0].Certificates[0].Challenge = ChallengeDNS01 }, "DNS-01 needs a DNS update client"},
+		{"cert dns-01 interface", func(d *Document) { dns01Cert(d).Interface = "eth0" }, "DNS-01 has no interface"},
+		{"cert dns-01 zone", func(d *Document) { dns01Cert(d).DNS01.Zone = "bad zone" }, `dns update "acme": invalid zone`},
+		{"cert dns-01 settings", func(d *Document) { dns01Cert(d).DNS01.ProviderSettings = map[string]string{} }, "Cloudflare needs"},
+		{"cert dns-01 tsig", func(d *Document) {
+			c := dns01Cert(d)
+			c.DNS01 = &DNS01{Client: "acme", Server: "192.0.2.53", Zone: "acme.example.net", TSIG: &TSIG{Name: "k", Algorithm: "hmac-sha256", Secret: "!"}}
+		}, "TSIG secret must be base64"},
+		{"cert http-01 with client", func(d *Document) { d.Instances[0].Certificates[0].DNS01 = &DNS01{Zone: "example.net"} }, "HTTP-01 has no DNS update client"},
 		{"cert email", func(d *Document) { d.Instances[0].Certificates[0].Email = "a b@example.com" }, "invalid email"},
 		{"cert duplicate", func(d *Document) {
 			d.Instances[0].Certificates = append(d.Instances[0].Certificates, d.Instances[0].Certificates[0])
@@ -502,5 +511,27 @@ func TestItemNames(t *testing.T) {
 		if err := d.Validate(); (err == nil) != ok {
 			t.Errorf("%q: validate %v", name, err)
 		}
+	}
+}
+
+// dns01Cert makes the test document's certificate a DNS-01 one, through a
+// Cloudflare account, and returns it.
+func dns01Cert(d *Document) *Certificate {
+	c := &d.Instances[0].Certificates[0]
+	c.Challenge, c.Interface = ChallengeDNS01, ""
+	c.DNS01 = &DNS01{Client: "acme", Provider: "cloudflare", ProviderSettings: map[string]string{"api_token": "t"}, Zone: "acme.example.net"}
+	return c
+}
+
+func TestCertificateDNS01(t *testing.T) {
+	d := SampleDocument()
+	c := dns01Cert(&d)
+	c.Domains = append(c.Domains, "*.example.com")
+	if err := d.Validate(); err != nil {
+		t.Fatalf("DNS-01 with a wildcard: %v", err)
+	}
+	c.DNS01 = &DNS01{Client: "ns", Server: "192.0.2.53", Zone: "acme.example.net", TSIG: &TSIG{Name: "acme-key", Algorithm: "hmac-sha256", Secret: "c2VjcmV0"}}
+	if err := d.Validate(); err != nil {
+		t.Fatalf("DNS-01 with RFC 2136: %v", err)
 	}
 }

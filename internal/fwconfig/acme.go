@@ -26,6 +26,12 @@ import (
 // challenge (render.ACMEHTTPSet holds the port then, and is empty
 // otherwise), so port 80 is closed the rest of the time.
 //
+// With the DNS-01 challenge the agent puts a TXT record at
+// _acme-challenge.<domain> through a DNS update client's provider (DNS01),
+// from the host like the client's own updates; the domains need not be
+// reachable, and may be wildcards. A CNAME at _acme-challenge.<domain> is
+// followed, so the TXT record can be in another zone, the client's.
+//
 // An imported certificate (Source CertSourceImport) comes with its chain
 // and key, which the agent stores as they are and never renews; the ACME
 // fields are empty.
@@ -50,12 +56,35 @@ type Certificate struct {
 	// KeyType is one of CertKeyTypes.
 	KeyType   string `json:"key_type"`
 	Challenge string `json:"challenge"`
-	// Interface is where the CA's HTTP-01 requests come in.
-	Interface string `json:"interface"`
+	// Interface is where the CA's HTTP-01 requests come in (HTTP-01
+	// only).
+	Interface string `json:"interface,omitempty"`
+	// DNS01 is where DNS-01's TXT records are written (DNS-01 only).
+	DNS01 *DNS01 `json:"dns01,omitempty"`
+}
+
+// DNS01 is a DNS update client's provider and zone, copied into a
+// certificate that uses it for the DNS-01 challenge. Every
+// _acme-challenge name, after its CNAMEs, must be in Zone.
+type DNS01 struct {
+	// Client is the DNS update client's name, for messages.
+	Client string `json:"client"`
+	// Provider, ProviderSettings, Server, Zone and TSIG are as in DynDNS.
+	Provider         string            `json:"provider,omitempty"`
+	ProviderSettings map[string]string `json:"provider_settings,omitempty"`
+	Server           string            `json:"server,omitempty"`
+	Zone             string            `json:"zone"`
+	TSIG             *TSIG             `json:"tsig,omitempty"`
 }
 
 // Challenges.
-const ChallengeHTTP01 = "http-01"
+const (
+	ChallengeHTTP01 = "http-01"
+	ChallengeDNS01  = "dns-01"
+)
+
+// Challenges are the ACME challenges a certificate may use.
+var Challenges = []string{ChallengeHTTP01, ChallengeDNS01}
 
 // Certificate sources.
 const (
@@ -65,6 +94,10 @@ const (
 
 // Imported says whether a certificate is imported rather than got by ACME.
 func (c *Certificate) Imported() bool { return c.Source == CertSourceImport }
+
+// HTTP01 says whether a certificate is got with the HTTP-01 challenge,
+// which opens port 80 on its interface.
+func (c *Certificate) HTTP01() bool { return !c.Imported() && c.Challenge == ChallengeHTTP01 }
 
 // ParseImported checks an imported certificate: a PEM chain whose first
 // certificate matches the PEM private key. It returns the leaf.
@@ -154,7 +187,7 @@ func (v *validator) certificates(p string, in *Instance, ifaces map[string]*Inte
 			if _, err := ParseImported(c.FullChain, c.PrivKey); err != nil {
 				v.addf("%s: %v", cp, err)
 			}
-			if c.Interface != "" || c.CA != "" || c.KeyType != "" || c.Challenge != "" || c.Email != "" || c.CommonName != "" || len(c.Domains) > 0 {
+			if c.Interface != "" || c.DNS01 != nil || c.CA != "" || c.KeyType != "" || c.Challenge != "" || c.Email != "" || c.CommonName != "" || len(c.Domains) > 0 {
 				v.addf("%s: an imported certificate has no ACME settings", cp)
 			}
 			continue
@@ -165,11 +198,30 @@ func (v *validator) certificates(p string, in *Instance, ifaces map[string]*Inte
 		if c.FullChain != "" || c.PrivKey != "" {
 			v.addf("%s: an ACME certificate has no imported chain or key", cp)
 		}
-		if c.Challenge != ChallengeHTTP01 {
-			v.addf("%s: challenge must be %s", cp, ChallengeHTTP01)
-		}
-		if ifaces[c.Interface] == nil {
-			v.addf("%s: unknown interface %q", cp, c.Interface)
+		switch c.Challenge {
+		case ChallengeHTTP01:
+			if ifaces[c.Interface] == nil {
+				v.addf("%s: unknown interface %q", cp, c.Interface)
+			}
+			if c.DNS01 != nil {
+				v.addf("%s: HTTP-01 has no DNS update client", cp)
+			}
+		case ChallengeDNS01:
+			if c.Interface != "" {
+				v.addf("%s: DNS-01 has no interface", cp)
+			}
+			if d := c.DNS01; d == nil {
+				v.addf("%s: DNS-01 needs a DNS update client", cp)
+			} else {
+				dp := fmt.Sprintf("%s: dns update %q", cp, d.Client)
+				v.dnsProvider(dp, DynDNS{Provider: d.Provider, ProviderSettings: d.ProviderSettings, Server: d.Server, TSIG: d.TSIG})
+				v.tsig(dp, d.Provider, d.TSIG)
+				if !validDomain(d.Zone) {
+					v.addf("%s: invalid zone %q", dp, d.Zone)
+				}
+			}
+		default:
+			v.addf("%s: challenge must be one of %s", cp, strings.Join(Challenges, ", "))
 		}
 		if _, err := ACMEDirectory(c.CA); err != nil {
 			v.addf("%s: %v", cp, err)
@@ -185,7 +237,7 @@ func (v *validator) certificates(p string, in *Instance, ifaces map[string]*Inte
 		}
 		seen := map[string]bool{}
 		for _, d := range c.Domains {
-			if err := CertDomain(d); err != nil {
+			if err := CertDomain(d, c.Challenge); err != nil {
 				v.addf("%s: %v", cp, err)
 			}
 			if seen[d] {
@@ -205,13 +257,17 @@ func (v *validator) certificates(p string, in *Instance, ifaces map[string]*Inte
 }
 
 // CertDomain checks a certificate's domain: a lower-case DNS name with at
-// least two labels and no trailing dot, not an address and no wildcard.
-func CertDomain(d string) error {
+// least two labels and no trailing dot, not an address, and a wildcard
+// only with DNS-01.
+func CertDomain(d, challenge string) error {
 	if _, err := netip.ParseAddr(d); err == nil {
-		return fmt.Errorf("%q: an IP address can't be validated by HTTP-01", d)
+		return fmt.Errorf("%q: an IP address can't be validated", d)
 	}
-	if strings.HasPrefix(d, "*.") {
-		return fmt.Errorf("%q: HTTP-01 cannot validate a wildcard", d)
+	if rest, ok := strings.CutPrefix(d, "*."); ok {
+		if challenge != ChallengeDNS01 {
+			return fmt.Errorf("%q: only DNS-01 can validate a wildcard", d)
+		}
+		d = rest
 	}
 	if d != strings.ToLower(d) || strings.HasSuffix(d, ".") || !strings.Contains(d, ".") || !validDomain(d) || strings.Contains(d, "_") {
 		return fmt.Errorf("%q is not a DNS name (lower case, no trailing dot)", d)

@@ -8,7 +8,7 @@ import { useToast } from '@nuxt/ui/composables'
 import CrudPage from '@/components/CrudPage.vue'
 import NeedInstance from '@/components/NeedInstance.vue'
 import SearchInput from '@/components/SearchInput.vue'
-import { api, certificates } from '@/api'
+import { api, certificates, dyndnsClients } from '@/api'
 import { errMsg } from '@/api/http'
 import { useFormGuard } from '@/composables/useFormGuard'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
@@ -27,6 +27,19 @@ onMounted(() => deploy.refresh())
 const cas = ref([])
 onMounted(async () => (cas.value = await api.acmeCAs()))
 const caLabel = (name) => cas.value.find((c) => c.name === name)?.label ?? name
+
+// The instance's DNS update clients, whose providers write DNS-01's TXT
+// records.
+const dnsClients = ref([])
+watch(
+  () => store.currentId,
+  async (id) => (dnsClients.value = id ? await dyndnsClients.list({ instance_id: id }) : []),
+  { immediate: true },
+)
+const dnsClientItems = computed(() =>
+  dnsClients.value.map((c) => ({ label: `${c.name} (${c.zone})`, value: c.id })),
+)
+const dnsClientName = (id) => dnsClients.value.find((c) => c.id === id)?.name ?? ''
 
 // What the agent reports for the instance's certificates, by name.
 const states = computed(() => {
@@ -167,14 +180,21 @@ const columns = [
   { key: 'domains', label: 'SANs', class: 'font-mono', format: (r) => r.domains.join(', ') },
   {
     key: 'interface_id',
-    label: 'Interface',
-    format: (r) => (imported(r) ? '' : ifaceName(r.interface_id)),
+    label: 'Validation',
+    format: (r) =>
+      imported(r)
+        ? ''
+        : dns01(r)
+          ? `DNS-01 · ${dnsClientName(r.dyndns_client_id)}`
+          : `HTTP-01 · ${ifaceName(r.interface_id)}`,
   },
   { key: 'ca', label: 'CA', format: (r) => (imported(r) ? 'Imported' : caLabel(r.ca)) },
   { key: 'state', label: 'State' },
   { key: 'enabled', label: 'Enabled' },
 ]
 const acme = (form) => form.source !== 'import'
+const dns01 = (form) => acme(form) && form.challenge === 'dns-01'
+const http01 = (form) => acme(form) && form.challenge !== 'dns-01'
 const fields = computed(() => [
   { key: 'name', label: 'Name', required: true, placeholder: 'www' },
   { key: 'description', label: 'Description' },
@@ -199,7 +219,7 @@ const fields = computed(() => [
     type: 'tags',
     required: true,
     placeholder: 'www.example.com',
-    hint: 'The DNS names in the certificate; clients check the name they connect to against these. Each must resolve to an address of the interface below. No wildcards.',
+    hint: 'The DNS names in the certificate; clients check the name they connect to against these. With HTTP-01 each must resolve to an address of the interface below, and wildcards (*.example.com) need DNS-01.',
   },
   {
     key: 'common_name',
@@ -209,13 +229,33 @@ const fields = computed(() => [
     hint: "Optional, at most 64 characters. Only shown to people inspecting the certificate: clients ignore the CN when matching names. Added to the SANs if missing. Let's Encrypt may leave it out.",
   },
   {
-    key: 'interface_id',
+    key: 'challenge',
     show: acme,
+    label: 'Challenge',
+    type: 'select',
+    items: [
+      { label: 'HTTP-01 (port 80)', value: 'http-01' },
+      { label: 'DNS-01 (TXT record)', value: 'dns-01' },
+    ],
+    hint: 'HTTP-01: the CA fetches a token from each name on port 80, so the names must be reachable from the Internet. DNS-01: the firewall puts a TXT record at _acme-challenge.<name> through a DNS update client, so internal names and wildcards work.',
+  },
+  {
+    key: 'interface_id',
+    show: http01,
     label: 'Interface',
     type: 'select',
     items: () => ifaceItems.value,
     required: true,
     hint: "Where the CA's HTTP-01 requests come in. Port 80 is opened on it only while a challenge is answered.",
+  },
+  {
+    key: 'dyndns_client_id',
+    show: dns01,
+    label: 'DNS update client',
+    type: 'select',
+    items: () => dnsClientItems.value,
+    required: true,
+    hint: 'Its provider and credentials write the TXT records, in its zone. For a name outside that zone, add a CNAME from _acme-challenge.<name> to a name in it (_acme-challenge.www.example.com → www.acme.example.net): the firewall follows it. A client kept only for certificates can be disabled and needs no records.',
   },
   {
     key: 'email',
@@ -244,13 +284,6 @@ const fields = computed(() => [
       { label: 'RSA 3072', value: 'rsa3072' },
       { label: 'RSA 4096', value: 'rsa4096' },
     ],
-  },
-  {
-    key: 'challenge',
-    show: acme,
-    label: 'Challenge',
-    type: 'select',
-    items: [{ label: 'HTTP-01 (port 80)', value: 'http-01' }],
   },
   { key: 'enabled', label: 'Enabled', type: 'switch' },
 ])
@@ -353,7 +386,7 @@ const fields = computed(() => [
         <CrudPage
           title="Certificates"
           noun="certificate"
-          description="TLS certificates from Let's Encrypt (ACME), got by the firewall and renewed when two thirds of their lifetime have passed. The CA checks each domain over HTTP on port 80, which the firewall opens on the certificate's interface only while it answers. A certificate from elsewhere is imported with its key on the Store tab, and is never renewed. To serve the GUI itself with one, choose it under Settings → Portitor web."
+          description="TLS certificates from Let's Encrypt (ACME), got by the firewall and renewed when two thirds of their lifetime have passed. The CA checks each domain over HTTP on port 80 (HTTP-01), which the firewall opens on the certificate's interface only while it answers, or by a TXT record the firewall writes through a DNS update client (DNS-01), which also works for internal names and wildcards. A certificate from elsewhere is imported with its key on the Store tab, and is never renewed. To serve the GUI itself with one, choose it under Settings → Portitor web."
           :api="certificates"
           :params="{ instance_id: store.currentId }"
           :columns="columns"

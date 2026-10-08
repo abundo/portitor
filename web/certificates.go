@@ -36,9 +36,24 @@ func prepareCertificate(tx *gorm.DB, c, old *models.Certificate) error {
 		return bad("source: acme or import")
 	}
 	c.FullChain, c.PrivKey, c.NewPrivKey = "", "", ""
+	if c.Challenge == "" {
+		c.Challenge = fwconfig.ChallengeHTTP01
+	}
 	var ifc models.Interface
-	if c.InterfaceID == nil || tx.First(&ifc, *c.InterfaceID).Error != nil || ifc.InstanceID != c.InstanceID {
-		return bad("pick an interface of this virtual firewall")
+	var dc models.DyndnsClient
+	switch c.Challenge {
+	case fwconfig.ChallengeHTTP01:
+		c.DyndnsClientID = nil
+		if c.InterfaceID == nil || tx.First(&ifc, *c.InterfaceID).Error != nil || ifc.InstanceID != c.InstanceID {
+			return bad("pick an interface of this virtual firewall")
+		}
+	case fwconfig.ChallengeDNS01:
+		c.InterfaceID = nil
+		if c.DyndnsClientID == nil || tx.First(&dc, *c.DyndnsClientID).Error != nil || dc.InstanceID != c.InstanceID {
+			return bad("pick a DNS update client of this virtual firewall")
+		}
+	default:
+		return bad("challenge: " + strings.Join(fwconfig.Challenges, " or "))
 	}
 	domains := models.StringList{}
 	for _, d := range c.Domains {
@@ -66,10 +81,11 @@ func prepareCertificate(tx *gorm.DB, c, old *models.Certificate) error {
 	if c.KeyType == "" {
 		c.KeyType = fwconfig.CertKeyTypes[0]
 	}
-	if c.Challenge == "" {
-		c.Challenge = fwconfig.ChallengeHTTP01
+	cert := builder.Certificate(c, ifc.Name)
+	if c.Challenge == fwconfig.ChallengeDNS01 {
+		cert.DNS01 = builder.DNS01(&dc)
 	}
-	return checkCertificate(builder.Certificate(c, ifc.Name))
+	return checkCertificate(cert)
 }
 
 // prepareImported checks an imported certificate's chain and key (a new
@@ -90,7 +106,7 @@ func prepareImported(c *models.Certificate) error {
 		c.Domains = append(c.Domains, ip.String())
 	}
 	c.CommonName = leaf.Subject.CommonName
-	c.Email, c.Ca, c.KeyType, c.Challenge, c.InterfaceID = "", "", "", "", nil
+	c.Email, c.Ca, c.KeyType, c.Challenge, c.InterfaceID, c.DyndnsClientID = "", "", "", "", nil, nil
 	return checkCertificate(builder.Certificate(c, ""))
 }
 
@@ -121,6 +137,19 @@ func checkCertificate(cert fwconfig.Certificate) error {
 		msgs[i] = strings.TrimPrefix(p, prefix)
 	}
 	return bad(strings.Join(msgs, "; "))
+}
+
+// refuseCertificateDyndns refuses deleting a DNS update client while a
+// certificate's DNS-01 challenge uses it.
+func refuseCertificateDyndns(tx *gorm.DB, dc *models.DyndnsClient) error {
+	return usedBy(tx, "DNS update "+dc.Name, &models.Certificate{}, "dyndns_client_id", dc.ID, func() []string {
+		var names []string
+		tx.Model(&models.Certificate{}).Where("dyndns_client_id = ?", dc.ID).Order("name").Pluck("name", &names)
+		for j := range names {
+			names[j] = "certificate " + names[j]
+		}
+		return names
+	})
 }
 
 // refuseCertificateIface refuses removing an interface from its instance

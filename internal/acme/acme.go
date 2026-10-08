@@ -4,7 +4,8 @@
 // Package acme gets certificates from an ACME CA (Let's Encrypt) through
 // lego. It keeps one account per directory and email, and leaves the
 // HTTP-01 challenge to a challenge.Provider of the caller's, which serves
-// it where the CA's requests come in (an instance's namespace).
+// it where the CA's requests come in (an instance's namespace). DNS-01's
+// provider (NewDNS01) writes TXT records through a DNS update client.
 package acme
 
 import (
@@ -56,7 +57,9 @@ type Request struct {
 	Domains   []string
 	// CommonName is the subject's CN, one of Domains; empty uses the first.
 	CommonName string
-	HTTP01     challenge.Provider
+	// HTTP01 or DNS01 answers the challenge; DNS01 when both are set.
+	HTTP01 challenge.Provider
+	DNS01  challenge.Provider
 }
 
 // Result is a certificate and its key, PEM encoded. Certificate holds the
@@ -89,7 +92,12 @@ func Obtain(accountsDir string, req Request) (*Result, error) {
 	if err != nil {
 		return nil, fmt.Errorf("ACME directory %s: %w", req.Directory, err)
 	}
-	if err := client.Challenge.SetHTTP01Provider(req.HTTP01); err != nil {
+	if req.DNS01 != nil {
+		err = client.Challenge.SetDNS01Provider(req.DNS01)
+	} else {
+		err = client.Challenge.SetHTTP01Provider(req.HTTP01)
+	}
+	if err != nil {
 		return nil, err
 	}
 	if user.Registration == nil {
