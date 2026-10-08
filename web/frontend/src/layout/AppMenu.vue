@@ -52,7 +52,7 @@ const sections = computed(() => [
     label: 'Routing',
     value: 'routing',
     children: [
-      { label: 'Routing', icon: 'i-lucide-table', to: '/routing' },
+      { label: 'Tables', icon: 'i-lucide-table', to: '/routing' },
       { label: 'Objects', icon: 'i-lucide-list-filter', to: '/routing-objects' },
       { label: 'VRF', icon: 'i-lucide-split', to: '/vrf' },
       { label: 'Static', icon: 'i-lucide-signpost', to: '/static-routes' },
