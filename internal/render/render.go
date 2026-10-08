@@ -377,7 +377,7 @@ func Render(doc fwconfig.Document, opt Options) (*Bundle, error) {
 		}
 		if in.FRRRunning() {
 			add(f.FRRDaemons, FRRDaemons(in), 0o640, false)
-			add(f.FRRVtysh, FRRVtyshConf(in), 0o644, false)
+			add(f.FRRVtysh, FRRVtyshConf(in), 0o640, false)
 			add(f.FRRConf, FRRConf(in), 0o640, hasFRRSecret(in))
 		}
 	}

@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -64,6 +65,10 @@ func (a *Agent) handleConsole(w http.ResponseWriter, r *http.Request) {
 		// login shell's PS1 from the environment would not survive.
 		name := r.URL.Query().Get("instance")
 		cmd.Env = append(cmd.Env, "debian_chroot="+name, "PORTITOR_VF="+name)
+		// The VF's FRR has the instance as its pathspace
+		// (portitor-frr@.service): bash imports this function, so a plain
+		// vtysh talks to it.
+		cmd.Env = append(cmd.Env, "BASH_FUNC_vtysh%%=() {  command vtysh -N "+name+` "$@"; }`)
 	}
 	// The server's read/write timeouts are for requests, not a session.
 	rc := http.NewResponseController(w)
@@ -197,6 +202,11 @@ func credential(u *user.User) (*syscall.Credential, error) {
 	}
 	c := &syscall.Credential{Uid: uint32(uid), Gid: uint32(gid)}
 	ids, _ := u.GroupIds()
+	// FRR's vty sockets are for the frrvty group: with it, vtysh works
+	// without sudo.
+	if g, err := user.LookupGroup("frrvty"); err == nil && !slices.Contains(ids, g.Gid) {
+		ids = append(ids, g.Gid)
+	}
 	for _, s := range ids {
 		if g, err := strconv.ParseUint(s, 10, 32); err == nil {
 			c.Groups = append(c.Groups, uint32(g))

@@ -16,6 +16,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	dnsmgr "github.com/abundo/dnsmgr2/dnsmgr"
@@ -802,6 +803,9 @@ func (a *Agent) applyFRR(ctx context.Context, in *fwconfig.Instance, changed map
 			chownTo("frr", d)
 		}
 	}
+	if in.Default && !a.cfg.DryRun {
+		vtyshReadable(files.FRRVtysh)
+	}
 	active, _ := a.run.Run(ctx, "", "systemctl", "is-active", unit)
 	running := strings.TrimSpace(string(active)) == "active"
 	if err := a.enable(ctx, in, unit); err != nil {
@@ -960,6 +964,31 @@ func chownTo(name, path string) {
 	uid, _ := strconv.Atoi(u.Uid)
 	gid, _ := strconv.Atoi(u.Gid)
 	_ = os.Chown(path, uid, gid)
+}
+
+// vtyshReadable lets the frrvty group (the console user's, see
+// credential) read vtysh.conf, as Debian's package sets it up: vtysh
+// refuses to run without it. frr.conf, with its secrets, stays FRR's.
+func vtyshReadable(path string) {
+	g, err := user.LookupGroup("frrvty")
+	if err != nil {
+		return
+	}
+	gid, _ := strconv.Atoi(g.Gid)
+	uid := -1
+	if u, err := user.Lookup("frr"); err == nil {
+		uid, _ = strconv.Atoi(u.Uid)
+	}
+	_ = os.Chown(path, uid, gid)
+	_ = os.Chmod(path, 0o640)
+	// The directory: its group may pass through (Debian's is frr:frr 0750).
+	dir := filepath.Dir(path)
+	if st, err := os.Stat(dir); err == nil && st.Mode().Perm()&0o001 == 0 {
+		if sys, ok := st.Sys().(*syscall.Stat_t); ok && int(sys.Gid) != gid {
+			_ = os.Chown(dir, -1, gid)
+		}
+		_ = os.Chmod(dir, st.Mode().Perm()|0o050)
+	}
 }
 
 func ensureFile(path, content string) {
