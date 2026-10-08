@@ -679,7 +679,7 @@ func (v *validator) bgpPeer(p string, peer BGPPeer, refs *policyRefs, ifaces map
 	}
 }
 
-// routing checks an instance's routing policy, BGP and OSPF.
+// routing checks an instance's routing policy, BGP, OSPF and IS-IS.
 func (v *validator) routing(p string, in *Instance, ifaces map[string]*Interface) {
 	rp := &in.RoutingPolicy
 	seen := map[string]bool{}
@@ -719,6 +719,9 @@ func (v *validator) routing(p string, in *Instance, ifaces map[string]*Interface
 		if o.ospf != nil {
 			v.ospf(p+": "+o.name, o.ospf, o.version, refs, ifaces)
 		}
+	}
+	if in.ISIS != nil {
+		v.isis(p+": isis", in.ISIS, refs, ifaces)
 	}
 
 	b := in.BGP

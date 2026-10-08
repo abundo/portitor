@@ -66,7 +66,7 @@ const html = computed(() => {
 const TOPICS = [
   { label: 'General', children: ['portitor-web', 'appliance'] },
   { label: 'Network', children: ['nat64', 'tunnels'] },
-  { label: 'Routing', children: ['bfd', 'vrrp', 'ospf', 'bgp'] },
+  { label: 'Routing', children: ['bfd', 'vrrp', 'isis', 'ospf', 'bgp'] },
   { label: 'Firewall', children: ['rules', 'shaping', 'crowdsec'] },
   { label: 'Services', children: ['ntp', 'snmp'] },
 ]

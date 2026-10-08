@@ -10,7 +10,8 @@ import (
 
 // BFDInterface turns BFD (RFC 5880, single hop, FRR's bfdd) on for an
 // interface of the instance, with its timers. Static routes (Route.BFD),
-// OSPF interfaces (OSPFInterface.BFD) and BGP neighbours (BGPPeer.BFD)
+// OSPF and IS-IS interfaces (OSPFInterface.BFD, ISISInterface.BFD) and
+// BGP neighbours (BGPPeer.BFD)
 // that ask for BFD use it on the interfaces that have it, and only there:
 // on any other interface they run without, so this list is the switch.
 // Each renders as a bfdd profile (BFDProfile) the users name.

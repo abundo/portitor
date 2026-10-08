@@ -930,6 +930,55 @@ type OSPFRoute struct {
 	Interface []string `json:"interfaces,omitempty"`
 }
 
+// ISISResponse is the IS-IS state of the instances that run it, from FRR.
+type ISISResponse struct {
+	Instances []ISISInstance `json:"instances"`
+}
+
+// ISISInstance is one instance's IS-IS state. Error says why FRR could not
+// be asked (not running yet, say).
+type ISISInstance struct {
+	Instance   string              `json:"instance"`
+	SystemID   string              `json:"system_id,omitempty"`
+	Error      string              `json:"error,omitempty"`
+	Neighbors  []ISISNeighborInfo  `json:"neighbors"`
+	Interfaces []ISISInterfaceInfo `json:"interfaces"`
+	// Routes are IS-IS's routing table, at most ISISMaxRoutes.
+	Routes          []ISISRoute `json:"routes"`
+	RoutesTruncated bool        `json:"routes_truncated,omitempty"`
+}
+
+// ISISMaxRoutes caps the routes in an ISISInstance.
+const ISISMaxRoutes = 2000
+
+// ISISNeighborInfo is an adjacency: the neighbour by its hostname or
+// system id, on an interface, at a level.
+type ISISNeighborInfo struct {
+	SystemID  string `json:"system_id"`
+	Interface string `json:"interface,omitempty"`
+	Level     string `json:"level,omitempty"`
+	State     string `json:"state"`
+	HoldTime  string `json:"hold_time,omitempty"`
+	SNPA      string `json:"snpa,omitempty"`
+}
+
+// ISISInterfaceInfo is an interface (circuit) IS-IS runs on.
+type ISISInterfaceInfo struct {
+	Name  string `json:"name"`
+	State string `json:"state,omitempty"`
+	Type  string `json:"type,omitempty"`  // broadcast, p2p, loopback
+	Level string `json:"level,omitempty"` // L1, L2, L1L2
+}
+
+// ISISRoute is a route in IS-IS's routing table, at a level.
+type ISISRoute struct {
+	Prefix    string   `json:"prefix"`
+	Level     string   `json:"level,omitempty"`
+	Metric    *int64   `json:"metric,omitempty"`
+	NextHops  []string `json:"next_hops"`
+	Interface []string `json:"interfaces,omitempty"`
+}
+
 // VRRPResponse is the state of the virtual routers of the instances that
 // have them, from FRR's vrrpd.
 type VRRPResponse struct {

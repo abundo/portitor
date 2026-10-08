@@ -3,7 +3,7 @@
 
 <!-- BFD (FRR's bfdd): the interfaces of the virtual firewall with BFD and
      their timers (Interfaces tab), and the sessions as FRR has them (BFD
-     info). Static routes, OSPF interfaces and BGP neighbours turn BFD on
+     info). Static routes, OSPF and IS-IS interfaces and BGP neighbours turn BFD on
      for themselves; it runs on the interfaces listed here. -->
 <script setup>
 import AutoRefreshButton from '@/components/AutoRefreshButton.vue'
@@ -13,7 +13,15 @@ import { useRoute, useRouter } from 'vue-router'
 import CrudPage from '@/components/CrudPage.vue'
 import NeedInstance from '@/components/NeedInstance.vue'
 import SearchInput from '@/components/SearchInput.vue'
-import { api, bfdInterfaces, bgpNeighbors, bgpPeerGroups, ospfInterfaces, routes } from '@/api'
+import {
+  api,
+  bfdInterfaces,
+  bgpNeighbors,
+  bgpPeerGroups,
+  isisInterfaces,
+  ospfInterfaces,
+  routes,
+} from '@/api'
 import { errMsg } from '@/api/http'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
 import { useSearch, valuesText } from '@/utils/search'
@@ -36,17 +44,18 @@ const status = ref(null)
 const statusError = ref('')
 const loading = ref(false)
 // What asks for BFD: static routes, BGP neighbours (or their peer group) and
-// OSPF interfaces with it on, loaded with the sessions.
-const users = ref({ routes: [], neighbors: [], groups: [], ospf: [] })
+// OSPF and IS-IS interfaces with it on, loaded with the sessions.
+const users = ref({ routes: [], neighbors: [], groups: [], ospf: [], isis: [] })
 async function loadUsers() {
   const params = { instance_id: store.currentId }
-  const [r, n, g, o] = await Promise.all([
+  const [r, n, g, o, s] = await Promise.all([
     routes.list(params),
     bgpNeighbors.list(params),
     bgpPeerGroups.list(params),
     ospfInterfaces.list(params),
+    isisInterfaces.list(params),
   ])
-  users.value = { routes: r, neighbors: n, groups: g, ospf: o }
+  users.value = { routes: r, neighbors: n, groups: g, ospf: o, isis: s }
 }
 async function loadStatus() {
   loading.value = true
@@ -66,7 +75,7 @@ const mine = computed(() =>
 )
 const peers = computed(() => mine.value?.peers ?? [])
 // usedBy lists the protocols a session serves: a static route by its
-// gateway, a BGP neighbour by its address, OSPF by the session's interface
+// gateway, a BGP neighbour by its address, OSPF and IS-IS by the session's interface
 // (OSPFv2 for an IPv4 peer, OSPFv3 for IPv6).
 const sameAddr = (a, b) => !!a && !!b && a.toLowerCase() === b.toLowerCase()
 function usedBy(p) {
@@ -83,6 +92,7 @@ function usedBy(p) {
   const version = p.peer?.includes(':') ? 3 : 2
   if (u.ospf.some((o) => o.bfd && o.version === version && o.name === p.interface))
     out.push(version === 3 ? 'OSPFv3' : 'OSPF')
+  if (u.isis.some((i) => i.bfd && i.name === p.interface)) out.push('IS-IS')
   return out
 }
 const info = useSearch(peers, (p) =>
@@ -135,7 +145,7 @@ const fields = computed(() => [
     key: 'enabled',
     label: 'Enabled',
     type: 'switch',
-    hint: 'Off: no BFD on the interface; the static routes, OSPF and BGP neighbours that ask for BFD run without it there.',
+    hint: 'Off: no BFD on the interface; the static routes, OSPF, IS-IS and BGP neighbours that ask for BFD run without it there.',
   },
   {
     key: 'receive_interval',
@@ -181,7 +191,7 @@ const defaults = {
       <template #interfaces>
         <CrudPage
           title="BFD interfaces"
-          description="BFD (FRR) on the interfaces of this virtual firewall: fast detection of a lost neighbour. Static routes (their gateway), OSPF interfaces and BGP neighbours turn BFD on in their own settings, and use it on the interfaces listed and enabled here, with these timers."
+          description="BFD (FRR) on the interfaces of this virtual firewall: fast detection of a lost neighbour. Static routes (their gateway), OSPF and IS-IS interfaces and BGP neighbours turn BFD on in their own settings, and use it on the interfaces listed and enabled here, with these timers."
           :api="bfdInterfaces"
           :params="{ instance_id: store.currentId }"
           :columns="columns"
@@ -199,7 +209,8 @@ const defaults = {
               <div class="text-lg font-semibold">BFD info</div>
               <p class="max-w-3xl text-sm text-muted">
                 The BFD sessions of this virtual firewall as FRR has them: one per neighbour or
-                gateway that uses BFD, with the protocols (static routes, BGP, OSPF) that use it.
+                gateway that uses BFD, with the protocols (static routes, BGP, OSPF, IS-IS) that use
+                it.
               </p>
             </div>
             <AutoRefreshButton :auto="auto" :loading="loading" />

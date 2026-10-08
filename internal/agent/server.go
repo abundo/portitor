@@ -72,6 +72,9 @@ func (a *Agent) routes() *http.ServeMux {
 	mux.HandleFunc("GET /v1/ospf", func(w http.ResponseWriter, r *http.Request) {
 		writeJSONResponse(w, http.StatusOK, a.OSPF(r.Context()))
 	})
+	mux.HandleFunc("GET /v1/isis", func(w http.ResponseWriter, r *http.Request) {
+		writeJSONResponse(w, http.StatusOK, a.ISIS(r.Context()))
+	})
 	mux.HandleFunc("GET /v1/vrrp", func(w http.ResponseWriter, r *http.Request) {
 		writeJSONResponse(w, http.StatusOK, a.VRRP(r.Context()))
 	})

@@ -73,14 +73,16 @@ type Instance struct {
 	// ospf6d in the instance; nil when off.
 	OSPF  *OSPF `json:"ospf,omitempty"`
 	OSPF6 *OSPF `json:"ospf6,omitempty"`
+	// ISIS runs FRR's isisd in the instance; nil when off.
+	ISIS *ISIS `json:"isis,omitempty"`
 	// VRRP lists the virtual routers on the instance's interfaces (FRR's
 	// vrrpd).
 	VRRP []VRRP `json:"vrrp,omitempty"`
 	// BFD lists the interfaces with BFD (FRR's bfdd), which static routes,
-	// OSPF and BGP use there.
+	// OSPF, IS-IS and BGP use there.
 	BFD []BFDInterface `json:"bfd,omitempty"`
 	// RoutingPolicy holds the prefix lists, AS path and community lists
-	// and route maps BGP and OSPF refer to.
+	// and route maps BGP, OSPF and IS-IS refer to.
 	RoutingPolicy RoutingPolicy `json:"routing_policy,omitzero"`
 	// LogDrops lists the filter chains (ChainInput, ...) that log, rate
 	// limited, what no rule decided on before the chain's policy drops it.

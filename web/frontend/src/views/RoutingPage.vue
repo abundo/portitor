@@ -58,6 +58,7 @@ const protocolLabel = {
   dhcp: 'DHCP',
   bgp: 'BGP',
   ospf: 'OSPF',
+  isis: 'IS-IS',
   static: 'static (FRR)',
   kernel: 'connected',
   zebra: 'FRR',
@@ -113,7 +114,7 @@ const columns = [
           <p class="max-w-3xl text-sm text-muted">
             The IPv4 and IPv6 routes of this virtual firewall in all its routing tables (main, local
             and any other) as the kernel has them. Protocol is who added the route: connected
-            networks, DHCP and RA, the static routes deployed (portitor), and FRR's BGP, OSPF and
+            networks, DHCP and RA, the static routes deployed (portitor), and FRR's BGP, IS-IS, OSPF and
             static (with BFD) routes.
           </p>
         </div>

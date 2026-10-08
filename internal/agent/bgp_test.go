@@ -227,7 +227,7 @@ func TestApplyFRR(t *testing.T) {
 
 	// VRRP alone keeps it running too.
 	r.calls = nil
-	in.OSPF.Enabled, in.OSPF6.Enabled = false, false
+	in.OSPF.Enabled, in.OSPF6.Enabled, in.ISIS = false, false, nil
 	if err := a.applyFRR(ctx, in, map[string]bool{}); err != nil {
 		t.Fatal(err)
 	}

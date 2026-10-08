@@ -46,7 +46,7 @@ var programs = []program{
 	{name: "snmpd", purpose: "SNMP (net-snmp)", needed: func(in *fwconfig.Instance) bool { return in.SNMP != nil }},
 	{name: "jool", purpose: "NAT64 (Jool)", needed: func(in *fwconfig.Instance) bool { return in.NAT64 != nil }},
 	// FRR's daemons are in /usr/lib/frr, off the PATH; vtysh comes with them.
-	{name: "vtysh", purpose: "BGP, OSPF, VRRP and BFD (FRR)", needed: func(in *fwconfig.Instance) bool { return in.FRRRunning() }},
+	{name: "vtysh", purpose: "BGP, OSPF, IS-IS, VRRP and BFD (FRR)", needed: func(in *fwconfig.Instance) bool { return in.FRRRunning() }},
 }
 
 // lookPath is exec.LookPath, replaceable in tests.

@@ -181,9 +181,11 @@ func ifaceLists(tx *gorm.DB, instanceID uint, zones bool, visit func(where strin
 // renameIfaceRefs rewrites old to name in the instance's rule lists and,
 // for an interface (zones true), in its interface zones.
 func renameIfaceRefs(tx *gorm.DB, instanceID uint, old, name string, zones bool) error {
-	// OSPF, VRRP and BFD run on interfaces and link ends.
-	if err := tx.Model(&models.OspfInterface{}).Where("instance_id = ? AND name = ?", instanceID, old).UpdateColumn("name", name).Error; err != nil {
-		return err
+	// OSPF, IS-IS, VRRP and BFD run on interfaces and link ends.
+	for _, m := range []any{&models.OspfInterface{}, &models.IsisInterface{}} {
+		if err := tx.Model(m).Where("instance_id = ? AND name = ?", instanceID, old).UpdateColumn("name", name).Error; err != nil {
+			return err
+		}
 	}
 	if err := tx.Model(&models.VrrpRouter{}).Where("instance_id = ? AND interface = ?", instanceID, old).UpdateColumn("interface", name).Error; err != nil {
 		return err
@@ -260,6 +262,7 @@ func refuseIfaceInUse(tx *gorm.DB, instanceID uint, name string) error {
 		users = append(users, "VXLAN "+x)
 	}
 	users = append(users, ospfIfaceUsers(tx, instanceID, name)...)
+	users = append(users, isisIfaceUsers(tx, instanceID, name)...)
 	users = append(users, vrrpIfaceUsers(tx, instanceID, name)...)
 	if len(users) > 0 {
 		if len(users) > 5 {

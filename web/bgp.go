@@ -474,7 +474,7 @@ func (o *routingObjects) check(where, kind, name, family string) []string {
 }
 
 // eachRoutingRef calls visit for every reference of an instance's route
-// maps, BGP config, peer groups, neighbours and OSPF configs to a routing
+// maps, BGP config, peer groups, neighbours, OSPF and IS-IS configs to a routing
 // object (or a
 // neighbour's to its peer group). Rows where visit changed one are saved.
 func eachRoutingRef(tx *gorm.DB, instanceID uint, visit func(kind, where string, ref *string) bool) error {
@@ -540,6 +540,31 @@ func eachRoutingRef(tx *gorm.DB, instanceID uint, visit func(kind, where string,
 		}
 		if changed {
 			if err := tx.Model(&models.OspfConfig{}).Where("id = ?", c.ID).UpdateColumn("redistribute", c.Redistribute).Error; err != nil {
+				return err
+			}
+		}
+	}
+
+	var isis []models.IsisConfig
+	if err := tx.Where("instance_id = ?", instanceID).Find(&isis).Error; err != nil {
+		return err
+	}
+	for _, c := range isis {
+		changed := false
+		for i := range c.DefaultOriginate {
+			d := &c.DefaultOriginate[i]
+			if d.RouteMap != "" && visit(refRouteMap, "IS-IS default originate "+d.Family, &d.RouteMap) {
+				changed = true
+			}
+		}
+		for i := range c.Redistribute {
+			r := &c.Redistribute[i]
+			if r.RouteMap != "" && visit(refRouteMap, fmt.Sprintf("IS-IS redistribute %s %s", r.Family, r.Source), &r.RouteMap) {
+				changed = true
+			}
+		}
+		if changed {
+			if err := tx.Model(&models.IsisConfig{}).Where("id = ?", c.ID).Select("default_originate", "redistribute").Updates(&c).Error; err != nil {
 				return err
 			}
 		}

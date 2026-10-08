@@ -122,7 +122,7 @@ func isQuery(name string, args []string) bool {
 		// An nftables import, read in a namespace of its own.
 		return len(args) > 0 && args[0] == "--net"
 	case "vtysh":
-		// BGP and OSPF info: vtysh [-N <instance>] -c "show ...".
+		// BGP, OSPF and IS-IS info: vtysh [-N <instance>] -c "show ...".
 		return len(args) >= 2 && args[len(args)-2] == "-c" &&
 			strings.HasPrefix(args[len(args)-1], "show ")
 	case "chronyc":

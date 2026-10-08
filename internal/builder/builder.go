@@ -57,6 +57,8 @@ type data struct {
 	bgpNeighbors   []models.BgpNeighbor
 	ospfConfigs    []models.OspfConfig
 	ospfIfaces     []models.OspfInterface
+	isisConfigs    []models.IsisConfig
+	isisIfaces     []models.IsisInterface
 	vrrpRouters    []models.VrrpRouter
 	bfdIfaces      []models.BfdInterface
 	vrfs           []models.Vrf
@@ -102,6 +104,8 @@ func load(db *gorm.DB) (*data, error) {
 		{&d.bgpNeighbors, "id"},
 		{&d.ospfConfigs, "id"},
 		{&d.ospfIfaces, "name"},
+		{&d.isisConfigs, "id"},
+		{&d.isisIfaces, "name"},
 		{&d.vrrpRouters, "interface, vrid"},
 		{&d.bfdIfaces, "interface"},
 		{&d.vrfs, "name"},
@@ -746,6 +750,7 @@ func build(db *gorm.DB, generation int64, only map[string]bool) (*fwconfig.Docum
 
 		d.bgp(&in, mi.ID)
 		in.OSPF, in.OSPF6 = d.ospf(mi.ID, 2), d.ospf(mi.ID, 3)
+		in.ISIS = d.isis(mi.ID)
 		for i := range d.vrrpRouters {
 			if r := &d.vrrpRouters[i]; r.InstanceID == mi.ID {
 				in.VRRP = append(in.VRRP, r.Router())
@@ -912,8 +917,38 @@ func (d *data) ospf(instanceID uint, version int) *fwconfig.OSPF {
 	return o
 }
 
+// isis returns the instance's IS-IS when it is enabled, or nil.
+func (d *data) isis(instanceID uint) *fwconfig.ISIS {
+	var cfg *models.IsisConfig
+	for i := range d.isisConfigs {
+		if c := &d.isisConfigs[i]; c.InstanceID == instanceID {
+			cfg = c
+		}
+	}
+	if cfg == nil || !cfg.Enabled {
+		return nil
+	}
+	s := &fwconfig.ISIS{
+		Enabled:             true,
+		NET:                 cfg.Net,
+		Level:               cfg.Level,
+		MetricStyle:         cfg.MetricStyle,
+		LogAdjacencyChanges: cfg.LogAdjacencyChanges,
+		IPv6Topology:        cfg.IPv6Topology,
+		Overload:            cfg.Overload,
+		DefaultOriginate:    slices.Clone([]fwconfig.ISISDefault(cfg.DefaultOriginate)),
+		Redistribute:        slices.Clone([]fwconfig.ISISRedistribute(cfg.Redistribute)),
+	}
+	for i := range d.isisIfaces {
+		if ifc := &d.isisIfaces[i]; ifc.InstanceID == instanceID {
+			s.Interfaces = append(s.Interfaces, ifc.Interface())
+		}
+	}
+	return s
+}
+
 // routingPolicy adds the instance's routing policy objects, when FRR runs
-// (BGP or OSPF): off, they stay out of the document.
+// (BGP, OSPF or IS-IS): off, they stay out of the document.
 func (d *data) routingPolicy(in *fwconfig.Instance, instanceID uint) {
 	rp := &in.RoutingPolicy
 	for _, l := range d.prefixLists {

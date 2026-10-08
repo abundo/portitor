@@ -310,6 +310,10 @@ func filterOSPF(o *agentapi.OSPFResponse, names map[string]bool) {
 	o.Instances = slices.DeleteFunc(o.Instances, func(x agentapi.OSPFInstance) bool { return !names[x.Instance] })
 }
 
+func filterISIS(o *agentapi.ISISResponse, names map[string]bool) {
+	o.Instances = slices.DeleteFunc(o.Instances, func(x agentapi.ISISInstance) bool { return !names[x.Instance] })
+}
+
 func filterVRRP(v *agentapi.VRRPResponse, names map[string]bool) {
 	v.Instances = slices.DeleteFunc(v.Instances, func(x agentapi.VRRPInstance) bool { return !names[x.Instance] })
 }

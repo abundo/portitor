@@ -202,6 +202,12 @@ func (c *Client) OSPF(ctx context.Context) (*agentapi.OSPFResponse, error) {
 	return &o, c.do(ctx, http.MethodGet, "/v1/ospf", nil, &o)
 }
 
+// ISIS returns the IS-IS state of the instances that run it.
+func (c *Client) ISIS(ctx context.Context) (*agentapi.ISISResponse, error) {
+	var o agentapi.ISISResponse
+	return &o, c.do(ctx, http.MethodGet, "/v1/isis", nil, &o)
+}
+
 // RoutingTable returns the instances' IPv4 and IPv6 routes.
 func (c *Client) RoutingTable(ctx context.Context) (*agentapi.RoutingTableResponse, error) {
 	var t agentapi.RoutingTableResponse

@@ -31,6 +31,8 @@ export const bgpPeerGroups = crud('/bgp/peer-groups')
 export const bgpNeighbors = crud('/bgp/neighbors')
 export const ospfConfig = crud('/ospf/config')
 export const ospfInterfaces = crud('/ospf/interfaces')
+export const isisConfig = crud('/isis/config')
+export const isisInterfaces = crud('/isis/interfaces')
 export const vrrpRouters = crud('/vrrp/routers')
 export const bfdInterfaces = crud('/bfd/interfaces')
 // VRFs of an instance (Routing → VRF).
@@ -157,6 +159,7 @@ export const api = {
   agentBgpNeighbor: (instance, neighbor) =>
     http.get('/agent/bgp/neighbor', { params: { instance, neighbor } }).then((r) => r.data),
   agentOspf: () => http.get('/agent/ospf').then((r) => r.data),
+  agentIsis: () => http.get('/agent/isis').then((r) => r.data),
   agentVrrp: () => http.get('/agent/vrrp').then((r) => r.data),
   agentBfd: () => http.get('/agent/bfd').then((r) => r.data),
   agentNtp: () => http.get('/agent/ntp').then((r) => r.data),

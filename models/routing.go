@@ -293,6 +293,48 @@ func (i *OspfInterface) Interface() fwconfig.OSPFInterface {
 	}
 }
 
+// IsisConfig is an instance's IS-IS: one row per instance, made on the
+// first save. It is off (not run) until Enabled.
+type IsisConfig struct {
+	Base
+	InstanceID          uint                                `json:"instance_id"`
+	Enabled             bool                                `json:"enabled"`
+	Net                 string                              `gorm:"column:net" json:"net"`
+	Level               string                              `json:"level"`
+	MetricStyle         string                              `json:"metric_style"`
+	LogAdjacencyChanges bool                                `json:"log_adjacency_changes"`
+	IPv6Topology        bool                                `gorm:"column:ipv6_topology" json:"ipv6_topology"`
+	Overload            bool                                `json:"overload"`
+	DefaultOriginate    JSONList[fwconfig.ISISDefault]      `json:"default_originate"`
+	Redistribute        JSONList[fwconfig.ISISRedistribute] `json:"redistribute"`
+}
+
+// IsisInterface is IS-IS on an interface of the instance, by name.
+type IsisInterface struct {
+	Base
+	InstanceID      uint   `json:"instance_id"`
+	Name            string `json:"name"`
+	IPv4            bool   `gorm:"column:ipv4" json:"ipv4"`
+	IPv6            bool   `gorm:"column:ipv6" json:"ipv6"`
+	CircuitType     string `json:"circuit_type"`
+	PointToPoint    bool   `json:"point_to_point"`
+	Passive         bool   `json:"passive"`
+	Metric          int    `json:"metric"`
+	HelloInterval   int    `json:"hello_interval"`
+	HelloMultiplier int    `json:"hello_multiplier"`
+	Priority        *int   `json:"priority"`
+	Bfd             bool   `json:"bfd"` // BFD for the neighbours, if the interface has it
+}
+
+// Interface is the interface as the document holds it.
+func (i *IsisInterface) Interface() fwconfig.ISISInterface {
+	return fwconfig.ISISInterface{
+		Name: i.Name, IPv4: i.IPv4, IPv6: i.IPv6, CircuitType: i.CircuitType, PointToPoint: i.PointToPoint,
+		Passive: i.Passive, Metric: i.Metric, HelloInterval: i.HelloInterval, HelloMultiplier: i.HelloMultiplier,
+		Priority: i.Priority, BFD: i.Bfd,
+	}
+}
+
 // VrrpRouter is a VRRP virtual router on an interface of the instance (by
 // name; link ends included). Disabled, it is shut down: configured, but
 // always backup.

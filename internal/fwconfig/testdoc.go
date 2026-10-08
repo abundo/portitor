@@ -238,6 +238,15 @@ func SampleDocument() Document {
 					Interfaces:   []OSPFInterface{{Name: "lk-main", Area: "0.0.0.0"}},
 					Redistribute: []OSPFRedistribute{{Source: RedistConnected}},
 				},
+				ISIS: &ISIS{
+					Enabled: true, NET: "49.0001.0102.5500.0002.00", Level: ISISLevel2, LogAdjacencyChanges: true, IPv6Topology: true,
+					DefaultOriginate: []ISISDefault{{Family: "ipv4", Level: "level-2", Always: true}},
+					Redistribute:     []ISISRedistribute{{Family: "ipv4", Source: RedistStatic, Level: "level-2", Metric: 20, RouteMap: "connected"}, {Family: "ipv6", Source: RedistOSPF, Level: "level-2"}},
+					Interfaces: []ISISInterface{
+						{Name: "lk-main", IPv4: true, IPv6: true, PointToPoint: true, HelloInterval: 1, HelloMultiplier: 5},
+						{Name: "eth2", IPv4: true, Passive: true, Metric: 100, CircuitType: ISISLevel2, Priority: ptr(100)},
+					},
+				},
 				RoutingPolicy: RoutingPolicy{
 					PrefixLists: []PrefixList{
 						{Name: "ours", Family: "ipv4", Entries: []PrefixListEntry{{Seq: 5, Action: Permit, Prefix: "192.168.0.0/16", LE: 24}}},

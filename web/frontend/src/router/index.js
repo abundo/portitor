@@ -29,6 +29,7 @@ const router = createRouter({
         { path: 'routing-objects', component: () => import('@/views/RoutingObjectsPage.vue') },
         { path: 'vrf', component: () => import('@/views/VrfPage.vue') },
         { path: 'bgp', component: () => import('@/views/BgpPage.vue') },
+        { path: 'isis', component: () => import('@/views/IsisPage.vue') },
         { path: 'ospf', component: () => import('@/views/OspfPage.vue') },
         { path: 'vrrp', component: () => import('@/views/VrrpPage.vue') },
         { path: 'bfd', component: () => import('@/views/BfdPage.vue') },

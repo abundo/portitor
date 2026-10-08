@@ -1272,6 +1272,27 @@ func (s *Server) handleAgentOSPF(c *echo.Context) error {
 	return c.JSON(http.StatusOK, o)
 }
 
+// handleAgentISIS passes on the IS-IS state (adjacencies, interfaces,
+// routes) of the instances, for the IS-IS page.
+func (s *Server) handleAgentISIS(c *echo.Context) error {
+	a, _, err := s.agent()
+	if err != nil {
+		return agentError(c, err)
+	}
+	o, err := a.ISIS(c.Request().Context())
+	if err != nil {
+		return agentError(c, err)
+	}
+	names, err := s.readableInstanceNames(c)
+	if err != nil {
+		return err
+	}
+	if names != nil {
+		filterISIS(o, names)
+	}
+	return c.JSON(http.StatusOK, o)
+}
+
 // handleAgentVRRP passes on the state of the instances' virtual routers,
 // for the VRRP page.
 func (s *Server) handleAgentVRRP(c *echo.Context) error {

@@ -58,6 +58,7 @@ const sections = computed(() => [
       { label: 'Static', icon: 'i-lucide-signpost', to: '/static-routes' },
       { label: 'BFD', icon: 'i-lucide-heart-pulse', to: '/bfd' },
       { label: 'VRRP', icon: 'i-lucide-git-fork', to: '/vrrp' },
+      { label: 'IS-IS', icon: 'i-lucide-route', to: '/isis' },
       { label: 'OSPF', icon: 'i-lucide-waypoints', to: '/ospf' },
       { label: 'BGP', icon: 'i-lucide-share-2', to: '/bgp' },
     ],

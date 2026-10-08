@@ -247,8 +247,9 @@ func TestFRROSPF(t *testing.T) {
 	for _, want := range []string{
 		// One interface block holds both versions.
 		"interface lk-main\n ip ospf area 0.0.0.0\n ip ospf hello-interval 5\n ip ospf dead-interval 20\n ip ospf network point-to-point\n" +
-			" ip ospf authentication message-digest\n ip ospf message-digest-key 1 md5 k3y\n ipv6 ospf6 area 0.0.0.0\nexit\n",
-		"interface eth2\n ip ospf area 0.0.0.1\n ip ospf cost 100\n ip ospf priority 0\n ip ospf passive\n vrrp 50\n",
+			" ip ospf authentication message-digest\n ip ospf message-digest-key 1 md5 k3y\n ipv6 ospf6 area 0.0.0.0\n" +
+			" ip router isis portitor\n ipv6 router isis portitor\n isis network point-to-point\n isis hello-interval 1\n isis hello-multiplier 5\nexit\n",
+		"interface eth2\n ip ospf area 0.0.0.1\n ip ospf cost 100\n ip ospf priority 0\n ip ospf passive\n ip router isis portitor\n isis circuit-type level-2-only\n isis passive\n isis metric 100\n isis priority 100\n vrrp 50\n",
 		"router ospf\n ospf router-id 10.255.0.2\n log-adjacency-changes\n auto-cost reference-bandwidth 10000\n" +
 			" area 0.0.0.1 stub no-summary\n area 0.0.0.1 range 192.168.50.0/23 cost 10\n summary-address 172.16.0.0/12\n" +
 			" redistribute kernel metric 50 metric-type 1 route-map connected\n redistribute bgp\n default-information originate\nexit\n",
@@ -274,13 +275,13 @@ func TestFRROSPF(t *testing.T) {
 	// secret.
 	doc := fwconfig.SampleDocument()
 	in := doc.Instance("guest")
-	in.BGP, in.OSPF6 = nil, nil
+	in.BGP, in.OSPF6, in.ISIS = nil, nil, nil
 	in.RoutingPolicy.RouteMaps[0].Entries = nil
 	b, err := Render(doc, Options{Paths: DefaultPaths(), Units: DefaultUnits()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if d := mustFile(t, b, "/etc/portitor/instances/guest/frr/daemons"); !strings.Contains(d, "bgpd=no\nospfd=yes\nospf6d=no\n") {
+	if d := mustFile(t, b, "/etc/portitor/instances/guest/frr/daemons"); !strings.Contains(d, "bgpd=no\nospfd=yes\nospf6d=no\nisisd=no\n") {
 		t.Errorf("daemons:\n%s", d)
 	}
 	f := b.File("/etc/portitor/instances/guest/frr/frr.conf")
@@ -333,7 +334,7 @@ func TestFRRVRRP(t *testing.T) {
 	b := sampleBundle(t)
 	conf := mustFile(t, b, "/etc/portitor/instances/guest/frr/frr.conf")
 	// The virtual router is in its interface's block, after OSPF's.
-	want := " ip ospf passive\n vrrp 50\n vrrp 50 priority 200\n vrrp 50 advertisement-interval 500\n" +
+	want := " ip ospf passive\n ip router isis portitor\n isis circuit-type level-2-only\n isis passive\n isis metric 100\n isis priority 100\n vrrp 50\n vrrp 50 priority 200\n vrrp 50 advertisement-interval 500\n" +
 		" vrrp 50 ip 192.168.50.254\n vrrp 50 ipv6 fe80::50\nexit\n"
 	if !strings.Contains(conf, want) {
 		t.Errorf("frr.conf lacks %q:\n%s", want, conf)
@@ -346,7 +347,7 @@ func TestFRRVRRP(t *testing.T) {
 	// VRRP alone runs FRR with vrrpd only; version 2, no preempt, shut down.
 	doc := fwconfig.SampleDocument()
 	in := doc.Instance("guest")
-	in.BGP, in.OSPF, in.OSPF6 = nil, nil, nil
+	in.BGP, in.OSPF, in.OSPF6, in.ISIS = nil, nil, nil, nil
 	in.VRRP[0] = fwconfig.VRRP{Interface: "eth2", VRID: 7, Version: 2, NoPreempt: true, Shutdown: true, IPv4: []string{"192.168.50.254"}}
 	b, err := Render(doc, Options{Paths: DefaultPaths(), Units: DefaultUnits()})
 	if err != nil {
@@ -358,7 +359,7 @@ func TestFRRVRRP(t *testing.T) {
 		t.Errorf("frr.conf lacks %q:\n%s", want, conf)
 	}
 	daemons = mustFile(t, b, "/etc/portitor/instances/guest/frr/daemons")
-	if !strings.Contains(daemons, "bgpd=no\nospfd=no\nospf6d=no\nvrrpd=yes\n") {
+	if !strings.Contains(daemons, "bgpd=no\nospfd=no\nospf6d=no\nisisd=no\nvrrpd=yes\n") {
 		t.Errorf("daemons:\n%s", daemons)
 	}
 }
@@ -428,5 +429,37 @@ func TestFRRBFD(t *testing.T) {
 	plain := mustFile(t, sampleBundle(t), "/etc/portitor/instances/guest/frr/frr.conf")
 	if strings.Contains(plain, "bfd") {
 		t.Errorf("BFD without BFD interfaces:\n%s", plain)
+	}
+}
+
+func TestFRRISIS(t *testing.T) {
+	b := sampleBundle(t)
+	conf := mustFile(t, b, "/etc/portitor/instances/guest/frr/frr.conf")
+	want := "router isis portitor\n net 49.0001.0102.5500.0002.00\n is-type level-2-only\n metric-style wide\n log-adjacency-changes\n" +
+		" topology ipv6-unicast\n default-information originate ipv4 level-2 always\n" +
+		" redistribute ipv4 kernel level-2 metric 20 route-map connected\n redistribute ipv6 ospf6 level-2\nexit\n"
+	if !strings.Contains(conf, want) {
+		t.Errorf("frr.conf lacks %q:\n%s", want, conf)
+	}
+	if d := mustFile(t, b, "/etc/portitor/instances/guest/frr/daemons"); !strings.Contains(d, "isisd=yes\n") || !strings.Contains(d, "isisd_options=") {
+		t.Errorf("daemons:\n%s", d)
+	}
+
+	// IS-IS alone runs FRR; BFD on an interface with BFD.
+	doc := fwconfig.SampleDocument()
+	in := doc.Instance("guest")
+	in.BGP, in.OSPF, in.OSPF6, in.VRRP = nil, nil, nil, nil
+	in.ISIS.Interfaces[0].BFD = true
+	in.BFD = []fwconfig.BFDInterface{{Name: "lk-main"}}
+	b, err := Render(doc, Options{Paths: DefaultPaths(), Units: DefaultUnits()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	conf = mustFile(t, b, "/etc/portitor/instances/guest/frr/frr.conf")
+	if !strings.Contains(conf, " isis bfd\n isis bfd profile if-lk-main\n") || strings.Contains(conf, "router ospf") {
+		t.Errorf("frr.conf:\n%s", conf)
+	}
+	if d := mustFile(t, b, "/etc/portitor/instances/guest/frr/daemons"); !strings.Contains(d, "bgpd=no\nospfd=no\nospf6d=no\nisisd=yes\n") {
+		t.Errorf("daemons:\n%s", d)
 	}
 }
