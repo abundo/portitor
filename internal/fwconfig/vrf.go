@@ -35,6 +35,8 @@ type VRF struct {
 	OSPF        *OSPF  `json:"ospf,omitempty"`
 	OSPF6       *OSPF  `json:"ospf6,omitempty"`
 	ISIS        *ISIS  `json:"isis,omitempty"`
+	// EVPN makes the VRF an L3VPN over EVPN/VXLAN (l3vni.go); nil: off.
+	EVPN *VRFEVPN `json:"evpn,omitempty"`
 }
 
 // MaxVRFs is the most VRFs an instance may have: each marks the
@@ -50,6 +52,8 @@ type Routing struct {
 	OSPF  *OSPF
 	OSPF6 *OSPF
 	ISIS  *ISIS
+	// EVPN is a VRF's L3VNI, nil for none.
+	EVPN *VRFEVPN
 }
 
 // BGPOn reports whether BGP runs there.
@@ -74,7 +78,7 @@ func (r Routing) ISISOn() bool { return r.ISIS != nil && r.ISIS.Enabled }
 func (in *Instance) Routings() []Routing {
 	out := []Routing{{BGP: in.BGP, OSPF: in.OSPF, OSPF6: in.OSPF6, ISIS: in.ISIS}}
 	for _, vrf := range in.VRFs {
-		out = append(out, Routing{VRF: vrf.Name, BGP: vrf.BGP, OSPF: vrf.OSPF, OSPF6: vrf.OSPF6, ISIS: vrf.ISIS})
+		out = append(out, Routing{VRF: vrf.Name, BGP: vrf.BGP, OSPF: vrf.OSPF, OSPF6: vrf.OSPF6, ISIS: vrf.ISIS, EVPN: vrf.EVPN})
 	}
 	return out
 }
@@ -144,6 +148,9 @@ func (in *Instance) addVRFDevices() {
 		in.Interfaces = append(in.Interfaces, dev)
 	}
 }
+
+// VRFByName returns the instance's VRF of that name, or nil.
+func (in *Instance) VRFByName(name string) *VRF { return in.vrfByName(name) }
 
 // vrfByName returns the instance's VRF of that name, or nil.
 func (in *Instance) vrfByName(name string) *VRF {

@@ -406,7 +406,7 @@ func build(db *gorm.DB, generation int64, only map[string]bool) (*fwconfig.Docum
 		for _, v := range d.vrfs {
 			if v.InstanceID == mi.ID {
 				vrfName[v.ID] = v.Name
-				in.VRFs = append(in.VRFs, fwconfig.VRF{Name: v.Name, Table: v.RouteTable, Description: v.Description})
+				in.VRFs = append(in.VRFs, fwconfig.VRF{Name: v.Name, Table: v.RouteTable, Description: v.Description, EVPN: v.EVPN()})
 			}
 		}
 		for _, r := range d.routes {

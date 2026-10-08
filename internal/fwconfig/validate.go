@@ -253,6 +253,7 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 	}
 	v.vxlanInstance(p, in, ifaces)
 	v.vrfInstance(p, in, ifaces)
+	v.l3vniInstance(p, in)
 
 	zones := map[string]bool{}
 	for _, z := range in.InterfaceZones {

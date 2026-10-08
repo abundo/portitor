@@ -306,3 +306,14 @@ func SampleVRFDocument() Document {
 	in.Routes = append(in.Routes, Route{Destination: "10.30.0.0/16", Gateway: "172.16.3.9", VRF: "blue", BFD: true})
 	return doc
 }
+
+// SampleL3VNIDocument is the sample with EVPN in the guest instance's main
+// table and VRF blue an L3VPN with VNI 5000.
+func SampleL3VNIDocument() Document {
+	doc := SampleDocument()
+	in := doc.Instance("guest")
+	in.BGP.EVPN = true
+	in.VRFs[0].EVPN = &VRFEVPN{VNI: 5000, Local: "192.168.50.1", Device: "eth2", AdvertiseIPv4: true, AdvertiseIPv6: true,
+		RD: "192.168.50.1:5000", ImportRTs: []string{"65000:5000"}, ExportRTs: []string{"65000:5000"}}
+	return doc
+}

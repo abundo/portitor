@@ -754,6 +754,7 @@ func (d Document) Expand() Document {
 		}
 	}
 	for i := range out.Instances {
+		out.Instances[i].addL3VNIDevices()
 		out.Instances[i].addVRFDevices()
 	}
 	return out

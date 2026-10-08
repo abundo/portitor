@@ -203,8 +203,11 @@ func renameIfaceRefs(tx *gorm.DB, instanceID uint, old, name string, zones bool)
 				return err
 			}
 		}
-		// A VXLAN's underlay.
+		// A VXLAN's underlay, and a VRF's L3VNI's.
 		if err := tx.Model(&models.Interface{}).Where("instance_id = ? AND kind = ? AND vxlan_device = ?", instanceID, fwconfig.KindVXLAN, old).UpdateColumn("vxlan_device", name).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&models.Vrf{}).Where("instance_id = ? AND evpn_device = ?", instanceID, old).UpdateColumn("evpn_device", name).Error; err != nil {
 			return err
 		}
 		// A bridge's members.
@@ -263,6 +266,11 @@ func refuseIfaceInUse(tx *gorm.DB, instanceID uint, name string) error {
 	tx.Model(&models.Interface{}).Where("instance_id = ? AND kind = ? AND vxlan_device = ?", instanceID, fwconfig.KindVXLAN, name).Order("name").Pluck("name", &vxlans)
 	for _, x := range vxlans {
 		users = append(users, "VXLAN "+x)
+	}
+	var l3vnis []string
+	tx.Model(&models.Vrf{}).Where("instance_id = ? AND evpn_vni <> 0 AND evpn_device = ?", instanceID, name).Order("name").Pluck("name", &l3vnis)
+	for _, x := range l3vnis {
+		users = append(users, "VRF "+x+" (EVPN underlay)")
 	}
 	users = append(users, ospfIfaceUsers(tx, instanceID, name)...)
 	users = append(users, isisIfaceUsers(tx, instanceID, name)...)

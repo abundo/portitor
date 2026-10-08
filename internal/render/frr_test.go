@@ -4,6 +4,8 @@
 package render
 
 import (
+	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -481,5 +483,67 @@ func TestFRRISIS(t *testing.T) {
 	}
 	if d := mustFile(t, b, "/etc/portitor/instances/guest/frr/daemons"); !strings.Contains(d, "bgpd=no\nospfd=no\nospf6d=no\nisisd=yes\n") {
 		t.Errorf("daemons:\n%s", d)
+	}
+}
+
+func TestFRRRouteTargets(t *testing.T) {
+	for _, c := range []struct {
+		rts  []string
+		want []string
+	}{
+		{[]string{"65000:1"}, []string{"65000:1"}},
+		{[]string{"65000:5000"}, nil},
+		{[]string{"65000:5000", "65000:1"}, []string{"65000:1", "65000:5000"}},
+	} {
+		if got := frrRTs(c.rts, autoRT(65000, 5000)); !slices.Equal(got, c.want) {
+			t.Errorf("%v: got %v, want %v", c.rts, got, c.want)
+		}
+	}
+	if got := autoRT(4200000000, 70000); got != "4200000000:4464" {
+		t.Errorf("4-byte AS: %s", got)
+	}
+}
+
+func TestFRRL3VNI(t *testing.T) {
+	doc := fwconfig.SampleL3VNIDocument()
+	b, err := Render(doc, Options{Paths: DefaultPaths(), Units: DefaultUnits()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	conf := mustFile(t, b, "/etc/portitor/instances/guest/frr/frr.conf")
+	asn := doc.Instance("guest").BGP.ASN
+	for _, want := range []string{
+		"vrf blue\n vni 5000\nexit-vrf\n",
+		// Without BGP of its own: the main table's AS, connected and static.
+		fmt.Sprintf("router bgp %d vrf blue\n", asn),
+		" address-family ipv4 unicast\n  redistribute connected\n  redistribute kernel\n exit-address-family\n",
+		" address-family l2vpn evpn\n  advertise ipv4 unicast\n  advertise ipv6 unicast\n  rd 192.168.50.1:5000\n" +
+			"  route-target import 65000:5000\n  route-target export 65000:5000\n exit-address-family\n",
+	} {
+		if !strings.Contains(conf, want) {
+			t.Errorf("frr.conf lacks %q:\n%s", want, conf)
+		}
+	}
+	nft := mustFile(t, b, "/etc/portitor/instances/guest/nftables.nft")
+	if !strings.Contains(nft, `udp dport 4789 accept comment "auto: vxlan l3vx-5000"`) {
+		t.Errorf("ruleset lacks the l3vni's auto rule:\n%s", nft)
+	}
+
+	// With BGP of its own, the VRF's router bgp gets the family.
+	doc = fwconfig.SampleVRFDocument()
+	in := doc.Instance("guest")
+	in.BGP.EVPN = true
+	in.VRFs[0].EVPN = &fwconfig.VRFEVPN{VNI: 5000, Local: "192.168.50.1", AdvertiseIPv4: true, ImportRTs: []string{"65000:1"}, ExportRTs: []string{"65000:1"}}
+	b, err = Render(doc, Options{Paths: DefaultPaths(), Units: DefaultUnits()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	conf = mustFile(t, b, "/etc/portitor/instances/guest/frr/frr.conf")
+	if !strings.Contains(conf, "vrf blue\n vni 5000\n ip route 10.30.0.0/16 172.16.3.9") {
+		t.Errorf("vrf block:\n%s", conf)
+	}
+	i := strings.Index(conf, "router bgp 65010 vrf blue\n")
+	if i < 0 || !strings.Contains(conf[i:], "address-family l2vpn evpn\n  advertise ipv4 unicast\n  route-target import 65000:1\n") {
+		t.Errorf("vrf bgp:\n%s", conf)
 	}
 }

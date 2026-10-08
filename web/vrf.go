@@ -5,6 +5,7 @@ package web
 
 import (
 	"fmt"
+	"net/netip"
 	"strings"
 
 	"gorm.io/gorm"
@@ -16,7 +17,9 @@ import (
 // VRFs (Routing → VRF) belong to an instance. Interfaces are put in one by
 // name (interfaces.vrf), which a rename rewrites; routes by id. A VRF in use
 // can't be deleted. Its name is that of its Linux device, so it may not be
-// an interface's, a link end's or an interface zone's of the instance.
+// an interface's, a link end's or an interface zone's of the instance. Its
+// L3VNI (evpn_*, fwconfig.VRFEVPN) names its underlay interface, which a
+// rename rewrites (renameIfaceRefs) and which can't be deleted.
 
 func vrfExists(tx *gorm.DB, instanceID uint, name string) bool {
 	var n int64
@@ -36,7 +39,7 @@ func prepareVrf(tx *gorm.DB, v, old *models.Vrf) error {
 		return bad("name: a Linux interface name (at most 15 characters, no spaces)")
 	}
 	if strings.HasPrefix(v.Name, fwconfig.IFBPrefix) || strings.HasPrefix(v.Name, fwconfig.NAT64DevicePrefix) ||
-		strings.HasPrefix(v.Name, "vrrp4-") || strings.HasPrefix(v.Name, "vrrp6-") {
+		strings.HasPrefix(v.Name, "vrrp4-") || strings.HasPrefix(v.Name, "vrrp6-") || fwconfig.IsL3VNIName(v.Name) {
 		return bad("name: that prefix is for the firewall's own devices")
 	}
 	v.Description = strings.TrimSpace(v.Description)
@@ -60,6 +63,9 @@ func prepareVrf(tx *gorm.DB, v, old *models.Vrf) error {
 	if err := tx.Where("instance_id = ? AND id <> ?", v.InstanceID, v.ID).Find(&others).Error; err != nil {
 		return err
 	}
+	if err := prepareVrfEVPN(tx, v, names, others); err != nil {
+		return err
+	}
 	for _, o := range others {
 		if o.Name == v.Name {
 			return bad(fmt.Sprintf("name: there is a VRF %s already", v.Name))
@@ -70,6 +76,49 @@ func prepareVrf(tx *gorm.DB, v, old *models.Vrf) error {
 	}
 	if old != nil && old.Name != v.Name {
 		return tx.Model(&models.Interface{}).Where("instance_id = ? AND vrf = ?", v.InstanceID, old.Name).UpdateColumn("vrf", v.Name).Error
+	}
+	return nil
+}
+
+// prepareVrfEVPN checks a VRF's L3VNI, or clears its settings when it has
+// none (VNI 0).
+func prepareVrfEVPN(tx *gorm.DB, v *models.Vrf, names map[string]bool, others []models.Vrf) error {
+	if v.EvpnVni == 0 {
+		v.EvpnLocal, v.EvpnDevice, v.EvpnPort, v.EvpnRd = "", "", 0, ""
+		v.EvpnImportRts, v.EvpnExportRts = models.StringList{}, models.StringList{}
+		return nil
+	}
+	v.EvpnLocal, v.EvpnDevice, v.EvpnRd = strings.TrimSpace(v.EvpnLocal), strings.TrimSpace(v.EvpnDevice), strings.TrimSpace(v.EvpnRd)
+	if a, err := netip.ParseAddr(v.EvpnLocal); err == nil {
+		v.EvpnLocal = a.String()
+	}
+	v.EvpnImportRts, v.EvpnExportRts = cleanList(v.EvpnImportRts), cleanList(v.EvpnExportRts)
+	if problems := fwconfig.CheckVRFEVPN(v.EVPN()); len(problems) > 0 {
+		return bad(strings.Join(problems, "; "))
+	}
+	if v.EvpnDevice != "" {
+		if !names[v.EvpnDevice] {
+			return bad(fmt.Sprintf("evpn underlay: %s is not an interface of this virtual firewall", v.EvpnDevice))
+		}
+		var in models.Interface
+		if tx.Where("instance_id = ? AND name = ?", v.InstanceID, v.EvpnDevice).Limit(1).Find(&in); in.ID != 0 {
+			if in.Kind == fwconfig.KindVXLAN {
+				return bad(fmt.Sprintf("evpn underlay: %s is a VXLAN", v.EvpnDevice))
+			}
+			if in.Vrf != "" {
+				return bad(fmt.Sprintf("evpn underlay: %s is in VRF %s", v.EvpnDevice, in.Vrf))
+			}
+		}
+	}
+	for _, o := range others {
+		if o.EvpnVni == v.EvpnVni {
+			return bad(fmt.Sprintf("evpn vni: %d is VRF %s's", v.EvpnVni, o.Name))
+		}
+	}
+	var vxlans []string
+	tx.Model(&models.Interface{}).Where("instance_id = ? AND kind = ? AND vxlan_vni = ?", v.InstanceID, fwconfig.KindVXLAN, v.EvpnVni).Pluck("name", &vxlans)
+	if len(vxlans) > 0 {
+		return bad(fmt.Sprintf("evpn vni: %d is VXLAN %s's", v.EvpnVni, vxlans[0]))
 	}
 	return nil
 }

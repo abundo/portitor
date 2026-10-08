@@ -69,8 +69,8 @@ table.
 - **BGP**: each VRF has its own BGP settings (local AS, router id,
   networks, redistribution), peer groups and neighbours. A neighbour's
   interface and update source must be in its VRF, and its peer group of the
-  same VRF; the same address may be a neighbour in two VRFs. EVPN is the main
-  table's only. FRR: `router bgp <AS> vrf <name>`.
+  same VRF; the same address may be a neighbour in two VRFs. EVPN sessions
+  are the main table's; a VRF joins EVPN with an L3VNI (below). FRR: `router bgp <AS> vrf <name>`.
 - **OSPF** and **IS-IS**: each VRF has its own settings, and runs on the
   interfaces of the VRF (the interface lists show those only). An interface
   moved to another VRF takes its OSPF and IS-IS settings to that VRF's.
@@ -84,6 +84,13 @@ table.
   the same VRF, so the virtual address answers there.
 
 The routing objects (prefix lists, route maps and so on) are shared by all.
+
+## L3VPN over EVPN/VXLAN
+
+A VRF with an **L3VNI** (in its settings) is an L3VPN: its routes are sent to
+other VTEPs over the main table's EVPN sessions as type 5 routes, and theirs come
+into its table, reached through VXLAN. See
+[VXLAN and EVPN](vxlan.md#l3vpn-layer-3-vnis).
 
 ## Rules
 
@@ -149,6 +156,6 @@ over a VRF.
 ## Limits
 
 - 464XLAT (NAT64) is not supported on an interface in a VRF.
-- EVPN is the main table's BGP's only; layer 3 VNIs are not supported.
+- EVPN's sessions are the main table's BGP's; a VRF takes part with its L3VNI.
 - Rules can't name a VRF itself; name its interfaces, or an interface zone of
   them.

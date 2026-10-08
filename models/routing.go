@@ -434,6 +434,25 @@ type Vrf struct {
 	Name        string `json:"name"`
 	RouteTable  int    `json:"route_table"`
 	Description string `json:"description"`
+	// L3VPN over EVPN/VXLAN (fwconfig.VRFEVPN); EvpnVni 0 is off.
+	EvpnVni         uint32     `json:"evpn_vni"`
+	EvpnLocal       string     `json:"evpn_local"`
+	EvpnDevice      string     `json:"evpn_device"`
+	EvpnPort        int        `json:"evpn_port"`
+	EvpnRd          string     `json:"evpn_rd"`
+	EvpnImportRts   StringList `json:"evpn_import_rts"`
+	EvpnExportRts   StringList `json:"evpn_export_rts"`
+	EvpnAdvertiseV4 bool       `gorm:"column:evpn_advertise_v4" json:"evpn_advertise_v4"`
+	EvpnAdvertiseV6 bool       `gorm:"column:evpn_advertise_v6" json:"evpn_advertise_v6"`
+}
+
+// EVPN is the VRF's L3VNI, nil when off.
+func (v *Vrf) EVPN() *fwconfig.VRFEVPN {
+	if v.EvpnVni == 0 {
+		return nil
+	}
+	return &fwconfig.VRFEVPN{VNI: v.EvpnVni, Local: v.EvpnLocal, Device: v.EvpnDevice, Port: v.EvpnPort, RD: v.EvpnRd,
+		ImportRTs: v.EvpnImportRts, ExportRTs: v.EvpnExportRts, AdvertiseIPv4: v.EvpnAdvertiseV4, AdvertiseIPv6: v.EvpnAdvertiseV6}
 }
 
 func (Vrf) TableName() string { return "vrfs" }

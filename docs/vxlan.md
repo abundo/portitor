@@ -76,11 +76,46 @@ on the bridge. The VNIs and the routes are shown with
 `vtysh -N <virtual firewall> -c 'show evpn vni'` and `-c 'show bgp l2vpn evpn'`
 (the default instance: without `-N`).
 
-Only layer 2 VNIs are supported: hosts on one VNI reach each other through the
-VXLAN; traffic between VNIs or out of the segment is routed by the firewall's
-interfaces in the bridges, like any other LAN. Layer 3 VNIs (symmetric IRB)
-are not supported, and EVPN is the main table's BGP's only, not a
-[VRF](vrf.md)'s.
+Hosts on one layer 2 VNI reach each other through the VXLAN; traffic between
+VNIs or out of the segment is routed by the firewall's interfaces in the
+bridges, like any other LAN. EVPN itself (the sessions and `advertise-all-vni`)
+is the main table's BGP's; a [VRF](vrf.md) joins it with a layer 3 VNI, below.
+
+## L3VPN (layer 3 VNIs)
+
+A VRF can be an L3VPN over EVPN: its routes are sent to the other VTEPs as EVPN
+type 5 routes (RFC 9136) with a layer 3 VNI, and their routes for the same VRF
+come into its table, routed to them through VXLAN (symmetric IRB). The VRFs of
+one L3VPN at each firewall (or switch) share the VNI and route targets.
+
+1. Set up EVPN in the main table as above: BGP with **EVPN** on and the
+   neighbours that activate *L2VPN EVPN*. No layer 2 VNI is needed.
+2. Under *Routing → VRF*, edit the VRF and give it an **L3VNI** (unique among
+   the virtual firewall's VNIs), the **Local VTEP address** (as for a VXLAN)
+   and, if wanted, the **Underlay interface** and **UDP port**.
+3. Choose what to advertise (**IPv4**, **IPv6**) and, if the defaults don't
+   suit the other end, the **Route distinguisher** and **Import** and **Export
+   route targets** (ASN:NN or IPv4:NN). FRR's defaults are the router id and an
+   index for the RD, and AS:VNI for the route targets, the AS being the VRF's
+   BGP's: give the route targets when that differs from the main table's AS.
+4. What the VRF advertises is what its BGP has: with BGP turned on in the VRF
+   (*Routing → BGP* with the VRF chosen), its networks, redistribution and the
+   routes from its neighbours (PE–CE); without, its connected networks and
+   static routes.
+5. Commit.
+
+The firewall makes, for each such VRF, a VXLAN device `l3vx-<VNI>` (not
+learning) and a bridge `l3br-<VNI>` in the VRF with it as its port; the bridge's
+MAC address is the router MAC the other VTEPs send to. These names may not be
+used for interfaces. FRR gets `vrf <name>` / `vni <VNI>` and, in `router bgp
+<AS> vrf <name>`, the L2VPN EVPN address family with `advertise ipv4 unicast`
+(and IPv6), `rd` and `route-target`. VXLAN packets to the L3VNI's port are
+accepted automatically (on the underlay, when given). The routes are shown with
+`vtysh -N <virtual firewall> -c 'show bgp l2vpn evpn route type prefix'` and
+`-c 'show evpn vni'`, and in the VRF's table under *Routing → Tables*.
+
+A layer 2 VNI's bridge can be put in a VRF with an L3VNI: zebra then ties the
+two together, and the hosts on the segment are routed in the VRF as well.
 
 ## How it runs
 

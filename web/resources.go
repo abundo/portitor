@@ -356,6 +356,9 @@ func prepareInterface(tx *gorm.DB, i, old *models.Interface) error {
 	if strings.HasPrefix(i.Name, fwconfig.NAT64DevicePrefix) {
 		return bad("name: " + fwconfig.NAT64DevicePrefix + " names are for the NAT64 devices")
 	}
+	if fwconfig.IsL3VNIName(i.Name) {
+		return bad("name: " + fwconfig.L3VNIDevicePrefix + " and " + fwconfig.L3VNIBridgePrefix + " names are for the VRFs' L3VNI devices")
+	}
 	i.Label = strings.TrimSpace(i.Label)
 	if len(i.Label) > 32 || strings.ContainsFunc(i.Label, unicode.IsControl) {
 		return bad("label: at most 32 characters, no control characters")

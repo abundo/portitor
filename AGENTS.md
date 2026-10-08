@@ -322,7 +322,15 @@ the certificate portitor-web serves, chosen under Settings
   (`BGP.EVPN`: `advertise-all-vni`; peers activate `l2vpn evpn` per
   `BGPPeer.EVPN`) each VXLAN needs a local address and a bridge, the device and its
   bridge port don't learn, the port has `neigh_suppress`, and the FDB is zebra's;
-  `Remotes` then only filter the sources. L2VNIs only (no VRFs). The underlay
+  `Remotes` then only filter the sources. A VRF's L3VNI (`VRF.EVPN`,
+  `fwconfig/l3vni.go`, L3VPN with type 5 routes) is a vxlan device `l3vx-<vni>` in a
+  bridge `l3br-<vni>` in the VRF, both made by `Document.Expand`
+  (`addL3VNIDevices`; interface names may not start with those prefixes), so the
+  agent and the auto rules treat them like any VXLAN; frr.conf gets `vrf <name>` /
+  `vni <n>` and the VRF's `router bgp` the L2VPN EVPN family (`advertise ipv4
+  unicast`, rd, route targets), rendered from the main table's AS (`l3vniBGP`,
+  connected and static) when the VRF runs no BGP of its own. It needs the main
+  table's EVPN; its underlay follows a rename and is refused on delete. The underlay
   follows a rename and is refused on delete (`web/ifzones.go`).
 - **VRFs** (`fwconfig/vrf.go`, `web/vrf.go`, Routing → VRF) are per instance
   (`vrfs`: name, `route_table`, unique in the instance; the namespace makes them
@@ -354,7 +362,7 @@ the certificate portitor-web serves, chosen under Settings
   and a NET interface must be in its VRF (`routingVRF` in validation). The renderer
   writes `router ... vrf <name>` and a `vrf` block for staticd's BFD routes; the
   agent asks vtysh with `vrf <name>` (`inVRF`), so the status answers carry a
-  `vrf`. EVPN is the main table's only, and 464XLAT is not allowed in a VRF.
+  `vrf`. EVPN's sessions are the main table's (a VRF joins with its L3VNI), and 464XLAT is not allowed in a VRF.
 - **Dual stack:** rule and NAT address lists may mix IPv4 and IPv6;
   `fwconfig.MatchFamilies` decides which versions a rule is rendered for, and
   validation uses the same function.
