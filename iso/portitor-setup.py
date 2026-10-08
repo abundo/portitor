@@ -278,8 +278,8 @@ def check_address(text: str, other: ipaddress.IPv4Interface | None = None) -> ip
         raise ValueError("add the prefix length, e.g. /24")
     if net.prefixlen < 31 and iface.ip in (net.network_address, net.broadcast_address):
         raise ValueError(f"{iface.ip} is the network or broadcast address of {net}")
-    if net.prefixlen > 30:
-        raise ValueError("use a prefix length of 30 or less")
+    if net.prefixlen > 31:
+        raise ValueError("use a prefix length of 31 or less")
     if other and net.overlaps(other.network):
         raise ValueError(f"{net} overlaps the LAN {other.network}")
     return iface
