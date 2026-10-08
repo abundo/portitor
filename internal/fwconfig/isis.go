@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/netip"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -325,5 +326,6 @@ func (v *validator) isis(p string, s *ISIS, refs *policyRefs, ifaces map[string]
 	}
 }
 
-// ISISRunning reports whether the instance runs IS-IS.
-func (in *Instance) ISISRunning() bool { return in.ISIS != nil && in.ISIS.Enabled }
+// ISISRunning reports whether the instance runs IS-IS, in the main table
+// or a VRF.
+func (in *Instance) ISISRunning() bool { return slices.ContainsFunc(in.Routings(), Routing.ISISOn) }

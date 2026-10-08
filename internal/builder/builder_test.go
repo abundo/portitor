@@ -347,3 +347,49 @@ func TestBuildDelegatedPrefix(t *testing.T) {
 		t.Errorf("ra = %+v", in.RA)
 	}
 }
+
+// A VRF's BGP, OSPF and IS-IS are its own: the configs and neighbours of
+// its id, and the OSPF and IS-IS interfaces on its interfaces.
+func TestBuildVRFRouting(t *testing.T) {
+	db := testDB(t)
+	main := models.Instance{Name: "main", IsDefault: true}
+	mustCreate(t, db, &main)
+	blue := models.Vrf{InstanceID: main.ID, Name: "blue", RouteTable: 10}
+	mustCreate(t, db, &blue)
+	mustCreate(t, db, &models.Interface{InstanceID: main.ID, Name: "eth1", Kind: "physical", Enabled: true, Ipv4Mode: "static", Addresses: models.StringList{"192.0.2.1/24"}})
+	mustCreate(t, db, &models.Interface{InstanceID: main.ID, Name: "eth2", Kind: "physical", Enabled: true, Ipv4Mode: "static", Addresses: models.StringList{"10.2.0.1/24"}, Vrf: "blue"})
+	mustCreate(t, db, &models.BgpConfig{InstanceID: main.ID, Enabled: true, Asn: 65000})
+	mustCreate(t, db, &models.BgpConfig{InstanceID: main.ID, VrfID: &blue.ID, Enabled: true, Asn: 65000, RouterID: "10.2.0.1"})
+	mustCreate(t, db, &models.BgpNeighbor{InstanceID: main.ID, Address: "192.0.2.2", Enabled: true, BgpPeerSettings: models.BgpPeerSettings{RemoteAs: "65001"}})
+	// The same address in the VRF is another neighbour.
+	mustCreate(t, db, &models.BgpNeighbor{InstanceID: main.ID, VrfID: &blue.ID, Address: "192.0.2.2", Enabled: true, BgpPeerSettings: models.BgpPeerSettings{RemoteAs: "65002"}})
+	for _, v := range []*uint{nil, &blue.ID} {
+		mustCreate(t, db, &models.OspfConfig{InstanceID: main.ID, VrfID: v, Version: 2, Enabled: true})
+	}
+	mustCreate(t, db, &models.OspfInterface{InstanceID: main.ID, Version: 2, Name: "eth1", Area: "0.0.0.0"})
+	mustCreate(t, db, &models.OspfInterface{InstanceID: main.ID, Version: 2, Name: "eth2", Area: "0.0.0.1"})
+	mustCreate(t, db, &models.IsisConfig{InstanceID: main.ID, VrfID: &blue.ID, Enabled: true, Net: "49.0001.0000.0000.0001.00"})
+	mustCreate(t, db, &models.IsisInterface{InstanceID: main.ID, Name: "eth2", IPv4: true})
+
+	doc, err := Build(db, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := doc.Instance("main")
+	if in.BGP == nil || len(in.BGP.Neighbors) != 1 || in.BGP.Neighbors[0].RemoteAS != "65001" || in.ISIS != nil {
+		t.Errorf("main: %+v %+v", in.BGP, in.ISIS)
+	}
+	if len(in.OSPF.Interfaces) != 1 || in.OSPF.Interfaces[0].Name != "eth1" {
+		t.Errorf("main ospf: %+v", in.OSPF)
+	}
+	vrf := in.VRFs[0]
+	if vrf.BGP == nil || vrf.BGP.RouterID != "10.2.0.1" || len(vrf.BGP.Neighbors) != 1 || vrf.BGP.Neighbors[0].RemoteAS != "65002" {
+		t.Errorf("vrf bgp: %+v", vrf.BGP)
+	}
+	if vrf.OSPF == nil || len(vrf.OSPF.Interfaces) != 1 || vrf.OSPF.Interfaces[0].Name != "eth2" || vrf.OSPF6 != nil {
+		t.Errorf("vrf ospf: %+v %+v", vrf.OSPF, vrf.OSPF6)
+	}
+	if vrf.ISIS == nil || len(vrf.ISIS.Interfaces) != 1 {
+		t.Errorf("vrf isis: %+v", vrf.ISIS)
+	}
+}

@@ -20,6 +20,8 @@ type connectionsRequest struct {
 	Instance   string `json:"instance"`
 	IntervalMs int    `json:"interval_ms"`
 	Max        int    `json:"max"`
+	// VRF: those of a VRF, "" of none; absent: all.
+	VRF *string `json:"vrf"`
 }
 
 // allowInstanceName checks the virtual firewall's name and that the user
@@ -98,7 +100,7 @@ func (s *Server) handleAgentConnections(c *echo.Context) error {
 		return agentError(c, err)
 	}
 	r := c.Request()
-	stream, err := a.Connections(r.Context(), agentapi.ConnectionsRequest{Instance: body.Instance, IntervalMs: body.IntervalMs, Max: body.Max})
+	stream, err := a.Connections(r.Context(), agentapi.ConnectionsRequest{Instance: body.Instance, IntervalMs: body.IntervalMs, Max: body.Max, VRF: body.VRF})
 	if err != nil {
 		return agentError(c, err)
 	}

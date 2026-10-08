@@ -284,3 +284,25 @@ func SampleDocument() Document {
 }
 
 func ptr[T any](v T) *T { return &v }
+
+// SampleVRFDocument is SampleDocument with routing in the guest instance's
+// VRF blue: BGP to a customer edge router (with BFD), OSPF, a virtual
+// router and a static route with BFD.
+func SampleVRFDocument() Document {
+	doc := SampleDocument()
+	in := doc.Instance("guest")
+	in.VRFs[0].BGP = &BGP{
+		Enabled: true, ASN: 65010, RouterID: "172.16.3.1",
+		Redistribute: []BGPRedistribute{{Family: "ipv4", Source: RedistConnected}},
+		Neighbors: []BGPPeer{{Address: "172.16.3.2", RemoteAS: "65100", BFD: true,
+			IPv4: BGPAddressFamily{Activate: true, RouteMapIn: "connected", RouteMapOut: "connected"}}},
+	}
+	in.VRFs[0].OSPF = &OSPF{
+		Enabled: true, RouterID: "172.16.3.1",
+		Interfaces: []OSPFInterface{{Name: "eth3", Area: "0.0.0.0", BFD: true}},
+	}
+	in.VRRP = append(in.VRRP, VRRP{Interface: "eth3", VRID: 3, IPv4: []string{"172.16.3.254"}})
+	in.BFD = append(in.BFD, BFDInterface{Name: "eth3"})
+	in.Routes = append(in.Routes, Route{Destination: "10.30.0.0/16", Gateway: "172.16.3.9", VRF: "blue", BFD: true})
+	return doc
+}

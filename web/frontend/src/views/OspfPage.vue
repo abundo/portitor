@@ -2,7 +2,8 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
 <!-- OSPF (FRR): the state of OSPFv2 (IPv4) and OSPFv3 (IPv6) as FRR has it
-     (info), and each version's configuration (config). -->
+     (info), and each version's configuration (config), of the main table
+     or a VRF, chosen at the top. -->
 <script setup>
 import AutoRefreshButton from '@/components/AutoRefreshButton.vue'
 import { useAutoRefresh } from '@/composables/useAutoRefresh'
@@ -11,13 +12,16 @@ import { useRoute, useRouter } from 'vue-router'
 import NeedInstance from '@/components/NeedInstance.vue'
 import OspfConfig from '@/components/OspfConfig.vue'
 import OspfInfo from '@/components/OspfInfo.vue'
+import VrfSelect from '@/components/VrfSelect.vue'
 import { api } from '@/api'
 import { errMsg } from '@/api/http'
 import { useInstanceStore } from '@/stores/instances'
+import { useVrfChoice } from '@/composables/useVrfChoice'
 
 const route = useRoute()
 const router = useRouter()
 const store = useInstanceStore()
+const { vrf, vrfItems, vrfName } = useVrfChoice()
 
 const tabs = [
   { label: 'OSPF info', value: 'info', slot: 'info', icon: 'i-lucide-info' },
@@ -48,12 +52,15 @@ async function loadStatus() {
 const auto = useAutoRefresh(loadStatus, { seconds: 10, active: () => infoTab.value })
 
 const mine = computed(() =>
-  status.value?.instances?.find((i) => i.instance === store.current?.name),
+  status.value?.instances?.find(
+    (i) => i.instance === store.current?.name && (i.vrf ?? '') === vrfName.value,
+  ),
 )
 </script>
 
 <template>
   <NeedInstance>
+    <div class="mb-2"><VrfSelect v-model="vrf" :items="vrfItems" /></div>
     <!-- The config tabs stay mounted, so their unsaved changes do too. -->
     <UTabs v-model="tab" :items="tabs" :unmount-on-hide="false">
       <template #info>
@@ -63,7 +70,7 @@ const mine = computed(() =>
               <div class="text-lg font-semibold">OSPF info</div>
               <p class="max-w-3xl text-sm text-muted">
                 The OSPFv2 and OSPFv3 router ids, neighbours, interfaces, areas and routes of this
-                virtual firewall, as FRR has them.
+                virtual firewall{{ vrfName ? ` in VRF ${vrfName}` : '' }}, as FRR has them.
               </p>
             </div>
             <AutoRefreshButton :auto="auto" :loading="loading" />
@@ -84,8 +91,9 @@ const mine = computed(() =>
           />
         </div>
       </template>
-      <template #config2><OspfConfig :version="2" /></template>
-      <template #config3><OspfConfig :version="3" /></template>
+      <!-- Keyed by the VRF: another VRF's OSPF is another form. -->
+      <template #config2><OspfConfig :key="`2-${vrf}`" :version="2" /></template>
+      <template #config3><OspfConfig :key="`3-${vrf}`" :version="3" /></template>
     </UTabs>
   </NeedInstance>
 </template>

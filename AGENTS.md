@@ -15,7 +15,7 @@ are in [README.md](README.md).
 | `cmd/portitor-agent` | Agent daemon on the firewall: `start`, `init`, `render`, `netns-exec`; run as `portitor` (a symlink, `cli.go`) it is a read-only CLI (`show lldp neighbours`, `show ip neighbours`) over the agent's GET routes on the root-only socket `<run_dir>/agent.sock` |
 | `internal/fwconfig` | The desired-state document and `Validate()`. **The contract between web and agent.** |
 | `internal/render` | Pure functions: document → nftables, WireGuard, named.conf, Kea, chrony.conf (`chrony.go`), snmpd.conf (`snmpd.go`), dnsmgr2 config, FRR (`frr.go`: frr.conf with BGP, OSPF, IS-IS, VRRP and BFD, daemons, vtysh.conf) |
-| `internal/agent` | Agent: apply/reconcile, commit-confirm, DHCP and DHCPv6 (prefix delegation) clients (woken when their interface gets a carrier, `linkwatch.go`), IP lists, task scheduler, packet log (NFLOG), DNS query log (BIND logs to the journal, followed with `journalctl`, filtered by the agent, `querylog.go`), WireGuard endpoint re-resolving, packet capture (tcpdump, streamed rate-limited), traceroute (`mtr --raw`, streamed as JSON lines, `trace.go`), service logs (`journalctl --follow` of a status service unit, streamed as text, `servicelog.go`), LLDP (sent and heard on raw sockets, `lldp.go`), neighbours (ARP/ND, LLDP), NAT64 (a Jool instance per namespace, `nat64.go`), traffic shaping (CAKE, IFB devices for receiving, HTB classes for the rate limits that shape (`fwconfig.Instance.Shapers`) by packet mark `render.ShaperMark`; planned from `tc -j` output, `shaping.go`), BGP, OSPF, IS-IS, VRRP and BFD state (FRR's JSON through `vtysh`, `bgp.go`, `ospf.go`, `isis.go`, `vrrp.go`, `bfd.go`), VRRP's macvlan devices (`vrrp.go`), 6in4 tunnels' endpoint updates at Hurricane Electric's tunnel broker (from the instance netns, on address changes, `tunnelbroker.go`), VXLANs' learning, EVPN bridge port flags and static flood lists (`vxlan.go`), status, API server |
+| `internal/agent` | Agent: apply/reconcile, commit-confirm, DHCP and DHCPv6 (prefix delegation) clients (woken when their interface gets a carrier, `linkwatch.go`), IP lists, task scheduler, packet log (NFLOG), DNS query log (BIND logs to the journal, followed with `journalctl`, filtered by the agent, `querylog.go`), WireGuard endpoint re-resolving, packet capture (tcpdump, streamed rate-limited), traceroute (`mtr --raw`, streamed as JSON lines, `trace.go`), service logs (`journalctl --follow` of a status service unit, streamed as text, `servicelog.go`), LLDP (sent and heard on raw sockets, `lldp.go`), neighbours (ARP/ND, LLDP), NAT64 (a Jool instance per namespace, `nat64.go`), traffic shaping (CAKE, IFB devices for receiving, HTB classes for the rate limits that shape (`fwconfig.Instance.Shapers`) by packet mark `render.ShaperMark`; planned from `tc -j` output, `shaping.go`), BGP, OSPF, IS-IS, VRRP and BFD state (FRR's JSON through `vtysh`, `bgp.go`, `ospf.go`, `isis.go`, `vrrp.go`, `bfd.go`), VRRP's macvlan devices (`vrrp.go`), 6in4 tunnels' endpoint updates at Hurricane Electric's tunnel broker (from the instance netns, on address changes, `tunnelbroker.go`), VXLANs' learning, EVPN bridge port flags and static flood lists (`vxlan.go`), the VRFs' source rules and sysctls for the firewall's services (`vrf.go`), status, API server |
 | `internal/dyndns` | DNS update client ("DNS update" in the GUI): RFC 2136 (from ifnsupdate), sent from the instance netns, or a DNS hosting provider's API through libdns (`providers.go`, matching `fwconfig.DNSProviders`), called from the host |
 | `internal/acme` | ACME certificates through lego: accounts, orders, the stored chain and key (`<state_dir>/certificates/`); the agent's `acme.go` schedules them and answers HTTP-01 in the instance netns, opening port 80 by the `acme_http` set (`render.ACMEHTTPSet`) |
 | `internal/nftimport` | nftables file (`nft -j list ruleset`, read by the agent's `POST /v1/nftables/parse` in a new network namespace, `nftparse.go`) → rules, NAT rules, hosts/prefixes, services, and what it leaves out, with jumped-to chains inlined in groups; written by `web/nftimport.go` through the CRUD's `prepare*` checks, a preview being the same transaction rolled back |
@@ -121,11 +121,13 @@ docs and user-facing messages.
   their `ifb-<name>` devices (`fwconfig.IFBName`; interface names may not start
   with `ifb-`), and the VRRP macvlan devices (`fwconfig.VRRPDevices`; names may not
   start with `vrrp4-` or `vrrp6-`), and the Jool instance `fwconfig.JoolInstance` in
-  each namespace, its loop devices (`n64-*`) and the IPv4 `ip rule`s with protocol 99,
+  each namespace, its loop devices (`n64-*`) and the `ip rule`s with protocol 99
+  (NAT64's IPv4 ones, and the VRF source rules at `agent.VRFSourcePref`),
   and, without EVPN, the all-zero forwarding entries (flood list) of its vxlan devices. Leave everything else alone (docker, libvirt, other tables).
   Accept rules set the connection mark (`ct mark`) to the rule's id, so the
   rule counters (`render.RuleCounter`) count whole connections; the agent owns
-  `ct mark` in its namespaces. Log statements send to nflog group
+  `ct mark` in its namespaces, and the conntrack labels (`ct label`, a VRF's bit,
+  `Instance.VRFLabel`). Log statements send to nflog group
   `render.LogGroup`, never the kernel log, with a prefix `render.ParseLogPrefix`
   reads; the agent listens on that group in each namespace whose ruleset logs.
 - **Commit-confirm:** the rollback target is the last *confirmed* document; a second
@@ -215,7 +217,8 @@ the certificate portitor-web serves, chosen under Settings
   rewrites the rules (`web/tasks.go`); deleting one a rule or task uses is refused.
 - **Routing objects and BGP** (`web/bgp.go`) are per instance: prefix lists, AS
   path and community lists and route maps (`route_*` tables, entries as JSON),
-  `bgp_configs` (one per instance), peer groups and neighbours. They refer to each
+  `bgp_configs` (one per instance and VRF), peer groups and neighbours (each of
+  the main table's BGP or a VRF's, `vrf_id`; see VRFs). They refer to each
   other by name, as FRR does: renaming one rewrites the references
   (`eachRoutingRef`), deleting one in use is refused, a row never moves to another
   instance, and a new reference field goes in `eachRoutingRef`. Off (the default),
@@ -227,13 +230,13 @@ the certificate portitor-web serves, chosen under Settings
   routes), so "redistribute static" renders as `redistribute kernel`.
 - **OSPF** (`web/ospf.go`) is per instance and version (2: OSPFv2, IPv4,
   `Instance.OSPF`; 3: OSPFv3, IPv6, `Instance.OSPF6`): `ospf_configs` (one per
-  instance and version) and `ospf_interfaces`, by interface name (link ends
+  instance, version and VRF) and `ospf_interfaces`, by interface name (link ends
   included), which `renameIfaceRefs` rewrites and `refuseIfaceInUse` keeps from
   being deleted. Its route maps are in `eachRoutingRef`. Area ids are stored
   dotted. OSPFv2's network statements and interface areas are exclusive, as in
   FRR.
 - **IS-IS** (`web/isis.go`, `fwconfig/isis.go`) is per instance: `isis_configs` (one
-  per instance) and `isis_interfaces`, by interface name (link ends included), which
+  per instance and VRF) and `isis_interfaces`, by interface name (link ends included), which
   `renameIfaceRefs` rewrites and `refuseIfaceInUse` keeps from being deleted. One
   isisd process (`fwconfig.ISISTag`) for IPv4 and IPv6; its route maps are in
   `eachRoutingRef`. IS-IS is LLC frames, not IP: no auto rules, and on a WireGuard
@@ -246,7 +249,9 @@ the certificate portitor-web serves, chosen under Settings
   device per virtual router and IP version (`fwconfig.VRRPDevices`: virtual MAC,
   the addresses as /32 or /128, random link-local), created protodown so vrrpd
   alone turns it on, and sets `arp_ignore` 1 on its interface
-  (`internal/agent/vrrp.go`). A disabled row is shut down in FRR, not left out.
+  (`internal/agent/vrrp.go`); the device is in its interface's VRF
+  (`VRRPDevice.VRF`, and `Instance.VRFOf` knows it). A disabled row is shut down
+  in FRR, not left out.
 - **BFD** (`web/bfd.go`, `fwconfig/bfd.go`) is per instance: `bfd_interfaces`, by
   interface name (link ends included; `renameIfaceRefs` rewrites it, removing the
   interface removes it), each a bfdd profile (`fwconfig.BFDProfile`). Static routes,
@@ -332,9 +337,24 @@ the certificate portitor-web serves, chosen under Settings
   the agent plans the proto 99 routes of main and each VRF table. In input and
   forward an interface in a VRF has the VRF device as `iifname`, so the renderer
   matches it by `meta sdifname` (`iifMatches`; a mixed list becomes two rules);
-  NAT keeps `iifname` (prerouting's first pass). With a VRF,
-  `tcp_l3mdev_accept`/`udp_l3mdev_accept` let the firewall's services answer on
-  them. FRR stays in the default VRF.
+  NAT keeps `iifname` (prerouting's first pass). In output, what a socket in a
+  VRF sends passes first with the VRF device as `oifname`, untracked (accepted),
+  then with its interface. Each VRF has a conntrack label bit (`Instance.VRFLabel`,
+  at most `fwconfig.MaxVRFs`) the ruleset sets on its new connections
+  (`writeVRFLabels`), by which the agent tells a connection's VRF.
+  The firewall's services stay in the default VRF: with a VRF the agent sets
+  `tcp_l3mdev_accept`/`udp_l3mdev_accept` and `ip_nonlocal_bind`, and a rule
+  `from <address> iif lo lookup <table>` (proto 99, `agent.VRFSourcePref`) per
+  address of a VRF's interfaces (`internal/agent/vrf.go`; the DHCP client keeps
+  its own), so UDP answers go back through the VRF.
+  Each VRF may run its own BGP, OSPF and IS-IS (`VRF.BGP`/`OSPF`/`OSPF6`/`ISIS`;
+  the instance's are the main table's; `Instance.Routings` lists both): rows with
+  a `vrf_id`, which never changes, unique per VRF; OSPF and IS-IS interfaces belong
+  to their interface's VRF's routing, and a BGP neighbour's interfaces, peer group
+  and a NET interface must be in its VRF (`routingVRF` in validation). The renderer
+  writes `router ... vrf <name>` and a `vrf` block for staticd's BFD routes; the
+  agent asks vtysh with `vrf <name>` (`inVRF`), so the status answers carry a
+  `vrf`. EVPN is the main table's only, and 464XLAT is not allowed in a VRF.
 - **Dual stack:** rule and NAT address lists may mix IPv4 and IPv6;
   `fwconfig.MatchFamilies` decides which versions a rule is rendered for, and
   validation uses the same function.

@@ -198,7 +198,7 @@ func TestNftablesGuestHasNoLockout(t *testing.T) {
 	if strings.Contains(nft, "anti-lockout") {
 		t.Error("anti-lockout belongs to the default instance only")
 	}
-	if strings.Contains(strings.ReplaceAll(nft, "set AUTO_", ""), "set ") || strings.Contains(nft, "include") {
+	if strings.Contains(strings.NewReplacer("set AUTO_", "", "label set ", "").Replace(nft), "set ") || strings.Contains(nft, "include") {
 		t.Error("the guest rules use no IP lists")
 	}
 	if !strings.Contains(nft, `oifname "lk-main" ip daddr 192.168.0.0/16 counter jump reject_pkt`) {
@@ -236,7 +236,7 @@ func TestNftablesSyntax(t *testing.T) {
 		}
 	}
 	// Rules without and with IDs (named counters, connection marks).
-	for _, doc := range []fwconfig.Document{fwconfig.SampleDocument(), withRuleIDs(fwconfig.SampleDocument())} {
+	for _, doc := range []fwconfig.Document{fwconfig.SampleDocument(), withRuleIDs(fwconfig.SampleDocument()), fwconfig.SampleVRFDocument()} {
 		b, err := Render(doc, Options{Paths: paths, Units: DefaultUnits()})
 		if err != nil {
 			t.Fatal(err)
@@ -1060,5 +1060,51 @@ func TestRenderVRFMembers(t *testing.T) {
 	}
 	if strings.Contains(nft, `"eth2", "eth3"`) {
 		t.Error("eth3 matched by iifname")
+	}
+}
+
+// Routing in a VRF: its own router blocks, staticd's BFD routes in a vrf
+// block, its interfaces' OSPF and VRRP, and the ruleset's auto rules and
+// VRF handling.
+func TestRenderVRFRouting(t *testing.T) {
+	b, err := Render(fwconfig.SampleVRFDocument(), Options{Paths: DefaultPaths(), Units: DefaultUnits()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := fwconfig.SampleVRFDocument().Expand()
+	in := doc.Instance("guest")
+	frr := FRRConf(in)
+	for _, want := range []string{
+		"vrf blue\n ip route 10.30.0.0/16 172.16.3.9 bfd profile if-eth3\nexit-vrf\n!\n",
+		"interface eth3\n ip ospf area 0.0.0.0\n ip ospf bfd\n ip ospf bfd profile if-eth3\n vrrp 3\n vrrp 3 ip 172.16.3.254\nexit\n",
+		"router bgp 65010\n bgp router-id 10.255.0.2\n",
+		"router bgp 65010 vrf blue\n bgp router-id 172.16.3.1\n",
+		" neighbor 172.16.3.2 remote-as 65100\n neighbor 172.16.3.2 bfd\n neighbor 172.16.3.2 bfd profile if-eth3\n",
+		" address-family ipv4 unicast\n  redistribute connected\n  neighbor 172.16.3.2 activate\n",
+		"router ospf\n ospf router-id 10.255.0.2\n",
+		"router ospf vrf blue\n ospf router-id 172.16.3.1\nexit\n",
+	} {
+		if !strings.Contains(frr, want) {
+			t.Errorf("frr.conf lacks %q:\n%s", want, frr)
+		}
+	}
+	if strings.Count(frr, "router ospf6") != 1 {
+		t.Errorf("OSPFv3 in the VRF:\n%s", frr)
+	}
+
+	nft := mustFile(t, b, "/etc/portitor/instances/guest/nftables.nft")
+	for _, want := range []string{
+		// The VRF's interfaces (its virtual router's device too) by sdifname.
+		`meta sdifname { "eth3", "vrrp4-3-eth3" } oifname { "eth3", "vrrp4-3-eth3" } counter accept comment "rule 4: into the vrf"`,
+		`meta sdifname { "eth3", "vrrp4-3-eth3" } meta nfproto ipv4 meta l4proto 89 accept comment "auto: ospf"`,
+		`meta sdifname { "eth3", "vrrp4-3-eth3" } meta l4proto 112 accept comment "auto: vrrp"`,
+		"elements = { 10.255.0.1, 172.16.3.2 }",
+		`iifname "blue" ct state new ct label set 1`,
+		`oifname "blue" ct state untracked accept`,
+		`oifname { "eth3", "vrrp4-3-eth3" } ct state new ct label set 1`,
+	} {
+		if !strings.Contains(nft, want) {
+			t.Errorf("ruleset lacks %q:\n%s", want, nft)
+		}
 	}
 }

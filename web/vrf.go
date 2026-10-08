@@ -74,16 +74,43 @@ func prepareVrf(tx *gorm.DB, v, old *models.Vrf) error {
 	return nil
 }
 
+// deleteVrf refuses a VRF that interfaces, routes, BGP neighbours or peer
+// groups are in, or that runs BGP, OSPF or IS-IS; a disabled config goes
+// with it.
 func deleteVrf(tx *gorm.DB, v *models.Vrf) error {
 	var users []string
-	var ifs, routes []string
+	var ifs, routes, neighbors, groups []string
 	tx.Model(&models.Interface{}).Where("instance_id = ? AND vrf = ?", v.InstanceID, v.Name).Order("name").Pluck("name", &ifs)
 	tx.Model(&models.Route{}).Where("vrf_id = ?", v.ID).Order("destination").Pluck("destination", &routes)
+	tx.Model(&models.BgpNeighbor{}).Where("vrf_id = ?", v.ID).Order("address").Pluck("address", &neighbors)
+	tx.Model(&models.BgpPeerGroup{}).Where("vrf_id = ?", v.ID).Order("name").Pluck("name", &groups)
 	for _, i := range ifs {
 		users = append(users, "interface "+i)
 	}
 	for _, r := range routes {
 		users = append(users, "route "+r)
+	}
+	for _, n := range neighbors {
+		users = append(users, "BGP neighbour "+n)
+	}
+	for _, g := range groups {
+		users = append(users, "BGP peer group "+g)
+	}
+	for _, c := range []struct {
+		what  string
+		model any
+		where string
+	}{
+		{"BGP", &models.BgpConfig{}, "vrf_id = ? AND enabled"},
+		{"OSPFv2", &models.OspfConfig{}, "vrf_id = ? AND enabled AND version = 2"},
+		{"OSPFv3", &models.OspfConfig{}, "vrf_id = ? AND enabled AND version = 3"},
+		{"IS-IS", &models.IsisConfig{}, "vrf_id = ? AND enabled"},
+	} {
+		var n int64
+		tx.Model(c.model).Where(c.where, v.ID).Count(&n)
+		if n > 0 {
+			users = append(users, c.what)
+		}
 	}
 	if len(users) == 0 {
 		return nil
@@ -117,4 +144,98 @@ func prepareIfaceVrf(tx *gorm.DB, i *models.Interface) error {
 		}
 	}
 	return nil
+}
+
+// Routing rows (BGP, OSPF and IS-IS configs, BGP peer groups and
+// neighbours) belong to the main table (vrf_id NULL) or a VRF of their
+// instance, and stay there. OSPF and IS-IS interfaces belong to the
+// routing of their interface's VRF.
+
+// rowVrf returns a routing row's VRF (nil: the main table), checking that
+// it is one of the instance's.
+func rowVrf(tx *gorm.DB, instanceID uint, id *uint) (*models.Vrf, error) {
+	if id == nil {
+		return nil, nil
+	}
+	var v models.Vrf
+	if tx.First(&v, *id).Error != nil || v.InstanceID != instanceID {
+		return nil, bad("VRF: not a VRF of this virtual firewall")
+	}
+	return &v, nil
+}
+
+// whereVrf limits a query to the rows of a VRF (nil: the main table).
+func whereVrf(q *gorm.DB, id *uint) *gorm.DB {
+	if id == nil {
+		return q.Where("vrf_id IS NULL")
+	}
+	return q.Where("vrf_id = ?", *id)
+}
+
+// vrfName is a VRF's name, "" for the main table.
+func vrfName(v *models.Vrf) string {
+	if v == nil {
+		return ""
+	}
+	return v.Name
+}
+
+// vrfText names the main table or a VRF in a message.
+func vrfText(v *models.Vrf) string {
+	if v == nil {
+		return "the main table (no VRF)"
+	}
+	return "VRF " + v.Name
+}
+
+// ifaceVrf is the VRF an interface of the instance is in, "" for none
+// (and for a link end).
+func ifaceVrf(tx *gorm.DB, instanceID uint, name string) string {
+	var vrf string
+	tx.Model(&models.Interface{}).Where("instance_id = ? AND name = ?", instanceID, name).Limit(1).Pluck("vrf", &vrf)
+	return vrf
+}
+
+// ifacesInVrf are the names of the instance's interfaces (link ends
+// included, which are in none) in a VRF ("" for none).
+func ifacesInVrf(tx *gorm.DB, instanceID uint, vrf string) (map[string]bool, error) {
+	names, err := ifaceNames(tx, instanceID)
+	if err != nil {
+		return nil, err
+	}
+	for name := range names {
+		if ifaceVrf(tx, instanceID, name) != vrf {
+			delete(names, name)
+		}
+	}
+	return names, nil
+}
+
+// checkIfaceVrf refuses an interface outside the routing's VRF.
+func checkIfaceVrf(tx *gorm.DB, instanceID uint, what, name string, v *models.Vrf) error {
+	if name == "" {
+		return nil
+	}
+	if got := ifaceVrf(tx, instanceID, name); got != vrfName(v) {
+		where := "in no VRF"
+		if got != "" {
+			where = "in VRF " + got
+		}
+		return bad(fmt.Sprintf("%s: %s is %s, not in %s", what, name, where, vrfText(v)))
+	}
+	return nil
+}
+
+// ifaceVrfID is the id of the VRF an interface of the instance is in, nil
+// for none: the routing whose OSPF or IS-IS the interface's settings are.
+func ifaceVrfID(tx *gorm.DB, instanceID uint, name string) *uint {
+	vrf := ifaceVrf(tx, instanceID, name)
+	if vrf == "" {
+		return nil
+	}
+	var v models.Vrf
+	if tx.Where("instance_id = ? AND name = ?", instanceID, vrf).First(&v).Error != nil {
+		return nil
+	}
+	return &v.ID
 }

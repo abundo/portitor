@@ -75,6 +75,12 @@ BGP's *Redistribute* has *IPv4 OSPF* and *IPv6 OSPF*: OSPFv2's routes into IPv4,
 OSPFv3's into IPv6. OSPF's *Redistribute* has *BGP*. Redistributing both ways on
 more than one router can loop routes; filter them with route maps.
 
+## In a VRF
+
+Each [VRF](vrf.md) can run OSPFv2 and OSPFv3 of its own, on its interfaces: choose
+the VRF at the top of the page. The interface lists then show the VRF's
+interfaces only; see [VRFs](vrf.md#routing-protocols).
+
 ## How it runs
 
 OSPF runs in the same FRR as BGP, from the same files (`frr.conf`, `daemons`; see

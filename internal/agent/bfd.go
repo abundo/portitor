@@ -53,13 +53,16 @@ func parseBFDPeers(data []byte) ([]agentapi.BFDPeerInfo, error) {
 			return n
 		}
 		p := agentapi.BFDPeerInfo{
-			Peer: o.str("peer"), Local: o.str("local"), Interface: o.str("interface"),
+			Peer: o.str("peer"), VRF: o.str("vrf"), Local: o.str("local"), Interface: o.str("interface"),
 			Multihop: o.flag("multihop"), Profile: o.str("profile"), Status: o.str("status"),
 			Diagnostic: o.str("diagnostic"), RemoteDiagnostic: o.str("remote-diagnostic"),
 			Uptime: num("uptime"), Downtime: num("downtime"),
 			DetectMultiplier: int(num("detect-multiplier")), ReceiveInterval: int(num("receive-interval")),
 			TransmitInterval: int(num("transmit-interval")), RemoteDetectMultiplier: int(num("remote-detect-multiplier")),
 			RemoteReceiveInterval: int(num("remote-receive-interval")), RemoteTransmitInterval: int(num("remote-transmit-interval")),
+		}
+		if p.VRF == "default" {
+			p.VRF = ""
 		}
 		out = append(out, p)
 	}

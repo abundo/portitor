@@ -111,6 +111,13 @@ entries matches nothing.
   A route that no entry matches is denied, so end a route map that should let the
   rest through with a permit entry that matches anything.
 
+## In a VRF
+
+Each [VRF](vrf.md) can run a BGP of its own, for its interfaces and table: choose
+the VRF at the top of the page, then configure it like the main table's. Its
+neighbours, peer groups and BGP info are its own; see
+[VRFs](vrf.md#routing-protocols).
+
 ## How it runs
 
 The default virtual firewall (the host) runs the distribution's `frr.service` from

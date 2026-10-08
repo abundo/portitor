@@ -26,10 +26,13 @@ func (a *Agent) ISIS(ctx context.Context) *agentapi.ISISResponse {
 	}
 	for i := range doc.Instances {
 		in := &doc.Instances[i]
-		if !in.ISISRunning() {
-			continue
+		for _, r := range in.Routings() {
+			if r.ISISOn() {
+				st := isisInstance(in.Name, inVRF(a.vtysh(ctx, in), r.VRF))
+				st.VRF = r.VRF
+				resp.Instances = append(resp.Instances, st)
+			}
 		}
-		resp.Instances = append(resp.Instances, isisInstance(in.Name, a.vtysh(ctx, in)))
 	}
 	return resp
 }

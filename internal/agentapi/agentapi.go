@@ -582,9 +582,11 @@ type RouteEntry struct {
 type IPNeighbour struct {
 	Instance  string `json:"instance"`
 	Interface string `json:"interface"`
-	Family    string `json:"family"` // ipv4 (ARP) or ipv6 (ND)
-	Address   string `json:"address"`
-	MAC       string `json:"mac,omitempty"`
+	// VRF is the interface's VRF, "" for none.
+	VRF     string `json:"vrf,omitempty"`
+	Family  string `json:"family"` // ipv4 (ARP) or ipv6 (ND)
+	Address string `json:"address"`
+	MAC     string `json:"mac,omitempty"`
 	// State is the kernel's NUD state in lower case (reachable, stale,
 	// delay, probe, failed, incomplete, permanent, noarp).
 	State string `json:"state"`
@@ -695,6 +697,9 @@ type ConnectionsRequest struct {
 	Instance   string `json:"instance"`
 	IntervalMs int    `json:"interval_ms,omitempty"` // 0 is ConnectionsDefaultIntervalMs
 	Max        int    `json:"max,omitempty"`         // entries per snapshot; 0 is ConnectionsDefaultMax
+	// VRF limits the connections to those of a VRF (Connection.VRF), ""
+	// to those of none; nil: all.
+	VRF *string `json:"vrf,omitempty"`
 }
 
 // ConnectionsFlushRequest empties an instance's connection tracking table
@@ -729,6 +734,9 @@ type ConnectionsSnapshot struct {
 // under NAT. Mark is the id of the rule that accepted it (render.RuleCounter's
 // ct mark), 0 for none.
 type Connection struct {
+	// VRF is the VRF the connection came in on or left by, from the
+	// firewall (its conntrack label, render.writeVRFLabels); "" for none.
+	VRF          string `json:"vrf,omitempty"`
 	Family       string `json:"family"` // "ipv4" or "ipv6"
 	Protocol     string `json:"protocol"`
 	Src          string `json:"src"`
@@ -767,7 +775,9 @@ type BGPResponse struct {
 // BGPInstance is one instance's BGP state. Error says why FRR could not
 // be asked (not running yet, say).
 type BGPInstance struct {
-	Instance string        `json:"instance"`
+	Instance string `json:"instance"`
+	// VRF is the VRF whose BGP this is, "" for the main table's.
+	VRF      string        `json:"vrf,omitempty"`
 	RouterID string        `json:"router_id,omitempty"`
 	ASN      uint32        `json:"asn,omitempty"`
 	Error    string        `json:"error,omitempty"`
@@ -855,9 +865,11 @@ type OSPFResponse struct {
 // OSPFInstance is one instance's OSPFv2 and OSPFv3 state; nil for a
 // version it does not run.
 type OSPFInstance struct {
-	Instance string     `json:"instance"`
-	V2       *OSPFState `json:"v2,omitempty"`
-	V3       *OSPFState `json:"v3,omitempty"`
+	Instance string `json:"instance"`
+	// VRF is the VRF whose OSPF this is, "" for the main table's.
+	VRF string     `json:"vrf,omitempty"`
+	V2  *OSPFState `json:"v2,omitempty"`
+	V3  *OSPFState `json:"v3,omitempty"`
 }
 
 // OSPFState is one OSPF version's state. Error says why FRR could not be
@@ -938,7 +950,9 @@ type ISISResponse struct {
 // ISISInstance is one instance's IS-IS state. Error says why FRR could not
 // be asked (not running yet, say).
 type ISISInstance struct {
-	Instance   string              `json:"instance"`
+	Instance string `json:"instance"`
+	// VRF is the VRF whose IS-IS this is, "" for the main table's.
+	VRF        string              `json:"vrf,omitempty"`
 	SystemID   string              `json:"system_id,omitempty"`
 	Error      string              `json:"error,omitempty"`
 	Neighbors  []ISISNeighborInfo  `json:"neighbors"`
@@ -1044,7 +1058,9 @@ type BFDInstance struct {
 // BFDPeerInfo is a BFD session, as bfdd has it. Intervals are in
 // milliseconds, Uptime and Downtime in seconds.
 type BFDPeerInfo struct {
-	Peer             string `json:"peer"`
+	Peer string `json:"peer"`
+	// VRF is the session's VRF, "" for the main table.
+	VRF              string `json:"vrf,omitempty"`
 	Local            string `json:"local,omitempty"`
 	Interface        string `json:"interface,omitempty"`
 	Multihop         bool   `json:"multihop"`

@@ -67,6 +67,10 @@ distance.
 
 "Redistribute static" in BGP and OSPF includes the routes with BFD.
 
+A static route with BFD in a [VRF](vrf.md) is FRR's in that VRF; its gateway's
+interface must be in the same VRF. BGP, OSPF and IS-IS in a VRF use BFD as the
+main table's do, and *BFD info* shows each session's VRF.
+
 ## The firewall rules
 
 BFD's control packets (UDP port 3784) are let in and out on the interfaces with BFD

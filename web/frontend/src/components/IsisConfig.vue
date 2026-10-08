@@ -2,8 +2,9 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
 <script setup>
-// IsisConfig: IS-IS's configuration: IS-IS itself (one row per instance,
-// made on the first save) and the interfaces it runs on.
+// IsisConfig: IS-IS's configuration of the chosen VRF (useVrfChoice; the
+// page keys it by the VRF): IS-IS itself (one row per instance and VRF,
+// made on the first save) and the interfaces it runs on, those in the VRF.
 import { computed, reactive, ref, watch } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import CrudPage from '@/components/CrudPage.vue'
@@ -13,6 +14,7 @@ import { errMsg } from '@/api/http'
 import { usePageForm } from '@/composables/useFormGuard'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
 import { useRoutingObjects } from '@/composables/useRoutingObjects'
+import { useVrfChoice } from '@/composables/useVrfChoice'
 import { useAuthStore } from '@/stores/auth'
 import { inlineField } from '@/utils/form'
 
@@ -20,6 +22,9 @@ const toast = useToast()
 const auth = useAuthStore()
 const objects = useRoutingObjects()
 const { store, ifaceList, ifaceNames, ifaceText } = useInstanceRefs()
+const { vrfName, vrfId, ofVrf } = useVrfChoice()
+// inVrf reports whether an interface (or link end, in none) is in the VRF.
+const inVrf = (name) => (ifaceList.value.find((i) => i.name === name)?.vrf || '') === vrfName.value
 const readOnly = computed(() => !auth.canEdit)
 
 // ----- IS-IS itself.
@@ -51,7 +56,8 @@ const defaults = () => ({
 async function load() {
   if (!store.currentId) return
   try {
-    const [row] = await isisConfig.list({ instance_id: store.currentId })
+    const rows = await isisConfig.list({ instance_id: store.currentId })
+    const row = rows.find(ofVrf)
     for (const k of Object.keys(cfg)) delete cfg[k]
     Object.assign(cfg, defaults(), row ?? {})
     cfgForm.mark()
@@ -63,7 +69,7 @@ watch(() => store.currentId, load, { immediate: true })
 
 async function save() {
   saving.value = true
-  const body = { ...cfg, instance_id: store.currentId }
+  const body = { ...cfg, instance_id: store.currentId, vrf_id: vrfId.value }
   try {
     const saved = cfg.id ? await isisConfig.update(cfg.id, body) : await isisConfig.create(body)
     // The passwords are write-only: the inputs empty again after a save.
@@ -92,7 +98,9 @@ const netFromIface = computed({
   },
 })
 const netIfaceItems = computed(() =>
-  ifaceList.value.map((i) => ({ label: ifaceText(i.name), value: i.name })),
+  ifaceList.value
+    .filter((i) => inVrf(i.name))
+    .map((i) => ({ label: ifaceText(i.name), value: i.name })),
 )
 const generatedNet = computed(() => {
   const ifc = ifaceList.value.find((i) => i.name === cfg.net_interface)
@@ -176,7 +184,9 @@ const redistColumns = computed(() => [
 ])
 
 // ----- Interfaces.
-const ifaceItems = computed(() => ifaceNames.value.map((n) => ({ label: ifaceText(n), value: n })))
+const ifaceItems = computed(() =>
+  ifaceNames.value.filter(inVrf).map((n) => ({ label: ifaceText(n), value: n })),
+)
 const ifColumns = [
   { key: 'name', label: 'Interface', format: (i) => ifaceText(i.name) },
   {
@@ -284,6 +294,10 @@ const ifDefaults = {
             IS-IS (IPv4 and IPv6) runs FRR's isisd in this virtual firewall. It is off until enabled
             here; changes take effect when committed. IS-IS is not IP, so no firewall rules apply to
             it.
+            <template v-if="vrfName">
+              This is VRF {{ vrfName }}'s IS-IS, on the VRF's interfaces; its routes go in the VRF's
+              table.
+            </template>
           </p>
         </div>
         <UButton
@@ -451,6 +465,7 @@ const ifDefaults = {
       description="The interfaces IS-IS runs on, and their options. Link ends between virtual firewalls are interfaces too."
       :api="isisInterfaces"
       :params="{ instance_id: store.currentId }"
+      :row-filter="(i) => inVrf(i.name)"
       :columns="ifColumns"
       :fields="ifFields"
       :defaults="ifDefaults"

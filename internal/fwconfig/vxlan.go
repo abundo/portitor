@@ -126,7 +126,7 @@ func (v *validator) vxlanInstance(p string, in *Instance, ifaces map[string]*Int
 		}
 	}
 	vnis := map[uint32]string{}
-	evpn := in.BGPRunning() && in.BGP.EVPN
+	evpn := in.BGP != nil && in.BGP.Enabled && in.BGP.EVPN
 	vteps := 0
 	for _, ifc := range in.Interfaces {
 		if ifc.Kind != KindVXLAN || ifc.VXLAN == nil {
@@ -176,5 +176,5 @@ func (in *Instance) VXLANs() []*Interface {
 
 // EVPNRunning reports whether BGP runs with EVPN.
 func (in *Instance) EVPNRunning() bool {
-	return in.BGPRunning() && in.BGP.EVPN
+	return in.BGP != nil && in.BGP.Enabled && in.BGP.EVPN
 }

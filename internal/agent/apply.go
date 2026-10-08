@@ -295,11 +295,9 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 			sysctls = append(sysctls, "net.ipv6.conf."+strings.ReplaceAll(ifc.Name, ".", "/")+".accept_ra="+ra)
 		}
 		sysctls = append(sysctls, vrrpSysctls(vrrpDevs)...)
-		if in.HasVRF() {
-			// The firewall's own services (in the default VRF) answer
-			// connections that come in on a VRF's member.
-			sysctls = append(sysctls, "net.ipv4.tcp_l3mdev_accept=1", "net.ipv4.udp_l3mdev_accept=1")
-		}
+		// The firewall's own services (in the default VRF) answer on a
+		// VRF's interfaces (vrf.go).
+		sysctls = append(sysctls, vrfSysctls(in)...)
 		if err := a.do(ctx, command{Netns: ns, Name: "sysctl", Args: append([]string{"-q", "-e", "-w"}, sysctls...)}); err != nil {
 			return err
 		}
@@ -324,6 +322,9 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 		}
 
 		if err := a.doAll(ctx, planVRRPDevices(ns, vrrpDevs, links)); err != nil {
+			return err
+		}
+		if err := a.applyVRFRules(ctx, in, ns); err != nil {
 			return err
 		}
 

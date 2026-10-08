@@ -82,6 +82,11 @@ the other protocols' sessions); other changes are reloaded with `frr-reload.py`.
 *Static* in *Redistribute* means the static routes Portitor installs: FRR's
 `redistribute kernel`.
 
+## In a VRF
+
+Each [VRF](vrf.md) can run an IS-IS of its own, on its interfaces: choose the VRF
+at the top of the page; see [VRFs](vrf.md#routing-protocols).
+
 ## With BGP and OSPF
 
 BGP's *Redistribute* has *IPv4 IS-IS* and *IPv6 IS-IS*, and OSPF's has *IS-IS*

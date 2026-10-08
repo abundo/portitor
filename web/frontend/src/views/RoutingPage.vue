@@ -6,32 +6,26 @@
 <script setup>
 import AutoRefreshButton from '@/components/AutoRefreshButton.vue'
 import { useAutoRefresh } from '@/composables/useAutoRefresh'
-import { computed, ref, watch } from 'vue'
+import { computed, ref } from 'vue'
 import NeedInstance from '@/components/NeedInstance.vue'
 import SearchInput from '@/components/SearchInput.vue'
+import VrfSelect from '@/components/VrfSelect.vue'
 import { api } from '@/api'
 import { errMsg } from '@/api/http'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
+import { useVrfChoice } from '@/composables/useVrfChoice'
 import { useSearch, valuesText } from '@/utils/search'
 
-const { store, vrfList, ifaceText } = useInstanceRefs()
+const { store, ifaceText } = useInstanceRefs()
 
-// The VRF whose routes are shown, by id: 0 is the tables of no VRF (main,
-// local and any other), a VRF its own table.
-const vrf = ref(0)
-watch(
-  () => store.current?.name,
-  () => (vrf.value = 0),
-)
-const vrfItems = computed(() => [
-  { label: 'Main (no VRF)', value: 0 },
-  ...vrfList.value.map((v) => ({ label: `${v.name} (table ${v.route_table})`, value: v.id })),
-])
+// The VRF whose routes are shown: the main table is the tables of no VRF
+// (main, local and any other), a VRF its own table.
+const { vrf, vrfList, vrfItems, current } = useVrfChoice()
 const vrfTables = computed(() => new Set(vrfList.value.map((v) => String(v.route_table))))
 function inVRF(r) {
-  if (!vrf.value) return !vrfTables.value.has(r.table)
-  const v = vrfList.value.find((x) => x.id === vrf.value)
-  return v ? r.table === String(v.route_table) || r.table === v.name : false
+  const v = current.value
+  if (!v) return !vrfTables.value.has(r.table)
+  return r.table === String(v.route_table) || r.table === v.name
 }
 
 // Loaded, and refreshed every 10 s, while the page is open.
@@ -114,21 +108,15 @@ const columns = [
           <p class="max-w-3xl text-sm text-muted">
             The IPv4 and IPv6 routes of this virtual firewall in all its routing tables (main, local
             and any other) as the kernel has them. Protocol is who added the route: connected
-            networks, DHCP and RA, the static routes deployed (portitor), and FRR's BGP, IS-IS, OSPF and
-            static (with BFD) routes.
+            networks, DHCP and RA, the static routes deployed (portitor), and FRR's BGP, IS-IS, OSPF
+            and static (with BFD) routes.
           </p>
         </div>
         <AutoRefreshButton :auto="auto" :loading="loading" />
       </div>
       <UAlert v-if="error" class="mb-2" color="error" variant="subtle" :title="error" />
       <div class="mb-2 flex items-center gap-3">
-        <USelect
-          v-if="vrfList.length"
-          v-model="vrf"
-          :items="vrfItems"
-          class="w-56"
-          aria-label="VRF"
-        />
+        <VrfSelect v-model="vrf" :items="vrfItems" />
         <SearchInput v-model="search" />
         <span class="text-sm text-muted">{{ filtered.length }} of {{ rows.length }} routes</span>
       </div>

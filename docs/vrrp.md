@@ -85,6 +85,9 @@ An interface with an IPv4 virtual router answers ARP only for its own addresses
 (`arp_ignore` 1), so the virtual addresses are answered by their devices, with the
 virtual MAC address, and never by a backup's interface.
 
+A virtual router may be on an interface in a [VRF](vrf.md): its device is put in
+the same VRF.
+
 ## Limits
 
 - **Services on the virtual address.** The DNS server listens on the interfaces'

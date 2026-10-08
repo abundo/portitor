@@ -20,10 +20,14 @@ import (
 
 func prepareIsisConfig(tx *gorm.DB, c, old *models.IsisConfig) error {
 	if old != nil {
-		// Rows stay in their instance.
-		c.InstanceID = old.InstanceID
+		// Rows stay in their instance and VRF.
+		c.InstanceID, c.VrfID = old.InstanceID, old.VrfID
 	}
 	if err := instanceExists(tx, c.InstanceID); err != nil {
+		return err
+	}
+	v, err := rowVrf(tx, c.InstanceID, c.VrfID)
+	if err != nil {
 		return err
 	}
 	c.Net, _ = fwconfig.ParseISISNet(c.Net)
@@ -41,6 +45,9 @@ func prepareIsisConfig(tx *gorm.DB, c, old *models.IsisConfig) error {
 		var ifc models.Interface
 		if err := tx.Where("instance_id = ? AND name = ?", c.InstanceID, c.NetInterface).First(&ifc).Error; err != nil {
 			return bad(fmt.Sprintf("%q is not an interface of this virtual firewall", c.NetInterface))
+		}
+		if err := checkIfaceVrf(tx, c.InstanceID, "NET interface", c.NetInterface, v); err != nil {
+			return err
 		}
 		net, ok := fwconfig.ISISNetFromAddresses(area, ifc.Addresses)
 		if !ok {
@@ -91,8 +98,13 @@ func prepareIsisConfig(tx *gorm.DB, c, old *models.IsisConfig) error {
 	}
 	// Narrow metrics cap the interfaces' metrics too.
 	if max := fwconfig.ISISMaxMetric(c.MetricStyle); max < fwconfig.ISISMaxMetric("") {
-		var ifs []string
-		tx.Model(&models.IsisInterface{}).Where("instance_id = ? AND metric > ?", c.InstanceID, max).Order("name").Pluck("name", &ifs)
+		var all, ifs []string
+		tx.Model(&models.IsisInterface{}).Where("instance_id = ? AND metric > ?", c.InstanceID, max).Order("name").Pluck("name", &all)
+		for _, name := range all {
+			if ifaceVrf(tx, c.InstanceID, name) == vrfName(v) {
+				ifs = append(ifs, name)
+			}
+		}
 		if len(ifs) > 0 {
 			return bad(fmt.Sprintf("narrow metrics go up to %d; lower the metric of %s first", max, strings.Join(ifs, ", ")))
 		}
@@ -139,8 +151,9 @@ func prepareIsisInterface(tx *gorm.DB, i, old *models.IsisInterface) error {
 	if tx.Where("instance_id = ? AND name = ?", i.InstanceID, i.Name).First(&ifc).Error == nil && fwconfig.ISISLayer3(ifc.Kind) && !i.Passive {
 		return bad(fmt.Sprintf("%s is a %s interface, which carries no IS-IS (IS-IS is not IP); it can only be passive, to announce its networks", i.Name, ifc.Kind))
 	}
+	// The IS-IS of the interface's VRF.
 	var cfg models.IsisConfig
-	tx.Where("instance_id = ?", i.InstanceID).First(&cfg)
+	whereVrf(tx.Where("instance_id = ?", i.InstanceID), ifaceVrfID(tx, i.InstanceID, i.Name)).First(&cfg)
 	return problems(fwconfig.CheckISISInterface(i.Interface(), cfg.MetricStyle))
 }
 

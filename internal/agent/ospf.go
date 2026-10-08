@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/netip"
+	"slices"
 	"sort"
 	"strings"
 
@@ -26,18 +27,22 @@ func (a *Agent) OSPF(ctx context.Context) *agentapi.OSPFResponse {
 	}
 	for i := range doc.Instances {
 		in := &doc.Instances[i]
-		if !in.OSPFRunning(2) && !in.OSPFRunning(3) {
-			continue
+		for _, r := range in.Routings() {
+			if r.OSPFOn(2) == nil && r.OSPFOn(3) == nil {
+				continue
+			}
+			oi := agentapi.OSPFInstance{Instance: in.Name, VRF: r.VRF}
+			vtysh := inVRF(a.vtysh(ctx, in), r.VRF)
+			if r.OSPFOn(2) != nil {
+				oi.V2 = ospfState(vtysh, 2)
+			}
+			if r.OSPFOn(3) != nil {
+				oi.V3 = ospfState(vtysh, 3)
+				// OSPFv3 lists a VRF's device among its interfaces.
+				oi.V3.Interfaces = slices.DeleteFunc(oi.V3.Interfaces, func(i agentapi.OSPFInterfaceInfo) bool { return r.VRF != "" && i.Name == r.VRF })
+			}
+			resp.Instances = append(resp.Instances, oi)
 		}
-		oi := agentapi.OSPFInstance{Instance: in.Name}
-		vtysh := a.vtysh(ctx, in)
-		if in.OSPFRunning(2) {
-			oi.V2 = ospfState(vtysh, 2)
-		}
-		if in.OSPFRunning(3) {
-			oi.V3 = ospfState(vtysh, 3)
-		}
-		resp.Instances = append(resp.Instances, oi)
 	}
 	return resp
 }

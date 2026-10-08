@@ -28,7 +28,7 @@ import { useSearch, valuesText } from '@/utils/search'
 
 const route = useRoute()
 const router = useRouter()
-const { store, ifaceNames, ifaceText } = useInstanceRefs()
+const { store, ifaceNames, ifaceText, vrfList } = useInstanceRefs()
 
 const tabs = [
   { label: 'BFD info', value: 'info', slot: 'info', icon: 'i-lucide-info' },
@@ -83,9 +83,15 @@ function usedBy(p) {
   const out = []
   if (u.routes.some((r) => r.enabled && r.bfd && sameAddr(r.gateway, p.peer))) out.push('Static')
   const groupBfd = new Set(u.groups.filter((g) => g.bfd).map((g) => g.name))
+  // A neighbour of the session's VRF's BGP.
+  const vrfOf = (n) => vrfList.value.find((v) => v.id === n.vrf_id)?.name ?? ''
   if (
     u.neighbors.some(
-      (n) => n.enabled && (n.bfd || groupBfd.has(n.peer_group)) && sameAddr(n.address, p.peer),
+      (n) =>
+        n.enabled &&
+        (n.bfd || groupBfd.has(n.peer_group)) &&
+        sameAddr(n.address, p.peer) &&
+        vrfOf(n) === (p.vrf ?? ''),
     )
   )
     out.push('BGP')
@@ -98,6 +104,7 @@ function usedBy(p) {
 const info = useSearch(peers, (p) =>
   valuesText(
     ifaceText(p.interface),
+    p.vrf,
     p.peer,
     p.local,
     p.status,
@@ -116,8 +123,9 @@ function duration(s) {
     .filter(Boolean)
     .join(' ')
 }
-const infoColumns = [
+const infoColumns = computed(() => [
   { id: 'interface', header: 'Interface' },
+  ...(vrfList.value.length ? [{ accessorKey: 'vrf', header: 'VRF' }] : []),
   { accessorKey: 'peer', header: 'Peer' },
   { accessorKey: 'local', header: 'Local address' },
   { id: 'status', header: 'Status' },
@@ -126,7 +134,7 @@ const infoColumns = [
   { id: 'local_timers', header: 'Rx / tx (ms) × multiplier' },
   { id: 'remote_timers', header: 'Peer rx / tx (ms) × multiplier' },
   { accessorKey: 'diagnostic', header: 'Diagnostic' },
-]
+])
 
 // ----- Interfaces.
 const ifaceItems = computed(() => ifaceNames.value.map((n) => ({ label: ifaceText(n), value: n })))

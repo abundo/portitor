@@ -46,6 +46,30 @@ func TestPlanVRRP(t *testing.T) {
 	}
 }
 
+// A virtual router on an interface in a VRF has its device in the VRF:
+// made there, and made again when it is not.
+func TestPlanVRRPInVRF(t *testing.T) {
+	doc := fwconfig.SampleVRFDocument()
+	devs := doc.Instance("guest").VRRPDevices()[2:]
+	equal(t, planVRRPCreate("fw-guest", devs, map[string]ipLink{}),
+		"fw-guest ip link add link eth3 name vrrp4-3-eth3 address 00:00:5e:00:01:03 type macvlan mode bridge",
+		"fw-guest ip link set dev vrrp4-3-eth3 addrgenmode random",
+		"fw-guest ip link set dev vrrp4-3-eth3 protodown on",
+		"fw-guest ip link set dev vrrp4-3-eth3 master blue",
+	)
+	have := func(master string) map[string]ipLink {
+		links, err := parseLinks([]byte(`[{"ifname":"vrrp4-3-eth3","link":"eth3","master":"` + master + `","flags":["UP"],"address":"00:00:5e:00:01:03","linkinfo":{"info_kind":"macvlan"},"addr_info":[]}]`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return map[string]ipLink{links[0].Ifname: links[0]}
+	}
+	equal(t, planVRRPCreate("fw-guest", devs, have("blue")))
+	if cmds := planVRRPCreate("fw-guest", devs, have("")); len(cmds) != 5 {
+		t.Errorf("device out of the vrf: %v", cmds)
+	}
+}
+
 func TestParseVRRP(t *testing.T) {
 	routers, err := parseVRRP([]byte(`[
  {"vrid":50,"version":3,"autoconfigured":false,"shutdown":false,"preemptMode":true,"acceptMode":true,

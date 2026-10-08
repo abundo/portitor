@@ -79,7 +79,7 @@ func (a *Agent) handleConnections(w http.ResponseWriter, r *http.Request) {
 			flows = append(flows, f...)
 		}
 		if snap.Error == "" {
-			snap.Total, snap.Entries = connections(flows, req.Max)
+			snap.Total, snap.Entries = connections(flows, connVRFs(in), req.VRF, req.Max)
 		}
 		if enc.Encode(snap) != nil || rc.Flush() != nil {
 			break
@@ -153,14 +153,44 @@ func clampConnections(req *agentapi.ConnectionsRequest) {
 	req.Max = min(req.Max, agentapi.ConnectionsMaxEntries)
 }
 
-// connections converts flows, largest (both directions' bytes) first,
-// and returns how many there are and the first maxEntries.
-func connections(flows []*netlink.ConntrackFlow, maxEntries int) (int, []agentapi.Connection) {
+// connVRFs names the instance's VRFs by their conntrack label bit
+// (Instance.VRFLabel).
+func connVRFs(in *fwconfig.Instance) map[int]string {
+	out := map[int]string{}
+	for _, name := range in.VRFNames() {
+		out[in.VRFLabel(name)] = name
+	}
+	return out
+}
+
+// flowVRF is the VRF of a flow by the first label bit set that names one
+// (vrfs), "" for none. The kernel's label bitmap is little-endian words.
+func flowVRF(labels []byte, vrfs map[int]string) string {
+	for i, b := range labels {
+		for bit := range 8 {
+			if b&(1<<bit) != 0 {
+				if name, ok := vrfs[i*8+bit]; ok {
+					return name
+				}
+			}
+		}
+	}
+	return ""
+}
+
+// connections converts flows, largest (both directions' bytes) first, of
+// the VRF vrf (nil: all; "": none), and returns how many there are and
+// the first maxEntries.
+func connections(flows []*netlink.ConntrackFlow, vrfs map[int]string, vrf *string, maxEntries int) (int, []agentapi.Connection) {
+	if vrf != nil {
+		flows = slices.DeleteFunc(slices.Clone(flows), func(f *netlink.ConntrackFlow) bool { return flowVRF(f.Labels, vrfs) != *vrf })
+	}
 	size := func(f *netlink.ConntrackFlow) uint64 { return f.Forward.Bytes + f.Reverse.Bytes }
 	slices.SortStableFunc(flows, func(a, b *netlink.ConntrackFlow) int { return cmp.Compare(size(b), size(a)) })
 	out := make([]agentapi.Connection, 0, min(len(flows), maxEntries))
 	for _, f := range flows[:min(len(flows), maxEntries)] {
 		c := agentapi.Connection{
+			VRF:          flowVRF(f.Labels, vrfs),
 			Family:       "ipv4",
 			Protocol:     protoName(f.Forward.Protocol),
 			Src:          f.Forward.SrcIP.String(),

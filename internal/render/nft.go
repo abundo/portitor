@@ -125,6 +125,7 @@ func Nftables(in *fwconfig.Instance, lockout *AntiLockout, paths Paths) string {
 	}
 	b.WriteString("\t\tct state established,related accept\n")
 	writeInvalidDrop(b, in, fwconfig.ChainInput)
+	writeVRFLabels(b, in, fwconfig.ChainInput)
 	b.WriteString("\t\tiif \"lo\" accept\n")
 	b.WriteString("\t\tmeta l4proto ipv6-icmp icmpv6 type { nd-router-solicit, nd-router-advert, nd-neighbor-solicit, nd-neighbor-advert, destination-unreachable, packet-too-big, time-exceeded, parameter-problem } accept\n")
 	b.WriteString("\t\tmeta l4proto icmp icmp type { destination-unreachable, time-exceeded, parameter-problem } accept\n")
@@ -176,6 +177,7 @@ func Nftables(in *fwconfig.Instance, lockout *AntiLockout, paths Paths) string {
 	}
 	b.WriteString("\t\tct state established,related accept\n")
 	writeInvalidDrop(b, in, fwconfig.ChainForward)
+	writeVRFLabels(b, in, fwconfig.ChainForward)
 	b.WriteString("\t\tmeta l4proto ipv6-icmp icmpv6 type { destination-unreachable, packet-too-big, time-exceeded, parameter-problem } accept\n")
 	// Port forwards are accepted after the rules, so a rule can drop
 	// what a DNAT would let in.
@@ -195,6 +197,13 @@ func Nftables(in *fwconfig.Instance, lockout *AntiLockout, paths Paths) string {
 	b.WriteString("\t\tct state established,related accept\n")
 	writeInvalidDrop(b, in, fwconfig.ChainOutput)
 	b.WriteString("\t\toif \"lo\" accept\n")
+	if names := in.VRFNames(); len(names) > 0 {
+		// What a socket in a VRF sends passes output twice: first with the
+		// VRF device as its output interface, untracked, then with the
+		// interface it leaves by, where the rules decide.
+		fmt.Fprintf(b, "\t\toifname %s ct state untracked accept comment \"vrf: filtered on its interface\"\n", quotedSet(names))
+	}
+	writeVRFLabels(b, in, fwconfig.ChainOutput)
 	b.WriteString("\t\tmeta l4proto ipv6-icmp icmpv6 type { nd-router-solicit, nd-router-advert, nd-neighbor-solicit, nd-neighbor-advert, destination-unreachable, packet-too-big, time-exceeded, parameter-problem } accept\n")
 	b.WriteString("\t\tmeta l4proto icmp icmp type { destination-unreachable, time-exceeded, parameter-problem } accept\n")
 	// What OSPF sends: on its interfaces, or to its networks' neighbours
@@ -271,6 +280,30 @@ func Nftables(in *fwconfig.Instance, lockout *AntiLockout, paths Paths) string {
 		fmt.Fprintf(b, "include %q\n", paths.IPListFile(name))
 	}
 	return b.String()
+}
+
+// writeVRFLabels marks each new connection that comes in on a VRF's
+// interfaces (in input and forward, the VRF device), or that the firewall
+// opens out of them, with the VRF's conntrack label bit
+// (Instance.VRFLabel), so the connection list can tell the VRFs apart:
+// they share the namespace's conntrack table.
+func writeVRFLabels(b *strings.Builder, in *fwconfig.Instance, chain string) {
+	for _, vrf := range in.VRFs {
+		label := in.VRFLabel(vrf.Name)
+		if chain != fwconfig.ChainOutput {
+			fmt.Fprintf(b, "\t\tiifname %s ct state new ct label set %d\n", quotedSet([]string{vrf.Name}), label)
+			continue
+		}
+		var members []string
+		for _, ifc := range in.Interfaces {
+			if ifc.VRF == vrf.Name {
+				members = append(members, ifc.Name)
+			}
+		}
+		if members = in.AddVRRPDevices(members); len(members) > 0 {
+			fmt.Fprintf(b, "\t\toifname %s ct state new ct label set %d\n", quotedSet(members), label)
+		}
+	}
 }
 
 // Rule counters. A rule with an ID counts the packets it matches in a

@@ -1202,7 +1202,8 @@ func (s *Server) handleAgentBGP(c *echo.Context) error {
 }
 
 // handleAgentBGPRoutes passes on the prefixes received, filtered and
-// advertised of one BGP neighbour (?instance=&neighbor=), for the BGP page.
+// advertised of one BGP neighbour (?instance=&vrf=&neighbor=; no vrf: the
+// main table's), for the BGP page.
 func (s *Server) handleAgentBGPRoutes(c *echo.Context) error {
 	inst, nbr := c.QueryParam("instance"), c.QueryParam("neighbor")
 	if inst == "" || nbr == "" {
@@ -1219,7 +1220,7 @@ func (s *Server) handleAgentBGPRoutes(c *echo.Context) error {
 	if err != nil {
 		return agentError(c, err)
 	}
-	r, err := a.BGPNeighborRoutes(c.Request().Context(), inst, nbr)
+	r, err := a.BGPNeighborRoutes(c.Request().Context(), inst, c.QueryParam("vrf"), nbr)
 	if err != nil {
 		return agentError(c, err)
 	}
@@ -1227,7 +1228,7 @@ func (s *Server) handleAgentBGPRoutes(c *echo.Context) error {
 }
 
 // handleAgentBGPNeighbor passes on FRR's view of one BGP neighbour
-// (?instance=&neighbor=), for the BGP page.
+// (?instance=&vrf=&neighbor=), for the BGP page.
 func (s *Server) handleAgentBGPNeighbor(c *echo.Context) error {
 	inst, nbr := c.QueryParam("instance"), c.QueryParam("neighbor")
 	if inst == "" || nbr == "" {
@@ -1244,7 +1245,7 @@ func (s *Server) handleAgentBGPNeighbor(c *echo.Context) error {
 	if err != nil {
 		return agentError(c, err)
 	}
-	r, err := a.BGPNeighborDetail(c.Request().Context(), inst, nbr)
+	r, err := a.BGPNeighborDetail(c.Request().Context(), inst, c.QueryParam("vrf"), nbr)
 	if err != nil {
 		return agentError(c, err)
 	}
@@ -1491,45 +1492,11 @@ func redactDoc(doc fwconfig.Document) fwconfig.Document {
 			}
 			cp.DynDNS[j] = d
 		}
-		if in.BGP != nil {
-			b := *in.BGP
-			redact := func(peers []fwconfig.BGPPeer) []fwconfig.BGPPeer {
-				out := slices.Clone(peers)
-				for k := range out {
-					if out[k].Password != "" {
-						out[k].Password = "<redacted>"
-					}
-				}
-				return out
-			}
-			b.PeerGroups, b.Neighbors = redact(b.PeerGroups), redact(b.Neighbors)
-			cp.BGP = &b
-		}
-		if in.OSPF != nil {
-			o := *in.OSPF
-			o.Interfaces = slices.Clone(o.Interfaces)
-			for k := range o.Interfaces {
-				if o.Interfaces[k].AuthKey != "" {
-					o.Interfaces[k].AuthKey = "<redacted>"
-				}
-			}
-			cp.OSPF = &o
-		}
-		if in.ISIS != nil {
-			s := *in.ISIS
-			if s.AreaPassword != "" {
-				s.AreaPassword = "<redacted>"
-			}
-			if s.DomainPassword != "" {
-				s.DomainPassword = "<redacted>"
-			}
-			s.Interfaces = slices.Clone(s.Interfaces)
-			for k := range s.Interfaces {
-				if s.Interfaces[k].Password != "" {
-					s.Interfaces[k].Password = "<redacted>"
-				}
-			}
-			cp.ISIS = &s
+		cp.BGP, cp.OSPF, cp.ISIS = redactBGP(in.BGP), redactOSPF(in.OSPF), redactISIS(in.ISIS)
+		cp.VRFs = slices.Clone(in.VRFs)
+		for j := range cp.VRFs {
+			v := &cp.VRFs[j]
+			v.BGP, v.OSPF, v.ISIS = redactBGP(v.BGP), redactOSPF(v.OSPF), redactISIS(v.ISIS)
 		}
 		if in.SNMP != nil {
 			s := *in.SNMP
@@ -1576,4 +1543,59 @@ func insideAny(cidr string, prefixes []string) bool {
 
 func equalPtr[T comparable](a, b *T) bool {
 	return a == b || a != nil && b != nil && *a == *b
+}
+
+// redactBGP is a copy of a BGP with the peers' passwords masked.
+func redactBGP(in *fwconfig.BGP) *fwconfig.BGP {
+	if in == nil {
+		return nil
+	}
+	b := *in
+	redact := func(peers []fwconfig.BGPPeer) []fwconfig.BGPPeer {
+		out := slices.Clone(peers)
+		for k := range out {
+			if out[k].Password != "" {
+				out[k].Password = "<redacted>"
+			}
+		}
+		return out
+	}
+	b.PeerGroups, b.Neighbors = redact(b.PeerGroups), redact(b.Neighbors)
+	return &b
+}
+
+// redactOSPF is a copy of an OSPF with the interfaces' MD5 keys masked.
+func redactOSPF(in *fwconfig.OSPF) *fwconfig.OSPF {
+	if in == nil {
+		return nil
+	}
+	o := *in
+	o.Interfaces = slices.Clone(o.Interfaces)
+	for k := range o.Interfaces {
+		if o.Interfaces[k].AuthKey != "" {
+			o.Interfaces[k].AuthKey = "<redacted>"
+		}
+	}
+	return &o
+}
+
+// redactISIS is a copy of an IS-IS with its passwords masked.
+func redactISIS(in *fwconfig.ISIS) *fwconfig.ISIS {
+	if in == nil {
+		return nil
+	}
+	s := *in
+	if s.AreaPassword != "" {
+		s.AreaPassword = "<redacted>"
+	}
+	if s.DomainPassword != "" {
+		s.DomainPassword = "<redacted>"
+	}
+	s.Interfaces = slices.Clone(s.Interfaces)
+	for k := range s.Interfaces {
+		if s.Interfaces[k].Password != "" {
+			s.Interfaces[k].Password = "<redacted>"
+		}
+	}
+	return &s
 }

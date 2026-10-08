@@ -3,8 +3,9 @@
 
 <script setup>
 // OspfConfig: one OSPF version's configuration (2: OSPFv2, IPv4; 3:
-// OSPFv3, IPv6): OSPF itself (one row per instance and version, made on
-// the first save) and the interfaces it runs on.
+// OSPFv3, IPv6) of the chosen VRF (useVrfChoice; the page keys it by the
+// VRF): OSPF itself (one row per instance, version and VRF, made on the
+// first save) and the interfaces it runs on, those in the VRF.
 import { computed, reactive, ref, watch } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import CrudPage from '@/components/CrudPage.vue'
@@ -15,6 +16,7 @@ import { errMsg } from '@/api/http'
 import { usePageForm } from '@/composables/useFormGuard'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
 import { useRoutingObjects } from '@/composables/useRoutingObjects'
+import { useVrfChoice } from '@/composables/useVrfChoice'
 import { useAuthStore } from '@/stores/auth'
 import { inlineField } from '@/utils/form'
 
@@ -25,7 +27,10 @@ const props = defineProps({
 const toast = useToast()
 const auth = useAuthStore()
 const objects = useRoutingObjects()
-const { store, ifaceNames, ifaceText } = useInstanceRefs()
+const { store, ifaceList, ifaceNames, ifaceText } = useInstanceRefs()
+const { vrfName, vrfId, ofVrf } = useVrfChoice()
+// inVrf reports whether an interface (or link end, in none) is in the VRF.
+const inVrf = (name) => (ifaceList.value.find((i) => i.name === name)?.vrf || '') === vrfName.value
 const readOnly = computed(() => !auth.canEdit)
 const v2 = computed(() => props.version === 2)
 const name = computed(() => (v2.value ? 'OSPFv2' : 'OSPFv3'))
@@ -54,7 +59,8 @@ const defaults = () => ({
 async function load() {
   if (!store.currentId) return
   try {
-    const [row] = await ospfConfig.list({ instance_id: store.currentId, version: props.version })
+    const rows = await ospfConfig.list({ instance_id: store.currentId, version: props.version })
+    const row = rows.find(ofVrf)
     for (const k of Object.keys(cfg)) delete cfg[k]
     Object.assign(cfg, defaults(), row ?? {})
     cfgForm.mark()
@@ -66,7 +72,7 @@ watch(() => store.currentId, load, { immediate: true })
 
 async function save() {
   saving.value = true
-  const body = { ...cfg, instance_id: store.currentId, version: props.version }
+  const body = { ...cfg, instance_id: store.currentId, version: props.version, vrf_id: vrfId.value }
   for (const k of ['reference_bandwidth', 'maximum_paths']) body[k] = Number(body[k]) || 0
   try {
     const saved = cfg.id ? await ospfConfig.update(cfg.id, body) : await ospfConfig.create(body)
@@ -128,7 +134,9 @@ const metricTypes = [
 ]
 
 // ----- Interfaces.
-const ifaceItems = computed(() => ifaceNames.value.map((n) => ({ label: ifaceText(n), value: n })))
+const ifaceItems = computed(() =>
+  ifaceNames.value.filter(inVrf).map((n) => ({ label: ifaceText(n), value: n })),
+)
 const ifColumns = computed(() => [
   { key: 'name', label: 'Interface', format: (i) => ifaceText(i.name) },
   { key: 'area', label: 'Area', class: 'font-mono' },
@@ -220,6 +228,10 @@ const ifDefaults = computed(() => ({
             {{ name }} ({{ v2 ? 'IPv4' : 'IPv6' }}) runs FRR's {{ v2 ? 'ospfd' : 'ospf6d' }} in this
             virtual firewall. It is off until enabled here; changes take effect when committed. The
             firewall lets OSPF in and out on its interfaces by itself.
+            <template v-if="vrfName">
+              This is VRF {{ vrfName }}'s {{ name }}, on the VRF's interfaces; its routes go in the
+              VRF's table.
+            </template>
           </p>
         </div>
         <UButton
@@ -387,6 +399,7 @@ const ifDefaults = computed(() => ({
       :description="`The interfaces ${name} runs on, and their options. Link ends between virtual firewalls are interfaces too.`"
       :api="ospfInterfaces"
       :params="{ instance_id: store.currentId, version }"
+      :row-filter="(i) => inVrf(i.name)"
       :columns="ifColumns"
       :fields="ifFields"
       :defaults="ifDefaults"

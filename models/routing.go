@@ -90,11 +90,13 @@ type RouteMap struct {
 	Entries     JSONList[fwconfig.RouteMapEntry] `json:"entries"`
 }
 
-// BgpConfig is an instance's BGP: one row per instance, made on the first
-// save. BGP is off (FRR stopped) until Enabled.
+// BgpConfig is an instance's BGP: one row per instance and VRF (VrfID nil
+// is the main table), made on the first save. BGP is off (FRR stopped)
+// until Enabled.
 type BgpConfig struct {
 	Base
 	InstanceID         uint                            `json:"instance_id"`
+	VrfID              *uint                           `json:"vrf_id"`
 	Enabled            bool                            `json:"enabled"`
 	Asn                uint32                          `json:"asn"`
 	RouterID           string                          `json:"router_id"`
@@ -225,17 +227,22 @@ func (s *BgpPeerSettings) PolicyRefs() (prefixLists map[string]*string, routeMap
 		}
 }
 
+// BgpPeerGroup is a peer group of the BGP of the main table (VrfID nil) or
+// a VRF; its name is unique in the instance.
 type BgpPeerGroup struct {
 	Base
 	InstanceID uint   `json:"instance_id"`
+	VrfID      *uint  `json:"vrf_id"`
 	Name       string `json:"name"`
 	BgpPeerSettings
 }
 
-// BgpNeighbor is a neighbour, in an optional peer group (by name).
+// BgpNeighbor is a neighbour of the BGP of the main table (VrfID nil) or
+// a VRF, in an optional peer group (by name) of the same.
 type BgpNeighbor struct {
 	Base
 	InstanceID uint   `json:"instance_id"`
+	VrfID      *uint  `json:"vrf_id"`
 	Address    string `json:"address"`
 	Enabled    bool   `json:"enabled"`
 	PeerGroup  string `json:"peer_group"`
@@ -245,11 +252,13 @@ type BgpNeighbor struct {
 }
 
 // OspfConfig is an instance's OSPFv2 (Version 2) or OSPFv3 (3): one row
-// per instance and version, made on the first save. It is off (not run)
-// until Enabled.
+// per instance, version and VRF (VrfID nil is the main table), made on
+// the first save. It is off (not run) until Enabled. Its interfaces are
+// the OspfInterfaces on the interfaces in its VRF.
 type OspfConfig struct {
 	Base
 	InstanceID          uint                                `json:"instance_id"`
+	VrfID               *uint                               `json:"vrf_id"`
 	Version             int                                 `json:"version"`
 	Enabled             bool                                `json:"enabled"`
 	RouterID            string                              `json:"router_id"`
@@ -298,11 +307,14 @@ func (i *OspfInterface) Interface() fwconfig.OSPFInterface {
 	}
 }
 
-// IsisConfig is an instance's IS-IS: one row per instance, made on the
-// first save. It is off (not run) until Enabled.
+// IsisConfig is an instance's IS-IS: one row per instance and VRF (VrfID
+// nil is the main table), made on the first save. It is off (not run)
+// until Enabled. Its interfaces are the IsisInterfaces on the interfaces
+// in its VRF.
 type IsisConfig struct {
 	Base
 	InstanceID uint   `json:"instance_id"`
+	VrfID      *uint  `json:"vrf_id"`
 	Enabled    bool   `json:"enabled"`
 	Net        string `gorm:"column:net" json:"net"`
 	// NetInterface makes the NET from that interface's first IPv4 address,

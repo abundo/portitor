@@ -3,7 +3,8 @@
 
 <!-- BGP (FRR): the neighbours' sessions and the BGP table as FRR has them
      (BGP info), and the configuration: BGP itself, peer groups and
-     neighbours (Configuration). -->
+     neighbours (Configuration). Each VRF has a BGP of its own, chosen at
+     the top. -->
 <script setup>
 import AutoRefreshButton from '@/components/AutoRefreshButton.vue'
 import { useAutoRefresh } from '@/composables/useAutoRefresh'
@@ -17,11 +18,13 @@ import EntriesEditor from '@/components/EntriesEditor.vue'
 import NameSelect from '@/components/NameSelect.vue'
 import NeedInstance from '@/components/NeedInstance.vue'
 import SearchInput from '@/components/SearchInput.vue'
+import VrfSelect from '@/components/VrfSelect.vue'
 import { api, bgpConfig, bgpNeighbors, bgpPeerGroups } from '@/api'
 import { errMsg } from '@/api/http'
 import { usePageForm } from '@/composables/useFormGuard'
 import { useRoutingObjects } from '@/composables/useRoutingObjects'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
+import { useVrfChoice } from '@/composables/useVrfChoice'
 import { useAuthStore } from '@/stores/auth'
 import { useInstanceStore } from '@/stores/instances'
 import { inlineField } from '@/utils/form'
@@ -34,6 +37,7 @@ const auth = useAuthStore()
 const store = useInstanceStore()
 const objects = useRoutingObjects()
 const { ifaceList, ifaceText } = useInstanceRefs()
+const { vrf, vrfItems, vrfName, vrfId, ofVrf } = useVrfChoice()
 const readOnly = computed(() => !auth.canEdit)
 
 const tabs = [
@@ -63,7 +67,9 @@ async function loadStatus() {
 const auto = useAutoRefresh(loadStatus, { seconds: 10, active: () => tab.value === 'info' })
 
 const mine = computed(() =>
-  status.value?.instances?.find((i) => i.instance === store.current?.name),
+  status.value?.instances?.find(
+    (i) => i.instance === store.current?.name && (i.vrf ?? '') === vrfName.value,
+  ),
 )
 const peers = computed(() => mine.value?.peers ?? [])
 const bgpRoutes = computed(() => mine.value?.routes ?? [])
@@ -81,7 +87,7 @@ const routeSearch = useSearch(bgpRoutes, (r) =>
 // '' for none. FRR names a link-local neighbour by its interface or as
 // address%interface.
 const peerGroupOf = (p) =>
-  neighborRows.value.find(
+  vrfNeighbors.value.find(
     (n) =>
       n.address === p.address ||
       (n.interface && (p.address === n.interface || p.address === `${n.address}%${n.interface}`)),
@@ -134,8 +140,8 @@ const routeColumns = [
   { accessorKey: 'origin', header: 'Origin' },
 ]
 
-// ----- Configuration: BGP itself (one row per instance, made on the first
-// save).
+// ----- Configuration: BGP itself (one row per instance and VRF, made on
+// the first save).
 const cfg = reactive({})
 const cfgForm = usePageForm(cfg)
 const savingCfg = ref(false)
@@ -174,7 +180,8 @@ const defaults = () => ({
 async function loadCfg() {
   if (!store.currentId) return
   try {
-    const [row] = await bgpConfig.list({ instance_id: store.currentId })
+    const rows = await bgpConfig.list({ instance_id: store.currentId })
+    const row = rows.find(ofVrf)
     for (const k of Object.keys(cfg)) delete cfg[k]
     Object.assign(cfg, defaults(), row ?? {})
     cfgForm.mark()
@@ -182,11 +189,11 @@ async function loadCfg() {
     toast.add({ title: errMsg(err, 'Failed to load BGP'), color: 'error' })
   }
 }
-watch(() => store.currentId, loadCfg, { immediate: true })
+watch([() => store.currentId, vrfId], loadCfg, { immediate: true })
 
 async function saveCfg() {
   savingCfg.value = true
-  const body = { ...cfg, instance_id: store.currentId }
+  const body = { ...cfg, instance_id: store.currentId, vrf_id: vrfId.value }
   for (const k of ['asn', 'keepalive', 'hold', 'maximum_paths']) body[k] = Number(body[k]) || 0
   try {
     const saved = cfg.id ? await bgpConfig.update(cfg.id, body) : await bgpConfig.create(body)
@@ -236,6 +243,8 @@ function groupsChanged() {
   loadGroups()
   neighborPage.value?.reload() // a renamed group is renamed in its neighbours
 }
+// The peer groups of the chosen VRF's BGP.
+const vrfGroups = computed(() => groups.value.filter(ofVrf))
 const groupOf = (n) => groups.value.find((g) => g.name === n.peer_group)
 const families = (p) =>
   [p.v4_activate && 'IPv4', p.v6_activate && 'IPv6', p.evpn_activate && 'EVPN']
@@ -318,18 +327,20 @@ function peerFields() {
     { key: 'hold', label: 'Hold time (s)', type: 'number', hint: '0: three times the keepalive.' },
     ...fam('v4', 'IPv4 unicast', '0.0.0.0/0'),
     ...fam('v6', 'IPv6 unicast', '::/0'),
-    { key: 'evpn_heading', label: 'L2VPN EVPN', type: 'heading' },
+    // EVPN is the main table's BGP's only.
+    { key: 'evpn_heading', label: 'L2VPN EVPN', type: 'heading', show: () => !vrfName.value },
     {
       key: 'evpn_activate',
       label: 'Activate',
       type: 'switch',
       hint: "Exchanges EVPN routes (the VXLANs' VTEPs and MAC addresses) with the neighbour.",
+      show: () => !vrfName.value,
     },
     {
       key: 'evpn_route_reflector_client',
       label: 'Route reflector client',
       type: 'switch',
-      show: (form) => form.evpn_activate,
+      show: (form) => !vrfName.value && form.evpn_activate,
     },
   ]
 }
@@ -356,7 +367,7 @@ const groupColumns = [
   {
     key: 'members',
     label: 'Neighbours',
-    format: (g) => String(neighborRows.value.filter((n) => n.peer_group === g.name).length),
+    format: (g) => String(vrfNeighbors.value.filter((n) => n.peer_group === g.name).length),
   },
   { key: 'description', label: 'Description' },
 ]
@@ -368,6 +379,8 @@ async function loadNeighborRows() {
     neighborRows.value = await bgpNeighbors.list({ instance_id: store.currentId })
 }
 watch(() => store.currentId, loadNeighborRows, { immediate: true })
+// The neighbours of the chosen VRF's BGP.
+const vrfNeighbors = computed(() => neighborRows.value.filter(ofVrf))
 const neighborColumns = [
   {
     key: 'address',
@@ -403,7 +416,9 @@ const neighborFields = computed(() => [
     key: 'interface',
     label: 'Interface',
     type: 'select',
-    items: ifaceList.value.map((i) => ({ label: ifaceText(i.name), value: i.name })),
+    items: ifaceList.value
+      .filter((i) => (i.vrf || '') === vrfName.value)
+      .map((i) => ({ label: ifaceText(i.name), value: i.name })),
     show: (form) => isLinkLocal(form.address),
     hint: 'The interface the link-local neighbour is on.',
   },
@@ -413,7 +428,11 @@ const neighborFields = computed(() => [
     type: 'select',
     nullable: true,
     text: true,
-    items: groups.value.map((g) => ({ label: g.name, value: g.name, description: g.description })),
+    items: vrfGroups.value.map((g) => ({
+      label: g.name,
+      value: g.name,
+      description: g.description,
+    })),
     hint: "The neighbour takes the group's settings; what is set here adds to them.",
   },
   ...peerFields(),
@@ -422,6 +441,7 @@ const neighborFields = computed(() => [
 
 <template>
   <NeedInstance>
+    <div class="mb-2"><VrfSelect v-model="vrf" :items="vrfItems" /></div>
     <UTabs v-model="tab" :items="tabs">
       <template #info>
         <div class="card">
@@ -446,7 +466,11 @@ const neighborFields = computed(() => [
             class="mb-2"
             color="neutral"
             variant="subtle"
-            title="BGP is not running in this virtual firewall."
+            :title="
+              vrfName
+                ? `BGP is not running in VRF ${vrfName}.`
+                : 'BGP is not running in this virtual firewall.'
+            "
             description="Turn it on under Configuration, then commit."
           />
           <template v-if="mine">
@@ -558,6 +582,11 @@ const neighborFields = computed(() => [
                 <p class="max-w-3xl text-sm text-muted">
                   BGP runs FRR (zebra and bgpd) in this virtual firewall. It is off until enabled
                   here; changes take effect when deployed.
+                  <template v-if="vrfName">
+                    This is VRF {{ vrfName }}'s BGP (FRR's router bgp … vrf {{ vrfName }}): its
+                    neighbours are reached through the VRF's interfaces and table, and its routes go
+                    in that table.
+                  </template>
                 </p>
               </div>
               <UButton
@@ -621,6 +650,7 @@ const neighborFields = computed(() => [
               </UFormField>
 
               <UFormField
+                v-if="!vrfName"
                 label="EVPN"
                 :ui="inlineField"
                 help="Advertises the VNIs of the VXLAN interfaces in bridges (Network → Interfaces) and their MAC addresses to the neighbours with L2VPN EVPN activated, and learns theirs."
@@ -688,13 +718,15 @@ const neighborFields = computed(() => [
           </div>
 
           <BgpPeerTable
+            :key="`groups-${vrf}`"
             title="Peer groups"
             description="Settings shared by the neighbours in a group."
             :api="bgpPeerGroups"
             :params="{ instance_id: store.currentId }"
+            :row-filter="ofVrf"
             :columns="groupColumns"
             :fields="groupFields"
-            :defaults="peerDefaults"
+            :defaults="{ ...peerDefaults, vrf_id: vrfId }"
             new-label="New peer group"
             :disabled="readOnly"
             :prefix-list-items="objects.prefixListItems"
@@ -704,13 +736,21 @@ const neighborFields = computed(() => [
 
           <BgpPeerTable
             ref="neighborPage"
+            :key="`neighbours-${vrf}`"
             title="Neighbours"
             description="The BGP neighbours (peers) of this virtual firewall. The firewall opens TCP port 179 to and from them by itself."
             :api="bgpNeighbors"
             :params="{ instance_id: store.currentId }"
+            :row-filter="ofVrf"
             :columns="neighborColumns"
             :fields="neighborFields"
-            :defaults="{ ...peerDefaults, enabled: true, peer_group: '', interface: '' }"
+            :defaults="{
+              ...peerDefaults,
+              enabled: true,
+              peer_group: '',
+              interface: '',
+              vrf_id: vrfId,
+            }"
             noun="neighbour"
             new-label="New neighbour"
             :item-name="
@@ -726,11 +766,13 @@ const neighborFields = computed(() => [
     </UTabs>
     <BgpNeighborRoutes
       :instance="store.current?.name ?? ''"
+      :vrf="vrfName"
       :neighbor="routesOf"
       @close="routesOf = null"
     />
     <BgpNeighborDetail
       :instance="store.current?.name ?? ''"
+      :vrf="vrfName"
       :neighbor="detailOf"
       @close="detailOf = null"
     />

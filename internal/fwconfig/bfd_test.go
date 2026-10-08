@@ -59,10 +59,10 @@ func TestBFDUsers(t *testing.T) {
 	if len(in.KernelRoutes()) != 0 || !in.HasBFDRoutes() {
 		t.Errorf("kernel routes: %+v", in.KernelRoutes())
 	}
-	if got := in.NeighborBFD(in.BGP.Neighbors[0]); got != "lk-main" {
+	if got := in.NeighborBFD(in.BGP, in.BGP.Neighbors[0]); got != "lk-main" {
 		t.Errorf("neighbour in the group: %q", got)
 	}
-	if got := in.NeighborBFD(in.BGP.Neighbors[1]); got != "" {
+	if got := in.NeighborBFD(in.BGP, in.BGP.Neighbors[1]); got != "" {
 		t.Errorf("neighbour off BFD interfaces: %q", got)
 	}
 	// Without BFD on the interface, the route is the agent's again.

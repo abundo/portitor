@@ -79,7 +79,8 @@ on the bridge. The VNIs and the routes are shown with
 Only layer 2 VNIs are supported: hosts on one VNI reach each other through the
 VXLAN; traffic between VNIs or out of the segment is routed by the firewall's
 interfaces in the bridges, like any other LAN. Layer 3 VNIs (symmetric IRB)
-need VRFs, which Portitor does not have.
+are not supported, and EVPN is the main table's BGP's only, not a
+[VRF](vrf.md)'s.
 
 ## How it runs
 

@@ -53,7 +53,7 @@ func (a *Agent) routes() *http.ServeMux {
 	})
 	mux.HandleFunc("GET /v1/bgp/routes", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
-		res, err := a.BGPNeighborRoutes(r.Context(), q.Get("instance"), q.Get("neighbor"))
+		res, err := a.BGPNeighborRoutes(r.Context(), q.Get("instance"), q.Get("vrf"), q.Get("neighbor"))
 		if err != nil {
 			writeError(w, http.StatusNotFound, err)
 			return
@@ -62,7 +62,7 @@ func (a *Agent) routes() *http.ServeMux {
 	})
 	mux.HandleFunc("GET /v1/bgp/neighbor", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
-		res, err := a.BGPNeighborDetail(r.Context(), q.Get("instance"), q.Get("neighbor"))
+		res, err := a.BGPNeighborDetail(r.Context(), q.Get("instance"), q.Get("vrf"), q.Get("neighbor"))
 		if err != nil {
 			writeError(w, http.StatusNotFound, err)
 			return

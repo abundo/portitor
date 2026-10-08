@@ -4,6 +4,7 @@
 package agent
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/abundo/portitor/internal/fwconfig"
@@ -67,4 +68,51 @@ func TestPlanRoutesVRF(t *testing.T) {
 		"ip route del 10.9.0.0/16 dev eth3 metric 0 proto 99",
 		"ip route replace default via 172.16.3.254 metric 0 proto 99 table 100",
 		"ip route replace 10.9.0.0/16 dev eth3 metric 0 proto 99 table 100")
+}
+
+// What the firewall sends from an address in a VRF goes by the VRF's
+// table: a rule per address (not link-local), the stale ones removed; the
+// NAT64 rules are left alone.
+func TestPlanVRFRules(t *testing.T) {
+	links, err := parseLinks([]byte(`[
+ {"ifname":"blue","flags":["UP"],"linkinfo":{"info_kind":"vrf","info_data":{"table":100}},"addr_info":[]},
+ {"ifname":"eth3","master":"blue","flags":["UP"],"addr_info":[
+   {"family":"inet","local":"172.16.3.1","prefixlen":24,"scope":"global"},
+   {"family":"inet6","local":"2001:db8:3::1","prefixlen":64,"scope":"global"},
+   {"family":"inet6","local":"fe80::1","prefixlen":64,"scope":"link"}]},
+ {"ifname":"vrrp4-3-eth3","master":"blue","flags":["UP"],"linkinfo":{"info_kind":"macvlan"},"addr_info":[
+   {"family":"inet","local":"172.16.3.254","prefixlen":32,"scope":"global"}]},
+ {"ifname":"eth2","flags":["UP"],"addr_info":[{"family":"inet","local":"192.168.50.1","prefixlen":24,"scope":"global"}]}
+]`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	have := map[string]ipLink{}
+	for _, l := range links {
+		have[l.Ifname] = l
+	}
+	doc := fwconfig.SampleVRFDocument()
+	want := vrfSourceRules(doc.Instance("guest"), have)
+	rules, err := parseRules([]byte(`[{"priority":0,"src":"all","table":"local"},{"priority":1000,"src":"all","l3mdev":null},
+ {"priority":1100,"src":"172.16.3.1","iif":"lo","table":"100","protocol":"99"},
+ {"priority":1100,"src":"172.16.9.1","iif":"lo","table":"100","protocol":"99"},
+ {"priority":6400,"src":"192.0.0.1","iif":"lo","table":"6400","protocol":"99"},
+ {"priority":32766,"src":"all","table":"main"}]`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	equal(t, planVRFRules("fw-guest", "-4", want["-4"], rules),
+		"fw-guest ip -4 rule del pref 1100 from 172.16.9.1 iif lo lookup 100 proto 99",
+		"fw-guest ip -4 rule add pref 1100 from 172.16.3.254 iif lo lookup 100 proto 99")
+	equal(t, planVRFRules("fw-guest", "-6", want["-6"], nil),
+		"fw-guest ip -6 rule add pref 1100 from 2001:db8:3::1 iif lo lookup 100 proto 99")
+	// NAT64's planner keeps its hands off them.
+	for _, c := range cmdStrings(planNAT64Rules("fw-guest", nil, rules, nil)) {
+		if strings.Contains(c, "1100") {
+			t.Errorf("nat64 removes a vrf rule: %s", c)
+		}
+	}
+	if got := vrfSysctls(doc.Instance("main")); got != nil {
+		t.Errorf("sysctls without vrfs: %v", got)
+	}
 }

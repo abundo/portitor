@@ -47,13 +47,17 @@ func ospfPrefix(what, s string) (string, error) {
 
 func prepareOspfConfig(tx *gorm.DB, c, old *models.OspfConfig) error {
 	if old != nil {
-		// Rows stay in their instance and version.
-		c.InstanceID, c.Version = old.InstanceID, old.Version
+		// Rows stay in their instance, version and VRF.
+		c.InstanceID, c.Version, c.VrfID = old.InstanceID, old.Version, old.VrfID
 	}
 	if err := instanceExists(tx, c.InstanceID); err != nil {
 		return err
 	}
 	if err := ospfVersion(c.Version); err != nil {
+		return err
+	}
+	v, err := rowVrf(tx, c.InstanceID, c.VrfID)
+	if err != nil {
 		return err
 	}
 	c.RouterID = strings.TrimSpace(c.RouterID)
@@ -75,7 +79,6 @@ func prepareOspfConfig(tx *gorm.DB, c, old *models.OspfConfig) error {
 	if c.Redistribute == nil {
 		c.Redistribute = models.JSONList[fwconfig.OSPFRedistribute]{}
 	}
-	var err error
 	for i := range c.Areas {
 		a := &c.Areas[i]
 		if a.ID, err = ospfArea("areas", a.ID); err != nil {
@@ -126,8 +129,13 @@ func prepareOspfConfig(tx *gorm.DB, c, old *models.OspfConfig) error {
 		return err
 	}
 	if len(c.Networks) > 0 {
-		var ifs []string
-		tx.Model(&models.OspfInterface{}).Where("instance_id = ? AND version = ? AND area <> ''", c.InstanceID, c.Version).Order("name").Pluck("name", &ifs)
+		var all, ifs []string
+		tx.Model(&models.OspfInterface{}).Where("instance_id = ? AND version = ? AND area <> ''", c.InstanceID, c.Version).Order("name").Pluck("name", &all)
+		for _, name := range all {
+			if ifaceVrf(tx, c.InstanceID, name) == vrfName(v) {
+				ifs = append(ifs, name)
+			}
+		}
 		if len(ifs) > 0 {
 			return bad(fmt.Sprintf("network statements can't be used while interfaces have an area (%s); FRR enables OSPF one way or the other", strings.Join(ifs, ", ")))
 		}
@@ -165,8 +173,9 @@ func prepareOspfInterface(tx *gorm.DB, i, old *models.OspfInterface) error {
 		if i.Area, err = ospfArea("interface "+i.Name, i.Area); err != nil {
 			return err
 		}
+		// The OSPF of the interface's VRF.
 		var cfg models.OspfConfig
-		if tx.Where("instance_id = ? AND version = ?", i.InstanceID, i.Version).First(&cfg).Error == nil && len(cfg.Networks) > 0 {
+		if whereVrf(tx.Where("instance_id = ? AND version = ?", i.InstanceID, i.Version), ifaceVrfID(tx, i.InstanceID, i.Name)).First(&cfg).Error == nil && len(cfg.Networks) > 0 {
 			return bad("an interface can't have an area while there are network statements; leave the area empty to set the interface's options only, or remove the network statements")
 		}
 	} else {

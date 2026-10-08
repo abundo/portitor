@@ -29,6 +29,9 @@ func (a *Agent) Neighbours(ctx context.Context) *agentapi.NeighboursResponse {
 		for _, ifc := range in.Interfaces {
 			ifaces[ifc.Name] = true
 		}
+		for _, d := range in.VRRPDevices() {
+			ifaces[d.Name] = true
+		}
 		for _, fam := range []string{"-4", "-6"} {
 			out, err := a.bg.Run(ctx, in.NetnsName(), "ip", "-j", fam, "neigh", "show")
 			if err != nil {
@@ -39,6 +42,7 @@ func (a *Agent) Neighbours(ctx context.Context) *agentapi.NeighboursResponse {
 				// interfaces that are not the firewall's (docker, ...).
 				if ifaces[n.Interface] {
 					n.Instance = in.Name
+					n.VRF = in.IfaceVRF(n.Interface)
 					resp.IP = append(resp.IP, n)
 				}
 			}

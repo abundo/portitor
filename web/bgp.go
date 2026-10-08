@@ -205,10 +205,17 @@ func prepareRouteMap(tx *gorm.DB, m, old *models.RouteMap) error {
 
 func prepareBgpConfig(tx *gorm.DB, c, old *models.BgpConfig) error {
 	if old != nil {
-		c.InstanceID = old.InstanceID // rows stay in their instance
+		c.InstanceID, c.VrfID = old.InstanceID, old.VrfID // rows stay in their instance and VRF
 	}
 	if err := instanceExists(tx, c.InstanceID); err != nil {
 		return err
+	}
+	v, err := rowVrf(tx, c.InstanceID, c.VrfID)
+	if err != nil {
+		return err
+	}
+	if c.Evpn && v != nil {
+		return bad("EVPN is for the main table's BGP only")
 	}
 	c.RouterID = strings.TrimSpace(c.RouterID)
 	if c.RouterID != "" {
@@ -285,9 +292,10 @@ func prepareBgpConfig(tx *gorm.DB, c, old *models.BgpConfig) error {
 	return problems(errs)
 }
 
-// preparePeerSettings checks what a neighbour and a peer group have in
-// common, and takes a new password.
-func preparePeerSettings(tx *gorm.DB, instanceID uint, s, old *models.BgpPeerSettings, peer fwconfig.BGPPeer) error {
+// preparePeerSettings checks what a neighbour and a peer group (of the BGP
+// of the main table, v nil, or a VRF) have in common, and takes a new
+// password.
+func preparePeerSettings(tx *gorm.DB, instanceID uint, v *models.Vrf, s, old *models.BgpPeerSettings, peer fwconfig.BGPPeer) error {
 	s.Description = strings.TrimSpace(s.Description)
 	s.RemoteAs = strings.TrimSpace(s.RemoteAs)
 	s.UpdateSource = strings.TrimSpace(s.UpdateSource)
@@ -319,7 +327,13 @@ func preparePeerSettings(tx *gorm.DB, instanceID uint, s, old *models.BgpPeerSet
 			if n == 0 {
 				return bad(fmt.Sprintf("update source %q is neither an address nor an interface of this virtual firewall", s.UpdateSource))
 			}
+			if err := checkIfaceVrf(tx, instanceID, "update source", s.UpdateSource, v); err != nil {
+				return err
+			}
 		}
+	}
+	if v != nil && s.EvpnActivate {
+		return bad("EVPN is for the main table's BGP only")
 	}
 	o, err := loadRoutingObjects(tx, instanceID)
 	if err != nil {
@@ -339,9 +353,13 @@ func preparePeerSettings(tx *gorm.DB, instanceID uint, s, old *models.BgpPeerSet
 
 func preparePeerGroup(tx *gorm.DB, g, old *models.BgpPeerGroup) error {
 	if old != nil {
-		g.InstanceID = old.InstanceID // rows stay in their instance
+		g.InstanceID, g.VrfID = old.InstanceID, old.VrfID // rows stay in their instance and VRF
 	}
 	if err := instanceExists(tx, g.InstanceID); err != nil {
+		return err
+	}
+	v, err := rowVrf(tx, g.InstanceID, g.VrfID)
+	if err != nil {
 		return err
 	}
 	g.Name = strings.TrimSpace(g.Name)
@@ -349,10 +367,10 @@ func preparePeerGroup(tx *gorm.DB, g, old *models.BgpPeerGroup) error {
 	if old != nil {
 		oldSettings = &old.BgpPeerSettings
 	}
-	if err := preparePeerSettings(tx, g.InstanceID, &g.BgpPeerSettings, oldSettings, fwconfig.BGPPeer{Name: g.Name}); err != nil {
+	if err := preparePeerSettings(tx, g.InstanceID, v, &g.BgpPeerSettings, oldSettings, fwconfig.BGPPeer{Name: g.Name}); err != nil {
 		return err
 	}
-	if err := checkSession(tx, g.InstanceID, g.Peer(), g.RemoteAs); err != nil {
+	if err := checkSession(tx, g.InstanceID, g.VrfID, g.Peer(), g.RemoteAs); err != nil {
 		return err
 	}
 	if old == nil {
@@ -363,9 +381,13 @@ func preparePeerGroup(tx *gorm.DB, g, old *models.BgpPeerGroup) error {
 
 func prepareNeighbor(tx *gorm.DB, n, old *models.BgpNeighbor) error {
 	if old != nil {
-		n.InstanceID = old.InstanceID // rows stay in their instance
+		n.InstanceID, n.VrfID = old.InstanceID, old.VrfID // rows stay in their instance and VRF
 	}
 	if err := instanceExists(tx, n.InstanceID); err != nil {
+		return err
+	}
+	v, err := rowVrf(tx, n.InstanceID, n.VrfID)
+	if err != nil {
 		return err
 	}
 	a, err := fwconfig.ParseAddr(strings.TrimSpace(n.Address))
@@ -384,6 +406,9 @@ func prepareNeighbor(tx *gorm.DB, n, old *models.BgpNeighbor) error {
 		if count == 0 {
 			return bad(fmt.Sprintf("interface %q is not an interface of this virtual firewall", n.Interface))
 		}
+		if err := checkIfaceVrf(tx, n.InstanceID, "interface", n.Interface, v); err != nil {
+			return err
+		}
 	}
 	var group *models.BgpPeerGroup
 	if n.PeerGroup != "" {
@@ -391,12 +416,15 @@ func prepareNeighbor(tx *gorm.DB, n, old *models.BgpNeighbor) error {
 		if err := tx.Where("instance_id = ? AND name = ?", n.InstanceID, n.PeerGroup).First(group).Error; err != nil {
 			return bad(fmt.Sprintf("peer group %q does not exist", n.PeerGroup))
 		}
+		if gv, _ := rowVrf(tx, n.InstanceID, group.VrfID); vrfName(gv) != vrfName(v) {
+			return bad(fmt.Sprintf("peer group %s is %s's, not %s's", n.PeerGroup, vrfText(gv), vrfText(v)))
+		}
 	}
 	var oldSettings *models.BgpPeerSettings
 	if old != nil {
 		oldSettings = &old.BgpPeerSettings
 	}
-	if err := preparePeerSettings(tx, n.InstanceID, &n.BgpPeerSettings, oldSettings, fwconfig.BGPPeer{Address: n.Address, PeerGroup: n.PeerGroup, Interface: n.Interface}); err != nil {
+	if err := preparePeerSettings(tx, n.InstanceID, v, &n.BgpPeerSettings, oldSettings, fwconfig.BGPPeer{Address: n.Address, PeerGroup: n.PeerGroup, Interface: n.Interface}); err != nil {
 		return err
 	}
 	remote := n.RemoteAs
@@ -406,14 +434,15 @@ func prepareNeighbor(tx *gorm.DB, n, old *models.BgpNeighbor) error {
 	if remote == "" {
 		return bad("remote AS is required (on the neighbour or its peer group)")
 	}
-	return checkSession(tx, n.InstanceID, n.Peer(), remote)
+	return checkSession(tx, n.InstanceID, n.VrfID, n.Peer(), remote)
 }
 
-// checkSession checks a neighbour or peer group against the instance's
-// local AS (fwconfig.CheckBGPSession).
-func checkSession(tx *gorm.DB, instanceID uint, peer fwconfig.BGPPeer, remote string) error {
+// checkSession checks a neighbour or peer group against the local AS of
+// its BGP (the instance's main table's, vrfID nil, or a VRF's;
+// fwconfig.CheckBGPSession).
+func checkSession(tx *gorm.DB, instanceID uint, vrfID *uint, peer fwconfig.BGPPeer, remote string) error {
 	var asn uint32
-	tx.Model(&models.BgpConfig{}).Where("instance_id = ?", instanceID).Pluck("asn", &asn)
+	whereVrf(tx.Model(&models.BgpConfig{}).Where("instance_id = ?", instanceID), vrfID).Pluck("asn", &asn)
 	return problems(fwconfig.CheckBGPSession(asn, peer, remote))
 }
 

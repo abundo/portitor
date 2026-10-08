@@ -165,16 +165,17 @@ func (c *Client) BGP(ctx context.Context) (*agentapi.BGPResponse, error) {
 
 // BGPNeighborRoutes returns the prefixes received, filtered and advertised
 // of one instance's BGP neighbour.
-func (c *Client) BGPNeighborRoutes(ctx context.Context, instance, neighbor string) (*agentapi.BGPNeighborRoutes, error) {
+// vrf is the neighbour's VRF, "" for the main table.
+func (c *Client) BGPNeighborRoutes(ctx context.Context, instance, vrf, neighbor string) (*agentapi.BGPNeighborRoutes, error) {
 	var b agentapi.BGPNeighborRoutes
-	q := url.Values{"instance": {instance}, "neighbor": {neighbor}}
+	q := url.Values{"instance": {instance}, "vrf": {vrf}, "neighbor": {neighbor}}
 	return &b, c.do(ctx, http.MethodGet, "/v1/bgp/routes?"+q.Encode(), nil, &b)
 }
 
 // BGPNeighborDetail returns FRR's view of one instance's BGP neighbour.
-func (c *Client) BGPNeighborDetail(ctx context.Context, instance, neighbor string) (*agentapi.BGPNeighborDetail, error) {
+func (c *Client) BGPNeighborDetail(ctx context.Context, instance, vrf, neighbor string) (*agentapi.BGPNeighborDetail, error) {
 	var b agentapi.BGPNeighborDetail
-	q := url.Values{"instance": {instance}, "neighbor": {neighbor}}
+	q := url.Values{"instance": {instance}, "vrf": {vrf}, "neighbor": {neighbor}}
 	return &b, c.do(ctx, http.MethodGet, "/v1/bgp/neighbor?"+q.Encode(), nil, &b)
 }
 

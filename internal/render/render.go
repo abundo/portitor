@@ -405,27 +405,29 @@ var (
 // hasFRRSecret reports whether frr.conf holds a BGP password, an OSPF
 // key or an IS-IS password.
 func hasFRRSecret(in *fwconfig.Instance) bool {
-	if g := in.BGP; in.BGPRunning() {
-		for _, p := range append(slices.Clone(g.PeerGroups), g.Neighbors...) {
-			if p.Password != "" {
-				return true
+	for _, r := range in.Routings() {
+		if g := r.BGP; r.BGPOn() {
+			for _, p := range append(slices.Clone(g.PeerGroups), g.Neighbors...) {
+				if p.Password != "" {
+					return true
+				}
 			}
 		}
-	}
-	if in.OSPFRunning(2) {
-		for _, ifc := range in.OSPF.Interfaces {
-			if ifc.AuthKey != "" {
-				return true
+		if o := r.OSPFOn(2); o != nil {
+			for _, ifc := range o.Interfaces {
+				if ifc.AuthKey != "" {
+					return true
+				}
 			}
 		}
-	}
-	if s := in.ISIS; in.ISISRunning() {
-		if s.AreaPassword != "" || s.DomainPassword != "" {
-			return true
-		}
-		for _, ifc := range s.Interfaces {
-			if ifc.Password != "" {
+		if s := r.ISIS; r.ISISOn() {
+			if s.AreaPassword != "" || s.DomainPassword != "" {
 				return true
+			}
+			for _, ifc := range s.Interfaces {
+				if ifc.Password != "" {
+					return true
+				}
 			}
 		}
 	}

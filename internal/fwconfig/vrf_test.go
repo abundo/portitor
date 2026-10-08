@@ -4,6 +4,7 @@
 package fwconfig
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -40,6 +41,30 @@ func TestValidateVRF(t *testing.T) {
 			in.Routes = append(in.Routes, Route{Destination: "default", Gateway: "10.0.0.1", VRF: "eth2"})
 		}, `vrf "eth2" is not a vrf`},
 	}
+	vrfCases := []struct {
+		name   string
+		mutate func(in *Instance)
+		want   string
+	}{
+		{"bfd route out of its vrf", func(in *Instance) { in.Routes[1].VRF = "" }, "route 2: a route with bfd must be in the vrf of its gateway's interface eth3"},
+		{"main ospf on a vrf's interface", func(in *Instance) {
+			in.OSPF.Interfaces = append(in.OSPF.Interfaces, OSPFInterface{Name: "eth3", Area: "0.0.0.0"})
+		}, "ospf: interface eth3 is in vrf blue"},
+		{"vrf ospf on a main interface", func(in *Instance) {
+			in.VRFs[0].OSPF.Interfaces = append(in.VRFs[0].OSPF.Interfaces, OSPFInterface{Name: "eth2", Area: "0.0.0.0"})
+		}, "vrf blue: ospf: interface eth2 is in no vrf"},
+		{"vrf bgp update source", func(in *Instance) { in.VRFs[0].BGP.Neighbors[0].UpdateSource = "eth2" }, "vrf blue: bgp 172.16.3.2 update source: interface eth2 is in no vrf"},
+		{"vrf evpn", func(in *Instance) { in.VRFs[0].BGP.EVPN = true }, "vrf blue: bgp: evpn is for the main table's bgp only"},
+		{"vrf bgp checked", func(in *Instance) { in.VRFs[0].BGP.ASN = 0 }, "vrf blue: bgp: local AS is required"},
+		{"464xlat in a vrf", func(in *Instance) {
+			in.NAT64 = &NAT64{Prefix: "64:ff9b::/96", Interfaces: []string{"eth3"}}
+		}, "464xlat is not supported on an interface in a vrf"},
+		{"too many vrfs", func(in *Instance) {
+			for i := range MaxVRFs {
+				in.VRFs = append(in.VRFs, VRF{Name: fmt.Sprintf("v%d", i), Table: 1000 + i})
+			}
+		}, "at most 127 vrfs"},
+	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			d := SampleDocument()
@@ -50,10 +75,24 @@ func TestValidateVRF(t *testing.T) {
 			}
 		})
 	}
+	if d := SampleVRFDocument(); d.Validate() != nil {
+		err := d.Validate()
+		t.Fatal(err)
+	}
+	for _, c := range vrfCases {
+		t.Run(c.name, func(t *testing.T) {
+			d := SampleVRFDocument()
+			c.mutate(d.Instance("guest"))
+			err := d.Validate()
+			if err == nil || !strings.Contains(err.Error(), c.want) {
+				t.Errorf("got %v, want %q", err, c.want)
+			}
+		})
+	}
 }
 
 func TestExpandVRF(t *testing.T) {
-	d := SampleDocument().Expand()
+	d := SampleVRFDocument().Expand()
 	in := d.Instance("guest")
 	dev := in.Interface("blue")
 	if dev == nil || dev.Kind != KindVRF || dev.VRFTable != 100 || len(dev.Members) != 1 || dev.Members[0] != "eth3" {
@@ -76,5 +115,16 @@ func TestExpandVRF(t *testing.T) {
 	}
 	if !in.HasVRF() || d.Instance("main").HasVRF() {
 		t.Error("HasVRF")
+	}
+	if r := in.Routings(); len(r) != 2 || r[0].VRF != "" || r[1].VRF != "blue" || !r[1].BGPOn() || r[1].OSPFOn(2) == nil || r[1].OSPFOn(3) != nil {
+		t.Errorf("routings: %+v", r)
+	}
+	if in.VRFLabel("blue") != 1 || in.VRFLabel("eth3") != 0 {
+		t.Error("VRFLabel")
+	}
+	for _, dev := range in.VRRPDevices() {
+		if want := map[string]string{"eth2": "", "eth3": "blue"}[dev.Parent]; dev.VRF != want {
+			t.Errorf("vrrp device %s: vrf %q, want %q", dev.Name, dev.VRF, want)
+		}
 	}
 }

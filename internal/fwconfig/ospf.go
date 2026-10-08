@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/netip"
 	"regexp"
+	"slices"
 	"strconv"
 )
 
@@ -343,13 +344,9 @@ func (v *validator) ospf(p string, o *OSPF, version int, refs *policyRefs, iface
 }
 
 // OSPFRunning reports whether the instance runs OSPFv2 (version 2) or
-// OSPFv3 (3).
+// OSPFv3 (3), in the main table or a VRF.
 func (in *Instance) OSPFRunning(version int) bool {
-	o := in.OSPF
-	if version == 3 {
-		o = in.OSPF6
-	}
-	return o != nil && o.Enabled
+	return slices.ContainsFunc(in.Routings(), func(r Routing) bool { return r.OSPFOn(version) != nil })
 }
 
 // FRRRunning reports whether the instance runs FRR: for BGP, OSPF, IS-IS,

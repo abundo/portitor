@@ -397,6 +397,11 @@ func (m *dhcpManager) installLease(ctx context.Context, k dhcpKey, old, lease *n
 		"valid_lft", lft, "preferred_lft", lft); err != nil {
 		return err
 	}
+	if k.table != "" {
+		// What the firewall sends from the address goes by the VRF's
+		// table (vrf.go); an error is a rule that is there already.
+		_, _ = m.run.Run(ctx, k.netns, "ip", append([]string{"-4", "rule", "add"}, vrfSourceRuleArgs(pfx.Addr().String(), k.table)...)...)
+	}
 	var router string
 	if routers := ack.Router(); len(routers) > 0 {
 		router = routers[0].String()
@@ -482,6 +487,9 @@ func (m *dhcpManager) removeLease(k dhcpKey, lease *nclient4.Lease) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_, _ = m.run.Run(ctx, k.netns, "ip", "addr", "del", pfx.String(), "dev", k.iface)
+	if k.table != "" {
+		_, _ = m.run.Run(ctx, k.netns, "ip", append([]string{"-4", "rule", "del"}, vrfSourceRuleArgs(pfx.Addr().String(), k.table)...)...)
+	}
 	changed := m.update(k, func(l *Lease) {
 		*l = Lease{Instance: l.Instance, Interface: l.Interface, State: "requesting", LastError: l.LastError}
 	})

@@ -58,6 +58,9 @@ type VRRPDevice struct {
 	VRID      int
 	MAC       string
 	Addresses []string
+	// VRF is the parent's VRF, which the device is in too: vrrpd wants
+	// them in the same one.
+	VRF string
 }
 
 // VRRPDeviceName is the macvlan device of a virtual router: vrrp4- or
@@ -100,6 +103,7 @@ func (in *Instance) VRRPDevices() []VRRPDevice {
 			d := VRRPDevice{
 				Name: VRRPDeviceName(fam.family, r.VRID, r.Interface), Parent: r.Interface,
 				Family: fam.family, VRID: r.VRID, MAC: VRRPMAC(fam.family, r.VRID),
+				VRF: in.IfaceVRF(r.Interface),
 			}
 			for _, s := range fam.addrs {
 				if a, err := netip.ParseAddr(s); err == nil {

@@ -14,6 +14,8 @@ import { useSearch, valuesText } from '@/utils/search'
 
 const props = defineProps({
   instance: { type: String, default: '' },
+  // vrf is the neighbour's VRF, '' for the main table.
+  vrf: { type: String, default: '' },
   // neighbor is the session (BGP info's peer row), or null when closed.
   neighbor: { type: Object, default: null },
 })
@@ -27,7 +29,7 @@ async function load() {
   if (!props.neighbor) return
   loading.value = true
   try {
-    data.value = await api.agentBgpRoutes(props.instance, props.neighbor.address)
+    data.value = await api.agentBgpRoutes(props.instance, props.vrf, props.neighbor.address)
     error.value = ''
   } catch (err) {
     error.value = errMsg(err)

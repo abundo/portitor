@@ -3,20 +3,25 @@
 
 <!-- Neighbours: what the virtual firewall's interfaces see next to them, by
      interface: the LLDP neighbours heard (an info button shows all their
-     frame said), then the ARP (IPv4) and ND (IPv6) entries. -->
+     frame said), then the ARP (IPv4) and ND (IPv6) entries; of all VRFs or
+     one, chosen at the top. -->
 <script setup>
 import AutoRefreshButton from '@/components/AutoRefreshButton.vue'
 import { useAutoRefresh } from '@/composables/useAutoRefresh'
 import { computed, ref } from 'vue'
 import NeedInstance from '@/components/NeedInstance.vue'
 import SearchInput from '@/components/SearchInput.vue'
+import VrfSelect from '@/components/VrfSelect.vue'
 import { api } from '@/api'
 import { errMsg } from '@/api/http'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
+import { useVrfChoice } from '@/composables/useVrfChoice'
 import { useSearch, valuesText } from '@/utils/search'
 import { ago, when } from '@/utils/time'
 
-const { store, ifaceNames, ifaceText } = useInstanceRefs()
+const { store, ifaceList, ifaceNames, ifaceText } = useInstanceRefs()
+const { vrf, vrfList, vrfItems, showsName } = useVrfChoice({ all: true })
+const ifaceVrf = (name) => ifaceList.value.find((i) => i.name === name)?.vrf || ''
 const data = ref(null)
 const error = ref('')
 const loading = ref(false)
@@ -47,6 +52,7 @@ const rows = computed(() => {
     out.push({
       kind: 'lldp',
       interface: n.interface,
+      vrf: ifaceVrf(n.interface),
       neighbour: n.system_name || n.chassis_id,
       address: n.management_addresses?.join(', ') ?? '',
       mac: n.source_mac,
@@ -58,6 +64,7 @@ const rows = computed(() => {
     out.push({
       kind: n.family === 'ipv6' ? 'nd' : 'arp',
       interface: n.interface,
+      vrf: n.vrf ?? '',
       neighbour: '',
       address: n.address,
       mac: n.mac ?? '',
@@ -68,30 +75,41 @@ const rows = computed(() => {
   // By interface in the instance's order, then LLDP, ARP, ND, then address.
   const pos = new Map(ifaceNames.value.map((name, i) => [name, i]))
   const at = (r) => pos.get(r.interface) ?? Infinity
-  return out.sort(
-    (a, b) =>
-      at(a) - at(b) ||
-      a.interface.localeCompare(b.interface) ||
-      protoOrder[a.kind] - protoOrder[b.kind] ||
-      (a.neighbour + a.address).localeCompare(b.neighbour + b.address, undefined, {
-        numeric: true,
-      }),
-  )
+  return out
+    .filter((r) => showsName(r.vrf))
+    .sort(
+      (a, b) =>
+        at(a) - at(b) ||
+        a.interface.localeCompare(b.interface) ||
+        protoOrder[a.kind] - protoOrder[b.kind] ||
+        (a.neighbour + a.address).localeCompare(b.neighbour + b.address, undefined, {
+          numeric: true,
+        }),
+    )
 })
 const protoLabel = { lldp: 'LLDP', arp: 'ARP', nd: 'ND' }
 const { search, filtered } = useSearch(rows, (r) =>
-  valuesText(ifaceText(r.interface), protoLabel[r.kind], r.neighbour, r.address, r.mac, r.details),
+  valuesText(
+    ifaceText(r.interface),
+    r.vrf,
+    protoLabel[r.kind],
+    r.neighbour,
+    r.address,
+    r.mac,
+    r.details,
+  ),
 )
 
-const columns = [
+const columns = computed(() => [
   { id: 'info', header: '' },
   { id: 'interface', header: 'Interface' },
+  ...(vrfList.value.length ? [{ accessorKey: 'vrf', header: 'VRF' }] : []),
   { id: 'kind', header: 'Protocol' },
   { accessorKey: 'neighbour', header: 'Name' },
   { accessorKey: 'address', header: 'Address' },
   { accessorKey: 'mac', header: 'MAC' },
   { accessorKey: 'details', header: 'Port / state' },
-]
+])
 
 // The rows of an LLDP neighbour's details.
 function lldpRows(n) {
@@ -144,6 +162,7 @@ function lldpRows(n) {
       </div>
       <div>
         <div class="mb-2 flex items-center gap-3">
+          <VrfSelect v-model="vrf" :items="vrfItems" />
           <SearchInput v-model="search" />
           <span v-if="lldpPorts.length" class="text-sm text-muted">
             LLDP on {{ lldpPorts.map((p) => ifaceText(p.interface)).join(', ') }}

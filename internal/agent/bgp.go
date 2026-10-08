@@ -30,12 +30,53 @@ func (a *Agent) BGP(ctx context.Context) *agentapi.BGPResponse {
 	}
 	for i := range doc.Instances {
 		in := &doc.Instances[i]
-		if !in.BGPRunning() {
-			continue
+		for _, r := range in.Routings() {
+			if r.BGPOn() {
+				bi := bgpInstance(in.Name, inVRF(a.vtysh(ctx, in), r.VRF))
+				bi.VRF = r.VRF
+				resp.Instances = append(resp.Instances, bi)
+			}
 		}
-		resp.Instances = append(resp.Instances, bgpInstance(in.Name, a.vtysh(ctx, in)))
 	}
 	return resp
+}
+
+// inVRF returns vtysh for a VRF's commands ("" is the main table's):
+// "vrf <name>" goes after the protocol's show words (show bgp, show ip
+// ospf, show ipv6 ospf6, show isis). OSPFv2 answers for a VRF inside an
+// object named after it, which is taken off.
+func inVRF(vtysh func(string) ([]byte, error), vrf string) func(string) ([]byte, error) {
+	if vrf == "" {
+		return vtysh
+	}
+	return func(command string) ([]byte, error) {
+		for _, p := range []string{"show bgp ", "show ip ospf ", "show ipv6 ospf6 ", "show isis "} {
+			rest, ok := strings.CutPrefix(command, p)
+			if !ok {
+				continue
+			}
+			out, err := vtysh(p + "vrf " + vrf + " " + rest)
+			if err == nil && p == "show ip ospf " {
+				var m map[string]json.RawMessage
+				if json.Unmarshal(out, &m) == nil && m[vrf] != nil {
+					out = m[vrf]
+				}
+			}
+			return out, err
+		}
+		return vtysh(command)
+	}
+}
+
+// routingVRF checks that vrf names a VRF of the instance that runs BGP
+// ("" is the main table): it becomes part of a vtysh command.
+func routingVRF(in *fwconfig.Instance, vrf string) bool {
+	for _, r := range in.Routings() {
+		if r.VRF == vrf && r.BGPOn() {
+			return true
+		}
+	}
+	return false
 }
 
 // vtysh returns a function that runs one vtysh command in the instance's
@@ -247,7 +288,7 @@ func parseBGPRoutes(data []byte, fam string) []agentapi.BGPRoute {
 // advertised of one BGP neighbour of an instance. The neighbour must be
 // one FRR has, as `show bgp neighbors` names it, so nothing else reaches
 // the vtysh command.
-func (a *Agent) BGPNeighborRoutes(ctx context.Context, instance, neighbor string) (*agentapi.BGPNeighborRoutes, error) {
+func (a *Agent) BGPNeighborRoutes(ctx context.Context, instance, vrf, neighbor string) (*agentapi.BGPNeighborRoutes, error) {
 	a.mu.Lock()
 	doc := a.applied
 	a.mu.Unlock()
@@ -255,10 +296,17 @@ func (a *Agent) BGPNeighborRoutes(ctx context.Context, instance, neighbor string
 	if doc != nil {
 		in = doc.Instance(instance)
 	}
-	if in == nil || !in.BGPRunning() {
-		return nil, fmt.Errorf("BGP is not running in %q", instance)
+	if in == nil || !routingVRF(in, vrf) {
+		return nil, fmt.Errorf("BGP is not running in %q%s", instance, vrfSuffix(vrf))
 	}
-	return bgpNeighborRoutes(a.vtysh(ctx, in), neighbor)
+	return bgpNeighborRoutes(inVRF(a.vtysh(ctx, in), vrf), neighbor)
+}
+
+func vrfSuffix(vrf string) string {
+	if vrf == "" {
+		return ""
+	}
+	return fmt.Sprintf(" (VRF %q)", vrf)
 }
 
 func bgpNeighborRoutes(vtysh func(string) ([]byte, error), neighbor string) (*agentapi.BGPNeighborRoutes, error) {
@@ -325,7 +373,7 @@ func bgpNeighborRoutes(vtysh func(string) ([]byte, error), neighbor string) (*ag
 // of an instance (`show bgp neighbors <n> json`): timers, capabilities,
 // message counters, address families. The neighbour must be one FRR has,
 // as for BGPNeighborRoutes.
-func (a *Agent) BGPNeighborDetail(ctx context.Context, instance, neighbor string) (*agentapi.BGPNeighborDetail, error) {
+func (a *Agent) BGPNeighborDetail(ctx context.Context, instance, vrf, neighbor string) (*agentapi.BGPNeighborDetail, error) {
 	a.mu.Lock()
 	doc := a.applied
 	a.mu.Unlock()
@@ -333,10 +381,10 @@ func (a *Agent) BGPNeighborDetail(ctx context.Context, instance, neighbor string
 	if doc != nil {
 		in = doc.Instance(instance)
 	}
-	if in == nil || !in.BGPRunning() {
-		return nil, fmt.Errorf("BGP is not running in %q", instance)
+	if in == nil || !routingVRF(in, vrf) {
+		return nil, fmt.Errorf("BGP is not running in %q%s", instance, vrfSuffix(vrf))
 	}
-	return bgpNeighborDetail(a.vtysh(ctx, in), neighbor)
+	return bgpNeighborDetail(inVRF(a.vtysh(ctx, in), vrf), neighbor)
 }
 
 func bgpNeighborDetail(vtysh func(string) ([]byte, error), neighbor string) (*agentapi.BGPNeighborDetail, error) {

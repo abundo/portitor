@@ -110,12 +110,12 @@ func (in *Instance) HasBFDRoutes() bool {
 }
 
 // NeighborBFD is the interface of a BGP neighbour's BFD session, "" when
-// neither it nor its peer group asks for BFD or it is not on an interface
-// with BFD.
-func (in *Instance) NeighborBFD(n BGPPeer) string {
+// neither it nor its peer group (of b, the BGP it is in) asks for BFD or
+// it is not on an interface with BFD.
+func (in *Instance) NeighborBFD(b *BGP, n BGPPeer) string {
 	on := n.BFD
-	if !on && n.PeerGroup != "" && in.BGP != nil {
-		for _, g := range in.BGP.PeerGroups {
+	if !on && n.PeerGroup != "" && b != nil {
+		for _, g := range b.PeerGroups {
 			if g.Name == n.PeerGroup {
 				on = g.BFD
 			}

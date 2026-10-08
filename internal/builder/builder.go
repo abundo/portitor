@@ -748,9 +748,16 @@ func build(db *gorm.DB, generation int64, only map[string]bool) (*fwconfig.Docum
 			in.Certificates = append(in.Certificates, Certificate(&c, ifc.Name))
 		}
 
-		d.bgp(&in, mi.ID)
-		in.OSPF, in.OSPF6 = d.ospf(mi.ID, 2), d.ospf(mi.ID, 3)
-		in.ISIS = d.isis(mi.ID)
+		// The main table's routing, then each VRF's.
+		in.BGP = d.bgp(mi.ID, nil)
+		in.OSPF, in.OSPF6 = d.ospf(mi.ID, 2, nil), d.ospf(mi.ID, 3, nil)
+		in.ISIS = d.isis(mi.ID, nil)
+		for i := range in.VRFs {
+			v := d.vrfByName(mi.ID, in.VRFs[i].Name)
+			in.VRFs[i].BGP = d.bgp(mi.ID, v)
+			in.VRFs[i].OSPF, in.VRFs[i].OSPF6 = d.ospf(mi.ID, 2, v), d.ospf(mi.ID, 3, v)
+			in.VRFs[i].ISIS = d.isis(mi.ID, v)
+		}
 		for i := range d.vrrpRouters {
 			if r := &d.vrrpRouters[i]; r.InstanceID == mi.ID {
 				in.VRRP = append(in.VRRP, r.Router())
@@ -824,16 +831,51 @@ func build(db *gorm.DB, generation int64, only map[string]bool) (*fwconfig.Docum
 	return doc, nil
 }
 
-// bgp adds the instance's BGP when it is enabled.
-func (d *data) bgp(in *fwconfig.Instance, instanceID uint) {
+// vrfByName is an instance's VRF of that name.
+func (d *data) vrfByName(instanceID uint, name string) *models.Vrf {
+	for i := range d.vrfs {
+		if v := &d.vrfs[i]; v.InstanceID == instanceID && v.Name == name {
+			return v
+		}
+	}
+	return nil
+}
+
+// inVRF reports whether a row's VRF (id, nil for the main table) is vrf
+// (nil for the main table).
+func inVRF(id *uint, vrf *models.Vrf) bool {
+	if vrf == nil {
+		return id == nil
+	}
+	return id != nil && *id == vrf.ID
+}
+
+// ifaceInVRF reports whether an interface (link ends included) of the
+// instance is in vrf (nil: in none). OSPF and IS-IS interfaces belong to
+// the routing of their interface's VRF.
+func (d *data) ifaceInVRF(instanceID uint, name string, vrf *models.Vrf) bool {
+	for _, ifc := range d.interfaces {
+		if ifc.InstanceID == instanceID && ifc.Name == name {
+			if vrf == nil {
+				return ifc.Vrf == ""
+			}
+			return ifc.Vrf == vrf.Name
+		}
+	}
+	return vrf == nil // a link end
+}
+
+// bgp returns the BGP of the instance's main table (vrf nil) or a VRF
+// when it is enabled, or nil.
+func (d *data) bgp(instanceID uint, vrf *models.Vrf) *fwconfig.BGP {
 	var cfg *models.BgpConfig
 	for i := range d.bgpConfigs {
-		if d.bgpConfigs[i].InstanceID == instanceID {
-			cfg = &d.bgpConfigs[i]
+		if c := &d.bgpConfigs[i]; c.InstanceID == instanceID && inVRF(c.VrfID, vrf) {
+			cfg = c
 		}
 	}
 	if cfg == nil || !cfg.Enabled {
-		return
+		return nil
 	}
 	b := &fwconfig.BGP{
 		Enabled:            true,
@@ -869,28 +911,28 @@ func (d *data) bgp(in *fwconfig.Instance, instanceID uint) {
 		}
 	}
 	for _, g := range d.bgpGroups {
-		if g.InstanceID == instanceID {
+		if g.InstanceID == instanceID && inVRF(g.VrfID, vrf) {
 			p := g.Peer()
 			p.Name = g.Name
 			b.PeerGroups = append(b.PeerGroups, p)
 		}
 	}
 	for _, n := range d.bgpNeighbors {
-		if n.InstanceID == instanceID && n.Enabled {
+		if n.InstanceID == instanceID && n.Enabled && inVRF(n.VrfID, vrf) {
 			p := n.Peer()
 			p.Address, p.PeerGroup, p.Interface = n.Address, n.PeerGroup, n.Interface
 			b.Neighbors = append(b.Neighbors, p)
 		}
 	}
-	in.BGP = b
+	return b
 }
 
-// ospf returns the instance's OSPF of a version when it is enabled, or
-// nil.
-func (d *data) ospf(instanceID uint, version int) *fwconfig.OSPF {
+// ospf returns the OSPF of a version of the instance's main table (vrf
+// nil) or a VRF when it is enabled, or nil.
+func (d *data) ospf(instanceID uint, version int, vrf *models.Vrf) *fwconfig.OSPF {
 	var cfg *models.OspfConfig
 	for i := range d.ospfConfigs {
-		if c := &d.ospfConfigs[i]; c.InstanceID == instanceID && c.Version == version {
+		if c := &d.ospfConfigs[i]; c.InstanceID == instanceID && c.Version == version && inVRF(c.VrfID, vrf) {
 			cfg = c
 		}
 	}
@@ -912,18 +954,19 @@ func (d *data) ospf(instanceID uint, version int) *fwconfig.OSPF {
 		Redistribute:        slices.Clone([]fwconfig.OSPFRedistribute(cfg.Redistribute)),
 	}
 	for i := range d.ospfIfaces {
-		if ifc := &d.ospfIfaces[i]; ifc.InstanceID == instanceID && ifc.Version == version {
+		if ifc := &d.ospfIfaces[i]; ifc.InstanceID == instanceID && ifc.Version == version && d.ifaceInVRF(instanceID, ifc.Name, vrf) {
 			o.Interfaces = append(o.Interfaces, ifc.Interface())
 		}
 	}
 	return o
 }
 
-// isis returns the instance's IS-IS when it is enabled, or nil.
-func (d *data) isis(instanceID uint) *fwconfig.ISIS {
+// isis returns the IS-IS of the instance's main table (vrf nil) or a VRF
+// when it is enabled, or nil.
+func (d *data) isis(instanceID uint, vrf *models.Vrf) *fwconfig.ISIS {
 	var cfg *models.IsisConfig
 	for i := range d.isisConfigs {
-		if c := &d.isisConfigs[i]; c.InstanceID == instanceID {
+		if c := &d.isisConfigs[i]; c.InstanceID == instanceID && inVRF(c.VrfID, vrf) {
 			cfg = c
 		}
 	}
@@ -957,7 +1000,7 @@ func (d *data) isis(instanceID uint) *fwconfig.ISIS {
 		}
 	}
 	for i := range d.isisIfaces {
-		if ifc := &d.isisIfaces[i]; ifc.InstanceID == instanceID {
+		if ifc := &d.isisIfaces[i]; ifc.InstanceID == instanceID && d.ifaceInVRF(instanceID, ifc.Name, vrf) {
 			s.Interfaces = append(s.Interfaces, ifc.Interface())
 		}
 	}

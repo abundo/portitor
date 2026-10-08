@@ -2,7 +2,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
 <!-- IS-IS (FRR): its state as FRR has it (info), and its configuration
-     (config). -->
+     (config), of the main table or a VRF, chosen at the top. -->
 <script setup>
 import AutoRefreshButton from '@/components/AutoRefreshButton.vue'
 import { useAutoRefresh } from '@/composables/useAutoRefresh'
@@ -11,13 +11,16 @@ import { useRoute, useRouter } from 'vue-router'
 import NeedInstance from '@/components/NeedInstance.vue'
 import IsisConfig from '@/components/IsisConfig.vue'
 import IsisInfo from '@/components/IsisInfo.vue'
+import VrfSelect from '@/components/VrfSelect.vue'
 import { api } from '@/api'
 import { errMsg } from '@/api/http'
 import { useInstanceStore } from '@/stores/instances'
+import { useVrfChoice } from '@/composables/useVrfChoice'
 
 const route = useRoute()
 const router = useRouter()
 const store = useInstanceStore()
+const { vrf, vrfItems, vrfName } = useVrfChoice()
 
 const tabs = [
   { label: 'IS-IS info', value: 'info', slot: 'info', icon: 'i-lucide-info' },
@@ -46,12 +49,15 @@ async function loadStatus() {
 const auto = useAutoRefresh(loadStatus, { seconds: 10, active: () => tab.value === 'info' })
 
 const mine = computed(() =>
-  status.value?.instances?.find((i) => i.instance === store.current?.name),
+  status.value?.instances?.find(
+    (i) => i.instance === store.current?.name && (i.vrf ?? '') === vrfName.value,
+  ),
 )
 </script>
 
 <template>
   <NeedInstance>
+    <div class="mb-2"><VrfSelect v-model="vrf" :items="vrfItems" /></div>
     <!-- The config tab stays mounted, so its unsaved changes do too. -->
     <UTabs v-model="tab" :items="tabs" :unmount-on-hide="false">
       <template #info>
@@ -60,8 +66,9 @@ const mine = computed(() =>
             <div>
               <div class="text-lg font-semibold">IS-IS info</div>
               <p class="max-w-3xl text-sm text-muted">
-                The IS-IS system id, adjacencies, interfaces and routes of this virtual firewall, as
-                FRR has them.
+                The IS-IS system id, adjacencies, interfaces and routes of this virtual firewall{{
+                  vrfName ? ` in VRF ${vrfName}` : ''
+                }}, as FRR has them.
               </p>
             </div>
             <AutoRefreshButton :auto="auto" :loading="loading" />
@@ -76,7 +83,8 @@ const mine = computed(() =>
           <IsisInfo v-else :state="mine" :loaded="!!status" :loading="loading && !status" />
         </div>
       </template>
-      <template #config><IsisConfig /></template>
+      <!-- Keyed by the VRF: another VRF's IS-IS is another form. -->
+      <template #config><IsisConfig :key="vrf" /></template>
     </UTabs>
   </NeedInstance>
 </template>

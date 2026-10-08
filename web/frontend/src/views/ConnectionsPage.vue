@@ -3,21 +3,25 @@
 
 <!-- Connections: the virtual firewall's connection tracking table, streamed
      from the agent (POST /api/agent/connections) as one snapshot per
-     interval, the largest connections first. -->
+     interval, the largest connections first; of all VRFs or one, chosen
+     at the top (the agent filters them by the VRF label the ruleset sets). -->
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import NeedInstance from '@/components/NeedInstance.vue'
 import SearchInput from '@/components/SearchInput.vue'
+import VrfSelect from '@/components/VrfSelect.vue'
 import { rules } from '@/api'
 import http, { errMsg } from '@/api/http'
 import { useToast } from '@nuxt/ui/composables'
 import { useConfirm } from '@/composables/useConfirm'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
+import { ALL_VRFS, useVrfChoice } from '@/composables/useVrfChoice'
 import { useSearch, valuesText } from '@/utils/search'
 import { bytes } from '@/utils/bytes'
 import { ago, clock, when } from '@/utils/time'
 
 const { store } = useInstanceRefs()
+const { vrf, vrfList, vrfItems, vrfName } = useVrfChoice({ all: true })
 const toast = useToast()
 const { ask } = useConfirm()
 const form = reactive({ interval: 2000, max: 1000 })
@@ -60,6 +64,8 @@ async function start() {
         instance: store.current.name,
         interval_ms: form.interval,
         max: form.max,
+        // Absent: all VRFs; '': the connections of none.
+        ...(vrf.value === ALL_VRFS ? {} : { vrf: vrfName.value }),
       }),
       signal: ctl.signal,
     })
@@ -144,6 +150,10 @@ watch(
   () => [form.interval, form.max],
   () => running.value && start(),
 )
+watch(vrf, () => {
+  snapshot.value = null
+  start()
+})
 
 const hostPort = (a, p) => (p ? (a.includes(':') ? `[${a}]:${p}` : `${a}:${p}`) : a)
 const rows = computed(() =>
@@ -154,6 +164,7 @@ const rows = computed(() =>
     const snat = c.reply_dst !== c.src || (c.reply_dport || 0) !== (c.sport || 0)
     return {
       key: i,
+      vrf: c.vrf ?? '',
       protocol: c.protocol + (c.family === 'ipv6' ? '6' : ''),
       source: hostPort(c.src, c.sport),
       destination: hostPort(c.dst, c.dport),
@@ -173,10 +184,11 @@ const rows = computed(() =>
   }),
 )
 const { search, filtered } = useSearch(rows, (r) =>
-  valuesText(r.protocol, r.source, r.destination, r.nat, r.state, r.rule),
+  valuesText(r.vrf, r.protocol, r.source, r.destination, r.nat, r.state, r.rule),
 )
 
-const columns = [
+const columns = computed(() => [
+  ...(vrfList.value.length ? [{ accessorKey: 'vrf', header: 'VRF' }] : []),
   { accessorKey: 'protocol', header: 'Protocol' },
   { accessorKey: 'source', header: 'Source' },
   { accessorKey: 'destination', header: 'Destination' },
@@ -187,7 +199,7 @@ const columns = [
   { accessorKey: 'rule', header: 'Rule' },
   { id: 'start', header: 'Started' },
   { id: 'timeout', header: 'Expires in' },
-]
+])
 const updated = computed(() => (snapshot.value ? clock(snapshot.value.time) : ''))
 </script>
 
@@ -199,7 +211,8 @@ const updated = computed(() => (snapshot.value ? clock(snapshot.value.time) : ''
           <div class="text-lg font-semibold">Connections</div>
           <p class="max-w-3xl text-sm text-muted">
             The connection tracking table of this virtual firewall, updated live, the largest
-            connections first. Rule is the rule that accepted the connection.
+            connections first. Rule is the rule that accepted the connection. Its VRFs share the
+            table; VRF is the one a connection came in on (or left by, from the firewall).
           </p>
         </div>
         <div class="flex flex-wrap items-end gap-3">
@@ -238,6 +251,7 @@ const updated = computed(() => (snapshot.value ? clock(snapshot.value.time) : ''
 
       <UAlert v-if="error" class="mb-2" color="error" variant="subtle" :title="error" />
       <div class="mb-2 flex flex-wrap items-center gap-3">
+        <VrfSelect v-model="vrf" :items="vrfItems" />
         <SearchInput v-model="search" />
         <span v-if="snapshot" class="text-sm text-muted">
           {{ snapshot.total }} connections<template v-if="snapshot.total > rows.length">

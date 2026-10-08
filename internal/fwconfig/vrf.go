@@ -4,7 +4,9 @@
 package fwconfig
 
 import (
+	"cmp"
 	"fmt"
+	"slices"
 	"strconv"
 )
 
@@ -20,10 +22,90 @@ import (
 // interface as meta sdifname; the renderer matches such interfaces that way
 // (Instance.VRFOf). Routes go in the table of their VRF (Route.VRF), or of
 // their interface's VRF (Instance.RouteTable).
+//
+// A VRF may run routing protocols of its own (FRR's router bgp, ospf,
+// ospf6 and isis ... vrf <name>) on its interfaces, apart from the
+// instance's (Instance.BGP and the rest, the main table's): Routings
+// lists both.
 type VRF struct {
 	Name        string `json:"name"`
 	Table       int    `json:"table"`
 	Description string `json:"description,omitempty"`
+	BGP         *BGP   `json:"bgp,omitempty"`
+	OSPF        *OSPF  `json:"ospf,omitempty"`
+	OSPF6       *OSPF  `json:"ospf6,omitempty"`
+	ISIS        *ISIS  `json:"isis,omitempty"`
+}
+
+// MaxVRFs is the most VRFs an instance may have: each marks the
+// connections that come in on its interfaces with a conntrack label bit
+// of its own (VRFLabel), and there are 128.
+const MaxVRFs = 127
+
+// Routing is the routing protocols of the main table (VRF "") or of a VRF;
+// nil or disabled: not run there.
+type Routing struct {
+	VRF   string
+	BGP   *BGP
+	OSPF  *OSPF
+	OSPF6 *OSPF
+	ISIS  *ISIS
+}
+
+// BGPOn reports whether BGP runs there.
+func (r Routing) BGPOn() bool { return r.BGP != nil && r.BGP.Enabled }
+
+// OSPFOn returns OSPF of a version (2 or 3) when it runs there, else nil.
+func (r Routing) OSPFOn(version int) *OSPF {
+	o := r.OSPF
+	if version == 3 {
+		o = r.OSPF6
+	}
+	if o == nil || !o.Enabled {
+		return nil
+	}
+	return o
+}
+
+// ISISOn reports whether IS-IS runs there.
+func (r Routing) ISISOn() bool { return r.ISIS != nil && r.ISIS.Enabled }
+
+// Routings are the routing protocols of the main table, then of each VRF.
+func (in *Instance) Routings() []Routing {
+	out := []Routing{{BGP: in.BGP, OSPF: in.OSPF, OSPF6: in.OSPF6, ISIS: in.ISIS}}
+	for _, vrf := range in.VRFs {
+		out = append(out, Routing{VRF: vrf.Name, BGP: vrf.BGP, OSPF: vrf.OSPF, OSPF6: vrf.OSPF6, ISIS: vrf.ISIS})
+	}
+	return out
+}
+
+// IfaceVRF is the name of the VRF an interface is in, "" for none.
+func (in *Instance) IfaceVRF(name string) string {
+	if vrf := in.VRFOf(name); vrf != nil {
+		return vrf.Name
+	}
+	return ""
+}
+
+// RouteVRF is the name of the VRF whose table a route goes in, "" for
+// main.
+func (in *Instance) RouteVRF(r Route) string {
+	if r.VRF != "" {
+		return r.VRF
+	}
+	return in.IfaceVRF(r.Interface)
+}
+
+// VRFLabel is the conntrack label bit (1-127) the ruleset sets on the
+// connections that come in on a VRF's interfaces (or go out of them from
+// the firewall), 0 for a name that is not a VRF.
+func (in *Instance) VRFLabel(name string) int {
+	for i, vrf := range in.VRFs {
+		if vrf.Name == name {
+			return i + 1
+		}
+	}
+	return 0
 }
 
 // VRF tables the kernel uses, which a VRF can't have.
@@ -73,10 +155,24 @@ func (in *Instance) vrfByName(name string) *VRF {
 	return nil
 }
 
-// VRFOf returns the VRF the interface name is in, or nil.
+// VRFOf returns the VRF the interface name is in, or nil. A VRRP device is
+// in its parent's.
 func (in *Instance) VRFOf(name string) *VRF {
-	if ifc := in.Interface(name); ifc != nil && ifc.VRF != "" {
-		return in.vrfByName(ifc.VRF)
+	if ifc := in.Interface(name); ifc != nil {
+		if ifc.VRF != "" {
+			return in.vrfByName(ifc.VRF)
+		}
+		return nil
+	}
+	if !in.HasVRF() {
+		return nil
+	}
+	for _, r := range in.VRRP {
+		for _, fam := range []int{4, 6} {
+			if VRRPDeviceName(fam, r.VRID, r.Interface) == name {
+				return in.VRFOf(r.Interface)
+			}
+		}
 	}
 	return nil
 }
@@ -97,6 +193,15 @@ func (in *Instance) RouteTable(r Route) string {
 	return strconv.Itoa(vrf.Table)
 }
 
+// VRFNames are the names of the instance's VRFs.
+func (in *Instance) VRFNames() []string {
+	var out []string
+	for _, vrf := range in.VRFs {
+		out = append(out, vrf.Name)
+	}
+	return out
+}
+
 // VRFTables are the tables of the instance's VRFs.
 func (in *Instance) VRFTables() []string {
 	var out []string
@@ -112,6 +217,9 @@ func (in *Instance) VRFTables() []string {
 func (v *validator) vrfInstance(p string, in *Instance, ifaces map[string]*Interface) {
 	names := map[string]bool{}
 	tables := map[int]string{}
+	if len(in.VRFs) > MaxVRFs {
+		v.addf("%s: at most %d vrfs", p, MaxVRFs)
+	}
 	for _, vrf := range in.VRFs {
 		vp := fmt.Sprintf("%s: vrf %q", p, vrf.Name)
 		if names[vrf.Name] {
@@ -157,6 +265,10 @@ func (v *validator) vrfInstance(p string, in *Instance, ifaces map[string]*Inter
 		if b := bridged[ifc.Name]; b != "" {
 			v.addf("%s: a member of bridge %s can't be in a vrf (put the bridge in it)", ip, b)
 		}
+		if in.NAT64 != nil && slices.Contains(in.NAT64.Interfaces, ifc.Name) {
+			// Jool and its loop devices are the main table's.
+			v.addf("%s: 464xlat is not supported on an interface in a vrf", ip)
+		}
 	}
 	for i, r := range in.Routes {
 		if r.VRF == "" {
@@ -166,9 +278,61 @@ func (v *validator) vrfInstance(p string, in *Instance, ifaces map[string]*Inter
 		if !names[r.VRF] {
 			v.addf("%s: vrf %q is not a vrf of this instance", rp, r.VRF)
 		}
-		if in.RouteBFD(r) != "" {
-			v.addf("%s: a route with bfd can't be in a vrf", rp)
+	}
+	for i, r := range in.Routes {
+		// staticd puts a route with BFD in its VRF, on its gateway's
+		// interface: they can't be in two.
+		if iface := in.RouteBFD(r); iface != "" && in.IfaceVRF(iface) != in.RouteVRF(r) {
+			v.addf("%s: route %d: a route with bfd must be in the vrf of its gateway's interface %s", p, i+1, iface)
 		}
+	}
+}
+
+// routingVRF checks that the interfaces a routing's protocols name are in
+// its VRF (the main table's: in none), and that EVPN is the main table's.
+func (v *validator) routingVRF(p string, in *Instance, r Routing) {
+	where := func(name string) string {
+		if vrf := in.IfaceVRF(name); vrf != "" {
+			return "vrf " + vrf
+		}
+		return "no vrf"
+	}
+	check := func(what, name string) {
+		if name != "" && in.Interface(name) != nil && in.IfaceVRF(name) != r.VRF {
+			v.addf("%s: %s: interface %s is in %s", p, what, name, where(name))
+		}
+	}
+	for _, o := range []struct {
+		name string
+		ospf *OSPF
+	}{{"ospf", r.OSPF}, {"ospf6", r.OSPF6}} {
+		if o.ospf != nil {
+			for _, ifc := range o.ospf.Interfaces {
+				check(o.name, ifc.Name)
+			}
+		}
+	}
+	if r.ISIS != nil {
+		for _, ifc := range r.ISIS.Interfaces {
+			check("isis", ifc.Name)
+		}
+	}
+	b := r.BGP
+	if b == nil {
+		return
+	}
+	for _, peer := range slices.Concat(b.PeerGroups, b.Neighbors) {
+		id := cmp.Or(peer.Address, peer.Name)
+		check("bgp "+id, peer.Interface)
+		if _, err := ParseAddr(peer.UpdateSource); err != nil {
+			check("bgp "+id+" update source", peer.UpdateSource)
+		}
+		if r.VRF != "" && peer.EVPN.Activate {
+			v.addf("%s: bgp %s: evpn is for the main table's bgp only", p, id)
+		}
+	}
+	if r.VRF != "" && b.EVPN {
+		v.addf("%s: bgp: evpn is for the main table's bgp only", p)
 	}
 }
 

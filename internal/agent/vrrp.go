@@ -23,13 +23,14 @@ import (
 // vrrpd.
 
 // planVRRPCreate returns the commands that create the instance's VRRP
-// devices that are missing or wrong (kind, parent, MAC address). Stale
-// ones go with the other stale virtual interfaces.
+// devices that are missing or wrong (kind, parent, MAC address, VRF).
+// Stale ones go with the other stale virtual interfaces. A device is in
+// its parent's VRF, put there before it comes up (joining one cycles it).
 func planVRRPCreate(ns string, devs []fwconfig.VRRPDevice, have map[string]ipLink) []command {
 	var cmds []command
 	for _, d := range devs {
 		if l, ok := have[d.Name]; ok {
-			if l.kind() == "macvlan" && (l.Link == "" || l.Link == d.Parent) && strings.EqualFold(l.Address, d.MAC) {
+			if l.kind() == "macvlan" && (l.Link == "" || l.Link == d.Parent) && strings.EqualFold(l.Address, d.MAC) && l.Master == d.VRF {
 				continue
 			}
 			cmds = append(cmds, ipCmd(ns, "link", "del", "dev", d.Name))
@@ -42,6 +43,9 @@ func planVRRPCreate(ns string, devs []fwconfig.VRRPDevice, have map[string]ipLin
 			ipCmd(ns, "link", "set", "dev", d.Name, "addrgenmode", "random"),
 			ipCmd(ns, "link", "set", "dev", d.Name, "protodown", "on"),
 		)
+		if d.VRF != "" {
+			cmds = append(cmds, ipCmd(ns, "link", "set", "dev", d.Name, "master", d.VRF))
+		}
 	}
 	return cmds
 }

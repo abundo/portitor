@@ -57,7 +57,8 @@ const (
 )
 
 // FRRConf renders FRR's integrated config (frr.conf) for an instance's
-// routing policy, BGP, OSPF, IS-IS, VRRP and BFD. Static routes stay the agent's
+// routing policy, BGP, OSPF, IS-IS, VRRP and BFD, of the main table and
+// of each VRF (router ... vrf <name>). Static routes stay the agent's
 // (kernel routes, proto 99): "redistribute static" is FRR's redistribute
 // kernel; but a route with BFD is staticd's (writeBFDRoutes), so with
 // those it is redistribute static as well.
@@ -71,17 +72,18 @@ func FRRConf(in *fwconfig.Instance) string {
 	writeBFD(b, in)
 	writeBFDRoutes(b, in)
 	writeInterfaces(b, in)
-	if in.BGPRunning() {
-		writeBGP(b, in)
-	}
-	if in.OSPFRunning(2) {
-		writeOSPF(b, in, in.OSPF, 2)
-	}
-	if in.OSPFRunning(3) {
-		writeOSPF(b, in, in.OSPF6, 3)
-	}
-	if in.ISISRunning() {
-		writeISIS(b, in, in.ISIS)
+	for _, r := range in.Routings() {
+		if r.BGPOn() {
+			writeBGP(b, in, r.BGP, r.VRF)
+		}
+		for _, version := range []int{2, 3} {
+			if o := r.OSPFOn(version); o != nil {
+				writeOSPF(b, in, o, version, r.VRF)
+			}
+		}
+		if r.ISISOn() {
+			writeISIS(b, in, r.ISIS, r.VRF)
+		}
 	}
 	b.WriteString("end\n")
 	return b.String()
@@ -260,37 +262,55 @@ func writeBFD(b *strings.Builder, in *fwconfig.Instance) {
 }
 
 // writeBFDRoutes writes the static routes with BFD, which staticd installs
-// while the session to the gateway is up. The metric is FRR's distance.
+// while the session to the gateway is up: the main table's, then each
+// VRF's in its vrf block. The metric is FRR's distance.
 func writeBFDRoutes(b *strings.Builder, in *fwconfig.Instance) {
-	n := 0
-	for _, r := range in.Routes {
-		iface := in.RouteBFD(r)
-		if iface == "" {
-			continue
+	for _, vrf := range append([]string{""}, in.VRFNames()...) {
+		lines := &strings.Builder{}
+		indent := ""
+		if vrf != "" {
+			indent = " "
 		}
-		kw := "ip"
-		gw, _ := fwconfig.ParseAddr(r.Gateway)
-		if gw.Is6() {
-			kw = "ipv6"
+		for _, r := range in.Routes {
+			iface := in.RouteBFD(r)
+			if iface == "" || in.RouteVRF(r) != vrf {
+				continue
+			}
+			kw := "ip"
+			gw, _ := fwconfig.ParseAddr(r.Gateway)
+			if gw.Is6() {
+				kw = "ipv6"
+			}
+			fmt.Fprintf(lines, "%s%s route %s %s", indent, kw, fwconfig.BFDRouteDest(r), gw)
+			if r.Interface != "" {
+				fmt.Fprintf(lines, " %s", r.Interface)
+			}
+			if r.Metric > 0 {
+				fmt.Fprintf(lines, " %d", r.Metric)
+			}
+			fmt.Fprintf(lines, " bfd profile %s\n", fwconfig.BFDProfile(iface))
 		}
-		fmt.Fprintf(b, "%s route %s %s", kw, fwconfig.BFDRouteDest(r), gw)
-		if r.Interface != "" {
-			fmt.Fprintf(b, " %s", r.Interface)
+		switch {
+		case lines.Len() == 0:
+		case vrf == "":
+			b.WriteString(lines.String() + "!\n")
+		default:
+			fmt.Fprintf(b, "vrf %s\n%sexit-vrf\n!\n", vrf, lines)
 		}
-		if r.Metric > 0 {
-			fmt.Fprintf(b, " %d", r.Metric)
-		}
-		fmt.Fprintf(b, " bfd profile %s\n", fwconfig.BFDProfile(iface))
-		n++
-	}
-	if n > 0 {
-		b.WriteString("!\n")
 	}
 }
 
-func writeBGP(b *strings.Builder, in *fwconfig.Instance) {
-	g := in.BGP
-	fmt.Fprintf(b, "router bgp %d\n", g.ASN)
+// vrfSuffix is what follows a router line in a VRF.
+func vrfSuffix(vrf string) string {
+	if vrf == "" {
+		return ""
+	}
+	return " vrf " + vrf
+}
+
+// writeBGP writes router bgp of the main table (vrf "") or a VRF.
+func writeBGP(b *strings.Builder, in *fwconfig.Instance, g *fwconfig.BGP, vrf string) {
+	fmt.Fprintf(b, "router bgp %d%s\n", g.ASN, vrfSuffix(vrf))
 	if g.RouterID != "" {
 		fmt.Fprintf(b, " bgp router-id %s\n", g.RouterID)
 	}
@@ -334,7 +354,7 @@ func writeBGP(b *strings.Builder, in *fwconfig.Instance) {
 		writePeer(b, ip, p, true)
 		// BFD is per neighbour, never on a peer group: only the members on
 		// an interface with BFD get it.
-		if iface := in.NeighborBFD(p); iface != "" {
+		if iface := in.NeighborBFD(g, p); iface != "" {
 			fmt.Fprintf(b, " neighbor %s bfd\n", ip)
 			fmt.Fprintf(b, " neighbor %s bfd profile %s\n", ip, fwconfig.BFDProfile(iface))
 		}
@@ -553,69 +573,65 @@ func writePeerFamily(b *strings.Builder, id string, p fwconfig.BGPPeer, fam stri
 }
 
 // BGPNeighborAddrs are the addresses of the instance's BGP neighbours that
-// are not shut down, for the auto input rule.
+// are not shut down, of the main table and the VRFs, for the auto rules.
 func BGPNeighborAddrs(in *fwconfig.Instance) []string {
-	if !in.BGPRunning() {
-		return nil
-	}
 	var out []string
-	for _, n := range in.BGP.Neighbors {
-		if n.Shutdown {
+	for _, r := range in.Routings() {
+		if !r.BGPOn() {
 			continue
 		}
-		if a := canonAddr(n.Address); !slices.Contains(out, a) {
-			out = append(out, a)
+		for _, n := range r.BGP.Neighbors {
+			if n.Shutdown {
+				continue
+			}
+			if a := canonAddr(n.Address); !slices.Contains(out, a) {
+				out = append(out, a)
+			}
 		}
 	}
 	sort.Strings(out)
 	return out
 }
 
-// ospfInterface is an interface's OSPF settings of one version, or nil.
-func ospfInterface(o *fwconfig.OSPF, name string) *fwconfig.OSPFInterface {
-	if o == nil || !o.Enabled {
-		return nil
-	}
-	for i := range o.Interfaces {
-		if o.Interfaces[i].Name == name {
-			return &o.Interfaces[i]
+// ospfInterfaces are the OSPF settings of the interfaces OSPF of a version
+// runs on, in the main table and the VRFs, by name.
+func ospfInterfaces(in *fwconfig.Instance, version int) map[string]*fwconfig.OSPFInterface {
+	out := map[string]*fwconfig.OSPFInterface{}
+	for _, r := range in.Routings() {
+		if o := r.OSPFOn(version); o != nil {
+			for i := range o.Interfaces {
+				out[o.Interfaces[i].Name] = &o.Interfaces[i]
+			}
 		}
 	}
-	return nil
+	return out
 }
 
-// isisInterface is an interface's IS-IS settings, or nil.
-func isisInterface(in *fwconfig.Instance, name string) *fwconfig.ISISInterface {
-	if !in.ISISRunning() {
-		return nil
-	}
-	for i := range in.ISIS.Interfaces {
-		if in.ISIS.Interfaces[i].Name == name {
-			return &in.ISIS.Interfaces[i]
+// isisInterfaces are the IS-IS settings of the interfaces IS-IS runs on,
+// in the main table and the VRFs, by name.
+func isisInterfaces(in *fwconfig.Instance) map[string]*fwconfig.ISISInterface {
+	out := map[string]*fwconfig.ISISInterface{}
+	for _, r := range in.Routings() {
+		if r.ISISOn() {
+			for i := range r.ISIS.Interfaces {
+				out[r.ISIS.Interfaces[i].Name] = &r.ISIS.Interfaces[i]
+			}
 		}
 	}
-	return nil
+	return out
 }
 
 // writeInterfaces writes one interface block per interface with OSPF or
 // IS-IS settings or virtual routers: OSPFv2's, OSPFv3's, IS-IS's, then
-// VRRP's.
+// VRRP's. zebra knows each interface's VRF, so an interface in one joins
+// the VRF's OSPF or IS-IS.
 func writeInterfaces(b *strings.Builder, in *fwconfig.Instance) {
+	ospf2, ospf3, isis := ospfInterfaces(in, 2), ospfInterfaces(in, 3), isisInterfaces(in)
 	var names []string
-	for _, o := range []*fwconfig.OSPF{in.OSPF, in.OSPF6} {
-		if o == nil || !o.Enabled {
-			continue
-		}
-		for _, ifc := range o.Interfaces {
-			if !slices.Contains(names, ifc.Name) {
-				names = append(names, ifc.Name)
-			}
-		}
-	}
-	if in.ISISRunning() {
-		for _, ifc := range in.ISIS.Interfaces {
-			if !slices.Contains(names, ifc.Name) {
-				names = append(names, ifc.Name)
+	for _, m := range []map[string]bool{setOf(ospf2), setOf(ospf3), setOf(isis)} {
+		for name := range m {
+			if !slices.Contains(names, name) {
+				names = append(names, name)
 			}
 		}
 	}
@@ -627,13 +643,13 @@ func writeInterfaces(b *strings.Builder, in *fwconfig.Instance) {
 	sort.Strings(names)
 	for _, name := range names {
 		fmt.Fprintf(b, "interface %s\n", name)
-		if ifc := ospfInterface(in.OSPF, name); ifc != nil {
+		if ifc := ospf2[name]; ifc != nil {
 			writeOSPFInterface(b, in, ifc, "ip ospf")
 		}
-		if ifc := ospfInterface(in.OSPF6, name); ifc != nil {
+		if ifc := ospf3[name]; ifc != nil {
 			writeOSPFInterface(b, in, ifc, "ipv6 ospf6")
 		}
-		if ifc := isisInterface(in, name); ifc != nil {
+		if ifc := isis[name]; ifc != nil {
 			writeISISInterface(b, in, ifc)
 		}
 		for _, r := range in.VRRP {
@@ -717,13 +733,14 @@ func writeOSPFInterface(b *strings.Builder, in *fwconfig.Instance, ifc *fwconfig
 	}
 }
 
-// writeOSPF writes router ospf (version 2) or router ospf6 (3).
-func writeOSPF(b *strings.Builder, in *fwconfig.Instance, o *fwconfig.OSPF, version int) {
+// writeOSPF writes router ospf (version 2) or router ospf6 (3), of the
+// main table (vrf "") or a VRF.
+func writeOSPF(b *strings.Builder, in *fwconfig.Instance, o *fwconfig.OSPF, version int, vrf string) {
 	router, rid := "ospf", "ospf router-id"
 	if version == 3 {
 		router, rid = "ospf6", "ospf6 router-id"
 	}
-	fmt.Fprintf(b, "router %s\n", router)
+	fmt.Fprintf(b, "router %s%s\n", router, vrfSuffix(vrf))
 	if o.RouterID != "" {
 		fmt.Fprintf(b, " %s %s\n", rid, o.RouterID)
 	}
@@ -797,22 +814,21 @@ func writeOSPF(b *strings.Builder, in *fwconfig.Instance, o *fwconfig.OSPF, vers
 
 // OSPFActive returns the interfaces where an OSPF version sends and hears
 // hellos (with an area, not passive), and the OSPFv2 network statements'
-// prefixes, for the auto rules.
+// prefixes, of the main table and the VRFs, for the auto rules.
 func OSPFActive(in *fwconfig.Instance, version int) (ifaces, networks []string) {
-	o := in.OSPF
-	if version == 3 {
-		o = in.OSPF6
-	}
-	if o == nil || !o.Enabled {
-		return nil, nil
-	}
-	for _, ifc := range o.Interfaces {
-		if ifc.Area != "" && !ifc.Passive {
-			ifaces = append(ifaces, ifc.Name)
+	for _, r := range in.Routings() {
+		o := r.OSPFOn(version)
+		if o == nil {
+			continue
 		}
-	}
-	for _, n := range o.Networks {
-		networks = append(networks, n.Prefix)
+		for _, ifc := range o.Interfaces {
+			if ifc.Area != "" && !ifc.Passive {
+				ifaces = appendUnique(ifaces, ifc.Name)
+			}
+		}
+		for _, n := range o.Networks {
+			networks = appendUnique(networks, n.Prefix)
+		}
 	}
 	sort.Strings(ifaces)
 	sort.Strings(networks)
@@ -856,9 +872,10 @@ func writeISISInterface(b *strings.Builder, in *fwconfig.Instance, ifc *fwconfig
 	}
 }
 
-// writeISIS writes router isis.
-func writeISIS(b *strings.Builder, in *fwconfig.Instance, s *fwconfig.ISIS) {
-	fmt.Fprintf(b, "router isis %s\n", fwconfig.ISISTag)
+// writeISIS writes router isis, of the main table (vrf "") or a VRF: the
+// same tag in each.
+func writeISIS(b *strings.Builder, in *fwconfig.Instance, s *fwconfig.ISIS, vrf string) {
+	fmt.Fprintf(b, "router isis %s%s\n", fwconfig.ISISTag, vrfSuffix(vrf))
 	fmt.Fprintf(b, " net %s\n", s.NET)
 	if s.Level != "" {
 		fmt.Fprintf(b, " is-type %s\n", s.Level)
@@ -909,4 +926,12 @@ func writeISIS(b *strings.Builder, in *fwconfig.Instance, s *fwconfig.ISIS) {
 		}
 	}
 	b.WriteString("exit\n!\n")
+}
+
+func setOf[T any](m map[string]T) map[string]bool {
+	out := make(map[string]bool, len(m))
+	for k := range m {
+		out[k] = true
+	}
+	return out
 }

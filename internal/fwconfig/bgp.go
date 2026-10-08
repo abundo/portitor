@@ -713,24 +713,32 @@ func (v *validator) routing(p string, in *Instance, ifaces map[string]*Interface
 		v.routeMap(fmt.Sprintf("%s: route map %s", p, m.Name), m, refs)
 	}
 
-	for _, o := range []struct {
-		name    string
-		ospf    *OSPF
-		version int
-	}{{"ospf", in.OSPF, 2}, {"ospf6", in.OSPF6, 3}} {
-		if o.ospf != nil {
-			v.ospf(p+": "+o.name, o.ospf, o.version, refs, ifaces)
+	for _, r := range in.Routings() {
+		rp := p
+		if r.VRF != "" {
+			rp = fmt.Sprintf("%s: vrf %s", p, r.VRF)
 		}
+		for _, o := range []struct {
+			name    string
+			ospf    *OSPF
+			version int
+		}{{"ospf", r.OSPF, 2}, {"ospf6", r.OSPF6, 3}} {
+			if o.ospf != nil {
+				v.ospf(rp+": "+o.name, o.ospf, o.version, refs, ifaces)
+			}
+		}
+		if r.ISIS != nil {
+			v.isis(rp+": isis", r.ISIS, refs, ifaces)
+		}
+		if r.BGP != nil {
+			v.bgp(rp+": bgp", r.BGP, refs, ifaces)
+		}
+		v.routingVRF(rp, in, r)
 	}
-	if in.ISIS != nil {
-		v.isis(p+": isis", in.ISIS, refs, ifaces)
-	}
+}
 
-	b := in.BGP
-	if b == nil {
-		return
-	}
-	bp := p + ": bgp"
+// bgp checks a BGP of the main table or a VRF.
+func (v *validator) bgp(bp string, b *BGP, refs *policyRefs, ifaces map[string]*Interface) {
 	if b.ASN == 0 {
 		v.addf("%s: local AS is required", bp)
 	}
@@ -891,7 +899,8 @@ func (b *BGP) peerGroup(name string) BGPPeer {
 	return BGPPeer{}
 }
 
-// BGPRunning reports whether the instance runs FRR.
+// BGPRunning reports whether the instance runs BGP, in the main table or
+// a VRF.
 func (in *Instance) BGPRunning() bool {
-	return in.BGP != nil && in.BGP.Enabled
+	return slices.ContainsFunc(in.Routings(), Routing.BGPOn)
 }
