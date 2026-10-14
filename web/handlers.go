@@ -1478,6 +1478,15 @@ func redactDoc(doc fwconfig.Document) fwconfig.Document {
 				cp.Certificates[j].DNS01 = &r
 			}
 		}
+		if x := in.ACMEProxy; x != nil {
+			r := *x
+			r.Policies = slices.Clone(x.Policies)
+			for j := range r.Policies {
+				d := &r.Policies[j].DNS01
+				d.TSIG, d.ProviderSettings = redactTSIG(d.TSIG), redactProviderSettings(d.Provider, d.ProviderSettings)
+			}
+			cp.ACMEProxy = &r
+		}
 		cp.DynDNS = make([]fwconfig.DynDNS, len(in.DynDNS))
 		for j, d := range in.DynDNS {
 			d.TSIG, d.ProviderSettings = redactTSIG(d.TSIG), redactProviderSettings(d.Provider, d.ProviderSettings)

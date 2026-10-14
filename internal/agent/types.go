@@ -24,6 +24,8 @@ type (
 	DynDNSStatus        = agentapi.DynDNSStatus
 	TunnelBrokerStatus  = agentapi.TunnelBrokerStatus
 	CertificateStatus   = agentapi.CertificateStatus
+	ACMEProxyStatus     = agentapi.ACMEProxyStatus
+	ACMEProxyIssue      = agentapi.ACMEProxyIssue
 	IPListStatus        = agentapi.IPListStatus
 	TaskStatus          = agentapi.TaskStatus
 )

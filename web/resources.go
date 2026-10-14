@@ -212,6 +212,9 @@ func prepareInstance(tx *gorm.DB, in, old *models.Instance) error {
 	if err := prepareInstanceSNMP(tx, in); err != nil {
 		return err
 	}
+	if err := prepareInstanceACMEProxy(tx, in); err != nil {
+		return err
+	}
 	in.DnsQueryLogClients = cleanList(in.DnsQueryLogClients)
 	if err := checkEntries(tx, "query log clients", in.DnsQueryLogClients, entryCIDR); err != nil {
 		return err

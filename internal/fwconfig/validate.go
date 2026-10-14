@@ -592,6 +592,9 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 
 	v.dyndns(p, in, ifaces)
 	v.certificates(p, in, ifaces)
+	if in.ACMEProxy != nil {
+		v.acmeProxy(p, in, ifaces)
+	}
 
 	v.logChains(p+": log drops", in.LogDrops)
 	v.logChains(p+": log invalid", in.LogInvalid)

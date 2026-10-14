@@ -244,6 +244,19 @@ func TestValidateCatchesProblems(t *testing.T) {
 		}, "TSIG secret must be base64"},
 		{"cert http-01 with client", func(d *Document) { d.Instances[0].Certificates[0].DNS01 = &DNS01{Zone: "example.net"} }, "HTTP-01 has no DNS update client"},
 		{"cert email", func(d *Document) { d.Instances[0].Certificates[0].Email = "a b@example.com" }, "invalid email"},
+		{"proxy port", func(d *Document) { acmeProxy(d).Port = 0 }, "acme proxy: port must be 1-65535"},
+		{"proxy interface", func(d *Document) { acmeProxy(d).Interfaces = []string{"eth9"} }, `acme proxy: unknown interface "eth9"`},
+		{"proxy no interface", func(d *Document) { acmeProxy(d).Interfaces = nil }, "acme proxy: needs an interface"},
+		{"proxy certificate", func(d *Document) { acmeProxy(d).Certificate = "nope" }, `acme proxy: unknown certificate "nope"`},
+		{"proxy ca", func(d *Document) { acmeProxy(d).CA = "http://ca" }, "https URL"},
+		{"proxy no policy", func(d *Document) { acmeProxy(d).Policies = nil }, "acme proxy: needs a policy"},
+		{"proxy domain", func(d *Document) { acmeProxy(d).Policies[0].Domains = []string{"Bad"} }, `policy "lan": "Bad" is not a DNS name`},
+		{"proxy source", func(d *Document) { acmeProxy(d).Policies[0].Sources = []string{"lan"} }, `invalid source prefix "lan"`},
+		{"proxy zone", func(d *Document) { acmeProxy(d).Policies[0].DNS01.Zone = "" }, `dns update "ns": invalid zone`},
+		{"proxy duplicate policy", func(d *Document) {
+			x := acmeProxy(d)
+			x.Policies = append(x.Policies, x.Policies[0])
+		}, `policy "lan": duplicate`},
 		{"cert duplicate", func(d *Document) {
 			d.Instances[0].Certificates = append(d.Instances[0].Certificates, d.Instances[0].Certificates[0])
 		}, `certificate "www": duplicate`},
@@ -533,5 +546,23 @@ func TestCertificateDNS01(t *testing.T) {
 	c.DNS01 = &DNS01{Client: "ns", Server: "192.0.2.53", Zone: "acme.example.net", TSIG: &TSIG{Name: "acme-key", Algorithm: "hmac-sha256", Secret: "c2VjcmV0"}}
 	if err := d.Validate(); err != nil {
 		t.Fatalf("DNS-01 with RFC 2136: %v", err)
+	}
+}
+
+// acmeProxy gives the test document's first instance an ACME proxy and
+// returns it.
+func acmeProxy(d *Document) *ACMEProxy {
+	in := &d.Instances[0]
+	in.ACMEProxy = &ACMEProxy{Port: 8555, Interfaces: []string{in.Interfaces[0].Name}, CA: "letsencrypt", Certificate: in.Certificates[0].Name,
+		Policies: []ACMEProxyPolicy{{Name: "lan", Domains: []string{"*.lan.example.com", "lan.example.com"}, Sources: []string{"192.168.1.0/24"},
+			DNS01: DNS01{Client: "ns", Server: "192.0.2.53", Zone: "example.com"}}}}
+	return in.ACMEProxy
+}
+
+func TestACMEProxyValid(t *testing.T) {
+	d := SampleDocument()
+	acmeProxy(&d)
+	if err := d.Validate(); err != nil {
+		t.Fatal(err)
 	}
 }

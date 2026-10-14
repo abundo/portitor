@@ -79,6 +79,7 @@ const sections = computed(() => [
     label: 'Services',
     value: 'services',
     children: [
+      { label: 'ACME proxy', icon: 'i-lucide-shield-plus', to: '/acme-proxy' },
       { label: 'Certificates', icon: 'i-lucide-badge-check', to: '/certificates' },
       { label: 'DHCP', icon: 'i-lucide-list-ordered', to: '/dhcp' },
       { label: 'DNS', icon: 'i-lucide-globe', to: '/dns' },

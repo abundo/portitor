@@ -649,6 +649,15 @@ func AutoInputRules(in *fwconfig.Instance) []AutoRule {
 		sort.Strings(acme)
 		out = append(out, AutoRule{Service: ACMEHTTPService, InInterfaces: acme, Protocol: "tcp", DstPort: 80, PortSet: ACMEHTTPSet})
 	}
+	// The ACME proxy's clients, from the policies' sources.
+	if x := in.ACMEProxy; x != nil && len(x.Interfaces) > 0 {
+		ifs := slices.Sorted(slices.Values(x.Interfaces))
+		r := AutoRule{Service: fwconfig.ACMEProxyService, InInterfaces: ifs, Protocol: "tcp", DstPort: x.Port}
+		if src := x.Clients(); len(src) > 0 {
+			r.Source, r.SourceSet = src, fwconfig.ACMEProxySet
+		}
+		out = append(out, r)
+	}
 	for _, ifc := range in.Interfaces {
 		if ifc.Enabled && ifc.Kind == fwconfig.KindWireGuard && ifc.WireGuard != nil && ifc.WireGuard.ListenPort > 0 {
 			out = append(out, AutoRule{Service: "wireguard " + ifc.Name, Protocol: "udp", DstPort: ifc.WireGuard.ListenPort})

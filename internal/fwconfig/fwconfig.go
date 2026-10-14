@@ -67,6 +67,9 @@ type Instance struct {
 	// Certificates are TLS certificates the agent gets and renews by
 	// ACME (Let's Encrypt).
 	Certificates []Certificate `json:"certificates,omitempty"`
+	// ACMEProxy, when set, is an ACME server for the hosts behind the
+	// firewall, which gets their certificates upstream by DNS-01.
+	ACMEProxy *ACMEProxy `json:"acme_proxy,omitempty"`
 	// BGP runs FRR in the instance; nil when it is off.
 	BGP *BGP `json:"bgp,omitempty"`
 	// OSPF (OSPFv2, IPv4) and OSPF6 (OSPFv3, IPv6) run FRR's ospfd and

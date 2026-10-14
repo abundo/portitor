@@ -83,9 +83,11 @@ type Status struct {
 	TunnelBroker []TunnelBrokerStatus `json:"tunnel_broker"`
 	// Certificates are the ACME certificates.
 	Certificates []CertificateStatus `json:"certificates"`
-	IPLists      []IPListStatus      `json:"ip_lists"`
-	Tasks        []TaskStatus        `json:"tasks"`
-	Programs     []ProgramStatus     `json:"programs"`
+	// ACMEProxy are the instances' ACME proxies.
+	ACMEProxy []ACMEProxyStatus `json:"acme_proxy"`
+	IPLists   []IPListStatus    `json:"ip_lists"`
+	Tasks     []TaskStatus      `json:"tasks"`
+	Programs  []ProgramStatus   `json:"programs"`
 	// NICs are the physical interfaces on the firewall, wherever they are.
 	NICs []NICStatus `json:"nics"`
 	// AntiLockout is the input rule the agent adds in the default
@@ -275,6 +277,33 @@ type CertificateStatus struct {
 	// LastAttempt is the last order; NextAttempt the next check or retry.
 	LastAttempt *time.Time `json:"last_attempt,omitempty"`
 	NextAttempt *time.Time `json:"next_attempt,omitempty"`
+}
+
+// ACMEProxyStatus is the state of an instance's ACME proxy.
+type ACMEProxyStatus struct {
+	Instance string `json:"instance"`
+	// Port is the HTTPS port; the ACME directory is
+	// https://<address>:<port>/directory.
+	Port int `json:"port"`
+	// State: running, error, dry-run.
+	State     string `json:"state"`
+	LastError string `json:"last_error,omitempty"`
+	// SelfSigned is the PEM certificate the server presents when no
+	// certificate is chosen, for the clients to trust.
+	SelfSigned string `json:"self_signed,omitempty"`
+	// Issued are the latest certificates asked for, newest first.
+	Issued []ACMEProxyIssue `json:"issued"`
+}
+
+// ACMEProxyIssue is a certificate the proxy got for a client, or failed
+// to.
+type ACMEProxyIssue struct {
+	Time     time.Time  `json:"time"`
+	Client   string     `json:"client"`
+	Names    []string   `json:"names"`
+	NotAfter *time.Time `json:"not_after,omitempty"`
+	Issuer   string     `json:"issuer,omitempty"`
+	Error    string     `json:"error,omitempty"`
 }
 
 // IPListStatus is the state of an IP list's download.

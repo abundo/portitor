@@ -893,6 +893,30 @@ func TestACMEHTTPRule(t *testing.T) {
 	}
 }
 
+func TestACMEProxyRule(t *testing.T) {
+	doc := fwconfig.SampleDocument()
+	in := &doc.Instances[0]
+	in.ACMEProxy = &fwconfig.ACMEProxy{Port: 8555, Interfaces: []string{"eth1"}, Policies: []fwconfig.ACMEProxyPolicy{
+		{Name: "lan", Sources: []string{"192.168.1.0/24", "fd00::/64"}},
+	}}
+	nft := Nftables(in, nil, Paths{})
+	for _, want := range []string{
+		"set AUTO_acme_proxy_clients_v4",
+		`ip saddr @AUTO_acme_proxy_clients_v4 iifname "eth1" tcp dport 8555 accept comment "auto: acme proxy"`,
+		`ip6 saddr @AUTO_acme_proxy_clients_v6 iifname "eth1" tcp dport 8555 accept comment "auto: acme proxy"`,
+	} {
+		if !strings.Contains(nft, want) {
+			t.Errorf("no %q in\n%s", want, nft)
+		}
+	}
+	// A policy without sources lets any client in.
+	in.ACMEProxy.Policies = append(in.ACMEProxy.Policies, fwconfig.ACMEProxyPolicy{Name: "any"})
+	nft = Nftables(in, nil, Paths{})
+	if want := `iifname "eth1" tcp dport 8555 accept comment "auto: acme proxy"`; !strings.Contains(nft, want) || strings.Contains(nft, "acme_proxy_clients") {
+		t.Errorf("want %q without the set in\n%s", want, nft)
+	}
+}
+
 // The default instance's files are in the distribution's places, with
 // Kea's and named's standard names; a virtual firewall's are its own.
 func TestDefaultInstanceLayout(t *testing.T) {

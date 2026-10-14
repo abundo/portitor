@@ -242,6 +242,17 @@ func eachObjectRef(tx *gorm.DB, visit func(where string, entry *string) bool) er
 			}
 		}
 	}
+	var policies []models.AcmeProxyPolicy
+	if err := tx.Order("name").Find(&policies).Error; err != nil {
+		return err
+	}
+	for _, p := range policies {
+		if list(fmt.Sprintf("ACME proxy policy %s in %s", p.Name, instName[p.InstanceID]), p.Sources) {
+			if err := save(&models.AcmeProxyPolicy{}, p.ID, map[string]any{"sources": p.Sources}); err != nil {
+				return err
+			}
+		}
+	}
 	var rules []models.Rule
 	if err := tx.Order("position, id").Find(&rules).Error; err != nil {
 		return err

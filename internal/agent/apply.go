@@ -136,6 +136,7 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 	var ddnsWant []dyndnsItem
 	var tbWant []tunnelBrokerItem
 	var certsWant []certItem
+	var proxiesWant []acmeProxyItem
 	var lldpWant []lldpKey
 	pktsWant := map[string]string{}
 	dnsqWant := map[string]queryLogItem{}
@@ -340,6 +341,15 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 		for _, c := range in.Certificates {
 			certsWant = append(certsWant, certItem{instance: in.Name, netns: ns, cfg: c})
 		}
+		if x := in.ACMEProxy; x != nil {
+			it := acmeProxyItem{instance: in.Name, netns: ns, cfg: *x}
+			for _, ifc := range in.Interfaces {
+				if slices.Contains(x.Interfaces, ifc.Name) {
+					it.addrs = append(it.addrs, ifc.Addresses...)
+				}
+			}
+			proxiesWant = append(proxiesWant, it)
+		}
 		if logsPackets(in) {
 			pktsWant[in.Name] = ns
 		}
@@ -387,6 +397,7 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 	a.ddns.Reconcile(ddnsWant)
 	a.tbroker.Reconcile(tbWant)
 	a.certs.Reconcile(ctx, certsWant)
+	a.proxies.Reconcile(proxiesWant)
 	a.pkts.Reconcile(pktsWant)
 	a.dnsq.Reconcile(dnsqWant)
 	a.lldp.Reconcile(lldpWant)

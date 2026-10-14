@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -28,9 +29,12 @@ import (
 	"sync"
 	"time"
 
+	legoacme "github.com/go-acme/lego/v4/acme"
+	"github.com/go-acme/lego/v4/acme/api"
 	"github.com/go-acme/lego/v4/certcrypto"
 	"github.com/go-acme/lego/v4/certificate"
 	"github.com/go-acme/lego/v4/challenge"
+	legoresolver "github.com/go-acme/lego/v4/challenge/resolver"
 	"github.com/go-acme/lego/v4/lego"
 	legolog "github.com/go-acme/lego/v4/log"
 	"github.com/go-acme/lego/v4/registration"
@@ -60,6 +64,8 @@ type Request struct {
 	// HTTP01 or DNS01 answers the challenge; DNS01 when both are set.
 	HTTP01 challenge.Provider
 	DNS01  challenge.Provider
+	// HTTPClient talks to the CA; nil is lego's default (tests set it).
+	HTTPClient *http.Client
 }
 
 // Result is a certificate and its key, PEM encoded. Certificate holds the
@@ -73,42 +79,9 @@ type Result struct {
 // a certificate. It blocks until the order is done or fails; lego's
 // requests have timeouts of their own.
 func Obtain(accountsDir string, req Request) (*Result, error) {
-	logOnce.Do(func() {
-		legolog.Logger = slog.NewLogLogger(slog.Default().Handler(), slog.LevelInfo)
-	})
-	keyType, ok := KeyTypes[req.KeyType]
-	if !ok {
-		return nil, fmt.Errorf("unknown key type %q", req.KeyType)
-	}
-	user, err := loadAccount(accountsDir, req.Directory, req.Email)
+	client, _, err := newClient(accountsDir, req)
 	if err != nil {
 		return nil, err
-	}
-	cfg := lego.NewConfig(user)
-	cfg.CADirURL = req.Directory
-	cfg.UserAgent = "portitor/" + buildinfo.Version
-	cfg.Certificate.KeyType = keyType
-	client, err := lego.NewClient(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("ACME directory %s: %w", req.Directory, err)
-	}
-	if req.DNS01 != nil {
-		err = client.Challenge.SetDNS01Provider(req.DNS01)
-	} else {
-		err = client.Challenge.SetHTTP01Provider(req.HTTP01)
-	}
-	if err != nil {
-		return nil, err
-	}
-	if user.Registration == nil {
-		reg, err := client.Registration.Register(registration.RegisterOptions{TermsOfServiceAgreed: true})
-		if err != nil {
-			return nil, fmt.Errorf("ACME account: %w", err)
-		}
-		user.Registration = reg
-		if err := user.save(); err != nil {
-			return nil, err
-		}
 	}
 	// lego makes the first domain the CN.
 	domains := slices.Clone(req.Domains)
@@ -120,6 +93,100 @@ func Obtain(accountsDir string, req Request) (*Result, error) {
 		return nil, err
 	}
 	return &Result{Certificate: res.Certificate, PrivateKey: res.PrivateKey}, nil
+}
+
+// ObtainForCSR gets a certificate for someone else's key: the CSR's names
+// (req.Domains and KeyType are not used). It returns the PEM chain, leaf
+// first.
+func ObtainForCSR(accountsDir string, req Request, csr *x509.CertificateRequest) ([]byte, error) {
+	req.KeyType = "ec256"
+	client, _, err := newClient(accountsDir, req)
+	if err != nil {
+		return nil, err
+	}
+	res, err := client.Certificate.ObtainForCSR(certificate.ObtainForCSRRequest{CSR: csr, Bundle: true})
+	if err != nil {
+		return nil, err
+	}
+	return res.Certificate, nil
+}
+
+// Authorize solves the challenges of req.Domains at the CA without
+// ordering a certificate: an order that is never finalized. The CA keeps
+// a valid authorization for a while (Let's Encrypt: hours to days) and
+// reuses it for the account's next order of the name, which then needs no
+// challenge and is done in seconds.
+func Authorize(accountsDir string, req Request) error {
+	req.KeyType = "ec256"
+	client, user, err := newClient(accountsDir, req)
+	if err != nil {
+		return err
+	}
+	core, err := api.New(&http.Client{Timeout: 30 * time.Second}, userAgent(), req.Directory, user.Registration.URI, user.key)
+	if err != nil {
+		return err
+	}
+	order, err := core.Orders.New(req.Domains)
+	if err != nil {
+		return err
+	}
+	var authzs []legoacme.Authorization
+	for _, u := range order.Authorizations {
+		a, err := core.Authorizations.Get(u)
+		if err != nil {
+			return err
+		}
+		authzs = append(authzs, a)
+	}
+	return legoresolver.NewProber(client.Challenge).Solve(authzs)
+}
+
+func userAgent() string { return "portitor/" + buildinfo.Version }
+
+// newClient makes a lego client for req's CA and challenge, with the
+// account of the directory and email, registered on first use.
+func newClient(accountsDir string, req Request) (*lego.Client, *account, error) {
+	logOnce.Do(func() {
+		legolog.Logger = slog.NewLogLogger(slog.Default().Handler(), slog.LevelInfo)
+	})
+	keyType, ok := KeyTypes[req.KeyType]
+	if !ok {
+		return nil, nil, fmt.Errorf("unknown key type %q", req.KeyType)
+	}
+	user, err := loadAccount(accountsDir, req.Directory, req.Email)
+	if err != nil {
+		return nil, nil, err
+	}
+	cfg := lego.NewConfig(user)
+	cfg.CADirURL = req.Directory
+	cfg.UserAgent = userAgent()
+	cfg.Certificate.KeyType = keyType
+	if req.HTTPClient != nil {
+		cfg.HTTPClient = req.HTTPClient
+	}
+	client, err := lego.NewClient(cfg)
+	if err != nil {
+		return nil, nil, fmt.Errorf("ACME directory %s: %w", req.Directory, err)
+	}
+	if req.DNS01 != nil {
+		err = client.Challenge.SetDNS01Provider(req.DNS01)
+	} else {
+		err = client.Challenge.SetHTTP01Provider(req.HTTP01)
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	if user.Registration == nil {
+		reg, err := client.Registration.Register(registration.RegisterOptions{TermsOfServiceAgreed: true})
+		if err != nil {
+			return nil, nil, fmt.Errorf("ACME account: %w", err)
+		}
+		user.Registration = reg
+		if err := user.save(); err != nil {
+			return nil, nil, err
+		}
+	}
+	return client, user, nil
 }
 
 // account is a lego registration.User, stored as JSON with its key.

@@ -34,6 +34,7 @@ type Agent struct {
 	// tbroker updates the 6in4 tunnels' endpoints at the tunnel broker.
 	tbroker *tunnelBrokerManager
 	certs   *certManager
+	proxies *acmeProxyManager
 	pkts    *packetLog
 	dnsq    *queryLog
 	lldp    *lldpManager
@@ -94,6 +95,7 @@ func New(cfg *Config) *Agent {
 		a.bg = &ExecRunner{}
 	}
 	a.certs = newCertManager(cfg.DryRun, cfg.Paths, a.bg)
+	a.proxies = newACMEProxyManager(cfg.DryRun, cfg.Paths, a.certs)
 	a.tbroker = newTunnelBrokerManager(cfg.DryRun, a.bg)
 	return a
 }
@@ -171,6 +173,7 @@ func (a *Agent) Stop() {
 	a.lists.Stop()
 	a.ddns.Stop()
 	a.tbroker.Stop()
+	a.proxies.Stop()
 	a.certs.Stop()
 	a.pkts.Stop()
 	a.dnsq.Stop()

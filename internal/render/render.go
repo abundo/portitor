@@ -223,6 +223,12 @@ func (p Paths) CertificateDir(instance, name string) string {
 	return filepath.Join(p.StateDir, "certificates", instance, name)
 }
 
+// ACMEProxyDir holds an instance's ACME proxy's state: its clients'
+// accounts, its self-signed certificate and its issue log.
+func (p Paths) ACMEProxyDir(instance string) string {
+	return filepath.Join(p.StateDir, "acmeproxy", instance)
+}
+
 // ACMEAccountsDir holds the ACME accounts, one per CA and email.
 func (p Paths) ACMEAccountsDir() string {
 	return filepath.Join(p.StateDir, "acme")

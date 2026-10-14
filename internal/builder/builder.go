@@ -63,6 +63,7 @@ type data struct {
 	bfdIfaces      []models.BfdInterface
 	vrfs           []models.Vrf
 	snmpUsers      []models.SnmpUser
+	proxyPolicies  []models.AcmeProxyPolicy
 }
 
 func load(db *gorm.DB) (*data, error) {
@@ -110,6 +111,7 @@ func load(db *gorm.DB) (*data, error) {
 		{&d.bfdIfaces, "interface"},
 		{&d.vrfs, "name"},
 		{&d.snmpUsers, "name"},
+		{&d.proxyPolicies, "name"},
 	} {
 		if err := db.Order(q.order).Find(q.dst).Error; err != nil {
 			return nil, err
@@ -760,6 +762,9 @@ func build(db *gorm.DB, generation int64, only map[string]bool) (*fwconfig.Docum
 			}
 			in.Certificates = append(in.Certificates, Certificate(&c, ifc.Name))
 		}
+		if mi.AcmeProxyEnabled {
+			in.ACMEProxy = d.acmeProxy(&mi, &in, func(where string, l []string) []string { return expand(where, objs.Prefixes, l) }, addf)
+		}
 
 		// The main table's routing, then each VRF's.
 		in.BGP = d.bgp(mi.ID, nil)
@@ -1056,6 +1061,44 @@ func Certificate(c *models.Certificate, iface string) fwconfig.Certificate {
 		Name: c.Name, Domains: slices.Clone([]string(c.Domains)), CommonName: c.CommonName, Email: c.Email,
 		CA: c.Ca, KeyType: c.KeyType, Challenge: c.Challenge, Interface: iface,
 	}
+}
+
+// acmeProxy is an instance's ACME proxy, with its enabled policies (names
+// expanded, DNS update clients copied in).
+func (d *data) acmeProxy(mi *models.Instance, in *fwconfig.Instance, prefixes func(where string, list []string) []string, addf func(string, ...any)) *fwconfig.ACMEProxy {
+	x := &fwconfig.ACMEProxy{Port: mi.AcmeProxyPort, CA: mi.AcmeProxyCa, Email: mi.AcmeProxyEmail, Interfaces: []string{}, Policies: []fwconfig.ACMEProxyPolicy{}}
+	for _, ifc := range in.Interfaces {
+		if mif, ok := ifaceByName(d.interfaces, mi.ID, ifc.Name); ok && mif.AcmeProxyServe {
+			x.Interfaces = append(x.Interfaces, ifc.Name)
+		}
+	}
+	if id := mi.AcmeProxyCertificateID; id != nil {
+		i := slices.IndexFunc(d.certs, func(c models.Certificate) bool { return c.ID == *id && c.InstanceID == mi.ID })
+		switch {
+		case i < 0:
+			addf("instance %s: ACME proxy: its certificate is not in this instance", mi.Name)
+		case !d.certs[i].Enabled:
+			addf("instance %s: ACME proxy: its certificate %s is disabled", mi.Name, d.certs[i].Name)
+		default:
+			x.Certificate = d.certs[i].Name
+		}
+	}
+	for _, p := range d.proxyPolicies {
+		if p.InstanceID != mi.ID || !p.Enabled {
+			continue
+		}
+		i := slices.IndexFunc(d.dyndns, func(dc models.DyndnsClient) bool { return dc.ID == p.DyndnsClientID && dc.InstanceID == mi.ID })
+		if i < 0 {
+			addf("instance %s: ACME proxy policy %s: its DNS update client is not in this instance", mi.Name, p.Name)
+			continue
+		}
+		x.Policies = append(x.Policies, fwconfig.ACMEProxyPolicy{
+			Name: p.Name, Domains: slices.Clone([]string(p.Domains)),
+			Sources: prefixes("instance "+mi.Name+": ACME proxy policy "+p.Name, p.Sources),
+			DNS01:   *DNS01(&d.dyndns[i]),
+		})
+	}
+	return x
 }
 
 // DynDNS is a DNS update client with its records as the document holds

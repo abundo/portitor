@@ -38,6 +38,8 @@ export const bfdInterfaces = crud('/bfd/interfaces')
 // VRFs of an instance (Routing → VRF).
 export const vrfs = crud('/vrfs')
 export const snmpUsers = crud('/snmp/users')
+// The ACME proxy's policies (Services → ACME proxy).
+export const acmeProxyPolicies = crud('/acme-proxy/policies')
 export const rules = crud('/rules')
 export const nat = crud('/nat')
 export const ipamPrefixes = crud('/ipam/prefixes')

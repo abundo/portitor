@@ -339,6 +339,60 @@ to. The agent hands out the key to anyone with its token, which portitor-web alr
 The service unit lets the `portitor` user listen on port 443
 (`CAP_NET_BIND_SERVICE`).
 
+## ACME proxy
+
+*Services → ACME proxy* is an ACME server for the hosts behind the firewall. A host
+runs its usual ACME client (certbot, Caddy, Traefik, lego, acme.sh) with the proxy's
+directory URL instead of Let's Encrypt's. The client proves control of a name over
+the internal network with HTTP-01, and the firewall gets the certificate from Let's
+Encrypt with DNS-01, through a DNS update client. Only the firewall holds the DNS
+credentials, and the hosts need not be reachable from the Internet.
+
+1. Make a DNS update client (*Services → DNS update*) whose zone holds the names'
+   `_acme-challenge` records, or their CNAME targets, as for a
+   [DNS-01 certificate](#dns-01).
+2. Add a policy: the names (`nas.lan.example.com`, or `*.lan.example.com` for any
+   name below it), the clients (prefixes, or hosts and prefixes by name; empty is
+   any), and the DNS update client.
+3. Turn the proxy on, pick the interfaces it answers on, and commit. Its status
+   shows the directory URLs, such as `https://192.168.1.1:8555/directory`.
+
+When a client orders a name:
+
+- The name must be allowed from the client's address by a policy (tried in name
+  order; the first that matches is used). Otherwise the order is refused.
+- The firewall resolves the name in the virtual firewall (its own DNS, if the
+  firewall serves it), and every address must be in that policy's clients. It then
+  fetches `http://<name>/.well-known/acme-challenge/<token>` from the virtual
+  firewall. It does not follow redirects, so the client must answer on port 80
+  itself, as certbot's standalone and webroot modes, Caddy and Traefik do.
+- As soon as the order is accepted, the firewall has Let's Encrypt check the names
+  with DNS-01, while the client answers its own challenge. When the client then
+  sends its CSR, Let's Encrypt reuses those checks, so the certificate comes back
+  within seconds. This matters because some clients, such as Traefik and lego, wait
+  only 30 seconds for it.
+- The certificate is for the client's own key: the firewall never sees it. The
+  client renews as usual. Let's Encrypt's rate limits apply to the names as always.
+
+Wildcard certificates can't be ordered through the proxy, since HTTP-01 can't check
+them; get those as a [DNS-01 certificate](#dns-01) on the firewall.
+
+The proxy listens with HTTPS. Its certificate is either one of the virtual
+firewall's certificates (from *Certificates*), which clients trust as they are, or a
+self-signed one the firewall makes, for the serving interfaces' addresses. That one
+must be downloaded from the status and given to the clients:
+
+```sh
+REQUESTS_CA_BUNDLE=/etc/ssl/acme-proxy.pem certbot certonly --standalone \
+  --server https://192.168.1.1:8555/directory -d nas.lan.example.com
+LEGO_CA_CERTIFICATES=/etc/ssl/acme-proxy.pem lego --server https://192.168.1.1:8555/directory ...
+```
+
+Traefik takes `LEGO_CA_CERTIFICATES` too, and Caddy takes `acme_ca_root`. The
+*Issued* list shows the latest certificates, with the client, names and the error of
+a failed order. The clients' ACME accounts are kept by the firewall; orders in
+progress are lost when the agent restarts, and the client orders again.
+
 ## Backup and restore
 
 *Settings → General → Backup* downloads the whole configuration database, encrypted with

@@ -26,6 +26,9 @@ office networks. It manages:
 - certificates: Let's Encrypt (ACME) certificates, renewed automatically: HTTP-01, with port 80
   open only while a challenge is answered, or DNS-01 through a DNS update client (internal
   names and wildcards; `_acme-challenge` CNAMEs followed); or a certificate imported with its key
+- ACME proxy: an ACME server for internal hosts (certbot, Caddy, Traefik), which prove
+  their names with HTTP-01 inside the network while the firewall gets their certificates
+  by DNS-01, by policy (names and client prefixes); the DNS credentials stay on the firewall
 - IP lists: CrowdSec decisions or downloaded blocklists, used as `@name` in rules
 - BGP (FRR, off by default): neighbours and peer groups, networks, aggregates and
   redistribution, filtered with prefix lists, AS path and community lists and route maps
@@ -65,7 +68,8 @@ firewall, the agent, makes the changes the GUI asks for. For a single box, an
                   ├─ WireGuard      wg syncconf
                   ├─ DHCP clients   in-process DHCPv4 and DHCPv6 (prefix delegation), for the WAN
                   ├─ DNS update     in-process RFC 2136 updates (ifnsupdate), provider APIs (libdns)
-                  ├─ ACME           Let's Encrypt certificates (lego), HTTP-01 in the virtual firewall, DNS-01
+                  ├─ ACME           Let's Encrypt certificates (lego), HTTP-01 in the virtual firewall, DNS-01;
+                  │                 the ACME proxy for internal hosts (an RFC 8555 server)
                   ├─ IP lists       downloads (CrowdSec LAPI, plain text) into nftables sets
                   ├─ scheduler      cron-style tasks
                   ├─ diagnostics    packet log (NFLOG), DNS query log, conntrack, capture, mtr, LLDP

@@ -288,6 +288,7 @@ func filterStatus(st *agentapi.Status, names map[string]bool) {
 	st.DynDNS = slices.DeleteFunc(st.DynDNS, func(d agentapi.DynDNSStatus) bool { return !names[d.Instance] })
 	st.TunnelBroker = slices.DeleteFunc(st.TunnelBroker, func(t agentapi.TunnelBrokerStatus) bool { return !names[t.Instance] })
 	st.Certificates = slices.DeleteFunc(st.Certificates, func(c agentapi.CertificateStatus) bool { return !names[c.Instance] })
+	st.ACMEProxy = slices.DeleteFunc(st.ACMEProxy, func(p agentapi.ACMEProxyStatus) bool { return !names[p.Instance] })
 	st.NICs = []agentapi.NICStatus{}
 	st.AntiLockout = nil
 	st.LastError = ""

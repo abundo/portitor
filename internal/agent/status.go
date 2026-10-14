@@ -31,6 +31,7 @@ func (a *Agent) Status(ctx context.Context) *Status {
 		DynDNS:       a.ddns.Status(),
 		TunnelBroker: a.tbroker.Status(),
 		Certificates: a.certs.Status(),
+		ACMEProxy:    a.proxies.Status(),
 		IPLists:      a.lists.Status(),
 		Tasks:        a.tasks.Status(),
 		Instances:    []InstanceStatus{},

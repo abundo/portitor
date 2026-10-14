@@ -55,6 +55,7 @@ const router = createRouter({
         { path: 'wireguard', component: () => import('@/views/WireguardPage.vue') },
         { path: 'dns-update', redirect: '/dns' },
         { path: 'certificates', component: () => import('@/views/CertificatesPage.vue') },
+        { path: 'acme-proxy', component: () => import('@/views/AcmeProxyPage.vue') },
         { path: 'scheduled-tasks', component: () => import('@/views/TasksPage.vue') },
         { path: 'deploy', component: () => import('@/views/DeployPage.vue') },
         {

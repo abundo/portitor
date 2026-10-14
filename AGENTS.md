@@ -18,6 +18,7 @@ are in [README.md](README.md).
 | `internal/agent` | Agent: apply/reconcile, commit-confirm, DHCP and DHCPv6 (prefix delegation) clients (woken when their interface gets a carrier, `linkwatch.go`), IP lists, task scheduler, packet log (NFLOG), DNS query log (BIND logs to the journal, followed with `journalctl`, filtered by the agent, `querylog.go`), WireGuard endpoint re-resolving, packet capture (tcpdump, streamed rate-limited), traceroute (`mtr --raw`, streamed as JSON lines, `trace.go`), service logs (`journalctl --follow` of a status service unit, streamed as text, `servicelog.go`), LLDP (sent and heard on raw sockets, `lldp.go`), neighbours (ARP/ND, LLDP), NAT64 (a Jool instance per namespace, `nat64.go`), traffic shaping (CAKE, IFB devices for receiving, HTB classes for the rate limits that shape (`fwconfig.Instance.Shapers`) by packet mark `render.ShaperMark`; planned from `tc -j` output, `shaping.go`), BGP, OSPF, IS-IS, VRRP and BFD state (FRR's JSON through `vtysh`, `bgp.go`, `ospf.go`, `isis.go`, `vrrp.go`, `bfd.go`), VRRP's macvlan devices (`vrrp.go`), 6in4 tunnels' endpoint updates at Hurricane Electric's tunnel broker (from the instance netns, on address changes, `tunnelbroker.go`), VXLANs' learning, EVPN bridge port flags and static flood lists (`vxlan.go`), the VRFs' source rules and sysctls for the firewall's services (`vrf.go`), status, API server |
 | `internal/dyndns` | DNS update client ("DNS update" in the GUI): RFC 2136 (from ifnsupdate), sent from the instance netns, or a DNS hosting provider's API through libdns (`providers.go`, matching `fwconfig.DNSProviders`), called from the host |
 | `internal/acme` | ACME certificates through lego: accounts, orders, the stored chain and key (`<state_dir>/certificates/`); the agent's `acme.go` schedules them and answers HTTP-01 in the instance netns, opening port 80 by the `acme_http` set (`render.ACMEHTTPSet`), or DNS-01 (`dns01.go`: the TXT record at `_acme-challenge.<domain>` after its CNAMEs, lego's `EffectiveFQDN`) through a DNS update client's provider (`dyndns.TXTUpdater`, copied into the certificate as `fwconfig.DNS01` by the builder) |
+| `internal/acmeserver` | ACME server (RFC 8555 subset: accounts, orders, HTTP-01, finalize), with the policy, validation and issuing left to `Hooks`; used by the agent's ACME proxy (`acmeproxy.go`) |
 | `internal/nftimport` | nftables file (`nft -j list ruleset`, read by the agent's `POST /v1/nftables/parse` in a new network namespace, `nftparse.go`) → rules, NAT rules, hosts/prefixes, services, and what it leaves out, with jumped-to chains inlined in groups; written by `web/nftimport.go` through the CRUD's `prepare*` checks, a preview being the same transaction rolled back |
 | `internal/iplist` | Downloads IP lists (CrowdSec LAPI decisions, plain-text lists) |
 | `internal/wgkeys` | WireGuard key generation (wg(8) base64) |
@@ -282,6 +283,20 @@ the certificate portitor-web serves, chosen under Settings
   Jool's instance again when the NAT64 (prefix, pool, interfaces) differs from
   `<state>/nat64.json` or it isn't running (`planNAT64`), and keeps the devices,
   rules and tables (`planNAT64Devices`, `planNAT64Rules`).
+- **ACME proxy** (`fwconfig/acmeproxy.go`, `internal/acmeserver`,
+  `internal/agent/acmeproxy.go`, `web/acmeproxy.go`): per instance
+  (`instances.acme_proxy_*`, `interfaces.acme_proxy_serve`, `acme_proxy_policies`),
+  an HTTPS ACME server in the instance netns on `Port` (auto input rule "acme proxy",
+  from the policies' sources, `ACMEProxy.Clients`). A name is allowed by the first
+  policy (by name) that matches it and the client's address (`ACMEProxy.Policy`);
+  the agent checks HTTP-01 from the instance (every address the name resolves to
+  must be in the policy's sources) and orders upstream for the client's CSR with
+  DNS-01 through the policy's DNS update client (`DNS01`, copied in by the builder,
+  redacted in history). A new order starts the upstream authorization at once
+  (`acme.Authorize`) so finalize (`acme.ObtainForCSR`) reuses it: lego clients wait
+  only 30 s. Upstream calls share `certManager.order`. The clients' accounts, the
+  self-signed certificate and the issue log are in `<state_dir>/acmeproxy/<instance>`;
+  orders only in memory.
 - **NTP** (`fwconfig/ntp.go`, `render/chrony.go`): chrony per instance
   (`instances.ntp_*`), its servers JSON. The default instance's chrony.service sets
   the host's clock; a virtual firewall's `portitor-chrony@` runs `chronyd -x` (the

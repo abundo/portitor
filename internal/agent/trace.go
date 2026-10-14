@@ -14,6 +14,7 @@ import (
 	"net/netip"
 	"os/exec"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -188,6 +189,21 @@ func resolveTarget(ctx context.Context, netns string, req *agentapi.TraceRequest
 // instance's namespace so the name means what it means to the instance.
 // The caller checks name against dnsName.
 func resolveName(ctx context.Context, netns, name, family string) (netip.Addr, error) {
+	addrs, err := resolveAddrs(ctx, netns, name, family)
+	if err != nil {
+		return netip.Addr{}, err
+	}
+	if family == "" {
+		if i := slices.IndexFunc(addrs, netip.Addr.Is4); i >= 0 {
+			return addrs[i], nil
+		}
+	}
+	return addrs[0], nil
+}
+
+// resolveAddrs returns all of name's addresses of family, as resolveName
+// resolves them, in getent's order.
+func resolveAddrs(ctx context.Context, netns, name, family string) ([]netip.Addr, error) {
 	db := "ahosts"
 	switch family {
 	case "ipv4":
@@ -199,7 +215,7 @@ func resolveName(ctx context.Context, netns, name, family string) (netip.Addr, e
 	defer cancel()
 	argv := inNetns(netns, []string{"getent", db, "--", name})
 	out, runErr := exec.CommandContext(ctx, argv[0], argv[1:]...).Output()
-	var first netip.Addr
+	var addrs []netip.Addr
 	for _, line := range strings.Split(string(out), "\n") {
 		f := strings.Fields(line)
 		if len(f) == 0 {
@@ -209,19 +225,14 @@ func resolveName(ctx context.Context, netns, name, family string) (netip.Addr, e
 		if err != nil {
 			continue
 		}
-		a = a.Unmap()
-		if family == "" && a.Is4() {
-			first = a
-			break
-		}
-		if !first.IsValid() {
-			first = a
+		if a = a.Unmap(); !slices.Contains(addrs, a) {
+			addrs = append(addrs, a)
 		}
 	}
-	if !first.IsValid() {
-		return netip.Addr{}, fmt.Errorf("cannot resolve %s: %s", name, getentReason(ctx, runErr))
+	if len(addrs) == 0 {
+		return nil, fmt.Errorf("cannot resolve %s: %s", name, getentReason(ctx, runErr))
 	}
-	return first, nil
+	return addrs, nil
 }
 
 // getentReason says why getent found no address. getent(1) exits 2 when

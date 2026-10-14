@@ -363,6 +363,16 @@ type Instance struct {
 	NewSnmpCommunity   string `gorm:"-" json:"new_snmp_community,omitempty"`
 	ClearSnmpCommunity bool   `gorm:"-" json:"clear_snmp_community,omitempty"`
 	HasSnmpCommunity   bool   `gorm:"-" json:"has_snmp_community"`
+	// AcmeProxyEnabled runs an ACME server for the hosts behind the
+	// firewall on AcmeProxyPort of the interfaces with AcmeProxyServe,
+	// presenting AcmeProxyCertificateID (self-signed when nil); it gets
+	// their certificates from AcmeProxyCa (an ACME CA name or directory
+	// URL) by DNS-01, as its AcmeProxyPolicies allow.
+	AcmeProxyEnabled       bool   `json:"acme_proxy_enabled"`
+	AcmeProxyPort          int    `json:"acme_proxy_port"`
+	AcmeProxyCa            string `json:"acme_proxy_ca"`
+	AcmeProxyEmail         string `json:"acme_proxy_email"`
+	AcmeProxyCertificateID *uint  `json:"acme_proxy_certificate_id"`
 
 	DhcpEnabled    bool   `json:"dhcp_enabled"`
 	DhcpDomainName string `json:"dhcp_domain_name"`
@@ -427,6 +437,9 @@ type Interface struct {
 	NtpServe bool `json:"ntp_serve"`
 	// SnmpServe answers SNMP requests on this interface (Instance.SnmpAllow).
 	SnmpServe bool `json:"snmp_serve"`
+	// AcmeProxyServe answers ACME clients on this interface
+	// (Instance.AcmeProxyEnabled).
+	AcmeProxyServe bool `json:"acme_proxy_serve"`
 	// ShapeEgress and ShapeIngress shape what the interface sends and
 	// receives with CAKE, in Mbit/s; 0 is not shaped.
 	ShapeEgress  int `json:"shape_egress"`
@@ -921,8 +934,24 @@ func All() []any {
 		&DyndnsClient{}, &DyndnsRecord{}, &Certificate{}, &IpList{}, &Task{}, &Service{}, &RateLimit{}, &ObjectFolder{}, &Role{}, &RoleMember{}, &RoleInstance{},
 		&RoutePrefixList{}, &RouteAsPathList{}, &RouteCommunityList{}, &RouteMap{}, &BgpConfig{}, &BgpPeerGroup{}, &BgpNeighbor{},
 		&OspfConfig{}, &OspfInterface{}, &IsisConfig{}, &IsisInterface{}, &VrrpRouter{}, &BfdInterface{}, &AddressList{},
-		&SnmpUser{}, &Vrf{},
+		&SnmpUser{}, &Vrf{}, &AcmeProxyPolicy{},
 	}
+}
+
+// AcmeProxyPolicy allows the ACME proxy's clients in Sources (any when
+// empty; hosts/prefixes by name) names in Domains ("host.example.com", or
+// "*.example.com" for any name below it), whose upstream DNS-01 TXT
+// records the DyndnsClient's provider writes. Policies are tried by name;
+// a disabled one is left out.
+type AcmeProxyPolicy struct {
+	Base
+	InstanceID     uint       `json:"instance_id"`
+	Name           string     `json:"name"`
+	Enabled        bool       `json:"enabled"`
+	Description    string     `json:"description"`
+	Domains        StringList `json:"domains"`
+	Sources        StringList `json:"sources"`
+	DyndnsClientID uint       `json:"dyndns_client_id"`
 }
 
 // SnmpUser is a read-only SNMPv3 user of an instance. Disabled, it is left
