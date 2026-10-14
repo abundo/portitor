@@ -5,11 +5,8 @@ package web
 
 import (
 	"context"
-	"encoding/json"
 	"io"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -69,57 +66,6 @@ func TestCaptureWorkerCSP(t *testing.T) {
 		csp := rec.Header().Get("Content-Security-Policy")
 		if strings.Contains(csp, "unsafe-eval") != eval || csp == "" {
 			t.Errorf("%s: %q", path, csp)
-		}
-	}
-}
-
-func TestWiregasmFiles(t *testing.T) {
-	env := newEnv(t)
-	env.srv.cfg.WiregasmDir = t.TempDir()
-	if rec := env.do("GET", "/wiregasm/wiregasm.js", nil); rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "not installed") {
-		t.Errorf("missing: %d %s", rec.Code, rec.Body)
-	}
-	if err := os.WriteFile(filepath.Join(env.srv.cfg.WiregasmDir, "wiregasm.js"), []byte("var loadWiregasm"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if rec := env.do("GET", "/wiregasm/wiregasm.js", nil); rec.Code != http.StatusOK || rec.Body.String() != "var loadWiregasm" {
-		t.Errorf("served: %d %q", rec.Code, rec.Body)
-	}
-	for _, p := range []string{"/wiregasm/..%2fweb.yaml", "/wiregasm/LICENSE", "/wiregasm/"} {
-		if rec := env.do("GET", p, nil); rec.Code != http.StatusNotFound {
-			t.Errorf("%s: %d", p, rec.Code)
-		}
-	}
-}
-
-// TestWiregasmPin keeps install.py's Wiregasm (what portitor-web serves)
-// the same package as the frontend's, which the capture worker is written
-// against.
-func TestWiregasmPin(t *testing.T) {
-	py, err := os.ReadFile("../install.py")
-	if err != nil {
-		t.Fatal(err)
-	}
-	lock, err := os.ReadFile("frontend/package-lock.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var pkgs struct {
-		Packages map[string]struct {
-			Version   string `json:"version"`
-			Integrity string `json:"integrity"`
-		} `json:"packages"`
-	}
-	if err := json.Unmarshal(lock, &pkgs); err != nil {
-		t.Fatal(err)
-	}
-	p := pkgs.Packages["node_modules/@goodtools/wiregasm"]
-	for _, want := range []string{
-		`WIREGASM_VERSION = "` + p.Version + `"`,
-		`WIREGASM_SHA512 = "` + strings.TrimPrefix(p.Integrity, "sha512-") + `"`,
-	} {
-		if p.Version == "" || !strings.Contains(string(py), want) {
-			t.Errorf("install.py lacks %s (package-lock.json)", want)
 		}
 	}
 }

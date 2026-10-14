@@ -296,5 +296,9 @@ either version 3 of the License, or (at your option) any later version. See
 [LICENSE](LICENSE). If you run a modified Portitor that others use over a network, the
 AGPL requires you to offer them its source.
 
+portitor-web includes Wiregasm (Wireshark compiled to WebAssembly, the packet capture
+viewer), licensed under the GNU GPL version 2 or later; its licence and source are at
+`/wiregasm/LICENSE` and `/wiregasm/SOURCE` in the GUI.
+
 Contributions are accepted under a Developer Certificate of Origin (`git commit -s`),
 not a CLA; see [CONTRIBUTING.md](CONTRIBUTING.md).

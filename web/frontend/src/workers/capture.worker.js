@@ -38,8 +38,7 @@ let running = false
 
 const toArray = (vec) => Array.from({ length: vec.size() }, (_, i) => vec.get(i))
 
-// fetchOk fetches a Wiregasm file; portitor-web answers 404 with why
-// (Wiregasm is installed separately, by install.py).
+// fetchOk fetches a Wiregasm file (the build's wiregasm/).
 async function fetchOk(url) {
   const res = await fetch(url)
   if (!res.ok) throw new Error((await res.text()).trim() || `${url}: ${res.status}`)

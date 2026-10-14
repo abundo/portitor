@@ -576,11 +576,13 @@ them first; commit only when asked to, each time.
 - The packet capture page runs Wiregasm (Wireshark in WebAssembly) in a worker,
   `workers/capture.worker.js`, which fetches the capture stream itself and
   dissects the whole file again as it grows (Wiregasm has no incremental
-  API), up to the last complete pcap record. Wiregasm (GPL-2.0) is a separate
-  program, never bundled or embedded: portitor-web serves it at `/wiregasm/`
-  from `wiregasm_dir`, where `install.py` downloads the pinned npm package
-  (`WIREGASM_VERSION`/`WIREGASM_SHA512`, same as `package-lock.json`,
-  `TestWiregasmPin`); in dev, Vite and portitor-web serve `node_modules`' copy. The worker script alone
+  API), up to the last complete pcap record. Wiregasm (GPL-2.0-or-later, so it
+  combines with the AGPL) is the npm package `@goodtools/wiregasm`, copied
+  unchanged by the Vite build into `web/static/wiregasm/` with its LICENSE and a
+  SOURCE note (`vite.config.js`), so it is embedded like the rest of the frontend
+  and served at `/wiregasm/`; the Vite dev server serves `node_modules`' copy there.
+  Its wrapper class (camelCase API) is not used: the worker calls the Emscripten
+  module's bindings directly. The worker script alone
   gets a CSP with `unsafe-eval` and `wasm-unsafe-eval` (`captureWorkerCSP`).
 - `pkill -f portitor-web` also matches a shell whose command line contains that text;
   anchor the pattern (`pkill -f '^./build/portitor-web'`).

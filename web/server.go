@@ -258,8 +258,6 @@ func (s *Server) Echo() *echo.Echo {
 	g.POST("/system/jobs", s.handleSystemJob)
 	g.POST("/system/reboot", s.handleSystemReboot)
 
-	e.GET("/wiregasm/*", s.handleWiregasm)
-
 	api.Any("/*", func(c *echo.Context) error { return errJSON(c, http.StatusNotFound, "no such API endpoint") })
 
 	// The Vue SPA owns every other path; unknown paths fall back to
@@ -270,7 +268,7 @@ func (s *Server) Echo() *echo.Echo {
 		HTML5:      true,
 		Skipper: func(c *echo.Context) bool {
 			p := c.Request().URL.Path
-			return strings.HasPrefix(p, "/api/") || strings.HasPrefix(p, "/wiregasm/")
+			return strings.HasPrefix(p, "/api/")
 		},
 	}))
 	return e

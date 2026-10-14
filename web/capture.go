@@ -6,10 +6,7 @@ package web
 import (
 	"log/slog"
 	"net/http"
-	"os"
-	"path/filepath"
 	"regexp"
-	"slices"
 	"strings"
 	"time"
 
@@ -97,26 +94,4 @@ func captureWorkerCSP(next echo.HandlerFunc) echo.HandlerFunc {
 		}
 		return next(c)
 	}
-}
-
-// wiregasmFiles are what the capture worker loads from /wiregasm/.
-var wiregasmFiles = []string{"wiregasm.js", "wiregasm.wasm.gz", "wiregasm.data.gz"}
-
-// handleWiregasm serves Wiregasm from cfg.WiregasmDir. It is a separate
-// program, installed next to portitor-web (install.py), never embedded.
-func (s *Server) handleWiregasm(c *echo.Context) error {
-	name := c.Param("*")
-	if !slices.Contains(wiregasmFiles, name) {
-		return c.String(http.StatusNotFound, "not found")
-	}
-	path := filepath.Join(s.cfg.WiregasmDir, name)
-	if _, err := os.Stat(path); err != nil {
-		return c.String(http.StatusNotFound, "Wiregasm is not installed in "+s.cfg.WiregasmDir+" (install.py installs it)")
-	}
-	if name != "wiregasm.js" {
-		c.Response().Header().Set(echo.HeaderContentType, "application/octet-stream")
-	}
-	c.Response().Header().Set("Cache-Control", "public, max-age=86400")
-	http.ServeFile(c.Response(), c.Request(), path)
-	return nil
 }

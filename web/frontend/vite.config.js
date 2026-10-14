@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 The Portitor contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { createReadStream } from 'node:fs'
+import { createReadStream, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath, URL } from 'node:url'
 
@@ -9,13 +9,11 @@ import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import ui from '@nuxt/ui/vite'
 
-// Wiregasm (Wireshark in WebAssembly, for the packet capture page) is a
-// separate program: it is never bundled or copied into the build.
-// portitor-web serves it from wiregasm_dir (web.yaml), where install.py
-// puts it; the dev server serves the npm package's copy at the same path.
-const wiregasmDir = fileURLToPath(
-  new URL('./node_modules/@goodtools/wiregasm/dist', import.meta.url),
-)
+// Wiregasm (Wireshark in WebAssembly, GPL-2.0-or-later, for the packet
+// capture page) is copied as it is from the npm package into the build's
+// wiregasm/, with its LICENSE and a SOURCE note; the dev server serves the
+// package's copy at the same path. The capture worker loads it from there.
+const wiregasmPkg = fileURLToPath(new URL('./node_modules/@goodtools/wiregasm', import.meta.url))
 const wiregasmFiles = ['wiregasm.js', 'wiregasm.wasm.gz', 'wiregasm.data.gz']
 function wiregasm() {
   return {
@@ -28,7 +26,30 @@ function wiregasm() {
           'Content-Type',
           name.endsWith('.js') ? 'text/javascript' : 'application/octet-stream',
         )
-        createReadStream(join(wiregasmDir, name)).pipe(res)
+        createReadStream(join(wiregasmPkg, 'dist', name)).pipe(res)
+      })
+    },
+    generateBundle() {
+      const { version, license } = JSON.parse(readFileSync(join(wiregasmPkg, 'package.json')))
+      for (const name of wiregasmFiles) {
+        this.emitFile({
+          type: 'asset',
+          fileName: `wiregasm/${name}`,
+          source: readFileSync(join(wiregasmPkg, 'dist', name)),
+        })
+      }
+      this.emitFile({
+        type: 'asset',
+        fileName: 'wiregasm/LICENSE',
+        source: readFileSync(join(wiregasmPkg, 'LICENSE')),
+      })
+      this.emitFile({
+        type: 'asset',
+        fileName: 'wiregasm/SOURCE',
+        source:
+          `Wiregasm ${version}, Wireshark compiled to WebAssembly, licensed under\n` +
+          `${license} (LICENSE). Source: https://github.com/good-tools/wiregasm\n` +
+          `(tag v${version}).\n`,
       })
     },
   }

@@ -37,10 +37,6 @@ type Config struct {
 	// their place once it is fetched from the agent.
 	TLSCert string `yaml:"tls_cert"`
 	TLSKey  string `yaml:"tls_key"`
-	// WiregasmDir holds Wiregasm (Wireshark in WebAssembly) for the packet
-	// capture page, served at /wiregasm/. install.py puts it there; it is
-	// not part of Portitor. Dev defaults to the frontend's npm copy.
-	WiregasmDir string `yaml:"wiregasm_dir"`
 }
 
 type DBConfig struct {
@@ -50,11 +46,6 @@ type DBConfig struct {
 }
 
 const DefaultDBPath = "/var/lib/portitor-web/portitor.db"
-
-const (
-	DefaultWiregasmDir = "/usr/share/portitor/wiregasm"
-	devWiregasmDir     = "web/frontend/node_modules/@goodtools/wiregasm/dist"
-)
 
 func LoadConfig(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
@@ -70,12 +61,6 @@ func LoadConfig(path string) (*Config, error) {
 	}
 	if cfg.DB.Path == "" {
 		cfg.DB.Path = DefaultDBPath
-	}
-	if cfg.WiregasmDir == "" {
-		cfg.WiregasmDir = DefaultWiregasmDir
-		if cfg.Dev {
-			cfg.WiregasmDir = devWiregasmDir
-		}
 	}
 	return cfg, nil
 }
