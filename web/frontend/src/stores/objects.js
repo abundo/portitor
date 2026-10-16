@@ -2,12 +2,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { defineStore } from 'pinia'
-import { addressLists, addressObjects, api, customServices, ipLists } from '@/api'
+import { addressLists, addressObjects, api, customServices, ipLists, portNames } from '@/api'
 import { serviceSummary } from '@/utils/services'
 
 // Named hosts and prefixes and address lists, offered as suggestions in
 // address fields, and IP lists, which rules take as "@name"; the services rules name, custom
-// and predefined; the built-in port names NAT port fields accept; and the
+// and predefined; the port names NAT port fields accept, custom and built-in; and the
 // ICMP and ICMPv6 types services match ({ icmp: [...], icmpv6: [...] },
 // fwconfig.ICMPTypes).
 export const useObjectStore = defineStore('objects', {
@@ -16,6 +16,7 @@ export const useObjectStore = defineStore('objects', {
     addressLists: [],
     ipLists: [],
     services: [],
+    customPortNames: [],
     customServices: [],
     predefinedServices: [],
     icmpTypes: { icmp: [], icmpv6: [] },
@@ -24,8 +25,12 @@ export const useObjectStore = defineStore('objects', {
   getters: {
     names: (s) => [...s.list, ...s.addressLists].map((o) => o.name),
     listRefs: (s) => s.ipLists.map((l) => `@${l.name}`),
-    // portNames: the built-in port names, as { name, port, description }.
-    portNames: (s) => s.services,
+    // portNames: the custom port names, then the built-in ones, as
+    // { name, port, description }.
+    portNames: (s) => [
+      ...[...s.customPortNames].sort((a, b) => a.name.localeCompare(b.name)),
+      ...s.services,
+    ],
     // allServices: the custom services, then the predefined ones (with
     // predefined: true), by name.
     allServices: (s) => [
@@ -54,6 +59,7 @@ export const useObjectStore = defineStore('objects', {
         this.addressLists,
         this.ipLists,
         this.services,
+        this.customPortNames,
         this.customServices,
         this.predefinedServices,
         this.icmpTypes,
@@ -62,6 +68,7 @@ export const useObjectStore = defineStore('objects', {
         addressLists.list(),
         ipLists.list(),
         api.services(),
+        portNames.list(),
         customServices.list(),
         api.predefinedServices(),
         api.icmpTypes(),

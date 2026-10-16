@@ -1159,10 +1159,18 @@ type PortRange struct{ Lo, Hi int }
 
 // ParsePorts parses "22", "80,443", "1000-2000,3000"; a port may also be
 // a name from Services ("ssh, https").
-func ParsePorts(s string) ([]PortRange, error) {
+func ParsePorts(s string) ([]PortRange, error) { return ParsePortsNamed(s, nil) }
+
+// ParsePortsNamed is ParsePorts that also takes the names in extra (custom
+// port names, which portitor-web resolves before the agent sees them).
+func ParsePortsNamed(s string, extra map[string]int) ([]PortRange, error) {
 	var out []PortRange
 	for _, part := range strings.Split(s, ",") {
 		part = strings.TrimSpace(part)
+		if p, ok := extra[strings.ToLower(part)]; ok {
+			out = append(out, PortRange{p, p})
+			continue
+		}
 		if p, ok := ServicePort(strings.ToLower(part)); ok {
 			out = append(out, PortRange{p, p})
 			continue

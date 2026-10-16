@@ -812,6 +812,46 @@ func TestCustomServices(t *testing.T) {
 	}
 }
 
+func TestPortNames(t *testing.T) {
+	env := newEnv(t)
+	inst := env.create("/api/instances", map[string]any{"name": "main"})
+	env.create("/api/interfaces", map[string]any{"instance_id": inst, "name": "eth0", "enabled": true})
+	pn := env.create("/api/port-names", map[string]any{"name": " Web ", "port": 8080})
+	for _, body := range []map[string]any{
+		{"name": "ssh", "port": 2222},
+		{"name": "1bad", "port": 80},
+		{"name": "zero", "port": 0},
+		{"name": "big", "port": 70000},
+	} {
+		if rec := env.do("POST", "/api/port-names", body); rec.Code != http.StatusBadRequest {
+			t.Errorf("%v: %d %s", body, rec.Code, rec.Body)
+		}
+	}
+	if rec := env.do("POST", "/api/port-names", map[string]any{"name": "web", "port": 81}); rec.Code != http.StatusConflict {
+		t.Errorf("duplicate: %d %s", rec.Code, rec.Body)
+	}
+	nat := env.create("/api/nat", map[string]any{"instance_id": inst, "kind": "dnat", "in_interfaces": []string{"eth0"}, "protocol": "tcp",
+		"dst_ports": "WEB, https", "to_addr": "192.168.1.10", "enabled": true})
+	if rec := env.do("POST", "/api/nat", map[string]any{"instance_id": inst, "kind": "dnat", "protocol": "tcp", "dst_ports": "ghost", "to_addr": "192.168.1.10"}); rec.Code != http.StatusBadRequest {
+		t.Errorf("unknown port name accepted: %d %s", rec.Code, rec.Body)
+	}
+	doc, _ := builder.Build(env.srv.db, 1)
+	if got := doc.Instances[0].NAT[0].DstPorts; got != "8080, https" {
+		t.Errorf("not resolved: %q", got)
+	}
+	if rec := env.do("DELETE", fmt.Sprintf("/api/port-names/%d", pn), nil); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "used by") {
+		t.Errorf("delete in use: %d %s", rec.Code, rec.Body)
+	}
+	if rec := env.do("PUT", fmt.Sprintf("/api/port-names/%d", pn), map[string]any{"name": "proxy"}); rec.Code != http.StatusOK {
+		t.Fatalf("rename: %d %s", rec.Code, rec.Body)
+	}
+	var n models.NatRule
+	env.srv.db.First(&n, nat)
+	if n.DstPorts != "proxy, https" {
+		t.Errorf("references not renamed: %q", n.DstPorts)
+	}
+}
+
 func TestIpv6PrefixChecks(t *testing.T) {
 	env := newEnv(t)
 	inst := env.create("/api/instances", map[string]any{"name": "main"})

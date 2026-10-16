@@ -63,6 +63,8 @@ export const objectFolders = crud('/object-folders')
 export const tasks = crud('/tasks')
 // Custom services: protocol matches rules name next to the predefined ones.
 export const customServices = crud('/custom-services')
+// Custom port names: NAT port fields take them next to the built-in ones.
+export const portNames = crud('/port-names')
 
 export const api = {
   login: (username, password, remember) =>

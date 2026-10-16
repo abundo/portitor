@@ -795,7 +795,11 @@ func prepareNat(tx *gorm.DB, n, old *models.NatRule) error {
 		if n.Protocol == "" {
 			return bad("ports need protocol tcp, udp or tcp+udp")
 		}
-		if _, err := fwconfig.ParsePorts(n.DstPorts); err != nil {
+		names, err := portNames(tx)
+		if err != nil {
+			return err
+		}
+		if _, err := fwconfig.ParsePortsNamed(n.DstPorts, names); err != nil {
 			return bad(err.Error() + "; use ports (22), ranges (8000-8080) or port names (https)")
 		}
 	}

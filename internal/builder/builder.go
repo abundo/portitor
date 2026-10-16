@@ -14,6 +14,7 @@ import (
 	"net/netip"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"gorm.io/gorm"
@@ -48,6 +49,7 @@ type data struct {
 	ipLists        []models.IpList
 	tasks          []models.Task
 	services       []models.Service
+	portNames      []models.PortName
 	rateLimits     []models.RateLimit
 	prefixLists    []models.RoutePrefixList
 	asPathLists    []models.RouteAsPathList
@@ -97,6 +99,7 @@ func load(db *gorm.DB) (*data, error) {
 		{&d.ipLists, "name"},
 		{&d.tasks, "name"},
 		{&d.services, "name"},
+		{&d.portNames, "name"},
 		{&d.rateLimits, "name"},
 		{&d.prefixLists, "name"},
 		{&d.asPathLists, "name"},
@@ -164,6 +167,11 @@ func build(db *gorm.DB, generation int64, only map[string]bool) (*fwconfig.Docum
 			failed = true
 		}
 		return out
+	}
+	// And custom port names: the agent sees their numbers.
+	portNames := make(map[string]int, len(d.portNames))
+	for _, p := range d.portNames {
+		portNames[p.Name] = p.Port
 	}
 	// So are services: the agent sees protocol matches only.
 	services := netobj.NewServices(d.services)
@@ -372,7 +380,7 @@ func build(db *gorm.DB, generation int64, only map[string]bool) (*fwconfig.Docum
 				Protocol:      n.Protocol,
 				SrcAddrs:      expand(where+": source", objs.Expand, n.SrcAddrs),
 				DstAddrs:      expand(where+": destination", objs.Expand, n.DstAddrs),
-				DstPorts:      n.DstPorts,
+				DstPorts:      resolvePortNames(n.DstPorts, portNames),
 				ToPort:        n.ToPort,
 				Hairpin:       n.Hairpin,
 				Description:   n.Description,
@@ -1305,4 +1313,19 @@ func ifaceByName(ifaces []models.Interface, instanceID uint, name string) (model
 		}
 	}
 	return models.Interface{}, false
+}
+
+// resolvePortNames writes the custom port names in a port list ("web, 443")
+// as their numbers; numbers, ranges and built-in names are left as they are.
+func resolvePortNames(ports string, names map[string]int) string {
+	if ports == "" || len(names) == 0 {
+		return ports
+	}
+	parts := strings.Split(ports, ",")
+	for i, part := range parts {
+		if p, ok := names[strings.ToLower(strings.TrimSpace(part))]; ok {
+			parts[i] = strconv.Itoa(p)
+		}
+	}
+	return strings.Join(parts, ",")
 }

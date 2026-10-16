@@ -528,6 +528,15 @@ type Route struct {
 	Description string `json:"description"`
 }
 
+// PortName is a custom port name NAT port fields take next to the built-in
+// ones (fwconfig.Services); the builder writes its number.
+type PortName struct {
+	Base
+	Name        string `gorm:"uniqueIndex" json:"name"`
+	Port        int    `json:"port"`
+	Description string `json:"description"`
+}
+
 // StaticNeighbour is a permanent ARP (IPv4 Address) or ND (IPv6) entry on
 // an interface (fwconfig.StaticNeighbour). Disabled, it is left out.
 type StaticNeighbour struct {
@@ -946,7 +955,7 @@ func All() []any {
 		&DyndnsClient{}, &DyndnsRecord{}, &Certificate{}, &IpList{}, &Task{}, &Service{}, &RateLimit{}, &ObjectFolder{}, &Role{}, &RoleMember{}, &RoleInstance{},
 		&RoutePrefixList{}, &RouteAsPathList{}, &RouteCommunityList{}, &RouteMap{}, &BgpConfig{}, &BgpPeerGroup{}, &BgpNeighbor{},
 		&OspfConfig{}, &OspfInterface{}, &IsisConfig{}, &IsisInterface{}, &VrrpRouter{}, &BfdInterface{}, &AddressList{},
-		&SnmpUser{}, &Vrf{}, &AcmeProxyPolicy{}, &StaticNeighbour{},
+		&SnmpUser{}, &Vrf{}, &AcmeProxyPolicy{}, &StaticNeighbour{}, &PortName{},
 	}
 }
 
