@@ -128,6 +128,12 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 		return err
 	}
 
+	// What fails below is collected, not returned at once: one interface,
+	// address or route that fails (a VLAN whose parent is down) must not
+	// leave every other one down or without addresses, at boot least of
+	// all. The apply still fails, after everything has been tried.
+	var soft []error
+
 	var root managedState
 	_ = readJSON(a.managedFile(), &root)
 	var newRoot []string
@@ -234,9 +240,7 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 		if links, err = a.links(ctx, ns); err != nil {
 			return err
 		}
-		if err := a.doAll(ctx, planLinkSettings(ns, in.Interfaces, links)); err != nil {
-			return err
-		}
+		soft = append(soft, a.doEach(ctx, planLinkSettings(ns, in.Interfaces, links)))
 		// The vxlans' learning, bridge port flags and flood lists, from
 		// the state before the bridge membership above: a port that only
 		// just joined its bridge gets its flags set.
@@ -244,9 +248,7 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 		if err != nil {
 			return err
 		}
-		if err := a.doAll(ctx, planVXLAN(ns, in, links, fdbs)); err != nil {
-			return err
-		}
+		soft = append(soft, a.doEach(ctx, planVXLAN(ns, in, links, fdbs)))
 		if vrfs {
 			// Joining or leaving a VRF cycles an interface, which takes
 			// its IPv6 addresses away: the addresses are planned from
@@ -281,9 +283,7 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 				a.shaped[ns+"/"+dev] = t
 			}
 		}
-		if err != nil {
-			return err
-		}
+		soft = append(soft, err)
 
 		// -e: an interface with IPv6 disabled has no accept_ra key.
 		// Conntrack timestamps and accounting give the Connections page start
@@ -300,17 +300,13 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 		// The firewall's own services (in the default VRF) answer on a
 		// VRF's interfaces (vrf.go).
 		sysctls = append(sysctls, vrfSysctls(in)...)
-		if err := a.do(ctx, command{Netns: ns, Name: "sysctl", Args: append([]string{"-q", "-e", "-w"}, sysctls...)}); err != nil {
-			return err
-		}
+		soft = append(soft, a.do(ctx, command{Netns: ns, Name: "sysctl", Args: append([]string{"-q", "-e", "-w"}, sysctls...)}))
 		if err := a.applyNAT64(ctx, in, ns); err != nil {
 			return err
 		}
 
 		for _, ifc := range in.Interfaces {
-			if err := a.doAll(ctx, planAddresses(ns, ifc, links[ifc.Name])); err != nil {
-				return err
-			}
+			soft = append(soft, a.doEach(ctx, planAddresses(ns, ifc, links[ifc.Name])))
 			if ifc.IPv4Mode == fwconfig.ModeDHCP && ifc.Enabled {
 				dhcpWant = append(dhcpWant, dhcpKey{instance: in.Name, netns: ns, iface: ifc.Name, noRoute: ifc.DHCPNoDefaultRoute,
 					table: in.RouteTable(fwconfig.Route{Interface: ifc.Name})})
@@ -323,12 +319,8 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 			}
 		}
 
-		if err := a.doAll(ctx, planVRRPDevices(ns, vrrpDevs, links)); err != nil {
-			return err
-		}
-		if err := a.applyVRFRules(ctx, in, ns); err != nil {
-			return err
-		}
+		soft = append(soft, a.doEach(ctx, planVRRPDevices(ns, vrrpDevs, links)))
+		soft = append(soft, a.applyVRFRules(ctx, in, ns))
 
 		for _, d := range in.DynDNS {
 			ddnsWant = append(ddnsWant, dyndnsItem{instance: in.Name, netns: ns, cfg: d})
@@ -380,12 +372,8 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 				routes = append(routes, r...)
 			}
 		}
-		if err := a.doAll(ctx, planRoutes(ns, slices.Concat(in.KernelRoutes(), in.WireGuardRoutes(), nat64Routes(in)), routes, in.RouteTable)); err != nil {
-			return err
-		}
-		if err := a.applyStaticNeighbours(ctx, in); err != nil {
-			return err
-		}
+		soft = append(soft, a.doEach(ctx, planRoutes(ns, slices.Concat(in.KernelRoutes(), in.WireGuardRoutes(), nat64Routes(in)), routes, in.RouteTable)))
+		soft = append(soft, a.applyStaticNeighbours(ctx, in))
 		a.setNamedEndpoints(ctx, in)
 
 	}
@@ -406,9 +394,8 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 	a.lldp.Reconcile(lldpWant)
 
 	for i := range exp.Instances {
-		if err := a.applyServices(ctx, &exp.Instances[i], bundle, changed); err != nil {
-			return err
-		}
+		// One instance's failed service doesn't keep the others' down.
+		soft = append(soft, a.applyServices(ctx, &exp.Instances[i], bundle, changed))
 	}
 
 	for _, ns := range existing {
@@ -436,7 +423,7 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 	a.lastApply = time.Now()
 	a.reconcileIPLists(&d)
 	a.tasks.Reconcile(d.Tasks)
-	return nil
+	return errors.Join(soft...)
 }
 
 func (a *Agent) checkRulesets(ctx context.Context, exp *fwconfig.Document, b *render.Bundle) error {
@@ -525,6 +512,16 @@ func (a *Agent) writeFile(f render.File) (bool, error) {
 func (a *Agent) do(ctx context.Context, c command) error {
 	_, err := a.run.RunInput(ctx, c.Netns, c.Stdin, c.Name, c.Args...)
 	return err
+}
+
+// doEach runs every command, also after one fails, and returns their
+// errors joined.
+func (a *Agent) doEach(ctx context.Context, cmds []command) error {
+	var errs []error
+	for _, c := range cmds {
+		errs = append(errs, a.do(ctx, c))
+	}
+	return errors.Join(errs...)
 }
 
 func (a *Agent) doAll(ctx context.Context, cmds []command) error {
