@@ -383,6 +383,9 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 		if err := a.doAll(ctx, planRoutes(ns, slices.Concat(in.KernelRoutes(), in.WireGuardRoutes(), nat64Routes(in)), routes, in.RouteTable)); err != nil {
 			return err
 		}
+		if err := a.applyStaticNeighbours(ctx, in); err != nil {
+			return err
+		}
 		a.setNamedEndpoints(ctx, in)
 
 	}

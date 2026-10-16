@@ -144,6 +144,19 @@ func TestValidateCatchesProblems(t *testing.T) {
 			d.Instances[0].Rules[5].Family = "ipv6"
 		}, "no service fits"},
 		{"slaac needs /64", func(d *Document) { d.Instances[0].RA[0].Prefixes[0].Prefix = "fd00:1::/56" }, "needs a /64"},
+		{"static neighbour address", func(d *Document) {
+			d.Instances[0].StaticNeighbours = []StaticNeighbour{{Interface: "eth0", Address: "10.0.0.300", MAC: "02:00:00:00:00:01"}}
+		}, `static neighbour 1: invalid address "10.0.0.300"`},
+		{"static neighbour mac", func(d *Document) {
+			d.Instances[0].StaticNeighbours = []StaticNeighbour{{Interface: "eth0", Address: "10.0.0.5", MAC: "02:00:00:00:00"}}
+		}, `static neighbour 1: invalid mac`},
+		{"static neighbour interface", func(d *Document) {
+			d.Instances[0].StaticNeighbours = []StaticNeighbour{{Interface: "eth9", Address: "fd00::5", MAC: "02:00:00:00:00:01"}}
+		}, `static neighbour 1: unknown interface "eth9"`},
+		{"static neighbour twice", func(d *Document) {
+			n := StaticNeighbour{Interface: "eth0", Address: "10.0.0.5", MAC: "02:00:00:00:00:01"}
+			d.Instances[0].StaticNeighbours = []StaticNeighbour{n, n}
+		}, `10.0.0.5 on eth0 twice`},
 		{"ra unknown interface", func(d *Document) { d.Instances[0].RA[0].Interface = "eth9" }, "unknown interface"},
 		{"ra v4 dns", func(d *Document) { d.Instances[0].RA[0].RDNSS = []string{"192.168.1.1"} }, "invalid IPv6 dns server"},
 		{"dhcpv6 without ra", func(d *Document) { d.Instances[0].RA = nil }, "DHCPv6 needs router advertisements"},

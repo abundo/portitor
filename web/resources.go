@@ -6,6 +6,7 @@ package web
 import (
 	"errors"
 	"fmt"
+	"net"
 	"net/netip"
 	"reflect"
 	"slices"
@@ -595,6 +596,38 @@ func prepareLink(tx *gorm.DB, l, old *models.Link) error {
 		if err := ifaceMoved(tx, old.InstanceBID, old.InterfaceB, l.InstanceBID, l.InterfaceB); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func prepareStaticNeighbour(tx *gorm.DB, n, old *models.StaticNeighbour) error {
+	if old != nil {
+		n.InstanceID = old.InstanceID // rows stay in their instance
+	}
+	if err := instanceExists(tx, n.InstanceID); err != nil {
+		return err
+	}
+	n.Description = strings.TrimSpace(n.Description)
+	a, err := netip.ParseAddr(strings.TrimSpace(n.Address))
+	if err != nil || a.Zone() != "" || a.Is4In6() || a.IsMulticast() || a.IsUnspecified() {
+		return bad("address must be an IPv4 or IPv6 address")
+	}
+	n.Address = a.String()
+	mac, err := net.ParseMAC(strings.TrimSpace(n.MAC))
+	if err != nil || len(mac) != 6 {
+		return bad("MAC must be 6 bytes, like 02:00:5e:00:01:01")
+	}
+	n.MAC = mac.String()
+	var i models.Interface
+	if tx.First(&i, n.InterfaceID).Error != nil || i.InstanceID != n.InstanceID {
+		return bad("interface must belong to the same virtual firewall")
+	}
+	var c int64
+	if err := tx.Model(&models.StaticNeighbour{}).Where("interface_id = ? AND address = ? AND id <> ?", n.InterfaceID, n.Address, n.ID).Count(&c).Error; err != nil {
+		return err
+	}
+	if c > 0 {
+		return bad(fmt.Sprintf("%s already has a static entry on %s", n.Address, i.Name))
 	}
 	return nil
 }

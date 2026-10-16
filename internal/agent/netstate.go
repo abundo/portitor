@@ -277,7 +277,12 @@ func planLinkSettings(ns string, want []fwconfig.Interface, have map[string]ipLi
 			}
 		}
 	}
-	for _, ifc := range want {
+	// VLANs last: one can't come up before its parent ("Network is down"),
+	// and a link end, which may be a parent, comes after the instance's
+	// own interfaces (Document.Expand).
+	ordered := append([]fwconfig.Interface(nil), want...)
+	sort.SliceStable(ordered, func(i, j int) bool { return ordered[i].Parent == "" && ordered[j].Parent != "" })
+	for _, ifc := range ordered {
 		l, exists := have[ifc.Name]
 		if m := master[ifc.Name]; m != "" && (!exists || l.Master != m) {
 			cmds = append(cmds, ipCmd(ns, "link", "set", "dev", ifc.Name, "master", m))

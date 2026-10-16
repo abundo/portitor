@@ -482,6 +482,26 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 		}
 	}
 
+	neighSeen := map[string]bool{}
+	for i, n := range in.StaticNeighbours {
+		np := fmt.Sprintf("%s: static neighbour %d", p, i+1)
+		a, err := netip.ParseAddr(n.Address)
+		if err != nil || a.Zone() != "" || a.Is4In6() || a.IsMulticast() || a.IsUnspecified() {
+			v.addf("%s: invalid address %q", np, n.Address)
+		}
+		if !macRe.MatchString(n.MAC) {
+			v.addf("%s: invalid mac %q", np, n.MAC)
+		}
+		if ifaces[n.Interface] == nil {
+			v.addf("%s: unknown interface %q", np, n.Interface)
+		}
+		if k := n.Interface + "|" + n.Address; neighSeen[k] {
+			v.addf("%s: %s on %s twice", np, n.Address, n.Interface)
+		} else {
+			neighSeen[k] = true
+		}
+	}
+
 	raOn := map[string]bool{}
 	for _, ra := range in.RA {
 		rp := fmt.Sprintf("%s: router advertisements on %q", p, ra.Interface)

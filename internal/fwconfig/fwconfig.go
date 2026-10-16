@@ -49,8 +49,10 @@ type Instance struct {
 	RateLimits []RateLimit `json:"rate_limits,omitempty"`
 	NAT        []NATRule   `json:"nat"`
 	Routes     []Route     `json:"routes"`
-	DHCP       DHCPServer  `json:"dhcp"`
-	DNS        DNSServer   `json:"dns"`
+	// StaticNeighbours are permanent ARP (IPv4) and ND (IPv6) entries.
+	StaticNeighbours []StaticNeighbour `json:"static_neighbours,omitempty"`
+	DHCP             DHCPServer        `json:"dhcp"`
+	DNS              DNSServer         `json:"dns"`
 	// RA lists the interfaces that send IPv6 router advertisements.
 	RA []RAInterface `json:"ra,omitempty"`
 	// NAT64, when set, translates IPv6 to IPv4 (stateful NAT64, Jool).
@@ -449,6 +451,14 @@ type Route struct {
 	BFD bool `json:"bfd,omitempty"`
 	// VRF puts the route in that VRF interface's table (Instance.RouteTable).
 	VRF string `json:"vrf,omitempty"`
+}
+
+// StaticNeighbour is a permanent neighbour entry (ip neigh ... nud
+// permanent): ARP for an IPv4 Address, ND for an IPv6 one.
+type StaticNeighbour struct {
+	Interface string `json:"interface"`
+	Address   string `json:"address"`
+	MAC       string `json:"mac"`
 }
 
 type DHCPServer struct {

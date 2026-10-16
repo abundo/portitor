@@ -30,6 +30,7 @@ type data struct {
 	peers          []models.WgPeer
 	links          []models.Link
 	routes         []models.Route
+	neighbours     []models.StaticNeighbour
 	rules          []models.Rule
 	nat            []models.NatRule
 	prefixes       []models.IpamPrefix
@@ -78,6 +79,7 @@ func load(db *gorm.DB) (*data, error) {
 		{&d.peers, "name"},
 		{&d.links, "name"},
 		{&d.routes, "id"},
+		{&d.neighbours, "id"},
 		{&d.rules, "position, id"},
 		{&d.nat, "position, id"},
 		{&d.prefixes, "prefix"},
@@ -455,6 +457,14 @@ func build(db *gorm.DB, generation int64, only map[string]bool) (*fwconfig.Docum
 					addf("%s: gateway %s has no address of the same IP version as %s", where, r.Gateway, dst)
 				}
 			}
+		}
+
+		for _, n := range d.neighbours {
+			ifc, ok := ifaceByID[n.InterfaceID]
+			if n.InstanceID != mi.ID || !n.Enabled || !ok || !ifc.Enabled {
+				continue
+			}
+			in.StaticNeighbours = append(in.StaticNeighbours, fwconfig.StaticNeighbour{Interface: ifc.Name, Address: n.Address, MAC: n.MAC})
 		}
 
 		// DNS: zones, records from the zone and from IPAM names.

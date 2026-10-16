@@ -528,6 +528,18 @@ type Route struct {
 	Description string `json:"description"`
 }
 
+// StaticNeighbour is a permanent ARP (IPv4 Address) or ND (IPv6) entry on
+// an interface (fwconfig.StaticNeighbour). Disabled, it is left out.
+type StaticNeighbour struct {
+	Base
+	InstanceID  uint   `json:"instance_id"`
+	InterfaceID uint   `json:"interface_id"`
+	Address     string `json:"address"`
+	MAC         string `json:"mac" gorm:"column:mac"`
+	Enabled     bool   `json:"enabled"`
+	Description string `json:"description"`
+}
+
 type Rule struct {
 	Base
 	InstanceID uint   `json:"instance_id"`
@@ -934,7 +946,7 @@ func All() []any {
 		&DyndnsClient{}, &DyndnsRecord{}, &Certificate{}, &IpList{}, &Task{}, &Service{}, &RateLimit{}, &ObjectFolder{}, &Role{}, &RoleMember{}, &RoleInstance{},
 		&RoutePrefixList{}, &RouteAsPathList{}, &RouteCommunityList{}, &RouteMap{}, &BgpConfig{}, &BgpPeerGroup{}, &BgpNeighbor{},
 		&OspfConfig{}, &OspfInterface{}, &IsisConfig{}, &IsisInterface{}, &VrrpRouter{}, &BfdInterface{}, &AddressList{},
-		&SnmpUser{}, &Vrf{}, &AcmeProxyPolicy{},
+		&SnmpUser{}, &Vrf{}, &AcmeProxyPolicy{}, &StaticNeighbour{},
 	}
 }
 
