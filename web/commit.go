@@ -65,6 +65,9 @@ type commitTarget struct {
 	// those to delete there.
 	push []string
 	del  []string
+	// hash: configHash of the commit's snapshot, for its deployment;
+	// empty when the commit is of some virtual firewalls only.
+	hash string
 	// skip: an HA host that can't be reached while its peer can; it
 	// catches up when it answers (witness.go).
 	skip bool
@@ -193,7 +196,7 @@ func (s *Server) deploy(ctx context.Context, username string, timeout *int, only
 	var applyErr error
 	for _, t := range targets {
 		if t.cfg != nil {
-			t.dep = models.Deployment{FirewallID: t.fw.ID, CommitID: commit, Username: username, Instances: models.StringList{}}
+			t.dep = models.Deployment{FirewallID: t.fw.ID, CommitID: commit, Username: username, DocHash: t.hash, Instances: models.StringList{}}
 			if only != nil {
 				t.dep.Instances = sortedNames(only)
 			}
@@ -472,6 +475,32 @@ func (s *Server) pendingDeployments() ([]models.Deployment, error) {
 	return out, nil
 }
 
+// settlePending is pendingDeployments after asking the agents of their
+// firewalls whether they still hold them (firewallStatus): one rolled back
+// on timeout, or settled on the console, no longer waits. Nothing else
+// asks when no GUI polls the status, as on portitor-config. An agent that
+// can't be reached leaves its deployment pending.
+func (s *Server) settlePending(ctx context.Context) ([]models.Deployment, error) {
+	deps, err := s.pendingDeployments()
+	if err != nil || len(deps) == 0 {
+		return deps, err
+	}
+	fws, err := s.firewalls()
+	if err != nil {
+		return nil, err
+	}
+	for _, fw := range fws {
+		// portitor-config settles its own.
+		if viaConfig(fws, fw) {
+			continue
+		}
+		if slices.ContainsFunc(deps, func(d models.Deployment) bool { return d.FirewallID == fw.ID }) {
+			_, _ = s.firewallStatus(ctx, &fw)
+		}
+	}
+	return s.pendingDeployments()
+}
+
 // liveCommit is the newest commit that the firewalls run: each firewall
 // runs its live deployment's commit or the database at a later one, since
 // a commit skips the firewalls it does not change. 0: nothing deployed.
@@ -501,7 +530,7 @@ func (s *Server) handleDeployApply(c *echo.Context) error {
 	_ = c.Bind(&req)
 	// One change at a time: a pending one is confirmed or rolled back
 	// first.
-	if deps, err := s.pendingDeployments(); err != nil {
+	if deps, err := s.settlePending(c.Request().Context()); err != nil {
 		return err
 	} else if len(deps) > 0 {
 		return errJSON(c, http.StatusConflict, errPending.Error())
@@ -557,7 +586,17 @@ func (s *Server) handleDeployChanges(c *echo.Context) error {
 		return err
 	}
 	for _, fw := range fws {
-		changed, problems, err := s.firewallChanged(fw.ID)
+		var changed bool
+		var problems int
+		switch {
+		case fw.ConfigURL != "":
+			changed, problems, err = s.configChanged(fw.ID)
+		case viaConfig(fws, fw):
+			// Its primary's portitor-config deploys it.
+			continue
+		default:
+			changed, problems, err = s.firewallChanged(fw.ID)
+		}
 		if err != nil {
 			return err
 		}
@@ -594,6 +633,30 @@ func (s *Server) firewallChanged(firewallID uint) (bool, int, error) {
 		return true, 0, nil
 	}
 	return docHash(old) != docHash(redactDoc(*doc)), 0, nil
+}
+
+// configChanged tells whether the virtual firewalls of a firewall with
+// portitor-config differ from those its live deployment pushed, and how
+// many problems it has. A change made there (break-glass) is the drift
+// view's.
+func (s *Server) configChanged(firewallID uint) (bool, int, error) {
+	_, err := builder.BuildFirewall(s.db, 0, firewallID)
+	var ve *fwconfig.ValidationError
+	switch {
+	case errors.As(err, &ve):
+		return true, len(ve.Problems), nil
+	case err != nil:
+		return false, 0, err
+	}
+	live, err := s.liveDeployment(firewallID)
+	if err != nil {
+		return false, 0, err
+	}
+	h, err := configHash(s.db, firewallID)
+	if err != nil {
+		return false, 0, err
+	}
+	return live == nil || live.DocHash != h, 0, nil
 }
 
 func (s *Server) handleDeployConfirm(c *echo.Context) error {

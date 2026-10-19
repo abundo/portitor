@@ -96,6 +96,10 @@ func TestManagedFirewall(t *testing.T) {
 	if rec := hq.do("POST", "/api/deploy/confirm", map[string]any{}); rec.Code != http.StatusOK || len(agent.confirmed) != 1 {
 		t.Fatalf("confirm: %d %s", rec.Code, rec.Body)
 	}
+	changes := func() string { return hq.do("GET", "/api/deploy/changes", nil).Body.String() }
+	if c := changes(); !strings.Contains(c, `"changed":false`) {
+		t.Errorf("changes after commit: %s", c)
+	}
 	drift := func() map[string]string {
 		var items []driftItem
 		_ = json.Unmarshal(hq.do("GET", "/api/firewalls/1/drift", nil).Body.Bytes(), &items)
@@ -115,6 +119,9 @@ func TestManagedFirewall(t *testing.T) {
 	fw.do("POST", "/api/instances/"+itoa(shopThere)+"/break-glass", nil)
 	fw.create("/api/rules", map[string]any{"instance_id": shopThere, "chain": "input", "action": "drop", "enabled": true, "description": "local fix"})
 	hq.create("/api/rules", map[string]any{"instance_id": instanceID(t, hq, "shop"), "chain": "input", "action": "accept", "enabled": true})
+	if c := changes(); !strings.Contains(c, `"changed":true`) {
+		t.Errorf("changes after an edit: %s", c)
+	}
 	if d := drift(); d["shop"] != driftThere {
 		t.Errorf("drift after break-glass: %v", d)
 	}
@@ -145,6 +152,21 @@ func TestManagedFirewall(t *testing.T) {
 	fw.srv.db.Model(&models.Instance{}).Where("name = ?", "shop").Count(&n)
 	if n != 0 {
 		t.Error("shop is still on the firewall")
+	}
+
+	// A commit there that the agent rolled back on timeout, with no GUI
+	// open there to notice: the manager is not told it is still pending.
+	if rec := fw.manager("POST", "/commit", map[string]any{"manager": "hq", "confirm_timeout": 60}); rec.Code != http.StatusOK {
+		t.Fatalf("commit there: %d %s", rec.Code, rec.Body)
+	}
+	agent.pending, agent.generation = nil, agent.generation-1
+	var st ManagedState
+	_ = json.Unmarshal(fw.manager("GET", "/state", nil).Body.Bytes(), &st)
+	if st.Pending {
+		t.Error("state still pending after the agent rolled back")
+	}
+	if rec := fw.manager("POST", "/commit", map[string]any{"manager": "hq", "confirm_timeout": 0}); rec.Code != http.StatusOK {
+		t.Errorf("commit after the rollback: %d %s", rec.Code, rec.Body)
 	}
 }
 

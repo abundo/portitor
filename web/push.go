@@ -5,6 +5,8 @@ package web
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -102,6 +104,11 @@ func (s *Server) configTargets(ctx context.Context, db *gorm.DB, fws []models.Fi
 				}
 			}
 		}
+		if only == nil {
+			if t.hash, err = configHash(db, fw.ID); err != nil {
+				return nil, nil, err
+			}
+		}
 		if st.Schema != s.schemaVersion(db) {
 			problems = append(problems, fmt.Sprintf("%s: portitor-config is at schema %d, this portitor-web at %d; update both to the same version", fw.Name, st.Schema, s.schemaVersion(db)))
 		}
@@ -115,6 +122,27 @@ func (s *Server) configTargets(ctx context.Context, db *gorm.DB, fws []models.Fi
 		return nil, nil, &fwconfig.ValidationError{Problems: problems}
 	}
 	return changed, same, nil
+}
+
+// configHash identifies the virtual firewalls db has for a firewall with
+// portitor-config (its host is portitor-config's own) by name and
+// InstanceHash. A commit there keeps it as the deployment's DocHash, which
+// the "uncommitted changes" banner compares (configChanged).
+func configHash(db *gorm.DB, firewallID uint) (string, error) {
+	var names []string
+	if err := db.Model(&models.Instance{}).Where("firewall_id = ? AND NOT is_default", firewallID).
+		Order("name").Pluck("name", &names).Error; err != nil {
+		return "", err
+	}
+	sum := sha256.New()
+	for _, n := range names {
+		h, err := InstanceHash(db, n)
+		if err != nil {
+			return "", err
+		}
+		fmt.Fprintf(sum, "%s %s\n", n, h)
+	}
+	return "config:" + hex.EncodeToString(sum.Sum(nil)), nil
 }
 
 func (s *Server) schemaVersion(db *gorm.DB) int64 {

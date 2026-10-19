@@ -124,7 +124,7 @@ func (s *Server) handleManagerState(c *echo.Context) error {
 		}
 		st.Instances = append(st.Instances, ManagedInstance{Name: in.Name, Default: in.IsDefault, ManagedBy: in.ManagedBy, Diverged: in.Diverged, Hash: h})
 	}
-	deps, err := s.pendingDeployments()
+	deps, err := s.settlePending(c.Request().Context())
 	if err != nil {
 		return err
 	}
@@ -205,7 +205,7 @@ func (s *Server) handleManagerCommit(c *echo.Context) error {
 		ConfirmTimeout *int   `json:"confirm_timeout"`
 	}
 	_ = c.Bind(&req)
-	if deps, err := s.pendingDeployments(); err != nil {
+	if deps, err := s.settlePending(c.Request().Context()); err != nil {
 		return err
 	} else if len(deps) > 0 {
 		return errJSON(c, http.StatusConflict, errPending.Error())
