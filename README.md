@@ -181,7 +181,9 @@ from a release, then:
 
 On an update it restarts the agent first (it rejects document fields it does not know,
 so it must not be older than the GUI), then stops portitor-web, migrates the database
-and starts it again. It finds the firewall from the first firewall's agent URL under *Firewalls*. A
+and starts it again. It finds the agents from the agent URLs under *Firewalls* (or `--agent HOST,HOST...`)
+and updates them one at a time, an HA pair's secondary first, waiting until each hears
+its peer again, so one host of the pair keeps forwarding. A
 systemd unit you changed is shown as a diff and kept unless you confirm. `--dry-run`
 shows what would change; `--source` builds and installs a source checkout instead.
 

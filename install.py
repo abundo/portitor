@@ -18,14 +18,18 @@ prints the remaining steps.
 
 What gets installed:
   (default)       whatever is installed on this host. When that includes
-                  portitor-web, also the agent at the host of its first
-                  firewall's agent URL (`portitor-web agent-url`).
+                  portitor-web, also the agents at the hosts of its
+                  firewalls' agent URLs (`portitor-web agent-url --all`).
   --web [HOST]    portitor-web on HOST (default this host), over SSH like
                   --agent (plus the agent, as above; an agent URL on
                   localhost then means HOST)
   --agent [HOST]  portitor-agent on HOST (default this host), over SSH as
                   --ssh-user (default portitor, which needs passwordless
-                  sudo; the installer prints how to set that up), or root
+                  sudo; the installer prints how to set that up), or root.
+                  Repeat it, or separate hosts by commas, for several. Agents
+                  are updated one at a time, an HA pair's secondary first,
+                  each waiting until the one before hears its HA peer again,
+                  so one host of the pair keeps forwarding.
   --no-agent      never the agent
 
 Where from:
@@ -274,7 +278,7 @@ def need_sudo() -> bool:
 
 def ensure_sudo(plan: "Plan", dry_run: bool) -> None:
     """Asks for the sudo password up front, when a host is this one."""
-    if dry_run or not need_sudo() or not any(h and h.local for h in (plan.web, plan.agent)):
+    if dry_run or not need_sudo() or not any(h.local for h in plan.hosts()):
         return
     log("==> Requesting sudo access")
     if subprocess.run(["sudo", "-v"], check=False).returncode != 0:
@@ -461,12 +465,20 @@ def install_unit(host: Host, src: Path, assume_yes: bool) -> str:
 @dataclass
 class Plan:
     web: Host | None
-    agent: Host | None
+    agents: list[Host]
+    # Why the agents go in this order (HA pairs), for describe.
+    agent_order_note: str = ""
+    # Agents in an HA pair before the install, by name: after a restart
+    # the agent's socket may not answer yet, so it is not asked again.
+    ha_agents: set[str] = field(default_factory=set)
+
+    def hosts(self) -> list[Host]:
+        return ([self.web] if self.web else []) + self.agents
 
     def describe(self) -> list[str]:
-        out = []
-        if self.agent:
-            out.append(f"portitor-agent on {self.agent}")
+        out = [f"portitor-agent on {a}" for a in self.agents]
+        if self.agent_order_note:
+            out.append(self.agent_order_note)
         if self.web:
             out.append(f"portitor-web on {self.web}")
         return out
@@ -512,11 +524,23 @@ def install_agent(host: Host, binary: Path, deploy: Path, version: str, assume_y
     if actions[AGENT_UNIT] == "installed":
         host.systemctl("enable", AGENT_UNIT)
     host.systemctl("restart", AGENT_UNIT)
-    if not host.dry_run:
-        time.sleep(2)
-        if host.run(f"systemctl is-active --quiet {AGENT_UNIT}", check=False, mutate=False).returncode:
-            warn(f"{AGENT_UNIT} is not running on {host}; see journalctl -u {AGENT_UNIT}")
+    if not host.dry_run and not agent_answers(host):
+        warn(f"{AGENT_UNIT} does not answer on {host}; see journalctl -u {AGENT_UNIT}")
     verify_version(host, AGENT_BIN, version)
+
+
+def agent_answers(host: Host, timeout: float = 20) -> bool:
+    """Whether the restarted agent answers on its socket within timeout.
+    A unit that is active for a moment may still be failing at start and
+    restarting (no token, a listen address it can't bind): that one never
+    answers."""
+    deadline = time.monotonic() + timeout
+    while True:
+        if host.run(f"{CLI_LINK} show ha >/dev/null 2>&1", check=False, mutate=False, root=True).returncode == 0:
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(1)
 
 
 def add_bind_repo(host: Host, deploy: Path) -> bool:
@@ -717,11 +741,17 @@ def install(
     """roots: arch -> directory with the binaries. deploy: units and example configs."""
     # The agent first: it rejects fields it does not know, so it must never
     # be older than the GUI that deploys to it.
-    if plan.agent:
-        install_agent(plan.agent, roots[archs["agent"]] / "portitor-agent", deploy, version, assume_yes)
-    # portitor-config next to the agent: asked for, or there already.
-    if plan.agent and (config or plan.agent.exists(CONFIG_LINK)):
-        install_config(plan.agent, roots[archs["agent"]] / "portitor-web", deploy, version, assume_yes)
+    # One at a time, an HA pair's secondary first (make_plan's order): each
+    # agent restarts fenced unless it hears its peer, so the next waits
+    # until the restarted one does, and one host of the pair keeps forwarding.
+    for agent in plan.agents:
+        root = roots[archs[agent_key(agent)]]
+        install_agent(agent, root / "portitor-agent", deploy, version, assume_yes)
+        # portitor-config next to the agent: asked for, or there already.
+        if config or agent.exists(CONFIG_LINK):
+            install_config(agent, root / "portitor-web", deploy, version, assume_yes)
+        if agent.name in plan.ha_agents:
+            wait_for_ha_peer(agent)
     if plan.web:
         install_web(plan.web, roots[archs["web"]] / "portitor-web", deploy, version, assume_yes)
     log("==> Done")
@@ -787,43 +817,90 @@ def install_config(host: Host, binary: Path, deploy: Path, version: str, assume_
 # ---------------------------------------------------------------------------
 
 
-def agent_host_from_settings(web: Host) -> str | None:
-    """Host part of the agent URL in the settings of portitor-web on web.
+def agent_hosts_from_settings(web: Host) -> list[str]:
+    """Hosts of the agent URLs of portitor-web's firewalls on web: all of
+    them (`agent-url --all`), or the first with a portitor-web from before
+    several firewalls.
 
     An agent on localhost is on the web host itself.
     """
     if not (web.exists(WEB_BIN) and web.exists(WEB_CONFIG)):
-        return None
-    proc = web.run(
-        f"runuser -u {WEB_USER} -- {WEB_BIN} -f {WEB_CONFIG} agent-url",
-        check=False, mutate=False, capture=True, root=True,
-    )
+        return []
+    cmd = f"runuser -u {WEB_USER} -- {WEB_BIN} -f {WEB_CONFIG} agent-url"
+    proc = web.run(f"{cmd} --all", check=False, mutate=False, capture=True, root=True)
+    if proc.returncode != 0:
+        proc = web.run(cmd, check=False, mutate=False, capture=True, root=True)
     if proc.returncode != 0:
         raise InstallError(
-            "could not read the agent URL from portitor-web's settings: "
+            "could not read the agent URLs from portitor-web's settings: "
             f"{(proc.stderr or proc.stdout).strip()}\n"
             "Pass --agent HOST, or --no-agent to update portitor-web alone."
         )
-    url = proc.stdout.strip()
-    if not url:
-        return None
-    host = urllib.parse.urlsplit(url).hostname
-    if not host:
-        raise InstallError(f"cannot find a host in the agent URL {url!r}; pass --agent HOST")
-    if not web.local and host in LOCAL_NAMES:
-        return web.name
-    return host
+    hosts = []
+    for url in proc.stdout.split():
+        host = urllib.parse.urlsplit(url).hostname
+        if not host:
+            raise InstallError(f"cannot find a host in the agent URL {url!r}; pass --agent HOST")
+        if not web.local and host in LOCAL_NAMES:
+            host = web.name
+        if host not in hosts:
+            hosts.append(host)
+    return hosts
+
+
+def ha_status(host: Host) -> dict:
+    """The agent's HA status (`portitor show ha --json`); empty when it
+    is not in a pair, not running, or too old to tell."""
+    if host.dry_run or not host.exists(CLI_LINK):
+        return {}
+    proc = host.run(f"{CLI_LINK} --json show ha", check=False, mutate=False, capture=True, root=True)
+    if proc.returncode != 0:
+        return {}
+    try:
+        st = json.loads(proc.stdout)
+    except ValueError:
+        return {}
+    return st if isinstance(st, dict) and st.get("node") else {}
+
+
+def order_agents(agents: list[Host]) -> tuple[list[Host], str, set[str]]:
+    """HA secondaries first, then the rest, each in the given order; a
+    note on it when there is a pair; and the agents in a pair."""
+    nodes = {a.name: ha_status(a).get("node", "") for a in agents}
+    ordered = sorted(agents, key=lambda a: nodes[a.name] != "secondary")
+    paired = {n for n, node in nodes.items() if node}
+    if not paired:
+        return ordered, "", paired
+    return ordered, "one agent at a time, HA secondaries first", paired
+
+
+def wait_for_ha_peer(host: Host, timeout: float = 60) -> None:
+    """Waits until a restarted agent in an HA pair hears its peer, so the
+    pair's other host can go next. Warns when it doesn't in time."""
+    if host.dry_run:
+        return
+    log(f"==> Waiting for portitor-agent on {host} to hear its HA peer")
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        st = ha_status(host)
+        if st.get("peer_alive"):
+            return
+        time.sleep(2)
+    warn(f"portitor-agent on {host} does not hear its HA peer after {timeout:.0f} s; "
+         f"see `portitor show ha` there")
 
 
 def make_plan(args: argparse.Namespace) -> Plan:
     web_host: str | None = args.web
-    agent_host: str | None = args.agent
-    if web_host is None and agent_host is None:
+    agent_hosts: list[str] = [h for arg in args.agent or [] for h in arg.split(",") if h]
+    if args.agent and not agent_hosts:
+        raise InstallError("--agent: no host")
+    if web_host is None and not agent_hosts:
         if Path(WEB_BIN).exists():
             web_host = "localhost"
         elif Path(AGENT_BIN).exists():
-            agent_host = "localhost"
-        if web_host is None and agent_host is None:
+            agent_hosts = ["localhost"]
+        if web_host is None and not agent_hosts:
             raise InstallError(
                 "Portitor is not installed on this host. For a first install pass "
                 "--web [HOST] and/or --agent [HOST]."
@@ -831,22 +908,28 @@ def make_plan(args: argparse.Namespace) -> Plan:
     web = Host(web_host, args.ssh_user, args.dry_run) if web_host is not None else None
     if web:
         check_ssh(web)
-    if web and agent_host is None and not args.no_agent:
-        agent_host = agent_host_from_settings(web)
-        if agent_host:
-            log(f"==> Agent from portitor-web's settings: {agent_host}")
+    if web and not agent_hosts and not args.no_agent:
+        agent_hosts = agent_hosts_from_settings(web)
+        if agent_hosts:
+            log(f"==> Agents of portitor-web's firewalls: {', '.join(agent_hosts)}")
         else:
             log("==> No agent URL in portitor-web's settings; not updating an agent")
     if args.no_agent:
-        agent_host = None
-    elif web and agent_host is None and web.exists(AGENT_BIN):
-        agent_host = web.name
-    if not web and agent_host is None:
+        agent_hosts = []
+    elif web and not agent_hosts and web.exists(AGENT_BIN):
+        agent_hosts = [web.name]
+    if not web and not agent_hosts:
         raise InstallError("nothing to install")
-    agent = Host(agent_host, args.ssh_user, args.dry_run) if agent_host else None
-    if agent:
+    agents: list[Host] = []
+    for name in agent_hosts:
+        agent = Host(name, args.ssh_user, args.dry_run)
+        # The same machine by two names (localhost and its address) once.
+        if any(a.name == agent.name or (a.local and agent.local) for a in agents):
+            continue
         check_ssh(agent)
-    return Plan(web=web, agent=agent)
+        agents.append(agent)
+    agents, note, paired = order_agents(agents)
+    return Plan(web=web, agents=agents, agent_order_note=note, ha_agents=paired)
 
 
 def ssh_setup_help(host: str, user: str) -> str:
@@ -888,20 +971,36 @@ def check_ssh(host: Host) -> None:
         )
 
 
+def agent_key(host: Host, first: bool = False) -> str:
+    """An agent's key in plan_archs and installed_versions: "agent" for
+    the first (the keys `--list --json` has always had), else "agent HOST"."""
+    return "agent" if first else f"agent {host.name}"
+
+
 def plan_archs(plan: Plan) -> dict[str, str]:
-    archs = {"web": local_arch(), "agent": local_arch()}
-    for kind, host in (("web", plan.web), ("agent", plan.agent)):
-        if host and not host.local:
-            archs[kind] = host.arch()
+    """Architecture of each host: "web" and agent_key(agent)."""
+    archs = {"web": plan.web.arch() if plan.web and not plan.web.local else local_arch()}
+    for a in plan.agents:
+        archs[agent_key(a)] = local_arch() if a.local else a.arch()
     return archs
+
+
+def needed_archs(plan: Plan, archs: dict[str, str]) -> dict[str, set[str]]:
+    """Architecture -> the binaries the hosts of it need."""
+    out: dict[str, set[str]] = {}
+    if plan.web:
+        out.setdefault(archs["web"], set()).add("portitor-web")
+    for a in plan.agents:
+        out.setdefault(archs[agent_key(a)], set()).add("portitor-agent")
+    return out
 
 
 def installed_versions(plan: Plan) -> dict[str, str]:
     out = {}
     if plan.web:
         out["web"] = plan.web.version(WEB_BIN) or "not installed"
-    if plan.agent:
-        out["agent"] = plan.agent.version(AGENT_BIN) or "not installed"
+    for i, a in enumerate(plan.agents):
+        out[agent_key(a, first=i == 0)] = a.version(AGENT_BIN) or "not installed"
     return out
 
 
@@ -911,8 +1010,8 @@ def primary_version(installed: dict[str, str]) -> str:
 
 def summary_lines(plan: Plan, installed: dict[str, str]) -> list[str]:
     lines = []
-    if plan.agent:
-        lines.append(f"agent  {installed.get('agent', '?'):<22} {plan.agent}")
+    for i, a in enumerate(plan.agents):
+        lines.append(f"agent  {installed.get(agent_key(a, first=i == 0), '?'):<22} {a}")
     if plan.web:
         lines.append(f"web    {installed.get('web', '?'):<22} {plan.web}")
     return lines
@@ -1477,7 +1576,7 @@ def run_release_installer(rel: Release, root: Path, work: Path) -> int | None:
 def main_release(args: argparse.Namespace) -> int:
     plan = make_plan(args)
     archs = plan_archs(plan)
-    needed = {archs[k] for k, h in (("web", plan.web), ("agent", plan.agent)) if h}
+    needed = set(needed_archs(plan, archs))
     installed = installed_versions(plan)
     cur = primary_version(installed)
 
@@ -1581,10 +1680,8 @@ def main_source(args: argparse.Namespace) -> int:
         build(["make", "release"], {"CGO_ENABLED": "0"}, args.dry_run)
     roots = {local_arch(): build_dir}
     # What each architecture needs: the local one always gets both (make release).
-    needs: dict[str, set[str]] = {local_arch(): {"portitor-web", "portitor-agent"}}
-    for kind, host in (("web", plan.web), ("agent", plan.agent)):
-        if host:
-            needs.setdefault(archs[kind], set()).add(f"portitor-{kind}")
+    needs = needed_archs(plan, archs)
+    needs[local_arch()] = {"portitor-web", "portitor-agent"}
     for arch, names in needs.items():
         if arch == local_arch():
             continue
@@ -1657,6 +1754,7 @@ Examples:
   ./install.py --source --dry-run       from this tree, show what would change
   ./install.py --source --agent 192.168.1.1   this tree's agent onto the firewall only
   ./install.py --source --web gui.example.net --agent fw.example.net   this tree onto both
+  ./install.py --install latest --agent fw1,fw2   both hosts of an HA pair, secondary first
   ./install.py --local portitor_1.2.0_linux_amd64.tar.gz --web --agent
 
 Environment:
@@ -1667,8 +1765,9 @@ Environment:
     what = p.add_argument_group("what to install (default: what is installed on this host)")
     what.add_argument("--web", nargs="?", const="localhost", metavar="HOST",
                       help="portitor-web on HOST (default this host)")
-    what.add_argument("--agent", nargs="?", const="localhost", metavar="HOST",
-                      help="portitor-agent on HOST (default this host)")
+    what.add_argument("--agent", nargs="?", const="localhost", action="append", metavar="HOST[,HOST...]",
+                      help="portitor-agent on HOST (default this host); repeat it, or separate hosts "
+                           "by commas, for several (one at a time, HA secondaries first)")
     what.add_argument("--no-agent", action="store_true", help="never install or update the agent")
     what.add_argument("--config", action="store_true",
                       help="also portitor-config on the agent's host (updated with the agent once there)")

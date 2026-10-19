@@ -180,9 +180,10 @@ func main() {
 	importVF.Flags().BoolVar(&importLocal, "local", false, "with --manager: the virtual firewall stays this firewall's own, only its shared objects are the manager's")
 	root.AddCommand(importVF)
 
-	root.AddCommand(&cobra.Command{
+	var allAgents bool
+	agentURLCmd := &cobra.Command{
 		Use:   "agent-url",
-		Short: "Print the first firewall's agent URL (install.py updates that host)",
+		Short: "Print the first firewall's agent URL, or with --all every firewall's, one per line (install.py updates those hosts)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := web.LoadConfig(configFile)
@@ -193,16 +194,22 @@ func main() {
 			if err != nil {
 				return err
 			}
+			q := db.Model(&models.Firewall{}).Order("id")
+			if !allAgents {
+				q = q.Limit(1)
+			}
 			var urls []string
-			if err := db.Model(&models.Firewall{}).Order("id").Limit(1).Pluck("agent_url", &urls).Error; err != nil {
+			if err := q.Pluck("agent_url", &urls).Error; err != nil {
 				return err
 			}
-			if len(urls) > 0 {
-				fmt.Println(urls[0])
+			for _, u := range urls {
+				fmt.Println(u)
 			}
 			return nil
 		},
-	})
+	}
+	agentURLCmd.Flags().BoolVar(&allAgents, "all", false, "every firewall's agent URL")
+	root.AddCommand(agentURLCmd)
 
 	var bo web.BootstrapOptions
 	var tokenFile, address, wanAddress, gateway, dhcpRange, dhcpDNS, defaultRoute, join string

@@ -32,7 +32,7 @@ must pass WebSocket upgrades for the console.
 portitor-web start                 # serve the GUI and API
 portitor-web migrate               # apply database migrations; start never migrates
 portitor-web createadmin <user>    # create an admin, or reset a user's password and make them admin
-portitor-web agent-url             # print the first firewall's agent URL (used by install.py)
+portitor-web agent-url [--all]     # print the first (or every) firewall's agent URL (used by install.py)
 portitor-web bootstrap ...         # first configuration of an ISO install (portitor-setup runs it)
 ```
 
