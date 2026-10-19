@@ -139,8 +139,9 @@ func deleteIpList(tx *gorm.DB, l *models.IpList) error {
 	return nil
 }
 
-// eachIPListRef calls visit for every rule address entry, where IP list
-// references can be. Rules where visit changed an entry are saved.
+// eachIPListRef calls visit for every address entry of the rules and
+// policy routes, where IP list references can be. Rows where visit
+// changed an entry are saved.
 func eachIPListRef(tx *gorm.DB, visit func(where string, entry *string) bool) error {
 	instName := map[uint]string{}
 	var instances []models.Instance
@@ -167,6 +168,26 @@ func eachIPListRef(tx *gorm.DB, visit func(where string, entry *string) bool) er
 		}
 		if changed {
 			if err := tx.Model(&models.Rule{}).Where("id = ?", r.ID).UpdateColumns(map[string]any{"src_addrs": r.SrcAddrs, "dst_addrs": r.DstAddrs}).Error; err != nil {
+				return err
+			}
+		}
+	}
+	var policies []models.PolicyRoute
+	if err := tx.Order("position, id").Find(&policies).Error; err != nil {
+		return err
+	}
+	for _, p := range policies {
+		where := fmt.Sprintf("%s in %s", names.policy(p), instName[p.InstanceID])
+		changed := false
+		for _, list := range []models.StringList{p.SrcAddrs, p.DstAddrs} {
+			for i := range list {
+				if visit(where, &list[i]) {
+					changed = true
+				}
+			}
+		}
+		if changed {
+			if err := tx.Model(&models.PolicyRoute{}).Where("id = ?", p.ID).UpdateColumns(map[string]any{"src_addrs": p.SrcAddrs, "dst_addrs": p.DstAddrs}).Error; err != nil {
 				return err
 			}
 		}

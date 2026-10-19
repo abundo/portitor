@@ -51,6 +51,9 @@ type Instance struct {
 	RateLimits []RateLimit `json:"rate_limits,omitempty"`
 	NAT        []NATRule   `json:"nat"`
 	Routes     []Route     `json:"routes"`
+	// PolicyRoutes route the forwarded packets they match by routes of
+	// their own, tried in order (policyroute.go).
+	PolicyRoutes []PolicyRoute `json:"policy_routes,omitempty"`
 	// StaticNeighbours are permanent ARP (IPv4) and ND (IPv6) entries.
 	StaticNeighbours []StaticNeighbour `json:"static_neighbours,omitempty"`
 	DHCP             DHCPServer        `json:"dhcp"`

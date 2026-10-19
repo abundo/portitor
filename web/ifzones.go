@@ -127,9 +127,9 @@ func deleteInterfaceZone(tx *gorm.DB, z *models.InterfaceZone) error {
 	return refuseIfaceInUse(tx, z.InstanceID, z.Name)
 }
 
-// ifaceLists visits every interface list of the instance's rules and NAT
-// rules (and, with zones, of its interface zones). Rows where visit
-// returns true are saved.
+// ifaceLists visits every interface list of the instance's rules, NAT
+// rules and policy routes (and, with zones, of its interface zones). Rows
+// where visit returns true are saved.
 func ifaceLists(tx *gorm.DB, instanceID uint, zones bool, visit func(where string, list *models.StringList) bool) error {
 	save := func(model any, id uint, cols map[string]any) error {
 		return tx.Model(model).Where("id = ?", id).UpdateColumns(cols).Error
@@ -157,6 +157,17 @@ func ifaceLists(tx *gorm.DB, instanceID uint, zones bool, visit func(where strin
 		a, b := visit(where, &n.InInterfaces), visit(where, &n.OutInterfaces)
 		if a || b {
 			if err := save(&models.NatRule{}, n.ID, map[string]any{"in_interfaces": n.InInterfaces, "out_interfaces": n.OutInterfaces}); err != nil {
+				return err
+			}
+		}
+	}
+	var policies []models.PolicyRoute
+	if err := tx.Where("instance_id = ?", instanceID).Order("position, id").Find(&policies).Error; err != nil {
+		return err
+	}
+	for _, p := range policies {
+		if visit(names.policy(p), &p.InInterfaces) {
+			if err := save(&models.PolicyRoute{}, p.ID, map[string]any{"in_interfaces": p.InInterfaces}); err != nil {
 				return err
 			}
 		}

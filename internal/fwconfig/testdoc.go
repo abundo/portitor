@@ -103,6 +103,11 @@ func SampleDocument() Document {
 				Routes: []Route{
 					{Destination: "10.50.0.0/16", Gateway: "192.168.1.254"},
 				},
+				PolicyRoutes: []PolicyRoute{
+					{InInterfaces: []string{"lan"}, DstAddrs: []string{"192.168.50.0/24"}, Description: "office: main table"},
+					{InInterfaces: []string{"iot"}, Services: []ServiceMatch{{Protocol: ProtoTCP, DstPorts: "http,https"}}, Gateways: []string{"192.168.1.253"}, Description: "IoT web by the LAN router"},
+					{SrcAddrs: []string{"$admins"}, Interface: "wg0", Description: "admins through the VPN"},
+				},
 				DHCP: DHCPServer{
 					Enabled:    true,
 					DomainName: "home.arpa",

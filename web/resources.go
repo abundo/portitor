@@ -668,6 +668,53 @@ func prepareRoute(tx *gorm.DB, r, _ *models.Route) error {
 	return nil
 }
 
+func preparePolicyRoute(tx *gorm.DB, r, old *models.PolicyRoute) error {
+	if old != nil {
+		r.InstanceID = old.InstanceID // rows stay in their instance
+	}
+	if err := instanceExists(tx, r.InstanceID); err != nil {
+		return err
+	}
+	if err := oneOf("family", r.Family, "", "ipv4", "ipv6"); err != nil {
+		return err
+	}
+	r.InInterfaces = dedupe(cleanList(r.InInterfaces))
+	if err := checkIfaceList(tx, r.InstanceID, "incoming interfaces", r.InInterfaces); err != nil {
+		return err
+	}
+	r.SrcAddrs, r.DstAddrs = cleanList(r.SrcAddrs), cleanList(r.DstAddrs)
+	if err := checkEntries(tx, "source", r.SrcAddrs, entryRule); err != nil {
+		return err
+	}
+	if err := checkEntries(tx, "destination", r.DstAddrs, entryRule); err != nil {
+		return err
+	}
+	r.Services = dedupe(cleanList(r.Services))
+	if err := checkServices(tx, r.Services); err != nil {
+		return err
+	}
+	r.Gateway = strings.TrimSpace(r.Gateway)
+	if r.Gateway != "" {
+		if err := checkHost(tx, "gateway", r.Gateway); err != nil {
+			return err
+		}
+	}
+	if r.InterfaceID != nil {
+		var i models.Interface
+		if tx.First(&i, *r.InterfaceID).Error != nil || i.InstanceID != r.InstanceID {
+			return bad("interface must belong to the same virtual firewall")
+		}
+		if i.Vrf != "" {
+			return bad(fmt.Sprintf("interface %s is in VRF %s; policy routes use the main table", i.Name, i.Vrf))
+		}
+	}
+	r.Description = strings.TrimSpace(r.Description)
+	if old == nil && r.Position == 0 {
+		r.Position = nextPosition(tx, "policy_routes", r.InstanceID)
+	}
+	return nil
+}
+
 func nextPosition(tx *gorm.DB, table string, instanceID uint) int {
 	var max *int
 	tx.Table(table).Where("instance_id = ?", instanceID).Select("MAX(position)").Scan(&max)

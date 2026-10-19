@@ -390,6 +390,8 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 		checkComment(v, rp, r.Description)
 	}
 
+	v.policyRoutes(p, in, ifaces, ifaceRefs)
+
 	for i, n := range in.NAT {
 		np := fmt.Sprintf("%s: nat rule %d", p, i+1)
 		ifaceRefs(np, n.InInterfaces)

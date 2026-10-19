@@ -213,6 +213,7 @@ type ipRule struct {
 	Iif      string `json:"iif"`
 	Table    string `json:"table"`
 	Protocol string `json:"protocol"`
+	Fwmark   string `json:"fwmark"`
 }
 
 func parseRules(data []byte) ([]ipRule, error) {
@@ -233,7 +234,9 @@ type ipTableRoute struct {
 }
 
 // planNAT64Rules removes the agent's IPv4 rules that aren't the loop
-// devices' (or the VRFs', planVRFRules) and adds the missing ones, and points each device's table at it. A
+// devices' (or the VRFs', planVRFRules, or the policy routes',
+// planPolicyRules) and adds the missing ones, and points each device's
+// table at it. A
 // stale table's route went with its device.
 func planNAT64Rules(ns string, devs []fwconfig.NAT64Device, have []ipRule, routes []ipTableRoute) []command {
 	key := func(pref int, src, iif, table string) string {
@@ -246,8 +249,8 @@ func planNAT64Rules(ns string, devs []fwconfig.NAT64Device, have []ipRule, route
 	var cmds []command
 	haveKeys := map[string]bool{}
 	for _, r := range have {
-		if r.Protocol != RouteProto || r.Priority == VRFSourcePref {
-			continue // not the agent's, or the VRFs' (vrf.go)
+		if r.Protocol != RouteProto || r.Priority == VRFSourcePref || fwconfig.IsPolicyRoutePref(r.Priority) {
+			continue // not the agent's, or the VRFs' (vrf.go) or policy routes' (policyroute.go)
 		}
 		k := key(r.Priority, r.Src, r.Iif, r.Table)
 		if want[k] && !haveKeys[k] {

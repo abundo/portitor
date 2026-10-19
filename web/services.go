@@ -83,8 +83,8 @@ func deleteService(tx *gorm.DB, s *models.Service) error {
 	return nil
 }
 
-// eachServiceRef calls visit for every entry of the rules' service lists.
-// Rules where visit changed an entry are saved.
+// eachServiceRef calls visit for every entry of the rules' and policy
+// routes' service lists. Rows where visit changed an entry are saved.
 func eachServiceRef(tx *gorm.DB, visit func(where string, entry *string) bool) error {
 	instName := map[uint]string{}
 	var instances []models.Instance
@@ -109,6 +109,24 @@ func eachServiceRef(tx *gorm.DB, visit func(where string, entry *string) bool) e
 		}
 		if changed {
 			if err := tx.Model(&models.Rule{}).Where("id = ?", r.ID).UpdateColumn("services", r.Services).Error; err != nil {
+				return err
+			}
+		}
+	}
+	var policies []models.PolicyRoute
+	if err := tx.Order("position, id").Find(&policies).Error; err != nil {
+		return err
+	}
+	for _, p := range policies {
+		where := fmt.Sprintf("%s in %s", names.policy(p), instName[p.InstanceID])
+		changed := false
+		for i := range p.Services {
+			if visit(where, &p.Services[i]) {
+				changed = true
+			}
+		}
+		if changed {
+			if err := tx.Model(&models.PolicyRoute{}).Where("id = ?", p.ID).UpdateColumn("services", p.Services).Error; err != nil {
 				return err
 			}
 		}

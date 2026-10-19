@@ -280,6 +280,19 @@ func eachObjectRef(tx *gorm.DB, visit func(where string, entry *string) bool) er
 			}
 		}
 	}
+	var policyRoutes []models.PolicyRoute
+	if err := tx.Order("position, id").Find(&policyRoutes).Error; err != nil {
+		return err
+	}
+	for _, p := range policyRoutes {
+		where := fmt.Sprintf("%s in %s", names.policy(p), instName[p.InstanceID])
+		a, b, c := list(where, p.SrcAddrs), list(where, p.DstAddrs), visit(where, &p.Gateway)
+		if a || b || c {
+			if err := save(&models.PolicyRoute{}, p.ID, map[string]any{"src_addrs": p.SrcAddrs, "dst_addrs": p.DstAddrs, "gateway": p.Gateway}); err != nil {
+				return err
+			}
+		}
+	}
 	var routes []models.Route
 	if err := tx.Find(&routes).Error; err != nil {
 		return err
@@ -345,6 +358,10 @@ func (n ruleNamer) rule(r models.Rule) string {
 
 func (n ruleNamer) nat(r models.NatRule) string {
 	return n.next(fmt.Sprintf("%d nat", r.InstanceID), "NAT rule", r.Description)
+}
+
+func (n ruleNamer) policy(r models.PolicyRoute) string {
+	return n.next(fmt.Sprintf("%d policy", r.InstanceID), "policy route", r.Description)
 }
 
 func (n ruleNamer) next(key, kind, desc string) string {

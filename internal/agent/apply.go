@@ -289,12 +289,21 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 		// Conntrack timestamps and accounting give the Connections page start
 		// times and packet and byte counts.
 		sysctls := []string{"net.ipv4.ip_forward=1", "net.ipv6.conf.all.forwarding=1", "net.netfilter.nf_conntrack_timestamp=1", "net.netfilter.nf_conntrack_acct=1"}
+		// A policy route whose interface lost its carrier is passed over,
+		// to the main table (fwconfig.PolicyRoute).
+		policyDevs := in.PolicyRouteDevices()
 		for _, ifc := range in.Interfaces {
 			ra := "0"
 			if ifc.IPv6AcceptRA {
 				ra = "2" // accept RAs even though forwarding is on
 			}
-			sysctls = append(sysctls, "net.ipv6.conf."+strings.ReplaceAll(ifc.Name, ".", "/")+".accept_ra="+ra)
+			name := strings.ReplaceAll(ifc.Name, ".", "/")
+			linkdown := "0"
+			if policyDevs[ifc.Name] {
+				linkdown = "1"
+			}
+			sysctls = append(sysctls, "net.ipv6.conf."+name+".accept_ra="+ra,
+				"net.ipv4.conf."+name+".ignore_routes_with_linkdown="+linkdown, "net.ipv6.conf."+name+".ignore_routes_with_linkdown="+linkdown)
 		}
 		sysctls = append(sysctls, vrrpSysctls(vrrpDevs)...)
 		// The firewall's own services (in the default VRF) answer on a
@@ -373,6 +382,7 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 			}
 		}
 		soft = append(soft, a.doEach(ctx, planRoutes(ns, slices.Concat(in.KernelRoutes(), in.WireGuardRoutes(), nat64Routes(in)), routes, in.RouteTable)))
+		soft = append(soft, a.applyPolicyRoutes(ctx, in, ns))
 		soft = append(soft, a.applyStaticNeighbours(ctx, in))
 		a.setNamedEndpoints(ctx, in)
 

@@ -37,6 +37,12 @@ func TestValidateVRF(t *testing.T) {
 		{"vrf device given", func(in *Instance) {
 			in.Interfaces = append(in.Interfaces, Interface{Name: "red", Kind: KindVRF, IPv4Mode: ModeNone, VRFTable: 7})
 		}, "a vrf device without a vrf"},
+		{"policy route from a vrf", func(in *Instance) {
+			in.PolicyRoutes = []PolicyRoute{{InInterfaces: []string{"eth3"}, Gateways: []string{"10.0.0.1"}}}
+		}, "policy route 1: interface eth3 is in vrf blue"},
+		{"policy route into a vrf", func(in *Instance) {
+			in.PolicyRoutes = []PolicyRoute{{Interface: "eth3"}}
+		}, "policy route 1: interface eth3 is in a vrf"},
 		{"route to no vrf", func(in *Instance) {
 			in.Routes = append(in.Routes, Route{Destination: "default", Gateway: "10.0.0.1", VRF: "eth2"})
 		}, `vrf "eth2" is not a vrf`},

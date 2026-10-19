@@ -26,6 +26,7 @@ const router = createRouter({
         { path: 'neighbours', component: () => import('@/views/NeighboursPage.vue') },
         { path: 'routing', component: () => import('@/views/RoutingPage.vue') },
         { path: 'static-routes', component: () => import('@/views/RoutesPage.vue') },
+        { path: 'policy-routes', component: () => import('@/views/PolicyRoutesPage.vue') },
         { path: 'routing-objects', component: () => import('@/views/RoutingObjectsPage.vue') },
         { path: 'vrf', component: () => import('@/views/VrfPage.vue') },
         { path: 'bgp', component: () => import('@/views/BgpPage.vue') },

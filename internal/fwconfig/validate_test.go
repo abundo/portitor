@@ -157,6 +157,18 @@ func TestValidateCatchesProblems(t *testing.T) {
 			n := StaticNeighbour{Interface: "eth0", Address: "10.0.0.5", MAC: "02:00:00:00:00:01"}
 			d.Instances[0].StaticNeighbours = []StaticNeighbour{n, n}
 		}, `10.0.0.5 on eth0 twice`},
+		{"policy route gateway", func(d *Document) { d.Instances[0].PolicyRoutes[1].Gateways = []string{"192.168.1.300"} }, `policy route 2: invalid gateway "192.168.1.300"`},
+		{"policy route two gateways", func(d *Document) {
+			d.Instances[0].PolicyRoutes[1].Gateways = []string{"192.168.1.253", "192.168.1.252"}
+		}, "policy route 2: one gateway per ip version"},
+		{"policy route interface", func(d *Document) { d.Instances[0].PolicyRoutes[2].Interface = "eth9" }, `policy route 3: unknown interface "eth9"`},
+		{"policy route link-local", func(d *Document) { d.Instances[0].PolicyRoutes[1].Gateways = []string{"fe80::1"} }, "a link-local gateway needs an interface"},
+		{"policy route family", func(d *Document) {
+			d.Instances[0].PolicyRoutes[1].DstAddrs = []string{"fd00:9::/64"}
+		}, "policy route 2: its addresses, services and ip version don't fit its gateways"},
+		{"policy route family gateway", func(d *Document) { d.Instances[0].PolicyRoutes[1].Family = "ipv6" }, "policy route 2: no ipv6 gateway"},
+		{"policy route in interfaces", func(d *Document) { d.Instances[0].PolicyRoutes[0].InInterfaces = []string{"nope"} }, `policy route 1: unknown interface or interface zone "nope"`},
+		{"policy route address", func(d *Document) { d.Instances[0].PolicyRoutes[0].SrcAddrs = []string{"10.0.0.0/33"} }, "policy route 1"},
 		{"ra unknown interface", func(d *Document) { d.Instances[0].RA[0].Interface = "eth9" }, "unknown interface"},
 		{"ra v4 dns", func(d *Document) { d.Instances[0].RA[0].RDNSS = []string{"192.168.1.1"} }, "invalid IPv6 dns server"},
 		{"dhcpv6 without ra", func(d *Document) { d.Instances[0].RA = nil }, "DHCPv6 needs router advertisements"},

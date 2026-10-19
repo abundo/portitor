@@ -598,6 +598,27 @@ type Route struct {
 	Description string `json:"description"`
 }
 
+// PolicyRoute routes the forwarded traffic it matches by a gateway and/or
+// interface of its own (fwconfig.PolicyRoute); with neither it is an
+// exception that keeps the main table. The instance's are tried by
+// Position. The lists hold names, as a rule's do.
+type PolicyRoute struct {
+	Base
+	InstanceID   uint       `json:"instance_id"`
+	Position     int        `json:"position"`
+	InInterfaces StringList `json:"in_interfaces"`
+	Family       string     `json:"family"`
+	SrcAddrs     StringList `json:"src_addrs"`
+	DstAddrs     StringList `json:"dst_addrs"`
+	Services     StringList `json:"services"`
+	// Gateway is an address or a host's name (one address per IP
+	// version); "" is none.
+	Gateway     string `json:"gateway"`
+	InterfaceID *uint  `json:"interface_id"`
+	Enabled     bool   `json:"enabled"`
+	Description string `json:"description"`
+}
+
 // PortName is a custom port name NAT port fields take next to the built-in
 // ones (fwconfig.Services); the builder writes its number.
 type PortName struct {
@@ -1050,7 +1071,7 @@ func All() []any {
 		&DyndnsClient{}, &DyndnsRecord{}, &Certificate{}, &IpList{}, &Task{}, &Service{}, &RateLimit{}, &ObjectFolder{}, &Role{}, &RoleMember{}, &RoleInstance{},
 		&RoutePrefixList{}, &RouteAsPathList{}, &RouteCommunityList{}, &RouteMap{}, &BgpConfig{}, &BgpPeerGroup{}, &BgpNeighbor{},
 		&OspfConfig{}, &OspfInterface{}, &IsisConfig{}, &IsisInterface{}, &VrrpRouter{}, &BfdInterface{}, &AddressList{},
-		&SnmpUser{}, &Vrf{}, &AcmeProxyPolicy{}, &StaticNeighbour{}, &PortName{},
+		&SnmpUser{}, &Vrf{}, &AcmeProxyPolicy{}, &StaticNeighbour{}, &PortName{}, &PolicyRoute{},
 	}
 }
 

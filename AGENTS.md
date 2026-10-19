@@ -221,7 +221,8 @@ docs and user-facing messages.
   with `ifb-`), and the VRRP macvlan devices (`fwconfig.VRRPDevices`; names may not
   start with `vrrp4-` or `vrrp6-`), and the Jool instance `fwconfig.JoolInstance` in
   each namespace, its loop devices (`n64-*`) and the `ip rule`s with protocol 99
-  (NAT64's IPv4 ones, and the VRF source rules at `agent.VRFSourcePref`),
+  (NAT64's IPv4 ones, the VRF source rules at `agent.VRFSourcePref`, and the
+  policy routes' at `fwconfig.PolicyRouteTable(i)`) with the policy routes' tables,
   and, without EVPN, the all-zero forwarding entries (flood list) of its vxlan devices. Leave everything else alone (docker, libvirt, other tables).
   Accept rules set the connection mark (`ct mark`) to the rule's id, so the
   rule counters (`render.RuleCounter`) count whole connections; the agent owns
@@ -476,6 +477,21 @@ the certificate portitor-web serves, chosen under Settings
   writes `router ... vrf <name>` and a `vrf` block for staticd's BFD routes; the
   agent asks vtysh with `vrf <name>` (`inVRF`), so the status answers carry a
   `vrf`. EVPN's sessions are the main table's (a VRF joins with its L3VNI), and 464XLAT is not allowed in a VRF.
+- **Policy routes** (`fwconfig/policyroute.go`, `render/policyroute.go`,
+  `internal/agent/policyroute.go`, Routing → Policy) are per instance
+  (`policy_routes`, ordered by `position`, the first match decides): a forward
+  rule's match (interface and zone names, addresses and IP lists, services; kept
+  by `ifaceLists`, `eachObjectRef`, `eachServiceRef` and `eachIPListRef`) and a
+  gateway (address or host, one per IP version) and/or interface (by id, removed
+  with it); neither is an exception that keeps the main table. The ruleset's
+  `prerouting_policy` chain (priority mangle + 1, after NAT64's, leaving marked
+  packets alone) sets `fwconfig.PolicyRouteMark(i)`; the agent keeps `fwmark
+  <mark> lookup <table>` and the default route in table `PolicyRouteTable(i)`
+  (pref = table, proto 99) per IP version it routes, and a missing route falls
+  through to main, as does one whose device lost its carrier: the agent sets
+  `ignore_routes_with_linkdown` on `Instance.PolicyRouteDevices`. The forward chain clears the mark before the shapers' `meta
+  mark 0` test (`writePolicyRouteUnmark`). They are the main table's: no
+  interface in a VRF.
 - **Dual stack:** rule and NAT address lists may mix IPv4 and IPv6;
   `fwconfig.MatchFamilies` decides which versions a rule is rendered for, and
   validation uses the same function.

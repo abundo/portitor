@@ -176,6 +176,7 @@ func Nftables(in *fwconfig.Instance, lockout *AntiLockout, paths Paths) string {
 	b.WriteString("\t\ttype filter hook forward priority filter; policy drop;\n")
 	writeNAT64LoopDrop(b, in)
 	writePolicers(b, in, fwconfig.ChainForward)
+	writePolicyRouteUnmark(b, in)
 	writeShaperMarks(b, in, fwconfig.ChainForward)
 	if counted {
 		b.WriteString(connCountRules)
@@ -251,6 +252,7 @@ func Nftables(in *fwconfig.Instance, lockout *AntiLockout, paths Paths) string {
 	b.WriteString("\t}\n\n")
 
 	writeNAT64(b, in, counted)
+	writePolicyRoutes(b, in)
 
 	// ----- NAT -----
 	b.WriteString("\tchain prerouting_nat {\n")

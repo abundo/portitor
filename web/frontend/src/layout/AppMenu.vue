@@ -56,6 +56,7 @@ const sections = computed(() => [
       { label: 'Objects', icon: 'i-lucide-list-filter', to: '/routing-objects' },
       { label: 'VRF', icon: 'i-lucide-split', to: '/vrf' },
       { label: 'Static', icon: 'i-lucide-signpost', to: '/static-routes' },
+      { label: 'Policy', icon: 'i-lucide-milestone', to: '/policy-routes' },
       { label: 'BFD', icon: 'i-lucide-heart-pulse', to: '/bfd' },
       { label: 'VRRP', icon: 'i-lucide-git-fork', to: '/vrrp' },
       { label: 'IS-IS', icon: 'i-lucide-route', to: '/isis' },

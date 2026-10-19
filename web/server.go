@@ -163,6 +163,7 @@ func (s *Server) Echo() *echo.Echo {
 	(&resource[models.WgPeer, *models.WgPeer]{db: s.db, scope: byParent("InterfaceID", "interface_id", "interfaces"), tenantWrites: tenantAll, filters: []string{"interface_id"}, order: "name", prepare: prepareWgPeer, present: presentWgPeer}).register(s, g, "/wg/peers")
 	(&resource[models.Link, *models.Link]{db: s.db, scope: linkScope, order: "name", prepare: prepareLink, beforeDelete: deleteLink}).register(s, g, "/links")
 	(&resource[models.Route, *models.Route]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "destination", prepare: prepareRoute}).register(s, g, "/routes")
+	(&resource[models.PolicyRoute, *models.PolicyRoute]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "position, id", prepare: preparePolicyRoute}).register(s, g, "/policy-routes")
 	(&resource[models.StaticNeighbour, *models.StaticNeighbour]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "address", prepare: prepareStaticNeighbour}).register(s, g, "/static-neighbours")
 	(&resource[models.RoutePrefixList, *models.RoutePrefixList]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "name", prepare: preparePrefixList, beforeDelete: deletePrefixList}).register(s, g, "/routing/prefix-lists")
 	(&resource[models.RouteAsPathList, *models.RouteAsPathList]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "name", prepare: prepareAsPathList, beforeDelete: deleteAsPathList}).register(s, g, "/routing/as-path-lists")
@@ -202,7 +203,7 @@ func (s *Server) Echo() *echo.Echo {
 	(&resource[models.PortName, *models.PortName]{db: s.db, order: "name", prepare: preparePortName, beforeDelete: deletePortName}).register(s, g, "/port-names")
 
 	// Instance admins use these too; the handlers check the instance.
-	for _, r := range []string{"PUT /api/dns/zones/:id/records", "PUT /api/dyndns/clients/:id/records", "POST /api/rules/reorder", "POST /api/nat/reorder",
+	for _, r := range []string{"PUT /api/dns/zones/:id/records", "PUT /api/dyndns/clients/:id/records", "POST /api/rules/reorder", "POST /api/nat/reorder", "POST /api/policy-routes/reorder",
 		"POST /api/interfaces/:id/wg-rekey", "POST /api/wg/import", "POST /api/agent/capture", "POST /api/agent/trace", "POST /api/agent/servicelog", "POST /api/agent/connections", "POST /api/agent/connections/flush", "POST /api/agent/dhcp/renew",
 		"POST /api/deploy/apply", "POST /api/deploy/confirm", "POST /api/deploy/rollback"} {
 		s.tenantWrites[r] = true
@@ -222,6 +223,7 @@ func (s *Server) Echo() *echo.Echo {
 	})
 	g.POST("/rules/reorder", s.handleReorder("rules"))
 	g.POST("/nat/reorder", s.handleReorder("nat_rules"))
+	g.POST("/policy-routes/reorder", s.handleReorder("policy_routes"))
 	g.GET("/wg/peers/:id/config", s.handleWgClientConfig)
 	g.POST("/interfaces/:id/wg-rekey", s.handleWgRekey)
 	g.POST("/wg/import", s.handleWgImport)

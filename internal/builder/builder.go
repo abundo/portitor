@@ -33,6 +33,7 @@ type data struct {
 	peers          []models.WgPeer
 	links          []models.Link
 	routes         []models.Route
+	policyRoutes   []models.PolicyRoute
 	neighbours     []models.StaticNeighbour
 	rules          []models.Rule
 	nat            []models.NatRule
@@ -83,6 +84,7 @@ func load(db *gorm.DB) (*data, error) {
 		{&d.peers, "name"},
 		{&d.links, "name"},
 		{&d.routes, "id"},
+		{&d.policyRoutes, "position, id"},
 		{&d.neighbours, "id"},
 		{&d.rules, "position, id"},
 		{&d.nat, "position, id"},
@@ -558,6 +560,37 @@ func buildPeer(db *gorm.DB, generation int64, only map[string]bool, firewallID u
 				if !matched {
 					addf("%s: gateway %s has no address of the same IP version as %s", where, r.Gateway, dst)
 				}
+			}
+		}
+
+		for _, r := range d.policyRoutes {
+			if r.InstanceID != mi.ID || !r.Enabled {
+				continue
+			}
+			where := fmt.Sprintf("instance %s: policy route %d", mi.Name, len(in.PolicyRoutes)+1)
+			failed = false
+			pr := fwconfig.PolicyRoute{
+				InInterfaces: []string(r.InInterfaces),
+				Family:       r.Family,
+				SrcAddrs:     expand(where+": source", ruleAddrs, r.SrcAddrs),
+				DstAddrs:     expand(where+": destination", ruleAddrs, r.DstAddrs),
+				Services:     expandServices(where+": services", r.Services),
+				Description:  r.Description,
+			}
+			if r.Gateway != "" {
+				gws, err := objs.Host(r.Gateway)
+				if err != nil {
+					addf("%s: gateway: %v", where, err)
+					continue
+				}
+				pr.Gateways = gws
+			}
+			if r.InterfaceID != nil {
+				pr.Interface = ifaceByID[*r.InterfaceID].Name
+			}
+			// An unresolved name must not leave a wider match.
+			if !failed {
+				in.PolicyRoutes = append(in.PolicyRoutes, pr)
 			}
 		}
 
