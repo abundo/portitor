@@ -133,6 +133,7 @@ router.beforeEach((to) => {
     return { name: 'login', query: to.fullPath !== '/' ? { next: to.fullPath } : {} }
   }
   if (to.name === 'login' && auth.isAuthenticated) return { name: 'dashboard' }
+  if (auth.mustSetupTotp && to.path !== '/profile' && !to.meta.public) return { path: '/profile' }
   if (to.matched.some((r) => r.meta.admin) && !auth.isAdmin) return { name: 'dashboard' }
   // An instance admin captures on their instances.
   if (to.matched.some((r) => r.meta.deployer) && !auth.canDeploy) return { name: 'dashboard' }

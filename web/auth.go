@@ -148,9 +148,23 @@ var tenantDenied = map[string]bool{
 // viewerWrites are the requests other than GET a viewer may make: their own
 // profile and password, and the deploy preview, which changes nothing.
 var viewerWrites = map[string]bool{
+	"PUT /api/me":                      true,
+	"POST /api/me/password":            true,
+	"POST /api/me/totp/setup":          true,
+	"POST /api/me/totp/enable":         true,
+	"POST /api/me/totp/disable":        true,
+	"POST /api/me/totp/recovery-codes": true,
+	"POST /api/deploy/preview":         true,
+}
+
+// totpSetupRoutes are all a user who must use two-factor login may do
+// before they have set it up.
+var totpSetupRoutes = map[string]bool{
+	"GET /api/me":              true,
 	"PUT /api/me":              true,
-	"POST /api/me/password":    true,
-	"POST /api/deploy/preview": true,
+	"GET /api/me/totp":         true,
+	"POST /api/me/totp/setup":  true,
+	"POST /api/me/totp/enable": true,
 }
 
 // requireRole lets a global admin through, limits everyone else to reading,
@@ -162,6 +176,9 @@ func (s *Server) requireRole(next echo.HandlerFunc) echo.HandlerFunc {
 		u := currentUser(c)
 		if u == nil {
 			return errJSON(c, http.StatusUnauthorized, "not logged in")
+		}
+		if u.TOTPRequired && u.TOTPSecret == "" && !totpSetupRoutes[c.Request().Method+" "+c.Path()] {
+			return c.JSON(http.StatusForbidden, map[string]any{"error": "set up two-factor login under My settings first", "totp_setup_required": true})
 		}
 		a, err := accessOf(s.db, u)
 		if err != nil {
@@ -283,6 +300,9 @@ func (s *Server) handleLogin(c *echo.Context) error {
 		Username string `json:"username"`
 		Password string `json:"password"`
 		Remember bool   `json:"remember"`
+		// Code is the TOTP code, or a recovery code, of a user with
+		// two-factor login on.
+		Code string `json:"code"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return errJSON(c, http.StatusBadRequest, "invalid request")
@@ -296,6 +316,20 @@ func (s *Server) handleLogin(c *echo.Context) error {
 	if bcrypt.CompareHashAndPassword(hash, []byte(req.Password)) != nil || !found {
 		s.limiter.fail(ip)
 		return errJSON(c, http.StatusUnauthorized, "wrong username or password")
+	}
+	if u.TOTPSecret != "" {
+		// A missing code is no failure: the GUI asks for it.
+		if strings.TrimSpace(req.Code) == "" {
+			return c.JSON(http.StatusUnauthorized, map[string]any{"error": "enter the code from your authenticator app", "totp_required": true})
+		}
+		ok, err := checkSecondFactor(s.db, &u, req.Code)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			s.limiter.fail(ip)
+			return c.JSON(http.StatusUnauthorized, map[string]any{"error": "wrong code", "totp_required": true})
+		}
 	}
 	s.limiter.reset(ip)
 	if err := s.issueSession(c, &u, req.Remember); err != nil {

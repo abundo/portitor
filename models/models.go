@@ -13,6 +13,8 @@ import (
 	"slices"
 	"time"
 
+	"gorm.io/gorm"
+
 	"github.com/abundo/portitor/internal/fwconfig"
 )
 
@@ -241,6 +243,28 @@ type User struct {
 	// ManagedBy names the manager that pushed it (portitor-config);
 	// changed there only.
 	ManagedBy string `json:"managed_by"`
+	// TOTPSecret is the base32 TOTP secret of a user with two-factor
+	// login on, else empty. TOTPPending is one being set up, on once a
+	// code from it is checked.
+	TOTPSecret  string `gorm:"column:totp_secret" json:"-"`
+	TOTPPending string `gorm:"column:totp_pending" json:"-"`
+	// TOTPLastStep is the time step of the last code accepted, so a code
+	// is good once.
+	TOTPLastStep int64 `gorm:"column:totp_last_step" json:"-"`
+	// RecoveryCodes are the unused recovery codes' SHA-256 hashes (hex, a
+	// JSON list).
+	RecoveryCodes string `json:"-"`
+	// TOTPRequired: the user must set up two-factor login before they
+	// may do anything else; an admin sets it.
+	TOTPRequired bool `gorm:"column:totp_required" json:"totp_required"`
+	// TOTPEnabled tells the GUI whether TOTPSecret is set.
+	TOTPEnabled bool `gorm:"-" json:"totp_enabled"`
+}
+
+// AfterFind sets TOTPEnabled.
+func (u *User) AfterFind(*gorm.DB) error {
+	u.TOTPEnabled = u.TOTPSecret != ""
+	return nil
 }
 
 // DateFormats are the values of User.DateFormat: the browser's language,
@@ -342,6 +366,8 @@ type Settings struct {
 	// VirtualFirewalls shows the Virtual firewalls and Links pages and
 	// allows more than one instance; it can't be turned off while there are.
 	VirtualFirewalls bool `json:"virtual_firewalls"`
+	// TOTPDefault is the new user form's "Require two-factor login".
+	TOTPDefault bool `gorm:"column:totp_default" json:"totp_default"`
 	// LastCommit numbers the commits: the Revert snapshots and
 	// Deployment.CommitID.
 	LastCommit int64     `json:"last_commit"`

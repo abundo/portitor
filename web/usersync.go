@@ -5,10 +5,12 @@ package web
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 
 	"github.com/labstack/echo/v5"
 	"gorm.io/gorm"
@@ -39,6 +41,11 @@ type ManagedUser struct {
 	Email        string `json:"email"`
 	Role         string `json:"role"`
 	PasswordHash string `json:"password_hash"`
+	// TOTPSecret and RecoveryCodes (hashes) are the user's two-factor
+	// login, so it is the same on the firewall.
+	TOTPSecret    string `json:"totp_secret,omitempty"`
+	RecoveryCodes string `json:"recovery_codes,omitempty"`
+	TOTPRequired  bool   `json:"totp_required,omitempty"`
 }
 
 type ManagedMember struct {
@@ -59,7 +66,8 @@ func (s *Server) managedUsers(firewallID uint) (*ManagedUsers, error) {
 	name := map[uint]string{}
 	for _, u := range users {
 		name[u.ID] = u.Username
-		out.Users = append(out.Users, ManagedUser{Username: u.Username, FullName: u.FullName, Email: u.Email, Role: u.Role, PasswordHash: u.PasswordHash})
+		out.Users = append(out.Users, ManagedUser{Username: u.Username, FullName: u.FullName, Email: u.Email, Role: u.Role, PasswordHash: u.PasswordHash,
+			TOTPSecret: u.TOTPSecret, RecoveryCodes: u.RecoveryCodes, TOTPRequired: u.TOTPRequired})
 	}
 	var rows []struct {
 		Instance string
@@ -118,8 +126,15 @@ func syncUsers(tx *gorm.DB, req *ManagedUsers) ([]string, error) {
 			return nil, err
 		}
 		keep[mu.Username] = true
-		changed := u.ID == 0 || u.Role != mu.Role || u.PasswordHash != mu.PasswordHash
+		changed := u.ID == 0 || u.Role != mu.Role || u.PasswordHash != mu.PasswordHash || u.TOTPSecret != mu.TOTPSecret
 		u.Username, u.FullName, u.Email, u.Role, u.PasswordHash, u.ManagedBy = mu.Username, mu.FullName, mu.Email, mu.Role, mu.PasswordHash, req.Manager
+		if u.TOTPSecret != mu.TOTPSecret {
+			u.TOTPLastStep = 0
+			u.RecoveryCodes = mu.RecoveryCodes
+		} else {
+			u.RecoveryCodes = mergeRecovery(u.RecoveryCodes, mu.RecoveryCodes)
+		}
+		u.TOTPSecret, u.TOTPPending, u.TOTPRequired = mu.TOTPSecret, "", mu.TOTPRequired
 		if u.DateFormat == "" {
 			u.DateFormat = "locale"
 		}
@@ -183,4 +198,24 @@ func (s *Server) pushUsers(ctx context.Context, fw *models.Firewall, cfg configA
 		slog.Warn("users not pushed: the firewall has local ones of the name", "firewall", fw.Name, "users", skipped)
 	}
 	return nil
+}
+
+// mergeRecovery keeps the recovery codes left both here and on the manager,
+// so one used on either is used up, unless they have none in common: the
+// manager made new ones.
+func mergeRecovery(local, manager string) string {
+	var l, m []string
+	_ = json.Unmarshal([]byte(local), &l)
+	_ = json.Unmarshal([]byte(manager), &m)
+	var both []string
+	for _, h := range l {
+		if slices.Contains(m, h) {
+			both = append(both, h)
+		}
+	}
+	if len(both) == 0 {
+		return manager
+	}
+	out, _ := json.Marshal(both)
+	return string(out)
 }

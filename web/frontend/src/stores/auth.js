@@ -27,6 +27,9 @@ export const useAuthStore = defineStore('auth', {
     },
     // canDeploy: a global admin, or the admin of an instance (who deploys
     // just their instances).
+    // mustSetupTotp: an admin requires two-factor login of the user, who
+    // has not set it up; the server refuses everything else until then.
+    mustSetupTotp: (s) => !!s.user?.totp_required && !s.user?.totp_enabled,
     canDeploy: (s) =>
       s.user?.role === 'admin' || Object.values(s.user?.access ?? {}).includes('admin'),
   },
@@ -45,8 +48,8 @@ export const useAuthStore = defineStore('auth', {
         this.loaded = true
       }
     },
-    async login(username, password, remember) {
-      this.setUser(await api.login(username, password, remember))
+    async login(username, password, remember, code) {
+      this.setUser(await api.login(username, password, remember, code))
     },
     async updateProfile(body) {
       this.setUser(await api.updateMe(body))

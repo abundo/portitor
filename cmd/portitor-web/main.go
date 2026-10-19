@@ -124,6 +124,23 @@ func main() {
 		},
 	})
 
+	root.AddCommand(&cobra.Command{
+		Use:   "reset-2fa <username>",
+		Short: "Turn off a user's two-factor login (a lost phone and recovery codes)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, srv, err := load()
+			if err != nil {
+				return err
+			}
+			if err := web.ResetTOTP(srv, args[0]); err != nil {
+				return err
+			}
+			fmt.Println("two-factor login of", args[0], "turned off")
+			return nil
+		},
+	})
+
 	addConsoleCommands(root, load)
 
 	var agentURL, agentTokenFile, agentFingerprint string

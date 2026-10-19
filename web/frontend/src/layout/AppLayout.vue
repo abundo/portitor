@@ -14,8 +14,10 @@ import ServiceDialog from '@/components/ServiceDialog.vue'
 import { useInstanceStore } from '@/stores/instances'
 import { useDeployStore } from '@/stores/deploy'
 import { useLogPanel } from '@/composables/useLogPanel'
+import { useAuthStore } from '@/stores/auth'
 
 const instances = useInstanceStore()
+const auth = useAuthStore()
 const deploy = useDeployStore()
 const mobileMenu = ref(false)
 // On a wide screen the menu is a sidebar the button hides and shows, and the
@@ -86,10 +88,19 @@ watch(
   },
 )
 
-onMounted(() => {
+// Until two-factor login is set up (an admin requires it), the server
+// answers only the profile's requests.
+function loadAll() {
   instances.load()
   deploy.refresh()
+}
+onMounted(() => {
+  if (!auth.mustSetupTotp) loadAll()
 })
+watch(
+  () => auth.mustSetupTotp,
+  (must) => !must && loadAll(),
+)
 </script>
 
 <template>

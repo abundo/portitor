@@ -466,6 +466,7 @@ func (s *Server) handlePutSettings(c *echo.Context) error {
 		// WebCertificateID: absent keeps, 0 clears.
 		WebCertificateID *uint `json:"web_certificate_id"`
 		VirtualFirewalls *bool `json:"virtual_firewalls"`
+		TOTPDefault      *bool `json:"totp_default"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return errJSON(c, http.StatusBadRequest, "invalid request")
@@ -504,6 +505,9 @@ func (s *Server) handlePutSettings(c *echo.Context) error {
 		}
 		st.VirtualFirewalls = *req.VirtualFirewalls
 	}
+	if req.TOTPDefault != nil {
+		st.TOTPDefault = *req.TOTPDefault
+	}
 	oldCert := st.WebCertificateID
 	if req.WebCertificateID != nil {
 		st.WebCertificateID = nil
@@ -536,9 +540,18 @@ func (s *Server) handleCreateUser(c *echo.Context) error {
 		Username string `json:"username"`
 		Password string `json:"password"`
 		Role     string `json:"role"`
+		// TOTPRequired: absent takes the default under Settings.
+		TOTPRequired *bool `json:"totp_required"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return errJSON(c, http.StatusBadRequest, "invalid request")
+	}
+	if req.TOTPRequired == nil {
+		st, err := s.settings()
+		if err != nil {
+			return err
+		}
+		req.TOTPRequired = &st.TOTPDefault
 	}
 	req.Username = strings.TrimSpace(req.Username)
 	if req.Username == "" {
@@ -550,7 +563,7 @@ func (s *Server) handleCreateUser(c *echo.Context) error {
 	if !validRole(req.Role) {
 		return errJSON(c, http.StatusBadRequest, "role must be admin, viewer or none")
 	}
-	u := models.User{Username: req.Username, Role: req.Role}
+	u := models.User{Username: req.Username, Role: req.Role, TOTPRequired: *req.TOTPRequired}
 	if err := setPassword(&u, req.Password); err != nil {
 		return errJSON(c, http.StatusBadRequest, err.Error())
 	}
@@ -569,16 +582,18 @@ func validLevel(level string) bool {
 	return level == models.RoleAdmin || level == models.RoleViewer
 }
 
-// handleUpdateUser changes another user's role and ends their sessions, so
-// a demoted admin loses an open console too. The caller's own role cannot
-// change, which keeps at least one admin.
+// handleUpdateUser changes another user's role, which ends their sessions
+// so a demoted admin loses an open console too, and whether they must use
+// two-factor login. The caller's own role cannot change, which keeps at
+// least one admin.
 func (s *Server) handleUpdateUser(c *echo.Context) error {
 	id, err := echo.PathParam[uint](c, "id")
 	if err != nil {
 		return errJSON(c, http.StatusNotFound, "not found")
 	}
 	var req struct {
-		Role string `json:"role"`
+		Role         string `json:"role"`
+		TOTPRequired *bool  `json:"totp_required"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return errJSON(c, http.StatusBadRequest, "invalid request")
@@ -586,7 +601,7 @@ func (s *Server) handleUpdateUser(c *echo.Context) error {
 	if !validRole(req.Role) {
 		return errJSON(c, http.StatusBadRequest, "role must be admin, viewer or none")
 	}
-	if id == currentUser(c).ID {
+	if id == currentUser(c).ID && req.Role != currentUser(c).Role {
 		return errJSON(c, http.StatusBadRequest, "you cannot change your own role")
 	}
 	var u models.User
@@ -596,9 +611,17 @@ func (s *Server) handleUpdateUser(c *echo.Context) error {
 	if u.ManagedBy != "" {
 		return errJSON(c, http.StatusForbidden, "managed by "+u.ManagedBy+": change it there")
 	}
+	changed := false
 	if u.Role != req.Role {
 		u.Role = req.Role
 		u.TokenVersion++
+		changed = true
+	}
+	if req.TOTPRequired != nil && *req.TOTPRequired != u.TOTPRequired {
+		u.TOTPRequired = *req.TOTPRequired
+		changed = true
+	}
+	if changed {
 		if err := s.db.Save(&u).Error; err != nil {
 			return err
 		}

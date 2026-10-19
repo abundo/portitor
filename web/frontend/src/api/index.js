@@ -68,12 +68,23 @@ export const customServices = crud('/custom-services')
 export const portNames = crud('/port-names')
 
 export const api = {
-  login: (username, password, remember) =>
-    http.post('/login', { username, password, remember }).then((r) => r.data),
+  // code: a TOTP or recovery code, for a user with two-factor login on (a
+  // 401 with totp_required asks for it).
+  login: (username, password, remember, code = '') =>
+    http.post('/login', { username, password, remember, code }).then((r) => r.data),
   logout: () => http.post('/logout', {}),
   me: () => http.get('/me').then((r) => r.data),
   updateMe: (body) => http.put('/me', body).then((r) => r.data),
   changePassword: (current, next) => http.post('/me/password', { current, new: next }),
+  // Two-factor login: setup makes a pending secret ({ secret, uri }), on once
+  // enable checks a code from it; enable and recoveryCodes answer with new
+  // recovery codes ({ recovery_codes }).
+  totpStatus: () => http.get('/me/totp').then((r) => r.data),
+  totpSetup: (password) => http.post('/me/totp/setup', { password }).then((r) => r.data),
+  totpEnable: (code) => http.post('/me/totp/enable', { code }).then((r) => r.data),
+  totpDisable: (password) => http.post('/me/totp/disable', { password }),
+  recoveryCodes: (password) =>
+    http.post('/me/totp/recovery-codes', { password }).then((r) => r.data),
   version: () => http.get('/version').then((r) => r.data),
   acmeCAs: () => http.get('/certificates/cas').then((r) => r.data ?? []),
   certificateDownload: (id, format) =>
@@ -124,13 +135,18 @@ export const api = {
   restore: (data, passphrase) =>
     http.post('/backup/restore', { data, passphrase }).then((r) => r.data),
   users: () => http.get('/users').then((r) => r.data),
-  createUser: (username, password, role) =>
-    http.post('/users', { username, password, role }).then((r) => r.data),
-  // Changing a user's role ends their sessions.
-  setUserRole: (id, role) => http.put(`/users/${id}`, { role }).then((r) => r.data),
+  createUser: (username, password, role, totpRequired) =>
+    http
+      .post('/users', { username, password, role, totp_required: totpRequired })
+      .then((r) => r.data),
+  // updateUser sets { role, totp_required }; changing the role ends their
+  // sessions.
+  updateUser: (id, body) => http.put(`/users/${id}`, body).then((r) => r.data),
   // Setting a user's password ends their sessions.
   setUserPassword: (id, password) => http.post(`/users/${id}/password`, { password }),
   deleteUser: (id) => http.delete(`/users/${id}`),
+  // Turns off another user's two-factor login.
+  resetUserTotp: (id) => http.delete(`/users/${id}/totp`),
   // A role's members are [{ user_id, level }]; saving replaces them.
   roles: () => http.get('/roles').then((r) => r.data),
   createRole: (body) => http.post('/roles', body).then((r) => r.data),

@@ -32,6 +32,7 @@ must pass WebSocket upgrades for the console.
 portitor-web start                 # serve the GUI and API
 portitor-web migrate               # apply database migrations; start never migrates
 portitor-web createadmin <user>    # create an admin, or reset a user's password and make them admin
+portitor-web reset-2fa <user>      # turn off a user's two-factor login (portitor-config reset-2fa on a firewall)
 portitor-web agent-url [--all]     # print the first (or every) firewall's agent URL (used by install.py)
 portitor-web bootstrap ...         # first configuration of an ISO install (portitor-setup runs it)
 ```
@@ -186,6 +187,31 @@ of everything: it restores the database as it was then.
 An admin can reset another user's password: open the user and pick *Reset password*,
 then enter the new password twice. Your own password is changed under *Change
 password*, which asks for the current one.
+
+### Two-factor login
+
+Under *My settings*, *Two-factor login* → *Set up* asks for your password, then shows
+a QR code (and its key) for an authenticator app (TOTP: Google Authenticator, Aegis,
+1Password and the like). It goes on only once you enter a code from the app, so a
+mistyped key can't lock you out. Then it shows ten recovery codes, once: copy or
+download them. Each logs you in once in place of a code. *New recovery codes*
+replaces them; *Turn off* asks for your password.
+
+An admin can require it of a user: *Require two-factor login* in the user's form. Such
+a user can do nothing but set it up (they land on *My settings*), and can't turn it
+off. New users start with the default under *Settings* (*Require two-factor login of
+new users*); changing that leaves existing users as they are.
+
+With it on, the login asks for a code after the password. A code is good once, and a
+wrong one counts as a failed login. Users shows who has it on.
+
+A user who has lost both phone and recovery codes: an admin opens the user and picks
+*Reset 2FA* (an admin can always do this, for a managed user too), or, on the console, `sudo -u portitor portitor-web reset-2fa <user>`
+(`portitor-config reset-2fa <user>` on a firewall run by portitor-config). The user
+then logs in with the password alone and can set it up again; if it is required of
+them, they must. A user a manager pushed
+to portitor-config has the manager's two-factor login; it is set up and reset there
+(a console reset on the firewall lasts until the manager's next commit).
 
 A login lasts 12 hours, or 30 days with *Remember me*. Changing your password ends
 your other sessions; deleting a user, changing their role or resetting their password

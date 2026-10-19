@@ -20,6 +20,7 @@ const settings = reactive({
   capture_rate_kbps: 1000,
   web_certificate_id: 0,
   virtual_firewalls: false,
+  totp_default: false,
 })
 const settingsForm = usePageForm(settings)
 const webTLS = ref(false)
@@ -99,6 +100,12 @@ async function saveSettings() {
             v-model="settings.virtual_firewalls"
             :disabled="settings.virtual_firewalls && instStore.list.some((i) => !i.is_default)"
           />
+        </UFormField>
+        <UFormField
+          label="Require two-factor login of new users"
+          help="Where the new user form's Require two-factor login starts. Users already there keep theirs: change it under Users."
+        >
+          <USwitch v-model="settings.totp_default" />
         </UFormField>
         <UButton type="submit">Save</UButton>
       </form>

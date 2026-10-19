@@ -6,6 +6,7 @@ import { reactive } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import { errMsg } from '@/api/http'
 import { useAuthStore } from '@/stores/auth'
+import TwoFactorCard from '@/components/TwoFactorCard.vue'
 import { usePageForm } from '@/composables/useFormGuard'
 import { dateFormat, datetime } from '@/utils/time'
 
@@ -60,6 +61,14 @@ async function save() {
 
 <template>
   <div class="max-w-xl space-y-4">
+    <UAlert
+      v-if="auth.mustSetupTotp"
+      color="warning"
+      variant="subtle"
+      icon="i-lucide-shield-alert"
+      title="Set up two-factor login"
+      description="An admin requires two-factor login for your user. Set it up below to use Portitor."
+    />
     <div class="card">
       <div class="mb-3 text-lg font-semibold">My settings</div>
       <form class="space-y-3" @submit.prevent="save">
@@ -85,6 +94,7 @@ async function save() {
         </div>
       </form>
     </div>
+    <TwoFactorCard />
     <div class="card">
       <div class="mb-3 text-lg font-semibold">Display</div>
       <UFormField label="Date and time format" :help="`Saved for your user. Now: ${datetime(now)}`">

@@ -15,7 +15,7 @@ import { useSearch } from '@/utils/search'
 
 const toast = useToast()
 const auth = useAuthStore()
-const { confirmDelete } = useConfirm()
+const { ask, confirmDelete } = useConfirm()
 const users = ref([])
 const roles = [
   { label: 'Admin', value: 'admin', description: 'Changes and deploys everything' },
@@ -37,20 +37,46 @@ const { search, filtered: shownUsers } = useSearch(
 const open = ref(false)
 const saving = ref(false)
 const editing = ref(null)
-const form = reactive({ username: '', password: '', repeat: '', role: 'viewer' })
+const form = reactive({
+  username: '',
+  password: '',
+  repeat: '',
+  role: 'viewer',
+  totp_required: false,
+})
 const guard = useFormGuard(form, open)
 const isSelf = computed(() => editing.value?.id === auth.user?.id)
 const formMismatch = computed(() => form.repeat !== '' && form.password !== form.repeat)
 
-function openCreate() {
+// openCreate starts "Require two-factor login" from the default under
+// Settings.
+async function openCreate() {
   editing.value = null
-  Object.assign(form, { username: '', password: '', repeat: '', role: 'viewer' })
+  let totp = false
+  try {
+    totp = !!(await api.settings()).totp_default
+  } catch (err) {
+    toast.add({ title: errMsg(err), color: 'error' })
+  }
+  Object.assign(form, {
+    username: '',
+    password: '',
+    repeat: '',
+    role: 'viewer',
+    totp_required: totp,
+  })
   open.value = true
 }
 
 function openEdit(u) {
   editing.value = u
-  Object.assign(form, { username: u.username, password: '', repeat: '', role: u.role })
+  Object.assign(form, {
+    username: u.username,
+    password: '',
+    repeat: '',
+    role: u.role,
+    totp_required: !!u.totp_required,
+  })
   open.value = true
 }
 
@@ -61,9 +87,16 @@ async function save() {
   }
   saving.value = true
   try {
-    if (!editing.value) await api.createUser(form.username, form.password, form.role)
-    else if (!isSelf.value && form.role !== editing.value.role)
-      await api.setUserRole(editing.value.id, form.role)
+    if (!editing.value)
+      await api.createUser(form.username, form.password, form.role, form.totp_required)
+    else if (
+      form.role !== editing.value.role ||
+      form.totp_required !== !!editing.value.totp_required
+    )
+      await api.updateUser(editing.value.id, {
+        role: form.role,
+        totp_required: form.totp_required,
+      })
     open.value = false
     await load()
   } catch (err) {
@@ -106,6 +139,25 @@ async function savePassword() {
   }
 }
 
+async function resetTotp() {
+  const u = editing.value
+  const ok = await ask({
+    title: 'Reset two-factor login',
+    message: u.totp_required
+      ? `Turn off two-factor login for ${u.username}? It is required of them, so they must set it up again at their next login.`
+      : `Turn off two-factor login for ${u.username}? They log in with their password alone and can set it up again.`,
+  })
+  if (!ok) return
+  try {
+    await api.resetUserTotp(u.id)
+    toast.add({ title: `Two-factor login of ${u.username} is off`, color: 'success' })
+    open.value = false
+    await load()
+  } catch (err) {
+    toast.add({ title: errMsg(err), color: 'error' })
+  }
+}
+
 async function remove() {
   if (!(await confirmDelete(`user ${editing.value.username}`))) return
   try {
@@ -134,6 +186,7 @@ async function remove() {
           { id: 'actions', header: '' },
           { accessorKey: 'username', header: 'Username' },
           { id: 'role', header: 'Role' },
+          { id: 'totp', header: '2FA' },
         ]"
       >
         <template #actions-cell="{ row }">
@@ -149,6 +202,16 @@ async function remove() {
         <template #role-cell="{ row }">
           {{ roleLabel(row.original.role) }}
           <span v-if="row.original.id === auth.user?.id" class="text-muted">(you)</span>
+        </template>
+        <template #totp-cell="{ row }">
+          <UBadge v-if="row.original.totp_enabled" color="success" variant="subtle" label="On" />
+          <UBadge
+            v-else-if="row.original.totp_required"
+            color="warning"
+            variant="subtle"
+            label="Required, not set up"
+          />
+          <span v-else class="text-muted">Off</span>
         </template>
         <template #empty>
           <div class="py-6 text-center text-muted">No user matches.</div>
@@ -206,6 +269,13 @@ async function remove() {
         >
           <USelect v-model="form.role" :items="roles" class="w-full" :disabled="isSelf" />
         </UFormField>
+        <UFormField
+          :ui="inlineField"
+          label="Require two-factor login"
+          help="The user must set up two-factor login (TOTP) before they can do anything else."
+        >
+          <USwitch v-model="form.totp_required" :disabled="!!editing?.managed_by" />
+        </UFormField>
       </form>
     </template>
     <template #footer>
@@ -225,6 +295,14 @@ async function remove() {
           icon="i-lucide-key-round"
           label="Reset password"
           @click="openPassword"
+        />
+        <UButton
+          v-if="editing && !isSelf && editing.totp_enabled"
+          color="neutral"
+          variant="ghost"
+          icon="i-lucide-shield-off"
+          label="Reset 2FA"
+          @click="resetTotp"
         />
         <UButton class="ms-auto" color="neutral" variant="ghost" @click="guard.close">
           Cancel

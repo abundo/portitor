@@ -237,7 +237,7 @@ docs and user-facing messages.
   failed rollback keeps the change pending and retries. `RolledBack` means the
   restore succeeded; `RollbackErrors` says it didn't.
 - **Secrets:** fields tagged `json:"-"` (WireGuard private/preshared keys, TSIG
-  secrets, DNS update provider settings, IP list passwords and API keys, agent token, password hashes) never reach
+  secrets, DNS update provider settings, IP list passwords and API keys, agent token, password hashes, TOTP secrets and recovery code hashes) never reach
   the browser. The generic CRUD
   `PUT` merges the body onto the stored row, so those fields can't be overwritten
   through the API either; a secret the user enters comes in through a write-only
