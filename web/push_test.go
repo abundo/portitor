@@ -57,8 +57,12 @@ func (e envConfig) Commit(_ context.Context, manager string, confirm int) (*comm
 	var res commitResult
 	return &res, e.call("POST", "/commit", map[string]any{"manager": manager, "confirm_timeout": confirm}, &res)
 }
-func (e envConfig) Confirm(context.Context) error  { return e.call("POST", "/confirm", map[string]any{}, nil) }
-func (e envConfig) Rollback(context.Context) error { return e.call("POST", "/rollback", map[string]any{}, nil) }
+func (e envConfig) Confirm(context.Context) error {
+	return e.call("POST", "/confirm", map[string]any{}, nil)
+}
+func (e envConfig) Rollback(context.Context) error {
+	return e.call("POST", "/rollback", map[string]any{}, nil)
+}
 
 func TestManagedFirewall(t *testing.T) {
 	hq := newEnv(t)
