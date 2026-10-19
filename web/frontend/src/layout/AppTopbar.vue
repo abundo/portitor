@@ -104,7 +104,11 @@ const userMenu = computed(() => [
     </UTooltip>
     <div v-if="auth.user?.virtual_firewalls" class="ml-2 flex items-center gap-2">
       <span class="hidden text-sm text-muted md:inline">VF</span>
-      <USelect v-model="current" :items="instances.items" class="w-40" placeholder="none" />
+      <USelect v-model="current" :items="instances.topItems" class="w-56" placeholder="none">
+        <template #default>
+          <span class="truncate">{{ instances.currentText || 'none' }}</span>
+        </template>
+      </USelect>
     </div>
     <ConfirmBanner />
     <ChangesBanner />

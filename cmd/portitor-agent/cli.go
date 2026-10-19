@@ -6,8 +6,10 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"path/filepath"
 	"strings"
 	"text/tabwriter"
@@ -29,7 +31,7 @@ func cliCommand() *cobra.Command {
 	var asJSON bool
 	root := &cobra.Command{
 		Use:           "portitor",
-		Short:         "Show the firewall's state (read-only; changes go through portitor-web)",
+		Short:         "Show the firewall's state and act on it (configuration changes go through portitor-web)",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Version:       buildinfo.Version,
@@ -50,7 +52,7 @@ func cliCommand() *cobra.Command {
 		defer cancel()
 		n, err := client().Neighbours(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("%w (is portitor-agent running, and are you root?)", err)
+			return nil, hint(err)
 		}
 		return n, nil
 	}
@@ -160,7 +162,7 @@ func cliCommand() *cobra.Command {
 			defer cancel()
 			v, err := client().VRRP(ctx)
 			if err != nil {
-				return fmt.Errorf("%w (is portitor-agent running, and are you root?)", err)
+				return hint(err)
 			}
 			var rows []agentapi.VRRPInstance
 			for _, in := range v.Instances {
@@ -184,7 +186,7 @@ func cliCommand() *cobra.Command {
 			defer cancel()
 			v, err := client().BFD(ctx)
 			if err != nil {
-				return fmt.Errorf("%w (is portitor-agent running, and are you root?)", err)
+				return hint(err)
 			}
 			var rows []agentapi.BFDInstance
 			for _, in := range v.Instances {
@@ -199,7 +201,230 @@ func cliCommand() *cobra.Command {
 			return nil
 		},
 	})
+	show.AddCommand(&cobra.Command{
+		Use:   "ha",
+		Short: "This host's place in its HA pair and its quorum",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
+			defer cancel()
+			st, err := client().HA(ctx)
+			if err != nil {
+				return hint(err)
+			}
+			if asJSON {
+				return printJSON(cmd.OutOrStdout(), st)
+			}
+			printHA(cmd.OutOrStdout(), st)
+			return nil
+		},
+	})
+	addActions(root, client, &instance)
 	return root
+}
+
+// addActions adds the commands that act without changing the
+// configuration, for the console when portitor-web can't reach the
+// firewall.
+func addActions(root *cobra.Command, client func() *agentclient.Client, instance *string) {
+	call := func(cmd *cobra.Command, f func(ctx context.Context, c *agentclient.Client) error) error {
+		ctx, cancel := context.WithTimeout(cmd.Context(), 5*time.Minute)
+		defer cancel()
+		if err := f(ctx, client()); err != nil {
+			return hint(err)
+		}
+		return nil
+	}
+	// instanceName is --instance, or the default instance (the one in the
+	// root namespace).
+	instanceName := func(ctx context.Context, c *agentclient.Client) (string, error) {
+		if *instance != "" {
+			return *instance, nil
+		}
+		st, err := c.Status(ctx)
+		if err != nil {
+			return "", err
+		}
+		for _, in := range st.Instances {
+			if in.Netns == "" {
+				return in.Name, nil
+			}
+		}
+		return "", errors.New("no default instance applied; name one with --instance")
+	}
+
+	root.AddCommand(&cobra.Command{
+		Use:   "confirm",
+		Short: "Confirm the pending commit",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return call(cmd, func(ctx context.Context, c *agentclient.Client) error {
+				st, err := c.Status(ctx)
+				if err != nil {
+					return err
+				}
+				if st.Pending == nil {
+					return errors.New("no commit is pending")
+				}
+				if err := c.Confirm(ctx, st.Pending.Generation); err != nil {
+					return err
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "Confirmed generation %d.\n", st.Pending.Generation)
+				return nil
+			})
+		},
+	})
+	root.AddCommand(&cobra.Command{
+		Use:   "rollback",
+		Short: "Roll back to the last confirmed configuration",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return call(cmd, func(ctx context.Context, c *agentclient.Client) error {
+				res, err := c.Rollback(ctx)
+				if err != nil {
+					return err
+				}
+				for _, l := range res.Log {
+					fmt.Fprintln(cmd.OutOrStdout(), clean(l))
+				}
+				if res.RollbackErrors != "" {
+					return fmt.Errorf("rollback failed: %s", res.RollbackErrors)
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "Rolled back to generation %d.\n", res.Generation)
+				return nil
+			})
+		},
+	})
+
+	request := &cobra.Command{Use: "request", Short: "Start an action"}
+	root.AddCommand(request)
+	dhcp := &cobra.Command{Use: "dhcp", Short: "DHCP client"}
+	request.AddCommand(dhcp)
+	var ipv6 bool
+	renew := &cobra.Command{
+		Use:   "renew <interface>",
+		Short: "Renew the DHCP lease on an interface",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return call(cmd, func(ctx context.Context, c *agentclient.Client) error {
+				name, err := instanceName(ctx, c)
+				if err != nil {
+					return err
+				}
+				req := agentapi.DHCPRenewRequest{Instance: name, Interface: args[0]}
+				if ipv6 {
+					req.Family = "ipv6"
+				}
+				if err := c.RenewDHCP(ctx, req); err != nil {
+					return err
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "Renewing %s in %s.\n", args[0], name)
+				return nil
+			})
+		},
+	}
+	renew.Flags().BoolVarP(&ipv6, "ipv6", "6", false, "the DHCPv6 client")
+	dhcp.AddCommand(renew)
+	iplist := &cobra.Command{Use: "iplist", Short: "IP lists"}
+	request.AddCommand(iplist)
+	iplist.AddCommand(&cobra.Command{
+		Use:   "update <name>",
+		Short: "Download an IP list now",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return call(cmd, func(ctx context.Context, c *agentclient.Client) error {
+				if err := c.RefreshIPList(ctx, args[0]); err != nil {
+					return err
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "Downloading %s.\n", args[0])
+				return nil
+			})
+		},
+	})
+
+	// Break-glass for an HA host that hears neither its peer nor the
+	// witness: it is fenced until it does, or until this vote ends.
+	var minutes int
+	haActive := &cobra.Command{
+		Use:   "active",
+		Short: "Let this HA host be active without its peer or the witness (logged)",
+		Long: "Gives this HA host the witness's vote, so it stops fencing itself. " +
+			"Only when the other host is known to be down: two active hosts answer for the same addresses.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return call(cmd, func(ctx context.Context, c *agentclient.Client) error {
+				st, err := c.HAVote(ctx, minutes*60)
+				if err != nil {
+					return err
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "Active for %d minutes (fenced: %v).\n", minutes, st.Fenced)
+				return nil
+			})
+		},
+	}
+	haActive.Flags().IntVar(&minutes, "minutes", 60, "how long")
+	haReq := &cobra.Command{Use: "ha", Short: "HA pair"}
+	haReq.AddCommand(haActive)
+	request.AddCommand(haReq)
+
+	clear := &cobra.Command{Use: "clear", Short: "Clear state"}
+	root.AddCommand(clear)
+	clear.AddCommand(&cobra.Command{
+		Use:   "connections",
+		Short: "Flush the connection tracking table",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return call(cmd, func(ctx context.Context, c *agentclient.Client) error {
+				name, err := instanceName(ctx, c)
+				if err != nil {
+					return err
+				}
+				if err := c.FlushConnections(ctx, name); err != nil {
+					return err
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "Flushed the connection table of %s.\n", name)
+				return nil
+			})
+		},
+	})
+}
+
+// hint adds a reason to an error from not reaching the agent's socket;
+// any other error stands as it is.
+func hint(err error) error {
+	var op *net.OpError
+	if !errors.As(err, &op) {
+		return err
+	}
+	return fmt.Errorf("%w (is portitor-agent running, and are you root?)", err)
+}
+
+func printHA(w io.Writer, st *agentapi.HAStatus) {
+	if st.Node == "" {
+		fmt.Fprintln(w, "Not in an HA pair.")
+		return
+	}
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	fmt.Fprintf(tw, "Node:\t%s\n", st.Node)
+	peer := "not heard"
+	if st.PeerAlive {
+		peer = "alive"
+	}
+	if st.PeerSeen != nil {
+		peer += ", last heard " + st.PeerSeen.Local().Format(time.DateTime)
+	}
+	fmt.Fprintf(tw, "Peer:\t%s\n", peer)
+	vote := "none"
+	if st.VoteUntil != nil {
+		vote = "until " + st.VoteUntil.Local().Format(time.DateTime)
+	}
+	fmt.Fprintf(tw, "Witness vote:\t%s\n", vote)
+	fenced := "no"
+	if st.Fenced {
+		fenced = "yes: VRRP shut down, no DHCP or router advertisements"
+	}
+	fmt.Fprintf(tw, "Fenced:\t%s\n", fenced)
+	tw.Flush()
 }
 
 func printBFD(w io.Writer, rows []agentapi.BFDInstance) {

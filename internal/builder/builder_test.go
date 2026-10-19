@@ -41,7 +41,7 @@ func ptr(v uint) *uint { return &v }
 
 func TestBuildHome(t *testing.T) {
 	db := testDB(t)
-	main := models.Instance{Name: "main", IsDefault: true, DnsUpstream: "dhcp",
+	main := models.Instance{Name: "main", IsDefault: true, FirewallID: 1, DnsUpstream: "dhcp",
 		DhcpEnabled: true, DhcpDomainName: "home.arpa", DhcpLeaseTime: 3600}
 	mustCreate(t, db, &main)
 	mustCreate(t, db, &models.InterfaceZone{InstanceID: main.ID, Name: "lan", Interfaces: models.StringList{"eth1", "wg0"}})
@@ -164,7 +164,7 @@ func TestBuildHome(t *testing.T) {
 
 func TestBuildReportsProblems(t *testing.T) {
 	db := testDB(t)
-	main := models.Instance{Name: "main", IsDefault: true}
+	main := models.Instance{Name: "main", IsDefault: true, FirewallID: 1}
 	mustCreate(t, db, &main)
 	mustCreate(t, db, &models.Interface{InstanceID: main.ID, Name: "eth1", Kind: "physical", Enabled: true, Ipv4Mode: "static",
 		Addresses: models.StringList{"192.168.1.0/24"}})
@@ -186,7 +186,7 @@ func TestBuildReportsProblems(t *testing.T) {
 
 func TestBuildIPv6AndObjects(t *testing.T) {
 	db := testDB(t)
-	main := models.Instance{Name: "main", IsDefault: true, DhcpEnabled: true, DhcpDomainName: "home.arpa",
+	main := models.Instance{Name: "main", IsDefault: true, FirewallID: 1, DhcpEnabled: true, DhcpDomainName: "home.arpa",
 		DnsForwarders: models.StringList{"quad9"}, Nat64Prefix: "64:ff9b::/96", Dns64: true, Nat64: true,
 		NtpEnabled: true, NtpServers: models.JSONList[fwconfig.NTPServer]{{Address: "pool.ntp.org", Pool: true, IBurst: true}}, NtpAllow: models.StringList{"10.0.0.0/8"},
 		SnmpEnabled: true, SnmpLocation: "rack 1", SnmpCommunity: "s3cret", SnmpAllow: models.StringList{"10.0.0.0/8"}}
@@ -275,7 +275,7 @@ func TestBuildIPv6AndObjects(t *testing.T) {
 // shared network). A DHCPv4 reservation no longer needs the DNS server.
 func TestBuildTwoPrefixesOnInterface(t *testing.T) {
 	db := testDB(t)
-	main := models.Instance{Name: "main", IsDefault: true, DhcpEnabled: true}
+	main := models.Instance{Name: "main", IsDefault: true, FirewallID: 1, DhcpEnabled: true}
 	mustCreate(t, db, &main)
 	mustCreate(t, db, &models.Interface{InstanceID: main.ID, Name: "eth1", Kind: "physical", Enabled: true, Ipv4Mode: "static",
 		Addresses: models.StringList{"192.168.1.1/24", "10.1.2.1/24"}})
@@ -299,7 +299,7 @@ func TestBuildTwoPrefixesOnInterface(t *testing.T) {
 
 func TestBuildReportsObjectProblems(t *testing.T) {
 	db := testDB(t)
-	main := models.Instance{Name: "main", IsDefault: true}
+	main := models.Instance{Name: "main", IsDefault: true, FirewallID: 1}
 	mustCreate(t, db, &main)
 	mustCreate(t, db, &models.AddressObject{Name: "net", Addresses: models.StringList{"10.0.0.0/8"}})
 	mustCreate(t, db, &models.AddressObject{Name: "hollow"})
@@ -322,7 +322,7 @@ func TestBuildReportsObjectProblems(t *testing.T) {
 
 func TestBuildDelegatedPrefix(t *testing.T) {
 	db := testDB(t)
-	main := models.Instance{Name: "main", IsDefault: true, DhcpDomainName: "home.arpa"}
+	main := models.Instance{Name: "main", IsDefault: true, FirewallID: 1, DhcpDomainName: "home.arpa"}
 	mustCreate(t, db, &main)
 	mustCreate(t, db, &models.Interface{InstanceID: main.ID, Name: "eth0", Kind: "physical", Enabled: true, Ipv4Mode: "dhcp",
 		Ipv6AcceptRA: true, Dhcpv6: true, Dhcpv6Pd: true, Dhcpv6PdLength: 56})
@@ -352,7 +352,7 @@ func TestBuildDelegatedPrefix(t *testing.T) {
 // its id, and the OSPF and IS-IS interfaces on its interfaces.
 func TestBuildVRFRouting(t *testing.T) {
 	db := testDB(t)
-	main := models.Instance{Name: "main", IsDefault: true}
+	main := models.Instance{Name: "main", IsDefault: true, FirewallID: 1}
 	mustCreate(t, db, &main)
 	blue := models.Vrf{InstanceID: main.ID, Name: "blue", RouteTable: 10}
 	mustCreate(t, db, &blue)

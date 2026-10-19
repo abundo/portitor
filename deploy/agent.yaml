@@ -41,6 +41,8 @@ allow_from:
 #   radvd_conf: /etc/radvd.conf
 #   chrony_conf: /etc/chrony/chrony.conf  # Fedora: /etc/chrony.conf
 #   snmpd_conf: /etc/snmp/snmpd.conf
+#   conntrackd_conf: /etc/conntrackd/conntrackd.conf
+#   kea_hooks_dir: /usr/lib/x86_64-linux-gnu/kea/hooks  # by architecture
 # units:
 #   named: portitor-named@%s.service      # the other virtual firewalls'
 #   kea4: portitor-kea4@%s.service
@@ -48,9 +50,11 @@ allow_from:
 #   radvd: portitor-radvd@%s.service
 #   chrony: portitor-chrony@%s.service
 #   snmpd: portitor-snmpd@%s.service
+#   conntrackd: portitor-conntrackd@%s.service
 #   default_named: named.service          # Fedora: kea-dhcp4.service, kea-dhcp6.service
 #   default_kea4: kea-dhcp4-server.service
 #   default_kea6: kea-dhcp6-server.service
 #   default_radvd: radvd.service
 #   default_chrony: chrony.service        # Fedora: chronyd.service
 #   default_snmpd: snmpd.service
+#   default_conntrackd: conntrackd.service

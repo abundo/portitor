@@ -55,12 +55,15 @@ install-agent: portitor-agent
 	install -D -m 0644 deploy/systemd/portitor-radvd@.service $(DESTDIR)/etc/systemd/system/portitor-radvd@.service
 	install -D -m 0644 deploy/systemd/portitor-chrony@.service $(DESTDIR)/etc/systemd/system/portitor-chrony@.service
 	install -D -m 0644 deploy/systemd/portitor-snmpd@.service $(DESTDIR)/etc/systemd/system/portitor-snmpd@.service
+	install -D -m 0644 deploy/systemd/portitor-conntrackd@.service $(DESTDIR)/etc/systemd/system/portitor-conntrackd@.service
 	install -D -m 0644 deploy/systemd/portitor-frr@.service $(DESTDIR)/etc/systemd/system/portitor-frr@.service
 	test -e $(DESTDIR)/etc/portitor/agent.yaml || install -D -m 0600 deploy/agent.yaml $(DESTDIR)/etc/portitor/agent.yaml
 
 install-web: release
 	install -D -m 0755 $(BUILD_DIR)/portitor-web $(DESTDIR)$(PREFIX)/bin/portitor-web
 	install -D -m 0644 deploy/systemd/portitor-web.service $(DESTDIR)/etc/systemd/system/portitor-web.service
+	install -D -m 0644 deploy/systemd/portitor-config.service $(DESTDIR)/etc/systemd/system/portitor-config.service
+	ln -sfn portitor-web $(DESTDIR)$(PREFIX)/bin/portitor-config
 	test -e $(DESTDIR)/etc/portitor/web.yaml || install -D -m 0600 deploy/web.yaml $(DESTDIR)/etc/portitor/web.yaml
 
 # ----- development: SQLite in dev/run + dry-run agent (see DEV.md) -----

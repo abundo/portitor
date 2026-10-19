@@ -188,6 +188,20 @@ func prepareTask(tx *gorm.DB, t, _ *models.Task) error {
 	if !fwconfig.ValidFileName(t.Name) {
 		return bad("name: no control characters or /, not . or .., at most 255 bytes")
 	}
+	if t.FirewallID == 0 {
+		id, err := firstFirewallID(tx)
+		if err != nil {
+			return err
+		}
+		t.FirewallID = id
+	}
+	var fw models.Firewall
+	if err := tx.First(&fw, t.FirewallID).Error; err != nil {
+		return bad("firewall: no such firewall")
+	}
+	if fw.HAPrimaryID != nil {
+		return bad("firewall: " + fw.Name + " is an HA secondary; it runs its primary's tasks")
+	}
 	t.Schedule = strings.Join(strings.Fields(t.Schedule), " ")
 	if _, err := cron.Parse(t.Schedule); err != nil {
 		return bad("schedule: " + err.Error())
@@ -222,16 +236,29 @@ func (s *Server) handleTaskRun(c *echo.Context) error {
 	if !s.loadByID(c, &t) {
 		return nil
 	}
-	return s.startOnAgent(c, t.Name, func(a agentAPI) error { return a.RunTask(c.Request().Context(), t.Name) })
+	return s.startOnAgent(c, t.FirewallID, t.Name, func(a agentAPI) error { return a.RunTask(c.Request().Context(), t.Name) })
 }
 
-// handleIPListRefresh downloads an IP list on the firewall now.
+// handleIPListRefresh downloads an IP list on every firewall now.
 func (s *Server) handleIPListRefresh(c *echo.Context) error {
 	var l models.IpList
 	if !s.loadByID(c, &l) {
 		return nil
 	}
-	return s.startOnAgent(c, l.Name, func(a agentAPI) error { return a.RefreshIPList(c.Request().Context(), l.Name) })
+	fws, err := s.firewalls()
+	if err != nil {
+		return err
+	}
+	for _, fw := range fws[1:] {
+		a, _, err := s.firewallAgent(fw.ID)
+		if err == nil {
+			err = a.RefreshIPList(c.Request().Context(), l.Name)
+		}
+		if err != nil {
+			return agentError(c, fmt.Errorf("firewall %s: %w", fw.Name, err))
+		}
+	}
+	return s.startOnAgent(c, fws[0].ID, l.Name, func(a agentAPI) error { return a.RefreshIPList(c.Request().Context(), l.Name) })
 }
 
 // loadByID loads the row with the :id path parameter into dst, or answers
@@ -248,8 +275,9 @@ func (s *Server) loadByID(c *echo.Context, dst any) bool {
 	return true
 }
 
-func (s *Server) startOnAgent(c *echo.Context, name string, start func(agentAPI) error) error {
-	a, _, err := s.agent()
+// startOnAgent starts something on the firewall's agent.
+func (s *Server) startOnAgent(c *echo.Context, firewallID uint, name string, start func(agentAPI) error) error {
+	a, _, err := s.firewallAgent(firewallID)
 	if err != nil {
 		return agentError(c, err)
 	}

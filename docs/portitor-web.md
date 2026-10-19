@@ -32,7 +32,7 @@ must pass WebSocket upgrades for the console.
 portitor-web start                 # serve the GUI and API
 portitor-web migrate               # apply database migrations; start never migrates
 portitor-web createadmin <user>    # create an admin, or reset a user's password and make them admin
-portitor-web agent-url             # print the agent URL from Settings (used by install.py)
+portitor-web agent-url             # print the first firewall's agent URL (used by install.py)
 portitor-web bootstrap ...         # first configuration of an ISO install (portitor-setup runs it)
 ```
 
@@ -46,9 +46,9 @@ After an upgrade, run `migrate` before `start`. `install.py` does both.
 1. Log in with the user from `createadmin`.
 2. On the firewall, run `portitor-agent init --host <address>`. It prints a token and
    the agent's certificate fingerprint.
-3. *Admin → Settings → General*: enter the agent URL (`https://<address>:8443`), the
-   token and the fingerprint, and save. The badge next to *Save* says whether the agent
-   answers.
+3. *Admin → Firewalls*: edit the firewall and enter the agent URL
+   (`https://<address>:8443`), the token and the fingerprint, and save. Its *Status*
+   column says whether the agent answers.
 4. portitor-web adds the firewall's physical interfaces to the default virtual firewall `main`
    as they are configured now, and says so. Check them under *Network → Interfaces*.
 5. Configure addresses, rules and services, then deploy.
@@ -120,7 +120,8 @@ After an upgrade, run `migrate` before `start`. `install.py` does both.
 | | Packet capture | Live capture with Wireshark in the browser. tcpdump runs on an interface of the selected virtual firewall (or *any*), with a capture filter (pcap syntax) and limits (packets, seconds, bytes per packet); the packets stream in as they are captured, into a packet list with Wireshark's display filters (`dns \|\| tcp.port == 443`), protocol tree and bytes. *Follow* keeps the newest packet in view. *pcap* downloads the capture for Wireshark. *Open in window* runs the capture in a window of its own, for the selected virtual firewall, so it keeps going while you use the rest of the GUI; each window is a capture of its own. The stream from the agent is capped at the rate under *Settings* (1000 kbit/s by default); when traffic outruns it, the firewall drops captured packets rather than fall behind. The agent's own API connection is left out, and at most two captures run at once. Wireshark (Wiregasm, about 20 MB) loads when the page opens; it ships with portitor-web, under its own licence (GPL-2.0-or-later, `/wiregasm/LICENSE`). |
 | | Traceroute | A traceroute like MTR, run on the firewall in the selected virtual firewall with `mtr`. Pick a *source interface* (*None*, the default, lets the routing table decide) and a *destination*: an IPv4 or IPv6 address, a named host or a DNS name, which the firewall resolves (for a name with both, *IP version* picks; IPv4 by default). One probe per hop goes out each second for the given rounds (10 by default); each hop's row shows its address, loss, sent and the last, average, best and worst round trip and its standard deviation, updated as replies come. *Stop* ends it early. |
 | Admin | Updates | Debian package upgrades, Portitor releases, reboot. See [Installer ISO and updates](appliance.md#updates). |
-| | Settings → General | The GUI's certificate, agent connection, default auto-rollback, packet capture rate, [backup and restore](#backup-and-restore). |
+| | Settings → General | The GUI's certificate, default auto-rollback, packet capture rate, [backup and restore](#backup-and-restore). |
+| | Firewalls | The hosts Portitor deploys to, each with its agent (URL, token, fingerprint). Each firewall's host is a virtual firewall named after it; the others are put on a firewall in their form, and a task runs on one. A commit deploys to every firewall whose configuration changed; with several, each waits for confirmation and they are confirmed together, and when one fails the others are rolled back at once. A link joins virtual firewalls on the same firewall. **HA**: a firewall created as the *HA secondary* of another runs its virtual firewalls too, with its own addresses (*HA peer addresses* on the interfaces), VRRP priority (*HA peer priority*, 10 below by default) and router ids where they are set; both get every commit, and VRRP decides which forwards. Each host stays active only while it hears the other or holds portitor-web's vote (the witness); otherwise it fences itself: its VRRP routers shut down and it serves no DHCP or router advertisements. A commit while one host is unreachable goes to the other, and the first catches up when it is back. DHCP runs on both with Kea's HA (the primary serves, the standby takes over and the leases stay in step), connections are synced with conntrackd so they live on after a failover, and DNS updates, the tunnel broker's endpoint update and ACME orders run on the active host only; the other copies its certificates every minute. A BGP neighbour on the pair itself (another virtual firewall over a link) has an *HA peer address*: its address on the secondary. They talk over each virtual firewall's DHCP interface, or else its first physical interface (or VLAN on one) with an address and an HA peer address; one with only internal links syncs nothing. On the console, `portitor show ha` shows a host's state, and `portitor request ha active` lets a host that hears neither be active (only when the other is known to be down). Set *HA URL* when the peer reaches an agent at another address than portitor-web (127.0.0.1, say); both need the agents' certificate fingerprints. See [High availability](ha.md). |
 | | Settings → Users | GUI users and their roles. |
 | | Settings → Roles | Groups of users, one per virtual firewall and your own; see [Roles](#roles). |
 | | Help | This guide and the other guides in `docs/`. |
@@ -407,8 +408,9 @@ version is refused), and replaces the configuration in one step. It keeps:
 
 - the users, so you stay logged in,
 - the deployment history,
-- the agent connection under *Settings* (URL, token, fingerprint), when one is set, so a
-  backup restores onto a reinstalled firewall.
+- the firewalls under *Firewalls* (agent URL, token, fingerprint), so a backup restores
+  onto a reinstalled firewall; a virtual firewall or task of the backup on a firewall
+  this installation doesn't have goes to the first one.
 
 Restore changes only the database. Review the changes on *Deploy* and apply them as
 usual. Restore is refused while an apply waits for confirmation.
@@ -423,3 +425,27 @@ the preshared key. Treat that config like a password: hand it over securely and
 delete the downloaded copy. Their fields are empty when
 you open a form. Leave them empty to keep the stored value, or enter a new one to
 replace it.
+
+## portitor-config: a firewall's own configuration
+
+A firewall can keep its configuration on itself, in **portitor-config** (portitor-web
+run under that name, on port 8444), and be managed from a portitor-web elsewhere.
+`install.py --agent HOST --config` installs it next to the agent. On the manager, give
+the firewall its *portitor-config URL*, token (`/etc/portitor/manager.token` on the
+firewall) and fingerprint under *Firewalls*.
+
+- A commit on the manager pushes the virtual firewalls that changed to portitor-config
+  and commits there; confirm and roll back from the manager as usual. The firewall's
+  host (its default virtual firewall) is portitor-config's own: read-only on the
+  manager, changed on the firewall.
+- What the manager pushed is read-only on the firewall. When it can't wait, a global
+  admin there uses *Break glass* on the virtual firewall to edit it; the manager's
+  *Drift* section (under *Firewalls*) then shows it as changed there, to *Take* that
+  version or *Overwrite* it. The next commit waits until then.
+- The manager's users come along at each commit, with their memberships of the pushed
+  virtual firewalls: they log in on the firewall with the same password, and are changed
+  on the manager only. Local users stay, and a local user's name wins over a pushed one.
+- On the firewall's console, as root:
+  `sudo -u portitor portitor-config set interfaces ens19 addresses=192.168.1.1/24`,
+  then `portitor-config commit --confirm 120` and `portitor-config confirm`.
+  `portitor-config api GET /api/...` reads anything the GUI shows.

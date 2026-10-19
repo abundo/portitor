@@ -181,20 +181,25 @@ func Bootstrap(ctx context.Context, s *Server, o BootstrapOptions) (*models.Depl
 	if err != nil {
 		return nil, err
 	}
-	if st.Generation > 0 && !o.Reconfigure {
+	if st.LastCommit > 0 && !o.Reconfigure {
 		return nil, errors.New("this installation has been deployed already; configure it in the GUI, or run portitor-setup")
 	}
+	fwID, err := firstFirewallID(s.db)
+	if err != nil {
+		return nil, err
+	}
 	if o.AgentFingerprint != "" {
-		st.AgentURL = strings.TrimRight(o.AgentURL, "/")
-		st.AgentToken = o.AgentToken
-		st.AgentFingerprint = strings.ToLower(strings.ReplaceAll(o.AgentFingerprint, ":", ""))
-		if err := s.db.Save(st).Error; err != nil {
+		if err := s.db.Model(&models.Firewall{}).Where("id = ?", fwID).Updates(map[string]any{
+			"agent_url":         strings.TrimRight(o.AgentURL, "/"),
+			"agent_token":       o.AgentToken,
+			"agent_fingerprint": normalizeFingerprint(o.AgentFingerprint),
+		}).Error; err != nil {
 			return nil, err
 		}
 	}
 
 	// The agent has usually just started.
-	a, _, err := s.agent()
+	a, _, err := s.firewallAgent(fwID)
 	if err != nil {
 		return nil, err
 	}
@@ -213,13 +218,13 @@ func Bootstrap(ctx context.Context, s *Server, o BootstrapOptions) (*models.Depl
 		case <-time.After(time.Second):
 		}
 	}
-	if _, err := s.syncNICs(status.NICs); err != nil {
+	if _, err := s.syncNICs(fwID, status.NICs); err != nil {
 		return nil, err
 	}
 
 	err = s.db.Transaction(func(tx *gorm.DB) error {
 		var in models.Instance
-		if err := tx.Where("is_default = ?", true).First(&in).Error; err != nil {
+		if err := tx.Where("is_default AND firewall_id = ?", fwID).First(&in).Error; err != nil {
 			return err
 		}
 		if err := bootstrapNetwork(tx, in.ID, o); err != nil {
@@ -235,7 +240,11 @@ func Bootstrap(ctx context.Context, s *Server, o BootstrapOptions) (*models.Depl
 		return nil, err
 	}
 	noConfirm := 0
-	dep, _, err := s.deploy(ctx, "bootstrap", &noConfirm, nil)
+	res, err := s.deploy(ctx, "bootstrap", &noConfirm, nil)
+	var dep *models.Deployment
+	if res != nil && len(res.Deployments) > 0 {
+		dep = &res.Deployments[0]
+	}
 	if err != nil {
 		var ve *fwconfig.ValidationError
 		if errors.As(err, &ve) {
@@ -243,7 +252,7 @@ func Bootstrap(ctx context.Context, s *Server, o BootstrapOptions) (*models.Depl
 		}
 		return dep, err
 	}
-	slog.Info("bootstrap deployed", "lan", o.LAN, "address", o.Address, "wan", o.WAN, "reconfigure", o.Reconfigure, "generation", dep.Generation)
+	slog.Info("bootstrap deployed", "lan", o.LAN, "address", o.Address, "wan", o.WAN, "reconfigure", o.Reconfigure, "commit", res.Commit)
 	return dep, nil
 }
 

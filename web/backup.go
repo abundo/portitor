@@ -6,7 +6,6 @@ package web
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"io"
@@ -40,8 +39,9 @@ const backupMaxSize = 256 << 20
 const restorePath = "/api/backup/restore"
 
 // restoreKeeps are tables that belong to this installation rather than to
-// the firewall configuration: restore leaves them as they are.
-var restoreKeeps = []string{"users", "deployments", "goose_db_version"}
+// the firewall configuration: restore leaves them as they are. The
+// firewalls are the hosts with their agents and generations.
+var restoreKeeps = []string{"users", "deployments", "firewalls", "goose_db_version"}
 
 var sqliteMagic = []byte("SQLite format 3\x00")
 
@@ -161,9 +161,9 @@ func (s *Server) handleRestore(c *echo.Context) error {
 
 	s.deployMu.Lock()
 	defer s.deployMu.Unlock()
-	if dep, err := s.latestDeployment(); err != nil {
+	if deps, err := s.pendingDeployments(); err != nil {
 		return err
-	} else if dep != nil && dep.Status == "pending" {
+	} else if len(deps) > 0 {
 		return errJSON(c, http.StatusConflict, "a deployment is waiting for confirmation; confirm or roll it back first")
 	}
 	res, err := restoreDatabase(c.Request().Context(), s.db, path)
@@ -191,9 +191,8 @@ type restoreResult struct {
 
 // restoreDatabase replaces the configuration in db with the database file
 // at path, which it checks and migrates first. It copies every table in
-// one transaction, except restoreKeeps and the agent connection and
-// deployment generation in settings, which stay those of this
-// installation (when it has an agent configured).
+// one transaction, except restoreKeeps and the commit number in settings,
+// which stay those of this installation.
 func restoreDatabase(ctx context.Context, db *gorm.DB, path string) (*restoreResult, error) {
 	res, err := prepareRestore(path)
 	if err != nil {
@@ -288,21 +287,26 @@ func restoreDatabase(ctx context.Context, db *gorm.DB, path string) (*restoreRes
 	if _, err := tx.ExecContext(ctx, `DELETE FROM main.role_members WHERE user_id NOT IN (SELECT id FROM main.users)`); err != nil {
 		return nil, err
 	}
-	gen := `UPDATE main.settings SET generation = max(generation, ?) WHERE id = 1`
-	args := []any{cur.Generation}
-	if cur.AgentURL != "" {
-		gen = `UPDATE main.settings SET generation = max(generation, ?), agent_url = ?, agent_token = ?, agent_fingerprint = ? WHERE id = 1`
-		args = append(args, cur.AgentURL, cur.AgentToken, cur.AgentFingerprint)
-	}
-	r, err := tx.ExecContext(ctx, gen, args...)
+	r, err := tx.ExecContext(ctx, `UPDATE main.settings SET last_commit = max(last_commit, ?) WHERE id = 1`, cur.LastCommit)
 	if err != nil {
 		return nil, err
 	}
 	if n, _ := r.RowsAffected(); n == 0 {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO main.settings (id, agent_url, agent_token, agent_fingerprint, confirm_timeout, wg_endpoint_host, generation, updated_at)
-			VALUES (1, ?, ?, ?, ?, ?, ?, ?)`, cur.AgentURL, cur.AgentToken, cur.AgentFingerprint, cur.ConfirmTimeout, cur.WgEndpointHost, cur.Generation, time.Now()); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO main.settings (id, confirm_timeout, wg_endpoint_host, last_commit, updated_at)
+			VALUES (1, ?, ?, ?, ?)`, cur.ConfirmTimeout, cur.WgEndpointHost, cur.LastCommit, time.Now()); err != nil {
 			return nil, err
 		}
+	}
+	// What was on a firewall this installation doesn't have goes to the
+	// first one.
+	for _, t := range []string{"instances", "tasks", "known_interfaces"} {
+		if _, err := tx.ExecContext(ctx, `UPDATE OR IGNORE main.`+t+` SET firewall_id = (SELECT min(id) FROM main.firewalls)
+			WHERE firewall_id NOT IN (SELECT id FROM main.firewalls)`); err != nil {
+			return nil, err
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM main.known_interfaces WHERE firewall_id NOT IN (SELECT id FROM main.firewalls)`); err != nil {
+		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("restore: %w", err)
@@ -372,7 +376,7 @@ func missing(a, b []string) string {
 	return strings.Join(out, ", ")
 }
 
-func queryStrings(ctx context.Context, conn *sql.Conn, query string, args ...any) ([]string, error) {
+func queryStrings(ctx context.Context, conn querier, query string, args ...any) ([]string, error) {
 	rows, err := conn.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err

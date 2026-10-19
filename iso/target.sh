@@ -42,7 +42,8 @@ fi
 # these units, which it unmasks when it uses them, the others' under
 # portitor-*@ units.
 systemctl mask named.service kea-dhcp4-server.service kea-dhcp6-server.service \
-	kea-ctrl-agent.service kea-dhcp-ddns-server.service radvd.service frr.service
+	kea-ctrl-agent.service kea-dhcp-ddns-server.service radvd.service frr.service \
+	conntrackd.service
 
 # The agent owns the interfaces: nothing else may configure them (a second
 # DHCP client on the WAN keeps the agent from getting a lease).

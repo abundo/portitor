@@ -19,6 +19,8 @@ import (
 	"github.com/go-acme/lego/v4/challenge/http01"
 
 	"github.com/abundo/portitor/internal/acme"
+	"github.com/abundo/portitor/internal/agentapi"
+	"github.com/abundo/portitor/internal/agentclient"
 	"github.com/abundo/portitor/internal/dyndns"
 	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/internal/render"
@@ -55,6 +57,9 @@ type certManager struct {
 	run Runner
 	// obtain gets a certificate (acme.Obtain; a fake in tests).
 	obtain func(accountsDir string, req acme.Request) (*acme.Result, error)
+	// standby: an HA host that leaves ordering to its peer and copies its
+	// certificates (syncCertificates).
+	standby func() bool
 
 	mu    sync.Mutex
 	certs map[certKey]*certRun
@@ -174,6 +179,10 @@ func (m *certManager) loop(ctx context.Context, r *certRun) {
 		if st != nil && st.Matches(req) && time.Now().Before(st.RenewAt()) {
 			m.update(r, func() { r.stored, r.state, r.err = st, "ok", "" })
 			wait = min(time.Until(st.RenewAt()), certCheck)
+		} else if m.standby != nil && m.standby() {
+			// The active host orders; its certificate comes over.
+			m.update(r, func() { r.stored, r.state, r.err = st, "standby", "" })
+			wait = haCertSync
 		} else {
 			m.update(r, func() { r.state, r.lastAttempt, r.next = "issuing", time.Now(), time.Time{} })
 			log.Info("ordering certificate", "domains", req.Domains, "ca", req.Directory)
@@ -375,4 +384,68 @@ func timePtr(t time.Time) *time.Time {
 		return nil
 	}
 	return &t
+}
+
+// haCertSync is how often an HA standby copies its peer's certificates,
+// and looks again at one it has none of.
+const haCertSync = time.Minute
+
+// haCertificates are the ordered (not imported) certificates this host
+// holds, for its HA peer (GET /v1/ha/certificates).
+func (m *certManager) haCertificates() []agentapi.HACertificate {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := []agentapi.HACertificate{}
+	for k, r := range m.certs {
+		if r.item.cfg.Imported() {
+			continue
+		}
+		if raw := acme.ReadRaw(m.dir(r.item)); raw != nil {
+			out = append(out, agentapi.HACertificate{Instance: k.instance, Name: k.name, Raw: *raw})
+		}
+	}
+	return out
+}
+
+// adopt stores the peer's certificates that this host declares too.
+func (m *certManager) adopt(certs []agentapi.HACertificate) {
+	m.mu.Lock()
+	dirs := map[certKey]string{}
+	for k, r := range m.certs {
+		if !r.item.cfg.Imported() {
+			dirs[k] = m.dir(r.item)
+		}
+	}
+	m.mu.Unlock()
+	for _, c := range certs {
+		dir, ok := dirs[certKey{c.Instance, c.Name}]
+		if !ok {
+			continue
+		}
+		raw := c.Raw
+		changed, err := acme.WriteRaw(dir, &raw)
+		switch {
+		case err != nil:
+			slog.Warn("ha: the peer's certificate", "instance", c.Instance, "certificate", c.Name, "err", err)
+		case changed:
+			slog.Info("ha: certificate copied from the peer", "instance", c.Instance, "certificate", c.Name)
+		}
+	}
+}
+
+// syncCertificates copies the HA peer's certificates while this host is
+// its standby.
+func (a *Agent) syncCertificates(ctx context.Context, cfg *fwconfig.HA) {
+	c, err := agentclient.New(cfg.Peer, cfg.Secret, cfg.PeerFingerprint)
+	if err != nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	certs, err := c.HACertificates(ctx)
+	if err != nil {
+		slog.Warn("ha: the peer's certificates", "err", err)
+		return
+	}
+	a.certs.adopt(certs)
 }

@@ -41,6 +41,12 @@ type Agent struct {
 	lists   *ipLists
 	tasks   *scheduler
 	sys     *systemManager
+	ha      *haManager
+	// ddnsWant and tbWant are the applied DNS update clients and tunnel
+	// broker accounts, which run on the active HA host only
+	// (reconcileActive).
+	ddnsWant []dyndnsItem
+	tbWant   []tunnelBrokerItem
 
 	stopBg context.CancelFunc
 	bgDone sync.WaitGroup
@@ -97,6 +103,9 @@ func New(cfg *Config) *Agent {
 	a.certs = newCertManager(cfg.DryRun, cfg.Paths, a.bg)
 	a.proxies = newACMEProxyManager(cfg.DryRun, cfg.Paths, a.certs)
 	a.tbroker = newTunnelBrokerManager(cfg.DryRun, a.bg)
+	a.ha = newHAManager(a.onFenceChange, a.onActiveChange)
+	a.certs.standby = a.ha.isStandby
+	a.ha.syncCerts = a.syncCertificates
 	return a
 }
 
@@ -123,6 +132,11 @@ func (a *Agent) Start(ctx context.Context) error {
 	go func() {
 		defer a.bgDone.Done()
 		a.resolveLoop(bgCtx)
+	}()
+	a.bgDone.Add(1)
+	go func() {
+		defer a.bgDone.Done()
+		a.ha.loop(bgCtx)
 	}()
 
 	a.mu.Lock()
@@ -155,6 +169,7 @@ func (a *Agent) Start(ctx context.Context) error {
 		}
 		return err
 	}
+	a.ha.boot(ctx, doc.HA)
 	slog.Info("re-applying last configuration", "generation", doc.Generation)
 	if err := a.applyLocked(ctx, doc); err != nil {
 		a.lastError = err.Error()
@@ -189,6 +204,7 @@ func (a *Agent) renderOptions() render.Options {
 		AntiLockout: a.cfg.antiLockout(),
 		DHCPDNS:     a.dhcp.DNSServers(),
 		Delegated:   a.dhcp6.Prefixes(),
+		Fenced:      a.ha.isFenced(),
 	}
 }
 

@@ -8,10 +8,12 @@
 package builder
 
 import (
+	"errors"
 	"fmt"
 	"maps"
 	"math"
 	"net/netip"
+	"net/url"
 	"slices"
 	"sort"
 	"strconv"
@@ -129,7 +131,66 @@ func load(db *gorm.DB) (*data, error) {
 // resolving the database, and by fwconfig.Validate, come back as a
 // *fwconfig.ValidationError alongside the (possibly incomplete) document.
 func Build(db *gorm.DB, generation int64) (*fwconfig.Document, error) {
-	return build(db, generation, nil)
+	return build(db, generation, nil, 0)
+}
+
+// BuildFirewall is Build for one firewall: its instances, the links
+// between them, its tasks, and every IP list. An HA secondary gets its
+// primary's, with the peer values (peerValues).
+func BuildFirewall(db *gorm.DB, generation int64, firewallID uint) (*fwconfig.Document, error) {
+	return BuildFirewallInstances(db, generation, firewallID, nil)
+}
+
+// BuildFirewallInstances is BuildInstances for a firewall: only the named
+// instances (nil: all) of those it runs, an HA secondary with the peer
+// values, and no fwconfig.Validate when only is set.
+func BuildFirewallInstances(db *gorm.DB, generation int64, firewallID uint, only map[string]bool) (*fwconfig.Document, error) {
+	var fw models.Firewall
+	if err := db.First(&fw, firewallID).Error; err != nil {
+		return nil, err
+	}
+	ha, haProblem, err := haBlock(db, &fw)
+	if err != nil {
+		return nil, err
+	}
+	runs := firewallID
+	if fw.HAPrimaryID != nil {
+		runs = *fw.HAPrimaryID
+	}
+	return buildPeer(db, generation, only, runs, fw.HAPrimaryID != nil, ha, haProblem)
+}
+
+// haBlock is the firewall's place in its HA pair, or nil outside one,
+// with a problem when the pair can't reach each other's agents.
+func haBlock(db *gorm.DB, fw *models.Firewall) (*fwconfig.HA, string, error) {
+	var peer models.Firewall
+	ha := &fwconfig.HA{}
+	switch err := db.Where("ha_primary_id = ?", fw.ID).First(&peer).Error; {
+	case fw.HAPrimaryID != nil:
+		if err := db.First(&peer, *fw.HAPrimaryID).Error; err != nil {
+			return nil, "", err
+		}
+		ha.Node, ha.Secret = fwconfig.HASecondary, fw.HASecret
+	case err == nil:
+		ha.Node, ha.Secret = fwconfig.HAPrimary, peer.HASecret
+	case errors.Is(err, gorm.ErrRecordNotFound):
+		return nil, "", nil
+	default:
+		return nil, "", err
+	}
+	ha.Peer, ha.PeerFingerprint = peer.HAURL, peer.AgentFingerprint
+	if ha.Peer == "" {
+		ha.Peer = peer.AgentURL
+	}
+	if u, err := url.Parse(ha.Peer); err == nil {
+		if a, err := netip.ParseAddr(u.Hostname()); (err == nil && a.IsLoopback()) || u.Hostname() == "localhost" {
+			return nil, fmt.Sprintf("HA: %s's agent URL is a loopback address, which %s can't reach; set its HA URL", peer.Name, fw.Name), nil
+		}
+	}
+	if ha.PeerFingerprint == "" {
+		return nil, fmt.Sprintf("HA: %s needs its agent's certificate fingerprint, which %s pins", peer.Name, fw.Name), nil
+	}
+	return ha, "", nil
 }
 
 // BuildInstances builds only the named instances, for a deploy that
@@ -138,16 +199,44 @@ func Build(db *gorm.DB, generation int64) (*fwconfig.Document, error) {
 // merges them into). Problems resolving the database come back as a
 // *fwconfig.ValidationError alongside the document.
 func BuildInstances(db *gorm.DB, generation int64, only map[string]bool) (*fwconfig.Document, error) {
-	return build(db, generation, only)
+	return build(db, generation, only, 0)
 }
 
-func build(db *gorm.DB, generation int64, only map[string]bool) (*fwconfig.Document, error) {
+// build builds the instances in only (nil: all) on the firewall (0: all).
+func build(db *gorm.DB, generation int64, only map[string]bool, firewallID uint) (*fwconfig.Document, error) {
+	return buildPeer(db, generation, only, firewallID, false, nil, "")
+}
+
+// buildPeer is build, for the firewall's HA secondary when peer is set,
+// with the host's HA block (and a problem with it).
+func buildPeer(db *gorm.DB, generation int64, only map[string]bool, firewallID uint, peer bool, ha *fwconfig.HA, haProblem string) (*fwconfig.Document, error) {
 	d, err := load(db)
 	if err != nil {
 		return nil, err
 	}
 	var problems []string
 	addf := func(format string, args ...any) { problems = append(problems, fmt.Sprintf(format, args...)) }
+	if haProblem != "" {
+		problems = append(problems, haProblem)
+	}
+	// Both hosts' static addresses, for Kea's HA peers (dhcpHA): the
+	// primary's before peerValues replaces them on the secondary.
+	var pairAddrs map[uint][2][]string
+	if ha != nil {
+		pairAddrs = map[uint][2][]string{}
+		for _, ifc := range d.interfaces {
+			var own []string
+			for _, a := range ifc.Addresses {
+				if !fwconfig.IsDelegated(a) {
+					own = append(own, a)
+				}
+			}
+			pairAddrs[ifc.ID] = [2][]string{own, ifc.PeerAddresses}
+		}
+	}
+	if peer {
+		peerValues(d, firewallID, addf)
+	}
 
 	ifaceByID := map[uint]models.Interface{}
 	for _, i := range d.interfaces {
@@ -184,9 +273,14 @@ func build(db *gorm.DB, generation int64, only map[string]bool) (*fwconfig.Docum
 		return out
 	}
 
-	doc := &fwconfig.Document{Version: fwconfig.Version, Generation: generation, Instances: []fwconfig.Instance{}, Links: []fwconfig.Link{}}
+	doc := &fwconfig.Document{Version: fwconfig.Version, Generation: generation, Instances: []fwconfig.Instance{}, Links: []fwconfig.Link{}, HA: ha}
 
+	onFirewall := map[uint]bool{}
 	for _, mi := range d.instances {
+		if firewallID != 0 && mi.FirewallID != firewallID {
+			continue
+		}
+		onFirewall[mi.ID] = true
 		if only != nil && !only[mi.Name] {
 			continue
 		}
@@ -809,6 +903,16 @@ func build(db *gorm.DB, generation int64, only map[string]bool) (*fwconfig.Docum
 			d.routingPolicy(&in, mi.ID)
 		}
 
+		if ha != nil && in.DHCP.Enabled && len(in.DHCP.Subnets) > 0 {
+			h, problem := dhcpHA(&in, mi.ID, d.interfaces, pairAddrs, ha.Node)
+			if problem != "" {
+				addf("%s: %s", in.Name, problem)
+			}
+			in.DHCP.HA = h
+		}
+		if ha != nil {
+			in.ConntrackSync = conntrackSync(&in, mi.ID, d.interfaces, pairAddrs, ha.Node)
+		}
 		doc.Instances = append(doc.Instances, in)
 	}
 
@@ -819,6 +923,12 @@ func build(db *gorm.DB, generation int64, only map[string]bool) (*fwconfig.Docum
 		return doc, nil
 	}
 	for _, l := range d.links {
+		if a, b := onFirewall[l.InstanceAID], onFirewall[l.InstanceBID]; !a || !b {
+			if a || b {
+				addf("link %s: its virtual firewalls are on different firewalls", l.Name)
+			}
+			continue
+		}
 		doc.Links = append(doc.Links, fwconfig.Link{
 			Name: l.Name,
 			A:    fwconfig.LinkEnd{Instance: instName[l.InstanceAID], Interface: l.InterfaceA, Addresses: []string(l.AddressesA)},
@@ -837,7 +947,7 @@ func build(db *gorm.DB, generation int64, only map[string]bool) (*fwconfig.Docum
 		})
 	}
 	for _, t := range d.tasks {
-		if !t.Enabled {
+		if !t.Enabled || (firewallID != 0 && t.FirewallID != firewallID) {
 			continue
 		}
 		task := fwconfig.Task{Name: t.Name, Schedule: t.Schedule, Kind: t.Kind, Command: t.Command, Timeout: t.Timeout}
@@ -865,6 +975,192 @@ func build(db *gorm.DB, generation int64, only map[string]bool) (*fwconfig.Docum
 		return doc, &fwconfig.ValidationError{Problems: problems}
 	}
 	return doc, nil
+}
+
+// haLink is the link the hosts of an HA pair talk over for an instance
+// (Kea's HA peers, conntrackd): prefer if it is on the wire (onWire) with
+// a static IPv4 address and its peer address, else the first interface
+// (by name) that is. The addresses come from the primary's and their
+// peer addresses, this host's first. ok is false when there is none: an
+// instance with only internal links has no way to its peer.
+func haLink(instanceID uint, ifaces []models.Interface, pair map[uint][2][]string, node, prefer string) (iface, this, peer string, ok bool) {
+	try := func(ifc models.Interface) bool {
+		addrs := pair[ifc.ID]
+		for k, a := range addrs[0] {
+			p, err := netip.ParsePrefix(a)
+			if err != nil || !p.Addr().Is4() || k >= len(addrs[1]) {
+				continue
+			}
+			q, err := netip.ParsePrefix(addrs[1][k])
+			if err != nil {
+				continue
+			}
+			iface, this, peer = ifc.Name, p.Addr().String(), q.Addr().String()
+			if node == fwconfig.HASecondary {
+				this, peer = peer, this
+			}
+			return true
+		}
+		return false
+	}
+	for _, ifc := range ifaces {
+		if ifc.InstanceID == instanceID && ifc.Enabled && ifc.Name == prefer && onWire(ifc, instanceID, ifaces) && try(ifc) {
+			return iface, this, peer, true
+		}
+	}
+	for _, ifc := range ifaces {
+		if ifc.InstanceID != instanceID || !ifc.Enabled {
+			continue
+		}
+		if onWire(ifc, instanceID, ifaces) && try(ifc) {
+			return iface, this, peer, true
+		}
+	}
+	return "", "", "", false
+}
+
+// onWire tells whether an interface reaches beyond the host: a physical
+// one or a bridge, or a VLAN on one (not on a link between instances).
+func onWire(ifc models.Interface, instanceID uint, ifaces []models.Interface) bool {
+	switch ifc.Kind {
+	case fwconfig.KindPhysical, fwconfig.KindBridge, "":
+		return true
+	case fwconfig.KindVLAN:
+		i := slices.IndexFunc(ifaces, func(p models.Interface) bool { return p.InstanceID == instanceID && p.Name == ifc.Parent })
+		return i >= 0 && ifaces[i].Kind != fwconfig.KindVLAN && onWire(ifaces[i], instanceID, ifaces)
+	}
+	return false
+}
+
+// dhcpHA is Kea's HA link of an instance on an HA pair (haLink), the
+// interface of its first DHCP subnet (IPv4 first) preferred.
+func dhcpHA(in *fwconfig.Instance, instanceID uint, ifaces []models.Interface, pair map[uint][2][]string, node string) (*fwconfig.DHCPHA, string) {
+	subs := slices.Clone(in.DHCP.Subnets)
+	slices.SortStableFunc(subs, func(a, b fwconfig.DHCPSubnet) int {
+		return cmpBool(strings.Contains(a.Prefix, ":"), strings.Contains(b.Prefix, ":"))
+	})
+	iface, this, peer, ok := haLink(instanceID, ifaces, pair, node, subs[0].Interface)
+	if !ok {
+		return nil, "DHCP on an HA pair: the DHCP servers talk over an interface with a static IPv4 address and its peer address; there is none"
+	}
+	h := &fwconfig.DHCPHA{Role: fwconfig.DHCPHAPrimary, Interface: iface, This: this, Peer: peer}
+	if node == fwconfig.HASecondary {
+		h.Role = fwconfig.DHCPHAStandby
+	}
+	return h, ""
+}
+
+// conntrackSync is the link an instance on an HA pair syncs its
+// connections over: Kea's, or haLink's; nil when there is none.
+func conntrackSync(in *fwconfig.Instance, instanceID uint, ifaces []models.Interface, pair map[uint][2][]string, node string) *fwconfig.ConntrackSync {
+	if h := in.DHCP.HA; h != nil {
+		return &fwconfig.ConntrackSync{Interface: h.Interface, This: h.This, Peer: h.Peer}
+	}
+	iface, this, peer, ok := haLink(instanceID, ifaces, pair, node, "")
+	if !ok {
+		return nil
+	}
+	return &fwconfig.ConntrackSync{Interface: iface, This: this, Peer: peer}
+}
+
+func cmpBool(a, b bool) int {
+	switch {
+	case a == b:
+		return 0
+	case a:
+		return 1
+	}
+	return -1
+}
+
+// peerValues puts the HA secondary's values in place of what differs
+// between the two hosts, for the instances of the primary: the
+// interfaces' addresses, the VRRP priorities and the routers' ids.
+func peerValues(d *data, primaryID uint, addf func(string, ...any)) {
+	on := map[uint]string{}
+	for _, in := range d.instances {
+		if in.FirewallID == primaryID {
+			on[in.ID] = in.Name
+		}
+	}
+	// Delegated addresses are each host's own prefix; the peer addresses
+	// stand for the others, in order. A disabled interface keeps its own.
+	for i := range d.interfaces {
+		ifc := &d.interfaces[i]
+		name, ok := on[ifc.InstanceID]
+		if !ok || !ifc.Enabled {
+			continue
+		}
+		var static, delegated models.StringList
+		for _, a := range ifc.Addresses {
+			if fwconfig.IsDelegated(a) {
+				delegated = append(delegated, a)
+			} else {
+				static = append(static, a)
+			}
+		}
+		if len(static) == 0 {
+			continue
+		}
+		if len(ifc.PeerAddresses) != len(static) {
+			addf("%s: interface %s: the HA secondary needs an address of its own for each address (peer addresses)", name, ifc.Name)
+			continue
+		}
+		for j, a := range static {
+			pa, err1 := fwconfig.ParseInterfaceAddress(a)
+			pb, err2 := fwconfig.ParseInterfaceAddress(ifc.PeerAddresses[j])
+			// A host address (/32, /128: a loopback's) may be any other one.
+			host := err1 == nil && err2 == nil && pa.Bits() == pa.Addr().BitLen() && pb.Bits() == pa.Bits() && pa.Addr().Is4() == pb.Addr().Is4()
+			if err1 != nil || err2 != nil || (pa.Masked() != pb.Masked() && !host) || pa.Addr() == pb.Addr() {
+				addf("%s: interface %s: peer address %s is not another address of %s", name, ifc.Name, ifc.PeerAddresses[j], a)
+			}
+		}
+		ifc.Addresses = append(slices.Clone(ifc.PeerAddresses), delegated...)
+	}
+	for i := range d.vrrpRouters {
+		r := &d.vrrpRouters[i]
+		if _, ok := on[r.InstanceID]; !ok {
+			continue
+		}
+		if r.PeerPriority != nil {
+			r.Priority = *r.PeerPriority
+		} else {
+			r.Priority = max(1, min(r.Priority, 254)-10)
+		}
+	}
+	for i := range d.bgpNeighbors {
+		n := &d.bgpNeighbors[i]
+		if _, ok := on[n.InstanceID]; ok && n.HAPeerAddress != "" {
+			n.Address = n.HAPeerAddress
+		}
+	}
+	for i := range d.bgpConfigs {
+		c := &d.bgpConfigs[i]
+		if name, ok := on[c.InstanceID]; ok && c.RouterID != "" {
+			if c.PeerRouterID == "" {
+				addf("%s: BGP: the HA secondary needs a router id of its own (peer router id)", name)
+			}
+			c.RouterID = c.PeerRouterID
+		}
+	}
+	for i := range d.ospfConfigs {
+		c := &d.ospfConfigs[i]
+		if name, ok := on[c.InstanceID]; ok && c.RouterID != "" {
+			if c.PeerRouterID == "" {
+				addf("%s: OSPF: the HA secondary needs a router id of its own (peer router id)", name)
+			}
+			c.RouterID = c.PeerRouterID
+		}
+	}
+	for i := range d.isisConfigs {
+		c := &d.isisConfigs[i]
+		if name, ok := on[c.InstanceID]; ok && c.Net != "" && c.NetInterface == "" {
+			if c.PeerNet == "" {
+				addf("%s: IS-IS: the HA secondary needs a NET of its own (peer NET)", name)
+			}
+			c.Net = c.PeerNet
+		}
+	}
 }
 
 // vrfByName is an instance's VRF of that name.

@@ -14,6 +14,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/tls"
 	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
@@ -312,6 +313,56 @@ func SaveImported(dir, chain, key string) (*Stored, error) {
 		}
 	}
 	return Save(dir, Request{Directory: Imported}, &Result{Certificate: []byte(chain), PrivateKey: []byte(key)})
+}
+
+// Raw is a stored certificate's files as they are, for an HA peer.
+type Raw struct {
+	Meta      string `json:"meta"`
+	FullChain string `json:"fullchain"`
+	PrivKey   string `json:"privkey"`
+}
+
+// ReadRaw reads the files Save wrote; nil without a (complete)
+// certificate.
+func ReadRaw(dir string) *Raw {
+	if Load(dir) == nil {
+		return nil
+	}
+	m, err1 := os.ReadFile(filepath.Join(dir, metaFile))
+	c, err2 := os.ReadFile(filepath.Join(dir, FullChainFile))
+	k, err3 := os.ReadFile(filepath.Join(dir, PrivKeyFile))
+	if err1 != nil || err2 != nil || err3 != nil {
+		return nil
+	}
+	return &Raw{Meta: string(m), FullChain: string(c), PrivKey: string(k)}
+}
+
+// WriteRaw writes an HA peer's certificate to dir as Save does (meta.json
+// last), after checking it; false when dir holds the same already.
+func WriteRaw(dir string, r *Raw) (bool, error) {
+	if old := ReadRaw(dir); old != nil && *old == *r {
+		return false, nil
+	}
+	var st Stored
+	if err := json.Unmarshal([]byte(r.Meta), &st); err != nil {
+		return false, fmt.Errorf("meta: %w", err)
+	}
+	if _, err := parse([]byte(r.FullChain)); err != nil {
+		return false, err
+	}
+	if _, err := tls.X509KeyPair([]byte(r.FullChain), []byte(r.PrivKey)); err != nil {
+		return false, err
+	}
+	if err := os.Remove(filepath.Join(dir, metaFile)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return false, err
+	}
+	if err := writeFile(filepath.Join(dir, PrivKeyFile), []byte(r.PrivKey), 0o600); err != nil {
+		return false, err
+	}
+	if err := writeFile(filepath.Join(dir, FullChainFile), []byte(r.FullChain), 0o644); err != nil {
+		return false, err
+	}
+	return true, writeFile(filepath.Join(dir, metaFile), []byte(r.Meta), 0o644)
 }
 
 // Load reads what Save wrote; nil without a (complete) certificate.

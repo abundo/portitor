@@ -137,6 +137,14 @@ const fields = computed(() => [
     hint: '1-254. The router with the highest priority is master; on a tie, the one with the highest interface address.',
   },
   {
+    key: 'peer_priority',
+    label: 'HA peer priority',
+    type: 'number',
+    placeholder: 'priority - 10',
+    show: () => store.hasPeer,
+    hint: "The HA secondary's priority; empty: 10 below the priority, so the primary is master.",
+  },
+  {
     key: 'advertisement_interval',
     label: 'Advertisement interval (ms)',
     type: 'number',

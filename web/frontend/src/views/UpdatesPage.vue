@@ -10,6 +10,7 @@ import { api } from '@/api'
 import { errMsg } from '@/api/http'
 import { ago, when } from '@/utils/time'
 import { useSearch } from '@/utils/search'
+import { useInstanceStore } from '@/stores/instances'
 
 const { ask } = useConfirm()
 
@@ -59,9 +60,18 @@ const terminalText = (s) =>
     .join('\n')
 const stateColor = (s) => (s === 'succeeded' ? 'success' : s === 'failed' ? 'error' : 'info')
 
+// With several firewalls the page shows one; null is the first.
+const instStore = useInstanceStore()
+const firewallId = ref(null)
+function pickFirewall(id) {
+  firewallId.value = id
+  sys.value = null
+  load()
+}
+
 async function load() {
   try {
-    sys.value = await api.system()
+    sys.value = await api.system(firewallId.value)
     error.value = ''
   } catch (err) {
     error.value = errMsg(err)
@@ -115,7 +125,7 @@ onUnmounted(() => clearTimeout(timer))
 
 async function start(job, release) {
   try {
-    await api.systemJob(job, release)
+    await api.systemJob(job, release, firewallId.value)
     // Up to a minute of polls before the job must have shown up.
     expecting.value = 20
     toast.add({ title: `${jobTitle[job]} started`, color: 'info' })
@@ -170,7 +180,7 @@ async function reboot() {
   )
     return
   try {
-    await api.systemReboot()
+    await api.systemReboot(firewallId.value)
     toast.add({ title: 'The firewall is rebooting', color: 'warning' })
     expecting.value = 60
     setTimeout(load, 10000)
@@ -221,6 +231,15 @@ async function reboot() {
         </div>
       </template>
     </UModal>
+    <div v-if="instStore.firewalls.length > 1" class="flex items-center gap-2">
+      <span class="text-sm text-muted">Firewall</span>
+      <USelect
+        :model-value="firewallId ?? instStore.firewalls[0]?.id"
+        :items="instStore.firewallItems"
+        class="w-48"
+        @update:model-value="pickFirewall"
+      />
+    </div>
     <UAlert
       v-if="error"
       color="error"

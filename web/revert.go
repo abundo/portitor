@@ -19,14 +19,15 @@ import (
 	"gorm.io/gorm/logger"
 
 	"github.com/abundo/portitor/internal/dbmigrate"
+	"github.com/abundo/portitor/models"
 )
 
-// Every deployment keeps a snapshot of the database it was built from
-// (<db dir>/deployed/<generation>.db), so "Revert" can throw away the
-// uncommitted changes: it restores the live deployment's snapshot the way a
+// Every commit keeps a snapshot of the database it was built from
+// (<db dir>/deployed/<commit>.db), so "Revert" can throw away the
+// uncommitted changes: it restores the live commit's snapshot the way a
 // backup restore does. The document cannot be turned back into rows.
 
-// snapshotKeep is how many of the latest live deployments keep a snapshot;
+// snapshotKeep is how many of the latest live commits keep a snapshot;
 // rolling back a pending one makes an older one live again.
 const snapshotKeep = 5
 
@@ -47,13 +48,13 @@ func (s *Server) snapshotDir() (string, error) {
 	return "", errors.New("the database has no file")
 }
 
-func snapshotPath(dir string, gen int64) string {
-	return filepath.Join(dir, strconv.FormatInt(gen, 10)+".db")
+func snapshotPath(dir string, commit int64) string {
+	return filepath.Join(dir, strconv.FormatInt(commit, 10)+".db")
 }
 
 // takeSnapshot writes the database to a temporary file in the snapshot
 // directory; keepSnapshot or os.Remove finishes it.
-func (s *Server) takeSnapshot(gen int64) (string, error) {
+func (s *Server) takeSnapshot(commit int64) (string, error) {
 	dir, err := s.snapshotDir()
 	if err != nil {
 		return "", err
@@ -62,7 +63,7 @@ func (s *Server) takeSnapshot(gen int64) (string, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
 	}
-	tmp := snapshotPath(dir, gen) + ".tmp"
+	tmp := snapshotPath(dir, commit) + ".tmp"
 	os.Remove(tmp)
 	if err := s.db.Exec("VACUUM INTO ?", tmp).Error; err != nil {
 		return "", fmt.Errorf("snapshot: %w", err)
@@ -83,9 +84,9 @@ func closeDB(db *gorm.DB) {
 
 // keepSnapshot moves the temporary snapshot into place and removes the
 // snapshots of all but the latest live deployments.
-func (s *Server) keepSnapshot(tmp string, gen int64) {
+func (s *Server) keepSnapshot(tmp string, commit int64) {
 	dir := filepath.Dir(tmp)
-	if err := os.Rename(tmp, snapshotPath(dir, gen)); err != nil {
+	if err := os.Rename(tmp, snapshotPath(dir, commit)); err != nil {
 		slog.Warn("keeping the deployment snapshot", "err", err)
 		os.Remove(tmp)
 		return
@@ -94,23 +95,31 @@ func (s *Server) keepSnapshot(tmp string, gen int64) {
 }
 
 // pruneSnapshots removes the snapshots and documents of all but the latest
-// live deployments.
+// live commits.
 func (s *Server) pruneSnapshots() {
 	dir, err := s.snapshotDir()
 	if err != nil {
 		return
 	}
-	var gens []int64
-	s.db.Table("deployments").Where("status IN ?", []string{"applied", "pending", "confirmed"}).
-		Order("generation desc").Limit(snapshotKeep).Pluck("generation", &gens)
+	var commits []int64
+	s.db.Table("deployments").Distinct("commit_id").Where("status IN ?", []string{"applied", "pending", "confirmed"}).
+		Order("commit_id desc").Limit(snapshotKeep).Pluck("commit_id", &commits)
+	// Each firewall's live document stays, however old.
+	fws, _ := s.firewalls()
+	for _, fw := range fws {
+		if dep, _ := s.liveDeployment(fw.ID); dep != nil {
+			commits = append(commits, dep.CommitID)
+		}
+	}
 	keep := map[string]bool{}
-	for _, g := range gens {
-		keep[strconv.FormatInt(g, 10)] = true
+	for _, c := range commits {
+		keep[strconv.FormatInt(c, 10)] = true
 	}
 	entries, _ := os.ReadDir(dir)
 	for _, e := range entries {
-		gen, ext, ok := strings.Cut(e.Name(), ".")
-		if ok && (ext == "db" || ext == "json") && !keep[gen] {
+		base, ext, ok := strings.Cut(e.Name(), ".")
+		commit, _, _ := strings.Cut(base, "-")
+		if ok && (ext == "db" || ext == "json") && !keep[commit] {
 			os.Remove(filepath.Join(dir, e.Name()))
 		}
 	}
@@ -121,23 +130,27 @@ func (s *Server) pruneSnapshots() {
 func (s *Server) handleDeployRevert(c *echo.Context) error {
 	s.deployMu.Lock()
 	defer s.deployMu.Unlock()
-	live, err := s.liveDeployment()
+	live, err := s.liveCommit()
 	if err != nil {
 		return err
 	}
-	if live == nil {
+	if live == 0 {
 		return errJSON(c, http.StatusConflict, "nothing has been committed yet")
 	}
 	dir, err := s.snapshotDir()
 	if err != nil {
 		return err
 	}
-	src, err := os.Open(snapshotPath(dir, live.Generation))
+	src, err := os.Open(snapshotPath(dir, live))
 	if errors.Is(err, os.ErrNotExist) {
-		if len(live.Instances) > 0 {
-			return errJSON(c, http.StatusConflict, fmt.Sprintf("generation %d deployed only some virtual firewalls (%s); revert works after a deploy of everything", live.Generation, strings.Join(live.Instances, ", ")))
+		var partial []string
+		if err := s.db.Model(&models.Deployment{}).Where("commit_id = ? AND instances != '[]'", live).Pluck("instances", &partial).Error; err != nil {
+			return err
 		}
-		return errJSON(c, http.StatusConflict, fmt.Sprintf("generation %d has no saved configuration to revert to (it was committed by an older version)", live.Generation))
+		if len(partial) > 0 {
+			return errJSON(c, http.StatusConflict, fmt.Sprintf("commit %d deployed only some virtual firewalls; revert works after a commit of everything", live))
+		}
+		return errJSON(c, http.StatusConflict, fmt.Sprintf("commit %d has no saved configuration to revert to (it was committed by an older version, or failed on a firewall)", live))
 	} else if err != nil {
 		return err
 	}
@@ -168,6 +181,6 @@ func (s *Server) handleDeployRevert(c *echo.Context) error {
 		}
 		return err
 	}
-	slog.Info("uncommitted changes reverted", "user", currentUser(c).Username, "generation", live.Generation)
-	return c.JSON(http.StatusOK, map[string]any{"generation": live.Generation})
+	slog.Info("uncommitted changes reverted", "user", currentUser(c).Username, "commit", live)
+	return c.JSON(http.StatusOK, map[string]any{"generation": live})
 }

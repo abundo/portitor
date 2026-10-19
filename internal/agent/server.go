@@ -31,7 +31,30 @@ const maxConfirmTimeout = 30 * time.Minute
 
 // Handler returns the management API.
 func (a *Agent) Handler() http.Handler {
-	return a.authMiddleware(a.routes())
+	api := a.authMiddleware(a.routes())
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The HA peer's heartbeat and certificate copy have the pair's
+		// secret, not the token, and pass allow_from: the peer is another
+		// host. The pair runs the same configuration, so its secret may
+		// have the certificates' keys.
+		if r.URL.Path == "/v1/ha/heartbeat" || r.URL.Path == "/v1/ha/certificates" {
+			if r.Method != http.MethodGet || !a.ha.heartbeatAuth(r) {
+				writeError(w, http.StatusUnauthorized, errors.New("unauthorized"))
+				return
+			}
+			if r.URL.Path == "/v1/ha/certificates" {
+				certs := a.certs.haCertificates()
+				if len(certs) > 0 {
+					slog.Debug("ha: certificates sent to the peer", "remote", r.RemoteAddr, "certificates", len(certs))
+				}
+				writeJSONResponse(w, http.StatusOK, certs)
+				return
+			}
+			writeJSONResponse(w, http.StatusOK, map[string]any{"node": a.ha.status().Node})
+			return
+		}
+		api.ServeHTTP(w, r)
+	})
 }
 
 func (a *Agent) routes() *http.ServeMux {
@@ -205,6 +228,10 @@ func (a *Agent) routes() *http.ServeMux {
 		slog.Info("api: dhcp renew", "instance", req.Instance, "interface", req.Interface, "family", req.Family, "remote", r.RemoteAddr)
 		writeJSONResponse(w, http.StatusOK, map[string]any{"renewing": req.Interface})
 	})
+	mux.HandleFunc("GET /v1/ha", func(w http.ResponseWriter, r *http.Request) {
+		writeJSONResponse(w, http.StatusOK, a.ha.status())
+	})
+	mux.HandleFunc("POST /v1/ha/vote", a.handleHAVote)
 	mux.HandleFunc("GET /v1/system", func(w http.ResponseWriter, r *http.Request) {
 		writeJSONResponse(w, http.StatusOK, a.sys.Status(r.Context()))
 	})
@@ -342,14 +369,29 @@ func listenSocket(path string) (net.Listener, error) {
 	return ln, nil
 }
 
-// localHandler serves the API's GET routes, without the token: the
-// socket's permissions already limit it to root. Changes go through
-// portitor-web.
+// localWrites are the POST routes the local socket serves: actions for
+// the console when portitor-web can't reach the firewall, none of which
+// changes the configuration.
+var localWrites = map[string]bool{
+	"/v1/confirm":           true,
+	"/v1/rollback":          true,
+	"/v1/dhcp/renew":        true,
+	"/v1/iplists/refresh":   true,
+	"/v1/connections/flush": true,
+	"/v1/ha/vote":           true,
+}
+
+// localHandler serves the API's GET routes and localWrites, without the
+// token: the socket's permissions already limit it to root.
+// Configuration changes go through portitor-web.
 func localHandler(api http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			writeError(w, http.StatusMethodNotAllowed, errors.New("the local socket is read-only"))
+		if r.Method != http.MethodGet && !(r.Method == http.MethodPost && localWrites[r.URL.Path]) {
+			writeError(w, http.StatusMethodNotAllowed, errors.New("not served on the local socket"))
 			return
+		}
+		if r.Method == http.MethodPost {
+			r.RemoteAddr = "local socket"
 		}
 		api.ServeHTTP(w, r)
 	})

@@ -52,7 +52,7 @@ func (s *Server) handleAgentConnectionsFlush(c *echo.Context) error {
 	if ok, err := s.allowInstanceName(c, body.Instance); !ok {
 		return err
 	}
-	a, _, err := s.agent()
+	a, _, err := s.instanceAgent(body.Instance)
 	if err != nil {
 		return agentError(c, err)
 	}
@@ -73,7 +73,7 @@ func (s *Server) handleAgentDHCPRenew(c *echo.Context) error {
 	if ok, err := s.allowInstanceName(c, body.Instance); !ok {
 		return err
 	}
-	a, _, err := s.agent()
+	a, _, err := s.instanceAgent(body.Instance)
 	if err != nil {
 		return agentError(c, err)
 	}
@@ -95,7 +95,7 @@ func (s *Server) handleAgentConnections(c *echo.Context) error {
 	if ok, err := s.allowInstanceName(c, body.Instance); !ok {
 		return err
 	}
-	a, _, err := s.agent()
+	a, _, err := s.instanceAgent(body.Instance)
 	if err != nil {
 		return agentError(c, err)
 	}

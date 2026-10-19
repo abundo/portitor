@@ -181,7 +181,7 @@ from a release, then:
 
 On an update it restarts the agent first (it rejects document fields it does not know,
 so it must not be older than the GUI), then stops portitor-web, migrates the database
-and starts it again. It finds the firewall from the agent URL under *Settings*. A
+and starts it again. It finds the firewall from the first firewall's agent URL under *Firewalls*. A
 systemd unit you changed is shown as a diff and kept unless you confirm. `--dry-run`
 shows what would change; `--source` builds and installs a source checkout instead.
 
@@ -274,7 +274,7 @@ portitor-web listens on `127.0.0.1:8080` and its session cookie needs HTTPS: set
 `tls_cert` and `tls_key` in `web.yaml`, or put a TLS reverse proxy in front (see
 [Configuration](docs/portitor-web.md#configuration)).
 
-Then open the GUI. Enter the agent URL, token and fingerprint under *Settings*,
+Then open the GUI. Enter the agent URL, token and fingerprint under *Admin → Firewalls*,
 configure the default virtual firewall `main` (created on first start), and deploy.
 [docs/portitor-web.md](docs/portitor-web.md) describes the configuration file, the
 commands and the GUI. [docs/rules.md](docs/rules.md) is a guide to writing firewall rules,

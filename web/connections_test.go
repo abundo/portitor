@@ -17,7 +17,7 @@ import (
 func TestAgentConnections(t *testing.T) {
 	env := newEnv(t)
 	fake := &connectionsAgent{}
-	env.srv.newAgent = func(*models.Settings) (agentAPI, error) { return fake, nil }
+	env.srv.newAgent = func(*models.Firewall) (agentAPI, error) { return fake, nil }
 	rec := env.do("POST", "/api/agent/connections", map[string]any{"instance": "main", "interval_ms": 500, "max": 10})
 	if rec.Code != http.StatusOK || rec.Body.String() != "{}\n" || fake.req.Instance != "main" || fake.req.Max != 10 {
 		t.Errorf("%d %q %+v", rec.Code, rec.Body, fake.req)

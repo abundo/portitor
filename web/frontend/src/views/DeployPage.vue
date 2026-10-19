@@ -18,6 +18,17 @@ const auth = useAuthStore()
 const toast = useToast()
 const deploy = useDeployStore()
 const instanceStore = useInstanceStore()
+// Each commit has a deployment per firewall it changed, with that
+// firewall's generation.
+const historyColumns = computed(() => [
+  { accessorKey: 'commit_id', header: 'Commit' },
+  ...(instanceStore.firewalls.length > 1 ? [{ id: 'firewall', header: 'Firewall' }] : []),
+  { accessorKey: 'generation', header: 'Gen' },
+  { id: 'when', header: 'When' },
+  { accessorKey: 'username', header: 'By' },
+  { id: 'status', header: 'Status' },
+  { accessorKey: 'message', header: 'Message' },
+])
 // The instances to deploy; none chosen is everything the user may (a
 // global admin: the whole configuration).
 const chosen = ref([])
@@ -50,7 +61,7 @@ onMounted(load)
 const { search: historySearch, filtered: shownHistory } = useSearch(
   history,
   (d) =>
-    `${d.generation} ${datetime(d.created_at)} ${d.username} ${d.status.replace('_', ' ')} ${d.message}`,
+    `${d.commit_id} ${instanceStore.firewallName(d.firewall_id)} ${d.generation} ${datetime(d.created_at)} ${d.username} ${d.status.replace('_', ' ')} ${d.message}`,
 )
 
 // A different choice checks again; the preview was of the old one.
@@ -78,7 +89,7 @@ async function apply() {
     const res = await api.deployApply(Number(confirmTimeout.value), chosen.value)
     applyResult.value = { ok: true, ...res }
     toast.add({
-      title: `Generation ${res.deployment.generation} ${res.deployment.status}`,
+      title: `Commit ${res.commit} ${res.status}`,
       color: 'success',
     })
     preview.value = null
@@ -228,7 +239,7 @@ const fileColor = { same: 'neutral', changed: 'warning', new: 'success', removed
           <UBadge
             color="neutral"
             variant="outline"
-            :label="`next generation ${check.generation + 1}`"
+            :label="`next commit ${check.generation + 1}`"
           />
         </div>
       </template>
@@ -294,16 +305,10 @@ const fileColor = { same: 'neutral', changed: 'warning', new: 'success', removed
       <div class="mb-2">
         <SearchInput v-model="historySearch" />
       </div>
-      <UTable
-        :data="shownHistory"
-        :columns="[
-          { accessorKey: 'generation', header: 'Gen' },
-          { id: 'when', header: 'When' },
-          { accessorKey: 'username', header: 'By' },
-          { id: 'status', header: 'Status' },
-          { accessorKey: 'message', header: 'Message' },
-        ]"
-      >
+      <UTable :data="shownHistory" :columns="historyColumns">
+        <template #firewall-cell="{ row }">{{
+          instanceStore.firewallName(row.original.firewall_id)
+        }}</template>
         <template #when-cell="{ row }">{{ datetime(row.original.created_at) }}</template>
         <template #status-cell="{ row }">
           <UBadge

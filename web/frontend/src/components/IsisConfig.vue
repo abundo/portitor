@@ -35,6 +35,7 @@ const defaults = () => ({
   id: 0,
   enabled: false,
   net: '',
+  peer_net: '',
   net_interface: '',
   net_area: '49.0001',
   level: '',
@@ -352,6 +353,14 @@ const ifDefaults = {
             placeholder="49.0001.1921.6800.1001.00"
             :ui="{ base: 'font-mono' }"
           />
+        </UFormField>
+        <UFormField
+          v-if="store.hasPeer && cfg.net"
+          label="HA peer NET"
+          :ui="inlineField"
+          help="The HA secondary's NET: the same area, another system id."
+        >
+          <UInput v-model="cfg.peer_net" class="w-72" :ui="{ base: 'font-mono' }" />
         </UFormField>
         <UFormField
           label="Level"

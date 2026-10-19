@@ -238,6 +238,9 @@ type User struct {
 	// TokenVersion invalidates issued sessions when bumped (password
 	// change, role change, logout everywhere).
 	TokenVersion int `json:"-"`
+	// ManagedBy names the manager that pushed it (portitor-config);
+	// changed there only.
+	ManagedBy string `json:"managed_by"`
 }
 
 // DateFormats are the values of User.DateFormat: the browser's language,
@@ -283,16 +286,46 @@ type RoleMember struct {
 	Level  string `json:"level"`
 }
 
-// Settings is a single row (ID 1).
-type Settings struct {
-	ID uint `gorm:"primaryKey" json:"id"`
+// Firewall is a host portitor-web deploys to, through its agent. The
+// first one (ID 1) is the one the installation started with.
+type Firewall struct {
+	Base
+	Name        string `gorm:"uniqueIndex" json:"name"`
+	Description string `json:"description"`
 	// AgentURL is the portitor-agent API, e.g. https://192.168.1.1:8443.
 	AgentURL string `json:"agent_url"`
-	// AgentToken authenticates to the agent. Never sent to the browser.
-	AgentToken string `json:"-"`
+	// AgentToken authenticates to the agent. Never sent to the browser;
+	// NewAgentToken sets it.
+	AgentToken    string `json:"-"`
+	NewAgentToken string `gorm:"-" json:"agent_token,omitempty"`
+	HasAgentToken bool   `gorm:"-" json:"has_agent_token"`
 	// AgentFingerprint pins the agent's self-signed certificate
 	// (SHA-256 of the DER, hex). Empty means verify against system CAs.
 	AgentFingerprint string `json:"agent_fingerprint"`
+	// Generation is the agent's monotonic deploy id: the last one
+	// portitor-web handed out to it.
+	Generation int64 `json:"generation"`
+	// HAPrimaryID makes it the HA secondary of that firewall: it runs the
+	// primary's instances, with their peer_* values, and has none of its own.
+	HAPrimaryID *uint `gorm:"column:ha_primary_id" json:"ha_primary_id"`
+	// HASecret is the pair's heartbeat secret, on the secondary.
+	HASecret string `gorm:"column:ha_secret" json:"-"`
+	// HAURL is the agent URL the HA peer uses; empty: AgentURL.
+	HAURL string `gorm:"column:ha_url" json:"ha_url"`
+	// ConfigURL is the firewall's portitor-config (manager API), its
+	// token (write-only, NewConfigToken) and certificate pin. With one,
+	// its virtual firewalls are pushed and committed there; the agent is
+	// asked for live data alone.
+	ConfigURL         string `json:"config_url"`
+	ConfigToken       string `json:"-"`
+	NewConfigToken    string `gorm:"-" json:"config_token,omitempty"`
+	HasConfigToken    bool   `gorm:"-" json:"has_config_token"`
+	ConfigFingerprint string `json:"config_fingerprint"`
+}
+
+// Settings is a single row (ID 1).
+type Settings struct {
+	ID uint `gorm:"primaryKey" json:"id"`
 	// ConfirmTimeout is the default commit-confirm window in seconds;
 	// 0 applies without confirmation.
 	ConfirmTimeout int `json:"confirm_timeout"`
@@ -309,8 +342,9 @@ type Settings struct {
 	// VirtualFirewalls shows the Virtual firewalls and Links pages and
 	// allows more than one instance; it can't be turned off while there are.
 	VirtualFirewalls bool `json:"virtual_firewalls"`
-	// Generation is the last deployed document generation.
-	Generation int64     `json:"generation"`
+	// LastCommit numbers the commits: the Revert snapshots and
+	// Deployment.CommitID.
+	LastCommit int64     `json:"last_commit"`
 	UpdatedAt  time.Time `json:"updated_at"`
 }
 
@@ -320,7 +354,14 @@ type Instance struct {
 	Base
 	Name        string `gorm:"uniqueIndex" json:"name"`
 	Description string `json:"description"`
-	IsDefault   bool   `json:"is_default"`
+	// IsDefault: the firewall's host itself (its root namespace); one per
+	// firewall.
+	IsDefault  bool `json:"is_default"`
+	FirewallID uint `json:"firewall_id"`
+	// ManagedBy names the manager that pushed it (portitor-config); it
+	// is read-only here then, unless Diverged (break-glass).
+	ManagedBy string `json:"managed_by"`
+	Diverged  bool   `json:"diverged"`
 
 	DnsUpstream         string     `json:"dns_upstream"` // fwconfig.Upstream*
 	DnsForwarders       StringList `json:"dns_forwarders"`
@@ -413,8 +454,11 @@ type Interface struct {
 	Ipv4Mode    string     `json:"ipv4_mode"`
 	// Addresses are the interface's static addresses in CIDR form with a
 	// host part (192.168.1.1/24, fd00:1::1/64), IPv4 and IPv6 mixed.
-	Addresses    StringList `json:"addresses"`
-	Ipv6AcceptRA bool       `gorm:"column:ipv6_accept_ra" json:"ipv6_accept_ra"`
+	Addresses StringList `json:"addresses"`
+	// PeerAddresses are the HA secondary's static addresses in place of
+	// Addresses, one each, in the same prefixes.
+	PeerAddresses StringList `json:"peer_addresses"`
+	Ipv6AcceptRA  bool       `gorm:"column:ipv6_accept_ra" json:"ipv6_accept_ra"`
 	// Dhcpv6 runs a DHCPv6 client; Dhcpv6Pd also asks for a delegated
 	// prefix, of Dhcpv6PdLength bits (0: the server chooses).
 	Dhcpv6         bool `gorm:"column:dhcpv6" json:"dhcpv6"`
@@ -532,6 +576,9 @@ type Route struct {
 // ones (fwconfig.Services); the builder writes its number.
 type PortName struct {
 	Base
+	// ManagedBy names the manager that pushed it (portitor-config);
+	// read-only here then.
+	ManagedBy   string `json:"managed_by"`
 	Name        string `gorm:"uniqueIndex" json:"name"`
 	Port        int    `json:"port"`
 	Description string `json:"description"`
@@ -650,6 +697,9 @@ type IpamPrefix struct {
 // Addresses may mix IPv4 and IPv6 (a host with both, say).
 type AddressObject struct {
 	Base
+	// ManagedBy names the manager that pushed it (portitor-config);
+	// read-only here then.
+	ManagedBy   string     `json:"managed_by"`
 	Name        string     `gorm:"uniqueIndex" json:"name"`
 	Addresses   StringList `json:"addresses"`
 	Description string     `json:"description"`
@@ -663,6 +713,9 @@ type AddressObject struct {
 // matches it as an nftables set; anywhere else it is expanded.
 type AddressList struct {
 	Base
+	// ManagedBy names the manager that pushed it (portitor-config);
+	// read-only here then.
+	ManagedBy   string     `json:"managed_by"`
 	Name        string     `gorm:"uniqueIndex" json:"name"`
 	Entries     StringList `json:"entries"`
 	Description string     `json:"description"`
@@ -675,9 +728,12 @@ type AddressList struct {
 // the top) and mean nothing to the firewall.
 type ObjectFolder struct {
 	Base
-	Kind     string `json:"kind"` // ObjectFolder*
-	ParentID *uint  `json:"parent_id"`
-	Name     string `json:"name"`
+	// ManagedBy names the manager that pushed it (portitor-config);
+	// read-only here then.
+	ManagedBy string `json:"managed_by"`
+	Kind      string `json:"kind"` // ObjectFolder*
+	ParentID  *uint  `json:"parent_id"`
+	Name      string `json:"name"`
 }
 
 // Kinds of ObjectFolder.
@@ -693,6 +749,9 @@ const (
 // IcmpCode (icmp, icmp6), or IpProtocol (ip).
 type Service struct {
 	Base
+	// ManagedBy names the manager that pushed it (portitor-config);
+	// read-only here then.
+	ManagedBy   string          `json:"managed_by"`
 	Name        string          `gorm:"uniqueIndex" json:"name"`
 	Description string          `json:"description"`
 	Type        string          `json:"type"`
@@ -888,6 +947,9 @@ type DyndnsRecord struct {
 // use it by name as "@name" in their address lists.
 type IpList struct {
 	Base
+	// ManagedBy names the manager that pushed it (portitor-config);
+	// read-only here then.
+	ManagedBy   string `json:"managed_by"`
 	Name        string `gorm:"uniqueIndex" json:"name"`
 	Description string `json:"description"`
 	Source      string `json:"source"` // fwconfig.IPList*
@@ -916,20 +978,27 @@ type Task struct {
 	Kind        string `json:"kind"` // fwconfig.Task*
 	IpListID    *uint  `json:"ip_list_id"`
 	Command     string `json:"command"`
-	Timeout     int    `json:"timeout"` // seconds; 0 is the default
+	// FirewallID is the firewall the task runs on.
+	FirewallID uint `json:"firewall_id"`
+	Timeout    int  `json:"timeout"` // seconds; 0 is the default
 }
 
 // KnownInterface is a physical interface the agent has reported
-// (web/nics.go). A new one is imported into the default instance once, so
+// (web/nics.go). A new one is imported into its firewall's default instance once, so
 // deleting it there sticks.
 type KnownInterface struct {
-	Name      string    `gorm:"primaryKey" json:"name"`
-	CreatedAt time.Time `json:"created_at"`
+	FirewallID uint      `gorm:"primaryKey" json:"firewall_id"`
+	Name       string    `gorm:"primaryKey" json:"name"`
+	CreatedAt  time.Time `json:"created_at"`
 }
 
 // Deployment is one push to the agent.
 type Deployment struct {
 	Base
+	FirewallID uint `json:"firewall_id"`
+	// CommitID is the commit (Settings.LastCommit) that made it.
+	CommitID int64 `json:"commit_id"`
+	// Generation is the firewall's (Firewall.Generation).
 	Generation int64  `json:"generation"`
 	Username   string `json:"username"`
 	// Status: applied, pending, confirmed, rolled_back, failed.

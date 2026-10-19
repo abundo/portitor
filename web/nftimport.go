@@ -43,7 +43,11 @@ func (s *Server) handleImportNftables(c *echo.Context) error {
 	if err := instanceExists(s.db, req.InstanceID); err != nil {
 		return errJSON(c, http.StatusBadRequest, "no such virtual firewall")
 	}
-	a, _, err := s.agent()
+	var inst models.Instance
+	if err := s.db.Select("firewall_id").First(&inst, req.InstanceID).Error; err != nil {
+		return err
+	}
+	a, _, err := s.firewallAgent(inst.FirewallID)
 	if err != nil {
 		return agentError(c, err)
 	}

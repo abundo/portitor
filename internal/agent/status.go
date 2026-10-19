@@ -34,6 +34,7 @@ func (a *Agent) Status(ctx context.Context) *Status {
 		ACMEProxy:    a.proxies.Status(),
 		IPLists:      a.lists.Status(),
 		Tasks:        a.tasks.Status(),
+		HA:           a.ha.status(),
 		Instances:    []InstanceStatus{},
 		AntiLockout:  a.cfg.antiLockout(),
 	}

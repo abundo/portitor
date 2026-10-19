@@ -217,9 +217,12 @@ func prepareBgpConfig(tx *gorm.DB, c, old *models.BgpConfig) error {
 	if c.Evpn && v != nil {
 		return bad("EVPN is for the main table's BGP only")
 	}
-	c.RouterID = strings.TrimSpace(c.RouterID)
-	if c.RouterID != "" {
-		if a, err := netip.ParseAddr(c.RouterID); err != nil || !a.Is4() {
+	c.RouterID, c.PeerRouterID = strings.TrimSpace(c.RouterID), strings.TrimSpace(c.PeerRouterID)
+	for _, id := range []string{c.RouterID, c.PeerRouterID} {
+		if id == "" {
+			continue
+		}
+		if a, err := netip.ParseAddr(id); err != nil || !a.Is4() {
 			return bad("router id must be an IPv4 address (e.g. 192.0.2.1)")
 		}
 	}
@@ -395,6 +398,15 @@ func prepareNeighbor(tx *gorm.DB, n, old *models.BgpNeighbor) error {
 		return bad("address must be an IPv4 or IPv6 address")
 	}
 	n.Address = a.String()
+	if s := strings.TrimSpace(n.HAPeerAddress); s != "" {
+		p, err := fwconfig.ParseAddr(s)
+		if err != nil || p.Is4() != a.Is4() {
+			return bad("HA peer address must be an address of the same IP version")
+		}
+		n.HAPeerAddress = p.String()
+	} else {
+		n.HAPeerAddress = ""
+	}
 	n.PeerGroup = strings.TrimSpace(n.PeerGroup)
 	n.Interface = strings.TrimSpace(n.Interface)
 	if !a.IsLinkLocalUnicast() {

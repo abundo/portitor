@@ -1,0 +1,14 @@
+# SPDX-FileCopyrightText: 2026 The Portitor contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# /etc/portitor/config.yaml - portitor-config: portitor-web run as
+# "portitor-config" on the firewall, for its own configuration. Its manager
+# (portitor-web elsewhere) pushes virtual firewalls through the manager API
+# (/manager/v1) with the token in manager_token_file.
+bind: ":8444"
+jwt_secret: CHANGE-ME
+db:
+  path: /var/lib/portitor-config/portitor.db
+tls_cert: /etc/portitor/config.crt
+tls_key: /etc/portitor/config.key
+manager_token_file: /etc/portitor/manager.token

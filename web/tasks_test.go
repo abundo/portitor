@@ -126,7 +126,7 @@ func TestIPListsAndTasks(t *testing.T) {
 
 	// Run now goes to the agent by name.
 	fake := &runAgent{}
-	env.srv.newAgent = func(*models.Settings) (agentAPI, error) { return fake, nil }
+	env.srv.newAgent = func(*models.Firewall) (agentAPI, error) { return fake, nil }
 	if rec := env.do("POST", "/api/tasks/"+itoa(backup)+"/run", map[string]any{}); rec.Code != http.StatusAccepted || fake.ran != "backup" {
 		t.Errorf("run: %d %s %q", rec.Code, rec.Body, fake.ran)
 	}

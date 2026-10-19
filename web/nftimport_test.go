@@ -29,7 +29,7 @@ func (parseAgent) ParseNftables(context.Context, string) (*agentapi.ParseNftable
 
 func TestImportNftables(t *testing.T) {
 	env := newEnv(t)
-	env.srv.newAgent = func(*models.Settings) (agentAPI, error) { return parseAgent{}, nil }
+	env.srv.newAgent = func(*models.Firewall) (agentAPI, error) { return parseAgent{}, nil }
 	inst := env.create("/api/instances", map[string]any{"name": "main"})
 	env.create("/api/interfaces", map[string]any{"instance_id": inst, "name": "wan", "enabled": true})
 	env.create("/api/interfaces", map[string]any{"instance_id": inst, "name": "lan", "enabled": true})

@@ -177,7 +177,7 @@ sudo runuser -u portitor -- portitor-web -f /etc/portitor/web.yaml bootstrap --j
 
 Paste the string, then press Enter and Ctrl-D. Both refuse once portitor-web has
 deployed something. You can also enter the agent URL, token and fingerprint by hand in
-*Settings → Agent*, but then configure the firewall's LAN interface with its address
+*Firewalls*, but then configure the firewall's LAN interface with its address
 before the first deploy. Otherwise the deploy takes the LAN address away.
 
 Run again, `sudo portitor-setup` changes less on a split setup. On the firewall it

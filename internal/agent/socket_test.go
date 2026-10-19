@@ -7,6 +7,7 @@ import (
 	"context"
 	"net/http"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/abundo/portitor/internal/agentclient"
@@ -30,7 +31,11 @@ func TestLocalSocket(t *testing.T) {
 	if _, err := c.Neighbours(context.Background()); err != nil {
 		t.Errorf("GET without token: %v", err)
 	}
-	if err := c.Confirm(context.Background(), 1); err == nil {
-		t.Error("POST on the local socket succeeded")
+	if err := c.RunTask(context.Background(), "x"); err == nil || !strings.Contains(err.Error(), "not served on the local socket") {
+		t.Errorf("POST /v1/tasks/run on the local socket: %v", err)
+	}
+	// Confirm is served: it fails only because nothing is pending.
+	if err := c.Confirm(context.Background(), 1); err == nil || strings.Contains(err.Error(), "not served") {
+		t.Errorf("POST /v1/confirm on the local socket: %v", err)
 	}
 }

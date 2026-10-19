@@ -30,7 +30,7 @@ func (s *Server) handleAgentConsole(c *echo.Context) error {
 	if instance != "" && !captureName.MatchString(instance) {
 		return errJSON(c, http.StatusBadRequest, "invalid virtual firewall name")
 	}
-	a, _, err := s.agent()
+	a, _, err := s.instanceAgent(instance)
 	if err != nil {
 		return agentError(c, err)
 	}

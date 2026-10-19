@@ -32,7 +32,7 @@ func (s *Server) handleCertificateDownload(c *echo.Context) error {
 	if err := s.db.First(&inst, cert.InstanceID).Error; err != nil {
 		return err
 	}
-	a, _, err := s.agent()
+	a, _, err := s.instanceAgent(inst.Name)
 	if err != nil {
 		return errJSON(c, http.StatusBadGateway, err.Error())
 	}

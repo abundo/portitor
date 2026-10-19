@@ -31,6 +31,7 @@ func prepareIsisConfig(tx *gorm.DB, c, old *models.IsisConfig) error {
 		return err
 	}
 	c.Net, _ = fwconfig.ParseISISNet(c.Net)
+	c.PeerNet, _ = fwconfig.ParseISISNet(c.PeerNet)
 	c.NetInterface = strings.TrimSpace(c.NetInterface)
 	if c.NetInterface == "" {
 		c.NetArea = ""

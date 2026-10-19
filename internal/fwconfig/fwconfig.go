@@ -32,6 +32,8 @@ type Document struct {
 	IPLists []IPList `json:"ip_lists,omitempty"`
 	// Tasks run on the firewall on a cron schedule.
 	Tasks []Task `json:"tasks,omitempty"`
+	// HA makes the host one of an HA pair (ha.go).
+	HA *HA `json:"ha,omitempty"`
 }
 
 type Instance struct {
@@ -83,6 +85,9 @@ type Instance struct {
 	// VRRP lists the virtual routers on the instance's interfaces (FRR's
 	// vrrpd).
 	VRRP []VRRP `json:"vrrp,omitempty"`
+	// ConntrackSync keeps the HA peer's connection table in step
+	// (conntrackd, ha.go).
+	ConntrackSync *ConntrackSync `json:"conntrack_sync,omitempty"`
 	// BFD lists the interfaces with BFD (FRR's bfdd), which static routes,
 	// OSPF, IS-IS and BGP use there.
 	BFD []BFDInterface `json:"bfd,omitempty"`
@@ -466,6 +471,8 @@ type DHCPServer struct {
 	DomainName string       `json:"domain_name,omitempty"`
 	LeaseTime  int          `json:"lease_time,omitempty"` // seconds
 	Subnets    []DHCPSubnet `json:"subnets"`
+	// HA runs Kea's HA hook between the hosts of an HA pair (ha.go).
+	HA *DHCPHA `json:"ha,omitempty"`
 }
 
 // DHCPSubnet is served on Interface by Kea DHCPv4 or DHCPv6. The subnets

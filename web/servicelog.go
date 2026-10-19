@@ -39,7 +39,7 @@ func (s *Server) handleAgentServiceLog(c *echo.Context) error {
 			return err
 		}
 	}
-	a, _, err := s.agent()
+	a, _, err := s.instanceAgent(body.Instance)
 	if err != nil {
 		return agentError(c, err)
 	}

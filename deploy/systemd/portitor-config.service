@@ -1,0 +1,30 @@
+# SPDX-FileCopyrightText: 2026 The Portitor contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# portitor-config: the firewall's own configuration (portitor-web run as
+# portitor-config), deploying to the local agent; its manager pushes
+# virtual firewalls to it.
+[Unit]
+Description=Portitor configuration of this firewall
+After=network-online.target portitor-agent.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=portitor
+Group=portitor
+ExecStart=/usr/bin/portitor-config -f /etc/portitor/config.yaml start
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+# The SQLite database (db.path in config.yaml).
+StateDirectory=portitor-config
+StateDirectoryMode=0700
+
+[Install]
+WantedBy=multi-user.target

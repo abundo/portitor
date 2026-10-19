@@ -68,6 +68,7 @@ func (d *Document) Validate() error {
 	exp := d.Expand()
 	v.ipLists(d.IPLists)
 	v.tasks(d.Tasks)
+	v.ha(d.HA)
 
 	defaults := 0
 	instNames := map[string]bool{}
@@ -557,6 +558,8 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 		}
 	}
 
+	v.dhcpHA(p, in)
+	v.conntrackSync(p, in)
 	if in.DHCP.DomainName != "" && !validDomain(in.DHCP.DomainName) {
 		v.addf("%s: dhcp: invalid domain name %q", p, in.DHCP.DomainName)
 	}

@@ -104,6 +104,12 @@ func NewLocal(socket string) *Client {
 	}
 }
 
+// Do sends a request to the API at path (portitor-config's manager API
+// uses the same pinning and token).
+func (c *Client) Do(ctx context.Context, method, path string, body, out any) error {
+	return c.do(ctx, method, path, body, out)
+}
+
 func (c *Client) do(ctx context.Context, method, path string, body, out any) error {
 	var rd io.Reader
 	if body != nil {
@@ -358,6 +364,31 @@ func (c *Client) Connections(ctx context.Context, req agentapi.ConnectionsReques
 
 // stream posts req and returns the answer's body as it comes.
 // RenewDHCP asks the DHCP client of an instance's interface to renew now.
+// HA returns the host's HA quorum.
+func (c *Client) HA(ctx context.Context) (*agentapi.HAStatus, error) {
+	var out agentapi.HAStatus
+	return &out, c.do(ctx, http.MethodGet, "/v1/ha", nil, &out)
+}
+
+// HAVote grants the host the witness's vote for seconds.
+func (c *Client) HAVote(ctx context.Context, seconds int) (*agentapi.HAStatus, error) {
+	var out agentapi.HAStatus
+	return &out, c.do(ctx, http.MethodPost, "/v1/ha/vote", agentapi.HAVoteRequest{Seconds: seconds}, &out)
+}
+
+// HAHeartbeat is the HA peer's beat; the client's token is the pair's
+// secret.
+func (c *Client) HAHeartbeat(ctx context.Context) error {
+	return c.do(ctx, http.MethodGet, "/v1/ha/heartbeat", nil, nil)
+}
+
+// HACertificates are the HA peer's ACME certificates, keys included; the
+// client's token is the pair's secret.
+func (c *Client) HACertificates(ctx context.Context) ([]agentapi.HACertificate, error) {
+	var out []agentapi.HACertificate
+	return out, c.do(ctx, http.MethodGet, "/v1/ha/certificates", nil, &out)
+}
+
 func (c *Client) RenewDHCP(ctx context.Context, req agentapi.DHCPRenewRequest) error {
 	return c.do(ctx, http.MethodPost, "/v1/dhcp/renew", req, nil)
 }

@@ -150,6 +150,7 @@ const defaults = () => ({
   enabled: false,
   asn: 0,
   router_id: '',
+  peer_router_id: '',
   keepalive: 0,
   hold: 0,
   ebgp_requires_policy: false,
@@ -413,6 +414,13 @@ const neighborFields = computed(() => [
     hint: 'A link-local address (fe80::) is reached on its interface, and carries IPv4 routes too (extended next hop).',
   },
   {
+    key: 'ha_peer_address',
+    label: 'HA peer address',
+    show: () => store.hasPeer,
+    placeholder: 'the address',
+    hint: "The neighbour's address as the HA secondary sees it: for a neighbour on the pair itself (another virtual firewall, over a link), its address on the secondary. Empty: the address.",
+  },
+  {
     key: 'interface',
     label: 'Interface',
     type: 'select',
@@ -610,6 +618,14 @@ const neighborFields = computed(() => [
                 help="An IPv4 address; empty: FRR picks one."
               >
                 <UInput v-model="cfg.router_id" class="w-48" :ui="{ base: 'font-mono' }" />
+              </UFormField>
+              <UFormField
+                v-if="store.hasPeer && cfg.router_id"
+                label="HA peer router id"
+                :ui="inlineField"
+                help="The HA secondary's router id, another IPv4 address."
+              >
+                <UInput v-model="cfg.peer_router_id" class="w-48" :ui="{ base: 'font-mono' }" />
               </UFormField>
               <UFormField
                 label="Keepalive / hold (s)"

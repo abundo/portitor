@@ -23,6 +23,9 @@ import (
 
 const DefaultConfigFile = "/etc/portitor/web.yaml"
 
+// DefaultLocalConfigFile is portitor-config's (Config.Local).
+const DefaultLocalConfigFile = "/etc/portitor/config.yaml"
+
 // Config is /etc/portitor/web.yaml.
 type Config struct {
 	Bind string   `yaml:"bind"`
@@ -37,6 +40,17 @@ type Config struct {
 	// their place once it is fetched from the agent.
 	TLSCert string `yaml:"tls_cert"`
 	TLSKey  string `yaml:"tls_key"`
+	// ManagerTokenFile holds the token a manager authenticates with to
+	// portitor-config's manager API (/manager/v1); none: no manager.
+	ManagerTokenFile string `yaml:"manager_token_file"`
+	// ManagerName is how this portitor-web names itself to the
+	// portitor-configs it manages (what they mark as its); default: the
+	// host name.
+	ManagerName string `yaml:"manager_name"`
+	// Local is portitor-config: portitor-web run as that name, on the
+	// firewall, for its own firewall (and HA secondary) alone, with the
+	// manager API. Not in the file.
+	Local bool `yaml:"-"`
 }
 
 type DBConfig struct {

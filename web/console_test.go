@@ -51,10 +51,10 @@ func consoleEnv(t *testing.T, consoleUser string) (*testEnv, *httptest.Server) {
 	ats := httptest.NewTLSServer(ag.Handler())
 	t.Cleanup(ats.Close)
 	sum := sha256.Sum256(ats.Certificate().Raw)
-	if rec := env.do("PUT", "/api/settings", map[string]any{
-		"agent_url": ats.URL, "agent_token": token, "agent_fingerprint": hex.EncodeToString(sum[:]),
+	if rec := env.do("PUT", "/api/firewalls/1", map[string]any{
+		"name": "firewall", "agent_url": ats.URL, "agent_token": token, "agent_fingerprint": hex.EncodeToString(sum[:]),
 	}); rec.Code != http.StatusOK {
-		t.Fatalf("settings: %d %s", rec.Code, rec.Body)
+		t.Fatalf("firewall: %d %s", rec.Code, rec.Body)
 	}
 	ws := httptest.NewServer(env.e)
 	t.Cleanup(ws.Close)

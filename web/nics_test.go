@@ -44,7 +44,7 @@ func TestSyncNICs(t *testing.T) {
 		{Name: "eth3", Netns: "fw-lan", Up: true, Addresses: []string{}},
 		{Name: "eth4", Netns: "fw-lan", Up: true, Addresses: []string{}},
 	}}
-	env.srv.newAgent = func(*models.Settings) (agentAPI, error) { return fake, nil }
+	env.srv.newAgent = func(*models.Firewall) (agentAPI, error) { return fake, nil }
 	status := func() nicSync {
 		t.Helper()
 		rec := env.do("GET", "/api/agent/status", nil)

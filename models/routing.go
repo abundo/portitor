@@ -100,6 +100,7 @@ type BgpConfig struct {
 	Enabled            bool                            `json:"enabled"`
 	Asn                uint32                          `json:"asn"`
 	RouterID           string                          `json:"router_id"`
+	PeerRouterID       string                          `json:"peer_router_id"` // the HA secondary's
 	Keepalive          int                             `json:"keepalive"`
 	Hold               int                             `json:"hold"`
 	EbgpRequiresPolicy bool                            `json:"ebgp_requires_policy"`
@@ -244,8 +245,11 @@ type BgpNeighbor struct {
 	InstanceID uint   `json:"instance_id"`
 	VrfID      *uint  `json:"vrf_id"`
 	Address    string `json:"address"`
-	Enabled    bool   `json:"enabled"`
-	PeerGroup  string `json:"peer_group"`
+	// HAPeerAddress is the neighbour's address on the HA secondary (a
+	// neighbour on the pair itself); empty: Address.
+	HAPeerAddress string `gorm:"column:ha_peer_address" json:"ha_peer_address"`
+	Enabled       bool   `json:"enabled"`
+	PeerGroup     string `json:"peer_group"`
 	// Interface is set for a link-local address (fwconfig.BGPPeer.Interface).
 	Interface string `json:"interface"`
 	BgpPeerSettings
@@ -262,6 +266,7 @@ type OspfConfig struct {
 	Version             int                                 `json:"version"`
 	Enabled             bool                                `json:"enabled"`
 	RouterID            string                              `json:"router_id"`
+	PeerRouterID        string                              `json:"peer_router_id"` // the HA secondary's
 	ReferenceBandwidth  int                                 `json:"reference_bandwidth"`
 	LogAdjacencyChanges bool                                `json:"log_adjacency_changes"`
 	MaximumPaths        int                                 `json:"maximum_paths"`
@@ -317,6 +322,7 @@ type IsisConfig struct {
 	VrfID      *uint  `json:"vrf_id"`
 	Enabled    bool   `json:"enabled"`
 	Net        string `gorm:"column:net" json:"net"`
+	PeerNet    string `json:"peer_net"` // the HA secondary's, when Net is entered
 	// NetInterface makes the NET from that interface's first IPv4 address,
 	// in the area NetArea (fwconfig.ISISNetFromIPv4); empty: Net is entered.
 	NetInterface        string                              `json:"net_interface"`
@@ -381,11 +387,13 @@ func (i *IsisInterface) Interface() fwconfig.ISISInterface {
 // always backup.
 type VrrpRouter struct {
 	Base
-	InstanceID            uint       `json:"instance_id"`
-	Interface             string     `json:"interface"`
-	Vrid                  int        `json:"vrid"`
-	Version               int        `json:"version"`
-	Priority              int        `json:"priority"`
+	InstanceID uint   `json:"instance_id"`
+	Interface  string `json:"interface"`
+	Vrid       int    `json:"vrid"`
+	Version    int    `json:"version"`
+	Priority   int    `json:"priority"`
+	// PeerPriority is the HA secondary's; nil: Priority - 10.
+	PeerPriority          *int       `json:"peer_priority"`
 	AdvertisementInterval int        `json:"advertisement_interval"` // ms
 	Preempt               bool       `json:"preempt"`
 	Enabled               bool       `json:"enabled"`

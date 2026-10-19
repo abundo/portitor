@@ -38,6 +38,16 @@ type testEnv struct {
 	cookie *http.Cookie
 }
 
+// firstFirewall reads the firewall the installation started with.
+func firstFirewall(t *testing.T, env *testEnv) models.Firewall {
+	t.Helper()
+	var fw models.Firewall
+	if err := env.srv.db.Order("id").First(&fw).Error; err != nil {
+		t.Fatal(err)
+	}
+	return fw
+}
+
 func newEnv(t *testing.T) *testEnv {
 	t.Helper()
 	db, err := dbmigrate.Open(filepath.Join(t.TempDir(), "db.sqlite"), &gorm.Config{Logger: logger.Discard})
@@ -318,9 +328,12 @@ func TestDeployEndToEnd(t *testing.T) {
 	defer ts.Close()
 	sum := sha256.Sum256(ts.Certificate().Raw)
 
-	if rec := env.do("PUT", "/api/settings", map[string]any{
-		"agent_url": ts.URL, "agent_token": token, "agent_fingerprint": hex.EncodeToString(sum[:]), "confirm_timeout": 120,
+	if rec := env.do("PUT", "/api/firewalls/1", map[string]any{
+		"name": "firewall", "agent_url": ts.URL, "agent_token": token, "agent_fingerprint": hex.EncodeToString(sum[:]),
 	}); rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), token) {
+		t.Fatalf("firewall: %d %s", rec.Code, rec.Body)
+	}
+	if rec := env.do("PUT", "/api/settings", map[string]any{"confirm_timeout": 120}); rec.Code != http.StatusOK {
 		t.Fatalf("settings: %d %s", rec.Code, rec.Body)
 	}
 
@@ -405,12 +418,12 @@ func TestDeployEndToEnd(t *testing.T) {
 	if nRules != nDeployed {
 		t.Errorf("rules after revert: %d, want %d", nRules, nDeployed)
 	}
-	if rec := env.do("GET", "/api/settings", nil); !strings.Contains(rec.Body.String(), ts.URL) {
-		t.Errorf("revert lost the agent settings: %s", rec.Body)
+	if fw := firstFirewall(t, env); fw.AgentURL != ts.URL {
+		t.Errorf("revert lost the agent settings: %+v", fw)
 	}
 
 	// A wrong pin must fail closed.
-	env.do("PUT", "/api/settings", map[string]any{"agent_fingerprint": strings.Repeat("ab", 32)})
+	env.do("PUT", "/api/firewalls/1", map[string]any{"name": "firewall", "agent_url": ts.URL, "agent_fingerprint": strings.Repeat("ab", 32)})
 	if rec := env.do("GET", "/api/agent/status", nil); rec.Code != http.StatusBadGateway || !strings.Contains(rec.Body.String(), "fingerprint mismatch") {
 		t.Errorf("wrong pin: %d %s", rec.Code, rec.Body)
 	}
@@ -453,7 +466,7 @@ func TestAutoRulesAntiLockout(t *testing.T) {
 	env.srv.db.Where("is_default = ?", true).First(&main)
 	other := env.create("/api/instances", map[string]any{"name": "guest"})
 	fake := &statusAgent{antiLockout: &render.AntiLockout{Port: 8443, SSHPort: 22, AllowFrom: []string{"192.168.1.0/24"}}}
-	env.srv.newAgent = func(*models.Settings) (agentAPI, error) { return fake, nil }
+	env.srv.newAgent = func(*models.Firewall) (agentAPI, error) { return fake, nil }
 
 	get := func(id uint) string {
 		t.Helper()

@@ -99,6 +99,9 @@ func (c *Config) applyDefaults() {
 	if c.Paths.KeaDataDir == "" {
 		c.Paths.KeaDataDir = def.KeaDataDir
 	}
+	if c.Paths.KeaHooksDir == "" {
+		c.Paths.KeaHooksDir = def.KeaHooksDir
+	}
 	if c.Paths.KeaSocketDir == "" {
 		c.Paths.KeaSocketDir = def.KeaSocketDir
 	}
@@ -122,6 +125,7 @@ func (c *Config) applyDefaults() {
 		{&c.Paths.RadvdConf, def.RadvdConf},
 		{&c.Paths.ChronyConf, def.ChronyConf},
 		{&c.Paths.SnmpdConf, def.SnmpdConf},
+		{&c.Paths.ConntrackdConf, def.ConntrackdConf},
 		{&c.Paths.FRRDir, def.FRRDir},
 		{&c.Paths.FRRRunDir, def.FRRRunDir},
 		{&c.Paths.FRRStateDir, def.FRRStateDir},
@@ -132,6 +136,7 @@ func (c *Config) applyDefaults() {
 		{&c.Units.DefaultFRR, du.DefaultFRR},
 		{&c.Units.DefaultChrony, du.DefaultChrony},
 		{&c.Units.DefaultSnmpd, du.DefaultSnmpd},
+		{&c.Units.DefaultConntrackd, du.DefaultConntrackd},
 	} {
 		if *p.v == "" {
 			*p.v = p.d
@@ -158,6 +163,9 @@ func (c *Config) applyDefaults() {
 	if c.Units.SnmpdFmt == "" {
 		c.Units.SnmpdFmt = du.SnmpdFmt
 	}
+	if c.Units.ConntrackdFmt == "" {
+		c.Units.ConntrackdFmt = du.ConntrackdFmt
+	}
 }
 
 func (c *Config) validate() error {
@@ -172,7 +180,7 @@ func (c *Config) validate() error {
 			return fmt.Errorf("allow_from %q: %w", a, err)
 		}
 	}
-	for _, f := range []string{c.Units.NamedFmt, c.Units.Kea4Fmt, c.Units.Kea6Fmt, c.Units.RadvdFmt, c.Units.FRRFmt, c.Units.ChronyFmt, c.Units.SnmpdFmt} {
+	for _, f := range []string{c.Units.NamedFmt, c.Units.Kea4Fmt, c.Units.Kea6Fmt, c.Units.RadvdFmt, c.Units.FRRFmt, c.Units.ChronyFmt, c.Units.SnmpdFmt, c.Units.ConntrackdFmt} {
 		if strings.Count(f, "%s") != 1 {
 			return fmt.Errorf("unit %q must contain exactly one %%s", f)
 		}

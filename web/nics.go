@@ -32,16 +32,16 @@ type missingNIC struct {
 	Name     string `json:"name"`
 }
 
-// syncNICs imports physical interfaces of the firewall's root namespace
-// that have not been seen before into the default instance, and lists the
-// physical interfaces in the database that the firewall does not have.
+// syncNICs imports physical interfaces of a firewall's root namespace
+// that have not been seen before into its default instance, and lists the
+// physical interfaces of its instances that the firewall does not have.
 //
 // An imported interface mirrors what is configured now (link state,
 // static addresses), so that deploying does not take down, say,
 // the management port. Each name is imported once (models.KnownInterface):
 // deleting the interface afterwards sticks. Interfaces in instance
 // namespaces were put there by a deploy, so they are declared already.
-func (s *Server) syncNICs(nics []agentapi.NICStatus) (*nicSync, error) {
+func (s *Server) syncNICs(firewallID uint, nics []agentapi.NICStatus) (*nicSync, error) {
 	s.nicMu.Lock()
 	defer s.nicMu.Unlock()
 	res := &nicSync{Imported: []string{}, Missing: []missingNIC{}, Problems: []string{}}
@@ -49,13 +49,13 @@ func (s *Server) syncNICs(nics []agentapi.NICStatus) (*nicSync, error) {
 		var instances []models.Instance
 		var ifaces []models.Interface
 		var known []models.KnownInterface
-		if err := tx.Find(&instances).Error; err != nil {
+		if err := tx.Where("firewall_id = ?", firewallID).Find(&instances).Error; err != nil {
 			return err
 		}
-		if err := tx.Find(&ifaces).Error; err != nil {
+		if err := tx.Where("instance_id IN (?)", tx.Model(&models.Instance{}).Select("id").Where("firewall_id = ?", firewallID)).Find(&ifaces).Error; err != nil {
 			return err
 		}
-		if err := tx.Find(&known).Error; err != nil {
+		if err := tx.Where("firewall_id = ?", firewallID).Find(&known).Error; err != nil {
 			return err
 		}
 
@@ -95,7 +95,7 @@ func (s *Server) syncNICs(nics []agentapi.NICStatus) (*nicSync, error) {
 				continue
 			}
 			seen[n.Name] = true
-			if err := tx.Create(&models.KnownInterface{Name: n.Name}).Error; err != nil {
+			if err := tx.Create(&models.KnownInterface{FirewallID: firewallID, Name: n.Name}).Error; err != nil {
 				return err
 			}
 			if inDB[n.Name] {

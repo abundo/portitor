@@ -101,6 +101,7 @@ const sections = computed(() => [
           value: 'admin',
           children: [
             { label: 'Settings', icon: 'i-lucide-settings', to: '/settings', exact: true },
+            { label: 'Firewalls', icon: 'i-lucide-server', to: '/firewalls' },
             { label: 'Updates', icon: 'i-lucide-package-check', to: '/updates' },
             { label: 'Backup & restore', icon: 'i-lucide-archive', to: '/backup' },
             { label: 'Users', icon: 'i-lucide-users', to: '/users' },

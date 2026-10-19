@@ -26,7 +26,7 @@ async function confirm() {
   busy.value = true
   try {
     await api.deployConfirm()
-    toast.add({ title: `Generation ${deploy.pending.generation} confirmed`, color: 'success' })
+    toast.add({ title: `Commit ${deploy.pending.generation} confirmed`, color: 'success' })
   } catch (err) {
     toast.add({ title: errMsg(err, 'Confirm failed'), color: 'error' })
   } finally {
@@ -52,11 +52,11 @@ async function rollback() {
 <template>
   <div v-if="deploy.pending" class="flex items-center gap-2">
     <UTooltip
-      :text="`Generation ${deploy.pending.generation} is live and rolls back in ${secondsLeft}s unless you confirm it. If this page still works, the change didn't lock you out.`"
+      :text="`Commit ${deploy.pending.generation} is live and rolls back in ${secondsLeft}s unless you confirm it. If this page still works, the change didn't lock you out.`"
     >
       <span class="flex items-center gap-1 text-sm text-warning">
         <UIcon name="i-lucide-timer" class="size-5" />
-        <span class="hidden xl:inline">Gen {{ deploy.pending.generation }} rolls back in</span>
+        <span class="hidden xl:inline">Commit {{ deploy.pending.generation }} rolls back in</span>
         <b class="tabular-nums">{{ secondsLeft }}s</b>
       </span>
     </UTooltip>

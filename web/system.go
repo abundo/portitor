@@ -12,10 +12,16 @@ import (
 	"github.com/abundo/portitor/internal/agentapi"
 )
 
+// The system routes act on one firewall: ?firewall_id=, or the first.
+
 // handleSystem passes on the firewall's operating system, its updates and
 // the update jobs, for the Updates page.
 func (s *Server) handleSystem(c *echo.Context) error {
-	a, _, err := s.agent()
+	id, err := s.requestFirewall(c)
+	if err != nil {
+		return err
+	}
+	a, _, err := s.firewallAgent(id)
 	if err != nil {
 		return agentError(c, err)
 	}
@@ -33,11 +39,19 @@ func (s *Server) handleSystemJob(c *echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return errJSON(c, http.StatusBadRequest, "invalid request")
 	}
-	slog.Info("update job", "job", req.Job, "release", req.Release, "user", currentUser(c).Username)
-	return s.startOnAgent(c, req.Job, func(a agentAPI) error { return a.StartSystemJob(c.Request().Context(), req) })
+	id, err := s.requestFirewall(c)
+	if err != nil {
+		return err
+	}
+	slog.Info("update job", "job", req.Job, "release", req.Release, "firewall", id, "user", currentUser(c).Username)
+	return s.startOnAgent(c, id, req.Job, func(a agentAPI) error { return a.StartSystemJob(c.Request().Context(), req) })
 }
 
 func (s *Server) handleSystemReboot(c *echo.Context) error {
-	slog.Warn("firewall reboot", "user", currentUser(c).Username, "remote", c.RealIP())
-	return s.startOnAgent(c, "reboot", func(a agentAPI) error { return a.Reboot(c.Request().Context()) })
+	id, err := s.requestFirewall(c)
+	if err != nil {
+		return err
+	}
+	slog.Warn("firewall reboot", "firewall", id, "user", currentUser(c).Username, "remote", c.RealIP())
+	return s.startOnAgent(c, id, "reboot", func(a agentAPI) error { return a.Reboot(c.Request().Context()) })
 }

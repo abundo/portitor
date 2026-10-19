@@ -47,14 +47,18 @@ const state = reactive({
   dns: feed(),
   error: null,
   paused: false,
+  // The firewall whose logs show; null is the first.
+  firewallId: null,
 })
 
 const fetchers = {
   // The agent's log tells of every instance: a global reader's only.
   log: (after) =>
-    useAuthStore().readsAll ? api.agentLogs(after) : Promise.resolve({ entries: [] }),
-  packets: (after) => api.agentPacketLog(after),
-  dns: (after) => api.agentDnsQueryLog(after),
+    useAuthStore().readsAll
+      ? api.agentLogs(after, state.firewallId)
+      : Promise.resolve({ entries: [] }),
+  packets: (after) => api.agentPacketLog(after, state.firewallId),
+  dns: (after) => api.agentDnsQueryLog(after, state.firewallId),
 }
 
 let timer = null
@@ -131,6 +135,19 @@ export function useLogPanel() {
     toggle: () => (state.open = !state.open),
     close: () => (state.open = false),
     clear: () => (state[state.tab].lines = []),
+    // Another firewall's logs start over; the GUI's own messages stay.
+    setFirewall(id) {
+      if (id === state.firewallId) return
+      state.firewallId = id
+      state.log = { lines: state.log.lines.filter((l) => l.attrs?.source === 'gui'), after: 0 }
+      state.packets = feed()
+      state.dns = feed()
+      polling++
+      if (running) {
+        clearTimeout(timer)
+        poll()
+      }
+    },
     togglePause: () => (state.paused = !state.paused),
     setHeight(h, persist = false) {
       state.height = Math.min(maxHeight(), Math.max(MIN_HEIGHT, Math.round(h)))

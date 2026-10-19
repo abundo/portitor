@@ -11,8 +11,10 @@ import { errMsg } from '@/api/http'
 import { useDeployStore } from '@/stores/deploy'
 import { ago, when } from '@/utils/time'
 import { useAuthStore } from '@/stores/auth'
+import { useInstanceStore } from '@/stores/instances'
 
 const auth = useAuthStore()
+const instStore = useInstanceStore()
 const toast = useToast()
 const deploy = useDeployStore()
 const lists = ref([])
@@ -48,6 +50,14 @@ const fields = [
   { key: 'name', label: 'Name', required: true, placeholder: 'crowdsec' },
   { key: 'description', label: 'Description' },
   { key: 'kind', label: 'Task', type: 'select', items: kinds },
+  {
+    key: 'firewall_id',
+    label: 'Firewall',
+    type: 'select',
+    items: () => instStore.firewallItems,
+    show: () => instStore.firewalls.length > 1,
+    hint: 'The firewall the task runs on.',
+  },
   {
     key: 'ip_list_id',
     label: 'IP list',

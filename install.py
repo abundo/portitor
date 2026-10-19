@@ -18,8 +18,8 @@ prints the remaining steps.
 
 What gets installed:
   (default)       whatever is installed on this host. When that includes
-                  portitor-web, also the agent at the host of the agent URL in
-                  its settings (`portitor-web agent-url`).
+                  portitor-web, also the agent at the host of its first
+                  firewall's agent URL (`portitor-web agent-url`).
   --web [HOST]    portitor-web on HOST (default this host), over SSH like
                   --agent (plus the agent, as above; an agent URL on
                   localhost then means HOST)
@@ -76,7 +76,7 @@ from typing import Sequence
 
 # Bump when the installer itself changes, so a release's copy can tell
 # whether it is newer than the one running.
-INSTALLER_VERSION = 6
+INSTALLER_VERSION = 8
 INSTALLER_FILENAME = "install.py"
 # Where the agent host keeps a copy, for updates from the GUI.
 INSTALLER_DEST = "/usr/lib/portitor/install.py"
@@ -100,6 +100,15 @@ WEB_USER = "portitor"
 # StateDirectory). portitor-web touches the database only as WEB_USER, so
 # the files SQLite creates stay writable for the service.
 WEB_DB_DIR = "/var/lib/portitor-web"
+# portitor-config: portitor-web run as portitor-config on the agent's host
+# (--config), for the firewall's own configuration, managed from elsewhere.
+CONFIG_LINK = f"{BIN_DIR}/portitor-config"
+CONFIG_FILE = f"{ETC_DIR}/config.yaml"
+CONFIG_DB_DIR = "/var/lib/portitor-config"
+CONFIG_UNIT = "portitor-config.service"
+CONFIG_CERT = f"{ETC_DIR}/config.crt"
+CONFIG_KEY = f"{ETC_DIR}/config.key"
+MANAGER_TOKEN = f"{ETC_DIR}/manager.token"
 SSH_USER_DEFAULT = "portitor"
 WEB_UNIT = "portitor-web.service"
 AGENT_UNIT = "portitor-agent.service"
@@ -113,6 +122,7 @@ AGENT_UNITS = (
     "portitor-frr@.service",
     "portitor-chrony@.service",
     "portitor-snmpd@.service",
+    "portitor-conntrackd@.service",
 )
 # The Debian packages the agent runs (iso/preseed.cfg has the same). An
 # update installs the ones missing (a release can need a new one, as 0.4.0
@@ -139,6 +149,9 @@ AGENT_PACKAGES = {
     "chrony": (),
     # SNMP; the default virtual firewall's runs under snmpd.service.
     "snmpd": ("snmpd.service",),
+    # Connection sync of HA pairs; the default virtual firewall's runs under
+    # conntrackd.service.
+    "conntrackd": ("conntrackd.service",),
     # NAT64; DKMS builds the kernel module with the kernel headers
     # (agent_packages adds them for the architecture).
     "jool-dkms": (),
@@ -698,16 +711,75 @@ def install_web(host: Host, binary: Path, deploy: Path, version: str, assume_yes
 
 
 def install(
-    plan: Plan, roots: dict[str, Path], archs: dict[str, str], deploy: Path, version: str, assume_yes: bool
+    plan: Plan, roots: dict[str, Path], archs: dict[str, str], deploy: Path, version: str, assume_yes: bool,
+    config: bool = False,
 ) -> None:
     """roots: arch -> directory with the binaries. deploy: units and example configs."""
     # The agent first: it rejects fields it does not know, so it must never
     # be older than the GUI that deploys to it.
     if plan.agent:
         install_agent(plan.agent, roots[archs["agent"]] / "portitor-agent", deploy, version, assume_yes)
+    # portitor-config next to the agent: asked for, or there already.
+    if plan.agent and (config or plan.agent.exists(CONFIG_LINK)):
+        install_config(plan.agent, roots[archs["agent"]] / "portitor-web", deploy, version, assume_yes)
     if plan.web:
         install_web(plan.web, roots[archs["web"]] / "portitor-web", deploy, version, assume_yes)
     log("==> Done")
+
+
+def install_config(host: Host, binary: Path, deploy: Path, version: str, assume_yes: bool) -> None:
+    """portitor-config on the agent's host: the portitor-web binary run as
+    portitor-config, with its own config, certificate, manager token,
+    database and unit, set to deploy to the local agent. A new one is not
+    started: it needs an admin, and maybe the host's configuration
+    (portitor-config import-vf)."""
+    log(f"==> Installing portitor-config {version} on {host}")
+    host.run(
+        f"getent group {WEB_USER} >/dev/null || groupadd --system {WEB_USER}; "
+        f"getent passwd {WEB_USER} >/dev/null || useradd --system -g {WEB_USER} "
+        f"--no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin {WEB_USER}",
+        desc=f"create system user {WEB_USER} unless it exists",
+    )
+    new_config = not host.exists(CONFIG_FILE)
+    if new_config:
+        example = (deploy / "config.yaml").read_text(encoding="utf-8")
+        secret = secrets.token_urlsafe(32)
+        host.put_text(example.replace("jwt_secret: CHANGE-ME", f'jwt_secret: "{secret}"'), CONFIG_FILE, "0640", group=WEB_USER)
+    if not host.exists(MANAGER_TOKEN):
+        host.put_text(secrets.token_urlsafe(32) + "\n", MANAGER_TOKEN, "0640", group=WEB_USER)
+    if not host.exists(CONFIG_CERT):
+        host.run(
+            f"openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 3650 "
+            f"-subj /CN=portitor-config -keyout {CONFIG_KEY} -out {CONFIG_CERT} 2>/dev/null && "
+            f"chgrp {WEB_USER} {CONFIG_KEY} {CONFIG_CERT} && chmod 0640 {CONFIG_KEY} && chmod 0644 {CONFIG_CERT}",
+            desc="make portitor-config's certificate",
+        )
+    host.run(f"install -d -o {WEB_USER} -g {WEB_USER} -m 0700 {CONFIG_DB_DIR}")
+    host.run(f"systemctl stop {CONFIG_UNIT} 2>/dev/null || true", desc=f"systemctl stop {CONFIG_UNIT}")
+    host.put(binary, WEB_BIN, "0755")
+    host.run(f"ln -sfn portitor-web {shlex.quote(CONFIG_LINK)}", desc=f"ln -s portitor-web {CONFIG_LINK}")
+    action = install_unit(host, deploy / "systemd" / CONFIG_UNIT, assume_yes)
+    host.systemctl("daemon-reload")
+    run_config = f"runuser -u {WEB_USER} -- {CONFIG_LINK} -f {CONFIG_FILE}"
+    host.run(f"{run_config} migrate", desc="portitor-config migrate")
+    if new_config:
+        # Its own agent, the token read as root and handed over.
+        host.run(
+            f"fp=$(openssl x509 -in {ETC_DIR}/agent.crt -noout -fingerprint -sha256 | cut -d= -f2 | tr -d :); "
+            f"cat {ETC_DIR}/agent.token | {run_config} set-agent --url https://127.0.0.1:8443 "
+            f"--token-file - --fingerprint \"$fp\"",
+            desc="portitor-config set-agent (the local agent)",
+        )
+        log("==> portitor-config is installed but not started. Next steps:")
+        log(f"    sudo -u {WEB_USER} portitor-config createadmin admin")
+        log(f"    (optional) sudo -u {WEB_USER} portitor-config import-vf host-bundle.json --name main")
+        log(f"    systemctl enable --now {CONFIG_UNIT}")
+        log(f"    for the manager: URL https://<this host>:8444, token in {MANAGER_TOKEN},")
+        log(f"    fingerprint: openssl x509 -in {CONFIG_CERT} -noout -fingerprint -sha256")
+        return
+    if action == "installed":
+        host.systemctl("enable", CONFIG_UNIT)
+    host.systemctl("restart", CONFIG_UNIT)
 
 
 # ---------------------------------------------------------------------------
@@ -1467,7 +1539,7 @@ def main_release(args: argparse.Namespace) -> int:
         rc = run_release_installer(rel, any_root, work)
         if rc is not None:
             return rc
-        install(plan, roots, archs, any_root / "deploy", rel.tag, args.yes)
+        install(plan, roots, archs, any_root / "deploy", rel.tag, args.yes, args.config)
     finally:
         if not inherited:
             shutil.rmtree(work, ignore_errors=True)
@@ -1536,7 +1608,7 @@ def main_source(args: argparse.Namespace) -> int:
     version = version_of_output(proc.stdout) or git_describe()
 
     ensure_sudo(plan, args.dry_run)
-    install(plan, roots, archs, REPO_DIR / "deploy", version, args.yes)
+    install(plan, roots, archs, REPO_DIR / "deploy", version, args.yes, args.config)
     return 0
 
 
@@ -1565,7 +1637,7 @@ def main_local(args: argparse.Namespace) -> int:
             raise InstallError(f"cannot run {root / 'portitor-agent'} --version (not an {local_arch()} build?)")
         log(f"==> Local install of {version} from {path}: " + ", ".join(plan.describe()))
         ensure_sudo(plan, args.dry_run)
-        install(plan, {local_arch(): root}, archs, root / "deploy", version, args.yes)
+        install(plan, {local_arch(): root}, archs, root / "deploy", version, args.yes, args.config)
     finally:
         if work:
             shutil.rmtree(work, ignore_errors=True)
@@ -1598,6 +1670,8 @@ Environment:
     what.add_argument("--agent", nargs="?", const="localhost", metavar="HOST",
                       help="portitor-agent on HOST (default this host)")
     what.add_argument("--no-agent", action="store_true", help="never install or update the agent")
+    what.add_argument("--config", action="store_true",
+                      help="also portitor-config on the agent's host (updated with the agent once there)")
     what.add_argument("--ssh-user", default=os.environ.get("SSH_USER", SSH_USER_DEFAULT),
                       help="SSH user for a remote host: root, or a user with passwordless sudo "
                            f"(default {SSH_USER_DEFAULT})")

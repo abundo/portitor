@@ -17,7 +17,7 @@ import (
 func TestAgentCapture(t *testing.T) {
 	env := newEnv(t)
 	fake := &captureAgent{}
-	env.srv.newAgent = func(*models.Settings) (agentAPI, error) { return fake, nil }
+	env.srv.newAgent = func(*models.Firewall) (agentAPI, error) { return fake, nil }
 
 	body := map[string]any{"instance": "main", "interface": "lan", "filter": "port 53", "rate_kbps": 0}
 	rec := env.do("POST", "/api/agent/capture", body)

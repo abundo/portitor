@@ -67,6 +67,8 @@ type agentAPI interface {
 	System(ctx context.Context) (*agentapi.SystemStatus, error)
 	StartSystemJob(ctx context.Context, req agentapi.SystemJobRequest) error
 	Reboot(ctx context.Context) error
+	HA(ctx context.Context) (*agentapi.HAStatus, error)
+	HAVote(ctx context.Context, seconds int) (*agentapi.HAStatus, error)
 }
 
 type Server struct {
@@ -80,11 +82,15 @@ type Server struct {
 	// tenantWrites are the routes ("POST /api/rules") an instance admin
 	// may use besides reading; their handlers check the instance.
 	tenantWrites map[string]bool
-	// newAgent builds a client from the current settings.
-	newAgent func(s *models.Settings) (agentAPI, error)
-	static   fs.FS
+	// newAgent builds a client for a firewall's agent, newConfig for its
+	// portitor-config.
+	newAgent  func(f *models.Firewall) (agentAPI, error)
+	newConfig func(f *models.Firewall) (configAPI, error)
+	static    fs.FS
 	// webCert serves HTTPS when portitor-web does (tls_cert); nil otherwise.
 	webCert *tlsCert
+	// witness is the HA pairs' third vote (witness.go).
+	witness *witness
 }
 
 func NewServer(cfg *Config, db *gorm.DB) *Server {
@@ -92,10 +98,11 @@ func NewServer(cfg *Config, db *gorm.DB) *Server {
 		cfg:    cfg,
 		db:     db,
 		jwtKey: []byte(cfg.JWTSecret),
-		newAgent: func(s *models.Settings) (agentAPI, error) {
-			return agentclient.New(s.AgentURL, s.AgentToken, s.AgentFingerprint)
+		newAgent: func(f *models.Firewall) (agentAPI, error) {
+			return agentclient.New(f.AgentURL, f.AgentToken, f.AgentFingerprint)
 		},
-		static: staticFS(),
+		newConfig: newConfigClient,
+		static:    staticFS(),
 	}
 }
 
@@ -125,6 +132,14 @@ func (s *Server) Echo() *echo.Echo {
 	}))
 	e.Use(captureWorkerCSP)
 
+	if s.cfg.Local {
+		s.registerManagerAPI(e)
+	} else {
+		// Not the GUI's page either.
+		e.Any("/manager/*", func(c *echo.Context) error {
+			return errJSON(c, http.StatusNotFound, "no manager API: this is not portitor-config")
+		})
+	}
 	api := e.Group("/api", requireJSON, noStore)
 	api.POST("/login", s.handleLogin)
 	api.POST("/logout", s.handleLogout)
@@ -136,7 +151,8 @@ func (s *Server) Echo() *echo.Echo {
 	g.PUT("/me", s.handleUpdateMe)
 	g.POST("/me/password", s.handleChangePassword)
 
-	(&resource[models.Instance, *models.Instance]{db: s.db, scope: instanceScope, tenantWrites: []string{http.MethodPut}, tenantCheck: tenantInstanceCheck, order: "is_default desc, name", prepare: prepareInstance, present: presentInstance, afterCreate: seedInstance, beforeDelete: deleteInstance}).register(s, g, "/instances")
+	(&resource[models.Firewall, *models.Firewall]{db: s.db, order: "id", prepare: s.prepareFirewallHere, present: presentFirewall, afterCreate: createFirewallInstance, beforeDelete: deleteFirewall}).register(s, g, "/firewalls")
+	(&resource[models.Instance, *models.Instance]{db: s.db, scope: instanceScope, tenantWrites: []string{http.MethodPut}, tenantCheck: tenantInstanceCheck, order: "firewall_id, is_default desc, name", prepare: prepareInstance, present: presentInstance, afterCreate: seedInstance, beforeDelete: deleteInstance}).register(s, g, "/instances")
 	(&resource[models.InterfaceZone, *models.InterfaceZone]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "name", prepare: prepareInterfaceZone, beforeDelete: deleteInterfaceZone}).register(s, g, "/interface-zones")
 	(&resource[models.Interface, *models.Interface]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, tenantCheck: tenantInterfaceCheck, filters: []string{"instance_id"}, order: "name", prepare: prepareInterface, present: presentInterface, beforeDelete: deleteInterface}).register(s, g, "/interfaces")
 	(&resource[models.WgPeer, *models.WgPeer]{db: s.db, scope: byParent("InterfaceID", "interface_id", "interfaces"), tenantWrites: tenantAll, filters: []string{"interface_id"}, order: "name", prepare: prepareWgPeer, present: presentWgPeer}).register(s, g, "/wg/peers")
@@ -223,6 +239,13 @@ func (s *Server) Echo() *echo.Echo {
 	g.PUT("/roles/:id", s.handleUpdateRole)
 	g.DELETE("/roles/:id", s.handleDeleteRole)
 
+	// Bundles hold a virtual firewall's secrets: global admins only
+	// (no tenant or viewer write rule, and the GET in viewerDenied).
+	g.GET("/instances/:id/bundle", s.handleExportBundle)
+	g.POST("/instances/import", s.handleImportBundle)
+	g.POST("/instances/:id/break-glass", s.handleBreakGlass)
+	g.GET("/firewalls/:id/drift", s.handleDrift)
+	g.POST("/firewalls/:id/drift/:name", s.handleDriftSettle)
 	g.GET("/deploy/check", s.handleDeployCheck)
 	g.GET("/deploy/changes", s.handleDeployChanges)
 	g.POST("/deploy/preview", s.handleDeployPreview)
@@ -285,6 +308,7 @@ func (s *Server) Serve(ctx context.Context) error {
 		return err
 	}
 	e := s.Echo()
+	go s.runWitness(ctx)
 	sc := echo.StartConfig{Address: s.cfg.Bind, HideBanner: true}
 	slog.Info("portitor-web listening", "addr", s.cfg.Bind, "dev", s.cfg.Dev, "tls", s.cfg.TLSCert != "")
 	var err error
@@ -328,6 +352,9 @@ func tenantInstanceCheck(in, old *models.Instance) error {
 	if in.Name != old.Name {
 		return bad("only a global admin renames a virtual firewall")
 	}
+	if in.FirewallID != 0 && in.FirewallID != old.FirewallID {
+		return bad("only a global admin moves a virtual firewall to another firewall")
+	}
 	return nil
 }
 
@@ -336,6 +363,11 @@ func deleteInstance(tx *gorm.DB, in *models.Instance) error {
 	if in.IsDefault {
 		return bad("the default virtual firewall is the host itself and can't be deleted")
 	}
+	return deleteInstanceRows(tx, in)
+}
+
+// deleteInstanceRows deletes what the cascade can't delete in order.
+func deleteInstanceRows(tx *gorm.DB, in *models.Instance) error {
 	// The cascade would delete the DNS templates in any order, and those
 	// in use refuse it: zones first, then templates, then what they use.
 	for _, m := range []any{&models.DnsZone{}, &models.DnsTemplate{}, &models.DnsSoaTemplate{}, &models.DnsDnssecPolicy{}} {
@@ -359,28 +391,25 @@ func tenantInterfaceCheck(i, old *models.Interface) error {
 // DefaultInstanceName is the instance created on start when there is none.
 const DefaultInstanceName = "main"
 
-// ensureDefaultInstance creates the default instance if there are no
-// instances, since everything else belongs to one. It logs the policy
-// drops of all three chains.
+// ensureDefaultInstance creates the first firewall and its default
+// instance if there are no instances, since everything else belongs to one.
 func (s *Server) ensureDefaultInstance() error {
+	if err := s.ensureFirewall(); err != nil {
+		return err
+	}
 	return s.db.Transaction(func(tx *gorm.DB) error {
 		var n int64
 		if err := tx.Model(&models.Instance{}).Count(&n).Error; err != nil || n > 0 {
 			return err
 		}
-		// Log what no rule matched, so a new install shows what it drops.
-		in := models.Instance{Name: DefaultInstanceName, IsDefault: true,
-			LogDrops: models.StringList{fwconfig.ChainInput, fwconfig.ChainForward, fwconfig.ChainOutput}}
-		if err := prepareInstance(tx, &in, nil); err != nil {
+		id, err := firstFirewallID(tx)
+		if err != nil {
 			return err
 		}
-		if err := tx.Create(&in).Error; err != nil {
+		if err := createDefaultInstance(tx, id, DefaultInstanceName); err != nil {
 			return err
 		}
-		if err := seedInstance(tx, &in); err != nil {
-			return err
-		}
-		slog.Info("created default instance", "name", in.Name)
+		slog.Info("created default instance", "name", DefaultInstanceName)
 		return nil
 	})
 }
@@ -391,16 +420,4 @@ func (s *Server) settings() (*models.Settings, error) {
 		return nil, err
 	}
 	return &st, nil
-}
-
-func (s *Server) agent() (agentAPI, *models.Settings, error) {
-	st, err := s.settings()
-	if err != nil {
-		return nil, nil, err
-	}
-	a, err := s.newAgent(st)
-	if err != nil {
-		return nil, st, bad(err.Error())
-	}
-	return a, st, nil
 }

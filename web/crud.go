@@ -136,6 +136,22 @@ func (r *resource[T, PT]) load(c *echo.Context) (PT, error) {
 // any, an instance admin one of tenantWrites on rows of their instances
 // (before and after the change).
 func (r *resource[T, PT]) checkWrite(c *echo.Context, tx *gorm.DB, item, old PT) error {
+	if item != nil {
+		var o any
+		if old != nil {
+			o = old
+		}
+		keepManaged(item, o)
+	}
+	var rows []any
+	for _, row := range []PT{item, old} {
+		if row != nil {
+			rows = append(rows, row)
+		}
+	}
+	if err := refuseManaged(tx, r.scope, rows...); err != nil {
+		return err
+	}
 	a := currentAccess(c)
 	if a.isAdmin() {
 		return nil
@@ -262,6 +278,10 @@ func dbError(c *echo.Context, err error) error {
 	}
 	if errors.Is(err, errForbidden) {
 		return errJSON(c, http.StatusForbidden, "you can't change this")
+	}
+	var m *errManaged
+	if errors.As(err, &m) {
+		return errJSON(c, http.StatusForbidden, m.msg)
 	}
 	msg := err.Error()
 	switch {

@@ -10,10 +10,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"net/netip"
-	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -25,7 +23,6 @@ import (
 	"github.com/abundo/portitor/internal/agentapi"
 	"github.com/abundo/portitor/internal/agentclient"
 	"github.com/abundo/portitor/internal/builder"
-	"github.com/abundo/portitor/internal/buildinfo"
 	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/internal/ipam"
 	"github.com/abundo/portitor/internal/render"
@@ -118,14 +115,14 @@ func (s *Server) handleAutoRules(c *echo.Context) error {
 	if err := s.db.First(&mi, id).Error; err != nil {
 		return errJSON(c, http.StatusNotFound, "not found")
 	}
-	doc, err := builder.Build(s.db, 0)
+	doc, err := builder.BuildFirewall(s.db, 0, mi.FirewallID)
 	var ve *fwconfig.ValidationError
 	if err != nil && !errors.As(err, &ve) {
 		return err
 	}
 	out := []render.AutoRule{}
 	if mi.IsDefault {
-		if l := s.antiLockout(c.Request().Context()); l != nil {
+		if l := s.antiLockout(c.Request().Context(), mi.FirewallID); l != nil {
 			out = append(out, l.Rules()...)
 		}
 	}
@@ -136,10 +133,10 @@ func (s *Server) handleAutoRules(c *echo.Context) error {
 	return c.JSON(http.StatusOK, out)
 }
 
-// antiLockout returns the agent's anti-lockout rule, or nil when it is
+// antiLockout returns the firewall's anti-lockout rule, or nil when it is
 // disabled or the agent cannot be asked.
-func (s *Server) antiLockout(ctx context.Context) *render.AntiLockout {
-	a, _, err := s.agent()
+func (s *Server) antiLockout(ctx context.Context, firewallID uint) *render.AntiLockout {
+	a, _, err := s.firewallAgent(firewallID)
 	if err != nil {
 		return nil
 	}
@@ -444,7 +441,6 @@ func suggestBits(ip netip.Addr) int {
 
 type settingsView struct {
 	models.Settings
-	HasAgentToken bool `json:"has_agent_token"`
 	// WebTLS says portitor-web serves HTTPS itself (tls_cert), so a
 	// web certificate takes effect.
 	WebTLS bool `json:"web_tls"`
@@ -455,7 +451,7 @@ func (s *Server) handleGetSettings(c *echo.Context) error {
 	if err != nil {
 		return err
 	}
-	return c.JSON(http.StatusOK, settingsView{*st, st.AgentToken != "", s.cfg.TLSCert != ""})
+	return c.JSON(http.StatusOK, settingsView{*st, s.cfg.TLSCert != ""})
 }
 
 func (s *Server) handlePutSettings(c *echo.Context) error {
@@ -464,34 +460,15 @@ func (s *Server) handlePutSettings(c *echo.Context) error {
 		return err
 	}
 	var req struct {
-		AgentURL         *string `json:"agent_url"`
-		AgentToken       *string `json:"agent_token"` // empty/absent keeps the stored token
-		AgentFingerprint *string `json:"agent_fingerprint"`
-		ConfirmTimeout   *int    `json:"confirm_timeout"`
-		WgEndpointHost   *string `json:"wg_endpoint_host"`
-		CaptureRateKbps  *int    `json:"capture_rate_kbps"`
+		ConfirmTimeout  *int    `json:"confirm_timeout"`
+		WgEndpointHost  *string `json:"wg_endpoint_host"`
+		CaptureRateKbps *int    `json:"capture_rate_kbps"`
 		// WebCertificateID: absent keeps, 0 clears.
 		WebCertificateID *uint `json:"web_certificate_id"`
 		VirtualFirewalls *bool `json:"virtual_firewalls"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return errJSON(c, http.StatusBadRequest, "invalid request")
-	}
-	if req.AgentURL != nil {
-		u := strings.TrimSpace(*req.AgentURL)
-		if u != "" && !strings.HasPrefix(u, "https://") {
-			return errJSON(c, http.StatusBadRequest, "agent URL must start with https://")
-		}
-		st.AgentURL = strings.TrimRight(u, "/")
-	}
-	if req.AgentToken != nil && strings.TrimSpace(*req.AgentToken) != "" {
-		st.AgentToken = strings.TrimSpace(*req.AgentToken)
-	}
-	if req.AgentFingerprint != nil {
-		st.AgentFingerprint = strings.ToLower(strings.ReplaceAll(strings.TrimSpace(*req.AgentFingerprint), ":", ""))
-		if st.AgentFingerprint != "" && len(st.AgentFingerprint) != 64 {
-			return errJSON(c, http.StatusBadRequest, "fingerprint must be 64 hex characters (SHA-256)")
-		}
 	}
 	if req.ConfirmTimeout != nil {
 		if *req.ConfirmTimeout < 0 || *req.ConfirmTimeout > 1800 {
@@ -515,14 +492,14 @@ func (s *Server) handlePutSettings(c *echo.Context) error {
 	if req.VirtualFirewalls != nil {
 		if !*req.VirtualFirewalls && st.VirtualFirewalls {
 			var n, links int64
-			if err := s.db.Model(&models.Instance{}).Count(&n).Error; err != nil {
+			if err := s.db.Model(&models.Instance{}).Where("NOT is_default").Count(&n).Error; err != nil {
 				return err
 			}
 			if err := s.db.Model(&models.Link{}).Count(&links).Error; err != nil {
 				return err
 			}
-			if n > 1 || links > 0 {
-				return errJSON(c, http.StatusBadRequest, "virtual firewalls can't be turned off while there are more than one, or links")
+			if n > 0 || links > 0 {
+				return errJSON(c, http.StatusBadRequest, "virtual firewalls can't be turned off while there are any besides the firewalls' hosts, or links")
 			}
 		}
 		st.VirtualFirewalls = *req.VirtualFirewalls
@@ -543,7 +520,7 @@ func (s *Server) handlePutSettings(c *echo.Context) error {
 	if s.webCert != nil && !equalPtr(oldCert, st.WebCertificateID) {
 		s.webCert.reset()
 	}
-	return c.JSON(http.StatusOK, settingsView{*st, st.AgentToken != "", s.cfg.TLSCert != ""})
+	return c.JSON(http.StatusOK, settingsView{*st, s.cfg.TLSCert != ""})
 }
 
 func (s *Server) handleListUsers(c *echo.Context) error {
@@ -616,6 +593,9 @@ func (s *Server) handleUpdateUser(c *echo.Context) error {
 	if err := s.db.First(&u, id).Error; err != nil {
 		return errJSON(c, http.StatusNotFound, "not found")
 	}
+	if u.ManagedBy != "" {
+		return errJSON(c, http.StatusForbidden, "managed by "+u.ManagedBy+": change it there")
+	}
 	if u.Role != req.Role {
 		u.Role = req.Role
 		u.TokenVersion++
@@ -646,6 +626,9 @@ func (s *Server) handleSetUserPassword(c *echo.Context) error {
 	if err := s.db.First(&u, id).Error; err != nil {
 		return errJSON(c, http.StatusNotFound, "not found")
 	}
+	if u.ManagedBy != "" {
+		return errJSON(c, http.StatusForbidden, "managed by "+u.ManagedBy+": change it there")
+	}
 	if err := setPassword(&u, req.Password); err != nil {
 		return errJSON(c, http.StatusBadRequest, err.Error())
 	}
@@ -663,6 +646,13 @@ func (s *Server) handleDeleteUser(c *echo.Context) error {
 	}
 	if id == currentUser(c).ID {
 		return errJSON(c, http.StatusBadRequest, "you cannot delete yourself")
+	}
+	var u models.User
+	if err := s.db.First(&u, id).Error; err != nil {
+		return errJSON(c, http.StatusNotFound, "not found")
+	}
+	if u.ManagedBy != "" {
+		return errJSON(c, http.StatusForbidden, "managed by "+u.ManagedBy+": change it there")
 	}
 	if err := s.db.Delete(&models.User{}, id).Error; err != nil {
 		return err
@@ -693,371 +683,12 @@ func agentError(c *echo.Context, err error) error {
 	return c.JSON(http.StatusBadGateway, map[string]any{"error": err.Error()})
 }
 
-func (s *Server) handleDeployCheck(c *echo.Context) error {
-	st, err := s.settings()
-	if err != nil {
-		return err
-	}
-	var names []string
-	if q := c.QueryParam("instances"); q != "" {
-		names = strings.Split(q, ",")
-	}
-	only, err := s.chosenScope(currentAccess(c), names, true)
-	if err != nil {
-		return dbError(c, err)
-	}
-	doc, err := s.buildDoc(s.db, st.Generation+1, only)
-	problems := []string{}
-	var ve *fwconfig.ValidationError
-	var br *badRequest
-	switch {
-	case errors.As(err, &ve):
-		problems = ve.Problems
-	case errors.As(err, &br):
-		problems = []string{br.msg}
-		doc = &fwconfig.Document{}
-	case errors.Is(err, errForbidden):
-		problems = []string{"you are not an admin of any virtual firewall"}
-		doc = &fwconfig.Document{}
-	case err != nil:
-		return err
-	}
-	counts := map[string]int{"instances": len(doc.Instances), "links": len(doc.Links)}
-	if only != nil {
-		counts = map[string]int{"instances": len(only)}
-	}
-	for _, in := range doc.Instances {
-		if only != nil && !only[in.Name] {
-			continue
-		}
-		counts["interfaces"] += len(in.Interfaces)
-		for _, r := range in.Rules {
-			if r.Kind != fwconfig.RuleKindComment {
-				counts["rules"]++
-			}
-		}
-		counts["nat"] += len(in.NAT)
-	}
-	return c.JSON(http.StatusOK, map[string]any{"problems": problems, "counts": counts, "generation": st.Generation})
-}
-
-func (s *Server) handleDeployPreview(c *echo.Context) error {
-	a, st, err := s.agent()
-	if err != nil {
-		return agentError(c, err)
-	}
-	var req struct {
-		Instances []string `json:"instances"`
-	}
-	_ = c.Bind(&req)
-	only, err := s.chosenScope(currentAccess(c), req.Instances, true)
-	if err != nil {
-		return dbError(c, err)
-	}
-	doc, err := s.buildDoc(s.db, st.Generation+1, only)
-	if err != nil {
-		return problemsResponse(c, err)
-	}
-	res, err := a.Render(c.Request().Context(), *doc)
-	if err != nil {
-		return agentError(c, err)
-	}
-	if only != nil {
-		res.Files, res.Current = filterFiles(res.Files, only), filterFiles(res.Current, only)
-	}
-	return c.JSON(http.StatusOK, res)
-}
-
-// handleExportNftables downloads one virtual firewall's nftables ruleset as
-// the agent renders it: the live one (from=live) or the one a commit would
-// load (the default). It is Portitor's output, auto rules included.
-func (s *Server) handleExportNftables(c *echo.Context) error {
-	name := c.QueryParam("instance")
-	if name == "" {
-		return errJSON(c, http.StatusBadRequest, "instance is required")
-	}
-	live := c.QueryParam("from") == "live"
-	a, st, err := s.agent()
-	if err != nil {
-		return agentError(c, err)
-	}
-	only, err := s.chosenScope(currentAccess(c), []string{name}, true)
-	if err != nil {
-		return dbError(c, err)
-	}
-	doc, err := s.buildDoc(s.db, st.Generation+1, only)
-	if err != nil {
-		return problemsResponse(c, err)
-	}
-	res, err := a.Render(c.Request().Context(), *doc)
-	if err != nil {
-		return agentError(c, err)
-	}
-	files := res.Files
-	if live {
-		files = res.Current
-	}
-	path := res.Rulesets[name]
-	i := slices.IndexFunc(files, func(f render.File) bool { return path != "" && f.Path == path })
-	if i < 0 {
-		return errJSON(c, http.StatusNotFound, "no nftables ruleset for "+name)
-	}
-	h := c.Response().Header()
-	h.Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", name+".nft"))
-	return c.Blob(http.StatusOK, "text/plain; charset=utf-8", []byte(files[i].Content))
-}
-
-func (s *Server) handleDeployApply(c *echo.Context) error {
-	var req struct {
-		ConfirmTimeout *int     `json:"confirm_timeout"`
-		Instances      []string `json:"instances"`
-	}
-	_ = c.Bind(&req)
-	// One change at a time: a pending one is confirmed or rolled back
-	// first. The agent is asked, since the history may not know yet that
-	// a change timed out.
-	a, _, err := s.agent()
-	if err != nil {
-		return agentError(c, err)
-	}
-	st, err := a.Status(c.Request().Context())
-	if err != nil {
-		return agentError(c, err)
-	}
-	if st.Pending != nil {
-		return errJSON(c, http.StatusConflict, "a deployment is waiting for confirmation; confirm or roll it back first")
-	}
-	only, err := s.chosenScope(currentAccess(c), req.Instances, false)
-	if err != nil {
-		return dbError(c, err)
-	}
-	if only != nil && len(only) == 0 {
-		return errJSON(c, http.StatusForbidden, "you are not an admin of any virtual firewall")
-	}
-	dep, res, err := s.deploy(c.Request().Context(), currentUser(c).Username, req.ConfirmTimeout, only)
-	var ve *fwconfig.ValidationError
-	switch {
-	case errors.As(err, &ve):
-		return problemsResponse(c, err)
-	case err != nil:
-		return agentError(c, err)
-	}
-	return c.JSON(http.StatusOK, map[string]any{"deployment": dep, "result": res})
-}
-
-// deploy builds the document, applies it and records the deployment.
-// timeout nil takes the confirm timeout from the settings. only names the
-// instances to deploy from the database (nil: everything); see buildDoc.
-func (s *Server) deploy(ctx context.Context, username string, timeout *int, only map[string]bool) (*models.Deployment, *agentapi.ApplyResult, error) {
-	s.deployMu.Lock()
-	defer s.deployMu.Unlock()
-	a, st, err := s.agent()
-	if err != nil {
-		return nil, nil, err
-	}
-	gen := st.Generation + 1
-	// Build from the snapshot, so it is exactly what Revert restores even
-	// if an edit comes in meanwhile.
-	snap, err := s.takeSnapshot(gen)
-	if err != nil {
-		return nil, nil, err
-	}
-	kept := false
-	defer func() {
-		if !kept {
-			os.Remove(snap)
-		}
-	}()
-	snapDB, err := openSnapshot(snap)
-	if err != nil {
-		return nil, nil, err
-	}
-	doc, err := s.buildDoc(snapDB, gen, only)
-	closeDB(snapDB)
-	if err != nil {
-		return nil, nil, err
-	}
-	confirm := st.ConfirmTimeout
-	if timeout != nil {
-		confirm = *timeout
-	}
-	// Burn the generation even if the apply fails, so every attempt the
-	// agent sees has a unique number.
-	st.Generation = gen
-	if err := s.db.Save(st).Error; err != nil {
-		return nil, nil, err
-	}
-	docJSON, _ := json.Marshal(redactDoc(*doc))
-	dep := models.Deployment{Generation: gen, Username: username, Document: string(docJSON), DocHash: docHash(*doc), Instances: models.StringList{}}
-	if only != nil {
-		dep.Instances = sortedNames(only)
-	}
-
-	res, applyErr := a.Apply(ctx, *doc, confirm)
-	switch {
-	case applyErr != nil:
-		dep.Status = "failed"
-		dep.Message = applyErr.Error()
-		var ae *agentclient.Error
-		if errors.As(applyErr, &ae) && ae.Result != nil {
-			res = ae.Result
-			switch {
-			case ae.Result.RollbackErrors != "":
-				dep.Message += " (restoring the previous configuration failed: " + ae.Result.RollbackErrors + ")"
-			case ae.Result.RolledBack:
-				dep.Message += " (previous configuration restored)"
-			}
-		}
-	case res.ConfirmBy != nil:
-		dep.Status = "pending"
-		dep.Message = "confirm before " + res.ConfirmBy.Local().Format(time.TimeOnly)
-	default:
-		dep.Status = "applied"
-	}
-	if res != nil {
-		dep.Log = strings.Join(res.Log, "\n")
-	}
-	if err := s.db.Create(&dep).Error; err != nil {
-		return nil, nil, err
-	}
-	if dep.Status != "failed" {
-		if err := s.keepDocument(doc); err != nil {
-			slog.Warn("keeping the deployed document", "err", err)
-		}
-		// Revert restores a snapshot of the database, which matches
-		// what runs only after a deploy of everything.
-		if only == nil {
-			s.keepSnapshot(snap, gen)
-			kept = true
-		} else {
-			s.pruneSnapshots()
-		}
-	}
-	return &dep, res, applyErr
-}
-
-func (s *Server) latestDeployment() (*models.Deployment, error) {
-	var dep models.Deployment
-	err := s.db.Order("generation desc, id desc").First(&dep).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, nil
-	}
-	return &dep, err
-}
-
 // docHash identifies a document's content, whatever its generation.
 func docHash(doc fwconfig.Document) string {
 	doc.Generation = 0
 	b, _ := json.Marshal(doc)
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])
-}
-
-// liveDeployment is the latest deployment the firewall runs (or runs
-// pending confirmation); a failed or rolled back one left the previous
-// one in place.
-func (s *Server) liveDeployment() (*models.Deployment, error) {
-	var dep models.Deployment
-	err := s.db.Where("status IN ?", []string{"applied", "pending", "confirmed"}).Order("generation desc, id desc").First(&dep).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, nil
-	}
-	return &dep, err
-}
-
-// handleDeployChanges tells whether the database differs from what is
-// deployed, for the "uncommitted changes" banner.
-func (s *Server) handleDeployChanges(c *echo.Context) error {
-	resp := struct {
-		Changed  bool `json:"changed"`
-		Deployed bool `json:"deployed"`
-		Problems int  `json:"problems"`
-	}{}
-	live, err := s.liveDeployment()
-	if err != nil {
-		return err
-	}
-	resp.Deployed = live != nil
-	if a := currentAccess(c); !a.readsAll() {
-		names, err := s.instanceNames(a.readable())
-		if err != nil {
-			return err
-		}
-		resp.Changed, resp.Problems, err = s.instanceChanges(names)
-		if err != nil {
-			return err
-		}
-		return c.JSON(http.StatusOK, resp)
-	}
-	doc, err := builder.Build(s.db, 0)
-	var ve *fwconfig.ValidationError
-	switch {
-	case errors.As(err, &ve):
-		// What is deployed was valid, so this is a change.
-		resp.Changed, resp.Problems = true, len(ve.Problems)
-	case err != nil:
-		return err
-	case live == nil:
-		resp.Changed = true
-	case live.DocHash != "":
-		resp.Changed = live.DocHash != docHash(*doc)
-	default:
-		// Older rows only have the redacted document, so key changes go
-		// unnoticed there.
-		var old fwconfig.Document
-		if json.Unmarshal([]byte(live.Document), &old) != nil {
-			resp.Changed = true
-			break
-		}
-		resp.Changed = docHash(old) != docHash(redactDoc(*doc))
-	}
-	return c.JSON(http.StatusOK, resp)
-}
-
-func (s *Server) handleDeployConfirm(c *echo.Context) error {
-	a, _, err := s.agent()
-	if err != nil {
-		return agentError(c, err)
-	}
-	dep, err := s.latestDeployment()
-	if err != nil {
-		return err
-	}
-	if dep == nil || dep.Status != "pending" {
-		return errJSON(c, http.StatusConflict, "no change is waiting for confirmation")
-	}
-	if !s.mayFinish(currentAccess(c), dep) {
-		return errJSON(c, http.StatusForbidden, "this change deployed virtual firewalls you are not an admin of")
-	}
-	if err := a.Confirm(c.Request().Context(), dep.Generation); err != nil {
-		return agentError(c, err)
-	}
-	dep.Status, dep.Message = "confirmed", "confirmed by "+currentUser(c).Username
-	s.db.Save(dep)
-	return c.JSON(http.StatusOK, dep)
-}
-
-func (s *Server) handleDeployRollback(c *echo.Context) error {
-	a, _, err := s.agent()
-	if err != nil {
-		return agentError(c, err)
-	}
-	dep, err := s.latestDeployment()
-	if err != nil {
-		return err
-	}
-	if !s.mayFinish(currentAccess(c), dep) {
-		return errJSON(c, http.StatusForbidden, "only a global admin rolls back a change of virtual firewalls you are not an admin of")
-	}
-	res, err := a.Rollback(c.Request().Context())
-	if err != nil {
-		return agentError(c, err)
-	}
-	if dep != nil && dep.Status == "pending" {
-		dep.Status, dep.Message = "rolled_back", "rolled back by "+currentUser(c).Username
-		s.db.Save(dep)
-	}
-	return c.JSON(http.StatusOK, res)
 }
 
 func (s *Server) handleDeployments(c *echo.Context) error {
@@ -1079,52 +710,16 @@ func (s *Server) handleDeployments(c *echo.Context) error {
 	return c.JSON(http.StatusOK, deps)
 }
 
-func (s *Server) handleAgentStatus(c *echo.Context) error {
-	a, _, err := s.agent()
-	if err != nil {
-		return agentError(c, err)
-	}
-	st, err := a.Status(c.Request().Context())
-	if err != nil {
-		return agentError(c, err)
-	}
-	// A pending deployment that the agent no longer holds was either
-	// confirmed elsewhere or rolled back on timeout.
-	if dep, _ := s.latestDeployment(); dep != nil && dep.Status == "pending" && st.Pending == nil {
-		if st.Generation == dep.Generation {
-			dep.Status, dep.Message = "confirmed", "confirmed"
-		} else {
-			dep.Status, dep.Message = "rolled_back", fmt.Sprintf("not confirmed in time; agent restored generation %d", st.Generation)
-		}
-		s.db.Save(dep)
-	}
-	sync, err := s.syncNICs(st.NICs)
-	if err != nil {
-		return err
-	}
-	names, err := s.readableInstanceNames(c)
-	if err != nil {
-		return err
-	}
-	if names != nil {
-		filterStatus(st, names)
-		sync = nil
-	}
-	return c.JSON(http.StatusOK, struct {
-		*agentapi.Status
-		NICSync *nicSync `json:"nic_sync"`
-		// VersionMismatch says how the agent's version differs from
-		// portitor-web's; empty when they match.
-		VersionMismatch string `json:"version_mismatch,omitempty"`
-	}{st, sync, buildinfo.Mismatch(st.Version)})
-}
-
 func (s *Server) handleAgentLeases(c *echo.Context) error {
-	a, _, err := s.agent()
-	if err != nil {
-		return agentError(c, err)
-	}
-	l, err := a.Leases(c.Request().Context())
+	l, err := fromAll(c.Request().Context(), s, agentAPI.Leases, func(into, from *agentapi.LeasesResponse) {
+		into.Client = append(into.Client, from.Client...)
+		for k, v := range from.Server {
+			if into.Server == nil {
+				into.Server = map[string][]agentapi.ServerLease{}
+			}
+			into.Server[k] = append(into.Server[k], v...)
+		}
+	})
 	if err != nil {
 		return agentError(c, err)
 	}
@@ -1141,11 +736,9 @@ func (s *Server) handleAgentLeases(c *echo.Context) error {
 // handleAgentNeighbours passes on the ARP, ND and LLDP neighbours of the
 // instances' interfaces, for the Neighbours page.
 func (s *Server) handleAgentNeighbours(c *echo.Context) error {
-	a, _, err := s.agent()
-	if err != nil {
-		return agentError(c, err)
-	}
-	n, err := a.Neighbours(c.Request().Context())
+	n, err := fromAll(c.Request().Context(), s, agentAPI.Neighbours, func(into, from *agentapi.NeighboursResponse) {
+		into.IP, into.LLDP, into.LLDPPorts = append(into.IP, from.IP...), append(into.LLDP, from.LLDP...), append(into.LLDPPorts, from.LLDPPorts...)
+	})
 	if err != nil {
 		return agentError(c, err)
 	}
@@ -1162,11 +755,7 @@ func (s *Server) handleAgentNeighbours(c *echo.Context) error {
 // handleAgentRoutingTable passes on the instances' IPv4 and IPv6 routes,
 // for the Routes page.
 func (s *Server) handleAgentRoutingTable(c *echo.Context) error {
-	a, _, err := s.agent()
-	if err != nil {
-		return agentError(c, err)
-	}
-	t, err := a.RoutingTable(c.Request().Context())
+	t, err := fromAll(c.Request().Context(), s, agentAPI.RoutingTable, func(into, from *agentapi.RoutingTableResponse) { into.Routes = append(into.Routes, from.Routes...) })
 	if err != nil {
 		return agentError(c, err)
 	}
@@ -1183,11 +772,7 @@ func (s *Server) handleAgentRoutingTable(c *echo.Context) error {
 // handleAgentBGP passes on the BGP state (neighbours, BGP table) of the
 // instances, for the BGP page.
 func (s *Server) handleAgentBGP(c *echo.Context) error {
-	a, _, err := s.agent()
-	if err != nil {
-		return agentError(c, err)
-	}
-	b, err := a.BGP(c.Request().Context())
+	b, err := fromAll(c.Request().Context(), s, agentAPI.BGP, func(into, from *agentapi.BGPResponse) { into.Instances = append(into.Instances, from.Instances...) })
 	if err != nil {
 		return agentError(c, err)
 	}
@@ -1216,7 +801,7 @@ func (s *Server) handleAgentBGPRoutes(c *echo.Context) error {
 	if names != nil && !names[inst] {
 		return errJSON(c, http.StatusForbidden, "forbidden")
 	}
-	a, _, err := s.agent()
+	a, _, err := s.instanceAgent(inst)
 	if err != nil {
 		return agentError(c, err)
 	}
@@ -1241,7 +826,7 @@ func (s *Server) handleAgentBGPNeighbor(c *echo.Context) error {
 	if names != nil && !names[inst] {
 		return errJSON(c, http.StatusForbidden, "forbidden")
 	}
-	a, _, err := s.agent()
+	a, _, err := s.instanceAgent(inst)
 	if err != nil {
 		return agentError(c, err)
 	}
@@ -1255,11 +840,7 @@ func (s *Server) handleAgentBGPNeighbor(c *echo.Context) error {
 // handleAgentOSPF passes on the OSPF state (areas, interfaces,
 // neighbours, routes) of the instances, for the OSPF page.
 func (s *Server) handleAgentOSPF(c *echo.Context) error {
-	a, _, err := s.agent()
-	if err != nil {
-		return agentError(c, err)
-	}
-	o, err := a.OSPF(c.Request().Context())
+	o, err := fromAll(c.Request().Context(), s, agentAPI.OSPF, func(into, from *agentapi.OSPFResponse) { into.Instances = append(into.Instances, from.Instances...) })
 	if err != nil {
 		return agentError(c, err)
 	}
@@ -1276,11 +857,7 @@ func (s *Server) handleAgentOSPF(c *echo.Context) error {
 // handleAgentISIS passes on the IS-IS state (adjacencies, interfaces,
 // routes) of the instances, for the IS-IS page.
 func (s *Server) handleAgentISIS(c *echo.Context) error {
-	a, _, err := s.agent()
-	if err != nil {
-		return agentError(c, err)
-	}
-	o, err := a.ISIS(c.Request().Context())
+	o, err := fromAll(c.Request().Context(), s, agentAPI.ISIS, func(into, from *agentapi.ISISResponse) { into.Instances = append(into.Instances, from.Instances...) })
 	if err != nil {
 		return agentError(c, err)
 	}
@@ -1297,11 +874,7 @@ func (s *Server) handleAgentISIS(c *echo.Context) error {
 // handleAgentVRRP passes on the state of the instances' virtual routers,
 // for the VRRP page.
 func (s *Server) handleAgentVRRP(c *echo.Context) error {
-	a, _, err := s.agent()
-	if err != nil {
-		return agentError(c, err)
-	}
-	v, err := a.VRRP(c.Request().Context())
+	v, err := fromAll(c.Request().Context(), s, agentAPI.VRRP, func(into, from *agentapi.VRRPResponse) { into.Instances = append(into.Instances, from.Instances...) })
 	if err != nil {
 		return agentError(c, err)
 	}
@@ -1317,11 +890,7 @@ func (s *Server) handleAgentVRRP(c *echo.Context) error {
 
 // handleAgentBFD passes on the instances' BFD sessions, for the BFD page.
 func (s *Server) handleAgentBFD(c *echo.Context) error {
-	a, _, err := s.agent()
-	if err != nil {
-		return agentError(c, err)
-	}
-	b, err := a.BFD(c.Request().Context())
+	b, err := fromAll(c.Request().Context(), s, agentAPI.BFD, func(into, from *agentapi.BFDResponse) { into.Instances = append(into.Instances, from.Instances...) })
 	if err != nil {
 		return agentError(c, err)
 	}
@@ -1338,11 +907,7 @@ func (s *Server) handleAgentBFD(c *echo.Context) error {
 // handleAgentNTP passes on the instances' NTP sources and statistics, for
 // the NTP page.
 func (s *Server) handleAgentNTP(c *echo.Context) error {
-	a, _, err := s.agent()
-	if err != nil {
-		return agentError(c, err)
-	}
-	n, err := a.NTP(c.Request().Context())
+	n, err := fromAll(c.Request().Context(), s, agentAPI.NTP, func(into, from *agentapi.NTPResponse) { into.Instances = append(into.Instances, from.Instances...) })
 	if err != nil {
 		return agentError(c, err)
 	}
@@ -1359,11 +924,17 @@ func (s *Server) handleAgentNTP(c *echo.Context) error {
 // handleAgentRuleCounters passes on the traffic per rule (by rule id), for
 // the Rules page.
 func (s *Server) handleAgentRuleCounters(c *echo.Context) error {
-	a, _, err := s.agent()
-	if err != nil {
-		return agentError(c, err)
-	}
-	rc, err := a.RuleCounters(c.Request().Context())
+	rc, err := fromAll(c.Request().Context(), s, agentAPI.RuleCounters, func(into, from *agentapi.RuleCountersResponse) {
+		for k, v := range from.Rules {
+			into.Rules[k] = v
+		}
+		for k, v := range from.Drops {
+			if into.Drops == nil {
+				into.Drops = map[string]map[string]agentapi.ChainDrops{}
+			}
+			into.Drops[k] = v
+		}
+	})
 	if err != nil {
 		return agentError(c, err)
 	}
@@ -1383,7 +954,7 @@ func (s *Server) handleAgentRuleCounters(c *echo.Context) error {
 // for the log panel.
 func (s *Server) handleAgentLogs(c *echo.Context) error {
 	after, _ := strconv.ParseInt(c.QueryParam("after"), 10, 64)
-	a, _, err := s.agent()
+	a, err := s.firewallFromRequest(c)
 	if err != nil {
 		return agentError(c, err)
 	}
@@ -1398,7 +969,7 @@ func (s *Server) handleAgentLogs(c *echo.Context) error {
 // ?after=<id>, for the log panel's logged packets.
 func (s *Server) handleAgentPacketLog(c *echo.Context) error {
 	after, _ := strconv.ParseInt(c.QueryParam("after"), 10, 64)
-	a, _, err := s.agent()
+	a, err := s.firewallFromRequest(c)
 	if err != nil {
 		return agentError(c, err)
 	}
@@ -1420,7 +991,7 @@ func (s *Server) handleAgentPacketLog(c *echo.Context) error {
 // ?after=<id>, for the log panel's DNS queries.
 func (s *Server) handleAgentDNSQueryLog(c *echo.Context) error {
 	after, _ := strconv.ParseInt(c.QueryParam("after"), 10, 64)
-	a, _, err := s.agent()
+	a, err := s.firewallFromRequest(c)
 	if err != nil {
 		return agentError(c, err)
 	}
@@ -1442,6 +1013,11 @@ func (s *Server) handleAgentDNSQueryLog(c *echo.Context) error {
 // deployment history.
 func redactDoc(doc fwconfig.Document) fwconfig.Document {
 	out := doc
+	if doc.HA != nil {
+		ha := *doc.HA
+		ha.Secret = "<redacted>"
+		out.HA = &ha
+	}
 	out.Instances = make([]fwconfig.Instance, len(doc.Instances))
 	for i, in := range doc.Instances {
 		cp := in

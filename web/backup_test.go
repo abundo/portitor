@@ -45,7 +45,8 @@ func objectNames(t *testing.T, env *testEnv) []string {
 func TestBackupRestore(t *testing.T) {
 	env := newEnv(t)
 	env.create("/api/objects", map[string]any{"name": "nas", "addresses": []string{"192.168.1.10"}})
-	env.do("PUT", "/api/settings", map[string]any{"wg_endpoint_host": "old.example.com", "agent_url": "https://10.0.0.1:8443"})
+	env.do("PUT", "/api/settings", map[string]any{"wg_endpoint_host": "old.example.com"})
+	env.do("PUT", "/api/firewalls/1", map[string]any{"name": "firewall", "agent_url": "https://10.0.0.1:8443"})
 	// Role memberships come back; one of a user deleted since the backup
 	// goes with that user.
 	if err := CreateUser(env.srv, "stays", "another long password"); err != nil {
@@ -75,8 +76,10 @@ func TestBackupRestore(t *testing.T) {
 
 	// Change things after the backup.
 	env.create("/api/objects", map[string]any{"name": "printer", "addresses": []string{"192.168.1.20"}})
-	env.do("PUT", "/api/settings", map[string]any{"wg_endpoint_host": "new.example.com", "agent_url": "https://10.0.0.2:8443", "agent_token": "new-token"})
-	env.srv.db.Model(&models.Settings{}).Where("id = 1").Update("generation", 7)
+	env.do("PUT", "/api/settings", map[string]any{"wg_endpoint_host": "new.example.com"})
+	env.do("PUT", "/api/firewalls/1", map[string]any{"name": "firewall", "agent_url": "https://10.0.0.2:8443", "agent_token": "new-token"})
+	env.srv.db.Model(&models.Settings{}).Where("id = 1").Update("last_commit", 7)
+	env.srv.db.Model(&models.Firewall{}).Where("id = 1").Update("generation", 9)
 	if err := env.srv.db.Exec("DELETE FROM users WHERE username = 'gone'").Error; err != nil {
 		t.Fatal(err)
 	}
@@ -107,9 +110,11 @@ func TestBackupRestore(t *testing.T) {
 	if st.WgEndpointHost != "old.example.com" {
 		t.Errorf("settings not restored: %q", st.WgEndpointHost)
 	}
-	// This installation's agent connection, generation and users stay.
-	if st.AgentURL != "https://10.0.0.2:8443" || st.AgentToken != "new-token" || st.Generation != 7 {
-		t.Errorf("agent settings: %q %q %d", st.AgentURL, st.AgentToken, st.Generation)
+	// This installation's agent connection, generation, commit number and
+	// users stay.
+	fw := firstFirewall(t, env)
+	if fw.AgentURL != "https://10.0.0.2:8443" || fw.AgentToken != "new-token" || fw.Generation != 9 || st.LastCommit != 7 {
+		t.Errorf("agent settings: %q %q %d %d", fw.AgentURL, fw.AgentToken, fw.Generation, st.LastCommit)
 	}
 	var n int64
 	env.srv.db.Model(&models.User{}).Where("username = ?", "later").Count(&n)

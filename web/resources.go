@@ -4,7 +4,6 @@
 package web
 
 import (
-	"errors"
 	"fmt"
 	"net"
 	"net/netip"
@@ -118,18 +117,8 @@ func prepareInstance(tx *gorm.DB, in, old *models.Instance) error {
 	if !fwconfig.ValidInstanceName(in.Name) {
 		return bad("name: lowercase letters and digits, starting with a letter, at most 12 characters")
 	}
-	if old == nil {
-		var st models.Settings
-		var n int64
-		if err := tx.Select("virtual_firewalls").First(&st, 1).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-			return err
-		}
-		if err := tx.Model(&models.Instance{}).Count(&n).Error; err != nil {
-			return err
-		}
-		if n > 0 && !st.VirtualFirewalls {
-			return bad("virtual firewalls are turned off (Settings)")
-		}
+	if err := prepareInstanceFirewall(tx, in, old); err != nil {
+		return err
 	}
 	in.LogDrops = cleanList(in.LogDrops)
 	for _, c := range in.LogDrops {
@@ -244,15 +233,6 @@ func prepareInstance(tx *gorm.DB, in, old *models.Instance) error {
 	}
 	if in.DhcpLeaseTime < 300 {
 		return bad("DHCP lease time must be at least 300 seconds")
-	}
-	// The default instance is the host itself, with its files in the
-	// standard places: it is the first instance, and stays the default.
-	if old != nil {
-		in.IsDefault = old.IsDefault
-	} else {
-		var n int64
-		tx.Model(&models.Instance{}).Where("is_default").Count(&n)
-		in.IsDefault = n == 0
 	}
 	return renameInstanceRole(tx, in, old)
 }
@@ -390,6 +370,10 @@ func prepareInterface(tx *gorm.DB, i, old *models.Interface) error {
 		return err
 	}
 	i.Addresses = addrs
+	// The HA secondary's; the builder pairs them with the addresses.
+	if i.PeerAddresses, err = ifaceAddrs("peer addresses", i.PeerAddresses, false); err != nil {
+		return err
+	}
 	if err := prepareDHCPv6(tx, i, old); err != nil {
 		return err
 	}
@@ -563,6 +547,9 @@ func prepareLink(tx *gorm.DB, l, old *models.Link) error {
 	}
 	if l.InstanceAID == l.InstanceBID {
 		return bad("a link connects two different virtual firewalls")
+	}
+	if err := sameFirewall(tx, l.InstanceAID, l.InstanceBID); err != nil {
+		return err
 	}
 	l.InterfaceA, l.InterfaceB = strings.TrimSpace(l.InterfaceA), strings.TrimSpace(l.InterfaceB)
 	for _, end := range []struct {

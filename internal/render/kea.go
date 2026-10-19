@@ -257,14 +257,15 @@ func KeaDhcp4Conf(in *fwconfig.Instance, p Paths) string {
     "renew-timer": %d,
     "rebind-timer": %d,
     %s
-    "loggers": [ { "name": "kea-dhcp4", "output-options": [ { "output": "stdout" } ], "severity": "INFO" } ]
+    %s"loggers": [ { "name": "kea-dhcp4", "output-options": [ { "output": "stdout" } ], "severity": "INFO" } ]
   }
 }
 `, ifJSON,
 		p.Files(in).Kea4Socket,
 		p.Files(in).Kea4Lease,
 		lease, lease/2, lease*7/8,
-		keaSubnetsJSON(in, false))
+		keaSubnetsJSON(in, false),
+		keaHAHooks(in, p, KeaHAPort4))
 	return b.String()
 }
 
@@ -287,13 +288,66 @@ func KeaDhcp6Conf(in *fwconfig.Instance, p Paths) string {
     "renew-timer": %d,
     "rebind-timer": %d,
     %s
-    "loggers": [ { "name": "kea-dhcp6", "output-options": [ { "output": "stdout" } ], "severity": "INFO" } ]
+    %s"loggers": [ { "name": "kea-dhcp6", "output-options": [ { "output": "stdout" } ], "severity": "INFO" } ]
   }
 }
 `, ifJSON,
 		p.Files(in).Kea6Socket,
 		p.Files(in).Kea6Lease,
 		lease*3/4, lease, lease/2, lease*4/5,
-		keaSubnetsJSON(in, true))
+		keaSubnetsJSON(in, true),
+		keaHAHooks(in, p, KeaHAPort6))
 	return b.String()
+}
+
+// Ports of Kea's HA peers (fwconfig.DHCPHA), one per server.
+const (
+	KeaHAPort4 = 8001
+	KeaHAPort6 = 8002
+)
+
+// keaHAHooks loads Kea's HA hook in hot-standby with the lease commands it
+// needs, when the instance's DHCP runs on an HA pair. Each server listens
+// on its own address (a dedicated listener, as multi-threaded Kea needs).
+func keaHAHooks(in *fwconfig.Instance, p Paths, port int) string {
+	h := in.DHCP.HA
+	if h == nil {
+		return ""
+	}
+	primary, standby := h.This, h.Peer
+	this := "primary"
+	if h.Role == fwconfig.DHCPHAStandby {
+		primary, standby, this = h.Peer, h.This, "standby"
+	}
+	url := func(a string) string { return fmt.Sprintf("http://%s:%d/", a, port) }
+	type peer struct {
+		Name         string `json:"name"`
+		URL          string `json:"url"`
+		Role         string `json:"role"`
+		AutoFailover bool   `json:"auto-failover"`
+	}
+	ha := map[string]any{
+		"this-server-name":    this,
+		"mode":                "hot-standby",
+		"heartbeat-delay":     10000,
+		"max-response-delay":  30000,
+		"max-ack-delay":       5000,
+		"max-unacked-clients": 3,
+		"multi-threading": map[string]any{
+			"enable-multi-threading":  true,
+			"http-dedicated-listener": true,
+			"http-listener-threads":   0,
+			"http-client-threads":     0,
+		},
+		"peers": []peer{
+			{"primary", url(primary), "primary", true},
+			{"standby", url(standby), "standby", true},
+		},
+	}
+	hooks := []map[string]any{
+		{"library": p.KeaHooksDir + "/libdhcp_lease_cmds.so"},
+		{"library": p.KeaHooksDir + "/libdhcp_ha.so", "parameters": map[string]any{"high-availability": []any{ha}}},
+	}
+	b, _ := json.Marshal(hooks)
+	return `"hooks-libraries": ` + string(b) + ",\n    "
 }

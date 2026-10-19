@@ -135,7 +135,7 @@ func (t *tlsCert) fetch(ctx context.Context) (chosen bool, err error) {
 	if err := t.s.db.First(&inst, cert.InstanceID).Error; err != nil {
 		return true, err
 	}
-	a, _, err := t.s.agent()
+	a, _, err := t.s.instanceAgent(inst.Name)
 	if err != nil {
 		return true, err
 	}

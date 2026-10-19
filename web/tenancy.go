@@ -6,13 +6,12 @@ package web
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
-
-	"gorm.io/gorm"
 
 	"github.com/abundo/portitor/internal/agentapi"
 	"github.com/abundo/portitor/internal/builder"
@@ -26,14 +25,21 @@ import (
 // else (other instances, links, IP lists, tasks) as the firewall runs it,
 // so they never push another tenant's unfinished changes. "As the firewall
 // runs it" is the live deployment's document, kept unredacted next to the
-// snapshots (<db dir>/deployed/<generation>.json, 0600, like the database).
+// snapshots (<db dir>/deployed/<commit>-<firewall id>.json, 0600, like the
+// database).
 
-func docPath(dir string, gen int64) string {
-	return filepath.Join(dir, strconv.FormatInt(gen, 10)+".json")
+// docPath is where a commit keeps a firewall's document. A commit from
+// before firewalls kept it at legacyDocPath, as the first firewall's.
+func docPath(dir string, commit int64, firewallID uint) string {
+	return filepath.Join(dir, fmt.Sprintf("%d-%d.json", commit, firewallID))
 }
 
-// keepDocument stores the document a deployment applied.
-func (s *Server) keepDocument(doc *fwconfig.Document) error {
+func legacyDocPath(dir string, commit int64) string {
+	return filepath.Join(dir, strconv.FormatInt(commit, 10)+".json")
+}
+
+// keepDocument stores the document a commit applied to a firewall.
+func (s *Server) keepDocument(doc *fwconfig.Document, commit int64, firewallID uint) error {
 	dir, err := s.snapshotDir()
 	if err != nil {
 		return err
@@ -45,11 +51,11 @@ func (s *Server) keepDocument(doc *fwconfig.Document) error {
 	if err != nil {
 		return err
 	}
-	tmp := docPath(dir, doc.Generation) + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+	path := docPath(dir, commit, firewallID)
+	if err := os.WriteFile(path+".tmp", b, 0o600); err != nil {
 		return err
 	}
-	return os.Rename(tmp, docPath(dir, doc.Generation))
+	return os.Rename(path+".tmp", path)
 }
 
 // errNoLiveDocument: nothing deployed to build on.
@@ -57,8 +63,8 @@ var errNoLiveDocument = bad("a global admin has to deploy the whole configuratio
 
 // liveDocument is the document the firewall runs. Deployments from before
 // documents were kept fall back to their database snapshot.
-func (s *Server) liveDocument() (*fwconfig.Document, error) {
-	live, err := s.liveDeployment()
+func (s *Server) liveDocument(firewallID uint) (*fwconfig.Document, error) {
+	live, err := s.liveDeployment(firewallID)
 	if err != nil {
 		return nil, err
 	}
@@ -69,7 +75,10 @@ func (s *Server) liveDocument() (*fwconfig.Document, error) {
 	if err != nil {
 		return nil, err
 	}
-	b, err := os.ReadFile(docPath(dir, live.Generation))
+	b, err := os.ReadFile(docPath(dir, live.CommitID, firewallID))
+	if errors.Is(err, os.ErrNotExist) {
+		b, err = os.ReadFile(legacyDocPath(dir, live.CommitID))
+	}
 	if err == nil {
 		var doc fwconfig.Document
 		if err := json.Unmarshal(b, &doc); err != nil {
@@ -80,7 +89,7 @@ func (s *Server) liveDocument() (*fwconfig.Document, error) {
 	if !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}
-	snap := snapshotPath(dir, live.Generation)
+	snap := snapshotPath(dir, live.CommitID)
 	if len(live.Instances) > 0 {
 		return nil, errNoLiveDocument
 	}
@@ -92,48 +101,10 @@ func (s *Server) liveDocument() (*fwconfig.Document, error) {
 		return nil, err
 	}
 	defer closeDB(db)
-	doc, err := builder.Build(db, live.Generation)
+	doc, err := builder.BuildFirewall(db, live.Generation, firewallID)
 	var ve *fwconfig.ValidationError
 	if err != nil && !errors.As(err, &ve) {
 		return nil, err
-	}
-	return doc, nil
-}
-
-// buildDoc builds the document to deploy from db. With only nil it is the
-// whole database; otherwise only those instances come from db and the
-// rest from the live document. Problems come back as a
-// *fwconfig.ValidationError alongside the document.
-func (s *Server) buildDoc(db *gorm.DB, gen int64, only map[string]bool) (*fwconfig.Document, error) {
-	if only == nil {
-		return builder.Build(db, gen)
-	}
-	if len(only) == 0 {
-		return nil, errForbidden
-	}
-	live, err := s.liveDocument()
-	if err != nil {
-		return nil, err
-	}
-	part, err := builder.BuildInstances(db, gen, only)
-	var problems []string
-	var ve *fwconfig.ValidationError
-	if errors.As(err, &ve) {
-		problems = ve.Problems
-	} else if err != nil {
-		return nil, err
-	}
-	doc := mergeInstances(live, part)
-	doc.Generation = gen
-	if err := doc.Validate(); err != nil {
-		if errors.As(err, &ve) {
-			problems = append(problems, ve.Problems...)
-		} else {
-			problems = append(problems, err.Error())
-		}
-	}
-	if len(problems) > 0 {
-		return doc, &fwconfig.ValidationError{Problems: problems}
 	}
 	return doc, nil
 }
@@ -245,22 +216,33 @@ func (s *Server) instanceChanges(names map[string]bool) (changed bool, problems 
 	} else if err != nil {
 		return false, 0, err
 	}
-	live, err := s.liveDocument()
+	on, err := s.instancesOn()
 	if err != nil {
-		return true, problems, nil
+		return false, 0, err
 	}
-	for name := range names {
-		a, b := live.Instance(name), part.Instance(name)
-		if (a == nil) != (b == nil) {
-			return true, problems, nil
-		}
-		if a == nil {
-			continue
-		}
-		ja, _ := json.Marshal(a)
-		jb, _ := json.Marshal(b)
-		if string(ja) != string(jb) {
-			return true, problems, nil
+	for fwID, ins := range on {
+		var live *fwconfig.Document
+		for name := range names {
+			if !ins[name] {
+				continue
+			}
+			if live == nil {
+				if live, err = s.liveDocument(fwID); err != nil {
+					return true, problems, nil
+				}
+			}
+			a, b := live.Instance(name), part.Instance(name)
+			if (a == nil) != (b == nil) {
+				return true, problems, nil
+			}
+			if a == nil {
+				continue
+			}
+			ja, _ := json.Marshal(a)
+			jb, _ := json.Marshal(b)
+			if string(ja) != string(jb) {
+				return true, problems, nil
+			}
 		}
 	}
 	return problems > 0, problems, nil

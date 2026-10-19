@@ -28,7 +28,7 @@ const detail = computed(() => {
   if (c?.problems)
     return `There are uncommitted changes with ${c.problems} problem(s) to fix before they can be committed.`
   if (deploy.pending)
-    return 'There are uncommitted changes. Confirm or roll back the pending generation first.'
+    return 'There are uncommitted changes. Confirm or roll back the pending commit first.'
   if (!c?.deployed) return 'Nothing has been committed to the firewall yet.'
   return 'There are uncommitted changes that are not on the firewall yet.'
 })
@@ -43,7 +43,7 @@ async function commit() {
   try {
     const res = await api.deployApply(changes.value?.changed ? undefined : 0)
     toast.add({
-      title: `Generation ${res.deployment.generation} ${res.deployment.status}`,
+      title: `Commit ${res.commit} ${res.status}`,
       color: 'success',
     })
   } catch (err) {
@@ -73,7 +73,7 @@ async function revert() {
   reverting.value = true
   try {
     const res = await api.deployRevert()
-    toast.add({ title: `Reverted to generation ${res.generation}`, color: 'success' })
+    toast.add({ title: `Reverted to commit ${res.generation}`, color: 'success' })
     // Every page and store holds data from before the revert.
     setTimeout(() => window.location.reload(), 1000)
   } catch (err) {

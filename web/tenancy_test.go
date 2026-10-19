@@ -20,7 +20,7 @@ import (
 func TestTenancy(t *testing.T) {
 	env := newEnv(t)
 	fake := &neighboursAgent{}
-	env.srv.newAgent = func(*models.Settings) (agentAPI, error) { return fake, nil }
+	env.srv.newAgent = func(*models.Firewall) (agentAPI, error) { return fake, nil }
 	env.create("/api/instances", map[string]any{"name": "main"}) // the default, with no role
 	a := env.create("/api/instances", map[string]any{"name": "a"})
 	b := env.create("/api/instances", map[string]any{"name": "b"})

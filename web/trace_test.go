@@ -17,7 +17,7 @@ import (
 func TestAgentTrace(t *testing.T) {
 	env := newEnv(t)
 	fake := &traceAgent{}
-	env.srv.newAgent = func(*models.Settings) (agentAPI, error) { return fake, nil }
+	env.srv.newAgent = func(*models.Firewall) (agentAPI, error) { return fake, nil }
 	if err := env.srv.db.Create(&models.AddressObject{Name: "gw", Addresses: models.StringList{"192.0.2.1", "2001:db8::1"}}).Error; err != nil {
 		t.Fatal(err)
 	}

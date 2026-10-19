@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/abundo/portitor/internal/acme"
+	"github.com/abundo/portitor/internal/agentapi"
 	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/internal/render"
 )
@@ -180,4 +181,52 @@ func TestCertManagerImported(t *testing.T) {
 		t.Error("not loadable")
 	}
 	m.Stop()
+}
+
+// An HA standby never orders; it adopts its peer's certificate, which the
+// peer hands out with its key.
+func TestCertManagerHAStandby(t *testing.T) {
+	item := certItem{instance: "main", netns: "fw-main", cfg: fwconfig.Certificate{
+		Name: "www", Domains: []string{"www.example.com"}, CA: "letsencrypt", KeyType: "ec256", Challenge: fwconfig.ChallengeHTTP01, Interface: "wan",
+	}}
+	// The active host orders.
+	active := newCertManager(false, render.Paths{StateDir: t.TempDir()}, &nftRunner{})
+	active.obtain = func(_ string, req acme.Request) (*acme.Result, error) { return testCert(t, req.Domains), nil }
+	active.Reconcile(context.Background(), []certItem{item})
+	waitState(t, active, "ok")
+	certs := active.haCertificates()
+	active.Stop()
+	if len(certs) != 1 || certs[0].PrivKey == "" || certs[0].Name != "www" {
+		t.Fatalf("certificates for the peer: %+v", certs)
+	}
+
+	// The standby waits for the peer's, without ordering.
+	paths := render.Paths{StateDir: t.TempDir()}
+	standby := newCertManager(false, paths, &nftRunner{})
+	standby.standby = func() bool { return true }
+	standby.obtain = func(string, acme.Request) (*acme.Result, error) {
+		t.Error("the standby ordered")
+		return nil, errors.New("no")
+	}
+	standby.Reconcile(context.Background(), []certItem{item})
+	waitState(t, standby, "standby")
+	standby.adopt(certs)
+	standby.adopt(append(certs, agentapi.HACertificate{Instance: "other", Name: "x"}))
+	if acme.Load(paths.CertificateDir("main", "www")) == nil {
+		t.Fatal("the peer's certificate was not stored")
+	}
+	// Taking over, it finds the certificate valid: still no order.
+	standby.Stop()
+	took := newCertManager(false, paths, &nftRunner{})
+	took.obtain = standby.obtain
+	took.Reconcile(context.Background(), []certItem{item})
+	waitState(t, took, "ok")
+	took.Stop()
+
+	// A broken copy is refused.
+	bad := certs[0]
+	bad.PrivKey = "nonsense"
+	if _, err := acme.WriteRaw(t.TempDir(), &bad.Raw); err == nil {
+		t.Error("a chain without its key was stored")
+	}
 }

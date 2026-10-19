@@ -1,0 +1,38 @@
+# SPDX-FileCopyrightText: 2026 The Portitor contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# Connection sync (conntrackd) for one Portitor instance on an HA pair,
+# inside the instance's network namespace: it reads and writes the
+# instance's connection table. Started and restarted by portitor-agent; do
+# not enable by hand.
+[Unit]
+Description=Connection sync for Portitor instance %i
+After=portitor-agent.service
+PartOf=portitor-agent.service
+
+[Service]
+Type=simple
+# The lock file and control socket are in the private /tmp.
+ExecStart=/usr/bin/portitor-agent netns-exec %i -- /usr/sbin/conntrackd -C /etc/portitor/instances/%i/conntrackd.conf
+Restart=on-failure
+RestartSec=5
+# Multitenancy: an instance's daemon sees only its own files and processes.
+# The other instances' config and state are hidden, the rest of the system
+# is read-only, and it gets its own /tmp, IPC and PID namespaces.
+# netns-exec drops CAP_SYS_ADMIN and the like, so it can't enter another
+# instance's network namespace.
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateIPC=yes
+PrivatePIDs=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectProc=invisible
+TemporaryFileSystem=/etc/portitor /var/lib/portitor
+BindReadOnlyPaths=/etc/portitor/instances/%i
+BindReadOnlyPaths=/var/lib/portitor/instances/%i

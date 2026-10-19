@@ -13,7 +13,7 @@ import { logTime } from '@/utils/time'
 // The agent's log, the logged packets and DNS queries at the bottom of the layout. It
 // takes its height out of the page (a flex item, not an overlay), so
 // nothing ends up behind it.
-const { state, close, clear, togglePause, setHeight, start, stop } = useLogPanel()
+const { state, close, clear, togglePause, setHeight, start, stop, setFirewall } = useLogPanel()
 
 const tabs = [
   { value: 'log', label: 'Agent log', icon: 'i-lucide-terminal' },
@@ -58,6 +58,13 @@ watch(
 // Interface labels by instance and name, so a packet shows "WAN (ens18)".
 // Loaded when the Logged packets tab is shown.
 const instStore = useInstanceStore()
+// With several firewalls the logs are one firewall's: the selected VF's,
+// until another is picked here.
+watch(
+  () => instStore.current?.firewall_id ?? null,
+  (id) => setFirewall(id),
+  { immediate: true },
+)
 const ifaceLabels = ref(new Map())
 async function loadIfaces() {
   try {
@@ -209,6 +216,15 @@ onUnmounted(stop)
           @click="state.tab = t.value"
         />
       </div>
+      <USelect
+        v-if="instStore.firewalls.length > 1"
+        :model-value="state.firewallId ?? instStore.firewalls[0]?.id"
+        :items="instStore.firewallItems"
+        size="xs"
+        class="w-36"
+        title="The firewall whose logs show"
+        @update:model-value="setFirewall"
+      />
       <SearchInput v-model="filter" :placeholder="placeholders[state.tab]" size="xs" class="w-56" />
       <span v-if="filter" class="text-xs text-muted">{{ shown.length }} of {{ total }}</span>
       <UTooltip v-if="state.error" :text="state.error">

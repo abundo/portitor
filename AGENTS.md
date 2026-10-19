@@ -12,7 +12,7 @@ are in [README.md](README.md).
 | Path | What |
 |---|---|
 | `cmd/portitor-web` | GUI/API binary: `start`, `migrate`, `createadmin`, `agent-url`, `bootstrap` (ISO first boot) |
-| `cmd/portitor-agent` | Agent daemon on the firewall: `start`, `init`, `render`, `netns-exec`; run as `portitor` (a symlink, `cli.go`) it is a read-only CLI (`show lldp neighbours`, `show ip neighbours`) over the agent's GET routes on the root-only socket `<run_dir>/agent.sock` |
+| `cmd/portitor-agent` | Agent daemon on the firewall: `start`, `init`, `render`, `netns-exec`; run as `portitor` (a symlink, `cli.go`) it is a CLI over the agent's root-only socket `<run_dir>/agent.sock`: `show ...` over the GET routes, and actions that change no configuration (`confirm`, `rollback`, `request dhcp renew`, `request iplist update`, `clear connections`) over the POST routes in `localWrites` |
 | `internal/fwconfig` | The desired-state document and `Validate()`. **The contract between web and agent.** |
 | `internal/render` | Pure functions: document → nftables, WireGuard, named.conf, Kea, chrony.conf (`chrony.go`), snmpd.conf (`snmpd.go`), dnsmgr2 config, FRR (`frr.go`: frr.conf with BGP, OSPF, IS-IS, VRRP and BFD, daemons, vtysh.conf) |
 | `internal/agent` | Agent: apply/reconcile, commit-confirm, DHCP and DHCPv6 (prefix delegation) clients (woken when their interface gets a carrier, `linkwatch.go`), IP lists, task scheduler, packet log (NFLOG), DNS query log (BIND logs to the journal, followed with `journalctl`, filtered by the agent, `querylog.go`), WireGuard endpoint re-resolving, packet capture (tcpdump, streamed rate-limited), traceroute (`mtr --raw`, streamed as JSON lines, `trace.go`), service logs (`journalctl --follow` of a status service unit, streamed as text, `servicelog.go`), LLDP (sent and heard on raw sockets, `lldp.go`), neighbours (ARP/ND, LLDP), NAT64 (a Jool instance per namespace, `nat64.go`), traffic shaping (CAKE, IFB devices for receiving, HTB classes for the rate limits that shape (`fwconfig.Instance.Shapers`) by packet mark `render.ShaperMark`; planned from `tc -j` output, `shaping.go`), BGP, OSPF, IS-IS, VRRP and BFD state (FRR's JSON through `vtysh`, `bgp.go`, `ospf.go`, `isis.go`, `vrrp.go`, `bfd.go`), VRRP's macvlan devices (`vrrp.go`), 6in4 tunnels' endpoint updates at Hurricane Electric's tunnel broker (from the instance netns, on address changes, `tunnelbroker.go`), VXLANs' learning, EVPN bridge port flags and static flood lists (`vxlan.go`), the VRFs' source rules and sysctls for the firewall's services (`vrf.go`), status, API server |
@@ -31,7 +31,7 @@ are in [README.md](README.md).
 | `internal/netobj` | Named hosts/prefixes (`address_objects`) and address lists (`address_lists`): name checks and expansion |
 | `internal/dbmigrate` | Opens the SQLite database; goose migrations (the schema's source of truth) |
 | `models` | GORM mapping |
-| `web` | Echo v5 server (`server.go`: routes): auth, generic CRUD (`crud.go`), entry validation (`resources.go`), deploy handlers (`handlers.go`), Revert snapshots (`revert.go`), tenancy (`tenancy.go`), roles (`roles.go`, `access.go`), VRFs (`vrf.go`), rename/delete reference keeping (`objects.go`, `services.go`, `ratelimits.go`, `ifzones.go`, `bgp.go`, `ospf.go`, `isis.go`, `vrrp.go`, `bfd.go`, `delegated.go`), folders for hosts and IP lists (`folders.go`, GUI only), agent proxies (`console.go`, `capture.go`, `trace.go`, `servicelog.go`, `connections.go`), WireGuard config import (`wgimport.go`), backup/restore (`backup.go`), `web.yaml` (`config.go`) |
+| `web` | Echo v5 server (`server.go`: routes): auth, generic CRUD (`crud.go`), entry validation (`resources.go`), firewalls (`firewalls.go`), commits (`commit.go`), other handlers (`handlers.go`), Revert snapshots (`revert.go`), tenancy (`tenancy.go`), roles (`roles.go`, `access.go`), VRFs (`vrf.go`), rename/delete reference keeping (`objects.go`, `services.go`, `ratelimits.go`, `ifzones.go`, `bgp.go`, `ospf.go`, `isis.go`, `vrrp.go`, `bfd.go`, `delegated.go`), folders for hosts and IP lists (`folders.go`, GUI only), agent proxies (`console.go`, `capture.go`, `trace.go`, `servicelog.go`, `connections.go`), WireGuard config import (`wgimport.go`), backup/restore (`backup.go`), `web.yaml` (`config.go`) |
 | `web/frontend` | Vue SPA; `CrudPage.vue` drives most pages from field/column schemas |
 | `docs` | User guides; every `docs/*.md` is bundled into the GUI's Help page (`src/docs.js`), and links between them stay in the GUI |
 | `deploy` | systemd units and example configs |
@@ -51,14 +51,29 @@ docs and user-facing messages.
   agent's HTTPS API (`internal/agent/server.go`, `/v1/...`; wire types in
   `agentapi`): a bearer token (`token_file` in `agent.yaml`) and a pinned
   certificate fingerprint (`agentclient.New`). On the firewall, the root-only
-  socket `<run_dir>/agent.sock` serves the GET routes without the token
+  socket `<run_dir>/agent.sock` serves the GET routes and `localWrites` without the token
   (`localHandler`), for the `portitor` CLI. The join string (`web/join.go`)
   carries what portitor-web needs to reach an agent on another host.
-- **Deploy ("commit" in the GUI)**: `web/handlers.go` `deploy` takes a database
-  snapshot (`web/revert.go`), `buildDoc` (`web/tenancy.go`) runs
-  `builder.Build` on it (merged into the live document for an instance
-  admin), and the document goes to `POST /v1/apply` with a confirm timeout.
-  `Generation` is the monotonic deploy id. The agent validates, renders
+- **Firewalls** (`firewalls`, `web/firewalls.go`, Admin → Firewalls): the hosts
+  portitor-web deploys to, each with its agent (URL, token, fingerprint) and its
+  `generation`. Every instance is on one (`instances.firewall_id`), and each
+  firewall has one default instance, its host, created with it and named after
+  it (`instances_one_default` is per firewall). A link joins instances on one
+  firewall, a task runs on one (`tasks.firewall_id`), known NICs are per firewall,
+  and IP lists go to all. A proxy for one instance asks its firewall's agent
+  (`instanceAgent`); the live views (status, leases, neighbours, routes, routing
+  protocols, counters) ask all of them and merge (`fromAll`; an unreachable one is
+  left out when there are several); the logs and Updates are one firewall's
+  (`?firewall_id=`, the first by default), picked in the GUI.
+- **Deploy ("commit" in the GUI)**: `web/commit.go` `deploy` takes a database
+  snapshot (`web/revert.go`) numbered by `settings.last_commit`, `buildDoc`
+  runs `builder.BuildFirewall` on it for each firewall (merged into the
+  firewall's live document for an instance admin), and each firewall whose
+  document changed (all of them when none did) gets `POST /v1/apply` with a
+  confirm timeout, and a `deployments` row with the commit's `commit_id` and the
+  firewall's next generation. A commit to several firewalls always applies with a
+  confirm window (`jointConfirm` without one) so that one failing rolls the others
+  back, and confirms them all at once without a timeout. The agent validates, renders
   (`render.Render` → `Bundle`), preflights (programs installed, `nft -c` on
   every ruleset), then `applyLocked` (`internal/agent/apply.go`) creates
   namespaces, loads rulesets, moves and configures interfaces, writes files and
@@ -67,9 +82,92 @@ docs and user-facing messages.
   (`/v1/confirm`) or the agent rolls back on timeout. `POST /v1/render` is the
   preview, with the same code and no apply. Only one change can be pending at a
   time (`deployMu`, and the agent is asked).
+- **HA pairs** (`fwconfig/ha.go`, `internal/agent/ha.go`, `web/witness.go`): a
+  firewall may be the HA secondary of another (`firewalls.ha_primary_id`, set at
+  creation). It has no instances of its own: `builder.BuildFirewall` builds the
+  primary's, with the `peer_*` values (`peerValues`: interface `peer_addresses` in
+  place of the static ones, VRRP `peer_priority` or priority - 10, BGP/OSPF
+  `peer_router_id`, IS-IS `peer_net`, BGP neighbours' `ha_peer_address`), and both apply; VRRP decides which forwards.
+  Each document carries `HA` (node, the peer's agent URL (`ha_url`, else
+  `agent_url`; never loopback) and fingerprint, the pair's secret, which opens only
+  `/v1/ha/heartbeat` and is redacted in history). A host may be active only with a
+  quorum: it hears its peer (every second, dead after 3 s) or holds the witness's
+  vote. Without one it is fenced: it applies its document again with
+  `render.Options.Fenced` (VRRP routers shut down, no DHCP or RA). After a restart
+  it starts fenced unless its peer answers at once; joining a pair, it has 3 s to
+  hear it. portitor-web is the witness: every 2 s it keeps its vote
+  (`witnessVote` s) on one host, the holder, and moves it only once the holder's has
+  run out, so two hosts that can't hear each other are never both active. A commit
+  skips an unreachable host whose peer answers (deployment `skipped`), and the
+  witness applies that commit's document there when it answers again (`catchUp`).
+  `portitor request ha active` on the console gives the vote by hand (logged).
+  Each instance on a pair has an HA link (`builder.haLink`: its DHCP interface, else
+  the first physical/bridge interface, or VLAN on one, with a static IPv4 address
+  and its peer address). Over it run Kea's HA hook in hot-standby
+  (`fwconfig.DHCPHA`, `render.keaHAHooks`, ports `KeaHAPort4`/`KeaHAPort6`, hooks
+  from `paths.kea_hooks_dir`) and conntrackd (`fwconfig.ConntrackSync`,
+  `render/conntrackd.go`: FTFW over UDP 3780 into the kernel table, no external
+  cache; `conntrackd.service` for the default instance, `portitor-conntrackd@`
+  for the others), each with an auto input rule from the peer alone. An instance
+  with only internal links syncs nothing. DNS updates and the tunnel broker run on
+  the active host only (`haManager.standby`: fenced, or the secondary while it hears
+  the primary; `Agent.reconcileActive`). ACME certificates are ordered by the active
+  host; the standby copies them, keys included, from `GET /v1/ha/certificates`
+  (the pair's secret, which therefore opens the keys too) every minute
+  (`certManager.adopt`, `acme.WriteRaw`), so it has them when it takes over.
+- **Bundles** (`web/bundle.go`): a virtual firewall as rows, read and written
+  column by column from the schema's foreign keys (`schemaGraph`): every table that
+  cascades from `instances` (but its role and links), the shared objects
+  (`bundleShared`, matched by name on import, a different one a conflict) and rows of
+  other instances it refers to by id (a global DNS template, by name). Import gives
+  new ids in foreign-key order (`ownedTables`, Kahn) and needs the same schema
+  version. A new table or column needs nothing there. Global admins only: a bundle
+  holds the instance's secrets (`GET /api/instances/:id/bundle`,
+  `POST /api/instances/import`).
+- **portitor-config** is portitor-web run under that name (a symlink): `Config.Local`,
+  `/etc/portitor/config.yaml`, for its own firewall and HA secondary alone
+  (`prepareFirewallHere`). It serves the manager API (`web/managerapi.go`,
+  `/manager/v1`, the token in `manager_token_file`): state (each instance's
+  `InstanceHash`, the built configuration without name and rule ids, equal on a
+  manager and its firewall when they agree), bundle, push (replaces an instance the
+  manager pushed before, keeping its role's members; not the host; a diverged one
+  only with overwrite; a local shared object of a pushed name is a conflict), delete,
+  commit, confirm and rollback. What a manager pushed is `managed_by` it and
+  read-only in the local GUI and API (`refuseManaged` in the CRUD's `checkWrite`;
+  `keepManaged` keeps the columns), until a global admin breaks glass on the
+  instance (`diverged`). Its own pairs' witness is the manager: portitor-config with
+  a `manager_token_file` does not vote (`Server.votes`), it only catches up.
+- **Managing through portitor-config** (`web/push.go`, `web/configclient.go`,
+  `web/drift.go`): a firewall with `config_url` (token, fingerprint) gets its
+  virtual firewalls from this portitor-web, named by `manager_name` (default the
+  host name). A commit compares each with portitor-config's by `InstanceHash`
+  (`configTargets`), pushes the changed, deletes the removed, and commits there as
+  one of the commit's firewalls (`commitVia`; confirm and rollback through it,
+  `finishDeployment`); the host VF stays portitor-config's own. One changed there
+  (break-glass) stops the commit until the drift view takes it or overwrites it.
+  The manager asks such a firewall's agents for live data only (status, logs,
+  console, capture); their deployments are ordered by `commit_id`, since
+  portitor-config's generations start again from 1. Bundles carry their links,
+  made when the instance at the other end is there by name. A firewall moves under
+  portitor-config with `install.py --agent HOST --config`, then
+  `portitor-config import-vf` (the host with `--manager <name> --local`, the others
+  with `--manager <name>`) before its first commit, so none is deleted. On the
+  manager, such a firewall's host VF is read-only (`refuseManaged`). At each commit
+  the manager pushes its users (password hashes included) and their memberships of
+  its VFs' roles (`web/usersync.go`, `PUT /manager/v1/users`): managed by it there
+  (no local edit, password or delete), removed when gone here; a local user of the
+  same name stays and is reported.
+- **Console configuration** (`web/consolecli.go`, `cmd/portitor-web/console.go`):
+  `portitor-config` (or portitor-web) `api METHOD PATH [JSON]`, `set RESOURCE NAME
+  KEY=VALUE...` (`--vf`, default the host), `commit [--confirm N]`, `confirm` and
+  `rollback` run one API request in-process as the console admin
+  (`ConsoleRequest`); the user rides in the request's context, which no network
+  request carries, and every API check applies. Running them takes access to the
+  database (root, or the service user).
 - **Revert** discards uncommitted database edits by restoring the live
-  deployment's snapshot (`<db dir>/deployed/<gen>.db`); the newest
-  `snapshotKeep` are kept. A document can't be turned back into rows.
+  commit's snapshot (`<db dir>/deployed/<commit>.db`, `liveCommit`); the newest
+  `snapshotKeep` are kept, with each firewall's live document
+  (`<commit>-<firewall id>.json`). A document can't be turned back into rows.
 - **Live data** (status, leases, neighbours, counters, logs) is fetched from the
   agent per request and filtered per tenant (`filter*` in `web/tenancy.go`).
   Logs are polled with `after` cursors from the agent's ring buffers
@@ -404,7 +502,7 @@ the certificate portitor-web serves, chosen under Settings
   secrets must check the instance or go in `viewerDenied`. `TestViewerRole` sweeps
   every route, `TestTenancy` the instance checks. An instance admin's deploy merges
   their instances from the database into the live deployment's document
-  (`web/tenancy.go`, `deployed/<gen>.json`); only a full deploy keeps a snapshot
+  (`web/tenancy.go`, `deployed/<commit>-<firewall id>.json`); only a full deploy keeps a snapshot
   for Revert.
 - **Database files:** portitor-web refuses to run as root against a database
   directory owned by another user; root would leave root-owned `-wal`/`-shm` files.

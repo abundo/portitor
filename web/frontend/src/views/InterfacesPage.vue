@@ -169,6 +169,14 @@ const fields = [
     hint: 'Addresses of the firewall on this interface with their prefix length, IPv4 and IPv6, as many as needed: 192.168.1.1/24, fd00:1::1/64. Their prefixes appear under Hosts & prefixes; DHCP and router advertisements are turned on for them under DHCP. An IPv6 address in the prefix delegated to another interface names it: <wan0>:2000::1/64 is subnet 2000 of the prefix wan0 gets, host ::1; its /64 is announced with router advertisements (SLAAC).',
   },
   {
+    key: 'peer_addresses',
+    label: 'HA peer addresses',
+    type: 'tags',
+    placeholder: '192.168.1.2/24',
+    show: (f) => store.hasPeer && !is6in4(f),
+    hint: "The HA secondary's own addresses, one for each address above in the same prefix and order (delegated ones aside). The virtual address both share is VRRP's.",
+  },
+  {
     key: 'addresses',
     label: 'IPv6 addresses',
     type: 'tags',

@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"sort"
 	"strings"
@@ -30,6 +31,8 @@ type Paths struct {
 	RunDir       string `yaml:"run_dir" json:"run_dir"`
 	KeaDataDir   string `yaml:"kea_data_dir" json:"kea_data_dir"`
 	KeaSocketDir string `yaml:"kea_socket_dir" json:"kea_socket_dir"`
+	// KeaHooksDir holds Kea's hook libraries (HA, lease commands).
+	KeaHooksDir  string `yaml:"kea_hooks_dir" json:"kea_hooks_dir"`
 	BindCacheDir string `yaml:"bind_cache_dir" json:"bind_cache_dir"`
 	BindZonesDir string `yaml:"bind_zones_dir" json:"bind_zones_dir"`
 	BindRunDir   string `yaml:"bind_run_dir" json:"bind_run_dir"`
@@ -45,6 +48,8 @@ type Paths struct {
 	RadvdConf    string `yaml:"radvd_conf" json:"radvd_conf"`
 	ChronyConf   string `yaml:"chrony_conf" json:"chrony_conf"`
 	SnmpdConf    string `yaml:"snmpd_conf" json:"snmpd_conf"`
+	// ConntrackdConf is the default instance's conntrackd.conf (HA pairs).
+	ConntrackdConf string `yaml:"conntrackd_conf" json:"conntrackd_conf"`
 	// FRRDir is FRR's config directory: the default instance's frr.conf
 	// and daemons are in it, and a virtual firewall's unit mounts the
 	// instance's over FRRDir/<instance> (FRR's pathspace).
@@ -57,24 +62,26 @@ type Paths struct {
 
 func DefaultPaths() Paths {
 	return Paths{
-		EtcDir:       "/etc/portitor",
-		StateDir:     "/var/lib/portitor",
-		RunDir:       "/run/portitor",
-		KeaDataDir:   "/var/lib/kea",
-		KeaSocketDir: "/run/kea",
-		BindCacheDir: "/var/cache/bind",
-		BindZonesDir: "/var/lib/bind",
-		BindRunDir:   "/run/named",
-		NftablesFile: "/etc/nftables.d/portitor.nft",
-		WireGuardDir: "/etc/wireguard",
-		NamedConf:    "/etc/bind/named.conf",
-		KeaConfDir:   "/etc/kea",
-		RadvdConf:    "/etc/radvd.conf",
-		ChronyConf:   "/etc/chrony/chrony.conf",
-		SnmpdConf:    "/etc/snmp/snmpd.conf",
-		FRRDir:       "/etc/frr",
-		FRRRunDir:    "/run/frr",
-		FRRStateDir:  "/var/lib/frr",
+		EtcDir:         "/etc/portitor",
+		StateDir:       "/var/lib/portitor",
+		RunDir:         "/run/portitor",
+		KeaDataDir:     "/var/lib/kea",
+		KeaSocketDir:   "/run/kea",
+		KeaHooksDir:    "/usr/lib/" + multiarch() + "/kea/hooks",
+		BindCacheDir:   "/var/cache/bind",
+		BindZonesDir:   "/var/lib/bind",
+		BindRunDir:     "/run/named",
+		NftablesFile:   "/etc/nftables.d/portitor.nft",
+		WireGuardDir:   "/etc/wireguard",
+		NamedConf:      "/etc/bind/named.conf",
+		KeaConfDir:     "/etc/kea",
+		RadvdConf:      "/etc/radvd.conf",
+		ChronyConf:     "/etc/chrony/chrony.conf",
+		SnmpdConf:      "/etc/snmp/snmpd.conf",
+		ConntrackdConf: "/etc/conntrackd/conntrackd.conf",
+		FRRDir:         "/etc/frr",
+		FRRRunDir:      "/run/frr",
+		FRRStateDir:    "/var/lib/frr",
 	}
 }
 
@@ -105,6 +112,7 @@ type InstanceFiles struct {
 	// default instance's is chrony's own (empty).
 	ChronySocket string
 	Snmpd        string
+	Conntrackd   string
 	// SnmpdPersist is a virtual firewall's snmpd persistent directory
 	// (engine id, boots), which its unit alone mounts
 	// (portitor-snmpd@.service); the default instance's is net-snmp's
@@ -156,6 +164,7 @@ func (p Paths) Files(in *fwconfig.Instance) InstanceFiles {
 			Radvd:        p.RadvdConf,
 			Chrony:       p.ChronyConf,
 			Snmpd:        p.SnmpdConf,
+			Conntrackd:   p.ConntrackdConf,
 			FRRConf:      filepath.Join(p.FRRDir, "frr.conf"),
 			FRRDaemons:   filepath.Join(p.FRRDir, "daemons"),
 			FRRVtysh:     filepath.Join(p.FRRDir, "vtysh.conf"),
@@ -185,6 +194,7 @@ func (p Paths) Files(in *fwconfig.Instance) InstanceFiles {
 		Chrony:       filepath.Join(etc, "chrony.conf"),
 		ChronySocket: filepath.Join(p.RunDir, "chrony", in.Name, "chronyd.sock"),
 		Snmpd:        filepath.Join(etc, "snmpd.conf"),
+		Conntrackd:   filepath.Join(etc, "conntrackd.conf"),
 		SnmpdPersist: filepath.Join(p.StateDir, "snmp", in.Name),
 		FRRConf:      filepath.Join(etc, "frr", "frr.conf"),
 		FRRDaemons:   filepath.Join(etc, "frr", "daemons"),
@@ -239,31 +249,34 @@ func (p Paths) ACMEAccountsDir() string {
 // default instance's run under the distribution's own units (Default*),
 // which read the standard files (Paths.Files).
 type Units struct {
-	NamedFmt      string `yaml:"named" json:"named"`
-	Kea4Fmt       string `yaml:"kea4" json:"kea4"`
-	Kea6Fmt       string `yaml:"kea6" json:"kea6"`
-	RadvdFmt      string `yaml:"radvd" json:"radvd"`
-	FRRFmt        string `yaml:"frr" json:"frr"`
-	ChronyFmt     string `yaml:"chrony" json:"chrony"`
-	SnmpdFmt      string `yaml:"snmpd" json:"snmpd"`
-	DefaultNamed  string `yaml:"default_named" json:"default_named"`
-	DefaultKea4   string `yaml:"default_kea4" json:"default_kea4"`
-	DefaultKea6   string `yaml:"default_kea6" json:"default_kea6"`
-	DefaultRadvd  string `yaml:"default_radvd" json:"default_radvd"`
-	DefaultFRR    string `yaml:"default_frr" json:"default_frr"`
-	DefaultChrony string `yaml:"default_chrony" json:"default_chrony"`
-	DefaultSnmpd  string `yaml:"default_snmpd" json:"default_snmpd"`
+	NamedFmt          string `yaml:"named" json:"named"`
+	Kea4Fmt           string `yaml:"kea4" json:"kea4"`
+	Kea6Fmt           string `yaml:"kea6" json:"kea6"`
+	RadvdFmt          string `yaml:"radvd" json:"radvd"`
+	FRRFmt            string `yaml:"frr" json:"frr"`
+	ChronyFmt         string `yaml:"chrony" json:"chrony"`
+	SnmpdFmt          string `yaml:"snmpd" json:"snmpd"`
+	ConntrackdFmt     string `yaml:"conntrackd" json:"conntrackd"`
+	DefaultNamed      string `yaml:"default_named" json:"default_named"`
+	DefaultKea4       string `yaml:"default_kea4" json:"default_kea4"`
+	DefaultKea6       string `yaml:"default_kea6" json:"default_kea6"`
+	DefaultRadvd      string `yaml:"default_radvd" json:"default_radvd"`
+	DefaultFRR        string `yaml:"default_frr" json:"default_frr"`
+	DefaultChrony     string `yaml:"default_chrony" json:"default_chrony"`
+	DefaultSnmpd      string `yaml:"default_snmpd" json:"default_snmpd"`
+	DefaultConntrackd string `yaml:"default_conntrackd" json:"default_conntrackd"`
 }
 
 func DefaultUnits() Units {
 	return Units{
-		NamedFmt:  "portitor-named@%s.service",
-		Kea4Fmt:   "portitor-kea4@%s.service",
-		Kea6Fmt:   "portitor-kea6@%s.service",
-		RadvdFmt:  "portitor-radvd@%s.service",
-		FRRFmt:    "portitor-frr@%s.service",
-		ChronyFmt: "portitor-chrony@%s.service",
-		SnmpdFmt:  "portitor-snmpd@%s.service",
+		NamedFmt:      "portitor-named@%s.service",
+		Kea4Fmt:       "portitor-kea4@%s.service",
+		Kea6Fmt:       "portitor-kea6@%s.service",
+		RadvdFmt:      "portitor-radvd@%s.service",
+		FRRFmt:        "portitor-frr@%s.service",
+		ChronyFmt:     "portitor-chrony@%s.service",
+		SnmpdFmt:      "portitor-snmpd@%s.service",
+		ConntrackdFmt: "portitor-conntrackd@%s.service",
 		// Debian/Ubuntu's names (Fedora: kea-dhcp4.service, kea-dhcp6.service).
 		DefaultNamed: "named.service",
 		DefaultKea4:  "kea-dhcp4-server.service",
@@ -271,8 +284,9 @@ func DefaultUnits() Units {
 		DefaultRadvd: "radvd.service",
 		DefaultFRR:   "frr.service",
 		// Fedora: chronyd.service.
-		DefaultChrony: "chrony.service",
-		DefaultSnmpd:  "snmpd.service",
+		DefaultChrony:     "chrony.service",
+		DefaultSnmpd:      "snmpd.service",
+		DefaultConntrackd: "conntrackd.service",
 	}
 }
 
@@ -292,11 +306,14 @@ func (u Units) Chrony(in *fwconfig.Instance) string {
 	return u.pick(in, u.DefaultChrony, u.ChronyFmt)
 }
 func (u Units) Snmpd(in *fwconfig.Instance) string { return u.pick(in, u.DefaultSnmpd, u.SnmpdFmt) }
+func (u Units) Conntrackd(in *fwconfig.Instance) string {
+	return u.pick(in, u.DefaultConntrackd, u.ConntrackdFmt)
+}
 
 // All lists the instance's units: named, Kea4, Kea6, radvd, FRR, chrony,
-// snmpd.
+// snmpd, conntrackd.
 func (u Units) All(in *fwconfig.Instance) []string {
-	return []string{u.Named(in), u.Kea4(in), u.Kea6(in), u.Radvd(in), u.FRR(in), u.Chrony(in), u.Snmpd(in)}
+	return []string{u.Named(in), u.Kea4(in), u.Kea6(in), u.Radvd(in), u.FRR(in), u.Chrony(in), u.Snmpd(in), u.Conntrackd(in)}
 }
 
 type Options struct {
@@ -310,6 +327,9 @@ type Options struct {
 	// the document's delegated addresses are resolved from
 	// (fwconfig.Document.ResolveDelegated).
 	Delegated fwconfig.DelegatedPrefixes
+	// Fenced: an HA host without a quorum (fwconfig.HA). Its VRRP routers
+	// render shut down, and it serves no DHCP or router advertisements.
+	Fenced bool
 }
 
 type File struct {
@@ -337,6 +357,9 @@ func Render(doc fwconfig.Document, opt Options) (*Bundle, error) {
 		return nil, err
 	}
 	doc = doc.ResolveDelegated(opt.Delegated).Expand()
+	if opt.Fenced {
+		fence(&doc)
+	}
 	b := &Bundle{Dnsmgr: map[string]dnsmgr.ConfigRoot{}}
 	add := func(path, content string, mode os.FileMode, secret bool) {
 		b.Files = append(b.Files, File{Path: path, Content: content, Mode: mode, Secret: secret})
@@ -380,6 +403,9 @@ func Render(doc fwconfig.Document, opt Options) (*Bundle, error) {
 		}
 		if in.SNMP != nil {
 			add(f.Snmpd, SnmpdConf(in), 0o600, hasSNMPSecret(in))
+		}
+		if in.ConntrackSync != nil {
+			add(f.Conntrackd, ConntrackdConf(in), 0o644, false)
 		}
 		if in.FRRRunning() {
 			add(f.FRRDaemons, FRRDaemons(in), 0o640, false)
@@ -454,4 +480,33 @@ func (b *Bundle) Redacted() []File {
 		}
 	}
 	return out
+}
+
+// fence takes what answers for the pair's shared addresses off a fenced
+// HA host (Options.Fenced). doc is Expand's copy.
+func fence(doc *fwconfig.Document) {
+	for i := range doc.Instances {
+		in := &doc.Instances[i]
+		in.VRRP = slices.Clone(in.VRRP)
+		for j := range in.VRRP {
+			in.VRRP[j].Shutdown = true
+		}
+		in.DHCP.Enabled = false
+		in.RA = nil
+	}
+}
+
+// multiarch is Debian's multiarch directory for the host's architecture.
+func multiarch() string {
+	switch runtime.GOARCH {
+	case "arm64":
+		return "aarch64-linux-gnu"
+	case "arm":
+		return "arm-linux-gnueabihf"
+	case "386":
+		return "i386-linux-gnu"
+	case "riscv64":
+		return "riscv64-linux-gnu"
+	}
+	return "x86_64-linux-gnu"
 }

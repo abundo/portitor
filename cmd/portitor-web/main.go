@@ -1,8 +1,11 @@
 // SPDX-FileCopyrightText: 2026 The Portitor contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// portitor-web is the management GUI and API. It runs off the firewall and
-// pushes configuration to portitor-agent. See AGENTS.md.
+// portitor-web is the management GUI and API. It pushes configuration to
+// portitor-agent, or as manager to portitor-config. Run as
+// "portitor-config" (a symlink) it is portitor-config: the firewall's own
+// configuration, for its own firewall, with the manager API. See
+// AGENTS.md.
 package main
 
 import (
@@ -14,6 +17,7 @@ import (
 	"net/netip"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 
@@ -29,8 +33,13 @@ import (
 func main() {
 	var configFile, bind string
 	var debug bool
+	local := filepath.Base(os.Args[0]) == "portitor-config"
+	name, defaultConfig := "portitor-web", web.DefaultConfigFile
+	if local {
+		name, defaultConfig = "portitor-config", web.DefaultLocalConfigFile
+	}
 	root := &cobra.Command{
-		Use:           "portitor-web",
+		Use:           name,
 		Short:         "Portitor management GUI",
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -43,7 +52,7 @@ func main() {
 			slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level})))
 		},
 	}
-	root.PersistentFlags().StringVarP(&configFile, "config", "f", web.DefaultConfigFile, "config file")
+	root.PersistentFlags().StringVarP(&configFile, "config", "f", defaultConfig, "config file")
 	root.PersistentFlags().BoolVarP(&debug, "debug", "d", false, "debug logging")
 
 	load := func() (*web.Config, *web.Server, error) {
@@ -51,6 +60,7 @@ func main() {
 		if err != nil {
 			return nil, nil, err
 		}
+		cfg.Local = local
 		if bind != "" {
 			cfg.Bind = bind
 		}
@@ -114,9 +124,65 @@ func main() {
 		},
 	})
 
+	addConsoleCommands(root, load)
+
+	var agentURL, agentTokenFile, agentFingerprint string
+	setAgent := &cobra.Command{
+		Use:   "set-agent",
+		Short: "Set the first firewall's agent (portitor-config: its own agent)",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, srv, err := load()
+			if err != nil {
+				return err
+			}
+			var tok []byte
+			if agentTokenFile == "-" {
+				tok, err = io.ReadAll(os.Stdin)
+			} else {
+				tok, err = os.ReadFile(agentTokenFile)
+			}
+			if err != nil {
+				return err
+			}
+			return web.SetAgent(srv, agentURL, strings.TrimSpace(string(tok)), agentFingerprint)
+		},
+	}
+	setAgent.Flags().StringVar(&agentURL, "url", "https://127.0.0.1:8443", "agent API")
+	setAgent.Flags().StringVar(&agentTokenFile, "token-file", "/etc/portitor/agent.token", "agent token file (-: standard input)")
+	setAgent.Flags().StringVar(&agentFingerprint, "fingerprint", "", "agent certificate SHA-256")
+	root.AddCommand(setAgent)
+
+	var importName, importManager string
+	var importLocal bool
+	importVF := &cobra.Command{
+		Use:   "import-vf <bundle.json>",
+		Short: "Add a virtual firewall from a bundle; into a new database, the host's configuration",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, srv, err := load()
+			if err != nil {
+				return err
+			}
+			problems, err := web.ImportBundleFile(cmd.Context(), srv, args[0], importName, importManager, importLocal)
+			if err != nil {
+				return err
+			}
+			for _, p := range problems {
+				fmt.Fprintln(cmd.ErrOrStderr(), "problem:", p)
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), "imported")
+			return nil
+		},
+	}
+	importVF.Flags().StringVar(&importName, "name", "", "its name here (default: the bundle's)")
+	importVF.Flags().StringVar(&importManager, "manager", "", "mark it (and its shared objects) as this manager's")
+	importVF.Flags().BoolVar(&importLocal, "local", false, "with --manager: the virtual firewall stays this firewall's own, only its shared objects are the manager's")
+	root.AddCommand(importVF)
+
 	root.AddCommand(&cobra.Command{
 		Use:   "agent-url",
-		Short: "Print the agent URL from the settings (install.py updates that host)",
+		Short: "Print the first firewall's agent URL (install.py updates that host)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := web.LoadConfig(configFile)
@@ -128,7 +194,7 @@ func main() {
 				return err
 			}
 			var urls []string
-			if err := db.Model(&models.Settings{}).Where("id = ?", 1).Pluck("agent_url", &urls).Error; err != nil {
+			if err := db.Model(&models.Firewall{}).Order("id").Limit(1).Pluck("agent_url", &urls).Error; err != nil {
 				return err
 			}
 			if len(urls) > 0 {

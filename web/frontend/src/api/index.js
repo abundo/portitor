@@ -14,6 +14,7 @@ export function crud(path) {
   }
 }
 
+export const firewalls = crud('/firewalls')
 export const instances = crud('/instances')
 export const interfaceZones = crud('/interface-zones')
 // Rate limits rules name, per instance.
@@ -155,6 +156,14 @@ export const api = {
   deployRevert: () => http.post('/deploy/revert', {}).then((r) => r.data),
   deployments: () => http.get('/deployments').then((r) => r.data),
   agentStatus: () => http.get('/agent/status').then((r) => r.data),
+  // A firewall with portitor-config: its virtual firewalls here and there.
+  drift: (firewallId) => http.get(`/firewalls/${firewallId}/drift`).then((r) => r.data),
+  settleDrift: (firewallId, name, action) =>
+    http
+      .post(`/firewalls/${firewallId}/drift/${encodeURIComponent(name)}`, { action })
+      .then((r) => r.data),
+  breakGlass: (instanceId) =>
+    http.post(`/instances/${instanceId}/break-glass`, {}).then((r) => r.data),
   agentLeases: () => http.get('/agent/leases').then((r) => r.data),
   agentNeighbours: () => http.get('/agent/neighbours').then((r) => r.data),
   agentRoutingTable: () => http.get('/agent/routing-table').then((r) => r.data),
@@ -170,14 +179,19 @@ export const api = {
   agentBfd: () => http.get('/agent/bfd').then((r) => r.data),
   agentNtp: () => http.get('/agent/ntp').then((r) => r.data),
   agentRuleCounters: () => http.get('/agent/rule-counters').then((r) => r.data),
-  agentLogs: (after) => http.get('/agent/logs', { params: { after } }).then((r) => r.data),
-  agentPacketLog: (after) =>
-    http.get('/agent/packet-log', { params: { after } }).then((r) => r.data),
-  agentDnsQueryLog: (after) =>
-    http.get('/agent/dns-query-log', { params: { after } }).then((r) => r.data),
+  // The logs are one firewall's (firewall_id; null: the first).
+  agentLogs: (after, firewall_id) =>
+    http.get('/agent/logs', { params: { after, firewall_id } }).then((r) => r.data),
+  agentPacketLog: (after, firewall_id) =>
+    http.get('/agent/packet-log', { params: { after, firewall_id } }).then((r) => r.data),
+  agentDnsQueryLog: (after, firewall_id) =>
+    http.get('/agent/dns-query-log', { params: { after, firewall_id } }).then((r) => r.data),
 
-  // Updates of the firewall's Debian and of Portitor (UpdatesPage).
-  system: () => http.get('/system').then((r) => r.data),
-  systemJob: (job, release) => http.post('/system/jobs', { job, release }).then((r) => r.data),
-  systemReboot: () => http.post('/system/reboot', {}).then((r) => r.data),
+  // Updates of a firewall's Debian and of Portitor (UpdatesPage); null is
+  // the first firewall.
+  system: (firewall_id) => http.get('/system', { params: { firewall_id } }).then((r) => r.data),
+  systemJob: (job, release, firewall_id) =>
+    http.post('/system/jobs', { job, release }, { params: { firewall_id } }).then((r) => r.data),
+  systemReboot: (firewall_id) =>
+    http.post('/system/reboot', {}, { params: { firewall_id } }).then((r) => r.data),
 }

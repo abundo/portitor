@@ -61,7 +61,7 @@ func TestBootstrapNoGUIPort(t *testing.T) {
 		{Name: "enp1s0", Addresses: []string{}},
 		{Name: "enp2s0", Addresses: []string{}},
 	}}}
-	env.srv.newAgent = func(*models.Settings) (agentAPI, error) { return fake, nil }
+	env.srv.newAgent = func(*models.Firewall) (agentAPI, error) { return fake, nil }
 	o, err := ParseJoin(joinString(`{"url":"https://192.168.1.1:8443","token":"` + strings.Repeat("t", 43) + `","fingerprint":"` +
 		strings.Repeat("ab", 32) + `","lan":"enp2s0","address":"192.168.1.1/24","wan":"enp1s0"}`))
 	if err != nil {
@@ -70,9 +70,8 @@ func TestBootstrapNoGUIPort(t *testing.T) {
 	if _, err := Bootstrap(context.Background(), env.srv, o); err != nil {
 		t.Fatal(err)
 	}
-	st, _ := env.srv.settings()
-	if st.AgentURL != "https://192.168.1.1:8443" {
-		t.Errorf("agent URL %q", st.AgentURL)
+	if fw := firstFirewall(t, env); fw.AgentURL != "https://192.168.1.1:8443" {
+		t.Errorf("agent URL %q", fw.AgentURL)
 	}
 	var n int64
 	env.srv.db.Model(&models.Service{}).Where("name = ?", "portitor-web").Count(&n)

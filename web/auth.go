@@ -84,6 +84,12 @@ func (s *Server) clearSession(c *echo.Context) {
 // requireAuth resolves the session cookie to a user.
 func (s *Server) requireAuth(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(c *echo.Context) error {
+		// The console (ConsoleRequest), in-process only.
+		if u, ok := c.Request().Context().Value(consoleUserKey{}).(*models.User); ok {
+			c.Set(ctxUser, u)
+			c.Set(ctxRemember, false)
+			return next(c)
+		}
 		cookie, err := c.Cookie(cookieName)
 		if err != nil {
 			return errJSON(c, http.StatusUnauthorized, "not logged in")
@@ -124,14 +130,19 @@ var viewerDenied = map[string]bool{
 	"/api/users":         true,
 	"/api/roles":         true,
 	"/api/agent/console": true,
+	// A virtual firewall's bundle holds its secrets.
+	"/api/instances/:id/bundle": true,
 }
 
 // tenantDenied are the GET routes a user without a global role (RoleNone)
 // may not use either: they show the whole firewall, not one instance.
 var tenantDenied = map[string]bool{
-	"/api/settings":   true,
-	"/api/system":     true,
-	"/api/agent/logs": true,
+	"/api/settings":            true,
+	"/api/system":              true,
+	"/api/agent/logs":          true,
+	"/api/firewalls":           true,
+	"/api/firewalls/:id":       true,
+	"/api/firewalls/:id/drift": true,
 }
 
 // viewerWrites are the requests other than GET a viewer may make: their own
@@ -371,6 +382,9 @@ func (s *Server) handleChangePassword(c *echo.Context) error {
 		return errJSON(c, http.StatusBadRequest, "invalid request")
 	}
 	u := currentUser(c)
+	if u.ManagedBy != "" {
+		return errJSON(c, http.StatusForbidden, "your user is managed by "+u.ManagedBy+": change your password there")
+	}
 	if bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(req.Current)) != nil {
 		return errJSON(c, http.StatusForbidden, "current password is wrong")
 	}

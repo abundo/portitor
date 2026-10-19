@@ -41,7 +41,11 @@ func (s *Server) handleAgentCapture(c *echo.Context) error {
 			return err
 		}
 	}
-	a, st, err := s.agent()
+	a, _, err := s.instanceAgent(req.Instance)
+	if err != nil {
+		return agentError(c, err)
+	}
+	st, err := s.settings()
 	if err != nil {
 		return agentError(c, err)
 	}

@@ -44,7 +44,7 @@ func TestBootstrap(t *testing.T) {
 		{Name: "enp1s0", Addresses: []string{}},
 		{Name: "enp2s0", Addresses: []string{}},
 	}}}
-	env.srv.newAgent = func(*models.Settings) (agentAPI, error) { return fake, nil }
+	env.srv.newAgent = func(*models.Firewall) (agentAPI, error) { return fake, nil }
 	opts := BootstrapOptions{
 		AgentURL: "https://127.0.0.1:8443/", AgentToken: strings.Repeat("t", 43), AgentFingerprint: strings.Repeat("AB", 32),
 		LAN: "enp2s0", Address: netip.MustParsePrefix("192.168.1.1/24"),
@@ -87,8 +87,8 @@ func TestBootstrap(t *testing.T) {
 		t.Errorf("deployment %+v", dep)
 	}
 	st, _ := env.srv.settings()
-	if st.AgentURL != "https://127.0.0.1:8443" || st.AgentFingerprint != strings.Repeat("ab", 32) || st.Generation != 1 {
-		t.Errorf("settings %+v", st)
+	if fw := firstFirewall(t, env); fw.AgentURL != "https://127.0.0.1:8443" || fw.AgentFingerprint != strings.Repeat("ab", 32) || fw.Generation != 1 || st.LastCommit != 1 {
+		t.Errorf("firewall %+v, settings %+v", fw, st)
 	}
 
 	doc := fake.applied
@@ -178,7 +178,7 @@ func TestBootstrapWAN(t *testing.T) {
 				{Name: "enp1s0", Addresses: []string{}},
 				{Name: "enp2s0", Addresses: []string{}},
 			}}}
-			env.srv.newAgent = func(*models.Settings) (agentAPI, error) { return fake, nil }
+			env.srv.newAgent = func(*models.Firewall) (agentAPI, error) { return fake, nil }
 			o := BootstrapOptions{
 				AgentURL: "https://127.0.0.1:8443", AgentToken: strings.Repeat("t", 43), AgentFingerprint: strings.Repeat("ab", 32),
 				LAN: "enp2s0", Address: netip.MustParsePrefix("192.168.1.1/24"), WAN: "enp1s0", GUIPort: 443,
@@ -237,7 +237,7 @@ func TestBootstrapReconfigure(t *testing.T) {
 		{Name: "enp1s0", Addresses: []string{}},
 		{Name: "enp2s0", Addresses: []string{}},
 	}}}
-	env.srv.newAgent = func(*models.Settings) (agentAPI, error) { return fake, nil }
+	env.srv.newAgent = func(*models.Firewall) (agentAPI, error) { return fake, nil }
 	o := BootstrapOptions{
 		AgentURL: "https://127.0.0.1:8443", AgentToken: strings.Repeat("t", 43), AgentFingerprint: strings.Repeat("ab", 32),
 		LAN: "enp2s0", Address: netip.MustParsePrefix("192.168.1.1/24"), WAN: "enp1s0", GUIPort: 443,
@@ -269,8 +269,8 @@ func TestBootstrapReconfigure(t *testing.T) {
 	if _, err := Bootstrap(context.Background(), env.srv, r); err != nil {
 		t.Fatal(err)
 	}
-	if st, _ := env.srv.settings(); st.AgentFingerprint != strings.Repeat("ab", 32) {
-		t.Errorf("agent settings changed: %+v", st)
+	if fw := firstFirewall(t, env); fw.AgentFingerprint != strings.Repeat("ab", 32) {
+		t.Errorf("agent settings changed: %+v", fw)
 	}
 	if lan := iface("enp1s0"); lan.IPv4Mode != fwconfig.ModeStatic || !slices.Equal(lan.Addresses, []string{"192.168.1.1/24"}) {
 		t.Errorf("LAN %+v", lan)
@@ -337,7 +337,7 @@ func TestBootstrapLANDHCP(t *testing.T) {
 				{Name: "enp1s0", Addresses: []string{}},
 				{Name: "enp2s0", Addresses: []string{"192.168.1.5/24"}},
 			}}}
-			env.srv.newAgent = func(*models.Settings) (agentAPI, error) { return fake, nil }
+			env.srv.newAgent = func(*models.Firewall) (agentAPI, error) { return fake, nil }
 			o := BootstrapOptions{
 				AgentURL: "https://127.0.0.1:8443", AgentToken: strings.Repeat("t", 43), AgentFingerprint: strings.Repeat("ab", 32),
 				LAN: "enp2s0", WAN: tc.wan, DefaultRouteLAN: tc.routeLAN, GUIPort: 443,
@@ -369,7 +369,7 @@ func TestBootstrapLANDHCP(t *testing.T) {
 func TestBootstrapDHCPServer(t *testing.T) {
 	env := newEnv(t)
 	fake := &applyAgent{statusAgent: statusAgent{nics: []agentapi.NICStatus{{Name: "enp2s0", Addresses: []string{}}}}}
-	env.srv.newAgent = func(*models.Settings) (agentAPI, error) { return fake, nil }
+	env.srv.newAgent = func(*models.Firewall) (agentAPI, error) { return fake, nil }
 	o := BootstrapOptions{
 		AgentURL: "https://127.0.0.1:8443", AgentToken: strings.Repeat("t", 43), AgentFingerprint: strings.Repeat("ab", 32),
 		LAN: "enp2s0", Address: netip.MustParsePrefix("192.168.1.1/24"), GUIPort: 443,

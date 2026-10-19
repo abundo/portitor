@@ -89,6 +89,11 @@ const router = createRouter({
           meta: { admin: true },
         },
         {
+          path: 'firewalls',
+          component: () => import('@/views/FirewallsPage.vue'),
+          meta: { admin: true },
+        },
+        {
           path: 'users',
           component: () => import('@/views/UsersPage.vue'),
           meta: { admin: true },

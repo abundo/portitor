@@ -385,8 +385,8 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 
 	a.dhcp.Reconcile(dhcpWant)
 	a.dhcp6.Reconcile(dhcp6Want)
-	a.ddns.Reconcile(ddnsWant)
-	a.tbroker.Reconcile(tbWant)
+	a.ddnsWant, a.tbWant = ddnsWant, tbWant
+	a.reconcileActive()
 	a.certs.Reconcile(ctx, certsWant)
 	a.proxies.Reconcile(proxiesWant)
 	a.pkts.Reconcile(pktsWant)
@@ -423,6 +423,7 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 	a.lastApply = time.Now()
 	a.reconcileIPLists(&d)
 	a.tasks.Reconcile(d.Tasks)
+	a.ha.setConfig(d.HA)
 	return errors.Join(soft...)
 }
 
@@ -757,6 +758,7 @@ func (a *Agent) applyServices(ctx context.Context, in *fwconfig.Instance, b *ren
 		{a.cfg.Units.Radvd(in), files.Radvd, len(in.RA) > 0, "reload-or-restart", false},
 		{a.cfg.Units.Chrony(in), files.Chrony, in.NTP != nil, "restart", false},
 		{a.cfg.Units.Snmpd(in), files.Snmpd, in.SNMP != nil, "restart", false},
+		{a.cfg.Units.Conntrackd(in), files.Conntrackd, in.ConntrackSync != nil, "restart", false},
 	} {
 		if !svc.on {
 			a.disableService(ctx, in, svc.unit, svc.conf)

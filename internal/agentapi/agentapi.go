@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/abundo/portitor/internal/acme"
 	"github.com/abundo/portitor/internal/dyndns"
 	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/internal/render"
@@ -93,6 +94,8 @@ type Status struct {
 	// AntiLockout is the input rule the agent adds in the default
 	// instance for its API port; nil when disabled.
 	AntiLockout *render.AntiLockout `json:"anti_lockout,omitempty"`
+	// HA is the host's place in its HA pair and its quorum.
+	HA *HAStatus `json:"ha,omitempty"`
 }
 
 // NICStatus is a physical interface: a real NIC (no link kind), or one the
@@ -1153,4 +1156,31 @@ type NTPSource struct {
 type NTPField struct {
 	Name  string `json:"name"`
 	Value string `json:"value"`
+}
+
+// HAStatus is an HA host's quorum (GET /v1/ha); Node is empty when the
+// host is not in a pair.
+type HAStatus struct {
+	Node      string     `json:"node,omitempty"`
+	PeerAlive bool       `json:"peer_alive"`
+	PeerSeen  *time.Time `json:"peer_seen,omitempty"`
+	// VoteUntil is when the witness's (or the console's) vote ends.
+	VoteUntil *time.Time `json:"vote_until,omitempty"`
+	Fenced    bool       `json:"fenced"`
+	// Standby: it leaves the DNS updates and the tunnel broker to its
+	// peer (fenced, or the secondary while it hears the primary).
+	Standby bool `json:"standby"`
+}
+
+// HAVoteRequest grants an HA host the witness's vote for Seconds.
+type HAVoteRequest struct {
+	Seconds int `json:"seconds"`
+}
+
+// HACertificate is an ACME certificate an HA host holds, for its standby
+// peer (GET /v1/ha/certificates, the pair's secret).
+type HACertificate struct {
+	Instance string `json:"instance"`
+	Name     string `json:"name"`
+	acme.Raw
 }

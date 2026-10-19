@@ -16,16 +16,12 @@ const deploy = useDeployStore()
 const instStore = useInstanceStore()
 const auth = useAuthStore()
 const settings = reactive({
-  agent_url: '',
-  agent_token: '',
-  agent_fingerprint: '',
   confirm_timeout: 120,
   capture_rate_kbps: 1000,
   web_certificate_id: 0,
   virtual_firewalls: false,
 })
 const settingsForm = usePageForm(settings)
-const hasToken = ref(false)
 const webTLS = ref(false)
 const version = ref(null)
 
@@ -41,8 +37,7 @@ const certItems = computed(() => [
 
 async function load() {
   const s = await api.settings()
-  Object.assign(settings, s, { agent_token: '', web_certificate_id: s.web_certificate_id ?? 0 })
-  hasToken.value = s.has_agent_token
+  Object.assign(settings, s, { web_certificate_id: s.web_certificate_id ?? 0 })
   webTLS.value = s.web_tls
   settingsForm.mark()
   version.value = await api.version()
@@ -57,8 +52,6 @@ async function saveSettings() {
       confirm_timeout: Number(settings.confirm_timeout),
       capture_rate_kbps: Number(settings.capture_rate_kbps),
     })
-    hasToken.value = s.has_agent_token
-    settings.agent_token = ''
     settings.web_certificate_id = s.web_certificate_id ?? 0
     settings.virtual_firewalls = s.virtual_firewalls
     if (auth.user) auth.user.virtual_firewalls = s.virtual_firewalls
@@ -100,11 +93,11 @@ async function saveSettings() {
         />
         <UFormField
           label="Virtual firewalls"
-          help="Several virtual firewalls, each its own namespace, connected by links. Shows the Virtual firewalls and Links pages. Can't be turned off while there is more than one virtual firewall."
+          help="Several virtual firewalls, each its own namespace, connected by links. Shows the Virtual firewalls and Links pages. Can't be turned off while there are virtual firewalls besides the firewalls' hosts."
         >
           <USwitch
             v-model="settings.virtual_firewalls"
-            :disabled="settings.virtual_firewalls && instStore.list.length > 1"
+            :disabled="settings.virtual_firewalls && instStore.list.some((i) => !i.is_default)"
           />
         </UFormField>
         <UButton type="submit">Save</UButton>
@@ -112,35 +105,12 @@ async function saveSettings() {
     </div>
 
     <div class="card">
-      <div class="mb-1 text-lg font-semibold">Portitor agent</div>
+      <div class="mb-1 text-lg font-semibold">Deploy</div>
       <p class="mb-4 text-sm text-muted">
-        Run <code class="font-mono">portitor-agent init --host &lt;address&gt;</code> on the
-        firewall; it prints the token and the certificate fingerprint.
+        The agents of the firewalls are set up under
+        <RouterLink to="/firewalls" class="text-primary">Firewalls</RouterLink>.
       </p>
       <form class="space-y-3" @submit.prevent="saveSettings">
-        <UFormField label="Agent URL"
-          ><UInput
-            v-model="settings.agent_url"
-            class="w-full font-mono"
-            placeholder="https://192.168.1.1:8443"
-        /></UFormField>
-        <UFormField
-          label="Token"
-          :help="hasToken ? 'A token is stored. Leave empty to keep it.' : 'Not set.'"
-        >
-          <UInput
-            v-model="settings.agent_token"
-            type="password"
-            class="w-full font-mono"
-            autocomplete="off"
-          />
-        </UFormField>
-        <UFormField
-          label="Certificate fingerprint (SHA-256)"
-          help="Pins the agent's self-signed certificate. Empty: verify against system CAs."
-        >
-          <UInput v-model="settings.agent_fingerprint" class="w-full font-mono text-xs" />
-        </UFormField>
         <UFormField
           label="Default auto-rollback (seconds)"
           help="After an apply, the agent restores the previous configuration unless you confirm within this time. 0 disables it."

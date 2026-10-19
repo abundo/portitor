@@ -17,7 +17,7 @@ import (
 func TestAgentServiceLog(t *testing.T) {
 	env := newEnv(t)
 	fake := &serviceLogAgent{}
-	env.srv.newAgent = func(*models.Settings) (agentAPI, error) { return fake, nil }
+	env.srv.newAgent = func(*models.Firewall) (agentAPI, error) { return fake, nil }
 	for _, c := range []struct {
 		body map[string]any
 		code int

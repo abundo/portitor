@@ -56,7 +56,7 @@ func (s *Server) handleAgentTrace(c *echo.Context) error {
 	if msg != "" {
 		return errJSON(c, http.StatusBadRequest, msg)
 	}
-	a, _, err := s.agent()
+	a, _, err := s.instanceAgent(body.Instance)
 	if err != nil {
 		return agentError(c, err)
 	}
