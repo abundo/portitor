@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/netip"
 	"slices"
@@ -971,6 +972,37 @@ func (s *Server) handleAgentRuleCounters(c *echo.Context) error {
 		}
 	}
 	return c.JSON(http.StatusOK, rc)
+}
+
+// handleAgentRateLimits passes on the traffic per rate limit (by instance
+// and name), for the Rate limits page; an HA pair's two hosts add up.
+func (s *Server) handleAgentRateLimits(c *echo.Context) error {
+	rl, err := fromAll(c.Request().Context(), s, agentAPI.RateLimits, func(into, from *agentapi.RateLimitsResponse) {
+		if into.Instances == nil {
+			into.Instances = map[string]map[string]agentapi.RateLimitStats{}
+		}
+		for in, limits := range from.Instances {
+			if into.Instances[in] == nil {
+				into.Instances[in] = map[string]agentapi.RateLimitStats{}
+			}
+			for name, v := range limits {
+				st := into.Instances[in][name]
+				st.Add(v)
+				into.Instances[in][name] = st
+			}
+		}
+	})
+	if err != nil {
+		return agentError(c, err)
+	}
+	names, err := s.readableInstanceNames(c)
+	if err != nil {
+		return err
+	}
+	if names != nil {
+		maps.DeleteFunc(rl.Instances, func(k string, _ map[string]agentapi.RateLimitStats) bool { return !names[k] })
+	}
+	return c.JSON(http.StatusOK, rl)
 }
 
 // handleAgentLogs passes on the agent's log records after ?after=<id>,

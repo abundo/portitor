@@ -2,10 +2,14 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
 <script setup>
+import { ref } from 'vue'
+import AutoRefreshButton from '@/components/AutoRefreshButton.vue'
 import CrudPage from '@/components/CrudPage.vue'
 import NeedInstance from '@/components/NeedInstance.vue'
-import { rateLimits } from '@/api'
+import { api as backend, rateLimits } from '@/api'
+import { useAutoRefresh } from '@/composables/useAutoRefresh'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
+import { bitRate, bytes } from '@/utils/bytes'
 
 const { store } = useInstanceRefs()
 // Police counts packets or Mbit/s, shape Mbit/s or kbit/s; always per
@@ -58,12 +62,84 @@ function clean(b) {
   return body
 }
 
+// Traffic per rate limit name of the selected instance since the last
+// deploy (agentapi.RateLimitStats), polled every 5 seconds while the page
+// is open and visible; null when the agent can't be reached. rates holds
+// what changed since the previous poll, per second: in and out bytes,
+// dropped packets; none for a counter that went down (a deploy reset it).
+const stats = ref(null)
+const rates = ref({})
+const statsLoading = ref(false)
+let prev = {}
+async function loadStats() {
+  statsLoading.value = true
+  const r = await backend.agentRateLimits().catch(() => null)
+  statsLoading.value = false
+  const now = Date.now()
+  const mine = r ? (r.instances?.[store.current?.name] ?? {}) : null
+  const next = {}
+  const out = {}
+  for (const [name, st] of Object.entries(mine ?? {})) {
+    const cur = { t: now, in: st.orig_bytes, out: st.reply_bytes, drop: droppedPackets(st) }
+    const p = prev[name]
+    if (p && now > p.t && cur.in >= p.in && cur.out >= p.out && cur.drop >= p.drop) {
+      const dt = (now - p.t) / 1000
+      out[name] = {
+        in: (cur.in - p.in) / dt,
+        out: (cur.out - p.out) / dt,
+        drop: (cur.drop - p.drop) / dt,
+      }
+    }
+    next[name] = cur
+  }
+  prev = next
+  stats.value = mine
+  rates.value = out
+}
+const autoStats = useAutoRefresh(loadStats, { seconds: 5 })
+
+const statOf = (r) => stats.value?.[r.name]
+// A shaper drops in its queues, one per interface it sends on.
+const droppedPackets = (st) =>
+  st.drop_packets + (st.interfaces ?? []).reduce((n, c) => n + c.drops, 0)
+const perSecond = (n) => `${n < 10 ? n.toFixed(1) : Math.round(n).toLocaleString()} packets/s`
+function notCounted(r) {
+  if (!stats.value) return 'Agent not reachable'
+  return statOf(r) ? '' : 'Not deployed'
+}
+function trafficTitle(r) {
+  const st = statOf(r)
+  if (!st) return notCounted(r)
+  return [
+    `In: ${st.orig_bytes.toLocaleString()} bytes, ${st.orig_packets.toLocaleString()} packets from the side that opened the connections`,
+    `Out: ${st.reply_bytes.toLocaleString()} bytes, ${st.reply_packets.toLocaleString()} packets of replies`,
+    'of the rules that name it, since the last deploy; the rate over the last 5 seconds',
+  ].join('\n')
+}
+function dropTitle(r) {
+  const st = statOf(r)
+  if (!st) return notCounted(r)
+  if (!r.shape) {
+    return `${st.drop_bytes.toLocaleString()} bytes, ${st.drop_packets.toLocaleString()} packets over the rate dropped since the last deploy`
+  }
+  const lines = (st.interfaces ?? []).map(
+    (c) =>
+      `${c.interface}: ${c.drops.toLocaleString()} dropped, held back ${c.overlimits.toLocaleString()} times, ${bytes(c.backlog)} queued`,
+  )
+  return [...lines, 'by the queues since the last deploy'].join('\n')
+}
+// A shaper's queue on each interface it sends on, for its form.
+const classesOf = (r) => (r ? (statOf(r)?.interfaces ?? []) : [])
+const classTotal = (r) => classesOf(r).reduce((n, c) => n + c.bytes, 0)
+
 const columns = [
   { key: 'name', label: 'Rate limit', class: 'font-medium' },
   { key: 'mode', label: 'Mode' },
   { key: 'rate', label: 'Rate' },
   { key: 'burst', label: 'Burst' },
   { key: 'per_source', label: 'Applies to' },
+  { key: 'traffic', label: 'Traffic' },
+  { key: 'dropped', label: 'Dropped' },
   { key: 'description', label: 'Description' },
 ]
 const fields = [
@@ -127,6 +203,9 @@ const fields = [
       new-label="New rate limit"
       :search-text="(r) => `${modeText(r)} ${rateText(r)} ${scopeText(r)}`"
     >
+      <template #toolbar>
+        <AutoRefreshButton :auto="autoStats" :loading="statsLoading" />
+      </template>
       <template #field-mode="{ form }">
         <USelect
           :model-value="form.mode"
@@ -141,6 +220,66 @@ const fields = [
         row.shape ? '' : row.burst ? `${row.burst} ${unitText(row)}` : 'default'
       }}</template>
       <template #cell-per_source="{ row }">{{ scopeText(row) }}</template>
+      <template #cell-traffic="{ row }">
+        <div v-if="statOf(row)" class="text-xs whitespace-nowrap" :title="trafficTitle(row)">
+          <div>
+            <span class="text-muted">in</span> {{ bytes(statOf(row).orig_bytes) }}
+            <span v-if="rates[row.name]" class="text-muted"
+              >· {{ bitRate(rates[row.name].in) }}</span
+            >
+          </div>
+          <div>
+            <span class="text-muted">out</span> {{ bytes(statOf(row).reply_bytes) }}
+            <span v-if="rates[row.name]" class="text-muted"
+              >· {{ bitRate(rates[row.name].out) }}</span
+            >
+          </div>
+        </div>
+        <span v-else class="text-xs text-muted">{{ notCounted(row) }}</span>
+      </template>
+      <template #cell-dropped="{ row }">
+        <div v-if="statOf(row)" class="text-xs whitespace-nowrap" :title="dropTitle(row)">
+          {{ droppedPackets(statOf(row)).toLocaleString() }} packets
+          <div v-if="rates[row.name]?.drop" class="text-muted">
+            {{ perSecond(rates[row.name].drop) }}
+          </div>
+        </div>
+      </template>
+      <template #form-extra="{ editing }">
+        <div v-if="editing?.shape && classesOf(editing).length" class="text-sm">
+          <div class="mb-1 font-medium">Queues since the last deploy</div>
+          <table class="w-full">
+            <thead class="text-left text-muted">
+              <tr>
+                <th class="py-1 pr-3 font-normal">Interface</th>
+                <th class="py-1 pr-3 font-normal">Sent</th>
+                <th class="py-1 pr-3 font-normal">Packets</th>
+                <th class="py-1 pr-3 font-normal" title="Packets dropped by the queue">Dropped</th>
+                <th
+                  class="py-1 pr-3 font-normal"
+                  title="Times a packet was held back over the rate"
+                >
+                  Held back
+                </th>
+                <th class="py-1 font-normal" title="What is queued now">Queued</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="c in classesOf(editing)" :key="c.interface">
+                <td class="py-1 pr-3 font-mono">{{ c.interface }}</td>
+                <td class="py-1 pr-3">{{ bytes(c.bytes) }}</td>
+                <td class="py-1 pr-3">{{ c.packets.toLocaleString() }}</td>
+                <td class="py-1 pr-3">{{ c.drops.toLocaleString() }}</td>
+                <td class="py-1 pr-3">{{ c.overlimits.toLocaleString() }}</td>
+                <td class="py-1">{{ bytes(c.backlog) }} ({{ c.qlen }})</td>
+              </tr>
+            </tbody>
+          </table>
+          <p class="mt-1 text-xs text-muted">
+            The rate applies on each interface: {{ bytes(classTotal(editing)) }} sent in all.
+          </p>
+        </div>
+      </template>
     </CrudPage>
   </NeedInstance>
 </template>

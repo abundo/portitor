@@ -7,6 +7,7 @@ package agentapi
 
 import (
 	"encoding/json"
+	"slices"
 	"time"
 
 	"github.com/abundo/portitor/internal/acme"
@@ -61,6 +62,65 @@ type RuleCounters struct {
 	OrigBytes    uint64 `json:"orig_bytes"`
 	ReplyPackets uint64 `json:"reply_packets"`
 	ReplyBytes   uint64 `json:"reply_bytes"`
+}
+
+// RateLimitsResponse is the traffic of each rate limit since it was last
+// applied, by instance name and then rate limit name.
+type RateLimitsResponse struct {
+	Instances map[string]map[string]RateLimitStats `json:"instances"`
+}
+
+// RateLimitStats counts a rate limit's traffic. Orig and Reply are the
+// rule counters (RuleCounters) of the rules that name it, added up: what
+// went through it. Drop is what a policer dropped. Interfaces are a
+// shaper's HTB classes, one per interface it queues on.
+type RateLimitStats struct {
+	OrigPackets  uint64        `json:"orig_packets"`
+	OrigBytes    uint64        `json:"orig_bytes"`
+	ReplyPackets uint64        `json:"reply_packets"`
+	ReplyBytes   uint64        `json:"reply_bytes"`
+	DropPackets  uint64        `json:"drop_packets"`
+	DropBytes    uint64        `json:"drop_bytes"`
+	Interfaces   []ShaperClass `json:"interfaces,omitempty"`
+}
+
+// Add adds o's counters to s (the two hosts of an HA pair), interface by
+// interface.
+func (s *RateLimitStats) Add(o RateLimitStats) {
+	s.OrigPackets += o.OrigPackets
+	s.OrigBytes += o.OrigBytes
+	s.ReplyPackets += o.ReplyPackets
+	s.ReplyBytes += o.ReplyBytes
+	s.DropPackets += o.DropPackets
+	s.DropBytes += o.DropBytes
+	for _, c := range o.Interfaces {
+		i := slices.IndexFunc(s.Interfaces, func(x ShaperClass) bool { return x.Interface == c.Interface })
+		if i < 0 {
+			s.Interfaces = append(s.Interfaces, c)
+			continue
+		}
+		x := &s.Interfaces[i]
+		x.Bytes += c.Bytes
+		x.Packets += c.Packets
+		x.Drops += c.Drops
+		x.Overlimits += c.Overlimits
+		x.Backlog += c.Backlog
+		x.Qlen += c.Qlen
+	}
+}
+
+// ShaperClass is a shaper's HTB class on one interface: what it sent,
+// what it and its fq_codel queue dropped, how often it held packets back
+// over the rate (Overlimits), and what is queued now (Backlog bytes, Qlen
+// packets).
+type ShaperClass struct {
+	Interface  string `json:"interface"`
+	Bytes      uint64 `json:"bytes"`
+	Packets    uint64 `json:"packets"`
+	Drops      uint64 `json:"drops"`
+	Overlimits uint64 `json:"overlimits"`
+	Backlog    uint64 `json:"backlog"`
+	Qlen       uint64 `json:"qlen"`
 }
 
 type ErrorResponse struct {

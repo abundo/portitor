@@ -1112,7 +1112,7 @@ func writeRuleMatches(b *strings.Builder, idx int, r fwconfig.Rule, in *fwconfig
 		for _, match := range matchExprs(m.FamilyMatch, serviceExpr(m.Service)) {
 			for _, lim := range limitExprs(limit, m) {
 				line := append(append(append([]string(nil), parts...), match...), lim...)
-				line = append(line, "drop", comment(fmt.Sprintf("rule %d", idx+1), "rate limit "+limit.Name))
+				line = append(line, dropCount(limit.Name), "drop", comment(fmt.Sprintf("rule %d", idx+1), "rate limit "+limit.Name))
 				b.WriteString("\t\t" + strings.Join(line, " ") + "\n")
 			}
 			line := append(append(append([]string(nil), parts...), match...), tail...)
@@ -1139,12 +1139,12 @@ func writePolicers(b *strings.Builder, in *fwconfig.Instance, chain string) {
 		}
 		c := comment(fmt.Sprintf("rule %d", idx), "rate limit "+l.Name)
 		if !l.PerSource {
-			fmt.Fprintf(b, "\t\tct mark %d limit name %q drop %s\n", r.ID, RateLimitKey(l.Name), c)
+			fmt.Fprintf(b, "\t\tct mark %d limit name %q %s drop %s\n", r.ID, RateLimitKey(l.Name), dropCount(l.Name), c)
 			continue
 		}
 		for _, f := range []struct{ fam, key string }{{"ipv4", "ip"}, {"ipv6", "ip6"}} {
-			fmt.Fprintf(b, "\t\tmeta nfproto %s ct mark %d update @%s { ct original %s saddr limit %s } drop %s\n",
-				f.fam, r.ID, RateLimitSet(l.Name, f.fam), f.key, limitRate(*l), c)
+			fmt.Fprintf(b, "\t\tmeta nfproto %s ct mark %d update @%s { ct original %s saddr limit %s } %s drop %s\n",
+				f.fam, r.ID, RateLimitSet(l.Name, f.fam), f.key, limitRate(*l), dropCount(l.Name), c)
 		}
 	}
 }
@@ -1251,10 +1251,22 @@ func nftAmount(n int, unit string, burst bool) string {
 	return fmt.Sprintf("%d %s", n, unit)
 }
 
+// RateLimitDropCounter is the counter of what a policing rate limit
+// dropped, shared by the rules that name it; it restarts from zero on
+// apply, like the rule counters.
+func RateLimitDropCounter(name string) string {
+	return RateLimitKey(name) + "_drop"
+}
+
+func dropCount(name string) string {
+	return fmt.Sprintf("counter name %q", RateLimitDropCounter(name))
+}
+
 func writeRateLimit(b *strings.Builder, l fwconfig.RateLimit) {
 	if l.Shape {
 		return // the agent's HTB classes (writeShaperMarks)
 	}
+	fmt.Fprintf(b, "\tcounter %s {\n\t}\n\n", RateLimitDropCounter(l.Name))
 	if !l.PerSource {
 		fmt.Fprintf(b, "\tlimit %s {\n\t\t%s\n\t}\n\n", RateLimitKey(l.Name), limitRate(l))
 		return

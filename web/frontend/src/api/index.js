@@ -196,6 +196,7 @@ export const api = {
   agentBfd: () => http.get('/agent/bfd').then((r) => r.data),
   agentNtp: () => http.get('/agent/ntp').then((r) => r.data),
   agentRuleCounters: () => http.get('/agent/rule-counters').then((r) => r.data),
+  agentRateLimits: () => http.get('/agent/rate-limits').then((r) => r.data),
   // The logs are one firewall's (firewall_id; null: the first).
   agentLogs: (after, firewall_id) =>
     http.get('/agent/logs', { params: { after, firewall_id } }).then((r) => r.data),

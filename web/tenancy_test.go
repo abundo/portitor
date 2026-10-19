@@ -89,6 +89,11 @@ func TestTenancy(t *testing.T) {
 		len(nb.LLDPPorts) != 1 || nb.LLDPPorts[0].Instance != "a" {
 		t.Errorf("neighbours: %+v", nb)
 	}
+	var rl agentapi.RateLimitsResponse
+	_ = json.Unmarshal(env.do("GET", "/api/agent/rate-limits", nil).Body.Bytes(), &rl)
+	if len(rl.Instances) != 1 || rl.Instances["a"]["ssh"].DropPackets != 3 {
+		t.Errorf("rate limits: %+v", rl)
+	}
 	ruleA := env.create("/api/rules", rule(a, "tina's"))
 	if rec := env.do("PUT", fmt.Sprintf("/api/rules/%d", ruleA), map[string]any{"instance_id": b}); rec.Code != http.StatusForbidden {
 		t.Errorf("move rule to b: %d %s", rec.Code, rec.Body)
@@ -164,4 +169,12 @@ func (*neighboursAgent) Neighbours(context.Context) (*agentapi.NeighboursRespons
 		n.LLDPPorts = append(n.LLDPPorts, agentapi.LLDPPort{Instance: inst, Interface: "eth0"})
 	}
 	return n, nil
+}
+
+func (*neighboursAgent) RateLimits(context.Context) (*agentapi.RateLimitsResponse, error) {
+	r := &agentapi.RateLimitsResponse{Instances: map[string]map[string]agentapi.RateLimitStats{}}
+	for _, inst := range []string{"a", "b"} {
+		r.Instances[inst] = map[string]agentapi.RateLimitStats{"ssh": {DropPackets: 3}}
+	}
+	return r, nil
 }

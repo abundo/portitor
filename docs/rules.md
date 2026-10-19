@@ -131,6 +131,19 @@ to one of two things:
 - Rules that name the same rate limit share it.
 - Renaming a rate limit updates the rules; deleting one a rule uses is refused.
 
+The page shows each rate limit's traffic since the last commit, refreshed every 5
+seconds:
+
+- **Traffic**: what went through it, added up over the rules that name it. *In* is
+  sent by the side that opened the connections and *out* is the replies, as on the
+  rules list. Each comes with its rate over the last 5 seconds.
+- **Dropped**: the packets a policer dropped for being over the rate. For a shaper,
+  the packets its queues dropped. Hover over the cell for bytes and, for a shaper,
+  the figures for each interface.
+- A shaper's form lists its queue on each interface it sends on: what it sent and
+  dropped, how many times it held packets back for being over the rate, and what
+  is queued now. The rate applies on each interface separately.
+
 Policing drops: TCP slows down when it loses packets, but it gets there by losing
 them. To queue instead, use *Shape*, or shape the whole interface; see
 [Traffic shaping](shaping.md).

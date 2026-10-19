@@ -232,6 +232,13 @@ func (c *Client) RuleCounters(ctx context.Context) (*agentapi.RuleCountersRespon
 	return &r, c.do(ctx, http.MethodGet, "/v1/rule-counters", nil, &r)
 }
 
+// RateLimits returns the traffic counted per rate limit since the last
+// apply.
+func (c *Client) RateLimits(ctx context.Context) (*agentapi.RateLimitsResponse, error) {
+	var r agentapi.RateLimitsResponse
+	return &r, c.do(ctx, http.MethodGet, "/v1/rate-limits", nil, &r)
+}
+
 // Logs returns the agent's log records with an id above after.
 func (c *Client) Logs(ctx context.Context, after int64) (*agentapi.LogsResponse, error) {
 	var l agentapi.LogsResponse

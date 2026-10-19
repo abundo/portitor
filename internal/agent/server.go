@@ -110,6 +110,9 @@ func (a *Agent) routes() *http.ServeMux {
 	mux.HandleFunc("GET /v1/rule-counters", func(w http.ResponseWriter, r *http.Request) {
 		writeJSONResponse(w, http.StatusOK, a.RuleCounters(r.Context()))
 	})
+	mux.HandleFunc("GET /v1/rate-limits", func(w http.ResponseWriter, r *http.Request) {
+		writeJSONResponse(w, http.StatusOK, a.RateLimits(r.Context()))
+	})
 	mux.HandleFunc("GET /v1/logs", func(w http.ResponseWriter, r *http.Request) {
 		after, _ := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
 		writeJSONResponse(w, http.StatusOK, agentapi.LogsResponse{Entries: Logs.After(after)})
