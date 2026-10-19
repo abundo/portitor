@@ -1113,8 +1113,11 @@ func redactDoc(doc fwconfig.Document) fwconfig.Document {
 			r := *x
 			r.Policies = slices.Clone(x.Policies)
 			for j := range r.Policies {
-				d := &r.Policies[j].DNS01
-				d.TSIG, d.ProviderSettings = redactTSIG(d.TSIG), redactProviderSettings(d.Provider, d.ProviderSettings)
+				if d := r.Policies[j].DNS01; d != nil {
+					rd := *d
+					rd.TSIG, rd.ProviderSettings = redactTSIG(d.TSIG), redactProviderSettings(d.Provider, d.ProviderSettings)
+					r.Policies[j].DNS01 = &rd
+				}
 			}
 			cp.ACMEProxy = &r
 		}

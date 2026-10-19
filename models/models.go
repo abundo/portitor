@@ -434,7 +434,7 @@ type Instance struct {
 	// firewall on AcmeProxyPort of the interfaces with AcmeProxyServe,
 	// presenting AcmeProxyCertificateID (self-signed when nil); it gets
 	// their certificates from AcmeProxyCa (an ACME CA name or directory
-	// URL) by DNS-01, as its AcmeProxyPolicies allow.
+	// URL) by DNS-01 or HTTP-01, as its AcmeProxyPolicies allow.
 	AcmeProxyEnabled       bool   `json:"acme_proxy_enabled"`
 	AcmeProxyPort          int    `json:"acme_proxy_port"`
 	AcmeProxyCa            string `json:"acme_proxy_ca"`
@@ -1077,9 +1077,10 @@ func All() []any {
 
 // AcmeProxyPolicy allows the ACME proxy's clients in Sources (any when
 // empty; hosts/prefixes by name) names in Domains ("host.example.com", or
-// "*.example.com" for any name below it), whose upstream DNS-01 TXT
-// records the DyndnsClient's provider writes. Policies are tried by name;
-// a disabled one is left out.
+// "*.example.com" for any name below it), got upstream by Challenge:
+// DNS-01, whose TXT records the DyndnsClient's provider writes, or
+// HTTP-01, answered by the firewall on port 80 of the Interface. Policies
+// are tried by name; a disabled one is left out.
 type AcmeProxyPolicy struct {
 	Base
 	InstanceID     uint       `json:"instance_id"`
@@ -1088,7 +1089,9 @@ type AcmeProxyPolicy struct {
 	Description    string     `json:"description"`
 	Domains        StringList `json:"domains"`
 	Sources        StringList `json:"sources"`
-	DyndnsClientID uint       `json:"dyndns_client_id"`
+	Challenge      string     `json:"challenge"`
+	InterfaceID    *uint      `json:"interface_id"`
+	DyndnsClientID *uint      `json:"dyndns_client_id"`
 }
 
 // SnmpUser is a read-only SNMPv3 user of an instance. Disabled, it is left

@@ -411,6 +411,9 @@ func prepareInterface(tx *gorm.DB, i, old *models.Interface) error {
 			if err := refuseCertificateIface(tx, old); err != nil {
 				return err
 			}
+			if err := refuseProxyIface(tx, old); err != nil {
+				return err
+			}
 			if err := refuseIfaceMove(tx, old); err != nil {
 				return err
 			}

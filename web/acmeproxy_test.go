@@ -121,3 +121,67 @@ func TestACMEProxy(t *testing.T) {
 		t.Errorf("delete policy of a stopped proxy: %d %s", rec.Code, rec.Body)
 	}
 }
+
+// A policy may get its names upstream by HTTP-01 on an interface instead
+// of DNS-01: no DNS update client, and the interface can't be deleted.
+func TestACMEProxyHTTP01(t *testing.T) {
+	env := newEnv(t)
+	inst := env.create("/api/instances", map[string]any{"name": "main"})
+	lan := env.create("/api/interfaces", map[string]any{"instance_id": inst, "name": "lan", "ipv4_mode": "static",
+		"addresses": []string{"192.168.1.1/24"}, "enabled": true, "acme_proxy_serve": true})
+	wan := env.create("/api/interfaces", map[string]any{"instance_id": inst, "name": "wan", "ipv4_mode": "static",
+		"addresses": []string{"198.51.100.1/24"}, "enabled": true})
+	other := env.create("/api/instances", map[string]any{"name": "lab"})
+	eth9 := env.create("/api/interfaces", map[string]any{"instance_id": other, "name": "eth9", "enabled": true})
+
+	pol := map[string]any{"instance_id": inst, "name": "web", "enabled": true, "challenge": "http-01",
+		"domains": []string{"*.web.example.com"}, "sources": []string{"192.168.1.0/24"}}
+	for _, ifc := range []any{nil, eth9} {
+		pol["interface_id"] = ifc
+		if rec := env.do("POST", "/api/acme-proxy/policies", pol); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "pick an interface") {
+			t.Errorf("interface %v: %d %s", ifc, rec.Code, rec.Body)
+		}
+	}
+	pol["interface_id"] = wan
+	pid := env.create("/api/acme-proxy/policies", pol)
+	if rec := env.do("PUT", "/api/instances/"+itoa(inst), map[string]any{"acme_proxy_enabled": true}); rec.Code != http.StatusOK {
+		t.Fatalf("enable: %d %s", rec.Code, rec.Body)
+	}
+
+	doc, err := builder.Build(env.srv.db, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	x := doc.Instance("main").ACMEProxy
+	if x == nil || len(x.Policies) != 1 {
+		t.Fatalf("document: %+v", x)
+	}
+	if p := x.Policies[0]; p.Challenge != fwconfig.ChallengeHTTP01 || p.Interface != "wan" || p.DNS01 != nil {
+		t.Errorf("policy: %+v", p)
+	}
+	var found bool
+	for _, r := range render.AutoInputRules(doc.Instance("main")) {
+		found = found || r.Service == render.ACMEHTTPService && slices.Equal(r.InInterfaces, []string{"wan"})
+	}
+	if !found {
+		t.Error("no HTTP-01 auto rule on wan")
+	}
+	if red := redactDoc(*doc); red.Instance("main").ACMEProxy.Policies[0].DNS01 != nil {
+		t.Error("redacting added a DNS update client")
+	}
+
+	if rec := env.do("DELETE", "/api/interfaces/"+itoa(wan), nil); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "ACME proxy policy web") {
+		t.Errorf("delete wan: %d %s", rec.Code, rec.Body)
+	}
+	// Back to DNS-01: the interface is dropped.
+	dc := env.create("/api/dyndns/clients", map[string]any{"instance_id": inst, "name": "ns", "interface_id": lan,
+		"server": "192.0.2.53", "zone": "example.com"})
+	if rec := env.do("PUT", "/api/acme-proxy/policies/"+itoa(pid), map[string]any{"challenge": "dns-01", "dyndns_client_id": dc}); rec.Code != http.StatusOK {
+		t.Fatalf("to DNS-01: %d %s", rec.Code, rec.Body)
+	}
+	var got models.AcmeProxyPolicy
+	env.srv.db.First(&got, pid)
+	if got.InterfaceID != nil || got.DyndnsClientID == nil || *got.DyndnsClientID != dc {
+		t.Errorf("after DNS-01: %+v", got)
+	}
+}

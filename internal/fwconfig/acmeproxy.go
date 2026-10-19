@@ -6,6 +6,7 @@ package fwconfig
 import (
 	"fmt"
 	"net/netip"
+	"slices"
 	"strings"
 )
 
@@ -13,9 +14,12 @@ import (
 // firewall: certbot, Caddy, Traefik and the like point their ACME
 // directory at it, prove control of a name by HTTP-01 over the internal
 // network, and get a certificate the agent orders from the upstream CA
-// (Let's Encrypt) with DNS-01, through the DNS update client of the policy
-// that allows the name. Only the firewall holds the DNS credentials, and
-// the hosts need not be reachable from the internet.
+// (Let's Encrypt) as the policy that allows the name says: with DNS-01,
+// through its DNS update client, so only the firewall holds the DNS
+// credentials and the hosts need not be reachable from the internet; or
+// with HTTP-01, answered by the agent on port 80 of the policy's
+// interface, where the name must resolve to the firewall from the
+// internet (opened as a certificate's HTTP-01, render.ACMEHTTPSet).
 //
 // The server listens with HTTPS on Port of the instance's addresses,
 // opened on Interfaces by the auto input rule "acme proxy" (from the
@@ -46,8 +50,31 @@ type ACMEProxyPolicy struct {
 	// Sources are the prefixes the clients, and the addresses the names
 	// resolve to, must be in; empty: any.
 	Sources []string `json:"sources,omitempty"`
-	// DNS01 writes the upstream DNS-01 challenge's TXT records.
-	DNS01 DNS01 `json:"dns01"`
+	// Challenge is the upstream challenge: ChallengeDNS01 (also when
+	// empty) or ChallengeHTTP01.
+	Challenge string `json:"challenge,omitempty"`
+	// Interface is where the CA's HTTP-01 requests come in (HTTP-01
+	// only).
+	Interface string `json:"interface,omitempty"`
+	// DNS01 writes the upstream DNS-01 challenge's TXT records (DNS-01
+	// only).
+	DNS01 *DNS01 `json:"dns01,omitempty"`
+}
+
+// HTTP01 says whether the policy's names are validated upstream by
+// HTTP-01.
+func (pol *ACMEProxyPolicy) HTTP01() bool { return pol.Challenge == ChallengeHTTP01 }
+
+// HTTP01Interfaces are the interfaces of the HTTP-01 policies, where port
+// 80 opens while the agent answers the upstream CA.
+func (p *ACMEProxy) HTTP01Interfaces() []string {
+	var out []string
+	for _, pol := range p.Policies {
+		if pol.HTTP01() && !slices.Contains(out, pol.Interface) {
+			out = append(out, pol.Interface)
+		}
+	}
+	return out
 }
 
 // ACMEProxyService is the proxy's auto input rule's service, and its
@@ -178,12 +205,31 @@ func (v *validator) acmeProxy(p string, in *Instance, ifaces map[string]*Interfa
 				v.addf("%s: invalid source prefix %q", pp, s)
 			}
 		}
-		d := pol.DNS01
-		dp := fmt.Sprintf("%s: dns update %q", pp, d.Client)
-		v.dnsProvider(dp, DynDNS{Provider: d.Provider, ProviderSettings: d.ProviderSettings, Server: d.Server, TSIG: d.TSIG})
-		v.tsig(dp, d.Provider, d.TSIG)
-		if !validDomain(d.Zone) {
-			v.addf("%s: invalid zone %q", dp, d.Zone)
+		switch pol.Challenge {
+		case ChallengeHTTP01:
+			if ifaces[pol.Interface] == nil {
+				v.addf("%s: unknown interface %q", pp, pol.Interface)
+			}
+			if pol.DNS01 != nil {
+				v.addf("%s: HTTP-01 has no DNS update client", pp)
+			}
+		case "", ChallengeDNS01:
+			if pol.Interface != "" {
+				v.addf("%s: DNS-01 has no interface", pp)
+			}
+			d := pol.DNS01
+			if d == nil {
+				v.addf("%s: DNS-01 needs a DNS update client", pp)
+				continue
+			}
+			dp := fmt.Sprintf("%s: dns update %q", pp, d.Client)
+			v.dnsProvider(dp, DynDNS{Provider: d.Provider, ProviderSettings: d.ProviderSettings, Server: d.Server, TSIG: d.TSIG})
+			v.tsig(dp, d.Provider, d.TSIG)
+			if !validDomain(d.Zone) {
+				v.addf("%s: invalid zone %q", dp, d.Zone)
+			}
+		default:
+			v.addf("%s: challenge must be one of %s", pp, strings.Join(Challenges, ", "))
 		}
 	}
 }

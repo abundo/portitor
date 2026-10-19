@@ -278,6 +278,17 @@ func TestValidateCatchesProblems(t *testing.T) {
 		{"proxy domain", func(d *Document) { acmeProxy(d).Policies[0].Domains = []string{"Bad"} }, `policy "lan": "Bad" is not a DNS name`},
 		{"proxy source", func(d *Document) { acmeProxy(d).Policies[0].Sources = []string{"lan"} }, `invalid source prefix "lan"`},
 		{"proxy zone", func(d *Document) { acmeProxy(d).Policies[0].DNS01.Zone = "" }, `dns update "ns": invalid zone`},
+		{"proxy dns-01 no client", func(d *Document) { acmeProxy(d).Policies[0].DNS01 = nil }, `policy "lan": DNS-01 needs a DNS update client`},
+		{"proxy http-01 interface", func(d *Document) {
+			p := &acmeProxy(d).Policies[0]
+			p.Challenge, p.DNS01, p.Interface = ChallengeHTTP01, nil, "eth9"
+		}, `policy "lan": unknown interface "eth9"`},
+		{"proxy http-01 with client", func(d *Document) {
+			p := &acmeProxy(d).Policies[0]
+			p.Challenge, p.Interface = ChallengeHTTP01, d.Instances[0].Interfaces[0].Name
+		}, `policy "lan": HTTP-01 has no DNS update client`},
+		{"proxy dns-01 interface", func(d *Document) { acmeProxy(d).Policies[0].Interface = d.Instances[0].Interfaces[0].Name }, `policy "lan": DNS-01 has no interface`},
+		{"proxy challenge", func(d *Document) { acmeProxy(d).Policies[0].Challenge = "tls-alpn-01" }, `policy "lan": challenge must be one of`},
 		{"proxy duplicate policy", func(d *Document) {
 			x := acmeProxy(d)
 			x.Policies = append(x.Policies, x.Policies[0])
@@ -580,7 +591,7 @@ func acmeProxy(d *Document) *ACMEProxy {
 	in := &d.Instances[0]
 	in.ACMEProxy = &ACMEProxy{Port: 8555, Interfaces: []string{in.Interfaces[0].Name}, CA: "letsencrypt", Certificate: in.Certificates[0].Name,
 		Policies: []ACMEProxyPolicy{{Name: "lan", Domains: []string{"*.lan.example.com", "lan.example.com"}, Sources: []string{"192.168.1.0/24"},
-			DNS01: DNS01{Client: "ns", Server: "192.0.2.53", Zone: "example.com"}}}}
+			DNS01: &DNS01{Client: "ns", Server: "192.0.2.53", Zone: "example.com"}}}}
 	return in.ACMEProxy
 }
 
@@ -589,5 +600,18 @@ func TestACMEProxyValid(t *testing.T) {
 	acmeProxy(&d)
 	if err := d.Validate(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestACMEProxyHTTP01Valid(t *testing.T) {
+	d := SampleDocument()
+	x := acmeProxy(&d)
+	x.Policies = append(x.Policies, ACMEProxyPolicy{Name: "web", Domains: []string{"www.example.com"},
+		Challenge: ChallengeHTTP01, Interface: d.Instances[0].Interfaces[0].Name})
+	if err := d.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if got := x.HTTP01Interfaces(); len(got) != 1 || got[0] != d.Instances[0].Interfaces[0].Name {
+		t.Errorf("HTTP01Interfaces = %v", got)
 	}
 }

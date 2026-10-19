@@ -57,8 +57,8 @@ func freePort(t *testing.T) int {
 }
 
 func TestACMEProxy(t *testing.T) {
-	dns01 := func(client string) fwconfig.DNS01 {
-		return fwconfig.DNS01{Client: client, Server: "192.0.2.53", Zone: "example.com"}
+	dns01 := func(client string) *fwconfig.DNS01 {
+		return &fwconfig.DNS01{Client: client, Server: "192.0.2.53", Zone: "example.com"}
 	}
 	cfg := fwconfig.ACMEProxy{
 		Port: freePort(t), Interfaces: []string{"lan"}, CA: "letsencrypt-staging",
@@ -188,5 +188,40 @@ func TestACMEProxyPolicy(t *testing.T) {
 	}
 	if x.Clients() != nil {
 		t.Errorf("clients %v: policy b has no sources", x.Clients())
+	}
+}
+
+// An HTTP-01 policy's names are answered upstream by the HTTP-01 server;
+// an order mixing them with DNS-01 names is refused.
+func TestACMEProxyUpstreamHTTP01(t *testing.T) {
+	cfg := fwconfig.ACMEProxy{CA: "letsencrypt-staging", Policies: []fwconfig.ACMEProxyPolicy{
+		{Name: "web", Domains: []string{"*.web.example.com"}, Challenge: fwconfig.ChallengeHTTP01, Interface: "wan"},
+		{Name: "lan", Domains: []string{"*.lan.example.com"}, DNS01: &fwconfig.DNS01{Client: "a", Server: "192.0.2.53", Zone: "example.com"}},
+	}}
+	paths := render.Paths{StateDir: t.TempDir()}
+	m := newACMEProxyManager(false, paths, newCertManager(false, paths, nil))
+	it := acmeProxyItem{instance: "main", cfg: cfg}
+	client := netip.MustParseAddr("192.168.1.5")
+
+	req, done, err := m.upstream(it, []string{"a.web.example.com", "b.web.example.com"}, client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := req.HTTP01.(*http01Server); !ok || req.DNS01 != nil {
+		t.Errorf("HTTP-01 request %+v", req)
+	}
+	done()
+
+	req, done, err = m.upstream(it, []string{"a.lan.example.com"}, client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := req.DNS01.(*multiDNS01); !ok || req.HTTP01 != nil {
+		t.Errorf("DNS-01 request %+v", req)
+	}
+	done()
+
+	if _, _, err := m.upstream(it, []string{"a.web.example.com", "a.lan.example.com"}, client); err == nil || !strings.Contains(err.Error(), "different challenges") {
+		t.Errorf("mixed challenges: %v", err)
 	}
 }

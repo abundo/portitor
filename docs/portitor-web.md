@@ -373,15 +373,23 @@ The service unit lets the `portitor` user listen on port 443
 runs its usual ACME client (certbot, Caddy, Traefik, lego, acme.sh) with the proxy's
 directory URL instead of Let's Encrypt's. The client proves control of a name over
 the internal network with HTTP-01, and the firewall gets the certificate from Let's
-Encrypt with DNS-01, through a DNS update client. Only the firewall holds the DNS
-credentials, and the hosts need not be reachable from the Internet.
+Encrypt. Each policy says how Let's Encrypt checks its names for the firewall:
 
-1. Make a DNS update client (*Services → DNS update*) whose zone holds the names'
-   `_acme-challenge` records, or their CNAME targets, as for a
+- **DNS-01**, through a DNS update client. Only the firewall holds the DNS
+  credentials, and the hosts need not be reachable from the Internet.
+- **HTTP-01**, answered by the firewall itself on port 80 of an interface (the WAN),
+  as for an [HTTP-01 certificate](#certificates). The names must resolve to that
+  interface's address from the Internet, and port 80 there must not be forwarded to
+  another host. Inside, the names may resolve to the hosts themselves (split DNS).
+  No DNS credentials are needed, and the hosts still need not be reachable.
+
+1. For DNS-01, make a DNS update client (*Services → DNS update*) whose zone holds
+   the names' `_acme-challenge` records, or their CNAME targets, as for a
    [DNS-01 certificate](#dns-01).
 2. Add a policy: the names (`nas.lan.example.com`, or `*.lan.example.com` for any
    name below it), the clients (prefixes, or hosts and prefixes by name; empty is
-   any), and the DNS update client.
+   any), the upstream challenge, and the DNS update client (DNS-01) or the
+   interface (HTTP-01).
 3. Turn the proxy on, pick the interfaces it answers on, and commit. Its status
    shows the directory URLs, such as `https://192.168.1.1:8555/directory`.
 
@@ -395,7 +403,9 @@ When a client orders a name:
   firewall. It does not follow redirects, so the client must answer on port 80
   itself, as certbot's standalone and webroot modes, Caddy and Traefik do.
 - As soon as the order is accepted, the firewall has Let's Encrypt check the names
-  with DNS-01, while the client answers its own challenge. When the client then
+  with the policy's challenge, while the client answers its own challenge. The
+  names of one order must use the same upstream challenge; an order mixing DNS-01
+  and HTTP-01 names fails, and the client should order them separately. When the client then
   sends its CSR, Let's Encrypt reuses those checks, so the certificate comes back
   within seconds. This matters because some clients, such as Traefik and lego, wait
   only 30 seconds for it.

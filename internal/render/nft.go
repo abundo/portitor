@@ -102,7 +102,7 @@ func Nftables(in *fwconfig.Instance, lockout *AntiLockout, paths Paths) string {
 		declared[r.SourceSet] = r.SourceSet != ""
 	}
 
-	if slices.ContainsFunc(in.Certificates, func(c fwconfig.Certificate) bool { return c.HTTP01() }) {
+	if len(acmeHTTPInterfaces(in)) > 0 {
 		fmt.Fprintf(b, "\tset %s {\n\t\ttype inet_service\n\t}\n\n", ACMEHTTPSet)
 	}
 	if hasTunnelBroker(in) {
@@ -592,6 +592,26 @@ var (
 	ACMEHTTPClose = fmt.Sprintf("flush set inet %s %s\n", TableName, ACMEHTTPSet)
 )
 
+// acmeHTTPInterfaces are where the upstream CA's HTTP-01 requests come in,
+// sorted: the HTTP-01 certificates' and ACME proxy policies' interfaces.
+func acmeHTTPInterfaces(in *fwconfig.Instance) []string {
+	var out []string
+	for _, c := range in.Certificates {
+		if c.HTTP01() && !slices.Contains(out, c.Interface) {
+			out = append(out, c.Interface)
+		}
+	}
+	if x := in.ACMEProxy; x != nil {
+		for _, ifc := range x.HTTP01Interfaces() {
+			if !slices.Contains(out, ifc) {
+				out = append(out, ifc)
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
 // AutoInputRules opens what the configured services need, so a user who
 // enables the DHCP server on lan doesn't also have to write the rule.
 func AutoInputRules(in *fwconfig.Instance) []AutoRule {
@@ -661,16 +681,9 @@ func AutoInputRules(in *fwconfig.Instance) []AutoRule {
 		}
 		out = append(out, r)
 	}
-	// HTTP-01 challenges come in on the certificates' interfaces; the
-	// rule matches only while one is being answered.
-	var acme []string
-	for _, c := range in.Certificates {
-		if c.HTTP01() && !slices.Contains(acme, c.Interface) {
-			acme = append(acme, c.Interface)
-		}
-	}
-	if len(acme) > 0 {
-		sort.Strings(acme)
+	// HTTP-01 challenges come in on the certificates' and the ACME proxy's
+	// interfaces; the rule matches only while one is being answered.
+	if acme := acmeHTTPInterfaces(in); len(acme) > 0 {
 		out = append(out, AutoRule{Service: ACMEHTTPService, InInterfaces: acme, Protocol: "tcp", DstPort: 80, PortSet: ACMEHTTPSet})
 	}
 	// The ACME proxy's clients, from the policies' sources.

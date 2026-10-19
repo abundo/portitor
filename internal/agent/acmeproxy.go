@@ -60,9 +60,11 @@ const preauthKeep = time.Hour
 
 // acmeProxyManager runs each instance's ACME proxy (fwconfig.ACMEProxy):
 // an acmeserver.Server on its port in the instance's namespace. A name a
-// client orders is authorized upstream at once (preauthorize), by DNS-01
-// through its policy's DNS update client, while the client answers its
-// HTTP-01 challenge, which the agent checks from the instance; finalizing
+// client orders is authorized upstream at once (preauthorize), as its
+// policy says: by DNS-01 through the policy's DNS update client, or by
+// HTTP-01 answered on port 80 of the instance (certManager's
+// http01Server), while the client answers its own HTTP-01 challenge,
+// which the agent checks from the instance; finalizing
 // then orders the certificate for the client's CSR, reusing those
 // authorizations. Upstream orders run one at a time with the
 // certificates' (certManager.order).
@@ -217,30 +219,52 @@ func (m *acmeProxyManager) start(it acmeProxyItem) *proxyRun {
 }
 
 // upstream is the request of an upstream order of names for client: the
-// proxy's CA, and DNS-01 through each name's policy's DNS update client.
-func upstream(it acmeProxyItem, names []string, client netip.Addr) (acme.Request, error) {
+// proxy's CA, and the challenge of the names' policies. With DNS-01 each
+// name's TXT record is written through its own policy's DNS update
+// client; with HTTP-01 the agent answers on port 80 of the instance until
+// done is called. lego picks one challenge for all the names of an order,
+// so their policies must agree.
+func (m *acmeProxyManager) upstream(it acmeProxyItem, names []string, client netip.Addr) (req acme.Request, done func(), err error) {
 	dir, err := fwconfig.ACMEDirectory(it.cfg.CA)
 	if err != nil {
-		return acme.Request{}, err
+		return acme.Request{}, nil, err
 	}
+	req = acme.Request{Directory: dir, Email: it.cfg.Email, Domains: names}
 	p := &multiDNS01{by: map[string]challenge.ProviderTimeout{}}
 	clients := map[string]challenge.ProviderTimeout{}
-	for _, n := range names {
+	http01 := false
+	for i, n := range names {
 		pol := it.cfg.Policy(n, client)
 		if pol == nil {
-			return acme.Request{}, fmt.Errorf("%s: no policy allows it from %s", n, client)
+			return acme.Request{}, nil, fmt.Errorf("%s: no policy allows it from %s", n, client)
+		}
+		if i > 0 && pol.HTTP01() != http01 {
+			return acme.Request{}, nil, fmt.Errorf("%s and %s are validated upstream by different challenges: order them separately", names[0], n)
+		}
+		http01 = pol.HTTP01()
+		if http01 {
+			continue
 		}
 		d := pol.DNS01
+		if d == nil {
+			return acme.Request{}, nil, fmt.Errorf("%s: policy %s has no DNS update client", n, pol.Name)
+		}
 		if clients[d.Client] == nil {
-			u, err := dyndns.NewTXTUpdater(d, instanceDNSEnv(it.netns))
+			u, err := dyndns.NewTXTUpdater(*d, instanceDNSEnv(it.netns))
 			if err != nil {
-				return acme.Request{}, fmt.Errorf("DNS update %s: %w", d.Client, err)
+				return acme.Request{}, nil, fmt.Errorf("DNS update %s: %w", d.Client, err)
 			}
 			clients[d.Client] = acme.NewDNS01(u)
 		}
 		p.by[n] = clients[d.Client]
 	}
-	return acme.Request{Directory: dir, Email: it.cfg.Email, Domains: names, DNS01: p}, nil
+	if http01 {
+		s := &http01Server{m: m.certs, netns: it.netns, tokens: map[string]string{}}
+		req.HTTP01 = s
+		return req, s.close, nil
+	}
+	req.DNS01 = p
+	return req, func() {}, nil
 }
 
 // preauthorize starts the upstream authorization of an order's names,
@@ -274,10 +298,11 @@ func (m *acmeProxyManager) preauthorize(r *proxyRun, names []string, client neti
 	m.mu.Unlock()
 	go func() {
 		err := m.upstreamCall(func() error {
-			req, err := upstream(r.item, names, client)
+			req, done, err := m.upstream(r.item, names, client)
 			if err != nil {
 				return err
 			}
+			defer done()
 			return m.authorize(m.paths.ACMEAccountsDir(), req)
 		})
 		if err != nil {
@@ -320,10 +345,11 @@ func (m *acmeProxyManager) issue(ctx context.Context, r *proxyRun, csr *x509.Cer
 	go func() {
 		var chain []byte
 		err := m.upstreamCall(func() error {
-			req, err := upstream(r.item, names, client)
+			req, done, err := m.upstream(r.item, names, client)
 			if err != nil {
 				return err
 			}
+			defer done()
 			chain, err = m.obtain(m.paths.ACMEAccountsDir(), req, csr)
 			return err
 		})

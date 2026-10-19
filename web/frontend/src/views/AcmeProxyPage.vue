@@ -2,8 +2,9 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
 <!-- The ACME proxy: an ACME server for the hosts behind the firewall,
-     which gets their certificates from Let's Encrypt by DNS-01. Its
-     settings and interfaces, its policies, and what it has issued. -->
+     which gets their certificates from Let's Encrypt by DNS-01 or
+     HTTP-01. Its settings and interfaces, its policies, and what it has
+     issued. -->
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
@@ -34,10 +35,11 @@ const cas = ref([])
 onMounted(async () => (cas.value = await api.acmeCAs()))
 const caItems = computed(() => cas.value.map((c) => ({ label: c.label, value: c.name })))
 
-// The instance's certificates (the one the server presents) and DNS
-// update clients (the policies').
+// The instance's certificates (the one the server presents), DNS update
+// clients and interfaces (the policies' DNS-01 and HTTP-01).
 const certs = ref([])
 const dnsClients = ref([])
+const ifaceRows = ref([])
 const SELF = 0 // the self-signed certificate, null in the database
 const certItems = computed(() => [
   { label: 'Self-signed (made by the firewall)', value: SELF },
@@ -47,6 +49,13 @@ const dnsClientItems = computed(() =>
   dnsClients.value.map((c) => ({ label: `${c.name} (${c.zone})`, value: c.id })),
 )
 const dnsClientName = (id) => dnsClients.value.find((c) => c.id === id)?.name ?? ''
+const ifaceItems = computed(() =>
+  ifaceRows.value.map((i) => ({ label: withLabel(i.label, i.name), value: i.id })),
+)
+const ifaceText = (id) => {
+  const i = ifaceRows.value.find((x) => x.id === id)
+  return i ? withLabel(i.label, i.name) : ''
+}
 
 // The instance's acme_proxy_* fields, and its interfaces' acme_proxy_serve.
 const form = reactive({
@@ -71,6 +80,7 @@ async function load() {
     dyndnsClients.list({ instance_id: id }),
   ])
   loaded = ifs
+  ifaceRows.value = ifs
   certs.value = cs
   dnsClients.value = dcs
   Object.assign(form, {
@@ -164,7 +174,14 @@ const policyColumns = [
     class: 'font-mono',
     format: (p) => (p.sources.length ? p.sources.join(', ') : 'any'),
   },
-  { key: 'dyndns_client_id', label: 'DNS-01', format: (p) => dnsClientName(p.dyndns_client_id) },
+  {
+    key: 'challenge',
+    label: 'Upstream',
+    format: (p) =>
+      p.challenge === 'http-01'
+        ? `HTTP-01 on ${ifaceText(p.interface_id)}`
+        : `DNS-01 by ${dnsClientName(p.dyndns_client_id)}`,
+  },
   { key: 'enabled', label: 'Enabled' },
   { key: 'description', label: 'Description' },
 ]
@@ -187,12 +204,32 @@ const policyFields = computed(() => [
     hint: 'The hosts that may ask, as prefixes or hosts and prefixes by name. Every address a name resolves to must be in them too. Empty: any host that can reach the proxy.',
   },
   {
+    key: 'challenge',
+    label: 'Upstream challenge',
+    type: 'select',
+    items: [
+      { label: 'DNS-01 (TXT record)', value: 'dns-01' },
+      { label: 'HTTP-01 (port 80)', value: 'http-01' },
+    ],
+    hint: 'How Let’s Encrypt checks the names for the firewall. DNS-01: the firewall writes a TXT record through a DNS update client, so the names need not be reachable from the Internet. HTTP-01: the firewall answers on port 80 itself, so the names must resolve to it from the Internet (internal DNS may still give the clients’ own addresses). The names of one order must use the same challenge.',
+  },
+  {
     key: 'dyndns_client_id',
+    show: (form) => form.challenge !== 'http-01',
     label: 'DNS update client',
     type: 'select',
     items: () => dnsClientItems.value,
     required: true,
     hint: 'Writes the TXT records of the DNS-01 challenge at Let’s Encrypt, as for a DNS-01 certificate: in its zone, following a CNAME at _acme-challenge.<name>.',
+  },
+  {
+    key: 'interface_id',
+    show: (form) => form.challenge === 'http-01',
+    label: 'Interface',
+    type: 'select',
+    items: () => ifaceItems.value,
+    required: true,
+    hint: 'Where Let’s Encrypt’s HTTP-01 requests come in. Port 80 is opened on it only while a challenge is answered, as for an HTTP-01 certificate; it must not be forwarded elsewhere.',
   },
 ])
 </script>
@@ -207,9 +244,10 @@ const policyFields = computed(() => [
             An ACME server for the hosts behind the firewall. Point certbot, Caddy, Traefik or
             another ACME client at its directory URL: it proves control of a name over the internal
             network (HTTP-01, which the firewall checks from this virtual firewall), and the
-            firewall gets the certificate from Let's Encrypt by DNS-01. Only the firewall holds the
-            DNS credentials, and the hosts need not be reachable from the Internet. Policies decide
-            which hosts may ask for which names. Changes take effect when committed.
+            firewall gets the certificate from Let's Encrypt, by DNS-01 or by HTTP-01 answered on
+            the firewall itself, as each policy says. Only the firewall holds the DNS credentials
+            and the ACME account, and the hosts need not be reachable from the Internet. Policies
+            decide which hosts may ask for which names. Changes take effect when committed.
           </p>
           <fieldset :disabled="readOnly" class="space-y-3">
             <UFormField label="Enabled" :ui="inlineField">
@@ -299,12 +337,12 @@ const policyFields = computed(() => [
 
       <CrudPage
         title="Policies"
-        description="Which hosts may get certificates for which names, and the DNS update client that answers Let's Encrypt for them. A name is looked up in the policies by name order; the first that allows it from the client is used."
+        description="Which hosts may get certificates for which names, and how the firewall answers Let's Encrypt for them: by DNS-01 through a DNS update client, or by HTTP-01 on an interface. A name is looked up in the policies by name order; the first that allows it from the client is used."
         :api="acmeProxyPolicies"
         :params="{ instance_id: store.currentId }"
         :columns="policyColumns"
         :fields="policyFields"
-        :defaults="{ enabled: true, domains: [], sources: [] }"
+        :defaults="{ enabled: true, domains: [], sources: [], challenge: 'dns-01' }"
         noun="policy"
         new-label="Add policy"
         :item-name="(p) => `policy ${p.name}`"

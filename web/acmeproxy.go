@@ -16,7 +16,8 @@ import (
 
 // The ACME proxy, per instance: the instance's acme_proxy_* fields
 // (prepareInstanceACMEProxy), its interfaces' acme_proxy_serve, and its
-// policies.
+// policies, each getting its names upstream by DNS-01 (a DNS update
+// client) or HTTP-01 (an interface).
 
 func prepareInstanceACMEProxy(tx *gorm.DB, in *models.Instance) error {
 	if in.AcmeProxyPort == 0 {
@@ -91,9 +92,24 @@ func prepareAcmeProxyPolicy(tx *gorm.DB, p, old *models.AcmeProxyPolicy) error {
 	if err := checkEntries(tx, "sources", p.Sources, entryCIDR); err != nil {
 		return err
 	}
-	var dc models.DyndnsClient
-	if p.DyndnsClientID == 0 || tx.First(&dc, p.DyndnsClientID).Error != nil || dc.InstanceID != p.InstanceID {
-		return bad("pick a DNS update client of this virtual firewall")
+	if p.Challenge == "" {
+		p.Challenge = fwconfig.ChallengeDNS01
+	}
+	switch p.Challenge {
+	case fwconfig.ChallengeHTTP01:
+		p.DyndnsClientID = nil
+		var ifc models.Interface
+		if p.InterfaceID == nil || tx.First(&ifc, *p.InterfaceID).Error != nil || ifc.InstanceID != p.InstanceID {
+			return bad("pick an interface of this virtual firewall")
+		}
+	case fwconfig.ChallengeDNS01:
+		p.InterfaceID = nil
+		var dc models.DyndnsClient
+		if p.DyndnsClientID == nil || tx.First(&dc, *p.DyndnsClientID).Error != nil || dc.InstanceID != p.InstanceID {
+			return bad("pick a DNS update client of this virtual firewall")
+		}
+	default:
+		return bad("challenge: " + strings.Join(fwconfig.Challenges, " or "))
 	}
 	return nil
 }
@@ -123,6 +139,19 @@ func refuseProxyDyndns(tx *gorm.DB, dc *models.DyndnsClient) error {
 		tx.Model(&models.AcmeProxyPolicy{}).Where("dyndns_client_id = ?", dc.ID).Order("name").Pluck("name", &names)
 		for i := range names {
 			names[i] = "ACME proxy policy " + names[i]
+		}
+		return names
+	})
+}
+
+// refuseProxyIface refuses removing an interface from its instance while
+// an ACME proxy policy answers HTTP-01 on it.
+func refuseProxyIface(tx *gorm.DB, i *models.Interface) error {
+	return usedBy(tx, i.Name, &models.AcmeProxyPolicy{}, "interface_id", i.ID, func() []string {
+		var names []string
+		tx.Model(&models.AcmeProxyPolicy{}).Where("interface_id = ?", i.ID).Order("name").Pluck("name", &names)
+		for j := range names {
+			names[j] = "ACME proxy policy " + names[j]
 		}
 		return names
 	})

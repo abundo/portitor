@@ -390,8 +390,11 @@ the certificate portitor-web serves, chosen under Settings
   policy (by name) that matches it and the client's address (`ACMEProxy.Policy`);
   the agent checks HTTP-01 from the instance (every address the name resolves to
   must be in the policy's sources) and orders upstream for the client's CSR with
-  DNS-01 through the policy's DNS update client (`DNS01`, copied in by the builder,
-  redacted in history). A new order starts the upstream authorization at once
+  the policy's `Challenge`: DNS-01 through its DNS update client (`DNS01`, copied in
+  by the builder, redacted in history), or HTTP-01 on its `Interface`, answered by
+  certManager's `http01Server` with port 80 opened as for a certificate
+  (`ACMEProxy.HTTP01Interfaces`, the `acme_http` set). lego picks one challenge per
+  order, so the names of one order must share it. A new order starts the upstream authorization at once
   (`acme.Authorize`) so finalize (`acme.ObtainForCSR`) reuses it: lego clients wait
   only 30 s. Upstream calls share `certManager.order`. The clients' accounts, the
   self-signed certificate and the issue log are in `<state_dir>/acmeproxy/<instance>`;

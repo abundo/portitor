@@ -892,6 +892,19 @@ func TestACMEHTTPRule(t *testing.T) {
 	if nft := Nftables(in, nil, Paths{}); strings.Contains(nft, "acme_http") {
 		t.Errorf("acme_http without certificates:\n%s", nft)
 	}
+	// An ACME proxy policy's HTTP-01 opens it on the policy's interface.
+	in.ACMEProxy = &fwconfig.ACMEProxy{Port: 8555, Interfaces: []string{"eth1"}, Policies: []fwconfig.ACMEProxyPolicy{
+		{Name: "web", Challenge: fwconfig.ChallengeHTTP01, Interface: "eth0"},
+	}}
+	nft = Nftables(in, nil, Paths{})
+	for _, want := range []string{
+		"\tset acme_http {\n\t\ttype inet_service\n\t}\n",
+		`iifname "eth0" tcp dport @acme_http accept comment "auto: acme http-01"`,
+	} {
+		if !strings.Contains(nft, want) {
+			t.Errorf("no %q in\n%s", want, nft)
+		}
+	}
 }
 
 func TestACMEProxyRule(t *testing.T) {

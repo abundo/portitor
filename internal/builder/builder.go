@@ -1411,7 +1411,7 @@ func Certificate(c *models.Certificate, iface string) fwconfig.Certificate {
 }
 
 // acmeProxy is an instance's ACME proxy, with its enabled policies (names
-// expanded, DNS update clients copied in).
+// expanded, DNS update clients copied in, interfaces by name).
 func (d *data) acmeProxy(mi *models.Instance, in *fwconfig.Instance, prefixes func(where string, list []string) []string, addf func(string, ...any)) *fwconfig.ACMEProxy {
 	x := &fwconfig.ACMEProxy{Port: mi.AcmeProxyPort, CA: mi.AcmeProxyCa, Email: mi.AcmeProxyEmail, Interfaces: []string{}, Policies: []fwconfig.ACMEProxyPolicy{}}
 	for _, ifc := range in.Interfaces {
@@ -1434,16 +1434,30 @@ func (d *data) acmeProxy(mi *models.Instance, in *fwconfig.Instance, prefixes fu
 		if p.InstanceID != mi.ID || !p.Enabled {
 			continue
 		}
-		i := slices.IndexFunc(d.dyndns, func(dc models.DyndnsClient) bool { return dc.ID == p.DyndnsClientID && dc.InstanceID == mi.ID })
-		if i < 0 {
-			addf("instance %s: ACME proxy policy %s: its DNS update client is not in this instance", mi.Name, p.Name)
-			continue
-		}
-		x.Policies = append(x.Policies, fwconfig.ACMEProxyPolicy{
+		pol := fwconfig.ACMEProxyPolicy{
 			Name: p.Name, Domains: slices.Clone([]string(p.Domains)),
 			Sources: prefixes("instance "+mi.Name+": ACME proxy policy "+p.Name, p.Sources),
-			DNS01:   *DNS01(&d.dyndns[i]),
-		})
+		}
+		if p.Challenge == fwconfig.ChallengeHTTP01 {
+			i := slices.IndexFunc(d.interfaces, func(ifc models.Interface) bool {
+				return p.InterfaceID != nil && ifc.ID == *p.InterfaceID && ifc.InstanceID == mi.ID
+			})
+			if i < 0 {
+				addf("instance %s: ACME proxy policy %s: its interface is not in this instance", mi.Name, p.Name)
+				continue
+			}
+			pol.Challenge, pol.Interface = fwconfig.ChallengeHTTP01, d.interfaces[i].Name
+		} else {
+			i := slices.IndexFunc(d.dyndns, func(dc models.DyndnsClient) bool {
+				return p.DyndnsClientID != nil && dc.ID == *p.DyndnsClientID && dc.InstanceID == mi.ID
+			})
+			if i < 0 {
+				addf("instance %s: ACME proxy policy %s: its DNS update client is not in this instance", mi.Name, p.Name)
+				continue
+			}
+			pol.Challenge, pol.DNS01 = fwconfig.ChallengeDNS01, DNS01(&d.dyndns[i])
+		}
+		x.Policies = append(x.Policies, pol)
 	}
 	return x
 }
