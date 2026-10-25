@@ -11,6 +11,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useToast } from '@nuxt/ui/composables'
 import AddrInput from '@/components/AddrInput.vue'
 import EntriesEditor from '@/components/EntriesEditor.vue'
+import FormHeader from '@/components/FormHeader.vue'
 import NeedInstance from '@/components/NeedInstance.vue'
 import SearchInput from '@/components/SearchInput.vue'
 import { api, instances, interfaces } from '@/api'
@@ -273,7 +274,9 @@ async function save() {
       <template #config>
         <div class="card mt-2">
           <form @submit.prevent="save">
-            <h2 class="border-b border-default pb-1 mb-2 text-xl font-semibold">NTP</h2>
+            <FormHeader title="NTP">
+              <UButton v-if="!readOnly" type="submit" :loading="saving">Save</UButton>
+            </FormHeader>
             <p class="mb-4 text-sm text-muted">
               chrony keeps the time from the servers below. On the default virtual firewall it sets
               the firewall's clock; on another it serves the time to its clients without setting the
@@ -353,10 +356,6 @@ async function save() {
                 <AddrInput v-model="form.ntp_allow" multiple placeholder="192.168.1.0/24" />
               </UFormField>
             </fieldset>
-
-            <div v-if="!readOnly" class="mt-4">
-              <UButton type="submit" :loading="saving">Save</UButton>
-            </div>
           </form>
         </div>
       </template>

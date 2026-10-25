@@ -10,6 +10,7 @@ import { computed, reactive, ref, watch } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import CrudPage from '@/components/CrudPage.vue'
 import EntriesEditor from '@/components/EntriesEditor.vue'
+import FormHeader from '@/components/FormHeader.vue'
 import NameSelect from '@/components/NameSelect.vue'
 import { ospfConfig, ospfInterfaces } from '@/api'
 import { errMsg } from '@/api/http'
@@ -222,19 +223,7 @@ const ifDefaults = computed(() => ({
 <template>
   <div class="space-y-4">
     <div class="card">
-      <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <div class="text-lg font-semibold">{{ name }}</div>
-          <p class="max-w-3xl text-sm text-muted">
-            {{ name }} ({{ v2 ? 'IPv4' : 'IPv6' }}) runs FRR's {{ v2 ? 'ospfd' : 'ospf6d' }} in this
-            virtual firewall. It is off until enabled here; changes take effect when committed. The
-            firewall lets OSPF in and out on its interfaces by itself.
-            <template v-if="vrfName">
-              This is VRF {{ vrfName }}'s {{ name }}, on the VRF's interfaces; its routes go in the
-              VRF's table.
-            </template>
-          </p>
-        </div>
+      <FormHeader :title="name">
         <UButton
           v-if="!readOnly"
           label="Save"
@@ -242,7 +231,16 @@ const ifDefaults = computed(() => ({
           :disabled="!cfgForm.dirty()"
           @click="save"
         />
-      </div>
+      </FormHeader>
+      <p class="mb-4 max-w-3xl text-sm text-muted">
+        {{ name }} ({{ v2 ? 'IPv4' : 'IPv6' }}) runs FRR's {{ v2 ? 'ospfd' : 'ospf6d' }} in this
+        virtual firewall. It is off until enabled here; changes take effect when committed. The
+        firewall lets OSPF in and out on its interfaces by itself.
+        <template v-if="vrfName">
+          This is VRF {{ vrfName }}'s {{ name }}, on the VRF's interfaces; its routes go in the
+          VRF's table.
+        </template>
+      </p>
       <fieldset :disabled="readOnly" class="max-w-3xl space-y-3">
         <UFormField label="Enabled" :ui="inlineField" help="Starts the daemon; off stops it.">
           <USwitch v-model="cfg.enabled" />

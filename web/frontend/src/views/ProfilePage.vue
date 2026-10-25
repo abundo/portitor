@@ -6,6 +6,7 @@ import { reactive } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import { errMsg } from '@/api/http'
 import { useAuthStore } from '@/stores/auth'
+import FormHeader from '@/components/FormHeader.vue'
 import TwoFactorCard from '@/components/TwoFactorCard.vue'
 import { usePageForm } from '@/composables/useFormGuard'
 import { dateFormat, datetime } from '@/utils/time'
@@ -69,31 +70,28 @@ async function save() {
       title="Set up two-factor login"
       description="An admin requires two-factor login for your user. Set it up below to use Portitor."
     />
-    <div class="card">
-      <div class="mb-3 text-lg font-semibold">My settings</div>
-      <form class="space-y-3" @submit.prevent="save">
-        <UFormField label="Username" help="Used to log in.">
-          <UInput
-            :model-value="auth.user?.username"
-            class="w-full"
-            autocomplete="username"
-            disabled
-          />
-        </UFormField>
-        <UFormField label="Full name">
-          <UInput v-model="form.full_name" class="w-full" autocomplete="name" />
-        </UFormField>
-        <UFormField label="Email">
-          <UInput v-model="form.email" type="email" class="w-full" autocomplete="email" />
-        </UFormField>
-        <div class="flex items-center gap-3">
-          <UButton type="submit">Save</UButton>
-          <UButton to="/profile/password" color="neutral" variant="ghost" icon="i-lucide-key-round">
-            Change password
-          </UButton>
-        </div>
-      </form>
-    </div>
+    <form class="card space-y-3" @submit.prevent="save">
+      <FormHeader title="My settings">
+        <UButton to="/profile/password" color="neutral" variant="ghost" icon="i-lucide-key-round">
+          Change password
+        </UButton>
+        <UButton type="submit">Save</UButton>
+      </FormHeader>
+      <UFormField label="Username" help="Used to log in.">
+        <UInput
+          :model-value="auth.user?.username"
+          class="w-full"
+          autocomplete="username"
+          disabled
+        />
+      </UFormField>
+      <UFormField label="Full name">
+        <UInput v-model="form.full_name" class="w-full" autocomplete="name" />
+      </UFormField>
+      <UFormField label="Email">
+        <UInput v-model="form.email" type="email" class="w-full" autocomplete="email" />
+      </UFormField>
+    </form>
     <TwoFactorCard />
     <div class="card">
       <div class="mb-3 text-lg font-semibold">Display</div>

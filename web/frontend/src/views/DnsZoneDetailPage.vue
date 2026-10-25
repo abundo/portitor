@@ -5,6 +5,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useToast } from '@nuxt/ui/composables'
+import FormHeader from '@/components/FormHeader.vue'
 import ZoneRecordsTable from '@/components/ZoneRecordsTable.vue'
 import { api, dnsDnssecPolicies, dnsRecords, dnsSoaTemplates, dnsTemplates, dnsZones } from '@/api'
 import { errMsg } from '@/api/http'
@@ -223,20 +224,43 @@ useUnsaved(() => !deleted.value && (!!dirty.value || recordsDirty.value))
 
 <template>
   <div v-if="zone" class="space-y-4">
-    <div class="flex flex-wrap items-center gap-2">
-      <UButton to="/dns?tab=zones" color="neutral" variant="ghost" icon="i-lucide-arrow-left" />
-      <div class="font-mono text-lg font-semibold">{{ zone.name }}</div>
-      <UBadge color="neutral" variant="subtle">{{ typeLabel }}</UBadge>
-      <UBadge v-if="effective.policy" color="success" variant="subtle" icon="i-lucide-lock">
-        DNSSEC: {{ effective.policy.name }}
-      </UBadge>
-      <span class="text-sm text-muted">instance {{ store.nameOf(zone.instance_id) }}</span>
-    </div>
+    <FormHeader>
+      <template #title>
+        <UButton to="/dns?tab=zones" color="neutral" variant="ghost" icon="i-lucide-arrow-left" />
+        <span class="font-mono">{{ zone.name }}</span>
+        <UBadge color="neutral" variant="subtle">{{ typeLabel }}</UBadge>
+        <UBadge v-if="effective.policy" color="success" variant="subtle" icon="i-lucide-lock">
+          DNSSEC: {{ effective.policy.name }}
+        </UBadge>
+        <span class="text-sm font-normal text-muted"
+          >instance {{ store.nameOf(zone.instance_id) }}</span
+        >
+      </template>
+      <template v-if="auth.canEdit">
+        <UButton
+          v-if="activeTab === 'info'"
+          type="submit"
+          form="zone-info-form"
+          :loading="saving"
+          :disabled="!dirty"
+          >Save</UButton
+        >
+        <UButton
+          v-else-if="isForward"
+          type="button"
+          :loading="savingRecords"
+          :disabled="!recordsDirty"
+          @click="saveRecords"
+        >
+          Save
+        </UButton>
+      </template>
+    </FormHeader>
 
     <div class="card">
       <UTabs v-model="activeTab" :items="tabItems" :unmount-on-hide="false">
         <template #info>
-          <form class="pt-4" @submit.prevent="save">
+          <form id="zone-info-form" class="pt-4" @submit.prevent="save">
             <fieldset :disabled="!auth.canEdit" class="space-y-4">
               <div class="grid gap-x-4 gap-y-3 sm:grid-cols-2">
                 <UFormField label="Name" required>
@@ -253,9 +277,6 @@ useUnsaved(() => !deleted.value && (!!dirty.value || recordsDirty.value))
                 <UTextarea v-model="form.description" class="w-full" :rows="3" />
               </UFormField>
               <div class="flex gap-2">
-                <UButton v-if="auth.canEdit" type="submit" :loading="saving" :disabled="!dirty"
-                  >Save</UButton
-                >
                 <UButton
                   to="/dns?tab=templates"
                   color="neutral"
@@ -358,17 +379,6 @@ useUnsaved(() => !deleted.value && (!!dirty.value || recordsDirty.value))
                 :instance="instance?.name ?? ''"
                 :disabled="!auth.canEdit"
               >
-                <template #leading-actions>
-                  <UButton
-                    v-if="auth.canEdit"
-                    type="button"
-                    :loading="savingRecords"
-                    :disabled="!recordsDirty"
-                    @click="saveRecords"
-                  >
-                    Save
-                  </UButton>
-                </template>
                 <template #actions>
                   <UButton
                     type="button"

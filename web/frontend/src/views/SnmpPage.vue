@@ -8,6 +8,7 @@ import { computed, reactive, ref, watch } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import AddrInput from '@/components/AddrInput.vue'
 import CrudPage from '@/components/CrudPage.vue'
+import FormHeader from '@/components/FormHeader.vue'
 import NeedInstance from '@/components/NeedInstance.vue'
 import SearchInput from '@/components/SearchInput.vue'
 import { instances, interfaces, snmpUsers } from '@/api'
@@ -140,7 +141,11 @@ const userDefaults = {
     <div class="space-y-4">
       <div class="card">
         <form @submit.prevent="save">
-          <h2 class="border-b border-default pb-1 mb-2 text-xl font-semibold">SNMP</h2>
+          <FormHeader title="SNMP">
+            <UButton v-if="!readOnly" type="submit" :loading="saving" :disabled="!pageForm.dirty()"
+              >Save</UButton
+            >
+          </FormHeader>
           <p class="mb-4 text-sm text-muted">
             An SNMP agent (net-snmp) lets management platforms monitor this virtual firewall:
             interfaces and their traffic, addresses and routes, system load, memory and disks. It is
@@ -233,10 +238,6 @@ const userDefaults = {
               <AddrInput v-model="form.snmp_allow" multiple placeholder="192.168.1.10/32" />
             </UFormField>
           </fieldset>
-
-          <div v-if="!readOnly" class="mt-4">
-            <UButton type="submit" :loading="saving" :disabled="!pageForm.dirty()">Save</UButton>
-          </div>
         </form>
       </div>
 

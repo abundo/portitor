@@ -9,6 +9,7 @@ import { computed, reactive, ref, watch } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import CrudPage from '@/components/CrudPage.vue'
 import EntriesEditor from '@/components/EntriesEditor.vue'
+import FormHeader from '@/components/FormHeader.vue'
 import { isisConfig, isisInterfaces } from '@/api'
 import { errMsg } from '@/api/http'
 import { usePageForm } from '@/composables/useFormGuard'
@@ -288,19 +289,7 @@ const ifDefaults = {
 <template>
   <div class="space-y-4">
     <div class="card">
-      <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <div class="text-lg font-semibold">IS-IS</div>
-          <p class="max-w-3xl text-sm text-muted">
-            IS-IS (IPv4 and IPv6) runs FRR's isisd in this virtual firewall. It is off until enabled
-            here; changes take effect when committed. IS-IS is not IP, so no firewall rules apply to
-            it.
-            <template v-if="vrfName">
-              This is VRF {{ vrfName }}'s IS-IS, on the VRF's interfaces; its routes go in the VRF's
-              table.
-            </template>
-          </p>
-        </div>
+      <FormHeader title="IS-IS">
         <UButton
           v-if="!readOnly"
           label="Save"
@@ -308,7 +297,15 @@ const ifDefaults = {
           :disabled="!cfgForm.dirty()"
           @click="save"
         />
-      </div>
+      </FormHeader>
+      <p class="mb-4 max-w-3xl text-sm text-muted">
+        IS-IS (IPv4 and IPv6) runs FRR's isisd in this virtual firewall. It is off until enabled
+        here; changes take effect when committed. IS-IS is not IP, so no firewall rules apply to it.
+        <template v-if="vrfName">
+          This is VRF {{ vrfName }}'s IS-IS, on the VRF's interfaces; its routes go in the VRF's
+          table.
+        </template>
+      </p>
       <fieldset :disabled="readOnly" class="max-w-3xl space-y-3">
         <UFormField label="Enabled" :ui="inlineField" help="Starts isisd; off stops it.">
           <USwitch v-model="cfg.enabled" />

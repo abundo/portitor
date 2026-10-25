@@ -10,6 +10,7 @@ import { useDeployStore } from '@/stores/deploy'
 import { useInstanceStore } from '@/stores/instances'
 import { useAuthStore } from '@/stores/auth'
 import { usePageForm } from '@/composables/useFormGuard'
+import FormHeader from '@/components/FormHeader.vue'
 
 const toast = useToast()
 const deploy = useDeployStore()
@@ -69,6 +70,9 @@ async function saveSettings() {
 
 <template>
   <form class="grid gap-4 xl:grid-cols-2" @submit.prevent="saveSettings">
+    <FormHeader title="Settings" class="xl:col-span-2">
+      <UButton type="submit">Save</UButton>
+    </FormHeader>
     <div class="card xl:col-span-2">
       <div class="mb-1 text-lg font-semibold">Portitor web</div>
       <p class="mb-4 text-sm text-muted">
@@ -143,8 +147,7 @@ async function saveSettings() {
       </div>
     </div>
 
-    <div class="flex items-center gap-3 xl:col-span-2">
-      <UButton type="submit">Save</UButton>
+    <div class="xl:col-span-2">
       <p v-if="version" class="text-xs text-muted">
         portitor-config {{ version.version }} ({{ version.commit.slice(0, 8) }}),
         {{ version.go_version }}

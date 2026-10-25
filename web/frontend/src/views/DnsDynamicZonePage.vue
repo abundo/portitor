@@ -7,6 +7,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useToast } from '@nuxt/ui/composables'
 import DyndnsClientForm from '@/components/DyndnsClientForm.vue'
 import DyndnsState from '@/components/DyndnsState.vue'
+import FormHeader from '@/components/FormHeader.vue'
 import ZoneRecordsTable from '@/components/ZoneRecordsTable.vue'
 import { api, dyndnsClients, dyndnsRecords } from '@/api'
 import { errMsg } from '@/api/http'
@@ -108,20 +109,26 @@ useUnsaved(() => !deleted.value && dirty.value)
 
 <template>
   <div v-if="client" class="space-y-4">
-    <div class="flex flex-wrap items-center gap-2">
-      <UButton to="/dns?tab=zones" color="neutral" variant="ghost" icon="i-lucide-arrow-left" />
-      <div class="font-mono text-lg font-semibold">{{ client.zone }}</div>
-      <UBadge color="neutral" variant="subtle">{{ dynamicZoneLabel }}</UBadge>
-      <span class="text-sm text-muted">instance {{ store.nameOf(client.instance_id) }}</span>
+    <FormHeader>
+      <template #title>
+        <UButton to="/dns?tab=zones" color="neutral" variant="ghost" icon="i-lucide-arrow-left" />
+        <span class="font-mono">{{ client.zone }}</span>
+        <UBadge color="neutral" variant="subtle">{{ dynamicZoneLabel }}</UBadge>
+        <span class="text-sm font-normal text-muted"
+          >instance {{ store.nameOf(client.instance_id) }}</span
+        >
+      </template>
       <UButton
-        class="ms-auto"
         color="neutral"
         variant="outline"
         :icon="auth.canEdit ? 'i-lucide-settings' : 'i-lucide-eye'"
         label="Settings"
         @click="auth.canEdit ? settings.openEdit(client) : settings.openView(client)"
       />
-    </div>
+      <UButton v-if="auth.canEdit" type="button" :loading="saving" :disabled="!dirty" @click="save">
+        Save
+      </UButton>
+    </FormHeader>
     <DyndnsState :name="client.name" />
 
     <div class="card space-y-3">
@@ -131,19 +138,7 @@ useUnsaved(() => !deleted.value && dirty.value)
         interface's address; TXT with an empty value holds the time of the last update. TTL empty:
         300. One record per name and type; a name with a CNAME can have no other records.
       </p>
-      <ZoneRecordsTable v-model="records" :types="types" simple :disabled="!auth.canEdit">
-        <template #leading-actions>
-          <UButton
-            v-if="auth.canEdit"
-            type="button"
-            :loading="saving"
-            :disabled="!dirty"
-            @click="save"
-          >
-            Save
-          </UButton>
-        </template>
-      </ZoneRecordsTable>
+      <ZoneRecordsTable v-model="records" :types="types" simple :disabled="!auth.canEdit" />
     </div>
     <DyndnsClientForm ref="settings" @changed="onChanged" />
   </div>

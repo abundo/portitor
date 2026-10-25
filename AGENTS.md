@@ -588,6 +588,9 @@ singular); a custom page uses `SearchInput` above each table,
 - **Forms and dialogs** are wide when the screen allows: each label sits on the
   same row as its value. On a narrow screen they fall back to one column, with the
   label above the value.
+- **Page forms** (a form on the page, not in a dialog) put their title and Save
+  button in `FormHeader.vue` at the top: it stays visible (sticky) while the form
+  scrolls under it. A Save button outside the form names it (`form="..."`).
 - **Lists of entries** with several fields (a prefix list's entries, BGP networks)
   are edited in place in the form with `EntriesEditor.vue`, one row per entry with
   a remove button (and up/down where order decides); route map entries, which

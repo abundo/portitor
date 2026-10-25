@@ -3,11 +3,7 @@
 
 <template>
   <div class="space-y-2">
-    <div
-      v-if="!disabled || $slots.actions || $slots['leading-actions']"
-      class="flex flex-wrap gap-2"
-    >
-      <slot name="leading-actions" />
+    <div v-if="!disabled || $slots.actions" class="flex flex-wrap gap-2">
       <UButton
         v-if="!disabled"
         type="button"

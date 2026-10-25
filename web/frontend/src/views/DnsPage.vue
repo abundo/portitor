@@ -11,6 +11,7 @@ import CrudPage from '@/components/CrudPage.vue'
 import DnsTemplates from '@/components/DnsTemplates.vue'
 import DyndnsClientForm from '@/components/DyndnsClientForm.vue'
 import DyndnsState from '@/components/DyndnsState.vue'
+import FormHeader from '@/components/FormHeader.vue'
 import NeedInstance from '@/components/NeedInstance.vue'
 import SearchInput from '@/components/SearchInput.vue'
 import { dnsTemplates, dnsZones, dyndnsClients, instances, interfaces } from '@/api'
@@ -339,7 +340,9 @@ const tab = computed({
         <div class="pt-2">
           <div class="card">
             <form @submit.prevent="save">
-              <h2 class="border-b border-default pb-1 mb-2 text-xl font-semibold">DNS server</h2>
+              <FormHeader title="DNS server">
+                <UButton v-if="!readOnly" type="submit" :loading="saving">Save</UButton>
+              </FormHeader>
 
               <!-- Outside the form's fieldset, so a viewer can search too. -->
               <div class="pt-3">
@@ -538,10 +541,6 @@ const tab = computed({
                 Will answer for the zones under the
                 <RouterLink to="/dns" class="text-primary">DNS zones</RouterLink> tab.
               </p>
-
-              <div v-if="!readOnly" class="mt-4">
-                <UButton type="submit" :loading="saving">Save</UButton>
-              </div>
             </form>
           </div>
         </div>

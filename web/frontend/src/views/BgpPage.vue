@@ -15,6 +15,7 @@ import BgpNeighborDetail from '@/components/BgpNeighborDetail.vue'
 import BgpNeighborRoutes from '@/components/BgpNeighborRoutes.vue'
 import BgpPeerTable from '@/components/BgpPeerTable.vue'
 import EntriesEditor from '@/components/EntriesEditor.vue'
+import FormHeader from '@/components/FormHeader.vue'
 import NameSelect from '@/components/NameSelect.vue'
 import NeedInstance from '@/components/NeedInstance.vue'
 import SearchInput from '@/components/SearchInput.vue'
@@ -584,19 +585,7 @@ const neighborFields = computed(() => [
       <template #config>
         <div class="space-y-4">
           <div class="card">
-            <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <div class="text-lg font-semibold">BGP</div>
-                <p class="max-w-3xl text-sm text-muted">
-                  BGP runs FRR (zebra and bgpd) in this virtual firewall. It is off until enabled
-                  here; changes take effect when deployed.
-                  <template v-if="vrfName">
-                    This is VRF {{ vrfName }}'s BGP (FRR's router bgp … vrf {{ vrfName }}): its
-                    neighbours are reached through the VRF's interfaces and table, and its routes go
-                    in that table.
-                  </template>
-                </p>
-              </div>
+            <FormHeader title="BGP">
               <UButton
                 v-if="!readOnly"
                 label="Save"
@@ -604,7 +593,16 @@ const neighborFields = computed(() => [
                 :disabled="!cfgForm.dirty()"
                 @click="saveCfg"
               />
-            </div>
+            </FormHeader>
+            <p class="mb-4 max-w-3xl text-sm text-muted">
+              BGP runs FRR (zebra and bgpd) in this virtual firewall. It is off until enabled here;
+              changes take effect when deployed.
+              <template v-if="vrfName">
+                This is VRF {{ vrfName }}'s BGP (FRR's router bgp … vrf {{ vrfName }}): its
+                neighbours are reached through the VRF's interfaces and table, and its routes go in
+                that table.
+              </template>
+            </p>
             <fieldset :disabled="readOnly" class="max-w-3xl space-y-3">
               <UFormField label="Enabled" :ui="inlineField" help="Starts FRR; off stops it.">
                 <USwitch v-model="cfg.enabled" />

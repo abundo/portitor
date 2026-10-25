@@ -9,6 +9,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useToast } from '@nuxt/ui/composables'
 import AddrInput from '@/components/AddrInput.vue'
 import DhcpLeaseInfo from '@/components/DhcpLeaseInfo.vue'
+import FormHeader from '@/components/FormHeader.vue'
 import NeedInstance from '@/components/NeedInstance.vue'
 import SearchInput from '@/components/SearchInput.vue'
 import { api, instances, interfaces, ipamPrefixes } from '@/api'
@@ -316,8 +317,10 @@ const autoLeases = useAutoRefresh(loadLeases, { seconds: 10, active: () => tab.v
 
       <template #server>
         <div class="pt-2">
-          <div class="card">
-            <div class="mb-1 text-lg font-semibold">DHCP server</div>
+          <form class="card" @submit.prevent="save">
+            <FormHeader title="DHCP server">
+              <UButton v-if="!readOnly" type="submit" :loading="saving">Save</UButton>
+            </FormHeader>
             <p class="mb-4 text-sm text-muted">
               Kea, for the clients on this virtual firewall's interfaces. DHCP is served per prefix
               of an interface address; several on one interface form a shared network, and clients
@@ -325,196 +328,191 @@ const autoLeases = useAutoRefresh(loadLeases, { seconds: 10, active: () => tab.v
               under
               <RouterLink to="/hosts-prefixes" class="text-primary">Hosts & prefixes</RouterLink>.
             </p>
-            <form @submit.prevent="save">
-              <fieldset :disabled="readOnly" class="space-y-3">
-                <UFormField label="DHCP server (Kea)" :ui="inlineField">
-                  <USwitch v-model="server.dhcp_enabled" />
+            <fieldset :disabled="readOnly" class="space-y-3">
+              <UFormField label="DHCP server (Kea)" :ui="inlineField">
+                <USwitch v-model="server.dhcp_enabled" />
+              </UFormField>
+              <template v-if="server.dhcp_enabled">
+                <UFormField label="DHCP domain name" :ui="inlineField">
+                  <UInput
+                    v-model="server.dhcp_domain_name"
+                    placeholder="home.arpa"
+                    class="w-full sm:w-96"
+                  />
                 </UFormField>
-                <template v-if="server.dhcp_enabled">
-                  <UFormField label="DHCP domain name" :ui="inlineField">
-                    <UInput
-                      v-model="server.dhcp_domain_name"
-                      placeholder="home.arpa"
-                      class="w-full sm:w-96"
-                    />
-                  </UFormField>
-                  <UFormField label="Lease time (seconds)" :ui="inlineField">
-                    <UInput
-                      v-model.number="server.dhcp_lease_time"
-                      type="number"
-                      min="300"
-                      class="w-full sm:w-48"
-                    />
-                  </UFormField>
-                </template>
-                <p v-else class="text-sm text-muted">
-                  With the DHCP server off, the interfaces' DHCP settings are kept but not served;
-                  IPv6 router advertisements are still sent.
-                </p>
-              </fieldset>
+                <UFormField label="Lease time (seconds)" :ui="inlineField">
+                  <UInput
+                    v-model.number="server.dhcp_lease_time"
+                    type="number"
+                    min="300"
+                    class="w-full sm:w-48"
+                  />
+                </UFormField>
+              </template>
+              <p v-else class="text-sm text-muted">
+                With the DHCP server off, the interfaces' DHCP settings are kept but not served;
+                IPv6 router advertisements are still sent.
+              </p>
+            </fieldset>
 
-              <div class="mt-4 mb-2">
-                <SearchInput v-model="ifaceSearch" />
-              </div>
-              <div class="overflow-x-auto">
-                <table class="w-full text-sm">
-                  <thead>
-                    <tr class="border-b border-default text-left text-xs text-muted">
-                      <th class="w-px py-1 pr-2"></th>
-                      <th class="pr-4 font-medium">Interface</th>
-                      <th class="pr-4 font-medium">Description</th>
-                      <th class="pr-4 font-medium">Prefix</th>
-                      <th class="pr-4 font-medium">DHCP server</th>
-                      <th class="pr-4 font-medium">Range</th>
-                      <th class="pr-4 font-medium">Gateway</th>
-                      <th class="font-medium">DNS servers</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <template v-for="i in shownIfaces" :key="i.id">
-                      <tr
-                        v-for="(p, idx) in i.prefixes.length ? i.prefixes : [null]"
-                        :key="p?.prefix ?? 'none'"
-                        class="border-b border-default last:border-0"
-                      >
-                        <template v-if="idx === 0">
-                          <td :rowspan="i.prefixes.length || 1" class="py-1 pr-2 align-top">
-                            <UButton
-                              v-if="i.prefixes.length"
-                              size="sm"
-                              variant="outline"
-                              :icon="readOnly ? 'i-lucide-eye' : 'i-lucide-pencil'"
-                              :aria-label="readOnly ? 'View' : 'Edit'"
-                              :title="readOnly ? 'View' : 'Edit'"
-                              type="button"
-                              @click="openDetail(withLabel(i.label, i.name), i.prefixes)"
-                            />
-                          </td>
-                          <td :rowspan="i.prefixes.length || 1" class="py-1 pr-4 align-top">
-                            <div class="font-mono">{{ withLabel(i.label, i.name) }}</div>
-                            <div class="mt-0.5 flex flex-wrap gap-1">
-                              <UBadge
-                                v-if="i.ipv4_mode === 'dhcp'"
-                                color="neutral"
-                                variant="subtle"
-                                size="sm"
-                                label="DHCP Client"
-                                title="Gets its IPv4 address from a DHCP server"
-                              />
-                              <UBadge
-                                v-if="i.ipv6_accept_ra"
-                                color="neutral"
-                                variant="subtle"
-                                size="sm"
-                                label="SLAAC-C"
-                                title="Takes an IPv6 address from router advertisements (SLAAC client)"
-                              />
-                              <UBadge
-                                v-if="i.prefixes.some((p) => p.ra_enabled)"
-                                color="info"
-                                variant="subtle"
-                                size="sm"
-                                label="RA"
-                                title="Sends IPv6 router advertisements"
-                              />
-                            </div>
-                          </td>
-                          <td :rowspan="i.prefixes.length || 1" class="py-1 pr-4 align-top">
-                            {{ i.description }}
-                          </td>
-                        </template>
-                        <td v-if="!p" colspan="5" class="py-1 text-muted">
-                          {{
-                            i.ipv4_mode === 'dhcp'
-                              ? 'DHCP client; no static address to serve DHCP on.'
-                              : 'No address; give it one under Interfaces to serve DHCP.'
-                          }}
+            <div class="mt-4 mb-2">
+              <SearchInput v-model="ifaceSearch" />
+            </div>
+            <div class="overflow-x-auto">
+              <table class="w-full text-sm">
+                <thead>
+                  <tr class="border-b border-default text-left text-xs text-muted">
+                    <th class="w-px py-1 pr-2"></th>
+                    <th class="pr-4 font-medium">Interface</th>
+                    <th class="pr-4 font-medium">Description</th>
+                    <th class="pr-4 font-medium">Prefix</th>
+                    <th class="pr-4 font-medium">DHCP server</th>
+                    <th class="pr-4 font-medium">Range</th>
+                    <th class="pr-4 font-medium">Gateway</th>
+                    <th class="font-medium">DNS servers</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template v-for="i in shownIfaces" :key="i.id">
+                    <tr
+                      v-for="(p, idx) in i.prefixes.length ? i.prefixes : [null]"
+                      :key="p?.prefix ?? 'none'"
+                      class="border-b border-default last:border-0"
+                    >
+                      <template v-if="idx === 0">
+                        <td :rowspan="i.prefixes.length || 1" class="py-1 pr-2 align-top">
+                          <UButton
+                            v-if="i.prefixes.length"
+                            size="sm"
+                            variant="outline"
+                            :icon="readOnly ? 'i-lucide-eye' : 'i-lucide-pencil'"
+                            :aria-label="readOnly ? 'View' : 'Edit'"
+                            :title="readOnly ? 'View' : 'Edit'"
+                            type="button"
+                            @click="openDetail(withLabel(i.label, i.name), i.prefixes)"
+                          />
                         </td>
-                        <template v-else>
-                          <td class="py-1 pr-4 font-mono">{{ p.prefix }}</td>
-                          <td class="py-1 pr-4">
-                            <div class="flex items-center gap-1.5">
-                              <USwitch
-                                v-model="p.dhcp_enabled"
-                                :disabled="readOnly || (is6(p) && !p.ra_enabled && !p.dhcp_enabled)"
-                                @update:model-value="(on) => dhcpSwitched(p, on)"
-                                :title="
-                                  is6(p) && !p.ra_enabled
-                                    ? 'DHCPv6 needs router advertisements: open the interface'
-                                    : ''
-                                "
-                                :aria-label="`DHCP server on ${p.prefix}`"
-                              />
-                              <UBadge
-                                v-if="p.ra_slaac"
-                                color="info"
-                                variant="subtle"
-                                size="sm"
-                                label="SLAAC"
-                                title="Clients pick their own address from this prefix"
-                              />
-                            </div>
-                          </td>
-                          <template v-if="p.dhcp_enabled">
-                            <td class="py-1 pr-4 font-mono text-xs">{{ rangeText(p) }}</td>
-                            <td class="py-1 pr-4 font-mono text-xs">
-                              {{ is6(p) ? 'from RA' : gatewayText(p) }}
-                            </td>
-                          </template>
-                          <td v-else colspan="2" />
-                          <td class="py-1 font-mono text-xs">
-                            <template v-if="p.dhcp_enabled || p.ra_enabled">{{
-                              p.dhcp_dns_servers?.length
-                                ? p.dhcp_dns_servers.join(', ')
-                                : 'firewall, when it answers DNS here'
-                            }}</template>
-                          </td>
-                        </template>
-                      </tr>
-                    </template>
-                    <tr v-if="!shownIfaces.length">
-                      <td colspan="8" class="py-2 text-muted">
+                        <td :rowspan="i.prefixes.length || 1" class="py-1 pr-4 align-top">
+                          <div class="font-mono">{{ withLabel(i.label, i.name) }}</div>
+                          <div class="mt-0.5 flex flex-wrap gap-1">
+                            <UBadge
+                              v-if="i.ipv4_mode === 'dhcp'"
+                              color="neutral"
+                              variant="subtle"
+                              size="sm"
+                              label="DHCP Client"
+                              title="Gets its IPv4 address from a DHCP server"
+                            />
+                            <UBadge
+                              v-if="i.ipv6_accept_ra"
+                              color="neutral"
+                              variant="subtle"
+                              size="sm"
+                              label="SLAAC-C"
+                              title="Takes an IPv6 address from router advertisements (SLAAC client)"
+                            />
+                            <UBadge
+                              v-if="i.prefixes.some((p) => p.ra_enabled)"
+                              color="info"
+                              variant="subtle"
+                              size="sm"
+                              label="RA"
+                              title="Sends IPv6 router advertisements"
+                            />
+                          </div>
+                        </td>
+                        <td :rowspan="i.prefixes.length || 1" class="py-1 pr-4 align-top">
+                          {{ i.description }}
+                        </td>
+                      </template>
+                      <td v-if="!p" colspan="5" class="py-1 text-muted">
                         {{
-                          server.ifaces.length
-                            ? 'No interface matches.'
-                            : 'This virtual firewall has no interfaces.'
+                          i.ipv4_mode === 'dhcp'
+                            ? 'DHCP client; no static address to serve DHCP on.'
+                            : 'No address; give it one under Interfaces to serve DHCP.'
                         }}
                       </td>
+                      <template v-else>
+                        <td class="py-1 pr-4 font-mono">{{ p.prefix }}</td>
+                        <td class="py-1 pr-4">
+                          <div class="flex items-center gap-1.5">
+                            <USwitch
+                              v-model="p.dhcp_enabled"
+                              :disabled="readOnly || (is6(p) && !p.ra_enabled && !p.dhcp_enabled)"
+                              @update:model-value="(on) => dhcpSwitched(p, on)"
+                              :title="
+                                is6(p) && !p.ra_enabled
+                                  ? 'DHCPv6 needs router advertisements: open the interface'
+                                  : ''
+                              "
+                              :aria-label="`DHCP server on ${p.prefix}`"
+                            />
+                            <UBadge
+                              v-if="p.ra_slaac"
+                              color="info"
+                              variant="subtle"
+                              size="sm"
+                              label="SLAAC"
+                              title="Clients pick their own address from this prefix"
+                            />
+                          </div>
+                        </td>
+                        <template v-if="p.dhcp_enabled">
+                          <td class="py-1 pr-4 font-mono text-xs">{{ rangeText(p) }}</td>
+                          <td class="py-1 pr-4 font-mono text-xs">
+                            {{ is6(p) ? 'from RA' : gatewayText(p) }}
+                          </td>
+                        </template>
+                        <td v-else colspan="2" />
+                        <td class="py-1 font-mono text-xs">
+                          <template v-if="p.dhcp_enabled || p.ra_enabled">{{
+                            p.dhcp_dns_servers?.length
+                              ? p.dhcp_dns_servers.join(', ')
+                              : 'firewall, when it answers DNS here'
+                          }}</template>
+                        </td>
+                      </template>
                     </tr>
-                  </tbody>
-                </table>
-              </div>
-
-              <div v-if="server.orphans.length" class="pt-2">
-                <UAlert
-                  color="warning"
-                  variant="subtle"
-                  icon="i-lucide-triangle-alert"
-                  title="Not served: no interface has an address in these prefixes"
-                >
-                  <template #description>
-                    <div class="mt-1 flex flex-wrap gap-2">
-                      <UButton
-                        v-for="p in server.orphans"
-                        :key="p.prefix"
-                        size="xs"
-                        color="neutral"
-                        variant="outline"
-                        class="font-mono"
-                        :icon="readOnly ? 'i-lucide-eye' : 'i-lucide-pencil'"
-                        :label="p.prefix"
-                        type="button"
-                        @click="openDetail(p.prefix, [p])"
-                      />
-                    </div>
                   </template>
-                </UAlert>
-              </div>
-              <div v-if="!readOnly" class="mt-4">
-                <UButton type="submit" :loading="saving">Save</UButton>
-              </div>
-            </form>
-          </div>
+                  <tr v-if="!shownIfaces.length">
+                    <td colspan="8" class="py-2 text-muted">
+                      {{
+                        server.ifaces.length
+                          ? 'No interface matches.'
+                          : 'This virtual firewall has no interfaces.'
+                      }}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div v-if="server.orphans.length" class="pt-2">
+              <UAlert
+                color="warning"
+                variant="subtle"
+                icon="i-lucide-triangle-alert"
+                title="Not served: no interface has an address in these prefixes"
+              >
+                <template #description>
+                  <div class="mt-1 flex flex-wrap gap-2">
+                    <UButton
+                      v-for="p in server.orphans"
+                      :key="p.prefix"
+                      size="xs"
+                      color="neutral"
+                      variant="outline"
+                      class="font-mono"
+                      :icon="readOnly ? 'i-lucide-eye' : 'i-lucide-pencil'"
+                      :label="p.prefix"
+                      type="button"
+                      @click="openDetail(p.prefix, [p])"
+                    />
+                  </div>
+                </template>
+              </UAlert>
+            </div>
+          </form>
         </div>
       </template>
     </UTabs>

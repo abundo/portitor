@@ -4,6 +4,7 @@
 <script setup>
 import { computed, reactive, ref, watch } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
+import FormHeader from '@/components/FormHeader.vue'
 import NeedInstance from '@/components/NeedInstance.vue'
 import TagsInput from '@/components/TagsInput.vue'
 import { instances, interfaces } from '@/api'
@@ -64,7 +65,9 @@ async function save() {
   <NeedInstance>
     <div class="card">
       <form @submit.prevent="save">
-        <h2 class="border-b border-default pb-1 mb-2 text-xl font-semibold">NAT64</h2>
+        <FormHeader title="NAT64">
+          <UButton v-if="!readOnly" type="submit" :loading="saving">Save</UButton>
+        </FormHeader>
         <p class="mb-4 text-sm text-muted">
           For IPv6-only clients: IPv6 packets to the NAT64 prefix are translated to IPv4, here or by
           another router (PLAT). Only packets coming in on an interface with 464XLAT are translated.
@@ -112,10 +115,6 @@ async function save() {
           <template v-if="xlatIfaces.length">On: {{ xlatIfaces.join(', ') }}</template>
           <span v-else class="text-muted">No interface has 464XLAT.</span>
         </p>
-
-        <div v-if="!readOnly" class="mt-4">
-          <UButton type="submit" :loading="saving">Save</UButton>
-        </div>
       </form>
     </div>
   </NeedInstance>

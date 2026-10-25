@@ -10,6 +10,7 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import AutoRefreshButton from '@/components/AutoRefreshButton.vue'
 import CrudPage from '@/components/CrudPage.vue'
+import FormHeader from '@/components/FormHeader.vue'
 import NeedInstance from '@/components/NeedInstance.vue'
 import SearchInput from '@/components/SearchInput.vue'
 import { acmeProxyPolicies, api, certificates, dyndnsClients, instances, interfaces } from '@/api'
@@ -239,7 +240,11 @@ const policyFields = computed(() => [
     <div class="space-y-4">
       <div class="card">
         <form @submit.prevent="save">
-          <h2 class="border-b border-default pb-1 mb-2 text-xl font-semibold">ACME proxy</h2>
+          <FormHeader title="ACME proxy">
+            <UButton v-if="!readOnly" type="submit" :loading="saving" :disabled="!pageForm.dirty()"
+              >Save</UButton
+            >
+          </FormHeader>
           <p class="mb-4 text-sm text-muted">
             An ACME server for the hosts behind the firewall. Point certbot, Caddy, Traefik or
             another ACME client at its directory URL: it proves control of a name over the internal
@@ -328,10 +333,6 @@ const policyFields = computed(() => [
               </tbody>
             </table>
           </fieldset>
-
-          <div v-if="!readOnly" class="mt-4">
-            <UButton type="submit" :loading="saving" :disabled="!pageForm.dirty()">Save</UButton>
-          </div>
         </form>
       </div>
 
