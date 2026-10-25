@@ -12,11 +12,12 @@ tls_cert: /etc/portitor/agent.crt
 tls_key: /etc/portitor/agent.key
 
 # Who may call the API, besides loopback (portitor-config). The same list gets an always-on accept rule for the
-# API port and SSH (22) (anti-lockout), whatever rules are deployed.
+# API port, SSH (22) and portitor-config's port (config_port) (anti-lockout), whatever rules are deployed.
 allow_from:
   - 192.168.1.0/24
 
 # anti_lockout: true
+# config_port: 8444        # portitor-config (the GUI); 0 leaves it out of anti-lockout
 # bind_user: bind          # BIND's user: bind (Debian) or named (Fedora)
 # console_user: portitor  # the web console's shell and command tasks run as this user; none = off
 # dry_run: false           # render and log only; writes only its own state_dir

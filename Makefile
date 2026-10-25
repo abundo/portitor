@@ -17,7 +17,7 @@ GORELEASER ?= $(or $(shell command -v goreleaser),$(shell go env GOPATH)/bin/gor
 
 .PHONY: build portitor-web portitor-agent frontend release test lint fmt \
 	install-agent install-web dev-agent dev-web dev-portal dev-seed \
-	lab-up lab-install lab-seed lab-deploy lab-down lab-clean iso iso-test iso-e2e iso-e2e-split iso-e2e-update test-all release-check clean
+	lab-up lab-install lab-seed lab-deploy lab-down lab-clean iso iso-test iso-e2e iso-e2e-split iso-e2e-update iso-e2e-split-update test-all release-check clean
 
 build: portitor-web portitor-agent
 
@@ -126,6 +126,12 @@ iso-e2e-split:
 # virtual machine running.
 iso-e2e-update:
 	iso/test-update.sh $(FROM)
+
+# The same for the split setup, in two virtual machines: install.py on
+# portitor-web's host updates the firewall and moves the database to its
+# portitor-config. KEEP=1 leaves both running.
+iso-e2e-split-update:
+	iso/test-split-update.sh $(FROM)
 
 # Every test there is, unattended, before tagging: about 20 minutes (the lab
 # and both ISO tests); stops at the first failure. Needs no tag or CHANGELOG

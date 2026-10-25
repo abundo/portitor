@@ -81,7 +81,7 @@ decides:
 - a **forward** rule: the same, for port forwards and anything else reaching your
   network. Port forwards are accepted after your rules, so this rule drops them too.
 
-The anti-lockout rule (the agent's API and SSH from `allow_from`) comes before your
+The anti-lockout rule (the agent's API, SSH and the GUI from `allow_from`) comes before your
 rules too, and is not blocked. A new ban drops new connections; a connection that was
 already established stays open until it ends.
 

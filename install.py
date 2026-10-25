@@ -20,7 +20,10 @@ remaining steps.
 
 A host that ran portitor-web with its database (before portitor-web became
 the portal) gets that database as portitor-config's, and portitor-web
-there serves it as its firewall: the same GUI, at the same address.
+there serves it as its firewall: the same GUI, at the same address. A
+portitor-web on a host of its own gives its database to the firewall it
+deployed to (found in the database, updated with it, over SSH), and serves
+that one.
 
 What gets installed:
   (default)       whatever is installed on this host. When that includes
@@ -87,7 +90,7 @@ from typing import Sequence
 
 # Bump when the installer itself changes, so a release's copy can tell
 # whether it is newer than the one running.
-INSTALLER_VERSION = 9
+INSTALLER_VERSION = 10
 INSTALLER_FILENAME = "install.py"
 # Where the agent host keeps a copy, for updates from the GUI.
 INSTALLER_DEST = "/usr/lib/portitor/install.py"
@@ -119,6 +122,8 @@ CONFIG_DB_DIR = "/var/lib/portitor-config"
 CONFIG_UNIT = "portitor-config.service"
 CONFIG_CERT = f"{ETC_DIR}/config.crt"
 CONFIG_KEY = f"{ETC_DIR}/config.key"
+# The agent's last applied document (its default state_dir).
+AGENT_APPLIED = "/var/lib/portitor/applied.json"
 # portitor-config's address on its own host, which portitor-web there uses.
 CONFIG_LOCAL_URL = "https://127.0.0.1:8444"
 SSH_USER_DEFAULT = "portitor"
@@ -375,9 +380,24 @@ class Host:
             )
         return proc
 
-    def read(self, path: str) -> str | None:
-        proc = self.run(f"cat {shlex.quote(path)}", check=False, mutate=False, capture=True)
+    def read(self, path: str, root: bool = False) -> str | None:
+        proc = self.run(f"cat {shlex.quote(path)}", check=False, mutate=False, capture=True, root=root)
         return proc.stdout if proc.returncode == 0 else None
+
+    def run_to_file(self, script: str, dest: Path, desc: str) -> None:
+        """Runs script as root, its output (binary) written to the local file
+        dest. Only prints in dry-run."""
+        where = "" if self.local else f"{self.name}: "
+        if self.dry_run:
+            log(f"    [dry-run] {where}{desc}")
+            return
+        log(f"    $ {where}{desc}")
+        with dest.open("wb") as out:
+            proc = subprocess.run(self.argv(script, root=True), stdin=subprocess.DEVNULL, stdout=out,
+                                  stderr=subprocess.PIPE, check=False)
+        if proc.returncode != 0:
+            detail = proc.stderr.decode(errors="replace").strip()
+            raise InstallError(f"{where}command failed ({proc.returncode}): {desc}" + (f"\n{detail}" if detail else ""))
 
     def exists(self, path: str) -> bool:
         return self.run(f"test -e {shlex.quote(path)}", check=False, mutate=False).returncode == 0
@@ -479,6 +499,10 @@ class Plan:
     # Agents in an HA pair before the install, by name: after a restart
     # the agent's socket may not answer yet, so it is not asked again.
     ha_agents: set[str] = field(default_factory=set)
+    # The agent (by name) that portitor-web's database on web, from before
+    # it became the portal, moves to, and the address web reached it at.
+    db_to: str = ""
+    db_address: str = ""
 
     def hosts(self) -> list[Host]:
         return ([self.web] if self.web else []) + self.agents
@@ -489,6 +513,8 @@ class Plan:
             out.append(self.agent_order_note)
         if self.web:
             out.append(f"portitor-web on {self.web}")
+        if self.db_to:
+            out.append(f"portitor-web's database moves from {self.web} to portitor-config on {self.db_to}")
         return out
 
 
@@ -706,8 +732,12 @@ def install_apparmor(host: Host, deploy: Path) -> None:
             host.run(f"apparmor_parser -r {shlex.quote(profile)}", check=False)
 
 
-def install_web(host: Host, binary: Path, deploy: Path, version: str, assume_yes: bool) -> None:
-    """portitor-web, the portal: no database, the firewalls in web.yaml."""
+def install_web(
+    host: Host, binary: Path, deploy: Path, version: str, assume_yes: bool,
+    moved_to: Host | None = None, moved_address: str = "",
+) -> None:
+    """portitor-web, the portal: no database, the firewalls in web.yaml.
+    moved_to is the firewall its old database went to (at moved_address)."""
     log(f"==> Installing portitor-web {version} on {host}")
     ensure_user(host)
     new_config = not host.exists(WEB_CONFIG)
@@ -718,8 +748,10 @@ def install_web(host: Host, binary: Path, deploy: Path, version: str, assume_yes
         host.run(f"rm -rf {OLD_WIREGASM_DIR}")
     action = install_unit(host, deploy / "systemd" / WEB_UNIT, assume_yes)
     host.systemctl("daemon-reload")
+    if moved_to:
+        link_remote_config(host, moved_to, moved_address)
     # portitor-config on this host is its firewall, unless it lists others.
-    if host.exists(CONFIG_FILE):
+    elif host.exists(CONFIG_FILE):
         link_local_config(host)
     if new_config:
         log("==> portitor-web is installed but not started. Next steps:")
@@ -766,21 +798,111 @@ def link_local_config(host: Host) -> None:
         warn(f"portitor-config fingerprint failed on {host}; list it under firewalls: in {WEB_CONFIG} yourself")
         return
     name = portal_name(host)
-    block = f"firewalls:\n  - name: {name}\n    url: {CONFIG_LOCAL_URL}\n    fingerprint: {fp}\n"
+    add_portal_firewall(host, web, name, CONFIG_LOCAL_URL, fp, "This host's portitor-config")
+    log(f"    portitor-web serves this host's portitor-config as firewall {name}")
+    if add_trusted_proxy(host, "127.0.0.1", "portitor-web on this host"):
+        host.systemctl("try-restart", CONFIG_UNIT, check=False)
+
+
+def link_remote_config(web: Host, fw: Host, address: str) -> None:
+    """portitor-web on web serves portitor-config on fw, which its old
+    database moved to: fw is listed in web.yaml at address, and fw's
+    portitor-config trusts web's X-Forwarded-For."""
+    if web.dry_run:
+        log(f"    [dry-run] list {fw} under firewalls: in {WEB_CONFIG}, and {web} in its trusted_proxies")
+        return
+    proc = fw.run(f"runuser -u {WEB_USER} -- {CONFIG_LINK} -f {CONFIG_FILE} fingerprint",
+                  check=False, mutate=False, capture=True, root=True)
+    fp = (proc.stdout or "").strip()
+    if proc.returncode != 0 or not re.fullmatch(r"[0-9a-f]{64}", fp):
+        warn(f"portitor-config fingerprint failed on {fw}; list it under firewalls: in {WEB_CONFIG} on {web} yourself")
+        return
+    port = config_port(fw)
+    url_host = f"[{address}]" if ":" in address else address
+    name = portal_name(fw)
+    add_portal_firewall(web, web.read(WEB_CONFIG, root=True) or "", name, f"https://{url_host}:{port}", fp,
+                        "The firewall portitor-web's database moved to")
+    log(f"    portitor-web serves {fw}'s portitor-config as firewall {name}")
+    # The address web reaches fw from, which fw sees in the connections.
+    script = ("import socket, sys; a = socket.getaddrinfo(sys.argv[1], int(sys.argv[2]), type=socket.SOCK_DGRAM)[0]; "
+              "s = socket.socket(a[0], socket.SOCK_DGRAM); s.connect(a[4]); print(s.getsockname()[0])")
+    proc = web.run(f"python3 -I -c {shlex.quote(script)} {shlex.quote(address)} {port}",
+                   check=False, mutate=False, capture=True)
+    src = (proc.stdout or "").strip().split("%")[0]
+    if proc.returncode != 0 or not src:
+        warn(f"cannot tell {web}'s address towards {address}; add it under trusted_proxies: in {CONFIG_FILE} on {fw}")
+        return
+    if add_trusted_proxy(fw, src, "portitor-web"):
+        fw.systemctl("try-restart", CONFIG_UNIT, check=False)
+
+
+def add_portal_firewall(host: Host, web: str, name: str, url: str, fp: str, note: str) -> None:
+    """Writes web.yaml (text web) on host with this one firewall listed."""
+    block = f"firewalls:\n  - name: {name}\n    url: {url}\n    fingerprint: {fp}\n"
     if re.search(r"^firewalls:.*$", web, re.M):
         web = re.sub(r"^firewalls:.*\n?", block, web, count=1, flags=re.M)
     else:
-        web = web.rstrip("\n") + "\n\n# This host's portitor-config (install.py).\n" + block
+        web = web.rstrip("\n") + f"\n\n# {note} (install.py).\n" + block
     host.put_text(web, WEB_CONFIG, "0640", group=WEB_USER)
-    log(f"    portitor-web serves this host's portitor-config as firewall {name}")
-    cfg = host.read(CONFIG_FILE) or ""
-    if not re.search(r"^trusted_proxies:.*127\.0\.0\.1", cfg, re.M):
-        if re.search(r"^trusted_proxies:.*$", cfg, re.M):
-            cfg = re.sub(r"^trusted_proxies:.*$", "trusted_proxies: [127.0.0.1]", cfg, count=1, flags=re.M)
-        else:
-            cfg = cfg.rstrip("\n") + "\n# portitor-web on this host (install.py).\ntrusted_proxies: [127.0.0.1]\n"
-        host.put_text(cfg, CONFIG_FILE, "0640", group=WEB_USER)
-        host.systemctl("try-restart", CONFIG_UNIT, check=False)
+
+
+def add_trusted_proxy(host: Host, addr: str, note: str) -> bool:
+    """Adds addr to trusted_proxies in host's config.yaml; True when it
+    changed. A list in block style is left to the admin."""
+    cfg = host.read(CONFIG_FILE, root=True) or ""
+    m = re.search(r"^trusted_proxies:[ \t]*(\[([^\]\n]*)\])?[ \t]*(#.*)?$", cfg, re.M)
+    if m and m.group(1) is None:
+        warn(f"add {addr} under trusted_proxies: in {CONFIG_FILE} on {host} yourself")
+        return False
+    items = [i.strip().strip("\"'") for i in m.group(2).split(",")] if m else []
+    items = [i for i in items if i]
+    if addr in items:
+        return False
+    line = f"trusted_proxies: [{', '.join(items + [addr])}]"
+    if m:
+        cfg = cfg[:m.start()] + line + cfg[m.end():]
+    else:
+        cfg = cfg.rstrip("\n") + f"\n# {note} (install.py).\n{line}\n"
+    host.put_text(cfg, CONFIG_FILE, "0640", group=WEB_USER)
+    log(f"    portitor-config on {host} trusts {addr} (trusted_proxies)")
+    return True
+
+
+def config_port(host: Host) -> int:
+    """portitor-config's port on host (bind in config.yaml)."""
+    cfg = host.read(CONFIG_FILE, root=True) or ""
+    m = re.search(r"^bind:\s*[\"']?[^\s\"'#]*:(\d+)", cfg, re.M)
+    return int(m.group(1)) if m else 8444
+
+
+def local_agent_url(host: Host) -> str:
+    """Where portitor-config reaches the agent on its host: the agent's
+    listen address in agent.yaml, loopback when it listens on all."""
+    text = host.read(AGENT_CONFIG, root=True) or ""
+    m = re.search(r"^listen:\s*[\"']?([^\s\"'#]+)", text, re.M)
+    addr, _, port = (m.group(1) if m else ":8443").rpartition(":")
+    addr = addr.strip("[]")
+    if addr in ("", "0.0.0.0", "::"):
+        addr = "127.0.0.1"
+    return f"https://{f'[{addr}]' if ':' in addr else addr}:{port or 8443}"
+
+
+def set_agent_url(host: Host) -> None:
+    """Sets agent_url in config.yaml when the agent does not listen on
+    loopback, unless the admin has set it."""
+    cfg = host.read(CONFIG_FILE, root=True)
+    if cfg is None or re.search(r"^agent_url:", cfg, re.M) or host.dry_run:
+        return
+    url = local_agent_url(host)
+    if url == "https://127.0.0.1:8443":
+        return
+    line = f"agent_url: {url}"
+    if re.search(r"^#\s*agent_url:.*$", cfg, re.M):
+        cfg = re.sub(r"^#\s*agent_url:.*$", line, cfg, count=1, flags=re.M)
+    else:
+        cfg = cfg.rstrip("\n") + f"\n# This host's agent (install.py, from its listen).\n{line}\n"
+    host.put_text(cfg, CONFIG_FILE, "0640", group=WEB_USER)
+    log(f"    portitor-config reaches its agent at {url}")
 
 
 def install(
@@ -795,22 +917,28 @@ def install(
     # One at a time, an HA pair's secondary first (make_plan's order): each
     # agent restarts fenced unless it hears its peer, so the next waits
     # until the restarted one does, and one host of the pair keeps forwarding.
+    moved_to = next((a for a in plan.agents if a.name == plan.db_to), None)
     for agent in plan.agents:
         root = roots[archs[agent_key(agent)]]
         install_agent(agent, root / "portitor-agent", deploy, version, assume_yes)
-        install_config(agent, root / "portitor-web", deploy, version, assume_yes)
+        install_config(agent, root / "portitor-web", deploy, version, assume_yes,
+                       db_from=plan.web if agent is moved_to else None)
         if agent.name in plan.ha_agents:
             wait_for_ha_peer(agent)
     if plan.web:
-        install_web(plan.web, roots[archs["web"]] / "portitor-web", deploy, version, assume_yes)
+        install_web(plan.web, roots[archs["web"]] / "portitor-web", deploy, version, assume_yes,
+                    moved_to=moved_to, moved_address=plan.db_address)
     log("==> Done")
 
 
-def install_config(host: Host, binary: Path, deploy: Path, version: str, assume_yes: bool) -> None:
+def install_config(
+    host: Host, binary: Path, deploy: Path, version: str, assume_yes: bool, db_from: Host | None = None,
+) -> None:
     """portitor-config on the firewall: the portitor-web binary run as
     portitor-config, with its own config, certificate, database and unit,
     set to deploy to the local agent. A host that ran portitor-web with its
-    database gets that database. A new one is not started: it needs an
+    database gets that database, and so does the firewall a portitor-web
+    elsewhere (db_from) deployed to. A new one is not started: it needs an
     admin."""
     log(f"==> Installing portitor-config {version} on {host}")
     ensure_user(host)
@@ -828,7 +956,8 @@ def install_config(host: Host, binary: Path, deploy: Path, version: str, assume_
         )
     host.run(f"install -d -o {WEB_USER} -g {WEB_USER} -m 0700 {CONFIG_DB_DIR}")
     host.run(f"systemctl stop {CONFIG_UNIT} 2>/dev/null || true", desc=f"systemctl stop {CONFIG_UNIT}")
-    moved = move_web_database(host)
+    moved = move_remote_database(db_from, host) if db_from else move_web_database(host)
+    set_agent_url(host)
     host.put(binary, WEB_BIN, "0755")
     host.run(f"ln -sfn portitor-web {shlex.quote(CONFIG_LINK)}", desc=f"ln -s portitor-web {CONFIG_LINK}")
     action = install_unit(host, deploy / "systemd" / CONFIG_UNIT, assume_yes)
@@ -843,6 +972,12 @@ def install_config(host: Host, binary: Path, deploy: Path, version: str, assume_
             f"--token-file - --fingerprint \"$fp\"",
             desc="portitor-config set-agent (the local agent)",
         )
+    if new_config and not moved and configured_elsewhere(host):
+        log("==> portitor-config is installed but not started: this firewall's configuration is")
+        log("    in a portitor-web elsewhere. Update that one with install.py on its host, which moves")
+        log("    its database here. Don't create an admin here: a commit from this empty database")
+        log("    would replace the firewall's configuration.")
+        return
     if new_config and not moved:
         log("==> portitor-config is installed but not started. Next steps:")
         if not host.exists(f"{ETC_DIR}/agent.token"):
@@ -876,6 +1011,123 @@ def move_web_database(host: Host) -> bool:
         f"mv {old} {old}.moved-to-portitor-config",
         desc=f"copy {OLD_WEB_DB_DIR} to {CONFIG_DB_DIR}",
     )
+    return True
+
+
+# Reads the firewalls of portitor-web's database from before it became the
+# portal, of any schema since there was one: their agent URLs, and whether
+# each is an HA secondary. Run as python3 -I -c with the database's path.
+OLD_DB_FIREWALLS = """
+import json, sqlite3, sys
+db = sqlite3.connect("file:" + sys.argv[1] + "?mode=ro", uri=True)
+rows = []
+for q in ("SELECT agent_url, ha_primary_id IS NOT NULL FROM firewalls ORDER BY id",
+          "SELECT agent_url, 0 FROM firewalls ORDER BY id",
+          "SELECT agent_url, 0 FROM settings WHERE id = 1"):
+    try:
+        rows = db.execute(q).fetchall()
+        break
+    except sqlite3.OperationalError:
+        pass
+print(json.dumps([{"url": u or "", "secondary": bool(s)} for u, s in rows]))
+"""
+# Copies a database with SQLite's backup API (its WAL included): source,
+# then destination.
+DB_BACKUP = ('import sqlite3, sys; d = sqlite3.connect(sys.argv[2]); '
+             'sqlite3.connect("file:" + sys.argv[1] + "?mode=ro", uri=True).backup(d); d.close()')
+DB_USERS = 'import sqlite3, sys; print(sqlite3.connect("file:" + sys.argv[1] + "?mode=ro", uri=True).execute("SELECT count(*) FROM users").fetchone()[0])'
+
+
+def old_web_database(web: Host) -> tuple[list[str], str] | None:
+    """portitor-web's database on web from before it became the portal,
+    when it must move to a firewall elsewhere: the hosts of its agent URLs,
+    and the address of the one it moves to (the HA primary), "" when it has
+    no agent URL. None when there is nothing to move: no database, moved
+    already, web.yaml lists firewalls, portitor-web was disabled (a
+    leftover), or the agent runs on web itself (move_web_database's case;
+    the ISO's portitor-web alone has the agent installed but disabled)."""
+    old = f"{OLD_WEB_DB_DIR}/portitor.db"
+    if not web.exists(old):
+        return None
+    if agent_enabled(web):
+        return None
+    if re.search(r"^\s*-\s*name:", web.read(WEB_CONFIG, root=True) or "", re.M):
+        return None
+    if web.run(f"systemctl is-enabled --quiet {WEB_UNIT}", check=False, mutate=False).returncode != 0:
+        return None
+    proc = web.run(f"python3 -I -c {shlex.quote(OLD_DB_FIREWALLS)} {shlex.quote(old)}",
+                   check=False, mutate=False, capture=True, root=True)
+    try:
+        rows = json.loads(proc.stdout) if proc.returncode == 0 else None
+    except ValueError:
+        rows = None
+    if rows is None:
+        raise InstallError(f"{web}: cannot read the firewalls in {old}: {(proc.stderr or proc.stdout).strip()}")
+    hosts: list[str] = []
+    primaries: list[str] = []
+    for r in rows:
+        host = urllib.parse.urlsplit(r["url"]).hostname or ""
+        if not host:
+            continue
+        if host in LOCAL_NAMES:
+            return None
+        if host not in hosts:
+            hosts.append(host)
+        if not r["secondary"]:
+            primaries.append(host)
+    if len(primaries) > 1:
+        raise InstallError(
+            f"portitor-web's database on {web} deploys to several firewalls ({', '.join(primaries)}); "
+            "each firewall now has its own portitor-config. Export each virtual firewall as a bundle "
+            "and import it on its firewall, then list the firewalls in web.yaml."
+        )
+    return hosts, primaries[0] if primaries else ""
+
+
+def agent_enabled(host: Host) -> bool:
+    """True when host runs the agent: the ISO's portitor-web alone has it
+    installed but disabled."""
+    return host.run(f"systemctl is-enabled --quiet {AGENT_UNIT}", check=False, mutate=False).returncode == 0
+
+
+def configured_elsewhere(host: Host) -> bool:
+    """True when the agent on host has applied a configuration that its
+    portitor-config has no database for: a portitor-web elsewhere has it."""
+    return host.exists(AGENT_APPLIED)
+
+
+def move_remote_database(web: Host, fw: Host) -> bool:
+    """Moves portitor-web's database on web, from before it became the
+    portal, to portitor-config on fw, the firewall it deployed to. One
+    there already is set aside only when it has no users (a new one, from
+    an update of the firewall alone)."""
+    old, new = f"{OLD_WEB_DB_DIR}/portitor.db", f"{CONFIG_DB_DIR}/portitor.db"
+    log(f"==> Moving portitor-web's database on {web} to portitor-config on {fw}")
+    if fw.exists(new) and not fw.dry_run:
+        proc = fw.run(f"python3 -I -c {shlex.quote(DB_USERS)} {new}", check=False, mutate=False, capture=True, root=True)
+        if proc.returncode != 0 or proc.stdout.strip() != "0":
+            raise InstallError(
+                f"{fw} has a portitor-config database with users ({new}); move it aside there "
+                f"to move {web}'s {old} in its place, or copy that one over yourself"
+            )
+        fw.run(f"for f in portitor.db portitor.db-wal portitor.db-shm; do "
+               f"[ ! -e {CONFIG_DB_DIR}/$f ] || mv {CONFIG_DB_DIR}/$f {CONFIG_DB_DIR}/$f.unused; done",
+               desc=f"set the new, empty {new} aside (.unused)")
+    web.run(f"systemctl stop {WEB_UNIT} 2>/dev/null || true", desc=f"systemctl stop {WEB_UNIT} on {web}")
+    pack = (
+        f"t=$(mktemp -d) && python3 -I -c {shlex.quote(DB_BACKUP)} {old} $t/portitor.db && "
+        f"{{ [ ! -d {OLD_WEB_DB_DIR}/deployed ] || cp -a {OLD_WEB_DB_DIR}/deployed $t/; }} && "
+        f"cd $t && tar -czf - *; rc=$?; cd /; rm -rf \"$t\"; exit $rc"
+    )
+    with tempfile.TemporaryDirectory(prefix="portitor-db-") as tmp:
+        archive = Path(tmp) / "database.tar.gz"
+        web.run_to_file(pack, archive, f"copy {old} and {OLD_WEB_DB_DIR}/deployed")
+        fw.run(
+            f"tar -C {CONFIG_DB_DIR} --no-same-owner -xzf - && chown -R {WEB_USER}:{WEB_USER} {CONFIG_DB_DIR} && "
+            f"chmod 0600 {new}",
+            desc=f"unpack it in {CONFIG_DB_DIR}", stdin_file=archive,
+        )
+    web.run(f"mv {old} {old}.moved-to-portitor-config", desc=f"mv {old} {old}.moved-to-portitor-config")
     return True
 
 
@@ -978,6 +1230,29 @@ def make_plan(args: argparse.Namespace) -> Plan:
     web = Host(web_host, args.ssh_user, args.dry_run) if web_host is not None else None
     if web:
         check_ssh(web)
+    # A portitor-web from before the portal, on its own host: its database
+    # moves to the firewall it deployed to, so the firewall goes too.
+    old_db = old_web_database(web) if web else None
+    db_to = db_address = ""
+    if old_db:
+        if args.no_agent:
+            raise InstallError(
+                f"portitor-web's database on {web} moves to its firewall's portitor-config: "
+                "update them together (without --no-agent)"
+            )
+        old_hosts, db_address = old_db
+        if not agent_hosts:
+            agent_hosts = list(old_hosts)
+            log(f"==> portitor-web's firewalls (in its database): {', '.join(agent_hosts)}")
+        if not db_address and len(agent_hosts) == 1:
+            db_address = agent_hosts[0]
+        if not db_address:
+            raise InstallError(
+                f"portitor-web's database on {web} has no agent URL; pass the firewall it belongs to as --agent HOST"
+            )
+        db_to = db_address
+        if db_to not in agent_hosts:
+            agent_hosts.append(db_to)
     if web and not agent_hosts and not args.no_agent:
         agent_hosts = agent_hosts_from_settings(web)
         if agent_hosts:
@@ -986,7 +1261,7 @@ def make_plan(args: argparse.Namespace) -> Plan:
             log(f"==> No firewalls in {WEB_CONFIG}; not updating a firewall")
     if args.no_agent:
         agent_hosts = []
-    elif web and not agent_hosts and web.exists(AGENT_BIN):
+    elif web and not agent_hosts and agent_enabled(web):
         agent_hosts = [web.name]
     if not web and not agent_hosts:
         raise InstallError("nothing to install")
@@ -999,7 +1274,7 @@ def make_plan(args: argparse.Namespace) -> Plan:
         check_ssh(agent)
         agents.append(agent)
     agents, note, paired = order_agents(agents)
-    return Plan(web=web, agents=agents, agent_order_note=note, ha_agents=paired)
+    return Plan(web=web, agents=agents, agent_order_note=note, ha_agents=paired, db_to=db_to, db_address=db_address)
 
 
 def ssh_setup_help(host: str, user: str) -> str:

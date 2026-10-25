@@ -197,6 +197,15 @@ firewall, and portitor-web stays on port 443 as the portal to it: the GUI is at 
 address, under `/fw/<host name>/`. Log in again afterwards. `sudo portitor-setup`, run
 again, puts portitor-config itself on port 443.
 
+A portitor-web on a host of its own, from before portitor-config, had the database
+there. Update it from that host with `install.py`, which needs SSH to the firewall
+(as for `--agent`): it finds the firewall in the database, updates it first, copies
+the database to its portitor-config and lists it in `web.yaml`, and the firewall
+trusts portitor-web's address (`trusted_proxies`). The GUI is then at
+`/fw/<firewall's host name>/`. Updating the firewall alone first (from the GUI)
+leaves its portitor-config stopped and empty; don't create an admin there, as a
+commit from it would replace the firewall's configuration.
+
 ## Building the ISO
 
 `iso/build.sh` remasters Debian's netinst ISO. It needs `xorriso` and `curl`, and Go

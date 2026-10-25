@@ -8,7 +8,7 @@
 #   iso/test-update.sh          from the latest GitHub release
 #   iso/test-update.sh v1.2.0   from this release
 #
-# Builds a test ISO of the old release (iso/build.sh --release --test),
+# Builds a test ISO of the old release (its own iso/build.sh --release --test),
 # installs it and waits for the first-boot setup. Through the GUI's API it
 # then runs the update page's check (the old agent and its install.py's
 # --list --json) and deploys. The update itself installs this tree's release
@@ -50,7 +50,12 @@ fi
 
 mkdir -p "$DIR"
 log "Building the test ISO of $from"
-iso/build.sh --release "$from" --test -o "$DIR/from.iso"
+# With the release's own iso/ files: this tree's first-boot setup runs
+# commands an old release does not have.
+old=$(mktemp -d build/update-old.XXXXXX)
+git archive "$from" | tar -x -C "$old"
+(cd "$old" && iso/build.sh --release "$from" --test -o "$OLDPWD/$DIR/from.iso")
+rm -rf "$old"
 
 # This tree's release archive, as iso/build.sh makes it.
 log "Building this tree's release archive"

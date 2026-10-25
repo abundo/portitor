@@ -143,7 +143,9 @@ the tag is new and the CHANGELOG section, then runs `test-all`. The rest of the 
 5. **Upgrade path:** install the previous release in the lab
    (`./install.py --install <last tag>`), deploy, then update with `--source`:
    migrations run on a populated database, the agent accepts the old document,
-   and a deploy afterwards renders nothing unexpected (Preview).
+   and a deploy afterwards renders nothing unexpected (Preview). `make
+   iso-e2e-update` and `make iso-e2e-split-update` do it from the last release's
+   ISO, on one host and split.
 6. **ISO:** `make iso-e2e` (about 5 minutes) installs a test ISO in a VM and checks
    the first-boot setup, the units and the GUI's reach to the agent.
 7. **Backup:** download a backup and restore it.
@@ -207,7 +209,17 @@ a deploy through the API, copies this tree's release archive in (`iso/qga.py
 --put`) and installs it with its `install.py --local` in a transient unit, then
 checks both versions, the units, that the interfaces survived the migrations, the
 check (installed version) and a deploy again. The GUI's own update job installs
-GitHub releases only, so it can't install this tree.
+GitHub releases only, so it can't install this tree. The old release's ISO is built
+with that release's own `iso/` files (`git archive`), since this tree's first-boot
+setup may run commands it lacks.
+
+`make iso-e2e-split-update` (`iso/test-split-update.sh`, `FROM` as above) does the
+same for the split setup in `build/vm-sup-fw` and `build/vm-sup-web`: it joins the
+firewall as the old release does and deploys, gives the web VM SSH as root to the
+firewall, and runs this tree's `install.py --local` there with no host given. That
+must find the firewall in portitor-web's database, move the database to the
+firewall's portitor-config and list it in `web.yaml`; the checks then log in
+through the portal at `/fw/fw/`, compare the interfaces and deploy.
 
 Log in to the GUI as `admin` / `portitor-test`. Without `VM_SERIAL` the serial
 console is on stdio; after the first boot you can log in there as `portitor`.

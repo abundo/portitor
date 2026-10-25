@@ -21,26 +21,27 @@ import (
 // namespace. Other tables (docker, libvirt, ...) are left alone.
 const TableName = "firewall"
 
-// AntiLockout keeps the agent's management port, and SSH, reachable in the
-// default instance no matter what the rules say.
+// AntiLockout keeps the agent's management port, SSH and portitor-config
+// (the GUI) reachable in the default instance no matter what the rules say.
 type AntiLockout struct {
-	Port      int      `json:"port"`
-	SSHPort   int      `json:"ssh_port,omitempty"` // 0 leaves SSH out
-	AllowFrom []string `json:"allow_from"`         // CIDRs; empty disables the rule
+	Port       int      `json:"port"`
+	SSHPort    int      `json:"ssh_port,omitempty"`    // 0 leaves SSH out
+	ConfigPort int      `json:"config_port,omitempty"` // 0 leaves portitor-config out
+	AllowFrom  []string `json:"allow_from"`            // CIDRs; empty disables the rule
 }
 
 // AntiLockoutService is the anti-lockout rule's service, as the other auto
 // input rules have (AutoRule.Service); LogAuto names it to log the rule.
 const AntiLockoutService = "anti-lockout"
 
-// Ports are the TCP ports the anti-lockout rule accepts: SSH, then the API.
+// Ports are the TCP ports the anti-lockout rule accepts: SSH, the API, then
+// portitor-config, each once.
 func (l *AntiLockout) Ports() []int {
 	var out []int
-	if l.SSHPort > 0 && l.SSHPort != l.Port {
-		out = append(out, l.SSHPort)
-	}
-	if l.Port > 0 {
-		out = append(out, l.Port)
+	for _, p := range []int{l.SSHPort, l.Port, l.ConfigPort} {
+		if p > 0 && !slices.Contains(out, p) {
+			out = append(out, p)
+		}
 	}
 	return out
 }

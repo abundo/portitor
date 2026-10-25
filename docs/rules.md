@@ -41,8 +41,8 @@ locked rows show where the built-in parts sit:
 3. Loopback and the ICMP that IPv4 and IPv6 need to work are allowed.
 4. **Auto rules** (input only, locked): what the configured services need, such as
    DHCP and DNS on the interfaces that serve them, WireGuard's port and ACME's port 80.
-   In the default virtual firewall the agent's management port and SSH stay open to
-   the agent's `allow_from` addresses (anti-lockout). They come before your rules, so
+   In the default virtual firewall the agent's management port, SSH and the GUI
+   (portitor-config) stay open to the agent's `allow_from` addresses (anti-lockout). They come before your rules, so
    a rule that closes an interface to the firewall still keeps DHCP and DNS working on it.
 5. **Your rules**, in the order shown.
 6. **Port forwards** (forward only, locked): connections a NAT port forward redirected

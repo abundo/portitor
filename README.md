@@ -141,8 +141,9 @@ from scratch.
   restarts or crashes; a rollback that fails is tried again every minute and at the
   next start. The first apply has nothing to roll back to, and a timeout of 0 turns
   confirmation off.
-- **Anti-lockout.** The agent always accepts its API port and SSH (22) from `allow_from`,
-  whatever rules are deployed.
+- **Anti-lockout.** The agent always accepts its API port, SSH (22) and
+  portitor-config's port (8444, `config_port`) from `allow_from`, whatever rules
+  are deployed.
 - **Atomic rulesets.** Each ruleset is checked with `nft -c` before anything changes,
   and loaded as a single transaction, before the virtual firewall's interfaces come up or
   forwarding is turned on. A failed apply restores the previous configuration; if

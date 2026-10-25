@@ -28,9 +28,13 @@ type Config struct {
 	// same list feeds the anti-lockout rule, so these addresses keep
 	// reaching the API whatever the pushed rules say.
 	AllowFrom []string `yaml:"allow_from"`
-	// AntiLockout adds an input accept rule for Listen's port and SSH
-	// (22) from AllowFrom in the default instance. Default true.
+	// AntiLockout adds an input accept rule for Listen's port, SSH (22)
+	// and ConfigPort from AllowFrom in the default instance. Default true.
 	AntiLockout *bool `yaml:"anti_lockout"`
+	// ConfigPort is portitor-config's port on this host (the GUI, which
+	// portitor-web elsewhere reaches too), kept open by the anti-lockout
+	// rule. Default 8444; 0 leaves it out.
+	ConfigPort *int `yaml:"config_port"`
 	// DryRun renders and logs, but changes nothing. For development on a
 	// machine that is not the firewall.
 	DryRun bool `yaml:"dry_run"`
@@ -217,5 +221,9 @@ func (c *Config) antiLockout() *render.AntiLockout {
 	if i := strings.LastIndex(c.Listen, ":"); i >= 0 {
 		fmt.Sscanf(c.Listen[i+1:], "%d", &port)
 	}
-	return &render.AntiLockout{Port: port, SSHPort: 22, AllowFrom: from}
+	configPort := 8444
+	if c.ConfigPort != nil {
+		configPort = *c.ConfigPort
+	}
+	return &render.AntiLockout{Port: port, SSHPort: 22, ConfigPort: configPort, AllowFrom: from}
 }

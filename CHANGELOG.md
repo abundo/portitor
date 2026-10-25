@@ -6,6 +6,28 @@
 The major changes in each release. A release's notes on GitHub are its section
 here (`dev/release-notes.sh`); the full list is `git log <previous tag>..<tag>`.
 
+## Unreleased
+
+### Upgrading
+
+- portitor-web's database moves to the firewall: portitor-config there owns it,
+  and portitor-web becomes the portal to it at `/fw/<host name>/`. Everyone logs in
+  again.
+- **Firewall and portitor-web on one host** (the ISO): the update moves the database
+  on that host.
+- **portitor-web on a host of its own:** update from that host
+  (`install.py` there, with SSH to the firewall as for `--agent`). It finds the
+  firewall in its database, updates it first, copies the database (and the Revert
+  snapshots) to the firewall's portitor-config, and lists it in `web.yaml`. An
+  update of the firewall alone (from the GUI) leaves its portitor-config stopped:
+  don't create an admin there, as a commit from that empty database would replace
+  the firewall's configuration. A database that deploys to several firewalls is not
+  moved: export each virtual firewall as a bundle and import it on its firewall.
+- The anti-lockout rule also opens portitor-config's port (8444, `config_port` in
+  `agent.yaml`) to `allow_from`, so the portal elsewhere reaches it.
+- A certificate chosen under Settings for the GUI now applies to portitor-config;
+  portitor-web serves the `tls_cert` in its `web.yaml`.
+
 ## v0.6.1
 
 ### New
