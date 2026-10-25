@@ -17,7 +17,6 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
-	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -27,6 +26,7 @@ import (
 
 	"github.com/abundo/portitor/internal/agentclient"
 	"github.com/abundo/portitor/internal/buildinfo"
+	"github.com/abundo/portitor/internal/fwconfig"
 )
 
 // portitor-web is a portal: it has no database and no configuration of
@@ -64,8 +64,6 @@ type PortalFirewall struct {
 	Fingerprint string `yaml:"fingerprint" json:"-"`
 }
 
-var portalNameRe = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
-
 func LoadPortalConfig(path string) (*PortalConfig, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -91,8 +89,9 @@ func (c *PortalConfig) check() error {
 	seen := map[string]bool{}
 	for i := range c.Firewalls {
 		f := &c.Firewalls[i]
-		if !portalNameRe.MatchString(f.Name) {
-			return fmt.Errorf("firewalls: name %q: lowercase letters, digits and -, starting with a letter, at most 32", f.Name)
+		// A firewall's own name (fwconfig.ValidDefaultInstanceName).
+		if !fwconfig.ValidDefaultInstanceName(f.Name) {
+			return fmt.Errorf("firewalls: name %q: letters, digits, '-', '_' and '.', starting with a letter or digit, at most 63 characters", f.Name)
 		}
 		if seen[f.Name] {
 			return fmt.Errorf("firewalls: %s twice", f.Name)

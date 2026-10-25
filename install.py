@@ -746,10 +746,10 @@ def ensure_user(host: Host) -> None:
 def portal_name(host: Host) -> str:
     """The name portitor-web gives the firewall on its own host."""
     proc = host.run("hostname -s", check=False, mutate=False, capture=True)
-    name = re.sub(r"[^a-z0-9-]+", "-", (proc.stdout or "").strip().lower()).strip("-")
-    if not name or not name[0].isalpha():
-        name = "fw-" + name if name else "firewall"
-    return name[:32].rstrip("-")
+    # A firewall's name: letters, digits, '-', '_' and '.', starting with a
+    # letter or digit, at most 63 characters.
+    name = re.sub(r"[^a-zA-Z0-9_.-]+", "-", (proc.stdout or "").strip()).lstrip("-_.")
+    return name[:63] or "firewall"
 
 
 def link_local_config(host: Host) -> None:

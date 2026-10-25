@@ -75,7 +75,7 @@ applies (on an HA secondary, the configuration is read-only).
 |---|---|---|
 | `bind` | `127.0.0.1:8080` | Listen address. |
 | `tls_cert`, `tls_key` | | Serve HTTPS directly; otherwise put a TLS reverse proxy in front. |
-| `firewalls` | none | The firewalls: `name` (lowercase letters, digits and `-`), `url` of its portitor-config (`https://<firewall>:8444`; `http://` only to this host) and `fingerprint`, the SHA-256 of its `tls_cert` (`portitor-config fingerprint` on the firewall). |
+| `firewalls` | none | The firewalls: `name` (letters, digits, `-`, `_` and `.`, starting with a letter or digit, at most 63, as a firewall's name), `url` of its portitor-config (`https://<firewall>:8444`; `http://` only to this host) and `fingerprint`, the SHA-256 of its `tls_cert` (`portitor-config fingerprint` on the firewall). |
 | `witness` | none | The witness strings of the HA pairs this host is the [witness](ha.md#the-witness) of. |
 
 ```yaml

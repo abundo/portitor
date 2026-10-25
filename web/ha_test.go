@@ -320,8 +320,9 @@ func TestPortalConfig(t *testing.T) {
 		fw   PortalFirewall
 		want string
 	}{
-		{PortalFirewall{Name: "Fw", URL: "https://a:1", Fingerprint: strings.Repeat("ab", 32)}, "name"},
+		{PortalFirewall{Name: "-fw", URL: "https://a:1", Fingerprint: strings.Repeat("ab", 32)}, "name"},
 		{PortalFirewall{Name: "fw", URL: "https://a:1"}, "fingerprint"},
+		{PortalFirewall{Name: "FW1_a.lab", URL: "https://a:1"}, "fingerprint"},
 		{PortalFirewall{Name: "fw", URL: "http://192.0.2.1:8444"}, "http:// only to this host"},
 		{PortalFirewall{Name: "fw", URL: "https://a:1/path", Fingerprint: strings.Repeat("ab", 32)}, "url must be"},
 	} {

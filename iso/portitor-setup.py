@@ -443,7 +443,7 @@ def decode_portal(text: str) -> dict:
         raise ValueError("the portal string is damaged; copy it again") from None
     if not isinstance(d, dict) or not all(isinstance(d.get(k), str) and d.get(k) for k in ("name", "url", "fingerprint")):
         raise ValueError("the portal string is incomplete; copy it again")
-    if not re.fullmatch(r"[a-z][a-z0-9-]{0,31}", d["name"]) or not re.fullmatch(r"https://[\w.:\[\]-]+", d["url"]) \
+    if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]{0,62}", d["name"]) or not re.fullmatch(r"https://[\w.:\[\]-]+", d["url"]) \
             or not re.fullmatch(r"[0-9a-f]{64}", d["fingerprint"]):
         raise ValueError("the portal string is damaged; copy it again")
     return d
@@ -653,8 +653,8 @@ def cert_fingerprint() -> str:
 
 
 def portal_name(a: dict) -> str:
-    name = re.sub(r"[^a-z0-9-]+", "-", a["hostname"].split(".", 1)[0].lower()).strip("-")
-    return (name if name[:1].isalpha() else "fw-" + name)[:32].rstrip("-") or "firewall"
+    """The short host name, a valid firewall name (check_hostname)."""
+    return a["hostname"].split(".", 1)[0]
 
 
 def portal_string(a: dict) -> str:

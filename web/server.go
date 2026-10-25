@@ -16,7 +16,6 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"regexp"
 	"strings"
 	"sync"
 
@@ -317,8 +316,11 @@ func (s *Server) Echo() *echo.Echo {
 	return e
 }
 
-// prefixRe is a path portitor-web serves a firewall at (portalPrefix).
-var prefixRe = regexp.MustCompile(`^/fw/[a-z][a-z0-9-]{0,31}$`)
+// isPortalPrefix: a path portitor-web serves a firewall at (portalPrefix).
+func isPortalPrefix(p string) bool {
+	name, ok := strings.CutPrefix(p, "/fw/")
+	return ok && fwconfig.ValidDefaultInstanceName(name)
+}
 
 // serveIndex answers the SPA's routes, and every path that is not one of
 // its files, with index.html, its <base> the path portitor-web serves this
@@ -340,7 +342,7 @@ func (s *Server) serveIndex(next echo.HandlerFunc) echo.HandlerFunc {
 			return errJSON(c, http.StatusNotFound, "the GUI is not built (web/static)")
 		}
 		base := "/"
-		if pre := r.Header.Get("X-Forwarded-Prefix"); prefixRe.MatchString(pre) {
+		if pre := r.Header.Get("X-Forwarded-Prefix"); isPortalPrefix(pre) {
 			base = pre + "/"
 		}
 		page = bytes.Replace(page, []byte("<head>"), []byte(`<head><base href="`+base+`">`), 1)
