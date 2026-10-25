@@ -9,7 +9,9 @@ import { api } from '@/api'
 // banner can count down and the rollback is noticed. changes says whether
 // the database differs from what is deployed. rates keeps each interface's
 // receive and send rate (bytes/s) over the last 5 minutes, from the counters'
-// differences between polls, by "instance/interface".
+// differences between polls, by "instance/interface"; cpu each firewall's CPU
+// use (0..1) over the same window, from its busy and total jiffies, by
+// firewall id.
 const RATE_WINDOW = 5 * 60 * 1000
 
 export const useDeployStore = defineStore('deploy', {
@@ -22,6 +24,8 @@ export const useDeployStore = defineStore('deploy', {
     watchers: 0,
     rates: {},
     counters: {},
+    cpu: {},
+    cpuTimes: {},
   }),
   getters: {
     pending: (s) => s.status?.pending ?? null,
@@ -57,6 +61,17 @@ export const useDeployStore = defineStore('deploy', {
           }
           this.rates[key] = list
         }
+      }
+      for (const fw of this.status?.firewalls ?? []) {
+        const h = fw.host
+        if (!h) continue
+        const prev = this.cpuTimes[fw.id]
+        this.cpuTimes[fw.id] = { busy: h.cpu_busy, total: h.cpu_total }
+        const list = (this.cpu[fw.id] ?? []).filter((r) => now - r.t <= RATE_WINDOW)
+        if (prev && h.cpu_total > prev.total && h.cpu_busy >= prev.busy) {
+          list.push({ t: now, usage: (h.cpu_busy - prev.busy) / (h.cpu_total - prev.total) })
+        }
+        this.cpu[fw.id] = list
       }
       for (const key of Object.keys(this.counters)) {
         if (!seen.has(key)) {

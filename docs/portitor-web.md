@@ -94,7 +94,7 @@ After an upgrade, run `migrate` before `start`. `install.py` does both.
 
 | Section | Page | What |
 |---|---|---|
-| | Dashboard | The selected virtual firewall on the firewall: interfaces, WAN lease, WireGuard peers, missing programs. |
+| | Dashboard | The selected virtual firewall on the firewall: system information and updates, CPU, memory and disk use of its host (global readers), a traffic graph, interface statistics (packets, bytes, errors, drops), services with their logs, connected WireGuard peers, the packets its rules logged since the page opened, the latest release notes as announcements, missing programs. |
 | | Deploy | Check, preview, apply, history. |
 | Globals | Virtual firewalls | Virtual routers. `main` is the host; others are network namespaces. |
 | | Links | veth pairs between virtual firewalls. |

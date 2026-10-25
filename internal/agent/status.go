@@ -53,6 +53,7 @@ func (a *Agent) Status(ctx context.Context) *Status {
 	a.mu.Unlock()
 	st.Programs = programStatus(doc)
 	st.NICs = a.nics(ctx, doc)
+	st.Host = hostStatus()
 
 	if doc == nil {
 		return st

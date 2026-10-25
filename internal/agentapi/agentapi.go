@@ -156,6 +156,35 @@ type Status struct {
 	AntiLockout *render.AntiLockout `json:"anti_lockout,omitempty"`
 	// HA is the host's place in its HA pair and its quorum.
 	HA *HAStatus `json:"ha,omitempty"`
+	// Host is the firewall's memory, disks and CPU, for the dashboard.
+	Host *HostStatus `json:"host,omitempty"`
+}
+
+// HostStatus is the firewall host's resources as /proc and statfs show
+// them. The CPU times are counters since boot, so a usage is the
+// difference between two of them.
+type HostStatus struct {
+	MemTotal     uint64 `json:"mem_total"`     // bytes
+	MemAvailable uint64 `json:"mem_available"` // bytes
+	SwapTotal    uint64 `json:"swap_total"`
+	SwapFree     uint64 `json:"swap_free"`
+	CPUs         int    `json:"cpus"`
+	// CPUBusy and CPUTotal are the jiffies of all CPUs: busy is all but
+	// idle and iowait.
+	CPUBusy  uint64     `json:"cpu_busy"`
+	CPUTotal uint64     `json:"cpu_total"`
+	Load     [3]float64 `json:"load"` // 1, 5 and 15 minutes
+	// Uptime is in seconds.
+	Uptime int64        `json:"uptime"`
+	Disks  []DiskStatus `json:"disks"`
+}
+
+// DiskStatus is one mounted filesystem's use.
+type DiskStatus struct {
+	Mount string `json:"mount"`
+	Total uint64 `json:"total"` // bytes
+	Free  uint64 `json:"free"`  // available to unprivileged users
+	Used  uint64 `json:"used"`
 }
 
 // NICStatus is a physical interface: a real NIC (no link kind), or one the

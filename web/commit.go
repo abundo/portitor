@@ -742,6 +742,9 @@ type firewallStatus struct {
 	VersionMismatch string                  `json:"version_mismatch,omitempty"`
 	Pending         *agentapi.PendingStatus `json:"pending,omitempty"`
 	HA              *agentapi.HAStatus      `json:"ha,omitempty"`
+	// Host is the firewall's memory, disks and CPU (the whole host: a
+	// global reader's only).
+	Host *agentapi.HostStatus `json:"host,omitempty"`
 }
 
 // handleAgentStatus merges the firewalls' agent status: their instances,
@@ -773,6 +776,7 @@ func (s *Server) handleAgentStatus(c *echo.Context) error {
 		if st.HA != nil && st.HA.Node != "" {
 			fs.HA = st.HA
 		}
+		fs.Host = st.Host
 		fs.VersionMismatch = buildinfo.Mismatch(st.Version)
 		if mismatch == "" {
 			mismatch = fs.VersionMismatch
@@ -793,7 +797,7 @@ func (s *Server) handleAgentStatus(c *echo.Context) error {
 			merged.LastError = joinNonEmpty(merged.LastError, fs.Name+": "+fs.Error)
 		}
 	}
-	merged.Pending = nil
+	merged.Pending, merged.Host = nil, nil
 	if deps, err := s.pendingDeployments(); err != nil {
 		return err
 	} else if len(deps) > 0 {
@@ -814,7 +818,7 @@ func (s *Server) handleAgentStatus(c *echo.Context) error {
 		filterStatus(merged, names)
 		sync = nil
 		for i := range statuses {
-			statuses[i].Hostname, statuses[i].Version, statuses[i].Error, statuses[i].HA = "", "", "", nil
+			statuses[i].Hostname, statuses[i].Version, statuses[i].Error, statuses[i].HA, statuses[i].Host = "", "", "", nil, nil
 		}
 	}
 	return c.JSON(http.StatusOK, struct {
