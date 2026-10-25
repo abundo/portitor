@@ -14,11 +14,13 @@ import (
 	"maps"
 	"math/big"
 	"net/http"
+	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/abundo/portitor/internal/acme"
 	"github.com/abundo/portitor/internal/builder"
 	"github.com/abundo/portitor/internal/render"
 	"github.com/abundo/portitor/models"
@@ -158,6 +160,181 @@ func TestCertificateImport(t *testing.T) {
 	}
 	if red := redactDoc(*doc); red.Instance("main").Certificates[0].PrivKey != "<redacted>" || main.Certificates[0].PrivKey != key {
 		t.Error("key not redacted, or redacted in place")
+	}
+}
+
+// A self-signed certificate is made on save and stored as an imported one.
+func TestCertificateSelfSigned(t *testing.T) {
+	env := newEnv(t)
+	inst := env.create("/api/instances", map[string]any{"name": "main"})
+	for _, g := range []map[string]any{
+		{"domains": []string{}, "days": 365},
+		{"domains": []string{"bad name"}, "days": 365},
+		{"domains": []string{"fw"}, "days": 0},
+		{"domains": []string{"fw"}, "days": 365, "key_type": "dsa"},
+	} {
+		if rec := env.do("POST", "/api/certificates", map[string]any{"instance_id": inst, "name": "fw", "enabled": true,
+			"source": "import", "generate": g}); rec.Code != http.StatusBadRequest {
+			t.Errorf("bad request %v accepted: %d %s", g, rec.Code, rec.Body)
+		}
+	}
+	rec := env.do("POST", "/api/certificates", map[string]any{"instance_id": inst, "name": "fw", "enabled": true,
+		"source": "import", "generate": map[string]any{
+			"domains": []string{"FW.example.com", "*.example.com", "192.0.2.1", "2001:db8::1"}, "key_type": "rsa2048", "days": 30,
+		}})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("generate: %d %s", rec.Code, rec.Body)
+	}
+	if strings.Contains(rec.Body.String(), "PRIVATE KEY") {
+		t.Error("key shown")
+	}
+	var created models.Certificate
+	_ = json.Unmarshal(rec.Body.Bytes(), &created)
+	if !created.HasPrivKey || created.CommonName != "fw.example.com" ||
+		!slices.Equal(created.Domains, []string{"fw.example.com", "*.example.com", "192.0.2.1", "2001:db8::1"}) {
+		t.Errorf("generated: %+v", created)
+	}
+	b, _ := pem.Decode([]byte(created.FullChain))
+	leaf, err := x509.ParseCertificate(b.Bytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := time.Until(leaf.NotAfter); d < 29*24*time.Hour || d > 31*24*time.Hour || leaf.CheckSignature(leaf.SignatureAlgorithm, leaf.RawTBSCertificate, leaf.Signature) != nil {
+		t.Errorf("certificate: until %v, %v", leaf.NotAfter, leaf.CheckSignature(leaf.SignatureAlgorithm, leaf.RawTBSCertificate, leaf.Signature))
+	}
+}
+
+// A CA is the firewall's: made or imported on its host alone, deployed
+// with the host like any imported certificate (to both hosts of a pair), it
+// signs the certificates of that firewall's host and virtual firewalls.
+func TestCertificateAuthority(t *testing.T) {
+	env, _, branch := twoFirewalls(t)
+	inst := func(where string, args ...any) uint {
+		var in models.Instance
+		if err := env.srv.db.Where(where, args...).First(&in).Error; err != nil {
+			t.Fatal(err)
+		}
+		return in.ID
+	}
+	host := inst("firewall_id = 1 AND is_default")
+	guest := inst("name = ?", "guest")
+	branchHost := inst("firewall_id = ? AND is_default", branch)
+	shop := inst("name = ?", "shop")
+	gen := func(inst uint, name string, g map[string]any) *httptest.ResponseRecorder {
+		return env.do("POST", "/api/certificates", map[string]any{"instance_id": inst, "name": name, "enabled": true,
+			"source": "import", "generate": g})
+	}
+
+	if rec := gen(guest, "ca", map[string]any{"ca": true, "days": 3650}); rec.Code != http.StatusBadRequest {
+		t.Errorf("CA in a virtual firewall accepted: %d %s", rec.Code, rec.Body)
+	}
+	if rec := gen(host, "ca", map[string]any{"ca": true, "domains": []string{"ca.example.com"}, "days": 3650}); rec.Code != http.StatusBadRequest {
+		t.Errorf("CA with SANs accepted: %d %s", rec.Code, rec.Body)
+	}
+	rec := gen(host, "ca", map[string]any{"ca": true, "common_name": "Example CA", "days": 3650})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("CA: %d %s", rec.Code, rec.Body)
+	}
+	if strings.Contains(rec.Body.String(), "PRIVATE KEY") {
+		t.Error("CA key shown")
+	}
+	var ca models.Certificate
+	_ = json.Unmarshal(rec.Body.Bytes(), &ca)
+	if !ca.IsCA || ca.CommonName != "Example CA" || ca.Issuer != "Example CA" || len(ca.Domains) != 0 || ca.NotAfter == nil {
+		t.Errorf("CA: %+v", ca)
+	}
+	// A CA imported into a virtual firewall is refused too.
+	caChain, caKey, err := acme.MakeCertificate(acme.CertRequest{CommonName: "Other CA", KeyType: "ec256", Days: 30, CA: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec := env.do("POST", "/api/certificates", map[string]any{"instance_id": guest, "name": "ca2", "enabled": true,
+		"source": "import", "fullchain": caChain, "privkey": caKey}); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "belongs to the firewall") {
+		t.Errorf("CA imported into a virtual firewall: %d %s", rec.Code, rec.Body)
+	}
+	if rec := env.do("POST", "/api/certificates", map[string]any{"instance_id": host, "name": "ca2", "enabled": true,
+		"source": "import", "fullchain": caChain, "privkey": caKey}); rec.Code != http.StatusCreated {
+		t.Errorf("CA imported on the host: %d %s", rec.Code, rec.Body)
+	}
+
+	plain := env.create("/api/certificates", map[string]any{"instance_id": host, "name": "plain", "enabled": true,
+		"source": "import", "generate": map[string]any{"domains": []string{"plain.example.com"}, "days": 30}})
+	branchCA := env.create("/api/certificates", map[string]any{"instance_id": branchHost, "name": "ca", "enabled": true,
+		"source": "import", "generate": map[string]any{"ca": true, "days": 30}})
+	for _, c := range []struct {
+		inst, ca uint
+	}{{guest, plain}, {guest, branchCA}, {shop, ca.ID}, {guest, 9999}} {
+		if rec := gen(c.inst, "www", map[string]any{"domains": []string{"www.example.com"}, "days": 30, "ca_id": c.ca}); rec.Code != http.StatusBadRequest {
+			t.Errorf("instance %d signed by %d: %d %s", c.inst, c.ca, rec.Code, rec.Body)
+		}
+	}
+	rec = gen(guest, "www", map[string]any{"domains": []string{"www.example.com"}, "days": 36500, "ca_id": ca.ID})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("signed: %d %s", rec.Code, rec.Body)
+	}
+	var www models.Certificate
+	_ = json.Unmarshal(rec.Body.Bytes(), &www)
+	if www.IsCA || www.Issuer != "Example CA" || !www.NotAfter.Equal(*ca.NotAfter) {
+		t.Errorf("signed: %+v (CA until %v)", www, ca.NotAfter)
+	}
+	if rec := gen(host, "fw", map[string]any{"domains": []string{"fw.example.com"}, "days": 30, "ca_id": ca.ID}); rec.Code != http.StatusCreated {
+		t.Errorf("signed on the host: %d %s", rec.Code, rec.Body)
+	}
+	if rec := env.do("PUT", "/api/certificates/"+itoa(www.ID), map[string]any{"fullchain": ca.FullChain}); rec.Code != http.StatusBadRequest {
+		t.Errorf("server certificate turned into a CA: %d %s", rec.Code, rec.Body)
+	}
+
+	// The CA is exported without its key, and verifies the chain.
+	dl := env.do("GET", "/api/certificates/"+itoa(ca.ID)+"/download?format=pem", nil)
+	if dl.Code != http.StatusOK || strings.Contains(dl.Body.String(), "PRIVATE KEY") {
+		t.Fatalf("CA download: %d %s", dl.Code, dl.Body)
+	}
+	roots := x509.NewCertPool()
+	if !roots.AppendCertsFromPEM(dl.Body.Bytes()) {
+		t.Fatal("CA download: no certificate")
+	}
+	b, rest := pem.Decode([]byte(www.FullChain))
+	leaf, _ := x509.ParseCertificate(b.Bytes)
+	if b, _ = pem.Decode(rest); b == nil {
+		t.Fatal("chain without its CA")
+	}
+	if _, err := leaf.Verify(x509.VerifyOptions{Roots: roots, DNSName: "www.example.com"}); err != nil {
+		t.Errorf("verify: %v", err)
+	}
+
+	// The CA goes to its firewall with the host, key included.
+	doc, err := builder.BuildFirewall(env.srv.db, 1, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, in := range doc.Instances {
+		for _, c := range in.Certificates {
+			if c.Name == "ca" {
+				found = in.Default && c.PrivKey != ""
+			}
+		}
+	}
+	if !found {
+		t.Error("CA not deployed with the host")
+	}
+	if rec := env.do("PUT", "/api/settings", map[string]any{"web_certificate_id": ca.ID}); rec.Code != http.StatusBadRequest {
+		t.Errorf("CA as the GUI's certificate: %d %s", rec.Code, rec.Body)
+	}
+
+	// An instance admin makes self-signed certificates only.
+	tina := env.create("/api/users", map[string]string{"username": "tina", "password": "a long password", "role": "none"})
+	if rec := env.do("PUT", "/api/roles/"+itoa(env.roles()["vf-guest"].ID), map[string]any{
+		"members": []map[string]any{{"user_id": tina, "level": "admin"}},
+	}); rec.Code != http.StatusOK {
+		t.Fatalf("role: %d %s", rec.Code, rec.Body)
+	}
+	env.login("tina", "a long password")
+	if rec := gen(guest, "self", map[string]any{"domains": []string{"self.example.com"}, "days": 30}); rec.Code != http.StatusCreated {
+		t.Errorf("tenant self-signed: %d %s", rec.Code, rec.Body)
+	}
+	if rec := gen(guest, "signed", map[string]any{"domains": []string{"x.example.com"}, "days": 30, "ca_id": ca.ID}); rec.Code < 400 {
+		t.Errorf("tenant signed with the CA: %d %s", rec.Code, rec.Body)
 	}
 }
 

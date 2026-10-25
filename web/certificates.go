@@ -5,11 +5,13 @@ package web
 
 import (
 	"fmt"
+	"net/netip"
 	"slices"
 	"strings"
 
 	"gorm.io/gorm"
 
+	"github.com/abundo/portitor/internal/acme"
 	"github.com/abundo/portitor/internal/builder"
 	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/models"
@@ -30,7 +32,16 @@ func prepareCertificate(tx *gorm.DB, c, old *models.Certificate) error {
 		return bad("source: can't change; add a new certificate")
 	}
 	if c.Source == fwconfig.CertSourceImport {
-		return prepareImported(c)
+		if g := c.Generate; g != nil {
+			c.Generate = nil
+			if err := generateCertificate(tx, c, g); err != nil {
+				return err
+			}
+		}
+		if err := prepareImported(c); err != nil {
+			return err
+		}
+		return checkAuthority(tx, c, old)
 	}
 	if c.Source != fwconfig.CertSourceACME {
 		return bad("source: acme or import")
@@ -110,9 +121,149 @@ func prepareImported(c *models.Certificate) error {
 	return checkCertificate(builder.Certificate(c, ""))
 }
 
-// presentCertificate hides an imported certificate's key.
+// generateCertificate puts a new certificate and key, made as g asks, in
+// c's chain and new key: a CA, or a server certificate self-signed or
+// signed by a CA of its firewall.
+func generateCertificate(tx *gorm.DB, c *models.Certificate, g *models.CertGenerate) error {
+	san := func(d string) bool {
+		_, err := netip.ParseAddr(d)
+		return err == nil || fwconfig.ValidDomain(strings.TrimPrefix(d, "*."))
+	}
+	var names []string
+	for _, d := range g.Domains {
+		d = dnsName(d)
+		if a, err := netip.ParseAddr(d); err == nil {
+			d = a.Unmap().WithZone("").String()
+		} else if d != "" && !san(d) {
+			return bad(fmt.Sprintf("subject alternative names: %q is neither a DNS name nor an IP address", d))
+		}
+		if d != "" && !slices.Contains(names, d) {
+			names = append(names, d)
+		}
+	}
+	cn := strings.TrimSpace(g.CommonName)
+	if !g.CA {
+		cn = dnsName(cn)
+	}
+	if len(cn) > 64 || strings.ContainsFunc(cn, func(r rune) bool { return r < 0x20 || r == 0x7f }) {
+		return bad("common name: at most 64 characters, no control characters")
+	}
+	req := acme.CertRequest{KeyType: g.KeyType, Days: g.Days, CA: g.CA}
+	if g.CA {
+		if g.CAID != nil {
+			return bad("a CA here is self-signed: it signs server certificates, no other CA")
+		}
+		if len(names) > 0 {
+			return bad("a CA has no subject alternative names")
+		}
+		if cn == "" {
+			cn = c.Name
+		}
+	} else {
+		if cn != "" && !slices.Contains(names, cn) && san(cn) {
+			names = slices.Insert(names, 0, cn)
+		}
+		if len(names) == 0 || len(names) > 100 {
+			return bad("subject alternative names: 1-100 DNS names or IP addresses")
+		}
+		if cn == "" {
+			cn = names[0]
+		}
+	}
+	req.CommonName, req.Names = cn, names
+	if req.KeyType == "" {
+		req.KeyType = fwconfig.CertKeyTypes[0]
+	}
+	if !slices.Contains(fwconfig.CertKeyTypes, req.KeyType) {
+		return bad("key type: one of " + strings.Join(fwconfig.CertKeyTypes, ", "))
+	}
+	if g.Days < 1 || g.Days > 36500 {
+		return bad("valid for: 1-36500 days")
+	}
+	if id := g.CAID; id != nil {
+		ca, err := firewallCA(tx, *id, c.InstanceID)
+		if err != nil {
+			return err
+		}
+		req.IssuerChain, req.IssuerKey = ca.FullChain, ca.PrivKey
+	}
+	chain, key, err := acme.MakeCertificate(req)
+	if err != nil {
+		return bad(err.Error())
+	}
+	c.FullChain, c.NewPrivKey = chain, key
+	return nil
+}
+
+// firewallCA is the CA certificate id, which must be on the host of the
+// firewall instance is on.
+func firewallCA(tx *gorm.DB, id, instance uint) (*models.Certificate, error) {
+	var ca models.Certificate
+	var host, in models.Instance
+	if tx.First(&ca, id).Error != nil || ca.Source != fwconfig.CertSourceImport || !isCA(&ca) ||
+		tx.First(&host, ca.InstanceID).Error != nil || tx.First(&in, instance).Error != nil ||
+		!host.IsDefault || host.FirewallID != in.FirewallID {
+		return nil, bad("signed by: pick a CA of this firewall")
+	}
+	return &ca, nil
+}
+
+// isCA says whether c is an imported certificate authority.
+func isCA(c *models.Certificate) bool {
+	leaf := fwconfig.ChainLeaf(c.FullChain)
+	return c.Source == fwconfig.CertSourceImport && leaf != nil && leaf.IsCA
+}
+
+// checkAuthority keeps a CA, made or imported, on its firewall's host:
+// it belongs to the firewall, not to a virtual firewall. A certificate
+// stays what it was, a CA or not.
+func checkAuthority(tx *gorm.DB, c, old *models.Certificate) error {
+	ca := isCA(c)
+	if old != nil && isCA(old) != ca {
+		return bad("certificate: can't change between a CA and a server certificate; add a new one")
+	}
+	if !ca {
+		return nil
+	}
+	var in models.Instance
+	if err := tx.First(&in, c.InstanceID).Error; err != nil {
+		return err
+	}
+	if !in.IsDefault {
+		return bad("a CA belongs to the firewall: add it on the firewall's host, not in a virtual firewall")
+	}
+	return nil
+}
+
+// tenantCertificate refuses an instance admin signing with the firewall's
+// CA, which global admins keep.
+func tenantCertificate(c, _ *models.Certificate) error {
+	if c != nil && c.Generate != nil && (c.Generate.CAID != nil || c.Generate.CA) {
+		return bad("certificate authorities: global admins only")
+	}
+	return nil
+}
+
+// refuseCA refuses a CA where a server certificate is needed (what, e.g.
+// "the GUI's certificate").
+func refuseCA(c *models.Certificate, what string) error {
+	if isCA(c) {
+		return bad(fmt.Sprintf("%s: %s is a certificate authority; pick a server certificate", what, c.Name))
+	}
+	return nil
+}
+
+// presentCertificate hides an imported certificate's key and shows what
+// its chain says.
 func presentCertificate(c *models.Certificate) {
 	c.HasPrivKey, c.NewPrivKey = c.PrivKey != "", ""
+	if c.Source != fwconfig.CertSourceImport {
+		return
+	}
+	if leaf := fwconfig.ChainLeaf(c.FullChain); leaf != nil {
+		c.IsCA, c.Issuer = leaf.IsCA, leaf.Issuer.CommonName
+		c.NotBefore, c.NotAfter = &leaf.NotBefore, &leaf.NotAfter
+	}
 }
 
 // checkCertificate runs fwconfig's validation of a certificate, for a

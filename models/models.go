@@ -976,6 +976,32 @@ type Certificate struct {
 	PrivKey    string `json:"-"`
 	NewPrivKey string `gorm:"-" json:"privkey,omitempty"`
 	HasPrivKey bool   `gorm:"-" json:"has_privkey"`
+	// Generate, when set on a save of an imported certificate, makes a new
+	// certificate and key in place of FullChain and NewPrivKey.
+	Generate *CertGenerate `gorm:"-" json:"generate,omitempty"`
+	// IsCA, Issuer, NotBefore and NotAfter are read from an imported
+	// certificate's chain when it is shown. A CA is the firewall's: it is
+	// on the host alone, and signs the certificates of the host and its
+	// virtual firewalls.
+	IsCA      bool       `gorm:"-" json:"is_ca"`
+	Issuer    string     `gorm:"-" json:"issuer,omitempty"`
+	NotBefore *time.Time `gorm:"-" json:"not_before,omitempty"`
+	NotAfter  *time.Time `gorm:"-" json:"not_after,omitempty"`
+}
+
+// CertGenerate is what a new certificate is made with: its SANs (DNS
+// names, wildcards and IP addresses; none for a CA), CN (default the first
+// SAN, or the certificate's name for a CA), key type (fwconfig.CertKeyTypes)
+// and lifetime in days. CA makes a certificate authority (on a firewall's
+// host); CAID is the CA, a certificate of the same firewall's host, that
+// signs a server certificate, self-signed when nil.
+type CertGenerate struct {
+	Domains    []string `json:"domains"`
+	CommonName string   `json:"common_name"`
+	KeyType    string   `json:"key_type"`
+	Days       int      `json:"days"`
+	CA         bool     `json:"ca"`
+	CAID       *uint    `json:"ca_id"`
 }
 
 // DyndnsRecord is a record a DyndnsClient maintains. A/AAAA without Value

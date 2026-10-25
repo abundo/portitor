@@ -238,7 +238,7 @@ docs and user-facing messages.
   failed rollback keeps the change pending and retries. `RolledBack` means the
   restore succeeded; `RollbackErrors` says it didn't.
 - **Secrets:** fields tagged `json:"-"` (WireGuard private/preshared keys, TSIG
-  secrets, DNS update provider settings, IP list passwords and API keys, agent token, password hashes, TOTP secrets and recovery code hashes) never reach
+  secrets, DNS update provider settings, IP list passwords and API keys, agent token, password hashes, TOTP secrets and recovery code hashes, imported certificates' and certificate authorities' keys) never reach
   the browser. The generic CRUD
   `PUT` merges the body onto the stored row, so those fields can't be overwritten
   through the API either; a secret the user enters comes in through a write-only
@@ -399,6 +399,14 @@ the certificate portitor-web serves, chosen under Settings
   only 30 s. Upstream calls share `certManager.order`. The clients' accounts, the
   self-signed certificate and the issue log are in `<state_dir>/acmeproxy/<instance>`;
   orders only in memory.
+- **Certificate authorities** are a firewall's: imported certificates of its host
+  whose certificate is a CA (`isCA`; made by `generate.ca` or imported with their
+  key, `checkAuthority` refuses them in a virtual firewall), deployed with the host
+  like any imported certificate, so they are kept on the firewall (both hosts of a
+  pair). A new certificate (`generate`, `acme.MakeCertificate`) is self-signed or
+  signed by a CA of its own firewall's host (`firewallCA`; global admins only,
+  `tenantCertificate`); a CA is never the GUI's or the ACME proxy's certificate
+  (`refuseCA`).
 - **NTP** (`fwconfig/ntp.go`, `render/chrony.go`): chrony per instance
   (`instances.ntp_*`), its servers JSON. The default instance's chrony.service sets
   the host's clock; a virtual firewall's `portitor-chrony@` runs `chronyd -x` (the

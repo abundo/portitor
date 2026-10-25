@@ -43,7 +43,7 @@ const ifaceRows = ref([])
 const SELF = 0 // the self-signed certificate, null in the database
 const certItems = computed(() => [
   { label: 'Self-signed (made by the firewall)', value: SELF },
-  ...certs.value.map((c) => ({ label: c.name, value: c.id })),
+  ...certs.value.filter((c) => !c.is_ca).map((c) => ({ label: c.name, value: c.id })),
 ])
 const dnsClientItems = computed(() =>
   dnsClients.value.map((c) => ({ label: `${c.name} (${c.zone})`, value: c.id })),

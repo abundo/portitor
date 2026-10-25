@@ -351,6 +351,39 @@ turns *expired* once past its end. To replace it, edit it on the *Overview* tab 
 paste the new certificate (and a new key, unless it reuses the old one). The key is
 never shown again, and the deployment history keeps it redacted.
 
+### Certificate authorities
+
+A certificate authority (CA) belongs to the **firewall**, not to a virtual firewall:
+the *Certificate authorities* tab shows the CAs of the firewall the selected virtual
+firewall is on, kept on its host. A CA is deployed with the host like any imported
+certificate, key included, so it is stored on the firewall itself (on both hosts of
+an HA pair), and the deployment history keeps the key redacted. Global admins
+manage CAs.
+
+- **New CA** makes one (a common name, the key type, ten years by default), or
+  imports an existing CA with its key (*Import a CA with its key*), which then signs
+  too. A CA can't be added to a virtual firewall, nor be the GUI's or the ACME
+  proxy's certificate.
+- **Export** on its row downloads its certificate (PEM or DER, without the key).
+  Add it to the trust store of the hosts that should trust what it signs, e.g.
+  `/usr/local/share/ca-certificates/<name>.crt` and `update-ca-certificates` on
+  Debian, or *Trusted Root Certification Authorities* on Windows.
+- **Sign for &lt;VF&gt;** on its row opens *Create certificate* (below) for the
+  virtual firewall selected in the top bar, signed by that CA. A CA signs the
+  certificates of its own firewall's host and virtual firewalls only.
+
+Deleting a CA leaves the certificates it signed as they are.
+
+### Created certificates
+
+*Create certificate* on the *Store* tab makes a new key and a server certificate for
+it in the selected virtual firewall (or host): *Signed by* a certificate authority
+of its firewall (global admins only) or self-signed, for the SANs you give (DNS
+names, wildcards and IP addresses), valid for the days you give (825 by default,
+the most Apple's systems accept), but never past its CA's end. Its chain holds its CA after it. It is
+then an imported certificate like any other: deployed at the next commit, never
+renewed, so make a new one before it ends.
+
 ### The GUI's own certificate
 
 portitor-web can serve HTTPS with one of these certificates: choose it under

@@ -30,10 +30,12 @@ const version = ref(null)
 const certs = ref([])
 const certItems = computed(() => [
   { label: 'None (tls_cert from web.yaml)', value: 0 },
-  ...certs.value.map((c) => ({
-    label: `${instStore.nameOf(c.instance_id)}/${c.name} (${c.domains.join(', ')})`,
-    value: c.id,
-  })),
+  ...certs.value
+    .filter((c) => !c.is_ca)
+    .map((c) => ({
+      label: `${instStore.nameOf(c.instance_id)}/${c.name} (${c.domains.join(', ')})`,
+      value: c.id,
+    })),
 ])
 
 async function load() {

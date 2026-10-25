@@ -42,6 +42,9 @@ func prepareInstanceACMEProxy(tx *gorm.DB, in *models.Instance) error {
 		if tx.First(&c, *id).Error != nil || c.InstanceID != in.ID {
 			return bad("ACME proxy: pick a certificate of this virtual firewall")
 		}
+		if err := refuseCA(&c, "ACME proxy"); err != nil {
+			return err
+		}
 	}
 	if in.AcmeProxyEnabled {
 		var n int64

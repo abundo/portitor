@@ -124,6 +124,19 @@ func ParseImported(chain, key string) (*x509.Certificate, error) {
 	return x509.ParseCertificate(pair.Certificate[0])
 }
 
+// ChainLeaf is the first certificate of a PEM chain; nil without one.
+func ChainLeaf(chain string) *x509.Certificate {
+	b, _ := pem.Decode([]byte(chain))
+	if b == nil || b.Type != "CERTIFICATE" {
+		return nil
+	}
+	leaf, err := x509.ParseCertificate(b.Bytes)
+	if err != nil {
+		return nil
+	}
+	return leaf
+}
+
 // ACMECA is an ACME certificate authority by name.
 type ACMECA struct {
 	Name  string `json:"name"`

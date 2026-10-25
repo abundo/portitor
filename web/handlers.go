@@ -513,8 +513,12 @@ func (s *Server) handlePutSettings(c *echo.Context) error {
 	if req.WebCertificateID != nil {
 		st.WebCertificateID = nil
 		if id := *req.WebCertificateID; id != 0 {
-			if err := s.db.First(&models.Certificate{}, id).Error; err != nil {
+			var cert models.Certificate
+			if err := s.db.First(&cert, id).Error; err != nil {
 				return errJSON(c, http.StatusBadRequest, "no such certificate")
+			}
+			if err := refuseCA(&cert, "the GUI's certificate"); err != nil {
+				return errJSON(c, http.StatusBadRequest, err.Error())
 			}
 			st.WebCertificateID = &id
 		}

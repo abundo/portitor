@@ -9,11 +9,12 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/models"
 	"github.com/labstack/echo/v5"
 )
 
-// handleCertificateDownload hands out an ACME certificate, without its
+// handleCertificateDownload hands out a certificate, without its
 // private key: ?format=pem (the certificate), chain (PEM, with the
 // intermediates) or der (the certificate, binary).
 func (s *Server) handleCertificateDownload(c *echo.Context) error {
@@ -28,25 +29,35 @@ func (s *Server) handleCertificateDownload(c *echo.Context) error {
 	if ok, err := allowInstance(c, cert.InstanceID, false); !ok {
 		return err
 	}
-	var inst models.Instance
-	if err := s.db.First(&inst, cert.InstanceID).Error; err != nil {
-		return err
+	// An imported certificate is the one in the database; an ACME one is
+	// the agent's.
+	chain := []byte(cert.FullChain)
+	if cert.Source != fwconfig.CertSourceImport {
+		var inst models.Instance
+		if err := s.db.First(&inst, cert.InstanceID).Error; err != nil {
+			return err
+		}
+		a, _, err := s.instanceAgent(inst.Name)
+		if err != nil {
+			return errJSON(c, http.StatusBadGateway, err.Error())
+		}
+		ca, ok := a.(certAgent)
+		if !ok {
+			return errJSON(c, http.StatusBadGateway, "agent client cannot fetch certificates")
+		}
+		ctx, cancel := context.WithTimeout(c.Request().Context(), 30*time.Second)
+		defer cancel()
+		f, err := ca.Certificate(ctx, inst.Name, cert.Name)
+		if err != nil {
+			return errJSON(c, http.StatusBadGateway, err.Error())
+		}
+		chain = []byte(f.FullChain)
 	}
-	a, _, err := s.instanceAgent(inst.Name)
-	if err != nil {
-		return errJSON(c, http.StatusBadGateway, err.Error())
-	}
-	ca, ok := a.(certAgent)
-	if !ok {
-		return errJSON(c, http.StatusBadGateway, "agent client cannot fetch certificates")
-	}
-	ctx, cancel := context.WithTimeout(c.Request().Context(), 30*time.Second)
-	defer cancel()
-	f, err := ca.Certificate(ctx, inst.Name, cert.Name)
-	if err != nil {
-		return errJSON(c, http.StatusBadGateway, err.Error())
-	}
-	chain := []byte(f.FullChain)
+	return sendCertificate(c, cert.Name, chain)
+}
+
+// sendCertificate answers with a chain's certificate, as ?format asks.
+func sendCertificate(c *echo.Context, name string, chain []byte) error {
 	leaf, _ := pem.Decode(chain)
 	if leaf == nil || leaf.Type != "CERTIFICATE" {
 		return errJSON(c, http.StatusNotFound, "no certificate stored yet")
@@ -66,6 +77,6 @@ func (s *Server) handleCertificateDownload(c *echo.Context) error {
 	default:
 		return errJSON(c, http.StatusBadRequest, "format: pem, chain or der")
 	}
-	c.Response().Header().Set("Content-Disposition", `attachment; filename="`+cert.Name+"."+ext+`"`)
+	c.Response().Header().Set("Content-Disposition", `attachment; filename="`+name+"."+ext+`"`)
 	return c.Blob(http.StatusOK, ct, body)
 }
