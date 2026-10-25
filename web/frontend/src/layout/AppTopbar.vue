@@ -104,15 +104,11 @@ const userMenu = computed(() => [
     <UTooltip v-if="version" :text="`commit ${build.commit.slice(0, 12)}, ${build.date}`">
       <span class="hidden font-mono text-xs text-muted sm:inline">{{ version }}</span>
     </UTooltip>
+    <FirewallSwitcher />
     <div v-if="auth.user?.virtual_firewalls" class="ml-2 flex items-center gap-2">
       <span class="hidden text-sm text-muted md:inline">VF</span>
-      <USelect v-model="current" :items="instances.topItems" class="w-56" placeholder="none">
-        <template #default>
-          <span class="truncate">{{ instances.currentText || 'none' }}</span>
-        </template>
-      </USelect>
+      <USelect v-model="current" :items="instances.topItems" class="w-56" placeholder="none" />
     </div>
-    <FirewallSwitcher />
     <ReplicaBanner />
     <ConfirmBanner />
     <ChangesBanner v-if="!auth.replica" />

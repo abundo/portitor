@@ -116,13 +116,16 @@ two hosts by those fingerprints.
 
 ## The screen
 
-- **Virtual firewall selector** (top bar). Most pages show one virtual firewall, the one selected here.
+- **Firewall pick, then virtual firewall selector** (top bar). First the firewall,
+  then a virtual firewall on it: the selector lists the chosen firewall's host and
+  virtual firewalls. Most pages show one virtual firewall, the one selected here.
   Users and settings are shared by all virtual firewalls.
 - **Agent badge** (top bar). The generation the agent has applied; yellow if its last
   apply had an error, red if portitor-config cannot reach it.
 - **Firewall pick** (login page and top bar, behind portitor-web with several
   firewalls): opens another firewall's GUI, which has its own login (one for both
-  hosts of an HA pair).
+  hosts of an HA pair). Without portitor-web, it is shown when this GUI has several
+  firewalls (an HA secondary runs its primary's, so it isn't listed), and picks one.
 - **HA secondary badge** (top bar, on an HA secondary's portitor-config): its
   configuration is a read-only copy of the primary's; the badge opens the pair's
   state and, for a global admin, *Promote* (see [High availability](ha.md#promoting-the-secondary)).

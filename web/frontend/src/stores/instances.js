@@ -22,39 +22,22 @@ export const useInstanceStore = defineStore('instances', {
         const label = i.is_default ? `${i.name} (default)` : fw ? `${i.name} (${fw.name})` : i.name
         return { label, value: i.id }
       }),
-    // topItems are the top bar's choice: with several firewalls, a group
-    // per firewall under its name, its host first and its virtual
-    // firewalls indented under it.
+    // firewallId is the selected one's firewall.
+    firewallId: (s) => s.list.find((i) => i.id === s.currentId)?.firewall_id ?? null,
+    // hostItems are the top bar's firewall choice: the firewalls with
+    // instances (an HA secondary has none of its own).
+    hostItems: (s) =>
+      s.firewalls
+        .filter((f) => s.list.some((i) => i.firewall_id === f.id))
+        .map((f) => ({ label: f.config_url ? `${f.name} (read-only here)` : f.name, value: f.id })),
+    // topItems are the top bar's VF choice: the selected one's firewall's
+    // instances, its host first.
     topItems: (s) => {
-      const hosts = s.firewalls.filter((f) => s.list.some((i) => i.firewall_id === f.id))
-      if (hosts.length < 2) return s.list.map((i) => ({ label: i.name, value: i.id }))
-      return hosts.map((f) => {
-        const vfs = s.list.filter((i) => i.firewall_id === f.id)
-        const host = vfs.find((i) => i.is_default)
-        return [
-          { type: 'label', label: f.name },
-          ...(host
-            ? [
-                {
-                  label: `${host.name} (host${f.config_url ? ', read-only here' : ''})`,
-                  value: host.id,
-                },
-              ]
-            : []),
-          ...vfs
-            .filter((i) => !i.is_default)
-            .map((i) => ({ label: i.name, value: i.id, class: 'ps-6' })),
-        ]
-      })
-    },
-    // currentText names the selected one with its firewall when there are
-    // several.
-    currentText: (s) => {
-      const cur = s.list.find((i) => i.id === s.currentId)
-      if (!cur) return ''
-      const hosts = s.firewalls.filter((f) => s.list.some((i) => i.firewall_id === f.id))
-      const fw = s.firewalls.find((f) => f.id === cur.firewall_id)
-      return hosts.length > 1 && fw ? `${fw.name} / ${cur.name}` : cur.name
+      const fw = s.list.find((i) => i.id === s.currentId)?.firewall_id
+      return s.list
+        .filter((i) => i.firewall_id === fw)
+        .sort((a, b) => b.is_default - a.is_default)
+        .map((i) => ({ label: i.name, value: i.id }))
     },
     // host is the host of the selected one's firewall.
     host: (s) => {
@@ -80,6 +63,11 @@ export const useInstanceStore = defineStore('instances', {
       if (!this.list.some((i) => i.id === this.currentId)) {
         this.select(this.list.find((i) => i.is_default)?.id ?? this.list[0]?.id ?? null)
       }
+    },
+    // selectFirewall selects a firewall's host, else its first instance.
+    selectFirewall(id) {
+      const vfs = this.list.filter((i) => i.firewall_id === id)
+      this.select((vfs.find((i) => i.is_default) ?? vfs[0])?.id ?? null)
     },
     select(id) {
       this.currentId = id
