@@ -49,18 +49,25 @@ office networks. It manages:
   Wireshark (Wiregasm) in the browser, traceroute (mtr), and a console on the firewall
 - users and roles: global admins and viewers, and per-virtual-firewall admins
   (multitenancy), each virtual firewall's daemons sandboxed apart
+- HA pairs: two firewalls with VRRP, Kea HA and conntrackd, fenced without a quorum,
+  the configuration copied to the secondary, which can be promoted
 - encrypted backups, deployment history with revert, and Debian and Portitor updates
   from the GUI
 
-For the best security the GUI does not run on the firewall. A small daemon on the
-firewall, the agent, makes the changes the GUI asks for. For a single box, an
-[installer ISO](docs/appliance.md) puts both on the firewall.
+Every firewall keeps its own configuration: portitor-config, on the firewall, serves
+its GUI and keeps the configuration, and a small root daemon next to it, the agent,
+makes the changes. An optional portal, portitor-web, serves the GUIs of several
+firewalls from another host. The [installer ISO](docs/appliance.md) sets up a firewall
+from scratch.
 
 ## How it fits together
 
 ```
- browser ──► portitor-web (Vue GUI + REST API, SQLite)          runs anywhere but the firewall
-                  │  HTTPS, bearer token, pinned certificate
+ browser ──► portitor-web (portal: /fw/<name>/, no database)     optional, on another host
+                  │  HTTPS, pinned certificate; each firewall's own login
+                  ▼
+ browser ──► portitor-config (Vue GUI + REST API, SQLite)          runs on the firewall
+                  │  HTTPS on 127.0.0.1, bearer token, pinned certificate
                   ▼
              portitor-agent (root daemon)                         runs on the firewall
                   ├─ nftables       one ruleset per virtual firewall
@@ -78,10 +85,14 @@ firewall, the agent, makes the changes the GUI asks for. For a single box, an
                   └─ FRR            BGP, OSPF, VRRP and BFD, per virtual firewall that uses them
 ```
 
-- **portitor-web** holds the configuration in an SQLite database. On *Deploy* it builds a
-  complete desired-state document (`internal/fwconfig`) and sends it to the agent.
+- **portitor-config** holds the firewall's configuration in an SQLite database. On
+  *Deploy* it builds a complete desired-state document (`internal/fwconfig`) and sends
+  it to the agent (and to its HA secondary's). It runs as an unprivileged user; the
+  agent re-checks everything it is sent.
 - **portitor-agent** validates the document again, renders every config file
-  (`internal/render`) and makes the system match. It never reads the web database.
+  (`internal/render`) and makes the system match. It never reads the database.
+- **portitor-web** (optional) passes each firewall's GUI through, at `/fw/<name>/`.
+  It has no database and no users: the firewall's login and roles apply.
 - **Virtual firewalls** are virtual routers. The default virtual firewall is the host itself; every
   other virtual firewall is a Linux network namespace (`fw-<name>`) with its own interfaces,
   routing table, nftables ruleset, BIND and Kea. **Links** are veth pairs between
@@ -116,7 +127,7 @@ firewall, the agent, makes the changes the GUI asks for. For a single box, an
 - **Scheduled tasks** run on the firewall on a cron schedule, in its time zone: download
   an IP list again, or run a shell command as `console_user` (off when the console is).
 - **Hosts & prefixes** are named addresses. A name can be used wherever addresses are
-  entered (rules, NAT, routes, DNS, DHCP, WireGuard); portitor-web expands it when it
+  entered (rules, NAT, routes, DNS, DHCP, WireGuard); portitor-config expands it when it
   builds the document. A host may have an IPv4 and an IPv6 address: a rule with
   addresses of both versions is rendered as one nftables rule per version, and a
   port forward to such a host as one DNAT per version.
@@ -167,23 +178,25 @@ its address and a password, then you continue in the GUI. See
 [docs/appliance.md](docs/appliance.md), which also covers updating Debian and Portitor
 from the GUI (*Admin → Updates*) and building the ISO (`iso/build.sh`).
 
-**GUI on another host.** `install.py` installs and updates both parts from a GitHub release (SHA-256
-verified): portitor-web on the host it runs on, portitor-agent on the firewall over
-SSH as `portitor` (`--ssh-user`; a user with passwordless sudo, or root). If it
-cannot log in, it prints how to create that user and its sudoers entry. Download it
-from a release, then:
+**With install.py.** `install.py` installs and updates from a GitHub release (SHA-256
+verified): portitor-agent and portitor-config on the firewall, and portitor-web, the
+portal, where you want it, on this host or over SSH as `portitor` (`--ssh-user`; a user
+with passwordless sudo, or root). If it cannot log in, it prints how to create that
+user and its sudoers entry. Download it from a release, then:
 
 ```sh
-./install.py --web --agent 192.168.1.1      # first install: binaries, units, example configs
+./install.py --agent 192.168.1.1            # first install of a firewall: binaries, units, example configs
+./install.py --web --agent 192.168.1.1      # ... and portitor-web here, the portal to it
 ./install.py                                # later: pick a release; updates what is installed
 ./install.py --install latest --yes         # unattended update
 ```
 
 On an update it restarts the agent first (it rejects document fields it does not know,
-so it must not be older than the GUI), then stops portitor-web, migrates the database
-and starts it again. It finds the agents from the agent URLs under *Firewalls* (or `--agent HOST,HOST...`)
-and updates them one at a time, an HA pair's secondary first, waiting until each hears
-its peer again, so one host of the pair keeps forwarding. A
+so it must not be older than portitor-config), then stops portitor-config, migrates the
+database and starts it again, then portitor-web. From portitor-web's host it finds the
+firewalls in `web.yaml` and their HA peers (or `--agent HOST,HOST...`), and updates them
+one at a time, an HA pair's secondary first, waiting until each hears its peer again, so
+one host of the pair keeps forwarding. A
 systemd unit you changed is shown as a diff and kept unless you confirm. `--dry-run`
 shows what would change; `--source` builds and installs a source checkout instead.
 
@@ -252,32 +265,32 @@ as `ens*` work), and leave out a management port that networkd should keep.
 The installer ISO does not need this: it is Debian with ifupdown, and neither
 netplan nor dracut is installed.
 
-When portitor-web reaches the agent, it adds the firewall's physical interfaces it
+When portitor-config reaches the agent, it adds the firewall's physical interfaces it
 has not seen before to the default virtual firewall, as they are configured at that moment
 (link state and static addresses), so a first deploy leaves them as they are. An
 interface you delete is not added again. Physical interfaces in the configuration
 that the firewall does not have are shown as a warning.
 
-On the **management host**, with a system user `portitor`:
+Then, also on the firewall, portitor-config, with a system user `portitor`:
 
 ```sh
-make install-web                            # embedded frontend
-$EDITOR /etc/portitor/web.yaml              # jwt_secret
-install -d -o portitor -g portitor -m 0700 /var/lib/portitor-web
-sudo -u portitor portitor-web migrate
-sudo -u portitor portitor-web createadmin admin
-systemctl enable --now portitor-web
+make install-web                            # embedded frontend; portitor-config is a symlink
+cp deploy/config.yaml /etc/portitor/config.yaml && $EDITOR /etc/portitor/config.yaml   # jwt_secret, tls_cert
+install -d -o portitor -g portitor -m 0700 /var/lib/portitor-config
+sudo -u portitor portitor-config migrate
+sudo -u portitor portitor-config createadmin admin
+cat /etc/portitor/agent.token | sudo -u portitor portitor-config set-agent --token-file - --fingerprint <agent fingerprint>
+systemctl enable --now portitor-config
 ```
 
-Run portitor-web commands as `portitor`, so the database files SQLite creates stay
-writable for the service; as root it refuses.
+Run portitor-config commands as `portitor`, so the database files SQLite creates stay
+writable for the service; as root it refuses. Its session cookie needs HTTPS: set
+`tls_cert` and `tls_key` in `config.yaml` (install.py makes a self-signed one), or put a
+TLS reverse proxy in front (see [portitor-config](docs/portitor-web.md#portitor-config)).
 
-portitor-web listens on `127.0.0.1:8080` and its session cookie needs HTTPS: set
-`tls_cert` and `tls_key` in `web.yaml`, or put a TLS reverse proxy in front (see
-[Configuration](docs/portitor-web.md#configuration)).
-
-Then open the GUI. Enter the agent URL, token and fingerprint under *Admin → Firewalls*,
-configure the default virtual firewall `main` (created on first start), and deploy.
+Then open the GUI (`https://<firewall>:8444`), configure the default virtual firewall
+`main` (created on first start), and deploy. For portitor-web, the portal, list the
+firewall in its `/etc/portitor/web.yaml` (see [portitor-web](docs/portitor-web.md#portitor-web)).
 [docs/portitor-web.md](docs/portitor-web.md) describes the configuration file, the
 commands and the GUI. [docs/rules.md](docs/rules.md) is a guide to writing firewall rules,
 port forwards and hairpin NAT.

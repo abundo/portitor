@@ -18,6 +18,9 @@
 //               {type: 'progress', bytes, packets, running},
 //               {type: 'ended', error}, {type: 'reply', id, result, error}
 
+// The GUI's path (utils/base.js), which the page gives as the worker's name.
+const BASE = self.name || '/'
+
 let lib = null
 let session = null
 let chunks = []
@@ -51,11 +54,11 @@ async function gunzip(url) {
 }
 
 async function init() {
-  await fetchOk('/wiregasm/wiregasm.js') // a clear error before importScripts' vague one
-  importScripts('/wiregasm/wiregasm.js')
+  await fetchOk(BASE + 'wiregasm/wiregasm.js') // a clear error before importScripts' vague one
+  importScripts(BASE + 'wiregasm/wiregasm.js')
   const [wasmBinary, data] = await Promise.all([
-    gunzip('/wiregasm/wiregasm.wasm.gz'),
-    gunzip('/wiregasm/wiregasm.data.gz'),
+    gunzip(BASE + 'wiregasm/wiregasm.wasm.gz'),
+    gunzip(BASE + 'wiregasm/wiregasm.data.gz'),
   ])
   lib = await loadWiregasm({
     wasmBinary,
@@ -150,7 +153,7 @@ async function start(body) {
   postMessage({ type: 'progress', bytes: 0, packets: 0, running })
   let error = null
   try {
-    const res = await fetch('/api/agent/capture', {
+    const res = await fetch(BASE + 'api/agent/capture', {
       method: 'POST',
       credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },

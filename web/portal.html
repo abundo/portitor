@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<!-- SPDX-FileCopyrightText: 2026 The Portitor contributors -->
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Portitor</title>
+<style>
+:root { --bg: #ffffff; --fg: #18181b; --muted: #71717a; --line: #e4e4e7; --accent: #16a34a; --error: #dc2626; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #18181b; --fg: #f4f4f5; --muted: #a1a1aa; --line: #3f3f46; --accent: #4ade80; --error: #f87171; }
+}
+body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.5 system-ui, sans-serif; }
+main { max-width: 48rem; margin: 0 auto; padding: 2rem 1rem; }
+h1 { font-size: 1.25rem; margin: 0 0 0.25rem; }
+p { color: var(--muted); margin: 0 0 1.5rem; }
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 0.25rem 0.5rem; border-bottom: 1px solid var(--line); }
+th { color: var(--muted); font-weight: 500; }
+a { color: var(--accent); font-weight: 600; text-decoration: none; }
+a:hover { text-decoration: underline; }
+.error { color: var(--error); }
+footer { margin-top: 2rem; color: var(--muted); font-size: 12px; }
+</style>
+</head>
+<body>
+<main>
+<h1>Portitor</h1>
+<p>Each firewall keeps its configuration on the firewall; log in to it there.</p>
+<table>
+<thead><tr><th>Firewall</th><th>portitor-config</th></tr></thead>
+<tbody>
+{{range .Firewalls}}<tr>
+<td><a href="{{.Path}}">{{.Name}}</a></td>
+<td>{{if .Error}}<span class="error">{{.Error}}</span>{{else}}{{.Version}}{{end}}</td>
+</tr>
+{{else}}<tr><td colspan="2">No firewalls: list them under firewalls: in /etc/portitor/web.yaml.</td></tr>
+{{end}}</tbody>
+</table>
+<footer>portitor-web {{.Version}}</footer>
+</main>
+</body>
+</html>

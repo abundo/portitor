@@ -1,19 +1,23 @@
 # SPDX-FileCopyrightText: 2026 The Portitor contributors
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-# /etc/portitor/web.yaml - portitor-web (runs off the firewall).
-
-# Put a TLS reverse proxy in front, or set tls_cert/tls_key. With them, a
-# certificate from Services -> Certificates can be chosen under Settings ->
-# Portitor web; it is fetched from the agent and replaces tls_cert.
+# /etc/portitor/web.yaml - portitor-web: the portal to the firewalls' GUIs.
+# It has no database: each firewall keeps its configuration in its own
+# portitor-config, which portitor-web serves at /fw/<name>/ (with its login,
+# users and roles). Put a TLS reverse proxy in front, or set tls_cert/tls_key.
 bind: 127.0.0.1:8080
 # tls_cert: /etc/portitor/web.crt
 # tls_key: /etc/portitor/web.key
 
-# Signs session cookies. At least 32 random characters:
-#   openssl rand -base64 32
-jwt_secret: CHANGE-ME
+# The firewalls: each one's portitor-config URL and the SHA-256 of its
+# tls_cert (portitor-config fingerprint, on that firewall). There, list this
+# host's address under trusted_proxies in /etc/portitor/config.yaml.
+firewalls: []
+#  - name: fw1
+#    url: https://192.0.2.1:8444
+#    fingerprint: 0123...ef
 
-# SQLite database file. The unit's StateDirectory creates its directory.
-db:
-  path: /var/lib/portitor-web/portitor.db
+# The HA pairs this host is the witness of (their third vote): the witness
+# string of each (portitor-config witness-string on the pair's primary, its
+# HA witness set to external). `portitor-web witness` runs the witness alone.
+witness: []

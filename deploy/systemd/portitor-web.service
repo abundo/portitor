@@ -1,8 +1,10 @@
 # SPDX-FileCopyrightText: 2026 The Portitor contributors
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
+# portitor-web: the portal to the firewalls' portitor-configs, and the
+# witness of HA pairs; no database.
 [Unit]
-Description=Portitor management GUI
+Description=Portitor portal
 After=network-online.target
 Wants=network-online.target
 
@@ -22,9 +24,6 @@ ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
 PrivateDevices=yes
-# The SQLite database (db.path in web.yaml).
-StateDirectory=portitor-web
-StateDirectoryMode=0700
 
 [Install]
 WantedBy=multi-user.target

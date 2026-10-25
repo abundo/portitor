@@ -4,20 +4,17 @@
 # Installer ISO and updates
 
 The Portitor ISO installs a complete firewall on an amd64 machine: Debian 13, the
-programs the agent needs (nftables, BIND, Kea, radvd, WireGuard),
-portitor-agent and portitor-web. The GUI runs on the firewall itself, so a single box
-is enough.
+programs the agent needs (nftables, BIND, Kea, radvd, WireGuard), portitor-agent and
+portitor-config, which keeps the firewall's configuration and serves its GUI. A single
+box is enough.
 
-This is less strict than the split setup in the [README](../README.md#install), where
-the GUI runs on another host. Here the agent API listens on 127.0.0.1 only, and the
-ruleset lets the LAN interface reach the GUI; the WAN does not. At boot the agent loads
-the ruleset before it brings up the interfaces and turns on forwarding, but there is no
-ruleset before the agent starts: anything else that configures an interface earlier
-(a leftover netplan or DHCP client entry) opens a gap. To move the GUI to
-another host later, install portitor-web there with `install.py`, point it at the
-agent, and change the agent's `listen` and `allow_from` in
-`/etc/portitor/agent.yaml`. To split them from the start, see
-[Firewall and GUI on separate hosts](#firewall-and-gui-on-separate-hosts).
+The agent API listens on 127.0.0.1 only, and the ruleset lets the LAN interface reach
+the GUI; the WAN does not. At boot the agent loads the ruleset before it brings up the
+interfaces and turns on forwarding, but there is no ruleset before the agent starts:
+anything else that configures an interface earlier (a leftover netplan or DHCP client
+entry) opens a gap. To serve the GUIs of several firewalls from one place, run
+portitor-web, the portal, on another host; see
+[Firewall and portal on separate hosts](#firewall-and-portal-on-separate-hosts).
 
 AppArmor stays on. Debian's profiles for BIND and Kea get Portitor's paths added in
 `/etc/apparmor.d/local/` (by `install.py`, as on any Debian host).
@@ -41,7 +38,7 @@ fields, Enter goes on, Escape goes back). It first asks for the **keyboard layou
 pick one from the list, or type to search the layout names and codes (e.g. `se`). It
 applies at once, so the password is typed with it.
 
-Next it asks what the machine runs (see [Firewall and GUI on separate hosts](#firewall-and-gui-on-separate-hosts)). The network
+Next it asks what the machine runs (see [Firewall and portal on separate hosts](#firewall-and-portal-on-separate-hosts)). The network
 page lists the network interfaces with their MAC addresses and whether a cable is
 plugged in (*Reload interfaces* updates the list, so you can plug cables in and
 watch). It asks for:
@@ -119,7 +116,8 @@ It then deploys at once, without the confirm timeout:
 - with the LAN DHCP server on, the LAN's prefix serves the range; *Off* leaves DHCP
   as it is (turn it off in the GUI);
 - a new GUI certificate is made when the LAN address changes, so the browser warns
-  again; the new fingerprint is shown.
+  again; the new fingerprint is shown (a portitor-web that serves this firewall needs
+  it too: the new portal string, below).
 
 Everything else stays: the database, the agent, other interfaces (an interface that
 was the LAN or WAN before stays enabled), rules, NAT and DHCP. Run it at the console:
@@ -129,62 +127,43 @@ Do not edit the rule *management from the LAN*, the service *portitor-mgmt* or t
 locks you out. If that happens, the auto-rollback restores the previous configuration
 as long as you do not confirm the change.
 
-## Firewall and GUI on separate hosts
+## Firewall and portal on separate hosts
 
-The setup first asks what the machine runs:
+A firewall always keeps its own configuration and serves its GUI. portitor-web, the
+portal, can serve the GUIs of several firewalls from another host: each at
+`/fw/<name>/`, with the firewall's own login and users. The setup first asks what the
+machine runs:
 
 - **both**: the firewall with its GUI, as above.
-- **agent**: a firewall managed by portitor-web on another host.
-- **web**: portitor-web only, managing a firewall on another host.
+- **agent**: the same firewall, its GUI served by portitor-web on another host too.
+- **web**: portitor-web only, the portal.
 
-Install the firewall first.
-
-**The firewall (agent).** The setup asks the same questions as above, except that the
-LAN address must be static (portitor-web has to find the firewall there), and it asks
+**The firewall (agent).** The setup asks the same questions as for *both*, except that
+the LAN address must be static (portitor-web reaches the firewall there), and it asks
 for **portitor-web's address**: an address or a network, by default the LAN network.
-The agent listens on port 8443 and only takes calls from that address; the
-anti-lockout rule keeps port 8443 and SSH open from it whatever the rules say. The
-password is for the console login `portitor` only.
+The firewall then believes the browser's address that portitor-web passes on
+(`trusted_proxies` in `/etc/portitor/config.yaml`), for its login limits. The GUI is
+open from the LAN as for *both*.
 
-Nothing is deployed yet: until portitor-web deploys a first configuration, the setup
-puts the LAN address on the LAN interface (`portitor-setup-lan.service`, at every boot
-until then). There is no other address and no route, so portitor-web must be on the
-LAN network for the first deploy.
+The setup ends with a **portal string**, one line that starts with `portitor-portal:`:
+the firewall's name, its GUI's URL and its certificate's fingerprint. It names no
+secret. Log in over SSH (`ssh portitor@<LAN address>`) and run `sudo portitor-setup
+--show-join`, which prints it as plain text, to copy it.
 
-The setup ends with a **join string**, one line that starts with `portitor-join:`. It
-holds the agent's URL, its token and certificate fingerprint, and the LAN and WAN
-answers. The token is a password to the firewall: keep the string to yourself. It is
-too long to type comfortably, so log in over SSH (`ssh portitor@<LAN address>`) and run
-`sudo portitor-setup --show-join`, which prints it as plain text, to copy it.
+**The portal (web).** The setup asks for the host's interface, DHCP or a static
+address with its default gateway, the DNS servers, the password for the console user
+`portitor`, and the time zone. The interface is configured in `/etc/network/interfaces`
+and portitor-agent and portitor-config are disabled: this host has no firewall and no
+users of its own. At the end, paste a firewall's portal string and choose *Add*, or
+choose *Later*: log in over SSH and run `sudo portitor-setup --join` (it asks), or
+`sudo portitor-setup --join <portal string>`. Each adds the firewall to
+`/etc/portitor/web.yaml`; one of the same name is replaced. A portitor-web installed
+with `install.py` takes the same entry by hand under `firewalls:` (see
+[portitor-web](portitor-web.md#portitor-web)).
 
-**The GUI host (web).** The setup asks for the host's interface, DHCP or a static
-address with its default gateway, the DNS servers, the password for
-`portitor` (GUI and console), and the time zone. The interface is configured in `/etc/network/interfaces`
-and portitor-agent is disabled, so this host has no Portitor firewall of its own. At
-the end, paste the join string and choose *Deploy*, or choose *Later* and paste it later: log in over SSH
-and run `sudo portitor-setup --join`.
-
-The join deploys the firewall's first configuration, as for *both*: its LAN and WAN,
-the default route, *management from the LAN*, *ping from the LAN*, *LAN to WAN* and
-the masquerade. Its service *portitor-mgmt* holds only SSH (TCP 22), since the GUI is
-not on the firewall.
-
-A portitor-web installed with `install.py` takes the join string too:
-
-```sh
-sudo runuser -u portitor -- portitor-web -f /etc/portitor/web.yaml bootstrap --join -
-```
-
-Paste the string, then press Enter and Ctrl-D. Both refuse once portitor-web has
-deployed something. You can also enter the agent URL, token and fingerprint by hand in
-*Firewalls*, but then configure the firewall's LAN interface with its address
-before the first deploy. Otherwise the deploy takes the LAN address away.
-
-Run again, `sudo portitor-setup` changes less on a split setup. On the firewall it
-changes portitor-web's address, the DNS servers, the time zone, the keyboard layout and
-the console password; the network is portitor-web's to change. On the GUI host it
-changes the host's interface and address, the DNS servers, the time zone, the keyboard
-layout and the password.
+Run again, `sudo portitor-setup` changes on the firewall what it changes for *both*,
+and portitor-web's address; on the portal, the host's interface and address, the DNS
+servers, the time zone, the keyboard layout and the password.
 
 ## Updates
 
@@ -196,8 +175,8 @@ layout and the password.
   removes packages, and it keeps configuration files you have changed. Security updates
   are marked.
 - **Install** next to a Portitor release runs `install.py --install <release>` on the
-  firewall. It updates the agent first, then portitor-web (and migrates its database),
-  and restarts both. The GUI is away for a moment; reload the page when the update is
+  firewall. It updates the agent first, then portitor-config (and migrates its
+  database), and restarts both. The GUI is away for a moment; reload the page when the update is
   done. *Go back* installs an older release the same way.
 - **Reboot firewall**. After a kernel update, a banner says a reboot is needed.
   Traffic stops until the firewall is back up.
@@ -209,8 +188,14 @@ agent. Their output is shown on the page, and is in the journal
 
 Updating from the GUI needs a copy of `install.py` on the firewall
 (`/usr/lib/portitor/install.py`). The ISO installs it, and every `install.py` run since
-this feature puts it there. When portitor-web runs on another host, *Install* updates
-only the agent. Update portitor-web on its own host with `install.py`, after the agent.
+this feature puts it there. A portitor-web on another host is updated on its own host
+with `install.py`, which updates its firewalls first.
+
+An ISO firewall from before portitor-config ran portitor-web with the database. The
+update moves that database to portitor-config, which listens on port 8444 on the
+firewall, and portitor-web stays on port 443 as the portal to it: the GUI is at the same
+address, under `/fw/<host name>/`. Log in again afterwards. `sudo portitor-setup`, run
+again, puts portitor-config itself on port 443.
 
 ## Building the ISO
 

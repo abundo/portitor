@@ -31,7 +31,7 @@ func cliCommand() *cobra.Command {
 	var asJSON bool
 	root := &cobra.Command{
 		Use:           "portitor",
-		Short:         "Show the firewall's state and act on it (configuration changes go through portitor-web)",
+		Short:         "Show the firewall's state and act on it (configuration changes go through portitor-config)",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Version:       buildinfo.Version,
@@ -406,6 +406,10 @@ func printHA(w io.Writer, st *agentapi.HAStatus) {
 	}
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	fmt.Fprintf(tw, "Node:\t%s\n", st.Node)
+	fmt.Fprintf(tw, "Epoch:\t%d\n", st.Epoch)
+	if st.Stale {
+		fmt.Fprintf(tw, "Stale:\tyes: the peer was promoted while this host was away; fenced until the new primary catches it up\n")
+	}
 	peer := "not heard"
 	if st.PeerAlive {
 		peer = "alive"

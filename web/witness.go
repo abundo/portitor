@@ -17,16 +17,22 @@ import (
 	"github.com/abundo/portitor/models"
 )
 
-// portitor-web is the witness of each HA pair: the third vote of the
-// quorum (fwconfig.HA). Every witnessBeat it asks both hosts and keeps its
-// vote on one of them, the holder, renewing it while it sees that host. A
-// host that has lost its peer stays active with the vote, and the other is
-// fenced, so two hosts that can't see each other never both are. The
-// vote moves only when the holder can't be asked and its vote has run
-// out. After a restart the holder is the host that reports a vote.
+// The witness is the third vote of an HA pair's quorum (fwconfig.HA).
+// Every witnessBeat it asks both hosts and keeps its vote on one of them,
+// the holder, renewing it while it sees that host. A host that has lost
+// its peer stays active with the vote, and the other is fenced, so two
+// hosts that can't see each other never both are. The vote moves only
+// when the holder can't be asked and its vote has run out. After a restart
+// the holder is the host that reports a vote.
 //
-// Each round also catches up a host a commit skipped while it was
-// unreachable (deployment status "skipped"): it applies the commit's
+// A pair has one witness, never two (each could vote for another host):
+// portitor-config on the primary (Firewall.HAWitness local, the default),
+// or an external one on a third host, which survives the primary's loss:
+// portitor-web, or portitor-web witness alone (portalwitness.go), given
+// the pair's witness string.
+//
+// portitor-config's round also catches up a host a commit skipped while it
+// was unreachable (deployment status "skipped"): it applies the commit's
 // document there once the host answers.
 const (
 	witnessBeat = 2 * time.Second
@@ -34,17 +40,100 @@ const (
 	witnessVote = 10
 )
 
+// haHost is what the witness asks of an HA host's agent.
+type haHost interface {
+	HA(ctx context.Context) (*agentapi.HAStatus, error)
+	HAVote(ctx context.Context, seconds int) (*agentapi.HAStatus, error)
+}
+
+// witness is the votes of the pairs, by a key per pair.
 type witness struct {
 	mu      sync.Mutex
 	started time.Time
-	// holder and until are per pair, by the primary's id.
-	holder map[uint]uint
-	until  map[uint]time.Time
+	pairs   map[string]*pairVote
 }
 
-// runWitness runs the witness until ctx is cancelled.
+// pairVote is one pair's vote: held by host 0 (the primary), 1 or none
+// (-1), and until when.
+type pairVote struct {
+	holder int
+	until  time.Time
+}
+
+func newWitnessState() *witness {
+	return &witness{started: time.Now(), pairs: map[string]*pairVote{}}
+}
+
+// haOf asks a host for its quorum; nil when it can't be asked.
+func haOf(ctx context.Context, h haHost) *agentapi.HAStatus {
+	if h == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, witnessBeat)
+	defer cancel()
+	st, err := h.HA(ctx)
+	if err != nil {
+		return nil
+	}
+	return st
+}
+
+// vote keeps the vote of the pair key of hosts (the primary first; nil:
+// can't be asked).
+func (w *witness) vote(ctx context.Context, key string, hosts [2]haHost) {
+	sts := [2]*agentapi.HAStatus{haOf(ctx, hosts[0]), haOf(ctx, hosts[1])}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	pv := w.pairs[key]
+	if pv == nil {
+		pv = &pairVote{holder: -1}
+		w.pairs[key] = pv
+	}
+	now := time.Now()
+	if pv.holder < 0 {
+		for i, st := range sts {
+			if st != nil && st.VoteUntil != nil {
+				pv.holder = i
+				break
+			}
+		}
+	}
+	to := -1
+	switch {
+	case pv.holder >= 0 && sts[pv.holder] != nil:
+		to = pv.holder
+	case pv.holder >= 0 && now.Before(pv.until):
+		// The holder can't be asked, and its vote may still count.
+		return
+	case pv.holder < 0 && sts[0] != nil && sts[1] != nil:
+		to = 0
+	case now.Sub(w.started) < witnessVote*time.Second:
+		// A host that can't be asked may hold a vote from before the
+		// witness started.
+		return
+	case sts[0] != nil:
+		to = 0
+	case sts[1] != nil:
+		to = 1
+	default:
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, witnessBeat)
+	defer cancel()
+	if _, err := hosts[to].HAVote(ctx, witnessVote); err != nil {
+		slog.Warn("witness: vote", "pair", key, "host", to, "err", err)
+		return
+	}
+	if pv.holder != to {
+		slog.Info("witness: vote moved", "pair", key, "to", to)
+	}
+	pv.holder, pv.until = to, now.Add(witnessVote*time.Second)
+}
+
+// runWitness is portitor-config's round until ctx is cancelled: it votes
+// in its pairs whose witness it is, and catches up their hosts.
 func (s *Server) runWitness(ctx context.Context) {
-	s.witness = &witness{started: time.Now(), holder: map[uint]uint{}, until: map[uint]time.Time{}}
+	s.witness = newWitnessState()
 	t := time.NewTicker(witnessBeat)
 	defer t.Stop()
 	for {
@@ -52,6 +141,10 @@ func (s *Server) runWitness(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
+		}
+		if s.isReplica() {
+			// The primary's portitor-config does both.
+			continue
 		}
 		fws, err := s.firewalls()
 		if err != nil {
@@ -70,90 +163,24 @@ func (s *Server) runWitness(ctx context.Context) {
 			if !ok {
 				continue
 			}
-			if s.votes() {
+			if p.HAWitness != models.HAWitnessExternal {
 				s.witnessPair(ctx, p, fw)
 			}
-			// A pair behind portitor-config is caught up by it.
-			if !viaConfig(fws, p) {
-				s.catchUp(ctx, p)
-				s.catchUp(ctx, fw)
-			}
+			s.catchUp(ctx, p)
+			s.catchUp(ctx, fw)
 		}
 	}
-}
-
-// votes tells whether this portitor-web is its pairs' witness: not
-// portitor-config with a manager, which is the witness then (two
-// witnesses could each vote for another host).
-func (s *Server) votes() bool {
-	return !(s.cfg.Local && s.cfg.ManagerTokenFile != "")
-}
-
-// haOf asks a host for its quorum; nil when it can't be asked.
-func (s *Server) haOf(ctx context.Context, fw *models.Firewall) (agentAPI, *agentapi.HAStatus) {
-	a, err := s.newAgent(fw)
-	if err != nil {
-		return nil, nil
-	}
-	ctx, cancel := context.WithTimeout(ctx, witnessBeat)
-	defer cancel()
-	st, err := a.HA(ctx)
-	if err != nil {
-		return nil, nil
-	}
-	return a, st
 }
 
 // witnessPair keeps the vote of the pair of primary p and secondary q.
 func (s *Server) witnessPair(ctx context.Context, p, q models.Firewall) {
-	ap, sp := s.haOf(ctx, &p)
-	aq, sq := s.haOf(ctx, &q)
-	w := s.witness
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	now := time.Now()
-	holder := w.holder[p.ID]
-	if holder == 0 {
-		switch {
-		case sp != nil && sp.VoteUntil != nil:
-			holder = p.ID
-		case sq != nil && sq.VoteUntil != nil:
-			holder = q.ID
+	var hosts [2]haHost
+	for i, fw := range []*models.Firewall{&p, &q} {
+		if a, err := s.newAgent(fw); err == nil {
+			hosts[i] = a
 		}
 	}
-	var to agentAPI
-	var toID uint
-	switch {
-	case holder == p.ID && sp != nil:
-		to, toID = ap, p.ID
-	case holder == q.ID && sq != nil:
-		to, toID = aq, q.ID
-	case holder != 0 && now.Before(w.until[p.ID]):
-		// The holder can't be asked, and its vote may still count.
-		return
-	case holder == 0 && sp != nil && sq != nil:
-		to, toID = ap, p.ID
-	case now.Sub(w.started) < witnessVote*time.Second:
-		// A host that can't be asked may hold a vote from before
-		// portitor-web started.
-		return
-	case sp != nil:
-		to, toID = ap, p.ID
-	case sq != nil:
-		to, toID = aq, q.ID
-	default:
-		return
-	}
-	ctx, cancel := context.WithTimeout(ctx, witnessBeat)
-	defer cancel()
-	if _, err := to.HAVote(ctx, witnessVote); err != nil {
-		slog.Warn("witness: vote", "firewall", toID, "err", err)
-		return
-	}
-	if holder != toID {
-		slog.Info("witness: vote moved", "pair", p.Name, "to", toID)
-	}
-	w.holder[p.ID], w.until[p.ID] = toID, now.Add(witnessVote*time.Second)
+	s.witness.vote(ctx, fmt.Sprintf("firewall %d", p.ID), hosts)
 }
 
 // catchUp applies the document a commit skipped on the firewall, once it
@@ -167,8 +194,8 @@ func (s *Server) catchUp(ctx context.Context, fw models.Firewall) {
 		return
 	}
 	defer s.deployMu.Unlock()
-	a, st := s.haOf(ctx, &fw)
-	if st == nil {
+	a, err := s.newAgent(&fw)
+	if err != nil || haOf(ctx, a) == nil {
 		return
 	}
 	dir, err := s.snapshotDir()

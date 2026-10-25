@@ -16,13 +16,14 @@ LDFLAGS := -s -w \
 GORELEASER ?= $(or $(shell command -v goreleaser),$(shell go env GOPATH)/bin/goreleaser)
 
 .PHONY: build portitor-web portitor-agent frontend release test lint fmt \
-	install-agent install-web dev-agent dev-web dev-seed \
+	install-agent install-web dev-agent dev-web dev-portal dev-seed \
 	lab-up lab-install lab-seed lab-deploy lab-down lab-clean iso iso-test iso-e2e iso-e2e-split iso-e2e-update test-all release-check clean
 
 build: portitor-web portitor-agent
 
 portitor-web portitor-agent:
 	go build -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$@ ./cmd/$@
+	ln -sfn portitor-web $(BUILD_DIR)/portitor-config
 
 frontend:
 	cd web/frontend && npm ci && npm run build
@@ -66,7 +67,8 @@ install-web: release
 	ln -sfn portitor-web $(DESTDIR)$(PREFIX)/bin/portitor-config
 	test -e $(DESTDIR)/etc/portitor/web.yaml || install -D -m 0600 deploy/web.yaml $(DESTDIR)/etc/portitor/web.yaml
 
-# ----- development: SQLite in dev/run + dry-run agent (see DEV.md) -----
+# ----- development: portitor-config with SQLite in dev/run, a dry-run
+# agent, and the portal in front (see DEV.md) -----
 
 dev-agent: portitor-agent
 	@test -e dev/run/agent.token || $(BUILD_DIR)/portitor-agent init --host 127.0.0.1 \
@@ -75,11 +77,14 @@ dev-agent: portitor-agent
 
 dev-web: portitor-web
 	mkdir -p dev/run
-	$(BUILD_DIR)/portitor-web -f dev/web.yaml migrate
+	$(BUILD_DIR)/portitor-config -f dev/config.yaml migrate
+	$(BUILD_DIR)/portitor-config -f dev/config.yaml start
+
+dev-portal: portitor-web
 	$(BUILD_DIR)/portitor-web -f dev/web.yaml start
 
 dev-seed: portitor-web
-	echo 'dev-password-123' | $(BUILD_DIR)/portitor-web -f dev/web.yaml createadmin admin
+	echo 'dev-password-123' | $(BUILD_DIR)/portitor-config -f dev/config.yaml createadmin admin
 	dev/seed.sh
 
 # ----- lab: real apply in two podman containers (see DEV.md) -----

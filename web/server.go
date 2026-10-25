@@ -6,6 +6,7 @@
 package web
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"errors"
@@ -15,6 +16,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -83,28 +85,34 @@ type Server struct {
 	// tenantWrites are the routes ("POST /api/rules") an instance admin
 	// may use besides reading; their handlers check the instance.
 	tenantWrites map[string]bool
-	// newAgent builds a client for a firewall's agent, newConfig for its
-	// portitor-config.
-	newAgent  func(f *models.Firewall) (agentAPI, error)
-	newConfig func(f *models.Firewall) (configAPI, error)
-	static    fs.FS
+	// newAgent builds a client for a firewall's agent.
+	newAgent func(f *models.Firewall) (agentAPI, error)
+	static   fs.FS
 	// webCert serves HTTPS when portitor-web does (tls_cert); nil otherwise.
 	webCert *tlsCert
 	// witness is the HA pairs' third vote (witness.go).
 	witness *witness
+	// role is the host's place in its HA pair, and replMu keeps a copy of
+	// the primary's database and a promotion apart (replica.go).
+	role   hostRole
+	replMu sync.Mutex
+	// localHA asks this host's agent for its place in the pair
+	// (localPeerConfig; a fake in tests).
+	localHA func(ctx context.Context) (*agentapi.HAPeerConfig, *models.Firewall, error)
 }
 
 func NewServer(cfg *Config, db *gorm.DB) *Server {
-	return &Server{
+	s := &Server{
 		cfg:    cfg,
 		db:     db,
 		jwtKey: []byte(cfg.JWTSecret),
 		newAgent: func(f *models.Firewall) (agentAPI, error) {
 			return agentclient.New(f.AgentURL, f.AgentToken, f.AgentFingerprint)
 		},
-		newConfig: newConfigClient,
-		static:    staticFS(),
+		static: staticFS(),
 	}
+	s.localHA = s.localPeerConfig
+	return s
 }
 
 // Echo builds the HTTP handler.
@@ -132,16 +140,16 @@ func (s *Server) Echo() *echo.Echo {
 		ContentSecurityPolicy: "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'",
 	}))
 	e.Use(captureWorkerCSP)
-
-	if s.cfg.Local {
-		s.registerManagerAPI(e)
-	} else {
-		// Not the GUI's page either.
-		e.Any("/manager/*", func(c *echo.Context) error {
-			return errJSON(c, http.StatusNotFound, "no manager API: this is not portitor-config")
-		})
+	if nets, _ := s.cfg.trustedProxies(); len(nets) > 0 {
+		opts := []echo.TrustOption{echo.TrustLoopback(false), echo.TrustLinkLocal(false), echo.TrustPrivateNet(false)}
+		for _, n := range nets {
+			opts = append(opts, echo.TrustIPRange(n))
+		}
+		e.IPExtractor = echo.ExtractIPFromXFFHeader(opts...)
 	}
-	api := e.Group("/api", requireJSON, noStore)
+	e.GET(replicaPath, s.handleReplica, noStore)
+
+	api := e.Group("/api", requireJSON, noStore, s.refuseOnReplica)
 	api.POST("/login", s.handleLogin)
 	api.POST("/logout", s.handleLogout)
 	api.GET("/version", func(c *echo.Context) error { return c.JSON(http.StatusOK, buildinfo.Get()) })
@@ -252,9 +260,9 @@ func (s *Server) Echo() *echo.Echo {
 	// (no tenant or viewer write rule, and the GET in viewerDenied).
 	g.GET("/instances/:id/bundle", s.handleExportBundle)
 	g.POST("/instances/import", s.handleImportBundle)
-	g.POST("/instances/:id/break-glass", s.handleBreakGlass)
-	g.GET("/firewalls/:id/drift", s.handleDrift)
-	g.POST("/firewalls/:id/drift/:name", s.handleDriftSettle)
+	g.GET("/firewalls/:id/witness", s.handleWitnessString)
+	g.GET("/ha", s.handleHAStatus)
+	g.POST("/ha/promote", s.handlePromote)
 	g.GET("/deploy/check", s.handleDeployCheck)
 	g.GET("/deploy/changes", s.handleDeployChanges)
 	g.POST("/deploy/preview", s.handleDeployPreview)
@@ -295,18 +303,50 @@ func (s *Server) Echo() *echo.Echo {
 
 	api.Any("/*", func(c *echo.Context) error { return errJSON(c, http.StatusNotFound, "no such API endpoint") })
 
-	// The Vue SPA owns every other path; unknown paths fall back to
-	// index.html so client-side routes survive a reload.
+	// The Vue SPA owns every other path: its files, and index.html for
+	// the rest, so client-side routes survive a reload.
+	e.Use(s.serveIndex)
 	e.Use(middleware.StaticWithConfig(middleware.StaticConfig{
 		Filesystem: s.static,
 		Root:       ".",
-		HTML5:      true,
 		Skipper: func(c *echo.Context) bool {
 			p := c.Request().URL.Path
 			return strings.HasPrefix(p, "/api/")
 		},
 	}))
 	return e
+}
+
+// prefixRe is a path portitor-web serves a firewall at (portalPrefix).
+var prefixRe = regexp.MustCompile(`^/fw/[a-z][a-z0-9-]{0,31}$`)
+
+// serveIndex answers the SPA's routes, and every path that is not one of
+// its files, with index.html, its <base> the path portitor-web serves this
+// firewall at (X-Forwarded-Prefix), or / without one.
+func (s *Server) serveIndex(next echo.HandlerFunc) echo.HandlerFunc {
+	return func(c *echo.Context) error {
+		r := c.Request()
+		p := strings.TrimPrefix(r.URL.Path, "/")
+		if (r.Method != http.MethodGet && r.Method != http.MethodHead) || strings.HasPrefix(p, "api/") || strings.HasPrefix(p, "ha/") {
+			return next(c)
+		}
+		if p != "" && p != "index.html" {
+			if fi, err := fs.Stat(s.static, p); err == nil && !fi.IsDir() {
+				return next(c)
+			}
+		}
+		page, err := fs.ReadFile(s.static, "index.html")
+		if err != nil {
+			return errJSON(c, http.StatusNotFound, "the GUI is not built (web/static)")
+		}
+		base := "/"
+		if pre := r.Header.Get("X-Forwarded-Prefix"); prefixRe.MatchString(pre) {
+			base = pre + "/"
+		}
+		page = bytes.Replace(page, []byte("<head>"), []byte(`<head><base href="`+base+`">`), 1)
+		c.Response().Header().Set("Cache-Control", "no-cache")
+		return c.HTMLBlob(http.StatusOK, page)
+	}
 }
 
 // Serve runs until ctx is cancelled.
@@ -318,9 +358,12 @@ func (s *Server) Serve(ctx context.Context) error {
 		return err
 	}
 	e := s.Echo()
+	if s.cfg.Local {
+		go s.runRole(ctx)
+	}
 	go s.runWitness(ctx)
 	sc := echo.StartConfig{Address: s.cfg.Bind, HideBanner: true}
-	slog.Info("portitor-web listening", "addr", s.cfg.Bind, "dev", s.cfg.Dev, "tls", s.cfg.TLSCert != "")
+	slog.Info("portitor-config listening", "addr", s.cfg.Bind, "dev", s.cfg.Dev, "tls", s.cfg.TLSCert != "")
 	var err error
 	if s.cfg.TLSCert != "" {
 		cert, key, rerr := readFiles(s.cfg.TLSCert, s.cfg.TLSKey)

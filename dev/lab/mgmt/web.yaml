@@ -1,8 +1,11 @@
 # SPDX-FileCopyrightText: 2026 The Portitor contributors
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-# Lab portitor-web config. Published on the host as 127.0.0.1:28080.
+# Lab portitor-web, the portal: published on the host as 127.0.0.1:28080,
+# the firewall at /fw/fw/. lab.sh install fills in the firewall's
+# certificate fingerprint.
 bind: 0.0.0.0:8080
-jwt_secret: lab-only-secret-change-me-0123456789abcdef
-db:
-  path: /var/lib/portitor-web/portitor.db
+firewalls:
+  - name: fw
+    url: https://192.168.1.1:8444
+    fingerprint: FINGERPRINT

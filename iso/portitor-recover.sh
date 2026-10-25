@@ -3,12 +3,12 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 # Password recovery, run by portitor-recovery.service from the boot menu entry
-# "Portitor password recovery": the system is up without the firewall, portitor-web
+# "Portitor password recovery": the system is up without the firewall, its GUI
 # or any network service, and this is on the console. Whoever can choose the
 # entry can edit the kernel line too, so it gives no one more access; it makes the
 # recovery easy.
 set -u
-WEB_YAML=/etc/portitor/web.yaml
+CONFIG_YAML=/etc/portitor/config.yaml
 USER_NAME=portitor
 
 echo
@@ -25,14 +25,14 @@ while true; do
 		passwd "$USER_NAME"
 		;;
 	2)
-		if [ ! -f "$WEB_YAML" ]; then
-			echo "portitor-web is not installed on this system ($WEB_YAML is missing)."
+		if [ ! -f "$CONFIG_YAML" ]; then
+			echo "portitor-config is not installed on this system ($CONFIG_YAML is missing)."
 			continue
 		fi
 		printf "GUI user name: "
 		read -r name || continue
 		[ -n "$name" ] || continue
-		runuser -u "$USER_NAME" -- portitor-web -f "$WEB_YAML" createadmin "$name"
+		runuser -u "$USER_NAME" -- portitor-config -f "$CONFIG_YAML" createadmin "$name"
 		;;
 	3)
 		break

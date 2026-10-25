@@ -36,15 +36,8 @@ func SetAgent(s *Server, url, token, fingerprint string) error {
 
 // ImportBundleFile adds the bundle in path as a virtual firewall named
 // name on the first firewall. Into a database without instances (a new
-// portitor-config, before its first start) it becomes the host: how a
-// firewall's own configuration moves from its manager.
-//
-// manager marks it as that manager's, as if it had pushed it: how a
-// firewall's virtual firewalls move to portitor-config without being
-// deleted at its first commit.
-// With local, the instance stays this firewall's own and only its shared
-// objects are the manager's.
-func ImportBundleFile(ctx context.Context, s *Server, path, name, manager string, local bool) ([]string, error) {
+// portitor-config, before its first start) it becomes the host.
+func ImportBundleFile(ctx context.Context, s *Server, path, name string) ([]string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -59,9 +52,6 @@ func ImportBundleFile(ctx context.Context, s *Server, path, name, manager string
 	if name == "" {
 		name = b.Instance
 	}
-	if manager != "" && !managerNameRe.MatchString(manager) {
-		return nil, fmt.Errorf("manager: a lowercase name")
-	}
-	_, problems, err := importBundle(ctx, s.db, &b, strings.TrimSpace(name), 0, importOptions{Manager: manager, LocalInstance: local})
+	_, problems, err := ImportBundle(ctx, s.db, &b, strings.TrimSpace(name), 0)
 	return problems, err
 }

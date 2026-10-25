@@ -5,12 +5,14 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/abundo/portitor/internal/agentapi"
 	"github.com/abundo/portitor/internal/fwconfig"
 )
 
@@ -125,5 +127,80 @@ func TestHAStandby(t *testing.T) {
 	h.decide()
 	if h.isStandby() {
 		t.Error("primary with its peer is standby")
+	}
+}
+
+func TestHAStale(t *testing.T) {
+	changes := make(chan bool, 10)
+	h := newHAManager(func(f bool) { changes <- f }, func() {})
+	prim := &fwconfig.HA{Node: fwconfig.HAPrimary, Secret: strings.Repeat("s", 43)}
+	h.setConfig(prim)
+	h.mu.Lock()
+	h.heard(&agentapi.HAHeartbeat{Node: fwconfig.HASecondary})
+	h.mu.Unlock()
+	h.decide()
+	if h.isFenced() || h.status().Stale {
+		t.Fatal("a primary hearing its secondary is fenced or stale")
+	}
+	// The peer promoted while this host was away: it answers as the
+	// primary at a later epoch. Its peer alive, this host is fenced.
+	h.mu.Lock()
+	h.heard(&agentapi.HAHeartbeat{Node: fwconfig.HAPrimary, Epoch: 1})
+	h.mu.Unlock()
+	h.vote(time.Minute)
+	if st := h.status(); !st.Fenced || !st.Stale || !st.Standby {
+		t.Fatalf("taken over: %+v", st)
+	}
+	// Caught up as the secondary of the next epoch, it takes part again.
+	h.setConfig(&fwconfig.HA{Node: fwconfig.HASecondary, Secret: prim.Secret, Epoch: 1})
+	if st := h.status(); st.Fenced || st.Stale || st.Epoch != 1 {
+		t.Errorf("caught up: %+v", st)
+	}
+	// A primary of the same epoch as its peer is not stale (both promoted
+	// by force: the commit catches one up).
+	h.setConfig(&fwconfig.HA{Node: fwconfig.HAPrimary, Secret: prim.Secret, Epoch: 1})
+	if h.status().Stale {
+		t.Error("stale at the peer's epoch")
+	}
+}
+
+func TestHAWitnessAuth(t *testing.T) {
+	a, h := testAgent(t)
+	secret, witness := strings.Repeat("k", 43), strings.Repeat("w", 43)
+	if rec := call(t, h, "GET", "/v1/ha", witness, nil); rec.Code != http.StatusUnauthorized {
+		t.Errorf("witness outside a pair: %d", rec.Code)
+	}
+	a.ha.setConfig(&fwconfig.HA{Node: fwconfig.HAPrimary, Secret: secret, WitnessSecret: witness})
+	if rec := call(t, h, "GET", "/v1/ha", witness, nil); rec.Code != http.StatusOK {
+		t.Errorf("quorum with the witness secret: %d %s", rec.Code, rec.Body)
+	}
+	if rec := call(t, h, "POST", "/v1/ha/vote", witness, agentapi.HAVoteRequest{Seconds: 10}); rec.Code != http.StatusOK || a.ha.status().VoteUntil == nil {
+		t.Errorf("vote with the witness secret: %d %s", rec.Code, rec.Body)
+	}
+	// It opens nothing else, and the pair's secret not the vote.
+	for _, p := range []string{"/v1/status", "/v1/ha/peer-config"} {
+		if rec := call(t, h, "GET", p, witness, nil); rec.Code != http.StatusUnauthorized {
+			t.Errorf("%s with the witness secret: %d", p, rec.Code)
+		}
+	}
+	if rec := call(t, h, "POST", "/v1/ha/vote", secret, agentapi.HAVoteRequest{Seconds: 10}); rec.Code != http.StatusUnauthorized {
+		t.Errorf("vote with the pair's secret: %d", rec.Code)
+	}
+	// The token reads where portitor-config copies from.
+	rec := call(t, h, "GET", "/v1/ha/peer-config", testToken, nil)
+	var pc agentapi.HAPeerConfig
+	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &pc) != nil || pc.Secret != secret || pc.Node != fwconfig.HAPrimary {
+		t.Errorf("peer config: %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestHAApplyEpoch(t *testing.T) {
+	a, h := testAgent(t)
+	secret := strings.Repeat("k", 43)
+	a.ha.setConfig(&fwconfig.HA{Node: fwconfig.HASecondary, Secret: secret, Epoch: 2})
+	doc := fwconfig.Document{Version: fwconfig.Version, Generation: 1, HA: &fwconfig.HA{Node: fwconfig.HAPrimary, Secret: secret, Epoch: 1}}
+	rec := call(t, h, "POST", "/v1/apply", testToken, agentapi.ApplyRequest{Document: doc})
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "promoted") {
+		t.Errorf("a document of an earlier epoch: %d %s", rec.Code, rec.Body)
 	}
 }

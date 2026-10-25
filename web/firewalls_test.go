@@ -413,7 +413,7 @@ func TestFirewallsHADegradedCommit(t *testing.T) {
 func TestWitness(t *testing.T) {
 	env, agents, pair := haPair(t)
 	s := env.srv
-	s.witness = &witness{started: time.Now().Add(-time.Minute), holder: map[uint]uint{}, until: map[uint]time.Time{}}
+	s.witness = &witness{started: time.Now().Add(-time.Minute), pairs: map[string]*pairVote{}}
 	var p, q models.Firewall
 	s.db.First(&p, 1)
 	s.db.First(&q, pair)
@@ -432,10 +432,11 @@ func TestWitness(t *testing.T) {
 		t.Fatal("the vote moved while the holder's still counted")
 	}
 	// Once it has run out, the vote moves.
-	s.witness.until[p.ID] = time.Now().Add(-time.Second)
+	pv := s.witness.pairs["firewall 1"]
+	pv.until = time.Now().Add(-time.Second)
 	s.witnessPair(ctx, p, q)
-	if agents[pair].votes != 1 || s.witness.holder[p.ID] != pair {
-		t.Fatalf("vote did not move: %d, holder %d", agents[pair].votes, s.witness.holder[p.ID])
+	if agents[pair].votes != 1 || pv.holder != 1 {
+		t.Fatalf("vote did not move: %d, holder %d", agents[pair].votes, pv.holder)
 	}
 	// The primary back: the secondary keeps the vote, no flapping.
 	agents[1].down = false

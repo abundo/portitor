@@ -159,3 +159,17 @@ func TestBundleLinks(t *testing.T) {
 		t.Errorf("left differs:\n got %s\nwant %s", got, want)
 	}
 }
+
+func bundleOf(t *testing.T, env *testEnv, name string) Bundle {
+	t.Helper()
+	var in models.Instance
+	if err := env.srv.db.Where("name = ?", name).First(&in).Error; err != nil {
+		t.Fatal(err)
+	}
+	rec := env.do("GET", "/api/instances/"+itoa(in.ID)+"/bundle", nil)
+	var b Bundle
+	if err := json.Unmarshal(rec.Body.Bytes(), &b); err != nil {
+		t.Fatal(err)
+	}
+	return b
+}

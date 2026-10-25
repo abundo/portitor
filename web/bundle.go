@@ -284,29 +284,10 @@ type bundleConflict struct{ msg string }
 
 func (e *bundleConflict) Error() string { return e.msg }
 
-// importOptions are a manager's push (portitor-config): the instance and
-// the shared objects it brings are Manager's; an instance of the name
-// Manager pushed before is replaced, a diverged one only with Overwrite.
-type importOptions struct {
-	Manager   string
-	Overwrite bool
-	// ReplaceLocal replaces this database's own instance of the name, on
-	// the firewall (a manager taking a firewall's version).
-	ReplaceLocal bool
-	// LocalInstance keeps the instance this firewall's own while its
-	// shared objects are Manager's (the host's configuration moving from
-	// its manager).
-	LocalInstance bool
-}
-
 // ImportBundle adds the bundle's instance as a new instance named name on
 // the firewall, with its shared objects, and returns its id and the
 // problems its configuration has (it is imported anyway). Ids are new.
 func ImportBundle(ctx context.Context, db *gorm.DB, b *Bundle, name string, firewallID uint) (uint, []string, error) {
-	return importBundle(ctx, db, b, name, firewallID, importOptions{})
-}
-
-func importBundle(ctx context.Context, db *gorm.DB, b *Bundle, name string, firewallID uint, opt importOptions) (uint, []string, error) {
 	if b.Format != bundleFormat {
 		return 0, nil, bad(fmt.Sprintf("bundle format %d, this version reads %d", b.Format, bundleFormat))
 	}
@@ -333,51 +314,12 @@ func importBundle(ctx context.Context, db *gorm.DB, b *Bundle, name string, fire
 	if err != nil {
 		return 0, nil, err
 	}
-	// A manager replaces the instance it pushed before.
-	var replace *models.Instance
-	if opt.ReplaceLocal {
-		var old models.Instance
-		if err := db.Where("name = ? AND firewall_id = ?", name, firewallID).First(&old).Error; err != nil || old.IsDefault {
-			return 0, nil, bad("no virtual firewall " + name + " on that firewall to replace")
-		}
-		replace = &old
-	}
-	if opt.Manager != "" && !opt.LocalInstance {
-		var old models.Instance
-		switch err := db.Where("name = ?", name).First(&old).Error; {
-		case err == nil:
-			switch {
-			case old.ManagedBy != opt.Manager:
-				return 0, nil, &bundleConflict{fmt.Sprintf("virtual firewall %s is this firewall's own, not %s's", name, opt.Manager)}
-			case old.IsDefault:
-				return 0, nil, &bundleConflict{fmt.Sprintf("virtual firewall %s is the host; it is not replaced", name)}
-			case old.Diverged && !opt.Overwrite:
-				return 0, nil, &bundleConflict{fmt.Sprintf("virtual firewall %s was changed here (break-glass); take this version or overwrite it", name)}
-			}
-			replace = &old
-			if firewallID == 0 {
-				firewallID = old.FirewallID
-			}
-		case !errors.Is(err, gorm.ErrRecordNotFound):
-			return 0, nil, err
-		}
-	}
 	// The instance is checked as a new one would be (name, firewall,
 	// virtual firewalls on).
 	var fresh models.Instance
 	fresh.Name, fresh.FirewallID = name, firewallID
 	if err := db.Transaction(func(tx *gorm.DB) error { return prepareInstanceFirewall(tx, &fresh, nil) }); err != nil {
 		return 0, nil, err
-	}
-	if replace != nil && replace.FirewallID != fresh.FirewallID {
-		return 0, nil, bad("a pushed virtual firewall stays on its firewall")
-	}
-	// Its role goes with it; the members come back on the new one.
-	var members []models.RoleMember
-	if replace != nil {
-		if err := db.Where("role_id IN (?)", db.Model(&models.Role{}).Select("id").Where("instance_id = ?", replace.ID)).Find(&members).Error; err != nil {
-			return 0, nil, err
-		}
 	}
 	if !fwconfig.ValidInstanceName(name) {
 		return 0, nil, bad("name: lowercase letters and digits, starting with a letter, at most 12 characters")
@@ -390,18 +332,6 @@ func importBundle(ctx context.Context, db *gorm.DB, b *Bundle, name string, fire
 	defer tx.Rollback()
 	if _, err := tx.ExecContext(ctx, "PRAGMA defer_foreign_keys = ON"); err != nil {
 		return 0, nil, err
-	}
-	if replace != nil {
-		// The cascade would delete the DNS templates in any order, and
-		// those in use refuse it: zones, templates, then what they use.
-		for _, t := range []string{"dns_zones", "dns_templates", "dns_soa_templates", "dns_dnssec_policies"} {
-			if _, err := tx.ExecContext(ctx, fmt.Sprintf("DELETE FROM %q WHERE instance_id = ?", t), replace.ID); err != nil {
-				return 0, nil, err
-			}
-		}
-		if _, err := tx.ExecContext(ctx, "DELETE FROM instances WHERE id = ?", replace.ID); err != nil {
-			return 0, nil, err
-		}
 	}
 	// newIDs[table][old id] = new id.
 	newIDs := map[string]map[int64]int64{}
@@ -445,18 +375,8 @@ func importBundle(ctx context.Context, db *gorm.DB, b *Bundle, name string, fire
 			if err != nil {
 				return 0, nil, err
 			}
-			fixed["managed_by"] = opt.Manager
 			if len(have) > 0 {
-				mine := opt.Manager != "" && have[0]["managed_by"] == opt.Manager
-				switch {
-				case mine && t != "object_folders":
-					// The manager's: its values now.
-					if err := updateRow(ctx, tx, t, c, rowID(have[0]), fixed); err != nil {
-						return 0, nil, fmt.Errorf("%s %v: %w", t, r["name"], err)
-					}
-				case opt.Manager != "" && !mine && t != "object_folders":
-					return 0, nil, &bundleConflict{fmt.Sprintf("%s %v exists here, not %s's; rename or remove it here", strings.TrimSuffix(strings.ReplaceAll(t, "_", " "), "s"), r["name"], opt.Manager)}
-				case t != "object_folders" && !sameRow(have[0], fixed):
+				if t != "object_folders" && !sameRow(have[0], fixed) {
 					return 0, nil, &bundleConflict{fmt.Sprintf("%s %v exists here with other values", strings.TrimSuffix(t, "s"), r["name"])}
 				}
 				mapID(t, old, rowID(have[0]))
@@ -492,10 +412,6 @@ func importBundle(ctx context.Context, db *gorm.DB, b *Bundle, name string, fire
 			fixed := remapRow(r, g[t], newIDs)
 			if t == "instances" {
 				fixed["name"], fixed["firewall_id"], fixed["is_default"] = name, fresh.FirewallID, fresh.IsDefault
-				fixed["managed_by"], fixed["diverged"] = opt.Manager, false
-				if opt.LocalInstance {
-					fixed["managed_by"] = ""
-				}
 				// Set once its certificate is in.
 				if v := r["acme_proxy_certificate_id"]; v != nil {
 					old := v
@@ -568,17 +484,6 @@ func importBundle(ctx context.Context, db *gorm.DB, b *Bundle, name string, fire
 	if err := createInstanceRole(db, &in); err != nil {
 		return 0, nil, err
 	}
-	if len(members) > 0 {
-		var role models.Role
-		if err := db.Where("instance_id = ?", in.ID).First(&role).Error; err != nil {
-			return 0, nil, err
-		}
-		for _, m := range members {
-			if err := db.Create(&models.RoleMember{RoleID: role.ID, UserID: m.UserID, Level: m.Level}).Error; err != nil {
-				return 0, nil, err
-			}
-		}
-	}
 	var problems []string
 	_, err = builder.BuildInstances(db, 0, map[string]bool{name: true})
 	var ve *fwconfig.ValidationError
@@ -620,7 +525,7 @@ func remapRow(r bundleRow, keys []fkey, newIDs map[string]map[int64]int64) bundl
 func sameRow(have, want bundleRow) bool {
 	for k, v := range want {
 		switch k {
-		case "id", "created_at", "updated_at", "folder_id", "managed_by":
+		case "id", "created_at", "updated_at", "folder_id":
 			continue
 		}
 		if !reflect.DeepEqual(normalizeValue(have[k]), normalizeValue(v)) {

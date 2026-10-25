@@ -17,6 +17,13 @@ const (
 	ConntrackSyncSet     = "conntrack_sync"
 )
 
+// HAConfigService is the auto rule letting the HA peer's portitor-config
+// reach this host's (fwconfig.HAConfigAccess), from the HAConfigSet set.
+const (
+	HAConfigService = "portitor-config peer"
+	HAConfigSet     = "portitor_config_peer"
+)
+
 // ConntrackdConf renders conntrackd.conf for an instance on an HA pair
 // (fwconfig.ConntrackSync): FTFW over UDP to the peer, and the peer's
 // connections straight into the kernel's table (no external cache), so

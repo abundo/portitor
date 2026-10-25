@@ -72,7 +72,7 @@ async function saveSettings() {
     <div class="card xl:col-span-2">
       <div class="mb-1 text-lg font-semibold">Portitor web</div>
       <p class="mb-4 text-sm text-muted">
-        The certificate the GUI serves HTTPS with, from Services → Certificates. portitor-web
+        The certificate the GUI serves HTTPS with, from Services → Certificates. portitor-config
         fetches it from the agent, and again when it is renewed; until it has it, and when none is
         chosen, it serves <code class="font-mono">tls_cert</code>. Its domain must be the name you
         browse to.
@@ -91,8 +91,8 @@ async function saveSettings() {
           color="neutral"
           variant="subtle"
           icon="i-lucide-info"
-          title="portitor-web does not serve HTTPS itself"
-          description="Set tls_cert and tls_key in web.yaml (the ISO's setup does) and restart it to choose a certificate here; behind a reverse proxy, give the proxy the certificate instead."
+          title="portitor-config does not serve HTTPS itself"
+          description="Set tls_cert and tls_key in config.yaml (install.py and the ISO's setup do) and restart it to choose a certificate here; behind portitor-web or a reverse proxy, give that the certificate instead."
         />
         <UFormField
           label="Virtual firewalls"
@@ -128,7 +128,7 @@ async function saveSettings() {
         </UFormField>
         <UFormField
           label="Packet capture rate (kbit/s)"
-          help="The most a packet capture sends from the agent to portitor-web. When it falls behind, the firewall drops captured packets rather than slow down. 0 is unlimited."
+          help="The most a packet capture sends from the agent to portitor-config. When it falls behind, the firewall drops captured packets rather than slow down. 0 is unlimited."
         >
           <UInput v-model="settings.capture_rate_kbps" type="number" min="0" class="w-40" />
         </UFormField>
@@ -147,7 +147,7 @@ async function saveSettings() {
 
     <div class="space-y-4">
       <p v-if="version" class="text-xs text-muted">
-        portitor-web {{ version.version }} ({{ version.commit.slice(0, 8) }}),
+        portitor-config {{ version.version }} ({{ version.commit.slice(0, 8) }}),
         {{ version.go_version }}
       </p>
     </div>

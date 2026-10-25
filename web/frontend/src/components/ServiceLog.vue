@@ -6,6 +6,7 @@
 // it comes, with a filter over the lines. It follows while mounted.
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import SearchInput from '@/components/SearchInput.vue'
+import { apiURL } from '@/utils/base'
 
 const props = defineProps({
   instance: { type: String, default: '' },
@@ -43,7 +44,7 @@ async function start() {
   const ctl = new AbortController()
   controller = ctl
   try {
-    const res = await fetch('/api/agent/servicelog', {
+    const res = await fetch(apiURL('/agent/servicelog'), {
       method: 'POST',
       credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },

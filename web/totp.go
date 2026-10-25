@@ -161,9 +161,6 @@ func recoveryLeft(u *models.User) int {
 // with their password when the request has one.
 func ownTOTP(c *echo.Context, password *string) (*models.User, error) {
 	u := currentUser(c)
-	if u.ManagedBy != "" {
-		return nil, errJSON(c, http.StatusForbidden, "your user is managed by "+u.ManagedBy+": change two-factor login there")
-	}
 	if password != nil && bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(*password)) != nil {
 		return nil, errJSON(c, http.StatusForbidden, "password is wrong")
 	}

@@ -1,0 +1,14 @@
+# SPDX-FileCopyrightText: 2026 The Portitor contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# Lab portitor-config: the firewall's configuration, its GUI on the LAN,
+# served by portitor-web on mgmt (192.168.1.2).
+bind: 0.0.0.0:8444
+jwt_secret: lab-only-secret-change-me-0123456789abcdef
+db:
+  path: /var/lib/portitor-config/portitor.db
+tls_cert: /etc/portitor/config.crt
+tls_key: /etc/portitor/config.key
+trusted_proxies: [192.168.1.2]
+# The agent listens on the LAN address only.
+agent_url: https://192.168.1.1:8443

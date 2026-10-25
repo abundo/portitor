@@ -13,6 +13,9 @@ export const useAuthStore = defineStore('auth', {
     // A global admin changes everything. A global viewer reads everything;
     // a user with role 'none' only the instances their roles grant.
     isAdmin: (s) => s.user?.role === 'admin',
+    // replica: an HA secondary's portitor-config, whose configuration is a
+    // read-only copy of the primary's (ReplicaBanner).
+    replica: (s) => !!s.user?.replica,
     readsAll: (s) => s.user?.role === 'admin' || s.user?.role === 'viewer',
     // levelOf(id): 'admin', 'viewer' or '' on an instance. The server
     // checks the same; this only hides what would be refused.
@@ -23,7 +26,7 @@ export const useAuthStore = defineStore('auth', {
     },
     // canEdit: an admin of the instance selected in the top bar.
     canEdit() {
-      return this.levelOf(useInstanceStore().currentId) === 'admin'
+      return !this.replica && this.levelOf(useInstanceStore().currentId) === 'admin'
     },
     // canDeploy: a global admin, or the admin of an instance (who deploys
     // just their instances).
@@ -31,7 +34,8 @@ export const useAuthStore = defineStore('auth', {
     // has not set it up; the server refuses everything else until then.
     mustSetupTotp: (s) => !!s.user?.totp_required && !s.user?.totp_enabled,
     canDeploy: (s) =>
-      s.user?.role === 'admin' || Object.values(s.user?.access ?? {}).includes('admin'),
+      !s.user?.replica &&
+      (s.user?.role === 'admin' || Object.values(s.user?.access ?? {}).includes('admin')),
   },
   actions: {
     // setUser keeps the user and applies their date format.

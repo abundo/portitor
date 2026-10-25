@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 # Seed a dev database with a typical home setup through the API, and point
-# portitor-web at the dev agent. Run after `make dev-agent dev-web`.
+# portitor-config at the dev agent. Run after `make dev-agent dev-web`.
 #
 #   dev/seed.sh [url] [user] [password]
 #
@@ -31,7 +31,7 @@ FP=${AGENT_FINGERPRINT:-$(openssl x509 -in dev/run/agent.crt -outform DER | sha2
 req PUT /firewalls/1 "{\"name\":\"firewall\",\"agent_url\":\"$AGENT_URL\",\"agent_token\":\"$TOKEN\",\"agent_fingerprint\":\"$FP\"}" >/dev/null
 req PUT /settings "{\"confirm_timeout\":120,\"wg_endpoint_host\":\"home.example.org\",\"virtual_firewalls\":true}" >/dev/null
 
-# portitor-web start creates the default instance "main"; update it.
+# portitor-config start creates the default instance "main"; update it.
 MAIN=$(req GET /instances | grep -oE '"id":[0-9]+,[^}]*"name":"main"' | sed -E 's/"id":([0-9]+).*/\1/')
 req PUT /instances/$MAIN '{"name":"main","description":"Home","dns_upstream":"forward","dns_forwarders":["9.9.9.9"],"dhcp_enabled":true,"dhcp_domain_name":"home.arpa","dhcp_lease_time":43200}' >/dev/null
 id /interfaces "{\"instance_id\":$MAIN,\"name\":\"eth0\",\"description\":\"ISP\",\"ipv4_mode\":\"dhcp\",\"ipv6_accept_ra\":true,\"enabled\":true}" >/dev/null

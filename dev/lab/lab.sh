@@ -5,11 +5,12 @@
 # Two-container lab for trying a real apply (see DEV.md, "Lab"). Rootless
 # podman, systemd inside each container:
 #
-#   fwlab-fw    portitor-agent as root, not dry-run. eth0 WAN (DHCP from mgmt),
-#               eth1 LAN 192.168.1.1/24, eth2 guest.
-#   fwlab-mgmt  portitor-web on lan0 192.168.1.2, GUI published on
-#               http://127.0.0.1:$LAB_WEB_PORT. Also the ISP: DHCP and NAT on
-#               wan0 198.51.100.1/24.
+#   fwlab-fw    portitor-agent as root, not dry-run, and portitor-config (the
+#               configuration, GUI on 192.168.1.1:8444). eth0 WAN (DHCP from
+#               mgmt), eth1 LAN 192.168.1.1/24, eth2 guest.
+#   fwlab-mgmt  portitor-web, the portal, on lan0 192.168.1.2, published on
+#               http://127.0.0.1:$LAB_WEB_PORT (the firewall at /fw/fw/). Also
+#               the ISP: DHCP and NAT on wan0 198.51.100.1/24.
 #
 #   dev/lab/lab.sh up        build images and binaries, start, install
 #   dev/lab/lab.sh install   rebuild binaries and reinstall (after code changes)
@@ -28,7 +29,7 @@ RT=podman
 # LAB_PREFIX names the containers and networks, so a second lab can run beside one.
 PREFIX=${LAB_PREFIX:-fwlab}
 WEB_PORT=${LAB_WEB_PORT:-28080}
-URL=http://127.0.0.1:$WEB_PORT
+URL=http://127.0.0.1:$WEB_PORT/fw/fw
 ADMIN_PASS=admin
 # bcrypt of "admin". portitor-web requires 10+ characters, so the lab user is
 # created with a throwaway password and this hash is written over it.
@@ -93,14 +94,34 @@ cmd_install() {
 	ex fw systemctl enable portitor-agent.service
 	ex fw systemctl restart portitor-agent.service
 
+	log "installing portitor-config on fw"
+	$RT cp build/portitor-web "$PREFIX-fw:/usr/bin/portitor-web"
+	ex fw ln -sfn portitor-web /usr/bin/portitor-config
+	$RT cp deploy/systemd/portitor-config.service "$PREFIX-fw:/etc/systemd/system/portitor-config.service"
+	ex fw sh -c 'test -e /etc/portitor/config.crt ||
+		{ openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 3650 \
+			-subj /CN=portitor-config -keyout /etc/portitor/config.key -out /etc/portitor/config.crt 2>/dev/null &&
+		chgrp portitor /etc/portitor/config.key /etc/portitor/config.crt && chmod 0640 /etc/portitor/config.key; }'
+	ex fw install -d -o portitor -g portitor -m 0700 /var/lib/portitor-config
+	ex fw runuser -u portitor -- portitor-config migrate
+	if ! ex fw test -e /var/lib/portitor-config/.lab; then
+		openssl rand -hex 16 | $RT exec -i "$PREFIX-fw" runuser -u portitor -- portitor-config createadmin admin >/dev/null
+		ex fw runuser -u portitor -- sqlite3 /var/lib/portitor-config/portitor.db \
+			"update users set password_hash = '$ADMIN_HASH' where username = 'admin'"
+		ex fw sh -c 'fp=$(openssl x509 -in /etc/portitor/agent.crt -outform DER | sha256sum | cut -d" " -f1)
+			runuser -u portitor -- portitor-config set-agent --url https://192.168.1.1:8443 --token-file - --fingerprint "$fp" </etc/portitor/agent.token
+			touch /var/lib/portitor-config/.lab'
+	fi
+	ex fw systemctl daemon-reload
+	ex fw systemctl enable portitor-config.service
+	ex fw systemctl restart portitor-config.service
+
 	log "installing portitor-web on mgmt"
 	$RT cp build/portitor-web "$PREFIX-mgmt:/usr/bin/portitor-web"
 	$RT cp deploy/systemd/portitor-web.service "$PREFIX-mgmt:/etc/systemd/system/portitor-web.service"
-	ex mgmt install -d -o portitor -g portitor -m 0700 /var/lib/portitor-web
-	ex mgmt runuser -u portitor -- portitor-web migrate
-	openssl rand -hex 16 | $RT exec -i "$PREFIX-mgmt" runuser -u portitor -- portitor-web createadmin admin >/dev/null
-	ex mgmt runuser -u portitor -- sqlite3 /var/lib/portitor-web/portitor.db \
-		"update users set password_hash = '$ADMIN_HASH' where username = 'admin'"
+	local fp
+	fp=$(ex fw runuser -u portitor -- portitor-config fingerprint)
+	ex mgmt sed -i "s/fingerprint: .*/fingerprint: $fp/" /etc/portitor/web.yaml
 	ex mgmt systemctl daemon-reload
 	ex mgmt systemctl enable portitor-web.service
 	ex mgmt systemctl restart portitor-web.service
@@ -150,7 +171,7 @@ cmd_shell() { $RT exec -it "$PREFIX-${1:?fw or mgmt}" bash; }
 
 cmd_logs() {
 	case ${1:?fw or mgmt} in
-	fw) ex fw journalctl -f -u portitor-agent -u 'portitor-named@*' -u 'portitor-kea4@*' -u 'portitor-kea6@*' -u 'portitor-radvd@*' -u 'portitor-frr@*' -u 'portitor-chrony@*' -u 'portitor-snmpd@*' -u named -u kea-dhcp4-server -u kea-dhcp6-server -u radvd -u frr -u chrony -u snmpd ;;
+	fw) ex fw journalctl -f -u portitor-agent -u portitor-config -u 'portitor-named@*' -u 'portitor-kea4@*' -u 'portitor-kea6@*' -u 'portitor-radvd@*' -u 'portitor-frr@*' -u 'portitor-chrony@*' -u 'portitor-snmpd@*' -u named -u kea-dhcp4-server -u kea-dhcp6-server -u radvd -u frr -u chrony -u snmpd ;;
 	mgmt) ex mgmt journalctl -f -u portitor-web -u dnsmasq ;;
 	*) echo "fw or mgmt" >&2; exit 2 ;;
 	esac

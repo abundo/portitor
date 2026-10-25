@@ -504,7 +504,7 @@ func bootstrapMgmtService(tx *gorm.DB, o BootstrapOptions) (string, error) {
 	if o.GUIPort > 0 && o.GUIPort != 22 {
 		ports = append(ports, models.ServicePort{Protocol: "tcp", DstLo: o.GUIPort})
 	}
-	gui := models.Service{Name: "portitor-mgmt", Type: models.ServiceTypePorts, Description: "Portitor management: SSH and the portitor-web GUI",
+	gui := models.Service{Name: "portitor-mgmt", Type: models.ServiceTypePorts, Description: "Portitor management: SSH and the GUI",
 		Ports: ports}
 	var old models.Service
 	switch err := tx.Where("name = ?", gui.Name).First(&old).Error; {
@@ -673,4 +673,17 @@ func takeAddress(tx *gorm.DB, ifc *models.Interface, ip netip.Addr, reconfigure 
 		}
 	}
 	return nil
+}
+
+// ParseDHCPRange parses "192.168.1.100-192.168.1.199".
+func ParseDHCPRange(s string) (start, end netip.Addr, err error) {
+	a, b, ok := strings.Cut(s, "-")
+	if !ok {
+		return start, end, errors.New("start-end, e.g. 192.168.1.100-192.168.1.199")
+	}
+	if start, err = netip.ParseAddr(strings.TrimSpace(a)); err != nil {
+		return start, end, err
+	}
+	end, err = netip.ParseAddr(strings.TrimSpace(b))
+	return start, end, err
 }

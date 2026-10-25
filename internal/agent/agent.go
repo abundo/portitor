@@ -164,7 +164,7 @@ func (a *Agent) Start(ctx context.Context) error {
 	var doc fwconfig.Document
 	if err := readJSON(a.appliedFile(), &doc); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			slog.Info("no applied configuration yet; waiting for portitor-web")
+			slog.Info("no applied configuration yet; waiting for portitor-config")
 			return nil
 		}
 		return err

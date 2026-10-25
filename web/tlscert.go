@@ -6,7 +6,10 @@ package web
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
+	"encoding/hex"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -39,6 +42,10 @@ type tlsCert struct {
 	pem      []byte // chain + key of cur, as cached
 	fallback *tls.Certificate
 }
+
+// PinnedServerName is the TLS server name a client that pins
+// portitor-config's tls_cert asks for (portitor-web, the HA peer).
+const PinnedServerName = "portitor-config.invalid"
 
 const (
 	tlsCertRefresh = time.Hour
@@ -85,10 +92,12 @@ func (t *tlsCert) reset() {
 	}
 }
 
-func (t *tlsCert) get(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+func (t *tlsCert) get(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if t.cur != nil {
+	// portitor-web and the HA peer pin tls_cert, asked for by name, so a
+	// certificate chosen under Settings never breaks them.
+	if t.cur != nil && (hello == nil || hello.ServerName != PinnedServerName) {
 		return t.cur, nil
 	}
 	return t.fallback, nil
@@ -165,4 +174,22 @@ func (t *tlsCert) fetch(ctx context.Context) (chosen bool, err error) {
 		return true, err
 	}
 	return true, os.Rename(tmp, t.cache)
+}
+
+// CertFingerprint is the SHA-256 of the first certificate in the PEM file
+// path, hex: what portitor-web and the HA peer pin.
+func CertFingerprint(path string) (string, error) {
+	if path == "" {
+		return "", errors.New("no tls_cert: portitor-config serves plain HTTP, which portitor-web reaches on this host only")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	block, _ := pem.Decode(data)
+	if block == nil || block.Type != "CERTIFICATE" {
+		return "", fmt.Errorf("%s: no PEM certificate", path)
+	}
+	sum := sha256.Sum256(block.Bytes)
+	return hex.EncodeToString(sum[:]), nil
 }

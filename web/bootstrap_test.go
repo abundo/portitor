@@ -405,3 +405,39 @@ func TestBootstrapDHCPServer(t *testing.T) {
 		t.Errorf("DHCP domain %q", d)
 	}
 }
+
+// Without a GUI port the management service is SSH alone, and the rules
+// are the same.
+func TestBootstrapNoGUIPort(t *testing.T) {
+	env := newEnv(t)
+	fake := &applyAgent{statusAgent: statusAgent{nics: []agentapi.NICStatus{
+		{Name: "enp1s0", Addresses: []string{}},
+		{Name: "enp2s0", Addresses: []string{}},
+	}}}
+	env.srv.newAgent = func(*models.Firewall) (agentAPI, error) { return fake, nil }
+	o := BootstrapOptions{AgentURL: "https://192.168.1.1:8443", AgentToken: strings.Repeat("t", 43), AgentFingerprint: strings.Repeat("ab", 32),
+		LAN: "enp2s0", Address: netip.MustParsePrefix("192.168.1.1/24"), WAN: "enp1s0"}
+	if _, err := Bootstrap(context.Background(), env.srv, o); err != nil {
+		t.Fatal(err)
+	}
+	if fw := firstFirewall(t, env); fw.AgentURL != "https://192.168.1.1:8443" {
+		t.Errorf("agent URL %q", fw.AgentURL)
+	}
+	var mgmt models.Service
+	if err := env.srv.db.Where("name = ?", "portitor-mgmt").First(&mgmt).Error; err != nil || len(mgmt.Ports) != 1 || mgmt.Ports[0].DstLo != 22 {
+		t.Errorf("management service: %+v %v", mgmt.Ports, err)
+	}
+	in := fake.applied.Instances[0]
+	var input, forward int
+	for _, r := range in.Rules {
+		switch r.Chain {
+		case fwconfig.ChainInput:
+			input++
+		case fwconfig.ChainForward:
+			forward++
+		}
+	}
+	if input != 2 || forward != 1 || len(in.NAT) != 1 {
+		t.Errorf("rules %+v, NAT %+v", in.Rules, in.NAT)
+	}
+}

@@ -59,17 +59,29 @@ func prepareFirewall(tx *gorm.DB, f, old *models.Firewall) error {
 	if f.ConfigFingerprint != "" && len(f.ConfigFingerprint) != 64 {
 		return bad("portitor-config fingerprint must be 64 hex characters (SHA-256)")
 	}
-	if t := strings.TrimSpace(f.NewConfigToken); t != "" {
-		f.ConfigToken = t
+	switch f.HAWitness {
+	case "":
+		f.HAWitness = models.HAWitnessLocal
+	case models.HAWitnessLocal, models.HAWitnessExternal:
+	default:
+		return bad("HA witness: local or external")
 	}
-	f.NewConfigToken = ""
 	// The generation is the agent's, counted by deploys only.
 	f.Generation = 0
 	if old != nil {
 		f.Generation = old.Generation
-		// A firewall is made a secondary, or not, when it is created.
-		f.HAPrimaryID, f.HASecret = old.HAPrimaryID, old.HASecret
+		// A firewall is made a secondary, or not, when it is created; a
+		// promotion swaps the pair (promote.go).
+		f.HAPrimaryID, f.HASecret, f.HAEpoch = old.HAPrimaryID, old.HASecret, old.HAEpoch
+		f.HAWitnessSecret = old.HAWitnessSecret
+		if f.HAWitness == models.HAWitnessExternal && f.HAWitnessSecret == "" {
+			f.HAWitnessSecret = newHASecret()
+		}
 		return nil
+	}
+	f.HAWitnessSecret = ""
+	if f.HAWitness == models.HAWitnessExternal {
+		f.HAWitnessSecret = newHASecret()
 	}
 	if f.HAPrimaryID != nil {
 		var p models.Firewall
@@ -107,8 +119,6 @@ func normalizeFingerprint(fp string) string {
 func presentFirewall(f *models.Firewall) {
 	f.HasAgentToken = f.AgentToken != ""
 	f.NewAgentToken = ""
-	f.HasConfigToken = f.ConfigToken != ""
-	f.NewConfigToken = ""
 }
 
 // instanceNameFree refuses a firewall name that a virtual firewall has:

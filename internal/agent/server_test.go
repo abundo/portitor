@@ -82,6 +82,15 @@ func TestAuth(t *testing.T) {
 	if rec := call(t, h2, "GET", "/v1/status", testToken, nil); rec.Code != http.StatusForbidden {
 		t.Errorf("outside allow_from: %d", rec.Code)
 	}
+	// Loopback is portitor-config on the firewall, whatever allow_from says.
+	req := httptest.NewRequest("GET", "/v1/status", nil)
+	req.RemoteAddr = "127.0.0.1:40000"
+	req.Header.Set("Authorization", "Bearer "+testToken)
+	rec := httptest.NewRecorder()
+	h2.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Errorf("loopback outside allow_from: %d", rec.Code)
+	}
 }
 
 func TestApplyRejectsInvalid(t *testing.T) {

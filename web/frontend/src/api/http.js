@@ -2,11 +2,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import axios from 'axios'
+import { BASE } from '@/utils/base'
 
 // Every mutating request is JSON: the server refuses anything else, which
 // (with the SameSite=Strict cookie) is the CSRF defence.
 const http = axios.create({
-  baseURL: '/api',
+  baseURL: `${BASE}api`,
   headers: { 'Content-Type': 'application/json' },
   withCredentials: true,
 })

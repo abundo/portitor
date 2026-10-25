@@ -7,6 +7,7 @@ import (
 	"net/netip"
 	"net/url"
 	"regexp"
+	"slices"
 )
 
 // HA nodes.
@@ -28,9 +29,59 @@ type HA struct {
 	// pinned by PeerFingerprint (SHA-256, hex).
 	Peer            string `json:"peer"`
 	PeerFingerprint string `json:"peer_fingerprint"`
-	// Secret is shared by the pair for the heartbeat (/v1/ha/heartbeat),
-	// the only route it opens.
+	// Secret is shared by the pair for the heartbeat (/v1/ha/heartbeat)
+	// and the copy of the certificates; the secondary's portitor-config
+	// copies the primary's database with it too.
 	Secret string `json:"secret"`
+	// WitnessSecret, when the pair's witness is external (portitor-web on
+	// a third host), opens GET /v1/ha and POST /v1/ha/vote to it alone.
+	WitnessSecret string `json:"witness_secret,omitempty"`
+	// PeerConfig is the peer's portitor-config (https://...), its tls_cert
+	// pinned by PeerConfigFingerprint: where the secondary's
+	// portitor-config copies the configuration from. Empty: none.
+	PeerConfig            string `json:"peer_config,omitempty"`
+	PeerConfigFingerprint string `json:"peer_config_fingerprint,omitempty"`
+	// Epoch counts the pair's promotions: a secondary promoted to primary
+	// raises it. A primary that hears a peer that is primary at a higher
+	// epoch has been taken over: it is stale, fenced and standby, until it
+	// is given the document of the secondary it now is.
+	Epoch int64 `json:"epoch,omitempty"`
+	// ConfigPort is this host's portitor-config port (its own
+	// portitor-config URL's), which the default instance opens to the
+	// peer's addresses (HAConfigAccess): the secondary copies the
+	// configuration from the primary, and the other way round once it is
+	// promoted. 0: none.
+	ConfigPort int `json:"config_port,omitempty"`
+}
+
+// HAConfigAccess is what Expand gives an HA host's default instance from
+// HA: its portitor-config's port, opened to the peer's addresses (the auto
+// rule render.HAConfigService).
+type HAConfigAccess struct {
+	Port int
+	From []string
+}
+
+// configAccess: the peer's addresses are those written as addresses in
+// its agent and portitor-config URLs; a name gives none.
+func (h *HA) configAccess() *HAConfigAccess {
+	if h == nil || h.ConfigPort == 0 {
+		return nil
+	}
+	var from []string
+	for _, s := range []string{h.Peer, h.PeerConfig} {
+		u, err := url.Parse(s)
+		if err != nil {
+			continue
+		}
+		if a, err := netip.ParseAddr(u.Hostname()); err == nil && !slices.Contains(from, a.Unmap().String()) {
+			from = append(from, a.Unmap().String())
+		}
+	}
+	if len(from) == 0 {
+		return nil
+	}
+	return &HAConfigAccess{Port: h.ConfigPort, From: from}
 }
 
 var (
@@ -53,6 +104,23 @@ func (v *validator) ha(h *HA) {
 	}
 	if !haSecretRe.MatchString(h.Secret) {
 		v.addf("ha: secret must be 32-128 URL-safe base64 characters")
+	}
+	if h.WitnessSecret != "" && (!haSecretRe.MatchString(h.WitnessSecret) || h.WitnessSecret == h.Secret) {
+		v.addf("ha: witness secret must be 32-128 URL-safe base64 characters, not the pair's secret")
+	}
+	if h.PeerConfig != "" {
+		if u, err := url.Parse(h.PeerConfig); err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || (u.Path != "" && u.Path != "/") || u.RawQuery != "" {
+			v.addf("ha: peer config must be the other host's portitor-config URL (https://<address>:<port>)")
+		}
+		if !haFingerprintRe.MatchString(h.PeerConfigFingerprint) {
+			v.addf("ha: peer config fingerprint must be 64 lowercase hex characters")
+		}
+	}
+	if h.Epoch < 0 {
+		v.addf("ha: epoch must not be negative")
+	}
+	if h.ConfigPort < 0 || h.ConfigPort > 65535 {
+		v.addf("ha: config port must be 1-65535")
 	}
 }
 

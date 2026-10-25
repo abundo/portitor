@@ -24,6 +24,12 @@ import (
 // again with render.Options.Fenced, which shuts its VRRP routers down
 // and leaves out DHCP and router advertisements. It starts fenced after a
 // restart, until it hears its peer or the witness.
+//
+// A primary whose peer answers as primary at a higher epoch was taken
+// over: its secondary was promoted while it was away. It is stale: fenced
+// and standby whatever its quorum, until it is given the document of the
+// secondary it now is (by the new primary's portitor-config), and its
+// own portitor-config copies the new primary's configuration.
 const (
 	haBeat = time.Second
 	// haDeadAfter without an answer the peer counts as gone.
@@ -38,6 +44,8 @@ type haManager struct {
 	peerSeen  time.Time
 	voteUntil time.Time
 	fenced    bool
+	// peer is the peer's last answer to the heartbeat.
+	peer agentapi.HAHeartbeat
 	// standby: a host in a pair that is fenced, or the secondary while it
 	// hears the primary. It leaves the DNS updates and the tunnel broker
 	// to the other, which would otherwise see the two publish their own
@@ -67,25 +75,41 @@ func (h *haManager) isStandby() bool {
 // setStandby records standby from the state under h.mu; it tells whether
 // it changed.
 func (h *haManager) setStandby(peerAlive bool) bool {
-	s := h.cfg != nil && (h.fenced || (h.cfg.Node == fwconfig.HASecondary && peerAlive))
+	s := h.cfg != nil && (h.fenced || h.staleLocked() || (h.cfg.Node == fwconfig.HASecondary && peerAlive))
 	changed := s != h.standby
 	h.standby = s
 	return changed
 }
 
+// staleLocked tells whether the host is a primary taken over by its
+// peer's promotion; h.mu held.
+func (h *haManager) staleLocked() bool {
+	return h.cfg != nil && h.cfg.Node == fwconfig.HAPrimary && h.peer.Node == fwconfig.HAPrimary && h.peer.Epoch > h.cfg.Epoch
+}
+
+// heard records the peer's answer; h.mu held.
+func (h *haManager) heard(hb *agentapi.HAHeartbeat) {
+	h.peerSeen = time.Now()
+	h.peer = *hb
+}
+
 // boot fences a host whose last applied document puts it in a pair, before
-// that document is applied again at start, unless its peer answers now:
-// a restarted agent then doesn't take its VRRP routers down and up.
+// that document is applied again at start, unless its peer answers now
+// (and has not taken it over): a restarted agent then doesn't take its
+// VRRP routers down and up.
 func (h *haManager) boot(ctx context.Context, cfg *fwconfig.HA) {
-	alive := cfg != nil && heartbeat(ctx, cfg) == nil
+	var hb *agentapi.HAHeartbeat
+	if cfg != nil {
+		hb, _ = heartbeat(ctx, cfg)
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.cfg = cfg
-	h.fenced = cfg != nil && !alive
-	if alive {
-		h.peerSeen = time.Now()
+	if hb != nil {
+		h.heard(hb)
 	}
-	h.setStandby(alive)
+	h.fenced = cfg != nil && (hb == nil || h.staleLocked())
+	h.setStandby(hb != nil)
 }
 
 // setConfig follows the applied document. A host leaving its pair is no
@@ -106,6 +130,20 @@ func (h *haManager) setConfig(cfg *fwconfig.HA) {
 	if changed {
 		go h.onChange(false)
 	}
+	// A document of another node or epoch may end staleness at once.
+	if cfg != nil {
+		h.decide()
+	}
+}
+
+// epoch is the applied document's epoch, 0 outside a pair.
+func (h *haManager) epoch() int64 {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.cfg == nil {
+		return 0
+	}
+	return h.cfg.Epoch
 }
 
 func (h *haManager) isFenced() bool {
@@ -130,19 +168,24 @@ func (h *haManager) decide() {
 		return
 	}
 	now := time.Now()
-	quorum := now.Sub(h.peerSeen) < haDeadAfter || now.Before(h.voteUntil)
+	stale := h.staleLocked()
+	quorum := (now.Sub(h.peerSeen) < haDeadAfter || now.Before(h.voteUntil)) && !stale
 	changed := h.fenced == quorum
 	h.fenced = !quorum
 	fenced := h.fenced
 	standbyChanged := h.setStandby(now.Sub(h.peerSeen) < haDeadAfter)
+	epoch, peerEpoch := h.cfg.Epoch, h.peer.Epoch
 	h.mu.Unlock()
 	if standbyChanged {
 		go h.onActive()
 	}
 	if changed {
-		if fenced {
+		switch {
+		case fenced && stale:
+			slog.Warn("ha: the peer is primary at a later epoch (promoted): this host was taken over, fencing", "epoch", epoch, "peer_epoch", peerEpoch)
+		case fenced:
 			slog.Warn("ha: no quorum (neither the peer nor the witness), fencing")
-		} else {
+		default:
 			slog.Info("ha: quorum again, lifting the fence")
 		}
 		// An apply reads the state when it renders, so applies that
@@ -168,10 +211,11 @@ func (h *haManager) loop(ctx context.Context) {
 		if cfg == nil {
 			continue
 		}
-		alive := heartbeat(ctx, cfg) == nil
+		hb, err := heartbeat(ctx, cfg)
+		alive := err == nil
 		if alive {
 			h.mu.Lock()
-			h.peerSeen = time.Now()
+			h.heard(hb)
 			h.mu.Unlock()
 		}
 		h.decide()
@@ -182,10 +226,10 @@ func (h *haManager) loop(ctx context.Context) {
 	}
 }
 
-func heartbeat(ctx context.Context, cfg *fwconfig.HA) error {
+func heartbeat(ctx context.Context, cfg *fwconfig.HA) (*agentapi.HAHeartbeat, error) {
 	c, err := agentclient.New(cfg.Peer, cfg.Secret, cfg.PeerFingerprint)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	ctx, cancel := context.WithTimeout(ctx, haBeat)
 	defer cancel()
@@ -200,7 +244,7 @@ func (h *haManager) status() *agentapi.HAStatus {
 		return st
 	}
 	now := time.Now()
-	st.Node = h.cfg.Node
+	st.Node, st.Epoch, st.Stale = h.cfg.Node, h.cfg.Epoch, h.staleLocked()
 	st.PeerAlive = now.Sub(h.peerSeen) < haDeadAfter
 	if !h.peerSeen.IsZero() {
 		seen := h.peerSeen
@@ -223,6 +267,41 @@ func (h *haManager) heartbeatAuth(r *http.Request) bool {
 		return false
 	}
 	return subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte("Bearer "+cfg.Secret)) == 1
+}
+
+// witnessAuth lets an external witness, with the pair's witness secret,
+// ask for the quorum and vote.
+func (h *haManager) witnessAuth(r *http.Request) bool {
+	h.mu.Lock()
+	cfg := h.cfg
+	h.mu.Unlock()
+	if cfg == nil || cfg.WitnessSecret == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte("Bearer "+cfg.WitnessSecret)) == 1
+}
+
+// heartbeatAnswer is the host's answer to its peer's heartbeat.
+func (h *haManager) heartbeatAnswer() agentapi.HAHeartbeat {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.cfg == nil {
+		return agentapi.HAHeartbeat{}
+	}
+	return agentapi.HAHeartbeat{Node: h.cfg.Node, Epoch: h.cfg.Epoch}
+}
+
+// peerConfig is where this host's portitor-config copies the pair's
+// configuration from.
+func (h *haManager) peerConfig() agentapi.HAPeerConfig {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.cfg == nil {
+		return agentapi.HAPeerConfig{}
+	}
+	return agentapi.HAPeerConfig{Node: h.cfg.Node, Stale: h.staleLocked(), Epoch: h.cfg.Epoch,
+		PeerAlive: time.Since(h.peerSeen) < haDeadAfter,
+		URL:       h.cfg.PeerConfig, Fingerprint: h.cfg.PeerConfigFingerprint, Secret: h.cfg.Secret}
 }
 
 // onActiveChange starts or stops the DNS updates and the tunnel broker

@@ -7,10 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"os/user"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -21,12 +23,13 @@ import (
 	"github.com/abundo/portitor/internal/dbmigrate"
 )
 
+// DefaultConfigFile is portitor-web's (PortalConfig).
 const DefaultConfigFile = "/etc/portitor/web.yaml"
 
-// DefaultLocalConfigFile is portitor-config's (Config.Local).
+// DefaultLocalConfigFile is portitor-config's (Config).
 const DefaultLocalConfigFile = "/etc/portitor/config.yaml"
 
-// Config is /etc/portitor/web.yaml.
+// Config is portitor-config's /etc/portitor/config.yaml.
 type Config struct {
 	Bind string   `yaml:"bind"`
 	DB   DBConfig `yaml:"db"`
@@ -40,16 +43,16 @@ type Config struct {
 	// their place once it is fetched from the agent.
 	TLSCert string `yaml:"tls_cert"`
 	TLSKey  string `yaml:"tls_key"`
-	// ManagerTokenFile holds the token a manager authenticates with to
-	// portitor-config's manager API (/manager/v1); none: no manager.
-	ManagerTokenFile string `yaml:"manager_token_file"`
-	// ManagerName is how this portitor-web names itself to the
-	// portitor-configs it manages (what they mark as its); default: the
-	// host name.
-	ManagerName string `yaml:"manager_name"`
-	// Local is portitor-config: portitor-web run as that name, on the
-	// firewall, for its own firewall (and HA secondary) alone, with the
-	// manager API. Not in the file.
+	// TrustedProxies are the addresses (CIDRs) whose X-Forwarded-For is
+	// believed: portitor-web's, which passes the browser's on, so the login
+	// limits count the browser's address.
+	TrustedProxies []string `yaml:"trusted_proxies"`
+	// AgentURL is this host's own agent, which tells portitor-config its
+	// place in an HA pair (role.go); default https://127.0.0.1:8443.
+	AgentURL string `yaml:"agent_url"`
+	// Local is portitor-config proper: on the firewall, for its own
+	// firewall (and HA secondary) alone. Not in the file; tests run
+	// without it.
 	Local bool `yaml:"-"`
 }
 
@@ -59,7 +62,7 @@ type DBConfig struct {
 	Path string `yaml:"path"`
 }
 
-const DefaultDBPath = "/var/lib/portitor-web/portitor.db"
+const DefaultDBPath = "/var/lib/portitor-config/portitor.db"
 
 func LoadConfig(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
@@ -76,6 +79,9 @@ func LoadConfig(path string) (*Config, error) {
 	if cfg.DB.Path == "" {
 		cfg.DB.Path = DefaultDBPath
 	}
+	if cfg.AgentURL == "" {
+		cfg.AgentURL = "https://127.0.0.1:8443"
+	}
 	return cfg, nil
 }
 
@@ -86,7 +92,30 @@ func (c *Config) validateForServe() error {
 	if (c.TLSCert == "") != (c.TLSKey == "") {
 		return errors.New("tls_cert and tls_key go together")
 	}
+	if _, err := c.trustedProxies(); err != nil {
+		return err
+	}
 	return nil
+}
+
+// trustedProxies parses TrustedProxies (an address is a /32 or /128).
+func (c *Config) trustedProxies() ([]*net.IPNet, error) {
+	var out []*net.IPNet
+	for _, p := range c.TrustedProxies {
+		if !strings.Contains(p, "/") {
+			if ip := net.ParseIP(p); ip != nil && ip.To4() != nil {
+				p += "/32"
+			} else {
+				p += "/128"
+			}
+		}
+		_, n, err := net.ParseCIDR(p)
+		if err != nil {
+			return nil, fmt.Errorf("trusted_proxies: %q is not an address or CIDR", p)
+		}
+		out = append(out, n)
+	}
+	return out, nil
 }
 
 func ConnectDB(c DBConfig) (*gorm.DB, error) {
@@ -126,5 +155,5 @@ func checkDBOwner(path string) error {
 	if u, err := user.LookupId(name); err == nil {
 		name = u.Username
 	}
-	return fmt.Errorf("%s belongs to %s: run portitor-web as that user (sudo -u %s portitor-web ...)", dir, name, name)
+	return fmt.Errorf("%s belongs to %s: run portitor-config as that user (sudo -u %s portitor-config ...)", dir, name, name)
 }

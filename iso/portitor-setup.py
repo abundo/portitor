@@ -13,11 +13,11 @@ or LAN, offers), a password and the time zone; before applying, LAN and WAN can 
 
   - writes /etc/resolv.conf (the agent does not manage the firewall's own
     resolver; the one from the installation may be unreachable now),
-  - creates the SQLite database and writes /etc/portitor/web.yaml, with a
-    self-signed certificate for the GUI on port 443,
+  - creates the SQLite database and writes /etc/portitor/config.yaml, with a
+    self-signed certificate for the GUI on port 443 (portitor-config),
   - creates the GUI user portitor, and sets the console user's password,
-  - sets the agent up on 127.0.0.1 (portitor-web runs on the firewall itself),
-  - runs `portitor-web bootstrap`: LAN (static or DHCP, which then takes no
+  - sets the agent up on 127.0.0.1 (portitor-config runs on the firewall),
+  - runs `portitor-config bootstrap`: LAN (static or DHCP, which then takes no
     default route; the default route belongs to the WAN, unless both use
     DHCP and the LAN is chosen to take it) and WAN (DHCP or static), described as LAN and WAN, default route, input rules for
     management (the portitor-mgmt service: SSH and the GUI) and ping from the LAN, a forward rule from the LAN to the WAN,
@@ -26,8 +26,8 @@ or LAN, offers), a password and the time zone; before applying, LAN and WAN can 
     the LAN if chosen (handing out the firewall as DNS server and the
     domain home.arpa, so https://fw reaches the GUI), and deploys (output has the instance's allow all
     output rule),
-  - starts portitor-web and writes the GUI's address to /etc/issue.d (with a
-    DHCP LAN, agetty shows its current address).
+  - starts portitor-config and writes the GUI's address to /etc/issue.d (with
+    a DHCP LAN, agetty shows its current address).
 
 Every step can be repeated; a failed one is retried with the same answers.
 
@@ -35,32 +35,34 @@ The text UI has the steps in a list on the left and the form of the selected
 one on the right; Up and Down in the list switch step, Enter or Tab move into
 the form, Escape back to the list. Run again, every step is open at once.
 
-Split setups: the setup first asks what the machine runs.
+Split setups: the setup first asks what the machine runs. A firewall always
+keeps its configuration itself (portitor-config); portitor-web on another
+host is a portal to the GUIs of its firewalls, with no database.
 
   both   the above: the firewall with its GUI.
-  agent  a firewall managed by portitor-web on another host. The LAN address
-         is static; the agent listens on port 8443 and takes calls from
-         portitor-web's address (allow_from). Until the first deploy a
-         oneshot unit (portitor-setup-lan.service) puts the LAN address on
-         the LAN, so portitor-web can reach it. It ends by showing a join
-         string: the agent's URL, token and certificate fingerprint and the
-         LAN and WAN answers. `sudo portitor-setup --show-join` prints it
-         again (plain text, to copy over SSH).
-  web    portitor-web only, on a host that manages a firewall elsewhere. Its
-         one interface goes in /etc/network/interfaces (DHCP or static), the
-         agent is disabled, and the join string from the firewall is pasted
-         (now, or later over SSH with `sudo portitor-setup --join`): that runs
-         `portitor-web bootstrap --join -`, which deploys the firewall's LAN
-         and WAN as above, without the GUI rule.
+  agent  the same firewall, its GUI served by portitor-web on another host
+         too. The LAN address is static, and portitor-config believes the
+         browser's address that portitor-web there passes on (trusted_proxies:
+         its address or network). It ends by showing a portal string: the
+         firewall's name, GUI URL and certificate fingerprint. `sudo
+         portitor-setup --show-join` prints it again (plain text, to copy
+         over SSH).
+  web    portitor-web only, the portal. Its one interface goes in
+         /etc/network/interfaces (DHCP or static), the agent is disabled, and
+         the portal string of a firewall is pasted (now, or later over SSH
+         with `sudo portitor-setup --join`): that adds the firewall to
+         /etc/portitor/web.yaml. Log in to each firewall there with its own
+         users.
 
 Run again (`sudo portitor-setup`) after it has finished, it changes the
 network: the LAN and WAN interfaces (swapped, too) and addresses, the
 LAN's DHCP server (turned on or its range changed; off leaves it as it is),
 the default gateway, the DNS servers, the time zone and the keyboard layout, with the last answers
 (SETUP_STATE) as defaults; a password is optional there. It leaves the
-database, the agent and every other interface alone, runs `portitor-web
+database, the agent and every other interface alone, runs `portitor-config
 bootstrap --reconfigure`, and makes a new GUI certificate when the LAN
-address changes.
+address changes (a portitor-web that serves the firewall then needs its new
+fingerprint).
 
 With /etc/portitor/firstboot.answers (an ISO built with `iso/build.sh
 --test`), nothing is asked and no text UI runs: it holds "key: value" lines
@@ -72,7 +74,8 @@ interface that takes the default route when both use DHCP), gateway (on the stat
 optional), dns (space separated), password, hostname (default portitor, may include the domain), timezone and keyboard (an XKB layout, e.g. se). The file is removed when the setup has
 finished. role (both, agent or web) picks the split setups; agent reads
 web_from (portitor-web's address or network, default the LAN network), web
-reads lan and address (its own interface), gateway and join (optional).
+reads lan and address (its own interface), gateway and join (a portal
+string, optional).
 """
 
 from __future__ import annotations
@@ -111,11 +114,16 @@ SETUP_STATE = Path("/var/lib/portitor/setup.json")
 ANSWERS = Path("/etc/portitor/firstboot.answers")
 LOG = Path("/var/log/portitor-setup.log")
 ETC = Path("/etc/portitor")
+# portitor-web, the portal (web), and portitor-config, the firewall's
+# configuration and GUI (both, agent).
 WEB_YAML = ETC / "web.yaml"
+CONFIG_YAML = ETC / "config.yaml"
 AGENT_YAML = ETC / "agent.yaml"
+# The GUI's certificate, which portitor-web pins (agent).
 WEB_CERT = ETC / "web.crt"
 WEB_KEY = ETC / "web.key"
-WEB_DROPIN = Path("/etc/systemd/system/portitor-web.service.d/firstboot.conf")
+# Before portitor-config: portitor-web on the firewall bound port 443 with it.
+OLD_WEB_DROPIN = Path("/etc/systemd/system/portitor-web.service.d/firstboot.conf")
 ISSUE = Path("/etc/issue.d/portitor.issue")
 RESOLV_CONF = Path("/etc/resolv.conf")
 HOSTS = Path("/etc/hosts")
@@ -132,25 +140,26 @@ PUBLIC_DNS = "1.1.1.1 8.8.8.8"
 # The login user the installer created; also the agent's console user.
 CONSOLE_USER = "portitor"
 WEB_GROUP = "portitor"
-# portitor-web's service user; it runs every portitor-web command, so the
-# database files stay writable for the service.
+# The service user of portitor-config and portitor-web; it runs every
+# portitor-config command, so the database files stay writable for the
+# service.
 WEB_USER = "portitor"
-WEB_DB_DIR = Path("/var/lib/portitor-web")
+CONFIG_DB_DIR = Path("/var/lib/portitor-config")
 AGENT_TOKEN = ETC / "agent.token"
 GUI_USER = "portitor"
 GUI_PORT = 443
 AGENT_LISTEN = "127.0.0.1:8443"
-AGENT_PORT = 8443
-# Agent only: the LAN address until the agent has applied a configuration.
-APPLIED = Path("/var/lib/portitor/applied.json")
+# From before portitor-config: the agent-only firewall's LAN address until
+# its first deploy, removed now.
 LAN_UNIT = Path("/etc/systemd/system/portitor-setup-lan.service")
 # portitor-web only: the host's own interface.
 NET_INTERFACES = Path("/etc/network/interfaces")
-JOIN_PREFIX = "portitor-join:"  # web.JoinPrefix
+# A portal string: what portitor-web needs to serve a firewall's GUI.
+PORTAL_PREFIX = "portitor-portal:"
 ROLES = [
-    ("both", "the firewall, with its GUI (portitor-agent and portitor-web)"),
-    ("agent", "a firewall, managed by portitor-web on another host"),
-    ("web", "portitor-web only, managing a firewall on another host"),
+    ("both", "the firewall, with its GUI (portitor-agent and portitor-config)"),
+    ("agent", "the firewall, its GUI served by portitor-web on another host too"),
+    ("web", "portitor-web only: the portal to firewalls on other hosts"),
 ]
 MIN_PASSWORD = 10  # portitor-web's minimum
 
@@ -422,18 +431,21 @@ def set_keyboard(layout: str) -> None:
         run(["setupcon", "-k", "--force"], check=False, quiet=True)
 
 
-def decode_join(text: str) -> dict:
-    """The join string's contents (web.ParseJoin checks them again)."""
+def decode_portal(text: str) -> dict:
+    """A portal string's contents (portitor-web checks them again)."""
     text = "".join(text.split())
-    if not text.startswith(JOIN_PREFIX):
-        raise ValueError(f"a join string starts with {JOIN_PREFIX}")
-    raw = text[len(JOIN_PREFIX):].rstrip("=")
+    if not text.startswith(PORTAL_PREFIX):
+        raise ValueError(f"a portal string starts with {PORTAL_PREFIX}")
+    raw = text[len(PORTAL_PREFIX):].rstrip("=")
     try:
         d = json.loads(base64.urlsafe_b64decode(raw + "=" * (-len(raw) % 4)))
     except ValueError:
-        raise ValueError("the join string is damaged; copy it again") from None
-    if not isinstance(d, dict) or not all(d.get(k) for k in ("url", "token", "fingerprint", "lan", "address")):
-        raise ValueError("the join string is incomplete; copy it again")
+        raise ValueError("the portal string is damaged; copy it again") from None
+    if not isinstance(d, dict) or not all(isinstance(d.get(k), str) and d.get(k) for k in ("name", "url", "fingerprint")):
+        raise ValueError("the portal string is incomplete; copy it again")
+    if not re.fullmatch(r"[a-z][a-z0-9-]{0,31}", d["name"]) or not re.fullmatch(r"https://[\w.:\[\]-]+", d["url"]) \
+            or not re.fullmatch(r"[0-9a-f]{64}", d["fingerprint"]):
+        raise ValueError("the portal string is damaged; copy it again")
     return d
 
 
@@ -451,8 +463,8 @@ def write(path: Path, text: str, mode: int, group: str = "root") -> None:
     tmp.replace(path)
 
 
-def web(*args: str) -> list[str]:
-    return ["runuser", "-u", WEB_USER, "--", "portitor-web", "-f", str(WEB_YAML), *args]
+def config(*args: str) -> list[str]:
+    return ["runuser", "-u", WEB_USER, "--", "portitor-config", "-f", str(CONFIG_YAML), *args]
 
 
 def step_links(a: dict) -> None:
@@ -492,7 +504,7 @@ def step_hostname(a: dict) -> None:
 
 
 def step_database(a: dict) -> None:
-    run(["install", "-d", "-o", WEB_USER, "-g", WEB_GROUP, "-m", "0700", str(WEB_DB_DIR)])
+    run(["install", "-d", "-o", WEB_USER, "-g", WEB_GROUP, "-m", "0700", str(CONFIG_DB_DIR)])
 
 
 def step_cert(a: dict) -> None:
@@ -519,25 +531,57 @@ def step_new_cert(a: dict) -> None:
         step_cert(a)
 
 
-def step_web_config(a: dict) -> None:
-    step_cert(a)
-    write(WEB_YAML, f"""# /etc/portitor/web.yaml - written by the first-boot setup.
-# portitor-web runs on the firewall; the ruleset lets the LAN reach it.
+def step_config(a: dict) -> None:
+    """portitor-config: the firewall's configuration and its GUI on port 443
+    (its unit may bind it). Run again, a new certificate only for a new LAN
+    address."""
+    if not a.get("reconfigure") or a.get("new_cert") or not WEB_CERT.exists():
+        step_cert(a)
+    proxies = f"[{a['web_from']}]" if a.get("web_from") else "[]"
+    write(CONFIG_YAML, f"""# /etc/portitor/config.yaml - written by the first-boot setup.
+# portitor-config runs on the firewall; the ruleset lets the LAN reach it.
 bind: ":{GUI_PORT}"
 tls_cert: {WEB_CERT}
 tls_key: {WEB_KEY}
 jwt_secret: "{secrets.token_urlsafe(32)}"
+# portitor-web serving this GUI too: the browser's address it passes on.
+trusted_proxies: {proxies}
 
 db:
-  path: {WEB_DB_DIR}/portitor.db
+  path: {CONFIG_DB_DIR}/portitor.db
 """, 0o640, WEB_GROUP)
-    # Port 443 as the unprivileged service user.
-    write(WEB_DROPIN, """[Service]
-AmbientCapabilities=CAP_NET_BIND_SERVICE
-CapabilityBoundingSet=CAP_NET_BIND_SERVICE
-""", 0o644)
+    OLD_WEB_DROPIN.unlink(missing_ok=True)
     run(["systemctl", "daemon-reload"])
-    run(web("migrate"))
+    run(config("migrate"))
+
+
+def step_portal_config(a: dict) -> None:
+    """portitor-web only: the portal, its firewalls added with portal strings."""
+    step_cert(a)
+    old = read(WEB_YAML)
+    firewalls = old[old.index("firewalls:"):] if "firewalls:" in old and "# written by the first-boot setup" in old else "firewalls: []\n"
+    write(WEB_YAML, f"""# /etc/portitor/web.yaml - written by the first-boot setup.
+# portitor-web: the portal to the firewalls' GUIs (sudo portitor-setup --join
+# adds one).
+bind: ":{GUI_PORT}"
+tls_cert: {WEB_CERT}
+tls_key: {WEB_KEY}
+
+{firewalls}""", 0o640, WEB_GROUP)
+    run(["systemctl", "daemon-reload"])
+
+
+def add_portal_firewall(d: dict) -> None:
+    """portitor-web only: serves the firewall of a portal string, in place of
+    one of the same name."""
+    text = read(WEB_YAML)
+    head, sep, rest = text.partition("firewalls:")
+    if not sep:
+        raise RuntimeError(f"{WEB_YAML} has no firewalls:")
+    entries = re.findall(r"^  - name: (\S+)\n    url: (\S+)\n    fingerprint: (\S+)\n", rest, re.M)
+    entries = [e for e in entries if e[0] != d["name"]] + [(d["name"], d["url"], d["fingerprint"])]
+    block = "".join(f"  - name: {n}\n    url: {u}\n    fingerprint: {f}\n" for n, u, f in entries)
+    write(WEB_YAML, head + "firewalls:\n" + block, 0o640, WEB_GROUP)
 
 
 def step_console_password(a: dict) -> None:
@@ -553,13 +597,14 @@ def step_users(a: dict) -> None:
     run(["usermod", "-aG", "wireshark", CONSOLE_USER])
     if not a["password"]:
         return
-    if a["role"] != "agent":
-        run(web("createadmin", GUI_USER), stdin=a["password"] + "\n")
+    # The portal has no users: each firewall has its own.
+    if a["role"] != "web":
+        run(config("createadmin", GUI_USER), stdin=a["password"] + "\n")
 
 
 def agent_init(a: dict) -> None:
     """Makes the agent's token and certificate, or keeps them; sets a["fingerprint"]."""
-    hosts = [str(a["address"].ip)] if a["role"] == "agent" else ["127.0.0.1", "localhost"]
+    hosts = ["127.0.0.1", "localhost"]
     # The output holds the agent's token.
     out = run(["portitor-agent", "init", *[x for h in hosts for x in ("--host", h)]], secret=True).stdout
     m = re.search(r"^fingerprint:\s*([0-9a-f]{64})\s*$", out, re.M)
@@ -574,16 +619,10 @@ def step_agent(a: dict) -> None:
 
 
 def step_agent_config(a: dict) -> None:
-    if a["role"] == "agent":
-        # All addresses: the LAN address may change in the GUI, and the
-        # agent starts before it configures the interfaces. allow_from (and
-        # the anti-lockout rule, the only way in to the port) limit it.
-        head = f"# portitor-web runs on another host, at {a['web_from']}.\nlisten: \":{AGENT_PORT}\""
-        allow = a["web_from"]
-    else:
-        head = f"""# portitor-web runs on this host and is the only client of the API.
+    # An HA pair's agents also reach each other: see docs/ha.md.
+    head = f"""# portitor-config runs on this host and is the only client of the API.
 listen: {AGENT_LISTEN}"""
-        allow = "127.0.0.1/32"
+    allow = "127.0.0.1/32"
     write(AGENT_YAML, f"""# /etc/portitor/agent.yaml - written by the first-boot setup.
 {head}
 token_file: {ETC}/agent.token
@@ -599,51 +638,30 @@ console_user: {CONSOLE_USER}
     run(["systemctl", "enable", "--now", "ssh.service"])
 
 
-def step_lan_unit(a: dict) -> None:
-    """Agent only: the LAN address until the agent applies the first configuration."""
-    lan, addr = a["lan"], a["address"]
-    write(LAN_UNIT, f"""# Written by the Portitor first-boot setup (agent only): the LAN address,
-# so portitor-web on another host reaches the agent, until the agent has
-# applied a configuration. From then on the agent configures the LAN.
-[Unit]
-Description=Portitor: LAN address until the first deploy
-ConditionPathExists=!{APPLIED}
-Before=portitor-agent.service
-
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-ExecStart=/usr/sbin/ip link set dev {lan} up
-ExecStart=/usr/sbin/ip addr replace {addr} dev {lan}
-
-[Install]
-WantedBy=multi-user.target
-""", 0o644)
-    run(["systemctl", "daemon-reload"])
-    run(["systemctl", "enable", LAN_UNIT.name])
-    if not APPLIED.exists():
-        run(["systemctl", "restart", LAN_UNIT.name])
+def step_no_lan_unit(a: dict) -> None:
+    """The agent-only firewall's LAN unit, from before portitor-config: the
+    firewall configures its LAN itself now."""
+    if LAN_UNIT.exists():
+        run(["systemctl", "disable", LAN_UNIT.name], check=False, quiet=True)
+        LAN_UNIT.unlink()
+        run(["systemctl", "daemon-reload"])
 
 
-def join_string(a: dict) -> str:
-    """Agent only: what portitor-web needs to manage this firewall."""
-    d = {
-        "url": f"https://{a['address'].ip}:{AGENT_PORT}",
-        "token": AGENT_TOKEN.read_text(encoding="utf-8").strip(),
-        "fingerprint": a["fingerprint"],
-        "lan": a["lan"],
-        "address": str(a["address"]),
-    }
-    if a["wan"]:
-        d["wan"] = a["wan"]
-    if a["wan_address"]:
-        d["wan_address"] = str(a["wan_address"])
-    if a["gateway"]:
-        d["gateway"] = str(a["gateway"])
-    if a.get("dhcp_range"):
-        d["dhcp_range"] = fmt_range(a["dhcp_range"])
+def cert_fingerprint() -> str:
+    out = run(["openssl", "x509", "-in", str(WEB_CERT), "-noout", "-fingerprint", "-sha256"], quiet=True).stdout
+    return out.strip().split("=", 1)[-1].replace(":", "").lower()
+
+
+def portal_name(a: dict) -> str:
+    name = re.sub(r"[^a-z0-9-]+", "-", a["hostname"].split(".", 1)[0].lower()).strip("-")
+    return (name if name[:1].isalpha() else "fw-" + name)[:32].rstrip("-") or "firewall"
+
+
+def portal_string(a: dict) -> str:
+    """Agent role: what portitor-web needs to serve this firewall's GUI."""
+    d = {"name": portal_name(a), "url": f"https://{a['address'].ip}:{GUI_PORT}", "fingerprint": cert_fingerprint()}
     raw = json.dumps(d, separators=(",", ":")).encode()
-    return JOIN_PREFIX + base64.urlsafe_b64encode(raw).decode().rstrip("=")
+    return PORTAL_PREFIX + base64.urlsafe_b64encode(raw).decode().rstrip("=")
 
 
 def step_host_network(a: dict) -> None:
@@ -676,14 +694,18 @@ def step_no_agent(a: dict) -> None:
 
 
 def join(a: dict, text: str) -> bool:
-    """portitor-web only: deploys the firewall of the join string."""
-    say("==> Deploy the firewall's LAN and WAN configuration")
-    proc = run(web("bootstrap", "--join", "-"), stdin=text, check=False)
-    if proc.returncode == 0:
-        say(f"The firewall is managed from here now (agent {decode_join(text)['url']}).")
-        return True
-    say("!!  portitor-web bootstrap failed (see above)")
-    return False
+    """portitor-web only: serves the firewall of the portal string."""
+    say("==> Serve the firewall's GUI")
+    try:
+        d = decode_portal(text)
+        add_portal_firewall(d)
+        run(["systemctl", "restart", "portitor-web.service"])
+        run(["portitor-web", "-f", str(WEB_YAML), "check"], check=False)
+    except (ValueError, RuntimeError, OSError) as exc:
+        say(f"!!  {exc}")
+        return False
+    say(f"portitor-web serves firewall {d['name']} at /fw/{d['name']}/ (portitor-config {d['url']}).")
+    return True
 
 
 def route_from(a: dict) -> str:
@@ -693,7 +715,7 @@ def route_from(a: dict) -> str:
 
 
 def step_bootstrap(a: dict) -> None:
-    argv = web("bootstrap", "--lan", a["lan"], "--address", str(a["address"] or "dhcp"), "--gui-port", str(GUI_PORT))
+    argv = config("bootstrap", "--lan", a["lan"], "--address", str(a["address"] or "dhcp"), "--gui-port", str(GUI_PORT))
     if a.get("dhcp_range"):
         argv += ["--dhcp-range", fmt_range(a["dhcp_range"])]
     if a["wan"]:
@@ -717,22 +739,27 @@ def step_bootstrap(a: dict) -> None:
     ]
     proc = run(argv, stdin=AGENT_TOKEN.read_text(encoding="utf-8"), check=False)
     if proc.returncode != 0 and "deployed already" not in proc.stdout + proc.stderr:
-        raise RuntimeError("portitor-web bootstrap failed (see above)")
+        raise RuntimeError("portitor-config bootstrap failed (see above)")
 
 
 def step_web(a: dict) -> None:
-    run(["systemctl", "enable", "portitor-web.service"])
-    run(["systemctl", "restart", "portitor-web.service"])
+    """Starts the GUI: portitor-config on a firewall, portitor-web (the
+    portal) on its own."""
+    unit, other = ("portitor-web", "portitor-config") if a["role"] == "web" else ("portitor-config", "portitor-web")
+    run(["systemctl", "disable", "--now", f"{other}.service"], check=False, quiet=True)
+    run(["systemctl", "enable", f"{unit}.service"])
+    run(["systemctl", "restart", f"{unit}.service"])
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
     for _ in range(30):
         try:
-            urllib.request.urlopen(f"https://127.0.0.1:{GUI_PORT}/api/version", context=ctx, timeout=2).close()
+            path = "/portal/v1/firewalls" if a["role"] == "web" else "/api/version"
+            urllib.request.urlopen(f"https://127.0.0.1:{GUI_PORT}{path}", context=ctx, timeout=10).close()
             return
         except OSError:
             time.sleep(1)
-    raise RuntimeError("portitor-web does not answer; see journalctl -u portitor-web")
+    raise RuntimeError(f"{unit} does not answer; see journalctl -u {unit}")
 
 
 def dhcp_address(nic: str, wait: int = 30) -> str:
@@ -774,24 +801,12 @@ STEPS = [
     ("Time zone", step_timezone),
     ("Host name", step_hostname),
     ("Database", step_database),
-    ("portitor-web configuration", step_web_config),
+    ("portitor-config configuration", step_config),
     ("Users", step_users),
     ("portitor-agent", step_agent),
     ("Deploy the LAN and WAN configuration", step_bootstrap),
-    ("Start portitor-web", step_web),
+    ("Start portitor-config", step_web),
     ("Login screen", step_issue),
-]
-
-AGENT_STEPS = [
-    ("Console password", step_console_password),
-    ("Keyboard layout", step_keyboard),
-    ("Interfaces", step_links),
-    ("DNS servers", step_dns),
-    ("Time zone", step_timezone),
-    ("Host name", step_hostname),
-    ("Users", step_users),
-    ("portitor-agent", step_agent),
-    ("LAN address until the first deploy", step_lan_unit),
 ]
 
 WEB_STEPS = [
@@ -801,8 +816,7 @@ WEB_STEPS = [
     ("DNS servers", step_dns),
     ("Time zone", step_timezone),
     ("Host name", step_hostname),
-    ("Database", step_database),
-    ("portitor-web configuration", step_web_config),
+    ("portitor-web configuration", step_portal_config),
     ("Users", step_users),
     ("Disable portitor-agent", step_no_agent),
     ("Start portitor-web", step_web),
@@ -812,26 +826,16 @@ WEB_STEPS = [
 # Run again: the network only.
 RECONFIGURE_STEPS = [
     ("Console password", step_console_password),
+    ("Old LAN unit", step_no_lan_unit),
     ("Keyboard layout", step_keyboard),
     ("DNS servers", step_dns),
     ("Time zone", step_timezone),
     ("Host name", step_hostname),
-    ("GUI certificate", step_new_cert),
+    ("portitor-config configuration", step_config),
     ("Users", step_users),
     ("Deploy the LAN and WAN configuration", step_bootstrap),
-    ("Restart portitor-web", step_web),
+    ("Restart portitor-config", step_web),
     ("Login screen", step_issue),
-]
-
-# Run again, agent only: the network belongs to portitor-web now.
-AGENT_RECONFIGURE_STEPS = [
-    ("Console password", step_console_password),
-    ("Keyboard layout", step_keyboard),
-    ("DNS servers", step_dns),
-    ("Time zone", step_timezone),
-    ("Host name", step_hostname),
-    ("Users", step_users),
-    ("portitor-agent", step_agent),
 ]
 
 WEB_RECONFIGURE_STEPS = [
@@ -847,8 +851,9 @@ WEB_RECONFIGURE_STEPS = [
     ("Login screen", step_issue),
 ]
 
-FIRST_STEPS = {"both": STEPS, "agent": AGENT_STEPS, "web": WEB_STEPS}
-RECONFIGURE = {"both": RECONFIGURE_STEPS, "agent": AGENT_RECONFIGURE_STEPS, "web": WEB_RECONFIGURE_STEPS}
+# The agent role is the firewall's, with a portal string at the end.
+FIRST_STEPS = {"both": STEPS, "agent": STEPS, "web": WEB_STEPS}
+RECONFIGURE = {"both": RECONFIGURE_STEPS, "agent": RECONFIGURE_STEPS, "web": WEB_RECONFIGURE_STEPS}
 
 
 def read_answers() -> dict:
@@ -905,7 +910,7 @@ def read_answers() -> dict:
         except ValueError as exc:
             raise RuntimeError(f"{ANSWERS}: dhcp_range: {exc}") from None
     if a["join"]:
-        decode_join(a["join"])
+        decode_portal(a["join"])
     return a
 
 
@@ -977,8 +982,6 @@ def summary(a: dict) -> list[str]:
         out += [f"Interface       {nic_label(a['lan'])}",
                 f"Address         {a['address'] or 'DHCP'}",
                 f"Default gateway {a['gateway'] or 'from DHCP'}"]
-    elif a["role"] == "agent" and a.get("reconfigure"):
-        out.append(f"portitor-web    {a['web_from']}")
     else:
         out += [f"WAN interface   {nic_label(a['wan'])}",
                 f"WAN address     {a['wan_address'] or ('DHCP (no default route)' if route_from(a) == 'lan' else 'DHCP')}",
@@ -1008,21 +1011,21 @@ The browser warns about the self-signed certificate; its SHA-256 fingerprint is
 
 
 def join_text(a: dict) -> str:
-    """Agent only: the join string for portitor-web, and how to use it."""
-    return f"""Run sudo portitor-setup on the portitor-web host (installed from the ISO as
-"web", or later: sudo portitor-setup --join) and paste this join string:
+    """Agent role: the portal string for portitor-web, and how to use it."""
+    d = decode_portal(portal_string(a))
+    return f"""This firewall's GUI: https://{a['address'].ip}/ (user {GUI_USER}). To serve it from
+portitor-web on another host too, run sudo portitor-setup --join there (installed
+from the ISO as "web") and paste this portal string:
 
-{join_string(a)}
+{portal_string(a)}
 
-It holds the agent's token: keep it like a password. Easiest is to copy it over
-SSH (ssh {CONSOLE_USER}@{a['address'].ip}, then sudo portitor-setup --show-join). A
-portitor-web installed with install.py takes it too:
-    sudo runuser -u {WEB_USER} -- portitor-web -f {WEB_YAML} bootstrap --join -
-(paste it, Enter, Ctrl-D). By hand, in portitor-web's Settings > Agent:
-    Agent URL    https://{a['address'].ip}:{AGENT_PORT}
-    Fingerprint  {a['fingerprint']}
-    Token        in {AGENT_TOKEN}
-but then configure the LAN interface there before the first deploy.
+Easiest is to copy it over SSH (ssh {CONSOLE_USER}@{a['address'].ip}, then sudo
+portitor-setup --show-join). A portitor-web installed with install.py takes the
+same under firewalls: in {WEB_YAML}:
+  - name: {d['name']}
+    url: {d['url']}
+    fingerprint: {d['fingerprint']}
+It names no secret: the users log in to the firewall itself.
 """
 
 
@@ -1035,13 +1038,14 @@ def intro(role: str) -> str:
                 "kept. A session over the old LAN address drops; the console is the safe place "
                 "to run this.")
     if role == "agent":
-        return ("The first setup has run already. This changes portitor-web's address, the DNS "
-                "servers, the time zone, the keyboard layout and the console password. "
-                "portitor-web manages the network. sudo portitor-setup --show-join shows the "
-                "join string.")
+        return ("The first setup has run already. This changes the LAN and WAN interfaces and "
+                "addresses, the default gateway, the DNS servers, portitor-web's address, the time "
+                "zone and the keyboard layout, and deploys at once. A new LAN address makes a new "
+                "GUI certificate: portitor-web then needs the new portal string (sudo "
+                "portitor-setup --show-join).")
     return ("The first setup has run already. This changes this host's interface and address, "
             "the DNS servers, the time zone, the keyboard layout and the password. A session "
-            "over the old address drops. sudo portitor-setup --join manages another firewall.")
+            "over the old address drops. sudo portitor-setup --join serves another firewall.")
 
 
 # ---------------------------------------------------------------------------
@@ -1206,11 +1210,8 @@ class NetworkPage(Page):
     heading = "Network"
 
     def kind(self) -> str:
-        """fw: the firewall's LAN and WAN; host: portitor-web only; agent: run again on an agent-only firewall."""
-        role = self.a["role"]
-        if role == "web":
-            return "host"
-        return "agent" if role == "agent" and self.app.reconfigure else "fw"
+        """fw: the firewall's LAN and WAN; host: portitor-web only."""
+        return "host" if self.a["role"] == "web" else "fw"
 
     def body(self) -> ComposeResult:
         kind, st, role = self.kind(), self.state, self.a["role"]
@@ -1258,9 +1259,9 @@ class NetworkPage(Page):
                      + " Filled in from the DHCP server on the DHCP interface, when one answers.", classes="hint")
         if role == "agent":
             yield row("portitor-web from", Input(st.get("web_from", ""), id="web_from", placeholder="the LAN network"))
-            yield Static(f"portitor-web calls the agent on port {AGENT_PORT} from this address or network; "
-                         "SSH is always open from it too (anti-lockout). Until the first deploy the firewall "
-                         "has no routes: portitor-web must be on the LAN for that.", classes="hint")
+            yield Static("portitor-web, which serves this firewall's GUI too, calls it from this address or "
+                         "network; the firewall believes the browser's address it passes on (for the login "
+                         "limits). The GUI is open from the LAN.", classes="hint")
 
     def on_mount(self) -> None:
         # The last answers keep their DNS servers.
@@ -1346,9 +1347,7 @@ class NetworkPage(Page):
     def save(self) -> None:
         a, kind = self.a, self.kind()
         a["dhcp_range"] = None
-        if kind == "agent":
-            a.update(answers_of(self.state))
-        elif kind == "host":
+        if kind == "host":
             a["lan"] = self.nic("#lan", "interface")
             a["address"] = self.field("Address", check_address, self.value("#address")) if self.static("#lan_mode") else None
             a["gateway"] = self.field("Default gateway", check_gateway, self.value("#gateway"), a["address"]) if a["address"] else None
@@ -1652,7 +1651,7 @@ class ProgressPage(LogPage):
 
 
 class JoinPage(LogPage):
-    """portitor-web only: the join string from the firewall, deployed."""
+    """portitor-web only: the portal string from a firewall, served."""
 
     def __init__(self, optional: bool) -> None:
         super().__init__()
@@ -1660,17 +1659,17 @@ class JoinPage(LogPage):
 
     def compose(self) -> ComposeResult:
         yield Header(icon=" ")
-        yield Static("Manage a firewall", classes="heading")
-        yield Static("Paste the join string that the firewall's setup showed (sudo portitor-setup "
+        yield Static("Serve a firewall's GUI", classes="heading")
+        yield Static("Paste the portal string that the firewall's setup showed (sudo portitor-setup "
                      "--show-join on the firewall shows it again)."
                      + (" Later is fine too: sudo portitor-setup --join." if self.optional else ""), classes="text")
-        yield Input(placeholder=JOIN_PREFIX + "...", id="join")
+        yield Input(placeholder=PORTAL_PREFIX + "...", id="join")
         yield Label("", id="error")
         yield RichLog(wrap=True, id="log")
         with Horizontal(id="buttons"):
             if self.optional:
                 yield Button("Later", id="later")
-            yield Button("Deploy", id="deploy", variant="primary")
+            yield Button("Add", id="deploy", variant="primary")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -1686,12 +1685,11 @@ class JoinPage(LogPage):
     def deploy(self) -> None:
         text = "".join(self.query_one("#join", Input).value.split())
         try:
-            d = decode_join(text)
+            d = decode_portal(text)
         except ValueError as exc:
             self.query_one("#error", Label).update(str(exc))
             return
-        wan = f"WAN {d.get('wan') or '-'} {d.get('wan_address') or ('DHCP' if d.get('wan') else '')}"
-        self.query_one("#error", Label).update(f"agent {d['url']}, LAN {d['lan']} {d['address']}, {wan}")
+        self.query_one("#error", Label).update(f"firewall {d['name']}, portitor-config {d['url']}")
         for b in self.query(Button):
             b.disabled = True
         self.run_join(text)
@@ -1706,7 +1704,7 @@ class JoinPage(LogPage):
             self.app.joined = True
             self.app.push_screen(DonePage())
             return
-        self.query_one("#error", Label).update("The deploy failed (see below). Try another join string"
+        self.query_one("#error", Label).update("That failed (see below). Try another portal string"
                                                + (", or Later." if self.optional else "."))
         for b in self.query(Button):
             b.disabled = False
@@ -1723,10 +1721,10 @@ class DonePage(Screen):
             if a.get("role") == "agent":
                 yield Static(join_text(a), classes="text")
             elif self.app.mode == "join":
-                yield Static("The firewall is managed from here now.", classes="text")
+                yield Static("portitor-web serves the firewall's GUI now.", classes="text")
             else:
                 if self.app.joined:
-                    yield Static("The firewall is managed from here now.", classes="text")
+                    yield Static("portitor-web serves the firewall's GUI now; log in with the firewall's users.", classes="text")
                 yield Static(gui_text(a), classes="text")
         with Horizontal(id="buttons"):
             yield Button("Continue to the login prompt" if self.app.mode == "first" else "Exit",
@@ -1838,15 +1836,16 @@ def unattended() -> int:
         say(join_text(a))
     elif a["role"] == "web" and a["join"] and not join(a, a["join"]):
         return 1
-    say("Done." + (f" GUI: {a['url']}" if a["role"] != "agent" else ""))
+    say(f"Done. GUI: {a['url']}")
     return 0
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Portitor setup (see the top of this file).")
     group = parser.add_mutually_exclusive_group()
-    group.add_argument("--join", action="store_true", help="portitor-web only: manage the firewall of a join string")
-    group.add_argument("--show-join", action="store_true", help="agent only: print the join string for portitor-web")
+    group.add_argument("--join", nargs="?", const="", default=None, metavar="PORTAL_STRING",
+                       help="portitor-web only: serve the firewall of a portal string (asked for without one)")
+    group.add_argument("--show-join", action="store_true", help="agent role: print the portal string for portitor-web")
     args = parser.parse_args()
     if os.geteuid() != 0:
         if shutil.which("sudo"):
@@ -1854,15 +1853,16 @@ def main() -> int:
         say("run as root")
         return 1
     state = load_state()
-    if args.join or args.show_join:
-        want = "web" if args.join else "agent"
+    if args.join is not None or args.show_join:
+        want = "web" if args.join is not None else "agent"
         if not DONE.exists() or (state.get("role") or "both") != want:
-            say(f"{'--join' if args.join else '--show-join'} is for a machine set up as \"{want}\"")
+            say(f"{'--join' if args.join is not None else '--show-join'} is for a machine set up as \"{want}\"")
             return 1
+        if args.join:
+            return 0 if join({"role": "web"}, args.join) else 1
         if args.show_join:
             # Plain text, to copy over SSH.
-            a = {**answers_of(state), "role": "agent"}
-            agent_init(a)
+            a = {**answers_of(state), "role": "agent", "hostname": state.get("hostname") or current_hostname()}
             say(join_text(a))
             return 0
         return run_tui("join", state)

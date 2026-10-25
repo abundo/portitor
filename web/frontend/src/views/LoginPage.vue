@@ -6,6 +6,7 @@ import { ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { errMsg } from '@/api/http'
 import { useAuthStore } from '@/stores/auth'
+import FirewallSwitcher from '@/components/FirewallSwitcher.vue'
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -53,6 +54,7 @@ async function submit() {
         </div>
       </template>
       <form class="space-y-4" @submit.prevent="submit">
+        <FirewallSwitcher field />
         <UFormField label="Username">
           <UInput v-model="username" class="w-full" autocomplete="username" autofocus required />
         </UFormField>

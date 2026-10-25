@@ -173,14 +173,12 @@ export const api = {
   deployRevert: () => http.post('/deploy/revert', {}).then((r) => r.data),
   deployments: () => http.get('/deployments').then((r) => r.data),
   agentStatus: () => http.get('/agent/status').then((r) => r.data),
-  // A firewall with portitor-config: its virtual firewalls here and there.
-  drift: (firewallId) => http.get(`/firewalls/${firewallId}/drift`).then((r) => r.data),
-  settleDrift: (firewallId, name, action) =>
-    http
-      .post(`/firewalls/${firewallId}/drift/${encodeURIComponent(name)}`, { action })
-      .then((r) => r.data),
-  breakGlass: (instanceId) =>
-    http.post(`/instances/${instanceId}/break-glass`, {}).then((r) => r.data),
+  // The HA pair: this portitor-config's place, the promotion of a
+  // secondary, and the pair's witness string (its primary).
+  haStatus: () => http.get('/ha').then((r) => r.data),
+  haPromote: (force) => http.post('/ha/promote', { force }).then((r) => r.data),
+  witnessString: (firewallId) =>
+    http.get(`/firewalls/${firewallId}/witness`).then((r) => r.data.witness),
   agentLeases: () => http.get('/agent/leases').then((r) => r.data),
   agentNeighbours: () => http.get('/agent/neighbours').then((r) => r.data),
   agentRoutingTable: () => http.get('/agent/routing-table').then((r) => r.data),

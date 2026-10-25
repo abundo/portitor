@@ -1,14 +1,19 @@
 # SPDX-FileCopyrightText: 2026 The Portitor contributors
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-# /etc/portitor/config.yaml - portitor-config: portitor-web run as
-# "portitor-config" on the firewall, for its own configuration. Its manager
-# (portitor-web elsewhere) pushes virtual firewalls through the manager API
-# (/manager/v1) with the token in manager_token_file.
+# /etc/portitor/config.yaml - portitor-config: the firewall's configuration,
+# its database, GUI and API, on the firewall itself, deploying to its own
+# agent (and its HA secondary's). portitor-web elsewhere serves its GUI too.
 bind: ":8444"
 jwt_secret: CHANGE-ME
 db:
   path: /var/lib/portitor-config/portitor.db
+# portitor-web and the HA peer pin this certificate (portitor-config
+# fingerprint), whatever certificate the GUI is given under Settings.
 tls_cert: /etc/portitor/config.crt
 tls_key: /etc/portitor/config.key
-manager_token_file: /etc/portitor/manager.token
+# portitor-web's address: it passes the browser's on in X-Forwarded-For,
+# which the login limits count.
+trusted_proxies: []
+# This host's agent, which tells portitor-config its place in an HA pair.
+# agent_url: https://127.0.0.1:8443

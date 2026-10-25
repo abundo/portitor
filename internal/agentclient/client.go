@@ -60,24 +60,9 @@ func New(baseURL, token, fingerprint string) (*Client, error) {
 	if !strings.HasPrefix(baseURL, "https://") {
 		return nil, errors.New("agent URL must be https://")
 	}
-	tlsCfg := &tls.Config{MinVersion: tls.VersionTLS13}
-	fp := strings.ToLower(strings.ReplaceAll(fingerprint, ":", ""))
-	if fp != "" {
-		want, err := hex.DecodeString(fp)
-		if err != nil || len(want) != sha256.Size {
-			return nil, errors.New("agent fingerprint must be a SHA-256 hex string")
-		}
-		tlsCfg.InsecureSkipVerify = true // replaced by the pin check below
-		tlsCfg.VerifyPeerCertificate = func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
-			if len(rawCerts) == 0 {
-				return errors.New("agent presented no certificate")
-			}
-			got := sha256.Sum256(rawCerts[0])
-			if subtle.ConstantTimeCompare(got[:], want) != 1 {
-				return fmt.Errorf("agent certificate fingerprint mismatch (got %s)", hex.EncodeToString(got[:]))
-			}
-			return nil
-		}
+	tlsCfg, err := PinnedTLS("agent", fingerprint)
+	if err != nil {
+		return nil, err
 	}
 	return &Client{
 		baseURL: strings.TrimRight(baseURL, "/"),
@@ -87,6 +72,34 @@ func New(baseURL, token, fingerprint string) (*Client, error) {
 			Transport: &http.Transport{TLSClientConfig: tlsCfg, ResponseHeaderTimeout: 5 * time.Minute},
 		},
 	}, nil
+}
+
+// PinnedTLS is a TLS client config that pins the server's leaf
+// certificate by its SHA-256 fingerprint (hex, colons allowed) in place of
+// CA validation; without a fingerprint it validates against the system
+// CAs. what names the server in errors.
+func PinnedTLS(what, fingerprint string) (*tls.Config, error) {
+	tlsCfg := &tls.Config{MinVersion: tls.VersionTLS13}
+	fp := strings.ToLower(strings.ReplaceAll(fingerprint, ":", ""))
+	if fp == "" {
+		return tlsCfg, nil
+	}
+	want, err := hex.DecodeString(fp)
+	if err != nil || len(want) != sha256.Size {
+		return nil, fmt.Errorf("%s fingerprint must be a SHA-256 hex string", what)
+	}
+	tlsCfg.InsecureSkipVerify = true // replaced by the pin check below
+	tlsCfg.VerifyPeerCertificate = func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
+		if len(rawCerts) == 0 {
+			return fmt.Errorf("%s presented no certificate", what)
+		}
+		got := sha256.Sum256(rawCerts[0])
+		if subtle.ConstantTimeCompare(got[:], want) != 1 {
+			return fmt.Errorf("%s certificate fingerprint mismatch (got %s)", what, hex.EncodeToString(got[:]))
+		}
+		return nil
+	}
+	return tlsCfg, nil
 }
 
 // NewLocal talks to the agent's local socket (agent.SocketName), on the
@@ -385,8 +398,16 @@ func (c *Client) HAVote(ctx context.Context, seconds int) (*agentapi.HAStatus, e
 
 // HAHeartbeat is the HA peer's beat; the client's token is the pair's
 // secret.
-func (c *Client) HAHeartbeat(ctx context.Context) error {
-	return c.do(ctx, http.MethodGet, "/v1/ha/heartbeat", nil, nil)
+func (c *Client) HAHeartbeat(ctx context.Context) (*agentapi.HAHeartbeat, error) {
+	var out agentapi.HAHeartbeat
+	return &out, c.do(ctx, http.MethodGet, "/v1/ha/heartbeat", nil, &out)
+}
+
+// HAPeerConfig is where the host's portitor-config copies the pair's
+// configuration from.
+func (c *Client) HAPeerConfig(ctx context.Context) (*agentapi.HAPeerConfig, error) {
+	var out agentapi.HAPeerConfig
+	return &out, c.do(ctx, http.MethodGet, "/v1/ha/peer-config", nil, &out)
 }
 
 // HACertificates are the HA peer's ACME certificates, keys included; the

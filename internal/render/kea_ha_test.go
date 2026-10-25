@@ -17,6 +17,35 @@ func withDHCPHA(doc fwconfig.Document) fwconfig.Document {
 	return doc
 }
 
+// withHAConfig makes the document an HA host's whose portitor-config, on
+// 8444, the peer reaches.
+func withHAConfig(doc fwconfig.Document) fwconfig.Document {
+	fp := strings.Repeat("ab", 32)
+	doc.HA = &fwconfig.HA{Node: fwconfig.HAPrimary, Peer: "https://192.168.1.2:8443", PeerFingerprint: fp, Secret: strings.Repeat("s", 43),
+		PeerConfig: "https://[2001:db8::2]:8444", PeerConfigFingerprint: fp, ConfigPort: 8444}
+	return doc
+}
+
+func TestHAConfigRule(t *testing.T) {
+	b, err := Render(withHAConfig(fwconfig.SampleDocument()), Options{Paths: DefaultPaths(), Units: DefaultUnits()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	nft := mustFile(t, b, "/etc/nftables.d/portitor.nft")
+	for _, want := range []string{
+		"ip saddr @AUTO_portitor_config_peer_v4 tcp dport 8444 accept",
+		"ip6 saddr @AUTO_portitor_config_peer_v6 tcp dport 8444 accept",
+		"192.168.1.2", "2001:db8::2",
+	} {
+		if !strings.Contains(nft, want) {
+			t.Errorf("missing %q:\n%s", want, nft)
+		}
+	}
+	if guest := mustFile(t, b, "/etc/portitor/instances/guest/nftables.nft"); strings.Contains(guest, HAConfigService) {
+		t.Error("the portitor-config peer rule belongs to the default instance only")
+	}
+}
+
 func TestKeaHA(t *testing.T) {
 	b, err := Render(withDHCPHA(fwconfig.SampleDocument()), Options{Paths: DefaultPaths(), Units: DefaultUnits()})
 	if err != nil {

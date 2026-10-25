@@ -58,16 +58,6 @@ type commitTarget struct {
 	a   agentAPI
 	doc *fwconfig.Document
 	dep models.Deployment
-	// cfg: a firewall with portitor-config, committed there (push.go);
-	// doc and a are unused then.
-	cfg configAPI
-	// push are its virtual firewalls to push before the commit, del
-	// those to delete there.
-	push []string
-	del  []string
-	// hash: configHash of the commit's snapshot, for its deployment;
-	// empty when the commit is of some virtual firewalls only.
-	hash string
 	// skip: an HA host that can't be reached while its peer can; it
 	// catches up when it answers (witness.go).
 	skip bool
@@ -105,24 +95,15 @@ func (s *Server) deploy(ctx context.Context, username string, timeout *int, only
 	if err != nil {
 		return nil, err
 	}
-	viaChanged, viaSame, err := s.configTargets(ctx, snapDB, fws, only)
-	if err != nil {
-		closeDB(snapDB)
-		return nil, err
-	}
 	targets, same, err := s.commitTargets(snapDB, fws, only)
 	if err == nil {
 		// Nothing changed: all are applied again.
-		if len(targets) == 0 && len(viaChanged) == 0 {
-			targets, viaChanged = same, viaSame
+		if len(targets) == 0 {
+			targets = same
 		}
-		targets = append(targets, viaChanged...)
 		if len(targets) == 0 {
 			err = bad("there is nothing to deploy")
 		}
-	}
-	if err == nil {
-		err = s.pushTargets(ctx, snapDB, viaChanged)
 	}
 	closeDB(snapDB)
 	if err != nil {
@@ -132,11 +113,6 @@ func (s *Server) deploy(ctx context.Context, username string, timeout *int, only
 	var unreached []*commitTarget
 	var reachErr error
 	for _, t := range targets {
-		if t.cfg != nil {
-			// portitor-config asks its agents.
-			reached[t.fw.ID] = true
-			continue
-		}
 		if t.a, err = s.newAgent(&t.fw); err != nil {
 			return nil, bad(fmt.Sprintf("firewall %s: %v", t.fw.Name, err))
 		}
@@ -184,9 +160,6 @@ func (s *Server) deploy(ctx context.Context, username string, timeout *int, only
 		return nil, err
 	}
 	for _, t := range targets {
-		if t.doc == nil {
-			continue
-		}
 		if err := s.db.Model(&models.Firewall{}).Where("id = ?", t.fw.ID).Update("generation", t.doc.Generation).Error; err != nil {
 			return nil, err
 		}
@@ -195,18 +168,11 @@ func (s *Server) deploy(ctx context.Context, username string, timeout *int, only
 	res := &commitResult{Commit: commit, Status: "applied", Deployments: []models.Deployment{}, Results: map[string]*agentapi.ApplyResult{}}
 	var applyErr error
 	for _, t := range targets {
-		if t.cfg != nil {
-			t.dep = models.Deployment{FirewallID: t.fw.ID, CommitID: commit, Username: username, DocHash: t.hash, Instances: models.StringList{}}
-			if only != nil {
-				t.dep.Instances = sortedNames(only)
-			}
-		} else {
-			docJSON, _ := json.Marshal(redactDoc(*t.doc))
-			t.dep = models.Deployment{FirewallID: t.fw.ID, CommitID: commit, Generation: t.doc.Generation, Username: username,
-				Document: string(docJSON), DocHash: docHash(*t.doc), Instances: models.StringList{}}
-			if only != nil {
-				t.dep.Instances = sortedNames(onlyOn(only, t.doc))
-			}
+		docJSON, _ := json.Marshal(redactDoc(*t.doc))
+		t.dep = models.Deployment{FirewallID: t.fw.ID, CommitID: commit, Generation: t.doc.Generation, Username: username,
+			Document: string(docJSON), DocHash: docHash(*t.doc), Instances: models.StringList{}}
+		if only != nil {
+			t.dep.Instances = sortedNames(onlyOn(only, t.doc))
 		}
 		if t.skip {
 			t.dep.Status, t.dep.Message = "skipped", "not reachable; it catches up when it answers"
@@ -214,12 +180,6 @@ func (s *Server) deploy(ctx context.Context, username string, timeout *int, only
 		}
 		if applyErr != nil {
 			t.dep.Status, t.dep.Message = "failed", "not applied: firewall "+failedName(targets)+" failed"
-			continue
-		}
-		if t.cfg != nil {
-			if err := s.commitVia(ctx, t, applyConfirm); err != nil {
-				applyErr = fmt.Errorf("firewall %s: %w", t.fw.Name, err)
-			}
 			continue
 		}
 		r, err := t.a.Apply(ctx, *t.doc, applyConfirm)
@@ -290,9 +250,6 @@ func (s *Server) deploy(ctx context.Context, username string, timeout *int, only
 				res.Status = "pending"
 			}
 		}
-		if t.doc == nil {
-			continue
-		}
 		if err := s.keepDocument(t.doc, commit, t.fw.ID); err != nil {
 			slog.Warn("keeping the deployed document", "firewall", t.fw.Name, "err", err)
 		}
@@ -315,9 +272,6 @@ func (s *Server) deploy(ctx context.Context, username string, timeout *int, only
 func (s *Server) commitTargets(db *gorm.DB, fws []models.Firewall, only map[string]bool) (changed, same []*commitTarget, err error) {
 	var problems []string
 	for _, fw := range fws {
-		if viaConfig(fws, fw) {
-			continue
-		}
 		doc, err := s.buildDoc(db, &fw, fw.Generation+1, only)
 		var ve *fwconfig.ValidationError
 		switch {
@@ -490,10 +444,6 @@ func (s *Server) settlePending(ctx context.Context) ([]models.Deployment, error)
 		return nil, err
 	}
 	for _, fw := range fws {
-		// portitor-config settles its own.
-		if viaConfig(fws, fw) {
-			continue
-		}
 		if slices.ContainsFunc(deps, func(d models.Deployment) bool { return d.FirewallID == fw.ID }) {
 			_, _ = s.firewallStatus(ctx, &fw)
 		}
@@ -586,17 +536,7 @@ func (s *Server) handleDeployChanges(c *echo.Context) error {
 		return err
 	}
 	for _, fw := range fws {
-		var changed bool
-		var problems int
-		switch {
-		case fw.ConfigURL != "":
-			changed, problems, err = s.configChanged(fw.ID)
-		case viaConfig(fws, fw):
-			// Its primary's portitor-config deploys it.
-			continue
-		default:
-			changed, problems, err = s.firewallChanged(fw.ID)
-		}
+		changed, problems, err := s.firewallChanged(fw.ID)
 		if err != nil {
 			return err
 		}
@@ -633,30 +573,6 @@ func (s *Server) firewallChanged(firewallID uint) (bool, int, error) {
 		return true, 0, nil
 	}
 	return docHash(old) != docHash(redactDoc(*doc)), 0, nil
-}
-
-// configChanged tells whether the virtual firewalls of a firewall with
-// portitor-config differ from those its live deployment pushed, and how
-// many problems it has. A change made there (break-glass) is the drift
-// view's.
-func (s *Server) configChanged(firewallID uint) (bool, int, error) {
-	_, err := builder.BuildFirewall(s.db, 0, firewallID)
-	var ve *fwconfig.ValidationError
-	switch {
-	case errors.As(err, &ve):
-		return true, len(ve.Problems), nil
-	case err != nil:
-		return false, 0, err
-	}
-	live, err := s.liveDeployment(firewallID)
-	if err != nil {
-		return false, 0, err
-	}
-	h, err := configHash(s.db, firewallID)
-	if err != nil {
-		return false, 0, err
-	}
-	return live == nil || live.DocHash != h, 0, nil
 }
 
 func (s *Server) handleDeployConfirm(c *echo.Context) error {
@@ -758,6 +674,7 @@ func (s *Server) handleAgentStatus(c *echo.Context) error {
 		return err
 	}
 	var merged *agentapi.Status
+	replica := s.isReplica()
 	sync := &nicSync{Imported: []string{}, Missing: []missingNIC{}, Problems: []string{}}
 	statuses := []firewallStatus{}
 	var mismatch string
@@ -782,6 +699,11 @@ func (s *Server) handleAgentStatus(c *echo.Context) error {
 			mismatch = fs.VersionMismatch
 		}
 		statuses = append(statuses, fs)
+		merged = mergeStatus(merged, st, fw.Name, len(fws) > 1)
+		// A replica's configuration is the primary's copy.
+		if replica {
+			continue
+		}
 		fwSync, err := s.syncNICs(fw.ID, st.NICs)
 		if err != nil {
 			return err
@@ -789,7 +711,6 @@ func (s *Server) handleAgentStatus(c *echo.Context) error {
 		sync.Imported = append(sync.Imported, fwSync.Imported...)
 		sync.Missing = append(sync.Missing, fwSync.Missing...)
 		sync.Problems = append(sync.Problems, fwSync.Problems...)
-		merged = mergeStatus(merged, st, fw.Name, len(fws) > 1)
 	}
 	if merged == nil {
 		merged = &agentapi.Status{}
@@ -1092,3 +1013,25 @@ func (s *Server) answers(ctx context.Context, fws []models.Firewall, id uint) bo
 }
 
 func joinLog(lines []string) string { return strings.Join(lines, "\n") }
+
+// finishTarget confirms (or rolls back) a target of this commit.
+func (s *Server) finishTarget(ctx context.Context, t *commitTarget, confirm bool) error {
+	if confirm {
+		return t.a.Confirm(ctx, t.dep.Generation)
+	}
+	_, err := t.a.Rollback(ctx)
+	return err
+}
+
+// finishDeployment confirms (or rolls back) a pending deployment.
+func (s *Server) finishDeployment(ctx context.Context, dep *models.Deployment, confirm bool) (*models.Firewall, error) {
+	var fw models.Firewall
+	if err := s.db.First(&fw, dep.FirewallID).Error; err != nil {
+		return nil, err
+	}
+	a, err := s.newAgent(&fw)
+	if err != nil {
+		return &fw, bad(err.Error())
+	}
+	return &fw, s.finishTarget(ctx, &commitTarget{fw: fw, a: a, dep: *dep}, confirm)
+}

@@ -4,6 +4,8 @@
 package web
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
 	"errors"
 	"net/http"
 	"net/mail"
@@ -57,10 +59,12 @@ func (s *Server) issueSession(c *echo.Context, u *models.User, remember bool) er
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 		},
 	}
-	signed, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(s.jwtKey)
+	key, pair := s.sessionKey()
+	signed, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(key)
 	if err != nil {
 		return err
 	}
+	s.pairHeader(c, pair)
 	cookie := &http.Cookie{
 		Name:     cookieName,
 		Value:    signed,
@@ -77,6 +81,8 @@ func (s *Server) issueSession(c *echo.Context, u *models.User, remember bool) er
 }
 
 func (s *Server) clearSession(c *echo.Context) {
+	_, pair := s.sessionKey()
+	s.pairHeader(c, pair)
 	c.SetCookie(&http.Cookie{Name: cookieName, Value: "", Path: "/", HttpOnly: true, Secure: !s.cfg.Dev,
 		SameSite: http.SameSiteStrictMode, MaxAge: -1})
 }
@@ -94,10 +100,7 @@ func (s *Server) requireAuth(next echo.HandlerFunc) echo.HandlerFunc {
 		if err != nil {
 			return errJSON(c, http.StatusUnauthorized, "not logged in")
 		}
-		var claims sessionClaims
-		_, err = jwt.ParseWithClaims(cookie.Value, &claims, func(t *jwt.Token) (any, error) {
-			return s.jwtKey, nil
-		}, jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}), jwt.WithExpirationRequired())
+		claims, err := s.parseSession(cookie.Value)
 		if err != nil {
 			return errJSON(c, http.StatusUnauthorized, "session expired")
 		}
@@ -107,8 +110,60 @@ func (s *Server) requireAuth(next echo.HandlerFunc) echo.HandlerFunc {
 		}
 		c.Set(ctxUser, &u)
 		c.Set(ctxRemember, claims.Remember)
-		c.Set(ctxClaims, &claims)
+		c.Set(ctxClaims, claims)
 		return next(c)
+	}
+}
+
+// sessionKey signs the sessions. On a host of an HA pair it is made from
+// the pair's secret, which both hosts' databases hold (the secondary's a
+// copy of the primary's, users included), so a session of one is one of
+// the other; pair is that pair's firewall rows. Otherwise it is
+// jwt_secret.
+func (s *Server) sessionKey() (key []byte, pair []models.Firewall) {
+	var sec models.Firewall
+	if s.db.Where("ha_primary_id IS NOT NULL AND ha_secret != ''").Order("id").First(&sec).Error != nil {
+		return s.jwtKey, nil
+	}
+	if s.db.Where("id IN ?", []uint{sec.ID, *sec.HAPrimaryID}).Find(&pair).Error != nil {
+		pair = nil
+	}
+	mac := hmac.New(sha256.New, []byte(sec.HASecret))
+	mac.Write([]byte("portitor-config session"))
+	return mac.Sum(nil), pair
+}
+
+// parseSession checks a session cookie, signed by the pair's key or by
+// jwt_secret (one from before the pair).
+func (s *Server) parseSession(value string) (*sessionClaims, error) {
+	key, _ := s.sessionKey()
+	var err error
+	for _, k := range [][]byte{key, s.jwtKey} {
+		var claims sessionClaims
+		if _, err = jwt.ParseWithClaims(value, &claims, func(t *jwt.Token) (any, error) {
+			return k, nil
+		}, jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}), jwt.WithExpirationRequired()); err == nil {
+			return &claims, nil
+		}
+	}
+	return nil, err
+}
+
+// PairHeader names, on a response that sets the session cookie, the
+// fingerprints of the portitor-configs of this host's HA pair (their
+// config_fingerprint), so that portitor-web, which pins them by those,
+// sets the cookie for each of them (portalCookies).
+const PairHeader = "X-Portitor-Pair"
+
+func (s *Server) pairHeader(c *echo.Context, pair []models.Firewall) {
+	var fps []string
+	for _, f := range pair {
+		if f.ConfigFingerprint != "" {
+			fps = append(fps, f.ConfigFingerprint)
+		}
+	}
+	if len(fps) > 0 {
+		c.Response().Header().Set(PairHeader, strings.Join(fps, ","))
 	}
 }
 
@@ -137,12 +192,12 @@ var viewerDenied = map[string]bool{
 // tenantDenied are the GET routes a user without a global role (RoleNone)
 // may not use either: they show the whole firewall, not one instance.
 var tenantDenied = map[string]bool{
-	"/api/settings":            true,
-	"/api/system":              true,
-	"/api/agent/logs":          true,
-	"/api/firewalls":           true,
-	"/api/firewalls/:id":       true,
-	"/api/firewalls/:id/drift": true,
+	"/api/settings":              true,
+	"/api/system":                true,
+	"/api/agent/logs":            true,
+	"/api/firewalls":             true,
+	"/api/firewalls/:id":         true,
+	"/api/firewalls/:id/witness": true,
 }
 
 // viewerWrites are the requests other than GET a viewer may make: their own
@@ -363,7 +418,9 @@ func (s *Server) me(c *echo.Context, u *models.User) error {
 		*models.User
 		Access           map[uint]string `json:"access"`
 		VirtualFirewalls bool            `json:"virtual_firewalls"`
-	}{u, a.levels, st.VirtualFirewalls})
+		// Replica: this is an HA secondary's portitor-config, read-only.
+		Replica bool `json:"replica"`
+	}{u, a.levels, st.VirtualFirewalls, s.isReplica()})
 }
 
 // handleUpdateMe changes the caller's own full name, email and date format
@@ -416,9 +473,6 @@ func (s *Server) handleChangePassword(c *echo.Context) error {
 		return errJSON(c, http.StatusBadRequest, "invalid request")
 	}
 	u := currentUser(c)
-	if u.ManagedBy != "" {
-		return errJSON(c, http.StatusForbidden, "your user is managed by "+u.ManagedBy+": change your password there")
-	}
 	if bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(req.Current)) != nil {
 		return errJSON(c, http.StatusForbidden, "current password is wrong")
 	}

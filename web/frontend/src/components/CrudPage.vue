@@ -108,7 +108,9 @@ const auth = useAuthStore()
 // Rows of an instance take its admin; shared ones (templates, services,
 // tasks, links, instances) a global admin.
 const viewing = ref(false)
-const readOnly = computed(() => viewing.value || (props.shared ? !auth.isAdmin : !auth.canEdit))
+const readOnly = computed(
+  () => viewing.value || auth.replica || (props.shared ? !auth.isAdmin : !auth.canEdit),
+)
 const rows = ref([])
 const shown = (list) => (props.rowFilter ? list.filter(props.rowFilter) : list)
 const loading = ref(true)

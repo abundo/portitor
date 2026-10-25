@@ -18,8 +18,7 @@ import (
 // in-process, as consoleUser, a global admin. Whoever can run it can read
 // the database already (root, or its service user), so it asks for no
 // password. The user rides in the request's context, which a request
-// from the network never carries; every check of the API applies, read-
-// only managed virtual firewalls and break-glass included.
+// from the network never carries; every check of the API applies.
 
 type consoleUserKey struct{}
 
@@ -31,6 +30,10 @@ var consoleUser = &models.User{Username: "console", Role: models.RoleAdmin}
 func (s *Server) ConsoleRequest(ctx context.Context, method, path string, body []byte) (int, []byte) {
 	if err := s.ensureDefaultInstance(); err != nil {
 		return http.StatusInternalServerError, []byte(`{"error":"` + err.Error() + `"}`)
+	}
+	// Whether this host is a replica (read-only), from its agent.
+	if s.cfg.Local {
+		s.checkRole(ctx)
 	}
 	req := httptest.NewRequestWithContext(context.WithValue(ctx, consoleUserKey{}, consoleUser), method, path, bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")

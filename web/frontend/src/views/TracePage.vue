@@ -9,6 +9,7 @@ import { useInstanceRefs } from '@/composables/useInstanceRefs'
 import { useSearch } from '@/utils/search'
 import { useAuthStore } from '@/stores/auth'
 import SearchInput from '@/components/SearchInput.vue'
+import { apiURL } from '@/utils/base'
 
 // Traceroute like MTR: mtr runs on the firewall in the selected instance's
 // namespace (POST /api/agent/trace) and streams one event per probe sent,
@@ -118,7 +119,7 @@ async function start() {
   running.value = true
   controller = new AbortController()
   try {
-    const res = await fetch('/api/agent/trace', {
+    const res = await fetch(apiURL('/agent/trace'), {
       method: 'POST',
       credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },

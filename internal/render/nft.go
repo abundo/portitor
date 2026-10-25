@@ -671,6 +671,10 @@ func AutoInputRules(in *fwconfig.Instance) []AutoRule {
 		out = append(out, AutoRule{Service: ConntrackSyncService, InInterfaces: []string{c.Interface}, Protocol: "udp",
 			DstPort: fwconfig.ConntrackSyncPort, Source: []string{c.Peer}, SourceSet: ConntrackSyncSet})
 	}
+	// The HA peer's portitor-config, copying the configuration.
+	if h := in.HAConfig; h != nil {
+		out = append(out, AutoRule{Service: HAConfigService, Protocol: "tcp", DstPort: h.Port, Source: h.From, SourceSet: HAConfigSet})
+	}
 	// SNMP requests on its interfaces, from the allowed clients if listed.
 	if in.SNMP != nil && len(in.SNMP.Interfaces) > 0 {
 		ifs := append([]string(nil), in.SNMP.Interfaces...)

@@ -14,20 +14,25 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 STOPSIGNAL SIGRTMIN+3
 CMD ["/sbin/init"]
 
-# The firewall: portitor-agent applies for real (nftables, netns, BIND, Kea, FRR).
+# The firewall: portitor-agent applies for real (nftables, netns, BIND, Kea,
+# FRR); portitor-config keeps its configuration.
 FROM base AS fw
 RUN apt-get update && apt-get install -y --no-install-recommends \
 		wireguard-tools bind9 bind9-utils dnsutils kea-dhcp4-server kea-dhcp6-server radvd frr frr-pythontools chrony snmpd \
+		sqlite3 openssl \
 	&& rm -rf /var/lib/apt/lists/* \
-	&& systemctl mask named.service kea-dhcp4-server.service kea-dhcp6-server.service radvd.service frr.service chrony.service snmpd.service
+	&& systemctl mask named.service kea-dhcp4-server.service kea-dhcp6-server.service radvd.service frr.service chrony.service snmpd.service \
+	&& useradd --system --no-create-home --shell /usr/sbin/nologin portitor
 COPY fw/agent.yaml /etc/portitor/agent.yaml
+COPY fw/config.yaml /etc/portitor/config.yaml
 COPY fw/portitor-lab-net.service /etc/systemd/system/
-RUN chmod 0600 /etc/portitor/agent.yaml && systemctl enable portitor-lab-net.service
+RUN chmod 0600 /etc/portitor/agent.yaml && chown root:portitor /etc/portitor/config.yaml && chmod 0640 /etc/portitor/config.yaml \
+	&& systemctl enable portitor-lab-net.service
 
-# Management host (portitor-web), also playing the ISP for the
+# Management host (portitor-web, the portal), also playing the ISP for the
 # firewall's WAN: DHCP server and NAT to the outside.
 FROM base AS mgmt
-RUN apt-get update && apt-get install -y --no-install-recommends sqlite3 dnsmasq \
+RUN apt-get update && apt-get install -y --no-install-recommends dnsmasq \
 	&& rm -rf /var/lib/apt/lists/* \
 	&& useradd --system --no-create-home --shell /usr/sbin/nologin portitor
 COPY mgmt/web.yaml /etc/portitor/web.yaml

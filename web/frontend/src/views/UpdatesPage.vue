@@ -143,7 +143,7 @@ async function install(r) {
   if (
     !(await ask({
       title: r.broken ? 'Install a broken release' : 'Update',
-      message: `${warning}${what} Portitor ${r.tag}${r.broken ? ' anyway' : ''}? The agent (and portitor-web, if it runs on the firewall) restarts; the GUI is away for a moment.`,
+      message: `${warning}${what} Portitor ${r.tag}${r.broken ? ' anyway' : ''}? The agent and portitor-config restart; the GUI is away for a moment.`,
     }))
   )
     return
@@ -205,15 +205,15 @@ async function reboot() {
             variant="subtle"
             icon="i-lucide-triangle-alert"
             title="Reload the page"
-            description="The update has not finished after 5 minutes, or portitor-web did not come back with a new version. Reload the page (Ctrl+R / Cmd+R) to load the GUI that is running now, and check the update's output below."
+            description="The update has not finished after 5 minutes, or portitor-config did not come back with a new version. Reload the page (Ctrl+R / Cmd+R) to load the GUI that is running now, and check the update's output below."
           />
         </div>
         <div v-else class="flex items-center gap-3 text-sm">
           <UIcon name="i-lucide-loader-circle" class="size-5 animate-spin" />
           <span v-if="updating?.reloading">Reloading…</span>
           <span v-else-if="updating?.webOnFirewall"
-            >Installing; the agent and portitor-web restart. The page reloads by itself once
-            portitor-web is back.</span
+            >Installing; the agent and portitor-config restart. The page reloads by itself once
+            portitor-config is back.</span
           >
           <span v-else>Installing; the agent restarts.</span>
         </div>
@@ -287,7 +287,7 @@ async function reboot() {
       <div class="card">
         <div class="mb-1 text-lg font-semibold">Portitor</div>
         <div class="mb-3 space-y-0.5 text-sm text-muted">
-          <div v-if="web">portitor-web {{ web.version }} (this GUI)</div>
+          <div v-if="web">portitor-config {{ web.version }} (this GUI)</div>
           <div v-for="(v, k) in installed" :key="k">portitor-{{ k }} {{ v }} on the firewall</div>
         </div>
         <UAlert
@@ -298,10 +298,10 @@ async function reboot() {
           description="Update once with install.py; from then on, updates can be installed from here."
         />
         <template v-else>
-          <p v-if="sys.releases && !installed.web" class="mb-3 text-sm text-muted">
-            portitor-web does not run on the firewall; this updates the agent only. Update
-            portitor-web with <code class="font-mono">install.py</code> on its own host, after the
-            agent (never the other way around).
+          <p v-if="sys.releases" class="mb-3 text-sm text-muted">
+            This updates the firewall: its agent and portitor-config. A portitor-web that serves
+            this GUI from another host is updated with
+            <code class="font-mono">install.py</code> on its own host.
           </p>
           <div v-if="sys.releases_error" class="text-sm text-error">{{ sys.releases_error }}</div>
           <div v-else-if="!sys.releases" class="text-sm text-muted">

@@ -167,7 +167,7 @@ func TestRestoreRefusesNewerSchema(t *testing.T) {
 	bk.Exec("INSERT INTO goose_db_version (version_id, is_applied) VALUES (99999, 1)")
 	sqlDB, _ := bk.DB()
 	sqlDB.Close()
-	_, err = restoreDatabase(t.Context(), env.srv.db, path)
+	_, err = restoreDatabase(t.Context(), env.srv.db, path, restoreKeeps)
 	if err == nil || !strings.Contains(err.Error(), "newer Portitor") {
 		t.Errorf("newer schema: %v", err)
 	}

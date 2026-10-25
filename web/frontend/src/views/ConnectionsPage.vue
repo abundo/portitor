@@ -19,6 +19,7 @@ import { ALL_VRFS, useVrfChoice } from '@/composables/useVrfChoice'
 import { useSearch, valuesText } from '@/utils/search'
 import { bytes } from '@/utils/bytes'
 import { ago, clock, when } from '@/utils/time'
+import { apiURL } from '@/utils/base'
 
 const { store } = useInstanceRefs()
 const { vrf, vrfList, vrfItems, vrfName } = useVrfChoice({ all: true })
@@ -56,7 +57,7 @@ async function start() {
   running.value = true
   const ctl = (controller = new AbortController())
   try {
-    const res = await fetch('/api/agent/connections', {
+    const res = await fetch(apiURL('/agent/connections'), {
       method: 'POST',
       credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },

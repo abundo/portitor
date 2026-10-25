@@ -2,19 +2,35 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
 <script setup>
-import { computed } from 'vue'
+import { ref } from 'vue'
+import { useToast } from '@nuxt/ui/composables'
 import CrudPage from '@/components/CrudPage.vue'
-import DriftPanel from '@/components/DriftPanel.vue'
-import { firewalls } from '@/api'
+import { api, firewalls } from '@/api'
+import { errMsg } from '@/api/http'
 import { useDeployStore } from '@/stores/deploy'
 import { useInstanceStore } from '@/stores/instances'
 
 const deploy = useDeployStore()
 const instStore = useInstanceStore()
 
+const toast = useToast()
+// isPrimary: the firewall has an HA secondary.
+const isPrimary = (f) => !!f.id && instStore.firewalls.some((x) => x.ha_primary_id === f.id)
+// The pair's witness string, for its external witness.
+const witness = ref('')
+async function showWitness(f) {
+  try {
+    witness.value = await api.witnessString(f.id)
+  } catch (err) {
+    toast.add({ title: errMsg(err), color: 'error' })
+  }
+}
+async function copyWitness() {
+  await navigator.clipboard.writeText(witness.value)
+  toast.add({ title: 'Witness string copied', color: 'success' })
+}
+
 // The agent's answer in the last status poll, by firewall id.
-// The firewalls with portitor-config, each with its drift.
-const withConfig = computed(() => instStore.firewalls.filter((f) => f.config_url))
 const statusOf = (id) => deploy.status?.firewalls?.find((f) => f.id === id)
 
 const columns = [
@@ -74,26 +90,37 @@ const fields = [
     label: 'HA URL',
     placeholder: 'agent URL',
     show: (f) => !!f.ha_primary_id || instStore.firewalls.some((x) => x.ha_primary_id === f.id),
-    hint: "The agent URL its HA peer reaches it at, when portitor-web's differs (127.0.0.1, say). Empty: the agent URL.",
+    hint: "The agent URL its HA peer reaches it at, when portitor-config's differs (127.0.0.1, say). Empty: the agent URL.",
+  },
+  {
+    key: 'ha_witness',
+    label: 'HA witness',
+    type: 'select',
+    items: [
+      { label: "This firewall's portitor-config", value: 'local' },
+      { label: 'External: portitor-web on a third host', value: 'external' },
+    ],
+    show: isPrimary,
+    hint: "The pair's third vote. Its portitor-config here keeps the pair active while the two can't hear each other, but goes with this host: without an external witness the secondary stays fenced when this one is lost, until it is promoted. An external witness (portitor-web, or portitor-web witness, on another host) gets the witness string below; commit after changing this.",
+  },
+  {
+    key: 'witness_string',
+    label: 'Witness string',
+    type: 'custom',
+    show: (f) => isPrimary(f) && f.ha_witness === 'external',
   },
   {
     key: 'config_url',
     label: 'portitor-config URL',
     placeholder: 'https://192.168.1.1:8444',
-    hint: "The firewall's own portitor-config: its virtual firewalls are pushed there and committed through it, the agent asked for live data only. Empty: deployed to the agent.",
-  },
-  {
-    key: 'config_token',
-    label: 'portitor-config token',
-    type: 'password',
-    show: (f) => !!f.config_url,
-    hint: 'Its manager_token_file. Stored on the server, never shown again; leave empty to keep it.',
+    show: (f) => !!f.ha_primary_id || instStore.firewalls.some((x) => x.ha_primary_id === f.id),
+    hint: "This host's portitor-config as its HA peer reaches it. The secondary copies the primary's configuration from there, and either takes it over when promoted.",
   },
   {
     key: 'config_fingerprint',
     label: 'portitor-config fingerprint',
-    show: (f) => !!f.config_url,
-    hint: "Pins portitor-config's certificate (SHA-256). Empty: verify against system CAs.",
+    show: (f) => !!f.ha_primary_id || instStore.firewalls.some((x) => x.ha_primary_id === f.id),
+    hint: 'Pins its certificate (SHA-256 of its tls_cert): portitor-config fingerprint on that host.',
   },
   {
     key: 'agent_token',
@@ -112,7 +139,7 @@ const fields = [
 <template>
   <CrudPage
     title="Firewalls"
-    description="The hosts Portitor deploys to, each through its agent. Run portitor-agent init --host <address> on a firewall; it prints the token and the certificate fingerprint. Each firewall's host is a virtual firewall of its own; the others are put on a firewall in their form. A commit deploys to every firewall whose configuration changed."
+    description="This firewall and its HA secondary, each through its agent: portitor-config deploys to its own firewall and its secondary only. portitor-agent init on a host prints its agent's token and certificate fingerprint. The firewall's host is a virtual firewall of its own."
     :api="firewalls"
     shared
     noun="firewall"
@@ -121,6 +148,26 @@ const fields = [
     new-label="New firewall"
     @changed="instStore.load()"
   >
+    <template #field-witness_string="{ form }">
+      <div class="space-y-2">
+        <div class="flex gap-2">
+          <UButton size="xs" variant="outline" label="Show" @click="showWitness(form)" />
+          <UButton
+            v-if="witness"
+            size="xs"
+            variant="outline"
+            icon="i-lucide-copy"
+            label="Copy"
+            @click="copyWitness"
+          />
+        </div>
+        <p v-if="witness" class="font-mono text-xs break-all">{{ witness }}</p>
+        <p class="text-xs text-muted">
+          Under witness: in portitor-web's web.yaml on the third host. It holds the witness secret,
+          which opens the vote alone.
+        </p>
+      </div>
+    </template>
     <template #cell-ha_primary_id="{ row }">
       <span :class="statusOf(row.id)?.ha?.fenced ? 'text-error' : ''">
         {{ columns.find((c) => c.key === 'ha_primary_id').format(row) }}
@@ -132,5 +179,4 @@ const fields = [
       </span>
     </template>
   </CrudPage>
-  <DriftPanel v-for="f in withConfig" :key="f.id" :firewall="f" class="mt-4" />
 </template>

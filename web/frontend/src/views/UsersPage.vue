@@ -274,7 +274,7 @@ async function remove() {
           label="Require two-factor login"
           help="The user must set up two-factor login (TOTP) before they can do anything else."
         >
-          <USwitch v-model="form.totp_required" :disabled="!!editing?.managed_by" />
+          <USwitch v-model="form.totp_required" />
         </UFormField>
       </form>
     </template>

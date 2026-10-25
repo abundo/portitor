@@ -613,9 +613,6 @@ func (s *Server) handleUpdateUser(c *echo.Context) error {
 	if err := s.db.First(&u, id).Error; err != nil {
 		return errJSON(c, http.StatusNotFound, "not found")
 	}
-	if u.ManagedBy != "" {
-		return errJSON(c, http.StatusForbidden, "managed by "+u.ManagedBy+": change it there")
-	}
 	changed := false
 	if u.Role != req.Role {
 		u.Role = req.Role
@@ -654,9 +651,6 @@ func (s *Server) handleSetUserPassword(c *echo.Context) error {
 	if err := s.db.First(&u, id).Error; err != nil {
 		return errJSON(c, http.StatusNotFound, "not found")
 	}
-	if u.ManagedBy != "" {
-		return errJSON(c, http.StatusForbidden, "managed by "+u.ManagedBy+": change it there")
-	}
 	if err := setPassword(&u, req.Password); err != nil {
 		return errJSON(c, http.StatusBadRequest, err.Error())
 	}
@@ -678,9 +672,6 @@ func (s *Server) handleDeleteUser(c *echo.Context) error {
 	var u models.User
 	if err := s.db.First(&u, id).Error; err != nil {
 		return errJSON(c, http.StatusNotFound, "not found")
-	}
-	if u.ManagedBy != "" {
-		return errJSON(c, http.StatusForbidden, "managed by "+u.ManagedBy+": change it there")
 	}
 	if err := s.db.Delete(&models.User{}, id).Error; err != nil {
 		return err
@@ -1075,6 +1066,9 @@ func redactDoc(doc fwconfig.Document) fwconfig.Document {
 	if doc.HA != nil {
 		ha := *doc.HA
 		ha.Secret = "<redacted>"
+		if ha.WitnessSecret != "" {
+			ha.WitnessSecret = "<redacted>"
+		}
 		out.HA = &ha
 	}
 	out.Instances = make([]fwconfig.Instance, len(doc.Instances))

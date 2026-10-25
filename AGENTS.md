@@ -11,7 +11,7 @@ are in [README.md](README.md).
 
 | Path | What |
 |---|---|
-| `cmd/portitor-web` | GUI/API binary: `start`, `migrate`, `createadmin`, `agent-url`, `bootstrap` (ISO first boot) |
+| `cmd/portitor-web` | One binary, two programs by name: `portitor-web` is the portal (`portal.go`: `start`, `witness`, `check`); run as `portitor-config` (a symlink, `main.go`) the firewall's configuration, GUI and API: `start`, `migrate`, `createadmin`, `set-agent`, `agent-url`, `bootstrap` (ISO first boot), `fingerprint`, `witness-string`, `promote`, `import-vf` and the console commands (`console.go`) |
 | `cmd/portitor-agent` | Agent daemon on the firewall: `start`, `init`, `render`, `netns-exec`; run as `portitor` (a symlink, `cli.go`) it is a CLI over the agent's root-only socket `<run_dir>/agent.sock`: `show ...` over the GET routes, and actions that change no configuration (`confirm`, `rollback`, `request dhcp renew`, `request iplist update`, `clear connections`) over the POST routes in `localWrites` |
 | `internal/fwconfig` | The desired-state document and `Validate()`. **The contract between web and agent.** |
 | `internal/render` | Pure functions: document → nftables, WireGuard, named.conf, Kea, chrony.conf (`chrony.go`), snmpd.conf (`snmpd.go`), dnsmgr2 config, FRR (`frr.go`: frr.conf with BGP, OSPF, IS-IS, VRRP and BFD, daemons, vtysh.conf) |
@@ -25,19 +25,19 @@ are in [README.md](README.md).
 | `internal/buildinfo` | Version, commit and date, set at link time (Makefile `LDFLAGS`, `.goreleaser.yaml`) |
 | `internal/cron` | crontab(5) schedule parser for tasks (shared by web and agent) |
 | `internal/agentapi` | Agent API wire types (shared by agent and client) |
-| `internal/agentclient` | portitor-web's HTTPS client for the agent, with certificate pinning |
+| `internal/agentclient` | portitor-config's HTTPS client for the agent, with certificate pinning (`PinnedTLS`, which the portal and the replica use too) |
 | `internal/builder` | Database → `fwconfig.Document` (resolves ids, IPAM, DHCP scopes, DNS names) |
 | `internal/ipam` | Prefix tree by CIDR containment, next free address |
 | `internal/netobj` | Named hosts/prefixes (`address_objects`) and address lists (`address_lists`): name checks and expansion |
 | `internal/dbmigrate` | Opens the SQLite database; goose migrations (the schema's source of truth) |
 | `models` | GORM mapping |
-| `web` | Echo v5 server (`server.go`: routes): auth, generic CRUD (`crud.go`), entry validation (`resources.go`), firewalls (`firewalls.go`), commits (`commit.go`), other handlers (`handlers.go`), Revert snapshots (`revert.go`), tenancy (`tenancy.go`), roles (`roles.go`, `access.go`), VRFs (`vrf.go`), rename/delete reference keeping (`objects.go`, `services.go`, `ratelimits.go`, `ifzones.go`, `bgp.go`, `ospf.go`, `isis.go`, `vrrp.go`, `bfd.go`, `delegated.go`), folders for hosts and IP lists (`folders.go`, GUI only), agent proxies (`console.go`, `capture.go`, `trace.go`, `servicelog.go`, `connections.go`), WireGuard config import (`wgimport.go`), backup/restore (`backup.go`), `web.yaml` (`config.go`) |
+| `web` | Echo v5 server (`server.go`: routes): auth, generic CRUD (`crud.go`), entry validation (`resources.go`), firewalls (`firewalls.go`), commits (`commit.go`), other handlers (`handlers.go`), Revert snapshots (`revert.go`), tenancy (`tenancy.go`), roles (`roles.go`, `access.go`), VRFs (`vrf.go`), rename/delete reference keeping (`objects.go`, `services.go`, `ratelimits.go`, `ifzones.go`, `bgp.go`, `ospf.go`, `isis.go`, `vrrp.go`, `bfd.go`, `delegated.go`), folders for hosts and IP lists (`folders.go`, GUI only), agent proxies (`console.go`, `capture.go`, `trace.go`, `servicelog.go`, `connections.go`), WireGuard config import (`wgimport.go`), backup/restore (`backup.go`), `config.yaml` (`config.go`), the HA replica and promotion (`replica.go`, `promote.go`), the witness (`witness.go`, `portalwitness.go`), and portitor-web, the portal (`portal.go`, `portal.html`) |
 | `web/frontend` | Vue SPA; `CrudPage.vue` drives most pages from field/column schemas |
 | `docs` | User guides; every `docs/*.md` is bundled into the GUI's Help page (`src/docs.js`), and links between them stay in the GUI |
 | `deploy` | systemd units and example configs |
 | `dev` | Dev configs and `seed.sh`; `dev/lab` runs a real apply in two podman containers |
-| `install.py` | Installs/updates web and agent from a GitHub release (`.goreleaser.yaml`), `--source` or `--local`; the agent runs its copy in `/usr/lib/portitor` for GUI updates |
-| `iso` | Installer ISO: Debian netinst + preseed (`build.sh`), setup (`portitor-setup.py`, installed as `portitor-setup`: runs `portitor-web bootstrap` at first boot, `--reconfigure` when run again; or sets up only the agent, which prints a join string, or only portitor-web, which deploys it with `bootstrap --join`), QEMU test VM (`vm.sh`), end-to-end test (`test.sh`, `make iso-e2e`) |
+| `install.py` | Installs/updates a firewall (agent and portitor-config) and portitor-web (the portal) from a GitHub release (`.goreleaser.yaml`), `--source` or `--local`; moves an old portitor-web's database to portitor-config on the same host (`move_web_database`) and lists it in that host's `web.yaml` (`link_local_config`); the agent runs its copy in `/usr/lib/portitor` for GUI updates |
+| `iso` | Installer ISO: Debian netinst + preseed (`build.sh`), setup (`portitor-setup.py`, installed as `portitor-setup`: runs `portitor-config bootstrap` at first boot, `--reconfigure` when run again; role `agent` is the same firewall, ending with a portal string for portitor-web, role `web` portitor-web alone, which adds a firewall with `--join`), QEMU test VM (`vm.sh`), end-to-end tests (`test.sh`, `test-split.sh`, `test-update.sh`, `make iso-e2e`) |
 
 ## Terms
 
@@ -46,17 +46,33 @@ docs and user-facing messages.
 
 ## How it fits together
 
-- **Two processes.** portitor-web owns the SQLite database and the GUI; the
-  agent runs as root on the firewall and owns the system. They talk over the
-  agent's HTTPS API (`internal/agent/server.go`, `/v1/...`; wire types in
-  `agentapi`): a bearer token (`token_file` in `agent.yaml`) and a pinned
-  certificate fingerprint (`agentclient.New`). On the firewall, the root-only
-  socket `<run_dir>/agent.sock` serves the GET routes and `localWrites` without the token
-  (`localHandler`), for the `portitor` CLI. The join string (`web/join.go`)
-  carries what portitor-web needs to reach an agent on another host.
+- **Processes.** On every firewall, portitor-config (portitor-web run under that
+  name, `Config.Local`, `/etc/portitor/config.yaml`) owns the SQLite database, the
+  GUI and the API, as the service user; the agent runs as root and owns the system.
+  They talk over the agent's HTTPS API (`internal/agent/server.go`, `/v1/...`; wire
+  types in `agentapi`): a bearer token (`token_file` in `agent.yaml`) and a pinned
+  certificate fingerprint (`agentclient.New`), usually on 127.0.0.1. On the
+  firewall, the root-only socket `<run_dir>/agent.sock` serves the GET routes and
+  `localWrites` without the token (`localHandler`), for the `portitor` CLI.
+- **portitor-web, the portal** (`web/portal.go`, `web.yaml`), is optional and has no
+  database and no users: it serves each firewall it lists at `/fw/<name>/` with
+  `httputil.ReverseProxy` to that firewall's portitor-config (its `tls_cert` pinned
+  and asked for by `PinnedServerName`, so a certificate chosen under Settings never
+  breaks the pin), streams flushed as they come, the console's WebSocket passed
+  through, the browser's `Host` kept, `X-Forwarded-For` (believed by portitor-config
+  from `trusted_proxies` only, for the login limits) and `X-Forwarded-Prefix`, which
+  portitor-config writes into index.html as `<base>` (`serveIndex`). Session cookies
+  are kept to `/fw/<name>/` (`portalCookies`), so each firewall has its own login,
+  but an HA pair's: portitor-config signs sessions with a key made from the pair's
+  secret (`sessionKey`; the users are the replica's copy) and names both hosts'
+  `config_fingerprint`s in `X-Portitor-Pair` (`PairHeader`), and the portal sets the
+  cookie on the paths of the firewalls it pins by them (`pairPrefixes`). `/` opens
+  the firewall opened last (cookie `portitor_firewall`); `/portal/` is the list, and
+  `/portal/v1/firewalls` lists them for the GUI's switcher (login page and top bar).
 - **Firewalls** (`firewalls`, `web/firewalls.go`, Admin → Firewalls): the hosts
-  portitor-web deploys to, each with its agent (URL, token, fingerprint) and its
-  `generation`. Every instance is on one (`instances.firewall_id`), and each
+  portitor-config deploys to, each with its agent (URL, token, fingerprint) and its
+  `generation`: its own firewall, and its HA secondary (`prepareFirewallHere`
+  refuses others). Every instance is on one (`instances.firewall_id`), and each
   firewall has one default instance, its host, created with it and named after
   it (`instances_one_default` is per firewall). A link joins instances on one
   firewall, a task runs on one (`tasks.firewall_id`), known NICs are per firewall,
@@ -64,7 +80,8 @@ docs and user-facing messages.
   (`instanceAgent`); the live views (status, leases, neighbours, routes, routing
   protocols, counters) ask all of them and merge (`fromAll`; an unreachable one is
   left out when there are several); the logs and Updates are one firewall's
-  (`?firewall_id=`, the first by default), picked in the GUI.
+  (`?firewall_id=`, the first by default), picked in the GUI. Tests run the server
+  without `Local`, with any number of firewalls.
 - **Deploy ("commit" in the GUI)**: `web/commit.go` `deploy` takes a database
   snapshot (`web/revert.go`) numbered by `settings.last_commit`, `buildDoc`
   runs `builder.BuildFirewall` on it for each firewall (merged into the
@@ -90,16 +107,24 @@ docs and user-facing messages.
   `peer_router_id`, IS-IS `peer_net`, BGP neighbours' `ha_peer_address`), and both apply; VRRP decides which forwards.
   Each document carries `HA` (node, the peer's agent URL (`ha_url`, else
   `agent_url`; never loopback) and fingerprint, the pair's secret, which opens only
-  `/v1/ha/heartbeat` and is redacted in history). A host may be active only with a
+  `/v1/ha/heartbeat` and `/v1/ha/certificates` and is redacted in history, the
+  peer's portitor-config (`config_url`, `config_fingerprint`), the witness secret
+  and the epoch). A host may be active only with a
   quorum: it hears its peer (every second, dead after 3 s) or holds the witness's
   vote. Without one it is fenced: it applies its document again with
   `render.Options.Fenced` (VRRP routers shut down, no DHCP or RA). After a restart
   it starts fenced unless its peer answers at once; joining a pair, it has 3 s to
-  hear it. portitor-web is the witness: every 2 s it keeps its vote
+  hear it. The witness (`witness.vote`): every 2 s it keeps its vote
   (`witnessVote` s) on one host, the holder, and moves it only once the holder's has
-  run out, so two hosts that can't hear each other are never both active. A commit
+  run out, so two hosts that can't hear each other are never both active. A pair
+  has one (`firewalls.ha_witness` on the primary): its portitor-config
+  (`local`, `Server.runWitness`; not a replica's), or `external`, portitor-web
+  given the pair's witness string (`web/portalwitness.go`, `WitnessPair`: both
+  agents and `ha_witness_secret`, which opens only `GET /v1/ha` and
+  `POST /v1/ha/vote`, `haManager.witnessAuth`). A commit
   skips an unreachable host whose peer answers (deployment `skipped`), and the
-  witness applies that commit's document there when it answers again (`catchUp`).
+  primary's portitor-config applies that commit's document there when it answers
+  again (`catchUp`).
   `portitor request ha active` on the console gives the vote by hand (logged).
   Each instance on a pair has an HA link (`builder.haLink`: its DHCP interface, else
   the first physical/bridge interface, or VLAN on one, with a static IPv4 address
@@ -108,13 +133,33 @@ docs and user-facing messages.
   from `paths.kea_hooks_dir`) and conntrackd (`fwconfig.ConntrackSync`,
   `render/conntrackd.go`: FTFW over UDP 3780 into the kernel table, no external
   cache; `conntrackd.service` for the default instance, `portitor-conntrackd@`
-  for the others), each with an auto input rule from the peer alone. An instance
+  for the others), each with an auto input rule from the peer alone; the default
+  instance opens this host's portitor-config port (`HA.ConfigPort`, from its own
+  `config_url`) to the peer's addresses (`fwconfig.HAConfigAccess`, made by
+  `Expand`; auto rule `render.HAConfigService`). An instance
   with only internal links syncs nothing. DNS updates and the tunnel broker run on
   the active host only (`haManager.standby`: fenced, or the secondary while it hears
   the primary; `Agent.reconcileActive`). ACME certificates are ordered by the active
   host; the standby copies them, keys included, from `GET /v1/ha/certificates`
   (the pair's secret, which therefore opens the keys too) every minute
   (`certManager.adopt`, `acme.WriteRaw`), so it has them when it takes over.
+- **HA replica and promotion** (`web/replica.go`, `web/promote.go`): portitor-config
+  runs on both hosts of a pair. Its role is its agent's (`runRole`: the firewall row
+  whose fingerprint is that of the agent at `agent_url`, asked for
+  `GET /v1/ha/peer-config`): the secondary's (unless its database has it as the
+  primary of the pair: promoted there, `primaryHere`), or a primary's taken over
+  (stale), is a replica, which copies the primary's database (`GET /ha/v1/database`, the pair's
+  secret, ETag its SHA-256; `restoreDatabase` with `replicaKeeps`) every 15 s, and
+  refuses writes but `readOnlyAllowed` (`refuseOnReplica`); a pair whose agent has
+  not answered yet is read-only too (`isReplica`). `POST /api/ha/promote` (or
+  `portitor-config promote`) on a replica whose agent no longer hears the primary
+  (else `force`) swaps the pair's rows (`promoteRows`: instances and tasks to it,
+  `swapHAValues` for the `peer_*` values, `ha_primary_id`, secret and witness moved,
+  the old primary's agent URL its HA URL, its own `agent_url`), raises the epoch
+  (`firewalls.ha_epoch`, on the secondary) and commits. The agent of a primary that
+  hears a peer that is primary at a higher epoch is stale (`haManager.staleLocked`):
+  fenced and standby, and refuses documents of an earlier epoch (`POST /v1/apply`),
+  until it is caught up as the secondary.
 - **Bundles** (`web/bundle.go`): a virtual firewall as rows, read and written
   column by column from the schema's foreign keys (`schemaGraph`): every table that
   cascades from `instances` (but its role and links), the shared objects
@@ -124,41 +169,8 @@ docs and user-facing messages.
   version. A new table or column needs nothing there. Global admins only: a bundle
   holds the instance's secrets (`GET /api/instances/:id/bundle`,
   `POST /api/instances/import`).
-- **portitor-config** is portitor-web run under that name (a symlink): `Config.Local`,
-  `/etc/portitor/config.yaml`, for its own firewall and HA secondary alone
-  (`prepareFirewallHere`). It serves the manager API (`web/managerapi.go`,
-  `/manager/v1`, the token in `manager_token_file`): state (each instance's
-  `InstanceHash`, the built configuration without name and rule ids, equal on a
-  manager and its firewall when they agree), bundle, push (replaces an instance the
-  manager pushed before, keeping its role's members; not the host; a diverged one
-  only with overwrite; a local shared object of a pushed name is a conflict), delete,
-  commit, confirm and rollback. What a manager pushed is `managed_by` it and
-  read-only in the local GUI and API (`refuseManaged` in the CRUD's `checkWrite`;
-  `keepManaged` keeps the columns), until a global admin breaks glass on the
-  instance (`diverged`). Its own pairs' witness is the manager: portitor-config with
-  a `manager_token_file` does not vote (`Server.votes`), it only catches up.
-- **Managing through portitor-config** (`web/push.go`, `web/configclient.go`,
-  `web/drift.go`): a firewall with `config_url` (token, fingerprint) gets its
-  virtual firewalls from this portitor-web, named by `manager_name` (default the
-  host name). A commit compares each with portitor-config's by `InstanceHash`
-  (`configTargets`), pushes the changed, deletes the removed, and commits there as
-  one of the commit's firewalls (`commitVia`; confirm and rollback through it,
-  `finishDeployment`); the host VF stays portitor-config's own. One changed there
-  (break-glass) stops the commit until the drift view takes it or overwrites it.
-  The manager asks such a firewall's agents for live data only (status, logs,
-  console, capture); their deployments are ordered by `commit_id`, since
-  portitor-config's generations start again from 1. Bundles carry their links,
-  made when the instance at the other end is there by name. A firewall moves under
-  portitor-config with `install.py --agent HOST --config`, then
-  `portitor-config import-vf` (the host with `--manager <name> --local`, the others
-  with `--manager <name>`) before its first commit, so none is deleted. On the
-  manager, such a firewall's host VF is read-only (`refuseManaged`). At each commit
-  the manager pushes its users (password hashes included) and their memberships of
-  its VFs' roles (`web/usersync.go`, `PUT /manager/v1/users`): managed by it there
-  (no local edit, password or delete), removed when gone here; a local user of the
-  same name stays and is reported.
 - **Console configuration** (`web/consolecli.go`, `cmd/portitor-web/console.go`):
-  `portitor-config` (or portitor-web) `api METHOD PATH [JSON]`, `set RESOURCE NAME
+  `portitor-config` `api METHOD PATH [JSON]`, `set RESOURCE NAME
   KEY=VALUE...` (`--vf`, default the host), `commit [--confirm N]`, `confirm` and
   `rollback` run one API request in-process as the console admin
   (`ConsoleRequest`); the user rides in the request's context, which no network
@@ -176,7 +188,9 @@ docs and user-facing messages.
   (`web/console.go`).
 - **Frontend serving:** a dev build reads `web/static` from disk (`fs_dev.go`),
   so `npm run build` takes effect without a Go rebuild; `-tags release` embeds
-  it (`fs_release.go`). Pinia stores (`stores/`): `auth`, `deploy` (polls the
+  it (`fs_release.go`). The SPA is built with a relative base and runs under
+  index.html's `<base>` (`utils/base.js`: `BASE`, `apiURL`): every API, WebSocket and
+  router path starts with it, and the capture worker gets it as its name. Pinia stores (`stores/`): `auth`, `deploy` (polls the
   agent's status and rule counters, and the uncommitted changes, which a write
   rechecks through `changed()`), `instances` (the selected VF), `objects`.
 
@@ -231,14 +245,14 @@ docs and user-facing messages.
   `render.LogGroup`, never the kernel log, with a prefix `render.ParseLogPrefix`
   reads; the agent listens on that group in each namespace whose ruleset logs.
 - **Commit-confirm:** the rollback target is the last *confirmed* document; a second
-  apply while one is pending keeps it (portitor-web refuses one, the agent allows
+  apply while one is pending keeps it (portitor-config refuses one, the agent allows
   it). `rollback.json` is written before an apply with confirmation changes anything
   (the apply fails if it can't be), and removed only once the target is restored or
   the change confirmed: a crash or a failed rollback leaves it for the next start. A
   failed rollback keeps the change pending and retries. `RolledBack` means the
   restore succeeded; `RollbackErrors` says it didn't.
 - **Secrets:** fields tagged `json:"-"` (WireGuard private/preshared keys, TSIG
-  secrets, DNS update provider settings, IP list passwords and API keys, agent token, password hashes, TOTP secrets and recovery code hashes, imported certificates' and certificate authorities' keys) never reach
+  secrets, DNS update provider settings, IP list passwords and API keys, agent token, the HA pair's and witness's secrets, password hashes, TOTP secrets and recovery code hashes, imported certificates' and certificate authorities' keys) never reach
   the browser. The generic CRUD
   `PUT` merges the body onto the stored row, so those fields can't be overwritten
   through the API either; a secret the user enters comes in through a write-only
@@ -254,7 +268,7 @@ docs and user-facing messages.
   passphrase; and a WireGuard peer's client config (`render.WireGuardClientConf`),
   with its generated private key and preshared key; and the agent's
 `GET /v1/certificates/<instance>/<name>`, an ACME certificate with its key for
-the certificate portitor-web serves, chosen under Settings
+the certificate portitor-config serves, chosen under Settings
 (`settings.web_certificate_id`, `web/tlscert.go`). API answers are
   `Cache-Control: no-store`. IP list credentials go over `http://` only to loopback
   (`fwconfig.PlainTextCredentials`, checked when saving), and a download never
@@ -531,7 +545,7 @@ the certificate portitor-web serves, chosen under Settings
   their instances from the database into the live deployment's document
   (`web/tenancy.go`, `deployed/<commit>-<firewall id>.json`); only a full deploy keeps a snapshot
   for Revert.
-- **Database files:** portitor-web refuses to run as root against a database
+- **Database files:** portitor-config refuses to run as root against a database
   directory owned by another user; root would leave root-owned `-wal`/`-shm` files.
   Scripts run it as the service user (`runuser -u portitor --`).
 - **Updates from the GUI** (`internal/agent/system.go`): the Debian upgrade and the

@@ -240,9 +240,6 @@ type User struct {
 	// TokenVersion invalidates issued sessions when bumped (password
 	// change, role change, logout everywhere).
 	TokenVersion int `json:"-"`
-	// ManagedBy names the manager that pushed it (portitor-config);
-	// changed there only.
-	ManagedBy string `json:"managed_by"`
 	// TOTPSecret is the base32 TOTP secret of a user with two-factor
 	// login on, else empty. TOTPPending is one being set up, on once a
 	// code from it is checked.
@@ -332,20 +329,29 @@ type Firewall struct {
 	// HAPrimaryID makes it the HA secondary of that firewall: it runs the
 	// primary's instances, with their peer_* values, and has none of its own.
 	HAPrimaryID *uint `gorm:"column:ha_primary_id" json:"ha_primary_id"`
-	// HASecret is the pair's heartbeat secret, on the secondary.
+	// HASecret is the pair's heartbeat secret, on the secondary, and
+	// HAEpoch the pair's number of promotions (fwconfig.HA.Epoch).
 	HASecret string `gorm:"column:ha_secret" json:"-"`
+	HAEpoch  int64  `gorm:"column:ha_epoch" json:"ha_epoch"`
+	// HAWitness, on the primary, is who the pair's witness is: its
+	// portitor-config (HAWitnessLocal) or one on a third host
+	// (HAWitnessExternal), which opens the vote with HAWitnessSecret.
+	HAWitness       string `gorm:"column:ha_witness" json:"ha_witness"`
+	HAWitnessSecret string `gorm:"column:ha_witness_secret" json:"-"`
 	// HAURL is the agent URL the HA peer uses; empty: AgentURL.
 	HAURL string `gorm:"column:ha_url" json:"ha_url"`
-	// ConfigURL is the firewall's portitor-config (manager API), its
-	// token (write-only, NewConfigToken) and certificate pin. With one,
-	// its virtual firewalls are pushed and committed there; the agent is
-	// asked for live data alone.
+	// ConfigURL is the host's portitor-config as its HA peer reaches it,
+	// pinned by ConfigFingerprint (its tls_cert): the secondary copies the
+	// primary's database from there (replica.go).
 	ConfigURL         string `json:"config_url"`
-	ConfigToken       string `json:"-"`
-	NewConfigToken    string `gorm:"-" json:"config_token,omitempty"`
-	HasConfigToken    bool   `gorm:"-" json:"has_config_token"`
 	ConfigFingerprint string `json:"config_fingerprint"`
 }
+
+// Witnesses of an HA pair (Firewall.HAWitness).
+const (
+	HAWitnessLocal    = "local"
+	HAWitnessExternal = "external"
+)
 
 // Settings is a single row (ID 1).
 type Settings struct {
@@ -384,10 +390,6 @@ type Instance struct {
 	// firewall.
 	IsDefault  bool `json:"is_default"`
 	FirewallID uint `json:"firewall_id"`
-	// ManagedBy names the manager that pushed it (portitor-config); it
-	// is read-only here then, unless Diverged (break-glass).
-	ManagedBy string `json:"managed_by"`
-	Diverged  bool   `json:"diverged"`
 
 	DnsUpstream         string     `json:"dns_upstream"` // fwconfig.Upstream*
 	DnsForwarders       StringList `json:"dns_forwarders"`
@@ -623,9 +625,6 @@ type PolicyRoute struct {
 // ones (fwconfig.Services); the builder writes its number.
 type PortName struct {
 	Base
-	// ManagedBy names the manager that pushed it (portitor-config);
-	// read-only here then.
-	ManagedBy   string `json:"managed_by"`
 	Name        string `gorm:"uniqueIndex" json:"name"`
 	Port        int    `json:"port"`
 	Description string `json:"description"`
@@ -744,9 +743,6 @@ type IpamPrefix struct {
 // Addresses may mix IPv4 and IPv6 (a host with both, say).
 type AddressObject struct {
 	Base
-	// ManagedBy names the manager that pushed it (portitor-config);
-	// read-only here then.
-	ManagedBy   string     `json:"managed_by"`
 	Name        string     `gorm:"uniqueIndex" json:"name"`
 	Addresses   StringList `json:"addresses"`
 	Description string     `json:"description"`
@@ -760,9 +756,6 @@ type AddressObject struct {
 // matches it as an nftables set; anywhere else it is expanded.
 type AddressList struct {
 	Base
-	// ManagedBy names the manager that pushed it (portitor-config);
-	// read-only here then.
-	ManagedBy   string     `json:"managed_by"`
 	Name        string     `gorm:"uniqueIndex" json:"name"`
 	Entries     StringList `json:"entries"`
 	Description string     `json:"description"`
@@ -775,12 +768,9 @@ type AddressList struct {
 // the top) and mean nothing to the firewall.
 type ObjectFolder struct {
 	Base
-	// ManagedBy names the manager that pushed it (portitor-config);
-	// read-only here then.
-	ManagedBy string `json:"managed_by"`
-	Kind      string `json:"kind"` // ObjectFolder*
-	ParentID  *uint  `json:"parent_id"`
-	Name      string `json:"name"`
+	Kind     string `json:"kind"` // ObjectFolder*
+	ParentID *uint  `json:"parent_id"`
+	Name     string `json:"name"`
 }
 
 // Kinds of ObjectFolder.
@@ -796,9 +786,6 @@ const (
 // IcmpCode (icmp, icmp6), or IpProtocol (ip).
 type Service struct {
 	Base
-	// ManagedBy names the manager that pushed it (portitor-config);
-	// read-only here then.
-	ManagedBy   string          `json:"managed_by"`
 	Name        string          `gorm:"uniqueIndex" json:"name"`
 	Description string          `json:"description"`
 	Type        string          `json:"type"`
@@ -1020,9 +1007,6 @@ type DyndnsRecord struct {
 // use it by name as "@name" in their address lists.
 type IpList struct {
 	Base
-	// ManagedBy names the manager that pushed it (portitor-config);
-	// read-only here then.
-	ManagedBy   string `json:"managed_by"`
 	Name        string `gorm:"uniqueIndex" json:"name"`
 	Description string `json:"description"`
 	Source      string `json:"source"` // fwconfig.IPList*

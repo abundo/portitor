@@ -1,29 +1,36 @@
 #!/usr/bin/env python3
 # SPDX-FileCopyrightText: 2026 The Portitor contributors
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Install or update Portitor: portitor-web on this host, portitor-agent on
-the firewall (this host, or over SSH).
+"""Install or update Portitor: on a firewall portitor-agent and
+portitor-config (its configuration, GUI and API), and portitor-web, the
+portal to the firewalls' GUIs, on this host or another (over SSH).
 
 Binaries go to /usr/bin, systemd units to /etc/systemd/system, example
-configs to /etc/portitor (only when missing; web.yaml gets a generated
+configs to /etc/portitor (only when missing; config.yaml gets a generated
 jwt_secret). If an installed unit differs from this release, the installer
 shows a diff and asks before overwriting (--yes overwrites).
 
-An update stops portitor-web, runs `portitor-web migrate` and restarts it,
-and restarts portitor-agent (its per-instance units follow). The agent is
-updated first: it rejects document fields it does not know, so it must never
-be older than portitor-web. On a first install, when a config was just
-created, the database is created but nothing is started; the installer
-prints the remaining steps.
+An update restarts portitor-agent (its per-instance units follow), stops
+portitor-config, runs `portitor-config migrate` and restarts it, and
+restarts portitor-web. The firewall is updated first: the agent rejects
+document fields it does not know, so it must never be older than
+portitor-config. On a first install, when a config was just created, the
+database is created but nothing is started; the installer prints the
+remaining steps.
+
+A host that ran portitor-web with its database (before portitor-web became
+the portal) gets that database as portitor-config's, and portitor-web
+there serves it as its firewall: the same GUI, at the same address.
 
 What gets installed:
   (default)       whatever is installed on this host. When that includes
-                  portitor-web, also the agents at the hosts of its
-                  firewalls' agent URLs (`portitor-web agent-url --all`).
+                  portitor-web, also the firewalls it serves (the hosts of
+                  the URLs under firewalls: in web.yaml, and their HA
+                  peers).
   --web [HOST]    portitor-web on HOST (default this host), over SSH like
-                  --agent (plus the agent, as above; an agent URL on
-                  localhost then means HOST)
-  --agent [HOST]  portitor-agent on HOST (default this host), over SSH as
+                  --agent (plus the firewalls, as above)
+  --agent [HOST]  portitor-agent and portitor-config on HOST (default this
+                  host), over SSH as
                   --ssh-user (default portitor, which needs passwordless
                   sudo; the installer prints how to set that up), or root.
                   Repeat it, or separate hosts by commas, for several. Agents
@@ -80,7 +87,7 @@ from typing import Sequence
 
 # Bump when the installer itself changes, so a release's copy can tell
 # whether it is newer than the one running.
-INSTALLER_VERSION = 8
+INSTALLER_VERSION = 9
 INSTALLER_FILENAME = "install.py"
 # Where the agent host keeps a copy, for updates from the GUI.
 INSTALLER_DEST = "/usr/lib/portitor/install.py"
@@ -100,19 +107,20 @@ WEB_CONFIG = f"{ETC_DIR}/web.yaml"
 AGENT_CONFIG = f"{ETC_DIR}/agent.yaml"
 SYSTEMD_DIR = "/etc/systemd/system"
 WEB_USER = "portitor"
-# The SQLite database's directory (db.path in web.yaml, and the unit's
-# StateDirectory). portitor-web touches the database only as WEB_USER, so
-# the files SQLite creates stay writable for the service.
-WEB_DB_DIR = "/var/lib/portitor-web"
-# portitor-config: portitor-web run as portitor-config on the agent's host
-# (--config), for the firewall's own configuration, managed from elsewhere.
+# portitor-web's database before it became the portal: moved to
+# portitor-config on the same host.
+OLD_WEB_DB_DIR = "/var/lib/portitor-web"
+# portitor-config: portitor-web run as portitor-config on the firewall,
+# its configuration, GUI and API. It touches the database only as
+# WEB_USER, so the files SQLite creates stay writable for the service.
 CONFIG_LINK = f"{BIN_DIR}/portitor-config"
 CONFIG_FILE = f"{ETC_DIR}/config.yaml"
 CONFIG_DB_DIR = "/var/lib/portitor-config"
 CONFIG_UNIT = "portitor-config.service"
 CONFIG_CERT = f"{ETC_DIR}/config.crt"
 CONFIG_KEY = f"{ETC_DIR}/config.key"
-MANAGER_TOKEN = f"{ETC_DIR}/manager.token"
+# portitor-config's address on its own host, which portitor-web there uses.
+CONFIG_LOCAL_URL = "https://127.0.0.1:8444"
 SSH_USER_DEFAULT = "portitor"
 WEB_UNIT = "portitor-web.service"
 AGENT_UNIT = "portitor-agent.service"
@@ -476,7 +484,7 @@ class Plan:
         return ([self.web] if self.web else []) + self.agents
 
     def describe(self) -> list[str]:
-        out = [f"portitor-agent on {a}" for a in self.agents]
+        out = [f"portitor-agent and portitor-config on {a}" for a in self.agents]
         if self.agent_order_note:
             out.append(self.agent_order_note)
         if self.web:
@@ -699,33 +707,25 @@ def install_apparmor(host: Host, deploy: Path) -> None:
 
 
 def install_web(host: Host, binary: Path, deploy: Path, version: str, assume_yes: bool) -> None:
+    """portitor-web, the portal: no database, the firewalls in web.yaml."""
     log(f"==> Installing portitor-web {version} on {host}")
-    host.run(
-        f"getent group {WEB_USER} >/dev/null || groupadd --system {WEB_USER}; "
-        f"getent passwd {WEB_USER} >/dev/null || useradd --system -g {WEB_USER} "
-        f"--no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin {WEB_USER}",
-        desc=f"create system user {WEB_USER} unless it exists",
-    )
+    ensure_user(host)
     new_config = not host.exists(WEB_CONFIG)
     if new_config:
-        example = (deploy / "web.yaml").read_text(encoding="utf-8")
-        secret = secrets.token_urlsafe(32)
-        text = example.replace("jwt_secret: CHANGE-ME", f'jwt_secret: "{secret}"')
-        # The service runs as portitor; the file holds the JWT secret.
-        host.put_text(text, WEB_CONFIG, "0640", group=WEB_USER)
-    host.run(f"install -d -o {WEB_USER} -g {WEB_USER} -m 0700 {WEB_DB_DIR}")
-    # Migrations must not run under a serving GUI. The unit is missing on a
-    # first install, hence no check.
-    host.run(f"systemctl stop {WEB_UNIT} 2>/dev/null || true", desc=f"systemctl stop {WEB_UNIT}")
+        host.put(deploy / "web.yaml", WEB_CONFIG, "0640", group=WEB_USER)
     host.put(binary, WEB_BIN, "0755")
     if host.exists(OLD_WIREGASM_DIR):
         host.run(f"rm -rf {OLD_WIREGASM_DIR}")
     action = install_unit(host, deploy / "systemd" / WEB_UNIT, assume_yes)
     host.systemctl("daemon-reload")
-    host.run(f"runuser -u {WEB_USER} -- {WEB_BIN} -f {WEB_CONFIG} migrate", desc="portitor-web migrate")
+    # portitor-config on this host is its firewall, unless it lists others.
+    if host.exists(CONFIG_FILE):
+        link_local_config(host)
     if new_config:
         log("==> portitor-web is installed but not started. Next steps:")
-        log(f"    sudo -u {WEB_USER} portitor-web createadmin admin")
+        log(f"    list the firewalls under firewalls: in {WEB_CONFIG}: on each,")
+        log("      url https://<firewall>:8444 and fingerprint (portitor-config fingerprint there),")
+        log(f"      and this host's address under trusted_proxies: in its {CONFIG_FILE}")
         log(f"    systemctl enable --now {WEB_UNIT}")
         return
     if action == "installed":
@@ -734,22 +734,71 @@ def install_web(host: Host, binary: Path, deploy: Path, version: str, assume_yes
     verify_version(host, WEB_BIN, version)
 
 
+def ensure_user(host: Host) -> None:
+    host.run(
+        f"getent group {WEB_USER} >/dev/null || groupadd --system {WEB_USER}; "
+        f"getent passwd {WEB_USER} >/dev/null || useradd --system -g {WEB_USER} "
+        f"--no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin {WEB_USER}",
+        desc=f"create system user {WEB_USER} unless it exists",
+    )
+
+
+def portal_name(host: Host) -> str:
+    """The name portitor-web gives the firewall on its own host."""
+    proc = host.run("hostname -s", check=False, mutate=False, capture=True)
+    name = re.sub(r"[^a-z0-9-]+", "-", (proc.stdout or "").strip().lower()).strip("-")
+    if not name or not name[0].isalpha():
+        name = "fw-" + name if name else "firewall"
+    return name[:32].rstrip("-")
+
+
+def link_local_config(host: Host) -> None:
+    """portitor-web serves portitor-config on the same host, when its
+    web.yaml lists no firewall: it adds that one, and portitor-config trusts
+    portitor-web's X-Forwarded-For (127.0.0.1)."""
+    web = host.read(WEB_CONFIG) or ""
+    if re.search(r"^\s*-\s*name:", web, re.M) or host.dry_run:
+        return
+    proc = host.run(f"runuser -u {WEB_USER} -- {CONFIG_LINK} -f {CONFIG_FILE} fingerprint",
+                    check=False, mutate=False, capture=True, root=True)
+    fp = (proc.stdout or "").strip()
+    if proc.returncode != 0 or not re.fullmatch(r"[0-9a-f]{64}", fp):
+        warn(f"portitor-config fingerprint failed on {host}; list it under firewalls: in {WEB_CONFIG} yourself")
+        return
+    name = portal_name(host)
+    block = f"firewalls:\n  - name: {name}\n    url: {CONFIG_LOCAL_URL}\n    fingerprint: {fp}\n"
+    if re.search(r"^firewalls:.*$", web, re.M):
+        web = re.sub(r"^firewalls:.*\n?", block, web, count=1, flags=re.M)
+    else:
+        web = web.rstrip("\n") + "\n\n# This host's portitor-config (install.py).\n" + block
+    host.put_text(web, WEB_CONFIG, "0640", group=WEB_USER)
+    log(f"    portitor-web serves this host's portitor-config as firewall {name}")
+    cfg = host.read(CONFIG_FILE) or ""
+    if not re.search(r"^trusted_proxies:.*127\.0\.0\.1", cfg, re.M):
+        if re.search(r"^trusted_proxies:.*$", cfg, re.M):
+            cfg = re.sub(r"^trusted_proxies:.*$", "trusted_proxies: [127.0.0.1]", cfg, count=1, flags=re.M)
+        else:
+            cfg = cfg.rstrip("\n") + "\n# portitor-web on this host (install.py).\ntrusted_proxies: [127.0.0.1]\n"
+        host.put_text(cfg, CONFIG_FILE, "0640", group=WEB_USER)
+        host.systemctl("try-restart", CONFIG_UNIT, check=False)
+
+
 def install(
     plan: Plan, roots: dict[str, Path], archs: dict[str, str], deploy: Path, version: str, assume_yes: bool,
     config: bool = False,
 ) -> None:
-    """roots: arch -> directory with the binaries. deploy: units and example configs."""
-    # The agent first: it rejects fields it does not know, so it must never
-    # be older than the GUI that deploys to it.
+    """roots: arch -> directory with the binaries. deploy: units and example
+    configs. config is the old --config: portitor-config goes with every
+    agent now."""
+    # The firewalls first: the agent rejects fields it does not know, so it
+    # must never be older than portitor-config, which deploys to it.
     # One at a time, an HA pair's secondary first (make_plan's order): each
     # agent restarts fenced unless it hears its peer, so the next waits
     # until the restarted one does, and one host of the pair keeps forwarding.
     for agent in plan.agents:
         root = roots[archs[agent_key(agent)]]
         install_agent(agent, root / "portitor-agent", deploy, version, assume_yes)
-        # portitor-config next to the agent: asked for, or there already.
-        if config or agent.exists(CONFIG_LINK):
-            install_config(agent, root / "portitor-web", deploy, version, assume_yes)
+        install_config(agent, root / "portitor-web", deploy, version, assume_yes)
         if agent.name in plan.ha_agents:
             wait_for_ha_peer(agent)
     if plan.web:
@@ -758,41 +807,35 @@ def install(
 
 
 def install_config(host: Host, binary: Path, deploy: Path, version: str, assume_yes: bool) -> None:
-    """portitor-config on the agent's host: the portitor-web binary run as
-    portitor-config, with its own config, certificate, manager token,
-    database and unit, set to deploy to the local agent. A new one is not
-    started: it needs an admin, and maybe the host's configuration
-    (portitor-config import-vf)."""
+    """portitor-config on the firewall: the portitor-web binary run as
+    portitor-config, with its own config, certificate, database and unit,
+    set to deploy to the local agent. A host that ran portitor-web with its
+    database gets that database. A new one is not started: it needs an
+    admin."""
     log(f"==> Installing portitor-config {version} on {host}")
-    host.run(
-        f"getent group {WEB_USER} >/dev/null || groupadd --system {WEB_USER}; "
-        f"getent passwd {WEB_USER} >/dev/null || useradd --system -g {WEB_USER} "
-        f"--no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin {WEB_USER}",
-        desc=f"create system user {WEB_USER} unless it exists",
-    )
+    ensure_user(host)
     new_config = not host.exists(CONFIG_FILE)
     if new_config:
         example = (deploy / "config.yaml").read_text(encoding="utf-8")
         secret = secrets.token_urlsafe(32)
         host.put_text(example.replace("jwt_secret: CHANGE-ME", f'jwt_secret: "{secret}"'), CONFIG_FILE, "0640", group=WEB_USER)
-    if not host.exists(MANAGER_TOKEN):
-        host.put_text(secrets.token_urlsafe(32) + "\n", MANAGER_TOKEN, "0640", group=WEB_USER)
     if not host.exists(CONFIG_CERT):
         host.run(
-            f"openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 3650 "
+            f"openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 7300 "
             f"-subj /CN=portitor-config -keyout {CONFIG_KEY} -out {CONFIG_CERT} 2>/dev/null && "
             f"chgrp {WEB_USER} {CONFIG_KEY} {CONFIG_CERT} && chmod 0640 {CONFIG_KEY} && chmod 0644 {CONFIG_CERT}",
             desc="make portitor-config's certificate",
         )
     host.run(f"install -d -o {WEB_USER} -g {WEB_USER} -m 0700 {CONFIG_DB_DIR}")
     host.run(f"systemctl stop {CONFIG_UNIT} 2>/dev/null || true", desc=f"systemctl stop {CONFIG_UNIT}")
+    moved = move_web_database(host)
     host.put(binary, WEB_BIN, "0755")
     host.run(f"ln -sfn portitor-web {shlex.quote(CONFIG_LINK)}", desc=f"ln -s portitor-web {CONFIG_LINK}")
     action = install_unit(host, deploy / "systemd" / CONFIG_UNIT, assume_yes)
     host.systemctl("daemon-reload")
     run_config = f"runuser -u {WEB_USER} -- {CONFIG_LINK} -f {CONFIG_FILE}"
     host.run(f"{run_config} migrate", desc="portitor-config migrate")
-    if new_config:
+    if new_config and not moved and host.exists(f"{ETC_DIR}/agent.token"):
         # Its own agent, the token read as root and handed over.
         host.run(
             f"fp=$(openssl x509 -in {ETC_DIR}/agent.crt -noout -fingerprint -sha256 | cut -d= -f2 | tr -d :); "
@@ -800,16 +843,40 @@ def install_config(host: Host, binary: Path, deploy: Path, version: str, assume_
             f"--token-file - --fingerprint \"$fp\"",
             desc="portitor-config set-agent (the local agent)",
         )
+    if new_config and not moved:
         log("==> portitor-config is installed but not started. Next steps:")
+        if not host.exists(f"{ETC_DIR}/agent.token"):
+            log(f"    portitor-agent init, then: cat {ETC_DIR}/agent.token | sudo -u {WEB_USER} portitor-config set-agent --token-file - --fingerprint <its fingerprint>")
         log(f"    sudo -u {WEB_USER} portitor-config createadmin admin")
-        log(f"    (optional) sudo -u {WEB_USER} portitor-config import-vf host-bundle.json --name main")
         log(f"    systemctl enable --now {CONFIG_UNIT}")
-        log(f"    for the manager: URL https://<this host>:8444, token in {MANAGER_TOKEN},")
-        log(f"    fingerprint: openssl x509 -in {CONFIG_CERT} -noout -fingerprint -sha256")
+        log(f"    for portitor-web: URL https://<this host>:8444, fingerprint: sudo -u {WEB_USER} portitor-config fingerprint")
         return
-    if action == "installed":
+    if action == "installed" or moved:
         host.systemctl("enable", CONFIG_UNIT)
     host.systemctl("restart", CONFIG_UNIT)
+    verify_version(host, WEB_BIN, version)
+
+
+def move_web_database(host: Host) -> bool:
+    """Moves portitor-web's database, from before it became the portal, to
+    portitor-config on the same host, when portitor-config has none yet and
+    portitor-web was enabled (a disabled one's database is a leftover)."""
+    old, new = f"{OLD_WEB_DB_DIR}/portitor.db", f"{CONFIG_DB_DIR}/portitor.db"
+    if not host.exists(old) or host.exists(new):
+        return False
+    enabled = host.run(f"systemctl is-enabled --quiet {WEB_UNIT}", check=False, mutate=False, capture=True)
+    if enabled.returncode != 0:
+        return False
+    log(f"==> Moving portitor-web's database to portitor-config on {host}")
+    host.run(f"systemctl stop {WEB_UNIT} 2>/dev/null || true", desc=f"systemctl stop {WEB_UNIT}")
+    host.run(
+        f"for f in portitor.db portitor.db-wal portitor.db-shm; do "
+        f"[ -e {OLD_WEB_DB_DIR}/$f ] && install -o {WEB_USER} -g {WEB_USER} -m 0600 {OLD_WEB_DB_DIR}/$f {CONFIG_DB_DIR}/$f; done; "
+        f"[ -d {OLD_WEB_DB_DIR}/deployed ] && cp -a {OLD_WEB_DB_DIR}/deployed {CONFIG_DB_DIR}/ && chown -R {WEB_USER}:{WEB_USER} {CONFIG_DB_DIR}/deployed; "
+        f"mv {old} {old}.moved-to-portitor-config",
+        desc=f"copy {OLD_WEB_DB_DIR} to {CONFIG_DB_DIR}",
+    )
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -818,33 +885,34 @@ def install_config(host: Host, binary: Path, deploy: Path, version: str, assume_
 
 
 def agent_hosts_from_settings(web: Host) -> list[str]:
-    """Hosts of the agent URLs of portitor-web's firewalls on web: all of
-    them (`agent-url --all`), or the first with a portitor-web from before
-    several firewalls.
-
-    An agent on localhost is on the web host itself.
-    """
-    if not (web.exists(WEB_BIN) and web.exists(WEB_CONFIG)):
+    """The firewalls portitor-web on web serves: the hosts of the URLs under
+    firewalls: in web.yaml, and the HA peers their portitor-configs deploy
+    to (`portitor-config agent-url --all` there). One on localhost is the web
+    host itself."""
+    text = web.read(WEB_CONFIG) if web.exists(WEB_CONFIG) else None
+    if not text:
         return []
-    cmd = f"runuser -u {WEB_USER} -- {WEB_BIN} -f {WEB_CONFIG} agent-url"
-    proc = web.run(f"{cmd} --all", check=False, mutate=False, capture=True, root=True)
-    if proc.returncode != 0:
-        proc = web.run(cmd, check=False, mutate=False, capture=True, root=True)
-    if proc.returncode != 0:
-        raise InstallError(
-            "could not read the agent URLs from portitor-web's settings: "
-            f"{(proc.stderr or proc.stdout).strip()}\n"
-            "Pass --agent HOST, or --no-agent to update portitor-web alone."
-        )
-    hosts = []
-    for url in proc.stdout.split():
+    hosts: list[str] = []
+
+    def add(url: str, via: Host | None) -> None:
         host = urllib.parse.urlsplit(url).hostname
         if not host:
-            raise InstallError(f"cannot find a host in the agent URL {url!r}; pass --agent HOST")
-        if not web.local and host in LOCAL_NAMES:
-            host = web.name
+            raise InstallError(f"cannot find a host in the URL {url!r}; pass --agent HOST")
+        if host in LOCAL_NAMES:
+            host = via.name if via and not via.local else ("localhost" if web.local else web.name)
         if host not in hosts:
             hosts.append(host)
+
+    for url in re.findall(r"^\s*url:\s*[\"']?([^\s\"']+)", text, re.M):
+        add(url, web)
+    # Their HA peers, which their portitor-configs know; one that can't be
+    # asked (no SSH yet, an older release) is left to --agent.
+    for name in list(hosts):
+        fw = web if name in (web.name, "localhost") else Host(name, web.ssh_user, web.dry_run)
+        proc = fw.run(f"test -x {CONFIG_LINK} && runuser -u {WEB_USER} -- {CONFIG_LINK} -f {CONFIG_FILE} agent-url --all",
+                      check=False, mutate=False, capture=True, root=True)
+        for url in (proc.stdout or "").split() if proc.returncode == 0 else []:
+            add(url, fw)
     return hosts
 
 
@@ -896,7 +964,9 @@ def make_plan(args: argparse.Namespace) -> Plan:
     if args.agent and not agent_hosts:
         raise InstallError("--agent: no host")
     if web_host is None and not agent_hosts:
-        if Path(WEB_BIN).exists():
+        # The binary is portitor-config's too: portitor-web is installed
+        # where its web.yaml is.
+        if Path(WEB_CONFIG).exists():
             web_host = "localhost"
         elif Path(AGENT_BIN).exists():
             agent_hosts = ["localhost"]
@@ -911,9 +981,9 @@ def make_plan(args: argparse.Namespace) -> Plan:
     if web and not agent_hosts and not args.no_agent:
         agent_hosts = agent_hosts_from_settings(web)
         if agent_hosts:
-            log(f"==> Agents of portitor-web's firewalls: {', '.join(agent_hosts)}")
+            log(f"==> portitor-web's firewalls: {', '.join(agent_hosts)}")
         else:
-            log("==> No agent URL in portitor-web's settings; not updating an agent")
+            log(f"==> No firewalls in {WEB_CONFIG}; not updating a firewall")
     if args.no_agent:
         agent_hosts = []
     elif web and not agent_hosts and web.exists(AGENT_BIN):
@@ -1770,7 +1840,7 @@ Environment:
                            "by commas, for several (one at a time, HA secondaries first)")
     what.add_argument("--no-agent", action="store_true", help="never install or update the agent")
     what.add_argument("--config", action="store_true",
-                      help="also portitor-config on the agent's host (updated with the agent once there)")
+                      help=argparse.SUPPRESS)  # portitor-config goes with every agent now
     what.add_argument("--ssh-user", default=os.environ.get("SSH_USER", SSH_USER_DEFAULT),
                       help="SSH user for a remote host: root, or a user with passwordless sudo "
                            f"(default {SSH_USER_DEFAULT})")

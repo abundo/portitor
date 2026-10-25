@@ -237,7 +237,7 @@ func TestNftablesSyntax(t *testing.T) {
 		}
 	}
 	// Rules without and with IDs (named counters, connection marks).
-	for _, doc := range []fwconfig.Document{fwconfig.SampleDocument(), withRuleIDs(fwconfig.SampleDocument()), fwconfig.SampleVRFDocument(), withDHCPHA(fwconfig.SampleDocument())} {
+	for _, doc := range []fwconfig.Document{fwconfig.SampleDocument(), withRuleIDs(fwconfig.SampleDocument()), fwconfig.SampleVRFDocument(), withDHCPHA(fwconfig.SampleDocument()), withHAConfig(fwconfig.SampleDocument())} {
 		b, err := Render(doc, Options{Paths: paths, Units: DefaultUnits()})
 		if err != nil {
 			t.Fatal(err)

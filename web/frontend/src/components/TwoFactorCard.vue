@@ -5,7 +5,7 @@
 // Two-factor login (TOTP) of the logged-in user, on My settings. Setting it
 // up shows a QR code; it goes on only once a code from the app is checked,
 // and then shows the recovery codes, this once.
-import { computed, onMounted, reactive, ref } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import QRCode from 'qrcode'
 import { api } from '@/api'
@@ -17,7 +17,6 @@ import { inlineField, wideModal } from '@/utils/form'
 const toast = useToast()
 const auth = useAuthStore()
 const status = ref({ enabled: false, recovery_left: 0 })
-const managed = computed(() => !!auth.user?.managed_by)
 
 async function load() {
   try {
@@ -112,10 +111,7 @@ function downloadCodes() {
 <template>
   <div class="card">
     <div class="mb-3 text-lg font-semibold">Two-factor login</div>
-    <p v-if="managed" class="text-sm text-muted">
-      Your user is managed by {{ auth.user?.managed_by }}: set up two-factor login there.
-    </p>
-    <template v-else-if="status.enabled">
+    <template v-if="status.enabled">
       <p class="mb-3 text-sm">
         On. The login asks for a code from your authenticator app.
         {{ status.recovery_left }} recovery code{{ status.recovery_left === 1 ? '' : 's' }} left.

@@ -174,7 +174,7 @@ func (s *Server) handleDeployRevert(c *echo.Context) error {
 	if err != nil {
 		return err
 	}
-	if _, err := restoreDatabase(c.Request().Context(), s.db, path); err != nil {
+	if _, err := restoreDatabase(c.Request().Context(), s.db, path, restoreKeeps); err != nil {
 		var re restoreError
 		if errors.As(err, &re) {
 			return errJSON(c, http.StatusConflict, err.Error())

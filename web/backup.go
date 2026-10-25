@@ -166,7 +166,7 @@ func (s *Server) handleRestore(c *echo.Context) error {
 	} else if len(deps) > 0 {
 		return errJSON(c, http.StatusConflict, "a deployment is waiting for confirmation; confirm or roll it back first")
 	}
-	res, err := restoreDatabase(c.Request().Context(), s.db, path)
+	res, err := restoreDatabase(c.Request().Context(), s.db, path, restoreKeeps)
 	if err != nil {
 		var re restoreError
 		if errors.As(err, &re) {
@@ -191,9 +191,9 @@ type restoreResult struct {
 
 // restoreDatabase replaces the configuration in db with the database file
 // at path, which it checks and migrates first. It copies every table in
-// one transaction, except restoreKeeps and the commit number in settings,
-// which stay those of this installation.
-func restoreDatabase(ctx context.Context, db *gorm.DB, path string) (*restoreResult, error) {
+// one transaction, except keeps (restoreKeeps for a backup) and the commit
+// number in settings, which stay those of this installation.
+func restoreDatabase(ctx context.Context, db *gorm.DB, path string, keeps []string) (*restoreResult, error) {
 	res, err := prepareRestore(path)
 	if err != nil {
 		return nil, err
@@ -229,7 +229,7 @@ func restoreDatabase(ctx context.Context, db *gorm.DB, path string) (*restoreRes
 	}
 	cols := map[string][]string{}
 	for _, t := range tables {
-		if slices.Contains(restoreKeeps, t) {
+		if slices.Contains(keeps, t) {
 			continue
 		}
 		mine, err := queryStrings(ctx, conn, "SELECT name FROM pragma_table_info(?, 'main') ORDER BY name", t)

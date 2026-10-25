@@ -91,6 +91,9 @@ type Instance struct {
 	// ConntrackSync keeps the HA peer's connection table in step
 	// (conntrackd, ha.go).
 	ConntrackSync *ConntrackSync `json:"conntrack_sync,omitempty"`
+	// HAConfig is set by Expand, on the default instance of an HA host
+	// (HA.ConfigPort).
+	HAConfig *HAConfigAccess `json:"-"`
 	// BFD lists the interfaces with BFD (FRR's bfdd), which static routes,
 	// OSPF, IS-IS and BGP use there.
 	BFD []BFDInterface `json:"bfd,omitempty"`
@@ -779,6 +782,9 @@ func (d Document) Expand() Document {
 	for i := range out.Instances {
 		out.Instances[i].addL3VNIDevices()
 		out.Instances[i].addVRFDevices()
+		if out.Instances[i].Default {
+			out.Instances[i].HAConfig = d.HA.configAccess()
+		}
 	}
 	return out
 }

@@ -1,11 +1,10 @@
 // SPDX-FileCopyrightText: 2026 The Portitor contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// portitor-web is the management GUI and API. It pushes configuration to
-// portitor-agent, or as manager to portitor-config. Run as
-// "portitor-config" (a symlink) it is portitor-config: the firewall's own
-// configuration, for its own firewall, with the manager API. See
-// AGENTS.md.
+// portitor-web is the portal to the firewalls' GUIs, with no database of
+// its own, and the witness of HA pairs. Run as "portitor-config" (a
+// symlink) it is portitor-config: the firewall's own configuration, its
+// database, GUI and API, on the firewall. See AGENTS.md.
 package main
 
 import (
@@ -31,28 +30,40 @@ import (
 )
 
 func main() {
+	root := portalCommand()
+	if filepath.Base(os.Args[0]) == "portitor-config" {
+		root = configCommand()
+	}
+	if err := root.Execute(); err != nil {
+		fmt.Fprintln(os.Stderr, "Error:", err)
+		os.Exit(1)
+	}
+}
+
+// setLogging sets the log level of every command.
+func setLogging(debug *bool) func(*cobra.Command, []string) {
+	return func(cmd *cobra.Command, args []string) {
+		level := slog.LevelInfo
+		if *debug {
+			level = slog.LevelDebug
+		}
+		slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level})))
+	}
+}
+
+// configCommand is portitor-config's.
+func configCommand() *cobra.Command {
 	var configFile, bind string
 	var debug bool
-	local := filepath.Base(os.Args[0]) == "portitor-config"
-	name, defaultConfig := "portitor-web", web.DefaultConfigFile
-	if local {
-		name, defaultConfig = "portitor-config", web.DefaultLocalConfigFile
-	}
 	root := &cobra.Command{
-		Use:           name,
-		Short:         "Portitor management GUI",
-		SilenceUsage:  true,
-		SilenceErrors: true,
-		Version:       buildinfo.Version,
-		PersistentPreRun: func(cmd *cobra.Command, args []string) {
-			level := slog.LevelInfo
-			if debug {
-				level = slog.LevelDebug
-			}
-			slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level})))
-		},
+		Use:              "portitor-config",
+		Short:            "Portitor: the firewall's configuration, GUI and API",
+		SilenceUsage:     true,
+		SilenceErrors:    true,
+		Version:          buildinfo.Version,
+		PersistentPreRun: setLogging(&debug),
 	}
-	root.PersistentFlags().StringVarP(&configFile, "config", "f", defaultConfig, "config file")
+	root.PersistentFlags().StringVarP(&configFile, "config", "f", web.DefaultLocalConfigFile, "config file")
 	root.PersistentFlags().BoolVarP(&debug, "debug", "d", false, "debug logging")
 
 	load := func() (*web.Config, *web.Server, error) {
@@ -60,7 +71,7 @@ func main() {
 		if err != nil {
 			return nil, nil, err
 		}
-		cfg.Local = local
+		cfg.Local = true
 		if bind != "" {
 			cfg.Bind = bind
 		}
@@ -170,8 +181,7 @@ func main() {
 	setAgent.Flags().StringVar(&agentFingerprint, "fingerprint", "", "agent certificate SHA-256")
 	root.AddCommand(setAgent)
 
-	var importName, importManager string
-	var importLocal bool
+	var importName string
 	importVF := &cobra.Command{
 		Use:   "import-vf <bundle.json>",
 		Short: "Add a virtual firewall from a bundle; into a new database, the host's configuration",
@@ -181,7 +191,7 @@ func main() {
 			if err != nil {
 				return err
 			}
-			problems, err := web.ImportBundleFile(cmd.Context(), srv, args[0], importName, importManager, importLocal)
+			problems, err := web.ImportBundleFile(cmd.Context(), srv, args[0], importName)
 			if err != nil {
 				return err
 			}
@@ -193,8 +203,6 @@ func main() {
 		},
 	}
 	importVF.Flags().StringVar(&importName, "name", "", "its name here (default: the bundle's)")
-	importVF.Flags().StringVar(&importManager, "manager", "", "mark it (and its shared objects) as this manager's")
-	importVF.Flags().BoolVar(&importLocal, "local", false, "with --manager: the virtual firewall stays this firewall's own, only its shared objects are the manager's")
 	root.AddCommand(importVF)
 
 	var allAgents bool
@@ -229,10 +237,10 @@ func main() {
 	root.AddCommand(agentURLCmd)
 
 	var bo web.BootstrapOptions
-	var tokenFile, address, wanAddress, gateway, dhcpRange, dhcpDNS, defaultRoute, join string
+	var tokenFile, address, wanAddress, gateway, dhcpRange, dhcpDNS, defaultRoute string
 	bootstrap := &cobra.Command{
 		Use:   "bootstrap",
-		Short: "Configure and deploy a new firewall that runs portitor-web itself (installer ISO)",
+		Short: "Configure and deploy this new firewall (the installer ISO's first boot)",
 		Long: `Stores the agent settings, configures the LAN interface with its address
 (or DHCP, without a default route when there is a WAN, unless
 --default-route lan with a DHCP WAN, which then takes none), the WAN interface
@@ -245,38 +253,15 @@ anything has been deployed, unless --reconfigure (portitor-setup run again):
 then the LAN and WAN get exactly these settings, the IPv4 default route is
 --gateway or none, the GUI, SSH and ping rules are enabled on the LAN, the
 forward and masquerade rules move to the new LAN and WAN, and the agent
-settings are kept unless --agent-fingerprint is given.
-
---join takes the join string that portitor-setup shows on a firewall set up
-for the agent only (or - to read it from stdin): the agent's URL, token and
-fingerprint and the LAN and WAN settings. No GUI port is opened on that
-firewall unless --gui-port is given.`,
+settings are kept unless --agent-fingerprint is given.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, srv, err := load()
 			if err != nil {
 				return err
 			}
-			if join != "" {
-				if join == "-" {
-					b, err := io.ReadAll(os.Stdin)
-					if err != nil {
-						return err
-					}
-					join = string(b)
-				}
-				j, err := web.ParseJoin(join)
-				if err != nil {
-					return err
-				}
-				if cmd.Flags().Changed("gui-port") {
-					j.GUIPort = bo.GUIPort
-				}
-				dep, err := web.Bootstrap(cmd.Context(), srv, j)
-				return printDeployment(dep, err)
-			}
 			if bo.LAN == "" || address == "" {
-				return fmt.Errorf("--lan and --address are required (or --join)")
+				return fmt.Errorf("--lan and --address are required")
 			}
 			if bo.AgentFingerprint != "" {
 				var tok []byte
@@ -341,15 +326,78 @@ firewall unless --gui-port is given.`,
 	bf.StringVar(&defaultRoute, "default-route", "wan", "which DHCP interface takes the default route when both the LAN and the WAN use DHCP: lan or wan")
 	bf.StringVar(&dhcpRange, "dhcp-range", "", "DHCP server on the static LAN, e.g. 192.168.1.100-192.168.1.199 (optional)")
 	bf.StringVar(&dhcpDNS, "dhcp-dns", "", "DNS servers DHCP hands out, comma separated (default: the firewall, if its DNS listens on the LAN)")
-	bf.IntVar(&bo.GUIPort, "gui-port", 443, "port to open for portitor-web on the LAN, 0 for none")
+	bf.IntVar(&bo.GUIPort, "gui-port", 443, "port to open for the GUI on the LAN, 0 for none")
 	bf.BoolVar(&bo.Reconfigure, "reconfigure", false, "change the LAN and WAN of a deployed installation")
-	bf.StringVar(&join, "join", "", "join string from portitor-setup on an agent-only firewall, - for stdin")
 	root.AddCommand(bootstrap)
 
-	if err := root.Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, "Error:", err)
-		os.Exit(1)
+	root.AddCommand(&cobra.Command{
+		Use:   "fingerprint",
+		Short: "Print the SHA-256 fingerprint of tls_cert, which portitor-web and the HA peer pin",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := web.LoadConfig(configFile)
+			if err != nil {
+				return err
+			}
+			fp, err := web.CertFingerprint(cfg.TLSCert)
+			if err != nil {
+				return err
+			}
+			fmt.Println(fp)
+			return nil
+		},
+	})
+
+	root.AddCommand(&cobra.Command{
+		Use:   "witness-string",
+		Short: "Print the HA pair's witness string, for its external witness (portitor-web's web.yaml)",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, srv, err := load()
+			if err != nil {
+				return err
+			}
+			str, err := web.WitnessString(srv)
+			if err != nil {
+				return err
+			}
+			fmt.Println(str)
+			return nil
+		},
+	})
+
+	var force bool
+	promote := &cobra.Command{
+		Use:   "promote",
+		Short: "Make this HA secondary the primary, its primary lost, and commit",
+		Long: `Run on the HA secondary whose primary is lost. Its copy of the
+configuration becomes the pair's: the instances and tasks move to it, with
+the two hosts' values swapped (addresses and peer addresses, router ids,
+NETs, VRRP priorities), the old primary becomes the secondary, and it commits.
+The old primary, back, stays fenced until this host catches it up.
+Refused while this host's agent hears the primary, unless --force.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, srv, err := load()
+			if err != nil {
+				return err
+			}
+			res, err := web.PromoteHere(cmd.Context(), srv, force)
+			if res != nil {
+				for _, d := range res.Deployments {
+					fmt.Printf("%d %s %s\n", d.FirewallID, d.Status, d.Message)
+				}
+			}
+			if err != nil {
+				return err
+			}
+			fmt.Println("promoted: this host is the primary, commit", res.Commit)
+			return nil
+		},
 	}
+	promote.Flags().BoolVar(&force, "force", false, "promote even though the agent hears the primary")
+	root.AddCommand(promote)
+	return root
 }
 
 // printDeployment prints a bootstrap's result.

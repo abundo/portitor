@@ -56,6 +56,11 @@ export const useInstanceStore = defineStore('instances', {
       const fw = s.firewalls.find((f) => f.id === cur.firewall_id)
       return hosts.length > 1 && fw ? `${fw.name} / ${cur.name}` : cur.name
     },
+    // host is the host of the selected one's firewall.
+    host: (s) => {
+      const fw = s.list.find((i) => i.id === s.currentId)?.firewall_id
+      return s.list.find((i) => i.is_default && i.firewall_id === fw) ?? null
+    },
     nameOf: (s) => (id) => s.list.find((i) => i.id === id)?.name ?? '',
     // hasPeer: the selected VF runs on an HA pair, so what differs between
     // the hosts has a value for the secondary too.

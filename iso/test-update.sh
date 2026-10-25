@@ -14,7 +14,8 @@
 # --list --json) and deploys. The update itself installs this tree's release
 # archive with its install.py --local, as a transient unit like the agent's
 # update job (a GitHub release is all the GUI can install). Afterwards the
-# agent and portitor-web must report this tree's version, the units run, the
+# agent and portitor-config must report this tree's version, the units run
+# (portitor-web as the portal in front of portitor-config), the
 # database (migrated) still has its interfaces, the GUI logs in, the new
 # agent's check lists the new version installed, and a deploy applies. Logs in
 # build/vm-update/. KEEP=1 leaves the virtual machine running. Needs what
@@ -26,6 +27,10 @@ DIR=build/vm-update
 REPO=${GITHUB_REPO:-abundo/portitor}
 export VM_DIR=$DIR VM_GUI_PORT=${VM_GUI_PORT:-28444}
 GUI=https://127.0.0.1:$VM_GUI_PORT
+# The firewall's API: portitor-web's own before the update, then portitor-web
+# as the portal serves portitor-config at /fw/<host name>/ (install.py moves
+# the database, iso/test.answers has no host name: portitor).
+API=$GUI
 PASSWORD=$(sed -n 's/^password: *//p' iso/test.answers)
 
 log() { printf '\033[1m==> [%dm%02ds] %s\033[0m\n' $((SECONDS / 60)) $((SECONDS % 60)) "$*"; }
@@ -99,22 +104,22 @@ jar=$DIR/cookies
 api() { curl -skf -b "$jar" "$@"; }
 login() {
 	local deadline=$((SECONDS + 300))
-	until curl -skf -o /dev/null "$GUI/api/version"; do
-		((SECONDS < deadline)) || { fail "portitor-web did not answer at $GUI"; return 1; }
+	until curl -skf -o /dev/null "$API/api/version"; do
+		((SECONDS < deadline)) || { fail "the GUI did not answer at $API"; return 1; }
 		sleep 3
 	done
 	rm -f "$jar"
 	curl -skf -c "$jar" -o /dev/null -H 'Content-Type: application/json' \
-		-d "{\"username\":\"portitor\",\"password\":\"$PASSWORD\"}" "$GUI/api/login" ||
-		{ fail "GUI login at $GUI"; return 1; }
+		-d "{\"username\":\"portitor\",\"password\":\"$PASSWORD\"}" "$API/api/login" ||
+		{ fail "GUI login at $API"; return 1; }
 }
 # update_check VERSION: runs the update page's check and expects the agent
 # installed at VERSION.
 update_check() {
 	local want=${1#v} sys deadline=$((SECONDS + 300))
-	api -o /dev/null -H 'Content-Type: application/json' -d '{"job":"check"}' "$GUI/api/system/jobs" ||
+	api -o /dev/null -H 'Content-Type: application/json' -d '{"job":"check"}' "$API/api/system/jobs" ||
 		{ fail "start the check"; return; }
-	while sys=$(api "$GUI/api/system") &&
+	while sys=$(api "$API/api/system") &&
 		[[ $(json '[x["state"] for x in j.get("jobs") or [] if x["name"] == "check"]' <<<"$sys") != "['succeeded']" ]] &&
 		[[ $(json '[x["state"] for x in j.get("jobs") or [] if x["name"] == "check"]' <<<"$sys") != "['failed']" ]]; do
 		((SECONDS < deadline)) || { fail "the check did not finish"; return; }
@@ -130,9 +135,9 @@ update_check() {
 deploy() {
 	local out
 	if out=$(curl -sk -b "$jar" -w '\n%{http_code}' -H 'Content-Type: application/json' \
-		-d '{"confirm_timeout":120}' "$GUI/api/deploy/apply") && [[ ${out##*$'\n'} == 200 ]] &&
+		-d '{"confirm_timeout":120}' "$API/api/deploy/apply") && [[ ${out##*$'\n'} == 200 ]] &&
 		out=$(curl -sk -b "$jar" -w '\n%{http_code}' -H 'Content-Type: application/json' \
-			-d '{}' "$GUI/api/deploy/confirm") && [[ ${out##*$'\n'} == 200 ]]; then
+			-d '{}' "$API/api/deploy/confirm") && [[ ${out##*$'\n'} == 200 ]]; then
 		echo "ok    deploy ($1)"
 	else
 		fail "deploy ($1)"
@@ -141,7 +146,7 @@ deploy() {
 }
 versions() {
 	local web agent
-	web=$(curl -skf "$GUI/api/version" | json 'j["version"]') || web=?
+	web=$(curl -skf "$API/api/version" | json 'j["version"]') || web=?
 	agent=$(guest portitor-agent --version | awk '{ print $NF }') || agent=?
 	if [[ ${web#v} == "${1#v}" && ${agent#v} == "${1#v}" ]]; then
 		echo "ok    portitor-web and the agent are $1"
@@ -150,7 +155,9 @@ versions() {
 	fi
 }
 units() {
-	for unit in portitor-agent portitor-web; do
+	local u=(portitor-agent portitor-web)
+	[[ $API == "$GUI" ]] || u+=(portitor-config)
+	for unit in "${u[@]}"; do
 		check "$unit running" systemctl is-active --quiet "$unit.service"
 	done
 	check "no failed units" sh -c 'test -z "$(systemctl list-units --failed --plain --no-legend)" || { systemctl list-units --failed --plain --no-legend; false; }'
@@ -162,7 +169,7 @@ units
 login && {
 	versions "$from"
 	update_check "$from"
-	ifaces_before=$(api "$GUI/api/interfaces" | json 'sorted(x["name"] for x in j)')
+	ifaces_before=$(api "$API/api/interfaces" | json 'sorted(x["name"] for x in j)')
 	deploy "$from"
 }
 ((failed == 0)) || { log "FAILED before the update (logs in $DIR/)"; exit 1; }
@@ -193,17 +200,18 @@ else
 fi
 
 log "Checking $to"
+API=$GUI/fw/portitor
 units
 login && {
 	versions "$to"
-	ifaces_after=$(api "$GUI/api/interfaces" | json 'sorted(x["name"] for x in j)')
+	ifaces_after=$(api "$API/api/interfaces" | json 'sorted(x["name"] for x in j)')
 	if [[ $ifaces_after == "$ifaces_before" ]]; then
 		echo "ok    interfaces kept: $ifaces_after"
 	else
 		fail "interfaces: $ifaces_before before, $ifaces_after after"
 	fi
-	if api -o /dev/null "$GUI/api/agent/status"; then
-		echo "ok    portitor-web reaches the agent"
+	if api -o /dev/null "$API/api/agent/status"; then
+		echo "ok    portitor-config reaches the agent"
 	else
 		fail "GET /api/agent/status"
 	fi

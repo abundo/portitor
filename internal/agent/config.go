@@ -23,7 +23,8 @@ type Config struct {
 	TokenFile string `yaml:"token_file"`
 	TLSCert   string `yaml:"tls_cert"`
 	TLSKey    string `yaml:"tls_key"`
-	// AllowFrom restricts which client addresses may call the API. The
+	// AllowFrom restricts which client addresses may call the API, besides
+	// loopback (portitor-config on this host), which may always. The
 	// same list feeds the anti-lockout rule, so these addresses keep
 	// reaching the API whatever the pushed rules say.
 	AllowFrom []string `yaml:"allow_from"`

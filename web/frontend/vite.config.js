@@ -56,7 +56,8 @@ function wiregasm() {
 }
 
 export default defineConfig({
-  base: '/',
+  // Relative, under index.html's <base> (BASE in utils/base.js).
+  base: './',
   plugins: [
     vue(),
     wiregasm(),

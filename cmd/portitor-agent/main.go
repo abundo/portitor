@@ -35,7 +35,7 @@ func main() {
 	var configFile string
 	root := &cobra.Command{
 		Use:           "portitor-agent",
-		Short:         "Portitor agent: applies configuration from portitor-web",
+		Short:         "Portitor agent: applies configuration from portitor-config",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Version:       buildinfo.Version,
@@ -67,14 +67,14 @@ func main() {
 	var tokenFile, certFile, keyFile string
 	initCmd := &cobra.Command{
 		Use:   "init",
-		Short: "Create the API token and TLS certificate, and print what portitor-web needs",
+		Short: "Create the API token and TLS certificate, and print what portitor-config needs",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			token, fp, err := agent.InitFiles(tokenFile, certFile, keyFile, hosts)
 			if err != nil {
 				return err
 			}
 			fmt.Printf("token:       %s\nfingerprint: %s\n", token, fp)
-			fmt.Println("\nEnter both under Settings > Agent in portitor-web.")
+			fmt.Println("\nEnter both under Admin > Firewalls in portitor-config.")
 			return nil
 		},
 	}

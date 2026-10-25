@@ -1,40 +1,59 @@
 <!-- SPDX-FileCopyrightText: 2026 The Portitor contributors -->
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
-# portitor-web
+# portitor-config and portitor-web
 
-portitor-web is the management GUI and REST API. It keeps the configuration in
-an SQLite database and pushes it to portitor-agent on the firewall. Run it on another host, not
-on the firewall itself. Installing it is covered in the [README](../README.md#install).
-The [installer ISO](appliance.md) is the exception: it puts portitor-web on the
-firewall, for a single-box setup.
+Every firewall keeps its own configuration: **portitor-config**, on the firewall
+next to portitor-agent, holds it in an SQLite database, serves the GUI and the REST
+API, and deploys to its agent (and to its [HA secondary](ha.md)). Nothing outside
+the firewall is needed to change it.
 
-## Configuration
+**portitor-web** is optional: a portal on another host to the GUIs of several
+firewalls. It has no database and no users of its own. It serves each firewall it
+lists at `/fw/<name>/`, passing the GUI, the API, the console and the captures
+through to that firewall's portitor-config, whose login, users and roles apply as
+they do there. A *Firewall* pick, on the login page and in the top bar, switches
+between them. Each has its own login, but the two hosts of an HA pair share one: a
+login on either is good on both. It is also the [witness](ha.md#the-witness) of HA
+pairs.
 
-`/etc/portitor/web.yaml` (`-f` picks another file):
+Both are the same binary (`portitor-config` is a symlink to `portitor-web`).
+Installing them is covered in the [README](../README.md#install); the
+[installer ISO](appliance.md) puts portitor-config on the firewall.
+
+## portitor-config
+
+`/etc/portitor/config.yaml` (`-f` picks another file):
 
 | Key | Default | |
 |---|---|---|
-| `bind` | `127.0.0.1:8080` | Listen address. `start --bind` overrides it. |
+| `bind` | `127.0.0.1:8080` (install.py: `:8444`) | Listen address. `start --bind` overrides it. |
 | `jwt_secret` | | Signs session cookies. At least 32 characters: `openssl rand -base64 32`. |
-| `tls_cert`, `tls_key` | | Serve HTTPS directly. Set both or neither. A certificate chosen under *Settings → Portitor web* takes their place; see [The GUI's own certificate](#the-guis-own-certificate). |
-| `db.path` | `/var/lib/portitor-web/portitor.db` | SQLite database. Its directory must be writable by the service user (`-wal` and `-shm` files go next to it). |
+| `tls_cert`, `tls_key` | | Serve HTTPS directly. Set both or neither. A certificate chosen under *Settings → Portitor web* takes their place for browsers; see [The GUI's own certificate](#the-guis-own-certificate). portitor-web and the HA peer always get `tls_cert`, which they pin. |
+| `db.path` | `/var/lib/portitor-config/portitor.db` | SQLite database. Its directory must be writable by the service user (`-wal` and `-shm` files go next to it). |
+| `trusted_proxies` | none | Addresses or networks whose `X-Forwarded-For` is believed: portitor-web's. The login limits then count the browser's address, not portitor-web's. |
+| `agent_url` | `https://127.0.0.1:8443` | This host's agent, which tells portitor-config its place in an HA pair. |
 | `dev` | `false` | Serves the frontend from disk and drops the cookie's Secure flag. Development only. |
 
-Without `tls_cert`, keep `bind` on localhost and put a TLS reverse proxy in front. The
-session cookie is marked Secure, so the GUI does not work over plain HTTP. The proxy
-must pass WebSocket upgrades for the console.
-
-## Commands
+Without `tls_cert`, keep `bind` on localhost and put a TLS reverse proxy in front (or
+portitor-web on the same host, `url: http://127.0.0.1:...`). The session cookie is
+marked Secure, so the GUI does not work over plain HTTP. A proxy must pass WebSocket
+upgrades for the console.
 
 ```sh
 # as the service user (sudo -u portitor ...); as root it refuses
-portitor-web start                 # serve the GUI and API
-portitor-web migrate               # apply database migrations; start never migrates
-portitor-web createadmin <user>    # create an admin, or reset a user's password and make them admin
-portitor-web reset-2fa <user>      # turn off a user's two-factor login (portitor-config reset-2fa on a firewall)
-portitor-web agent-url [--all]     # print the first (or every) firewall's agent URL (used by install.py)
-portitor-web bootstrap ...         # first configuration of an ISO install (portitor-setup runs it)
+portitor-config start                 # serve the GUI and API
+portitor-config migrate               # apply database migrations; start never migrates
+portitor-config createadmin <user>    # create an admin, or reset a user's password and make them admin
+portitor-config reset-2fa <user>      # turn off a user's two-factor login
+portitor-config set-agent ...         # this firewall's agent: URL, token, fingerprint (install.py)
+portitor-config agent-url [--all]     # print the first (or every) firewall's agent URL (install.py)
+portitor-config bootstrap ...         # first configuration of an ISO install (portitor-setup runs it)
+portitor-config fingerprint           # the SHA-256 of tls_cert, for portitor-web and the HA peer
+portitor-config witness-string        # the HA pair's witness string, for an external witness
+portitor-config promote [--force]     # make this HA secondary the primary (ha.md)
+portitor-config import-vf <bundle>    # add a virtual firewall from a bundle (into a new database: the host)
+portitor-config api|set|commit|confirm|rollback ...   # configuration from the console (below)
 ```
 
 `createadmin` asks for the password twice on a terminal, or reads one line from stdin.
@@ -42,24 +61,71 @@ portitor-web bootstrap ...         # first configuration of an ISO install (port
 
 After an upgrade, run `migrate` before `start`. `install.py` does both.
 
+On the firewall's console, as root:
+`sudo -u portitor portitor-config set interfaces ens19 addresses=192.168.1.1/24`, then
+`portitor-config commit --confirm 120` and `portitor-config confirm`.
+`portitor-config api GET /api/...` reads anything the GUI shows. Every check of the API
+applies (on an HA secondary, the configuration is read-only).
+
+## portitor-web
+
+`/etc/portitor/web.yaml`:
+
+| Key | Default | |
+|---|---|---|
+| `bind` | `127.0.0.1:8080` | Listen address. |
+| `tls_cert`, `tls_key` | | Serve HTTPS directly; otherwise put a TLS reverse proxy in front. |
+| `firewalls` | none | The firewalls: `name` (lowercase letters, digits and `-`), `url` of its portitor-config (`https://<firewall>:8444`; `http://` only to this host) and `fingerprint`, the SHA-256 of its `tls_cert` (`portitor-config fingerprint` on the firewall). |
+| `witness` | none | The witness strings of the HA pairs this host is the [witness](ha.md#the-witness) of. |
+
+```yaml
+firewalls:
+  - name: office
+    url: https://192.0.2.1:8444
+    fingerprint: 3f1c...e0
+```
+
+On each firewall, add portitor-web's address to `trusted_proxies` in its
+`config.yaml`. Then:
+
+```sh
+portitor-web start      # serve the portal at / and each firewall at /fw/<name>/
+portitor-web witness    # only the witness of the pairs under witness:, without the GUI
+portitor-web check      # check web.yaml and ask each firewall's portitor-config for its version
+```
+
+`/` opens the GUI of the firewall the browser opened last, or the first one listed.
+The list of firewalls (`/portal/`, and `/portal/v1/firewalls` for the *Firewall*
+pick) names them and their versions to anyone who reaches portitor-web; everything
+else is behind each firewall's login. The HA pair's shared login needs each host's
+*portitor-config URL* and *fingerprint* under *Firewalls*: portitor-web knows the
+two hosts by those fingerprints.
+
 ## First steps
 
 1. Log in with the user from `createadmin`.
-2. On the firewall, run `portitor-agent init --host <address>`. It prints a token and
-   the agent's certificate fingerprint.
-3. *Admin → Firewalls*: edit the firewall and enter the agent URL
-   (`https://<address>:8443`), the token and the fingerprint, and save. Its *Status*
-   column says whether the agent answers.
-4. portitor-web adds the firewall's physical interfaces to the default virtual firewall `main`
-   as they are configured now, and says so. Check them under *Network → Interfaces*.
-5. Configure addresses, rules and services, then deploy.
+2. *Admin → Firewalls*: the firewall's agent is set by `install.py` (or the ISO); its
+   *Status* column says whether the agent answers. By hand: run
+   `portitor-agent init --host 127.0.0.1` on the firewall, which prints a token and the
+   agent's certificate fingerprint, and enter them with the agent URL
+   (`https://127.0.0.1:8443`).
+3. portitor-config adds the firewall's physical interfaces to the default virtual
+   firewall `main` as they are configured now, and says so. Check them under
+   *Network → Interfaces*.
+4. Configure addresses, rules and services, then deploy.
 
 ## The screen
 
 - **Virtual firewall selector** (top bar). Most pages show one virtual firewall, the one selected here.
   Users and settings are shared by all virtual firewalls.
 - **Agent badge** (top bar). The generation the agent has applied; yellow if its last
-  apply had an error, red if portitor-web cannot reach it.
+  apply had an error, red if portitor-config cannot reach it.
+- **Firewall pick** (login page and top bar, behind portitor-web with several
+  firewalls): opens another firewall's GUI, which has its own login (one for both
+  hosts of an HA pair).
+- **HA secondary badge** (top bar, on an HA secondary's portitor-config): its
+  configuration is a read-only copy of the primary's; the badge opens the pair's
+  state and, for a global admin, *Promote* (see [High availability](ha.md#promoting-the-secondary)).
 - **Log panel** (terminal icon) opens a panel at the bottom with three tabs:
   - *Agent log*: the agent's log.
   - *Logged packets*: the packets of the rules with *Log* ticked on the Rules page, as a
@@ -123,7 +189,7 @@ After an upgrade, run `migrate` before `start`. `install.py` does both.
 | | Traceroute | A traceroute like MTR, run on the firewall in the selected virtual firewall with `mtr`. Pick a *source interface* (*None*, the default, lets the routing table decide) and a *destination*: an IPv4 or IPv6 address, a named host or a DNS name, which the firewall resolves (for a name with both, *IP version* picks; IPv4 by default). One probe per hop goes out each second for the given rounds (10 by default); each hop's row shows its address, loss, sent and the last, average, best and worst round trip and its standard deviation, updated as replies come. *Stop* ends it early. |
 | Admin | Updates | Debian package upgrades, Portitor releases, reboot. See [Installer ISO and updates](appliance.md#updates). |
 | | Settings → General | The GUI's certificate, default auto-rollback, packet capture rate, [backup and restore](#backup-and-restore). |
-| | Firewalls | The hosts Portitor deploys to, each with its agent (URL, token, fingerprint). Each firewall's host is a virtual firewall named after it; the others are put on a firewall in their form, and a task runs on one. A commit deploys to every firewall whose configuration changed; with several, each waits for confirmation and they are confirmed together, and when one fails the others are rolled back at once. A link joins virtual firewalls on the same firewall. **HA**: a firewall created as the *HA secondary* of another runs its virtual firewalls too, with its own addresses (*HA peer addresses* on the interfaces), VRRP priority (*HA peer priority*, 10 below by default) and router ids where they are set; both get every commit, and VRRP decides which forwards. Each host stays active only while it hears the other or holds portitor-web's vote (the witness); otherwise it fences itself: its VRRP routers shut down and it serves no DHCP or router advertisements. A commit while one host is unreachable goes to the other, and the first catches up when it is back. DHCP runs on both with Kea's HA (the primary serves, the standby takes over and the leases stay in step), connections are synced with conntrackd so they live on after a failover, and DNS updates, the tunnel broker's endpoint update and ACME orders run on the active host only; the other copies its certificates every minute. A BGP neighbour on the pair itself (another virtual firewall over a link) has an *HA peer address*: its address on the secondary. They talk over each virtual firewall's DHCP interface, or else its first physical interface (or VLAN on one) with an address and an HA peer address; one with only internal links syncs nothing. On the console, `portitor show ha` shows a host's state, and `portitor request ha active` lets a host that hears neither be active (only when the other is known to be down). Set *HA URL* when the peer reaches an agent at another address than portitor-web (127.0.0.1, say); both need the agents' certificate fingerprints. See [High availability](ha.md). |
+| | Firewalls | This firewall, with its agent (URL, token, fingerprint), and its HA secondary, if it has one: portitor-config deploys to its own firewall and its secondary only (another firewall has its own portitor-config). The firewall's host is a virtual firewall named after it. **HA**: a firewall created as the *HA secondary* of another runs its virtual firewalls too, with its own addresses (*HA peer addresses* on the interfaces), VRRP priority (*HA peer priority*, 10 below by default) and router ids where they are set; both get every commit, and VRRP decides which forwards. Each host stays active only while it hears the other or holds the witness's vote (*HA witness*: portitor-config on the primary, or an external one, portitor-web on a third host, given the *Witness string*); otherwise it fences itself: its VRRP routers shut down and it serves no DHCP or router advertisements. A commit while one host is unreachable goes to the other, and the first catches up when it is back. DHCP runs on both with Kea's HA (the primary serves, the standby takes over and the leases stay in step), connections are synced with conntrackd so they live on after a failover, and DNS updates, the tunnel broker's endpoint update and ACME orders run on the active host only; the other copies its certificates every minute. A BGP neighbour on the pair itself (another virtual firewall over a link) has an *HA peer address*: its address on the secondary. They talk over each virtual firewall's DHCP interface, or else its first physical interface (or VLAN on one) with an address and an HA peer address; one with only internal links syncs nothing. On the console, `portitor show ha` shows a host's state, and `portitor request ha active` lets a host that hears neither be active (only when the other is known to be down). Set *HA URL* when the peer reaches an agent at another address than portitor-config (127.0.0.1, say); both need the agents' certificate fingerprints. *portitor-config URL* and *fingerprint* name each host's portitor-config for its peer: the secondary copies the primary's configuration from there, and can be promoted when the primary is lost. See [High availability](ha.md). |
 | | Settings → Users | GUI users and their roles. |
 | | Settings → Roles | Groups of users, one per virtual firewall and your own; see [Roles](#roles). |
 | | Help | This guide and the other guides in `docs/`. |
@@ -207,16 +273,15 @@ With it on, the login asks for a code after the password. A code is good once, a
 wrong one counts as a failed login. Users shows who has it on.
 
 A user who has lost both phone and recovery codes: an admin opens the user and picks
-*Reset 2FA* (an admin can always do this, for a managed user too), or, on the console, `sudo -u portitor portitor-web reset-2fa <user>`
-(`portitor-config reset-2fa <user>` on a firewall run by portitor-config). The user
-then logs in with the password alone and can set it up again; if it is required of
-them, they must. A user a manager pushed
-to portitor-config has the manager's two-factor login; it is set up and reset there
-(a console reset on the firewall lasts until the manager's next commit).
+*Reset 2FA*, or, on the console, `sudo -u portitor portitor-config reset-2fa <user>`.
+The user then logs in with the password alone and can set it up again; if it is
+required of them, they must. Users are each firewall's own: behind portitor-web, a
+user logs in to each firewall with that firewall's user (an HA pair's are the
+primary's, which the secondary copies).
 
 A login lasts 12 hours, or 30 days with *Remember me*. Changing your password ends
 your other sessions; deleting a user, changing their role or resetting their password
-ends theirs, and so does `portitor-web createadmin` for an existing user. An open
+ends theirs, and so does `portitor-config createadmin` for an existing user. An open
 console closes within a few seconds when its session ends or expires. *Log out* only
 clears the cookie in that browser: a copy of the cookie stays valid until it
 expires. To end every session of a user at once, change the password. Changing
@@ -386,17 +451,19 @@ renewed, so make a new one before it ends.
 
 ### The GUI's own certificate
 
-portitor-web can serve HTTPS with one of these certificates: choose it under
+portitor-config can serve HTTPS with one of these certificates: choose it under
 *Settings → Portitor web*. That takes effect without a restart, but needs
-portitor-web to serve HTTPS itself: `tls_cert` and `tls_key` in `web.yaml` (the
-ISO's setup sets them to a self-signed certificate), with `bind` on an address the
-browser reaches, e.g. `0.0.0.0:443`. It fetches the chain and key from the agent
+portitor-config to serve HTTPS itself: `tls_cert` and `tls_key` in `config.yaml`
+(the ISO's setup sets them to a self-signed certificate), with `bind` on an address
+the browser reaches, e.g. `0.0.0.0:443`. portitor-web and the HA peer still get
+`tls_cert`, which they pin (they ask for it by name). Behind portitor-web, the
+browser sees portitor-web's certificate instead. It fetches the chain and key from the agent
 at once, every hour after and when the choice changes, and uses a renewed one
 without a restart. The last one fetched is kept next to the database
 (`tls-certificate.pem`, 0600), so a restart while the agent is unreachable still
-has it; before the first is fetched, and when none is chosen, portitor-web serves
+has it; before the first is fetched, and when none is chosen, portitor-config serves
 `tls_cert`, and tries again every minute. The certificate's domain must be the name you browse
-to. The agent hands out the key to anyone with its token, which portitor-web already holds.
+to. The agent hands out the key to anyone with its token, which portitor-config already holds.
 The service unit lets the `portitor` user listen on port 443
 (`CAP_NET_BIND_SERVICE`).
 
@@ -496,26 +563,12 @@ delete the downloaded copy. Their fields are empty when
 you open a form. Leave them empty to keep the stored value, or enter a new one to
 replace it.
 
-## portitor-config: a firewall's own configuration
+## Moving a virtual firewall
 
-A firewall can keep its configuration on itself, in **portitor-config** (portitor-web
-run under that name, on port 8444), and be managed from a portitor-web elsewhere.
-`install.py --agent HOST --config` installs it next to the agent. On the manager, give
-the firewall its *portitor-config URL*, token (`/etc/portitor/manager.token` on the
-firewall) and fingerprint under *Firewalls*.
-
-- A commit on the manager pushes the virtual firewalls that changed to portitor-config
-  and commits there; confirm and roll back from the manager as usual. The firewall's
-  host (its default virtual firewall) is portitor-config's own: read-only on the
-  manager, changed on the firewall.
-- What the manager pushed is read-only on the firewall. When it can't wait, a global
-  admin there uses *Break glass* on the virtual firewall to edit it; the manager's
-  *Drift* section (under *Firewalls*) then shows it as changed there, to *Take* that
-  version or *Overwrite* it. The next commit waits until then.
-- The manager's users come along at each commit, with their memberships of the pushed
-  virtual firewalls: they log in on the firewall with the same password, and are changed
-  on the manager only. Local users stay, and a local user's name wins over a pushed one.
-- On the firewall's console, as root:
-  `sudo -u portitor portitor-config set interfaces ens19 addresses=192.168.1.1/24`,
-  then `portitor-config commit --confirm 120` and `portitor-config confirm`.
-  `portitor-config api GET /api/...` reads anything the GUI shows.
+A virtual firewall moves to another firewall as a bundle: *Virtual firewalls →
+Export* on one, *Import* on the other (or `portitor-config import-vf` on its console).
+A bundle holds the virtual firewall's rows and the shared objects it uses (hosts and
+prefixes, address lists, services, IP lists), matched by name where they import; it
+holds its secrets too, so global admins only. Each firewall's hosts and prefixes,
+services and IP lists are its own: an object of the same name on two firewalls is two
+objects.

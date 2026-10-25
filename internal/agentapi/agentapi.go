@@ -1259,6 +1259,30 @@ type HAStatus struct {
 	// Standby: it leaves the DNS updates and the tunnel broker to its
 	// peer (fenced, or the secondary while it hears the primary).
 	Standby bool `json:"standby"`
+	// Epoch is the pair's (fwconfig.HA.Epoch) in the applied document;
+	// Stale: a primary whose peer is primary at a higher epoch, taken
+	// over by a promotion, fenced until it gets the secondary's document.
+	Epoch int64 `json:"epoch,omitempty"`
+	Stale bool  `json:"stale,omitempty"`
+}
+
+// HAHeartbeat is an HA host's answer to its peer's heartbeat.
+type HAHeartbeat struct {
+	Node  string `json:"node"`
+	Epoch int64  `json:"epoch"`
+}
+
+// HAPeerConfig is where the host's portitor-config copies the pair's
+// configuration from while it is the secondary, or stale (GET
+// /v1/ha/peer-config): the peer's portitor-config and the pair's secret.
+type HAPeerConfig struct {
+	Node        string `json:"node"`
+	Stale       bool   `json:"stale"`
+	Epoch       int64  `json:"epoch"`
+	PeerAlive   bool   `json:"peer_alive"`
+	URL         string `json:"url"`
+	Fingerprint string `json:"fingerprint"`
+	Secret      string `json:"secret"`
 }
 
 // HAVoteRequest grants an HA host the witness's vote for Seconds.

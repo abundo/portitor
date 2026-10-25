@@ -6,6 +6,7 @@ import { computed, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Marked } from 'marked'
 import { docs } from '@/docs'
+import { BASE } from '@/utils/base'
 
 const route = useRoute()
 const router = useRouter()
@@ -44,7 +45,7 @@ const marked = new Marked({
       if ((doc && slugs.has(doc[1])) || local) {
         const target = doc ? doc[1] : current.value.slug
         const hash = (doc ? doc[2] : local[1]) ?? ''
-        return `<a href="/help/${target}${hash ? '#' + esc(hash) : ''}" data-help="${target}" data-hash="${esc(hash)}">${text}</a>`
+        return `<a href="${BASE}help/${target}${hash ? '#' + esc(hash) : ''}" data-help="${target}" data-hash="${esc(hash)}">${text}</a>`
       }
       if (!/^[a-z]+:/i.test(href)) {
         href =

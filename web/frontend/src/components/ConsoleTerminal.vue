@@ -6,6 +6,7 @@ import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
+import { apiURL } from '@/utils/base'
 
 // A shell on the firewall: portitor-agent runs it as its console user
 // (portitor) and portitor-web passes the WebSocket through. Binary
@@ -34,7 +35,7 @@ function connect() {
   reason.value = ''
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
   const q = props.instance ? `?instance=${encodeURIComponent(props.instance)}` : ''
-  ws = new WebSocket(`${proto}//${location.host}/api/agent/console${q}`)
+  ws = new WebSocket(`${proto}//${location.host}${apiURL('/agent/console')}${q}`)
   ws.binaryType = 'arraybuffer'
   ws.onopen = () => {
     status.value = 'open'

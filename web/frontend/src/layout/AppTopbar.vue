@@ -14,6 +14,8 @@ import { confirmDiscard } from '@/composables/useFormGuard'
 import { api } from '@/api'
 import ConfirmBanner from '@/components/ConfirmBanner.vue'
 import ChangesBanner from '@/components/ChangesBanner.vue'
+import ReplicaBanner from '@/components/ReplicaBanner.vue'
+import FirewallSwitcher from '@/components/FirewallSwitcher.vue'
 
 defineEmits(['toggle-menu'])
 
@@ -110,11 +112,13 @@ const userMenu = computed(() => [
         </template>
       </USelect>
     </div>
+    <FirewallSwitcher />
+    <ReplicaBanner />
     <ConfirmBanner />
-    <ChangesBanner />
+    <ChangesBanner v-if="!auth.replica" />
     <div class="ml-auto flex items-center gap-2">
       <UTooltip
-        v-if="!auth.canEdit"
+        v-if="!auth.canEdit && !auth.replica"
         text="Your user can look at this virtual firewall but not change it"
       >
         <UBadge color="neutral" variant="outline" icon="i-lucide-eye" label="Read-only" />

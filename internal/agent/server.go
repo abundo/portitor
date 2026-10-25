@@ -31,8 +31,16 @@ const maxConfirmTimeout = 30 * time.Minute
 
 // Handler returns the management API.
 func (a *Agent) Handler() http.Handler {
-	api := a.authMiddleware(a.routes())
+	routes := a.routes()
+	api := a.authMiddleware(routes)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// An external witness asks for the quorum and votes with the
+		// pair's witness secret, from another host.
+		if ((r.Method == http.MethodGet && r.URL.Path == "/v1/ha") || (r.Method == http.MethodPost && r.URL.Path == "/v1/ha/vote")) &&
+			a.ha.witnessAuth(r) {
+			routes.ServeHTTP(w, r)
+			return
+		}
 		// The HA peer's heartbeat and certificate copy have the pair's
 		// secret, not the token, and pass allow_from: the peer is another
 		// host. The pair runs the same configuration, so its secret may
@@ -50,7 +58,7 @@ func (a *Agent) Handler() http.Handler {
 				writeJSONResponse(w, http.StatusOK, certs)
 				return
 			}
-			writeJSONResponse(w, http.StatusOK, map[string]any{"node": a.ha.status().Node})
+			writeJSONResponse(w, http.StatusOK, a.ha.heartbeatAnswer())
 			return
 		}
 		api.ServeHTTP(w, r)
@@ -159,6 +167,12 @@ func (a *Agent) routes() *http.ServeMux {
 			writeError(w, http.StatusBadRequest, errors.New("confirm_timeout_seconds out of range"))
 			return
 		}
+		// A document from before the pair's last promotion is a stale
+		// portitor-config's.
+		if h := req.Document.HA; h != nil && h.Epoch < a.ha.epoch() {
+			writeError(w, http.StatusConflict, fmt.Errorf("the HA pair was promoted since (epoch %d, this document's %d): its configuration is the new primary's", a.ha.epoch(), h.Epoch))
+			return
+		}
 		// Apply must finish even if the client goes away (its own rules
 		// may be what cut the connection).
 		res, err := a.Apply(context.WithoutCancel(r.Context()), req.Document, timeout)
@@ -235,6 +249,9 @@ func (a *Agent) routes() *http.ServeMux {
 		writeJSONResponse(w, http.StatusOK, a.ha.status())
 	})
 	mux.HandleFunc("POST /v1/ha/vote", a.handleHAVote)
+	mux.HandleFunc("GET /v1/ha/peer-config", func(w http.ResponseWriter, r *http.Request) {
+		writeJSONResponse(w, http.StatusOK, a.ha.peerConfig())
+	})
 	mux.HandleFunc("GET /v1/system", func(w http.ResponseWriter, r *http.Request) {
 		writeJSONResponse(w, http.StatusOK, a.sys.Status(r.Context()))
 	})
@@ -282,6 +299,8 @@ func (a *Agent) authMiddleware(next http.Handler) http.Handler {
 			ok := false
 			if err == nil {
 				addr = addr.Unmap()
+				// portitor-config on this host, whatever allow_from says.
+				ok = addr.IsLoopback()
 				for _, p := range allow {
 					if p.Contains(addr) {
 						ok = true

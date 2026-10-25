@@ -10,7 +10,7 @@
 #
 # Checks, through the QEMU guest agent and the GUI: the first-boot setup
 # finished, the Portitor units run, the LAN has iso/test.answers' address,
-# the admin logs in and portitor-web reaches the agent. Logs in build/vm/.
+# the admin logs in and portitor-config reaches the agent. Logs in build/vm/.
 # KEEP=1 leaves the virtual machine running afterwards (GUI on
 # https://127.0.0.1:$VM_GUI_PORT/). Needs qemu-system-x86_64 (KVM, else slow),
 # python3 and curl.
@@ -73,7 +73,7 @@ check() {
 	fi
 }
 check "first-boot setup did not fail" sh -c '! systemctl is-failed --quiet portitor-firstboot.service'
-for unit in portitor-agent portitor-web; do
+for unit in portitor-agent portitor-config; do
 	check "$unit running" systemctl is-active --quiet "$unit.service"
 done
 check "no failed units" sh -c 'test -z "$(systemctl list-units --failed --plain --no-legend)" || { systemctl list-units --failed --plain --no-legend; false; }'
@@ -92,7 +92,7 @@ if curl -skf -c "$jar" -o /dev/null -H 'Content-Type: application/json' \
 	-d "{\"username\":\"portitor\",\"password\":\"$PASSWORD\"}" "$GUI/api/login"; then
 	echo "ok    GUI login"
 	if status=$(curl -skf -b "$jar" "$GUI/api/agent/status"); then
-		echo "ok    portitor-web reaches the agent"
+		echo "ok    portitor-config reaches the agent"
 	else
 		fail "GET /api/agent/status"
 		echo "      $status" >&2

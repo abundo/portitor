@@ -2,19 +2,20 @@
 # SPDX-FileCopyrightText: 2026 The Portitor contributors
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-# End-to-end test of the split setup (make iso-e2e-split): the agent and
-# portitor-web in two QEMU virtual machines of iso/vm.sh, on a LAN of their
-# own (a link between their second NICs):
+# End-to-end test of the split setup (make iso-e2e-split): a firewall and
+# portitor-web, the portal to its GUI, in two QEMU virtual machines of
+# iso/vm.sh, on a LAN of their own (a link between their second NICs):
 #
 #   build/vm-fw   role agent  (iso/test-split-fw.answers), LAN 192.168.1.1
 #   build/vm-web  role web    (iso/test-split-web.answers), 192.168.1.10
 #
 # Builds a test ISO for each, installs both at once and boots them. When both
-# first-boot setups have finished, portitor-web joins the firewall with the
-# join string `portitor-setup --show-join` prints on it (as `portitor-setup
-# --join` would), and the checks run through the QEMU guest agents: the units
-# of each role, the firewall's LAN address and ruleset, and from the web VM
-# the GUI login and portitor-web reaching the agent across the LAN. Logs in
+# first-boot setups have finished, portitor-web serves the firewall with the
+# portal string `portitor-setup --show-join` prints on it (`portitor-setup
+# --join STRING`), and the checks run through the QEMU guest agents: the
+# units of each role, the firewall's LAN address and ruleset, and from the
+# web VM the GUI login through the portal and the firewall's portitor-config
+# reaching its agent. Logs in
 # build/vm-fw and build/vm-web. KEEP=1 leaves the virtual machines running.
 # Needs what iso/test.sh needs, and QEMU 7.2 or later (datagram sockets).
 set -euo pipefail
@@ -87,11 +88,10 @@ check() {
 	fi
 }
 
-log "Joining the firewall"
-join=$(guest fw portitor-setup --show-join | grep -o 'portitor-join:[A-Za-z0-9_-]*') ||
-	{ echo "no join string from portitor-setup --show-join on fw" >&2; exit 1; }
-check web "portitor-web bootstrap --join" \
-	runuser -u portitor -- portitor-web -f /etc/portitor/web.yaml bootstrap --join "$join"
+log "Serving the firewall"
+join=$(guest fw portitor-setup --show-join | grep -o 'portitor-portal:[A-Za-z0-9_-]*') ||
+	{ echo "no portal string from portitor-setup --show-join on fw" >&2; exit 1; }
+check web "portitor-setup --join" portitor-setup --join "$join"
 
 log "Checking"
 for name in fw web; do
@@ -99,20 +99,22 @@ for name in fw web; do
 	check "$name" "no failed units" sh -c 'test -z "$(systemctl list-units --failed --plain --no-legend)" || { systemctl list-units --failed --plain --no-legend; false; }'
 done
 check fw "portitor-agent running" systemctl is-active --quiet portitor-agent.service
+check fw "portitor-config running" systemctl is-active --quiet portitor-config.service
 check fw "portitor-web not running" sh -c '! systemctl is-active --quiet portitor-web.service'
 check fw "LAN has 192.168.1.1/24" sh -c "ip -o addr show | grep -qF ' 192.168.1.1/24 '"
 check fw "nftables firewall table loaded" nft list table inet firewall
 check web "portitor-web running" systemctl is-active --quiet portitor-web.service
 check web "portitor-agent not running" sh -c '! systemctl is-active --quiet portitor-agent.service'
+check web "portitor-config not running" sh -c '! systemctl is-active --quiet portitor-config.service'
 check web "the firewall answers on the LAN" ping -c 3 -W 2 192.168.1.1
 # The GUI from inside the web VM (python3: curl may not be installed).
-check web "GUI login, and portitor-web reaches the agent" python3 -c '
+check web "GUI login through the portal, and the firewall reaches its agent" python3 -c '
 import http.cookiejar, json, ssl, sys, urllib.request
 ctx = ssl.create_default_context()
 ctx.check_hostname, ctx.verify_mode = False, ssl.CERT_NONE
 op = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx),
                                  urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
-gui = "https://127.0.0.1"
+gui = "https://127.0.0.1/fw/fw"
 op.open(urllib.request.Request(gui + "/api/login", json.dumps({"username": "portitor", "password": sys.argv[1]}).encode(),
                                {"Content-Type": "application/json"}), timeout=10).close()
 print(op.open(gui + "/api/agent/status", timeout=30).read().decode()[:500])

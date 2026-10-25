@@ -172,14 +172,24 @@ func haBlock(db *gorm.DB, fw *models.Firewall) (*fwconfig.HA, string, error) {
 		if err := db.First(&peer, *fw.HAPrimaryID).Error; err != nil {
 			return nil, "", err
 		}
-		ha.Node, ha.Secret = fwconfig.HASecondary, fw.HASecret
+		ha.Node, ha.Secret, ha.Epoch = fwconfig.HASecondary, fw.HASecret, fw.HAEpoch
+		if peer.HAWitness == models.HAWitnessExternal {
+			ha.WitnessSecret = peer.HAWitnessSecret
+		}
 	case err == nil:
-		ha.Node, ha.Secret = fwconfig.HAPrimary, peer.HASecret
+		ha.Node, ha.Secret, ha.Epoch = fwconfig.HAPrimary, peer.HASecret, peer.HAEpoch
+		if fw.HAWitness == models.HAWitnessExternal {
+			ha.WitnessSecret = fw.HAWitnessSecret
+		}
 	case errors.Is(err, gorm.ErrRecordNotFound):
 		return nil, "", nil
 	default:
 		return nil, "", err
 	}
+	if peer.ConfigURL != "" && peer.ConfigFingerprint != "" {
+		ha.PeerConfig, ha.PeerConfigFingerprint = peer.ConfigURL, peer.ConfigFingerprint
+	}
+	ha.ConfigPort = configPort(fw.ConfigURL)
 	ha.Peer, ha.PeerFingerprint = peer.HAURL, peer.AgentFingerprint
 	if ha.Peer == "" {
 		ha.Peer = peer.AgentURL
@@ -193,6 +203,23 @@ func haBlock(db *gorm.DB, fw *models.Firewall) (*fwconfig.HA, string, error) {
 		return nil, fmt.Sprintf("HA: %s needs its agent's certificate fingerprint, which %s pins", peer.Name, fw.Name), nil
 	}
 	return ha, "", nil
+}
+
+// configPort is the port of a portitor-config URL (https://host[:port]),
+// 0 for none.
+func configPort(s string) int {
+	u, err := url.Parse(s)
+	if err != nil || u.Scheme != "https" || u.Host == "" {
+		return 0
+	}
+	if u.Port() == "" {
+		return 443
+	}
+	p, err := strconv.Atoi(u.Port())
+	if err != nil || p < 1 || p > 65535 {
+		return 0
+	}
+	return p
 }
 
 // BuildInstances builds only the named instances, for a deploy that

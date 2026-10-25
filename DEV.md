@@ -11,7 +11,7 @@ binary (release build, `-tags release`).
   default `GOTOOLCHAIN=auto` an older local Go downloads it)
 - Node.js 22.18+ or 24.12+
 
-Schema migrations are a dedicated command: `portitor-web migrate`. `start` never
+Schema migrations are a dedicated command: `portitor-config migrate`. `start` never
 migrates.
 
 GORM models (`models/`) are the application
@@ -33,12 +33,14 @@ its own state, such as the applied configuration and IP list downloads, under it
 
 ```sh
 make dev-agent         # terminal 1: dry-run agent on https://127.0.0.1:8443
-make dev-web           # terminal 2: migrate, then GUI/API on http://127.0.0.1:8080
+make dev-web           # terminal 2: migrate, then portitor-config's GUI/API on http://127.0.0.1:8080
 make dev-seed          # admin / dev-password-123, a sample home network, agent settings
+make dev-portal        # optional: portitor-web, the portal, on http://127.0.0.1:8090/fw/dev/
 cd web/frontend && npm install && npm run dev   # optional: Vite with hot reload on :5173
 ```
 
-`dev/agent.yaml` and `dev/web.yaml` are the dev configs; runtime files (token,
+`dev/agent.yaml`, `dev/config.yaml` (portitor-config) and `dev/web.yaml` (the portal)
+are the dev configs; runtime files (token,
 certificate, rendered configs, agent state, logs, the SQLite database
 `portitor.db`) go to `dev/run/`. Delete `dev/run/portitor.db*` for an empty database.
 
@@ -87,12 +89,13 @@ the release build in them, the way README's *Install* does on real machines:
 ```
 
 - **fwlab-fw** runs `portitor-agent` as root and applies for real: nftables, the
-  `fw-guest` namespace, VLAN, WireGuard, veth link, BIND and Kea.
-- **fwlab-mgmt** runs `portitor-web`, reaches the agent over the LAN,
-  and plays the ISP on the firewall's WAN (DHCP and NAT to the outside).
+  `fw-guest` namespace, VLAN, WireGuard, veth link, BIND and Kea. Its
+  `portitor-config` keeps the configuration (GUI on 192.168.1.1:8444).
+- **fwlab-mgmt** runs `portitor-web`, the portal to the firewall's GUI over the LAN
+  (`/fw/fw/`), and plays the ISP on the firewall's WAN (DHCP and NAT to the outside).
 
 ```sh
-make lab-up       # images, containers, release build, install; GUI on http://127.0.0.1:28080, admin / admin
+make lab-up       # images, containers, release build, install; GUI on http://127.0.0.1:28080/fw/fw/, admin / admin
 make lab-seed     # the dev/seed.sh network, agent settings
 make lab-deploy   # apply (and confirm, when there is something to roll back to)
 make lab-install  # after code changes: rebuild and reinstall both binaries
@@ -192,9 +195,10 @@ curl -k https://127.0.0.1:28443/api/version    # after a minute or two
 `make iso-e2e-split` (`iso/test-split.sh`) tests the split setup the same way: two
 VMs (`build/vm-fw`, role agent, and `build/vm-web`, role web, answers in
 `iso/test-split-*.answers`) on a LAN of their own (`VM_LAN` of `iso/vm.sh`: a QEMU
-datagram link between their second NICs). portitor-web joins the firewall with the
-join string of `portitor-setup --show-join`, then the checks run in both VMs,
-including the GUI login and the agent's status from the web VM.
+datagram link between their second NICs). portitor-web serves the firewall with the
+portal string of `portitor-setup --show-join` (`portitor-setup --join STRING`), then
+the checks run in both VMs, including the GUI login through the portal and the
+agent's status from the web VM.
 
 `make iso-e2e-update` (`iso/test-update.sh`, `FROM=vX.Y.Z`, default the latest
 GitHub release) tests an update to this tree in `build/vm-update` (GUI on port

@@ -2,12 +2,16 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { onScopeDispose, ref } from 'vue'
+import { BASE } from '@/utils/base'
 
 // useCaptureWorker runs the packet capture worker (workers/capture.worker.js)
 // for as long as the calling component lives, and wraps its messages:
 // state as refs, questions as promises.
 export function useCaptureWorker() {
-  const worker = new Worker(new URL('../workers/capture.worker.js', import.meta.url))
+  // The worker has no document: BASE comes as its name.
+  const worker = new Worker(new URL('../workers/capture.worker.js', import.meta.url), {
+    name: BASE,
+  })
   const ready = ref(false)
   const fatal = ref('')
   const columns = ref([])

@@ -38,5 +38,5 @@ func Mismatch(agent string) string {
 	if web == "dev" || agent == "dev" || agent == "" || web == agent {
 		return ""
 	}
-	return fmt.Sprintf("portitor-web is version %s but the agent is %s; update both to the same version (the agent first)", web, agent)
+	return fmt.Sprintf("portitor-config is version %s but the agent is %s; update both to the same version (the agent first)", web, agent)
 }
