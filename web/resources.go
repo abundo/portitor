@@ -210,6 +210,9 @@ func prepareInstance(tx *gorm.DB, in, old *models.Instance) error {
 	if err := prepareInstanceACMEProxy(tx, in); err != nil {
 		return err
 	}
+	if err := prepareServiceRateLimits(tx, in); err != nil {
+		return err
+	}
 	in.DnsQueryLogClients = cleanList(in.DnsQueryLogClients)
 	if err := checkEntries(tx, "query log clients", in.DnsQueryLogClients, entryCIDR); err != nil {
 		return err
@@ -242,11 +245,14 @@ func prepareInstance(tx *gorm.DB, in, old *models.Instance) error {
 	return renameInstanceRole(tx, in, old)
 }
 
-// seedInstance adds the instance's role and the rules a new instance starts
-// with. The output chain drops by default, so an explicit rule keeps the
+// seedInstance adds the instance's role, its services' rate limits and the
+// rules a new instance starts with. The output chain drops by default, so an explicit rule keeps the
 // firewall's own traffic open until the user narrows it.
 func seedInstance(tx *gorm.DB, in *models.Instance) error {
 	if err := createInstanceRole(tx, in); err != nil {
+		return err
+	}
+	if err := createServiceRateLimits(tx, in); err != nil {
 		return err
 	}
 	return tx.Create(&models.Rule{

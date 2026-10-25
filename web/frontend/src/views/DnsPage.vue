@@ -14,6 +14,7 @@ import DyndnsState from '@/components/DyndnsState.vue'
 import FormHeader from '@/components/FormHeader.vue'
 import NeedInstance from '@/components/NeedInstance.vue'
 import SearchInput from '@/components/SearchInput.vue'
+import ServiceRateLimit from '@/components/ServiceRateLimit.vue'
 import { dnsTemplates, dnsZones, dyndnsClients, instances, interfaces } from '@/api'
 import { errMsg } from '@/api/http'
 import { withLabel } from '@/composables/useInstanceRefs'
@@ -59,6 +60,7 @@ const server = reactive({
   dns_query_log_clients: [],
   dns_query_log_names: [],
   dns_query_log_types: [],
+  dns_rate_limit: false,
   ifaces: [], // { id, name, label, description, ipv4_mode, dns_listen, dns_from_dhcp }
 })
 const serverForm = usePageForm(server)
@@ -80,6 +82,7 @@ async function load() {
     dns_query_log_clients: inst.dns_query_log_clients ?? [],
     dns_query_log_names: inst.dns_query_log_names ?? [],
     dns_query_log_types: inst.dns_query_log_types ?? [],
+    dns_rate_limit: inst.dns_rate_limit ?? false,
     ifaces: ifs.map((i) => ({
       id: i.id,
       name: i.name,
@@ -386,6 +389,9 @@ const tab = computed({
                   </table>
                 </fieldset>
               </div>
+              <fieldset :disabled="readOnly" class="mt-3 space-y-3">
+                <ServiceRateLimit v-model="server.dns_rate_limit" service="DNS server" />
+              </fieldset>
 
               <h2 class="border-b border-default pb-1 mt-8 mb-2 text-xl font-semibold">
                 DNS resolver

@@ -24,6 +24,10 @@ func prepareRateLimit(tx *gorm.DB, l, old *models.RateLimit) error {
 	if old != nil && old.InstanceID != l.InstanceID {
 		return bad("a rate limit cannot move to another virtual firewall")
 	}
+	l.Service = ""
+	if old != nil {
+		l.Service = old.Service
+	}
 	l.Name, l.Description = strings.TrimSpace(l.Name), strings.TrimSpace(l.Description)
 	if !fwconfig.ValidName(l.Name) {
 		return bad("name: no control characters")
@@ -66,6 +70,9 @@ func prepareRateLimit(tx *gorm.DB, l, old *models.RateLimit) error {
 			return err
 		}
 	}
+	if l.Shape && l.Service != "" {
+		return bad("this is a service's rate limit, which polices; it can't shape")
+	}
 	if old != nil && old.Name != l.Name {
 		return tx.Model(&models.Rule{}).Where("instance_id = ? AND rate_limit = ?", l.InstanceID, old.Name).
 			UpdateColumn("rate_limit", l.Name).Error
@@ -74,7 +81,90 @@ func prepareRateLimit(tx *gorm.DB, l, old *models.RateLimit) error {
 }
 
 func deleteRateLimit(tx *gorm.DB, l *models.RateLimit) error {
+	if l.Service != "" {
+		var in models.Instance
+		if err := tx.First(&in, l.InstanceID).Error; err != nil {
+			return err
+		}
+		for _, sv := range serviceRateLimits {
+			if sv.service == l.Service && *sv.on(&in) {
+				return bad(fmt.Sprintf("%s is the %s's rate limit; switch it off on the %s page first", l.Name, sv.label, sv.page))
+			}
+		}
+	}
 	return refuseRuleRef(tx, l.InstanceID, l.Name, func(r models.Rule) string { return r.RateLimit })
+}
+
+// serviceRateLimits are the services open to a subnet
+// (fwconfig.ServiceRateLimit): each may police with its rate limit
+// (models.RateLimit.Service), switched on by the instance's column, and
+// named, at first, name.
+var serviceRateLimits = []struct {
+	service, column, label, page, name, description string
+	on                                              func(*models.Instance) *bool
+}{
+	{"dns", "dns_rate_limit", "DNS server", "DNS", "dns server", "What comes in to the DNS server", func(in *models.Instance) *bool { return &in.DnsRateLimit }},
+	{"dhcp", "dhcp_rate_limit", "DHCP server", "DHCP", "dhcp server", "What comes in to the DHCP server", func(in *models.Instance) *bool { return &in.DhcpRateLimit }},
+	{"ntp", "ntp_rate_limit", "NTP server", "NTP", "ntp server", "What comes in to the NTP server", func(in *models.Instance) *bool { return &in.NtpRateLimit }},
+}
+
+// prepareServiceRateLimits makes the rate limit of each service an
+// instance switches its rate limit on for, unless it has one. A new
+// instance gets them all after it is created (createServiceRateLimits).
+func prepareServiceRateLimits(tx *gorm.DB, in *models.Instance) error {
+	if in.ID == 0 {
+		return nil
+	}
+	for i, sv := range serviceRateLimits {
+		if *sv.on(in) {
+			if err := ensureServiceRateLimit(tx, in.ID, i); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// ensureServiceRateLimit makes the instance's rate limit of
+// serviceRateLimits[i], policing fwconfig.DefaultServiceRate Mbit/s, unless
+// it has one; named after the service, or with a number when that name is
+// taken.
+func ensureServiceRateLimit(tx *gorm.DB, instanceID uint, i int) error {
+	sv := serviceRateLimits[i]
+	var n int64
+	if err := tx.Model(&models.RateLimit{}).Where("instance_id = ? AND service = ?", instanceID, sv.service).Count(&n).Error; err != nil {
+		return err
+	}
+	if n > 0 {
+		return nil
+	}
+	name := sv.name
+	for k := 2; ; k++ {
+		if err := tx.Model(&models.RateLimit{}).Where("instance_id = ? AND name = ?", instanceID, name).Count(&n).Error; err != nil {
+			return err
+		}
+		if n == 0 {
+			break
+		}
+		name = fmt.Sprintf("%s %d", sv.name, k)
+	}
+	return tx.Create(&models.RateLimit{InstanceID: instanceID, Name: name, Description: sv.description, Service: sv.service,
+		Rate: fwconfig.DefaultServiceRate, Unit: fwconfig.RateUnitMBit, Per: fwconfig.RatePerSecond, Connections: true}).Error
+}
+
+// createServiceRateLimits gives a new instance the rate limits of its
+// services, switched on.
+func createServiceRateLimits(tx *gorm.DB, in *models.Instance) error {
+	for i, sv := range serviceRateLimits {
+		if err := ensureServiceRateLimit(tx, in.ID, i); err != nil {
+			return err
+		}
+		if err := tx.Model(in).UpdateColumn(sv.column, true).Error; err != nil {
+			return err
+		}
+		*sv.on(in) = true
+	}
+	return nil
 }
 
 // refuseRuleRef refuses to delete what the instance's rules name in the

@@ -95,6 +95,8 @@ func SampleDocument() Document {
 					{Name: "bulk", Rate: 100, Unit: RateUnitMBit, Per: RatePerSecond, Shape: true},
 					{Name: "shared", Rate: 2, Unit: RateUnitMBytes, Per: RatePerSecond, Shape: true},
 					{Name: "cap", Rate: 10, Unit: RateUnitMBit, Per: RatePerSecond, Burst: 1, Connections: true},
+					{Name: "dns server", Rate: DefaultServiceRate, Unit: RateUnitMBit, Per: RatePerSecond, Connections: true},
+					{Name: "ntp clients", Rate: 20, Per: RatePerSecond, PerSource: true},
 				},
 				NAT: []NATRule{
 					{Kind: NATDNAT, InInterfaces: []string{"wan"}, Protocol: "tcp", DstPorts: "8443", ToAddr: "192.168.1.10", ToPort: 443, Hairpin: true, Description: "NAS"},
@@ -112,6 +114,7 @@ func SampleDocument() Document {
 					Enabled:    true,
 					DomainName: "home.arpa",
 					LeaseTime:  43200,
+					RateLimit:  "dns server",
 					Subnets: []DHCPSubnet{
 						{Prefix: "192.168.1.0/24", Interface: "eth1", RangeStart: "192.168.1.100", RangeEnd: "192.168.1.199", Gateway: "192.168.1.1", DNSServers: []string{"192.168.1.1"}, IPv6OnlyPreferred: IPv6OnlyWait},
 						{Prefix: "192.168.20.0/24", Interface: "eth1.20", RangeStart: "192.168.20.100", RangeEnd: "192.168.20.199", Gateway: "192.168.20.1", DNSServers: []string{"192.168.20.1"}},
@@ -132,6 +135,7 @@ func SampleDocument() Document {
 					Servers:    []NTPServer{{Address: "time.cloudflare.com", IBurst: true, NTS: true}, {Address: "2.debian.pool.ntp.org", Pool: true, IBurst: true}},
 					Interfaces: []string{"eth1"},
 					Allow:      []string{"192.168.1.0/24", "fd00:1::/64"},
+					RateLimit:  "ntp clients",
 				},
 				SNMP: &SNMP{
 					Location: "Server room 1", Contact: "noc@example.com",
@@ -166,6 +170,7 @@ func SampleDocument() Document {
 					Forwarders:       []string{"9.9.9.9"},
 					ListenInterfaces: []string{"eth1", "eth1.20", "wg0"},
 					DNS64:            NAT64WellKnownPrefix,
+					RateLimit:        "dns server",
 					Zones: []DNSZone{
 						{Name: "home.arpa", Type: ZoneForward, Template: "home", Records: []DNSRecord{
 							{Name: "gw", Type: "A", Value: "192.168.1.1"},

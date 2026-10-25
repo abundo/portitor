@@ -447,6 +447,13 @@ type Instance struct {
 	DhcpDomainName string `json:"dhcp_domain_name"`
 	DhcpLeaseTime  int    `json:"dhcp_lease_time"`
 
+	// DnsRateLimit, DhcpRateLimit and NtpRateLimit police what comes in to
+	// those servers (fwconfig.ServiceRateLimit) with the instance's rate
+	// limit of that service (RateLimit.Service).
+	DnsRateLimit  bool `json:"dns_rate_limit"`
+	DhcpRateLimit bool `json:"dhcp_rate_limit"`
+	NtpRateLimit  bool `json:"ntp_rate_limit"`
+
 	// LogDrops lists the filter chains whose policy drops are logged,
 	// LogInvalid those whose invalid packet drops are, and LogAuto the auto
 	// input rules (by service) whose matches are.
@@ -687,6 +694,10 @@ type RateLimit struct {
 	Connections bool `json:"connections"`
 	// Shape queues the traffic of those connections to the rate instead.
 	Shape bool `json:"shape"`
+	// Service, when set, makes it the rate limit of that service of the
+	// instance (dns, dhcp, ntp; serviceRateLimits in web), which it
+	// polices with while switched on there; the API can't change it.
+	Service string `json:"service"`
 }
 
 // Rule kinds besides a rule ("").

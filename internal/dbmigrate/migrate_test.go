@@ -259,3 +259,102 @@ func TestXlat464Migration(t *testing.T) {
 		t.Error("schema not repaired")
 	}
 }
+
+// Instances from before 76 get a rate limit for each of their DNS, DHCP
+// and NTP servers, switched on; one that has a rate limit of that name
+// keeps it, and the service's gets another.
+func TestServiceRateLimitsMigration(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "db.sqlite"), &gorm.Config{Logger: logger.Discard})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := provider(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(context.Background(), 75); err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range []string{
+		`INSERT INTO instances (id, name, firewall_id, is_default) VALUES (1, 'main', 1, true), (2, 'guest', 1, false)`,
+		`INSERT INTO rate_limits (instance_id, name, rate, unit, connections, shape) VALUES (2, 'ntp server', 5, 'mbit', false, true)`,
+	} {
+		if err := db.Exec(s).Error; err != nil {
+			t.Fatalf("%s: %v", s, err)
+		}
+	}
+	if err := Up(db); err != nil {
+		t.Fatal(err)
+	}
+	var ins []models.Instance
+	db.Order("id").Find(&ins)
+	if len(ins) != 2 {
+		t.Fatalf("instances: %d", len(ins))
+	}
+	for _, in := range ins {
+		if !in.DnsRateLimit || !in.DhcpRateLimit || !in.NtpRateLimit {
+			t.Errorf("%s: off", in.Name)
+		}
+	}
+	var l models.RateLimit
+	db.Where("instance_id = 1 AND service = 'dns'").First(&l)
+	if l.Name != "dns server" || l.Rate != 1 || l.Unit != "mbit" || l.Per != "second" || !l.Connections || l.Shape {
+		t.Errorf("dns server: %+v", l)
+	}
+	var ntp, kept models.RateLimit
+	db.Where("instance_id = 2 AND service = 'ntp'").First(&ntp)
+	db.Where("instance_id = 2 AND name = 'ntp server'").First(&kept)
+	if ntp.Name != "ntp server (service)" || ntp.Shape {
+		t.Errorf("guest's ntp server rate limit: %+v", ntp)
+	}
+	if !kept.Shape || kept.Rate != 5 || kept.Service != "" {
+		t.Errorf("guest's own ntp server: %+v", kept)
+	}
+}
+
+// A database the development build's 76 made, whose instances named their
+// services' rate limits, gets the released schema: the named rate limits
+// become the services', and the columns switches.
+func TestServiceRateLimitsDevMigration(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "db.sqlite"), &gorm.Config{Logger: logger.Discard})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := provider(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(context.Background(), 75); err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range []string{
+		`ALTER TABLE instances ADD COLUMN dns_rate_limit TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE instances ADD COLUMN dhcp_rate_limit TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE instances ADD COLUMN ntp_rate_limit TEXT NOT NULL DEFAULT ''`,
+		`INSERT INTO goose_db_version (version_id, is_applied) VALUES (76, true)`,
+		`INSERT INTO instances (id, name, firewall_id, is_default, dns_rate_limit, dhcp_rate_limit, ntp_rate_limit)
+			VALUES (1, 'main', 1, true, 'resolver', 'resolver', '')`,
+		`INSERT INTO rate_limits (instance_id, name, rate, unit, connections) VALUES (1, 'resolver', 3, 'mbit', true)`,
+	} {
+		if err := db.Exec(s).Error; err != nil {
+			t.Fatalf("%s: %v", s, err)
+		}
+	}
+	if err := Up(db); err != nil {
+		t.Fatal(err)
+	}
+	var in models.Instance
+	if err := db.First(&in, 1).Error; err != nil {
+		t.Fatal(err)
+	}
+	if !in.DnsRateLimit || !in.DhcpRateLimit || in.NtpRateLimit {
+		t.Errorf("switches: %v %v %v", in.DnsRateLimit, in.DhcpRateLimit, in.NtpRateLimit)
+	}
+	for service, want := range map[string]string{"dns": "resolver", "dhcp": "dhcp server", "ntp": "ntp server"} {
+		var l models.RateLimit
+		db.Where("instance_id = 1 AND service = ?", service).Limit(1).Find(&l)
+		if l.Name != want {
+			t.Errorf("%s: %q, want %q", service, l.Name, want)
+		}
+	}
+}

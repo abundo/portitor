@@ -29,10 +29,16 @@ const modes = [
   { label: 'Shape: queue what is over the rate', value: 'shape' },
 ]
 const isPolice = (f) => f.mode === 'police'
+const isService = (f) => !!f.service
 const unitLabel = { packets: 'packets/s', mbit: 'Mbit/s', kbit: 'kbit/s' }
 const unitText = (r) => unitLabel[r.unit] ?? `${r.unit}/s`
 const modeText = (r) => (r.shape ? 'shape' : 'police')
+// A service's own rate limit (DNS, DHCP, NTP) polices every packet that
+// comes in to it, while its page switches it on.
+const serviceLabel = { dns: 'DNS server', dhcp: 'DHCP server', ntp: 'NTP server' }
 function scopeText(r) {
+  if (r.service)
+    return `all that comes in to the ${serviceLabel[r.service] ?? r.service}${r.per_source ? ', per source address' : ', shared'}`
   if (r.shape) return 'connections, shared'
   return `${r.connections ? 'connections' : 'packets the rule matches'}, ${r.per_source ? 'per source address' : 'shared'}`
 }
@@ -149,13 +155,14 @@ const fields = [
     key: 'mode',
     label: 'Mode',
     type: 'custom',
+    show: (f) => !isService(f),
     hint: 'Police drops what is over the rate. Shape queues it, so the connections slow down without losing packets; accept rules only.',
   },
   {
     key: 'connections',
     label: 'Whole connections',
     type: 'switch',
-    show: isPolice,
+    show: (f) => isPolice(f) && !isService(f),
     hint: 'On: polices all the traffic, both ways, of the connections the rules accept (accept rules only). Off: only the packets the rule matches, which on an accept rule are the new connections; Mbit/s needs whole connections.',
   },
   { key: 'rate', label: 'Rate', type: 'number', required: true },
@@ -186,7 +193,7 @@ const fields = [
   <NeedInstance>
     <CrudPage
       title="Rate limits"
-      description="Rates a rule can name (Rate limit in the rule's form). When the rule matches, its traffic goes through the rate limit. Police drops what is over the rate, in Mbit/s or packets per second: of the whole connections the rule accepts, both ways, or only of the packets the rule matches (on an accept rule, the new connections, as against SSH or ping floods). Shape queues the traffic of the connections the rule accepts to the rate, each way, where it leaves the firewall. Rules that name the same rate limit share it."
+      description="Rates a rule can name (Rate limit in the rule's form). When the rule matches, its traffic goes through the rate limit. Police drops what is over the rate, in Mbit/s or packets per second: of the whole connections the rule accepts, both ways, or only of the packets the rule matches (on an accept rule, the new connections, as against SSH or ping floods). Shape queues the traffic of the connections the rule accepts to the rate, each way, where it leaves the firewall. Rules that name the same rate limit share it. The DNS, DHCP and NTP servers each have one of their own, 1 Mbit/s to start with, which polices every packet that comes in to them while Rate limit is on on their page."
       :api="api"
       :params="{ instance_id: store.currentId }"
       :columns="columns"

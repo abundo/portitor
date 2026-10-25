@@ -14,6 +14,7 @@ import EntriesEditor from '@/components/EntriesEditor.vue'
 import FormHeader from '@/components/FormHeader.vue'
 import NeedInstance from '@/components/NeedInstance.vue'
 import SearchInput from '@/components/SearchInput.vue'
+import ServiceRateLimit from '@/components/ServiceRateLimit.vue'
 import { api, instances, interfaces } from '@/api'
 import { errMsg } from '@/api/http'
 import { withLabel } from '@/composables/useInstanceRefs'
@@ -104,6 +105,7 @@ const form = reactive({
   ntp_enabled: false,
   ntp_servers: [],
   ntp_allow: [],
+  ntp_rate_limit: false,
   ifaces: [], // { id, name, label, description, ntp_serve }
 })
 const pageForm = usePageForm(form)
@@ -131,6 +133,7 @@ async function load() {
       nts: !!s.nts,
     })),
     ntp_allow: inst.ntp_allow ?? [],
+    ntp_rate_limit: inst.ntp_rate_limit ?? false,
     ifaces: ifs.map((i) => ({
       id: i.id,
       name: i.name,
@@ -355,6 +358,7 @@ async function save() {
               >
                 <AddrInput v-model="form.ntp_allow" multiple placeholder="192.168.1.0/24" />
               </UFormField>
+              <ServiceRateLimit v-model="form.ntp_rate_limit" service="NTP server" />
             </fieldset>
           </form>
         </div>

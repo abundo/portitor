@@ -817,7 +817,19 @@ function onKeydown(event, index) {
               <td>
                 <span class="font-mono">{{ autoService(a) }}</span>
               </td>
-              <td><span class="font-semibold text-success">accept</span></td>
+              <td>
+                <span class="font-semibold text-success">accept</span>
+                <UBadge
+                  v-if="a.rate_limit"
+                  color="neutral"
+                  variant="subtle"
+                  size="sm"
+                  icon="i-lucide-gauge"
+                  :label="a.rate_limit"
+                  class="ml-1"
+                  :title="`Rate limit ${a.rate_limit}: polices every packet to the service, before the established accept`"
+                />
+              </td>
               <td class="text-center">
                 <input
                   :disabled="readOnly"

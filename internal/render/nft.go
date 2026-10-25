@@ -129,6 +129,7 @@ func Nftables(in *fwconfig.Instance, lockout *AntiLockout, paths Paths) string {
 	if counted {
 		b.WriteString(connCountRules)
 	}
+	writeServicePolicers(b, in)
 	b.WriteString("\t\tct state established,related accept\n")
 	writeInvalidDrop(b, in, fwconfig.ChainInput)
 	writeVRFLabels(b, in, fwconfig.ChainInput)
@@ -577,6 +578,10 @@ type AutoRule struct {
 	// of DstPort: the rule opens DstPort only while the agent puts it in
 	// the set (ACMEHTTPSet).
 	PortSet string `json:"port_set,omitempty"`
+	// RateLimit names the rate limit that polices every packet the rule's
+	// match takes in, before the established accept
+	// (fwconfig.ServiceRateLimit, writeServicePolicers).
+	RateLimit string `json:"rate_limit,omitempty"`
 }
 
 // ACMEHTTPSet is the port set of the HTTP-01 auto rule: empty, except for
@@ -639,21 +644,21 @@ func AutoInputRules(in *fwconfig.Instance) []AutoRule {
 	}
 	if in.DHCP.Enabled {
 		if ifs := subnetInterfaces(DHCP4Subnets(in)); len(ifs) > 0 {
-			out = append(out, AutoRule{Service: "dhcp server", InInterfaces: ifs, Protocol: "udp", DstPort: 67})
+			out = append(out, AutoRule{Service: "dhcp server", InInterfaces: ifs, Protocol: "udp", DstPort: 67, RateLimit: in.DHCP.RateLimit})
 		}
 		if ifs6 := subnetInterfaces(DHCP6Subnets(in)); len(ifs6) > 0 {
-			out = append(out, AutoRule{Service: "dhcpv6 server", InInterfaces: ifs6, Protocol: "udp", DstPort: 547})
+			out = append(out, AutoRule{Service: "dhcpv6 server", InInterfaces: ifs6, Protocol: "udp", DstPort: 547, RateLimit: in.DHCP.RateLimit})
 		}
 	}
 	if in.DNS.Enabled && len(in.DNS.ListenInterfaces) > 0 {
 		ifs := append([]string(nil), in.DNS.ListenInterfaces...)
 		sort.Strings(ifs)
-		out = append(out, AutoRule{Service: "dns server", InInterfaces: ifs, Protocol: "tcp,udp", DstPort: 53})
+		out = append(out, AutoRule{Service: "dns server", InInterfaces: ifs, Protocol: "tcp,udp", DstPort: 53, RateLimit: in.DNS.RateLimit})
 	}
 	if in.NTP != nil && len(in.NTP.Interfaces) > 0 {
 		ifs := append([]string(nil), in.NTP.Interfaces...)
 		sort.Strings(ifs)
-		out = append(out, AutoRule{Service: "ntp server", InInterfaces: ifs, Protocol: "udp", DstPort: fwconfig.NTPPort})
+		out = append(out, AutoRule{Service: "ntp server", InInterfaces: ifs, Protocol: "udp", DstPort: fwconfig.NTPPort, RateLimit: in.NTP.RateLimit})
 	}
 	// Kea's HA peer, to each Kea server that runs.
 	if h := in.DHCP.HA; h != nil && in.DHCP.Enabled {
@@ -1167,6 +1172,31 @@ func writePolicers(b *strings.Builder, in *fwconfig.Instance, chain string) {
 	}
 }
 
+// writeServicePolicers drops what is over the rate limits of the services
+// open to a subnet (fwconfig.ServiceRateLimit): every packet their auto
+// rules' matches take in, before the established accept, which would let
+// a flow's later packets (or a loop's copies of them) through unpoliced.
+func writeServicePolicers(b *strings.Builder, in *fwconfig.Instance) {
+	for _, r := range AutoInputRules(in) {
+		l := rateLimit(in, r.RateLimit)
+		if l == nil {
+			continue
+		}
+		r.InInterfaces = in.AddVRRPDevices(r.InInterfaces)
+		c := comment("auto", r.Service+", rate limit "+l.Name)
+		for _, match := range r.matches(in) {
+			if !l.PerSource {
+				fmt.Fprintf(b, "\t\t%s limit name %q %s drop %s\n", match, RateLimitKey(l.Name), dropCount(l.Name), c)
+				continue
+			}
+			for _, f := range []struct{ fam, key string }{{"ipv4", "ip"}, {"ipv6", "ip6"}} {
+				fmt.Fprintf(b, "\t\tmeta nfproto %s %s update @%s { %s saddr limit %s } %s drop %s\n",
+					f.fam, match, RateLimitSet(l.Name, f.fam), f.key, limitRate(*l), dropCount(l.Name), c)
+			}
+		}
+	}
+}
+
 // Shapers: the rate limits that shape (fwconfig.RateLimit.Shape). A
 // packet of a connection a rule with a shaper accepted (its ct mark is the
 // rule's ID) gets the shaper's packet mark, which the
@@ -1299,12 +1329,7 @@ func rateLimit(in *fwconfig.Instance, name string) *fwconfig.RateLimit {
 	if name == "" {
 		return nil
 	}
-	for i := range in.RateLimits {
-		if in.RateLimits[i].Name == name {
-			return &in.RateLimits[i]
-		}
-	}
-	return nil // Validate refuses it
+	return in.RateLimit(name) // nil: Validate refuses it
 }
 
 // limitExprs renders what of a rule's matches is over its rate limit on

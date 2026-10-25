@@ -163,6 +163,22 @@ Example: each guest at most 20 Mbit/s (forward), with *guest host* policing
 |---|---|---|---|---|---|---|
 | guest | wan | | | | accept | guest host |
 
+### The services' rate limits
+
+The DNS, DHCP and NTP servers answer anyone on the subnets they serve, so a
+flood, a misbehaving client or an L2 loop on one subnet could keep them, and the
+firewall, busy. Each has a rate limit of its own that polices
+**every packet that comes in to it**, ahead of the established accept, so a
+flow's later packets and a loop's copies count too. A virtual firewall starts
+with one for each, *dns server*, *dhcp server* and *ntp server*, policing
+1 Mbit/s, switched on by *Rate limit* on the DNS, DHCP and NTP pages. Tune them on
+the Rate limits page (a rename is fine): the rate, the burst, or *Per source
+address* so one client can't use up everyone's rate. The automatic rules on the
+rules list (*Input*) show the rate limit next to *accept*, and *Dropped* on the
+Rate limits page counts what it drops. A service's rate limit always polices; it
+can't shape, and it can be deleted only while it is switched off (switching it on
+again makes a new one).
+
 ## Working on the Rules page
 
 - **Edit in place:** cells can be edited directly in the table; a change saves at once

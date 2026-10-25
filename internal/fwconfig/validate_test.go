@@ -93,6 +93,8 @@ func TestValidateCatchesProblems(t *testing.T) {
 		{"shaping per minute", func(d *Document) { d.Instances[0].RateLimits[4].Per = RatePerMinute }, "a rate per second only"},
 		{"shaping per source", func(d *Document) { d.Instances[0].RateLimits[4].PerSource = true }, "a rate per second only"},
 		{"bits without connections", func(d *Document) { d.Instances[0].RateLimits[1].Unit = RateUnitMBit }, "needs connections"},
+		{"unknown dns rate limit", func(d *Document) { d.Instances[0].DNS.RateLimit = "nope" }, `dns: unknown rate limit "nope"`},
+		{"ntp rate limit shapes", func(d *Document) { d.Instances[0].NTP.RateLimit = "bulk" }, `ntp: rate limit "bulk" shapes`},
 		{"comment with rate limit", func(d *Document) { d.Instances[0].Rules[11].RateLimit = "ssh" }, "a comment has only"},
 		{"zone name newline", func(d *Document) { d.Instances[0].InterfaceZones[0].Name = "wan\naccept" }, "invalid name"},
 		{"ports with icmp", func(d *Document) { d.Instances[0].Rules[5].Services[0].DstPorts = "22" }, "ports need protocol"},

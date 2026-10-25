@@ -479,6 +479,18 @@ func buildPeer(db *gorm.DB, generation int64, only map[string]bool, firewallID u
 				in.Rules = append(in.Rules, rule)
 			}
 		}
+		// The rate limits of the services that are switched on to them.
+		serviceLimit := map[string]string{}
+		for _, l := range d.rateLimits {
+			if l.InstanceID == mi.ID && l.Service != "" {
+				serviceLimit[l.Service] = l.Name
+			}
+		}
+		for s, on := range map[string]bool{"dns": mi.DnsRateLimit, "dhcp": mi.DhcpRateLimit, "ntp": mi.NtpRateLimit} {
+			if !on {
+				delete(serviceLimit, s)
+			}
+		}
 		for _, l := range d.rateLimits {
 			if l.InstanceID == mi.ID {
 				in.RateLimits = append(in.RateLimits, fwconfig.RateLimit{
@@ -633,6 +645,7 @@ func buildPeer(db *gorm.DB, generation int64, only map[string]bool, firewallID u
 			ForwardMode:      mi.DnsForwardMode,
 			DNSSECValidation: mi.DnsDnssecValidation,
 			AllowRecursion:   expand("instance "+mi.Name+": dns allow recursion", objs.Prefixes, mi.DnsAllowRecursion),
+			RateLimit:        serviceLimit["dns"],
 			Zones:            []fwconfig.DNSZone{},
 		}
 		if mi.Dns64 {
@@ -752,7 +765,7 @@ func buildPeer(db *gorm.DB, generation int64, only map[string]bool, firewallID u
 		// RA on, served on the interface that has an address inside the
 		// prefix (with the prefix's length). Several on one interface
 		// become a Kea shared network (render.KeaDhcp4Conf).
-		in.DHCP = fwconfig.DHCPServer{Enabled: mi.DhcpEnabled, DomainName: mi.DhcpDomainName, LeaseTime: mi.DhcpLeaseTime, Subnets: []fwconfig.DHCPSubnet{}}
+		in.DHCP = fwconfig.DHCPServer{Enabled: mi.DhcpEnabled, DomainName: mi.DhcpDomainName, LeaseTime: mi.DhcpLeaseTime, RateLimit: serviceLimit["dhcp"], Subnets: []fwconfig.DHCPSubnet{}}
 		raIndex := map[string]int{}
 		for _, p := range prefixes {
 			dhcp := p.DhcpEnabled && mi.DhcpEnabled
@@ -853,8 +866,9 @@ func buildPeer(db *gorm.DB, generation int64, only map[string]bool, firewallID u
 
 		if mi.NtpEnabled {
 			in.NTP = &fwconfig.NTP{
-				Servers: slices.Clone([]fwconfig.NTPServer(mi.NtpServers)),
-				Allow:   expand("instance "+mi.Name+": ntp allow", objs.Prefixes, mi.NtpAllow),
+				Servers:   slices.Clone([]fwconfig.NTPServer(mi.NtpServers)),
+				Allow:     expand("instance "+mi.Name+": ntp allow", objs.Prefixes, mi.NtpAllow),
+				RateLimit: serviceLimit["ntp"],
 			}
 			for _, ifc := range in.Interfaces {
 				if mif, ok := ifaceByName(d.interfaces, mi.ID, ifc.Name); ok && mif.NtpServe {

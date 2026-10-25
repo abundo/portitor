@@ -12,6 +12,7 @@ import DhcpLeaseInfo from '@/components/DhcpLeaseInfo.vue'
 import FormHeader from '@/components/FormHeader.vue'
 import NeedInstance from '@/components/NeedInstance.vue'
 import SearchInput from '@/components/SearchInput.vue'
+import ServiceRateLimit from '@/components/ServiceRateLimit.vue'
 import { api, instances, interfaces, ipamPrefixes } from '@/api'
 import { errMsg } from '@/api/http'
 import { withLabel } from '@/composables/useInstanceRefs'
@@ -108,6 +109,7 @@ const server = reactive({
   dhcp_enabled: false,
   dhcp_domain_name: '',
   dhcp_lease_time: 86400,
+  dhcp_rate_limit: false,
   ifaces: [], // { id, name, label, description, ipv4_mode, ipv6_accept_ra, prefixes: [prefixRow] }
   orphans: [],
 })
@@ -147,6 +149,7 @@ async function load() {
     dhcp_enabled: inst.dhcp_enabled,
     dhcp_domain_name: inst.dhcp_domain_name ?? '',
     dhcp_lease_time: inst.dhcp_lease_time,
+    dhcp_rate_limit: inst.dhcp_rate_limit ?? false,
     ifaces: ifs.map((i) => ({
       id: i.id,
       name: i.name,
@@ -171,8 +174,13 @@ const settings = (p) => JSON.stringify(prefixFields.map((k) => p[k]))
 async function save() {
   saving.value = true
   try {
-    const { dhcp_enabled, dhcp_domain_name, dhcp_lease_time } = server
-    await instances.update(store.currentId, { dhcp_enabled, dhcp_domain_name, dhcp_lease_time })
+    const { dhcp_enabled, dhcp_domain_name, dhcp_lease_time, dhcp_rate_limit } = server
+    await instances.update(store.currentId, {
+      dhcp_enabled,
+      dhcp_domain_name,
+      dhcp_lease_time,
+      dhcp_rate_limit,
+    })
     for (const p of allPrefixes()) {
       if (settings(p) === loaded.get(p.prefix)) continue
       const body = Object.fromEntries(prefixFields.map((k) => [k, p[k]]))
@@ -348,6 +356,7 @@ const autoLeases = useAutoRefresh(loadLeases, { seconds: 10, active: () => tab.v
                     class="w-full sm:w-48"
                   />
                 </UFormField>
+                <ServiceRateLimit v-model="server.dhcp_rate_limit" service="DHCP server" />
               </template>
               <p v-else class="text-sm text-muted">
                 With the DHCP server off, the interfaces' DHCP settings are kept but not served;

@@ -335,6 +335,14 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 	if shaping > MaxShapers {
 		v.addf("%s: at most %d shaping rate limits", p, MaxShapers)
 	}
+	for _, s := range in.serviceRateLimits() {
+		switch l := in.RateLimit(s.name); {
+		case l == nil:
+			v.addf("%s: %s: unknown rate limit %q", p, s.what, s.name)
+		case l.Shape:
+			v.addf("%s: %s: rate limit %q shapes; a service's must police", p, s.what, s.name)
+		}
+	}
 
 	// ifaceRefs checks a rule's interface list: interface or zone names.
 	ifaceRefs := func(where string, list []string) {

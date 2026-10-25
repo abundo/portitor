@@ -16,6 +16,9 @@ type NTP struct {
 	// Allow lists the client prefixes chrony answers on Interfaces; empty
 	// answers any client there.
 	Allow []string `json:"allow,omitempty"`
+	// RateLimit names a rate limit that polices what comes in to chrony
+	// (ServiceRateLimit).
+	RateLimit string `json:"rate_limit,omitempty"`
 }
 
 // NTPServer is a time source: an address or host name, or with Pool a

@@ -6,6 +6,7 @@ package web
 import (
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 
@@ -94,6 +95,8 @@ func TestRateLimits(t *testing.T) {
 		t.Fatal(err)
 	}
 	main := doc.Instances[0]
+	// Less the services' (TestServiceRateLimits).
+	main.RateLimits = slices.DeleteFunc(main.RateLimits, func(l fwconfig.RateLimit) bool { return strings.HasSuffix(l.Name, " server") })
 	want := []fwconfig.RateLimit{
 		{Name: "admin", Rate: 4, Per: "second", Burst: 2, PerSource: true},
 		{Name: "bulk", Rate: 50, Unit: "mbit", Per: "second", Shape: true},
@@ -107,5 +110,74 @@ func TestRateLimits(t *testing.T) {
 	}
 	if ifc := main.Interfaces[0]; ifc.ShapeEgress != 40 || ifc.ShapeIngress != 400 {
 		t.Errorf("shaping: %+v", ifc)
+	}
+}
+
+// A new instance gets a rate limit for each of its DNS, DHCP and NTP
+// servers, switched on. Renaming one keeps it the service's; deleting one
+// that is on, or shaping one, is refused; switching one on again makes it
+// anew if it was deleted.
+func TestServiceRateLimits(t *testing.T) {
+	env := newEnv(t)
+	inst := env.create("/api/instances", map[string]any{"name": "main"})
+	instURL := fmt.Sprint("/api/instances/", inst)
+	var in models.Instance
+	env.srv.db.First(&in, inst)
+	if !in.DnsRateLimit || !in.DhcpRateLimit || !in.NtpRateLimit {
+		t.Fatalf("service rate limits off: %v %v %v", in.DnsRateLimit, in.DhcpRateLimit, in.NtpRateLimit)
+	}
+	limitOf := func(service string) models.RateLimit {
+		var l models.RateLimit
+		env.srv.db.Where("instance_id = ? AND service = ?", inst, service).Limit(1).Find(&l)
+		return l
+	}
+	dns := limitOf("dns")
+	if dns.Name != "dns server" || dns.Rate != fwconfig.DefaultServiceRate || dns.Unit != fwconfig.RateUnitMBit || dns.Shape {
+		t.Errorf("dns server rate limit: %+v", dns)
+	}
+	dnsURL := fmt.Sprint("/api/rate-limits/", dns.ID)
+
+	if rec := env.do("PUT", dnsURL, map[string]any{"name": "resolver", "rate": 5, "service": ""}); rec.Code != http.StatusOK {
+		t.Fatalf("rename: %d %s", rec.Code, rec.Body)
+	}
+	if l := limitOf("dns"); l.Name != "resolver" || l.Rate != 5 {
+		t.Errorf("after rename: %+v", l)
+	}
+	if rec := env.do("DELETE", dnsURL, nil); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "DNS server") {
+		t.Errorf("delete while on: %d %s", rec.Code, rec.Body)
+	}
+	if rec := env.do("PUT", dnsURL, map[string]any{"shape": true}); rec.Code != http.StatusBadRequest {
+		t.Errorf("shaping a service's limit: %d", rec.Code)
+	}
+	if rec := env.do("POST", "/api/rate-limits", map[string]any{"instance_id": inst, "name": "mine", "rate": 1, "service": "ntp"}); rec.Code < 400 {
+		var n int64
+		env.srv.db.Model(&models.RateLimit{}).Where("instance_id = ? AND service = ?", inst, "ntp").Count(&n)
+		if n != 1 {
+			t.Errorf("a second ntp rate limit through the API: %d", n)
+		}
+	}
+
+	// Off, the DHCP server's can go; on again, it is back.
+	if rec := env.do("PUT", instURL, map[string]any{"dhcp_rate_limit": false}); rec.Code != http.StatusOK {
+		t.Fatalf("switch off: %d %s", rec.Code, rec.Body)
+	}
+	dhcp := limitOf("dhcp")
+	if rec := env.do("DELETE", fmt.Sprint("/api/rate-limits/", dhcp.ID), nil); rec.Code >= 400 {
+		t.Errorf("delete while off: %d %s", rec.Code, rec.Body)
+	}
+	env.do("PUT", instURL, map[string]any{"ntp_enabled": true, "ntp_servers": []map[string]any{{"address": "192.0.2.123"}}})
+	doc, err := builder.Build(env.srv.db, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	main := doc.Instances[0]
+	if main.DNS.RateLimit != "resolver" || main.DHCP.RateLimit != "" || main.NTP == nil || main.NTP.RateLimit != "ntp server" {
+		t.Errorf("document: dns %q dhcp %q ntp %+v", main.DNS.RateLimit, main.DHCP.RateLimit, main.NTP)
+	}
+	if rec := env.do("PUT", instURL, map[string]any{"dhcp_rate_limit": true}); rec.Code != http.StatusOK {
+		t.Fatalf("switch on: %d %s", rec.Code, rec.Body)
+	}
+	if l := limitOf("dhcp"); l.Name != "dhcp server" || l.ID == dhcp.ID {
+		t.Errorf("dhcp server rate limit made again: %+v", l)
 	}
 }

@@ -319,6 +319,17 @@ type RateLimit struct {
 	Shape       bool   `json:"shape,omitempty"`
 }
 
+// ServiceRateLimit: the services any host on a subnet may use (DNS,
+// DHCP, NTP) may name a rate limit, which polices every packet that
+// comes in to them, before the established accept, so a flood or an L2
+// loop on one subnet can't take the firewall down. It must police, not
+// shape; per source address keeps a bucket per client. Connections makes
+// no difference here: the policer sees every packet anyway.
+//
+// DefaultServiceRate is the rate, in Mbit/s, of the rate limits
+// portitor-config creates for them.
+const DefaultServiceRate = 1
+
 // Rate limit units besides packets (""): bytes and bits (k and m are
 // 1000 and 1000000).
 const (
@@ -353,6 +364,33 @@ func (l RateLimit) Bits() int64 {
 		return n * 1000000
 	}
 	return 0
+}
+
+// RateLimit returns the instance's rate limit of this name; nil for none.
+func (in *Instance) RateLimit(name string) *RateLimit {
+	for i := range in.RateLimits {
+		if in.RateLimits[i].Name == name {
+			return &in.RateLimits[i]
+		}
+	}
+	return nil
+}
+
+// serviceRateLimits lists the rate limits the services name
+// (ServiceRateLimit), by service.
+func (in *Instance) serviceRateLimits() []struct{ what, name string } {
+	var out []struct{ what, name string }
+	add := func(what, name string) {
+		if name != "" {
+			out = append(out, struct{ what, name string }{what, name})
+		}
+	}
+	add("dns", in.DNS.RateLimit)
+	add("dhcp", in.DHCP.RateLimit)
+	if in.NTP != nil {
+		add("ntp", in.NTP.RateLimit)
+	}
+	return out
 }
 
 // Shapers returns the rate limits that shape, when a rule names one;
@@ -479,6 +517,9 @@ type DHCPServer struct {
 	Subnets    []DHCPSubnet `json:"subnets"`
 	// HA runs Kea's HA hook between the hosts of an HA pair (ha.go).
 	HA *DHCPHA `json:"ha,omitempty"`
+	// RateLimit names a rate limit that polices what comes in to the
+	// DHCP servers (ServiceRateLimit).
+	RateLimit string `json:"rate_limit,omitempty"`
 }
 
 // DHCPSubnet is served on Interface by Kea DHCPv4 or DHCPv6. The subnets
@@ -579,7 +620,10 @@ type DNSServer struct {
 	// QueryLog, when set, logs the queries BIND answers; the agent keeps
 	// those that pass its filters for the GUI's log panel.
 	QueryLog *DNSQueryLog `json:"query_log,omitempty"`
-	Zones    []DNSZone    `json:"zones"`
+	// RateLimit names a rate limit that polices what comes in to the DNS
+	// server (ServiceRateLimit).
+	RateLimit string    `json:"rate_limit,omitempty"`
+	Zones     []DNSZone `json:"zones"`
 	// Templates the zones refer to by name. A zone without a template
 	// gets a built-in SOA and NS pointing at localhost.
 	SOATemplates   []DNSSOATemplate  `json:"soa_templates,omitempty"`

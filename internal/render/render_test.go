@@ -274,6 +274,34 @@ func withRuleIDs(doc fwconfig.Document) fwconfig.Document {
 	return doc
 }
 
+// The services open to a subnet police every packet to them with their
+// rate limit, before the established accept.
+func TestNftablesServicePolicers(t *testing.T) {
+	b, err := Render(fwconfig.SampleDocument(), Options{Paths: DefaultPaths(), Units: DefaultUnits()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	nft := mustFile(t, b, "/etc/nftables.d/portitor.nft")
+	dns, ntp := RateLimitKey("dns server"), RateLimitKey("ntp clients")
+	established := strings.Index(nft, "ct state established,related accept")
+	for _, want := range []string{
+		fmt.Sprintf(`iifname { "eth1", "eth1.20" } udp dport 67 limit name %q counter name "%s_drop" drop comment "auto: dhcp server, rate limit dns server"`, dns, dns),
+		fmt.Sprintf(`iifname "eth1" udp dport 547 limit name %q counter name "%s_drop" drop comment "auto: dhcpv6 server, rate limit dns server"`, dns, dns),
+		fmt.Sprintf(`iifname { "eth1", "eth1.20", "wg0" } meta l4proto { tcp, udp } th dport 53 limit name %q counter name "%s_drop" drop`, dns, dns),
+		fmt.Sprintf(`meta nfproto ipv4 iifname "eth1" udp dport 123 update @%s_v4 { ip saddr limit rate over 20/second } counter name "%s_drop" drop`, ntp, ntp),
+		fmt.Sprintf(`meta nfproto ipv6 iifname "eth1" udp dport 123 update @%s_v6 { ip6 saddr limit rate over 20/second } counter name "%s_drop" drop`, ntp, ntp),
+		fmt.Sprintf("\tlimit %s {\n\t\trate over 125 kbytes/second\n\t}\n", dns),
+	} {
+		i := strings.Index(nft, want)
+		switch {
+		case i < 0:
+			t.Errorf("missing %q in\n%s", want, nft)
+		case i > established && !strings.HasPrefix(want, "\tlimit"):
+			t.Errorf("%q after the established accept", want)
+		}
+	}
+}
+
 func TestNftablesRuleCounters(t *testing.T) {
 	doc := withRuleIDs(fwconfig.SampleDocument())
 	b, err := Render(doc, Options{Paths: DefaultPaths(), Units: DefaultUnits()})
@@ -287,7 +315,8 @@ func TestNftablesRuleCounters(t *testing.T) {
 		`elements = { 1 : "rule_1_orig", `,
 		`iifname { "eth1", "n64-eth1" } oifname "eth0" counter name "rule_1_orig" ct mark set 1 accept comment "rule 1: LAN to Internet"`,
 		`iifname "eth1.20" counter name "rule_11_orig" jump reject_pkt comment "rule 11"`,
-		"policy drop;\n" + connCountRules + "\t\tct state established,related accept\n",
+		// The services' policers (TestNftablesServicePolicers) come between.
+		"policy drop;\n" + connCountRules + "\t\tiifname { \"eth1\", \"eth1.20\" } udp dport 67 limit name ",
 	} {
 		if !strings.Contains(nft, want) {
 			t.Errorf("missing %q in\n%s", want, nft)
