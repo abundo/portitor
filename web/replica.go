@@ -120,21 +120,46 @@ func agentFingerprint(ctx context.Context, rawURL string) (string, error) {
 	return hex.EncodeToString(sum[:]), nil
 }
 
-// localFirewall is this host's firewall: the one whose agent fingerprint
-// is that of the agent at agent_url.
-func (s *Server) localFirewall(ctx context.Context) (*models.Firewall, error) {
+// localFingerprint is the certificate fingerprint of this host's agent, the
+// one at agent_url, read once.
+func (s *Server) localFingerprint(ctx context.Context) (string, error) {
 	r := &s.role
 	r.mu.Lock()
 	fp := r.fingerprint
 	r.mu.Unlock()
-	if fp == "" {
-		var err error
-		if fp, err = agentFingerprint(ctx, s.cfg.AgentURL); err != nil {
-			return nil, fmt.Errorf("this host's agent (%s): %w", s.cfg.AgentURL, err)
-		}
-		r.mu.Lock()
-		r.fingerprint = fp
-		r.mu.Unlock()
+	if fp != "" {
+		return fp, nil
+	}
+	fp, err := agentFingerprint(ctx, s.cfg.AgentURL)
+	if err != nil {
+		return "", fmt.Errorf("this host's agent (%s): %w", s.cfg.AgentURL, err)
+	}
+	r.mu.Lock()
+	r.fingerprint = fp
+	r.mu.Unlock()
+	return fp, nil
+}
+
+// agentURL is where this portitor-config reaches f's agent: its own
+// agent at agent_url (127.0.0.1, say), every other at the firewall's agent
+// URL, the address its HA peer and witness use too. The firewalls are the
+// pair's, copied to the replica, so its own is told by the fingerprint.
+func (s *Server) agentURL(f *models.Firewall) string {
+	if !s.cfg.Local || f.AgentFingerprint == "" {
+		return f.AgentURL
+	}
+	if fp, err := s.localFingerprint(context.Background()); err == nil && strings.EqualFold(fp, f.AgentFingerprint) {
+		return s.cfg.AgentURL
+	}
+	return f.AgentURL
+}
+
+// localFirewall is this host's firewall: the one whose agent fingerprint
+// is that of the agent at agent_url.
+func (s *Server) localFirewall(ctx context.Context) (*models.Firewall, error) {
+	fp, err := s.localFingerprint(ctx)
+	if err != nil {
+		return nil, err
 	}
 	var fw models.Firewall
 	if err := s.db.Where("agent_fingerprint = ?", fp).Order("id").First(&fw).Error; err != nil {

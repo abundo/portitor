@@ -139,7 +139,7 @@ func (s *Server) Promote(ctx context.Context, username string, force bool) (*com
 		if err := tx.First(&oldPrimary, *me.HAPrimaryID).Error; err != nil {
 			return err
 		}
-		return promoteRows(tx, me, &oldPrimary, s.cfg.AgentURL)
+		return promoteRows(tx, me, &oldPrimary)
 	})
 	if err != nil {
 		return nil, err
@@ -165,10 +165,10 @@ func PromoteHere(ctx context.Context, s *Server, force bool) (*commitResult, err
 }
 
 // promoteRows swaps the pair of secondary sec and primary prim: sec owns
-// the instances and tasks, with their values for it, and is reached at
-// localAgent; prim is the secondary at the next epoch, reached at the
-// address its peer used.
-func promoteRows(tx *gorm.DB, sec, prim *models.Firewall, localAgent string) error {
+// the instances and tasks, with their values for it, and prim is the
+// secondary at the next epoch. Their agent URLs stay: each portitor-config
+// reaches its own agent by its agent_url (Server.agentURL).
+func promoteRows(tx *gorm.DB, sec, prim *models.Firewall) error {
 	var ids []uint
 	if err := tx.Model(&models.Instance{}).Where("firewall_id = ?", prim.ID).Pluck("id", &ids).Error; err != nil {
 		return err
@@ -181,14 +181,6 @@ func promoteRows(tx *gorm.DB, sec, prim *models.Firewall, localAgent string) err
 	if err := swapHAValues(tx, ids); err != nil {
 		return err
 	}
-	primURL := prim.HAURL
-	if primURL == "" {
-		primURL = prim.AgentURL
-	}
-	secHA := sec.HAURL
-	if secHA == "" {
-		secHA = sec.AgentURL
-	}
 	witness, witnessSecret := prim.HAWitness, prim.HAWitnessSecret
 	if witness == "" {
 		witness = models.HAWitnessLocal
@@ -196,14 +188,12 @@ func promoteRows(tx *gorm.DB, sec, prim *models.Firewall, localAgent string) err
 	if err := tx.Model(&models.Firewall{}).Where("id = ?", sec.ID).Updates(map[string]any{
 		"ha_primary_id": nil, "ha_secret": "", "ha_epoch": 0,
 		"ha_witness": witness, "ha_witness_secret": witnessSecret,
-		"agent_url": localAgent, "ha_url": secHA,
 	}).Error; err != nil {
 		return err
 	}
 	return tx.Model(&models.Firewall{}).Where("id = ?", prim.ID).Updates(map[string]any{
 		"ha_primary_id": sec.ID, "ha_secret": sec.HASecret, "ha_epoch": sec.HAEpoch + 1,
 		"ha_witness": models.HAWitnessLocal, "ha_witness_secret": "",
-		"agent_url": primURL, "ha_url": "",
 	}).Error
 }
 

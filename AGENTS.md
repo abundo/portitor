@@ -72,7 +72,9 @@ docs and user-facing messages.
 - **Firewalls** (`firewalls`, `web/firewalls.go`, Admin → Firewalls): the hosts
   portitor-config deploys to, each with its agent (URL, token, fingerprint) and its
   `generation`: its own firewall, and its HA secondary (`prepareFirewallHere`
-  refuses others). Every instance is on one (`instances.firewall_id`), and each
+  refuses others). The agent URL is the host's address on the network; a
+  portitor-config reaches its own agent, the one with its agent's fingerprint, at
+  its `agent_url` (`Server.agentURL`), so the replica's copy of the rows works too. Every instance is on one (`instances.firewall_id`), and each
   firewall has one default instance, its host, created with it and named after
   it (`instances_one_default` is per firewall). A link joins instances on one
   firewall, a task runs on one (`tasks.firewall_id`), known NICs are per firewall,
@@ -105,8 +107,7 @@ docs and user-facing messages.
   primary's, with the `peer_*` values (`peerValues`: interface `peer_addresses` in
   place of the static ones, VRRP `peer_priority` or priority - 10, BGP/OSPF
   `peer_router_id`, IS-IS `peer_net`, BGP neighbours' `ha_peer_address`), and both apply; VRRP decides which forwards.
-  Each document carries `HA` (node, the peer's agent URL (`ha_url`, else
-  `agent_url`; never loopback) and fingerprint, the pair's secret, which opens only
+  Each document carries `HA` (node, the peer's agent URL (never loopback) and fingerprint, the pair's secret, which opens only
   `/v1/ha/heartbeat` and `/v1/ha/certificates` and is redacted in history, the
   peer's portitor-config (`config_url`, `config_fingerprint`), the witness secret
   and the epoch). A host may be active only with a
@@ -154,8 +155,8 @@ docs and user-facing messages.
   not answered yet is read-only too (`isReplica`). `POST /api/ha/promote` (or
   `portitor-config promote`) on a replica whose agent no longer hears the primary
   (else `force`) swaps the pair's rows (`promoteRows`: instances and tasks to it,
-  `swapHAValues` for the `peer_*` values, `ha_primary_id`, secret and witness moved,
-  the old primary's agent URL its HA URL, its own `agent_url`), raises the epoch
+  `swapHAValues` for the `peer_*` values, `ha_primary_id`, secret and witness moved;
+  the agent URLs stay), raises the epoch
   (`firewalls.ha_epoch`, on the secondary) and commits. The agent of a primary that
   hears a peer that is primary at a higher epoch is stale (`haManager.staleLocked`):
   fenced and standby, and refuses documents of an earlier epoch (`POST /v1/apply`),

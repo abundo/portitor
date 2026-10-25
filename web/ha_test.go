@@ -38,6 +38,27 @@ func asHost(t *testing.T, env *testEnv, id uint, pc agentapi.HAPeerConfig) {
 	env.srv.checkRole(context.Background())
 }
 
+// Each host reaches its own agent at its agent_url and the other at the
+// firewall's agent URL, from the same copy of the firewalls.
+func TestAgentURL(t *testing.T) {
+	env, _, pair := haPair(t)
+	var prim, sec models.Firewall
+	env.srv.db.First(&prim, 1)
+	env.srv.db.First(&sec, pair)
+	prim.AgentFingerprint, sec.AgentFingerprint = strings.Repeat("ab", 32), strings.Repeat("cd", 32)
+	if u := env.srv.agentURL(&prim); u != "https://192.0.2.1:8443" {
+		t.Errorf("not local: %s", u)
+	}
+	env.srv.cfg.Local, env.srv.cfg.AgentURL = true, "https://127.0.0.1:8443"
+	env.srv.role.fingerprint = strings.Repeat("CD", 32)
+	if u := env.srv.agentURL(&sec); u != "https://127.0.0.1:8443" {
+		t.Errorf("own agent: %s", u)
+	}
+	if u := env.srv.agentURL(&prim); u != "https://192.0.2.1:8443" {
+		t.Errorf("peer's agent: %s", u)
+	}
+}
+
 // haPairConfigured is haPair with a LAN that has the secondary's address,
 // a VRRP router with a priority for each, BGP with a router id for each,
 // and committed to both.
@@ -86,8 +107,8 @@ func TestPromote(t *testing.T) {
 	if p.HAPrimaryID != nil || q.HAPrimaryID == nil || *q.HAPrimaryID != pair || q.HAEpoch != 1 || q.HASecret != sec.HASecret || p.HASecret != "" {
 		t.Fatalf("after: %+v / %+v", p, q)
 	}
-	if p.AgentURL != "https://127.0.0.1:8443" || p.HAURL != "https://192.0.2.3:8443" || q.AgentURL != "https://192.0.2.1:8443" {
-		t.Errorf("agent URLs: %s %s / %s", p.AgentURL, p.HAURL, q.AgentURL)
+	if p.AgentURL != "https://192.0.2.3:8443" || q.AgentURL != "https://192.0.2.1:8443" {
+		t.Errorf("agent URLs: %s / %s", p.AgentURL, q.AgentURL)
 	}
 	var n int64
 	env.srv.db.Model(&models.Instance{}).Where("firewall_id = ?", 1).Count(&n)

@@ -150,12 +150,9 @@ func (s *Server) witnessString(fw *models.Firewall) (string, error) {
 	}
 	w := WitnessPair{Pair: fw.Name, Secret: fw.HAWitnessSecret}
 	for _, h := range []models.Firewall{*fw, sec} {
-		u := h.HAURL
-		if u == "" {
-			u = h.AgentURL
-		}
+		u := h.AgentURL
 		if pu, err := url.Parse(u); err != nil || isLoopback(pu.Hostname()) {
-			return "", bad(fmt.Sprintf("%s's agent URL is a loopback address, which a witness on another host can't reach; set its HA URL", h.Name))
+			return "", bad(fmt.Sprintf("%s's agent URL is a loopback address, which a witness on another host can't reach; set its address on the network", h.Name))
 		}
 		if h.AgentFingerprint == "" {
 			return "", bad(fmt.Sprintf("%s needs its agent's certificate fingerprint", h.Name))

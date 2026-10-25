@@ -52,9 +52,10 @@ Around that, Portitor keeps the pair in step and safe:
 
 Everything is done in the primary's portitor-config.
 
-1. **The primary** is the firewall under *Admin → Firewalls*. Its portitor-config
-   reaches its own agent at `127.0.0.1`, which the secondary can't: set its *HA URL*
-   to the address the secondary uses (`https://192.0.2.5:8443`). Set its
+1. **The primary** is the firewall under *Admin → Firewalls*. Set its agent URL to
+   its address on the network, which the secondary uses (`https://192.0.2.5:8443`),
+   not `127.0.0.1`: each portitor-config reaches its own agent at the `agent_url` in
+   its `config.yaml`, and the other host's at the address here. Set its
    *portitor-config URL* (`https://192.0.2.5:8444`) and *fingerprint*
    (`portitor-config fingerprint` on it), for the secondary to copy from.
 2. **The secondary**: *New firewall*, with its agent URL, token and fingerprint

@@ -296,7 +296,7 @@ func TestFirewallsHAPair(t *testing.T) {
 		"ipv4_mode": "static", "addresses": []string{"10.0.0.1/24"}})
 	env.create("/api/vrrp/routers", map[string]any{"instance_id": main.ID, "interface": "lan", "vrid": 10, "enabled": true, "ipv4": []string{"10.0.0.254"}})
 	fp := strings.Repeat("ab", 32)
-	env.do("PUT", "/api/firewalls/1", map[string]any{"name": "firewall", "agent_url": "https://127.0.0.1:8443", "ha_url": "https://192.0.2.1:8443", "agent_fingerprint": fp})
+	env.do("PUT", "/api/firewalls/1", map[string]any{"name": "firewall", "agent_url": "https://127.0.0.1:8443", "agent_fingerprint": fp})
 	pair := env.create("/api/firewalls", map[string]any{"name": "fw1b", "ha_primary_id": 1, "agent_url": "https://192.0.2.3:8443", "agent_fingerprint": fp})
 	agents[pair] = &fleetAgent{}
 	var n int64
@@ -321,6 +321,11 @@ func TestFirewallsHAPair(t *testing.T) {
 	if rec := env.do("PUT", "/api/interfaces/"+itoa(lan.ID), map[string]any{"peer_addresses": []string{"10.0.0.2/24"}}); rec.Code != http.StatusOK {
 		t.Fatalf("peer addresses: %d %s", rec.Code, rec.Body)
 	}
+	// The secondary can't reach the primary's agent at 127.0.0.1.
+	if rec := env.do("POST", "/api/deploy/apply", map[string]any{}); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "loopback") {
+		t.Fatalf("commit with a loopback agent URL: %d %s", rec.Code, rec.Body)
+	}
+	env.do("PUT", "/api/firewalls/1", map[string]any{"agent_url": "https://192.0.2.1:8443"})
 	if rec := env.do("POST", "/api/deploy/apply", map[string]any{}); rec.Code != http.StatusOK {
 		t.Fatalf("commit: %d %s", rec.Code, rec.Body)
 	}

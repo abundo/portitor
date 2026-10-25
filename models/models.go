@@ -313,7 +313,9 @@ type Firewall struct {
 	Base
 	Name        string `gorm:"uniqueIndex" json:"name"`
 	Description string `json:"description"`
-	// AgentURL is the portitor-agent API, e.g. https://192.168.1.1:8443.
+	// AgentURL is the portitor-agent API, e.g. https://192.168.1.1:8443, as
+	// the network reaches it (its HA peer, a witness); the host's own
+	// portitor-config uses its agent_url (Server.agentURL).
 	AgentURL string `json:"agent_url"`
 	// AgentToken authenticates to the agent. Never sent to the browser;
 	// NewAgentToken sets it.
@@ -338,8 +340,6 @@ type Firewall struct {
 	// (HAWitnessExternal), which opens the vote with HAWitnessSecret.
 	HAWitness       string `gorm:"column:ha_witness" json:"ha_witness"`
 	HAWitnessSecret string `gorm:"column:ha_witness_secret" json:"-"`
-	// HAURL is the agent URL the HA peer uses; empty: AgentURL.
-	HAURL string `gorm:"column:ha_url" json:"ha_url"`
 	// ConfigURL is the host's portitor-config as its HA peer reaches it,
 	// pinned by ConfigFingerprint (its tls_cert): the secondary copies the
 	// primary's database from there (replica.go).

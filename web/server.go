@@ -85,7 +85,7 @@ type Server struct {
 	// tenantWrites are the routes ("POST /api/rules") an instance admin
 	// may use besides reading; their handlers check the instance.
 	tenantWrites map[string]bool
-	// newAgent builds a client for a firewall's agent.
+	// newAgent builds a client for a firewall's agent (at agentURL).
 	newAgent func(f *models.Firewall) (agentAPI, error)
 	static   fs.FS
 	// webCert serves HTTPS when portitor-web does (tls_cert); nil otherwise.
@@ -106,10 +106,10 @@ func NewServer(cfg *Config, db *gorm.DB) *Server {
 		cfg:    cfg,
 		db:     db,
 		jwtKey: []byte(cfg.JWTSecret),
-		newAgent: func(f *models.Firewall) (agentAPI, error) {
-			return agentclient.New(f.AgentURL, f.AgentToken, f.AgentFingerprint)
-		},
 		static: staticFS(),
+	}
+	s.newAgent = func(f *models.Firewall) (agentAPI, error) {
+		return agentclient.New(s.agentURL(f), f.AgentToken, f.AgentFingerprint)
 	}
 	s.localHA = s.localPeerConfig
 	return s

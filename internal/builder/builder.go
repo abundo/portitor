@@ -190,13 +190,10 @@ func haBlock(db *gorm.DB, fw *models.Firewall) (*fwconfig.HA, string, error) {
 		ha.PeerConfig, ha.PeerConfigFingerprint = peer.ConfigURL, peer.ConfigFingerprint
 	}
 	ha.ConfigPort = configPort(fw.ConfigURL)
-	ha.Peer, ha.PeerFingerprint = peer.HAURL, peer.AgentFingerprint
-	if ha.Peer == "" {
-		ha.Peer = peer.AgentURL
-	}
+	ha.Peer, ha.PeerFingerprint = peer.AgentURL, peer.AgentFingerprint
 	if u, err := url.Parse(ha.Peer); err == nil {
 		if a, err := netip.ParseAddr(u.Hostname()); (err == nil && a.IsLoopback()) || u.Hostname() == "localhost" {
-			return nil, fmt.Sprintf("HA: %s's agent URL is a loopback address, which %s can't reach; set its HA URL", peer.Name, fw.Name), nil
+			return nil, fmt.Sprintf("HA: %s's agent URL is a loopback address, which %s can't reach; set its address on the network", peer.Name, fw.Name), nil
 		}
 	}
 	if ha.PeerFingerprint == "" {

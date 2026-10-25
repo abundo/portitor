@@ -84,13 +84,11 @@ const fields = [
     disabled: (f) => !!f.id,
     hint: "Makes it the HA secondary of that firewall: it runs the primary's virtual firewalls and tasks, with the peer values (addresses, VRRP priority, router ids) where the two differ, and a commit deploys to both. Set when the firewall is created.",
   },
-  { key: 'agent_url', label: 'Agent URL', placeholder: 'https://192.168.1.1:8443' },
   {
-    key: 'ha_url',
-    label: 'HA URL',
-    placeholder: 'agent URL',
-    show: (f) => !!f.ha_primary_id || instStore.firewalls.some((x) => x.ha_primary_id === f.id),
-    hint: "The agent URL its HA peer reaches it at, when portitor-config's differs (127.0.0.1, say). Empty: the agent URL.",
+    key: 'agent_url',
+    label: 'Agent URL',
+    placeholder: 'https://192.168.1.1:8443',
+    hint: "Its address on the network, which its HA peer uses too (not 127.0.0.1 in a pair). portitor-config reaches its own host's agent at the agent_url in its config.yaml.",
   },
   {
     key: 'ha_witness',

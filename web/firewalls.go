@@ -39,10 +39,6 @@ func prepareFirewall(tx *gorm.DB, f, old *models.Firewall) error {
 	if f.AgentURL != "" && !strings.HasPrefix(f.AgentURL, "https://") {
 		return bad("agent URL must start with https://")
 	}
-	f.HAURL = strings.TrimRight(strings.TrimSpace(f.HAURL), "/")
-	if f.HAURL != "" && !strings.HasPrefix(f.HAURL, "https://") {
-		return bad("HA URL must start with https://")
-	}
 	f.AgentFingerprint = normalizeFingerprint(f.AgentFingerprint)
 	if f.AgentFingerprint != "" && len(f.AgentFingerprint) != 64 {
 		return bad("fingerprint must be 64 hex characters (SHA-256)")
