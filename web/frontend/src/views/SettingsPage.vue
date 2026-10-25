@@ -68,7 +68,7 @@ async function saveSettings() {
 </script>
 
 <template>
-  <div class="grid gap-4 xl:grid-cols-2">
+  <form class="grid gap-4 xl:grid-cols-2" @submit.prevent="saveSettings">
     <div class="card xl:col-span-2">
       <div class="mb-1 text-lg font-semibold">Portitor web</div>
       <p class="mb-4 text-sm text-muted">
@@ -77,7 +77,7 @@ async function saveSettings() {
         chosen, it serves <code class="font-mono">tls_cert</code>. Its domain must be the name you
         browse to.
       </p>
-      <form class="space-y-3" @submit.prevent="saveSettings">
+      <div class="space-y-3">
         <UFormField label="Certificate">
           <USelect
             v-model="settings.web_certificate_id"
@@ -109,8 +109,7 @@ async function saveSettings() {
         >
           <USwitch v-model="settings.totp_default" />
         </UFormField>
-        <UButton type="submit">Save</UButton>
-      </form>
+      </div>
     </div>
 
     <div class="card">
@@ -119,7 +118,7 @@ async function saveSettings() {
         The agents of the firewalls are set up under
         <RouterLink to="/firewalls" class="text-primary">Firewalls</RouterLink>.
       </p>
-      <form class="space-y-3" @submit.prevent="saveSettings">
+      <div class="space-y-3">
         <UFormField
           label="Default auto-rollback (seconds)"
           help="After an apply, the agent restores the previous configuration unless you confirm within this time. 0 disables it."
@@ -133,7 +132,6 @@ async function saveSettings() {
           <UInput v-model="settings.capture_rate_kbps" type="number" min="0" class="w-40" />
         </UFormField>
         <div class="flex items-center gap-3">
-          <UButton type="submit">Save</UButton>
           <UBadge v-if="deploy.error" color="error" variant="subtle" :label="deploy.error" />
           <UBadge
             v-else-if="deploy.status"
@@ -142,14 +140,15 @@ async function saveSettings() {
             :label="`connected to ${deploy.status.hostname}`"
           />
         </div>
-      </form>
+      </div>
     </div>
 
-    <div class="space-y-4">
+    <div class="flex items-center gap-3 xl:col-span-2">
+      <UButton type="submit">Save</UButton>
       <p v-if="version" class="text-xs text-muted">
         portitor-config {{ version.version }} ({{ version.commit.slice(0, 8) }}),
         {{ version.go_version }}
       </p>
     </div>
-  </div>
+  </form>
 </template>
