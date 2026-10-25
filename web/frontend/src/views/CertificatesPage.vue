@@ -347,6 +347,12 @@ const caFields = [
   },
 ]
 
+// The Overview tab: the ACME client's certificates alone; imported and
+// created ones are on the Store tab.
+const acmeAPI = {
+  ...certificates,
+  list: async (params) => (await certificates.list(params)).filter((r) => !imported(r)),
+}
 const columns = [
   { key: 'name', label: 'Name', class: 'font-medium' },
   { key: 'domains', label: 'SANs', class: 'font-mono', format: (r) => r.domains.join(', ') },
@@ -354,43 +360,21 @@ const columns = [
     key: 'interface_id',
     label: 'Validation',
     format: (r) =>
-      imported(r)
-        ? ''
-        : dns01(r)
-          ? `DNS-01 · ${dnsClientName(r.dyndns_client_id)}`
-          : `HTTP-01 · ${ifaceName(r.interface_id)}`,
+      dns01(r)
+        ? `DNS-01 · ${dnsClientName(r.dyndns_client_id)}`
+        : `HTTP-01 · ${ifaceName(r.interface_id)}`,
   },
-  {
-    key: 'ca',
-    label: 'CA',
-    format: (r) => (imported(r) ? 'Imported' : caLabel(r.ca)),
-  },
+  { key: 'ca', label: 'CA', format: (r) => caLabel(r.ca) },
   { key: 'state', label: 'State' },
   { key: 'enabled', label: 'Enabled' },
 ]
-const acme = (form) => form.source !== 'import'
-const dns01 = (form) => acme(form) && form.challenge === 'dns-01'
-const http01 = (form) => acme(form) && form.challenge !== 'dns-01'
+const dns01 = (form) => form.challenge === 'dns-01'
+const http01 = (form) => !dns01(form)
 const fields = computed(() => [
   { key: 'name', label: 'Name', required: true, placeholder: 'www' },
   { key: 'description', label: 'Description' },
   {
-    key: 'fullchain',
-    label: 'Certificate (PEM)',
-    type: 'textarea',
-    show: imported,
-    hint: 'The certificate, then its intermediates. A new one must match the key.',
-  },
-  {
-    key: 'privkey',
-    label: 'Private key (PEM)',
-    type: 'textarea',
-    show: imported,
-    hint: 'Leave empty to keep the stored key, which is never shown.',
-  },
-  {
     key: 'domains',
-    show: acme,
     label: 'Subject Alternative Names (SANs)',
     type: 'tags',
     required: true,
@@ -399,14 +383,12 @@ const fields = computed(() => [
   },
   {
     key: 'common_name',
-    show: acme,
     label: 'Common name (CN)',
     placeholder: 'the first SAN',
     hint: "Optional, at most 64 characters. Only shown to people inspecting the certificate: clients ignore the CN when matching names. Added to the SANs if missing. Let's Encrypt may leave it out.",
   },
   {
     key: 'challenge',
-    show: acme,
     label: 'Challenge',
     type: 'select',
     items: [
@@ -435,14 +417,12 @@ const fields = computed(() => [
   },
   {
     key: 'email',
-    show: acme,
     label: 'Email',
     placeholder: 'admin@example.com',
     hint: "The ACME account's contact. Optional.",
   },
   {
     key: 'ca',
-    show: acme,
     label: 'CA',
     type: 'select',
     items: cas.value.map((c) => ({ label: c.label, value: c.name })),
@@ -450,7 +430,6 @@ const fields = computed(() => [
   },
   {
     key: 'key_type',
-    show: acme,
     label: 'Key type',
     type: 'select',
     items: keyTypeItems,
@@ -569,7 +548,7 @@ const fields = computed(() => [
           title="Certificates"
           noun="certificate"
           description="TLS certificates from Let's Encrypt (ACME), got by the firewall and renewed when two thirds of their lifetime have passed. The CA checks each domain over HTTP on port 80 (HTTP-01), which the firewall opens on the certificate's interface only while it answers, or by a TXT record the firewall writes through a DNS update client (DNS-01), which also works for internal names and wildcards. A certificate from elsewhere is imported with its key on the Store tab, and is never renewed. To serve the GUI itself with one, choose it under Settings → Portitor web."
-          :api="certificates"
+          :api="acmeAPI"
           :params="{ instance_id: store.currentId }"
           :columns="columns"
           :fields="fields"
