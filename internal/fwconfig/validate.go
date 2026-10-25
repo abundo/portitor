@@ -18,6 +18,10 @@ import (
 var (
 	// Instance names become netns names ("fw-" + name) and path segments.
 	instanceNameRe = regexp.MustCompile(`^[a-z][a-z0-9]{0,11}$`)
+	// The default instance is the host, in the root namespace with the
+	// distribution's files and units: its name (its firewall's) is only a
+	// path segment under state_dir and run_dir, and in the agent's URLs.
+	defaultInstanceNameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,62}$`)
 	// Linux IFNAMSIZ is 16 including the NUL.
 	ifnameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,14}$`)
 	// An auto input rule's service: words of a name's characters, one
@@ -75,8 +79,12 @@ func (d *Document) Validate() error {
 	ifaceOwner := map[string]string{} // physical interfaces must be in one instance only
 	for i := range exp.Instances {
 		in := &exp.Instances[i]
-		if !instanceNameRe.MatchString(in.Name) {
-			v.addf("instance %q: name must match %s", in.Name, instanceNameRe)
+		re := instanceNameRe
+		if in.Default {
+			re = defaultInstanceNameRe
+		}
+		if !re.MatchString(in.Name) {
+			v.addf("instance %q: name must match %s", in.Name, re)
 		}
 		if instNames[in.Name] {
 			v.addf("instance %q: duplicate name", in.Name)
@@ -1206,11 +1214,15 @@ func ParsePortsNamed(s string, extra map[string]int) ([]PortRange, error) {
 // entered rather than at deploy time.
 
 func ValidInstanceName(s string) bool { return instanceNameRe.MatchString(s) }
-func ValidIfname(s string) bool       { return ifnameRe.MatchString(s) }
-func ValidDomain(s string) bool       { return validDomain(s) }
-func ValidWGKey(s string) bool        { return validWGKey(s) }
-func ValidMAC(s string) bool          { return macRe.MatchString(s) }
-func ValidEndpoint(s string) bool     { return validEndpoint(s) }
+
+// ValidDefaultInstanceName checks a firewall's name, its default
+// instance's; every valid instance name is one.
+func ValidDefaultInstanceName(s string) bool { return defaultInstanceNameRe.MatchString(s) }
+func ValidIfname(s string) bool              { return ifnameRe.MatchString(s) }
+func ValidDomain(s string) bool              { return validDomain(s) }
+func ValidWGKey(s string) bool               { return validWGKey(s) }
+func ValidMAC(s string) bool                 { return macRe.MatchString(s) }
+func ValidEndpoint(s string) bool            { return validEndpoint(s) }
 
 var queryTypeRe = regexp.MustCompile(`^(?:[A-Z][A-Z0-9-]{0,15}|TYPE[0-9]{1,5})$`)
 

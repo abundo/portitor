@@ -247,6 +247,16 @@ func TestFirewallsRules(t *testing.T) {
 	if rec := env.do("POST", "/api/firewalls", map[string]any{"name": "guest"}); rec.Code != http.StatusBadRequest {
 		t.Errorf("firewall named like a virtual firewall: %d %s", rec.Code, rec.Body)
 	}
+	// A firewall's name, its host's, is freer than a virtual firewall's.
+	if rec := env.do("POST", "/api/firewalls", map[string]any{"name": "Branch-Office_2.lab"}); rec.Code != http.StatusCreated && rec.Code != http.StatusOK {
+		t.Errorf("firewall name: %d %s", rec.Code, rec.Body)
+	}
+	if rec := env.do("POST", "/api/instances", map[string]any{"name": "Shop-2", "firewall_id": 1}); rec.Code != http.StatusBadRequest {
+		t.Errorf("virtual firewall name: %d %s", rec.Code, rec.Body)
+	}
+	if rec := env.do("POST", "/api/firewalls", map[string]any{"name": "../etc"}); rec.Code != http.StatusBadRequest {
+		t.Errorf("firewall name ../etc: %d %s", rec.Code, rec.Body)
+	}
 	if rec := env.do("DELETE", "/api/firewalls/"+itoa(branch), nil); rec.Code != http.StatusBadRequest {
 		t.Errorf("delete with a virtual firewall: %d %s", rec.Code, rec.Body)
 	}

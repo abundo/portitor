@@ -16,6 +16,27 @@ func TestSampleIsValid(t *testing.T) {
 	}
 }
 
+// The default instance, the host, has its firewall's name, which may be
+// longer and hold capitals, '-', '_' and '.'; a virtual firewall's may not.
+func TestValidateDefaultInstanceName(t *testing.T) {
+	doc := SampleDocument()
+	doc.Instances[0].Name = "Branch-Office_2.lab"
+	for i := range doc.Links {
+		for _, e := range []*LinkEnd{&doc.Links[i].A, &doc.Links[i].B} {
+			if e.Instance == "main" {
+				e.Instance = doc.Instances[0].Name
+			}
+		}
+	}
+	if err := doc.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	doc.Instances[1].Name = "Branch-Office_3"
+	if err := doc.Validate(); err == nil || !strings.Contains(err.Error(), "name must match") {
+		t.Fatalf("virtual firewall name accepted: %v", err)
+	}
+}
+
 // Every address of a /31 or /32 (/127, /128) is a host address.
 func TestValidatePointToPointAddresses(t *testing.T) {
 	doc := SampleDocument()
@@ -46,6 +67,7 @@ func TestValidateCatchesProblems(t *testing.T) {
 		{"log auto double space", func(d *Document) { d.Instances[0].LogAuto = []string{"dns  server"} }, `log auto: invalid service`},
 		{"two defaults", func(d *Document) { d.Instances[1].Default = true }, "exactly one instance"},
 		{"bad instance name", func(d *Document) { d.Instances[1].Name = "Guest-Net" }, "name must match"},
+		{"bad default instance name", func(d *Document) { d.Instances[0].Name = "../etc" }, "name must match"},
 		{"unknown interface", func(d *Document) { d.Instances[0].Rules[0].InInterfaces = []string{"eth9"} }, `unknown interface or interface zone "eth9"`},
 		{"nat unknown interface", func(d *Document) { d.Instances[0].NAT[1].OutInterfaces = []string{"up"} }, `unknown interface or interface zone "up"`},
 		{"interface of other instance", func(d *Document) { d.Instances[1].Rules[0].InInterfaces = []string{"eth1"} }, `unknown interface or interface zone "eth1"`},

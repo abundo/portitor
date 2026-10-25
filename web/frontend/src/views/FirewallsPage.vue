@@ -69,7 +69,7 @@ const fields = [
     label: 'Name',
     required: true,
     placeholder: 'branch',
-    hint: 'Lowercase letters and digits, max 12. Its host becomes a virtual firewall of this name.',
+    hint: "Letters, digits, '-', '_' and '.', max 63. Its host becomes a virtual firewall of this name.",
   },
   { key: 'description', label: 'Description' },
   {

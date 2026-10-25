@@ -114,11 +114,16 @@ func checkAddrsFree(tx *gorm.DB, i *models.Interface) error {
 
 func prepareInstance(tx *gorm.DB, in, old *models.Instance) error {
 	in.Name = strings.TrimSpace(in.Name)
-	if !fwconfig.ValidInstanceName(in.Name) {
-		return bad("name: lowercase letters and digits, starting with a letter, at most 12 characters")
-	}
 	if err := prepareInstanceFirewall(tx, in, old); err != nil {
 		return err
+	}
+	// The default instance has its firewall's name (prepareFirewall).
+	if in.IsDefault {
+		if !fwconfig.ValidDefaultInstanceName(in.Name) {
+			return bad("name: letters, digits, '-', '_' and '.', starting with a letter or digit, at most 63 characters")
+		}
+	} else if !fwconfig.ValidInstanceName(in.Name) {
+		return bad("name: lowercase letters and digits, starting with a letter, at most 12 characters")
 	}
 	in.LogDrops = cleanList(in.LogDrops)
 	for _, c := range in.LogDrops {

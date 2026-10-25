@@ -26,8 +26,8 @@ import (
 
 func prepareFirewall(tx *gorm.DB, f, old *models.Firewall) error {
 	f.Name = strings.TrimSpace(f.Name)
-	if !fwconfig.ValidInstanceName(f.Name) {
-		return bad("name: lowercase letters and digits, starting with a letter, at most 12 characters")
+	if !fwconfig.ValidDefaultInstanceName(f.Name) {
+		return bad("name: letters, digits, '-', '_' and '.', starting with a letter or digit, at most 63 characters")
 	}
 	if old == nil {
 		if err := instanceNameFree(tx, f.Name); err != nil {
