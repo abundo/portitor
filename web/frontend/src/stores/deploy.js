@@ -10,8 +10,8 @@ import { api } from '@/api'
 // the database differs from what is deployed. rates keeps each interface's
 // receive and send rate (bytes/s) over the last 5 minutes, from the counters'
 // differences between polls, by "instance/interface"; cpu each firewall's CPU
-// use (0..1) over the same window, from its busy and total jiffies, by
-// firewall id.
+// use (0..1) over the same window, from its busy and total jiffies, and its
+// memory use (mem, 0..1), by firewall id.
 const RATE_WINDOW = 5 * 60 * 1000
 
 export const useDeployStore = defineStore('deploy', {
@@ -69,7 +69,11 @@ export const useDeployStore = defineStore('deploy', {
         this.cpuTimes[fw.id] = { busy: h.cpu_busy, total: h.cpu_total }
         const list = (this.cpu[fw.id] ?? []).filter((r) => now - r.t <= RATE_WINDOW)
         if (prev && h.cpu_total > prev.total && h.cpu_busy >= prev.busy) {
-          list.push({ t: now, usage: (h.cpu_busy - prev.busy) / (h.cpu_total - prev.total) })
+          list.push({
+            t: now,
+            usage: (h.cpu_busy - prev.busy) / (h.cpu_total - prev.total),
+            mem: h.mem_total ? (h.mem_total - h.mem_available) / h.mem_total : 0,
+          })
         }
         this.cpu[fw.id] = list
       }

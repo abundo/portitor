@@ -5,9 +5,6 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import AutoRefreshButton from '@/components/AutoRefreshButton.vue'
 import { useStatusRefresh } from '@/composables/useAutoRefresh'
-import FirewallEvents from '@/components/FirewallEvents.vue'
-import RateSparkline from '@/components/RateSparkline.vue'
-import SearchInput from '@/components/SearchInput.vue'
 import TrafficGraph from '@/components/TrafficGraph.vue'
 import { api } from '@/api'
 import { useAuthStore } from '@/stores/auth'
@@ -17,18 +14,12 @@ import { useInstanceRefs } from '@/composables/useInstanceRefs'
 import { openServiceLogWindow } from '@/composables/useServiceLogWindow'
 import { bytes } from '@/utils/bytes'
 import { ago } from '@/utils/time'
-import { useSearch, valuesText } from '@/utils/search'
 
 const deploy = useDeployStore()
 const instances = useInstanceStore()
 const auth = useAuthStore()
-const { ifaceRefItems, ifaceText } = useInstanceRefs()
+const { ifaceText } = useInstanceRefs()
 const { auto, loading } = useStatusRefresh()
-
-// Descriptions of the instance's interfaces and link ends, by name.
-const ifaceDesc = computed(
-  () => new Map(ifaceRefItems.value.map((it) => [it.value, it.description])),
-)
 
 const st = computed(() => deploy.status)
 const inst = computed(() => st.value?.instances?.find((i) => i.name === instances.current?.name))
@@ -37,14 +28,11 @@ const ifaces = computed(() =>
     a.name.localeCompare(b.name, undefined, { numeric: true }),
   ),
 )
-const { search: ifaceSearch, filtered: shownIfaces } = useSearch(ifaces, (i) =>
-  valuesText(ifaceText(i.name), ifaceDesc.value.get(i.name), i.state),
-)
 const missing = computed(() => (st.value?.programs ?? []).filter((p) => !p.path))
 const missingNeeded = computed(() => missing.value.some((p) => p.needed))
 
-// The firewall the selected virtual firewall is on. Its host's memory, disks
-// and CPU are a global reader's only (the server leaves them out otherwise).
+// The firewall the selected virtual firewall is on. Its host's memory and
+// CPU are a global reader's only (the server leaves them out otherwise).
 const firewallId = computed(() => instances.current?.firewall_id ?? null)
 const fw = computed(() => {
   const list = st.value?.firewalls ?? []
@@ -55,8 +43,8 @@ const cpuSamples = computed(() => (fw.value ? (deploy.cpu[fw.value.id] ?? []) : 
 const cpuNow = computed(() => cpuSamples.value.at(-1)?.usage ?? null)
 const memUsed = computed(() => (host.value ? host.value.mem_total - host.value.mem_available : 0))
 
-// The operating system, its updates and the Portitor releases (from the
-// last check for updates), for System information and Announcements. Asking
+// The operating system and the Portitor releases (from the last check for
+// updates), for System information and Announcements. Asking
 // runs an apt simulation on the firewall, so it is asked now and then, not
 // at every refresh.
 const SYSTEM_MS = 5 * 60 * 1000
@@ -90,9 +78,6 @@ watch(firewallId, () => {
 })
 
 const releases = computed(() => sys.value?.releases?.releases ?? [])
-const newer = computed(() => releases.value.filter((r) => r.newer && r.installable))
-const security = computed(() => (sys.value?.packages ?? []).filter((p) => p.security).length)
-const lastCheck = computed(() => sys.value?.jobs?.find((j) => j.name === 'check')?.finished)
 const announcements = computed(() => releases.value.slice(0, 3))
 
 // Traffic graph: one interface's rates, the first one up by default.
@@ -140,9 +125,7 @@ const stateColor = (s) =>
     : s === 'down' || s === 'failed'
       ? 'error'
       : 'neutral'
-const count = (n) => (n ?? 0).toLocaleString()
 const pct = (f) => `${Math.round(f * 100)} %`
-const usageColor = (f) => (f >= 0.9 ? 'error' : f >= 0.75 ? 'warning' : 'primary')
 function duration(s) {
   const d = Math.floor(s / 86400)
   const h = Math.floor((s % 86400) / 3600)
@@ -150,21 +133,23 @@ function duration(s) {
   return d ? `${d} d ${h} h` : h ? `${h} h ${m} min` : `${m} min`
 }
 
-// The CPU sparkline: use over the store's 5 minutes, 0..100 %.
-const CPU_W = 160
-const CPU_H = 32
+// The CPU and memory graph: use over the store's 5 minutes, 0..100 %.
+const CPU_W = 400
+const CPU_H = 64
 const CPU_WINDOW = 5 * 60 * 1000
-const cpuPath = computed(() => {
+function usagePath(key) {
   const s = cpuSamples.value
   const end = s.at(-1)?.t ?? 0
   return s
     .map((p, n) => {
       const x = CPU_W - ((end - p.t) / CPU_WINDOW) * CPU_W
-      const y = CPU_H - 1 - p.usage * (CPU_H - 2)
+      const y = CPU_H - 1 - p[key] * (CPU_H - 2)
       return `${n ? 'L' : 'M'}${x.toFixed(1)},${y.toFixed(1)}`
     })
     .join(' ')
-})
+}
+const cpuPath = computed(() => usagePath('usage'))
+const memPath = computed(() => usagePath('mem'))
 </script>
 
 <template>
@@ -222,7 +207,7 @@ const cpuPath = computed(() => {
       </template>
     </UAlert>
 
-    <div v-if="auth.readsAll || host" class="grid gap-4 md:grid-cols-2 2xl:grid-cols-4">
+    <div v-if="auth.readsAll || host" class="grid gap-4 md:grid-cols-2">
       <div v-if="auth.readsAll" class="card text-sm">
         <div class="mb-2 flex items-center gap-2">
           <span class="font-semibold">System information</span>
@@ -251,101 +236,58 @@ const cpuPath = computed(() => {
             <dt class="text-muted">Uptime</dt>
             <dd>{{ duration(host.uptime) }}</dd>
           </template>
-          <template v-if="sys">
-            <dt class="text-muted">Updates</dt>
-            <dd class="flex flex-wrap gap-1">
-              <UBadge
-                v-if="newer.length"
-                color="info"
-                variant="subtle"
-                :label="`Portitor ${newer[0].tag}`"
-              />
-              <UBadge
-                v-if="sys.packages.length"
-                :color="security ? 'warning' : 'neutral'"
-                variant="subtle"
-                :label="`${sys.packages.length} packages${security ? `, ${security} security` : ''}`"
-              />
-              <UBadge
-                v-if="sys.reboot_required"
-                color="warning"
-                variant="subtle"
-                label="reboot required"
-              />
-              <span
-                v-if="!newer.length && !sys.packages.length && !sys.reboot_required"
-                class="text-muted"
-                >none</span
-              >
-            </dd>
-            <dt class="text-muted">Last check</dt>
-            <dd>{{ lastCheck ? ago(lastCheck) : 'not since the agent started' }}</dd>
-          </template>
         </dl>
         <div v-if="sysError" class="mt-1 text-xs text-error">{{ sysError }}</div>
       </div>
 
-      <template v-if="host">
-        <div class="card text-sm">
-          <div class="mb-2 font-semibold">CPU</div>
-          <div class="flex items-center gap-3">
-            <span class="text-2xl font-semibold">{{ cpuNow == null ? '…' : pct(cpuNow) }}</span>
-            <svg :width="CPU_W" :height="CPU_H" class="shrink-0">
-              <line
-                :x1="0"
-                :x2="CPU_W"
-                :y1="CPU_H - 0.5"
-                :y2="CPU_H - 0.5"
-                class="stroke-(--ui-border)"
-              />
-              <path
-                v-if="cpuSamples.length > 1"
-                :d="cpuPath"
-                fill="none"
-                stroke-width="2"
-                class="stroke-(--ui-primary)"
-              />
-            </svg>
-          </div>
-          <div class="mt-2 text-xs text-muted">
-            {{ host.cpus }} CPUs · load {{ host.load.map((l) => l.toFixed(2)).join(' ') }}
-          </div>
+      <div v-if="host" class="card text-sm">
+        <div class="mb-2 font-semibold">CPU and memory</div>
+        <div class="mb-2 flex flex-wrap gap-x-6 gap-y-1">
+          <span class="flex items-center gap-2">
+            <span class="h-0.5 w-4 bg-(--ui-primary)" />
+            CPU
+            <span class="text-lg font-semibold">{{ cpuNow == null ? '…' : pct(cpuNow) }}</span>
+          </span>
+          <span class="flex items-center gap-2">
+            <span class="h-0.5 w-4 bg-(--ui-info)" />
+            Memory
+            <span class="text-lg font-semibold">{{ pct(memUsed / host.mem_total) }}</span>
+            <span class="text-muted">{{ bytes(memUsed) }} of {{ bytes(host.mem_total) }}</span>
+          </span>
         </div>
-
-        <div class="card text-sm">
-          <div class="mb-2 font-semibold">Memory</div>
-          <div class="mb-1 flex justify-between">
-            <span>{{ bytes(memUsed) }} of {{ bytes(host.mem_total) }}</span>
-            <span class="text-muted">{{ pct(memUsed / host.mem_total) }}</span>
-          </div>
-          <UProgress
-            :model-value="(memUsed / host.mem_total) * 100"
-            :color="usageColor(memUsed / host.mem_total)"
-            size="sm"
+        <svg :viewBox="`0 0 ${CPU_W} ${CPU_H}`" preserveAspectRatio="none" class="h-16 w-full">
+          <line
+            :x1="0"
+            :x2="CPU_W"
+            :y1="CPU_H - 0.5"
+            :y2="CPU_H - 0.5"
+            class="stroke-(--ui-border)"
+            vector-effect="non-scaling-stroke"
           />
-          <div v-if="host.swap_total" class="mt-2 text-xs text-muted">
-            Swap {{ bytes(host.swap_total - host.swap_free) }} of {{ bytes(host.swap_total) }}
-          </div>
-        </div>
-
-        <div class="card text-sm">
-          <div class="mb-2 font-semibold">Disk</div>
-          <div v-if="!host.disks.length" class="text-muted">No disk found.</div>
-          <div v-for="d in host.disks" :key="d.mount" class="mb-2 last:mb-0">
-            <div class="mb-1 flex justify-between gap-2">
-              <span class="truncate font-mono" :title="d.mount">{{ d.mount }}</span>
-              <span class="whitespace-nowrap text-muted"
-                >{{ bytes(d.used) }} of {{ bytes(d.used + d.free) }}</span
-              >
-            </div>
-            <UProgress
-              :model-value="(d.used / (d.used + d.free)) * 100"
-              :color="usageColor(d.used / (d.used + d.free))"
-              size="sm"
+          <template v-if="cpuSamples.length > 1">
+            <path
+              :d="memPath"
+              fill="none"
+              stroke-width="2"
+              class="stroke-(--ui-info)"
+              vector-effect="non-scaling-stroke"
             />
-          </div>
+            <path
+              :d="cpuPath"
+              fill="none"
+              stroke-width="2"
+              class="stroke-(--ui-primary)"
+              vector-effect="non-scaling-stroke"
+            />
+          </template>
+        </svg>
+        <div class="mt-2 text-xs text-muted">
+          {{ host.cpus }} CPUs · load {{ host.load.map((l) => l.toFixed(2)).join(' ') }}
+          <template v-if="host.swap_total">
+            · swap {{ bytes(host.swap_total - host.swap_free) }} of {{ bytes(host.swap_total) }}
+          </template>
         </div>
-      </template>
+      </div>
     </div>
 
     <template v-if="inst">
@@ -363,65 +305,7 @@ const cpuPath = computed(() => {
         <TrafficGraph :samples="graphSamples" />
       </div>
 
-      <div class="card overflow-x-auto">
-        <div class="mb-2 font-semibold">Interface statistics · {{ inst.name }}</div>
-        <div class="mb-2">
-          <SearchInput v-model="ifaceSearch" />
-        </div>
-        <table class="w-full text-sm">
-          <thead>
-            <tr class="border-b border-default text-left text-xs text-muted">
-              <th class="py-1 pr-4 font-medium">Name</th>
-              <th class="pr-4 font-medium">Description</th>
-              <th class="pr-4 font-medium">State</th>
-              <th class="pr-4 font-medium">Bandwidth, 5 min</th>
-              <th class="pr-4 text-right font-medium">Packets in</th>
-              <th class="pr-4 text-right font-medium">Packets out</th>
-              <th class="pr-4 text-right font-medium">Bytes in</th>
-              <th class="pr-4 text-right font-medium">Bytes out</th>
-              <th class="pr-4 text-right font-medium" title="Received / sent">Errors</th>
-              <th class="text-right font-medium" title="Received / sent">Drops</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr
-              v-for="i in shownIfaces"
-              :key="i.name"
-              class="border-b border-default last:border-0"
-            >
-              <td class="py-1 pr-4 font-mono">{{ ifaceText(i.name) }}</td>
-              <td class="pr-4">{{ ifaceDesc.get(i.name) }}</td>
-              <td class="pr-4">
-                <UBadge :color="stateColor(i.state)" variant="subtle" :label="i.state" />
-              </td>
-              <td class="py-1 pr-4">
-                <RateSparkline :samples="deploy.rates[`${inst.name}/${i.name}`]" />
-              </td>
-              <td class="pr-4 text-right whitespace-nowrap">{{ count(i.rx_packets) }}</td>
-              <td class="pr-4 text-right whitespace-nowrap">{{ count(i.tx_packets) }}</td>
-              <td class="pr-4 text-right whitespace-nowrap">{{ bytes(i.rx_bytes) }}</td>
-              <td class="pr-4 text-right whitespace-nowrap">{{ bytes(i.tx_bytes) }}</td>
-              <td
-                class="pr-4 text-right whitespace-nowrap"
-                :class="{ 'text-error': i.rx_errors || i.tx_errors }"
-              >
-                {{ count(i.rx_errors) }} / {{ count(i.tx_errors) }}
-              </td>
-              <td
-                class="text-right whitespace-nowrap"
-                :class="{ 'text-warning': i.rx_dropped || i.tx_dropped }"
-              >
-                {{ count(i.rx_dropped) }} / {{ count(i.tx_dropped) }}
-              </td>
-            </tr>
-            <tr v-if="!shownIfaces.length">
-              <td colspan="10" class="py-2 text-muted">No interface matches.</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-
-      <div class="grid gap-4 xl:grid-cols-2">
+      <div class="grid gap-4 xl:grid-cols-3">
         <div class="card">
           <div class="mb-2 flex items-center gap-2">
             <span class="font-semibold">Services</span>
@@ -485,15 +369,6 @@ const cpuPath = computed(() => {
             >
           </div>
         </div>
-      </div>
-
-      <div class="grid gap-4 xl:grid-cols-3">
-        <FirewallEvents
-          class="xl:col-span-2"
-          :instance="inst.name"
-          :firewall-id="firewallId"
-          :iface-text="ifaceText"
-        />
         <div v-if="auth.readsAll" class="card text-sm">
           <div class="mb-2 font-semibold">Announcements</div>
           <div v-if="!sys?.releases" class="text-muted">

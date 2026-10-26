@@ -163,7 +163,7 @@ two hosts by those fingerprints.
 
 | Section | Page | What |
 |---|---|---|
-| | Dashboard | The selected virtual firewall on the firewall: system information and updates, CPU, memory and disk use of its host (global readers), a traffic graph, interface statistics (packets, bytes, errors, drops), services with their logs, connected WireGuard peers, the packets its rules logged since the page opened, the latest release notes as announcements, missing programs. |
+| | Dashboard | The selected virtual firewall on the firewall: system information, CPU and memory use of its host in one graph (global readers), a traffic graph, services with their logs, connected WireGuard peers, the latest release notes as announcements, missing programs. |
 | | Deploy | Check, preview, apply, history. |
 | Globals | Virtual firewalls | Firewalls of their own on one host, each with its own interfaces, routing, rules and services. The host itself is the default virtual firewall. |
 | | Links | veth pairs between virtual firewalls. |
