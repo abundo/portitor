@@ -170,5 +170,5 @@ func deleteCertificate(tx *gorm.DB, c *models.Certificate) error {
 	if n > 0 {
 		return bad(fmt.Sprintf("certificate %s is used by the ACME proxy", c.Name))
 	}
-	return nil
+	return refuseOpenVPNCertificate(tx, c)
 }

@@ -73,6 +73,9 @@ func (d *Document) Validate() error {
 	v.ipLists(d.IPLists)
 	v.tasks(d.Tasks)
 	v.ha(d.HA)
+	if d.Directory != nil {
+		v.directory(d.Directory)
+	}
 
 	defaults := 0
 	instNames := map[string]bool{}
@@ -148,6 +151,9 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 		if strings.HasPrefix(ifc.Name, NAT64DevicePrefix) {
 			v.addf("%s: %s names are for NAT64 devices", ip, NAT64DevicePrefix)
 		}
+		if strings.HasPrefix(ifc.Name, OpenVPNDevicePrefix) && (ifc.Kind != KindOpenVPN || ifc.Parent == "") {
+			v.addf("%s: %s names are for OpenVPN TCP devices", ip, OpenVPNDevicePrefix)
+		}
 		if ifc.ShapeEgress < 0 || ifc.ShapeEgress > MaxShapeMbit || ifc.ShapeIngress < 0 || ifc.ShapeIngress > MaxShapeMbit {
 			v.addf("%s: shaping must be 0-%d Mbit/s", ip, MaxShapeMbit)
 		}
@@ -168,21 +174,21 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 		switch ifc.IPv4Mode {
 		case ModeStatic, ModeNone:
 		case ModeDHCP:
-			if ifc.Kind == KindWireGuard || ifc.Kind == KindLink || ifc.Kind == KindLoopback || ifc.Kind == Kind6in4 {
+			if ifc.Kind == KindWireGuard || ifc.Kind == KindLink || ifc.Kind == KindLoopback || ifc.Kind == Kind6in4 || ifc.Kind == KindOpenVPN {
 				v.addf("%s: dhcp client is not supported on %s interfaces", ip, ifc.Kind)
 			}
 		default:
 			v.addf("%s: invalid ipv4 mode %q", ip, ifc.IPv4Mode)
 		}
 		switch {
-		case ifc.DHCPv6 && (ifc.Kind == KindWireGuard || ifc.Kind == KindLink || ifc.Kind == KindLoopback || ifc.Kind == Kind6in4):
+		case ifc.DHCPv6 && (ifc.Kind == KindWireGuard || ifc.Kind == KindLink || ifc.Kind == KindLoopback || ifc.Kind == Kind6in4 || ifc.Kind == KindOpenVPN):
 			v.addf("%s: dhcpv6 client is not supported on %s interfaces", ip, ifc.Kind)
 		case ifc.DHCPv6 && !ifc.IPv6AcceptRA:
 			v.addf("%s: dhcpv6 client needs router advertisements accepted (the default route comes from them)", ip)
 		case ifc.DHCPv6PD && !ifc.DHCPv6:
 			v.addf("%s: prefix delegation needs the dhcpv6 client", ip)
 		}
-		if ifc.LLDP && (ifc.Kind == KindWireGuard || ifc.Kind == KindLink || ifc.Kind == KindLoopback || ifc.Kind == Kind6in4) {
+		if ifc.LLDP && (ifc.Kind == KindWireGuard || ifc.Kind == KindLink || ifc.Kind == KindLoopback || ifc.Kind == Kind6in4 || ifc.Kind == KindOpenVPN) {
 			v.addf("%s: lldp is not supported on %s interfaces", ip, ifc.Kind)
 		}
 		if ifc.DHCPv6PDLength != 0 && (ifc.DHCPv6PDLength < 32 || ifc.DHCPv6PDLength > 64) {
@@ -239,6 +245,8 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 			v.vxlan(ip, ifc)
 		case KindVRF:
 			v.vrf(ip, ifc)
+		case KindOpenVPN:
+			v.openVPN(ip, in, ifc)
 		default:
 			v.addf("%s: invalid kind %q", ip, ifc.Kind)
 		}
@@ -263,6 +271,7 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 	v.vxlanInstance(p, in, ifaces)
 	v.vrfInstance(p, in, ifaces)
 	v.l3vniInstance(p, in)
+	v.openVPNInstance(p, in)
 
 	zones := map[string]bool{}
 	for _, z := range in.InterfaceZones {

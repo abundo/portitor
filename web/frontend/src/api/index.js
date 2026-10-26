@@ -41,6 +41,8 @@ export const bfdInterfaces = crud('/bfd/interfaces')
 // VRFs of an instance (Routing → VRF).
 export const vrfs = crud('/vrfs')
 export const snmpUsers = crud('/snmp/users')
+export const directoryServers = crud('/directory/servers')
+export const directoryMappings = crud('/directory/mappings')
 // The ACME proxy's policies (Services → ACME proxy).
 export const acmeProxyPolicies = crud('/acme-proxy/policies')
 export const rules = crud('/rules')
@@ -196,6 +198,13 @@ export const api = {
   agentVrrp: () => http.get('/agent/vrrp').then((r) => r.data),
   agentBfd: () => http.get('/agent/bfd').then((r) => r.data),
   agentNtp: () => http.get('/agent/ntp').then((r) => r.data),
+  agentOpenvpn: () => http.get('/agent/openvpn').then((r) => r.data),
+  reorderDirectoryServers: (ids) => http.post('/directory/servers/reorder', { ids }),
+  testDirectoryServer: (body) => http.post('/directory/servers/test', body).then((r) => r.data),
+  browseDirectoryServer: (id, dn) =>
+    http.get(`/directory/servers/${id}/browse`, { params: { dn } }).then((r) => r.data),
+  openvpnClientConfig: (interfaceId) =>
+    http.get(`/interfaces/${interfaceId}/openvpn-client`).then((r) => r.data),
   agentRuleCounters: () => http.get('/agent/rule-counters').then((r) => r.data),
   agentRateLimits: () => http.get('/agent/rate-limits').then((r) => r.data),
   // The logs are one firewall's (firewall_id; null: the first).

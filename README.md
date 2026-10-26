@@ -19,6 +19,12 @@ office networks. It manages:
   advertisements
 - WireGuard tunnels, for road warriors and site-to-site; client configs generated,
   wg-quick files imported
+- an OpenVPN server for remote users (IPv4 and IPv6, UDP with TCP fallback): they log
+  in with their password, as to the GUI (optionally a role's members only); its
+  certificate from the certificate store
+- a directory of users and roles, with OpenLDAP and Active Directory servers: a user the
+  firewall doesn't have logs in through them (GUI and OpenVPN) and is copied in, with the
+  roles their groups map to
 - DHCP and DHCPv6 clients for the WAN link, with IPv6 prefix delegation: LAN
   addresses and router advertisements follow the delegated prefix
 - DNS update: DNS records follow the WAN addresses, on your own nameserver (RFC 2136, TSIG)

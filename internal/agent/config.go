@@ -130,6 +130,7 @@ func (c *Config) applyDefaults() {
 		{&c.Paths.RadvdConf, def.RadvdConf},
 		{&c.Paths.ChronyConf, def.ChronyConf},
 		{&c.Paths.SnmpdConf, def.SnmpdConf},
+		{&c.Paths.OpenVPNDir, def.OpenVPNDir},
 		{&c.Paths.ConntrackdConf, def.ConntrackdConf},
 		{&c.Paths.FRRDir, def.FRRDir},
 		{&c.Paths.FRRRunDir, def.FRRRunDir},
@@ -141,6 +142,8 @@ func (c *Config) applyDefaults() {
 		{&c.Units.DefaultFRR, du.DefaultFRR},
 		{&c.Units.DefaultChrony, du.DefaultChrony},
 		{&c.Units.DefaultSnmpd, du.DefaultSnmpd},
+		{&c.Units.DefaultOpenVPNUDP, du.DefaultOpenVPNUDP},
+		{&c.Units.DefaultOpenVPNTCP, du.DefaultOpenVPNTCP},
 		{&c.Units.DefaultConntrackd, du.DefaultConntrackd},
 	} {
 		if *p.v == "" {
@@ -168,6 +171,12 @@ func (c *Config) applyDefaults() {
 	if c.Units.SnmpdFmt == "" {
 		c.Units.SnmpdFmt = du.SnmpdFmt
 	}
+	if c.Units.OpenVPNUDPFmt == "" {
+		c.Units.OpenVPNUDPFmt = du.OpenVPNUDPFmt
+	}
+	if c.Units.OpenVPNTCPFmt == "" {
+		c.Units.OpenVPNTCPFmt = du.OpenVPNTCPFmt
+	}
 	if c.Units.ConntrackdFmt == "" {
 		c.Units.ConntrackdFmt = du.ConntrackdFmt
 	}
@@ -185,7 +194,7 @@ func (c *Config) validate() error {
 			return fmt.Errorf("allow_from %q: %w", a, err)
 		}
 	}
-	for _, f := range []string{c.Units.NamedFmt, c.Units.Kea4Fmt, c.Units.Kea6Fmt, c.Units.RadvdFmt, c.Units.FRRFmt, c.Units.ChronyFmt, c.Units.SnmpdFmt, c.Units.ConntrackdFmt} {
+	for _, f := range []string{c.Units.NamedFmt, c.Units.Kea4Fmt, c.Units.Kea6Fmt, c.Units.RadvdFmt, c.Units.FRRFmt, c.Units.ChronyFmt, c.Units.SnmpdFmt, c.Units.ConntrackdFmt, c.Units.OpenVPNUDPFmt, c.Units.OpenVPNTCPFmt} {
 		if strings.Count(f, "%s") != 1 {
 			return fmt.Errorf("unit %q must contain exactly one %%s", f)
 		}

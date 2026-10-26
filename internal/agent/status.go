@@ -389,6 +389,11 @@ func (a *Agent) serviceUnits(in *fwconfig.Instance) []string {
 	if in.SNMP != nil {
 		units = append(units, a.cfg.Units.Snmpd(in))
 	}
+	if s := in.OpenVPNServer(); s != nil && s.Enabled {
+		for _, proto := range s.OpenVPN.Protocols() {
+			units = append(units, a.cfg.Units.OpenVPN(in, proto))
+		}
+	}
 	if in.FRRRunning() {
 		units = append(units, a.cfg.Units.FRR(in))
 	}

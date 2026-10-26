@@ -140,6 +140,8 @@ AGENT_UNITS = (
     "portitor-chrony@.service",
     "portitor-snmpd@.service",
     "portitor-conntrackd@.service",
+    "portitor-openvpn-udp@.service",
+    "portitor-openvpn-tcp@.service",
 )
 # The Debian packages the agent runs (iso/preseed.cfg has the same). An
 # update installs the ones missing (a release can need a new one, as 0.4.0
@@ -171,6 +173,9 @@ AGENT_PACKAGES = {
     # Connection sync of HA pairs; the default virtual firewall's runs under
     # conntrackd.service.
     "conntrackd": ("conntrackd.service",),
+    # OpenVPN; the default virtual firewall's runs under the template
+    # openvpn-server@, which starts nothing by itself.
+    "openvpn": (),
     # NAT64; DKMS builds the kernel module with the kernel headers
     # (agent_packages adds them for the architecture).
     "jool-dkms": (),

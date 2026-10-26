@@ -56,6 +56,8 @@ install-agent: portitor-agent
 	install -D -m 0644 deploy/systemd/portitor-radvd@.service $(DESTDIR)/etc/systemd/system/portitor-radvd@.service
 	install -D -m 0644 deploy/systemd/portitor-chrony@.service $(DESTDIR)/etc/systemd/system/portitor-chrony@.service
 	install -D -m 0644 deploy/systemd/portitor-snmpd@.service $(DESTDIR)/etc/systemd/system/portitor-snmpd@.service
+	install -D -m 0644 deploy/systemd/portitor-openvpn-udp@.service $(DESTDIR)/etc/systemd/system/portitor-openvpn-udp@.service
+	install -D -m 0644 deploy/systemd/portitor-openvpn-tcp@.service $(DESTDIR)/etc/systemd/system/portitor-openvpn-tcp@.service
 	install -D -m 0644 deploy/systemd/portitor-conntrackd@.service $(DESTDIR)/etc/systemd/system/portitor-conntrackd@.service
 	install -D -m 0644 deploy/systemd/portitor-frr@.service $(DESTDIR)/etc/systemd/system/portitor-frr@.service
 	test -e $(DESTDIR)/etc/portitor/agent.yaml || install -D -m 0600 deploy/agent.yaml $(DESTDIR)/etc/portitor/agent.yaml

@@ -189,6 +189,8 @@ func virtualMatches(want fwconfig.Interface, have ipLink) bool {
 		return have.kind() == "veth"
 	case fwconfig.KindVRF:
 		return have.kind() == "vrf" && have.LinkInfo.InfoData.Table == want.VRFTable
+	case fwconfig.KindOpenVPN:
+		return have.kind() == "tun"
 	}
 	return true
 }
@@ -221,7 +223,7 @@ func planCreate(ns string, want []fwconfig.Interface, have map[string]ipLink) []
 	sort.SliceStable(order, func(i, j int) bool { return rank(order[i].Kind) < rank(order[j].Kind) })
 	for _, ifc := range order {
 		switch ifc.Kind {
-		case fwconfig.KindVLAN, fwconfig.KindBridge, fwconfig.KindWireGuard, fwconfig.KindLoopback, fwconfig.Kind6in4, fwconfig.KindVXLAN, fwconfig.KindVRF:
+		case fwconfig.KindVLAN, fwconfig.KindBridge, fwconfig.KindWireGuard, fwconfig.KindLoopback, fwconfig.Kind6in4, fwconfig.KindVXLAN, fwconfig.KindVRF, fwconfig.KindOpenVPN:
 		default:
 			continue
 		}
@@ -240,6 +242,10 @@ func planCreate(ns string, want []fwconfig.Interface, have map[string]ipLink) []
 			cmds = append(cmds, ipCmd(ns, "link", "add", "name", ifc.Name, "type", "wireguard"))
 		case fwconfig.KindLoopback:
 			cmds = append(cmds, ipCmd(ns, "link", "add", "name", ifc.Name, "type", "dummy"))
+		case fwconfig.KindOpenVPN:
+			// Persistent, so it keeps its addresses and routes while
+			// OpenVPN (which attaches to it) restarts.
+			cmds = append(cmds, ipCmd(ns, "tuntap", "add", "dev", ifc.Name, "mode", "tun"))
 		case fwconfig.KindVRF:
 			cmds = append(cmds, ipCmd(ns, "link", "add", "name", ifc.Name, "type", "vrf", "table", strconv.Itoa(ifc.VRFTable)))
 		case fwconfig.Kind6in4:

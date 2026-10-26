@@ -18,7 +18,7 @@ CMD ["/sbin/init"]
 # FRR); portitor-config keeps its configuration.
 FROM base AS fw
 RUN apt-get update && apt-get install -y --no-install-recommends \
-		wireguard-tools bind9 bind9-utils dnsutils kea-dhcp4-server kea-dhcp6-server radvd frr frr-pythontools chrony snmpd \
+		wireguard-tools bind9 bind9-utils dnsutils kea-dhcp4-server kea-dhcp6-server radvd frr frr-pythontools chrony snmpd openvpn \
 		sqlite3 openssl \
 	&& rm -rf /var/lib/apt/lists/* \
 	&& systemctl mask named.service kea-dhcp4-server.service kea-dhcp6-server.service radvd.service frr.service chrony.service snmpd.service \

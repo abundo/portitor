@@ -1468,3 +1468,62 @@ type HACertificate struct {
 	Name     string `json:"name"`
 	acme.Raw
 }
+
+// OpenVPNResponse is the state of the instances' OpenVPN servers.
+type OpenVPNResponse struct {
+	Servers []OpenVPNServer `json:"servers"`
+}
+
+// OpenVPNServer is one OpenVPN process: its device and protocol, whether
+// the agent is connected to its management socket, and its clients.
+type OpenVPNServer struct {
+	Instance  string          `json:"instance"`
+	Interface string          `json:"interface"`
+	Device    string          `json:"device"`
+	Proto     string          `json:"proto"`
+	Connected bool            `json:"connected"`
+	Error     string          `json:"error,omitempty"`
+	Clients   []OpenVPNClient `json:"clients"`
+}
+
+// OpenVPNClient is a connected client, as OpenVPN's status lists it.
+// Source says what checked the password: "local" or an LDAP server's name.
+type OpenVPNClient struct {
+	ID          int64     `json:"id"`
+	User        string    `json:"user"`
+	RealAddress string    `json:"real_address"`
+	Address     string    `json:"address,omitempty"`
+	Address6    string    `json:"address6,omitempty"`
+	RxBytes     int64     `json:"rx_bytes"`
+	TxBytes     int64     `json:"tx_bytes"`
+	Since       time.Time `json:"since"`
+	Cipher      string    `json:"cipher,omitempty"`
+	Source      string    `json:"source,omitempty"`
+}
+
+// OpenVPNCA is the CA a client of an instance's OpenVPN server trusts:
+// the root of the server certificate's chain, and the name it verifies
+// (the certificate's CN).
+type OpenVPNCA struct {
+	CA         string `json:"ca"`
+	CommonName string `json:"common_name"`
+}
+
+// DirectoryLoginsResponse are the OpenVPN logins, through the directory,
+// of users portitor-config doesn't have, for it to copy.
+type DirectoryLoginsResponse struct {
+	Logins []DirectoryLogin `json:"logins"`
+}
+
+// DirectoryLogin is one such login: the user, the directory server that
+// checked the password, and what it has of the user.
+type DirectoryLogin struct {
+	ID          int64     `json:"id"`
+	Time        time.Time `json:"time"`
+	User        string    `json:"user"`
+	Server      string    `json:"server"`
+	DN          string    `json:"dn"`
+	Email       string    `json:"email,omitempty"`
+	DisplayName string    `json:"display_name,omitempty"`
+	Groups      []string  `json:"groups,omitempty"`
+}

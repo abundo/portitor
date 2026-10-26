@@ -112,6 +112,21 @@ func (a *Agent) routes() *http.ServeMux {
 	mux.HandleFunc("GET /v1/ntp", func(w http.ResponseWriter, r *http.Request) {
 		writeJSONResponse(w, http.StatusOK, a.NTP(r.Context()))
 	})
+	mux.HandleFunc("GET /v1/openvpn", func(w http.ResponseWriter, r *http.Request) {
+		writeJSONResponse(w, http.StatusOK, a.OpenVPN(r.Context()))
+	})
+	mux.HandleFunc("GET /v1/directory/logins", func(w http.ResponseWriter, r *http.Request) {
+		after, _ := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
+		writeJSONResponse(w, http.StatusOK, a.DirectoryLogins(after))
+	})
+	mux.HandleFunc("GET /v1/openvpn/{instance}/ca", func(w http.ResponseWriter, r *http.Request) {
+		ca, err := a.OpenVPNCA(r.PathValue("instance"))
+		if err != nil {
+			writeError(w, http.StatusNotFound, err)
+			return
+		}
+		writeJSONResponse(w, http.StatusOK, ca)
+	})
 	mux.HandleFunc("GET /v1/bfd", func(w http.ResponseWriter, r *http.Request) {
 		writeJSONResponse(w, http.StatusOK, a.BFD(r.Context()))
 	})

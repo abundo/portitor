@@ -96,7 +96,10 @@ const sections = computed(() => [
   {
     label: 'VPN',
     value: 'vpn',
-    children: [{ label: 'WireGuard', icon: 'i-lucide-key-round', to: '/wireguard' }],
+    children: [
+      { label: 'WireGuard', icon: 'i-lucide-key-round', to: '/wireguard' },
+      { label: 'OpenVPN', icon: 'i-lucide-shield-check', to: '/openvpn' },
+    ],
   },
   ...(tools.value.length ? [{ label: 'Tools', value: 'tools', children: tools.value }] : []),
   ...(auth.isAdmin
@@ -109,8 +112,7 @@ const sections = computed(() => [
             { label: 'Firewalls', icon: 'i-lucide-server', to: '/firewalls' },
             { label: 'Updates', icon: 'i-lucide-package-check', to: '/updates' },
             { label: 'Backup & restore', icon: 'i-lucide-archive', to: '/backup' },
-            { label: 'Users', icon: 'i-lucide-users', to: '/users' },
-            { label: 'Roles', icon: 'i-lucide-shield-user', to: '/roles' },
+            { label: 'Directory', icon: 'i-lucide-folder-tree', to: '/directory' },
           ],
         },
       ]

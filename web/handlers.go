@@ -654,6 +654,8 @@ func (s *Server) handleSetUserPassword(c *echo.Context) error {
 	if err := setPassword(&u, req.Password); err != nil {
 		return errJSON(c, http.StatusBadRequest, err.Error())
 	}
+	// A directory user becomes a local one.
+	u.LdapServer = ""
 	u.TokenVersion++
 	if err := s.db.Save(&u).Error; err != nil {
 		return err
@@ -1071,6 +1073,15 @@ func redactDoc(doc fwconfig.Document) fwconfig.Document {
 		}
 		out.HA = &ha
 	}
+	if doc.Directory != nil {
+		dir := fwconfig.Directory{Servers: slices.Clone(doc.Directory.Servers)}
+		for k := range dir.Servers {
+			if dir.Servers[k].BindPassword != "" {
+				dir.Servers[k].BindPassword = "<redacted>"
+			}
+		}
+		out.Directory = &dir
+	}
 	out.Instances = make([]fwconfig.Instance, len(doc.Instances))
 	for i, in := range doc.Instances {
 		cp := in
@@ -1087,6 +1098,17 @@ func redactDoc(doc fwconfig.Document) fwconfig.Document {
 					wg.Peers[k] = p
 				}
 				ifc.WireGuard = &wg
+			}
+			if ifc.OpenVPN != nil {
+				o := *ifc.OpenVPN
+				o.TLSCrypt = "<redacted>"
+				o.Users = slices.Clone(o.Users)
+				for k := range o.Users {
+					if o.Users[k].Hash != "" {
+						o.Users[k].Hash = "<redacted>"
+					}
+				}
+				ifc.OpenVPN = &o
 			}
 			if ifc.Tunnel != nil && ifc.Tunnel.TunnelBroker != nil {
 				t, tb := *ifc.Tunnel, *ifc.Tunnel.TunnelBroker

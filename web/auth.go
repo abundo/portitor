@@ -187,6 +187,12 @@ var viewerDenied = map[string]bool{
 	"/api/agent/console": true,
 	// A virtual firewall's bundle holds its secrets.
 	"/api/instances/:id/bundle": true,
+	// The directory is the global admins'.
+	"/api/directory/servers":            true,
+	"/api/directory/servers/:id":        true,
+	"/api/directory/servers/:id/browse": true,
+	"/api/directory/mappings":           true,
+	"/api/directory/mappings/:id":       true,
 }
 
 // tenantDenied are the GET routes a user without a global role (RoleNone)
@@ -362,16 +368,16 @@ func (s *Server) handleLogin(c *echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return errJSON(c, http.StatusBadRequest, "invalid request")
 	}
-	var u models.User
-	found := s.db.Where("username = ?", req.Username).First(&u).Error == nil
-	hash := dummyHash
-	if found {
-		hash = []byte(u.PasswordHash)
+	// Local users, then the directory (directory.go).
+	found, err := authenticateUser(c.Request().Context(), s.db, req.Username, req.Password)
+	if err != nil {
+		return err
 	}
-	if bcrypt.CompareHashAndPassword(hash, []byte(req.Password)) != nil || !found {
+	if found == nil {
 		s.limiter.fail(ip)
 		return errJSON(c, http.StatusUnauthorized, "wrong username or password")
 	}
+	u := *found
 	if u.TOTPSecret != "" {
 		// A missing code is no failure: the GUI asks for it.
 		if strings.TrimSpace(req.Code) == "" {
@@ -473,6 +479,9 @@ func (s *Server) handleChangePassword(c *echo.Context) error {
 		return errJSON(c, http.StatusBadRequest, "invalid request")
 	}
 	u := currentUser(c)
+	if u.PasswordHash == models.LDAPPassword {
+		return errJSON(c, http.StatusBadRequest, "your password is the directory's ("+u.LdapServer+"): change it there")
+	}
 	if bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(req.Current)) != nil {
 		return errJSON(c, http.StatusForbidden, "current password is wrong")
 	}

@@ -21,7 +21,6 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v5"
-	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 
 	"github.com/abundo/portitor/models"
@@ -159,9 +158,9 @@ func recoveryLeft(u *models.User) int {
 
 // ownTOTP checks that the caller may change their own two-factor login,
 // with their password when the request has one.
-func ownTOTP(c *echo.Context, password *string) (*models.User, error) {
+func (s *Server) ownTOTP(c *echo.Context, password *string) (*models.User, error) {
 	u := currentUser(c)
-	if password != nil && bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(*password)) != nil {
+	if password != nil && !checkPassword(c.Request().Context(), s.db, u, *password) {
 		return nil, errJSON(c, http.StatusForbidden, "password is wrong")
 	}
 	return u, nil
@@ -183,7 +182,7 @@ func (s *Server) handleTOTPSetup(c *echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return errJSON(c, http.StatusBadRequest, "invalid request")
 	}
-	u, err := ownTOTP(c, &req.Password)
+	u, err := s.ownTOTP(c, &req.Password)
 	if u == nil {
 		return err
 	}
@@ -206,7 +205,7 @@ func (s *Server) handleTOTPEnable(c *echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return errJSON(c, http.StatusBadRequest, "invalid request")
 	}
-	u, err := ownTOTP(c, nil)
+	u, err := s.ownTOTP(c, nil)
 	if u == nil {
 		return err
 	}
@@ -239,7 +238,7 @@ func (s *Server) handleTOTPDisable(c *echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return errJSON(c, http.StatusBadRequest, "invalid request")
 	}
-	u, err := ownTOTP(c, &req.Password)
+	u, err := s.ownTOTP(c, &req.Password)
 	if u == nil {
 		return err
 	}
@@ -262,7 +261,7 @@ func (s *Server) handleRecoveryCodes(c *echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return errJSON(c, http.StatusBadRequest, "invalid request")
 	}
-	u, err := ownTOTP(c, &req.Password)
+	u, err := s.ownTOTP(c, &req.Password)
 	if u == nil {
 		return err
 	}

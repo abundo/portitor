@@ -71,6 +71,12 @@ type data struct {
 	vrfs           []models.Vrf
 	snmpUsers      []models.SnmpUser
 	proxyPolicies  []models.AcmeProxyPolicy
+	ldapServers    []models.LdapServer
+	// The users, role members and the directory's group mappings, for
+	// OpenVPN's logins.
+	users        []models.User
+	roleMembers  []models.RoleMember
+	roleMappings []models.LdapRoleMapping
 }
 
 func load(db *gorm.DB) (*data, error) {
@@ -123,6 +129,10 @@ func load(db *gorm.DB) (*data, error) {
 		{&d.vrfs, "name"},
 		{&d.snmpUsers, "name"},
 		{&d.proxyPolicies, "name"},
+		{&d.ldapServers, "position, id"},
+		{&d.roleMappings, "id"},
+		{&d.users, "username"},
+		{&d.roleMembers, "id"},
 	} {
 		if err := db.Order(q.order).Find(q.dst).Error; err != nil {
 			return nil, err
@@ -955,6 +965,14 @@ func buildPeer(db *gorm.DB, generation int64, only map[string]bool, firewallID u
 			}
 			in.Certificates = append(in.Certificates, Certificate(&c, ifc.Name))
 		}
+		// OpenVPN, once the certificates are known.
+		for i := range in.Interfaces {
+			if ifc := &in.Interfaces[i]; ifc.Kind == fwconfig.KindOpenVPN {
+				if mif, ok := ifaceByName(d.interfaces, mi.ID, ifc.Name); ok {
+					ifc.OpenVPN = d.openVPN(&mi, &mif, &in, addf)
+				}
+			}
+		}
 		if mi.AcmeProxyEnabled {
 			in.ACMEProxy = d.acmeProxy(&mi, &in, func(where string, l []string) []string { return expand(where, objs.Prefixes, l) }, addf)
 		}
@@ -1040,6 +1058,13 @@ func buildPeer(db *gorm.DB, generation int64, only map[string]bool, firewallID u
 			task.IPList = listName[*t.IpListID]
 		}
 		doc.Tasks = append(doc.Tasks, task)
+	}
+	// The directory, for the OpenVPN servers' logins.
+	for i := range doc.Instances {
+		if doc.Instances[i].OpenVPNServer() != nil {
+			doc.Directory = d.directory()
+			break
+		}
 	}
 
 	if err := doc.Validate(); err != nil {
@@ -1165,11 +1190,13 @@ func peerValues(d *data, primaryID uint, addf func(string, ...any)) {
 		}
 	}
 	// Delegated addresses are each host's own prefix; the peer addresses
-	// stand for the others, in order. A disabled interface keeps its own.
+	// stand for the others, in order. A disabled interface keeps its own,
+	// and so does an OpenVPN server: its addresses are only in the tunnel,
+	// to which only the active host has clients, so they stay the same.
 	for i := range d.interfaces {
 		ifc := &d.interfaces[i]
 		name, ok := on[ifc.InstanceID]
-		if !ok || !ifc.Enabled {
+		if !ok || !ifc.Enabled || ifc.Kind == fwconfig.KindOpenVPN {
 			continue
 		}
 		var static, delegated models.StringList
@@ -1456,6 +1483,87 @@ func Certificate(c *models.Certificate, iface string) fwconfig.Certificate {
 		Name: c.Name, Domains: slices.Clone([]string(c.Domains)), CommonName: c.CommonName, Email: c.Email,
 		CA: c.Ca, KeyType: c.KeyType, Challenge: c.Challenge, Interface: iface,
 	}
+}
+
+// openVPN is an OpenVPN interface's server: its certificate by name, the
+// users, and with a required role the groups mapped to it. The
+// pushed DNS servers default to the interface's own addresses when the
+// instance's DNS answers on it.
+func (d *data) openVPN(mi *models.Instance, mif *models.Interface, in *fwconfig.Instance, addf func(string, ...any)) *fwconfig.OpenVPN {
+	o := &fwconfig.OpenVPN{
+		Mode: mif.OvpnMode, Port: mif.OvpnPort, Listen: mif.OvpnListen, TLSCrypt: mif.OvpnTlsCrypt,
+		Routes: slices.Clone([]string(mif.OvpnRoutes)), RedirectGateway: mif.OvpnRedirectGateway,
+		DNS: slices.Clone([]string(mif.OvpnDns)), DNSDomain: mif.OvpnDnsDomain, ClientToClient: mif.OvpnClientToClient,
+	}
+	i := slices.IndexFunc(d.certs, func(c models.Certificate) bool {
+		return mif.OvpnCertificateID != nil && c.ID == *mif.OvpnCertificateID && c.InstanceID == mi.ID
+	})
+	switch {
+	case i < 0:
+		addf("instance %s: OpenVPN %s: choose a certificate of this virtual firewall", mi.Name, mif.Name)
+	case !d.certs[i].Enabled:
+		addf("instance %s: OpenVPN %s: its certificate %s is disabled", mi.Name, mif.Name, d.certs[i].Name)
+	default:
+		o.Certificate = d.certs[i].Name
+	}
+	o.Users, o.RequireRole = d.openVPNUsers(mif), mif.OvpnRequireRole
+	if mif.OvpnRoleID != nil {
+		for _, m := range d.roleMappings {
+			if m.RoleID == *mif.OvpnRoleID && !slices.Contains(o.RoleGroups, m.GroupDn) {
+				o.RoleGroups = append(o.RoleGroups, m.GroupDn)
+			}
+		}
+	}
+	if len(o.DNS) == 0 && in.DNS.Enabled && mif.DnsListen {
+		for _, a := range mif.Addresses {
+			if p, err := netip.ParsePrefix(a); err == nil {
+				o.DNS = append(o.DNS, p.Addr().String())
+			}
+		}
+	}
+	return o
+}
+
+// openVPNUsers are the firewall's users as an OpenVPN server's logins
+// need them (the agent's check, as web authenticateUser): a local user
+// with their hash, a directory user without; Denied without a usable
+// password, or outside a required role (all of them when the role is
+// gone).
+func (d *data) openVPNUsers(mif *models.Interface) []fwconfig.OpenVPNUser {
+	members := map[uint]bool{}
+	if mif.OvpnRequireRole && mif.OvpnRoleID != nil {
+		for _, m := range d.roleMembers {
+			if m.RoleID == *mif.OvpnRoleID {
+				members[m.UserID] = true
+			}
+		}
+	}
+	var out []fwconfig.OpenVPNUser
+	for _, u := range d.users {
+		if !fwconfig.ValidOpenVPNUser(u.Username) {
+			continue // OpenVPN would change the name
+		}
+		ou := fwconfig.OpenVPNUser{Name: u.Username, LDAP: u.PasswordHash == models.LDAPPassword}
+		if mif.OvpnRequireRole && !members[u.ID] || (!ou.LDAP && !strings.HasPrefix(u.PasswordHash, "$2")) {
+			ou.Denied = true
+		} else if !ou.LDAP {
+			ou.Hash = u.PasswordHash
+		}
+		out = append(out, ou)
+	}
+	return out
+}
+
+// directory is the document's Directory, for its OpenVPN servers: the
+// enabled servers in order.
+func (d *data) directory() *fwconfig.Directory {
+	dir := &fwconfig.Directory{Servers: []fwconfig.LDAPServer{}}
+	for i := range d.ldapServers {
+		if l := &d.ldapServers[i]; l.Enabled {
+			dir.Servers = append(dir.Servers, l.Server())
+		}
+	}
+	return dir
 }
 
 // acmeProxy is an instance's ACME proxy, with its enabled policies (names

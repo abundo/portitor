@@ -43,6 +43,7 @@ allow_from:
 #   chrony_conf: /etc/chrony/chrony.conf  # Fedora: /etc/chrony.conf
 #   snmpd_conf: /etc/snmp/snmpd.conf
 #   conntrackd_conf: /etc/conntrackd/conntrackd.conf
+#   openvpn_dir: /etc/openvpn/server        # the default VF's portitor-udp.conf, portitor-tcp.conf
 #   kea_hooks_dir: /usr/lib/x86_64-linux-gnu/kea/hooks  # by architecture
 # units:
 #   named: portitor-named@%s.service      # the other virtual firewalls'
@@ -52,6 +53,8 @@ allow_from:
 #   chrony: portitor-chrony@%s.service
 #   snmpd: portitor-snmpd@%s.service
 #   conntrackd: portitor-conntrackd@%s.service
+#   openvpn_udp: portitor-openvpn-udp@%s.service
+#   openvpn_tcp: portitor-openvpn-tcp@%s.service
 #   default_named: named.service          # Fedora: kea-dhcp4.service, kea-dhcp6.service
 #   default_kea4: kea-dhcp4-server.service
 #   default_kea6: kea-dhcp6-server.service
@@ -59,3 +62,5 @@ allow_from:
 #   default_chrony: chrony.service        # Fedora: chronyd.service
 #   default_snmpd: snmpd.service
 #   default_conntrackd: conntrackd.service
+#   default_openvpn_udp: openvpn-server@portitor-udp.service
+#   default_openvpn_tcp: openvpn-server@portitor-tcp.service

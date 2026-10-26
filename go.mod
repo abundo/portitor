@@ -15,7 +15,9 @@ require (
 	github.com/florianl/go-nflog/v2 v2.3.0
 	github.com/glebarez/sqlite v1.11.0
 	github.com/go-acme/lego/v4 v4.35.2
+	github.com/go-asn1-ber/asn1-ber v1.5.8
 	github.com/go-jose/go-jose/v4 v4.1.4
+	github.com/go-ldap/ldap/v3 v3.4.15
 	github.com/goccy/go-yaml v1.19.2
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/insomniacslk/dhcp v0.0.0-20260901064844-234b97448fae
@@ -53,6 +55,7 @@ require (
 
 require (
 	filippo.io/hpke v0.4.0 // indirect
+	github.com/Azure/go-ntlmssp v0.1.1 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/gaissmai/bart v0.29.0 // indirect

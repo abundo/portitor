@@ -163,8 +163,9 @@ func Nftables(in *fwconfig.Instance, lockout *AntiLockout, paths Paths) string {
 	// that closes an interface to the firewall doesn't take DHCP or DNS
 	// away from it.
 	for _, r := range AutoInputRules(in) {
-		// What comes to a virtual router's address arrives on its device.
-		r.InInterfaces = in.AddVRRPDevices(r.InInterfaces)
+		// What comes to a virtual router's address arrives on its device,
+		// and an adaptive OpenVPN's TCP clients on its TCP device.
+		r.InInterfaces = in.AddOpenVPNDevices(in.AddVRRPDevices(r.InInterfaces))
 		for _, match := range r.matches(in) {
 			writeAutoLog(b, in, r.Service, match)
 			b.WriteString("\t\t" + match + " accept " + comment("auto", r.Service) + "\n")
@@ -739,6 +740,8 @@ func AutoInputRules(in *fwconfig.Instance) []AutoRule {
 			out = append(out, AutoRule{Service: "wireguard " + ifc.Name, Protocol: "udp", DstPort: ifc.WireGuard.ListenPort})
 		}
 	}
+	// OpenVPN clients on its listen interface.
+	out = append(out, openVPNAutoRule(in)...)
 	// 6in4 packets from the tunnel servers.
 	for _, ifc := range in.Interfaces {
 		if t := tunnelOf(ifc); t != nil {
@@ -1215,7 +1218,7 @@ func writeServicePolicers(b *strings.Builder, in *fwconfig.Instance) {
 		if l == nil {
 			continue
 		}
-		r.InInterfaces = in.AddVRRPDevices(r.InInterfaces)
+		r.InInterfaces = in.AddOpenVPNDevices(in.AddVRRPDevices(r.InInterfaces))
 		c := comment("auto", r.Service+", rate limit "+l.Name)
 		for _, match := range r.matches(in) {
 			if !l.PerSource {

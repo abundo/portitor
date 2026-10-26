@@ -14,14 +14,15 @@ are in [README.md](README.md).
 | `cmd/portitor-web` | One binary, two programs by name: `portitor-web` is the portal (`portal.go`: `start`, `witness`, `check`); run as `portitor-config` (a symlink, `main.go`) the firewall's configuration, GUI and API: `start`, `migrate`, `createadmin`, `set-agent`, `agent-url`, `bootstrap` (ISO first boot), `fingerprint`, `witness-string`, `promote`, `import-vf` and the console commands (`console.go`) |
 | `cmd/portitor-agent` | Agent daemon on the firewall: `start`, `init`, `render`, `netns-exec`; run as `portitor` (a symlink, `cli.go`) it is a CLI over the agent's root-only socket `<run_dir>/agent.sock`: `show ...` over the GET routes, and actions that change no configuration (`confirm`, `rollback`, `request dhcp renew`, `request iplist update`, `request blocklist update`, `clear connections`) over the POST routes in `localWrites` |
 | `internal/fwconfig` | The desired-state document and `Validate()`. **The contract between web and agent.** |
-| `internal/render` | Pure functions: document → nftables, WireGuard, named.conf, Kea, chrony.conf (`chrony.go`), snmpd.conf (`snmpd.go`), dnsmgr2 config, FRR (`frr.go`: frr.conf with BGP, OSPF, IS-IS, VRRP and BFD, daemons, vtysh.conf) |
-| `internal/agent` | Agent: apply/reconcile, commit-confirm, DHCP and DHCPv6 (prefix delegation) clients (woken when their interface gets a carrier, `linkwatch.go`), IP lists, task scheduler, packet log (NFLOG), DNS query log (BIND logs to the journal, followed with `journalctl`, filtered by the agent, `querylog.go`), WireGuard endpoint re-resolving, packet capture (tcpdump, streamed rate-limited), connectivity tests (ICMP echo on a raw socket, TCP connect, UDP datagram, from the agent's own sockets opened in the instance netns by `withNetns`, streamed as JSON lines, `probe.go`), traceroute (`mtr --raw`, streamed as JSON lines, `trace.go`), iperf3 tests (client or server, `--json-stream` read into JSON lines, a server's port in the ruleset's timeout set `render.IperfServerSet` while it runs, `iperf.go`), service logs (`journalctl --follow` of a status service unit, streamed as text, `servicelog.go`), LLDP (sent and heard on raw sockets, `lldp.go`), neighbours (ARP/ND, LLDP), NAT64 (a Jool instance per namespace, `nat64.go`), traffic shaping (CAKE, IFB devices for receiving, HTB classes for the rate limits that shape (`fwconfig.Instance.Shapers`) by packet mark `render.ShaperMark`; planned from `tc -j` output, `shaping.go`; their traffic and the policers' drop counters `render.RateLimitDropCounter`, `ratelimits.go`), BGP, OSPF, IS-IS, VRRP and BFD state (FRR's JSON through `vtysh`, `bgp.go`, `ospf.go`, `isis.go`, `vrrp.go`, `bfd.go`), VRRP's macvlan devices (`vrrp.go`), 6in4 tunnels' endpoint updates at Hurricane Electric's tunnel broker (from the instance netns, on address changes, `tunnelbroker.go`), VXLANs' learning, EVPN bridge port flags and static flood lists (`vxlan.go`), the VRFs' source rules and sysctls for the firewall's services (`vrf.go`), status (the host's memory, CPU times, load and disk use from /proc and statfs, `host.go`), API server |
+| `internal/render` | Pure functions: document → nftables, WireGuard, named.conf, Kea, chrony.conf (`chrony.go`), snmpd.conf (`snmpd.go`), openvpn.conf (`openvpn.go`), dnsmgr2 config, FRR (`frr.go`: frr.conf with BGP, OSPF, IS-IS, VRRP and BFD, daemons, vtysh.conf) |
+| `internal/agent` | Agent: apply/reconcile, commit-confirm, DHCP and DHCPv6 (prefix delegation) clients (woken when their interface gets a carrier, `linkwatch.go`), IP lists, task scheduler, packet log (NFLOG), DNS query log (BIND logs to the journal, followed with `journalctl`, filtered by the agent, `querylog.go`), WireGuard endpoint re-resolving, packet capture (tcpdump, streamed rate-limited), connectivity tests (ICMP echo on a raw socket, TCP connect, UDP datagram, from the agent's own sockets opened in the instance netns by `withNetns`, streamed as JSON lines, `probe.go`), traceroute (`mtr --raw`, streamed as JSON lines, `trace.go`), iperf3 tests (client or server, `--json-stream` read into JSON lines, a server's port in the ruleset's timeout set `render.IperfServerSet` while it runs, `iperf.go`), service logs (`journalctl --follow` of a status service unit, streamed as text, `servicelog.go`), LLDP (sent and heard on raw sockets, `lldp.go`), neighbours (ARP/ND, LLDP), NAT64 (a Jool instance per namespace, `nat64.go`), traffic shaping (CAKE, IFB devices for receiving, HTB classes for the rate limits that shape (`fwconfig.Instance.Shapers`) by packet mark `render.ShaperMark`; planned from `tc -j` output, `shaping.go`; their traffic and the policers' drop counters `render.RateLimitDropCounter`, `ratelimits.go`), BGP, OSPF, IS-IS, VRRP and BFD state (FRR's JSON through `vtysh`, `bgp.go`, `ospf.go`, `isis.go`, `vrrp.go`, `bfd.go`), VRRP's macvlan devices (`vrrp.go`), 6in4 tunnels' endpoint updates at Hurricane Electric's tunnel broker (from the instance netns, on address changes, `tunnelbroker.go`), VXLANs' learning, EVPN bridge port flags and static flood lists (`vxlan.go`), OpenVPN's logins through its management socket, checked as portitor-config checks a login, against the document's users and `Directory` (`openvpn.go`), the VRFs' source rules and sysctls for the firewall's services (`vrf.go`), status (the host's memory, CPU times, load and disk use from /proc and statfs, `host.go`), API server |
 | `internal/dyndns` | DNS update client ("DNS update" in the GUI): RFC 2136 (from ifnsupdate), sent from the instance netns, or a DNS hosting provider's API through libdns (`providers.go`, matching `fwconfig.DNSProviders`), called from the host |
 | `internal/acme` | ACME certificates through lego: accounts, orders, the stored chain and key (`<state_dir>/certificates/`); the agent's `acme.go` schedules them and answers HTTP-01 in the instance netns, opening port 80 by the `acme_http` set (`render.ACMEHTTPSet`), or DNS-01 (`dns01.go`: the TXT record at `_acme-challenge.<domain>` after its CNAMEs, lego's `EffectiveFQDN`) through a DNS update client's provider (`dyndns.TXTUpdater`, copied into the certificate as `fwconfig.DNS01` by the builder) |
 | `internal/acmeserver` | ACME server (RFC 8555 subset: accounts, orders, HTTP-01, finalize), with the policy, validation and issuing left to `Hooks`; used by the agent's ACME proxy (`acmeproxy.go`) |
 | `internal/nftimport` | nftables file (`nft -j list ruleset`, read by the agent's `POST /v1/nftables/parse` in a new network namespace, `nftparse.go`) → rules, NAT rules, hosts/prefixes, services, and what it leaves out, with jumped-to chains inlined in groups; written by `web/nftimport.go` through the CRUD's `prepare*` checks, a preview being the same transaction rolled back |
 | `internal/iplist` | Downloads IP lists (CrowdSec LAPI decisions, plain-text lists with ranges and JSON lines); the public blocklists the GUI offers are `web/frontend/src/utils/ipListFeeds.js` |
 | `internal/dnsblocklist` | Downloads DNS blocklists (RPZ zone files, domain lists, hosts files, zipped or not; conditional requests) and writes their names, checked, as RPZ records; the public lists the GUI offers are `web/frontend/src/utils/dnsBlocklistFeeds.js` |
+| `internal/ldapauth` | LDAP/Active Directory search-and-bind login, test and tree browsing (from factum2), shared by portitor-config's logins (`web/directory.go`) and the agent's OpenVPN logins |
 | `internal/wgkeys` | WireGuard key generation (wg(8) base64) |
 | `internal/buildinfo` | Version, commit and date, set at link time (Makefile `LDFLAGS`, `.goreleaser.yaml`) |
 | `internal/cron` | crontab(5) schedule parser for tasks (shared by web and agent) |
@@ -106,7 +107,7 @@ docs and user-facing messages.
   firewall may be the HA secondary of another (`firewalls.ha_primary_id`, set at
   creation). It has no instances of its own: `builder.BuildFirewall` builds the
   primary's, with the `peer_*` values (`peerValues`: interface `peer_addresses` in
-  place of the static ones, VRRP `peer_priority` or priority - 10, BGP/OSPF
+  place of the static ones (not an OpenVPN interface's: both hosts have the same), VRRP `peer_priority` or priority - 10, BGP/OSPF
   `peer_router_id`, IS-IS `peer_net`, BGP neighbours' `ha_peer_address`), and both apply; VRRP decides which forwards.
   Each document carries `HA` (node, the peer's agent URL (never loopback) and fingerprint, the pair's secret, which opens only
   `/v1/ha/heartbeat` and `/v1/ha/certificates` and is redacted in history, the
@@ -235,7 +236,8 @@ docs and user-facing messages.
   `managed.json`, and the root and ingress qdiscs of its instances' interfaces with
   their `ifb-<name>` devices (`fwconfig.IFBName`; interface names may not start
   with `ifb-`), and the VRRP macvlan devices (`fwconfig.VRRPDevices`; names may not
-  start with `vrrp4-` or `vrrp6-`), and the Jool instance `fwconfig.JoolInstance` in
+  start with `vrrp4-` or `vrrp6-`), the OpenVPN tun devices (an adaptive server's TCP
+  one is `fwconfig.OpenVPNTCPDevice`; names may not start with `ovt-`), and the Jool instance `fwconfig.JoolInstance` in
   each namespace, its loop devices (`n64-*`) and the `ip rule`s with protocol 99
   (NAT64's IPv4 ones, the VRF source rules at `agent.VRFSourcePref`, and the
   policy routes' at `fwconfig.PolicyRouteTable(i)`) with the policy routes' tables,
@@ -254,21 +256,24 @@ docs and user-facing messages.
   failed rollback keeps the change pending and retries. `RolledBack` means the
   restore succeeded; `RollbackErrors` says it didn't.
 - **Secrets:** fields tagged `json:"-"` (WireGuard private/preshared keys, TSIG
-  secrets, DNS blocklist keys, DNS update provider settings, IP list passwords and API keys, agent token, the HA pair's and witness's secrets, password hashes, TOTP secrets and recovery code hashes, imported certificates' and certificate authorities' keys) never reach
+  secrets, DNS blocklist keys, DNS update provider settings, IP list passwords and API keys, agent token, the HA pair's and witness's secrets, password hashes, TOTP secrets and recovery code hashes, imported certificates' and certificate authorities' keys, OpenVPN's tls-crypt key, LDAP bind passwords) never reach
   the browser. The generic CRUD
   `PUT` merges the body onto the stored row, so those fields can't be overwritten
   through the API either; a secret the user enters comes in through a write-only
   `gorm:"-"` field that `prepare` copies and `present` clears (`DyndnsClient.NewTsigSecret`,
   `IpList.NewPassword`/`NewApiKey`, `BgpPeerSettings.NewPassword` with
   `ClearPassword`, `Instance.NewSnmpCommunity` with `ClearSnmpCommunity`,
-  `SnmpUser.NewAuthPassword`/`NewPrivPassword`, `OspfInterface.NewAuthKey` with `ClearAuthKey`, `IsisConfig.NewAreaPassword`/`NewDomainPassword` and `IsisInterface.NewPassword` with their `Clear*`, `Certificate.NewPrivKey` for an imported certificate; a DNS update provider's secret settings come in
+  `SnmpUser.NewAuthPassword`/`NewPrivPassword`, `OspfInterface.NewAuthKey` with `ClearAuthKey`, `IsisConfig.NewAreaPassword`/`NewDomainPassword` and `IsisInterface.NewPassword` with their `Clear*`, `LdapServer.NewBindPassword` with `ClearBindPassword`, `Certificate.NewPrivKey` for an imported certificate; a DNS update provider's secret settings come in
   through `DyndnsClient.Settings`, where an empty one keeps the stored value).
   A BGP password, OSPF MD5 key or IS-IS password is in frr.conf, so that is a `Secret` file
-  `Bundle.Redacted` masks; so is snmpd.conf.
+  `Bundle.Redacted` masks; so are snmpd.conf and openvpn.conf (the tls-crypt key).
+  The document carries OpenVPN's users' bcrypt hashes and the LDAP bind passwords,
+  redacted in history like the other secrets.
   Deployment history stores a redacted document. The exceptions are the backup
   download (`web/backup.go`): the whole database, age-encrypted with the user's
   passphrase; and a WireGuard peer's client config (`render.WireGuardClientConf`),
-  with its generated private key and preshared key; and the agent's
+  with its generated private key and preshared key; an OpenVPN client config
+  (`web/openvpn.go`), with the server's tls-crypt key; and the agent's
 `GET /v1/certificates/<instance>/<name>`, an ACME certificate with its key for
 the certificate portitor-config serves, chosen under Settings
 (`settings.web_certificate_id`, `web/tlscert.go`). API answers are
@@ -462,6 +467,44 @@ the certificate portitor-config serves, chosen under Settings
   write-only secrets (`NewSnmpCommunity`/`ClearSnmpCommunity`, `SnmpUser.NewAuthPassword`/
   `NewPrivPassword`); snmpd.conf is a `Secret` file (0600, read by snmpd as root
   before it drops to its user, so a change restarts it), removed when SNMP is off.
+- **OpenVPN** (`fwconfig/openvpn.go`, `render/openvpn.go`, `internal/agent/openvpn.go`,
+  `web/openvpn.go`, VPN → OpenVPN): an interface of kind `openvpn`, at most one per
+  instance, with the server in `ovpn_*` columns (`fwconfig.OpenVPN`). The interface is a
+  persistent tun device the agent creates and addresses (`ip tuntap`); OpenVPN attaches
+  to it (`ifconfig-noexec`, `disable-dco`). One process listens on one protocol, so the
+  adaptive mode (the default: UDP, TCP for clients where UDP is blocked) runs two:
+  `Document.Expand` gives the interface the UDP process and adds the TCP device
+  (`OpenVPNTCPDevice`, `Parent` the interface) with the other half of each prefix
+  (`Pools`; the whole `Prefixes` pushed as routes); `MatchInterfaces` and the auto
+  rules add it to a list naming the interface (`AddOpenVPNDevices`). Units per
+  protocol: the default instance's `openvpn-server@portitor-<proto>` from
+  `/etc/openvpn/server`, a VF's `portitor-openvpn-<proto>@` (two copies of one file,
+  `%j` the protocol). Auto rule `openvpn <name>` on `Listen`. No script runs: the agent
+  is the management client (`management-client-auth`, socket
+  `<run_dir>/openvpn/<instance>/<proto>.sock`) and checks each login against
+  `Users` (all of portitor-config's users: a local one's bcrypt hash, a directory
+  one's `LDAP`; with `ovpn_require_role` the non-members `Denied`, all of them when the
+  role is gone; an instance admin's role is always their VF's, `tenantOpenVPN`) and
+  then the document's `Directory` (see Directory), a directory user of the required
+  role's mapped groups (`RoleGroups`) counting as a member; it reports the users it
+  let in that portitor-config doesn't have (`GET /v1/directory/logins`), kills sessions of users no longer allowed on
+  apply, and restarts OpenVPN when the certificate's files change (`watchCert`). The
+  certificate is an instance certificate by id (`refuseOpenVPNCertificate`), read
+  from `Paths.CertificateDir`; the client config's CA is the chain's root
+  (`GET /v1/openvpn/<instance>/ca`). In bundles, `ovpn_certificate_id` is set after
+  the insert (`bundleDeferred`) and `ovpn_role_id` cleared.
+- **Directory** (`web/directory.go`, `internal/ldapauth`, Admin → Directory, from
+  factum2): the users, roles and the OpenLDAP/AD servers (`ldap_servers`, global, in
+  `position` order). Every login takes `authenticateUser`'s path: a local user's
+  bcrypt hash; a directory user's (`password_hash` `models.LDAPPassword`,
+  `users.ldap_server`) at the servers; an unknown user at the servers, then copied in
+  with the global role `none`. `ldap_role_mappings` (group DN → role, level) give the
+  mapped roles' memberships, synced at each login (`syncDirectoryRoles`; roles no
+  group maps to are left alone). The agent checks OpenVPN logins the same way from
+  `Document.Directory` (only with an OpenVPN server; bind passwords redacted in
+  history) and keeps the unknown users it let in, which `runDirectorySync` copies in
+  every 30 s (not on a replica). Servers are reached from the host. Directory routes
+  are global-admin-only (`viewerDenied`).
 - **6in4 tunnels** (`fwconfig/tunnel.go`, Network → Interfaces, kind 6in4): interfaces of kind
   `6in4` (a `sit` device, `remote`/`local any`, recreated when either changes), with
   auto rules for IP protocol 41 from and to the server (input and output). With a
@@ -647,7 +690,9 @@ singular); a custom page uses `SearchInput` above each table,
   packet capture's packet list (`PacketList`: Wireshark's display filter
   takes the search field's place), and so is the Hosts & prefixes tree
   (`ObjectTree`, a Wunderbaum treegrid: a click opens the row's form, the
-  context menu adds). The rule's form is
+  context menu adds), and so is the Directory tree (`DirectoryPage`: a click
+  shows the item's form beside the tree, `UserForm`, `RoleForm` or a server's,
+  with its Save and Delete; no dialog). The rule's form is
   not: it follows the form and delete rules.
 
 ## Adding a feature end to end

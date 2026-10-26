@@ -41,6 +41,7 @@ const kinds = [
   { label: 'Loopback', value: 'loopback' },
   { label: '6in4 tunnel (Hurricane Electric)', value: '6in4' },
   { label: 'VXLAN', value: 'vxlan' },
+  { label: 'OpenVPN server', value: 'openvpn' },
 ]
 const is6in4 = (f) => f.kind === '6in4'
 const isVxlan = (f) => f.kind === 'vxlan'
@@ -146,7 +147,7 @@ const fields = [
     label: 'IPv4',
     type: 'select',
     items: (f) =>
-      f.kind === 'wireguard' || f.kind === 'loopback'
+      f.kind === 'wireguard' || f.kind === 'loopback' || f.kind === 'openvpn'
         ? modes.filter((m) => m.value !== 'dhcp')
         : modes,
     show: (f) => !is6in4(f),
@@ -173,7 +174,7 @@ const fields = [
     label: 'HA peer addresses',
     type: 'tags',
     placeholder: '192.168.1.2/24',
-    show: (f) => store.hasPeer && !is6in4(f),
+    show: (f) => store.hasPeer && !is6in4(f) && f.kind !== 'openvpn',
     hint: "The HA secondary's own addresses, one for each address above in the same prefix and order (delegated ones aside). The virtual address both share is VRRP's.",
   },
   {
@@ -194,7 +195,7 @@ const fields = [
     key: 'dhcpv6',
     label: 'DHCPv6 client',
     type: 'switch',
-    show: (f) => !['wireguard', 'loopback', '6in4'].includes(f.kind),
+    show: (f) => !['wireguard', 'loopback', '6in4', 'openvpn'].includes(f.kind),
     hint: 'Ask a DHCPv6 server for an IPv6 address. Needs router advertisements accepted: the default route comes from them.',
   },
   {
@@ -334,6 +335,12 @@ const fields = [
     type: 'password',
     show: (f) => is6in4(f) && !!f.he_tunnel_id,
     hint: "The tunnel's Update Key (Advanced tab). Stored on the server, never shown again; leave empty to keep the stored key.",
+  },
+  {
+    key: 'ovpn_note',
+    label: 'The OpenVPN server (port, certificate, logins) is set up under VPN → OpenVPN.',
+    type: 'heading',
+    show: (f) => f.kind === 'openvpn',
   },
   {
     key: 'wg_listen_port',

@@ -16,6 +16,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/abundo/portitor/internal/fwconfig"
+	"github.com/abundo/portitor/internal/ldapauth"
 )
 
 type Base struct {
@@ -235,6 +236,10 @@ type User struct {
 	// DateFormat is how the GUI shows dates and times, one of DateFormats.
 	DateFormat   string `gorm:"default:locale" json:"date_format"`
 	PasswordHash string `json:"-"`
+	// LdapServer is the directory server the user was copied from on
+	// their first login, whose password is the server's (PasswordHash
+	// LDAPPassword); empty for a local user.
+	LdapServer string `json:"ldap_server"`
 	// Role is RoleAdmin or RoleViewer.
 	Role string `json:"role"`
 	// TokenVersion invalidates issued sessions when bumped (password
@@ -559,7 +564,90 @@ type Interface struct {
 	VxlanRemotes StringList `json:"vxlan_remotes"`
 	// Vrf is the name of the VRF the interface is in; "" is main.
 	Vrf string `json:"vrf"`
+
+	// An OpenVPN server's (fwconfig.OpenVPN): mode, port, the interface
+	// clients come in on (empty: any) and its certificate. Its users are
+	// the directory's, with OvpnRequireRole only the members of OvpnRoleID
+	// (none when the role is gone). OvpnTlsCrypt is the static key, a secret
+	// generated here that clients get in their config. OvpnHost is the
+	// name clients connect to.
+	OvpnMode            string     `json:"ovpn_mode"`
+	OvpnPort            int        `json:"ovpn_port"`
+	OvpnListen          string     `json:"ovpn_listen"`
+	OvpnCertificateID   *uint      `json:"ovpn_certificate_id"`
+	OvpnTlsCrypt        string     `json:"-"`
+	OvpnRequireRole     bool       `json:"ovpn_require_role"`
+	OvpnRoleID          *uint      `json:"ovpn_role_id"`
+	OvpnRoutes          StringList `json:"ovpn_routes"`
+	OvpnRedirectGateway bool       `json:"ovpn_redirect_gateway"`
+	OvpnDns             StringList `json:"ovpn_dns"`
+	OvpnDnsDomain       string     `json:"ovpn_dns_domain"`
+	OvpnClientToClient  bool       `json:"ovpn_client_to_client"`
+	OvpnHost            string     `json:"ovpn_host"`
 }
+
+// LdapServer is an OpenLDAP or Active Directory server of the directory
+// (Admin → Directory): logins try the enabled ones in Position order for a
+// user the firewall doesn't have, or has from a server. The bind password
+// is write-only: NewBindPassword sets it (empty keeps it),
+// ClearBindPassword removes it.
+type LdapServer struct {
+	Base
+	Position          int    `json:"position"`
+	Name              string `json:"name"`
+	Description       string `json:"description"`
+	Enabled           bool   `json:"enabled"`
+	ServerType        string `json:"server_type"`
+	Host              string `json:"host"`
+	Port              int    `json:"port"`
+	TlsMode           string `json:"tls_mode"`
+	SkipTlsVerify     bool   `json:"skip_tls_verify"`
+	CaCert            string `json:"ca_cert"`
+	BindDn            string `json:"bind_dn"`
+	BindPassword      string `json:"-"`
+	NewBindPassword   string `gorm:"-" json:"new_bind_password,omitempty"`
+	ClearBindPassword bool   `gorm:"-" json:"clear_bind_password,omitempty"`
+	HasBindPassword   bool   `gorm:"-" json:"has_bind_password"`
+	BaseDn            string `json:"base_dn"`
+	// UserFilter finds the user, %s the name; AttrEmail, AttrDisplayName
+	// and AttrGroups are read from the entry for the local copy. Empty:
+	// the server type's defaults (ldapauth.Config.WithDefaults).
+	UserFilter      string `json:"user_filter"`
+	AttrEmail       string `json:"attr_email"`
+	AttrDisplayName string `json:"attr_display_name"`
+	AttrGroups      string `json:"attr_groups"`
+}
+
+// Server is the server as the document holds it, defaults filled in.
+func (l *LdapServer) Server() fwconfig.LDAPServer {
+	c := l.Config().WithDefaults()
+	return fwconfig.LDAPServer{
+		Name: l.Name, ServerType: c.ServerType, Host: c.Host, Port: c.Port, TLSMode: c.TLSMode, SkipTLSVerify: c.SkipTLSVerify,
+		CACert: c.CACert, BindDN: c.BindDN, BindPassword: c.BindPassword, BaseDN: c.BaseDN, UserFilter: c.UserFilter, AttrGroups: c.AttrGroups,
+	}
+}
+
+// Config is the server as ldapauth takes it.
+func (l *LdapServer) Config() ldapauth.Config {
+	return ldapauth.Config{
+		Host: l.Host, Port: l.Port, TLSMode: l.TlsMode, SkipTLSVerify: l.SkipTlsVerify, CACert: l.CaCert, ServerType: l.ServerType,
+		BindDN: l.BindDn, BindPassword: l.BindPassword, BaseDN: l.BaseDn, UserFilter: l.UserFilter,
+		AttrEmail: l.AttrEmail, AttrDisplayName: l.AttrDisplayName, AttrGroups: l.AttrGroups,
+	}
+}
+
+// LdapRoleMapping makes the members of a directory group (by DN) members
+// of a role at Level, synced at each of their logins.
+type LdapRoleMapping struct {
+	Base
+	GroupDn string `json:"group_dn"`
+	RoleID  uint   `json:"role_id"`
+	Level   string `json:"level"`
+}
+
+// LDAPPassword is the password hash of a user from a directory server:
+// their password is the server's.
+const LDAPPassword = "@LDAP"
 
 type WgPeer struct {
 	Base
@@ -1117,7 +1205,7 @@ func All() []any {
 		&DyndnsClient{}, &DyndnsRecord{}, &Certificate{}, &IpList{}, &Task{}, &Service{}, &RateLimit{}, &ObjectFolder{}, &Role{}, &RoleMember{}, &RoleInstance{},
 		&RoutePrefixList{}, &RouteAsPathList{}, &RouteCommunityList{}, &RouteMap{}, &BgpConfig{}, &BgpPeerGroup{}, &BgpNeighbor{},
 		&OspfConfig{}, &OspfInterface{}, &IsisConfig{}, &IsisInterface{}, &VrrpRouter{}, &BfdInterface{}, &AddressList{},
-		&SnmpUser{}, &Vrf{}, &AcmeProxyPolicy{}, &StaticNeighbour{}, &PortName{}, &PolicyRoute{},
+		&SnmpUser{}, &LdapServer{}, &LdapRoleMapping{}, &Vrf{}, &AcmeProxyPolicy{}, &StaticNeighbour{}, &PortName{}, &PolicyRoute{},
 	}
 }
 

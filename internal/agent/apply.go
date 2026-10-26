@@ -143,6 +143,7 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 	var tbWant []tunnelBrokerItem
 	var certsWant []certItem
 	var proxiesWant []acmeProxyItem
+	var ovpnWant []openvpnItem
 	var lldpWant []lldpKey
 	pktsWant := map[string]string{}
 	dnsqWant := map[string]queryLogItem{}
@@ -342,6 +343,7 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 		for _, c := range in.Certificates {
 			certsWant = append(certsWant, certItem{instance: in.Name, netns: ns, cfg: c})
 		}
+		ovpnWant = append(ovpnWant, a.openvpnItems(in, ns, doc.Directory)...)
 		if x := in.ACMEProxy; x != nil {
 			it := acmeProxyItem{instance: in.Name, netns: ns, cfg: *x}
 			for _, ifc := range in.Interfaces {
@@ -399,6 +401,7 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 	a.reconcileActive()
 	a.certs.Reconcile(ctx, certsWant)
 	a.proxies.Reconcile(proxiesWant)
+	a.ovpn.Reconcile(ovpnWant)
 	a.pkts.Reconcile(pktsWant)
 	a.dnsq.Reconcile(dnsqWant)
 	a.lldp.Reconcile(lldpWant)
@@ -747,6 +750,18 @@ func (a *Agent) applyServices(ctx context.Context, in *fwconfig.Instance, b *ren
 		}
 	}
 
+	ovpn := map[string]bool{}
+	if s := in.OpenVPNServer(); s != nil && s.Enabled {
+		for _, p := range s.OpenVPN.Protocols() {
+			ovpn[p] = true
+		}
+		if !a.cfg.DryRun {
+			if err := prepareOpenVPN(files); err != nil {
+				return err
+			}
+		}
+	}
+
 	if in.SNMP != nil && !in.Default && !a.cfg.DryRun {
 		// portitor-snmpd@.service mounts the persistent directory (the
 		// engine id SNMPv3 managers know it by), which snmpd writes as
@@ -774,6 +789,9 @@ func (a *Agent) applyServices(ctx context.Context, in *fwconfig.Instance, b *ren
 		{a.cfg.Units.Chrony(in), files.Chrony, in.NTP != nil, "restart", false},
 		{a.cfg.Units.Snmpd(in), files.Snmpd, in.SNMP != nil, "restart", false},
 		{a.cfg.Units.Conntrackd(in), files.Conntrackd, in.ConntrackSync != nil, "restart", false},
+		// OpenVPN's clients reconnect after a restart.
+		{a.cfg.Units.OpenVPN(in, fwconfig.OpenVPNUDP), files.OpenVPNUDP, ovpn[fwconfig.OpenVPNUDP], "restart", false},
+		{a.cfg.Units.OpenVPN(in, fwconfig.OpenVPNTCP), files.OpenVPNTCP, ovpn[fwconfig.OpenVPNTCP], "restart", false},
 	} {
 		if !svc.on {
 			a.disableService(ctx, in, svc.unit, svc.conf)
@@ -799,6 +817,12 @@ func (a *Agent) applyServices(ctx context.Context, in *fwconfig.Instance, b *ren
 		// community, the users' passwords): remove ours.
 		if c, err := os.ReadFile(files.Snmpd); err == nil && render.Generated(c) && !a.cfg.DryRun {
 			_ = os.Remove(files.Snmpd)
+		}
+	}
+	// And a stale openvpn.conf its tls-crypt key.
+	for proto, conf := range map[string]string{fwconfig.OpenVPNUDP: files.OpenVPNUDP, fwconfig.OpenVPNTCP: files.OpenVPNTCP} {
+		if c, err := os.ReadFile(conf); err == nil && !ovpn[proto] && render.Generated(c) && !a.cfg.DryRun {
+			_ = os.Remove(conf)
 		}
 	}
 	return a.applyFRR(ctx, in, changed)

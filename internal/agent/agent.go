@@ -35,10 +35,12 @@ type Agent struct {
 	tbroker *tunnelBrokerManager
 	certs   *certManager
 	proxies *acmeProxyManager
-	pkts    *packetLog
-	dnsq    *queryLog
-	lldp    *lldpManager
-	lists   *ipLists
+	// ovpn answers the OpenVPN servers' logins.
+	ovpn  *openvpnManager
+	pkts  *packetLog
+	dnsq  *queryLog
+	lldp  *lldpManager
+	lists *ipLists
 	// blocklists keeps the DNS blocklists' zone files current.
 	blocklists *dnsBlocklists
 	tasks      *scheduler
@@ -105,6 +107,7 @@ func New(cfg *Config) *Agent {
 	}
 	a.certs = newCertManager(cfg.DryRun, cfg.Paths, a.bg)
 	a.proxies = newACMEProxyManager(cfg.DryRun, cfg.Paths, a.certs)
+	a.ovpn = newOpenVPNManager(cfg.DryRun, a.bg)
 	a.tbroker = newTunnelBrokerManager(cfg.DryRun, a.bg)
 	a.ha = newHAManager(a.onFenceChange, a.onActiveChange)
 	a.certs.standby = a.ha.isStandby
@@ -193,6 +196,7 @@ func (a *Agent) Stop() {
 	a.ddns.Stop()
 	a.tbroker.Stop()
 	a.proxies.Stop()
+	a.ovpn.Stop()
 	a.certs.Stop()
 	a.pkts.Stop()
 	a.dnsq.Stop()

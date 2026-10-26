@@ -210,6 +210,25 @@ func (c *Client) NTP(ctx context.Context) (*agentapi.NTPResponse, error) {
 	return &n, c.do(ctx, http.MethodGet, "/v1/ntp", nil, &n)
 }
 
+// OpenVPN returns the OpenVPN servers and their clients.
+func (c *Client) OpenVPN(ctx context.Context) (*agentapi.OpenVPNResponse, error) {
+	var o agentapi.OpenVPNResponse
+	return &o, c.do(ctx, http.MethodGet, "/v1/openvpn", nil, &o)
+}
+
+// DirectoryLogins returns the directory logins to OpenVPN of users
+// portitor-config doesn't have, since after.
+func (c *Client) DirectoryLogins(ctx context.Context, after int64) (*agentapi.DirectoryLoginsResponse, error) {
+	var o agentapi.DirectoryLoginsResponse
+	return &o, c.do(ctx, http.MethodGet, "/v1/directory/logins?after="+strconv.FormatInt(after, 10), nil, &o)
+}
+
+// OpenVPNCA returns what a client of the instance's OpenVPN server trusts.
+func (c *Client) OpenVPNCA(ctx context.Context, instance string) (*agentapi.OpenVPNCA, error) {
+	var o agentapi.OpenVPNCA
+	return &o, c.do(ctx, http.MethodGet, "/v1/openvpn/"+url.PathEscape(instance)+"/ca", nil, &o)
+}
+
 // BFD returns the instances' BFD sessions.
 func (c *Client) BFD(ctx context.Context) (*agentapi.BFDResponse, error) {
 	var b agentapi.BFDResponse

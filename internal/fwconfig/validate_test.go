@@ -609,6 +609,7 @@ func TestItemNames(t *testing.T) {
 		}
 		d := SampleDocument()
 		d.Instances[0].Certificates[0].Name = name
+		d.Instances[0].Interfaces[5].OpenVPN.Certificate = name
 		d.Instances[0].DynDNS[0].Name = name
 		if err := d.Validate(); (err == nil) != ok {
 			t.Errorf("%q: validate %v", name, err)

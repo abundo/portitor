@@ -47,6 +47,18 @@ func SampleDocument() Document {
 							TunnelID: "123456", Username: "example", UpdateKey: "s3cretKey",
 						}},
 					},
+					{
+						Name: "ovpn0", Kind: KindOpenVPN, Enabled: true, IPv4Mode: ModeStatic,
+						Addresses: []string{"10.8.0.1/24", "fd00:8::1/64"},
+						OpenVPN: &OpenVPN{
+							Mode: OpenVPNAdaptive, Port: OpenVPNPort, Listen: "eth0", Certificate: "www", TLSCrypt: SampleTLSCrypt,
+							Users: []OpenVPNUser{{Name: "alice", Hash: "$2a$04$sPjBZ8e3Suq8ztRXAZk6gu23Z2daJoCtgy9b3J2wzh9YCN1P0YLfG"}, // alicepass
+								{Name: "bob", LDAP: true}, {Name: "carol", Denied: true}},
+							RequireRole: true, RoleGroups: []string{"CN=VPN,CN=Users,DC=example,DC=com"},
+							Routes: []string{"192.168.1.0/24", "fd00:1::/64"},
+							DNS:    []string{"10.8.0.1"}, DNSDomain: "home.arpa",
+						},
+					},
 				},
 				InterfaceZones: []InterfaceZone{
 					{Name: "wan", Interfaces: []string{"eth0"}},
@@ -281,6 +293,11 @@ func SampleDocument() Document {
 			A:    LinkEnd{Instance: "main", Interface: "lk-guest", Addresses: []string{"10.255.0.1/30"}},
 			B:    LinkEnd{Instance: "guest", Interface: "lk-main", Addresses: []string{"10.255.0.2/30"}},
 		}},
+		Directory: &Directory{Servers: []LDAPServer{{
+			Name: "ad", ServerType: "ad", Host: "dc1.example.com", Port: 636, TLSMode: "ldaps",
+			BindDN: "CN=vpn,CN=Users,DC=example,DC=com", BindPassword: "bindpass", BaseDN: "DC=example,DC=com",
+			UserFilter: "(sAMAccountName=%s)", AttrGroups: "memberOf",
+		}}},
 		IPLists: []IPList{
 			{Name: "crowdsec", Source: IPListCrowdSec, URL: "http://127.0.0.1:8080", APIKey: "0123456789abcdef"},
 			{Name: "drop", Source: IPListURL, URL: "https://www.spamhaus.org/drop/drop.txt"},
@@ -327,3 +344,11 @@ func SampleL3VNIDocument() Document {
 		RD: "192.168.50.1:5000", ImportRTs: []string{"65000:5000"}, ExportRTs: []string{"65000:5000"}}
 	return doc
 }
+
+// SampleTLSCrypt is the sample document's OpenVPN tls-crypt key.
+const SampleTLSCrypt = "-----BEGIN OpenVPN Static key V1-----\n" +
+	"00112233445566778899aabbccddeeff\n00112233445566778899aabbccddeeff\n00112233445566778899aabbccddeeff\n00112233445566778899aabbccddeeff\n" +
+	"00112233445566778899aabbccddeeff\n00112233445566778899aabbccddeeff\n00112233445566778899aabbccddeeff\n00112233445566778899aabbccddeeff\n" +
+	"00112233445566778899aabbccddeeff\n00112233445566778899aabbccddeeff\n00112233445566778899aabbccddeeff\n00112233445566778899aabbccddeeff\n" +
+	"00112233445566778899aabbccddeeff\n00112233445566778899aabbccddeeff\n00112233445566778899aabbccddeeff\n00112233445566778899aabbccddeeff\n" +
+	"-----END OpenVPN Static key V1-----\n"

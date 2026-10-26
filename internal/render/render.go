@@ -48,6 +48,10 @@ type Paths struct {
 	RadvdConf    string `yaml:"radvd_conf" json:"radvd_conf"`
 	ChronyConf   string `yaml:"chrony_conf" json:"chrony_conf"`
 	SnmpdConf    string `yaml:"snmpd_conf" json:"snmpd_conf"`
+	// OpenVPNDir holds the default instance's OpenVPN configs
+	// (portitor-udp.conf, portitor-tcp.conf), read by the distribution's
+	// openvpn-server@ units.
+	OpenVPNDir string `yaml:"openvpn_dir" json:"openvpn_dir"`
 	// ConntrackdConf is the default instance's conntrackd.conf (HA pairs).
 	ConntrackdConf string `yaml:"conntrackd_conf" json:"conntrackd_conf"`
 	// FRRDir is FRR's config directory: the default instance's frr.conf
@@ -78,6 +82,7 @@ func DefaultPaths() Paths {
 		RadvdConf:      "/etc/radvd.conf",
 		ChronyConf:     "/etc/chrony/chrony.conf",
 		SnmpdConf:      "/etc/snmp/snmpd.conf",
+		OpenVPNDir:     "/etc/openvpn/server",
 		ConntrackdConf: "/etc/conntrackd/conntrackd.conf",
 		FRRDir:         "/etc/frr",
 		FRRRunDir:      "/run/frr",
@@ -113,6 +118,12 @@ type InstanceFiles struct {
 	ChronySocket string
 	Snmpd        string
 	Conntrackd   string
+	// OpenVPNUDP and OpenVPNTCP are the OpenVPN processes' configs;
+	// OpenVPNRun holds their management sockets (OpenVPNSocket), which
+	// the agent alone opens.
+	OpenVPNUDP string
+	OpenVPNTCP string
+	OpenVPNRun string
 	// SnmpdPersist is a virtual firewall's snmpd persistent directory
 	// (engine id, boots), which its unit alone mounts
 	// (portitor-snmpd@.service); the default instance's is net-snmp's
@@ -170,6 +181,9 @@ func (p Paths) Files(in *fwconfig.Instance) InstanceFiles {
 			Chrony:       p.ChronyConf,
 			Snmpd:        p.SnmpdConf,
 			Conntrackd:   p.ConntrackdConf,
+			OpenVPNUDP:   filepath.Join(p.OpenVPNDir, "portitor-udp.conf"),
+			OpenVPNTCP:   filepath.Join(p.OpenVPNDir, "portitor-tcp.conf"),
+			OpenVPNRun:   filepath.Join(p.RunDir, "openvpn", in.Name),
 			FRRConf:      filepath.Join(p.FRRDir, "frr.conf"),
 			FRRDaemons:   filepath.Join(p.FRRDir, "daemons"),
 			FRRVtysh:     filepath.Join(p.FRRDir, "vtysh.conf"),
@@ -202,6 +216,9 @@ func (p Paths) Files(in *fwconfig.Instance) InstanceFiles {
 		ChronySocket: filepath.Join(p.RunDir, "chrony", in.Name, "chronyd.sock"),
 		Snmpd:        filepath.Join(etc, "snmpd.conf"),
 		Conntrackd:   filepath.Join(etc, "conntrackd.conf"),
+		OpenVPNUDP:   filepath.Join(etc, "openvpn-udp.conf"),
+		OpenVPNTCP:   filepath.Join(etc, "openvpn-tcp.conf"),
+		OpenVPNRun:   filepath.Join(p.RunDir, "openvpn", in.Name),
 		SnmpdPersist: filepath.Join(p.StateDir, "snmp", in.Name),
 		FRRConf:      filepath.Join(etc, "frr", "frr.conf"),
 		FRRDaemons:   filepath.Join(etc, "frr", "daemons"),
@@ -220,6 +237,19 @@ func (p Paths) Files(in *fwconfig.Instance) InstanceFiles {
 		Kea4Socket:   filepath.Join(p.KeaSocketDir, "kea4-"+in.Name+".sock"),
 		Kea6Socket:   filepath.Join(p.KeaSocketDir, "kea6-"+in.Name+".sock"),
 	}
+}
+
+// OpenVPNConf is the config of the OpenVPN process for proto.
+func (f InstanceFiles) OpenVPNConf(proto string) string {
+	if proto == fwconfig.OpenVPNTCP {
+		return f.OpenVPNTCP
+	}
+	return f.OpenVPNUDP
+}
+
+// OpenVPNSocket is the management socket of the OpenVPN process for proto.
+func (f InstanceFiles) OpenVPNSocket(proto string) string {
+	return filepath.Join(f.OpenVPNRun, proto+".sock")
 }
 
 func (p Paths) InstanceEtc(name string) string {
@@ -277,6 +307,8 @@ type Units struct {
 	ChronyFmt         string `yaml:"chrony" json:"chrony"`
 	SnmpdFmt          string `yaml:"snmpd" json:"snmpd"`
 	ConntrackdFmt     string `yaml:"conntrackd" json:"conntrackd"`
+	OpenVPNUDPFmt     string `yaml:"openvpn_udp" json:"openvpn_udp"`
+	OpenVPNTCPFmt     string `yaml:"openvpn_tcp" json:"openvpn_tcp"`
 	DefaultNamed      string `yaml:"default_named" json:"default_named"`
 	DefaultKea4       string `yaml:"default_kea4" json:"default_kea4"`
 	DefaultKea6       string `yaml:"default_kea6" json:"default_kea6"`
@@ -285,6 +317,8 @@ type Units struct {
 	DefaultChrony     string `yaml:"default_chrony" json:"default_chrony"`
 	DefaultSnmpd      string `yaml:"default_snmpd" json:"default_snmpd"`
 	DefaultConntrackd string `yaml:"default_conntrackd" json:"default_conntrackd"`
+	DefaultOpenVPNUDP string `yaml:"default_openvpn_udp" json:"default_openvpn_udp"`
+	DefaultOpenVPNTCP string `yaml:"default_openvpn_tcp" json:"default_openvpn_tcp"`
 }
 
 func DefaultUnits() Units {
@@ -297,6 +331,8 @@ func DefaultUnits() Units {
 		ChronyFmt:     "portitor-chrony@%s.service",
 		SnmpdFmt:      "portitor-snmpd@%s.service",
 		ConntrackdFmt: "portitor-conntrackd@%s.service",
+		OpenVPNUDPFmt: "portitor-openvpn-udp@%s.service",
+		OpenVPNTCPFmt: "portitor-openvpn-tcp@%s.service",
 		// Debian/Ubuntu's names (Fedora: kea-dhcp4.service, kea-dhcp6.service).
 		DefaultNamed: "named.service",
 		DefaultKea4:  "kea-dhcp4-server.service",
@@ -307,6 +343,9 @@ func DefaultUnits() Units {
 		DefaultChrony:     "chrony.service",
 		DefaultSnmpd:      "snmpd.service",
 		DefaultConntrackd: "conntrackd.service",
+		// The distribution's template, with OpenVPNDir's configs.
+		DefaultOpenVPNUDP: "openvpn-server@portitor-udp.service",
+		DefaultOpenVPNTCP: "openvpn-server@portitor-tcp.service",
 	}
 }
 
@@ -330,10 +369,20 @@ func (u Units) Conntrackd(in *fwconfig.Instance) string {
 	return u.pick(in, u.DefaultConntrackd, u.ConntrackdFmt)
 }
 
+// OpenVPN is the unit of the instance's OpenVPN process for proto
+// (fwconfig.OpenVPNUDP or OpenVPNTCP).
+func (u Units) OpenVPN(in *fwconfig.Instance, proto string) string {
+	if proto == fwconfig.OpenVPNTCP {
+		return u.pick(in, u.DefaultOpenVPNTCP, u.OpenVPNTCPFmt)
+	}
+	return u.pick(in, u.DefaultOpenVPNUDP, u.OpenVPNUDPFmt)
+}
+
 // All lists the instance's units: named, Kea4, Kea6, radvd, FRR, chrony,
-// snmpd, conntrackd.
+// snmpd, conntrackd, OpenVPN's.
 func (u Units) All(in *fwconfig.Instance) []string {
-	return []string{u.Named(in), u.Kea4(in), u.Kea6(in), u.Radvd(in), u.FRR(in), u.Chrony(in), u.Snmpd(in), u.Conntrackd(in)}
+	return []string{u.Named(in), u.Kea4(in), u.Kea6(in), u.Radvd(in), u.FRR(in), u.Chrony(in), u.Snmpd(in), u.Conntrackd(in),
+		u.OpenVPN(in, fwconfig.OpenVPNUDP), u.OpenVPN(in, fwconfig.OpenVPNTCP)}
 }
 
 type Options struct {
@@ -430,6 +479,9 @@ func Render(doc fwconfig.Document, opt Options) (*Bundle, error) {
 		if in.ConntrackSync != nil {
 			add(f.Conntrackd, ConntrackdConf(in), 0o644, false)
 		}
+		for _, ifc := range in.OpenVPNDevices() {
+			add(f.OpenVPNConf(ifc.OpenVPN.Proto), OpenVPNConf(in, ifc, opt.Paths), 0o600, true)
+		}
 		if in.FRRRunning() {
 			add(f.FRRDaemons, FRRDaemons(in), 0o640, false)
 			add(f.FRRVtysh, FRRVtyshConf(in), 0o640, false)
@@ -500,6 +552,7 @@ func (b *Bundle) Redacted() []File {
 			out[i].Content = ospfKeyLine.ReplaceAllString(out[i].Content, "${1}<redacted>")
 			out[i].Content = isisPassLine.ReplaceAllString(out[i].Content, "${1}<redacted>")
 			out[i].Content = redactSnmpd(out[i].Content)
+			out[i].Content = redactOpenVPN(out[i].Content)
 		}
 	}
 	return out

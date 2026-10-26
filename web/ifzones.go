@@ -231,6 +231,10 @@ func renameIfaceRefs(tx *gorm.DB, instanceID uint, old, name string, zones bool)
 		}); err != nil {
 			return err
 		}
+		// An OpenVPN server's listen interface.
+		if err := tx.Model(&models.Interface{}).Where("instance_id = ? AND kind = ? AND ovpn_listen = ?", instanceID, fwconfig.KindOpenVPN, old).UpdateColumn("ovpn_listen", name).Error; err != nil {
+			return err
+		}
 		// A link-local BGP neighbour's interface.
 		if err := tx.Model(&models.BgpNeighbor{}).Where("instance_id = ? AND interface = ?", instanceID, old).UpdateColumn("interface", name).Error; err != nil {
 			return err
@@ -277,6 +281,11 @@ func refuseIfaceInUse(tx *gorm.DB, instanceID uint, name string) error {
 	tx.Model(&models.Interface{}).Where("instance_id = ? AND kind = ? AND vxlan_device = ?", instanceID, fwconfig.KindVXLAN, name).Order("name").Pluck("name", &vxlans)
 	for _, x := range vxlans {
 		users = append(users, "VXLAN "+x)
+	}
+	var ovpns []string
+	tx.Model(&models.Interface{}).Where("instance_id = ? AND kind = ? AND ovpn_listen = ?", instanceID, fwconfig.KindOpenVPN, name).Order("name").Pluck("name", &ovpns)
+	for _, x := range ovpns {
+		users = append(users, "OpenVPN "+x+" (listen interface)")
 	}
 	var l3vnis []string
 	tx.Model(&models.Vrf{}).Where("instance_id = ? AND evpn_vni <> 0 AND evpn_device = ?", instanceID, name).Order("name").Pluck("name", &l3vnis)

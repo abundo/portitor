@@ -364,7 +364,7 @@ func prepareInterface(tx *gorm.DB, i, old *models.Interface) error {
 	if i.Kind == "" {
 		i.Kind = fwconfig.KindPhysical
 	}
-	if err := oneOf("kind", i.Kind, fwconfig.KindPhysical, fwconfig.KindVLAN, fwconfig.KindBridge, fwconfig.KindWireGuard, fwconfig.KindLoopback, fwconfig.Kind6in4, fwconfig.KindVXLAN); err != nil {
+	if err := oneOf("kind", i.Kind, fwconfig.KindPhysical, fwconfig.KindVLAN, fwconfig.KindBridge, fwconfig.KindWireGuard, fwconfig.KindLoopback, fwconfig.Kind6in4, fwconfig.KindVXLAN, fwconfig.KindOpenVPN); err != nil {
 		return err
 	}
 	if old != nil && old.Kind != i.Kind {
@@ -467,6 +467,10 @@ func prepareInterface(tx *gorm.DB, i, old *models.Interface) error {
 		if i.WgKeepalive < 0 || i.WgKeepalive > 65535 {
 			return bad("keepalive must be 0-65535")
 		}
+	case fwconfig.KindOpenVPN:
+		if err := prepareOpenVPN(tx, i, old); err != nil {
+			return err
+		}
 	default:
 		i.WgEndpoint, i.WgKeepalive = "", 0
 	}
@@ -479,7 +483,7 @@ func prepareInterface(tx *gorm.DB, i, old *models.Interface) error {
 	if err := prepareIfaceVrf(tx, i); err != nil {
 		return err
 	}
-	if i.Kind == fwconfig.KindWireGuard || i.Kind == fwconfig.KindLoopback || i.Kind == fwconfig.Kind6in4 {
+	if i.Kind == fwconfig.KindWireGuard || i.Kind == fwconfig.KindLoopback || i.Kind == fwconfig.Kind6in4 || i.Kind == fwconfig.KindOpenVPN {
 		i.Lldp = false
 	}
 	if i.Kind == fwconfig.KindLoopback {

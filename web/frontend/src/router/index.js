@@ -55,6 +55,7 @@ const router = createRouter({
         { path: 'dns-templates', redirect: { path: '/dns', query: { tab: 'templates' } } },
         { path: 'dhcp', component: () => import('@/views/DhcpPage.vue') },
         { path: 'wireguard', component: () => import('@/views/WireguardPage.vue') },
+        { path: 'openvpn', component: () => import('@/views/OpenvpnPage.vue') },
         { path: 'dns-update', redirect: '/dns' },
         { path: 'certificates', component: () => import('@/views/CertificatesPage.vue') },
         { path: 'acme-proxy', component: () => import('@/views/AcmeProxyPage.vue') },
@@ -106,15 +107,13 @@ const router = createRouter({
           meta: { admin: true },
         },
         {
-          path: 'users',
-          component: () => import('@/views/UsersPage.vue'),
+          path: 'directory',
+          component: () => import('@/views/DirectoryPage.vue'),
           meta: { admin: true },
         },
-        {
-          path: 'roles',
-          component: () => import('@/views/RolesPage.vue'),
-          meta: { admin: true },
-        },
+        // The users and roles are in the directory's tree.
+        { path: 'users', redirect: '/directory' },
+        { path: 'roles', redirect: '/directory' },
         { path: 'help/:doc?', component: () => import('@/views/HelpPage.vue') },
         { path: 'profile', component: () => import('@/views/ProfilePage.vue') },
         { path: 'profile/password', component: () => import('@/views/ChangePasswordPage.vue') },

@@ -49,6 +49,11 @@ var bundleShared = []string{"object_folders", "address_objects", "address_lists"
 // configuration of one.
 var bundleSkip = map[string]bool{"roles": true, "role_instances": true, "links": true}
 
+// bundleDeferred are the foreign keys set after the rows are in, which
+// would make cycles with the certificates (whose HTTP-01 interface is an
+// interface): the ACME proxy's certificate and an OpenVPN server's.
+var bundleDeferred = map[string]string{"instances": "acme_proxy_certificate_id", "interfaces": "ovpn_certificate_id"}
+
 type bundleRow = map[string]any
 
 type Bundle struct {
@@ -120,8 +125,8 @@ func ownedTables(g map[string][]fkey) []string {
 			}
 		}
 	}
-	// Parents before children by every owned foreign key (Kahn): the one
-	// cycle (instances' ACME proxy certificate) is set after the insert.
+	// Parents before children by every owned foreign key (Kahn) but the
+	// deferred ones, set after the insert.
 	rest := order[1:]
 	sorted := []string{"instances"}
 	placed := map[string]bool{"instances": true}
@@ -130,7 +135,7 @@ func ownedTables(g map[string][]fkey) []string {
 		for _, t := range rest {
 			ready := true
 			for _, k := range g[t] {
-				if owned[k.parent] && !placed[k.parent] && k.parent != t {
+				if owned[k.parent] && !placed[k.parent] && k.parent != t && bundleDeferred[t] != k.from {
 					ready = false
 				}
 			}
@@ -412,23 +417,31 @@ func ImportBundle(ctx context.Context, db *gorm.DB, b *Bundle, name string, fire
 			fixed := remapRow(r, g[t], newIDs)
 			if t == "instances" {
 				fixed["name"], fixed["firewall_id"], fixed["is_default"] = name, fresh.FirewallID, fresh.IsDefault
-				// Set once its certificate is in.
-				if v := r["acme_proxy_certificate_id"]; v != nil {
-					old := v
-					fixed["acme_proxy_certificate_id"] = nil
-					deferred = append(deferred, func() error {
-						cid, ok := newIDs["certificates"][toInt(old)]
-						if !ok {
-							return nil
-						}
-						_, err := tx.ExecContext(ctx, "UPDATE instances SET acme_proxy_certificate_id = ? WHERE id = ?", cid, instID)
-						return err
-					})
-				}
+			}
+			if t == "interfaces" {
+				// The roles are this firewall's: an OpenVPN server that
+				// required one lets no one in until one is chosen.
+				fixed["ovpn_role_id"] = nil
+			}
+			// Set once its certificate is in.
+			var deferredCert any
+			if col := bundleDeferred[t]; col != "" && r[col] != nil {
+				deferredCert, fixed[col] = r[col], nil
 			}
 			id, err := insertRow(ctx, tx, t, c, fixed)
 			if err != nil {
 				return 0, nil, fmt.Errorf("%s: %w", t, err)
+			}
+			if deferredCert != nil {
+				col := bundleDeferred[t]
+				deferred = append(deferred, func() error {
+					cid, ok := newIDs["certificates"][toInt(deferredCert)]
+					if !ok {
+						return nil
+					}
+					_, err := tx.ExecContext(ctx, fmt.Sprintf("UPDATE %q SET %q = ? WHERE id = ?", t, col), cid, id)
+					return err
+				})
 			}
 			mapID(t, rowID(r), id)
 			if t == "instances" {

@@ -34,6 +34,9 @@ type Document struct {
 	Tasks []Task `json:"tasks,omitempty"`
 	// HA makes the host one of an HA pair (ha.go).
 	HA *HA `json:"ha,omitempty"`
+	// Directory is where the users portitor-config doesn't have log in to
+	// OpenVPN (only with an OpenVPN server).
+	Directory *Directory `json:"directory,omitempty"`
 }
 
 type Instance struct {
@@ -123,6 +126,7 @@ const (
 	Kind6in4      = "6in4"     // an IPv6-in-IPv4 tunnel (sit), Tunnel
 	KindVXLAN     = "vxlan"    // a VXLAN (ethernet in UDP), VXLAN
 	KindVRF       = "vrf"      // a VRF's device, generated from Instance.VRFs
+	KindOpenVPN   = "openvpn"  // an OpenVPN server's tun device, OpenVPN
 )
 
 // IPv4 addressing modes.
@@ -178,6 +182,9 @@ type Interface struct {
 	Tunnel *Tunnel6in4 `json:"tunnel,omitempty"`
 	// VXLAN holds a vxlan interface's settings.
 	VXLAN *VXLAN `json:"vxlan,omitempty"`
+	// OpenVPN holds an openvpn interface's server. Its TCP device
+	// (generated, Expand) has the interface as Parent.
+	OpenVPN *OpenVPN `json:"openvpn,omitempty"`
 }
 
 // MaxShapeMbit bounds an interface's shaped bandwidth (Mbit/s).
@@ -829,6 +836,7 @@ func (d Document) Expand() Document {
 		}
 	}
 	for i := range out.Instances {
+		out.Instances[i].addOpenVPNDevices()
 		out.Instances[i].addL3VNIDevices()
 		out.Instances[i].addVRFDevices()
 		if out.Instances[i].Default {
@@ -877,7 +885,7 @@ func (in *Instance) InterfaceZone(name string) *InterfaceZone {
 
 // MatchInterfaces resolves a rule's interface list (interface and zone
 // names) to the enabled interfaces it matches, with their VRRP devices
-// (AddVRRPDevices) and NAT64 loop devices (AddNAT64Devices), sorted and without duplicates. Call it on an expanded document so link ends are included.
+// (AddVRRPDevices), NAT64 loop devices (AddNAT64Devices) and OpenVPN TCP devices (AddOpenVPNDevices), sorted and without duplicates. Call it on an expanded document so link ends are included.
 // A non-empty list can resolve to none (empty zones, disabled interfaces);
 // the rule must then be left out, not rendered without the match.
 func (in *Instance) MatchInterfaces(list []string) []string {
@@ -896,5 +904,5 @@ func (in *Instance) MatchInterfaces(list []string) []string {
 			add(name)
 		}
 	}
-	return in.AddNAT64Devices(in.AddVRRPDevices(out))
+	return in.AddOpenVPNDevices(in.AddNAT64Devices(in.AddVRRPDevices(out)))
 }

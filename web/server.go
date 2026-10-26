@@ -47,6 +47,9 @@ type agentAPI interface {
 	VRRP(ctx context.Context) (*agentapi.VRRPResponse, error)
 	BFD(ctx context.Context) (*agentapi.BFDResponse, error)
 	NTP(ctx context.Context) (*agentapi.NTPResponse, error)
+	OpenVPN(ctx context.Context) (*agentapi.OpenVPNResponse, error)
+	OpenVPNCA(ctx context.Context, instance string) (*agentapi.OpenVPNCA, error)
+	DirectoryLogins(ctx context.Context, after int64) (*agentapi.DirectoryLoginsResponse, error)
 	RuleCounters(ctx context.Context) (*agentapi.RuleCountersResponse, error)
 	RateLimits(ctx context.Context) (*agentapi.RateLimitsResponse, error)
 	Logs(ctx context.Context, after int64) (*agentapi.LogsResponse, error)
@@ -170,7 +173,7 @@ func (s *Server) Echo() *echo.Echo {
 	(&resource[models.Firewall, *models.Firewall]{db: s.db, order: "id", prepare: s.prepareFirewallHere, present: presentFirewall, afterCreate: createFirewallInstance, beforeDelete: deleteFirewall}).register(s, g, "/firewalls")
 	(&resource[models.Instance, *models.Instance]{db: s.db, scope: instanceScope, tenantWrites: []string{http.MethodPut}, tenantCheck: tenantInstanceCheck, order: "firewall_id, is_default desc, name", prepare: prepareInstance, present: presentInstance, afterCreate: seedInstance, beforeDelete: deleteInstance}).register(s, g, "/instances")
 	(&resource[models.InterfaceZone, *models.InterfaceZone]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "name", prepare: prepareInterfaceZone, beforeDelete: deleteInterfaceZone}).register(s, g, "/interface-zones")
-	(&resource[models.Interface, *models.Interface]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, tenantCheck: tenantInterfaceCheck, filters: []string{"instance_id"}, order: "name", prepare: prepareInterface, present: presentInterface, beforeDelete: deleteInterface}).register(s, g, "/interfaces")
+	(&resource[models.Interface, *models.Interface]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, tenantCheck: s.tenantInterfaceCheck, filters: []string{"instance_id"}, order: "name", prepare: prepareInterface, present: presentInterface, beforeDelete: deleteInterface}).register(s, g, "/interfaces")
 	(&resource[models.WgPeer, *models.WgPeer]{db: s.db, scope: byParent("InterfaceID", "interface_id", "interfaces"), tenantWrites: tenantAll, filters: []string{"interface_id"}, order: "name", prepare: prepareWgPeer, present: presentWgPeer}).register(s, g, "/wg/peers")
 	(&resource[models.Link, *models.Link]{db: s.db, scope: linkScope, order: "name", prepare: prepareLink, beforeDelete: deleteLink}).register(s, g, "/links")
 	(&resource[models.Route, *models.Route]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "destination", prepare: prepareRoute}).register(s, g, "/routes")
@@ -289,6 +292,13 @@ func (s *Server) Echo() *echo.Echo {
 	g.GET("/agent/vrrp", s.handleAgentVRRP)
 	g.GET("/agent/bfd", s.handleAgentBFD)
 	g.GET("/agent/ntp", s.handleAgentNTP)
+	g.GET("/agent/openvpn", s.handleAgentOpenVPN)
+	(&resource[models.LdapServer, *models.LdapServer]{db: s.db, order: "position, id", prepare: prepareLdapServer, present: presentLdapServer}).register(s, g, "/directory/servers")
+	(&resource[models.LdapRoleMapping, *models.LdapRoleMapping]{db: s.db, order: "group_dn, role_id", prepare: prepareLdapRoleMapping}).register(s, g, "/directory/mappings")
+	g.POST("/directory/servers/reorder", s.handleReorderLdapServers)
+	g.POST("/directory/servers/test", s.handleTestLdapServer)
+	g.GET("/directory/servers/:id/browse", s.handleBrowseLdapServer)
+	g.GET("/interfaces/:id/openvpn-client", s.handleOpenVPNClientConfig)
 	g.GET("/agent/rule-counters", s.handleAgentRuleCounters)
 	g.GET("/agent/rate-limits", s.handleAgentRateLimits)
 	g.GET("/agent/logs", s.handleAgentLogs)
@@ -371,6 +381,7 @@ func (s *Server) Serve(ctx context.Context) error {
 		go s.runRole(ctx)
 	}
 	go s.runWitness(ctx)
+	go s.runDirectorySync(ctx)
 	sc := echo.StartConfig{Address: s.cfg.Bind, HideBanner: true}
 	slog.Info("portitor-config listening", "addr", s.cfg.Bind, "dev", s.cfg.Dev, "tls", s.cfg.TLSCert != "")
 	var err error
@@ -443,11 +454,11 @@ func deleteInstanceRows(tx *gorm.DB, in *models.Instance) error {
 // tenantInterfaceCheck: physical NICs belong to the host, so only a global
 // admin hands one to an instance (adds, renames or removes it). Old is nil
 // on create and delete.
-func tenantInterfaceCheck(i, old *models.Interface) error {
+func (s *Server) tenantInterfaceCheck(i, old *models.Interface) error {
 	if (i.Kind == fwconfig.KindPhysical || i.Kind == "") && (old == nil || old.Name != i.Name || old.InstanceID != i.InstanceID) {
 		return bad("only a global admin adds, renames or removes a physical interface")
 	}
-	return nil
+	return s.tenantOpenVPN(i)
 }
 
 // DefaultInstanceName is the instance created on start when there is none.
