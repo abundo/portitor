@@ -59,9 +59,15 @@ onMounted(() => {
   el.value.addEventListener('contextmenu', onContextMenu)
 })
 
+// Wunderbaum throttles its redraws and may drop the one after a load that
+// follows another closely (the page's data comes in several answers),
+// leaving rows undrawn; so redraw at once after each load.
 watch(
   () => props.source,
-  (source) => tree?.load(source),
+  async (source) => {
+    await tree?.load(source)
+    tree?.update('structure', { immediate: true })
+  },
 )
 
 onBeforeUnmount(() => {

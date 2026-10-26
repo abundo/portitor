@@ -99,8 +99,9 @@ A host in *Hosts & prefixes* with both an IPv4 and an IPv6 address covers both.
   application's ports. You can create one from the Service column's search too.
 - **Rate limits** (*Firewall → Rate limits*) cap how often a rule matches; see
   [Rate limits](#rate-limits).
-- **IP lists** (`@name`) are downloaded address lists, such as CrowdSec decisions or a
-  blocklist; see [Blocking with CrowdSec](crowdsec.md).
+- **IP lists** (`@name`) are downloaded address lists, such as a public blocklist or
+  CrowdSec decisions; see [Blocklists](blocklists.md) and
+  [Blocking with CrowdSec](crowdsec.md).
 
 ## Rate limits
 

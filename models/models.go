@@ -1033,6 +1033,9 @@ type IpList struct {
 	NewApiKey   string `gorm:"-" json:"api_key,omitempty"`
 	HasPassword bool   `gorm:"-" json:"has_password"`
 	HasApiKey   bool   `gorm:"-" json:"has_api_key"`
+	// RefreshSchedule, on create, adds a task that downloads the list on
+	// that schedule on each firewall (web.createIpListTasks).
+	RefreshSchedule string `gorm:"-" json:"refresh_schedule,omitempty"`
 }
 
 // Task runs on the firewall on a cron schedule (fwconfig.Task): it

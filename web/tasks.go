@@ -87,6 +87,14 @@ func prepareIpList(tx *gorm.DB, l, old *models.IpList) error {
 			l.Password = ""
 		}
 	}
+	l.RefreshSchedule = strings.Join(strings.Fields(l.RefreshSchedule), " ")
+	if old != nil {
+		l.RefreshSchedule = ""
+	} else if l.RefreshSchedule != "" {
+		if _, err := cron.Parse(l.RefreshSchedule); err != nil {
+			return bad("refresh schedule: " + err.Error())
+		}
+	}
 	if fwconfig.PlainTextCredentials(ipListDoc(l)) {
 		what := "password"
 		if l.Source == fwconfig.IPListCrowdSec {
@@ -109,9 +117,49 @@ func prepareIpList(tx *gorm.DB, l, old *models.IpList) error {
 	return nil
 }
 
+// createIpListTasks adds the tasks that download a new list on its
+// RefreshSchedule: one on each firewall but HA secondaries (they run
+// their primary's), named after the list, and after the firewall too
+// when there are several.
+func createIpListTasks(tx *gorm.DB, l *models.IpList) error {
+	if l.RefreshSchedule == "" {
+		return nil
+	}
+	var fws []models.Firewall
+	if err := tx.Where("ha_primary_id IS NULL").Order("id").Find(&fws).Error; err != nil {
+		return err
+	}
+	for _, fw := range fws {
+		base := l.Name
+		if len(fws) > 1 {
+			base += "-" + fw.Name
+		}
+		name := base
+		for i := 2; ; i++ {
+			var n int64
+			if err := tx.Model(&models.Task{}).Where("name = ?", name).Count(&n).Error; err != nil {
+				return err
+			}
+			if n == 0 {
+				break
+			}
+			name = fmt.Sprintf("%s-%d", base, i)
+		}
+		t := models.Task{Name: name, Description: "Downloads @" + l.Name, Enabled: true, Schedule: l.RefreshSchedule,
+			Kind: fwconfig.TaskIPList, IpListID: &l.ID, FirewallID: fw.ID}
+		if err := prepareTask(tx, &t, nil); err != nil {
+			return err
+		}
+		if err := tx.Create(&t).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func presentIpList(l *models.IpList) {
 	l.HasPassword, l.HasApiKey = l.Password != "", l.ApiKey != ""
-	l.NewPassword, l.NewApiKey = "", ""
+	l.NewPassword, l.NewApiKey, l.RefreshSchedule = "", "", ""
 }
 
 func deleteIpList(tx *gorm.DB, l *models.IpList) error {

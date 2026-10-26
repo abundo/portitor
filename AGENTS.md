@@ -20,7 +20,7 @@ are in [README.md](README.md).
 | `internal/acme` | ACME certificates through lego: accounts, orders, the stored chain and key (`<state_dir>/certificates/`); the agent's `acme.go` schedules them and answers HTTP-01 in the instance netns, opening port 80 by the `acme_http` set (`render.ACMEHTTPSet`), or DNS-01 (`dns01.go`: the TXT record at `_acme-challenge.<domain>` after its CNAMEs, lego's `EffectiveFQDN`) through a DNS update client's provider (`dyndns.TXTUpdater`, copied into the certificate as `fwconfig.DNS01` by the builder) |
 | `internal/acmeserver` | ACME server (RFC 8555 subset: accounts, orders, HTTP-01, finalize), with the policy, validation and issuing left to `Hooks`; used by the agent's ACME proxy (`acmeproxy.go`) |
 | `internal/nftimport` | nftables file (`nft -j list ruleset`, read by the agent's `POST /v1/nftables/parse` in a new network namespace, `nftparse.go`) → rules, NAT rules, hosts/prefixes, services, and what it leaves out, with jumped-to chains inlined in groups; written by `web/nftimport.go` through the CRUD's `prepare*` checks, a preview being the same transaction rolled back |
-| `internal/iplist` | Downloads IP lists (CrowdSec LAPI decisions, plain-text lists) |
+| `internal/iplist` | Downloads IP lists (CrowdSec LAPI decisions, plain-text lists with ranges and JSON lines); the public blocklists the GUI offers are `web/frontend/src/utils/ipListFeeds.js` |
 | `internal/wgkeys` | WireGuard key generation (wg(8) base64) |
 | `internal/buildinfo` | Version, commit and date, set at link time (Makefile `LDFLAGS`, `.goreleaser.yaml`) |
 | `internal/cron` | crontab(5) schedule parser for tasks (shared by web and agent) |

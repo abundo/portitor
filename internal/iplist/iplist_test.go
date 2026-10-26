@@ -51,6 +51,40 @@ not-an-address
 	}
 }
 
+// DShield's block list gives ranges, Spamhaus's JSON lists one object a
+// line.
+func TestParseTextRangesAndJSON(t *testing.T) {
+	res, err := ParseText(strings.NewReader(`#   DShield.org Recommended Block List
+64.62.197.0	64.62.197.255	24	291	HURRICANE	US	abuse@he.net
+192.0.2.1 192.0.2.6
+2001:db8:: 2001:db8::1:ffff
+198.51.100.9 2001:db8::1
+{"cidr":"2001:678:254::/48","sblid":"SBL697648","rir":"ripencc"}
+{"cidr":"203.0.113.0/24","sblid":"SBL1","rir":"apnic"}
+{"type":"metadata","timestamp":1792750442,"size":5759,"records":91}
+{"other":1}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "64.62.197.0/24 192.0.2.1/32 192.0.2.2/31 192.0.2.4/31 192.0.2.6/32 198.51.100.9/32 203.0.113.0/24 2001:678:254::/48 2001:db8::/111"
+	if got := prefixes(res); got != want {
+		t.Errorf("got  %s\nwant %s", got, want)
+	}
+	if res.Skipped != 1 {
+		t.Errorf("skipped %d, want 1", res.Skipped)
+	}
+	for _, r := range [][2]string{{"0.0.0.0", "255.255.255.255"}, {"10.0.0.0", "10.0.0.0"}, {"::", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"}} {
+		ps, ok := rangePrefixes(r[0], r[1])
+		if !ok || len(ps) != 1 {
+			t.Errorf("rangePrefixes(%s, %s) = %v, %v; want one prefix", r[0], r[1], ps, ok)
+		}
+	}
+	if _, ok := rangePrefixes("10.0.0.2", "10.0.0.1"); ok {
+		t.Error("a range that ends before it starts is not a range")
+	}
+}
+
 func TestNormalizeNested(t *testing.T) {
 	var in []netip.Prefix
 	for _, s := range []string{"10.0.0.0/24", "10.0.0.128/25", "10.0.1.0/24", "10.0.0.0/16", "11.0.0.1/32", "::/0", "2001:db8::/32", "0.0.0.0/0"} {

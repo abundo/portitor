@@ -171,3 +171,36 @@ func TestSchedulePreview(t *testing.T) {
 		t.Errorf("bad schedule: %s", rec.Body)
 	}
 }
+
+// A new list with a refresh schedule gets a task on each firewall but an
+// HA secondary, named after the list (and the firewall, with several).
+func TestIPListRefreshTasks(t *testing.T) {
+	env := newEnv(t)
+	tasksOf := func() []models.Task {
+		var ts []models.Task
+		env.srv.db.Order("name").Find(&ts)
+		return ts
+	}
+	if rec := env.do("POST", "/api/ip-lists", map[string]any{"name": "bad", "url": "https://example.com/l.txt", "refresh_schedule": "61 * * * *"}); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "refresh schedule") {
+		t.Errorf("bad schedule: %d %s", rec.Code, rec.Body)
+	}
+	drop := env.create("/api/ip-lists", map[string]any{"name": "drop", "url": "https://example.com/drop.txt", "refresh_schedule": "17  3 * * *"})
+	ts := tasksOf()
+	if len(ts) != 1 || ts[0].Name != "drop" || ts[0].Schedule != "17 3 * * *" || !ts[0].Enabled || ts[0].Kind != "iplist" || ts[0].IpListID == nil || *ts[0].IpListID != drop {
+		t.Fatalf("tasks: %+v", ts)
+	}
+	// An edit adds none.
+	if rec := env.do("PUT", "/api/ip-lists/"+itoa(drop), map[string]any{"refresh_schedule": "@daily"}); rec.Code != http.StatusOK || len(tasksOf()) != 1 {
+		t.Errorf("edit: %d %s, %d tasks", rec.Code, rec.Body, len(tasksOf()))
+	}
+
+	env.create("/api/firewalls", map[string]any{"name": "branch", "agent_url": "https://192.0.2.2:8443", "agent_token": "secret"})
+	env.create("/api/ip-lists", map[string]any{"name": "fh", "url": "https://example.com/fh.txt", "refresh_schedule": "@daily"})
+	var names []string
+	for _, t := range tasksOf() {
+		names = append(names, t.Name)
+	}
+	if got := strings.Join(names, " "); !strings.Contains(got, "fh-branch") || len(names) != 3 {
+		t.Errorf("tasks: %s", got)
+	}
+}

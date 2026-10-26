@@ -204,7 +204,7 @@ func (s *Server) Echo() *echo.Echo {
 	(&resource[models.DyndnsRecord, *models.DyndnsRecord]{db: s.db, scope: byParent("ClientID", "client_id", "dyndns_clients"), tenantWrites: tenantAll, filters: []string{"client_id"}, order: "id", prepare: prepareDyndnsRecord}).register(s, g, "/dyndns/records")
 	(&resource[models.AddressObject, *models.AddressObject]{db: s.db, order: "name", prepare: prepareAddressObject, beforeDelete: deleteAddressObject}).register(s, g, "/objects")
 	(&resource[models.AddressList, *models.AddressList]{db: s.db, order: "name", prepare: prepareAddressList, beforeDelete: deleteAddressList}).register(s, g, "/address-lists")
-	(&resource[models.IpList, *models.IpList]{db: s.db, order: "name", prepare: prepareIpList, present: presentIpList, beforeDelete: deleteIpList}).register(s, g, "/ip-lists")
+	(&resource[models.IpList, *models.IpList]{db: s.db, order: "name", prepare: prepareIpList, afterCreate: createIpListTasks, present: presentIpList, beforeDelete: deleteIpList}).register(s, g, "/ip-lists")
 	(&resource[models.ObjectFolder, *models.ObjectFolder]{db: s.db, order: "name", prepare: prepareObjectFolder, beforeDelete: deleteObjectFolder}).register(s, g, "/object-folders")
 	(&resource[models.Task, *models.Task]{db: s.db, order: "name", prepare: prepareTask}).register(s, g, "/tasks")
 	(&resource[models.Service, *models.Service]{db: s.db, order: "name", prepare: prepareService, beforeDelete: deleteService}).register(s, g, "/custom-services")

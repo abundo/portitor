@@ -102,7 +102,11 @@ func Fetch(ctx context.Context, client *http.Client, l fwconfig.IPList, userAgen
 
 // ParseText reads one address or prefix per line. "#" and ";" start a
 // comment, and only the first word of a line counts, so lists such as
-// Spamhaus DROP ("192.0.2.0/24 ; SBL123") read as they are.
+// Spamhaus DROP ("192.0.2.0/24 ; SBL123") read as they are. A line
+// whose first two words are addresses is a range, as in DShield's block
+// list ("192.0.2.0  192.0.2.255  24 ..."), and a line that is a JSON
+// object takes its "cidr", as in Spamhaus's JSON lists (drop_v6.json),
+// whose metadata line is left out.
 //
 // Entries but no address among them is an error, not an empty list: that
 // is what an HTML error or login page served with 200 OK looks like, and
@@ -113,13 +117,29 @@ func ParseText(r io.Reader) (*Result, error) {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 64<<10), 64<<10)
 	for sc.Scan() {
-		line := sc.Text()
+		line := strings.TrimSpace(sc.Text())
+		if strings.HasPrefix(line, "{") {
+			if err := res.addJSON(line); err != nil {
+				return nil, err
+			}
+			continue
+		}
 		if i := strings.IndexAny(line, "#;"); i >= 0 {
 			line = line[:i]
 		}
 		fields := strings.Fields(line)
 		if len(fields) == 0 {
 			continue
+		}
+		if len(fields) >= 2 {
+			if ps, ok := rangePrefixes(fields[0], fields[1]); ok {
+				for _, p := range ps {
+					if err := res.add(p.String()); err != nil {
+						return nil, err
+					}
+				}
+				continue
+			}
 		}
 		if err := res.add(fields[0]); err != nil {
 			return nil, err
@@ -176,6 +196,66 @@ func ParseCrowdSec(r io.Reader) (*Result, error) {
 	}
 	res.Prefixes = Normalize(res.Prefixes)
 	return res, nil
+}
+
+// addJSON adds the "cidr" of a JSON line (Spamhaus's JSON lists).
+func (res *Result) addJSON(line string) error {
+	var e struct {
+		CIDR string `json:"cidr"`
+		Type string `json:"type"`
+	}
+	switch {
+	case json.Unmarshal([]byte(line), &e) != nil:
+	case e.CIDR != "":
+		return res.add(e.CIDR)
+	case e.Type == "metadata":
+		return nil
+	}
+	res.Skipped++
+	return nil
+}
+
+// rangePrefixes returns the prefixes that cover the range from first to
+// last, two addresses of one IP version, first not after last.
+func rangePrefixes(first, last string) ([]netip.Prefix, bool) {
+	a, err1 := netip.ParseAddr(first)
+	b, err2 := netip.ParseAddr(last)
+	if err1 != nil || err2 != nil || a.Zone() != "" || b.Zone() != "" {
+		return nil, false
+	}
+	a, b = a.Unmap(), b.Unmap()
+	if a.Is4() != b.Is4() || b.Less(a) {
+		return nil, false
+	}
+	var out []netip.Prefix
+	for {
+		// The shortest prefix starting at a that ends at b or before.
+		bits := a.BitLen()
+		for bits > 0 {
+			p := netip.PrefixFrom(a, bits-1)
+			if p.Masked().Addr() != a || b.Less(lastAddr(p)) {
+				break
+			}
+			bits--
+		}
+		p := netip.PrefixFrom(a, bits)
+		out = append(out, p)
+		end := lastAddr(p)
+		if end == b {
+			return out, true
+		}
+		a = end.Next()
+	}
+}
+
+// lastAddr returns the last address of p.
+func lastAddr(p netip.Prefix) netip.Addr {
+	s := p.Masked().Addr().AsSlice()
+	for i := p.Bits(); i < len(s)*8; i++ {
+		s[i/8] |= 0x80 >> (i % 8)
+	}
+	a, _ := netip.AddrFromSlice(s)
+	return a
 }
 
 func (res *Result) add(s string) error {
