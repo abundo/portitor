@@ -166,6 +166,7 @@ const rows = computed(() =>
     return {
       key: i,
       vrf: c.vrf ?? '',
+      loopback: loopback(c.src) || loopback(c.dst),
       protocol: c.protocol + (c.family === 'ipv6' ? '6' : ''),
       source: hostPort(c.src, c.sport),
       destination: hostPort(c.dst, c.dport),
@@ -184,7 +185,17 @@ const rows = computed(() =>
     }
   }),
 )
-const { search, filtered } = useSearch(rows, (r) =>
+// Show active: leaves out TCP connections that are closed or in TIME_WAIT, and
+// the firewall's own loopback traffic.
+const activeOnly = ref(false)
+const closedStates = new Set(['TIME_WAIT', 'CLOSE'])
+const loopback = (a) => a === '::1' || a.startsWith('127.')
+const shown = computed(() =>
+  activeOnly.value
+    ? rows.value.filter((r) => !closedStates.has(r.state) && !r.loopback)
+    : rows.value,
+)
+const { search, filtered } = useSearch(shown, (r) =>
   valuesText(r.vrf, r.protocol, r.source, r.destination, r.nat, r.state, r.rule),
 )
 
@@ -254,10 +265,16 @@ const updated = computed(() => (snapshot.value ? clock(snapshot.value.time) : ''
       <div class="mb-2 flex flex-wrap items-center gap-3">
         <VrfSelect v-model="vrf" :items="vrfItems" />
         <SearchInput v-model="search" />
+        <USwitch
+          v-model="activeOnly"
+          label="Show active"
+          title="Leave out closed and TIME_WAIT connections and localhost traffic"
+        />
         <span v-if="snapshot" class="text-sm text-muted">
           {{ snapshot.total }} connections<template v-if="snapshot.total > rows.length">
-            ({{ rows.length }} largest shown)</template
-          >, at {{ updated }}<template v-if="paused">, paused</template>
+            ({{ rows.length }} largest received)</template
+          ><template v-if="activeOnly">, {{ shown.length }} active</template>, at {{ updated
+          }}<template v-if="paused">, paused</template>
         </span>
       </div>
       <UTable
