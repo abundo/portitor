@@ -109,6 +109,7 @@ func Nftables(in *fwconfig.Instance, lockout *AntiLockout, paths Paths) string {
 	if hasTunnelBroker(in) {
 		fmt.Fprintf(b, "\tset %s {\n\t\ttype ipv4_addr\n\t\tflags timeout\n\t}\n\n", TunnelBrokerPingSet)
 	}
+	fmt.Fprintf(b, "\tset %s {\n\t\ttype inet_service\n\t\tflags timeout\n\t}\n\n", IperfServerSet)
 
 	for _, l := range in.RateLimits {
 		writeRateLimit(b, l)
@@ -598,6 +599,32 @@ var (
 	ACMEHTTPClose = fmt.Sprintf("flush set inet %s %s\n", TableName, ACMEHTTPSet)
 )
 
+// IperfServerSet is the port set of the iperf3 server auto rule: empty,
+// except for the ports of the iperf3 servers the agent runs in the
+// instance, each with a timeout the agent renews while it runs, so a
+// port reopens after a ruleset load and closes if the agent dies.
+const IperfServerSet = "iperf3_server"
+
+// IperfService is the iperf3 server auto rule's service.
+const IperfService = "iperf3 server"
+
+// IperfServerTimeout is how long a port stays in IperfServerSet unless
+// the agent renews it.
+const IperfServerTimeout = "60s"
+
+// IperfServerOpen and IperfServerClose are the nft scripts that open and
+// close an iperf3 server's port. Adding an element that is there keeps
+// its timer, so opening adds, deletes and adds it again in one batch:
+// the port is never closed in between and has IperfServerTimeout left.
+func IperfServerOpen(port int) string {
+	add := fmt.Sprintf("add element inet %s %s { %d timeout %s }\n", TableName, IperfServerSet, port, IperfServerTimeout)
+	return add + IperfServerClose(port) + add
+}
+
+func IperfServerClose(port int) string {
+	return fmt.Sprintf("delete element inet %s %s { %d }\n", TableName, IperfServerSet, port)
+}
+
 // acmeHTTPInterfaces are where the upstream CA's HTTP-01 requests come in,
 // sorted: the HTTP-01 certificates' and ACME proxy policies' interfaces.
 func acmeHTTPInterfaces(in *fwconfig.Instance) []string {
@@ -705,6 +732,8 @@ func AutoInputRules(in *fwconfig.Instance) []AutoRule {
 		}
 		out = append(out, r)
 	}
+	// The iperf3 servers started from Tools → iperf3, while they run.
+	out = append(out, AutoRule{Service: IperfService, Protocol: "tcp,udp", PortSet: IperfServerSet})
 	for _, ifc := range in.Interfaces {
 		if ifc.Enabled && ifc.Kind == fwconfig.KindWireGuard && ifc.WireGuard != nil && ifc.WireGuard.ListenPort > 0 {
 			out = append(out, AutoRule{Service: "wireguard " + ifc.Name, Protocol: "udp", DstPort: ifc.WireGuard.ListenPort})
@@ -987,7 +1016,11 @@ func (r AutoRule) match(iif string) string {
 	case TunnelBrokerPingService:
 		parts = append(parts, "ip daddr @"+TunnelBrokerPingSet+" icmp type echo-request")
 	case "tcp,udp":
-		parts = append(parts, fmt.Sprintf("meta l4proto { tcp, udp } th dport %d", r.DstPort))
+		if r.PortSet != "" {
+			parts = append(parts, "meta l4proto { tcp, udp } th dport @"+r.PortSet)
+		} else {
+			parts = append(parts, fmt.Sprintf("meta l4proto { tcp, udp } th dport %d", r.DstPort))
+		}
 	default:
 		if r.SrcPort > 0 {
 			parts = append(parts, fmt.Sprintf("%s sport %d", r.Protocol, r.SrcPort))

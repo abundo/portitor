@@ -76,6 +76,11 @@ const router = createRouter({
           meta: { deployer: true },
         },
         {
+          path: 'iperf3',
+          component: () => import('@/views/IperfPage.vue'),
+          meta: { deployer: true },
+        },
+        {
           path: 'updates',
           component: () => import('@/views/UpdatesPage.vue'),
           meta: { admin: true },

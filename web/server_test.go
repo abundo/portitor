@@ -449,7 +449,7 @@ func TestAutoRules(t *testing.T) {
 	for _, r := range got {
 		names = append(names, fmt.Sprintf("%s %v %d", r.Service, r.InInterfaces, r.DstPort))
 	}
-	if want := "dhcp client [wan] 68|wireguard wg0 [] 51820"; strings.Join(names, "|") != want {
+	if want := "dhcp client [wan] 68|iperf3 server [] 0|wireguard wg0 [] 51820"; strings.Join(names, "|") != want {
 		t.Errorf("got %q, want %q", strings.Join(names, "|"), want)
 	}
 	if rec := env.do("GET", "/api/rules/auto?instance_id=999", nil); rec.Code != http.StatusNotFound {
@@ -478,6 +478,9 @@ func TestAutoRulesAntiLockout(t *testing.T) {
 		_ = json.Unmarshal(rec.Body.Bytes(), &got)
 		var out []string
 		for _, r := range got {
+			if r.Service == render.IperfService { // every instance's
+				continue
+			}
 			out = append(out, fmt.Sprintf("%s %s %d %v", r.Service, r.Protocol, r.DstPort, r.Source))
 		}
 		return strings.Join(out, "|")

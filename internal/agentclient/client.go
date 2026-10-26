@@ -375,6 +375,13 @@ func (c *Client) Trace(ctx context.Context, req agentapi.TraceRequest) (io.ReadC
 	return c.stream(ctx, "/v1/trace", req)
 }
 
+// Iperf starts an iperf3 client or server and returns its stream of
+// agentapi.IperfEvents (JSON lines); closing it (or cancelling ctx) stops
+// iperf3 on the agent.
+func (c *Client) Iperf(ctx context.Context, req agentapi.IperfRequest) (io.ReadCloser, error) {
+	return c.stream(ctx, "/v1/iperf", req)
+}
+
 // ServiceLog follows a service's journal as text; closing it (or
 // cancelling ctx) stops journalctl on the agent.
 func (c *Client) ServiceLog(ctx context.Context, req agentapi.ServiceLogRequest) (io.ReadCloser, error) {

@@ -161,6 +161,8 @@ AGENT_PACKAGES = {
     "tcpdump": (),
     "tshark": (),
     "mtr-tiny": (),
+    # Tools → iperf3; its own server unit is never used.
+    "iperf3": ("iperf3.service",),
     # NTP. Not masked: it replaces systemd-timesyncd and keeps the host's
     # clock with Debian's config until the default virtual firewall has NTP.
     "chrony": (),
@@ -544,7 +546,7 @@ def install_agent(host: Host, binary: Path, deploy: Path, version: str, assume_y
         on = "" if host.local else f" (on {host.name})"
         log(f"==> portitor-agent is installed but not started. Next steps{on}:")
         log("    install nftables, iproute2, wireguard-tools, bind9, kea-dhcp4-server,")
-        log("      kea-dhcp6-server, radvd, frr, frr-pythontools, tcpdump, tshark and mtr-tiny (or your distribution's equivalents)")
+        log("      kea-dhcp6-server, radvd, frr, frr-pythontools, tcpdump, tshark, mtr-tiny and iperf3 (or your distribution's equivalents)")
         log("    portitor-agent init --host <management address>   # token + fingerprint for the GUI")
         log(f"    $EDITOR {AGENT_CONFIG}                     # listen, allow_from, bind_user")
         log("    the default virtual firewall (the host) runs the distribution's named, Kea, radvd and FRR:")

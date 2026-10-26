@@ -199,7 +199,7 @@ func TestNftablesGuestHasNoLockout(t *testing.T) {
 	if strings.Contains(nft, "anti-lockout") {
 		t.Error("anti-lockout belongs to the default instance only")
 	}
-	if strings.Contains(strings.NewReplacer("set AUTO_", "", "label set ", "").Replace(nft), "set ") || strings.Contains(nft, "include") {
+	if strings.Contains(strings.NewReplacer("set AUTO_", "", "label set ", "", "set "+IperfServerSet+" ", "").Replace(nft), "set ") || strings.Contains(nft, "include") {
 		t.Error("the guest rules use no IP lists")
 	}
 	if !strings.Contains(nft, `oifname "lk-main" ip daddr 192.168.0.0/16 counter jump reject_pkt`) {
@@ -934,6 +934,23 @@ func TestAutoInputRulesDHCPv6Client(t *testing.T) {
 	want := `iifname "eth0" udp sport 547 udp dport 546 accept comment "auto: dhcpv6 client"`
 	if !strings.Contains(nft, want) {
 		t.Errorf("no %q in\n%s", want, nft)
+	}
+}
+
+func TestIperfServerRule(t *testing.T) {
+	doc := fwconfig.SampleDocument()
+	nft := Nftables(&doc.Instances[0], nil, Paths{})
+	for _, want := range []string{
+		"\tset iperf3_server {\n\t\ttype inet_service\n\t\tflags timeout\n\t}\n",
+		`meta l4proto { tcp, udp } th dport @iperf3_server accept comment "auto: iperf3 server"`,
+	} {
+		if !strings.Contains(nft, want) {
+			t.Errorf("no %q in\n%s", want, nft)
+		}
+	}
+	want := "add element inet firewall iperf3_server { 5201 timeout 60s }\ndelete element inet firewall iperf3_server { 5201 }\nadd element inet firewall iperf3_server { 5201 timeout 60s }\n"
+	if got := IperfServerOpen(5201); got != want {
+		t.Errorf("open %q", got)
 	}
 }
 

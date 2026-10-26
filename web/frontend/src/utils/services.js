@@ -88,7 +88,8 @@ export function autoService(a) {
   if (a.protocol === 'ospf' || a.protocol === 'ospfv3' || a.protocol === 'vrrp') return a.protocol
   const protos = a.protocol === 'tcp,udp' ? ['tcp', 'udp'] : [a.protocol]
   const from = a.src_port ? ` from ${a.src_port}` : ''
-  return protos.map((p) => `${p}/${a.dst_port}${from}`).join(', ')
+  const port = a.dst_port || `@${a.port_set}`
+  return protos.map((p) => `${p}/${port}${from}`).join(', ')
 }
 // autoFamily is the IP versions of an auto rule's source addresses.
 export function autoFamily(a) {

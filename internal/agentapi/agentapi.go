@@ -821,6 +821,84 @@ const (
 	TraceMaxSessions = 4
 )
 
+// IperfRequest starts an iperf3 test (POST /v1/iperf) in the instance's
+// namespace: a client to Target, or a server on Port that the instance's
+// ruleset opens while it runs (render.IperfServerSet). The answer is a
+// stream of IperfEvents, one JSON object per line, until the test (or
+// the server's Duration) ends or the client disconnects. An error before
+// iperf3 starts is a JSON ErrorResponse.
+type IperfRequest struct {
+	Instance string `json:"instance"`
+	Mode     string `json:"mode"` // "client" or "server"
+	// Interface binds the test to an instance interface (--bind-dev);
+	// empty lets the routing table decide (and a server listens on all).
+	Interface string `json:"interface,omitempty"`
+	// Target is the client's server: an IPv4 or IPv6 address, or a DNS
+	// name that the agent resolves in the instance's namespace (of
+	// Family, if given).
+	Target string `json:"target,omitempty"`
+	Family string `json:"family,omitempty"` // "", "ipv4" or "ipv6"
+	Port   int    `json:"port,omitempty"`   // 0 is IperfDefaultPort
+	// Duration is the client's test time, or how long the server
+	// listens, in seconds; 0 is the mode's default.
+	Duration int `json:"duration,omitempty"`
+	// The client's test: "tcp" (default) or "udp", the parallel streams,
+	// "send" (default), "receive" (-R) or "both" (--bidir), and the
+	// target bitrate in bits/s (0: unlimited for TCP, iperf3's 1 Mbit/s
+	// for UDP).
+	Protocol  string `json:"protocol,omitempty"`
+	Streams   int    `json:"streams,omitempty"`
+	Direction string `json:"direction,omitempty"`
+	Bitrate   int64  `json:"bitrate,omitempty"`
+	// OneOff ends the server after one test (-1).
+	OneOff bool `json:"one_off,omitempty"`
+}
+
+// IperfEvent is one event of a test: the server "listening" on Port, a
+// test's "start" (Remote, the peer's address; Protocol, Duration and
+// Streams as the client asked), an "interval" with its Sums (one a
+// second, one per direction), its "end" with the totals, or "error"
+// (a failed test; a server goes on listening unless it is one-off).
+type IperfEvent struct {
+	Type     string     `json:"type"`
+	Port     int        `json:"port,omitempty"`
+	Remote   string     `json:"remote,omitempty"`
+	Protocol string     `json:"protocol,omitempty"`
+	Duration int        `json:"duration,omitempty"`
+	Streams  int        `json:"streams,omitempty"`
+	Sums     []IperfSum `json:"sums,omitempty"`
+	Error    string     `json:"error,omitempty"`
+}
+
+// IperfSum is the traffic of one direction over an interval or a whole
+// test, seen from the firewall: Dir "sent" or "received". In an "end"
+// event a direction has its sender's and its receiver's sum (Receiver).
+type IperfSum struct {
+	Dir           string  `json:"dir"`
+	Receiver      bool    `json:"receiver,omitempty"`
+	Start         float64 `json:"start"`
+	End           float64 `json:"end"`
+	Bytes         int64   `json:"bytes"`
+	BitsPerSecond float64 `json:"bits_per_second"`
+	// TCP: the sender's retransmits; UDP: the receiver's jitter and loss.
+	Retransmits *int64   `json:"retransmits,omitempty"`
+	JitterMs    *float64 `json:"jitter_ms,omitempty"`
+	LostPackets *int64   `json:"lost_packets,omitempty"`
+	Packets     *int64   `json:"packets,omitempty"`
+	LostPercent *float64 `json:"lost_percent,omitempty"`
+}
+
+// iperf3 limits, enforced by the agent.
+const (
+	IperfDefaultPort           = 5201
+	IperfDefaultDuration       = 10
+	IperfMaxDuration           = 3600
+	IperfDefaultServerDuration = 600
+	IperfMaxStreams            = 128
+	// IperfMaxSessions is how many tests and servers may run at once.
+	IperfMaxSessions = 2
+)
+
 // ServiceLogRequest follows a service's journal (POST /v1/servicelog):
 // the answer is journalctl's text, a line per entry, starting with the
 // last ServiceLogLines entries, until the client disconnects. Unit must be
