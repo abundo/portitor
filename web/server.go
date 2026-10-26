@@ -59,6 +59,7 @@ type agentAPI interface {
 	Rollback(ctx context.Context) (*agentapi.ApplyResult, error)
 	RunTask(ctx context.Context, name string) error
 	RefreshIPList(ctx context.Context, name string) error
+	RefreshDNSBlocklist(ctx context.Context, instance, name string) error
 	Console(ctx context.Context, instance string) (*websocket.Conn, error)
 	Capture(ctx context.Context, req agentapi.CaptureRequest) (io.ReadCloser, error)
 	Trace(ctx context.Context, req agentapi.TraceRequest) (io.ReadCloser, error)
@@ -194,6 +195,7 @@ func (s *Server) Echo() *echo.Echo {
 	(&resource[models.IpamPrefix, *models.IpamPrefix]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "prefix", prepare: prepareIpamPrefix}).register(s, g, "/ipam/prefixes")
 	(&resource[models.IpamAddress, *models.IpamAddress]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "address", prepare: prepareIpamAddress}).register(s, g, "/ipam/addresses")
 	(&resource[models.DnsZone, *models.DnsZone]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "name", prepare: prepareDnsZone}).register(s, g, "/dns/zones")
+	(&resource[models.DnsBlocklist, *models.DnsBlocklist]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "name", prepare: prepareDnsBlocklist, present: presentDnsBlocklist}).register(s, g, "/dns/blocklists")
 	(&resource[models.DnsRecord, *models.DnsRecord]{db: s.db, scope: byParent("ZoneID", "zone_id", "dns_zones"), tenantWrites: tenantAll, filters: []string{"zone_id"}, order: "rank, id", prepare: prepareDnsRecord}).register(s, g, "/dns/records")
 	(&resource[models.DnsSoaTemplate, *models.DnsSoaTemplate]{db: s.db, scope: globalScope, tenantWrites: tenantAll, order: "name", prepare: prepareDnsSoaTemplate, beforeDelete: deleteDnsSoaTemplate}).register(s, g, "/dns/soa-templates")
 	(&resource[models.DnsDnssecPolicy, *models.DnsDnssecPolicy]{db: s.db, scope: globalScope, tenantWrites: tenantAll, order: "name", prepare: prepareDnsDnssecPolicy, beforeDelete: deleteDnsDnssecPolicy}).register(s, g, "/dns/dnssec-policies")
@@ -211,7 +213,7 @@ func (s *Server) Echo() *echo.Echo {
 	(&resource[models.PortName, *models.PortName]{db: s.db, order: "name", prepare: preparePortName, beforeDelete: deletePortName}).register(s, g, "/port-names")
 
 	// Instance admins use these too; the handlers check the instance.
-	for _, r := range []string{"PUT /api/dns/zones/:id/records", "PUT /api/dyndns/clients/:id/records", "POST /api/rules/reorder", "POST /api/nat/reorder", "POST /api/policy-routes/reorder",
+	for _, r := range []string{"PUT /api/dns/zones/:id/records", "POST /api/dns/blocklists/:id/refresh", "PUT /api/dyndns/clients/:id/records", "POST /api/rules/reorder", "POST /api/nat/reorder", "POST /api/policy-routes/reorder",
 		"POST /api/interfaces/:id/wg-rekey", "POST /api/wg/import", "POST /api/agent/capture", "POST /api/agent/trace", "POST /api/agent/servicelog", "POST /api/agent/connections", "POST /api/agent/connections/flush", "POST /api/agent/dhcp/renew",
 		"POST /api/deploy/apply", "POST /api/deploy/confirm", "POST /api/deploy/rollback"} {
 		s.tenantWrites[r] = true
@@ -237,6 +239,7 @@ func (s *Server) Echo() *echo.Echo {
 	g.POST("/wg/import", s.handleWgImport)
 	g.GET("/interfaces/:id/wg-next-free", s.handleWgNextFree)
 	g.POST("/ip-lists/:id/refresh", s.handleIPListRefresh)
+	g.POST("/dns/blocklists/:id/refresh", s.handleDNSBlocklistRefresh)
 	g.POST("/tasks/:id/run", s.handleTaskRun)
 	g.GET("/schedule/preview", s.handleSchedulePreview)
 

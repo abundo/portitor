@@ -300,6 +300,12 @@ func (c *Client) RunTask(ctx context.Context, name string) error {
 	return c.do(ctx, http.MethodPost, "/v1/tasks/run", agentapi.RunRequest{Name: name}, nil)
 }
 
+// RefreshDNSBlocklist starts downloading a DNS blocklist of an instance
+// of the applied configuration.
+func (c *Client) RefreshDNSBlocklist(ctx context.Context, instance, name string) error {
+	return c.do(ctx, http.MethodPost, "/v1/dns/blocklists/refresh", agentapi.DNSBlocklistRequest{Instance: instance, Name: name}, nil)
+}
+
 // RefreshIPList starts downloading an IP list of the applied
 // configuration now.
 func (c *Client) RefreshIPList(ctx context.Context, name string) error {

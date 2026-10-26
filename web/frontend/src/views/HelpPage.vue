@@ -69,7 +69,7 @@ const TOPICS = [
   { label: 'Network', children: ['nat64', 'tunnels'] },
   { label: 'Routing', children: ['bfd', 'vrrp', 'isis', 'ospf', 'bgp'] },
   { label: 'Firewall', children: ['rules', 'shaping', 'crowdsec'] },
-  { label: 'Services', children: ['ntp', 'snmp'] },
+  { label: 'Services', children: ['dns-blocklists', 'ntp', 'snmp'] },
 ]
 
 const items = computed(() => {

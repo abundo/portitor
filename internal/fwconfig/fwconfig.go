@@ -622,8 +622,13 @@ type DNSServer struct {
 	QueryLog *DNSQueryLog `json:"query_log,omitempty"`
 	// RateLimit names a rate limit that polices what comes in to the DNS
 	// server (ServiceRateLimit).
-	RateLimit string    `json:"rate_limit,omitempty"`
-	Zones     []DNSZone `json:"zones"`
+	RateLimit string `json:"rate_limit,omitempty"`
+	// Blocklists are response policy zones of names not to resolve, in
+	// order; BlocklistAllow are domains (and the names below them) that
+	// no blocklist blocks.
+	Blocklists     []DNSBlocklist `json:"blocklists,omitempty"`
+	BlocklistAllow []string       `json:"blocklist_allow,omitempty"`
+	Zones          []DNSZone      `json:"zones"`
 	// Templates the zones refer to by name. A zone without a template
 	// gets a built-in SOA and NS pointing at localhost.
 	SOATemplates   []DNSSOATemplate  `json:"soa_templates,omitempty"`

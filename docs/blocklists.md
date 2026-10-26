@@ -6,7 +6,9 @@
 A blocklist is a public list of addresses known for attacks, botnets or spam. Portitor
 downloads it into an IP list and refreshes it on a schedule. Your rules then use the
 list as `@name`. The lists below are free and need no account. For CrowdSec, which
-needs an engine or a Console account, see [Blocking with CrowdSec](crowdsec.md).
+needs an engine or a Console account, see [Blocking with CrowdSec](crowdsec.md). To
+block malware and phishing domains in the DNS server instead, see
+[DNS blocklists](dns-blocklists.md).
 
 ## The lists
 

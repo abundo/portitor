@@ -432,6 +432,7 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 	a.applied = &d
 	a.lastApply = time.Now()
 	a.reconcileIPLists(&d)
+	a.reconcileDNSBlocklists(&d)
 	a.tasks.Reconcile(d.Tasks)
 	a.ha.setConfig(d.HA)
 	return errors.Join(soft...)
@@ -711,6 +712,10 @@ func (a *Agent) applyServices(ctx context.Context, in *fwconfig.Instance, b *ren
 			// make sure it exists before named starts.
 			ensureFile(files.NamedInclude, "")
 		}
+		// And the blocklists' zone files, which named.conf names.
+		if err := a.prepareDNSBlocklists(in); err != nil {
+			return fmt.Errorf("instance %s: dns blocklists: %w", in.Name, err)
+		}
 		if err := a.enable(ctx, in, named); err != nil {
 			return err
 		}
@@ -720,7 +725,7 @@ func (a *Agent) applyServices(ctx context.Context, in *fwconfig.Instance, b *ren
 	}
 
 	if in.DNS.Enabled {
-		if changed[files.NamedConf] {
+		if changed[files.NamedConf] || changed[files.RPZAllow] {
 			if err := a.do(ctx, command{Name: "systemctl", Args: []string{"reload-or-restart", named}}); err != nil {
 				return err
 			}

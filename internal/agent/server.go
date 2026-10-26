@@ -223,6 +223,12 @@ func (a *Agent) routes() *http.ServeMux {
 			writeStarted(w, req.Name, a.RefreshIPList(req.Name))
 		}
 	})
+	mux.HandleFunc("POST /v1/dns/blocklists/refresh", func(w http.ResponseWriter, r *http.Request) {
+		var req agentapi.DNSBlocklistRequest
+		if decode(w, r, &req) {
+			writeStarted(w, req.Name, a.RefreshDNSBlocklist(req.Instance, req.Name))
+		}
+	})
 	mux.HandleFunc("POST /v1/dhcp/renew", func(w http.ResponseWriter, r *http.Request) {
 		var req agentapi.DHCPRenewRequest
 		if !decode(w, r, &req) {
@@ -395,12 +401,13 @@ func listenSocket(path string) (net.Listener, error) {
 // the console when portitor-web can't reach the firewall, none of which
 // changes the configuration.
 var localWrites = map[string]bool{
-	"/v1/confirm":           true,
-	"/v1/rollback":          true,
-	"/v1/dhcp/renew":        true,
-	"/v1/iplists/refresh":   true,
-	"/v1/connections/flush": true,
-	"/v1/ha/vote":           true,
+	"/v1/confirm":                true,
+	"/v1/rollback":               true,
+	"/v1/dhcp/renew":             true,
+	"/v1/iplists/refresh":        true,
+	"/v1/dns/blocklists/refresh": true,
+	"/v1/connections/flush":      true,
+	"/v1/ha/vote":                true,
 }
 
 // localHandler serves the API's GET routes and localWrites, without the

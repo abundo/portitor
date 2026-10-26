@@ -341,6 +341,26 @@ func addActions(root *cobra.Command, client func() *agentclient.Client, instance
 			})
 		},
 	})
+	blocklist := &cobra.Command{Use: "blocklist", Short: "DNS blocklists"}
+	request.AddCommand(blocklist)
+	blocklist.AddCommand(&cobra.Command{
+		Use:   "update <name>",
+		Short: "Download a DNS blocklist now",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return call(cmd, func(ctx context.Context, c *agentclient.Client) error {
+				name, err := instanceName(ctx, c)
+				if err != nil {
+					return err
+				}
+				if err := c.RefreshDNSBlocklist(ctx, name, args[0]); err != nil {
+					return err
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "Downloading %s in %s.\n", args[0], name)
+				return nil
+			})
+		},
+	})
 
 	// Break-glass for an HA host that hears neither its peer nor the
 	// witness: it is fenced until it does, or until this vote ends.

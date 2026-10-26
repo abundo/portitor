@@ -1119,6 +1119,12 @@ func redactDoc(doc fwconfig.Document) fwconfig.Document {
 			}
 			cp.ACMEProxy = &r
 		}
+		cp.DNS.Blocklists = slices.Clone(in.DNS.Blocklists)
+		for j := range cp.DNS.Blocklists {
+			if cp.DNS.Blocklists[j].Key != "" {
+				cp.DNS.Blocklists[j].Key = "<redacted>"
+			}
+		}
 		cp.DynDNS = make([]fwconfig.DynDNS, len(in.DynDNS))
 		for j, d := range in.DynDNS {
 			d.TSIG, d.ProviderSettings = redactTSIG(d.TSIG), redactProviderSettings(d.Provider, d.ProviderSettings)

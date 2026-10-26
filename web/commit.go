@@ -791,6 +791,7 @@ func mergeStatus(into, st *agentapi.Status, name string, several bool) *agentapi
 	into.Certificates = append(into.Certificates, st.Certificates...)
 	into.ACMEProxy = append(into.ACMEProxy, st.ACMEProxy...)
 	into.IPLists = append(into.IPLists, st.IPLists...)
+	into.DNSBlocklists = append(into.DNSBlocklists, st.DNSBlocklists...)
 	into.Tasks = append(into.Tasks, st.Tasks...)
 	into.NICs = append(into.NICs, st.NICs...)
 	for _, p := range st.Programs {

@@ -595,6 +595,38 @@ func TestNamedConfQueryLog(t *testing.T) {
 	}
 }
 
+func TestNamedConfBlocklists(t *testing.T) {
+	in := &fwconfig.SampleDocument().Instances[0]
+	if named := NamedConf(in, DefaultPaths(), nil); strings.Contains(named, "response-policy") {
+		t.Errorf("no blocklists:\n%s", named)
+	}
+	in.DNS.Blocklists = []fwconfig.DNSBlocklist{
+		{Name: "tif", URLs: []string{"https://example.com/tif.txt"}, Action: fwconfig.BlocklistNXDomain},
+		{Name: "oisd", URLs: []string{"https://example.com/rpz"}, Action: fwconfig.BlocklistLog},
+	}
+	in.DNS.BlocklistAllow = []string{"Example.com."}
+	named := NamedConf(in, DefaultPaths(), nil)
+	for _, want := range []string{
+		"\tresponse-policy {\n\t\tzone \"_allow.rpz.invalid\" policy passthru;\n\t\tzone \"tif.rpz.invalid\" policy nxdomain;\n\t\tzone \"oisd.rpz.invalid\" policy disabled;\n\t} break-dnssec yes qname-wait-recurse no;\n};",
+		"zone \"_allow.rpz.invalid\" {\n\ttype primary;\n\tfile \"/etc/bind/rpz-allow.db\";",
+		"zone \"tif.rpz.invalid\" {\n\ttype primary;\n\tfile \"/var/cache/bind/portitor-rpz/tif.db\";\n\tallow-query { localhost; };",
+	} {
+		if !strings.Contains(named, want) {
+			t.Errorf("missing %q in\n%s", want, named)
+		}
+	}
+	allow := RPZAllowZone(in)
+	if !Generated([]byte(allow)) || !strings.Contains(allow, "\nexample.com CNAME rpz-passthru.\n*.example.com CNAME rpz-passthru.\n") {
+		t.Errorf("allow zone:\n%s", allow)
+	}
+	// A virtual firewall's downloads are in its own working directory,
+	// which its unit mounts over named's.
+	vf := fwconfig.Instance{Name: "guest"}
+	if f := DefaultPaths().Files(&vf); f.RPZDir != "/var/cache/bind/guest/portitor-rpz" || f.RPZAllow != "/etc/portitor/instances/guest/rpz-allow.db" {
+		t.Errorf("virtual firewall files: %s, %s", f.RPZDir, f.RPZAllow)
+	}
+}
+
 func TestDnsmgrAndKea(t *testing.T) {
 	b := sampleBundle(t)
 	cfg := b.Dnsmgr["main"]

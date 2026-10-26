@@ -40,6 +40,7 @@ type data struct {
 	prefixes       []models.IpamPrefix
 	addrs          []models.IpamAddress
 	dnsZones       []models.DnsZone
+	blocklists     []models.DnsBlocklist
 	records        []models.DnsRecord
 	objects        []models.AddressObject
 	addressLists   []models.AddressList
@@ -91,6 +92,7 @@ func load(db *gorm.DB) (*data, error) {
 		{&d.prefixes, "prefix"},
 		{&d.addrs, "address"},
 		{&d.dnsZones, "name"},
+		{&d.blocklists, "name"},
 		{&d.records, "zone_id, rank, id"},
 		{&d.objects, "name"},
 		{&d.addressLists, "name"},
@@ -650,6 +652,14 @@ func buildPeer(db *gorm.DB, generation int64, only map[string]bool, firewallID u
 		}
 		if mi.Dns64 {
 			in.DNS.DNS64 = mi.Nat64Prefix
+		}
+		for _, b := range d.blocklists {
+			if b.InstanceID == mi.ID && b.Enabled {
+				in.DNS.Blocklists = append(in.DNS.Blocklists, fwconfig.DNSBlocklist{Name: b.Name, URLs: b.Urls, Key: b.AuthKey, Action: b.Action, Refresh: b.Refresh})
+			}
+		}
+		if len(in.DNS.Blocklists) > 0 {
+			in.DNS.BlocklistAllow = mi.DnsBlocklistAllow
 		}
 		if mi.DnsQueryLog {
 			in.DNS.QueryLog = &fwconfig.DNSQueryLog{

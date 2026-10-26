@@ -12,7 +12,7 @@ are in [README.md](README.md).
 | Path | What |
 |---|---|
 | `cmd/portitor-web` | One binary, two programs by name: `portitor-web` is the portal (`portal.go`: `start`, `witness`, `check`); run as `portitor-config` (a symlink, `main.go`) the firewall's configuration, GUI and API: `start`, `migrate`, `createadmin`, `set-agent`, `agent-url`, `bootstrap` (ISO first boot), `fingerprint`, `witness-string`, `promote`, `import-vf` and the console commands (`console.go`) |
-| `cmd/portitor-agent` | Agent daemon on the firewall: `start`, `init`, `render`, `netns-exec`; run as `portitor` (a symlink, `cli.go`) it is a CLI over the agent's root-only socket `<run_dir>/agent.sock`: `show ...` over the GET routes, and actions that change no configuration (`confirm`, `rollback`, `request dhcp renew`, `request iplist update`, `clear connections`) over the POST routes in `localWrites` |
+| `cmd/portitor-agent` | Agent daemon on the firewall: `start`, `init`, `render`, `netns-exec`; run as `portitor` (a symlink, `cli.go`) it is a CLI over the agent's root-only socket `<run_dir>/agent.sock`: `show ...` over the GET routes, and actions that change no configuration (`confirm`, `rollback`, `request dhcp renew`, `request iplist update`, `request blocklist update`, `clear connections`) over the POST routes in `localWrites` |
 | `internal/fwconfig` | The desired-state document and `Validate()`. **The contract between web and agent.** |
 | `internal/render` | Pure functions: document → nftables, WireGuard, named.conf, Kea, chrony.conf (`chrony.go`), snmpd.conf (`snmpd.go`), dnsmgr2 config, FRR (`frr.go`: frr.conf with BGP, OSPF, IS-IS, VRRP and BFD, daemons, vtysh.conf) |
 | `internal/agent` | Agent: apply/reconcile, commit-confirm, DHCP and DHCPv6 (prefix delegation) clients (woken when their interface gets a carrier, `linkwatch.go`), IP lists, task scheduler, packet log (NFLOG), DNS query log (BIND logs to the journal, followed with `journalctl`, filtered by the agent, `querylog.go`), WireGuard endpoint re-resolving, packet capture (tcpdump, streamed rate-limited), traceroute (`mtr --raw`, streamed as JSON lines, `trace.go`), service logs (`journalctl --follow` of a status service unit, streamed as text, `servicelog.go`), LLDP (sent and heard on raw sockets, `lldp.go`), neighbours (ARP/ND, LLDP), NAT64 (a Jool instance per namespace, `nat64.go`), traffic shaping (CAKE, IFB devices for receiving, HTB classes for the rate limits that shape (`fwconfig.Instance.Shapers`) by packet mark `render.ShaperMark`; planned from `tc -j` output, `shaping.go`; their traffic and the policers' drop counters `render.RateLimitDropCounter`, `ratelimits.go`), BGP, OSPF, IS-IS, VRRP and BFD state (FRR's JSON through `vtysh`, `bgp.go`, `ospf.go`, `isis.go`, `vrrp.go`, `bfd.go`), VRRP's macvlan devices (`vrrp.go`), 6in4 tunnels' endpoint updates at Hurricane Electric's tunnel broker (from the instance netns, on address changes, `tunnelbroker.go`), VXLANs' learning, EVPN bridge port flags and static flood lists (`vxlan.go`), the VRFs' source rules and sysctls for the firewall's services (`vrf.go`), status (the host's memory, CPU times, load and disk use from /proc and statfs, `host.go`), API server |
@@ -21,6 +21,7 @@ are in [README.md](README.md).
 | `internal/acmeserver` | ACME server (RFC 8555 subset: accounts, orders, HTTP-01, finalize), with the policy, validation and issuing left to `Hooks`; used by the agent's ACME proxy (`acmeproxy.go`) |
 | `internal/nftimport` | nftables file (`nft -j list ruleset`, read by the agent's `POST /v1/nftables/parse` in a new network namespace, `nftparse.go`) → rules, NAT rules, hosts/prefixes, services, and what it leaves out, with jumped-to chains inlined in groups; written by `web/nftimport.go` through the CRUD's `prepare*` checks, a preview being the same transaction rolled back |
 | `internal/iplist` | Downloads IP lists (CrowdSec LAPI decisions, plain-text lists with ranges and JSON lines); the public blocklists the GUI offers are `web/frontend/src/utils/ipListFeeds.js` |
+| `internal/dnsblocklist` | Downloads DNS blocklists (RPZ zone files, domain lists, hosts files, zipped or not; conditional requests) and writes their names, checked, as RPZ records; the public lists the GUI offers are `web/frontend/src/utils/dnsBlocklistFeeds.js` |
 | `internal/wgkeys` | WireGuard key generation (wg(8) base64) |
 | `internal/buildinfo` | Version, commit and date, set at link time (Makefile `LDFLAGS`, `.goreleaser.yaml`) |
 | `internal/cron` | crontab(5) schedule parser for tasks (shared by web and agent) |
@@ -253,7 +254,7 @@ docs and user-facing messages.
   failed rollback keeps the change pending and retries. `RolledBack` means the
   restore succeeded; `RollbackErrors` says it didn't.
 - **Secrets:** fields tagged `json:"-"` (WireGuard private/preshared keys, TSIG
-  secrets, DNS update provider settings, IP list passwords and API keys, agent token, the HA pair's and witness's secrets, password hashes, TOTP secrets and recovery code hashes, imported certificates' and certificate authorities' keys) never reach
+  secrets, DNS blocklist keys, DNS update provider settings, IP list passwords and API keys, agent token, the HA pair's and witness's secrets, password hashes, TOTP secrets and recovery code hashes, imported certificates' and certificate authorities' keys) never reach
   the browser. The generic CRUD
   `PUT` merges the body onto the stored row, so those fields can't be overwritten
   through the API either; a secret the user enters comes in through a write-only
@@ -422,6 +423,22 @@ the certificate portitor-config serves, chosen under Settings
   signed by a CA of its own firewall's host (`firewallCA`; global admins only,
   `tenantCertificate`); a CA is never the GUI's or the ACME proxy's certificate
   (`refuseCA`).
+- **DNS blocklists** (`fwconfig/dnsblocklist.go`, `internal/dnsblocklist`,
+  `internal/agent/dnsblocklists.go`, `web/dnsblocklists.go`, Services → DNS →
+  Blocklists) are per instance (`dns_blocklists`; `instances.dns_blocklist_allow`):
+  response policy zones in BIND, `<name>.rpz.invalid`, in named.conf's
+  `response-policy` (the allowed names' zone `fwconfig.RPZAllowZone` first, rendered,
+  `InstanceFiles.RPZAllow`; then the lists, each `policy` its action). A list's zone
+  file is volatile, like an IP list's: the agent writes it in `InstanceFiles.RPZDir`
+  (named's working directory, `render.Paths.RPZFile` as named sees it), empty before
+  named starts (`prepareDNSBlocklists`), downloads it on apply when its URLs or key
+  changed and then every `Refresh` minutes on a timer, with ETag/Last-Modified
+  (`<state_dir>/dnsblocklists/<instance>/<name>.json`), and reloads named only when it
+  changed. A download never reaches BIND as it is: only names checked by
+  `dnsblocklist.Parse` are written, each `name CNAME .` (no `$INCLUDE`, redirects or
+  passthru from a feed). The key (`Key`, URLhaus's Auth-Key) fills `{key}` in the URLs,
+  over https only; it is write-only (`DnsBlocklist.NewAuthKey`/`ClearAuthKey`) and
+  redacted in history and in errors.
 - **NTP** (`fwconfig/ntp.go`, `render/chrony.go`): chrony per instance
   (`instances.ntp_*`), its servers JSON. The default instance's chrony.service sets
   the host's clock; a virtual firewall's `portitor-chrony@` runs `chronyd -x` (the

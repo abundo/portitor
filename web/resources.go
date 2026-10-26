@@ -225,6 +225,9 @@ func prepareInstance(tx *gorm.DB, in, old *models.Instance) error {
 		}
 		in.DnsQueryLogNames[i] = n
 	}
+	if err := prepareBlocklistAllow(in); err != nil {
+		return err
+	}
 	in.DnsQueryLogTypes = cleanList(in.DnsQueryLogTypes)
 	for i, t := range in.DnsQueryLogTypes {
 		t = strings.ToUpper(t)

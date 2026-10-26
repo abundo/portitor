@@ -52,6 +52,8 @@ export const dnsRecords = crud('/dns/records')
 export const dnsTemplates = crud('/dns/templates')
 export const dnsSoaTemplates = crud('/dns/soa-templates')
 export const dnsDnssecPolicies = crud('/dns/dnssec-policies')
+// DNS blocklists (response policy zones) of an instance.
+export const dnsBlocklists = crud('/dns/blocklists')
 export const addressObjects = crud('/objects')
 // Address lists: addresses, prefixes and names of hosts and other lists.
 export const addressLists = crud('/address-lists')
@@ -123,6 +125,7 @@ export const api = {
   // Start a deployed task, or the download of a deployed IP list, now.
   runTask: (id) => http.post(`/tasks/${id}/run`, {}).then((r) => r.data),
   refreshIPList: (id) => http.post(`/ip-lists/${id}/refresh`, {}).then((r) => r.data),
+  refreshDNSBlocklist: (id) => http.post(`/dns/blocklists/${id}/refresh`, {}).then((r) => r.data),
   // The next runs of a cron schedule ({ next: [...] } or { error }).
   schedulePreview: (schedule) =>
     http.get('/schedule/preview', { params: { schedule } }).then((r) => r.data),

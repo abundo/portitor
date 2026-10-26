@@ -147,8 +147,10 @@ type Status struct {
 	// ACMEProxy are the instances' ACME proxies.
 	ACMEProxy []ACMEProxyStatus `json:"acme_proxy"`
 	IPLists   []IPListStatus    `json:"ip_lists"`
-	Tasks     []TaskStatus      `json:"tasks"`
-	Programs  []ProgramStatus   `json:"programs"`
+	// DNSBlocklists are the instances' DNS blocklists.
+	DNSBlocklists []DNSBlocklistStatus `json:"dns_blocklists"`
+	Tasks         []TaskStatus         `json:"tasks"`
+	Programs      []ProgramStatus      `json:"programs"`
 	// NICs are the physical interfaces on the firewall, wherever they are.
 	NICs []NICStatus `json:"nics"`
 	// AntiLockout is the input rule the agent adds in the default
@@ -411,6 +413,32 @@ type IPListStatus struct {
 	Skipped     int        `json:"skipped"`
 	LastAttempt *time.Time `json:"last_attempt,omitempty"`
 	LastError   string     `json:"last_error,omitempty"`
+}
+
+// DNSBlocklistStatus is the state of a DNS blocklist's downloads.
+type DNSBlocklistStatus struct {
+	Instance string `json:"instance"`
+	Name     string `json:"name"`
+	// State: pending (not downloaded yet), fetching, ok, error.
+	State string `json:"state"`
+	// Updated is the last successful download or check, Changed the
+	// last that brought new content, whose counts follow.
+	Updated *time.Time `json:"updated,omitempty"`
+	Changed *time.Time `json:"changed,omitempty"`
+	Names   int        `json:"names"`
+	// Skipped entries were not names to block.
+	Skipped     int        `json:"skipped"`
+	LastAttempt *time.Time `json:"last_attempt,omitempty"`
+	LastError   string     `json:"last_error,omitempty"`
+	// Next is when it is downloaded again.
+	Next *time.Time `json:"next,omitempty"`
+}
+
+// DNSBlocklistRequest names an instance's DNS blocklist
+// (/v1/dns/blocklists/refresh).
+type DNSBlocklistRequest struct {
+	Instance string `json:"instance"`
+	Name     string `json:"name"`
 }
 
 // TaskStatus is the state of a scheduled task.

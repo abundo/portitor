@@ -140,6 +140,11 @@ type InstanceFiles struct {
 	BindCache string
 	BindRun   string
 	BindZones string
+	// RPZDir holds the DNS blocklists' zone files, which the agent writes
+	// (Paths.RPZFile is where named reads one); RPZAllow is the zone of
+	// the names no blocklist blocks, rendered.
+	RPZDir   string
+	RPZAllow string
 	// Kea's lease files and control sockets as Kea sees them. Kea 2.6+
 	// refuses them outside its own directories, hence KeaDataDir and
 	// KeaSocketDir.
@@ -175,6 +180,8 @@ func (p Paths) Files(in *fwconfig.Instance) InstanceFiles {
 			BindCache:    p.BindCacheDir,
 			BindRun:      p.BindRunDir,
 			BindZones:    p.BindZonesDir,
+			RPZDir:       filepath.Join(p.BindCacheDir, rpzDir),
+			RPZAllow:     filepath.Join(filepath.Dir(p.NamedConf), "rpz-allow.db"),
 			Kea4Lease:    filepath.Join(p.KeaDataDir, "kea-leases4.csv"),
 			Kea6Lease:    filepath.Join(p.KeaDataDir, "kea-leases6.csv"),
 			Kea4Socket:   filepath.Join(p.KeaSocketDir, "kea4-ctrl-socket"),
@@ -206,6 +213,8 @@ func (p Paths) Files(in *fwconfig.Instance) InstanceFiles {
 		BindCache:    filepath.Join(p.BindCacheDir, in.Name),
 		BindRun:      filepath.Join(p.BindRunDir, in.Name),
 		BindZones:    filepath.Join(p.BindZonesDir, in.Name),
+		RPZDir:       filepath.Join(p.BindCacheDir, in.Name, rpzDir),
+		RPZAllow:     filepath.Join(etc, "rpz-allow.db"),
 		Kea4Lease:    filepath.Join(p.KeaDataDir, "kea-leases4-"+in.Name+".csv"),
 		Kea6Lease:    filepath.Join(p.KeaDataDir, "kea-leases6-"+in.Name+".csv"),
 		Kea4Socket:   filepath.Join(p.KeaSocketDir, "kea4-"+in.Name+".sock"),
@@ -225,6 +234,17 @@ func (p Paths) InstanceState(name string) string {
 // IPListElements). The agent writes it; rulesets include it.
 func (p Paths) IPListFile(name string) string {
 	return filepath.Join(p.StateDir, "iplists", IPListKey(name)+".nft")
+}
+
+// rpzDir is the DNS blocklists' directory in named's working directory.
+// Its '-' keeps it apart from a virtual firewall's directory there.
+const rpzDir = "portitor-rpz"
+
+// RPZFile is a DNS blocklist's zone file as named sees it: in its working
+// directory, which a virtual firewall's unit mounts its own over
+// (portitor-named@.service). The agent writes it in InstanceFiles.RPZDir.
+func (p Paths) RPZFile(name string) string {
+	return filepath.Join(p.BindCacheDir, rpzDir, name+".db")
 }
 
 // CertificateDir holds an ACME certificate of an instance: the agent
@@ -388,6 +408,9 @@ func Render(doc fwconfig.Document, opt Options) (*Bundle, error) {
 		}
 		if in.DNS.Enabled {
 			add(f.NamedConf, NamedConf(in, opt.Paths, opt.DHCPDNS[in.Name]), 0o644, false)
+			if len(in.DNS.Blocklists) > 0 && len(in.DNS.BlocklistAllow) > 0 {
+				add(f.RPZAllow, RPZAllowZone(in), 0o644, false)
+			}
 		}
 		if in.DHCP.Enabled {
 			add(f.Kea4, KeaDhcp4Conf(in, opt.Paths), 0o644, false)

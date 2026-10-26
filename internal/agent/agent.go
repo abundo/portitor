@@ -39,9 +39,11 @@ type Agent struct {
 	dnsq    *queryLog
 	lldp    *lldpManager
 	lists   *ipLists
-	tasks   *scheduler
-	sys     *systemManager
-	ha      *haManager
+	// blocklists keeps the DNS blocklists' zone files current.
+	blocklists *dnsBlocklists
+	tasks      *scheduler
+	sys        *systemManager
+	ha         *haManager
 	// ddnsWant and tbWant are the applied DNS update clients and tunnel
 	// broker accounts, which run on the active HA host only
 	// (reconcileActive).
@@ -90,6 +92,7 @@ func New(cfg *Config) *Agent {
 	a.dnsq = newQueryLog(cfg.DryRun)
 	a.lldp = newLLDPManager(cfg.DryRun)
 	a.lists = newIPLists()
+	a.blocklists = newDNSBlocklists()
 	a.tasks = newScheduler(a.runTask)
 	// Updates and background work have runners of their own: their
 	// commands are not part of an apply's log.
@@ -186,6 +189,7 @@ func (a *Agent) Stop() {
 	}
 	a.tasks.Stop()
 	a.lists.Stop()
+	a.blocklists.Stop()
 	a.ddns.Stop()
 	a.tbroker.Stop()
 	a.proxies.Stop()

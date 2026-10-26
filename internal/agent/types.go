@@ -27,5 +27,6 @@ type (
 	ACMEProxyStatus     = agentapi.ACMEProxyStatus
 	ACMEProxyIssue      = agentapi.ACMEProxyIssue
 	IPListStatus        = agentapi.IPListStatus
+	DNSBlocklistStatus  = agentapi.DNSBlocklistStatus
 	TaskStatus          = agentapi.TaskStatus
 )

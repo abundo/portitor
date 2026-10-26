@@ -8,6 +8,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useToast } from '@nuxt/ui/composables'
 import AddrInput from '@/components/AddrInput.vue'
 import CrudPage from '@/components/CrudPage.vue'
+import DnsBlocklists from '@/components/DnsBlocklists.vue'
 import DnsTemplates from '@/components/DnsTemplates.vue'
 import DyndnsClientForm from '@/components/DyndnsClientForm.vue'
 import DyndnsState from '@/components/DyndnsState.vue'
@@ -280,6 +281,7 @@ const tabs = [
   { label: 'DNS zones', value: 'zones', slot: 'zones', icon: 'i-lucide-globe' },
   { label: 'DNS templates', value: 'templates', slot: 'templates', icon: 'i-lucide-file-cog' },
   { label: 'DNS server', value: 'server', slot: 'server', icon: 'i-lucide-server' },
+  { label: 'Blocklists', value: 'blocklists', slot: 'blocklists', icon: 'i-lucide-shield-ban' },
 ]
 // The tab is in the URL (?tab=server), so links can open one.
 const tab = computed({
@@ -337,6 +339,10 @@ const tab = computed({
 
       <template #templates>
         <DnsTemplates @changed="loadTemplates" />
+      </template>
+
+      <template #blocklists>
+        <DnsBlocklists :active="tab === 'blocklists'" />
       </template>
 
       <template #server>

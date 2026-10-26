@@ -8,3 +8,5 @@
 # in /etc/portitor/agent.yaml. The unit puts everything else in BIND's own
 # directories (per instance, mounted over them), which the profile allows.
 /etc/portitor/instances/*/named.conf* r,
+# A virtual firewall's names allowed past its DNS blocklists (an RPZ zone).
+/etc/portitor/instances/*/rpz-allow.db r,

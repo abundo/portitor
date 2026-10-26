@@ -402,6 +402,9 @@ type Instance struct {
 	DnsQueryLogClients StringList `json:"dns_query_log_clients"`
 	DnsQueryLogNames   StringList `json:"dns_query_log_names"`
 	DnsQueryLogTypes   StringList `json:"dns_query_log_types"`
+	// DnsBlocklistAllow are domains no DnsBlocklist blocks, nor the names
+	// below them (fwconfig.DNSServer.BlocklistAllow).
+	DnsBlocklistAllow StringList `json:"dns_blocklist_allow"`
 	// Nat64Prefix is the prefix of the NAT64 serving the instance's
 	// clients; Dns64 synthesizes AAAA records in it, and an interface's
 	// Xlat464 announces it.
@@ -840,6 +843,25 @@ type DnsZone struct {
 	// Forwarders: the DNS servers of a forward-only zone (addresses or
 	// named hosts).
 	Forwarders StringList `json:"forwarders"`
+}
+
+// DnsBlocklist is a list of domains the instance's DNS server does not
+// resolve (fwconfig.DNSBlocklist), which the agent downloads from Urls.
+type DnsBlocklist struct {
+	Base
+	InstanceID  uint       `json:"instance_id"`
+	Name        string     `json:"name"`
+	Description string     `json:"description"`
+	Enabled     bool       `json:"enabled"`
+	Urls        StringList `json:"urls"`
+	// AuthKey fills {key} in the URLs. It is set through NewAuthKey
+	// (empty keeps it, ClearAuthKey removes it) and never sent back.
+	AuthKey      string `json:"-"`
+	NewAuthKey   string `gorm:"-" json:"auth_key,omitempty"`
+	ClearAuthKey bool   `gorm:"-" json:"clear_auth_key,omitempty"`
+	HasAuthKey   bool   `gorm:"-" json:"has_auth_key"`
+	Action       string `json:"action"`  // fwconfig.Blocklist*
+	Refresh      int    `json:"refresh"` // minutes between downloads
 }
 
 // DnsSoaTemplate belongs to an instance; Global (the default instance's

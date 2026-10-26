@@ -217,6 +217,35 @@ func TestValidateCatchesProblems(t *testing.T) {
 		{"dns query log client", func(d *Document) { d.Instances[0].DNS.QueryLog = &DNSQueryLog{Clients: []string{"10.0.0.1"}} }, `invalid client prefix "10.0.0.1"`},
 		{"dns query log name", func(d *Document) { d.Instances[0].DNS.QueryLog = &DNSQueryLog{Names: []string{"a b"}} }, `invalid name "a b"`},
 		{"dns query log type", func(d *Document) { d.Instances[0].DNS.QueryLog = &DNSQueryLog{Types: []string{"a;"}} }, `invalid query type "a;"`},
+		{"dns blocklist name", func(d *Document) {
+			d.Instances[0].DNS.Blocklists = []DNSBlocklist{{Name: "Bad_list", URLs: []string{"https://example.com/rpz"}, Action: BlocklistNXDomain}}
+		}, `dns blocklist "Bad_list": invalid name`},
+		{"dns blocklist duplicate", func(d *Document) {
+			b := DNSBlocklist{Name: "tif", URLs: []string{"https://example.com/rpz"}, Action: BlocklistNXDomain}
+			d.Instances[0].DNS.Blocklists = []DNSBlocklist{b, b}
+		}, `dns blocklist "tif": duplicate`},
+		{"dns blocklist no url", func(d *Document) {
+			d.Instances[0].DNS.Blocklists = []DNSBlocklist{{Name: "tif", Action: BlocklistNXDomain}}
+		}, `needs 1 to 4 urls`},
+		{"dns blocklist action", func(d *Document) {
+			d.Instances[0].DNS.Blocklists = []DNSBlocklist{{Name: "tif", URLs: []string{"https://example.com/rpz"}, Action: "redirect"}}
+		}, `invalid action "redirect"`},
+		{"dns blocklist refresh", func(d *Document) {
+			d.Instances[0].DNS.Blocklists = []DNSBlocklist{{Name: "tif", URLs: []string{"https://example.com/rpz"}, Action: BlocklistDrop, Refresh: 1}}
+		}, `refresh must be 5-10080 minutes`},
+		{"dns blocklist key missing", func(d *Document) {
+			d.Instances[0].DNS.Blocklists = []DNSBlocklist{{Name: "urlhaus", URLs: []string{"https://example.com/{key}/rpz"}, Action: BlocklistNXDomain}}
+		}, `has {key} but the blocklist has no key`},
+		{"dns blocklist key over http", func(d *Document) {
+			d.Instances[0].DNS.Blocklists = []DNSBlocklist{{Name: "urlhaus", URLs: []string{"http://example.com/{key}/rpz"}, Key: "abc", Action: BlocklistNXDomain}}
+		}, `would send the key unencrypted`},
+		{"dns blocklist key unused", func(d *Document) {
+			d.Instances[0].DNS.Blocklists = []DNSBlocklist{{Name: "urlhaus", URLs: []string{"https://example.com/rpz"}, Key: "abc", Action: BlocklistNXDomain}}
+		}, `a key needs {key} in a url`},
+		{"dns blocklist key characters", func(d *Document) {
+			d.Instances[0].DNS.Blocklists = []DNSBlocklist{{Name: "urlhaus", URLs: []string{"https://example.com/{key}/rpz"}, Key: "a/../b", Action: BlocklistNXDomain}}
+		}, `invalid key`},
+		{"dns blocklist allow", func(d *Document) { d.Instances[0].DNS.BlocklistAllow = []string{"a b"} }, `blocklist allow: invalid domain "a b"`},
 		{"dns upstream", func(d *Document) { d.Instances[0].DNS.Upstream = "peer" }, `invalid upstream "peer"`},
 		{"dns upstream dhcp no interface", func(d *Document) { d.Instances[0].DNS.Upstream = UpstreamDHCP }, "needs the interface"},
 		{"dns upstream dhcp static", func(d *Document) {
