@@ -5,6 +5,7 @@ package render
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 
@@ -79,5 +80,24 @@ func TestKeaHA(t *testing.T) {
 	b, _ = Render(fwconfig.SampleDocument(), Options{Paths: DefaultPaths(), Units: DefaultUnits()})
 	if strings.Contains(mustFile(t, b, "/etc/kea/kea-dhcp4.conf"), "hooks-libraries") {
 		t.Error("hooks without HA")
+	}
+}
+
+// With DHCPv6 subnets alone no DHCPv4 server runs, so none calls its HA
+// peer on a port the ruleset keeps closed.
+func TestKeaHAIPv6Only(t *testing.T) {
+	doc := withDHCPHA(fwconfig.SampleDocument())
+	in := &doc.Instances[0]
+	in.DHCP.Subnets = slices.DeleteFunc(in.DHCP.Subnets, func(s fwconfig.DHCPSubnet) bool { return fwconfig.AddrFamily(s.Prefix) == "ipv4" })
+	b, err := Render(doc, Options{Paths: DefaultPaths(), Units: DefaultUnits()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.File("/etc/kea/kea-dhcp4.conf") != nil {
+		t.Error("kea-dhcp4.conf without DHCPv4 subnets")
+	}
+	nft := mustFile(t, b, "/etc/nftables.d/portitor.nft")
+	if strings.Contains(nft, "tcp dport 8001") || !strings.Contains(nft, "tcp dport 8002") {
+		t.Errorf("ruleset:\n%s", nft)
 	}
 }

@@ -412,7 +412,7 @@ func Render(doc fwconfig.Document, opt Options) (*Bundle, error) {
 				add(f.RPZAllow, RPZAllowZone(in), 0o644, false)
 			}
 		}
-		if in.DHCP.Enabled {
+		if len(DHCP4Subnets(in)) > 0 {
 			add(f.Kea4, KeaDhcp4Conf(in, opt.Paths), 0o644, false)
 		}
 		if len(DHCP6Subnets(in)) > 0 {

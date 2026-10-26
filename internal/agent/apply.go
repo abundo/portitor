@@ -768,7 +768,7 @@ func (a *Agent) applyServices(ctx context.Context, in *fwconfig.Instance, b *ren
 		// opens no socket on an interface that was down when it started).
 		once bool
 	}{
-		{a.cfg.Units.Kea4(in), files.Kea4, in.DHCP.Enabled, "restart", true},
+		{a.cfg.Units.Kea4(in), files.Kea4, len(render.DHCP4Subnets(in)) > 0, "restart", true},
 		{a.cfg.Units.Kea6(in), files.Kea6, len(render.DHCP6Subnets(in)) > 0, "restart", true},
 		{a.cfg.Units.Radvd(in), files.Radvd, len(in.RA) > 0, "reload-or-restart", false},
 		{a.cfg.Units.Chrony(in), files.Chrony, in.NTP != nil, "restart", false},

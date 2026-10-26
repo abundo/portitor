@@ -374,7 +374,7 @@ func (a *Agent) serviceUnits(in *fwconfig.Instance) []string {
 	if in.DNS.Enabled {
 		units = append(units, a.cfg.Units.Named(in))
 	}
-	if in.DHCP.Enabled {
+	if len(render.DHCP4Subnets(in)) > 0 {
 		units = append(units, a.cfg.Units.Kea4(in))
 	}
 	if len(render.DHCP6Subnets(in)) > 0 {
