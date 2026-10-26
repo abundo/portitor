@@ -375,6 +375,13 @@ func (c *Client) Trace(ctx context.Context, req agentapi.TraceRequest) (io.ReadC
 	return c.stream(ctx, "/v1/trace", req)
 }
 
+// Probe starts a connectivity test and returns its stream of
+// agentapi.ProbeEvents (JSON lines); closing it (or cancelling ctx) stops
+// it on the agent.
+func (c *Client) Probe(ctx context.Context, req agentapi.ProbeRequest) (io.ReadCloser, error) {
+	return c.stream(ctx, "/v1/probe", req)
+}
+
 // Iperf starts an iperf3 client or server and returns its stream of
 // agentapi.IperfEvents (JSON lines); closing it (or cancelling ctx) stops
 // iperf3 on the agent.

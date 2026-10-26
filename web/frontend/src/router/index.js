@@ -71,6 +71,11 @@ const router = createRouter({
           meta: { deployer: true },
         },
         {
+          path: 'connectivity',
+          component: () => import('@/views/ConnectivityPage.vue'),
+          meta: { deployer: true },
+        },
+        {
           path: 'traceroute',
           component: () => import('@/views/TracePage.vue'),
           meta: { deployer: true },

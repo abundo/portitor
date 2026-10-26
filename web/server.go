@@ -64,6 +64,7 @@ type agentAPI interface {
 	Capture(ctx context.Context, req agentapi.CaptureRequest) (io.ReadCloser, error)
 	Trace(ctx context.Context, req agentapi.TraceRequest) (io.ReadCloser, error)
 	Iperf(ctx context.Context, req agentapi.IperfRequest) (io.ReadCloser, error)
+	Probe(ctx context.Context, req agentapi.ProbeRequest) (io.ReadCloser, error)
 	ServiceLog(ctx context.Context, req agentapi.ServiceLogRequest) (io.ReadCloser, error)
 	Connections(ctx context.Context, req agentapi.ConnectionsRequest) (io.ReadCloser, error)
 	FlushConnections(ctx context.Context, instance string) error
@@ -215,7 +216,7 @@ func (s *Server) Echo() *echo.Echo {
 
 	// Instance admins use these too; the handlers check the instance.
 	for _, r := range []string{"PUT /api/dns/zones/:id/records", "POST /api/dns/blocklists/:id/refresh", "PUT /api/dyndns/clients/:id/records", "POST /api/rules/reorder", "POST /api/nat/reorder", "POST /api/policy-routes/reorder",
-		"POST /api/interfaces/:id/wg-rekey", "POST /api/wg/import", "POST /api/agent/capture", "POST /api/agent/trace", "POST /api/agent/iperf", "POST /api/agent/servicelog", "POST /api/agent/connections", "POST /api/agent/connections/flush", "POST /api/agent/dhcp/renew",
+		"POST /api/interfaces/:id/wg-rekey", "POST /api/wg/import", "POST /api/agent/capture", "POST /api/agent/trace", "POST /api/agent/iperf", "POST /api/agent/probe", "POST /api/agent/servicelog", "POST /api/agent/connections", "POST /api/agent/connections/flush", "POST /api/agent/dhcp/renew",
 		"POST /api/deploy/apply", "POST /api/deploy/confirm", "POST /api/deploy/rollback"} {
 		s.tenantWrites[r] = true
 	}
@@ -297,6 +298,7 @@ func (s *Server) Echo() *echo.Echo {
 	g.POST("/agent/capture", s.handleAgentCapture)
 	g.POST("/agent/trace", s.handleAgentTrace)
 	g.POST("/agent/iperf", s.handleAgentIperf)
+	g.POST("/agent/probe", s.handleAgentProbe)
 	g.POST("/agent/servicelog", s.handleAgentServiceLog)
 	g.POST("/agent/connections", s.handleAgentConnections)
 	g.POST("/agent/connections/flush", s.handleAgentConnectionsFlush)

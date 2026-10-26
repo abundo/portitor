@@ -821,6 +821,71 @@ const (
 	TraceMaxSessions = 4
 )
 
+// ProbeRequest starts a connectivity test (POST /v1/probe) from the
+// instance's namespace: every Interval milliseconds, Count times (0: until
+// the client disconnects, at most ProbeMaxTime), an ICMP echo, a TCP
+// connect to Port, or a UDP datagram to Port that waits for an answer. The
+// answer is a stream of ProbeEvents, one JSON object per line. An error
+// before the first probe is a JSON ErrorResponse.
+type ProbeRequest struct {
+	Instance string `json:"instance"`
+	// Interface is the instance interface to send from (SO_BINDTODEVICE);
+	// empty lets the routing table decide.
+	Interface string `json:"interface,omitempty"`
+	// Target is an IPv4 or IPv6 address, or a DNS name that the agent
+	// resolves in the instance's namespace (of Family, if given).
+	Target   string `json:"target"`
+	Family   string `json:"family,omitempty"`   // "", "ipv4" or "ipv6"
+	Protocol string `json:"protocol"`           // "icmp", "tcp" or "udp"
+	Port     int    `json:"port,omitempty"`     // tcp and udp
+	Count    int    `json:"count,omitempty"`    // probes; 0 until stopped
+	Interval int    `json:"interval,omitempty"` // ms; 0 is ProbeDefaultInterval
+	Timeout  int    `json:"timeout,omitempty"`  // ms; 0 is ProbeDefaultTimeout
+	// Size is an ICMP echo's data bytes (0: ProbeDefaultSize).
+	Size int `json:"size,omitempty"`
+	// Payload is what a UDP probe sends (may be empty).
+	Payload string `json:"payload,omitempty"`
+}
+
+// ProbeEvent is the address probed ("target", first, with the protocol and
+// port), one probe's result ("probe"), or "error", which ends a test that
+// failed. A probe's Status is "ok" (an echo reply, a TCP connection or a UDP
+// answer; RTTus is its round trip), "refused" (a TCP reset or an ICMP port
+// unreachable: the host answers, the port is closed; RTTus too),
+// "unreachable" (an ICMP error from From, with Error saying which), "timeout"
+// or "error" (the probe could not be sent). Probes are numbered from 1 (Seq)
+// and At is when one was sent (Unix milliseconds); results may come out of
+// order when the timeout is longer than the interval.
+type ProbeEvent struct {
+	Type     string `json:"type"`
+	Addr     string `json:"addr,omitempty"`
+	Protocol string `json:"protocol,omitempty"`
+	Port     int    `json:"port,omitempty"`
+	Seq      int    `json:"seq,omitempty"`
+	At       int64  `json:"at,omitempty"`
+	Status   string `json:"status,omitempty"`
+	RTTus    int64  `json:"rtt_us,omitempty"`
+	From     string `json:"from,omitempty"`
+	Error    string `json:"error,omitempty"`
+}
+
+// Connectivity test limits, enforced by the agent.
+const (
+	ProbeDefaultInterval = 1000
+	ProbeMinInterval     = 100
+	ProbeMaxInterval     = 60000
+	ProbeDefaultTimeout  = 2000
+	ProbeMaxTimeout      = 10000
+	ProbeDefaultSize     = 56
+	ProbeMaxSize         = 9000
+	ProbeMaxPayload      = 1400
+	ProbeMaxCount        = 100000
+	// ProbeMaxTime ends any test, counted or not.
+	ProbeMaxTime = 24 * time.Hour
+	// ProbeMaxSessions is how many tests may run at once.
+	ProbeMaxSessions = 8
+)
+
 // IperfRequest starts an iperf3 test (POST /v1/iperf) in the instance's
 // namespace: a client to Target, or a server on Port that the instance's
 // ruleset opens while it runs (render.IperfServerSet). The answer is a

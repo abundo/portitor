@@ -16,6 +16,7 @@ const instances = useInstanceStore()
 const tools = computed(() => [
   ...(auth.canDeploy
     ? [
+        { label: 'Connectivity', icon: 'i-lucide-activity', to: '/connectivity' },
         { label: 'Traceroute', icon: 'i-lucide-waypoints', to: '/traceroute' },
         { label: 'iperf3', icon: 'i-lucide-gauge', to: '/iperf3' },
       ]
