@@ -30,7 +30,7 @@ const fields = [
   <NeedInstance>
     <CrudPage
       title="Interface zones"
-      description="Named groups of interfaces. Rules and NAT rules can name a zone wherever they list interfaces. A rule whose interfaces are all in empty zones (or disabled) is left out, never widened to any interface."
+      description="Named groups of interfaces. Rules and NAT rules can name a zone wherever they list interfaces."
       :api="interfaceZones"
       :params="{ instance_id: store.currentId }"
       :columns="columns"

@@ -29,12 +29,12 @@ func TestValidateVRRP(t *testing.T) {
 		{"outside the networks", func(in *Instance) { in.VRRP[0].IPv4 = []string{"10.0.0.1"} }, "is in none of the networks of eth2"},
 		{"interface's own address", func(in *Instance) { in.VRRP[0].IPv4 = []string{"192.168.50.1"} }, "is an address of interface eth2"},
 		{"listed twice", func(in *Instance) { in.VRRP[0].IPv4 = []string{"192.168.50.254", "192.168.50.254"} }, "listed twice"},
-		{"duplicate", func(in *Instance) { in.VRRP = append(in.VRRP, in.VRRP[0]) }, "virtual router 50 on eth2: duplicate"},
+		{"duplicate", func(in *Instance) { in.VRRP = append(in.VRRP, in.VRRP[0]) }, "VRRP 50 on eth2: duplicate"},
 		{"address in two", func(in *Instance) {
 			r := in.VRRP[0]
 			r.VRID = 51
 			in.VRRP = append(in.VRRP, r)
-		}, "also an address of virtual router eth2/50"},
+		}, "also an address of VRRP eth2/50"},
 		{"loopback parent", func(in *Instance) {
 			in.Interfaces = append(in.Interfaces, Interface{Name: "lo1", Kind: KindLoopback, Enabled: true, IPv4Mode: ModeStatic, Addresses: []string{"10.1.1.1/24"}})
 			in.VRRP = append(in.VRRP, VRRP{Interface: "lo1", VRID: 1, IPv4: []string{"10.1.1.2"}})

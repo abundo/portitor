@@ -2,15 +2,17 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
 <!-- BFD (FRR's bfdd): the interfaces of the virtual firewall with BFD and
-     their timers (Interfaces tab), and the sessions as FRR has them (BFD
+     their timers (BFD config tab), and the sessions as FRR has them (BFD
      info). Static routes, OSPF and IS-IS interfaces and BGP neighbours turn BFD on
      for themselves; it runs on the interfaces listed here. -->
 <script setup>
 import AutoRefreshButton from '@/components/AutoRefreshButton.vue'
 import { useAutoRefresh } from '@/composables/useAutoRefresh'
-import { computed, ref } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useToast } from '@nuxt/ui/composables'
 import CrudPage from '@/components/CrudPage.vue'
+import FormHeader from '@/components/FormHeader.vue'
 import NeedInstance from '@/components/NeedInstance.vue'
 import SearchInput from '@/components/SearchInput.vue'
 import {
@@ -18,12 +20,16 @@ import {
   bfdInterfaces,
   bgpNeighbors,
   bgpPeerGroups,
+  instances,
   isisInterfaces,
   ospfInterfaces,
   routes,
 } from '@/api'
 import { errMsg } from '@/api/http'
+import { usePageForm } from '@/composables/useFormGuard'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
+import { useAuthStore } from '@/stores/auth'
+import { inlineField } from '@/utils/form'
 import { useSearch, valuesText } from '@/utils/search'
 
 const route = useRoute()
@@ -32,7 +38,7 @@ const { store, ifaceNames, ifaceText, vrfList } = useInstanceRefs()
 
 const tabs = [
   { label: 'BFD info', value: 'info', slot: 'info', icon: 'i-lucide-info' },
-  { label: 'Interfaces', value: 'interfaces', slot: 'interfaces', icon: 'i-lucide-heart-pulse' },
+  { label: 'BFD config', value: 'interfaces', slot: 'interfaces', icon: 'i-lucide-heart-pulse' },
 ]
 const tab = computed({
   get: () => (tabs.some((t) => t.value === route.query.tab) ? route.query.tab : 'info'),
@@ -136,14 +142,67 @@ const infoColumns = computed(() => [
   { accessorKey: 'diagnostic', header: 'Diagnostic' },
 ])
 
-// ----- Interfaces.
+// ----- BFD config: the virtual firewall's default timers, for the
+// interfaces that set none (0, shown empty), and the interfaces.
+const toast = useToast()
+const auth = useAuthStore()
+const readOnly = computed(() => !auth.canEdit)
+const timers = reactive({
+  bfd_receive_interval: '',
+  bfd_transmit_interval: '',
+  bfd_detect_multiplier: '',
+})
+const timersForm = usePageForm(timers)
+const savingTimers = ref(false)
+// The timers an interface that sets none gets: the defaults, else FRR's.
+const effective = reactive({ rx: 300, tx: 300, mult: 3 })
+async function loadTimers() {
+  const id = store.currentId
+  if (!id) return
+  const inst = await instances.get(id)
+  for (const k of Object.keys(timers)) timers[k] = inst[k] || ''
+  Object.assign(effective, {
+    rx: inst.bfd_receive_interval || 300,
+    tx: inst.bfd_transmit_interval || 300,
+    mult: inst.bfd_detect_multiplier || 3,
+  })
+  timersForm.mark()
+}
+watch(() => store.currentId, loadTimers, { immediate: true })
+async function saveTimers() {
+  savingTimers.value = true
+  try {
+    const body = {}
+    for (const [k, v] of Object.entries(timers)) body[k] = v === '' || v == null ? 0 : Number(v)
+    await instances.update(store.currentId, body)
+    toast.add({ title: 'BFD defaults saved', color: 'success' })
+    await loadTimers()
+  } catch (err) {
+    toast.add({ title: errMsg(err), color: 'error' })
+  } finally {
+    savingTimers.value = false
+  }
+}
+
 const ifaceItems = computed(() => ifaceNames.value.map((n) => ({ label: ifaceText(n), value: n })))
 const columns = [
   { key: 'interface', label: 'Interface', format: (r) => ifaceText(r.interface) },
   { key: 'enabled', label: 'Enabled' },
-  { key: 'receive_interval', label: 'Receive (ms)' },
-  { key: 'transmit_interval', label: 'Transmit (ms)' },
-  { key: 'detect_multiplier', label: 'Multiplier' },
+  {
+    key: 'receive_interval',
+    label: 'Receive (ms)',
+    format: (r) => r.receive_interval || `default (${effective.rx})`,
+  },
+  {
+    key: 'transmit_interval',
+    label: 'Transmit (ms)',
+    format: (r) => r.transmit_interval || `default (${effective.tx})`,
+  },
+  {
+    key: 'detect_multiplier',
+    label: 'Multiplier',
+    format: (r) => r.detect_multiplier || `default (${effective.mult})`,
+  },
   { key: 'passive', label: 'Passive' },
   { key: 'description', label: 'Description' },
 ]
@@ -159,22 +218,25 @@ const fields = computed(() => [
     key: 'receive_interval',
     label: 'Receive interval (ms)',
     type: 'number',
-    placeholder: '300',
-    hint: '10-60000: how often the peer may send.',
+    zeroEmpty: true,
+    placeholder: `${effective.rx} (default)`,
+    hint: '10-60000, empty: the default. How often the peer may send.',
   },
   {
     key: 'transmit_interval',
     label: 'Transmit interval (ms)',
     type: 'number',
-    placeholder: '300',
-    hint: '10-60000: how often this firewall sends, at the most. The slower of this and the peer’s receive interval is used.',
+    zeroEmpty: true,
+    placeholder: `${effective.tx} (default)`,
+    hint: '10-60000, empty: the default. How often this firewall sends, at the most. The slower of this and the peer’s receive interval is used.',
   },
   {
     key: 'detect_multiplier',
     label: 'Detect multiplier',
     type: 'number',
-    placeholder: '3',
-    hint: '2-255: how many packets may be lost before the peer is down. 300 ms × 3: the peer is down after 0.9 s.',
+    zeroEmpty: true,
+    placeholder: `${effective.mult} (default)`,
+    hint: '2-255, empty: the default. How many packets may be lost before the peer is down. 300 ms × 3: the peer is down after 0.9 s.',
   },
   {
     key: 'passive',
@@ -186,9 +248,9 @@ const fields = computed(() => [
 ])
 const defaults = {
   enabled: true,
-  receive_interval: 300,
-  transmit_interval: 300,
-  detect_multiplier: 3,
+  receive_interval: 0,
+  transmit_interval: 0,
+  detect_multiplier: 0,
   passive: false,
 }
 </script>
@@ -197,9 +259,30 @@ const defaults = {
   <NeedInstance>
     <UTabs v-model="tab" :items="tabs">
       <template #interfaces>
+        <div class="card mb-4">
+          <form @submit.prevent="saveTimers">
+            <FormHeader title="Default timers">
+              <UButton v-if="!readOnly" type="submit" :loading="savingTimers">Save</UButton>
+            </FormHeader>
+            <p class="mb-4 text-sm text-muted">
+              The timers of the BFD interfaces below that set none. Empty: 300 ms and 3.
+            </p>
+            <fieldset :disabled="readOnly" class="max-w-3xl space-y-3">
+              <UFormField label="Receive interval (ms)" help="10-60000." :ui="inlineField">
+                <UInput v-model="timers.bfd_receive_interval" type="number" placeholder="300" />
+              </UFormField>
+              <UFormField label="Transmit interval (ms)" help="10-60000." :ui="inlineField">
+                <UInput v-model="timers.bfd_transmit_interval" type="number" placeholder="300" />
+              </UFormField>
+              <UFormField label="Detect multiplier" help="2-255." :ui="inlineField">
+                <UInput v-model="timers.bfd_detect_multiplier" type="number" placeholder="3" />
+              </UFormField>
+            </fieldset>
+          </form>
+        </div>
         <CrudPage
           title="BFD interfaces"
-          description="BFD (FRR) on the interfaces of this virtual firewall: fast detection of a lost neighbour. Static routes (their gateway), OSPF and IS-IS interfaces and BGP neighbours turn BFD on in their own settings, and use it on the interfaces listed and enabled here, with these timers."
+          description="BFD on the interfaces of this virtual firewall: fast detection of a lost neighbour. Static routes (their gateway), OSPF and IS-IS interfaces and BGP neighbours turn BFD on in their own settings, and use it on the interfaces listed and enabled here, with these timers (empty: the default timers above)."
           :api="bfdInterfaces"
           :params="{ instance_id: store.currentId }"
           :columns="columns"

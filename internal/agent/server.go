@@ -112,6 +112,9 @@ func (a *Agent) routes() *http.ServeMux {
 	mux.HandleFunc("GET /v1/ntp", func(w http.ResponseWriter, r *http.Request) {
 		writeJSONResponse(w, http.StatusOK, a.NTP(r.Context()))
 	})
+	mux.HandleFunc("GET /v1/nat64", func(w http.ResponseWriter, r *http.Request) {
+		writeJSONResponse(w, http.StatusOK, a.NAT64(r.Context()))
+	})
 	mux.HandleFunc("GET /v1/openvpn", func(w http.ResponseWriter, r *http.Request) {
 		writeJSONResponse(w, http.StatusOK, a.OpenVPN(r.Context()))
 	})

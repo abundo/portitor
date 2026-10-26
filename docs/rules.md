@@ -207,7 +207,7 @@ IP list `include` the list's file on the firewall, so the file loads as it is on
 `/etc/nftables.conf` from another firewall, into this virtual firewall:
 
 1. Choose the file or paste it, then click *Preview*. The firewall reads it with
-   `nft` in a network namespace of its own, so variables (`define`) work and syntax
+   `nft` apart from the running rules, so variables (`define`) work and syntax
    errors show with their line. `include` statements are refused: paste the included
    files in their place.
 2. Map the file's interface names to this virtual firewall's interfaces or zones.

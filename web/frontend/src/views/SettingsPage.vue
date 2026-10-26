@@ -100,7 +100,7 @@ async function saveSettings() {
         />
         <UFormField
           label="Virtual firewalls"
-          help="Several virtual firewalls, each its own namespace, connected by links. Shows the Virtual firewalls and Links pages. Can't be turned off while there are virtual firewalls besides the firewalls' hosts."
+          help="Several virtual firewalls, connected by links. Shows the Virtual firewalls and Links pages. Can't be turned off while there are virtual firewalls besides the firewalls' hosts."
         >
           <USwitch
             v-model="settings.virtual_firewalls"

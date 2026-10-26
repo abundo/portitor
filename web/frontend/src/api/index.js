@@ -141,12 +141,11 @@ export const api = {
   restore: (data, passphrase) =>
     http.post('/backup/restore', { data, passphrase }).then((r) => r.data),
   users: () => http.get('/users').then((r) => r.data),
-  createUser: (username, password, role, totpRequired) =>
-    http
-      .post('/users', { username, password, role, totp_required: totpRequired })
-      .then((r) => r.data),
-  // updateUser sets { role, totp_required }; changing the role ends their
-  // sessions.
+  // createUser takes { username, full_name, email, password, role,
+  // totp_required }.
+  createUser: (body) => http.post('/users', body).then((r) => r.data),
+  // updateUser sets { role, totp_required, full_name, email }; changing the
+  // role ends their sessions.
   updateUser: (id, body) => http.put(`/users/${id}`, body).then((r) => r.data),
   // Setting a user's password ends their sessions.
   setUserPassword: (id, password) => http.post(`/users/${id}/password`, { password }),
@@ -198,6 +197,7 @@ export const api = {
   agentVrrp: () => http.get('/agent/vrrp').then((r) => r.data),
   agentBfd: () => http.get('/agent/bfd').then((r) => r.data),
   agentNtp: () => http.get('/agent/ntp').then((r) => r.data),
+  agentNat64: () => http.get('/agent/nat64').then((r) => r.data),
   agentOpenvpn: () => http.get('/agent/openvpn').then((r) => r.data),
   reorderDirectoryServers: (ids) => http.post('/directory/servers/reorder', { ids }),
   testDirectoryServer: (body) => http.post('/directory/servers/test', body).then((r) => r.data),

@@ -252,7 +252,7 @@ const policyFields = computed(() => [
             firewall gets the certificate from Let's Encrypt, by DNS-01 or by HTTP-01 answered on
             the firewall itself, as each policy says. Only the firewall holds the DNS credentials
             and the ACME account, and the hosts need not be reachable from the Internet. Policies
-            decide which hosts may ask for which names. Changes take effect when committed.
+            decide which hosts may ask for which names.
           </p>
           <fieldset :disabled="readOnly" class="space-y-3">
             <UFormField label="Enabled" :ui="inlineField">

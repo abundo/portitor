@@ -16,9 +16,9 @@ the clients behind it.
   own network, through its own interfaces, but never sets the clock, which is
   the host's. It is there to serve the time to the virtual firewall's clients.
 
-The page has two tabs: **Info** shows the time sources as chrony has them (state,
+The page has two tabs: **NTP info** shows the time sources as chrony has them (state,
 stratum, reach, offset, NTS), how it keeps time (tracking) and what it has served,
-refreshed every 5 seconds; **Configuration** holds the settings below.
+refreshed every 5 seconds; **NTP config** holds the settings below.
 
 ## Servers
 

@@ -8,7 +8,7 @@ firewall a routing table of their own. Traffic that comes in on them is routed
 by that table only, apart from the rest of the virtual firewall, so two VRFs can
 have their own default routes and overlapping networks.
 
-Each virtual firewall has its own network namespace, so its VRFs are its own:
+Each virtual firewall has its own VRFs:
 two virtual firewalls can each have a VRF called `blue` with table 10, and they
 have nothing to do with each other.
 
@@ -80,7 +80,7 @@ table.
   and other protocols' routes.
 - **BFD** works for the protocols of a VRF as for the main table's, on the
   interfaces with BFD (*Routing → BFD*). The BFD info shows each session's VRF.
-- **VRRP** works on an interface in a VRF: the virtual router's device is put in
+- **VRRP** works on an interface in a VRF: the VRRP's device is put in
   the same VRF, so the virtual address answers there.
 
 The routing objects (prefix lists, route maps and so on) are shared by all.

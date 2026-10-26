@@ -76,7 +76,7 @@ Everything is done in the primary's portitor-config.
 
    A commit lists what is missing (`fw2: main: interface lan: the HA secondary needs an
    address of its own ...`).
-4. **The shared addresses** are VRRP's: a virtual router on each LAN, with the
+4. **The shared addresses** are VRRP's: a VRRP on each LAN, with the
    gateway address the clients use (*Routing → VRRP*). Turn on *Preempt* if the
    primary should take the address back when it returns.
 5. **Commit.** Both hosts get the configuration; confirm it as usual.
@@ -138,7 +138,7 @@ On either host, as root:
 
 ```
 portitor show ha                          # node, peer, witness vote, fenced or not
-portitor show vrrp                        # master or backup, per virtual router
+portitor show vrrp                        # master or backup, per VRRP
 ```
 
 **When neither the peer nor the witness can be reached** (the witness down, or the

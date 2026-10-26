@@ -22,7 +22,7 @@ router that does it.
 
 ## Settings
 
-Under *Network → NAT64*, per virtual firewall:
+Under *Network → NAT64*, tab *NAT64 config*, per virtual firewall:
 
 - **NAT64 prefix**: `64:ff9b::/96`, or a network-specific prefix of length 32, 40,
   48, 56, 64 or 96. Use a network-specific one if the clients must reach IPv4
@@ -92,10 +92,11 @@ forward chain, so replies don't go round the loop. The `nat64_reply` chain gives
 them what the forward chain would: the rule's rate limit, shaper mark and counter.
 The reply leaves on `lan`, where the shaper queues it.
 
-## Troubleshooting
+## Status and troubleshooting
 
-On the firewall, as root, in the virtual firewall's namespace
-(`ip netns exec fw-<name> ...`) for a virtual firewall:
+The *NAT64 info* tab shows the sessions and Jool's counters. For more, on the
+firewall as root (for a virtual firewall other than the host, with
+`ip netns exec fw-<name>` in front):
 
 - `jool -i portitor pool4 display --icmp` (or `--tcp`, `--udp`): one entry per
   interface with 464XLAT, with its mark and pool address. Empty means Jool sends
@@ -116,5 +117,5 @@ Jool is a kernel module, built by DKMS: the installer and the Portitor update
 install `jool-dkms`, `jool-tools` and the kernel headers. With Secure Boot, the
 module must be signed with a key enrolled with `mokutil`, or it won't load.
 
-A firewall that has rebooted, or a virtual firewall whose namespace is made again,
+A firewall that has rebooted, or a virtual firewall that is made again,
 gets its Jool instance back at the next commit or start of the agent.

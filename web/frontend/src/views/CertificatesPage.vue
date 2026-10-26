@@ -61,8 +61,8 @@ const toast = useToast()
 
 // Store is the default tab; ?tab=overview or ?tab=cas opens another.
 const tabs = [
-  { label: 'Store', value: 'store', slot: 'store', icon: 'i-lucide-shield-check' },
-  { label: 'Overview', value: 'overview', slot: 'overview', icon: 'i-lucide-list' },
+  { label: 'Certificate store', value: 'store', slot: 'store', icon: 'i-lucide-shield-check' },
+  { label: 'ACME certificates', value: 'overview', slot: 'overview', icon: 'i-lucide-list' },
   { label: 'Certificate authorities', value: 'cas', slot: 'cas', icon: 'i-lucide-landmark' },
 ]
 const tab = computed({
@@ -547,7 +547,7 @@ const fields = computed(() => [
         <CrudPage
           title="Certificates"
           noun="certificate"
-          description="TLS certificates from Let's Encrypt (ACME), got by the firewall and renewed when two thirds of their lifetime have passed. The CA checks each domain over HTTP on port 80 (HTTP-01), which the firewall opens on the certificate's interface only while it answers, or by a TXT record the firewall writes through a DNS update client (DNS-01), which also works for internal names and wildcards. A certificate from elsewhere is imported with its key on the Store tab, and is never renewed. To serve the GUI itself with one, choose it under Settings → Portitor web."
+          description="TLS certificates from Let's Encrypt (ACME), got by the firewall and renewed when two thirds of their lifetime have passed. The CA checks each domain over HTTP on port 80 (HTTP-01), which the firewall opens on the certificate's interface only while it answers, or by a TXT record the firewall writes through a DNS update client (DNS-01), which also works for internal names and wildcards. A certificate from elsewhere is imported with its key on the Certificate store tab, and is never renewed. To serve the GUI itself with one, choose it under Settings → Portitor web."
           :api="acmeAPI"
           :params="{ instance_id: store.currentId }"
           :columns="columns"
@@ -593,7 +593,7 @@ const fields = computed(() => [
         <CrudPage
           title="Certificate authorities"
           noun="certificate authority"
-          :description="`The certificate authorities of firewall ${host?.name ?? ''}, kept on its host. They are deployed with the host like any imported certificate, so they are stored on the firewall itself (on both hosts of an HA pair), and sign the server certificates of the host and its virtual firewalls (Sign, or Create certificate on the Store tab). Export a CA and add it to the trust store of the hosts that should trust those certificates. Global admins manage them.`"
+          :description="`The certificate authorities of firewall ${host?.name ?? ''}, kept on its host. They are deployed with the host like any imported certificate, so they are stored on the firewall itself (on both hosts of an HA pair), and sign the server certificates of the host and its virtual firewalls (Sign, or Create certificate on the Certificate store tab). Export a CA and add it to the trust store of the hosts that should trust those certificates. Global admins manage them.`"
           :api="caAPI"
           :params="{ instance_id: host?.id }"
           shared

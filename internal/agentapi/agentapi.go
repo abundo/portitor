@@ -796,6 +796,9 @@ type TraceRequest struct {
 	Target string `json:"target"`
 	Family string `json:"family,omitempty"` // "", "ipv4" or "ipv6"
 	Count  int    `json:"count,omitempty"`  // rounds; 0 is TraceDefaultCount
+	// Protocol is what the probes are: "" or "icmp" (echo requests), or
+	// "udp" (datagrams to high ports).
+	Protocol string `json:"protocol,omitempty"`
 }
 
 // TraceEvent is the address traced ("target", first), a hop address's
@@ -1416,6 +1419,58 @@ type NTPSource struct {
 type NTPField struct {
 	Name  string `json:"name"`
 	Value string `json:"value"`
+}
+
+// NAT64Response is the NAT64 state of the instances that translate (Jool).
+type NAT64Response struct {
+	Instances []NAT64Instance `json:"instances"`
+}
+
+// NAT64Instance is one instance's Jool: its prefix, the loop devices'
+// pool4 addresses, the sessions (at most MaxNAT64Sessions of them;
+// SessionCounts has them all, per protocol) and Jool's counters. Error
+// says why Jool could not be asked.
+type NAT64Instance struct {
+	Instance      string         `json:"instance"`
+	Error         string         `json:"error,omitempty"`
+	Prefix        string         `json:"prefix"`
+	Pool4         []NAT64Pool4   `json:"pool4"`
+	Sessions      []NAT64Session `json:"sessions"`
+	SessionCounts map[string]int `json:"session_counts"`
+	Stats         []NAT64Stat    `json:"stats"`
+}
+
+// MaxNAT64Sessions is how many sessions an NAT64Instance lists.
+const MaxNAT64Sessions = 1000
+
+// NAT64Pool4 is the pool4 address of an interface with 464XLAT.
+type NAT64Pool4 struct {
+	Interface string `json:"interface"`
+	Address   string `json:"address"`
+}
+
+// NAT64Session is a Jool session: the IPv6 client and the address it
+// sent to (in the prefix), and the IPv4 pool4 address and destination
+// they are translated to. Expires is as Jool prints it; State is TCP's.
+type NAT64Session struct {
+	Protocol  string `json:"protocol"`
+	Source6   string `json:"source6"`
+	Port6     string `json:"port6"`
+	Dest6     string `json:"dest6"`
+	DestPort6 string `json:"dest_port6"`
+	Source4   string `json:"source4"`
+	Port4     string `json:"port4"`
+	Dest4     string `json:"dest4"`
+	DestPort4 string `json:"dest_port4"`
+	Expires   string `json:"expires"`
+	State     string `json:"state,omitempty"`
+}
+
+// NAT64Stat is one of Jool's counters, with its explanation.
+type NAT64Stat struct {
+	Name        string `json:"name"`
+	Value       uint64 `json:"value"`
+	Explanation string `json:"explanation,omitempty"`
 }
 
 // HAStatus is an HA host's quorum (GET /v1/ha); Node is empty when the

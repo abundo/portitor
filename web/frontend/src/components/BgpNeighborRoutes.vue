@@ -121,9 +121,9 @@ const title = computed(() => {
             v-if="noSoftReconfig"
             class="flex h-[60vh] items-center justify-center p-4 text-center text-muted"
           >
-            Soft reconfiguration inbound is not enabled on this neighbour, so FRR does not keep the
-            routes the inbound policy filtered. Turn it on (Soft reconfiguration in the neighbour's
-            address family) to see them.
+            Soft reconfiguration inbound is not enabled on this neighbour, so the routes the inbound
+            policy filtered. Turn it on (Soft reconfiguration in the neighbour's address family) to
+            see them.
           </div>
           <UTable
             v-else

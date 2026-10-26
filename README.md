@@ -42,7 +42,7 @@ office networks. It manages:
   interfaces, area ranges, external summaries and redistribution, MD5 authentication
 - IS-IS (FRR, off by default): IPv4 and IPv6 (multi-topology), levels 1 and 2,
   point-to-point and passive interfaces, default route and redistribution
-- VRRP (FRR): VRRPv3 (IPv4 and IPv6) and VRRPv2 virtual routers, a gateway address
+- VRRP (FRR): VRRPv3 (IPv4 and IPv6) and VRRPv2, a gateway address
   shared by two or more firewalls
 - BFD (FRR): fast failure detection on an interface, for static routes, OSPF,
   IS-IS and BGP neighbours
@@ -99,7 +99,7 @@ from scratch.
   (`internal/render`) and makes the system match. It never reads the database.
 - **portitor-web** (optional) passes each firewall's GUI through, at `/fw/<name>/`.
   It has no database and no users: the firewall's login and roles apply.
-- **Virtual firewalls** are virtual routers. The default virtual firewall is the host itself; every
+- **Virtual firewalls** are separate firewalls on one host. The default virtual firewall is the host itself; every
   other virtual firewall is a Linux network namespace (`fw-<name>`) with its own interfaces,
   routing table, nftables ruleset, BIND and Kea. **Links** are veth pairs between
   virtual firewalls. The default virtual firewall is not listed on the *Virtual firewalls*

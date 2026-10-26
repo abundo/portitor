@@ -120,7 +120,7 @@ two together, and the hosts on the segment are routed in the VRF as well.
 ## How it runs
 
 The agent creates the VXLAN device (`ip link add ... type vxlan id <VNI> local
-<address> dstport <port> dev <underlay>`) in the virtual firewall's namespace and
+<address> dstport <port> dev <underlay>`) in the virtual firewall and
 makes it again when the VNI, local address, port or underlay changes. Without
 EVPN it learns from packets, and the agent keeps one all-zero forwarding entry
 per remote VTEP (`bridge fdb append 00:00:00:00:00:00 dev vx100 dst <remote>`),

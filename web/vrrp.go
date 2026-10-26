@@ -105,11 +105,11 @@ func prepareVrrpRouter(tx *gorm.DB, r, old *models.VrrpRouter) error {
 	}
 	for _, o := range others {
 		if o.Interface == r.Interface && o.Vrid == r.Vrid {
-			return bad(fmt.Sprintf("%s already has virtual router %d", r.Interface, r.Vrid))
+			return bad(fmt.Sprintf("%s already has VRRP %d", r.Interface, r.Vrid))
 		}
 		for _, a := range slices.Concat(r.Ipv4, r.Ipv6) {
 			if slices.Contains(o.Ipv4, a) || slices.Contains(o.Ipv6, a) {
-				return bad(fmt.Sprintf("%s is also an address of virtual router %d on %s", a, o.Vrid, o.Interface))
+				return bad(fmt.Sprintf("%s is also an address of VRRP %d on %s", a, o.Vrid, o.Interface))
 			}
 		}
 	}
@@ -122,7 +122,7 @@ func vrrpIfaceUsers(tx *gorm.DB, instanceID uint, name string) []string {
 	tx.Model(&models.VrrpRouter{}).Where("instance_id = ? AND interface = ?", instanceID, name).Order("vrid").Pluck("vrid", &ids)
 	var users []string
 	for _, id := range ids {
-		users = append(users, fmt.Sprintf("VRRP virtual router %d", id))
+		users = append(users, fmt.Sprintf("VRRP %d", id))
 	}
 	return users
 }

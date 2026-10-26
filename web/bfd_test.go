@@ -17,15 +17,22 @@ func TestBFD(t *testing.T) {
 	inst := env.create("/api/instances", map[string]any{"name": "main"})
 	eth := env.create("/api/interfaces", map[string]any{"instance_id": inst, "name": "eth1", "kind": "physical", "enabled": true, "ipv4_mode": "static", "addresses": []string{"10.0.0.1/24"}})
 
-	// Defaults filled in.
-	rec := env.do("POST", "/api/bfd/interfaces", map[string]any{"instance_id": inst, "interface": "eth1", "enabled": true})
+	// Timers left empty are the virtual firewall's defaults.
+	rec := env.do("POST", "/api/bfd/interfaces", map[string]any{"instance_id": inst, "interface": "eth1", "enabled": true, "receive_interval": 100})
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("create: %d %s", rec.Code, rec.Body)
 	}
 	var b models.BfdInterface
 	_ = json.Unmarshal(rec.Body.Bytes(), &b)
-	if b.DetectMultiplier != 3 || b.ReceiveInterval != 300 || b.TransmitInterval != 300 {
-		t.Errorf("not normalised: %+v", b)
+	if b.DetectMultiplier != 0 || b.ReceiveInterval != 100 || b.TransmitInterval != 0 {
+		t.Errorf("stored: %+v", b)
+	}
+	instURL := "/api/instances/" + itoa(inst)
+	if rec := env.do("PUT", instURL, map[string]any{"bfd_detect_multiplier": 1}); rec.Code != http.StatusBadRequest {
+		t.Errorf("default multiplier 1 accepted: %d %s", rec.Code, rec.Body)
+	}
+	if rec := env.do("PUT", instURL, map[string]any{"bfd_detect_multiplier": 5, "bfd_receive_interval": 200, "bfd_transmit_interval": 250}); rec.Code != http.StatusOK {
+		t.Fatalf("defaults: %d %s", rec.Code, rec.Body)
 	}
 	for what, body := range map[string]map[string]any{
 		"unknown interface": {"instance_id": inst, "interface": "eth9"},
@@ -51,6 +58,9 @@ func TestBFD(t *testing.T) {
 	in := exp.Instance("main")
 	if len(in.BFD) != 1 || in.BFD[0].Name != "eth1" || !in.HasBFDRoutes() || !in.FRRRunning() {
 		t.Errorf("document: %+v %+v", in.BFD, in.Routes)
+	}
+	if bi := in.BFD[0]; bi.DetectMultiplier != 5 || bi.ReceiveInterval != 100 || bi.TransmitInterval != 250 {
+		t.Errorf("timers: %+v", bi)
 	}
 
 	// Renaming the interface rewrites it; disabled, it is left out.

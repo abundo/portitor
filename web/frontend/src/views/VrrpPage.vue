@@ -1,8 +1,8 @@
 <!-- SPDX-FileCopyrightText: 2026 The Portitor contributors -->
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
-<!-- VRRP (FRR's vrrpd): the virtual routers of the virtual firewall
-     (Virtual routers tab), and their state as FRR has it (VRRP info). -->
+<!-- VRRP (FRR's vrrpd): the VRRPs of the virtual firewall (VRRP config),
+     and their state as FRR has it (VRRP info). -->
 <script setup>
 import AutoRefreshButton from '@/components/AutoRefreshButton.vue'
 import { useAutoRefresh } from '@/composables/useAutoRefresh'
@@ -22,7 +22,7 @@ const { store, ifaceNames, ifaceText } = useInstanceRefs()
 
 const tabs = [
   { label: 'VRRP info', value: 'info', slot: 'info', icon: 'i-lucide-info' },
-  { label: 'Virtual routers', value: 'routers', slot: 'routers', icon: 'i-lucide-git-fork' },
+  { label: 'VRRP config', value: 'routers', slot: 'routers', icon: 'i-lucide-git-fork' },
 ]
 const tab = computed({
   get: () => (tabs.some((t) => t.value === route.query.tab) ? route.query.tab : 'info'),
@@ -49,7 +49,7 @@ const auto = useAutoRefresh(loadStatus, { seconds: 5, active: () => tab.value ==
 const mine = computed(() =>
   status.value?.instances?.find((i) => i.instance === store.current?.name),
 )
-// One row per virtual router and IP version.
+// One row per VRRP and IP version.
 const infoRows = computed(() =>
   (mine.value?.routers ?? []).flatMap((r) =>
     [
@@ -86,7 +86,7 @@ const infoColumns = [
   { accessorKey: 'transitions', header: 'Transitions' },
 ]
 
-// ----- Virtual routers.
+// ----- VRRP config.
 const ifaceItems = computed(() => ifaceNames.value.map((n) => ({ label: ifaceText(n), value: n })))
 const versions = [
   { label: 'VRRPv3', value: 3 },
@@ -107,11 +107,11 @@ const fields = computed(() => [
   { key: 'interface', label: 'Interface', type: 'select', items: ifaceItems.value, required: true },
   {
     key: 'vrid',
-    label: 'Virtual router id',
+    label: 'VRID',
     type: 'number',
     required: true,
     placeholder: '1-255',
-    hint: 'The same on every router of the group, and unique on the network: it sets the virtual MAC address (00:00:5e:00:01:id, IPv6 00:00:5e:00:02:id).',
+    hint: 'The same on every router of the group, and unique on the network: it sets the VRRP MAC address (00:00:5e:00:01:id, IPv6 00:00:5e:00:02:id).',
   },
   {
     key: 'ipv4',
@@ -181,16 +181,16 @@ const defaults = {
     <UTabs v-model="tab" :items="tabs">
       <template #routers>
         <CrudPage
-          title="Virtual routers"
-          description="VRRP virtual routers (FRR): addresses shared with other routers on the same network, held by the master and taken over by a backup when it fails. Rules and auto rules on an interface also match what is sent to its virtual routers."
+          title="VRRP"
+          description="VRRP: addresses shared with other routers on the same network, held by the master and taken over by a backup when it fails. Rules and auto rules on an interface also match what is sent to its VRRP addresses."
           :api="vrrpRouters"
           :params="{ instance_id: store.currentId }"
           :columns="columns"
           :fields="fields"
           :defaults="defaults"
-          noun="virtual router"
-          new-label="New virtual router"
-          :item-name="(r) => `virtual router ${r.vrid} on ${ifaceText(r.interface)}`"
+          noun="VRRP"
+          new-label="New VRRP"
+          :item-name="(r) => `VRRP ${r.vrid} on ${ifaceText(r.interface)}`"
         />
       </template>
       <template #info>
@@ -199,8 +199,7 @@ const defaults = {
             <div>
               <div class="text-lg font-semibold">VRRP info</div>
               <p class="max-w-3xl text-sm text-muted">
-                The state of this virtual firewall's virtual routers as FRR has them: master or
-                backup, per IP version.
+                The state of this virtual firewall's VRRPs: master or backup, per IP version.
               </p>
             </div>
             <AutoRefreshButton :auto="auto" :loading="loading" />
@@ -241,7 +240,7 @@ const defaults = {
             </template>
             <template #empty>
               <div class="py-4 text-center text-muted">
-                {{ status ? 'No virtual routers deployed.' : '' }}
+                {{ status ? 'No VRRP deployed.' : '' }}
               </div>
             </template>
           </UTable>

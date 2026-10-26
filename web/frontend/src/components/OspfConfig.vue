@@ -233,9 +233,8 @@ const ifDefaults = computed(() => ({
         />
       </FormHeader>
       <p class="mb-4 max-w-3xl text-sm text-muted">
-        {{ name }} ({{ v2 ? 'IPv4' : 'IPv6' }}) runs FRR's {{ v2 ? 'ospfd' : 'ospf6d' }} in this
-        virtual firewall. It is off until enabled here; changes take effect when committed. The
-        firewall lets OSPF in and out on its interfaces by itself.
+        {{ name }} ({{ v2 ? 'IPv4' : 'IPv6' }}) in this virtual firewall. The firewall lets OSPF in
+        and out on its interfaces by itself.
         <template v-if="vrfName">
           This is VRF {{ vrfName }}'s {{ name }}, on the VRF's interfaces; its routes go in the
           VRF's table.
@@ -250,8 +249,8 @@ const ifDefaults = computed(() => ({
           :ui="inlineField"
           :help="
             v2
-              ? 'An IPv4 address; empty: FRR picks one.'
-              : 'An IPv4 address, also for OSPFv3; empty: FRR picks one (an IPv4 address of the firewall).'
+              ? 'An IPv4 address; empty: one is picked.'
+              : 'An IPv4 address, also for OSPFv3; empty: an IPv4 address of the firewall is picked.'
           "
         >
           <UInput v-model="cfg.router_id" class="w-48" :ui="{ base: 'font-mono' }" />
@@ -277,7 +276,7 @@ const ifDefaults = computed(() => ({
         <UFormField
           label="Maximum paths"
           :ui="inlineField"
-          help="Equal-cost paths installed; 0: FRR's default."
+          help="Equal-cost paths installed; 0: the default."
         >
           <UInput v-model="cfg.maximum_paths" type="number" class="w-28" />
         </UFormField>
@@ -311,7 +310,7 @@ const ifDefaults = computed(() => ({
           v-if="v2"
           label="Networks"
           :ui="inlineField"
-          help="Runs OSPF on the interfaces with an address in the prefix: the other way to enable it than an interface's area. FRR does not allow both."
+          help="Runs OSPF on the interfaces with an address in the prefix: the other way to enable it than an interface's area. Both are not allowed."
         >
           <EntriesEditor
             v-model="cfg.networks"
@@ -357,7 +356,7 @@ const ifDefaults = computed(() => ({
         <p class="text-sm text-muted">
           Announces these routes into OSPF as external routes. A route map filters or changes them.
           The metric (empty: 20) is their cost; type 2 keeps it as it is, type 1 adds the cost of
-          the way to this router.
+          the path to this router.
         </p>
         <UFormField
           v-for="s in sources"

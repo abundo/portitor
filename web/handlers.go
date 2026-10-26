@@ -543,6 +543,8 @@ func (s *Server) handleListUsers(c *echo.Context) error {
 func (s *Server) handleCreateUser(c *echo.Context) error {
 	var req struct {
 		Username string `json:"username"`
+		FullName string `json:"full_name"`
+		Email    string `json:"email"`
 		Password string `json:"password"`
 		Role     string `json:"role"`
 		// TOTPRequired: absent takes the default under Settings.
@@ -562,13 +564,17 @@ func (s *Server) handleCreateUser(c *echo.Context) error {
 	if req.Username == "" {
 		return errJSON(c, http.StatusBadRequest, "username is required")
 	}
+	req.FullName, req.Email = strings.TrimSpace(req.FullName), strings.TrimSpace(req.Email)
+	if msg := checkNameEmail(req.FullName, req.Email); msg != "" {
+		return errJSON(c, http.StatusBadRequest, msg)
+	}
 	if req.Role == "" {
 		req.Role = models.RoleViewer
 	}
 	if !validRole(req.Role) {
 		return errJSON(c, http.StatusBadRequest, "role must be admin, viewer or none")
 	}
-	u := models.User{Username: req.Username, Role: req.Role, TOTPRequired: *req.TOTPRequired}
+	u := models.User{Username: req.Username, FullName: req.FullName, Email: req.Email, Role: req.Role, TOTPRequired: *req.TOTPRequired}
 	if err := setPassword(&u, req.Password); err != nil {
 		return errJSON(c, http.StatusBadRequest, err.Error())
 	}
@@ -587,9 +593,9 @@ func validLevel(level string) bool {
 	return level == models.RoleAdmin || level == models.RoleViewer
 }
 
-// handleUpdateUser changes another user's role, which ends their sessions
-// so a demoted admin loses an open console too, and whether they must use
-// two-factor login. The caller's own role cannot change, which keeps at
+// handleUpdateUser changes a user's full name and email (kept when left
+// out), another user's role, which ends their sessions so a demoted admin
+// loses an open console too, and whether they must use two-factor login. The caller's own role cannot change, which keeps at
 // least one admin.
 func (s *Server) handleUpdateUser(c *echo.Context) error {
 	id, err := echo.PathParam[uint](c, "id")
@@ -597,8 +603,10 @@ func (s *Server) handleUpdateUser(c *echo.Context) error {
 		return errJSON(c, http.StatusNotFound, "not found")
 	}
 	var req struct {
-		Role         string `json:"role"`
-		TOTPRequired *bool  `json:"totp_required"`
+		Role         string  `json:"role"`
+		FullName     *string `json:"full_name"`
+		Email        *string `json:"email"`
+		TOTPRequired *bool   `json:"totp_required"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return errJSON(c, http.StatusBadRequest, "invalid request")
@@ -614,6 +622,20 @@ func (s *Server) handleUpdateUser(c *echo.Context) error {
 		return errJSON(c, http.StatusNotFound, "not found")
 	}
 	changed := false
+	if req.FullName != nil || req.Email != nil {
+		name, email := u.FullName, u.Email
+		if req.FullName != nil {
+			name = strings.TrimSpace(*req.FullName)
+		}
+		if req.Email != nil {
+			email = strings.TrimSpace(*req.Email)
+		}
+		if msg := checkNameEmail(name, email); msg != "" {
+			return errJSON(c, http.StatusBadRequest, msg)
+		}
+		changed = changed || name != u.FullName || email != u.Email
+		u.FullName, u.Email = name, email
+	}
 	if u.Role != req.Role {
 		u.Role = req.Role
 		u.TokenVersion++
@@ -938,6 +960,23 @@ func (s *Server) handleAgentNTP(c *echo.Context) error {
 	}
 	if names != nil {
 		filterNTP(n, names)
+	}
+	return c.JSON(http.StatusOK, n)
+}
+
+// handleAgentNAT64 passes on the instances' NAT64 sessions and counters,
+// for the NAT64 page.
+func (s *Server) handleAgentNAT64(c *echo.Context) error {
+	n, err := fromAll(c.Request().Context(), s, agentAPI.NAT64, func(into, from *agentapi.NAT64Response) { into.Instances = append(into.Instances, from.Instances...) })
+	if err != nil {
+		return agentError(c, err)
+	}
+	names, err := s.readableInstanceNames(c)
+	if err != nil {
+		return err
+	}
+	if names != nil {
+		filterNAT64(n, names)
 	}
 	return c.JSON(http.StatusOK, n)
 }

@@ -412,7 +412,7 @@ func (r *VrrpRouter) Router() fwconfig.VRRP {
 }
 
 // BfdInterface is BFD on an interface of the instance (by name; link ends
-// included), with its timers. Disabled, the interface has no BFD: what
+// included), with its timers (0: the instance's Bfd* defaults). Disabled, the interface has no BFD: what
 // asks for BFD there runs without.
 type BfdInterface struct {
 	Base

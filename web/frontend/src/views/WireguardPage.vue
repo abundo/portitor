@@ -37,8 +37,8 @@ const route = useRoute()
 const router = useRouter()
 
 const tabs = [
-  { label: 'Info', value: 'info', slot: 'info', icon: 'i-lucide-info' },
-  { label: 'Configuration', value: 'config', slot: 'config', icon: 'i-lucide-settings' },
+  { label: 'WireGuard info', value: 'info', slot: 'info', icon: 'i-lucide-info' },
+  { label: 'WireGuard config', value: 'config', slot: 'config', icon: 'i-lucide-settings' },
 ]
 const tab = computed({
   get: () => (tabs.some((t) => t.value === route.query.tab) ? route.query.tab : 'info'),
@@ -158,7 +158,7 @@ async function saveTunnel() {
   }
 }
 
-// The agent's status, for the Info tab, refreshed every 5 s.
+// The agent's status, for the WireGuard info tab, refreshed every 5 s.
 const { auto: autoStatus, loading: statusLoading } = useStatusRefresh()
 
 // ----- Info: the selected interface as configured and as the agent sees
@@ -388,7 +388,7 @@ function copy(text) {
             <UAlert
               icon="i-lucide-key-round"
               title="No WireGuard interface in this virtual firewall"
-              description="Add one on the Configuration tab or under Interfaces."
+              description="Add one on the WireGuard config tab or under Interfaces."
             />
           </div>
           <template v-else>
@@ -498,7 +498,7 @@ function copy(text) {
           <form v-if="auth.isAdmin" class="card mb-4 space-y-3" @submit.prevent="saveEndpoint">
             <UFormField
               label="Public endpoint host"
-              help="Name or address clients connect to, in every virtual firewall; used in generated client configs when the interface has no client endpoint of its own."
+              help="Name or address clients connect to; used in generated client configs when the interface has no client endpoint of its own."
             >
               <div class="flex flex-wrap gap-2">
                 <UInput

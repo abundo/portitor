@@ -13,7 +13,9 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/abundo/portitor/internal/agentapi"
 	"github.com/abundo/portitor/internal/fwconfig"
 )
 
@@ -286,4 +288,118 @@ func nat64Routes(in *fwconfig.Instance) []fwconfig.Route {
 		out = append(out, fwconfig.Route{Destination: d.Address + "/32", Interface: d.Name})
 	}
 	return out
+}
+
+// NAT64 gathers the state of the instances' Jool: the pool4 addresses of
+// the loop devices, the sessions and the counters.
+func (a *Agent) NAT64(ctx context.Context) *agentapi.NAT64Response {
+	resp := &agentapi.NAT64Response{Instances: []agentapi.NAT64Instance{}}
+	a.mu.Lock()
+	doc := a.applied
+	a.mu.Unlock()
+	if doc == nil {
+		return resp
+	}
+	for i := range doc.Instances {
+		in := &doc.Instances[i]
+		if in.NAT64 == nil {
+			continue
+		}
+		ns := in.NetnsName()
+		jool := func(args ...string) ([]byte, error) {
+			cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			defer cancel()
+			return a.bg.Run(cctx, ns, "jool", append([]string{"-i", fwconfig.JoolInstance}, args...)...)
+		}
+		resp.Instances = append(resp.Instances, nat64Instance(in, jool))
+	}
+	return resp
+}
+
+func nat64Instance(in *fwconfig.Instance, jool func(...string) ([]byte, error)) agentapi.NAT64Instance {
+	ni := agentapi.NAT64Instance{
+		Instance:      in.Name,
+		Prefix:        in.NAT64.Prefix,
+		Pool4:         []agentapi.NAT64Pool4{},
+		Sessions:      []agentapi.NAT64Session{},
+		SessionCounts: map[string]int{},
+		Stats:         []agentapi.NAT64Stat{},
+	}
+	for _, d := range in.NAT64Devices() {
+		ni.Pool4 = append(ni.Pool4, agentapi.NAT64Pool4{Interface: d.Parent, Address: d.Address})
+	}
+	out, err := jool("instance", "status")
+	if err != nil {
+		ni.Error = chronycError(out, err)
+		return ni
+	}
+	if !strings.Contains(string(out), "Running") {
+		ni.Error = strings.TrimSpace(string(out))
+		return ni
+	}
+	for _, proto := range nat64Protos {
+		out, err := jool("session", "display", proto, "--numeric", "--csv", "--no-headers")
+		if err != nil {
+			ni.Error = chronycError(out, err)
+			return ni
+		}
+		sessions := parseJoolSessions(out)
+		ni.SessionCounts[strings.TrimPrefix(proto, "--")] = len(sessions)
+		if room := agentapi.MaxNAT64Sessions - len(ni.Sessions); room > 0 {
+			ni.Sessions = append(ni.Sessions, sessions[:min(room, len(sessions))]...)
+		}
+	}
+	if out, err := jool("stats", "display", "--csv", "--explain"); err == nil {
+		ni.Stats = parseJoolStats(out)
+	}
+	return ni
+}
+
+// parseJoolSessions reads `jool session display --numeric --csv
+// --no-headers`: protocol, IPv6 remote address and port (the client),
+// IPv6 local address and port (in the prefix), IPv4 local address and
+// port (pool4), IPv4 remote address and port, expiry, and TCP's state.
+func parseJoolSessions(out []byte) []agentapi.NAT64Session {
+	rows, _ := chronyCSV(out)
+	sessions := []agentapi.NAT64Session{}
+	for _, f := range rows {
+		if len(f) < 10 {
+			continue
+		}
+		s := agentapi.NAT64Session{
+			Protocol: strings.ToLower(f[0]),
+			Source6:  f[1], Port6: f[2],
+			Dest6: f[3], DestPort6: f[4],
+			Source4: f[5], Port4: f[6],
+			Dest4: f[7], DestPort4: f[8],
+			Expires: f[9],
+		}
+		if len(f) > 10 {
+			s.State = f[10]
+		}
+		sessions = append(sessions, s)
+	}
+	return sessions
+}
+
+// parseJoolStats reads `jool stats display --csv --explain`: name, value
+// and explanation; the counters that are zero are left out by Jool.
+func parseJoolStats(out []byte) []agentapi.NAT64Stat {
+	rows, _ := chronyCSV(out)
+	stats := []agentapi.NAT64Stat{}
+	for _, f := range rows {
+		if len(f) < 2 {
+			continue
+		}
+		v, err := strconv.ParseUint(strings.TrimSpace(f[1]), 10, 64)
+		if err != nil {
+			continue // a header
+		}
+		st := agentapi.NAT64Stat{Name: strings.TrimSpace(f[0]), Value: v}
+		if len(f) > 2 {
+			st.Explanation = strings.TrimSpace(strings.Join(f[2:], ","))
+		}
+		stats = append(stats, st)
+	}
+	return stats
 }

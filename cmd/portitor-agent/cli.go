@@ -155,7 +155,7 @@ func cliCommand() *cobra.Command {
 	})
 	show.AddCommand(&cobra.Command{
 		Use:   "vrrp",
-		Short: "VRRP virtual routers and their state",
+		Short: "VRRP and its state",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)

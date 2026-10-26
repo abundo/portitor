@@ -429,6 +429,20 @@ func (s *Server) me(c *echo.Context, u *models.User) error {
 	}{u, a.levels, st.VirtualFirewalls, s.isReplica()})
 }
 
+// checkNameEmail checks a user's full name and email (trimmed): the
+// message saying what is wrong, "" when they are fine.
+func checkNameEmail(fullName, email string) string {
+	if strings.ContainsFunc(fullName, unicode.IsControl) {
+		return "control characters are not allowed"
+	}
+	if email != "" {
+		if a, err := mail.ParseAddress(email); err != nil || a.Address != email {
+			return "invalid email address"
+		}
+	}
+	return ""
+}
+
 // handleUpdateMe changes the caller's own full name, email and date format
 // (kept when left out). The username cannot be changed here.
 func (s *Server) handleUpdateMe(c *echo.Context) error {
@@ -440,15 +454,9 @@ func (s *Server) handleUpdateMe(c *echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return errJSON(c, http.StatusBadRequest, "invalid request")
 	}
-	req.FullName = strings.TrimSpace(req.FullName)
-	req.Email = strings.TrimSpace(req.Email)
-	if strings.ContainsFunc(req.FullName, unicode.IsControl) {
-		return errJSON(c, http.StatusBadRequest, "control characters are not allowed")
-	}
-	if req.Email != "" {
-		if a, err := mail.ParseAddress(req.Email); err != nil || a.Address != req.Email {
-			return errJSON(c, http.StatusBadRequest, "invalid email address")
-		}
+	req.FullName, req.Email = strings.TrimSpace(req.FullName), strings.TrimSpace(req.Email)
+	if msg := checkNameEmail(req.FullName, req.Email); msg != "" {
+		return errJSON(c, http.StatusBadRequest, msg)
 	}
 	fields := map[string]any{"full_name": req.FullName, "email": req.Email}
 	if req.DateFormat != nil {

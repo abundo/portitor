@@ -27,6 +27,7 @@ type traceRequest struct {
 	Target    string `json:"target"`
 	Family    string `json:"family"` // "", "ipv4" or "ipv6"
 	Count     int    `json:"count"`
+	Protocol  string `json:"protocol"` // "", "icmp" or "udp"
 }
 
 // traceDNSName is a DNS name the agent may resolve (it checks again).
@@ -60,7 +61,7 @@ func (s *Server) handleAgentTrace(c *echo.Context) error {
 	if err != nil {
 		return agentError(c, err)
 	}
-	req := agentapi.TraceRequest{Instance: body.Instance, Interface: body.Interface, Target: target, Family: body.Family, Count: body.Count}
+	req := agentapi.TraceRequest{Instance: body.Instance, Interface: body.Interface, Target: target, Family: body.Family, Count: body.Count, Protocol: body.Protocol}
 	r := c.Request()
 	stream, err := a.Trace(r.Context(), req)
 	if err != nil {

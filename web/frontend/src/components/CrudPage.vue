@@ -11,6 +11,8 @@
 // nullable: a select with a "—" choice, saved as null, or as '' with
 // `text: true` (a name; null would leave the stored value as it is).
 // heading: a section title in the form (label), with no value.
+// number with `zeroEmpty: true`: 0 shows as an empty field (its
+// placeholder), and an empty field saves as 0.
 // multiselect: an array of strings picked from items (strings, or
 // { label, value, description } to show a description under each name).
 // transfer: the same, picked in a dual listbox (TransferList).
@@ -197,6 +199,7 @@ function fill(src) {
     )
       form[f.key] = []
     if (f.type === 'addr' && form[f.key] == null) form[f.key] = ''
+    if (f.zeroEmpty && !form[f.key]) form[f.key] = ''
   }
 }
 
@@ -232,6 +235,7 @@ async function save() {
   for (const f of props.fields) {
     if (f.type === 'heading') delete body[f.key]
     if (f.nullable && body[f.key] === NONE) body[f.key] = f.text ? '' : null
+    if (f.zeroEmpty && (body[f.key] === '' || body[f.key] == null)) body[f.key] = 0
     if (f.type === 'number' && body[f.key] !== null && body[f.key] !== '')
       body[f.key] = Number(body[f.key] ?? 0)
   }

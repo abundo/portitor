@@ -117,7 +117,7 @@ const generatedNet = computed(() => {
 })
 
 const levelItems = [
-  { label: 'level-1-2 (FRR’s)', value: '' },
+  { label: 'level-1-2 (default)', value: '' },
   { label: 'level-1', value: 'level-1' },
   { label: 'level-2-only', value: 'level-2-only' },
 ]
@@ -174,14 +174,14 @@ const defaultColumns = computed(() => [
   { key: 'family', label: 'Family', type: 'select', items: familyItems },
   { key: 'level', label: 'Into', type: 'select', items: intoLevels },
   { key: 'always', label: 'Always', type: 'switch' },
-  { key: 'metric', label: 'Metric', type: 'number', placeholder: 'FRR’s' },
+  { key: 'metric', label: 'Metric', type: 'number', placeholder: 'default' },
   { key: 'route_map', label: 'Route map', type: 'select', items: routeMapItems.value },
 ])
 const redistColumns = computed(() => [
   { key: 'family', label: 'Family', type: 'select', items: familyItems },
   { key: 'source', label: 'Source', type: 'select', items: sourceItems },
   { key: 'level', label: 'Into', type: 'select', items: intoLevels },
-  { key: 'metric', label: 'Metric', type: 'number', placeholder: 'FRR’s' },
+  { key: 'metric', label: 'Metric', type: 'number', placeholder: 'default' },
   { key: 'route_map', label: 'Route map', type: 'select', items: routeMapItems.value },
 ])
 
@@ -299,15 +299,15 @@ const ifDefaults = {
         />
       </FormHeader>
       <p class="mb-4 max-w-3xl text-sm text-muted">
-        IS-IS (IPv4 and IPv6) runs FRR's isisd in this virtual firewall. It is off until enabled
-        here; changes take effect when committed. IS-IS is not IP, so no firewall rules apply to it.
+        IS-IS (IPv4 and IPv6) in this virtual firewall. IS-IS is not IP, so no firewall rules apply
+        to it.
         <template v-if="vrfName">
           This is VRF {{ vrfName }}'s IS-IS, on the VRF's interfaces; its routes go in the VRF's
           table.
         </template>
       </p>
       <fieldset :disabled="readOnly" class="max-w-3xl space-y-3">
-        <UFormField label="Enabled" :ui="inlineField" help="Starts isisd; off stops it.">
+        <UFormField label="Enabled" :ui="inlineField" help="Starts IS-IS; off stops it.">
           <USwitch v-model="cfg.enabled" />
         </UFormField>
         <UFormField
@@ -333,7 +333,7 @@ const ifDefaults = {
               :ui="{ base: 'font-mono' }"
             />
           </UFormField>
-          <UFormField label="NET" :ui="inlineField">
+          <UFormField label="Effective NET" :ui="inlineField">
             <span v-if="generatedNet" class="font-mono text-sm">{{ generatedNet }}</span>
             <span v-else class="text-sm text-error">The interface has no static IPv4 address.</span>
           </UFormField>
@@ -369,7 +369,7 @@ const ifDefaults = {
         <UFormField
           label="Metric style"
           :ui="inlineField"
-          help="Wide metrics go up to 16777215; narrow (up to 63) only for old routers."
+          help="Wide metrics go up to 16777215; narrow (up to 63)."
         >
           <USelect v-model="metricStyle" :items="selectItems(styleItems)" class="w-48" />
         </UFormField>

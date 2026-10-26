@@ -18,11 +18,11 @@ interface zones, NAT, DNS and the other services treat it like any interface.
 - On the **default virtual firewall** (the host itself) OpenVPN runs as the
   distribution's `openvpn-server@portitor-udp.service` and
   `openvpn-server@portitor-tcp.service`, from `/etc/openvpn/server/`.
-- On **another virtual firewall** it runs in the virtual firewall's own network
-  namespace (`portitor-openvpn-udp@<name>.service`,
+- On **another virtual firewall** it runs in the virtual firewall
+  (`portitor-openvpn-udp@<name>.service`,
   `portitor-openvpn-tcp@<name>.service`).
 
-Changes take effect when committed. Changing the server's settings restarts
+Changing the server's settings restarts
 OpenVPN, which disconnects the clients for a moment (they reconnect by
 themselves); changing who may log in does not.
 
@@ -122,7 +122,7 @@ is self-signed. Commit first, and wait for an ACME certificate to be issued.
 
 ## Status
 
-The **Info** tab shows each OpenVPN process (UDP, TCP) and the connected clients:
+The **OpenVPN info** tab shows each OpenVPN process (UDP, TCP) and the connected clients:
 user, address, tunnel addresses, traffic, and what checked the password (`local`
 or the directory server's name).
 

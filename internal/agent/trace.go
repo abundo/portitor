@@ -276,6 +276,13 @@ func traceArgs(in *fwconfig.Instance, req *agentapi.TraceRequest) ([]string, err
 	} else {
 		argv = append(argv, "-6")
 	}
+	switch req.Protocol {
+	case "", "icmp":
+	case "udp":
+		argv = append(argv, "--udp")
+	default:
+		return nil, fmt.Errorf("unknown protocol %q (icmp or udp)", req.Protocol)
+	}
 	if req.Interface != "" {
 		if in.Interface(req.Interface) == nil {
 			return nil, fmt.Errorf("instance %s has no interface %q", in.Name, req.Interface)

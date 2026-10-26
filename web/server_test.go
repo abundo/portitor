@@ -1320,3 +1320,29 @@ func TestDnsTemplatesGlobal(t *testing.T) {
 		t.Errorf("%d SOA templates left of the deleted VF", n)
 	}
 }
+
+// An admin sets a user's full name and email; a bad email is refused, and
+// a body without them keeps them.
+func TestUserNameEmail(t *testing.T) {
+	env := newEnv(t)
+	id := env.create("/api/users", map[string]string{"username": "ann", "full_name": "Ann Example", "email": "ann@example.com", "password": "a long password", "role": "viewer"})
+	var u models.User
+	env.srv.db.First(&u, id)
+	if u.FullName != "Ann Example" || u.Email != "ann@example.com" {
+		t.Errorf("created: %+v", u)
+	}
+	if rec := env.do("POST", "/api/users", map[string]string{"username": "bob", "email": "not an email", "password": "a long password"}); rec.Code != http.StatusBadRequest {
+		t.Errorf("bad email on create: %d", rec.Code)
+	}
+	url := "/api/users/" + itoa(id)
+	if rec := env.do("PUT", url, map[string]any{"role": "viewer", "email": "nope"}); rec.Code != http.StatusBadRequest {
+		t.Errorf("bad email: %d", rec.Code)
+	}
+	if rec := env.do("PUT", url, map[string]any{"role": "viewer", "full_name": " Ann E. "}); rec.Code != http.StatusOK {
+		t.Fatalf("update: %d %s", rec.Code, rec.Body)
+	}
+	env.srv.db.First(&u, id)
+	if u.FullName != "Ann E." || u.Email != "ann@example.com" {
+		t.Errorf("updated: %+v", u)
+	}
+}

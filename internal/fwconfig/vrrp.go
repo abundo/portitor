@@ -145,7 +145,7 @@ func CheckVRRP(r VRRP, parent *Interface) []string {
 // vrrpRouter checks one virtual router; parent, when not nil, is its
 // interface.
 func (v *validator) vrrpRouter(p string, r VRRP, parent *Interface) {
-	p = fmt.Sprintf("%s: virtual router %d on %s", p, r.VRID, r.Interface)
+	p = fmt.Sprintf("%s: VRRP %d on %s", p, r.VRID, r.Interface)
 	if !ifnameRe.MatchString(r.Interface) {
 		v.addf("%s: invalid interface name", p)
 	}
@@ -228,10 +228,10 @@ func (v *validator) vrrp(p string, in *Instance, ifaces map[string]*Interface, a
 	for _, r := range in.VRRP {
 		parent := ifaces[r.Interface]
 		if parent == nil {
-			v.addf("%s: virtual router %d: unknown interface %q", p, r.VRID, r.Interface)
+			v.addf("%s: VRRP %d: unknown interface %q", p, r.VRID, r.Interface)
 		}
 		v.vrrpRouter(p, r, parent)
-		rp := fmt.Sprintf("%s: virtual router %d on %s", p, r.VRID, r.Interface)
+		rp := fmt.Sprintf("%s: VRRP %d on %s", p, r.VRID, r.Interface)
 		key := fmt.Sprintf("%s/%d", r.Interface, r.VRID)
 		if ids[key] {
 			v.addf("%s: duplicate", rp)
@@ -246,14 +246,14 @@ func (v *validator) vrrp(p string, in *Instance, ifaces map[string]*Interface, a
 				v.addf("%s: %s is an address of interface %s", rp, s, owner)
 			}
 			if other, ok := vips[a]; ok && other != key {
-				v.addf("%s: %s is also an address of virtual router %s", rp, s, other)
+				v.addf("%s: %s is also an address of VRRP %s", rp, s, other)
 			}
 			vips[a] = key
 		}
 	}
 	for _, d := range in.VRRPDevices() {
 		if devices[d.Name] {
-			v.addf("%s: two virtual routers on interfaces with similar long names get the same device name %s; rename one of the interfaces", p, d.Name)
+			v.addf("%s: two VRRPs on interfaces with similar long names get the same device name %s; rename one of the interfaces", p, d.Name)
 		}
 		devices[d.Name] = true
 	}

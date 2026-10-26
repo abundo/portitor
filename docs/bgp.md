@@ -13,7 +13,7 @@ You set it up under *Network → Routing*:
 - **Routing objects**: prefix lists, AS path lists, community lists and route maps.
   BGP filters with them, by name.
 - **BGP**: the *BGP info* tab shows what FRR has (sessions, the BGP table), the
-  *Configuration* tab what you deploy.
+  *BGP config* tab what you deploy.
 
 FRR must be installed on the firewall (`apt install frr frr-pythontools`; the
 installer ISO does). Without `frr-pythontools` (FRR's `frr-reload.py`) a changed
@@ -23,7 +23,7 @@ lacks it.
 
 ## A first session
 
-1. *Network → Routing → BGP*, *Configuration*: turn on *Enabled*, enter the *Local
+1. *Network → Routing → BGP*, *BGP config*: turn on *Enabled*, enter the *Local
    AS* (`65000`) and, optionally, a *Router id* (an IPv4 address of the firewall;
    empty, FRR picks one). Save.
 2. Under *Neighbours*, *New neighbour*: the neighbour's address and *Remote AS*. Keep
@@ -123,7 +123,7 @@ neighbours, peer groups and BGP info are its own; see
 The default virtual firewall (the host) runs the distribution's `frr.service` from
 `/etc/frr` (`frr.conf`, `daemons`, `vtysh.conf`; files that were there before are
 kept as `*.portitor-orig`). Every other virtual firewall runs
-`portitor-frr@<name>.service` in its network namespace, with its files in
+`portitor-frr@<name>.service`, with its files in
 `/etc/portitor/instances/<name>/frr`, mounted as FRR's *pathspace*
 `/etc/frr/<name>`. Its daemons keep the capability CAP_SYS_ADMIN, which FRR needs to
 start, where the other daemons of a virtual firewall drop it.

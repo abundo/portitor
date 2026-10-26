@@ -16,6 +16,22 @@ import (
 // BFD per interface of an instance, by name: renaming the interface
 // rewrites it, and removing the interface removes it (web/ifzones.go).
 
+// prepareInstanceBFD checks the instance's default BFD timers.
+func prepareInstanceBFD(in *models.Instance) error {
+	if m := in.BfdDetectMultiplier; m != 0 && (m < 2 || m > 255) {
+		return bad("BFD: the default detect multiplier must be 2-255")
+	}
+	for _, t := range []struct {
+		name string
+		ms   int
+	}{{"receive", in.BfdReceiveInterval}, {"transmit", in.BfdTransmitInterval}} {
+		if t.ms != 0 && (t.ms < 10 || t.ms > 60000) {
+			return bad(fmt.Sprintf("BFD: the default %s interval must be 10-60000 ms", t.name))
+		}
+	}
+	return nil
+}
+
 func prepareBfdInterface(tx *gorm.DB, b, old *models.BfdInterface) error {
 	if old != nil {
 		b.InstanceID = old.InstanceID
@@ -33,15 +49,6 @@ func prepareBfdInterface(tx *gorm.DB, b, old *models.BfdInterface) error {
 	}
 	if parent.Kind == fwconfig.KindLoopback {
 		return bad("BFD is not for loopback interfaces")
-	}
-	if b.DetectMultiplier == 0 {
-		b.DetectMultiplier = 3
-	}
-	if b.ReceiveInterval == 0 {
-		b.ReceiveInterval = 300
-	}
-	if b.TransmitInterval == 0 {
-		b.TransmitInterval = 300
 	}
 	b.Description = strings.TrimSpace(b.Description)
 	if err := problems(fwconfig.CheckBFDInterface(b.BFD())); err != nil {

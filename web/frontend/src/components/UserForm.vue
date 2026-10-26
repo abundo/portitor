@@ -27,6 +27,8 @@ const roles = [
 
 const form = reactive({
   username: '',
+  full_name: '',
+  email: '',
   password: '',
   repeat: '',
   role: 'viewer',
@@ -54,6 +56,8 @@ onMounted(async () => {
     }
   Object.assign(form, {
     username: u?.username ?? '',
+    full_name: u?.full_name ?? '',
+    email: u?.email ?? '',
     password: '',
     repeat: '',
     role: u?.role ?? 'viewer',
@@ -71,13 +75,27 @@ async function save() {
   try {
     let saved = editing.value
     if (!saved) {
-      saved = await api.createUser(form.username, form.password, form.role, form.totp_required)
+      saved = await api.createUser({
+        username: form.username,
+        full_name: form.full_name,
+        email: form.email,
+        password: form.password,
+        role: form.role,
+        totp_required: form.totp_required,
+      })
       toast.add({ title: `User ${saved.username} added`, color: 'success' })
     } else {
-      if (form.role !== saved.role || form.totp_required !== !!saved.totp_required)
+      if (
+        form.role !== saved.role ||
+        form.totp_required !== !!saved.totp_required ||
+        form.full_name !== (saved.full_name ?? '') ||
+        form.email !== (saved.email ?? '')
+      )
         saved = await api.updateUser(saved.id, {
           role: form.role,
           totp_required: form.totp_required,
+          full_name: form.full_name,
+          email: form.email,
         })
       if (form.password) await api.setUserPassword(saved.id, form.password)
       toast.add({
@@ -159,6 +177,24 @@ async function remove() {
           :disabled="!!editing"
           required
         />
+      </UFormField>
+      <UFormField
+        :ui="inlineField"
+        label="Full name"
+        :help="
+          editing?.ldap_server ? 'Updated from the directory at each login, when it has one.' : ''
+        "
+      >
+        <UInput v-model="form.full_name" class="w-full" autocomplete="off" />
+      </UFormField>
+      <UFormField
+        :ui="inlineField"
+        label="Email"
+        :help="
+          editing?.ldap_server ? 'Updated from the directory at each login, when it has one.' : ''
+        "
+      >
+        <UInput v-model="form.email" type="email" class="w-full" autocomplete="off" />
       </UFormField>
       <UFormField v-if="editing" :ui="inlineField" label="From">
         <span v-if="editing.ldap_server">

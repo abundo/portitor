@@ -70,7 +70,7 @@ const mine = computed(() =>
               <div class="text-lg font-semibold">OSPF info</div>
               <p class="max-w-3xl text-sm text-muted">
                 The OSPFv2 and OSPFv3 router ids, neighbours, interfaces, areas and routes of this
-                virtual firewall{{ vrfName ? ` in VRF ${vrfName}` : '' }}, as FRR has them.
+                virtual firewall{{ vrfName ? ` in VRF ${vrfName}` : '' }}.
               </p>
             </div>
             <AutoRefreshButton :auto="auto" :loading="loading" />

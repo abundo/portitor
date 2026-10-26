@@ -13,12 +13,10 @@ and the host's load, memory and disks (HOST-RESOURCES-MIB, UCD-SNMP-MIB).
 - On the **default virtual firewall** (the host itself) snmpd runs as the
   distribution's `snmpd.service`. Its config replaces `/etc/snmp/snmpd.conf` (the
   original is kept as `snmpd.conf.portitor-orig`).
-- On **another virtual firewall** snmpd runs in the virtual firewall's own network
-  namespace (`portitor-snmpd@<name>.service`), so it shows that virtual firewall's
+- On **another virtual firewall** snmpd runs in the virtual firewall
+  (`portitor-snmpd@<name>.service`), so it shows that virtual firewall's
   interfaces, addresses and routes. The system-wide values (load, memory, disks)
   are the host's.
-
-Changes take effect when committed.
 
 ## Settings
 

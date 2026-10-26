@@ -1,10 +1,10 @@
 <!-- SPDX-FileCopyrightText: 2026 The Portitor contributors -->
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
-<!-- Neighbours. Info: what the virtual firewall's interfaces see next to
+<!-- Neighbours. Neighbors info: what the virtual firewall's interfaces see next to
      them, by interface: the LLDP neighbours heard (an info button shows all
      their frame said), then the ARP (IPv4) and ND (IPv6) entries; of all VRFs
-     or one, chosen at the top. Static entries: permanent ARP and ND entries. -->
+     or one, chosen at the top. Neighbors config: permanent ARP and ND entries. -->
 <script setup>
 import AutoRefreshButton from '@/components/AutoRefreshButton.vue'
 import CrudPage from '@/components/CrudPage.vue'
@@ -24,8 +24,8 @@ import { ago, when } from '@/utils/time'
 const route = useRoute()
 const router = useRouter()
 const tabs = [
-  { label: 'Info', value: 'info', slot: 'info', icon: 'i-lucide-info' },
-  { label: 'Static entries', value: 'static', slot: 'static', icon: 'i-lucide-pin' },
+  { label: 'Neighbors info', value: 'info', slot: 'info', icon: 'i-lucide-info' },
+  { label: 'Neighbors config', value: 'static', slot: 'static', icon: 'i-lucide-pin' },
 ]
 const tab = computed({
   get: () => (tabs.some((t) => t.value === route.query.tab) ? route.query.tab : 'info'),
@@ -146,7 +146,7 @@ function lldpRows(n) {
   return r.filter(([, v]) => v !== '' && v != null)
 }
 
-// ----- Static entries: permanent ARP (IPv4) and ND (IPv6) entries.
+// ----- Neighbors config: permanent ARP (IPv4) and ND (IPv6) entries.
 const isV6 = (a) => (a ?? '').includes(':')
 const staticColumns = [
   { key: 'interface_id', label: 'Interface', format: (r) => ifaceName(r.interface_id) },

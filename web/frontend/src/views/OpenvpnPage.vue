@@ -34,8 +34,8 @@ const router = useRouter()
 const readOnly = computed(() => !auth.canEdit)
 
 const tabs = [
-  { label: 'Info', value: 'info', slot: 'info', icon: 'i-lucide-info' },
-  { label: 'Configuration', value: 'config', slot: 'config', icon: 'i-lucide-settings' },
+  { label: 'OpenVPN info', value: 'info', slot: 'info', icon: 'i-lucide-info' },
+  { label: 'OpenVPN config', value: 'config', slot: 'config', icon: 'i-lucide-settings' },
 ]
 const tab = computed({
   get: () => (tabs.some((t) => t.value === route.query.tab) ? route.query.tab : 'info'),
@@ -249,7 +249,7 @@ function downloadConfig() {
             <UAlert
               icon="i-lucide-shield-check"
               title="No OpenVPN server in this virtual firewall"
-              description="Add one on the Configuration tab."
+              description="Add one on the OpenVPN config tab."
             />
           </div>
           <template v-else>
@@ -357,7 +357,7 @@ function downloadConfig() {
               <p class="mb-4 text-sm text-muted">
                 Remote users log in with their user name and password, over IPv4 or IPv6. The
                 firewall opens the port automatically; what clients reach is up to the firewall
-                rules on {{ server.name }}. Changes take effect when committed.
+                rules on {{ server.name }}.
               </p>
               <fieldset :disabled="readOnly" class="space-y-3">
                 <UFormField label="Enabled" :ui="inlineField">

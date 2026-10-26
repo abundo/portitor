@@ -14,10 +14,10 @@ const instances = useInstanceStore()
     <div>
       <div class="text-lg font-semibold">Console</div>
       <p class="text-sm text-muted">
-        A shell on the firewall, as portitor-agent's console user, in the network namespace of
-        instance <span class="font-semibold">{{ instances.current?.name }}</span
-        >. <code>vtysh</code> talks to this instance's FRR, without sudo. It ends when you leave
-        this page.
+        A shell on the firewall, as portitor-agent's console user, in virtual firewall
+        <span class="font-semibold">{{ instances.current?.name }}</span
+        >. <code>vtysh</code> talks to this virtual firewall's FRR, without sudo. It ends when you
+        leave this page.
       </p>
     </div>
     <ConsoleTerminal

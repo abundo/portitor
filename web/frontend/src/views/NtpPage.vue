@@ -32,8 +32,8 @@ const route = useRoute()
 const router = useRouter()
 
 const tabs = [
-  { label: 'Info', value: 'info', slot: 'info', icon: 'i-lucide-info' },
-  { label: 'Configuration', value: 'config', slot: 'config', icon: 'i-lucide-settings' },
+  { label: 'NTP info', value: 'info', slot: 'info', icon: 'i-lucide-info' },
+  { label: 'NTP config', value: 'config', slot: 'config', icon: 'i-lucide-settings' },
 ]
 const tab = computed({
   get: () => (tabs.some((t) => t.value === route.query.tab) ? route.query.tab : 'info'),
@@ -240,7 +240,7 @@ async function save() {
                       ? ''
                       : mine
                         ? 'No sources.'
-                        : 'NTP is not running in this virtual firewall (turn it on under Configuration, then commit).'
+                        : 'NTP is not running in this virtual firewall (turn it on under NTP config, then commit).'
                   }}
                 </div>
               </template>

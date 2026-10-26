@@ -19,11 +19,15 @@ const auth = useAuthStore()
 const { store, ifaceNames, ifaceText } = useInstanceRefs()
 
 const NONE = '__none__'
-const form = reactive({ interface: NONE, target: '', family: 'auto', count: 10 })
+const form = reactive({ interface: NONE, target: '', family: 'auto', protocol: 'icmp', count: 10 })
 const ifaceItems = computed(() => [
   { label: 'None (the routing table decides)', value: NONE },
   ...ifaceNames.value.map((n) => ({ label: ifaceText(n), value: n })),
 ])
+const protocolItems = [
+  { label: 'ICMP', value: 'icmp' },
+  { label: 'UDP', value: 'udp' },
+]
 const familyItems = [
   { label: 'Auto', value: 'auto' },
   { label: 'IPv4', value: 'ipv4' },
@@ -128,6 +132,7 @@ async function start() {
         interface: form.interface === NONE ? '' : form.interface,
         target: form.target.trim(),
         family: form.family === 'auto' ? '' : form.family,
+        protocol: form.protocol,
         count: Number(form.count) || 0,
       }),
       signal: controller.signal,
@@ -272,6 +277,12 @@ const timelineNow = computed(() => (tick.value, timeline.value))
         title="For a named host or DNS name with both an IPv4 and an IPv6 address"
       >
         <USelect v-model="form.family" :items="familyItems" class="w-28" :disabled="running" />
+      </UFormField>
+      <UFormField
+        label="Protocol"
+        title="ICMP echo requests, or UDP datagrams to high ports (for routers that drop pings)"
+      >
+        <USelect v-model="form.protocol" :items="protocolItems" class="w-24" :disabled="running" />
       </UFormField>
       <UFormField label="Rounds">
         <UInput

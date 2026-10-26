@@ -8,6 +8,7 @@
 package builder
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"maps"
@@ -995,7 +996,11 @@ func buildPeer(db *gorm.DB, generation int64, only map[string]bool, firewallID u
 		// A disabled BFD interface is left out: no BFD there.
 		for i := range d.bfdIfaces {
 			if b := &d.bfdIfaces[i]; b.InstanceID == mi.ID && b.Enabled {
-				in.BFD = append(in.BFD, b.BFD())
+				bi := b.BFD()
+				bi.DetectMultiplier = cmp.Or(bi.DetectMultiplier, mi.BfdDetectMultiplier)
+				bi.ReceiveInterval = cmp.Or(bi.ReceiveInterval, mi.BfdReceiveInterval)
+				bi.TransmitInterval = cmp.Or(bi.TransmitInterval, mi.BfdTransmitInterval)
+				in.BFD = append(in.BFD, bi)
 			}
 		}
 		if in.FRRRunning() {

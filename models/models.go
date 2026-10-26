@@ -419,6 +419,12 @@ type Instance struct {
 	// IPv4 prefixes, or the outgoing interface's address when empty.
 	Nat64      bool       `json:"nat64"`
 	Nat64Pool4 StringList `json:"nat64_pool4"`
+	// BfdDetectMultiplier, BfdReceiveInterval and BfdTransmitInterval (ms)
+	// are the timers of the BFD interfaces that set none; 0: FRR's (3,
+	// 300, 300).
+	BfdDetectMultiplier int `json:"bfd_detect_multiplier"`
+	BfdReceiveInterval  int `json:"bfd_receive_interval"`
+	BfdTransmitInterval int `json:"bfd_transmit_interval"`
 	// NtpEnabled runs chrony with NtpServers as its time sources; it
 	// answers clients in NtpAllow (any when empty, hosts/prefixes by name)
 	// on the interfaces with NtpServe.

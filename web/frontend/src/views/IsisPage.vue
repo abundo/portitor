@@ -68,7 +68,7 @@ const mine = computed(() =>
               <p class="max-w-3xl text-sm text-muted">
                 The IS-IS system id, adjacencies, interfaces and routes of this virtual firewall{{
                   vrfName ? ` in VRF ${vrfName}` : ''
-                }}, as FRR has them.
+                }}.
               </p>
             </div>
             <AutoRefreshButton :auto="auto" :loading="loading" />

@@ -235,8 +235,8 @@ const { search: ifaceSearch, filtered: shownIfaces } = useSearch(
 )
 
 const tabs = [
-  { label: 'Leases', value: 'info', slot: 'info', icon: 'i-lucide-info' },
-  { label: 'DHCP server', value: 'server', slot: 'server', icon: 'i-lucide-server' },
+  { label: 'DHCP info', value: 'info', slot: 'info', icon: 'i-lucide-info' },
+  { label: 'DHCP server config', value: 'server', slot: 'server', icon: 'i-lucide-server' },
 ]
 // The tab is in the URL (?tab=server), so links can open one.
 const tab = computed({
@@ -258,7 +258,7 @@ const autoLeases = useAutoRefresh(loadLeases, { seconds: 10, active: () => tab.v
             variant="subtle"
             icon="i-lucide-triangle-alert"
             title="The DHCP server is off for this virtual firewall"
-            description="Turn it on, and DHCP on an interface, on the DHCP server tab."
+            description="Turn it on, and DHCP on an interface, on the DHCP server config tab."
           />
           <div class="card">
             <div class="mb-2 flex items-center justify-between gap-3">

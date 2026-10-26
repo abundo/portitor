@@ -43,7 +43,7 @@ const readOnly = computed(() => !auth.canEdit)
 
 const tabs = [
   { label: 'BGP info', value: 'info', slot: 'info', icon: 'i-lucide-info' },
-  { label: 'Configuration', value: 'config', slot: 'config', icon: 'i-lucide-settings' },
+  { label: 'BGP config', value: 'config', slot: 'config', icon: 'i-lucide-settings' },
 ]
 const tab = computed({
   get: () => (tabs.some((t) => t.value === route.query.tab) ? route.query.tab : 'info'),
@@ -458,7 +458,7 @@ const neighborFields = computed(() => [
             <div>
               <div class="text-lg font-semibold">BGP info</div>
               <p class="max-w-3xl text-sm text-muted">
-                The BGP sessions and the BGP table of this virtual firewall, as FRR has them.
+                The BGP sessions and the BGP table of this virtual firewall.
               </p>
             </div>
             <AutoRefreshButton :auto="auto" :loading="loading" />
@@ -480,7 +480,7 @@ const neighborFields = computed(() => [
                 ? `BGP is not running in VRF ${vrfName}.`
                 : 'BGP is not running in this virtual firewall.'
             "
-            description="Turn it on under Configuration, then commit."
+            description="Turn it on under BGP config, then commit."
           />
           <template v-if="mine">
             <UAlert
@@ -594,17 +594,12 @@ const neighborFields = computed(() => [
                 @click="saveCfg"
               />
             </FormHeader>
-            <p class="mb-4 max-w-3xl text-sm text-muted">
-              BGP runs FRR (zebra and bgpd) in this virtual firewall. It is off until enabled here;
-              changes take effect when deployed.
-              <template v-if="vrfName">
-                This is VRF {{ vrfName }}'s BGP (FRR's router bgp … vrf {{ vrfName }}): its
-                neighbours are reached through the VRF's interfaces and table, and its routes go in
-                that table.
-              </template>
+            <p v-if="vrfName" class="mb-4 max-w-3xl text-sm text-muted">
+              This is VRF {{ vrfName }}'s BGP: its neighbours are reached through the VRF's
+              interfaces and table, and its routes go in that table.
             </p>
             <fieldset :disabled="readOnly" class="max-w-3xl space-y-3">
-              <UFormField label="Enabled" :ui="inlineField" help="Starts FRR; off stops it.">
+              <UFormField label="Enabled" :ui="inlineField" help="Starts BGP; off stops it.">
                 <USwitch v-model="cfg.enabled" />
               </UFormField>
               <UFormField label="Local AS" required :ui="inlineField">
@@ -613,7 +608,7 @@ const neighborFields = computed(() => [
               <UFormField
                 label="Router id"
                 :ui="inlineField"
-                help="An IPv4 address; empty: FRR picks one."
+                help="An IPv4 address; empty: one is picked."
               >
                 <UInput v-model="cfg.router_id" class="w-48" :ui="{ base: 'font-mono' }" />
               </UFormField>
@@ -658,7 +653,7 @@ const neighborFields = computed(() => [
               <UFormField
                 label="Maximum paths"
                 :ui="inlineField"
-                help="ECMP paths installed; 0: FRR's default."
+                help="ECMP paths installed; 0: the default."
               >
                 <UInput v-model="cfg.maximum_paths" type="number" class="w-28" />
               </UFormField>
@@ -709,7 +704,7 @@ const neighborFields = computed(() => [
                 Connected: the networks of the interfaces. Static: the static routes (Network &gt;
                 Routing &gt; Static). OSPF: OSPFv2's routes into IPv4, OSPFv3's into IPv6 (Network
                 &gt; Routing &gt; OSPF). IS-IS: its routes of the IP version (Routing &gt; IS-IS). A
-                route map filters or changes what is announced.
+                route map filters or changes what is redistributed.
               </p>
               <UFormField
                 v-for="r in redistributions"

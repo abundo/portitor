@@ -24,7 +24,7 @@ FRR must be installed on the firewall (`apt install frr frr-pythontools`), as fo
 
 BFD is turned on in two places, and runs only where both say so:
 
-1. **On the interface**, under *Network → Routing → BFD*, tab *Interfaces*: *New BFD
+1. **On the interface**, under *Network → Routing → BFD*, tab *BFD config*: *New BFD
    interface*, with the interface and its timers. This is the switch: disable the row
    (or delete it) and nothing uses BFD on that interface any more.
 2. **On what uses it**, with its *BFD* switch:
@@ -49,6 +49,9 @@ The other end must run BFD too: a session only comes up when both ends send.
 | Transmit interval | 300 ms | How often this firewall sends, at the most (10-60000 ms). |
 | Detect multiplier | 3 | How many packets may be lost before the peer is down (2-255). |
 | Passive | off | Wait for the peer to start the session. |
+
+A timer left empty on an interface takes the virtual firewall's *Default timers*,
+at the top of the *BFD config* tab; left empty there too, the defaults above.
 
 Each end sends at the slower of its own transmit interval and the other's receive
 interval, so with the defaults a lost neighbour is noticed after 3 × 300 ms = 0.9 s.

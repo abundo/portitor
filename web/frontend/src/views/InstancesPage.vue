@@ -20,7 +20,7 @@ const fields = [
     label: 'Name',
     required: true,
     placeholder: 'guest',
-    hint: 'Lowercase letters and digits, max 12. Runs in network namespace fw-<name>.',
+    hint: 'Lowercase letters and digits, max 12.',
   },
   {
     key: 'firewall_id',
@@ -37,7 +37,7 @@ const fields = [
 <template>
   <CrudPage
     title="Virtual firewalls"
-    description="Virtual routers, each in its own network namespace, with its own interfaces, routing table, firewall, DNS and DHCP server. Each firewall's host is its default virtual firewall and is not listed. Connect virtual firewalls with links."
+    description="Virtual firewalls, each with its own interfaces, routing table, firewall, DNS and DHCP server. Connect virtual firewalls with links."
     :api="instances"
     shared
     :columns="columns"

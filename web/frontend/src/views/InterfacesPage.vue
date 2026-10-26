@@ -450,7 +450,7 @@ const { search: statsSearch, filtered: statsFiltered } = useSearch(statsRows)
   <NeedInstance>
     <CrudPage
       title="Interfaces"
-      description="Physical ports, VLANs, bridges, loopbacks, WireGuard, 6in4 tunnels (such as Hurricane Electric's tunnel broker) and VXLANs of this virtual firewall. Physical ports are moved into the virtual firewall's network namespace."
+      description="Physical ports, VLANs, bridges, loopbacks, WireGuard, 6in4 tunnels (such as Hurricane Electric's tunnel broker) and VXLANs of this virtual firewall."
       :api="interfaces"
       :params="{ instance_id: store.currentId }"
       :columns="columns"

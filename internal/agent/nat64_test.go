@@ -4,6 +4,8 @@
 package agent
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/abundo/portitor/internal/fwconfig"
@@ -111,4 +113,47 @@ func TestPlanNAT64Rules(t *testing.T) {
 		"ip -4 rule del pref 6400 from 192.0.0.0 iif lo lookup 6400 proto 99",
 		"ip -4 rule del pref 6402 from 192.0.0.2 iif lo lookup 6402 proto 99",
 	)
+}
+
+func TestNAT64Instance(t *testing.T) {
+	in := &fwconfig.Instance{Name: "main", NAT64: &fwconfig.NAT64{Prefix: fwconfig.NAT64WellKnownPrefix, Interfaces: []string{"eth1"}}}
+	jool := func(args ...string) ([]byte, error) {
+		switch strings.Join(args, " ") {
+		case "instance status":
+			return []byte("Running\n"), nil
+		case "session display --tcp --numeric --csv --no-headers":
+			return []byte("TCP,2001:db8::5,40000,64:ff9b::c000:201,443,192.0.0.1,61001,192.0.2.1,443,01:59:58.123,ESTABLISHED\n"), nil
+		case "session display --udp --numeric --csv --no-headers":
+			return []byte("UDP,2001:db8::5,5353,64:ff9b::808:808,53,192.0.0.1,61002,8.8.8.8,53,00:04:59.000\n"), nil
+		case "session display --icmp --numeric --csv --no-headers":
+			return nil, nil
+		case "stats display --csv --explain":
+			return []byte("JSTAT_RECEIVED6,12,\"Packets received on IPv6\"\nJSTAT_SUCCESS,10,Translated, all of them\n"), nil
+		}
+		return nil, fmt.Errorf("unexpected jool %v", args)
+	}
+	ni := nat64Instance(in, jool)
+	if ni.Error != "" {
+		t.Fatal(ni.Error)
+	}
+	if len(ni.Pool4) != 1 || ni.Pool4[0].Interface != "eth1" || ni.Pool4[0].Address != "192.0.0.0" {
+		t.Errorf("pool4 %+v", ni.Pool4)
+	}
+	if len(ni.Sessions) != 2 || ni.SessionCounts["tcp"] != 1 || ni.SessionCounts["udp"] != 1 || ni.SessionCounts["icmp"] != 0 {
+		t.Fatalf("sessions %+v, counts %v", ni.Sessions, ni.SessionCounts)
+	}
+	if s := ni.Sessions[0]; s.Protocol != "tcp" || s.Source6 != "2001:db8::5" || s.Dest4 != "192.0.2.1" || s.DestPort4 != "443" || s.State != "ESTABLISHED" {
+		t.Errorf("tcp session %+v", s)
+	}
+	if s := ni.Sessions[1]; s.Protocol != "udp" || s.State != "" || s.Expires != "00:04:59.000" {
+		t.Errorf("udp session %+v", s)
+	}
+	if len(ni.Stats) != 2 || ni.Stats[0].Value != 12 || ni.Stats[0].Explanation != "Packets received on IPv6" || ni.Stats[1].Explanation != "Translated, all of them" {
+		t.Errorf("stats %+v", ni.Stats)
+	}
+
+	stopped := nat64Instance(in, func(...string) ([]byte, error) { return []byte("jool: no such instance"), fmt.Errorf("exit status 1") })
+	if stopped.Error != "jool: no such instance" || len(stopped.Pool4) != 1 {
+		t.Errorf("not running: %+v", stopped)
+	}
 }

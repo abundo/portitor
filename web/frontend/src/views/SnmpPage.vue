@@ -112,7 +112,12 @@ const userFields = [
   { key: 'enabled', label: 'Enabled', type: 'switch' },
   { key: 'description', label: 'Description' },
   { key: 'auth_protocol', label: 'Authentication', type: 'select', items: authItems },
-  { key: 'auth_password', label: 'Authentication password', type: 'custom' },
+  {
+    key: 'auth_password',
+    label: 'Authentication password',
+    type: 'custom',
+    hint: '8 to 64 characters.',
+  },
   {
     key: 'priv_protocol',
     label: 'Privacy',
@@ -124,6 +129,7 @@ const userFields = [
     key: 'priv_password',
     label: 'Privacy password',
     type: 'custom',
+    hint: '8 to 64 characters.',
     show: (f) => !!f.priv_protocol,
   },
 ]
@@ -150,7 +156,7 @@ const userDefaults = {
             An SNMP agent (net-snmp) lets management platforms monitor this virtual firewall:
             interfaces and their traffic, addresses and routes, system load, memory and disks. It is
             read-only. On a virtual firewall other than the default it sees that virtual firewall's
-            own interfaces. Changes take effect when committed.
+            own interfaces.
           </p>
           <fieldset :disabled="readOnly" class="space-y-3">
             <UFormField label="Enabled" :ui="inlineField">
@@ -189,8 +195,8 @@ const userDefaults = {
             Answering requests
           </h2>
           <p class="mb-4 text-sm text-muted">
-            The firewall answers SNMP requests (UDP port 161) on the interfaces turned on here, and
-            of those only from the allowed clients.
+            The firewall answers SNMP requests (UDP port 161) on the interfaces enabled here, and of
+            those only from the allowed clients.
           </p>
           <!-- Outside the form's fieldset, so a viewer can search too. -->
           <div class="mb-2">
@@ -243,7 +249,7 @@ const userDefaults = {
 
       <CrudPage
         title="SNMPv3 users"
-        description="Read-only users with their own passwords: authenticated (SHA) and, with privacy, encrypted (AES). Passwords are 8 to 64 characters."
+        description="Read-only users with their own passwords: authenticated (SHA) and, with privacy, encrypted (AES)."
         :api="snmpUsers"
         :params="{ instance_id: store.currentId }"
         :columns="userColumns"

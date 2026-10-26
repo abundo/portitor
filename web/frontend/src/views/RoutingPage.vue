@@ -104,7 +104,7 @@ const columns = [
     <div class="card">
       <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div>
-          <div class="text-lg font-semibold">Routing</div>
+          <div class="text-lg font-semibold">Tables</div>
           <p class="max-w-3xl text-sm text-muted">
             The IPv4 and IPv6 routes of this virtual firewall in all its routing tables (main, local
             and any other) as the kernel has them. Protocol is who added the route: connected

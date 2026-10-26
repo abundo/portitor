@@ -60,7 +60,7 @@ func TestVRRP(t *testing.T) {
 	if r.Interface != "lan" {
 		t.Errorf("not rewritten: %+v", r)
 	}
-	if rec := env.do("DELETE", "/api/interfaces/"+itoa(eth), nil); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "VRRP virtual router 10") {
+	if rec := env.do("DELETE", "/api/interfaces/"+itoa(eth), nil); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "VRRP 10") {
 		t.Errorf("delete interface: %d %s", rec.Code, rec.Body)
 	}
 

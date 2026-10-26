@@ -27,10 +27,15 @@ func TestTraceArgs(t *testing.T) {
 		{Target: "-x"},
 		{Target: "fe80::1%eth0"},
 		{Target: "192.0.2.1", Interface: "nope"},
+		{Target: "192.0.2.1", Protocol: "tcp"},
 	} {
 		if _, err := traceArgs(in, &bad); err == nil {
 			t.Errorf("%+v accepted", bad)
 		}
+	}
+	udp := agentapi.TraceRequest{Target: "192.0.2.1", Protocol: "udp"}
+	if argv, err := traceArgs(in, &udp); err != nil || !slices.Contains(argv, "--udp") {
+		t.Errorf("udp: %q, %v", argv, err)
 	}
 	big := agentapi.TraceRequest{Target: "192.0.2.1", Count: 1 << 20}
 	if _, err := traceArgs(in, &big); err != nil || big.Count != agentapi.TraceMaxCount {

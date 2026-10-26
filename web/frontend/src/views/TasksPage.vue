@@ -105,7 +105,7 @@ async function runNow(row) {
   <CrudPage
     title="Scheduled tasks"
     noun="task"
-    description="Jobs the firewall runs on a cron schedule, in its own time zone: download an IP list again, or run a shell command. Tasks take effect when deployed; Next and Last run are what the firewall reports."
+    description="Jobs the firewall runs on a cron schedule, in the firewall's local time zone (set at install): download an IP list again, or run a shell command. Tasks take effect when deployed; Next and Last run are what the firewall reports."
     :api="tasks"
     shared
     :columns="columns"

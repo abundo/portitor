@@ -210,6 +210,12 @@ func (c *Client) NTP(ctx context.Context) (*agentapi.NTPResponse, error) {
 	return &n, c.do(ctx, http.MethodGet, "/v1/ntp", nil, &n)
 }
 
+// NAT64 returns the instances' NAT64 sessions and counters.
+func (c *Client) NAT64(ctx context.Context) (*agentapi.NAT64Response, error) {
+	var n agentapi.NAT64Response
+	return &n, c.do(ctx, http.MethodGet, "/v1/nat64", nil, &n)
+}
+
 // OpenVPN returns the OpenVPN servers and their clients.
 func (c *Client) OpenVPN(ctx context.Context) (*agentapi.OpenVPNResponse, error) {
 	var o agentapi.OpenVPNResponse
