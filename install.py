@@ -173,6 +173,8 @@ AGENT_PACKAGES = {
     # Connection sync of HA pairs; the default virtual firewall's runs under
     # conntrackd.service.
     "conntrackd": ("conntrackd.service",),
+    # Syslog servers: rsyslog sends them the journal, and runs only for that.
+    "rsyslog": ("rsyslog.service",),
     # OpenVPN; the default virtual firewall's runs under the template
     # openvpn-server@, which starts nothing by itself.
     "openvpn": (),

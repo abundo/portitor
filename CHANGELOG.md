@@ -8,7 +8,15 @@ here (`dev/release-notes.sh`); the full list is `git log <previous tag>..<tag>`.
 
 ## Unreleased
 
+### New
+
+- **Syslog** (Services → Syslog): the firewall's journal, followed live, and remote
+  syslog servers (UDP or TCP, RFC 3164 or 5424, a minimum severity) that rsyslog
+  sends it to.
+
 ### Upgrading
+
+- An update installs rsyslog, masked until the firewall has syslog servers.
 
 - portitor-web's database moves to the firewall: portitor-config there owns it,
   and portitor-web becomes the portal to it at `/fw/<host name>/`. Everyone logs in

@@ -201,6 +201,7 @@ var tenantDenied = map[string]bool{
 	"/api/settings":              true,
 	"/api/system":                true,
 	"/api/agent/logs":            true,
+	"/api/agent/syslog":          true,
 	"/api/firewalls":             true,
 	"/api/firewalls/:id":         true,
 	"/api/firewalls/:id/witness": true,

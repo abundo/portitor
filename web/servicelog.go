@@ -4,6 +4,7 @@
 package web
 
 import (
+	"io"
 	"log/slog"
 	"net/http"
 	"regexp"
@@ -51,6 +52,13 @@ func (s *Server) handleAgentServiceLog(c *echo.Context) error {
 	defer stream.Close()
 
 	slog.Info("service log started", "user", currentUser(c).Username, "instance", body.Instance, "unit", body.Unit)
+	streamText(c, stream)
+	return nil
+}
+
+// streamText passes a text stream from the agent to the browser as it
+// comes, until either end closes it.
+func streamText(c *echo.Context, stream io.Reader) {
 	w := c.Response()
 	rc := http.NewResponseController(w)
 	_ = rc.SetWriteDeadline(time.Time{}) // the server's timeout is for requests
@@ -70,5 +78,4 @@ func (s *Server) handleAgentServiceLog(c *echo.Context) error {
 			break
 		}
 	}
-	return nil
 }

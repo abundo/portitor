@@ -984,6 +984,40 @@ const (
 	ServiceLogMaxSessions = 8
 )
 
+// JournalRequest follows the host's whole journal (POST /v1/journal), as
+// ServiceLogRequest follows one service's: journalctl's text, starting with
+// the last JournalLines entries, until the client disconnects. It shares
+// ServiceLogMaxSessions with the service logs.
+type JournalRequest struct {
+	// Lines is how many earlier entries it starts with: JournalLines when
+	// 0, at most JournalMaxLines.
+	Lines int `json:"lines,omitempty"`
+}
+
+const (
+	JournalLines    = 500
+	JournalMaxLines = 10000
+)
+
+// SyslogStatus is the host's syslog (GET /v1/syslog): rsyslog, which sends
+// the journal to the default instance's syslog servers (none when it has
+// none), and the journal it reads.
+type SyslogStatus struct {
+	Servers []fwconfig.SyslogServer `json:"servers"`
+	// Unit is rsyslog's, State its ActiveState ("active", "inactive",
+	// "failed"...), Since when it entered it.
+	Unit  string     `json:"unit"`
+	State string     `json:"state"`
+	Since *time.Time `json:"since,omitempty"`
+	// JournalBytes is the journal files' size; JournalPersistent tells
+	// whether the journal is kept on disk (/var/log/journal), over
+	// reboots, or only in /run.
+	JournalBytes      int64 `json:"journal_bytes"`
+	JournalPersistent bool  `json:"journal_persistent"`
+	// JournalSince is the oldest entry's time.
+	JournalSince *time.Time `json:"journal_since,omitempty"`
+}
+
 // ConnectionsRequest streams an instance's connection tracking table
 // (POST /v1/connections): the answer is a ConnectionsSnapshot per line,
 // one every IntervalMs at most, until the client disconnects. An error

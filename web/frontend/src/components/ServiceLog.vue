@@ -3,7 +3,9 @@
 
 <script setup>
 // ServiceLog: a service's journal (journalctl --follow on the agent) as
-// it comes, with a filter over the lines. It follows while mounted.
+// it comes, with a filter over the lines. It follows while mounted. With
+// endpoint and request it follows another stream of journal lines (the
+// firewall's whole journal).
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import SearchInput from '@/components/SearchInput.vue'
 import { apiURL } from '@/utils/base'
@@ -11,6 +13,9 @@ import { apiURL } from '@/utils/base'
 const props = defineProps({
   instance: { type: String, default: '' },
   unit: { type: String, default: '' },
+  endpoint: { type: String, default: '/agent/servicelog' },
+  // request is the body posted; default: { instance, unit }.
+  request: { type: Object, default: null },
   // active is false while the log is in a hidden tab, which can't scroll.
   active: { type: Boolean, default: true },
 })
@@ -44,11 +49,11 @@ async function start() {
   const ctl = new AbortController()
   controller = ctl
   try {
-    const res = await fetch(apiURL('/agent/servicelog'), {
+    const res = await fetch(apiURL(props.endpoint), {
       method: 'POST',
       credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ instance: props.instance, unit: props.unit }),
+      body: JSON.stringify(props.request ?? { instance: props.instance, unit: props.unit }),
       signal: ctl.signal,
     })
     if (!res.ok) {

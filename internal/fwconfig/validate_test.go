@@ -408,6 +408,17 @@ func TestValidateCatchesProblems(t *testing.T) {
 		{"ntp duplicate", func(d *Document) { d.Instances[0].NTP.Servers[1].Address = "time.cloudflare.com" }, "ntp: duplicate server"},
 		{"ntp interface", func(d *Document) { d.Instances[0].NTP.Interfaces = []string{"eth9"} }, `ntp: unknown interface "eth9"`},
 		{"ntp allow", func(d *Document) { d.Instances[0].NTP.Allow = []string{"all"} }, "ntp: invalid allow prefix"},
+		{"syslog no servers", func(d *Document) { d.Instances[0].Syslog.Servers = nil }, "syslog: no servers"},
+		{"syslog not default", func(d *Document) { d.Instances[1].Syslog = d.Instances[0].Syslog }, "only the default instance"},
+		{"syslog address", func(d *Document) { d.Instances[0].Syslog.Servers[0].Address = "logs.example.com" }, "IPv4 or IPv6 address"},
+		{"syslog port", func(d *Document) { d.Instances[0].Syslog.Servers[0].Port = 0 }, "port must be 1 to 65535"},
+		{"syslog protocol", func(d *Document) { d.Instances[0].Syslog.Servers[0].Protocol = "tls" }, "protocol must be one of"},
+		{"syslog format", func(d *Document) { d.Instances[0].Syslog.Servers[0].Format = "json" }, "format must be one of"},
+		{"syslog severity", func(d *Document) { d.Instances[0].Syslog.Servers[0].Severity = "info\n*.* /x" }, "severity must be one of"},
+		{"syslog duplicate", func(d *Document) {
+			d.Instances[0].Syslog.Servers[1] = d.Instances[0].Syslog.Servers[0]
+			d.Instances[0].Syslog.Servers[1].Severity = "err"
+		}, "duplicate server"},
 		{"snmp nothing", func(d *Document) { d.Instances[0].SNMP.Community, d.Instances[0].SNMP.Users = "", nil }, "snmp: no community and no users"},
 		{"snmp community injection", func(d *Document) { d.Instances[0].SNMP.Community = "x\nrwcommunity y" }, "snmp: the community"},
 		{"snmp community space", func(d *Document) { d.Instances[0].SNMP.Community = "a b" }, "snmp: the community"},

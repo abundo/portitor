@@ -71,6 +71,7 @@ type data struct {
 	bfdIfaces      []models.BfdInterface
 	vrfs           []models.Vrf
 	snmpUsers      []models.SnmpUser
+	syslogServers  []models.SyslogServer
 	proxyPolicies  []models.AcmeProxyPolicy
 	ldapServers    []models.LdapServer
 	// The users, role members and the directory's group mappings, for
@@ -129,6 +130,7 @@ func load(db *gorm.DB) (*data, error) {
 		{&d.bfdIfaces, "interface"},
 		{&d.vrfs, "name"},
 		{&d.snmpUsers, "name"},
+		{&d.syslogServers, "address, port, protocol"},
 		{&d.proxyPolicies, "name"},
 		{&d.ldapServers, "position, id"},
 		{&d.roleMappings, "id"},
@@ -913,6 +915,17 @@ func buildPeer(db *gorm.DB, generation int64, only map[string]bool, firewallID u
 			for i := range d.snmpUsers {
 				if u := &d.snmpUsers[i]; u.InstanceID == mi.ID && u.Enabled {
 					in.SNMP.Users = append(in.SNMP.Users, u.User())
+				}
+			}
+		}
+
+		if mi.IsDefault {
+			for i := range d.syslogServers {
+				if s := &d.syslogServers[i]; s.InstanceID == mi.ID && s.Enabled {
+					if in.Syslog == nil {
+						in.Syslog = &fwconfig.Syslog{}
+					}
+					in.Syslog.Servers = append(in.Syslog.Servers, s.Server())
 				}
 			}
 		}

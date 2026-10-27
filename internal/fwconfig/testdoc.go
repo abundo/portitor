@@ -159,6 +159,10 @@ func SampleDocument() Document {
 						{Name: "ro", AuthProtocol: "SHA", AuthPassword: "authpass2"},
 					},
 				},
+				Syslog: &Syslog{Servers: []SyslogServer{
+					{Address: "192.0.2.10", Port: SyslogPort, Protocol: "udp", Format: "rfc3164", Severity: "info"},
+					{Address: "2001:db8::10", Port: 6514, Protocol: "tcp", Format: "rfc5424", Severity: "warning"},
+				}},
 				Certificates: []Certificate{{
 					Name: "www", Domains: []string{"www.example.com", "example.com"}, Email: "admin@example.com",
 					CA: "letsencrypt", KeyType: "ec256", Challenge: ChallengeHTTP01, Interface: "eth0",

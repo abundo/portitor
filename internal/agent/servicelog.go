@@ -20,13 +20,12 @@ import (
 	"github.com/abundo/portitor/internal/fwconfig"
 )
 
-// serviceLogs counts the followed service logs
+// serviceLogs counts the followed service logs and journals
 // (agentapi.ServiceLogMaxSessions).
 var serviceLogs atomic.Int32
 
 // handleServiceLog streams journalctl --follow of one of the instance's
-// service units as text. journalctl only reads, so it runs outside the
-// Runner, as the DNS query log's does. The client disconnecting stops it.
+// service units as text.
 func (a *Agent) handleServiceLog(w http.ResponseWriter, r *http.Request) {
 	var req agentapi.ServiceLogRequest
 	if !decode(w, r, &req) {
@@ -47,17 +46,25 @@ func (a *Agent) handleServiceLog(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, fmt.Errorf("instance %s has no service %q", in.Name, req.Unit))
 		return
 	}
+	a.followJournal(w, r, agentapi.ServiceLogLines, "service log", "--unit="+req.Unit)
+}
+
+// followJournal streams journalctl --follow as text, starting with the
+// last lines entries, of the units in args (none: the whole journal), and
+// logs it as what. journalctl only reads, so it runs outside the Runner,
+// as the DNS query log's does. The client disconnecting stops it.
+func (a *Agent) followJournal(w http.ResponseWriter, r *http.Request, lines int, what string, args ...string) {
 	if serviceLogs.Add(1) > agentapi.ServiceLogMaxSessions {
 		serviceLogs.Add(-1)
-		writeError(w, http.StatusTooManyRequests, fmt.Errorf("%d service logs are already followed", agentapi.ServiceLogMaxSessions))
+		writeError(w, http.StatusTooManyRequests, fmt.Errorf("%d logs are already followed", agentapi.ServiceLogMaxSessions))
 		return
 	}
 	defer serviceLogs.Add(-1)
 
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "journalctl", "--follow", "--no-pager", "--output=short-iso",
-		"--lines="+strconv.Itoa(agentapi.ServiceLogLines), "--unit="+req.Unit)
+	cmd := exec.CommandContext(ctx, "journalctl", append([]string{"--follow", "--no-pager", "--output=short-iso",
+		"--lines=" + strconv.Itoa(lines)}, args...)...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM) }
 	cmd.WaitDelay = 5 * time.Second
@@ -70,7 +77,7 @@ func (a *Agent) handleServiceLog(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, fmt.Errorf("start journalctl: %w", err))
 		return
 	}
-	slog.Info("service log started", "instance", req.Instance, "unit", req.Unit, "remote", r.RemoteAddr)
+	slog.Info(what+" started", "args", args, "remote", r.RemoteAddr)
 
 	rc := http.NewResponseController(w)
 	_ = rc.SetWriteDeadline(time.Time{}) // the server's timeout is for requests
@@ -91,7 +98,7 @@ func (a *Agent) handleServiceLog(w http.ResponseWriter, r *http.Request) {
 	}
 	cancel()
 	if err := cmd.Wait(); err != nil && !errors.Is(ctx.Err(), context.Canceled) {
-		slog.Warn("service log", "unit", req.Unit, "err", err)
+		slog.Warn(what, "args", args, "err", err)
 	}
-	slog.Info("service log ended", "instance", req.Instance, "unit", req.Unit)
+	slog.Info(what+" ended", "args", args)
 }

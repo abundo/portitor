@@ -41,6 +41,8 @@ export const bfdInterfaces = crud('/bfd/interfaces')
 // VRFs of an instance (Routing → VRF).
 export const vrfs = crud('/vrfs')
 export const snmpUsers = crud('/snmp/users')
+// The remote syslog servers of a firewall's host (Services → Syslog).
+export const syslogServers = crud('/syslog/servers')
 export const directoryServers = crud('/directory/servers')
 export const directoryMappings = crud('/directory/mappings')
 // The ACME proxy's policies (Services → ACME proxy).
@@ -197,6 +199,9 @@ export const api = {
   agentVrrp: () => http.get('/agent/vrrp').then((r) => r.data),
   agentBfd: () => http.get('/agent/bfd').then((r) => r.data),
   agentNtp: () => http.get('/agent/ntp').then((r) => r.data),
+  // rsyslog and the journal of a firewall (firewall_id).
+  agentSyslog: (firewallId) =>
+    http.get('/agent/syslog', { params: { firewall_id: firewallId } }).then((r) => r.data),
   agentNat64: () => http.get('/agent/nat64').then((r) => r.data),
   agentOpenvpn: () => http.get('/agent/openvpn').then((r) => r.data),
   reorderDirectoryServers: (ids) => http.post('/directory/servers/reorder', { ids }),

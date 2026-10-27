@@ -54,6 +54,9 @@ type Paths struct {
 	OpenVPNDir string `yaml:"openvpn_dir" json:"openvpn_dir"`
 	// ConntrackdConf is the default instance's conntrackd.conf (HA pairs).
 	ConntrackdConf string `yaml:"conntrackd_conf" json:"conntrackd_conf"`
+	// RsyslogConf is rsyslog's config: the default instance's syslog
+	// servers (fwconfig.Syslog).
+	RsyslogConf string `yaml:"rsyslog_conf" json:"rsyslog_conf"`
 	// FRRDir is FRR's config directory: the default instance's frr.conf
 	// and daemons are in it, and a virtual firewall's unit mounts the
 	// instance's over FRRDir/<instance> (FRR's pathspace).
@@ -84,6 +87,7 @@ func DefaultPaths() Paths {
 		SnmpdConf:      "/etc/snmp/snmpd.conf",
 		OpenVPNDir:     "/etc/openvpn/server",
 		ConntrackdConf: "/etc/conntrackd/conntrackd.conf",
+		RsyslogConf:    "/etc/rsyslog.conf",
 		FRRDir:         "/etc/frr",
 		FRRRunDir:      "/run/frr",
 		FRRStateDir:    "/var/lib/frr",
@@ -118,6 +122,9 @@ type InstanceFiles struct {
 	ChronySocket string
 	Snmpd        string
 	Conntrackd   string
+	// Rsyslog is the default instance's alone (fwconfig.Syslog): empty
+	// for the others.
+	Rsyslog string
 	// OpenVPNUDP and OpenVPNTCP are the OpenVPN processes' configs;
 	// OpenVPNRun holds their management sockets (OpenVPNSocket), which
 	// the agent alone opens.
@@ -181,6 +188,7 @@ func (p Paths) Files(in *fwconfig.Instance) InstanceFiles {
 			Chrony:       p.ChronyConf,
 			Snmpd:        p.SnmpdConf,
 			Conntrackd:   p.ConntrackdConf,
+			Rsyslog:      p.RsyslogConf,
 			OpenVPNUDP:   filepath.Join(p.OpenVPNDir, "portitor-udp.conf"),
 			OpenVPNTCP:   filepath.Join(p.OpenVPNDir, "portitor-tcp.conf"),
 			OpenVPNRun:   filepath.Join(p.RunDir, "openvpn", in.Name),
@@ -319,6 +327,9 @@ type Units struct {
 	DefaultConntrackd string `yaml:"default_conntrackd" json:"default_conntrackd"`
 	DefaultOpenVPNUDP string `yaml:"default_openvpn_udp" json:"default_openvpn_udp"`
 	DefaultOpenVPNTCP string `yaml:"default_openvpn_tcp" json:"default_openvpn_tcp"`
+	// DefaultRsyslog runs the default instance's syslog servers; no other
+	// instance has them.
+	DefaultRsyslog string `yaml:"default_rsyslog" json:"default_rsyslog"`
 }
 
 func DefaultUnits() Units {
@@ -346,6 +357,7 @@ func DefaultUnits() Units {
 		// The distribution's template, with OpenVPNDir's configs.
 		DefaultOpenVPNUDP: "openvpn-server@portitor-udp.service",
 		DefaultOpenVPNTCP: "openvpn-server@portitor-tcp.service",
+		DefaultRsyslog:    "rsyslog.service",
 	}
 }
 
@@ -368,6 +380,9 @@ func (u Units) Snmpd(in *fwconfig.Instance) string { return u.pick(in, u.Default
 func (u Units) Conntrackd(in *fwconfig.Instance) string {
 	return u.pick(in, u.DefaultConntrackd, u.ConntrackdFmt)
 }
+
+// Rsyslog is the unit of the default instance's syslog servers.
+func (u Units) Rsyslog() string { return u.DefaultRsyslog }
 
 // OpenVPN is the unit of the instance's OpenVPN process for proto
 // (fwconfig.OpenVPNUDP or OpenVPNTCP).
@@ -478,6 +493,9 @@ func Render(doc fwconfig.Document, opt Options) (*Bundle, error) {
 		}
 		if in.ConntrackSync != nil {
 			add(f.Conntrackd, ConntrackdConf(in), 0o644, false)
+		}
+		if in.Syslog != nil && in.Default {
+			add(f.Rsyslog, RsyslogConf(in), 0o644, false)
 		}
 		for _, ifc := range in.OpenVPNDevices() {
 			add(f.OpenVPNConf(ifc.OpenVPN.Proto), OpenVPNConf(in, ifc, opt.Paths), 0o600, true)

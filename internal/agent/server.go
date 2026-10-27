@@ -112,6 +112,9 @@ func (a *Agent) routes() *http.ServeMux {
 	mux.HandleFunc("GET /v1/ntp", func(w http.ResponseWriter, r *http.Request) {
 		writeJSONResponse(w, http.StatusOK, a.NTP(r.Context()))
 	})
+	mux.HandleFunc("GET /v1/syslog", func(w http.ResponseWriter, r *http.Request) {
+		writeJSONResponse(w, http.StatusOK, a.Syslog(r.Context()))
+	})
 	mux.HandleFunc("GET /v1/nat64", func(w http.ResponseWriter, r *http.Request) {
 		writeJSONResponse(w, http.StatusOK, a.NAT64(r.Context()))
 	})
@@ -305,6 +308,7 @@ func (a *Agent) routes() *http.ServeMux {
 	mux.HandleFunc("POST /v1/probe", a.handleProbe)
 	mux.HandleFunc("POST /v1/iperf", a.handleIperf)
 	mux.HandleFunc("POST /v1/servicelog", a.handleServiceLog)
+	mux.HandleFunc("POST /v1/journal", a.handleJournal)
 	mux.HandleFunc("POST /v1/connections", a.handleConnections)
 	mux.HandleFunc("POST /v1/connections/flush", a.handleConnectionsFlush)
 	return mux

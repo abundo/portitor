@@ -678,7 +678,7 @@ func (a *Agent) placeLinks(ctx context.Context, doc fwconfig.Document) error {
 }
 
 // applyServices runs dnsmgr2 and starts/stops/reloads BIND, Kea, radvd,
-// chrony, snmpd and FRR for an instance. The default instance's run under the distribution's own
+// chrony, snmpd, rsyslog and FRR for an instance. The default instance's run under the distribution's own
 // units, from the standard files (render.Paths.Files).
 func (a *Agent) applyServices(ctx context.Context, in *fwconfig.Instance, b *render.Bundle, changed map[string]bool) error {
 	files := a.cfg.Paths.Files(in)
@@ -810,6 +810,22 @@ func (a *Agent) applyServices(ctx context.Context, in *fwconfig.Instance, b *ren
 				a.started = map[string]bool{}
 			}
 			a.started[svc.unit] = true
+		}
+	}
+	if in.Default {
+		// The syslog servers: rsyslog reads its config only when it
+		// starts.
+		if in.Syslog == nil {
+			a.disableService(ctx, in, a.cfg.Units.Rsyslog(), files.Rsyslog)
+		} else {
+			if err := a.enable(ctx, in, a.cfg.Units.Rsyslog()); err != nil {
+				return err
+			}
+			if changed[files.Rsyslog] {
+				if err := a.do(ctx, command{Name: "systemctl", Args: []string{"restart", a.cfg.Units.Rsyslog()}}); err != nil {
+					return err
+				}
+			}
 		}
 	}
 	if in.SNMP == nil {

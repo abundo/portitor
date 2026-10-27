@@ -394,6 +394,9 @@ func (a *Agent) serviceUnits(in *fwconfig.Instance) []string {
 			units = append(units, a.cfg.Units.OpenVPN(in, proto))
 		}
 	}
+	if in.Syslog != nil && in.Default {
+		units = append(units, a.cfg.Units.Rsyslog())
+	}
 	if in.FRRRunning() {
 		units = append(units, a.cfg.Units.FRR(in))
 	}

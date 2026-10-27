@@ -90,6 +90,8 @@ const sections = computed(() => [
       { label: 'DNS', icon: 'i-lucide-globe', to: '/dns' },
       { label: 'NTP', icon: 'i-lucide-clock', to: '/ntp' },
       { label: 'SNMP', icon: 'i-lucide-activity', to: '/snmp' },
+      // The firewall's journal: global admins and viewers only.
+      ...(auth.readsAll ? [{ label: 'Syslog', icon: 'i-lucide-scroll-text', to: '/syslog' }] : []),
       { label: 'Scheduled tasks', icon: 'i-lucide-calendar-clock', to: '/scheduled-tasks' },
     ],
   },

@@ -71,6 +71,9 @@ type Instance struct {
 	// SNMP, when set, runs snmpd: read-only SNMP for management
 	// platforms.
 	SNMP *SNMP `json:"snmp,omitempty"`
+	// Syslog, when set, sends the host's journal to remote syslog
+	// servers (rsyslog); the default instance's alone.
+	Syslog *Syslog `json:"syslog,omitempty"`
 	// DynDNS clients keep records on a nameserver in step with the
 	// addresses of this instance's interfaces.
 	DynDNS []DynDNS `json:"dyndns,omitempty"`

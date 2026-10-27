@@ -132,6 +132,7 @@ func (c *Config) applyDefaults() {
 		{&c.Paths.SnmpdConf, def.SnmpdConf},
 		{&c.Paths.OpenVPNDir, def.OpenVPNDir},
 		{&c.Paths.ConntrackdConf, def.ConntrackdConf},
+		{&c.Paths.RsyslogConf, def.RsyslogConf},
 		{&c.Paths.FRRDir, def.FRRDir},
 		{&c.Paths.FRRRunDir, def.FRRRunDir},
 		{&c.Paths.FRRStateDir, def.FRRStateDir},
@@ -145,6 +146,7 @@ func (c *Config) applyDefaults() {
 		{&c.Units.DefaultOpenVPNUDP, du.DefaultOpenVPNUDP},
 		{&c.Units.DefaultOpenVPNTCP, du.DefaultOpenVPNTCP},
 		{&c.Units.DefaultConntrackd, du.DefaultConntrackd},
+		{&c.Units.DefaultRsyslog, du.DefaultRsyslog},
 	} {
 		if *p.v == "" {
 			*p.v = p.d

@@ -1161,6 +1161,45 @@ func TestSnmpdConf(t *testing.T) {
 	}
 }
 
+func TestRsyslogConf(t *testing.T) {
+	doc := fwconfig.SampleDocument()
+	in := &doc.Instances[0]
+	conf := RsyslogConf(in)
+	for _, want := range []string{
+		"module(load=\"imjournal\" StateFile=\"imjournal.state\" IgnorePreviousMessages=\"on\")\n",
+		"if $syslogseverity <= 6 then {\n\taction(type=\"omfwd\" target=\"192.0.2.10\" port=\"514\" protocol=\"udp\" template=\"RSYSLOG_TraditionalForwardFormat\"\n",
+		"if $syslogseverity <= 4 then {\n\taction(type=\"omfwd\" target=\"2001:db8::10\" port=\"6514\" protocol=\"tcp\" template=\"RSYSLOG_SyslogProtocol23Format\" TCP_Framing=\"octet-counted\"\n",
+	} {
+		if !strings.Contains(conf, want) {
+			t.Errorf("missing %q in\n%s", want, conf)
+		}
+	}
+	nft := Nftables(in, nil, DefaultPaths())
+	for _, want := range []string{
+		`ip daddr 192.0.2.10 udp dport 514 accept comment "auto: syslog"`,
+		`ip6 daddr 2001:db8::10 tcp dport 6514 accept comment "auto: syslog"`,
+	} {
+		if !strings.Contains(nft, want) {
+			t.Errorf("missing %q in\n%s", want, nft)
+		}
+	}
+
+	b, err := Render(doc, Options{Paths: DefaultPaths()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.File("/etc/rsyslog.conf") == nil {
+		t.Error("no /etc/rsyslog.conf")
+	}
+	doc.Instances[0].Syslog = nil
+	if b, err = Render(doc, Options{Paths: DefaultPaths()}); err != nil {
+		t.Fatal(err)
+	}
+	if b.File("/etc/rsyslog.conf") != nil {
+		t.Error("/etc/rsyslog.conf without syslog servers")
+	}
+}
+
 // A rule's VRF members are matched by meta sdifname in input and forward,
 // where the VRF device is the input interface: a rule naming members and
 // other interfaces is two.

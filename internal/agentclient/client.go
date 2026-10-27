@@ -204,6 +204,12 @@ func (c *Client) VRRP(ctx context.Context) (*agentapi.VRRPResponse, error) {
 	return &v, c.do(ctx, http.MethodGet, "/v1/vrrp", nil, &v)
 }
 
+// Syslog returns rsyslog's state, its syslog servers and the journal's.
+func (c *Client) Syslog(ctx context.Context) (*agentapi.SyslogStatus, error) {
+	var out agentapi.SyslogStatus
+	return &out, c.do(ctx, http.MethodGet, "/v1/syslog", nil, &out)
+}
+
 // NTP returns the instances' NTP sources and statistics.
 func (c *Client) NTP(ctx context.Context) (*agentapi.NTPResponse, error) {
 	var n agentapi.NTPResponse
@@ -418,6 +424,12 @@ func (c *Client) Iperf(ctx context.Context, req agentapi.IperfRequest) (io.ReadC
 // cancelling ctx) stops journalctl on the agent.
 func (c *Client) ServiceLog(ctx context.Context, req agentapi.ServiceLogRequest) (io.ReadCloser, error) {
 	return c.stream(ctx, "/v1/servicelog", req)
+}
+
+// Journal follows the host's whole journal as text; closing it (or
+// cancelling ctx) stops journalctl on the agent.
+func (c *Client) Journal(ctx context.Context, req agentapi.JournalRequest) (io.ReadCloser, error) {
+	return c.stream(ctx, "/v1/journal", req)
 }
 
 // Connections streams an instance's conntrack table as

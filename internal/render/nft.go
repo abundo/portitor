@@ -251,6 +251,10 @@ func Nftables(in *fwconfig.Instance, lockout *AntiLockout, paths Paths) string {
 			}
 		}
 	}
+	// What rsyslog sends to the syslog servers.
+	for _, r := range syslogOutputRules(in) {
+		fmt.Fprintf(b, "\t\t%s\n", r)
+	}
 	writeRules(b, in, fwconfig.ChainOutput)
 	writePolicyCount(b, in, fwconfig.ChainOutput)
 	b.WriteString("\t}\n\n")

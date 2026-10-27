@@ -1212,6 +1212,7 @@ func All() []any {
 		&RoutePrefixList{}, &RouteAsPathList{}, &RouteCommunityList{}, &RouteMap{}, &BgpConfig{}, &BgpPeerGroup{}, &BgpNeighbor{},
 		&OspfConfig{}, &OspfInterface{}, &IsisConfig{}, &IsisInterface{}, &VrrpRouter{}, &BfdInterface{}, &AddressList{},
 		&SnmpUser{}, &LdapServer{}, &LdapRoleMapping{}, &Vrf{}, &AcmeProxyPolicy{}, &StaticNeighbour{}, &PortName{}, &PolicyRoute{},
+		&SyslogServer{},
 	}
 }
 
@@ -1254,6 +1255,27 @@ type SnmpUser struct {
 	NewPrivPassword string `gorm:"-" json:"new_priv_password,omitempty"`
 	HasAuthPassword bool   `gorm:"-" json:"has_auth_password"`
 	HasPrivPassword bool   `gorm:"-" json:"has_priv_password"`
+}
+
+// SyslogServer is a remote syslog server rsyslog sends the host's journal
+// to: a server of a firewall's default instance. Disabled, it is left out.
+type SyslogServer struct {
+	Base
+	InstanceID  uint   `json:"instance_id"`
+	Enabled     bool   `json:"enabled"`
+	Description string `json:"description"`
+	Address     string `json:"address"`
+	Port        int    `json:"port"`
+	// Protocol, Format and Severity are fwconfig.SyslogProtocols',
+	// SyslogFormats' and SyslogSeverities'.
+	Protocol string `json:"protocol"`
+	Format   string `json:"format"`
+	Severity string `json:"severity"`
+}
+
+// Server is the server as the document holds it.
+func (s *SyslogServer) Server() fwconfig.SyslogServer {
+	return fwconfig.SyslogServer{Address: s.Address, Port: s.Port, Protocol: s.Protocol, Format: s.Format, Severity: s.Severity}
 }
 
 // User is the user as the document holds it.
