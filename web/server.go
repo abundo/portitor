@@ -11,6 +11,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -370,6 +371,11 @@ func (s *Server) serveIndex(next echo.HandlerFunc) echo.HandlerFunc {
 			base = pre + "/"
 		}
 		page = bytes.Replace(page, []byte("<head>"), []byte(`<head><base href="`+base+`">`), 1)
+		// The browser's tab names the firewall it is on.
+		if host, err := os.Hostname(); err == nil && s.cfg.Local {
+			page = bytes.Replace(page, []byte("<title>Portitor</title>"),
+				[]byte("<title>Portitor · "+html.EscapeString(host)+"</title>"), 1)
+		}
 		c.Response().Header().Set("Cache-Control", "no-cache")
 		return c.HTMLBlob(http.StatusOK, page)
 	}
