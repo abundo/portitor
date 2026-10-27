@@ -21,16 +21,16 @@ func TestOpenVPNExpand(t *testing.T) {
 	if udp.OpenVPN.Proto != OpenVPNUDP || tcp.OpenVPN.Proto != OpenVPNTCP || tcp.Parent != "ovpn0" {
 		t.Errorf("protocols %q %q, parent %q", udp.OpenVPN.Proto, tcp.OpenVPN.Proto, tcp.Parent)
 	}
-	if got := strings.Join(udp.OpenVPN.Pools, " "); got != "10.8.0.0/25 fd00:8::/65" {
+	if got := strings.Join(udp.OpenVPN.Pools, " "); got != "10.8.0.0/24 fd00:8::/64" {
 		t.Errorf("udp pools %s", got)
 	}
-	if got := strings.Join(tcp.OpenVPN.Pools, " "); got != "10.8.0.128/25 fd00:8:0:0:8000::/65" {
+	if got := strings.Join(tcp.OpenVPN.Pools, " "); got != "10.9.0.0/24 fd00:9::/64" {
 		t.Errorf("tcp pools %s", got)
 	}
-	if got := strings.Join(tcp.Addresses, " "); got != "10.8.0.129/25 fd00:8::8000:0:0:1/65" {
+	if got := strings.Join(tcp.Addresses, " "); got != "10.9.0.1/24 fd00:9::1/64" {
 		t.Errorf("tcp addresses %s", got)
 	}
-	if got := strings.Join(tcp.OpenVPN.Prefixes, " "); got != "10.8.0.0/24 fd00:8::/64" {
+	if got := strings.Join(tcp.OpenVPN.Prefixes, " "); got != "10.8.0.0/24 fd00:8::/64 10.9.0.0/24 fd00:9::/64" {
 		t.Errorf("tcp prefixes %s", got)
 	}
 	// The document itself is left alone.
@@ -43,6 +43,7 @@ func TestOpenVPNExpand(t *testing.T) {
 	}
 
 	d.Instances[0].Interfaces[5].OpenVPN.Mode = OpenVPNTCP
+	d.Instances[0].Interfaces[5].OpenVPN.TCPAddresses = nil
 	exp = d.Expand()
 	if in := &exp.Instances[0]; in.Interface("ovt-ovpn0") != nil || in.Interface("ovpn0").OpenVPN.Proto != OpenVPNTCP ||
 		strings.Join(in.Interface("ovpn0").OpenVPN.Pools, " ") != "10.8.0.0/24 fd00:8::/64" {
@@ -105,14 +106,17 @@ func TestValidateOpenVPN(t *testing.T) {
 		{"dhcp", func(d *Document) { ovpn(d).IPv4Mode = ModeDHCP }, "dhcp client is not supported on openvpn"},
 		{"no address", func(d *Document) { ovpn(d).Addresses = nil }, "needs an IPv4 or IPv6 address"},
 		{"two v4", func(d *Document) { ovpn(d).Addresses = []string{"10.8.0.1/24", "10.9.0.1/24"} }, "one address per IP version"},
-		{"small v4", func(d *Document) { ovpn(d).Addresses = []string{"10.8.0.1/30"} }, "the IPv4 prefix must be /16 to /29"},
-		{"small v6", func(d *Document) { ovpn(d).Addresses = []string{"fd00:8::1/120"} }, "the IPv6 prefix must be /111 or shorter"},
+		{"small v4", func(d *Document) { ovpn(d).Addresses = []string{"10.8.0.1/31"} }, "the IPv4 prefix must be /16 to /30"},
+		{"small v6", func(d *Document) { ovpn(d).Addresses = []string{"fd00:8::1/120"} }, "the IPv6 prefix must be /112 or shorter"},
 		{"delegated", func(d *Document) { ovpn(d).Addresses = []string{"<eth0>:8::1/64"} }, "no delegated address"},
 		{"two servers", func(d *Document) {
 			o := *ovpn(d)
 			o.Name, o.Addresses = "ovpn1", []string{"10.9.0.1/24"}
 			d.Instances[0].Interfaces = append(d.Instances[0].Interfaces, o)
 		}, "at most one OpenVPN interface"},
+		{"no tcp addresses", func(d *Document) { ovpn(d).OpenVPN.TCPAddresses = nil }, "the adaptive mode needs the TCP tunnel's addresses"},
+		{"tcp addresses in udp mode", func(d *Document) { ovpn(d).OpenVPN.Mode = OpenVPNUDP }, "TCP tunnel addresses are for the adaptive mode"},
+		{"tcp overlaps udp", func(d *Document) { ovpn(d).OpenVPN.TCPAddresses = []string{"10.8.0.129/25"} }, "overlaps the UDP tunnel's 10.8.0.1/24"},
 		{"reserved name", func(d *Document) { d.Instances[0].Interfaces[1].Name = "ovt-x" }, "names are for OpenVPN TCP devices"},
 		{"ldap host", func(d *Document) { d.Directory.Servers[0].Host = "dc 1" }, "host must be"},
 		{"ldap filter", func(d *Document) { d.Directory.Servers[0].UserFilter = "(uid=bob)" }, "hold %s once"},
@@ -134,24 +138,28 @@ func TestValidateOpenVPN(t *testing.T) {
 
 func TestCheckOpenVPNAddresses(t *testing.T) {
 	for _, c := range []struct {
-		mode  string
-		addrs []string
-		ok    bool
+		mode       string
+		addrs, tcp []string
+		ok         bool
 	}{
-		{OpenVPNAdaptive, []string{"10.8.0.1/24", "fd00:8::1/64"}, true},
-		{OpenVPNUDP, []string{"10.8.0.1/30"}, true},
-		{OpenVPNAdaptive, []string{"10.8.0.1/30"}, false},
+		{OpenVPNAdaptive, []string{"10.8.0.1/24", "fd00:8::1/64"}, []string{"10.9.0.1/24", "fd00:9::1/64"}, true},
+		{OpenVPNAdaptive, []string{"10.8.0.1/30"}, []string{"10.9.0.1/30"}, true},
+		{OpenVPNAdaptive, []string{"10.8.0.1/24"}, nil, false},
+		{OpenVPNAdaptive, []string{"10.8.0.1/24"}, []string{"10.8.0.129/25"}, false},
+		{OpenVPNAdaptive, []string{"10.8.0.1/24"}, []string{"10.9.0.1/31"}, false},
+		{OpenVPNUDP, []string{"10.8.0.1/24"}, []string{"10.9.0.1/24"}, false},
+		{OpenVPNUDP, []string{"10.8.0.1/30"}, nil, true},
 		// Dual stack: as many IPv6 addresses as IPv4 clients will do.
-		{OpenVPNUDP, []string{"10.8.0.1/24", "fd00:8::1/112"}, true},
-		{OpenVPNAdaptive, []string{"10.8.0.1/24", "fd00:8::1/111"}, true},
+		{OpenVPNUDP, []string{"10.8.0.1/24", "fd00:8::1/112"}, nil, true},
+		{OpenVPNUDP, []string{"10.8.0.1/24", "fd00:8::1/113"}, nil, false},
 		// IPv6 alone: OpenVPN's whole pool.
-		{OpenVPNUDP, []string{"fd00:8::1/112"}, false},
-		{OpenVPNUDP, []string{"fd00:8::1/111"}, true},
-		{OpenVPNUDP, []string{"fd00:8::1/64"}, true},
-		{OpenVPNUDP, nil, false},
+		{OpenVPNUDP, []string{"fd00:8::1/112"}, nil, false},
+		{OpenVPNUDP, []string{"fd00:8::1/111"}, nil, true},
+		{OpenVPNUDP, []string{"fd00:8::1/64"}, nil, true},
+		{OpenVPNUDP, nil, nil, false},
 	} {
-		if got := CheckOpenVPNAddresses(c.mode, c.addrs); (len(got) == 0) != c.ok {
-			t.Errorf("%s %v: %v", c.mode, c.addrs, got)
+		if got := CheckOpenVPNAddresses(c.mode, c.addrs, c.tcp); (len(got) == 0) != c.ok {
+			t.Errorf("%s %v %v: %v", c.mode, c.addrs, c.tcp, got)
 		}
 	}
 }

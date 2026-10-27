@@ -52,6 +52,7 @@ const keys = [
   'description',
   'enabled',
   'addresses',
+  'ovpn_tcp_addresses',
   'mtu',
   'ovpn_mode',
   'ovpn_port',
@@ -86,6 +87,7 @@ async function load() {
   if (server.value) {
     for (const k of keys) form[k] = JSON.parse(JSON.stringify(server.value[k] ?? null))
     form.addresses ??= []
+    form.ovpn_tcp_addresses ??= []
     form.ovpn_routes ??= []
     form.ovpn_dns ??= []
     form.ovpn_certificate_id ??= NONE
@@ -100,6 +102,8 @@ const modeItems = [
   { label: 'UDP only', value: 'udp' },
   { label: 'TCP only', value: 'tcp' },
 ]
+// Adaptive: a UDP and a TCP process, each with its own tunnel addresses.
+const adaptive = computed(() => form.ovpn_mode === 'adaptive')
 const certItems = computed(() => [
   { label: '—', value: NONE },
   ...certs.value.map((c) => ({
@@ -128,6 +132,7 @@ async function create() {
       enabled: false,
       ipv4_mode: 'static',
       addresses: ['10.8.0.1/24'],
+      ovpn_tcp_addresses: ['10.9.0.1/24'],
       ovpn_mode: 'adaptive',
       ovpn_port: 1194,
     })
@@ -202,7 +207,12 @@ const infoRows = computed(() => {
     ['Port', String(s.ovpn_port)],
     ['Listens on', s.ovpn_listen || 'any interface'],
     ['Certificate', certName.value || '— (none chosen)'],
-    ['Addresses', (s.addresses ?? []).join(', ') || '—'],
+    ...(s.ovpn_mode === 'adaptive'
+      ? [
+          ['UDP tunnel addresses', (s.addresses ?? []).join(', ') || '—'],
+          ['TCP tunnel addresses', (s.ovpn_tcp_addresses ?? []).join(', ') || '—'],
+        ]
+      : [['Addresses', (s.addresses ?? []).join(', ') || '—']]),
     ['Logins', login],
     ...processes.value.map((p) => [
       `Process (${p.proto.toUpperCase()})`,
@@ -333,7 +343,7 @@ function downloadConfig() {
             <UAlert
               icon="i-lucide-shield-check"
               title="No OpenVPN server in this virtual firewall"
-              description="Add one: an interface ovpn0 with the tunnel's addresses. Its clients get the other addresses of their prefixes. Choose its certificate (under Certificates) and enable it; allow its traffic with firewall rules on ovpn0."
+              description="Add one: an interface ovpn0 with the tunnel's addresses (adaptive: one prefix for the UDP clients, another for the TCP clients). Its clients get the other addresses of their prefixes. Choose its certificate (under Certificates) and enable it; allow its traffic with firewall rules on ovpn0."
             />
             <UButton
               v-if="auth.canEdit"
@@ -369,9 +379,12 @@ function downloadConfig() {
                 <UFormField label="Description" :ui="inlineField">
                   <UInput v-model="form.description" class="w-full" />
                 </UFormField>
+                <UFormField label="Mode" :ui="inlineField">
+                  <USelect v-model="form.ovpn_mode" :items="modeItems" class="w-full" />
+                </UFormField>
                 <UFormField
-                  label="Tunnel addresses"
-                  help="The firewall's address in the tunnel, one IPv4 and/or one IPv6, with the prefix length: 10.8.0.1/24, fd00:8::1/64. Clients get the other addresses of the prefixes (adaptive: UDP clients one half, TCP clients the other). IPv4 /16 to /29 (adaptive), IPv6 /64 is usual."
+                  :label="adaptive ? 'UDP tunnel addresses' : 'Tunnel addresses'"
+                  :help="`The firewall's address in the ${adaptive ? 'UDP clients’ ' : ''}tunnel, one IPv4 and/or one IPv6, with the prefix length: 10.8.0.1/24, fd00:8::1/64. Clients get the other addresses of the prefixes. IPv4 /16 to /30, IPv6 /64 is usual.`"
                   :ui="inlineField"
                 >
                   <TagsInput
@@ -381,8 +394,18 @@ function downloadConfig() {
                     :disabled="readOnly"
                   />
                 </UFormField>
-                <UFormField label="Mode" :ui="inlineField">
-                  <USelect v-model="form.ovpn_mode" :items="modeItems" class="w-full" />
+                <UFormField
+                  v-if="adaptive"
+                  label="TCP tunnel addresses"
+                  help="The firewall's address in the TCP clients' tunnel, as for UDP, in other prefixes: 10.9.0.1/24, fd00:9::1/64. Each side's clients get a route to the other's."
+                  :ui="inlineField"
+                >
+                  <TagsInput
+                    v-model="form.ovpn_tcp_addresses"
+                    class="w-full font-mono"
+                    placeholder="10.9.0.1/24"
+                    :disabled="readOnly"
+                  />
                 </UFormField>
                 <UFormField
                   label="Port"

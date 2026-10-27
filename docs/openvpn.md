@@ -33,7 +33,8 @@ themselves); changing who may log in does not.
    `vpn.example.com`, or an imported or generated one. Clients check the server
    by the certificate's **common name**.
 2. Under **VPN → OpenVPN → Configuration**, **Add OpenVPN server**. It is added
-   as `ovpn0`, disabled, with the tunnel address `10.8.0.1/24`.
+   as `ovpn0`, disabled, with the tunnel address `10.8.0.1/24` (and `10.9.0.1/24`
+   for the TCP clients).
 3. Choose its **certificate**, set the **listen interface** (the WAN), add an IPv6
    tunnel address if you like (`fd00:8::1/64`), choose who may log in, and enable
    it.
@@ -44,19 +45,23 @@ themselves); changing who may log in does not.
 
 ## Settings
 
-- **Tunnel addresses**: the firewall's address in the tunnel, one IPv4 and/or one
-  IPv6 address with its prefix length. Clients get the other addresses of the
-  prefixes. IPv4 prefixes may be /16 to /30 (/29 in the adaptive mode). IPv6:
-  /64 is usual; at most /112 (/111 in the adaptive mode), and without an IPv4
-  address, when OpenVPN reserves 65536 addresses, at most /111 (/110).
 - **Mode**:
   - **Adaptive** (the default): the server listens on UDP and on TCP, on the same
     port. Clients try UDP first and fall back to TCP within seconds where UDP is
-    blocked (hotel and guest networks often let only TCP out). UDP clients get
-    their addresses from one half of each prefix, TCP clients from the other: a
-    second device, `ovt-ovpn0`, carries the TCP clients, and rules, zones and
-    services naming `ovpn0` cover it too.
-  - **UDP only** or **TCP only**: one process, the whole prefix.
+    blocked (hotel and guest networks often let only TCP out). UDP and TCP
+    clients each have a tunnel of their own, with its own prefixes (**UDP tunnel
+    addresses** and **TCP tunnel addresses**), and each side's clients get a route
+    to the other's: a second device, `ovt-ovpn0`, carries the TCP clients, and
+    rules, zones and services naming `ovpn0` cover it too.
+  - **UDP only** or **TCP only**: one process, one tunnel.
+- **Tunnel addresses** (**UDP tunnel addresses** in the adaptive mode): the
+  firewall's address in the tunnel, one IPv4 and/or one IPv6 address with its
+  prefix length. Clients get the other addresses of the prefixes. IPv4 prefixes
+  may be /16 to /30. IPv6: /64 is usual; at most /112, and without an IPv4
+  address, when OpenVPN reserves 65536 addresses, at most /111.
+- **TCP tunnel addresses** (adaptive mode only): the same for the TCP clients'
+  tunnel, in prefixes of their own, apart from the UDP tunnel's: `10.9.0.1/24`,
+  `fd00:9::1/64`.
 - **Port**: 1194 by default. It is opened automatically in the firewall (auto
   rule `openvpn ovpn0`) for UDP and TCP, on the listen interface only when one is
   set. Port 443/TCP gets through the strictest networks.

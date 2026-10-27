@@ -35,7 +35,7 @@ func richInstance(t *testing.T, env *testEnv, name string) uint {
 		"generate": map[string]any{"domains": []string{"vpn.shop.example"}, "key_type": "ec256", "days": 30}})
 	vpnRole := env.create("/api/roles", map[string]any{"name": "vpn-" + name})
 	env.create("/api/interfaces", map[string]any{"instance_id": inst, "name": "ovpn0", "kind": "openvpn", "enabled": true,
-		"addresses": []string{"10.8.0.1/24"}, "ovpn_listen": "eth1", "ovpn_certificate_id": cert, "ovpn_role_id": vpnRole})
+		"addresses": []string{"10.8.0.1/24"}, "ovpn_tcp_addresses": []string{"10.7.0.1/24"}, "ovpn_listen": "eth1", "ovpn_certificate_id": cert, "ovpn_role_id": vpnRole})
 	zone := env.create("/api/dns/zones", map[string]any{"instance_id": inst, "name": "shop.example"})
 	env.create("/api/dns/records", map[string]any{"zone_id": zone, "name": "nas", "type": "A", "value": "192.168.5.10"})
 	env.create("/api/ipam/prefixes", map[string]any{"instance_id": inst, "prefix": "192.168.5.0/24", "dhcp_enabled": true, "dhcp_range_start": "192.168.5.100", "dhcp_range_end": "192.168.5.199"})

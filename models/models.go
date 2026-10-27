@@ -572,7 +572,9 @@ type Interface struct {
 	Vrf string `json:"vrf"`
 
 	// An OpenVPN server's (fwconfig.OpenVPN): mode, port, the interface
-	// clients come in on (empty: any) and its certificate. Its users are
+	// clients come in on (empty: any), the TCP tunnel's addresses in the
+	// adaptive mode (Addresses are then the UDP tunnel's) and its
+	// certificate. Its users are
 	// the directory's, with OvpnRequireRole only the members of OvpnRoleID
 	// (none when the role is gone). OvpnTlsCrypt is the static key, a secret
 	// generated here that clients get in their config. OvpnHost is the
@@ -580,6 +582,7 @@ type Interface struct {
 	OvpnMode            string     `json:"ovpn_mode"`
 	OvpnPort            int        `json:"ovpn_port"`
 	OvpnListen          string     `json:"ovpn_listen"`
+	OvpnTcpAddresses    StringList `json:"ovpn_tcp_addresses"`
 	OvpnCertificateID   *uint      `json:"ovpn_certificate_id"`
 	OvpnTlsCrypt        string     `json:"-"`
 	OvpnRequireRole     bool       `json:"ovpn_require_role"`

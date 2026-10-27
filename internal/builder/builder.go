@@ -1513,6 +1513,10 @@ func (d *data) openVPN(mi *models.Instance, mif *models.Interface, in *fwconfig.
 		Routes: slices.Clone([]string(mif.OvpnRoutes)), RedirectGateway: mif.OvpnRedirectGateway,
 		DNS: slices.Clone([]string(mif.OvpnDns)), DNSDomain: mif.OvpnDnsDomain, ClientToClient: mif.OvpnClientToClient,
 	}
+	// The TCP tunnel's addresses stay in the row in another mode.
+	if o.Mode == fwconfig.OpenVPNAdaptive {
+		o.TCPAddresses = slices.Clone([]string(mif.OvpnTcpAddresses))
+	}
 	i := slices.IndexFunc(d.certs, func(c models.Certificate) bool {
 		return mif.OvpnCertificateID != nil && c.ID == *mif.OvpnCertificateID && c.InstanceID == mi.ID
 	})

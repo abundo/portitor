@@ -20,9 +20,9 @@ func TestOpenVPNConf(t *testing.T) {
 	for _, want := range []string{
 		"dev ovpn0\ndev-type tun\nproto udp6\nport 1194\n",
 		"ifconfig-noexec\n",
-		"ifconfig 10.8.0.1 255.255.255.0\nifconfig-pool 10.8.0.2 10.8.0.126 255.255.255.128\npush \"route-gateway 10.8.0.1\"\n",
-		"ifconfig-ipv6 fd00:8::1/64 fd00:8::\nifconfig-ipv6-pool fd00:8::2/65\n",
-		"push \"route 10.8.0.0 255.255.255.0\"\npush \"route-ipv6 fd00:8::/64\"\npush \"route 192.168.1.0 255.255.255.0\"\npush \"route-ipv6 fd00:1::/64\"\n",
+		"ifconfig 10.8.0.1 255.255.255.0\nifconfig-pool 10.8.0.2 10.8.0.254 255.255.255.0\npush \"route-gateway 10.8.0.1\"\n",
+		"ifconfig-ipv6 fd00:8::1/64 fd00:8::\nifconfig-ipv6-pool fd00:8::2/64\n",
+		"push \"route 10.9.0.0 255.255.255.0\"\npush \"route-ipv6 fd00:9::/64\"\npush \"route 192.168.1.0 255.255.255.0\"\npush \"route-ipv6 fd00:1::/64\"\n",
 		"push \"dhcp-option DNS 10.8.0.1\"\npush \"dhcp-option DOMAIN home.arpa\"\n",
 		"explicit-exit-notify 1\n",
 		"cert /var/lib/portitor/certificates/main/www/fullchain.pem\nkey /var/lib/portitor/certificates/main/www/privkey.pem\n",
@@ -37,9 +37,9 @@ func TestOpenVPNConf(t *testing.T) {
 	tcp := OpenVPNConf(in, in.Interface("ovt-ovpn0"), p)
 	for _, want := range []string{
 		"dev ovt-ovpn0\ndev-type tun\nproto tcp6-server\n",
-		"ifconfig 10.8.0.129 255.255.255.128\nifconfig-pool 10.8.0.130 10.8.0.254 255.255.255.128\n",
-		"ifconfig-ipv6-pool fd00:8::8000:0:0:2/65\n",
-		"push \"route 10.8.0.0 255.255.255.0\"\n",
+		"ifconfig 10.9.0.1 255.255.255.0\nifconfig-pool 10.9.0.2 10.9.0.254 255.255.255.0\n",
+		"ifconfig-ipv6-pool fd00:9::2/64\n",
+		"push \"route 10.8.0.0 255.255.255.0\"\npush \"route-ipv6 fd00:8::/64\"\n",
 		"management /run/portitor/openvpn/main/tcp.sock unix\n",
 	} {
 		if !strings.Contains(tcp, want) {

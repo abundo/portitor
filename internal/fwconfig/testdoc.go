@@ -52,6 +52,7 @@ func SampleDocument() Document {
 						Addresses: []string{"10.8.0.1/24", "fd00:8::1/64"},
 						OpenVPN: &OpenVPN{
 							Mode: OpenVPNAdaptive, Port: OpenVPNPort, Listen: "eth0", Certificate: "www", TLSCrypt: SampleTLSCrypt,
+							TCPAddresses: []string{"10.9.0.1/24", "fd00:9::1/64"},
 							Users: []OpenVPNUser{{Name: "alice", Hash: "$2a$04$sPjBZ8e3Suq8ztRXAZk6gu23Z2daJoCtgy9b3J2wzh9YCN1P0YLfG"}, // alicepass
 								{Name: "bob", LDAP: true}, {Name: "carol", Denied: true}},
 							RequireRole: true, RoleGroups: []string{"CN=VPN,CN=Users,DC=example,DC=com"},

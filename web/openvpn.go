@@ -55,8 +55,21 @@ func prepareOpenVPN(tx *gorm.DB, i, old *models.Interface) error {
 	if others > 0 {
 		return bad("a virtual firewall has one OpenVPN interface")
 	}
-	if errs := fwconfig.CheckOpenVPNAddresses(i.OvpnMode, i.Addresses); len(errs) > 0 {
+	tcpAddrs, err := ifaceAddrs("TCP tunnel addresses", i.OvpnTcpAddresses, false)
+	if err != nil {
+		return err
+	}
+	i.OvpnTcpAddresses = tcpAddrs
+	if i.OvpnMode != fwconfig.OpenVPNAdaptive {
+		tcpAddrs = nil // kept for the adaptive mode, unused
+	}
+	if errs := fwconfig.CheckOpenVPNAddresses(i.OvpnMode, i.Addresses, tcpAddrs); len(errs) > 0 {
 		return bad("addresses: " + strings.Join(errs, "; "))
+	}
+	tcp := *i
+	tcp.Addresses = tcpAddrs
+	if err := checkAddrsFree(tx, &tcp); err != nil {
+		return err
 	}
 	i.OvpnListen = strings.TrimSpace(i.OvpnListen)
 	if i.OvpnListen != "" {

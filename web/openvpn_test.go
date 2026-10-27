@@ -27,6 +27,7 @@ func TestOpenVPN(t *testing.T) {
 	env.srv.newAgent = func(*models.Firewall) (agentAPI, error) { return openvpnAgent{}, nil }
 	inst := env.create("/api/instances", map[string]any{"name": "main"})
 	env.create("/api/interfaces", map[string]any{"instance_id": inst, "name": "eth0", "kind": "physical", "enabled": true, "ipv4_mode": "dhcp"})
+	env.create("/api/interfaces", map[string]any{"instance_id": inst, "name": "eth1", "kind": "physical", "enabled": true, "addresses": []string{"192.168.1.1/24"}})
 	cert := env.create("/api/certificates", map[string]any{"instance_id": inst, "name": "vpn", "enabled": true, "source": "import",
 		"generate": map[string]any{"domains": []string{"vpn.example.com"}, "key_type": "ec256", "days": 30}})
 	alice := env.create("/api/users", map[string]string{"username": "alice", "password": "a long password", "role": "none"})
@@ -34,11 +35,16 @@ func TestOpenVPN(t *testing.T) {
 	role := env.create("/api/roles", map[string]any{"name": "vpn", "members": []map[string]any{{"user_id": alice, "level": "viewer"}}})
 
 	base := map[string]any{"instance_id": inst, "name": "ovpn0", "kind": "openvpn", "enabled": true, "ipv4_mode": "static",
-		"addresses": []string{"10.8.0.1/24", "fd00:8::1/64"}, "ovpn_listen": "eth0", "ovpn_certificate_id": cert,
+		"addresses": []string{"10.8.0.1/24", "fd00:8::1/64"}, "ovpn_tcp_addresses": []string{"10.9.0.1/24", "fd00:9::1/64"},
+		"ovpn_listen": "eth0", "ovpn_certificate_id": cert,
 		"ovpn_role_id": role, "ovpn_routes": []string{"192.168.1.0/24"}}
 	for what, change := range map[string]map[string]any{
-		"small prefix":  {"addresses": []string{"10.8.0.1/30"}},
-		"two v4":        {"addresses": []string{"10.8.0.1/24", "10.9.0.1/24"}},
+		"small prefix":  {"addresses": []string{"10.8.0.1/31"}},
+		"two v4":        {"addresses": []string{"10.8.0.1/24", "10.7.0.1/24"}},
+		"no tcp":        {"ovpn_tcp_addresses": []string{}},
+		"tcp overlaps":  {"ovpn_tcp_addresses": []string{"10.8.0.129/25"}},
+		"tcp in use":    {"ovpn_tcp_addresses": []string{"192.168.1.1/24"}},
+		"tcp invalid":   {"ovpn_tcp_addresses": []string{"10.9.0.0/24"}},
 		"listen":        {"ovpn_listen": "eth9"},
 		"mode":          {"ovpn_mode": "both"},
 		"route":         {"ovpn_routes": []string{"192.168.1.1/24"}},
@@ -90,6 +96,9 @@ func TestOpenVPN(t *testing.T) {
 	if o == nil || o.Certificate != "vpn" || o.Listen != "eth0" || !o.RequireRole || !strings.HasPrefix(hashes["alice"], "$2") ||
 		hashes["bob"] != "" || !strings.Contains(o.TLSCrypt, "Static key") || doc.Directory == nil {
 		t.Fatalf("openvpn %+v", o)
+	}
+	if got := strings.Join(o.TCPAddresses, " "); got != "10.9.0.1/24 fd00:9::1/64" {
+		t.Errorf("tcp addresses %s", got)
 	}
 	b, _ := json.Marshal(redactDoc(*doc))
 	if strings.Contains(string(b), "Static key") || strings.Contains(string(b), hashes["alice"]) {
@@ -159,7 +168,7 @@ func TestOpenVPNTenant(t *testing.T) {
 	}
 	env.login("tina", "a long password")
 	rec := env.do("POST", "/api/interfaces", map[string]any{"instance_id": a, "name": "ovpn0", "kind": "openvpn", "enabled": true,
-		"addresses": []string{"10.8.0.1/24"}, "ovpn_role_id": other})
+		"addresses": []string{"10.8.0.1/24"}, "ovpn_mode": "udp", "ovpn_role_id": other})
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("create: %d %s", rec.Code, rec.Body)
 	}
@@ -177,7 +186,8 @@ func TestOpenVPNHA(t *testing.T) {
 	cert := env.create("/api/certificates", map[string]any{"instance_id": main, "name": "vpn", "enabled": true, "source": "import",
 		"generate": map[string]any{"domains": []string{"vpn.example.com"}, "key_type": "ec256", "days": 30}})
 	if rec := env.do("POST", "/api/interfaces", map[string]any{"instance_id": main, "name": "ovpn0", "kind": "openvpn", "enabled": true,
-		"addresses": []string{"10.8.0.1/24", "fd00:8::1/64"}, "peer_addresses": []string{"10.8.0.2/24"}, "ovpn_certificate_id": cert}); rec.Code != http.StatusCreated {
+		"addresses": []string{"10.8.0.1/24", "fd00:8::1/64"}, "peer_addresses": []string{"10.8.0.2/24"},
+		"ovpn_tcp_addresses": []string{"10.9.0.1/24"}, "ovpn_certificate_id": cert}); rec.Code != http.StatusCreated {
 		t.Fatalf("create: %d %s", rec.Code, rec.Body)
 	}
 	var ifc models.Interface

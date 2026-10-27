@@ -484,8 +484,10 @@ the certificate portitor-config serves, chosen under Settings
   to it (`ifconfig-noexec`, `disable-dco`). One process listens on one protocol, so the
   adaptive mode (the default: UDP, TCP for clients where UDP is blocked) runs two:
   `Document.Expand` gives the interface the UDP process and adds the TCP device
-  (`OpenVPNTCPDevice`, `Parent` the interface) with the other half of each prefix
-  (`Pools`; the whole `Prefixes` pushed as routes); `MatchInterfaces` and the auto
+  (`OpenVPNTCPDevice`, `Parent` the interface) with the TCP tunnel's own addresses
+  (`OpenVPN.TCPAddresses`, `interfaces.ovpn_tcp_addresses`, apart from the UDP
+  tunnel's; `Pools` each device's prefixes, the other's in `Prefixes` pushed as
+  routes); `MatchInterfaces` and the auto
   rules add it to a list naming the interface (`AddOpenVPNDevices`). Units per
   protocol: the default instance's `openvpn-server@portitor-<proto>` from
   `/etc/openvpn/server`, a VF's `portitor-openvpn-<proto>@` (two copies of one file,

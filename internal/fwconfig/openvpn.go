@@ -27,8 +27,9 @@ import (
 // One OpenVPN process listens on one protocol, so the adaptive mode (UDP,
 // and TCP for clients that can't use UDP) runs two: Expand gives the
 // interface its UDP process and adds a second device for the TCP one
-// (OpenVPNTCPDevice), each with half of the prefixes for its clients
-// (Pools). A rule naming the interface matches both (AddOpenVPNDevices).
+// (OpenVPNTCPDevice) with the TCPAddresses, each with its own prefixes for
+// its clients (Pools). A rule naming the interface matches both
+// (AddOpenVPNDevices).
 type OpenVPN struct {
 	// Mode is OpenVPNAdaptive, OpenVPNUDP or OpenVPNTCP.
 	Mode string `json:"mode"`
@@ -37,6 +38,9 @@ type OpenVPN struct {
 	Port int `json:"port"`
 	// Listen is the interface clients come in on; empty: any.
 	Listen string `json:"listen,omitempty"`
+	// TCPAddresses are, in the adaptive mode, the server's addresses in
+	// the TCP clients' tunnel, as the interface's are in the UDP clients'.
+	TCPAddresses []string `json:"tcp_addresses,omitempty"`
 	// Certificate is the server's, an instance certificate by name.
 	Certificate string `json:"certificate"`
 	// TLSCrypt is the static key (OpenVPN's format) that authenticates
@@ -62,8 +66,8 @@ type OpenVPN struct {
 	ClientToClient bool `json:"client_to_client,omitempty"`
 
 	// Set by Expand on each device: its protocol, the prefixes its
-	// clients get addresses from, and the interface's whole prefixes,
-	// pushed as routes when a pool is half of one.
+	// clients get addresses from, and the prefixes of both processes, the
+	// other's pushed as routes.
 	Proto    string   `json:"proto,omitempty"`
 	Pools    []string `json:"pools,omitempty"`
 	Prefixes []string `json:"prefixes,omitempty"`
@@ -153,9 +157,8 @@ func (in *Instance) AddOpenVPNDevices(names []string) []string {
 }
 
 // addOpenVPNDevices sets each OpenVPN interface's protocol and pools and,
-// in the adaptive mode, adds its TCP device, for Expand. The TCP device's
-// addresses are the first of the halves of the prefixes the interface's
-// addresses aren't in.
+// in the adaptive mode, adds its TCP device with the TCPAddresses, for
+// Expand.
 func (in *Instance) addOpenVPNDevices() {
 	n := len(in.Interfaces)
 	for i := 0; i < n; i++ {
@@ -164,26 +167,12 @@ func (in *Instance) addOpenVPNDevices() {
 			continue
 		}
 		o := *ifc.OpenVPN
-		o.Pools, o.Prefixes = nil, nil
-		var tcpAddrs, tcpPools []string
-		for _, a := range ifc.Addresses {
-			p, err := netip.ParsePrefix(a)
-			if err != nil {
-				continue
-			}
-			o.Prefixes = append(o.Prefixes, p.Masked().String())
-			if o.Mode != OpenVPNAdaptive {
-				o.Pools = append(o.Pools, p.Masked().String())
-				continue
-			}
-			own, other, ok := halves(p)
-			if !ok {
-				continue
-			}
-			o.Pools = append(o.Pools, own.String())
-			tcpPools = append(tcpPools, other.String())
-			tcpAddrs = append(tcpAddrs, netip.PrefixFrom(other.Addr().Next(), other.Bits()).String())
+		o.Pools = prefixesOf(ifc.Addresses)
+		var tcpPools []string
+		if o.Mode == OpenVPNAdaptive {
+			tcpPools = prefixesOf(o.TCPAddresses)
 		}
+		o.Prefixes = append(slices.Clone(o.Pools), tcpPools...)
 		switch o.Mode {
 		case OpenVPNTCP:
 			o.Proto = OpenVPNTCP
@@ -196,26 +185,23 @@ func (in *Instance) addOpenVPNDevices() {
 		}
 		t := *ifc
 		tcp := o
-		tcp.Proto, tcp.Pools = OpenVPNTCP, tcpPools
+		tcp.Proto, tcp.Pools, tcp.TCPAddresses = OpenVPNTCP, tcpPools, nil
 		t.Name, t.Parent, t.Description = OpenVPNTCPDevice(ifc.Name), ifc.Name, "OpenVPN TCP of "+ifc.Name
-		t.Addresses, t.OpenVPN = tcpAddrs, &tcp
+		t.Addresses, t.OpenVPN = slices.Clone(o.TCPAddresses), &tcp
 		t.ShapeEgress, t.ShapeIngress = 0, 0
 		in.Interfaces = append(in.Interfaces, t)
 	}
 }
 
-// halves splits the prefix of an interface address in two: the half the
-// address is in, and the other.
-func halves(p netip.Prefix) (own, other netip.Prefix, ok bool) {
-	if p.Bits() >= p.Addr().BitLen() {
-		return own, other, false
+// prefixesOf are the prefixes of interface addresses.
+func prefixesOf(addrs []string) []string {
+	var out []string
+	for _, a := range addrs {
+		if p, err := netip.ParsePrefix(a); err == nil {
+			out = append(out, p.Masked().String())
+		}
 	}
-	lo := netip.PrefixFrom(p.Masked().Addr(), p.Bits()+1)
-	hi := netip.PrefixFrom(lastAddr(p), p.Bits()+1).Masked()
-	if lo.Contains(p.Addr()) {
-		return lo, hi, true
-	}
-	return hi, lo, true
+	return out
 }
 
 // lastAddr is the last address of a prefix.
@@ -332,6 +318,7 @@ func (v *validator) openVPN(p string, in *Instance, ifc *Interface) {
 	if ifc.IPv4Mode == ModeDHCP {
 		v.addf("%s: an OpenVPN interface has static addresses", p)
 	}
+	v.openVPNTCPAddresses(p, ifc)
 	users := map[string]bool{}
 	for _, u := range o.Users {
 		if !ValidOpenVPNUser(u.Name) {
@@ -366,10 +353,37 @@ func (v *validator) openVPN(p string, in *Instance, ifc *Interface) {
 	}
 }
 
+// openVPNTCPAddresses checks an OpenVPN interface's TCPAddresses: there
+// in the adaptive mode only, apart from the UDP tunnel's prefixes. The
+// TCP device checks them as addresses.
+func (v *validator) openVPNTCPAddresses(p string, ifc *Interface) {
+	o := ifc.OpenVPN
+	switch {
+	case o.Mode == OpenVPNAdaptive && len(o.TCPAddresses) == 0:
+		v.addf("%s: the adaptive mode needs the TCP tunnel's addresses", p)
+	case o.Mode != OpenVPNAdaptive && len(o.TCPAddresses) > 0:
+		v.addf("%s: TCP tunnel addresses are for the adaptive mode", p)
+	}
+	for _, a := range o.TCPAddresses {
+		q, err := netip.ParsePrefix(a)
+		if err != nil {
+			continue
+		}
+		for _, b := range ifc.Addresses {
+			if r, err := netip.ParsePrefix(b); err == nil && r.Overlaps(q) {
+				v.addf("%s: TCP tunnel address %s overlaps the UDP tunnel's %s", p, a, b)
+			}
+		}
+	}
+}
+
 // openVPNPools checks a device's addresses and pools: at most one address
 // per IP version, each with a pool OpenVPN can use.
 func (v *validator) openVPNPools(p string, ifc *Interface) {
 	o := ifc.OpenVPN
+	if ifc.Parent != "" && len(ifc.Addresses) == 0 {
+		return // its interface reports the missing TCPAddresses
+	}
 	type family struct {
 		addr        string
 		first, last netip.Addr
@@ -402,11 +416,11 @@ func (v *validator) openVPNPools(p string, ifc *Interface) {
 		}
 		// OpenVPN's IPv4 pool: up to 65534 clients.
 		if is4 && (pool.Bits() < 16 || pool.Bits() > 30) {
-			v.addf("%s: address %s: the IPv4 prefix must be /16 to /%d", p, a, 30-boolInt(o.Mode == OpenVPNAdaptive))
+			v.addf("%s: address %s: the IPv4 prefix must be /16 to /30", p, a)
 			continue
 		}
 		if !is4 && pool.Bits() > 112 {
-			v.addf("%s: address %s: the IPv6 prefix must be /%d or shorter", p, a, 112-boolInt(o.Mode == OpenVPNAdaptive))
+			v.addf("%s: address %s: the IPv6 prefix must be /112 or shorter", p, a)
 			continue
 		}
 		first, last, ok := OpenVPNPool(pool, addr.Addr())
@@ -430,13 +444,6 @@ func (v *validator) openVPNPools(p string, ifc *Interface) {
 			v.addf("%s: address %s: no room for %d IPv6 clients on one side of it", p, f6.addr, need)
 		}
 	}
-}
-
-func boolInt(b bool) int {
-	if b {
-		return 1
-	}
-	return 0
 }
 
 // openVPNInstance checks what spans an instance's OpenVPN devices: one
@@ -464,13 +471,15 @@ func (o *OpenVPN) Protocols() []string {
 	return []string{OpenVPNUDP, OpenVPNTCP}
 }
 
-// CheckOpenVPNAddresses checks an OpenVPN interface's addresses for a mode
-// as Validate does (one per IP version, room for the clients of each
-// process); it returns the problems.
-func CheckOpenVPNAddresses(mode string, addrs []string) []string {
-	in := Instance{Interfaces: []Interface{{Name: "x", Kind: KindOpenVPN, Addresses: addrs, OpenVPN: &OpenVPN{Mode: mode}}}}
-	in.addOpenVPNDevices()
+// CheckOpenVPNAddresses checks an OpenVPN interface's addresses and TCP
+// tunnel addresses for a mode as Validate does (one per IP version, room
+// for the clients of each process, the TCP tunnel's apart and only in the
+// adaptive mode); it returns the problems.
+func CheckOpenVPNAddresses(mode string, addrs, tcpAddrs []string) []string {
+	in := Instance{Interfaces: []Interface{{Name: "x", Kind: KindOpenVPN, Addresses: addrs, OpenVPN: &OpenVPN{Mode: mode, TCPAddresses: tcpAddrs}}}}
 	v := &validator{}
+	v.openVPNTCPAddresses("x", &in.Interfaces[0])
+	in.addOpenVPNDevices()
 	for i := range in.Interfaces {
 		v.openVPNPools(in.Interfaces[i].Name, &in.Interfaces[i])
 	}
