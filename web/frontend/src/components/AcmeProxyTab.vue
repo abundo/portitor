@@ -1,7 +1,7 @@
 <!-- SPDX-FileCopyrightText: 2026 The Portitor contributors -->
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
-<!-- The ACME proxy: an ACME server for the hosts behind the firewall,
+<!-- The ACME proxy, a tab of Services → Certificates: an ACME server for the hosts behind the firewall,
      which gets their certificates from Let's Encrypt by DNS-01 or
      HTTP-01. Its settings and interfaces, its policies, and what it has
      issued. -->
@@ -11,7 +11,6 @@ import { useToast } from '@nuxt/ui/composables'
 import AutoRefreshButton from '@/components/AutoRefreshButton.vue'
 import CrudPage from '@/components/CrudPage.vue'
 import FormHeader from '@/components/FormHeader.vue'
-import NeedInstance from '@/components/NeedInstance.vue'
 import SearchInput from '@/components/SearchInput.vue'
 import { acmeProxyPolicies, api, certificates, dyndnsClients, instances, interfaces } from '@/api'
 import { errMsg } from '@/api/http'
@@ -236,190 +235,188 @@ const policyFields = computed(() => [
 </script>
 
 <template>
-  <NeedInstance>
-    <div class="space-y-4">
-      <div class="card">
-        <form @submit.prevent="save">
-          <FormHeader title="ACME proxy">
-            <UButton v-if="!readOnly" type="submit" :loading="saving" :disabled="!pageForm.dirty()"
-              >Save</UButton
-            >
-          </FormHeader>
-          <p class="mb-4 text-sm text-muted">
-            An ACME server for the hosts behind the firewall. Point certbot, Caddy, Traefik or
-            another ACME client at its directory URL: it proves control of a name over the internal
-            network (HTTP-01, which the firewall checks from this virtual firewall), and the
-            firewall gets the certificate from Let's Encrypt, by DNS-01 or by HTTP-01 answered on
-            the firewall itself, as each policy says. Only the firewall holds the DNS credentials
-            and the ACME account, and the hosts need not be reachable from the Internet. Policies
-            decide which hosts may ask for which names.
-          </p>
-          <fieldset :disabled="readOnly" class="space-y-3">
-            <UFormField label="Enabled" :ui="inlineField">
-              <USwitch v-model="form.acme_proxy_enabled" />
-            </UFormField>
-            <UFormField label="Port" help="HTTPS, on the interfaces below." :ui="inlineField">
-              <UInput v-model="form.acme_proxy_port" type="number" min="1" max="65535" />
-            </UFormField>
-            <UFormField
-              label="Server certificate"
-              help="What the proxy presents to its clients. Self-signed: download it below and have the clients trust it (certbot: REQUESTS_CA_BUNDLE; lego and Traefik: LEGO_CA_CERTIFICATES)."
-              :ui="inlineField"
-            >
-              <USelect v-model="form.acme_proxy_certificate_id" :items="certItems" class="w-full" />
-            </UFormField>
-            <UFormField
-              label="CA"
-              help="Where the certificates come from. Try the staging CA first."
-              :ui="inlineField"
-            >
-              <USelect v-model="form.acme_proxy_ca" :items="caItems" class="w-full" />
-            </UFormField>
-            <UFormField
-              label="Email"
-              help="The upstream ACME account's contact. Optional."
-              :ui="inlineField"
-            >
-              <UInput
-                v-model="form.acme_proxy_email"
-                class="w-full"
-                placeholder="admin@example.com"
-              />
-            </UFormField>
-          </fieldset>
-
-          <h2 class="border-b border-default pb-1 mt-8 mb-2 text-xl font-semibold">
-            Answering clients
-          </h2>
-          <p class="mb-4 text-sm text-muted">
-            The proxy answers on the interfaces turned on here, from the policies' clients.
-          </p>
-          <div class="mb-2">
-            <SearchInput v-model="ifaceSearch" />
-          </div>
-          <fieldset :disabled="readOnly" class="min-w-0 overflow-x-auto">
-            <table class="w-full text-sm">
-              <thead>
-                <tr class="border-b border-default text-left text-xs text-muted">
-                  <th class="py-1 pr-4 font-medium">Interface</th>
-                  <th class="pr-4 font-medium">Description</th>
-                  <th class="pr-4 font-medium">Answer ACME clients</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr
-                  v-for="i in shownIfaces"
-                  :key="i.id"
-                  class="border-b border-default last:border-0"
-                >
-                  <td class="py-1 pr-4 font-mono">{{ withLabel(i.label, i.name) }}</td>
-                  <td class="py-1 pr-4">{{ i.description }}</td>
-                  <td class="py-1 pr-4">
-                    <USwitch
-                      v-model="i.acme_proxy_serve"
-                      :aria-label="`Answer ACME clients on ${i.name}`"
-                    />
-                  </td>
-                </tr>
-                <tr v-if="!shownIfaces.length">
-                  <td colspan="3" class="py-2 text-muted">
-                    {{
-                      form.ifaces.length
-                        ? 'No interface matches.'
-                        : 'This virtual firewall has no interfaces.'
-                    }}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </fieldset>
-        </form>
-      </div>
-
-      <CrudPage
-        title="Policies"
-        description="Which hosts may get certificates for which names, and how the firewall answers Let's Encrypt for them: by DNS-01 through a DNS update client, or by HTTP-01 on an interface. A name is looked up in the policies by name order; the first that allows it from the client is used."
-        :api="acmeProxyPolicies"
-        :params="{ instance_id: store.currentId }"
-        :columns="policyColumns"
-        :fields="policyFields"
-        :defaults="{ enabled: true, domains: [], sources: [], challenge: 'dns-01' }"
-        noun="policy"
-        new-label="Add policy"
-        :item-name="(p) => `policy ${p.name}`"
-      />
-
-      <div class="card">
-        <div
-          class="flex flex-wrap items-center justify-between gap-2 border-b border-default pb-1 mb-2"
-        >
-          <h2 class="text-xl font-semibold">Status</h2>
-          <AutoRefreshButton :auto="auto" :loading="loading" />
-        </div>
-        <div v-if="!status" class="text-sm text-muted">
-          Not running: enable it, add a policy and an interface, and commit.
-        </div>
-        <div v-else class="space-y-3 text-sm">
-          <div class="flex flex-wrap items-center gap-2">
-            <UBadge :color="stateColor[status.state] ?? 'neutral'" variant="subtle">
-              {{ status.state }}
-            </UBadge>
-            <span v-if="status.last_error" class="text-error">{{ status.last_error }}</span>
-          </div>
-          <div v-if="directories.length">
-            <div class="text-xs text-muted">Directory URL</div>
-            <div v-for="d in directories" :key="d" class="font-mono select-all">{{ d }}</div>
-          </div>
-          <div v-if="status.self_signed">
-            <UButton
-              size="sm"
-              variant="outline"
-              color="neutral"
-              icon="i-lucide-download"
-              label="Download the self-signed certificate"
-              @click="downloadSelfSigned"
+  <div class="space-y-4">
+    <div class="card">
+      <form @submit.prevent="save">
+        <FormHeader title="ACME proxy">
+          <UButton v-if="!readOnly" type="submit" :loading="saving" :disabled="!pageForm.dirty()"
+            >Save</UButton
+          >
+        </FormHeader>
+        <p class="mb-4 text-sm text-muted">
+          An ACME server for the hosts behind the firewall. Point certbot, Caddy, Traefik or another
+          ACME client at its directory URL: it proves control of a name over the internal network
+          (HTTP-01, which the firewall checks from this virtual firewall), and the firewall gets the
+          certificate from Let's Encrypt, by DNS-01 or by HTTP-01 answered on the firewall itself,
+          as each policy says. Only the firewall holds the DNS credentials and the ACME account, and
+          the hosts need not be reachable from the Internet. Policies decide which hosts may ask for
+          which names.
+        </p>
+        <fieldset :disabled="readOnly" class="space-y-3">
+          <UFormField label="Enabled" :ui="inlineField">
+            <USwitch v-model="form.acme_proxy_enabled" />
+          </UFormField>
+          <UFormField label="Port" help="HTTPS, on the interfaces below." :ui="inlineField">
+            <UInput v-model="form.acme_proxy_port" type="number" min="1" max="65535" />
+          </UFormField>
+          <UFormField
+            label="Server certificate"
+            help="What the proxy presents to its clients. Self-signed: download it below and have the clients trust it (certbot: REQUESTS_CA_BUNDLE; lego and Traefik: LEGO_CA_CERTIFICATES)."
+            :ui="inlineField"
+          >
+            <USelect v-model="form.acme_proxy_certificate_id" :items="certItems" class="w-full" />
+          </UFormField>
+          <UFormField
+            label="CA"
+            help="Where the certificates come from. Try the staging CA first."
+            :ui="inlineField"
+          >
+            <USelect v-model="form.acme_proxy_ca" :items="caItems" class="w-full" />
+          </UFormField>
+          <UFormField
+            label="Email"
+            help="The upstream ACME account's contact. Optional."
+            :ui="inlineField"
+          >
+            <UInput
+              v-model="form.acme_proxy_email"
+              class="w-full"
+              placeholder="admin@example.com"
             />
-          </div>
+          </UFormField>
+        </fieldset>
 
-          <h3 class="pt-2 font-semibold">Issued</h3>
-          <SearchInput v-model="issuedSearch" />
-          <div class="min-w-0 overflow-x-auto">
-            <table class="w-full text-sm">
-              <thead>
-                <tr class="border-b border-default text-left text-xs text-muted">
-                  <th class="py-1 pr-4 font-medium">Time</th>
-                  <th class="pr-4 font-medium">Client</th>
-                  <th class="pr-4 font-medium">Names</th>
-                  <th class="pr-4 font-medium">Result</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr
-                  v-for="(e, n) in shownIssued"
-                  :key="n"
-                  class="border-b border-default last:border-0 align-top"
-                >
-                  <td class="py-1 pr-4 whitespace-nowrap">{{ when(e.time) }}</td>
-                  <td class="py-1 pr-4 font-mono">{{ e.client }}</td>
-                  <td class="py-1 pr-4 font-mono">{{ e.names.join(', ') }}</td>
-                  <td class="py-1 pr-4 text-xs">
-                    <span v-if="e.error" class="text-error">{{ e.error }}</span>
-                    <template v-else>
-                      valid until {{ when(e.not_after) }}
-                      <div class="text-muted">{{ e.issuer }}</div>
-                    </template>
-                  </td>
-                </tr>
-                <tr v-if="!shownIssued.length">
-                  <td colspan="4" class="py-2 text-muted">
-                    {{ issued.length ? 'Nothing matches.' : 'No certificates yet.' }}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
+        <h2 class="border-b border-default pb-1 mt-8 mb-2 text-xl font-semibold">
+          Answering clients
+        </h2>
+        <p class="mb-4 text-sm text-muted">
+          The proxy answers on the interfaces turned on here, from the policies' clients.
+        </p>
+        <div class="mb-2">
+          <SearchInput v-model="ifaceSearch" />
+        </div>
+        <fieldset :disabled="readOnly" class="min-w-0 overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="border-b border-default text-left text-xs text-muted">
+                <th class="py-1 pr-4 font-medium">Interface</th>
+                <th class="pr-4 font-medium">Description</th>
+                <th class="pr-4 font-medium">Answer ACME clients</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="i in shownIfaces"
+                :key="i.id"
+                class="border-b border-default last:border-0"
+              >
+                <td class="py-1 pr-4 font-mono">{{ withLabel(i.label, i.name) }}</td>
+                <td class="py-1 pr-4">{{ i.description }}</td>
+                <td class="py-1 pr-4">
+                  <USwitch
+                    v-model="i.acme_proxy_serve"
+                    :aria-label="`Answer ACME clients on ${i.name}`"
+                  />
+                </td>
+              </tr>
+              <tr v-if="!shownIfaces.length">
+                <td colspan="3" class="py-2 text-muted">
+                  {{
+                    form.ifaces.length
+                      ? 'No interface matches.'
+                      : 'This virtual firewall has no interfaces.'
+                  }}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </fieldset>
+      </form>
+    </div>
+
+    <CrudPage
+      title="Policies"
+      description="Which hosts may get certificates for which names, and how the firewall answers Let's Encrypt for them: by DNS-01 through a DNS update client, or by HTTP-01 on an interface. A name is looked up in the policies by name order; the first that allows it from the client is used."
+      :api="acmeProxyPolicies"
+      :params="{ instance_id: store.currentId }"
+      :columns="policyColumns"
+      :fields="policyFields"
+      :defaults="{ enabled: true, domains: [], sources: [], challenge: 'dns-01' }"
+      noun="policy"
+      new-label="Add policy"
+      :item-name="(p) => `policy ${p.name}`"
+    />
+
+    <div class="card">
+      <div
+        class="flex flex-wrap items-center justify-between gap-2 border-b border-default pb-1 mb-2"
+      >
+        <h2 class="text-xl font-semibold">Status</h2>
+        <AutoRefreshButton :auto="auto" :loading="loading" />
+      </div>
+      <div v-if="!status" class="text-sm text-muted">
+        Not running: enable it, add a policy and an interface, and commit.
+      </div>
+      <div v-else class="space-y-3 text-sm">
+        <div class="flex flex-wrap items-center gap-2">
+          <UBadge :color="stateColor[status.state] ?? 'neutral'" variant="subtle">
+            {{ status.state }}
+          </UBadge>
+          <span v-if="status.last_error" class="text-error">{{ status.last_error }}</span>
+        </div>
+        <div v-if="directories.length">
+          <div class="text-xs text-muted">Directory URL</div>
+          <div v-for="d in directories" :key="d" class="font-mono select-all">{{ d }}</div>
+        </div>
+        <div v-if="status.self_signed">
+          <UButton
+            size="sm"
+            variant="outline"
+            color="neutral"
+            icon="i-lucide-download"
+            label="Download the self-signed certificate"
+            @click="downloadSelfSigned"
+          />
+        </div>
+
+        <h3 class="pt-2 font-semibold">Issued</h3>
+        <SearchInput v-model="issuedSearch" />
+        <div class="min-w-0 overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="border-b border-default text-left text-xs text-muted">
+                <th class="py-1 pr-4 font-medium">Time</th>
+                <th class="pr-4 font-medium">Client</th>
+                <th class="pr-4 font-medium">Names</th>
+                <th class="pr-4 font-medium">Result</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="(e, n) in shownIssued"
+                :key="n"
+                class="border-b border-default last:border-0 align-top"
+              >
+                <td class="py-1 pr-4 whitespace-nowrap">{{ when(e.time) }}</td>
+                <td class="py-1 pr-4 font-mono">{{ e.client }}</td>
+                <td class="py-1 pr-4 font-mono">{{ e.names.join(', ') }}</td>
+                <td class="py-1 pr-4 text-xs">
+                  <span v-if="e.error" class="text-error">{{ e.error }}</span>
+                  <template v-else>
+                    valid until {{ when(e.not_after) }}
+                    <div class="text-muted">{{ e.issuer }}</div>
+                  </template>
+                </td>
+              </tr>
+              <tr v-if="!shownIssued.length">
+                <td colspan="4" class="py-2 text-muted">
+                  {{ issued.length ? 'Nothing matches.' : 'No certificates yet.' }}
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </div>
     </div>
-  </NeedInstance>
+  </div>
 </template>

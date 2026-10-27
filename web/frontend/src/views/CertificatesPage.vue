@@ -5,6 +5,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useToast } from '@nuxt/ui/composables'
+import AcmeProxyTab from '@/components/AcmeProxyTab.vue'
 import CrudPage from '@/components/CrudPage.vue'
 import NeedInstance from '@/components/NeedInstance.vue'
 import SearchInput from '@/components/SearchInput.vue'
@@ -59,11 +60,12 @@ const route = useRoute()
 const router = useRouter()
 const toast = useToast()
 
-// Store is the default tab; ?tab=overview or ?tab=cas opens another.
+// Store is the default tab; ?tab=cas, ?tab=overview or ?tab=proxy opens another.
 const tabs = [
   { label: 'Certificate store', value: 'store', slot: 'store', icon: 'i-lucide-shield-check' },
-  { label: 'ACME certificates', value: 'overview', slot: 'overview', icon: 'i-lucide-list' },
   { label: 'Certificate authorities', value: 'cas', slot: 'cas', icon: 'i-lucide-landmark' },
+  { label: 'ACME certificates', value: 'overview', slot: 'overview', icon: 'i-lucide-list' },
+  { label: 'ACME proxy', value: 'proxy', slot: 'proxy', icon: 'i-lucide-shield-plus' },
 ]
 const tab = computed({
   get: () => (tabs.some((t) => t.value === route.query.tab) ? route.query.tab : 'store'),
@@ -440,7 +442,7 @@ const fields = computed(() => [
 
 <template>
   <NeedInstance>
-    <UTabs v-model="tab" :items="tabs">
+    <UTabs v-model="tab" :items="tabs" :unmount-on-hide="false">
       <template #store>
         <div class="space-y-3 pt-2">
           <div class="flex items-center gap-2">
@@ -647,6 +649,9 @@ const fields = computed(() => [
             </div>
           </template>
         </CrudPage>
+      </template>
+      <template #proxy>
+        <AcmeProxyTab />
       </template>
     </UTabs>
 

@@ -475,9 +475,9 @@ The service unit lets the `portitor` user listen on port 443
 
 ## ACME proxy
 
-*Services → ACME proxy* is an ACME server for the hosts behind the firewall. A host
-runs its usual ACME client (certbot, Caddy, Traefik, lego, acme.sh) with the proxy's
-directory URL instead of Let's Encrypt's. The client proves control of a name over
+The *ACME proxy* tab of *Services → Certificates* is an ACME server for the hosts
+behind the firewall. A host runs its usual ACME client (certbot, Caddy, Traefik,
+lego, acme.sh) with the proxy's directory URL instead of Let's Encrypt's. The client proves control of a name over
 the internal network with HTTP-01, and the firewall gets the certificate from Let's
 Encrypt. Each policy says how Let's Encrypt checks its names for the firewall:
 

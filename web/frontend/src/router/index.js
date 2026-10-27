@@ -59,7 +59,7 @@ const router = createRouter({
         { path: 'openvpn', component: () => import('@/views/OpenvpnPage.vue') },
         { path: 'dns-update', redirect: '/dns' },
         { path: 'certificates', component: () => import('@/views/CertificatesPage.vue') },
-        { path: 'acme-proxy', component: () => import('@/views/AcmeProxyPage.vue') },
+        { path: 'acme-proxy', redirect: { path: '/certificates', query: { tab: 'proxy' } } },
         { path: 'scheduled-tasks', component: () => import('@/views/TasksPage.vue') },
         { path: 'deploy', component: () => import('@/views/DeployPage.vue') },
         {
