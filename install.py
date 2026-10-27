@@ -542,6 +542,23 @@ def verify_version(host: Host, binary: str, expected: str) -> None:
     log(f"    {host}: {Path(binary).name} {got}")
 
 
+# systemd generators of no use on a firewall, masked by a /dev/null link in
+# /etc/systemd/system-generators. systemd-ssh-generator runs on every daemon
+# reload (each unit the agent unmasks) and, outside a VM, logs "Failed to query
+# local AF_VSOCK CID" to the kernel log, which fills the console.
+MASKED_GENERATORS = ("systemd-ssh-generator",)
+GENERATORS_DIR = "/etc/systemd/system-generators"
+
+
+def mask_generators(host: Host) -> None:
+    for name in MASKED_GENERATORS:
+        link = shlex.quote(f"{GENERATORS_DIR}/{name}")
+        host.run(
+            f"mkdir -p {GENERATORS_DIR} && ln -sfn /dev/null {link}",
+            desc=f"ln -s /dev/null {GENERATORS_DIR}/{name}",
+        )
+
+
 def install_agent(host: Host, binary: Path, deploy: Path, version: str, assume_yes: bool) -> None:
     log(f"==> Installing portitor-agent {version} on {host}")
     new_config = not host.exists(AGENT_CONFIG)
@@ -558,6 +575,7 @@ def install_agent(host: Host, binary: Path, deploy: Path, version: str, assume_y
     actions = {u: install_unit(host, deploy / "systemd" / u, assume_yes) for u in AGENT_UNITS}
     move_kea_leases(host)
     move_bind_dirs(host)
+    mask_generators(host)
     host.systemctl("daemon-reload")
     install_apparmor(host, deploy)
     if new_config:
