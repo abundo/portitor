@@ -33,7 +33,8 @@ Around that, Portitor keeps the pair in step and safe:
   safe when the two can't hear each other but goes with the primary: lose the primary
   and the secondary fences instead of taking over, until you
   [promote](#promoting-the-secondary) it. For a takeover by itself, run an **external
-  witness** on a third host (see [The witness](#the-witness)).
+  witness** on a third host (see [The witness](#the-witness)), usually the portal
+  ([HA pair and portal](deployments.md#ha-pair-and-portal)).
 - **The agents reachable from each other** (and from an external witness). In each
   `/etc/portitor/agent.yaml`, `listen` on an address the others reach (`":8443"`), and
   `allow_from` including the peer's (and the witness's) addresses (loopback, for its

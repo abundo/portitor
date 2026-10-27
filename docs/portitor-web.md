@@ -20,6 +20,7 @@ pairs.
 Both are the same binary (`portitor-config` is a symlink to `portitor-web`).
 Installing them is covered in the [README](../README.md#install); the
 [installer ISO](appliance.md) puts portitor-config on the firewall.
+[Deployments](deployments.md) shows where each one runs in the three layouts.
 
 ## portitor-config
 

@@ -63,8 +63,9 @@ office networks. It manages:
 Every firewall keeps its own configuration: portitor-config, on the firewall, serves
 its GUI and keeps the configuration, and a small root daemon next to it, the agent,
 makes the changes. An optional portal, portitor-web, serves the GUIs of several
-firewalls from another host. The [installer ISO](docs/appliance.md) sets up a firewall
-from scratch.
+firewalls from another host. [Deployments](docs/deployments.md) shows the three layouts:
+one host, a firewall and a portal, and an HA pair with a portal. The
+[installer ISO](docs/appliance.md) sets up a firewall from scratch.
 
 ## How it fits together
 
