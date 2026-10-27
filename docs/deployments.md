@@ -9,7 +9,7 @@ Portitor runs in one of three layouts:
 |---|---|---|
 | [Everything on one host](#everything-on-one-host) | 1 | a home or a small office |
 | [Firewall and portal](#firewall-and-portal) | 2 | one place for the GUIs of one or more firewalls |
-| [HA pair and portal](#ha-pair-and-portal) | 3 | a firewall that keeps forwarding when a host fails |
+| [HA pair and portal](#ha-pair-and-portal) | 3 | a firewall that keeps forwarding when a host fails (experimental) |
 
 In every layout, each firewall keeps its own configuration. **portitor-config**, on
 the firewall next to **portitor-agent**, holds the configuration, serves the GUI and
@@ -62,6 +62,9 @@ firewall it lists.
  browser ──► portal ──────┤                                  │ copy of the configuration
              (witness)    └──► firewall 2 (secondary): portitor-config ──► portitor-agent
 ```
+
+> **Experimental.** This layout is new and needs more testing. Try it in a lab
+> before relying on it in production, and report what you find.
 
 Two firewalls run as an [HA pair](ha.md) with the same configuration, and
 [VRRP](vrrp.md) decides which one forwards. The primary's portitor-config holds the
