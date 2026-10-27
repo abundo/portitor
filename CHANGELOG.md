@@ -6,18 +6,74 @@
 The major changes in each release. A release's notes on GitHub are its section
 here (`dev/release-notes.sh`); the full list is `git log <previous tag>..<tag>`.
 
-## Unreleased
+## v0.7.0
 
 ### New
 
+- **portitor-config on every firewall:** each firewall holds its own configuration
+  and serves the GUI and API itself (port 8444), so it can be changed when no portal
+  is reachable. portitor-web becomes an optional portal with no configuration or
+  users of its own: it passes the GUIs of one or more firewalls through at
+  `/fw/<name>/`, with a firewall switcher in the top bar. The ISO sets up either
+  layout.
+- **HA pairs** (Admin → Firewalls, experimental): a secondary firewall that applies
+  the primary's configuration with its own peer values, VRRP, Kea HA and conntrackd
+  over an HA link, fencing without a quorum, a witness (portitor-config or
+  portitor-web), a read-only replica of the database and promotion.
+- **OpenVPN servers** (VPN → OpenVPN): an interface of type openvpn, UDP, TCP or
+  adaptive (both, with separate tunnel addresses), logins checked against the
+  users, a required role and the directory, client configs to download.
+- **Directory** (Admin → Directory): users, roles and OpenLDAP/Active Directory
+  servers, with LDAP groups mapped to roles.
+- **Two-factor login** with TOTP and recovery codes.
+- **VXLAN interfaces and BGP EVPN**, and **VRFs** with their own BGP, OSPF, IS-IS,
+  VRRP, BFD and routes, and L3VPN over EVPN (L3VNI, type-5 routes).
+- **IS-IS** (FRR's isisd) per virtual firewall
+- **Policy routes** (Routing → Policy): route forwarded traffic by source,
+  interface or service to another gateway or interface.
+- **DNS blocklists** (Services → DNS → Blocklists): malware and phishing domains as
+  response policy zones in BIND, refreshed on a schedule.
+- **IP lists:** public blocklists to start from, refreshed on a schedule.
+- **Rate limits:** the DNS, DHCP and NTP servers police what comes in to them; the
+  Rate limits page shows traffic, drops and shaper queues.
+- **Certificates:** certificate authorities, certificates made and signed here,
+  DNS-01 through a DNS update client (following `_acme-challenge` CNAMEs), and an
+  **ACME proxy** that gets certificates upstream for internal hosts.
+- **Tools:** connectivity tests (ICMP, TCP connect, UDP) and iperf3 bandwidth tests.
+- **Dashboard:** system information, CPU and memory, disk, traffic and logged
+  packets.
+- **Neighbours:** static ARP and ND entries. **Services:** custom port names for NAT
+  port fields. **Connections:** a Show active switch.
 - **Syslog** (Services → Syslog): the firewall's journal, followed live, and remote
   syslog servers (UDP or TCP, RFC 3164 or 5424, a minimum severity) that rsyslog
   sends it to.
 
+### Changed
+
+- Firewall names may be longer, with capitals, `-`, `_` and `.`.
+- Page forms keep their title and Save button at the top; Settings has one Save.
+- Kea's DHCPv4 server runs only with DHCPv4 subnets.
+- Built with Go 1.26.10 and golang.org/x/net 0.60.0 (security fixes).
+
+### Fixed
+
+- **An apply no longer stops at the first failing step.** One failing command (a
+  VLAN whose parent interface is down, say) left every interface after it down and
+  without addresses, at boot too. The agent now sets up every interface, address,
+  route and service it can and reports all the errors at the end; a commit with
+  errors still fails and is rolled back.
+- **DHCP after a reboot:** when renewing the saved lease fails, the DHCP and DHCPv6
+  clients ask for a new lease at once instead of waiting for the old one to expire.
+  They also try again as soon as their interface's link comes up (a cable plugged
+  in, the switch port up) instead of after their next retry delay.
+- Setup fills in the DNS servers that the DHCP server on the WAN offers; reverse
+  path filtering dropped its answer.
+- A renamed VLAN no longer clashes with its old device.
+- Setup accepts a /31 address (a point-to-point WAN link).
+
 ### Upgrading
 
-- An update installs rsyslog, masked until the firewall has syslog servers.
-
+- An update installs rsyslog, disabled until the firewall has syslog servers configured.
 - portitor-web's database moves to the firewall: portitor-config there owns it,
   and portitor-web becomes the portal to it at `/fw/<host name>/`. Everyone logs in
   again.
