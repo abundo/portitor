@@ -105,6 +105,10 @@ WEB_BIN = f"{BIN_DIR}/portitor-web"
 AGENT_BIN = f"{BIN_DIR}/portitor-agent"
 # The portitor command (show lldp neighbours, ...) is the agent run by this name.
 CLI_LINK = f"{BIN_DIR}/portitor"
+# Its bash completion (cobra's "portitor completion bash"), written on every
+# install and update so it follows the release's commands; the bash-completion
+# package loads it.
+CLI_COMPLETION = "/usr/share/bash-completion/completions/portitor"
 ETC_DIR = "/etc/portitor"
 WEB_CONFIG = f"{ETC_DIR}/web.yaml"
 AGENT_CONFIG = f"{ETC_DIR}/agent.yaml"
@@ -182,6 +186,8 @@ AGENT_PACKAGES = {
     # (agent_packages adds them for the architecture).
     "jool-dkms": (),
     "jool-tools": (),
+    # Loads the portitor command's completion (CLI_COMPLETION).
+    "bash-completion": (),
 }
 # BIND 9 stable from ISC's Debian repository
 # (https://kb.isc.org/docs/isc-packages-for-bind-9), newer than the
@@ -543,6 +549,11 @@ def install_agent(host: Host, binary: Path, deploy: Path, version: str, assume_y
         host.put(deploy / "agent.yaml", AGENT_CONFIG, "0600")
     host.put(binary, AGENT_BIN, "0755")
     host.run(f"ln -sfn portitor-agent {shlex.quote(CLI_LINK)}", desc=f"ln -s portitor-agent {CLI_LINK}")
+    host.run(
+        f"mkdir -p {shlex.quote(str(Path(CLI_COMPLETION).parent))}"
+        f" && {shlex.quote(CLI_LINK)} completion bash >{shlex.quote(CLI_COMPLETION)}",
+        desc=f"portitor completion bash >{CLI_COMPLETION}",
+    )
     host.put(Path(__file__).resolve(), INSTALLER_DEST, "0755", name=INSTALLER_FILENAME)
     actions = {u: install_unit(host, deploy / "systemd" / u, assume_yes) for u in AGENT_UNITS}
     move_kea_leases(host)
