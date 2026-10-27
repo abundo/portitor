@@ -805,8 +805,56 @@ func prepareRule(tx *gorm.DB, r, old *models.Rule) error {
 	if err := checkRateLimit(tx, r.InstanceID, r.RateLimit, r.Action); err != nil {
 		return err
 	}
+	if err := checkSynProxy(tx, r); err != nil {
+		return err
+	}
 	if old == nil && r.Position == 0 {
 		r.Position = nextPosition(tx, "rules", r.InstanceID)
+	}
+	return nil
+}
+
+// checkSynProxy checks a rule's SYN proxy as fwconfig.Validate does
+// (fwconfig.SynProxy), with its services and rate limit resolved.
+func checkSynProxy(tx *gorm.DB, r *models.Rule) error {
+	if !r.SynProxy {
+		return nil
+	}
+	if r.Chain != fwconfig.ChainForward || r.Action != fwconfig.ActionAccept {
+		return bad("SYN proxy: only a forward rule that accepts can have one")
+	}
+	if len(r.OutInterfaces) > 0 {
+		return bad("SYN proxy: a rule with one can't match outgoing interfaces (the handshake is answered before routing)")
+	}
+	var list []models.Service
+	if err := tx.Find(&list).Error; err != nil {
+		return err
+	}
+	matches, err := netobj.NewServices(list).Expand(r.Services)
+	if err != nil {
+		return bad("services: " + err.Error())
+	}
+	tcp := false
+	for _, m := range matches {
+		tcp = tcp || m.Protocol == fwconfig.ProtoTCP
+	}
+	if !tcp {
+		return bad("SYN proxy: the rule needs a TCP service")
+	}
+	if r.RateLimit != "" {
+		var l models.RateLimit
+		if err := tx.Where("instance_id = ? AND name = ?", r.InstanceID, r.RateLimit).Limit(1).Find(&l).Error; err != nil {
+			return err
+		}
+		if !l.Connections && !l.Shape {
+			return bad("SYN proxy: the rule's rate limit must limit or shape connections")
+		}
+	}
+	if m := r.SynProxyMSS; m != 0 && (m < fwconfig.MinSynProxyMSS || m > fwconfig.MaxSynProxyMSS) {
+		return bad(fmt.Sprintf("SYN proxy: MSS must be 0 (default) or between %d and %d", fwconfig.MinSynProxyMSS, fwconfig.MaxSynProxyMSS))
+	}
+	if w := r.SynProxyWScale; w < 0 || w > fwconfig.MaxSynProxyWScale {
+		return bad(fmt.Sprintf("SYN proxy: window scale must be between 0 and %d", fwconfig.MaxSynProxyWScale))
 	}
 	return nil
 }

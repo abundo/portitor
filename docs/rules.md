@@ -63,6 +63,7 @@ locked rows show where the built-in parts sit:
 | Destination addresses | The same, for the destination. |
 | Action | **accept** lets it through; **drop** discards it silently; **reject** discards it and tells the sender (TCP reset, or ICMP port unreachable), so a client fails at once instead of waiting for a timeout. |
 | Rate limit | A rate from the *Rate limits* page, which limits or shapes the rule's traffic. See [Rate limits](#rate-limits). |
+| SYN proxy | Forward accept rules: answer the TCP handshakes with SYN cookies before the server sees them, against SYN floods. See [SYN flood protection](#syn-flood-protection). |
 | Log matches | Every packet the rule matches shows in the log panel's *Logged packets* tab. |
 | Enabled | A disabled rule stays in the list but is not deployed. New rules start disabled. |
 | Description | Shown in the table, in the log and in the ruleset's comments. |
@@ -179,6 +180,50 @@ rules list (*Input*) show the rate limit next to *accept*, and *Dropped* on the
 Rate limits page counts what it drops. A service's rate limit always polices; it
 can't shape, and it can be deleted only while it is switched off (switching it on
 again makes a new one).
+
+## SYN flood protection
+
+A SYN flood sends a server a stream of connection requests (TCP SYNs), often from
+forged addresses, that never complete the handshake. Each one takes up a place in
+the server's queue and an entry in the firewall's connection table.
+
+**The firewall itself** is protected by SYN cookies, always on: when the queue of
+one of its own services (the GUI, SSH, DNS over TCP) is full, it answers with a
+cookie and keeps no state until the client answers.
+
+**Servers behind the firewall** are protected by a rule's **SYN proxy**. The firewall
+answers each SYN itself with a SYN cookie. Only when the client completes the
+handshake does the firewall open the connection to the server and join the two. A
+forged source never answers, so the server never sees it, and no connection entry
+is made for it.
+
+Switch on *SYN proxy* in a forward rule that accepts:
+
+| In | Out | Services | Source | Destination | Action | |
+|---|---|---|---|---|---|---|
+| wan | | https | | web server | accept | SYN proxy |
+
+- It applies to the rule's **TCP** services. The rule's other services (UDP 443 of
+  *https*, for HTTP/3) are accepted as they would be without it. The rule needs at
+  least one TCP service.
+- The rule can't have **outgoing interfaces**: the firewall answers the SYN before it
+  is routed. Narrow it by incoming interface and destination address instead.
+- **Not for port forwards.** A port forward's connections are to an address of the
+  firewall, which a SYN proxy leaves alone. Use it for servers with addresses of their
+  own (routed, or in a DMZ).
+- **MSS** and **window scale** are what the firewall tells the client about the
+  server, so they must match the server. The MSS is 1460 by default (IPv4; IPv6 gets
+  20 less): lower it when the server's link has a smaller MTU (1452 over PPPoE). The
+  window scale is 7 by default, which suits Linux and most others; use 8 for Windows
+  servers. A window scale lower than the server's makes transfers slower; a higher one
+  loses packets.
+- The rule counts, logs and rate-limits the proxied connections as usual. A rate
+  limit must be one for whole connections, or a shaper.
+- With a SYN proxy in a virtual firewall, its connection table no longer takes up a
+  TCP connection it hasn't seen from the start. An established connection that
+  wasn't in the table, after a reboot say, has to reconnect. On an HA pair, the
+  connections synchronised to the other host carry on after a switch-over, but
+  handshakes in progress during it fail and are retried by the client.
 
 ## Working on the Rules page
 

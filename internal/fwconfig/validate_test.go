@@ -88,6 +88,19 @@ func TestValidateCatchesProblems(t *testing.T) {
 		{"connection limit without id", func(d *Document) { d.Instances[0].Rules[18].ID = 0 }, "limits or shapes connections"},
 		{"interface named ifb-", func(d *Document) { d.Instances[0].Interfaces[1].Name = "ifb-x" }, "names are for shaping"},
 		{"shaping range", func(d *Document) { d.Instances[0].Interfaces[0].ShapeIngress = -1 }, "shaping must be"},
+		{"syn proxy on input", func(d *Document) { synProxyRule(d).Chain = ChainInput }, "for forward accept rules"},
+		{"syn proxy on drop", func(d *Document) { synProxyRule(d).Action = ActionDrop }, "for forward accept rules"},
+		{"syn proxy out interfaces", func(d *Document) { synProxyRule(d).OutInterfaces = []string{"lan"} }, "no outgoing interfaces"},
+		{"syn proxy any protocol", func(d *Document) { synProxyRule(d).Services = nil }, "needs a TCP service"},
+		{"syn proxy udp", func(d *Document) {
+			synProxyRule(d).Services = []ServiceMatch{{Protocol: ProtoUDP, DstPorts: "443"}}
+		}, "needs a TCP service"},
+		{"syn proxy packet limit", func(d *Document) { synProxyRule(d).RateLimit = "ssh" }, "must limit or shape connections"},
+		{"syn proxy mss", func(d *Document) { synProxyRule(d).SynProxy.MSS = 100 }, "SYN proxy MSS 100"},
+		{"syn proxy wscale", func(d *Document) { synProxyRule(d).SynProxy.WScale = 15 }, "window scale 15"},
+		{"syn proxy on a comment", func(d *Document) {
+			d.Instances[0].Rules = append(d.Instances[0].Rules, Rule{Chain: ChainForward, Kind: RuleKindComment, SynProxy: &SynProxy{}})
+		}, "a comment has only"},
 		{"shaping on drop", func(d *Document) { d.Instances[0].Rules[19].Action = ActionDrop }, "limits or shapes connections"},
 		{"shaping in packets", func(d *Document) { d.Instances[0].RateLimits[4].Unit = "" }, "shaping needs a rate in bytes or bits"},
 		{"shaping per minute", func(d *Document) { d.Instances[0].RateLimits[4].Per = RatePerMinute }, "a rate per second only"},
@@ -678,5 +691,28 @@ func TestACMEProxyHTTP01Valid(t *testing.T) {
 	}
 	if got := x.HTTP01Interfaces(); len(got) != 1 || got[0] != d.Instances[0].Interfaces[0].Name {
 		t.Errorf("HTTP01Interfaces = %v", got)
+	}
+}
+
+// synProxyRule adds a valid rule with a SYN proxy to the first instance.
+func synProxyRule(d *Document) *Rule {
+	in := &d.Instances[0]
+	in.Rules = append(in.Rules, Rule{
+		Chain: ChainForward, InInterfaces: []string{"wan"}, DstAddrs: []string{"192.168.1.10"},
+		Services: []ServiceMatch{{Protocol: ProtoTCP, DstPorts: "443"}},
+		Action:   ActionAccept, SynProxy: &SynProxy{WScale: 7},
+	})
+	return &in.Rules[len(in.Rules)-1]
+}
+
+func TestValidateSynProxy(t *testing.T) {
+	d := SampleDocument()
+	r := synProxyRule(&d)
+	r.ID, r.RateLimit = 1000, "updates"
+	if err := d.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if !d.Instances[0].HasSynProxy() || d.Instances[1].HasSynProxy() {
+		t.Error("HasSynProxy")
 	}
 }

@@ -265,6 +265,29 @@ const fields = [
     hint: 'When the rule matches, its traffic goes through the rate limit. Police drops what is over the rate; Shape (accept rules only) queues it. Rate limits are defined on the Rate limits page.',
   },
   {
+    key: 'syn_proxy',
+    label: 'SYN proxy',
+    type: 'switch',
+    show: (f) => !f.match && f.chain === 'forward' && f.action === 'accept',
+    hint: "Protects servers behind the firewall from SYN floods: the firewall answers each TCP handshake with a SYN cookie and connects to the server only once the client completes it. Applies to the rule's TCP services (others are accepted as usual); the rule can't have outgoing interfaces. Not for port forwards: a connection to the firewall's own address is left alone.",
+  },
+  {
+    key: 'syn_proxy_mss',
+    label: 'SYN proxy MSS',
+    type: 'number',
+    zeroEmpty: true,
+    placeholder: '1460 (default)',
+    show: (f) => f.syn_proxy && f.chain === 'forward' && f.action === 'accept',
+    hint: '536-65495, empty: 1460. The largest segment the client is told the servers take, for IPv4 (20 less for IPv6); lower it on a link with a smaller MTU (1452 over PPPoE).',
+  },
+  {
+    key: 'syn_proxy_wscale',
+    label: 'SYN proxy window scale',
+    type: 'number',
+    show: (f) => f.syn_proxy && f.chain === 'forward' && f.action === 'accept',
+    hint: "0-14. The servers' TCP window scale, which the client is told: 7 for Linux and most others, 8 for Windows.",
+  },
+  {
     key: 'log',
     label: 'Log matches',
     type: 'switch',
@@ -376,6 +399,9 @@ function clean(b) {
         dst_addrs: [],
         services: [],
         rate_limit: '',
+        syn_proxy: false,
+        syn_proxy_mss: 0,
+        syn_proxy_wscale: 7,
       }"
       new-label=""
       reorder="rules"

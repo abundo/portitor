@@ -371,7 +371,7 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 		}
 		if r.Kind == RuleKindComment {
 			if len(r.InInterfaces)+len(r.OutInterfaces)+len(r.SrcAddrs)+len(r.DstAddrs) > 0 ||
-				r.Family != "" || len(r.Services) > 0 || r.Action != "" || r.Log || r.ID != 0 || r.RateLimit != "" {
+				r.Family != "" || len(r.Services) > 0 || r.Action != "" || r.Log || r.ID != 0 || r.RateLimit != "" || r.SynProxy != nil {
 				v.addf("%s: a comment has only a chain and a description", rp)
 			}
 			checkComment(v, rp, r.Description)
@@ -411,6 +411,9 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 			if valid && len(r.Services) > 0 && len(r.Matches()) == 0 {
 				v.addf("%s: no service fits the rule's IP version and addresses", rp)
 			}
+		}
+		if r.SynProxy != nil {
+			v.synProxy(rp, r, connLimits)
 		}
 		checkComment(v, rp, r.Description)
 	}
@@ -1267,5 +1270,31 @@ func (v *validator) logChains(what string, chains []string) {
 			v.addf("%s: %s listed twice", what, c)
 		}
 		seen[c] = true
+	}
+}
+
+// synProxy checks a rule's SYN proxy (SynProxy).
+func (v *validator) synProxy(rp string, r Rule, connLimits map[string]bool) {
+	if r.Chain != ChainForward || r.Action != ActionAccept {
+		v.addf("%s: a SYN proxy is for forward accept rules", rp)
+	}
+	if len(r.OutInterfaces) > 0 {
+		v.addf("%s: a SYN proxy rule has no outgoing interfaces (the handshake is answered before routing)", rp)
+	}
+	tcp := false
+	for _, s := range r.Services {
+		tcp = tcp || s.Protocol == ProtoTCP
+	}
+	if !tcp {
+		v.addf("%s: a SYN proxy rule needs a TCP service", rp)
+	}
+	if marks, ok := connLimits[r.RateLimit]; ok && !marks {
+		v.addf("%s: a SYN proxy rule's rate limit must limit or shape connections", rp)
+	}
+	if m := r.SynProxy.MSS; m != 0 && (m < MinSynProxyMSS || m > MaxSynProxyMSS) {
+		v.addf("%s: SYN proxy MSS %d is not between %d and %d", rp, m, MinSynProxyMSS, MaxSynProxyMSS)
+	}
+	if w := r.SynProxy.WScale; w < 0 || w > MaxSynProxyWScale {
+		v.addf("%s: SYN proxy window scale %d is not between 0 and %d", rp, w, MaxSynProxyWScale)
 	}
 }

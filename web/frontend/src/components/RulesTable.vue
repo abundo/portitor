@@ -184,7 +184,7 @@ function searchCells(r) {
     src_addrs: listText(r.src_addrs),
     dst_addrs: listText(r.dst_addrs),
     services: listText(r.services),
-    action: [r.action, r.rate_limit].filter(Boolean).join(' '),
+    action: [r.action, r.rate_limit, r.syn_proxy && 'syn proxy'].filter(Boolean).join(' '),
     description: r.description,
   }
   if (hasFrom.value) {
@@ -1132,6 +1132,16 @@ function onKeydown(event, index) {
                     :label="r.rate_limit"
                     class="ml-1"
                     :title="`Rate limit ${r.rate_limit}`"
+                  />
+                  <UBadge
+                    v-if="r.syn_proxy"
+                    color="neutral"
+                    variant="subtle"
+                    size="sm"
+                    icon="i-lucide-shield"
+                    label="SYN proxy"
+                    class="ml-1"
+                    title="SYN proxy: the TCP handshakes are answered with SYN cookies before the server sees them"
                   />
                 </td>
                 <td class="text-center">

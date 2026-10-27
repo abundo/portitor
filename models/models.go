@@ -774,9 +774,14 @@ type Rule struct {
 	Action   string     `json:"action"`
 	Log      bool       `json:"log"`
 	// RateLimit names one of the instance's rate limits; empty is none.
-	RateLimit   string `json:"rate_limit"`
-	Enabled     bool   `json:"enabled"`
-	Description string `json:"description"`
+	RateLimit string `json:"rate_limit"`
+	// SynProxy answers a forward accept rule's TCP handshakes with SYN
+	// cookies (fwconfig.SynProxy); SynProxyMSS 0 is the default.
+	SynProxy       bool   `json:"syn_proxy"`
+	SynProxyMSS    int    `json:"syn_proxy_mss" gorm:"column:syn_proxy_mss"`
+	SynProxyWScale int    `json:"syn_proxy_wscale" gorm:"column:syn_proxy_wscale"`
+	Enabled        bool   `json:"enabled"`
+	Description    string `json:"description"`
 }
 
 // RateLimit limits the traffic of the rules that name it

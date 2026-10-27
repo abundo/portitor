@@ -295,8 +295,54 @@ type Rule struct {
 	Log      bool           `json:"log,omitempty"`
 	// RateLimit names one of the instance's RateLimits, which limits or
 	// shapes the rule's traffic (RateLimit).
-	RateLimit   string `json:"rate_limit,omitempty"`
-	Description string `json:"description,omitempty"`
+	RateLimit string `json:"rate_limit,omitempty"`
+	// SynProxy answers the TCP handshakes of a forward accept rule on the
+	// servers' behalf, with SYN cookies (SynProxy).
+	SynProxy    *SynProxy `json:"syn_proxy,omitempty"`
+	Description string    `json:"description,omitempty"`
+}
+
+// SynProxy: nftables' synproxy answers a client's SYN with a SYN cookie
+// and opens the connection to the server only once the client has
+// completed the handshake, so a SYN flood (spoofed sources) never reaches
+// the server or fills the conntrack table. The SYNs the rule matches are
+// untracked (prerouting, priority raw) and handed to synproxy in the
+// forward chain before the invalid drop; the packets synproxy itself sends
+// come through the output chain (render.writeSynProxyOutput). It needs
+// nf_conntrack_tcp_loose off, which the agent sets in a namespace with a
+// SYN proxy (Instance.HasSynProxy).
+//
+// It proxies the rule's TCP services; the others (UDP 443 of https) are
+// accepted as without it. The rule is a forward accept rule with a TCP
+// service, no outgoing interfaces (the SYN is untracked before routing) and a rate limit, if
+// any, that polices or shapes connections. A SYN to an address of the
+// firewall, as a port forward's, is left alone: an untracked packet is
+// never DNATed.
+//
+// MSS and WScale are what the client is told the server takes: MSS for
+// IPv4 (20 less for IPv6), 0 for 1460; WScale should be the server's
+// window scale (Linux and most others use 7, Windows 8).
+type SynProxy struct {
+	MSS    int `json:"mss,omitempty"`
+	WScale int `json:"wscale"`
+}
+
+// SynProxy defaults and limits.
+const (
+	DefaultSynProxyMSS = 1460
+	MinSynProxyMSS     = 536
+	MaxSynProxyMSS     = 65495
+	MaxSynProxyWScale  = 14
+)
+
+// HasSynProxy reports whether a rule of the instance has a SYN proxy.
+func (in *Instance) HasSynProxy() bool {
+	for _, r := range in.Rules {
+		if r.SynProxy != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // RateLimit is a token bucket: Rate units per Per, with Burst units

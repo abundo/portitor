@@ -226,7 +226,14 @@ docs and user-facing messages.
   non-passive interfaces; their sources are sets `render.AutoSetName`, which Hosts &
   prefixes lists read-only), then the user's rules; in forward, the accept of port
   forwards (`ct status dnat`) comes after the user's rules, so a rule can drop what a
-  DNAT would let in; then the policy. The input auto accepts stay first so a rule
+  DNAT would let in; then the policy. A forward rule's SYN proxy (`fwconfig.SynProxy`,
+  `render/synproxy.go`) is the exception: its SYNs are untracked in
+  `prerouting_synproxy` (priority raw; not to the firewall's own addresses), its
+  `synproxy` statement comes before the invalid drop (it takes the client's ACK, which
+  conntrack finds invalid without `nf_conntrack_tcp_loose`, off in such a namespace),
+  and the output chain accepts what synproxy sends from the client's and server's
+  addresses, before its invalid drop too (the SYN cookie is invalid to conntrack),
+  the server's SYN with the rule's counter, log and `ct mark`. The input auto accepts stay first so a rule
   that closes an interface to the firewall keeps the DHCP and DNS enabled on it.
   The output chain has auto accepts too, before the user's rules: the BGP sessions
   FRR opens to its neighbours (TCP 179), what OSPF sends (IP protocol 89,

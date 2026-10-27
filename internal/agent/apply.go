@@ -289,7 +289,16 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 		// -e: an interface with IPv6 disabled has no accept_ra key.
 		// Conntrack timestamps and accounting give the Connections page start
 		// times and packet and byte counts.
-		sysctls := []string{"net.ipv4.ip_forward=1", "net.ipv6.conf.all.forwarding=1", "net.netfilter.nf_conntrack_timestamp=1", "net.netfilter.nf_conntrack_acct=1"}
+		// SYN cookies (the kernel's default, set so it stays that way)
+		// answer a SYN flood on the firewall's own listening sockets once
+		// their queue is full. A SYN proxy (fwconfig.SynProxy) needs
+		// conntrack to find a lone ACK invalid, not take it up mid-stream.
+		loose := "1"
+		if in.HasSynProxy() {
+			loose = "0"
+		}
+		sysctls := []string{"net.ipv4.ip_forward=1", "net.ipv6.conf.all.forwarding=1", "net.netfilter.nf_conntrack_timestamp=1", "net.netfilter.nf_conntrack_acct=1",
+			"net.ipv4.tcp_syncookies=1", "net.netfilter.nf_conntrack_tcp_loose=" + loose}
 		// A policy route whose interface lost its carrier is passed over,
 		// to the main table (fwconfig.PolicyRoute).
 		policyDevs := in.PolicyRouteDevices()

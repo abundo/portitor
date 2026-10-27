@@ -489,6 +489,9 @@ func buildPeer(db *gorm.DB, generation int64, only map[string]bool, firewallID u
 				RateLimit:     r.RateLimit,
 				Description:   r.Description,
 			}
+			if r.SynProxy {
+				rule.SynProxy = &fwconfig.SynProxy{MSS: r.SynProxyMSS, WScale: r.SynProxyWScale}
+			}
 			// An unresolved name must not leave an emptier (wider) match.
 			if !failed {
 				in.Rules = append(in.Rules, rule)

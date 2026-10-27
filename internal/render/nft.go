@@ -186,6 +186,8 @@ func Nftables(in *fwconfig.Instance, lockout *AntiLockout, paths Paths) string {
 		b.WriteString(connCountRules)
 	}
 	b.WriteString("\t\tct state established,related accept\n")
+	// A SYN proxy takes the ACKs conntrack finds invalid.
+	writeSynProxies(b, in)
 	writeInvalidDrop(b, in, fwconfig.ChainForward)
 	writeVRFLabels(b, in, fwconfig.ChainForward)
 	b.WriteString("\t\tmeta l4proto ipv6-icmp icmpv6 type { destination-unreachable, packet-too-big, time-exceeded, parameter-problem } accept\n")
@@ -205,6 +207,8 @@ func Nftables(in *fwconfig.Instance, lockout *AntiLockout, paths Paths) string {
 		b.WriteString(connCountRules)
 	}
 	b.WriteString("\t\tct state established,related accept\n")
+	// What a SYN proxy sends, its SYN cookie invalid to conntrack.
+	writeSynProxyOutput(b, in)
 	writeInvalidDrop(b, in, fwconfig.ChainOutput)
 	b.WriteString("\t\toif \"lo\" accept\n")
 	if names := in.VRFNames(); len(names) > 0 {
@@ -261,6 +265,7 @@ func Nftables(in *fwconfig.Instance, lockout *AntiLockout, paths Paths) string {
 
 	writeNAT64(b, in, counted)
 	writePolicyRoutes(b, in)
+	writeSynProxyNotrack(b, in)
 
 	// ----- NAT -----
 	b.WriteString("\tchain prerouting_nat {\n")
