@@ -54,6 +54,7 @@ func TestOpenVPN(t *testing.T) {
 		"unknown role":  {"ovpn_role_id": 999},
 		"domain":        {"ovpn_dns_domain": "a b"},
 		"listen itself": {"ovpn_listen": "ovpn0"},
+		"two-factor":    {"ovpn_two_factor": "sms"},
 	} {
 		body := map[string]any{}
 		for k, v := range base {
@@ -149,6 +150,45 @@ func TestOpenVPN(t *testing.T) {
 	}
 	if strings.Index(cc.Config, " udp\n") > strings.Index(cc.Config, " tcp-client\n") || cc.Filename != "main-ovpn0.ovpn" {
 		t.Errorf("client config order or name %q", cc.Filename)
+	}
+	if strings.Contains(cc.Config, "static-challenge") {
+		t.Error("static-challenge without two-factor login")
+	}
+
+	// Two-factor login: alice's TOTP secret in the document (not in its
+	// redacted copy), and the client asks for the code.
+	const secret = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
+	env.srv.db.Model(&models.User{}).Where("id = ?", alice).Update("totp_secret", secret)
+	totps := func() map[string]string {
+		doc, _ = builder.Build(env.srv.db, 1)
+		m := map[string]string{}
+		for _, u := range doc.Instance("main").Interface("ovpn0").OpenVPN.Users {
+			m[u.Name] = u.TOTP
+		}
+		return m
+	}
+	if got := totps(); got["alice"] != "" {
+		t.Errorf("TOTP without two-factor login: %v", got)
+	}
+	if rec := env.do("PUT", path, map[string]any{"ovpn_two_factor": "user"}); rec.Code != http.StatusOK {
+		t.Fatalf("two-factor: %d %s", rec.Code, rec.Body)
+	}
+	if got := totps(); got["alice"] != secret || got["bob"] != "" {
+		t.Errorf("TOTP secrets %v", got)
+	}
+	if o = doc.Instance("main").Interface("ovpn0").OpenVPN; o.TwoFactor != "user" {
+		t.Errorf("two-factor %q", o.TwoFactor)
+	}
+	if err := doc.Validate(); err != nil {
+		t.Error(err)
+	}
+	if b, _ := json.Marshal(redactDoc(*doc)); strings.Contains(string(b), secret) {
+		t.Error("redacted document holds the TOTP secret")
+	}
+	rec = env.do("GET", path+"/openvpn-client", nil)
+	_ = json.Unmarshal(rec.Body.Bytes(), &cc)
+	if !strings.Contains(cc.Config, "auth-user-pass\nauth-nocache\nstatic-challenge \"Authenticator code\" 1\n") {
+		t.Errorf("client config without static-challenge:\n%s", cc.Config)
 	}
 }
 

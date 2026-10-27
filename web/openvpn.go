@@ -42,6 +42,9 @@ func prepareOpenVPN(tx *gorm.DB, i, old *models.Interface) error {
 	if err := oneOf("mode", i.OvpnMode, fwconfig.OpenVPNModes...); err != nil {
 		return err
 	}
+	if !slices.Contains(fwconfig.OpenVPNTwoFactors, i.OvpnTwoFactor) {
+		return bad("two-factor login must be off (empty), user or required")
+	}
 	if i.OvpnPort == 0 {
 		i.OvpnPort = fwconfig.OpenVPNPort
 	}
@@ -239,20 +242,25 @@ func (s *Server) handleOpenVPNClientConfig(c *echo.Context) error {
 	if !ifc.Enabled {
 		warnings = append(warnings, "The interface is disabled.")
 	}
-	m := &models.Interface{OvpnMode: ifc.OvpnMode, OvpnPort: ifc.OvpnPort, OvpnTlsCrypt: ifc.OvpnTlsCrypt}
+	m := &models.Interface{OvpnMode: ifc.OvpnMode, OvpnPort: ifc.OvpnPort, OvpnTlsCrypt: ifc.OvpnTlsCrypt, OvpnTwoFactor: ifc.OvpnTwoFactor}
 	cfg := openVPNClientConf(inst.Name, ifc.Name, host, ca, m)
 	return c.JSON(http.StatusOK, map[string]any{
 		"config": cfg, "filename": inst.Name + "-" + ifc.Name + ".ovpn", "warnings": warnings,
 	})
 }
 
-// openVPNClientConf is the client config of a server (mode, port, key in
-// ifc) reached at host.
+// openVPNClientConf is the client config of a server (mode, port, key and
+// two-factor login in ifc) reached at host. With two-factor login the
+// client asks for the code too (static-challenge), and sends it with the
+// password (SCRV1, the agent's splitChallenge).
 func openVPNClientConf(instance, iface, host string, ca *agentapi.OpenVPNCA, ifc *models.Interface) string {
 	b := &strings.Builder{}
 	fmt.Fprintf(b, "# OpenVPN client for %s (%s), from Portitor.\n", instance, iface)
 	b.WriteString("client\ndev tun\nnobind\npersist-tun\n")
 	b.WriteString("auth-user-pass\nauth-nocache\n")
+	if ifc.OvpnTwoFactor != fwconfig.OpenVPNTwoFactorOff {
+		b.WriteString("static-challenge \"Authenticator code\" 1\n")
+	}
 	b.WriteString("remote-cert-tls server\n")
 	fmt.Fprintf(b, "verify-x509-name %s name\n", ca.CommonName)
 	b.WriteString("data-ciphers AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305\n")

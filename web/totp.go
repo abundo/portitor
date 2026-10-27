@@ -4,13 +4,9 @@
 package web
 
 import (
-	"crypto/hmac"
 	"crypto/rand"
-	"crypto/sha1"
 	"crypto/sha256"
 	"crypto/subtle"
-	"encoding/base32"
-	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -23,6 +19,7 @@ import (
 	"github.com/labstack/echo/v5"
 	"gorm.io/gorm"
 
+	"github.com/abundo/portitor/internal/totp"
 	"github.com/abundo/portitor/models"
 )
 
@@ -32,16 +29,12 @@ import (
 // one of the recovery codes, each good once.
 
 const (
-	totpPeriod = 30
-	totpDigits = 6
-	// totpSkew steps before and after now are accepted too (clock drift).
-	totpSkew = 1
 	// recoveryCount codes are made at a time.
 	recoveryCount = 10
 	totpIssuer    = "Portitor"
 )
 
-var b32 = base32.StdEncoding.WithPadding(base32.NoPadding)
+var b32 = totp.Encoding
 
 func newTOTPSecret() (string, error) {
 	b := make([]byte, 20)
@@ -51,34 +44,9 @@ func newTOTPSecret() (string, error) {
 	return b32.EncodeToString(b), nil
 }
 
-// totpCode is the code of a step (RFC 4226 dynamic truncation).
-func totpCode(key []byte, step int64) string {
-	m := hmac.New(sha1.New, key)
-	_ = binary.Write(m, binary.BigEndian, uint64(step))
-	sum := m.Sum(nil)
-	o := sum[len(sum)-1] & 0x0f
-	v := binary.BigEndian.Uint32(sum[o:o+4]) & 0x7fffffff
-	return fmt.Sprintf("%0*d", totpDigits, v%1000000)
-}
-
-// totpMatch returns the step of now's window whose code is code, or 0.
-func totpMatch(secret, code string, now time.Time) int64 {
-	key, err := b32.DecodeString(secret)
-	if err != nil || len(code) != totpDigits {
-		return 0
-	}
-	cur := now.Unix() / totpPeriod
-	for step := cur - totpSkew; step <= cur+totpSkew; step++ {
-		if subtle.ConstantTimeCompare([]byte(totpCode(key, step)), []byte(code)) == 1 {
-			return step
-		}
-	}
-	return 0
-}
-
 func totpURI(username, secret string) string {
 	v := url.Values{"secret": {secret}, "issuer": {totpIssuer}, "algorithm": {"SHA1"},
-		"digits": {fmt.Sprint(totpDigits)}, "period": {fmt.Sprint(totpPeriod)}}
+		"digits": {fmt.Sprint(totp.Digits)}, "period": {fmt.Sprint(totp.Period)}}
 	return "otpauth://totp/" + url.PathEscape(totpIssuer+":"+username) + "?" + v.Encode()
 }
 
@@ -119,7 +87,7 @@ func newRecoveryCodes() ([]string, string, error) {
 // can't both use one code.
 func checkSecondFactor(db *gorm.DB, u *models.User, code string) (bool, error) {
 	code = normalizeCode(code)
-	if step := totpMatch(u.TOTPSecret, code, time.Now()); step != 0 {
+	if step := totp.Match(u.TOTPSecret, code, time.Now()); step != 0 {
 		res := db.Model(&models.User{}).Where("id = ? AND totp_last_step < ?", u.ID, step).
 			Update("totp_last_step", step)
 		return res.RowsAffected == 1, res.Error
@@ -212,7 +180,7 @@ func (s *Server) handleTOTPEnable(c *echo.Context) error {
 	if u.TOTPPending == "" {
 		return errJSON(c, http.StatusBadRequest, "set up two-factor login first")
 	}
-	step := totpMatch(u.TOTPPending, normalizeCode(req.Code), time.Now())
+	step := totp.Match(u.TOTPPending, normalizeCode(req.Code), time.Now())
 	if step == 0 {
 		return errJSON(c, http.StatusBadRequest, "the code is wrong; check the time on your phone")
 	}

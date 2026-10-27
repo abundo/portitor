@@ -578,7 +578,8 @@ type Interface struct {
 	// the directory's, with OvpnRequireRole only the members of OvpnRoleID
 	// (none when the role is gone). OvpnTlsCrypt is the static key, a secret
 	// generated here that clients get in their config. OvpnHost is the
-	// name clients connect to.
+	// name clients connect to. OvpnTwoFactor asks for a TOTP code too
+	// (fwconfig.OpenVPNTwoFactors).
 	OvpnMode            string     `json:"ovpn_mode"`
 	OvpnPort            int        `json:"ovpn_port"`
 	OvpnListen          string     `json:"ovpn_listen"`
@@ -593,6 +594,7 @@ type Interface struct {
 	OvpnDnsDomain       string     `json:"ovpn_dns_domain"`
 	OvpnClientToClient  bool       `json:"ovpn_client_to_client"`
 	OvpnHost            string     `json:"ovpn_host"`
+	OvpnTwoFactor       string     `json:"ovpn_two_factor"`
 }
 
 // LdapServer is an OpenLDAP or Active Directory server of the directory

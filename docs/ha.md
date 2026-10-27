@@ -197,9 +197,9 @@ and *HA peer priority* where both are set), the old primary becomes the secondar
 the pair's **epoch** goes up, and it commits. The commit skips the old primary while
 it is away.
 
-When the old primary comes back, its agent still has the document of before. It
+When the old primary comes back, its agent still has the configuration deployed before. It
 hears its peer answer as primary at a higher epoch: it has been taken over, so it
-stays **fenced** (and refuses documents of the earlier epoch). Its portitor-config
+stays **fenced** (and refuses configurations of the earlier epoch). Its portitor-config
 becomes a replica of the new primary. The new primary then catches it up with the
 secondary's configuration, and it takes part as the secondary. To drop it instead,
 delete it under *Admin → Firewalls* and add a new secondary later.

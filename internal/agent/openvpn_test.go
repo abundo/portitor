@@ -11,17 +11,21 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/base64"
 	"encoding/pem"
 	"fmt"
 	"math/big"
 	"net"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/internal/ldapauth"
+	"github.com/abundo/portitor/internal/totp"
 )
 
 // fakeOpenVPN is OpenVPN's side of the management socket: it sends
@@ -190,5 +194,80 @@ func TestClientCA(t *testing.T) {
 	}
 	if _, err := clientCA([]byte("junk")); err == nil {
 		t.Error("junk accepted")
+	}
+}
+
+func TestOpenVPNTwoFactor(t *testing.T) {
+	f, sock := newFakeOpenVPN(t)
+	m := newOpenVPNManager(false, &DryRunner{})
+	m.failDelay = 0
+	m.ldapAuth = func(_ context.Context, _ fwconfig.LDAPServer, user, pass string) (bool, *ldapauth.UserInfo, error) {
+		return pass == user+"pass", &ldapauth.UserInfo{Groups: []string{"CN=VPN,CN=Users,DC=example,DC=com"}}, nil
+	}
+	doc := fwconfig.SampleDocument()
+	cfg := *doc.Instances[0].Interfaces[5].OpenVPN
+	key := []byte("12345678901234567890")
+	cfg.TwoFactor = fwconfig.OpenVPNTwoFactorUser
+	cfg.Users = slices.Clone(cfg.Users)
+	cfg.Users[0].TOTP = totp.Encoding.EncodeToString(key) // alice
+	item := openvpnItem{instance: "main", iface: "ovpn0", device: "ovpn0", unit: "openvpn-server@portitor-udp.service", socket: sock,
+		certDir: t.TempDir(), cfg: cfg, dir: doc.Directory.Servers}
+	m.Reconcile([]openvpnItem{item})
+	defer m.Stop()
+
+	scrv1 := func(pass, code string) string {
+		return "SCRV1:" + base64.StdEncoding.EncodeToString([]byte(pass)) + ":" + base64.StdEncoding.EncodeToString([]byte(code))
+	}
+	code := totp.Code(key, time.Now().Unix()/totp.Period)
+	wrong := fmt.Sprintf("%06d", (mustAtoi(t, code)+1)%1000000)
+	for _, c := range []struct {
+		cid        int
+		user, pass string
+		want       string
+	}{
+		{1, "alice", "alicepass", `client-deny 1 1 "login refused"`},
+		{2, "alice", scrv1("alicepass", wrong), `client-deny 2 1 "login refused"`},
+		{3, "alice", scrv1("wrong", code), `client-deny 3 1 "login refused"`},
+		{4, "alice", scrv1("alicepass", code), "client-auth-nt 4 1"},
+		// A code is good once.
+		{5, "alice", scrv1("alicepass", code), `client-deny 5 1 "login refused"`},
+		// bob (directory) has no secret: no code needed, any sent ignored.
+		{6, "bob", "bobpass", "client-auth-nt 6 1"},
+		{7, "bob", scrv1("bobpass", ""), "client-auth-nt 7 1"},
+	} {
+		f.connect("CONNECT", c.cid, c.user, c.pass)
+		if got := f.next(); got != c.want {
+			t.Errorf("%d %s: %q, want %q", c.cid, c.user, got, c.want)
+		}
+	}
+
+	// Required: bob, without a secret, is refused.
+	item.cfg.TwoFactor = fwconfig.OpenVPNTwoFactorRequired
+	m.Reconcile([]openvpnItem{item})
+	f.connect("CONNECT", 8, "bob", scrv1("bobpass", "123456"))
+	if got := f.next(); got != `client-deny 8 1 "login refused"` {
+		t.Errorf("required: %q", got)
+	}
+}
+
+func mustAtoi(t *testing.T, s string) int {
+	t.Helper()
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+func TestSplitChallenge(t *testing.T) {
+	for _, c := range []struct{ in, pass, code string }{
+		{"SCRV1:cGFzcw==:MTIzNDU2", "pass", "123456"},
+		{"plain", "plain", ""},
+		{"SCRV1:nocolon", "SCRV1:nocolon", ""},
+		{"SCRV1:!!:MTIz", "SCRV1:!!:MTIz", ""},
+	} {
+		if p, code := splitChallenge(c.in); p != c.pass || code != c.code {
+			t.Errorf("%q: %q %q", c.in, p, code)
+		}
 	}
 }

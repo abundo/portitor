@@ -191,7 +191,7 @@ func (a *Agent) routes() *http.ServeMux {
 		// A document from before the pair's last promotion is a stale
 		// portitor-config's.
 		if h := req.Document.HA; h != nil && h.Epoch < a.ha.epoch() {
-			writeError(w, http.StatusConflict, fmt.Errorf("the HA pair was promoted since (epoch %d, this document's %d): its configuration is the new primary's", a.ha.epoch(), h.Epoch))
+			writeError(w, http.StatusConflict, fmt.Errorf("the HA pair was promoted since (epoch %d, this configuration's %d): its configuration is the new primary's", a.ha.epoch(), h.Epoch))
 			return
 		}
 		// Apply must finish even if the client goes away (its own rules

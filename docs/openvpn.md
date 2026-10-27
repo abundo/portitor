@@ -94,8 +94,26 @@ The password is checked by portitor-agent, which OpenVPN asks for each login
 (through its management socket): no password is written to a file, and no
 script runs. The agent reaches the directory servers from the firewall host. A
 refused login is answered after two seconds, and logged in the agent's log with
-the user name and the client's address. Two-factor login codes are not asked
-for: OpenVPN logins take the password alone.
+the user name and the client's address.
+
+- **Two-factor code**: asks for a code from the user's authenticator app after
+  the password, the same TOTP code as for the GUI (set up under **My settings →
+  Two-factor login**). Recovery codes are for the GUI only.
+  - **Off** (the default): the password alone.
+  - **For the users with two-factor login on**: they must give a code; the
+    others log in with the password alone (their client still shows the code
+    field: they leave it empty).
+  - **Required**: everyone gives a code, and a user without two-factor login is
+    refused, a directory user too until they have set it up in the GUI.
+
+  The client config then has `static-challenge`, so the client asks for the
+  code with the password: hand your users the new config. OpenVPN Connect, the
+  OpenVPN GUI, Tunnelblick, Viscosity and `openvpn` support it; check
+  NetworkManager's OpenVPN plugin on your clients' versions before requiring
+  it. A code is good once. The code is asked for when connecting; the session
+  then renews itself with a token, without asking again, until it ends. The
+  users' TOTP secrets are part of the deployed configuration: a user who turns two-factor
+  login on or off is asked for a code from the next commit.
 
 When a local user may no longer log in (removed from the role, deleted), or a
 directory server they logged in through is removed, their sessions end when the
@@ -119,7 +137,8 @@ the server (UDP first, then TCP in the adaptive mode), the CA that signed the
 server's certificate, the name to check, and the server's **tls-crypt key**.
 The key keeps anyone without the file from even starting a handshake, so the
 server doesn't answer port scans; hand the file to your users only. It holds no
-password: the client asks for the user name and password.
+password: the client asks for the user name and password (and, with a
+two-factor code, the code).
 
 The CA is the root of the certificate's chain: the system CA that signed an ACME
 certificate (ISRG Root X1 for Let's Encrypt), or the certificate itself when it

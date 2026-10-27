@@ -12,6 +12,8 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+
+	"github.com/abundo/portitor/internal/totp"
 )
 
 // OpenVPN is an OpenVPN server on an interface of kind KindOpenVPN: remote
@@ -54,6 +56,11 @@ type OpenVPN struct {
 	// (RoleGroups, DNs).
 	RequireRole bool     `json:"require_role,omitempty"`
 	RoleGroups  []string `json:"role_groups,omitempty"`
+	// TwoFactor asks for a TOTP code after the password (OpenVPN's static
+	// challenge, in the client config): "" not, OpenVPNTwoFactorUser of
+	// the users with two-factor login on (their TOTP), OpenVPNTwoFactorRequired
+	// of everyone, refusing a user without it.
+	TwoFactor string `json:"two_factor,omitempty"`
 	// Routes are pushed to the clients: the networks they reach through
 	// the tunnel. RedirectGateway sends all their traffic through it.
 	Routes          []string `json:"routes,omitempty"`
@@ -76,12 +83,14 @@ type OpenVPN struct {
 // OpenVPNUser is one of the firewall's users: a local one with the bcrypt
 // hash of their password, or a directory user (LDAP), whose password the
 // Directory checks. Denied is a user outside the required role, who has
-// no hash (a directory user may still be let in by RoleGroups).
+// no hash (a directory user may still be let in by RoleGroups). TOTP is
+// the secret of a user with two-factor login on, with TwoFactor only.
 type OpenVPNUser struct {
 	Name   string `json:"name"`
 	Hash   string `json:"hash,omitempty"`
 	LDAP   bool   `json:"ldap,omitempty"`
 	Denied bool   `json:"denied,omitempty"`
+	TOTP   string `json:"totp,omitempty"`
 }
 
 // OpenVPN modes and protocols.
@@ -93,6 +102,16 @@ const (
 
 // OpenVPNModes are the values of OpenVPN.Mode.
 var OpenVPNModes = []string{OpenVPNAdaptive, OpenVPNUDP, OpenVPNTCP}
+
+// Values of OpenVPN.TwoFactor.
+const (
+	OpenVPNTwoFactorOff      = ""
+	OpenVPNTwoFactorUser     = "user"
+	OpenVPNTwoFactorRequired = "required"
+)
+
+// OpenVPNTwoFactors are the values of OpenVPN.TwoFactor.
+var OpenVPNTwoFactors = []string{OpenVPNTwoFactorOff, OpenVPNTwoFactorUser, OpenVPNTwoFactorRequired}
 
 // OpenVPNPort is OpenVPN's registered port, the default.
 const OpenVPNPort = 1194
@@ -318,6 +337,9 @@ func (v *validator) openVPN(p string, in *Instance, ifc *Interface) {
 	if ifc.IPv4Mode == ModeDHCP {
 		v.addf("%s: an OpenVPN interface has static addresses", p)
 	}
+	if !slices.Contains(OpenVPNTwoFactors, o.TwoFactor) {
+		v.addf("%s: two-factor must be one of %q", p, OpenVPNTwoFactors)
+	}
 	v.openVPNTCPAddresses(p, ifc)
 	users := map[string]bool{}
 	for _, u := range o.Users {
@@ -327,6 +349,9 @@ func (v *validator) openVPN(p string, in *Instance, ifc *Interface) {
 		local := !u.LDAP && !u.Denied
 		if (local && !bcryptRe.MatchString(u.Hash)) || (!local && u.Hash != "") {
 			v.addf("%s: user %q: invalid password hash", p, u.Name)
+		}
+		if u.TOTP != "" && (o.TwoFactor == OpenVPNTwoFactorOff || u.Denied || !totp.ValidSecret(u.TOTP)) {
+			v.addf("%s: user %q: invalid TOTP secret", p, u.Name)
 		}
 		if users[u.Name] {
 			v.addf("%s: duplicate user %q", p, u.Name)

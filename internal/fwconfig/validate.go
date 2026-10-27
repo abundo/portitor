@@ -67,7 +67,7 @@ func (v *validator) addf(format string, args ...any) {
 func (d *Document) Validate() error {
 	v := &validator{lists: map[string]bool{}, ruleIDs: map[uint32]bool{}}
 	if d.Version != Version {
-		v.addf("unsupported document version %d (want %d)", d.Version, Version)
+		v.addf("unsupported configuration version %d (want %d)", d.Version, Version)
 	}
 	exp := d.Expand()
 	v.ipLists(d.IPLists)

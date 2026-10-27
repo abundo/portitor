@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/pem"
 	"errors"
@@ -30,6 +31,7 @@ import (
 	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/internal/ldapauth"
 	"github.com/abundo/portitor/internal/render"
+	"github.com/abundo/portitor/internal/totp"
 )
 
 // OpenVPN: the agent is the management client of each OpenVPN process
@@ -37,7 +39,9 @@ import (
 // every client that connects, with the user name and password the client
 // sent; the agent checks them as portitor-config checks a GUI login (the
 // document's users' bcrypt hashes, then the Directory) and answers, so no
-// script runs and no password is written down. It restarts OpenVPN when the server's certificate
+// script runs and no password is written down. With two-factor login the
+// client sends a TOTP code with the password (static-challenge), checked
+// against the user's secret. It restarts OpenVPN when the server's certificate
 // changes (an ACME renewal), and lists the clients for the GUI.
 
 // openvpnItem is an OpenVPN process as the applied document declares it.
@@ -55,6 +59,8 @@ var (
 	errNoSuchUser  = errors.New("no such user")
 	errBadPassword = errors.New("wrong password")
 	errNotMember   = errors.New("not a member of the group")
+	errBadCode     = errors.New("wrong or used two-factor code")
+	errNoTwoFactor = errors.New("two-factor login is not set up")
 )
 
 const (
@@ -80,12 +86,15 @@ type openvpnManager struct {
 
 	mu      sync.Mutex
 	servers map[string]*ovpnServer // by unit
-	wg      sync.WaitGroup
+	// totpStep is each user's last TOTP step let in, so a code is good
+	// once (both processes of a server, and all servers).
+	totpStep map[string]int64
+	wg       sync.WaitGroup
 }
 
 func newOpenVPNManager(dryRun bool, run Runner) *openvpnManager {
 	return &openvpnManager{dryRun: dryRun, run: run, ldapAuth: directoryAuthenticate, failDelay: ovpnFailDelay, servers: map[string]*ovpnServer{},
-		logins: newRing(500, func(l *agentapi.DirectoryLogin) *int64 { return &l.ID })}
+		totpStep: map[string]int64{}, logins: newRing(500, func(l *agentapi.DirectoryLogin) *int64 { return &l.ID })}
 }
 
 // ovpnServer is the agent's side of one OpenVPN process.
@@ -242,7 +251,8 @@ func (s *ovpnServer) event(ctx context.Context, conn *ovpnConn, ev *ovpnEvent) {
 // agent let in (one without the auth token) is let in again while its
 // user may still log in.
 func (s *ovpnServer) authorize(ctx context.Context, conn *ovpnConn, ev *ovpnEvent) {
-	user, password := ev.env["username"], ev.env["password"]
+	user := ev.env["username"]
+	password, code := splitChallenge(ev.env["password"])
 	from := ev.env["untrusted_ip"]
 	if from == "" {
 		from = ev.env["untrusted_ip6"]
@@ -257,7 +267,7 @@ func (s *ovpnServer) authorize(ctx context.Context, conn *ovpnConn, ev *ovpnEven
 		s.answer(ctx, log, conn, ev, nil)
 		return
 	}
-	source, err := s.m.check(ctx, it, user, password)
+	source, err := s.m.check(ctx, it, user, password, code)
 	if err != nil {
 		log.Warn("openvpn: login refused", "err", err)
 		if !sleepCtx(ctx, s.m.failDelay) {
@@ -292,8 +302,9 @@ func (s *ovpnServer) answer(ctx context.Context, log *slog.Logger, conn *ovpnCon
 // order, the first to accept it deciding. A user the firewall doesn't
 // have is then reported, to be copied to the users. With a required role,
 // a user must be a member, or a directory user in one of the role's
-// groups. It returns what checked the password.
-func (m *openvpnManager) check(ctx context.Context, it openvpnItem, user, password string) (string, error) {
+// groups. With two-factor login, code is then checked (secondFactor). It
+// returns what checked the password.
+func (m *openvpnManager) check(ctx context.Context, it openvpnItem, user, password, code string) (string, error) {
 	if !fwconfig.ValidOpenVPNUser(user) {
 		return "", errors.New("invalid user name")
 	}
@@ -309,7 +320,7 @@ func (m *openvpnManager) check(ctx context.Context, it openvpnItem, user, passwo
 		if bcrypt.CompareHashAndPassword([]byte(u.Hash), []byte(password)) != nil {
 			return "", errBadPassword
 		}
-		return ovpnLocal, nil
+		return ovpnLocal, m.secondFactor(it.cfg.TwoFactor, user, u.TOTP, code)
 	}
 	server, info, err := m.directory(ctx, it.dir, user, password)
 	if err != nil {
@@ -323,7 +334,59 @@ func (m *openvpnManager) check(ctx context.Context, it openvpnItem, user, passwo
 	if it.cfg.RequireRole && (i < 0 || it.cfg.Users[i].Denied) && !ldapauth.InGroups(info.Groups, it.cfg.RoleGroups) {
 		return "", fmt.Errorf("%s: %w", server, errNotMember)
 	}
+	secret := ""
+	if i >= 0 {
+		secret = it.cfg.Users[i].TOTP
+	}
+	if err := m.secondFactor(it.cfg.TwoFactor, user, secret, code); err != nil {
+		return "", fmt.Errorf("%s: %w", server, err)
+	}
 	return server, nil
+}
+
+// secondFactor checks the TOTP code of a user whose password was right:
+// with two-factor login, a user with a secret needs a code of now not used
+// before; one without may log in only when it isn't required.
+func (m *openvpnManager) secondFactor(mode, user, secret, code string) error {
+	switch {
+	case mode == fwconfig.OpenVPNTwoFactorOff:
+		return nil
+	case secret == "" && mode == fwconfig.OpenVPNTwoFactorRequired:
+		return errNoTwoFactor
+	case secret == "":
+		return nil
+	}
+	step := totp.Match(secret, strings.ReplaceAll(code, " ", ""), time.Now())
+	if step == 0 {
+		return errBadCode
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if step <= m.totpStep[user] {
+		return errBadCode
+	}
+	m.totpStep[user] = step
+	return nil
+}
+
+// splitChallenge splits what a client with static-challenge sends as its
+// password, "SCRV1:" and the base64 of the password and of the response,
+// into the two. Another password is the password, without a code.
+func splitChallenge(s string) (password, code string) {
+	rest, ok := strings.CutPrefix(s, "SCRV1:")
+	if !ok {
+		return s, ""
+	}
+	p64, c64, ok := strings.Cut(rest, ":")
+	if !ok {
+		return s, ""
+	}
+	p, err1 := base64.StdEncoding.DecodeString(p64)
+	c, err2 := base64.StdEncoding.DecodeString(c64)
+	if err1 != nil || err2 != nil {
+		return s, ""
+	}
+	return string(p), string(c)
 }
 
 // directory checks a password at each server in turn: one that is down

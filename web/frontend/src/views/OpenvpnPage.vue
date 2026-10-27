@@ -3,7 +3,8 @@
 
 <!-- OpenVPN: the virtual firewall's OpenVPN server (an interface of kind
      openvpn), its connected clients, and client configs. Users log in with
-     their password, as to the GUI: the directory's (Admin → Directory). -->
+     their password, as to the GUI: the directory's (Admin → Directory), and
+     with two-factor login on a code from their authenticator app. -->
 <script setup>
 import { computed, reactive, ref, watch } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
@@ -65,11 +66,13 @@ const keys = [
   'ovpn_dns',
   'ovpn_dns_domain',
   'ovpn_client_to_client',
+  'ovpn_two_factor',
 ]
 const form = reactive({})
 const pageForm = usePageForm(form)
 const saving = ref(false)
 const NONE = 0 // no certificate or role, null in the database
+const OFF = 'off' // no two-factor login, '' in the database (a select item can't be '')
 
 async function load() {
   const id = store.currentId
@@ -92,6 +95,7 @@ async function load() {
     form.ovpn_dns ??= []
     form.ovpn_certificate_id ??= NONE
     form.ovpn_role_id ??= NONE
+    form.ovpn_two_factor ||= OFF
   }
   pageForm.mark()
 }
@@ -112,6 +116,11 @@ const certItems = computed(() => [
     description: (c.domains ?? []).join(', '),
   })),
 ])
+const twoFactorItems = [
+  { label: 'Off: the password alone', value: OFF },
+  { label: 'For the users with two-factor login on', value: 'user' },
+  { label: 'Required: users without it are refused', value: 'required' },
+]
 const roleItems = computed(() => [
   { label: 'Any user of the directory', value: NONE },
   ...roles.value.map((r) => ({ label: r.name, value: r.id, description: r.description })),
@@ -155,6 +164,7 @@ async function save() {
     const body = { ...form }
     if (body.ovpn_certificate_id === NONE) body.ovpn_certificate_id = null
     if (body.ovpn_role_id === NONE) body.ovpn_role_id = null
+    if (body.ovpn_two_factor === OFF) body.ovpn_two_factor = ''
     server.value = await interfaces.update(server.value.id, body)
     toast.add({ title: 'OpenVPN saved; commit to apply it.', color: 'success' })
     await load()
@@ -214,6 +224,11 @@ const infoRows = computed(() => {
         ]
       : [['Addresses', (s.addresses ?? []).join(', ') || '—']]),
     ['Logins', login],
+    [
+      'Two-factor code',
+      twoFactorItems.find((t) => t.value === (s.ovpn_two_factor || OFF))?.label ??
+        s.ovpn_two_factor,
+    ],
     ...processes.value.map((p) => [
       `Process (${p.proto.toUpperCase()})`,
       p.connected
@@ -450,9 +465,15 @@ function downloadConfig() {
                 <p class="text-sm text-muted">
                   Users log in with their name and password, as to the GUI: a local user's is
                   checked here, a directory user's at the directory's servers (Admin → Directory),
-                  which also let in, and copy to the users, a user the firewall doesn't have yet. No
-                  two-factor code is asked for.
+                  which also let in, and copy to the users, a user the firewall doesn't have yet.
                 </p>
+                <UFormField
+                  label="Two-factor code"
+                  help="Asks for a code from the user's authenticator app after the password: the one they set up for the GUI (My settings → Two-factor login); recovery codes don't work here. Users need the client config again. A change of a user's two-factor login takes effect at the next commit."
+                  :ui="inlineField"
+                >
+                  <USelect v-model="form.ovpn_two_factor" :items="twoFactorItems" class="w-full" />
+                </UFormField>
                 <UFormField
                   v-if="auth.isAdmin"
                   label="Required role"
@@ -537,8 +558,10 @@ function downloadConfig() {
           }}</pre>
           <p class="text-xs text-muted">
             For the OpenVPN apps (OpenVPN Connect, the OpenVPN GUI, NetworkManager): the same file
-            for every user, who logs in with their own name and password. It holds the server's
-            tls-crypt key: hand it out to your users only.
+            for every user, who logs in with their own name and password<template
+              v-if="server?.ovpn_two_factor"
+              >, and the code from their authenticator app</template
+            >. It holds the server's tls-crypt key: hand it out to your users only.
           </p>
         </div>
       </template>

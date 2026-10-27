@@ -25,6 +25,7 @@ are in [README.md](README.md).
 | `internal/ldapauth` | LDAP/Active Directory search-and-bind login, test and tree browsing (from factum2), shared by portitor-config's logins (`web/directory.go`) and the agent's OpenVPN logins |
 | `internal/wgkeys` | WireGuard key generation (wg(8) base64) |
 | `internal/buildinfo` | Version, commit and date, set at link time (Makefile `LDFLAGS`, `.goreleaser.yaml`) |
+| `internal/totp` | TOTP codes (RFC 6238), shared by portitor-config's two-factor login and the agent's OpenVPN logins |
 | `internal/cron` | crontab(5) schedule parser for tasks (shared by web and agent) |
 | `internal/agentapi` | Agent API wire types (shared by agent and client) |
 | `internal/agentclient` | portitor-config's HTTPS client for the agent, with certificate pinning (`PinnedTLS`, which the portal and the replica use too) |
@@ -267,7 +268,8 @@ docs and user-facing messages.
   through `DyndnsClient.Settings`, where an empty one keeps the stored value).
   A BGP password, OSPF MD5 key or IS-IS password is in frr.conf, so that is a `Secret` file
   `Bundle.Redacted` masks; so are snmpd.conf and openvpn.conf (the tls-crypt key).
-  The document carries OpenVPN's users' bcrypt hashes and the LDAP bind passwords,
+  The document carries OpenVPN's users' bcrypt hashes (and, with two-factor login,
+  TOTP secrets) and the LDAP bind passwords,
   redacted in history like the other secrets.
   Deployment history stores a redacted document. The exceptions are the backup
   download (`web/backup.go`): the whole database, age-encrypted with the user's
@@ -495,7 +497,8 @@ the certificate portitor-config serves, chosen under Settings
   is the management client (`management-client-auth`, socket
   `<run_dir>/openvpn/<instance>/<proto>.sock`) and checks each login against
   `Users` (all of portitor-config's users: a local one's bcrypt hash, a directory
-  one's `LDAP`; with `ovpn_require_role` the non-members `Denied`, all of them when the
+  one's `LDAP`, with `TwoFactor` their TOTP secret, the code sent with the password
+  by the client's `static-challenge` (SCRV1, `splitChallenge`), each step good once; with `ovpn_require_role` the non-members `Denied`, all of them when the
   role is gone; an instance admin's role is always their VF's, `tenantOpenVPN`) and
   then the document's `Directory` (see Directory), a directory user of the required
   role's mapped groups (`RoleGroups`) counting as a member; it reports the users it

@@ -99,6 +99,12 @@ func TestValidateOpenVPN(t *testing.T) {
 		{"hash", func(d *Document) { ovpn(d).OpenVPN.Users[0].Hash = "plain" }, "invalid password hash"},
 		{"duplicate user", func(d *Document) { o := ovpn(d).OpenVPN; o.Users = append(o.Users, o.Users[0]) }, "duplicate user"},
 		{"hash of a directory user", func(d *Document) { ovpn(d).OpenVPN.Users[1].Hash = ovpn(d).OpenVPN.Users[0].Hash }, "invalid password hash"},
+		{"two-factor", func(d *Document) { ovpn(d).OpenVPN.TwoFactor = "sms" }, "two-factor must be one of"},
+		{"totp without two-factor", func(d *Document) { ovpn(d).OpenVPN.Users[0].TOTP = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ" }, "invalid TOTP secret"},
+		{"totp secret", func(d *Document) {
+			o := ovpn(d).OpenVPN
+			o.TwoFactor, o.Users[0].TOTP = OpenVPNTwoFactorUser, "not base32"
+		}, "invalid TOTP secret"},
 		{"role group", func(d *Document) { ovpn(d).OpenVPN.RoleGroups = []string{"CN=a\nx"} }, "invalid role group"},
 		{"route", func(d *Document) { ovpn(d).OpenVPN.Routes = []string{"10.0.0.1\npush x"} }, "invalid route"},
 		{"dns", func(d *Document) { ovpn(d).OpenVPN.DNS = []string{"dns.example"} }, "invalid DNS server"},

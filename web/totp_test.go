@@ -10,29 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/abundo/portitor/internal/totp"
 	"github.com/abundo/portitor/models"
 )
-
-func TestTOTPCode(t *testing.T) {
-	// RFC 6238 appendix B, SHA-1, the last 6 of its 8 digits.
-	key := []byte("12345678901234567890")
-	for _, tc := range []struct {
-		unix int64
-		want string
-	}{{59, "287082"}, {1111111109, "081804"}, {1234567890, "005924"}, {2000000000, "279037"}} {
-		if got := totpCode(key, tc.unix/totpPeriod); got != tc.want {
-			t.Errorf("%d: %s, want %s", tc.unix, got, tc.want)
-		}
-	}
-	secret := b32.EncodeToString(key)
-	now := time.Unix(1111111109, 0)
-	if totpMatch(secret, "081804", now) == 0 || totpMatch(secret, "081804", now.Add(totpPeriod*time.Second)) == 0 {
-		t.Error("code of now (or the step before) refused")
-	}
-	if totpMatch(secret, "081804", now.Add(3*totpPeriod*time.Second)) != 0 {
-		t.Error("old code accepted")
-	}
-}
 
 func TestTOTPLogin(t *testing.T) {
 	env := newEnv(t)
@@ -51,7 +31,7 @@ func TestTOTPLogin(t *testing.T) {
 		t.Errorf("enable with a wrong code: %d", rec.Code)
 	}
 	key, _ := b32.DecodeString(setup.Secret)
-	code := totpCode(key, time.Now().Unix()/totpPeriod)
+	code := totp.Code(key, time.Now().Unix()/totp.Period)
 	rec = env.do("POST", "/api/me/totp/enable", map[string]string{"code": code})
 	var enabled struct {
 		RecoveryCodes []string `json:"recovery_codes"`
@@ -140,7 +120,7 @@ func TestTOTPRequired(t *testing.T) {
 		t.Fatalf("setup: %d %s", rec.Code, rec.Body)
 	}
 	key, _ := b32.DecodeString(setup.Secret)
-	if rec := env.do("POST", "/api/me/totp/enable", map[string]string{"code": totpCode(key, time.Now().Unix()/totpPeriod)}); rec.Code != http.StatusOK {
+	if rec := env.do("POST", "/api/me/totp/enable", map[string]string{"code": totp.Code(key, time.Now().Unix()/totp.Period)}); rec.Code != http.StatusOK {
 		t.Fatalf("enable: %d %s", rec.Code, rec.Body)
 	}
 	if rec := env.do("GET", "/api/users", nil); rec.Code != http.StatusOK {

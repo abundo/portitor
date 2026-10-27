@@ -1512,6 +1512,7 @@ func (d *data) openVPN(mi *models.Instance, mif *models.Interface, in *fwconfig.
 		Mode: mif.OvpnMode, Port: mif.OvpnPort, Listen: mif.OvpnListen, TLSCrypt: mif.OvpnTlsCrypt,
 		Routes: slices.Clone([]string(mif.OvpnRoutes)), RedirectGateway: mif.OvpnRedirectGateway,
 		DNS: slices.Clone([]string(mif.OvpnDns)), DNSDomain: mif.OvpnDnsDomain, ClientToClient: mif.OvpnClientToClient,
+		TwoFactor: mif.OvpnTwoFactor,
 	}
 	// The TCP tunnel's addresses stay in the row in another mode.
 	if o.Mode == fwconfig.OpenVPNAdaptive {
@@ -1550,7 +1551,7 @@ func (d *data) openVPN(mi *models.Instance, mif *models.Interface, in *fwconfig.
 // need them (the agent's check, as web authenticateUser): a local user
 // with their hash, a directory user without; Denied without a usable
 // password, or outside a required role (all of them when the role is
-// gone).
+// gone). With two-factor login a user's TOTP secret, when they have one.
 func (d *data) openVPNUsers(mif *models.Interface) []fwconfig.OpenVPNUser {
 	members := map[uint]bool{}
 	if mif.OvpnRequireRole && mif.OvpnRoleID != nil {
@@ -1570,6 +1571,9 @@ func (d *data) openVPNUsers(mif *models.Interface) []fwconfig.OpenVPNUser {
 			ou.Denied = true
 		} else if !ou.LDAP {
 			ou.Hash = u.PasswordHash
+		}
+		if !ou.Denied && mif.OvpnTwoFactor != fwconfig.OpenVPNTwoFactorOff {
+			ou.TOTP = u.TOTPSecret
 		}
 		out = append(out, ou)
 	}

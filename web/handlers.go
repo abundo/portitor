@@ -1146,6 +1146,9 @@ func redactDoc(doc fwconfig.Document) fwconfig.Document {
 					if o.Users[k].Hash != "" {
 						o.Users[k].Hash = "<redacted>"
 					}
+					if o.Users[k].TOTP != "" {
+						o.Users[k].TOTP = "<redacted>"
+					}
 				}
 				ifc.OpenVPN = &o
 			}
