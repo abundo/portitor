@@ -20,8 +20,8 @@ import (
 	"github.com/abundo/portitor/internal/iplist"
 )
 
-// fakeFetch serves each list as its URL's last path element, an address;
-// "fail" in the URL fails.
+// fakeFetch serves each list as its URL's last path element, an address,
+// and a country list as 198.51.100.0/24; "fail" in the URL fails.
 type fakeFetch struct {
 	mu    sync.Mutex
 	calls map[string]int
@@ -33,6 +33,9 @@ func (f *fakeFetch) fetch(_ context.Context, l fwconfig.IPList) (*iplist.Result,
 	f.mu.Unlock()
 	if strings.Contains(l.URL, "fail") {
 		return nil, errors.New("503 Service Unavailable")
+	}
+	if l.Source == fwconfig.IPListCountry {
+		return &iplist.Result{Prefixes: []netip.Prefix{netip.MustParsePrefix("198.51.100.0/24")}}, nil
 	}
 	addr := l.URL[strings.LastIndex(l.URL, "/")+1:]
 	return &iplist.Result{Prefixes: []netip.Prefix{netip.MustParsePrefix(addr + "/32")}, Skipped: 1}, nil

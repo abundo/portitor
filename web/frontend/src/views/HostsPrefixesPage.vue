@@ -307,7 +307,9 @@ const states = computed(() =>
   Object.fromEntries((deploy.status?.ip_lists ?? []).map((s) => [s.name, s])),
 )
 const stateColor = { ok: 'success', error: 'error', fetching: 'info' }
-const sourceLabel = { crowdsec: 'CrowdSec LAPI', url: 'URL' }
+const sourceLabel = { crowdsec: 'CrowdSec LAPI', url: 'URL', country: 'Countries' }
+// ipListSource is what an IP list reads: its URL, or its countries.
+const ipListSource = (l) => (l.source === 'country' ? (l.countries ?? []).join(' ') : l.url)
 
 // Whether the DNS server listens on the interface's addresses.
 function dnsListen(id) {
@@ -438,7 +440,7 @@ function listNode(l) {
     icon: icon('list'),
     cells: {
       description: esc(l.description),
-      details: `<span class="text-xs">${esc(sourceLabel[l.source] ?? l.source)}</span> ${muted(l.url, 'font-mono text-xs')}`,
+      details: `<span class="text-xs">${esc(sourceLabel[l.source] ?? l.source)}</span> ${muted(ipListSource(l), 'font-mono text-xs')}`,
       status: listStatus(l),
     },
     item: { type: 'list', obj: l },
@@ -570,7 +572,7 @@ const treeSource = computed(() => {
         `@${l.name}`,
         l.description,
         sourceLabel[l.source] ?? l.source,
-        l.url,
+        ipListSource(l),
         states.value[l.name]?.state ?? 'not deployed',
         states.value[l.name]?.last_error,
       ),

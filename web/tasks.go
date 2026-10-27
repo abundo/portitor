@@ -6,6 +6,7 @@ package web
 import (
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -47,7 +48,7 @@ func checkDocPart(doc fwconfig.Document, prefix string) error {
 }
 
 func ipListDoc(l *models.IpList) fwconfig.IPList {
-	return fwconfig.IPList{Name: l.Name, Source: l.Source, URL: l.Url, Username: l.Username, Password: l.Password, APIKey: l.ApiKey}
+	return fwconfig.IPList{Name: l.Name, Source: l.Source, URL: l.Url, Username: l.Username, Password: l.Password, APIKey: l.ApiKey, Countries: []string(l.Countries)}
 }
 
 func prepareIpList(tx *gorm.DB, l, old *models.IpList) error {
@@ -61,12 +62,31 @@ func prepareIpList(tx *gorm.DB, l, old *models.IpList) error {
 	if l.Source == "" {
 		l.Source = fwconfig.IPListURL
 	}
-	if err := oneOf("source", l.Source, fwconfig.IPListCrowdSec, fwconfig.IPListURL); err != nil {
+	if err := oneOf("source", l.Source, fwconfig.IPListCrowdSec, fwconfig.IPListURL, fwconfig.IPListCountry); err != nil {
 		return err
 	}
 	l.Url = strings.TrimSpace(l.Url)
-	if err := fwconfig.ValidURL(l.Url); err != nil {
-		return bad("URL: " + err.Error())
+	if l.Source == fwconfig.IPListCountry {
+		l.Url, l.Username, l.NewPassword, l.NewApiKey = "", "", "", ""
+		countries := models.StringList{}
+		for _, c := range l.Countries {
+			c = strings.ToUpper(strings.TrimSpace(c))
+			if !fwconfig.ValidCountry(c) {
+				return bad(fmt.Sprintf("countries: %q is not a two-letter country code", c))
+			}
+			if !slices.Contains(countries, c) {
+				countries = append(countries, c)
+			}
+		}
+		if len(countries) == 0 {
+			return bad("countries: pick at least one")
+		}
+		l.Countries = countries
+	} else {
+		l.Countries = models.StringList{}
+		if err := fwconfig.ValidURL(l.Url); err != nil {
+			return bad("URL: " + err.Error())
+		}
 	}
 	l.Username = strings.TrimSpace(l.Username)
 	if pw := l.NewPassword; pw != "" {
@@ -76,12 +96,15 @@ func prepareIpList(tx *gorm.DB, l, old *models.IpList) error {
 		l.ApiKey = key
 	}
 	l.NewPassword, l.NewApiKey = "", ""
-	if l.Source == fwconfig.IPListCrowdSec {
+	switch l.Source {
+	case fwconfig.IPListCountry:
+		l.Password, l.ApiKey = "", ""
+	case fwconfig.IPListCrowdSec:
 		l.Username, l.Password = "", ""
 		if l.ApiKey == "" {
 			return bad("CrowdSec needs a bouncer API key (cscli bouncers add portitor)")
 		}
-	} else {
+	default:
 		l.ApiKey = ""
 		if l.Username == "" {
 			l.Password = ""

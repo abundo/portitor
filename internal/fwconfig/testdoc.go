@@ -306,6 +306,7 @@ func SampleDocument() Document {
 		IPLists: []IPList{
 			{Name: "crowdsec", Source: IPListCrowdSec, URL: "http://127.0.0.1:8080", APIKey: "0123456789abcdef"},
 			{Name: "drop", Source: IPListURL, URL: "https://www.spamhaus.org/drop/drop.txt"},
+			{Name: "nordic", Source: IPListCountry, Countries: []string{"SE", "NO", "DK", "FI"}},
 		},
 		Tasks: []Task{
 			{Name: "crowdsec", Schedule: "*/5 * * * *", Kind: TaskIPList, IPList: "crowdsec"},

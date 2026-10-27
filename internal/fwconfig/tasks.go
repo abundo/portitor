@@ -22,7 +22,13 @@ const (
 	// "#" and ";" start comments. CrowdSec blocklist integrations serve
 	// this, with HTTP basic auth.
 	IPListURL = "url"
+	// IPListCountry reads the prefixes the regional internet registries
+	// delegated to Countries (iplist.CountrySources): no URL, no account.
+	IPListCountry = "country"
 )
+
+// MaxCountries limits an IP list's Countries.
+const MaxCountries = 300
 
 // IPList is a list of addresses and prefixes the agent downloads and
 // loads into the nftables sets "<name>_v4" and "<name>_v6" of every
@@ -37,6 +43,14 @@ type IPList struct {
 	Password string `json:"password,omitempty"`
 	// APIKey is the CrowdSec bouncer key (cscli bouncers add).
 	APIKey string `json:"api_key,omitempty"`
+	// Countries are ISO 3166-1 alpha-2 codes, upper case (country source).
+	Countries []string `json:"countries,omitempty"`
+}
+
+// ValidCountry reports whether s is an ISO 3166-1 alpha-2 code in upper
+// case.
+func ValidCountry(s string) bool {
+	return len(s) == 2 && 'A' <= s[0] && s[0] <= 'Z' && 'A' <= s[1] && s[1] <= 'Z'
 }
 
 // IPListRef is the prefix of an IP list reference in a rule's addresses.
@@ -154,8 +168,13 @@ func (v *validator) ipLists(lists []IPList) {
 			v.addf("%s: duplicate", lp)
 		}
 		v.lists[l.Name] = true
-		if err := ValidURL(l.URL); err != nil {
-			v.addf("%s: url %v", lp, err)
+		if l.Source != IPListCountry {
+			if err := ValidURL(l.URL); err != nil {
+				v.addf("%s: url %v", lp, err)
+			}
+			if len(l.Countries) > 0 {
+				v.addf("%s: countries are for country lists", lp)
+			}
 		}
 		for _, f := range []struct{ name, value string }{{"username", l.Username}, {"password", l.Password}, {"api key", l.APIKey}} {
 			if len(f.value) > 256 {
@@ -184,6 +203,25 @@ func (v *validator) ipLists(lists []IPList) {
 			}
 			if l.Username != "" || l.Password != "" {
 				v.addf("%s: crowdsec takes an api key, not a username and password", lp)
+			}
+		case IPListCountry:
+			if l.URL != "" || l.Username != "" || l.Password != "" || l.APIKey != "" {
+				v.addf("%s: a country list has no url or credentials", lp)
+			}
+			if len(l.Countries) == 0 {
+				v.addf("%s: no countries", lp)
+			}
+			if len(l.Countries) > MaxCountries {
+				v.addf("%s: more than %d countries", lp, MaxCountries)
+			}
+			seen := map[string]bool{}
+			for _, c := range l.Countries {
+				if !ValidCountry(c) {
+					v.addf("%s: invalid country code %q", lp, c)
+				} else if seen[c] {
+					v.addf("%s: duplicate country %s", lp, c)
+				}
+				seen[c] = true
 			}
 		default:
 			v.addf("%s: invalid source %q", lp, l.Source)

@@ -6,7 +6,8 @@
 // `changed` follows a save or delete. The API key and password are
 // write-only: the server never sends them back, and empty keeps them.
 // A new list may start from a public blocklist (ipListFeeds) and get a
-// task that downloads it again on a schedule (refresh_schedule).
+// task that downloads it again on a schedule (refresh_schedule). A
+// country list (source country) has countries in place of a URL.
 import { computed, reactive, ref, toRaw } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import { ipLists } from '@/api'
@@ -17,7 +18,9 @@ import { useFormGuard } from '@/composables/useFormGuard'
 import { inlineField, wideModal } from '@/utils/form'
 import { folderOptions } from '@/utils/folders'
 import { ipListFeeds, nightlySchedule } from '@/utils/ipListFeeds'
+import { countryItems } from '@/utils/countries'
 import ScheduleHelp from '@/components/ScheduleHelp.vue'
+import TransferList from '@/components/TransferList.vue'
 
 // folders: every folder (object_folders), for the Folder field.
 const props = defineProps({ folders: { type: Array, default: () => [] } })
@@ -55,13 +58,14 @@ function pickFeed(key) {
 const sources = [
   { label: 'CrowdSec Local API (as a bouncer)', value: 'crowdsec' },
   { label: 'URL: one address or prefix per line', value: 'url' },
+  { label: 'Countries: the addresses delegated to them', value: 'country' },
 ]
 
 function edit(src = {}) {
   Object.keys(form).forEach((k) => delete form[k])
   Object.assign(
     form,
-    { name: '', description: '', source: 'crowdsec', url: '', username: '' },
+    { name: '', description: '', source: 'crowdsec', url: '', username: '', countries: [] },
     src.id ? {} : { feed: 'custom', refresh: false, refresh_schedule: nightlySchedule() },
     structuredClone(toRaw(src)),
   )
@@ -141,6 +145,20 @@ defineExpose({ edit })
             <USelect v-model="form.source" :items="sources" class="w-full" />
           </UFormField>
           <UFormField
+            v-if="form.source === 'country'"
+            :ui="inlineField"
+            label="Countries"
+            required
+            help="The prefixes the regional internet registries delegated to these countries, from ipverse (github.com/ipverse/country-ip-blocks), or ipdeny.com when that fails; free, without an account, updated daily. Where an address is registered, not where it is used: best to allow your own countries to a service, not as protection against attacks."
+          >
+            <TransferList
+              v-model="form.countries"
+              :items="countryItems"
+              :disabled="!auth.isAdmin"
+            />
+          </UFormField>
+          <UFormField
+            v-else
             :ui="inlineField"
             label="URL"
             required
@@ -167,7 +185,7 @@ defineExpose({ edit })
               placeholder="from: cscli bouncers add portitor"
             />
           </UFormField>
-          <template v-else>
+          <template v-else-if="form.source === 'url'">
             <UFormField :ui="inlineField" label="Username">
               <UInput
                 v-model="form.username"

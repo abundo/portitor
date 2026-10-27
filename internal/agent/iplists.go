@@ -83,6 +83,11 @@ func ipListHash(l fwconfig.IPList) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// sameIPList reports whether two lists' configurations are the same.
+func sameIPList(a, b fwconfig.IPList) bool {
+	return ipListHash(a) == ipListHash(b)
+}
+
 func (a *Agent) ipListMetaFile(name string) string {
 	return strings.TrimSuffix(a.cfg.Paths.IPListFile(name), ".nft") + ".json"
 }
@@ -123,10 +128,10 @@ func (a *Agent) reconcileIPLists(doc *fwconfig.Document) {
 				}
 			}
 			m.lists[l.Name] = st
-		} else if st.cfg != l && !st.fetching {
+		} else if !sameIPList(st.cfg, l) && !st.fetching {
 			st.status.State = "pending"
 		}
-		changed := st.cfg != l
+		changed := !sameIPList(st.cfg, l)
 		st.cfg = l
 		switch {
 		case st.fetching:

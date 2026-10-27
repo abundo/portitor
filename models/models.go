@@ -1150,6 +1150,8 @@ type IpList struct {
 	FolderID    *uint  `json:"folder_id"`
 	Url         string `json:"url"`
 	Username    string `json:"username"`
+	// Countries are ISO 3166-1 alpha-2 codes (source country).
+	Countries StringList `json:"countries"`
 	// Password and ApiKey are set through NewPassword and NewApiKey and
 	// never sent back.
 	Password string `json:"-"`

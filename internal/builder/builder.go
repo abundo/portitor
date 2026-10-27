@@ -1064,6 +1064,7 @@ func buildPeer(db *gorm.DB, generation int64, only map[string]bool, firewallID u
 		doc.IPLists = append(doc.IPLists, fwconfig.IPList{
 			Name: l.Name, Source: l.Source, URL: l.Url,
 			Username: l.Username, Password: l.Password, APIKey: l.ApiKey,
+			Countries: []string(l.Countries),
 		})
 	}
 	for _, t := range d.tasks {

@@ -66,3 +66,34 @@ entry per line:
 
 A download that holds entries but no address (an HTML error page, say) fails. The last
 good list then stays in force. Hosts & prefixes shows the error under *IP lists*.
+
+## Country lists
+
+An IP list can also hold the addresses of one or more countries: for example, the SSH
+or VPN port open only from the countries you work from.
+
+1. *Network → Hosts & prefixes*, button *+ IP list*, *Blocklist* at *None*.
+2. *Source*: *Countries*. Move the countries to *Selected* (the search fields find
+   them by name or code).
+3. Leave *Refresh* on: the lists change a little every day.
+4. Use it in a rule as any list (named `nordic` here): **input**, incoming interface your WAN, service
+   `ssh`, source `@nordic`, action accept; SSH from elsewhere then meets the default
+   drop. To block countries instead, a drop rule with the list as source.
+
+The addresses come from [ipverse](https://github.com/ipverse/country-ip-blocks)
+(CC0), or [ipdeny.com](https://www.ipdeny.com) when ipverse can't be reached. Both
+are free, need no account, and are built every day from the delegation files of the
+five regional internet registries.
+
+Know what a country list can do:
+
+- It shows where an address is **registered**, not where it is used. A company's
+  addresses may be used in other countries, and VPNs, mobile networks and cloud
+  providers blur it further. Expect a few addresses to be in the wrong place.
+- It **doesn't stop a DDoS attack**. Botnets and rented servers are in every country,
+  and a flood that fills your Internet connection does so before the firewall drops it;
+  only your ISP or a scrubbing service can help there.
+- It does cut the background noise: most password guessing and scanning of an open
+  port comes from a few places. An *allow* list of your own countries for SSH, VPN
+  and management ports gives the most; blocking a few countries gives less, since the
+  rest of the world stays open.

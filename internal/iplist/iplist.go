@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package iplist downloads the addresses of an fwconfig.IPList: the ban
-// decisions of a CrowdSec Local API, or a plain-text list with one
-// address or prefix per line.
+// decisions of a CrowdSec Local API, a plain-text list with one address
+// or prefix per line, or the prefixes delegated to countries.
 package iplist
 
 import (
@@ -64,8 +64,45 @@ func CheckRedirect(req *http.Request, via []*http.Request) error {
 	return nil
 }
 
+// CountrySource serves the prefixes the regional internet registries
+// delegated to a country, as plain text, one file per IP version, free
+// and without an account. URL returns the file of a country code (upper
+// case); a file that is not there (404) means the country has no
+// addresses of that version.
+type CountrySource struct {
+	Name string
+	URL  func(country string, ipv6 bool) string
+}
+
+// CountrySources are tried in order: a country list comes from the
+// first that serves it. Both are built daily from the RIRs' delegation
+// files.
+var CountrySources = []CountrySource{
+	{"ipverse", func(c string, v6 bool) string {
+		// CC0: github.com/ipverse/country-ip-blocks
+		v := "ipv4"
+		if v6 {
+			v = "ipv6"
+		}
+		return "https://raw.githubusercontent.com/ipverse/country-ip-blocks/master/country/" + strings.ToLower(c) + "/" + v + "-aggregated.txt"
+	}},
+	{"ipdeny", func(c string, v6 bool) string {
+		dir := "ipblocks/data"
+		if v6 {
+			dir = "ipv6/ipaddresses"
+		}
+		return "https://www.ipdeny.com/" + dir + "/aggregated/" + strings.ToLower(c) + "-aggregated.zone"
+	}},
+}
+
+// errNoCountry: a source has neither file of a country.
+var errNoCountry = errors.New("no such country")
+
 // Fetch downloads the list with client.
 func Fetch(ctx context.Context, client *http.Client, l fwconfig.IPList, userAgent string) (*Result, error) {
+	if l.Source == fwconfig.IPListCountry {
+		return fetchCountries(ctx, client, l.Countries, userAgent)
+	}
 	u := l.URL
 	if l.Source == fwconfig.IPListCrowdSec {
 		// startup=true returns every active decision, not only the
@@ -98,6 +135,86 @@ func Fetch(ctx context.Context, client *http.Client, l fwconfig.IPList, userAgen
 		return ParseCrowdSec(body)
 	}
 	return ParseText(body)
+}
+
+// fetchCountries downloads each country from the first source that
+// serves it. A source that has neither of a country's files is believed
+// (the code is not a country, or has no addresses) rather than another
+// asked: they differ on codes such as ZZ.
+func fetchCountries(ctx context.Context, client *http.Client, countries []string, userAgent string) (*Result, error) {
+	res := &Result{}
+	for _, c := range countries {
+		var errs []error
+		for _, src := range CountrySources {
+			part, err := fetchCountry(ctx, client, src, c, userAgent)
+			if errors.Is(err, errNoCountry) {
+				return nil, fmt.Errorf("country %s: %s has no addresses for it", c, src.Name)
+			}
+			if err != nil {
+				errs = append(errs, fmt.Errorf("%s: %w", src.Name, err))
+				if ctx.Err() != nil {
+					break
+				}
+				continue
+			}
+			if len(res.Prefixes)+len(part.Prefixes) > MaxEntries {
+				return nil, fmt.Errorf("more than %d entries", MaxEntries)
+			}
+			res.Prefixes = append(res.Prefixes, part.Prefixes...)
+			res.Skipped += part.Skipped
+			errs = nil
+			break
+		}
+		if errs != nil {
+			return nil, fmt.Errorf("country %s: %w", c, errors.Join(errs...))
+		}
+	}
+	res.Prefixes = Normalize(res.Prefixes)
+	return res, nil
+}
+
+// fetchCountry downloads a country's two files from src.
+func fetchCountry(ctx context.Context, client *http.Client, src CountrySource, country, userAgent string) (*Result, error) {
+	res := &Result{}
+	missing := 0
+	for _, v6 := range []bool{false, true} {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, src.URL(country, v6), nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("User-Agent", userAgent)
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		part, err := countryFile(resp)
+		if err != nil {
+			return nil, err
+		}
+		if part == nil {
+			missing++
+			continue
+		}
+		res.Prefixes = append(res.Prefixes, part.Prefixes...)
+		res.Skipped += part.Skipped
+	}
+	if missing == 2 {
+		return nil, errNoCountry
+	}
+	return res, nil
+}
+
+// countryFile reads one file of a country list; nil when it is not there.
+func countryFile(resp *http.Response) (*Result, error) {
+	defer resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusOK:
+		return ParseText(&limitedReader{r: resp.Body, left: MaxBody})
+	case http.StatusNotFound:
+		return nil, nil
+	}
+	msg, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+	return nil, fmt.Errorf("%s: %s", resp.Status, firstLine(string(msg)))
 }
 
 // ParseText reads one address or prefix per line. "#" and ";" start a

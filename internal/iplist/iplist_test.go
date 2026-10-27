@@ -247,3 +247,59 @@ func TestFetchRedirects(t *testing.T) {
 		t.Errorf("https to http: %v", err)
 	}
 }
+
+// A country list merges each country's two files, a missing one is no
+// addresses of that version, and a source that fails gives way to the
+// next; one that has neither file is believed.
+func TestFetchCountries(t *testing.T) {
+	files := map[string]string{
+		"/a/SE/4": "# Sweden\n2.0.0.0/15\n2.2.0.0/16\n",
+		"/a/SE/6": "2001:6b0::/32\n",
+		"/a/KP/4": "175.45.176.0/22\n",
+		"/b/NO/4": "2.148.0.0/14\n",
+		"/b/NO/6": "2001:0700:0000:0000:0000:0000:0000:0000/32\n",
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/a/NO/") {
+			http.Error(w, "busy", http.StatusServiceUnavailable)
+			return
+		}
+		body, ok := files[r.URL.Path]
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		fmt.Fprint(w, body)
+	}))
+	defer srv.Close()
+	saved := CountrySources
+	defer func() { CountrySources = saved }()
+	source := func(name string) CountrySource {
+		return CountrySource{name, func(c string, v6 bool) string {
+			v := "4"
+			if v6 {
+				v = "6"
+			}
+			return srv.URL + "/" + name + "/" + c + "/" + v
+		}}
+	}
+	CountrySources = []CountrySource{source("a"), source("b")}
+	l := fwconfig.IPList{Name: "geo", Source: fwconfig.IPListCountry, Countries: []string{"SE", "KP", "NO"}}
+	res, err := Fetch(context.Background(), srv.Client(), l, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "2.0.0.0/15 2.2.0.0/16 2.148.0.0/14 175.45.176.0/22 2001:6b0::/32 2001:700::/32"
+	if got := prefixes(res); got != want {
+		t.Errorf("got %s\nwant %s", got, want)
+	}
+	l.Countries = []string{"SE", "ZZ"}
+	if _, err := Fetch(context.Background(), srv.Client(), l, "test"); err == nil || !strings.Contains(err.Error(), "country ZZ: a has no addresses") {
+		t.Errorf("unknown country: %v", err)
+	}
+	CountrySources = []CountrySource{source("a")}
+	l.Countries = []string{"NO"}
+	if _, err := Fetch(context.Background(), srv.Client(), l, "test"); err == nil || !strings.Contains(err.Error(), "503") {
+		t.Errorf("failing source: %v", err)
+	}
+}

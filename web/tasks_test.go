@@ -57,6 +57,23 @@ func TestIPListsAndTasks(t *testing.T) {
 		env.do("DELETE", "/api/ip-lists/"+itoa(env.create("/api/ip-lists", c)), nil)
 	}
 
+	// A country list: codes upper-cased and deduplicated, no URL kept.
+	for _, c := range []map[string]any{
+		{"name": "geo", "source": "country"},
+		{"name": "geo", "source": "country", "countries": []string{"Sweden"}},
+	} {
+		if rec := env.do("POST", "/api/ip-lists", c); rec.Code != http.StatusBadRequest {
+			t.Errorf("bad country list %v accepted: %d %s", c, rec.Code, rec.Body)
+		}
+	}
+	geo := env.create("/api/ip-lists", map[string]any{"name": "geo", "source": "country", "url": "https://example.com/x", "countries": []string{"se", " NO", "SE"}})
+	var g models.IpList
+	env.srv.db.First(&g, geo)
+	if g.Url != "" || strings.Join(g.Countries, " ") != "SE NO" {
+		t.Errorf("country list stored as %q %v", g.Url, g.Countries)
+	}
+	env.do("DELETE", "/api/ip-lists/"+itoa(geo), nil)
+
 	rec := env.do("POST", "/api/ip-lists", cs)
 	if rec.Code != http.StatusCreated || strings.Contains(rec.Body.String(), key) || !strings.Contains(rec.Body.String(), `"has_api_key":true`) {
 		t.Fatalf("create: %d %s", rec.Code, rec.Body)
