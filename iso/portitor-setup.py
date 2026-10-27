@@ -251,7 +251,13 @@ def offered_dns(nic: str, timeout: float = 4) -> list[str]:
     msg = (bytes([1, 1, 6, 0]) + xid + b"\0\0\x80\0" + bytes(16) + mac + bytes(10 + 192)
            + bytes.fromhex("63825363") + bytes([53, 1, 1, 55, 3, 1, 3, 6, 255]))
     deadline = time.monotonic() + timeout
+    # With no route to the server yet, reverse path filtering (systemd's loose
+    # mode) drops its offer as martian.
+    rp_filter = Path("/proc/sys/net/ipv4/conf") / nic / "rp_filter"
+    saved = read(rp_filter)
     try:
+        if saved:
+            rp_filter.write_text("0")
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
             s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
@@ -274,6 +280,12 @@ def offered_dns(nic: str, timeout: float = 4) -> list[str]:
                 return [str(ipaddress.IPv4Address(dns[j:j + 4])) for j in range(0, len(dns) - 3, 4)][:3]
     except OSError:
         pass
+    finally:
+        if saved:
+            try:
+                rp_filter.write_text(saved)
+            except OSError:
+                pass
     return []
 
 
