@@ -561,6 +561,7 @@ const columns = computed(() =>
     'w-7',
     'w-8',
     'w-8',
+    '',
     hasFrom.value && 'w-36',
     hasTo.value && 'w-36',
     '',
@@ -569,11 +570,10 @@ const columns = computed(() =>
     'w-18',
     'w-8',
     'w-24',
-    '',
   ].filter((c) => c !== false),
 )
 const table = ref(null)
-const resize = useColumnResize({ table, storageKey: () => `rules-grid-cols-v4-${props.chain}` })
+const resize = useColumnResize({ table, storageKey: () => `rules-grid-cols-v5-${props.chain}` })
 const { widths, total: tableWidth } = resize
 const onHandle = (fn) => (event) => event.target.classList.contains('col-resize') && fn(event)
 const onResizeStart = onHandle(resize.onPointerDown)
@@ -704,6 +704,7 @@ function onKeydown(event, index) {
               <th><span class="col-resize" /></th>
               <th title="Evaluated top to bottom">#<span class="col-resize" /></th>
               <th title="Enabled">On<span class="col-resize" /></th>
+              <th>Description<span class="col-resize" /></th>
               <th v-if="hasFrom">From<span class="col-resize" /></th>
               <th v-if="hasTo">To<span class="col-resize" /></th>
               <th>Source<span class="col-resize" /></th>
@@ -719,7 +720,6 @@ function onKeydown(event, index) {
               >
                 In / Out<span class="col-resize" />
               </th>
-              <th>Description<span class="col-resize" /></th>
             </tr>
           </thead>
           <tbody class="auto-rules">
@@ -758,7 +758,11 @@ function onKeydown(event, index) {
               <td class="text-center text-muted">
                 <UIcon name="i-lucide-lock" class="size-3.5 align-middle" />
               </td>
-              <td :colspan="colCount - 5">
+              <td colspan="2" />
+              <td>
+                <span><span class="text-muted">auto:</span> invalid packets</span>
+              </td>
+              <td :colspan="colCount - 7">
                 <span class="text-muted">invalid: no known connection</span>
               </td>
               <td><span class="font-semibold text-error">drop</span></td>
@@ -778,9 +782,6 @@ function onKeydown(event, index) {
                   <div>{{ dropCount('invalid').toLocaleString() }} pkt</div>
                 </template>
               </td>
-              <td>
-                <span><span class="text-muted">auto:</span> invalid packets</span>
-              </td>
             </tr>
             <tr
               v-for="a in auto"
@@ -796,6 +797,9 @@ function onKeydown(event, index) {
               <td />
               <td class="text-center">
                 <input type="checkbox" class="accent-primary" checked disabled />
+              </td>
+              <td>
+                <span><span class="text-muted">auto:</span> {{ autoDescription(a) }}</span>
               </td>
               <td v-if="hasFrom" :title="ifaceTitle(a.in_interfaces, 'any')">
                 <span :class="{ 'text-muted': !a.in_interfaces?.length }">{{
@@ -841,9 +845,6 @@ function onKeydown(event, index) {
                 />
               </td>
               <td />
-              <td>
-                <span><span class="text-muted">auto:</span> {{ autoDescription(a) }}</span>
-              </td>
             </tr>
           </tbody>
           <tbody class="user-rules">
@@ -985,6 +986,24 @@ function onKeydown(event, index) {
                     :checked="r.enabled"
                     title="Enabled"
                     @change="set(r, 'enabled', $event.target.checked)"
+                  />
+                </td>
+                <td>
+                  <div
+                    v-if="isHit(r, 'description')"
+                    class="search-mirror"
+                    aria-hidden="true"
+                    v-html="highlight(r.description)"
+                  />
+                  <input
+                    :readonly="readOnly"
+                    :value="cellText(r, 'description', r.description)"
+                    data-col="description"
+                    :title="r.description"
+                    @input="onDraft(r, 'description', $event)"
+                    @change="setText(r, 'description', $event)"
+                    @blur="endDraft"
+                    @keydown="onKeydown($event, i)"
                   />
                 </td>
                 <td
@@ -1131,24 +1150,6 @@ function onKeydown(event, index) {
                     <div><span class="dir">out</span>{{ bytes(counter(r).reply_bytes) }}</div>
                   </template>
                 </td>
-                <td>
-                  <div
-                    v-if="isHit(r, 'description')"
-                    class="search-mirror"
-                    aria-hidden="true"
-                    v-html="highlight(r.description)"
-                  />
-                  <input
-                    :readonly="readOnly"
-                    :value="cellText(r, 'description', r.description)"
-                    data-col="description"
-                    :title="r.description"
-                    @input="onDraft(r, 'description', $event)"
-                    @change="setText(r, 'description', $event)"
-                    @blur="endDraft"
-                    @keydown="onKeydown($event, i)"
-                  />
-                </td>
               </tr>
             </template>
             <tr v-if="!rows.length">
@@ -1168,15 +1169,16 @@ function onKeydown(event, index) {
               <td class="text-center text-muted">
                 <UIcon name="i-lucide-lock" class="size-3.5 align-middle" />
               </td>
-              <td :colspan="colCount - 5">
+              <td colspan="2" />
+              <td>
+                <span><span class="text-muted">auto:</span> port forwards</span>
+              </td>
+              <td :colspan="colCount - 7">
                 <span class="text-muted">to a port forward (NAT)</span>
               </td>
               <td><span class="font-semibold text-success">accept</span></td>
               <td />
               <td />
-              <td>
-                <span><span class="text-muted">auto:</span> port forwards</span>
-              </td>
             </tr>
             <tr
               class="cursor-pointer"
@@ -1186,7 +1188,9 @@ function onKeydown(event, index) {
               <td class="text-center text-muted">
                 <UIcon name="i-lucide-lock" class="size-3.5 align-middle" />
               </td>
-              <td :colspan="colCount - 5">
+              <td colspan="2" />
+              <td><span>default drop</span></td>
+              <td :colspan="colCount - 7">
                 <span class="text-muted">no rule matched</span>
               </td>
               <td><span class="font-semibold text-error">drop</span></td>
@@ -1206,7 +1210,6 @@ function onKeydown(event, index) {
                   <div>{{ dropCount('policy').toLocaleString() }} pkt</div>
                 </template>
               </td>
-              <td><span>default drop</span></td>
             </tr>
           </tbody>
         </table>
