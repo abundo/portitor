@@ -41,10 +41,16 @@ async function loadLimits() {
 }
 watch(() => store.currentId, loadLimits, { immediate: true })
 // lockedRow shows a locked row of a chain's table in the rule form
-// (read-only): an auto rule, or { builtin } for the invalid packets, the port
+// (read-only): an auto rule, or { builtin } for IP options, the invalid packets, the port
 // forwards' accept or the policy. What it matches takes the Services field's
 // place.
 const builtins = {
+  ip_options: {
+    match: 'ip hdrlength > 5 (input: not IGMP)',
+    action: 'drop',
+    description:
+      'IP options: IPv4 packets with options, dropped before the rules and established connections (Settings)',
+  },
   invalid: {
     match: 'ct state invalid',
     action: 'drop',

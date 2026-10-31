@@ -74,6 +74,7 @@ type data struct {
 	syslogServers  []models.SyslogServer
 	proxyPolicies  []models.AcmeProxyPolicy
 	ldapServers    []models.LdapServer
+	settings       []models.Settings // the one row, if any
 	// The users, role members and the directory's group mappings, for
 	// OpenVPN's logins.
 	users        []models.User
@@ -133,6 +134,7 @@ func load(db *gorm.DB) (*data, error) {
 		{&d.syslogServers, "address, port, protocol"},
 		{&d.proxyPolicies, "name"},
 		{&d.ldapServers, "position, id"},
+		{&d.settings, "id"},
 		{&d.roleMappings, "id"},
 		{&d.users, "username"},
 		{&d.roleMembers, "id"},
@@ -338,6 +340,14 @@ func buildPeer(db *gorm.DB, generation int64, only map[string]bool, firewallID u
 			}
 			if contains(mi.LogInvalid, c) {
 				in.LogInvalid = append(in.LogInvalid, c)
+			}
+		}
+		if len(d.settings) > 0 {
+			if d.settings[0].DropIPOptionsInput {
+				in.DropIPOptions = append(in.DropIPOptions, fwconfig.ChainInput)
+			}
+			if d.settings[0].DropIPOptionsForward {
+				in.DropIPOptions = append(in.DropIPOptions, fwconfig.ChainForward)
 			}
 		}
 		for _, svc := range mi.LogAuto {

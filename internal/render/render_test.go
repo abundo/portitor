@@ -237,7 +237,7 @@ func TestNftablesSyntax(t *testing.T) {
 		}
 	}
 	// Rules without and with IDs (named counters, connection marks).
-	for _, doc := range []fwconfig.Document{fwconfig.SampleDocument(), withRuleIDs(fwconfig.SampleDocument()), fwconfig.SampleVRFDocument(), withDHCPHA(fwconfig.SampleDocument()), withHAConfig(fwconfig.SampleDocument()), withSynProxy(fwconfig.SampleDocument())} {
+	for _, doc := range []fwconfig.Document{fwconfig.SampleDocument(), withRuleIDs(fwconfig.SampleDocument()), fwconfig.SampleVRFDocument(), withDHCPHA(fwconfig.SampleDocument()), withHAConfig(fwconfig.SampleDocument()), withSynProxy(fwconfig.SampleDocument()), withDropIPOptions(fwconfig.SampleDocument())} {
 		b, err := Render(doc, Options{Paths: paths, Units: DefaultUnits()})
 		if err != nil {
 			t.Fatal(err)
@@ -414,10 +414,55 @@ func TestParseDropCounter(t *testing.T) {
 	if chain, reason, ok := ParseDropCounter(DropCounter("forward", DropPolicy)); !ok || chain != "forward" || reason != DropPolicy {
 		t.Errorf("round trip: %q %q %v", chain, reason, ok)
 	}
+	if chain, reason, ok := ParseDropCounter(DropCounter("input", DropIPOptions)); !ok || chain != "input" || reason != DropIPOptions {
+		t.Errorf("round trip: %q %q %v", chain, reason, ok)
+	}
 	for _, bad := range []string{"drop_nat_policy", "drop_input_x", "drop_input", "rule_1_orig", "drop__policy"} {
 		if _, _, ok := ParseDropCounter(bad); ok {
 			t.Errorf("%q parsed", bad)
 		}
+	}
+}
+
+// withDropIPOptions drops the IPv4 packets with options in input and
+// forward of every instance.
+func withDropIPOptions(doc fwconfig.Document) fwconfig.Document {
+	for i := range doc.Instances {
+		doc.Instances[i].DropIPOptions = []string{fwconfig.ChainInput, fwconfig.ChainForward}
+	}
+	return doc
+}
+
+func TestNftablesDropIPOptions(t *testing.T) {
+	nft := mustFile(t, sampleBundle(t), "/etc/nftables.d/portitor.nft")
+	if strings.Contains(nft, "hdrlength") || strings.Contains(nft, DropIPOptions) {
+		t.Errorf("ip options dropped without the setting:\n%s", nft)
+	}
+	doc := withDropIPOptions(fwconfig.SampleDocument())
+	if err := doc.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	b, err := Render(doc, Options{Paths: DefaultPaths(), Units: DefaultUnits()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	nft = mustFile(t, b, "/etc/nftables.d/portitor.nft")
+	for _, c := range []struct{ chain, want string }{
+		{"input", `ip hdrlength > 5 ip protocol != igmp counter name "drop_input_ip_options" drop comment "ip options"`},
+		{"forward", `ip hdrlength > 5 counter name "drop_forward_ip_options" drop comment "ip options"`},
+	} {
+		if !strings.Contains(nft, "counter "+DropCounter(c.chain, DropIPOptions)+" {") {
+			t.Errorf("%s: counter not declared", c.chain)
+		}
+		_, body, _ := strings.Cut(nft, "\tchain "+c.chain+" {\n")
+		body, _, _ = strings.Cut(body, "\t}\n")
+		drop, est := strings.Index(body, c.want), strings.Index(body, "ct state established,related accept")
+		if drop < 0 || est < 0 || drop > est {
+			t.Errorf("%s: want %q before the established accept in\n%s", c.chain, c.want, body)
+		}
+	}
+	if strings.Contains(nft, DropCounter("output", DropIPOptions)) {
+		t.Error("output drops ip options")
 	}
 }
 

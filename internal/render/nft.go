@@ -116,7 +116,7 @@ func Nftables(in *fwconfig.Instance, lockout *AntiLockout, paths Paths) string {
 	}
 
 	counted := writeRuleCounters(b, in.Rules)
-	writeDropCounters(b)
+	writeDropCounters(b, in)
 
 	b.WriteString("\tchain reject_pkt {\n")
 	b.WriteString("\t\tmeta l4proto tcp reject with tcp reset\n")
@@ -131,6 +131,7 @@ func Nftables(in *fwconfig.Instance, lockout *AntiLockout, paths Paths) string {
 		b.WriteString(connCountRules)
 	}
 	writeServicePolicers(b, in)
+	writeIPOptionsDrop(b, in, fwconfig.ChainInput)
 	b.WriteString("\t\tct state established,related accept\n")
 	writeInvalidDrop(b, in, fwconfig.ChainInput)
 	writeVRFLabels(b, in, fwconfig.ChainInput)
@@ -185,6 +186,7 @@ func Nftables(in *fwconfig.Instance, lockout *AntiLockout, paths Paths) string {
 	if counted {
 		b.WriteString(connCountRules)
 	}
+	writeIPOptionsDrop(b, in, fwconfig.ChainForward)
 	b.WriteString("\t\tct state established,related accept\n")
 	// A SYN proxy takes the ACKs conntrack finds invalid.
 	writeSynProxies(b, in)
@@ -391,11 +393,13 @@ func writeRuleCounters(b *strings.Builder, rules []fwconfig.Rule) bool {
 // Drop counters. Each filter chain counts, apart from the rules, the
 // packets it drops by itself: DropInvalid those of no known connection
 // (ct state invalid), DropPolicy those no rule decided on, which fall
-// through to the chain's drop policy. They restart from zero on apply, like
-// the rule counters.
+// through to the chain's drop policy, and DropIPOptions the IPv4 packets
+// with options (fwconfig.Instance.DropIPOptions; only in the chains that
+// drop them). They restart from zero on apply, like the rule counters.
 const (
-	DropInvalid = "invalid"
-	DropPolicy  = "policy"
+	DropInvalid   = "invalid"
+	DropPolicy    = "policy"
+	DropIPOptions = "ip_options"
 )
 
 var filterChains = []string{fwconfig.ChainInput, fwconfig.ChainForward, fwconfig.ChainOutput}
@@ -412,18 +416,36 @@ func ParseDropCounter(name string) (chain, reason string, ok bool) {
 		return "", "", false
 	}
 	chain, reason, found = strings.Cut(rest, "_")
-	if !found || !slices.Contains(filterChains, chain) || (reason != DropInvalid && reason != DropPolicy) {
+	if !found || !slices.Contains(filterChains, chain) || (reason != DropInvalid && reason != DropPolicy && reason != DropIPOptions) {
 		return "", "", false
 	}
 	return chain, reason, true
 }
 
-func writeDropCounters(b *strings.Builder) {
+func writeDropCounters(b *strings.Builder, in *fwconfig.Instance) {
 	for _, chain := range filterChains {
 		for _, reason := range []string{DropInvalid, DropPolicy} {
 			fmt.Fprintf(b, "\tcounter %s {\n\t}\n\n", DropCounter(chain, reason))
 		}
+		if slices.Contains(in.DropIPOptions, chain) {
+			fmt.Fprintf(b, "\tcounter %s {\n\t}\n\n", DropCounter(chain, DropIPOptions))
+		}
 	}
+}
+
+// writeIPOptionsDrop drops the IPv4 packets with options, whose header is
+// longer than its 20 bytes (5 words), if the instance says so for the chain
+// (DropIPOptions). It comes before the established accept, so it takes them
+// in any connection. IGMP's reports carry Router Alert: input keeps them.
+func writeIPOptionsDrop(b *strings.Builder, in *fwconfig.Instance, chain string) {
+	if !slices.Contains(in.DropIPOptions, chain) {
+		return
+	}
+	igmp := ""
+	if chain == fwconfig.ChainInput {
+		igmp = " ip protocol != igmp"
+	}
+	fmt.Fprintf(b, "\t\tip hdrlength > 5%s counter name %q drop comment \"ip options\"\n", igmp, DropCounter(chain, DropIPOptions))
 }
 
 // writeInvalidDrop drops a chain's invalid packets, after logging them

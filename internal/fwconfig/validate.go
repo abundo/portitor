@@ -651,6 +651,10 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 
 	v.logChains(p+": log drops", in.LogDrops)
 	v.logChains(p+": log invalid", in.LogInvalid)
+	v.logChains(p+": drop ip options", in.DropIPOptions)
+	if slices.Contains(in.DropIPOptions, ChainOutput) {
+		v.addf("%s: drop ip options: only input and forward", p)
+	}
 	seenAuto := map[string]bool{}
 	for _, s := range in.LogAuto {
 		switch {
@@ -1259,7 +1263,8 @@ func ValidAutoService(s string) bool {
 	return len(s) <= 48 && autoServiceRe.MatchString(s)
 }
 
-// logChains checks a list of filter chains (LogDrops, LogInvalid).
+// logChains checks a list of filter chains (LogDrops, LogInvalid,
+// DropIPOptions).
 func (v *validator) logChains(what string, chains []string) {
 	seen := map[string]bool{}
 	for _, c := range chains {

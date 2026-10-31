@@ -22,6 +22,8 @@ const settings = reactive({
   web_certificate_id: 0,
   virtual_firewalls: false,
   totp_default: false,
+  drop_ip_options_input: false,
+  drop_ip_options_forward: false,
 })
 const settingsForm = usePageForm(settings)
 const webTLS = ref(false)
@@ -144,6 +146,31 @@ async function saveSettings() {
             :label="`connected to ${deploy.status.hostname}`"
           />
         </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="mb-1 text-lg font-semibold">IP options</div>
+      <p class="mb-4 text-sm text-muted">
+        IPv4 packets with IP options (Record Route, Timestamp, Router Alert, ...: a header longer
+        than 20 bytes). Normal traffic carries none, and they have been the way in for kernel flaws.
+        Dropped first in the chain, before the rules and established connections, in every virtual
+        firewall; the Rules page shows what each drop counted. Source-routed packets are always
+        dropped. Takes effect on the next commit.
+      </p>
+      <div class="space-y-3">
+        <UFormField
+          label="Drop packets with options to the firewall"
+          help="In the input chain. IGMP's reports (Router Alert) still come in."
+        >
+          <USwitch v-model="settings.drop_ip_options_input" />
+        </UFormField>
+        <UFormField
+          label="Drop packets with options when forwarding"
+          help="In the forward chain: to and from the hosts behind the firewall."
+        >
+          <USwitch v-model="settings.drop_ip_options_forward" />
+        </UFormField>
       </div>
     </div>
 

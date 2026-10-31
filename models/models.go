@@ -379,6 +379,11 @@ type Settings struct {
 	VirtualFirewalls bool `json:"virtual_firewalls"`
 	// TOTPDefault is the new user form's "Require two-factor login".
 	TOTPDefault bool `gorm:"column:totp_default" json:"totp_default"`
+	// DropIPOptionsInput and DropIPOptionsForward drop the IPv4 packets
+	// with options to the firewall and through it, in every instance
+	// (fwconfig.Instance.DropIPOptions).
+	DropIPOptionsInput   bool `gorm:"column:drop_ip_options_input" json:"drop_ip_options_input"`
+	DropIPOptionsForward bool `gorm:"column:drop_ip_options_forward" json:"drop_ip_options_forward"`
 	// LastCommit numbers the commits: the Revert snapshots and
 	// Deployment.CommitID.
 	LastCommit int64     `json:"last_commit"`

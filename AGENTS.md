@@ -220,7 +220,9 @@ docs and user-facing messages.
   exists, before interfaces move in or come up and before forwarding is turned on.
   Rules match interfaces by name (`iifname`), so they need not exist yet; only `lo`
   is matched by index.
-- **Rule order in a chain:** established/related, invalid drop, loopback and
+- **Rule order in a chain:** the IP options drop (`fwconfig.Instance.DropIPOptions`,
+  from Settings' `drop_ip_options_*` for every instance; input and forward, input
+  sparing IGMP; counter `render.DropIPOptions`, declared only then), established/related, invalid drop, loopback and
   essential ICMP, anti-lockout and the services' auto accepts
   (`render.AutoInputRules`; BGP's from its neighbours' addresses only, OSPF's on its
   non-passive interfaces; their sources are sets `render.AutoSetName`, which Hosts &

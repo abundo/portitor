@@ -34,21 +34,23 @@ Rules are evaluated **top to bottom, and the first match decides**. A packet tha
 rule accepts is dropped by the chain's policy. Each chain runs in this order; the
 locked rows show where the built-in parts sit:
 
-1. **Established connections** are allowed. Rules only decide the *first* packet of a
+1. **IP options** (input and forward, when switched on under Settings): IPv4 packets
+   with IP options are dropped, before anything else. See [IP options](#ip-options).
+2. **Established connections** are allowed. Rules only decide the *first* packet of a
    connection; the replies and the rest of the connection follow automatically. You
    never need a rule for return traffic.
-2. **Invalid packets** (of no known connection) are dropped (the locked row at the top).
-3. Loopback and the ICMP that IPv4 and IPv6 need to work are allowed.
-4. **Auto rules** (input only, locked): what the configured services need, such as
+3. **Invalid packets** (of no known connection) are dropped (a locked row at the top).
+4. Loopback and the ICMP that IPv4 and IPv6 need to work are allowed.
+5. **Auto rules** (input only, locked): what the configured services need, such as
    DHCP and DNS on the interfaces that serve them, WireGuard's port and ACME's port 80.
    In the default virtual firewall the agent's management port, SSH and the GUI
    (portitor-config) stay open to the agent's `allow_from` addresses (anti-lockout). They come before your rules, so
    a rule that closes an interface to the firewall still keeps DHCP and DNS working on it.
-5. **Your rules**, in the order shown.
-6. **Port forwards** (forward only, locked): connections a NAT port forward redirected
+6. **Your rules**, in the order shown.
+7. **Port forwards** (forward only, locked): connections a NAT port forward redirected
    are accepted *after* your rules, so a forward rule can still drop them, for example
    to allow a port forward from a few addresses only.
-7. **The policy** (locked row at the bottom): everything else is dropped and counted.
+8. **The policy** (locked row at the bottom): everything else is dropped and counted.
 
 ## Fields of a rule
 
@@ -224,6 +226,49 @@ Switch on *SYN proxy* in a forward rule that accepts:
   wasn't in the table, after a reboot say, has to reconnect. On an HA pair, the
   connections synchronised to the other host carry on after a switch-over, but
   handshakes in progress during it fail and are retried by the client.
+
+## IP options
+
+An IPv4 header is 20 bytes; options (Record Route, Timestamp, Router Alert, Security,
+...) make it longer. Normal traffic carries none, and options have been the way in for
+kernel flaws. Source-routed packets (the LSRR and SSRR options) are always dropped;
+the others are let through unless you switch on, under **Admin → Settings → IP
+options**:
+
+- **Drop packets with options to the firewall**: in the input chain. IGMP's membership
+  reports carry the Router Alert option, so IGMP still comes in.
+- **Drop packets with options when forwarding**: in the forward chain, to and from the
+  hosts behind the firewall.
+
+Both apply to every virtual firewall, from the next commit. The drop comes first in the
+chain, before established connections are accepted, so it takes packets with options
+in any connection, and no rule can let them through. A locked row *IP options* at the top
+of the chain counts what it dropped.
+
+## Fragmented packets
+
+A packet too big for a link on its way may arrive in fragments, and only the first
+fragment carries the TCP or UDP header with the ports. The firewall **reassembles
+fragments before any rule sees them**: connection tracking needs whole packets, so the
+kernel puts the fragments back together as they arrive, before NAT, the SYN proxy and
+the chains. Every rule, in every chain, sees the whole packet, so services and ports
+match fragmented traffic like any other, and no rule for fragments is needed.
+
+- **Forwarded packets leave in fragments again.** After the forward chain the kernel
+  splits the packet up: IPv4 into fragments no bigger than the largest one that came
+  in, IPv6 into the sizes it came in. An IPv4 packet with *don't fragment* set that is
+  too big for the outgoing link is dropped with an ICMP *fragmentation needed* to its
+  sender; IPv6 is never fragmented by a router, so a packet too big gets an ICMPv6
+  *packet too big*. Both kinds of ICMP are always allowed (see
+  [How a chain is evaluated](#how-a-chain-is-evaluated)).
+- **Incomplete fragments are dropped silently.** A packet whose fragments don't all
+  arrive in time (30 seconds for IPv4, 60 for IPv6), or whose fragments overlap, is
+  dropped before the chains: no rule, counter or packet log sees it. Each virtual
+  firewall has its own memory for reassembly, so fragments sent to one can't fill up
+  another's.
+- **What sees fragments:** a packet capture shows the packets as they are on the wire,
+  in fragments. Traffic shaping of received traffic sees the fragments as they come
+  in, and shaping of sent traffic the fragments that leave.
 
 ## Working on the Rules page
 

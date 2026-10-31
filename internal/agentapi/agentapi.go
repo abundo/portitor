@@ -46,12 +46,15 @@ type RuleCountersResponse struct {
 
 // ChainDrops counts the packets a filter chain dropped outside the rules:
 // Invalid those of no known connection (ct state invalid), Policy those no
-// rule decided on (the chain's drop policy).
+// rule decided on (the chain's drop policy), IPOptions the IPv4 packets
+// with options, nil when the chain doesn't drop them.
 type ChainDrops struct {
-	InvalidPackets uint64 `json:"invalid_packets"`
-	InvalidBytes   uint64 `json:"invalid_bytes"`
-	PolicyPackets  uint64 `json:"policy_packets"`
-	PolicyBytes    uint64 `json:"policy_bytes"`
+	InvalidPackets   uint64  `json:"invalid_packets"`
+	InvalidBytes     uint64  `json:"invalid_bytes"`
+	PolicyPackets    uint64  `json:"policy_packets"`
+	PolicyBytes      uint64  `json:"policy_bytes"`
+	IPOptionsPackets *uint64 `json:"ip_options_packets,omitempty"`
+	IPOptionsBytes   *uint64 `json:"ip_options_bytes,omitempty"`
 }
 
 // RuleCounters counts a rule's traffic: Orig what the rule matched and the

@@ -58,7 +58,7 @@ const props = defineProps({
 // log-builtin(builtin, service, on): a built-in row's Log box changed;
 // builtin is 'policy', 'invalid' or 'auto' (with the auto rule's service).
 // view(row): a locked row was clicked, to show it read-only: an auto rule,
-// or { builtin } for 'invalid', 'dnat' (port forwards) or 'policy'.
+// or { builtin } for 'ip_options', 'invalid', 'dnat' (port forwards) or 'policy'.
 const emit = defineEmits(['save', 'move', 'edit', 'view', 'remove', 'log-builtin'])
 
 const objects = useObjectStore()
@@ -611,6 +611,13 @@ function dropTitle(reason) {
   return `${props.drops[`${reason}_bytes`].toLocaleString()} bytes, ${n.toLocaleString()} packets dropped since the last deploy`
 }
 const dropCount = (reason) => props.drops?.[`${reason}_packets`]
+// The deployed ruleset drops IPv4 packets with options in this chain
+// (Settings; render.DropIPOptions): its counter is there.
+const ipOptions = computed(() => dropCount('ip_options') !== undefined)
+const ipOptionsMatch = computed(() =>
+  props.chain === 'input' ? 'ip hdrlength > 5, not IGMP' : 'ip hdrlength > 5',
+)
+const autoCount = computed(() => props.auto.length + 1 + (ipOptions.value ? 1 : 0))
 
 // The built-in rows log rate limited (render.builtinLogLimit).
 const builtinLogLimit = 'at most 10 packets a second'
@@ -744,9 +751,33 @@ function onKeydown(event, index) {
                 <div class="flex items-center">
                   <span class="group-name auto-name">Automatic rules</span>
                   <span class="group-size">
-                    {{ auto.length + 1 }} rule{{ auto.length ? 's' : '' }}
+                    {{ autoCount }} rule{{ autoCount > 1 ? 's' : '' }}
                   </span>
                 </div>
+              </td>
+            </tr>
+            <tr
+              v-if="ipOptions"
+              :hidden="!autoOpen"
+              class="cursor-pointer"
+              @click="emit('view', { builtin: 'ip_options' })"
+              title="IPv4 packets with IP options, dropped before the rules and established connections (Settings)"
+            >
+              <td class="text-center text-muted">
+                <UIcon name="i-lucide-lock" class="size-3.5 align-middle" />
+              </td>
+              <td colspan="2" />
+              <td>
+                <span><span class="text-muted">auto:</span> IP options</span>
+              </td>
+              <td :colspan="colCount - 7">
+                <span class="text-muted">{{ ipOptionsMatch }}</span>
+              </td>
+              <td><span class="font-semibold text-error">drop</span></td>
+              <td />
+              <td class="counter" :title="dropTitle('ip_options')">
+                <div>{{ bytes(drops.ip_options_bytes) }}</div>
+                <div>{{ dropCount('ip_options').toLocaleString() }} pkt</div>
               </td>
             </tr>
             <tr

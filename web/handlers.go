@@ -468,6 +468,10 @@ func (s *Server) handlePutSettings(c *echo.Context) error {
 		WebCertificateID *uint `json:"web_certificate_id"`
 		VirtualFirewalls *bool `json:"virtual_firewalls"`
 		TOTPDefault      *bool `json:"totp_default"`
+		// The IPv4 packets with options dropped to the firewall and
+		// through it.
+		DropIPOptionsInput   *bool `json:"drop_ip_options_input"`
+		DropIPOptionsForward *bool `json:"drop_ip_options_forward"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return errJSON(c, http.StatusBadRequest, "invalid request")
@@ -508,6 +512,12 @@ func (s *Server) handlePutSettings(c *echo.Context) error {
 	}
 	if req.TOTPDefault != nil {
 		st.TOTPDefault = *req.TOTPDefault
+	}
+	if req.DropIPOptionsInput != nil {
+		st.DropIPOptionsInput = *req.DropIPOptionsInput
+	}
+	if req.DropIPOptionsForward != nil {
+		st.DropIPOptionsForward = *req.DropIPOptionsForward
 	}
 	oldCert := st.WebCertificateID
 	if req.WebCertificateID != nil {

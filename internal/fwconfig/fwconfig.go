@@ -112,6 +112,12 @@ type Instance struct {
 	// LogInvalid lists the filter chains that log, rate limited, the
 	// invalid packets (of no known connection) they drop.
 	LogInvalid []string `json:"log_invalid,omitempty"`
+	// DropIPOptions lists the filter chains (ChainInput, ChainForward) that
+	// drop IPv4 packets with IP options (a header longer than 20 bytes:
+	// Record Route, Timestamp, ...), first in the chain, before the
+	// established accept; input lets IGMP's (Router Alert) through. The
+	// kernel drops the source-routing ones (LSRR, SSRR) anyway.
+	DropIPOptions []string `json:"drop_ip_options,omitempty"`
 	// LogAuto lists the auto input rules (by service: "dhcp server",
 	// "wireguard wg0", "anti-lockout") that log, rate limited, what they
 	// accept. A service the instance doesn't have is ignored.

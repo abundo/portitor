@@ -76,9 +76,12 @@ func parseCounters(out []byte, rules map[uint32]agentapi.RuleCounters, drops map
 	for name, v := range nftCounters(out) {
 		if chain, reason, ok := render.ParseDropCounter(name); ok {
 			d := drops[chain]
-			if reason == render.DropInvalid {
+			switch reason {
+			case render.DropInvalid:
 				d.InvalidPackets, d.InvalidBytes = v.Packets, v.Bytes
-			} else {
+			case render.DropIPOptions:
+				d.IPOptionsPackets, d.IPOptionsBytes = &v.Packets, &v.Bytes
+			default:
 				d.PolicyPackets, d.PolicyBytes = v.Packets, v.Bytes
 			}
 			drops[chain] = d

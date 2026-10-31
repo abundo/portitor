@@ -62,6 +62,8 @@ func TestValidateCatchesProblems(t *testing.T) {
 	}{
 		{"log drops bad chain", func(d *Document) { d.Instances[0].LogDrops = []string{"nat"} }, `log drops: invalid chain "nat"`},
 		{"log drops twice", func(d *Document) { d.Instances[0].LogDrops = []string{"input", "input"} }, "input listed twice"},
+		{"drop ip options in output", func(d *Document) { d.Instances[0].DropIPOptions = []string{ChainOutput} }, "drop ip options: only input and forward"},
+		{"drop ip options twice", func(d *Document) { d.Instances[0].DropIPOptions = []string{ChainInput, ChainInput} }, "drop ip options: input listed twice"},
 		{"log invalid bad chain", func(d *Document) { d.Instances[0].LogInvalid = []string{"prerouting"} }, `log invalid: invalid chain "prerouting"`},
 		{"log auto bad service", func(d *Document) { d.Instances[0].LogAuto = []string{`dns" server`} }, `log auto: invalid service`},
 		{"log auto double space", func(d *Document) { d.Instances[0].LogAuto = []string{"dns  server"} }, `log auto: invalid service`},
