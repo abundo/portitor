@@ -1103,6 +1103,9 @@ type Certificate struct {
 	// Generate, when set on a save of an imported certificate, makes a new
 	// certificate and key in place of FullChain and NewPrivKey.
 	Generate *CertGenerate `gorm:"-" json:"generate,omitempty"`
+	// ImportCA, on the save of an imported certificate, refuses one that
+	// is not a CA (the Certificate authorities tab's Import CA).
+	ImportCA bool `gorm:"-" json:"import_ca,omitempty"`
 	// IsCA, Issuer, NotBefore and NotAfter are read from an imported
 	// certificate's chain when it is shown. A CA is the firewall's: it is
 	// on the host alone, and signs the certificates of the host and its

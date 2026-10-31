@@ -252,8 +252,14 @@ func TestCertificateAuthority(t *testing.T) {
 		"source": "import", "fullchain": caChain, "privkey": caKey}); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "belongs to the firewall") {
 		t.Errorf("CA imported into a virtual firewall: %d %s", rec.Code, rec.Body)
 	}
+	// Import CA refuses a server certificate.
+	srvChain, srvKey := testPair(t, "www.example.com")
+	if rec := env.do("POST", "/api/certificates", map[string]any{"instance_id": host, "name": "notca", "enabled": true,
+		"source": "import", "fullchain": srvChain, "privkey": srvKey, "import_ca": true}); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "not a certificate authority") {
+		t.Errorf("server certificate imported as a CA: %d %s", rec.Code, rec.Body)
+	}
 	if rec := env.do("POST", "/api/certificates", map[string]any{"instance_id": host, "name": "ca2", "enabled": true,
-		"source": "import", "fullchain": caChain, "privkey": caKey}); rec.Code != http.StatusCreated {
+		"source": "import", "fullchain": caChain, "privkey": caKey, "import_ca": true}); rec.Code != http.StatusCreated {
 		t.Errorf("CA imported on the host: %d %s", rec.Code, rec.Body)
 	}
 

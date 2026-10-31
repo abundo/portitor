@@ -41,6 +41,11 @@ func prepareCertificate(tx *gorm.DB, c, old *models.Certificate) error {
 		if err := prepareImported(c); err != nil {
 			return err
 		}
+		if c.ImportCA && !isCA(c) {
+			c.ImportCA = false
+			return bad("certificate: not a certificate authority (basic constraints CA:TRUE); import a server certificate on the Certificate store tab")
+		}
+		c.ImportCA = false
 		return checkAuthority(tx, c, old)
 	}
 	if c.Source != fwconfig.CertSourceACME {

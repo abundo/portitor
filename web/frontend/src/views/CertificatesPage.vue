@@ -157,7 +157,9 @@ function openImport() {
 }
 const pemBlocks = (text) =>
   text.match(/-----BEGIN ([A-Z0-9 ]+)-----[\s\S]*?-----END \1-----/g) ?? []
-async function loadFiles(e) {
+// readPEM fills form's fullchain, privkey and (when empty) name from the
+// files of the change event e.
+async function readPEM(e, form) {
   const certs = []
   let key = ''
   for (const file of e.target.files) {
@@ -165,16 +167,17 @@ async function loadFiles(e) {
       if (b.startsWith('-----BEGIN CERTIFICATE-----')) certs.push(b)
       else if (/^-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(b)) key = b
     }
-    if (!importForm.value.name) importForm.value.name = file.name.replace(/\.[^.]*$/, '')
+    if (!form.name) form.name = file.name.replace(/\.[^.]*$/, '')
   }
   e.target.value = ''
   if (!certs.length && !key) {
     toast.add({ title: 'No PEM certificate or private key in the file', color: 'error' })
     return
   }
-  if (certs.length) importForm.value.fullchain = certs.join('\n') + '\n'
-  if (key) importForm.value.privkey = key + '\n'
+  if (certs.length) form.fullchain = certs.join('\n') + '\n'
+  if (key) form.privkey = key + '\n'
 }
+const loadFiles = (e) => readPEM(e, importForm.value)
 async function saveImport() {
   importSaving.value = true
   try {
@@ -279,7 +282,7 @@ const caAPI = {
         source: 'import',
         enabled: true,
         ...(mode === 'import'
-          ? {}
+          ? { import_ca: true }
           : {
               fullchain: '',
               privkey: '',
@@ -295,7 +298,11 @@ const caAPI = {
   update: (id, body) => certificates.update(id, body).finally(loadCAs),
   remove: (id) => certificates.remove(id).finally(loadCAs),
 }
+// caPage is the tab's CrudPage: Import CA opens its form in import mode.
+const caPage = ref(null)
+const caFileInput = ref(null)
 const isNew = (form) => !form.id
+const importing = (form) => isNew(form) && form.mode === 'import'
 const generating = (form) => isNew(form) && form.mode !== 'import'
 const caColumns = [
   { key: 'name', label: 'Name', class: 'font-medium' },
@@ -334,11 +341,18 @@ const caFields = [
     hint: 'The certificates it signs end no later than it does.',
   },
   {
+    key: 'files',
+    label: 'Files',
+    type: 'custom',
+    show: importing,
+    hint: "PEM files with the CA's certificate and its private key; one file may hold both.",
+  },
+  {
     key: 'fullchain',
     label: 'Certificate (PEM)',
     type: 'textarea',
     show: (f) => !generating(f),
-    hint: "The CA's certificate. A new one must match the key.",
+    hint: "The CA's certificate (basic constraints CA:TRUE), then any CA above it. A new one must match the key.",
   },
   {
     key: 'privkey',
@@ -593,6 +607,7 @@ const fields = computed(() => [
       </template>
       <template #cas>
         <CrudPage
+          ref="caPage"
           title="Certificate authorities"
           noun="certificate authority"
           :description="`The certificate authorities of firewall ${host?.name ?? ''}, kept on its host. They are deployed with the host like any imported certificate, so they are stored on the firewall itself (on both hosts of an HA pair), and sign the server certificates of the host and its virtual firewalls (Sign, or Create certificate on the Certificate store tab). Export a CA and add it to the trust store of the hosts that should trust those certificates. Global admins manage them.`"
@@ -605,6 +620,33 @@ const fields = computed(() => [
           :new-label="'New CA'"
           :search-text="(row) => valuesText(row.common_name)"
         >
+          <template #toolbar>
+            <UButton
+              v-if="auth.isAdmin && !auth.replica"
+              icon="i-lucide-upload"
+              color="neutral"
+              variant="outline"
+              label="Import CA"
+              @click="caPage.openCreate({ mode: 'import' })"
+            />
+          </template>
+          <template #field-files="{ form }">
+            <UButton
+              icon="i-lucide-file-up"
+              color="neutral"
+              variant="outline"
+              label="Load files…"
+              @click="caFileInput.click()"
+            />
+            <input
+              ref="caFileInput"
+              type="file"
+              multiple
+              accept=".pem,.crt,.cer,.key,text/plain"
+              hidden
+              @change="readPEM($event, form)"
+            />
+          </template>
           <template #cell-not_after="{ row }">
             <div v-if="row.not_after" class="text-xs whitespace-nowrap">
               <div>from {{ when(row.not_before) }}</div>
