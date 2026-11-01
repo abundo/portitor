@@ -633,7 +633,7 @@ func prepareStaticNeighbour(tx *gorm.DB, n, old *models.StaticNeighbour) error {
 	n.Address = a.String()
 	mac, err := net.ParseMAC(strings.TrimSpace(n.MAC))
 	if err != nil || len(mac) != 6 {
-		return bad("MAC must be 6 bytes, like 02:00:5e:00:01:01")
+		return bad("MAC must be 6 bytes, like 0200.5e00.0101 or 02:00:5e:00:01:01")
 	}
 	n.MAC = mac.String()
 	var i models.Interface
@@ -1000,10 +1000,10 @@ func prepareIpamAddress(tx *gorm.DB, a, _ *models.IpamAddress) error {
 	if a.DnsName != "" && !fwconfig.ValidDomain(a.DnsName) {
 		return bad("DNS name must be a fully qualified name, e.g. nas.home.arpa")
 	}
-	a.Mac = strings.ToLower(strings.ReplaceAll(strings.TrimSpace(a.Mac), "-", ":"))
+	a.Mac = normalizeMAC(a.Mac)
 	if a.Mac != "" {
 		if !fwconfig.ValidMAC(a.Mac) {
-			return bad("MAC must look like 02:00:00:00:00:01")
+			return bad("MAC must look like 0200.0000.0001 or 02:00:00:00:00:01")
 		}
 		if a.DnsName == "" {
 			return bad("a DHCP reservation needs a DNS name (reservations are made from DNS records)")

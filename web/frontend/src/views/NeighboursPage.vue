@@ -18,6 +18,7 @@ import { api, staticNeighbours } from '@/api'
 import { errMsg } from '@/api/http'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
 import { useVrfChoice } from '@/composables/useVrfChoice'
+import { formatMac } from '@/utils/mac'
 import { useSearch, valuesText } from '@/utils/search'
 import { ago, when } from '@/utils/time'
 
@@ -56,6 +57,9 @@ const mine = (x) => x.instance === store.current?.name
 const lldpPorts = computed(() => (data.value?.lldp_ports ?? []).filter(mine))
 const portErrors = computed(() => lldpPorts.value.filter((p) => p.error))
 
+// An LLDP chassis or port ID, a MAC address shown as one.
+const lldpID = (id, subtype) => (subtype === 'mac' ? formatMac(id) : id)
+
 // One row per neighbour: { kind: 'lldp' | 'arp' | 'nd', interface,
 // neighbour, mac, details, n (what the agent sent) }.
 const protoOrder = { lldp: 0, arp: 1, nd: 2 }
@@ -66,10 +70,12 @@ const rows = computed(() => {
       kind: 'lldp',
       interface: n.interface,
       vrf: ifaceVrf(n.interface),
-      neighbour: n.system_name || n.chassis_id,
+      neighbour: n.system_name || lldpID(n.chassis_id, n.chassis_id_subtype),
       address: n.management_addresses?.join(', ') ?? '',
-      mac: n.source_mac,
-      details: [n.port_id, n.port_description].filter(Boolean).join(' — '),
+      mac: formatMac(n.source_mac),
+      details: [lldpID(n.port_id, n.port_id_subtype), n.port_description]
+        .filter(Boolean)
+        .join(' — '),
       n,
     })
   }
@@ -80,7 +86,7 @@ const rows = computed(() => {
       vrf: n.vrf ?? '',
       neighbour: '',
       address: n.address,
-      mac: n.mac ?? '',
+      mac: formatMac(n.mac),
       details: [n.state, n.router && 'router'].filter(Boolean).join(', '),
       n,
     })
@@ -129,8 +135,11 @@ function lldpRows(n) {
   const r = [
     ['System name', n.system_name],
     ['System description', n.system_description],
-    ['Chassis ID', n.chassis_id && `${n.chassis_id} (${n.chassis_id_subtype})`],
-    ['Port ID', n.port_id && `${n.port_id} (${n.port_id_subtype})`],
+    [
+      'Chassis ID',
+      n.chassis_id && `${lldpID(n.chassis_id, n.chassis_id_subtype)} (${n.chassis_id_subtype})`,
+    ],
+    ['Port ID', n.port_id && `${lldpID(n.port_id, n.port_id_subtype)} (${n.port_id_subtype})`],
     ['Port description', n.port_description],
     ['Port VLAN', n.port_vlan || ''],
     ['VLANs', n.vlan_names?.join(', ')],
@@ -138,7 +147,7 @@ function lldpRows(n) {
     ['Capabilities', n.capabilities?.join(', ')],
     ['Enabled capabilities', n.enabled_capabilities?.join(', ')],
     ['Maximum frame size', n.max_frame || ''],
-    ['Source MAC', n.source_mac],
+    ['Source MAC', formatMac(n.source_mac)],
     ['TTL', `${n.ttl} s`],
     ['First seen', `${when(n.first_seen)} (${ago(n.first_seen)})`],
     ['Last seen', `${when(n.last_seen)} (${ago(n.last_seen)})`],
@@ -152,7 +161,7 @@ const staticColumns = [
   { key: 'interface_id', label: 'Interface', format: (r) => ifaceName(r.interface_id) },
   { key: 'kind', label: 'Protocol', format: (r) => (isV6(r.address) ? 'ND' : 'ARP') },
   { key: 'address', label: 'Address', class: 'font-mono' },
-  { key: 'mac', label: 'MAC', class: 'font-mono' },
+  { key: 'mac', label: 'MAC', class: 'font-mono', format: (r) => formatMac(r.mac) },
   { key: 'enabled', label: 'Enabled' },
   { key: 'description', label: 'Description' },
 ]
@@ -171,7 +180,7 @@ const staticFields = [
     placeholder: '192.168.1.10 or fd00::10',
     hint: 'An IPv4 address makes a static ARP entry, an IPv6 address a static ND entry.',
   },
-  { key: 'mac', label: 'MAC', required: true, placeholder: '02:00:5e:00:01:01' },
+  { key: 'mac', label: 'MAC', type: 'mac', required: true, placeholder: '0200.5e00.0101' },
   { key: 'enabled', label: 'Enabled', type: 'switch' },
   { key: 'description', label: 'Description' },
 ]

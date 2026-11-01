@@ -276,10 +276,11 @@
                     color="neutral"
                     size="xs"
                     :ui="cellFieldUi"
-                    placeholder="aa:bb:cc:dd:ee:ff"
+                    placeholder="1122.3344.5566"
                     autocomplete="off"
                     :disabled="disabled || !isAddressRecord(row.original)"
                     @update:model-value="syncRowChanged(row.original)"
+                    @blur="formatRowMac(row.original)"
                   />
                 </div>
               </UTooltip>
@@ -385,6 +386,7 @@ import {
   subzoneRecordRange,
   ZONE_RECORD_TYPES,
 } from '@/utils/zoneRecords'
+import { formatMac } from '@/utils/mac'
 
 const STRINGS = {
   'common.name': 'Name',
@@ -738,7 +740,15 @@ function applyLeaseMac(lease) {
   const row = leasePickerRow.value
   leasePickerRow.value = null
   if (!row || !lease?.mac) return
-  row.mac = lease.mac
+  row.mac = formatMac(lease.mac)
+  syncRowChanged(row)
+}
+
+// formatRowMac shows a MAC typed with colons or dashes as 1122.3344.5566.
+function formatRowMac(row) {
+  const mac = formatMac(row.mac)
+  if (mac === row.mac) return
+  row.mac = mac
   syncRowChanged(row)
 }
 

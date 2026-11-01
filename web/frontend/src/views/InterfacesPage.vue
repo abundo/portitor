@@ -16,6 +16,7 @@ import { useInstanceRefs, withLabel } from '@/composables/useInstanceRefs'
 import { useAuthStore } from '@/stores/auth'
 import { useDeployStore } from '@/stores/deploy'
 import { bytes } from '@/utils/bytes'
+import { formatMac } from '@/utils/mac'
 import { useSearch } from '@/utils/search'
 
 const { store, ifaceList, vrfList, ifaceText, zonesOf, reload } = useInstanceRefs()
@@ -68,7 +69,7 @@ const columns = [
             ? `vxlan ${r.vxlan_vni}${r.vxlan_device ? ` on ${ifaceText(r.vxlan_device)}` : ''}`
             : r.kind,
   },
-  { key: 'mac', label: 'MAC', class: 'font-mono text-xs', format: macOf },
+  { key: 'mac', label: 'MAC', class: 'font-mono text-xs', format: (r) => formatMac(macOf(r)) },
   { key: 'zones', label: 'Zones', format: (r) => zonesOf(r.name).join(', ') },
   { key: 'vrf', label: 'VRF', class: 'font-mono' },
   { key: 'ipv4_mode', label: 'IPv4', format: (r) => (is6in4(r) ? '' : r.ipv4_mode) },

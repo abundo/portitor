@@ -34,6 +34,7 @@ import { ago } from '@/utils/time'
 import { useConfirm } from '@/composables/useConfirm'
 import { useFormGuard } from '@/composables/useFormGuard'
 import { inlineField, wideModal } from '@/utils/form'
+import { formatMac } from '@/utils/mac'
 import { matchesWords, searchWords, valuesText } from '@/utils/search'
 
 const toast = useToast()
@@ -205,7 +206,7 @@ function nodeText(n) {
     n.description,
     n.dns_name,
     n.interface_id ? ifaceName(n.interface_id) : '',
-    n.mac,
+    formatMac(n.mac),
   )
 }
 function pruneTree(nodes) {
@@ -475,7 +476,7 @@ function ipamBadges(n) {
       'neutral',
       'A DNS zone has an A or AAAA record for this address',
     )
-  if (n.mac) html += badge(`reserved ${n.mac}`, 'outline')
+  if (n.mac) html += badge(`reserved ${formatMac(n.mac)}`, 'outline')
   if (n.dhcp_enabled) {
     const on = !!store.current?.dhcp_enabled
     html += badge(
@@ -702,6 +703,7 @@ function editAddress(src, ifaceId = null) {
     mac: '',
     ...src,
   })
+  addr.mac = formatMac(addr.mac)
   addrIface.value = ifaceId
   addrOpen.value = true
 }
@@ -1054,7 +1056,8 @@ async function removeAddress() {
                 <UInput
                   v-model="addr.mac"
                   class="w-full font-mono"
-                  placeholder="02:00:00:00:00:10"
+                  placeholder="0200.0000.0010"
+                  @blur="addr.mac = formatMac(addr.mac)"
                 />
                 <UButton
                   v-if="store.current?.dhcp_enabled"
@@ -1096,7 +1099,7 @@ async function removeAddress() {
       v-model:open="leasePickerOpen"
       :instance="store.current?.name ?? ''"
       :ip="addr.address"
-      @select="(lease) => (addr.mac = lease.mac)"
+      @select="(lease) => (addr.mac = formatMac(lease.mac))"
     />
   </div>
 </template>

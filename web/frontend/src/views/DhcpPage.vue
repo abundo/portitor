@@ -22,6 +22,7 @@ import { useInstanceStore } from '@/stores/instances'
 import { inlineField, wideModal } from '@/utils/form'
 import { suggestDhcpRange } from '@/utils/dhcp'
 import { datetime } from '@/utils/time'
+import { formatMac } from '@/utils/mac'
 import { useSearch, valuesText } from '@/utils/search'
 
 const toast = useToast()
@@ -51,7 +52,7 @@ const clientLeases = computed(() =>
   (leases.value?.client ?? []).filter((l) => l.instance === store.current?.name),
 )
 const { search: leaseSearch, filtered: shownServerLeases } = useSearch(serverLeases, (l) =>
-  valuesText(l.address, l.mac, l.hostname, datetime(l.expires)),
+  valuesText(l.address, formatMac(l.mac), l.hostname, datetime(l.expires)),
 )
 const { search: clientSearch, filtered: shownClientLeases } = useSearch(clientLeases, (l) =>
   valuesText(
@@ -274,11 +275,12 @@ const autoLeases = useAutoRefresh(loadLeases, { seconds: 10, active: () => tab.v
                 :data="shownServerLeases"
                 :columns="[
                   { accessorKey: 'address', header: 'Address' },
-                  { accessorKey: 'mac', header: 'MAC' },
+                  { id: 'mac', header: 'MAC' },
                   { accessorKey: 'hostname', header: 'Host name' },
                   { id: 'expires', header: 'Expires' },
                 ]"
               >
+                <template #mac-cell="{ row }">{{ formatMac(row.original.mac) }}</template>
                 <template #expires-cell="{ row }">{{ datetime(row.original.expires) }}</template>
                 <template #empty
                   ><div class="py-4 text-center text-muted">

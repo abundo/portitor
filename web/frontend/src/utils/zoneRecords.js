@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: 2026 The Portitor contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import { formatMac, isMacAddress } from './mac.js'
+
 // Types Portitor's fwconfig accepts (internal/fwconfig/validate.go).
 export const ZONE_RECORD_TYPES = [
   'A',
@@ -184,7 +186,7 @@ export function fromApiRecord(row) {
     type,
     value: domain ? '' : row.value || '',
     description: comment || domain ? '' : row.description || '',
-    mac: comment || domain ? '' : row.mac || '',
+    mac: comment || domain ? '' : formatMac(row.mac || ''),
   })
 }
 
@@ -282,12 +284,6 @@ export function validateZoneRecord(row, t) {
     return t('zoneRecords.macInvalid')
   }
   return null
-}
-
-export function isMacAddress(value) {
-  if (typeof value !== 'string') return false
-  const hex = value.toLowerCase().replace(/[:\-.]/g, '')
-  return /^[0-9a-f]{12}$/.test(hex)
 }
 
 export function validateZoneRecords(rows, t) {

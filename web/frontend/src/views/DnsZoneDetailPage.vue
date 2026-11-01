@@ -146,7 +146,7 @@ const recordStrings = {
   'zoneRecords.aMustBeIpv4': 'A record must be an IPv4 address',
   'zoneRecords.aaaaMustBeIpv6': 'AAAA record must be an IPv6 address',
   'zoneRecords.macOnlyA': 'MAC is only valid on A and AAAA records',
-  'zoneRecords.macInvalid': 'MAC must be 12 hex digits (aa:bb:cc:dd:ee:ff)',
+  'zoneRecords.macInvalid': 'MAC must look like 1122.3344.5566 or 11:22:33:44:55:66',
   'zoneRecords.recordN': 'Record {n}: {message}',
 }
 function recordT(key, params = {}) {

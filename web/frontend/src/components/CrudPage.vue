@@ -19,6 +19,7 @@
 // addrs/addr: address list / single address; names of hosts/prefixes are
 // suggested and accepted, and with `lists: true` IP lists ("@name").
 // ports: a port list, with port names and their ports suggested.
+// mac: a MAC address, shown as 1122.3344.5566; colons and dashes are taken too.
 // custom: the page's `field-<key>` slot ({ form }) edits the value.
 // Column: { key, label, format: (row, rows) => string, class }
 // Cells can be overridden with a `cell-<key>` slot, or the whole table with
@@ -46,6 +47,7 @@ import { useObjectStore } from '@/stores/objects'
 import { useConfirm } from '@/composables/useConfirm'
 import { useFormGuard } from '@/composables/useFormGuard'
 import { inlineField, wideModal, widerModal } from '@/utils/form'
+import { formatMac } from '@/utils/mac'
 import { useSearch, valuesText } from '@/utils/search'
 
 const props = defineProps({
@@ -199,6 +201,7 @@ function fill(src) {
     )
       form[f.key] = []
     if (f.type === 'addr' && form[f.key] == null) form[f.key] = ''
+    if (f.type === 'mac') form[f.key] = formatMac(form[f.key])
     if (f.zeroEmpty && !form[f.key]) form[f.key] = ''
   }
 }
@@ -572,6 +575,7 @@ defineExpose({ reload: load, openEdit, openView, openCreate })
                 :placeholder="f.placeholder"
                 :required="f.required"
                 :disabled="f.disabled?.(form)"
+                @blur="f.type === 'mac' && (form[f.key] = formatMac(form[f.key]))"
               />
             </UFormField>
           </template>

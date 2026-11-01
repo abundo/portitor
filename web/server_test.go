@@ -885,6 +885,12 @@ func TestIpv6PrefixChecks(t *testing.T) {
 	env.create("/api/ipam/prefixes", map[string]any{"instance_id": inst, "prefix": "fd00:1::/64", "ra_enabled": true, "ra_slaac": true,
 		"dhcp_enabled": true, "dhcp_range_start": "fd00:1::1000", "dhcp_range_end": "fd00:1::1fff"})
 	env.create("/api/ipam/addresses", map[string]any{"instance_id": inst, "address": "fd00:1::10", "dns_name": "nas.home.arpa", "mac": "02:00:00:00:00:10"})
+	// A MAC in the GUI's form is stored with colons.
+	rec := env.do("POST", "/api/ipam/addresses", map[string]any{"instance_id": inst, "address": "fd00:1::11", "dns_name": "nas2.home.arpa", "mac": "0200.0000.00AB"})
+	var a models.IpamAddress
+	if err := json.Unmarshal(rec.Body.Bytes(), &a); rec.Code != http.StatusCreated || err != nil || a.Mac != "02:00:00:00:00:ab" {
+		t.Errorf("dotted MAC: %d %s", rec.Code, rec.Body)
+	}
 }
 
 func TestDnsTemplates(t *testing.T) {

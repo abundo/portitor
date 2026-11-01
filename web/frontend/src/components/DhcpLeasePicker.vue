@@ -8,6 +8,7 @@ import { useToast } from '@nuxt/ui/composables'
 import { computed, h, nextTick, ref, resolveComponent, watch } from 'vue'
 import { api } from '@/api'
 import { errMsg } from '@/api/http'
+import { formatMac } from '@/utils/mac'
 import { datetime } from '@/utils/time'
 import SearchInput from '@/components/SearchInput.vue'
 
@@ -112,7 +113,7 @@ async function loadLeases() {
         const family = l.address.includes(':') ? 'ipv6' : 'ipv4'
         return {
           ip: l.address,
-          mac: l.mac,
+          mac: formatMac(l.mac),
           hostname: l.hostname ?? '',
           family,
           familyLabel: family === 'ipv6' ? 'IPv6' : 'IPv4',

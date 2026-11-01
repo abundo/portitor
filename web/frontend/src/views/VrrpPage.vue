@@ -14,6 +14,7 @@ import SearchInput from '@/components/SearchInput.vue'
 import { api, vrrpRouters } from '@/api'
 import { errMsg } from '@/api/http'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
+import { formatMac } from '@/utils/mac'
 import { useSearch, valuesText } from '@/utils/search'
 
 const route = useRoute()
@@ -68,7 +69,7 @@ const info = useSearch(infoRows, (x) =>
     stateText(x),
     x.addresses,
     x.device,
-    x.mac,
+    formatMac(x.mac),
   ),
 )
 const stateText = (x) => (x.router.shutdown ? `${x.state} (shut down)` : x.state)
@@ -229,7 +230,7 @@ const defaults = {
             </template>
             <template #device-cell="{ row }">
               <span class="font-mono text-xs">
-                {{ [row.original.device, row.original.mac].filter(Boolean).join(' / ') }}
+                {{ [row.original.device, formatMac(row.original.mac)].filter(Boolean).join(' / ') }}
               </span>
             </template>
             <template #intervals-cell="{ row }">
