@@ -367,6 +367,7 @@ func (m *certManager) Status() []CertificateStatus {
 				s.Domains = st.Domains
 			}
 			s.NotBefore, s.NotAfter, s.Issuer = timePtr(st.NotBefore), timePtr(st.NotAfter), st.Issuer
+			s.Chain = st.Chain
 		}
 		out = append(out, s)
 	}

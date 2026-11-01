@@ -4,8 +4,10 @@
 package fwconfig
 
 import (
+	"bytes"
 	"crypto/tls"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -135,6 +137,44 @@ func ChainLeaf(chain string) *x509.Certificate {
 		return nil
 	}
 	return leaf
+}
+
+// ChainPath is a PEM chain's certification path from the top down: the
+// top certificate's issuer (unless it is self-signed), then the chain's
+// certificates, the leaf last. Each is named by its CN, else its DN.
+func ChainPath(chain string) []string {
+	var certs []*x509.Certificate
+	for rest := []byte(chain); ; {
+		var b *pem.Block
+		if b, rest = pem.Decode(rest); b == nil {
+			break
+		}
+		if b.Type != "CERTIFICATE" {
+			continue
+		}
+		c, err := x509.ParseCertificate(b.Bytes)
+		if err != nil {
+			return nil
+		}
+		certs = append(certs, c)
+	}
+	if len(certs) == 0 {
+		return nil
+	}
+	name := func(n pkix.Name) string {
+		if n.CommonName != "" {
+			return n.CommonName
+		}
+		return n.String()
+	}
+	var path []string
+	if top := certs[len(certs)-1]; !bytes.Equal(top.RawIssuer, top.RawSubject) {
+		path = append(path, name(top.Issuer))
+	}
+	for i := len(certs) - 1; i >= 0; i-- {
+		path = append(path, name(certs[i].Subject))
+	}
+	return path
 }
 
 // ACMECA is an ACME certificate authority by name.

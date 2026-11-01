@@ -41,6 +41,7 @@ import (
 	"github.com/go-acme/lego/v4/registration"
 
 	"github.com/abundo/portitor/internal/buildinfo"
+	"github.com/abundo/portitor/internal/fwconfig"
 )
 
 var logOnce sync.Once
@@ -260,6 +261,9 @@ type Stored struct {
 	NotBefore  time.Time `json:"not_before"`
 	NotAfter   time.Time `json:"not_after"`
 	Issuer     string    `json:"issuer"`
+	// Chain is the certification path from the top down, the leaf last
+	// (fwconfig.ChainPath), read from the chain, not stored.
+	Chain []string `json:"-"`
 }
 
 // Files in a certificate's directory.
@@ -375,6 +379,9 @@ func Load(dir string) *Stored {
 	if json.Unmarshal(data, &st) != nil {
 		return nil
 	}
+	if c, err := os.ReadFile(filepath.Join(dir, FullChainFile)); err == nil {
+		st.Chain = fwconfig.ChainPath(string(c))
+	}
 	return &st
 }
 
@@ -390,7 +397,7 @@ func parse(chain []byte) (*Stored, error) {
 	}
 	domains := slices.Clone(c.DNSNames)
 	slices.Sort(domains)
-	return &Stored{Domains: domains, NotBefore: c.NotBefore, NotAfter: c.NotAfter, Issuer: c.Issuer.String()}, nil
+	return &Stored{Domains: domains, NotBefore: c.NotBefore, NotAfter: c.NotAfter, Issuer: c.Issuer.String(), Chain: fwconfig.ChainPath(string(chain))}, nil
 }
 
 // Matches says whether st was got for req: same CA, key type, domains

@@ -82,6 +82,79 @@ const { search, filtered } = useSearch(rows, (r) =>
   valuesText(r.name, r.domains, states.value[r.name]),
 )
 
+// The Store tab's tree: each certificate under its issuer, from the root
+// CA down, by the certification path (chain, the certificate last) the
+// agent read for a deployed one, else the stored chain's. An issuer that is
+// not a certificate here (Let's Encrypt's, a CA of the firewall seen from a
+// virtual firewall) is a node of its own. A certificate without a chain (an
+// ACME one not got yet) is at the top.
+const chainOf = (r) => states.value[r.name]?.chain ?? r.chain ?? null
+const pathKey = (path) => JSON.stringify(path)
+const tree = computed(() => {
+  const nodes = new Map()
+  const roots = []
+  function node(path) {
+    if (!path?.length) return null
+    const key = pathKey(path)
+    let n = nodes.get(key)
+    if (!n) {
+      n = { key, label: path.at(-1), row: null, children: [] }
+      nodes.set(key, n)
+      ;(node(path.slice(0, -1))?.children ?? roots).push(n)
+    }
+    return n
+  }
+  for (const r of rows.value) {
+    const chain = chainOf(r)
+    const n = node(chain)
+    if (n && !n.row) n.row = r
+    else
+      (node(chain?.slice(0, -1))?.children ?? roots).push({
+        key: `row-${r.id}`,
+        row: r,
+        children: [],
+      })
+  }
+  const order = (a, b) =>
+    !a.children.length - !b.children.length ||
+    (a.row?.name ?? a.label).localeCompare(b.row?.name ?? b.label)
+  const sort = (list) => list.sort(order).forEach((n) => sort(n.children))
+  sort(roots)
+  return roots
+})
+// The firewall's CAs by path, to name an issuer node that is one.
+const authorityAt = computed(() => {
+  const m = {}
+  for (const a of authorities.value) if (a.chain) m[pathKey(a.chain)] = a
+  return m
+})
+// The issuer nodes folded by the user; a search unfolds them all.
+const folded = ref(new Set())
+function toggleFold(key) {
+  const s = new Set(folded.value)
+  if (!s.delete(key)) s.add(key)
+  folded.value = s
+}
+// treeRows is the tree as the table's rows, with each row's depth: while
+// searching, the matches with the issuers above them.
+const treeRows = computed(() => {
+  const words = search.value.trim().toLowerCase()
+  const match = new Set(filtered.value)
+  const out = []
+  function walk(list, depth) {
+    for (const n of list) {
+      const at = out.length
+      const hit = n.row ? match.has(n.row) : !words || n.label.toLowerCase().includes(words)
+      const open = words || !folded.value.has(n.key)
+      out.push({ ...n, depth, open })
+      if (open) walk(n.children, depth + 1)
+      if (words && !hit && out.length === at + 1) out.pop()
+    }
+  }
+  walk(tree.value, 0)
+  return out
+})
+
 // lifetime is the share of the certificate's lifetime left (0..1), with
 // the bar's colour: yellow under a third (when renewal is due), red under
 // a quarter.
@@ -488,71 +561,116 @@ const fields = computed(() => [
               </tr>
             </thead>
             <tbody>
-              <tr v-for="row in filtered" :key="row.id" class="border-b border-default align-top">
-                <td class="py-1 pe-3 font-medium">
-                  {{ row.name }}
-                  <div v-if="row.is_ca" class="text-xs text-muted">certificate authority</div>
-                  <div v-else-if="imported(row)" class="text-xs text-muted">imported</div>
-                  <div v-if="!row.enabled" class="text-xs text-muted">disabled</div>
-                </td>
-                <td class="py-1 pe-3 font-mono">{{ row.domains.join(', ') }}</td>
-                <td class="py-1 pe-3 text-xs">
-                  <template v-if="states[row.name]">
-                    <UBadge
-                      :color="stateColor[states[row.name].state] ?? 'neutral'"
-                      variant="subtle"
-                      size="sm"
-                    >
-                      {{ states[row.name].state }}
-                    </UBadge>
-                    <div v-if="states[row.name].issuer" class="text-muted">
-                      {{ states[row.name].issuer }}
-                    </div>
-                    <div v-if="states[row.name].last_error" class="text-error">
-                      {{ states[row.name].last_error }}
-                    </div>
-                  </template>
-                  <template v-else>
-                    <span class="text-muted">not deployed</span>
-                    <div v-if="row.issuer" class="text-muted">{{ row.issuer }}</div>
-                  </template>
-                </td>
-                <td class="py-1 pe-3 text-xs whitespace-nowrap">
-                  <template v-if="validity(row)">
-                    <div>from {{ when(validity(row).not_before) }}</div>
-                    <div>until {{ when(validity(row).not_after) }}</div>
-                  </template>
-                </td>
-                <td class="py-1 pe-3 text-xs">
-                  <template v-if="lifetime(validity(row))">
-                    <div class="h-2 w-full rounded bg-elevated overflow-hidden">
-                      <div
-                        class="h-full rounded"
-                        :class="lifetime(validity(row)).color"
-                        :style="{ width: lifetime(validity(row)).left * 100 + '%' }"
-                      />
-                    </div>
-                    <div class="mt-0.5 text-muted">
-                      {{ Math.round(lifetime(validity(row)).left * 100) }}% ·
-                      {{ lifetime(validity(row)).days }} days
-                    </div>
-                  </template>
-                  <span v-else class="text-muted">no certificate</span>
-                </td>
-                <td class="py-1 text-right">
-                  <UDropdownMenu v-if="validity(row)" :items="downloadItems(row)">
+              <tr
+                v-for="node in treeRows"
+                :key="node.key"
+                class="border-b border-default align-top"
+              >
+                <td class="py-1 pe-3" :style="{ paddingInlineStart: `${node.depth * 1.5}rem` }">
+                  <div class="flex items-start gap-1">
                     <UButton
-                      size="xs"
-                      variant="outline"
+                      v-if="node.children.length"
+                      :icon="node.open ? 'i-lucide-chevron-down' : 'i-lucide-chevron-right'"
+                      variant="ghost"
                       color="neutral"
-                      icon="i-lucide-download"
-                      trailing-icon="i-lucide-chevron-down"
-                      label="Download"
+                      size="xs"
+                      class="-my-0.5 p-0.5"
+                      :aria-label="node.open ? 'Fold' : 'Unfold'"
+                      :disabled="!!search.trim()"
+                      @click="toggleFold(node.key)"
                     />
-                  </UDropdownMenu>
+                    <span v-else class="w-5 shrink-0" />
+                    <UIcon
+                      :name="
+                        !node.row || node.row.is_ca ? 'i-lucide-landmark' : 'i-lucide-file-badge'
+                      "
+                      class="mt-0.5 size-4 shrink-0 text-muted"
+                    />
+                    <div v-if="node.row" class="font-medium">
+                      {{ node.row.name }}
+                      <div v-if="node.row.is_ca" class="text-xs font-normal text-muted">
+                        certificate authority
+                      </div>
+                      <div v-else-if="imported(node.row)" class="text-xs font-normal text-muted">
+                        imported
+                      </div>
+                      <div v-if="!node.row.enabled" class="text-xs font-normal text-muted">
+                        disabled
+                      </div>
+                    </div>
+                    <div v-else>
+                      {{ authorityAt[node.key]?.name ?? node.label }}
+                      <div class="text-xs text-muted">
+                        {{
+                          authorityAt[node.key]
+                            ? `certificate authority of firewall ${host?.name ?? ''}`
+                            : 'issuer'
+                        }}
+                      </div>
+                    </div>
+                  </div>
                 </td>
+                <td v-if="!node.row" colspan="5" />
+                <template v-else>
+                  <td class="py-1 pe-3 font-mono">{{ node.row.domains.join(', ') }}</td>
+                  <td class="py-1 pe-3 text-xs">
+                    <template v-if="states[node.row.name]">
+                      <UBadge
+                        :color="stateColor[states[node.row.name].state] ?? 'neutral'"
+                        variant="subtle"
+                        size="sm"
+                      >
+                        {{ states[node.row.name].state }}
+                      </UBadge>
+                      <div v-if="states[node.row.name].issuer" class="text-muted">
+                        {{ states[node.row.name].issuer }}
+                      </div>
+                      <div v-if="states[node.row.name].last_error" class="text-error">
+                        {{ states[node.row.name].last_error }}
+                      </div>
+                    </template>
+                    <template v-else>
+                      <span class="text-muted">not deployed</span>
+                      <div v-if="node.row.issuer" class="text-muted">{{ node.row.issuer }}</div>
+                    </template>
+                  </td>
+                  <td class="py-1 pe-3 text-xs whitespace-nowrap">
+                    <template v-if="validity(node.row)">
+                      <div>from {{ when(validity(node.row).not_before) }}</div>
+                      <div>until {{ when(validity(node.row).not_after) }}</div>
+                    </template>
+                  </td>
+                  <td class="py-1 pe-3 text-xs">
+                    <template v-if="lifetime(validity(node.row))">
+                      <div class="h-2 w-full rounded bg-elevated overflow-hidden">
+                        <div
+                          class="h-full rounded"
+                          :class="lifetime(validity(node.row)).color"
+                          :style="{ width: lifetime(validity(node.row)).left * 100 + '%' }"
+                        />
+                      </div>
+                      <div class="mt-0.5 text-muted">
+                        {{ Math.round(lifetime(validity(node.row)).left * 100) }}% ·
+                        {{ lifetime(validity(node.row)).days }} days
+                      </div>
+                    </template>
+                    <span v-else class="text-muted">no certificate</span>
+                  </td>
+                  <td class="py-1 text-right">
+                    <UDropdownMenu v-if="validity(node.row)" :items="downloadItems(node.row)">
+                      <UButton
+                        size="xs"
+                        variant="outline"
+                        color="neutral"
+                        icon="i-lucide-download"
+                        trailing-icon="i-lucide-chevron-down"
+                        label="Download"
+                      />
+                    </UDropdownMenu>
+                  </td>
+                </template>
               </tr>
-              <tr v-if="!filtered.length">
+              <tr v-if="!treeRows.length">
                 <td colspan="6" class="py-4 text-center text-muted">No certificates</td>
               </tr>
             </tbody>

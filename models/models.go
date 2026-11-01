@@ -1117,12 +1117,14 @@ type Certificate struct {
 	// ImportCA, on the save of an imported certificate, refuses one that
 	// is not a CA (the Certificate authorities tab's Import CA).
 	ImportCA bool `gorm:"-" json:"import_ca,omitempty"`
-	// IsCA, Issuer, NotBefore and NotAfter are read from an imported
+	// IsCA, Issuer, Chain (the certification path from the top down,
+	// fwconfig.ChainPath), NotBefore and NotAfter are read from an imported
 	// certificate's chain when it is shown. A CA is the firewall's: it is
 	// on the host alone, and signs the certificates of the host and its
 	// virtual firewalls.
 	IsCA      bool       `gorm:"-" json:"is_ca"`
 	Issuer    string     `gorm:"-" json:"issuer,omitempty"`
+	Chain     []string   `gorm:"-" json:"chain,omitempty"`
 	NotBefore *time.Time `gorm:"-" json:"not_before,omitempty"`
 	NotAfter  *time.Time `gorm:"-" json:"not_after,omitempty"`
 }

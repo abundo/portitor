@@ -411,6 +411,16 @@ and have no records. While a client is used by a certificate, it can't be delete
 - An RFC 2136 nameserver is reached from the virtual firewall, through its routes and
   rules, as the client's updates are; a provider's API from the firewall host.
 
+### The certificate store
+
+The *Certificate store* tab shows the virtual firewall's certificates as a tree by
+their certification path: each certificate under the CA that signed it, from the
+root CA down (*ISRG Root X1* → *R11* → your Let's Encrypt certificate; a CA of the
+firewall → the certificates it signed), so the path a client checks can be seen at
+a glance. The path is read from each certificate's chain; an issuer that is not a
+certificate of the virtual firewall itself is shown by its name, and a certificate
+not got yet is at the top. The arrow before an issuer folds it.
+
 ### Imported certificates
 
 A certificate from another CA is imported with its key: *Import certificate* on the

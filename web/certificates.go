@@ -267,6 +267,7 @@ func presentCertificate(c *models.Certificate) {
 	}
 	if leaf := fwconfig.ChainLeaf(c.FullChain); leaf != nil {
 		c.IsCA, c.Issuer = leaf.IsCA, leaf.Issuer.CommonName
+		c.Chain = fwconfig.ChainPath(c.FullChain)
 		c.NotBefore, c.NotAfter = &leaf.NotBefore, &leaf.NotAfter
 	}
 }

@@ -376,6 +376,9 @@ type CertificateStatus struct {
 	NotBefore *time.Time `json:"not_before,omitempty"`
 	NotAfter  *time.Time `json:"not_after,omitempty"`
 	Issuer    string     `json:"issuer,omitempty"`
+	// Chain is the certification path from the top down, the certificate
+	// last (fwconfig.ChainPath).
+	Chain []string `json:"chain,omitempty"`
 	// LastAttempt is the last order; NextAttempt the next check or retry.
 	LastAttempt *time.Time `json:"last_attempt,omitempty"`
 	NextAttempt *time.Time `json:"next_attempt,omitempty"`
