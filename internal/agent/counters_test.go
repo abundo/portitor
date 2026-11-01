@@ -18,6 +18,7 @@ func TestParseRuleCounters(t *testing.T) {
 		{"counter": {"family": "inet", "name": "drop_forward_policy", "table": "firewall", "handle": 5, "packets": 3, "bytes": 180}},
 		{"counter": {"family": "inet", "name": "drop_forward_invalid", "table": "firewall", "handle": 6, "packets": 1, "bytes": 40}},
 		{"counter": {"family": "inet", "name": "drop_input_ip_options", "table": "firewall", "handle": 8, "packets": 2, "bytes": 120}},
+		{"counter": {"family": "inet", "name": "drop_prerouting_rpf", "table": "firewall", "handle": 9, "packets": 4, "bytes": 240}},
 		{"counter": {"family": "inet", "name": "drop_nat_policy", "table": "firewall", "handle": 7, "packets": 1, "bytes": 1}},
 		{"counter": {"family": "inet", "name": "other", "table": "firewall", "handle": 4, "packets": 1, "bytes": 1}}]}`)
 	got := map[uint32]agentapi.RuleCounters{}
@@ -28,14 +29,17 @@ func TestParseRuleCounters(t *testing.T) {
 		t.Errorf("got %+v", got)
 	}
 	wantDrops := agentapi.ChainDrops{InvalidPackets: 1, InvalidBytes: 40, PolicyPackets: 3, PolicyBytes: 180}
-	if len(drops) != 2 || drops["forward"] != wantDrops {
+	if len(drops) != 3 || drops["forward"] != wantDrops {
 		t.Errorf("drops %+v", drops)
 	}
 	if in := drops["input"]; in.IPOptionsPackets == nil || *in.IPOptionsPackets != 2 || *in.IPOptionsBytes != 120 {
 		t.Errorf("ip options drops %+v", in)
 	}
+	if pre := drops["prerouting"]; pre.RPFPackets == nil || *pre.RPFPackets != 4 || *pre.RPFBytes != 240 {
+		t.Errorf("rpf drops %+v", pre)
+	}
 	parseCounters([]byte("[]"), got, drops) // dry-run answer
-	if len(got) != 1 || len(drops) != 2 {
+	if len(got) != 1 || len(drops) != 3 {
 		t.Errorf("got %+v", got)
 	}
 }

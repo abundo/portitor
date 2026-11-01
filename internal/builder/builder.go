@@ -399,6 +399,11 @@ func buildPeer(db *gorm.DB, generation int64, only map[string]bool, firewallID u
 				LLDP:               mif.Lldp && mif.Kind != fwconfig.KindWireGuard && mif.Kind != fwconfig.KindLoopback && mif.Kind != fwconfig.Kind6in4,
 				ShapeEgress:        mif.ShapeEgress,
 				ShapeIngress:       mif.ShapeIngress,
+				MSSClamp:           mif.MssClamp,
+				RPF:                mif.Rpf,
+			}
+			if ifc.MSSClamp {
+				ifc.MSSClampValue = mif.MssClampValue
 			}
 			if ifc.DHCPv6PD {
 				ifc.DHCPv6PDLength = mif.Dhcpv6PdLength

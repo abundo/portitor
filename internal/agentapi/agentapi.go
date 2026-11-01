@@ -40,14 +40,17 @@ type LeasesResponse struct {
 type RuleCountersResponse struct {
 	Rules map[uint32]RuleCounters `json:"rules"`
 	// Drops is what each instance's filter chains dropped by themselves,
-	// by instance name and then chain (input, forward, output).
+	// by instance name and then chain (input, forward, output), and
+	// prerouting's reverse path check (RPF).
 	Drops map[string]map[string]ChainDrops `json:"drops"`
 }
 
 // ChainDrops counts the packets a filter chain dropped outside the rules:
 // Invalid those of no known connection (ct state invalid), Policy those no
 // rule decided on (the chain's drop policy), IPOptions the IPv4 packets
-// with options, nil when the chain doesn't drop them.
+// with options, nil when the chain doesn't drop them; RPF what the
+// interfaces' reverse path check dropped, in prerouting alone, nil without
+// one.
 type ChainDrops struct {
 	InvalidPackets   uint64  `json:"invalid_packets"`
 	InvalidBytes     uint64  `json:"invalid_bytes"`
@@ -55,6 +58,8 @@ type ChainDrops struct {
 	PolicyBytes      uint64  `json:"policy_bytes"`
 	IPOptionsPackets *uint64 `json:"ip_options_packets,omitempty"`
 	IPOptionsBytes   *uint64 `json:"ip_options_bytes,omitempty"`
+	RPFPackets       *uint64 `json:"rpf_packets,omitempty"`
+	RPFBytes         *uint64 `json:"rpf_bytes,omitempty"`
 }
 
 // RuleCounters counts a rule's traffic: Orig what the rule matched and the

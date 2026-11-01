@@ -81,6 +81,8 @@ func parseCounters(out []byte, rules map[uint32]agentapi.RuleCounters, drops map
 				d.InvalidPackets, d.InvalidBytes = v.Packets, v.Bytes
 			case render.DropIPOptions:
 				d.IPOptionsPackets, d.IPOptionsBytes = &v.Packets, &v.Bytes
+			case render.DropRPF:
+				d.RPFPackets, d.RPFBytes = &v.Packets, &v.Bytes
 			default:
 				d.PolicyPackets, d.PolicyBytes = v.Packets, v.Bytes
 			}

@@ -268,6 +268,8 @@ func Nftables(in *fwconfig.Instance, lockout *AntiLockout, paths Paths) string {
 	writeNAT64(b, in, counted)
 	writePolicyRoutes(b, in)
 	writeSynProxyNotrack(b, in)
+	writeRPF(b, in)
+	writeMSSClamp(b, in)
 
 	// ----- NAT -----
 	b.WriteString("\tchain prerouting_nat {\n")
@@ -395,11 +397,14 @@ func writeRuleCounters(b *strings.Builder, rules []fwconfig.Rule) bool {
 // (ct state invalid), DropPolicy those no rule decided on, which fall
 // through to the chain's drop policy, and DropIPOptions the IPv4 packets
 // with options (fwconfig.Instance.DropIPOptions; only in the chains that
-// drop them). They restart from zero on apply, like the rule counters.
+// drop them). DropRPF, in ChainPrerouting, counts what the reverse path
+// check dropped (RPFChain; only with one). They restart from zero on
+// apply, like the rule counters.
 const (
 	DropInvalid   = "invalid"
 	DropPolicy    = "policy"
 	DropIPOptions = "ip_options"
+	DropRPF       = "rpf"
 )
 
 var filterChains = []string{fwconfig.ChainInput, fwconfig.ChainForward, fwconfig.ChainOutput}
@@ -416,6 +421,9 @@ func ParseDropCounter(name string) (chain, reason string, ok bool) {
 		return "", "", false
 	}
 	chain, reason, found = strings.Cut(rest, "_")
+	if chain == ChainPrerouting && reason == DropRPF {
+		return chain, reason, true
+	}
 	if !found || !slices.Contains(filterChains, chain) || (reason != DropInvalid && reason != DropPolicy && reason != DropIPOptions) {
 		return "", "", false
 	}
@@ -430,6 +438,9 @@ func writeDropCounters(b *strings.Builder, in *fwconfig.Instance) {
 		if slices.Contains(in.DropIPOptions, chain) {
 			fmt.Fprintf(b, "\tcounter %s {\n\t}\n\n", DropCounter(chain, DropIPOptions))
 		}
+	}
+	if len(rpfInterfaces(in)) > 0 {
+		fmt.Fprintf(b, "\tcounter %s {\n\t}\n\n", DropCounter(ChainPrerouting, DropRPF))
 	}
 }
 

@@ -157,6 +157,7 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 		if ifc.ShapeEgress < 0 || ifc.ShapeEgress > MaxShapeMbit || ifc.ShapeIngress < 0 || ifc.ShapeIngress > MaxShapeMbit {
 			v.addf("%s: shaping must be 0-%d Mbit/s", ip, MaxShapeMbit)
 		}
+		v.normalize(ip, ifc)
 		if ifaces[ifc.Name] != nil {
 			v.addf("%s: duplicate", ip)
 		}
@@ -270,6 +271,7 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 	}
 	v.vxlanInstance(p, in, ifaces)
 	v.vrfInstance(p, in, ifaces)
+	v.normalizeInstance(p, in, ifaces)
 	v.l3vniInstance(p, in)
 	v.openVPNInstance(p, in)
 

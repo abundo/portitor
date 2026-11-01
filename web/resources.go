@@ -491,6 +491,13 @@ func prepareInterface(tx *gorm.DB, i, old *models.Interface) error {
 	}
 	if i.Kind == fwconfig.KindLoopback {
 		i.ShapeEgress, i.ShapeIngress = 0, 0
+		i.MssClamp, i.Rpf = false, false
+	}
+	if !i.MssClamp {
+		i.MssClampValue = 0
+	}
+	if i.MssClampValue != 0 && (i.MssClampValue < fwconfig.MinMSS || i.MssClampValue > fwconfig.MaxMSS) {
+		return bad(fmt.Sprintf("mss: 0 or %d-%d", fwconfig.MinMSS, fwconfig.MaxMSS))
 	}
 	if i.ShapeEgress < 0 || i.ShapeEgress > fwconfig.MaxShapeMbit || i.ShapeIngress < 0 || i.ShapeIngress > fwconfig.MaxShapeMbit {
 		return bad(fmt.Sprintf("shaping: 0-%d Mbit/s", fwconfig.MaxShapeMbit))

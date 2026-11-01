@@ -32,7 +32,9 @@ A packet is checked against one filter chain only. Traffic from your LAN to the 
 
 Rules are evaluated **top to bottom, and the first match decides**. A packet that no
 rule accepts is dropped by the chain's policy. Each chain runs in this order; the
-locked rows show where the built-in parts sit:
+locked rows show where the built-in parts sit. Before any chain, packets that fail an
+interface's [reverse path check](#reverse-path-check) are dropped (a locked row in
+input and forward).
 
 1. **IP options** (input and forward, when switched on under Settings): IPv4 packets
    with IP options are dropped, before anything else. See [IP options](#ip-options).
@@ -244,6 +246,52 @@ Both apply to every virtual firewall, from the next commit. The drop comes first
 chain, before established connections are accepted, so it takes packets with options
 in any connection, and no rule can let them through. A locked row *IP options* at the top
 of the chain counts what it dropped.
+
+## Reverse path check
+
+Switch on **Reverse path check** on an interface (Network → Interfaces) to drop packets
+that come in on it from a source address the virtual firewall would not route back out
+of it: a host on the LAN pretending to be on the Internet, or packets from the Internet
+claiming a LAN address. This is strict *unicast reverse path forwarding* (uRPF), PF's
+`urpf-failed`.
+
+- The check comes first, before connection tracking, NAT and the chains, so no rule can
+  let such a packet through and it never opens a connection. A locked row *reverse path*
+  in the input and forward chains counts what it dropped (one counter for both).
+- The route back is looked up as for any packet, in the interface's VRF if it is in one.
+  A source with no route at all fails too, so an interface whose networks aren't routed
+  (a LAN behind another router without a static route for it) drops their traffic.
+- Packets to a VRRP virtual router (Routing → VRRP) arrive on its device and must route
+  back by its interface. The check is not available on an interface with VRRP in a VRF.
+- DHCP clients asking for an address (from `0.0.0.0`), IPv6 duplicate address detection
+  (from `::`), router advertisements and neighbour solicitations always pass.
+- **Leave it off where routing is asymmetric on purpose**: a second uplink that is not
+  the default route (replies to its traffic are routed out by the first), policy routes
+  for traffic that comes in, or a network that reaches you by one path and is reached by
+  another.
+
+## MSS clamping
+
+A TCP connection agrees on the largest segment each side will send (the MSS) in its
+handshake, from each host's own link, usually 1460 bytes for a 1500-byte ethernet. When
+a link on the way is smaller (a WireGuard, 6in4 or OpenVPN tunnel, a PPPoE uplink at
+1492) the hosts are meant to find out by *path MTU discovery*, from the ICMP *too big*
+messages; when something on the way filters ICMP, connections hang as soon as a full
+packet is sent (a page that never finishes loading, an SSH session that stalls).
+
+Switch on **Clamp TCP MSS** on the interface with the small MTU (Network → Interfaces):
+the firewall lowers the MSS in the handshakes it forwards through it, so neither side
+ever sends packets too big for it.
+
+- **MSS 0** (the default) takes it from the MTU of the route each handshake leaves by,
+  less the headers. Handshakes that come in on the interface are lowered to what its own
+  MTU leaves, when that is known: set as the interface's MTU, or a WireGuard's (1420) or
+  6in4 tunnel's (1480) default.
+- **A fixed MSS**, the IPv4 one (IPv6 gets 20 bytes less), applies both ways: 1452 for
+  PPPoE, 1380 for a WireGuard tunnel over IPv4.
+- The MSS is only ever lowered, in both directions of a connection, whatever the rules
+  decide. Connections to and from the firewall itself don't need it: its own TCP knows its
+  links' MTUs.
 
 ## Fragmented packets
 

@@ -184,9 +184,16 @@ type Interface struct {
 	// receives to that many Mbit/s with CAKE (0: not shaped). Receiving
 	// is shaped on an IFB device (IFBName) the interface's traffic is
 	// redirected to.
-	ShapeEgress  int        `json:"shape_egress,omitempty"`
-	ShapeIngress int        `json:"shape_ingress,omitempty"`
-	WireGuard    *WireGuard `json:"wireguard,omitempty"`
+	ShapeEgress  int `json:"shape_egress,omitempty"`
+	ShapeIngress int `json:"shape_ingress,omitempty"`
+	// MSSClamp lowers the MSS of the forwarded TCP SYNs through the
+	// interface, to MSSClampValue (IPv4; 0: from the route's MTU) (mss.go).
+	MSSClamp      bool `json:"mss_clamp,omitempty"`
+	MSSClampValue int  `json:"mss_clamp_value,omitempty"`
+	// RPF drops the packets that come in on the interface from a source
+	// it doesn't route back through (strict reverse path check, rpf.go).
+	RPF       bool       `json:"rpf,omitempty"`
+	WireGuard *WireGuard `json:"wireguard,omitempty"`
 	// Tunnel holds a 6in4 interface's settings.
 	Tunnel *Tunnel6in4 `json:"tunnel,omitempty"`
 	// VXLAN holds a vxlan interface's settings.

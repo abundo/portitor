@@ -58,7 +58,7 @@ const props = defineProps({
 // log-builtin(builtin, service, on): a built-in row's Log box changed;
 // builtin is 'policy', 'invalid' or 'auto' (with the auto rule's service).
 // view(row): a locked row was clicked, to show it read-only: an auto rule,
-// or { builtin } for 'ip_options', 'invalid', 'dnat' (port forwards) or 'policy'.
+// or { builtin } for 'rpf', 'ip_options', 'invalid', 'dnat' (port forwards) or 'policy'.
 const emit = defineEmits(['save', 'move', 'edit', 'view', 'remove', 'log-builtin'])
 
 const objects = useObjectStore()
@@ -617,7 +617,13 @@ const ipOptions = computed(() => dropCount('ip_options') !== undefined)
 const ipOptionsMatch = computed(() =>
   props.chain === 'input' ? 'ip hdrlength > 5, not IGMP' : 'ip hdrlength > 5',
 )
-const autoCount = computed(() => props.auto.length + 1 + (ipOptions.value ? 1 : 0))
+// The deployed ruleset checks the reverse path on some interfaces
+// (render.RPFChain, in prerouting): its counter, shared by input and
+// forward, is there.
+const rpf = computed(() => dropCount('rpf') !== undefined)
+const autoCount = computed(
+  () => props.auto.length + 1 + (ipOptions.value ? 1 : 0) + (rpf.value ? 1 : 0),
+)
 
 // The built-in rows log rate limited (render.builtinLogLimit).
 const builtinLogLimit = 'at most 10 packets a second'
@@ -754,6 +760,30 @@ function onKeydown(event, index) {
                     {{ autoCount }} rule{{ autoCount > 1 ? 's' : '' }}
                   </span>
                 </div>
+              </td>
+            </tr>
+            <tr
+              v-if="rpf"
+              :hidden="!autoOpen"
+              class="cursor-pointer"
+              @click="emit('view', { builtin: 'rpf' })"
+              title="Packets from a source not routed back by the interface they came in on, dropped before connection tracking (Interfaces → Reverse path check); counted once for input and forward"
+            >
+              <td class="text-center text-muted">
+                <UIcon name="i-lucide-lock" class="size-3.5 align-middle" />
+              </td>
+              <td colspan="2" />
+              <td>
+                <span><span class="text-muted">auto:</span> reverse path</span>
+              </td>
+              <td :colspan="colCount - 7">
+                <span class="text-muted">fib saddr . iif oif missing (prerouting)</span>
+              </td>
+              <td><span class="font-semibold text-error">drop</span></td>
+              <td />
+              <td class="counter" :title="dropTitle('rpf')">
+                <div>{{ bytes(drops.rpf_bytes) }}</div>
+                <div>{{ dropCount('rpf').toLocaleString() }} pkt</div>
               </td>
             </tr>
             <tr

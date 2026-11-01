@@ -64,6 +64,15 @@ func TestValidateCatchesProblems(t *testing.T) {
 		{"log drops twice", func(d *Document) { d.Instances[0].LogDrops = []string{"input", "input"} }, "input listed twice"},
 		{"drop ip options in output", func(d *Document) { d.Instances[0].DropIPOptions = []string{ChainOutput} }, "drop ip options: only input and forward"},
 		{"drop ip options twice", func(d *Document) { d.Instances[0].DropIPOptions = []string{ChainInput, ChainInput} }, "drop ip options: input listed twice"},
+		{"mss out of range", func(d *Document) {
+			d.Instances[0].Interfaces[0].MSSClamp, d.Instances[0].Interfaces[0].MSSClampValue = true, 500
+		}, "mss 500 out of range"},
+		{"mss without clamping", func(d *Document) { d.Instances[0].Interfaces[0].MSSClampValue = 1400 }, "mss without mss clamping"},
+		{"rpf on a bridge member", func(d *Document) { d.Instances[1].Interfaces[1].RPF = true }, `interface "vx200": member of bridge "br200"`},
+		{"rpf with vrrp in a vrf", func(d *Document) {
+			d.Instances[1].VRRP = append(d.Instances[1].VRRP, VRRP{Interface: "eth3", VRID: 3, IPv4: []string{"172.16.3.254"}})
+			d.Instances[1].Interfaces[3].RPF = true
+		}, "reverse path check is not supported with VRRP in a VRF"},
 		{"log invalid bad chain", func(d *Document) { d.Instances[0].LogInvalid = []string{"prerouting"} }, `log invalid: invalid chain "prerouting"`},
 		{"log auto bad service", func(d *Document) { d.Instances[0].LogAuto = []string{`dns" server`} }, `log auto: invalid service`},
 		{"log auto double space", func(d *Document) { d.Instances[0].LogAuto = []string{"dns  server"} }, `log auto: invalid service`},

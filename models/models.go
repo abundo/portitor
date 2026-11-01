@@ -542,6 +542,12 @@ type Interface struct {
 	// receives with CAKE, in Mbit/s; 0 is not shaped.
 	ShapeEgress  int `json:"shape_egress"`
 	ShapeIngress int `json:"shape_ingress"`
+	// MssClamp lowers the MSS of the forwarded TCP SYNs through the
+	// interface to MssClampValue (0: from the route's MTU); Rpf drops what
+	// comes in from a source not routed back by it (fwconfig.Interface).
+	MssClamp      bool `json:"mss_clamp"`
+	MssClampValue int  `json:"mss_clamp_value"`
+	Rpf           bool `gorm:"column:rpf" json:"rpf"`
 
 	WgPrivateKey string `json:"-"`
 	WgPublicKey  string `json:"wg_public_key"`

@@ -235,7 +235,14 @@ docs and user-facing messages.
   conntrack finds invalid without `nf_conntrack_tcp_loose`, off in such a namespace),
   and the output chain accepts what synproxy sends from the client's and server's
   addresses, before its invalid drop too (the SYN cookie is invalid to conntrack),
-  the server's SYN with the rule's counter, log and `ct mark`. The input auto accepts stay first so a rule
+  the server's SYN with the rule's counter, log and `ct mark`. Before the chains, an
+  interface's strict reverse path check (`fwconfig.Interface.RPF`, `render/rpf.go`:
+  chain `prerouting_rpf` at priority raw, `fib saddr . iif`; a VRRP device by its
+  parent's name, refused in a VRF; counter `drop_prerouting_rpf`, `ChainDrops.RPF*`
+  under `prerouting`) drops spoofed sources, and `forward_mss` (priority mangle,
+  `render/mss.go`) lowers the forwarded SYNs' MSS on the interfaces with
+  `MSSClamp` (`rt mtu` going out, `Interface.MSSClampIn` coming in, or the fixed
+  `MSSClampValue`). The input auto accepts stay first so a rule
   that closes an interface to the firewall keeps the DHCP and DNS enabled on it.
   The output chain has auto accepts too, before the user's rules: the BGP sessions
   FRR opens to its neighbours (TCP 179), what OSPF sends (IP protocol 89,

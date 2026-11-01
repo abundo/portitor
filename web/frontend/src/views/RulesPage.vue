@@ -41,10 +41,16 @@ async function loadLimits() {
 }
 watch(() => store.currentId, loadLimits, { immediate: true })
 // lockedRow shows a locked row of a chain's table in the rule form
-// (read-only): an auto rule, or { builtin } for IP options, the invalid packets, the port
+// (read-only): an auto rule, or { builtin } for the reverse path check, IP options, the invalid packets, the port
 // forwards' accept or the policy. What it matches takes the Services field's
 // place.
 const builtins = {
+  rpf: {
+    match: 'fib saddr . iif oif missing (prerouting)',
+    action: 'drop',
+    description:
+      'reverse path: packets from a source not routed back by the interface they came in on, on the interfaces with Reverse path check (Interfaces), dropped before connection tracking',
+  },
   ip_options: {
     match: 'ip hdrlength > 5 (input: not IGMP)',
     action: 'drop',
@@ -116,6 +122,15 @@ async function loadCounters() {
   drops.value = r ? (r.drops ?? {}) : null
 }
 const autoCounters = useAutoRefresh(loadCounters, { seconds: 5 })
+// chainDrops is a chain's drops for its table; input and forward also get
+// prerouting's reverse path check (rpf_*), which counts for both.
+function chainDrops(chain) {
+  if (!drops.value) return null
+  const d = drops.value[store.current?.name] ?? {}
+  const own = d[chain] ?? {}
+  if (chain === 'output' || d.prerouting?.rpf_packets === undefined) return own
+  return { ...own, rpf_packets: d.prerouting.rpf_packets, rpf_bytes: d.prerouting.rpf_bytes }
+}
 
 // The locked rows have a Log box too, kept in the instance: log_drops and
 // log_invalid list the chains that log what no rule matched and their
@@ -453,7 +468,7 @@ function clean(b) {
                 :auto="c.value === 'input' ? autoRules : []"
                 :ifaces="ifaceRefItems"
                 :counters="counters"
-                :drops="drops && (drops[store.current?.name]?.[c.value] ?? {})"
+                :drops="chainDrops(c.value)"
                 :log-builtin="logBuiltin(c.value)"
                 :read-only="!auth.canEdit"
                 :insert="

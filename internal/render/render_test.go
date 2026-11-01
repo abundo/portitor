@@ -237,7 +237,7 @@ func TestNftablesSyntax(t *testing.T) {
 		}
 	}
 	// Rules without and with IDs (named counters, connection marks).
-	for _, doc := range []fwconfig.Document{fwconfig.SampleDocument(), withRuleIDs(fwconfig.SampleDocument()), fwconfig.SampleVRFDocument(), withDHCPHA(fwconfig.SampleDocument()), withHAConfig(fwconfig.SampleDocument()), withSynProxy(fwconfig.SampleDocument()), withDropIPOptions(fwconfig.SampleDocument())} {
+	for _, doc := range []fwconfig.Document{fwconfig.SampleDocument(), withRuleIDs(fwconfig.SampleDocument()), fwconfig.SampleVRFDocument(), withDHCPHA(fwconfig.SampleDocument()), withHAConfig(fwconfig.SampleDocument()), withSynProxy(fwconfig.SampleDocument()), withDropIPOptions(fwconfig.SampleDocument()), withNormalize(fwconfig.SampleDocument())} {
 		b, err := Render(doc, Options{Paths: paths, Units: DefaultUnits()})
 		if err != nil {
 			t.Fatal(err)
@@ -417,7 +417,10 @@ func TestParseDropCounter(t *testing.T) {
 	if chain, reason, ok := ParseDropCounter(DropCounter("input", DropIPOptions)); !ok || chain != "input" || reason != DropIPOptions {
 		t.Errorf("round trip: %q %q %v", chain, reason, ok)
 	}
-	for _, bad := range []string{"drop_nat_policy", "drop_input_x", "drop_input", "rule_1_orig", "drop__policy"} {
+	if chain, reason, ok := ParseDropCounter(DropCounter(ChainPrerouting, DropRPF)); !ok || chain != ChainPrerouting || reason != DropRPF {
+		t.Errorf("round trip: %q %q %v", chain, reason, ok)
+	}
+	for _, bad := range []string{"drop_nat_policy", "drop_prerouting_policy", "drop_input_rpf", "drop_input_x", "drop_input", "rule_1_orig", "drop__policy"} {
 		if _, _, ok := ParseDropCounter(bad); ok {
 			t.Errorf("%q parsed", bad)
 		}
@@ -463,6 +466,101 @@ func TestNftablesDropIPOptions(t *testing.T) {
 	}
 	if strings.Contains(nft, DropCounter("output", DropIPOptions)) {
 		t.Error("output drops ip options")
+	}
+}
+
+// withNormalize clamps the MSS and checks the reverse path on some
+// interfaces: by the route's MTU (eth0, wg0) or a fixed MSS (eth3, in VRF
+// blue); eth0, eth1, the OpenVPN server and eth2, with a virtual router.
+func withNormalize(doc fwconfig.Document) fwconfig.Document {
+	for _, in := range []*fwconfig.Instance{doc.Instance("main"), doc.Instance("guest")} {
+		for i := range in.Interfaces {
+			ifc := &in.Interfaces[i]
+			switch ifc.Name {
+			case "eth0":
+				ifc.MSSClamp, ifc.RPF = true, true
+			case "wg0":
+				ifc.MSSClamp = true
+			case "eth3":
+				ifc.MSSClamp, ifc.MSSClampValue = true, 1400
+			case "eth1", "ovpn0", "eth2":
+				ifc.RPF = true
+			}
+		}
+	}
+	return doc
+}
+
+func TestNftablesNormalize(t *testing.T) {
+	nft := mustFile(t, sampleBundle(t), "/etc/nftables.d/portitor.nft")
+	if strings.Contains(nft, MSSChain) || strings.Contains(nft, RPFChain) || strings.Contains(nft, DropRPF) {
+		t.Errorf("normalized without the settings:\n%s", nft)
+	}
+	doc := withNormalize(fwconfig.SampleDocument())
+	if err := doc.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	b, err := Render(doc, Options{Paths: DefaultPaths(), Units: DefaultUnits()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	chain := func(nft, name string) string {
+		t.Helper()
+		_, body, ok := strings.Cut(nft, "\tchain "+name+" {\n")
+		if !ok {
+			t.Fatalf("no chain %s in\n%s", name, nft)
+		}
+		body, _, _ = strings.Cut(body, "\t}\n")
+		return body
+	}
+	main := mustFile(t, b, "/etc/nftables.d/portitor.nft")
+	mss := chain(main, MSSChain)
+	for _, want := range []string{
+		`oifname "eth0" tcp flags & (syn | rst) == syn tcp option maxseg size set rt mtu comment "mss clamp: eth0"`,
+		`oifname "wg0" tcp flags & (syn | rst) == syn tcp option maxseg size set rt mtu comment "mss clamp: wg0"`,
+		// WireGuard's default MTU, 1420, less the headers.
+		`iifname "wg0" meta nfproto ipv4 tcp flags & (syn | rst) == syn tcp option maxseg size > 1380 tcp option maxseg size set 1380`,
+		`iifname "wg0" meta nfproto ipv6 tcp flags & (syn | rst) == syn tcp option maxseg size > 1360 tcp option maxseg size set 1360`,
+	} {
+		if !strings.Contains(mss, want) {
+			t.Errorf("want %q in\n%s", want, mss)
+		}
+	}
+	if strings.Contains(mss, `iifname "eth0"`) {
+		t.Errorf("eth0's MTU is unknown, clamped coming in:\n%s", mss)
+	}
+	rpf := chain(main, RPFChain)
+	for _, want := range []string{
+		"type filter hook prerouting priority raw; policy accept;",
+		fmt.Sprintf(`iifname { "eth0", "eth1", "ovpn0", %q } fib saddr . iif oif missing counter name "drop_prerouting_rpf" drop`, fwconfig.OpenVPNTCPDevice("ovpn0")),
+	} {
+		if !strings.Contains(rpf, want) {
+			t.Errorf("want %q in\n%s", want, rpf)
+		}
+	}
+	if !strings.Contains(main, "counter "+DropCounter(ChainPrerouting, DropRPF)+" {") {
+		t.Error("rpf counter not declared")
+	}
+
+	guest := mustFile(t, b, DefaultPaths().Files(doc.Instance("guest")).Nftables)
+	mss = chain(guest, MSSChain)
+	for _, want := range []string{
+		`oifname "eth3" meta nfproto ipv4 tcp flags & (syn | rst) == syn tcp option maxseg size > 1400 tcp option maxseg size set 1400`,
+		`meta sdifname "eth3" meta nfproto ipv6 tcp flags & (syn | rst) == syn tcp option maxseg size > 1380 tcp option maxseg size set 1380`,
+	} {
+		if !strings.Contains(mss, want) {
+			t.Errorf("want %q in\n%s", want, mss)
+		}
+	}
+	rpf = chain(guest, RPFChain)
+	for _, want := range []string{
+		`iifname "eth2" fib saddr . iif oif missing`,
+		`iifname "vrrp4-50-eth2" fib saddr oifname != "eth2" counter name "drop_prerouting_rpf" drop`,
+		`iifname "vrrp6-50-eth2" fib saddr oifname != "eth2"`,
+	} {
+		if !strings.Contains(rpf, want) {
+			t.Errorf("want %q in\n%s", want, rpf)
+		}
 	}
 }
 
