@@ -6,6 +6,14 @@
 The major changes in each release. A release's notes on GitHub are its section
 here (`dev/release-notes.sh`); the full list is `git log <previous tag>..<tag>`.
 
+## Unreleased
+
+### New
+
+- **ISO:** the installed system has a serial console on `ttyS0` (115200 baud) as
+  well as the screen: boot menu, kernel messages and a login. In Proxmox VE, add a
+  serial port and use the xterm.js console, where copy and paste work.
+
 ## v0.8.0
 
 ### New

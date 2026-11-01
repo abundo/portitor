@@ -118,7 +118,9 @@ d-i partman/confirm boolean true
 d-i partman/confirm_nooverwrite boolean true
 PRESEED
 	# The installer and the installed system (what follows ---) on the
-	# serial console, and no waiting in the boot menus.
+	# serial console, and no waiting in the boot menus. (Every installed system
+	# has ttyS0 as a console too, target.sh; this one names it last, so it is
+	# /dev/console and gets systemd's boot messages.)
 	serial=console=ttyS0,115200n8
 	sed -i "s/--- quiet/$serial --- $serial/; s/timeout=10/timeout=1/" "$work/grub.cfg"
 	sed -i "s/--- quiet/$serial --- $serial/; s/timeout 100/timeout 10/" "$work/isolinux.cfg"

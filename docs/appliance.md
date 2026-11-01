@@ -31,6 +31,12 @@ AppArmor stays on. Debian's profiles for BIND and Kea get Portitor's paths added
    installation.
 3. The machine reboots into the first-boot setup on the screen.
 
+The installed system also has a serial console on the first serial port (`ttyS0`,
+115200 baud): the boot menu, the kernel's messages and a login prompt. The first-boot
+setup and password recovery run on the screen only. In Proxmox VE, add a serial port
+to the VM (`qm set <vmid> -serial0 socket`) and open the console as **xterm.js**,
+where copy and paste work, unlike in the noVNC console.
+
 ## First-boot setup
 
 The setup is a text UI of a few pages, with *Back* and *Next* (Tab moves between
