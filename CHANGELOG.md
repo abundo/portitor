@@ -6,6 +6,39 @@
 The major changes in each release. A release's notes on GitHub are its section
 here (`dev/release-notes.sh`); the full list is `git log <previous tag>..<tag>`.
 
+## v0.8.0
+
+### New
+
+- **SYN proxy** for forward accept rules: SYN cookies answer the TCP handshake
+  before the server sees it, against SYN floods.
+- **Interfaces:** TCP MSS clamping (to the route's MTU, the interface's own or a
+  fixed value) and a strict reverse path check that drops spoofed sources.
+- **Drop IPv4 packets with IP options** (Settings), in input and forward, in every
+  virtual firewall.
+- **IP lists by country**, from the RIRs' delegations (ipverse, then ipdeny).
+- **OpenVPN two-factor login:** a code from the user's authenticator app after the
+  password, for the users with two-factor login or for everyone.
+- **Certificates:** the certificate store as a tree by certification path, and an
+  Import CA button on the Certificate authorities tab.
+- Bash completion for the `portitor` command.
+
+### Changed
+
+- The GUI writes MAC addresses as `1122.3344.5566`; inputs also take colons and
+  dashes.
+- The ACME proxy is a tab of Services → Certificates.
+- The rules table shows the description before From.
+- The browser's title names the firewall's host.
+
+### Fixed
+
+- systemd-ssh-generator is masked: its AF_VSOCK errors filled the console.
+
+### Upgrading
+
+- An update installs bash-completion.
+
 ## v0.7.0
 
 ### New
