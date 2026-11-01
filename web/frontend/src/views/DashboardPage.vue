@@ -13,7 +13,6 @@ import { useInstanceStore } from '@/stores/instances'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
 import { openServiceLogWindow } from '@/composables/useServiceLogWindow'
 import { bytes } from '@/utils/bytes'
-import { ago } from '@/utils/time'
 
 const deploy = useDeployStore()
 const instances = useInstanceStore()
@@ -106,18 +105,39 @@ const units = computed(() => Object.keys(inst.value?.services ?? {}))
 // A WireGuard peer is connected while its last handshake is recent: WireGuard
 // does one at least every 2 minutes on a session that carries traffic.
 const ACTIVE_S = 180
-const peers = computed(() =>
-  (inst.value?.wireguard ?? [])
-    .flatMap((w) => w.peers.map((p) => ({ ...p, iface: w.interface })))
-    .map((p) => ({
-      ...p,
-      active:
-        !!p.latest_handshake &&
-        Date.now() - new Date(p.latest_handshake).getTime() < ACTIVE_S * 1000,
-    }))
-    .sort((a, b) => b.active - a.active),
+const connected = (p) =>
+  !!p.latest_handshake && Date.now() - new Date(p.latest_handshake).getTime() < ACTIVE_S * 1000
+// The OpenVPN servers are not in the status: asked for at each refresh of it.
+const openvpn = ref([])
+async function loadOpenvpn() {
+  try {
+    openvpn.value = (await api.agentOpenvpn()).servers ?? []
+  } catch {
+    openvpn.value = []
+  }
+}
+watch(st, loadOpenvpn, { immediate: true })
+
+// The VPN interfaces: name, state and how many of their peers are connected.
+// An OpenVPN server knows only its connected clients, one row per protocol.
+const vpns = computed(() =>
+  [
+    ...(inst.value?.wireguard ?? []).map((w) => ({
+      key: w.interface,
+      name: ifaceText(w.interface),
+      state: ifaces.value.find((i) => i.name === w.interface)?.state ?? 'unknown',
+      count: `${w.peers.filter(connected).length} of ${w.peers.length} peers connected`,
+    })),
+    ...openvpn.value
+      .filter((o) => o.instance === instances.current?.name)
+      .map((o) => ({
+        key: `${o.interface}/${o.proto}`,
+        name: `${ifaceText(o.interface)} · ${o.proto}`,
+        state: o.connected ? 'up' : 'down',
+        count: `${o.clients?.length ?? 0} clients connected`,
+      })),
+  ].sort((a, b) => a.key.localeCompare(b.key, undefined, { numeric: true })),
 )
-const activePeers = computed(() => peers.value.filter((p) => p.active).length)
 
 const stateColor = (s) =>
   s === 'up' || s === 'active' || s === 'unknown'
@@ -306,7 +326,7 @@ const memPath = computed(() => usagePath('mem'))
       </div>
 
       <div class="grid gap-4 xl:grid-cols-3">
-        <div class="card">
+        <div class="card rounded-lg border border-default p-3">
           <div class="mb-2 flex items-center gap-2">
             <span class="font-semibold">Services</span>
             <UButton
@@ -332,12 +352,9 @@ const memPath = computed(() => usagePath('mem'))
           </div>
         </div>
 
-        <div class="card">
+        <div class="card rounded-lg border border-default p-3">
           <div class="mb-2 flex items-center gap-2">
             <span class="font-semibold">VPN</span>
-            <span v-if="peers.length" class="text-xs text-muted"
-              >{{ activePeers }} of {{ peers.length }} WireGuard peers connected</span
-            >
             <UButton
               class="ms-auto"
               size="sm"
@@ -345,31 +362,24 @@ const memPath = computed(() => usagePath('mem'))
               label="WireGuard"
               to="/wireguard"
             />
+            <UButton size="sm" variant="outline" label="OpenVPN" to="/openvpn" />
           </div>
-          <div v-if="!peers.length" class="text-sm text-muted">
-            No WireGuard peers in this virtual firewall.
+          <div v-if="!vpns.length" class="text-sm text-muted">
+            No VPN interfaces in this virtual firewall.
           </div>
           <div
-            v-for="p in peers"
-            :key="p.iface + p.public_key"
-            class="flex flex-wrap items-center justify-between gap-2 py-1 text-sm"
+            v-for="v in vpns"
+            :key="v.key"
+            class="flex items-center justify-between gap-2 py-1 text-sm"
           >
+            <span class="font-mono">{{ v.name }}</span>
             <span class="flex items-center gap-2">
-              <UBadge
-                :color="p.active ? 'success' : 'neutral'"
-                variant="subtle"
-                :label="p.active ? 'connected' : 'idle'"
-              />
-              <span class="font-mono text-xs">{{ p.iface }} · {{ p.allowed_ips.join(', ') }}</span>
+              <span class="text-xs text-muted">{{ v.count }}</span>
+              <UBadge :color="stateColor(v.state)" variant="subtle" :label="v.state" />
             </span>
-            <span class="text-xs text-muted"
-              ><span v-if="p.endpoint" class="font-mono">{{ p.endpoint }} · </span
-              >{{ ago(p.latest_handshake) }} · ↓ {{ bytes(p.rx_bytes) }} ↑
-              {{ bytes(p.tx_bytes) }}</span
-            >
           </div>
         </div>
-        <div v-if="auth.readsAll" class="card text-sm">
+        <div v-if="auth.readsAll" class="card rounded-lg border border-default p-3 text-sm">
           <div class="mb-2 font-semibold">Announcements</div>
           <div v-if="!sys?.releases" class="text-muted">
             Check for updates on the
