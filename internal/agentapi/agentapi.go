@@ -452,6 +452,13 @@ type DNSBlocklistRequest struct {
 	Name     string `json:"name"`
 }
 
+// CertificateRequest names an instance's ACME certificate
+// (/v1/certificates/renew).
+type CertificateRequest struct {
+	Instance string `json:"instance"`
+	Name     string `json:"name"`
+}
+
 // TaskStatus is the state of a scheduled task.
 type TaskStatus struct {
 	Name     string `json:"name"`

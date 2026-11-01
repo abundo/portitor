@@ -130,6 +130,60 @@ func TestCertManager(t *testing.T) {
 	}
 }
 
+// Renew orders at once: a failed certificate without waiting for the
+// retry, a valid one before it is due.
+func TestCertManagerRenew(t *testing.T) {
+	m := newCertManager(false, render.Paths{StateDir: t.TempDir()}, &nftRunner{})
+	var mu sync.Mutex
+	orders := 0
+	fail := true
+	m.obtain = func(_ string, req acme.Request) (*acme.Result, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		orders++
+		if fail {
+			return nil, errors.New("rate limited")
+		}
+		return testCert(t, req.Domains), nil
+	}
+	item := certItem{instance: "main", netns: "fw-main", cfg: fwconfig.Certificate{
+		Name: "www", Domains: []string{"www.example.com"}, CA: "letsencrypt", KeyType: "ec256", Challenge: fwconfig.ChallengeHTTP01, Interface: "wan",
+	}}
+	m.Reconcile(context.Background(), []certItem{item})
+	defer m.Stop()
+	waitState(t, m, "error")
+
+	mu.Lock()
+	fail = false
+	mu.Unlock()
+	if err := m.Renew("main", "www"); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, m, "ok")
+	if err := m.Renew("main", "www"); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		mu.Lock()
+		n := orders
+		mu.Unlock()
+		if n == 3 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%d orders, want 3", n)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	waitState(t, m, "ok")
+
+	var nf errNotFound
+	if err := m.Renew("main", "nope"); !errors.As(err, &nf) {
+		t.Errorf("unknown certificate: %v", err)
+	}
+}
+
 // An apply reloads the ruleset, emptying the set: Reconcile fills it again
 // where a challenge is being answered.
 func TestCertManagerReopensPort(t *testing.T) {

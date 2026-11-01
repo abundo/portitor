@@ -80,3 +80,38 @@ func sendCertificate(c *echo.Context, name string, chain []byte) error {
 	c.Response().Header().Set("Content-Disposition", `attachment; filename="`+name+"."+ext+`"`)
 	return c.Blob(http.StatusOK, ct, body)
 }
+
+// handleCertificateRenew orders an ACME certificate now, on its virtual
+// firewall's firewall and that firewall's HA secondary: the active host
+// orders, the standby copies it.
+func (s *Server) handleCertificateRenew(c *echo.Context) error {
+	var cert models.Certificate
+	if !s.loadByID(c, &cert) {
+		return nil
+	}
+	if ok, err := allowInstance(c, cert.InstanceID, true); !ok {
+		return err
+	}
+	if cert.Source == fwconfig.CertSourceImport {
+		return errJSON(c, http.StatusConflict, "an imported certificate is never renewed")
+	}
+	if !cert.Enabled {
+		return errJSON(c, http.StatusConflict, "the certificate is off")
+	}
+	var in models.Instance
+	if err := s.db.First(&in, cert.InstanceID).Error; err != nil {
+		return err
+	}
+	var secondaries []models.Firewall
+	if err := s.db.Where("ha_primary_id = ?", in.FirewallID).Find(&secondaries).Error; err != nil {
+		return err
+	}
+	for _, fw := range secondaries {
+		if a, _, err := s.firewallAgent(fw.ID); err == nil {
+			_ = a.RenewCertificate(c.Request().Context(), in.Name, cert.Name)
+		}
+	}
+	return s.startOnAgent(c, in.FirewallID, cert.Name, func(a agentAPI) error {
+		return a.RenewCertificate(c.Request().Context(), in.Name, cert.Name)
+	})
+}

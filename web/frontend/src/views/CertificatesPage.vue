@@ -457,6 +457,17 @@ const columns = [
   { key: 'state', label: 'State' },
   { key: 'enabled', label: 'Enabled' },
 ]
+// renew orders the certificate again now: a failed one without waiting
+// for the next retry, a valid one before it is due.
+async function renew(row) {
+  try {
+    await api.certificateRenew(row.id)
+    toast.add({ title: `Ordering ${row.name}`, color: 'info' })
+    setTimeout(() => deploy.refresh(), 2000)
+  } catch (err) {
+    toast.add({ title: errMsg(err, 'Renewal failed to start'), color: 'error' })
+  }
+}
 const dns01 = (form) => form.challenge === 'dns-01'
 const http01 = (form) => !dns01(form)
 const fields = computed(() => [
@@ -720,6 +731,21 @@ const fields = computed(() => [
               <div class="font-mono text-muted">{{ states[row.name].dir }}</div>
             </div>
             <span v-else class="text-xs text-muted">not deployed</span>
+          </template>
+          <template #row-actions="{ row }">
+            <UButton
+              v-if="
+                writable && row.enabled && states[row.name] && states[row.name].state !== 'dry-run'
+              "
+              size="sm"
+              variant="outline"
+              color="neutral"
+              icon="i-lucide-refresh-cw"
+              label="Renew"
+              title="Order the certificate again now"
+              :loading="states[row.name].state === 'issuing'"
+              @click="renew(row)"
+            />
           </template>
         </CrudPage>
       </template>

@@ -250,6 +250,13 @@ func (a *Agent) routes() *http.ServeMux {
 			writeStarted(w, req.Name, a.RefreshDNSBlocklist(req.Instance, req.Name))
 		}
 	})
+	mux.HandleFunc("POST /v1/certificates/renew", func(w http.ResponseWriter, r *http.Request) {
+		var req agentapi.CertificateRequest
+		if decode(w, r, &req) {
+			slog.Info("api: certificate renewal", "instance", req.Instance, "certificate", req.Name, "remote", r.RemoteAddr)
+			writeStarted(w, req.Name, a.certs.Renew(req.Instance, req.Name))
+		}
+	})
 	mux.HandleFunc("POST /v1/dhcp/renew", func(w http.ResponseWriter, r *http.Request) {
 		var req agentapi.DHCPRenewRequest
 		if !decode(w, r, &req) {

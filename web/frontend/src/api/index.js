@@ -129,6 +129,7 @@ export const api = {
   // Start a deployed task, or the download of a deployed IP list, now.
   runTask: (id) => http.post(`/tasks/${id}/run`, {}).then((r) => r.data),
   refreshIPList: (id) => http.post(`/ip-lists/${id}/refresh`, {}).then((r) => r.data),
+  certificateRenew: (id) => http.post(`/certificates/${id}/renew`, {}).then((r) => r.data),
   refreshDNSBlocklist: (id) => http.post(`/dns/blocklists/${id}/refresh`, {}).then((r) => r.data),
   // The next runs of a cron schedule ({ next: [...] } or { error }).
   schedulePreview: (schedule) =>

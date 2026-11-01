@@ -337,6 +337,12 @@ func (c *Client) RefreshDNSBlocklist(ctx context.Context, instance, name string)
 	return c.do(ctx, http.MethodPost, "/v1/dns/blocklists/refresh", agentapi.DNSBlocklistRequest{Instance: instance, Name: name}, nil)
 }
 
+// RenewCertificate orders an ACME certificate of an instance of the
+// applied configuration now.
+func (c *Client) RenewCertificate(ctx context.Context, instance, name string) error {
+	return c.do(ctx, http.MethodPost, "/v1/certificates/renew", agentapi.CertificateRequest{Instance: instance, Name: name}, nil)
+}
+
 // RefreshIPList starts downloading an IP list of the applied
 // configuration now.
 func (c *Client) RefreshIPList(ctx context.Context, name string) error {

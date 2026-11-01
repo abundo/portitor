@@ -74,8 +74,12 @@ type certManager struct {
 type certRun struct {
 	item   certItem
 	cancel context.CancelFunc
+	// wake ends the loop's wait (Renew).
+	wake chan struct{}
 	// Under certManager.mu:
-	state, err  string
+	state, err string
+	// renew: order a new certificate even if the stored one is not due.
+	renew       bool
 	stored      *acme.Stored
 	lastAttempt time.Time
 	next        time.Time
@@ -127,7 +131,7 @@ func (m *certManager) Stop() {
 
 func (m *certManager) start(it certItem) *certRun {
 	ctx, cancel := context.WithCancel(context.Background())
-	r := &certRun{item: it, cancel: cancel, stored: acme.Load(m.dir(it))}
+	r := &certRun{item: it, cancel: cancel, wake: make(chan struct{}, 1), stored: acme.Load(m.dir(it))}
 	if it.cfg.Imported() {
 		// Stored as it is, never ordered: the agent's own state, so
 		// written in a dry run too.
@@ -176,7 +180,9 @@ func (m *certManager) loop(ctx context.Context, r *certRun) {
 	for {
 		st := acme.Load(m.dir(r.item))
 		var wait time.Duration
-		if st != nil && st.Matches(req) && time.Now().Before(st.RenewAt()) {
+		var renew bool
+		m.update(r, func() { renew, r.renew = r.renew, false })
+		if !renew && st != nil && st.Matches(req) && time.Now().Before(st.RenewAt()) {
 			m.update(r, func() { r.stored, r.state, r.err = st, "ok", "" })
 			wait = min(time.Until(st.RenewAt()), certCheck)
 		} else if m.standby != nil && m.standby() {
@@ -201,10 +207,42 @@ func (m *certManager) loop(ctx context.Context, r *certRun) {
 			retry = min(retry*2, certRetryMax)
 		}
 		m.update(r, func() { r.next = time.Now().Add(wait) })
-		if !sleepCtx(ctx, wait) {
+		t := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			t.Stop()
 			return
+		case <-r.wake:
+			// A renewal by hand starts over at the shortest retry wait.
+			retry = certRetryMin
+		case <-t.C:
 		}
+		t.Stop()
 	}
+}
+
+// Renew orders an ACME certificate of the applied document now: a failed
+// one without waiting for the next retry, a valid one before it is due.
+// An HA standby leaves it to the active host.
+func (m *certManager) Renew(instance, name string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r, ok := m.certs[certKey{instance, name}]
+	if !ok || r.item.cfg.Imported() {
+		return errNotFound{fmt.Sprintf("no ACME certificate %s in instance %s of the applied configuration", name, instance)}
+	}
+	if m.dryRun {
+		return errors.New("certificates are not ordered in a dry run")
+	}
+	if r.state == "issuing" {
+		return errBusy{"certificate " + name + " is being ordered"}
+	}
+	r.renew = true
+	select {
+	case r.wake <- struct{}{}:
+	default:
+	}
+	return nil
 }
 
 func (m *certManager) update(r *certRun, fn func()) {
