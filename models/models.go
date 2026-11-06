@@ -510,9 +510,15 @@ type Interface struct {
 	// host part (192.168.1.1/24, fd00:1::1/64), IPv4 and IPv6 mixed.
 	Addresses StringList `json:"addresses"`
 	// PeerAddresses are the HA secondary's static addresses in place of
-	// Addresses, one each, in the same prefixes.
+	// Addresses, one each, in the same prefixes, on an interface with an
+	// HaRole: all else is the same on both hosts.
 	PeerAddresses StringList `json:"peer_addresses"`
-	Ipv6AcceptRA  bool       `gorm:"column:ipv6_accept_ra" json:"ipv6_accept_ra"`
+	// HaRole makes it one of an HA pair's own two links
+	// (fwconfig.Interface.HARole); HaGateway is the management one's
+	// gateway.
+	HaRole       string `gorm:"column:ha_role" json:"ha_role"`
+	HaGateway    string `gorm:"column:ha_gateway" json:"ha_gateway"`
+	Ipv6AcceptRA bool   `gorm:"column:ipv6_accept_ra" json:"ipv6_accept_ra"`
 	// Dhcpv6 runs a DHCPv6 client; Dhcpv6Pd also asks for a delegated
 	// prefix, of Dhcpv6PdLength bits (0: the server chooses).
 	Dhcpv6         bool `gorm:"column:dhcpv6" json:"dhcpv6"`

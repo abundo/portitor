@@ -59,17 +59,14 @@ func TestAgentURL(t *testing.T) {
 	}
 }
 
-// haPairConfigured is haPair with a LAN that has the secondary's address,
-// a VRRP router with a priority for each, BGP with a router id for each,
-// and committed to both.
+// haPairConfigured is haPair with a LAN, shared by the hosts, committed to
+// both.
 func haPairConfigured(t *testing.T) (*testEnv, map[uint]*fleetAgent, uint) {
 	t.Helper()
 	env, agents, pair := haPair(t)
 	main := instanceID(t, env, "main")
 	env.create("/api/interfaces", map[string]any{"instance_id": main, "name": "lan", "kind": "bridge", "enabled": true,
-		"ipv4_mode": "static", "addresses": []string{"10.0.0.1/24"}, "peer_addresses": []string{"10.0.0.2/24"}})
-	env.create("/api/vrrp/routers", map[string]any{"instance_id": main, "interface": "lan", "vrid": 10, "enabled": true,
-		"priority": 200, "peer_priority": 100, "ipv4": []string{"10.0.0.254"}})
+		"ipv4_mode": "static", "addresses": []string{"10.0.0.1/24"}})
 	if rec := env.do("POST", "/api/deploy/apply", map[string]any{}); rec.Code != http.StatusOK {
 		t.Fatalf("commit: %d %s", rec.Code, rec.Body)
 	}
@@ -115,15 +112,15 @@ func TestPromote(t *testing.T) {
 	if n != 0 {
 		t.Errorf("%d instances left on the old primary", n)
 	}
+	var mgmt models.Interface
+	env.srv.db.Where("name = ?", "mgmt0").First(&mgmt)
+	if !slices.Equal(mgmt.Addresses, models.StringList{"192.0.2.3/24"}) || !slices.Equal(mgmt.PeerAddresses, models.StringList{"192.0.2.1/24"}) {
+		t.Errorf("mgmt0 swapped: %v / %v", mgmt.Addresses, mgmt.PeerAddresses)
+	}
 	var lan models.Interface
 	env.srv.db.Where("name = ?", "lan").First(&lan)
-	if !slices.Equal(lan.Addresses, models.StringList{"10.0.0.2/24"}) || !slices.Equal(lan.PeerAddresses, models.StringList{"10.0.0.1/24"}) {
-		t.Errorf("lan swapped: %v / %v", lan.Addresses, lan.PeerAddresses)
-	}
-	var vr models.VrrpRouter
-	env.srv.db.First(&vr)
-	if vr.Priority != 100 || vr.PeerPriority == nil || *vr.PeerPriority != 200 {
-		t.Errorf("VRRP priorities: %d %v", vr.Priority, vr.PeerPriority)
+	if !slices.Equal(lan.Addresses, models.StringList{"10.0.0.1/24"}) {
+		t.Errorf("the shared lan changed: %v", lan.Addresses)
 	}
 	// It runs as the primary at the next epoch, with its own address.
 	doc := agents[pair].last()
@@ -131,8 +128,8 @@ func TestPromote(t *testing.T) {
 		t.Fatalf("promoted host's HA: %+v", doc.HA)
 	}
 	in := doc.Instance("main")
-	if a := in.Interfaces[slices.IndexFunc(in.Interfaces, func(i fwconfig.Interface) bool { return i.Name == "lan" })].Addresses; !slices.Equal(a, []string{"10.0.0.2/24"}) {
-		t.Errorf("promoted host's lan: %v", a)
+	if a := in.HAInterface(fwconfig.HARoleManagement).Addresses; !slices.Equal(a, []string{"192.0.2.3/24"}) {
+		t.Errorf("promoted host's management: %v", a)
 	}
 	// The old primary is skipped, and caught up as the secondary with its
 	// own address.
@@ -148,8 +145,8 @@ func TestPromote(t *testing.T) {
 		t.Fatalf("old primary caught up: %+v", old.HA)
 	}
 	in = old.Instance("main")
-	if a := in.Interfaces[slices.IndexFunc(in.Interfaces, func(i fwconfig.Interface) bool { return i.Name == "lan" })].Addresses; !slices.Equal(a, []string{"10.0.0.1/24"}) {
-		t.Errorf("old primary's lan: %v", a)
+	if a := in.HAInterface(fwconfig.HARoleManagement).Addresses; !slices.Equal(a, []string{"192.0.2.1/24"}) {
+		t.Errorf("old primary's management: %v", a)
 	}
 	// Writes are the new primary's.
 	if rec := env.do("POST", "/api/rules", map[string]any{"instance_id": main, "chain": "input", "action": "drop", "enabled": true}); rec.Code != http.StatusCreated {

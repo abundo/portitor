@@ -7,8 +7,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/netip"
+	"slices"
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/abundo/portitor/internal/fwconfig"
 )
@@ -299,6 +301,15 @@ func planLinkSettings(ns string, want []fwconfig.Interface, have map[string]ipLi
 		}
 		if ifc.MTU > 0 && (!exists || l.MTU != ifc.MTU) {
 			cmds = append(cmds, ipCmd(ns, "link", "set", "dev", ifc.Name, "mtu", strconv.Itoa(ifc.MTU)))
+		}
+		// A pair's shared MAC address, set before it comes up, as not
+		// every driver changes it on a running device.
+		if ifc.MAC != "" && (!exists || !strings.EqualFold(l.Address, ifc.MAC)) {
+			if exists && l.up() {
+				cmds = append(cmds, ipCmd(ns, "link", "set", "dev", ifc.Name, "down"))
+				l.Flags = slices.DeleteFunc(slices.Clone(l.Flags), func(f string) bool { return f == "UP" })
+			}
+			cmds = append(cmds, ipCmd(ns, "link", "set", "dev", ifc.Name, "address", ifc.MAC))
 		}
 		state := "down"
 		if ifc.Enabled {

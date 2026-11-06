@@ -46,6 +46,7 @@ type Agent struct {
 	tasks      *scheduler
 	sys        *systemManager
 	ha         *haManager
+	gate       *gate
 	// ddnsWant and tbWant are the applied DNS update clients and tunnel
 	// broker accounts, which run on the active HA host only
 	// (reconcileActive).
@@ -109,7 +110,10 @@ func New(cfg *Config) *Agent {
 	a.proxies = newACMEProxyManager(cfg.DryRun, cfg.Paths, a.certs)
 	a.ovpn = newOpenVPNManager(cfg.DryRun, a.bg)
 	a.tbroker = newTunnelBrokerManager(cfg.DryRun, a.bg)
-	a.ha = newHAManager(a.onFenceChange, a.onActiveChange)
+	a.gate = newGate(a.bg, filepath.Join(cfg.Paths.StateDir, "gate.json"))
+	a.ha = newHAManager(a.gate, &watchdog{dry: cfg.DryRun, run: a.bg}, a.bg, filepath.Join(cfg.Paths.StateDir, "ha-term"))
+	a.ha.onActive = a.onActiveChange
+	a.ha.onTakeover = a.onTakeover
 	a.certs.standby = a.ha.isStandby
 	a.ha.syncCerts = a.syncCertificates
 	return a
@@ -152,6 +156,8 @@ func (a *Agent) Start(ctx context.Context) error {
 	if err := readJSON(a.rollbackFile(), &pending); err == nil {
 		slog.Warn("unconfirmed change found at startup; rolling back", "generation", pending.Generation)
 		if pending.Previous != nil {
+			exp := pending.Previous.Expand()
+			a.ha.boot(ctx, pending.Previous.HA, gateDevices(&exp))
 			// The file stays until the previous config is back, so a
 			// failed restore is tried again at the next start.
 			if err := a.applyLocked(ctx, *pending.Previous); err != nil {
@@ -175,7 +181,9 @@ func (a *Agent) Start(ctx context.Context) error {
 		}
 		return err
 	}
-	a.ha.boot(ctx, doc.HA)
+	// Closed before anything else: a restarted agent has lost its leases.
+	exp := doc.Expand()
+	a.ha.boot(ctx, doc.HA, gateDevices(&exp))
 	slog.Info("re-applying last configuration", "generation", doc.Generation)
 	if err := a.applyLocked(ctx, doc); err != nil {
 		a.lastError = err.Error()
@@ -186,6 +194,8 @@ func (a *Agent) Start(ctx context.Context) error {
 }
 
 func (a *Agent) Stop() {
+	// Closed first: the watchdog is fed by the loop stopped below.
+	a.ha.shutdown()
 	if a.stopBg != nil {
 		a.stopBg()
 		a.bgDone.Wait()
@@ -212,7 +222,6 @@ func (a *Agent) renderOptions() render.Options {
 		AntiLockout: a.cfg.antiLockout(),
 		DHCPDNS:     a.dhcp.DNSServers(),
 		Delegated:   a.dhcp6.Prefixes(),
-		Fenced:      a.ha.isFenced(),
 	}
 }
 

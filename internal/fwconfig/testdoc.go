@@ -3,6 +3,11 @@
 
 package fwconfig
 
+import (
+	"slices"
+	"strings"
+)
+
 // SampleDocument is a typical home setup: a default instance with a DHCP
 // WAN, a LAN with DHCP/DNS, a WireGuard interface with a road warrior and a
 // site, and a port forward, plus a "guest" instance linked to the default
@@ -358,3 +363,23 @@ const SampleTLSCrypt = "-----BEGIN OpenVPN Static key V1-----\n" +
 	"00112233445566778899aabbccddeeff\n00112233445566778899aabbccddeeff\n00112233445566778899aabbccddeeff\n00112233445566778899aabbccddeeff\n" +
 	"00112233445566778899aabbccddeeff\n00112233445566778899aabbccddeeff\n00112233445566778899aabbccddeeff\n00112233445566778899aabbccddeeff\n" +
 	"-----END OpenVPN Static key V1-----\n"
+
+// SampleHA is doc on an HA pair, as the primary: its two links added to
+// the default instance, and without VRRP, which a pair doesn't use. For
+// tests.
+func SampleHA(doc Document) Document {
+	fp := strings.Repeat("ab", 32)
+	doc.HA = &HA{Node: HAPrimary, Peer: "https://192.0.2.2:8443", PeerFingerprint: fp, PeerLink: "https://192.0.2.130:8443",
+		Secret: strings.Repeat("s", 43)}
+	for i := range doc.Instances {
+		in := &doc.Instances[i]
+		in.VRRP = nil
+		if in.Default {
+			in.Interfaces = append(slices.Clone(in.Interfaces),
+				Interface{Name: "ha0", Kind: KindPhysical, Enabled: true, IPv4Mode: ModeStatic, Addresses: []string{"192.0.2.129/25"}, HARole: HARoleLink},
+				Interface{Name: "mgmt0", Kind: KindPhysical, Enabled: true, IPv4Mode: ModeStatic, Addresses: []string{"192.0.2.1/25"},
+					HARole: HARoleManagement, HAGateway: "192.0.2.126"})
+		}
+	}
+	return doc
+}

@@ -257,6 +257,10 @@ func Nftables(in *fwconfig.Instance, lockout *AntiLockout, paths Paths) string {
 			}
 		}
 	}
+	// What this host sends its HA peer.
+	for _, r := range haOutputRules(in) {
+		fmt.Fprintf(b, "\t\t%s\n", r)
+	}
 	// What rsyslog sends to the syslog servers.
 	for _, r := range syslogOutputRules(in) {
 		fmt.Fprintf(b, "\t\t%s\n", r)
@@ -747,9 +751,15 @@ func AutoInputRules(in *fwconfig.Instance) []AutoRule {
 		out = append(out, AutoRule{Service: ConntrackSyncService, InInterfaces: []string{c.Interface}, Protocol: "udp",
 			DstPort: fwconfig.ConntrackSyncPort, Source: []string{c.Peer}, SourceSet: ConntrackSyncSet})
 	}
-	// The HA peer's portitor-config, copying the configuration.
+	// The HA peer's portitor-config, copying the configuration, and its
+	// heartbeats.
 	if h := in.HAConfig; h != nil {
-		out = append(out, AutoRule{Service: HAConfigService, Protocol: "tcp", DstPort: h.Port, Source: h.From, SourceSet: HAConfigSet})
+		if h.Port != 0 {
+			out = append(out, AutoRule{Service: HAConfigService, Protocol: "tcp", DstPort: h.Port, Source: h.From, SourceSet: HAConfigSet})
+		}
+		if h.AgentPort != 0 && h.AgentPort != h.Port {
+			out = append(out, AutoRule{Service: HAAgentService, Protocol: "tcp", DstPort: h.AgentPort, Source: h.From, SourceSet: HAAgentSet})
+		}
 	}
 	// SNMP requests on its interfaces, from the allowed clients if listed.
 	if in.SNMP != nil && len(in.SNMP.Interfaces) > 0 {

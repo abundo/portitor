@@ -9,6 +9,9 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -17,68 +20,79 @@ import (
 	"github.com/abundo/portitor/internal/fwconfig"
 )
 
-// An HA host (fwconfig.HA) may be active only with a quorum of two of
-// three: itself and its peer, which it hears every haBeat, or itself and
-// the witness, whose vote portitor-web renews while it sees the host
-// (POST /v1/ha/vote). Without one it is fenced: the document is applied
-// again with render.Options.Fenced, which shuts its VRRP routers down
-// and leaves out DHCP and router advertisements. It starts fenced after a
-// restart, until it hears its peer or the witness.
+// An HA host (fwconfig.HA) is active or closed: the gate (gate.go) opens
+// or closes its traffic interfaces and nothing else changes, so the
+// services keep running on the standby and a takeover starts nothing. The
+// rules are haDecide's. The loop looks at the leases every haTick and acts
+// itself, never through an apply: it takes no Agent lock, so closing
+// doesn't wait for a commit. It alone feeds the watchdog.
 //
 // A primary whose peer answers as primary at a higher epoch was taken
-// over: its secondary was promoted while it was away. It is stale: fenced
-// and standby whatever its quorum, until it is given the document of the
-// secondary it now is (by the new primary's portitor-config), and its
-// own portitor-config copies the new primary's configuration.
+// over: its secondary was promoted while it was away. It is stale and
+// closed until it is given the document of the secondary it now is (by the
+// new primary's portitor-config), and its own portitor-config copies the
+// new primary's configuration.
 const (
-	haBeat = time.Second
-	// haDeadAfter without an answer the peer counts as gone.
-	haDeadAfter = 3 * time.Second
 	// haMaxVote is the longest vote the witness or the console grants.
 	haMaxVote = 24 * time.Hour
+	// haGateCheck is how often a closed gate is checked.
+	haGateCheck = time.Second
+	// haActionTimeout bounds opening or closing the gate.
+	haActionTimeout = time.Second
 )
 
 type haManager struct {
-	mu        sync.Mutex
-	cfg       *fwconfig.HA
-	peerSeen  time.Time
-	voteUntil time.Time
-	fenced    bool
-	// peer is the peer's last answer to the heartbeat.
-	peer agentapi.HAHeartbeat
-	// standby: a host in a pair that is fenced, or the secondary while it
-	// hears the primary. It leaves the DNS updates and the tunnel broker
-	// to the other, which would otherwise see the two publish their own
-	// addresses in turn.
-	standby bool
-	// onChange applies the document again when fenced changes, onActive
-	// follows standby.
-	onChange func(fenced bool)
-	onActive func()
+	gate     *gate
+	wd       *watchdog
+	run      Runner
+	termFile string
+
+	mu  sync.Mutex
+	cfg *fwconfig.HA
+	// active: the gate is open, or opening or closing. So a closing host
+	// still answers as active.
+	active bool
+	term   int64
+	// vote and forced are the witness's or the console's vote.
+	vote   time.Time
+	forced bool
+	// held is the end of the peer's promise, given of this host's.
+	held, given time.Time
+	peerSeen    time.Time
+	peer        agentapi.HAHeartbeat
+	// clients are the two paths' agent clients, reused for their
+	// connections.
+	clients map[string]*agentclient.Client
+	// wdKind is what watchdog this host has, once looked for.
+	wdKind string
+	// mgmt is what the routing for the host's own traffic is made from.
+	mgmt *haMgmt
+	own  map[string]bool
+	// rules serialises changes to the management rules.
+	rules sync.Mutex
+
+	// onActive follows the host's state, onTakeover runs after it opened.
+	onActive   func()
+	onTakeover func()
 	// syncCerts copies the peer's certificates, every haCertSync while
-	// the host is standby.
+	// the host is closed.
 	syncCerts func(context.Context, *fwconfig.HA)
 }
 
-func newHAManager(onChange func(bool), onActive func()) *haManager {
-	return &haManager{onChange: onChange, onActive: onActive}
+func newHAManager(g *gate, wd *watchdog, run Runner, termFile string) *haManager {
+	h := &haManager{gate: g, wd: wd, run: run, termFile: termFile, clients: map[string]*agentclient.Client{}}
+	if b, err := os.ReadFile(termFile); err == nil {
+		h.term, _ = strconv.ParseInt(strings.TrimSpace(string(b)), 10, 64)
+	}
+	return h
 }
 
 // isStandby tells whether the host leaves the DNS updates and the tunnel
-// broker to its peer.
+// broker to its peer: any host in a pair that isn't active.
 func (h *haManager) isStandby() bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return h.standby
-}
-
-// setStandby records standby from the state under h.mu; it tells whether
-// it changed.
-func (h *haManager) setStandby(peerAlive bool) bool {
-	s := h.cfg != nil && (h.fenced || h.staleLocked() || (h.cfg.Node == fwconfig.HASecondary && peerAlive))
-	changed := s != h.standby
-	h.standby = s
-	return changed
+	return h.cfg != nil && !h.active
 }
 
 // staleLocked tells whether the host is a primary taken over by its
@@ -87,52 +101,44 @@ func (h *haManager) staleLocked() bool {
 	return h.cfg != nil && h.cfg.Node == fwconfig.HAPrimary && h.peer.Node == fwconfig.HAPrimary && h.peer.Epoch > h.cfg.Epoch
 }
 
-// heard records the peer's answer; h.mu held.
-func (h *haManager) heard(hb *agentapi.HAHeartbeat) {
-	h.peerSeen = time.Now()
-	h.peer = *hb
+// heard records the peer's word; h.mu held.
+func (h *haManager) heard(now time.Time, node string, epoch, term int64, active bool) {
+	h.peerSeen = now
+	h.peer.Node, h.peer.Epoch, h.peer.Term, h.peer.Active = node, epoch, term, active
 }
 
-// boot fences a host whose last applied document puts it in a pair, before
-// that document is applied again at start, unless its peer answers now
-// (and has not taken it over): a restarted agent then doesn't take its
-// VRRP routers down and up.
-func (h *haManager) boot(ctx context.Context, cfg *fwconfig.HA) {
-	var hb *agentapi.HAHeartbeat
-	if cfg != nil {
-		hb, _ = heartbeat(ctx, cfg)
-	}
+// boot closes a restarted host's gates: it has forgotten its leases, and
+// waits out any promise it may have given.
+func (h *haManager) boot(ctx context.Context, cfg *fwconfig.HA, devs map[string][]string) {
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	h.cfg = cfg
-	if hb != nil {
-		h.heard(hb)
+	if cfg != nil {
+		h.given = time.Now().Add(haPromise)
 	}
-	h.fenced = cfg != nil && (hb == nil || h.staleLocked())
-	h.setStandby(hb != nil)
+	h.mu.Unlock()
+	if cfg == nil {
+		return
+	}
+	for ns, d := range devs {
+		if err := h.gate.set(ctx, ns, d, nil); err != nil {
+			slog.Error("ha: closing the gate at start", "netns", ns, "err", err)
+		}
+	}
 }
 
-// setConfig follows the applied document. A host leaving its pair is no
-// longer fenced; one joining has haDeadAfter to hear its peer before it
-// counts as gone.
+// setConfig follows the applied document. A host leaving its pair is
+// disarmed; apply takes its gates away.
 func (h *haManager) setConfig(cfg *fwconfig.HA) {
 	h.mu.Lock()
-	if h.cfg == nil && cfg != nil && !h.fenced {
-		h.peerSeen = time.Now()
-	}
+	left := cfg == nil && h.active
 	h.cfg = cfg
-	changed := cfg == nil && h.fenced
-	if changed {
-		h.fenced = false
+	if left {
+		h.active = false
 	}
-	h.setStandby(time.Since(h.peerSeen) < haDeadAfter)
 	h.mu.Unlock()
-	if changed {
-		go h.onChange(false)
-	}
-	// A document of another node or epoch may end staleness at once.
-	if cfg != nil {
-		h.decide()
+	if left {
+		h.wd.disarm()
+		go h.onActive()
 	}
 }
 
@@ -146,59 +152,214 @@ func (h *haManager) epoch() int64 {
 	return h.cfg.Epoch
 }
 
-func (h *haManager) isFenced() bool {
+// giveVote records the witness's vote, or the console's, for d.
+func (h *haManager) giveVote(d time.Duration, forced bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return h.fenced
+	h.vote, h.forced = time.Now().Add(min(d, haMaxVote)), forced
 }
 
-// vote records the witness's vote (or the console's) for d.
-func (h *haManager) vote(d time.Duration) {
-	h.mu.Lock()
-	h.voteUntil = time.Now().Add(min(d, haMaxVote))
-	h.mu.Unlock()
-	h.decide()
+// facts is what haDecide needs; h.mu held.
+func (h *haManager) facts(now time.Time) haFacts {
+	return haFacts{now: now, primary: h.cfg.Node == fwconfig.HAPrimary, active: h.active, stale: h.staleLocked(),
+		term: h.term, vote: h.vote, held: h.held, given: h.given, forced: h.forced,
+		peerSeen: h.peerSeen, peerActive: h.peer.Active, peerTerm: h.peer.Term,
+		noWatchdog: h.wdKind == agentapi.HAWatchdogNone}
 }
 
-// decide fences the host, or lifts the fence, by its quorum now.
-func (h *haManager) decide() {
+// tick looks at the leases and acts; it feeds the watchdog while active.
+func (h *haManager) tick(ctx context.Context) {
 	h.mu.Lock()
 	if h.cfg == nil {
 		h.mu.Unlock()
 		return
 	}
-	now := time.Now()
-	stale := h.staleLocked()
-	quorum := (now.Sub(h.peerSeen) < haDeadAfter || now.Before(h.voteUntil)) && !stale
-	changed := h.fenced == quorum
-	h.fenced = !quorum
-	fenced := h.fenced
-	standbyChanged := h.setStandby(now.Sub(h.peerSeen) < haDeadAfter)
-	epoch, peerEpoch := h.cfg.Epoch, h.peer.Epoch
-	h.mu.Unlock()
-	if standbyChanged {
-		go h.onActive()
-	}
-	if changed {
-		switch {
-		case fenced && stale:
-			slog.Warn("ha: the peer is primary at a later epoch (promoted): this host was taken over, fencing", "epoch", epoch, "peer_epoch", peerEpoch)
-		case fenced:
-			slog.Warn("ha: no quorum (neither the peer nor the witness), fencing")
-		default:
-			slog.Info("ha: quorum again, lifting the fence")
+	mv, why := haDecide(h.facts(time.Now()))
+	switch mv {
+	case haOpen:
+		h.term = max(h.term, h.peer.Term) + 1
+		h.active = true
+	case haClose:
+		// active stays true until the gate is closed.
+	default:
+		active := h.active
+		h.mu.Unlock()
+		if active {
+			h.wd.feed()
 		}
-		// An apply reads the state when it renders, so applies that
-		// overtake each other end in the latest one.
-		go h.onChange(fenced)
+		return
+	}
+	term, forced := h.term, h.forced
+	h.mu.Unlock()
+
+	ctx, cancel := context.WithTimeout(ctx, haActionTimeout)
+	defer cancel()
+	if mv == haOpen {
+		h.open(ctx, term, forced, why)
+	} else {
+		h.closeGate(ctx, why)
 	}
 }
 
-// loop beats the peer and decides until ctx is cancelled.
+// open opens the gate: the term is on disk first, so a restarted host
+// can't use it twice, and the watchdog armed, so a hung one can't stay.
+func (h *haManager) open(ctx context.Context, term int64, forced bool, why string) {
+	err := atomicWrite(h.termFile, []byte(strconv.FormatInt(term, 10)+"\n"), 0o644)
+	if err == nil {
+		err = h.wd.arm()
+		if err != nil && forced {
+			slog.Warn("ha: opening without a watchdog, by the console's vote", "err", err)
+			err = nil
+		}
+	}
+	if err == nil {
+		err = h.gate.setOpen(ctx, true)
+	}
+	if err != nil {
+		slog.Error("ha: can't open", "err", err)
+		h.closeGate(ctx, "opening failed")
+		return
+	}
+	h.wd.feed()
+	slog.Warn("ha: active", "term", term, "why", why)
+	go h.onActive()
+	go h.onTakeover()
+}
+
+// closeGate closes the gate. If neither that nor setting its devices down
+// worked, the watchdog stays armed and unfed: the host resets, which
+// closes it.
+func (h *haManager) closeGate(ctx context.Context, why string) {
+	err := h.gate.setOpen(ctx, false)
+	if err != nil {
+		slog.Error("ha: closing the gate, the host resets unless its devices went down", "err", err)
+	} else {
+		h.wd.disarm()
+	}
+	h.mu.Lock()
+	h.active = false
+	h.mu.Unlock()
+	slog.Warn("ha: closed", "why", why)
+	go h.onActive()
+}
+
+// shutdown closes an active host for a clean stop.
+func (h *haManager) shutdown() {
+	h.mu.Lock()
+	active := h.active
+	h.mu.Unlock()
+	if !active {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	h.closeGate(ctx, "the agent is stopping")
+}
+
+// loop runs the HA manager until ctx is cancelled.
 func (h *haManager) loop(ctx context.Context) {
+	t := time.NewTicker(haTick)
+	defer t.Stop()
+	go h.beat(ctx, func(c *fwconfig.HA) string { return c.Peer })
+	go h.beat(ctx, func(c *fwconfig.HA) string { return c.PeerLink })
+	go h.checkGate(ctx)
+	go h.copyCerts(ctx)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		h.tick(ctx)
+	}
+}
+
+// client is the agent client of one path; h.mu held.
+func (h *haManager) client(cfg *fwconfig.HA, url string) (*agentclient.Client, error) {
+	key := url + "|" + cfg.PeerFingerprint + "|" + cfg.Secret
+	if c := h.clients[key]; c != nil {
+		return c, nil
+	}
+	c, err := agentclient.New(url, cfg.Secret, cfg.PeerFingerprint)
+	if err != nil {
+		return nil, err
+	}
+	h.clients[key] = c
+	return c, nil
+}
+
+// beat sends a heartbeat over one path every haBeat, until ctx is
+// cancelled. Each path runs apart, so a dead one costs the other nothing.
+func (h *haManager) beat(ctx context.Context, path func(*fwconfig.HA) string) {
 	t := time.NewTicker(haBeat)
 	defer t.Stop()
-	var lastSync time.Time
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		h.mu.Lock()
+		cfg := h.cfg
+		var c *agentclient.Client
+		var err error
+		var req agentapi.HAHeartbeatRequest
+		if cfg != nil && path(cfg) != "" {
+			c, err = h.client(cfg, path(cfg))
+			req = agentapi.HAHeartbeatRequest{Node: cfg.Node, Epoch: cfg.Epoch, Term: h.term, Active: h.active}
+		}
+		h.mu.Unlock()
+		if c == nil || err != nil {
+			continue
+		}
+		// The lease is counted from before the request left.
+		sent := time.Now()
+		bctx, cancel := context.WithTimeout(ctx, haBeat)
+		hb, err := c.HAHeartbeat(bctx, req)
+		cancel()
+		if err == nil {
+			h.answered(sent, hb)
+		}
+	}
+}
+
+// answered records the peer's answer to a heartbeat sent at sent.
+func (h *haManager) answered(sent time.Time, hb *agentapi.HAHeartbeat) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.heard(time.Now(), hb.Node, hb.Epoch, hb.Term, hb.Active)
+	if hb.PromiseMS > 0 {
+		if until := sent.Add(time.Duration(hb.PromiseMS) * time.Millisecond); until.After(h.held) {
+			h.held = until
+		}
+	}
+}
+
+// answer is the host's answer to its peer's heartbeat, with its promise
+// when it gives one.
+func (h *haManager) answer(req agentapi.HAHeartbeatRequest) agentapi.HAHeartbeat {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.cfg == nil {
+		return agentapi.HAHeartbeat{}
+	}
+	now := time.Now()
+	h.heard(now, req.Node, req.Epoch, req.Term, req.Active)
+	out := agentapi.HAHeartbeat{Node: h.cfg.Node, Epoch: h.cfg.Epoch, Term: h.term, Active: h.active}
+	if haGives(h.active, h.cfg.Node == fwconfig.HAPrimary, req.Active, req.Node == fwconfig.HAPrimary) {
+		if until := now.Add(haPromise); until.After(h.given) {
+			h.given = until
+		}
+		out.PromiseMS = int(haPromise / time.Millisecond)
+	}
+	return out
+}
+
+// checkGate makes sure a closed gate holds its devices.
+func (h *haManager) checkGate(ctx context.Context) {
+	t := time.NewTicker(haGateCheck)
+	defer t.Stop()
+	var once bool
 	for {
 		select {
 		case <-ctx.Done():
@@ -211,53 +372,81 @@ func (h *haManager) loop(ctx context.Context) {
 		if cfg == nil {
 			continue
 		}
-		hb, err := heartbeat(ctx, cfg)
-		alive := err == nil
-		if alive {
+		if !once {
+			once = true
+			kind := h.wd.detect(ctx)
 			h.mu.Lock()
-			h.heard(hb)
+			h.wdKind = kind
 			h.mu.Unlock()
 		}
-		h.decide()
-		if alive && h.syncCerts != nil && h.isStandby() && time.Since(lastSync) >= haCertSync {
-			lastSync = time.Now()
+		cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		loose, err := h.gate.check(cctx)
+		cancel()
+		if err != nil {
+			slog.Error("ha: checking the gate", "err", err)
+		}
+		if len(loose) > 0 {
+			slog.Error("ha: the closed gate had lost interfaces; closed them again", "interfaces", loose)
+		}
+	}
+}
+
+// copyCerts copies the peer's certificates while the host is closed.
+func (h *haManager) copyCerts(ctx context.Context) {
+	t := time.NewTicker(haCertSync)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		h.mu.Lock()
+		cfg := h.cfg
+		alive := cfg != nil && !h.active && time.Since(h.peerSeen) < haDeadAfter
+		h.mu.Unlock()
+		if alive && h.syncCerts != nil {
 			h.syncCerts(ctx, cfg)
 		}
 	}
 }
 
-func heartbeat(ctx context.Context, cfg *fwconfig.HA) (*agentapi.HAHeartbeat, error) {
-	c, err := agentclient.New(cfg.Peer, cfg.Secret, cfg.PeerFingerprint)
-	if err != nil {
-		return nil, err
-	}
-	ctx, cancel := context.WithTimeout(ctx, haBeat)
-	defer cancel()
-	return c.HAHeartbeat(ctx)
-}
-
 func (h *haManager) status() *agentapi.HAStatus {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	st := &agentapi.HAStatus{Fenced: h.fenced, Standby: h.standby}
+	st := &agentapi.HAStatus{}
 	if h.cfg == nil {
 		return st
 	}
 	now := time.Now()
-	st.Node, st.Epoch, st.Stale = h.cfg.Node, h.cfg.Epoch, h.staleLocked()
+	st.Node, st.Epoch, st.Term, st.Watchdog = h.cfg.Node, h.cfg.Epoch, max(h.term, h.peer.Term), h.wdKind
 	st.PeerAlive = now.Sub(h.peerSeen) < haDeadAfter
 	if !h.peerSeen.IsZero() {
 		seen := h.peerSeen
 		st.PeerSeen = &seen
 	}
-	if now.Before(h.voteUntil) {
-		until := h.voteUntil
+	if now.Before(h.vote) {
+		until := h.vote
 		st.VoteUntil = &until
+	}
+	if now.Before(h.held) {
+		until := h.held
+		st.PromiseUntil = &until
+	}
+	switch {
+	case h.active:
+		st.State = agentapi.HAActive
+	case h.staleLocked():
+		st.State = agentapi.HAStale
+	case st.PeerAlive || now.Before(h.vote):
+		st.State = agentapi.HAStandby
+	default:
+		st.State = agentapi.HAFenced
 	}
 	return st
 }
 
-// heartbeatAuth answers the peer's heartbeat, which carries the pair's
+// heartbeatAuth checks the peer's heartbeat, which carries the pair's
 // secret instead of the API token.
 func (h *haManager) heartbeatAuth(r *http.Request) bool {
 	h.mu.Lock()
@@ -270,7 +459,7 @@ func (h *haManager) heartbeatAuth(r *http.Request) bool {
 }
 
 // witnessAuth lets an external witness, with the pair's witness secret,
-// ask for the quorum and vote.
+// ask for the host's state and vote.
 func (h *haManager) witnessAuth(r *http.Request) bool {
 	h.mu.Lock()
 	cfg := h.cfg
@@ -279,16 +468,6 @@ func (h *haManager) witnessAuth(r *http.Request) bool {
 		return false
 	}
 	return subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte("Bearer "+cfg.WitnessSecret)) == 1
-}
-
-// heartbeatAnswer is the host's answer to its peer's heartbeat.
-func (h *haManager) heartbeatAnswer() agentapi.HAHeartbeat {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if h.cfg == nil {
-		return agentapi.HAHeartbeat{}
-	}
-	return agentapi.HAHeartbeat{Node: h.cfg.Node, Epoch: h.cfg.Epoch}
 }
 
 // peerConfig is where this host's portitor-config copies the pair's
@@ -304,9 +483,14 @@ func (h *haManager) peerConfig() agentapi.HAPeerConfig {
 		URL:       h.cfg.PeerConfig, Fingerprint: h.cfg.PeerConfigFingerprint, Secret: h.cfg.Secret}
 }
 
-// onActiveChange starts or stops the DNS updates and the tunnel broker
-// as the host becomes the active one of its pair, or not.
+// onActiveChange starts or stops what only the active host runs, and
+// routes what the host itself sends.
 func (a *Agent) onActiveChange() {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := a.ha.applyMgmt(ctx, a.bg); err != nil {
+		slog.Error("ha: management routing", "err", err)
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.reconcileActive()
@@ -324,25 +508,18 @@ func (a *Agent) reconcileActive() {
 	a.tbroker.Reconcile(a.tbWant)
 }
 
-// onFenceChange applies the current document again, fenced or not.
-func (a *Agent) onFenceChange(fenced bool) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.applied == nil {
-		return
+// gateDevices are the devices to gate per namespace, of an expanded
+// document on an HA pair.
+func gateDevices(exp *fwconfig.Document) map[string][]string {
+	out := map[string][]string{}
+	if exp.HA == nil {
+		return out
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
-	what := "lifting the fence"
-	if fenced {
-		what = "fencing"
+	for i := range exp.Instances {
+		in := &exp.Instances[i]
+		out[in.NetnsName()] = in.GateDevices()
 	}
-	a.log.Infof("ha: %s, applying generation %d again", what, a.applied.Generation)
-	if err := a.applyLocked(ctx, *a.applied); err != nil {
-		slog.Error("ha: apply", "fenced", fenced, "err", err)
-		a.lastError = err.Error()
-	}
-	a.log.Take()
+	return out
 }
 
 func (a *Agent) handleHAVote(w http.ResponseWriter, r *http.Request) {
@@ -358,8 +535,9 @@ func (a *Agent) handleHAVote(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, errors.New("this host is not in an HA pair"))
 		return
 	}
-	a.ha.vote(time.Duration(req.Seconds) * time.Second)
-	if r.RemoteAddr == "local socket" {
+	console := r.RemoteAddr == "local socket"
+	a.ha.giveVote(time.Duration(req.Seconds)*time.Second, console)
+	if console {
 		slog.Warn("ha: vote from the console", "seconds", req.Seconds)
 	}
 	writeJSONResponse(w, http.StatusOK, a.ha.status())

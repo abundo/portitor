@@ -411,9 +411,6 @@ type Options struct {
 	// the document's delegated addresses are resolved from
 	// (fwconfig.Document.ResolveDelegated).
 	Delegated fwconfig.DelegatedPrefixes
-	// Fenced: an HA host without a quorum (fwconfig.HA). Its VRRP routers
-	// render shut down, and it serves no DHCP or router advertisements.
-	Fenced bool
 }
 
 type File struct {
@@ -441,9 +438,6 @@ func Render(doc fwconfig.Document, opt Options) (*Bundle, error) {
 		return nil, err
 	}
 	doc = doc.ResolveDelegated(opt.Delegated).Expand()
-	if opt.Fenced {
-		fence(&doc)
-	}
 	b := &Bundle{Dnsmgr: map[string]dnsmgr.ConfigRoot{}}
 	add := func(path, content string, mode os.FileMode, secret bool) {
 		b.Files = append(b.Files, File{Path: path, Content: content, Mode: mode, Secret: secret})
@@ -574,20 +568,6 @@ func (b *Bundle) Redacted() []File {
 		}
 	}
 	return out
-}
-
-// fence takes what answers for the pair's shared addresses off a fenced
-// HA host (Options.Fenced). doc is Expand's copy.
-func fence(doc *fwconfig.Document) {
-	for i := range doc.Instances {
-		in := &doc.Instances[i]
-		in.VRRP = slices.Clone(in.VRRP)
-		for j := range in.VRRP {
-			in.VRRP[j].Shutdown = true
-		}
-		in.DHCP.Enabled = false
-		in.RA = nil
-	}
 }
 
 // multiarch is Debian's multiarch directory for the host's architecture.

@@ -46,7 +46,6 @@ const defaults = () => ({
   version: props.version,
   enabled: false,
   router_id: '',
-  peer_router_id: '',
   reference_bandwidth: 0,
   log_adjacency_changes: true,
   maximum_paths: 0,
@@ -254,14 +253,6 @@ const ifDefaults = computed(() => ({
           "
         >
           <UInput v-model="cfg.router_id" class="w-48" :ui="{ base: 'font-mono' }" />
-        </UFormField>
-        <UFormField
-          v-if="store.hasPeer && cfg.router_id"
-          label="HA peer router id"
-          :ui="inlineField"
-          help="The HA secondary's router id, another IPv4 address."
-        >
-          <UInput v-model="cfg.peer_router_id" class="w-48" :ui="{ base: 'font-mono' }" />
         </UFormField>
         <UFormField
           label="Reference bandwidth"

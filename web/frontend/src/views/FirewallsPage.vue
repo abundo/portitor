@@ -55,8 +55,7 @@ const columns = [
       if (sec) role = `primary of ${sec.name}`
       const ha = statusOf(r.id)?.ha
       if (!role || !ha) return role
-      if (ha.fenced) return `${role} · fenced`
-      return `${role} · ${ha.peer_alive ? 'peer alive' : 'peer gone, witness vote'}`
+      return `${role} · ${ha.state}${ha.peer_alive ? '' : ', peer gone'}`
     },
   },
   { key: 'generation', label: 'Generation' },
@@ -99,7 +98,7 @@ const fields = [
       { label: 'External: portitor-web on a third host', value: 'external' },
     ],
     show: isPrimary,
-    hint: "The pair's third vote. Its portitor-config here keeps the pair active while the two can't hear each other, but goes with this host: without an external witness the secondary stays fenced when this one is lost, until it is promoted. An external witness (portitor-web, or portitor-web witness, on another host) gets the witness string below; commit after changing this.",
+    hint: "The pair's third vote. Its portitor-config here keeps the pair active while the two can't hear each other, but goes with this host: without an external witness nothing takes over automatically when this host is lost: open the other by hand (portitor request ha active) or promote it. An external witness (portitor-web, or portitor-web witness, on another host) gets the witness string below; commit after changing this.",
   },
   {
     key: 'witness_string',
@@ -167,7 +166,7 @@ const fields = [
       </div>
     </template>
     <template #cell-ha_primary_id="{ row }">
-      <span :class="statusOf(row.id)?.ha?.fenced ? 'text-error' : ''">
+      <span :class="['fenced', 'stale'].includes(statusOf(row.id)?.ha?.state) ? 'text-error' : ''">
         {{ columns.find((c) => c.key === 'ha_primary_id').format(row) }}
       </span>
     </template>

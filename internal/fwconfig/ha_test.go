@@ -4,6 +4,7 @@
 package fwconfig
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -11,10 +12,10 @@ import (
 func TestValidateHA(t *testing.T) {
 	secret, fp := strings.Repeat("s", 43), strings.Repeat("ab", 32)
 	ok := func() *HA {
-		return &HA{Node: HAPrimary, Peer: "https://192.0.2.2:8443", PeerFingerprint: fp, Secret: secret,
+		return &HA{Node: HAPrimary, Peer: "https://192.0.2.2:8443", PeerFingerprint: fp, PeerLink: "https://192.0.2.130:8443", Secret: secret,
 			WitnessSecret: strings.Repeat("w", 43), PeerConfig: "https://192.0.2.2:8444", PeerConfigFingerprint: fp, Epoch: 2}
 	}
-	doc := SampleDocument()
+	doc := SampleHA(SampleDocument())
 	doc.HA = ok()
 	if err := doc.Validate(); err != nil {
 		t.Fatalf("valid HA: %v", err)
@@ -31,10 +32,13 @@ func TestValidateHA(t *testing.T) {
 		{"peer config without its pin", func(h *HA) { h.PeerConfigFingerprint = "" }, "peer config fingerprint"},
 		{"negative epoch", func(h *HA) { h.Epoch = -1 }, "epoch must not be negative"},
 		{"config port too high", func(h *HA) { h.ConfigPort = 70000 }, "config port must be"},
+		{"agent port too high", func(h *HA) { h.AgentPort = 70000 }, "agent port must be"},
+		{"no HA link path", func(h *HA) { h.PeerLink = "" }, "peer link must be"},
+		{"one path", func(h *HA) { h.PeerLink = h.Peer }, "two paths"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			doc := SampleDocument()
+			doc := SampleHA(SampleDocument())
 			doc.HA = ok()
 			c.mutate(doc.HA)
 			err := doc.Validate()
@@ -42,6 +46,81 @@ func TestValidateHA(t *testing.T) {
 				t.Fatalf("want %q, got %v", c.want, err)
 			}
 		})
+	}
+}
+
+func TestValidateHAInterfaces(t *testing.T) {
+	iface := func(in *Instance, role string) *Interface { return in.HAInterface(role) }
+	cases := []struct {
+		name   string
+		mutate func(d *Document)
+		want   string
+	}{
+		{"unknown role", func(d *Document) { iface(&d.Instances[0], HARoleLink).HARole = "other" }, "HA role must be"},
+		{"no HA link", func(d *Document) { iface(&d.Instances[0], HARoleLink).HARole = "" }, "with the role ha_link"},
+		{"no management", func(d *Document) {
+			m := iface(&d.Instances[0], HARoleManagement)
+			m.HARole, m.HAGateway = "", ""
+		}, "with the role management"},
+		{"two HA links", func(d *Document) {
+			m := iface(&d.Instances[0], HARoleManagement)
+			m.HARole, m.HAGateway = HARoleLink, ""
+		}, "only one interface"},
+		{"role on a VLAN", func(d *Document) {
+			m := iface(&d.Instances[0], HARoleLink)
+			m.Kind, m.Parent, m.VLANID = KindVLAN, "eth0", 40
+		}, "needs a physical interface"},
+		{"role off the host", func(d *Document) {
+			d.Instances[1].Interfaces[0].HARole = HARoleLink
+		}, "default instance"},
+		{"disabled", func(d *Document) { iface(&d.Instances[0], HARoleLink).Enabled = false }, "must be enabled"},
+		{"no address", func(d *Document) { iface(&d.Instances[0], HARoleLink).Addresses = nil }, "needs a static address"},
+		{"no gateway", func(d *Document) { iface(&d.Instances[0], HARoleManagement).HAGateway = "" }, "needs a gateway"},
+		{"gateway elsewhere", func(d *Document) { iface(&d.Instances[0], HARoleManagement).HAGateway = "198.51.100.1" }, "is not on the interface"},
+		{"gateway is its own address", func(d *Document) { iface(&d.Instances[0], HARoleManagement).HAGateway = "192.0.2.1" }, "is not on the interface"},
+		{"a gateway on the HA link", func(d *Document) { iface(&d.Instances[0], HARoleLink).HAGateway = "192.0.2.130" }, "only the management interface"},
+		{"a gateway on a traffic interface", func(d *Document) { d.Instances[0].Interfaces[0].HAGateway = "192.0.2.130" }, "only the management interface"},
+		{"VRRP on a pair", func(d *Document) { d.Instances[1].VRRP = SampleDocument().Instances[1].VRRP }, "VRRP is not used"},
+		{"multicast mac", func(d *Document) { d.Instances[0].Interfaces[0].MAC = "03:11:22:33:44:55" }, "locally administered"},
+		{"universal mac", func(d *Document) { d.Instances[0].Interfaces[0].MAC = "bc:24:11:33:44:55" }, "locally administered"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			doc := SampleHA(SampleDocument())
+			doc.Instances = slices.Clone(doc.Instances)
+			for i := range doc.Instances {
+				doc.Instances[i].Interfaces = slices.Clone(doc.Instances[i].Interfaces)
+			}
+			c.mutate(&doc)
+			err := doc.Validate()
+			if err == nil || !strings.Contains(err.Error(), c.want) {
+				t.Fatalf("want %q, got %v", c.want, err)
+			}
+		})
+	}
+}
+
+func TestGateDevices(t *testing.T) {
+	in := Instance{Interfaces: []Interface{
+		{Name: "wan", Kind: KindPhysical},
+		{Name: "lan", Kind: KindPhysical},
+		{Name: "lan.10", Kind: KindVLAN, Parent: "lan"},
+		{Name: "wg0", Kind: KindWireGuard},
+		{Name: "ha0", Kind: KindPhysical, HARole: HARoleLink},
+		{Name: "mgmt0", Kind: KindPhysical, HARole: HARoleManagement},
+	}}
+	if got := in.GateDevices(); !slices.Equal(got, []string{"wan", "lan"}) {
+		t.Errorf("got %v", got)
+	}
+}
+
+func TestDeriveHAMAC(t *testing.T) {
+	a, b := DeriveHAMAC("pair", "lan"), DeriveHAMAC("pair", "wan")
+	if !haMACRe.MatchString(a) || !haMACRe.MatchString(b) || a == b {
+		t.Errorf("%s %s", a, b)
+	}
+	if a != DeriveHAMAC("pair", "lan") || a == DeriveHAMAC("other", "lan") {
+		t.Error("it must follow the pair and the name alone")
 	}
 }
 

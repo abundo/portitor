@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/labstack/echo/v5"
@@ -129,9 +130,12 @@ func (w *Witness) Run(ctx context.Context) {
 			return
 		case <-t.C:
 		}
+		// Apart: a pair with a dead host mustn't hold up the others.
+		var wg sync.WaitGroup
 		for _, p := range w.pairs {
-			w.state.vote(ctx, p.name, p.hosts)
+			wg.Go(func() { w.state.vote(ctx, p.name, p.hosts) })
 		}
+		wg.Wait()
 	}
 }
 

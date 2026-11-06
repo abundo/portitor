@@ -15,7 +15,6 @@ import (
 	"github.com/labstack/echo/v5"
 	"gorm.io/gorm"
 
-	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/models"
 )
 
@@ -197,60 +196,24 @@ func promoteRows(tx *gorm.DB, sec, prim *models.Firewall) error {
 	}).Error
 }
 
-// swapHAValues swaps the primary's values and the secondary's (the peer_*
-// ones) of the instances.
+// swapHAValues swaps the two hosts' addresses on the pair's own links, the
+// only values of the instances they don't share.
 func swapHAValues(tx *gorm.DB, ids []uint) error {
 	if len(ids) == 0 {
 		return nil
 	}
 	var ifaces []models.Interface
-	if err := tx.Where("instance_id IN ?", ids).Find(&ifaces).Error; err != nil {
+	if err := tx.Where("instance_id IN ? AND ha_role != ''", ids).Find(&ifaces).Error; err != nil {
 		return err
 	}
 	for _, ifc := range ifaces {
-		var static, delegated models.StringList
-		for _, a := range ifc.Addresses {
-			if fwconfig.IsDelegated(a) {
-				delegated = append(delegated, a)
-			} else {
-				static = append(static, a)
-			}
-		}
-		if len(static) == 0 || len(ifc.PeerAddresses) != len(static) {
+		if len(ifc.Addresses) == 0 || len(ifc.PeerAddresses) != len(ifc.Addresses) {
 			continue
 		}
-		addrs := append(append(models.StringList{}, ifc.PeerAddresses...), delegated...)
 		if err := tx.Model(&models.Interface{}).Where("id = ?", ifc.ID).
-			Updates(map[string]any{"addresses": addrs, "peer_addresses": static}).Error; err != nil {
+			Updates(map[string]any{"addresses": ifc.PeerAddresses, "peer_addresses": ifc.Addresses}).Error; err != nil {
 			return err
 		}
 	}
-	var vrrp []models.VrrpRouter
-	if err := tx.Where("instance_id IN ? AND peer_priority IS NOT NULL", ids).Find(&vrrp).Error; err != nil {
-		return err
-	}
-	for _, r := range vrrp {
-		if err := tx.Model(&models.VrrpRouter{}).Where("id = ?", r.ID).
-			Updates(map[string]any{"priority": *r.PeerPriority, "peer_priority": r.Priority}).Error; err != nil {
-			return err
-		}
-	}
-	var nbrs []models.BgpNeighbor
-	if err := tx.Where("instance_id IN ? AND ha_peer_address != ''", ids).Find(&nbrs).Error; err != nil {
-		return err
-	}
-	for _, n := range nbrs {
-		if err := tx.Model(&models.BgpNeighbor{}).Where("id = ?", n.ID).
-			Updates(map[string]any{"address": n.HAPeerAddress, "ha_peer_address": n.Address}).Error; err != nil {
-			return err
-		}
-	}
-	for _, m := range []any{&models.BgpConfig{}, &models.OspfConfig{}} {
-		if err := tx.Model(m).Where("instance_id IN ? AND router_id != '' AND peer_router_id != ''", ids).
-			Updates(map[string]any{"router_id": gorm.Expr("peer_router_id"), "peer_router_id": gorm.Expr("router_id")}).Error; err != nil {
-			return err
-		}
-	}
-	return tx.Model(&models.IsisConfig{}).Where("instance_id IN ? AND net != '' AND peer_net != ''", ids).
-		Updates(map[string]any{"net": gorm.Expr("peer_net"), "peer_net": gorm.Expr("net")}).Error
+	return nil
 }

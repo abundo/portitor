@@ -304,7 +304,6 @@ func TestFirewallsHAPair(t *testing.T) {
 	env.srv.db.Where("name = ?", "main").First(&main)
 	env.create("/api/interfaces", map[string]any{"instance_id": main.ID, "name": "lan", "kind": "bridge", "enabled": true,
 		"ipv4_mode": "static", "addresses": []string{"10.0.0.1/24"}})
-	env.create("/api/vrrp/routers", map[string]any{"instance_id": main.ID, "interface": "lan", "vrid": 10, "enabled": true, "ipv4": []string{"10.0.0.254"}})
 	fp := strings.Repeat("ab", 32)
 	env.do("PUT", "/api/firewalls/1", map[string]any{"name": "firewall", "agent_url": "https://127.0.0.1:8443", "agent_fingerprint": fp})
 	pair := env.create("/api/firewalls", map[string]any{"name": "fw1b", "ha_primary_id": 1, "agent_url": "https://192.0.2.3:8443", "agent_fingerprint": fp})
@@ -314,6 +313,13 @@ func TestFirewallsHAPair(t *testing.T) {
 	if n != 0 {
 		t.Errorf("the secondary has %d instances of its own", n)
 	}
+	// A role is only for the host's own physical interface.
+	if rec := env.do("POST", "/api/interfaces", map[string]any{"instance_id": main.ID, "name": "v0", "kind": "bridge", "enabled": true, "ipv4_mode": "static", "ha_role": fwconfig.HARoleLink}); rec.Code != http.StatusBadRequest {
+		t.Errorf("role on a bridge: %d %s", rec.Code, rec.Body)
+	}
+	if rec := env.do("POST", "/api/interfaces", map[string]any{"instance_id": main.ID, "name": "v0", "kind": "physical", "enabled": true, "ipv4_mode": "static", "ha_role": fwconfig.HARoleManagement}); rec.Code != http.StatusBadRequest {
+		t.Errorf("management without a gateway: %d %s", rec.Code, rec.Body)
+	}
 	if rec := env.do("POST", "/api/firewalls", map[string]any{"name": "fw1c", "ha_primary_id": 1}); rec.Code != http.StatusBadRequest {
 		t.Errorf("second secondary: %d %s", rec.Code, rec.Body)
 	}
@@ -321,14 +327,30 @@ func TestFirewallsHAPair(t *testing.T) {
 		t.Errorf("instance on the secondary: %d %s", rec.Code, rec.Body)
 	}
 
-	// Without the secondary's own address there is nothing to commit.
+	// Without the pair's two links there is nothing to commit.
 	rec := env.do("POST", "/api/deploy/apply", map[string]any{})
-	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "fw1b: main: interface lan") {
+	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "with the role ha_link") {
+		t.Fatalf("commit without the links: %d %s", rec.Code, rec.Body)
+	}
+	addHALinks(t, env)
+	// VRRP isn't used on a pair.
+	vrrp := env.create("/api/vrrp/routers", map[string]any{"instance_id": main.ID, "interface": "lan", "vrid": 10, "enabled": true, "ipv4": []string{"10.0.0.254"}})
+	env.do("PUT", "/api/firewalls/1", map[string]any{"agent_url": "https://192.0.2.1:8443"})
+	if rec := env.do("POST", "/api/deploy/apply", map[string]any{}); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "VRRP is not used") {
+		t.Fatalf("commit with VRRP: %d %s", rec.Code, rec.Body)
+	}
+	env.do("DELETE", "/api/vrrp/routers/"+itoa(vrrp), nil)
+	env.do("PUT", "/api/firewalls/1", map[string]any{"agent_url": "https://127.0.0.1:8443"})
+	// A link's peer address is the secondary's own.
+	var mgmt models.Interface
+	env.srv.db.Where("name = ?", "mgmt0").First(&mgmt)
+	if rec := env.do("PUT", "/api/interfaces/"+itoa(mgmt.ID), map[string]any{"peer_addresses": []string{}}); rec.Code != http.StatusOK {
+		t.Fatalf("peer addresses: %d %s", rec.Code, rec.Body)
+	}
+	if rec := env.do("POST", "/api/deploy/apply", map[string]any{}); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "interface mgmt0: the secondary needs") {
 		t.Fatalf("commit without peer addresses: %d %s", rec.Code, rec.Body)
 	}
-	var lan models.Interface
-	env.srv.db.Where("name = ?", "lan").First(&lan)
-	if rec := env.do("PUT", "/api/interfaces/"+itoa(lan.ID), map[string]any{"peer_addresses": []string{"10.0.0.2/24"}}); rec.Code != http.StatusOK {
+	if rec := env.do("PUT", "/api/interfaces/"+itoa(mgmt.ID), map[string]any{"peer_addresses": []string{"192.0.2.3/24"}}); rec.Code != http.StatusOK {
 		t.Fatalf("peer addresses: %d %s", rec.Code, rec.Body)
 	}
 	// The secondary can't reach the primary's agent at 127.0.0.1.
@@ -344,11 +366,28 @@ func TestFirewallsHAPair(t *testing.T) {
 		t.Fatalf("the secondary runs %v, the primary %v", instanceNames(sec), instanceNames(prim))
 	}
 	in := sec.Instance("main")
-	if a := in.Interfaces[slices.IndexFunc(in.Interfaces, func(i fwconfig.Interface) bool { return i.Name == "lan" })].Addresses; !slices.Equal(a, []string{"10.0.0.2/24"}) {
+	// The traffic interfaces are the same on both hosts; the two links
+	// are each host's own.
+	lan := func(d *fwconfig.Document) fwconfig.Interface {
+		ifs := d.Instance("main").Interfaces
+		return ifs[slices.IndexFunc(ifs, func(i fwconfig.Interface) bool { return i.Name == "lan" })]
+	}
+	if a := lan(sec).Addresses; !slices.Equal(a, []string{"10.0.0.1/24"}) {
 		t.Errorf("secondary's lan: %v", a)
 	}
-	if p := in.VRRP[0].Priority; p != 90 {
-		t.Errorf("secondary's VRRP priority %d, want 90", p)
+	if a := in.HAInterface(fwconfig.HARoleManagement).Addresses; !slices.Equal(a, []string{"192.0.2.3/24"}) {
+		t.Errorf("secondary's management: %v", a)
+	}
+	if a := prim.Instance("main").HAInterface(fwconfig.HARoleManagement).Addresses; !slices.Equal(a, []string{"192.0.2.1/24"}) {
+		t.Errorf("primary's management: %v", a)
+	}
+	// Only a physical traffic interface gets the shared MAC address.
+	if in.HAInterface(fwconfig.HARoleLink).MAC != "" || lan(sec).MAC != "" {
+		t.Errorf("MAC on a link or a bridge: %+v", in.HAInterface(fwconfig.HARoleLink))
+	}
+	// The heartbeat's two paths.
+	if prim.HA.PeerLink != "https://169.254.1.2:8443" || sec.HA.PeerLink != "https://169.254.1.1:8443" {
+		t.Errorf("HA links: %s %s", prim.HA.PeerLink, sec.HA.PeerLink)
 	}
 	// Each knows its peer by the URL the peer is reached at, and the pair's
 	// secret, which history never shows.
@@ -356,10 +395,10 @@ func TestFirewallsHAPair(t *testing.T) {
 		prim.HA.Peer != "https://192.0.2.3:8443" || sec.HA.Peer != "https://192.0.2.1:8443" || prim.HA.Secret != sec.HA.Secret || len(prim.HA.Secret) < 32 {
 		t.Errorf("HA blocks: %+v %+v", prim.HA, sec.HA)
 	}
-	// Connections sync over lan, each host to the other.
+	// Connections sync over the HA link, each host to the other.
 	if c, d := prim.Instance("main").ConntrackSync, in.ConntrackSync; c == nil || d == nil ||
-		*c != (fwconfig.ConntrackSync{Interface: "lan", This: "10.0.0.1", Peer: "10.0.0.2"}) ||
-		*d != (fwconfig.ConntrackSync{Interface: "lan", This: "10.0.0.2", Peer: "10.0.0.1"}) {
+		*c != (fwconfig.ConntrackSync{Interface: "ha0", This: "169.254.1.1", Peer: "169.254.1.2"}) ||
+		*d != (fwconfig.ConntrackSync{Interface: "ha0", This: "169.254.1.2", Peer: "169.254.1.1"}) {
 		t.Errorf("conntrack sync: %+v %+v", c, d)
 	}
 	var dep models.Deployment
@@ -384,7 +423,18 @@ func haPair(t *testing.T) (*testEnv, map[uint]*fleetAgent, uint) {
 	env.do("PUT", "/api/firewalls/1", map[string]any{"name": "firewall", "agent_url": "https://192.0.2.1:8443", "agent_fingerprint": fp})
 	pair := env.create("/api/firewalls", map[string]any{"name": "fw1b", "ha_primary_id": 1, "agent_url": "https://192.0.2.3:8443", "agent_fingerprint": fp})
 	agents[pair] = &fleetAgent{}
+	addHALinks(t, env)
 	return env, agents, pair
+}
+
+// addHALinks gives the first firewall the pair's two links.
+func addHALinks(t *testing.T, env *testEnv) {
+	t.Helper()
+	main := instanceID(t, env, "main")
+	env.create("/api/interfaces", map[string]any{"instance_id": main, "name": "ha0", "kind": "physical", "enabled": true, "ipv4_mode": "static",
+		"addresses": []string{"169.254.1.1/30"}, "peer_addresses": []string{"169.254.1.2/30"}, "ha_role": fwconfig.HARoleLink})
+	env.create("/api/interfaces", map[string]any{"instance_id": main, "name": "mgmt0", "kind": "physical", "enabled": true, "ipv4_mode": "static",
+		"addresses": []string{"192.0.2.1/24"}, "peer_addresses": []string{"192.0.2.3/24"}, "ha_role": fwconfig.HARoleManagement, "ha_gateway": "192.0.2.254"})
 }
 
 func instanceID(t *testing.T, env *testEnv, name string) uint {
@@ -446,9 +496,15 @@ func TestWitness(t *testing.T) {
 	if agents[pair].votes != 0 {
 		t.Fatal("the vote moved while the holder's still counted")
 	}
-	// Once it has run out, the vote moves.
+	// Run out, but not the grace for a request still in flight.
 	pv := s.witness.pairs["firewall 1"]
-	pv.until = time.Now().Add(-time.Second)
+	pv.until = time.Now().Add(-witnessGrace / 2)
+	s.witnessPair(ctx, p, q)
+	if agents[pair].votes != 0 {
+		t.Fatal("the vote moved within the grace")
+	}
+	// Past that, the vote moves.
+	pv.until = time.Now().Add(-2 * witnessGrace)
 	s.witnessPair(ctx, p, q)
 	if agents[pair].votes != 1 || pv.holder != 1 {
 		t.Fatalf("vote did not move: %d, holder %d", agents[pair].votes, pv.holder)
@@ -458,5 +514,109 @@ func TestWitness(t *testing.T) {
 	s.witnessPair(ctx, p, q)
 	if agents[pair].votes != 2 || agents[1].votes != 2 {
 		t.Errorf("after the primary came back: %d %d", agents[1].votes, agents[pair].votes)
+	}
+}
+
+// stateHost reports a state, and counts votes.
+type stateHost struct {
+	st    agentapi.HAStatus
+	down  bool
+	votes int
+}
+
+func (h *stateHost) HA(context.Context) (*agentapi.HAStatus, error) {
+	if h.down {
+		return nil, errDown
+	}
+	st := h.st
+	return &st, nil
+}
+
+func (h *stateHost) HAVote(context.Context, int) (*agentapi.HAStatus, error) {
+	h.votes++
+	return &h.st, nil
+}
+
+// The vote follows the host that reports active.
+func TestWitnessFollowsActive(t *testing.T) {
+	ctx := context.Background()
+	old := time.Now().Add(-time.Minute)
+	// A witness that restarts doesn't give the primary the vote while the
+	// secondary is active.
+	a, b := &stateHost{st: agentapi.HAStatus{State: agentapi.HAStandby}}, &stateHost{st: agentapi.HAStatus{State: agentapi.HAActive}}
+	w := &witness{started: old, pairs: map[string]*pairVote{}}
+	w.vote(ctx, "pair", [2]haHost{a, b})
+	if a.votes != 0 || b.votes != 1 {
+		t.Errorf("after a restart: %d %d", a.votes, b.votes)
+	}
+	// Nor while it can't see that the primary holds none.
+	until := time.Now().Add(time.Second)
+	a, b = &stateHost{st: agentapi.HAStatus{State: agentapi.HAStandby, VoteUntil: &until}}, &stateHost{st: agentapi.HAStatus{State: agentapi.HAActive}}
+	w = &witness{started: old, pairs: map[string]*pairVote{}}
+	w.vote(ctx, "pair", [2]haHost{a, b})
+	if a.votes != 0 || b.votes != 0 {
+		t.Errorf("a vote that still counts moved: %d %d", a.votes, b.votes)
+	}
+	// Just restarted, with a host it can't ask, which may hold a vote.
+	a, b = &stateHost{down: true}, &stateHost{st: agentapi.HAStatus{State: agentapi.HAStandby}}
+	w = newWitnessState()
+	w.vote(ctx, "pair", [2]haHost{a, b})
+	if b.votes != 0 {
+		t.Errorf("voted within a vote's length of starting: %d", b.votes)
+	}
+	// A vote that has run out moves to the active host.
+	a, b = &stateHost{st: agentapi.HAStatus{State: agentapi.HAStandby}}, &stateHost{st: agentapi.HAStatus{State: agentapi.HAActive}}
+	w = &witness{started: old, pairs: map[string]*pairVote{"pair": {holder: 0, until: time.Now().Add(-2 * witnessGrace)}}}
+	w.vote(ctx, "pair", [2]haHost{a, b})
+	if b.votes != 1 || w.pairs["pair"].holder != 1 {
+		t.Errorf("didn't follow: %d, holder %d", b.votes, w.pairs["pair"].holder)
+	}
+	// Two active: the higher term, as the other is about to close.
+	sts := [2]*agentapi.HAStatus{{State: agentapi.HAActive, Term: 3}, {State: agentapi.HAActive, Term: 4}}
+	if got := activeOf(sts); got != 1 {
+		t.Errorf("activeOf %d", got)
+	}
+}
+
+// slowHost's vote reaches it only after a delay; fail loses the answer.
+type slowHost struct {
+	delay    time.Duration
+	fail     bool
+	received time.Time
+}
+
+func (h *slowHost) HA(context.Context) (*agentapi.HAStatus, error) {
+	return &agentapi.HAStatus{}, nil
+}
+
+func (h *slowHost) HAVote(context.Context, int) (*agentapi.HAStatus, error) {
+	time.Sleep(h.delay)
+	h.received = time.Now()
+	if h.fail {
+		return nil, errDown
+	}
+	return &agentapi.HAStatus{}, nil
+}
+
+// The witness's record of a vote may never end before the host's, which
+// counts from when it got the vote, or both hosts could hold one.
+func TestWitnessVoteOutlastsHosts(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		fail bool
+	}{{"answered", false}, {"answer lost", true}} {
+		t.Run(tt.name, func(t *testing.T) {
+			w := newWitnessState()
+			host := &slowHost{delay: 20 * time.Millisecond, fail: tt.fail}
+			w.vote(context.Background(), "pair", [2]haHost{host, &slowHost{}})
+			pv := w.pairs["pair"]
+			if pv.holder != 0 {
+				t.Fatalf("holder %d", pv.holder)
+			}
+			hostUntil := host.received.Add(witnessVote * time.Second)
+			if pv.until.Before(hostUntil) {
+				t.Errorf("the witness's vote ends %s before the host's", hostUntil.Sub(pv.until))
+			}
+		})
 	}
 }

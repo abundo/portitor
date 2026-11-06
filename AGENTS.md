@@ -104,49 +104,54 @@ docs and user-facing messages.
   (`/v1/confirm`) or the agent rolls back on timeout. `POST /v1/render` is the
   preview, with the same code and no apply. Only one change can be pending at a
   time (`deployMu`, and the agent is asked).
-- **HA pairs** (`fwconfig/ha.go`, `internal/agent/ha.go`, `web/witness.go`): a
-  firewall may be the HA secondary of another (`firewalls.ha_primary_id`, set at
-  creation). It has no instances of its own: `builder.BuildFirewall` builds the
-  primary's, with the `peer_*` values (`peerValues`: interface `peer_addresses` in
-  place of the static ones (not an OpenVPN interface's: both hosts have the same), VRRP `peer_priority` or priority - 10, BGP/OSPF
-  `peer_router_id`, IS-IS `peer_net`, BGP neighbours' `ha_peer_address`), and both apply; VRRP decides which forwards.
-  Each document carries `HA` (node, the peer's agent URL (never loopback) and fingerprint, the pair's secret, which opens only
-  `/v1/ha/heartbeat` and `/v1/ha/certificates` and is redacted in history, the
-  peer's portitor-config (`config_url`, `config_fingerprint`), the witness secret
-  and the epoch). A host may be active only with a
-  quorum: it hears its peer (every second, dead after 3 s) or holds the witness's
-  vote. Without one it is fenced: it applies its document again with
-  `render.Options.Fenced` (VRRP routers shut down, no DHCP or RA). After a restart
-  it starts fenced unless its peer answers at once; joining a pair, it has 3 s to
-  hear it. The witness (`witness.vote`): every 2 s it keeps its vote
-  (`witnessVote` s) on one host, the holder, and moves it only once the holder's has
-  run out, so two hosts that can't hear each other are never both active. A pair
-  has one (`firewalls.ha_witness` on the primary): its portitor-config
-  (`local`, `Server.runWitness`; not a replica's), or `external`, portitor-web
-  given the pair's witness string (`web/portalwitness.go`, `WitnessPair`: both
-  agents and `ha_witness_secret`, which opens only `GET /v1/ha` and
-  `POST /v1/ha/vote`, `haManager.witnessAuth`). A commit
-  skips an unreachable host whose peer answers (deployment `skipped`), and the
-  primary's portitor-config applies that commit's document there when it answers
-  again (`catchUp`).
-  `portitor request ha active` on the console gives the vote by hand (logged).
-  Each instance on a pair has an HA link (`builder.haLink`: its DHCP interface, else
-  the first physical/bridge interface, or VLAN on one, with a static IPv4 address
-  and its peer address). Over it run Kea's HA hook in hot-standby
-  (`fwconfig.DHCPHA`, `render.keaHAHooks`, ports `KeaHAPort4`/`KeaHAPort6`, hooks
-  from `paths.kea_hooks_dir`) and conntrackd (`fwconfig.ConntrackSync`,
-  `render/conntrackd.go`: FTFW over UDP 3780 into the kernel table, no external
-  cache; `conntrackd.service` for the default instance, `portitor-conntrackd@`
-  for the others), each with an auto input rule from the peer alone; the default
-  instance opens this host's portitor-config port (`HA.ConfigPort`, from its own
-  `config_url`) to the peer's addresses (`fwconfig.HAConfigAccess`, made by
-  `Expand`; auto rule `render.HAConfigService`). An instance
-  with only internal links syncs nothing. DNS updates and the tunnel broker run on
-  the active host only (`haManager.standby`: fenced, or the secondary while it hears
-  the primary; `Agent.reconcileActive`). ACME certificates are ordered by the active
-  host; the standby copies them, keys included, from `GET /v1/ha/certificates`
-  (the pair's secret, which therefore opens the keys too) every minute
-  (`certManager.adopt`, `acme.WriteRaw`), so it has them when it takes over.
+- **HA pairs** (`fwconfig/ha.go`, `internal/agent/ha.go`, `hastate.go`, `gate.go`,
+  `hamgmt.go`, `hatakeover.go`, `watchdog.go`, `web/witness.go`; design in
+  `dev/design-ha-cluster.md`): active/passive with the same addresses. A firewall may
+  be the HA secondary of another (`firewalls.ha_primary_id`, set at creation). It has
+  no instances of its own: `builder.BuildFirewall` builds the primary's, the same but
+  for `HA.Node` and the addresses on the pair's two links, physical interfaces of the
+  default instance with `Interface.HARole` (`pairLinks`, `peer_addresses`): the HA
+  link (a direct cable) and management (`HAGateway`, with the witness); a pair
+  without both is refused, and VRRP on one. Each physical traffic interface gets a
+  MAC shared by the hosts (`DeriveHAMAC`). The standby's traffic interfaces are closed
+  by the gate (`render.Gate`, netdev table `portitor_gate`, per namespace, on
+  `Instance.GateDevices`; LLDP passes); services run on both, and opening or closing
+  is one nft transaction, never an apply. A loop in `haManager` (no `Agent.mu`, so it
+  never waits for a commit) applies `haDecide` every `haTick`: a host stays open with
+  a vote (witness, `V` 4 s) or a promise (the standby's heartbeat answer, 2 s, either
+  path every 500 ms, `POST /v1/ha/heartbeat`); it opens with a vote once promises it
+  gave have run out and it hears no active peer; at start the primary opens on a
+  promise, so a healthy pair runs without the witness. It closes 1 s before its
+  leases end. Each activation raises `term` (`<state>/ha-term`, separate from the
+  epoch). An open host arms `/dev/watchdog` (2 s, softdog if there is nothing better),
+  fed by that loop alone; with none, or `nowayout`, it won't open on a vote, only on
+  the console's (`portitor request ha active`). Apply loads the gate after moving a
+  device and before it comes up; `gate.check` looks for devices a closed gate lost
+  (6.12 detaches them) every second. The host's own traffic uses table
+  `fwconfig.HAMgmtTable`: `from <management address>` always, and everything from
+  `iif lo` while closed (proto 99, `hamgmt.go`). At takeover (`onTakeover`): GARP and
+  NA twice, DHCP clients renew, radvd reloads, BGP is cleared. The witness
+  (`witness.vote`): every 1 s it asks both hosts in parallel and keeps its vote on the
+  host reporting active, else its holder; it moves only once the old holder's has run
+  out, plus `witnessGrace`. A pair has one witness (`firewalls.ha_witness` on the
+  primary): its portitor-config (`local`, `Server.runWitness`; not a replica's; it
+  dies with the primary, so failover is by hand), or `external`, portitor-web given
+  the pair's witness string (`web/portalwitness.go`, `WitnessPair`: both agents and
+  `ha_witness_secret`, which opens only `GET /v1/ha` and `POST /v1/ha/vote`,
+  `haManager.witnessAuth`). A commit skips an unreachable host whose peer answers
+  (deployment `skipped`), and the primary's portitor-config applies that commit's
+  document there when it answers again (`catchUp`). Until the built-in DHCP server,
+  each host's Kea runs alone with its own leases (no HA hook). conntrackd
+  (`fwconfig.ConntrackSync`, `render/conntrackd.go`: FTFW over UDP 3780 into the
+  kernel table) runs for the default instance over the HA link. The default instance
+  opens the ports of this host's agent and portitor-config to the peer, both ways
+  (`fwconfig.HAConfigAccess`, made by `Expand`; auto rules `render.HAConfigService`,
+  `HAAgentService`, `haOutputRules`). DNS updates and the tunnel broker run on the
+  active host only (`haManager.isStandby`, `Agent.reconcileActive`). ACME certificates
+  are ordered by the active host; the standby copies them, keys included, from
+  `GET /v1/ha/certificates` (the pair's secret, which therefore opens the keys too)
+  every minute (`certManager.adopt`, `acme.WriteRaw`), so it has them when it takes
+  over.
 - **HA replica and promotion** (`web/replica.go`, `web/promote.go`): portitor-config
   runs on both hosts of a pair. Its role is its agent's (`runRole`: the firewall row
   whose fingerprint is that of the agent at `agent_url`, asked for
@@ -158,11 +163,11 @@ docs and user-facing messages.
   not answered yet is read-only too (`isReplica`). `POST /api/ha/promote` (or
   `portitor-config promote`) on a replica whose agent no longer hears the primary
   (else `force`) swaps the pair's rows (`promoteRows`: instances and tasks to it,
-  `swapHAValues` for the `peer_*` values, `ha_primary_id`, secret and witness moved;
+  `swapHAValues` for the links' addresses, `ha_primary_id`, secret and witness moved;
   the agent URLs stay), raises the epoch
   (`firewalls.ha_epoch`, on the secondary) and commits. The agent of a primary that
   hears a peer that is primary at a higher epoch is stale (`haManager.staleLocked`):
-  fenced and standby, and refuses documents of an earlier epoch (`POST /v1/apply`),
+  closed, and refuses documents of an earlier epoch (`POST /v1/apply`),
   until it is caught up as the secondary.
 - **Bundles** (`web/bundle.go`): a virtual firewall as rows, read and written
   column by column from the schema's foreign keys (`schemaGraph`): every table that
@@ -256,8 +261,9 @@ docs and user-facing messages.
   start with `vrrp4-` or `vrrp6-`), the OpenVPN tun devices (an adaptive server's TCP
   one is `fwconfig.OpenVPNTCPDevice`; names may not start with `ovt-`), and the Jool instance `fwconfig.JoolInstance` in
   each namespace, its loop devices (`n64-*`) and the `ip rule`s with protocol 99
-  (NAT64's IPv4 ones, the VRF source rules at `agent.VRFSourcePref`, and the
-  policy routes' at `fwconfig.PolicyRouteTable(i)`) with the policy routes' tables,
+  (NAT64's IPv4 ones, the VRF source rules at `agent.VRFSourcePref`, the policy
+  routes' at `fwconfig.PolicyRouteTable(i)` and an HA pair's at 1000-1002), the
+  netdev table `portitor_gate` with the policy routes' tables,
   and, without EVPN, the all-zero forwarding entries (flood list) of its vxlan devices. Leave everything else alone (docker, libvirt, other tables).
   Accept rules set the connection mark (`ct mark`) to the rule's id, so the
   rule counters (`render.RuleCounter`) count whole connections; the agent owns

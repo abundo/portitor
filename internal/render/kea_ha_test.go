@@ -21,9 +21,9 @@ func withDHCPHA(doc fwconfig.Document) fwconfig.Document {
 // withHAConfig makes the document an HA host's whose portitor-config, on
 // 8444, the peer reaches.
 func withHAConfig(doc fwconfig.Document) fwconfig.Document {
-	fp := strings.Repeat("ab", 32)
-	doc.HA = &fwconfig.HA{Node: fwconfig.HAPrimary, Peer: "https://192.168.1.2:8443", PeerFingerprint: fp, Secret: strings.Repeat("s", 43),
-		PeerConfig: "https://[2001:db8::2]:8444", PeerConfigFingerprint: fp, ConfigPort: 8444}
+	doc = fwconfig.SampleHA(doc)
+	doc.HA.Peer, doc.HA.PeerConfig, doc.HA.PeerConfigFingerprint, doc.HA.ConfigPort = "https://192.168.1.2:8443", "https://[2001:db8::2]:8444", doc.HA.PeerFingerprint, 8444
+	doc.HA.AgentPort = 8443
 	return doc
 }
 
@@ -36,7 +36,11 @@ func TestHAConfigRule(t *testing.T) {
 	for _, want := range []string{
 		"ip saddr @AUTO_portitor_config_peer_v4 tcp dport 8444 accept",
 		"ip6 saddr @AUTO_portitor_config_peer_v6 tcp dport 8444 accept",
-		"192.168.1.2", "2001:db8::2",
+		"ip saddr @AUTO_portitor_agent_peer_v4 tcp dport 8443 accept",
+		"192.168.1.2", "192.0.2.130", "2001:db8::2",
+		"ip daddr 192.0.2.130 tcp dport 8443 accept",
+		"ip daddr 192.168.1.2 tcp dport 8444 accept",
+		"ip6 daddr 2001:db8::2 tcp dport 8444 accept",
 	} {
 		if !strings.Contains(nft, want) {
 			t.Errorf("missing %q:\n%s", want, nft)

@@ -363,12 +363,12 @@ func addActions(root *cobra.Command, client func() *agentclient.Client, instance
 	})
 
 	// Break-glass for an HA host that hears neither its peer nor the
-	// witness: it is fenced until it does, or until this vote ends.
+	// witness: it stays closed until it does, or this vote opens it.
 	var minutes int
 	haActive := &cobra.Command{
 		Use:   "active",
 		Short: "Let this HA host be active without its peer or the witness (logged)",
-		Long: "Gives this HA host the witness's vote, so it stops fencing itself. " +
+		Long: "Gives this HA host the witness's vote, so it opens once its promises have run out. " +
 			"Only when the other host is known to be down: two active hosts answer for the same addresses.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -377,7 +377,7 @@ func addActions(root *cobra.Command, client func() *agentclient.Client, instance
 				if err != nil {
 					return err
 				}
-				fmt.Fprintf(cmd.OutOrStdout(), "Active for %d minutes (fenced: %v).\n", minutes, st.Fenced)
+				fmt.Fprintf(cmd.OutOrStdout(), "Vote for %d minutes (state: %s).\n", minutes, st.State)
 				return nil
 			})
 		},
@@ -427,9 +427,14 @@ func printHA(w io.Writer, st *agentapi.HAStatus) {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	fmt.Fprintf(tw, "Node:\t%s\n", st.Node)
 	fmt.Fprintf(tw, "Epoch:\t%d\n", st.Epoch)
-	if st.Stale {
-		fmt.Fprintf(tw, "Stale:\tyes: the peer was promoted while this host was away; fenced until the new primary catches it up\n")
+	state := st.State
+	switch st.State {
+	case agentapi.HAFenced:
+		state += ": closed, hears neither its peer nor the witness"
+	case agentapi.HAStale:
+		state += ": closed, the peer was promoted while this host was away, until the new primary catches it up"
 	}
+	fmt.Fprintf(tw, "State:\t%s\n", state)
 	peer := "not heard"
 	if st.PeerAlive {
 		peer = "alive"
@@ -443,11 +448,11 @@ func printHA(w io.Writer, st *agentapi.HAStatus) {
 		vote = "until " + st.VoteUntil.Local().Format(time.DateTime)
 	}
 	fmt.Fprintf(tw, "Witness vote:\t%s\n", vote)
-	fenced := "no"
-	if st.Fenced {
-		fenced = "yes: VRRP shut down, no DHCP or router advertisements"
+	if st.PromiseUntil != nil {
+		fmt.Fprintf(tw, "Standby's promise:\tuntil %s\n", st.PromiseUntil.Local().Format(time.DateTime))
 	}
-	fmt.Fprintf(tw, "Fenced:\t%s\n", fenced)
+	fmt.Fprintf(tw, "Term:\t%d\n", st.Term)
+	fmt.Fprintf(tw, "Watchdog:\t%s\n", st.Watchdog)
 	tw.Flush()
 }
 

@@ -5,9 +5,16 @@ package agent
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -16,191 +23,489 @@ import (
 	"github.com/abundo/portitor/internal/fwconfig"
 )
 
-func TestHAQuorum(t *testing.T) {
-	changes := make(chan bool, 10)
-	h := newHAManager(func(f bool) { changes <- f }, func() {})
-	cfg := &fwconfig.HA{Node: fwconfig.HAPrimary, Secret: strings.Repeat("s", 43)}
+// gateRunner fakes nft and ip for the gate: nft fails while refuse is set.
+type gateRunner struct {
+	refuse bool
+	loads  []string
+	cmds   []string
+	links  string
+	chains string
+}
 
-	// After a restart a host in a pair starts fenced, when its peer
-	// doesn't answer (it has none here).
-	h.boot(context.Background(), cfg)
-	if !h.isFenced() {
-		t.Fatal("not fenced at boot")
+func (r *gateRunner) Run(ctx context.Context, ns, name string, args ...string) ([]byte, error) {
+	line := name + " " + strings.Join(args, " ")
+	switch {
+	case name == "nft":
+		return []byte(r.chains), nil
+	case strings.HasPrefix(line, "ip -j link"):
+		return []byte(r.links), nil
 	}
-	// Hearing the peer lifts the fence.
-	h.peerSeen = time.Now()
-	h.decide()
-	if h.isFenced() || <-changes {
-		t.Fatal("fenced with the peer alive")
+	r.cmds = append(r.cmds, ns+": "+line)
+	return nil, nil
+}
+
+func (r *gateRunner) RunInput(ctx context.Context, ns string, stdin []byte, name string, args ...string) ([]byte, error) {
+	if name == "nft" {
+		if r.refuse {
+			return nil, errors.New("no such device")
+		}
+		r.loads = append(r.loads, string(stdin))
+		return nil, nil
 	}
-	// The peer gone and no vote: fenced.
-	h.peerSeen = time.Now().Add(-haDeadAfter)
-	h.decide()
-	if !h.isFenced() || !<-changes {
-		t.Fatal("not fenced without a quorum")
+	return r.Run(ctx, ns, name, args...)
+}
+
+func TestGateHeld(t *testing.T) {
+	both := `{"nftables":[{"metainfo":{}},{"table":{"name":"portitor_gate"}},
+		{"chain":{"name":"ingress","dev":["ens18","ens22"]}},{"chain":{"name":"egress","dev":["ens18","ens22"]}}]}`
+	held, err := gateHeld([]byte(both))
+	if err != nil || !held["ens18"] || !held["ens22"] {
+		t.Errorf("list: %v %v", held, err)
 	}
-	// The witness's vote is a quorum while it lasts.
-	h.vote(time.Minute)
-	if h.isFenced() || <-changes {
-		t.Fatal("fenced with the witness's vote")
+	// One device left is a string, as nft shows it.
+	one := `{"nftables":[{"chain":{"name":"ingress","dev":"ens22"}},{"chain":{"name":"egress","dev":"ens22"}}]}`
+	if held, err = gateHeld([]byte(one)); err != nil || held["ens18"] || !held["ens22"] {
+		t.Errorf("string: %v %v", held, err)
 	}
-	h.voteUntil = time.Now().Add(-time.Second)
-	h.decide()
-	if !h.isFenced() || !<-changes {
-		t.Fatal("not fenced after the vote ended")
+	// None: no dev at all.
+	none := `{"nftables":[{"chain":{"name":"ingress"}},{"chain":{"name":"egress"}}]}`
+	if held, err = gateHeld([]byte(none)); err != nil || len(held) != 0 {
+		t.Errorf("none: %v %v", held, err)
 	}
-	// Leaving the pair lifts the fence.
-	h.setConfig(nil)
-	if h.isFenced() || <-changes {
-		t.Fatal("fenced outside a pair")
-	}
-	// Joining one gives the peer time to be heard.
-	h.setConfig(cfg)
-	h.decide()
-	if h.isFenced() {
-		t.Error("fenced at once on joining a pair")
+	// Held in one direction only isn't held.
+	half := `{"nftables":[{"chain":{"name":"ingress","dev":"ens22"}},{"chain":{"name":"egress"}}]}`
+	if held, err = gateHeld([]byte(half)); err != nil || len(held) != 0 {
+		t.Errorf("half: %v %v", held, err)
 	}
 }
 
-func TestHAHeartbeatRoute(t *testing.T) {
-	a, _ := testAgent(t)
-	srv := httptest.NewServer(a.Handler())
-	defer srv.Close()
-	get := func(auth string) int {
-		req, _ := http.NewRequest(http.MethodGet, srv.URL+"/v1/ha/heartbeat", nil)
-		if auth != "" {
-			req.Header.Set("Authorization", "Bearer "+auth)
-		}
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		resp.Body.Close()
-		return resp.StatusCode
+func TestGateCheck(t *testing.T) {
+	r := &gateRunner{
+		links:  `[{"ifname":"ens18","flags":["UP"]},{"ifname":"ens22","flags":["UP"]}]`,
+		chains: `{"nftables":[{"chain":{"name":"ingress","dev":"ens22"}},{"chain":{"name":"egress","dev":"ens22"}}]}`,
 	}
-	secret := strings.Repeat("k", 43)
-	if code := get(secret); code != http.StatusUnauthorized {
-		t.Errorf("heartbeat outside a pair: %d", code)
+	g := newGate(r, filepath.Join(t.TempDir(), "gate.json"))
+	if err := g.set(t.Context(), "", []string{"ens18", "ens22"}, nil); err != nil {
+		t.Fatal(err)
 	}
-	a.ha.setConfig(&fwconfig.HA{Node: fwconfig.HASecondary, Secret: secret})
-	if code := get(secret); code != http.StatusOK {
-		t.Errorf("heartbeat with the secret: %d", code)
+	r.loads = nil
+	loose, err := g.check(t.Context())
+	if err != nil || !slices.Equal(loose, []string{"ens18"}) {
+		t.Fatalf("loose %v, err %v", loose, err)
 	}
-	if code := get("wrong"); code != http.StatusUnauthorized {
-		t.Errorf("heartbeat with a wrong secret: %d", code)
+	// Down first, the gate again, and only then up.
+	if !slices.Equal(r.cmds, []string{": ip link set dev ens18 down", ": ip link set dev ens18 up"}) || len(r.loads) != 1 {
+		t.Errorf("cmds %q, %d loads", r.cmds, len(r.loads))
 	}
-	// The secret opens nothing else.
-	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/v1/status", nil)
-	req.Header.Set("Authorization", "Bearer "+secret)
-	if resp, err := http.DefaultClient.Do(req); err != nil || resp.StatusCode != http.StatusUnauthorized {
-		t.Errorf("status with the secret: %v %v", resp, err)
+	// A device that isn't there isn't loose, and an open gate isn't checked.
+	r.cmds, r.links = nil, `[{"ifname":"ens22","flags":["UP"]}]`
+	if loose, err = g.check(t.Context()); err != nil || len(loose) != 0 {
+		t.Errorf("gone: %v %v", loose, err)
+	}
+	if err := g.setOpen(t.Context(), true); err != nil {
+		t.Fatal(err)
+	}
+	r.links = `[{"ifname":"ens18","flags":["UP"]},{"ifname":"ens22","flags":["UP"]}]`
+	if loose, err = g.check(t.Context()); err != nil || len(loose) != 0 {
+		t.Errorf("open: %v %v", loose, err)
 	}
 }
 
-func TestHAStandby(t *testing.T) {
-	actives := make(chan struct{}, 10)
-	h := newHAManager(func(bool) {}, func() { actives <- struct{}{} })
-	sec := &fwconfig.HA{Node: fwconfig.HASecondary}
-	h.setConfig(sec)
-	h.peerSeen = time.Now()
-	h.decide()
-	// The secondary hearing the primary leaves the updates to it.
-	if !h.isStandby() {
-		t.Fatal("secondary with its primary alive is not standby")
+// A device the kernel took down by moving it comes back as the document
+// has it: a standby must not take over with a dead interface.
+func TestGateCheckBringsADeviceUpByTheDocument(t *testing.T) {
+	r := &gateRunner{
+		links:  `[{"ifname":"lan","flags":[]},{"ifname":"off","flags":[]}]`,
+		chains: `{"nftables":[{"chain":{"name":"ingress"}},{"chain":{"name":"egress"}}]}`,
 	}
-	// The primary gone, the secondary with the witness's vote takes over.
-	h.peerSeen = time.Now().Add(-haDeadAfter)
-	h.vote(time.Minute)
-	if h.isStandby() {
-		t.Fatal("secondary on its own is standby")
+	g := newGate(r, filepath.Join(t.TempDir(), "gate.json"))
+	if err := g.set(t.Context(), "", []string{"lan", "off"}, []string{"off"}); err != nil {
+		t.Fatal(err)
 	}
-	<-actives
-	// Fenced, it is standby again.
-	h.voteUntil = time.Now().Add(-time.Second)
-	h.decide()
-	if !h.isStandby() {
-		t.Error("fenced host is not standby")
+	if _, err := g.check(t.Context()); err != nil {
+		t.Fatal(err)
 	}
-	// A primary is never standby while it has a quorum.
-	h.setConfig(&fwconfig.HA{Node: fwconfig.HAPrimary})
-	h.peerSeen = time.Now()
-	h.decide()
-	if h.isStandby() {
-		t.Error("primary with its peer is standby")
+	if !slices.Contains(r.cmds, ": ip link set dev lan up") || slices.Contains(r.cmds, ": ip link set dev off up") {
+		t.Errorf("cmds %q", r.cmds)
+	}
+}
+
+func TestGateClosesByDevicesWhenNftFails(t *testing.T) {
+	r := &gateRunner{links: `[{"ifname":"ens18","flags":["UP"]}]`}
+	g := newGate(r, filepath.Join(t.TempDir(), "gate.json"))
+	if err := g.set(t.Context(), "", []string{"ens18"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	r.refuse = true
+	if err := g.setOpen(t.Context(), false); err == nil {
+		t.Error("no error from a gate that didn't load")
+	}
+	if !slices.Contains(r.cmds, ": ip link set dev ens18 down") {
+		t.Errorf("not set down: %q", r.cmds)
+	}
+}
+
+func TestGateRememberedAcrossRestarts(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "gate.json")
+	r := &gateRunner{}
+	g := newGate(r, file)
+	if err := g.set(t.Context(), "fw-a", []string{"ens20"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	// A host that left its pair finds the gate it must take away.
+	g = newGate(r, file)
+	if got := g.namespaces(); !slices.Equal(got, []string{"fw-a"}) {
+		t.Fatalf("namespaces %v", got)
+	}
+	r.loads = nil
+	if err := g.remove(t.Context(), "fw-a", true); err != nil {
+		t.Fatal(err)
+	}
+	if len(r.loads) != 1 || strings.Contains(r.loads[0], "chain") {
+		t.Errorf("loads %q", r.loads)
+	}
+	if got := g.namespaces(); len(got) != 0 {
+		t.Errorf("namespaces %v", got)
+	}
+}
+
+// A host that leaves its pair while active must not reload an open gate
+// when it joins one again: it would be open on the wire, as a standby.
+func TestGateClosedAfterLeavingAPair(t *testing.T) {
+	r := &gateRunner{}
+	g := newGate(r, filepath.Join(t.TempDir(), "gate.json"))
+	if err := g.set(t.Context(), "", []string{"ens18"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.setOpen(t.Context(), true); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.remove(t.Context(), "", true); err != nil {
+		t.Fatal(err)
+	}
+	if g.isOpen() {
+		t.Error("still open after leaving")
+	}
+	r.loads = nil
+	if err := g.set(t.Context(), "", []string{"ens18"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(r.loads) != 1 || !strings.Contains(r.loads[0], "policy drop") {
+		t.Errorf("joining: %q", r.loads)
+	}
+}
+
+func TestPlanHARules(t *testing.T) {
+	m := &haMgmt{dev: "ens21", gateway: "172.25.38.10", addrs: []netip.Prefix{netip.MustParsePrefix("172.25.38.1/24")}}
+	lines := func(cmds []command) []string {
+		var out []string
+		for _, c := range cmds {
+			out = append(out, strings.Join(c.Args, " "))
+		}
+		return out
+	}
+	got := lines(planHARules("-4", m, true, nil))
+	want := []string{
+		"-4 rule add pref 1000 from 172.25.38.1 lookup 6800 proto 99",
+		"-4 rule add pref 1001 iif lo lookup main suppress_prefixlength 0 proto 99",
+		"-4 rule add pref 1002 iif lo lookup 6800 proto 99",
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("closed:\n%q\nwant\n%q", got, want)
+	}
+	// Opening drops the catch-all and keeps the source rule.
+	have := []ipRule{
+		{Priority: 1000, Src: "172.25.38.1", Table: "6800", Protocol: RouteProto},
+		{Priority: 1001, Src: "all", Iif: "lo", Table: "main", Protocol: RouteProto},
+		{Priority: 1002, Src: "all", Iif: "lo", Table: "6800", Protocol: RouteProto},
+		{Priority: 1100, Src: "10.0.0.1", Iif: "lo", Table: "100", Protocol: RouteProto},
+		{Priority: 1000, Src: "192.0.2.1", Table: "6800", Protocol: "static"},
+	}
+	got = lines(planHARules("-4", m, false, have))
+	if !slices.Equal(got, []string{"-4 rule del pref 1001", "-4 rule del pref 1002"}) {
+		t.Errorf("open: %q", got)
+	}
+	if got = lines(planHARules("-4", m, true, have)); len(got) != 0 {
+		t.Errorf("in step: %q", got)
+	}
+	// A host that left its pair loses them all.
+	if got = lines(planHARules("-4", nil, false, have)); len(got) != 3 {
+		t.Errorf("left: %q", got)
+	}
+	// The other IP version wants none.
+	if got = lines(planHARules("-6", m, true, nil)); len(got) != 0 {
+		t.Errorf("ipv6: %q", got)
+	}
+}
+
+func TestPlanHARoutes(t *testing.T) {
+	m := &haMgmt{dev: "ens21", gateway: "172.25.38.10", addrs: []netip.Prefix{netip.MustParsePrefix("172.25.38.1/24")}}
+	lines := func(cmds []command) []string {
+		var out []string
+		for _, c := range cmds {
+			out = append(out, strings.Join(c.Args, " "))
+		}
+		return out
+	}
+	got := lines(planHARoutes("-4", m, nil))
+	want := []string{
+		"-4 route add 172.25.38.0/24 dev ens21 src 172.25.38.1 table 6800 proto 99",
+		"-4 route add default via 172.25.38.10 dev ens21 src 172.25.38.1 table 6800 proto 99",
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("new:\n%q\nwant\n%q", got, want)
+	}
+	have := []tableRoute{
+		{Dst: "172.25.38.0/24", Dev: "ens21", Table: "6800"},
+		{Dst: "default", Gateway: "172.25.38.10", Dev: "ens21", Table: "6800"},
+		{Dst: "default", Gateway: "10.0.0.1", Dev: "ens18", Table: "main"},
+	}
+	if got = lines(planHARoutes("-4", m, have)); len(got) != 0 {
+		t.Errorf("in step: %q", got)
+	}
+	m.gateway = "172.25.38.11"
+	if got = lines(planHARoutes("-4", m, have)); len(got) != 2 || !strings.Contains(got[0], "route del default") {
+		t.Errorf("new gateway: %q", got)
+	}
+	if got = lines(planHARoutes("-4", nil, have)); len(got) != 2 {
+		t.Errorf("left: %q", got)
+	}
+}
+
+func TestPlanLinkSettingsMAC(t *testing.T) {
+	want := []fwconfig.Interface{{Name: "ens18", Kind: fwconfig.KindPhysical, Enabled: true, MAC: "02:11:22:33:44:55"}}
+	lines := func(have map[string]ipLink) []string {
+		var out []string
+		for _, c := range planLinkSettings("", want, have) {
+			out = append(out, strings.Join(c.Args, " "))
+		}
+		return out
+	}
+	got := lines(map[string]ipLink{"ens18": {Address: "bc:24:11:00:00:01", Flags: []string{"UP"}}})
+	if !slices.Equal(got, []string{"link set dev ens18 down", "link set dev ens18 address 02:11:22:33:44:55", "link set dev ens18 up"}) {
+		t.Errorf("up: %q", got)
+	}
+	if got = lines(map[string]ipLink{"ens18": {Address: "02:11:22:33:44:55", Flags: []string{"UP"}}}); len(got) != 0 {
+		t.Errorf("in step: %q", got)
+	}
+}
+
+func newTestHA(t *testing.T, node string) *haManager {
+	t.Helper()
+	dir := t.TempDir()
+	h := newHAManager(newGate(&gateRunner{}, filepath.Join(dir, "gate.json")), &watchdog{dry: true}, &gateRunner{}, filepath.Join(dir, "term"))
+	h.onActive, h.onTakeover = func() {}, func() {}
+	h.cfg = &fwconfig.HA{Node: node}
+	return h
+}
+
+func TestHAOpensAndCloses(t *testing.T) {
+	h := newTestHA(t, fwconfig.HASecondary)
+	h.tick(t.Context())
+	if h.status().State != agentapi.HAFenced || h.gate.isOpen() {
+		t.Fatalf("at start: %+v", h.status())
+	}
+	h.giveVote(4*time.Second, false)
+	h.tick(t.Context())
+	st := h.status()
+	if st.State != agentapi.HAActive || !h.gate.isOpen() || st.Term != 1 {
+		t.Fatalf("with a vote: %+v", st)
+	}
+	// The term survives a restart, so no two activations share one.
+	again := newHAManager(h.gate, h.wd, h.run, h.termFile)
+	if again.term != 1 {
+		t.Errorf("term after a restart: %d", again.term)
+	}
+	h.giveVote(0, false)
+	h.tick(t.Context())
+	if st := h.status(); st.State == agentapi.HAActive || h.gate.isOpen() {
+		t.Errorf("without leases: %+v", st)
+	}
+}
+
+func TestHAPromises(t *testing.T) {
+	standby := newTestHA(t, fwconfig.HASecondary)
+	active := newTestHA(t, fwconfig.HAPrimary)
+	active.active = true
+	req := agentapi.HAHeartbeatRequest{Node: fwconfig.HAPrimary, Term: 3, Active: true}
+	hb := standby.answer(req)
+	if hb.PromiseMS != int(haPromise/time.Millisecond) || hb.Active {
+		t.Fatalf("answer %+v", hb)
+	}
+	sent := time.Now()
+	active.answered(sent, &hb)
+	if !active.held.Equal(sent.Add(haPromise)) {
+		t.Errorf("held from the send: %v", active.held.Sub(sent))
+	}
+	// The promise keeps the standby closed, whatever vote it gets.
+	standby.giveVote(4*time.Second, false)
+	standby.tick(t.Context())
+	if standby.status().State == agentapi.HAActive {
+		t.Error("opened with its promise running")
+	}
+	// An active host promises nothing.
+	if hb := active.answer(agentapi.HAHeartbeatRequest{Node: fwconfig.HASecondary}); hb.PromiseMS != 0 || !hb.Active {
+		t.Errorf("active's answer %+v", hb)
 	}
 }
 
 func TestHAStale(t *testing.T) {
-	changes := make(chan bool, 10)
-	h := newHAManager(func(f bool) { changes <- f }, func() {})
-	prim := &fwconfig.HA{Node: fwconfig.HAPrimary, Secret: strings.Repeat("s", 43)}
-	h.setConfig(prim)
-	h.mu.Lock()
-	h.heard(&agentapi.HAHeartbeat{Node: fwconfig.HASecondary})
-	h.mu.Unlock()
-	h.decide()
-	if h.isFenced() || h.status().Stale {
-		t.Fatal("a primary hearing its secondary is fenced or stale")
+	h := newTestHA(t, fwconfig.HAPrimary)
+	h.cfg.Epoch = 1
+	h.answer(agentapi.HAHeartbeatRequest{Node: fwconfig.HAPrimary, Epoch: 2})
+	h.giveVote(time.Hour, false)
+	h.tick(t.Context())
+	if st := h.status(); st.State != agentapi.HAStale {
+		t.Errorf("state %s", st.State)
 	}
-	// The peer promoted while this host was away: it answers as the
-	// primary at a later epoch. Its peer alive, this host is fenced.
-	h.mu.Lock()
-	h.heard(&agentapi.HAHeartbeat{Node: fwconfig.HAPrimary, Epoch: 1})
-	h.mu.Unlock()
-	h.vote(time.Minute)
-	if st := h.status(); !st.Fenced || !st.Stale || !st.Standby {
-		t.Fatalf("taken over: %+v", st)
-	}
-	// Caught up as the secondary of the next epoch, it takes part again.
-	h.setConfig(&fwconfig.HA{Node: fwconfig.HASecondary, Secret: prim.Secret, Epoch: 1})
-	if st := h.status(); st.Fenced || st.Stale || st.Epoch != 1 {
-		t.Errorf("caught up: %+v", st)
-	}
-	// A primary of the same epoch as its peer is not stale (both promoted
-	// by force: the commit catches one up).
-	h.setConfig(&fwconfig.HA{Node: fwconfig.HAPrimary, Secret: prim.Secret, Epoch: 1})
-	if h.status().Stale {
-		t.Error("stale at the peer's epoch")
+	// The secondary's document ends it.
+	h.setConfig(&fwconfig.HA{Node: fwconfig.HASecondary, Epoch: 2})
+	if h.staleLocked() {
+		t.Error("still stale")
 	}
 }
 
-func TestHAWitnessAuth(t *testing.T) {
-	a, h := testAgent(t)
-	secret, witness := strings.Repeat("k", 43), strings.Repeat("w", 43)
-	if rec := call(t, h, "GET", "/v1/ha", witness, nil); rec.Code != http.StatusUnauthorized {
-		t.Errorf("witness outside a pair: %d", rec.Code)
+func TestAnnounceFrames(t *testing.T) {
+	mac, _ := net.ParseMAC("02:11:22:33:44:55")
+	f := garpFrame(mac, netip.MustParseAddr("192.0.2.1"))
+	if len(f) != 42 || f[12] != 0x08 || f[13] != 0x06 || f[21] != 1 || !slices.Equal(f[28:32], f[38:42]) {
+		t.Errorf("garp % x", f)
 	}
-	a.ha.setConfig(&fwconfig.HA{Node: fwconfig.HAPrimary, Secret: secret, WitnessSecret: witness})
-	if rec := call(t, h, "GET", "/v1/ha", witness, nil); rec.Code != http.StatusOK {
-		t.Errorf("quorum with the witness secret: %d %s", rec.Code, rec.Body)
+	ip := netip.MustParseAddr("2001:db8::1")
+	f = naFrame(mac, ip)
+	if f[14+7] != 255 || f[54] != 136 || f[58]&0x20 == 0 {
+		t.Errorf("na % x", f)
 	}
-	if rec := call(t, h, "POST", "/v1/ha/vote", witness, agentapi.HAVoteRequest{Seconds: 10}); rec.Code != http.StatusOK || a.ha.status().VoteUntil == nil {
-		t.Errorf("vote with the witness secret: %d %s", rec.Code, rec.Body)
+	// A correct checksum sums to all ones.
+	src, dst := ip.As16(), netip.MustParseAddr("ff02::1").As16()
+	if icmp6Checksum(src, dst, f[54:]) != 0 {
+		t.Error("na checksum")
 	}
-	// It opens nothing else, and the pair's secret not the vote.
-	for _, p := range []string{"/v1/status", "/v1/ha/peer-config"} {
-		if rec := call(t, h, "GET", p, witness, nil); rec.Code != http.StatusUnauthorized {
-			t.Errorf("%s with the witness secret: %d", p, rec.Code)
+}
+
+// haNode is a manager with the agent's heartbeat route, over TLS.
+type haNode struct {
+	h      *haManager
+	srv    *httptest.Server
+	cancel context.CancelFunc
+}
+
+func (n *haNode) url() string { return n.srv.URL }
+
+func (n *haNode) fingerprint() string {
+	sum := sha256.Sum256(n.srv.Certificate().Raw)
+	return hex.EncodeToString(sum[:])
+}
+
+func newHANode(t *testing.T) *haNode {
+	t.Helper()
+	n := &haNode{}
+	n.srv = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !n.h.heartbeatAuth(r) {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
 		}
-	}
-	if rec := call(t, h, "POST", "/v1/ha/vote", secret, agentapi.HAVoteRequest{Seconds: 10}); rec.Code != http.StatusUnauthorized {
-		t.Errorf("vote with the pair's secret: %d", rec.Code)
-	}
-	// The token reads where portitor-config copies from.
-	rec := call(t, h, "GET", "/v1/ha/peer-config", testToken, nil)
-	var pc agentapi.HAPeerConfig
-	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &pc) != nil || pc.Secret != secret || pc.Node != fwconfig.HAPrimary {
-		t.Errorf("peer config: %d %s", rec.Code, rec.Body)
-	}
+		var req agentapi.HAHeartbeatRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(n.h.answer(req))
+	}))
+	t.Cleanup(n.srv.Close)
+	return n
 }
 
-func TestHAApplyEpoch(t *testing.T) {
-	a, h := testAgent(t)
-	secret := strings.Repeat("k", 43)
-	a.ha.setConfig(&fwconfig.HA{Node: fwconfig.HASecondary, Secret: secret, Epoch: 2})
-	doc := fwconfig.Document{Version: fwconfig.Version, Generation: 1, HA: &fwconfig.HA{Node: fwconfig.HAPrimary, Secret: secret, Epoch: 1}}
-	rec := call(t, h, "POST", "/v1/apply", testToken, agentapi.ApplyRequest{Document: doc})
-	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "promoted") {
-		t.Errorf("a document of an earlier epoch: %d %s", rec.Code, rec.Body)
+func (n *haNode) start(t *testing.T, node string, peer *haNode, secret string) {
+	t.Helper()
+	dir := t.TempDir()
+	n.h = newHAManager(newGate(&gateRunner{}, filepath.Join(dir, "gate.json")), &watchdog{dry: true}, &gateRunner{}, filepath.Join(dir, "term"))
+	n.h.onActive, n.h.onTakeover = func() {}, func() {}
+	n.h.cfg = &fwconfig.HA{Node: node, Peer: peer.url(), PeerFingerprint: peer.fingerprint(), Secret: secret}
+	ctx, cancel := context.WithCancel(context.Background())
+	n.cancel = cancel
+	t.Cleanup(cancel)
+	go n.h.loop(ctx)
+}
+
+func waitHAState(t *testing.T, n *haNode, state string, within time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(within)
+	for time.Now().Before(deadline) {
+		if n.h.status().State == state {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("not %s within %v: %+v", state, within, n.h.status())
+}
+
+// Two managers over real heartbeats: the healthy pair starts without a
+// witness, the standby takes over only on a vote and after its promise,
+// and a returning primary stays closed: no failback.
+func TestHAPairOverHeartbeats(t *testing.T) {
+	if testing.Short() {
+		t.Skip("takes as long as the leases")
+	}
+	secret := strings.Repeat("s", 43)
+	a, b := newHANode(t), newHANode(t)
+	a.start(t, fwconfig.HAPrimary, b, secret)
+	b.start(t, fwconfig.HASecondary, a, secret)
+
+	// Rule 3: the primary opens on the secondary's promise alone.
+	waitHAState(t, a, agentapi.HAActive, 3*time.Second)
+	waitHAState(t, b, agentapi.HAStandby, 3*time.Second)
+	if !a.h.gate.isOpen() || b.h.gate.isOpen() {
+		t.Fatalf("gates: %v %v", a.h.gate.isOpen(), b.h.gate.isOpen())
+	}
+	// A vote changes nothing while the standby hears the active host.
+	b.h.giveVote(4*time.Second, false)
+	time.Sleep(2 * haBeat)
+	if b.h.status().State == agentapi.HAActive {
+		t.Fatal("the standby opened while it heard the active host")
+	}
+
+	// The primary crashes: gone, as far as its peer can tell.
+	a.cancel()
+	a.srv.CloseClientConnections()
+	a.srv.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		panic(http.ErrAbortHandler)
+	})
+	crashed := time.Now()
+	for time.Since(crashed) < 2*haPromise {
+		b.h.giveVote(4*time.Second, false)
+		if b.h.status().State == agentapi.HAActive {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	waitHAState(t, b, agentapi.HAActive, 100*time.Millisecond)
+	// Its last promise ran for haPromise from a beat up to haBeat old.
+	if took := time.Since(crashed); took < haPromise-2*haBeat {
+		t.Errorf("opened after %v, with a promise running", took)
+	}
+	if st := b.h.status(); st.Term != 2 {
+		t.Errorf("term %d", st.Term)
+	}
+
+	// The primary returns, with no leases: it stays closed.
+	b.h.mu.Lock()
+	b.h.cfg.Peer = ""
+	b.h.mu.Unlock()
+	back := newHANode(t)
+	back.start(t, fwconfig.HAPrimary, b, secret)
+	b.h.mu.Lock()
+	b.h.cfg = &fwconfig.HA{Node: fwconfig.HASecondary, Peer: back.url(), PeerFingerprint: back.fingerprint(), Secret: secret}
+	b.h.mu.Unlock()
+	for range 40 {
+		b.h.giveVote(4*time.Second, false)
+		if back.h.status().State == agentapi.HAActive {
+			t.Fatal("the primary took back from an active secondary")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	waitHAState(t, back, agentapi.HAStandby, time.Second)
+	if st := b.h.status(); st.State != agentapi.HAActive {
+		t.Errorf("secondary: %+v", st)
 	}
 }

@@ -18,12 +18,14 @@ import (
 )
 
 // The witness is the third vote of an HA pair's quorum (fwconfig.HA).
-// Every witnessBeat it asks both hosts and keeps its vote on one of them,
-// the holder, renewing it while it sees that host. A host that has lost
-// its peer stays active with the vote, and the other is fenced, so two
-// hosts that can't see each other never both are. The vote moves only
-// when the holder can't be asked and its vote has run out. After a restart
-// the holder is the host that reports a vote.
+// Every witnessBeat it asks both hosts at once and keeps its vote on one of
+// them, the holder. A vote names the active host: the host reporting
+// active is the one that gets it, ahead of everything else, so a witness
+// that restarts doesn't hand it to the primary while the secondary is
+// active. The vote moves only when the old holder's has run out, plus
+// witnessGrace for a request still in flight after a timeout. So two hosts
+// that can't hear each other never both hold one. After a restart the
+// holder is the host that reports a vote.
 //
 // A pair has one witness, never two (each could vote for another host):
 // portitor-config on the primary (Firewall.HAWitness local, the default),
@@ -35,9 +37,16 @@ import (
 // was unreachable (deployment status "skipped"): it applies the commit's
 // document there once the host answers.
 const (
-	witnessBeat = 2 * time.Second
-	// witnessVote is how long a vote lasts, in seconds.
-	witnessVote = 10
+	witnessBeat = time.Second
+	// witnessAsk bounds a call to a host, so a dead one costs a round
+	// little.
+	witnessAsk = 500 * time.Millisecond
+	// witnessVote is how long a vote lasts, in seconds. A failover waits
+	// for it: it and the agent's watchdog and margin must fit
+	// (agent.haWatchdogTimeout).
+	witnessVote = 4
+	// witnessGrace is added to a vote that has run out before it moves.
+	witnessGrace = time.Second
 )
 
 // haHost is what the witness asks of an HA host's agent.
@@ -64,12 +73,12 @@ func newWitnessState() *witness {
 	return &witness{started: time.Now(), pairs: map[string]*pairVote{}}
 }
 
-// haOf asks a host for its quorum; nil when it can't be asked.
+// haOf asks a host for its state; nil when it can't be asked.
 func haOf(ctx context.Context, h haHost) *agentapi.HAStatus {
 	if h == nil {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(ctx, witnessBeat)
+	ctx, cancel := context.WithTimeout(ctx, witnessAsk)
 	defer cancel()
 	st, err := h.HA(ctx)
 	if err != nil {
@@ -78,39 +87,61 @@ func haOf(ctx context.Context, h haHost) *agentapi.HAStatus {
 	return st
 }
 
+// bothOf asks the two hosts at once.
+func bothOf(ctx context.Context, hosts [2]haHost) [2]*agentapi.HAStatus {
+	var sts [2]*agentapi.HAStatus
+	var wg sync.WaitGroup
+	for i := range hosts {
+		wg.Go(func() { sts[i] = haOf(ctx, hosts[i]) })
+	}
+	wg.Wait()
+	return sts
+}
+
+// activeOf is the host that reports active, -1 for none. Of two, the one
+// at the higher term: the other is about to close.
+func activeOf(sts [2]*agentapi.HAStatus) int {
+	active := -1
+	for i, st := range sts {
+		if st == nil || st.State != agentapi.HAActive {
+			continue
+		}
+		if active < 0 || st.Term > sts[active].Term {
+			active = i
+		}
+	}
+	return active
+}
+
 // vote keeps the vote of the pair key of hosts (the primary first; nil:
 // can't be asked).
 func (w *witness) vote(ctx context.Context, key string, hosts [2]haHost) {
-	sts := [2]*agentapi.HAStatus{haOf(ctx, hosts[0]), haOf(ctx, hosts[1])}
+	sts := bothOf(ctx, hosts)
 	w.mu.Lock()
-	defer w.mu.Unlock()
 	pv := w.pairs[key]
 	if pv == nil {
 		pv = &pairVote{holder: -1}
 		w.pairs[key] = pv
 	}
+	w.mu.Unlock()
 	now := time.Now()
 	if pv.holder < 0 {
 		for i, st := range sts {
 			if st != nil && st.VoteUntil != nil {
-				pv.holder = i
+				pv.holder, pv.until = i, *st.VoteUntil
 				break
 			}
 		}
 	}
+	active := activeOf(sts)
 	to := -1
 	switch {
+	case active >= 0:
+		to = active
 	case pv.holder >= 0 && sts[pv.holder] != nil:
 		to = pv.holder
-	case pv.holder >= 0 && now.Before(pv.until):
-		// The holder can't be asked, and its vote may still count.
-		return
 	case pv.holder < 0 && sts[0] != nil && sts[1] != nil:
 		to = 0
-	case now.Sub(w.started) < witnessVote*time.Second:
-		// A host that can't be asked may hold a vote from before the
-		// witness started.
-		return
 	case sts[0] != nil:
 		to = 0
 	case sts[1] != nil:
@@ -118,16 +149,27 @@ func (w *witness) vote(ctx context.Context, key string, hosts [2]haHost) {
 	default:
 		return
 	}
-	ctx, cancel := context.WithTimeout(ctx, witnessBeat)
-	defer cancel()
-	if _, err := hosts[to].HAVote(ctx, witnessVote); err != nil {
-		slog.Warn("witness: vote", "pair", key, "host", to, "err", err)
+	// A host that can't be asked may hold a vote from before the witness
+	// started.
+	if pv.holder < 0 && (sts[0] == nil || sts[1] == nil) && now.Sub(w.started) < witnessVote*time.Second+witnessGrace {
 		return
 	}
-	if pv.holder != to {
+	// The old holder's vote may still count.
+	if pv.holder >= 0 && to != pv.holder && now.Before(pv.until.Add(witnessGrace)) {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, witnessAsk)
+	defer cancel()
+	_, err := hosts[to].HAVote(ctx, witnessVote)
+	if err != nil {
+		slog.Warn("witness: vote", "pair", key, "host", to, "err", err)
+	} else if pv.holder != to {
 		slog.Info("witness: vote moved", "pair", key, "to", to)
 	}
-	pv.holder, pv.until = to, now.Add(witnessVote*time.Second)
+	// Counted from after the call, as the host counts from when it got
+	// the vote, and also when it failed: a lost answer may be of a vote
+	// the host took. So the host's vote never outlasts this record.
+	pv.holder, pv.until = to, time.Now().Add(witnessVote*time.Second)
 }
 
 // runWitness is portitor-config's round until ctx is cancelled: it votes

@@ -1525,29 +1525,65 @@ type NAT64Stat struct {
 	Explanation string `json:"explanation,omitempty"`
 }
 
-// HAStatus is an HA host's quorum (GET /v1/ha); Node is empty when the
+// An HA host's state (HAStatus.State). Only an active host's traffic
+// interfaces are open.
+const (
+	// HAActive forwards and answers.
+	HAActive = "active"
+	// HAStandby is closed, with a quorum: it could take over.
+	HAStandby = "standby"
+	// HAFenced is closed with neither its peer nor a vote.
+	HAFenced = "fenced"
+	// HAStale is closed for good: a primary taken over by a promotion,
+	// until it gets the document of the secondary it now is.
+	HAStale = "stale"
+)
+
+// Watchdogs an HA host may have (HAStatus.Watchdog).
+const (
+	HAWatchdogHardware = "hardware"
+	HAWatchdogSoft     = "softdog"
+	HAWatchdogNone     = "none"
+)
+
+// HAStatus is an HA host's state (GET /v1/ha); Node is empty when the
 // host is not in a pair.
 type HAStatus struct {
-	Node      string     `json:"node,omitempty"`
+	Node string `json:"node,omitempty"`
+	// State is HAActive, HAStandby, HAFenced or HAStale.
+	State string `json:"state,omitempty"`
+	// Term counts the pair's activations: the highest one this host knows.
+	Term      int64      `json:"term,omitempty"`
 	PeerAlive bool       `json:"peer_alive"`
 	PeerSeen  *time.Time `json:"peer_seen,omitempty"`
 	// VoteUntil is when the witness's (or the console's) vote ends.
 	VoteUntil *time.Time `json:"vote_until,omitempty"`
-	Fenced    bool       `json:"fenced"`
-	// Standby: it leaves the DNS updates and the tunnel broker to its
-	// peer (fenced, or the secondary while it hears the primary).
-	Standby bool `json:"standby"`
-	// Epoch is the pair's (fwconfig.HA.Epoch) in the applied document;
-	// Stale: a primary whose peer is primary at a higher epoch, taken
-	// over by a promotion, fenced until it gets the secondary's document.
+	// PromiseUntil is when the standby's promise to stay closed ends, on
+	// the active host.
+	PromiseUntil *time.Time `json:"promise_until,omitempty"`
+	// Watchdog is what resets this host if its agent hangs while open.
+	Watchdog string `json:"watchdog,omitempty"`
+	// Epoch is the pair's (fwconfig.HA.Epoch) in the applied document.
 	Epoch int64 `json:"epoch,omitempty"`
-	Stale bool  `json:"stale,omitempty"`
+}
+
+// HAHeartbeatRequest is an HA host's beat to its peer: what it is, and
+// that it wants the peer's promise to stay closed.
+type HAHeartbeatRequest struct {
+	Node   string `json:"node"`
+	Epoch  int64  `json:"epoch"`
+	Term   int64  `json:"term"`
+	Active bool   `json:"active"`
 }
 
 // HAHeartbeat is an HA host's answer to its peer's heartbeat.
 type HAHeartbeat struct {
-	Node  string `json:"node"`
-	Epoch int64  `json:"epoch"`
+	Node   string `json:"node"`
+	Epoch  int64  `json:"epoch"`
+	Term   int64  `json:"term"`
+	Active bool   `json:"active"`
+	// PromiseMS, if not 0: the host stays closed for that long.
+	PromiseMS int `json:"promise_ms,omitempty"`
 }
 
 // HAPeerConfig is where the host's portitor-config copies the pair's

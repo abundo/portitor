@@ -27,7 +27,7 @@ func prepareOpenVPN(tx *gorm.DB, i, old *models.Interface) error {
 	if i.Ipv4Mode == fwconfig.ModeDHCP {
 		return bad("OpenVPN interfaces have static addresses")
 	}
-	// Both hosts of an HA pair have the same (builder.peerValues).
+	// Both hosts of an HA pair have the same.
 	i.PeerAddresses = models.StringList{}
 	if i.OvpnTlsCrypt == "" {
 		key, err := fwconfig.GenerateOpenVPNKey()

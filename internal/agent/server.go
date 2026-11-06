@@ -46,7 +46,11 @@ func (a *Agent) Handler() http.Handler {
 		// host. The pair runs the same configuration, so its secret may
 		// have the certificates' keys.
 		if r.URL.Path == "/v1/ha/heartbeat" || r.URL.Path == "/v1/ha/certificates" {
-			if r.Method != http.MethodGet || !a.ha.heartbeatAuth(r) {
+			method := http.MethodGet
+			if r.URL.Path == "/v1/ha/heartbeat" {
+				method = http.MethodPost
+			}
+			if r.Method != method || !a.ha.heartbeatAuth(r) {
 				writeError(w, http.StatusUnauthorized, errors.New("unauthorized"))
 				return
 			}
@@ -58,7 +62,11 @@ func (a *Agent) Handler() http.Handler {
 				writeJSONResponse(w, http.StatusOK, certs)
 				return
 			}
-			writeJSONResponse(w, http.StatusOK, a.ha.heartbeatAnswer())
+			var req agentapi.HAHeartbeatRequest
+			if !decode(w, r, &req) {
+				return
+			}
+			writeJSONResponse(w, http.StatusOK, a.ha.answer(req))
 			return
 		}
 		api.ServeHTTP(w, r)

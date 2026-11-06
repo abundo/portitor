@@ -461,9 +461,9 @@ func (c *Client) HAVote(ctx context.Context, seconds int) (*agentapi.HAStatus, e
 
 // HAHeartbeat is the HA peer's beat; the client's token is the pair's
 // secret.
-func (c *Client) HAHeartbeat(ctx context.Context) (*agentapi.HAHeartbeat, error) {
+func (c *Client) HAHeartbeat(ctx context.Context, req agentapi.HAHeartbeatRequest) (*agentapi.HAHeartbeat, error) {
 	var out agentapi.HAHeartbeat
-	return &out, c.do(ctx, http.MethodGet, "/v1/ha/heartbeat", nil, &out)
+	return &out, c.do(ctx, http.MethodPost, "/v1/ha/heartbeat", req, &out)
 }
 
 // HAPeerConfig is where the host's portitor-config copies the pair's

@@ -60,7 +60,7 @@ func prepareOspfConfig(tx *gorm.DB, c, old *models.OspfConfig) error {
 	if err != nil {
 		return err
 	}
-	c.RouterID, c.PeerRouterID = strings.TrimSpace(c.RouterID), strings.TrimSpace(c.PeerRouterID)
+	c.RouterID = strings.TrimSpace(c.RouterID)
 	if !c.DefaultOriginate {
 		c.DefaultAlways = false
 	}

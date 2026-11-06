@@ -387,7 +387,14 @@ func prepareInterface(tx *gorm.DB, i, old *models.Interface) error {
 		return err
 	}
 	i.Addresses = addrs
-	// The HA secondary's; the builder pairs them with the addresses.
+	if err := prepareHARole(tx, i); err != nil {
+		return err
+	}
+	// The HA secondary's; the builder pairs them with the addresses. Only
+	// the pair's own links differ between the hosts.
+	if i.HaRole == "" {
+		i.PeerAddresses = models.StringList{}
+	}
 	if i.PeerAddresses, err = ifaceAddrs("peer addresses", i.PeerAddresses, false); err != nil {
 		return err
 	}
@@ -1314,4 +1321,53 @@ func zoneNames(tx *gorm.DB, templateID uint) func() []string {
 		}
 		return names
 	}
+}
+
+// prepareHARole checks an interface's HA role. The rest is checked with the
+// document (fwconfig Validate), as a pair's rules depend on it being one.
+func prepareHARole(tx *gorm.DB, i *models.Interface) error {
+	i.HaGateway = strings.TrimSpace(i.HaGateway)
+	switch i.HaRole {
+	case "":
+		i.HaGateway = ""
+		return nil
+	case fwconfig.HARoleLink:
+		i.HaGateway = ""
+	case fwconfig.HARoleManagement:
+		if a, err := netip.ParseAddr(i.HaGateway); err != nil {
+			return bad("HA role: the management interface needs its gateway")
+		} else {
+			i.HaGateway = a.String()
+		}
+	default:
+		return bad("HA role: HA link or management")
+	}
+	if i.Kind != fwconfig.KindPhysical {
+		return bad("HA role: a physical interface only")
+	}
+	if i.Ipv4Mode == fwconfig.ModeDHCP {
+		return bad("HA role: the pair's links have static addresses")
+	}
+	if i.Vrf != "" {
+		return bad("HA role: not on an interface in a VRF")
+	}
+	var in models.Instance
+	if err := tx.First(&in, i.InstanceID).Error; err != nil {
+		return err
+	}
+	if !in.IsDefault {
+		return bad("HA role: on an interface of the firewall itself, not of a virtual firewall")
+	}
+	var n int64
+	q := tx.Model(&models.Interface{}).Where("instance_id = ? AND ha_role = ?", i.InstanceID, i.HaRole)
+	if i.ID != 0 {
+		q = q.Where("id != ?", i.ID)
+	}
+	if err := q.Count(&n).Error; err != nil {
+		return err
+	}
+	if n > 0 {
+		return bad("HA role: another interface has it")
+	}
+	return nil
 }

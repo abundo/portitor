@@ -192,7 +192,16 @@ type Interface struct {
 	MSSClampValue int  `json:"mss_clamp_value,omitempty"`
 	// RPF drops the packets that come in on the interface from a source
 	// it doesn't route back through (strict reverse path check, rpf.go).
-	RPF       bool       `json:"rpf,omitempty"`
+	RPF bool `json:"rpf,omitempty"`
+	// HARole makes a physical interface of an HA pair's host one of its
+	// own links, which stay up on the standby: HARoleLink or
+	// HARoleManagement (ha.go). "" is a traffic interface.
+	HARole string `json:"ha_role,omitempty"`
+	// HAGateway is the management interface's gateway, for what the host
+	// itself sends while its traffic interfaces are closed.
+	HAGateway string `json:"ha_gateway,omitempty"`
+	// MAC is the interface's MAC address, shared by an HA pair's hosts.
+	MAC       string     `json:"mac,omitempty"`
 	WireGuard *WireGuard `json:"wireguard,omitempty"`
 	// Tunnel holds a 6in4 interface's settings.
 	Tunnel *Tunnel6in4 `json:"tunnel,omitempty"`

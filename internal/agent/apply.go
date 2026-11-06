@@ -241,6 +241,12 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 		if links, err = a.links(ctx, ns); err != nil {
 			return err
 		}
+		// The device, then the gate, then up: on an HA pair nothing
+		// leaves a traffic interface before the gate holds it, and the
+		// devices that just moved here are held from now on.
+		if err := a.applyGate(ctx, &exp, in, ns, links); err != nil {
+			return err
+		}
 		soft = append(soft, a.doEach(ctx, planLinkSettings(ns, in.Interfaces, links)))
 		// The vxlans' learning, bridge port flags and flood lists, from
 		// the state before the bridge membership above: a port that only
@@ -399,6 +405,16 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 
 	}
 
+	a.ha.setMgmt(haMgmtOf(&exp), haOwnLinks(&exp))
+	a.ha.setConfig(doc.HA)
+	soft = append(soft, a.ha.applyMgmt(ctx, a.run))
+	// Gone with their namespaces below; a host that left its pair opens.
+	for _, ns := range a.gate.namespaces() {
+		if !wantNS[ns] && ns != "" {
+			soft = append(soft, a.gate.remove(ctx, ns, slices.Contains(existing, ns)))
+		}
+	}
+
 	slices.Sort(newRoot)
 	if err := writeJSON(a.managedFile(), managedState{RootVirtual: newRoot}, 0o644); err != nil {
 		return err
@@ -446,7 +462,6 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 	a.reconcileIPLists(&d)
 	a.reconcileDNSBlocklists(&d)
 	a.tasks.Reconcile(d.Tasks)
-	a.ha.setConfig(d.HA)
 	return errors.Join(soft...)
 }
 
@@ -593,6 +608,29 @@ func (a *Agent) links(ctx context.Context, ns string) (map[string]ipLink, error)
 		m[l.Ifname] = l
 	}
 	return m, nil
+}
+
+// applyGate loads the namespace's gate, or removes it on a host that left
+// its pair. It needs links as they are after the moves.
+func (a *Agent) applyGate(ctx context.Context, exp *fwconfig.Document, in *fwconfig.Instance, ns string, links map[string]ipLink) error {
+	if exp.HA == nil {
+		return a.gate.remove(ctx, ns, true)
+	}
+	var devs, down []string
+	for _, d := range in.GateDevices() {
+		if _, ok := links[d]; ok {
+			devs = append(devs, d)
+		}
+	}
+	for _, ifc := range in.Interfaces {
+		if !ifc.Enabled {
+			down = append(down, ifc.Name)
+		}
+	}
+	if err := a.gate.set(ctx, ns, devs, down); err != nil {
+		return fmt.Errorf("instance %s: the HA gate: %w", in.Name, err)
+	}
+	return nil
 }
 
 // placePhysical moves physical interfaces into the namespace of the

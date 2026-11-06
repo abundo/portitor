@@ -116,6 +116,25 @@ const fields = [
   { key: 'description', label: 'Description' },
   { key: 'enabled', label: 'Enabled', type: 'switch' },
   {
+    key: 'ha_role',
+    label: 'HA role',
+    type: 'select',
+    items: [
+      { value: '', label: 'Traffic' },
+      { value: 'ha_link', label: 'HA link' },
+      { value: 'management', label: 'Management' },
+    ],
+    show: (f) => f.kind === 'physical' && !!store.current?.is_default,
+    hint: "An HA pair needs both: the HA link, a direct cable between the hosts, and the management interface, on a network of its own with the witness. They stay up on the standby, with an address for each host. Traffic interfaces are the same on both hosts, and closed on the standby.",
+  },
+  {
+    key: 'ha_gateway',
+    label: 'Management gateway',
+    placeholder: '172.25.38.10',
+    show: (f) => f.ha_role === 'management',
+    hint: 'What the host itself uses while its traffic interfaces are closed. It must not be the pair: the standby reaches the witness and updates through it.',
+  },
+  {
     key: 'parent',
     label: 'Parent interface',
     type: 'select',
@@ -175,8 +194,8 @@ const fields = [
     label: 'HA peer addresses',
     type: 'tags',
     placeholder: '192.168.1.2/24',
-    show: (f) => store.hasPeer && !is6in4(f) && f.kind !== 'openvpn',
-    hint: "The HA secondary's own addresses, one for each address above in the same prefix and order (delegated ones aside). The virtual address both share is VRRP's.",
+    show: (f) => !!f.ha_role,
+    hint: "The HA secondary's own addresses on this link, one for each address above in the same prefix and order. Traffic interfaces have the same addresses on both hosts.",
   },
   {
     key: 'addresses',

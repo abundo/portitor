@@ -5,6 +5,8 @@ package render
 
 import (
 	"fmt"
+	"net/netip"
+	"slices"
 	"strings"
 
 	"github.com/abundo/portitor/internal/fwconfig"
@@ -23,6 +25,40 @@ const (
 	HAConfigService = "portitor-config peer"
 	HAConfigSet     = "portitor_config_peer"
 )
+
+// HAAgentService is the auto rule letting the HA peer's agent reach this
+// host's for the heartbeat, from the HAAgentSet set.
+const (
+	HAAgentService = "portitor-agent peer"
+	HAAgentSet     = "portitor_agent_peer"
+)
+
+// haOutputRules are the output chain's accepts of what this host sends its
+// HA peer: heartbeats and the copy of the configuration. A rule closing the
+// output chain must not split the pair.
+func haOutputRules(in *fwconfig.Instance) []string {
+	h := in.HAConfig
+	if h == nil {
+		return nil
+	}
+	var out []string
+	for _, s := range h.From {
+		a, err := netip.ParseAddr(s)
+		if err != nil {
+			continue
+		}
+		fam := "ip"
+		if a.Is6() {
+			fam = "ip6"
+		}
+		for _, port := range []int{h.AgentPort, h.Port} {
+			if port != 0 {
+				out = append(out, fmt.Sprintf("%s daddr %s tcp dport %d accept %s", fam, a, port, comment("auto", HAAgentService)))
+			}
+		}
+	}
+	return slices.Compact(out)
+}
 
 // ConntrackdConf renders conntrackd.conf for an instance on an HA pair
 // (fwconfig.ConntrackSync): FTFW over UDP to the peer, and the peer's

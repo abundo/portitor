@@ -73,6 +73,7 @@ func (d *Document) Validate() error {
 	v.ipLists(d.IPLists)
 	v.tasks(d.Tasks)
 	v.ha(d.HA)
+	v.haInterfaces(d)
 	if d.Directory != nil {
 		v.directory(d.Directory)
 	}

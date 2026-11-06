@@ -4,6 +4,8 @@
 package fwconfig
 
 import (
+	"crypto/sha256"
+	"net"
 	"net/netip"
 	"net/url"
 	"regexp"
@@ -16,19 +18,22 @@ const (
 	HASecondary = "secondary"
 )
 
-// HA makes the document's host one of an HA pair. Both hosts apply the
-// same instances (the secondary with its own addresses); VRRP decides
-// which one forwards. A host may be active only with a quorum: it hears
-// its peer, or it holds the witness's vote (portitor-web). Without one it
-// is fenced: its VRRP routers are shut down and it serves no DHCP or
-// router advertisements, so the two never both answer for the virtual
-// addresses.
+// HA makes the document's host one of an active/passive HA pair. Both
+// hosts apply the same document but for Node and the addresses of their
+// own two links (Interface.HARole). One is active; the other's traffic
+// interfaces are closed by the gate (render.Gate), so it neither forwards
+// nor answers, and it takes over with the same addresses and MAC addresses
+// (Interface.MAC) when it holds the witness's vote and has heard the
+// active host's promises run out (internal/agent/ha.go).
 type HA struct {
 	Node string `json:"node"`
 	// Peer is the other host's agent API (https://...), its certificate
 	// pinned by PeerFingerprint (SHA-256, hex).
 	Peer            string `json:"peer"`
 	PeerFingerprint string `json:"peer_fingerprint"`
+	// PeerLink is the same agent over the HA link: the heartbeat's other
+	// path.
+	PeerLink string `json:"peer_link"`
 	// Secret is shared by the pair for the heartbeat (/v1/ha/heartbeat)
 	// and the copy of the certificates; the secondary's portitor-config
 	// copies the primary's database with it too.
@@ -52,24 +57,62 @@ type HA struct {
 	// configuration from the primary, and the other way round once it is
 	// promoted. 0: none.
 	ConfigPort int `json:"config_port,omitempty"`
+	// AgentPort is this host's agent port, opened to the peer's addresses
+	// for the heartbeat. 0: none.
+	AgentPort int `json:"agent_port,omitempty"`
+}
+
+// HAMgmtTable is the routing table of what an HA host sends from its
+// management address, and on the standby all it sends itself: the main
+// table points at traffic interfaces, which are closed there.
+const HAMgmtTable = 6800
+
+// HA interface roles (Interface.HARole).
+const (
+	HARoleLink       = "ha_link"
+	HARoleManagement = "management"
+)
+
+// GateDevices are the devices the gate holds in an instance of an HA pair:
+// its physical traffic interfaces. A gate on the lowest device covers the
+// VLANs and bridges on it.
+func (in *Instance) GateDevices() []string {
+	var out []string
+	for _, ifc := range in.Interfaces {
+		if ifc.Kind == KindPhysical && ifc.HARole == "" {
+			out = append(out, ifc.Name)
+		}
+	}
+	return out
+}
+
+// HAInterface is the interface of a role in the instance, nil if none.
+func (in *Instance) HAInterface(role string) *Interface {
+	for i := range in.Interfaces {
+		if in.Interfaces[i].HARole == role {
+			return &in.Interfaces[i]
+		}
+	}
+	return nil
 }
 
 // HAConfigAccess is what Expand gives an HA host's default instance from
-// HA: its portitor-config's port, opened to the peer's addresses (the auto
-// rule render.HAConfigService).
+// HA: the ports of its portitor-config and agent, opened to the peer's
+// addresses (the auto rule render.HAConfigService).
 type HAConfigAccess struct {
-	Port int
-	From []string
+	Port      int
+	AgentPort int
+	From      []string
 }
 
 // configAccess: the peer's addresses are those written as addresses in
 // its agent and portitor-config URLs; a name gives none.
 func (h *HA) configAccess() *HAConfigAccess {
-	if h == nil || h.ConfigPort == 0 {
+	if h == nil || (h.ConfigPort == 0 && h.AgentPort == 0) {
 		return nil
 	}
 	var from []string
-	for _, s := range []string{h.Peer, h.PeerConfig} {
+	for _, s := range []string{h.Peer, h.PeerLink, h.PeerConfig} {
 		u, err := url.Parse(s)
 		if err != nil {
 			continue
@@ -81,13 +124,23 @@ func (h *HA) configAccess() *HAConfigAccess {
 	if len(from) == 0 {
 		return nil
 	}
-	return &HAConfigAccess{Port: h.ConfigPort, From: from}
+	return &HAConfigAccess{Port: h.ConfigPort, AgentPort: h.AgentPort, From: from}
 }
 
 var (
 	haFingerprintRe = regexp.MustCompile(`^[0-9a-f]{64}$`)
 	haSecretRe      = regexp.MustCompile(`^[A-Za-z0-9_-]{32,128}$`)
+	// A locally administered unicast address, in lowercase as ip -j shows it.
+	haMACRe = regexp.MustCompile(`^[0-9a-f][26ae](:[0-9a-f]{2}){5}$`)
 )
+
+// DeriveHAMAC is the MAC address a pair's two hosts share on the traffic
+// interface name: locally administered, from the pair's key.
+func DeriveHAMAC(pair, name string) string {
+	sum := sha256.Sum256([]byte("portitor ha mac\x00" + pair + "\x00" + name))
+	sum[0] = sum[0]&^0x01 | 0x02
+	return net.HardwareAddr(sum[:6]).String()
+}
 
 func (v *validator) ha(h *HA) {
 	if h == nil {
@@ -122,6 +175,102 @@ func (v *validator) ha(h *HA) {
 	if h.ConfigPort < 0 || h.ConfigPort > 65535 {
 		v.addf("ha: config port must be 1-65535")
 	}
+	if h.AgentPort < 0 || h.AgentPort > 65535 {
+		v.addf("ha: agent port must be 1-65535")
+	}
+	if u, err := url.Parse(h.PeerLink); err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || (u.Path != "" && u.Path != "/") || u.RawQuery != "" {
+		v.addf("ha: peer link must be the other host's agent URL on the HA link")
+	}
+	if h.PeerLink == h.Peer {
+		v.addf("ha: the HA link and the management network must be two paths")
+	}
+}
+
+// haInterfaces checks the interfaces' HA settings, for the whole document.
+func (v *validator) haInterfaces(d *Document) {
+	for i := range d.Instances {
+		in := &d.Instances[i]
+		p := "instance " + in.Name
+		for _, ifc := range in.Interfaces {
+			if ifc.MAC != "" && !haMACRe.MatchString(ifc.MAC) {
+				v.addf("%s: interface %s: mac must be a locally administered unicast address", p, ifc.Name)
+			}
+			if ifc.MAC != "" && ifc.Kind != KindPhysical {
+				v.addf("%s: interface %s: only a physical interface has a mac", p, ifc.Name)
+			}
+			switch ifc.HARole {
+			case "":
+				if ifc.HAGateway != "" {
+					v.addf("%s: interface %s: only the management interface has an HA gateway", p, ifc.Name)
+				}
+				continue
+			case HARoleLink, HARoleManagement:
+			default:
+				v.addf("%s: interface %s: HA role must be %s or %s", p, ifc.Name, HARoleLink, HARoleManagement)
+				continue
+			}
+			if !in.Default {
+				v.addf("%s: interface %s: an HA role is the host's, on an interface of its default instance", p, ifc.Name)
+			}
+			if ifc.Kind != KindPhysical {
+				v.addf("%s: interface %s: an HA role needs a physical interface", p, ifc.Name)
+			}
+			if ifc.MAC != "" {
+				v.addf("%s: interface %s: an HA link or management interface keeps its own mac", p, ifc.Name)
+			}
+			if ifc.VRF != "" {
+				v.addf("%s: interface %s: an HA link or management interface can't be in a VRF", p, ifc.Name)
+			}
+			if ifc.HARole == HARoleLink && ifc.HAGateway != "" {
+				v.addf("%s: interface %s: only the management interface has an HA gateway", p, ifc.Name)
+			}
+			if ifc.HARole == HARoleManagement {
+				v.haGateway(p, ifc)
+			}
+		}
+		for _, role := range []string{HARoleLink, HARoleManagement} {
+			if n := len(slices.DeleteFunc(slices.Clone(in.Interfaces), func(ifc Interface) bool { return ifc.HARole != role })); n > 1 {
+				v.addf("%s: only one interface can be the %s", p, role)
+			}
+		}
+		if d.HA == nil {
+			continue
+		}
+		if len(in.VRRP) > 0 {
+			v.addf("%s: VRRP is not used on an HA pair: the pair shares its addresses", p)
+		}
+		if !in.Default {
+			continue
+		}
+		for _, role := range []string{HARoleLink, HARoleManagement} {
+			ifc := in.HAInterface(role)
+			if ifc == nil {
+				v.addf("%s: an HA pair needs a physical interface with the role %s", p, role)
+				continue
+			}
+			if !ifc.Enabled {
+				v.addf("%s: interface %s: the %s must be enabled", p, ifc.Name, role)
+			}
+			if len(ifc.Addresses) == 0 {
+				v.addf("%s: interface %s: the %s needs a static address", p, ifc.Name, role)
+			}
+		}
+	}
+}
+
+// haGateway checks the management gateway: an address on the interface.
+func (v *validator) haGateway(p string, ifc Interface) {
+	gw, err := netip.ParseAddr(ifc.HAGateway)
+	if err != nil {
+		v.addf("%s: interface %s: the management interface needs a gateway", p, ifc.Name)
+		return
+	}
+	for _, a := range ifc.Addresses {
+		if q, err := ParseInterfaceAddress(a); err == nil && q.Contains(gw) && q.Addr() != gw {
+			return
+		}
+	}
+	v.addf("%s: interface %s: the gateway %s is not on the interface", p, ifc.Name, ifc.HAGateway)
 }
 
 // Kea's HA roles.
