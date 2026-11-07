@@ -383,14 +383,14 @@ func (a *Agent) authMiddleware(next http.Handler) http.Handler {
 			}
 			if !ok {
 				slog.Warn("api: client not in allow_from", "remote", r.RemoteAddr)
-				writeError(w, http.StatusForbidden, errors.New("forbidden"))
+				writeError(w, http.StatusForbidden, fmt.Errorf("%s is not in allow_from", remoteHost(r.RemoteAddr)))
 				return
 			}
 		}
 		got := []byte(r.Header.Get("Authorization"))
 		if subtle.ConstantTimeCompare(got, want) != 1 {
 			slog.Warn("api: bad token", "remote", r.RemoteAddr)
-			writeError(w, http.StatusUnauthorized, errors.New("unauthorized"))
+			writeError(w, http.StatusUnauthorized, errors.New("wrong token"))
 			return
 		}
 		r.Body = http.MaxBytesReader(w, r.Body, maxBody)
@@ -562,4 +562,12 @@ func (a *Agent) handleCertificate(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeError(w, http.StatusInternalServerError, err)
+}
+
+// remoteHost is the address of a request's remote end, without the port.
+func remoteHost(remote string) string {
+	if ap, err := netip.ParseAddrPort(remote); err == nil {
+		return ap.Addr().Unmap().String()
+	}
+	return remote
 }

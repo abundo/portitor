@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/abundo/portitor/internal/agentapi"
@@ -82,8 +83,9 @@ type haManager struct {
 	handover bool
 	// switching asks tick to hand over; stopping ends it.
 	switching, stopping bool
-	// wake gets tick to look at once.
-	wake chan struct{}
+	// wake gets tick to look at once; gateWake checks the gate at once.
+	wake     chan struct{}
+	gateWake chan struct{}
 	// mgmt is what the routing for the host's own traffic is made from.
 	mgmt *haMgmt
 	own  map[string]bool
@@ -93,6 +95,10 @@ type haManager struct {
 	// onActive follows the host's state, onTakeover runs after it opened.
 	onActive   func()
 	onTakeover func()
+	// onLoose runs after the gate check closed devices it had lost: they
+	// came back without their addresses. reapplying keeps one at a time.
+	onLoose    func()
+	reapplying atomic.Bool
 	// syncCerts copies the peer's certificates, every haCertSync while
 	// the host is closed.
 	syncCerts func(context.Context, *fwconfig.HA)
@@ -100,7 +106,7 @@ type haManager struct {
 
 func newHAManager(g *gate, wd *watchdog, run Runner, termFile string) *haManager {
 	h := &haManager{gate: g, wd: wd, run: run, termFile: termFile, clients: map[string]*agentclient.Client{},
-		health: -1, peerHealth: -1, wake: make(chan struct{}, 1)}
+		health: -1, peerHealth: -1, wake: make(chan struct{}, 1), gateWake: make(chan struct{}, 1)}
 	if b, err := os.ReadFile(termFile); err == nil {
 		h.term, _ = strconv.ParseInt(strings.TrimSpace(string(b)), 10, 64)
 	}
@@ -441,6 +447,7 @@ func (h *haManager) loop(ctx context.Context) {
 	go h.beat(ctx, func(c *fwconfig.HA) string { return c.Peer })
 	go h.beat(ctx, func(c *fwconfig.HA) string { return c.PeerLink })
 	go h.checkGate(ctx)
+	go h.watchGate(ctx)
 	go h.copyCerts(ctx)
 	go h.watchHealth(ctx)
 	for {
@@ -599,6 +606,7 @@ func (h *haManager) checkGate(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
+		case <-h.gateWake:
 		}
 		h.mu.Lock()
 		cfg := h.cfg
@@ -621,6 +629,12 @@ func (h *haManager) checkGate(ctx context.Context) {
 		}
 		if len(loose) > 0 {
 			slog.Error("ha: the closed gate had lost interfaces; closed them again", "interfaces", loose)
+			if h.onLoose != nil && h.reapplying.CompareAndSwap(false, true) {
+				go func() {
+					defer h.reapplying.Store(false)
+					h.onLoose()
+				}()
+			}
 		}
 	}
 }

@@ -118,6 +118,11 @@ func (s *Server) deploy(ctx context.Context, username string, timeout *int, only
 		}
 		// The history may not know yet that a change timed out.
 		as, err := t.a.Status(ctx)
+		if err != nil && agentclient.Refused(err) {
+			// It answers but refuses (a wrong token): not skipped as
+			// unreachable, which it isn't.
+			return nil, bad(fmt.Sprintf("firewall %s: %v", t.fw.Name, err))
+		}
 		if err != nil {
 			unreached = append(unreached, t)
 			reachErr = fmt.Errorf("firewall %s: %w", t.fw.Name, err)

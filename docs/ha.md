@@ -53,7 +53,9 @@ forwards. Either host can be active; a failover changes no configuration.
 
 ## Setting up a pair
 
-Everything is done in the primary's portitor-config.
+From the installer ISO, choose *primary* and *secondary* as the machine types: the
+setup does the steps below ([An HA pair from the ISO](appliance.md#an-ha-pair-from-the-iso)).
+By hand, everything is done in the primary's portitor-config.
 
 1. **The two links.** On the primary's host, under *Network → Interfaces*, give one
    physical interface the *HA role* *HA link* and another *Management*. Each gets its

@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -141,6 +142,19 @@ func main() {
 	}
 	stateDir = render.DefaultPaths().StateDir
 	root.AddCommand(nsExec)
+
+	root.AddCommand(&cobra.Command{
+		Use:   "hup <pid>",
+		Short: "Reload a unit's daemon by SIGHUP, unless it is still starting (used by systemd units)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			pid, err := strconv.Atoi(args[0])
+			if err != nil {
+				return err
+			}
+			return agent.Hup(pid)
+		},
+	})
 
 	var dopt dhcpd.Options
 	dhcpdCmd := &cobra.Command{

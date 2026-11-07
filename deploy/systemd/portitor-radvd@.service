@@ -12,9 +12,11 @@ PartOf=portitor-agent.service
 [Service]
 Type=simple
 ExecStart=/usr/bin/portitor-agent netns-exec %i -- /usr/sbin/radvd --nodaemon --logmethod stderr --config /etc/portitor/instances/%i/radvd.conf --pidfile /tmp/radvd.pid
+# portitor-agent hup skips a daemon still starting (netns-exec), which reads
+# its config as it starts; a SIGHUP would end the launcher.
 # + : outside the sandbox, where $MAINPID is (PrivatePIDs gives each Exec*
 # line a PID namespace of its own).
-ExecReload=+/bin/kill -HUP $MAINPID
+ExecReload=+/usr/bin/portitor-agent hup $MAINPID
 # The PID file is in the private /tmp: radvd is PID 1 (PrivatePIDs), so a
 # stale one would read as "already running".
 Restart=on-failure

@@ -54,6 +54,22 @@ host is a portal to the GUIs of its firewalls, with no database.
          /etc/portitor/web.yaml. Log in to each firewall there with its own
          users.
 
+HA pairs (docs/ha.md):
+
+  primary    the firewall, as both, with its HA link and management
+             interfaces: after the bootstrap it gives them their roles and
+             addresses, lets the management network reach the GUI and SSH,
+             points its own firewall at its management address, and commits.
+             It ends by asking for the secondary string (later: `sudo
+             portitor-setup --join`), which adds the secondary and commits
+             the pair.
+  secondary  only its HA link and management: a unit gives them their
+             addresses until the pair's first commit, the agent listens on
+             every address, and portitor-config gets its own agent (set-agent)
+             with no bootstrap: the primary's configuration replaces its
+             database. It ends by showing the secondary string (again: `sudo
+             portitor-setup --show-join`), which holds the agent's token.
+
 Run again (`sudo portitor-setup`) after it has finished, it changes the
 network: the LAN and WAN interfaces (swapped, too) and addresses, the
 LAN's DHCP server (turned on or its range changed; off leaves it as it is),
@@ -75,7 +91,9 @@ optional), dns (space separated), password, hostname (default portitor, may incl
 finished. role (both, agent or web) picks the split setups; agent reads
 web_from (portitor-web's address or network, default the LAN network), web
 reads lan and address (its own interface), gateway and join (a portal
-string, optional).
+string, optional). primary and secondary read mgmt (a name or MAC address),
+mgmt_address, mgmt_gateway, ha_link and ha_address; primary may read join (a
+secondary string), and secondary needs no lan or address.
 """
 
 from __future__ import annotations
@@ -160,7 +178,21 @@ ROLES = [
     ("both", "the firewall, with its GUI (portitor-agent and portitor-config)"),
     ("agent", "the firewall, its GUI served by portitor-web on another host too"),
     ("web", "portitor-web only: the portal to firewalls on other hosts"),
+    ("primary", "the primary of an HA pair: the firewall, with its HA link and management"),
+    ("secondary", "the secondary of an HA pair: its HA link and management; the primary configures the rest"),
 ]
+HA_ROLES = ("primary", "secondary")
+# The agent's port, on every address in an HA pair: the peer and the
+# witness reach it over the HA link and management.
+AGENT_PORT = 8443
+# A secondary string: what the primary needs to add this host as its HA
+# secondary (sudo portitor-setup --join on the primary). It holds the
+# agent's token.
+SECONDARY_PREFIX = "portitor-secondary:"
+# The secondary's management address and HA link until the pair's first
+# commit, when the agent takes them over (it removes the proto 99 route).
+HA_NET_UNIT = Path("/etc/systemd/system/portitor-setup-ha.service")
+AGENT_APPLIED = Path("/var/lib/portitor/applied.json")
 MIN_PASSWORD = 10  # portitor-web's minimum
 
 
@@ -302,7 +334,7 @@ def check_address(text: str, other: ipaddress.IPv4Interface | None = None) -> ip
     if net.prefixlen > 31:
         raise ValueError("use a prefix length of 31 or less")
     if other and net.overlaps(other.network):
-        raise ValueError(f"{net} overlaps the LAN {other.network}")
+        raise ValueError(f"{net} overlaps {other.network}")
     return iface
 
 
@@ -461,6 +493,183 @@ def decode_portal(text: str) -> dict:
     return d
 
 
+def secondary_string(a: dict) -> str:
+    """Secondary role: what the primary needs to add this host."""
+    d = {
+        "name": portal_name(a),
+        "mgmt": str(a["mgmt_address"]),
+        "ha": str(a["ha_address"]),
+        "token": AGENT_TOKEN.read_text(encoding="utf-8").strip(),
+        "agent_fingerprint": agent_fingerprint(),
+        "config_fingerprint": cert_fingerprint(),
+    }
+    raw = json.dumps(d, separators=(",", ":")).encode()
+    return SECONDARY_PREFIX + base64.urlsafe_b64encode(raw).decode().rstrip("=")
+
+
+def decode_secondary(text: str) -> dict:
+    """A secondary string's contents."""
+    text = "".join(text.split())
+    if not text.startswith(SECONDARY_PREFIX):
+        raise ValueError(f"a secondary string starts with {SECONDARY_PREFIX}")
+    raw = text[len(SECONDARY_PREFIX):].rstrip("=")
+    try:
+        d = json.loads(base64.urlsafe_b64decode(raw + "=" * (-len(raw) % 4)))
+        if not isinstance(d, dict):
+            raise ValueError
+        d["mgmt"] = ipaddress.IPv4Interface(d["mgmt"])
+        d["ha"] = ipaddress.IPv4Interface(d["ha"])
+    except (ValueError, KeyError, TypeError):
+        raise ValueError("the secondary string is damaged; copy it again") from None
+    if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]{0,62}", str(d.get("name", ""))) \
+            or not re.fullmatch(r"[0-9a-f]{64}", str(d.get("agent_fingerprint", ""))) \
+            or not re.fullmatch(r"[0-9a-f]{64}", str(d.get("config_fingerprint", ""))) \
+            or not re.fullmatch(r"[A-Za-z0-9_=+/.-]{16,}", str(d.get("token", ""))):
+        raise ValueError("the secondary string is damaged; copy it again")
+    return d
+
+
+def agent_fingerprint() -> str:
+    """The agent's certificate SHA-256, as portitor-agent init printed it."""
+    out = run(["openssl", "x509", "-in", str(ETC / "agent.crt"), "-noout", "-fingerprint", "-sha256"], quiet=True).stdout
+    return out.strip().split("=", 1)[-1].replace(":", "").lower()
+
+
+def api(method: str, path: str, body: object = None) -> object:
+    """A portitor-config API request, run as the console admin."""
+    argv = config("api", method, path) + ([json.dumps(body)] if body is not None else [])
+    out = run(argv, quiet=True).stdout
+    return json.loads(out) if out.strip() else None
+
+
+def default_instance_id() -> int:
+    for inst in api("GET", "/api/instances") or []:
+        if inst.get("is_default"):
+            return int(inst["id"])
+    raise RuntimeError("no default virtual firewall")
+
+
+def own_firewall() -> dict:
+    """The firewall portitor-config here deploys to as its own: the first that is no secondary."""
+    fws = [f for f in api("GET", "/api/firewalls") or [] if not f.get("ha_primary_id")]
+    if not fws:
+        raise RuntimeError("no firewall in portitor-config")
+    return min(fws, key=lambda f: f["id"])
+
+
+def ha_interface(instance: int, nic: str, role: str, address: str, gateway: str = "", description: str = "") -> dict:
+    """Gives nic its HA role and address on the host's virtual firewall."""
+    body = {"ha_role": role, "addresses": [address], "enabled": True, "ipv4_mode": "static",
+            "description": description, "ha_monitor": False}
+    if role == "management":
+        body["ha_gateway"] = gateway
+    for ifc in api("GET", f"/api/interfaces?instance_id={instance}") or []:
+        if ifc.get("name") == nic and ifc.get("instance_id") == instance:
+            return api("PUT", f"/api/interfaces/{ifc['id']}", body)
+    return api("POST", "/api/interfaces", {**body, "instance_id": instance, "name": nic, "kind": "physical"})
+
+
+def commit(what: str) -> None:
+    say(f"    commit: {what}")
+    run(config("commit", "--confirm", "300"))
+    run(config("confirm"))
+
+
+def step_ha_primary(a: dict) -> None:
+    """Primary role: the HA link and management interfaces, and this host's
+    agent and portitor-config at its management address, for the secondary
+    and the witness."""
+    inst = default_instance_id()
+    ha_interface(inst, a["ha_link"], "ha_link", str(a["ha_address"]), description="HA link")
+    ha_interface(inst, a["mgmt"], "management", str(a["mgmt_address"]), str(a["mgmt_gateway"]), "Management")
+    # The GUI and SSH from the management network, as from the LAN.
+    rules = api("GET", f"/api/rules?instance_id={inst}") or []
+    if not any(r.get("description") == "management from the management network" for r in rules):
+        api("POST", "/api/rules", {"instance_id": inst, "chain": "input", "in_interfaces": [a["mgmt"]],
+                                   "services": ["portitor-mgmt"], "description": "management from the management network",
+                                   "enabled": True})
+    fw = own_firewall()
+    ip = a["mgmt_address"].ip
+    api("PUT", f"/api/firewalls/{fw['id']}", {"agent_url": f"https://{ip}:{AGENT_PORT}",
+                                              "config_url": f"https://{ip}:{GUI_PORT}",
+                                              "config_fingerprint": cert_fingerprint()})
+    commit("the HA link and management interfaces")
+
+
+def add_secondary(a: dict, d: dict) -> None:
+    """Primary role: adds the host of a secondary string as the HA secondary,
+    with its addresses on the two links, and commits the pair."""
+    fw = own_firewall()
+    if any(f.get("ha_primary_id") == fw["id"] for f in api("GET", "/api/firewalls") or []):
+        raise RuntimeError(f"{fw['name']} has an HA secondary already (Admin -> Firewalls)")
+    inst = default_instance_id()
+    links = {i["ha_role"]: i for i in api("GET", f"/api/interfaces?instance_id={inst}") or []
+             if i.get("ha_role") and i.get("instance_id") == inst}
+    for role, peer in (("ha_link", d["ha"]), ("management", d["mgmt"])):
+        ifc = links.get(role)
+        if not ifc or not ifc.get("addresses"):
+            raise RuntimeError(f"this host has no {role} interface with an address: run the primary's setup first")
+        own = ipaddress.IPv4Interface(ifc["addresses"][0])
+        if own.network != peer.network or own.ip == peer.ip:
+            raise RuntimeError(f"the secondary's {role} address {peer} is not another address in {own.network}")
+    ip = d["mgmt"].ip
+    api("POST", "/api/firewalls", {"name": d["name"], "agent_url": f"https://{ip}:{AGENT_PORT}",
+                                   "agent_token": d["token"], "agent_fingerprint": d["agent_fingerprint"],
+                                   "config_url": f"https://{ip}:{GUI_PORT}", "config_fingerprint": d["config_fingerprint"],
+                                   "ha_primary_id": fw["id"]})
+    for role, peer in (("ha_link", d["ha"]), ("management", d["mgmt"])):
+        api("PUT", f"/api/interfaces/{links[role]['id']}", {"peer_addresses": [str(peer)]})
+    commit(f"the HA pair with {d['name']}")
+
+
+def join_secondary(a: dict, text: str) -> bool:
+    say("==> Add the HA secondary")
+    try:
+        d = decode_secondary(text)
+        add_secondary(a, d)
+    except (ValueError, RuntimeError, OSError) as exc:
+        say(f"!!  {exc}")
+        return False
+    say(f"{d['name']} is the HA secondary. portitor show ha on either host shows the pair.")
+    return True
+
+
+def step_ha_network(a: dict) -> None:
+    """Secondary role: its management address and HA link until the pair's
+    first commit (the agent's then), so the primary reaches its agent."""
+    mgmt, ha = a["mgmt"], a["ha_link"]
+    write(HA_NET_UNIT, f"""# Written by the Portitor setup: this HA secondary's management address and
+# HA link until the pair's first commit, when portitor-agent takes them over.
+[Unit]
+Description=Portitor HA secondary network until the first commit
+Before=portitor-agent.service
+ConditionPathExists=!{AGENT_APPLIED}
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/ip link set {mgmt} up
+ExecStart=/usr/sbin/ip addr replace {a['mgmt_address']} dev {mgmt}
+ExecStart=/usr/sbin/ip link set {ha} up
+ExecStart=/usr/sbin/ip addr replace {a['ha_address']} dev {ha}
+ExecStart=-/usr/sbin/ip route replace default via {a['mgmt_gateway']} dev {mgmt} proto 99
+
+[Install]
+WantedBy=multi-user.target
+""", 0o644)
+    run(["systemctl", "daemon-reload"])
+    run(["systemctl", "enable", HA_NET_UNIT.name])
+    run(["systemctl", "restart", HA_NET_UNIT.name])
+
+
+def step_own_agent(a: dict) -> None:
+    """Secondary role: portitor-config's own firewall, its agent, without a
+    bootstrap: the primary's configuration replaces this database once the
+    pair is committed."""
+    run(config("set-agent", "--url", f"https://127.0.0.1:{AGENT_PORT}", "--token-file", "-",
+               "--fingerprint", a["fingerprint"]), stdin=AGENT_TOKEN.read_text(encoding="utf-8"))
+
+
 # ---------------------------------------------------------------------------
 # steps
 # ---------------------------------------------------------------------------
@@ -482,8 +691,9 @@ def config(*args: str) -> list[str]:
 def step_links(a: dict) -> None:
     # Only the LAN and the WAN stay up; the others are imported as they
     # are, so down.
+    keep = (a["lan"], a["wan"], a.get("mgmt", ""), a.get("ha_link", ""))
     for n in nics():
-        if n["name"] not in (a["lan"], a["wan"]):
+        if n["name"] not in keep:
             run(["ip", "link", "set", n["name"], "down"], check=False, quiet=True)
 
 
@@ -617,6 +827,8 @@ def step_users(a: dict) -> None:
 def agent_init(a: dict) -> None:
     """Makes the agent's token and certificate, or keeps them; sets a["fingerprint"]."""
     hosts = ["127.0.0.1", "localhost"]
+    if a.get("mgmt_address"):
+        hosts.append(str(a["mgmt_address"].ip))
     # The output holds the agent's token.
     out = run(["portitor-agent", "init", *[x for h in hosts for x in ("--host", h)]], secret=True).stdout
     m = re.search(r"^fingerprint:\s*([0-9a-f]{64})\s*$", out, re.M)
@@ -631,18 +843,24 @@ def step_agent(a: dict) -> None:
 
 
 def step_agent_config(a: dict) -> None:
-    # An HA pair's agents also reach each other: see docs/ha.md.
-    head = f"""# portitor-config runs on this host and is the only client of the API.
+    if a["role"] in HA_ROLES:
+        # An HA pair's agents reach each other over the HA link and
+        # management, and the witness over management: see docs/ha.md.
+        head = ("# portitor-config on this host, the HA peer and the witness are its clients.\n"
+                f'listen: ":{AGENT_PORT}"')
+        allow = ["127.0.0.1/32", str(a["mgmt_address"].network), str(a["ha_address"].network)]
+    else:
+        head = f"""# portitor-config runs on this host and is the only client of the API.
 listen: {AGENT_LISTEN}"""
-    allow = "127.0.0.1/32"
+        allow = ["127.0.0.1/32"]
+    allow_lines = "".join(f"  - {x}\n" for x in allow)
     write(AGENT_YAML, f"""# /etc/portitor/agent.yaml - written by the first-boot setup.
 {head}
 token_file: {ETC}/agent.token
 tls_cert: {ETC}/agent.crt
 tls_key: {ETC}/agent.key
 allow_from:
-  - {allow}
-console_user: {CONSOLE_USER}
+{allow_lines}console_user: {CONSOLE_USER}
 """, 0o600)
     run(["systemctl", "enable", "portitor-agent.service"])
     run(["systemctl", "restart", "portitor-agent.service"])
@@ -863,9 +1081,40 @@ WEB_RECONFIGURE_STEPS = [
     ("Login screen", step_issue),
 ]
 
+# The primary is the firewall, with its HA link and management.
+PRIMARY_STEPS = STEPS[:-2] + [("HA link and management", step_ha_primary)] + STEPS[-2:]
+
+# The secondary: its two links and its agent; the primary configures the rest.
+SECONDARY_STEPS = [
+    ("Console password", step_console_password),
+    ("Keyboard layout", step_keyboard),
+    ("Interfaces", step_links),
+    ("HA link and management", step_ha_network),
+    ("DNS servers", step_dns),
+    ("Time zone", step_timezone),
+    ("Host name", step_hostname),
+    ("Database", step_database),
+    ("portitor-config configuration", step_config),
+    ("Users", step_users),
+    ("portitor-agent", step_agent),
+    ("portitor-config's agent", step_own_agent),
+    ("Start portitor-config", step_web),
+    ("Login screen", step_issue),
+]
+
+SECONDARY_RECONFIGURE_STEPS = [
+    ("Console password", step_console_password),
+    ("Keyboard layout", step_keyboard),
+    ("DNS servers", step_dns),
+    ("Time zone", step_timezone),
+    ("Host name", step_hostname),
+    ("Users", step_users),
+]
+
 # The agent role is the firewall's, with a portal string at the end.
-FIRST_STEPS = {"both": STEPS, "agent": STEPS, "web": WEB_STEPS}
-RECONFIGURE = {"both": RECONFIGURE_STEPS, "agent": RECONFIGURE_STEPS, "web": WEB_RECONFIGURE_STEPS}
+FIRST_STEPS = {"both": STEPS, "agent": STEPS, "web": WEB_STEPS, "primary": PRIMARY_STEPS, "secondary": SECONDARY_STEPS}
+RECONFIGURE = {"both": RECONFIGURE_STEPS, "agent": RECONFIGURE_STEPS, "web": WEB_RECONFIGURE_STEPS,
+               "primary": RECONFIGURE_STEPS, "secondary": SECONDARY_RECONFIGURE_STEPS}
 
 
 def read_answers() -> dict:
@@ -889,10 +1138,12 @@ def read_answers() -> dict:
     if role not in dict(ROLES):
         raise RuntimeError(f"{ANSWERS}: no role {role!r}")
 
+    ha = role in HA_ROLES
     a = {
         "role": role,
-        "lan": nic("lan"),
-        "address": None if raw["address"].lower() == "dhcp" else ipaddress.IPv4Interface(raw["address"]),
+        "lan": nic("lan") if role != "secondary" else "",
+        "address": (None if role == "secondary" or raw["address"].lower() == "dhcp"
+                    else ipaddress.IPv4Interface(raw["address"])),
         "wan": nic("wan") if raw.get("wan") and role != "web" else "",
         "wan_address": ipaddress.IPv4Interface(raw["wan_address"]) if raw.get("wan_address") and role != "web" else None,
         "gateway": ipaddress.IPv4Address(raw["gateway"]) if raw.get("gateway") else None,
@@ -905,7 +1156,17 @@ def read_answers() -> dict:
         "keyboard": keyboard,
         "web_from": "",
         "join": raw.get("join", ""),
+        "mgmt": nic("mgmt") if ha else "",
+        "mgmt_address": ipaddress.IPv4Interface(raw["mgmt_address"]) if ha else None,
+        "mgmt_gateway": ipaddress.IPv4Address(raw["mgmt_gateway"]) if ha else None,
+        "ha_link": nic("ha_link") if ha else "",
+        "ha_address": ipaddress.IPv4Interface(raw["ha_address"]) if ha else None,
     }
+    if role == "secondary":
+        a["wan"], a["wan_address"] = "", None
+        a["lan"], a["address"], a["gateway"] = a["mgmt"], a["mgmt_address"], a["mgmt_gateway"]
+    if a["join"] and role == "primary":
+        decode_secondary(a["join"])
     if role == "agent":
         if not a["address"]:
             raise RuntimeError(f"{ANSWERS}: the agent-only firewall needs a static LAN address")
@@ -921,7 +1182,7 @@ def read_answers() -> dict:
             a["dhcp_range"] = check_dhcp_range(raw["dhcp_range"], a["address"])
         except ValueError as exc:
             raise RuntimeError(f"{ANSWERS}: dhcp_range: {exc}") from None
-    if a["join"]:
+    if a["join"] and role == "web":
         decode_portal(a["join"])
     return a
 
@@ -937,7 +1198,8 @@ def load_state() -> dict:
 
 def state_of(a: dict) -> dict:
     """The answers as strings, without the password; a DHCP LAN is "dhcp"."""
-    state = {k: str(a[k]) if a.get(k) else "" for k in ("role", "lan", "wan", "wan_address", "gateway", "tz", "hostname", "keyboard", "web_from")}
+    state = {k: str(a[k]) if a.get(k) else "" for k in ("role", "lan", "wan", "wan_address", "gateway", "tz", "hostname", "keyboard", "web_from",
+                                                         "mgmt", "mgmt_address", "mgmt_gateway", "ha_link", "ha_address")}
     state["address"] = str(a["address"] or "dhcp")
     state["dns"] = " ".join(a["dns"])
     state["dhcp_range"] = fmt_range(a.get("dhcp_range"))
@@ -955,6 +1217,9 @@ def answers_of(state: dict) -> dict:
         "wan": state.get("wan", ""), "wan_address": iface("wan_address"),
         "gateway": ipaddress.IPv4Address(state["gateway"]) if state.get("gateway") else None,
         "dns": parse_dns(state.get("dns") or PUBLIC_DNS),
+        "mgmt": state.get("mgmt", ""), "mgmt_address": iface("mgmt_address"),
+        "mgmt_gateway": ipaddress.IPv4Address(state["mgmt_gateway"]) if state.get("mgmt_gateway") else None,
+        "ha_link": state.get("ha_link", ""), "ha_address": iface("ha_address"),
     }
 
 
@@ -990,7 +1255,10 @@ def nic_label(name: str) -> str:
 
 def summary(a: dict) -> list[str]:
     out = [f"Runs            {a['role']}: {dict(ROLES)[a['role']]}"]
-    if a["role"] == "web":
+    if a["role"] == "secondary":
+        out += [f"Management      {nic_label(a['mgmt'])} {a['mgmt_address']}, gateway {a['mgmt_gateway']}",
+                f"HA link         {nic_label(a['ha_link'])} {a['ha_address']}"]
+    elif a["role"] == "web":
         out += [f"Interface       {nic_label(a['lan'])}",
                 f"Address         {a['address'] or 'DHCP'}",
                 f"Default gateway {a['gateway'] or 'from DHCP'}"]
@@ -1003,6 +1271,9 @@ def summary(a: dict) -> list[str]:
                 f"LAN DHCP server {fmt_range(a.get('dhcp_range')) or ('unchanged' if a.get('reconfigure') and a['address'] else 'off')}"]
         if a["role"] == "agent":
             out.append(f"portitor-web    {a['web_from']}")
+        if a["role"] == "primary" and a.get("mgmt"):
+            out += [f"Management      {nic_label(a['mgmt'])} {a['mgmt_address']}, gateway {a['mgmt_gateway']}",
+                    f"HA link         {nic_label(a['ha_link'])} {a['ha_address']}"]
     out += [f"DNS servers     {' '.join(a['dns'])}",
             f"Host name       {a['hostname']}",
             f"Time zone       {a['tz']}",
@@ -1039,6 +1310,30 @@ same under firewalls: in {WEB_YAML}:
     fingerprint: {d['fingerprint']}
 It names no secret: the users log in to the firewall itself.
 """
+
+
+def secondary_text(a: dict) -> str:
+    """Secondary role: the string for the primary, and how to use it."""
+    return f"""This host is ready to be the HA secondary. On the primary, run
+sudo portitor-setup --join and paste this secondary string (it holds this host's
+agent token: keep it to yourself):
+
+{secondary_string(a)}
+
+Easiest is to copy it over SSH (ssh {CONSOLE_USER}@{a['mgmt_address'].ip}, then sudo
+portitor-setup --show-join). The primary then adds this host and commits the pair;
+from then on this host's portitor-config is a read-only copy of the primary's
+(log in with the primary's users).
+"""
+
+
+def primary_text(a: dict) -> str:
+    return f"""This host is the primary of an HA pair. Install the secondary from the ISO
+("secondary"), and paste the string its setup shows into sudo portitor-setup --join
+here. For a failover by itself, give the pair an external witness: see High
+availability in the GUI's Help.
+
+{gui_text(a)}"""
 
 
 def intro(role: str) -> str:
@@ -1222,8 +1517,9 @@ class NetworkPage(Page):
     heading = "Network"
 
     def kind(self) -> str:
-        """fw: the firewall's LAN and WAN; host: portitor-web only."""
-        return "host" if self.a["role"] == "web" else "fw"
+        """fw: the firewall's LAN and WAN; host: portitor-web only; dns: an
+        HA secondary, whose LAN and WAN the primary configures."""
+        return {"web": "host", "secondary": "dns"}.get(self.a["role"], "fw")
 
     def body(self) -> ComposeResult:
         kind, st, role = self.kind(), self.state, self.a["role"]
@@ -1255,6 +1551,10 @@ class NetworkPage(Page):
             yield Static("Hands out addresses on the LAN, with the firewall as gateway and the DNS servers "
                          "below." + (" Off leaves a DHCP server set up in the GUI as it is."
                                      if self.app.reconfigure else ""), classes="hint")
+        elif kind == "dns":
+            yield Static("An HA secondary takes its LAN, WAN and everything else from the primary once the "
+                         "pair is committed; it needs only its HA link and management interfaces (the next "
+                         "step) and the DNS servers it uses until then.", classes="text")
         elif kind == "host":
             yield Static("The interface this host is reached on (the GUI) and reaches the firewall through. "
                          "Plug in a cable to see which interface it is; Reload updates the link state.",
@@ -1359,6 +1659,12 @@ class NetworkPage(Page):
     def save(self) -> None:
         a, kind = self.a, self.kind()
         a["dhcp_range"] = None
+        if kind == "dns":
+            a["wan"], a["wan_address"], a["default_route"], a["web_from"] = "", None, "wan", ""
+            if self.app.reconfigure:
+                a.update({k: v for k, v in answers_of(self.state).items() if k != "dns"})
+            a["dns"] = self.field("DNS servers", parse_dns, self.value("#dns"))
+            return
         if kind == "host":
             a["lan"] = self.nic("#lan", "interface")
             a["address"] = self.field("Address", check_address, self.value("#address")) if self.static("#lan_mode") else None
@@ -1384,6 +1690,73 @@ class NetworkPage(Page):
         if a["role"] == "agent":
             a["web_from"] = self.field("portitor-web from", check_web_from,
                                        self.value("#web_from") or str(a["address"].network))
+
+
+class HAPage(Page):
+    title = "HA pair"
+    heading = "HA link and management"
+
+    def body(self) -> ComposeResult:
+        st, role = self.state, self.a["role"]
+        if role not in HA_ROLES:
+            yield Static("Only for an HA pair (machine type primary or secondary): nothing to set here.",
+                         classes="text")
+            return
+        yield Static("An HA pair needs two interfaces of its own on each host: the HA link, a direct cable "
+                     "between the two, and the management interface, on a network of its own with the "
+                     "witness (the portal) and the GUI. The two must not share a switch. "
+                     + ("The secondary's setup then shows a string to add it here (sudo portitor-setup --join)."
+                        if role == "primary" else
+                        "At the end this setup shows a string for the primary, which adds this host and "
+                        "configures the rest."), classes="text")
+        yield row("Management", Select([], id="mgmt", prompt="choose the management interface"))
+        yield row("Address", Input(st.get("mgmt_address", ""), id="mgmt_address", placeholder="172.25.38.1/24"))
+        yield row("Gateway", Input(st.get("mgmt_gateway", ""), id="mgmt_gateway", placeholder="172.25.38.254"))
+        yield Static("What the host itself uses while it is the standby: updates, NTP, the witness. "
+                     "It must not be the pair.", classes="hint")
+        yield row("HA link", Select([], id="ha_link", prompt="choose the HA link interface"))
+        yield row("HA link address", Input(st.get("ha_address") or ("169.254.1.1/30" if role == "primary" else "169.254.1.2/30"),
+                                           id="ha_address"))
+        yield Static("This host's; the other host has another address in the same network.", classes="hint")
+        yield Button("Reload interfaces", id="reload")
+
+    def on_mount(self) -> None:
+        self.reload()
+
+    @on(Button.Pressed, "#reload")
+    def reload(self) -> None:
+        for sid in ("#mgmt", "#ha_link"):
+            for select in self.query(sid).results(Select):
+                set_nic_options(select, self.state.get(sid[1:], ""))
+
+    def nic(self, wid: str, name: str) -> str:
+        select = self.query_one(wid, Select)
+        if select.is_blank():
+            raise ValueError(f"choose the {name}")
+        return str(select.value)
+
+    def save(self) -> None:
+        a = self.a
+        for k in ("mgmt", "ha_link"):
+            a[k] = ""
+        a["mgmt_address"] = a["ha_address"] = a["mgmt_gateway"] = None
+        if a["role"] not in HA_ROLES:
+            return
+        a["mgmt"] = self.nic("#mgmt", "management interface")
+        a["ha_link"] = self.nic("#ha_link", "HA link interface")
+        used = [a["mgmt"], a["ha_link"]] + ([a["lan"], a["wan"]] if a["role"] == "primary" else [])
+        if len(set(used)) != len(used):
+            raise ValueError("the LAN, WAN, management and HA link interfaces must all differ")
+        a["mgmt_address"] = self.field("Management address", check_address, self.value("#mgmt_address"))
+        a["mgmt_gateway"] = self.field("Gateway", check_gateway, self.value("#mgmt_gateway"), a["mgmt_address"])
+        a["ha_address"] = self.field("HA link address", check_address, self.value("#ha_address"), a["mgmt_address"])
+        if a["role"] == "primary":
+            for other in (a["address"], a["wan_address"]):
+                if other and (a["mgmt_address"].network.overlaps(other.network) or a["ha_address"].network.overlaps(other.network)):
+                    raise ValueError("the management and HA link networks must differ from the LAN's and WAN's")
+        else:
+            # The secondary is reached on its management address.
+            a["lan"], a["address"], a["gateway"] = a["mgmt"], a["mgmt_address"], a["mgmt_gateway"]
 
 
 class AccountPage(Page):
@@ -1663,19 +2036,31 @@ class ProgressPage(LogPage):
 
 
 class JoinPage(LogPage):
-    """portitor-web only: the portal string from a firewall, served."""
+    """portitor-web only: the portal string from a firewall, served; an HA
+    primary: the secondary string, added."""
 
     def __init__(self, optional: bool) -> None:
         super().__init__()
         self.optional = optional
 
+    @property
+    def secondary(self) -> bool:
+        return self.app.a.get("role") == "primary"
+
     def compose(self) -> ComposeResult:
         yield Header(icon=" ")
-        yield Static("Serve a firewall's GUI", classes="heading")
-        yield Static("Paste the portal string that the firewall's setup showed (sudo portitor-setup "
-                     "--show-join on the firewall shows it again)."
-                     + (" Later is fine too: sudo portitor-setup --join." if self.optional else ""), classes="text")
-        yield Input(placeholder=PORTAL_PREFIX + "...", id="join")
+        if self.secondary:
+            yield Static("Add the HA secondary", classes="heading")
+            yield Static("Paste the secondary string that the secondary's setup showed (sudo portitor-setup "
+                         "--show-join on it shows it again). This adds it and commits the pair."
+                         + (" Later is fine too: sudo portitor-setup --join." if self.optional else ""), classes="text")
+            yield Input(placeholder=SECONDARY_PREFIX + "...", id="join", password=True)
+        else:
+            yield Static("Serve a firewall's GUI", classes="heading")
+            yield Static("Paste the portal string that the firewall's setup showed (sudo portitor-setup "
+                         "--show-join on the firewall shows it again)."
+                         + (" Later is fine too: sudo portitor-setup --join." if self.optional else ""), classes="text")
+            yield Input(placeholder=PORTAL_PREFIX + "...", id="join")
         yield Label("", id="error")
         yield RichLog(wrap=True, id="log")
         with Horizontal(id="buttons"):
@@ -1697,18 +2082,23 @@ class JoinPage(LogPage):
     def deploy(self) -> None:
         text = "".join(self.query_one("#join", Input).value.split())
         try:
-            d = decode_portal(text)
+            if self.secondary:
+                d = decode_secondary(text)
+                shown = f"secondary {d['name']}, management {d['mgmt']}"
+            else:
+                d = decode_portal(text)
+                shown = f"firewall {d['name']}, portitor-config {d['url']}"
         except ValueError as exc:
             self.query_one("#error", Label).update(str(exc))
             return
-        self.query_one("#error", Label).update(f"firewall {d['name']}, portitor-config {d['url']}")
+        self.query_one("#error", Label).update(shown)
         for b in self.query(Button):
             b.disabled = True
         self.run_join(text)
 
     @work(thread=True, exclusive=True)
     def run_join(self, text: str) -> None:
-        ok = join(self.app.a, text)
+        ok = join_secondary(self.app.a, text) if self.secondary else join(self.app.a, text)
         self.app.call_from_thread(self.joined, ok)
 
     def joined(self, ok: bool) -> None:
@@ -1716,7 +2106,7 @@ class JoinPage(LogPage):
             self.app.joined = True
             self.app.push_screen(DonePage())
             return
-        self.query_one("#error", Label).update("That failed (see below). Try another portal string"
+        self.query_one("#error", Label).update("That failed (see below). Try another string"
                                                + (", or Later." if self.optional else "."))
         for b in self.query(Button):
             b.disabled = False
@@ -1732,10 +2122,18 @@ class DonePage(Screen):
         with VerticalScroll(id="body"):
             if a.get("role") == "agent":
                 yield Static(join_text(a), classes="text")
+            elif a.get("role") == "secondary" and self.app.mode == "first":
+                yield Static(secondary_text(a), classes="text")
+            elif a.get("role") == "primary" and self.app.mode == "join":
+                yield Static("The HA pair is committed: portitor show ha on either host shows it.", classes="text")
+            elif a.get("role") == "primary" and self.app.mode == "first" and not self.app.joined:
+                yield Static(primary_text(a), classes="text")
             elif self.app.mode == "join":
                 yield Static("portitor-web serves the firewall's GUI now.", classes="text")
             else:
-                if self.app.joined:
+                if self.app.joined and a.get("role") == "primary":
+                    yield Static("The HA pair is committed: portitor show ha on either host shows it.", classes="text")
+                elif self.app.joined:
                     yield Static("portitor-web serves the firewall's GUI now; log in with the firewall's users.", classes="text")
                 yield Static(gui_text(a), classes="text")
         with Horizontal(id="buttons"):
@@ -1808,11 +2206,11 @@ class SetupApp(App):
             self.a["role"] = state.get("role") or "both"
             self.pages = [KeyboardPage, NetworkPage, AccountPage, SummaryPage]
         else:
-            self.pages = [KeyboardPage, RolePage, NetworkPage, AccountPage, SummaryPage]
+            self.pages = [KeyboardPage, RolePage, NetworkPage, HAPage, AccountPage, SummaryPage]
 
     def on_mount(self) -> None:
         if self.mode == "join":
-            self.a["role"] = "web"
+            self.a["role"] = "primary" if self.state.get("role") == "primary" else "web"
             self.push_screen(JoinPage(optional=False))
         else:
             self.push_screen(Wizard(self.pages, self.reconfigure))
@@ -1821,7 +2219,7 @@ class SetupApp(App):
         self.push_screen(ProgressPage())
 
     def steps_done(self) -> None:
-        if self.mode == "first" and self.a["role"] == "web":
+        if self.mode == "first" and self.a["role"] in ("web", "primary"):
             self.push_screen(JoinPage(optional=True))
         else:
             self.push_screen(DonePage())
@@ -1846,7 +2244,11 @@ def unattended() -> int:
     finish(a)
     if a["role"] == "agent":
         say(join_text(a))
+    elif a["role"] == "secondary":
+        say(secondary_text(a))
     elif a["role"] == "web" and a["join"] and not join(a, a["join"]):
+        return 1
+    elif a["role"] == "primary" and a["join"] and not join_secondary(a, a["join"]):
         return 1
     say(f"Done. GUI: {a['url']}")
     return 0
@@ -1855,9 +2257,11 @@ def unattended() -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Portitor setup (see the top of this file).")
     group = parser.add_mutually_exclusive_group()
-    group.add_argument("--join", nargs="?", const="", default=None, metavar="PORTAL_STRING",
-                       help="portitor-web only: serve the firewall of a portal string (asked for without one)")
-    group.add_argument("--show-join", action="store_true", help="agent role: print the portal string for portitor-web")
+    group.add_argument("--join", nargs="?", const="", default=None, metavar="STRING",
+                       help="portitor-web only: serve the firewall of a portal string; an HA primary: add the "
+                            "secondary of a secondary string (asked for without one)")
+    group.add_argument("--show-join", action="store_true",
+                       help="agent role: print the portal string for portitor-web; an HA secondary: the string for the primary")
     args = parser.parse_args()
     if os.geteuid() != 0:
         if shutil.which("sudo"):
@@ -1866,16 +2270,20 @@ def main() -> int:
         return 1
     state = load_state()
     if args.join is not None or args.show_join:
-        want = "web" if args.join is not None else "agent"
-        if not DONE.exists() or (state.get("role") or "both") != want:
-            say(f"{'--join' if args.join is not None else '--show-join'} is for a machine set up as \"{want}\"")
+        want = ("web", "primary") if args.join is not None else ("agent", "secondary")
+        role = state.get("role") or "both"
+        if not DONE.exists() or role not in want:
+            say(f"{'--join' if args.join is not None else '--show-join'} is for a machine set up as "
+                f"\"{want[0]}\" or \"{want[1]}\"")
             return 1
         if args.join:
+            if role == "primary":
+                return 0 if join_secondary({"role": "primary"}, args.join) else 1
             return 0 if join({"role": "web"}, args.join) else 1
         if args.show_join:
             # Plain text, to copy over SSH.
-            a = {**answers_of(state), "role": "agent", "hostname": state.get("hostname") or current_hostname()}
-            say(join_text(a))
+            a = {**answers_of(state), "role": role, "hostname": state.get("hostname") or current_hostname()}
+            say(secondary_text(a) if role == "secondary" else join_text(a))
             return 0
         return run_tui("join", state)
     if DONE.exists():

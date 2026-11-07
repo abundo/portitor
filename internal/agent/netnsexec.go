@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -50,6 +51,13 @@ var droppedCaps = []uintptr{
 // daemons still run as the frr user, with only the capabilities they ask
 // for, and their config is the validated frr.conf.
 func NetnsExec(stateDir, instance string, argv []string, keepSysAdmin bool) error {
+	// A reload right after systemd started the unit (the agent's, or
+	// dnsmgr2's after its first sync) is a SIGHUP to this process before
+	// it has become the daemon, which would end it (Go exits with status
+	// 2). Ignored, it stays ignored across the exec until the daemon sets
+	// its own handler, as named, radvd, OpenVPN and dhcpd do; a starting
+	// daemon reads the current config anyway.
+	signal.Ignore(syscall.SIGHUP)
 	if len(argv) == 0 {
 		return errors.New("no command")
 	}
@@ -93,4 +101,38 @@ func NetnsExec(stateDir, instance string, argv []string, keepSysAdmin bool) erro
 		return fmt.Errorf("clear ambient capabilities: %w", err)
 	}
 	return syscall.Exec(path, argv, os.Environ())
+}
+
+// Hup sends SIGHUP to a unit's main process, the reload of the units that
+// start through netns-exec (ExecReload). While the process is still the
+// launcher (netns-exec, or setpriv after it), the daemon hasn't started:
+// it reads the current config when it does, and the signal would end the
+// launcher instead. Between this look and the signal the launcher may
+// exec; netns-exec's ignored SIGHUP covers the daemon until it sets its
+// own handler.
+func Hup(pid int) error {
+	if pid <= 1 {
+		return fmt.Errorf("invalid pid %d", pid)
+	}
+	b, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
+	if errors.Is(err, os.ErrNotExist) {
+		// Under PrivatePIDs systemd forks once more: right after a start
+		// the main PID may be the step before the daemon.
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if launching(strings.Split(strings.TrimRight(string(b), "\x00"), "\x00")) {
+		return nil
+	}
+	return unix.Kill(pid, unix.SIGHUP)
+}
+
+// launching says whether argv is netns-exec's or setpriv's.
+func launching(argv []string) bool {
+	if len(argv) == 0 {
+		return false
+	}
+	return filepath.Base(argv[0]) == "setpriv" || (len(argv) > 1 && argv[1] == "netns-exec")
 }

@@ -15,11 +15,17 @@ Type=simple
 # portitor-dhcp with only what it needs: binding ports 67 and 547 and to
 # its interfaces, and ARP checks before an offer.
 ExecStart=/usr/bin/portitor-agent netns-exec %i -- /usr/bin/setpriv --reuid=portitor-dhcp --regid=portitor-dhcp --clear-groups --inh-caps=-all,+net_bind_service,+net_raw --ambient-caps=-all,+net_bind_service,+net_raw --bounding-set=-all,+net_bind_service,+net_raw --no-new-privs -- /usr/bin/portitor-agent dhcpd %i
-# SIGHUP reads the config again and keeps the leases. PrivatePIDs gives
+# SIGHUP reads the config again and keeps the leases; portitor-agent hup
+# skips a server still starting, which reads it as it starts. PrivatePIDs gives
 # each Exec line its own PID namespace, hence the +.
-ExecReload=+/bin/kill -HUP $MAINPID
+ExecReload=+/usr/bin/portitor-agent hup $MAINPID
 Restart=on-failure
 RestartSec=2
+# The server is PID 1 of its PID namespace (PrivatePIDs), where the kernel
+# drops a signal it has no handler for: a stop in the moment setpriv runs
+# is lost, and the server would run until the stop times out. It stops in
+# milliseconds when it hears the stop.
+TimeoutStopSec=5
 # Multitenancy: an instance's daemon sees only its own files and processes.
 # Its config, lease log and control socket directories are mounted alone
 # (directories: the agent replaces the config by renaming, which a file's

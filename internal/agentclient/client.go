@@ -46,7 +46,25 @@ type Error struct {
 }
 
 func (e *Error) Error() string {
-	return fmt.Sprintf("agent: %s (HTTP %d)", e.Message, e.Status)
+	msg := fmt.Sprintf("agent: %s (HTTP %d)", e.Message, e.Status)
+	switch e.Status {
+	case http.StatusUnauthorized:
+		msg += ": the agent refused the token; set it under Admin → Firewalls (portitor-agent init on the firewall prints it)"
+	case http.StatusForbidden:
+		msg += ": add this host's address to allow_from in the firewall's /etc/portitor/agent.yaml"
+	}
+	return msg
+}
+
+// ErrFingerprint: the certificate isn't the one pinned.
+var ErrFingerprint = errors.New("not the pinned certificate")
+
+// Refused says whether err is the agent's answer, an HTTP error (a wrong
+// token, say), or a certificate other than the pinned one, rather than
+// not reaching it.
+func Refused(err error) bool {
+	var e *Error
+	return errors.As(err, &e) || errors.Is(err, ErrFingerprint)
 }
 
 // New returns a client. With a fingerprint, the agent's certificate is
@@ -95,7 +113,7 @@ func PinnedTLS(what, fingerprint string) (*tls.Config, error) {
 		}
 		got := sha256.Sum256(rawCerts[0])
 		if subtle.ConstantTimeCompare(got[:], want) != 1 {
-			return fmt.Errorf("%s certificate fingerprint mismatch (got %s)", what, hex.EncodeToString(got[:]))
+			return fmt.Errorf("%w: %s certificate fingerprint mismatch (got %s): check the fingerprint under Admin → Firewalls", ErrFingerprint, what, hex.EncodeToString(got[:]))
 		}
 		return nil
 	}
@@ -142,6 +160,9 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
+		if errors.Is(err, ErrFingerprint) {
+			return fmt.Errorf("agent: %w", err)
+		}
 		return fmt.Errorf("agent unreachable: %w", err)
 	}
 	defer resp.Body.Close()

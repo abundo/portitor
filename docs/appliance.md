@@ -171,6 +171,36 @@ Run again, `sudo portitor-setup` changes on the firewall what it changes for *bo
 and portitor-web's address; on the portal, the host's interface and address, the DNS
 servers, the time zone, the keyboard layout and the password.
 
+## An HA pair from the ISO
+
+Two more machine types set up an [HA pair](ha.md):
+
+- **primary**: the firewall, as *both*, with its HA link and management interfaces.
+- **secondary**: only its HA link and management interfaces; the primary configures
+  the rest.
+
+Both ask, besides the usual, for the **management** interface, its address and its
+gateway (what the host itself uses while it is the standby), and the **HA link**
+interface and its address (`169.254.1.1/30` on the primary and `169.254.1.2/30` on the
+secondary by default). The two networks must not share a switch.
+
+**The primary** deploys its LAN and WAN as *both* does, then the two interfaces, a rule
+that lets the management network reach the GUI and SSH, and its agent and
+portitor-config at its management address.
+
+**The secondary** gets its management address and HA link until the pair's first
+commit (when the agent takes them over), its agent on its management address, and
+portitor-config, which becomes a read-only copy of the primary's once the pair is
+committed. Its setup ends with a **secondary string**, `portitor-secondary:...`: its
+name, its two addresses, its agent's token and its certificates' fingerprints. It
+holds the token: keep it to yourself. `sudo portitor-setup --show-join` on the
+secondary prints it again.
+
+On the primary, paste it at the end of the setup, or later with `sudo portitor-setup
+--join`. That adds the secondary under *Admin → Firewalls* with its addresses on the
+two links, and commits the pair. Then set up an external witness for a failover by
+itself (see [The witness](ha.md#the-witness)).
+
 ## Updates
 
 *Admin → Updates* updates the firewall. Nothing happens until you click a button.

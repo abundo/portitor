@@ -166,3 +166,19 @@ func TestParseNICs(t *testing.T) {
 		t.Errorf("eth1 %+v", e)
 	}
 }
+
+func TestLaunching(t *testing.T) {
+	for _, c := range []struct {
+		argv []string
+		want bool
+	}{
+		{[]string{"/usr/bin/portitor-agent", "netns-exec", "main", "--", "/usr/sbin/named"}, true},
+		{[]string{"/usr/bin/setpriv", "--reuid=portitor-dhcp", "--", "/usr/bin/portitor-agent", "dhcpd", "main"}, true},
+		{[]string{"/usr/sbin/named", "-f", "-u", "bind"}, false},
+		{[]string{"/usr/bin/portitor-agent", "dhcpd", "main"}, false},
+	} {
+		if got := launching(c.argv); got != c.want {
+			t.Errorf("%v: %v", c.argv, got)
+		}
+	}
+}

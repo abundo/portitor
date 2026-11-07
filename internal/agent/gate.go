@@ -130,6 +130,13 @@ func (g *gate) remove(ctx context.Context, ns string, exists bool) error {
 }
 
 // namespaces are those with a gate.
+// gated says whether the namespace's gate names the device.
+func (g *gate) gated(ns, dev string) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return slices.Contains(g.devs[ns], dev)
+}
+
 func (g *gate) namespaces() []string {
 	g.mu.Lock()
 	defer g.mu.Unlock()

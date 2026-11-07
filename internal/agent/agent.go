@@ -118,6 +118,7 @@ func New(cfg *Config) *Agent {
 	a.ha = newHAManager(a.gate, &watchdog{dry: cfg.DryRun, run: a.bg}, a.bg, filepath.Join(cfg.Paths.StateDir, "ha-term"))
 	a.ha.onActive = a.onActiveChange
 	a.ha.onTakeover = a.onTakeover
+	a.ha.onLoose = a.onGateLoose
 	a.certs.standby = a.ha.isStandby
 	a.ha.syncCerts = a.syncCertificates
 	return a
@@ -459,6 +460,25 @@ func (a *Agent) onPDChange(instance string) {
 	a.log.Infof("delegated prefix of instance %s changed, applying generation %d again", instance, a.applied.Generation)
 	if err := a.applyLocked(ctx, *a.applied); err != nil {
 		slog.Error("apply after delegated prefix change", "instance", instance, "err", err)
+		a.lastError = err.Error()
+	}
+	a.log.Take()
+}
+
+// onGateLoose applies the current document again after the gate check
+// closed devices that had been made again or moved back: they lost their
+// addresses and routes, and a standby must not take over without them.
+func (a *Agent) onGateLoose() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.applied == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	a.log.Infof("the gate had lost interfaces, applying generation %d again", a.applied.Generation)
+	if err := a.applyLocked(ctx, *a.applied); err != nil {
+		slog.Error("apply after the gate lost interfaces", "err", err)
 		a.lastError = err.Error()
 	}
 	a.log.Take()
