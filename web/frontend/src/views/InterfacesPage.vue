@@ -128,6 +128,13 @@ const fields = [
     hint: "An HA pair needs both: the HA link, a direct cable between the hosts, and the management interface, on a network of its own with the witness. They stay up on the standby, with an address for each host. Traffic interfaces are the same on both hosts, and closed on the standby.",
   },
   {
+    key: 'ha_monitor',
+    label: 'HA monitor',
+    type: 'switch',
+    show: (f) => f.kind === 'physical' && !f.ha_role,
+    hint: 'On an HA pair, counts this interface: when the standby has more monitored interfaces with a carrier for 2 s, the traffic moves to it. Turn it off for an interface a failover would not help.',
+  },
+  {
     key: 'ha_gateway',
     label: 'Management gateway',
     placeholder: '172.25.38.10',
@@ -504,6 +511,7 @@ const { search: statsSearch, filtered: statsFiltered } = useSearch(statsRows)
         kind: 'physical',
         label: '',
         enabled: true,
+        ha_monitor: true,
         ipv4_mode: 'static',
         addresses: [],
         members: [],

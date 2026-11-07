@@ -571,6 +571,14 @@ func TestWitnessFollowsActive(t *testing.T) {
 	if b.votes != 1 || w.pairs["pair"].holder != 1 {
 		t.Errorf("didn't follow: %d, holder %d", b.votes, w.pairs["pair"].holder)
 	}
+	// A handover took the vote along: the host that gave it up may be gone,
+	// so the active host's is renewed at once.
+	a, b = &stateHost{down: true}, &stateHost{st: agentapi.HAStatus{State: agentapi.HAActive, VoteUntil: &until}}
+	w = &witness{started: old, pairs: map[string]*pairVote{"pair": {holder: 0, until: time.Now().Add(3 * time.Second)}}}
+	w.vote(ctx, "pair", [2]haHost{a, b})
+	if b.votes != 1 || w.pairs["pair"].holder != 1 {
+		t.Errorf("after a handover: %d, holder %d", b.votes, w.pairs["pair"].holder)
+	}
 	// Two active: the higher term, as the other is about to close.
 	sts := [2]*agentapi.HAStatus{{State: agentapi.HAActive, Term: 3}, {State: agentapi.HAActive, Term: 4}}
 	if got := activeOf(sts); got != 1 {

@@ -114,6 +114,31 @@ func TestGateDevices(t *testing.T) {
 	}
 }
 
+func TestHABlackholes(t *testing.T) {
+	in := Instance{Interfaces: []Interface{
+		{Name: "wan", Kind: KindPhysical, Enabled: true},
+		{Name: "lan", Kind: KindPhysical, Enabled: true, Addresses: []string{"192.0.2.1/24", "2001:db8::1/64"}},
+		{Name: "lan.10", Kind: KindVLAN, Enabled: true, Parent: "lan", Addresses: []string{"198.51.100.1/24"}, VRF: "red"},
+		{Name: "lo1", Kind: KindLoopback, Enabled: true, Addresses: []string{"203.0.113.1/32"}},
+		{Name: "off", Kind: KindPhysical, Addresses: []string{"203.0.113.1/24"}},
+		{Name: "ha0", Kind: KindPhysical, Enabled: true, HARole: HARoleLink, Addresses: []string{"169.254.1.1/30"}},
+	}}
+	var got []string
+	for _, r := range in.HABlackholes() {
+		if !r.Blackhole {
+			t.Errorf("%+v", r)
+		}
+		got = append(got, r.Destination+" "+r.VRF)
+	}
+	if !slices.Equal(got, []string{"192.0.2.0/24 ", "2001:db8::/64 ", "198.51.100.0/24 red"}) {
+		t.Errorf("got %q", got)
+	}
+	// Off a pair there is no gate, and no such route.
+	if r := (&Instance{Interfaces: []Interface{{Name: "tun", Kind: KindWireGuard}}}).HABlackholes(); r != nil {
+		t.Errorf("%+v", r)
+	}
+}
+
 func TestDeriveHAMAC(t *testing.T) {
 	a, b := DeriveHAMAC("pair", "lan"), DeriveHAMAC("pair", "wan")
 	if !haMACRe.MatchString(a) || !haMACRe.MatchString(b) || a == b {

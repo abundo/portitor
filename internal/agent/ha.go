@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -58,6 +59,10 @@ type haManager struct {
 	forced bool
 	// held is the end of the peer's promise, given of this host's.
 	held, given time.Time
+	// noVoteUntil: this host gave its vote away, or may have before a
+	// restart. Until then it takes none: the witness, if it can't ask the
+	// peer, would hand back the vote the peer holds.
+	noVoteUntil time.Time
 	peerSeen    time.Time
 	peer        agentapi.HAHeartbeat
 	// clients are the two paths' agent clients, reused for their
@@ -65,6 +70,20 @@ type haManager struct {
 	clients map[string]*agentclient.Client
 	// wdKind is what watchdog this host has, once looked for.
 	wdKind string
+	// health and peerHealth are the monitored interfaces with a carrier,
+	// -1 for not known; worseSince is since when the peer has been better,
+	// and lastMove the last monitored handover.
+	health, peerHealth int
+	worseSince         time.Time
+	lastMove           time.Time
+	// monitored are the devices that count, by namespace.
+	monitored map[string][]string
+	// handover: the peer has closed and told this host to open.
+	handover bool
+	// switching asks tick to hand over; stopping ends it.
+	switching, stopping bool
+	// wake gets tick to look at once.
+	wake chan struct{}
 	// mgmt is what the routing for the host's own traffic is made from.
 	mgmt *haMgmt
 	own  map[string]bool
@@ -80,7 +99,8 @@ type haManager struct {
 }
 
 func newHAManager(g *gate, wd *watchdog, run Runner, termFile string) *haManager {
-	h := &haManager{gate: g, wd: wd, run: run, termFile: termFile, clients: map[string]*agentclient.Client{}}
+	h := &haManager{gate: g, wd: wd, run: run, termFile: termFile, clients: map[string]*agentclient.Client{},
+		health: -1, peerHealth: -1, wake: make(chan struct{}, 1)}
 	if b, err := os.ReadFile(termFile); err == nil {
 		h.term, _ = strconv.ParseInt(strings.TrimSpace(string(b)), 10, 64)
 	}
@@ -102,18 +122,20 @@ func (h *haManager) staleLocked() bool {
 }
 
 // heard records the peer's word; h.mu held.
-func (h *haManager) heard(now time.Time, node string, epoch, term int64, active bool) {
+func (h *haManager) heard(now time.Time, node string, epoch, term int64, active bool, health int) {
 	h.peerSeen = now
 	h.peer.Node, h.peer.Epoch, h.peer.Term, h.peer.Active = node, epoch, term, active
+	h.peerHealth = health
 }
 
 // boot closes a restarted host's gates: it has forgotten its leases, and
-// waits out any promise it may have given.
+// waits out any promise it may have given, a handover's the longest.
 func (h *haManager) boot(ctx context.Context, cfg *fwconfig.HA, devs map[string][]string) {
 	h.mu.Lock()
 	h.cfg = cfg
 	if cfg != nil {
-		h.given = time.Now().Add(haPromise)
+		h.given = time.Now().Add(haVoteMax)
+		h.noVoteUntil = h.given
 	}
 	h.mu.Unlock()
 	if cfg == nil {
@@ -156,7 +178,11 @@ func (h *haManager) epoch() int64 {
 func (h *haManager) giveVote(d time.Duration, forced bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.vote, h.forced = time.Now().Add(min(d, haMaxVote)), forced
+	now := time.Now()
+	if !forced && now.Before(h.noVoteUntil) {
+		return
+	}
+	h.vote, h.forced = now.Add(min(d, haMaxVote)), forced
 }
 
 // facts is what haDecide needs; h.mu held.
@@ -164,29 +190,49 @@ func (h *haManager) facts(now time.Time) haFacts {
 	return haFacts{now: now, primary: h.cfg.Node == fwconfig.HAPrimary, active: h.active, stale: h.staleLocked(),
 		term: h.term, vote: h.vote, held: h.held, given: h.given, forced: h.forced,
 		peerSeen: h.peerSeen, peerActive: h.peer.Active, peerTerm: h.peer.Term,
-		noWatchdog: h.wdKind == agentapi.HAWatchdogNone}
+		noWatchdog: h.wdKind == agentapi.HAWatchdogNone, handover: h.handover}
+}
+
+// request is this host's heartbeat; h.mu held and h.cfg set.
+func (h *haManager) request() agentapi.HAHeartbeatRequest {
+	return agentapi.HAHeartbeatRequest{Node: h.cfg.Node, Epoch: h.cfg.Epoch, Term: h.term, Active: h.active, Health: h.health}
 }
 
 // tick looks at the leases and acts; it feeds the watchdog while active.
 func (h *haManager) tick(ctx context.Context) {
 	h.mu.Lock()
-	if h.cfg == nil {
+	if h.cfg == nil || h.stopping {
 		h.mu.Unlock()
 		return
 	}
-	mv, why := haDecide(h.facts(time.Now()))
+	now := time.Now()
+	mv, why := haDecide(h.facts(now))
 	switch mv {
 	case haOpen:
 		h.term = max(h.term, h.peer.Term) + 1
-		h.active = true
+		h.active, h.handover = true, false
 	case haClose:
 		// active stays true until the gate is closed.
 	default:
-		active := h.active
-		h.mu.Unlock()
-		if active {
-			h.wd.feed()
+		if !h.active {
+			h.mu.Unlock()
+			return
 		}
+		hand := h.switching
+		reason := "the console asked"
+		if h.monitorSays(now) {
+			hand, reason = true, "the standby has more monitored interfaces up"
+			h.lastMove = now
+		}
+		h.switching = false
+		h.mu.Unlock()
+		if hand {
+			hctx, cancel := context.WithTimeout(ctx, haActionTimeout)
+			defer cancel()
+			h.handOver(hctx, reason)
+			return
+		}
+		h.wd.feed()
 		return
 	}
 	term, forced := h.term, h.forced
@@ -243,16 +289,148 @@ func (h *haManager) closeGate(ctx context.Context, why string) {
 	go h.onActive()
 }
 
-// shutdown closes an active host for a clean stop.
+// monitorSays keeps track of the peer's health and tells whether to hand
+// over now; h.mu held.
+func (h *haManager) monitorSays(now time.Time) bool {
+	f := haHealth{now: now, own: h.health, peer: h.peerHealth, peerAlive: now.Sub(h.peerSeen) < haDeadAfter,
+		worseSince: h.worseSince, lastMove: h.lastMove}
+	if !f.better() {
+		h.worseSince = time.Time{}
+		return false
+	}
+	if h.worseSince.IsZero() {
+		h.worseSince = now
+		return false
+	}
+	return haShouldHandOver(f)
+}
+
+// handOver closes this host and tells its peer to open. It promises to
+// stay closed first, and again once the peer has answered, so the peer
+// can count from when it got the word. Its vote goes along: this host may
+// be stopping, and a peer with only a promise from a host that is gone
+// would close again. It gives the vote up before it sends, and promises
+// to stay closed for as long as that vote lasts: the witness may still
+// renew this host's vote if it can't ask the peer, and this host must not
+// open on it while the peer holds the one it was given. A peer that can't
+// be told leaves the pair closed until the promise runs out, and then the
+// witness decides.
+func (h *haManager) handOver(ctx context.Context, why string) {
+	h.mu.Lock()
+	cfg := h.cfg
+	now := time.Now()
+	var left time.Duration
+	if now.Before(h.vote) {
+		left = min(h.vote.Sub(now), haVoteMax)
+	}
+	promise := max(haPromise, left)
+	h.given = now.Add(promise)
+	h.noVoteUntil = h.given
+	h.vote, h.forced = time.Time{}, false
+	var clients []*agentclient.Client
+	if cfg != nil {
+		for _, u := range []string{cfg.PeerLink, cfg.Peer} {
+			if u == "" {
+				continue
+			}
+			if c, err := h.client(cfg, u); err == nil {
+				clients = append(clients, c)
+			}
+		}
+	}
+	h.mu.Unlock()
+	h.closeGate(ctx, "handing over: "+why)
+	h.mu.Lock()
+	var req agentapi.HAHeartbeatRequest
+	if h.cfg != nil {
+		req = h.request()
+		req.VoteMS = int(left / time.Millisecond)
+	}
+	h.mu.Unlock()
+	var err error
+	for _, c := range clients {
+		if err = c.HAHandover(ctx, req); err == nil {
+			break
+		}
+	}
+	if err != nil {
+		slog.Error("ha: the peer can't be told to take over", "err", err)
+		return
+	}
+	h.mu.Lock()
+	h.given = time.Now().Add(promise)
+	h.noVoteUntil = h.given
+	h.mu.Unlock()
+}
+
+// takeHandover is the peer's word that it has closed: this host opens at
+// once, holding the promise that came with it.
+func (h *haManager) takeHandover(req agentapi.HAHeartbeatRequest) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	switch {
+	case h.cfg == nil:
+		return errors.New("this host is not in an HA pair")
+	case h.active:
+		return errors.New("this host is active")
+	case req.Active:
+		return errors.New("the peer is still active")
+	case h.staleLocked():
+		return errors.New("this host was taken over by a promotion")
+	case h.wdKind == agentapi.HAWatchdogNone:
+		return errors.New("this host has no watchdog")
+	}
+	now := time.Now()
+	h.heard(now, req.Node, req.Epoch, req.Term, false, req.Health)
+	h.held = now.Add(haPromise)
+	h.given, h.noVoteUntil = time.Time{}, time.Time{}
+	h.handover = true
+	if req.VoteMS > 0 {
+		h.vote = now.Add(min(time.Duration(req.VoteMS)*time.Millisecond, haVoteMax))
+	}
+	select {
+	case h.wake <- struct{}{}:
+	default:
+	}
+	return nil
+}
+
+// switchover asks the active host to hand over.
+func (h *haManager) switchover() error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	switch {
+	case h.cfg == nil:
+		return errors.New("this host is not in an HA pair")
+	case !h.active:
+		return errors.New("this host is not active: run it on the active host")
+	case time.Since(h.peerSeen) >= haDeadAfter:
+		return errors.New("the standby isn't heard: nothing to hand over to")
+	}
+	h.switching = true
+	select {
+	case h.wake <- struct{}{}:
+	default:
+	}
+	return nil
+}
+
+// shutdown leaves an active host closed for a clean stop, handing over to
+// a peer it hears.
 func (h *haManager) shutdown() {
 	h.mu.Lock()
-	active := h.active
+	h.stopping = true
+	active, alive := h.active, time.Since(h.peerSeen) < haDeadAfter
 	h.mu.Unlock()
 	if !active {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	if alive {
+		h.handOver(ctx, "the agent is stopping")
+		return
+	}
 	h.closeGate(ctx, "the agent is stopping")
 }
 
@@ -264,11 +442,13 @@ func (h *haManager) loop(ctx context.Context) {
 	go h.beat(ctx, func(c *fwconfig.HA) string { return c.PeerLink })
 	go h.checkGate(ctx)
 	go h.copyCerts(ctx)
+	go h.watchHealth(ctx)
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
+		case <-h.wake:
 		}
 		h.tick(ctx)
 	}
@@ -306,7 +486,7 @@ func (h *haManager) beat(ctx context.Context, path func(*fwconfig.HA) string) {
 		var req agentapi.HAHeartbeatRequest
 		if cfg != nil && path(cfg) != "" {
 			c, err = h.client(cfg, path(cfg))
-			req = agentapi.HAHeartbeatRequest{Node: cfg.Node, Epoch: cfg.Epoch, Term: h.term, Active: h.active}
+			req = h.request()
 		}
 		h.mu.Unlock()
 		if c == nil || err != nil {
@@ -327,7 +507,7 @@ func (h *haManager) beat(ctx context.Context, path func(*fwconfig.HA) string) {
 func (h *haManager) answered(sent time.Time, hb *agentapi.HAHeartbeat) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.heard(time.Now(), hb.Node, hb.Epoch, hb.Term, hb.Active)
+	h.heard(time.Now(), hb.Node, hb.Epoch, hb.Term, hb.Active, hb.Health)
 	if hb.PromiseMS > 0 {
 		if until := sent.Add(time.Duration(hb.PromiseMS) * time.Millisecond); until.After(h.held) {
 			h.held = until
@@ -344,8 +524,8 @@ func (h *haManager) answer(req agentapi.HAHeartbeatRequest) agentapi.HAHeartbeat
 		return agentapi.HAHeartbeat{}
 	}
 	now := time.Now()
-	h.heard(now, req.Node, req.Epoch, req.Term, req.Active)
-	out := agentapi.HAHeartbeat{Node: h.cfg.Node, Epoch: h.cfg.Epoch, Term: h.term, Active: h.active}
+	h.heard(now, req.Node, req.Epoch, req.Term, req.Active, req.Health)
+	out := agentapi.HAHeartbeat{Node: h.cfg.Node, Epoch: h.cfg.Epoch, Term: h.term, Active: h.active, Health: h.health}
 	if haGives(h.active, h.cfg.Node == fwconfig.HAPrimary, req.Active, req.Node == fwconfig.HAPrimary) {
 		if until := now.Add(haPromise); until.After(h.given) {
 			h.given = until
@@ -353,6 +533,60 @@ func (h *haManager) answer(req agentapi.HAHeartbeatRequest) agentapi.HAHeartbeat
 		out.PromiseMS = int(haPromise / time.Millisecond)
 	}
 	return out
+}
+
+// watchHealth counts the monitored interfaces with a carrier.
+func (h *haManager) watchHealth(ctx context.Context) {
+	t := time.NewTicker(haBeat)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		h.mu.Lock()
+		want := h.monitored
+		h.mu.Unlock()
+		if want == nil {
+			continue
+		}
+		health, ok := 0, true
+		for ns, devs := range want {
+			cctx, cancel := context.WithTimeout(ctx, haBeat)
+			out, err := h.run.Run(cctx, ns, "ip", "-j", "link", "show")
+			cancel()
+			links, lerr := linkMap(out)
+			if err != nil || lerr != nil {
+				ok = false
+				break
+			}
+			health += carriers(links, devs)
+		}
+		if ok {
+			h.mu.Lock()
+			h.health = health
+			h.mu.Unlock()
+		}
+	}
+}
+
+// carriers counts the devices with a carrier.
+func carriers(links map[string]ipLink, devs []string) int {
+	n := 0
+	for _, d := range devs {
+		if l, ok := links[d]; ok && slices.Contains(l.Flags, "LOWER_UP") {
+			n++
+		}
+	}
+	return n
+}
+
+// setMonitored follows the applied document: the devices that count.
+func (h *haManager) setMonitored(m map[string][]string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.monitored = m
 }
 
 // checkGate makes sure a closed gate holds its devices.
@@ -420,6 +654,10 @@ func (h *haManager) status() *agentapi.HAStatus {
 	}
 	now := time.Now()
 	st.Node, st.Epoch, st.Term, st.Watchdog = h.cfg.Node, h.cfg.Epoch, max(h.term, h.peer.Term), h.wdKind
+	st.Health, st.PeerHealth = h.health, h.peerHealth
+	for _, d := range h.monitored {
+		st.Monitored += len(d)
+	}
 	st.PeerAlive = now.Sub(h.peerSeen) < haDeadAfter
 	if !h.peerSeen.IsZero() {
 		seen := h.peerSeen
@@ -496,14 +734,18 @@ func (a *Agent) onActiveChange() {
 	a.reconcileActive()
 }
 
-// reconcileActive runs the applied DNS update clients and tunnel broker
-// accounts, or none on an HA standby; a.mu held.
+// reconcileActive runs the applied DHCP clients, DNS update clients and
+// tunnel broker accounts, or none on an HA standby; a.mu held.
 func (a *Agent) reconcileActive() {
 	if a.ha.isStandby() {
+		a.dhcp.Pause()
+		a.dhcp6.Pause()
 		a.ddns.Reconcile(nil)
 		a.tbroker.Reconcile(nil)
 		return
 	}
+	a.dhcp.Reconcile(a.dhcpWant)
+	a.dhcp6.Reconcile(a.dhcp6Want)
 	a.ddns.Reconcile(a.ddnsWant)
 	a.tbroker.Reconcile(a.tbWant)
 }
@@ -518,6 +760,21 @@ func gateDevices(exp *fwconfig.Document) map[string][]string {
 	for i := range exp.Instances {
 		in := &exp.Instances[i]
 		out[in.NetnsName()] = in.GateDevices()
+	}
+	return out
+}
+
+// monitoredDevices are the devices whose carrier counts, by namespace; nil
+// off a pair.
+func monitoredDevices(exp *fwconfig.Document) map[string][]string {
+	if exp.HA == nil {
+		return nil
+	}
+	out := map[string][]string{}
+	for i := range exp.Instances {
+		if d := exp.Instances[i].MonitoredDevices(); len(d) > 0 {
+			out[exp.Instances[i].NetnsName()] = d
+		}
 	}
 	return out
 }

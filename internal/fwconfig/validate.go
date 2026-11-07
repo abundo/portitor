@@ -149,6 +149,9 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 		if isVRRPDeviceName(ifc.Name) {
 			v.addf("%s: %s and %s names are for VRRP devices", ip, VRRPDevicePrefix4, VRRPDevicePrefix6)
 		}
+		if strings.HasPrefix(ifc.Name, HASyncPrefix) {
+			v.addf("%s: %s names are for HA sync devices", ip, HASyncPrefix)
+		}
 		if strings.HasPrefix(ifc.Name, NAT64DevicePrefix) {
 			v.addf("%s: %s names are for NAT64 devices", ip, NAT64DevicePrefix)
 		}

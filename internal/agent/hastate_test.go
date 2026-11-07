@@ -39,7 +39,9 @@ func TestHADecide(t *testing.T) {
 		{"rule 3: the primary opens with a promise", haFacts{primary: true, held: sec(2)}, haOpen},
 		{"rule 3: the secondary doesn't", haFacts{held: sec(2)}, haStay},
 		{"rule 3: not while the peer is active", haFacts{primary: true, held: sec(2), peerSeen: t0, peerActive: true}, haStay},
+		{"a handover opens at once", haFacts{handover: true, given: sec(2)}, haOpen},
 		{"stale never opens", haFacts{stale: true, vote: sec(4)}, haStay},
+		{"stale ignores a handover", haFacts{stale: true, handover: true}, haStay},
 		{"no watchdog: no failover on a vote", haFacts{noWatchdog: true, vote: sec(4)}, haStay},
 		{"no watchdog: the console can", haFacts{noWatchdog: true, forced: true, vote: sec(4)}, haOpen},
 	}
@@ -84,6 +86,14 @@ type simHost struct {
 	// A closing host has a slow nft: it is open on the wire until closedAt.
 	closedAt time.Time
 	openWire bool
+	// A handover in progress, and the peer's word of one.
+	handingTo   *simHost
+	handingAt   time.Time
+	handingVote time.Time
+	handingFor  time.Duration
+	noVote      time.Time
+	handover    bool
+	stale       bool
 }
 
 // TestHANeverBothOpen runs a pair and its witness through random link cuts
@@ -137,11 +147,51 @@ func TestHANeverBothOpen(t *testing.T) {
 					} else {
 						// A restart forgets its leases, and waits out any
 						// promise it may have given (haManager.boot).
-						h.vote, h.held, h.given = time.Time{}, time.Time{}, now.Add(haPromise)
+						h.vote, h.held, h.given, h.handover = time.Time{}, time.Time{}, now.Add(haVoteMax), false
+						h.noVote = h.given
 					}
 				}
 			}
 			delay := time.Duration(r.IntN(200)) * time.Millisecond
+
+			// A handover, sometimes with its answer lost.
+			if r.IntN(80) == 0 {
+				for i, h := range hosts {
+					p := hosts[1-i]
+					if !h.active || h.dead || p.dead || !calls[i] || p.openWire || p.stale {
+						continue
+					}
+					h.active = false
+					h.closedAt = now.Add(closeLag)
+					// The vote is given up here, and goes with the word,
+					// and the promise lasts as long.
+					h.handingVote, h.vote = h.vote, time.Time{}
+					h.handingFor = max(haPromise, h.handingVote.Sub(now))
+					h.given = now.Add(h.handingFor)
+					h.noVote = h.given
+					// The word goes after the gate has closed: this
+					// simulation sends it once closedAt has passed.
+					h.handingTo, h.handingAt = p, h.closedAt
+				}
+			}
+			for _, h := range hosts {
+				if p := h.handingTo; p != nil && !now.Before(h.handingAt) {
+					h.handingTo = nil
+					if h.dead || p.dead || p.openWire {
+						continue
+					}
+					got := now.Add(delay)
+					p.handover, p.held, p.given, p.noVote = true, got.Add(haPromise), time.Time{}, time.Time{}
+					if h.handingVote.After(got) {
+						p.vote = h.handingVote
+					}
+					p.peerSeen, p.peerActive, p.peerTerm = got, false, h.term
+					if r.IntN(4) != 0 { // the answer got back
+						h.given = got.Add(delay).Add(h.handingFor)
+						h.noVote = h.given
+					}
+				}
+			}
 
 			if !now.Before(nextBeat) {
 				nextBeat = now.Add(beat)
@@ -158,7 +208,10 @@ func TestHANeverBothOpen(t *testing.T) {
 					// the manager clears active after the gate has closed.
 					p.peerSeen, p.peerActive, p.peerTerm = answered, h.openWire, h.term
 					if haGives(p.openWire, p.primary, h.openWire, h.primary) {
-						p.given = answered.Add(haPromise)
+						// A promise only ever gets longer (haManager.answer).
+						if until := answered.Add(haPromise); until.After(p.given) {
+							p.given = until
+						}
 						h.held = sent.Add(haPromise)
 					}
 					h.peerSeen, h.peerActive, h.peerTerm = answered, p.openWire, p.term
@@ -191,8 +244,13 @@ func TestHANeverBothOpen(t *testing.T) {
 						}
 					}
 				}
-				if to >= 0 && (to == holder || holder < 0 || !now.Before(until.Add(grace))) {
-					hosts[to].vote = now.Add(vote)
+				// The active host that reports the vote got it by a handover.
+				handed := to >= 0 && hosts[to].openWire && now.Before(hosts[to].vote)
+				if to >= 0 && (to == holder || holder < 0 || !now.Before(until.Add(grace)) || handed) {
+					// A host that gave its vote away takes none.
+					if !now.Before(hosts[to].noVote) {
+						hosts[to].vote = now.Add(vote)
+					}
 					holder, until = to, now.Add(delay).Add(vote)
 				}
 			}
@@ -201,11 +259,11 @@ func TestHANeverBothOpen(t *testing.T) {
 					continue
 				}
 				f := haFacts{now: now, primary: h.primary, active: h.active, term: h.term, vote: h.vote, held: h.held,
-					given: h.given, peerSeen: h.peerSeen, peerActive: h.peerActive, peerTerm: h.peerTerm}
+					given: h.given, peerSeen: h.peerSeen, peerActive: h.peerActive, peerTerm: h.peerTerm, handover: h.handover}
 				switch mv, _ := haDecide(f); mv {
 				case haOpen:
 					h.term = max(h.term, h.peerTerm) + 1
-					h.active, h.openWire = true, true
+					h.active, h.openWire, h.handover = true, true, false
 					takeovers++
 				case haClose:
 					h.active = false

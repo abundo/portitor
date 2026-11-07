@@ -387,6 +387,7 @@ func buildPeer(db *gorm.DB, generation int64, only map[string]bool, firewallID u
 				HARole:       mif.HaRole,
 				HAGateway:    mif.HaGateway,
 				MAC:          mac,
+				HAMonitor:    mac != "" && mif.HaMonitor,
 				// Only meaningful for a DHCP client.
 				DHCPNoDefaultRoute: mif.DhcpNoDefaultRoute && mif.Ipv4Mode == fwconfig.ModeDHCP,
 				DHCPv6:             mif.Dhcpv6,
@@ -1033,10 +1034,21 @@ func buildPeer(db *gorm.DB, generation int64, only map[string]bool, firewallID u
 			d.routingPolicy(&in, mi.ID)
 		}
 
-		// Over the HA link, which is the host's: a virtual firewall's
-		// connections aren't synced yet.
-		if ha != nil && in.Default && pair.link != "" {
-			in.ConntrackSync = &fwconfig.ConntrackSync{Interface: pair.link, This: pair.this, Peer: pair.peer}
+		// Over the HA link, which is the host's; a virtual firewall has a
+		// device of its own on it.
+		if ha != nil && pair.link != "" {
+			if in.Default {
+				in.ConntrackSync = &fwconfig.ConntrackSync{Interface: pair.link, This: pair.this, Peer: pair.peer}
+			} else if p, q, ok := fwconfig.HASyncAddrs(mi.ID); !ok {
+				addf("%s: no address left on the HA link for its connections", in.Name)
+			} else {
+				if ha.Node == fwconfig.HASecondary {
+					p, q = q, p
+				}
+				name := fwconfig.HASyncPrefix + strconv.FormatUint(uint64(mi.ID), 10)
+				in.HASync = &fwconfig.HASync{Name: name, Parent: pair.link, Address: netip.PrefixFrom(p, 30).String()}
+				in.ConntrackSync = &fwconfig.ConntrackSync{Interface: name, This: p.String(), Peer: q.String()}
+			}
 		}
 		doc.Instances = append(doc.Instances, in)
 	}

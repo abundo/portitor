@@ -410,6 +410,14 @@ func newHANode(t *testing.T) *haNode {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
+		if r.URL.Path == "/v1/ha/handover" {
+			if err := n.h.takeHandover(req); err != nil {
+				w.WriteHeader(http.StatusConflict)
+				return
+			}
+			_, _ = w.Write([]byte("{}"))
+			return
+		}
 		_ = json.NewEncoder(w).Encode(n.h.answer(req))
 	}))
 	t.Cleanup(n.srv.Close)
@@ -507,5 +515,177 @@ func TestHAPairOverHeartbeats(t *testing.T) {
 	waitHAState(t, back, agentapi.HAStandby, time.Second)
 	if st := b.h.status(); st.State != agentapi.HAActive {
 		t.Errorf("secondary: %+v", st)
+	}
+
+	// A switchover moves the traffic back at once, with no vote; the old
+	// host's promise carries the new one until its heartbeats do.
+	if err := b.h.switchover(); err != nil {
+		t.Fatal(err)
+	}
+	moved := time.Now()
+	waitHAState(t, back, agentapi.HAActive, time.Second)
+	waitHAState(t, b, agentapi.HAStandby, time.Second)
+	if took := time.Since(moved); took > 500*time.Millisecond {
+		t.Errorf("the switchover took %v", took)
+	}
+	time.Sleep(2 * haPromise)
+	if back.h.status().State != agentapi.HAActive || b.h.status().State != agentapi.HAStandby {
+		t.Errorf("after: %+v, %+v", back.h.status(), b.h.status())
+	}
+}
+
+func TestHAShouldHandOver(t *testing.T) {
+	long := t0.Add(-time.Hour)
+	cases := []struct {
+		name string
+		f    haHealth
+		want bool
+	}{
+		{"better long enough", haHealth{own: 1, peer: 2, peerAlive: true, worseSince: t0.Add(-haMonitorHold)}, true},
+		{"better too briefly", haHealth{own: 1, peer: 2, peerAlive: true, worseSince: t0.Add(-time.Second)}, false},
+		{"equal", haHealth{own: 2, peer: 2, peerAlive: true, worseSince: long}, false},
+		{"worse", haHealth{own: 2, peer: 1, peerAlive: true, worseSince: long}, false},
+		{"peer gone", haHealth{own: 1, peer: 2, worseSince: long}, false},
+		{"own unknown", haHealth{own: -1, peer: 2, peerAlive: true, worseSince: long}, false},
+		{"peer unknown", haHealth{own: 0, peer: -1, peerAlive: true, worseSince: long}, false},
+		{"damped", haHealth{own: 1, peer: 2, peerAlive: true, worseSince: long, lastMove: t0.Add(-30 * time.Second)}, false},
+		{"damping over", haHealth{own: 1, peer: 2, peerAlive: true, worseSince: long, lastMove: t0.Add(-haDamping)}, true},
+	}
+	for _, c := range cases {
+		c.f.now = t0
+		if got := haShouldHandOver(c.f); got != c.want {
+			t.Errorf("%s: got %v", c.name, got)
+		}
+	}
+}
+
+func TestPlanBlackhole(t *testing.T) {
+	want := []fwconfig.Route{{Destination: "192.0.2.0/24", Metric: 2147483647, Blackhole: true}}
+	lines := func(have []ipRoute) []string {
+		var out []string
+		for _, c := range planRoutes("", want, have, nil) {
+			out = append(out, strings.Join(c.Args, " "))
+		}
+		return out
+	}
+	if got := lines(nil); len(got) != 1 || !strings.HasPrefix(got[0], "route replace blackhole 192.0.2.0/24 metric 2147483647") {
+		t.Errorf("new: %q", got)
+	}
+	// There already: it isn't taken for a stale route.
+	for _, l := range lines([]ipRoute{{Dst: "192.0.2.0/24", Metric: 2147483647}}) {
+		if strings.Contains(l, "route del") {
+			t.Errorf("kept: %q", l)
+		}
+	}
+}
+
+func TestPlanHASync(t *testing.T) {
+	d := &fwconfig.HASync{Name: "ha-7", Parent: "ens20", Address: "169.254.16.29/30"}
+	lines := func(cmds []command) []string {
+		var out []string
+		for _, c := range cmds {
+			out = append(out, c.Netns+": "+strings.Join(c.Args, " "))
+		}
+		return out
+	}
+	want := []string{": link add link ens20 name ha-7 netns fw-a type macvlan mode bridge", "fw-a: link set dev ha-7 up", "fw-a: addr add 169.254.16.29/30 dev ha-7"}
+	if got := lines(planHASync("fw-a", d, nil)); !slices.Equal(got, want) {
+		t.Errorf("new:\n%q", got)
+	}
+	have := map[string]ipLink{"ha-7": {Flags: []string{"UP"}, AddrInfo: []ipAddr{{Family: "inet", Local: "169.254.16.29", Prefixlen: 30}}}}
+	if got := lines(planHASync("fw-a", d, have)); len(got) != 0 {
+		t.Errorf("in step: %q", got)
+	}
+	have["ha-7"] = ipLink{Flags: []string{"UP"}, AddrInfo: []ipAddr{{Family: "inet", Local: "169.254.16.30", Prefixlen: 30}}}
+	if got := lines(planHASync("fw-a", d, have)); !slices.Equal(got, []string{"fw-a: addr del 169.254.16.30/30 dev ha-7", "fw-a: addr add 169.254.16.29/30 dev ha-7"}) {
+		t.Errorf("swapped: %q", got)
+	}
+}
+
+// The vote goes along, so the new host stays open if the old one stops,
+// and the old host keeps none of it.
+func TestHandoverCarriesTheVote(t *testing.T) {
+	h := newTestHA(t, fwconfig.HASecondary)
+	if err := h.takeHandover(agentapi.HAHeartbeatRequest{Node: fwconfig.HAPrimary, VoteMS: 3000}); err != nil {
+		t.Fatal(err)
+	}
+	h.tick(t.Context())
+	h.held = time.Time{} // the old host is gone
+	h.tick(t.Context())
+	if st := h.status(); st.State != agentapi.HAActive || st.VoteUntil == nil {
+		t.Fatalf("after: %+v", st)
+	}
+	old := newTestHA(t, fwconfig.HAPrimary)
+	old.active = true
+	old.giveVote(4*time.Second, false)
+	old.handOver(t.Context(), "test")
+	if st := old.status(); st.VoteUntil != nil || st.State == agentapi.HAActive {
+		t.Errorf("old host: %+v", st)
+	}
+}
+
+// A host that gave its vote away takes none until its promise has ended:
+// a witness that can't ask the new host would hand it straight back.
+func TestNoVoteAfterHandover(t *testing.T) {
+	old := newTestHA(t, fwconfig.HAPrimary)
+	old.active = true
+	old.giveVote(4*time.Second, false)
+	old.handOver(t.Context(), "test")
+	old.giveVote(4*time.Second, false)
+	if st := old.status(); st.VoteUntil != nil {
+		t.Errorf("took a vote: %+v", st)
+	}
+	// The console decides for itself.
+	old.giveVote(4*time.Second, true)
+	if st := old.status(); st.VoteUntil == nil {
+		t.Errorf("refused the console: %+v", st)
+	}
+	// A restart may have forgotten a handover.
+	h := newTestHA(t, fwconfig.HASecondary)
+	h.boot(t.Context(), h.cfg, nil)
+	h.giveVote(4*time.Second, false)
+	if st := h.status(); st.VoteUntil != nil {
+		t.Errorf("took a vote after a restart: %+v", st)
+	}
+}
+
+func TestHandoverRefused(t *testing.T) {
+	h := newTestHA(t, fwconfig.HASecondary)
+	if err := h.takeHandover(agentapi.HAHeartbeatRequest{Node: fwconfig.HAPrimary, Active: true}); err == nil {
+		t.Error("from a peer that is still active")
+	}
+	h.wdKind = agentapi.HAWatchdogNone
+	if err := h.takeHandover(agentapi.HAHeartbeatRequest{Node: fwconfig.HAPrimary}); err == nil {
+		t.Error("without a watchdog")
+	}
+	h.wdKind = ""
+	h.active = true
+	if err := h.takeHandover(agentapi.HAHeartbeatRequest{Node: fwconfig.HAPrimary}); err == nil {
+		t.Error("to an active host")
+	}
+	if err := newTestHA(t, fwconfig.HAPrimary).switchover(); err == nil {
+		t.Error("a switchover from a closed host")
+	}
+}
+
+// A handover opens the standby at once, with no vote, in spite of the
+// promise it gave, and the old host stays closed.
+func TestHandover(t *testing.T) {
+	h := newTestHA(t, fwconfig.HASecondary)
+	h.answer(agentapi.HAHeartbeatRequest{Node: fwconfig.HAPrimary, Active: true, Term: 4})
+	h.tick(t.Context())
+	if h.status().State == agentapi.HAActive {
+		t.Fatal("opened on its own")
+	}
+	if err := h.takeHandover(agentapi.HAHeartbeatRequest{Node: fwconfig.HAPrimary, Term: 4}); err != nil {
+		t.Fatal(err)
+	}
+	h.tick(t.Context())
+	if st := h.status(); st.State != agentapi.HAActive || st.Term != 5 || st.PromiseUntil == nil || st.VoteUntil != nil {
+		t.Fatalf("after: %+v", st)
+	}
+	h.tick(t.Context())
+	if h.status().State != agentapi.HAActive {
+		t.Error("closed again on the promise of the handover")
 	}
 }

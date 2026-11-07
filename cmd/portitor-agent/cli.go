@@ -383,8 +383,23 @@ func addActions(root *cobra.Command, client func() *agentclient.Client, instance
 		},
 	}
 	haActive.Flags().IntVar(&minutes, "minutes", 60, "how long")
+	haSwitchover := &cobra.Command{
+		Use:   "switchover",
+		Short: "Move the traffic to the standby (on the active host)",
+		Long:  "The active host closes and hands over to its standby, which opens at once. There is no automatic failback, so this is how traffic moves back.",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return call(cmd, func(ctx context.Context, c *agentclient.Client) error {
+				if err := c.HASwitchover(ctx); err != nil {
+					return err
+				}
+				fmt.Fprintln(cmd.OutOrStdout(), "Handing over to the standby.")
+				return nil
+			})
+		},
+	}
 	haReq := &cobra.Command{Use: "ha", Short: "HA pair"}
-	haReq.AddCommand(haActive)
+	haReq.AddCommand(haActive, haSwitchover)
 	request.AddCommand(haReq)
 
 	clear := &cobra.Command{Use: "clear", Short: "Clear state"}
@@ -452,6 +467,7 @@ func printHA(w io.Writer, st *agentapi.HAStatus) {
 		fmt.Fprintf(tw, "Standby's promise:\tuntil %s\n", st.PromiseUntil.Local().Format(time.DateTime))
 	}
 	fmt.Fprintf(tw, "Term:\t%d\n", st.Term)
+	fmt.Fprintf(tw, "Monitored interfaces:\t%d of %d up, peer %d\n", st.Health, st.Monitored, st.PeerHealth)
 	fmt.Fprintf(tw, "Watchdog:\t%s\n", st.Watchdog)
 	tw.Flush()
 }

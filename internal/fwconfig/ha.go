@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"regexp"
 	"slices"
+	"strings"
 )
 
 // HA nodes.
@@ -81,6 +82,82 @@ func (in *Instance) GateDevices() []string {
 	for _, ifc := range in.Interfaces {
 		if ifc.Kind == KindPhysical && ifc.HARole == "" {
 			out = append(out, ifc.Name)
+		}
+	}
+	return out
+}
+
+// MonitoredDevices are the enabled devices whose carrier counts in the
+// host's health.
+func (in *Instance) MonitoredDevices() []string {
+	var out []string
+	for _, ifc := range in.Interfaces {
+		if ifc.HAMonitor && ifc.Enabled {
+			out = append(out, ifc.Name)
+		}
+	}
+	return out
+}
+
+// HASyncPrefix starts the names of the devices virtual firewalls sync
+// connections over; no interface may be called that.
+const HASyncPrefix = "ha-"
+
+// HASync is a virtual firewall's own way to its peer on an HA pair: a
+// macvlan device on the host's HA link, in the instance's namespace, with
+// an address of its own. So conntrackd there reaches the peer's, on a
+// cable or a hypervisor's access port alike, which tagged VLANs may not
+// survive.
+type HASync struct {
+	Name    string `json:"name"`
+	Parent  string `json:"parent"`
+	Address string `json:"address"` // CIDR, this host's
+}
+
+// haSyncBase is where the virtual firewalls' /30s start, above the HA
+// link's own addresses.
+var haSyncBase = netip.MustParseAddr("169.254.16.0")
+
+// HASyncAddrs are the primary's and the secondary's addresses in the /30
+// of the instance id, false when the ids have run out of 169.254.0.0/16.
+func HASyncAddrs(id uint) (primary, secondary netip.Addr, ok bool) {
+	if id >= (0xffff-0x1000)/4 {
+		return primary, secondary, false
+	}
+	b := haSyncBase.As4()
+	n := uint(b[2])<<8 + uint(b[3]) + id*4
+	return netip.AddrFrom4([4]byte{b[0], b[1], byte(n >> 8), byte(n + 1)}),
+		netip.AddrFrom4([4]byte{b[0], b[1], byte(n >> 8), byte(n + 2)}), true
+}
+
+// haBlackholeMetric is above any route in use.
+const haBlackholeMetric = 1<<31 - 1
+
+// HABlackholes are the last-resort routes of the instance's static prefixes
+// on an HA pair. A link that dies takes its connected route along, and the
+// clients' traffic would then follow the default route out of the WAN: with
+// their private addresses, and until the standby takes over.
+func (in *Instance) HABlackholes() []Route {
+	if len(in.GateDevices()) == 0 {
+		return nil
+	}
+	var out []Route
+	seen := map[netip.Prefix]bool{}
+	for _, ifc := range in.Interfaces {
+		if ifc.HARole != "" || !ifc.Enabled || (ifc.Kind != KindPhysical && ifc.Kind != KindVLAN && ifc.Kind != KindBridge) {
+			continue
+		}
+		for _, a := range ifc.Addresses {
+			p, err := ParseInterfaceAddress(a)
+			if err != nil || p.IsSingleIP() {
+				continue
+			}
+			m := p.Masked()
+			if seen[m] {
+				continue
+			}
+			seen[m] = true
+			out = append(out, Route{Destination: m.String(), Metric: haBlackholeMetric, VRF: ifc.VRF, Blackhole: true})
 		}
 	}
 	return out
@@ -195,6 +272,9 @@ func (v *validator) haInterfaces(d *Document) {
 			if ifc.MAC != "" && !haMACRe.MatchString(ifc.MAC) {
 				v.addf("%s: interface %s: mac must be a locally administered unicast address", p, ifc.Name)
 			}
+			if ifc.HAMonitor && (ifc.Kind != KindPhysical || ifc.HARole != "") {
+				v.addf("%s: interface %s: only a physical traffic interface is monitored", p, ifc.Name)
+			}
 			if ifc.MAC != "" && ifc.Kind != KindPhysical {
 				v.addf("%s: interface %s: only a physical interface has a mac", p, ifc.Name)
 			}
@@ -231,6 +311,14 @@ func (v *validator) haInterfaces(d *Document) {
 		for _, role := range []string{HARoleLink, HARoleManagement} {
 			if n := len(slices.DeleteFunc(slices.Clone(in.Interfaces), func(ifc Interface) bool { return ifc.HARole != role })); n > 1 {
 				v.addf("%s: only one interface can be the %s", p, role)
+			}
+		}
+		if h := in.HASync; h != nil {
+			if !strings.HasPrefix(h.Name, HASyncPrefix) || !ValidIfname(h.Name) || !ValidIfname(h.Parent) || in.Default {
+				v.addf("%s: invalid HA sync device %q on %q", p, h.Name, h.Parent)
+			}
+			if a, err := ParseInterfaceAddress(h.Address); err != nil || !a.Addr().Is4() {
+				v.addf("%s: HA sync device: %q is not an IPv4 address with its prefix", p, h.Address)
 			}
 		}
 		if d.HA == nil {

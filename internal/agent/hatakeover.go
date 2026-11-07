@@ -12,8 +12,6 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
-
-	"github.com/abundo/portitor/internal/fwconfig"
 )
 
 // haAnnounceAgain is when the announcements are sent the second time.
@@ -44,11 +42,6 @@ func (a *Agent) onTakeover() {
 	exp := doc.Expand()
 	for i := range exp.Instances {
 		in := &exp.Instances[i]
-		for _, ifc := range in.Interfaces {
-			if ifc.IPv4Mode == fwconfig.ModeDHCP && ifc.Enabled {
-				a.dhcp.Takeover(in.Name, ifc.Name)
-			}
-		}
 		// radvd sends an advertisement when it reloads.
 		if len(in.RA) > 0 {
 			if _, err := a.bg.Run(ctx, "", "systemctl", "reload-or-restart", a.cfg.Units.Radvd(in)); err != nil {

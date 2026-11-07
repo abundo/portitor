@@ -466,6 +466,17 @@ func (c *Client) HAHeartbeat(ctx context.Context, req agentapi.HAHeartbeatReques
 	return &out, c.do(ctx, http.MethodPost, "/v1/ha/heartbeat", req, &out)
 }
 
+// HAHandover tells the HA peer that this host has closed and it opens now;
+// the client's token is the pair's secret.
+func (c *Client) HAHandover(ctx context.Context, req agentapi.HAHeartbeatRequest) error {
+	return c.do(ctx, http.MethodPost, "/v1/ha/handover", req, nil)
+}
+
+// HASwitchover makes the active host hand over to its standby.
+func (c *Client) HASwitchover(ctx context.Context) error {
+	return c.do(ctx, http.MethodPost, "/v1/ha/switchover", nil, nil)
+}
+
 // HAPeerConfig is where the host's portitor-config copies the pair's
 // configuration from.
 func (c *Client) HAPeerConfig(ctx context.Context) (*agentapi.HAPeerConfig, error) {

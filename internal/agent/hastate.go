@@ -20,6 +20,10 @@ const (
 	haBeat = 500 * time.Millisecond
 	// haPromise is how long a standby's promise lasts.
 	haPromise = 2 * time.Second
+	// haVoteMax is the most of a vote that goes along with a handover: the
+	// witness's vote, 4 s. It bounds what a host that handed over and
+	// restarted can have forgotten.
+	haVoteMax = 4 * time.Second
 	// haMargin: the active host closes this long before its leases end,
 	// so it is closed in time even if nft is slow.
 	haMargin = time.Second
@@ -27,6 +31,11 @@ const (
 	haDeadAfter = 2 * time.Second
 	// haTick is how often the leases are looked at.
 	haTick = 100 * time.Millisecond
+	// haMonitorHold: the standby must look healthier for this long.
+	haMonitorHold = 2 * time.Second
+	// haDamping: after a monitored handover, none for this long, so a
+	// flapping link doesn't flip the pair.
+	haDamping = time.Minute
 	// haWatchdogTimeout resets a host whose HA loop stops while open. With
 	// haMargin it must be less than the witness's vote, 4 s: a hung host
 	// is gone before its vote can move.
@@ -53,6 +62,8 @@ type haFacts struct {
 	// noWatchdog refuses to open on a vote: a host that hangs while open
 	// would keep the addresses from the one that takes over.
 	noWatchdog bool
+	// handover: the active peer has closed and told this host to open.
+	handover bool
 }
 
 type haMove int
@@ -80,7 +91,8 @@ func (f haFacts) outranked() bool {
 //  1. Stay open while the host holds a vote or a promise. A host holding
 //     neither closes at once.
 //  2. Open only with a vote, when every promise this host gave has run
-//     out, and it doesn't hear an active peer.
+//     out, and it doesn't hear an active peer, or on a handover: the peer
+//     has closed and promised to stay closed.
 //  3. At start, with neither active, the primary opens when it holds a
 //     promise. So a healthy pair runs without its witness.
 //  4. Stale: a host that hears a higher term closes.
@@ -99,6 +111,8 @@ func haDecide(f haFacts) (haMove, string) {
 	switch {
 	case f.stale:
 		return haStay, ""
+	case f.handover:
+		return haOpen, "handed over by the peer"
 	case f.now.Before(f.given):
 		return haStay, "" // rule 2: this host promised
 	case f.peerAlive() && f.peerActive:
@@ -116,4 +130,27 @@ func haDecide(f haFacts) (haMove, string) {
 // isn't active, or neither would ever open.
 func haGives(active, primary, peerActive, peerPrimary bool) bool {
 	return !active && (peerActive || (peerPrimary && !primary))
+}
+
+// haHealth is what an active host compares with its standby: the monitored
+// interfaces with a carrier, -1 for not known yet.
+type haHealth struct {
+	now        time.Time
+	own, peer  int
+	peerAlive  bool
+	worseSince time.Time // since when the peer has been better; zero: it isn't
+	lastMove   time.Time // the last monitored handover
+}
+
+// better tells whether the peer is healthier now.
+func (f haHealth) better() bool {
+	return f.own >= 0 && f.peer >= 0 && f.peerAlive && f.peer > f.own
+}
+
+// haShouldHandOver: the standby has been healthier for haMonitorHold, and
+// the last such handover is long enough ago. A pair with equal counts stays
+// where it is, and there is no failback.
+func haShouldHandOver(f haHealth) bool {
+	return f.better() && !f.worseSince.IsZero() && f.now.Sub(f.worseSince) >= haMonitorHold &&
+		(f.lastMove.IsZero() || f.now.Sub(f.lastMove) >= haDamping)
 }

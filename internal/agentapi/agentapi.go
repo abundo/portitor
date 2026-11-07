@@ -1565,15 +1565,25 @@ type HAStatus struct {
 	Watchdog string `json:"watchdog,omitempty"`
 	// Epoch is the pair's (fwconfig.HA.Epoch) in the applied document.
 	Epoch int64 `json:"epoch,omitempty"`
+	// Health and PeerHealth are the monitored interfaces with a carrier
+	// on this host and its peer, of Monitored; -1: not known yet.
+	Health     int `json:"health"`
+	PeerHealth int `json:"peer_health"`
+	Monitored  int `json:"monitored"`
 }
 
 // HAHeartbeatRequest is an HA host's beat to its peer: what it is, and
-// that it wants the peer's promise to stay closed.
+// that it wants the peer's promise to stay closed. Health is its monitored
+// interfaces with a carrier, -1 for not known yet.
 type HAHeartbeatRequest struct {
 	Node   string `json:"node"`
 	Epoch  int64  `json:"epoch"`
 	Term   int64  `json:"term"`
 	Active bool   `json:"active"`
+	Health int    `json:"health"`
+	// VoteMS, on a handover: what is left of this host's vote, which it
+	// has given up and the peer takes over.
+	VoteMS int `json:"vote_ms,omitempty"`
 }
 
 // HAHeartbeat is an HA host's answer to its peer's heartbeat.
@@ -1582,6 +1592,7 @@ type HAHeartbeat struct {
 	Epoch  int64  `json:"epoch"`
 	Term   int64  `json:"term"`
 	Active bool   `json:"active"`
+	Health int    `json:"health"`
 	// PromiseMS, if not 0: the host stays closed for that long.
 	PromiseMS int `json:"promise_ms,omitempty"`
 }

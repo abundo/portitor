@@ -198,6 +198,9 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 				newRoot = append(newRoot, d.Name)
 			}
 		}
+		if in.HASync != nil {
+			want[in.HASync.Name] = true
+		}
 		for name, l := range links {
 			if want[name] || name == "lo" || l.kind() == "" || fallbackDevice(l) {
 				continue
@@ -398,14 +401,20 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 				routes = append(routes, r...)
 			}
 		}
-		soft = append(soft, a.doEach(ctx, planRoutes(ns, slices.Concat(in.KernelRoutes(), in.WireGuardRoutes(), nat64Routes(in)), routes, in.RouteTable)))
+		soft = append(soft, a.doEach(ctx, planRoutes(ns, slices.Concat(in.KernelRoutes(), in.WireGuardRoutes(), nat64Routes(in), in.HABlackholes()), routes, in.RouteTable)))
 		soft = append(soft, a.applyPolicyRoutes(ctx, in, ns))
 		soft = append(soft, a.applyStaticNeighbours(ctx, in))
 		a.setNamedEndpoints(ctx, in)
 
 	}
 
+	// After every interface: their parent, the HA link, is the host's.
+	for i := range exp.Instances {
+		soft = append(soft, a.applyHASync(ctx, &exp.Instances[i]))
+	}
+
 	a.ha.setMgmt(haMgmtOf(&exp), haOwnLinks(&exp))
+	a.ha.setMonitored(monitoredDevices(&exp))
 	a.ha.setConfig(doc.HA)
 	soft = append(soft, a.ha.applyMgmt(ctx, a.run))
 	// Gone with their namespaces below; a host that left its pair opens.
@@ -420,9 +429,7 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 		return err
 	}
 
-	a.dhcp.Reconcile(dhcpWant)
-	a.dhcp6.Reconcile(dhcp6Want)
-	a.ddnsWant, a.tbWant = ddnsWant, tbWant
+	a.ddnsWant, a.tbWant, a.dhcpWant, a.dhcp6Want = ddnsWant, tbWant, dhcpWant, dhcp6Want
 	a.reconcileActive()
 	a.certs.Reconcile(ctx, certsWant)
 	a.proxies.Reconcile(proxiesWant)
@@ -608,6 +615,55 @@ func (a *Agent) links(ctx context.Context, ns string) (map[string]ipLink, error)
 		m[l.Ifname] = l
 	}
 	return m, nil
+}
+
+// applyHASync keeps a virtual firewall's device on the HA link.
+func (a *Agent) applyHASync(ctx context.Context, in *fwconfig.Instance) error {
+	if in.HASync == nil {
+		return nil
+	}
+	ns := in.NetnsName()
+	links, err := a.links(ctx, ns)
+	if err != nil {
+		return err
+	}
+	return a.doEach(ctx, planHASync(ns, in.HASync, links))
+}
+
+// planHASync makes the device from the root namespace, where its parent
+// is, in the instance's namespace, and addresses it there.
+func planHASync(ns string, d *fwconfig.HASync, have map[string]ipLink) []command {
+	var cmds []command
+	l, ok := have[d.Name]
+	if !ok {
+		cmds = append(cmds, ipCmd("", "link", "add", "link", d.Parent, "name", d.Name, "netns", ns, "type", "macvlan", "mode", "bridge"))
+	}
+	if !ok || !l.up() {
+		cmds = append(cmds, ipCmd(ns, "link", "set", "dev", d.Name, "up"))
+	}
+	addr, err := fwconfig.ParseInterfaceAddress(d.Address)
+	if err != nil {
+		return cmds
+	}
+	var stale []string
+	found := false
+	for _, a := range l.AddrInfo {
+		if a.Family != "inet" {
+			continue
+		}
+		if a.Local == addr.Addr().String() && a.Prefixlen == addr.Bits() {
+			found = true
+		} else {
+			stale = append(stale, fmt.Sprintf("%s/%d", a.Local, a.Prefixlen))
+		}
+	}
+	for _, s := range stale {
+		cmds = append(cmds, ipCmd(ns, "addr", "del", s, "dev", d.Name))
+	}
+	if !found {
+		cmds = append(cmds, ipCmd(ns, "addr", "add", d.Address, "dev", d.Name))
+	}
+	return cmds
 }
 
 // applyGate loads the namespace's gate, or removes it on a host that left

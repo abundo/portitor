@@ -3,7 +3,7 @@
 
 # Design: HA cluster and a built-in DHCP server
 
-Status: phases 1 to 3 implemented and run on the lab pair, 2026-11-06. Phases 4 to 6
+Status: phases 1 to 4 implemented and run on the lab pair, 2026-11-06. Phases 5 and 6
 are proposed. There are no
 production systems, so no migration is planned.
 
@@ -227,12 +227,26 @@ short interruption, and updates go to the standby first.
 interfaces) counts in the host's health, sent in heartbeats. When the standby has
 more monitored interfaces with carrier for 2 s, the active host hands over.
 
-**Handover:** the active host closes, then tells the standby over a heartbeat. The
-standby opens at once. The witness follows on its next round, as the holder is the
-host reporting active.
+**Handover:** the active host gives up its vote, promises to stay closed for as long
+as that vote lasts (at least `P`), closes, and only then tells the standby, which
+opens at once, holding the vote and a promise. It is used for monitoring, `portitor
+request ha switchover` and a clean stop. Three rules keep one vote at a time, and the
+simulation finds both hosts open without the first two:
 
-Damping: after a monitored handover, none for 60 s. A pair with equal counts stays
-where it is. There is no automatic failback at all; `portitor request ha
+- The promise lasts as long as the vote it hands over. A 2 s promise let the old host
+  open on a vote the witness had renewed while the new host still held its own.
+- A host that handed over takes no vote until that promise ends, nor does a restarted
+  host for `V`, as it may have forgotten handing over. The witness can't ask the new
+  host and renews the old one otherwise, and later both hold a vote. The console's vote
+  is exempt.
+- The witness renews at once for an active host that reports a vote, rather than
+  waiting for the old holder's to run out: only a handover gives it one, and the old
+  host may be stopping. A new host on a promise alone would close again after 1 s.
+
+Damping: after a monitored handover, that host hands over no more for 60 s. It is per
+host on purpose. A single flapping link can't loop, as there is no failback, so a pair
+moves at most there and back and then stops; a rule for the pair would leave traffic on
+a host whose LAN has died. A pair with equal counts stays where it is. There is no automatic failback at all; `portitor request ha
 switchover` moves the traffic by hand.
 
 ## What each service does
@@ -243,14 +257,14 @@ switchover` moves the traffic by hand.
 | Gate | Closed | Opened |
 | GARP and unsolicited NA | None | One per address, repeated once after 1 s |
 | DHCP server | Passive, applying the stream, no sockets | Goes active |
-| DHCP clients on the WAN | Stopped; client lease and DUID replicated | Start from the lease (renew) |
+| DHCP clients on the WAN | Paused, keeping the lease and address; never active on the standby | Renew. The server knows the shared MAC, and the DUID is made from it, so nothing is replicated |
 | radvd | Running | Sends at once |
 | named, chrony, snmpd | Running | Nothing |
 | FRR | Running, no neighbours | Sessions cleared, so BGP doesn't wait for its retry timer; OSPF waits for hellos |
 | WireGuard, OpenVPN | Running, same keys | Peers reconnect |
 | conntrackd | Writes the peer's connections to the kernel table | Sends |
 | ACME, DNS update, tunnel broker | Off (`haManager.standby`, today) | On |
-| IP lists, DNS blocklists | Copied from the active host | Download |
+| IP lists, DNS blocklists | Download from the host, over management | Nothing |
 
 `render.Options.Fenced` and `fence()` go: nothing renders differently on the
 standby, so previews match on both hosts.
@@ -258,10 +272,26 @@ standby, so previews match on both hosts.
 ### Conntrack into the VFs
 
 conntrackd runs per namespace, and the HA link is one interface in the root
-namespace. `Expand` makes a VLAN per instance on the HA link, in its namespace
-(`ha-<vlan>`, names may not start with `ha-`), with a `169.254.0.0/16` /31 by VLAN
-id and `instances.ha_vlan` keeping the id. The default instance uses the link
-itself. This replaces `haLink`.
+namespace. Each VF gets a macvlan device on the HA link, in its namespace
+(`fwconfig.HASync`, `ha-<instance id>`, names may not start with `ha-`), with an address
+in a `169.254.16.0/20` and up /30 by instance id, so no column keeps it. VLANs were
+planned, but tagged frames may not survive a hypervisor's access port, and a macvlan
+works on a cable and a VM NIC alike. The default instance uses the link itself.
+
+### A closing host keeps its addresses
+
+Removing a WAN address makes the kernel flush the connections masqueraded to it, and
+conntrackd then flushes them on the host that took over. A client that still sends
+recreates them mid-stream, which hid this in tests of a switchover; a connection with
+only the server sending dies. So DHCP clients pause on a closing host (`Pause`) and
+keep the address behind the gate.
+
+### Last-resort routes
+
+A dead link takes its connected route with it, and traffic for its clients would follow
+the default route out of the WAN, with private addresses, until the standby takes over.
+Each static prefix of a traffic interface has a blackhole route at the highest metric
+(`Instance.HABlackholes`), used only then.
 
 ## Config roles stay
 
@@ -383,8 +413,7 @@ Each phase ends with passing tests, and phase 2 can ship without phase 4.
    radvd behind a closed gate, tunnels, and a real NIC (the tests use veth).
 2. **Fix the witness bug.** Done.
 3. **Cluster core.** Done, and run on the lab pair. See below.
-4. **Monitoring and services.** `ha_monitor`, handover, conntrack VLANs, list
-   copies, WAN client state.
+4. **Monitoring and services.** Done, and run on the lab pair. See below.
 5. **DHCP server.** v4, then v6, then replication. Remove Kea.
 6. **Docs and GUI.** `docs/ha.md`, `docs/vrrp.md`, AGENTS.md, Admin → Firewalls and
    `portitor show ha`.
@@ -402,17 +431,32 @@ Until later phases:
   to serve from the standby-role host while the other, closed, still answers on the
   HA link. So each host's Kea runs alone with its own leases until phase 5, and
   clients may see a NAK after a takeover.
-- **Conntrack syncs for the default instance only,** over the HA link. VFs need the
-  per-VF VLANs of phase 4.
-- **DHCP clients on the WAN** run on the standby but can't reach anything. At takeover
-  the attempt in progress is cut short and the client asks afresh (`Takeover`): the
-  server knows the shared MAC and gives the active host's address. Waiting for the
-  next try took 15 s more in the lab. Phase 4 replaces this with replicated state.
-- **No handover yet,** so a monitored link loss doesn't fail over, and a clean stop
-  closes and leaves the standby to wait for the vote.
 - **The HA link's addresses are entered by hand,** like management's.
 - **The witness needs a way in.** An external witness calls the agent's port, which
   only `allow_from` opens. Its address must be listed in `agent.yaml`.
+
+### Phase 4 lab results
+
+As in phase 3, with a TCP download through the pair held open across each event.
+
+| Event | Outage | Download |
+|---|---|---|
+| `portitor request ha switchover` | One ping lost at most | Survives |
+| Clean restart of the active agent | One ping lost at most | Survives |
+| Active agent stopped for 8 s | One ping lost at most | Survives |
+| Monitored LAN carrier lost on the active host | 2.7 to 2.9 s, the 2 s hold included | Survives |
+| Active host hard reset | 5.0 s; 5.6-5.7 s on the final build | Survives |
+| Carrier lost on the standby | None | Not tested with a download |
+
+Each VF gets its device and conntrackd exchanges keepalives through it. A VF's
+connections surviving a failover isn't tested: the test VF had no traffic.
+
+The live runs found what the Go tests couldn't: the handover needs the vote (a new host
+on a promise alone closed again and the pair flipped twice), masquerade flushes
+connections when a closing host loses its address, and traffic for a dead link's clients
+left through the WAN. The simulation, given handovers, found two ways to both hosts open
+before they reached the lab. It passes 300,000 runs. A restart waiting `V` rather than
+`P`, and the old host clearing its vote, aren't needed in it; they stay as margins.
 
 ### Phase 3 lab results
 
@@ -492,7 +536,6 @@ the standby sends something.
 
 ## Open questions
 
-- Should conntrack sync use a VLAN per VF, or would a relay on the host be simpler?
 - How should a third-party daemon started by a task behave on the standby?
 - How are IPv6 addresses learned upstream (a WAN router's neighbour cache) refreshed
   when the router ignores unsolicited NA? The shared MAC should cover this.

@@ -23,7 +23,8 @@ import (
 // active is the one that gets it, ahead of everything else, so a witness
 // that restarts doesn't hand it to the primary while the secondary is
 // active. The vote moves only when the old holder's has run out, plus
-// witnessGrace for a request still in flight after a timeout. So two hosts
+// witnessGrace for a request still in flight after a timeout, or when the
+// active host reports the vote, which it got by a handover. So two hosts
 // that can't hear each other never both hold one. After a restart the
 // holder is the host that reports a vote.
 //
@@ -154,8 +155,12 @@ func (w *witness) vote(ctx context.Context, key string, hosts [2]haHost) {
 	if pv.holder < 0 && (sts[0] == nil || sts[1] == nil) && now.Sub(w.started) < witnessVote*time.Second+witnessGrace {
 		return
 	}
-	// The old holder's vote may still count.
-	if pv.holder >= 0 && to != pv.holder && now.Before(pv.until.Add(witnessGrace)) {
+	// The old holder's vote may still count, unless the active host says
+	// it has it: only a handover can have given it one while another held
+	// the vote, and a handover takes the vote along. The host that handed
+	// over may be gone by now.
+	handedOver := to == active && sts[to].VoteUntil != nil
+	if pv.holder >= 0 && to != pv.holder && now.Before(pv.until.Add(witnessGrace)) && !handedOver {
 		return
 	}
 	ctx, cancel := context.WithTimeout(ctx, witnessAsk)

@@ -516,9 +516,12 @@ type Interface struct {
 	// HaRole makes it one of an HA pair's own two links
 	// (fwconfig.Interface.HARole); HaGateway is the management one's
 	// gateway.
-	HaRole       string `gorm:"column:ha_role" json:"ha_role"`
-	HaGateway    string `gorm:"column:ha_gateway" json:"ha_gateway"`
-	Ipv6AcceptRA bool   `gorm:"column:ipv6_accept_ra" json:"ipv6_accept_ra"`
+	HaRole    string `gorm:"column:ha_role" json:"ha_role"`
+	HaGateway string `gorm:"column:ha_gateway" json:"ha_gateway"`
+	// HaMonitor counts the carrier of a traffic interface on a pair: the
+	// standby takes over when it has more of them up.
+	HaMonitor    bool `gorm:"column:ha_monitor;default:true" json:"ha_monitor"`
+	Ipv6AcceptRA bool `gorm:"column:ipv6_accept_ra" json:"ipv6_accept_ra"`
 	// Dhcpv6 runs a DHCPv6 client; Dhcpv6Pd also asks for a delegated
 	// prefix, of Dhcpv6PdLength bits (0: the server chooses).
 	Dhcpv6         bool `gorm:"column:dhcpv6" json:"dhcpv6"`

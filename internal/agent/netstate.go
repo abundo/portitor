@@ -428,6 +428,9 @@ func planRoutes(ns string, want []fwconfig.Route, have []ipRoute, table func(fwc
 	}
 	for _, r := range want {
 		args := []string{"route", "replace", r.Destination}
+		if r.Blackhole {
+			args = []string{"route", "replace", "blackhole", r.Destination}
+		}
 		if r.Gateway != "" {
 			args = append(args, "via", r.Gateway)
 		}

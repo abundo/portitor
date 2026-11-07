@@ -122,7 +122,13 @@ docs and user-facing messages.
   path every 500 ms, `POST /v1/ha/heartbeat`); it opens with a vote once promises it
   gave have run out and it hears no active peer; at start the primary opens on a
   promise, so a healthy pair runs without the witness. It closes 1 s before its
-  leases end. Each activation raises `term` (`<state>/ha-term`, separate from the
+  leases end. A handover (`haManager.handOver`: monitoring, `portitor request ha
+  switchover`, a clean stop) gives up the vote, promises to stay closed as long as
+  that vote lasts, closes, and tells the peer (`POST /v1/ha/handover`), which opens at
+  once with the vote; the old host takes no vote until the promise ends
+  (`noVoteUntil`, also after a restart). `Interface.HAMonitor` counts a traffic
+  interface's carrier in the host's health, sent in heartbeats: when the standby has
+  more for 2 s the active host hands over, at most once a minute. Each activation raises `term` (`<state>/ha-term`, separate from the
   epoch). An open host arms `/dev/watchdog` (2 s, softdog if there is nothing better),
   fed by that loop alone; with none, or `nowayout`, it won't open on a vote, only on
   the console's (`portitor request ha active`). Apply loads the gate after moving a
@@ -130,10 +136,11 @@ docs and user-facing messages.
   (6.12 detaches them) every second. The host's own traffic uses table
   `fwconfig.HAMgmtTable`: `from <management address>` always, and everything from
   `iif lo` while closed (proto 99, `hamgmt.go`). At takeover (`onTakeover`): GARP and
-  NA twice, DHCP clients renew, radvd reloads, BGP is cleared. The witness
+  NA twice, radvd reloads, BGP is cleared. The witness
   (`witness.vote`): every 1 s it asks both hosts in parallel and keeps its vote on the
   host reporting active, else its holder; it moves only once the old holder's has run
-  out, plus `witnessGrace`. A pair has one witness (`firewalls.ha_witness` on the
+  out, plus `witnessGrace`, or at once to an active host that reports a vote, which
+  only a handover gives it. A pair has one witness (`firewalls.ha_witness` on the
   primary): its portitor-config (`local`, `Server.runWitness`; not a replica's; it
   dies with the primary, so failover is by hand), or `external`, portitor-web given
   the pair's witness string (`web/portalwitness.go`, `WitnessPair`: both agents and
@@ -143,7 +150,12 @@ docs and user-facing messages.
   document there when it answers again (`catchUp`). Until the built-in DHCP server,
   each host's Kea runs alone with its own leases (no HA hook). conntrackd
   (`fwconfig.ConntrackSync`, `render/conntrackd.go`: FTFW over UDP 3780 into the
-  kernel table) runs for the default instance over the HA link. The default instance
+  kernel table) runs per instance: the default instance's over the HA link, a VF's over
+  a macvlan on it in its namespace (`fwconfig.HASync`, `ha-<instance id>`). DHCP clients
+  run on the active host alone and pause on a closing one, keeping the address:
+  removing it would flush the masqueraded connections, here and through conntrackd on
+  the peer. Each static traffic prefix has a blackhole route at the highest metric
+  (`Instance.HABlackholes`), so a dead link's traffic doesn't leave by the WAN. The default instance
   opens the ports of this host's agent and portitor-config to the peer, both ways
   (`fwconfig.HAConfigAccess`, made by `Expand`; auto rules `render.HAConfigService`,
   `HAAgentService`, `haOutputRules`). DNS updates and the tunnel broker run on the

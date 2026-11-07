@@ -45,10 +45,10 @@ func (a *Agent) Handler() http.Handler {
 		// secret, not the token, and pass allow_from: the peer is another
 		// host. The pair runs the same configuration, so its secret may
 		// have the certificates' keys.
-		if r.URL.Path == "/v1/ha/heartbeat" || r.URL.Path == "/v1/ha/certificates" {
-			method := http.MethodGet
-			if r.URL.Path == "/v1/ha/heartbeat" {
-				method = http.MethodPost
+		if r.URL.Path == "/v1/ha/heartbeat" || r.URL.Path == "/v1/ha/handover" || r.URL.Path == "/v1/ha/certificates" {
+			method := http.MethodPost
+			if r.URL.Path == "/v1/ha/certificates" {
+				method = http.MethodGet
 			}
 			if r.Method != method || !a.ha.heartbeatAuth(r) {
 				writeError(w, http.StatusUnauthorized, errors.New("unauthorized"))
@@ -64,6 +64,14 @@ func (a *Agent) Handler() http.Handler {
 			}
 			var req agentapi.HAHeartbeatRequest
 			if !decode(w, r, &req) {
+				return
+			}
+			if r.URL.Path == "/v1/ha/handover" {
+				if err := a.ha.takeHandover(req); err != nil {
+					writeError(w, http.StatusConflict, err)
+					return
+				}
+				writeJSONResponse(w, http.StatusOK, struct{}{})
 				return
 			}
 			writeJSONResponse(w, http.StatusOK, a.ha.answer(req))
@@ -291,6 +299,13 @@ func (a *Agent) routes() *http.ServeMux {
 		writeJSONResponse(w, http.StatusOK, a.ha.status())
 	})
 	mux.HandleFunc("POST /v1/ha/vote", a.handleHAVote)
+	mux.HandleFunc("POST /v1/ha/switchover", func(w http.ResponseWriter, r *http.Request) {
+		if err := a.ha.switchover(); err != nil {
+			writeError(w, http.StatusConflict, err)
+			return
+		}
+		writeJSONResponse(w, http.StatusOK, a.ha.status())
+	})
 	mux.HandleFunc("GET /v1/ha/peer-config", func(w http.ResponseWriter, r *http.Request) {
 		writeJSONResponse(w, http.StatusOK, a.ha.peerConfig())
 	})
@@ -447,6 +462,7 @@ var localWrites = map[string]bool{
 	"/v1/dns/blocklists/refresh": true,
 	"/v1/connections/flush":      true,
 	"/v1/ha/vote":                true,
+	"/v1/ha/switchover":          true,
 }
 
 // localHandler serves the API's GET routes and localWrites, without the

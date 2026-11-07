@@ -51,11 +51,7 @@ type dhcpManager struct {
 	mu      sync.Mutex
 	clients map[dhcpKey]context.CancelCauseFunc
 	wake    map[dhcpKey]chan struct{} // Renew asks the client to renew now
-	// attempts cancels the try at a lease in progress, and fresh makes the
-	// next one ask from scratch (Takeover).
-	attempts map[dhcpKey]context.CancelFunc
-	fresh    map[dhcpKey]bool
-	leases   map[dhcpKey]*Lease
+	leases  map[dhcpKey]*Lease
 	// restored are the unexpired leases saved by the last run, until the
 	// first Reconcile hands them to their clients.
 	restored map[leaseID]*nclient4.Lease
@@ -70,8 +66,6 @@ func newDHCPManager(run Runner, dryRun bool, dir string, onChange func(string)) 
 		onChange: onChange,
 		clients:  map[dhcpKey]context.CancelCauseFunc{},
 		wake:     map[dhcpKey]chan struct{}{},
-		attempts: map[dhcpKey]context.CancelFunc{},
-		fresh:    map[dhcpKey]bool{},
 		leases:   map[dhcpKey]*Lease{},
 		restored: map[leaseID]*nclient4.Lease{},
 	}
@@ -154,51 +148,6 @@ func (m *dhcpManager) Reconcile(want []dhcpKey) {
 
 // Renew wakes the DHCPv4 client of the instance's interface, which then
 // renews its lease (or asks for one) at once; false when there is none.
-// attempt is the context of one try at a lease, which Takeover cancels;
-// stop ends it.
-func (m *dhcpManager) attempt(ctx context.Context, k dhcpKey) (context.Context, context.CancelFunc) {
-	actx, cancel := context.WithCancel(ctx)
-	m.mu.Lock()
-	m.attempts[k] = cancel
-	m.mu.Unlock()
-	return actx, cancel
-}
-
-// takeFresh tells whether the client must ask afresh, once.
-func (m *dhcpManager) takeFresh(k dhcpKey) bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	fresh := m.fresh[k]
-	delete(m.fresh, k)
-	return fresh
-}
-
-// Takeover makes the client ask for a lease now: an HA host that has just
-// opened. Its renewal behind the closed gate has got nowhere, the lease is
-// old, and the server knows the pair's shared MAC address and gives it the
-// active host's. A try in progress may take many seconds, so it is cut
-// short.
-func (m *dhcpManager) Takeover(instance, iface string) bool {
-	m.mu.Lock()
-	var hit bool
-	for k, wake := range m.wake {
-		if k.instance != instance || k.iface != iface {
-			continue
-		}
-		hit = true
-		m.fresh[k] = true
-		if cancel := m.attempts[k]; cancel != nil {
-			cancel()
-		}
-		select {
-		case wake <- struct{}{}:
-		default:
-		}
-	}
-	m.mu.Unlock()
-	return hit
-}
-
 func (m *dhcpManager) Renew(instance, iface string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -212,6 +161,21 @@ func (m *dhcpManager) Renew(instance, iface string) bool {
 		}
 	}
 	return false
+}
+
+// Pause stops the clients of an HA host that closed, and keeps their leases
+// and addresses for when it opens. Removing the address would flush the
+// connections masqueraded to it (the kernel does that), and conntrackd would
+// flush them on the host that took over too.
+func (m *dhcpManager) Pause() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for k, cancel := range m.clients {
+		cancel(errStopping)
+		delete(m.clients, k)
+		delete(m.wake, k)
+		delete(m.leases, k)
+	}
 }
 
 // Stop stops the clients and keeps their leases (errStopping).
@@ -309,6 +273,11 @@ func (m *dhcpManager) loop(ctx context.Context, k dhcpKey, saved *nclient4.Lease
 			if client != nil {
 				client.Close()
 			}
+			if current != nil {
+				m.mu.Lock()
+				m.restored[id] = current
+				m.mu.Unlock()
+			}
 			return
 		}
 		if current != nil {
@@ -338,23 +307,16 @@ func (m *dhcpManager) loop(ctx context.Context, k dhcpKey, saved *nclient4.Lease
 
 		var lease *nclient4.Lease
 		var err error
-		attempt, stop := m.attempt(ctx, k)
-		if current != nil && !m.takeFresh(k) {
-			renewCtx, cancel := context.WithTimeout(attempt, renewTimeout)
+		if current != nil {
+			renewCtx, cancel := context.WithTimeout(ctx, renewTimeout)
 			lease, err = client.Renew(renewCtx, current)
 			cancel()
 		}
-		// A takeover cancels the renewal above and asks here at once.
-		if current == nil || err != nil || lease == nil {
-			if attempt.Err() != nil {
-				stop()
-				attempt, stop = m.attempt(ctx, k)
-			}
-			reqCtx, cancel := context.WithTimeout(attempt, requestTimeout)
+		if current == nil || err != nil {
+			reqCtx, cancel := context.WithTimeout(ctx, requestTimeout)
 			lease, err = client.Request(reqCtx)
 			cancel()
 		}
-		stop()
 		if err != nil {
 			m.fail(k, log, m.explain(ctx, k, current, err))
 			if current != nil && time.Now().After(leaseExpiry(current)) {

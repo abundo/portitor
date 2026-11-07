@@ -100,6 +100,8 @@ type Instance struct {
 	// HAConfig is set by Expand, on the default instance of an HA host
 	// (HA.ConfigPort).
 	HAConfig *HAConfigAccess `json:"-"`
+	// HASync is a virtual firewall's device to its peer on an HA pair.
+	HASync *HASync `json:"ha_sync,omitempty"`
 	// BFD lists the interfaces with BFD (FRR's bfdd), which static routes,
 	// OSPF, IS-IS and BGP use there.
 	BFD []BFDInterface `json:"bfd,omitempty"`
@@ -200,6 +202,9 @@ type Interface struct {
 	// HAGateway is the management interface's gateway, for what the host
 	// itself sends while its traffic interfaces are closed.
 	HAGateway string `json:"ha_gateway,omitempty"`
+	// HAMonitor counts the interface's carrier in the host's health: a
+	// standby with more monitored interfaces up takes over.
+	HAMonitor bool `json:"ha_monitor,omitempty"`
 	// MAC is the interface's MAC address, shared by an HA pair's hosts.
 	MAC       string     `json:"mac,omitempty"`
 	WireGuard *WireGuard `json:"wireguard,omitempty"`
@@ -578,6 +583,8 @@ type Route struct {
 	BFD bool `json:"bfd,omitempty"`
 	// VRF puts the route in that VRF interface's table (Instance.RouteTable).
 	VRF string `json:"vrf,omitempty"`
+	// Blackhole drops what the route matches (Instance.HABlackholes).
+	Blackhole bool `json:"-"`
 }
 
 // StaticNeighbour is a permanent neighbour entry (ip neigh ... nud

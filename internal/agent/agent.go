@@ -52,6 +52,13 @@ type Agent struct {
 	// (reconcileActive).
 	ddnsWant []dyndnsItem
 	tbWant   []tunnelBrokerItem
+	// dhcpWant and dhcp6Want are the applied DHCP clients, which run on
+	// the active HA host only: behind a closed gate they reach nothing. The
+	// server knows the pair's shared MAC address, and the DUID is made from
+	// it, so the host that opens gets the same lease. A closing host keeps
+	// its address (Pause).
+	dhcpWant  []dhcpKey
+	dhcp6Want []dhcp6Key
 
 	stopBg context.CancelFunc
 	bgDone sync.WaitGroup

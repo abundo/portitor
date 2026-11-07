@@ -161,6 +161,19 @@ func (m *dhcp6Manager) Renew(instance, iface string) bool {
 	return false
 }
 
+// Pause stops the clients of an HA host that closed, and keeps their leases
+// and addresses for when it opens (dhcpManager.Pause).
+func (m *dhcp6Manager) Pause() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for k, cancel := range m.clients {
+		cancel(errStopping)
+		delete(m.clients, k)
+		delete(m.wake, k)
+		delete(m.leases, k)
+	}
+}
+
 // Stop stops the clients and keeps their leases (errStopping).
 func (m *dhcp6Manager) Stop() {
 	m.stopped.Store(true)
@@ -256,6 +269,11 @@ func (m *dhcp6Manager) loop(ctx context.Context, k dhcp6Key, saved *lease6, wake
 		if errors.Is(context.Cause(ctx), errStopping) {
 			if client != nil {
 				client.Close()
+			}
+			if current != nil {
+				m.mu.Lock()
+				m.restored[id] = current
+				m.mu.Unlock()
 			}
 			return
 		}
