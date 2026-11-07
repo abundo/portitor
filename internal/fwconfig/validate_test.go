@@ -159,6 +159,14 @@ func TestValidateCatchesProblems(t *testing.T) {
 		{"pd length", func(d *Document) {
 			d.Instances[0].Interfaces[0].DHCPv6, d.Instances[0].Interfaces[0].DHCPv6PD, d.Instances[0].Interfaces[0].DHCPv6PDLength = true, true, 80
 		}, "delegated prefix length 80 out of range"},
+		{"delegated dhcp without pd", func(d *Document) {
+			d.Instances[0].DHCP.Subnets = append(d.Instances[0].DHCP.Subnets, DHCPSubnet{Prefix: "<eth0>:1::/64", Interface: "eth1"})
+		}, "eth0 does not get a delegated prefix"},
+		{"delegated dhcp range outside", func(d *Document) {
+			d.Instances[0].Interfaces[0].DHCPv6, d.Instances[0].Interfaces[0].DHCPv6PD = true, true
+			d.Instances[0].DHCP.Subnets = append(d.Instances[0].DHCP.Subnets, DHCPSubnet{Prefix: "<eth0>:1::/64", Interface: "eth1",
+				RangeStart: "<eth0>:2::1/128", RangeEnd: "<eth0>:1::9/128"})
+		}, `address "<eth0>:2::1/128" is not inside the prefix`},
 		{"dhcp subnet twice", func(d *Document) {
 			d.Instances[0].DHCP.Subnets = append(d.Instances[0].DHCP.Subnets, DHCPSubnet{Prefix: "192.168.1.0/24", Interface: "eth1"})
 		}, "dhcp subnet 192.168.1.0/24: duplicate"},

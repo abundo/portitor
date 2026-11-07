@@ -68,16 +68,22 @@ func ParseDelegated(s string) (Delegated, error) {
 		}
 		d.Subnet = uint16(v)
 	}
-	h, err := netip.ParseAddr("::" + host)
-	if err != nil || !h.Is6() || h.Zone() != "" {
-		return d, fmt.Errorf("invalid host part %q", host)
+	d.Host, err = ParseHostPart("::" + host)
+	return d, err
+}
+
+// ParseHostPart parses the host part of an address in a delegated
+// prefix, its low 64 bits written as an IPv6 address ("::1000").
+func ParseHostPart(s string) (uint64, error) {
+	h, err := netip.ParseAddr(s)
+	if err != nil || !h.Is6() || h.Zone() != "" || !strings.HasPrefix(s, "::") {
+		return 0, fmt.Errorf("invalid host part %q", strings.TrimPrefix(s, "::"))
 	}
 	b := h.As16()
 	if binary.BigEndian.Uint64(b[:8]) != 0 {
-		return d, fmt.Errorf("host part %q is longer than 64 bits", host)
+		return 0, fmt.Errorf("host part %q is longer than 64 bits", strings.TrimPrefix(s, "::"))
 	}
-	d.Host = binary.BigEndian.Uint64(b[8:])
-	return d, nil
+	return binary.BigEndian.Uint64(b[8:]), nil
 }
 
 // String is the canonical text form.
@@ -142,10 +148,11 @@ func (pds DelegatedPrefixes) resolve(instance, s string, prefix bool) (string, b
 }
 
 // ResolveDelegated returns d with the delegated addresses (interface
-// addresses, router advertisement prefixes and DNS servers) resolved
-// from pds. One whose prefix is not delegated, or does not fit in it,
-// is left out; router advertisements left without prefixes are dropped.
-// d itself is not changed.
+// addresses, router advertisement prefixes, DHCPv6 subnets and their
+// ranges, and DNS servers) resolved from pds. One whose prefix is not
+// delegated, or does not fit in it, is left out; router advertisements
+// left without prefixes are dropped, and so are DHCP subnets whose
+// prefix is. d itself is not changed.
 func (d Document) ResolveDelegated(pds DelegatedPrefixes) Document {
 	out := d
 	out.Instances = slices.Clone(d.Instances)
@@ -189,12 +196,53 @@ func (d Document) ResolveDelegated(pds DelegatedPrefixes) Document {
 			ras = append(ras, ra)
 		}
 		in.RA = ras
+		in.DHCP.Subnets = pds.resolveSubnets(in.Name, in.DHCP.Subnets)
 	}
 	return out
 }
 
-// UsesDelegated reports whether the instance has delegated addresses or
-// router advertisement prefixes.
+// resolveSubnets resolves the DHCP subnets in a delegated prefix: the
+// prefix, the range and the DNS servers.
+func (pds DelegatedPrefixes) resolveSubnets(instance string, subs []DHCPSubnet) []DHCPSubnet {
+	addr := func(s string) (string, bool) {
+		if !IsDelegated(s) {
+			return s, true
+		}
+		r, ok := pds.resolve(instance, s, false)
+		if !ok {
+			return "", false
+		}
+		return netip.MustParsePrefix(r).Addr().String(), true
+	}
+	var out []DHCPSubnet
+	for _, s := range subs {
+		if !IsDelegated(s.Prefix) {
+			out = append(out, s)
+			continue
+		}
+		pfx, ok := pds.resolve(instance, s.Prefix, true)
+		if !ok {
+			continue
+		}
+		start, ok1 := addr(s.RangeStart)
+		end, ok2 := addr(s.RangeEnd)
+		if !ok1 || !ok2 {
+			continue
+		}
+		var dns []string
+		for _, a := range s.DNSServers {
+			if r, ok := addr(a); ok {
+				dns = append(dns, r)
+			}
+		}
+		s.Prefix, s.RangeStart, s.RangeEnd, s.DNSServers = pfx, start, end, dns
+		out = append(out, s)
+	}
+	return out
+}
+
+// UsesDelegated reports whether the instance has delegated addresses,
+// router advertisement prefixes or DHCP subnets.
 func (in *Instance) UsesDelegated() bool {
 	for _, ifc := range in.Interfaces {
 		if slices.ContainsFunc(ifc.Addresses, IsDelegated) {
@@ -208,5 +256,65 @@ func (in *Instance) UsesDelegated() bool {
 			}
 		}
 	}
+	for _, s := range in.DHCP.Subnets {
+		if IsDelegated(s.Prefix) {
+			return true
+		}
+	}
 	return false
+}
+
+// delegatedSubnet checks a DHCPv6 subnet in a delegated prefix: the
+// prefix ("<wan0>:2000::/64") names an interface with prefix delegation,
+// and the range ("<wan0>:2000::1000/128") and DNS servers are addresses
+// in it.
+func (v *validator) delegatedSubnet(sp string, s DHCPSubnet, ifaces map[string]*Interface, raOn map[string]bool) {
+	d, err := ParseDelegated(s.Prefix)
+	switch {
+	case err != nil || !d.IsPrefix():
+		v.addf("%s: invalid delegated IPv6 prefix", sp)
+		return
+	case ifaces[d.Interface] == nil || !ifaces[d.Interface].DHCPv6PD:
+		v.addf("%s: %s does not get a delegated prefix", sp, d.Interface)
+	}
+	if ifaces[s.Interface] == nil {
+		v.addf("%s: unknown interface %q", sp, s.Interface)
+	}
+	if s.Gateway != "" {
+		v.addf("%s: IPv6 clients learn the gateway from router advertisements, not DHCP", sp)
+	}
+	if s.IPv6OnlyPreferred != 0 {
+		v.addf("%s: IPv6-only preferred needs an IPv4 subnet", sp)
+	}
+	if !raOn[s.Interface] {
+		v.addf("%s: DHCPv6 needs router advertisements on %s", sp, s.Interface)
+	}
+	in := func(a string) bool {
+		h, err := ParseDelegated(a)
+		if err != nil || h.Interface != d.Interface || h.Subnet != d.Subnet || h.Bits != 128 {
+			return false
+		}
+		mask := uint64(0)
+		if d.Bits > 64 {
+			mask = ^uint64(0) << (128 - d.Bits)
+		}
+		return h.Host&mask == d.Host
+	}
+	for _, a := range []string{s.RangeStart, s.RangeEnd} {
+		if a != "" && !in(a) {
+			v.addf("%s: address %q is not inside the prefix", sp, a)
+		}
+	}
+	if (s.RangeStart == "") != (s.RangeEnd == "") {
+		v.addf("%s: range needs both start and end", sp)
+	}
+	for _, a := range s.DNSServers {
+		if IsDelegated(a) {
+			if h, err := ParseDelegated(a); err != nil || ifaces[h.Interface] == nil || !ifaces[h.Interface].DHCPv6PD {
+				v.addf("%s: invalid delegated dns server %q", sp, a)
+			}
+		} else if addr, err := ParseAddr(a); err != nil || !addr.Is6() {
+			v.addf("%s: invalid IPv6 dns server %q", sp, a)
+		}
+	}
 }

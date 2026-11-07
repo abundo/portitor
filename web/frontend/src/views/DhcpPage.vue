@@ -100,6 +100,33 @@ function dhcpSwitched(p, on) {
   const r = suggestDhcpRange(p.prefix, p.fw_addr)
   if (r) [p.dhcp_range_start, p.dhcp_range_end] = r
 }
+// An interface's addresses in a delegated prefix (<wan0>:2000::1/64): the
+// /64s it serves with router advertisements, and with DHCPv6 when its
+// delegated_dhcp is on, from a range of host parts (the low 64 bits).
+const delegatedFields = [
+  'delegated_dhcp',
+  'delegated_range_start',
+  'delegated_range_end',
+  'delegated_slaac',
+]
+function delegatedPrefixes(addresses) {
+  const out = []
+  for (const a of addresses ?? []) {
+    const m = /^(<[^>]+>(?::[0-9a-f]{1,4})?)::[0-9a-f:.]*\/64$/i.exec(a)
+    if (m && !out.includes(`${m[1]}::/64`)) out.push(`${m[1]}::/64`)
+  }
+  return out
+}
+// Turning DHCPv6 on in the delegated prefixes fills in a suggested range.
+function delegatedSwitched(i, on) {
+  if (!on || i.delegated_range_start || i.delegated_range_end) return
+  i.delegated_range_start = '::1000'
+  i.delegated_range_end = '::1fff'
+}
+const delegatedSettings = (i) => JSON.stringify(delegatedFields.map((k) => i[k]))
+// The table's rows of an interface: its prefixes, then its delegated
+// prefixes ({ delegated: prefix }).
+const ifaceRows = (i) => [...i.prefixes, ...i.delegated.map((d) => ({ delegated: d }))]
 const is6 = (p) => p.prefix.includes(':')
 const is64 = (p) => p.prefix.endsWith('/64')
 
@@ -111,12 +138,13 @@ const server = reactive({
   dhcp_domain_name: '',
   dhcp_lease_time: 86400,
   dhcp_rate_limit: false,
-  ifaces: [], // { id, name, label, description, ipv4_mode, ipv6_accept_ra, prefixes: [prefixRow] }
+  ifaces: [], // { id, name, label, description, ipv4_mode, ipv6_accept_ra, prefixes: [prefixRow], delegated: [prefix], delegated_* }
   orphans: [],
 })
 const serverForm = usePageForm(server)
 const saving = ref(false)
 let loaded = new Map() // prefix -> its settings as loaded, to save only what changed
+let loadedIfaces = new Map() // interface id -> its delegated_* settings as loaded
 
 async function load() {
   const id = store.currentId
@@ -159,12 +187,18 @@ async function load() {
       ipv4_mode: i.ipv4_mode,
       ipv6_accept_ra: i.ipv6_accept_ra,
       prefixes: onIface.get(i.id) ?? [],
+      delegated: delegatedPrefixes(i.addresses),
+      delegated_dhcp: i.delegated_dhcp ?? false,
+      delegated_range_start: i.delegated_range_start ?? '',
+      delegated_range_end: i.delegated_range_end ?? '',
+      delegated_slaac: i.delegated_slaac ?? true,
     })),
     orphans: stored
       .filter((p) => (p.dhcp_enabled || p.ra_enabled) && !served.has(p.prefix))
       .map((p) => prefixRow(p.prefix, p)),
   })
   loaded = new Map(allPrefixes().map((p) => [p.prefix, settings(p)]))
+  loadedIfaces = new Map(server.ifaces.map((i) => [i.id, delegatedSettings(i)]))
   serverForm.mark()
 }
 watch(() => store.currentId, load, { immediate: true })
@@ -190,6 +224,10 @@ async function save() {
       if (p.id) await ipamPrefixes.update(p.id, body)
       else await ipamPrefixes.create({ ...body, instance_id: store.currentId, prefix: p.prefix })
     }
+    for (const i of server.ifaces) {
+      if (delegatedSettings(i) === loadedIfaces.get(i.id)) continue
+      await interfaces.update(i.id, Object.fromEntries(delegatedFields.map((k) => [k, i[k]])))
+    }
     toast.add({ title: 'DHCP server saved', color: 'success' })
     await Promise.all([load(), store.load()])
   } catch (err) {
@@ -201,23 +239,35 @@ async function save() {
 
 // ----- the interface's details: the DHCP settings of its prefixes -----
 const detailOpen = ref(false)
-const detail = reactive({ title: '', prefixes: [] })
+const detail = reactive({ title: '', prefixes: [], iface: null })
 let detailTarget = null // the prefix rows of the page the dialog edits
+let detailIface = null // the interface whose delegated prefixes it edits
 const detailGuard = useFormGuard(detail, detailOpen)
-function openDetail(title, prefixes) {
+const copy = (x) => JSON.parse(JSON.stringify(x))
+function openDetail(title, prefixes, iface = null) {
   detailTarget = prefixes
-  Object.assign(detail, { title, prefixes: prefixes.map((p) => JSON.parse(JSON.stringify(p))) })
+  detailIface = iface?.delegated.length ? iface : null
+  Object.assign(detail, {
+    title,
+    prefixes: prefixes.map(copy),
+    iface: detailIface && copy(detailIface),
+  })
   detailOpen.value = true
 }
 // Save copies the dialog into the page and saves the page's form.
 async function saveDetail() {
   detail.prefixes.forEach((p, i) => Object.assign(detailTarget[i], p))
+  if (detailIface) for (const k of delegatedFields) detailIface[k] = detail.iface[k]
   detailOpen.value = false
   await save()
 }
 
 const rangeText = (p) =>
   p.dhcp_range_start ? `${p.dhcp_range_start} – ${p.dhcp_range_end}` : 'reservations only'
+const delegatedRangeText = (i) =>
+  i.delegated_range_start
+    ? `${i.delegated_range_start} – ${i.delegated_range_end} (host part)`
+    : 'reservations only'
 const gatewayText = (p) => p.dhcp_gateway || (p.fw_addr ? `firewall (${p.fw_addr})` : 'firewall')
 
 // The DHCP server's interfaces the search finds, by what their rows show.
@@ -232,6 +282,8 @@ const { search: ifaceSearch, filtered: shownIfaces } = useSearch(
         p.dhcp_enabled ? [rangeText(p), gatewayText(p)] : [],
         p.dhcp_dns_servers,
       ]),
+      i.delegated,
+      i.delegated_dhcp ? delegatedRangeText(i) : [],
     ),
 )
 
@@ -335,8 +387,8 @@ const autoLeases = useAutoRefresh(loadLeases, { seconds: 10, active: () => tab.v
               Portitor's DHCPv4 and DHCPv6 server, for the clients on this virtual firewall's
               interfaces. DHCP is served per prefix of an interface address; several on one
               interface are served together, and clients get addresses from all of them. On an HA
-              pair the standby has every lease, so clients keep their addresses after a failover. Fixed leases are addresses with a MAC and a DNS name
-              under
+              pair the standby has every lease, so clients keep their addresses after a failover.
+              Fixed leases are addresses with a MAC and a DNS name under
               <RouterLink to="/hosts-prefixes" class="text-primary">Hosts & prefixes</RouterLink>.
             </p>
             <fieldset :disabled="readOnly" class="space-y-3">
@@ -387,24 +439,24 @@ const autoLeases = useAutoRefresh(loadLeases, { seconds: 10, active: () => tab.v
                 <tbody>
                   <template v-for="i in shownIfaces" :key="i.id">
                     <tr
-                      v-for="(p, idx) in i.prefixes.length ? i.prefixes : [null]"
-                      :key="p?.prefix ?? 'none'"
+                      v-for="(p, idx) in ifaceRows(i).length ? ifaceRows(i) : [null]"
+                      :key="p?.prefix ?? p?.delegated ?? 'none'"
                       class="border-b border-default last:border-0"
                     >
                       <template v-if="idx === 0">
-                        <td :rowspan="i.prefixes.length || 1" class="py-1 pr-2 align-top">
+                        <td :rowspan="ifaceRows(i).length || 1" class="py-1 pr-2 align-top">
                           <UButton
-                            v-if="i.prefixes.length"
+                            v-if="ifaceRows(i).length"
                             size="sm"
                             variant="outline"
                             :icon="readOnly ? 'i-lucide-eye' : 'i-lucide-pencil'"
                             :aria-label="readOnly ? 'View' : 'Edit'"
                             :title="readOnly ? 'View' : 'Edit'"
                             type="button"
-                            @click="openDetail(withLabel(i.label, i.name), i.prefixes)"
+                            @click="openDetail(withLabel(i.label, i.name), i.prefixes, i)"
                           />
                         </td>
-                        <td :rowspan="i.prefixes.length || 1" class="py-1 pr-4 align-top">
+                        <td :rowspan="ifaceRows(i).length || 1" class="py-1 pr-4 align-top">
                           <div class="font-mono">{{ withLabel(i.label, i.name) }}</div>
                           <div class="mt-0.5 flex flex-wrap gap-1">
                             <UBadge
@@ -424,7 +476,7 @@ const autoLeases = useAutoRefresh(loadLeases, { seconds: 10, active: () => tab.v
                               title="Takes an IPv6 address from router advertisements (SLAAC client)"
                             />
                             <UBadge
-                              v-if="i.prefixes.some((p) => p.ra_enabled)"
+                              v-if="i.delegated.length || i.prefixes.some((p) => p.ra_enabled)"
                               color="info"
                               variant="subtle"
                               size="sm"
@@ -433,7 +485,7 @@ const autoLeases = useAutoRefresh(loadLeases, { seconds: 10, active: () => tab.v
                             />
                           </div>
                         </td>
-                        <td :rowspan="i.prefixes.length || 1" class="py-1 pr-4 align-top">
+                        <td :rowspan="ifaceRows(i).length || 1" class="py-1 pr-4 align-top">
                           {{ i.description }}
                         </td>
                       </template>
@@ -444,6 +496,42 @@ const autoLeases = useAutoRefresh(loadLeases, { seconds: 10, active: () => tab.v
                             : 'No address; give it one under Interfaces to serve DHCP.'
                         }}
                       </td>
+                      <template v-else-if="p.delegated">
+                        <td class="py-1 pr-4 font-mono">
+                          {{ p.delegated }}
+                          <UBadge
+                            color="neutral"
+                            variant="subtle"
+                            size="sm"
+                            label="delegated"
+                            :title="`Subnet of the prefix delegated to ${p.delegated.slice(1, p.delegated.indexOf('>'))}, with router advertisements`"
+                          />
+                        </td>
+                        <td class="py-1 pr-4">
+                          <div class="flex items-center gap-1.5">
+                            <USwitch
+                              v-model="i.delegated_dhcp"
+                              :disabled="readOnly"
+                              @update:model-value="(on) => delegatedSwitched(i, on)"
+                              :aria-label="`DHCPv6 server on ${p.delegated}`"
+                            />
+                            <UBadge
+                              v-if="i.delegated_slaac"
+                              color="info"
+                              variant="subtle"
+                              size="sm"
+                              label="SLAAC"
+                              title="Clients pick their own address from this prefix"
+                            />
+                          </div>
+                        </td>
+                        <template v-if="i.delegated_dhcp">
+                          <td class="py-1 pr-4 font-mono text-xs">{{ delegatedRangeText(i) }}</td>
+                          <td class="py-1 pr-4 font-mono text-xs">from RA</td>
+                        </template>
+                        <td v-else colspan="2" />
+                        <td class="py-1 font-mono text-xs">firewall, when it answers DNS here</td>
+                      </template>
                       <template v-else>
                         <td class="py-1 pr-4 font-mono">{{ p.prefix }}</td>
                         <td class="py-1 pr-4">
@@ -615,6 +703,52 @@ const autoLeases = useAutoRefresh(loadLeases, { seconds: 10, active: () => tab.v
                 help="Addresses or hosts; only those of the prefix's IP version are used. Empty: the firewall, when its DNS server answers on this interface."
               >
                 <AddrInput v-model="p.dhcp_dns_servers" multiple />
+              </UFormField>
+            </div>
+            <div v-if="detail.iface" class="space-y-3">
+              <div class="border-b border-default pb-1">
+                <span class="font-mono font-semibold">{{ detail.iface.delegated.join(', ') }}</span>
+                <span class="ms-2 text-sm text-muted">in a delegated prefix</span>
+              </div>
+              <p class="text-sm text-muted">
+                The interface's addresses in a prefix delegated to another interface are announced
+                with router advertisements, so they follow when the ISP delegates a new prefix. The
+                DNS server announced is the firewall, when its DNS server answers on this interface.
+              </p>
+              <UFormField :ui="inlineField" label="SLAAC: clients pick their own address">
+                <USwitch v-model="detail.iface.delegated_slaac" />
+              </UFormField>
+              <UFormField
+                :ui="inlineField"
+                label="DHCPv6 server"
+                help="Needs the virtual firewall's DHCP server."
+              >
+                <USwitch
+                  v-model="detail.iface.delegated_dhcp"
+                  @update:model-value="(on) => delegatedSwitched(detail.iface, on)"
+                />
+              </UFormField>
+              <UFormField
+                v-if="detail.iface.delegated_dhcp"
+                :ui="inlineField"
+                label="Range (host part)"
+                help="The low 64 bits of the addresses, the same in each delegated prefix and after a new one: ::1000 to ::1fff. Empty: no dynamic addresses, only the fixed leases."
+              >
+                <div class="flex items-center gap-2">
+                  <UInput
+                    v-model="detail.iface.delegated_range_start"
+                    class="min-w-0 flex-1 font-mono"
+                    placeholder="::1000"
+                    aria-label="Range start"
+                  />
+                  <span class="text-muted">-</span>
+                  <UInput
+                    v-model="detail.iface.delegated_range_end"
+                    class="min-w-0 flex-1 font-mono"
+                    placeholder="::1fff"
+                    aria-label="Range end"
+                  />
+                </div>
               </UFormField>
             </div>
           </fieldset>

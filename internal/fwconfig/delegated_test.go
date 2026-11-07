@@ -5,6 +5,7 @@ package fwconfig
 
 import (
 	"net/netip"
+	"reflect"
 	"slices"
 	"testing"
 )
@@ -91,6 +92,37 @@ func TestResolveDelegated(t *testing.T) {
 		t.Error(err)
 	}
 	if !slices.Equal(in.Interfaces[1].Addresses, before) {
+		t.Error("ResolveDelegated changed its document")
+	}
+}
+
+func TestResolveDelegatedDHCP(t *testing.T) {
+	doc := SampleDocument()
+	in := &doc.Instances[0]
+	in.Interfaces[0].DHCPv6, in.Interfaces[0].DHCPv6PD = true, true
+	in.RA = append(in.RA, RAInterface{Interface: "eth1.20", Prefixes: []RAPrefix{{Prefix: "<eth0>:20::/64"}}, Managed: true})
+	n := len(in.DHCP.Subnets)
+	in.DHCP.Subnets = append(in.DHCP.Subnets, DHCPSubnet{Prefix: "<eth0>:20::/64", Interface: "eth1.20",
+		RangeStart: "<eth0>:20::1000/128", RangeEnd: "<eth0>:20::1fff/128", DNSServers: []string{"<eth0>:20::1/64", "2001:db8::53"}})
+	if err := doc.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if !in.UsesDelegated() {
+		t.Error("UsesDelegated = false")
+	}
+	if got := doc.ResolveDelegated(nil).Instances[0].DHCP.Subnets; len(got) != n {
+		t.Errorf("not delegated: %d subnets, want %d", len(got), n)
+	}
+	got := doc.ResolveDelegated(DelegatedPrefixes{"main": {"eth0": netip.MustParsePrefix("2001:db8:aa00::/48")}})
+	want := DHCPSubnet{Prefix: "2001:db8:aa00:20::/64", Interface: "eth1.20", RangeStart: "2001:db8:aa00:20::1000",
+		RangeEnd: "2001:db8:aa00:20::1fff", DNSServers: []string{"2001:db8:aa00:20::1", "2001:db8::53"}}
+	if s := got.Instances[0].DHCP.Subnets[n]; !reflect.DeepEqual(s, want) {
+		t.Errorf("subnet = %+v", s)
+	}
+	if err := got.Validate(); err != nil {
+		t.Error(err)
+	}
+	if in.DHCP.Subnets[n].Prefix != "<eth0>:20::/64" {
 		t.Error("ResolveDelegated changed its document")
 	}
 }

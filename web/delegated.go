@@ -4,7 +4,9 @@
 package web
 
 import (
+	"encoding/binary"
 	"fmt"
+	"net/netip"
 	"strings"
 
 	"gorm.io/gorm"
@@ -54,6 +56,9 @@ func prepareDHCPv6(tx *gorm.DB, i, old *models.Interface) error {
 		if n == 0 {
 			return bad(fmt.Sprintf("addresses: %s: %s is not an interface of this virtual firewall with DHCPv6 prefix delegation", a, d.Interface))
 		}
+	}
+	if err := prepareDelegatedDHCP(i); err != nil {
+		return err
 	}
 	if old == nil || !old.Dhcpv6Pd {
 		return nil
@@ -120,4 +125,51 @@ func renameDelegated(tx *gorm.DB, old *models.Interface, name string) error {
 		}
 	}
 	return nil
+}
+
+// prepareDelegatedDHCP checks the DHCPv6 settings of i's addresses in a
+// delegated prefix: a range of host parts ("::1000" to "::1fff"), and an
+// address of the interface's in a delegated /64 to serve it in.
+func prepareDelegatedDHCP(i *models.Interface) error {
+	i.DelegatedRangeStart = strings.TrimSpace(i.DelegatedRangeStart)
+	i.DelegatedRangeEnd = strings.TrimSpace(i.DelegatedRangeEnd)
+	for _, p := range []*string{&i.DelegatedRangeStart, &i.DelegatedRangeEnd} {
+		if *p != "" && !strings.HasPrefix(*p, "::") {
+			*p = "::" + *p // "1000" for "::1000"
+		}
+	}
+	if (i.DelegatedRangeStart == "") != (i.DelegatedRangeEnd == "") {
+		return bad("delegated prefix DHCPv6 range needs both start and end")
+	}
+	if i.DelegatedRangeStart != "" {
+		start, err := fwconfig.ParseHostPart(i.DelegatedRangeStart)
+		if err != nil {
+			return bad("delegated prefix DHCPv6 range start: " + err.Error())
+		}
+		end, err := fwconfig.ParseHostPart(i.DelegatedRangeEnd)
+		if err != nil {
+			return bad("delegated prefix DHCPv6 range end: " + err.Error())
+		}
+		if start > end {
+			return bad("delegated prefix DHCPv6 range: start is after end")
+		}
+		i.DelegatedRangeStart = hostPart(start)
+		i.DelegatedRangeEnd = hostPart(end)
+	}
+	if !i.DelegatedDhcp {
+		return nil
+	}
+	for _, a := range i.Addresses {
+		if d, err := fwconfig.ParseDelegated(a); err == nil && d.Bits == 64 {
+			return nil
+		}
+	}
+	return bad("DHCPv6 in a delegated prefix needs an address of this interface's in one, as a /64: <wan0>:2000::1/64")
+}
+
+// hostPart is the canonical text of a host part: "::1000".
+func hostPart(h uint64) string {
+	var b [16]byte
+	binary.BigEndian.PutUint64(b[8:], h)
+	return netip.AddrFrom16(b).String()
 }

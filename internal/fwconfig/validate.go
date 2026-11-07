@@ -599,8 +599,17 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 		v.addf("%s: dhcp: invalid domain name %q", p, in.DHCP.DomainName)
 	}
 	subnets := map[netip.Prefix]bool{}
+	delegatedSubnets := map[string]bool{}
 	for _, s := range in.DHCP.Subnets {
 		sp := fmt.Sprintf("%s: dhcp subnet %s", p, s.Prefix)
+		if IsDelegated(s.Prefix) {
+			if delegatedSubnets[s.Prefix] {
+				v.addf("%s: duplicate", sp)
+			}
+			delegatedSubnets[s.Prefix] = true
+			v.delegatedSubnet(sp, s, ifaces, raOn)
+			continue
+		}
 		pfx, err := netip.ParsePrefix(s.Prefix)
 		if err != nil {
 			v.addf("%s: %v", sp, err)

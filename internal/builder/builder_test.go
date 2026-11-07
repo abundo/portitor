@@ -348,6 +348,37 @@ func TestBuildDelegatedPrefix(t *testing.T) {
 	}
 }
 
+// DHCPv6 in a delegated /64: a subnet in the delegated form with the
+// range's host parts, M and O set, and SLAAC off when asked.
+func TestBuildDelegatedDHCP(t *testing.T) {
+	db := testDB(t)
+	main := models.Instance{Name: "main", IsDefault: true, FirewallID: 1, DhcpEnabled: true}
+	mustCreate(t, db, &main)
+	mustCreate(t, db, &models.Interface{InstanceID: main.ID, Name: "eth0", Kind: "physical", Enabled: true, Ipv4Mode: "dhcp",
+		Ipv6AcceptRA: true, Dhcpv6: true, Dhcpv6Pd: true})
+	lan := models.Interface{InstanceID: main.ID, Name: "eth1", Kind: "physical", Enabled: true, Ipv4Mode: "static", DnsListen: true,
+		Addresses: models.StringList{"<eth0>:1::1/64"}, DelegatedDhcp: true, DelegatedRangeStart: "::1000", DelegatedRangeEnd: "::1fff"}
+	mustCreate(t, db, &lan)
+	db.Model(&lan).Update("delegated_slaac", false)
+
+	doc, err := Build(db, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := doc.Instance("main")
+	wantSub := []fwconfig.DHCPSubnet{{Prefix: "<eth0>:1::/64", Interface: "eth1", RangeStart: "<eth0>:1::1000/128",
+		RangeEnd: "<eth0>:1::1fff/128", DNSServers: []string{"<eth0>:1::1/64"}}}
+	if !reflect.DeepEqual(in.DHCP.Subnets, wantSub) {
+		t.Errorf("subnets = %+v", in.DHCP.Subnets)
+	}
+	if len(in.RA) != 1 || !in.RA[0].Managed || !in.RA[0].Other || in.RA[0].Prefixes[0].Autonomous {
+		t.Errorf("ra = %+v", in.RA)
+	}
+	if err := doc.Validate(); err != nil {
+		t.Error(err)
+	}
+}
+
 // A VRF's BGP, OSPF and IS-IS are its own: the configs and neighbours of
 // its id, and the OSPF and IS-IS interfaces on its interfaces.
 func TestBuildVRFRouting(t *testing.T) {

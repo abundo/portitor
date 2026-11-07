@@ -59,7 +59,11 @@ func dhcpSubnets(in *fwconfig.Instance, family string) []fwconfig.DHCPSubnet {
 		return nil
 	}
 	for _, s := range in.DHCP.Subnets {
-		if fwconfig.AddrFamily(s.Prefix) == family {
+		f := fwconfig.AddrFamily(s.Prefix)
+		if fwconfig.IsDelegated(s.Prefix) {
+			f = "ipv6" // unresolved: the agent's own checks before apply
+		}
+		if f == family {
 			out = append(out, s)
 		}
 	}

@@ -48,3 +48,30 @@ func TestDelegatedAddresses(t *testing.T) {
 		t.Errorf("after rename: %v", got.Addresses)
 	}
 }
+
+func TestDelegatedDHCP(t *testing.T) {
+	env := newEnv(t)
+	inst := env.create("/api/instances", map[string]any{"name": "main"})
+	env.create("/api/interfaces", map[string]any{"instance_id": inst, "name": "eth0", "enabled": true, "ipv4_mode": "dhcp",
+		"ipv6_accept_ra": true, "dhcpv6": true, "dhcpv6_pd": true})
+	if rec := env.do("POST", "/api/interfaces", map[string]any{"instance_id": inst, "name": "eth1", "addresses": []string{"192.168.1.1/24"},
+		"delegated_dhcp": true}); rec.Code != http.StatusBadRequest {
+		t.Errorf("delegated DHCPv6 without a delegated address accepted: %d", rec.Code)
+	}
+	lan := env.create("/api/interfaces", map[string]any{"instance_id": inst, "name": "eth1", "addresses": []string{"<eth0>:1::1/64"}})
+	for _, r := range [][2]string{{"::1000", ""}, {"::2000", "::1000"}, {"1:0:0:0:0::1", "::2"}, {"::x", "::2"}} {
+		if rec := env.do("PUT", "/api/interfaces/"+itoa(lan), map[string]any{"delegated_dhcp": true,
+			"delegated_range_start": r[0], "delegated_range_end": r[1]}); rec.Code != http.StatusBadRequest {
+			t.Errorf("range %v accepted: %d", r, rec.Code)
+		}
+	}
+	if rec := env.do("PUT", "/api/interfaces/"+itoa(lan), map[string]any{"delegated_dhcp": true,
+		"delegated_range_start": "1000", "delegated_range_end": "::0:1fff"}); rec.Code != http.StatusOK {
+		t.Fatalf("range: %d %s", rec.Code, rec.Body)
+	}
+	var got models.Interface
+	env.srv.db.First(&got, lan)
+	if !got.DelegatedDhcp || got.DelegatedRangeStart != "::1000" || got.DelegatedRangeEnd != "::1fff" || !got.DelegatedSlaac {
+		t.Errorf("stored %+v", got)
+	}
+}

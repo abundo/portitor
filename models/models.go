@@ -527,6 +527,15 @@ type Interface struct {
 	Dhcpv6         bool `gorm:"column:dhcpv6" json:"dhcpv6"`
 	Dhcpv6Pd       bool `gorm:"column:dhcpv6_pd" json:"dhcpv6_pd"`
 	Dhcpv6PdLength int  `gorm:"column:dhcpv6_pd_length" json:"dhcpv6_pd_length"`
+	// DelegatedDhcp serves DHCPv6 in the /64 of each of the interface's
+	// addresses in a delegated prefix (<wan0>:2000::1/64), from
+	// DelegatedRangeStart to DelegatedRangeEnd: host parts, the low 64
+	// bits ("::1000"); empty is reservations only. DelegatedSlaac lets
+	// clients pick their own addresses there too (the RA's A flag).
+	DelegatedDhcp       bool   `gorm:"column:delegated_dhcp" json:"delegated_dhcp"`
+	DelegatedRangeStart string `gorm:"column:delegated_range_start" json:"delegated_range_start"`
+	DelegatedRangeEnd   string `gorm:"column:delegated_range_end" json:"delegated_range_end"`
+	DelegatedSlaac      bool   `gorm:"column:delegated_slaac;default:true" json:"delegated_slaac"`
 	// DhcpNoDefaultRoute ignores the router of the DHCP lease.
 	DhcpNoDefaultRoute bool `json:"dhcp_no_default_route"`
 	// DnsListen makes the instance's DNS server answer on this interface.

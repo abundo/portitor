@@ -344,8 +344,11 @@ the certificate portitor-config serves, chosen under Settings
   `Options.Delegated` (`Document.ResolveDelegated`, which leaves out what is not
   delegated yet), so rendering stays pure in (document, options). A changed
   prefix applies the current document again (`Agent.onPDChange`). They are
-  allowed in interface addresses and in RA prefixes and RDNSS (the builder adds
-  an RA with SLAAC for each delegated /64); renaming the delegating interface
+  allowed in interface addresses, RA prefixes and RDNSS, and DHCP subnets (prefix,
+  range, DNS servers); the builder adds an RA for each delegated /64, with SLAAC
+  unless `interfaces.delegated_slaac` is off, and with `delegated_dhcp` a DHCPv6
+  subnet whose range is the interface's host parts (`delegated_range_*`, "::1000")
+  in the delegated form (`<wan0>:1::1000/128`, `delegatedRA`); renaming the delegating interface
   rewrites them (`web/delegated.go`), deleting or moving it is refused.
 - **Named hosts/prefixes never reach the agent.** `builder.Build` expands names
   (`netobj`) and drops a rule it cannot resolve; an object with no addresses is an

@@ -886,7 +886,7 @@ func buildPeer(db *gorm.DB, generation int64, only map[string]bool, firewallID u
 				}
 			}
 		}
-		delegatedRA(&in, mi)
+		delegatedRA(&in, mi, d.interfaces)
 		for i, ra := range in.RA {
 			if mif, ok := ifaceByName(d.interfaces, mi.ID, ra.Interface); ok && mif.Xlat464 {
 				in.RA[i].NAT64Prefix = mi.Nat64Prefix
@@ -1694,12 +1694,17 @@ func ruleID(id uint) uint32 {
 	return uint32(id)
 }
 
-// delegatedRA announces with router advertisements (SLAAC) the /64 of
-// each address relative to a delegated prefix: the prefix is not known
-// until the agent gets it, so it cannot be an IPAM prefix. The address is
-// the DNS server announced when DNS listens on the interface.
-func delegatedRA(in *fwconfig.Instance, mi models.Instance) {
+// delegatedRA announces with router advertisements the /64 of each
+// address relative to a delegated prefix, with SLAAC unless the
+// interface turns it off, and serves DHCPv6 in it when the interface
+// asks for that: the prefix is not known until the agent gets it, so it
+// cannot be an IPAM prefix. The address is the DNS server announced when
+// DNS listens on the interface.
+func delegatedRA(in *fwconfig.Instance, mi models.Instance, ifaces []models.Interface) {
 	for _, ifc := range in.Interfaces {
+		mif, _ := ifaceByName(ifaces, mi.ID, ifc.Name)
+		slaac := mif.ID == 0 || mif.DelegatedSlaac
+		dhcp := mi.DhcpEnabled && mif.DelegatedDhcp
 		for _, a := range ifc.Addresses {
 			d, err := fwconfig.ParseDelegated(a)
 			if err != nil || d.Bits != 64 {
@@ -1714,14 +1719,33 @@ func delegatedRA(in *fwconfig.Instance, mi models.Instance) {
 			pfx := d
 			pfx.Host = 0
 			if !slices.ContainsFunc(ra.Prefixes, func(p fwconfig.RAPrefix) bool { return p.Prefix == pfx.String() }) {
-				ra.Prefixes = append(ra.Prefixes, fwconfig.RAPrefix{Prefix: pfx.String(), Autonomous: true})
+				ra.Prefixes = append(ra.Prefixes, fwconfig.RAPrefix{Prefix: pfx.String(), Autonomous: slaac})
 			}
-			if contains(in.DNS.ListenInterfaces, ifc.Name) && !contains(ra.RDNSS, a) {
-				ra.RDNSS = append(ra.RDNSS, a)
+			var dns []string
+			if contains(in.DNS.ListenInterfaces, ifc.Name) {
+				dns = []string{a}
+				if !contains(ra.RDNSS, a) {
+					ra.RDNSS = append(ra.RDNSS, a)
+				}
 			}
 			if mi.DhcpDomainName != "" && !contains(ra.DNSSL, mi.DhcpDomainName) {
 				ra.DNSSL = append(ra.DNSSL, mi.DhcpDomainName)
 			}
+			if !dhcp || slices.ContainsFunc(in.DHCP.Subnets, func(s fwconfig.DHCPSubnet) bool { return s.Prefix == pfx.String() }) {
+				continue
+			}
+			ra.Managed, ra.Other = true, true
+			sub := fwconfig.DHCPSubnet{Prefix: pfx.String(), Interface: ifc.Name, DNSServers: dns}
+			start, err1 := fwconfig.ParseHostPart(mif.DelegatedRangeStart)
+			end, err2 := fwconfig.ParseHostPart(mif.DelegatedRangeEnd)
+			if err1 == nil && err2 == nil {
+				r := d
+				r.Bits, r.Host = 128, start
+				sub.RangeStart = r.String()
+				r.Host = end
+				sub.RangeEnd = r.String()
+			}
+			in.DHCP.Subnets = append(in.DHCP.Subnets, sub)
 		}
 	}
 }
