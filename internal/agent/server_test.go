@@ -33,7 +33,6 @@ func testAgent(t *testing.T, allowFrom ...string) (*Agent, http.Handler) {
 			NftablesFile: filepath.Join(dir, "std", "nftables.d", "portitor.nft"),
 			WireGuardDir: filepath.Join(dir, "std", "wireguard"),
 			NamedConf:    filepath.Join(dir, "std", "bind", "named.conf"),
-			RadvdConf:    filepath.Join(dir, "std", "radvd.conf"),
 			FRRDir:       filepath.Join(dir, "std", "frr"),
 			FRRRunDir:    filepath.Join(dir, "run", "frr"),
 			FRRStateDir:  filepath.Join(dir, "state", "frr"),

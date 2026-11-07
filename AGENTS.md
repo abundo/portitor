@@ -16,7 +16,7 @@ are in [README.md](README.md).
 | `internal/fwconfig` | The desired-state document and `Validate()`. **The contract between web and agent.** |
 | `internal/render` | Pure functions: document → nftables, WireGuard, named.conf, the DHCP server's dhcpd.json (`dhcpd.go`), chrony.conf (`chrony.go`), snmpd.conf (`snmpd.go`), rsyslog.conf (`rsyslog.go`), openvpn.conf (`openvpn.go`), dnsmgr2 config, FRR (`frr.go`: frr.conf with BGP, OSPF, IS-IS, VRRP and BFD, daemons, vtysh.conf) |
 | `internal/agent` | Agent: apply/reconcile, commit-confirm, DHCP and DHCPv6 (prefix delegation) clients (woken when their interface gets a carrier, `linkwatch.go`), IP lists, task scheduler, packet log (NFLOG), DNS query log (BIND logs to the journal, followed with `journalctl`, filtered by the agent, `querylog.go`), WireGuard endpoint re-resolving, packet capture (tcpdump, streamed rate-limited), connectivity tests (ICMP echo on a raw socket, TCP connect, UDP datagram, from the agent's own sockets opened in the instance netns by `withNetns`, streamed as JSON lines, `probe.go`), traceroute (`mtr --raw`, streamed as JSON lines, `trace.go`), iperf3 tests (client or server, `--json-stream` read into JSON lines, a server's port in the ruleset's timeout set `render.IperfServerSet` while it runs, `iperf.go`), service logs (`journalctl --follow` of a status service unit, streamed as text, `servicelog.go`), the host's whole journal (`POST /v1/journal`) and rsyslog's state (`GET /v1/syslog`, `syslog.go`), LLDP (sent and heard on raw sockets, `lldp.go`), neighbours (ARP/ND, LLDP), NAT64 (a Jool instance per namespace; its sessions and counters for `GET /v1/nat64`, `nat64.go`), traffic shaping (CAKE, IFB devices for receiving, HTB classes for the rate limits that shape (`fwconfig.Instance.Shapers`) by packet mark `render.ShaperMark`; planned from `tc -j` output, `shaping.go`; their traffic and the policers' drop counters `render.RateLimitDropCounter`, `ratelimits.go`), BGP, OSPF, IS-IS, VRRP and BFD state (FRR's JSON through `vtysh`, `bgp.go`, `ospf.go`, `isis.go`, `vrrp.go`, `bfd.go`), VRRP's macvlan devices (`vrrp.go`), 6in4 tunnels' endpoint updates at Hurricane Electric's tunnel broker (from the instance netns, on address changes, `tunnelbroker.go`), VXLANs' learning, EVPN bridge port flags and static flood lists (`vxlan.go`), OpenVPN's logins through its management socket, checked as portitor-config checks a login, against the document's users and `Directory` (`openvpn.go`), the VRFs' source rules and sysctls for the firewall's services (`vrf.go`), status (the host's memory, CPU times, load and disk use from /proc and statfs, `host.go`), API server |
-| `internal/dhcpd` | The DHCPv4 and DHCPv6 server, `portitor-agent dhcpd <instance>` (`portitor-dhcpd@.service`, every instance's, as the user `portitor-dhcp`): the DHCPv4 wire format read tolerantly and written as clients expect (`packet4.go`), the handlers as pure functions over the store and a clock (`v4.go`, `v6.go`), the append-only lease log (`store.go`), the ARP check before an offer (`probe.go`), sockets per interface, reload and the control socket (`run.go`), and the replication to an HA standby (`repl.go`) |
+| `internal/dhcpd` | The DHCPv4 and DHCPv6 server and the IPv6 router advertisements, `portitor-agent dhcpd <instance>` (`portitor-dhcpd@.service`, every instance's, as the user `portitor-dhcp`): the DHCPv4 wire format read tolerantly and written as clients expect (`packet4.go`), the handlers as pure functions over the store and a clock (`v4.go`, `v6.go`), the append-only lease log (`store.go`), the ARP check before an offer (`probe.go`), sockets per interface, reload and the control socket (`run.go`), the replication to an HA standby (`repl.go`), and the router advertisements (`ra.go`: the message, the timing and the deprecation of a removed prefix as pure functions; `rarun.go`: a raw ICMPv6 socket and goroutine per interface) |
 | `internal/dyndns` | DNS update client ("DNS update" in the GUI): RFC 2136 (from ifnsupdate), sent from the instance netns, or a DNS hosting provider's API through libdns (`providers.go`, matching `fwconfig.DNSProviders`), called from the host |
 | `internal/acme` | ACME certificates through lego: accounts, orders, the stored chain and key (`<state_dir>/certificates/`); the agent's `acme.go` schedules them and answers HTTP-01 in the instance netns, opening port 80 by the `acme_http` set (`render.ACMEHTTPSet`), or DNS-01 (`dns01.go`: the TXT record at `_acme-challenge.<domain>` after its CNAMEs, lego's `EffectiveFQDN`) through a DNS update client's provider (`dyndns.TXTUpdater`, copied into the certificate as `fwconfig.DNS01` by the builder) |
 | `internal/acmeserver` | ACME server (RFC 8555 subset: accounts, orders, HTTP-01, finalize), with the policy, validation and issuing left to `Hooks`; used by the agent's ACME proxy (`acmeproxy.go`) |
@@ -137,7 +137,7 @@ docs and user-facing messages.
   (6.12 detaches them) every second. The host's own traffic uses table
   `fwconfig.HAMgmtTable`: `from <management address>` always, and everything from
   `iif lo` while closed (proto 99, `hamgmt.go`). At takeover (`onTakeover`): GARP and
-  NA twice, radvd reloads, BGP is cleared. The witness
+  NA twice, the DHCP server sends its initial RAs again (control op `advertise`), BGP is cleared. The witness
   (`witness.vote`): every 1 s it asks both hosts in parallel and keeps its vote on the
   host reporting active, else its holder; it moves only once the old holder's has run
   out, plus `witnessGrace`, or at once to an active host that reports a vote, which
@@ -426,7 +426,7 @@ the certificate portitor-config serves, chosen under Settings
   kernel route (`Instance.KernelRoutes`), so "redistribute static" then also renders
   `redistribute static`.
 - **NAT64** (`fwconfig/nat64.go`): one prefix per instance, used by DNS64 (named.conf),
-  PREF64 (radvd) and Jool. An interface's `xlat464` flag puts PREF64 and DHCPv4
+  PREF64 (the RAs) and Jool. An interface's `xlat464` flag puts PREF64 and DHCPv4
   option 108 on it, and, with Jool, is where packets to the prefix may come in: Jool
   takes them at prerouting (dstnat + 25), before the forward chain, so the ruleset's
   `prerouting_nat64` chain (priority mangle) drops the rest. Each such interface has
@@ -488,7 +488,8 @@ the certificate portitor-config serves, chosen under Settings
   redacted in history and in errors.
 - **DHCP server** (`internal/dhcpd`, `render/dhcpd.go`, `internal/agent/dhcprepl.go`;
   design in `dev/design-ha-cluster.md`): Portitor's own, one process per instance with
-  DHCP subnets, the default instance's too (`Units.DHCPD`, `portitor-dhcpd@<name>`;
+  DHCP subnets or RAs (`render.DHCPDRunning`), the default instance's too
+  (`Units.DHCPD`, `portitor-dhcpd@<name>`;
   config `<etc>/dhcpd/<name>/dhcpd.json`, a directory because a file's bind mount
   wouldn't see the rename that replaces it; lease log `<state>/dhcpd/<name>`; control
   socket `<run>/dhcpd/<name>/control.sock`, `dhcpd.Query`). The unit enters the
@@ -509,6 +510,18 @@ the certificate portitor-config serves, chosen under Settings
   DHCPv6 server DUID comes from the instance's name (`render.DHCPServerDUID`), the
   same on both hosts. The client tests are table-driven over the wire format
   (`v4_test.go`, `v6_test.go`).
+  The same process sends the IPv6 router advertisements (`Instance.RA`, `dhcpd.json`'s
+  `ra`; replacing radvd, with radvd's defaults: M/O flags, prefixes, RDNSS, DNSSL,
+  PREF64, the source link-layer address): a raw ICMPv6 socket per interface, bound to
+  it, hearing router solicitations alone (hop limit 255 checked), answered after up to
+  500 ms to the solicitor, or to all nodes when several asked; unsolicited ones every
+  198-600 s, the first three at most 16 s apart, again on a reload, a recreated
+  interface and an HA takeover (control op `advertise`), multicast ones at least 3 s
+  apart, always from the interface's link-local address once DAD is done. A prefix
+  taken out of the config (a new delegated prefix) is advertised for 2 h with a
+  preferred lifetime of 0, and an interface taken out gets a last RA with every
+  lifetime 0; a process that stops sends none, so a restart or an HA standby never
+  withdraws the router.
 - **NTP** (`fwconfig/ntp.go`, `render/chrony.go`): chrony per instance
   (`instances.ntp_*`), its servers JSON. The default instance's chrony.service sets
   the host's clock; a virtual firewall's `portitor-chrony@` runs `chronyd -x` (the
@@ -801,16 +814,14 @@ them first; commit only when asked to, each time.
   its zone files are in `<bind_zones_dir>/<instance>` (`InstanceFiles.BindZones`) at
   the same path on the host and for named, because dnsmgr2 writes their paths into
   `named.conf.dnsmgr2` on the host (a tmpfs hides the other instances').
-  `install.py` moves older files in (`move_bind_dirs`). radvd's PID file is in the
-  unit's private /tmp: under `PrivatePIDs` the daemon is always PID 1, so a stale one
-  would read as already running.
+  `install.py` moves older files in (`move_bind_dirs`).
 - **The default instance is the host, laid out like one.** Its files are in the
   distribution's standard places (`/etc/nftables.d/portitor.nft`, `/etc/wireguard`,
-  `/etc/bind/named.conf`, `/etc/radvd.conf`, named's own directories without a
-  subdirectory) and run by the distribution's units (`named`, `radvd`, ...;
-  `units.default_*`), which the agent unmasks when it uses them. The DHCP server is
-  the exception: Portitor's own, it runs under `portitor-dhcpd@<name>` for every
-  instance. Every path comes from `render.Paths.Files(instance)` and
+  `/etc/bind/named.conf`, named's own directories without a
+  subdirectory) and run by the distribution's units (`named`, `frr`, ...;
+  `units.default_*`), which the agent unmasks when it uses them. The DHCP server
+  (with the RAs) is the exception: Portitor's own, it runs under
+  `portitor-dhcpd@<name>` for every instance. Every path comes from `render.Paths.Files(instance)` and
   every unit from `render.Units`; never build them from `InstanceEtc`. Rendered
   files start with "Generated by portitor-agent" (`render.Generated`): a file of
   someone else's that one replaces is kept as `<file>.portitor-orig`, a
@@ -820,7 +831,7 @@ them first; commit only when asked to, each time.
   GUI doesn't list it under Virtual firewalls; it is the first instance, its
   flag never moves and it can't be deleted (`prepareInstance`, `deleteInstance`).
 - dnsmgr2 does DNS only. The DHCP server's config (`render/dhcpd.go`, reservations
-  from A/AAAA records with a MAC included) and radvd are rendered directly: the DHCP
+  from A/AAAA records with a MAC included, and the RAs) is rendered directly: the DHCP
   subnets of one IP version on an interface are served together, so clients get
   addresses from all of them, each with the interface's address in it as its server
   id.

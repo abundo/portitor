@@ -85,7 +85,7 @@ cmd_install() {
 
 	log "installing portitor-agent on fw"
 	$RT cp build/portitor-agent "$PREFIX-fw:/usr/bin/portitor-agent"
-	for u in portitor-agent.service portitor-named@.service portitor-dhcpd@.service portitor-radvd@.service portitor-frr@.service portitor-chrony@.service portitor-snmpd@.service portitor-openvpn-udp@.service portitor-openvpn-tcp@.service; do
+	for u in portitor-agent.service portitor-named@.service portitor-dhcpd@.service portitor-frr@.service portitor-chrony@.service portitor-snmpd@.service portitor-openvpn-udp@.service portitor-openvpn-tcp@.service; do
 		$RT cp "deploy/systemd/$u" "$PREFIX-fw:/etc/systemd/system/$u"
 	done
 	ex fw sh -c 'test -e /etc/portitor/agent.token ||
@@ -171,7 +171,7 @@ cmd_shell() { $RT exec -it "$PREFIX-${1:?fw or mgmt}" bash; }
 
 cmd_logs() {
 	case ${1:?fw or mgmt} in
-	fw) ex fw journalctl -f -u portitor-agent -u portitor-config -u 'portitor-named@*' -u 'portitor-dhcpd@*' -u 'portitor-radvd@*' -u 'portitor-frr@*' -u 'portitor-chrony@*' -u 'portitor-snmpd@*' -u 'portitor-openvpn-*' -u 'openvpn-server@*' -u named -u radvd -u frr -u chrony -u snmpd ;;
+	fw) ex fw journalctl -f -u portitor-agent -u portitor-config -u 'portitor-named@*' -u 'portitor-dhcpd@*' -u 'portitor-frr@*' -u 'portitor-chrony@*' -u 'portitor-snmpd@*' -u 'portitor-openvpn-*' -u 'openvpn-server@*' -u named -u frr -u chrony -u snmpd ;;
 	mgmt) ex mgmt journalctl -f -u portitor-web -u dnsmasq ;;
 	*) echo "fw or mgmt" >&2; exit 2 ;;
 	esac

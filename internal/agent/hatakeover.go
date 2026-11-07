@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/abundo/portitor/internal/dhcpd"
 )
 
 // haAnnounceAgain is when the announcements are sent the second time.
@@ -42,10 +44,10 @@ func (a *Agent) onTakeover() {
 	exp := doc.Expand()
 	for i := range exp.Instances {
 		in := &exp.Instances[i]
-		// radvd sends an advertisement when it reloads.
+		// The DHCP server sends the initial router advertisements again.
 		if len(in.RA) > 0 {
-			if _, err := a.bg.Run(ctx, "", "systemctl", "reload-or-restart", a.cfg.Units.Radvd(in)); err != nil {
-				slog.Warn("ha: takeover: radvd", "instance", in.Name, "err", err)
+			if _, err := dhcpd.Query(ctx, a.cfg.Paths.Files(in).DHCPDSocket(), dhcpd.Control{Op: "advertise"}); err != nil {
+				slog.Warn("ha: takeover: router advertisements", "instance", in.Name, "err", err)
 			}
 		}
 		// BGP would otherwise wait for its connect retry timer.

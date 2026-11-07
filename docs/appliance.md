@@ -4,7 +4,7 @@
 # Installer ISO and updates
 
 The Portitor ISO installs a complete firewall on an amd64 machine: Debian 13, the
-programs the agent needs (nftables, BIND, radvd, WireGuard), portitor-agent and
+programs the agent needs (nftables, BIND, WireGuard), portitor-agent and
 portitor-config, which keeps the firewall's configuration and serves its GUI. A single
 box is enough.
 

@@ -30,7 +30,7 @@ Portitor is a firewall, so we are especially interested in:
 - anything that lets traffic through that the deployed rules should drop,
 - ways around commit-confirm or the anti-lockout rule,
 - unauthenticated or unauthorised access to the agent API or the web GUI,
-- input that reaches an nftables, BIND, Kea, radvd or WireGuard file without being
+- input that reaches an nftables, BIND, DHCP server or WireGuard file without being
   validated,
 - secrets (WireGuard keys, agent token, password hashes) leaking to the browser or
   into deployment history.

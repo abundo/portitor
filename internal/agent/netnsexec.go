@@ -18,7 +18,7 @@ import (
 )
 
 // droppedCaps leave the bounding set of an instance's daemons (named, the
-// DHCP server, radvd). They run as root, at least at first; without CAP_SYS_ADMIN they
+// DHCP server). They run as root, at least at first; without CAP_SYS_ADMIN they
 // cannot setns into another instance's namespace or mount, and the rest
 // would reach the host's kernel, devices or other processes.
 var droppedCaps = []uintptr{
@@ -55,7 +55,7 @@ func NetnsExec(stateDir, instance string, argv []string, keepSysAdmin bool) erro
 	// dnsmgr2's after its first sync) is a SIGHUP to this process before
 	// it has become the daemon, which would end it (Go exits with status
 	// 2). Ignored, it stays ignored across the exec until the daemon sets
-	// its own handler, as named, radvd, OpenVPN and dhcpd do; a starting
+	// its own handler, as named, OpenVPN and dhcpd do; a starting
 	// daemon reads the current config anyway.
 	signal.Ignore(syscall.SIGHUP)
 	if len(argv) == 0 {

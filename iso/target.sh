@@ -49,11 +49,12 @@ if [ -f "$d/firstboot.answers" ]; then
 	install -m 0600 "$d/firstboot.answers" /etc/portitor/firstboot.answers
 fi
 
-# The agent runs BIND, radvd and FRR: the default virtual firewall's under
-# these units, which it unmasks when it uses them, the others' under
-# portitor-*@ units (and every instance's DHCP server under portitor-dhcpd@).
+# The agent runs BIND and FRR: the default virtual firewall's under these
+# units, which it unmasks when it uses them, the others' under portitor-*@
+# units (and every instance's DHCP server and router advertisements under
+# portitor-dhcpd@).
 # rsyslog runs only to send the journal to syslog servers.
-systemctl mask named.service radvd.service frr.service \
+systemctl mask named.service frr.service \
 	conntrackd.service rsyslog.service
 
 # The agent owns the interfaces: nothing else may configure them (a second

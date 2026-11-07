@@ -89,7 +89,7 @@ one host, a firewall and a portal, and an HA pair with a portal. The
                   ├─ scheduler      cron-style tasks
                   ├─ diagnostics    packet log (NFLOG), DNS query log, conntrack, capture, mtr, LLDP
                   ├─ dnsmgr2, BIND  DNS zones, per virtual firewall
-                  ├─ dhcpd, radvd   DHCPv4, DHCPv6 and router advertisements, per virtual firewall
+                  ├─ dhcpd          DHCPv4, DHCPv6 and router advertisements, per virtual firewall
                   └─ FRR            BGP, OSPF, VRRP and BFD, per virtual firewall that uses them
 ```
 
@@ -107,12 +107,12 @@ one host, a firewall and a portal, and an HA pair with a portal. The
   virtual firewalls. The default virtual firewall is not listed on the *Virtual firewalls*
   page and can't be changed or deleted. Its files are where a sysadmin expects them, run by
   the distribution's own units: `/etc/nftables.d/portitor.nft`, `/etc/wireguard/<if>.conf`,
-  `/etc/bind/named.conf` (`named`) and `/etc/radvd.conf` (`radvd`); a file it
+  `/etc/bind/named.conf` (`named`); a file it
   replaces is kept as `<file>.portitor-orig`. Every other virtual firewall's are under
   `/etc/portitor/instances/<name>`, run by `portitor-*@<name>` units. Every virtual
   firewall's DHCP server, the default one's too, is Portitor's own
   (`portitor-dhcpd@<name>`, as an unprivileged user, config in
-  `/etc/portitor/dhcpd/<name>`).
+  `/etc/portitor/dhcpd/<name>`), and sends the router advertisements too.
 - **Interfaces** carry their own addresses, IPv4 and IPv6 mixed, as many as needed,
   each with its prefix length (`192.168.1.1/24`, `fd00:1::1/64`). An IPv6 address can be
   relative to the prefix a WAN interface gets delegated (`<wan0>:1::1/64`); the agent
@@ -122,7 +122,7 @@ one host, a firewall and a portal, and an HA pair with a portal. The
   themselves. A prefix with DHCP on becomes a DHCP scope (DHCPv4 or DHCPv6) on the
   interface with an address in it; several scopes on one interface are served
   together, so clients get addresses from all of them. An IPv6 prefix can send router
-  advertisements (radvd), optionally with SLAAC; DHCPv6 needs them. An address with
+  advertisements, optionally with SLAAC; DHCPv6 needs them. An address with
   a DNS name gets an A/AAAA record (PTR generated), and with a MAC also a fixed lease.
 - **IP lists** are address lists the agent downloads: the ban decisions of a CrowdSec
   Local API (as a bouncer, with its API key), or plain text with one address or prefix
@@ -215,7 +215,7 @@ A first install creates the configs but starts nothing, and prints what is left 
 By hand, it is:
 
 On the **firewall** (Debian/Ubuntu shown; needs nftables, iproute2, wireguard-tools,
-bind9, bind9-utils, radvd; frr and frr-pythontools for BGP, OSPF, IS-IS, VRRP and BFD; tcpdump,
+bind9, bind9-utils; frr and frr-pythontools for BGP, OSPF, IS-IS, VRRP and BFD; tcpdump,
 tshark and mtr-tiny for packet capture and traceroute):
 
 ```sh
@@ -223,7 +223,7 @@ make install-agent                          # binary, systemd units, /etc/portit
 portitor-agent init --host 192.168.1.1      # prints token + certificate fingerprint
 $EDITOR /etc/portitor/agent.yaml            # listen address, allow_from
 useradd --system --no-create-home --shell /usr/sbin/nologin portitor-dhcp   # the DHCP servers' user
-systemctl disable --now named radvd frr   # the agent starts them when the default VF uses them
+systemctl disable --now named frr   # the agent starts them when the default VF uses them
 systemctl enable --now portitor-agent
 ```
 

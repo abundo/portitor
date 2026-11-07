@@ -1,11 +1,12 @@
 // SPDX-FileCopyrightText: 2026 The Portitor contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// Package dhcpd is Portitor's DHCPv4 and DHCPv6 server, one process per
-// instance (portitor-agent dhcpd, in the instance's namespace, as an
-// unprivileged user). It serves what Kea served: pools, the gateway, DNS
-// servers and domain, option 108, MAC reservations, and several subnets on
-// one interface. Its leases are an append-only log in its own directory;
+// Package dhcpd is Portitor's DHCPv4 and DHCPv6 server, and its IPv6
+// router advertisements, one process per instance (portitor-agent dhcpd,
+// in the instance's namespace, as an unprivileged user). It serves what
+// Kea served: pools, the gateway, DNS servers and domain, option 108, MAC
+// reservations, and several subnets on one interface; and what radvd
+// advertised (ra.go). Its leases are an append-only log in its own directory;
 // the agent reads them, and later sets its mode, through a Unix socket.
 package dhcpd
 
@@ -28,6 +29,8 @@ type Config struct {
 	DUID     string    `json:"duid,omitempty"`
 	Subnets4 []Subnet4 `json:"subnets4,omitempty"`
 	Subnets6 []Subnet6 `json:"subnets6,omitempty"`
+	// RA are the interfaces with router advertisements.
+	RA []RAConfig `json:"ra,omitempty"`
 }
 
 // Range is a pool's first and last address.

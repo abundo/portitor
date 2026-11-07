@@ -202,7 +202,7 @@ const NAT64WellKnownPrefix = "64:ff9b::/96"
 
 // CheckNAT64Prefix checks a NAT64 prefix as RFC 6052 has them: IPv6, of
 // length 32, 40, 48, 56, 64 or 96, and with bits 64 to 71 (the "u" octet)
-// zero. BIND's dns64 and radvd's nat64prefix take the same.
+// zero. BIND's dns64 and the RAs' PREF64 option take the same.
 func CheckNAT64Prefix(s string) error {
 	pfx, err := netip.ParsePrefix(s)
 	if err != nil || !pfx.Addr().Is6() || pfx != pfx.Masked() {

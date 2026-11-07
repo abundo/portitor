@@ -36,22 +36,19 @@ allow_from:
 #   nftables_file: /etc/nftables.d/portitor.nft
 #   wireguard_dir: /etc/wireguard
 #   named_conf: /etc/bind/named.conf
-#   radvd_conf: /etc/radvd.conf
 #   chrony_conf: /etc/chrony/chrony.conf  # Fedora: /etc/chrony.conf
 #   snmpd_conf: /etc/snmp/snmpd.conf
 #   conntrackd_conf: /etc/conntrackd/conntrackd.conf
 #   openvpn_dir: /etc/openvpn/server        # the default VF's portitor-udp.conf, portitor-tcp.conf
 # units:
 #   named: portitor-named@%s.service      # the other virtual firewalls'
-#   dhcpd: portitor-dhcpd@%s.service      # every virtual firewall's, the default one's too
-#   radvd: portitor-radvd@%s.service
+#   dhcpd: portitor-dhcpd@%s.service      # every virtual firewall's, the default one's too (DHCP and RAs)
 #   chrony: portitor-chrony@%s.service
 #   snmpd: portitor-snmpd@%s.service
 #   conntrackd: portitor-conntrackd@%s.service
 #   openvpn_udp: portitor-openvpn-udp@%s.service
 #   openvpn_tcp: portitor-openvpn-tcp@%s.service
 #   default_named: named.service
-#   default_radvd: radvd.service
 #   default_chrony: chrony.service        # Fedora: chronyd.service
 #   default_snmpd: snmpd.service
 #   default_conntrackd: conntrackd.service

@@ -1,11 +1,12 @@
 # SPDX-FileCopyrightText: 2026 The Portitor contributors
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-# Portitor's DHCP server (DHCPv4 and DHCPv6) for one instance, inside the
-# instance's network namespace; the default instance's too. Started and
+# Portitor's DHCP server (DHCPv4 and DHCPv6) and IPv6 router advertisements
+# for one instance, inside the instance's network namespace; the default
+# instance's too. Started and
 # reloaded by portitor-agent; do not enable by hand.
 [Unit]
-Description=Portitor DHCP server for instance %i
+Description=Portitor DHCP server and router advertisements for instance %i
 After=portitor-agent.service
 PartOf=portitor-agent.service
 
@@ -13,7 +14,8 @@ PartOf=portitor-agent.service
 Type=simple
 # netns-exec enters the namespace as root; setpriv then runs the server as
 # portitor-dhcp with only what it needs: binding ports 67 and 547 and to
-# its interfaces, and ARP checks before an offer.
+# its interfaces, ARP checks before an offer, and the router advertisements'
+# raw ICMPv6 sockets.
 ExecStart=/usr/bin/portitor-agent netns-exec %i -- /usr/bin/setpriv --reuid=portitor-dhcp --regid=portitor-dhcp --clear-groups --inh-caps=-all,+net_bind_service,+net_raw --ambient-caps=-all,+net_bind_service,+net_raw --bounding-set=-all,+net_bind_service,+net_raw --no-new-privs -- /usr/bin/portitor-agent dhcpd %i
 # SIGHUP reads the config again and keeps the leases; portitor-agent hup
 # skips a server still starting, which reads it as it starts. PrivatePIDs gives

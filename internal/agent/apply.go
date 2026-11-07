@@ -781,7 +781,7 @@ func (a *Agent) placeLinks(ctx context.Context, doc fwconfig.Document) error {
 	return nil
 }
 
-// applyServices runs dnsmgr2 and starts/stops/reloads BIND, the DHCP server, radvd,
+// applyServices runs dnsmgr2 and starts/stops/reloads BIND, the DHCP server (and RAs),
 // chrony, snmpd, rsyslog and FRR for an instance. The default instance's run under the distribution's own
 // units, from the standard files (render.Paths.Files).
 func (a *Agent) applyServices(ctx context.Context, in *fwconfig.Instance, b *render.Bundle, changed map[string]bool) error {
@@ -879,7 +879,7 @@ func (a *Agent) applyServices(ctx context.Context, in *fwconfig.Instance, b *ren
 	if err := a.applyDHCPD(ctx, in, files, changed); err != nil {
 		return err
 	}
-	// radvd, chrony and snmpd are rendered in full (no dnsmgr2).
+	// chrony and snmpd are rendered in full (no dnsmgr2).
 	// chronyd can't reload its config; snmpd re-reads it on SIGHUP, but as
 	// its user, and the file holds secrets (root's alone).
 	for _, svc := range []struct {
@@ -887,7 +887,6 @@ func (a *Agent) applyServices(ctx context.Context, in *fwconfig.Instance, b *ren
 		on         bool
 		reload     string
 	}{
-		{a.cfg.Units.Radvd(in), files.Radvd, len(in.RA) > 0, "reload-or-restart"},
 		{a.cfg.Units.Chrony(in), files.Chrony, in.NTP != nil, "restart"},
 		{a.cfg.Units.Snmpd(in), files.Snmpd, in.SNMP != nil, "restart"},
 		{a.cfg.Units.Conntrackd(in), files.Conntrackd, in.ConntrackSync != nil, "restart"},
@@ -945,13 +944,14 @@ func (a *Agent) applyServices(ctx context.Context, in *fwconfig.Instance, b *ren
 const dhcpdUser = "portitor-dhcp"
 
 // applyDHCPD starts, reloads (SIGHUP, which keeps the leases) or stops the
-// instance's DHCP server. It is Portitor's own, the default instance's
-// too, so it is always stopped when unused; its lease log stays. It opens
+// instance's DHCP server, which also sends its router advertisements. It
+// is Portitor's own, the default instance's too, so it is always stopped
+// when unused; its lease log stays. It opens
 // a socket on an interface once it is there and up, so it needs no
 // restart when interfaces come up after it.
 func (a *Agent) applyDHCPD(ctx context.Context, in *fwconfig.Instance, files render.InstanceFiles, changed map[string]bool) error {
 	unit := a.cfg.Units.DHCPD(in)
-	if !render.DHCPRunning(in) {
+	if !render.DHCPDRunning(in) {
 		a.disable(ctx, unit)
 		if !a.cfg.DryRun {
 			_ = os.Remove(files.DHCPD)
@@ -1044,7 +1044,7 @@ func (a *Agent) enable(ctx context.Context, in *fwconfig.Instance, unit string) 
 
 // disableService stops a service the instance no longer runs. The default
 // instance's units are the distribution's: they are left alone unless they
-// run from our file, so a sysadmin's own named or radvd keeps running.
+// run from our file, so a sysadmin's own named or FRR keeps running.
 func (a *Agent) disableService(ctx context.Context, in *fwconfig.Instance, unit, conf string) {
 	if in.Default {
 		if c, err := os.ReadFile(conf); err != nil || !render.Generated(c) {

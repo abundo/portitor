@@ -897,18 +897,16 @@ func TestIPv6Services(t *testing.T) {
 		t.Errorf("dhcpv4 rule changed:\n%s", nft)
 	}
 
-	radvd := mustFile(t, b, "/etc/radvd.conf")
-	for _, want := range []string{
-		"interface eth1 {", "AdvManagedFlag on;", "AdvOtherConfigFlag on;",
-		"prefix fd00:1::/64 {", "AdvAutonomous on;", "RDNSS fd00:1::1 {", "DNSSL home.arpa {",
-		"nat64prefix 64:ff9b::/96 {",
-	} {
-		if !strings.Contains(radvd, want) {
-			t.Errorf("radvd.conf lacks %q:\n%s", want, radvd)
-		}
-	}
-
 	d := parseDHCPD(t, mustFile(t, b, "/etc/portitor/dhcpd/main/dhcpd.json"))
+	// The router advertisements are the DHCP server's.
+	if len(d.RA) != 1 {
+		t.Fatalf("ra: %+v", d.RA)
+	}
+	ra := d.RA[0]
+	if ra.Interface != "eth1" || !ra.Managed || !ra.Other || fmt.Sprint(ra.Prefixes) != "[{fd00:1::/64 true}]" ||
+		fmt.Sprint(ra.RDNSS) != "[fd00:1::1]" || fmt.Sprint(ra.DNSSL) != "[home.arpa]" || ra.NAT64.String() != "64:ff9b::/96" {
+		t.Errorf("ra: %+v", ra)
+	}
 	if len(d.Subnets6) != 1 || d.DUID == "" {
 		t.Fatalf("subnets6: %+v", d)
 	}
@@ -922,11 +920,8 @@ func TestIPv6Services(t *testing.T) {
 	}
 
 	// The guest instance has no IPv6 services.
-	if b.File("/etc/portitor/instances/guest/radvd.conf") != nil {
-		t.Error("guest got radvd.conf")
-	}
-	if g := parseDHCPD(t, mustFile(t, b, "/etc/portitor/dhcpd/guest/dhcpd.json")); len(g.Subnets6) != 0 || g.DUID != "" {
-		t.Errorf("guest got DHCPv6: %+v", g)
+	if g := parseDHCPD(t, mustFile(t, b, "/etc/portitor/dhcpd/guest/dhcpd.json")); len(g.Subnets6) != 0 || g.DUID != "" || len(g.RA) != 0 {
+		t.Errorf("guest got DHCPv6 or RAs: %+v", g)
 	}
 }
 
@@ -1344,5 +1339,20 @@ func TestRenderVRFRouting(t *testing.T) {
 		if !strings.Contains(nft, want) {
 			t.Errorf("ruleset lacks %q:\n%s", want, nft)
 		}
+	}
+}
+
+// An instance with router advertisements and no DHCP runs the DHCP
+// server's process for them.
+func TestRAWithoutDHCP(t *testing.T) {
+	doc := fwconfig.SampleDocument()
+	doc.Instances[0].DHCP.Enabled = false
+	b, err := Render(doc, Options{Paths: DefaultPaths(), Units: DefaultUnits()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := parseDHCPD(t, mustFile(t, b, "/etc/portitor/dhcpd/main/dhcpd.json"))
+	if len(d.Subnets4)+len(d.Subnets6) != 0 || len(d.RA) != 1 {
+		t.Fatalf("dhcpd.json: %+v", d)
 	}
 }

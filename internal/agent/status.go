@@ -321,11 +321,8 @@ func (a *Agent) serviceUnits(in *fwconfig.Instance) []string {
 	if in.DNS.Enabled {
 		units = append(units, a.cfg.Units.Named(in))
 	}
-	if render.DHCPRunning(in) {
+	if render.DHCPDRunning(in) {
 		units = append(units, a.cfg.Units.DHCPD(in))
-	}
-	if len(in.RA) > 0 {
-		units = append(units, a.cfg.Units.Radvd(in))
 	}
 	if in.NTP != nil {
 		units = append(units, a.cfg.Units.Chrony(in))

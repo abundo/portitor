@@ -18,7 +18,8 @@ import (
 // The DHCP server's config (internal/dhcpd), rendered in full:
 // reservations come from A/AAAA records with a MAC (the dnsmgr2
 // convention), and the subnets that share an interface are served
-// together, so clients get addresses from all of them.
+// together, so clients get addresses from all of them. The same process
+// sends the router advertisements (Instance.RA).
 
 // DHCP4Subnets returns the instance's IPv4 DHCP subnets, sorted by prefix.
 func DHCP4Subnets(in *fwconfig.Instance) []fwconfig.DHCPSubnet {
@@ -30,9 +31,16 @@ func DHCP6Subnets(in *fwconfig.Instance) []fwconfig.DHCPSubnet {
 	return dhcpSubnets(in, "ipv6")
 }
 
-// DHCPRunning says whether the instance runs the DHCP server.
+// DHCPRunning says whether the instance serves DHCP: it has leases, and
+// on an HA pair replicates them.
 func DHCPRunning(in *fwconfig.Instance) bool {
 	return len(DHCP4Subnets(in))+len(DHCP6Subnets(in)) > 0
+}
+
+// DHCPDRunning says whether the instance runs the DHCP server's process
+// (portitor-dhcpd@), which also sends the router advertisements.
+func DHCPDRunning(in *fwconfig.Instance) bool {
+	return DHCPRunning(in) || len(in.RA) > 0
 }
 
 // subnetInterfaces are the subnets' interfaces, sorted.
@@ -190,7 +198,34 @@ func DHCPDConfig(in *fwconfig.Instance) dhcpd.Config {
 	if len(c.Subnets6) > 0 {
 		c.DUID = DHCPServerDUID(in)
 	}
+	c.RA = raConfigs(in)
 	return c
+}
+
+// raConfigs are the router advertisements, by interface. Delegated
+// prefixes are resolved by now (Document.ResolveDelegated).
+func raConfigs(in *fwconfig.Instance) []dhcpd.RAConfig {
+	var out []dhcpd.RAConfig
+	for _, ra := range in.RA {
+		c := dhcpd.RAConfig{
+			Interface: ra.Interface,
+			Managed:   ra.Managed,
+			Other:     ra.Other,
+			RDNSS:     parseAddrs(ra.RDNSS),
+			DNSSL:     ra.DNSSL,
+		}
+		for _, p := range ra.Prefixes {
+			if pfx, err := netip.ParsePrefix(p.Prefix); err == nil {
+				c.Prefixes = append(c.Prefixes, dhcpd.RAPrefix{Prefix: pfx.Masked(), Autonomous: p.Autonomous})
+			}
+		}
+		if pfx, err := netip.ParsePrefix(ra.NAT64Prefix); err == nil {
+			c.NAT64 = pfx.Masked()
+		}
+		out = append(out, c)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Interface < out[j].Interface })
+	return out
 }
 
 // DHCPDConf renders dhcpd.json, after a comment line that LoadConfig

@@ -52,7 +52,7 @@ from their underlay, which is not tested yet.
 |---|---|
 | Carrier stays up | No wait for link-up or STP; link failures show on the standby |
 | Nothing leaves | No duplicate MACs, ARP answers or IPv6 DAD conflicts |
-| Services keep running | Takeover starts nothing: named, radvd, FRR and OpenVPN are up |
+| Services keep running | Takeover starts nothing: named, the DHCP server (with the RAs), FRR and OpenVPN are up |
 | A separate table | A commit reloads `inet firewall` and leaves the gate alone |
 | One nft transaction per namespace | Opening and closing take milliseconds, where fencing today is a full apply |
 
@@ -257,7 +257,7 @@ switchover` moves the traffic by hand.
 | GARP and unsolicited NA | None | One per address, repeated once after 1 s |
 | DHCP server | Passive, applying the stream, no sockets | Goes active |
 | DHCP clients on the WAN | Paused, keeping the lease and address; never active on the standby | Renew. The server knows the shared MAC, and the DUID is made from it, so nothing is replicated |
-| radvd | Running | Sends at once |
+| Router advertisements (the DHCP server's) | Running | Initial RAs again (control op `advertise`) |
 | named, chrony, snmpd | Running | Nothing |
 | FRR | Running, no neighbours | Sessions cleared, so BGP doesn't wait for its retry timer; OSPF waits for hellos |
 | WireGuard, OpenVPN | Running, same keys | Peers reconnect |
@@ -409,7 +409,7 @@ an interface: what Kea does in Portitor today, no more.
 Each phase ends with passing tests, and phase 2 can ship without phase 4.
 
 1. **Prove the gate.** Done for the packet path, see below. Still open: FRR and
-   radvd behind a closed gate, tunnels, and a real NIC (the tests use veth).
+   the RAs behind a closed gate, tunnels, and a real NIC (the tests use veth).
 2. **Fix the witness bug.** Done.
 3. **Cluster core.** Done, and run on the lab pair. See below.
 4. **Monitoring and services.** Done, and run on the lab pair. See below.
@@ -422,7 +422,7 @@ Each phase ends with passing tests, and phase 2 can ship without phase 4.
 
 Built: interface roles (`ha_role`, `ha_gateway`), shared MAC addresses, the gate, the
 leases and states, the term, the watchdog, management routing, GARP and NA, DHCP
-renew, radvd and BGP at takeover, the witness changes, heartbeats on both paths, and
+renew, RAs and BGP at takeover, the witness changes, heartbeats on both paths, and
 VRRP's removal from pairs with its `peer_*` values.
 
 Until later phases:

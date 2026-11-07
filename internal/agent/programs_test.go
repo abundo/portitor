@@ -34,19 +34,20 @@ func TestCheckPrograms(t *testing.T) {
 		t.Fatalf("all installed: %v", err)
 	}
 
-	fakeInstalled(t, "named", "radvd")
+	fakeInstalled(t, "named", "setpriv")
 	err := checkPrograms(&exp)
-	if err == nil || !strings.Contains(err.Error(), "named, for DNS server") || !strings.Contains(err.Error(), "radvd") {
-		t.Fatalf("missing named/radvd: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "named, for DNS server") || !strings.Contains(err.Error(), "setpriv") {
+		t.Fatalf("missing named/setpriv: %v", err)
 	}
 
 	// Not needed when the instance doesn't use it.
 	for i := range exp.Instances {
 		exp.Instances[i].DNS.Enabled = false
 		exp.Instances[i].RA = nil
+		exp.Instances[i].DHCP.Enabled = false
 	}
 	if err := checkPrograms(&exp); err != nil {
-		t.Fatalf("DNS and RA off: %v", err)
+		t.Fatalf("DNS, DHCP and RA off: %v", err)
 	}
 }
 

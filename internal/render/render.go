@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package render turns a validated fwconfig.Document into the files the
-// firewall runs from: one nftables ruleset, BIND/DHCP/radvd/chrony/snmpd configs and a
+// firewall runs from: one nftables ruleset, BIND/DHCP/chrony/snmpd configs and a
 // dnsmgr2 config per instance, and one wg(8) config per WireGuard interface.
 //
 // Rendering is pure (no filesystem, no commands) so the same code serves
@@ -39,7 +39,6 @@ type Paths struct {
 	NftablesFile string `yaml:"nftables_file" json:"nftables_file"`
 	WireGuardDir string `yaml:"wireguard_dir" json:"wireguard_dir"`
 	NamedConf    string `yaml:"named_conf" json:"named_conf"`
-	RadvdConf    string `yaml:"radvd_conf" json:"radvd_conf"`
 	ChronyConf   string `yaml:"chrony_conf" json:"chrony_conf"`
 	SnmpdConf    string `yaml:"snmpd_conf" json:"snmpd_conf"`
 	// OpenVPNDir holds the default instance's OpenVPN configs
@@ -72,7 +71,6 @@ func DefaultPaths() Paths {
 		NftablesFile:   "/etc/nftables.d/portitor.nft",
 		WireGuardDir:   "/etc/wireguard",
 		NamedConf:      "/etc/bind/named.conf",
-		RadvdConf:      "/etc/radvd.conf",
 		ChronyConf:     "/etc/chrony/chrony.conf",
 		SnmpdConf:      "/etc/snmp/snmpd.conf",
 		OpenVPNDir:     "/etc/openvpn/server",
@@ -110,7 +108,6 @@ type InstanceFiles struct {
 	DHCPD      string
 	DHCPDState string
 	DHCPDRun   string
-	Radvd      string
 	Chrony     string
 	// ChronySocket is a virtual firewall's chronyd command socket, in a
 	// directory its unit alone mounts (portitor-chrony@.service); the
@@ -171,7 +168,6 @@ func (p Paths) Files(in *fwconfig.Instance) InstanceFiles {
 			DHCPD:        filepath.Join(p.EtcDir, "dhcpd", in.Name, "dhcpd.json"),
 			DHCPDState:   filepath.Join(p.StateDir, "dhcpd", in.Name),
 			DHCPDRun:     filepath.Join(p.RunDir, "dhcpd", in.Name),
-			Radvd:        p.RadvdConf,
 			Chrony:       p.ChronyConf,
 			Snmpd:        p.SnmpdConf,
 			Conntrackd:   p.ConntrackdConf,
@@ -201,7 +197,6 @@ func (p Paths) Files(in *fwconfig.Instance) InstanceFiles {
 		DHCPD:        filepath.Join(p.EtcDir, "dhcpd", in.Name, "dhcpd.json"),
 		DHCPDState:   filepath.Join(p.StateDir, "dhcpd", in.Name),
 		DHCPDRun:     filepath.Join(p.RunDir, "dhcpd", in.Name),
-		Radvd:        filepath.Join(etc, "radvd.conf"),
 		Chrony:       filepath.Join(etc, "chrony.conf"),
 		ChronySocket: filepath.Join(p.RunDir, "chrony", in.Name, "chronyd.sock"),
 		Snmpd:        filepath.Join(etc, "snmpd.conf"),
@@ -290,7 +285,6 @@ type Units struct {
 	// DHCPDFmt runs every instance's DHCP server, the default one's
 	// too.
 	DHCPDFmt          string `yaml:"dhcpd" json:"dhcpd"`
-	RadvdFmt          string `yaml:"radvd" json:"radvd"`
 	FRRFmt            string `yaml:"frr" json:"frr"`
 	ChronyFmt         string `yaml:"chrony" json:"chrony"`
 	SnmpdFmt          string `yaml:"snmpd" json:"snmpd"`
@@ -298,7 +292,6 @@ type Units struct {
 	OpenVPNUDPFmt     string `yaml:"openvpn_udp" json:"openvpn_udp"`
 	OpenVPNTCPFmt     string `yaml:"openvpn_tcp" json:"openvpn_tcp"`
 	DefaultNamed      string `yaml:"default_named" json:"default_named"`
-	DefaultRadvd      string `yaml:"default_radvd" json:"default_radvd"`
 	DefaultFRR        string `yaml:"default_frr" json:"default_frr"`
 	DefaultChrony     string `yaml:"default_chrony" json:"default_chrony"`
 	DefaultSnmpd      string `yaml:"default_snmpd" json:"default_snmpd"`
@@ -314,7 +307,6 @@ func DefaultUnits() Units {
 	return Units{
 		NamedFmt:      "portitor-named@%s.service",
 		DHCPDFmt:      "portitor-dhcpd@%s.service",
-		RadvdFmt:      "portitor-radvd@%s.service",
 		FRRFmt:        "portitor-frr@%s.service",
 		ChronyFmt:     "portitor-chrony@%s.service",
 		SnmpdFmt:      "portitor-snmpd@%s.service",
@@ -323,7 +315,6 @@ func DefaultUnits() Units {
 		OpenVPNTCPFmt: "portitor-openvpn-tcp@%s.service",
 		// Debian/Ubuntu's names.
 		DefaultNamed: "named.service",
-		DefaultRadvd: "radvd.service",
 		DefaultFRR:   "frr.service",
 		// Fedora: chronyd.service.
 		DefaultChrony:     "chrony.service",
@@ -345,7 +336,6 @@ func (u Units) pick(in *fwconfig.Instance, def, format string) string {
 
 func (u Units) Named(in *fwconfig.Instance) string { return u.pick(in, u.DefaultNamed, u.NamedFmt) }
 func (u Units) DHCPD(in *fwconfig.Instance) string { return fmt.Sprintf(u.DHCPDFmt, in.Name) }
-func (u Units) Radvd(in *fwconfig.Instance) string { return u.pick(in, u.DefaultRadvd, u.RadvdFmt) }
 func (u Units) FRR(in *fwconfig.Instance) string   { return u.pick(in, u.DefaultFRR, u.FRRFmt) }
 func (u Units) Chrony(in *fwconfig.Instance) string {
 	return u.pick(in, u.DefaultChrony, u.ChronyFmt)
@@ -367,10 +357,10 @@ func (u Units) OpenVPN(in *fwconfig.Instance, proto string) string {
 	return u.pick(in, u.DefaultOpenVPNUDP, u.OpenVPNUDPFmt)
 }
 
-// All lists the instance's units: named, dhcpd, radvd, FRR, chrony,
-// snmpd, conntrackd, OpenVPN's.
+// All lists the instance's units: named, dhcpd, FRR, chrony, snmpd,
+// conntrackd, OpenVPN's.
 func (u Units) All(in *fwconfig.Instance) []string {
-	return []string{u.Named(in), u.DHCPD(in), u.Radvd(in), u.FRR(in), u.Chrony(in), u.Snmpd(in), u.Conntrackd(in),
+	return []string{u.Named(in), u.DHCPD(in), u.FRR(in), u.Chrony(in), u.Snmpd(in), u.Conntrackd(in),
 		u.OpenVPN(in, fwconfig.OpenVPNUDP), u.OpenVPN(in, fwconfig.OpenVPNTCP)}
 }
 
@@ -444,11 +434,8 @@ func Render(doc fwconfig.Document, opt Options) (*Bundle, error) {
 				add(f.RPZAllow, RPZAllowZone(in), 0o644, false)
 			}
 		}
-		if DHCPRunning(in) {
+		if DHCPDRunning(in) {
 			add(f.DHCPD, DHCPDConf(in), 0o644, false)
-		}
-		if len(in.RA) > 0 {
-			add(f.Radvd, RadvdConf(in), 0o644, false)
 		}
 		if in.NTP != nil {
 			add(f.Chrony, ChronyConf(in, f), 0o644, false)

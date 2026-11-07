@@ -631,7 +631,8 @@ const (
 )
 
 // RAInterface makes the instance send IPv6 router advertisements on
-// Interface (radvd), announcing itself as the default router.
+// Interface (the DHCP server sends them), announcing itself as the
+// default router.
 type RAInterface struct {
 	Interface string     `json:"interface"`
 	Prefixes  []RAPrefix `json:"prefixes,omitempty"`

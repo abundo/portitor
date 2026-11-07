@@ -117,7 +117,6 @@ func (c *Config) applyDefaults() {
 		{&c.Paths.NftablesFile, def.NftablesFile},
 		{&c.Paths.WireGuardDir, def.WireGuardDir},
 		{&c.Paths.NamedConf, def.NamedConf},
-		{&c.Paths.RadvdConf, def.RadvdConf},
 		{&c.Paths.ChronyConf, def.ChronyConf},
 		{&c.Paths.SnmpdConf, def.SnmpdConf},
 		{&c.Paths.OpenVPNDir, def.OpenVPNDir},
@@ -127,7 +126,6 @@ func (c *Config) applyDefaults() {
 		{&c.Paths.FRRRunDir, def.FRRRunDir},
 		{&c.Paths.FRRStateDir, def.FRRStateDir},
 		{&c.Units.DefaultNamed, du.DefaultNamed},
-		{&c.Units.DefaultRadvd, du.DefaultRadvd},
 		{&c.Units.DefaultFRR, du.DefaultFRR},
 		{&c.Units.DefaultChrony, du.DefaultChrony},
 		{&c.Units.DefaultSnmpd, du.DefaultSnmpd},
@@ -145,9 +143,6 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Units.DHCPDFmt == "" {
 		c.Units.DHCPDFmt = du.DHCPDFmt
-	}
-	if c.Units.RadvdFmt == "" {
-		c.Units.RadvdFmt = du.RadvdFmt
 	}
 	if c.Units.FRRFmt == "" {
 		c.Units.FRRFmt = du.FRRFmt
@@ -181,7 +176,7 @@ func (c *Config) validate() error {
 			return fmt.Errorf("allow_from %q: %w", a, err)
 		}
 	}
-	for _, f := range []string{c.Units.NamedFmt, c.Units.DHCPDFmt, c.Units.RadvdFmt, c.Units.FRRFmt, c.Units.ChronyFmt, c.Units.SnmpdFmt, c.Units.ConntrackdFmt, c.Units.OpenVPNUDPFmt, c.Units.OpenVPNTCPFmt} {
+	for _, f := range []string{c.Units.NamedFmt, c.Units.DHCPDFmt, c.Units.FRRFmt, c.Units.ChronyFmt, c.Units.SnmpdFmt, c.Units.ConntrackdFmt, c.Units.OpenVPNUDPFmt, c.Units.OpenVPNTCPFmt} {
 		if strings.Count(f, "%s") != 1 {
 			return fmt.Errorf("unit %q must contain exactly one %%s", f)
 		}

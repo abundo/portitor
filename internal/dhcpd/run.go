@@ -59,12 +59,15 @@ func Run(ctx context.Context, o Options) error {
 	srv := NewServer(cfg, st)
 	srv.probe = arpProbe
 
+	ra := newRAManager(ctx)
+	ra.sync(cfg.RA)
+
 	ctl, err := listenControl(o.Socket)
 	if err != nil {
 		return err
 	}
 	defer ctl.Close()
-	go serveControl(ctl, srv)
+	go serveControl(ctl, srv, ra)
 
 	ls := &listeners{srv: srv, open: map[string]*listener{}}
 	defer ls.closeAll()
@@ -74,7 +77,7 @@ func Run(ctx context.Context, o Options) error {
 	defer flush.Stop()
 	check := time.NewTicker(recheck)
 	defer check.Stop()
-	slog.Info("dhcpd started", "instance", cfg.Instance, "subnets4", len(cfg.Subnets4), "subnets6", len(cfg.Subnets6))
+	slog.Info("dhcpd started", "instance", cfg.Instance, "subnets4", len(cfg.Subnets4), "subnets6", len(cfg.Subnets6), "ra", len(cfg.RA))
 	for {
 		select {
 		case <-ctx.Done():
@@ -88,7 +91,8 @@ func Run(ctx context.Context, o Options) error {
 			cfg = c
 			srv.SetConfig(cfg)
 			ls.sync(cfg)
-			slog.Info("dhcpd: config reloaded", "subnets4", len(cfg.Subnets4), "subnets6", len(cfg.Subnets6))
+			ra.sync(cfg.RA)
+			slog.Info("dhcpd: config reloaded", "subnets4", len(cfg.Subnets4), "subnets6", len(cfg.Subnets6), "ra", len(cfg.RA))
 		case <-check.C:
 			ls.sync(cfg)
 		case <-flush.C:
@@ -332,7 +336,8 @@ func neighbourMAC(index int, src netip.AddrPort, wait bool) net.HardwareAddr {
 
 // The control socket takes one JSON request per connection and answers
 // it: "leases" is every lease; "changes", "acked" and "apply" are the
-// replication to an HA pair's standby (repl.go).
+// replication to an HA pair's standby (repl.go); "advertise" sends the
+// initial router advertisements again (an HA takeover).
 
 // Control is a request on the control socket.
 type Control struct {
@@ -350,7 +355,7 @@ type ControlReply struct {
 	Leases []Lease `json:"leases,omitempty"`
 	// changes.
 	Changes *Changes `json:"changes,omitempty"`
-	// apply: how many leases it took.
+	// apply: how many leases it took; advertise: on how many interfaces.
 	Applied int    `json:"applied,omitempty"`
 	Error   string `json:"error,omitempty"`
 }
@@ -366,7 +371,7 @@ func listenControl(path string) (net.Listener, error) {
 	return l, nil
 }
 
-func serveControl(l net.Listener, srv *Server) {
+func serveControl(l net.Listener, srv *Server, ra *raManager) {
 	for {
 		c, err := l.Accept()
 		if err != nil {
@@ -398,6 +403,8 @@ func serveControl(l net.Listener, srv *Server) {
 				if err != nil {
 					rep.Error = err.Error()
 				}
+			case "advertise":
+				rep.Applied = ra.advertise()
 			default:
 				rep.Error = "unknown op " + req.Op
 			}
