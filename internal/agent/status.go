@@ -33,7 +33,7 @@ func (a *Agent) Status(ctx context.Context) *Status {
 		IPLists:       a.lists.Status(),
 		DNSBlocklists: a.blocklists.Status(),
 		Tasks:         a.tasks.Status(),
-		HA:            a.ha.status(),
+		HA:            a.haStatus(),
 		Instances:     []InstanceStatus{},
 		AntiLockout:   a.cfg.antiLockout(),
 	}

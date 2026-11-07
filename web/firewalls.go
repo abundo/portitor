@@ -10,11 +10,14 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"strings"
+	"time"
 
 	"github.com/labstack/echo/v5"
 	"gorm.io/gorm"
 
+	"github.com/abundo/portitor/internal/agentapi"
 	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/models"
 )
@@ -414,4 +417,50 @@ func newHASecret() string {
 		panic(err)
 	}
 	return base64.RawURLEncoding.EncodeToString(b)
+}
+
+// handleSwitchover hands the HA pair of firewall :id over from its active
+// host to its standby (as portitor request ha switchover on the active
+// host). It changes no configuration.
+func (s *Server) handleSwitchover(c *echo.Context) error {
+	id, err := echo.PathParam[uint](c, "id")
+	if err != nil {
+		return errJSON(c, http.StatusNotFound, "not found")
+	}
+	var fw models.Firewall
+	if err := s.db.First(&fw, id).Error; err != nil {
+		return errJSON(c, http.StatusNotFound, "not found")
+	}
+	pair := []models.Firewall{fw}
+	if fw.HAPrimaryID != nil {
+		var p models.Firewall
+		if err := s.db.First(&p, *fw.HAPrimaryID).Error; err != nil {
+			return dbError(c, err)
+		}
+		pair = append(pair, p)
+	} else {
+		var q models.Firewall
+		if err := s.db.Where("ha_primary_id = ?", fw.ID).First(&q).Error; err != nil {
+			return errJSON(c, http.StatusConflict, fw.Name+" is not in an HA pair")
+		}
+		pair = append(pair, q)
+	}
+	ctx, cancel := context.WithTimeout(c.Request().Context(), 5*time.Second)
+	defer cancel()
+	for i := range pair {
+		a, err := s.newAgent(&pair[i])
+		if err != nil {
+			continue
+		}
+		st, err := a.HA(ctx)
+		if err != nil || st.State != agentapi.HAActive {
+			continue
+		}
+		if err := a.HASwitchover(ctx); err != nil {
+			return agentError(c, err)
+		}
+		slog.Info("ha: switchover", "from", pair[i].Name, "user", currentUser(c).Username)
+		return c.JSON(http.StatusOK, map[string]string{"from": pair[i].Name})
+	}
+	return errJSON(c, http.StatusConflict, "no host of the pair answers as active")
 }

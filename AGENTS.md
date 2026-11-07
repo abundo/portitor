@@ -165,7 +165,11 @@ docs and user-facing messages.
   are ordered by the active host; the standby copies them, keys included, from
   `GET /v1/ha/certificates` (the pair's secret, which therefore opens the keys too)
   every minute (`certManager.adopt`, `acme.WriteRaw`), so it has them when it takes
-  over.
+  over. `portitor show ha` and a firewall's form (Admin → Firewalls, *HA state*) show
+  `GET /v1/ha`, with each instance's DHCP lease sync (`Agent.haStatus`, which takes no
+  `Agent.mu`: the witness asks every second); `POST /api/firewalls/:id/switchover`
+  hands the pair over from whichever host answers as active. The user guide is
+  `docs/ha.md`.
 - **HA replica and promotion** (`web/replica.go`, `web/promote.go`): portitor-config
   runs on both hosts of a pair. Its role is its agent's (`runRole`: the firewall row
   whose fingerprint is that of the agent at `agent_url`, asked for

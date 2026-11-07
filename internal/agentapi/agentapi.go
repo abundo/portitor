@@ -1570,6 +1570,19 @@ type HAStatus struct {
 	Health     int `json:"health"`
 	PeerHealth int `json:"peer_health"`
 	Monitored  int `json:"monitored"`
+	// DHCP is how each instance's DHCP leases reach the peer.
+	DHCP []HADHCPSync `json:"dhcp,omitempty"`
+}
+
+// HADHCPSync is how an instance's DHCP leases reach the HA peer: the last
+// batch the peer took from this host (Sent, as the active host) or this
+// host took from the peer (Received), and the last failure to send, until
+// a batch goes through.
+type HADHCPSync struct {
+	Instance string     `json:"instance"`
+	Sent     *time.Time `json:"sent,omitempty"`
+	Received *time.Time `json:"received,omitempty"`
+	Error    string     `json:"error,omitempty"`
 }
 
 // HAHeartbeatRequest is an HA host's beat to its peer: what it is, and

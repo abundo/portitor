@@ -7,6 +7,7 @@ import { useToast } from '@nuxt/ui/composables'
 import CrudPage from '@/components/CrudPage.vue'
 import { api, firewalls } from '@/api'
 import { errMsg } from '@/api/http'
+import { useConfirm } from '@/composables/useConfirm'
 import { useDeployStore } from '@/stores/deploy'
 import { useInstanceStore } from '@/stores/instances'
 
@@ -32,6 +33,56 @@ async function copyWitness() {
 
 // The agent's answer in the last status poll, by firewall id.
 const statusOf = (id) => deploy.status?.firewalls?.find((f) => f.id === id)
+
+// inPair: the firewall is a primary or a secondary.
+const inPair = (f) => !!f.id && (!!f.ha_primary_id || isPrimary(f))
+const when = (t) => (t ? new Date(t).toLocaleString() : '')
+const stateText = {
+  active: 'active: open, forwarding and answering for the pair\'s addresses',
+  standby: 'standby: closed, ready to take over',
+  fenced: 'fenced: closed, hears neither its peer nor the witness',
+  stale: 'stale: closed, its peer was promoted while it was away',
+}
+// haRows: what the host says of its place in the pair.
+function haRows(f) {
+  const ha = statusOf(f.id)?.ha
+  if (!ha?.node) return []
+  const rows = [
+    ['State', stateText[ha.state] || ha.state],
+    ['Peer', (ha.peer_alive ? 'alive' : 'not heard') + (ha.peer_seen ? `, last heard ${when(ha.peer_seen)}` : '')],
+    ['Witness vote', ha.vote_until ? `until ${when(ha.vote_until)}` : 'none'],
+    ['Monitored interfaces', `${ha.health} of ${ha.monitored} up, peer ${ha.peer_health}`],
+    ['Watchdog', ha.watchdog || ''],
+    ['Term', String(ha.term ?? '')],
+  ]
+  for (const d of ha.dhcp || []) {
+    const parts = []
+    if (d.error) parts.push(`not sent: ${d.error}`)
+    if (d.sent) parts.push(`sent to the peer ${when(d.sent)}`)
+    if (d.received) parts.push(`received from the peer ${when(d.received)}`)
+    rows.push([`DHCP leases, ${d.instance}`, parts.join('; ') || 'nothing sent or received yet'])
+  }
+  return rows
+}
+const switching = ref(false)
+async function switchover(f) {
+  const yes = await useConfirm().ask({
+    title: 'Switch over',
+    message: 'Hand the pair over to its standby?',
+    detail:
+      'The active host closes and the standby opens at once, with the same addresses; clients lose a packet or two. There is no automatic switch back.',
+  })
+  if (!yes) return
+  switching.value = true
+  try {
+    const r = await api.haSwitchover(f.id)
+    toast.add({ title: `${r.from} handed over to its standby`, color: 'success' })
+  } catch (err) {
+    toast.add({ title: errMsg(err), color: 'error' })
+  } finally {
+    switching.value = false
+  }
+}
 
 const columns = [
   { key: 'name', label: 'Name', class: 'font-medium' },
@@ -81,13 +132,19 @@ const fields = [
         .filter((x) => x.id !== f.id && !x.ha_primary_id)
         .map((x) => ({ label: x.name, value: x.id })),
     disabled: (f) => !!f.id,
-    hint: "Makes it the HA secondary of that firewall: it runs the primary's virtual firewalls and tasks, with the peer values (addresses, VRRP priority, router ids) where the two differ, and a commit deploys to both. Set when the firewall is created.",
+    hint: "Makes it the HA secondary of that firewall: it runs the primary's virtual firewalls and tasks, with the same addresses, and a commit deploys to both. Only its HA link and management interfaces have addresses of their own (HA peer addresses under Network → Interfaces). Set when the firewall is created.",
+  },
+  {
+    key: 'ha_state',
+    label: 'HA state',
+    type: 'custom',
+    show: inPair,
   },
   {
     key: 'agent_url',
     label: 'Agent URL',
     placeholder: 'https://192.168.1.1:8443',
-    hint: "Its address on the network, which its HA peer uses too (not 127.0.0.1 in a pair). portitor-config reaches its own host's agent at the agent_url in its config.yaml.",
+    hint: "Its address on the network, which its HA peer and the witness use too: in a pair, its management address (not 127.0.0.1). portitor-config reaches its own host's agent at the agent_url in its config.yaml.",
   },
   {
     key: 'ha_witness',
@@ -98,7 +155,7 @@ const fields = [
       { label: 'External: portitor-web on a third host', value: 'external' },
     ],
     show: isPrimary,
-    hint: "The pair's third vote. Its portitor-config here keeps the pair active while the two can't hear each other, but goes with this host: without an external witness nothing takes over automatically when this host is lost: open the other by hand (portitor request ha active) or promote it. An external witness (portitor-web, or portitor-web witness, on another host) gets the witness string below; commit after changing this.",
+    hint: "The pair's third vote, which a host needs to open when it doesn't hear its peer. This firewall's portitor-config goes with this host: when it is lost, nothing takes over by itself (open the other by hand with portitor request ha active, or promote it). An external witness (portitor-web, or portitor-web witness, on a third host on the management network) gets the witness string below, and fails over by itself; commit after changing this.",
   },
   {
     key: 'witness_string',
@@ -163,6 +220,27 @@ const fields = [
           Under witness: in portitor-web's web.yaml on the third host. It holds the witness secret,
           which opens the vote alone.
         </p>
+      </div>
+    </template>
+    <template #field-ha_state="{ form }">
+      <div class="space-y-2">
+        <table v-if="haRows(form).length" class="text-sm">
+          <tbody>
+            <tr v-for="[k, v] in haRows(form)" :key="k">
+              <td class="py-1 pr-4 align-top text-muted whitespace-nowrap">{{ k }}</td>
+              <td class="py-1">{{ v }}</td>
+            </tr>
+          </tbody>
+        </table>
+        <p v-else class="text-sm text-muted">Not known: the agent doesn't answer, or the pair isn't committed yet.</p>
+        <UButton
+          size="xs"
+          variant="outline"
+          icon="i-lucide-arrow-left-right"
+          label="Switch over"
+          :loading="switching"
+          @click="switchover(form)"
+        />
       </div>
     </template>
     <template #cell-ha_primary_id="{ row }">

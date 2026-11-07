@@ -444,6 +444,10 @@ func printHA(w io.Writer, st *agentapi.HAStatus) {
 	fmt.Fprintf(tw, "Epoch:\t%d\n", st.Epoch)
 	state := st.State
 	switch st.State {
+	case agentapi.HAActive:
+		state += ": open, forwarding and answering for the pair's addresses"
+	case agentapi.HAStandby:
+		state += ": closed, ready to take over"
 	case agentapi.HAFenced:
 		state += ": closed, hears neither its peer nor the witness"
 	case agentapi.HAStale:
@@ -469,7 +473,28 @@ func printHA(w io.Writer, st *agentapi.HAStatus) {
 	fmt.Fprintf(tw, "Term:\t%d\n", st.Term)
 	fmt.Fprintf(tw, "Monitored interfaces:\t%d of %d up, peer %d\n", st.Health, st.Monitored, st.PeerHealth)
 	fmt.Fprintf(tw, "Watchdog:\t%s\n", st.Watchdog)
+	for _, d := range st.DHCP {
+		fmt.Fprintf(tw, "DHCP leases, %s:\t%s\n", clean(d.Instance), dhcpSync(d))
+	}
 	tw.Flush()
+}
+
+// dhcpSync says how an instance's DHCP leases reach the peer.
+func dhcpSync(d agentapi.HADHCPSync) string {
+	var parts []string
+	if d.Error != "" {
+		parts = append(parts, "not sent: "+clean(d.Error))
+	}
+	if d.Sent != nil {
+		parts = append(parts, "sent to the peer "+d.Sent.Local().Format(time.DateTime))
+	}
+	if d.Received != nil {
+		parts = append(parts, "received from the peer "+d.Received.Local().Format(time.DateTime))
+	}
+	if len(parts) == 0 {
+		return "nothing sent or received yet"
+	}
+	return strings.Join(parts, "; ")
 }
 
 func printBFD(w io.Writer, rows []agentapi.BFDInstance) {

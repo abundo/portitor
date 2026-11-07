@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -36,6 +37,48 @@ const replIdle = 500 * time.Millisecond
 type dhcpRepl struct {
 	mu      sync.Mutex
 	workers map[string]context.CancelFunc
+	sync    map[string]*agentapi.HADHCPSync
+}
+
+// note updates an instance's sync state.
+func (r *dhcpRepl) note(instance string, fn func(*agentapi.HADHCPSync)) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.sync == nil {
+		r.sync = map[string]*agentapi.HADHCPSync{}
+	}
+	s := r.sync[instance]
+	if s == nil {
+		s = &agentapi.HADHCPSync{Instance: instance}
+		r.sync[instance] = s
+	}
+	fn(s)
+}
+
+// status is the sync state of the instances with a worker, sorted.
+func (r *dhcpRepl) status() []agentapi.HADHCPSync {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []agentapi.HADHCPSync
+	for n := range r.workers {
+		if s := r.sync[n]; s != nil {
+			out = append(out, *s)
+		} else {
+			out = append(out, agentapi.HADHCPSync{Instance: n})
+		}
+	}
+	slices.SortFunc(out, func(a, b agentapi.HADHCPSync) int { return strings.Compare(a.Instance, b.Instance) })
+	return out
+}
+
+// haStatus is the HA manager's status with the DHCP servers' sync. It
+// takes no a.mu, which an apply holds: the witness asks every second.
+func (a *Agent) haStatus() *agentapi.HAStatus {
+	st := a.ha.status()
+	if st.Node != "" {
+		st.DHCP = a.repl.status()
+	}
+	return st
 }
 
 // reconcileDHCPRepl runs a worker for each instance with a DHCP server on
@@ -108,8 +151,12 @@ func (a *Agent) replicate(ctx context.Context, instance, sock string) {
 		}
 		if err != nil {
 			// The peer that just took over refuses them, as it should.
-			if err.Error() != lastErr && !strings.Contains(err.Error(), "takes no leases") {
-				slog.Warn("ha: DHCP leases not sent to the peer", "instance", instance, "err", err)
+			if !strings.Contains(err.Error(), "takes no leases") {
+				if err.Error() != lastErr {
+					slog.Warn("ha: DHCP leases not sent to the peer", "instance", instance, "err", err)
+				}
+				msg := err.Error()
+				a.repl.note(instance, func(s *agentapi.HADHCPSync) { s.Error = msg })
 			}
 			lastErr = err.Error()
 			epoch = 0
@@ -120,6 +167,8 @@ func (a *Agent) replicate(ctx context.Context, instance, sock string) {
 			slog.Info("ha: DHCP leases sent to the peer", "instance", instance, "snapshot", ch.Snapshot, "leases", len(ch.Leases))
 			lastErr = ""
 		}
+		now := time.Now()
+		a.repl.note(instance, func(s *agentapi.HADHCPSync) { s.Sent, s.Error = &now, "" })
 		actx, cancel := context.WithTimeout(ctx, time.Second)
 		_, _ = dhcpd.Query(actx, sock, dhcpd.Control{Op: "acked", Seq: ch.Seq})
 		cancel()
@@ -195,5 +244,7 @@ func (a *Agent) takeDHCPLeases(ctx context.Context, req agentapi.HADHCPRequest) 
 	if err != nil {
 		return nil, err
 	}
+	now := time.Now()
+	a.repl.note(req.Instance, func(s *agentapi.HADHCPSync) { s.Received = &now })
 	return &agentapi.HADHCPReply{Applied: rep.Applied}, nil
 }

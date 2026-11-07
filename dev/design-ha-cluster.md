@@ -3,8 +3,7 @@
 
 # Design: HA cluster and a built-in DHCP server
 
-Status: phases 1 to 4 implemented and run on the lab pair, 2026-11-06. Phases 5 and 6
-are proposed. There are no
+Status: implemented, all six phases, and run on the lab pair, 2026-11-07. There are no
 production systems, so no migration is planned.
 
 ## Goals
@@ -415,8 +414,9 @@ Each phase ends with passing tests, and phase 2 can ship without phase 4.
 3. **Cluster core.** Done, and run on the lab pair. See below.
 4. **Monitoring and services.** Done, and run on the lab pair. See below.
 5. **DHCP server.** Done, Kea removed, and run on the lab pair. See below.
-6. **Docs and GUI.** `docs/ha.md`, `docs/vrrp.md`, AGENTS.md, Admin → Firewalls and
-   `portitor show ha`.
+6. **Docs and GUI.** Done: `docs/ha.md` rewritten, `docs/vrrp.md`, AGENTS.md,
+   Admin → Firewalls (*HA state*, *Switch over*) and `portitor show ha` (DHCP lease
+   sync).
 
 ### Phase 3 notes
 

@@ -309,7 +309,7 @@ func (a *Agent) routes() *http.ServeMux {
 		writeJSONResponse(w, http.StatusOK, map[string]any{"renewing": req.Interface})
 	})
 	mux.HandleFunc("GET /v1/ha", func(w http.ResponseWriter, r *http.Request) {
-		writeJSONResponse(w, http.StatusOK, a.ha.status())
+		writeJSONResponse(w, http.StatusOK, a.haStatus())
 	})
 	mux.HandleFunc("POST /v1/ha/vote", a.handleHAVote)
 	mux.HandleFunc("POST /v1/ha/switchover", func(w http.ResponseWriter, r *http.Request) {

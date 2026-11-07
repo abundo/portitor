@@ -81,6 +81,7 @@ type agentAPI interface {
 	StartSystemJob(ctx context.Context, req agentapi.SystemJobRequest) error
 	Reboot(ctx context.Context) error
 	HA(ctx context.Context) (*agentapi.HAStatus, error)
+	HASwitchover(ctx context.Context) error
 	HAVote(ctx context.Context, seconds int) (*agentapi.HAStatus, error)
 }
 
@@ -275,6 +276,7 @@ func (s *Server) Echo() *echo.Echo {
 	g.GET("/instances/:id/bundle", s.handleExportBundle)
 	g.POST("/instances/import", s.handleImportBundle)
 	g.GET("/firewalls/:id/witness", s.handleWitnessString)
+	g.POST("/firewalls/:id/switchover", s.handleSwitchover)
 	g.GET("/ha", s.handleHAStatus)
 	g.POST("/ha/promote", s.handlePromote)
 	g.GET("/deploy/check", s.handleDeployCheck)

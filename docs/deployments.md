@@ -66,19 +66,20 @@ firewall it lists.
 > **Experimental.** This layout is new and needs more testing. Try it in a lab
 > before relying on it in production, and report what you find.
 
-Two firewalls run as an [HA pair](ha.md) with the same configuration, and
-[VRRP](vrrp.md) decides which one forwards. The primary's portitor-config holds the
+Two firewalls run as an [HA pair](ha.md) with the same configuration: one is active
+and forwards, the other is a standby with the same addresses. The primary's portitor-config holds the
 configuration and deploys to both hosts. The secondary's portitor-config keeps a
 read-only copy, so it can be promoted if the primary is lost.
 
 The third host runs portitor-web. It plays two roles:
 
 - **The portal.** It lists both hosts. A login on either host is good on both.
-- **The witness.** A host stays active only while it hears its peer or holds the
-  witness's vote. With the portal as the [external witness](ha.md#the-witness),
-  the secondary takes over by itself when the primary fails. Without an external
-  witness, the witness is the primary's portitor-config and is lost with the
-  primary. The secondary then fences itself until you promote it.
+- **The witness.** A host opens only with the witness's vote or a handover from its
+  peer. With the portal as the [external witness](ha.md#the-witness), the standby
+  takes over by itself when the active host fails. Without an external witness, the
+  witness is the primary's portitor-config and is lost with the primary: the secondary
+  then stays closed until you open it by hand and promote it. The portal reaches the
+  hosts on their management network.
 
 To set it up:
 
@@ -91,7 +92,7 @@ To set it up:
    let the portal's address in through both agents' `allow_from`.
 
 `./install.py` on the portal host updates the pair one host at a time, the secondary
-first, so one host keeps forwarding.
+first; each host hands over before its agent restarts, so one host keeps forwarding.
 
 A pair also works without a portal, and its witness can run on a host of its own
 (`portitor-web witness`). Even then, the third host is what lets the secondary take

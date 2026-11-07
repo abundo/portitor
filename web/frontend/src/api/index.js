@@ -184,6 +184,8 @@ export const api = {
   // secondary, and the pair's witness string (its primary).
   haStatus: () => http.get('/ha').then((r) => r.data),
   haPromote: (force) => http.post('/ha/promote', { force }).then((r) => r.data),
+  haSwitchover: (firewallId) =>
+    http.post(`/firewalls/${firewallId}/switchover`).then((r) => r.data),
   witnessString: (firewallId) =>
     http.get(`/firewalls/${firewallId}/witness`).then((r) => r.data.witness),
   agentLeases: () => http.get('/agent/leases').then((r) => r.data),
