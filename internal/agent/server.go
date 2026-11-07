@@ -41,17 +41,30 @@ func (a *Agent) Handler() http.Handler {
 			routes.ServeHTTP(w, r)
 			return
 		}
-		// The HA peer's heartbeat and certificate copy have the pair's
-		// secret, not the token, and pass allow_from: the peer is another
-		// host. The pair runs the same configuration, so its secret may
-		// have the certificates' keys.
-		if r.URL.Path == "/v1/ha/heartbeat" || r.URL.Path == "/v1/ha/handover" || r.URL.Path == "/v1/ha/certificates" {
+		// The HA peer's heartbeat, certificate copy and DHCP leases have
+		// the pair's secret, not the token, and pass allow_from: the peer
+		// is another host. The pair runs the same configuration, so its
+		// secret may have the certificates' keys.
+		if r.URL.Path == "/v1/ha/heartbeat" || r.URL.Path == "/v1/ha/handover" || r.URL.Path == "/v1/ha/certificates" || r.URL.Path == "/v1/ha/dhcp" {
 			method := http.MethodPost
 			if r.URL.Path == "/v1/ha/certificates" {
 				method = http.MethodGet
 			}
 			if r.Method != method || !a.ha.heartbeatAuth(r) {
 				writeError(w, http.StatusUnauthorized, errors.New("unauthorized"))
+				return
+			}
+			if r.URL.Path == "/v1/ha/dhcp" {
+				var req agentapi.HADHCPRequest
+				if !decode(w, r, &req) {
+					return
+				}
+				rep, err := a.takeDHCPLeases(r.Context(), req)
+				if err != nil {
+					writeError(w, http.StatusConflict, err)
+					return
+				}
+				writeJSONResponse(w, http.StatusOK, rep)
 				return
 			}
 			if r.URL.Path == "/v1/ha/certificates" {

@@ -14,15 +14,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 STOPSIGNAL SIGRTMIN+3
 CMD ["/sbin/init"]
 
-# The firewall: portitor-agent applies for real (nftables, netns, BIND, Kea,
+# The firewall: portitor-agent applies for real (nftables, netns, BIND, DHCP,
 # FRR); portitor-config keeps its configuration.
 FROM base AS fw
 RUN apt-get update && apt-get install -y --no-install-recommends \
-		wireguard-tools bind9 bind9-utils dnsutils kea-dhcp4-server kea-dhcp6-server radvd frr frr-pythontools chrony snmpd openvpn \
+		wireguard-tools bind9 bind9-utils dnsutils radvd frr frr-pythontools chrony snmpd openvpn \
 		sqlite3 openssl \
 	&& rm -rf /var/lib/apt/lists/* \
-	&& systemctl mask named.service kea-dhcp4-server.service kea-dhcp6-server.service radvd.service frr.service chrony.service snmpd.service \
-	&& useradd --system --no-create-home --shell /usr/sbin/nologin portitor
+	&& systemctl mask named.service radvd.service frr.service chrony.service snmpd.service \
+	&& useradd --system --no-create-home --shell /usr/sbin/nologin portitor \
+	&& useradd --system --no-create-home --shell /usr/sbin/nologin portitor-dhcp
 COPY fw/agent.yaml /etc/portitor/agent.yaml
 COPY fw/config.yaml /etc/portitor/config.yaml
 COPY fw/portitor-lab-net.service /etc/systemd/system/
@@ -34,7 +35,8 @@ RUN chmod 0600 /etc/portitor/agent.yaml && chown root:portitor /etc/portitor/con
 FROM base AS mgmt
 RUN apt-get update && apt-get install -y --no-install-recommends dnsmasq \
 	&& rm -rf /var/lib/apt/lists/* \
-	&& useradd --system --no-create-home --shell /usr/sbin/nologin portitor
+	&& useradd --system --no-create-home --shell /usr/sbin/nologin portitor \
+	&& useradd --system --no-create-home --shell /usr/sbin/nologin portitor-dhcp
 COPY mgmt/web.yaml /etc/portitor/web.yaml
 COPY mgmt/dnsmasq.conf /etc/dnsmasq.d/lab.conf
 COPY mgmt/nftables.conf /etc/nftables.conf

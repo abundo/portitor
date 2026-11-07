@@ -4,7 +4,7 @@
 # Installer ISO and updates
 
 The Portitor ISO installs a complete firewall on an amd64 machine: Debian 13, the
-programs the agent needs (nftables, BIND, Kea, radvd, WireGuard), portitor-agent and
+programs the agent needs (nftables, BIND, radvd, WireGuard), portitor-agent and
 portitor-config, which keeps the firewall's configuration and serves its GUI. A single
 box is enough.
 
@@ -16,7 +16,7 @@ entry) opens a gap. To serve the GUIs of several firewalls from one place, run
 portitor-web, the portal, on another host; see
 [Firewall and portal on separate hosts](#firewall-and-portal-on-separate-hosts).
 
-AppArmor stays on. Debian's profiles for BIND and Kea get Portitor's paths added in
+AppArmor stays on. Debian's profiles for BIND and chrony get Portitor's paths added in
 `/etc/apparmor.d/local/` (by `install.py`, as on any Debian host).
 
 ## Installing

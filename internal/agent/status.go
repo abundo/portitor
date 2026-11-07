@@ -6,17 +6,15 @@ package agent
 import (
 	"bufio"
 	"context"
-	"encoding/csv"
 	"encoding/json"
-	"io"
 	"os"
-	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/abundo/portitor/internal/buildinfo"
+	"github.com/abundo/portitor/internal/dhcpd"
 	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/internal/render"
 )
@@ -268,15 +266,14 @@ func parseWGDump(s string) []WGStatus {
 	return out
 }
 
-// ServerLeases reads Kea's memfile lease files (DHCPv4 and DHCPv6) for
-// every instance with DHCP enabled. The memfile is an append log: the last line for an
-// address wins; lease file cleanup (LFC) spreads it over X.2, X.1 and X.
+// ServerLeases asks each instance's DHCP server for its leases, the
+// valid ones. An instance whose server doesn't answer has none.
 func (a *Agent) ServerLeases() map[string][]ServerLease {
 	a.mu.Lock()
 	var instances []fwconfig.Instance
 	if a.applied != nil {
 		for _, in := range a.applied.Instances {
-			if in.DHCP.Enabled {
+			if render.DHCPRunning(&in) {
 				instances = append(instances, in)
 			}
 		}
@@ -286,76 +283,26 @@ func (a *Agent) ServerLeases() map[string][]ServerLease {
 	out := map[string][]ServerLease{}
 	now := time.Now()
 	for _, in := range instances {
-		name := in.Name
-		latest := map[string]ServerLease{}
-		var order []string
-		var paths []string
-		files := a.cfg.Paths.Files(&in)
-		dir := files.KeaData
-		for _, f := range []string{files.Kea4Lease, files.Kea6Lease} {
-			base := filepath.Join(dir, filepath.Base(f))
-			paths = append(paths, base+".2", base+".1", base)
-		}
-		for _, path := range paths {
-			f, err := os.Open(path)
-			if err != nil {
-				continue
-			}
-			parseKeaLeases(f, func(l ServerLease, valid bool) {
-				if _, seen := latest[l.Address]; !seen {
-					order = append(order, l.Address)
-				}
-				if valid {
-					latest[l.Address] = l
-				} else {
-					latest[l.Address] = ServerLease{}
-				}
-			})
-			f.Close()
-		}
 		list := []ServerLease{}
-		for _, addr := range order {
-			if l := latest[addr]; l.Address != "" && l.Expires.After(now) {
-				list = append(list, l)
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		rep, err := dhcpd.Query(ctx, a.cfg.Paths.Files(&in).DHCPDSocket(), dhcpd.Control{Op: "leases"})
+		cancel()
+		if err == nil {
+			for _, l := range rep.Leases {
+				if !l.Valid(now) || l.Declined {
+					continue
+				}
+				list = append(list, ServerLease{
+					Address:  l.Addr.String(),
+					MAC:      l.MAC,
+					Hostname: l.Hostname,
+					Expires:  time.Unix(l.Expires, 0),
+				})
 			}
 		}
-		out[name] = list
+		out[in.Name] = list
 	}
 	return out
-}
-
-func parseKeaLeases(r io.Reader, fn func(l ServerLease, valid bool)) {
-	cr := csv.NewReader(r)
-	cr.FieldsPerRecord = -1
-	header, err := cr.Read()
-	if err != nil {
-		return
-	}
-	col := map[string]int{}
-	for i, h := range header {
-		col[h] = i
-	}
-	get := func(rec []string, name string) string {
-		if i, ok := col[name]; ok && i < len(rec) {
-			return rec[i]
-		}
-		return ""
-	}
-	for {
-		rec, err := cr.Read()
-		if err != nil {
-			return
-		}
-		exp, _ := strconv.ParseInt(get(rec, "expire"), 10, 64)
-		l := ServerLease{
-			Address:  get(rec, "address"),
-			MAC:      get(rec, "hwaddr"),
-			Hostname: strings.TrimSuffix(get(rec, "hostname"), "."),
-			Expires:  time.Unix(exp, 0),
-		}
-		// state 0 = default (active); 1 declined, 2 expired-reclaimed.
-		fn(l, get(rec, "state") == "0" || get(rec, "state") == "")
-	}
 }
 
 // clientLeases are the DHCPv4 and DHCPv6 client leases, by instance,
@@ -374,11 +321,8 @@ func (a *Agent) serviceUnits(in *fwconfig.Instance) []string {
 	if in.DNS.Enabled {
 		units = append(units, a.cfg.Units.Named(in))
 	}
-	if len(render.DHCP4Subnets(in)) > 0 {
-		units = append(units, a.cfg.Units.Kea4(in))
-	}
-	if len(render.DHCP6Subnets(in)) > 0 {
-		units = append(units, a.cfg.Units.Kea6(in))
+	if render.DHCPRunning(in) {
+		units = append(units, a.cfg.Units.DHCPD(in))
 	}
 	if len(in.RA) > 0 {
 		units = append(units, a.cfg.Units.Radvd(in))

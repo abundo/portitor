@@ -33,8 +33,7 @@ func readTestFile(t *testing.T, path string) string {
 }
 
 // A default instance that ran from etc_dir/instances/<name> moves to the
-// standard directories: Kea's leases lose the instance's name, named's
-// keys and zones move up, dnsmgr2 starts over and the old files go.
+// standard directories: named's keys and zones move up, dnsmgr2 starts over and the old files go.
 func TestMoveDefaultInstance(t *testing.T) {
 	a, _ := testAgent(t)
 	a.cfg.DryRun = false // file moves only; commands still go to the dry runner
@@ -47,13 +46,11 @@ func TestMoveDefaultInstance(t *testing.T) {
 	old := p.Files(&fwconfig.Instance{Name: "main"})
 
 	writeTestFile(t, filepath.Join(p.InstanceEtc("main"), "named.conf"), "old")
-	writeTestFile(t, filepath.Join(old.KeaData, "kea-leases4-main.csv"), "lease4")
-	writeTestFile(t, filepath.Join(old.KeaData, "kea-leases6-main.csv.1"), "lease6")
 	writeTestFile(t, filepath.Join(old.BindCache, "Kexample.com.+013+1.key"), "key")
 	writeTestFile(t, filepath.Join(old.BindZones, "example.com"), "zone")
 	writeTestFile(t, filepath.Join(p.InstanceState("main"), "dnsmgr2.sqlite"), "db")
-	writeTestFile(t, filepath.Join(old.KeaData, "kea-dhcp6-serverid"), "duid")
-	writeTestFile(t, filepath.Join(p.KeaDataDir, "kea-dhcp6-serverid"), "duid")
+	writeTestFile(t, filepath.Join(old.BindCache, "same.key"), "same")
+	writeTestFile(t, filepath.Join(p.BindCacheDir, "same.key"), "same")
 	writeTestFile(t, filepath.Join(old.BindCache, "managed-keys.bind"), "old anchors")
 	writeTestFile(t, filepath.Join(p.BindCacheDir, "managed-keys.bind"), "anchors")
 
@@ -61,8 +58,6 @@ func TestMoveDefaultInstance(t *testing.T) {
 		t.Fatal(err)
 	}
 	for path, want := range map[string]string{
-		filepath.Join(p.KeaDataDir, "kea-leases4.csv"):           "lease4",
-		filepath.Join(p.KeaDataDir, "kea-leases6.csv.1"):         "lease6",
 		filepath.Join(p.BindCacheDir, "Kexample.com.+013+1.key"): "key",
 		filepath.Join(p.BindZonesDir, "example.com"):             "zone",
 	} {
@@ -70,7 +65,7 @@ func TestMoveDefaultInstance(t *testing.T) {
 			t.Errorf("%s = %q, want %q", path, got, want)
 		}
 	}
-	for _, gone := range []string{p.InstanceEtc("main"), old.KeaData, old.BindCache, old.BindZones, filepath.Join(p.InstanceState("main"), "dnsmgr2.sqlite")} {
+	for _, gone := range []string{p.InstanceEtc("main"), old.BindCache, old.BindZones, filepath.Join(p.InstanceState("main"), "dnsmgr2.sqlite")} {
 		if _, err := os.Stat(gone); err == nil {
 			t.Errorf("%s is still there", gone)
 		}

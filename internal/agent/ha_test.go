@@ -689,3 +689,24 @@ func TestHandover(t *testing.T) {
 		t.Error("closed again on the promise of the handover")
 	}
 }
+
+// The standby takes the active peer's DHCP leases; the active host, or a
+// sender of an older term, doesn't get them in.
+func TestTakesLeases(t *testing.T) {
+	h := &haManager{}
+	if h.takesLeases(5) == nil {
+		t.Error("took leases off a pair")
+	}
+	h.cfg = &fwconfig.HA{Node: fwconfig.HASecondary}
+	h.term, h.peer.Term = 4, 7
+	if err := h.takesLeases(7); err != nil {
+		t.Errorf("standby refused the current term: %v", err)
+	}
+	if h.takesLeases(6) == nil {
+		t.Error("took leases of an older term")
+	}
+	h.active = true
+	if h.takesLeases(9) == nil {
+		t.Error("the active host took leases")
+	}
+}

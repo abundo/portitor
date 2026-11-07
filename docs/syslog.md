@@ -4,7 +4,7 @@
 # Syslog
 
 A firewall keeps its logs in the systemd journal: the agent's, the firewall's
-services' (BIND, Kea, FRR, OpenVPN, ...) and those of every virtual firewall on it.
+services' (BIND, the DHCP server, FRR, OpenVPN, ...) and those of every virtual firewall on it.
 Under **Services → Syslog** you see the journal and send it to remote syslog
 servers (a SIEM, Graylog, a central rsyslog or syslog-ng) with
 [rsyslog](https://www.rsyslog.com/).

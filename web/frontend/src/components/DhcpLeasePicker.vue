@@ -2,7 +2,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
 <script setup>
-// DhcpLeasePicker: pick a MAC from the instance's current Kea leases (as
+// DhcpLeasePicker: pick a MAC from the instance's current DHCP leases (as
 // reported by the agent) for a DHCP reservation. Ported from factum2.
 import { useToast } from '@nuxt/ui/composables'
 import { computed, h, nextTick, ref, resolveComponent, watch } from 'vue'
@@ -162,7 +162,7 @@ watch(
       <div class="flex min-w-0 flex-col gap-2">
         <div class="flex items-center justify-between gap-2">
           <p class="text-sm text-muted">
-            Current leases from Kea on instance {{ instance }}. Selecting a row copies its MAC.
+            Current DHCP leases on instance {{ instance }}. Selecting a row copies its MAC.
           </p>
           <SearchInput v-model="filter" class="shrink-0" />
         </div>

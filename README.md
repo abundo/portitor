@@ -15,8 +15,8 @@ office networks. It manages:
   virtual firewall's ruleset exported
 - rate limits (police or shape) and traffic shaping per interface (CAKE)
 - a DNS server (BIND 9 stable from ISC's Debian repository; zones with DNSSEC,
-  forward-only zones) and a DHCP server (Kea, DHCPv4 and DHCPv6) with router
-  advertisements
+  forward-only zones) and a DHCP server (Portitor's own, DHCPv4 and DHCPv6) with
+  router advertisements
 - WireGuard tunnels, for road warriors and site-to-site; client configs generated,
   wg-quick files imported
 - an OpenVPN server for remote users (IPv4 and IPv6, UDP with TCP fallback): they log
@@ -55,8 +55,9 @@ office networks. It manages:
   Wireshark (Wiregasm) in the browser, traceroute (mtr), and a console on the firewall
 - users and roles: global admins and viewers, and per-virtual-firewall admins
   (multitenancy), each virtual firewall's daemons sandboxed apart
-- HA pairs: two firewalls with VRRP, Kea HA and conntrackd, fenced without a quorum,
-  the configuration copied to the secondary, which can be promoted
+- HA pairs: two firewalls, active and standby, with the same addresses and a witness's
+  vote; DHCP leases and connections copied to the standby, the configuration to the
+  secondary, which can be promoted
 - encrypted backups, deployment history with revert, and Debian and Portitor updates
   from the GUI
 
@@ -88,7 +89,7 @@ one host, a firewall and a portal, and an HA pair with a portal. The
                   ├─ scheduler      cron-style tasks
                   ├─ diagnostics    packet log (NFLOG), DNS query log, conntrack, capture, mtr, LLDP
                   ├─ dnsmgr2, BIND  DNS zones, per virtual firewall
-                  ├─ Kea, radvd     DHCPv4, DHCPv6 and router advertisements, per virtual firewall
+                  ├─ dhcpd, radvd   DHCPv4, DHCPv6 and router advertisements, per virtual firewall
                   └─ FRR            BGP, OSPF, VRRP and BFD, per virtual firewall that uses them
 ```
 
@@ -102,23 +103,25 @@ one host, a firewall and a portal, and an HA pair with a portal. The
   It has no database and no users: the firewall's login and roles apply.
 - **Virtual firewalls** are separate firewalls on one host. The default virtual firewall is the host itself; every
   other virtual firewall is a Linux network namespace (`fw-<name>`) with its own interfaces,
-  routing table, nftables ruleset, BIND and Kea. **Links** are veth pairs between
+  routing table, nftables ruleset, BIND and DHCP server. **Links** are veth pairs between
   virtual firewalls. The default virtual firewall is not listed on the *Virtual firewalls*
   page and can't be changed or deleted. Its files are where a sysadmin expects them, run by
   the distribution's own units: `/etc/nftables.d/portitor.nft`, `/etc/wireguard/<if>.conf`,
-  `/etc/bind/named.conf` (`named`), `/etc/kea/kea-dhcp4.conf` and `kea-dhcp6.conf`
-  (`kea-dhcp4-server`, `kea-dhcp6-server`) and `/etc/radvd.conf` (`radvd`); a file it
+  `/etc/bind/named.conf` (`named`) and `/etc/radvd.conf` (`radvd`); a file it
   replaces is kept as `<file>.portitor-orig`. Every other virtual firewall's are under
-  `/etc/portitor/instances/<name>`, run by `portitor-*@<name>` units.
+  `/etc/portitor/instances/<name>`, run by `portitor-*@<name>` units. Every virtual
+  firewall's DHCP server, the default one's too, is Portitor's own
+  (`portitor-dhcpd@<name>`, as an unprivileged user, config in
+  `/etc/portitor/dhcpd/<name>`).
 - **Interfaces** carry their own addresses, IPv4 and IPv6 mixed, as many as needed,
   each with its prefix length (`192.168.1.1/24`, `fd00:1::1/64`). An IPv6 address can be
   relative to the prefix a WAN interface gets delegated (`<wan0>:1::1/64`); the agent
   fills in the prefix, and applies again when it changes.
 - **IP addresses** live in a prefix tree per virtual firewall. Nesting follows from CIDR
   containment; the interfaces' addresses and their prefixes appear in it by
-  themselves. A prefix with DHCP on becomes a Kea scope (DHCPv4 or DHCPv6) on the
-  interface with an address in it; several scopes on one interface form a Kea shared
-  network, so clients get addresses from all of them. An IPv6 prefix can send router
+  themselves. A prefix with DHCP on becomes a DHCP scope (DHCPv4 or DHCPv6) on the
+  interface with an address in it; several scopes on one interface are served
+  together, so clients get addresses from all of them. An IPv6 prefix can send router
   advertisements (radvd), optionally with SLAAC; DHCPv6 needs them. An address with
   a DNS name gets an A/AAAA record (PTR generated), and with a MAC also a fixed lease.
 - **IP lists** are address lists the agent downloads: the ban decisions of a CrowdSec
@@ -166,7 +169,7 @@ one host, a firewall and a portal, and an HA pair with a portal. The
   allowlist. portitor-web pins the agent's self-signed certificate by SHA-256
   fingerprint.
 - **Untrusted input.** Every name, address and comment is validated on both sides
-  before it reaches an nftables, BIND, Kea or WireGuard file.
+  before it reaches an nftables, BIND, DHCP or WireGuard file.
 - **GUI.** bcrypt passwords, login rate limiting, HttpOnly SameSite=Strict session
   cookie, JSON-only mutating requests (CSRF), strict CSP. Private keys and TSIG
   secrets are never sent to the browser, except a generated WireGuard client config.
@@ -212,14 +215,15 @@ A first install creates the configs but starts nothing, and prints what is left 
 By hand, it is:
 
 On the **firewall** (Debian/Ubuntu shown; needs nftables, iproute2, wireguard-tools,
-bind9, bind9-utils, kea-dhcp4-server, kea-dhcp6-server, radvd; frr and frr-pythontools for BGP, OSPF, IS-IS, VRRP and BFD; tcpdump,
+bind9, bind9-utils, radvd; frr and frr-pythontools for BGP, OSPF, IS-IS, VRRP and BFD; tcpdump,
 tshark and mtr-tiny for packet capture and traceroute):
 
 ```sh
 make install-agent                          # binary, systemd units, /etc/portitor/agent.yaml
 portitor-agent init --host 192.168.1.1      # prints token + certificate fingerprint
 $EDITOR /etc/portitor/agent.yaml            # listen address, allow_from
-systemctl disable --now named kea-dhcp4-server kea-dhcp6-server radvd frr   # the agent starts them when the default VF uses them
+useradd --system --no-create-home --shell /usr/sbin/nologin portitor-dhcp   # the DHCP servers' user
+systemctl disable --now named radvd frr   # the agent starts them when the default VF uses them
 systemctl enable --now portitor-agent
 ```
 

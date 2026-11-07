@@ -51,10 +51,10 @@ func TestCheckPrograms(t *testing.T) {
 }
 
 func TestProgramStatus(t *testing.T) {
-	fakeInstalled(t, "kea-dhcp6")
+	fakeInstalled(t, "setpriv")
 	doc := fwconfig.SampleDocument()
 	for _, p := range programStatus(&doc) {
-		if (p.Path == "") != (p.Name == "kea-dhcp6") {
+		if (p.Path == "") != (p.Name == "setpriv") {
 			t.Errorf("%s: path %q", p.Name, p.Path)
 		}
 		if !p.Needed {

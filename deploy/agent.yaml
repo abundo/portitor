@@ -27,8 +27,6 @@ allow_from:
 #   etc_dir: /etc/portitor
 #   state_dir: /var/lib/portitor
 #   run_dir: /run/portitor
-#   kea_data_dir: /var/lib/kea
-#   kea_socket_dir: /run/kea
 #   bind_cache_dir: /var/cache/bind
 #   bind_zones_dir: /var/lib/bind
 #   bind_run_dir: /run/named
@@ -38,26 +36,21 @@ allow_from:
 #   nftables_file: /etc/nftables.d/portitor.nft
 #   wireguard_dir: /etc/wireguard
 #   named_conf: /etc/bind/named.conf
-#   kea_conf_dir: /etc/kea
 #   radvd_conf: /etc/radvd.conf
 #   chrony_conf: /etc/chrony/chrony.conf  # Fedora: /etc/chrony.conf
 #   snmpd_conf: /etc/snmp/snmpd.conf
 #   conntrackd_conf: /etc/conntrackd/conntrackd.conf
 #   openvpn_dir: /etc/openvpn/server        # the default VF's portitor-udp.conf, portitor-tcp.conf
-#   kea_hooks_dir: /usr/lib/x86_64-linux-gnu/kea/hooks  # by architecture
 # units:
 #   named: portitor-named@%s.service      # the other virtual firewalls'
-#   kea4: portitor-kea4@%s.service
-#   kea6: portitor-kea6@%s.service
+#   dhcpd: portitor-dhcpd@%s.service      # every virtual firewall's, the default one's too
 #   radvd: portitor-radvd@%s.service
 #   chrony: portitor-chrony@%s.service
 #   snmpd: portitor-snmpd@%s.service
 #   conntrackd: portitor-conntrackd@%s.service
 #   openvpn_udp: portitor-openvpn-udp@%s.service
 #   openvpn_tcp: portitor-openvpn-tcp@%s.service
-#   default_named: named.service          # Fedora: kea-dhcp4.service, kea-dhcp6.service
-#   default_kea4: kea-dhcp4-server.service
-#   default_kea6: kea-dhcp6-server.service
+#   default_named: named.service
 #   default_radvd: radvd.service
 #   default_chrony: chrony.service        # Fedora: chronyd.service
 #   default_snmpd: snmpd.service

@@ -1,0 +1,44 @@
+# SPDX-FileCopyrightText: 2026 The Portitor contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# Portitor's DHCP server (DHCPv4 and DHCPv6) for one instance, inside the
+# instance's network namespace; the default instance's too. Started and
+# reloaded by portitor-agent; do not enable by hand.
+[Unit]
+Description=Portitor DHCP server for instance %i
+After=portitor-agent.service
+PartOf=portitor-agent.service
+
+[Service]
+Type=simple
+# netns-exec enters the namespace as root; setpriv then runs the server as
+# portitor-dhcp with only what it needs: binding ports 67 and 547 and to
+# its interfaces, and ARP checks before an offer.
+ExecStart=/usr/bin/portitor-agent netns-exec %i -- /usr/bin/setpriv --reuid=portitor-dhcp --regid=portitor-dhcp --clear-groups --inh-caps=-all,+net_bind_service,+net_raw --ambient-caps=-all,+net_bind_service,+net_raw --bounding-set=-all,+net_bind_service,+net_raw --no-new-privs -- /usr/bin/portitor-agent dhcpd %i
+# SIGHUP reads the config again and keeps the leases. PrivatePIDs gives
+# each Exec line its own PID namespace, hence the +.
+ExecReload=+/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=2
+# Multitenancy: an instance's daemon sees only its own files and processes.
+# Its config, lease log and control socket directories are mounted alone
+# (directories: the agent replaces the config by renaming, which a file's
+# bind mount would not see); the other instances' are hidden, the rest of the system is read-only, and it gets
+# its own /tmp, IPC and PID namespaces. The agent makes the lease and
+# socket directories for portitor-dhcp.
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateIPC=yes
+PrivatePIDs=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectProc=invisible
+TemporaryFileSystem=/etc/portitor /var/lib/portitor /run/portitor
+BindReadOnlyPaths=/etc/portitor/dhcpd/%i
+BindReadOnlyPaths=/var/lib/portitor/instances/%i
+BindPaths=/var/lib/portitor/dhcpd/%i /run/portitor/dhcpd/%i

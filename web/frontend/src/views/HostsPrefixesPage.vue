@@ -101,12 +101,11 @@ const autoListDescriptions = {
   ospf_networks: 'OSPFv2 networks, allowed to send OSPF',
   ospf6_networks: 'OSPFv3 networks, allowed to send OSPF',
   snmp_clients: 'SNMP allowed clients, allowed to UDP port 161',
-  dhcp_ha: "The HA peer, allowed to Kea's HA ports",
   conntrack_sync: 'The HA peer, allowed to send conntrackd sync (UDP port 3780)',
   portitor_config_peer: "The HA peer, allowed to this host's portitor-config",
 }
-// Several rules may share a set (Kea HA's, one rule per Kea server), so
-// one list each, with the entries of all of them.
+// Several rules may share a set, so one list each, with the entries of all
+// of them.
 const autoLists = computed(() => {
   const byName = new Map()
   for (const r of autoRules.value) {

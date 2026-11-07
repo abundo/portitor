@@ -16,8 +16,8 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// droppedCaps leave the bounding set of an instance's daemons (named, Kea,
-// radvd). They run as root, at least at first; without CAP_SYS_ADMIN they
+// droppedCaps leave the bounding set of an instance's daemons (named, the
+// DHCP server, radvd). They run as root, at least at first; without CAP_SYS_ADMIN they
 // cannot setns into another instance's namespace or mount, and the rest
 // would reach the host's kernel, devices or other processes.
 var droppedCaps = []uintptr{

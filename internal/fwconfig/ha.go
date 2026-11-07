@@ -361,46 +361,6 @@ func (v *validator) haGateway(p string, ifc Interface) {
 	v.addf("%s: interface %s: the gateway %s is not on the interface", p, ifc.Name, ifc.HAGateway)
 }
 
-// Kea's HA roles.
-const (
-	DHCPHAPrimary = "primary"
-	DHCPHAStandby = "standby"
-)
-
-// DHCPHA runs Kea's HA hook in hot-standby between the two hosts of an HA
-// pair: the primary serves and keeps the standby's leases in step; the
-// standby serves when the primary stops answering. They talk HTTP on
-// Interface, from This to Peer (IPv4 addresses on it), on
-// render.KeaHAPort4 and KeaHAPort6, which the auto rules open to Peer
-// alone.
-type DHCPHA struct {
-	Role      string `json:"role"`
-	Interface string `json:"interface"`
-	This      string `json:"this"`
-	Peer      string `json:"peer"`
-}
-
-func (v *validator) dhcpHA(p string, in *Instance) {
-	h := in.DHCP.HA
-	if h == nil {
-		return
-	}
-	if h.Role != DHCPHAPrimary && h.Role != DHCPHAStandby {
-		v.addf("%s: dhcp ha: role must be %s or %s", p, DHCPHAPrimary, DHCPHAStandby)
-	}
-	if !ValidIfname(h.Interface) {
-		v.addf("%s: dhcp ha: invalid interface %q", p, h.Interface)
-	}
-	for _, a := range []string{h.This, h.Peer} {
-		if ip, err := netip.ParseAddr(a); err != nil || !ip.Is4() {
-			v.addf("%s: dhcp ha: %q is not an IPv4 address", p, a)
-		}
-	}
-	if h.This == h.Peer {
-		v.addf("%s: dhcp ha: this host and its peer have the same address", p)
-	}
-}
-
 // ConntrackSyncPort is conntrackd's UDP port between the hosts of a pair.
 const ConntrackSyncPort = 3780
 

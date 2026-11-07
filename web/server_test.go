@@ -317,7 +317,7 @@ func TestDeployEndToEnd(t *testing.T) {
 	tokenFile := filepath.Join(dir, "token")
 	_ = os.WriteFile(tokenFile, []byte(token), 0o600)
 	cfgFile := filepath.Join(dir, "agent.yaml")
-	_ = os.WriteFile(cfgFile, []byte("dry_run: true\ntoken_file: "+tokenFile+"\npaths:\n  etc_dir: "+dir+"/etc\n  state_dir: "+dir+"/state\n  run_dir: "+dir+"/run\n  kea_data_dir: "+dir+"/kea\n"), 0o600)
+	_ = os.WriteFile(cfgFile, []byte("dry_run: true\ntoken_file: "+tokenFile+"\npaths:\n  etc_dir: "+dir+"/etc\n  state_dir: "+dir+"/state\n  run_dir: "+dir+"/run\n"), 0o600)
 	acfg, err := agent.LoadConfig(cfgFile)
 	if err != nil {
 		t.Fatal(err)

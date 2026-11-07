@@ -85,7 +85,7 @@ cmd_install() {
 
 	log "installing portitor-agent on fw"
 	$RT cp build/portitor-agent "$PREFIX-fw:/usr/bin/portitor-agent"
-	for u in portitor-agent.service portitor-named@.service portitor-kea4@.service portitor-kea6@.service portitor-radvd@.service portitor-frr@.service portitor-chrony@.service portitor-snmpd@.service portitor-openvpn-udp@.service portitor-openvpn-tcp@.service; do
+	for u in portitor-agent.service portitor-named@.service portitor-dhcpd@.service portitor-radvd@.service portitor-frr@.service portitor-chrony@.service portitor-snmpd@.service portitor-openvpn-udp@.service portitor-openvpn-tcp@.service; do
 		$RT cp "deploy/systemd/$u" "$PREFIX-fw:/etc/systemd/system/$u"
 	done
 	ex fw sh -c 'test -e /etc/portitor/agent.token ||
@@ -162,7 +162,7 @@ cmd_deploy() {
 }
 
 cmd_client() {
-	# Stands in for a LAN host: DHCP from the firewall's Kea, then a shell.
+	# Stands in for a LAN host: DHCP from the firewall's DHCP server, then a shell.
 	$RT run --rm -it --cap-add NET_ADMIN,NET_RAW --network "$PREFIX-lan:interface_name=eth0" \
 		docker.io/library/alpine sh -c 'udhcpc -i eth0 -q && ip addr show eth0 && exec sh'
 }
@@ -171,7 +171,7 @@ cmd_shell() { $RT exec -it "$PREFIX-${1:?fw or mgmt}" bash; }
 
 cmd_logs() {
 	case ${1:?fw or mgmt} in
-	fw) ex fw journalctl -f -u portitor-agent -u portitor-config -u 'portitor-named@*' -u 'portitor-kea4@*' -u 'portitor-kea6@*' -u 'portitor-radvd@*' -u 'portitor-frr@*' -u 'portitor-chrony@*' -u 'portitor-snmpd@*' -u 'portitor-openvpn-*' -u 'openvpn-server@*' -u named -u kea-dhcp4-server -u kea-dhcp6-server -u radvd -u frr -u chrony -u snmpd ;;
+	fw) ex fw journalctl -f -u portitor-agent -u portitor-config -u 'portitor-named@*' -u 'portitor-dhcpd@*' -u 'portitor-radvd@*' -u 'portitor-frr@*' -u 'portitor-chrony@*' -u 'portitor-snmpd@*' -u 'portitor-openvpn-*' -u 'openvpn-server@*' -u named -u radvd -u frr -u chrony -u snmpd ;;
 	mgmt) ex mgmt journalctl -f -u portitor-web -u dnsmasq ;;
 	*) echo "fw or mgmt" >&2; exit 2 ;;
 	esac

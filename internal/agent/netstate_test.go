@@ -144,22 +144,6 @@ func TestParseWGDump(t *testing.T) {
 	}
 }
 
-func TestParseKeaLeases(t *testing.T) {
-	csv := "address,hwaddr,client_id,valid_lifetime,expire,subnet_id,fqdn_fwd,fqdn_rev,hostname,state,user_context,pool_id\n" +
-		"192.168.1.100,02:00:00:00:00:01,,3600,4000000000,1,0,0,laptop.,0,,0\n" +
-		"192.168.1.101,02:00:00:00:00:02,,3600,4000000000,1,0,0,,0,,0\n" +
-		"192.168.1.101,02:00:00:00:00:02,,0,4000000000,1,0,0,,2,,0\n"
-	var got []ServerLease
-	valid := map[string]bool{}
-	parseKeaLeases(strings.NewReader(csv), func(l ServerLease, ok bool) {
-		got = append(got, l)
-		valid[l.Address] = ok
-	})
-	if len(got) != 3 || got[0].Hostname != "laptop" || valid["192.168.1.101"] {
-		t.Errorf("%+v %v", got, valid)
-	}
-}
-
 func TestParseNICs(t *testing.T) {
 	data := []byte(`[
 {"ifname":"lo","flags":["LOOPBACK","UP"],"mtu":65536,"operstate":"UNKNOWN","addr_info":[]},

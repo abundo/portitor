@@ -594,7 +594,6 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 		}
 	}
 
-	v.dhcpHA(p, in)
 	v.conntrackSync(p, in)
 	if in.DHCP.DomainName != "" && !validDomain(in.DHCP.DomainName) {
 		v.addf("%s: dhcp: invalid domain name %q", p, in.DHCP.DomainName)
@@ -1077,8 +1076,8 @@ func (v *validator) dnsRecord(p string, r DNSRecord) {
 }
 
 // reservations checks the DHCP reservations (A/AAAA records with a MAC
-// inside a DHCP subnet): Kea refuses a config with an address reserved
-// twice, or a MAC with two reservations of the same IP version.
+// inside a DHCP subnet): an address reserved twice, or a MAC with two
+// reservations of the same IP version, would leave one unserved.
 func (v *validator) reservations(p string, in *Instance, subnets map[netip.Prefix]bool) {
 	inSubnet := func(a netip.Addr) bool {
 		for s := range subnets {

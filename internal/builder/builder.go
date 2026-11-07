@@ -801,7 +801,7 @@ func buildPeer(db *gorm.DB, generation int64, only map[string]bool, firewallID u
 		// DHCP and IPv6 router advertisements: IPAM prefixes with DHCP or
 		// RA on, served on the interface that has an address inside the
 		// prefix (with the prefix's length). Several on one interface
-		// become a Kea shared network (render.KeaDhcp4Conf).
+		// are served together (render.DHCPDConfig).
 		in.DHCP = fwconfig.DHCPServer{Enabled: mi.DhcpEnabled, DomainName: mi.DhcpDomainName, LeaseTime: mi.DhcpLeaseTime, RateLimit: serviceLimit["dhcp"], Subnets: []fwconfig.DHCPSubnet{}}
 		raIndex := map[string]int{}
 		for _, p := range prefixes {

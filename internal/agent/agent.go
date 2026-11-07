@@ -71,12 +71,9 @@ type Agent struct {
 	// shaped holds the HTB tree (htbTree) set up on each "<netns>/<dev>",
 	// so an apply that changes nothing about it leaves it alone. Lost on
 	// restart, which builds the trees once more.
+	// repl sends the DHCP servers' leases to the HA standby (dhcprepl.go).
+	repl   dhcpRepl
 	shaped map[string]string
-	// started holds the Kea units this process has (re)started. At boot
-	// the distribution's start before the agent has brought the
-	// interfaces up, and Kea gives up on a down interface; the first
-	// apply restarts them.
-	started map[string]bool
 }
 
 // pendingConfirm is an applied document that rolls back to Previous

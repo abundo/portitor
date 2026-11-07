@@ -290,7 +290,7 @@ type WGPeerStatus struct {
 	PresharedKey    bool       `json:"preshared_key"`       // whether one is set (never the key)
 }
 
-// ServerLease is an active lease handed out by Kea.
+// ServerLease is an active lease handed out by the DHCP server.
 type ServerLease struct {
 	Address  string    `json:"address"`
 	MAC      string    `json:"mac"`
@@ -1584,6 +1584,22 @@ type HAHeartbeatRequest struct {
 	// VoteMS, on a handover: what is left of this host's vote, which it
 	// has given up and the peer takes over.
 	VoteMS int `json:"vote_ms,omitempty"`
+}
+
+// HADHCPRequest carries an instance's DHCP leases from an HA pair's
+// active host to its standby (POST /v1/ha/dhcp, the pair's secret): the
+// leases changed since the last batch, or all of them (Snapshot), as the
+// DHCP server writes them (dhcpd.Lease). Term is the sender's.
+type HADHCPRequest struct {
+	Instance string          `json:"instance"`
+	Term     int64           `json:"term"`
+	Snapshot bool            `json:"snapshot,omitempty"`
+	Leases   json.RawMessage `json:"leases,omitempty"`
+}
+
+// HADHCPReply says how many leases the standby took.
+type HADHCPReply struct {
+	Applied int `json:"applied"`
 }
 
 // HAHeartbeat is an HA host's answer to its peer's heartbeat.

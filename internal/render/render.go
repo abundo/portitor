@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package render turns a validated fwconfig.Document into the files the
-// firewall runs from: one nftables ruleset, BIND/Kea/radvd/chrony/snmpd configs and a
+// firewall runs from: one nftables ruleset, BIND/DHCP/radvd/chrony/snmpd configs and a
 // dnsmgr2 config per instance, and one wg(8) config per WireGuard interface.
 //
 // Rendering is pure (no filesystem, no commands) so the same code serves
@@ -14,7 +14,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"slices"
 	"sort"
 	"strings"
@@ -29,10 +28,6 @@ type Paths struct {
 	EtcDir       string `yaml:"etc_dir" json:"etc_dir"`
 	StateDir     string `yaml:"state_dir" json:"state_dir"`
 	RunDir       string `yaml:"run_dir" json:"run_dir"`
-	KeaDataDir   string `yaml:"kea_data_dir" json:"kea_data_dir"`
-	KeaSocketDir string `yaml:"kea_socket_dir" json:"kea_socket_dir"`
-	// KeaHooksDir holds Kea's hook libraries (HA, lease commands).
-	KeaHooksDir  string `yaml:"kea_hooks_dir" json:"kea_hooks_dir"`
 	BindCacheDir string `yaml:"bind_cache_dir" json:"bind_cache_dir"`
 	BindZonesDir string `yaml:"bind_zones_dir" json:"bind_zones_dir"`
 	BindRunDir   string `yaml:"bind_run_dir" json:"bind_run_dir"`
@@ -44,7 +39,6 @@ type Paths struct {
 	NftablesFile string `yaml:"nftables_file" json:"nftables_file"`
 	WireGuardDir string `yaml:"wireguard_dir" json:"wireguard_dir"`
 	NamedConf    string `yaml:"named_conf" json:"named_conf"`
-	KeaConfDir   string `yaml:"kea_conf_dir" json:"kea_conf_dir"`
 	RadvdConf    string `yaml:"radvd_conf" json:"radvd_conf"`
 	ChronyConf   string `yaml:"chrony_conf" json:"chrony_conf"`
 	SnmpdConf    string `yaml:"snmpd_conf" json:"snmpd_conf"`
@@ -72,16 +66,12 @@ func DefaultPaths() Paths {
 		EtcDir:         "/etc/portitor",
 		StateDir:       "/var/lib/portitor",
 		RunDir:         "/run/portitor",
-		KeaDataDir:     "/var/lib/kea",
-		KeaSocketDir:   "/run/kea",
-		KeaHooksDir:    "/usr/lib/" + multiarch() + "/kea/hooks",
 		BindCacheDir:   "/var/cache/bind",
 		BindZonesDir:   "/var/lib/bind",
 		BindRunDir:     "/run/named",
 		NftablesFile:   "/etc/nftables.d/portitor.nft",
 		WireGuardDir:   "/etc/wireguard",
 		NamedConf:      "/etc/bind/named.conf",
-		KeaConfDir:     "/etc/kea",
 		RadvdConf:      "/etc/radvd.conf",
 		ChronyConf:     "/etc/chrony/chrony.conf",
 		SnmpdConf:      "/etc/snmp/snmpd.conf",
@@ -112,10 +102,16 @@ type InstanceFiles struct {
 	NamedInclude string
 	// DnsmgrDir holds dnsmgr2.yaml and records.json.
 	DnsmgrDir string
-	Kea4      string
-	Kea6      string
-	Radvd     string
-	Chrony    string
+	// DHCPD is the DHCP server's config (<etc>/dhcpd/<instance>/dhcpd.json);
+	// DHCPDState holds its lease log and DHCPDRun its control socket
+	// (DHCPDSocket), directories its unit alone mounts
+	// (portitor-dhcpd@.service). The default instance's are in
+	// Portitor's directories too: no distribution unit runs it.
+	DHCPD      string
+	DHCPDState string
+	DHCPDRun   string
+	Radvd      string
+	Chrony     string
 	// ChronySocket is a virtual firewall's chronyd command socket, in a
 	// directory its unit alone mounts (portitor-chrony@.service); the
 	// default instance's is chrony's own (empty).
@@ -147,14 +143,11 @@ type InstanceFiles struct {
 	// mounts them.
 	FRRRun   string
 	FRRState string
-	// The host's directories of Kea's leases and sockets and named's
-	// working, run and zones directories. A virtual firewall's units mount
-	// its own over the standard ones (portitor-kea4@.service,
-	// portitor-named@.service), so one instance's daemons can't reach
-	// another's files; the zones directory keeps its host path, as dnsmgr2
-	// writes it into NamedInclude on the host.
-	KeaData   string
-	KeaSocket string
+	// The host's directories of named's working, run and zones
+	// directories. A virtual firewall's unit mounts its own over the
+	// standard ones (portitor-named@.service), so one instance's named
+	// can't reach another's files; the zones directory keeps its host
+	// path, as dnsmgr2 writes it into NamedInclude on the host.
 	BindCache string
 	BindRun   string
 	BindZones string
@@ -163,13 +156,6 @@ type InstanceFiles struct {
 	// the names no blocklist blocks, rendered.
 	RPZDir   string
 	RPZAllow string
-	// Kea's lease files and control sockets as Kea sees them. Kea 2.6+
-	// refuses them outside its own directories, hence KeaDataDir and
-	// KeaSocketDir.
-	Kea4Lease  string
-	Kea6Lease  string
-	Kea4Socket string
-	Kea6Socket string
 }
 
 // Files returns where an instance's files are: the distribution's places
@@ -182,8 +168,9 @@ func (p Paths) Files(in *fwconfig.Instance) InstanceFiles {
 			NamedConf:    p.NamedConf,
 			NamedInclude: filepath.Join(filepath.Dir(p.NamedConf), "named.conf.dnsmgr2"),
 			DnsmgrDir:    p.EtcDir,
-			Kea4:         filepath.Join(p.KeaConfDir, "kea-dhcp4.conf"),
-			Kea6:         filepath.Join(p.KeaConfDir, "kea-dhcp6.conf"),
+			DHCPD:        filepath.Join(p.EtcDir, "dhcpd", in.Name, "dhcpd.json"),
+			DHCPDState:   filepath.Join(p.StateDir, "dhcpd", in.Name),
+			DHCPDRun:     filepath.Join(p.RunDir, "dhcpd", in.Name),
 			Radvd:        p.RadvdConf,
 			Chrony:       p.ChronyConf,
 			Snmpd:        p.SnmpdConf,
@@ -197,17 +184,11 @@ func (p Paths) Files(in *fwconfig.Instance) InstanceFiles {
 			FRRVtysh:     filepath.Join(p.FRRDir, "vtysh.conf"),
 			FRRRun:       p.FRRRunDir,
 			FRRState:     p.FRRStateDir,
-			KeaData:      p.KeaDataDir,
-			KeaSocket:    p.KeaSocketDir,
 			BindCache:    p.BindCacheDir,
 			BindRun:      p.BindRunDir,
 			BindZones:    p.BindZonesDir,
 			RPZDir:       filepath.Join(p.BindCacheDir, rpzDir),
 			RPZAllow:     filepath.Join(filepath.Dir(p.NamedConf), "rpz-allow.db"),
-			Kea4Lease:    filepath.Join(p.KeaDataDir, "kea-leases4.csv"),
-			Kea6Lease:    filepath.Join(p.KeaDataDir, "kea-leases6.csv"),
-			Kea4Socket:   filepath.Join(p.KeaSocketDir, "kea4-ctrl-socket"),
-			Kea6Socket:   filepath.Join(p.KeaSocketDir, "kea6-ctrl-socket"),
 		}
 	}
 	etc := p.InstanceEtc(in.Name)
@@ -217,8 +198,9 @@ func (p Paths) Files(in *fwconfig.Instance) InstanceFiles {
 		NamedConf:    filepath.Join(etc, "named.conf"),
 		NamedInclude: filepath.Join(etc, "named.conf.dnsmgr2"),
 		DnsmgrDir:    etc,
-		Kea4:         filepath.Join(etc, "kea-dhcp4.conf"),
-		Kea6:         filepath.Join(etc, "kea-dhcp6.conf"),
+		DHCPD:        filepath.Join(p.EtcDir, "dhcpd", in.Name, "dhcpd.json"),
+		DHCPDState:   filepath.Join(p.StateDir, "dhcpd", in.Name),
+		DHCPDRun:     filepath.Join(p.RunDir, "dhcpd", in.Name),
 		Radvd:        filepath.Join(etc, "radvd.conf"),
 		Chrony:       filepath.Join(etc, "chrony.conf"),
 		ChronySocket: filepath.Join(p.RunDir, "chrony", in.Name, "chronyd.sock"),
@@ -233,19 +215,16 @@ func (p Paths) Files(in *fwconfig.Instance) InstanceFiles {
 		FRRVtysh:     filepath.Join(etc, "frr", "vtysh.conf"),
 		FRRRun:       filepath.Join(p.FRRRunDir, in.Name),
 		FRRState:     filepath.Join(p.FRRStateDir, in.Name),
-		KeaData:      filepath.Join(p.KeaDataDir, in.Name),
-		KeaSocket:    filepath.Join(p.KeaSocketDir, in.Name),
 		BindCache:    filepath.Join(p.BindCacheDir, in.Name),
 		BindRun:      filepath.Join(p.BindRunDir, in.Name),
 		BindZones:    filepath.Join(p.BindZonesDir, in.Name),
 		RPZDir:       filepath.Join(p.BindCacheDir, in.Name, rpzDir),
 		RPZAllow:     filepath.Join(etc, "rpz-allow.db"),
-		Kea4Lease:    filepath.Join(p.KeaDataDir, "kea-leases4-"+in.Name+".csv"),
-		Kea6Lease:    filepath.Join(p.KeaDataDir, "kea-leases6-"+in.Name+".csv"),
-		Kea4Socket:   filepath.Join(p.KeaSocketDir, "kea4-"+in.Name+".sock"),
-		Kea6Socket:   filepath.Join(p.KeaSocketDir, "kea6-"+in.Name+".sock"),
 	}
 }
+
+// DHCPDSocket is the DHCP server's control socket.
+func (f InstanceFiles) DHCPDSocket() string { return filepath.Join(f.DHCPDRun, "control.sock") }
 
 // OpenVPNConf is the config of the OpenVPN process for proto.
 func (f InstanceFiles) OpenVPNConf(proto string) string {
@@ -307,9 +286,10 @@ func (p Paths) ACMEAccountsDir() string {
 // default instance's run under the distribution's own units (Default*),
 // which read the standard files (Paths.Files).
 type Units struct {
-	NamedFmt          string `yaml:"named" json:"named"`
-	Kea4Fmt           string `yaml:"kea4" json:"kea4"`
-	Kea6Fmt           string `yaml:"kea6" json:"kea6"`
+	NamedFmt string `yaml:"named" json:"named"`
+	// DHCPDFmt runs every instance's DHCP server, the default one's
+	// too.
+	DHCPDFmt          string `yaml:"dhcpd" json:"dhcpd"`
 	RadvdFmt          string `yaml:"radvd" json:"radvd"`
 	FRRFmt            string `yaml:"frr" json:"frr"`
 	ChronyFmt         string `yaml:"chrony" json:"chrony"`
@@ -318,8 +298,6 @@ type Units struct {
 	OpenVPNUDPFmt     string `yaml:"openvpn_udp" json:"openvpn_udp"`
 	OpenVPNTCPFmt     string `yaml:"openvpn_tcp" json:"openvpn_tcp"`
 	DefaultNamed      string `yaml:"default_named" json:"default_named"`
-	DefaultKea4       string `yaml:"default_kea4" json:"default_kea4"`
-	DefaultKea6       string `yaml:"default_kea6" json:"default_kea6"`
 	DefaultRadvd      string `yaml:"default_radvd" json:"default_radvd"`
 	DefaultFRR        string `yaml:"default_frr" json:"default_frr"`
 	DefaultChrony     string `yaml:"default_chrony" json:"default_chrony"`
@@ -335,8 +313,7 @@ type Units struct {
 func DefaultUnits() Units {
 	return Units{
 		NamedFmt:      "portitor-named@%s.service",
-		Kea4Fmt:       "portitor-kea4@%s.service",
-		Kea6Fmt:       "portitor-kea6@%s.service",
+		DHCPDFmt:      "portitor-dhcpd@%s.service",
 		RadvdFmt:      "portitor-radvd@%s.service",
 		FRRFmt:        "portitor-frr@%s.service",
 		ChronyFmt:     "portitor-chrony@%s.service",
@@ -344,10 +321,8 @@ func DefaultUnits() Units {
 		ConntrackdFmt: "portitor-conntrackd@%s.service",
 		OpenVPNUDPFmt: "portitor-openvpn-udp@%s.service",
 		OpenVPNTCPFmt: "portitor-openvpn-tcp@%s.service",
-		// Debian/Ubuntu's names (Fedora: kea-dhcp4.service, kea-dhcp6.service).
+		// Debian/Ubuntu's names.
 		DefaultNamed: "named.service",
-		DefaultKea4:  "kea-dhcp4-server.service",
-		DefaultKea6:  "kea-dhcp6-server.service",
 		DefaultRadvd: "radvd.service",
 		DefaultFRR:   "frr.service",
 		// Fedora: chronyd.service.
@@ -369,8 +344,7 @@ func (u Units) pick(in *fwconfig.Instance, def, format string) string {
 }
 
 func (u Units) Named(in *fwconfig.Instance) string { return u.pick(in, u.DefaultNamed, u.NamedFmt) }
-func (u Units) Kea4(in *fwconfig.Instance) string  { return u.pick(in, u.DefaultKea4, u.Kea4Fmt) }
-func (u Units) Kea6(in *fwconfig.Instance) string  { return u.pick(in, u.DefaultKea6, u.Kea6Fmt) }
+func (u Units) DHCPD(in *fwconfig.Instance) string { return fmt.Sprintf(u.DHCPDFmt, in.Name) }
 func (u Units) Radvd(in *fwconfig.Instance) string { return u.pick(in, u.DefaultRadvd, u.RadvdFmt) }
 func (u Units) FRR(in *fwconfig.Instance) string   { return u.pick(in, u.DefaultFRR, u.FRRFmt) }
 func (u Units) Chrony(in *fwconfig.Instance) string {
@@ -393,10 +367,10 @@ func (u Units) OpenVPN(in *fwconfig.Instance, proto string) string {
 	return u.pick(in, u.DefaultOpenVPNUDP, u.OpenVPNUDPFmt)
 }
 
-// All lists the instance's units: named, Kea4, Kea6, radvd, FRR, chrony,
+// All lists the instance's units: named, dhcpd, radvd, FRR, chrony,
 // snmpd, conntrackd, OpenVPN's.
 func (u Units) All(in *fwconfig.Instance) []string {
-	return []string{u.Named(in), u.Kea4(in), u.Kea6(in), u.Radvd(in), u.FRR(in), u.Chrony(in), u.Snmpd(in), u.Conntrackd(in),
+	return []string{u.Named(in), u.DHCPD(in), u.Radvd(in), u.FRR(in), u.Chrony(in), u.Snmpd(in), u.Conntrackd(in),
 		u.OpenVPN(in, fwconfig.OpenVPNUDP), u.OpenVPN(in, fwconfig.OpenVPNTCP)}
 }
 
@@ -470,11 +444,8 @@ func Render(doc fwconfig.Document, opt Options) (*Bundle, error) {
 				add(f.RPZAllow, RPZAllowZone(in), 0o644, false)
 			}
 		}
-		if len(DHCP4Subnets(in)) > 0 {
-			add(f.Kea4, KeaDhcp4Conf(in, opt.Paths), 0o644, false)
-		}
-		if len(DHCP6Subnets(in)) > 0 {
-			add(f.Kea6, KeaDhcp6Conf(in, opt.Paths), 0o644, false)
+		if DHCPRunning(in) {
+			add(f.DHCPD, DHCPDConf(in), 0o644, false)
 		}
 		if len(in.RA) > 0 {
 			add(f.Radvd, RadvdConf(in), 0o644, false)
@@ -568,19 +539,4 @@ func (b *Bundle) Redacted() []File {
 		}
 	}
 	return out
-}
-
-// multiarch is Debian's multiarch directory for the host's architecture.
-func multiarch() string {
-	switch runtime.GOARCH {
-	case "arm64":
-		return "aarch64-linux-gnu"
-	case "arm":
-		return "arm-linux-gnueabihf"
-	case "386":
-		return "i386-linux-gnu"
-	case "riscv64":
-		return "riscv64-linux-gnu"
-	}
-	return "x86_64-linux-gnu"
 }

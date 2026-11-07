@@ -252,7 +252,7 @@ func RPZAllowZone(in *fwconfig.Instance) string {
 }
 
 // DnsmgrConfig builds the dnsmgr2 configuration for an instance: its DNS
-// zones (Kea's configs are rendered in full, see kea.go). Returns ok=false
+// zones (the DHCP server's config is rendered in full, see dhcpd.go). Returns ok=false
 // when the instance runs no DNS server.
 func DnsmgrConfig(in *fwconfig.Instance, p Paths, u Units) (dnsmgr.ConfigRoot, bool) {
 	if !in.DNS.Enabled {

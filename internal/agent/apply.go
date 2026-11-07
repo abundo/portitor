@@ -431,6 +431,7 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 
 	a.ddnsWant, a.tbWant, a.dhcpWant, a.dhcp6Want = ddnsWant, tbWant, dhcpWant, dhcp6Want
 	a.reconcileActive()
+	a.reconcileDHCPRepl(&exp)
 	a.certs.Reconcile(ctx, certsWant)
 	a.proxies.Reconcile(proxiesWant)
 	a.ovpn.Reconcile(ovpnWant)
@@ -780,7 +781,7 @@ func (a *Agent) placeLinks(ctx context.Context, doc fwconfig.Document) error {
 	return nil
 }
 
-// applyServices runs dnsmgr2 and starts/stops/reloads BIND, Kea, radvd,
+// applyServices runs dnsmgr2 and starts/stops/reloads BIND, the DHCP server, radvd,
 // chrony, snmpd, rsyslog and FRR for an instance. The default instance's run under the distribution's own
 // units, from the standard files (render.Paths.Files).
 func (a *Agent) applyServices(ctx context.Context, in *fwconfig.Instance, b *render.Bundle, changed map[string]bool) error {
@@ -875,26 +876,24 @@ func (a *Agent) applyServices(ctx context.Context, in *fwconfig.Instance, b *ren
 		chownTo(snmpdUser, files.SnmpdPersist)
 	}
 
-	// Kea, radvd, chrony and snmpd are rendered in full (no dnsmgr2).
+	if err := a.applyDHCPD(ctx, in, files, changed); err != nil {
+		return err
+	}
+	// radvd, chrony and snmpd are rendered in full (no dnsmgr2).
 	// chronyd can't reload its config; snmpd re-reads it on SIGHUP, but as
 	// its user, and the file holds secrets (root's alone).
 	for _, svc := range []struct {
 		unit, conf string
 		on         bool
 		reload     string
-		// once: restarted on this process's first apply too (Kea, which
-		// opens no socket on an interface that was down when it started).
-		once bool
 	}{
-		{a.cfg.Units.Kea4(in), files.Kea4, len(render.DHCP4Subnets(in)) > 0, "restart", true},
-		{a.cfg.Units.Kea6(in), files.Kea6, len(render.DHCP6Subnets(in)) > 0, "restart", true},
-		{a.cfg.Units.Radvd(in), files.Radvd, len(in.RA) > 0, "reload-or-restart", false},
-		{a.cfg.Units.Chrony(in), files.Chrony, in.NTP != nil, "restart", false},
-		{a.cfg.Units.Snmpd(in), files.Snmpd, in.SNMP != nil, "restart", false},
-		{a.cfg.Units.Conntrackd(in), files.Conntrackd, in.ConntrackSync != nil, "restart", false},
+		{a.cfg.Units.Radvd(in), files.Radvd, len(in.RA) > 0, "reload-or-restart"},
+		{a.cfg.Units.Chrony(in), files.Chrony, in.NTP != nil, "restart"},
+		{a.cfg.Units.Snmpd(in), files.Snmpd, in.SNMP != nil, "restart"},
+		{a.cfg.Units.Conntrackd(in), files.Conntrackd, in.ConntrackSync != nil, "restart"},
 		// OpenVPN's clients reconnect after a restart.
-		{a.cfg.Units.OpenVPN(in, fwconfig.OpenVPNUDP), files.OpenVPNUDP, ovpn[fwconfig.OpenVPNUDP], "restart", false},
-		{a.cfg.Units.OpenVPN(in, fwconfig.OpenVPNTCP), files.OpenVPNTCP, ovpn[fwconfig.OpenVPNTCP], "restart", false},
+		{a.cfg.Units.OpenVPN(in, fwconfig.OpenVPNUDP), files.OpenVPNUDP, ovpn[fwconfig.OpenVPNUDP], "restart"},
+		{a.cfg.Units.OpenVPN(in, fwconfig.OpenVPNTCP), files.OpenVPNTCP, ovpn[fwconfig.OpenVPNTCP], "restart"},
 	} {
 		if !svc.on {
 			a.disableService(ctx, in, svc.unit, svc.conf)
@@ -903,16 +902,10 @@ func (a *Agent) applyServices(ctx context.Context, in *fwconfig.Instance, b *ren
 		if err := a.enable(ctx, in, svc.unit); err != nil {
 			return err
 		}
-		if changed[svc.conf] || (svc.once && !a.started[svc.unit]) {
+		if changed[svc.conf] {
 			if err := a.do(ctx, command{Name: "systemctl", Args: []string{svc.reload, svc.unit}}); err != nil {
 				return err
 			}
-		}
-		if svc.once {
-			if a.started == nil {
-				a.started = map[string]bool{}
-			}
-			a.started[svc.unit] = true
 		}
 	}
 	if in.Default {
@@ -945,6 +938,44 @@ func (a *Agent) applyServices(ctx context.Context, in *fwconfig.Instance, b *ren
 		}
 	}
 	return a.applyFRR(ctx, in, changed)
+}
+
+// dhcpdUser runs the DHCP servers: portitor-dhcpd@.service drops to it
+// (setpriv) with CAP_NET_BIND_SERVICE and CAP_NET_RAW alone.
+const dhcpdUser = "portitor-dhcp"
+
+// applyDHCPD starts, reloads (SIGHUP, which keeps the leases) or stops the
+// instance's DHCP server. It is Portitor's own, the default instance's
+// too, so it is always stopped when unused; its lease log stays. It opens
+// a socket on an interface once it is there and up, so it needs no
+// restart when interfaces come up after it.
+func (a *Agent) applyDHCPD(ctx context.Context, in *fwconfig.Instance, files render.InstanceFiles, changed map[string]bool) error {
+	unit := a.cfg.Units.DHCPD(in)
+	if !render.DHCPRunning(in) {
+		a.disable(ctx, unit)
+		if !a.cfg.DryRun {
+			_ = os.Remove(files.DHCPD)
+		}
+		return nil
+	}
+	if !a.cfg.DryRun {
+		for _, d := range []string{files.DHCPDState, files.DHCPDRun} {
+			if err := os.MkdirAll(d, 0o700); err != nil {
+				return err
+			}
+			chownTo(dhcpdUser, d)
+		}
+	}
+	// A server that starts now reads the new config; one that runs is
+	// told to.
+	active, _ := a.run.Run(ctx, "", "systemctl", "is-active", unit)
+	if strings.TrimSpace(string(active)) != "active" {
+		return a.do(ctx, command{Name: "systemctl", Args: []string{"enable", "--now", unit}})
+	}
+	if changed[files.DHCPD] {
+		return a.do(ctx, command{Name: "systemctl", Args: []string{"reload", unit}})
+	}
+	return nil
 }
 
 // applyFRR starts, reloads or stops FRR (BGP, OSPF). It is off unless the
@@ -1013,7 +1044,7 @@ func (a *Agent) enable(ctx context.Context, in *fwconfig.Instance, unit string) 
 
 // disableService stops a service the instance no longer runs. The default
 // instance's units are the distribution's: they are left alone unless they
-// run from our file, so a sysadmin's own named, Kea or radvd keeps running.
+// run from our file, so a sysadmin's own named or radvd keeps running.
 func (a *Agent) disableService(ctx context.Context, in *fwconfig.Instance, unit, conf string) {
 	if in.Default {
 		if c, err := os.ReadFile(conf); err != nil || !render.Generated(c) {
@@ -1026,8 +1057,7 @@ func (a *Agent) disableService(ctx context.Context, in *fwconfig.Instance, unit,
 // moveDefaultInstance moves a default instance that ran like a virtual
 // firewall (portitor-*@<name> units, files under etc_dir/instances/<name>,
 // before the default instance used the standard places) to the
-// distribution's units and directories: its units stop, Kea's leases and
-// named's keys and zones move to the standard directories, and dnsmgr2
+// distribution's units and directories: its units stop, named's keys and zones move to the standard directories, and dnsmgr2
 // starts over so it writes the zones' new paths.
 func (a *Agent) moveDefaultInstance(ctx context.Context, in *fwconfig.Instance) error {
 	etc := a.cfg.Paths.InstanceEtc(in.Name)
@@ -1048,7 +1078,6 @@ func (a *Agent) moveDefaultInstance(ctx context.Context, in *fwconfig.Instance) 
 	old := a.cfg.Paths.Files(&fwconfig.Instance{Name: in.Name})
 	cur := a.cfg.Paths.Files(in)
 	for _, d := range []struct{ from, to string }{
-		{old.KeaData, cur.KeaData},
 		{old.BindCache, cur.BindCache},
 		{old.BindZones, cur.BindZones},
 	} {
@@ -1057,13 +1086,11 @@ func (a *Agent) moveDefaultInstance(ctx context.Context, in *fwconfig.Instance) 
 			continue
 		}
 		for _, e := range entries {
-			// kea-leases4-<name>.csv.1 -> kea-leases4.csv.1
 			from := filepath.Join(d.from, e.Name())
-			to := filepath.Join(d.to, strings.Replace(e.Name(), "-"+in.Name+".csv", ".csv", 1))
+			to := filepath.Join(d.to, e.Name())
 			if _, err := os.Lstat(to); err == nil {
-				// A copy of what is there (Kea's server id, which
-				// install.py copied into each instance) goes, and so do
-				// named's trust anchor state, which it keeps itself.
+				// A copy of what is there goes, and so does named's
+				// trust anchor state, which it keeps itself.
 				if strings.HasPrefix(e.Name(), "managed-keys.bind") {
 					_ = os.Remove(from)
 				} else if x, err := os.ReadFile(from); err == nil {
@@ -1080,7 +1107,6 @@ func (a *Agent) moveDefaultInstance(ctx context.Context, in *fwconfig.Instance) 
 		_ = os.Remove(d.from) // if empty
 	}
 	_ = os.RemoveAll(old.BindRun)
-	_ = os.RemoveAll(old.KeaSocket)
 	if err := os.Remove(filepath.Join(a.cfg.Paths.InstanceState(in.Name), "dnsmgr2.sqlite")); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}

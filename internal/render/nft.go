@@ -94,7 +94,7 @@ func Nftables(in *fwconfig.Instance, lockout *AntiLockout, paths Paths) string {
 		}
 	}
 
-	// Rules may share a set (Kea's HA peer, one per server): declared once.
+	// Rules may share a set (one per IP version or service): declared once.
 	declared := map[string]bool{}
 	for _, r := range AutoInputRules(in) {
 		if !declared[r.SourceSet] {
@@ -734,18 +734,6 @@ func AutoInputRules(in *fwconfig.Instance) []AutoRule {
 		sort.Strings(ifs)
 		out = append(out, AutoRule{Service: "ntp server", InInterfaces: ifs, Protocol: "udp", DstPort: fwconfig.NTPPort, RateLimit: in.NTP.RateLimit})
 	}
-	// Kea's HA peer, to each Kea server that runs.
-	if h := in.DHCP.HA; h != nil && in.DHCP.Enabled {
-		for _, k := range []struct {
-			subs []fwconfig.DHCPSubnet
-			port int
-		}{{DHCP4Subnets(in), KeaHAPort4}, {DHCP6Subnets(in), KeaHAPort6}} {
-			if len(k.subs) > 0 {
-				out = append(out, AutoRule{Service: DHCPHAService, InInterfaces: []string{h.Interface}, Protocol: "tcp",
-					DstPort: k.port, Source: []string{h.Peer}, SourceSet: DHCPHASet})
-			}
-		}
-	}
 	// The HA peer's conntrackd.
 	if c := in.ConntrackSync; c != nil {
 		out = append(out, AutoRule{Service: ConntrackSyncService, InInterfaces: []string{c.Interface}, Protocol: "udp",
@@ -973,13 +961,6 @@ func OSPFOutputMatches(in *fwconfig.Instance) []OSPFOutput {
 
 // BGPNeighborsSet is the auto set of the BGP neighbours' addresses.
 const BGPNeighborsSet = "bgp_neighbours"
-
-// DHCPHAService is the auto rule letting Kea's HA peer in, from the
-// DHCPHASet set (fwconfig.DHCPHA).
-const (
-	DHCPHAService = "dhcp ha"
-	DHCPHASet     = "dhcp_ha"
-)
 
 // AutoSetName is the nftables set holding one IP version of an auto rule's
 // sources: "AUTO_" and the name. Never an IP list's set (IPListKey: lower

@@ -414,7 +414,7 @@ Each phase ends with passing tests, and phase 2 can ship without phase 4.
 2. **Fix the witness bug.** Done.
 3. **Cluster core.** Done, and run on the lab pair. See below.
 4. **Monitoring and services.** Done, and run on the lab pair. See below.
-5. **DHCP server.** v4, then v6, then replication. Remove Kea.
+5. **DHCP server.** Done, Kea removed, and run on the lab pair. See below.
 6. **Docs and GUI.** `docs/ha.md`, `docs/vrrp.md`, AGENTS.md, Admin → Firewalls and
    `portitor show ha`.
 
@@ -434,6 +434,47 @@ Until later phases:
 - **The HA link's addresses are entered by hand,** like management's.
 - **The witness needs a way in.** An external witness calls the agent's port, which
   only `allow_from` opens. Its address must be listed in `agent.yaml`.
+
+### Phase 5 notes
+
+What the build changed from the plan above:
+
+- **The DHCPv4 wire format is Portitor's own** (`dhcpd/packet4.go`), not a layer over
+  `insomniacslk/dhcp`: most of the tolerance list is in the parser, and the reply
+  rules (message type first, size cap, padding) in the writer. DHCPv6 uses the
+  library.
+- **No active or passive mode.** The standby's gate is closed, so its server hears no
+  client; it only takes the stream.
+- **The server DUID comes from the instance's name** (`render.DHCPServerDUID`, a
+  DUID-UUID), the same on both hosts, with no column.
+- **The ARP check returns who answers.** An address another host answers for is held
+  from offers for 10 minutes, but the client answering for it itself keeps it. After a
+  failover, a client the new host has no record of renews without a NAK, and a new
+  client isn't given that address. The first build held the address from everyone,
+  which moved a client to a new address in the lab.
+- **The agent sends the stream.** It long-polls the server's changes over the control
+  socket, so the server has no network access beyond DHCP. Merging is by the time of
+  the change, the newer copy winning, so a snapshot and the stream can overlap.
+- **The config is in a directory per instance** (`/etc/portitor/dhcpd/<name>/`): a
+  file's bind mount keeps the inode that the agent's rename replaces.
+
+### Phase 5 lab results
+
+On the lab pair, with client1 and a test client in a network namespace with its own MAC
+address:
+
+| Test | Result |
+|---|---|
+| A renewal of an address Kea had given, unknown to the new server | Granted |
+| A new client | Offered after the 300 ms ARP check, bound; the same address again in 1 ms |
+| A host using a free address without a lease | Skipped, the next address offered |
+| A switchover before replication, then a new client and a renewal | The new client was kept off the renewing client's address, and the renewing client kept its address |
+| DHCPv6 (a temporary ULA prefix, RA with the M flag) | client1 got an address, valid 86400 s, preferred 64800 s |
+| A new binding with replication | On the standby before the client's ACK, at a cost of milliseconds |
+| A switchover with replication, then a renewal | Granted at once, with no ARP check: the new host has the lease |
+
+Not tested on the lab: reservations, a hard reset during a new binding, clients other
+than Linux (NetworkManager and the test client).
 
 ### Phase 4 lab results
 

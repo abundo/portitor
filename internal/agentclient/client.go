@@ -472,6 +472,13 @@ func (c *Client) HAHandover(ctx context.Context, req agentapi.HAHeartbeatRequest
 	return c.do(ctx, http.MethodPost, "/v1/ha/handover", req, nil)
 }
 
+// HADHCP sends an instance's DHCP leases to the HA standby; the client's
+// token is the pair's secret.
+func (c *Client) HADHCP(ctx context.Context, req agentapi.HADHCPRequest) (*agentapi.HADHCPReply, error) {
+	var out agentapi.HADHCPReply
+	return &out, c.do(ctx, http.MethodPost, "/v1/ha/dhcp", req, &out)
+}
+
 // HASwitchover makes the active host hand over to its standby.
 func (c *Client) HASwitchover(ctx context.Context) error {
 	return c.do(ctx, http.MethodPost, "/v1/ha/switchover", nil, nil)

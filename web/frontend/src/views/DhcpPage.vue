@@ -332,14 +332,15 @@ const autoLeases = useAutoRefresh(loadLeases, { seconds: 10, active: () => tab.v
               <UButton v-if="!readOnly" type="submit" :loading="saving">Save</UButton>
             </FormHeader>
             <p class="mb-4 text-sm text-muted">
-              Kea, for the clients on this virtual firewall's interfaces. DHCP is served per prefix
-              of an interface address; several on one interface form a shared network, and clients
-              get addresses from all of them. Fixed leases are addresses with a MAC and a DNS name
+              Portitor's DHCPv4 and DHCPv6 server, for the clients on this virtual firewall's
+              interfaces. DHCP is served per prefix of an interface address; several on one
+              interface are served together, and clients get addresses from all of them. On an HA
+              pair the standby has every lease, so clients keep their addresses after a failover. Fixed leases are addresses with a MAC and a DNS name
               under
               <RouterLink to="/hosts-prefixes" class="text-primary">Hosts & prefixes</RouterLink>.
             </p>
             <fieldset :disabled="readOnly" class="space-y-3">
-              <UFormField label="DHCP server (Kea)" :ui="inlineField">
+              <UFormField label="DHCP server" :ui="inlineField">
                 <USwitch v-model="server.dhcp_enabled" />
               </UFormField>
               <template v-if="server.dhcp_enabled">

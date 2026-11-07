@@ -131,14 +131,15 @@ AGENT_APPLIED = "/var/lib/portitor/applied.json"
 # portitor-config's address on its own host, which portitor-web there uses.
 CONFIG_LOCAL_URL = "https://127.0.0.1:8444"
 SSH_USER_DEFAULT = "portitor"
+# Portitor's DHCP servers run as this user (portitor-dhcpd@.service).
+DHCP_USER = "portitor-dhcp"
 WEB_UNIT = "portitor-web.service"
 AGENT_UNIT = "portitor-agent.service"
 # The per-instance units are started by the agent, never enabled.
 AGENT_UNITS = (
     AGENT_UNIT,
     "portitor-named@.service",
-    "portitor-kea4@.service",
-    "portitor-kea6@.service",
+    "portitor-dhcpd@.service",
     "portitor-radvd@.service",
     "portitor-frr@.service",
     "portitor-chrony@.service",
@@ -159,8 +160,6 @@ AGENT_PACKAGES = {
     "bind9": ("named.service",),
     "bind9-utils": (),
     "bind9-dnsutils": (),
-    "kea-dhcp4-server": ("kea-dhcp4-server.service",),
-    "kea-dhcp6-server": ("kea-dhcp6-server.service",),
     "radvd": ("radvd.service",),
     "frr": ("frr.service",),
     "frr-pythontools": (),
@@ -197,7 +196,7 @@ ISC_BIND_REPO = "https://bind.debian.net/bind"
 ISC_BIND_SUITES = ("bullseye", "bookworm", "trixie", "jammy", "noble", "resolute")
 ISC_BIND_KEYRING = "/usr/share/keyrings/isc-bind.asc"
 ISC_BIND_LIST = "/etc/apt/sources.list.d/isc-bind.list"
-# Debian/Ubuntu confine named and Kea with AppArmor; our rules
+# Debian/Ubuntu confine named and chronyd with AppArmor; our rules
 # (deploy/apparmor/<profile>) go in each profile's local include, between
 # markers so the admin's own lines are kept.
 APPARMOR_DIR = "/etc/apparmor.d"
@@ -573,7 +572,8 @@ def install_agent(host: Host, binary: Path, deploy: Path, version: str, assume_y
     )
     host.put(Path(__file__).resolve(), INSTALLER_DEST, "0755", name=INSTALLER_FILENAME)
     actions = {u: install_unit(host, deploy / "systemd" / u, assume_yes) for u in AGENT_UNITS}
-    move_kea_leases(host)
+    ensure_dhcp_user(host)
+    retire_kea(host)
     move_bind_dirs(host)
     mask_generators(host)
     host.systemctl("daemon-reload")
@@ -581,11 +581,11 @@ def install_agent(host: Host, binary: Path, deploy: Path, version: str, assume_y
     if new_config:
         on = "" if host.local else f" (on {host.name})"
         log(f"==> portitor-agent is installed but not started. Next steps{on}:")
-        log("    install nftables, iproute2, wireguard-tools, bind9, kea-dhcp4-server,")
-        log("      kea-dhcp6-server, radvd, frr, frr-pythontools, tcpdump, tshark, mtr-tiny and iperf3 (or your distribution's equivalents)")
+        log("    install nftables, iproute2, wireguard-tools, bind9, radvd, frr, frr-pythontools,")
+        log("      tcpdump, tshark, mtr-tiny and iperf3 (or your distribution's equivalents)")
         log("    portitor-agent init --host <management address>   # token + fingerprint for the GUI")
         log(f"    $EDITOR {AGENT_CONFIG}                     # listen, allow_from, bind_user")
-        log("    the default virtual firewall (the host) runs the distribution's named, Kea, radvd and FRR:")
+        log("    the default virtual firewall (the host) runs the distribution's named, radvd and FRR:")
         log("      the agent writes their standard config files (keeping the originals as *.portitor-orig)")
         log("      and enables the ones it uses; disable the others if you don't run them yourself")
         log("    remove the firewall's interfaces from netplan, NetworkManager or systemd-networkd")
@@ -676,26 +676,31 @@ def install_packages(host: Host, deploy: Path) -> None:
     )
 
 
-def move_kea_leases(host: Host) -> None:
-    """Move lease files from before the per-instance Kea directories.
-
-    The units mount /var/lib/kea/<instance> over /var/lib/kea, so a unit
-    can't do this itself. A running Kea keeps writing to the renamed file;
-    the restart that follows opens it at its new path. The DHCPv6 server
-    id (DUID) goes along, so clients see the same server.
-    """
+def ensure_dhcp_user(host: Host) -> None:
+    """The user Portitor's DHCP servers run as (portitor-dhcpd@.service)."""
     host.run(
-        "cd /var/lib/kea 2>/dev/null || exit 0\n"
-        "for f in kea-leases[46]-*.csv*; do\n"
-        '  [ -e "$f" ] || continue\n'
-        '  n=${f#kea-leases?-}; n=${n%%.csv*}\n'
-        '  mkdir -p -m 0750 "$n" && mv -n "$f" "$n/"\n'
+        f"getent group {DHCP_USER} >/dev/null || groupadd --system {DHCP_USER}; "
+        f"getent passwd {DHCP_USER} >/dev/null || useradd --system -g {DHCP_USER} "
+        f"--no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin {DHCP_USER}",
+        desc=f"create system user {DHCP_USER} unless it exists",
+    )
+
+
+def retire_kea(host: Host) -> None:
+    """Stop Kea, which Portitor's own DHCP server replaces.
+
+    Its units would keep the DHCP ports; the distribution's are masked and
+    Portitor's template units removed. The packages and lease files stay.
+    """
+    units = " ".join(f"{SYSTEMD_DIR}/portitor-kea{v}@.service" for v in (4, 6))
+    host.run(
+        "systemctl stop 'portitor-kea4@*' 'portitor-kea6@*' 2>/dev/null; "
+        f"rm -f {units}; "
+        "for u in kea-dhcp4-server.service kea-dhcp6-server.service; do\n"
+        '  if systemctl cat "$u" >/dev/null 2>&1; then systemctl disable --now "$u" 2>/dev/null; systemctl mask "$u"; fi\n'
         "done\n"
-        "if [ -e kea-dhcp6-serverid ]; then\n"
-        '  for d in */; do [ -d "$d" ] && cp -pn kea-dhcp6-serverid "$d"; done\n'
-        "fi\n"
         "true",
-        desc="move Kea lease files to /var/lib/kea/<instance>",
+        desc="stop and mask Kea (replaced by portitor-dhcpd@)",
     )
 
 
@@ -747,7 +752,7 @@ def replace_marked_block(text: str, begin: str, end: str, block: str) -> str:
 
 
 def install_apparmor(host: Host, deploy: Path) -> None:
-    """Let named and Kea (portitor-named@, -kea4@, -kea6@) use Portitor's paths.
+    """Let named and chronyd (portitor-named@, -chrony@) use Portitor's paths.
 
     Without this, they fail on Debian/Ubuntu with "permission denied" on
     their config, PID or lock files. Written whenever /etc/apparmor.d exists,

@@ -20,6 +20,7 @@ import (
 
 	"github.com/abundo/portitor/internal/agent"
 	"github.com/abundo/portitor/internal/buildinfo"
+	"github.com/abundo/portitor/internal/dhcpd"
 	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/internal/render"
 )
@@ -140,6 +141,36 @@ func main() {
 	}
 	stateDir = render.DefaultPaths().StateDir
 	root.AddCommand(nsExec)
+
+	var dopt dhcpd.Options
+	dhcpdCmd := &cobra.Command{
+		Use:   "dhcpd <instance>",
+		Short: "Run an instance's DHCP server (used by portitor-dhcpd@.service)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if !fwconfig.ValidInstanceName(args[0]) {
+				return fmt.Errorf("invalid instance %q", args[0])
+			}
+			p := render.DefaultPaths()
+			files := p.Files(&fwconfig.Instance{Name: args[0]})
+			if dopt.Config == "" {
+				dopt.Config = files.DHCPD
+			}
+			if dopt.LeaseDir == "" {
+				dopt.LeaseDir = files.DHCPDState
+			}
+			if dopt.Socket == "" {
+				dopt.Socket = files.DHCPDSocket()
+			}
+			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+			defer stop()
+			return dhcpd.Run(ctx, dopt)
+		},
+	}
+	dhcpdCmd.Flags().StringVar(&dopt.Config, "config", "", "the config (default <etc>/dhcpd/<instance>/dhcpd.json)")
+	dhcpdCmd.Flags().StringVar(&dopt.LeaseDir, "leases", "", "the lease log's directory (default <state>/dhcpd/<instance>)")
+	dhcpdCmd.Flags().StringVar(&dopt.Socket, "socket", "", "the control socket (default <run>/dhcpd/<instance>/control.sock)")
+	root.AddCommand(dhcpdCmd)
 
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, "Error:", err)

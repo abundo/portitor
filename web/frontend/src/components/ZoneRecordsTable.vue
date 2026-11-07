@@ -437,7 +437,7 @@ const props = defineProps({
   disabled: { type: Boolean, default: false },
   // The MAC column (DHCP reservations) is shown when the instance runs DHCP.
   showMac: { type: Boolean, default: false },
-  // Instance whose Kea leases the MAC picker lists.
+  // Instance whose DHCP leases the MAC picker lists.
   instance: { type: String, default: '' },
   // The record types offered; all by default.
   types: { type: Array, default: () => ZONE_RECORD_TYPES },

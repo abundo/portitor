@@ -600,16 +600,14 @@ type DHCPServer struct {
 	DomainName string       `json:"domain_name,omitempty"`
 	LeaseTime  int          `json:"lease_time,omitempty"` // seconds
 	Subnets    []DHCPSubnet `json:"subnets"`
-	// HA runs Kea's HA hook between the hosts of an HA pair (ha.go).
-	HA *DHCPHA `json:"ha,omitempty"`
 	// RateLimit names a rate limit that polices what comes in to the
 	// DHCP servers (ServiceRateLimit).
 	RateLimit string `json:"rate_limit,omitempty"`
 }
 
-// DHCPSubnet is served on Interface by Kea DHCPv4 or DHCPv6. The subnets
-// of one IP version on the same interface form a Kea shared network, so
-// clients get addresses from all of them. Reservations come from DNS
+// DHCPSubnet is served on Interface by the DHCP server (internal/dhcpd),
+// DHCPv4 or DHCPv6. The subnets of one IP version on the same interface
+// are served together, so clients get addresses from all of them. Reservations come from DNS
 // A/AAAA records that carry a MAC (dnsmgr2 convention). IPv6 subnets have
 // no Gateway; clients learn the router from router advertisements.
 type DHCPSubnet struct {

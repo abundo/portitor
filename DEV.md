@@ -89,7 +89,7 @@ the release build in them, the way README's *Install* does on real machines:
 ```
 
 - **fwlab-fw** runs `portitor-agent` as root and applies for real: nftables, the
-  `fw-guest` namespace, VLAN, WireGuard, veth link, BIND and Kea. Its
+  `fw-guest` namespace, VLAN, WireGuard, veth link, BIND and the DHCP server. Its
   `portitor-config` keeps the configuration (GUI on 192.168.1.1:8444).
 - **fwlab-mgmt** runs `portitor-web`, the portal to the firewall's GUI over the LAN
   (`/fw/fw/`), and plays the ISP on the firewall's WAN (DHCP and NAT to the outside).
@@ -105,7 +105,7 @@ make lab-down     # remove containers and networks
 make lab-clean    # lab-down, remove the images, stop the ISO test VM, rm -rf build
 ```
 
-The lab networks have no podman IPAM: addresses come from the agent, dnsmasq, Kea
+The lab networks have no podman IPAM: addresses come from the agent, dnsmasq, the DHCP server
 or `portitor-lab-net.service` (the LAN address the agent listens on before the first
 deploy). `LAB_WEB_PORT` changes the published GUI port. Rootless is enough because
 `--privileged` stays inside the user namespace. It needs the `wireguard` kernel
@@ -134,7 +134,7 @@ the tag is new and the CHANGELOG section, then runs `test-all`. The rest of the 
 3. **Installer:** if `install.py`, `deploy/` or the packages changed since the last
    tag (`git diff <last tag> -- install.py deploy/ iso/`), `INSTALLER_VERSION` is
    bumped once for the release; a new Debian package is in `AGENT_PACKAGES` and
-   `iso/preseed.cfg`; a new path named or Kea uses is in `deploy/apparmor/`.
+   `iso/preseed.cfg`; a new path named or chronyd uses is in `deploy/apparmor/`.
 4. **Lab** (a real apply as root): `make lab-clean lab-up lab-seed lab-deploy`, then
    in the GUI deploy a change and let it roll back, deploy and confirm, and check
    with `dev/lab/lab.sh client` that a LAN host gets a lease, resolves names and
