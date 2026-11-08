@@ -126,6 +126,9 @@ func copyRecorded(c *echo.Context, rec *httptest.ResponseRecorder, warnings []er
 		h.Set("X-Portitor-Warnings", joinErrors(warnings))
 	}
 	c.Response().WriteHeader(rec.Code)
+	if rec.Body.Len() == 0 {
+		return nil // a 204 has none
+	}
 	_, err := c.Response().Write(rec.Body.Bytes())
 	return err
 }

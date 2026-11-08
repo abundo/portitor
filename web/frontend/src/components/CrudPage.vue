@@ -40,7 +40,6 @@ import TagsInput from '@/components/TagsInput.vue'
 import TransferList from '@/components/TransferList.vue'
 import { usePortMenu } from '@/composables/usePortMenu'
 import { useRowDrag } from '@/composables/useRowDrag'
-import { api as rootApi } from '@/api'
 import { errMsg } from '@/api/http'
 import { useAuthStore } from '@/stores/auth'
 import { useObjectStore } from '@/stores/objects'
@@ -64,7 +63,7 @@ const props = defineProps({
   defaults: { type: [Object, Function], default: () => ({}) },
   // The header's create button; '' leaves it out (the page adds its own).
   newLabel: { type: String, default: 'Add' },
-  // Resource name for POST /api/<reorder>/reorder; enables drag-and-drop.
+  // Enables drag-and-drop (any non-empty value); the api's reorder saves it.
   reorder: { type: String, default: '' },
   blockedReason: { type: String, default: '' },
   // One row in words ("interface", "DNS zone"), for the form's title and
@@ -318,10 +317,8 @@ async function placeAt(created, at) {
   await reorderTo(ids)
 }
 
-// reorderTo saves rows' order: through the api's reorder (a list of the
-// configuration tree), else the table's (the reorder prop).
-const reorderTo = (ids) =>
-  props.api.reorder ? props.api.reorder(ids) : rootApi.reorder(props.reorder, ids)
+// reorderTo saves rows' order, by the api's reorder (moves in the tree).
+const reorderTo = (ids) => props.api.reorder(ids)
 
 // createAt creates a row without the form and inserts it at index `at` of
 // rows; it resolves to the created row (null on failure) once the table

@@ -94,20 +94,10 @@ export const api = {
     http.post('/me/totp/recovery-codes', { password }).then((r) => r.data),
   version: () => http.get('/version').then((r) => r.data),
   acmeCAs: () => http.get('/certificates/cas').then((r) => r.data ?? []),
-  certificateDownload: (id, format) =>
-    http.get(`/certificates/${id}/download`, { params: { format }, responseType: 'blob' }),
   dnsProviders: () => http.get('/dyndns/providers').then((r) => r.data ?? []),
 
   ipamTree: (instanceId) =>
     http.get('/ipam/tree', { params: { instance_id: instanceId } }).then((r) => r.data),
-  // The zone editor saves a zone's whole record grid, in order.
-  saveZoneRecords: (zoneId, records) =>
-    http.put(`/dns/zones/${zoneId}/records`, records).then((r) => r.data),
-  // The dynamic zone editor saves a DNS update client's whole record grid.
-  saveDyndnsRecords: (clientId, records) =>
-    http.put(`/dyndns/clients/${clientId}/records`, records).then((r) => r.data),
-  nextFree: (prefixId) =>
-    http.get(`/ipam/prefixes/${prefixId}/next-free`).then((r) => r.data.address),
   // Input rules the agent adds for the instance's services, read-only.
   autoRules: (instanceId) =>
     http.get('/rules/auto', { params: { instance_id: instanceId } }).then((r) => r.data ?? []),
@@ -118,19 +108,7 @@ export const api = {
   // custom services.
   predefinedServices: () => http.get('/predefined-services').then((r) => r.data),
   icmpTypes: () => http.get('/icmp-types').then((r) => r.data),
-  reorder: (kind, ids) => http.post(`/${kind}/reorder`, { ids }),
-  wgClientConfig: (peerId, split) =>
-    http
-      .get(`/wg/peers/${peerId}/config`, { params: split ? { split: 1 } : {} })
-      .then((r) => r.data),
-  wgRekey: (ifaceId) => http.post(`/interfaces/${ifaceId}/wg-rekey`, {}).then((r) => r.data),
   wgImport: (body) => http.post('/wg/import', body).then((r) => r.data),
-  wgNextFree: (ifaceId) => http.get(`/interfaces/${ifaceId}/wg-next-free`).then((r) => r.data),
-  // Start a deployed task, or the download of a deployed IP list, now.
-  runTask: (id) => http.post(`/tasks/${id}/run`, {}).then((r) => r.data),
-  refreshIPList: (id) => http.post(`/ip-lists/${id}/refresh`, {}).then((r) => r.data),
-  certificateRenew: (id) => http.post(`/certificates/${id}/renew`, {}).then((r) => r.data),
-  refreshDNSBlocklist: (id) => http.post(`/dns/blocklists/${id}/refresh`, {}).then((r) => r.data),
   // The next runs of a cron schedule ({ next: [...] } or { error }).
   schedulePreview: (schedule) =>
     http.get('/schedule/preview', { params: { schedule } }).then((r) => r.data),
@@ -211,8 +189,6 @@ export const api = {
   testDirectoryServer: (body) => http.post('/directory/servers/test', body).then((r) => r.data),
   browseDirectoryServer: (id, dn) =>
     http.get(`/directory/servers/${id}/browse`, { params: { dn } }).then((r) => r.data),
-  openvpnClientConfig: (interfaceId) =>
-    http.get(`/interfaces/${interfaceId}/openvpn-client`).then((r) => r.data),
   agentRuleCounters: () => http.get('/agent/rule-counters').then((r) => r.data),
   agentRateLimits: () => http.get('/agent/rate-limits').then((r) => r.data),
   // The logs are one firewall's (firewall_id; null: the first).

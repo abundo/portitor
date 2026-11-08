@@ -4,73 +4,12 @@
 package web
 
 import (
-	"encoding/json"
-	"errors"
-	"fmt"
-	"net/http"
 	"strings"
-
-	"github.com/labstack/echo/v5"
-	"gorm.io/gorm"
 
 	"github.com/abundo/portitor/internal/builder"
 	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/models"
 )
-
-// handleZoneRecords is PUT /api/dns/zones/:id/records: the zone editor
-// saves the whole grid, in order, replacing the zone's records.
-func (s *Server) handleZoneRecords(c *echo.Context) error {
-	id, err := echo.PathParam[uint](c, "id")
-	if err != nil {
-		return errJSON(c, http.StatusNotFound, "not found")
-	}
-	var body []models.DnsRecord
-	if err := json.NewDecoder(c.Request().Body).Decode(&body); err != nil {
-		return errJSON(c, http.StatusBadRequest, "invalid JSON: "+err.Error())
-	}
-	var z models.DnsZone
-	if err := s.dbOf(c).First(&z, id).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return errJSON(c, http.StatusNotFound, "not found")
-		}
-		return err
-	}
-	if ok, err := allowInstance(c, z.InstanceID, true); !ok {
-		return err
-	}
-	if z.Type != fwconfig.ZoneForward && len(body) > 0 {
-		return errJSON(c, http.StatusBadRequest, "records go in forward zones; reverse zones are generated")
-	}
-	domain := ""
-	for i := range body {
-		r := &body[i]
-		r.ID, r.ZoneID, r.Rank = 0, z.ID, i
-		if err := checkRecord(&z, r, domain); err != nil {
-			return errJSON(c, http.StatusBadRequest, fmt.Sprintf("record %d: %v", i+1, err))
-		}
-		if r.Type == models.DnsRecordDomain {
-			domain = r.Name
-		}
-	}
-	err = s.dbOf(c).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("zone_id = ?", z.ID).Delete(&models.DnsRecord{}).Error; err != nil {
-			return err
-		}
-		if len(body) == 0 {
-			return nil
-		}
-		return tx.Create(&body).Error
-	})
-	if err != nil {
-		return dbError(c, err)
-	}
-	out := []models.DnsRecord{}
-	if err := s.dbOf(c).Where("zone_id = ?", z.ID).Order("rank, id").Find(&out).Error; err != nil {
-		return err
-	}
-	return c.JSON(http.StatusOK, out)
-}
 
 // checkRecord normalises a record and validates it as it will be built:
 // under domain (the $DOMAIN row above it, or "").

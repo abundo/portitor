@@ -26,8 +26,8 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"github.com/abundo/portitor/internal/agentapi"
-	"github.com/abundo/portitor/internal/datastore"
 	"github.com/abundo/portitor/internal/agentclient"
+	"github.com/abundo/portitor/internal/datastore"
 	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/models"
 )

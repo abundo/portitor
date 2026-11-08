@@ -866,7 +866,8 @@ func TestZoneRecordsGrid(t *testing.T) {
 	if rec := env.cfg("PATCH", "instance=main/dns-zone=home.arpa", map[string]any{"type": "reverse4"}); rec.Code != http.StatusBadRequest {
 		t.Errorf("zone type change: %d %s", rec.Code, rec.Body)
 	}
-	path := "/api/config/candidate/instance=main/dns-zone=home.arpa?action=records"
+	// The grid saves as a PUT of the zone's whole record list.
+	path := "instance=main/dns-zone=home.arpa/record"
 
 	grid := []map[string]any{
 		{"type": "A", "name": "nas", "value": "192.168.1.10", "mac": "0200.0000.0010"},
@@ -875,16 +876,9 @@ func TestZoneRecordsGrid(t *testing.T) {
 		{"type": "A", "name": "@", "value": "192.168.2.1"},
 		{"type": "CNAME", "name": "www", "value": "nas.home.arpa."},
 	}
-	rec := env.do("POST", path, grid)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("PUT: %d %s", rec.Code, rec.Body)
-	}
-	var got []models.DnsRecord
-	_ = json.Unmarshal(rec.Body.Bytes(), &got)
-	if len(got) != 5 || got[0].Mac != "02:00:00:00:00:10" || got[1].Type != "COMMENT" || got[2].Name != "lab" || got[4].Rank != 4 {
-		t.Fatalf("records: %+v", got)
-	}
-	if rs := env.node("instance=main/dns-zone=home.arpa").Lists["record"]; len(rs) != 5 {
+	env.put(path, grid)
+	rs := env.node("instance=main/dns-zone=home.arpa").Lists["record"]
+	if len(rs) != 5 || rs[0].Leaf("mac") != "02:00:00:00:00:10" || rs[1].Leaf("type") != "COMMENT" || rs[2].Leaf("name") != "lab" || rs[4].Leaf("type") != "CNAME" {
 		t.Fatalf("the candidate's records: %v", rs)
 	}
 
@@ -911,7 +905,7 @@ func TestZoneRecordsGrid(t *testing.T) {
 
 	// A bad row rejects the whole grid, naming the row; nothing changes.
 	grid[3]["value"] = "fd00::1"
-	if rec := env.do("POST", path, grid); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "record 4") {
+	if rec := env.cfg("PUT", path, grid); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "record[id=") {
 		t.Errorf("bad grid: %d %s", rec.Code, rec.Body)
 	}
 	if rs := env.node("instance=main/dns-zone=home.arpa").Lists["record"]; len(rs) != 5 {

@@ -267,7 +267,6 @@ func init() {
 	registerAction("/task", "run", configAction{op: true, write: true, run: delegateM((*Server).handleTaskRun)})
 	registerAction("/instance", "bundle", configAction{view: true, write: true, run: delegateM((*Server).handleExportBundle)})
 	registerAction("/instance/certificate", "generate", configAction{write: true, create: true, run: generateCert})
-	registerAction("/instance/dns-zone", "records", configAction{write: true, legacy: true, run: delegateM((*Server).handleZoneRecords)})
 }
 
 // delegateM is delegate for a method of the server.

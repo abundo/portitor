@@ -80,30 +80,6 @@ func (r *resource[T, PT]) register(s *Server, g *echo.Group, path string, mws ..
 	g.DELETE(path+"/:id", r.remove, mws...)
 }
 
-// registerTree registers a configuration table's routes, its writes
-// made through the tree (throughTree).
-func (r *resource[T, PT]) registerTree(s *Server, g *echo.Group, path string) {
-	for _, m := range r.tenantWrites {
-		p := path
-		if m != http.MethodPost {
-			p += "/:id"
-		}
-		s.tenantWrites[m+" /api"+p] = true
-	}
-	g.GET(path, r.list)
-	g.GET(path+"/:id", r.get)
-	in := func(op func(rr *resource[T, PT], c *echo.Context) error) echo.HandlerFunc {
-		return s.throughTree(func(tx *gorm.DB, c *echo.Context) error {
-			rr := *r
-			rr.db = tx
-			return op(&rr, c)
-		})
-	}
-	g.POST(path, in((*resource[T, PT]).create))
-	g.PUT(path+"/:id", in((*resource[T, PT]).update))
-	g.DELETE(path+"/:id", in((*resource[T, PT]).remove))
-}
-
 // registerRead registers a configuration table's reads alone: the tables
 // are the candidate's cache, changed through /api/config.
 func (r *resource[T, PT]) registerRead(s *Server, g *echo.Group, path string) {

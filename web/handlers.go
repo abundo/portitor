@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v5"
-	"gorm.io/gorm"
 
 	"github.com/abundo/portitor/internal/agentapi"
 	"github.com/abundo/portitor/internal/agentclient"
@@ -27,7 +26,6 @@ import (
 	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/internal/ipam"
 	"github.com/abundo/portitor/internal/render"
-	"github.com/abundo/portitor/internal/wgkeys"
 	"github.com/abundo/portitor/models"
 )
 
@@ -181,63 +179,7 @@ func (s *Server) handleNextFree(c *echo.Context) error {
 
 // ----- rule ordering -----
 
-// handleReorder sets positions from the order of the given ids.
-func (s *Server) handleReorder(table string) echo.HandlerFunc {
-	return func(c *echo.Context) error {
-		var req struct {
-			IDs []uint `json:"ids"`
-		}
-		if err := c.Bind(&req); err != nil {
-			return errJSON(c, http.StatusBadRequest, "invalid request")
-		}
-		var instances []uint
-		if err := s.dbOf(c).Table(table).Where("id IN ?", req.IDs).Distinct().Pluck("instance_id", &instances).Error; err != nil {
-			return err
-		}
-		for _, inst := range instances {
-			if ok, err := allowInstance(c, inst, true); !ok {
-				return err
-			}
-		}
-		err := s.dbOf(c).Transaction(func(tx *gorm.DB) error {
-			for i, id := range req.IDs {
-				if err := tx.Table(table).Where("id = ?", id).Update("position", (i+1)*10).Error; err != nil {
-					return err
-				}
-			}
-			return nil
-		})
-		if err != nil {
-			return err
-		}
-		return c.NoContent(http.StatusNoContent)
-	}
-}
-
 // ----- WireGuard -----
-
-func (s *Server) handleWgRekey(c *echo.Context) error {
-	id, err := echo.PathParam[uint](c, "id")
-	if err != nil {
-		return errJSON(c, http.StatusNotFound, "not found")
-	}
-	var ifc models.Interface
-	if err := s.dbOf(c).First(&ifc, id).Error; err != nil || ifc.Kind != fwconfig.KindWireGuard {
-		return errJSON(c, http.StatusNotFound, "no such WireGuard interface")
-	}
-	if ok, err := allowInstance(c, ifc.InstanceID, true); !ok {
-		return err
-	}
-	priv, pub, err := wgkeys.Generate()
-	if err != nil {
-		return err
-	}
-	ifc.WgPrivateKey, ifc.WgPublicKey = priv, pub
-	if err := s.dbOf(c).Save(&ifc).Error; err != nil {
-		return err
-	}
-	return c.JSON(http.StatusOK, ifc)
-}
 
 // handleWgClientConfig renders a wg-quick config for the remote side of a
 // peer. ?split=1 routes only the instance's prefixes (IPAM's and its
