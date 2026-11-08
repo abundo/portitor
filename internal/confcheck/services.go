@@ -5,6 +5,7 @@ package confcheck
 
 import (
 	"encoding/base64"
+	"slices"
 	"strings"
 
 	"github.com/abundo/portitor/internal/datastore"
@@ -17,8 +18,9 @@ import (
 // here the GUI's normalizing, and what takes several rows.
 
 func init() {
-	register("/instance/dns-soa-template", hook{normalize: normalizeSOA, check: checkDNSScope})
-	register("/instance/dnssec-policy", hook{check: checkDNSScope})
+	register("/instance/dns-soa-template", hook{normalize: normalizeSOA, check: func(c *Ctx, e *datastore.Node) []error {
+		return append(checkDNSScope(c, e), checkSOA(e)...)
+	}})
 	register("/instance/dns-template", hook{check: checkDNSTemplate})
 	register("/instance/dns-blocklist", hook{check: checkBlocklist})
 	register("/instance/dns-update", hook{normalize: normalizeDynDNS, check: checkDynDNS})
@@ -44,6 +46,9 @@ func checkInstanceServices(c *Ctx, in *datastore.Node) []error {
 		if _, err := fwconfig.ACMEDirectory(ca); err != nil {
 			errs = append(errs, fail("acme-proxy-ca: %v", err))
 		}
+	}
+	if crt := in.Entry("certificate", []string{in.Leaf("acme-proxy-certificate")}); crt != nil && isCA(crt) {
+		errs = append(errs, fail("acme-proxy-certificate: %s is a certificate authority; pick a server certificate", crt.Leaf("name")))
 	}
 	if on(in, "acme-proxy-enabled") && !anyOn(in, "acme-proxy-policy") {
 		errs = append(errs, fail("acme-proxy-enabled: add a policy first"))
@@ -156,7 +161,7 @@ func usesDNS(in *datastore.Node, list, name string) bool {
 }
 
 func checkDNSTemplate(c *Ctx, t *datastore.Node) []error {
-	errs := checkDNSScope(c, t)
+	errs := append(checkDNSScope(c, t), checkZoneTemplate(c, t)...)
 	if !on(t, "global") {
 		return errs
 	}
@@ -231,6 +236,7 @@ func checkDynDNS(c *Ctx, d *datastore.Node) []error {
 	if fwconfig.FindDNSProvider(p) == nil {
 		return append(errs, fail("provider: no provider %q", p))
 	}
+	errs = append(errs, checkDynDNSDoc(d)...)
 	if p != fwconfig.ProviderRFC2136 {
 		return errs
 	}
@@ -319,10 +325,15 @@ func normalizeSNMPUser(c *Ctx, u *datastore.Node) error {
 }
 
 func checkSNMPUser(c *Ctx, u *datastore.Node) []error {
-	if a := u.Leaf("auth-password"); a != "" && a == u.Leaf("priv-password") {
-		return []error{fail("priv-password: use a different privacy password than the authentication one")}
+	var errs []error
+	for _, e := range fwconfig.CheckSNMPUser(fwconfig.SNMPUser{Name: u.Leaf("name"), AuthProtocol: u.Leaf("auth-protocol"),
+		AuthPassword: u.Leaf("auth-password"), PrivProtocol: u.Leaf("priv-protocol"), PrivPassword: u.Leaf("priv-password")}) {
+		errs = append(errs, fail("%s", e))
 	}
-	return nil
+	if a := u.Leaf("auth-password"); a != "" && a == u.Leaf("priv-password") {
+		errs = append(errs, fail("priv-password: use a different privacy password than the authentication one"))
+	}
+	return errs
 }
 
 func checkBFDInterface(c *Ctx, b *datastore.Node) []error {
@@ -335,7 +346,15 @@ func checkBFDInterface(c *Ctx, b *datastore.Node) []error {
 func init() {
 	register("/instance/certificate", hook{normalize: normalizeCertificate, check: checkCertificate})
 	register("/instance/ospf", hook{normalize: normalizeOSPF, check: checkOSPF})
-	register("/instance/ospf-interface", hook{normalize: normalizeOSPFInterface})
+	register("/instance/ospf-interface", hook{normalize: normalizeOSPFInterface, check: func(c *Ctx, e *datastore.Node) []error {
+		var v fwconfig.OSPFInterface
+		asFW(e, &v, nil)
+		errs := asErrors(fwconfig.CheckOSPFInterface(v, num(e, "version")))
+		if e.Leaf("version") == "3" && e.Leaf("area") == "" {
+			errs = append(errs, fail("area: an OSPFv3 interface needs its area"))
+		}
+		return errs
+	}})
 }
 
 // normalizeOpenVPN of an OpenVPN interface (from normalizeInterface).
@@ -378,6 +397,9 @@ func checkOpenVPN(c *Ctx, i *datastore.Node) []error {
 	for _, e := range fwconfig.CheckOpenVPNAddresses(mode, i.LeafLists["addresses"], tcp) {
 		errs = append(errs, fail("addresses: %s", e))
 	}
+	if crt := in.Entry("certificate", []string{i.Leaf("ovpn-certificate")}); crt != nil && isCA(crt) {
+		errs = append(errs, fail("ovpn-certificate: %s is a certificate authority; pick a server certificate", crt.Leaf("name")))
+	}
 	if l := i.Leaf("ovpn-listen"); l != "" {
 		if l == name {
 			errs = append(errs, fail("ovpn-listen: clients come in on another interface"))
@@ -388,12 +410,27 @@ func checkOpenVPN(c *Ctx, i *datastore.Node) []error {
 	return errs
 }
 
+// isCA reports whether a certificate is an imported (or made) CA.
+func isCA(crt *datastore.Node) bool {
+	if crt.Leaf("source") != fwconfig.CertSourceImport {
+		return false
+	}
+	leaf := fwconfig.ChainLeaf(crt.Leaf("full-chain"))
+	return leaf != nil && leaf.IsCA
+}
+
 func normalizeCertificate(c *Ctx, crt *datastore.Node) error {
-	if old := c.old(crt); old != nil && old.Leaf("source") != crt.Leaf("source") {
+	old := c.old(crt)
+	if old != nil && old.Leaf("source") != crt.Leaf("source") && old.Leaf("full-chain") == "" {
+		// An ACME certificate made here becomes an imported one (generate).
+	} else if old != nil && old.Leaf("source") != crt.Leaf("source") {
 		return fail("source: can't change; add a new certificate")
 	}
-	if crt.Leaf("source") != fwconfig.CertSourceACME {
-		return nil
+	if old != nil && isCA(old) != isCA(crt) {
+		return fail("can't change between a CA and a server certificate; add a new one")
+	}
+	if crt.Leaf("source") == fwconfig.CertSourceImport {
+		return normalizeImported(crt)
 	}
 	clear(crt, "full-chain", "priv-key")
 	if crt.Leaf("challenge") == fwconfig.ChallengeHTTP01 {
@@ -423,6 +460,9 @@ func checkCertificate(c *Ctx, crt *datastore.Node) []error {
 	var errs []error
 	if !fwconfig.ValidFileName(crt.Leaf("name")) {
 		errs = append(errs, fail("name: no control characters or /, not . or .., at most 255 bytes"))
+	}
+	if isCA(crt) && !on(instanceOf(crt), "is-default") {
+		errs = append(errs, fail("a CA belongs to the firewall: add it on the firewall's host, not in a virtual firewall"))
 	}
 	if crt.Leaf("source") != fwconfig.CertSourceACME {
 		return errs
@@ -463,6 +503,12 @@ func normalizeOSPF(c *Ctx, o *datastore.Node) error {
 // checkOSPF: network statements and interfaces with an area are FRR's two
 // ways of enabling OSPF, one at a time per routing.
 func checkOSPF(c *Ctx, o *datastore.Node) []error {
+	if v := o.Leaf("version"); v != "2" && v != "3" {
+		return []error{fail("version: 2 (OSPFv2, IPv4) or 3 (OSPFv3, IPv6)")}
+	}
+	if errs := checkOSPFConfig(o); len(errs) > 0 {
+		return errs
+	}
 	if len(o.Lists["network"]) == 0 {
 		return nil
 	}
@@ -483,8 +529,41 @@ func checkOSPF(c *Ctx, o *datastore.Node) []error {
 }
 
 func normalizeOSPFInterface(c *Ctx, i *datastore.Node) error {
-	if i.Leaf("version") != "2" {
+	switch {
+	case i.Leaf("version") != "2" || i.Leaf("auth-key") == "":
 		clear(i, "auth-key", "auth-key-id")
+	case i.Leaf("auth-key-id") == "" || i.Leaf("auth-key-id") == "0":
+		set(i, "auth-key-id", "1")
+	}
+	return nil
+}
+
+// normalizeImported checks an imported certificate's chain against its
+// key and takes its names from it.
+func normalizeImported(crt *datastore.Node) error {
+	for _, l := range []string{"full-chain", "priv-key"} {
+		if v, ok := crt.Leaves[l]; ok && v != "" {
+			crt.Leaves[l] = strings.TrimSpace(v) + "\n"
+		}
+	}
+	leaf, err := fwconfig.ParseImported(crt.Leaf("full-chain"), crt.Leaf("priv-key"))
+	if err != nil {
+		return fail("certificate and key: %v", err)
+	}
+	names := slices.Clone(leaf.DNSNames)
+	for _, ip := range leaf.IPAddresses {
+		names = append(names, ip.String())
+	}
+	if len(names) > 0 {
+		crt.LeafLists["domains"] = names
+	} else {
+		delete(crt.LeafLists, "domains")
+	}
+	clear(crt, "email", "ca", "key-type", "challenge", "interface", "dns-update")
+	if cn := leaf.Subject.CommonName; cn != "" {
+		crt.Leaves["common-name"] = cn
+	} else {
+		clear(crt, "common-name")
 	}
 	return nil
 }

@@ -20,7 +20,7 @@ submodule portitor-objects {
         type uint32;
       }
       leaf kind {
-        type string;
+        type enumeration { enum "hosts"; enum "address_lists"; enum "ip_lists"; }
         mandatory true;
         description "ObjectFolder*";
       }
@@ -29,7 +29,7 @@ submodule portitor-objects {
         px:column "parent_id";
       }
       leaf name {
-        type string;
+        type name;
         mandatory true;
       }
     }
@@ -82,13 +82,12 @@ submodule portitor-objects {
         type text;
       }
       leaf source {
-        type string;
-        mandatory true;
+        type enumeration { enum "crowdsec"; enum "url"; enum "country"; }
+        default "url";
         description "fwconfig.IPList*";
       }
       leaf url {
         type string;
-        mandatory true;
       }
       leaf username {
         type string;
@@ -117,13 +116,13 @@ submodule portitor-objects {
       px:table "services";
       description "Service is a named protocol match that rules refer to by name, next to the predefined ones (netobj.Predefined); the builder expands the names. Type says which fields apply: Ports (tcp, udp, sctp), IcmpType and IcmpCode (icmp, icmp6), or IpProtocol (ip).";
       leaf name {
-        type string;
+        type lowercase-name;
       }
       leaf description {
         type text;
       }
       leaf type {
-        type string;
+        type enumeration { enum "tcp/udp/sctp"; enum "icmp"; enum "icmp6"; enum "ip"; }
         mandatory true;
       }
       list port {
@@ -165,7 +164,7 @@ submodule portitor-objects {
       px:table "port_names";
       description "PortName is a custom port name NAT port fields take next to the built-in ones (fwconfig.Services); the builder writes its number.";
       leaf name {
-        type string;
+        type lowercase-name;
       }
       leaf port {
         type int32;

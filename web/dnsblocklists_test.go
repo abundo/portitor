@@ -10,16 +10,14 @@ import (
 
 	"github.com/abundo/portitor/internal/builder"
 	"github.com/abundo/portitor/internal/fwconfig"
-	"github.com/abundo/portitor/models"
 )
 
 func TestDNSBlocklists(t *testing.T) {
 	env := newEnv(t)
-	inst := env.create("/api/instances", map[string]any{"name": "main"})
+	env.host("main")
 
-	tif := map[string]any{"instance_id": inst, "name": "tif", "enabled": true, "urls": []string{"https://example.com/tif-1.txt", "https://example.com/tif-2.txt"}}
+	tif := map[string]any{"enabled": true, "urls": []string{"https://example.com/tif-1.txt", "https://example.com/tif-2.txt"}}
 	for field, v := range map[string]any{
-		"name":    "TIF list!",
 		"urls":    []string{},
 		"action":  "redirect",
 		"refresh": 2,
@@ -29,58 +27,52 @@ func TestDNSBlocklists(t *testing.T) {
 			b[k] = x
 		}
 		b[field] = v
-		if rec := env.do("POST", "/api/dns/blocklists", b); rec.Code != http.StatusBadRequest {
+		if rec := env.cfg("PUT", "instance=main/dns-blocklist=tif", b); rec.Code != http.StatusBadRequest {
 			t.Errorf("bad %s accepted: %d %s", field, rec.Code, rec.Body)
 		}
 	}
-	id := env.create("/api/dns/blocklists", tif)
-	var row models.DnsBlocklist
-	env.srv.db.First(&row, id)
-	if row.Action != fwconfig.BlocklistNXDomain || row.Refresh != fwconfig.DefaultBlocklistRefresh {
-		t.Errorf("defaults: %+v", row)
+	if rec := env.cfg("PUT", "instance=main/dns-blocklist=TIF%20list!", tif); rec.Code != http.StatusBadRequest {
+		t.Errorf("bad name accepted: %d %s", rec.Code, rec.Body)
+	}
+	env.put("instance=main/dns-blocklist=tif", tif)
+	if row := env.node("instance=main/dns-blocklist=tif"); row.Leaf("action") != fwconfig.BlocklistNXDomain || row.Leaf("refresh") != "720" {
+		t.Errorf("defaults: %+v", row.Leaves)
 	}
 
-	// The key is write-only, needs {key} and https, and stays when an
-	// edit leaves it out.
+	// The key is a secret, needs {key} and https, and stays when a replace
+	// leaves it out.
 	const key = "abuse-ch-key-0123"
-	urlhaus := map[string]any{"instance_id": inst, "name": "urlhaus", "enabled": true, "urls": []string{"https://example.com/{key}/rpz.txt"}, "refresh": 10}
-	if rec := env.do("POST", "/api/dns/blocklists", urlhaus); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "no key") {
+	urlhaus := map[string]any{"enabled": true, "urls": []string{"https://example.com/{key}/rpz.txt"}, "refresh": 10}
+	if rec := env.cfg("PUT", "instance=main/dns-blocklist=urlhaus", urlhaus); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "no key") {
 		t.Errorf("{key} without a key: %d %s", rec.Code, rec.Body)
 	}
-	urlhaus["auth_key"] = key
+	urlhaus["auth-key"] = key
 	urlhaus["urls"] = []string{"http://example.com/{key}/rpz.txt"}
-	if rec := env.do("POST", "/api/dns/blocklists", urlhaus); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "unencrypted") {
+	if rec := env.cfg("PUT", "instance=main/dns-blocklist=urlhaus", urlhaus); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "unencrypted") {
 		t.Errorf("key over http: %d %s", rec.Code, rec.Body)
 	}
 	urlhaus["urls"] = []string{"https://example.com/{key}/rpz.txt"}
-	rec := env.do("POST", "/api/dns/blocklists", urlhaus)
-	if rec.Code != http.StatusCreated || strings.Contains(rec.Body.String(), key) || !strings.Contains(rec.Body.String(), `"has_auth_key":true`) {
-		t.Fatalf("create: %d %s", rec.Code, rec.Body)
+	env.put("instance=main/dns-blocklist=urlhaus", urlhaus)
+	if rec := env.do("GET", "/api/config/candidate/instance=main/dns-blocklist", nil); strings.Contains(rec.Body.String(), key) {
+		t.Errorf("the key read back: %s", rec.Body)
 	}
-	uh := env.create("/api/dns/blocklists", map[string]any{"instance_id": inst, "name": "other", "urls": []string{"https://example.com/x"}})
-	env.do("DELETE", "/api/dns/blocklists/"+itoa(uh), nil)
-	row = models.DnsBlocklist{}
-	env.srv.db.Where("name = ?", "urlhaus").First(&row)
-	if rec := env.do("PUT", "/api/dns/blocklists/"+itoa(row.ID), map[string]any{"action": "log"}); rec.Code != http.StatusOK {
-		t.Fatalf("edit: %d %s", rec.Code, rec.Body)
-	}
-	env.srv.db.First(&row, row.ID)
-	if row.AuthKey != key || row.Action != fwconfig.BlocklistLog {
-		t.Errorf("after edit: %+v", row)
+	delete(urlhaus, "auth-key")
+	urlhaus["action"] = "log"
+	env.put("instance=main/dns-blocklist=urlhaus", urlhaus)
+	if row := env.node("instance=main/dns-blocklist=urlhaus"); row.Leaf("auth-key") != key || row.Leaf("action") != fwconfig.BlocklistLog {
+		t.Errorf("after edit: %+v", row.Leaves)
 	}
 
 	// The allowed names are normalised.
-	if rec := env.do("PUT", "/api/instances/"+itoa(inst), map[string]any{"dns_blocklist_allow": []string{"Example.COM.", "*.cdn.example"}}); rec.Code != http.StatusOK {
-		t.Fatalf("allow: %d %s", rec.Code, rec.Body)
-	}
-	if rec := env.do("PUT", "/api/instances/"+itoa(inst), map[string]any{"dns_blocklist_allow": []string{"not a domain"}}); rec.Code != http.StatusBadRequest {
+	env.patch("instance=main", map[string]any{"dns-blocklist-allow": []string{"Example.COM.", "*.cdn.example"}})
+	if rec := env.cfg("PATCH", "instance=main", map[string]any{"dns-blocklist-allow": []string{"not a domain"}}); rec.Code != http.StatusBadRequest {
 		t.Errorf("bad allowed name: %d %s", rec.Code, rec.Body)
 	}
 
 	// The document has the enabled lists, by name, with the key; the
 	// history's copy hides it.
-	env.do("PUT", "/api/dns/blocklists/"+itoa(id), map[string]any{"enabled": false})
-	doc, err := builder.Build(tablesInput(t, env.srv.db), 1)
+	env.patch("instance=main/dns-blocklist=tif", map[string]any{"enabled": false})
+	doc, err := builder.Build(env.input(), 1)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -12,13 +12,13 @@ import (
 
 func TestRuleSynProxy(t *testing.T) {
 	env := newEnv(t)
-	inst := env.create("/api/instances", map[string]any{"name": "main"})
-	env.create("/api/interfaces", map[string]any{"instance_id": inst, "name": "eth0", "enabled": true})
-	env.create("/api/interfaces", map[string]any{"instance_id": inst, "name": "eth1", "enabled": true})
-	env.create("/api/rate-limits", map[string]any{"instance_id": inst, "name": "ssh", "rate": 4, "per": "minute"})
+	env.host("main")
+	env.put("instance=main/interface=eth0", map[string]any{"kind": "physical", "enabled": true})
+	env.put("instance=main/interface=eth1", map[string]any{"kind": "physical", "enabled": true})
+	env.put("instance=main/rate-limit=ssh", map[string]any{"rate": 4})
 	rule := func(extra map[string]any) map[string]any {
-		body := map[string]any{"instance_id": inst, "chain": "forward", "action": "accept", "in_interfaces": []string{"eth0"},
-			"dst_addrs": []string{"192.168.1.10"}, "services": []string{"https"}, "syn_proxy": true, "syn_proxy_wscale": 7, "enabled": true}
+		body := map[string]any{"chain": "forward", "action": "accept", "in-interfaces": []string{"eth0"},
+			"dst-addrs": []string{"192.168.1.10"}, "services": []string{"https"}, "syn-proxy": true, "syn-proxy-wscale": 7}
 		for k, v := range extra {
 			body[k] = v
 		}
@@ -27,22 +27,23 @@ func TestRuleSynProxy(t *testing.T) {
 	for name, extra := range map[string]map[string]any{
 		"input chain":   {"chain": "input"},
 		"drop":          {"action": "drop"},
-		"out interface": {"out_interfaces": []string{"eth1"}},
+		"out interface": {"out-interfaces": []string{"eth1"}},
 		"any protocol":  {"services": []string{}},
 		"no tcp":        {"services": []string{"ntp"}},
-		"packet limit":  {"rate_limit": "ssh"},
-		"mss":           {"syn_proxy_mss": 100},
-		"wscale":        {"syn_proxy_wscale": 15},
+		"packet limit":  {"rate-limit": "ssh"},
+		"mss":           {"syn-proxy-mss": 100},
+		"wscale":        {"syn-proxy-wscale": 15},
 	} {
-		if rec := env.do("POST", "/api/rules", rule(extra)); rec.Code != http.StatusBadRequest {
+		if rec := env.cfg("POST", "instance=main/rule", rule(extra)); rec.Code != http.StatusBadRequest {
 			t.Errorf("%s accepted: %d %s", name, rec.Code, rec.Body)
 		}
 	}
-	env.create("/api/rules", rule(map[string]any{"syn_proxy_mss": 1400}))
+	env.mustCfg("POST", "instance=main/rule", rule(map[string]any{"syn-proxy-mss": 1400}))
 	// Without the switch, the other fields are free.
-	env.create("/api/rules", rule(map[string]any{"syn_proxy": false, "services": []string{"dns"}}))
+	env.mustCfg("POST", "instance=main/rule", rule(map[string]any{"syn-proxy": false, "services": []string{"dns"}}))
 
-	doc, err := builder.BuildFirewall(tablesInput(t, env.srv.db), 1, 1)
+	fw := firstFirewall(t, env)
+	doc, err := builder.BuildFirewall(env.input(), 1, fw.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

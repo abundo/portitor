@@ -344,7 +344,11 @@ func (t *Tree) Ensure(p Path) (*Node, error) {
 				en = newNode(ss[i], n)
 				for k, name := range ss[i].Keys {
 					if e.Keys[k] == "" {
-						return nil, errAt(t, p[:i+1], "%s: a key can't be empty", name)
+						// Only where the key's type takes it (a nameserver
+						// without an address).
+						if _, err := ss[i].Child(name).Type.Check(""); err != nil {
+							return nil, errAt(t, p[:i+1], "%s: a key can't be empty", name)
+						}
 					}
 					v, err := ss[i].Child(name).Type.Check(e.Keys[k])
 					if err != nil {
@@ -492,10 +496,9 @@ func (t *Tree) SetList(p Path, values []string) error {
 		if err != nil {
 			return errAt(t, p, "%v", err)
 		}
-		if slices.Contains(out, c) {
-			return errAt(t, p, "%q twice", c)
+		if !slices.Contains(out, c) { // a value twice is there once
+			out = append(out, c)
 		}
-		out = append(out, c)
 	}
 	n, err := t.Ensure(np)
 	if err != nil {
@@ -697,6 +700,12 @@ func (t *Tree) Rename(p Path, keys []string) error {
 	}
 	for i, k := range n.S.Keys {
 		n.Leaves[k] = newKeys[i]
+	}
+	if !n.S.OrderedByUser && len(n.S.Keys) > 0 {
+		// In key order again.
+		es := n.Parent.Lists[n.S.Name]
+		n.Parent.Lists[n.S.Name] = slices.DeleteFunc(es, func(e *Node) bool { return e == n })
+		n.Parent.insert(n)
 	}
 	t.Renamed = append(t.Renamed, Renamed{Path: slices.Clone(p), Keys: newKeys})
 	return nil

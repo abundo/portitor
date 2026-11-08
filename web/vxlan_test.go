@@ -4,55 +4,43 @@
 package web
 
 import (
+	"maps"
 	"net/http"
-	"strings"
 	"testing"
 
 	"github.com/abundo/portitor/internal/builder"
-	"github.com/abundo/portitor/models"
 )
 
 func TestVXLANEVPN(t *testing.T) {
 	env := newEnv(t)
-	inst := env.create("/api/instances", map[string]any{"name": "main"})
-	env.create("/api/interfaces", map[string]any{"instance_id": inst, "name": "eth0", "addresses": []string{"192.0.2.1/24"}, "enabled": true})
+	env.host("main")
+	env.put("instance=main/interface=eth0", map[string]any{"kind": "physical", "addresses": []string{"192.0.2.1/24"}, "enabled": true})
 
-	vx := map[string]any{
-		"instance_id": inst, "name": "vx100", "kind": "vxlan", "enabled": true, "ipv4_mode": "none",
-		"vxlan_vni": 100, "vxlan_local": "192.0.2.1", "vxlan_device": "eth0",
-	}
+	vx := map[string]any{"kind": "vxlan", "enabled": true, "ipv4-mode": "none", "vxlan-vni": 100, "vxlan-local": "192.0.2.1", "vxlan-device": "eth0"}
 	for field, v := range map[string]any{
-		"vxlan_vni":     0,
-		"vxlan_local":   "224.0.0.1",
-		"vxlan_port":    70000,
-		"vxlan_remotes": []string{"2001:db8::2"},
+		"vxlan-vni":     0,
+		"vxlan-local":   "224.0.0.1",
+		"vxlan-port":    70000,
+		"vxlan-remotes": []string{"2001:db8::2"},
 	} {
-		c := map[string]any{}
-		for k, x := range vx {
-			c[k] = x
-		}
+		c := maps.Clone(vx)
 		c[field] = v
-		if rec := env.do("POST", "/api/interfaces", c); rec.Code != http.StatusBadRequest {
+		if rec := env.cfg("PUT", "instance=main/interface=vx100", c); rec.Code != http.StatusBadRequest {
 			t.Errorf("bad %s accepted: %d %s", field, rec.Code, rec.Body)
 		}
 	}
-	env.create("/api/interfaces", vx)
-	env.create("/api/interfaces", map[string]any{"instance_id": inst, "name": "br100", "kind": "bridge", "enabled": true, "ipv4_mode": "none", "members": []string{"vx100"}})
-	env.create("/api/bgp/config", map[string]any{"instance_id": inst, "enabled": true, "asn": 65000, "evpn": true})
-	env.create("/api/bgp/neighbors", map[string]any{"instance_id": inst, "address": "192.0.2.2", "enabled": true, "remote_as": "internal",
-		"evpn_activate": true, "evpn_route_reflector_client": true})
+	env.put("instance=main/interface=vx100", vx)
+	env.put("instance=main/interface=br100", map[string]any{"kind": "bridge", "enabled": true, "ipv4-mode": "none", "members": []string{"vx100"}})
+	env.put("instance=main/bgp=main", map[string]any{"enabled": true, "asn": 65000, "evpn": true})
+	env.post("instance=main/bgp-neighbor", map[string]any{"address": "192.0.2.2", "enabled": true, "remote-as": "internal", "evpn-activate": true, "evpn-route-reflector-client": true, "vrf": "main"})
 
 	// Renaming the underlay rewrites it; deleting it is refused.
-	var eth0 models.Interface
-	env.srv.db.Where("name = ?", "eth0").First(&eth0)
-	if rec := env.do("PUT", "/api/interfaces/"+itoa(eth0.ID), map[string]any{"name": "wan0"}); rec.Code != http.StatusOK {
-		t.Fatalf("rename: %d %s", rec.Code, rec.Body)
-	}
-	if rec := env.do("DELETE", "/api/interfaces/"+itoa(eth0.ID), nil); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "VXLAN vx100") {
+	env.mustCfg("POST", "instance=main/interface=eth0?action=rename", map[string]any{"keys": []string{"wan0"}})
+	if rec := env.cfg("DELETE", "instance=main/interface=wan0", nil); rec.Code != http.StatusBadRequest {
 		t.Errorf("delete of the underlay: %d %s", rec.Code, rec.Body)
 	}
 
-	doc, err := builder.Build(tablesInput(t, env.srv.db), 1)
+	doc, err := builder.Build(env.input(), 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,48 +59,44 @@ func TestVXLANEVPN(t *testing.T) {
 
 func TestVRFL3VNI(t *testing.T) {
 	env := newEnv(t)
-	inst := env.create("/api/instances", map[string]any{"name": "main"})
-	env.create("/api/interfaces", map[string]any{"instance_id": inst, "name": "eth0", "addresses": []string{"192.0.2.1/24"}, "enabled": true})
-	env.create("/api/interfaces", map[string]any{"instance_id": inst, "name": "vx100", "kind": "vxlan", "enabled": true, "ipv4_mode": "none",
-		"vxlan_vni": 100, "vxlan_local": "192.0.2.1"})
-	env.create("/api/interfaces", map[string]any{"instance_id": inst, "name": "br100", "kind": "bridge", "enabled": true, "ipv4_mode": "none", "members": []string{"vx100"}})
-	env.create("/api/bgp/config", map[string]any{"instance_id": inst, "enabled": true, "asn": 65000, "evpn": true})
+	env.host("main")
+	env.put("instance=main/interface=eth0", map[string]any{"kind": "physical", "addresses": []string{"192.0.2.1/24"}, "enabled": true})
+	env.put("instance=main/interface=vx100", map[string]any{"kind": "vxlan", "enabled": true, "ipv4-mode": "none", "vxlan-vni": 100, "vxlan-local": "192.0.2.1"})
+	env.put("instance=main/interface=br100", map[string]any{"kind": "bridge", "enabled": true, "ipv4-mode": "none", "members": []string{"vx100"}})
+	env.put("instance=main/bgp=main", map[string]any{"enabled": true, "asn": 65000, "evpn": true})
 
-	vrf := map[string]any{"instance_id": inst, "name": "red", "route_table": 10, "evpn_vni": 5000, "evpn_local": "192.0.2.1",
-		"evpn_device": "eth0", "evpn_advertise_v4": true, "evpn_import_rts": []string{"65000:5000"}, "evpn_export_rts": []string{" 65000:5000 "}}
+	vrf := map[string]any{"route-table": 10, "evpn-vni": 5000, "evpn-local": "192.0.2.1",
+		"evpn-device": "eth0", "evpn-advertise-v4": true, "evpn-import-rts": []string{"65000:5000"}, "evpn-export-rts": []string{" 65000:5000 "}}
 	for field, v := range map[string]any{
-		"evpn_vni":          100, // vx100's
-		"evpn_local":        "",
-		"evpn_device":       "eth9",
-		"evpn_rd":           "x",
-		"evpn_import_rts":   []string{"65000"},
-		"evpn_advertise_v4": false,
+		"evpn-vni":          100, // vx100's
+		"evpn-local":        nil,
+		"evpn-device":       "eth9",
+		"evpn-rd":           "x",
+		"evpn-import-rts":   []string{"65000"},
 	} {
-		c := map[string]any{}
-		for k, x := range vrf {
-			c[k] = x
-		}
+		c := maps.Clone(vrf)
 		c[field] = v
-		if rec := env.do("POST", "/api/vrfs", c); rec.Code != http.StatusBadRequest {
+		if rec := env.cfg("PUT", "instance=main/vrf=red", c); rec.Code != http.StatusBadRequest {
 			t.Errorf("bad %s accepted: %d %s", field, rec.Code, rec.Body)
 		}
 	}
-	env.create("/api/vrfs", vrf)
-	if rec := env.do("POST", "/api/interfaces", map[string]any{"instance_id": inst, "name": "l3br-1", "kind": "bridge", "ipv4_mode": "none"}); rec.Code != http.StatusBadRequest {
+	none := maps.Clone(vrf)
+	none["evpn-advertise-v4"], none["evpn-advertise-v6"] = false, false
+	if rec := env.cfg("PUT", "instance=main/vrf=red", none); rec.Code != http.StatusBadRequest {
+		t.Errorf("no family advertised accepted: %d %s", rec.Code, rec.Body)
+	}
+	env.put("instance=main/vrf=red", vrf)
+	if rec := env.cfg("PUT", "instance=main/interface=l3br-1", map[string]any{"kind": "bridge", "ipv4-mode": "none"}); rec.Code != http.StatusBadRequest {
 		t.Errorf("reserved name accepted: %d %s", rec.Code, rec.Body)
 	}
 
 	// Renaming the underlay rewrites it; deleting it is refused.
-	var eth0 models.Interface
-	env.srv.db.Where("name = ?", "eth0").First(&eth0)
-	if rec := env.do("PUT", "/api/interfaces/"+itoa(eth0.ID), map[string]any{"name": "wan0"}); rec.Code != http.StatusOK {
-		t.Fatalf("rename: %d %s", rec.Code, rec.Body)
-	}
-	if rec := env.do("DELETE", "/api/interfaces/"+itoa(eth0.ID), nil); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "VRF red (EVPN underlay)") {
+	env.mustCfg("POST", "instance=main/interface=eth0?action=rename", map[string]any{"keys": []string{"wan0"}})
+	if rec := env.cfg("DELETE", "instance=main/interface=wan0", nil); rec.Code != http.StatusBadRequest {
 		t.Errorf("delete of the underlay: %d %s", rec.Code, rec.Body)
 	}
 
-	doc, err := builder.Build(tablesInput(t, env.srv.db), 1)
+	doc, err := builder.Build(env.input(), 1)
 	if err != nil {
 		t.Fatal(err)
 	}

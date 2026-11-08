@@ -873,11 +873,16 @@ func joinNonEmpty(a, b string) string {
 // leaving out the firewalls only names nothing on. Problems come back as
 // one *fwconfig.ValidationError alongside the documents.
 func (s *Server) firewallDocs(ctx context.Context, only map[string]bool) ([]models.Firewall, []*fwconfig.Document, error) {
-	all, err := s.firewalls()
+	in, err := s.candidateInput(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
-	in, err := s.candidateInput(ctx)
+	return s.firewallDocsOf(in, only)
+}
+
+// firewallDocsOf is firewallDocs of the tree in.
+func (s *Server) firewallDocsOf(in builder.Input, only map[string]bool) ([]models.Firewall, []*fwconfig.Document, error) {
+	all, err := s.firewalls()
 	if err != nil {
 		return nil, nil, err
 	}

@@ -44,7 +44,7 @@ func objectNames(t *testing.T, env *testEnv) []string {
 
 func TestBackupRestore(t *testing.T) {
 	env := newEnv(t)
-	env.create("/api/objects", map[string]any{"name": "nas", "addresses": []string{"192.168.1.10"}})
+	env.post("host", map[string]any{"name": "nas", "addresses": []string{"192.168.1.10"}})
 	env.do("PUT", "/api/settings", map[string]any{"wg_endpoint_host": "old.example.com"})
 	env.do("PUT", "/api/firewalls/1", map[string]any{"name": "firewall", "agent_url": "https://10.0.0.1:8443"})
 	// Role memberships come back; one of a user deleted since the backup
@@ -75,7 +75,7 @@ func TestBackupRestore(t *testing.T) {
 	}
 
 	// Change things after the backup.
-	env.create("/api/objects", map[string]any{"name": "printer", "addresses": []string{"192.168.1.20"}})
+	env.post("host", map[string]any{"name": "printer", "addresses": []string{"192.168.1.20"}})
 	env.do("PUT", "/api/settings", map[string]any{"wg_endpoint_host": "new.example.com"})
 	env.do("PUT", "/api/firewalls/1", map[string]any{"name": "firewall", "agent_url": "https://10.0.0.2:8443", "agent_token": "new-token"})
 	env.srv.db.Model(&models.Settings{}).Where("id = 1").Update("last_commit", 7)
@@ -132,7 +132,8 @@ func TestBackupRestore(t *testing.T) {
 	// A new row does not reuse the id of a row the restore removed.
 	var printerID, next uint
 	env.srv.db.Raw("SELECT seq FROM sqlite_sequence WHERE name = 'address_objects'").Scan(&printerID)
-	next = env.create("/api/objects", map[string]any{"name": "scanner", "addresses": []string{"192.168.1.30"}})
+	env.post("host", map[string]any{"name": "scanner", "addresses": []string{"192.168.1.30"}})
+	next = env.rowID("address_objects", "scanner")
 	if next <= printerID {
 		t.Errorf("id %d reused (sequence was %d)", next, printerID)
 	}

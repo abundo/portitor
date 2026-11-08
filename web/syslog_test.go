@@ -21,48 +21,44 @@ func TestSyslogServers(t *testing.T) {
 	if err := env.srv.ensureDefaultInstance(); err != nil {
 		t.Fatal(err)
 	}
-	var main models.Instance
-	env.srv.db.Where("is_default = ?", true).First(&main)
-	guest := env.create("/api/instances", map[string]any{"name": "guest"})
+	env.vf("guest")
 
-	server := func(inst uint, extra map[string]any) map[string]any {
-		body := map[string]any{"instance_id": inst, "enabled": true, "address": "192.0.2.10", "port": 514, "protocol": "udp", "format": "rfc3164", "severity": "info"}
+	server := func(extra map[string]any) map[string]any {
+		body := map[string]any{"enabled": true, "address": "192.0.2.10", "port": 514, "protocol": "udp", "format": "rfc3164", "severity": "info"}
 		for k, v := range extra {
 			body[k] = v
 		}
 		return body
 	}
+	if rec := env.cfg("POST", "instance=guest/syslog-server", server(nil)); rec.Code != http.StatusBadRequest {
+		t.Errorf("a virtual firewall's accepted: %d %s", rec.Code, rec.Body)
+	}
 	for what, body := range map[string]map[string]any{
-		"virtual firewall": server(guest, nil),
-		"host name":        server(main.ID, map[string]any{"address": "logs.example.com"}),
-		"port":             server(main.ID, map[string]any{"port": 70000}),
-		"protocol":         server(main.ID, map[string]any{"protocol": "tls"}),
-		"format":           server(main.ID, map[string]any{"format": "json"}),
-		"severity":         server(main.ID, map[string]any{"severity": "verbose"}),
+		"host name": server(map[string]any{"address": "logs.example.com"}),
+		"port":      server(map[string]any{"port": 70000}),
+		"protocol":  server(map[string]any{"protocol": "tls"}),
+		"format":    server(map[string]any{"format": "json"}),
+		"severity":  server(map[string]any{"severity": "verbose"}),
 	} {
-		if rec := env.do("POST", "/api/syslog/servers", body); rec.Code != http.StatusBadRequest {
+		if rec := env.cfg("POST", "instance=main/syslog-server", body); rec.Code != http.StatusBadRequest {
 			t.Errorf("%s accepted: %d %s", what, rec.Code, rec.Body)
 		}
 	}
-	id := env.create("/api/syslog/servers", server(main.ID, map[string]any{"port": 0}))
-	if rec := env.do("POST", "/api/syslog/servers", server(main.ID, nil)); rec.Code != http.StatusBadRequest {
+	env.post("instance=main/syslog-server", server(map[string]any{"port": nil}))
+	if rec := env.cfg("POST", "instance=main/syslog-server", server(nil)); rec.Code != http.StatusBadRequest {
 		t.Errorf("duplicate accepted: %d %s", rec.Code, rec.Body)
 	}
-	env.create("/api/syslog/servers", server(main.ID, map[string]any{"address": "2001:db8::10", "port": 6514, "protocol": "tcp", "format": "rfc5424", "severity": "warning"}))
-	env.create("/api/syslog/servers", server(main.ID, map[string]any{"address": "192.0.2.11", "enabled": false}))
-	// A server never moves to another instance.
-	if rec := env.do("PUT", "/api/syslog/servers/"+itoa(id), map[string]any{"instance_id": guest, "description": "SIEM"}); rec.Code != http.StatusOK {
-		t.Errorf("update: %d %s", rec.Code, rec.Body)
-	}
+	env.post("instance=main/syslog-server", server(map[string]any{"address": "2001:db8::10", "port": 6514, "protocol": "tcp", "format": "rfc5424", "severity": "warning"}))
+	env.post("instance=main/syslog-server", server(map[string]any{"address": "192.0.2.11", "enabled": false}))
 
-	doc, err := builder.Build(tablesInput(t, env.srv.db), 1)
+	doc, err := builder.Build(env.input(), 1)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if s := doc.Instance("guest").Syslog; s != nil {
 		t.Errorf("guest syslog %+v", s)
 	}
-	s := doc.Instance(main.Name).Syslog
+	s := doc.Instance("main").Syslog
 	want := []fwconfig.SyslogServer{
 		{Address: "192.0.2.10", Port: 514, Protocol: "udp", Format: "rfc3164", Severity: "info"},
 		{Address: "2001:db8::10", Port: 6514, Protocol: "tcp", Format: "rfc5424", Severity: "warning"},

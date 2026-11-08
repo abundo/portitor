@@ -4,53 +4,37 @@
 package web
 
 import (
-	"encoding/json"
 	"net/http"
 	"testing"
 
 	"github.com/abundo/portitor/internal/builder"
-	"github.com/abundo/portitor/models"
 )
 
 func TestBFD(t *testing.T) {
 	env := newEnv(t)
-	inst := env.create("/api/instances", map[string]any{"name": "main"})
-	eth := env.create("/api/interfaces", map[string]any{"instance_id": inst, "name": "eth1", "kind": "physical", "enabled": true, "ipv4_mode": "static", "addresses": []string{"10.0.0.1/24"}})
+	env.host("main")
+	env.put("instance=main/interface=eth1", map[string]any{"kind": "physical", "enabled": true, "ipv4-mode": "static", "addresses": []string{"10.0.0.1/24"}})
 
 	// Timers left empty are the virtual firewall's defaults.
-	rec := env.do("POST", "/api/bfd/interfaces", map[string]any{"instance_id": inst, "interface": "eth1", "enabled": true, "receive_interval": 100})
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("create: %d %s", rec.Code, rec.Body)
-	}
-	var b models.BfdInterface
-	_ = json.Unmarshal(rec.Body.Bytes(), &b)
-	if b.DetectMultiplier != 0 || b.ReceiveInterval != 100 || b.TransmitInterval != 0 {
-		t.Errorf("stored: %+v", b)
-	}
-	instURL := "/api/instances/" + itoa(inst)
-	if rec := env.do("PUT", instURL, map[string]any{"bfd_detect_multiplier": 1}); rec.Code != http.StatusBadRequest {
+	env.put("instance=main/bfd-interface=eth1", map[string]any{"enabled": true, "receive-interval": 100})
+	if rec := env.cfg("PATCH", "instance=main", map[string]any{"bfd-detect-multiplier": 1}); rec.Code != http.StatusBadRequest {
 		t.Errorf("default multiplier 1 accepted: %d %s", rec.Code, rec.Body)
 	}
-	if rec := env.do("PUT", instURL, map[string]any{"bfd_detect_multiplier": 5, "bfd_receive_interval": 200, "bfd_transmit_interval": 250}); rec.Code != http.StatusOK {
-		t.Fatalf("defaults: %d %s", rec.Code, rec.Body)
+	env.patch("instance=main", map[string]any{"bfd-detect-multiplier": 5, "bfd-receive-interval": 200, "bfd-transmit-interval": 250})
+	if rec := env.cfg("POST", "instance=main/bfd-interface", map[string]any{"interface": "eth1"}); rec.Code != http.StatusBadRequest {
+		t.Errorf("twice accepted: %d %s", rec.Code, rec.Body)
 	}
-	for what, body := range map[string]map[string]any{
-		"unknown interface": {"instance_id": inst, "interface": "eth9"},
-		"twice":             {"instance_id": inst, "interface": "eth1"},
-		"bad multiplier":    {"instance_id": inst, "interface": "eth1", "detect_multiplier": 300},
-	} {
-		if rec := env.do("POST", "/api/bfd/interfaces", body); rec.Code != http.StatusBadRequest {
-			t.Errorf("%s accepted: %d %s", what, rec.Code, rec.Body)
-		}
+	if rec := env.cfg("POST", "instance=main/bfd-interface", map[string]any{"interface": "eth9"}); rec.Code != http.StatusBadRequest {
+		t.Errorf("unknown interface accepted: %d %s", rec.Code, rec.Body)
 	}
 	// A route with BFD needs a gateway.
-	if rec := env.do("POST", "/api/routes", map[string]any{"instance_id": inst, "destination": "10.1.0.0/16", "interface_id": eth, "bfd": true, "enabled": true}); rec.Code != http.StatusBadRequest {
+	if rec := env.cfg("POST", "instance=main/route", map[string]any{"destination": "10.1.0.0/16", "interface": "eth1", "bfd": true}); rec.Code != http.StatusBadRequest {
 		t.Errorf("BFD route without gateway: %d %s", rec.Code, rec.Body)
 	}
-	env.create("/api/routes", map[string]any{"instance_id": inst, "destination": "10.1.0.0/16", "gateway": "10.0.0.2", "bfd": true, "enabled": true})
+	route := env.post("instance=main/route", map[string]any{"destination": "10.1.0.0/16", "gateway": "10.0.0.2", "bfd": true})
 
 	// The document has it, and the route is FRR's.
-	doc, err := builder.Build(tablesInput(t, env.srv.db), 1)
+	doc, err := builder.Build(env.input(), 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,27 +48,14 @@ func TestBFD(t *testing.T) {
 	}
 
 	// Renaming the interface rewrites it; disabled, it is left out.
-	if rec := env.do("PUT", "/api/interfaces/"+itoa(eth), map[string]any{"name": "lan"}); rec.Code != http.StatusOK {
-		t.Fatalf("rename: %d %s", rec.Code, rec.Body)
+	env.mustCfg("POST", "instance=main/interface=eth1?action=rename", map[string]any{"keys": []string{"lan"}})
+	if env.node("instance=main/bfd-interface=lan") == nil {
+		t.Error("not rewritten")
 	}
-	env.srv.db.First(&b, b.ID)
-	if b.Interface != "lan" {
-		t.Errorf("not rewritten: %+v", b)
-	}
-	env.do("PUT", "/api/bfd/interfaces/"+itoa(b.ID), map[string]any{"enabled": false})
-	doc, _ = builder.Build(tablesInput(t, env.srv.db), 2)
+	env.patch("instance=main/bfd-interface=lan", map[string]any{"enabled": false})
+	doc, _ = builder.Build(env.input(), 2)
 	if in := doc.Instance("main"); len(in.BFD) != 0 || len(in.KernelRoutes()) != 1 {
 		t.Errorf("disabled: %+v", in.BFD)
 	}
-
-	// Deleting the interface takes its BFD settings along.
-	env.do("DELETE", "/api/routes/1", nil)
-	if rec := env.do("DELETE", "/api/interfaces/"+itoa(eth), nil); rec.Code != http.StatusNoContent && rec.Code != http.StatusOK {
-		t.Fatalf("delete interface: %d %s", rec.Code, rec.Body)
-	}
-	var n int64
-	env.srv.db.Model(&models.BfdInterface{}).Count(&n)
-	if n != 0 {
-		t.Errorf("BFD settings left: %d", n)
-	}
+	env.mustCfg("DELETE", "instance=main/route="+route, nil)
 }

@@ -14,7 +14,8 @@ import (
 
 func TestWgImport(t *testing.T) {
 	env := newEnv(t)
-	inst := env.create("/api/instances", map[string]any{"name": "main"})
+	env.host("main")
+	inst := env.rowID("instances", "main")
 	priv, pub, _ := wgkeys.Generate()
 	_, peerPub, _ := wgkeys.Generate()
 	conf := "[Interface]\nPrivateKey = " + priv + "\nAddress = 10.99.0.1/24, fd00:99::1\nListenPort = 51821\nDNS = 1.1.1.1\n\n# phone\n[Peer]\nPublicKey = " + peerPub + "\nAllowedIPs = 10.99.0.2/32\nPersistentKeepalive = 25\n"

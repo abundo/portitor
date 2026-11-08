@@ -124,4 +124,12 @@ submodule portitor-types {
     type string;
     description "An interface-address, or a delegated-interface-address.";
   }
+  typedef prefix-or-any {
+    type string;
+    description "A prefix in CIDR notation, or any.";
+  }
+  typedef lowercase-name {
+    type string;
+    description "A name kept in lower case: a service's or a port's.";
+  }
 }

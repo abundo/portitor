@@ -184,7 +184,7 @@ submodule portitor-interfaces {
         default 1194;
       }
       leaf ovpn-listen {
-        type string;
+        type leafref { path "../../interface/name"; }
       }
       leaf ovpn-certificate {
         type leafref { path "../../certificate/name"; }

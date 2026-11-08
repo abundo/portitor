@@ -14,62 +14,50 @@ import (
 
 func TestSNMP(t *testing.T) {
 	env := newEnv(t)
-	inst := env.create("/api/instances", map[string]any{"name": "main"})
-	eth := env.create("/api/interfaces", map[string]any{"instance_id": inst, "name": "eth1", "kind": "bridge", "enabled": true, "ipv4_mode": "static", "addresses": []string{"10.0.0.1/24"}})
-	path := "/api/instances/" + itoa(inst)
+	env.host("main")
+	env.put("instance=main/interface=eth1", map[string]any{"kind": "bridge", "enabled": true, "ipv4-mode": "static", "addresses": []string{"10.0.0.1/24"}})
 
 	// Enabled needs a community or a user.
-	if rec := env.do("PUT", path, map[string]any{"snmp_enabled": true}); rec.Code != http.StatusBadRequest {
-		t.Errorf("enabled with nothing: %d %s", rec.Code, rec.Body)
-	}
-	if rec := env.do("PUT", path, map[string]any{"new_snmp_community": "a b"}); rec.Code != http.StatusBadRequest {
-		t.Errorf("bad community: %d %s", rec.Code, rec.Body)
-	}
-	if rec := env.do("PUT", path, map[string]any{"snmp_location": "a\nb"}); rec.Code != http.StatusBadRequest {
-		t.Errorf("two-line location: %d %s", rec.Code, rec.Body)
+	for what, body := range map[string]map[string]any{
+		"enabled with nothing": {"snmp-enabled": true},
+		"bad community":        {"snmp-community": "a b"},
+		"two-line location":    {"snmp-location": "a\nb"},
+	} {
+		if rec := env.cfg("PATCH", "instance=main", body); rec.Code != http.StatusBadRequest {
+			t.Errorf("%s: %d %s", what, rec.Code, rec.Body)
+		}
 	}
 
-	// The community is write-only.
+	// The community is a secret: never read back.
 	const community = "c0mmunity"
-	rec := env.do("PUT", path, map[string]any{"snmp_enabled": true, "new_snmp_community": community, "snmp_allow": []string{"10.0.0.0/24"}, "snmp_location": "rack 1"})
-	if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), community) || !strings.Contains(rec.Body.String(), `"has_snmp_community":true`) {
-		t.Fatalf("set community: %d %s", rec.Code, rec.Body)
-	}
-	if rec := env.do("GET", path, nil); strings.Contains(rec.Body.String(), community) || !strings.Contains(rec.Body.String(), `"has_snmp_community":true`) {
+	env.patch("instance=main", map[string]any{"snmp-enabled": true, "snmp-community": community, "snmp-allow": []string{"10.0.0.0/24"}, "snmp-location": "rack 1"})
+	if rec := env.do("GET", "/api/config/candidate/instance=main", nil); strings.Contains(rec.Body.String(), community) {
 		t.Errorf("get: %s", rec.Body)
 	}
-	// Another write keeps it.
-	env.do("PUT", path, map[string]any{"snmp_contact": "noc@example.com"})
-	env.do("PUT", "/api/interfaces/"+itoa(eth), map[string]any{"snmp_serve": true})
+	env.patch("instance=main", map[string]any{"snmp-contact": "noc@example.com"})
+	env.patch("instance=main/interface=eth1", map[string]any{"snmp-serve": true})
 
-	// Users: write-only passwords, checked.
+	// Users: secret passwords, checked.
 	const auth, priv = "authp4ss", "privp4ss"
 	for what, body := range map[string]map[string]any{
-		"short password": {"instance_id": inst, "name": "mon", "auth_protocol": "SHA-256", "new_auth_password": "short", "priv_protocol": ""},
-		"md5":            {"instance_id": inst, "name": "mon", "auth_protocol": "MD5", "new_auth_password": auth, "priv_protocol": ""},
-		"no priv pw":     {"instance_id": inst, "name": "mon", "auth_protocol": "SHA-256", "new_auth_password": auth, "priv_protocol": "AES"},
-		"same passwords": {"instance_id": inst, "name": "mon", "auth_protocol": "SHA-256", "new_auth_password": auth, "priv_protocol": "AES", "new_priv_password": auth},
-		"bad name":       {"instance_id": inst, "name": "a b", "auth_protocol": "SHA-256", "new_auth_password": auth, "priv_protocol": ""},
+		"short password": {"name": "mon", "auth-protocol": "SHA-256", "auth-password": "short"},
+		"md5":            {"name": "mon", "auth-protocol": "MD5", "auth-password": auth},
+		"no priv pw":     {"name": "mon", "auth-protocol": "SHA-256", "auth-password": auth, "priv-protocol": "AES"},
+		"same passwords": {"name": "mon", "auth-protocol": "SHA-256", "auth-password": auth, "priv-protocol": "AES", "priv-password": auth},
+		"bad name":       {"name": "a b", "auth-protocol": "SHA-256", "auth-password": auth},
 	} {
-		if rec := env.do("POST", "/api/snmp/users", body); rec.Code != http.StatusBadRequest {
+		if rec := env.cfg("POST", "instance=main/snmp-user", body); rec.Code != http.StatusBadRequest {
 			t.Errorf("%s accepted: %d %s", what, rec.Code, rec.Body)
 		}
 	}
-	rec = env.do("POST", "/api/snmp/users", map[string]any{"instance_id": inst, "name": "mon", "enabled": true, "auth_protocol": "SHA-256", "new_auth_password": auth, "priv_protocol": "AES", "new_priv_password": priv})
-	if rec.Code != http.StatusCreated || strings.Contains(rec.Body.String(), auth) || strings.Contains(rec.Body.String(), priv) ||
-		!strings.Contains(rec.Body.String(), `"has_auth_password":true`) || !strings.Contains(rec.Body.String(), `"has_priv_password":true`) {
-		t.Fatalf("create user: %d %s", rec.Code, rec.Body)
-	}
-	var u struct{ ID uint }
-	_ = json.Unmarshal(rec.Body.Bytes(), &u)
-	if rec := env.do("PUT", "/api/snmp/users/"+itoa(u.ID), map[string]any{"description": "NMS"}); rec.Code != http.StatusOK {
-		t.Errorf("update keeping passwords: %d %s", rec.Code, rec.Body)
-	}
-	if rec := env.do("GET", "/api/snmp/users?instance_id="+itoa(inst), nil); strings.Contains(rec.Body.String(), auth) {
-		t.Errorf("list holds the password: %s", rec.Body)
+	env.mustCfg("POST", "instance=main/snmp-user", map[string]any{"name": "mon", "enabled": true, "auth-protocol": "SHA-256", "auth-password": auth, "priv-protocol": "AES", "priv-password": priv})
+	// A replace without the passwords keeps them.
+	env.put("instance=main/snmp-user=mon", map[string]any{"enabled": true, "auth-protocol": "SHA-256", "priv-protocol": "AES", "description": "NMS"})
+	if rec := env.do("GET", "/api/config/candidate/instance=main/snmp-user", nil); strings.Contains(rec.Body.String(), auth) || strings.Contains(rec.Body.String(), priv) {
+		t.Errorf("list holds a password: %s", rec.Body)
 	}
 
-	doc, err := builder.Build(tablesInput(t, env.srv.db), 1)
+	doc, err := builder.Build(env.input(), 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +74,9 @@ func TestSNMP(t *testing.T) {
 	}
 
 	// Clearing the community leaves the user.
-	if rec := env.do("PUT", path, map[string]any{"clear_snmp_community": true}); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"has_snmp_community":false`) {
-		t.Errorf("clear: %d %s", rec.Code, rec.Body)
+	env.patch("instance=main", map[string]any{"snmp-community": nil})
+	doc, _ = builder.Build(env.input(), 2)
+	if s := doc.Instance("main").SNMP; s == nil || s.Community != "" || len(s.Users) != 1 {
+		t.Errorf("after clear: %+v", s)
 	}
 }

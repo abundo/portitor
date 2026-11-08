@@ -18,10 +18,10 @@ import (
 
 func init() {
 	register("/instance/vrf", hook{check: checkVRF})
-	register("/instance/community-list", hook{normalize: normalizeCommunityList})
-	register("/instance/route-map", hook{normalize: normalizeRouteMap})
+
 	register("/instance/bgp", hook{normalize: normalizeBGP, check: checkBGP})
 	register("/instance/bgp-neighbor", hook{normalize: normalizeNeighbor, check: checkNeighbor})
+	register("/instance/bgp-peer-group", hook{normalize: normalizePeer})
 }
 
 // vrfOf is a routing row's VRF, "" for the main table.
@@ -120,6 +120,16 @@ func normalizeNeighbor(c *Ctx, n *datastore.Node) error {
 	if a, err := netip.ParseAddr(n.Leaf("address")); err == nil && !a.IsLinkLocalUnicast() {
 		clear(n, "interface") // only a link-local neighbour has one
 	}
+	return normalizePeer(c, n)
+}
+
+// normalizePeer drops the filters of a family not activated.
+func normalizePeer(c *Ctx, n *datastore.Node) error {
+	for _, f := range []string{"v4", "v6"} {
+		if !on(n, f+"-activate") {
+			clear(n, f+"-prefix-list-in", f+"-prefix-list-out", f+"-route-map-in", f+"-route-map-out")
+		}
+	}
 	return nil
 }
 
@@ -132,13 +142,53 @@ func checkNeighbor(c *Ctx, n *datastore.Node) []error {
 			errs = append(errs, fail("peer-group: %s is %s's, not %s's", g, vrfText(vrfOf(group)), vrfText(vrf)))
 		}
 	}
-	if i := n.Leaf("interface"); i != "" {
-		if ifc := in.Entry("interface", []string{i}); ifc != nil && ifc.Leaf("vrf") != vrf {
-			errs = append(errs, fail("interface: %s is in %s, the neighbour in %s", i, vrfText(ifc.Leaf("vrf")), vrfText(vrf)))
+	for _, l := range []string{"interface", "update-source"} {
+		if i := n.Leaf(l); i != "" {
+			if ifc := in.Entry("interface", []string{i}); ifc != nil && ifc.Leaf("vrf") != vrf {
+				errs = append(errs, fail("%s: %s is in %s, the neighbour in %s", l, i, vrfText(ifc.Leaf("vrf")), vrfText(vrf)))
+			}
 		}
 	}
 	if n.Leaf("remote-as") == "" && (group == nil || group.Leaf("remote-as") == "") {
 		errs = append(errs, fail("remote-as: missing, on the neighbour or its peer group"))
 	}
 	return errs
+}
+
+func init() {
+	register("/instance/isis", hook{normalize: normalizeISIS, check: checkISISConfig})
+}
+
+// normalizeISIS keeps the NET in lower case, or makes it from an
+// interface's IPv4 address (the builder makes it again on deploy, so it
+// follows the address).
+func normalizeISIS(c *Ctx, s *datastore.Node) error {
+	if n, ok := s.Leaves["net"]; ok {
+		if net, ok := fwconfig.ParseISISNet(n); ok {
+			s.Leaves["net"] = net
+		}
+	}
+	ifname := s.Leaf("net-interface")
+	if ifname == "" {
+		clear(s, "net-area")
+		return nil
+	}
+	area, ok := fwconfig.ParseISISArea(s.Leaf("net-area"))
+	if !ok {
+		return fail("net-area: %q must be an AFI byte and up to 12 more bytes in groups of two (49.0001)", s.Leaf("net-area"))
+	}
+	set(s, "net-area", area)
+	ifc := instanceOf(s).Entry("interface", []string{ifname})
+	if ifc == nil {
+		return fail("net-interface: %q is not an interface of this virtual firewall", ifname)
+	}
+	if ifc.Leaf("vrf") != vrfOf(s) {
+		return fail("net-interface: %s is in %s, IS-IS in %s", ifname, vrfText(ifc.Leaf("vrf")), vrfText(vrfOf(s)))
+	}
+	net, ok := fwconfig.ISISNetFromAddresses(area, ifc.LeafLists["addresses"])
+	if !ok {
+		return fail("net-interface: %s has no static IPv4 address to make the NET from", ifname)
+	}
+	set(s, "net", net)
+	return nil
 }

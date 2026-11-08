@@ -4,6 +4,7 @@
 package confcheck
 
 import (
+	"encoding/binary"
 	"net/netip"
 	"slices"
 	"strconv"
@@ -26,7 +27,7 @@ func init() {
 	register("/instance/static-neighbour", hook{check: checkStaticNeighbour})
 	register("/instance/route", hook{check: checkRoute})
 	register("/instance/policy-route", hook{check: checkPolicyRoute})
-	register("/link", hook{check: checkLink})
+	register("/link", hook{normalize: normalizeLink, check: checkLink})
 }
 
 // set sets a leaf of e that the schema knows to take v.
@@ -48,6 +49,9 @@ func num(e *datastore.Node, leaf string) int {
 }
 
 func normalizeInstance(c *Ctx, in *datastore.Node) error {
+	if old := c.old(in); old != nil && on(old, "is-default") != on(in, "is-default") {
+		return fail("is-default: the default virtual firewall is the firewall's host; it stays the default")
+	}
 	if c.old(in) == nil {
 		if _, ok := in.Leaves["dns-upstream"]; !ok {
 			set(in, "dns-upstream", fwconfig.UpstreamRoot)
@@ -56,10 +60,22 @@ func normalizeInstance(c *Ctx, in *datastore.Node) error {
 			return err
 		}
 	}
-	if err := ensureServiceRateLimits(c, in); err != nil {
+	if err := ensureServiceRateLimits(c, in, c.old(in)); err != nil {
 		return err
 	}
 	normalizeInstanceServices(c, in)
+	// An interface deleted that was only a zone's member leaves the zone.
+	if old := c.old(in); old != nil {
+		for _, o := range old.Lists["interface"] {
+			if name := o.Leaf("name"); in.Entry("interface", []string{name}) == nil {
+				for _, z := range in.Lists["interface-zone"] {
+					if ms := z.LeafLists["interfaces"]; slices.Contains(ms, name) {
+						z.LeafLists["interfaces"] = slices.DeleteFunc(ms, func(m string) bool { return m == name })
+					}
+				}
+			}
+		}
+	}
 	if ts := in.LeafLists["dns-query-log-types"]; ts != nil {
 		for i, t := range ts {
 			ts[i] = strings.ToUpper(t)
@@ -78,6 +94,20 @@ func checkInstance(c *Ctx, in *datastore.Node) []error {
 		}
 	} else if !fwconfig.ValidInstanceName(name) {
 		errs = append(errs, fail("name: lowercase letters and digits, starting with a letter, at most 12 characters"))
+	}
+	// One default (the host) per firewall, which the others need.
+	hasDefault := false
+	for _, o := range c.T.Root.Lists["instance"] {
+		if o.Leaf("firewall") != in.Leaf("firewall") || !on(o, "is-default") {
+			continue
+		}
+		if o != in && on(in, "is-default") {
+			errs = append(errs, fail("is-default: %s is the default virtual firewall of %s", o.Leaf("name"), in.Leaf("firewall")))
+		}
+		hasDefault = true
+	}
+	if !hasDefault {
+		errs = append(errs, fail("firewall: %s has no default virtual firewall (its host)", in.Leaf("firewall")))
 	}
 	for _, s := range in.LeafLists["log-auto"] {
 		if !fwconfig.ValidAutoService(s) {
@@ -105,13 +135,22 @@ func checkInstance(c *Ctx, in *datastore.Node) []error {
 	if lt := in.Leaf("dhcp-lease-time"); lt != "" && num(in, "dhcp-lease-time") < 300 {
 		errs = append(errs, fail("dhcp-lease-time: at least 300 seconds"))
 	}
+	errs = append(errs, checkServiceLimits(in)...)
 	return append(errs, checkInstanceServices(c, in)...)
 }
 
 func normalizeInterface(c *Ctx, i *datastore.Node) error {
 	kind := i.Leaf("kind")
-	if old := c.old(i); old != nil && old.Leaf("kind") != kind {
+	old := c.old(i)
+	if old != nil && old.Leaf("kind") != kind {
 		return fail("the kind of an interface can't change; make a new one")
+	}
+	renumber(c, i, old)
+	if old != nil && old.Leaf("name") != i.Leaf("name") {
+		renameDelegated(instanceOf(i), old.Leaf("name"), i.Leaf("name"))
+	}
+	if err := normalizeDelegatedRange(i); err != nil {
+		return err
 	}
 	if i.Leaf("ipv4-mode") != fwconfig.ModeDHCP {
 		clear(i, "dns-from-dhcp")
@@ -302,6 +341,7 @@ func checkInterface(c *Ctx, i *datastore.Node) []error {
 	if kind == fwconfig.KindOpenVPN {
 		errs = append(errs, checkOpenVPN(c, i)...)
 	}
+	errs = append(errs, checkDelegatedDHCP(i)...)
 	if role := i.Leaf("ha-role"); role != "" {
 		switch {
 		case role == fwconfig.HARoleManagement && i.Leaf("ha-gateway") == "":
@@ -450,6 +490,8 @@ func checkRoute(c *Ctx, r *datastore.Node) []error {
 func checkPolicyRoute(c *Ctx, r *datastore.Node) []error {
 	in := instanceOf(r)
 	errs := checkIfaceList(c, in, "in-interfaces", r.LeafLists["in-interfaces"])
+	errs = append(errs, checkIPListRefs(c, r, "src-addrs", "dst-addrs")...)
+	errs = append(errs, checkServices(c, r)...)
 	if name := r.Leaf("interface"); name != "" {
 		if i := in.Entry("interface", []string{name}); i != nil && i.Leaf("vrf") != "" {
 			errs = append(errs, fail("interface: %s is in VRF %s; policy routes use the main table", name, i.Leaf("vrf")))
@@ -487,4 +529,102 @@ func checkLink(c *Ctx, l *datastore.Node) []error {
 		}
 	}
 	return errs
+}
+
+// renameDelegated rewrites the addresses in the prefix delegated to the
+// interface old to name it new.
+func renameDelegated(in *datastore.Node, old, new string) {
+	for _, o := range in.Lists["interface"] {
+		for j, a := range o.LeafLists["addresses"] {
+			if d, err := fwconfig.ParseDelegated(a); err == nil && d.Interface == old {
+				d.Interface = new
+				o.LeafLists["addresses"][j] = d.String()
+			}
+		}
+	}
+}
+
+// normalizeDelegatedRange writes the delegated prefix DHCPv6 range's host
+// parts canonical ("1000" is "::1000").
+func normalizeDelegatedRange(i *datastore.Node) error {
+	for _, l := range []string{"delegated-range-start", "delegated-range-end"} {
+		v, ok := i.Leaves[l]
+		if !ok || v == "" {
+			continue
+		}
+		if !strings.HasPrefix(v, "::") {
+			v = "::" + v
+		}
+		h, err := fwconfig.ParseHostPart(v)
+		if err != nil {
+			return fail("%s: %v", l, err)
+		}
+		var b [16]byte
+		binary.BigEndian.PutUint64(b[8:], h)
+		i.Leaves[l] = netip.AddrFrom16(b).String()
+	}
+	return nil
+}
+
+// checkDelegatedDHCP: the range has both ends, in order, and DHCPv6 in a
+// delegated prefix needs an address of the interface's in one, a /64.
+func checkDelegatedDHCP(i *datastore.Node) []error {
+	var errs []error
+	start, end := i.Leaf("delegated-range-start"), i.Leaf("delegated-range-end")
+	if (start == "") != (end == "") {
+		errs = append(errs, fail("delegated-range-start: the range needs both start and end"))
+	} else if start != "" {
+		s, _ := fwconfig.ParseHostPart(start)
+		e, _ := fwconfig.ParseHostPart(end)
+		if s > e {
+			errs = append(errs, fail("delegated-range-start: after the end"))
+		}
+	}
+	if on(i, "delegated-dhcp") {
+		ok := false
+		for _, a := range i.LeafLists["addresses"] {
+			if d, err := fwconfig.ParseDelegated(a); err == nil && d.Bits == 64 {
+				ok = true
+			}
+		}
+		if !ok {
+			errs = append(errs, fail("delegated-dhcp: DHCPv6 in a delegated prefix needs an address of this interface's in one, as a /64: <wan0>:2000::1/64"))
+		}
+	}
+	return errs
+}
+
+// normalizeLink: a link end renamed is renamed in the lists of interfaces
+// of its instance (rules, NAT rules, policy routes, zones), which name it
+// as they name interfaces.
+func normalizeLink(c *Ctx, l *datastore.Node) error {
+	old := c.old(l)
+	if old == nil {
+		return nil
+	}
+	for _, end := range []string{"a", "b"} {
+		from, to := old.Leaf("interface-"+end), l.Leaf("interface-"+end)
+		in := c.T.Root.Entry("instance", []string{l.Leaf("instance-" + end)})
+		if from == to || in == nil {
+			continue
+		}
+		renameIfaceRefs(in, from, to)
+	}
+	return nil
+}
+
+// renameIfaceRefs renames an interface name in the instance's lists of
+// interface names.
+func renameIfaceRefs(in *datastore.Node, from, to string) {
+	for _, list := range []string{"rule", "nat-rule", "policy-route", "interface-zone"} {
+		for _, e := range in.Lists[list] {
+			for _, leaf := range []string{"in-interfaces", "out-interfaces", "interfaces"} {
+				for i, v := range e.LeafLists[leaf] {
+					if v == from {
+						e.LeafLists[leaf][i] = to
+					}
+				}
+			}
+		}
+	}
 }

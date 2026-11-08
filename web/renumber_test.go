@@ -3,33 +3,23 @@
 
 package web
 
-import (
-	"net/http"
-	"testing"
+import "testing"
 
-	"github.com/abundo/portitor/models"
-)
-
-func TestRenumberMovesDHCP(t *testing.T) {
+// TestRenumberPrefixes: a new address of an interface takes the DHCP and RA
+// settings of the prefix it replaces.
+func TestRenumberPrefixes(t *testing.T) {
 	env := newEnv(t)
-	inst := env.create("/api/instances", map[string]any{"name": "main"})
-	ifc := env.create("/api/interfaces", map[string]any{"instance_id": inst, "name": "eth1", "enabled": true,
-		"addresses": []string{"192.168.1.1/24", "2001:db8:1::1/64"}})
-	env.create("/api/ipam/prefixes", map[string]any{"instance_id": inst, "prefix": "2001:db8:1::/64",
-		"ra_enabled": true, "ra_slaac": true, "dhcp_enabled": true,
-		"dhcp_range_start": "2001:db8:1::1000", "dhcp_range_end": "2001:db8:1::1fff"})
+	env.host("main")
+	env.put("instance=main/interface=eth1", map[string]any{"kind": "physical", "enabled": true, "addresses": []string{"192.168.1.1/24", "2001:db8:1::1/64"}})
+	env.post("instance=main/ipam-prefix", map[string]any{"prefix": "2001:db8:1::/64", "ra-enabled": true, "ra-slaac": true, "dhcp-enabled": true, "dhcp-range-start": "2001:db8:1::1000", "dhcp-range-end": "2001:db8:1::1fff"})
 
-	if rec := env.do("PUT", "/api/interfaces/"+itoa(ifc), map[string]any{
-		"addresses": []string{"192.168.1.1/24", "2001:db8:2::1/64"}}); rec.Code != http.StatusOK {
-		t.Fatalf("renumber: %d %s", rec.Code, rec.Body)
-	}
-	var oldP, newP models.IpamPrefix
-	env.srv.db.Where("prefix = ?", "2001:db8:1::/64").First(&oldP)
-	env.srv.db.Where("prefix = ?", "2001:db8:2::/64").First(&newP)
-	if oldP.DhcpEnabled || oldP.RaEnabled {
+	env.patch("instance=main/interface=eth1", map[string]any{"addresses": []string{"192.168.1.1/24", "2001:db8:2::1/64"}})
+	oldP, newP := env.node("instance=main/ipam-prefix=2001:db8:1::%2F64"), env.node("instance=main/ipam-prefix=2001:db8:2::%2F64")
+	if oldP == nil || on(oldP, "dhcp-enabled") || on(oldP, "ra-enabled") {
 		t.Errorf("old prefix kept its settings: %+v", oldP)
 	}
-	if !newP.RaEnabled || !newP.RaSlaac || !newP.DhcpEnabled || newP.DhcpRangeStart != "2001:db8:2::1000" || newP.DhcpRangeEnd != "2001:db8:2::1fff" {
+	if newP == nil || !on(newP, "ra-enabled") || !on(newP, "ra-slaac") || !on(newP, "dhcp-enabled") ||
+		newP.Leaf("dhcp-range-start") != "2001:db8:2::1000" || newP.Leaf("dhcp-range-end") != "2001:db8:2::1fff" {
 		t.Errorf("new prefix: %+v", newP)
 	}
 }

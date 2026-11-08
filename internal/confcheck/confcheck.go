@@ -53,11 +53,24 @@ func (c *Ctx) old(e *datastore.Node) *datastore.Node {
 	if c.Before == nil {
 		return nil
 	}
-	n, _, err := c.Before.Find(datastore.PathOf(e))
+	p := datastore.PathOf(e)
+	// An entry renamed by the edit was at its old path.
+	for _, r := range slices.Backward(c.T.Renamed) {
+		to := slices.Clone(r.Path)
+		to[len(to)-1].Keys = r.Keys
+		if pathEqual(to, p) {
+			p = r.Path
+		}
+	}
+	n, _, err := c.Before.Find(p)
 	if err != nil {
 		return nil
 	}
 	return n
+}
+
+func pathEqual(a, b datastore.Path) bool {
+	return slices.EqualFunc(a, b, func(x, y datastore.Elem) bool { return x.Name == y.Name && slices.Equal(x.Keys, y.Keys) })
 }
 
 // Normalize runs the normalize hooks of the entries of t changed since

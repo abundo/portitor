@@ -4,6 +4,7 @@
 package web
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/netip"
@@ -122,6 +123,13 @@ func (s *Server) syncNICs(firewallID uint, nics []agentapi.NICStatus) (*nicSync,
 	})
 	if err != nil {
 		return nil, err
+	}
+	// The tables are a cache of the candidate: what was imported into them
+	// becomes the candidate's.
+	if len(res.Imported) > 0 {
+		if err := s.syncFromTables(context.Background()); err != nil {
+			return nil, err
+		}
 	}
 	return res, nil
 }

@@ -151,7 +151,7 @@ func TestDirectoryLogin(t *testing.T) {
 		"generate": map[string]any{"domains": []string{"vpn.example.com"}, "key_type": "ec256", "days": 30}})
 	env.create("/api/interfaces", map[string]any{"instance_id": inst.ID, "name": "ovpn0", "kind": "openvpn", "enabled": true,
 		"addresses": []string{"10.8.0.1/24"}, "ovpn_tcp_addresses": []string{"10.9.0.1/24"}, "ovpn_certificate_id": cert, "ovpn_role_id": role})
-	doc, err := builder.Build(tablesInput(t, env.srv.db), 1)
+	doc, err := builder.Build(env.input(), 1)
 	if err != nil {
 		t.Fatal(err)
 	}

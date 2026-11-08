@@ -41,14 +41,14 @@ submodule portitor-routing {
         type int32;
       }
       leaf evpn-rd {
-        type string;
+        type text;
       }
       leaf-list evpn-import-rts {
-        type string;
+        type text;
         ordered-by user;
       }
       leaf-list evpn-export-rts {
-        type string;
+        type text;
         ordered-by user;
       }
       leaf evpn-advertise-v4 {
@@ -168,7 +168,7 @@ submodule portitor-routing {
           type enumeration { enum "permit"; enum "deny"; }
         }
         leaf prefix {
-          type cidr;
+          type prefix-or-any;
           description "a CIDR, or \"any\"";
         }
         leaf ge {
@@ -1029,11 +1029,11 @@ submodule portitor-routing {
         default true;
       }
       leaf-list ipv4 {
-        type string;
+        type ipv4-address;
         ordered-by user;
       }
       leaf-list ipv6 {
-        type string;
+        type ipv6-address;
         ordered-by user;
       }
       leaf description {
@@ -1054,16 +1054,14 @@ submodule portitor-routing {
       }
       leaf detect-multiplier {
         type int32;
-        default 3;
+        description "0 (none): the virtual firewall's default.";
       }
       leaf receive-interval {
         type int32;
-        default 300;
         description "ms";
       }
       leaf transmit-interval {
         type int32;
-        default 300;
         description "ms";
       }
       leaf passive {

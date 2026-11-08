@@ -32,11 +32,11 @@ func TestRoles(t *testing.T) {
 	env.srv.newAgent = func(*models.Firewall) (agentAPI, error) { return &neighboursAgent{}, nil }
 	ann := env.create("/api/users", map[string]string{"username": "ann", "password": "a long password", "role": "viewer"})
 
-	env.create("/api/instances", map[string]any{"name": "main"}) // the default, which stays
+	env.host("main") // the default, which stays
 	if _, ok := env.roles()["vf-main"]; ok {
 		t.Fatal("the default instance has a role")
 	}
-	inst := env.create("/api/instances", map[string]any{"name": "lab"})
+	env.vf("lab")
 	r, ok := env.roles()["vf-lab"]
 	if !ok || r.Instance == nil || *r.Instance != "lab" {
 		t.Fatalf("instance role: %+v", env.roles())
@@ -48,9 +48,7 @@ func TestRoles(t *testing.T) {
 	if rec := env.do("DELETE", fmt.Sprintf("/api/roles/%d", r.ID), nil); rec.Code != http.StatusBadRequest {
 		t.Errorf("delete instance role: %d", rec.Code)
 	}
-	if rec := env.do("PUT", fmt.Sprintf("/api/instances/%d", inst), map[string]any{"name": "lab2"}); rec.Code != http.StatusOK {
-		t.Fatalf("rename instance: %d %s", rec.Code, rec.Body)
-	}
+	env.mustCfg("POST", "instance=lab?action=rename", map[string]any{"keys": []string{"lab2"}})
 	r = env.roles()["vf-lab2"]
 	if r.ID == 0 || len(r.Members) != 1 || r.Members[0].Level != "admin" {
 		t.Fatalf("renamed instance role: %+v", env.roles())
@@ -84,9 +82,7 @@ func TestRoles(t *testing.T) {
 	if n := len(env.roles()["ops"].Members); n != 0 {
 		t.Errorf("ops members after user delete: %d", n)
 	}
-	if rec := env.do("DELETE", fmt.Sprintf("/api/instances/%d", inst), nil); rec.Code != http.StatusNoContent {
-		t.Fatalf("delete instance: %d %s", rec.Code, rec.Body)
-	}
+	env.mustCfg("DELETE", "instance=lab2", nil)
 	if _, ok := env.roles()["vf-lab2"]; !ok {
 		t.Error("instance role gone before the commit")
 	}

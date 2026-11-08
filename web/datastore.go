@@ -46,7 +46,7 @@ type treeState struct {
 	mapping *sqlmap.Mapping
 	store   *datastore.Store
 
-	dir       string // the database's, where the candidate and ids.json are; "" in memory
+	dir       string            // the database's, where the candidate and ids.json are; "" in memory
 	idMarks   map[string]uint64 // assignID's high-water marks, by list path
 	runMu     sync.Mutex
 	runCommit int64

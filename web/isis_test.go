@@ -4,130 +4,99 @@
 package web
 
 import (
-	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
 
 	"github.com/abundo/portitor/internal/builder"
-	"github.com/abundo/portitor/models"
 )
 
 func TestISIS(t *testing.T) {
 	env := newEnv(t)
-	inst := env.create("/api/instances", map[string]any{"name": "main"})
-	eth := env.create("/api/interfaces", map[string]any{"instance_id": inst, "name": "eth1", "kind": "bridge", "enabled": true, "ipv4_mode": "static", "addresses": []string{"10.0.0.1/24", "fd00::1/64"}})
-	env.create("/api/routing/route-maps", map[string]any{"instance_id": inst, "name": "out"})
+	env.host("main")
+	env.put("instance=main/interface=eth1", map[string]any{"kind": "bridge", "enabled": true, "ipv4-mode": "static", "addresses": []string{"10.0.0.1/24", "fd00::1/64"}})
+	env.post("instance=main/route-map", map[string]any{"name": "out"})
+	isis := "instance=main/isis=main"
 
 	for what, body := range map[string]map[string]any{
-		"no net":       {"instance_id": inst, "enabled": true},
-		"bad net":      {"instance_id": inst, "net": "49.0001.1921.6800.1001"},
-		"bad level":    {"instance_id": inst, "level": "level-2"},
-		"unknown map":  {"instance_id": inst, "redistribute": []map[string]any{{"family": "ipv4", "source": "static", "level": "level-2", "route_map": "nope"}}},
-		"bad source":   {"instance_id": inst, "redistribute": []map[string]any{{"family": "ipv4", "source": "rip", "level": "level-2"}}},
-		"narrow+topo":  {"instance_id": inst, "metric_style": "narrow", "ipv6_topology": true},
-		"default twic": {"instance_id": inst, "default_originate": []map[string]any{{"family": "ipv4", "level": "level-2"}, {"family": "ipv4", "level": "level-2"}}},
+		"no net":      {"enabled": true},
+		"bad net":     {"net": "49.0001.1921.6800.1001"},
+		"bad level":   {"level": "level-2"},
+		"unknown map": {"redistribute": []map[string]any{{"family": "ipv4", "source": "static", "level": "level-2", "route-map": "nope"}}},
+		"bad source":  {"redistribute": []map[string]any{{"family": "ipv4", "source": "rip", "level": "level-2"}}},
+		"narrow+topo": {"metric-style": "narrow", "ipv6-topology": true},
 	} {
-		if rec := env.do("POST", "/api/isis/config", body); rec.Code != http.StatusBadRequest {
+		if rec := env.cfg("PUT", isis, body); rec.Code != http.StatusBadRequest {
 			t.Errorf("%s accepted: %d %s", what, rec.Code, rec.Body)
 		}
 	}
 	// The NET is stored in lower case.
-	rec := env.do("POST", "/api/isis/config", map[string]any{
-		"instance_id": inst, "enabled": true, "net": " 49.0001.0A00.0000.0001.00 ", "level": "level-2-only",
-		"redistribute": []map[string]any{{"family": "ipv4", "source": "connected", "level": "level-2", "route_map": "out"}},
-	})
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("create: %d %s", rec.Code, rec.Body)
-	}
-	var cfg models.IsisConfig
-	_ = json.Unmarshal(rec.Body.Bytes(), &cfg)
-	if cfg.Net != "49.0001.0a00.0000.0001.00" {
-		t.Errorf("net %q", cfg.Net)
-	}
-	if rec := env.do("POST", "/api/isis/config", map[string]any{"instance_id": inst}); rec.Code < 400 {
-		t.Errorf("second config: %d", rec.Code)
+	env.put(isis, map[string]any{"enabled": true, "net": " 49.0001.0A00.0000.0001.00 ", "level": "level-2-only", "redistribute": []map[string]any{{"family": "ipv4", "source": "connected", "level": "level-2", "route-map": "out"}}})
+	if net := env.node(isis).Leaf("net"); net != "49.0001.0a00.0000.0001.00" {
+		t.Errorf("net %q", net)
 	}
 	// The NET made from an interface's IPv4 address.
-	if rec := env.do("PUT", "/api/isis/config/"+itoa(cfg.ID), map[string]any{"net_interface": "eth9", "net_area": "49.0002"}); rec.Code != http.StatusBadRequest {
+	if rec := env.cfg("PATCH", isis, map[string]any{"net-interface": "eth9", "net-area": "49.0002"}); rec.Code != http.StatusBadRequest {
 		t.Errorf("unknown NET interface: %d", rec.Code)
 	}
-	if rec := env.do("PUT", "/api/isis/config/"+itoa(cfg.ID), map[string]any{"net_interface": "eth1", "net_area": "49.2"}); rec.Code != http.StatusBadRequest {
+	if rec := env.cfg("PATCH", isis, map[string]any{"net-interface": "eth1", "net-area": "49.2"}); rec.Code != http.StatusBadRequest {
 		t.Errorf("bad area: %d", rec.Code)
 	}
-	rec = env.do("PUT", "/api/isis/config/"+itoa(cfg.ID), map[string]any{"net_interface": "eth1", "net_area": "49.0002"})
-	_ = json.Unmarshal(rec.Body.Bytes(), &cfg)
-	if rec.Code != http.StatusOK || cfg.Net != "49.0002.0100.0000.0001.00" {
-		t.Errorf("NET from eth1: %d %q", rec.Code, cfg.Net)
+	env.patch(isis, map[string]any{"net-interface": "eth1", "net-area": "49.0002"})
+	if net := env.node(isis).Leaf("net"); net != "49.0002.0100.0000.0001.00" {
+		t.Errorf("NET from eth1: %q", net)
 	}
-	env.do("PUT", "/api/isis/config/"+itoa(cfg.ID), map[string]any{"net_interface": "", "net": "49.0001.0a00.0000.0001.00"})
+	env.patch(isis, map[string]any{"net-interface": nil, "net": "49.0001.0a00.0000.0001.00"})
 
 	for what, body := range map[string]map[string]any{
-		"unknown interface": {"instance_id": inst, "name": "eth9", "ipv4": true},
-		"no family":         {"instance_id": inst, "name": "eth1"},
-		"priority":          {"instance_id": inst, "name": "eth1", "ipv4": true, "priority": 200},
+		"unknown interface": {"name": "eth9", "ipv4": true},
+		"no family":         {"name": "eth1", "ipv4": false, "ipv6": false},
+		"priority":          {"name": "eth1", "ipv4": true, "priority": 200},
 	} {
-		if rec := env.do("POST", "/api/isis/interfaces", body); rec.Code != http.StatusBadRequest {
+		if rec := env.cfg("POST", "instance=main/isis-interface", body); rec.Code != http.StatusBadRequest {
 			t.Errorf("%s accepted: %d %s", what, rec.Code, rec.Body)
 		}
 	}
-	env.create("/api/isis/interfaces", map[string]any{"instance_id": inst, "name": "eth1", "ipv4": true, "ipv6": true, "metric": 100})
+	env.post("instance=main/isis-interface", map[string]any{"name": "eth1", "ipv4": true, "ipv6": true, "metric": 100})
 	// Narrow metrics go up to 63.
-	if rec := env.do("PUT", "/api/isis/config/"+itoa(cfg.ID), map[string]any{"metric_style": "narrow"}); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "eth1") {
+	if rec := env.cfg("PATCH", isis, map[string]any{"metric-style": "narrow"}); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "eth1") {
 		t.Errorf("narrow: %d %s", rec.Code, rec.Body)
 	}
 
 	// Renaming the interface and the route map rewrites them; deleting
 	// either is refused while IS-IS uses it.
-	if rec := env.do("PUT", "/api/interfaces/"+itoa(eth), map[string]any{"name": "lan"}); rec.Code != http.StatusOK {
-		t.Fatalf("rename: %d %s", rec.Code, rec.Body)
+	env.mustCfg("POST", "instance=main/interface=eth1?action=rename", map[string]any{"keys": []string{"lan"}})
+	env.mustCfg("POST", "instance=main/route-map=out?action=rename", map[string]any{"keys": []string{"export"}})
+	if env.node("instance=main/isis-interface=lan") == nil || env.node(isis).Lists["redistribute"][0].Leaf("route-map") != "export" {
+		t.Errorf("not rewritten")
 	}
-	var rm models.RouteMap
-	env.srv.db.Where("instance_id = ? AND name = ?", inst, "out").First(&rm)
-	if rec := env.do("PUT", "/api/routing/route-maps/"+itoa(rm.ID), map[string]any{"name": "export"}); rec.Code != http.StatusOK {
-		t.Fatalf("rename: %d %s", rec.Code, rec.Body)
-	}
-	var names []string
-	env.srv.db.Model(&models.IsisInterface{}).Pluck("name", &names)
-	env.srv.db.First(&cfg, cfg.ID)
-	if strings.Join(names, ",") != "lan" || cfg.Redistribute[0].RouteMap != "export" {
-		t.Errorf("not rewritten: %v %+v", names, cfg.Redistribute)
-	}
-	if rec := env.do("DELETE", "/api/interfaces/"+itoa(eth), nil); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "IS-IS") {
+	if rec := env.cfg("DELETE", "instance=main/interface=lan", nil); rec.Code != http.StatusBadRequest {
 		t.Errorf("delete interface: %d %s", rec.Code, rec.Body)
 	}
-	if rec := env.do("DELETE", "/api/routing/route-maps/"+itoa(rm.ID), nil); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "IS-IS redistribute") {
+	if rec := env.cfg("DELETE", "instance=main/route-map=export", nil); rec.Code != http.StatusBadRequest {
 		t.Errorf("delete route map: %d %s", rec.Code, rec.Body)
 	}
 
-	// Passwords are write-only: never answered, kept on a save without one.
+	// Passwords are secrets: never answered, kept by a replace without.
 	const areaPw, helloPw = "ar3aPw", "h3lloPw"
-	if rec := env.do("PUT", "/api/isis/config/"+itoa(cfg.ID), map[string]any{"new_area_password": "two words"}); rec.Code != http.StatusBadRequest {
+	if rec := env.cfg("PATCH", isis, map[string]any{"area-password": "two words"}); rec.Code != http.StatusBadRequest {
 		t.Errorf("password with space: %d %s", rec.Code, rec.Body)
 	}
-	rec = env.do("PUT", "/api/isis/config/"+itoa(cfg.ID), map[string]any{"new_area_password": areaPw, "area_password_type": "clear"})
-	if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), areaPw) || !strings.Contains(rec.Body.String(), `"has_area_password":true`) {
-		t.Fatalf("area password: %d %s", rec.Code, rec.Body)
-	}
-	env.do("PUT", "/api/isis/config/"+itoa(cfg.ID), map[string]any{"overload": true})
-	var ifs []models.IsisInterface
-	env.srv.db.Find(&ifs)
-	rec = env.do("PUT", "/api/isis/interfaces/"+itoa(ifs[0].ID), map[string]any{"new_password": helloPw})
-	if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), helloPw) || !strings.Contains(rec.Body.String(), `"has_password":true`) {
-		t.Fatalf("hello password: %d %s", rec.Code, rec.Body)
-	}
-	env.do("PUT", "/api/isis/interfaces/"+itoa(ifs[0].ID), map[string]any{"metric": 20})
-	for _, path := range []string{"/api/isis/config?instance_id=" + itoa(inst), "/api/isis/interfaces?instance_id=" + itoa(inst)} {
-		if rec := env.do("GET", path, nil); strings.Contains(rec.Body.String(), areaPw) || strings.Contains(rec.Body.String(), helloPw) {
+	env.patch(isis, map[string]any{"area-password": areaPw, "area-password-type": "clear"})
+	env.patch(isis, map[string]any{"overload": true})
+	env.patch("instance=main/isis-interface=lan", map[string]any{"password": helloPw})
+	env.patch("instance=main/isis-interface=lan", map[string]any{"metric": 20})
+	for _, path := range []string{isis, "instance=main/isis-interface"} {
+		if rec := env.do("GET", "/api/config/candidate/"+path, nil); strings.Contains(rec.Body.String(), areaPw) || strings.Contains(rec.Body.String(), helloPw) {
 			t.Errorf("password leaked: %s", rec.Body)
 		}
 	}
 
 	// BGP and OSPF redistribute IS-IS.
-	env.create("/api/bgp/config", map[string]any{"instance_id": inst, "enabled": true, "asn": 65000, "redist_isis_v4": true, "redist_isis_v4_map": "export"})
-	env.create("/api/ospf/config", map[string]any{"instance_id": inst, "version": 2, "enabled": true, "redistribute": []map[string]any{{"source": "isis"}}})
+	env.put("instance=main/bgp=main", map[string]any{"enabled": true, "asn": 65000, "redist-isis-v4": true, "redist-isis-v4-map": "export"})
+	env.put("instance=main/ospf=2,main", map[string]any{"enabled": true, "redistribute": []map[string]any{{"source": "isis"}}})
 
-	doc, err := builder.Build(tablesInput(t, env.srv.db), 1)
+	doc, err := builder.Build(env.input(), 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,17 +109,10 @@ func TestISIS(t *testing.T) {
 		in.OSPF == nil || in.OSPF.Redistribute[0].Source != "isis" {
 		t.Errorf("redistribute: %+v %+v", in.BGP, in.OSPF)
 	}
-	if rec := env.do("DELETE", "/api/routing/route-maps/"+itoa(rm.ID), nil); !strings.Contains(rec.Body.String(), "BGP redistribute") {
-		t.Errorf("BGP's reference not kept: %d %s", rec.Code, rec.Body)
-	}
-	var bgp models.BgpConfig
-	env.srv.db.Where("instance_id = ?", inst).First(&bgp)
-	env.do("PUT", "/api/bgp/config/"+itoa(bgp.ID), map[string]any{"enabled": false})
-	var ospf models.OspfConfig
-	env.srv.db.Where("instance_id = ?", inst).First(&ospf)
-	env.do("PUT", "/api/ospf/config/"+itoa(ospf.ID), map[string]any{"enabled": false})
-	env.do("PUT", "/api/isis/config/"+itoa(cfg.ID), map[string]any{"enabled": false})
-	doc, _ = builder.Build(tablesInput(t, env.srv.db), 2)
+	env.patch("instance=main/bgp=main", map[string]any{"enabled": false})
+	env.patch("instance=main/ospf=2,main", map[string]any{"enabled": false})
+	env.patch(isis, map[string]any{"enabled": false})
+	doc, _ = builder.Build(env.input(), 2)
 	if in := doc.Instance("main"); in.ISIS != nil || !in.RoutingPolicy.Empty() {
 		t.Errorf("off: %+v", in)
 	}

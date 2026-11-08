@@ -262,7 +262,7 @@ submodule portitor-services {
         description "AuthKey fills {key} in the URLs. It is set through NewAuthKey (empty keeps it, ClearAuthKey removes it) and never sent back.";
       }
       leaf action {
-        type string;
+        type enumeration { enum "nxdomain"; enum "nodata"; enum "drop"; enum "log"; }
         default "nxdomain";
         description "fwconfig.Blocklist*";
       }
@@ -293,7 +293,6 @@ submodule portitor-services {
       }
       leaf server {
         type string;
-        mandatory true;
       }
       leaf zone {
         type domain-name;

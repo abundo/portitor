@@ -12,7 +12,6 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
-	"fmt"
 	"math/big"
 	"net/http"
 	"os"
@@ -63,10 +62,10 @@ func TestWebCertificate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	inst := env.create("/api/instances", map[string]any{"name": "main"})
-	wan := env.create("/api/interfaces", map[string]any{"instance_id": inst, "name": "wan", "ipv4_mode": "dhcp", "enabled": true})
-	id := env.create("/api/certificates", map[string]any{"instance_id": inst, "name": "web", "enabled": true,
-		"interface_id": wan, "domains": []string{"a.example.com"}})
+	env.host("main")
+	env.put("instance=main/interface=wan", map[string]any{"kind": "physical", "ipv4-mode": "dhcp", "enabled": true})
+	env.put("instance=main/certificate=web", map[string]any{"enabled": true, "interface": "wan", "domains": []string{"a.example.com"}})
+	id := env.rowID("certificates", "web")
 
 	tc := env.srv.newTLSCert(&fallback)
 	env.srv.webCert = tc
@@ -120,7 +119,7 @@ func TestWebCertificate(t *testing.T) {
 	}
 	// Deleting the chosen certificate clears the choice.
 	env.do("PUT", "/api/settings", map[string]any{"web_certificate_id": id})
-	if rec := env.do("DELETE", fmt.Sprintf("/api/certificates/%v", id), nil); rec.Code >= 300 {
+	if rec := env.cfg("DELETE", "instance=main/certificate=web", nil); rec.Code >= 300 {
 		t.Fatalf("delete: %d %s", rec.Code, rec.Body)
 	}
 	if st, _ := env.srv.settings(); st.WebCertificateID != nil {

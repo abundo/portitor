@@ -22,38 +22,38 @@ func richInstance(t *testing.T, env *testEnv, name string) uint {
 	if err := env.srv.ensureDefaultInstance(); err != nil {
 		t.Fatal(err)
 	}
-	inst := env.create("/api/instances", map[string]any{"name": name, "dns_upstream": "root", "dhcp_enabled": true, "dhcp_domain_name": "shop.example"})
-	env.create("/api/vrfs", map[string]any{"instance_id": inst, "name": "blue", "route_table": 10})
-	env.create("/api/interfaces", map[string]any{"instance_id": inst, "name": "eth1", "kind": "physical", "addresses": []string{"192.168.5.1/24"}, "enabled": true, "dns_listen": true})
-	env.create("/api/interfaces", map[string]any{"instance_id": inst, "name": "eth2", "kind": "physical", "addresses": []string{"10.2.0.1/24"}, "enabled": true, "vrf": "blue"})
-	wg := env.create("/api/interfaces", map[string]any{"instance_id": inst, "name": "wg0", "kind": "wireguard", "enabled": true, "ipv4_mode": "static", "addresses": []string{"10.9.0.1/24"}, "wg_listen_port": 51820})
-	env.create("/api/wg/peers", map[string]any{"interface_id": wg, "name": "phone", "allowed_ips": []string{"10.9.0.2/32"}, "enabled": true})
+	env.vf(name)
+	in := "instance=" + name
+	env.patch(in, map[string]any{"dns-upstream": "root", "dhcp-enabled": true, "dhcp-domain-name": "shop.example"})
+	env.put(in+"/vrf=blue", map[string]any{"route-table": 10})
+	env.put(in+"/interface=eth1", map[string]any{"kind": "physical", "addresses": []string{"192.168.5.1/24"}, "enabled": true, "dns-listen": true})
+	env.put(in+"/interface=eth2", map[string]any{"kind": "physical", "addresses": []string{"10.2.0.1/24"}, "enabled": true, "vrf": "blue"})
+	env.put(in+"/interface=wg0", map[string]any{"kind": "wireguard", "enabled": true, "ipv4-mode": "static", "addresses": []string{"10.9.0.1/24"}, "wg-listen-port": 51820})
+	env.put(in+"/interface=wg0/wireguard-peer=phone", map[string]any{"allowed-ips": []string{"10.9.0.2/32"}, "enabled": true})
 	// OpenVPN, by its certificate (a cycle with the certificates'
 	// interfaces), with no user in its role: the users differ between
 	// installations.
-	cert := env.create("/api/certificates", map[string]any{"instance_id": inst, "name": "vpn", "enabled": true, "source": "import",
-		"generate": map[string]any{"domains": []string{"vpn.shop.example"}, "key_type": "ec256", "days": 30}})
-	vpnRole := env.create("/api/roles", map[string]any{"name": "vpn-" + name})
-	env.create("/api/interfaces", map[string]any{"instance_id": inst, "name": "ovpn0", "kind": "openvpn", "enabled": true,
-		"addresses": []string{"10.8.0.1/24"}, "ovpn_tcp_addresses": []string{"10.7.0.1/24"}, "ovpn_listen": "eth1", "ovpn_certificate_id": cert, "ovpn_role_id": vpnRole})
-	zone := env.create("/api/dns/zones", map[string]any{"instance_id": inst, "name": "shop.example"})
-	env.create("/api/dns/records", map[string]any{"zone_id": zone, "name": "nas", "type": "A", "value": "192.168.5.10"})
-	env.create("/api/ipam/prefixes", map[string]any{"instance_id": inst, "prefix": "192.168.5.0/24", "dhcp_enabled": true, "dhcp_range_start": "192.168.5.100", "dhcp_range_end": "192.168.5.199"})
-	env.create("/api/routes", map[string]any{"instance_id": inst, "destination": "10.50.0.0/16", "gateway": "10.2.0.254", "vrf_id": nil, "enabled": true})
-	env.create("/api/bgp/config", map[string]any{"instance_id": inst, "enabled": true, "asn": 65010})
-	env.create("/api/bgp/neighbors", map[string]any{"instance_id": inst, "address": "192.168.5.2", "enabled": true, "remote_as": "65011"})
-	env.create("/api/objects", map[string]any{"name": "nas", "addresses": []string{"192.168.5.10"}})
-	env.create("/api/custom-services", map[string]any{"name": "unifi", "type": "tcp/udp/sctp", "ports": []any{map[string]any{"protocol": "tcp", "dst_lo": 8443, "dst_hi": 0}}})
-	env.create("/api/rules", map[string]any{"instance_id": inst, "chain": "forward", "action": "accept", "enabled": true,
-		"dst_addrs": []string{"nas"}, "services": []string{"unifi"}})
-	return inst
+	env.mustCfg("POST", in+"/certificate=vpn?action=generate", map[string]any{"domains": []string{"vpn.shop.example"}, "key-type": "ec256", "days": 30})
+	env.create("/api/roles", map[string]any{"name": "vpn-" + name})
+	env.put(in+"/interface=ovpn0", map[string]any{"kind": "openvpn", "enabled": true,
+		"addresses": []string{"10.8.0.1/24"}, "ovpn-tcp-addresses": []string{"10.7.0.1/24"}, "ovpn-listen": "eth1", "ovpn-certificate": "vpn", "ovpn-role": "vpn-" + name})
+	env.put(in+"/dns-zone=shop.example", map[string]any{})
+	env.post(in+"/dns-zone=shop.example/record", map[string]any{"name": "nas", "type": "A", "value": "192.168.5.10"})
+	env.post(in+"/ipam-prefix", map[string]any{"prefix": "192.168.5.0/24", "dhcp-enabled": true, "dhcp-range-start": "192.168.5.100", "dhcp-range-end": "192.168.5.199"})
+	env.post(in+"/route", map[string]any{"destination": "10.50.0.0/16", "gateway": "10.2.0.254", "enabled": true})
+	env.put(in+"/bgp=main", map[string]any{"enabled": true, "asn": 65010})
+	env.post(in+"/bgp-neighbor", map[string]any{"address": "192.168.5.2", "vrf": "main", "enabled": true, "remote-as": "65011"})
+	env.post("host", map[string]any{"name": "nas", "addresses": []string{"192.168.5.10"}})
+	env.post("service", map[string]any{"name": "unifi", "type": "tcp/udp/sctp", "port": []any{map[string]any{"protocol": "tcp", "dst-lo": 8443, "dst-hi": 0, "src-lo": 0, "src-hi": 0}}})
+	env.post(in+"/rule", map[string]any{"chain": "forward", "action": "accept", "enabled": true, "dst-addrs": []string{"nas"}, "services": []string{"unifi"}})
+	return env.rowID("instances", name)
 }
 
 // docOf builds one instance as the agent would get it, rule ids aside
 // (they are row ids).
 func docOf(t *testing.T, env *testEnv, name string) string {
 	t.Helper()
-	doc, err := builder.BuildInstances(tablesInput(t, env.srv.db), 0, map[string]bool{name: true})
+	doc, err := builder.BuildInstances(env.input(), 0, map[string]bool{name: true})
 	if err != nil {
 		t.Fatalf("build %s: %v", name, err)
 	}

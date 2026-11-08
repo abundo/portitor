@@ -5,6 +5,7 @@ package confcheck
 
 import (
 	"fmt"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -26,14 +27,14 @@ func init() {
 	register("/ip-list", hook{normalize: normalizeIPList, check: checkIPList})
 	register("/service", hook{normalize: normalizeService, check: checkService})
 	register("/port-name", hook{normalize: normalizePortName, check: checkPortName})
-	register("/object-folder", hook{normalize: normalizeFolder})
+	register("/object-folder", hook{normalize: normalizeFolder, check: checkFolder})
 	register("/task", hook{normalize: normalizeTask, check: checkTask})
 	register("/instance/rate-limit", hook{normalize: normalizeRateLimit, check: checkRateLimit})
 	register("/instance/syslog-server", hook{check: checkSyslogServer})
 }
 
 func checkHost(c *Ctx, o *datastore.Node) []error {
-	var errs []error
+	errs := checkItemFolder(c, o, "hosts")
 	name := o.Leaf("name")
 	if !netobj.ValidName(name) {
 		errs = append(errs, fail("name: letters, digits, _ . -, starting with a letter, at most 63 characters (not \"default\" or \"any\")"))
@@ -61,7 +62,7 @@ func nameSet(c *Ctx) netobj.Set {
 }
 
 func checkAddressList(c *Ctx, l *datastore.Node) []error {
-	var errs []error
+	errs := checkItemFolder(c, l, "address_lists")
 	name := l.Leaf("name")
 	if !netobj.ValidName(name) {
 		errs = append(errs, fail("name: letters, digits, _ . -, starting with a letter, at most 63 characters (not \"default\" or \"any\")"))
@@ -82,12 +83,29 @@ func checkAddressList(c *Ctx, l *datastore.Node) []error {
 }
 
 func normalizeIPList(c *Ctx, l *datastore.Node) error {
+	// Renamed: the rules and policy routes that name it follow.
+	if old := c.old(l); old != nil && old.Leaf("name") != l.Leaf("name") {
+		from, to := fwconfig.IPListRef+old.Leaf("name"), fwconfig.IPListRef+l.Leaf("name")
+		for _, in := range c.T.Root.Lists["instance"] {
+			for _, list := range []string{"rule", "policy-route"} {
+				for _, r := range in.Lists[list] {
+					for _, leaf := range []string{"src-addrs", "dst-addrs"} {
+						for i, v := range r.LeafLists[leaf] {
+							if v == from {
+								r.LeafLists[leaf][i] = to
+							}
+						}
+					}
+				}
+			}
+		}
+	}
 	switch l.Leaf("source") {
 	case fwconfig.IPListCountry:
 		clear(l, "url", "username", "password", "api-key")
 		if cs := l.LeafLists["countries"]; cs != nil {
 			for i, x := range cs {
-				cs[i] = strings.ToUpper(x)
+				cs[i] = strings.ToUpper(strings.TrimSpace(x))
 			}
 			l.LeafLists["countries"] = dedupe(cs)
 		}
@@ -103,7 +121,7 @@ func normalizeIPList(c *Ctx, l *datastore.Node) error {
 }
 
 func checkIPList(c *Ctx, l *datastore.Node) []error {
-	var errs []error
+	errs := checkItemFolder(c, l, "ip_lists")
 	name := l.Leaf("name")
 	if strings.HasPrefix(name, fwconfig.IPListRef) {
 		errs = append(errs, fail("name: not starting with %s", fwconfig.IPListRef))
@@ -177,12 +195,36 @@ func checkService(c *Ctx, s *datastore.Node) []error {
 	return nil
 }
 
-func normalizePortName(c *Ctx, p *datastore.Node) error { return nil }
+// normalizePortName: a port name renamed is renamed in the NAT rules'
+// port lists, which name it.
+func normalizePortName(c *Ctx, p *datastore.Node) error {
+	old := c.old(p)
+	if old == nil || old.Leaf("name") == p.Leaf("name") {
+		return nil
+	}
+	from, to := old.Leaf("name"), p.Leaf("name")
+	for _, in := range c.T.Root.Lists["instance"] {
+		for _, n := range in.Lists["nat-rule"] {
+			ports, ok := n.Leaves["dst-ports"]
+			if !ok {
+				continue
+			}
+			parts := strings.Split(ports, ",")
+			for i, part := range parts {
+				if strings.EqualFold(strings.TrimSpace(part), from) {
+					parts[i] = strings.Replace(part, strings.TrimSpace(part), to, 1)
+				}
+			}
+			n.Leaves["dst-ports"] = strings.Join(parts, ",")
+		}
+	}
+	return nil
+}
 
 func checkPortName(c *Ctx, p *datastore.Node) []error {
 	var errs []error
 	name := p.Leaf("name")
-	if name != strings.ToLower(name) || !netobj.ValidServiceName(name) {
+	if !portNameRe.MatchString(name) {
 		errs = append(errs, fail("name: lower-case letters, digits, _ . -, starting with a letter, at most 63 characters"))
 	}
 	if _, ok := fwconfig.ServicePort(name); ok {
@@ -246,8 +288,13 @@ func normalizeRateLimit(c *Ctx, l *datastore.Node) error {
 		} else {
 			clear(l, "service")
 		}
-	} else {
-		clear(l, "service") // only a seeded one is a service's
+	} else if svc := l.Leaf("service"); svc != "" {
+		// One rate limit per service: the seeded one.
+		for _, o := range l.Parent.Lists["rate-limit"] {
+			if o != l && o.Leaf("service") == svc {
+				clear(l, "service")
+			}
+		}
 	}
 	set(l, "per", fwconfig.RatePerSecond)
 	if on(l, "shape") {
@@ -315,6 +362,8 @@ func checkSyslogServer(c *Ctx, s *datastore.Node) []error {
 	return nil
 }
 
+var portNameRe = regexp.MustCompile(`^[a-z][a-z0-9_.-]{0,62}$`)
+
 // The services with a rate limit of their own: the instance's leaf that
 // switches it on, and the rate limit's name and description.
 var serviceRateLimits = []struct{ service, leaf, name, description string }{
@@ -330,7 +379,7 @@ func seedInstance(c *Ctx, in *datastore.Node) error {
 	for _, sv := range serviceRateLimits {
 		set(in, sv.leaf, "true")
 	}
-	if err := ensureServiceRateLimits(c, in); err != nil {
+	if err := ensureServiceRateLimits(c, in, nil); err != nil {
 		return err
 	}
 	if len(in.Lists["rule"]) == 0 {
@@ -343,13 +392,14 @@ func seedInstance(c *Ctx, in *datastore.Node) error {
 }
 
 // ensureServiceRateLimits makes the rate limit of each service the
-// instance switches its rate limit on for, unless it has one: policing
+// instance switches its rate limit on for (it was off in old, or there was
+// no old), unless it has one: policing
 // fwconfig.DefaultServiceRate Mbit/s of connections, named after the
 // service, or with a number when that name is taken.
-func ensureServiceRateLimits(c *Ctx, in *datastore.Node) error {
+func ensureServiceRateLimits(c *Ctx, in, old *datastore.Node) error {
 	s := in.S.Child("rate-limit")
 	for _, sv := range serviceRateLimits {
-		if !on(in, sv.leaf) || slices.ContainsFunc(in.Lists["rate-limit"], func(l *datastore.Node) bool { return l.Leaf("service") == sv.service }) {
+		if !on(in, sv.leaf) || (old != nil && on(old, sv.leaf)) || serviceLimit(in, sv.service) != nil {
 			continue
 		}
 		name := sv.name
@@ -365,6 +415,27 @@ func ensureServiceRateLimits(c *Ctx, in *datastore.Node) error {
 		set(l, "connections", "true")
 	}
 	return nil
+}
+
+// serviceLimit is the instance's rate limit of the service, or nil.
+func serviceLimit(in *datastore.Node, service string) *datastore.Node {
+	for _, l := range in.Lists["rate-limit"] {
+		if l.Leaf("service") == service {
+			return l
+		}
+	}
+	return nil
+}
+
+// checkServiceLimits: a service's switch on needs its rate limit.
+func checkServiceLimits(in *datastore.Node) []error {
+	var errs []error
+	for _, sv := range serviceRateLimits {
+		if on(in, sv.leaf) && serviceLimit(in, sv.service) == nil {
+			errs = append(errs, fail("%s: on, but the %s's rate limit is gone; switch it off first", sv.leaf, strings.ToUpper(sv.service)+" server"))
+		}
+	}
+	return errs
 }
 
 // nextRuleID is an id above every rule's in the tree and before the edit.
@@ -383,4 +454,27 @@ func nextRuleID(c *Ctx) uint64 {
 		}
 	}
 	return max + 1
+}
+
+// checkFolder: a folder's name is unique where it is, and its parent is a
+// folder of its kind.
+func checkFolder(c *Ctx, f *datastore.Node) []error {
+	var errs []error
+	for _, o := range c.T.Root.Lists["object-folder"] {
+		if o != f && o.Leaf("kind") == f.Leaf("kind") && o.Leaf("name") == f.Leaf("name") && o.Leaf("parent") == f.Leaf("parent") {
+			errs = append(errs, fail("name: there is a folder %s here already", f.Leaf("name")))
+		}
+	}
+	if p := c.T.Root.Entry("object-folder", []string{f.Leaf("parent")}); p != nil && p.Leaf("kind") != f.Leaf("kind") {
+		errs = append(errs, fail("parent: a folder of %s, not %s", p.Leaf("kind"), f.Leaf("kind")))
+	}
+	return errs
+}
+
+// checkItemFolder: an item is in a folder of its kind.
+func checkItemFolder(c *Ctx, e *datastore.Node, kind string) []error {
+	if f := c.T.Root.Entry("object-folder", []string{e.Leaf("folder")}); f != nil && f.Leaf("kind") != kind {
+		return []error{fail("folder: a folder of %s, not %s", f.Leaf("kind"), kind)}
+	}
+	return nil
 }

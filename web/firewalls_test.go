@@ -121,8 +121,8 @@ func twoFirewalls(t *testing.T) (*testEnv, map[uint]*fleetAgent, uint) {
 	branch := env.create("/api/firewalls", map[string]any{"name": "branch", "agent_url": "https://192.0.2.2:8443", "agent_token": "secret"})
 	agents := map[uint]*fleetAgent{1: {}, branch: {}}
 	env.srv.newAgent = func(f *models.Firewall) (agentAPI, error) { return agents[f.ID], nil }
-	env.create("/api/instances", map[string]any{"name": "guest"})
-	env.create("/api/instances", map[string]any{"name": "shop", "firewall_id": branch})
+	env.vf("guest")
+	env.mustCfg("POST", "instance", map[string]any{"name": "shop", "firewall": "branch"})
 	return env, agents, branch
 }
 
@@ -238,8 +238,7 @@ func TestFirewallsRules(t *testing.T) {
 	env.srv.db.Where("name = ?", "shop").First(&shop)
 
 	// A link stays on one firewall.
-	if rec := env.do("POST", "/api/links", map[string]any{"name": "l1", "instance_a_id": guest.ID, "instance_b_id": shop.ID,
-		"interface_a": "to-shop", "interface_b": "to-guest"}); rec.Code != http.StatusBadRequest {
+	if rec := env.cfg("POST", "link", map[string]any{"name": "l1", "instance-a": guest.ID, "instance-b": shop.ID, "interface-a": "to-shop", "interface-b": "to-guest"}); rec.Code != http.StatusBadRequest {
 		t.Errorf("link across firewalls: %d %s", rec.Code, rec.Body)
 	}
 	// A firewall's name can't be a virtual firewall's, and one with

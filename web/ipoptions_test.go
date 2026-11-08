@@ -14,11 +14,11 @@ import (
 
 func TestDropIPOptionsSetting(t *testing.T) {
 	env := newEnv(t)
-	inst := env.create("/api/instances", map[string]any{"name": "main"})
-	env.create("/api/interfaces", map[string]any{"instance_id": inst, "name": "eth0", "enabled": true})
+	env.host("main")
+	env.post("instance=main/interface", map[string]any{"kind": "physical", "name": "eth0", "enabled": true})
 	build := func() []string {
 		t.Helper()
-		doc, err := builder.BuildFirewall(tablesInput(t, env.srv.db), 1, 1)
+		doc, err := builder.BuildFirewall(env.input(), 1, 1)
 		if err != nil {
 			t.Fatal(err)
 		}

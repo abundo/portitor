@@ -33,10 +33,10 @@ func TestSyncNICs(t *testing.T) {
 	}
 	var main models.Instance
 	env.srv.db.First(&main)
-	lan := env.create("/api/instances", map[string]any{"name": "lan"})
-	env.create("/api/interfaces", map[string]any{"instance_id": lan, "name": "eth9", "enabled": true})
-	env.create("/api/interfaces", map[string]any{"instance_id": lan, "name": "eth3", "enabled": true})
-	env.create("/api/ipam/prefixes", map[string]any{"instance_id": main.ID, "prefix": "10.0.0.0/8"})
+	env.vf("lan")
+	env.post("instance=lan/interface", map[string]any{"kind": "physical", "name": "eth9", "enabled": true})
+	env.post("instance=lan/interface", map[string]any{"kind": "physical", "name": "eth3", "enabled": true})
+	env.post("instance=main/ipam-prefix", map[string]any{"prefix": "10.0.0.0/8"})
 
 	fake := &statusAgent{nics: []agentapi.NICStatus{
 		{Name: "eth0", Up: true, DHCPv4: true, SLAAC: true, Addresses: []string{}},

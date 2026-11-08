@@ -257,7 +257,7 @@ func TestCLIInstanceRoles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	env.create("/api/instances", map[string]any{"name": "lab"})
+	env.vf("lab")
 	ann := env.create("/api/users", map[string]string{"username": "ann", "password": "a long password", "role": "none"})
 	r := env.roles()["vf-lab"]
 	env.do("PUT", "/api/roles/"+itoa(r.ID), map[string]any{"members": []map[string]any{{"user_id": ann, "level": "admin"}}})

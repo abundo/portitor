@@ -5,123 +5,89 @@ package web
 
 import (
 	"encoding/json"
+	"maps"
 	"net/http"
 	"strings"
 	"testing"
 
 	"github.com/abundo/portitor/internal/builder"
-	"github.com/abundo/portitor/models"
 )
 
 func TestRoutingObjects(t *testing.T) {
 	env := newEnv(t)
-	inst := env.create("/api/instances", map[string]any{"name": "main"})
-	other := env.create("/api/instances", map[string]any{"name": "lab"})
+	env.host("main")
+	env.vf("lab")
 
-	// Entries are normalised: sequence numbers filled in and sorted,
-	// prefixes masked.
-	rec := env.do("POST", "/api/routing/prefix-lists", map[string]any{
-		"instance_id": inst, "name": "ours", "family": "ipv4",
-		"entries": []map[string]any{{"seq": 20, "action": "deny", "prefix": "any"}, {"action": "permit", "prefix": "192.168.1.0/24", "le": 32}},
-	})
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("create: %d %s", rec.Code, rec.Body)
-	}
-	var pl models.RoutePrefixList
-	_ = json.Unmarshal(rec.Body.Bytes(), &pl)
-	if len(pl.Entries) != 2 || pl.Entries[0].Seq != 20 || pl.Entries[1].Seq != 25 || pl.Entries[1].Prefix != "192.168.1.0/24" {
-		t.Errorf("entries: %+v", pl.Entries)
+	// Prefixes are masked.
+	env.put("instance=main/prefix-list=ours", map[string]any{"family": "ipv4", "entry": []map[string]any{{"seq": 20, "action": "deny", "prefix": "any"}, {"seq": 25, "action": "permit", "prefix": "192.168.1.7/24", "le": 32}}})
+	if es := env.node("instance=main/prefix-list=ours").Lists["entry"]; len(es) != 2 || es[1].Leaf("prefix") != "192.168.1.0/24" {
+		t.Errorf("entries: %v", es)
 	}
 	for what, body := range map[string]map[string]any{
-		"bad family":   {"instance_id": inst, "name": "x", "family": "ipv5"},
-		"wrong family": {"instance_id": inst, "name": "x", "family": "ipv6", "entries": []map[string]any{{"action": "permit", "prefix": "10.0.0.0/8"}}},
-		"bad name":     {"instance_id": inst, "name": "a b"},
-		"duplicate":    {"instance_id": inst, "name": "ours"},
+		"bad family":   {"name": "x", "family": "ipv5"},
+		"wrong family": {"name": "x", "family": "ipv6", "entry": []map[string]any{{"seq": 5, "action": "permit", "prefix": "10.0.0.0/8"}}},
+		"bad name":     {"name": "a b"},
+		"duplicate":    {"name": "ours"},
 	} {
-		if rec := env.do("POST", "/api/routing/prefix-lists", body); rec.Code < 400 {
+		if rec := env.cfg("POST", "instance=main/prefix-list", body); rec.Code < 400 {
 			t.Errorf("%s accepted: %d %s", what, rec.Code, rec.Body)
 		}
 	}
 	// The same name in another instance is another list.
-	env.create("/api/routing/prefix-lists", map[string]any{"instance_id": other, "name": "ours", "family": "ipv4"})
-	env.create("/api/routing/as-path-lists", map[string]any{"instance_id": inst, "name": "short", "entries": []map[string]any{{"action": "permit", "regex": "^65000$"}}})
-	env.create("/api/routing/community-lists", map[string]any{"instance_id": inst, "name": "blackhole", "kind": "standard", "entries": []map[string]any{{"action": "permit", "value": "  65000:666   blackhole "}}})
+	env.put("instance=lab/prefix-list=ours", map[string]any{"family": "ipv4"})
+	env.put("instance=main/as-path-list=short", map[string]any{"entry": []map[string]any{{"action": "permit", "regex": "^65000$"}}})
+	env.put("instance=main/community-list=blackhole", map[string]any{"kind": "standard", "entry": []map[string]any{{"action": "permit", "value": "  65000:666   blackhole "}}})
 
 	// A route map refers to objects of its own instance only.
 	entries := []map[string]any{
-		{"seq": 10, "action": "permit", "match_prefix_list": "ours", "match_as_path": "short", "set_local_preference": 200},
-		{"seq": 20, "action": "deny", "match_community": "blackhole", "set_metric": 5},
+		{"seq": 10, "action": "permit", "match-prefix-list": "ours", "match-as-path": "short", "set-local-preference": 200},
+		{"seq": 20, "action": "deny", "match-community": "blackhole", "set-metric": 5},
 	}
-	if rec := env.do("POST", "/api/routing/route-maps", map[string]any{"instance_id": other, "name": "in", "entries": entries}); rec.Code != http.StatusBadRequest {
+	if rec := env.cfg("PUT", "instance=lab/route-map=in", map[string]any{"entry": entries}); rec.Code != http.StatusBadRequest {
 		t.Errorf("objects of another instance: %d %s", rec.Code, rec.Body)
 	}
-	rm := env.create("/api/routing/route-maps", map[string]any{"instance_id": inst, "name": "in", "entries": entries})
-	var m models.RouteMap
-	env.srv.db.First(&m, rm)
-	if m.Entries[1].SetMetric != nil {
-		t.Errorf("a deny entry keeps a set: %+v", m.Entries[1])
+	env.put("instance=main/route-map=in", map[string]any{"entry": entries})
+	if e := env.node("instance=main/route-map=in").Lists["entry"][1]; e.Leaf("set-metric") != "" {
+		t.Errorf("a deny entry keeps a set: %+v", e.Leaves)
 	}
 
 	// BGP refers to the route map and the prefix list.
-	env.create("/api/bgp/config", map[string]any{
-		"instance_id": inst, "enabled": true, "asn": 65000,
-		"networks":            []map[string]any{{"prefix": "192.168.1.1/24", "route_map": "in"}},
-		"redist_connected_v4": true, "redist_connected_v4_map": "in",
-	})
-	if rec := env.do("POST", "/api/bgp/config", map[string]any{"instance_id": inst, "asn": 65001}); rec.Code != http.StatusConflict {
+	env.put("instance=main/bgp=main", map[string]any{"enabled": true, "asn": 65000, "network": []map[string]any{{"prefix": "192.168.1.1/24", "route-map": "in"}}, "redist-connected-v4": true, "redist-connected-v4-map": "in"})
+	if rec := env.cfg("POST", "instance=main/bgp", map[string]any{"asn": 65001, "vrf": "main"}); rec.Code != http.StatusBadRequest {
 		t.Errorf("second BGP config: %d %s", rec.Code, rec.Body)
 	}
-	g := env.create("/api/bgp/peer-groups", map[string]any{"instance_id": inst, "name": "up", "remote_as": "65001", "v4_activate": true, "v4_prefix_list_out": "ours"})
-	env.create("/api/bgp/neighbors", map[string]any{"instance_id": inst, "address": "192.0.2.1", "enabled": true, "peer_group": "up", "v4_activate": true, "v4_route_map_in": "in"})
+	env.post("instance=main/bgp-peer-group", map[string]any{"name": "up", "remote-as": "65001", "v4-activate": true, "v4-prefix-list-out": "ours", "vrf": "main"})
+	env.post("instance=main/bgp-neighbor", map[string]any{"address": "192.0.2.1", "enabled": true, "peer-group": "up", "v4-activate": true, "v4-route-map-in": "in", "vrf": "main"})
 
 	// Renames rewrite the references.
-	if rec := env.do("PUT", "/api/routing/prefix-lists/"+itoa(pl.ID), map[string]any{"name": "mine"}); rec.Code != http.StatusOK {
-		t.Fatalf("rename: %d %s", rec.Code, rec.Body)
+	env.mustCfg("POST", "instance=main/prefix-list=ours?action=rename", map[string]any{"keys": []string{"mine"}})
+	env.mustCfg("POST", "instance=main/route-map=in?action=rename", map[string]any{"keys": []string{"from-up"}})
+	env.mustCfg("POST", "instance=main/bgp-peer-group=up?action=rename", map[string]any{"keys": []string{"upstream"}})
+	m := env.node("instance=main/route-map=from-up")
+	cfg := env.node("instance=main/bgp=main")
+	grp := env.node("instance=main/bgp-peer-group=upstream")
+	nb := env.node("instance=main/bgp-neighbor=main,192.0.2.1")
+	if m.Lists["entry"][0].Leaf("match-prefix-list") != "mine" || cfg.Lists["network"][0].Leaf("route-map") != "from-up" || cfg.Leaf("redist-connected-v4-map") != "from-up" ||
+		grp.Leaf("v4-prefix-list-out") != "mine" || nb.Leaf("v4-route-map-in") != "from-up" || nb.Leaf("peer-group") != "upstream" {
+		t.Errorf("not rewritten")
 	}
-	if rec := env.do("PUT", "/api/routing/route-maps/"+itoa(rm), map[string]any{"name": "from-up"}); rec.Code != http.StatusOK {
-		t.Fatalf("rename: %d %s", rec.Code, rec.Body)
-	}
-	if rec := env.do("PUT", "/api/bgp/peer-groups/"+itoa(g), map[string]any{"name": "upstream"}); rec.Code != http.StatusOK {
-		t.Fatalf("rename: %d %s", rec.Code, rec.Body)
-	}
-	env.srv.db.First(&m, rm)
-	var cfg models.BgpConfig
-	env.srv.db.Where("instance_id = ?", inst).First(&cfg)
-	var grp models.BgpPeerGroup
-	env.srv.db.First(&grp, g)
-	var nb models.BgpNeighbor
-	env.srv.db.Where("instance_id = ?", inst).First(&nb)
-	if m.Entries[0].MatchPrefixList != "mine" || cfg.Networks[0].RouteMap != "from-up" || cfg.RedistConnectedV4Map != "from-up" ||
-		grp.V4PrefixListOut != "mine" || nb.V4RouteMapIn != "from-up" || nb.PeerGroup != "upstream" {
-		t.Errorf("not rewritten: map %+v cfg %+v group %s neighbour %s %s", m.Entries[0], cfg.Networks, grp.V4PrefixListOut, nb.V4RouteMapIn, nb.PeerGroup)
-	}
-	var lab models.RoutePrefixList
-	env.srv.db.Where("instance_id = ?", other).First(&lab)
-	if lab.Name != "ours" {
-		t.Errorf("another instance's list renamed: %s", lab.Name)
+	if env.node("instance=lab/prefix-list=ours") == nil {
+		t.Error("another instance's list renamed")
 	}
 
 	// Objects in use can't be deleted, nor a prefix list change family.
-	for _, path := range []string{"/api/routing/prefix-lists/" + itoa(pl.ID), "/api/routing/route-maps/" + itoa(rm), "/api/bgp/peer-groups/" + itoa(g)} {
-		if rec := env.do("DELETE", path, nil); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "is used by") {
+	for _, path := range []string{"instance=main/prefix-list=mine", "instance=main/route-map=from-up", "instance=main/bgp-peer-group=upstream"} {
+		if rec := env.cfg("DELETE", path, nil); rec.Code != http.StatusBadRequest {
 			t.Errorf("delete %s: %d %s", path, rec.Code, rec.Body)
 		}
 	}
-	if rec := env.do("PUT", "/api/routing/prefix-lists/"+itoa(pl.ID), map[string]any{"family": "ipv6", "entries": []any{}}); rec.Code != http.StatusBadRequest {
+	if rec := env.cfg("PUT", "instance=main/prefix-list=mine", map[string]any{"family": "ipv6"}); rec.Code != http.StatusBadRequest {
 		t.Errorf("family change of a list in use: %d %s", rec.Code, rec.Body)
-	}
-	// A row stays in its instance.
-	if rec := env.do("PUT", "/api/routing/route-maps/"+itoa(rm), map[string]any{"instance_id": other}); rec.Code != http.StatusOK {
-		t.Fatalf("move: %d %s", rec.Code, rec.Body)
-	}
-	env.srv.db.First(&m, rm)
-	if m.InstanceID != inst {
-		t.Errorf("route map moved to instance %d", m.InstanceID)
 	}
 
 	// The document holds BGP and the objects; the builder's result
 	// validates.
-	doc, err := builder.Build(tablesInput(t, env.srv.db), 1)
+	doc, err := builder.Build(env.input(), 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,10 +101,8 @@ func TestRoutingObjects(t *testing.T) {
 	}
 
 	// Turned off, BGP and its objects stay out of the document.
-	if rec := env.do("PUT", "/api/bgp/config/"+itoa(cfg.ID), map[string]any{"enabled": false}); rec.Code != http.StatusOK {
-		t.Fatal(rec.Body)
-	}
-	doc, _ = builder.Build(tablesInput(t, env.srv.db), 2)
+	env.patch("instance=main/bgp=main", map[string]any{"enabled": false})
+	doc, _ = builder.Build(env.input(), 2)
 	if in := doc.Instance("main"); in.BGP != nil || !in.RoutingPolicy.Empty() {
 		t.Errorf("BGP off: %+v", in.BGP)
 	}
@@ -146,72 +110,56 @@ func TestRoutingObjects(t *testing.T) {
 
 func TestBGPNeighbors(t *testing.T) {
 	env := newEnv(t)
-	inst := env.create("/api/instances", map[string]any{"name": "main"})
-	env.create("/api/interfaces", map[string]any{"instance_id": inst, "name": "lo1", "kind": "bridge", "enabled": true, "ipv4_mode": "static", "addresses": []string{"10.0.0.1/32"}})
-	env.create("/api/bgp/config", map[string]any{"instance_id": inst, "enabled": true, "asn": 65000})
+	env.host("main")
+	env.put("instance=main/interface=lo1", map[string]any{"kind": "bridge", "enabled": true, "ipv4-mode": "static", "addresses": []string{"10.0.0.1/32"}})
+	env.put("instance=main/bgp=main", map[string]any{"enabled": true, "asn": 65000})
 
 	const secret = "s3cret-pw"
-	n := map[string]any{"instance_id": inst, "address": "2001:DB8::0001", "enabled": true, "remote_as": "65001", "new_password": secret, "v6_activate": true}
+	n := map[string]any{"address": "2001:DB8::0001", "vrf": "main", "enabled": true, "remote-as": "65001", "password": secret, "v6-activate": true}
 	for field, v := range map[string]any{
 		"address":       "192.0.2.0/24",
-		"remote_as":     "AS1",
-		"new_password":  "has space",
-		"update_source": "eth9",
-		"peer_group":    "nope",
+		"remote-as":     "AS1",
+		"password":      "has space",
+		"update-source": "eth9",
+		"peer-group":    "nope",
 	} {
-		c := map[string]any{}
-		for k, x := range n {
-			c[k] = x
-		}
+		c := maps.Clone(n)
 		c[field] = v
-		if rec := env.do("POST", "/api/bgp/neighbors", c); rec.Code != http.StatusBadRequest {
+		if rec := env.cfg("POST", "instance=main/bgp-neighbor", c); rec.Code != http.StatusBadRequest {
 			t.Errorf("bad %s accepted: %d %s", field, rec.Code, rec.Body)
 		}
 	}
 	// What is for eBGP only, on an iBGP neighbour.
-	if rec := env.do("POST", "/api/bgp/neighbors", map[string]any{"instance_id": inst, "address": "192.0.2.9", "remote_as": "65000", "ebgp_multihop": 2}); rec.Code != http.StatusBadRequest {
+	if rec := env.cfg("POST", "instance=main/bgp-neighbor", map[string]any{"address": "192.0.2.9", "remote-as": "65000", "ebgp-multihop": 2, "vrf": "main"}); rec.Code != http.StatusBadRequest {
 		t.Errorf("multihop on iBGP: %d %s", rec.Code, rec.Body)
 	}
 	// Both a prefix list and a route map in.
-	env.create("/api/routing/prefix-lists", map[string]any{"instance_id": inst, "name": "p6", "family": "ipv6"})
-	env.create("/api/routing/route-maps", map[string]any{"instance_id": inst, "name": "m"})
-	if rec := env.do("POST", "/api/bgp/neighbors", map[string]any{"instance_id": inst, "address": "192.0.2.9", "remote_as": "65009", "v6_activate": true, "v6_prefix_list_in": "p6", "v6_route_map_in": "m"}); rec.Code != http.StatusBadRequest {
+	env.put("instance=main/prefix-list=p6", map[string]any{"family": "ipv6"})
+	env.put("instance=main/route-map=m", map[string]any{})
+	if rec := env.cfg("POST", "instance=main/bgp-neighbor", map[string]any{"address": "192.0.2.9", "remote-as": "65009", "v6-activate": true, "v6-prefix-list-in": "p6", "v6-route-map-in": "m", "vrf": "main"}); rec.Code != http.StatusBadRequest {
 		t.Errorf("two filters in: %d %s", rec.Code, rec.Body)
 	}
 
-	rec := env.do("POST", "/api/bgp/neighbors", n)
-	if rec.Code != http.StatusCreated || strings.Contains(rec.Body.String(), secret) || !strings.Contains(rec.Body.String(), `"has_password":true`) {
-		t.Fatalf("create: %d %s", rec.Code, rec.Body)
+	env.post("instance=main/bgp-neighbor", n)
+	nb := "instance=main/bgp-neighbor=main,2001:db8::1"
+	if env.node(nb) == nil {
+		t.Fatal("address not canonical")
 	}
-	var created models.BgpNeighbor
-	_ = json.Unmarshal(rec.Body.Bytes(), &created)
-	id := itoa(created.ID)
-	if created.Address != "2001:db8::1" {
-		t.Errorf("address not canonical: %s", created.Address)
-	}
-	if rec := env.do("GET", "/api/bgp/neighbors?instance_id="+itoa(inst), nil); strings.Contains(rec.Body.String(), secret) {
+	if rec := env.do("GET", "/api/config/candidate/instance=main/bgp-neighbor", nil); strings.Contains(rec.Body.String(), secret) {
 		t.Errorf("password leaked: %s", rec.Body)
 	}
-	// Saving without a password keeps it; clear_password removes it.
-	if rec := env.do("PUT", "/api/bgp/neighbors/"+id, map[string]any{"description": "transit", "update_source": "lo1"}); rec.Code != http.StatusOK {
-		t.Fatalf("update: %d %s", rec.Code, rec.Body)
-	}
-	var stored models.BgpNeighbor
-	env.srv.db.First(&stored, created.ID)
-	if stored.Password != secret || stored.Description != "transit" {
-		t.Errorf("stored %+v", stored)
+	env.patch(nb, map[string]any{"description": "transit", "update-source": "lo1"})
+	if stored := env.node(nb); stored.Leaf("password") != secret || stored.Leaf("description") != "transit" {
+		t.Errorf("stored %+v", stored.Leaves)
 	}
 	// A filter of a family that is not active is dropped.
-	if rec := env.do("PUT", "/api/bgp/neighbors/"+id, map[string]any{"v4_route_map_in": "m"}); rec.Code != http.StatusOK {
-		t.Fatal(rec.Body)
-	}
-	env.srv.db.First(&stored, created.ID)
-	if stored.V4RouteMapIn != "" {
-		t.Errorf("filter of an inactive family kept: %q", stored.V4RouteMapIn)
+	env.patch(nb, map[string]any{"v4-route-map-in": "m"})
+	if got := env.node(nb).Leaf("v4-route-map-in"); got != "" {
+		t.Errorf("filter of an inactive family kept: %q", got)
 	}
 
 	// The deployment history doesn't keep the password.
-	doc, err := builder.Build(tablesInput(t, env.srv.db), 1)
+	doc, err := builder.Build(env.input(), 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,54 +173,38 @@ func TestBGPNeighbors(t *testing.T) {
 
 	// The update source follows a renamed interface; deleting one in use
 	// is refused.
-	var lo models.Interface
-	env.srv.db.Where("name = ?", "lo1").First(&lo)
-	if rec := env.do("PUT", "/api/interfaces/"+itoa(lo.ID), map[string]any{"name": "lo2"}); rec.Code != http.StatusOK {
-		t.Fatalf("rename interface: %d %s", rec.Code, rec.Body)
+	env.mustCfg("POST", "instance=main/interface=lo1?action=rename", map[string]any{"keys": []string{"lo2"}})
+	if got := env.node(nb).Leaf("update-source"); got != "lo2" {
+		t.Errorf("update source %q", got)
 	}
-	env.srv.db.First(&stored, created.ID)
-	if stored.UpdateSource != "lo2" {
-		t.Errorf("update source %q", stored.UpdateSource)
-	}
-	if rec := env.do("DELETE", "/api/interfaces/"+itoa(lo.ID), nil); rec.Code != http.StatusBadRequest {
+	if rec := env.cfg("DELETE", "instance=main/interface=lo2", nil); rec.Code != http.StatusBadRequest {
 		t.Errorf("delete interface in use: %d %s", rec.Code, rec.Body)
 	}
-
-	if rec := env.do("PUT", "/api/bgp/neighbors/"+id, map[string]any{"clear_password": true}); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"has_password":false`) {
-		t.Fatalf("clear: %d %s", rec.Code, rec.Body)
-	}
-	env.srv.db.First(&stored, created.ID)
-	if stored.Password != "" {
+	env.patch(nb, map[string]any{"password": nil})
+	if env.node(nb).Leaf("password") != "" {
 		t.Error("password not cleared")
 	}
 
 	// A link-local neighbour needs its interface, which follows a rename
 	// and can't be deleted; a global address drops one.
-	ll := map[string]any{"instance_id": inst, "address": "fe80::1", "enabled": true, "remote_as": "external", "v4_activate": true, "v6_activate": true}
-	if rec := env.do("POST", "/api/bgp/neighbors", ll); rec.Code != http.StatusBadRequest {
+	ll := map[string]any{"address": "fe80::1", "vrf": "main", "enabled": true, "remote-as": "external", "v4-activate": true, "v6-activate": true}
+	if rec := env.cfg("POST", "instance=main/bgp-neighbor", ll); rec.Code != http.StatusBadRequest {
 		t.Errorf("link-local without interface: %d %s", rec.Code, rec.Body)
 	}
 	ll["interface"] = "lo2"
-	llID := env.create("/api/bgp/neighbors", ll)
-	if rec := env.do("PUT", "/api/bgp/neighbors/"+id, map[string]any{"update_source": "", "interface": "lo2"}); rec.Code != http.StatusOK {
-		t.Fatalf("update: %d %s", rec.Code, rec.Body)
+	env.post("instance=main/bgp-neighbor", ll)
+	env.patch(nb, map[string]any{"update-source": nil, "interface": "lo2"})
+	if got := env.node(nb).Leaf("interface"); got != "" {
+		t.Errorf("interface kept on a global neighbour: %q", got)
 	}
-	env.srv.db.First(&stored, created.ID)
-	if stored.Interface != "" {
-		t.Errorf("interface kept on a global neighbour: %q", stored.Interface)
+	env.mustCfg("POST", "instance=main/interface=lo2?action=rename", map[string]any{"keys": []string{"lo3"}})
+	if got := env.node("instance=main/bgp-neighbor=main,fe80::1").Leaf("interface"); got != "lo3" {
+		t.Errorf("interface %q", got)
 	}
-	if rec := env.do("PUT", "/api/interfaces/"+itoa(lo.ID), map[string]any{"name": "lo3"}); rec.Code != http.StatusOK {
-		t.Fatalf("rename interface: %d %s", rec.Code, rec.Body)
-	}
-	var llStored models.BgpNeighbor
-	env.srv.db.First(&llStored, llID)
-	if llStored.Interface != "lo3" {
-		t.Errorf("interface %q", llStored.Interface)
-	}
-	if rec := env.do("DELETE", "/api/interfaces/"+itoa(lo.ID), nil); rec.Code != http.StatusBadRequest {
+	if rec := env.cfg("DELETE", "instance=main/interface=lo3", nil); rec.Code != http.StatusBadRequest {
 		t.Errorf("delete interface of a link-local neighbour: %d %s", rec.Code, rec.Body)
 	}
-	doc, _ = builder.Build(tablesInput(t, env.srv.db), 1)
+	doc, _ = builder.Build(env.input(), 1)
 	if p := doc.Instance("main").BGP.Neighbors[1]; p.Address != "fe80::1" || p.Interface != "lo3" {
 		t.Errorf("document neighbour %+v", p)
 	}

@@ -8,17 +8,19 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
-	"strconv"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/labstack/echo/v5"
 
+	"github.com/abundo/portitor/internal/builder"
 	"github.com/abundo/portitor/internal/confcheck"
 	"github.com/abundo/portitor/internal/datastore"
 	"github.com/abundo/portitor/internal/fwconfig"
@@ -233,12 +235,19 @@ func (s *Server) handleConfigEdit(c *echo.Context) error {
 	}
 	acc := s.treeAccessOf(c)
 	var denied string
+	var created []string // a POST's new entry's keys
+	var warnings []error // what a commit would refuse that was so before
+	scope, err := s.deployScope(currentAccess(c))
+	if err != nil {
+		return err
+	}
 	err = t.store.Edit(c.Request().Context(), "", func(work *datastore.Tree) error {
 		before := work.Clone()
 		if method == http.MethodPost && action == "" {
 			if body, err = s.assignID(work, p, body); err != nil {
 				return err
 			}
+			created = newEntryKeys(work, p, body)
 		}
 		if err := applyConfigEdit(work, p, method, action, body); err != nil {
 			return err
@@ -254,13 +263,26 @@ func (s *Server) handleConfigEdit(c *echo.Context) error {
 				return err
 			}
 		}
-		// What the save changed is checked now, as the GUI expects; the
-		// rest of the candidate at the commit.
 		changed := datastore.ChangedEntries(before, work)
 		if err := confcheck.Normalize(before, work, changed); err != nil {
 			return err
 		}
-		if errs := confcheck.CheckEntries(work, changed); len(errs) > 0 {
+		// A save may not make the candidate invalid by the schema where it
+		// wasn't: a reference to nothing, a mandatory leaf missing, an
+		// entry deleted that something refers to.
+		if errs := newProblems(before.Validate(), work.Validate()); len(errs) > 0 {
+			return &datastore.ValidationError{Problems: errs}
+		}
+		// What the change breaks, in the entries changed or in those that
+		// refer to them.
+		if errs := newProblems(confcheck.Check(before), confcheck.Check(work)); len(errs) > 0 {
+			return &datastore.ValidationError{Problems: errs}
+		}
+		// And what the commit's build would find wrong that it didn't
+		// before; what was already wrong is a warning.
+		was := s.buildProblems(before, scope)
+		warnings = s.buildProblems(work, scope)
+		if errs := newProblems(was, warnings); len(errs) > 0 {
 			return &datastore.ValidationError{Problems: errs}
 		}
 		return nil
@@ -284,27 +306,94 @@ func (s *Server) handleConfigEdit(c *echo.Context) error {
 	// What a commit would refuse now, as warnings: the documents built and
 	// checked as the commit does (fwconfig.Validate), for the instances the
 	// user deploys. The save stands; the user finishes the change.
-	if warnings := s.saveWarnings(c); len(warnings) > 0 {
-		if status == http.StatusNoContent {
-			status = http.StatusOK
+	out := map[string]any{}
+	if len(warnings) > 0 {
+		ws := make([]string, len(warnings))
+		for i, w := range warnings {
+			ws[i] = w.Error()
 		}
-		return c.JSON(status, map[string]any{"warnings": warnings})
+		out["warnings"] = ws
 	}
-	return c.NoContent(status)
+	// A new entry: its keys, and its path as Location.
+	if created != nil {
+		out["keys"] = created
+		ep := slices.Clone(p)
+		ep[len(ep)-1].Keys = created
+		c.Response().Header().Set("Location", configPrefix+ds+"/"+formatConfigPath(ep))
+	}
+	if len(out) == 0 {
+		return c.NoContent(status)
+	}
+	if status == http.StatusNoContent {
+		status = http.StatusOK
+	}
+	return c.JSON(status, out)
 }
 
-// saveWarnings are the problems a commit of the candidate would have.
-func (s *Server) saveWarnings(c *echo.Context) []string {
-	only, err := s.deployScope(currentAccess(c))
-	if err != nil {
+// newEntryKeys are the keys of the entry a POST at the list path p makes
+// of body, canonical; nil when p is not a list's or the body has no keys.
+func newEntryKeys(t *datastore.Tree, p datastore.Path, body []byte) []string {
+	ss, err := datastore.ResolveAll(t.Root.S, p)
+	if err != nil || len(p) == 0 || p[len(p)-1].Keys != nil {
 		return nil
 	}
-	_, _, err = s.firewallDocs(c.Request().Context(), only)
-	var ve *fwconfig.ValidationError
-	if errors.As(err, &ve) {
-		return ve.Problems
+	list := ss[len(ss)-1]
+	if list.Kind != schema.List || len(list.Keys) == 0 {
+		return nil
 	}
-	return nil
+	var obj map[string]any
+	if json.Unmarshal(body, &obj) != nil {
+		return nil
+	}
+	keys := make([]string, len(list.Keys))
+	for i, k := range list.Keys {
+		v, ok := obj[k]
+		if !ok {
+			return nil
+		}
+		raw := fmt.Sprint(v)
+		if f, ok := v.(float64); ok {
+			raw = strconv.FormatFloat(f, 'f', -1, 64)
+		}
+		c, err := list.Child(k).Type.Check(raw)
+		if err != nil {
+			return nil
+		}
+		keys[i] = c
+	}
+	return keys
+}
+
+// formatConfigPath writes p as a RESTCONF path, the inverse of
+// parseConfigPath.
+func formatConfigPath(p datastore.Path) string {
+	parts := make([]string, len(p))
+	for i, e := range p {
+		parts[i] = url.PathEscape(e.Name)
+		if e.Keys != nil {
+			ks := make([]string, len(e.Keys))
+			for j, k := range e.Keys {
+				ks[j] = strings.ReplaceAll(url.PathEscape(k), ",", "%2C")
+			}
+			parts[i] += "=" + strings.Join(ks, ",")
+		}
+	}
+	return strings.Join(parts, "/")
+}
+
+// buildProblems are the problems the commit's build finds in tree, for
+// the instances only (nil: all).
+func (s *Server) buildProblems(tree *datastore.Tree, only map[string]bool) []error {
+	_, _, err := s.firewallDocsOf(builder.Input{DB: s.db, Tree: tree}, only)
+	var ve *fwconfig.ValidationError
+	if !errors.As(err, &ve) {
+		return nil
+	}
+	out := make([]error, len(ve.Problems))
+	for i, p := range ve.Problems {
+		out[i] = errors.New(p)
+	}
+	return out
 }
 
 // applyConfigEdit makes the change a request asks for in work.
@@ -472,4 +561,19 @@ func (s *Server) assignID(work *datastore.Tree, p datastore.Path, body []byte) (
 	}
 	obj[key] = next
 	return json.Marshal(obj)
+}
+
+// newProblems are the problems of after that before didn't have.
+func newProblems(before, after []error) []error {
+	had := map[string]bool{}
+	for _, e := range before {
+		had[e.Error()] = true
+	}
+	var out []error
+	for _, e := range after {
+		if !had[e.Error()] {
+			out = append(out, e)
+		}
+	}
+	return out
 }

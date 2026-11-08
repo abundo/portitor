@@ -30,10 +30,11 @@ func (parseAgent) ParseNftables(context.Context, string) (*agentapi.ParseNftable
 func TestImportNftables(t *testing.T) {
 	env := newEnv(t)
 	env.srv.newAgent = func(*models.Firewall) (agentAPI, error) { return parseAgent{}, nil }
-	inst := env.create("/api/instances", map[string]any{"name": "main"})
-	env.create("/api/interfaces", map[string]any{"instance_id": inst, "name": "wan", "enabled": true})
-	env.create("/api/interfaces", map[string]any{"instance_id": inst, "name": "lan", "enabled": true})
-	env.create("/api/rules", map[string]any{"instance_id": inst, "chain": "input", "action": "drop", "enabled": true})
+	env.host("main")
+	inst := env.rowID("instances", "main")
+	env.post("instance=main/interface", map[string]any{"kind": "physical", "name": "wan", "enabled": true})
+	env.post("instance=main/interface", map[string]any{"kind": "physical", "name": "lan", "enabled": true})
+	env.post("instance=main/rule", map[string]any{"chain": "input", "action": "drop", "enabled": true})
 
 	count := func(model any) int64 {
 		var n int64

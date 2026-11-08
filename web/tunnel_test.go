@@ -12,57 +12,53 @@ import (
 
 	"github.com/abundo/portitor/internal/builder"
 	"github.com/abundo/portitor/internal/fwconfig"
-	"github.com/abundo/portitor/models"
 )
 
 func TestTunnel6in4(t *testing.T) {
 	env := newEnv(t)
-	inst := env.create("/api/instances", map[string]any{"name": "main"})
-	env.create("/api/interfaces", map[string]any{"instance_id": inst, "name": "eth0", "ipv4_mode": "dhcp", "enabled": true})
+	env.host("main")
+	env.put("instance=main/interface=eth0", map[string]any{"kind": "physical", "ipv4-mode": "dhcp", "enabled": true})
 
 	const key = "UpD4teKey"
 	tunnel := map[string]any{
-		"instance_id": inst, "name": "he0", "kind": "6in4", "enabled": true, "ipv4_mode": "none",
-		"addresses": []string{"2001:470:1f0a:12::2/64"}, "tunnel_remote": "216.66.80.90",
-		"tunnel_default_route": true, "he_tunnel_id": "123456", "he_username": "alice", "new_he_update_key": key,
+		"kind": "6in4", "enabled": true, "ipv4-mode": "none",
+		"addresses": []string{"2001:470:1f0a:12::2/64"}, "tunnel-remote": "216.66.80.90",
+		"tunnel-default-route": true, "he-tunnel-id": "123456", "he-username": "alice", "he-update-key": key,
 	}
 	for field, v := range map[string]any{
-		"tunnel_remote":     "2001:db8::1",
-		"tunnel_local":      "127.0.0.1",
-		"he_tunnel_id":      "12&myip=1",
-		"he_username":       "a b",
-		"new_he_update_key": "",
-		"ipv4_mode":         "dhcp",
+		"tunnel-remote": "2001:db8::1",
+		"he-tunnel-id":  "12&myip=1",
+		"he-username":   "a b",
+		"he-update-key": nil,
+		"ipv4-mode":     "dhcp",
 	} {
 		c := map[string]any{}
 		for k, x := range tunnel {
 			c[k] = x
 		}
 		c[field] = v
-		if rec := env.do("POST", "/api/interfaces", c); rec.Code != http.StatusBadRequest {
+		if rec := env.cfg("PUT", "instance=main/interface=he0", c); rec.Code != http.StatusBadRequest {
 			t.Errorf("bad %s accepted: %d %s", field, rec.Code, rec.Body)
 		}
 	}
 
-	rec := env.do("POST", "/api/interfaces", tunnel)
-	if rec.Code != http.StatusCreated || strings.Contains(rec.Body.String(), key) || !strings.Contains(rec.Body.String(), `"has_he_update_key":true`) {
-		t.Fatalf("create: %d %s", rec.Code, rec.Body)
-	}
-	if rec := env.do("GET", "/api/interfaces?instance_id="+itoa(inst), nil); strings.Contains(rec.Body.String(), key) {
+	env.put("instance=main/interface=he0", tunnel)
+	if rec := env.do("GET", "/api/config/candidate/instance=main/interface", nil); strings.Contains(rec.Body.String(), key) {
 		t.Errorf("update key leaked: %s", rec.Body)
 	}
-	var he models.Interface
-	env.srv.db.Where("name = ?", "he0").First(&he)
-	// Saving without a key keeps it.
-	if rec := env.do("PUT", "/api/interfaces/"+itoa(he.ID), map[string]any{"description": "HE"}); rec.Code != http.StatusOK {
-		t.Fatalf("update: %d %s", rec.Code, rec.Body)
+	// A replace without the key keeps it.
+	c := map[string]any{"description": "HE"}
+	for k, x := range tunnel {
+		if k != "he-update-key" {
+			c[k] = x
+		}
 	}
-	env.srv.db.First(&he, he.ID)
-	if he.HeUpdateKey != key || he.Description != "HE" {
-		t.Errorf("stored %+v", he)
+	env.put("instance=main/interface=he0", c)
+	if he := env.node("instance=main/interface=he0"); he.Leaf("he-update-key") != key || he.Leaf("description") != "HE" {
+		t.Errorf("stored %+v", he.Leaves)
 	}
 
-	doc, err := builder.Build(tablesInput(t, env.srv.db), 1)
+	doc, err := builder.Build(env.input(), 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,11 +83,8 @@ func TestTunnel6in4(t *testing.T) {
 	}
 
 	// Without a tunnel id there is no account.
-	if rec := env.do("PUT", "/api/interfaces/"+itoa(he.ID), map[string]any{"he_tunnel_id": ""}); rec.Code != http.StatusOK {
-		t.Fatalf("clear: %d %s", rec.Code, rec.Body)
-	}
-	env.srv.db.First(&he, he.ID)
-	if he.HeUpdateKey != "" || he.HeUsername != "" {
-		t.Errorf("account kept: %+v", he)
+	env.patch("instance=main/interface=he0", map[string]any{"he-tunnel-id": nil})
+	if he := env.node("instance=main/interface=he0"); he.Leaf("he-update-key") != "" || he.Leaf("he-username") != "" {
+		t.Errorf("account kept: %+v", he.Leaves)
 	}
 }

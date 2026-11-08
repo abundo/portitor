@@ -4,18 +4,27 @@
 package web
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"net/netip"
 	"reflect"
+	"slices"
+	"strings"
 
 	"github.com/labstack/echo/v5"
 
+	"github.com/abundo/portitor/internal/acme"
 	"github.com/abundo/portitor/internal/builder"
+	"github.com/abundo/portitor/internal/cron"
 	"github.com/abundo/portitor/internal/datastore"
 	"github.com/abundo/portitor/internal/datastore/sqlmap"
 	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/internal/wgkeys"
+	"github.com/abundo/portitor/models"
 )
 
 // Actions on the configuration's entries: what is generated or done
@@ -41,6 +50,12 @@ type configAction struct {
 	// write: the user must be allowed to change the entry (else to read
 	// it).
 	write bool
+	// create: a change that makes the entry when it isn't there.
+	create bool
+	// legacy: a change made by a handler of the CRUD's time in the tables,
+	// read into the candidate after (the tables hold it until the API is
+	// all on the tree).
+	legacy bool
 	run   func(s *Server, c *echo.Context, a *actionCtx) error
 }
 
@@ -141,12 +156,18 @@ func (s *Server) runAction(c *echo.Context, ds string, p datastore.Path, name st
 	if a.write && !acc.CanWrite(p) {
 		return errJSON(c, http.StatusForbidden, "you may not change "+p.String(tree.Root.S))
 	}
-	if a.view || a.op {
+	if a.view || a.op || a.legacy {
 		n, _, err := tree.Find(p)
 		if err != nil || n == nil {
 			return errJSON(c, http.StatusNotFound, "not found")
 		}
-		return a.run(s, c, &actionCtx{tree: tree, path: p, entry: n, body: body})
+		err = a.run(s, c, &actionCtx{tree: tree, path: p, entry: n, body: body})
+		if r, rerr := echo.UnwrapResponse(c.Response()); a.legacy && err == nil && rerr == nil && r.Status < 300 {
+			if serr := s.syncFromTables(ctx); serr != nil {
+				return serr
+			}
+		}
+		return err
 	}
 	if ds != "candidate" {
 		return errJSON(c, http.StatusMethodNotAllowed, "only the candidate can be changed")
@@ -156,6 +177,9 @@ func (s *Server) runAction(c *echo.Context, ds string, p datastore.Path, name st
 	var answered error
 	err = t.store.Edit(ctx, "", func(work *datastore.Tree) error {
 		n, _, err := work.Find(p)
+		if err == nil && n == nil && a.create {
+			n, err = work.Ensure(p)
+		}
 		if err != nil || n == nil {
 			return &notFound{p.String(work.Root.S)}
 		}
@@ -179,7 +203,6 @@ func (s *Server) runAction(c *echo.Context, ds string, p datastore.Path, name st
 // errNoChange ends an Edit that changed nothing.
 var errNoChange = errors.New("no change")
 
-
 // delegate is an action done by a handler of the CRUD's time, which takes
 // the entry's row id as its :id: the tables hold the candidate (they are
 // kept in step with it until the API is all on the tree).
@@ -198,6 +221,7 @@ func delegate(h echo.HandlerFunc) func(s *Server, c *echo.Context, a *actionCtx)
 			return errJSON(c, http.StatusNotFound, "not found")
 		}
 		c.SetPathValues(echo.PathValues{{Name: "id", Value: fmt.Sprint(idx[n])}})
+		c.Request().Body = io.NopCloser(bytes.NewReader(a.body))
 		return h(c)
 	}
 }
@@ -214,6 +238,8 @@ func init() {
 	registerAction("/instance/dns-blocklist", "refresh", configAction{op: true, write: true, run: delegateM((*Server).handleDNSBlocklistRefresh)})
 	registerAction("/task", "run", configAction{op: true, write: true, run: delegateM((*Server).handleTaskRun)})
 	registerAction("/instance", "bundle", configAction{view: true, write: true, run: delegateM((*Server).handleExportBundle)})
+	registerAction("/instance/certificate", "generate", configAction{write: true, create: true, run: generateCert})
+	registerAction("/instance/dns-zone", "records", configAction{write: true, legacy: true, run: delegateM((*Server).handleZoneRecords)})
 }
 
 // delegateM is delegate for a method of the server.
@@ -236,4 +262,166 @@ func wgRekey(s *Server, c *echo.Context, a *actionCtx) error {
 	a.entry.Leaves["wg-private-key"], a.entry.Leaves["wg-public-key"] = priv, pub
 	a.changed = true
 	return c.JSON(http.StatusOK, map[string]string{"wg-public-key": pub})
+}
+
+// generateCert makes a certificate's key and chain here: self-signed, a
+// CA (on the firewall's host alone), or signed by a CA of the host of its
+// firewall. The certificate is an imported one from then on.
+func generateCert(s *Server, c *echo.Context, a *actionCtx) error {
+	var g struct {
+		Domains    []string `json:"domains"`
+		CommonName string   `json:"common-name"`
+		KeyType    string   `json:"key-type"`
+		Days       int      `json:"days"`
+		CA         bool     `json:"ca"`
+		SignedBy   string   `json:"signed-by"`
+	}
+	if err := json.Unmarshal(a.body, &g); err != nil {
+		return errJSON(c, http.StatusBadRequest, "the body: "+err.Error())
+	}
+	in := a.entry.Parent
+	if (g.CA || g.SignedBy != "") && !currentAccess(c).isAdmin() {
+		return errJSON(c, http.StatusForbidden, "certificate authorities: global admins only")
+	}
+	if g.CA && in.Leaf("is-default") != "true" {
+		return errJSON(c, http.StatusBadRequest, "a CA belongs to the firewall: add it on the firewall's host, not in a virtual firewall")
+	}
+	san := func(d string) bool {
+		_, err := netip.ParseAddr(d)
+		return err == nil || fwconfig.ValidDomain(strings.TrimPrefix(d, "*."))
+	}
+	var names []string
+	for _, d := range g.Domains {
+		d = dnsName(d)
+		if ad, err := netip.ParseAddr(d); err == nil {
+			d = ad.Unmap().WithZone("").String()
+		} else if d != "" && !san(d) {
+			return errJSON(c, http.StatusBadRequest, fmt.Sprintf("domains: %q is neither a DNS name nor an IP address", d))
+		}
+		if d != "" && !slices.Contains(names, d) {
+			names = append(names, d)
+		}
+	}
+	cn := strings.TrimSpace(g.CommonName)
+	if !g.CA {
+		cn = dnsName(cn)
+	}
+	if len(cn) > 64 || strings.ContainsFunc(cn, func(r rune) bool { return r < 0x20 || r == 0x7f }) {
+		return errJSON(c, http.StatusBadRequest, "common-name: at most 64 characters, no control characters")
+	}
+	req := acme.CertRequest{KeyType: g.KeyType, Days: g.Days, CA: g.CA}
+	if g.CA {
+		if g.SignedBy != "" {
+			return errJSON(c, http.StatusBadRequest, "a CA here is self-signed: it signs server certificates, no other CA")
+		}
+		if len(names) > 0 {
+			return errJSON(c, http.StatusBadRequest, "a CA has no subject alternative names")
+		}
+		if cn == "" {
+			cn = a.entry.Leaf("name")
+		}
+	} else {
+		if cn != "" && !slices.Contains(names, cn) && san(cn) {
+			names = slices.Insert(names, 0, cn)
+		}
+		if len(names) == 0 || len(names) > 100 {
+			return errJSON(c, http.StatusBadRequest, "domains: 1-100 DNS names or IP addresses")
+		}
+		if cn == "" {
+			cn = names[0]
+		}
+	}
+	req.CommonName, req.Names = cn, names
+	if req.KeyType == "" {
+		req.KeyType = fwconfig.CertKeyTypes[0]
+	}
+	if !slices.Contains(fwconfig.CertKeyTypes, req.KeyType) {
+		return errJSON(c, http.StatusBadRequest, "key-type: one of "+strings.Join(fwconfig.CertKeyTypes, ", "))
+	}
+	if g.Days < 1 || g.Days > 36500 {
+		return errJSON(c, http.StatusBadRequest, "days: 1-36500")
+	}
+	if g.SignedBy != "" {
+		ca := hostCA(a.tree, in, g.SignedBy)
+		if ca == nil {
+			return errJSON(c, http.StatusBadRequest, "signed-by: pick a CA of this firewall")
+		}
+		req.IssuerChain, req.IssuerKey = ca.Leaf("full-chain"), ca.Leaf("priv-key")
+	}
+	chain, key, err := acme.MakeCertificate(req)
+	if err != nil {
+		return errJSON(c, http.StatusBadRequest, err.Error())
+	}
+	e := a.entry
+	for name := range e.Leaves {
+		if name != "name" && name != "description" && name != "enabled" {
+			delete(e.Leaves, name)
+		}
+	}
+	delete(e.LeafLists, "domains")
+	e.Leaves["source"], e.Leaves["full-chain"], e.Leaves["priv-key"] = fwconfig.CertSourceImport, chain, key
+	a.changed = true
+	return c.NoContent(http.StatusOK)
+}
+
+// hostCA is the CA certificate name of the host of in's firewall, or nil.
+func hostCA(t *datastore.Tree, in *datastore.Node, name string) *datastore.Node {
+	for _, h := range t.Root.Lists["instance"] {
+		if h.Leaf("is-default") != "true" || h.Leaf("firewall") != in.Leaf("firewall") {
+			continue
+		}
+		ca := h.Entry("certificate", []string{name})
+		if ca == nil || ca.Leaf("source") != fwconfig.CertSourceImport {
+			return nil
+		}
+		if leaf := fwconfig.ChainLeaf(ca.Leaf("full-chain")); leaf == nil || !leaf.IsCA {
+			return nil
+		}
+		return ca
+	}
+	return nil
+}
+
+func init() {
+	registerAction("/ip-list", "schedule", configAction{write: true, run: ipListSchedule})
+}
+
+// ipListSchedule gives an IP list a task downloading it on schedule, on
+// each firewall but an HA secondary, named after the list (and the
+// firewall, with several).
+func ipListSchedule(s *Server, c *echo.Context, a *actionCtx) error {
+	var req struct {
+		Schedule string `json:"schedule"`
+	}
+	if err := json.Unmarshal(a.body, &req); err != nil {
+		return errJSON(c, http.StatusBadRequest, "the body: "+err.Error())
+	}
+	req.Schedule = strings.Join(strings.Fields(req.Schedule), " ")
+	if _, err := cron.Parse(req.Schedule); err != nil {
+		return errJSON(c, http.StatusBadRequest, "refresh schedule: "+err.Error())
+	}
+	var fws []models.Firewall
+	if err := s.db.Where("ha_primary_id IS NULL").Order("id").Find(&fws).Error; err != nil {
+		return err
+	}
+	root, list := a.tree.Root, a.entry.Leaf("name")
+	var made []string
+	for _, fw := range fws {
+		base := list
+		if len(fws) > 1 {
+			base += "-" + fw.Name
+		}
+		name := base
+		for i := 2; root.Entry("task", []string{name}) != nil; i++ {
+			name = fmt.Sprintf("%s-%d", base, i)
+		}
+		t := root.AddEntry(root.S.Child("task"), map[string]string{"name": name})
+		for k, v := range map[string]string{"description": "Downloads @" + list, "enabled": "true", "schedule": req.Schedule,
+			"kind": fwconfig.TaskIPList, "ip-list": list, "firewall": fw.Name} {
+			t.Leaves[k] = v
+		}
+		made = append(made, name)
+	}
+	a.changed = true
+	return c.JSON(http.StatusOK, map[string]any{"tasks": made})
 }

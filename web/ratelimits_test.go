@@ -4,7 +4,6 @@
 package web
 
 import (
-	"fmt"
 	"net/http"
 	"slices"
 	"strings"
@@ -12,89 +11,78 @@ import (
 
 	"github.com/abundo/portitor/internal/builder"
 	"github.com/abundo/portitor/internal/fwconfig"
-	"github.com/abundo/portitor/models"
 )
 
 func TestRateLimits(t *testing.T) {
 	env := newEnv(t)
-	inst := env.create("/api/instances", map[string]any{"name": "main"})
-	other := env.create("/api/instances", map[string]any{"name": "guest"})
-	env.create("/api/interfaces", map[string]any{"instance_id": inst, "name": "eth0", "enabled": true, "shape_egress": 40, "shape_ingress": 400})
-	if rec := env.do("POST", "/api/interfaces", map[string]any{"instance_id": inst, "name": "ifb-eth0"}); rec.Code != http.StatusBadRequest {
+	env.host("main")
+	env.vf("guest")
+	env.put("instance=main/interface=eth0", map[string]any{"kind": "physical", "enabled": true, "shape-egress": 40, "shape-ingress": 400})
+	if rec := env.cfg("POST", "instance=main/interface", map[string]any{"kind": "physical", "name": "ifb-eth0"}); rec.Code != http.StatusBadRequest {
 		t.Errorf("ifb- interface name accepted: %d", rec.Code)
 	}
-	ssh := env.create("/api/rate-limits", map[string]any{"instance_id": inst, "name": " ssh ", "rate": 4, "per": "minute", "burst": 2, "per_source": true})
-	sshURL := fmt.Sprint("/api/rate-limits/", ssh)
-	env.create("/api/rate-limits", map[string]any{"instance_id": other, "name": "theirs", "rate": 1, "per": "second"})
+	env.post("instance=main/rate-limit", map[string]any{"name": "ssh", "rate": 4, "burst": 2, "per-source": true})
+	env.post("instance=guest/rate-limit", map[string]any{"name": "theirs", "rate": 1})
 	for _, body := range []map[string]any{
-		{"instance_id": inst, "name": "zero", "rate": 0, "per": "second"},
-		{"instance_id": inst, "name": "bytes", "rate": 1, "unit": "mbytes", "per": "second", "connections": true},
-		{"instance_id": inst, "name": "burst", "rate": 1, "per": "second", "burst": -1},
-		{"instance_id": inst, "name": "ssh", "rate": 1, "per": "second"},
-		{"instance_id": inst, "name": "bytes", "rate": 1, "unit": "mbytes", "per": "second"},
-		{"instance_id": inst, "name": "bits", "rate": 1, "unit": "mbits", "per": "second", "connections": true},
+		{"name": "zero", "rate": 0},
+		{"name": "bytes", "rate": 1, "unit": "mbytes", "connections": true},
+		{"name": "burst", "rate": 1, "burst": -1},
+		{"name": "ssh", "rate": 1},
+		{"name": "bits", "rate": 1, "unit": "mbits", "connections": true},
 	} {
-		if rec := env.do("POST", "/api/rate-limits", body); rec.Code < 400 {
+		if rec := env.cfg("POST", "instance=main/rate-limit", body); rec.Code < 400 {
 			t.Errorf("%v accepted: %d", body, rec.Code)
 		}
 	}
 
-	rule := env.create("/api/rules", map[string]any{"instance_id": inst, "chain": "input", "action": "accept", "in_interfaces": []string{"eth0"}, "rate_limit": "ssh", "enabled": true})
-	if rec := env.do("POST", "/api/rules", map[string]any{"instance_id": inst, "chain": "input", "action": "accept", "rate_limit": "theirs"}); rec.Code != http.StatusBadRequest {
+	rule := env.post("instance=main/rule", map[string]any{"chain": "input", "action": "accept", "in-interfaces": []string{"eth0"}, "rate-limit": "ssh"})
+	if rec := env.cfg("POST", "instance=main/rule", map[string]any{"chain": "input", "action": "accept", "rate-limit": "theirs"}); rec.Code != http.StatusBadRequest {
 		t.Errorf("other instance's rate limit accepted: %d", rec.Code)
 	}
 
 	// A limit that polices connections needs accept rules.
-	env.create("/api/rate-limits", map[string]any{"instance_id": inst, "name": "host", "rate": 2, "unit": "mbit", "connections": true, "per_source": true})
-	if rec := env.do("POST", "/api/rules", map[string]any{"instance_id": inst, "chain": "forward", "action": "drop", "rate_limit": "host"}); rec.Code != http.StatusBadRequest {
+	env.post("instance=main/rate-limit", map[string]any{"name": "host", "rate": 2, "unit": "mbit", "connections": true, "per-source": true})
+	if rec := env.cfg("POST", "instance=main/rule", map[string]any{"chain": "forward", "action": "drop", "rate-limit": "host"}); rec.Code != http.StatusBadRequest {
 		t.Errorf("drop rule with a connection limit accepted: %d", rec.Code)
 	}
-	env.create("/api/rules", map[string]any{"instance_id": inst, "chain": "forward", "action": "accept", "rate_limit": "host", "enabled": true})
-	drop := env.create("/api/rules", map[string]any{"instance_id": inst, "chain": "input", "action": "drop", "rate_limit": "ssh"})
-	if rec := env.do("PUT", sshURL, map[string]any{"connections": true}); rec.Code != http.StatusBadRequest {
+	env.post("instance=main/rule", map[string]any{"chain": "forward", "action": "accept", "rate-limit": "host"})
+	drop := env.post("instance=main/rule", map[string]any{"chain": "input", "action": "drop", "rate-limit": "ssh"})
+	if rec := env.cfg("PATCH", "instance=main/rate-limit=ssh", map[string]any{"connections": true}); rec.Code != http.StatusBadRequest {
 		t.Errorf("connections on a limit a drop rule names: %d", rec.Code)
 	}
-	env.do("DELETE", fmt.Sprint("/api/rules/", drop), nil)
+	env.mustCfg("DELETE", "instance=main/rule="+drop, nil)
 
-	if rec := env.do("PUT", sshURL, map[string]any{"name": "admin"}); rec.Code != http.StatusOK {
-		t.Fatalf("rename: %d %s", rec.Code, rec.Body)
+	env.mustCfg("POST", "instance=main/rate-limit=ssh?action=rename", map[string]any{"keys": []string{"admin"}})
+	if got := env.node("instance=main/rule=" + rule).Leaf("rate-limit"); got != "admin" {
+		t.Errorf("rule after rename: %q", got)
 	}
-	var r models.Rule
-	env.srv.db.First(&r, rule)
-	if r.RateLimit != "admin" {
-		t.Errorf("rule after rename: %q", r.RateLimit)
-	}
-	rec := env.do("DELETE", sshURL, nil)
-	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "input rule") {
+	if rec := env.cfg("DELETE", "instance=main/rate-limit=admin", nil); rec.Code != http.StatusBadRequest {
 		t.Errorf("delete in use: %d %s", rec.Code, rec.Body)
 	}
 
 	// Shaping: accept rules only; a rate per second in bytes or bits.
-	if rec := env.do("POST", "/api/rate-limits", map[string]any{"instance_id": inst, "name": "pk", "rate": 5, "unit": "mbytes", "shape": true}); rec.Code != http.StatusBadRequest {
+	if rec := env.cfg("POST", "instance=main/rate-limit", map[string]any{"name": "pk", "rate": 5, "unit": "mbytes", "shape": true}); rec.Code != http.StatusBadRequest {
 		t.Errorf("shaping in mbytes accepted: %d", rec.Code)
 	}
-	var dm models.RateLimit
-	env.srv.db.First(&dm, env.create("/api/rate-limits", map[string]any{"instance_id": inst, "name": "dflt", "rate": 5, "shape": true}))
-	if dm.Unit != "mbit" {
-		t.Errorf("shaping unit defaults to %q", dm.Unit)
+	env.post("instance=main/rate-limit", map[string]any{"name": "dflt", "rate": 5, "shape": true})
+	if u := env.node("instance=main/rate-limit=dflt").Leaf("unit"); u != "mbit" {
+		t.Errorf("shaping unit defaults to %q", u)
 	}
-	env.do("DELETE", fmt.Sprint("/api/rate-limits/", dm.ID), nil)
-	bulk := env.create("/api/rate-limits", map[string]any{"instance_id": inst, "name": "bulk", "rate": 50, "unit": "mbit", "per": "minute", "burst": 3, "per_source": true, "shape": true})
-	var bl models.RateLimit
-	env.srv.db.First(&bl, bulk)
-	if bl.Per != "second" || bl.Burst != 0 || bl.PerSource {
-		t.Errorf("shaping kept limit fields: %+v", bl)
+	env.mustCfg("DELETE", "instance=main/rate-limit=dflt", nil)
+	env.post("instance=main/rate-limit", map[string]any{"name": "bulk", "rate": 50, "unit": "mbit", "per": "minute", "burst": 3, "per-source": true, "shape": true})
+	if bl := env.node("instance=main/rate-limit=bulk"); bl.Leaf("per") != "second" || bl.Leaf("burst") != "" || on(bl, "per-source") {
+		t.Errorf("shaping kept limit fields: %+v", bl.Leaves)
 	}
-	if rec := env.do("POST", "/api/rules", map[string]any{"instance_id": inst, "chain": "forward", "action": "reject", "rate_limit": "bulk"}); rec.Code != http.StatusBadRequest {
+	if rec := env.cfg("POST", "instance=main/rule", map[string]any{"chain": "forward", "action": "reject", "rate-limit": "bulk"}); rec.Code != http.StatusBadRequest {
 		t.Errorf("reject rule that shapes accepted: %d", rec.Code)
 	}
-	env.create("/api/rules", map[string]any{"instance_id": inst, "chain": "forward", "action": "accept", "rate_limit": "bulk", "enabled": true})
+	env.post("instance=main/rule", map[string]any{"chain": "forward", "action": "accept", "rate-limit": "bulk"})
 
-	doc, err := builder.Build(tablesInput(t, env.srv.db), 1)
+	doc, err := builder.Build(env.input(), 1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	main := doc.Instances[0]
+	main := doc.Instance("main")
 	// Less the services' (TestServiceRateLimits).
 	main.RateLimits = slices.DeleteFunc(main.RateLimits, func(l fwconfig.RateLimit) bool { return strings.HasSuffix(l.Name, " server") })
 	want := []fwconfig.RateLimit{
@@ -108,7 +96,7 @@ func TestRateLimits(t *testing.T) {
 	if sh := main.Shapers(); len(sh) != 1 || sh[0].Name != "bulk" || sh[0].Bits() != 50000000 {
 		t.Errorf("shapers: %+v", sh)
 	}
-	if ifc := main.Interfaces[0]; ifc.ShapeEgress != 40 || ifc.ShapeIngress != 400 {
+	if ifc := main.Interface("eth0"); ifc.ShapeEgress != 40 || ifc.ShapeIngress != 400 {
 		t.Errorf("shaping: %+v", ifc)
 	}
 }
@@ -119,65 +107,53 @@ func TestRateLimits(t *testing.T) {
 // anew if it was deleted.
 func TestServiceRateLimits(t *testing.T) {
 	env := newEnv(t)
-	inst := env.create("/api/instances", map[string]any{"name": "main"})
-	instURL := fmt.Sprint("/api/instances/", inst)
-	var in models.Instance
-	env.srv.db.First(&in, inst)
-	if !in.DnsRateLimit || !in.DhcpRateLimit || !in.NtpRateLimit {
-		t.Fatalf("service rate limits off: %v %v %v", in.DnsRateLimit, in.DhcpRateLimit, in.NtpRateLimit)
+	env.host("main")
+	in := env.node("instance=main")
+	if !on(in, "dns-rate-limit") || !on(in, "dhcp-rate-limit") || !on(in, "ntp-rate-limit") {
+		t.Fatalf("service rate limits off: %v", in.Leaves)
 	}
-	limitOf := func(service string) models.RateLimit {
-		var l models.RateLimit
-		env.srv.db.Where("instance_id = ? AND service = ?", inst, service).Limit(1).Find(&l)
-		return l
+	limitOf := func(service string) string {
+		for _, l := range env.node("instance=main").Lists["rate-limit"] {
+			if l.Leaf("service") == service {
+				return l.Leaf("name")
+			}
+		}
+		return ""
 	}
-	dns := limitOf("dns")
-	if dns.Name != "dns server" || dns.Rate != fwconfig.DefaultServiceRate || dns.Unit != fwconfig.RateUnitMBit || dns.Shape {
-		t.Errorf("dns server rate limit: %+v", dns)
+	dns := env.node("instance=main/rate-limit=dns%20server")
+	if dns == nil || dns.Leaf("service") != "dns" || dns.Leaf("rate") != "1" || dns.Leaf("unit") != fwconfig.RateUnitMBit || on(dns, "shape") {
+		t.Fatalf("dns server rate limit: %+v", dns)
 	}
-	dnsURL := fmt.Sprint("/api/rate-limits/", dns.ID)
-
-	if rec := env.do("PUT", dnsURL, map[string]any{"name": "resolver", "rate": 5, "service": ""}); rec.Code != http.StatusOK {
-		t.Fatalf("rename: %d %s", rec.Code, rec.Body)
+	env.mustCfg("POST", "instance=main/rate-limit=dns%20server?action=rename", map[string]any{"keys": []string{"resolver"}})
+	env.patch("instance=main/rate-limit=resolver", map[string]any{"rate": 5})
+	if limitOf("dns") != "resolver" {
+		t.Errorf("after rename: %q", limitOf("dns"))
 	}
-	if l := limitOf("dns"); l.Name != "resolver" || l.Rate != 5 {
-		t.Errorf("after rename: %+v", l)
-	}
-	if rec := env.do("DELETE", dnsURL, nil); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "DNS server") {
+	if rec := env.cfg("DELETE", "instance=main/rate-limit=resolver", nil); rec.Code != http.StatusBadRequest {
 		t.Errorf("delete while on: %d %s", rec.Code, rec.Body)
 	}
-	if rec := env.do("PUT", dnsURL, map[string]any{"shape": true}); rec.Code != http.StatusBadRequest {
+	if rec := env.cfg("PATCH", "instance=main/rate-limit=resolver", map[string]any{"shape": true}); rec.Code != http.StatusBadRequest {
 		t.Errorf("shaping a service's limit: %d", rec.Code)
 	}
-	if rec := env.do("POST", "/api/rate-limits", map[string]any{"instance_id": inst, "name": "mine", "rate": 1, "service": "ntp"}); rec.Code < 400 {
-		var n int64
-		env.srv.db.Model(&models.RateLimit{}).Where("instance_id = ? AND service = ?", inst, "ntp").Count(&n)
-		if n != 1 {
-			t.Errorf("a second ntp rate limit through the API: %d", n)
-		}
+	env.mustCfg("POST", "instance=main/rate-limit", map[string]any{"name": "mine", "rate": 1, "service": "ntp"})
+	if env.node("instance=main/rate-limit=mine").Leaf("service") != "" {
+		t.Error("a second ntp rate limit through the API")
 	}
 
 	// Off, the DHCP server's can go; on again, it is back.
-	if rec := env.do("PUT", instURL, map[string]any{"dhcp_rate_limit": false}); rec.Code != http.StatusOK {
-		t.Fatalf("switch off: %d %s", rec.Code, rec.Body)
-	}
-	dhcp := limitOf("dhcp")
-	if rec := env.do("DELETE", fmt.Sprint("/api/rate-limits/", dhcp.ID), nil); rec.Code >= 400 {
-		t.Errorf("delete while off: %d %s", rec.Code, rec.Body)
-	}
-	env.do("PUT", instURL, map[string]any{"ntp_enabled": true, "ntp_servers": []map[string]any{{"address": "192.0.2.123"}}})
-	doc, err := builder.Build(tablesInput(t, env.srv.db), 1)
+	env.patch("instance=main", map[string]any{"dhcp-rate-limit": false})
+	env.mustCfg("DELETE", "instance=main/rate-limit=dhcp%20server", nil)
+	env.patch("instance=main", map[string]any{"ntp-enabled": true, "ntp-server": []map[string]any{{"address": "192.0.2.123"}}})
+	doc, err := builder.Build(env.input(), 1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	main := doc.Instances[0]
+	main := doc.Instance("main")
 	if main.DNS.RateLimit != "resolver" || main.DHCP.RateLimit != "" || main.NTP == nil || main.NTP.RateLimit != "ntp server" {
 		t.Errorf("document: dns %q dhcp %q ntp %+v", main.DNS.RateLimit, main.DHCP.RateLimit, main.NTP)
 	}
-	if rec := env.do("PUT", instURL, map[string]any{"dhcp_rate_limit": true}); rec.Code != http.StatusOK {
-		t.Fatalf("switch on: %d %s", rec.Code, rec.Body)
-	}
-	if l := limitOf("dhcp"); l.Name != "dhcp server" || l.ID == dhcp.ID {
-		t.Errorf("dhcp server rate limit made again: %+v", l)
+	env.patch("instance=main", map[string]any{"dhcp-rate-limit": true})
+	if limitOf("dhcp") != "dhcp server" {
+		t.Errorf("dhcp server rate limit not made again: %q", limitOf("dhcp"))
 	}
 }

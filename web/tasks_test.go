@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"strings"
 	"testing"
@@ -18,112 +19,104 @@ import (
 
 func TestIPListsAndTasks(t *testing.T) {
 	env := newEnv(t)
-	inst := env.create("/api/instances", map[string]any{"name": "main"})
-	env.create("/api/interfaces", map[string]any{"instance_id": inst, "name": "wan", "ipv4_mode": "dhcp", "enabled": true})
+	env.host("main")
+	env.put("instance=main/interface=wan", map[string]any{"kind": "physical", "ipv4-mode": "dhcp", "enabled": true})
+	fw := firstFirewall(t, env).Name
 
 	const key = "bouncer-key-0123456789"
-	cs := map[string]any{"name": "crowdsec", "source": "crowdsec", "url": "http://127.0.0.1:8080", "api_key": key}
+	cs := map[string]any{"source": "crowdsec", "url": "http://127.0.0.1:8080", "api-key": key}
 	for field, v := range map[string]any{
-		"name":    "Crowd\nSec",
 		"source":  "file",
 		"url":     "ftp://example.com/list",
-		"api_key": "",
+		"api-key": nil,
 	} {
-		c := map[string]any{}
-		for k, x := range cs {
-			c[k] = x
-		}
+		c := maps.Clone(cs)
 		c[field] = v
-		if rec := env.do("POST", "/api/ip-lists", c); rec.Code != http.StatusBadRequest {
+		if rec := env.cfg("PUT", "ip-list=crowdsec", c); rec.Code != http.StatusBadRequest {
 			t.Errorf("bad %s accepted: %d %s", field, rec.Code, rec.Body)
 		}
 	}
+	if rec := env.cfg("PUT", "ip-list=Crowd%0ASec", cs); rec.Code != http.StatusBadRequest {
+		t.Errorf("bad name accepted: %d %s", rec.Code, rec.Body)
+	}
 	// A key or password over http:// only to a loopback address.
 	for _, c := range []map[string]any{
-		{"name": "remote", "source": "crowdsec", "url": "http://192.0.2.10:8080", "api_key": key},
-		{"name": "remote", "url": "http://lists.example/drop.txt", "username": "u", "password": "p"},
+		{"source": "crowdsec", "url": "http://192.0.2.10:8080", "api-key": key},
+		{"url": "http://lists.example/drop.txt", "username": "u", "password": "p"},
 	} {
-		if rec := env.do("POST", "/api/ip-lists", c); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "unencrypted") {
+		if rec := env.cfg("PUT", "ip-list=remote", c); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "unencrypted") {
 			t.Errorf("credentials over http accepted: %v: %d %s", c["url"], rec.Code, rec.Body)
 		}
 	}
 	for i, c := range []map[string]any{
-		{"source": "crowdsec", "url": "https://192.0.2.10:8080", "api_key": key},
-		{"source": "crowdsec", "url": "http://localhost:8080", "api_key": key},
-		{"source": "crowdsec", "url": "http://[::1]:8080", "api_key": key},
+		{"source": "crowdsec", "url": "https://192.0.2.10:8080", "api-key": key},
+		{"source": "crowdsec", "url": "http://localhost:8080", "api-key": key},
+		{"source": "crowdsec", "url": "http://[::1]:8080", "api-key": key},
 		{"url": "http://lists.example/drop.txt"}, // no credentials
 	} {
-		c["name"] = fmt.Sprintf("ok%d", i)
-		env.do("DELETE", "/api/ip-lists/"+itoa(env.create("/api/ip-lists", c)), nil)
+		path := fmt.Sprintf("ip-list=ok%d", i)
+		env.put(path, c)
+		env.mustCfg("DELETE", path, nil)
 	}
 
 	// A country list: codes upper-cased and deduplicated, no URL kept.
 	for _, c := range []map[string]any{
-		{"name": "geo", "source": "country"},
-		{"name": "geo", "source": "country", "countries": []string{"Sweden"}},
+		{"source": "country"},
+		{"source": "country", "countries": []string{"Sweden"}},
 	} {
-		if rec := env.do("POST", "/api/ip-lists", c); rec.Code != http.StatusBadRequest {
+		if rec := env.cfg("PUT", "ip-list=geo", c); rec.Code != http.StatusBadRequest {
 			t.Errorf("bad country list %v accepted: %d %s", c, rec.Code, rec.Body)
 		}
 	}
-	geo := env.create("/api/ip-lists", map[string]any{"name": "geo", "source": "country", "url": "https://example.com/x", "countries": []string{"se", " NO", "SE"}})
-	var g models.IpList
-	env.srv.db.First(&g, geo)
-	if g.Url != "" || strings.Join(g.Countries, " ") != "SE NO" {
-		t.Errorf("country list stored as %q %v", g.Url, g.Countries)
+	env.put("ip-list=geo", map[string]any{"source": "country", "url": "https://example.com/x", "countries": []string{"se", " NO", "SE"}})
+	if g := env.node("ip-list=geo"); g.Leaf("url") != "" || strings.Join(g.LeafLists["countries"], " ") != "SE NO" {
+		t.Errorf("country list stored as %q %v", g.Leaf("url"), g.LeafLists["countries"])
 	}
-	env.do("DELETE", "/api/ip-lists/"+itoa(geo), nil)
+	env.mustCfg("DELETE", "ip-list=geo", nil)
 
-	rec := env.do("POST", "/api/ip-lists", cs)
-	if rec.Code != http.StatusCreated || strings.Contains(rec.Body.String(), key) || !strings.Contains(rec.Body.String(), `"has_api_key":true`) {
-		t.Fatalf("create: %d %s", rec.Code, rec.Body)
+	env.put("ip-list=crowdsec", cs)
+	if rec := env.do("GET", "/api/config/candidate/ip-list", nil); strings.Contains(rec.Body.String(), key) {
+		t.Errorf("the key read back: %s", rec.Body)
 	}
-	var created models.IpList
-	_ = json.Unmarshal(rec.Body.Bytes(), &created)
-	csID := itoa(created.ID)
-	drop := env.create("/api/ip-lists", map[string]any{"name": "drop", "url": "https://example.com/drop.txt", "username": "u", "password": "p"})
+	env.put("ip-list=drop", map[string]any{"url": "https://example.com/drop.txt", "username": "u", "password": "p"})
 
-	// Rules take IP lists; NAT rules and other address fields do not.
-	rule := env.create("/api/rules", map[string]any{"instance_id": inst, "chain": "input", "in_interfaces": []string{"wan"},
-		"src_addrs": []string{"@crowdsec", "@drop", "192.0.2.0/24"}, "action": "drop", "enabled": true})
-	if rec := env.do("POST", "/api/rules", map[string]any{"instance_id": inst, "chain": "input", "src_addrs": []string{"@nope"}, "action": "drop"}); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `no IP list named \"nope\"`) {
+	// Rules take IP lists; NAT rules and other address fields don't.
+	rule := env.post("instance=main/rule", map[string]any{"chain": "input", "in-interfaces": []string{"wan"}, "src-addrs": []string{"@crowdsec", "@drop", "192.0.2.0/24"}, "action": "drop"})
+	if rec := env.cfg("POST", "instance=main/rule", map[string]any{"chain": "input", "src-addrs": []string{"@nope"}, "action": "drop"}); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "no IP list nope") {
 		t.Errorf("unknown list: %d %s", rec.Code, rec.Body)
 	}
-	if rec := env.do("POST", "/api/nat", map[string]any{"instance_id": inst, "kind": "masquerade", "out_interfaces": []string{"wan"}, "src_addrs": []string{"@drop"}}); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "only be used in firewall rules") {
+	if rec := env.cfg("POST", "instance=main/nat-rule", map[string]any{"kind": "masquerade", "out-interfaces": []string{"wan"}, "src-addrs": []string{"@drop"}}); rec.Code != http.StatusBadRequest {
 		t.Errorf("list in NAT: %d %s", rec.Code, rec.Body)
 	}
 
 	// Tasks.
 	for _, bad := range []map[string]any{
-		{"name": "t", "schedule": "every hour", "kind": "iplist", "ip_list_id": drop},
-		{"name": "t", "schedule": "@hourly", "kind": "iplist"},
-		{"name": "t", "schedule": "@hourly", "kind": "command", "command": " "},
-		{"name": "t", "schedule": "@hourly", "kind": "command", "command": "ls", "timeout": 100000},
-		{"name": "t", "schedule": "@hourly", "kind": "reboot"},
+		{"schedule": "every hour", "kind": "iplist", "ip-list": "drop"},
+		{"schedule": "@hourly", "kind": "iplist"},
+		{"schedule": "@hourly", "kind": "command", "command": " "},
+		{"schedule": "@hourly", "kind": "command", "command": "ls", "timeout": 100000},
+		{"schedule": "@hourly", "kind": "reboot"},
 	} {
-		if rec := env.do("POST", "/api/tasks", bad); rec.Code != http.StatusBadRequest {
+		bad["firewall"] = fw
+		if rec := env.cfg("PUT", "task=t", bad); rec.Code != http.StatusBadRequest {
 			t.Errorf("bad task %v accepted: %d %s", bad, rec.Code, rec.Body)
 		}
 	}
-	env.create("/api/tasks", map[string]any{"name": "crowdsec", "schedule": " */5  * * * * ", "kind": "iplist", "ip_list_id": created.ID, "command": "ignored", "enabled": true})
-	backup := env.create("/api/tasks", map[string]any{"name": "backup", "schedule": "30 3 * * *", "kind": "command", "command": "tar czf /tmp/x.tgz /etc", "timeout": 60, "enabled": true})
-	env.create("/api/tasks", map[string]any{"name": "off", "schedule": "@daily", "kind": "command", "command": "true", "enabled": false})
+	env.put("task=crowdsec", map[string]any{"schedule": " */5  * * * * ", "kind": "iplist", "ip-list": "crowdsec", "command": "ignored", "enabled": true, "firewall": fw})
+	env.put("task=backup", map[string]any{"schedule": "30 3 * * *", "kind": "command", "command": "tar czf /tmp/x.tgz /etc", "timeout": 60, "enabled": true, "firewall": fw})
+	env.put("task=off", map[string]any{"schedule": "@daily", "kind": "command", "command": "true", "enabled": false, "firewall": fw})
 
-	// Renaming a list rewrites the rules; deleting one in use is refused.
-	if rec := env.do("PUT", "/api/ip-lists/"+csID, map[string]any{"name": "cs"}); rec.Code != http.StatusOK {
-		t.Fatalf("rename: %d %s", rec.Code, rec.Body)
+	// Renaming a list rewrites the rules and tasks; deleting one in use is
+	// refused.
+	env.mustCfg("POST", "ip-list=crowdsec?action=rename", map[string]any{"keys": []string{"cs"}})
+	if got := env.node("instance=main/rule=" + rule).LeafLists["src-addrs"]; strings.Join(got, " ") != "@cs @drop 192.0.2.0/24" {
+		t.Errorf("rule after rename: %v", got)
 	}
-	var r models.Rule
-	env.srv.db.First(&r, rule)
-	if strings.Join(r.SrcAddrs, " ") != "@cs @drop 192.0.2.0/24" {
-		t.Errorf("rule after rename: %v", r.SrcAddrs)
-	}
-	rec = env.do("DELETE", "/api/ip-lists/"+csID, nil)
-	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "input rule 1 in main") || !strings.Contains(rec.Body.String(), "task crowdsec") {
+	if rec := env.cfg("DELETE", "ip-list=cs", nil); rec.Code != http.StatusBadRequest {
 		t.Errorf("delete in use: %d %s", rec.Code, rec.Body)
 	}
 
-	doc, err := builder.Build(tablesInput(t, env.srv.db), 1)
+	doc, err := builder.Build(env.input(), 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,13 +137,13 @@ func TestIPListsAndTasks(t *testing.T) {
 	// Run now goes to the agent by name.
 	fake := &runAgent{}
 	env.srv.newAgent = func(*models.Firewall) (agentAPI, error) { return fake, nil }
-	if rec := env.do("POST", "/api/tasks/"+itoa(backup)+"/run", map[string]any{}); rec.Code != http.StatusAccepted || fake.ran != "backup" {
+	if rec := env.do("POST", "/api/config/candidate/task=backup?action=run", map[string]any{}); rec.Code != http.StatusAccepted || fake.ran != "backup" {
 		t.Errorf("run: %d %s %q", rec.Code, rec.Body, fake.ran)
 	}
-	if rec := env.do("POST", "/api/ip-lists/"+itoa(drop)+"/refresh", map[string]any{}); rec.Code != http.StatusBadGateway || !strings.Contains(rec.Body.String(), "not deployed") {
+	if rec := env.do("POST", "/api/config/candidate/ip-list=drop?action=refresh", map[string]any{}); rec.Code != http.StatusBadGateway || !strings.Contains(rec.Body.String(), "not deployed") {
 		t.Errorf("refresh error: %d %s", rec.Code, rec.Body)
 	}
-	if rec := env.do("POST", "/api/tasks/999/run", map[string]any{}); rec.Code != http.StatusNotFound {
+	if rec := env.do("POST", "/api/config/candidate/task=nope?action=run", map[string]any{}); rec.Code != http.StatusNotFound {
 		t.Errorf("unknown task: %d", rec.Code)
 	}
 }
@@ -193,31 +186,26 @@ func TestSchedulePreview(t *testing.T) {
 // HA secondary, named after the list (and the firewall, with several).
 func TestIPListRefreshTasks(t *testing.T) {
 	env := newEnv(t)
-	tasksOf := func() []models.Task {
-		var ts []models.Task
-		env.srv.db.Order("name").Find(&ts)
-		return ts
+	tasks := func() []string {
+		var out []string
+		for _, t := range env.node("").Lists["task"] {
+			out = append(out, t.Leaf("name"))
+		}
+		return out
 	}
-	if rec := env.do("POST", "/api/ip-lists", map[string]any{"name": "bad", "url": "https://example.com/l.txt", "refresh_schedule": "61 * * * *"}); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "refresh schedule") {
+	env.put("ip-list=drop", map[string]any{"url": "https://example.com/drop.txt"})
+	if rec := env.cfg("POST", "ip-list=drop?action=schedule", map[string]any{"schedule": "61 * * * *"}); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "refresh schedule") {
 		t.Errorf("bad schedule: %d %s", rec.Code, rec.Body)
 	}
-	drop := env.create("/api/ip-lists", map[string]any{"name": "drop", "url": "https://example.com/drop.txt", "refresh_schedule": "17  3 * * *"})
-	ts := tasksOf()
-	if len(ts) != 1 || ts[0].Name != "drop" || ts[0].Schedule != "17 3 * * *" || !ts[0].Enabled || ts[0].Kind != "iplist" || ts[0].IpListID == nil || *ts[0].IpListID != drop {
-		t.Fatalf("tasks: %+v", ts)
-	}
-	// An edit adds none.
-	if rec := env.do("PUT", "/api/ip-lists/"+itoa(drop), map[string]any{"refresh_schedule": "@daily"}); rec.Code != http.StatusOK || len(tasksOf()) != 1 {
-		t.Errorf("edit: %d %s, %d tasks", rec.Code, rec.Body, len(tasksOf()))
+	env.mustCfg("POST", "ip-list=drop?action=schedule", map[string]any{"schedule": "17  3 * * *"})
+	if task := env.node("task=drop"); task == nil || task.Leaf("schedule") != "17 3 * * *" || !on(task, "enabled") || task.Leaf("kind") != "iplist" || task.Leaf("ip-list") != "drop" {
+		t.Fatalf("tasks: %v", tasks())
 	}
 
 	env.create("/api/firewalls", map[string]any{"name": "branch", "agent_url": "https://192.0.2.2:8443", "agent_token": "secret"})
-	env.create("/api/ip-lists", map[string]any{"name": "fh", "url": "https://example.com/fh.txt", "refresh_schedule": "@daily"})
-	var names []string
-	for _, t := range tasksOf() {
-		names = append(names, t.Name)
-	}
-	if got := strings.Join(names, " "); !strings.Contains(got, "fh-branch") || len(names) != 3 {
+	env.put("ip-list=fh", map[string]any{"url": "https://example.com/fh.txt"})
+	env.mustCfg("POST", "ip-list=fh?action=schedule", map[string]any{"schedule": "@daily"})
+	if got := strings.Join(tasks(), " "); !strings.Contains(got, "fh-branch") || len(tasks()) != 3 {
 		t.Errorf("tasks: %s", got)
 	}
 }

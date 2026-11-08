@@ -107,13 +107,12 @@ func TestConfigAPI(t *testing.T) {
 	want(env.do("PUT", "/api/config/running/instance=lab/description", "x"), http.StatusMethodNotAllowed, "a change of running")
 	want(env.do("PATCH", "/api/config/candidate/instance=lab/state", map[string]any{}), http.StatusBadRequest, "a change of state")
 
-	// A save the commit would refuse stands, with the reason as a warning.
+	// A save the commit would refuse is refused, with the reason.
 	rec = env.do("PUT", "/api/config/candidate/instance=lab/interface=vl9", map[string]any{"kind": "vlan", "enabled": true, "vlan-id": 9, "parent": "nope"})
-	want(rec, http.StatusOK, "a VLAN of no parent")
-	if !strings.Contains(rec.Body.String(), `"warnings"`) || !strings.Contains(rec.Body.String(), "vl9") {
-		t.Errorf("no warning: %s", rec.Body)
+	want(rec, http.StatusBadRequest, "a VLAN of no parent")
+	if !strings.Contains(rec.Body.String(), "vl9") {
+		t.Errorf("no reason: %s", rec.Body)
 	}
-	want(env.do("DELETE", "/api/config/candidate/instance=lab/interface=vl9", nil), http.StatusNoContent, "delete vl9")
 
 	// Actions: new keys, a peer's client config, the next free address.
 	want(env.do("PUT", "/api/config/candidate/instance=lab/interface=wg0", map[string]any{"kind": "wireguard", "enabled": true, "addresses": []string{"10.99.0.1/24"}, "wg-listen-port": 51820}), http.StatusOK, "wg0")

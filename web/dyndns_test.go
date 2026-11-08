@@ -4,75 +4,63 @@
 package web
 
 import (
-	"encoding/json"
 	"maps"
 	"net/http"
 	"strings"
 	"testing"
 
 	"github.com/abundo/portitor/internal/builder"
-	"github.com/abundo/portitor/models"
 )
 
 func TestDynDNS(t *testing.T) {
 	env := newEnv(t)
-	inst := env.create("/api/instances", map[string]any{"name": "main"})
-	eth0 := env.create("/api/interfaces", map[string]any{"instance_id": inst, "name": "eth0", "ipv4_mode": "dhcp", "enabled": true})
-	other := env.create("/api/instances", map[string]any{"name": "lab"})
-	eth9 := env.create("/api/interfaces", map[string]any{"instance_id": other, "name": "eth9", "enabled": true})
+	env.host("main")
+	env.put("instance=main/interface=eth0", map[string]any{"kind": "physical", "ipv4-mode": "dhcp", "enabled": true})
+	env.vf("lab")
+	env.put("instance=lab/interface=eth9", map[string]any{"kind": "physical", "enabled": true})
 
 	const secret = "c2VjcmV0c2VjcmV0c2VjcmV0"
 	client := map[string]any{
-		"instance_id": inst, "name": "home", "enabled": true, "interface_id": eth0,
-		"server": "192.0.2.53", "zone": "Example.com.", "tsig_name": "ddns-key.example.com.", "tsig_secret": secret,
+		"enabled": false, "interface": "eth0",
+		"server": "192.0.2.53", "zone": "Example.com.", "tsig-name": "ddns-key.example.com.", "tsig-secret": secret,
 	}
 	for field, v := range map[string]any{
-		"server":       "ns1",
-		"interface_id": eth9,
-		"tsig_secret":  "not base64!",
-		"name":         "..",
+		"server":      "ns1",
+		"interface":   "eth9",
+		"tsig-secret": "not base64!",
 	} {
-		c := map[string]any{}
-		for k, x := range client {
-			c[k] = x
-		}
+		c := maps.Clone(client)
 		c[field] = v
-		if rec := env.do("POST", "/api/dyndns/clients", c); rec.Code != http.StatusBadRequest {
+		if rec := env.cfg("PUT", "instance=main/dns-update=home", c); rec.Code != http.StatusBadRequest {
 			t.Errorf("bad %s accepted: %d %s", field, rec.Code, rec.Body)
 		}
 	}
-
-	rec := env.do("POST", "/api/dyndns/clients", client)
-	if rec.Code != http.StatusCreated || strings.Contains(rec.Body.String(), secret) || !strings.Contains(rec.Body.String(), `"has_tsig_secret":true`) {
-		t.Fatalf("create: %d %s", rec.Code, rec.Body)
+	if rec := env.cfg("PUT", "instance=main/dns-update=..", client); rec.Code != http.StatusBadRequest {
+		t.Errorf("bad name accepted: %d %s", rec.Code, rec.Body)
 	}
-	var created models.DyndnsClient
-	_ = json.Unmarshal(rec.Body.Bytes(), &created)
-	id := itoa(created.ID)
-	if created.Zone != "example.com" || created.TsigAlgorithm != "hmac-sha256" {
-		t.Errorf("not normalised: %+v", created)
+	home := "instance=main/dns-update=home"
+	env.put(home, client)
+	if d := env.node(home); d.Leaf("zone") != "example.com" || d.Leaf("tsig-algorithm") != "hmac-sha256" {
+		t.Errorf("not normalised: %+v", d.Leaves)
 	}
-	if rec := env.do("GET", "/api/dyndns/clients/"+id, nil); strings.Contains(rec.Body.String(), secret) {
+	if rec := env.do("GET", "/api/config/candidate/"+home, nil); strings.Contains(rec.Body.String(), secret) {
 		t.Errorf("secret leaked: %s", rec.Body)
 	}
 	// A nameserver by name.
-	if rec := env.do("PUT", "/api/dyndns/clients/"+id, map[string]any{"server": "ns1.example.net:5353"}); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"server":"ns1.example.net:5353"`) {
-		t.Fatalf("server by name: %d %s", rec.Code, rec.Body)
-	}
-	// Saving without a secret keeps it; a key needs one.
-	if rec := env.do("PUT", "/api/dyndns/clients/"+id, map[string]any{"description": "ISP"}); rec.Code != http.StatusOK {
-		t.Fatalf("update: %d %s", rec.Code, rec.Body)
-	}
-	var stored models.DyndnsClient
-	env.srv.db.First(&stored, created.ID)
-	if stored.TsigSecret != secret || stored.Description != "ISP" {
-		t.Errorf("stored %+v", stored)
+	env.patch(home, map[string]any{"server": "ns1.example.net:5353"})
+	// A replace without the secret keeps it.
+	c := maps.Clone(client)
+	delete(c, "tsig-secret")
+	c["server"], c["description"] = "ns1.example.net:5353", "ISP"
+	env.put(home, c)
+	if d := env.node(home); d.Leaf("tsig-secret") != secret || d.Leaf("description") != "ISP" {
+		t.Errorf("stored %+v", d.Leaves)
 	}
 
-	recs := "/api/dyndns/records"
-	env.create(recs, map[string]any{"client_id": created.ID, "name": "home", "type": "a", "ttl": 60})
-	env.create(recs, map[string]any{"client_id": created.ID, "name": "home", "type": "TXT"})
-	www := env.create(recs, map[string]any{"client_id": created.ID, "name": "www", "type": "CNAME", "value": "home"})
+	recs := home + "/record"
+	env.post(recs, map[string]any{"name": "home", "type": "a", "ttl": 60})
+	env.post(recs, map[string]any{"name": "home", "type": "TXT"})
+	www := env.post(recs, map[string]any{"name": "www", "type": "CNAME", "value": "home"})
 	for what, r := range map[string]map[string]any{
 		"duplicate":       {"name": "home.example.com.", "type": "A"},
 		"cname conflict":  {"name": "www", "type": "TXT", "value": "x"},
@@ -81,30 +69,24 @@ func TestDynDNS(t *testing.T) {
 		"A with v6":       {"name": "v6", "type": "A", "value": "2001:db8::1"},
 		"cname no target": {"name": "ftp", "type": "CNAME"},
 	} {
-		r["client_id"] = created.ID
-		if rec := env.do("POST", recs, r); rec.Code != http.StatusBadRequest {
+		if rec := env.cfg("POST", recs, r); rec.Code != http.StatusBadRequest {
 			t.Errorf("%s accepted: %d %s", what, rec.Code, rec.Body)
 		}
 	}
 	// Editing a record is checked against the others, not itself.
-	if rec := env.do("PUT", recs+"/"+itoa(www), map[string]any{"value": "home.example.com."}); rec.Code != http.StatusOK {
-		t.Errorf("edit record: %d %s", rec.Code, rec.Body)
-	}
+	env.patch(recs+"="+www, map[string]any{"value": "home.example.com."})
+	env.patch(home, map[string]any{"enabled": true})
 	// Moving the zone away from a record's absolute name is refused.
-	env.create(recs, map[string]any{"client_id": created.ID, "name": "fixed.example.com.", "type": "A", "value": "192.0.2.10"})
-	if rec := env.do("PUT", "/api/dyndns/clients/"+id, map[string]any{"zone": "example.org"}); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "not in zone") {
+	env.post(recs, map[string]any{"name": "fixed.example.com.", "type": "A", "value": "192.0.2.10"})
+	if rec := env.cfg("PATCH", home, map[string]any{"zone": "example.org"}); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "not in zone") {
 		t.Errorf("zone change: %d %s", rec.Code, rec.Body)
 	}
-
-	// The interface cannot go away under the client.
-	if rec := env.do("DELETE", "/api/interfaces/"+itoa(eth0), nil); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "DNS update home") {
+	// The interface can't go away under the client.
+	if rec := env.cfg("DELETE", "instance=main/interface=eth0", nil); rec.Code != http.StatusBadRequest {
 		t.Errorf("delete used interface: %d %s", rec.Code, rec.Body)
 	}
-	if rec := env.do("PUT", "/api/interfaces/"+itoa(eth0), map[string]any{"instance_id": other}); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "DNS update home") {
-		t.Errorf("move used interface: %d %s", rec.Code, rec.Body)
-	}
 
-	doc, err := builder.Build(tablesInput(t, env.srv.db), 1)
+	doc, err := builder.Build(env.input(), 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,77 +99,60 @@ func TestDynDNS(t *testing.T) {
 	}
 
 	// Removing the key clears the secret.
-	env.do("PUT", "/api/dyndns/clients/"+id, map[string]any{"tsig_name": ""})
-	env.srv.db.First(&stored, created.ID)
-	if stored.TsigSecret != "" || stored.TsigAlgorithm != "" {
-		t.Errorf("key not cleared: %+v", stored)
+	env.patch(home, map[string]any{"tsig-name": nil})
+	if d := env.node(home); d.Leaf("tsig-secret") != "" || d.Leaf("tsig-algorithm") != "" {
+		t.Errorf("key not cleared: %+v", d.Leaves)
 	}
-	if rec := env.do("DELETE", "/api/dyndns/clients/"+id, nil); rec.Code != http.StatusNoContent {
-		t.Fatalf("delete: %d %s", rec.Code, rec.Body)
-	}
-	var n int64
-	env.srv.db.Model(&models.DyndnsRecord{}).Count(&n)
-	if n != 0 {
-		t.Errorf("%d records left", n)
-	}
-	if rec := env.do("DELETE", "/api/interfaces/"+itoa(eth0), nil); rec.Code != http.StatusNoContent {
-		t.Errorf("delete unused interface: %d %s", rec.Code, rec.Body)
-	}
+	env.mustCfg("DELETE", home, nil)
+	env.mustCfg("DELETE", "instance=main/interface=eth0", nil)
 }
 
 func TestDNSUpdateProvider(t *testing.T) {
 	env := newEnv(t)
-	inst := env.create("/api/instances", map[string]any{"name": "main"})
-	eth0 := env.create("/api/interfaces", map[string]any{"instance_id": inst, "name": "eth0", "ipv4_mode": "dhcp", "enabled": true})
+	env.host("main")
+	env.put("instance=main/interface=eth0", map[string]any{"kind": "physical", "ipv4-mode": "dhcp", "enabled": true})
 
 	const token = "cf-token-secret"
-	client := map[string]any{
-		"instance_id": inst, "name": "home", "enabled": true, "interface_id": eth0, "zone": "example.com",
-		"provider": "glesys", "provider_settings": map[string]string{"project": "CL1", "api_key": token},
-		"server": "192.0.2.53", "tsig_name": "k.example.com", // ignored by a provider
+	settings := func(m map[string]string) []map[string]any {
+		var out []map[string]any
+		for k, v := range m {
+			out = append(out, map[string]any{"name": k, "value": v})
+		}
+		return out
 	}
-	for name, settings := range map[string]map[string]string{
+	client := map[string]any{
+		"enabled": false, "interface": "eth0", "zone": "example.com",
+		"provider": "glesys", "provider-setting": settings(map[string]string{"project": "CL1", "api_key": token}),
+		"server": "192.0.2.53", "tsig-name": "k.example.com", // left out with a provider
+	}
+	home := "instance=main/dns-update=home"
+	for name, s := range map[string]map[string]string{
 		"missing key":   {"project": "CL1"},
 		"unknown field": {"project": "CL1", "api_key": "k", "nope": "x"},
 		"control char":  {"project": "CL\n1", "api_key": "k"},
 	} {
 		c := maps.Clone(client)
-		c["provider_settings"] = settings
-		if rec := env.do("POST", "/api/dyndns/clients", c); rec.Code != http.StatusBadRequest {
+		c["provider-setting"] = settings(s)
+		if rec := env.cfg("PUT", home, c); rec.Code != http.StatusBadRequest {
 			t.Errorf("%s accepted: %d %s", name, rec.Code, rec.Body)
 		}
 	}
 	c := maps.Clone(client)
 	c["provider"] = "nope"
-	if rec := env.do("POST", "/api/dyndns/clients", c); rec.Code != http.StatusBadRequest {
+	if rec := env.cfg("PUT", home, c); rec.Code != http.StatusBadRequest {
 		t.Errorf("unknown provider accepted: %d %s", rec.Code, rec.Body)
 	}
-
-	rec := env.do("POST", "/api/dyndns/clients", client)
-	if rec.Code != http.StatusCreated || strings.Contains(rec.Body.String(), token) ||
-		!strings.Contains(rec.Body.String(), `"provider_settings":{"project":"CL1"}`) ||
-		!strings.Contains(rec.Body.String(), `"provider_secrets_set":["api_key"]`) {
-		t.Fatalf("create: %d %s", rec.Code, rec.Body)
+	env.put(home, client)
+	if rec := env.do("GET", "/api/config/candidate/"+home, nil); strings.Contains(rec.Body.String(), token) {
+		t.Errorf("the token read back: %s", rec.Body)
 	}
-	var created models.DyndnsClient
-	_ = json.Unmarshal(rec.Body.Bytes(), &created)
-	id := itoa(created.ID)
-	var stored models.DyndnsClient
-	env.srv.db.First(&stored, created.ID)
-	if stored.Server != "" || stored.TsigName != "" || stored.ProviderSettings["api_key"] != token {
-		t.Errorf("stored %+v", stored)
+	if d := env.node(home); d.Leaf("server") != "" || d.Leaf("tsig-name") != "" {
+		t.Errorf("stored %+v", d.Leaves)
 	}
 
-	// A PUT without settings, or with an empty secret, keeps them.
-	env.do("PUT", "/api/dyndns/clients/"+id, map[string]any{"description": "ISP"})
-	env.do("PUT", "/api/dyndns/clients/"+id, map[string]any{"provider_settings": map[string]string{"project": "CL2", "api_key": ""}})
-	env.srv.db.First(&stored, created.ID)
-	if stored.ProviderSettings["api_key"] != token || stored.ProviderSettings["project"] != "CL2" || stored.Description != "ISP" {
-		t.Errorf("settings not kept: %+v", stored.ProviderSettings)
-	}
-
-	env.create("/api/dyndns/records", map[string]any{"client_id": created.ID, "name": "home", "type": "A"})
-	doc, err := builder.Build(tablesInput(t, env.srv.db), 1)
+	env.post(home+"/record", map[string]any{"name": "home", "type": "A"})
+	env.patch(home, map[string]any{"enabled": true})
+	doc, err := builder.Build(env.input(), 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,23 +161,14 @@ func TestDNSUpdateProvider(t *testing.T) {
 		t.Fatalf("document: %+v", d)
 	}
 	red := redactDoc(*doc)
-	if r := red.Instance("main").DynDNS[0].ProviderSettings; r["api_key"] != "<redacted>" || r["project"] != "CL2" {
+	if r := red.Instance("main").DynDNS[0].ProviderSettings; r["api_key"] != "<redacted>" {
 		t.Errorf("redaction: %v", r)
 	}
-
-	// Another provider does not inherit the stored secret.
-	if rec := env.do("PUT", "/api/dyndns/clients/"+id, map[string]any{"provider": "loopia", "provider_settings": map[string]string{"username": "u@loopiaapi"}}); rec.Code != http.StatusBadRequest {
-		t.Errorf("switch without a password: %d %s", rec.Code, rec.Body)
-	}
 	// Back to RFC 2136 clears the settings.
-	if rec := env.do("PUT", "/api/dyndns/clients/"+id, map[string]any{"provider": "rfc2136", "server": "192.0.2.53", "tsig_name": ""}); rec.Code != http.StatusOK {
-		t.Fatalf("to rfc2136: %d %s", rec.Code, rec.Body)
+	env.patch(home, map[string]any{"provider": "rfc2136", "server": "192.0.2.53"})
+	if s := env.node(home).Lists["provider-setting"]; len(s) != 0 {
+		t.Errorf("settings kept: %v", s)
 	}
-	env.srv.db.First(&stored, created.ID)
-	if len(stored.ProviderSettings) != 0 {
-		t.Errorf("settings kept: %v", stored.ProviderSettings)
-	}
-
 	if rec := env.do("GET", "/api/dyndns/providers", nil); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"cloudflare"`) {
 		t.Errorf("providers: %d", rec.Code)
 	}
@@ -221,28 +177,26 @@ func TestDNSUpdateProvider(t *testing.T) {
 // The dynamic zone editor replaces a client's records in one PUT.
 func TestDynDNSRecordsReplace(t *testing.T) {
 	env := newEnv(t)
-	inst := env.create("/api/instances", map[string]any{"name": "main"})
-	eth0 := env.create("/api/interfaces", map[string]any{"instance_id": inst, "name": "eth0", "ipv4_mode": "dhcp", "enabled": true})
-	id := env.create("/api/dyndns/clients", map[string]any{
-		"instance_id": inst, "name": "home", "enabled": true, "interface_id": eth0, "server": "192.0.2.53", "zone": "example.com",
-	})
-	path := "/api/dyndns/clients/" + itoa(id) + "/records"
+	env.host("main")
+	env.put("instance=main/interface=eth0", map[string]any{"kind": "physical", "ipv4-mode": "dhcp", "enabled": true})
+	env.put("instance=main/dns-update=home", map[string]any{"enabled": false, "interface": "eth0", "server": "192.0.2.53", "zone": "example.com"})
+	path := "instance=main/dns-update=home/record"
 	for what, body := range map[string][]map[string]any{
-		"duplicate":      {{"name": "home", "type": "A"}, {"name": "home", "type": "a"}},
-		"cname conflict": {{"name": "www", "type": "CNAME", "value": "home"}, {"name": "www", "type": "TXT"}},
-		"bad type":       {{"name": "mx", "type": "MX", "value": "10 mail"}},
-		"cname target":   {{"name": "www", "type": "CNAME"}},
+		"duplicate":      {{"id": 1, "name": "home", "type": "A"}, {"id": 2, "name": "home", "type": "a"}},
+		"cname conflict": {{"id": 1, "name": "www", "type": "CNAME", "value": "home"}, {"id": 2, "name": "www", "type": "TXT"}},
+		"bad type":       {{"id": 1, "name": "mx", "type": "MX", "value": "10 mail"}},
+		"cname target":   {{"id": 1, "name": "www", "type": "CNAME"}},
 	} {
-		if rec := env.do("PUT", path, body); rec.Code != http.StatusBadRequest {
+		if rec := env.cfg("PUT", path, body); rec.Code != http.StatusBadRequest {
 			t.Errorf("%s accepted: %d %s", what, rec.Code, rec.Body)
 		}
 	}
-	rec := env.do("PUT", path, []map[string]any{{"name": "", "type": "a", "ttl": 60}, {"name": "www", "type": "CNAME", "value": "@"}})
-	var out []models.DyndnsRecord
-	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &out) != nil || len(out) != 2 || out[0].Name != "@" || out[0].Type != "A" || out[1].Type != "CNAME" {
-		t.Fatalf("replace: %d %s", rec.Code, rec.Body)
+	env.put(path, []map[string]any{{"id": 1, "name": "@", "type": "a", "ttl": 60}, {"id": 2, "name": "www", "type": "CNAME", "value": "@"}})
+	if rs := env.node("instance=main/dns-update=home").Lists["record"]; len(rs) != 2 || rs[0].Leaf("type") != "A" || rs[1].Leaf("type") != "CNAME" {
+		t.Fatalf("replace: %v", rs)
 	}
-	if rec := env.do("PUT", path, []map[string]any{}); rec.Code != http.StatusOK || strings.TrimSpace(rec.Body.String()) != "[]" {
-		t.Fatalf("clear: %d %s", rec.Code, rec.Body)
+	env.put(path, []map[string]any{})
+	if rs := env.node("instance=main/dns-update=home").Lists["record"]; len(rs) != 0 {
+		t.Fatalf("clear: %v", rs)
 	}
 }

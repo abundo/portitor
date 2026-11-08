@@ -118,6 +118,9 @@ var formats = map[string]format{
 			if err != nil {
 				return "", fmt.Errorf("%q is not an address or prefix", v)
 			}
+			if p.IsSingleIP() {
+				return p.Addr().String(), nil // a host's address
+			}
 			return p.Masked().String(), nil
 		}
 		a, err := fwconfig.ParseAddr(v)
@@ -199,6 +202,15 @@ func init() {
 		}
 	}
 	formats["route-destination"] = either("default-route", "ip-prefix")
+	formats["lowercase-name"] = func(v string) (string, error) {
+		return strings.ToLower(v), nil
+	}
+	formats["prefix-or-any"] = func(v string) (string, error) {
+		if v == "any" {
+			return v, nil
+		}
+		return formats["cidr"](v)
+	}
 	formats["rule-address"] = either("ip-list-ref", "address-or-prefix")
 	formats["any-interface-address"] = either("delegated-interface-address", "interface-address")
 }

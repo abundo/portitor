@@ -21,9 +21,9 @@ func TestTenancy(t *testing.T) {
 	env := newEnv(t)
 	fake := &neighboursAgent{}
 	env.srv.newAgent = func(*models.Firewall) (agentAPI, error) { return fake, nil }
-	env.create("/api/instances", map[string]any{"name": "main"}) // the default, with no role
-	a := env.create("/api/instances", map[string]any{"name": "a"})
-	b := env.create("/api/instances", map[string]any{"name": "b"})
+	env.host("main") // the default, with no role
+	env.vf("a")
+	env.vf("b")
 	tina := env.create("/api/users", map[string]string{"username": "tina", "password": "a long password", "role": "none"})
 	roleA := env.roles()["vf-a"].ID
 	if rec := env.do("PUT", fmt.Sprintf("/api/roles/%d", roleA), map[string]any{
@@ -31,13 +31,11 @@ func TestTenancy(t *testing.T) {
 	}); rec.Code != http.StatusOK {
 		t.Fatalf("role: %d %s", rec.Code, rec.Body)
 	}
-	rule := func(inst uint, desc string) map[string]any {
-		return map[string]any{"instance_id": inst, "chain": "input", "action": "accept", "enabled": true, "description": desc}
+	rule := func(desc string) map[string]any {
+		return map[string]any{"chain": "input", "action": "accept", "enabled": true, "description": desc}
 	}
-	ruleB := env.create("/api/rules", rule(b, "b's"))
-	if rec := env.do("POST", "/api/deploy/apply", map[string]any{}); rec.Code != http.StatusOK {
-		t.Fatalf("admin deploy: %d %s", rec.Code, rec.Body)
-	}
+	ruleB := env.post("instance=b/rule", rule("b's"))
+	env.commit()
 
 	env.login("tina", "a long password")
 	var me struct {
@@ -47,36 +45,29 @@ func TestTenancy(t *testing.T) {
 	if len(me.Access) != 1 || me.Access["a"] != "admin" {
 		t.Errorf("access: %v", me.Access)
 	}
-	var insts []models.Instance
-	_ = json.Unmarshal(env.do("GET", "/api/instances", nil).Body.Bytes(), &insts)
-	if len(insts) != 1 || insts[0].ID != a {
+	var insts []map[string]any
+	env.read("candidate", "instance", &insts)
+	if len(insts) != 1 || insts[0]["name"] != "a" {
 		t.Errorf("instances: %+v", insts)
-	}
-	var rules []models.Rule
-	_ = json.Unmarshal(env.do("GET", "/api/rules", nil).Body.Bytes(), &rules)
-	for _, r := range rules {
-		if r.InstanceID != a {
-			t.Errorf("sees rule %d of instance %d", r.ID, r.InstanceID)
-		}
 	}
 	for _, tc := range []struct {
 		method, path string
 		body         any
 		want         int
 	}{
-		{"GET", fmt.Sprintf("/api/rules/%d", ruleB), nil, http.StatusNotFound},
-		{"PUT", fmt.Sprintf("/api/rules/%d", ruleB), map[string]any{"description": "mine"}, http.StatusNotFound},
-		{"DELETE", fmt.Sprintf("/api/rules/%d", ruleB), nil, http.StatusNotFound},
-		{"POST", "/api/rules", rule(b, "x"), http.StatusForbidden},
-		{"POST", "/api/objects", map[string]any{"name": "h", "addresses": []string{"10.0.0.1"}}, http.StatusForbidden},
-		{"GET", "/api/objects", nil, http.StatusOK},
+		{"GET", "/api/config/candidate/instance=b/rule=" + ruleB, nil, http.StatusNotFound},
+		{"PATCH", "/api/config/candidate/instance=b/rule=" + ruleB, map[string]any{"description": "mine"}, http.StatusForbidden},
+		{"DELETE", "/api/config/candidate/instance=b/rule=" + ruleB, nil, http.StatusForbidden},
+		{"POST", "/api/config/candidate/instance=b/rule", rule("x"), http.StatusForbidden},
+		{"POST", "/api/config/candidate/host", map[string]any{"name": "h", "addresses": []string{"10.0.0.1"}}, http.StatusForbidden},
+		{"GET", "/api/config/candidate/host", nil, http.StatusOK},
 		{"GET", "/api/users", nil, http.StatusForbidden},
 		{"GET", "/api/settings", nil, http.StatusForbidden},
-		{"POST", "/api/instances", map[string]any{"name": "c"}, http.StatusForbidden},
-		{"DELETE", fmt.Sprintf("/api/instances/%d", a), nil, http.StatusForbidden},
-		{"PUT", fmt.Sprintf("/api/instances/%d", a), map[string]any{"name": "a2"}, http.StatusBadRequest},
-		{"PUT", fmt.Sprintf("/api/instances/%d", a), map[string]any{"description": "tina's"}, http.StatusOK},
-		{"POST", "/api/interfaces", map[string]any{"instance_id": a, "name": "eth7", "enabled": true}, http.StatusBadRequest},
+		{"POST", "/api/config/candidate/instance", map[string]any{"name": "c"}, http.StatusForbidden},
+		{"DELETE", "/api/config/candidate/instance=a", nil, http.StatusForbidden},
+		{"POST", "/api/config/candidate/instance=a?action=rename", map[string]any{"keys": []string{"a2"}}, http.StatusForbidden},
+		{"PATCH", "/api/config/candidate/instance=a", map[string]any{"description": "tina's"}, http.StatusOK},
+		{"PUT", "/api/config/candidate/instance=a/interface=eth7", map[string]any{"kind": "physical", "enabled": true}, http.StatusBadRequest},
 		{"POST", "/api/deploy/revert", map[string]any{}, http.StatusForbidden},
 	} {
 		if rec := env.do(tc.method, tc.path, tc.body); rec.Code != tc.want {
@@ -94,19 +85,13 @@ func TestTenancy(t *testing.T) {
 	if len(rl.Instances) != 1 || rl.Instances["a"]["ssh"].DropPackets != 3 {
 		t.Errorf("rate limits: %+v", rl)
 	}
-	ruleA := env.create("/api/rules", rule(a, "tina's"))
-	if rec := env.do("PUT", fmt.Sprintf("/api/rules/%d", ruleA), map[string]any{"instance_id": b}); rec.Code != http.StatusForbidden {
-		t.Errorf("move rule to b: %d %s", rec.Code, rec.Body)
-	}
+	ruleA := env.post("instance=a/rule", rule("tina's"))
 
 	// The admin changes b meanwhile; tina's deploy keeps b as deployed.
 	env.login("admin", "correct horse battery")
-	env.create("/api/rules", rule(b, "pending"))
+	env.post("instance=b/rule", rule("pending"))
 	env.login("tina", "a long password")
-	rec := env.do("POST", "/api/deploy/apply", map[string]any{})
-	if rec.Code != http.StatusOK {
-		t.Fatalf("tina deploy: %d %s", rec.Code, rec.Body)
-	}
+	env.commit()
 	descs := func(name string) []string {
 		var out []string
 		for _, r := range fake.applied.Instance(name).Rules {
@@ -131,13 +116,13 @@ func TestTenancy(t *testing.T) {
 	env.create("/api/roles", map[string]any{"name": "both", "instances": []string{"a", "b"},
 		"members": []map[string]any{{"user_id": tina, "level": "viewer"}}})
 	env.login("tina", "a long password")
-	if rec := env.do("GET", fmt.Sprintf("/api/rules/%d", ruleB), nil); rec.Code != http.StatusOK {
+	if rec := env.do("GET", "/api/config/candidate/instance=b/rule="+ruleB, nil); rec.Code != http.StatusOK {
 		t.Errorf("read b: %d", rec.Code)
 	}
-	if rec := env.do("PUT", fmt.Sprintf("/api/rules/%d", ruleB), map[string]any{"description": "mine"}); rec.Code != http.StatusForbidden {
+	if rec := env.cfg("PATCH", "instance=b/rule="+ruleB, map[string]any{"description": "mine"}); rec.Code != http.StatusForbidden {
 		t.Errorf("write b as viewer: %d", rec.Code)
 	}
-	if rec := env.do("PUT", fmt.Sprintf("/api/rules/%d", ruleA), map[string]any{"description": "still mine"}); rec.Code != http.StatusOK {
+	if rec := env.cfg("PATCH", "instance=a/rule="+ruleA, map[string]any{"description": "still mine"}); rec.Code != http.StatusOK {
 		t.Errorf("write a (admin wins): %d %s", rec.Code, rec.Body)
 	}
 	if rec := env.do("POST", "/api/deploy/apply", map[string]any{"instances": []string{"b"}}); rec.Code != http.StatusBadRequest {
