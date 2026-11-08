@@ -14,65 +14,32 @@ export function crud(path) {
   }
 }
 
+// reads returns list/get of a configuration table: the tree's read model
+// (the configuration is written through /api/config, api/config.js).
+export function reads(path) {
+  return {
+    list: (params) => http.get(path, { params }).then((r) => r.data ?? []),
+    get: (id) => http.get(`${path}/${id}`).then((r) => r.data),
+  }
+}
+
 export const firewalls = crud('/firewalls')
-export const instances = crud('/instances')
-export const interfaceZones = crud('/interface-zones')
-// Rate limits rules name, per instance.
-export const rateLimits = crud('/rate-limits')
-export const interfaces = crud('/interfaces')
-export const wgPeers = crud('/wg/peers')
-export const links = crud('/links')
-export const routes = crud('/routes')
-export const policyRoutes = crud('/policy-routes')
-export const staticNeighbours = crud('/static-neighbours')
-export const prefixLists = crud('/routing/prefix-lists')
-export const asPathLists = crud('/routing/as-path-lists')
-export const communityLists = crud('/routing/community-lists')
-export const routeMaps = crud('/routing/route-maps')
-export const bgpConfig = crud('/bgp/config')
-export const bgpPeerGroups = crud('/bgp/peer-groups')
-export const bgpNeighbors = crud('/bgp/neighbors')
-export const ospfConfig = crud('/ospf/config')
-export const ospfInterfaces = crud('/ospf/interfaces')
-export const isisConfig = crud('/isis/config')
-export const isisInterfaces = crud('/isis/interfaces')
-export const vrrpRouters = crud('/vrrp/routers')
-export const bfdInterfaces = crud('/bfd/interfaces')
+export const instances = reads('/instances')
+export const interfaceZones = reads('/interface-zones')
+export const interfaces = reads('/interfaces')
+export const links = reads('/links')
+export const routes = reads('/routes')
+export const bgpPeerGroups = reads('/bgp/peer-groups')
+export const bgpNeighbors = reads('/bgp/neighbors')
+export const ospfInterfaces = reads('/ospf/interfaces')
+export const isisInterfaces = reads('/isis/interfaces')
 // VRFs of an instance (Routing → VRF).
-export const vrfs = crud('/vrfs')
-export const snmpUsers = crud('/snmp/users')
-// The remote syslog servers of a firewall's host (Services → Syslog).
-export const syslogServers = crud('/syslog/servers')
+export const vrfs = reads('/vrfs')
 export const directoryServers = crud('/directory/servers')
 export const directoryMappings = crud('/directory/mappings')
-// The ACME proxy's policies (Services → ACME proxy).
-export const acmeProxyPolicies = crud('/acme-proxy/policies')
-export const rules = crud('/rules')
-export const nat = crud('/nat')
-export const ipamPrefixes = crud('/ipam/prefixes')
-export const ipamAddresses = crud('/ipam/addresses')
-export const dnsZones = crud('/dns/zones')
-export const dnsRecords = crud('/dns/records')
-export const dnsTemplates = crud('/dns/templates')
-export const dnsSoaTemplates = crud('/dns/soa-templates')
-export const dnsDnssecPolicies = crud('/dns/dnssec-policies')
-// DNS blocklists (response policy zones) of an instance.
-export const dnsBlocklists = crud('/dns/blocklists')
-export const addressObjects = crud('/objects')
-// Address lists: addresses, prefixes and names of hosts and other lists.
-export const addressLists = crud('/address-lists')
-export const dyndnsClients = crud('/dyndns/clients')
-export const dyndnsRecords = crud('/dyndns/records')
-export const certificates = crud('/certificates')
-export const ipLists = crud('/ip-lists')
-// Folders of hosts (kind hosts), address lists (kind address_lists) and IP
-// lists (kind ip_lists), for the GUI only.
-export const objectFolders = crud('/object-folders')
-export const tasks = crud('/tasks')
-// Custom services: protocol matches rules name next to the predefined ones.
-export const customServices = crud('/custom-services')
-// Custom port names: NAT port fields take them next to the built-in ones.
-export const portNames = crud('/port-names')
+export const ipamPrefixes = reads('/ipam/prefixes')
+export const certificates = reads('/certificates')
+export const ipLists = reads('/ip-lists')
 
 export const api = {
   // code: a TOTP or recovery code, for a user with two-factor login on (a
