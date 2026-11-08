@@ -121,8 +121,41 @@ func TestHooks(t *testing.T) {
 	if err := Normalize(tr, work, datastore.ChangedEntries(tr, work)); err != nil {
 		t.Fatal(err)
 	}
-	if got := work.Root.Entry("instance", []string{"shop"}).Leaf("dns-upstream"); got != "root" {
+	shop := work.Root.Entry("instance", []string{"shop"})
+	if got := shop.Leaf("dns-upstream"); got != "root" {
 		t.Errorf("dns-upstream %q", got)
+	}
+	if len(shop.Lists["rate-limit"]) != 3 || shop.Entry("rate-limit", []string{"dns server"}).Leaf("service") != "dns" {
+		t.Errorf("rate limits: %v", shop.Lists["rate-limit"])
+	}
+	if rs := shop.Lists["rule"]; len(rs) != 1 || rs[0].Leaf("chain") != "output" || rs[0].Leaf("description") != "allow all output" {
+		t.Errorf("rules: %v", rs)
+	}
+}
+
+func TestObjectHooks(t *testing.T) {
+	tr := tree(t, `{"portitor:host": [{"name": "nas", "addresses": ["10.0.0.5"]}],
+		"portitor:address-list": [{"name": "a", "entries": ["b"]}, {"name": "b", "entries": ["nas"]}],
+		"portitor:instance": [{"name": "host", "is-default": true, "firewall": "fw"}, {"name": "lab", "firewall": "fw"}]}`)
+	if errs := Check(tr); len(errs) > 0 {
+		t.Fatalf("base: %v", errs)
+	}
+	for what, c := range map[string]struct{ at, body, want string }{
+		"a loop":               {"address-list=b", `{"entries": ["a"]}`, "contains itself"},
+		"a host's name":        {"address-list=nas", `{"entries": ["10.0.0.1"]}`, "a host is named nas"},
+		"a predefined name":    {"service=ssh", `{"type": "tcp/udp/sctp", "port": [{"protocol": "tcp", "dst-lo": 2222, "dst-hi": 0, "src-lo": 0, "src-hi": 0}]}`, "predefined"},
+		"CrowdSec, no key":     {"ip-list=cs", `{"source": "crowdsec", "url": "https://lapi.example/"}`, "bouncer API key"},
+		"a key over http":      {"ip-list=cs", `{"source": "crowdsec", "url": "http://lapi.example/", "api-key": "k"}`, "unencrypted"},
+		"syslog in a VF":       {"instance=lab/syslog-server=7", `{"address": "192.0.2.1", "protocol": "udp"}`, "firewall's"},
+		"a bad schedule":       {"task=t", `{"kind": "command", "schedule": "every day", "command": "true"}`, "schedule"},
+		"shaping with a burst": {"instance=lab/rate-limit=s", `{"rate": 10, "shape": true, "burst": 5, "unit": "pps"}`, "unit"},
+	} {
+		err := edit(t, tr, func(w *datastore.Tree) error {
+			return w.EditJSON(path(c.at), datastore.EditMerge, []byte(c.body))
+		})
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: %v, want %q", what, err, c.want)
+		}
 	}
 }
 

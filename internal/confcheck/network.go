@@ -52,6 +52,12 @@ func normalizeInstance(c *Ctx, in *datastore.Node) error {
 		if _, ok := in.Leaves["dns-upstream"]; !ok {
 			set(in, "dns-upstream", fwconfig.UpstreamRoot)
 		}
+		if err := seedInstance(c, in); err != nil {
+			return err
+		}
+	}
+	if err := ensureServiceRateLimits(c, in); err != nil {
+		return err
 	}
 	if ts := in.LeafLists["dns-query-log-types"]; ts != nil {
 		for i, t := range ts {
@@ -467,4 +473,3 @@ func checkLink(c *Ctx, l *datastore.Node) []error {
 	}
 	return errs
 }
-

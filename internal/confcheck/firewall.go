@@ -282,4 +282,3 @@ func checkDNSZone(c *Ctx, z *datastore.Node) []error {
 	}
 	return nil
 }
-
