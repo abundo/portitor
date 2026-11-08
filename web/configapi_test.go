@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/abundo/portitor/internal/datastore"
 	"github.com/abundo/portitor/models"
 )
 
@@ -239,5 +240,45 @@ func TestMoveInterface(t *testing.T) {
 	env.post("instance=right/rule", map[string]any{"chain": "input", "action": "accept", "enabled": true, "in-interfaces": []string{"eth5"}})
 	if rec := env.cfg("POST", "instance=right/interface=eth5?action=move-to", map[string]any{"instance": "left"}); rec.Code < 400 || env.node("instance=right/interface=eth5") == nil {
 		t.Errorf("moved from under a rule: %d %s", rec.Code, rec.Body)
+	}
+}
+
+// A PUT of a list keyed by an id numbers the entries that come without.
+func TestPutListAssignsIDs(t *testing.T) {
+	env := newEnv(t)
+	env.host("main")
+	env.put("instance=main/dns-zone=home.arpa", map[string]any{})
+	env.post("instance=main/dns-zone=home.arpa/record", map[string]any{"name": "nas", "type": "A", "value": "192.168.1.10"})
+	recs := func() []*datastore.Node { return env.node("instance=main/dns-zone=home.arpa").Lists["record"] }
+	kept := recs()[0].Leaf("id")
+	env.put("instance=main/dns-zone=home.arpa/record", []any{
+		map[string]any{"id": kept, "name": "nas", "type": "A", "value": "192.168.1.11"},
+		map[string]any{"name": "printer", "type": "A", "value": "192.168.1.20"},
+		map[string]any{"name": "tv", "type": "A", "value": "192.168.1.21"},
+	})
+	rs := recs()
+	if len(rs) != 3 || rs[0].Leaf("id") != kept || rs[0].Leaf("value") != "192.168.1.11" || rs[1].Leaf("id") == rs[2].Leaf("id") || rs[1].Leaf("id") == kept {
+		for _, r := range rs {
+			t.Logf("%v", r.Leaves)
+		}
+		t.Error("records not numbered")
+	}
+}
+
+// Records are checked under their $DOMAIN, and normalized.
+func TestRecordChecks(t *testing.T) {
+	env := newEnv(t)
+	env.host("main")
+	env.put("instance=main/dns-zone=home.arpa", map[string]any{})
+	if rec := env.cfg("PUT", "instance=main/dns-zone=home.arpa/record", []any{map[string]any{"name": "nas", "type": "a", "value": "not-an-address"}}); rec.Code != http.StatusBadRequest {
+		t.Errorf("bad A record: %d %s", rec.Code, rec.Body)
+	}
+	env.put("instance=main/dns-zone=home.arpa/record", []any{
+		map[string]any{"name": "Lab.home.arpa.", "type": "$domain"},
+		map[string]any{"name": " nas ", "type": "a", "value": "192.168.1.10", "mac": "AABB.CCDD.EEFF"},
+	})
+	rs := env.node("instance=main/dns-zone=home.arpa").Lists["record"]
+	if rs[0].Leaf("name") != "lab" || rs[1].Leaf("type") != "A" || rs[1].Leaf("name") != "nas" || rs[1].Leaf("mac") != "aa:bb:cc:dd:ee:ff" {
+		t.Errorf("normalized: %v %v", rs[0].Leaves, rs[1].Leaves)
 	}
 }

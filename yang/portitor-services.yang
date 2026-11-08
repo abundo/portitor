@@ -227,7 +227,7 @@ submodule portitor-services {
         }
         leaf value {
           type string;
-          mandatory true;
+          description "Empty in a $DOMAIN row; a record of a type that needs one is refused without it.";
         }
         leaf mac {
           type string;

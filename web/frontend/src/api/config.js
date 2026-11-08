@@ -326,3 +326,32 @@ export const objectFolders = withNames(treeApi(() => 'object-folder', ['id']), {
 // on update: the DHCP page sets a prefix's DHCP settings.
 export const ipamPrefixes = vfApi('ipam-prefix', ['prefix'], { merge: true })
 export const ipamAddresses = vfApi('ipam-address', ['address'], { merge: true })
+
+// DNS update clients of the selected virtual firewall (the dynamic zones):
+// a page's provider_settings ({ key: value }) are the provider-setting
+// list's entries, whose values are secrets (provider_secrets_set names
+// those set; an empty one keeps it). Rows hold their records, so a form's
+// save keeps them; dnsUpdatesShallow lists them without.
+const dnsUpdateList = vfApi('dns-update')
+const withSettings = ({ provider_setting: ps, ...r }) => ({
+  ...r,
+  provider_settings: Object.fromEntries((ps ?? []).map((s) => [s.name, s.value ?? ''])),
+  provider_secrets_set: (ps ?? []).filter((s) => s.has_value).map((s) => s.name),
+})
+ 
+const withSetting = ({ provider_settings: ps, provider_secrets_set, ...r }) => ({
+  ...r,
+  provider_setting: Object.entries(ps ?? {}).map(([name, value]) => ({ name, value })),
+})
+export const dnsUpdates = {
+  ...dnsUpdateList,
+  list: async () => (await dnsUpdateList.list()).map(withSettings),
+  get: async (id) => withSettings(await dnsUpdateList.get(id)),
+  create: async (r) => withSettings(await dnsUpdateList.create(withSetting(r))),
+  update: async (id, r) => withSettings(await dnsUpdateList.update(id, withSetting(r))),
+}
+export const dnsUpdatesShallow = vfApi('dns-update', ['name'], { shallow: true })
+export const dnsUpdatePath = (name) => `${vfPath()}/${path(['dns-update', name])}`
+// The DNS zones of the selected virtual firewall, without their records
+// (the zone's page edits them).
+export const dnsZones = vfApi('dns-zone', ['name'], { shallow: true })

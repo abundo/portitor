@@ -7,7 +7,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useToast } from '@nuxt/ui/composables'
 import FormHeader from '@/components/FormHeader.vue'
 import ZoneRecordsTable from '@/components/ZoneRecordsTable.vue'
-import { api, dnsDnssecPolicies, dnsRecords, dnsSoaTemplates, dnsTemplates, dnsZones } from '@/api'
+import { config, fromEntry, path, toEntry, vfPath, vfWithGlobals } from '@/api/config'
 import { errMsg } from '@/api/http'
 import { useInstanceStore } from '@/stores/instances'
 import { builtinTemplate, zoneTypes } from '@/utils/dns'
@@ -28,7 +28,13 @@ const templates = ref([])
 const soas = ref([])
 const policies = ref([])
 const saving = ref(false)
-const form = reactive({ name: '', dns_template_id: 0, description: '' })
+const form = reactive({ name: '', dns_template: 0, description: '' })
+// The zone is the selected virtual firewall's dns-zone=<name> (the route's
+// :id), with its records; templates by name, the global ones too.
+const zonePath = (name) => `${vfPath()}/${path(['dns-zone', name])}`
+const dnsTemplates = vfWithGlobals('dns-template')
+const dnsSoaTemplates = vfWithGlobals('dns-soa-template')
+const dnsDnssecPolicies = vfWithGlobals('dnssec-policy')
 const activeTab = ref('records')
 
 const NONE = 0
@@ -42,48 +48,47 @@ const tabItems = computed(() => [
 ])
 const templateItems = computed(() => [
   { label: '— built-in (NS localhost)', value: NONE },
-  ...templates.value.map((t) => ({ label: t.name, value: t.id })),
+  ...templates.value.map((t) => ({ label: t.name, value: t.name })),
 ])
 
 // The template the form has selected (not necessarily saved yet), and what
 // it resolves to; the built-in one when there is none.
-const template = computed(() => templates.value.find((t) => t.id === form.dns_template_id))
+const template = computed(() => templates.value.find((t) => t.name === form.dns_template))
 const effective = computed(() => {
   const t = template.value
   if (!t) return { ...builtinTemplate, policy: null }
   return {
     default_ttl: t.default_ttl,
-    nameservers: t.nameservers ?? [],
-    soa: soas.value.find((s) => s.id === t.soa_template_id) ?? null,
-    policy: policies.value.find((p) => p.id === t.dnssec_policy_id) ?? null,
+    nameservers: t.nameserver ?? [],
+    soa: soas.value.find((s) => s.name === t.soa_template) ?? null,
+    policy: policies.value.find((p) => p.name === t.dnssec_policy) ?? null,
   }
 })
 const dirty = computed(
   () =>
     zone.value &&
     (form.name !== zone.value.name ||
-      form.dns_template_id !== (zone.value.dns_template_id ?? NONE) ||
+      form.dns_template !== (zone.value.dns_template ?? NONE) ||
       form.description !== zone.value.description),
 )
 
 function fill(z) {
   zone.value = z
   form.name = z.name
-  form.dns_template_id = z.dns_template_id ?? NONE
+  form.dns_template = z.dns_template ?? NONE
   form.description = z.description ?? ''
 }
 
 onMounted(async () => {
   try {
-    const [z, t, s, p, r] = await Promise.all([
-      dnsZones.get(route.params.id),
+    const [z, t, s, p] = await Promise.all([
+      config.get(zonePath(route.params.id)).then(fromEntry),
       dnsTemplates.list(),
       dnsSoaTemplates.list(),
       dnsDnssecPolicies.list(),
-      dnsRecords.list({ zone_id: route.params.id }),
     ])
-    loadRecords(r)
-    templates.value = t.filter((x) => x.instance_id === z.instance_id || x.global)
+    loadRecords(z.record ?? [])
+    templates.value = t
     soas.value = s
     policies.value = p
     fill(z)
@@ -95,13 +100,20 @@ onMounted(async () => {
 async function save() {
   saving.value = true
   try {
-    fill(
-      await dnsZones.update(zone.value.id, {
-        name: form.name,
-        dns_template_id: form.dns_template_id === NONE ? null : form.dns_template_id,
+    let name = zone.value.name
+    if (form.name !== name) {
+      await config.rename(zonePath(name), [form.name])
+      name = form.name
+      router.replace(`/dns/zones/${encodeURIComponent(name)}`)
+    }
+    await config.patch(
+      zonePath(name),
+      toEntry({
+        dns_template: form.dns_template === NONE ? null : form.dns_template,
         description: form.description,
       }),
     )
+    fill(fromEntry(await config.get(zonePath(name))))
     toast.add({ title: 'Zone saved. Commit to apply.', color: 'success' })
   } catch (err) {
     toast.add({ title: errMsg(err, 'Failed to save zone'), color: 'error' })
@@ -115,7 +127,7 @@ const deleted = ref(false)
 async function remove() {
   if (!(await confirmDelete(`DNS zone ${zone.value.name}`))) return
   try {
-    await dnsZones.remove(zone.value.id)
+    await config.remove(zonePath(zone.value.name))
     deleted.value = true
     router.push('/dns?tab=zones')
   } catch (err) {
@@ -128,7 +140,7 @@ const records = ref([])
 const savedRecords = ref('[]')
 const savingRecords = ref(false)
 const importInput = ref(null)
-const instance = computed(() => store.list.find((i) => i.id === zone.value?.instance_id))
+const instance = computed(() => store.current)
 const recordsDirty = computed(
   () => JSON.stringify(toApiRecords(records.value)) !== savedRecords.value,
 )
@@ -163,7 +175,9 @@ async function saveRecords() {
   }
   savingRecords.value = true
   try {
-    loadRecords(await api.saveZoneRecords(zone.value.id, toApiRecords(records.value)))
+    const at = `${zonePath(zone.value.name)}/record`
+    await config.put(at, toApiRecords(records.value).map(toEntry))
+    loadRecords(((await config.get(at)) ?? []).map(fromEntry))
     toast.add({ title: 'Records saved. Commit to apply.', color: 'success' })
   } catch (err) {
     toast.add({ title: errMsg(err, 'Failed to save records'), color: 'error' })
@@ -233,7 +247,7 @@ useUnsaved(() => !deleted.value && (!!dirty.value || recordsDirty.value))
           DNSSEC: {{ effective.policy.name }}
         </UBadge>
         <span class="text-sm font-normal text-muted"
-          >instance {{ store.nameOf(zone.instance_id) }}</span
+          >instance {{ store.current?.name }}</span
         >
       </template>
       <template v-if="auth.canEdit">
@@ -270,7 +284,7 @@ useUnsaved(() => !deleted.value && (!!dirty.value || recordsDirty.value))
                   label="DNS template"
                   help="SOA, NS and default TTL come from the template."
                 >
-                  <USelect v-model="form.dns_template_id" :items="templateItems" class="w-full" />
+                  <USelect v-model="form.dns_template" :items="templateItems" class="w-full" />
                 </UFormField>
               </div>
               <UFormField label="Description">

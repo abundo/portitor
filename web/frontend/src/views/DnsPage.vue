@@ -16,8 +16,16 @@ import FormHeader from '@/components/FormHeader.vue'
 import NeedInstance from '@/components/NeedInstance.vue'
 import SearchInput from '@/components/SearchInput.vue'
 import ServiceRateLimit from '@/components/ServiceRateLimit.vue'
-import { dnsTemplates, dnsZones, dyndnsClients } from '@/api'
-import { config, fromEntry, toEntry, vfPath } from '@/api/config'
+import {
+  config,
+  dnsUpdates as dyndnsClients,
+  dnsUpdatesShallow,
+  dnsZones,
+  fromEntry,
+  toEntry,
+  vfPath,
+  vfWithGlobals,
+} from '@/api/config'
 import { errMsg } from '@/api/http'
 import { withLabel } from '@/composables/useInstanceRefs'
 import { usePageForm } from '@/composables/useFormGuard'
@@ -40,8 +48,7 @@ const templates = ref([])
 
 // The DNS templates a zone can use: the instance's own and the global ones.
 async function loadTemplates() {
-  const id = store.currentId
-  templates.value = (await dnsTemplates.list()).filter((t) => t.instance_id === id || t.global)
+  templates.value = await vfWithGlobals('dns-template').list()
 }
 watch(() => store.currentId, loadTemplates, { immediate: true })
 
@@ -199,7 +206,11 @@ const dynamic = (z) => z.type === DYNAMIC_ZONE
 // A zone's name opens its records; a dynamic zone's Edit opens its settings
 // form instead.
 const recordsLink = (z) =>
-  dynamic(z) ? `/dns/dynamic/${z.client_id}` : forwardOnly(z) ? null : `/dns/zones/${z.id}`
+  dynamic(z)
+    ? `/dns/dynamic/${encodeURIComponent(z.client_id)}`
+    : forwardOnly(z)
+      ? null
+      : `/dns/zones/${encodeURIComponent(z.name)}`
 const zoneLink = (z) => (dynamic(z) ? null : recordsLink(z))
 async function editDynamic(z) {
   if (!dynamic(z)) return false
@@ -216,12 +227,12 @@ const dynamicForm = ref(null)
 const zonesApi = {
   ...dnsZones,
   list: async (params) => {
-    const [zones, clients] = await Promise.all([dnsZones.list(params), dyndnsClients.list(params)])
+    const [zones, clients] = await Promise.all([dnsZones.list(params), dnsUpdatesShallow.list()])
     return [
       ...zones,
       ...clients.map((c) => ({
-        id: `dyndns-${c.id}`,
-        client_id: c.id,
+        id: `dyndns-${c.name}`,
+        client_id: c.name,
         name: c.zone,
         type: DYNAMIC_ZONE,
         client_name: c.name,
@@ -239,7 +250,7 @@ const zoneColumns = [
     format: (r) =>
       forwardOnly(r) || dynamic(r)
         ? ''
-        : (templates.value.find((t) => t.id === r.dns_template_id)?.name ?? 'built-in'),
+        : (r.dns_template ?? 'built-in'),
   },
   { key: 'forwarders', label: 'Forwarders', format: (r) => (r.forwarders ?? []).join(', ') },
   { key: 'state', label: 'State', format: () => '' },
@@ -262,11 +273,11 @@ const zoneFields = [
     placeholder: 'home.arpa, or 192.168.1.0/24 for reverse',
   },
   {
-    key: 'dns_template_id',
+    key: 'dns_template',
     label: 'DNS template',
     type: 'select',
     nullable: true,
-    items: () => templates.value.map((t) => ({ label: t.name, value: t.id })),
+    items: () => templates.value.map((t) => ({ label: t.name, value: t.name })),
     hint: 'SOA, NS and default TTL come from the template. —: built-in (NS localhost).',
     show: (f) => !forwardOnly(f),
   },
@@ -283,7 +294,7 @@ const zoneFields = [
 ]
 const zoneDefaults = () => ({
   type: 'forward',
-  dns_template_id: templates.value[0]?.id ?? null,
+  dns_template: templates.value[0]?.name ?? null,
   forwarders: [],
 })
 
@@ -311,7 +322,7 @@ const tab = computed({
             noun="DNS zone"
             description="Zones served by this virtual firewall's DNS server (BIND, via dnsmgr2). Names of IPAM addresses go into the matching forward zone; PTRs in reverse zones are generated. Open a zone to edit its records. A forward-only zone has no records: its queries go to its forwarders. A forward dynamic zone is kept on another nameserver by DNS updates (RFC 2136 or a DNS hosting provider's API), its A and AAAA records following an interface's addresses."
             :api="zonesApi"
-            :params="{ instance_id: store.currentId }"
+            :params="{ _vf: store.currentId }"
             :columns="zoneColumns"
             :fields="zoneFields"
             :defaults="zoneDefaults"

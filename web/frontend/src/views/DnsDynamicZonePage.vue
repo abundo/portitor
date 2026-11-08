@@ -9,7 +9,7 @@ import DyndnsClientForm from '@/components/DyndnsClientForm.vue'
 import DyndnsState from '@/components/DyndnsState.vue'
 import FormHeader from '@/components/FormHeader.vue'
 import ZoneRecordsTable from '@/components/ZoneRecordsTable.vue'
-import { api, dyndnsClients, dyndnsRecords } from '@/api'
+import { config, dnsUpdatePath, dnsUpdates as dyndnsClients, fromEntry, toEntry } from '@/api/config'
 import { errMsg } from '@/api/http'
 import { useAuthStore } from '@/stores/auth'
 import { useDeployStore } from '@/stores/deploy'
@@ -51,12 +51,10 @@ function load(list) {
 
 onMounted(async () => {
   try {
-    const [c, r] = await Promise.all([
-      dyndnsClients.get(route.params.id),
-      dyndnsRecords.list({ client_id: route.params.id }),
-    ])
+    // The client dns-update=<name> (the route's :id), with its records.
+    const c = await dyndnsClients.get(route.params.id)
     client.value = c
-    load(r)
+    load(c.record ?? [])
   } catch (err) {
     toast.add({ title: errMsg(err, 'Failed to load zone'), color: 'error' })
   }
@@ -95,7 +93,9 @@ async function save() {
   }
   saving.value = true
   try {
-    load(await api.saveDyndnsRecords(client.value.id, rows))
+    const at = `${dnsUpdatePath(client.value.name)}/record`
+    await config.put(at, rows.map(toEntry))
+    load(((await config.get(at)) ?? []).map(fromEntry))
     toast.add({ title: 'Records saved. Commit to apply.', color: 'success' })
   } catch (err) {
     toast.add({ title: errMsg(err, 'Failed to save records'), color: 'error' })
@@ -115,7 +115,7 @@ useUnsaved(() => !deleted.value && dirty.value)
         <span class="font-mono">{{ client.zone }}</span>
         <UBadge color="neutral" variant="subtle">{{ dynamicZoneLabel }}</UBadge>
         <span class="text-sm font-normal text-muted"
-          >instance {{ store.nameOf(client.instance_id) }}</span
+          >instance {{ store.current?.name }}</span
         >
       </template>
       <UButton

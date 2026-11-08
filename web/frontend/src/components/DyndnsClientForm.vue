@@ -4,13 +4,14 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import CrudPage from '@/components/CrudPage.vue'
-import { api, dyndnsClients } from '@/api'
+import { api } from '@/api'
+import { dnsUpdates as dyndnsClients } from '@/api/config'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
 
 // The form of a DNS update client (a dynamic zone's settings), opened by
 // the page through openCreate/openEdit; its records are edited elsewhere.
 const emit = defineEmits(['changed'])
-const { store, ifaceItems } = useInstanceRefs()
+const { store, ifaceNameItems } = useInstanceRefs()
 
 // DNS hosting providers and their settings (fwconfig.DNSProviders).
 const providers = ref([])
@@ -65,10 +66,10 @@ const clientFields = computed(() => [
   { key: 'name', label: 'Name', required: true, placeholder: 'home' },
   { key: 'description', label: 'Description' },
   {
-    key: 'interface_id',
+    key: 'interface',
     label: 'Interface',
     type: 'select',
-    items: () => ifaceItems.value,
+    items: () => ifaceNameItems.value,
     required: true,
     hint: "A and AAAA records without a value get this interface's first global address.",
   },
@@ -142,7 +143,7 @@ defineExpose({
     noun="dynamic zone"
     :item-name="(c) => `dynamic zone ${c.zone} (${c.name})`"
     :api="clientApi"
-    :params="{ instance_id: store.currentId }"
+    :params="{ _vf: store.currentId }"
     :columns="[]"
     :fields="clientFields"
     :defaults="{

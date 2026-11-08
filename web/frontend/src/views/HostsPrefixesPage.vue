@@ -869,7 +869,7 @@ function nodeMenu(node) {
 function onEdit(node) {
   if (node.dhcp_lease) show(() => (leasesIface.value = node.interface_id))
   else if (node.auto && node.zone_id && !node.interface_id)
-    router.push(`/dns/zones/${node.zone_id}`)
+    router.push(`/dns/zones/${encodeURIComponent(node.zone)}`)
   else if (node.kind === 'prefix')
     show(async () =>
       editPrefix(node.auto ? { prefix: node.cidr } : await ipamPrefixes.get(node.cidr)),

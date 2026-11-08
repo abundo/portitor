@@ -247,11 +247,13 @@ func (s *Server) handleConfigEdit(c *echo.Context) error {
 	}
 	err = t.store.Edit(c.Request().Context(), "", func(work *datastore.Tree) error {
 		before := work.Clone()
-		if method == http.MethodPost && action == "" {
+		if (method == http.MethodPost || method == http.MethodPut) && action == "" {
 			if body, err = s.assignID(work, p, body); err != nil {
 				return err
 			}
-			created = newEntryKeys(work, p, body)
+			if method == http.MethodPost {
+				created = newEntryKeys(work, p, body)
+			}
 		}
 		if err := applyConfigEdit(work, p, method, action, body); err != nil {
 			return err
@@ -490,19 +492,51 @@ func (s *Server) assignID(work *datastore.Tree, p datastore.Path, body []byte) (
 		return body, nil
 	}
 	key := list.Keys[0]
-	var obj map[string]any
-	if json.Unmarshal(body, &obj) != nil {
+	var v any
+	if json.Unmarshal(body, &v) != nil {
 		return body, nil // EditJSON says what is wrong
 	}
-	if _, ok := obj[key]; ok {
+	// An entry (POST), or the entries of a whole list (PUT): each without
+	// its key gets the next id.
+	objs := []map[string]any{}
+	switch x := v.(type) {
+	case map[string]any:
+		objs = append(objs, x)
+	case []any:
+		for _, e := range x {
+			if o, ok := e.(map[string]any); ok {
+				objs = append(objs, o)
+			}
+		}
+	}
+	changed := false
+	for _, obj := range objs {
+		if _, ok := obj[key]; ok {
+			continue
+		}
+		if _, ok := obj[schema.Module+":"+key]; ok {
+			continue
+		}
+		id, err := s.nextID(work, list, key)
+		if err != nil {
+			return nil, err
+		}
+		obj[key] = id
+		changed = true
+	}
+	if !changed {
 		return body, nil
 	}
-	if _, ok := obj[schema.Module+":"+key]; ok {
-		return body, nil
-	}
+	return json.Marshal(v)
+}
+
+// nextID is the next id of a list keyed by a number: above every entry's
+// in the candidate and running, and above every one given before (ids.json,
+// so a deleted entry's id is never given again).
+func (s *Server) nextID(work *datastore.Tree, list *schema.Node, key string) (uint64, error) {
 	t, err := s.tree()
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
 	path := filepath.Join(t.dir, "ids.json")
 	if t.idMarks == nil {
@@ -531,11 +565,10 @@ func (s *Server) assignID(work *datastore.Tree, p datastore.Path, body []byte) (
 	if t.dir != "" {
 		data, _ := json.Marshal(marks)
 		if err := datastore.WriteFile(path, data); err != nil {
-			return nil, err
+			return 0, err
 		}
 	}
-	obj[key] = next
-	return json.Marshal(obj)
+	return next, nil
 }
 
 // newProblems are the problems of after that before didn't have.

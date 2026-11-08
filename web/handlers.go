@@ -92,7 +92,7 @@ func (s *Server) zoneAddresses(instanceID uint) ([]ipam.RecordAddress, error) {
 				} else {
 					name += "." + zone
 				}
-				out = append(out, ipam.RecordAddress{ZoneID: z.ID, Name: name, Address: r.Value, Mac: r.Mac, Description: r.Description})
+				out = append(out, ipam.RecordAddress{ZoneID: z.ID, Zone: z.Name, Name: name, Address: r.Value, Mac: r.Mac, Description: r.Description})
 			}
 		}
 	}

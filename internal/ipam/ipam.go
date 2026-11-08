@@ -33,6 +33,7 @@ type Node struct {
 	Mac         string  `json:"mac,omitempty"`
 	InterfaceID *uint   `json:"interface_id,omitempty"`
 	ZoneID      *uint   `json:"zone_id,omitempty"` // zone of the first A/AAAA record for the address
+	Zone        string  `json:"zone,omitempty"`    // that zone's name
 	DhcpEnabled bool    `json:"dhcp_enabled,omitempty"`
 	RaEnabled   bool    `json:"ra_enabled,omitempty"`
 	RaSlaac     bool    `json:"ra_slaac,omitempty"`
@@ -47,6 +48,7 @@ type Node struct {
 // RecordAddress is the address of an A or AAAA record of a DNS zone.
 type RecordAddress struct {
 	ZoneID      uint
+	Zone        string // the zone's name
 	Name        string // fully qualified, without the trailing dot
 	Address     string
 	Mac         string
@@ -159,7 +161,7 @@ func Tree(prefixes []models.IpamPrefix, addrs []models.IpamAddress, ifaces []mod
 		}
 		if n.ZoneID == nil {
 			id := r.ZoneID
-			n.ZoneID = &id
+			n.ZoneID, n.Zone = &id, r.Zone
 		}
 		if !slices.Contains(strings.Split(n.DnsName, ", "), r.Name) {
 			n.DnsName = strings.TrimPrefix(n.DnsName+", "+r.Name, ", ")

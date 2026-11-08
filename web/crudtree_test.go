@@ -5,8 +5,8 @@ package web
 
 import (
 	"fmt"
-	"slices"
 	"net/http"
+	"slices"
 	"testing"
 )
 
