@@ -193,6 +193,13 @@ func TestCertificateAuthority(t *testing.T) {
 	if leaf := fwconfig.ChainLeaf(ca.Leaf("full-chain")); leaf == nil || !leaf.IsCA || ca.Leaf("common-name") != "Example CA" || len(ca.LeafLists["domains"]) != 0 {
 		t.Errorf("CA: %+v", ca.Leaves)
 	}
+	// The chain view: of the entry, and of the list by name.
+	if rec := env.mustCfg("GET", "instance=main/certificate=ca?action=chain", nil); !strings.Contains(rec.Body.String(), `"is-ca":true`) || !strings.Contains(rec.Body.String(), `"has-key":true`) {
+		t.Errorf("chain: %s", rec.Body)
+	}
+	if rec := env.mustCfg("GET", "instance=main/certificate?action=chain", nil); !strings.Contains(rec.Body.String(), `"ca":{"is-ca":true`) {
+		t.Errorf("chains: %s", rec.Body)
+	}
 	// A CA imported into a virtual firewall is refused too.
 	caChain, caKey, err := acme.MakeCertificate(acme.CertRequest{CommonName: "Other CA", KeyType: "ec256", Days: 30, CA: true})
 	if err != nil {

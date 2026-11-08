@@ -43,6 +43,9 @@ export const config = {
     http.get(url('candidate', p), { params: { ...params, action } }).then((r) => r.data),
   action: (p, action, body = {}) =>
     http.post(url('candidate', p), body, { params: { action } }).then((r) => r.data),
+  // download is a view's whole response, its body a Blob (a file).
+  download: (p, action, params = {}) =>
+    http.get(url('candidate', p), { params: { ...params, action }, responseType: 'blob' }),
   changes: () => http.get('/config/changes').then((r) => r.data),
   discard: () => http.post('/config/discard', {}),
 }
@@ -355,3 +358,66 @@ export const dnsUpdatePath = (name) => `${vfPath()}/${path(['dns-update', name])
 // The DNS zones of the selected virtual firewall, without their records
 // (the zone's page edits them).
 export const dnsZones = vfApi('dns-zone', ['name'], { shallow: true })
+
+// certificatesOf is the certificates of the virtual firewall instance()
+// names, as the certificates page has them: each row with what its chain
+// says (is_ca, issuer, chain, not_before, not_after; the chain view) and
+// has_privkey; fullchain and privkey for the chain and the (write-only)
+// key. A create with generate makes the certificate here (the generate
+// action), one with import_ca refuses a certificate that is no CA.
+export function certificatesOf(instance) {
+  const listPath = () => `${path(['instance', instance()])}/certificate`
+  const entryPath = (name) => `${listPath()}=${encodeURIComponent(name)}`
+  const base = treeApi(listPath, ['name'], { merge: true })
+  const derived = ['is_ca', 'issuer', 'chain', 'not_before', 'not_after', 'has_key']
+  const toTree = ({ fullchain, privkey, ...r }) => {
+    for (const k of derived) delete r[k]
+    return {
+      ...r,
+      ...(fullchain !== undefined ? { full_chain: fullchain } : {}),
+      new_priv_key: privkey || '',
+    }
+  }
+  const withChain = (r, info = {}) => {
+    const { full_chain: fullchain, ...o } = r
+    return { ...o, fullchain: fullchain ?? '', ...fromEntry(info), has_privkey: !!info['has-key'] }
+  }
+  return {
+    ...base,
+    list: async () => {
+      const [rows, chains] = await Promise.all([
+        base.list(),
+        config.view(listPath(), 'chain').catch(() => ({})),
+      ])
+      return rows.map((r) => withChain(r, chains[r.name]))
+    },
+    get: async (name) => withChain(await base.get(name), await config.view(entryPath(name), 'chain')),
+    create: async (body) => {
+      const { generate, import_ca, instance_id, ...rest } = body
+      if (generate) {
+        await config.action(entryPath(rest.name), 'generate', {
+          domains: generate.domains ?? [],
+          'common-name': generate.common_name || '',
+          'key-type': generate.key_type,
+          days: generate.days,
+          ca: !!generate.ca,
+          ...(generate.signed_by ? { 'signed-by': generate.signed_by } : {}),
+        })
+        await config.patch(
+          entryPath(rest.name),
+          toEntry({ description: rest.description, enabled: rest.enabled }),
+        )
+        return { ...rest, id: rest.name }
+      }
+      const made = await base.create(toTree({ ...rest, source: 'import' }))
+      if (import_ca && !(await config.view(entryPath(rest.name), 'chain'))['is-ca']) {
+        await config.remove(entryPath(rest.name))
+        throw new Error(`${rest.name} is not a certificate authority`)
+      }
+      return made
+    },
+    update: (id, body) => base.update(id, toTree(body)),
+    download: (name, format) => config.download(entryPath(name), 'download', { format }),
+    renew: (name) => config.action(entryPath(name), 'renew'),
+  }
+}

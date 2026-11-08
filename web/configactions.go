@@ -15,6 +15,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/labstack/echo/v5"
 
@@ -68,6 +69,9 @@ type actionCtx struct {
 	path  datastore.Path
 	entry *datastore.Node
 	body  []byte
+	// list: a view asked of a whole list (its path without keys), whose
+	// entry is the list's parent.
+	list bool
 	// changed, set by a change, makes it the new candidate.
 	changed bool
 }
@@ -83,7 +87,7 @@ func registerAction(listPath, name string, a configAction) {
 
 // lookupAction is the action named on the entry at p, if there is one.
 func lookupAction(t *datastore.Tree, p datastore.Path, name string) (configAction, bool) {
-	ss, err := datastore.Resolve(t.Root.S, p)
+	ss, err := datastore.ResolveAll(t.Root.S, p)
 	if err != nil || len(ss) == 0 {
 		return configAction{}, false
 	}
@@ -158,11 +162,15 @@ func (s *Server) runAction(c *echo.Context, ds string, p datastore.Path, name st
 		return errJSON(c, http.StatusForbidden, "you may not change "+p.String(tree.Root.S))
 	}
 	if a.view || a.op || a.legacy {
-		n, _, err := tree.Find(p)
+		find, list := p, false
+		if a.view && len(p) > 0 && p[len(p)-1].Keys == nil {
+			find, list = p[:len(p)-1], true
+		}
+		n, _, err := tree.Find(find)
 		if err != nil || n == nil {
 			return errJSON(c, http.StatusNotFound, "not found")
 		}
-		err = a.run(s, c, &actionCtx{tree: tree, path: p, entry: n, body: body})
+		err = a.run(s, c, &actionCtx{tree: tree, path: p, entry: n, body: body, list: list})
 		if r, rerr := echo.UnwrapResponse(c.Response()); a.legacy && err == nil && rerr == nil && r.Status < 300 {
 			if serr := s.syncFromTables(ctx); serr != nil {
 				return serr
@@ -250,6 +258,7 @@ func init() {
 	registerAction("/instance/interface", "openvpn-client", configAction{view: true, write: true, run: delegateM((*Server).handleOpenVPNClientConfig)})
 	registerAction("/instance/interface", "wg-rekey", configAction{write: true, run: wgRekey})
 	registerAction("/instance/interface", "move-to", configAction{write: true, run: moveInterface})
+	registerAction("/instance/certificate", "chain", configAction{view: true, run: certChain})
 	registerAction("/instance/certificate", "download", configAction{view: true, write: true, run: delegateM((*Server).handleCertificateDownload)})
 	registerAction("/instance/certificate", "renew", configAction{op: true, write: true, run: delegateM((*Server).handleCertificateRenew)})
 	registerAction("/instance/ipam-prefix", "next-free", configAction{view: true, run: delegateM((*Server).handleNextFree)})
@@ -281,6 +290,40 @@ func wgRekey(s *Server, c *echo.Context, a *actionCtx) error {
 	a.entry.Leaves["wg-private-key"], a.entry.Leaves["wg-public-key"] = priv, pub
 	a.changed = true
 	return c.JSON(http.StatusOK, map[string]string{"wg-public-key": pub})
+}
+
+// certChain is what an imported certificate's chain says (CA or not,
+// issuer, the certification path, validity) and whether it has its key:
+// of the entry, or, asked of the whole list, of each by name.
+func certChain(s *Server, c *echo.Context, a *actionCtx) error {
+	type info struct {
+		IsCA      bool       `json:"is-ca"`
+		Issuer    string     `json:"issuer,omitempty"`
+		Chain     []string   `json:"chain,omitempty"`
+		NotBefore *time.Time `json:"not-before,omitempty"`
+		NotAfter  *time.Time `json:"not-after,omitempty"`
+		HasKey    bool       `json:"has-key"`
+	}
+	of := func(n *datastore.Node) info {
+		in := info{HasKey: n.Leaf("priv-key") != ""}
+		if n.Leaf("source") != fwconfig.CertSourceImport {
+			return in
+		}
+		if leaf := fwconfig.ChainLeaf(n.Leaf("full-chain")); leaf != nil {
+			in.IsCA, in.Issuer = leaf.IsCA, leaf.Issuer.CommonName
+			in.Chain = fwconfig.ChainPath(n.Leaf("full-chain"))
+			in.NotBefore, in.NotAfter = &leaf.NotBefore, &leaf.NotAfter
+		}
+		return in
+	}
+	if !a.list {
+		return c.JSON(http.StatusOK, of(a.entry))
+	}
+	out := map[string]info{}
+	for _, e := range a.entry.Lists["certificate"] {
+		out[e.Leaf("name")] = of(e)
+	}
+	return c.JSON(http.StatusOK, out)
 }
 
 // moveInterface moves an interface, with its addresses and peers, to

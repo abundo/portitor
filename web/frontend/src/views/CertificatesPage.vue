@@ -10,7 +10,8 @@ import CrudPage from '@/components/CrudPage.vue'
 import NeedInstance from '@/components/NeedInstance.vue'
 import SearchInput from '@/components/SearchInput.vue'
 import TagsInput from '@/components/TagsInput.vue'
-import { api, certificates, dyndnsClients } from '@/api'
+import { api } from '@/api'
+import { certificatesOf, dnsUpdatesShallow } from '@/api/config'
 import { errMsg } from '@/api/http'
 import { useFormGuard } from '@/composables/useFormGuard'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
@@ -20,7 +21,11 @@ import { inlineField, wideModal } from '@/utils/form'
 import { ago, when } from '@/utils/time'
 import { useSearch, valuesText } from '@/utils/search'
 
-const { store, ifaceItems, ifaceName } = useInstanceRefs()
+const { store, ifaceNameItems, ifaceText } = useInstanceRefs()
+// The certificates of the selected virtual firewall, and of its firewall's
+// host (the CAs), in the configuration tree, by name.
+const certificates = certificatesOf(() => store.nameOf(store.currentId))
+const hostCertificates = certificatesOf(() => store.host?.name)
 const auth = useAuthStore()
 const deploy = useDeployStore()
 onMounted(() => deploy.refresh())
@@ -35,13 +40,13 @@ const caLabel = (name) => cas.value.find((c) => c.name === name)?.label ?? name
 const dnsClients = ref([])
 watch(
   () => store.currentId,
-  async (id) => (dnsClients.value = id ? await dyndnsClients.list({ instance_id: id }) : []),
+  async (id) => (dnsClients.value = id ? await dnsUpdatesShallow.list() : []),
   { immediate: true },
 )
 const dnsClientItems = computed(() =>
-  dnsClients.value.map((c) => ({ label: `${c.name} (${c.zone})`, value: c.id })),
+  dnsClients.value.map((c) => ({ label: `${c.name} (${c.zone})`, value: c.name })),
 )
-const dnsClientName = (id) => dnsClients.value.find((c) => c.id === id)?.name ?? ''
+const dnsClientName = (name) => name ?? ''
 
 // What the agent reports for the instance's certificates, by name.
 const states = computed(() => {
@@ -75,7 +80,7 @@ const tab = computed({
 // The Store tab: the instance's certificates with what the agent holds.
 const rows = ref([])
 async function loadRows() {
-  rows.value = store.currentId ? await certificates.list({ instance_id: store.currentId }) : []
+  rows.value = store.currentId ? await certificates.list() : []
 }
 watch([() => store.currentId, tab], loadRows, { immediate: true })
 const { search, filtered } = useSearch(rows, (r) =>
@@ -193,7 +198,7 @@ const validity = (row) =>
   states.value[row.name]?.not_after ? states.value[row.name] : row.not_after ? row : null
 async function download(row, format) {
   try {
-    const res = await api.certificateDownload(row.id, format)
+    const res = await (row._host ? hostCertificates : certificates).download(row.name, format)
     const name =
       /filename="([^"]+)"/.exec(res.headers['content-disposition'] ?? '')?.[1] ?? row.name
     const url = URL.createObjectURL(res.data)
@@ -254,11 +259,7 @@ const loadFiles = (e) => readPEM(e, importForm.value)
 async function saveImport() {
   importSaving.value = true
   try {
-    await certificates.create({
-      ...importForm.value,
-      instance_id: store.currentId,
-      source: 'import',
-    })
+    await certificates.create({ ...importForm.value, source: 'import' })
     importOpen.value = false
     toast.add({ title: `Certificate ${importForm.value.name} imported`, color: 'success' })
     await loadRows()
@@ -286,7 +287,7 @@ const host = computed(() => store.host)
 const authorities = ref([])
 async function loadCAs() {
   authorities.value = host.value
-    ? (await certificates.list({ instance_id: host.value.id })).filter((r) => r.is_ca)
+    ? (await hostCertificates.list()).filter((r) => r.is_ca).map((r) => ({ ...r, _host: true }))
     : []
 }
 watch(() => host.value?.id, loadCAs, { immediate: true })
@@ -295,7 +296,7 @@ const issuerItems = computed(() => [
   ...(auth.isAdmin
     ? authorities.value
         .filter((r) => r.has_privkey)
-        .map((r) => ({ label: `${r.name} (${r.common_name})`, value: r.id }))
+        .map((r) => ({ label: `${r.name} (${r.common_name})`, value: r.name }))
     : []),
 ])
 const genOpen = ref(false)
@@ -324,9 +325,8 @@ async function saveGenerate() {
   try {
     await certificates.create({
       ...rest,
-      instance_id: store.currentId,
       source: 'import',
-      generate: { domains, common_name, key_type, days: Number(days), ca_id: ca_id || null },
+      generate: { domains, common_name, key_type, days: Number(days), signed_by: ca_id || null },
     })
     genOpen.value = false
     toast.add({
@@ -345,13 +345,13 @@ async function saveGenerate() {
 // here or imported with their key. A new CA's gen_* fields go to the API as
 // its generate request.
 const caAPI = {
-  ...certificates,
-  list: async (params) => (await certificates.list(params)).filter((r) => r.is_ca),
+  ...hostCertificates,
+  list: async () =>
+    (await hostCertificates.list()).filter((r) => r.is_ca).map((r) => ({ ...r, _host: true })),
   create: ({ mode, gen_common_name, gen_key_type, gen_days, ...body }) =>
-    certificates
+    hostCertificates
       .create({
         ...body,
-        instance_id: host.value?.id,
         source: 'import',
         enabled: true,
         ...(mode === 'import'
@@ -368,8 +368,8 @@ const caAPI = {
             }),
       })
       .finally(loadCAs),
-  update: (id, body) => certificates.update(id, body).finally(loadCAs),
-  remove: (id) => certificates.remove(id).finally(loadCAs),
+  update: (id, body) => hostCertificates.update(id, body).finally(loadCAs),
+  remove: (id) => hostCertificates.remove(id).finally(loadCAs),
 }
 // caPage is the tab's CrudPage: Import CA opens its form in import mode.
 const caPage = ref(null)
@@ -440,18 +440,16 @@ const caFields = [
 // created ones are on the Store tab.
 const acmeAPI = {
   ...certificates,
-  list: async (params) => (await certificates.list(params)).filter((r) => !imported(r)),
+  list: async () => (await certificates.list()).filter((r) => !imported(r)),
 }
 const columns = [
   { key: 'name', label: 'Name', class: 'font-medium' },
   { key: 'domains', label: 'SANs', class: 'font-mono', format: (r) => r.domains.join(', ') },
   {
-    key: 'interface_id',
+    key: 'interface',
     label: 'Validation',
     format: (r) =>
-      dns01(r)
-        ? `DNS-01 · ${dnsClientName(r.dyndns_client_id)}`
-        : `HTTP-01 · ${ifaceName(r.interface_id)}`,
+      dns01(r) ? `DNS-01 · ${dnsClientName(r.dns_update)}` : `HTTP-01 · ${ifaceText(r.interface ?? '')}`,
   },
   { key: 'ca', label: 'CA', format: (r) => caLabel(r.ca) },
   { key: 'state', label: 'State' },
@@ -461,7 +459,7 @@ const columns = [
 // for the next retry, a valid one before it is due.
 async function renew(row) {
   try {
-    await api.certificateRenew(row.id)
+    await certificates.renew(row.name)
     toast.add({ title: `Ordering ${row.name}`, color: 'info' })
     setTimeout(() => deploy.refresh(), 2000)
   } catch (err) {
@@ -498,16 +496,16 @@ const fields = computed(() => [
     hint: 'HTTP-01: the CA fetches a token from each name on port 80, so the names must be reachable from the Internet. DNS-01: the firewall puts a TXT record at _acme-challenge.<name> through a DNS update client, so internal names and wildcards work.',
   },
   {
-    key: 'interface_id',
+    key: 'interface',
     show: http01,
     label: 'Interface',
     type: 'select',
-    items: () => ifaceItems.value,
+    items: () => ifaceNameItems.value,
     required: true,
     hint: "Where the CA's HTTP-01 requests come in. Port 80 is opened on it only while a challenge is answered.",
   },
   {
-    key: 'dyndns_client_id',
+    key: 'dns_update',
     show: dns01,
     label: 'DNS update client',
     type: 'select',
@@ -694,7 +692,7 @@ const fields = computed(() => [
           noun="certificate"
           description="TLS certificates from Let's Encrypt (ACME), got by the firewall and renewed when two thirds of their lifetime have passed. The CA checks each domain over HTTP on port 80 (HTTP-01), which the firewall opens on the certificate's interface only while it answers, or by a TXT record the firewall writes through a DNS update client (DNS-01), which also works for internal names and wildcards. A certificate from elsewhere is imported with its key on the Certificate store tab, and is never renewed. To serve the GUI itself with one, choose it under Settings → Portitor web."
           :api="acmeAPI"
-          :params="{ instance_id: store.currentId }"
+          :params="{ _vf: store.currentId }"
           :columns="columns"
           :fields="fields"
           :defaults="{
@@ -756,7 +754,7 @@ const fields = computed(() => [
           noun="certificate authority"
           :description="`The certificate authorities of firewall ${host?.name ?? ''}, kept on its host. They are deployed with the host like any imported certificate, so they are stored on the firewall itself (on both hosts of an HA pair), and sign the server certificates of the host and its virtual firewalls (Sign, or Create certificate on the Certificate store tab). Export a CA and add it to the trust store of the hosts that should trust those certificates. Global admins manage them.`"
           :api="caAPI"
-          :params="{ instance_id: host?.id }"
+          :params="{ _vf: host?.id }"
           shared
           :columns="caColumns"
           :fields="caFields"

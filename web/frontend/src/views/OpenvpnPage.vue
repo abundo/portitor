@@ -15,8 +15,8 @@ import NameSelect from '@/components/NameSelect.vue'
 import NeedInstance from '@/components/NeedInstance.vue'
 import SearchInput from '@/components/SearchInput.vue'
 import TagsInput from '@/components/TagsInput.vue'
-import { api, certificates } from '@/api'
-import { config, path, toEntry, vfApi, vfPath } from '@/api/config'
+import { api } from '@/api'
+import { certificatesOf, config, path, toEntry, vfApi, vfPath } from '@/api/config'
 import { errMsg } from '@/api/http'
 import { withLabel } from '@/composables/useInstanceRefs'
 import { useAutoRefresh } from '@/composables/useAutoRefresh'
@@ -74,8 +74,7 @@ const pageForm = usePageForm(form)
 const saving = ref(false)
 const NONE = 0 // no certificate or role: the leaf unset
 // The server is the virtual firewall's openvpn interface in the
-// configuration tree; it names its certificate and role. Whether a
-// certificate is a CA is the CRUD's reading of its chain.
+// configuration tree; it names its certificate and role.
 const interfaces = vfApi('interface')
 const ifacePath = (name) => `${vfPath()}/${path(['interface', name])}`
 const OFF = 'off' // no two-factor login, '' in the database (a select item can't be '')
@@ -85,7 +84,7 @@ async function load() {
   if (!id) return
   const [ifs, cs] = await Promise.all([
     interfaces.list(),
-    certificates.list({ instance_id: id }),
+    certificatesOf(() => store.nameOf(id)).list(),
   ])
   ifaceRows.value = ifs
   certs.value = cs.filter((c) => !c.is_ca)

@@ -12,8 +12,8 @@ import AutoRefreshButton from '@/components/AutoRefreshButton.vue'
 import CrudPage from '@/components/CrudPage.vue'
 import FormHeader from '@/components/FormHeader.vue'
 import SearchInput from '@/components/SearchInput.vue'
-import { api, certificates } from '@/api'
-import { config, fromEntry, toEntry, vfApi, vfPath } from '@/api/config'
+import { api } from '@/api'
+import { certificatesOf, config, fromEntry, toEntry, vfApi, vfPath } from '@/api/config'
 import { errMsg } from '@/api/http'
 import { useStatusRefresh } from '@/composables/useAutoRefresh'
 import { withLabel } from '@/composables/useInstanceRefs'
@@ -42,8 +42,7 @@ const certs = ref([])
 const dnsClients = ref([])
 const ifaceRows = ref([])
 // The policies, interfaces, certificate and DNS update clients by name,
-// in the configuration tree. Whether a certificate is a CA is the CRUD's
-// reading of its chain.
+// in the configuration tree.
 const acmeProxyPolicies = vfApi('acme-proxy-policy')
 const SELF = 0 // the self-signed certificate: no acme-proxy-certificate
 const certItems = computed(() => [
@@ -80,7 +79,7 @@ async function load() {
   if (!id) return
   const [entry, cs] = await Promise.all([
     config.get(vfPath()),
-    certificates.list({ instance_id: id }),
+    certificatesOf(() => store.nameOf(id)).list(),
   ])
   const inst = fromEntry(entry)
   const ifs = inst.interface ?? []
