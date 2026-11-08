@@ -181,6 +181,14 @@ func (b treeBackend) Running(context.Context) (*datastore.Tree, error) {
 	return tree.Clone(), nil
 }
 
+// forgetRunning drops running's cache: its commit's file has come since.
+func (s *Server) forgetRunning() {
+	t := &s.treeState
+	t.runMu.Lock()
+	t.running = nil
+	t.runMu.Unlock()
+}
+
 // oldSnapshot reads a commit's configuration from its database snapshot
 // (deployed/<commit>.db), as commits were kept before the tree.
 func (s *Server) oldSnapshot(commit int64) (*datastore.Tree, bool, error) {

@@ -18,6 +18,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -25,6 +26,7 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"github.com/abundo/portitor/internal/agentapi"
+	"github.com/abundo/portitor/internal/datastore"
 	"github.com/abundo/portitor/internal/agentclient"
 	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/models"
@@ -289,6 +291,10 @@ func (s *Server) copyPrimary(ctx context.Context) error {
 	defer res.Body.Close()
 	switch res.StatusCode {
 	case http.StatusNotModified:
+		// The same database; running's commit may have come since.
+		if err := s.replicaTree(ctx, client, peer); err != nil {
+			return fail(err)
+		}
 		r.mu.Lock()
 		r.lastCopy, r.copyErr = time.Now(), ""
 		r.mu.Unlock()
@@ -327,6 +333,9 @@ func (s *Server) copyPrimary(ctx context.Context) error {
 	if _, err := restoreDatabase(ctx, s.db, tmp, replicaKeeps); err != nil {
 		return fail(fmt.Errorf("the primary's database: %w", err))
 	}
+	if err := s.replicaTree(ctx, client, peer); err != nil {
+		return fail(err)
+	}
 	r.mu.Lock()
 	if r.etag != res.Header.Get("ETag") {
 		slog.Info("replica: copied the primary's configuration")
@@ -338,15 +347,20 @@ func (s *Server) copyPrimary(ctx context.Context) error {
 
 const replicaPath = "/ha/v1/database"
 
-// handleReplica gives the secondary's portitor-config this database, the
-// pair's secret its key. Its ETag is its content's SHA-256.
-func (s *Server) handleReplica(c *echo.Context) error {
+// replicaCommitPath + <commit> is a commit's configuration
+// (deployed/<commit>-config.json), which the replica's running is.
+const replicaCommitPath = "/ha/v1/commits/"
+
+// pairAuthorized answers a request to the primary's portitor-config from
+// its secondary's: false (answered) unless this is the primary's and the
+// request has the pair's secret.
+func (s *Server) pairAuthorized(c *echo.Context) (bool, error) {
 	if !s.cfg.Local || s.isReplica() {
-		return errJSON(c, http.StatusConflict, "this portitor-config is not the primary's")
+		return false, errJSON(c, http.StatusConflict, "this portitor-config is not the primary's")
 	}
 	var secrets []string
 	if err := s.db.Model(&models.Firewall{}).Where("ha_primary_id IS NOT NULL AND ha_secret != ''").Pluck("ha_secret", &secrets).Error; err != nil {
-		return err
+		return false, err
 	}
 	got := c.Request().Header.Get("Authorization")
 	ok := false
@@ -356,8 +370,87 @@ func (s *Server) handleReplica(c *echo.Context) error {
 		}
 	}
 	if !ok {
-		slog.Warn("replica: refused a copy of the database", "remote", c.RealIP())
-		return errJSON(c, http.StatusUnauthorized, "unauthorized")
+		slog.Warn("replica: refused a request of the secondary's", "path", c.Request().URL.Path, "remote", c.RealIP())
+		return false, errJSON(c, http.StatusUnauthorized, "unauthorized")
+	}
+	return true, nil
+}
+
+// handleReplicaCommit gives the secondary's portitor-config a commit's
+// configuration, every secret in it (as the database has them).
+func (s *Server) handleReplicaCommit(c *echo.Context) error {
+	if ok, err := s.pairAuthorized(c); !ok {
+		return err
+	}
+	commit, err := echo.PathParam[int64](c, "commit")
+	if err != nil || commit <= 0 {
+		return errJSON(c, http.StatusNotFound, "not found")
+	}
+	dir, err := s.snapshotDir()
+	if err != nil {
+		return err
+	}
+	data, err := os.ReadFile(configPath(dir, commit))
+	if errors.Is(err, os.ErrNotExist) {
+		return errJSON(c, http.StatusNotFound, fmt.Sprintf("commit %d is not kept", commit))
+	} else if err != nil {
+		return err
+	}
+	return c.Blob(http.StatusOK, "application/json", data)
+}
+
+// replicaTree brings the replica's configuration tree in step with the
+// copy of the primary's database: the candidate is the tables (they are
+// the primary's candidate's), running the live commit's configuration,
+// fetched from the primary when this host doesn't have it.
+func (s *Server) replicaTree(ctx context.Context, client *http.Client, peer agentapi.HAPeerConfig) error {
+	if err := s.syncFromTables(ctx); err != nil {
+		return fmt.Errorf("the copy's candidate: %w", err)
+	}
+	commit, err := s.liveCommit()
+	if err != nil || commit == 0 {
+		return err
+	}
+	dir, err := s.snapshotDir()
+	if err != nil {
+		return err
+	}
+	path := configPath(dir, commit)
+	if _, err := os.Stat(path); err == nil {
+		return nil
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(peer.URL, "/")+replicaCommitPath+strconv.FormatInt(commit, 10), nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+peer.Secret)
+	res, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("commit %d from the primary: %w", commit, err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		return fmt.Errorf("commit %d from the primary: HTTP %d", commit, res.StatusCode)
+	}
+	data, err := io.ReadAll(io.LimitReader(res.Body, backupMaxSize))
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	if err := datastore.WriteFile(path, data); err != nil {
+		return err
+	}
+	s.forgetRunning()
+	return nil
+}
+
+// handleReplica gives the secondary's portitor-config this database, the
+// pair's secret its key. Its ETag is its content's SHA-256.
+func (s *Server) handleReplica(c *echo.Context) error {
+	if ok, err := s.pairAuthorized(c); !ok {
+		return err
 	}
 	dir, err := s.snapshotDir()
 	if err != nil {

@@ -177,6 +177,8 @@ func TestReplicaCopy(t *testing.T) {
 	var sec models.Firewall
 	prim.srv.db.First(&sec, pair)
 
+	prim.commit()
+
 	// A new secondary, with a database of its own before its first copy.
 	rep := newEnv(t)
 	if err := rep.srv.ensureDefaultInstance(); err != nil {
@@ -200,6 +202,18 @@ func TestReplicaCopy(t *testing.T) {
 	}
 	if rep.srv.role.etag == "" {
 		t.Error("no ETag kept")
+	}
+	// Its tree: the candidate the copy's, running the primary's live commit.
+	if rep.node("instance=main/interface=lan") == nil {
+		t.Error("the replica's candidate lacks the primary's lan")
+	}
+	run, err := treeBackend{rep.srv}.Running(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	lanPath, _ := parseConfigPath("instance=main/interface=lan")
+	if n, _, _ := run.Find(lanPath); n == nil {
+		t.Error("the replica's running lacks the primary's live commit")
 	}
 	// Unchanged, the next copy is not sent again.
 	etag := rep.srv.role.etag

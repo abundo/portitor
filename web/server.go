@@ -161,6 +161,7 @@ func (s *Server) Echo() *echo.Echo {
 		e.IPExtractor = echo.ExtractIPFromXFFHeader(opts...)
 	}
 	e.GET(replicaPath, s.handleReplica, noStore)
+	e.GET(replicaCommitPath+":commit", s.handleReplicaCommit, noStore)
 
 	api := e.Group("/api", requireJSON, noStore, s.refuseOnReplica)
 	api.POST("/login", s.handleLogin)
