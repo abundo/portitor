@@ -30,7 +30,7 @@ func (s *Server) handleZoneRecords(c *echo.Context) error {
 		return errJSON(c, http.StatusBadRequest, "invalid JSON: "+err.Error())
 	}
 	var z models.DnsZone
-	if err := s.db.First(&z, id).Error; err != nil {
+	if err := s.dbOf(c).First(&z, id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return errJSON(c, http.StatusNotFound, "not found")
 		}
@@ -53,7 +53,7 @@ func (s *Server) handleZoneRecords(c *echo.Context) error {
 			domain = r.Name
 		}
 	}
-	err = s.db.Transaction(func(tx *gorm.DB) error {
+	err = s.dbOf(c).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Where("zone_id = ?", z.ID).Delete(&models.DnsRecord{}).Error; err != nil {
 			return err
 		}
@@ -66,7 +66,7 @@ func (s *Server) handleZoneRecords(c *echo.Context) error {
 		return dbError(c, err)
 	}
 	out := []models.DnsRecord{}
-	if err := s.db.Where("zone_id = ?", z.ID).Order("rank, id").Find(&out).Error; err != nil {
+	if err := s.dbOf(c).Where("zone_id = ?", z.ID).Order("rank, id").Find(&out).Error; err != nil {
 		return err
 	}
 	return c.JSON(http.StatusOK, out)

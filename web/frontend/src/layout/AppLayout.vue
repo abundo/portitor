@@ -2,6 +2,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
 <script setup>
+import { setWarningsHandler } from '@/api/http'
 import { onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { watch } from 'vue'
@@ -50,6 +51,12 @@ function toggleMenu() {
 const { state: logPanel, note } = useLogPanel()
 const route = useRoute()
 const toast = useToast()
+
+// What a save leaves for the commit to refuse (AGENTS.md: messages are
+// toasts).
+setWarningsHandler((warnings) =>
+  toast.add({ title: 'The commit would refuse', description: warnings, color: 'warning' }),
+)
 
 // Every toast also goes into the log panel's Agent log tab, which keeps it.
 const seenToasts = new Set()

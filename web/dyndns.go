@@ -227,7 +227,7 @@ func (s *Server) handleDyndnsRecords(c *echo.Context) error {
 		return errJSON(c, http.StatusBadRequest, "invalid JSON: "+err.Error())
 	}
 	var cl models.DyndnsClient
-	if err := s.db.First(&cl, id).Error; err != nil {
+	if err := s.dbOf(c).First(&cl, id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return errJSON(c, http.StatusNotFound, "not found")
 		}
@@ -266,7 +266,7 @@ func (s *Server) handleDyndnsRecords(c *echo.Context) error {
 	if err := checkDynDNS(builder.DynDNS(&check, "eth0", body)); err != nil {
 		return errJSON(c, http.StatusBadRequest, err.Error())
 	}
-	err = s.db.Transaction(func(tx *gorm.DB) error {
+	err = s.dbOf(c).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Where("client_id = ?", cl.ID).Delete(&models.DyndnsRecord{}).Error; err != nil {
 			return err
 		}
@@ -279,7 +279,7 @@ func (s *Server) handleDyndnsRecords(c *echo.Context) error {
 		return dbError(c, err)
 	}
 	out := []models.DyndnsRecord{}
-	if err := s.db.Where("client_id = ?", cl.ID).Order("id").Find(&out).Error; err != nil {
+	if err := s.dbOf(c).Where("client_id = ?", cl.ID).Order("id").Find(&out).Error; err != nil {
 		return err
 	}
 	return c.JSON(http.StatusOK, out)

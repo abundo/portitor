@@ -253,39 +253,9 @@ func (s *Server) handleConfigEdit(c *echo.Context) error {
 		if err := applyConfigEdit(work, p, method, action, body); err != nil {
 			return err
 		}
-		for _, ch := range datastore.Diff(before, work) {
-			if !acc.CanWrite(ch.Path) {
-				denied = ch.Path.String(work.Root.S)
-				return errForbidden
-			}
-		}
-		if !acc.a.isAdmin() {
-			if err := tenantTreeCheck(before, work, acc.write); err != nil {
-				return err
-			}
-		}
-		changed := datastore.ChangedEntries(before, work)
-		if err := confcheck.Normalize(before, work, changed); err != nil {
+		warnings, denied, err = s.checkEdit(acc, scope, before, work)
+		if err != nil {
 			return err
-		}
-		// A save may not make the candidate invalid by the schema where it
-		// wasn't: a reference to nothing, a mandatory leaf missing, an
-		// entry deleted that something refers to.
-		if errs := newProblems(before.Validate(), work.Validate()); len(errs) > 0 {
-			return &datastore.ValidationError{Problems: errs}
-		}
-		// What the change breaks, in the entries changed or in those that
-		// refer to them.
-		if errs := newProblems(append(confcheck.Check(before), s.firewallProblems(before)...),
-			append(confcheck.Check(work), s.firewallProblems(work)...)); len(errs) > 0 {
-			return &datastore.ValidationError{Problems: errs}
-		}
-		// And what the commit's build would find wrong that it didn't
-		// before; what was already wrong is a warning.
-		was := s.buildProblems(before, scope)
-		warnings = s.buildProblems(work, scope)
-		if errs := newProblems(was, warnings); len(errs) > 0 {
-			return &datastore.ValidationError{Problems: errs}
 		}
 		return nil
 	})
@@ -615,4 +585,45 @@ func (s *Server) firewallProblems(tree *datastore.Tree) []error {
 		}
 	}
 	return errs
+}
+
+// checkEdit checks a change of the candidate from before to work: the
+// user may make it (denied names a path they may not change), and it adds
+// no problem (the schema's, the hooks', the firewalls', the build's).
+// What the build finds that was so before comes back as warnings.
+func (s *Server) checkEdit(acc treeAccess, scope map[string]bool, before, work *datastore.Tree) (warnings []error, denied string, err error) {
+	for _, ch := range datastore.Diff(before, work) {
+		if !acc.CanWrite(ch.Path) {
+			return nil, ch.Path.String(work.Root.S), errForbidden
+		}
+	}
+	if !acc.a.isAdmin() {
+		if err := tenantTreeCheck(before, work, acc.write); err != nil {
+			return nil, "", err
+		}
+	}
+	changed := datastore.ChangedEntries(before, work)
+	if err := confcheck.Normalize(before, work, changed); err != nil {
+		return nil, "", err
+	}
+	// A save may not make the candidate invalid by the schema where it
+	// wasn't: a reference to nothing, a mandatory leaf missing, an entry
+	// deleted that something refers to.
+	if errs := newProblems(before.Validate(), work.Validate()); len(errs) > 0 {
+		return nil, "", &datastore.ValidationError{Problems: errs}
+	}
+	// What the change breaks, in the entries changed or in those that
+	// refer to them.
+	if errs := newProblems(append(confcheck.Check(before), s.firewallProblems(before)...),
+		append(confcheck.Check(work), s.firewallProblems(work)...)); len(errs) > 0 {
+		return nil, "", &datastore.ValidationError{Problems: errs}
+	}
+	// And what the commit's build would find wrong that it didn't before;
+	// what was already wrong is a warning.
+	was := s.buildProblems(before, scope)
+	warnings = s.buildProblems(work, scope)
+	if errs := newProblems(was, warnings); len(errs) > 0 {
+		return nil, "", &datastore.ValidationError{Problems: errs}
+	}
+	return warnings, "", nil
 }

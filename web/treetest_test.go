@@ -5,6 +5,7 @@ package web
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http/httptest"
 	"strings"
 
@@ -127,4 +128,14 @@ func (env *testEnv) rowID(table, name string) uint {
 		env.t.Fatalf("no %s %s: %v", table, name, err)
 	}
 	return id
+}
+
+// rowIDOf is the row id of an entry keyed by its id (a rule's is its row's).
+func (env *testEnv) rowIDOf(table, id string) uint {
+	env.t.Helper()
+	var n uint
+	if _, err := fmt.Sscan(id, &n); err != nil {
+		env.t.Fatal(err)
+	}
+	return n
 }

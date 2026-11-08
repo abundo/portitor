@@ -191,7 +191,7 @@ func (s *Server) handleReorder(table string) echo.HandlerFunc {
 			return errJSON(c, http.StatusBadRequest, "invalid request")
 		}
 		var instances []uint
-		if err := s.db.Table(table).Where("id IN ?", req.IDs).Distinct().Pluck("instance_id", &instances).Error; err != nil {
+		if err := s.dbOf(c).Table(table).Where("id IN ?", req.IDs).Distinct().Pluck("instance_id", &instances).Error; err != nil {
 			return err
 		}
 		for _, inst := range instances {
@@ -199,7 +199,7 @@ func (s *Server) handleReorder(table string) echo.HandlerFunc {
 				return err
 			}
 		}
-		err := s.db.Transaction(func(tx *gorm.DB) error {
+		err := s.dbOf(c).Transaction(func(tx *gorm.DB) error {
 			for i, id := range req.IDs {
 				if err := tx.Table(table).Where("id = ?", id).Update("position", (i+1)*10).Error; err != nil {
 					return err
@@ -222,7 +222,7 @@ func (s *Server) handleWgRekey(c *echo.Context) error {
 		return errJSON(c, http.StatusNotFound, "not found")
 	}
 	var ifc models.Interface
-	if err := s.db.First(&ifc, id).Error; err != nil || ifc.Kind != fwconfig.KindWireGuard {
+	if err := s.dbOf(c).First(&ifc, id).Error; err != nil || ifc.Kind != fwconfig.KindWireGuard {
 		return errJSON(c, http.StatusNotFound, "no such WireGuard interface")
 	}
 	if ok, err := allowInstance(c, ifc.InstanceID, true); !ok {
@@ -233,7 +233,7 @@ func (s *Server) handleWgRekey(c *echo.Context) error {
 		return err
 	}
 	ifc.WgPrivateKey, ifc.WgPublicKey = priv, pub
-	if err := s.db.Save(&ifc).Error; err != nil {
+	if err := s.dbOf(c).Save(&ifc).Error; err != nil {
 		return err
 	}
 	return c.JSON(http.StatusOK, ifc)
