@@ -40,6 +40,16 @@ export function useInstanceRefs() {
       description: i.description || '',
     })),
   )
+  // The same by name, for the pages on the configuration tree, whose
+  // entries name their interface and VRF.
+  const ifaceNameItems = computed(() =>
+    ifaceList.value.map((i) => ({
+      label: ifaceText(i.name),
+      value: i.name,
+      description: i.description || '',
+    })),
+  )
+  const vrfItems = computed(() => vrfList.value.map((v) => ({ label: v.name, value: v.name })))
   const ifaceName = (id) => ifaceText(ifaceList.value.find((i) => i.id === id)?.name ?? '')
 
   // Interface names of the instance: its interfaces and its link ends.
@@ -87,6 +97,8 @@ export function useInstanceRefs() {
     ifaceList,
     vrfList,
     ifaceItems,
+    ifaceNameItems,
+    vrfItems,
     ifaceName,
     ifaceText,
     ifaceListText,

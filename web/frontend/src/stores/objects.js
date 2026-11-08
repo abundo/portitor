@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { defineStore } from 'pinia'
-import { addressLists, addressObjects, api, customServices, ipLists, portNames } from '@/api'
+import { addressLists, addressObjects, api, ipLists } from '@/api'
+import { portNames, services as customServices } from '@/api/config'
 import { serviceSummary } from '@/utils/services'
 
 // Named hosts and prefixes and address lists, offered as suggestions in

@@ -181,3 +181,41 @@ func TestConfigAPI(t *testing.T) {
 	rec = env.do("GET", "/api/config/candidate/instance=lab/interface=lan/description", nil)
 	want(rec, http.StatusNotFound, "tina's change after the discard")
 }
+
+// What the GUI's pages count on: a set secret is marked, a replace
+// without it keeps it and null removes it; a PATCH of a virtual firewall
+// merges into its interfaces' entries.
+func TestConfigAPISecretsAndMerge(t *testing.T) {
+	env := newEnv(t)
+	env.host("main")
+	user := "instance=main/snmp-user=nms"
+	env.put(user, map[string]any{"enabled": true, "auth-protocol": "SHA-256", "auth-password": "secret-pass-1", "priv-protocol": "AES", "priv-password": "secret-pass-2"})
+	rec := env.mustCfg("GET", user, nil)
+	if !strings.Contains(rec.Body.String(), `"@auth-password":{"portitor:set":true}`) || strings.Contains(rec.Body.String(), "secret-pass-1") {
+		t.Fatalf("user: %s", rec.Body)
+	}
+	var back map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &back)
+	back["description"] = "the NMS"
+	env.put(user, back)
+	if env.node(user).Leaf("auth-password") != "secret-pass-1" {
+		t.Error("a PUT of what was read lost the password")
+	}
+	env.put(user, map[string]any{"enabled": true, "auth-protocol": "SHA-256", "priv-password": nil})
+	if n := env.node(user); n.Leaf("priv-password") != "" || n.Leaf("auth-password") != "secret-pass-1" {
+		t.Errorf("null: priv %q, auth %q", n.Leaf("priv-password"), n.Leaf("auth-password"))
+	}
+
+	env.put("instance=main/interface=eth1", map[string]any{"kind": "physical", "enabled": true, "addresses": []string{"10.1.0.1/24"}, "mtu": 1400})
+	env.patch("instance=main", map[string]any{"snmp-enabled": true, "interface": []any{map[string]any{"name": "eth1", "snmp-serve": true}}})
+	eth1 := env.node("instance=main/interface=eth1")
+	if !on(eth1, "snmp-serve") || eth1.Leaf("mtu") != "1400" || !on(env.node("instance=main"), "snmp-enabled") {
+		t.Errorf("merged: snmp-serve %q mtu %q", eth1.Leaf("snmp-serve"), eth1.Leaf("mtu"))
+	}
+	// A PUT of a whole list replaces its entries.
+	env.put("instance=main/ntp-server", []any{map[string]any{"address": "a.example"}, map[string]any{"address": "b.example"}})
+	env.put("instance=main/ntp-server", []any{map[string]any{"address": "b.example", "iburst": true}})
+	if es := env.node("instance=main").Lists["ntp-server"]; len(es) != 1 || es[0].Leaf("address") != "b.example" {
+		t.Errorf("ntp servers: %d", len(es))
+	}
+}

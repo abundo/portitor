@@ -7,10 +7,11 @@
 <script setup>
 import CrudPage from '@/components/CrudPage.vue'
 import NeedInstance from '@/components/NeedInstance.vue'
-import { vrfs } from '@/api'
+import { vfApi } from '@/api/config'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
 
 const { store, ifaceList, vrfList, ifaceText, reload } = useInstanceRefs()
+const vrfs = vfApi('vrf')
 
 const membersOf = (name) =>
   ifaceList.value
@@ -131,7 +132,7 @@ const fields = [
       noun="VRF"
       description="VRFs of this virtual firewall: each routes the interfaces in it (Network → Interfaces) by its own table, apart from the main table and the other VRFs. Static routes go in one by their VRF or their interface's. With an L3VNI a VRF is an L3VPN over EVPN/VXLAN with the same VRFs at other VTEPs."
       :api="vrfs"
-      :params="{ instance_id: store.currentId }"
+      :params="{ _vf: store.currentId }"
       :columns="columns"
       :fields="fields"
       :search-text="(r) => membersOf(r.name)"

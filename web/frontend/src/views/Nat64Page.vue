@@ -12,7 +12,8 @@ import FormHeader from '@/components/FormHeader.vue'
 import NeedInstance from '@/components/NeedInstance.vue'
 import SearchInput from '@/components/SearchInput.vue'
 import TagsInput from '@/components/TagsInput.vue'
-import { api, instances, interfaces } from '@/api'
+import { api } from '@/api'
+import { config, fromEntry, toEntry, vfPath } from '@/api/config'
 import { errMsg } from '@/api/http'
 import { useInstanceRefs, withLabel } from '@/composables/useInstanceRefs'
 import { usePageForm } from '@/composables/useFormGuard'
@@ -106,7 +107,8 @@ const xlatIfaces = ref([])
 async function load() {
   const id = store.currentId
   if (!id) return
-  const [inst, ifs] = await Promise.all([instances.get(id), interfaces.list({ instance_id: id })])
+  const inst = fromEntry(await config.get(vfPath()))
+  const ifs = inst.interface ?? []
   Object.assign(form, {
     nat64_prefix: inst.nat64_prefix || '64:ff9b::/96',
     nat64: inst.nat64 ?? false,
@@ -121,7 +123,7 @@ watch(() => store.currentId, load, { immediate: true })
 async function save() {
   saving.value = true
   try {
-    await instances.update(store.currentId, { ...form })
+    await config.patch(vfPath(), toEntry({ ...form }))
     toast.add({ title: 'NAT64 saved', color: 'success' })
     await Promise.all([load(), store.load()])
   } catch (err) {

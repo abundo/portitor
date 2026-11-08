@@ -303,10 +303,7 @@ async function moveTo(from, to) {
   list.forEach((r, i) => (r.position = (i + 1) * 10))
   rows.value = list
   try {
-    await rootApi.reorder(
-      props.reorder,
-      list.map((r) => r.id),
-    )
+    await reorderTo(list.map((r) => r.id))
     emit('changed')
   } catch (err) {
     toast.add({ title: errMsg(err, 'Reorder failed'), color: 'error' })
@@ -318,8 +315,13 @@ async function moveTo(from, to) {
 async function placeAt(created, at) {
   const ids = rows.value.map((r) => r.id)
   ids.splice(at, 0, created.id)
-  await rootApi.reorder(props.reorder, ids)
+  await reorderTo(ids)
 }
+
+// reorderTo saves rows' order: through the api's reorder (a list of the
+// configuration tree), else the table's (the reorder prop).
+const reorderTo = (ids) =>
+  props.api.reorder ? props.api.reorder(ids) : rootApi.reorder(props.reorder, ids)
 
 // createAt creates a row without the form and inserts it at index `at` of
 // rows; it resolves to the created row (null on failure) once the table

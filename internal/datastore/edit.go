@@ -109,7 +109,7 @@ func (t *Tree) EditJSON(p Path, op EditOp, data []byte) error {
 		}
 		if old != nil {
 			n, _, _ := t.Find(p)
-			KeepSecrets(old, n)
+			keepSecrets(old, n, obj)
 		}
 		return nil
 	}
@@ -163,7 +163,7 @@ func (t *Tree) editList(p Path, s *schema.Node, op EditOp, v any) error {
 			n, _, _ := t.Find(ep)
 			for _, o := range old {
 				if slices.Equal(o.Keys(), n.Keys()) {
-					KeepSecrets(o, n)
+					keepSecrets(o, n, obj)
 				}
 			}
 		}
@@ -199,6 +199,9 @@ func (t *Tree) mergeObject(p Path, s *schema.Node, obj map[string]any) error {
 		return err
 	}
 	for name := range obj {
+		if strings.HasPrefix(name, "@") {
+			continue // an annotation (RFC 7952), SecretsSet's
+		}
 		local := name
 		if i := strings.IndexByte(name, ':'); i >= 0 {
 			if name[:i] != schema.Module {
@@ -349,16 +352,24 @@ func jsonScalars(v any) ([]string, error) {
 
 // KeepSecrets copies the secrets of old into new where new has none: a
 // client can't read them back, so a replace without them keeps them.
-func KeepSecrets(old, new *Node) {
+func KeepSecrets(old, new *Node) { keepSecrets(old, new, nil) }
+
+// keepSecrets is KeepSecrets but for the secrets body, the JSON the new
+// node was made from, sets to null: those it removes.
+func keepSecrets(old, new *Node, body map[string]any) {
+	nulled := func(name string) bool {
+		v, ok := objMember(body, name)
+		return ok && v == nil
+	}
 	for name, v := range old.Leaves {
-		if s := old.S.Child(name); s != nil && s.Secret() {
+		if s := old.S.Child(name); s != nil && s.Secret() && !nulled(name) {
 			if _, ok := new.Leaves[name]; !ok {
 				new.Leaves[name] = v
 			}
 		}
 	}
 	for name, vs := range old.LeafLists {
-		if s := old.S.Child(name); s != nil && s.Secret() {
+		if s := old.S.Child(name); s != nil && s.Secret() && !nulled(name) {
 			if _, ok := new.LeafLists[name]; !ok {
 				new.LeafLists[name] = slices.Clone(vs)
 			}
@@ -366,7 +377,9 @@ func KeepSecrets(old, new *Node) {
 	}
 	for name, oc := range old.Containers {
 		if nc := new.Containers[name]; nc != nil {
-			KeepSecrets(oc, nc)
+			sub, _ := objMember(body, name)
+			m, _ := sub.(map[string]any)
+			keepSecrets(oc, nc, m)
 		}
 	}
 	for name, es := range old.Lists {

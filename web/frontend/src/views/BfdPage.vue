@@ -17,7 +17,6 @@ import NeedInstance from '@/components/NeedInstance.vue'
 import SearchInput from '@/components/SearchInput.vue'
 import {
   api,
-  bfdInterfaces,
   bgpNeighbors,
   bgpPeerGroups,
   instances,
@@ -25,6 +24,7 @@ import {
   ospfInterfaces,
   routes,
 } from '@/api'
+import { vfApi } from '@/api/config'
 import { errMsg } from '@/api/http'
 import { usePageForm } from '@/composables/useFormGuard'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
@@ -35,6 +35,7 @@ import { useSearch, valuesText } from '@/utils/search'
 const route = useRoute()
 const router = useRouter()
 const { store, ifaceNames, ifaceText, vrfList } = useInstanceRefs()
+const bfdInterfaces = vfApi('bfd-interface', ['interface'])
 
 const tabs = [
   { label: 'BFD info', value: 'info', slot: 'info', icon: 'i-lucide-info' },
@@ -284,7 +285,7 @@ const defaults = {
           title="BFD interfaces"
           description="BFD on the interfaces of this virtual firewall: fast detection of a lost neighbour. Static routes (their gateway), OSPF and IS-IS interfaces and BGP neighbours turn BFD on in their own settings, and use it on the interfaces listed and enabled here, with these timers (empty: the default timers above)."
           :api="bfdInterfaces"
-          :params="{ instance_id: store.currentId }"
+          :params="{ _vf: store.currentId }"
           :columns="columns"
           :fields="fields"
           :defaults="defaults"

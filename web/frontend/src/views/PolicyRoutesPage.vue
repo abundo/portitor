@@ -7,17 +7,18 @@
 import CrudPage from '@/components/CrudPage.vue'
 import NeedInstance from '@/components/NeedInstance.vue'
 import { onMounted } from 'vue'
-import { policyRoutes } from '@/api'
+import { vfApi } from '@/api/config'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
 import { useObjectStore } from '@/stores/objects'
 
-const { store, ifaceItems, ifaceName, ifaceListText, ifaceRefItems } = useInstanceRefs()
+const { store, ifaceNameItems, ifaceText, ifaceListText, ifaceRefItems } = useInstanceRefs()
+const policyRoutes = vfApi('policy-route', ['id'])
 const objects = useObjectStore()
 onMounted(() => objects.load().catch(() => {}))
 
 const listText = (list) => (list?.length ? list.join(', ') : 'any')
 const routeText = (r) => {
-  const parts = [r.gateway, r.interface_id ? ifaceName(r.interface_id) : ''].filter(Boolean)
+  const parts = [r.gateway, r.interface ? ifaceText(r.interface) : ''].filter(Boolean)
   return parts.length ? parts.join(' on ') : 'main table'
 }
 
@@ -89,10 +90,10 @@ const fields = [
     hint: 'A host with an IPv4 and an IPv6 address routes both; an address routes its IP version only. Neither gateway nor interface: the traffic keeps the main table (an exception to the policy routes below).',
   },
   {
-    key: 'interface_id',
+    key: 'interface',
     label: 'Interface',
     type: 'select',
-    items: () => ifaceItems.value,
+    items: () => ifaceNameItems.value,
     nullable: true,
     hint: 'Alone (a tunnel, WireGuard), it routes both IP versions out of the interface. Give it for a gateway on an interface with a DHCP address, so the policy route is passed over while that interface has no link.',
   },
@@ -128,7 +129,7 @@ function clean(b) {
       description="Route forwarded traffic by its source, destination, incoming interface or service, through a gateway or interface of its own instead of the routing table."
       info="Tried top to bottom; the first match decides, and drag the grip to reorder. A policy route without a gateway or interface is an exception: what it matches keeps the main table. While a policy route's gateway can't be reached (its interface down), its traffic takes the main table. Traffic from the firewall itself, and on interfaces in a VRF, isn't policy-routed. Traffic sent out of a second uplink needs source NAT there (a masquerade NAT rule), so its replies come back the same way. The firewall rules still decide what may pass."
       :api="api"
-      :params="{ instance_id: store.currentId }"
+      :params="{ _vf: store.currentId }"
       :columns="columns"
       :fields="fields"
       :defaults="{
@@ -139,7 +140,7 @@ function clean(b) {
         dst_addrs: [],
         services: [],
         gateway: '',
-        interface_id: null,
+        interface: null,
       }"
       new-label="New policy route"
       reorder="policy-routes"

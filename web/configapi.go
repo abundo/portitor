@@ -158,7 +158,7 @@ func configJSON(t *datastore.Tree, p datastore.Path) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	o := datastore.JSONOptions{}
+	o := datastore.JSONOptions{SecretsSet: true}
 	if len(p) == 0 {
 		return t.JSON(o)
 	}

@@ -7,16 +7,32 @@
 // ones, which the others see read-only.
 import { computed, ref, watch } from 'vue'
 import CrudPage from '@/components/CrudPage.vue'
-import { dnsDnssecPolicies, dnsSoaTemplates, dnsTemplates } from '@/api'
+import { vfWithGlobals } from '@/api/config'
 import { useInstanceStore } from '@/stores/instances'
 
 const emit = defineEmits(['changed'])
 const store = useInstanceStore()
-const params = computed(() => ({ instance_id: store.currentId }))
+const params = computed(() => ({ _vf: store.currentId }))
+const dnsSoaTemplates = vfWithGlobals('dns-soa-template')
+const dnsDnssecPolicies = vfWithGlobals('dnssec-policy')
+// A template's nameservers are its nameserver list's entries.
+const templateList = vfWithGlobals('dns-template')
+const withNs = (r) => ({ ...r, nameservers: r.nameserver ?? [] })
+const withNameserver = ({ nameservers, ...r }) => ({
+  ...r,
+  nameserver: (nameservers ?? []).map((n) => ({ name: n.name, address: n.address ?? '' })),
+})
+const dnsTemplates = {
+  ...templateList,
+  list: async () => (await templateList.list()).map(withNs),
+  create: (r) => templateList.create(withNameserver(r)),
+  update: (id, r) => templateList.update(id, withNameserver(r)),
+}
+const own = () => store.nameOf(store.currentId)
 // The rows this virtual firewall uses: its own and the global ones.
-const usable = (r) => r.instance_id === store.currentId || r.global
+const usable = (r) => r._owner === own() || r.global
 // Another virtual firewall's global row is used, never changed, here.
-const foreign = (r) => r.instance_id !== store.currentId
+const foreign = (r) => r._owner !== own()
 const isDefault = computed(() => !!store.current?.is_default)
 
 // SOA templates and DNSSEC policies feed the DNS templates' selects.
@@ -39,7 +55,7 @@ function changed() {
 
 // A global DNS template uses only global SOA templates and policies.
 const choices = (list, form) =>
-  list.filter((x) => !form.global || x.global).map((x) => ({ label: x.name, value: x.id }))
+  list.filter((x) => !form.global || x.global).map((x) => ({ label: x.name, value: x.name }))
 
 // Global: the default virtual firewall's, offered to all, read-only there.
 const globalField = {
@@ -55,7 +71,6 @@ const globalColumn = {
   format: (r) => (foreign(r) ? 'global (default VF)' : r.global ? 'yes' : ''),
 }
 
-const nameOf = (list, id) => list.find((x) => x.id === id)?.name ?? ''
 
 // Nameservers are rows of a name and an optional IPv4 or IPv6 address (a
 // second row of the name for the other); the builder adds the address of
@@ -171,13 +186,13 @@ const policyDefaults = {
 
 const templateColumns = [
   { key: 'name', label: 'Name', class: 'font-medium' },
-  { key: 'soa', label: 'SOA', format: (r) => nameOf(soas.value, r.soa_template_id) },
+  { key: 'soa', label: 'SOA', format: (r) => r.soa_template },
   { key: 'default_ttl', label: 'Default TTL' },
   { key: 'nameservers', label: 'Nameservers', class: 'font-mono' },
   {
     key: 'dnssec',
     label: 'DNSSEC',
-    format: (r) => nameOf(policies.value, r.dnssec_policy_id) || '—',
+    format: (r) => r.dnssec_policy || '—',
   },
   { key: 'description', label: 'Description' },
   globalColumn,
@@ -185,7 +200,7 @@ const templateColumns = [
 const templateFields = [
   { key: 'name', label: 'Name', required: true },
   {
-    key: 'soa_template_id',
+    key: 'soa_template',
     label: 'SOA template',
     type: 'select',
     items: (form) => choices(soas.value, form),
@@ -198,7 +213,7 @@ const templateFields = [
     hint: 'Written as the NS records of every zone using this template. The address is optional: a nameserver inside a zone of the virtual firewall gets it as an A / AAAA record there. For both an IPv4 and an IPv6 address, add the nameserver twice.',
   },
   {
-    key: 'dnssec_policy_id',
+    key: 'dnssec_policy',
     label: 'DNSSEC policy',
     type: 'select',
     nullable: true,
@@ -212,7 +227,7 @@ const templateFields = [
   },
 ]
 const templateDefaults = () => ({
-  soa_template_id: soas.value[0]?.id,
+  soa_template: soas.value[0]?.name,
   default_ttl: 3600,
   nameservers: [newNameserver()],
 })

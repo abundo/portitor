@@ -7,7 +7,7 @@
 import { ref, toRef, watch } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import ServiceOptions from '@/components/ServiceOptions.vue'
-import { customServices } from '@/api'
+import { services as customServices } from '@/api/config'
 import { errMsg } from '@/api/http'
 import { useFormGuard } from '@/composables/useFormGuard'
 import { useServiceDialog } from '@/composables/useServiceDialog'

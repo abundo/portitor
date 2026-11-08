@@ -17,9 +17,16 @@ import (
 type JSONOptions struct {
 	// Secrets writes secret leaves; without it they are left out.
 	Secrets bool
+	// SecretsSet marks, without Secrets, each secret that has a value by
+	// an RFC 7952 annotation, "@auth-password": {"portitor:set": true}, so
+	// a client can show that it is set.
+	SecretsSet bool
 	// Indent pretty-prints.
 	Indent bool
 }
+
+// SetAnnotation is the annotation SecretsSet writes.
+const SetAnnotation = schema.Module + ":set"
 
 // MarshalJSON writes the tree as RFC 7951 JSON: top-level names
 // qualified with the module, 64-bit numbers as strings.
@@ -81,12 +88,18 @@ func nodeValue(n *Node, o JSONOptions, top bool) ordered {
 		switch s.Kind {
 		case schema.Leaf:
 			v, ok := n.Leaves[s.Name]
+			if ok && s.Secret() && !o.Secrets && o.SecretsSet {
+				out = append(out, member{"@" + name(s.Name), map[string]bool{SetAnnotation: true}})
+			}
 			if !ok || (s.Secret() && !o.Secrets) {
 				continue
 			}
 			out = append(out, member{name(s.Name), leafJSON(s, v)})
 		case schema.LeafList:
 			vs, ok := n.LeafLists[s.Name]
+			if ok && s.Secret() && !o.Secrets && o.SecretsSet {
+				out = append(out, member{"@" + name(s.Name), map[string]bool{SetAnnotation: true}})
+			}
 			if !ok || (s.Secret() && !o.Secrets) {
 				continue
 			}

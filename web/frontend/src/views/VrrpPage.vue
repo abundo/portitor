@@ -11,7 +11,8 @@ import { useRoute, useRouter } from 'vue-router'
 import CrudPage from '@/components/CrudPage.vue'
 import NeedInstance from '@/components/NeedInstance.vue'
 import SearchInput from '@/components/SearchInput.vue'
-import { api, vrrpRouters } from '@/api'
+import { api } from '@/api'
+import { vfApi } from '@/api/config'
 import { errMsg } from '@/api/http'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
 import { formatMac } from '@/utils/mac'
@@ -20,6 +21,7 @@ import { useSearch, valuesText } from '@/utils/search'
 const route = useRoute()
 const router = useRouter()
 const { store, ifaceNames, ifaceText } = useInstanceRefs()
+const vrrpRouters = vfApi('vrrp-router', ['interface', 'vrid'])
 
 const tabs = [
   { label: 'VRRP info', value: 'info', slot: 'info', icon: 'i-lucide-info' },
@@ -177,7 +179,7 @@ const defaults = {
           title="VRRP"
           description="VRRP: addresses shared with other routers on the same network, held by the master and taken over by a backup when it fails. Rules and auto rules on an interface also match what is sent to its VRRP addresses."
           :api="vrrpRouters"
-          :params="{ instance_id: store.currentId }"
+          :params="{ _vf: store.currentId }"
           :columns="columns"
           :fields="fields"
           :defaults="defaults"

@@ -11,7 +11,7 @@ import CrudPage from '@/components/CrudPage.vue'
 import FormHeader from '@/components/FormHeader.vue'
 import NeedInstance from '@/components/NeedInstance.vue'
 import SearchInput from '@/components/SearchInput.vue'
-import { instances, interfaces, snmpUsers } from '@/api'
+import { config, fromEntry, toEntry, vfApi, vfPath } from '@/api/config'
 import { errMsg } from '@/api/http'
 import { withLabel } from '@/composables/useInstanceRefs'
 import { usePageForm } from '@/composables/useFormGuard'
@@ -34,7 +34,7 @@ const form = reactive({
   new_snmp_community: '',
   clear_snmp_community: false,
   has_snmp_community: false,
-  ifaces: [], // { id, name, label, description, snmp_serve }
+  ifaces: [], // { name, label, description, snmp_serve }
 })
 const pageForm = usePageForm(form)
 const saving = ref(false)
@@ -43,7 +43,8 @@ let loaded = [] // the interfaces as loaded, to save only what changed
 async function load() {
   const id = store.currentId
   if (!id) return
-  const [inst, ifs] = await Promise.all([instances.get(id), interfaces.list({ instance_id: id })])
+  const inst = fromEntry(await config.get(vfPath()))
+  const ifs = inst.interface ?? []
   loaded = ifs
   Object.assign(form, {
     snmp_enabled: inst.snmp_enabled ?? false,
@@ -54,7 +55,6 @@ async function load() {
     clear_snmp_community: false,
     has_snmp_community: !!inst.has_snmp_community,
     ifaces: ifs.map((i) => ({
-      id: i.id,
       name: i.name,
       label: i.label,
       description: i.description,
@@ -73,14 +73,22 @@ const { search: ifaceSearch, filtered: shownIfaces } = useSearch(
 async function save() {
   saving.value = true
   try {
+    // One change of the virtual firewall: its snmp-* leaves and its
+    // interfaces' snmp-serve, merged into their entries.
     const { ifaces, ...snmp } = form
-    delete snmp.has_snmp_community
-    await instances.update(store.currentId, snmp)
-    for (const i of ifaces) {
-      const o = loaded.find((x) => x.id === i.id)
-      if (o && !!o.snmp_serve !== i.snmp_serve)
-        await interfaces.update(i.id, { snmp_serve: i.snmp_serve })
-    }
+    const changed = ifaces.filter((i) => {
+      const o = loaded.find((x) => x.name === i.name)
+      return o && !!o.snmp_serve !== i.snmp_serve
+    })
+    await config.patch(
+      vfPath(),
+      toEntry({
+        ...snmp,
+        ...(changed.length
+          ? { interface: changed.map((i) => ({ name: i.name, snmp_serve: i.snmp_serve })) }
+          : {}),
+      }),
+    )
     toast.add({ title: 'SNMP saved; commit to apply it.', color: 'success' })
     await Promise.all([load(), store.load()])
   } catch (err) {
@@ -91,6 +99,7 @@ async function save() {
 }
 
 // ----- SNMPv3 users.
+const snmpUsers = vfApi('snmp-user')
 const authItems = [
   { label: 'SHA-256', value: 'SHA-256' },
   { label: 'SHA-512', value: 'SHA-512' },
@@ -214,7 +223,7 @@ const userDefaults = {
               <tbody>
                 <tr
                   v-for="i in shownIfaces"
-                  :key="i.id"
+                  :key="i.name"
                   class="border-b border-default last:border-0"
                 >
                   <td class="py-1 pr-4 font-mono">{{ withLabel(i.label, i.name) }}</td>
@@ -251,7 +260,7 @@ const userDefaults = {
         title="SNMPv3 users"
         description="Read-only users with their own passwords: authenticated (SHA) and, with privacy, encrypted (AES)."
         :api="snmpUsers"
-        :params="{ instance_id: store.currentId }"
+        :params="{ _vf: store.currentId }"
         :columns="userColumns"
         :fields="userFields"
         :defaults="userDefaults"

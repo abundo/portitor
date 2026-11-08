@@ -263,6 +263,19 @@ func normalizeTask(c *Ctx, t *datastore.Node) error {
 	} else {
 		clear(t, "ip-list")
 	}
+	// Without a firewall, the only one: the firewall of the one default
+	// virtual firewall (an HA secondary has none).
+	if t.Leaf("firewall") == "" {
+		var fws []string
+		for _, in := range c.T.Root.Lists["instance"] {
+			if on(in, "is-default") {
+				fws = append(fws, in.Leaf("firewall"))
+			}
+		}
+		if len(fws) == 1 && fws[0] != "" {
+			t.Leaves["firewall"] = fws[0]
+		}
+	}
 	return nil
 }
 

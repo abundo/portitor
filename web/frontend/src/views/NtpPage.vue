@@ -15,7 +15,8 @@ import FormHeader from '@/components/FormHeader.vue'
 import NeedInstance from '@/components/NeedInstance.vue'
 import SearchInput from '@/components/SearchInput.vue'
 import ServiceRateLimit from '@/components/ServiceRateLimit.vue'
-import { api, instances, interfaces } from '@/api'
+import { api } from '@/api'
+import { config, fromEntry, toEntry, vfPath } from '@/api/config'
 import { errMsg } from '@/api/http'
 import { withLabel } from '@/composables/useInstanceRefs'
 import { usePageForm } from '@/composables/useFormGuard'
@@ -106,7 +107,7 @@ const form = reactive({
   ntp_servers: [],
   ntp_allow: [],
   ntp_rate_limit: false,
-  ifaces: [], // { id, name, label, description, ntp_serve }
+  ifaces: [], // { name, label, description, ntp_serve }
 })
 const pageForm = usePageForm(form)
 const saving = ref(false)
@@ -122,11 +123,12 @@ const serverColumns = [
 async function load() {
   const id = store.currentId
   if (!id) return
-  const [inst, ifs] = await Promise.all([instances.get(id), interfaces.list({ instance_id: id })])
+  const inst = fromEntry(await config.get(vfPath()))
+  const ifs = inst.interface ?? []
   loaded = ifs
   Object.assign(form, {
     ntp_enabled: inst.ntp_enabled ?? false,
-    ntp_servers: (inst.ntp_servers ?? []).map((s) => ({
+    ntp_servers: (inst.ntp_server ?? []).map((s) => ({
       address: s.address,
       pool: !!s.pool,
       iburst: !!s.iburst,
@@ -135,7 +137,6 @@ async function load() {
     ntp_allow: inst.ntp_allow ?? [],
     ntp_rate_limit: inst.ntp_rate_limit ?? false,
     ifaces: ifs.map((i) => ({
-      id: i.id,
       name: i.name,
       label: i.label,
       description: i.description,
@@ -154,13 +155,26 @@ const { search: ifaceSearch, filtered: shownIfaces } = useSearch(
 async function save() {
   saving.value = true
   try {
-    const { ifaces, ...ntp } = form
-    await instances.update(store.currentId, ntp)
-    for (const i of ifaces) {
-      const o = loaded.find((x) => x.id === i.id)
-      if (o && !!o.ntp_serve !== i.ntp_serve)
-        await interfaces.update(i.id, { ntp_serve: i.ntp_serve })
-    }
+    // The servers replace the list (a merge would keep removed ones);
+    // the rest is merged into the virtual firewall and its interfaces.
+    const { ifaces, ntp_servers: servers, ...ntp } = form
+    await config.put(
+      `${vfPath()}/ntp-server`,
+      servers.filter((s) => s.address).map(toEntry),
+    )
+    const changed = ifaces.filter((i) => {
+      const o = loaded.find((x) => x.name === i.name)
+      return o && !!o.ntp_serve !== i.ntp_serve
+    })
+    await config.patch(
+      vfPath(),
+      toEntry({
+        ...ntp,
+        ...(changed.length
+          ? { interface: changed.map((i) => ({ name: i.name, ntp_serve: i.ntp_serve })) }
+          : {}),
+      }),
+    )
     toast.add({ title: 'NTP saved', color: 'success' })
     await Promise.all([load(), store.load()])
   } catch (err) {
@@ -326,7 +340,7 @@ async function save() {
                 <tbody>
                   <tr
                     v-for="i in shownIfaces"
-                    :key="i.id"
+                    :key="i.name"
                     class="border-b border-default last:border-0"
                   >
                     <td class="py-1 pr-4 font-mono">{{ withLabel(i.label, i.name) }}</td>

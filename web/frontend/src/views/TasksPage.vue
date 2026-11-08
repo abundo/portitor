@@ -6,7 +6,8 @@ import { computed, onMounted, ref } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import CrudPage from '@/components/CrudPage.vue'
 import ScheduleHelp from '@/components/ScheduleHelp.vue'
-import { api, ipLists, tasks } from '@/api'
+import { ipLists } from '@/api'
+import { config, path, treeApi } from '@/api/config'
 import { errMsg } from '@/api/http'
 import { useDeployStore } from '@/stores/deploy'
 import { ago, when } from '@/utils/time'
@@ -22,10 +23,13 @@ onMounted(async () => {
   deploy.refresh()
   lists.value = await ipLists.list().catch(() => [])
 })
+// Tasks are in the configuration tree; they name their IP list and
+// firewall.
+const tasks = treeApi(() => 'task')
 const listItems = computed(() =>
-  lists.value.map((l) => ({ label: `@${l.name}`, value: l.id, description: l.description })),
+  lists.value.map((l) => ({ label: `@${l.name}`, value: l.name, description: l.description })),
 )
-const listName = (id) => lists.value.find((l) => l.id === id)?.name ?? ''
+const firewallItems = () => instStore.firewalls.map((f) => ({ label: f.name, value: f.name }))
 
 // What the agent reports for each deployed task, by name.
 const states = computed(() =>
@@ -51,15 +55,15 @@ const fields = [
   { key: 'description', label: 'Description' },
   { key: 'kind', label: 'Task', type: 'select', items: kinds },
   {
-    key: 'firewall_id',
+    key: 'firewall',
     label: 'Firewall',
     type: 'select',
-    items: () => instStore.firewallItems,
+    items: firewallItems,
     show: () => instStore.firewalls.length > 1,
     hint: 'The firewall the task runs on.',
   },
   {
-    key: 'ip_list_id',
+    key: 'ip_list',
     label: 'IP list',
     type: 'select',
     items: () => listItems.value,
@@ -92,7 +96,7 @@ const fields = [
 
 async function runNow(row) {
   try {
-    await api.runTask(row.id)
+    await config.action(path(['task', row.name]), 'run')
     toast.add({ title: `Started ${row.name}`, color: 'info' })
     setTimeout(() => deploy.refresh(), 2000)
   } catch (err) {
@@ -110,12 +114,20 @@ async function runNow(row) {
     shared
     :columns="columns"
     :fields="fields"
-    :defaults="{ kind: 'iplist', schedule: '*/15 * * * *', enabled: true, timeout: 0 }"
+    :defaults="
+      () => ({
+        kind: 'iplist',
+        schedule: '*/15 * * * *',
+        enabled: true,
+        timeout: 0,
+        firewall: instStore.firewalls[0]?.name,
+      })
+    "
     new-label="New task"
   >
     <template #cell-what="{ row }">
       <span v-if="row.kind === 'iplist'"
-        >download <span class="font-medium">@{{ listName(row.ip_list_id) }}</span></span
+        >download <span class="font-medium">@{{ row.ip_list }}</span></span
       >
       <code v-else class="line-clamp-2 text-xs break-all" :title="row.command">{{
         row.command

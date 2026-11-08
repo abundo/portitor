@@ -134,6 +134,17 @@ func TestJSONRoundTrip(t *testing.T) {
 	if bytes.Contains(public, []byte("MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")) {
 		t.Error("secret in public JSON")
 	}
+	// SecretsSet says it is set, and an edit with that annotation keeps it.
+	marked, err := NodeJSON(tr.Root.Entry("instance", k("host")).Entry("interface", k("wan0")), JSONOptions{SecretsSet: true})
+	must(t, err)
+	if !bytes.Contains(marked, []byte(`"@wg-private-key":{"portitor:set":true}`)) || bytes.Contains(marked, []byte("MDEy")) {
+		t.Errorf("marked: %s", marked)
+	}
+	wan := p("instance", k("host"), "interface", k("wan0"))
+	must(t, tr.EditJSON(wan, EditReplace, marked))
+	if tr.Root.Entry("instance", k("host")).Entry("interface", k("wan0")).Leaves["wg-private-key"] == "" {
+		t.Error("a replace with the annotation lost the secret")
+	}
 }
 
 func TestDiffApply(t *testing.T) {

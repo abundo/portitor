@@ -14,7 +14,8 @@ import { useRoute, useRouter } from 'vue-router'
 import NeedInstance from '@/components/NeedInstance.vue'
 import SearchInput from '@/components/SearchInput.vue'
 import VrfSelect from '@/components/VrfSelect.vue'
-import { api, staticNeighbours } from '@/api'
+import { api } from '@/api'
+import { vfApi } from '@/api/config'
 import { errMsg } from '@/api/http'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
 import { useVrfChoice } from '@/composables/useVrfChoice'
@@ -33,7 +34,8 @@ const tab = computed({
   set: (v) => router.replace({ query: { ...route.query, tab: v === 'info' ? undefined : v } }),
 })
 
-const { store, ifaceList, ifaceNames, ifaceText, ifaceItems, ifaceName } = useInstanceRefs()
+const { store, ifaceList, ifaceNames, ifaceText, ifaceNameItems } = useInstanceRefs()
+const staticNeighbours = vfApi('static-neighbour', ['interface', 'address'])
 const { vrf, vrfList, vrfItems, showsName } = useVrfChoice({ all: true })
 const ifaceVrf = (name) => ifaceList.value.find((i) => i.name === name)?.vrf || ''
 const data = ref(null)
@@ -158,7 +160,7 @@ function lldpRows(n) {
 // ----- Neighbors config: permanent ARP (IPv4) and ND (IPv6) entries.
 const isV6 = (a) => (a ?? '').includes(':')
 const staticColumns = [
-  { key: 'interface_id', label: 'Interface', format: (r) => ifaceName(r.interface_id) },
+  { key: 'interface', label: 'Interface', format: (r) => ifaceText(r.interface) },
   { key: 'kind', label: 'Protocol', format: (r) => (isV6(r.address) ? 'ND' : 'ARP') },
   { key: 'address', label: 'Address', class: 'font-mono' },
   { key: 'mac', label: 'MAC', class: 'font-mono', format: (r) => formatMac(r.mac) },
@@ -167,10 +169,10 @@ const staticColumns = [
 ]
 const staticFields = [
   {
-    key: 'interface_id',
+    key: 'interface',
     label: 'Interface',
     type: 'select',
-    items: () => ifaceItems.value,
+    items: () => ifaceNameItems.value,
     required: true,
   },
   {
@@ -281,7 +283,7 @@ const staticFields = [
           noun="static entry"
           description="Permanent ARP (IPv4) and ND (IPv6) entries of this virtual firewall's interfaces: the address is always answered by this MAC address."
           :api="staticNeighbours"
-          :params="{ instance_id: store.currentId }"
+          :params="{ _vf: store.currentId }"
           :columns="staticColumns"
           :fields="staticFields"
           :defaults="{ enabled: true }"

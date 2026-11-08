@@ -4,10 +4,11 @@
 <script setup>
 import CrudPage from '@/components/CrudPage.vue'
 import NeedInstance from '@/components/NeedInstance.vue'
-import { interfaceZones } from '@/api'
+import { vfApi } from '@/api/config'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
 
 const { store, ifaceNames, ifaceText, reload } = useInstanceRefs()
+const interfaceZones = vfApi('interface-zone')
 const columns = [
   { key: 'name', label: 'Zone', class: 'font-medium' },
   { key: 'interfaces', label: 'Interfaces' },
@@ -32,7 +33,7 @@ const fields = [
       title="Interface zones"
       description="Named groups of interfaces. Rules and NAT rules can name a zone wherever they list interfaces."
       :api="interfaceZones"
-      :params="{ instance_id: store.currentId }"
+      :params="{ _vf: store.currentId }"
       :columns="columns"
       :fields="fields"
       :defaults="{ interfaces: [] }"

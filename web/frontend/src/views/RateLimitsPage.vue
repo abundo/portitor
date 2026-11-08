@@ -6,7 +6,8 @@ import { ref } from 'vue'
 import AutoRefreshButton from '@/components/AutoRefreshButton.vue'
 import CrudPage from '@/components/CrudPage.vue'
 import NeedInstance from '@/components/NeedInstance.vue'
-import { api as backend, rateLimits } from '@/api'
+import { api as backend } from '@/api'
+import { vfApi } from '@/api/config'
 import { useAutoRefresh } from '@/composables/useAutoRefresh'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
 import { bitRate, bytes } from '@/utils/bytes'
@@ -52,6 +53,7 @@ function setMode(form, mode) {
 
 // Selects can't hold '' values: packets is '' in the API, and the mode is
 // the shape flag.
+const rateLimits = vfApi('rate-limit')
 const api = {
   ...rateLimits,
   list: async (p) => (await rateLimits.list(p)).map(fromApi),
@@ -195,7 +197,7 @@ const fields = [
       title="Rate limits"
       description="Rates a rule can name (Rate limit in the rule's form). When the rule matches, its traffic goes through the rate limit. Police drops what is over the rate, in Mbit/s or packets per second: of the whole connections the rule accepts, both ways, or only of the packets the rule matches (on an accept rule, the new connections, as against SSH or ping floods). Shape queues the traffic of the connections the rule accepts to the rate, each way, where it leaves the firewall. Rules that name the same rate limit share it. The DNS, DHCP and NTP servers each have one of their own, 1 Mbit/s to start with, which polices every packet that comes in to them while Rate limit is on on their page."
       :api="api"
-      :params="{ instance_id: store.currentId }"
+      :params="{ _vf: store.currentId }"
       :columns="columns"
       :fields="fields"
       :defaults="{

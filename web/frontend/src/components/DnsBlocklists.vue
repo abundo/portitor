@@ -14,7 +14,7 @@ import AutoRefreshButton from '@/components/AutoRefreshButton.vue'
 import CrudPage from '@/components/CrudPage.vue'
 import FormHeader from '@/components/FormHeader.vue'
 import TagsInput from '@/components/TagsInput.vue'
-import { api, dnsBlocklists, instances } from '@/api'
+import { config, fromEntry, path, toEntry, vfApi, vfPath } from '@/api/config'
 import { errMsg } from '@/api/http'
 import { useStatusRefresh } from '@/composables/useAutoRefresh'
 import { usePageForm } from '@/composables/useFormGuard'
@@ -34,7 +34,8 @@ const store = useInstanceStore()
 const deploy = useDeployStore()
 const readOnly = computed(() => !auth.canEdit)
 const { auto, loading } = useStatusRefresh({ active: () => props.active })
-const params = computed(() => ({ instance_id: store.currentId }))
+const params = computed(() => ({ _vf: store.currentId }))
+const dnsBlocklists = vfApi('dns-blocklist')
 const page = ref(null)
 
 const actions = [
@@ -129,7 +130,7 @@ const fields = [
     hint: 'One to four: an RPZ zone file, a list of domains or a hosts file (or a zip of one), downloaded into one list. {key} stands for the key.',
   },
   {
-    key: 'auth_key',
+    key: 'new_auth_key',
     label: 'Key',
     type: 'password',
     placeholder: 'abuse.ch Auth-Key',
@@ -161,7 +162,7 @@ const defaults = () => ({
 
 async function download(row) {
   try {
-    await api.refreshDNSBlocklist(row.id)
+    await config.action(`${vfPath()}/${path(['dns-blocklist', row.name])}`, 'refresh')
     toast.add({ title: `Downloading ${row.name}`, color: 'info' })
     setTimeout(() => deploy.refresh(), 2000)
   } catch (err) {
@@ -176,7 +177,7 @@ const saving = ref(false)
 
 async function loadAllow() {
   if (!store.currentId) return
-  const inst = await instances.get(store.currentId)
+  const inst = fromEntry(await config.get(vfPath()))
   allow.names = inst.dns_blocklist_allow ?? []
   allowForm.mark()
 }
@@ -185,7 +186,7 @@ watch(() => store.currentId, loadAllow, { immediate: true })
 async function saveAllow() {
   saving.value = true
   try {
-    await instances.update(store.currentId, { dns_blocklist_allow: allow.names })
+    await config.patch(vfPath(), toEntry({ dns_blocklist_allow: allow.names }))
     toast.add({ title: 'Allowed names saved', color: 'success' })
     await loadAllow()
   } catch (err) {

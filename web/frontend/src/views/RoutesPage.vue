@@ -6,20 +6,17 @@
 <script setup>
 import CrudPage from '@/components/CrudPage.vue'
 import NeedInstance from '@/components/NeedInstance.vue'
-import { computed } from 'vue'
-import { routes } from '@/api'
+import { vfApi } from '@/api/config'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
 
-const { store, vrfList, ifaceItems, ifaceName } = useInstanceRefs()
-
-const vrfItems = computed(() => vrfList.value.map((v) => ({ label: v.name, value: v.id })))
-const vrfName = (id) => vrfList.value.find((v) => v.id === id)?.name ?? ''
+const { store, vrfItems, ifaceNameItems, ifaceText } = useInstanceRefs()
+const routes = vfApi('route', ['id'])
 
 const columns = [
   { key: 'destination', label: 'Destination', class: 'font-mono' },
   { key: 'gateway', label: 'Gateway', class: 'font-mono' },
-  { key: 'interface_id', label: 'Interface', format: (r) => ifaceName(r.interface_id) },
-  { key: 'vrf_id', label: 'VRF', format: (r) => vrfName(r.vrf_id) },
+  { key: 'interface', label: 'Interface', format: (r) => ifaceText(r.interface ?? '') },
+  { key: 'vrf', label: 'VRF' },
   { key: 'metric', label: 'Metric' },
   { key: 'bfd', label: 'BFD' },
   { key: 'enabled', label: 'Enabled' },
@@ -41,19 +38,19 @@ const fields = [
     hint: 'With named IPv4 + IPv6 destinations/gateways, one route is made per IP version.',
   },
   {
-    key: 'interface_id',
+    key: 'interface',
     label: 'Interface',
     type: 'select',
-    items: () => ifaceItems.value,
+    items: () => ifaceNameItems.value,
     nullable: true,
   },
   {
-    key: 'vrf_id',
+    key: 'vrf',
     label: 'VRF',
     type: 'select',
     items: () => vrfItems.value,
     nullable: true,
-    show: (f) => vrfItems.value.length > 0 || !!f.vrf_id,
+    show: (f) => vrfItems.value.length > 0 || !!f.vrf,
     hint: 'Puts the route in the VRF’s table. — : the table of the interface’s VRF, or the main table.',
   },
   {
@@ -79,7 +76,7 @@ const fields = [
       title="Static routes"
       description="Static routes of this virtual firewall. Connected networks and DHCP default routes are added automatically."
       :api="routes"
-      :params="{ instance_id: store.currentId }"
+      :params="{ _vf: store.currentId }"
       :columns="columns"
       :fields="fields"
       :defaults="{ enabled: true, metric: 0, bfd: false }"

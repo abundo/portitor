@@ -476,8 +476,7 @@ submodule portitor-services {
       }
       leaf priv-protocol {
         type string;
-        default "AES";
-        description "PrivProtocol empty: authentication only (authNoPriv).";
+        description "PrivProtocol empty: authentication only (authNoPriv). A new user gets AES from the GUI; no default here, which would make empty impossible.";
       }
       leaf priv-password {
         type string;
