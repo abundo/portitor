@@ -246,7 +246,7 @@ submodule portitor-services {
         type string;
       }
       leaf description {
-        type string;
+        type text;
       }
       leaf enabled {
         type boolean;
@@ -281,7 +281,7 @@ submodule portitor-services {
         type string;
       }
       leaf description {
-        type string;
+        type text;
       }
       leaf enabled {
         type boolean;
@@ -296,11 +296,11 @@ submodule portitor-services {
         mandatory true;
       }
       leaf zone {
-        type string;
+        type domain-name;
         mandatory true;
       }
       leaf tsig-name {
-        type string;
+        type domain-name;
       }
       leaf tsig-algorithm {
         type string;
@@ -364,14 +364,14 @@ submodule portitor-services {
         type string;
       }
       leaf description {
-        type string;
+        type text;
       }
       leaf enabled {
         type boolean;
         default true;
       }
       leaf source {
-        type string;
+        type enumeration { enum "acme"; enum "import"; }
         default "acme";
       }
       leaf-list domains {
@@ -383,7 +383,7 @@ submodule portitor-services {
         type string;
       }
       leaf email {
-        type string;
+        type email;
       }
       leaf ca {
         type string;
@@ -395,7 +395,7 @@ submodule portitor-services {
         default "ec256";
       }
       leaf challenge {
-        type string;
+        type enumeration { enum "http-01"; enum "dns-01"; }
         default "http-01";
       }
       leaf interface {
@@ -429,18 +429,18 @@ submodule portitor-services {
         default true;
       }
       leaf description {
-        type string;
+        type text;
       }
       leaf-list domains {
         type string;
         ordered-by user;
       }
       leaf-list sources {
-        type string;
+        type union { type leafref { path "../../../host/name"; } type leafref { path "../../../address-list/name"; } type cidr; }
         ordered-by user;
       }
       leaf challenge {
-        type string;
+        type enumeration { enum "http-01"; enum "dns-01"; }
         default "dns-01";
       }
       leaf interface {
@@ -465,7 +465,7 @@ submodule portitor-services {
         default true;
       }
       leaf description {
-        type string;
+        type text;
       }
       leaf auth-protocol {
         type string;
@@ -498,10 +498,10 @@ submodule portitor-services {
         default true;
       }
       leaf description {
-        type string;
+        type text;
       }
       leaf address {
-        type string;
+        type ip-address;
         mandatory true;
       }
       leaf port {

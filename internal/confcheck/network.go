@@ -59,6 +59,7 @@ func normalizeInstance(c *Ctx, in *datastore.Node) error {
 	if err := ensureServiceRateLimits(c, in); err != nil {
 		return err
 	}
+	normalizeInstanceServices(c, in)
 	if ts := in.LeafLists["dns-query-log-types"]; ts != nil {
 		for i, t := range ts {
 			ts[i] = strings.ToUpper(t)
@@ -104,7 +105,7 @@ func checkInstance(c *Ctx, in *datastore.Node) []error {
 	if lt := in.Leaf("dhcp-lease-time"); lt != "" && num(in, "dhcp-lease-time") < 300 {
 		errs = append(errs, fail("dhcp-lease-time: at least 300 seconds"))
 	}
-	return errs
+	return append(errs, checkInstanceServices(c, in)...)
 }
 
 func normalizeInterface(c *Ctx, i *datastore.Node) error {
@@ -167,6 +168,11 @@ func normalizeInterface(c *Ctx, i *datastore.Node) error {
 	}
 	if !on(i, "dhcpv6") {
 		clear(i, "dhcpv6-pd")
+	}
+	if kind == fwconfig.KindOpenVPN {
+		if err := normalizeOpenVPN(i); err != nil {
+			return err
+		}
 	}
 	if !on(i, "dhcpv6-pd") {
 		clear(i, "dhcpv6-pd-length")
@@ -292,6 +298,9 @@ func checkInterface(c *Ctx, i *datastore.Node) []error {
 				errs = append(errs, fail("vrf: %s is a member of bridge %s; put the bridge in the VRF", name, b.Leaf("name")))
 			}
 		}
+	}
+	if kind == fwconfig.KindOpenVPN {
+		errs = append(errs, checkOpenVPN(c, i)...)
 	}
 	if role := i.Leaf("ha-role"); role != "" {
 		switch {

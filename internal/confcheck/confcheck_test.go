@@ -186,3 +186,45 @@ func TestRoutingHooks(t *testing.T) {
 		t.Errorf("a neighbour in another VRF than its group: %v", err)
 	}
 }
+
+func TestServiceHooks(t *testing.T) {
+	tr := tree(t, `{"portitor:instance": [
+		{"name": "host", "is-default": true, "firewall": "fw",
+		 "interface": [{"name": "wan0", "kind": "physical"}],
+		 "dns-soa-template": [{"name": "std", "mname": "ns1.example.com", "rname": "hostmaster.example.com"}]},
+		{"name": "lab", "firewall": "fw", "interface": [{"name": "eth1", "kind": "physical"}]}]}`)
+	work := tr.Clone()
+	must := func(err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	must(work.EditJSON(path("instance=lab/interface"), datastore.EditCreate, []byte(`{"name": "ovpn0", "kind": "openvpn", "addresses": ["10.8.0.1/24"], "ovpn-mode": "udp", "ovpn-role": "vf-lab"}`)))
+	must(work.EditJSON(path("instance=host/certificate"), datastore.EditCreate, []byte(`{"name": "web", "common-name": "FW.Example.com.", "domains": ["vpn.example.com"], "interface": "wan0"}`)))
+	must(Normalize(tr, work, datastore.ChangedEntries(tr, work)))
+	o := work.Root.Entry("instance", []string{"lab"}).Entry("interface", []string{"ovpn0"})
+	if o.Leaf("ovpn-tls-crypt") == "" || o.Leaf("ovpn-require-role") != "true" {
+		t.Errorf("OpenVPN: %v", o.Leaves)
+	}
+	crt := work.Root.Entry("instance", []string{"host"}).Entry("certificate", []string{"web"})
+	if got := crt.LeafLists["domains"]; len(got) != 2 || got[0] != "fw.example.com" {
+		t.Errorf("domains %v", got)
+	}
+	if errs := CheckEntries(work, datastore.ChangedEntries(tr, work)); len(errs) > 0 {
+		t.Errorf("checks: %v", errs)
+	}
+	for what, c := range map[string]struct{ at, body, want string }{
+		"a second OpenVPN":      {"instance=lab/interface=ovpn1", `{"kind": "openvpn", "addresses": ["10.9.0.1/24"], "ovpn-mode": "udp"}`, "one OpenVPN"},
+		"a global SOA in a VF":  {"instance=lab/dns-soa-template=mine", `{"global": true, "mname": "ns.lab.example", "rname": "h.lab.example"}`, "default virtual firewall's"},
+		"SNMP with no way in":   {"instance=lab", `{"snmp-enabled": true}`, "community"},
+		"a TSIG key, no secret": {"instance=lab/dns-update=up", `{"interface": "eth1", "server": "192.0.2.53", "zone": "example.com", "tsig-name": "k"}`, "secret"},
+	} {
+		err := edit(t, work, func(w *datastore.Tree) error {
+			return w.EditJSON(path(c.at), datastore.EditMerge, []byte(c.body))
+		})
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: %v, want %q", what, err, c.want)
+		}
+	}
+}

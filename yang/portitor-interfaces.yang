@@ -175,7 +175,7 @@ submodule portitor-interfaces {
         description "PeerAddresses are the HA secondary's static addresses in place of Addresses, one each, in the same prefixes, on an interface with an HaRole: all else is the same on both hosts.";
       }
       leaf ovpn-mode {
-        type string;
+        type enumeration { enum "adaptive"; enum "udp"; enum "tcp"; }
         default "adaptive";
         description "An OpenVPN server's (fwconfig.OpenVPN): mode, port, the interface clients come in on (empty: any), the TCP tunnel's addresses in the adaptive mode (Addresses are then the UDP tunnel's) and its certificate. Its users are the directory's, with OvpnRequireRole only the members of OvpnRoleID (none when the role is gone). OvpnTlsCrypt is the static key, a secret generated here that clients get in their config. OvpnHost is the name clients connect to. OvpnTwoFactor asks for a TOTP code too (fwconfig.OpenVPNTwoFactors).";
       }
@@ -203,31 +203,31 @@ submodule portitor-interfaces {
         px:column "ovpn_role_id";
       }
       leaf-list ovpn-routes {
-        type string;
+        type cidr;
         ordered-by user;
       }
       leaf ovpn-redirect-gateway {
         type boolean;
       }
       leaf-list ovpn-dns {
-        type string;
+        type ip-address;
         ordered-by user;
       }
       leaf ovpn-dns-domain {
-        type string;
+        type domain-name;
       }
       leaf ovpn-client-to-client {
         type boolean;
       }
       leaf ovpn-host {
-        type string;
+        type host-or-address;
       }
       leaf-list ovpn-tcp-addresses {
-        type string;
+        type interface-address;
         ordered-by user;
       }
       leaf ovpn-two-factor {
-        type string;
+        type enumeration { enum "user"; enum "required"; }
       }
       leaf mss-clamp {
         type boolean;
