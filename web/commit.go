@@ -255,7 +255,34 @@ func (s *Server) deploy(ctx context.Context, username string, timeout *int, only
 		}
 	}
 	s.pruneSnapshots()
+	// The store's lock may be held (a CLI or NETCONF commit): the trees
+	// are at hand.
+	if res.Status == "applied" {
+		if err := dropInstanceRoles(s.db, tree, runs); err != nil {
+			slog.Warn("removing the roles of deleted virtual firewalls", "err", err)
+		}
+	}
 	return res, applyErr
+}
+
+// dropStaleRoles removes the roles of the instances gone from running and
+// the candidate, once a commit is live (dropInstanceRoles).
+func (s *Server) dropStaleRoles(ctx context.Context) {
+	t, err := s.tree()
+	if err != nil {
+		return
+	}
+	cand, err := t.store.Candidate(ctx)
+	if err != nil {
+		return
+	}
+	run, err := t.store.Running(ctx)
+	if err != nil {
+		return
+	}
+	if err := dropInstanceRoles(s.db, cand, run); err != nil {
+		slog.Warn("removing the roles of deleted virtual firewalls", "err", err)
+	}
 }
 
 // commitTargets builds each firewall's document and picks the firewalls
@@ -530,10 +557,7 @@ func (s *Server) handleDeployChanges(c *echo.Context) error {
 	}
 	resp.Deployed = live > 0
 	if a := currentAccess(c); !a.readsAll() {
-		names, err := s.instanceNames(a.readable())
-		if err != nil {
-			return err
-		}
+		names := a.readableNames()
 		in, err := s.candidateInput(c.Request().Context())
 		if err != nil {
 			return err
@@ -619,6 +643,7 @@ func (s *Server) handleDeployConfirm(c *echo.Context) error {
 	if len(errs) > 0 {
 		return c.JSON(http.StatusBadGateway, map[string]any{"error": strings.Join(errs, "; ")})
 	}
+	s.dropStaleRoles(c.Request().Context())
 	return c.JSON(http.StatusOK, map[string]any{"commit": deps[0].CommitID, "deployments": deps})
 }
 

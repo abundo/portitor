@@ -44,7 +44,7 @@ func TestTenancy(t *testing.T) {
 		Access map[string]string `json:"access"`
 	}
 	_ = json.Unmarshal(env.do("GET", "/api/me", nil).Body.Bytes(), &me)
-	if len(me.Access) != 1 || me.Access[fmt.Sprint(a)] != "admin" {
+	if len(me.Access) != 1 || me.Access["a"] != "admin" {
 		t.Errorf("access: %v", me.Access)
 	}
 	var insts []models.Instance
@@ -128,7 +128,7 @@ func TestTenancy(t *testing.T) {
 
 	// A role made by hand grants its instances at the member's level.
 	env.login("admin", "correct horse battery")
-	env.create("/api/roles", map[string]any{"name": "both", "instance_ids": []uint{a, b},
+	env.create("/api/roles", map[string]any{"name": "both", "instances": []string{"a", "b"},
 		"members": []map[string]any{{"user_id": tina, "level": "viewer"}}})
 	env.login("tina", "a long password")
 	if rec := env.do("GET", fmt.Sprintf("/api/rules/%d", ruleB), nil); rec.Code != http.StatusOK {

@@ -714,8 +714,10 @@ the certificate portitor-config serves, chosen under Settings
   in `notConfiguration` (`internal/datastore/sqlmap`).
 - **Roles:** a user is `admin`, `viewer` or `none` (`models.RoleAdmin`/`RoleViewer`/
   `RoleNone`): global access. Roles (`roles`, `role_members`, `role_instances`) grant
-  instances at a level (admin/viewer); each instance but the default has its own
-  role, created, renamed and deleted with it (`web/roles.go`). `accessOf` (`web/access.go`) merges
+  instances, by name, at a level (admin/viewer); each instance but the default has its
+  own role (`roles.instance`), made when the candidate gets the instance and renamed
+  with it, and removed with its grants at the commit that leaves the instance out
+  (`web/roles.go`: `syncInstanceRoles`, `renameInstanceRoles`, `dropInstanceRoles`). `accessOf` (`web/access.go`) merges
   them; `requireRole` (`web/auth.go`) denies by default: everyone but a global admin
   gets GET routes except `viewerDenied` (and `tenantDenied` for `none`), and only
   the writes in `viewerWrites`, plus `tenantWrites` for an instance admin, whose

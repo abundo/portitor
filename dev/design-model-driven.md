@@ -73,7 +73,7 @@ broken on the branch until then. The steps, in order:
 | Step | What | State |
 |---|---|---|
 | A | **Store:** the candidate is always kept (`candidate.json`, the shared working configuration, as the database is today); commits are `commits/<n>.json`; running is the live commit's; Revert sets the candidate to running. The builder reads a tree (rows made from it by the `px:` mapping, decoded into the models it takes). Deploy, changes, preview and Revert from the tree. An old database's tables are read into the tree once, at the first start, and dropped. | Done but the dropping: the tables stay, kept in step with the candidate both ways (`syncTables`, `Store.OnChange`), for the code that still reads them until step C. |
-| B | **Roles by instance name:** `roles` and `role_instances` name their instance (the only tables left that point into the configuration); access and tenancy by name. | |
+| B | **Roles by instance name:** `roles` and `role_instances` name their instance (the only tables left that point into the configuration); access and tenancy by name. | Done. A virtual firewall's role is made when the candidate gets the instance, follows a rename (the tree records its renames, `Tree.Renamed`, for `Store.OnChange`), and goes with its grants at the commit that leaves the instance out of running and the candidate (`dropInstanceRoles`). `access` keeps a name → row id map for the handlers that take ids until step C. |
 | C | **API:** `GET /api/schema` (the compiled schema for the GUI); `/api/config/...` (RESTCONF-like: RFC 7951 JSON at a path, of the candidate, running or state; PUT, PATCH, POST, DELETE on the candidate; rename and move); validation hooks per schema path (the `prepare*` checks), run when the GUI saves and at commit; actions for what is generated (WireGuard keys and client configs, certificates, OpenVPN keys, imports, bundles). The CRUD resources and their reference code go. | |
 | D | **GUI:** the API client and a schema store; `CrudPage` driven by a YANG list path (fields, types, enumerations, defaults and help from the schema, per-page overrides for layout); every view on it, by keys and names instead of ids. | |
 | E | **The rest:** HA replica (copies the commits and the candidate), promotion, bootstrap and join, the NIC import, backup and restore, bundles, the IP list tasks, the dashboard. | |
@@ -97,9 +97,9 @@ deployments, known NICs, `settings.last_commit` and `settings.web_certificate_id
 
 **Row ids are kept**: an entry at the same path keeps its row. A list without a natural
 key (rules, NAT rules, routes, policy routes, DNS records, syslog servers) is keyed by
-its row id, so a rule keeps the id its connections are marked with. A rename of an
-entry keyed by name is a new row; rows that referred to it by id follow it, but a
-virtual firewall's role is made again (its members are lost).
+its row id, so a rule keeps the id its connections are marked with. A renamed entry
+keeps its row, and so do the entries below it and those whose keys named it
+(`Tree.Renamed`).
 
 **The candidate** is the tables' configuration with the CLI's edits, kept in
 `candidate.json` and `candidate-base.json` next to the database (0600: they hold
@@ -130,7 +130,6 @@ secondary's CLI is read-only.
 - References a leafref can't express are not rewritten by a rename: link ends in
   interface lists, `@iplist` in address lists, an IP list in a task by name. The
   builder reports what doesn't resolve.
-- Renaming a virtual firewall in the CLI loses its role's members.
 - The CLI has no `request` commands yet for what the GUI generates (WireGuard keys,
   certificates, OpenVPN keys); the GUI does those.
 - The SSH port isn't in the anti-lockout rule; an input rule opens it.

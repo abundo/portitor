@@ -16,6 +16,7 @@ package sqlmap
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"reflect"
 	"slices"
 	"sort"
@@ -466,6 +467,21 @@ func (m *Mapping) Write(tx *gorm.DB, tree *datastore.Tree) error {
 	oldByPath := map[string]*datastore.Node{}
 	for n := range oldIdx {
 		oldByPath[pathKey(m.root, n)] = n
+	}
+	// An entry renamed keeps its row, and so do the entries below it.
+	for _, r := range tree.Renamed {
+		from := r.Path.String(m.root)
+		to := slices.Clone(r.Path)
+		to[len(to)-1] = datastore.Elem{Name: to[len(to)-1].Name, Keys: r.Keys}
+		toKey := to.String(m.root)
+		moved := map[string]*datastore.Node{}
+		for k, n := range oldByPath {
+			if k == from || strings.HasPrefix(k, from+"/") {
+				moved[toKey+strings.TrimPrefix(k, from)] = n
+				delete(oldByPath, k)
+			}
+		}
+		maps.Copy(oldByPath, moved)
 	}
 	ext := map[string]map[string]int64{}
 	newIdx := Index{}

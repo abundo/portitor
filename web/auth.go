@@ -409,7 +409,7 @@ func (s *Server) handleMe(c *echo.Context) error {
 	return s.me(c, currentUser(c))
 }
 
-// me answers with the user and their level per instance id (admin or
+// me answers with the user and their level per instance name (admin or
 // viewer; an instance missing has none), for the GUI to show what they
 // may change.
 func (s *Server) me(c *echo.Context, u *models.User) error {
@@ -423,8 +423,8 @@ func (s *Server) me(c *echo.Context, u *models.User) error {
 	}
 	return c.JSON(http.StatusOK, struct {
 		*models.User
-		Access           map[uint]string `json:"access"`
-		VirtualFirewalls bool            `json:"virtual_firewalls"`
+		Access           map[string]string `json:"access"`
+		VirtualFirewalls bool              `json:"virtual_firewalls"`
 		// Replica: this is an HA secondary's portitor-config, read-only.
 		Replica bool `json:"replica"`
 	}{u, a.levels, st.VirtualFirewalls, s.isReplica()})

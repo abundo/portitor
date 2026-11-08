@@ -31,18 +31,18 @@ const levels = [
 ]
 const userName = (id) => props.users.find((u) => u.id === id)?.username ?? `#${id}`
 
-const form = reactive({ name: '', description: '', instance_ids: [], members: [] })
+const form = reactive({ name: '', description: '', instances: [], members: [] })
 const guard = usePageForm(form)
 const saving = ref(false)
 const editing = computed(() => props.role)
-const isInstanceRole = computed(() => !!editing.value?.instance_id)
+const isInstanceRole = computed(() => !!editing.value?.instance)
 
 onMounted(() => {
   const r = props.role
   Object.assign(form, {
     name: r?.name ?? '',
     description: r?.description ?? '',
-    instance_ids: [...(r?.instance_ids ?? [])],
+    instances: [...(r?.instances ?? [])],
     members: (r?.members ?? []).map((m) => ({ user_id: m.user_id, level: m.level })),
   })
   guard.mark()
@@ -130,8 +130,8 @@ async function remove() {
         "
       >
         <USelectMenu
-          v-model="form.instance_ids"
-          :items="instanceStore.list.map((i) => ({ label: i.name, value: i.id }))"
+          v-model="form.instances"
+          :items="instanceStore.list.map((i) => ({ label: i.name, value: i.name }))"
           value-key="value"
           multiple
           class="w-full"

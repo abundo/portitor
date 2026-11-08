@@ -232,6 +232,7 @@ func (s *Store) set(t *Tree) error {
 			return err
 		}
 	}
+	t.Renamed = nil
 	s.cand = t
 	return s.save()
 }

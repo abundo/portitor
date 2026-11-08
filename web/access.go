@@ -28,36 +28,51 @@ import (
 
 const ctxAccess = "access"
 
-// access is what one user may do, by instance id.
+// access is what one user may do, by instance name. ids names the
+// instances' rows for the handlers that still take row ids (the tables kept
+// in step with the candidate, until the API is on the tree).
 type access struct {
 	global string
-	levels map[uint]string
+	levels map[string]string
+	ids    map[uint]string
 }
 
 // accessOf works out the user's levels from their roles.
 func accessOf(db *gorm.DB, u *models.User) (*access, error) {
-	a := &access{global: u.Role, levels: map[uint]string{}}
+	a := &access{global: u.Role, levels: map[string]string{}, ids: map[uint]string{}}
 	if u.Role == models.RoleAdmin {
 		return a, nil
 	}
 	var rows []struct {
-		InstanceID uint
-		Level      string
+		Instance string
+		Level    string
 	}
 	err := db.Raw(`
-		SELECT r.instance_id AS instance_id, m.level AS level
+		SELECT r.instance AS instance, m.level AS level
 		  FROM role_members m JOIN roles r ON r.id = m.role_id
-		 WHERE m.user_id = ? AND r.instance_id IS NOT NULL
+		 WHERE m.user_id = ? AND r.instance IS NOT NULL
 		UNION ALL
-		SELECT ri.instance_id, m.level
+		SELECT ri.instance, m.level
 		  FROM role_members m JOIN role_instances ri ON ri.role_id = m.role_id
 		 WHERE m.user_id = ?`, u.ID, u.ID).Scan(&rows).Error
 	if err != nil {
 		return nil, err
 	}
 	for _, r := range rows {
-		if a.levels[r.InstanceID] != models.RoleAdmin {
-			a.levels[r.InstanceID] = r.Level
+		if a.levels[r.Instance] != models.RoleAdmin {
+			a.levels[r.Instance] = r.Level
+		}
+	}
+	if len(a.levels) > 0 && db.Migrator().HasTable("instances") {
+		var ins []struct {
+			ID   uint
+			Name string
+		}
+		if err := db.Table("instances").Select("id, name").Scan(&ins).Error; err != nil {
+			return nil, err
+		}
+		for _, in := range ins {
+			a.ids[in.ID] = in.Name
 		}
 	}
 	return a, nil
@@ -69,9 +84,17 @@ func (a *access) isAdmin() bool { return a.global == models.RoleAdmin }
 // readsAll: a global admin or viewer.
 func (a *access) readsAll() bool { return a.isAdmin() || a.global == models.RoleViewer }
 
-func (a *access) canRead(id uint) bool { return a.readsAll() || a.levels[id] != "" }
+func (a *access) canReadName(name string) bool { return a.readsAll() || a.levels[name] != "" }
 
-func (a *access) canWrite(id uint) bool { return a.isAdmin() || a.levels[id] == models.RoleAdmin }
+func (a *access) canWriteName(name string) bool {
+	return a.isAdmin() || a.levels[name] == models.RoleAdmin
+}
+
+func (a *access) canRead(id uint) bool { return a.readsAll() || a.levels[a.ids[id]] != "" }
+
+func (a *access) canWrite(id uint) bool {
+	return a.isAdmin() || a.levels[a.ids[id]] == models.RoleAdmin
+}
 
 // canReadAny: a row of several instances (a link) is seen from either end.
 func (a *access) canReadAny(ids []uint) bool { return slices.ContainsFunc(ids, a.canRead) }
@@ -85,24 +108,53 @@ func (a *access) canWriteAll(ids []uint) bool {
 	return true
 }
 
-// readable lists the instances the user reads; meaningless if readsAll.
+// readableNames lists the names of the instances the user reads;
+// meaningless if readsAll.
+func (a *access) readableNames() map[string]bool {
+	out := map[string]bool{}
+	for name := range a.levels {
+		out[name] = true
+	}
+	return out
+}
+
+// writableNames lists the names of the instances the user changes; nil for
+// a global admin.
+func (a *access) writableNames() map[string]bool {
+	if a.isAdmin() {
+		return nil
+	}
+	out := map[string]bool{}
+	for name, l := range a.levels {
+		if l == models.RoleAdmin {
+			out[name] = true
+		}
+	}
+	return out
+}
+
+// readable lists the rows of the instances the user reads; meaningless if
+// readsAll.
 func (a *access) readable() []uint {
 	ids := []uint{}
-	for id := range a.levels {
-		ids = append(ids, id)
+	for id, name := range a.ids {
+		if a.levels[name] != "" {
+			ids = append(ids, id)
+		}
 	}
 	slices.Sort(ids)
 	return ids
 }
 
-// writable lists the instances the user changes; nil for a global admin.
+// writable lists the rows of the instances the user changes; nil for a
+// global admin.
 func (a *access) writable() []uint {
 	if a.isAdmin() {
 		return nil
 	}
 	ids := []uint{}
-	for id, l := range a.levels {
-		if l == models.RoleAdmin {
+	for id, name := range a.ids {
+		if a.levels[name] == models.RoleAdmin {
 			ids = append(ids, id)
 		}
 	}
@@ -111,28 +163,15 @@ func (a *access) writable() []uint {
 }
 
 // writesAny: a global admin or the admin of an instance.
-func (a *access) writesAny() bool { return a.isAdmin() || len(a.writable()) > 0 }
+func (a *access) writesAny() bool { return a.isAdmin() || len(a.writableNames()) > 0 }
 
 // currentAccess is the request's access, set by requireRole.
 func currentAccess(c *echo.Context) *access {
 	a, _ := c.Get(ctxAccess).(*access)
 	if a == nil {
-		return &access{levels: map[uint]string{}}
+		return &access{levels: map[string]string{}, ids: map[uint]string{}}
 	}
 	return a
-}
-
-// readableNames lists the names of the instances the user reads.
-func (s *Server) instanceNames(ids []uint) (map[string]bool, error) {
-	var names []string
-	if err := s.db.Model(&models.Instance{}).Where("id IN ?", ids).Pluck("name", &names).Error; err != nil {
-		return nil, err
-	}
-	out := map[string]bool{}
-	for _, n := range names {
-		out[n] = true
-	}
-	return out, nil
 }
 
 // readableInstanceNames is nil when the user reads every instance.
@@ -141,7 +180,7 @@ func (s *Server) readableInstanceNames(c *echo.Context) (map[string]bool, error)
 	if a.readsAll() {
 		return nil, nil
 	}
-	return s.instanceNames(a.readable())
+	return a.readableNames(), nil
 }
 
 // instanceOf looks up the instance a row of table belongs to.

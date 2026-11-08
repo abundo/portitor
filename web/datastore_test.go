@@ -247,3 +247,37 @@ func tablesInput(t *testing.T, db *gorm.DB) builder.Input {
 	}
 	return builder.Input{DB: db, Tree: tree}
 }
+
+// A virtual firewall renamed in the CLI keeps its role and members; one
+// made there gets its role.
+func TestCLIInstanceRoles(t *testing.T) {
+	env, _ := consoleEnv(t, "")
+	ctx := context.Background()
+	cenv, err := env.srv.ConsoleCLI(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env.create("/api/instances", map[string]any{"name": "lab"})
+	ann := env.create("/api/users", map[string]string{"username": "ann", "password": "a long password", "role": "none"})
+	r := env.roles()["vf-lab"]
+	env.do("PUT", "/api/roles/"+itoa(r.ID), map[string]any{"members": []map[string]any{{"user_id": ann, "level": "admin"}}})
+	ops := env.create("/api/roles", map[string]any{"name": "ops", "instances": []string{"lab"}})
+
+	cliScript(t, cenv, "enter candidate\nrename instance lab to lab2\n")
+	roles := env.roles()
+	if got := roles["vf-lab2"]; got.ID != r.ID || len(got.Members) != 1 || got.Instance == nil || *got.Instance != "lab2" {
+		t.Errorf("renamed: %+v", roles)
+	}
+	if g := roles["ops"].Instances; len(g) != 1 || g[0] != "lab2" || roles["ops"].ID != ops {
+		t.Errorf("grant: %v", g)
+	}
+
+	var host models.Instance
+	env.srv.db.Where("is_default = ?", true).First(&host)
+	var fw models.Firewall
+	env.srv.db.First(&fw)
+	cliScript(t, cenv, "enter candidate\ninstance shop firewall "+fw.Name+"\n")
+	if _, ok := env.roles()["vf-shop"]; !ok {
+		t.Errorf("no role for a virtual firewall made in the CLI: %v", env.roles())
+	}
+}

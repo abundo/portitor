@@ -4,6 +4,7 @@
 package web
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	"github.com/labstack/echo/v5"
 	"gorm.io/gorm"
 
+	"github.com/abundo/portitor/internal/datastore"
 	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/models"
 )
@@ -24,26 +26,72 @@ const instanceRolePrefix = "vf-"
 
 func instanceRoleName(instance string) string { return instanceRolePrefix + instance }
 
-// createInstanceRole adds the role of a new instance. The default instance,
-// the host itself, has none: only global admins manage it.
+// createInstanceRole adds the role of a new instance, unless it has one
+// (a role outlives its instance until the commit that leaves it out). The
+// default instance, the host itself, has none: only global admins manage
+// it.
 func createInstanceRole(tx *gorm.DB, in *models.Instance) error {
 	if in.IsDefault {
 		return nil
 	}
-	id := in.ID
+	return ensureInstanceRole(tx, in.Name)
+}
+
+func ensureInstanceRole(tx *gorm.DB, name string) error {
+	var n int64
+	if err := tx.Model(&models.Role{}).Where("instance = ?", name).Count(&n).Error; err != nil || n > 0 {
+		return err
+	}
 	return tx.Create(&models.Role{
-		Name: instanceRoleName(in.Name), Description: "Users of virtual firewall " + in.Name, InstanceID: &id,
+		Name: instanceRoleName(name), Description: "Users of virtual firewall " + name, Instance: &name,
 	}).Error
 }
 
-// renameInstanceRole follows an instance's new name. Deleting the instance
-// removes its role and memberships (ON DELETE CASCADE).
+// renameInstanceRole follows an instance's new name.
 func renameInstanceRole(tx *gorm.DB, in, old *models.Instance) error {
 	if old == nil || old.Name == in.Name {
 		return nil
 	}
-	return tx.Model(&models.Role{}).Where("instance_id = ?", in.ID).
-		Update("name", instanceRoleName(in.Name)).Error
+	return renameInstanceRoles(tx, old.Name, in.Name)
+}
+
+// renameInstanceRoles makes the roles that name the instance old name new:
+// its own role, and the grants of the roles made by hand.
+func renameInstanceRoles(tx *gorm.DB, old, new string) error {
+	if err := tx.Model(&models.Role{}).Where("instance = ?", old).
+		Updates(map[string]any{"name": instanceRoleName(new), "instance": new}).Error; err != nil {
+		return err
+	}
+	return tx.Model(&models.RoleInstance{}).Where("instance = ?", old).Update("instance", new).Error
+}
+
+// syncInstanceRoles gives every virtual firewall of the candidate its role.
+func syncInstanceRoles(tx *gorm.DB, tree *datastore.Tree) error {
+	for _, in := range tree.Root.Lists["instance"] {
+		if in.Leaf("is-default") == "true" {
+			continue
+		}
+		if err := ensureInstanceRole(tx, in.Leaf("name")); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// dropInstanceRoles removes the roles and grants of the instances that
+// neither running nor the candidate has, after a commit: until then a
+// delete can be taken back without losing the members.
+func dropInstanceRoles(tx *gorm.DB, trees ...*datastore.Tree) error {
+	keep := []string{}
+	for _, t := range trees {
+		for _, in := range t.Root.Lists["instance"] {
+			keep = append(keep, in.Leaf("name"))
+		}
+	}
+	if err := tx.Where("instance IS NOT NULL AND instance NOT IN ?", keep).Delete(&models.Role{}).Error; err != nil {
+		return err
+	}
+	return tx.Where("instance NOT IN ?", keep).Delete(&models.RoleInstance{}).Error
 }
 
 type roleRequest struct {
@@ -53,13 +101,13 @@ type roleRequest struct {
 		UserID uint   `json:"user_id"`
 		Level  string `json:"level"`
 	} `json:"members"`
-	// InstanceIDs: the instances a role made by hand grants.
-	InstanceIDs []uint `json:"instance_ids"`
+	// Instances: the instances a role made by hand grants, by name.
+	Instances []string `json:"instances"`
 }
 
 func (s *Server) handleListRoles(c *echo.Context) error {
 	roles := []models.Role{}
-	if err := s.db.Order("instance_id IS NULL, name").Find(&roles).Error; err != nil {
+	if err := s.db.Order("instance IS NULL, name").Find(&roles).Error; err != nil {
 		return err
 	}
 	var members []models.RoleMember
@@ -67,16 +115,16 @@ func (s *Server) handleListRoles(c *echo.Context) error {
 		return err
 	}
 	var grants []models.RoleInstance
-	if err := s.db.Order("instance_id").Find(&grants).Error; err != nil {
+	if err := s.db.Order("instance").Find(&grants).Error; err != nil {
 		return err
 	}
 	byRole := map[uint][]models.RoleMember{}
 	for _, m := range members {
 		byRole[m.RoleID] = append(byRole[m.RoleID], m)
 	}
-	instances := map[uint][]uint{}
+	instances := map[uint][]string{}
 	for _, g := range grants {
-		instances[g.RoleID] = append(instances[g.RoleID], g.InstanceID)
+		instances[g.RoleID] = append(instances[g.RoleID], g.Instance)
 	}
 	for i := range roles {
 		r := &roles[i]
@@ -85,12 +133,12 @@ func (s *Server) handleListRoles(c *echo.Context) error {
 			r.Members = []models.RoleMember{}
 		}
 		switch {
-		case r.InstanceID != nil:
-			r.InstanceIDs = []uint{*r.InstanceID}
+		case r.Instance != nil:
+			r.Instances = []string{*r.Instance}
 		case instances[r.ID] != nil:
-			r.InstanceIDs = instances[r.ID]
+			r.Instances = instances[r.ID]
 		default:
-			r.InstanceIDs = []uint{}
+			r.Instances = []string{}
 		}
 	}
 	return c.JSON(http.StatusOK, roles)
@@ -124,7 +172,7 @@ func (s *Server) saveRole(c *echo.Context, old *models.Role) error {
 		r = *old
 	}
 	req.Name = strings.TrimSpace(req.Name)
-	if r.InstanceID == nil {
+	if r.Instance == nil {
 		if !fwconfig.ValidName(req.Name) {
 			return errJSON(c, http.StatusBadRequest, "name: not empty, no control characters")
 		}
@@ -147,11 +195,22 @@ func (s *Server) saveRole(c *echo.Context, old *models.Role) error {
 		}
 		seen[m.UserID] = true
 	}
-	if r.InstanceID != nil {
-		req.InstanceIDs = nil // its instance, always
+	if r.Instance != nil {
+		req.Instances = nil // its instance, always
 	}
-	slices.Sort(req.InstanceIDs)
-	req.InstanceIDs = slices.Compact(req.InstanceIDs)
+	slices.Sort(req.Instances)
+	req.Instances = slices.Compact(req.Instances)
+	if len(req.Instances) > 0 {
+		known, err := s.instanceNamesKnown(c.Request().Context())
+		if err != nil {
+			return err
+		}
+		for _, name := range req.Instances {
+			if !known[name] {
+				return errJSON(c, http.StatusBadRequest, "no such virtual firewall: "+name)
+			}
+		}
+	}
 	err := s.db.Transaction(func(tx *gorm.DB) error {
 		if old == nil {
 			if err := tx.Create(&r).Error; err != nil {
@@ -174,22 +233,19 @@ func (s *Server) saveRole(c *echo.Context, old *models.Role) error {
 			}
 			r.Members = append(r.Members, rm)
 		}
-		if r.InstanceID != nil {
-			r.InstanceIDs = []uint{*r.InstanceID}
+		if r.Instance != nil {
+			r.Instances = []string{*r.Instance}
 			return nil
 		}
 		if err := tx.Where("role_id = ?", r.ID).Delete(&models.RoleInstance{}).Error; err != nil {
 			return err
 		}
-		r.InstanceIDs = []uint{}
-		for _, id := range req.InstanceIDs {
-			if err := tx.Create(&models.RoleInstance{RoleID: r.ID, InstanceID: id}).Error; err != nil {
-				if strings.Contains(err.Error(), "FOREIGN KEY constraint") {
-					return bad("no such virtual firewall")
-				}
+		r.Instances = []string{}
+		for _, name := range req.Instances {
+			if err := tx.Create(&models.RoleInstance{RoleID: r.ID, Instance: name}).Error; err != nil {
 				return err
 			}
-			r.InstanceIDs = append(r.InstanceIDs, id)
+			r.Instances = append(r.Instances, name)
 		}
 		return nil
 	})
@@ -215,7 +271,7 @@ func (s *Server) handleDeleteRole(c *echo.Context) error {
 		}
 		return err
 	}
-	if r.InstanceID != nil {
+	if r.Instance != nil {
 		return errJSON(c, http.StatusBadRequest, "a virtual firewall's role goes away with the virtual firewall")
 	}
 	if err := refuseOpenVPNRole(s.db, &r); err != nil {
@@ -225,4 +281,29 @@ func (s *Server) handleDeleteRole(c *echo.Context) error {
 		return err
 	}
 	return c.NoContent(http.StatusNoContent)
+}
+
+// instanceNamesKnown is the set of the instances' names, of the candidate
+// and of running: a role may grant an instance not yet committed, or one
+// deleted in the candidate.
+func (s *Server) instanceNamesKnown(ctx context.Context) (map[string]bool, error) {
+	t, err := s.tree()
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]bool{}
+	cand, err := t.store.Candidate(ctx)
+	if err != nil {
+		return nil, err
+	}
+	run, err := t.store.Running(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, tr := range []*datastore.Tree{cand, run} {
+		for _, in := range tr.Root.Lists["instance"] {
+			out[in.Leaf("name")] = true
+		}
+	}
+	return out, nil
 }

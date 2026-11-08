@@ -284,24 +284,25 @@ const (
 	RoleNone = "none"
 )
 
-// Role groups users. A role with an InstanceID belongs to that instance:
-// it is created, renamed and removed with the instance, never by hand.
+// Role groups users. A role with an Instance (a name) belongs to that
+// instance: it is created and renamed with the instance, and removed at the
+// commit that leaves the instance out, never by hand.
 type Role struct {
 	Base
-	Name        string `gorm:"uniqueIndex" json:"name"`
-	Description string `json:"description"`
-	InstanceID  *uint  `json:"instance_id"`
-	// Members and InstanceIDs (the instances a role made by hand grants)
+	Name        string  `gorm:"uniqueIndex" json:"name"`
+	Description string  `json:"description"`
+	Instance    *string `json:"instance"`
+	// Members and Instances (the instances a role made by hand grants)
 	// are filled by the roles API, not stored with the row.
-	Members     []RoleMember `gorm:"-" json:"members"`
-	InstanceIDs []uint       `gorm:"-" json:"instance_ids"`
+	Members   []RoleMember `gorm:"-" json:"members"`
+	Instances []string     `gorm:"-" json:"instances"`
 }
 
-// RoleInstance grants a role made by hand an instance.
+// RoleInstance grants a role made by hand an instance, by name.
 type RoleInstance struct {
 	Base
-	RoleID     uint `json:"role_id"`
-	InstanceID uint `json:"instance_id"`
+	RoleID   uint   `json:"role_id"`
+	Instance string `json:"instance"`
 }
 
 // RoleMember puts a user in a role, as RoleAdmin or RoleViewer.

@@ -37,6 +37,16 @@ func newNode(s *schema.Node, parent *Node) *Node {
 // Tree is a configuration.
 type Tree struct {
 	Root *Node
+	// Renamed lists the entries Rename renamed since the tree became the
+	// candidate, for Store.OnChange (data outside the tree that names
+	// them); a clone starts without.
+	Renamed []Renamed
+}
+
+// Renamed is an entry renamed: its path before, and its new keys.
+type Renamed struct {
+	Path Path
+	Keys []string
 }
 
 // New is an empty configuration of the schema root.
@@ -654,13 +664,22 @@ func (t *Tree) Rename(p Path, keys []string) error {
 		}
 		t.eachRef(func(holder *Node, leaf *schema.Node, value string, set func(string)) {
 			if value == old[i] && slices.ContainsFunc(t.targets(holder, leaf), func(tg target) bool { return tg.entry == n && tg.leaf == k }) {
+				// A key that refers: its entry is renamed too.
+				var was Path
+				if holder.IsEntry() && slices.Contains(holder.S.Keys, leaf.Name) {
+					was = PathOf(holder)
+				}
 				set(newKeys[i])
+				if was != nil {
+					t.Renamed = append(t.Renamed, Renamed{Path: was, Keys: holder.Keys()})
+				}
 			}
 		})
 	}
 	for i, k := range n.S.Keys {
 		n.Leaves[k] = newKeys[i]
 	}
+	t.Renamed = append(t.Renamed, Renamed{Path: slices.Clone(p), Keys: newKeys})
 	return nil
 }
 

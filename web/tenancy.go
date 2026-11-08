@@ -134,20 +134,20 @@ func (s *Server) deployScope(a *access) (map[string]bool, error) {
 	if a.isAdmin() {
 		return nil, nil
 	}
-	return s.instanceNames(a.writable())
+	return a.writableNames(), nil
 }
 
 // previewScope is deployScope, or for a user who deploys nothing the
 // instances they read (a viewer previews what a deploy would do).
 func (s *Server) previewScope(a *access) (map[string]bool, error) {
-	if a.readsAll() && len(a.writable()) == 0 {
+	if a.readsAll() && len(a.writableNames()) == 0 {
 		return nil, nil
 	}
 	only, err := s.deployScope(a)
 	if err != nil || only == nil || len(only) > 0 {
 		return only, err
 	}
-	return s.instanceNames(a.readable())
+	return a.readableNames(), nil
 }
 
 func sortedNames(set map[string]bool) models.StringList {

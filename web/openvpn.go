@@ -149,8 +149,12 @@ func (s *Server) tenantOpenVPN(i *models.Interface) error {
 	if i.Kind != fwconfig.KindOpenVPN {
 		return nil
 	}
+	var in models.Instance
 	var r models.Role
-	if err := s.db.Where("instance_id = ?", i.InstanceID).First(&r).Error; err != nil {
+	if err := s.db.First(&in, i.InstanceID).Error; err != nil {
+		return bad("OpenVPN: no such virtual firewall")
+	}
+	if err := s.db.Where("instance = ?", in.Name).First(&r).Error; err != nil {
 		return bad("OpenVPN: only a global admin sets up OpenVPN here")
 	}
 	i.OvpnRoleID = &r.ID

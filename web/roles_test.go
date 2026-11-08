@@ -29,6 +29,7 @@ func (env *testEnv) roles() map[string]models.Role {
 // follows the instance.
 func TestRoles(t *testing.T) {
 	env := newEnv(t)
+	env.srv.newAgent = func(*models.Firewall) (agentAPI, error) { return &neighboursAgent{}, nil }
 	ann := env.create("/api/users", map[string]string{"username": "ann", "password": "a long password", "role": "viewer"})
 
 	env.create("/api/instances", map[string]any{"name": "main"}) // the default, which stays
@@ -37,7 +38,7 @@ func TestRoles(t *testing.T) {
 	}
 	inst := env.create("/api/instances", map[string]any{"name": "lab"})
 	r, ok := env.roles()["vf-lab"]
-	if !ok || r.InstanceID == nil || *r.InstanceID != inst {
+	if !ok || r.Instance == nil || *r.Instance != "lab" {
 		t.Fatalf("instance role: %+v", env.roles())
 	}
 	members := []map[string]any{{"user_id": ann, "level": "admin"}}
@@ -66,12 +67,17 @@ func TestRoles(t *testing.T) {
 			t.Errorf("POST %v: %d %s", body, rec.Code, rec.Body)
 		}
 	}
-	ops := env.create("/api/roles", map[string]any{"name": "ops", "members": []map[string]any{{"user_id": ann, "level": "viewer"}}})
+	if rec := env.do("POST", "/api/roles", map[string]any{"name": "ops", "instances": []string{"nowhere"}}); rec.Code != http.StatusBadRequest {
+		t.Errorf("a grant of no virtual firewall: %d %s", rec.Code, rec.Body)
+	}
+	ops := env.create("/api/roles", map[string]any{"name": "ops", "instances": []string{"lab2"},
+		"members": []map[string]any{{"user_id": ann, "level": "viewer"}}})
 	if rec := env.do("POST", "/api/roles", map[string]any{"name": "ops"}); rec.Code != http.StatusConflict {
 		t.Errorf("duplicate name: %d", rec.Code)
 	}
 
-	// Deleting the user drops their memberships; deleting the instance its role.
+	// Deleting the user drops their memberships; deleting the instance its
+	// role and grants, once that is committed.
 	if rec := env.do("DELETE", fmt.Sprintf("/api/users/%d", ann), nil); rec.Code != http.StatusNoContent {
 		t.Fatalf("delete user: %d", rec.Code)
 	}
@@ -81,8 +87,17 @@ func TestRoles(t *testing.T) {
 	if rec := env.do("DELETE", fmt.Sprintf("/api/instances/%d", inst), nil); rec.Code != http.StatusNoContent {
 		t.Fatalf("delete instance: %d %s", rec.Code, rec.Body)
 	}
+	if _, ok := env.roles()["vf-lab2"]; !ok {
+		t.Error("instance role gone before the commit")
+	}
+	if rec := env.do("POST", "/api/deploy/apply", map[string]any{}); rec.Code != http.StatusOK {
+		t.Fatalf("commit: %d %s", rec.Code, rec.Body)
+	}
 	if _, ok := env.roles()["vf-lab2"]; ok {
-		t.Error("instance role left after delete")
+		t.Error("instance role left after the commit")
+	}
+	if g := env.roles()["ops"].Instances; len(g) != 0 {
+		t.Errorf("grants left after the commit: %v", g)
 	}
 	if rec := env.do("DELETE", fmt.Sprintf("/api/roles/%d", ops), nil); rec.Code != http.StatusNoContent {
 		t.Errorf("delete role: %d", rec.Code)

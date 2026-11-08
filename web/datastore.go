@@ -65,12 +65,26 @@ func (s *Server) tree() (*treeState, error) {
 			dir = filepath.Dir(s.cfg.DB.Path)
 		}
 		t.store = datastore.NewStore(t.schema, treeBackend{s}, dir)
-		// The bridge to the code that still reads the tables.
+		// The roles name the virtual firewalls: they follow a rename, and
+		// a new one gets its role. And the bridge to the code that still
+		// reads the tables.
 		t.store.OnChange = func(c *datastore.Tree) error {
-			if !s.db.Migrator().HasTable("instances") {
-				return nil
-			}
-			return s.db.Transaction(func(tx *gorm.DB) error { return t.mapping.Write(tx, c) })
+			return s.db.Transaction(func(tx *gorm.DB) error {
+				for _, r := range c.Renamed {
+					if len(r.Path) == 1 && r.Path[0].Name == "instance" {
+						if err := renameInstanceRoles(tx, r.Path[0].Keys[0], r.Keys[0]); err != nil {
+							return err
+						}
+					}
+				}
+				if err := syncInstanceRoles(tx, c); err != nil {
+					return err
+				}
+				if !tx.Migrator().HasTable("instances") {
+					return nil
+				}
+				return t.mapping.Write(tx, c)
+			})
 		}
 	})
 	return t, t.err
@@ -317,14 +331,7 @@ func (s *Server) cliEnv(ctx context.Context, u *models.User) (*cli.Env, error) {
 	if err != nil {
 		return nil, err
 	}
-	read, err := s.instanceNames(a.readable())
-	if err != nil {
-		return nil, err
-	}
-	write, err := s.instanceNames(a.writable())
-	if err != nil {
-		return nil, err
-	}
+	read, write := a.readableNames(), a.writableNames()
 	if s.cfg.Local {
 		s.checkRole(ctx)
 	}
