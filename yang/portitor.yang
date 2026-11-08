@@ -1,0 +1,36 @@
+// SPDX-FileCopyrightText: 2026 The Portitor contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+module portitor {
+  yang-version 1.1;
+  namespace "urn:portitor:config";
+  prefix pt;
+
+  import portitor-extensions { prefix px; }
+
+  include portitor-system;
+  include portitor-interfaces;
+  include portitor-routing;
+  include portitor-firewall;
+  include portitor-services;
+  include portitor-objects;
+  include portitor-state;
+
+  organization "The Portitor contributors";
+  contact "https://github.com/abundo/portitor";
+  description
+    "The configuration of a Portitor firewall, and of its HA secondary:
+     settings, virtual firewalls (instance) with their interfaces, routing,
+     filter and NAT rules and services, links between them, and the
+     objects they share (hosts, address lists, IP lists, services).
+
+     Every frontend reads and writes this tree: the CLI, NETCONF, the API
+     and the GUI. The state (config false) is what the firewalls run
+     and see: system-state, and each instance's state.";
+
+  revision 2026-11-08 { description "First version, from the SQLite schema."; }
+
+  uses system;
+  uses objects;
+  uses system-state;
+}

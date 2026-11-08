@@ -10,6 +10,19 @@ here (`dev/release-notes.sh`); the full list is `git log <previous tag>..<tag>`.
 
 ### New
 
+- **Command line:** the whole configuration from the console or over SSH, in the
+  style of Nokia SR Linux: a shared candidate, `info`, `diff`, `commit confirmed`,
+  `?` help and Tab completion, all from the configuration's YANG model (`yang/`).
+  `sudo portitor-config cli` on the console; `ssh_listen` in
+  `/etc/portitor/config.yaml` for SSH, with the GUI's users and two-factor login.
+  See [Command line](docs/cli.md).
+- **NETCONF** on the same SSH port (subsystem `netconf`): the candidate, `edit-config`
+  with every operation, subtree filters, confirmed commits, locks and `get-schema`,
+  on the same YANG model.
+- **State in the model:** interfaces and counters, routes, WireGuard peers, services,
+  DHCP leases, neighbours, rule and rate-limit counters, BGP, OSPF, IS-IS, VRRP, BFD,
+  NTP, NAT64, OpenVPN, the host and HA, read-only, in the CLI (`info from state`)
+  and NETCONF `get`.
 - **ISO:** the installed system has a serial console on `ttyS0` (115200 baud) as
   well as the screen: boot menu, kernel messages and a login. In Proxmox VE, add a
   serial port and use the xterm.js console, where copy and paste work.

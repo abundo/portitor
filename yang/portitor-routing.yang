@@ -1,0 +1,1076 @@
+// SPDX-FileCopyrightText: 2026 The Portitor contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+submodule portitor-routing {
+  yang-version 1.1;
+  belongs-to portitor { prefix pt; }
+  import portitor-extensions { prefix px; }
+
+  description "Portitor configuration: routing.";
+
+  revision 2026-11-08 { description "First version, from the SQLite schema."; }
+
+  grouping routing {
+    list vrf {
+      key "name";
+      px:table "vrfs";
+      px:parent-column "instance_id";
+      description "Vrf is a VRF of an instance (fwconfig.VRF): interfaces are put in it by name (Interface.Vrf), routes by id (Route.VrfID).";
+      leaf name {
+        type string;
+      }
+      leaf route-table {
+        type int32;
+        mandatory true;
+      }
+      leaf description {
+        type string;
+      }
+      leaf evpn-vni {
+        type uint32;
+        description "L3VPN over EVPN/VXLAN (fwconfig.VRFEVPN); EvpnVni 0 is off.";
+      }
+      leaf evpn-local {
+        type string;
+      }
+      leaf evpn-device {
+        type leafref { path "../../interface/name"; }
+      }
+      leaf evpn-port {
+        type int32;
+      }
+      leaf evpn-rd {
+        type string;
+      }
+      leaf-list evpn-import-rts {
+        type string;
+        ordered-by user;
+      }
+      leaf-list evpn-export-rts {
+        type string;
+        ordered-by user;
+      }
+      leaf evpn-advertise-v4 {
+        type boolean;
+        default true;
+      }
+      leaf evpn-advertise-v6 {
+        type boolean;
+        default true;
+      }
+    }
+    list route {
+      key "id";
+      px:table "routes";
+      px:parent-column "instance_id";
+      leaf id {
+        type uint32;
+      }
+      leaf destination {
+        type string;
+        mandatory true;
+      }
+      leaf gateway {
+        type string;
+      }
+      leaf interface {
+        type leafref { path "../../interface/name"; }
+        px:column "interface_id";
+      }
+      leaf metric {
+        type int32;
+      }
+      leaf enabled {
+        type boolean;
+        default true;
+      }
+      leaf description {
+        type string;
+      }
+      leaf bfd {
+        type boolean;
+        description "Bfd: withdrawn while the BFD session to the gateway is down, when the gateway's interface has BFD (fwconfig.Route.BFD).";
+      }
+      leaf vrf {
+        type leafref { path "../../vrf/name"; }
+        px:column "vrf_id";
+        description "VrfID puts the route in that VRF's table (fwconfig.Route.VRF).";
+      }
+    }
+    list policy-route {
+      key "id";
+      ordered-by user;
+      px:position "position";
+      px:table "policy_routes";
+      px:parent-column "instance_id";
+      description "PolicyRoute routes the forwarded traffic it matches by a gateway and/or interface of its own (fwconfig.PolicyRoute); with neither it is an exception that keeps the main table. The instance's are tried by Position. The lists hold names, as a rule's do.";
+      leaf id {
+        type uint32;
+      }
+      leaf-list in-interfaces {
+        type union { type leafref { path "../../interface/name"; } type leafref { path "../../interface-zone/name"; } type string; }
+        ordered-by user;
+      }
+      leaf family {
+        type string;
+      }
+      leaf-list src-addrs {
+        type union { type leafref { path "../../../host/name"; } type leafref { path "../../../address-list/name"; } type string; }
+        ordered-by user;
+      }
+      leaf-list dst-addrs {
+        type union { type leafref { path "../../../host/name"; } type leafref { path "../../../address-list/name"; } type string; }
+        ordered-by user;
+      }
+      leaf-list services {
+        type union { type leafref { path "../../../service/name"; } type string; }
+        ordered-by user;
+      }
+      leaf gateway {
+        type string;
+        description "Gateway is an address or a host's name (one address per IP version); \"\" is none.";
+      }
+      leaf interface {
+        type leafref { path "../../interface/name"; }
+        px:column "interface_id";
+      }
+      leaf enabled {
+        type boolean;
+        default true;
+      }
+      leaf description {
+        type string;
+      }
+    }
+    list prefix-list {
+      key "name";
+      px:table "route_prefix_lists";
+      px:parent-column "instance_id";
+      leaf name {
+        type string;
+      }
+      leaf family {
+        type string;
+        default "ipv4";
+        description "ipv4, ipv6";
+      }
+      leaf description {
+        type string;
+      }
+      list entry {
+        key "seq";
+        px:json "entries";
+        leaf seq {
+          type int32;
+        }
+        leaf action {
+          type string;
+        }
+        leaf prefix {
+          type string;
+          description "a CIDR, or \"any\"";
+        }
+        leaf ge {
+          type int32;
+          default 0;
+        }
+        leaf le {
+          type int32;
+          default 0;
+        }
+      }
+    }
+    list as-path-list {
+      key "name";
+      px:table "route_as_path_lists";
+      px:parent-column "instance_id";
+      leaf name {
+        type string;
+      }
+      leaf description {
+        type string;
+      }
+      list entry {
+        key "action regex";
+        ordered-by user;
+        px:json "entries";
+        leaf action {
+          type string;
+        }
+        leaf regex {
+          type string;
+        }
+      }
+    }
+    list community-list {
+      key "name";
+      px:table "route_community_lists";
+      px:parent-column "instance_id";
+      leaf name {
+        type string;
+      }
+      leaf kind {
+        type string;
+        default "standard";
+        description "fwconfig.Community*";
+      }
+      leaf description {
+        type string;
+      }
+      list entry {
+        key "action value";
+        ordered-by user;
+        px:json "entries";
+        leaf action {
+          type string;
+        }
+        leaf value {
+          type string;
+        }
+      }
+    }
+    list route-map {
+      key "name";
+      px:table "route_maps";
+      px:parent-column "instance_id";
+      leaf name {
+        type string;
+      }
+      leaf description {
+        type string;
+      }
+      list entry {
+        key "seq";
+        px:json "entries";
+        leaf seq {
+          type int32;
+        }
+        leaf action {
+          type string;
+        }
+        leaf description {
+          type string;
+        }
+        leaf match-prefix-list {
+          type string;
+          description "MatchPrefixList is a prefix list of either IP version (match ip or ipv6 address prefix-list); MatchNextHop one for the next hop.";
+        }
+        leaf match-next-hop {
+          type string;
+        }
+        leaf match-as-path {
+          type string;
+        }
+        leaf match-community {
+          type string;
+          description "a community list, large or not";
+        }
+        leaf match-metric {
+          type int64;
+          px:nullable;
+        }
+        leaf match-tag {
+          type int64;
+          px:nullable;
+        }
+        leaf set-local-preference {
+          type int64;
+          px:nullable;
+        }
+        leaf set-metric {
+          type int64;
+          px:nullable;
+        }
+        leaf set-weight {
+          type int64;
+          px:nullable;
+        }
+        leaf set-as-path-prepend {
+          type string;
+          description "SetASPathPrepend is AS numbers separated by spaces.";
+        }
+        leaf set-community {
+          type string;
+          description "SetCommunity is communities separated by spaces, or \"none\"; SetCommunityAdditive adds them to the route's.";
+        }
+        leaf set-community-additive {
+          type boolean;
+        }
+        leaf set-large-community {
+          type string;
+        }
+        leaf set-next-hop {
+          type string;
+          description "an address of either version";
+        }
+        leaf set-origin {
+          type string;
+        }
+        leaf on-match-next {
+          type boolean;
+          description "OnMatchNext goes on to the next entry after a permit instead of leaving the route map.";
+        }
+      }
+    }
+    list bgp {
+      key "vrf";
+      px:table "bgp_configs";
+      px:parent-column "instance_id";
+      description "BgpConfig is an instance's BGP: one row per instance and VRF (VrfID nil is the main table), made on the first save. BGP is off (FRR stopped) until Enabled.";
+      leaf vrf {
+        type union { type enumeration { enum main; } type leafref { path "../../vrf/name"; } }
+        px:null-value "main";
+        px:column "vrf_id";
+      }
+      leaf enabled {
+        type boolean;
+      }
+      leaf asn {
+        type uint32;
+      }
+      leaf router-id {
+        type string;
+      }
+      leaf keepalive {
+        type int32;
+      }
+      leaf hold {
+        type int32;
+      }
+      leaf ebgp-requires-policy {
+        type boolean;
+      }
+      leaf log-neighbor-changes {
+        type boolean;
+        default true;
+      }
+      leaf graceful-restart {
+        type boolean;
+      }
+      leaf multipath-relax {
+        type boolean;
+      }
+      leaf maximum-paths {
+        type int32;
+      }
+      list network {
+        key "prefix";
+        px:json "networks";
+        leaf prefix {
+          type string;
+        }
+        leaf route-map {
+          type string;
+        }
+      }
+      list aggregate {
+        key "prefix";
+        px:json "aggregates";
+        leaf prefix {
+          type string;
+        }
+        leaf summary-only {
+          type boolean;
+        }
+        leaf as-set {
+          type boolean;
+        }
+      }
+      leaf redist-connected-v4 {
+        type boolean;
+        description "Redistribution of connected networks and static routes per IP version, each with an optional route map.";
+      }
+      leaf redist-connected-v4-map {
+        type leafref { path "../../route-map/name"; }
+      }
+      leaf redist-static-v4 {
+        type boolean;
+      }
+      leaf redist-static-v4-map {
+        type leafref { path "../../route-map/name"; }
+      }
+      leaf redist-connected-v6 {
+        type boolean;
+      }
+      leaf redist-connected-v6-map {
+        type leafref { path "../../route-map/name"; }
+      }
+      leaf redist-static-v6 {
+        type boolean;
+      }
+      leaf redist-static-v6-map {
+        type leafref { path "../../route-map/name"; }
+      }
+      leaf redist-ospf-v4 {
+        type boolean;
+        description "OSPFv2's routes into IPv4, OSPFv3's into IPv6.";
+      }
+      leaf redist-ospf-v4-map {
+        type leafref { path "../../route-map/name"; }
+      }
+      leaf redist-ospf-v6 {
+        type boolean;
+      }
+      leaf redist-ospf-v6-map {
+        type leafref { path "../../route-map/name"; }
+      }
+      leaf evpn {
+        type boolean;
+        description "Evpn advertises the VNIs of the instance's VXLANs (advertise-all-vni).";
+      }
+      leaf redist-isis-v4 {
+        type boolean;
+        description "IS-IS's routes, per IP version.";
+      }
+      leaf redist-isis-v4-map {
+        type leafref { path "../../route-map/name"; }
+      }
+      leaf redist-isis-v6 {
+        type boolean;
+      }
+      leaf redist-isis-v6-map {
+        type leafref { path "../../route-map/name"; }
+      }
+    }
+    list bgp-peer-group {
+      key "name";
+      px:table "bgp_peer_groups";
+      px:parent-column "instance_id";
+      description "BgpPeerGroup is a peer group of the BGP of the main table (VrfID nil) or a VRF; its name is unique in the instance.";
+      leaf name {
+        type string;
+      }
+      leaf description {
+        type string;
+      }
+      leaf remote-as {
+        type string;
+        description "AS number, internal, external";
+      }
+      leaf password {
+        type string;
+        px:secret;
+      }
+      leaf ebgp-multihop {
+        type int32;
+        description "TTL; 0 off";
+      }
+      leaf update-source {
+        type union { type leafref { path "../../interface/name"; } type string; }
+      }
+      leaf passive {
+        type boolean;
+      }
+      leaf shutdown {
+        type boolean;
+      }
+      leaf keepalive {
+        type int32;
+      }
+      leaf hold {
+        type int32;
+      }
+      leaf v4-activate {
+        type boolean;
+      }
+      leaf v4-prefix-list-in {
+        type leafref { path "../../prefix-list/name"; }
+      }
+      leaf v4-prefix-list-out {
+        type leafref { path "../../prefix-list/name"; }
+      }
+      leaf v4-route-map-in {
+        type leafref { path "../../route-map/name"; }
+      }
+      leaf v4-route-map-out {
+        type leafref { path "../../route-map/name"; }
+      }
+      leaf v4-next-hop-self {
+        type boolean;
+      }
+      leaf v4-remove-private-as {
+        type boolean;
+      }
+      leaf v4-soft-reconfiguration {
+        type boolean;
+      }
+      leaf v4-default-originate {
+        type boolean;
+      }
+      leaf v4-route-reflector-client {
+        type boolean;
+      }
+      leaf v4-allowas-in {
+        type int32;
+      }
+      leaf v4-maximum-prefix {
+        type int32;
+      }
+      leaf v6-activate {
+        type boolean;
+      }
+      leaf v6-prefix-list-in {
+        type leafref { path "../../prefix-list/name"; }
+      }
+      leaf v6-prefix-list-out {
+        type leafref { path "../../prefix-list/name"; }
+      }
+      leaf v6-route-map-in {
+        type leafref { path "../../route-map/name"; }
+      }
+      leaf v6-route-map-out {
+        type leafref { path "../../route-map/name"; }
+      }
+      leaf v6-next-hop-self {
+        type boolean;
+      }
+      leaf v6-remove-private-as {
+        type boolean;
+      }
+      leaf v6-soft-reconfiguration {
+        type boolean;
+      }
+      leaf v6-default-originate {
+        type boolean;
+      }
+      leaf v6-route-reflector-client {
+        type boolean;
+      }
+      leaf v6-allowas-in {
+        type int32;
+      }
+      leaf v6-maximum-prefix {
+        type int32;
+      }
+      leaf bfd {
+        type boolean;
+        description "Bfd: a neighbour's session is watched by BFD on an interface with it (a peer group's: its neighbours').";
+      }
+      leaf evpn-activate {
+        type boolean;
+        description "The L2VPN EVPN address family.";
+      }
+      leaf evpn-route-reflector-client {
+        type boolean;
+      }
+      leaf vrf {
+        type union { type enumeration { enum main; } type leafref { path "../../vrf/name"; } }
+        px:null-value "main";
+        px:column "vrf_id";
+      }
+    }
+    list bgp-neighbor {
+      key "vrf address";
+      px:table "bgp_neighbors";
+      px:parent-column "instance_id";
+      description "BgpNeighbor is a neighbour of the BGP of the main table (VrfID nil) or a VRF, in an optional peer group (by name) of the same.";
+      leaf vrf {
+        type union { type enumeration { enum main; } type leafref { path "../../vrf/name"; } }
+        px:null-value "main";
+        px:column "vrf_id";
+      }
+      leaf address {
+        type string;
+      }
+      leaf enabled {
+        type boolean;
+        default true;
+      }
+      leaf peer-group {
+        type leafref { path "../../bgp-peer-group/name"; }
+      }
+      leaf description {
+        type string;
+      }
+      leaf remote-as {
+        type string;
+        description "AS number, internal, external";
+      }
+      leaf password {
+        type string;
+        px:secret;
+      }
+      leaf ebgp-multihop {
+        type int32;
+        description "TTL; 0 off";
+      }
+      leaf update-source {
+        type union { type leafref { path "../../interface/name"; } type string; }
+      }
+      leaf passive {
+        type boolean;
+      }
+      leaf shutdown {
+        type boolean;
+      }
+      leaf keepalive {
+        type int32;
+      }
+      leaf hold {
+        type int32;
+      }
+      leaf v4-activate {
+        type boolean;
+      }
+      leaf v4-prefix-list-in {
+        type leafref { path "../../prefix-list/name"; }
+      }
+      leaf v4-prefix-list-out {
+        type leafref { path "../../prefix-list/name"; }
+      }
+      leaf v4-route-map-in {
+        type leafref { path "../../route-map/name"; }
+      }
+      leaf v4-route-map-out {
+        type leafref { path "../../route-map/name"; }
+      }
+      leaf v4-next-hop-self {
+        type boolean;
+      }
+      leaf v4-remove-private-as {
+        type boolean;
+      }
+      leaf v4-soft-reconfiguration {
+        type boolean;
+      }
+      leaf v4-default-originate {
+        type boolean;
+      }
+      leaf v4-route-reflector-client {
+        type boolean;
+      }
+      leaf v4-allowas-in {
+        type int32;
+      }
+      leaf v4-maximum-prefix {
+        type int32;
+      }
+      leaf v6-activate {
+        type boolean;
+      }
+      leaf v6-prefix-list-in {
+        type leafref { path "../../prefix-list/name"; }
+      }
+      leaf v6-prefix-list-out {
+        type leafref { path "../../prefix-list/name"; }
+      }
+      leaf v6-route-map-in {
+        type leafref { path "../../route-map/name"; }
+      }
+      leaf v6-route-map-out {
+        type leafref { path "../../route-map/name"; }
+      }
+      leaf v6-next-hop-self {
+        type boolean;
+      }
+      leaf v6-remove-private-as {
+        type boolean;
+      }
+      leaf v6-soft-reconfiguration {
+        type boolean;
+      }
+      leaf v6-default-originate {
+        type boolean;
+      }
+      leaf v6-route-reflector-client {
+        type boolean;
+      }
+      leaf v6-allowas-in {
+        type int32;
+      }
+      leaf v6-maximum-prefix {
+        type int32;
+      }
+      leaf interface {
+        type union { type leafref { path "../../interface/name"; } type string; }
+        description "Interface is set for a link-local address (fwconfig.BGPPeer.Interface).";
+      }
+      leaf bfd {
+        type boolean;
+        description "Bfd: a neighbour's session is watched by BFD on an interface with it (a peer group's: its neighbours').";
+      }
+      leaf evpn-activate {
+        type boolean;
+        description "The L2VPN EVPN address family.";
+      }
+      leaf evpn-route-reflector-client {
+        type boolean;
+      }
+    }
+    list ospf {
+      key "version vrf";
+      px:table "ospf_configs";
+      px:parent-column "instance_id";
+      description "OspfConfig is an instance's OSPFv2 (Version 2) or OSPFv3 (3): one row per instance, version and VRF (VrfID nil is the main table), made on the first save. It is off (not run) until Enabled. Its interfaces are the OspfInterfaces on the interfaces in its VRF.";
+      leaf version {
+        type int32;
+      }
+      leaf vrf {
+        type union { type enumeration { enum main; } type leafref { path "../../vrf/name"; } }
+        px:null-value "main";
+        px:column "vrf_id";
+      }
+      leaf enabled {
+        type boolean;
+      }
+      leaf router-id {
+        type string;
+      }
+      leaf reference-bandwidth {
+        type int32;
+      }
+      leaf log-adjacency-changes {
+        type boolean;
+        default true;
+      }
+      leaf maximum-paths {
+        type int32;
+      }
+      leaf default-originate {
+        type boolean;
+      }
+      leaf default-always {
+        type boolean;
+      }
+      list area {
+        key "id";
+        px:json "areas";
+        leaf id {
+          type string;
+          description "dotted, ParseOSPFArea";
+        }
+        leaf type {
+          type string;
+        }
+        leaf no-summary {
+          type boolean;
+        }
+      }
+      list range {
+        key "area prefix";
+        px:json "ranges";
+        leaf area {
+          type string;
+        }
+        leaf prefix {
+          type string;
+        }
+        leaf not-advertise {
+          type boolean;
+        }
+        leaf cost {
+          type int32;
+          default 0;
+        }
+      }
+      list summary {
+        key "prefix";
+        px:json "summaries";
+        leaf prefix {
+          type string;
+        }
+        leaf not-advertise {
+          type boolean;
+        }
+      }
+      list network {
+        key "prefix";
+        px:json "networks";
+        description "OSPFv2 only";
+        leaf prefix {
+          type string;
+        }
+        leaf area {
+          type string;
+        }
+      }
+      list redistribute {
+        key "source";
+        px:json "redistribute";
+        leaf source {
+          type string;
+        }
+        leaf route-map {
+          type string;
+        }
+        leaf metric {
+          type int32;
+          default 0;
+        }
+        leaf metric-type {
+          type int32;
+          default 0;
+        }
+      }
+    }
+    list ospf-interface {
+      key "version name";
+      px:table "ospf_interfaces";
+      px:parent-column "instance_id";
+      description "OspfInterface is OSPF on an interface of the instance, by name.";
+      leaf version {
+        type int32;
+      }
+      leaf name {
+        type union { type leafref { path "../../interface/name"; } type string; }
+      }
+      leaf area {
+        type string;
+      }
+      leaf passive {
+        type boolean;
+      }
+      leaf cost {
+        type int32;
+      }
+      leaf hello-interval {
+        type int32;
+      }
+      leaf dead-interval {
+        type int32;
+      }
+      leaf priority {
+        type int32;
+        px:nullable;
+      }
+      leaf network-type {
+        type string;
+      }
+      leaf auth-key-id {
+        type int32;
+      }
+      leaf auth-key {
+        type string;
+        px:secret;
+      }
+      leaf bfd {
+        type boolean;
+        description "BFD for the neighbours, if the interface has it";
+      }
+    }
+    list isis {
+      key "vrf";
+      px:table "isis_configs";
+      px:parent-column "instance_id";
+      description "IsisConfig is an instance's IS-IS: one row per instance and VRF (VrfID nil is the main table), made on the first save. It is off (not run) until Enabled. Its interfaces are the IsisInterfaces on the interfaces in its VRF.";
+      leaf vrf {
+        type union { type enumeration { enum main; } type leafref { path "../../vrf/name"; } }
+        px:null-value "main";
+        px:column "vrf_id";
+      }
+      leaf enabled {
+        type boolean;
+      }
+      leaf net {
+        type string;
+      }
+      leaf level {
+        type string;
+      }
+      leaf metric-style {
+        type string;
+      }
+      leaf log-adjacency-changes {
+        type boolean;
+        default true;
+      }
+      leaf ipv6-topology {
+        type boolean;
+      }
+      leaf overload {
+        type boolean;
+      }
+      list default-originate {
+        key "family level";
+        px:json "default_originate";
+        leaf family {
+          type string;
+        }
+        leaf level {
+          type string;
+        }
+        leaf always {
+          type boolean;
+        }
+        leaf route-map {
+          type string;
+        }
+        leaf metric {
+          type int32;
+          default 0;
+        }
+      }
+      list redistribute {
+        key "family source level";
+        px:json "redistribute";
+        leaf family {
+          type string;
+        }
+        leaf source {
+          type string;
+          description "RedistConnected, RedistStatic, RedistBGP, RedistOSPF";
+        }
+        leaf level {
+          type string;
+        }
+        leaf route-map {
+          type string;
+        }
+        leaf metric {
+          type int32;
+          default 0;
+        }
+      }
+      leaf area-password {
+        type string;
+        px:secret;
+      }
+      leaf area-password-type {
+        type string;
+        default "md5";
+      }
+      leaf domain-password {
+        type string;
+        px:secret;
+      }
+      leaf domain-password-type {
+        type string;
+        default "md5";
+      }
+      leaf net-interface {
+        type union { type leafref { path "../../interface/name"; } type string; }
+        description "NetInterface makes the NET from that interface's first IPv4 address, in the area NetArea (fwconfig.ISISNetFromIPv4); empty: Net is entered.";
+      }
+      leaf net-area {
+        type string;
+      }
+    }
+    list isis-interface {
+      key "name";
+      px:table "isis_interfaces";
+      px:parent-column "instance_id";
+      description "IsisInterface is IS-IS on an interface of the instance, by name.";
+      leaf name {
+        type union { type leafref { path "../../interface/name"; } type string; }
+      }
+      leaf ipv4 {
+        type boolean;
+        default true;
+      }
+      leaf ipv6 {
+        type boolean;
+      }
+      leaf circuit-type {
+        type string;
+      }
+      leaf point-to-point {
+        type boolean;
+      }
+      leaf passive {
+        type boolean;
+      }
+      leaf metric {
+        type int32;
+      }
+      leaf hello-interval {
+        type int32;
+      }
+      leaf hello-multiplier {
+        type int32;
+      }
+      leaf priority {
+        type int32;
+        px:nullable;
+      }
+      leaf bfd {
+        type boolean;
+        description "BFD for the neighbours, if the interface has it";
+      }
+      leaf password {
+        type string;
+        px:secret;
+      }
+      leaf password-type {
+        type string;
+        default "md5";
+      }
+    }
+    list vrrp-router {
+      key "interface vrid";
+      px:table "vrrp_routers";
+      px:parent-column "instance_id";
+      description "VrrpRouter is a VRRP virtual router on an interface of the instance (by name; link ends included). Disabled, it is shut down: configured, but always backup.";
+      leaf interface {
+        type union { type leafref { path "../../interface/name"; } type string; }
+      }
+      leaf vrid {
+        type int32;
+      }
+      leaf version {
+        type int32;
+        default 3;
+      }
+      leaf priority {
+        type int32;
+        default 100;
+      }
+      leaf advertisement-interval {
+        type int32;
+        default 1000;
+        description "ms";
+      }
+      leaf preempt {
+        type boolean;
+        default true;
+      }
+      leaf enabled {
+        type boolean;
+        default true;
+      }
+      leaf-list ipv4 {
+        type string;
+        ordered-by user;
+      }
+      leaf-list ipv6 {
+        type string;
+        ordered-by user;
+      }
+      leaf description {
+        type string;
+      }
+    }
+    list bfd-interface {
+      key "interface";
+      px:table "bfd_interfaces";
+      px:parent-column "instance_id";
+      description "BfdInterface is BFD on an interface of the instance (by name; link ends included), with its timers (0: the instance's Bfd* defaults). Disabled, the interface has no BFD: what asks for BFD there runs without.";
+      leaf interface {
+        type union { type leafref { path "../../interface/name"; } type string; }
+      }
+      leaf enabled {
+        type boolean;
+        default true;
+      }
+      leaf detect-multiplier {
+        type int32;
+        default 3;
+      }
+      leaf receive-interval {
+        type int32;
+        default 300;
+        description "ms";
+      }
+      leaf transmit-interval {
+        type int32;
+        default 300;
+        description "ms";
+      }
+      leaf passive {
+        type boolean;
+      }
+      leaf description {
+        type string;
+      }
+    }
+  }
+}

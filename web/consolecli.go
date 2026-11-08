@@ -35,7 +35,13 @@ func (s *Server) ConsoleRequest(ctx context.Context, method, path string, body [
 	if s.cfg.Local {
 		s.checkRole(ctx)
 	}
-	req := httptest.NewRequestWithContext(context.WithValue(ctx, consoleUserKey{}, consoleUser), method, path, bytes.NewReader(body))
+	return s.requestAs(ctx, consoleUser, method, path, body)
+}
+
+// requestAs answers an API request in-process as the user u: the CLI's
+// requests, with every check the API makes for u.
+func (s *Server) requestAs(ctx context.Context, u *models.User, method, path string, body []byte) (int, []byte) {
+	req := httptest.NewRequestWithContext(context.WithValue(ctx, consoleUserKey{}, u), method, path, bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	s.Echo().ServeHTTP(rec, req)

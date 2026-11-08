@@ -17,3 +17,6 @@ tls_key: /etc/portitor/config.key
 trusted_proxies: []
 # This host's agent, which tells portitor-config its place in an HA pair.
 # agent_url: https://127.0.0.1:8443
+# The configuration CLI over SSH (docs/cli.md), for the GUI's users; off when empty.
+# Open the port with an input rule. The host key is made next to the database.
+# ssh_listen: ":2222"

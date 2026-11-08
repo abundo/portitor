@@ -1,0 +1,219 @@
+// SPDX-FileCopyrightText: 2026 The Portitor contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+submodule portitor-objects {
+  yang-version 1.1;
+  belongs-to portitor { prefix pt; }
+  import portitor-extensions { prefix px; }
+
+  description "Portitor configuration: objects.";
+
+  revision 2026-11-08 { description "First version, from the SQLite schema."; }
+
+  grouping objects {
+    list object-folder {
+      key "id";
+      px:table "object_folders";
+      description "ObjectFolder is a folder in the GUI for hosts (AddressObject.FolderID), address lists (AddressList.FolderID) or IP lists (IpList.FolderID), by Kind. Folders nest (ParentID, nil at the top) and mean nothing to the firewall.";
+      leaf id {
+        type uint32;
+      }
+      leaf kind {
+        type string;
+        mandatory true;
+        description "ObjectFolder*";
+      }
+      leaf parent {
+        type leafref { path "../../object-folder/id"; }
+        px:column "parent_id";
+      }
+      leaf name {
+        type string;
+        mandatory true;
+      }
+    }
+    list host {
+      key "name";
+      px:table "address_objects";
+      description "AddressObject is a named host or prefix. Its name can stand in for addresses wherever an address list is entered; the builder expands it. Addresses may mix IPv4 and IPv6 (a host with both, say).";
+      leaf name {
+        type string;
+      }
+      leaf-list addresses {
+        type string;
+        ordered-by user;
+      }
+      leaf description {
+        type string;
+      }
+      leaf folder {
+        type leafref { path "../../object-folder/id"; }
+        px:column "folder_id";
+      }
+    }
+    list address-list {
+      key "name";
+      px:table "address_lists";
+      description "AddressList is a named list of addresses, prefixes and the names of hosts (AddressObject) or other address lists, which it holds as they change. Its name is unique among hosts and address lists together, so address fields refer to either by plain name. A filter rule using one matches it as an nftables set; anywhere else it is expanded.";
+      leaf name {
+        type string;
+      }
+      leaf-list entries {
+        type union { type leafref { path "../../host/name"; } type leafref { path "../../address-list/name"; } type string; }
+        ordered-by user;
+      }
+      leaf description {
+        type string;
+      }
+      leaf folder {
+        type leafref { path "../../object-folder/id"; }
+        px:column "folder_id";
+      }
+    }
+    list ip-list {
+      key "name";
+      px:table "ip_lists";
+      description "IpList is an address list the agent downloads (fwconfig.IPList). Rules use it by name as \"@name\" in their address lists.";
+      leaf name {
+        type string;
+      }
+      leaf description {
+        type string;
+      }
+      leaf source {
+        type string;
+        mandatory true;
+        description "fwconfig.IPList*";
+      }
+      leaf url {
+        type string;
+        mandatory true;
+      }
+      leaf username {
+        type string;
+      }
+      leaf password {
+        type string;
+        px:secret;
+        description "Password and ApiKey are set through NewPassword and NewApiKey and never sent back.";
+      }
+      leaf api-key {
+        type string;
+        px:secret;
+      }
+      leaf folder {
+        type leafref { path "../../object-folder/id"; }
+        px:column "folder_id";
+      }
+      leaf-list countries {
+        type string;
+        ordered-by user;
+        description "Countries are ISO 3166-1 alpha-2 codes (source country).";
+      }
+    }
+    list service {
+      key "name";
+      px:table "services";
+      description "Service is a named protocol match that rules refer to by name, next to the predefined ones (netobj.Predefined); the builder expands the names. Type says which fields apply: Ports (tcp, udp, sctp), IcmpType and IcmpCode (icmp, icmp6), or IpProtocol (ip).";
+      leaf name {
+        type string;
+      }
+      leaf description {
+        type string;
+      }
+      leaf type {
+        type string;
+        mandatory true;
+      }
+      list port {
+        key "protocol dst-lo dst-hi src-lo src-hi";
+        ordered-by user;
+        px:json "ports";
+        leaf protocol {
+          type string;
+          description "tcp, udp or sctp";
+        }
+        leaf dst-lo {
+          type int32;
+        }
+        leaf dst-hi {
+          type int32;
+        }
+        leaf src-lo {
+          type int32;
+        }
+        leaf src-hi {
+          type int32;
+        }
+      }
+      leaf icmp-type {
+        type string;
+        description "IcmpType is an ICMP or ICMPv6 type name and IcmpCode its code; empty or nil matches any.";
+      }
+      leaf icmp-code {
+        type int32;
+        px:nullable;
+      }
+      leaf ip-protocol {
+        type int32;
+        description "IpProtocol is an IP protocol number; 0 matches any.";
+      }
+    }
+    list port-name {
+      key "name";
+      px:table "port_names";
+      description "PortName is a custom port name NAT port fields take next to the built-in ones (fwconfig.Services); the builder writes its number.";
+      leaf name {
+        type string;
+      }
+      leaf port {
+        type int32;
+        mandatory true;
+      }
+      leaf description {
+        type string;
+      }
+    }
+    list task {
+      key "name";
+      px:table "tasks";
+      description "Task runs on the firewall on a cron schedule (fwconfig.Task): it downloads IpListID, or runs Command as the agent's console user.";
+      leaf name {
+        type string;
+      }
+      leaf description {
+        type string;
+      }
+      leaf enabled {
+        type boolean;
+        default true;
+      }
+      leaf schedule {
+        type string;
+        mandatory true;
+      }
+      leaf kind {
+        type string;
+        mandatory true;
+        description "fwconfig.Task*";
+      }
+      leaf ip-list {
+        type leafref { path "../../ip-list/name"; }
+        px:column "ip_list_id";
+      }
+      leaf command {
+        type string;
+      }
+      leaf timeout {
+        type int32;
+        description "seconds; 0 is the default";
+      }
+      leaf firewall {
+        type string;
+        px:external "firewalls";
+        px:column "firewall_id";
+        description "FirewallID is the firewall the task runs on.";
+      }
+    }
+  }
+}

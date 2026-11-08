@@ -110,6 +110,8 @@ type Server struct {
 	// localHA asks this host's agent for its place in the pair
 	// (localPeerConfig; a fake in tests).
 	localHA func(ctx context.Context) (*agentapi.HAPeerConfig, *models.Firewall, error)
+	// treeState is the configuration tree and its candidate (datastore.go).
+	treeState treeState
 }
 
 func NewServer(cfg *Config, db *gorm.DB) *Server {
@@ -399,6 +401,7 @@ func (s *Server) Serve(ctx context.Context) error {
 	}
 	go s.runWitness(ctx)
 	go s.runDirectorySync(ctx)
+	go s.runSSH(ctx)
 	sc := echo.StartConfig{Address: s.cfg.Bind, HideBanner: true}
 	slog.Info("portitor-config listening", "addr", s.cfg.Bind, "dev", s.cfg.Dev, "tls", s.cfg.TLSCert != "")
 	var err error

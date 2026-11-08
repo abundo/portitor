@@ -50,6 +50,10 @@ type Config struct {
 	// AgentURL is this host's own agent, which tells portitor-config its
 	// place in an HA pair (role.go); default https://127.0.0.1:8443.
 	AgentURL string `yaml:"agent_url"`
+	// SSHListen serves the CLI over SSH there (":2222"), to the GUI's
+	// users; empty: not. The host key is ssh_host_ed25519_key next to the
+	// database.
+	SSHListen string `yaml:"ssh_listen"`
 	// Local is portitor-config proper: on the firewall, for its own
 	// firewall (and HA secondary) alone. Not in the file; tests run
 	// without it.

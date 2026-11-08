@@ -40,6 +40,7 @@ require (
 	github.com/libdns/porkbun v1.1.0
 	github.com/mdlayher/packet v1.1.2
 	github.com/miekg/dns v1.1.72
+	github.com/openconfig/goyang v1.6.3
 	github.com/pressly/goose/v3 v3.27.0
 	github.com/spf13/cobra v1.10.2
 	github.com/vishvananda/netlink v1.3.1

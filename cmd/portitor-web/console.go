@@ -9,11 +9,15 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
+	"github.com/abundo/portitor/internal/cli"
 	"github.com/abundo/portitor/web"
 )
 
@@ -174,6 +178,49 @@ func addConsoleCommands(root *cobra.Command, load func() (*web.Config, *web.Serv
 	}
 	commit.Flags().IntVar(&confirmTimeout, "confirm", 120, "seconds to confirm in (0: no confirmation)")
 	root.AddCommand(commit)
+	root.AddCommand(&cobra.Command{
+		Use:   "cli",
+		Short: "The configuration CLI, as the console admin; it reads commands from stdin when that is not a terminal",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, srv, err := load()
+			if err != nil {
+				return err
+			}
+			env, err := srv.ConsoleCLI(cmd.Context())
+			if err != nil {
+				return err
+			}
+			fd := int(os.Stdin.Fd())
+			if !term.IsTerminal(fd) {
+				return cli.RunScript(cmd.Context(), env, os.Stdin, os.Stdout)
+			}
+			old, err := term.MakeRaw(fd)
+			if err != nil {
+				return err
+			}
+			defer term.Restore(fd, old)
+			tm := cli.NewTerminal(env, struct {
+				io.Reader
+				io.Writer
+			}{os.Stdin, os.Stdout})
+			resize := func() {
+				if w, h, err := term.GetSize(fd); err == nil {
+					tm.SetSize(w, h)
+				}
+			}
+			resize()
+			winch := make(chan os.Signal, 1)
+			signal.Notify(winch, syscall.SIGWINCH)
+			defer signal.Stop(winch)
+			go func() {
+				for range winch {
+					resize()
+				}
+			}()
+			return tm.Run(cmd.Context())
+		},
+	})
 	for _, a := range []struct{ use, path, done string }{
 		{"confirm", "/api/deploy/confirm", "Confirmed."},
 		{"rollback", "/api/deploy/rollback", "Rolled back."},

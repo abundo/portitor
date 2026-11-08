@@ -1,0 +1,425 @@
+// SPDX-FileCopyrightText: 2026 The Portitor contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+submodule portitor-state {
+  yang-version 1.1;
+  belongs-to portitor { prefix pt; }
+
+  description
+    "Portitor state: what the firewalls run and see, read-only (config
+     false), from their agents. The leaves are named after the agent API's
+     fields (rx_bytes is rx-bytes), which fill them. Times are RFC 3339.";
+
+  revision 2026-11-08 { description "First version."; }
+
+  typedef counter { type uint64; description "A count since the device or rule was last made."; }
+
+  grouping system-state {
+    container system-state {
+      config false;
+      description "The firewall host: the agent and the machine. With several firewalls, the first one's.";
+      leaf hostname { type string; }
+      leaf version { type string; description "portitor-agent's version."; }
+      leaf dry-run { type boolean; description "The agent runs no commands (a test setup)."; }
+      leaf generation { type int64; description "The deploy the agent runs."; }
+      leaf last-apply { type string; description "When it last applied a configuration."; }
+      leaf last-error { type string; description "Why the last apply failed."; }
+      container pending {
+        description "A commit waiting for confirmation.";
+        leaf generation { type int64; }
+        leaf deadline { type string; description "When it is rolled back unless confirmed."; }
+      }
+      container host {
+        description "The machine: memory, CPU, load, uptime and disks.";
+        leaf mem-total { type uint64; units bytes; }
+        leaf mem-available { type uint64; units bytes; }
+        leaf swap-total { type uint64; units bytes; }
+        leaf swap-free { type uint64; units bytes; }
+        leaf cpus { type int32; }
+        leaf cpu-busy { type uint64; description "CPU time busy since boot (ticks)."; }
+        leaf cpu-total { type uint64; description "CPU time since boot (ticks)."; }
+        leaf-list load { type string; ordered-by user; description "The load average over 1, 5 and 15 minutes."; }
+        leaf uptime { type int64; units seconds; }
+        list disks {
+          key "mount";
+          leaf mount { type string; }
+          leaf total { type uint64; units bytes; }
+          leaf free { type uint64; units bytes; description "Available to unprivileged users."; }
+          leaf used { type uint64; units bytes; }
+        }
+      }
+      container ha {
+        description "The host's place in its HA pair and its quorum (docs/ha.md).";
+        leaf node { type string; description "primary or secondary."; }
+        leaf state { type string; description "active, standby, ..."; }
+        leaf term { type int64; description "Raised at each activation."; }
+        leaf peer-alive { type boolean; }
+        leaf peer-seen { type string; }
+        leaf vote-until { type string; description "The witness's vote held until then."; }
+        leaf promise-until { type string; description "A promise to the peer to stay closed until then."; }
+        leaf watchdog { type string; }
+        leaf epoch { type int64; description "The pair's number of promotions."; }
+        leaf health { type int32; description "Monitored traffic interfaces with a carrier, here."; }
+        leaf peer-health { type int32; }
+        leaf monitored { type int32; }
+        list dhcp {
+          key "instance";
+          description "Each virtual firewall's DHCP lease sync to the standby.";
+          leaf instance { type string; }
+          leaf sent { type string; }
+          leaf received { type string; }
+          leaf error { type string; }
+        }
+      }
+      leaf-list errors { type string; description "What could not be read just now (an agent that doesn't answer)."; }
+    }
+  }
+
+  grouping vrrp-family {
+    leaf state { type string; description "Initialize, Backup or Master."; }
+    leaf mac { type string; }
+    leaf primary-address { type string; }
+    leaf-list addresses { type string; ordered-by user; }
+    leaf effective-priority { type int32; }
+    leaf master-adver-interval { type int32; units milliseconds; }
+    leaf master-down-interval { type int32; units milliseconds; }
+    leaf advertisements-sent { type int64; }
+  }
+
+  grouping instance-state {
+    container state {
+      config false;
+      description "The virtual firewall as it runs.";
+      list interfaces {
+        key "name";
+        description "The devices of the virtual firewall, configured ones and those made for them (VRFs, VRRP, NAT64).";
+        leaf name { type string; }
+        leaf kind { type string; }
+        leaf state { type string; description "The operational state: up, down, unknown, lowerlayerdown."; }
+        leaf mtu { type int32; }
+        leaf mac { type string; }
+        leaf-list addresses { type string; ordered-by user; }
+        leaf rx-bytes { type counter; }
+        leaf tx-bytes { type counter; }
+        leaf rx-packets { type counter; }
+        leaf tx-packets { type counter; }
+        leaf rx-errors { type counter; }
+        leaf tx-errors { type counter; }
+        leaf rx-dropped { type counter; }
+        leaf tx-dropped { type counter; }
+        leaf rx-over-errors { type counter; }
+        leaf rx-multicast { type counter; }
+        leaf tx-carrier-errors { type counter; }
+        leaf tx-collisions { type counter; }
+      }
+      list routes {
+        description "The main table's routes.";
+        leaf dst { type string; }
+        leaf gateway { type string; }
+        leaf dev { type string; }
+        leaf protocol { type string; }
+        leaf metric { type int32; }
+      }
+      list wireguard {
+        key "interface";
+        leaf interface { type string; }
+        leaf public-key { type string; }
+        leaf listen-port { type int32; }
+        list peers {
+          key "public-key";
+          leaf public-key { type string; }
+          leaf endpoint { type string; }
+          leaf-list allowed-ips { type string; ordered-by user; }
+          leaf latest-handshake { type string; }
+          leaf rx-bytes { type counter; }
+          leaf tx-bytes { type counter; }
+          leaf keepalive { type int32; units seconds; }
+        }
+      }
+      list services {
+        key "name";
+        description "The virtual firewall's daemons (named, dhcpd, frr, ...).";
+        leaf name { type string; }
+        leaf state { type string; description "systemd's: active, inactive, failed, ..."; }
+      }
+      list dhcp-client-leases {
+        key "interface family";
+        description "What the DHCP clients got.";
+        leaf interface { type string; }
+        leaf family { type string; description "ipv4 or ipv6."; }
+        leaf state { type string; description "requesting, bound or error."; }
+        leaf address { type string; }
+        leaf-list prefixes { type string; ordered-by user; description "Prefixes delegated (DHCPv6)."; }
+        leaf router { type string; }
+        leaf-list dns { type string; ordered-by user; }
+        leaf server { type string; }
+        leaf obtained { type string; }
+        leaf expires { type string; }
+        leaf last-error { type string; }
+      }
+      list dhcp-server-leases {
+        key "address";
+        description "What the DHCP server gave out.";
+        leaf address { type string; }
+        leaf mac { type string; }
+        leaf hostname { type string; }
+        leaf expires { type string; }
+      }
+      list ip-neighbours {
+        key "interface address";
+        description "ARP and neighbour discovery.";
+        leaf interface { type string; }
+        leaf address { type string; }
+        leaf family { type string; }
+        leaf mac { type string; }
+        leaf state { type string; description "reachable, stale, delay, probe, failed, incomplete, permanent, noarp."; }
+        leaf router { type boolean; }
+        leaf vrf { type string; }
+      }
+      list lldp-neighbours {
+        key "interface source-mac";
+        leaf interface { type string; }
+        leaf source-mac { type string; }
+        leaf chassis-id { type string; }
+        leaf chassis-id-subtype { type string; }
+        leaf port-id { type string; }
+        leaf port-id-subtype { type string; }
+        leaf ttl { type int32; units seconds; }
+        leaf port-description { type string; }
+        leaf system-name { type string; }
+        leaf system-description { type string; }
+      }
+      list rules {
+        key "id";
+        description "The traffic of the connections each filter rule accepted, since it was last applied.";
+        leaf id { type uint32; }
+        leaf orig-packets { type counter; }
+        leaf orig-bytes { type counter; }
+        leaf reply-packets { type counter; }
+        leaf reply-bytes { type counter; }
+      }
+      list bgp {
+        key "vrf";
+        leaf vrf { type string; description "The VRF, main for the main table."; }
+        leaf router-id { type string; }
+        leaf asn { type uint32; }
+        leaf error { type string; description "Why FRR could not be asked."; }
+        list peers {
+          key "address";
+          leaf address { type string; }
+          leaf remote-as { type uint32; }
+          leaf local-as { type uint32; }
+          leaf description { type string; }
+          leaf hostname { type string; }
+          leaf state { type string; description "Idle, Connect, Active, OpenSent, OpenConfirm, Established."; }
+          leaf uptime { type string; }
+          leaf uptime-secs { type int64; units seconds; }
+          leaf msg-rcvd { type int64; }
+          leaf msg-sent { type int64; }
+        }
+      }
+      list ospf {
+        key "version vrf";
+        description "OSPFv2 (version 2) and OSPFv3 (version 3) of the main table (vrf main) and the VRFs.";
+        leaf version { type int32; }
+        leaf vrf { type string; }
+        leaf router-id { type string; }
+        leaf error { type string; }
+        list areas {
+          key "id";
+          leaf id { type string; }
+          leaf interfaces { type int32; }
+          leaf full-adjacencies { type int32; }
+          leaf lsas { type int32; }
+        }
+        list interfaces {
+          key "name";
+          leaf name { type string; }
+          leaf area { type string; }
+          leaf address { type string; }
+          leaf state { type string; }
+          leaf network-type { type string; }
+          leaf cost { type int64; }
+          leaf priority { type int64; }
+          leaf passive { type boolean; }
+          leaf neighbors { type int64; }
+          leaf adjacent { type int64; }
+          leaf dr { type string; }
+          leaf bdr { type string; }
+        }
+        list neighbors {
+          leaf router-id { type string; }
+          leaf address { type string; }
+          leaf interface { type string; }
+          leaf priority { type int64; }
+          leaf state { type string; description "Full/DR, 2-Way/DROther, ..."; }
+          leaf role { type string; }
+          leaf uptime { type string; }
+          leaf dead-time { type string; }
+        }
+      }
+      list isis {
+        key "vrf";
+        leaf vrf { type string; }
+        leaf system-id { type string; }
+        leaf error { type string; }
+        list neighbors {
+          leaf system-id { type string; }
+          leaf interface { type string; }
+          leaf level { type string; }
+          leaf state { type string; }
+          leaf hold-time { type string; }
+          leaf snpa { type string; }
+        }
+        list interfaces {
+          key "name";
+          leaf name { type string; }
+          leaf state { type string; }
+          leaf type { type string; }
+          leaf level { type string; }
+        }
+      }
+      container vrrp {
+        leaf error { type string; }
+        list routers {
+          key "interface vrid";
+          leaf interface { type string; }
+          leaf vrid { type int32; }
+          leaf version { type int32; }
+          leaf priority { type int32; }
+          leaf preempt { type boolean; }
+          leaf shutdown { type boolean; }
+          leaf advertisement-interval { type int32; units milliseconds; }
+          container v4 { uses vrrp-family; }
+          container v6 { uses vrrp-family; }
+        }
+      }
+      container bfd {
+        leaf error { type string; }
+        list peers {
+          leaf peer { type string; }
+          leaf vrf { type string; }
+          leaf local { type string; }
+          leaf interface { type string; }
+          leaf multihop { type boolean; }
+          leaf profile { type string; }
+          leaf status { type string; description "up, down, init, shutdown."; }
+          leaf diagnostic { type string; }
+          leaf remote-diagnostic { type string; }
+          leaf uptime { type int64; units seconds; }
+          leaf downtime { type int64; units seconds; }
+          leaf detect-multiplier { type int32; }
+          leaf receive-interval { type int32; units milliseconds; }
+          leaf transmit-interval { type int32; units milliseconds; }
+          leaf remote-detect-multiplier { type int32; }
+          leaf remote-receive-interval { type int32; units milliseconds; }
+          leaf remote-transmit-interval { type int32; units milliseconds; }
+        }
+      }
+      container ntp {
+        leaf error { type string; }
+        list sources {
+          key "address";
+          leaf address { type string; }
+          leaf name { type string; }
+          leaf mode { type string; }
+          leaf state { type string; description "selected, combined, not combined, unusable, falseticker, too variable."; }
+          leaf stratum { type int32; }
+          leaf poll { type string; }
+          leaf reach { type int32; }
+          leaf last-rx { type int64; units seconds; }
+          leaf offset { type string; units seconds; }
+          leaf error { type string; units seconds; }
+          leaf samples { type int32; }
+          leaf span { type int64; }
+          leaf frequency { type string; units ppm; }
+          leaf freq-skew { type string; units ppm; }
+          leaf std-dev { type string; units seconds; }
+          leaf auth { type string; }
+        }
+        list tracking {
+          key "name";
+          description "chronyc tracking.";
+          leaf name { type string; }
+          leaf value { type string; }
+        }
+        list server-stats {
+          key "name";
+          description "chronyc serverstats.";
+          leaf name { type string; }
+          leaf value { type string; }
+        }
+      }
+      container nat64 {
+        leaf error { type string; }
+        leaf prefix { type string; }
+        list pool4 {
+          leaf interface { type string; }
+          leaf address { type string; }
+        }
+        list sessions {
+          leaf protocol { type string; }
+          leaf source6 { type string; }
+          leaf port6 { type string; }
+          leaf dest6 { type string; }
+          leaf dest-port6 { type string; }
+          leaf source4 { type string; }
+          leaf port4 { type string; }
+          leaf dest4 { type string; }
+          leaf dest-port4 { type string; }
+          leaf expires { type string; }
+          leaf state { type string; }
+        }
+        list stats {
+          key "name";
+          leaf name { type string; }
+          leaf value { type uint64; }
+          leaf explanation { type string; }
+        }
+      }
+      list openvpn {
+        key "interface proto";
+        leaf interface { type string; }
+        leaf proto { type string; description "udp or tcp."; }
+        leaf device { type string; }
+        leaf connected { type boolean; description "The agent is connected to the server's management socket."; }
+        leaf error { type string; }
+        list clients {
+          key "id";
+          leaf id { type int64; }
+          leaf user { type string; }
+          leaf real-address { type string; }
+          leaf address { type string; }
+          leaf address6 { type string; }
+          leaf rx-bytes { type int64; }
+          leaf tx-bytes { type int64; }
+          leaf since { type string; }
+          leaf cipher { type string; }
+          leaf source { type string; description "Where the user is from: local or a directory server."; }
+        }
+      }
+      list rate-limits {
+        key "name";
+        description "Each rate limit's traffic and drops since it was last applied.";
+        leaf name { type string; }
+        leaf orig-packets { type counter; }
+        leaf orig-bytes { type counter; }
+        leaf reply-packets { type counter; }
+        leaf reply-bytes { type counter; }
+        leaf drop-packets { type counter; }
+        leaf drop-bytes { type counter; }
+        list interfaces {
+          key "interface";
+          description "A shaping rate limit's queue on each interface.";
+          leaf interface { type string; }
+          leaf bytes { type counter; }
+          leaf packets { type counter; }
+          leaf drops { type counter; }
+          leaf overlimits { type counter; }
+          leaf backlog { type counter; }
+          leaf qlen { type counter; }
+        }
+      }
+    }
+  }
+}

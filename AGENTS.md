@@ -11,9 +11,15 @@ are in [README.md](README.md).
 
 | Path | What |
 |---|---|
-| `cmd/portitor-web` | One binary, two programs by name: `portitor-web` is the portal (`portal.go`: `start`, `witness`, `check`); run as `portitor-config` (a symlink, `main.go`) the firewall's configuration, GUI and API: `start`, `migrate`, `createadmin`, `set-agent`, `agent-url`, `bootstrap` (ISO first boot), `fingerprint`, `witness-string`, `promote`, `import-vf` and the console commands (`console.go`) |
+| `cmd/portitor-web` | One binary, two programs by name: `portitor-web` is the portal (`portal.go`: `start`, `witness`, `check`); run as `portitor-config` (a symlink, `main.go`) the firewall's configuration, GUI and API: `start`, `migrate`, `createadmin`, `set-agent`, `agent-url`, `bootstrap` (ISO first boot), `fingerprint`, `witness-string`, `promote`, `import-vf` and the console commands (`console.go`, `cli` among them) |
 | `cmd/portitor-agent` | Agent daemon on the firewall: `start`, `init`, `render`, `netns-exec`; run as `portitor` (a symlink, `cli.go`) it is a CLI over the agent's root-only socket `<run_dir>/agent.sock`: `show ...` over the GET routes, and actions that change no configuration (`confirm`, `rollback`, `request dhcp renew`, `request iplist update`, `request blocklist update`, `clear connections`) over the POST routes in `localWrites` |
 | `internal/fwconfig` | The desired-state document and `Validate()`. **The contract between web and agent.** |
+| `yang` | The YANG modules: the configuration's schema (module `portitor`, a submodule per area, the state in `portitor-state`, `portitor-extensions`), embedded by `yang.go`; first drafted from the tables by `dev/yanggen`, edited by hand since |
+| `internal/schema` | The modules compiled (goyang) into the tree every frontend walks: kinds, keys, order, types and their checks, defaults, descriptions, `px:` extensions |
+| `internal/datastore` | The configuration as a tree of the schema: set, delete, rename (rewriting leafrefs), move, validate, RFC 7951 JSON, diff and patch, the CLI's text and flat forms; `Store`, the shared candidate with its rebase and commit |
+| `internal/datastore/sqlmap` | The tree read from and written into the SQLite tables, by the modules' `px:` extensions, keeping row ids |
+| `internal/netconf` | NETCONF (RFC 6241/6242) on the datastore, the SSH server's `netconf` subsystem: framing (1.0 and chunked), XML, `edit-config` with every operation, subtree filters, `commit` with `confirmed-commit`, locks (`Store.Lock`), `get-schema` |
+| `internal/cli` | The CLI (SR Linux style): commands, path parsing, `?` help and Tab completion from the schema, the terminal (x/term), scripts, and the SSH server |
 | `internal/render` | Pure functions: document → nftables, WireGuard, named.conf, the DHCP server's dhcpd.json (`dhcpd.go`), chrony.conf (`chrony.go`), snmpd.conf (`snmpd.go`), rsyslog.conf (`rsyslog.go`), openvpn.conf (`openvpn.go`), dnsmgr2 config, FRR (`frr.go`: frr.conf with BGP, OSPF, IS-IS, VRRP and BFD, daemons, vtysh.conf) |
 | `internal/agent` | Agent: apply/reconcile, commit-confirm, DHCP and DHCPv6 (prefix delegation) clients (woken when their interface gets a carrier, `linkwatch.go`), IP lists, task scheduler, packet log (NFLOG), DNS query log (BIND logs to the journal, followed with `journalctl`, filtered by the agent, `querylog.go`), WireGuard endpoint re-resolving, packet capture (tcpdump, streamed rate-limited), connectivity tests (ICMP echo on a raw socket, TCP connect, UDP datagram, from the agent's own sockets opened in the instance netns by `withNetns`, streamed as JSON lines, `probe.go`), traceroute (`mtr --raw`, streamed as JSON lines, `trace.go`), iperf3 tests (client or server, `--json-stream` read into JSON lines, a server's port in the ruleset's timeout set `render.IperfServerSet` while it runs, `iperf.go`), service logs (`journalctl --follow` of a status service unit, streamed as text, `servicelog.go`), the host's whole journal (`POST /v1/journal`) and rsyslog's state (`GET /v1/syslog`, `syslog.go`), LLDP (sent and heard on raw sockets, `lldp.go`), neighbours (ARP/ND, LLDP), NAT64 (a Jool instance per namespace; its sessions and counters for `GET /v1/nat64`, `nat64.go`), traffic shaping (CAKE, IFB devices for receiving, HTB classes for the rate limits that shape (`fwconfig.Instance.Shapers`) by packet mark `render.ShaperMark`; planned from `tc -j` output, `shaping.go`; their traffic and the policers' drop counters `render.RateLimitDropCounter`, `ratelimits.go`), BGP, OSPF, IS-IS, VRRP and BFD state (FRR's JSON through `vtysh`, `bgp.go`, `ospf.go`, `isis.go`, `vrrp.go`, `bfd.go`), VRRP's macvlan devices (`vrrp.go`), 6in4 tunnels' endpoint updates at Hurricane Electric's tunnel broker (from the instance netns, on address changes, `tunnelbroker.go`), VXLANs' learning, EVPN bridge port flags and static flood lists (`vxlan.go`), OpenVPN's logins through its management socket, checked as portitor-config checks a login, against the document's users and `Directory` (`openvpn.go`), the VRFs' source rules and sysctls for the firewall's services (`vrf.go`), status (the host's memory, CPU times, load and disk use from /proc and statfs, `host.go`), API server |
 | `internal/dhcpd` | The DHCPv4 and DHCPv6 server and the IPv6 router advertisements, `portitor-agent dhcpd <instance>` (`portitor-dhcpd@.service`, every instance's, as the user `portitor-dhcp`): the DHCPv4 wire format read tolerantly and written as clients expect (`packet4.go`), the handlers as pure functions over the store and a clock (`v4.go`, `v6.go`), the append-only lease log (`store.go`), the ARP check before an offer (`probe.go`), sockets per interface, reload and the control socket (`run.go`), the replication to an HA standby (`repl.go`), and the router advertisements (`ra.go`: the message, the timing and the deprecation of a removed prefix as pure functions; `rarun.go`: a raw ICMPv6 socket and goroutine per interface) |
@@ -39,7 +45,7 @@ are in [README.md](README.md).
 | `web/frontend` | Vue SPA; `CrudPage.vue` drives most pages from field/column schemas |
 | `docs` | User guides; every `docs/*.md` is bundled into the GUI's Help page (`src/docs.js`), and links between them stay in the GUI |
 | `deploy` | systemd units and example configs |
-| `dev` | Dev configs and `seed.sh`; `dev/lab` runs a real apply in two podman containers |
+| `dev` | Dev configs and `seed.sh`; `dev/lab` runs a real apply in two podman containers; `dev/yanggen` drafted `yang/` from the tables |
 | `install.py` | Installs/updates a firewall (agent and portitor-config) and portitor-web (the portal) from a GitHub release (`.goreleaser.yaml`), `--source` or `--local`; moves an old portitor-web's database to portitor-config on the same host (`move_web_database`) and lists it in that host's `web.yaml` (`link_local_config`), or, from a host of its own, to the firewall its database deploys to (`old_web_database`, `move_remote_database`, `link_remote_config`); the agent runs its copy in `/usr/lib/portitor` for GUI updates |
 | `iso` | Installer ISO: Debian netinst + preseed (`build.sh`), setup (`portitor-setup.py`, installed as `portitor-setup`: runs `portitor-config bootstrap` at first boot, `--reconfigure` when run again; role `agent` is the same firewall, ending with a portal string for portitor-web, role `web` portitor-web alone, which adds a firewall with `--join`; roles `primary` and `secondary` an HA pair: the secondary only its HA link and management, ending with a secondary string (its agent's token) that the primary's `--join` adds and commits), QEMU test VM (`vm.sh`), end-to-end tests (`test.sh`, `test-split.sh`, `test-update.sh`, `make iso-e2e`) |
 
@@ -203,6 +209,26 @@ docs and user-facing messages.
   (`ConsoleRequest`); the user rides in the request's context, which no network
   request carries, and every API check applies. Running them takes access to the
   database (root, or the service user).
+- **Configuration tree and CLI** (`yang/`, `internal/schema`, `internal/datastore`,
+  `internal/datastore/sqlmap`, `internal/cli`, `web/datastore.go`; design and phases
+  in `dev/design-model-driven.md`, user guide `docs/cli.md`): the YANG modules are the
+  configuration's schema; the CLI (SR Linux style) takes its commands, help and
+  completion from it. Its sessions share a candidate (`datastore.Store`,
+  `candidate.json` next to the database), the tables' configuration (`sqlmap.Import`,
+  by the modules' `px:` extensions) with their edits, rebased when the tables change.
+  A commit checks it against the schema, writes it into the tables (`sqlmap.Write`,
+  keeping row ids by path) and runs `deploy`, restoring the tables when that fails;
+  running is the live commit's snapshot. `portitor-config cli` is the console admin's;
+  `ssh_listen` serves it over SSH to the GUI's users (`cliLogin`: `authenticateUser`,
+  two-factor codes, the login limits), with their access by path (`treeAccess`), and
+  NETCONF as its `netconf` subsystem (`internal/netconf`, sharing the candidate and
+  the locks). The state is `config false` YANG (`portitor-state.yang`: `system-state`,
+  each instance's `state`; `schema.Node.State`, read-only to every edit, skipped by
+  validation, diff and sqlmap), filled by `web/state.go` from the API's live views
+  requested as the user (`requestAs`), so tenant-filtered; its leaves are named after
+  the agent API's JSON fields, which `datastore.Fill` maps. Not
+  in the tree: users, roles, firewalls, the directory, deployments. The GUI and the
+  API don't use it yet (phase 4).
 - **Revert** discards uncommitted database edits by restoring the live
   commit's snapshot (`<db dir>/deployed/<commit>.db`, `liveCommit`); the newest
   `snapshotKeep` are kept, with each firewall's live document
@@ -683,7 +709,9 @@ the certificate portitor-config serves, chosen under Settings
   `foreign_keys` off around it. Ids are `AUTOINCREMENT` so a deleted row's id is
   never reused (rule ids mark connections). A data move SQL cannot compute (prefix
   containment, say) is a Go migration registered in `dbmigrate.provider`
-  (`interface_addresses.go`).
+  (`interface_addresses.go`). A new configuration table or column also gets its list
+  or leaf in `yang/` (see Configuration tree); a table that is not configuration goes
+  in `notConfiguration` (`internal/datastore/sqlmap`).
 - **Roles:** a user is `admin`, `viewer` or `none` (`models.RoleAdmin`/`RoleViewer`/
   `RoleNone`): global access. Roles (`roles`, `role_members`, `role_instances`) grant
   instances at a level (admin/viewer); each instance but the default has its own
@@ -795,7 +823,9 @@ singular); a custom page uses `SearchInput` above each table,
 2. Render them in `internal/render` (with a test; `nft -c` covers syntax).
 3. Apply them in `internal/agent` if they need more than a file.
 4. Migration + model, `builder.Build` mapping, entry checks in `web/resources.go`.
-5. A page or fields in `web/frontend` (most pages are a `CrudPage` schema).
+5. The leaves (or list) in `yang/` with their `px:` mapping, which puts them in the
+   CLI (`TestEveryColumnMapped` fails until they are there).
+6. A page or fields in `web/frontend` (most pages are a `CrudPage` schema).
 
 ## Licence
 

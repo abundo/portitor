@@ -1,0 +1,182 @@
+// SPDX-FileCopyrightText: 2026 The Portitor contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+submodule portitor-firewall {
+  yang-version 1.1;
+  belongs-to portitor { prefix pt; }
+  import portitor-extensions { prefix px; }
+
+  description "Portitor configuration: firewall.";
+
+  revision 2026-11-08 { description "First version, from the SQLite schema."; }
+
+  grouping firewall {
+    list rule {
+      key "id";
+      ordered-by user;
+      px:position "position";
+      px:table "rules";
+      px:parent-column "instance_id";
+      description "A filter rule. The id is the rule's: accepted connections are marked with it, so a new rule takes an id never used before.";
+      leaf id {
+        type uint32;
+      }
+      leaf kind {
+        type string;
+        description "Kind is empty for a rule, RuleKindComment for a comment row or RuleKindGroup for a group section heading; both keep their text in Description and only annotate the list. A group holds the rows below it up to the next group (the GUI folds them).";
+      }
+      leaf chain {
+        type enumeration { enum "input"; enum "forward"; enum "output"; }
+        mandatory true;
+      }
+      leaf-list in-interfaces {
+        type union { type leafref { path "../../interface/name"; } type leafref { path "../../interface-zone/name"; } type string; }
+        ordered-by user;
+        description "InInterfaces and OutInterfaces hold interface and interface zone names of the instance; empty matches any.";
+      }
+      leaf-list out-interfaces {
+        type union { type leafref { path "../../interface/name"; } type leafref { path "../../interface-zone/name"; } type string; }
+        ordered-by user;
+      }
+      leaf family {
+        type string;
+      }
+      leaf-list src-addrs {
+        type union { type leafref { path "../../../host/name"; } type leafref { path "../../../address-list/name"; } type string; }
+        ordered-by user;
+      }
+      leaf-list dst-addrs {
+        type union { type leafref { path "../../../host/name"; } type leafref { path "../../../address-list/name"; } type string; }
+        ordered-by user;
+      }
+      leaf action {
+        type enumeration { enum "accept"; enum "drop"; enum "reject"; }
+        default "accept";
+      }
+      leaf log {
+        type boolean;
+      }
+      leaf enabled {
+        type boolean;
+        default true;
+      }
+      leaf description {
+        type string;
+      }
+      leaf-list services {
+        type union { type leafref { path "../../../service/name"; } type string; }
+        ordered-by user;
+        description "Services holds names of services (custom or predefined); empty matches any protocol.";
+      }
+      leaf rate-limit {
+        type leafref { path "../../rate-limit/name"; }
+        description "RateLimit names one of the instance's rate limits; empty is none.";
+      }
+      leaf syn-proxy {
+        type boolean;
+        description "SynProxy answers a forward accept rule's TCP handshakes with SYN cookies (fwconfig.SynProxy); SynProxyMSS 0 is the default.";
+      }
+      leaf syn-proxy-mss {
+        type int32;
+      }
+      leaf syn-proxy-wscale {
+        type int32;
+        default 7;
+      }
+    }
+    list nat-rule {
+      key "id";
+      ordered-by user;
+      px:position "position";
+      px:table "nat_rules";
+      px:parent-column "instance_id";
+      leaf id {
+        type uint32;
+      }
+      leaf kind {
+        type enumeration { enum "masquerade"; enum "snat"; enum "dnat"; }
+        mandatory true;
+      }
+      leaf-list in-interfaces {
+        type union { type leafref { path "../../interface/name"; } type leafref { path "../../interface-zone/name"; } type string; }
+        ordered-by user;
+      }
+      leaf-list out-interfaces {
+        type union { type leafref { path "../../interface/name"; } type leafref { path "../../interface-zone/name"; } type string; }
+        ordered-by user;
+      }
+      leaf protocol {
+        type string;
+      }
+      leaf-list src-addrs {
+        type union { type leafref { path "../../../host/name"; } type leafref { path "../../../address-list/name"; } type string; }
+        ordered-by user;
+      }
+      leaf-list dst-addrs {
+        type union { type leafref { path "../../../host/name"; } type leafref { path "../../../address-list/name"; } type string; }
+        ordered-by user;
+      }
+      leaf dst-ports {
+        type string;
+      }
+      leaf to-addr {
+        type string;
+      }
+      leaf to-port {
+        type int32;
+      }
+      leaf enabled {
+        type boolean;
+        default true;
+      }
+      leaf description {
+        type string;
+      }
+      leaf hairpin {
+        type boolean;
+      }
+    }
+    list rate-limit {
+      key "name";
+      px:table "rate_limits";
+      px:parent-column "instance_id";
+      description "RateLimit limits the traffic of the rules that name it (fwconfig.RateLimit).";
+      leaf name {
+        type string;
+      }
+      leaf description {
+        type string;
+      }
+      leaf rate {
+        type int32;
+        default 10;
+      }
+      leaf per {
+        type string;
+        default "second";
+      }
+      leaf unit {
+        type string;
+        description "\"\" (packets), bytes, kbytes, mbytes, kbit, mbit";
+      }
+      leaf burst {
+        type int32;
+      }
+      leaf per-source {
+        type boolean;
+      }
+      leaf connections {
+        type boolean;
+        description "Connections polices all the traffic of the connections the rules accept, and drops what is over the limit (fwconfig.RateLimit).";
+      }
+      leaf shape {
+        type boolean;
+        description "Shape queues the traffic of those connections to the rate instead.";
+      }
+      leaf service {
+        type string;
+        description "Service, when set, makes it the rate limit of that service of the instance (dns, dhcp, ntp; serviceRateLimits in web), which it polices with while switched on there; the API can't change it.";
+      }
+    }
+  }
+}

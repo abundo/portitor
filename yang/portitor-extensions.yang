@@ -1,0 +1,80 @@
+// SPDX-FileCopyrightText: 2026 The Portitor contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+module portitor-extensions {
+  yang-version 1.1;
+  namespace "urn:portitor:extensions";
+  prefix px;
+
+  description
+    "Extensions of Portitor's YANG modules. secret is for good. The others
+     map the configuration onto the SQLite tables it is stored in while
+     portitor-config still reads those (dev/design-model-driven.md); they
+     go with the tables.";
+
+  revision 2026-11-08 { description "First version."; }
+
+  extension secret {
+    description
+      "The leaf is a secret: it can be set, never read back (as
+       nacm:default-deny-all). The CLI shows it as set or not.";
+  }
+
+  extension table {
+    argument name;
+    description "The list's entries are the rows of this table.";
+  }
+
+  extension singleton {
+    argument id;
+    description "The container is the row of its table with this id.";
+  }
+
+  extension parent-column {
+    argument name;
+    description "The column that holds the row id of the parent list's entry.";
+  }
+
+  extension position {
+    argument column;
+    description "An ordered-by user list's order is this column (0, 1, 2, ...).";
+  }
+
+  extension column {
+    argument name;
+    description
+      "The leaf's column, when it holds a row id: of the entry the leafref
+       points at, of the px:global-ref entry, or of the px:external row.";
+  }
+
+  extension external {
+    argument table;
+    description "The leaf names a row of this table, which is not configuration (firewalls, roles).";
+  }
+
+  extension global-ref {
+    argument path;
+    description
+      "The leaf names an entry at path (relative, as a leafref's), or one
+       with global true in another instance.";
+  }
+
+  extension null-value {
+    argument value;
+    description "This value of the leaf stands for NULL in its column.";
+  }
+
+  extension nullable {
+    description "An absent leaf is NULL in its column, not the default.";
+  }
+
+  extension json {
+    argument column;
+    description "The list's entries are a JSON array of objects in this column of the parent's row.";
+  }
+
+  extension json-map {
+    argument column;
+    description "The list's entries (name, value) are a JSON object in this column of the parent's row.";
+  }
+}

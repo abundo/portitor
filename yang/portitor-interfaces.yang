@@ -1,0 +1,352 @@
+// SPDX-FileCopyrightText: 2026 The Portitor contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+submodule portitor-interfaces {
+  yang-version 1.1;
+  belongs-to portitor { prefix pt; }
+  import portitor-extensions { prefix px; }
+
+  description "Portitor configuration: interfaces.";
+
+  revision 2026-11-08 { description "First version, from the SQLite schema."; }
+
+  grouping interfaces {
+    list interface {
+      key "name";
+      px:table "interfaces";
+      px:parent-column "instance_id";
+      leaf name {
+        type string;
+      }
+      leaf kind {
+        type enumeration { enum "physical"; enum "vlan"; enum "bridge"; enum "wireguard"; enum "loopback"; enum "6in4"; enum "vxlan"; enum "openvpn"; }
+        default "physical";
+      }
+      leaf description {
+        type string;
+      }
+      leaf enabled {
+        type boolean;
+        default true;
+      }
+      leaf parent {
+        type leafref { path "../../interface/name"; }
+      }
+      leaf vlan-id {
+        type int32;
+      }
+      leaf-list members {
+        type leafref { path "../../interface/name"; }
+        ordered-by user;
+      }
+      leaf mtu {
+        type int32;
+      }
+      leaf ipv4-mode {
+        type enumeration { enum "static"; enum "dhcp"; enum "none"; }
+        default "static";
+      }
+      leaf ipv6-accept-ra {
+        type boolean;
+      }
+      leaf dns-listen {
+        type boolean;
+        description "DnsListen makes the instance's DNS server answer on this interface.";
+      }
+      leaf wg-private-key {
+        type string;
+        px:secret;
+      }
+      leaf wg-public-key {
+        type string;
+      }
+      leaf wg-listen-port {
+        type int32;
+      }
+      leaf wg-endpoint {
+        type string;
+        description "WgEndpoint (host:port) and WgKeepalive go into generated client configs. An empty endpoint falls back to Settings.WgEndpointHost and the listen port.";
+      }
+      leaf wg-keepalive {
+        type int32;
+        default 25;
+      }
+      leaf dhcp-no-default-route {
+        type boolean;
+        description "DhcpNoDefaultRoute ignores the router of the DHCP lease.";
+      }
+      leaf label {
+        type string;
+        description "Label is a short name the GUI shows before the interface name.";
+      }
+      leaf-list addresses {
+        type string;
+        ordered-by user;
+        description "Addresses are the interface's static addresses in CIDR form with a host part (192.168.1.1/24, fd00:1::1/64), IPv4 and IPv6 mixed.";
+      }
+      leaf dns-from-dhcp {
+        type boolean;
+        description "DnsFromDhcp: with DNS upstream dhcp, the DNS servers of this interface's DHCP lease are the forwarders. At most one per instance.";
+      }
+      leaf dhcpv6 {
+        type boolean;
+        description "Dhcpv6 runs a DHCPv6 client; Dhcpv6Pd also asks for a delegated prefix, of Dhcpv6PdLength bits (0: the server chooses).";
+      }
+      leaf dhcpv6-pd {
+        type boolean;
+      }
+      leaf dhcpv6-pd-length {
+        type int32;
+      }
+      leaf lldp {
+        type boolean;
+        description "Lldp sends LLDP on the interface and lists its LLDP neighbours (physical, VLAN and bridge interfaces).";
+      }
+      leaf shape-egress {
+        type int32;
+        description "ShapeEgress and ShapeIngress shape what the interface sends and receives with CAKE, in Mbit/s; 0 is not shaped.";
+      }
+      leaf shape-ingress {
+        type int32;
+      }
+      leaf xlat464 {
+        type boolean;
+        description "Xlat464 announces the instance's NAT64 prefix in the interface's router advertisements (PREF64), for clients with a 464XLAT CLAT.";
+      }
+      leaf ntp-serve {
+        type boolean;
+        description "NtpServe answers NTP clients on this interface (Instance.NtpAllow).";
+      }
+      leaf snmp-serve {
+        type boolean;
+        description "SnmpServe answers SNMP requests on this interface (Instance.SnmpAllow).";
+      }
+      leaf tunnel-remote {
+        type string;
+        description "A 6in4 tunnel's server (IPv4) and local address (empty: any).";
+      }
+      leaf tunnel-local {
+        type string;
+      }
+      leaf he-tunnel-id {
+        type string;
+        description "The Hurricane Electric tunnel broker account that keeps the tunnel's endpoint up to date; an empty HeTunnelID is none. HeUpdateKey is a secret, set through NewHeUpdateKey (empty keeps it).";
+      }
+      leaf he-username {
+        type string;
+      }
+      leaf he-update-key {
+        type string;
+        px:secret;
+      }
+      leaf tunnel-default-route {
+        type boolean;
+        description "TunnelDefaultRoute routes IPv6 (::/0) through the tunnel.";
+      }
+      leaf vxlan-vni {
+        type uint32;
+        description "A VXLAN's VNI, local VTEP address, underlay interface (empty: as routed), UDP port (0: 4789) and remote VTEPs (fwconfig.VXLAN).";
+      }
+      leaf vxlan-local {
+        type string;
+      }
+      leaf vxlan-device {
+        type leafref { path "../../interface/name"; }
+      }
+      leaf vxlan-port {
+        type int32;
+      }
+      leaf-list vxlan-remotes {
+        type string;
+        ordered-by user;
+      }
+      leaf vrf {
+        type leafref { path "../../vrf/name"; }
+        description "Vrf is the name of the VRF the interface is in; \"\" is main.";
+      }
+      leaf acme-proxy-serve {
+        type boolean;
+        description "AcmeProxyServe answers ACME clients on this interface (Instance.AcmeProxyEnabled).";
+      }
+      leaf-list peer-addresses {
+        type string;
+        ordered-by user;
+        description "PeerAddresses are the HA secondary's static addresses in place of Addresses, one each, in the same prefixes, on an interface with an HaRole: all else is the same on both hosts.";
+      }
+      leaf ovpn-mode {
+        type string;
+        default "adaptive";
+        description "An OpenVPN server's (fwconfig.OpenVPN): mode, port, the interface clients come in on (empty: any), the TCP tunnel's addresses in the adaptive mode (Addresses are then the UDP tunnel's) and its certificate. Its users are the directory's, with OvpnRequireRole only the members of OvpnRoleID (none when the role is gone). OvpnTlsCrypt is the static key, a secret generated here that clients get in their config. OvpnHost is the name clients connect to. OvpnTwoFactor asks for a TOTP code too (fwconfig.OpenVPNTwoFactors).";
+      }
+      leaf ovpn-port {
+        type int32;
+        default 1194;
+      }
+      leaf ovpn-listen {
+        type string;
+      }
+      leaf ovpn-certificate {
+        type leafref { path "../../certificate/name"; }
+        px:column "ovpn_certificate_id";
+      }
+      leaf ovpn-tls-crypt {
+        type string;
+        px:secret;
+      }
+      leaf ovpn-require-role {
+        type boolean;
+      }
+      leaf ovpn-role {
+        type string;
+        px:external "roles";
+        px:column "ovpn_role_id";
+      }
+      leaf-list ovpn-routes {
+        type string;
+        ordered-by user;
+      }
+      leaf ovpn-redirect-gateway {
+        type boolean;
+      }
+      leaf-list ovpn-dns {
+        type string;
+        ordered-by user;
+      }
+      leaf ovpn-dns-domain {
+        type string;
+      }
+      leaf ovpn-client-to-client {
+        type boolean;
+      }
+      leaf ovpn-host {
+        type string;
+      }
+      leaf-list ovpn-tcp-addresses {
+        type string;
+        ordered-by user;
+      }
+      leaf ovpn-two-factor {
+        type string;
+      }
+      leaf mss-clamp {
+        type boolean;
+        description "MssClamp lowers the MSS of the forwarded TCP SYNs through the interface to MssClampValue (0: from the route's MTU); Rpf drops what comes in from a source not routed back by it (fwconfig.Interface).";
+      }
+      leaf mss-clamp-value {
+        type int32;
+      }
+      leaf rpf {
+        type boolean;
+      }
+      leaf ha-role {
+        type string;
+        description "HaRole makes it one of an HA pair's own two links (fwconfig.Interface.HARole); HaGateway is the management one's gateway.";
+      }
+      leaf ha-gateway {
+        type string;
+      }
+      leaf ha-monitor {
+        type boolean;
+        default true;
+        description "HaMonitor counts the carrier of a traffic interface on a pair: the standby takes over when it has more of them up.";
+      }
+      leaf delegated-dhcp {
+        type boolean;
+        description "DelegatedDhcp serves DHCPv6 in the /64 of each of the interface's addresses in a delegated prefix (<wan0>:2000::1/64), from DelegatedRangeStart to DelegatedRangeEnd: host parts, the low 64 bits (\"::1000\"); empty is reservations only. DelegatedSlaac lets clients pick their own addresses there too (the RA's A flag).";
+      }
+      leaf delegated-range-start {
+        type string;
+      }
+      leaf delegated-range-end {
+        type string;
+      }
+      leaf delegated-slaac {
+        type boolean;
+        default true;
+      }
+      list wireguard-peer {
+        key "public-key";
+        px:table "wg_peers";
+        px:parent-column "interface_id";
+        leaf public-key {
+          type string;
+        }
+        leaf name {
+          type string;
+          mandatory true;
+        }
+        leaf description {
+          type string;
+        }
+        leaf enabled {
+          type boolean;
+          default true;
+        }
+        leaf preshared-key {
+          type string;
+          px:secret;
+        }
+        leaf endpoint {
+          type string;
+        }
+        leaf-list allowed-ips {
+          type string;
+          ordered-by user;
+        }
+        leaf keepalive {
+          type int32;
+        }
+        leaf client-private-key {
+          type string;
+          px:secret;
+          description "ClientPrivateKey is kept only when the key pair was generated here, so a complete client config can be exported.";
+        }
+        leaf-list networks {
+          type string;
+          ordered-by user;
+          description "Networks behind a site peer: routed through the interface.";
+        }
+      }
+    }
+    list interface-zone {
+      key "name";
+      px:table "interface_zones";
+      px:parent-column "instance_id";
+      description "InterfaceZone is a named group of zero or more interfaces of an instance, by name (link ends included). Rules and NAT rules list interface and interface zone names.";
+      leaf name {
+        type string;
+      }
+      leaf description {
+        type string;
+      }
+      leaf-list interfaces {
+        type union { type leafref { path "../../interface/name"; } type string; }
+        ordered-by user;
+      }
+    }
+    list static-neighbour {
+      key "interface address";
+      px:table "static_neighbours";
+      px:parent-column "instance_id";
+      description "StaticNeighbour is a permanent ARP (IPv4 Address) or ND (IPv6) entry on an interface (fwconfig.StaticNeighbour). Disabled, it is left out.";
+      leaf interface {
+        type leafref { path "../../interface/name"; }
+        px:column "interface_id";
+      }
+      leaf address {
+        type string;
+      }
+      leaf mac {
+        type string;
+        mandatory true;
+      }
+      leaf enabled {
+        type boolean;
+        default true;
+      }
+      leaf description {
+        type string;
+      }
+    }
+  }
+}

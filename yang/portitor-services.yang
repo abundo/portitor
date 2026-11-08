@@ -1,0 +1,525 @@
+// SPDX-FileCopyrightText: 2026 The Portitor contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+submodule portitor-services {
+  yang-version 1.1;
+  belongs-to portitor { prefix pt; }
+  import portitor-extensions { prefix px; }
+
+  description "Portitor configuration: services.";
+
+  revision 2026-11-08 { description "First version, from the SQLite schema."; }
+
+  grouping services {
+    list ipam-prefix {
+      key "prefix";
+      px:table "ipam_prefixes";
+      px:parent-column "instance_id";
+      description "IpamPrefix is a node in the prefix tree. Parent/child relations are not stored; they follow from CIDR containment within an instance.";
+      leaf prefix {
+        type string;
+      }
+      leaf description {
+        type string;
+      }
+      leaf dhcp-enabled {
+        type boolean;
+      }
+      leaf dhcp-range-start {
+        type string;
+      }
+      leaf dhcp-range-end {
+        type string;
+      }
+      leaf dhcp-gateway {
+        type string;
+      }
+      leaf-list dhcp-dns-servers {
+        type string;
+        ordered-by user;
+      }
+      leaf ra-enabled {
+        type boolean;
+        description "RaEnabled sends IPv6 router advertisements for the prefix on the interface that has an address in it; RaSlaac lets clients pick their own address (/64 only).";
+      }
+      leaf ra-slaac {
+        type boolean;
+      }
+    }
+    list ipam-address {
+      key "address";
+      px:table "ipam_addresses";
+      px:parent-column "instance_id";
+      description "IpamAddress is a single address. With DnsName it gets an A/AAAA record; with Mac also a DHCP reservation. The firewall's own addresses are configured on the interface (Interface.Addresses).";
+      leaf address {
+        type string;
+      }
+      leaf dns-name {
+        type string;
+      }
+      leaf mac {
+        type string;
+      }
+      leaf description {
+        type string;
+      }
+    }
+    list dns-soa-template {
+      key "name";
+      px:table "dns_soa_templates";
+      px:parent-column "instance_id";
+      description "DnsSoaTemplate belongs to an instance; Global (the default instance's only) lends it to all, read-only. Minimum is the SOA minimum (negative-caching TTL); the serial is dnsmgr2's.";
+      leaf name {
+        type string;
+      }
+      leaf global {
+        type boolean;
+      }
+      leaf mname {
+        type string;
+        mandatory true;
+      }
+      leaf rname {
+        type string;
+        mandatory true;
+      }
+      leaf refresh {
+        type int64;
+        default 86400;
+      }
+      leaf retry {
+        type int64;
+        default 7200;
+      }
+      leaf expire {
+        type int64;
+        default 3600000;
+      }
+      leaf minimum {
+        type int64;
+        default 3600;
+      }
+    }
+    list dnssec-policy {
+      key "name";
+      px:table "dns_dnssec_policies";
+      px:parent-column "instance_id";
+      description "DnsDnssecPolicy belongs to an instance, and may be Global as a DnsSoaTemplate.";
+      leaf name {
+        type string;
+      }
+      leaf global {
+        type boolean;
+      }
+      leaf ksk-lifetime {
+        type string;
+      }
+      leaf ksk-algorithm {
+        type string;
+        mandatory true;
+      }
+      leaf zsk-lifetime {
+        type string;
+      }
+      leaf zsk-algorithm {
+        type string;
+        mandatory true;
+      }
+      leaf purge-keys {
+        type string;
+      }
+      leaf signatures-validity {
+        type string;
+      }
+      leaf signatures-validity-dnskey {
+        type string;
+      }
+      leaf signatures-refresh {
+        type string;
+      }
+    }
+    list dns-template {
+      key "name";
+      px:table "dns_templates";
+      px:parent-column "instance_id";
+      description "DnsTemplate is a zone template: SOA, default TTL, apex NS and an optional DNSSEC policy, of its instance or global. It belongs to an instance, and may be Global as a DnsSoaTemplate (then its SOA and policy are global too).";
+      leaf name {
+        type string;
+      }
+      leaf global {
+        type boolean;
+      }
+      leaf soa-template {
+        type string;
+        px:global-ref "../../dns-soa-template/name";
+        px:column "soa_template_id";
+      }
+      leaf default-ttl {
+        type int64;
+        default 3600;
+      }
+      leaf dnssec-policy {
+        type string;
+        px:global-ref "../../dnssec-policy/name";
+        px:column "dnssec_policy_id";
+      }
+      list nameserver {
+        key "name address";
+        ordered-by user;
+        px:json "nameservers";
+        leaf name {
+          type string;
+        }
+        leaf address {
+          type string;
+        }
+      }
+      leaf description {
+        type string;
+      }
+    }
+    list dns-zone {
+      key "name";
+      px:table "dns_zones";
+      px:parent-column "instance_id";
+      leaf name {
+        type string;
+      }
+      leaf type {
+        type string;
+        default "forward";
+      }
+      leaf description {
+        type string;
+      }
+      leaf dns-template {
+        type string;
+        px:global-ref "../../dns-template/name";
+        px:column "dns_template_id";
+        description "DnsTemplateID nil: built-in SOA and NS (localhost).";
+      }
+      leaf-list forwarders {
+        type string;
+        ordered-by user;
+        description "Forwarders: the DNS servers of a forward-only zone (addresses or named hosts).";
+      }
+      list record {
+        key "id";
+        ordered-by user;
+        px:position "rank";
+        px:table "dns_records";
+        px:parent-column "zone_id";
+        description "DnsRecord is one row of a zone's record grid, in Rank order. Type COMMENT (text in Value) and $DOMAIN (a subdomain in Name, applied to the rows below it) are editor-only; see builder.RecordName.";
+        leaf id {
+          type uint32;
+        }
+        leaf name {
+          type string;
+          mandatory true;
+        }
+        leaf ttl {
+          type int64;
+        }
+        leaf type {
+          type string;
+          mandatory true;
+        }
+        leaf value {
+          type string;
+          mandatory true;
+        }
+        leaf mac {
+          type string;
+        }
+        leaf description {
+          type string;
+        }
+      }
+    }
+    list dns-blocklist {
+      key "name";
+      px:table "dns_blocklists";
+      px:parent-column "instance_id";
+      description "DnsBlocklist is a list of domains the instance's DNS server does not resolve (fwconfig.DNSBlocklist), which the agent downloads from Urls.";
+      leaf name {
+        type string;
+      }
+      leaf description {
+        type string;
+      }
+      leaf enabled {
+        type boolean;
+        default true;
+      }
+      leaf-list urls {
+        type string;
+        ordered-by user;
+      }
+      leaf auth-key {
+        type string;
+        px:secret;
+        description "AuthKey fills {key} in the URLs. It is set through NewAuthKey (empty keeps it, ClearAuthKey removes it) and never sent back.";
+      }
+      leaf action {
+        type string;
+        default "nxdomain";
+        description "fwconfig.Blocklist*";
+      }
+      leaf refresh {
+        type int32;
+        default 720;
+        description "minutes between downloads";
+      }
+    }
+    list dns-update {
+      key "name";
+      px:table "dyndns_clients";
+      px:parent-column "instance_id";
+      description "DyndnsClient (a DNS update client) keeps DyndnsRecords in step with the addresses of an interface of its instance: on the nameserver Server by RFC 2136 UPDATE, or through the API of a DNS hosting Provider.";
+      leaf name {
+        type string;
+      }
+      leaf description {
+        type string;
+      }
+      leaf enabled {
+        type boolean;
+        default true;
+      }
+      leaf interface {
+        type leafref { path "../../interface/name"; }
+        px:column "interface_id";
+      }
+      leaf server {
+        type string;
+        mandatory true;
+      }
+      leaf zone {
+        type string;
+        mandatory true;
+      }
+      leaf tsig-name {
+        type string;
+      }
+      leaf tsig-algorithm {
+        type string;
+      }
+      leaf tsig-secret {
+        type string;
+        px:secret;
+        description "TsigSecret is set through NewTsigSecret and never sent back.";
+      }
+      leaf retry-interval {
+        type int32;
+      }
+      leaf verify-interval {
+        type int32;
+      }
+      leaf provider {
+        type string;
+        default "rfc2136";
+        description "Provider is a fwconfig.DNSProviders name.";
+      }
+      list provider-setting {
+        key "name";
+        px:json-map "provider_settings";
+        description "ProviderSettings are the provider's fields, secrets included; never sent back. They are written through Settings.";
+        leaf name { type string; }
+        leaf value { type string; px:secret; }
+      }
+      list record {
+        key "id";
+        px:table "dyndns_records";
+        px:parent-column "client_id";
+        description "DyndnsRecord is a record a DyndnsClient maintains. A/AAAA without Value follow the interface; TXT without Value holds the last update time.";
+        leaf id {
+          type uint32;
+        }
+        leaf name {
+          type string;
+          mandatory true;
+        }
+        leaf type {
+          type string;
+          mandatory true;
+        }
+        leaf ttl {
+          type int32;
+        }
+        leaf value {
+          type string;
+        }
+        leaf description {
+          type string;
+        }
+      }
+    }
+    list certificate {
+      key "name";
+      px:table "certificates";
+      px:parent-column "instance_id";
+      description "Certificate is a TLS certificate the agent gets from an ACME CA (Let's Encrypt) and renews, the CA's HTTP-01 requests coming in on Interface; or one imported with its key (Source fwconfig.CertSourceImport), which has no ACME settings and no interface.";
+      leaf name {
+        type string;
+      }
+      leaf description {
+        type string;
+      }
+      leaf enabled {
+        type boolean;
+        default true;
+      }
+      leaf source {
+        type string;
+        default "acme";
+      }
+      leaf-list domains {
+        type string;
+        ordered-by user;
+        description "Domains of an imported certificate are its SANs, read from it.";
+      }
+      leaf common-name {
+        type string;
+      }
+      leaf email {
+        type string;
+      }
+      leaf ca {
+        type string;
+        default "letsencrypt";
+        description "Ca is a fwconfig.ACMECAs name or an ACME directory URL.";
+      }
+      leaf key-type {
+        type string;
+        default "ec256";
+      }
+      leaf challenge {
+        type string;
+        default "http-01";
+      }
+      leaf interface {
+        type leafref { path "../../interface/name"; }
+        px:column "interface_id";
+        description "InterfaceID is HTTP-01's, DyndnsClientID DNS-01's: the DNS update client whose provider writes the TXT records.";
+      }
+      leaf full-chain {
+        type string;
+        description "FullChain and PrivKey are an imported certificate's PEM chain and key. The key is set through NewPrivKey and never shown.";
+      }
+      leaf priv-key {
+        type string;
+        px:secret;
+      }
+      leaf dns-update {
+        type leafref { path "../../dns-update/name"; }
+        px:column "dyndns_client_id";
+      }
+    }
+    list acme-proxy-policy {
+      key "name";
+      px:table "acme_proxy_policies";
+      px:parent-column "instance_id";
+      description "AcmeProxyPolicy allows the ACME proxy's clients in Sources (any when empty; hosts/prefixes by name) names in Domains (\"host.example.com\", or \"*.example.com\" for any name below it), got upstream by Challenge: DNS-01, whose TXT records the DyndnsClient's provider writes, or HTTP-01, answered by the firewall on port 80 of the Interface. Policies are tried by name; a disabled one is left out.";
+      leaf name {
+        type string;
+      }
+      leaf enabled {
+        type boolean;
+        default true;
+      }
+      leaf description {
+        type string;
+      }
+      leaf-list domains {
+        type string;
+        ordered-by user;
+      }
+      leaf-list sources {
+        type string;
+        ordered-by user;
+      }
+      leaf challenge {
+        type string;
+        default "dns-01";
+      }
+      leaf interface {
+        type leafref { path "../../interface/name"; }
+        px:column "interface_id";
+      }
+      leaf dns-update {
+        type leafref { path "../../dns-update/name"; }
+        px:column "dyndns_client_id";
+      }
+    }
+    list snmp-user {
+      key "name";
+      px:table "snmp_users";
+      px:parent-column "instance_id";
+      description "SnmpUser is a read-only SNMPv3 user of an instance. Disabled, it is left out.";
+      leaf name {
+        type string;
+      }
+      leaf enabled {
+        type boolean;
+        default true;
+      }
+      leaf description {
+        type string;
+      }
+      leaf auth-protocol {
+        type string;
+        default "SHA-256";
+      }
+      leaf auth-password {
+        type string;
+        px:secret;
+      }
+      leaf priv-protocol {
+        type string;
+        default "AES";
+        description "PrivProtocol empty: authentication only (authNoPriv).";
+      }
+      leaf priv-password {
+        type string;
+        px:secret;
+      }
+    }
+    list syslog-server {
+      key "id";
+      px:table "syslog_servers";
+      px:parent-column "instance_id";
+      description "SyslogServer is a remote syslog server rsyslog sends the host's journal to: a server of a firewall's default instance. Disabled, it is left out.";
+      leaf id {
+        type uint32;
+      }
+      leaf enabled {
+        type boolean;
+        default true;
+      }
+      leaf description {
+        type string;
+      }
+      leaf address {
+        type string;
+        mandatory true;
+      }
+      leaf port {
+        type int32;
+        default 514;
+      }
+      leaf protocol {
+        type string;
+        default "udp";
+        description "Protocol, Format and Severity are fwconfig.SyslogProtocols', SyslogFormats' and SyslogSeverities'.";
+      }
+      leaf format {
+        type string;
+        default "rfc3164";
+      }
+      leaf severity {
+        type string;
+        default "info";
+      }
+    }
+  }
+}
