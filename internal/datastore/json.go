@@ -282,3 +282,15 @@ func scalar(raw json.RawMessage) (string, error) {
 	}
 	return "", fmt.Errorf("not a value: %s", raw)
 }
+
+// LeafValue is a leaf's value as RFC 7951 JSON writes it.
+func LeafValue(s *schema.Node, v string) any { return leafJSON(s, v) }
+
+// LeafValues is a leaf-list's values as RFC 7951 JSON writes them.
+func LeafValues(s *schema.Node, vs []string) []any {
+	out := make([]any, len(vs))
+	for i, v := range vs {
+		out[i] = leafJSON(s, v)
+	}
+	return out
+}

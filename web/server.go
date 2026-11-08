@@ -229,7 +229,8 @@ func (s *Server) Echo() *echo.Echo {
 	// Instance admins use these too; the handlers check the instance.
 	for _, r := range []string{"PUT /api/dns/zones/:id/records", "POST /api/dns/blocklists/:id/refresh", "POST /api/certificates/:id/renew", "PUT /api/dyndns/clients/:id/records", "POST /api/rules/reorder", "POST /api/nat/reorder", "POST /api/policy-routes/reorder",
 		"POST /api/interfaces/:id/wg-rekey", "POST /api/wg/import", "POST /api/agent/capture", "POST /api/agent/trace", "POST /api/agent/iperf", "POST /api/agent/probe", "POST /api/agent/servicelog", "POST /api/agent/connections", "POST /api/agent/connections/flush", "POST /api/agent/dhcp/renew",
-		"POST /api/deploy/apply", "POST /api/deploy/confirm", "POST /api/deploy/rollback"} {
+		"POST /api/deploy/apply", "POST /api/deploy/confirm", "POST /api/deploy/rollback",
+		"PUT /api/config/*", "PATCH /api/config/*", "POST /api/config/*", "DELETE /api/config/*"} {
 		s.tenantWrites[r] = true
 	}
 	g.PUT("/dns/zones/:id/records", s.handleZoneRecords)
@@ -281,6 +282,14 @@ func (s *Server) Echo() *echo.Echo {
 	g.POST("/firewalls/:id/switchover", s.handleSwitchover)
 	g.GET("/ha", s.handleHAStatus)
 	g.POST("/ha/promote", s.handlePromote)
+	// The configuration on the datastore (configapi.go).
+	g.GET("/schema", s.handleSchema)
+	g.GET("/config/changes", s.handleConfigChanges)
+	g.POST("/config/discard", s.handleConfigDiscard)
+	g.GET("/config/*", s.handleConfigGet)
+	for _, m := range []string{http.MethodPut, http.MethodPatch, http.MethodPost, http.MethodDelete} {
+		g.Add(m, "/config/*", s.handleConfigEdit)
+	}
 	g.GET("/deploy/check", s.handleDeployCheck)
 	g.GET("/deploy/changes", s.handleDeployChanges)
 	g.POST("/deploy/preview", s.handleDeployPreview)

@@ -257,7 +257,7 @@ func (s *Server) syncTables(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		err := next(c)
 		m, path := c.Request().Method, c.Request().URL.Path
-		if err == nil && m != http.MethodGet && m != http.MethodHead && !strings.HasPrefix(path, "/api/deploy/") {
+		if err == nil && m != http.MethodGet && m != http.MethodHead && !strings.HasPrefix(path, "/api/deploy/") && !strings.HasPrefix(path, configPrefix) {
 			if serr := s.syncFromTables(c.Request().Context()); serr != nil {
 				slog.Warn("reading the tables into the candidate", "err", serr)
 			}

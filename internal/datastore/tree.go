@@ -253,6 +253,25 @@ func Resolve(root *schema.Node, p Path) ([]*schema.Node, error) {
 	return out, nil
 }
 
+// ResolveAll is Resolve for a path that may end at a whole list: its last
+// step a list without keys.
+func ResolveAll(root *schema.Node, p Path) ([]*schema.Node, error) {
+	if len(p) > 0 && p[len(p)-1].Keys == nil {
+		parent := root
+		ss, err := Resolve(root, p[:len(p)-1])
+		if err != nil {
+			return nil, err
+		}
+		if len(ss) > 0 {
+			parent = ss[len(ss)-1]
+		}
+		if c := parent.Child(p[len(p)-1].Name); c != nil && c.Kind == schema.List && len(c.Keys) > 0 {
+			return append(ss, c), nil
+		}
+	}
+	return Resolve(root, p)
+}
+
 func nameOf(s *schema.Node) string {
 	if s.Parent == nil {
 		return "the configuration"
@@ -821,6 +840,31 @@ func (t *Tree) RefValues(holder *Node, leaf *schema.Node) []string {
 	for _, tg := range t.targets(holder, leaf) {
 		if v := tg.entry.Leaves[tg.leaf]; !slices.Contains(out, v) {
 			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// Visible is a copy of t without what canRead refuses: by the top-level
+// lists and their entries, and the top-level containers.
+func (t *Tree) Visible(canRead func(Path) bool) *Tree {
+	out := t.Clone()
+	for name, es := range out.Root.Lists {
+		kept := es[:0]
+		for _, e := range es {
+			if canRead(Path{{Name: name, Keys: e.Keys()}}) {
+				kept = append(kept, e)
+			}
+		}
+		if len(kept) == 0 {
+			delete(out.Root.Lists, name)
+		} else {
+			out.Root.Lists[name] = kept
+		}
+	}
+	for name := range out.Root.Containers {
+		if !canRead(Path{{Name: name}}) {
+			delete(out.Root.Containers, name)
 		}
 	}
 	return out

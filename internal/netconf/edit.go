@@ -208,7 +208,7 @@ func (ed *editor) node(here datastore.Path, c *schema.Node, fe *elem, op string,
 			return err
 		}
 		if old != nil {
-			keepSecrets(old, n)
+			datastore.KeepSecrets(old, n)
 		}
 		return nil
 	}
@@ -310,37 +310,6 @@ func nameOf(s *schema.Node) string {
 		return "the configuration"
 	}
 	return s.Name
-}
-
-// keepSecrets copies the secrets of old into new where new has none: a
-// client can't read them back, so a replace without them keeps them.
-func keepSecrets(old, new *datastore.Node) {
-	for name, v := range old.Leaves {
-		if s := old.S.Child(name); s != nil && s.Secret() {
-			if _, ok := new.Leaves[name]; !ok {
-				new.Leaves[name] = v
-			}
-		}
-	}
-	for name, vs := range old.LeafLists {
-		if s := old.S.Child(name); s != nil && s.Secret() {
-			if _, ok := new.LeafLists[name]; !ok {
-				new.LeafLists[name] = slices.Clone(vs)
-			}
-		}
-	}
-	for name, oc := range old.Containers {
-		if nc := new.Containers[name]; nc != nil {
-			keepSecrets(oc, nc)
-		}
-	}
-	for name, es := range old.Lists {
-		for _, oe := range es {
-			if ne := new.Entry(name, oe.Keys()); ne != nil {
-				keepSecrets(oe, ne)
-			}
-		}
-	}
 }
 
 // joinErrors writes problems one per line.

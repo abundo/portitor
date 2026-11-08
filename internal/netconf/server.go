@@ -277,29 +277,9 @@ func (s *session) data(t *datastore.Tree, f *elem, monitoring bool) (string, err
 	return b.String(), nil
 }
 
-// visible is t without what the user may not read: by the top-level
-// lists and their entries, as the CLI's.
+// visible is t without what the user may not read.
 func (s *session) visible(t *datastore.Tree) *datastore.Tree {
-	out := t.Clone()
-	for name, es := range out.Root.Lists {
-		kept := es[:0]
-		for _, e := range es {
-			if s.env.Access.CanRead(datastore.Path{{Name: name, Keys: e.Keys()}}) {
-				kept = append(kept, e)
-			}
-		}
-		if len(kept) == 0 {
-			delete(out.Root.Lists, name)
-		} else {
-			out.Root.Lists[name] = kept
-		}
-	}
-	for name := range out.Root.Containers {
-		if !s.env.Access.CanRead(datastore.Path{{Name: name}}) {
-			delete(out.Root.Containers, name)
-		}
-	}
-	return out
+	return t.Visible(s.env.Access.CanRead)
 }
 
 func (s *session) canWrite(p datastore.Path) bool {
@@ -344,7 +324,7 @@ func (s *session) editConfig(ctx context.Context, op *elem) (string, error) {
 		if err := ed.apply(nil, t.Root.S, cfg.Children, "merge"); err != nil {
 			return err
 		}
-		keepSecrets(old, t.Root)
+		datastore.KeepSecrets(old, t.Root)
 		return nil
 	})
 	if err != nil {
@@ -389,7 +369,7 @@ func (s *session) copyConfig(ctx context.Context, op *elem) (string, error) {
 	err = s.env.Store.Edit(ctx, s.owner, func(t *datastore.Tree) error {
 		old := t.Root
 		t.Root = from.Root.Clone(nil)
-		keepSecrets(old, t.Root)
+		datastore.KeepSecrets(old, t.Root)
 		return nil
 	})
 	if err != nil {
