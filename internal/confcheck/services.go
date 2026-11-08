@@ -358,7 +358,7 @@ func init() {
 }
 
 // normalizeOpenVPN of an OpenVPN interface (from normalizeInterface).
-func normalizeOpenVPN(i *datastore.Node) error {
+func normalizeOpenVPN(c *Ctx, i *datastore.Node) error {
 	clear(i, "peer-addresses") // both hosts of an HA pair have the same
 	if i.Leaf("ovpn-tls-crypt") == "" {
 		key, err := fwconfig.GenerateOpenVPNKey()
@@ -367,11 +367,11 @@ func normalizeOpenVPN(i *datastore.Node) error {
 		}
 		set(i, "ovpn-tls-crypt", key)
 	}
-	// A role set once is required until it is taken away: a deleted role
-	// lets no one in.
+	// A role set once is required until an edit takes it away: a deleted
+	// role, or one left out of a bundle, lets no one in.
 	if i.Leaf("ovpn-role") != "" {
 		set(i, "ovpn-require-role", "true")
-	} else {
+	} else if old := c.old(i); old != nil && old.Leaf("ovpn-role") != "" {
 		clear(i, "ovpn-require-role")
 	}
 	return nil

@@ -261,7 +261,7 @@ func (s *Server) Echo() *echo.Echo {
 	g.GET("/icmp-types", func(c *echo.Context) error {
 		return c.JSON(http.StatusOK, map[string][]fwconfig.ICMPType{"icmp": fwconfig.ICMPTypes, "icmpv6": fwconfig.ICMPv6Types})
 	})
-	g.POST("/wg/import", s.handleWgImport, s.syncAfter)
+	g.POST("/wg/import", s.legacyWrite(s.handleWgImport))
 	g.GET("/schedule/preview", s.handleSchedulePreview)
 
 	g.GET("/settings", s.handleGetSettings)
@@ -281,7 +281,7 @@ func (s *Server) Echo() *echo.Echo {
 
 	// Bundles hold a virtual firewall's secrets: global admins only
 	// (no tenant or viewer write rule, and the GET in viewerDenied).
-	g.POST("/instances/import", s.handleImportBundle, s.syncAfter)
+	g.POST("/instances/import", s.legacyWrite(s.handleImportBundle))
 	g.GET("/firewalls/:id/witness", s.handleWitnessString)
 	g.POST("/firewalls/:id/switchover", s.handleSwitchover)
 	g.GET("/ha", s.handleHAStatus)
@@ -298,7 +298,7 @@ func (s *Server) Echo() *echo.Echo {
 	g.GET("/deploy/changes", s.handleDeployChanges)
 	g.POST("/deploy/preview", s.handleDeployPreview)
 	g.GET("/deploy/nftables", s.handleExportNftables)
-	g.POST("/import/nftables", s.handleImportNftables, s.syncAfter)
+	g.POST("/import/nftables", s.legacyWrite(s.handleImportNftables))
 	g.POST("/deploy/apply", s.handleDeployApply)
 	g.POST("/deploy/confirm", s.handleDeployConfirm)
 	g.POST("/deploy/rollback", s.handleDeployRollback)

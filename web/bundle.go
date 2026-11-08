@@ -106,6 +106,14 @@ type querier interface {
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 }
 
+// sqlRunner is a transaction the import writes in: its own, or the
+// caller's.
+type sqlRunner interface {
+	querier
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
 // ownedTables are the tables that cascade from instances, parents first.
 func ownedTables(g map[string][]fkey) []string {
 	owned := map[string]bool{"instances": true}
@@ -299,23 +307,37 @@ func ImportBundle(ctx context.Context, db *gorm.DB, b *Bundle, name string, fire
 	if len(b.Tables["instances"]) != 1 {
 		return 0, nil, bad("the bundle holds no virtual firewall")
 	}
-	sqlDB, err := db.DB()
-	if err != nil {
-		return 0, nil, err
+	// In db's transaction when it is one (a write through the tree,
+	// throughTree), else in one of its own on a connection.
+	var tx sqlRunner
+	commit := func() error { return nil }
+	if outer, ok := db.Statement.ConnPool.(*sql.Tx); ok {
+		tx = outer
+	} else {
+		sqlDB, err := db.DB()
+		if err != nil {
+			return 0, nil, err
+		}
+		conn, err := sqlDB.Conn(ctx)
+		if err != nil {
+			return 0, nil, err
+		}
+		defer conn.Close()
+		own, err := conn.BeginTx(ctx, nil)
+		if err != nil {
+			return 0, nil, err
+		}
+		defer own.Rollback()
+		tx, commit = own, own.Commit
 	}
-	conn, err := sqlDB.Conn(ctx)
-	if err != nil {
-		return 0, nil, err
-	}
-	defer conn.Close()
 	var version int64
-	if err := conn.QueryRowContext(ctx, "SELECT max(version_id) FROM goose_db_version WHERE is_applied").Scan(&version); err != nil {
+	if err := tx.QueryRowContext(ctx, "SELECT max(version_id) FROM goose_db_version WHERE is_applied").Scan(&version); err != nil {
 		return 0, nil, err
 	}
 	if version != b.Schema {
 		return 0, nil, bad(fmt.Sprintf("the bundle is of schema version %d, this database %d; update both to the same version", b.Schema, version))
 	}
-	g, err := schemaGraph(ctx, conn)
+	g, err := schemaGraph(ctx, tx)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -330,11 +352,6 @@ func ImportBundle(ctx context.Context, db *gorm.DB, b *Bundle, name string, fire
 		return 0, nil, bad("name: lowercase letters and digits, starting with a letter, at most 12 characters")
 	}
 
-	tx, err := conn.BeginTx(ctx, nil)
-	if err != nil {
-		return 0, nil, err
-	}
-	defer tx.Rollback()
 	if _, err := tx.ExecContext(ctx, "PRAGMA defer_foreign_keys = ON"); err != nil {
 		return 0, nil, err
 	}
@@ -486,7 +503,7 @@ func ImportBundle(ctx context.Context, db *gorm.DB, b *Bundle, name string, fire
 	if bad, err := selectRows(ctx, tx, "SELECT * FROM pragma_foreign_key_check"); err == nil && len(bad) > 0 {
 		return 0, nil, fmt.Errorf("import: a foreign key the bundle does not hold: %v", bad[0])
 	}
-	if err := tx.Commit(); err != nil {
+	if err := commit(); err != nil {
 		return 0, nil, fmt.Errorf("import: %w", err)
 	}
 
@@ -567,7 +584,7 @@ func normalizeValue(v any) any {
 	return v
 }
 
-func insertRow(ctx context.Context, tx *sql.Tx, t string, cols []string, r bundleRow) (int64, error) {
+func insertRow(ctx context.Context, tx sqlRunner, t string, cols []string, r bundleRow) (int64, error) {
 	var names, marks []string
 	var args []any
 	for _, c := range cols {
@@ -586,7 +603,7 @@ func insertRow(ctx context.Context, tx *sql.Tx, t string, cols []string, r bundl
 	return res.LastInsertId()
 }
 
-func updateRow(ctx context.Context, tx *sql.Tx, t string, cols []string, id int64, r bundleRow) error {
+func updateRow(ctx context.Context, tx sqlRunner, t string, cols []string, id int64, r bundleRow) error {
 	var sets []string
 	var args []any
 	for _, c := range cols {
@@ -648,7 +665,7 @@ func (s *Server) handleImportBundle(c *echo.Context) error {
 	if err := c.Bind(&req); err != nil || req.Bundle == nil {
 		return errJSON(c, http.StatusBadRequest, "invalid request")
 	}
-	id, problems, err := ImportBundle(c.Request().Context(), s.db, req.Bundle, strings.TrimSpace(req.Name), req.FirewallID)
+	id, problems, err := ImportBundle(c.Request().Context(), s.dbOf(c), req.Bundle, strings.TrimSpace(req.Name), req.FirewallID)
 	var conflict *bundleConflict
 	switch {
 	case errors.As(err, &conflict):

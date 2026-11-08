@@ -103,7 +103,12 @@ func TestBundleRoundTrip(t *testing.T) {
 		t.Errorf("no role for the imported instance: %v", err)
 	}
 
-	// Again into the source: the shared objects are reused.
+	// Beside the source it is refused: both would have eth1 and eth2.
+	if rec := src.do("POST", "/api/instances/import", map[string]any{"name": "shop3", "bundle": b}); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "already used by instance shop") {
+		t.Errorf("import beside the source: %d %s", rec.Code, rec.Body)
+	}
+	// In its place: the shared objects are reused.
+	src.mustCfg("DELETE", "instance=shop", nil)
 	if rec := src.do("POST", "/api/instances/import", map[string]any{"name": "shop3", "bundle": b}); rec.Code != http.StatusCreated {
 		t.Fatalf("import beside the source: %d %s", rec.Code, rec.Body)
 	}

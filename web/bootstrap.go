@@ -222,7 +222,7 @@ func Bootstrap(ctx context.Context, s *Server, o BootstrapOptions) (*models.Depl
 		return nil, err
 	}
 
-	err = s.db.Transaction(func(tx *gorm.DB) error {
+	err = s.viaTables(ctx, func(tx *gorm.DB) error {
 		var in models.Instance
 		if err := tx.Where("is_default AND firewall_id = ?", fwID).First(&in).Error; err != nil {
 			return err

@@ -4,6 +4,7 @@
 package web
 
 import (
+	"context"
 	"errors"
 	"maps"
 	"net/http"
@@ -138,6 +139,37 @@ func joinErrors(errs []error) string {
 		out += e.Error()
 	}
 	return out
+}
+
+// viaTables runs fn, code of the CRUD's time that writes configuration into
+// the tables (bootstrap), as one change of the candidate: in a transaction
+// rolled back after, the tables it leaves read into the candidate, which
+// the store normalizes and checks and OnChange writes back. What fn writes
+// that is not configuration is lost with the transaction.
+func (s *Server) viaTables(ctx context.Context, fn func(tx *gorm.DB) error) error {
+	t, err := s.tree()
+	if err != nil {
+		return err
+	}
+	return t.store.Edit(ctx, "", func(work *datastore.Tree) error {
+		before := work.Clone()
+		_, beforeIdx, err := t.mapping.Import(s.db)
+		if err != nil {
+			return err
+		}
+		tx := s.db.Begin()
+		defer tx.Rollback()
+		if err := fn(tx); err != nil {
+			return err
+		}
+		after, afterIdx, err := t.mapping.Import(tx)
+		if err != nil {
+			return err
+		}
+		work.Root = after.Root
+		work.Renamed = renamedInstances(beforeIdx, afterIdx, before)
+		return nil
+	})
 }
 
 // ctxTx holds the transaction a handler run by throughTree works in.

@@ -63,7 +63,7 @@ func (s *Server) handleImportNftables(c *echo.Context) error {
 	if err != nil {
 		return errJSON(c, http.StatusBadRequest, err.Error())
 	}
-	err = s.db.Transaction(func(tx *gorm.DB) error {
+	err = s.dbOf(c).Transaction(func(tx *gorm.DB) error {
 		if err := writeImport(tx, req, res); err != nil {
 			return err
 		}

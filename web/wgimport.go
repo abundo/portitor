@@ -190,7 +190,7 @@ func (s *Server) handleWgImport(c *echo.Context) error {
 		return dbError(c, err)
 	}
 	var res wgImportResult
-	err = s.db.Transaction(func(tx *gorm.DB) error {
+	err = s.dbOf(c).Transaction(func(tx *gorm.DB) error {
 		var old models.Interface
 		ifc := models.Interface{InstanceID: req.InstanceID, Name: strings.TrimSpace(req.Name), Kind: fwconfig.KindWireGuard, Enabled: true}
 		var oldp *models.Interface

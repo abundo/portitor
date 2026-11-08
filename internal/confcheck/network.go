@@ -211,7 +211,7 @@ func normalizeInterface(c *Ctx, i *datastore.Node) error {
 		clear(i, "dhcpv6-pd")
 	}
 	if kind == fwconfig.KindOpenVPN {
-		if err := normalizeOpenVPN(i); err != nil {
+		if err := normalizeOpenVPN(c, i); err != nil {
 			return err
 		}
 	}

@@ -107,6 +107,7 @@ import os
 import re
 import secrets
 import shutil
+import urllib.parse
 import socket
 import ssl
 import subprocess
@@ -542,10 +543,24 @@ def api(method: str, path: str, body: object = None) -> object:
     return json.loads(out) if out.strip() else None
 
 
-def default_instance_id() -> int:
-    for inst in api("GET", "/api/instances") or []:
-        if inst.get("is_default"):
-            return int(inst["id"])
+CONFIG = "/api/config/candidate"
+
+
+def cfg_path(*steps: str) -> str:
+    """A configuration path under /api/config/candidate: "instance=main", "interface=eth1"."""
+    return "/".join([CONFIG, *steps])
+
+
+def entry(name: str, key: str) -> str:
+    """A list entry's step, its key percent-encoded."""
+    return f"{name}={urllib.parse.quote(key, safe='')}"
+
+
+def default_instance() -> str:
+    """The name of this host's virtual firewall (the default one)."""
+    for inst in api("GET", cfg_path("instance") + "?shallow") or []:
+        if inst.get("is-default"):
+            return inst["name"]
     raise RuntimeError("no default virtual firewall")
 
 
@@ -557,16 +572,21 @@ def own_firewall() -> dict:
     return min(fws, key=lambda f: f["id"])
 
 
-def ha_interface(instance: int, nic: str, role: str, address: str, gateway: str = "", description: str = "") -> dict:
-    """Gives nic its HA role and address on the host's virtual firewall."""
-    body = {"ha_role": role, "addresses": [address], "enabled": True, "ipv4_mode": "static",
-            "description": description, "ha_monitor": False}
+def interfaces(instance: str) -> list:
+    """The virtual firewall's interfaces, as the configuration has them."""
+    return api("GET", cfg_path(entry("instance", instance), "interface") + "?shallow") or []
+
+
+def ha_interface(instance: str, nic: str, role: str, address: str, gateway: str = "", description: str = "") -> None:
+    """Gives nic its HA role and address on the host's virtual firewall
+    (merged into the interface, made physical when it isn't there)."""
+    body = {"ha-role": role, "addresses": [address], "enabled": True, "ipv4-mode": "static",
+            "description": description, "ha-monitor": False}
     if role == "management":
-        body["ha_gateway"] = gateway
-    for ifc in api("GET", f"/api/interfaces?instance_id={instance}") or []:
-        if ifc.get("name") == nic and ifc.get("instance_id") == instance:
-            return api("PUT", f"/api/interfaces/{ifc['id']}", body)
-    return api("POST", "/api/interfaces", {**body, "instance_id": instance, "name": nic, "kind": "physical"})
+        body["ha-gateway"] = gateway
+    if not any(i.get("name") == nic for i in interfaces(instance)):
+        body["kind"] = "physical"
+    api("PATCH", cfg_path(entry("instance", instance), entry("interface", nic)), body)
 
 
 def commit(what: str) -> None:
@@ -579,15 +599,16 @@ def step_ha_primary(a: dict) -> None:
     """Primary role: the HA link and management interfaces, and this host's
     agent and portitor-config at its management address, for the secondary
     and the witness."""
-    inst = default_instance_id()
+    inst = default_instance()
     ha_interface(inst, a["ha_link"], "ha_link", str(a["ha_address"]), description="HA link")
     ha_interface(inst, a["mgmt"], "management", str(a["mgmt_address"]), str(a["mgmt_gateway"]), "Management")
     # The GUI and SSH from the management network, as from the LAN.
-    rules = api("GET", f"/api/rules?instance_id={inst}") or []
+    rules_path = cfg_path(entry("instance", inst), "rule")
+    rules = api("GET", rules_path) or []
     if not any(r.get("description") == "management from the management network" for r in rules):
-        api("POST", "/api/rules", {"instance_id": inst, "chain": "input", "in_interfaces": [a["mgmt"]],
-                                   "services": ["portitor-mgmt"], "description": "management from the management network",
-                                   "enabled": True})
+        api("POST", rules_path, {"chain": "input", "action": "accept", "in-interfaces": [a["mgmt"]],
+                                 "services": ["portitor-mgmt"], "description": "management from the management network",
+                                 "enabled": True})
     fw = own_firewall()
     ip = a["mgmt_address"].ip
     api("PUT", f"/api/firewalls/{fw['id']}", {"agent_url": f"https://{ip}:{AGENT_PORT}",
@@ -602,9 +623,8 @@ def add_secondary(a: dict, d: dict) -> None:
     fw = own_firewall()
     if any(f.get("ha_primary_id") == fw["id"] for f in api("GET", "/api/firewalls") or []):
         raise RuntimeError(f"{fw['name']} has an HA secondary already (Admin -> Firewalls)")
-    inst = default_instance_id()
-    links = {i["ha_role"]: i for i in api("GET", f"/api/interfaces?instance_id={inst}") or []
-             if i.get("ha_role") and i.get("instance_id") == inst}
+    inst = default_instance()
+    links = {i["ha-role"]: i for i in interfaces(inst) if i.get("ha-role")}
     for role, peer in (("ha_link", d["ha"]), ("management", d["mgmt"])):
         ifc = links.get(role)
         if not ifc or not ifc.get("addresses"):
@@ -618,7 +638,8 @@ def add_secondary(a: dict, d: dict) -> None:
                                    "config_url": f"https://{ip}:{GUI_PORT}", "config_fingerprint": d["config_fingerprint"],
                                    "ha_primary_id": fw["id"]})
     for role, peer in (("ha_link", d["ha"]), ("management", d["mgmt"])):
-        api("PUT", f"/api/interfaces/{links[role]['id']}", {"peer_addresses": [str(peer)]})
+        api("PATCH", cfg_path(entry("instance", inst), entry("interface", links[role]["name"])),
+            {"peer-addresses": [str(peer)]})
     commit(f"the HA pair with {d['name']}")
 
 
