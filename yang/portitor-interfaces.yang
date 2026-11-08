@@ -266,15 +266,15 @@ submodule portitor-interfaces {
         default true;
       }
       list wireguard-peer {
-        key "public-key";
+        key "name";
         px:table "wg_peers";
         px:parent-column "interface_id";
-        leaf public-key {
-          type wg-key;
-        }
+        description "A WireGuard peer, by name. Without a public key, its key pair (and a preshared key) is made, for the client config.";
         leaf name {
           type name;
-          mandatory true;
+        }
+        leaf public-key {
+          type wg-key;
         }
         leaf description {
           type text;

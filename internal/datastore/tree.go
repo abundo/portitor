@@ -869,3 +869,16 @@ func (t *Tree) Visible(canRead func(Path) bool) *Tree {
 	}
 	return out
 }
+
+// Walk calls fn for n and every container and entry below it.
+func (n *Node) Walk(fn func(*Node)) {
+	fn(n)
+	for _, s := range n.S.Children {
+		if c := n.Containers[s.Name]; c != nil {
+			c.Walk(fn)
+		}
+		for _, e := range n.Lists[s.Name] {
+			e.Walk(fn)
+		}
+	}
+}

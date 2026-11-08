@@ -959,3 +959,11 @@ func (m *Mapping) Tables() []string {
 	}
 	return out
 }
+
+// TableOf is the table of a list (or singleton container), "" for none.
+func (m *Mapping) TableOf(s *schema.Node) string {
+	if t := m.byList[s]; t != nil {
+		return t.name
+	}
+	return ""
+}

@@ -83,6 +83,14 @@ func TestConfigAPI(t *testing.T) {
 	}
 	want(env.do("POST", "/api/config/candidate/instance=lab/rule", map[string]any{"id": 900, "chain": "input", "action": "accept", "in-interfaces": []string{"eth1"}}), http.StatusCreated, "rule 900")
 	want(env.do("POST", "/api/config/candidate/instance=lab/rule", map[string]any{"id": 901, "chain": "input", "action": "drop"}), http.StatusCreated, "rule 901")
+	// A new rule without an id gets one never used before.
+	want(env.do("POST", "/api/config/candidate/instance=lab/rule", map[string]any{"chain": "input", "action": "drop"}), http.StatusCreated, "a rule without an id")
+	rec = env.do("GET", "/api/config/candidate/instance=lab/rule=902", nil)
+	want(rec, http.StatusOK, "rule 902")
+	want(env.do("DELETE", "/api/config/candidate/instance=lab/rule=902", nil), http.StatusNoContent, "delete 902")
+	want(env.do("POST", "/api/config/candidate/instance=lab/rule", map[string]any{"chain": "input", "action": "drop"}), http.StatusCreated, "another rule")
+	want(env.do("GET", "/api/config/candidate/instance=lab/rule=903", nil), http.StatusOK, "rule 903, not 902 again")
+	want(env.do("DELETE", "/api/config/candidate/instance=lab/rule=903", nil), http.StatusNoContent, "delete 903")
 	want(env.do("POST", "/api/config/candidate/instance=lab/interface=eth1?action=rename", map[string]any{"keys": []string{"lan"}}), http.StatusOK, "rename")
 	rec = env.do("GET", "/api/config/candidate/instance=lab/rule=900/in-interfaces", nil)
 	if rec.Body.String() != `["lan"]` {
@@ -106,6 +114,24 @@ func TestConfigAPI(t *testing.T) {
 		t.Errorf("no warning: %s", rec.Body)
 	}
 	want(env.do("DELETE", "/api/config/candidate/instance=lab/interface=vl9", nil), http.StatusNoContent, "delete vl9")
+
+	// Actions: new keys, a peer's client config, the next free address.
+	want(env.do("PUT", "/api/config/candidate/instance=lab/interface=wg0", map[string]any{"kind": "wireguard", "enabled": true, "addresses": []string{"10.99.0.1/24"}, "wg-listen-port": 51820}), http.StatusOK, "wg0")
+	before := env.do("GET", "/api/config/candidate/instance=lab/interface=wg0/wg-public-key", nil).Body.String()
+	want(env.do("POST", "/api/config/candidate/instance=lab/interface=wg0?action=wg-rekey", map[string]any{}), http.StatusOK, "rekey")
+	if after := env.do("GET", "/api/config/candidate/instance=lab/interface=wg0/wg-public-key", nil).Body.String(); after == before || len(after) < 40 {
+		t.Errorf("the public key %s, then %s", before, after)
+	}
+	want(env.do("POST", "/api/config/candidate/instance=lab/interface=lan?action=wg-rekey", map[string]any{}), http.StatusBadRequest, "rekey a NIC")
+	rec = env.do("POST", "/api/config/candidate/instance=lab/interface=wg0/wireguard-peer", map[string]any{"name": "phone", "allowed-ips": []string{"10.99.0.2/32"}})
+	want(rec, http.StatusCreated, "a peer")
+	rec = env.do("GET", "/api/config/candidate/instance=lab/interface=wg0/wireguard-peer=phone?action=client-config", nil)
+	want(rec, http.StatusOK, "client config")
+	if !strings.Contains(rec.Body.String(), "PrivateKey") || !strings.Contains(rec.Body.String(), "10.99.0.2/32") {
+		t.Errorf("client config: %s", rec.Body)
+	}
+	want(env.do("GET", "/api/config/candidate/instance=lab/interface=wg0?action=spin", nil), http.StatusBadRequest, "an unknown view")
+	want(env.do("DELETE", "/api/config/candidate/instance=lab/interface=wg0", nil), http.StatusNoContent, "delete wg0")
 
 	// Changes, a commit, running.
 	rec = env.do("GET", "/api/config/changes", nil)

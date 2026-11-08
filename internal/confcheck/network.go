@@ -352,8 +352,14 @@ func checkWgPeer(c *Ctx, p *datastore.Node) []error {
 	if p.Parent.Leaf("kind") != fwconfig.KindWireGuard {
 		errs = append(errs, fail("a peer belongs to a WireGuard interface"))
 	}
-	if p.Leaf("public-key") == "" {
+	if k := p.Leaf("public-key"); k == "" {
 		errs = append(errs, fail("public-key: missing"))
+	} else {
+		for _, o := range p.Parent.Lists["wireguard-peer"] {
+			if o != p && o.Leaf("public-key") == k {
+				errs = append(errs, fail("public-key: peer %s has it", o.Leaf("name")))
+			}
+		}
 	}
 	if len(p.LeafLists["allowed-ips"]) == 0 {
 		errs = append(errs, fail("allowed-ips: at least one CIDR (the peer's tunnel address, e.g. 10.99.0.2/32)"))

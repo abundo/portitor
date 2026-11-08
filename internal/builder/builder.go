@@ -1867,3 +1867,7 @@ func resolvePortNames(ports string, names map[string]int) string {
 	}
 	return strings.Join(parts, ",")
 }
+
+// DecodeRows decodes rows of a table (sqlmap.Rows) into dst, a pointer to
+// a slice of the table's model.
+func DecodeRows(rows []sqlmap.Row, dst any) error { return decodeRows(rows, dst) }

@@ -5,11 +5,15 @@ package web
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
+	"strconv"
 	"slices"
 	"strings"
 
@@ -103,6 +107,9 @@ func (s *Server) handleConfigGet(c *echo.Context) error {
 	ds, p, err := configRequest(c)
 	if err != nil {
 		return errJSON(c, http.StatusBadRequest, "path: "+err.Error())
+	}
+	if name := c.QueryParam("action"); name != "" {
+		return s.runAction(c, ds, p, name, nil)
 	}
 	t, err := s.tree()
 	if err != nil {
@@ -216,15 +223,23 @@ func (s *Server) handleConfigEdit(c *echo.Context) error {
 	if err != nil {
 		return err
 	}
+	method, action := c.Request().Method, c.QueryParam("action")
+	if method == http.MethodPost && action != "" && action != "rename" && action != "move" {
+		return s.runAction(c, ds, p, action, body)
+	}
 	t, err := s.tree()
 	if err != nil {
 		return err
 	}
 	acc := s.treeAccessOf(c)
-	method, action := c.Request().Method, c.QueryParam("action")
 	var denied string
 	err = t.store.Edit(c.Request().Context(), "", func(work *datastore.Tree) error {
 		before := work.Clone()
+		if method == http.MethodPost && action == "" {
+			if body, err = s.assignID(work, p, body); err != nil {
+				return err
+			}
+		}
 		if err := applyConfigEdit(work, p, method, action, body); err != nil {
 			return err
 		}
@@ -394,4 +409,67 @@ func (s *Server) handleConfigDiscard(c *echo.Context) error {
 		return configError(c, err)
 	}
 	return c.NoContent(http.StatusNoContent)
+}
+
+// assignID gives a new entry of a list keyed by a numeric id (rules, NAT
+// rules, routes, DNS records, ...) its id when the body has none: one
+// above every id the list has had, here or in running, and never one given
+// before (a rule's id marks its connections), from the high-water marks in
+// ids.json next to the database. The store's lock is held.
+func (s *Server) assignID(work *datastore.Tree, p datastore.Path, body []byte) ([]byte, error) {
+	ss, err := datastore.ResolveAll(work.Root.S, p)
+	if err != nil || len(ss) == 0 || len(p) == 0 || p[len(p)-1].Keys != nil {
+		return body, nil
+	}
+	list := ss[len(ss)-1]
+	if list.Kind != schema.List || len(list.Keys) != 1 || !list.Child(list.Keys[0]).Type.Numeric() {
+		return body, nil
+	}
+	key := list.Keys[0]
+	var obj map[string]any
+	if json.Unmarshal(body, &obj) != nil {
+		return body, nil // EditJSON says what is wrong
+	}
+	if _, ok := obj[key]; ok {
+		return body, nil
+	}
+	if _, ok := obj[schema.Module+":"+key]; ok {
+		return body, nil
+	}
+	t, err := s.tree()
+	if err != nil {
+		return nil, err
+	}
+	path := filepath.Join(t.dir, "ids.json")
+	if t.idMarks == nil {
+		t.idMarks = map[string]uint64{}
+		if data, err := os.ReadFile(path); err == nil && t.dir != "" {
+			_ = json.Unmarshal(data, &t.idMarks)
+		}
+	}
+	marks := t.idMarks
+	next := marks[list.Path()]
+	trees := []*datastore.Tree{work}
+	if run, err := (treeBackend{s}).Running(context.Background()); err == nil {
+		trees = append(trees, run)
+	}
+	for _, tr := range trees {
+		tr.Root.Walk(func(n *datastore.Node) {
+			if n.S == list {
+				if id, err := strconv.ParseUint(n.Leaf(key), 10, 64); err == nil && id > next {
+					next = id
+				}
+			}
+		})
+	}
+	next++
+	marks[list.Path()] = next
+	if t.dir != "" {
+		data, _ := json.Marshal(marks)
+		if err := datastore.WriteFile(path, data); err != nil {
+			return nil, err
+		}
+	}
+	obj[key] = next
+	return json.Marshal(obj)
 }

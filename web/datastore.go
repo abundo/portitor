@@ -46,6 +46,8 @@ type treeState struct {
 	mapping *sqlmap.Mapping
 	store   *datastore.Store
 
+	dir       string // the database's, where the candidate and ids.json are; "" in memory
+	idMarks   map[string]uint64 // assignID's high-water marks, by list path
 	runMu     sync.Mutex
 	runCommit int64
 	running   *datastore.Tree
@@ -65,6 +67,7 @@ func (s *Server) tree() (*treeState, error) {
 		if s.cfg.DB.Path != "" {
 			dir = filepath.Dir(s.cfg.DB.Path)
 		}
+		t.dir = dir
 		t.store = datastore.NewStore(t.schema, treeBackend{s}, dir)
 		t.store.Normalize, t.store.Check = confcheck.Normalize, confcheck.Check
 		// The roles name the virtual firewalls: they follow a rename, and
