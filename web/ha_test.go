@@ -64,9 +64,7 @@ func TestAgentURL(t *testing.T) {
 func haPairConfigured(t *testing.T) (*testEnv, map[uint]*fleetAgent, uint) {
 	t.Helper()
 	env, agents, pair := haPair(t)
-	main := instanceID(t, env, "main")
-	env.create("/api/interfaces", map[string]any{"instance_id": main, "name": "lan", "kind": "bridge", "enabled": true,
-		"ipv4_mode": "static", "addresses": []string{"10.0.0.1/24"}})
+	env.put("instance=main/interface=lan", map[string]any{"kind": "bridge", "enabled": true, "ipv4-mode": "static", "addresses": []string{"10.0.0.1/24"}})
 	if rec := env.do("POST", "/api/deploy/apply", map[string]any{}); rec.Code != http.StatusOK {
 		t.Fatalf("commit: %d %s", rec.Code, rec.Body)
 	}
@@ -79,8 +77,7 @@ func TestPromote(t *testing.T) {
 	if !env.srv.isReplica() {
 		t.Fatal("the secondary's portitor-config is not a replica")
 	}
-	main := instanceID(t, env, "main")
-	if rec := env.do("POST", "/api/rules", map[string]any{"instance_id": main, "chain": "input", "action": "drop", "enabled": true}); rec.Code != http.StatusConflict {
+	if rec := env.cfg("POST", "instance=main/rule", map[string]any{"chain": "input", "action": "drop", "enabled": true}); rec.Code != http.StatusConflict && rec.Code != http.StatusForbidden {
 		t.Fatalf("a write on the replica: %d %s", rec.Code, rec.Body)
 	}
 	if rec := env.do("GET", "/api/me", nil); !strings.Contains(rec.Body.String(), `"replica":true`) {
@@ -149,7 +146,7 @@ func TestPromote(t *testing.T) {
 		t.Errorf("old primary's management: %v", a)
 	}
 	// Writes are the new primary's.
-	if rec := env.do("POST", "/api/rules", map[string]any{"instance_id": main, "chain": "input", "action": "drop", "enabled": true}); rec.Code != http.StatusCreated {
+	if rec := env.cfg("POST", "instance=main/rule", map[string]any{"chain": "input", "action": "drop", "enabled": true}); rec.Code != http.StatusCreated {
 		t.Errorf("a write after the promotion: %d %s", rec.Code, rec.Body)
 	}
 }

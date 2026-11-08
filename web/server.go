@@ -162,7 +162,7 @@ func (s *Server) Echo() *echo.Echo {
 	}
 	e.GET(replicaPath, s.handleReplica, noStore)
 
-	api := e.Group("/api", requireJSON, noStore, s.refuseOnReplica, s.syncTables)
+	api := e.Group("/api", requireJSON, noStore, s.refuseOnReplica)
 	api.POST("/login", s.handleLogin)
 	api.POST("/logout", s.handleLogout)
 	api.GET("/version", func(c *echo.Context) error { return c.JSON(http.StatusOK, buildinfo.Get()) })
@@ -178,91 +178,76 @@ func (s *Server) Echo() *echo.Echo {
 	g.POST("/me/totp/disable", s.handleTOTPDisable)
 	g.POST("/me/totp/recovery-codes", s.handleRecoveryCodes)
 
-	(&resource[models.Firewall, *models.Firewall]{db: s.db, order: "id", prepare: s.prepareFirewallHere, present: presentFirewall, afterCreate: createFirewallInstance, beforeDelete: deleteFirewall}).register(s, g, "/firewalls")
-	(&resource[models.Instance, *models.Instance]{db: s.db, scope: instanceScope, tenantWrites: []string{http.MethodPut}, tenantCheck: tenantInstanceCheck, order: "firewall_id, is_default desc, name", prepare: prepareInstance, present: presentInstance, afterCreate: seedInstance, beforeDelete: deleteInstance}).register(s, g, "/instances")
-	(&resource[models.InterfaceZone, *models.InterfaceZone]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "name", prepare: prepareInterfaceZone, beforeDelete: deleteInterfaceZone}).register(s, g, "/interface-zones")
-	(&resource[models.Interface, *models.Interface]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, tenantCheck: s.tenantInterfaceCheck, filters: []string{"instance_id"}, order: "name", prepare: prepareInterface, present: presentInterface, beforeDelete: deleteInterface}).register(s, g, "/interfaces")
-	(&resource[models.WgPeer, *models.WgPeer]{db: s.db, scope: byParent("InterfaceID", "interface_id", "interfaces"), tenantWrites: tenantAll, filters: []string{"interface_id"}, order: "name", prepare: prepareWgPeer, present: presentWgPeer}).register(s, g, "/wg/peers")
-	(&resource[models.Link, *models.Link]{db: s.db, scope: linkScope, order: "name", prepare: prepareLink, beforeDelete: deleteLink}).register(s, g, "/links")
-	(&resource[models.Route, *models.Route]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "destination", prepare: prepareRoute}).register(s, g, "/routes")
-	(&resource[models.PolicyRoute, *models.PolicyRoute]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "position, id", prepare: preparePolicyRoute}).register(s, g, "/policy-routes")
-	(&resource[models.StaticNeighbour, *models.StaticNeighbour]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "address", prepare: prepareStaticNeighbour}).register(s, g, "/static-neighbours")
-	(&resource[models.RoutePrefixList, *models.RoutePrefixList]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "name", prepare: preparePrefixList, beforeDelete: deletePrefixList}).register(s, g, "/routing/prefix-lists")
-	(&resource[models.RouteAsPathList, *models.RouteAsPathList]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "name", prepare: prepareAsPathList, beforeDelete: deleteAsPathList}).register(s, g, "/routing/as-path-lists")
-	(&resource[models.RouteCommunityList, *models.RouteCommunityList]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "name", prepare: prepareCommunityList, beforeDelete: deleteCommunityList}).register(s, g, "/routing/community-lists")
-	(&resource[models.RouteMap, *models.RouteMap]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "name", prepare: prepareRouteMap, beforeDelete: deleteRouteMap}).register(s, g, "/routing/route-maps")
-	(&resource[models.BgpConfig, *models.BgpConfig]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "id", prepare: prepareBgpConfig}).register(s, g, "/bgp/config")
-	(&resource[models.BgpPeerGroup, *models.BgpPeerGroup]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "name", prepare: preparePeerGroup, present: presentPeerGroup, beforeDelete: deletePeerGroup}).register(s, g, "/bgp/peer-groups")
-	(&resource[models.BgpNeighbor, *models.BgpNeighbor]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "address", prepare: prepareNeighbor, present: presentNeighbor}).register(s, g, "/bgp/neighbors")
-	(&resource[models.OspfConfig, *models.OspfConfig]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id", "version"}, order: "version", prepare: prepareOspfConfig}).register(s, g, "/ospf/config")
-	(&resource[models.SyslogServer, *models.SyslogServer]{db: s.db, scope: byField("InstanceID", "instance_id"), filters: []string{"instance_id"}, order: "address, port, protocol", prepare: prepareSyslogServer}).register(s, g, "/syslog/servers")
-	(&resource[models.SnmpUser, *models.SnmpUser]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "name", prepare: prepareSnmpUser, present: presentSnmpUser}).register(s, g, "/snmp/users")
-	(&resource[models.OspfInterface, *models.OspfInterface]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id", "version"}, order: "name", prepare: prepareOspfInterface, present: presentOspfInterface}).register(s, g, "/ospf/interfaces")
-	(&resource[models.IsisConfig, *models.IsisConfig]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "id", prepare: prepareIsisConfig, present: presentIsisConfig}).register(s, g, "/isis/config")
-	(&resource[models.IsisInterface, *models.IsisInterface]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "name", prepare: prepareIsisInterface, present: presentIsisInterface}).register(s, g, "/isis/interfaces")
-	(&resource[models.VrrpRouter, *models.VrrpRouter]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "interface, vrid", prepare: prepareVrrpRouter}).register(s, g, "/vrrp/routers")
-	(&resource[models.BfdInterface, *models.BfdInterface]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "interface", prepare: prepareBfdInterface}).register(s, g, "/bfd/interfaces")
-	(&resource[models.Vrf, *models.Vrf]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "name", prepare: prepareVrf, beforeDelete: deleteVrf}).register(s, g, "/vrfs")
-	(&resource[models.RateLimit, *models.RateLimit]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "name", prepare: prepareRateLimit, beforeDelete: deleteRateLimit}).register(s, g, "/rate-limits")
-	(&resource[models.Rule, *models.Rule]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "position, id", prepare: prepareRule}).register(s, g, "/rules")
-	(&resource[models.NatRule, *models.NatRule]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "position, id", prepare: prepareNat}).register(s, g, "/nat")
-	(&resource[models.IpamPrefix, *models.IpamPrefix]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "prefix", prepare: prepareIpamPrefix}).register(s, g, "/ipam/prefixes")
-	(&resource[models.IpamAddress, *models.IpamAddress]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "address", prepare: prepareIpamAddress}).register(s, g, "/ipam/addresses")
-	(&resource[models.DnsZone, *models.DnsZone]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "name", prepare: prepareDnsZone}).register(s, g, "/dns/zones")
-	(&resource[models.DnsBlocklist, *models.DnsBlocklist]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "name", prepare: prepareDnsBlocklist, present: presentDnsBlocklist}).register(s, g, "/dns/blocklists")
-	(&resource[models.DnsRecord, *models.DnsRecord]{db: s.db, scope: byParent("ZoneID", "zone_id", "dns_zones"), tenantWrites: tenantAll, filters: []string{"zone_id"}, order: "rank, id", prepare: prepareDnsRecord}).register(s, g, "/dns/records")
-	(&resource[models.DnsSoaTemplate, *models.DnsSoaTemplate]{db: s.db, scope: globalScope, tenantWrites: tenantAll, order: "name", prepare: prepareDnsSoaTemplate, beforeDelete: deleteDnsSoaTemplate}).register(s, g, "/dns/soa-templates")
-	(&resource[models.DnsDnssecPolicy, *models.DnsDnssecPolicy]{db: s.db, scope: globalScope, tenantWrites: tenantAll, order: "name", prepare: prepareDnsDnssecPolicy, beforeDelete: deleteDnsDnssecPolicy}).register(s, g, "/dns/dnssec-policies")
-	(&resource[models.DnsTemplate, *models.DnsTemplate]{db: s.db, scope: globalScope, tenantWrites: tenantAll, order: "name", prepare: prepareDnsTemplate, beforeDelete: deleteDnsTemplate}).register(s, g, "/dns/templates")
-	(&resource[models.DyndnsClient, *models.DyndnsClient]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "name", prepare: prepareDyndnsClient, present: presentDyndnsClient, beforeDelete: deleteDyndnsClient}).register(s, g, "/dyndns/clients")
-	(&resource[models.Certificate, *models.Certificate]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, tenantCheck: tenantCertificate, filters: []string{"instance_id"}, order: "name", prepare: prepareCertificate, present: presentCertificate, beforeDelete: deleteCertificate}).register(s, g, "/certificates")
-	(&resource[models.AcmeProxyPolicy, *models.AcmeProxyPolicy]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "name", prepare: prepareAcmeProxyPolicy, beforeDelete: deleteAcmeProxyPolicy}).register(s, g, "/acme-proxy/policies")
-	(&resource[models.DyndnsRecord, *models.DyndnsRecord]{db: s.db, scope: byParent("ClientID", "client_id", "dyndns_clients"), tenantWrites: tenantAll, filters: []string{"client_id"}, order: "id", prepare: prepareDyndnsRecord}).register(s, g, "/dyndns/records")
-	(&resource[models.AddressObject, *models.AddressObject]{db: s.db, order: "name", prepare: prepareAddressObject, beforeDelete: deleteAddressObject}).register(s, g, "/objects")
-	(&resource[models.AddressList, *models.AddressList]{db: s.db, order: "name", prepare: prepareAddressList, beforeDelete: deleteAddressList}).register(s, g, "/address-lists")
-	(&resource[models.IpList, *models.IpList]{db: s.db, order: "name", prepare: prepareIpList, afterCreate: createIpListTasks, present: presentIpList, beforeDelete: deleteIpList}).register(s, g, "/ip-lists")
-	(&resource[models.ObjectFolder, *models.ObjectFolder]{db: s.db, order: "name", prepare: prepareObjectFolder, beforeDelete: deleteObjectFolder}).register(s, g, "/object-folders")
-	(&resource[models.Task, *models.Task]{db: s.db, order: "name", prepare: prepareTask}).register(s, g, "/tasks")
-	(&resource[models.Service, *models.Service]{db: s.db, order: "name", prepare: prepareService, beforeDelete: deleteService}).register(s, g, "/custom-services")
-	(&resource[models.PortName, *models.PortName]{db: s.db, order: "name", prepare: preparePortName, beforeDelete: deletePortName}).register(s, g, "/port-names")
+	(&resource[models.Firewall, *models.Firewall]{db: s.db, order: "id", prepare: s.prepareFirewallHere, present: presentFirewall, afterCreate: createFirewallInstance, beforeDelete: deleteFirewall}).register(s, g, "/firewalls", s.syncAfter)
+	(&resource[models.Instance, *models.Instance]{db: s.db, scope: instanceScope, tenantWrites: []string{http.MethodPut}, tenantCheck: tenantInstanceCheck, order: "firewall_id, is_default desc, name", prepare: prepareInstance, present: presentInstance, afterCreate: seedInstance, beforeDelete: deleteInstance}).registerRead(s, g, "/instances")
+	(&resource[models.InterfaceZone, *models.InterfaceZone]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "name", prepare: prepareInterfaceZone, beforeDelete: deleteInterfaceZone}).registerRead(s, g, "/interface-zones")
+	(&resource[models.Interface, *models.Interface]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, tenantCheck: s.tenantInterfaceCheck, filters: []string{"instance_id"}, order: "name", prepare: prepareInterface, present: presentInterface, beforeDelete: deleteInterface}).registerRead(s, g, "/interfaces")
+	(&resource[models.WgPeer, *models.WgPeer]{db: s.db, scope: byParent("InterfaceID", "interface_id", "interfaces"), tenantWrites: tenantAll, filters: []string{"interface_id"}, order: "name", prepare: prepareWgPeer, present: presentWgPeer}).registerRead(s, g, "/wg/peers")
+	(&resource[models.Link, *models.Link]{db: s.db, scope: linkScope, order: "name", prepare: prepareLink, beforeDelete: deleteLink}).registerRead(s, g, "/links")
+	(&resource[models.Route, *models.Route]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "destination", prepare: prepareRoute}).registerRead(s, g, "/routes")
+	(&resource[models.PolicyRoute, *models.PolicyRoute]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "position, id", prepare: preparePolicyRoute}).registerRead(s, g, "/policy-routes")
+	(&resource[models.StaticNeighbour, *models.StaticNeighbour]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "address", prepare: prepareStaticNeighbour}).registerRead(s, g, "/static-neighbours")
+	(&resource[models.RoutePrefixList, *models.RoutePrefixList]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "name", prepare: preparePrefixList, beforeDelete: deletePrefixList}).registerRead(s, g, "/routing/prefix-lists")
+	(&resource[models.RouteAsPathList, *models.RouteAsPathList]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "name", prepare: prepareAsPathList, beforeDelete: deleteAsPathList}).registerRead(s, g, "/routing/as-path-lists")
+	(&resource[models.RouteCommunityList, *models.RouteCommunityList]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "name", prepare: prepareCommunityList, beforeDelete: deleteCommunityList}).registerRead(s, g, "/routing/community-lists")
+	(&resource[models.RouteMap, *models.RouteMap]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "name", prepare: prepareRouteMap, beforeDelete: deleteRouteMap}).registerRead(s, g, "/routing/route-maps")
+	(&resource[models.BgpConfig, *models.BgpConfig]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "id", prepare: prepareBgpConfig}).registerRead(s, g, "/bgp/config")
+	(&resource[models.BgpPeerGroup, *models.BgpPeerGroup]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "name", prepare: preparePeerGroup, present: presentPeerGroup, beforeDelete: deletePeerGroup}).registerRead(s, g, "/bgp/peer-groups")
+	(&resource[models.BgpNeighbor, *models.BgpNeighbor]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "address", prepare: prepareNeighbor, present: presentNeighbor}).registerRead(s, g, "/bgp/neighbors")
+	(&resource[models.OspfConfig, *models.OspfConfig]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id", "version"}, order: "version", prepare: prepareOspfConfig}).registerRead(s, g, "/ospf/config")
+	(&resource[models.SyslogServer, *models.SyslogServer]{db: s.db, scope: byField("InstanceID", "instance_id"), filters: []string{"instance_id"}, order: "address, port, protocol", prepare: prepareSyslogServer}).registerRead(s, g, "/syslog/servers")
+	(&resource[models.SnmpUser, *models.SnmpUser]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "name", prepare: prepareSnmpUser, present: presentSnmpUser}).registerRead(s, g, "/snmp/users")
+	(&resource[models.OspfInterface, *models.OspfInterface]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id", "version"}, order: "name", prepare: prepareOspfInterface, present: presentOspfInterface}).registerRead(s, g, "/ospf/interfaces")
+	(&resource[models.IsisConfig, *models.IsisConfig]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "id", prepare: prepareIsisConfig, present: presentIsisConfig}).registerRead(s, g, "/isis/config")
+	(&resource[models.IsisInterface, *models.IsisInterface]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "name", prepare: prepareIsisInterface, present: presentIsisInterface}).registerRead(s, g, "/isis/interfaces")
+	(&resource[models.VrrpRouter, *models.VrrpRouter]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "interface, vrid", prepare: prepareVrrpRouter}).registerRead(s, g, "/vrrp/routers")
+	(&resource[models.BfdInterface, *models.BfdInterface]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "interface", prepare: prepareBfdInterface}).registerRead(s, g, "/bfd/interfaces")
+	(&resource[models.Vrf, *models.Vrf]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "name", prepare: prepareVrf, beforeDelete: deleteVrf}).registerRead(s, g, "/vrfs")
+	(&resource[models.RateLimit, *models.RateLimit]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "name", prepare: prepareRateLimit, beforeDelete: deleteRateLimit}).registerRead(s, g, "/rate-limits")
+	(&resource[models.Rule, *models.Rule]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "position, id", prepare: prepareRule}).registerRead(s, g, "/rules")
+	(&resource[models.NatRule, *models.NatRule]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "position, id", prepare: prepareNat}).registerRead(s, g, "/nat")
+	(&resource[models.IpamPrefix, *models.IpamPrefix]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "prefix", prepare: prepareIpamPrefix}).registerRead(s, g, "/ipam/prefixes")
+	(&resource[models.IpamAddress, *models.IpamAddress]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "address", prepare: prepareIpamAddress}).registerRead(s, g, "/ipam/addresses")
+	(&resource[models.DnsZone, *models.DnsZone]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "name", prepare: prepareDnsZone}).registerRead(s, g, "/dns/zones")
+	(&resource[models.DnsBlocklist, *models.DnsBlocklist]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "name", prepare: prepareDnsBlocklist, present: presentDnsBlocklist}).registerRead(s, g, "/dns/blocklists")
+	(&resource[models.DnsRecord, *models.DnsRecord]{db: s.db, scope: byParent("ZoneID", "zone_id", "dns_zones"), tenantWrites: tenantAll, filters: []string{"zone_id"}, order: "rank, id", prepare: prepareDnsRecord}).registerRead(s, g, "/dns/records")
+	(&resource[models.DnsSoaTemplate, *models.DnsSoaTemplate]{db: s.db, scope: globalScope, tenantWrites: tenantAll, order: "name", prepare: prepareDnsSoaTemplate, beforeDelete: deleteDnsSoaTemplate}).registerRead(s, g, "/dns/soa-templates")
+	(&resource[models.DnsDnssecPolicy, *models.DnsDnssecPolicy]{db: s.db, scope: globalScope, tenantWrites: tenantAll, order: "name", prepare: prepareDnsDnssecPolicy, beforeDelete: deleteDnsDnssecPolicy}).registerRead(s, g, "/dns/dnssec-policies")
+	(&resource[models.DnsTemplate, *models.DnsTemplate]{db: s.db, scope: globalScope, tenantWrites: tenantAll, order: "name", prepare: prepareDnsTemplate, beforeDelete: deleteDnsTemplate}).registerRead(s, g, "/dns/templates")
+	(&resource[models.DyndnsClient, *models.DyndnsClient]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "name", prepare: prepareDyndnsClient, present: presentDyndnsClient, beforeDelete: deleteDyndnsClient}).registerRead(s, g, "/dyndns/clients")
+	(&resource[models.Certificate, *models.Certificate]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, tenantCheck: tenantCertificate, filters: []string{"instance_id"}, order: "name", prepare: prepareCertificate, present: presentCertificate, beforeDelete: deleteCertificate}).registerRead(s, g, "/certificates")
+	(&resource[models.AcmeProxyPolicy, *models.AcmeProxyPolicy]{db: s.db, scope: byField("InstanceID", "instance_id"), tenantWrites: tenantAll, filters: []string{"instance_id"}, order: "name", prepare: prepareAcmeProxyPolicy, beforeDelete: deleteAcmeProxyPolicy}).registerRead(s, g, "/acme-proxy/policies")
+	(&resource[models.DyndnsRecord, *models.DyndnsRecord]{db: s.db, scope: byParent("ClientID", "client_id", "dyndns_clients"), tenantWrites: tenantAll, filters: []string{"client_id"}, order: "id", prepare: prepareDyndnsRecord}).registerRead(s, g, "/dyndns/records")
+	(&resource[models.AddressObject, *models.AddressObject]{db: s.db, order: "name", prepare: prepareAddressObject, beforeDelete: deleteAddressObject}).registerRead(s, g, "/objects")
+	(&resource[models.AddressList, *models.AddressList]{db: s.db, order: "name", prepare: prepareAddressList, beforeDelete: deleteAddressList}).registerRead(s, g, "/address-lists")
+	(&resource[models.IpList, *models.IpList]{db: s.db, order: "name", prepare: prepareIpList, afterCreate: createIpListTasks, present: presentIpList, beforeDelete: deleteIpList}).registerRead(s, g, "/ip-lists")
+	(&resource[models.ObjectFolder, *models.ObjectFolder]{db: s.db, order: "name", prepare: prepareObjectFolder, beforeDelete: deleteObjectFolder}).registerRead(s, g, "/object-folders")
+	(&resource[models.Task, *models.Task]{db: s.db, order: "name", prepare: prepareTask}).registerRead(s, g, "/tasks")
+	(&resource[models.Service, *models.Service]{db: s.db, order: "name", prepare: prepareService, beforeDelete: deleteService}).registerRead(s, g, "/custom-services")
+	(&resource[models.PortName, *models.PortName]{db: s.db, order: "name", prepare: preparePortName, beforeDelete: deletePortName}).registerRead(s, g, "/port-names")
 
 	// Instance admins use these too; the handlers check the instance.
-	for _, r := range []string{"PUT /api/dns/zones/:id/records", "POST /api/dns/blocklists/:id/refresh", "POST /api/certificates/:id/renew", "PUT /api/dyndns/clients/:id/records", "POST /api/rules/reorder", "POST /api/nat/reorder", "POST /api/policy-routes/reorder",
-		"POST /api/interfaces/:id/wg-rekey", "POST /api/wg/import", "POST /api/agent/capture", "POST /api/agent/trace", "POST /api/agent/iperf", "POST /api/agent/probe", "POST /api/agent/servicelog", "POST /api/agent/connections", "POST /api/agent/connections/flush", "POST /api/agent/dhcp/renew",
+	for _, r := range []string{"POST /api/wg/import", "POST /api/agent/capture", "POST /api/agent/trace", "POST /api/agent/iperf", "POST /api/agent/probe", "POST /api/agent/servicelog", "POST /api/agent/connections", "POST /api/agent/connections/flush", "POST /api/agent/dhcp/renew",
 		"POST /api/deploy/apply", "POST /api/deploy/confirm", "POST /api/deploy/rollback",
 		"PUT /api/config/*", "PATCH /api/config/*", "POST /api/config/*", "DELETE /api/config/*"} {
 		s.tenantWrites[r] = true
 	}
-	g.PUT("/dns/zones/:id/records", s.handleZoneRecords)
-	g.PUT("/dyndns/clients/:id/records", s.handleDyndnsRecords)
 	g.GET("/ipam/tree", s.handleIpamTree)
-	g.GET("/ipam/prefixes/:id/next-free", s.handleNextFree)
 	g.GET("/rules/auto", s.handleAutoRules)
 	g.GET("/services", func(c *echo.Context) error { return c.JSON(http.StatusOK, fwconfig.Services) })
 	g.GET("/certificates/cas", func(c *echo.Context) error { return c.JSON(http.StatusOK, fwconfig.ACMECAs) })
-	g.GET("/certificates/:id/download", s.handleCertificateDownload)
-	g.POST("/certificates/:id/renew", s.handleCertificateRenew)
 	g.GET("/dyndns/providers", func(c *echo.Context) error { return c.JSON(http.StatusOK, fwconfig.DNSProviders) })
 	g.GET("/predefined-services", func(c *echo.Context) error { return c.JSON(http.StatusOK, netobj.Predefined) })
 	g.GET("/icmp-types", func(c *echo.Context) error {
 		return c.JSON(http.StatusOK, map[string][]fwconfig.ICMPType{"icmp": fwconfig.ICMPTypes, "icmpv6": fwconfig.ICMPv6Types})
 	})
-	g.POST("/rules/reorder", s.handleReorder("rules"))
-	g.POST("/nat/reorder", s.handleReorder("nat_rules"))
-	g.POST("/policy-routes/reorder", s.handleReorder("policy_routes"))
-	g.GET("/wg/peers/:id/config", s.handleWgClientConfig)
-	g.POST("/interfaces/:id/wg-rekey", s.handleWgRekey)
-	g.POST("/wg/import", s.handleWgImport)
-	g.GET("/interfaces/:id/wg-next-free", s.handleWgNextFree)
-	g.POST("/ip-lists/:id/refresh", s.handleIPListRefresh)
-	g.POST("/dns/blocklists/:id/refresh", s.handleDNSBlocklistRefresh)
-	g.POST("/tasks/:id/run", s.handleTaskRun)
+	g.POST("/wg/import", s.handleWgImport, s.syncAfter)
 	g.GET("/schedule/preview", s.handleSchedulePreview)
 
 	g.GET("/settings", s.handleGetSettings)
-	g.PUT("/settings", s.handlePutSettings)
+	g.PUT("/settings", s.handlePutSettings, s.syncAfter)
 	g.POST("/backup", s.handleBackup)
-	g.POST(strings.TrimPrefix(restorePath, "/api"), s.handleRestore, middleware.BodyLimit(backupMaxSize/3*4+1<<20))
+	g.POST(strings.TrimPrefix(restorePath, "/api"), s.handleRestore, middleware.BodyLimit(backupMaxSize/3*4+1<<20), s.syncAfter)
 	g.GET("/users", s.handleListUsers)
 	g.POST("/users", s.handleCreateUser)
 	g.PUT("/users/:id", s.handleUpdateUser)
@@ -276,8 +261,7 @@ func (s *Server) Echo() *echo.Echo {
 
 	// Bundles hold a virtual firewall's secrets: global admins only
 	// (no tenant or viewer write rule, and the GET in viewerDenied).
-	g.GET("/instances/:id/bundle", s.handleExportBundle)
-	g.POST("/instances/import", s.handleImportBundle)
+	g.POST("/instances/import", s.handleImportBundle, s.syncAfter)
 	g.GET("/firewalls/:id/witness", s.handleWitnessString)
 	g.POST("/firewalls/:id/switchover", s.handleSwitchover)
 	g.GET("/ha", s.handleHAStatus)
@@ -294,7 +278,7 @@ func (s *Server) Echo() *echo.Echo {
 	g.GET("/deploy/changes", s.handleDeployChanges)
 	g.POST("/deploy/preview", s.handleDeployPreview)
 	g.GET("/deploy/nftables", s.handleExportNftables)
-	g.POST("/import/nftables", s.handleImportNftables)
+	g.POST("/import/nftables", s.handleImportNftables, s.syncAfter)
 	g.POST("/deploy/apply", s.handleDeployApply)
 	g.POST("/deploy/confirm", s.handleDeployConfirm)
 	g.POST("/deploy/rollback", s.handleDeployRollback)
@@ -320,7 +304,6 @@ func (s *Server) Echo() *echo.Echo {
 	g.POST("/directory/servers/reorder", s.handleReorderLdapServers)
 	g.POST("/directory/servers/test", s.handleTestLdapServer)
 	g.GET("/directory/servers/:id/browse", s.handleBrowseLdapServer)
-	g.GET("/interfaces/:id/openvpn-client", s.handleOpenVPNClientConfig)
 	g.GET("/agent/rule-counters", s.handleAgentRuleCounters)
 	g.GET("/agent/rate-limits", s.handleAgentRateLimits)
 	g.GET("/agent/logs", s.handleAgentLogs)
@@ -499,7 +482,7 @@ func (s *Server) ensureDefaultInstance() error {
 	if err := s.ensureFirewall(); err != nil {
 		return err
 	}
-	return s.db.Transaction(func(tx *gorm.DB) error {
+	err := s.db.Transaction(func(tx *gorm.DB) error {
 		var n int64
 		if err := tx.Model(&models.Instance{}).Count(&n).Error; err != nil || n > 0 {
 			return err
@@ -514,6 +497,12 @@ func (s *Server) ensureDefaultInstance() error {
 		slog.Info("created default instance", "name", DefaultInstanceName)
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+	// The tables are the candidate's cache: what was written there is the
+	// candidate's.
+	return s.syncFromTables(context.Background())
 }
 
 func (s *Server) settings() (*models.Settings, error) {

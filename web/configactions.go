@@ -56,7 +56,7 @@ type configAction struct {
 	// read into the candidate after (the tables hold it until the API is
 	// all on the tree).
 	legacy bool
-	run   func(s *Server, c *echo.Context, a *actionCtx) error
+	run    func(s *Server, c *echo.Context, a *actionCtx) error
 }
 
 // actionCtx is what an action gets: the tree it acts on (a copy for a

@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"slices"
 	"testing"
-
 )
 
 func TestDelegatedAddresses(t *testing.T) {

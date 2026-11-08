@@ -64,7 +64,8 @@ func bad(msg string) error { return &badRequest{msg} }
 // errForbidden refuses a change the user may not make.
 var errForbidden = errors.New("forbidden")
 
-func (r *resource[T, PT]) register(s *Server, g *echo.Group, path string) {
+// register registers the resource's routes; mws run around its writes.
+func (r *resource[T, PT]) register(s *Server, g *echo.Group, path string, mws ...echo.MiddlewareFunc) {
 	for _, m := range r.tenantWrites {
 		p := path
 		if m != http.MethodPost {
@@ -74,9 +75,16 @@ func (r *resource[T, PT]) register(s *Server, g *echo.Group, path string) {
 	}
 	g.GET(path, r.list)
 	g.GET(path+"/:id", r.get)
-	g.POST(path, r.create)
-	g.PUT(path+"/:id", r.update)
-	g.DELETE(path+"/:id", r.remove)
+	g.POST(path, r.create, mws...)
+	g.PUT(path+"/:id", r.update, mws...)
+	g.DELETE(path+"/:id", r.remove, mws...)
+}
+
+// registerRead registers a configuration table's reads alone: the tables
+// are the candidate's cache, changed through /api/config.
+func (r *resource[T, PT]) registerRead(s *Server, g *echo.Group, path string) {
+	g.GET(path, r.list)
+	g.GET(path+"/:id", r.get)
 }
 
 func (r *resource[T, PT]) list(c *echo.Context) error {

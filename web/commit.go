@@ -93,6 +93,13 @@ func (s *Server) deploy(ctx context.Context, username string, timeout *int, only
 	if err != nil {
 		return nil, err
 	}
+	if errs := s.firewallProblems(tree); len(errs) > 0 {
+		problems := make([]string, len(errs))
+		for i, e := range errs {
+			problems[i] = e.Error()
+		}
+		return nil, &fwconfig.ValidationError{Problems: problems}
+	}
 	// An instance admin's commit: what they may not change.
 	if only != nil {
 		run, err := treeBackend{s}.Running(ctx)

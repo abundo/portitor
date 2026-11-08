@@ -89,7 +89,7 @@ func TestSyncNICs(t *testing.T) {
 	}
 
 	// A deleted interface is not imported again; a new one is.
-	env.do("DELETE", "/api/interfaces/"+itoa(ifaces[0].ID), nil)
+	env.mustCfg("DELETE", "instance=main/interface="+ifaces[0].Name, nil)
 	fake.nics = append(fake.nics, agentapi.NICStatus{Name: "eth5", Addresses: []string{}})
 	got = status()
 	if len(got.Imported) != 1 || got.Imported[0] != "eth5" {

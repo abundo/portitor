@@ -68,11 +68,11 @@ func TestVRFL3VNI(t *testing.T) {
 	vrf := map[string]any{"route-table": 10, "evpn-vni": 5000, "evpn-local": "192.0.2.1",
 		"evpn-device": "eth0", "evpn-advertise-v4": true, "evpn-import-rts": []string{"65000:5000"}, "evpn-export-rts": []string{" 65000:5000 "}}
 	for field, v := range map[string]any{
-		"evpn-vni":          100, // vx100's
-		"evpn-local":        nil,
-		"evpn-device":       "eth9",
-		"evpn-rd":           "x",
-		"evpn-import-rts":   []string{"65000"},
+		"evpn-vni":        100, // vx100's
+		"evpn-local":      nil,
+		"evpn-device":     "eth9",
+		"evpn-rd":         "x",
+		"evpn-import-rts": []string{"65000"},
 	} {
 		c := maps.Clone(vrf)
 		c[field] = v

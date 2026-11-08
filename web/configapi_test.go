@@ -15,7 +15,7 @@ import (
 func TestConfigAPI(t *testing.T) {
 	env := newEnv(t)
 	env.srv.newAgent = func(*models.Firewall) (agentAPI, error) { return &neighboursAgent{}, nil }
-	env.create("/api/instances", map[string]any{"name": "main"})
+	env.host("main")
 	var fw models.Firewall
 	env.srv.db.First(&fw)
 	want := func(rec interface {

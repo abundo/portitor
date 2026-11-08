@@ -51,6 +51,8 @@ func num(e *datastore.Node, leaf string) int {
 func normalizeInstance(c *Ctx, in *datastore.Node) error {
 	if old := c.old(in); old != nil && on(old, "is-default") != on(in, "is-default") {
 		return fail("is-default: the default virtual firewall is the firewall's host; it stays the default")
+	} else if old != nil && on(in, "is-default") && old.Leaf("firewall") != in.Leaf("firewall") {
+		return fail("firewall: the default virtual firewall is its firewall's host and can't move")
 	}
 	if c.old(in) == nil {
 		if _, ok := in.Leaves["dns-upstream"]; !ok {

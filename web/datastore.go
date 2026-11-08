@@ -10,7 +10,6 @@ import (
 	"io"
 	"log/slog"
 	"net"
-	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -118,9 +117,16 @@ func tablesTree(db *gorm.DB) (*datastore.Tree, bool, error) {
 	if !db.Migrator().HasTable("instances") {
 		return nil, false, nil
 	}
-	var n int64
-	if err := db.Table("instances").Count(&n).Error; err != nil || n == 0 {
+	// Configuration: a virtual firewall, or the settings.
+	var n, st int64
+	if err := db.Table("instances").Count(&n).Error; err != nil {
 		return nil, false, err
+	}
+	if err := db.Table("settings").Count(&st).Error; err != nil {
+		return nil, false, err
+	}
+	if n == 0 && st == 0 {
+		return nil, false, nil
 	}
 	root, err := schema.Load()
 	if err != nil {
@@ -256,13 +262,14 @@ func (s *Server) syncFromTables(ctx context.Context) error {
 	return t.store.Replace(ctx, tree)
 }
 
-// syncTables runs syncFromTables after an API request that may have
-// written the tables.
-func (s *Server) syncTables(next echo.HandlerFunc) echo.HandlerFunc {
+// syncAfter reads the tables into the candidate after a request that
+// wrote configuration into them: the handlers from before the tree (a
+// firewall made or deleted, Settings, an import, a bundle, a restore). The
+// tables are otherwise the candidate's cache, written from it.
+func (s *Server) syncAfter(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		err := next(c)
-		m, path := c.Request().Method, c.Request().URL.Path
-		if err == nil && m != http.MethodGet && m != http.MethodHead && !strings.HasPrefix(path, "/api/deploy/") && !strings.HasPrefix(path, configPrefix) {
+		if r, rerr := echo.UnwrapResponse(c.Response()); err == nil && rerr == nil && r.Status < 300 {
 			if serr := s.syncFromTables(c.Request().Context()); serr != nil {
 				slog.Warn("reading the tables into the candidate", "err", serr)
 			}

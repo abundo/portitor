@@ -25,6 +25,7 @@ import (
 	"github.com/abundo/portitor/internal/datastore"
 	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/internal/schema"
+	"github.com/abundo/portitor/models"
 )
 
 // The configuration API, on the datastore (RESTCONF-like, RFC 8040's paths
@@ -275,7 +276,8 @@ func (s *Server) handleConfigEdit(c *echo.Context) error {
 		}
 		// What the change breaks, in the entries changed or in those that
 		// refer to them.
-		if errs := newProblems(confcheck.Check(before), confcheck.Check(work)); len(errs) > 0 {
+		if errs := newProblems(append(confcheck.Check(before), s.firewallProblems(before)...),
+			append(confcheck.Check(work), s.firewallProblems(work)...)); len(errs) > 0 {
 			return &datastore.ValidationError{Problems: errs}
 		}
 		// And what the commit's build would find wrong that it didn't
@@ -576,4 +578,41 @@ func newProblems(before, after []error) []error {
 		}
 	}
 	return out
+}
+
+// firewallProblems are what is wrong with the tree's virtual firewalls by
+// what portitor-config alone knows: on a firewall that exists and isn't an
+// HA secondary (which runs its primary's), and only one per firewall
+// while Settings has virtual firewalls off.
+func (s *Server) firewallProblems(tree *datastore.Tree) []error {
+	fws, err := s.firewalls()
+	if err != nil {
+		return []error{err}
+	}
+	byName := map[string]models.Firewall{}
+	for _, fw := range fws {
+		byName[fw.Name] = fw
+	}
+	vfs := true
+	if st := tree.Root.Containers["settings"]; st != nil {
+		vfs = st.Leaf("virtual-firewalls") == "true"
+	}
+	var errs []error
+	count := map[string]int{}
+	for _, in := range tree.Root.Lists["instance"] {
+		at := datastore.PathOf(in).String(tree.Root.S)
+		name := in.Leaf("firewall")
+		fw, ok := byName[name]
+		switch {
+		case !ok:
+			errs = append(errs, &datastore.Error{Path: at, Msg: "firewall: no firewall " + name})
+		case fw.HAPrimaryID != nil:
+			errs = append(errs, &datastore.Error{Path: at, Msg: "firewall: " + name + " is an HA secondary; it runs its primary's virtual firewalls"})
+		}
+		count[name]++
+		if !vfs && count[name] == 2 {
+			errs = append(errs, &datastore.Error{Path: at, Msg: "virtual firewalls are off (Settings): a firewall has its host alone"})
+		}
+	}
+	return errs
 }

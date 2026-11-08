@@ -4,8 +4,8 @@
 package web
 
 import (
-	"net/http"
 	"fmt"
+	"net/http"
 	"slices"
 	"strings"
 	"testing"

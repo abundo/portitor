@@ -71,8 +71,8 @@ func docOf(t *testing.T, env *testEnv, name string) string {
 
 func TestBundleRoundTrip(t *testing.T) {
 	src := newEnv(t)
-	id := richInstance(t, src, "shop")
-	rec := src.do("GET", "/api/instances/"+itoa(id)+"/bundle", nil)
+	richInstance(t, src, "shop")
+	rec := src.do("GET", "/api/config/candidate/instance=shop?action=bundle", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("export: %d %s", rec.Code, rec.Body)
 	}
@@ -113,9 +113,7 @@ func TestBundleRoundTrip(t *testing.T) {
 		t.Errorf("%d hosts named nas", n)
 	}
 	// A host that differs here is a conflict, and nothing is imported.
-	var nas models.AddressObject
-	dst.srv.db.Where("name = ?", "nas").First(&nas)
-	dst.do("PUT", "/api/objects/"+itoa(nas.ID), map[string]any{"addresses": []string{"192.168.5.11"}})
+	dst.patch("host=nas", map[string]any{"addresses": []string{"192.168.5.11"}})
 	rec = dst.do("POST", "/api/instances/import", map[string]any{"name": "shop4", "bundle": b})
 	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "nas") {
 		t.Errorf("conflicting host: %d %s", rec.Code, rec.Body)
@@ -137,10 +135,10 @@ func TestBundleLinks(t *testing.T) {
 	if err := src.srv.ensureDefaultInstance(); err != nil {
 		t.Fatal(err)
 	}
-	a := src.create("/api/instances", map[string]any{"name": "left"})
-	b := src.create("/api/instances", map[string]any{"name": "right"})
-	src.create("/api/links", map[string]any{"name": "lr", "instance_a_id": a, "interface_a": "to-right", "addresses_a": []string{"10.7.0.1/30"},
-		"instance_b_id": b, "interface_b": "to-left", "addresses_b": []string{"10.7.0.2/30"}})
+	src.vf("left")
+	src.vf("right")
+	src.put("link=lr", map[string]any{"instance-a": "left", "interface-a": "to-right", "addresses-a": []string{"10.7.0.1/30"},
+		"instance-b": "right", "interface-b": "to-left", "addresses-b": []string{"10.7.0.2/30"}})
 	dst := newEnv(t)
 	if err := dst.srv.ensureDefaultInstance(); err != nil {
 		t.Fatal(err)
@@ -170,11 +168,7 @@ func TestBundleLinks(t *testing.T) {
 
 func bundleOf(t *testing.T, env *testEnv, name string) Bundle {
 	t.Helper()
-	var in models.Instance
-	if err := env.srv.db.Where("name = ?", name).First(&in).Error; err != nil {
-		t.Fatal(err)
-	}
-	rec := env.do("GET", "/api/instances/"+itoa(in.ID)+"/bundle", nil)
+	rec := env.do("GET", "/api/config/candidate/instance="+name+"?action=bundle", nil)
 	var b Bundle
 	if err := json.Unmarshal(rec.Body.Bytes(), &b); err != nil {
 		t.Fatal(err)

@@ -8,7 +8,6 @@ import (
 	"context"
 	"io"
 	"net"
-	"net/http"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -67,9 +66,7 @@ commit now
 
 	// An edit in the CLI, then one in the GUI: the commit has both.
 	cliScript(t, cenv, "enter candidate\ninstance "+host.Name+" interface lo1 description cli\n")
-	if rec := env.do("POST", "/api/interfaces", map[string]any{"instance_id": host.ID, "name": "lo2", "kind": "loopback", "enabled": true, "ipv4_mode": "static"}); rec.Code != http.StatusCreated && rec.Code != http.StatusOK {
-		t.Fatalf("GUI edit: %d %s", rec.Code, rec.Body)
-	}
+	env.put("instance="+host.Name+"/interface=lo2", map[string]any{"kind": "loopback", "enabled": true, "ipv4-mode": "static"})
 	out = cliScript(t, cenv, "enter candidate\ndiff flat\ncommit stay\n")
 	if strings.Contains(out, "pending") {
 		cliScript(t, cenv, "confirm\n")

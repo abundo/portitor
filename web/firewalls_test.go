@@ -162,7 +162,7 @@ func TestFirewallsDeploy(t *testing.T) {
 	// A change on the branch deploys there only.
 	var shop models.Instance
 	env.srv.db.Where("name = ?", "shop").First(&shop)
-	env.create("/api/rules", map[string]any{"instance_id": shop.ID, "chain": "input", "action": "drop", "enabled": true})
+	env.post("instance=shop/rule", map[string]any{"chain": "input", "action": "drop", "enabled": true})
 	if rec := env.do("POST", "/api/deploy/apply", map[string]any{}); rec.Code != http.StatusOK {
 		t.Fatalf("commit: %d %s", rec.Code, rec.Body)
 	}
@@ -180,7 +180,7 @@ func TestFirewallsDeploy(t *testing.T) {
 	}
 
 	// Revert works from the latest commit's snapshot.
-	env.create("/api/rules", map[string]any{"instance_id": shop.ID, "chain": "input", "action": "accept", "enabled": true})
+	env.post("instance=shop/rule", map[string]any{"chain": "input", "action": "accept", "enabled": true})
 	if rec := env.do("POST", "/api/deploy/revert", map[string]any{}); rec.Code != http.StatusOK {
 		t.Fatalf("revert: %d %s", rec.Code, rec.Body)
 	}
@@ -238,7 +238,7 @@ func TestFirewallsRules(t *testing.T) {
 	env.srv.db.Where("name = ?", "shop").First(&shop)
 
 	// A link stays on one firewall.
-	if rec := env.cfg("POST", "link", map[string]any{"name": "l1", "instance-a": guest.ID, "instance-b": shop.ID, "interface-a": "to-shop", "interface-b": "to-guest"}); rec.Code != http.StatusBadRequest {
+	if rec := env.cfg("POST", "link", map[string]any{"name": "l1", "instance-a": "guest", "instance-b": "shop", "interface-a": "to-shop", "interface-b": "to-guest"}); rec.Code != http.StatusBadRequest {
 		t.Errorf("link across firewalls: %d %s", rec.Code, rec.Body)
 	}
 	// A firewall's name can't be a virtual firewall's, and one with
@@ -250,7 +250,7 @@ func TestFirewallsRules(t *testing.T) {
 	if rec := env.do("POST", "/api/firewalls", map[string]any{"name": "Branch-Office_2.lab"}); rec.Code != http.StatusCreated && rec.Code != http.StatusOK {
 		t.Errorf("firewall name: %d %s", rec.Code, rec.Body)
 	}
-	if rec := env.do("POST", "/api/instances", map[string]any{"name": "Shop-2", "firewall_id": 1}); rec.Code != http.StatusBadRequest {
+	if rec := env.cfg("POST", "instance", map[string]any{"name": "Shop-2", "firewall": "firewall"}); rec.Code != http.StatusBadRequest {
 		t.Errorf("virtual firewall name: %d %s", rec.Code, rec.Body)
 	}
 	if rec := env.do("POST", "/api/firewalls", map[string]any{"name": "../etc"}); rec.Code != http.StatusBadRequest {
@@ -260,14 +260,10 @@ func TestFirewallsRules(t *testing.T) {
 		t.Errorf("delete with a virtual firewall: %d %s", rec.Code, rec.Body)
 	}
 	// The host never moves; another virtual firewall may.
-	var host models.Instance
-	env.srv.db.Where("name = ?", "branch").First(&host)
-	if rec := env.do("PUT", "/api/instances/"+itoa(host.ID), map[string]any{"firewall_id": 1}); rec.Code != http.StatusBadRequest {
+	if rec := env.cfg("PATCH", "instance=branch", map[string]any{"firewall": "firewall"}); rec.Code != http.StatusBadRequest {
 		t.Errorf("host moved: %d %s", rec.Code, rec.Body)
 	}
-	if rec := env.do("PUT", "/api/instances/"+itoa(shop.ID), map[string]any{"firewall_id": 1}); rec.Code != http.StatusOK {
-		t.Errorf("move: %d %s", rec.Code, rec.Body)
-	}
+	env.patch("instance=shop", map[string]any{"firewall": "firewall"})
 	if rec := env.do("DELETE", "/api/firewalls/"+itoa(branch), nil); rec.Code != http.StatusNoContent {
 		t.Errorf("delete: %d %s", rec.Code, rec.Body)
 	}
@@ -299,10 +295,7 @@ func TestFirewallsLiveData(t *testing.T) {
 
 func TestFirewallsHAPair(t *testing.T) {
 	env, agents, _ := twoFirewalls(t)
-	var main models.Instance
-	env.srv.db.Where("name = ?", "main").First(&main)
-	env.create("/api/interfaces", map[string]any{"instance_id": main.ID, "name": "lan", "kind": "bridge", "enabled": true,
-		"ipv4_mode": "static", "addresses": []string{"10.0.0.1/24"}})
+	env.put("instance=main/interface=lan", map[string]any{"kind": "bridge", "enabled": true, "ipv4-mode": "static", "addresses": []string{"10.0.0.1/24"}})
 	fp := strings.Repeat("ab", 32)
 	env.do("PUT", "/api/firewalls/1", map[string]any{"name": "firewall", "agent_url": "https://127.0.0.1:8443", "agent_fingerprint": fp})
 	pair := env.create("/api/firewalls", map[string]any{"name": "fw1b", "ha_primary_id": 1, "agent_url": "https://192.0.2.3:8443", "agent_fingerprint": fp})
@@ -313,16 +306,16 @@ func TestFirewallsHAPair(t *testing.T) {
 		t.Errorf("the secondary has %d instances of its own", n)
 	}
 	// A role is only for the host's own physical interface.
-	if rec := env.do("POST", "/api/interfaces", map[string]any{"instance_id": main.ID, "name": "v0", "kind": "bridge", "enabled": true, "ipv4_mode": "static", "ha_role": fwconfig.HARoleLink}); rec.Code != http.StatusBadRequest {
+	if rec := env.cfg("PUT", "instance=main/interface=v0", map[string]any{"kind": "bridge", "enabled": true, "ipv4-mode": "static", "ha-role": fwconfig.HARoleLink}); rec.Code != http.StatusBadRequest {
 		t.Errorf("role on a bridge: %d %s", rec.Code, rec.Body)
 	}
-	if rec := env.do("POST", "/api/interfaces", map[string]any{"instance_id": main.ID, "name": "v0", "kind": "physical", "enabled": true, "ipv4_mode": "static", "ha_role": fwconfig.HARoleManagement}); rec.Code != http.StatusBadRequest {
+	if rec := env.cfg("PUT", "instance=main/interface=v0", map[string]any{"kind": "physical", "enabled": true, "ipv4-mode": "static", "ha-role": fwconfig.HARoleManagement}); rec.Code != http.StatusBadRequest {
 		t.Errorf("management without a gateway: %d %s", rec.Code, rec.Body)
 	}
 	if rec := env.do("POST", "/api/firewalls", map[string]any{"name": "fw1c", "ha_primary_id": 1}); rec.Code != http.StatusBadRequest {
 		t.Errorf("second secondary: %d %s", rec.Code, rec.Body)
 	}
-	if rec := env.do("POST", "/api/instances", map[string]any{"name": "onsec", "firewall_id": pair}); rec.Code != http.StatusBadRequest {
+	if rec := env.cfg("POST", "instance", map[string]any{"name": "onsec", "firewall": "fw1b"}); rec.Code != http.StatusBadRequest {
 		t.Errorf("instance on the secondary: %d %s", rec.Code, rec.Body)
 	}
 
@@ -333,24 +326,12 @@ func TestFirewallsHAPair(t *testing.T) {
 	}
 	addHALinks(t, env)
 	// VRRP isn't used on a pair.
-	vrrp := env.create("/api/vrrp/routers", map[string]any{"instance_id": main.ID, "interface": "lan", "vrid": 10, "enabled": true, "ipv4": []string{"10.0.0.254"}})
-	env.do("PUT", "/api/firewalls/1", map[string]any{"agent_url": "https://192.0.2.1:8443"})
-	if rec := env.do("POST", "/api/deploy/apply", map[string]any{}); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "VRRP is not used") {
-		t.Fatalf("commit with VRRP: %d %s", rec.Code, rec.Body)
+	if rec := env.cfg("POST", "instance=main/vrrp-router", map[string]any{"interface": "lan", "vrid": 10, "enabled": true, "ipv4": []string{"10.0.0.254"}}); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "VRRP is not used") {
+		t.Fatalf("VRRP on a pair: %d %s", rec.Code, rec.Body)
 	}
-	env.do("DELETE", "/api/vrrp/routers/"+itoa(vrrp), nil)
-	env.do("PUT", "/api/firewalls/1", map[string]any{"agent_url": "https://127.0.0.1:8443"})
 	// A link's peer address is the secondary's own.
-	var mgmt models.Interface
-	env.srv.db.Where("name = ?", "mgmt0").First(&mgmt)
-	if rec := env.do("PUT", "/api/interfaces/"+itoa(mgmt.ID), map[string]any{"peer_addresses": []string{}}); rec.Code != http.StatusOK {
-		t.Fatalf("peer addresses: %d %s", rec.Code, rec.Body)
-	}
-	if rec := env.do("POST", "/api/deploy/apply", map[string]any{}); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "interface mgmt0: the secondary needs") {
-		t.Fatalf("commit without peer addresses: %d %s", rec.Code, rec.Body)
-	}
-	if rec := env.do("PUT", "/api/interfaces/"+itoa(mgmt.ID), map[string]any{"peer_addresses": []string{"192.0.2.3/24"}}); rec.Code != http.StatusOK {
-		t.Fatalf("peer addresses: %d %s", rec.Code, rec.Body)
+	if rec := env.cfg("PATCH", "instance=main/interface=mgmt0", map[string]any{"peer-addresses": []string{}}); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "interface mgmt0: the secondary needs") {
+		t.Fatalf("no peer addresses: %d %s", rec.Code, rec.Body)
 	}
 	// The secondary can't reach the primary's agent at 127.0.0.1.
 	if rec := env.do("POST", "/api/deploy/apply", map[string]any{}); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "loopback") {
@@ -415,7 +396,7 @@ func TestFirewallsHAPair(t *testing.T) {
 func haPair(t *testing.T) (*testEnv, map[uint]*fleetAgent, uint) {
 	t.Helper()
 	env, agents, branch := twoFirewalls(t)
-	env.do("DELETE", "/api/instances/"+itoa(instanceID(t, env, "shop")), nil)
+	env.mustCfg("DELETE", "instance=shop", nil)
 	env.do("DELETE", "/api/firewalls/"+itoa(branch), nil)
 	delete(agents, branch)
 	fp := strings.Repeat("ab", 32)
@@ -429,11 +410,10 @@ func haPair(t *testing.T) (*testEnv, map[uint]*fleetAgent, uint) {
 // addHALinks gives the first firewall the pair's two links.
 func addHALinks(t *testing.T, env *testEnv) {
 	t.Helper()
-	main := instanceID(t, env, "main")
-	env.create("/api/interfaces", map[string]any{"instance_id": main, "name": "ha0", "kind": "physical", "enabled": true, "ipv4_mode": "static",
-		"addresses": []string{"169.254.1.1/30"}, "peer_addresses": []string{"169.254.1.2/30"}, "ha_role": fwconfig.HARoleLink})
-	env.create("/api/interfaces", map[string]any{"instance_id": main, "name": "mgmt0", "kind": "physical", "enabled": true, "ipv4_mode": "static",
-		"addresses": []string{"192.0.2.1/24"}, "peer_addresses": []string{"192.0.2.3/24"}, "ha_role": fwconfig.HARoleManagement, "ha_gateway": "192.0.2.254"})
+	env.put("instance=main/interface=ha0", map[string]any{"kind": "physical", "enabled": true, "ipv4-mode": "static",
+		"addresses": []string{"169.254.1.1/30"}, "peer-addresses": []string{"169.254.1.2/30"}, "ha-role": fwconfig.HARoleLink})
+	env.put("instance=main/interface=mgmt0", map[string]any{"kind": "physical", "enabled": true, "ipv4-mode": "static",
+		"addresses": []string{"192.0.2.1/24"}, "peer-addresses": []string{"192.0.2.3/24"}, "ha-role": fwconfig.HARoleManagement, "ha-gateway": "192.0.2.254"})
 }
 
 func instanceID(t *testing.T, env *testEnv, name string) uint {
@@ -468,7 +448,7 @@ func TestFirewallsHADegradedCommit(t *testing.T) {
 	}
 	// Both down: no commit.
 	agents[1].down, agents[pair].down = true, true
-	env.create("/api/rules", map[string]any{"instance_id": instanceID(t, env, "main"), "chain": "input", "action": "drop", "enabled": true})
+	env.post("instance=main/rule", map[string]any{"chain": "input", "action": "drop", "enabled": true})
 	if rec := env.do("POST", "/api/deploy/apply", map[string]any{}); rec.Code == http.StatusOK {
 		t.Errorf("commit with both down: %d %s", rec.Code, rec.Body)
 	}

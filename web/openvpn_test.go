@@ -208,18 +208,12 @@ func TestOpenVPNTenant(t *testing.T) {
 // Both hosts of an HA pair have the OpenVPN server's addresses.
 func TestOpenVPNHA(t *testing.T) {
 	env, _, pair := haPairConfigured(t)
-	main := instanceID(t, env, "main")
-	cert := env.create("/api/certificates", map[string]any{"instance_id": main, "name": "vpn", "enabled": true, "source": "import",
-		"generate": map[string]any{"domains": []string{"vpn.example.com"}, "key_type": "ec256", "days": 30}})
-	if rec := env.do("POST", "/api/interfaces", map[string]any{"instance_id": main, "name": "ovpn0", "kind": "openvpn", "enabled": true,
-		"addresses": []string{"10.8.0.1/24", "fd00:8::1/64"}, "peer_addresses": []string{"10.8.0.2/24"},
-		"ovpn_tcp_addresses": []string{"10.9.0.1/24"}, "ovpn_certificate_id": cert}); rec.Code != http.StatusCreated {
-		t.Fatalf("create: %d %s", rec.Code, rec.Body)
-	}
-	var ifc models.Interface
-	env.srv.db.Where("name = ?", "ovpn0").First(&ifc)
-	if len(ifc.PeerAddresses) != 0 {
-		t.Errorf("peer addresses kept: %v", ifc.PeerAddresses)
+	env.mustCfg("POST", "instance=main/certificate=vpn?action=generate", map[string]any{"domains": []string{"vpn.example.com"}, "key-type": "ec256", "days": 30})
+	env.put("instance=main/interface=ovpn0", map[string]any{"kind": "openvpn", "enabled": true,
+		"addresses": []string{"10.8.0.1/24", "fd00:8::1/64"}, "peer-addresses": []string{"10.8.0.2/24"},
+		"ovpn-tcp-addresses": []string{"10.9.0.1/24"}, "ovpn-certificate": "vpn"})
+	if got := env.node("instance=main/interface=ovpn0").LeafLists["peer-addresses"]; len(got) != 0 {
+		t.Errorf("peer addresses kept: %v", got)
 	}
 	for _, fw := range []uint{1, pair} {
 		doc, err := builder.BuildFirewall(env.input(), 1, fw)
