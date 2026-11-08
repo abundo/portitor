@@ -41,8 +41,8 @@ are in [README.md](README.md).
 | `internal/netobj` | Named hosts/prefixes (`address_objects`) and address lists (`address_lists`): name checks and expansion |
 | `internal/dbmigrate` | Opens the SQLite database; goose migrations (the schema's source of truth) |
 | `models` | GORM mapping |
-| `web` | Echo v5 server (`server.go`: routes): auth, generic CRUD (`crud.go`), entry validation (`resources.go`), firewalls (`firewalls.go`), commits (`commit.go`), other handlers (`handlers.go`), Revert snapshots (`revert.go`), tenancy (`tenancy.go`), roles (`roles.go`, `access.go`), VRFs (`vrf.go`), rename/delete reference keeping (`objects.go`, `services.go`, `ratelimits.go`, `ifzones.go`, `bgp.go`, `ospf.go`, `isis.go`, `vrrp.go`, `bfd.go`, `delegated.go`), folders for hosts and IP lists (`folders.go`, GUI only), agent proxies (`console.go`, `capture.go`, `probe.go`, `trace.go`, `iperf.go`, `servicelog.go`, `syslog.go`, `connections.go`), WireGuard config import (`wgimport.go`), backup/restore (`backup.go`), `config.yaml` (`config.go`), the HA replica and promotion (`replica.go`, `promote.go`), the witness (`witness.go`, `portalwitness.go`), and portitor-web, the portal (`portal.go`, `portal.html`) |
-| `web/frontend` | Vue SPA; `CrudPage.vue` drives most pages from field/column schemas |
+| `web` | Echo v5 server (`server.go`: routes): auth, the configuration API (`configapi.go`: `/api/schema`, `/api/config`, `checkEdit`; entries' actions `configactions.go`), the CRUD's reads of the tables (`crud.go`, `registerRead`) and its code of before the tree (`resources.go`, `crudtree.go`: `legacyWrite`, `viaTables`), firewalls (`firewalls.go`), commits (`commit.go`), other handlers (`handlers.go`), Revert snapshots (`revert.go`), tenancy (`tenancy.go`), roles (`roles.go`, `access.go`), VRFs (`vrf.go`), rename/delete reference keeping (`objects.go`, `services.go`, `ratelimits.go`, `ifzones.go`, `bgp.go`, `ospf.go`, `isis.go`, `vrrp.go`, `bfd.go`, `delegated.go`), folders for hosts and IP lists (`folders.go`, GUI only), agent proxies (`console.go`, `capture.go`, `probe.go`, `trace.go`, `iperf.go`, `servicelog.go`, `syslog.go`, `connections.go`), WireGuard config import (`wgimport.go`), backup/restore (`backup.go`), `config.yaml` (`config.go`), the HA replica and promotion (`replica.go`, `promote.go`), the witness (`witness.go`, `portalwitness.go`), and portitor-web, the portal (`portal.go`, `portal.html`) |
+| `web/frontend` | Vue SPA; `CrudPage.vue` drives most pages from field/column schemas, on a YANG list (`api/config.js`: `treeApi`, `vfApi`) |
 | `docs` | User guides; every `docs/*.md` is bundled into the GUI's Help page (`src/docs.js`), and links between them stay in the GUI |
 | `deploy` | systemd units and example configs |
 | `dev` | Dev configs and `seed.sh`; `dev/lab` runs a real apply in two podman containers; `dev/yanggen` drafted `yang/` from the tables |
@@ -216,9 +216,11 @@ docs and user-facing messages.
   completion from it. Its sessions share a candidate (`datastore.Store`,
   `candidate.json` next to the database), the tables' configuration (`sqlmap.Import`,
   by the modules' `px:` extensions) with their edits, rebased when the tables change.
-  A commit checks it against the schema, writes it into the tables (`sqlmap.Write`,
-  keeping row ids by path) and runs `deploy`, restoring the tables when that fails;
-  running is the live commit's snapshot. `portitor-config cli` is the console admin's;
+  The candidate is the configuration: every write goes to it, and the tables are its
+  cache, written from it on each change (`Store.OnChange`, `sqlmap.Write`, keeping
+  row ids by path), for the code that still reads them. A commit runs `deploy` on the
+  candidate and keeps it as `deployed/<commit>-config.json`; running is the live
+  commit's. `portitor-config cli` is the console admin's;
   `ssh_listen` serves it over SSH to the GUI's users (`cliLogin`: `authenticateUser`,
   two-factor codes, the login limits), with their access by path (`treeAccess`), and
   NETCONF as its `netconf` subsystem (`internal/netconf`, sharing the candidate and
@@ -227,8 +229,25 @@ docs and user-facing messages.
   validation, diff and sqlmap), filled by `web/state.go` from the API's live views
   requested as the user (`requestAs`), so tenant-filtered; its leaves are named after
   the agent API's JSON fields, which `datastore.Fill` maps. Not
-  in the tree: users, roles, firewalls, the directory, deployments. The GUI and the
-  API don't use it yet (phase 4).
+  in the tree: users, roles, firewalls, the directory, deployments.
+  The GUI and API clients use `/api/config` (`web/configapi.go`): RFC 8040 paths
+  (`instance=main/interface=eth1`) and RFC 7951 JSON, GET of candidate, running or
+  state (`?shallow`, `?with-defaults=report-all`; a set secret marked by an RFC 7952
+  annotation `"@leaf": {"portitor:set": true}`), PUT, PATCH, POST (a list keyed by a
+  numeric id gets the next one, `assignID`/`nextID`, never reused), DELETE, and
+  `?action=` for rename, move and the entries' actions (`configactions.go`: views,
+  operations, changes). A JSON edit takes `""` on a leaf as unset and keeps a secret
+  given `""` or left out of a PUT; `null` removes it. Every change is checked by
+  `checkEdit`: the user's access by path (`treeAccess`, `tenantTreeCheck`), the
+  schema, the hooks of `internal/confcheck` (normalizing on edit, checks per list
+  path, from the CRUD's `prepare*`), and the build (`buildProblems`); it may not add
+  a problem, and problems it didn't add come back as warnings
+  (`X-Portitor-Warnings`, toasted). Code from before the tree that writes the tables
+  runs as one change of the candidate: `legacyWrite` (a request: the imports) or
+  `viaTables` (bootstrap, a new NIC); Settings, the firewalls and a restore, which
+  also write rows that are not configuration, read the tables into the candidate
+  after (`syncAfter`). An HA replica reads the copied tables into its candidate and
+  fetches the live commit's configuration (`GET /ha/v1/commits/<n>`).
 - **Revert** discards uncommitted database edits by restoring the live
   commit's snapshot (`<db dir>/deployed/<commit>.db`, `liveCommit`); the newest
   `snapshotKeep` are kept, with each firewall's live document
@@ -326,8 +345,11 @@ docs and user-facing messages.
   secrets, DNS blocklist keys, DNS update provider settings, IP list passwords and API keys, agent token, the HA pair's and witness's secrets, password hashes, TOTP secrets and recovery code hashes, imported certificates' and certificate authorities' keys, OpenVPN's tls-crypt key, LDAP bind passwords) never reach
   the browser. The generic CRUD
   `PUT` merges the body onto the stored row, so those fields can't be overwritten
-  through the API either; a secret the user enters comes in through a write-only
-  `gorm:"-"` field that `prepare` copies and `present` clears (`DyndnsClient.NewTsigSecret`,
+  through the API either. In the tree a secret is a `px:secret` leaf, never read
+  back over `/api/config` (only marked as set) and kept when a write leaves it out;
+  the GUI writes it as `new_<leaf>` (empty keeps it) or `clear_<leaf>` (`treeApi`'s
+  `secretsOf`). The CRUD's models still have write-only `gorm:"-"` fields that
+  `prepare` copies and `present` clears (`DyndnsClient.NewTsigSecret`,
   `IpList.NewPassword`/`NewApiKey`, `BgpPeerSettings.NewPassword` with
   `ClearPassword`, `Instance.NewSnmpCommunity` with `ClearSnmpCommunity`,
   `SnmpUser.NewAuthPassword`/`NewPrivPassword`, `OspfInterface.NewAuthKey` with `ClearAuthKey`, `IsisConfig.NewAreaPassword`/`NewDomainPassword` and `IsisInterface.NewPassword` with their `Clear*`, `LdapServer.NewBindPassword` with `ClearBindPassword`, `Certificate.NewPrivKey` for an imported certificate; a DNS update provider's secret settings come in
@@ -721,9 +743,10 @@ the certificate portitor-config serves, chosen under Settings
   them; `requireRole` (`web/auth.go`) denies by default: everyone but a global admin
   gets GET routes except `viewerDenied` (and `tenantDenied` for `none`), and only
   the writes in `viewerWrites`, plus `tenantWrites` for an instance admin, whose
-  handlers must check the instance (`allowInstance`). A CRUD `resource` with a
-  `scope` filters lists and checks rows per instance; one without is shared (read by
-  all, written by global admins). A new route is global-admin-only for writes
+  handlers must check the instance (`allowInstance`). On `/api/config` access is by
+  path (`treeAccess`): an instance admin writes their virtual firewalls' subtrees,
+  everyone reads the shared lists, global admins write those. A CRUD `resource` with
+  a `scope` filters its lists per instance; one without is shared. A new route is global-admin-only for writes
   automatically; a new GET of instance data must filter it, and one that hands out
   secrets must check the instance or go in `viewerDenied`. `TestViewerRole` sweeps
   every route, `TestTenancy` the instance checks. An instance admin's deploy merges
@@ -824,10 +847,15 @@ singular); a custom page uses `SearchInput` above each table,
 1. Add fields to `fwconfig` and validate them in `validate.go` (with a test case).
 2. Render them in `internal/render` (with a test; `nft -c` covers syntax).
 3. Apply them in `internal/agent` if they need more than a file.
-4. Migration + model, `builder.Build` mapping, entry checks in `web/resources.go`.
-5. The leaves (or list) in `yang/` with their `px:` mapping, which puts them in the
-   CLI (`TestEveryColumnMapped` fails until they are there).
-6. A page or fields in `web/frontend` (most pages are a `CrudPage` schema).
+4. The leaves (or list) in `yang/`, typed (`portitor-types.yang`, formats in
+   `internal/schema/formats.go`), with their `px:` mapping; that puts them in the API,
+   the CLI and NETCONF. Their checks that need more than the type go in
+   `internal/confcheck` (normalize on edit, check per list path).
+5. Migration + model (the tables are the candidate's cache until the code reading
+   them reads the tree; `TestEveryColumnMapped` fails until a column has its leaf),
+   and the `builder.Build` mapping.
+6. A page or fields in `web/frontend`: most pages are a `CrudPage` on `vfApi(list)`
+   or `treeApi`, rows with the leaves' names in snake case.
 
 ## Licence
 
@@ -873,8 +901,8 @@ them first; commit only when asked to, each time.
 - DNS templates (SOA templates, DNSSEC policies, zone templates) belong to an
   instance (`instance_id`); the default instance's may be `global`, read by all and
   used by any instance's zones and templates, changed only by its own admins
-  (`globalScope` in `web/access.go`, checks in `dnsOwner`/`usableBy`,
-  `web/resources.go`). A global template needs a global SOA and policy, one in use
+  (in the tree, entries of the default instance with `global` on, shown read-only in
+  the other virtual firewalls; checks in `internal/confcheck/services.go`). A global template needs a global SOA and policy, one in use
   elsewhere stays global, and names are unique per instance and a global one's
   across all, since the builder copies into each instance only the ones its zones
   use, and zones refer to them by name. A zone without a template gets the built-in

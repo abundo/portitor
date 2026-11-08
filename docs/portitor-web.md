@@ -65,8 +65,14 @@ After an upgrade, run `migrate` before `start`. `install.py` does both.
 On the firewall's console, as root:
 `sudo -u portitor portitor-config set interfaces ens19 addresses=192.168.1.1/24`, then
 `portitor-config commit --confirm 120` and `portitor-config confirm`.
-`portitor-config api GET /api/...` reads anything the GUI shows. Every check of the API
-applies (on an HA secondary, the configuration is read-only).
+`set` takes a list of the configuration (`interface`, `rule`, `route`, `host`, ...;
+`interfaces` works too) and its entry's key, in the virtual firewall `--vf` (default:
+the host); a list value is comma-separated, an empty value unsets the leaf.
+`portitor-config api GET /api/...` reads anything the GUI shows, and
+`portitor-config api PATCH /api/config/candidate/instance=main/interface=ens19
+'{"mtu": 1400}'` changes the configuration by its path (the leaves' names are those of
+the CLI, see [the CLI](cli.md)). Every check of the API applies (on an HA secondary,
+the configuration is read-only).
 
 ## portitor-web
 
