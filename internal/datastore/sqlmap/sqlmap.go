@@ -357,7 +357,9 @@ func leafValue(c *col, v any) (string, bool) {
 			s = "false"
 		}
 	}
-	if !c.nullable && !c.leaf.IsKey() && !c.leaf.Mandatory && s == zero(c.leaf) {
+	// An empty column is no value too, also where the leaf has a default:
+	// the CRUD stored "" for the default of some.
+	if !c.nullable && !c.leaf.IsKey() && !c.leaf.Mandatory && (s == zero(c.leaf) || s == "") {
 		return "", false
 	}
 	return s, true

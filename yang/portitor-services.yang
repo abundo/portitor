@@ -5,6 +5,7 @@ submodule portitor-services {
   yang-version 1.1;
   belongs-to portitor { prefix pt; }
   import portitor-extensions { prefix px; }
+  include portitor-types;
 
   description "Portitor configuration: services.";
 
@@ -17,25 +18,25 @@ submodule portitor-services {
       px:parent-column "instance_id";
       description "IpamPrefix is a node in the prefix tree. Parent/child relations are not stored; they follow from CIDR containment within an instance.";
       leaf prefix {
-        type string;
+        type ip-prefix;
       }
       leaf description {
-        type string;
+        type text;
       }
       leaf dhcp-enabled {
         type boolean;
       }
       leaf dhcp-range-start {
-        type string;
+        type ip-address;
       }
       leaf dhcp-range-end {
-        type string;
+        type ip-address;
       }
       leaf dhcp-gateway {
-        type string;
+        type ip-address;
       }
       leaf-list dhcp-dns-servers {
-        type string;
+        type union { type leafref { path "../../../host/name"; } type leafref { path "../../../address-list/name"; } type ip-address; }
         ordered-by user;
       }
       leaf ra-enabled {
@@ -52,16 +53,16 @@ submodule portitor-services {
       px:parent-column "instance_id";
       description "IpamAddress is a single address. With DnsName it gets an A/AAAA record; with Mac also a DHCP reservation. The firewall's own addresses are configured on the interface (Interface.Addresses).";
       leaf address {
-        type string;
+        type ip-address;
       }
       leaf dns-name {
-        type string;
+        type domain-name;
       }
       leaf mac {
-        type string;
+        type mac-address;
       }
       leaf description {
-        type string;
+        type text;
       }
     }
     list dns-soa-template {
@@ -76,7 +77,7 @@ submodule portitor-services {
         type boolean;
       }
       leaf mname {
-        type string;
+        type domain-name;
         mandatory true;
       }
       leaf rname {
@@ -168,14 +169,14 @@ submodule portitor-services {
         ordered-by user;
         px:json "nameservers";
         leaf name {
-          type string;
+          type domain-name;
         }
         leaf address {
-          type string;
+          type union { type ip-address; type string { length "0"; } }
         }
       }
       leaf description {
-        type string;
+        type text;
       }
     }
     list dns-zone {
@@ -186,11 +187,11 @@ submodule portitor-services {
         type string;
       }
       leaf type {
-        type string;
+        type enumeration { enum "forward"; enum "reverse4"; enum "reverse6"; enum "forward-only"; }
         default "forward";
       }
       leaf description {
-        type string;
+        type text;
       }
       leaf dns-template {
         type string;
@@ -199,7 +200,7 @@ submodule portitor-services {
         description "DnsTemplateID nil: built-in SOA and NS (localhost).";
       }
       leaf-list forwarders {
-        type string;
+        type union { type leafref { path "../../../host/name"; } type leafref { path "../../../address-list/name"; } type ip-address; }
         ordered-by user;
         description "Forwarders: the DNS servers of a forward-only zone (addresses or named hosts).";
       }

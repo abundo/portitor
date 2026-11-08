@@ -5,6 +5,7 @@ submodule portitor-firewall {
   yang-version 1.1;
   belongs-to portitor { prefix pt; }
   import portitor-extensions { prefix px; }
+  include portitor-types;
 
   description "Portitor configuration: firewall.";
 
@@ -22,7 +23,7 @@ submodule portitor-firewall {
         type uint32;
       }
       leaf kind {
-        type string;
+        type enumeration { enum "comment"; enum "group"; }
         description "Kind is empty for a rule, RuleKindComment for a comment row or RuleKindGroup for a group section heading; both keep their text in Description and only annotate the list. A group holds the rows below it up to the next group (the GUI folds them).";
       }
       leaf chain {
@@ -30,23 +31,23 @@ submodule portitor-firewall {
         mandatory true;
       }
       leaf-list in-interfaces {
-        type union { type leafref { path "../../interface/name"; } type leafref { path "../../interface-zone/name"; } type string; }
+        type union { type leafref { path "../../interface/name"; } type leafref { path "../../interface-zone/name"; } type ifname; }
         ordered-by user;
         description "InInterfaces and OutInterfaces hold interface and interface zone names of the instance; empty matches any.";
       }
       leaf-list out-interfaces {
-        type union { type leafref { path "../../interface/name"; } type leafref { path "../../interface-zone/name"; } type string; }
+        type union { type leafref { path "../../interface/name"; } type leafref { path "../../interface-zone/name"; } type ifname; }
         ordered-by user;
       }
       leaf family {
-        type string;
+        type enumeration { enum "ipv4"; enum "ipv6"; }
       }
       leaf-list src-addrs {
-        type union { type leafref { path "../../../host/name"; } type leafref { path "../../../address-list/name"; } type string; }
+        type union { type leafref { path "../../../host/name"; } type leafref { path "../../../address-list/name"; } type rule-address; }
         ordered-by user;
       }
       leaf-list dst-addrs {
-        type union { type leafref { path "../../../host/name"; } type leafref { path "../../../address-list/name"; } type string; }
+        type union { type leafref { path "../../../host/name"; } type leafref { path "../../../address-list/name"; } type rule-address; }
         ordered-by user;
       }
       leaf action {
@@ -61,7 +62,7 @@ submodule portitor-firewall {
         default true;
       }
       leaf description {
-        type string;
+        type text;
       }
       leaf-list services {
         type union { type leafref { path "../../../service/name"; } type string; }
@@ -98,29 +99,29 @@ submodule portitor-firewall {
         mandatory true;
       }
       leaf-list in-interfaces {
-        type union { type leafref { path "../../interface/name"; } type leafref { path "../../interface-zone/name"; } type string; }
+        type union { type leafref { path "../../interface/name"; } type leafref { path "../../interface-zone/name"; } type ifname; }
         ordered-by user;
       }
       leaf-list out-interfaces {
-        type union { type leafref { path "../../interface/name"; } type leafref { path "../../interface-zone/name"; } type string; }
+        type union { type leafref { path "../../interface/name"; } type leafref { path "../../interface-zone/name"; } type ifname; }
         ordered-by user;
       }
       leaf protocol {
-        type string;
+        type enumeration { enum "tcp"; enum "udp"; enum "tcp,udp"; }
       }
       leaf-list src-addrs {
-        type union { type leafref { path "../../../host/name"; } type leafref { path "../../../address-list/name"; } type string; }
+        type union { type leafref { path "../../../host/name"; } type leafref { path "../../../address-list/name"; } type address-or-prefix; }
         ordered-by user;
       }
       leaf-list dst-addrs {
-        type union { type leafref { path "../../../host/name"; } type leafref { path "../../../address-list/name"; } type string; }
+        type union { type leafref { path "../../../host/name"; } type leafref { path "../../../address-list/name"; } type address-or-prefix; }
         ordered-by user;
       }
       leaf dst-ports {
         type string;
       }
       leaf to-addr {
-        type string;
+        type union { type leafref { path "../../../host/name"; } type leafref { path "../../../address-list/name"; } type ip-address; }
       }
       leaf to-port {
         type int32;
@@ -130,7 +131,7 @@ submodule portitor-firewall {
         default true;
       }
       leaf description {
-        type string;
+        type text;
       }
       leaf hairpin {
         type boolean;
@@ -145,7 +146,7 @@ submodule portitor-firewall {
         type string;
       }
       leaf description {
-        type string;
+        type text;
       }
       leaf rate {
         type int32;

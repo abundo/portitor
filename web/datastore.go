@@ -24,6 +24,7 @@ import (
 	"github.com/abundo/portitor/internal/builder"
 	"github.com/abundo/portitor/internal/buildinfo"
 	"github.com/abundo/portitor/internal/cli"
+	"github.com/abundo/portitor/internal/confcheck"
 	"github.com/abundo/portitor/internal/datastore"
 	"github.com/abundo/portitor/internal/datastore/sqlmap"
 	"github.com/abundo/portitor/internal/dbmigrate"
@@ -65,6 +66,7 @@ func (s *Server) tree() (*treeState, error) {
 			dir = filepath.Dir(s.cfg.DB.Path)
 		}
 		t.store = datastore.NewStore(t.schema, treeBackend{s}, dir)
+		t.store.Normalize, t.store.Check = confcheck.Normalize, confcheck.Check
 		// The roles name the virtual firewalls: they follow a rename, and
 		// a new one gets its role. And the bridge to the code that still
 		// reads the tables.

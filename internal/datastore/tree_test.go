@@ -118,7 +118,7 @@ func TestValidate(t *testing.T) {
 
 func TestJSONRoundTrip(t *testing.T) {
 	tr := sample(t)
-	must(t, tr.Set(p("instance", k("host"), "interface", k("wan0"), "wg-private-key"), "secret!"))
+	must(t, tr.Set(p("instance", k("host"), "interface", k("wan0"), "wg-private-key"), "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="))
 	data, err := tr.JSON(JSONOptions{Secrets: true})
 	must(t, err)
 	if !bytes.Contains(data, []byte(`"portitor:instance"`)) || !bytes.Contains(data, []byte(`"mtu":1500`)) || !bytes.Contains(data, []byte(`"id":7`)) {
@@ -131,7 +131,7 @@ func TestJSONRoundTrip(t *testing.T) {
 	}
 	public, err := tr.JSON(JSONOptions{})
 	must(t, err)
-	if bytes.Contains(public, []byte("secret!")) {
+	if bytes.Contains(public, []byte("MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")) {
 		t.Error("secret in public JSON")
 	}
 }

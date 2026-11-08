@@ -129,14 +129,14 @@ func TestEditGetCommit(t *testing.T) {
 		c := dial(t, env, base11)
 		c.ok(edit(`<instance ` + cfg + `><name>host</name><is-default>true</is-default>
 			<interface><name>wan0</name><kind>physical</kind><addresses>192.0.2.1/24</addresses><addresses>2001:db8::1/64</addresses></interface>
-			<interface><name>lan0</name><mtu>9000</mtu><wg-private-key>c2VjcmV0</wg-private-key></interface>
+			<interface><name>lan0</name><mtu>9000</mtu><wg-private-key>MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=</wg-private-key></interface>
 			</instance>`))
 		r := c.rpc(`<get-config><source><candidate/></source><filter type="subtree"><instance ` + cfg + `><name>host</name><interface><name>wan0</name></interface></instance></filter></get-config>`)
 		if !strings.Contains(r, "<addresses>2001:db8::1/64</addresses>") || strings.Contains(r, "lan0") {
 			t.Errorf("filtered get-config:\n%s", r)
 		}
 		r = c.rpc(`<get-config><source><candidate/></source></get-config>`)
-		if strings.Contains(r, "c2VjcmV0") || !strings.Contains(r, "<mtu>9000</mtu>") {
+		if strings.Contains(r, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=") || !strings.Contains(r, "<mtu>9000</mtu>") {
 			t.Errorf("get-config:\n%s", r)
 		}
 		if r := c.rpc(`<get-config><source><running/></source></get-config>`); strings.Contains(r, "wan0") {
@@ -156,7 +156,7 @@ func TestEditGetCommit(t *testing.T) {
 func TestOperations(t *testing.T) {
 	env, _ := newEnv()
 	c := dial(t, env, true)
-	c.ok(edit(`<instance ` + cfg + `><name>host</name><interface><name>lan0</name><mtu>9000</mtu><wg-private-key>c2VjcmV0</wg-private-key></interface></instance>`))
+	c.ok(edit(`<instance ` + cfg + `><name>host</name><interface><name>lan0</name><mtu>9000</mtu><wg-private-key>MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=</wg-private-key></interface></instance>`))
 	c.fails(edit(`<instance `+cfg+`><name>host</name><interface xmlns:nc="`+nsBase+`" nc:operation="create"><name>lan0</name></interface></instance>`), "data-exists")
 	c.fails(edit(`<instance `+cfg+`><name>host</name><vrf xmlns:nc="`+nsBase+`" nc:operation="delete"><name>red</name></vrf></instance>`), "data-missing")
 	c.ok(edit(`<instance ` + cfg + `><name>host</name><vrf xmlns:nc="` + nsBase + `" nc:operation="remove"><name>red</name></vrf></instance>`))
@@ -167,7 +167,7 @@ func TestOperations(t *testing.T) {
 	c.ok(edit(`<instance ` + cfg + `><name>host</name><interface xmlns:nc="` + nsBase + `" nc:operation="replace"><name>lan0</name><mtu>1500</mtu></interface></instance>`))
 	cand, _ := env.Store.Candidate(context.Background())
 	lan := cand.Root.Entry("instance", []string{"host"}).Entry("interface", []string{"lan0"})
-	if lan.Leaves["mtu"] != "1500" || lan.Leaves["wg-private-key"] != "c2VjcmV0" {
+	if lan.Leaves["mtu"] != "1500" || lan.Leaves["wg-private-key"] != "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=" {
 		t.Errorf("after replace: %v", lan.Leaves)
 	}
 	// Ordered entries go where yang:insert says.

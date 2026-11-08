@@ -133,6 +133,9 @@ type Type struct {
 	Patterns []*regexp.Regexp
 	Path     string // a leafref's path
 	Union    []*Type
+	// Format is the typedef of portitor-types.yang the type is, whose
+	// values Go checks and makes canonical (formats.go); "" for none.
+	Format string
 }
 
 // Range is an inclusive range of a number or a length.
@@ -165,6 +168,12 @@ func (t *Type) Leafrefs() []string {
 func (t *Type) Check(v string) (string, error) {
 	switch t.Kind {
 	case "string":
+		if f := formats[t.Format]; f != nil {
+			var err error
+			if v, err = f(strings.TrimSpace(v)); err != nil {
+				return "", err
+			}
+		}
 		if err := checkLength(t.Lengths, len([]rune(v))); err != nil {
 			return "", err
 		}
@@ -189,12 +198,20 @@ func (t *Type) Check(v string) (string, error) {
 		}
 		return "", fmt.Errorf("%q is not one of %s", v, strings.Join(t.Enums, ", "))
 	case "union":
+		// The members that check a value first, so that it is canonical
+		// (an address shortened) if one takes it; a leafref takes any
+		// name, and validation looks for its target.
 		var errs []string
-		for _, u := range t.Union {
-			if c, err := u.Check(v); err == nil {
-				return c, nil
-			} else {
-				errs = append(errs, err.Error())
+		for _, leafrefs := range []bool{false, true} {
+			for _, u := range t.Union {
+				if (u.Kind == "leafref") != leafrefs {
+					continue
+				}
+				if c, err := u.Check(v); err == nil {
+					return c, nil
+				} else {
+					errs = append(errs, err.Error())
+				}
 			}
 		}
 		return "", fmt.Errorf("%s", strings.Join(errs, "; or "))
@@ -497,6 +514,9 @@ func convertType(y *goyang.YangType) (*Type, error) {
 		return nil, fmt.Errorf("no type")
 	}
 	t := &Type{Kind: goyang.TypeKindToName[y.Kind], Path: y.Path}
+	if _, ok := formats[y.Name]; ok && t.Kind == "string" {
+		t.Format = y.Name
+	}
 	if y.Enum != nil {
 		// In the module's order: by value.
 		vm := y.Enum.ValueMap()

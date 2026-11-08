@@ -8,6 +8,7 @@ module portitor {
 
   import portitor-extensions { prefix px; }
 
+  include portitor-types;
   include portitor-system;
   include portitor-interfaces;
   include portitor-routing;

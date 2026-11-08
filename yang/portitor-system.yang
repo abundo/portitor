@@ -5,6 +5,7 @@ submodule portitor-system {
   yang-version 1.1;
   belongs-to portitor { prefix pt; }
   import portitor-extensions { prefix px; }
+  include portitor-types;
   include portitor-interfaces;
   include portitor-routing;
   include portitor-firewall;
@@ -58,42 +59,42 @@ submodule portitor-system {
         type string;
       }
       leaf description {
-        type string;
+        type text;
       }
       leaf is-default {
         type boolean;
         description "IsDefault: the firewall's host itself (its root namespace); one per firewall.";
       }
       leaf-list dns-forwarders {
-        type string;
+        type union { type leafref { path "../../host/name"; } type leafref { path "../../address-list/name"; } type ip-address; }
         ordered-by user;
       }
       leaf dns-forward-mode {
-        type string;
+        type enumeration { enum "first"; enum "only"; }
         default "first";
         description "fwconfig.ForwardFirst or ForwardOnly";
       }
       leaf-list dns-allow-recursion {
-        type string;
+        type union { type leafref { path "../../host/name"; } type leafref { path "../../address-list/name"; } type cidr; }
         ordered-by user;
       }
       leaf dhcp-enabled {
         type boolean;
       }
       leaf dhcp-domain-name {
-        type string;
+        type domain-name;
       }
       leaf dhcp-lease-time {
         type int32;
         default 86400;
       }
       leaf-list log-drops {
-        type string;
+        type enumeration { enum "input"; enum "forward"; enum "output"; }
         ordered-by user;
         description "LogDrops lists the filter chains whose policy drops are logged, LogInvalid those whose invalid packet drops are, and LogAuto the auto input rules (by service) whose matches are.";
       }
       leaf-list log-invalid {
-        type string;
+        type enumeration { enum "input"; enum "forward"; enum "output"; }
         ordered-by user;
       }
       leaf-list log-auto {
@@ -101,12 +102,12 @@ submodule portitor-system {
         ordered-by user;
       }
       leaf dns-upstream {
-        type string;
+        type enumeration { enum "forward"; enum "root"; enum "dhcp"; }
         default "forward";
-        description "fwconfig.Upstream*";
+        description "Where the DNS server resolves what it isn't authoritative for: the forwarders, the root servers, or the DNS servers of the DHCP lease (fwconfig.Upstream*). A new virtual firewall gets root.";
       }
       leaf dns-dnssec-validation {
-        type string;
+        type enumeration { enum "auto"; enum "no"; }
         default "auto";
         description "fwconfig.DNSSECValidationAuto or No";
       }
@@ -115,11 +116,11 @@ submodule portitor-system {
         description "DNS query logging, and its filters (fwconfig.DNSQueryLog); clients may name hosts/prefixes.";
       }
       leaf-list dns-query-log-clients {
-        type union { type leafref { path "../../host/name"; } type leafref { path "../../address-list/name"; } type string; }
+        type union { type leafref { path "../../host/name"; } type leafref { path "../../address-list/name"; } type cidr; }
         ordered-by user;
       }
       leaf-list dns-query-log-names {
-        type string;
+        type domain-name;
         ordered-by user;
       }
       leaf-list dns-query-log-types {
@@ -127,7 +128,7 @@ submodule portitor-system {
         ordered-by user;
       }
       leaf nat64-prefix {
-        type string;
+        type cidr;
         default "64:ff9b::/96";
         description "Nat64Prefix is the prefix of the NAT64 serving the instance's clients; Dns64 synthesizes AAAA records in it, and an interface's Xlat464 announces it.";
       }
@@ -139,7 +140,7 @@ submodule portitor-system {
         description "Nat64 translates the prefix to IPv4 here (Jool), from Nat64Pool4's IPv4 prefixes, or the outgoing interface's address when empty.";
       }
       leaf-list nat64-pool4 {
-        type string;
+        type cidr;
         ordered-by user;
       }
       leaf ntp-enabled {
@@ -151,7 +152,7 @@ submodule portitor-system {
         ordered-by user;
         px:json "ntp_servers";
         leaf address {
-          type string;
+          type host-or-address;
         }
         leaf pool {
           type boolean;
@@ -165,7 +166,7 @@ submodule portitor-system {
         }
       }
       leaf-list ntp-allow {
-        type union { type leafref { path "../../host/name"; } type leafref { path "../../address-list/name"; } type string; }
+        type union { type leafref { path "../../host/name"; } type leafref { path "../../address-list/name"; } type cidr; }
         ordered-by user;
       }
       leaf snmp-enabled {
@@ -173,13 +174,13 @@ submodule portitor-system {
         description "SnmpEnabled runs snmpd, read-only, answering clients in SnmpAllow (any when empty, hosts/prefixes by name) on the interfaces with SnmpServe, with the SNMPv2c SnmpCommunity (none when empty) and the instance's SnmpUsers (SNMPv3).";
       }
       leaf snmp-location {
-        type string;
+        type text;
       }
       leaf snmp-contact {
-        type string;
+        type text;
       }
       leaf-list snmp-allow {
-        type union { type leafref { path "../../host/name"; } type leafref { path "../../address-list/name"; } type string; }
+        type union { type leafref { path "../../host/name"; } type leafref { path "../../address-list/name"; } type cidr; }
         ordered-by user;
       }
       leaf snmp-community {
@@ -200,7 +201,7 @@ submodule portitor-system {
         default "letsencrypt";
       }
       leaf acme-proxy-email {
-        type string;
+        type email;
       }
       leaf acme-proxy-certificate {
         type leafref { path "../certificate/name"; }
@@ -247,21 +248,21 @@ submodule portitor-system {
       px:table "links";
       description "A point-to-point connection between two virtual firewalls of a firewall (a veth pair).";
       leaf name {
-        type string;
+        type name;
       }
       leaf description {
-        type string;
+        type text;
       }
       leaf instance-a {
         type leafref { path "../../instance/name"; }
         px:column "instance_a_id";
       }
       leaf interface-a {
-        type string;
+        type ifname;
         mandatory true;
       }
       leaf-list addresses-a {
-        type string;
+        type interface-address;
         ordered-by user;
       }
       leaf instance-b {
@@ -269,11 +270,11 @@ submodule portitor-system {
         px:column "instance_b_id";
       }
       leaf interface-b {
-        type string;
+        type ifname;
         mandatory true;
       }
       leaf-list addresses-b {
-        type string;
+        type interface-address;
         ordered-by user;
       }
     }

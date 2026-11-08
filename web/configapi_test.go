@@ -50,16 +50,17 @@ func TestConfigAPI(t *testing.T) {
 	}
 
 	// A virtual firewall with an interface and a rule, made through the tree.
-	want(env.do("POST", "/api/config/candidate/instance", map[string]any{"name": "lab", "firewall": fw.Name}), http.StatusCreated, "create lab")
+	rec = env.do("POST", "/api/config/candidate/instance", map[string]any{"name": "lab", "firewall": fw.Name})
+	want(rec, http.StatusCreated, "create lab")
 	want(env.do("POST", "/api/config/candidate/instance", map[string]any{"name": "lab", "firewall": fw.Name}), http.StatusBadRequest, "create lab twice")
 	want(env.do("PUT", "/api/config/candidate/instance=lab/interface=eth1", map[string]any{
-		"kind": "physical", "enabled": true, "addresses": []string{"10.1.0.1/24"}, "wg-private-key": "s3cret"}), http.StatusOK, "put eth1")
+		"kind": "physical", "enabled": true, "addresses": []string{"10.1.0.1/24"}, "wg-private-key": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="}), http.StatusOK, "put eth1")
 	want(env.do("PATCH", "/api/config/candidate/instance=lab/interface=eth1", map[string]any{"mtu": 1400}), http.StatusOK, "patch mtu")
 	want(env.do("PATCH", "/api/config/candidate/instance=lab/interface=eth1", map[string]any{"mtu": "big"}), http.StatusBadRequest, "patch a bad mtu")
 
 	rec = env.do("GET", "/api/config/candidate/instance=lab/interface=eth1", nil)
 	want(rec, http.StatusOK, "get eth1")
-	if body := rec.Body.String(); !strings.Contains(body, `"mtu":1400`) || strings.Contains(body, "s3cret") {
+	if body := rec.Body.String(); !strings.Contains(body, `"mtu":1400`) || strings.Contains(body, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=") {
 		t.Errorf("eth1: %s", body)
 	}
 	rec = env.do("GET", "/api/config/candidate/instance=lab/interface=eth1/mtu", nil)
@@ -77,7 +78,7 @@ func TestConfigAPI(t *testing.T) {
 	// A replace keeps the secret; a rename follows into the rules.
 	want(env.do("PUT", "/api/config/candidate/instance=lab/interface=eth1", map[string]any{"kind": "physical", "enabled": true, "addresses": []string{"10.1.0.1/24"}}), http.StatusOK, "replace eth1")
 	cand, _ := env.srv.treeState.store.Candidate(t.Context())
-	if cand.Root.Entry("instance", []string{"lab"}).Entry("interface", []string{"eth1"}).Leaves["wg-private-key"] != "s3cret" {
+	if cand.Root.Entry("instance", []string{"lab"}).Entry("interface", []string{"eth1"}).Leaves["wg-private-key"] != "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=" {
 		t.Error("the replace lost the secret")
 	}
 	want(env.do("POST", "/api/config/candidate/instance=lab/rule", map[string]any{"id": 900, "chain": "input", "action": "accept", "in-interfaces": []string{"eth1"}}), http.StatusCreated, "rule 900")
@@ -97,6 +98,14 @@ func TestConfigAPI(t *testing.T) {
 	want(env.do("DELETE", "/api/config/candidate/instance=lab/rule=901", nil), http.StatusBadRequest, "delete 901 twice")
 	want(env.do("PUT", "/api/config/running/instance=lab/description", "x"), http.StatusMethodNotAllowed, "a change of running")
 	want(env.do("PATCH", "/api/config/candidate/instance=lab/state", map[string]any{}), http.StatusBadRequest, "a change of state")
+
+	// A save the commit would refuse stands, with the reason as a warning.
+	rec = env.do("PUT", "/api/config/candidate/instance=lab/interface=vl9", map[string]any{"kind": "vlan", "enabled": true, "vlan-id": 9, "parent": "nope"})
+	want(rec, http.StatusOK, "a VLAN of no parent")
+	if !strings.Contains(rec.Body.String(), `"warnings"`) || !strings.Contains(rec.Body.String(), "vl9") {
+		t.Errorf("no warning: %s", rec.Body)
+	}
+	want(env.do("DELETE", "/api/config/candidate/instance=lab/interface=vl9", nil), http.StatusNoContent, "delete vl9")
 
 	// Changes, a commit, running.
 	rec = env.do("GET", "/api/config/changes", nil)

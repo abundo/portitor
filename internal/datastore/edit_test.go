@@ -12,7 +12,7 @@ func TestEditJSON(t *testing.T) {
 	tr := sample(t)
 	host := p("instance", k("host"))
 	wan := append(host, p("interface", k("wan0"))...)
-	must(t, tr.Set(append(wan, Elem{Name: "wg-private-key"}), "secret"))
+	must(t, tr.Set(append(wan, Elem{Name: "wg-private-key"}), "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="))
 
 	// Merge: leaves set, a leaf-list replaced, null deletes.
 	must(t, tr.EditJSON(wan, EditMerge, []byte(`{"mtu": 1400, "addresses": ["198.51.100.1/24"], "kind": null}`)))
@@ -27,7 +27,7 @@ func TestEditJSON(t *testing.T) {
 	// Replace keeps the secret it can't read back, drops the rest.
 	must(t, tr.EditJSON(wan, EditReplace, []byte(`{"name": "wan0", "description": "uplink"}`)))
 	n, _, _ = tr.Find(wan)
-	if n.Leaves["wg-private-key"] != "secret" || n.Leaves["description"] != "uplink" || n.Leaves["mtu"] != "" || len(n.LeafLists) != 0 {
+	if n.Leaves["wg-private-key"] != "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=" || n.Leaves["description"] != "uplink" || n.Leaves["mtu"] != "" || len(n.LeafLists) != 0 {
 		t.Errorf("replace: %v %v", n.Leaves, n.LeafLists)
 	}
 

@@ -5,6 +5,7 @@ submodule portitor-routing {
   yang-version 1.1;
   belongs-to portitor { prefix pt; }
   import portitor-extensions { prefix px; }
+  include portitor-types;
 
   description "Portitor configuration: routing.";
 
@@ -17,21 +18,21 @@ submodule portitor-routing {
       px:parent-column "instance_id";
       description "Vrf is a VRF of an instance (fwconfig.VRF): interfaces are put in it by name (Interface.Vrf), routes by id (Route.VrfID).";
       leaf name {
-        type string;
+        type ifname;
       }
       leaf route-table {
         type int32;
         mandatory true;
       }
       leaf description {
-        type string;
+        type text;
       }
       leaf evpn-vni {
         type uint32;
         description "L3VPN over EVPN/VXLAN (fwconfig.VRFEVPN); EvpnVni 0 is off.";
       }
       leaf evpn-local {
-        type string;
+        type ip-address;
       }
       leaf evpn-device {
         type leafref { path "../../interface/name"; }
@@ -67,11 +68,11 @@ submodule portitor-routing {
         type uint32;
       }
       leaf destination {
-        type string;
+        type union { type leafref { path "../../../host/name"; } type leafref { path "../../../address-list/name"; } type route-destination; }
         mandatory true;
       }
       leaf gateway {
-        type string;
+        type union { type leafref { path "../../../host/name"; } type leafref { path "../../../address-list/name"; } type ip-address; }
       }
       leaf interface {
         type leafref { path "../../interface/name"; }
@@ -85,7 +86,7 @@ submodule portitor-routing {
         default true;
       }
       leaf description {
-        type string;
+        type text;
       }
       leaf bfd {
         type boolean;
@@ -108,18 +109,18 @@ submodule portitor-routing {
         type uint32;
       }
       leaf-list in-interfaces {
-        type union { type leafref { path "../../interface/name"; } type leafref { path "../../interface-zone/name"; } type string; }
+        type union { type leafref { path "../../interface/name"; } type leafref { path "../../interface-zone/name"; } type ifname; }
         ordered-by user;
       }
       leaf family {
-        type string;
+        type enumeration { enum "ipv4"; enum "ipv6"; }
       }
       leaf-list src-addrs {
-        type union { type leafref { path "../../../host/name"; } type leafref { path "../../../address-list/name"; } type string; }
+        type union { type leafref { path "../../../host/name"; } type leafref { path "../../../address-list/name"; } type rule-address; }
         ordered-by user;
       }
       leaf-list dst-addrs {
-        type union { type leafref { path "../../../host/name"; } type leafref { path "../../../address-list/name"; } type string; }
+        type union { type leafref { path "../../../host/name"; } type leafref { path "../../../address-list/name"; } type rule-address; }
         ordered-by user;
       }
       leaf-list services {
@@ -127,7 +128,7 @@ submodule portitor-routing {
         ordered-by user;
       }
       leaf gateway {
-        type string;
+        type union { type leafref { path "../../../host/name"; } type leafref { path "../../../address-list/name"; } type ip-address; }
         description "Gateway is an address or a host's name (one address per IP version); \"\" is none.";
       }
       leaf interface {
@@ -139,7 +140,7 @@ submodule portitor-routing {
         default true;
       }
       leaf description {
-        type string;
+        type text;
       }
     }
     list prefix-list {

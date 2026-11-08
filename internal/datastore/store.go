@@ -55,7 +55,13 @@ type Store struct {
 	locks map[string]string // datastore (candidate, running) → the session holding its lock
 
 	// OnChange, when set, is told each new candidate (s.mu is held).
+	// Normalize's before is the candidate before the edit.
 	OnChange func(*Tree) error
+	// Normalize, when set, fixes up the entries an edit changed (in the
+	// edited tree) or refuses the edit; Check reports what is wrong with a
+	// candidate beyond the schema, at a commit and its validate.
+	Normalize func(before, t *Tree, changed []*Node) error
+	Check     func(t *Tree) []error
 }
 
 // LockedError is an edit or commit refused for another session's lock.
@@ -222,6 +228,11 @@ func (s *Store) Edit(ctx context.Context, owner string, fn func(*Tree) error) er
 	if err := fn(work); err != nil {
 		return err
 	}
+	if s.Normalize != nil {
+		if err := s.Normalize(c, work, ChangedEntries(c, work)); err != nil {
+			return err
+		}
+	}
 	return s.set(work)
 }
 
@@ -298,7 +309,7 @@ func (s *Store) Prepare(ctx context.Context, owner string) (*Tree, error) {
 	if err != nil {
 		return nil, err
 	}
-	if errs := c.Validate(); len(errs) > 0 {
+	if errs := s.validate(c); len(errs) > 0 {
 		return nil, &ValidationError{errs}
 	}
 	return c.Clone(), nil
@@ -316,8 +327,16 @@ func (s *Store) Commit(ctx context.Context, o CommitOptions) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if errs := c.Validate(); len(errs) > 0 {
+	if errs := s.validate(c); len(errs) > 0 {
 		return "", &ValidationError{errs}
 	}
 	return s.backend.Commit(ctx, c.Clone(), o)
+}
+
+// validate is the schema's problems with t, then Check's.
+func (s *Store) validate(t *Tree) []error {
+	if errs := t.Validate(); len(errs) > 0 || s.Check == nil {
+		return errs
+	}
+	return s.Check(t)
 }

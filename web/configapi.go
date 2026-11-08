@@ -15,7 +15,9 @@ import (
 
 	"github.com/labstack/echo/v5"
 
+	"github.com/abundo/portitor/internal/confcheck"
 	"github.com/abundo/portitor/internal/datastore"
+	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/internal/schema"
 )
 
@@ -232,6 +234,15 @@ func (s *Server) handleConfigEdit(c *echo.Context) error {
 				return errForbidden
 			}
 		}
+		// What the save changed is checked now, as the GUI expects; the
+		// rest of the candidate at the commit.
+		changed := datastore.ChangedEntries(before, work)
+		if err := confcheck.Normalize(before, work, changed); err != nil {
+			return err
+		}
+		if errs := confcheck.CheckEntries(work, changed); len(errs) > 0 {
+			return &datastore.ValidationError{Problems: errs}
+		}
 		return nil
 	})
 	switch {
@@ -243,14 +254,37 @@ func (s *Server) handleConfigEdit(c *echo.Context) error {
 	case err != nil:
 		return configError(c, err)
 	}
-	if method == http.MethodDelete {
-		return c.NoContent(http.StatusNoContent)
-	}
 	status := http.StatusOK
-	if method == http.MethodPost && action == "" {
+	switch {
+	case method == http.MethodPost && action == "":
 		status = http.StatusCreated
+	case method == http.MethodDelete:
+		status = http.StatusNoContent
+	}
+	// What a commit would refuse now, as warnings: the documents built and
+	// checked as the commit does (fwconfig.Validate), for the instances the
+	// user deploys. The save stands; the user finishes the change.
+	if warnings := s.saveWarnings(c); len(warnings) > 0 {
+		if status == http.StatusNoContent {
+			status = http.StatusOK
+		}
+		return c.JSON(status, map[string]any{"warnings": warnings})
 	}
 	return c.NoContent(status)
+}
+
+// saveWarnings are the problems a commit of the candidate would have.
+func (s *Server) saveWarnings(c *echo.Context) []string {
+	only, err := s.deployScope(currentAccess(c))
+	if err != nil {
+		return nil
+	}
+	_, _, err = s.firewallDocs(c.Request().Context(), only)
+	var ve *fwconfig.ValidationError
+	if errors.As(err, &ve) {
+		return ve.Problems
+	}
+	return nil
 }
 
 // applyConfigEdit makes the change a request asks for in work.
@@ -306,6 +340,9 @@ func configError(c *echo.Context, err error) error {
 		return c.JSON(http.StatusBadRequest, map[string]any{"error": de.Msg, "path": de.Path})
 	}
 	var ve *datastore.ValidationError
+	if errors.As(err, &ve) && len(ve.Problems) == 1 {
+		return configError(c, ve.Problems[0])
+	}
 	if errors.As(err, &ve) {
 		problems := make([]string, len(ve.Problems))
 		for i, p := range ve.Problems {

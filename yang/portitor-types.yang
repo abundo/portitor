@@ -1,0 +1,127 @@
+// SPDX-FileCopyrightText: 2026 The Portitor contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+submodule portitor-types {
+  yang-version 1.1;
+  belongs-to portitor { prefix pt; }
+
+  description
+    "Portitor configuration: the types of its values. Each typedef here is
+     a format portitor-config knows by name (internal/schema/formats.go):
+     a value is checked, surrounding spaces taken off, and kept in its
+     canonical form (an IPv6 address shortened, a prefix's host bits
+     cleared, a MAC address lower case with colons), whichever frontend
+     writes it.";
+
+  revision 2026-11-08 { description "First version."; }
+
+  typedef text {
+    type string;
+    description "Free text, one line: no control characters.";
+  }
+  typedef name {
+    type string { length "1..max"; }
+    description "A name: not empty, no control characters.";
+  }
+  typedef word {
+    type string;
+    description "A name without spaces: letters, digits, '.', '_' and '-'.";
+  }
+  typedef ifname {
+    type string;
+    description "A Linux interface name: 1-15 characters, no '/', ':' or spaces.";
+  }
+  typedef ip-address {
+    type string;
+    description "An IPv4 or IPv6 address, without a zone.";
+  }
+  typedef ipv4-address {
+    type string;
+    description "An IPv4 address.";
+  }
+  typedef ipv6-address {
+    type string;
+    description "An IPv6 address, without a zone.";
+  }
+  typedef ip-prefix {
+    type string;
+    description "An IPv4 or IPv6 prefix in CIDR notation; the host bits are cleared.";
+  }
+  typedef interface-address {
+    type string;
+    description
+      "An interface's address with its prefix length (CIDR with a host part,
+       or any address of a /31, /32, /127 or /128).";
+  }
+  typedef mac-address {
+    type string;
+    description "A MAC address (6 bytes): 02:00:5e:00:01:01, 02-00-5E-00-01-01 or 0200.5e00.0101.";
+  }
+  typedef domain-name {
+    type string;
+    description "A DNS domain name.";
+  }
+  typedef email {
+    type string;
+    description "An email address.";
+  }
+  typedef url {
+    type string;
+    description "An http or https URL.";
+  }
+  typedef wg-key {
+    type string;
+    description "A WireGuard key: 32 bytes in base64.";
+  }
+  typedef address-or-prefix {
+    type string;
+    description "An IP address, or a prefix in CIDR notation (its host bits cleared).";
+  }
+  typedef cidr {
+    type string;
+    description "A prefix in CIDR notation, with its length; the host bits are cleared.";
+  }
+  typedef ip-list-ref {
+    type string;
+    description "An IP list by name, after '@': @blocklist. Only a filter rule's addresses take one.";
+  }
+  typedef delegated-address {
+    type string;
+    description
+      "An IPv6 address or prefix in the prefix an interface's DHCPv6 client
+       gets delegated: <wan0>:2000::1/64 (the interface, the subnet within
+       the delegated prefix, the host, the length).";
+  }
+  typedef delegated-interface-address {
+    type string;
+    description "A delegated-address that is an interface's own address, not the prefix's.";
+  }
+  typedef endpoint {
+    type string;
+    description "A host name or address and a port: vpn.example.com:51820, [2001:db8::1]:51820.";
+  }
+  typedef host-or-address {
+    type string;
+    description "An IP address or a host name.";
+  }
+  typedef default-route {
+    type string;
+    description "The word default: every destination.";
+  }
+  typedef ospf-area {
+    type string;
+    description "An OSPF area id, dotted (0.0.0.1) or a number (1); kept dotted.";
+  }
+  typedef route-destination {
+    type string;
+    description "A route's destination: a prefix, or default.";
+  }
+  typedef rule-address {
+    type string;
+    description "A filter rule's address: an address, a prefix, or an IP list (@name).";
+  }
+  typedef any-interface-address {
+    type string;
+    description "An interface-address, or a delegated-interface-address.";
+  }
+}

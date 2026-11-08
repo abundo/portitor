@@ -173,3 +173,33 @@ func (t *Tree) Apply(changes []Change) error {
 
 // Equal reports whether a and b hold the same configuration.
 func Equal(a, b *Tree) bool { return len(Diff(a, b)) == 0 }
+
+// ChangedEntries are the list entries of b that differ from a: for each
+// change, the deepest entry of b on its path, once each, in the order of
+// the changes. A deleted entry's parent entry counts as changed.
+func ChangedEntries(a, b *Tree) []*Node {
+	var out []*Node
+	seen := map[*Node]bool{}
+	for _, c := range Diff(a, b) {
+		var deepest *Node
+		n := b.Root
+		for _, e := range c.Path {
+			if e.Keys != nil {
+				n = n.Entry(e.Name, e.Keys)
+				if n == nil {
+					break
+				}
+				deepest = n
+			} else if next := n.Containers[e.Name]; next != nil {
+				n = next
+			} else {
+				break
+			}
+		}
+		if deepest != nil && !seen[deepest] {
+			seen[deepest] = true
+			out = append(out, deepest)
+		}
+	}
+	return out
+}

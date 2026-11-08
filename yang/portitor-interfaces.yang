@@ -5,6 +5,7 @@ submodule portitor-interfaces {
   yang-version 1.1;
   belongs-to portitor { prefix pt; }
   import portitor-extensions { prefix px; }
+  include portitor-types;
 
   description "Portitor configuration: interfaces.";
 
@@ -16,14 +17,14 @@ submodule portitor-interfaces {
       px:table "interfaces";
       px:parent-column "instance_id";
       leaf name {
-        type string;
+        type ifname;
       }
       leaf kind {
         type enumeration { enum "physical"; enum "vlan"; enum "bridge"; enum "wireguard"; enum "loopback"; enum "6in4"; enum "vxlan"; enum "openvpn"; }
         default "physical";
       }
       leaf description {
-        type string;
+        type text;
       }
       leaf enabled {
         type boolean;
@@ -54,17 +55,17 @@ submodule portitor-interfaces {
         description "DnsListen makes the instance's DNS server answer on this interface.";
       }
       leaf wg-private-key {
-        type string;
+        type wg-key;
         px:secret;
       }
       leaf wg-public-key {
-        type string;
+        type wg-key;
       }
       leaf wg-listen-port {
         type int32;
       }
       leaf wg-endpoint {
-        type string;
+        type endpoint;
         description "WgEndpoint (host:port) and WgKeepalive go into generated client configs. An empty endpoint falls back to Settings.WgEndpointHost and the listen port.";
       }
       leaf wg-keepalive {
@@ -76,11 +77,11 @@ submodule portitor-interfaces {
         description "DhcpNoDefaultRoute ignores the router of the DHCP lease.";
       }
       leaf label {
-        type string;
+        type text { length "0..32"; }
         description "Label is a short name the GUI shows before the interface name.";
       }
       leaf-list addresses {
-        type string;
+        type any-interface-address;
         ordered-by user;
         description "Addresses are the interface's static addresses in CIDR form with a host part (192.168.1.1/24, fd00:1::1/64), IPv4 and IPv6 mixed.";
       }
@@ -122,11 +123,11 @@ submodule portitor-interfaces {
         description "SnmpServe answers SNMP requests on this interface (Instance.SnmpAllow).";
       }
       leaf tunnel-remote {
-        type string;
+        type ipv4-address;
         description "A 6in4 tunnel's server (IPv4) and local address (empty: any).";
       }
       leaf tunnel-local {
-        type string;
+        type ipv4-address;
       }
       leaf he-tunnel-id {
         type string;
@@ -148,7 +149,7 @@ submodule portitor-interfaces {
         description "A VXLAN's VNI, local VTEP address, underlay interface (empty: as routed), UDP port (0: 4789) and remote VTEPs (fwconfig.VXLAN).";
       }
       leaf vxlan-local {
-        type string;
+        type ip-address;
       }
       leaf vxlan-device {
         type leafref { path "../../interface/name"; }
@@ -157,7 +158,7 @@ submodule portitor-interfaces {
         type int32;
       }
       leaf-list vxlan-remotes {
-        type string;
+        type ip-address;
         ordered-by user;
       }
       leaf vrf {
@@ -169,7 +170,7 @@ submodule portitor-interfaces {
         description "AcmeProxyServe answers ACME clients on this interface (Instance.AcmeProxyEnabled).";
       }
       leaf-list peer-addresses {
-        type string;
+        type interface-address;
         ordered-by user;
         description "PeerAddresses are the HA secondary's static addresses in place of Addresses, one each, in the same prefixes, on an interface with an HaRole: all else is the same on both hosts.";
       }
@@ -239,11 +240,11 @@ submodule portitor-interfaces {
         type boolean;
       }
       leaf ha-role {
-        type string;
+        type enumeration { enum "ha_link"; enum "management"; }
         description "HaRole makes it one of an HA pair's own two links (fwconfig.Interface.HARole); HaGateway is the management one's gateway.";
       }
       leaf ha-gateway {
-        type string;
+        type ip-address;
       }
       leaf ha-monitor {
         type boolean;
@@ -269,40 +270,40 @@ submodule portitor-interfaces {
         px:table "wg_peers";
         px:parent-column "interface_id";
         leaf public-key {
-          type string;
+          type wg-key;
         }
         leaf name {
-          type string;
+          type name;
           mandatory true;
         }
         leaf description {
-          type string;
+          type text;
         }
         leaf enabled {
           type boolean;
           default true;
         }
         leaf preshared-key {
-          type string;
+          type wg-key;
           px:secret;
         }
         leaf endpoint {
-          type string;
+          type endpoint;
         }
         leaf-list allowed-ips {
-          type string;
+          type union { type leafref { path "../../../../host/name"; } type leafref { path "../../../../address-list/name"; } type cidr; }
           ordered-by user;
         }
         leaf keepalive {
           type int32;
         }
         leaf client-private-key {
-          type string;
+          type wg-key;
           px:secret;
           description "ClientPrivateKey is kept only when the key pair was generated here, so a complete client config can be exported.";
         }
         leaf-list networks {
-          type string;
+          type union { type leafref { path "../../../../host/name"; } type leafref { path "../../../../address-list/name"; } type cidr; }
           ordered-by user;
           description "Networks behind a site peer: routed through the interface.";
         }
@@ -314,13 +315,13 @@ submodule portitor-interfaces {
       px:parent-column "instance_id";
       description "InterfaceZone is a named group of zero or more interfaces of an instance, by name (link ends included). Rules and NAT rules list interface and interface zone names.";
       leaf name {
-        type string;
+        type name;
       }
       leaf description {
-        type string;
+        type text;
       }
       leaf-list interfaces {
-        type union { type leafref { path "../../interface/name"; } type string; }
+        type union { type leafref { path "../../interface/name"; } type ifname; }
         ordered-by user;
       }
     }
@@ -334,10 +335,10 @@ submodule portitor-interfaces {
         px:column "interface_id";
       }
       leaf address {
-        type string;
+        type ip-address;
       }
       leaf mac {
-        type string;
+        type mac-address;
         mandatory true;
       }
       leaf enabled {
@@ -345,7 +346,7 @@ submodule portitor-interfaces {
         default true;
       }
       leaf description {
-        type string;
+        type text;
       }
     }
   }

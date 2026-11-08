@@ -26,6 +26,7 @@ type Exported struct {
 // ExportType is a leaf's type.
 type ExportType struct {
 	Base     string        `json:"base"`
+	Format   string        `json:"format,omitempty"`
 	Enums    []string      `json:"enums,omitempty"`
 	Ranges   [][2]float64  `json:"ranges,omitempty"`
 	Lengths  [][2]float64  `json:"lengths,omitempty"`
@@ -62,7 +63,7 @@ func (n *Node) Export() *Exported {
 }
 
 func (t *Type) export() *ExportType {
-	e := &ExportType{Base: t.Kind, Enums: t.Enums, Path: t.Path}
+	e := &ExportType{Base: t.Kind, Format: t.Format, Enums: t.Enums, Path: t.Path}
 	for _, r := range t.Ranges {
 		e.Ranges = append(e.Ranges, [2]float64{r.Min, r.Max})
 	}

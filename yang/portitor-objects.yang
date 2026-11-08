@@ -5,6 +5,7 @@ submodule portitor-objects {
   yang-version 1.1;
   belongs-to portitor { prefix pt; }
   import portitor-extensions { prefix px; }
+  include portitor-types;
 
   description "Portitor configuration: objects.";
 
@@ -37,14 +38,14 @@ submodule portitor-objects {
       px:table "address_objects";
       description "AddressObject is a named host or prefix. Its name can stand in for addresses wherever an address list is entered; the builder expands it. Addresses may mix IPv4 and IPv6 (a host with both, say).";
       leaf name {
-        type string;
+        type name;
       }
       leaf-list addresses {
-        type string;
+        type address-or-prefix;
         ordered-by user;
       }
       leaf description {
-        type string;
+        type text;
       }
       leaf folder {
         type leafref { path "../../object-folder/id"; }
@@ -56,14 +57,14 @@ submodule portitor-objects {
       px:table "address_lists";
       description "AddressList is a named list of addresses, prefixes and the names of hosts (AddressObject) or other address lists, which it holds as they change. Its name is unique among hosts and address lists together, so address fields refer to either by plain name. A filter rule using one matches it as an nftables set; anywhere else it is expanded.";
       leaf name {
-        type string;
+        type name;
       }
       leaf-list entries {
-        type union { type leafref { path "../../host/name"; } type leafref { path "../../address-list/name"; } type string; }
+        type union { type leafref { path "../../host/name"; } type leafref { path "../../address-list/name"; } type address-or-prefix; }
         ordered-by user;
       }
       leaf description {
-        type string;
+        type text;
       }
       leaf folder {
         type leafref { path "../../object-folder/id"; }
@@ -78,7 +79,7 @@ submodule portitor-objects {
         type string;
       }
       leaf description {
-        type string;
+        type text;
       }
       leaf source {
         type string;
@@ -119,7 +120,7 @@ submodule portitor-objects {
         type string;
       }
       leaf description {
-        type string;
+        type text;
       }
       leaf type {
         type string;
@@ -171,7 +172,7 @@ submodule portitor-objects {
         mandatory true;
       }
       leaf description {
-        type string;
+        type text;
       }
     }
     list task {
@@ -182,7 +183,7 @@ submodule portitor-objects {
         type string;
       }
       leaf description {
-        type string;
+        type text;
       }
       leaf enabled {
         type boolean;
