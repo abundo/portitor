@@ -1,0 +1,3879 @@
+-- SPDX-FileCopyrightText: 2026 The Portitor contributors
+-- SPDX-License-Identifier: AGPL-3.0-or-later
+
+-- Generated from Portitor's YANG modules (yang/portitor-state.yang) by
+-- portitor-config mib. Do not edit.
+
+PORTITOR-MIB DEFINITIONS ::= BEGIN
+
+IMPORTS
+    MODULE-IDENTITY, OBJECT-TYPE, Integer32, Unsigned32, Counter64
+        FROM SNMPv2-SMI
+    MODULE-COMPLIANCE, OBJECT-GROUP
+        FROM SNMPv2-CONF
+    TruthValue, DisplayString
+        FROM SNMPv2-TC
+    CounterBasedGauge64
+        FROM HCNUM-TC;
+
+portitorMIB MODULE-IDENTITY
+    LAST-UPDATED "202611080000Z"
+    ORGANIZATION "The Portitor contributors"
+    CONTACT-INFO "https://github.com/abundo/portitor"
+    DESCRIPTION
+        "Portitor's state, read-only: what the firewalls run and see,
+        as the YANG module portitor's config false nodes. A list is a
+        table indexed by its keys and its parents' (a list without keys
+        by its row number); a leaf-list is one string, its values
+        separated by commas."
+    REVISION "202611080000Z"
+    DESCRIPTION "From the YANG modules' revision 2026-11-08."
+    ::= { iso 3 6 1 4 1 8072 9999 9999 1 }
+
+ptSystemState OBJECT IDENTIFIER ::= { portitorMIB 2 }
+
+ptSystemStateHostname OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/system-state/hostname"
+    ::= { ptSystemState 1 }
+
+ptSystemStateVersion OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "portitor-agent's version. (/system-state/version)"
+    ::= { ptSystemState 2 }
+
+ptSystemStateDryRun OBJECT-TYPE
+    SYNTAX TruthValue
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "The agent runs no commands (a test setup). (/system-state/dry-run)"
+    ::= { ptSystemState 3 }
+
+ptSystemStateGeneration OBJECT-TYPE
+    SYNTAX CounterBasedGauge64
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "The deploy the agent runs. (/system-state/generation)"
+    ::= { ptSystemState 4 }
+
+ptSystemStateLastApply OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "When it last applied a configuration. (/system-state/last-apply)"
+    ::= { ptSystemState 5 }
+
+ptSystemStateLastError OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "Why the last apply failed. (/system-state/last-error)"
+    ::= { ptSystemState 6 }
+
+ptSystemStatePendingGeneration OBJECT-TYPE
+    SYNTAX CounterBasedGauge64
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/system-state/pending/generation"
+    ::= { ptSystemState 7 }
+
+ptSystemStatePendingDeadline OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "When it is rolled back unless confirmed. (/system-state/pending/deadline)"
+    ::= { ptSystemState 8 }
+
+ptSystemStateHostMemTotal OBJECT-TYPE
+    SYNTAX CounterBasedGauge64
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/system-state/host/mem-total"
+    ::= { ptSystemState 9 }
+
+ptSystemStateHostMemAvailable OBJECT-TYPE
+    SYNTAX CounterBasedGauge64
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/system-state/host/mem-available"
+    ::= { ptSystemState 10 }
+
+ptSystemStateHostSwapTotal OBJECT-TYPE
+    SYNTAX CounterBasedGauge64
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/system-state/host/swap-total"
+    ::= { ptSystemState 11 }
+
+ptSystemStateHostSwapFree OBJECT-TYPE
+    SYNTAX CounterBasedGauge64
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/system-state/host/swap-free"
+    ::= { ptSystemState 12 }
+
+ptSystemStateHostCpus OBJECT-TYPE
+    SYNTAX Integer32
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/system-state/host/cpus"
+    ::= { ptSystemState 13 }
+
+ptSystemStateHostCpuBusy OBJECT-TYPE
+    SYNTAX CounterBasedGauge64
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "CPU time busy since boot (ticks). (/system-state/host/cpu-busy)"
+    ::= { ptSystemState 14 }
+
+ptSystemStateHostCpuTotal OBJECT-TYPE
+    SYNTAX CounterBasedGauge64
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "CPU time since boot (ticks). (/system-state/host/cpu-total)"
+    ::= { ptSystemState 15 }
+
+ptSystemStateHostLoad OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "The load average over 1, 5 and 15 minutes. (/system-state/host/load)"
+    ::= { ptSystemState 16 }
+
+ptSystemStateHostUptime OBJECT-TYPE
+    SYNTAX CounterBasedGauge64
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/system-state/host/uptime"
+    ::= { ptSystemState 17 }
+
+ptSystemStateHaNode OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "primary or secondary. (/system-state/ha/node)"
+    ::= { ptSystemState 18 }
+
+ptSystemStateHa OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "active, standby, ... (/system-state/ha/state)"
+    ::= { ptSystemState 19 }
+
+ptSystemStateHaTerm OBJECT-TYPE
+    SYNTAX CounterBasedGauge64
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "Raised at each activation. (/system-state/ha/term)"
+    ::= { ptSystemState 20 }
+
+ptSystemStateHaPeerAlive OBJECT-TYPE
+    SYNTAX TruthValue
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/system-state/ha/peer-alive"
+    ::= { ptSystemState 21 }
+
+ptSystemStateHaPeerSeen OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/system-state/ha/peer-seen"
+    ::= { ptSystemState 22 }
+
+ptSystemStateHaVoteUntil OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "The witness's vote held until then. (/system-state/ha/vote-until)"
+    ::= { ptSystemState 23 }
+
+ptSystemStateHaPromiseUntil OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "A promise to the peer to stay closed until then. (/system-state/ha/promise-until)"
+    ::= { ptSystemState 24 }
+
+ptSystemStateHaWatchdog OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/system-state/ha/watchdog"
+    ::= { ptSystemState 25 }
+
+ptSystemStateHaEpoch OBJECT-TYPE
+    SYNTAX CounterBasedGauge64
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "The pair's number of promotions. (/system-state/ha/epoch)"
+    ::= { ptSystemState 26 }
+
+ptSystemStateHaHealth OBJECT-TYPE
+    SYNTAX Integer32
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "Monitored traffic interfaces with a carrier, here. (/system-state/ha/health)"
+    ::= { ptSystemState 27 }
+
+ptSystemStateHaPeerHealth OBJECT-TYPE
+    SYNTAX Integer32
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/system-state/ha/peer-health"
+    ::= { ptSystemState 28 }
+
+ptSystemStateHaMonitored OBJECT-TYPE
+    SYNTAX Integer32
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/system-state/ha/monitored"
+    ::= { ptSystemState 29 }
+
+ptSystemStateErrors OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "What could not be read just now (an agent that doesn't answer). (/system-state/errors)"
+    ::= { ptSystemState 30 }
+
+ptInstanceTable OBJECT-TYPE
+    SYNTAX SEQUENCE OF PtInstanceEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "A virtual firewall: its own network namespace, routing table, firewall, DNS and DHCP server. The default one of a firewall is its host. (/instance)"
+    ::= { portitorMIB 3 }
+
+ptInstanceEntry OBJECT-TYPE
+    SYNTAX PtInstanceEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "A row of /instance."
+    INDEX { ptInstanceName }
+    ::= { ptInstanceTable 1 }
+
+PtInstanceEntry ::= SEQUENCE {
+    ptInstanceName DisplayString,
+    ptInstanceStateVrrpError DisplayString,
+    ptInstanceStateBfdError DisplayString,
+    ptInstanceStateNtpError DisplayString,
+    ptInstanceStateNat64Error DisplayString,
+    ptInstanceStateNat64Prefix DisplayString
+}
+
+ptInstanceName OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/name"
+    ::= { ptInstanceEntry 1 }
+
+ptInstanceStateVrrpError OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/vrrp/error"
+    ::= { ptInstanceEntry 2 }
+
+ptInstanceStateBfdError OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/bfd/error"
+    ::= { ptInstanceEntry 3 }
+
+ptInstanceStateNtpError OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/ntp/error"
+    ::= { ptInstanceEntry 4 }
+
+ptInstanceStateNat64Error OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/nat64/error"
+    ::= { ptInstanceEntry 5 }
+
+ptInstanceStateNat64Prefix OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/nat64/prefix"
+    ::= { ptInstanceEntry 6 }
+
+ptInstanceInterfacesTable OBJECT-TYPE
+    SYNTAX SEQUENCE OF PtInstanceInterfacesEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "The devices of the virtual firewall, configured ones and those made for them (VRFs, VRRP, NAT64). (/instance/state/interfaces)"
+    ::= { portitorMIB 4 }
+
+ptInstanceInterfacesEntry OBJECT-TYPE
+    SYNTAX PtInstanceInterfacesEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "A row of /instance/state/interfaces."
+    INDEX { ptInstanceInterfacesInstanceName, ptInstanceInterfacesName }
+    ::= { ptInstanceInterfacesTable 1 }
+
+PtInstanceInterfacesEntry ::= SEQUENCE {
+    ptInstanceInterfacesInstanceName DisplayString,
+    ptInstanceInterfacesName DisplayString,
+    ptInstanceInterfacesKind DisplayString,
+    ptInstanceInterfacesState DisplayString,
+    ptInstanceInterfacesMtu Integer32,
+    ptInstanceInterfacesMac DisplayString,
+    ptInstanceInterfacesAddresses DisplayString,
+    ptInstanceInterfacesRxBytes Counter64,
+    ptInstanceInterfacesTxBytes Counter64,
+    ptInstanceInterfacesRxPackets Counter64,
+    ptInstanceInterfacesTxPackets Counter64,
+    ptInstanceInterfacesRxErrors Counter64,
+    ptInstanceInterfacesTxErrors Counter64,
+    ptInstanceInterfacesRxDropped Counter64,
+    ptInstanceInterfacesTxDropped Counter64,
+    ptInstanceInterfacesRxOverErrors Counter64,
+    ptInstanceInterfacesRxMulticast Counter64,
+    ptInstanceInterfacesTxCarrierErrors Counter64,
+    ptInstanceInterfacesTxCollisions Counter64
+}
+
+ptInstanceInterfacesInstanceName OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/name"
+    ::= { ptInstanceInterfacesEntry 1 }
+
+ptInstanceInterfacesName OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/state/interfaces/name"
+    ::= { ptInstanceInterfacesEntry 2 }
+
+ptInstanceInterfacesKind OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/interfaces/kind"
+    ::= { ptInstanceInterfacesEntry 3 }
+
+ptInstanceInterfacesState OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "The operational state: up, down, unknown, lowerlayerdown. (/instance/state/interfaces/state)"
+    ::= { ptInstanceInterfacesEntry 4 }
+
+ptInstanceInterfacesMtu OBJECT-TYPE
+    SYNTAX Integer32
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/interfaces/mtu"
+    ::= { ptInstanceInterfacesEntry 5 }
+
+ptInstanceInterfacesMac OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/interfaces/mac"
+    ::= { ptInstanceInterfacesEntry 6 }
+
+ptInstanceInterfacesAddresses OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/interfaces/addresses"
+    ::= { ptInstanceInterfacesEntry 7 }
+
+ptInstanceInterfacesRxBytes OBJECT-TYPE
+    SYNTAX Counter64
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/interfaces/rx-bytes"
+    ::= { ptInstanceInterfacesEntry 8 }
+
+ptInstanceInterfacesTxBytes OBJECT-TYPE
+    SYNTAX Counter64
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/interfaces/tx-bytes"
+    ::= { ptInstanceInterfacesEntry 9 }
+
+ptInstanceInterfacesRxPackets OBJECT-TYPE
+    SYNTAX Counter64
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/interfaces/rx-packets"
+    ::= { ptInstanceInterfacesEntry 10 }
+
+ptInstanceInterfacesTxPackets OBJECT-TYPE
+    SYNTAX Counter64
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/interfaces/tx-packets"
+    ::= { ptInstanceInterfacesEntry 11 }
+
+ptInstanceInterfacesRxErrors OBJECT-TYPE
+    SYNTAX Counter64
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/interfaces/rx-errors"
+    ::= { ptInstanceInterfacesEntry 12 }
+
+ptInstanceInterfacesTxErrors OBJECT-TYPE
+    SYNTAX Counter64
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/interfaces/tx-errors"
+    ::= { ptInstanceInterfacesEntry 13 }
+
+ptInstanceInterfacesRxDropped OBJECT-TYPE
+    SYNTAX Counter64
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/interfaces/rx-dropped"
+    ::= { ptInstanceInterfacesEntry 14 }
+
+ptInstanceInterfacesTxDropped OBJECT-TYPE
+    SYNTAX Counter64
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/interfaces/tx-dropped"
+    ::= { ptInstanceInterfacesEntry 15 }
+
+ptInstanceInterfacesRxOverErrors OBJECT-TYPE
+    SYNTAX Counter64
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/interfaces/rx-over-errors"
+    ::= { ptInstanceInterfacesEntry 16 }
+
+ptInstanceInterfacesRxMulticast OBJECT-TYPE
+    SYNTAX Counter64
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/interfaces/rx-multicast"
+    ::= { ptInstanceInterfacesEntry 17 }
+
+ptInstanceInterfacesTxCarrierErrors OBJECT-TYPE
+    SYNTAX Counter64
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/interfaces/tx-carrier-errors"
+    ::= { ptInstanceInterfacesEntry 18 }
+
+ptInstanceInterfacesTxCollisions OBJECT-TYPE
+    SYNTAX Counter64
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/interfaces/tx-collisions"
+    ::= { ptInstanceInterfacesEntry 19 }
+
+ptInstanceRoutesTable OBJECT-TYPE
+    SYNTAX SEQUENCE OF PtInstanceRoutesEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "The main table's routes. (/instance/state/routes)"
+    ::= { portitorMIB 5 }
+
+ptInstanceRoutesEntry OBJECT-TYPE
+    SYNTAX PtInstanceRoutesEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "A row of /instance/state/routes."
+    INDEX { ptInstanceRoutesInstanceName, ptInstanceRoutesIndex }
+    ::= { ptInstanceRoutesTable 1 }
+
+PtInstanceRoutesEntry ::= SEQUENCE {
+    ptInstanceRoutesInstanceName DisplayString,
+    ptInstanceRoutesIndex Unsigned32,
+    ptInstanceRoutesDst DisplayString,
+    ptInstanceRoutesGateway DisplayString,
+    ptInstanceRoutesDev DisplayString,
+    ptInstanceRoutesProtocol DisplayString,
+    ptInstanceRoutesMetric Integer32
+}
+
+ptInstanceRoutesInstanceName OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/name"
+    ::= { ptInstanceRoutesEntry 1 }
+
+ptInstanceRoutesIndex OBJECT-TYPE
+    SYNTAX Unsigned32 (1..4294967295)
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "a row number"
+    ::= { ptInstanceRoutesEntry 2 }
+
+ptInstanceRoutesDst OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/routes/dst"
+    ::= { ptInstanceRoutesEntry 3 }
+
+ptInstanceRoutesGateway OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/routes/gateway"
+    ::= { ptInstanceRoutesEntry 4 }
+
+ptInstanceRoutesDev OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/routes/dev"
+    ::= { ptInstanceRoutesEntry 5 }
+
+ptInstanceRoutesProtocol OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/routes/protocol"
+    ::= { ptInstanceRoutesEntry 6 }
+
+ptInstanceRoutesMetric OBJECT-TYPE
+    SYNTAX Integer32
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/routes/metric"
+    ::= { ptInstanceRoutesEntry 7 }
+
+ptInstanceWireguardTable OBJECT-TYPE
+    SYNTAX SEQUENCE OF PtInstanceWireguardEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/state/wireguard"
+    ::= { portitorMIB 6 }
+
+ptInstanceWireguardEntry OBJECT-TYPE
+    SYNTAX PtInstanceWireguardEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "A row of /instance/state/wireguard."
+    INDEX { ptInstanceWireguardInstanceName, ptInstanceWireguardInterface }
+    ::= { ptInstanceWireguardTable 1 }
+
+PtInstanceWireguardEntry ::= SEQUENCE {
+    ptInstanceWireguardInstanceName DisplayString,
+    ptInstanceWireguardInterface DisplayString,
+    ptInstanceWireguardPublicKey DisplayString,
+    ptInstanceWireguardListenPort Integer32
+}
+
+ptInstanceWireguardInstanceName OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/name"
+    ::= { ptInstanceWireguardEntry 1 }
+
+ptInstanceWireguardInterface OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/state/wireguard/interface"
+    ::= { ptInstanceWireguardEntry 2 }
+
+ptInstanceWireguardPublicKey OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/wireguard/public-key"
+    ::= { ptInstanceWireguardEntry 3 }
+
+ptInstanceWireguardListenPort OBJECT-TYPE
+    SYNTAX Integer32
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/wireguard/listen-port"
+    ::= { ptInstanceWireguardEntry 4 }
+
+ptInstanceWireguardPeersTable OBJECT-TYPE
+    SYNTAX SEQUENCE OF PtInstanceWireguardPeersEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/state/wireguard/peers"
+    ::= { portitorMIB 7 }
+
+ptInstanceWireguardPeersEntry OBJECT-TYPE
+    SYNTAX PtInstanceWireguardPeersEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "A row of /instance/state/wireguard/peers."
+    INDEX { ptInstanceWireguardPeersInstanceName, ptInstanceWireguardPeersWireguardInterface, ptInstanceWireguardPeersPublicKey }
+    ::= { ptInstanceWireguardPeersTable 1 }
+
+PtInstanceWireguardPeersEntry ::= SEQUENCE {
+    ptInstanceWireguardPeersInstanceName DisplayString,
+    ptInstanceWireguardPeersWireguardInterface DisplayString,
+    ptInstanceWireguardPeersPublicKey DisplayString,
+    ptInstanceWireguardPeersEndpoint DisplayString,
+    ptInstanceWireguardPeersAllowedIps DisplayString,
+    ptInstanceWireguardPeersLatestHandshake DisplayString,
+    ptInstanceWireguardPeersRxBytes Counter64,
+    ptInstanceWireguardPeersTxBytes Counter64,
+    ptInstanceWireguardPeersKeepalive Integer32
+}
+
+ptInstanceWireguardPeersInstanceName OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/name"
+    ::= { ptInstanceWireguardPeersEntry 1 }
+
+ptInstanceWireguardPeersWireguardInterface OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/state/wireguard/interface"
+    ::= { ptInstanceWireguardPeersEntry 2 }
+
+ptInstanceWireguardPeersPublicKey OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/state/wireguard/peers/public-key"
+    ::= { ptInstanceWireguardPeersEntry 3 }
+
+ptInstanceWireguardPeersEndpoint OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/wireguard/peers/endpoint"
+    ::= { ptInstanceWireguardPeersEntry 4 }
+
+ptInstanceWireguardPeersAllowedIps OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/wireguard/peers/allowed-ips"
+    ::= { ptInstanceWireguardPeersEntry 5 }
+
+ptInstanceWireguardPeersLatestHandshake OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/wireguard/peers/latest-handshake"
+    ::= { ptInstanceWireguardPeersEntry 6 }
+
+ptInstanceWireguardPeersRxBytes OBJECT-TYPE
+    SYNTAX Counter64
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/wireguard/peers/rx-bytes"
+    ::= { ptInstanceWireguardPeersEntry 7 }
+
+ptInstanceWireguardPeersTxBytes OBJECT-TYPE
+    SYNTAX Counter64
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/wireguard/peers/tx-bytes"
+    ::= { ptInstanceWireguardPeersEntry 8 }
+
+ptInstanceWireguardPeersKeepalive OBJECT-TYPE
+    SYNTAX Integer32
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/wireguard/peers/keepalive"
+    ::= { ptInstanceWireguardPeersEntry 9 }
+
+ptInstanceServicesTable OBJECT-TYPE
+    SYNTAX SEQUENCE OF PtInstanceServicesEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "The virtual firewall's daemons (named, dhcpd, frr, ...). (/instance/state/services)"
+    ::= { portitorMIB 8 }
+
+ptInstanceServicesEntry OBJECT-TYPE
+    SYNTAX PtInstanceServicesEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "A row of /instance/state/services."
+    INDEX { ptInstanceServicesInstanceName, ptInstanceServicesName }
+    ::= { ptInstanceServicesTable 1 }
+
+PtInstanceServicesEntry ::= SEQUENCE {
+    ptInstanceServicesInstanceName DisplayString,
+    ptInstanceServicesName DisplayString,
+    ptInstanceServicesState DisplayString
+}
+
+ptInstanceServicesInstanceName OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/name"
+    ::= { ptInstanceServicesEntry 1 }
+
+ptInstanceServicesName OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/state/services/name"
+    ::= { ptInstanceServicesEntry 2 }
+
+ptInstanceServicesState OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "systemd's: active, inactive, failed, ... (/instance/state/services/state)"
+    ::= { ptInstanceServicesEntry 3 }
+
+ptInstanceDhcpClientLeasesTable OBJECT-TYPE
+    SYNTAX SEQUENCE OF PtInstanceDhcpClientLeasesEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "What the DHCP clients got. (/instance/state/dhcp-client-leases)"
+    ::= { portitorMIB 9 }
+
+ptInstanceDhcpClientLeasesEntry OBJECT-TYPE
+    SYNTAX PtInstanceDhcpClientLeasesEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "A row of /instance/state/dhcp-client-leases."
+    INDEX { ptInstanceDhcpClientLeasesInstanceName, ptInstanceDhcpClientLeasesInterface, ptInstanceDhcpClientLeasesFamily }
+    ::= { ptInstanceDhcpClientLeasesTable 1 }
+
+PtInstanceDhcpClientLeasesEntry ::= SEQUENCE {
+    ptInstanceDhcpClientLeasesInstanceName DisplayString,
+    ptInstanceDhcpClientLeasesInterface DisplayString,
+    ptInstanceDhcpClientLeasesFamily DisplayString,
+    ptInstanceDhcpClientLeasesState DisplayString,
+    ptInstanceDhcpClientLeasesAddress DisplayString,
+    ptInstanceDhcpClientLeasesPrefixes DisplayString,
+    ptInstanceDhcpClientLeasesRouter DisplayString,
+    ptInstanceDhcpClientLeasesDns DisplayString,
+    ptInstanceDhcpClientLeasesServer DisplayString,
+    ptInstanceDhcpClientLeasesObtained DisplayString,
+    ptInstanceDhcpClientLeasesExpires DisplayString,
+    ptInstanceDhcpClientLeasesLastError DisplayString
+}
+
+ptInstanceDhcpClientLeasesInstanceName OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/name"
+    ::= { ptInstanceDhcpClientLeasesEntry 1 }
+
+ptInstanceDhcpClientLeasesInterface OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/state/dhcp-client-leases/interface"
+    ::= { ptInstanceDhcpClientLeasesEntry 2 }
+
+ptInstanceDhcpClientLeasesFamily OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "ipv4 or ipv6. (/instance/state/dhcp-client-leases/family)"
+    ::= { ptInstanceDhcpClientLeasesEntry 3 }
+
+ptInstanceDhcpClientLeasesState OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "requesting, bound or error. (/instance/state/dhcp-client-leases/state)"
+    ::= { ptInstanceDhcpClientLeasesEntry 4 }
+
+ptInstanceDhcpClientLeasesAddress OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/dhcp-client-leases/address"
+    ::= { ptInstanceDhcpClientLeasesEntry 5 }
+
+ptInstanceDhcpClientLeasesPrefixes OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "Prefixes delegated (DHCPv6). (/instance/state/dhcp-client-leases/prefixes)"
+    ::= { ptInstanceDhcpClientLeasesEntry 6 }
+
+ptInstanceDhcpClientLeasesRouter OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/dhcp-client-leases/router"
+    ::= { ptInstanceDhcpClientLeasesEntry 7 }
+
+ptInstanceDhcpClientLeasesDns OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/dhcp-client-leases/dns"
+    ::= { ptInstanceDhcpClientLeasesEntry 8 }
+
+ptInstanceDhcpClientLeasesServer OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/dhcp-client-leases/server"
+    ::= { ptInstanceDhcpClientLeasesEntry 9 }
+
+ptInstanceDhcpClientLeasesObtained OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/dhcp-client-leases/obtained"
+    ::= { ptInstanceDhcpClientLeasesEntry 10 }
+
+ptInstanceDhcpClientLeasesExpires OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/dhcp-client-leases/expires"
+    ::= { ptInstanceDhcpClientLeasesEntry 11 }
+
+ptInstanceDhcpClientLeasesLastError OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/dhcp-client-leases/last-error"
+    ::= { ptInstanceDhcpClientLeasesEntry 12 }
+
+ptInstanceDhcpServerLeasesTable OBJECT-TYPE
+    SYNTAX SEQUENCE OF PtInstanceDhcpServerLeasesEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "What the DHCP server gave out. (/instance/state/dhcp-server-leases)"
+    ::= { portitorMIB 10 }
+
+ptInstanceDhcpServerLeasesEntry OBJECT-TYPE
+    SYNTAX PtInstanceDhcpServerLeasesEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "A row of /instance/state/dhcp-server-leases."
+    INDEX { ptInstanceDhcpServerLeasesInstanceName, ptInstanceDhcpServerLeasesAddress }
+    ::= { ptInstanceDhcpServerLeasesTable 1 }
+
+PtInstanceDhcpServerLeasesEntry ::= SEQUENCE {
+    ptInstanceDhcpServerLeasesInstanceName DisplayString,
+    ptInstanceDhcpServerLeasesAddress DisplayString,
+    ptInstanceDhcpServerLeasesMac DisplayString,
+    ptInstanceDhcpServerLeasesHostname DisplayString,
+    ptInstanceDhcpServerLeasesExpires DisplayString
+}
+
+ptInstanceDhcpServerLeasesInstanceName OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/name"
+    ::= { ptInstanceDhcpServerLeasesEntry 1 }
+
+ptInstanceDhcpServerLeasesAddress OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/state/dhcp-server-leases/address"
+    ::= { ptInstanceDhcpServerLeasesEntry 2 }
+
+ptInstanceDhcpServerLeasesMac OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/dhcp-server-leases/mac"
+    ::= { ptInstanceDhcpServerLeasesEntry 3 }
+
+ptInstanceDhcpServerLeasesHostname OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/dhcp-server-leases/hostname"
+    ::= { ptInstanceDhcpServerLeasesEntry 4 }
+
+ptInstanceDhcpServerLeasesExpires OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/dhcp-server-leases/expires"
+    ::= { ptInstanceDhcpServerLeasesEntry 5 }
+
+ptInstanceIpNeighboursTable OBJECT-TYPE
+    SYNTAX SEQUENCE OF PtInstanceIpNeighboursEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "ARP and neighbour discovery. (/instance/state/ip-neighbours)"
+    ::= { portitorMIB 11 }
+
+ptInstanceIpNeighboursEntry OBJECT-TYPE
+    SYNTAX PtInstanceIpNeighboursEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "A row of /instance/state/ip-neighbours."
+    INDEX { ptInstanceIpNeighboursInstanceName, ptInstanceIpNeighboursInterface, ptInstanceIpNeighboursAddress }
+    ::= { ptInstanceIpNeighboursTable 1 }
+
+PtInstanceIpNeighboursEntry ::= SEQUENCE {
+    ptInstanceIpNeighboursInstanceName DisplayString,
+    ptInstanceIpNeighboursInterface DisplayString,
+    ptInstanceIpNeighboursAddress DisplayString,
+    ptInstanceIpNeighboursFamily DisplayString,
+    ptInstanceIpNeighboursMac DisplayString,
+    ptInstanceIpNeighboursState DisplayString,
+    ptInstanceIpNeighboursRouter TruthValue,
+    ptInstanceIpNeighboursVrf DisplayString
+}
+
+ptInstanceIpNeighboursInstanceName OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/name"
+    ::= { ptInstanceIpNeighboursEntry 1 }
+
+ptInstanceIpNeighboursInterface OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/state/ip-neighbours/interface"
+    ::= { ptInstanceIpNeighboursEntry 2 }
+
+ptInstanceIpNeighboursAddress OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/state/ip-neighbours/address"
+    ::= { ptInstanceIpNeighboursEntry 3 }
+
+ptInstanceIpNeighboursFamily OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/ip-neighbours/family"
+    ::= { ptInstanceIpNeighboursEntry 4 }
+
+ptInstanceIpNeighboursMac OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/ip-neighbours/mac"
+    ::= { ptInstanceIpNeighboursEntry 5 }
+
+ptInstanceIpNeighboursState OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "reachable, stale, delay, probe, failed, incomplete, permanent, noarp. (/instance/state/ip-neighbours/state)"
+    ::= { ptInstanceIpNeighboursEntry 6 }
+
+ptInstanceIpNeighboursRouter OBJECT-TYPE
+    SYNTAX TruthValue
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/ip-neighbours/router"
+    ::= { ptInstanceIpNeighboursEntry 7 }
+
+ptInstanceIpNeighboursVrf OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/ip-neighbours/vrf"
+    ::= { ptInstanceIpNeighboursEntry 8 }
+
+ptInstanceLldpNeighboursTable OBJECT-TYPE
+    SYNTAX SEQUENCE OF PtInstanceLldpNeighboursEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/state/lldp-neighbours"
+    ::= { portitorMIB 12 }
+
+ptInstanceLldpNeighboursEntry OBJECT-TYPE
+    SYNTAX PtInstanceLldpNeighboursEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "A row of /instance/state/lldp-neighbours."
+    INDEX { ptInstanceLldpNeighboursInstanceName, ptInstanceLldpNeighboursInterface, ptInstanceLldpNeighboursSourceMac }
+    ::= { ptInstanceLldpNeighboursTable 1 }
+
+PtInstanceLldpNeighboursEntry ::= SEQUENCE {
+    ptInstanceLldpNeighboursInstanceName DisplayString,
+    ptInstanceLldpNeighboursInterface DisplayString,
+    ptInstanceLldpNeighboursSourceMac DisplayString,
+    ptInstanceLldpNeighboursChassisId DisplayString,
+    ptInstanceLldpNeighboursChassisIdSubtype DisplayString,
+    ptInstanceLldpNeighboursPortId DisplayString,
+    ptInstanceLldpNeighboursPortIdSubtype DisplayString,
+    ptInstanceLldpNeighboursTtl Integer32,
+    ptInstanceLldpNeighboursPortDescription DisplayString,
+    ptInstanceLldpNeighboursSystemName DisplayString,
+    ptInstanceLldpNeighboursSystemDescription DisplayString
+}
+
+ptInstanceLldpNeighboursInstanceName OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/name"
+    ::= { ptInstanceLldpNeighboursEntry 1 }
+
+ptInstanceLldpNeighboursInterface OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/state/lldp-neighbours/interface"
+    ::= { ptInstanceLldpNeighboursEntry 2 }
+
+ptInstanceLldpNeighboursSourceMac OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/state/lldp-neighbours/source-mac"
+    ::= { ptInstanceLldpNeighboursEntry 3 }
+
+ptInstanceLldpNeighboursChassisId OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/lldp-neighbours/chassis-id"
+    ::= { ptInstanceLldpNeighboursEntry 4 }
+
+ptInstanceLldpNeighboursChassisIdSubtype OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/lldp-neighbours/chassis-id-subtype"
+    ::= { ptInstanceLldpNeighboursEntry 5 }
+
+ptInstanceLldpNeighboursPortId OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/lldp-neighbours/port-id"
+    ::= { ptInstanceLldpNeighboursEntry 6 }
+
+ptInstanceLldpNeighboursPortIdSubtype OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/lldp-neighbours/port-id-subtype"
+    ::= { ptInstanceLldpNeighboursEntry 7 }
+
+ptInstanceLldpNeighboursTtl OBJECT-TYPE
+    SYNTAX Integer32
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/lldp-neighbours/ttl"
+    ::= { ptInstanceLldpNeighboursEntry 8 }
+
+ptInstanceLldpNeighboursPortDescription OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/lldp-neighbours/port-description"
+    ::= { ptInstanceLldpNeighboursEntry 9 }
+
+ptInstanceLldpNeighboursSystemName OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/lldp-neighbours/system-name"
+    ::= { ptInstanceLldpNeighboursEntry 10 }
+
+ptInstanceLldpNeighboursSystemDescription OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/lldp-neighbours/system-description"
+    ::= { ptInstanceLldpNeighboursEntry 11 }
+
+ptInstanceRulesTable OBJECT-TYPE
+    SYNTAX SEQUENCE OF PtInstanceRulesEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "The traffic of the connections each filter rule accepted, since it was last applied. (/instance/state/rules)"
+    ::= { portitorMIB 13 }
+
+ptInstanceRulesEntry OBJECT-TYPE
+    SYNTAX PtInstanceRulesEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "A row of /instance/state/rules."
+    INDEX { ptInstanceRulesInstanceName, ptInstanceRulesId }
+    ::= { ptInstanceRulesTable 1 }
+
+PtInstanceRulesEntry ::= SEQUENCE {
+    ptInstanceRulesInstanceName DisplayString,
+    ptInstanceRulesId Unsigned32,
+    ptInstanceRulesOrigPackets Counter64,
+    ptInstanceRulesOrigBytes Counter64,
+    ptInstanceRulesReplyPackets Counter64,
+    ptInstanceRulesReplyBytes Counter64
+}
+
+ptInstanceRulesInstanceName OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/name"
+    ::= { ptInstanceRulesEntry 1 }
+
+ptInstanceRulesId OBJECT-TYPE
+    SYNTAX Unsigned32 (0..4294967295)
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/state/rules/id"
+    ::= { ptInstanceRulesEntry 2 }
+
+ptInstanceRulesOrigPackets OBJECT-TYPE
+    SYNTAX Counter64
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/rules/orig-packets"
+    ::= { ptInstanceRulesEntry 3 }
+
+ptInstanceRulesOrigBytes OBJECT-TYPE
+    SYNTAX Counter64
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/rules/orig-bytes"
+    ::= { ptInstanceRulesEntry 4 }
+
+ptInstanceRulesReplyPackets OBJECT-TYPE
+    SYNTAX Counter64
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/rules/reply-packets"
+    ::= { ptInstanceRulesEntry 5 }
+
+ptInstanceRulesReplyBytes OBJECT-TYPE
+    SYNTAX Counter64
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/rules/reply-bytes"
+    ::= { ptInstanceRulesEntry 6 }
+
+ptInstanceBgpTable OBJECT-TYPE
+    SYNTAX SEQUENCE OF PtInstanceBgpEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/state/bgp"
+    ::= { portitorMIB 14 }
+
+ptInstanceBgpEntry OBJECT-TYPE
+    SYNTAX PtInstanceBgpEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "A row of /instance/state/bgp."
+    INDEX { ptInstanceBgpInstanceName, ptInstanceBgpVrf }
+    ::= { ptInstanceBgpTable 1 }
+
+PtInstanceBgpEntry ::= SEQUENCE {
+    ptInstanceBgpInstanceName DisplayString,
+    ptInstanceBgpVrf DisplayString,
+    ptInstanceBgpRouterId DisplayString,
+    ptInstanceBgpAsn Unsigned32,
+    ptInstanceBgpError DisplayString
+}
+
+ptInstanceBgpInstanceName OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/name"
+    ::= { ptInstanceBgpEntry 1 }
+
+ptInstanceBgpVrf OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "The VRF, main for the main table. (/instance/state/bgp/vrf)"
+    ::= { ptInstanceBgpEntry 2 }
+
+ptInstanceBgpRouterId OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/bgp/router-id"
+    ::= { ptInstanceBgpEntry 3 }
+
+ptInstanceBgpAsn OBJECT-TYPE
+    SYNTAX Unsigned32
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/bgp/asn"
+    ::= { ptInstanceBgpEntry 4 }
+
+ptInstanceBgpError OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "Why FRR could not be asked. (/instance/state/bgp/error)"
+    ::= { ptInstanceBgpEntry 5 }
+
+ptInstanceBgpPeersTable OBJECT-TYPE
+    SYNTAX SEQUENCE OF PtInstanceBgpPeersEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/state/bgp/peers"
+    ::= { portitorMIB 15 }
+
+ptInstanceBgpPeersEntry OBJECT-TYPE
+    SYNTAX PtInstanceBgpPeersEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "A row of /instance/state/bgp/peers."
+    INDEX { ptInstanceBgpPeersInstanceName, ptInstanceBgpPeersBgpVrf, ptInstanceBgpPeersAddress }
+    ::= { ptInstanceBgpPeersTable 1 }
+
+PtInstanceBgpPeersEntry ::= SEQUENCE {
+    ptInstanceBgpPeersInstanceName DisplayString,
+    ptInstanceBgpPeersBgpVrf DisplayString,
+    ptInstanceBgpPeersAddress DisplayString,
+    ptInstanceBgpPeersRemoteAs Unsigned32,
+    ptInstanceBgpPeersLocalAs Unsigned32,
+    ptInstanceBgpPeersDescription DisplayString,
+    ptInstanceBgpPeersHostname DisplayString,
+    ptInstanceBgpPeersState DisplayString,
+    ptInstanceBgpPeersUptime DisplayString,
+    ptInstanceBgpPeersUptimeSecs CounterBasedGauge64,
+    ptInstanceBgpPeersMsgRcvd CounterBasedGauge64,
+    ptInstanceBgpPeersMsgSent CounterBasedGauge64
+}
+
+ptInstanceBgpPeersInstanceName OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/name"
+    ::= { ptInstanceBgpPeersEntry 1 }
+
+ptInstanceBgpPeersBgpVrf OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "The VRF, main for the main table. (/instance/state/bgp/vrf)"
+    ::= { ptInstanceBgpPeersEntry 2 }
+
+ptInstanceBgpPeersAddress OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/state/bgp/peers/address"
+    ::= { ptInstanceBgpPeersEntry 3 }
+
+ptInstanceBgpPeersRemoteAs OBJECT-TYPE
+    SYNTAX Unsigned32
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/bgp/peers/remote-as"
+    ::= { ptInstanceBgpPeersEntry 4 }
+
+ptInstanceBgpPeersLocalAs OBJECT-TYPE
+    SYNTAX Unsigned32
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/bgp/peers/local-as"
+    ::= { ptInstanceBgpPeersEntry 5 }
+
+ptInstanceBgpPeersDescription OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/bgp/peers/description"
+    ::= { ptInstanceBgpPeersEntry 6 }
+
+ptInstanceBgpPeersHostname OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/bgp/peers/hostname"
+    ::= { ptInstanceBgpPeersEntry 7 }
+
+ptInstanceBgpPeersState OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "Idle, Connect, Active, OpenSent, OpenConfirm, Established. (/instance/state/bgp/peers/state)"
+    ::= { ptInstanceBgpPeersEntry 8 }
+
+ptInstanceBgpPeersUptime OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/bgp/peers/uptime"
+    ::= { ptInstanceBgpPeersEntry 9 }
+
+ptInstanceBgpPeersUptimeSecs OBJECT-TYPE
+    SYNTAX CounterBasedGauge64
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/bgp/peers/uptime-secs"
+    ::= { ptInstanceBgpPeersEntry 10 }
+
+ptInstanceBgpPeersMsgRcvd OBJECT-TYPE
+    SYNTAX CounterBasedGauge64
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/bgp/peers/msg-rcvd"
+    ::= { ptInstanceBgpPeersEntry 11 }
+
+ptInstanceBgpPeersMsgSent OBJECT-TYPE
+    SYNTAX CounterBasedGauge64
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/bgp/peers/msg-sent"
+    ::= { ptInstanceBgpPeersEntry 12 }
+
+ptInstanceOspfTable OBJECT-TYPE
+    SYNTAX SEQUENCE OF PtInstanceOspfEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "OSPFv2 (version 2) and OSPFv3 (version 3) of the main table (vrf main) and the VRFs. (/instance/state/ospf)"
+    ::= { portitorMIB 16 }
+
+ptInstanceOspfEntry OBJECT-TYPE
+    SYNTAX PtInstanceOspfEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "A row of /instance/state/ospf."
+    INDEX { ptInstanceOspfInstanceName, ptInstanceOspfVersion, ptInstanceOspfVrf }
+    ::= { ptInstanceOspfTable 1 }
+
+PtInstanceOspfEntry ::= SEQUENCE {
+    ptInstanceOspfInstanceName DisplayString,
+    ptInstanceOspfVersion Unsigned32,
+    ptInstanceOspfVrf DisplayString,
+    ptInstanceOspfRouterId DisplayString,
+    ptInstanceOspfError DisplayString
+}
+
+ptInstanceOspfInstanceName OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/name"
+    ::= { ptInstanceOspfEntry 1 }
+
+ptInstanceOspfVersion OBJECT-TYPE
+    SYNTAX Unsigned32 (0..4294967295)
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/state/ospf/version"
+    ::= { ptInstanceOspfEntry 2 }
+
+ptInstanceOspfVrf OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/state/ospf/vrf"
+    ::= { ptInstanceOspfEntry 3 }
+
+ptInstanceOspfRouterId OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/ospf/router-id"
+    ::= { ptInstanceOspfEntry 4 }
+
+ptInstanceOspfError OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/ospf/error"
+    ::= { ptInstanceOspfEntry 5 }
+
+ptInstanceOspfAreasTable OBJECT-TYPE
+    SYNTAX SEQUENCE OF PtInstanceOspfAreasEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/state/ospf/areas"
+    ::= { portitorMIB 17 }
+
+ptInstanceOspfAreasEntry OBJECT-TYPE
+    SYNTAX PtInstanceOspfAreasEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "A row of /instance/state/ospf/areas."
+    INDEX { ptInstanceOspfAreasInstanceName, ptInstanceOspfAreasOspfVersion, ptInstanceOspfAreasOspfVrf, ptInstanceOspfAreasId }
+    ::= { ptInstanceOspfAreasTable 1 }
+
+PtInstanceOspfAreasEntry ::= SEQUENCE {
+    ptInstanceOspfAreasInstanceName DisplayString,
+    ptInstanceOspfAreasOspfVersion Unsigned32,
+    ptInstanceOspfAreasOspfVrf DisplayString,
+    ptInstanceOspfAreasId DisplayString,
+    ptInstanceOspfAreasInterfaces Integer32,
+    ptInstanceOspfAreasFullAdjacencies Integer32,
+    ptInstanceOspfAreasLsas Integer32
+}
+
+ptInstanceOspfAreasInstanceName OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/name"
+    ::= { ptInstanceOspfAreasEntry 1 }
+
+ptInstanceOspfAreasOspfVersion OBJECT-TYPE
+    SYNTAX Unsigned32 (0..4294967295)
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/state/ospf/version"
+    ::= { ptInstanceOspfAreasEntry 2 }
+
+ptInstanceOspfAreasOspfVrf OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/state/ospf/vrf"
+    ::= { ptInstanceOspfAreasEntry 3 }
+
+ptInstanceOspfAreasId OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/state/ospf/areas/id"
+    ::= { ptInstanceOspfAreasEntry 4 }
+
+ptInstanceOspfAreasInterfaces OBJECT-TYPE
+    SYNTAX Integer32
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/ospf/areas/interfaces"
+    ::= { ptInstanceOspfAreasEntry 5 }
+
+ptInstanceOspfAreasFullAdjacencies OBJECT-TYPE
+    SYNTAX Integer32
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/ospf/areas/full-adjacencies"
+    ::= { ptInstanceOspfAreasEntry 6 }
+
+ptInstanceOspfAreasLsas OBJECT-TYPE
+    SYNTAX Integer32
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/ospf/areas/lsas"
+    ::= { ptInstanceOspfAreasEntry 7 }
+
+ptInstanceOspfInterfacesTable OBJECT-TYPE
+    SYNTAX SEQUENCE OF PtInstanceOspfInterfacesEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/state/ospf/interfaces"
+    ::= { portitorMIB 18 }
+
+ptInstanceOspfInterfacesEntry OBJECT-TYPE
+    SYNTAX PtInstanceOspfInterfacesEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "A row of /instance/state/ospf/interfaces."
+    INDEX { ptInstanceOspfInterfacesInstanceName, ptInstanceOspfInterfacesOspfVersion, ptInstanceOspfInterfacesOspfVrf, ptInstanceOspfInterfacesName }
+    ::= { ptInstanceOspfInterfacesTable 1 }
+
+PtInstanceOspfInterfacesEntry ::= SEQUENCE {
+    ptInstanceOspfInterfacesInstanceName DisplayString,
+    ptInstanceOspfInterfacesOspfVersion Unsigned32,
+    ptInstanceOspfInterfacesOspfVrf DisplayString,
+    ptInstanceOspfInterfacesName DisplayString,
+    ptInstanceOspfInterfacesArea DisplayString,
+    ptInstanceOspfInterfacesAddress DisplayString,
+    ptInstanceOspfInterfacesState DisplayString,
+    ptInstanceOspfInterfacesNetworkType DisplayString,
+    ptInstanceOspfInterfacesCost CounterBasedGauge64,
+    ptInstanceOspfInterfacesPriority CounterBasedGauge64,
+    ptInstanceOspfInterfacesPassive TruthValue,
+    ptInstanceOspfInterfacesNeighbors CounterBasedGauge64,
+    ptInstanceOspfInterfacesAdjacent CounterBasedGauge64,
+    ptInstanceOspfInterfacesDr DisplayString,
+    ptInstanceOspfInterfacesBdr DisplayString
+}
+
+ptInstanceOspfInterfacesInstanceName OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/name"
+    ::= { ptInstanceOspfInterfacesEntry 1 }
+
+ptInstanceOspfInterfacesOspfVersion OBJECT-TYPE
+    SYNTAX Unsigned32 (0..4294967295)
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/state/ospf/version"
+    ::= { ptInstanceOspfInterfacesEntry 2 }
+
+ptInstanceOspfInterfacesOspfVrf OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/state/ospf/vrf"
+    ::= { ptInstanceOspfInterfacesEntry 3 }
+
+ptInstanceOspfInterfacesName OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/state/ospf/interfaces/name"
+    ::= { ptInstanceOspfInterfacesEntry 4 }
+
+ptInstanceOspfInterfacesArea OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/ospf/interfaces/area"
+    ::= { ptInstanceOspfInterfacesEntry 5 }
+
+ptInstanceOspfInterfacesAddress OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/ospf/interfaces/address"
+    ::= { ptInstanceOspfInterfacesEntry 6 }
+
+ptInstanceOspfInterfacesState OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/ospf/interfaces/state"
+    ::= { ptInstanceOspfInterfacesEntry 7 }
+
+ptInstanceOspfInterfacesNetworkType OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/ospf/interfaces/network-type"
+    ::= { ptInstanceOspfInterfacesEntry 8 }
+
+ptInstanceOspfInterfacesCost OBJECT-TYPE
+    SYNTAX CounterBasedGauge64
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/ospf/interfaces/cost"
+    ::= { ptInstanceOspfInterfacesEntry 9 }
+
+ptInstanceOspfInterfacesPriority OBJECT-TYPE
+    SYNTAX CounterBasedGauge64
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/ospf/interfaces/priority"
+    ::= { ptInstanceOspfInterfacesEntry 10 }
+
+ptInstanceOspfInterfacesPassive OBJECT-TYPE
+    SYNTAX TruthValue
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/ospf/interfaces/passive"
+    ::= { ptInstanceOspfInterfacesEntry 11 }
+
+ptInstanceOspfInterfacesNeighbors OBJECT-TYPE
+    SYNTAX CounterBasedGauge64
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/ospf/interfaces/neighbors"
+    ::= { ptInstanceOspfInterfacesEntry 12 }
+
+ptInstanceOspfInterfacesAdjacent OBJECT-TYPE
+    SYNTAX CounterBasedGauge64
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/ospf/interfaces/adjacent"
+    ::= { ptInstanceOspfInterfacesEntry 13 }
+
+ptInstanceOspfInterfacesDr OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/ospf/interfaces/dr"
+    ::= { ptInstanceOspfInterfacesEntry 14 }
+
+ptInstanceOspfInterfacesBdr OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/ospf/interfaces/bdr"
+    ::= { ptInstanceOspfInterfacesEntry 15 }
+
+ptInstanceOspfNeighborsTable OBJECT-TYPE
+    SYNTAX SEQUENCE OF PtInstanceOspfNeighborsEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/state/ospf/neighbors"
+    ::= { portitorMIB 19 }
+
+ptInstanceOspfNeighborsEntry OBJECT-TYPE
+    SYNTAX PtInstanceOspfNeighborsEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "A row of /instance/state/ospf/neighbors."
+    INDEX { ptInstanceOspfNeighborsInstanceName, ptInstanceOspfNeighborsOspfVersion, ptInstanceOspfNeighborsOspfVrf, ptInstanceOspfNeighborsIndex }
+    ::= { ptInstanceOspfNeighborsTable 1 }
+
+PtInstanceOspfNeighborsEntry ::= SEQUENCE {
+    ptInstanceOspfNeighborsInstanceName DisplayString,
+    ptInstanceOspfNeighborsOspfVersion Unsigned32,
+    ptInstanceOspfNeighborsOspfVrf DisplayString,
+    ptInstanceOspfNeighborsIndex Unsigned32,
+    ptInstanceOspfNeighborsRouterId DisplayString,
+    ptInstanceOspfNeighborsAddress DisplayString,
+    ptInstanceOspfNeighborsInterface DisplayString,
+    ptInstanceOspfNeighborsPriority CounterBasedGauge64,
+    ptInstanceOspfNeighborsState DisplayString,
+    ptInstanceOspfNeighborsRole DisplayString,
+    ptInstanceOspfNeighborsUptime DisplayString,
+    ptInstanceOspfNeighborsDeadTime DisplayString
+}
+
+ptInstanceOspfNeighborsInstanceName OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/name"
+    ::= { ptInstanceOspfNeighborsEntry 1 }
+
+ptInstanceOspfNeighborsOspfVersion OBJECT-TYPE
+    SYNTAX Unsigned32 (0..4294967295)
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/state/ospf/version"
+    ::= { ptInstanceOspfNeighborsEntry 2 }
+
+ptInstanceOspfNeighborsOspfVrf OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/state/ospf/vrf"
+    ::= { ptInstanceOspfNeighborsEntry 3 }
+
+ptInstanceOspfNeighborsIndex OBJECT-TYPE
+    SYNTAX Unsigned32 (1..4294967295)
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "a row number"
+    ::= { ptInstanceOspfNeighborsEntry 4 }
+
+ptInstanceOspfNeighborsRouterId OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/ospf/neighbors/router-id"
+    ::= { ptInstanceOspfNeighborsEntry 5 }
+
+ptInstanceOspfNeighborsAddress OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/ospf/neighbors/address"
+    ::= { ptInstanceOspfNeighborsEntry 6 }
+
+ptInstanceOspfNeighborsInterface OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/ospf/neighbors/interface"
+    ::= { ptInstanceOspfNeighborsEntry 7 }
+
+ptInstanceOspfNeighborsPriority OBJECT-TYPE
+    SYNTAX CounterBasedGauge64
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/ospf/neighbors/priority"
+    ::= { ptInstanceOspfNeighborsEntry 8 }
+
+ptInstanceOspfNeighborsState OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "Full/DR, 2-Way/DROther, ... (/instance/state/ospf/neighbors/state)"
+    ::= { ptInstanceOspfNeighborsEntry 9 }
+
+ptInstanceOspfNeighborsRole OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/ospf/neighbors/role"
+    ::= { ptInstanceOspfNeighborsEntry 10 }
+
+ptInstanceOspfNeighborsUptime OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/ospf/neighbors/uptime"
+    ::= { ptInstanceOspfNeighborsEntry 11 }
+
+ptInstanceOspfNeighborsDeadTime OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/ospf/neighbors/dead-time"
+    ::= { ptInstanceOspfNeighborsEntry 12 }
+
+ptInstanceIsisTable OBJECT-TYPE
+    SYNTAX SEQUENCE OF PtInstanceIsisEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/state/isis"
+    ::= { portitorMIB 20 }
+
+ptInstanceIsisEntry OBJECT-TYPE
+    SYNTAX PtInstanceIsisEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "A row of /instance/state/isis."
+    INDEX { ptInstanceIsisInstanceName, ptInstanceIsisVrf }
+    ::= { ptInstanceIsisTable 1 }
+
+PtInstanceIsisEntry ::= SEQUENCE {
+    ptInstanceIsisInstanceName DisplayString,
+    ptInstanceIsisVrf DisplayString,
+    ptInstanceIsisSystemId DisplayString,
+    ptInstanceIsisError DisplayString
+}
+
+ptInstanceIsisInstanceName OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/name"
+    ::= { ptInstanceIsisEntry 1 }
+
+ptInstanceIsisVrf OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/state/isis/vrf"
+    ::= { ptInstanceIsisEntry 2 }
+
+ptInstanceIsisSystemId OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/isis/system-id"
+    ::= { ptInstanceIsisEntry 3 }
+
+ptInstanceIsisError OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/isis/error"
+    ::= { ptInstanceIsisEntry 4 }
+
+ptInstanceIsisNeighborsTable OBJECT-TYPE
+    SYNTAX SEQUENCE OF PtInstanceIsisNeighborsEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/state/isis/neighbors"
+    ::= { portitorMIB 21 }
+
+ptInstanceIsisNeighborsEntry OBJECT-TYPE
+    SYNTAX PtInstanceIsisNeighborsEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "A row of /instance/state/isis/neighbors."
+    INDEX { ptInstanceIsisNeighborsInstanceName, ptInstanceIsisNeighborsIsisVrf, ptInstanceIsisNeighborsIndex }
+    ::= { ptInstanceIsisNeighborsTable 1 }
+
+PtInstanceIsisNeighborsEntry ::= SEQUENCE {
+    ptInstanceIsisNeighborsInstanceName DisplayString,
+    ptInstanceIsisNeighborsIsisVrf DisplayString,
+    ptInstanceIsisNeighborsIndex Unsigned32,
+    ptInstanceIsisNeighborsSystemId DisplayString,
+    ptInstanceIsisNeighborsInterface DisplayString,
+    ptInstanceIsisNeighborsLevel DisplayString,
+    ptInstanceIsisNeighborsState DisplayString,
+    ptInstanceIsisNeighborsHoldTime DisplayString,
+    ptInstanceIsisNeighborsSnpa DisplayString
+}
+
+ptInstanceIsisNeighborsInstanceName OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/name"
+    ::= { ptInstanceIsisNeighborsEntry 1 }
+
+ptInstanceIsisNeighborsIsisVrf OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/state/isis/vrf"
+    ::= { ptInstanceIsisNeighborsEntry 2 }
+
+ptInstanceIsisNeighborsIndex OBJECT-TYPE
+    SYNTAX Unsigned32 (1..4294967295)
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "a row number"
+    ::= { ptInstanceIsisNeighborsEntry 3 }
+
+ptInstanceIsisNeighborsSystemId OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/isis/neighbors/system-id"
+    ::= { ptInstanceIsisNeighborsEntry 4 }
+
+ptInstanceIsisNeighborsInterface OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/isis/neighbors/interface"
+    ::= { ptInstanceIsisNeighborsEntry 5 }
+
+ptInstanceIsisNeighborsLevel OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/isis/neighbors/level"
+    ::= { ptInstanceIsisNeighborsEntry 6 }
+
+ptInstanceIsisNeighborsState OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/isis/neighbors/state"
+    ::= { ptInstanceIsisNeighborsEntry 7 }
+
+ptInstanceIsisNeighborsHoldTime OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/isis/neighbors/hold-time"
+    ::= { ptInstanceIsisNeighborsEntry 8 }
+
+ptInstanceIsisNeighborsSnpa OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/isis/neighbors/snpa"
+    ::= { ptInstanceIsisNeighborsEntry 9 }
+
+ptInstanceIsisInterfacesTable OBJECT-TYPE
+    SYNTAX SEQUENCE OF PtInstanceIsisInterfacesEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/state/isis/interfaces"
+    ::= { portitorMIB 22 }
+
+ptInstanceIsisInterfacesEntry OBJECT-TYPE
+    SYNTAX PtInstanceIsisInterfacesEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "A row of /instance/state/isis/interfaces."
+    INDEX { ptInstanceIsisInterfacesInstanceName, ptInstanceIsisInterfacesIsisVrf, ptInstanceIsisInterfacesName }
+    ::= { ptInstanceIsisInterfacesTable 1 }
+
+PtInstanceIsisInterfacesEntry ::= SEQUENCE {
+    ptInstanceIsisInterfacesInstanceName DisplayString,
+    ptInstanceIsisInterfacesIsisVrf DisplayString,
+    ptInstanceIsisInterfacesName DisplayString,
+    ptInstanceIsisInterfacesState DisplayString,
+    ptInstanceIsisInterfacesType DisplayString,
+    ptInstanceIsisInterfacesLevel DisplayString
+}
+
+ptInstanceIsisInterfacesInstanceName OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/name"
+    ::= { ptInstanceIsisInterfacesEntry 1 }
+
+ptInstanceIsisInterfacesIsisVrf OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/state/isis/vrf"
+    ::= { ptInstanceIsisInterfacesEntry 2 }
+
+ptInstanceIsisInterfacesName OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/state/isis/interfaces/name"
+    ::= { ptInstanceIsisInterfacesEntry 3 }
+
+ptInstanceIsisInterfacesState OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/isis/interfaces/state"
+    ::= { ptInstanceIsisInterfacesEntry 4 }
+
+ptInstanceIsisInterfacesType OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/isis/interfaces/type"
+    ::= { ptInstanceIsisInterfacesEntry 5 }
+
+ptInstanceIsisInterfacesLevel OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/isis/interfaces/level"
+    ::= { ptInstanceIsisInterfacesEntry 6 }
+
+ptInstanceVrrpRoutersTable OBJECT-TYPE
+    SYNTAX SEQUENCE OF PtInstanceVrrpRoutersEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/state/vrrp/routers"
+    ::= { portitorMIB 23 }
+
+ptInstanceVrrpRoutersEntry OBJECT-TYPE
+    SYNTAX PtInstanceVrrpRoutersEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "A row of /instance/state/vrrp/routers."
+    INDEX { ptInstanceVrrpRoutersInstanceName, ptInstanceVrrpRoutersInterface, ptInstanceVrrpRoutersVrid }
+    ::= { ptInstanceVrrpRoutersTable 1 }
+
+PtInstanceVrrpRoutersEntry ::= SEQUENCE {
+    ptInstanceVrrpRoutersInstanceName DisplayString,
+    ptInstanceVrrpRoutersInterface DisplayString,
+    ptInstanceVrrpRoutersVrid Unsigned32,
+    ptInstanceVrrpRoutersVersion Integer32,
+    ptInstanceVrrpRoutersPriority Integer32,
+    ptInstanceVrrpRoutersPreempt TruthValue,
+    ptInstanceVrrpRoutersShutdown TruthValue,
+    ptInstanceVrrpRoutersAdvertisementInterval Integer32,
+    ptInstanceVrrpRoutersV4State DisplayString,
+    ptInstanceVrrpRoutersV4Mac DisplayString,
+    ptInstanceVrrpRoutersV4PrimaryAddress DisplayString,
+    ptInstanceVrrpRoutersV4Addresses DisplayString,
+    ptInstanceVrrpRoutersV4EffectivePriority Integer32,
+    ptInstanceVrrpRoutersV4MasterAdverInterval Integer32,
+    ptInstanceVrrpRoutersV4MasterDownInterval Integer32,
+    ptInstanceVrrpRoutersV4AdvertisementsSent CounterBasedGauge64,
+    ptInstanceVrrpRoutersV6State DisplayString,
+    ptInstanceVrrpRoutersV6Mac DisplayString,
+    ptInstanceVrrpRoutersV6PrimaryAddress DisplayString,
+    ptInstanceVrrpRoutersV6Addresses DisplayString,
+    ptInstanceVrrpRoutersV6EffectivePriority Integer32,
+    ptInstanceVrrpRoutersV6MasterAdverInterval Integer32,
+    ptInstanceVrrpRoutersV6MasterDownInterval Integer32,
+    ptInstanceVrrpRoutersV6AdvertisementsSent CounterBasedGauge64
+}
+
+ptInstanceVrrpRoutersInstanceName OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/name"
+    ::= { ptInstanceVrrpRoutersEntry 1 }
+
+ptInstanceVrrpRoutersInterface OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/state/vrrp/routers/interface"
+    ::= { ptInstanceVrrpRoutersEntry 2 }
+
+ptInstanceVrrpRoutersVrid OBJECT-TYPE
+    SYNTAX Unsigned32 (0..4294967295)
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/state/vrrp/routers/vrid"
+    ::= { ptInstanceVrrpRoutersEntry 3 }
+
+ptInstanceVrrpRoutersVersion OBJECT-TYPE
+    SYNTAX Integer32
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/vrrp/routers/version"
+    ::= { ptInstanceVrrpRoutersEntry 4 }
+
+ptInstanceVrrpRoutersPriority OBJECT-TYPE
+    SYNTAX Integer32
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/vrrp/routers/priority"
+    ::= { ptInstanceVrrpRoutersEntry 5 }
+
+ptInstanceVrrpRoutersPreempt OBJECT-TYPE
+    SYNTAX TruthValue
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/vrrp/routers/preempt"
+    ::= { ptInstanceVrrpRoutersEntry 6 }
+
+ptInstanceVrrpRoutersShutdown OBJECT-TYPE
+    SYNTAX TruthValue
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/vrrp/routers/shutdown"
+    ::= { ptInstanceVrrpRoutersEntry 7 }
+
+ptInstanceVrrpRoutersAdvertisementInterval OBJECT-TYPE
+    SYNTAX Integer32
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/vrrp/routers/advertisement-interval"
+    ::= { ptInstanceVrrpRoutersEntry 8 }
+
+ptInstanceVrrpRoutersV4State OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "Initialize, Backup or Master. (/instance/state/vrrp/routers/v4/state)"
+    ::= { ptInstanceVrrpRoutersEntry 9 }
+
+ptInstanceVrrpRoutersV4Mac OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/vrrp/routers/v4/mac"
+    ::= { ptInstanceVrrpRoutersEntry 10 }
+
+ptInstanceVrrpRoutersV4PrimaryAddress OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/vrrp/routers/v4/primary-address"
+    ::= { ptInstanceVrrpRoutersEntry 11 }
+
+ptInstanceVrrpRoutersV4Addresses OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/vrrp/routers/v4/addresses"
+    ::= { ptInstanceVrrpRoutersEntry 12 }
+
+ptInstanceVrrpRoutersV4EffectivePriority OBJECT-TYPE
+    SYNTAX Integer32
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/vrrp/routers/v4/effective-priority"
+    ::= { ptInstanceVrrpRoutersEntry 13 }
+
+ptInstanceVrrpRoutersV4MasterAdverInterval OBJECT-TYPE
+    SYNTAX Integer32
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/vrrp/routers/v4/master-adver-interval"
+    ::= { ptInstanceVrrpRoutersEntry 14 }
+
+ptInstanceVrrpRoutersV4MasterDownInterval OBJECT-TYPE
+    SYNTAX Integer32
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/vrrp/routers/v4/master-down-interval"
+    ::= { ptInstanceVrrpRoutersEntry 15 }
+
+ptInstanceVrrpRoutersV4AdvertisementsSent OBJECT-TYPE
+    SYNTAX CounterBasedGauge64
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/vrrp/routers/v4/advertisements-sent"
+    ::= { ptInstanceVrrpRoutersEntry 16 }
+
+ptInstanceVrrpRoutersV6State OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "Initialize, Backup or Master. (/instance/state/vrrp/routers/v6/state)"
+    ::= { ptInstanceVrrpRoutersEntry 17 }
+
+ptInstanceVrrpRoutersV6Mac OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/vrrp/routers/v6/mac"
+    ::= { ptInstanceVrrpRoutersEntry 18 }
+
+ptInstanceVrrpRoutersV6PrimaryAddress OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/vrrp/routers/v6/primary-address"
+    ::= { ptInstanceVrrpRoutersEntry 19 }
+
+ptInstanceVrrpRoutersV6Addresses OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/vrrp/routers/v6/addresses"
+    ::= { ptInstanceVrrpRoutersEntry 20 }
+
+ptInstanceVrrpRoutersV6EffectivePriority OBJECT-TYPE
+    SYNTAX Integer32
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/vrrp/routers/v6/effective-priority"
+    ::= { ptInstanceVrrpRoutersEntry 21 }
+
+ptInstanceVrrpRoutersV6MasterAdverInterval OBJECT-TYPE
+    SYNTAX Integer32
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/vrrp/routers/v6/master-adver-interval"
+    ::= { ptInstanceVrrpRoutersEntry 22 }
+
+ptInstanceVrrpRoutersV6MasterDownInterval OBJECT-TYPE
+    SYNTAX Integer32
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/vrrp/routers/v6/master-down-interval"
+    ::= { ptInstanceVrrpRoutersEntry 23 }
+
+ptInstanceVrrpRoutersV6AdvertisementsSent OBJECT-TYPE
+    SYNTAX CounterBasedGauge64
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/vrrp/routers/v6/advertisements-sent"
+    ::= { ptInstanceVrrpRoutersEntry 24 }
+
+ptInstanceBfdPeersTable OBJECT-TYPE
+    SYNTAX SEQUENCE OF PtInstanceBfdPeersEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/state/bfd/peers"
+    ::= { portitorMIB 24 }
+
+ptInstanceBfdPeersEntry OBJECT-TYPE
+    SYNTAX PtInstanceBfdPeersEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "A row of /instance/state/bfd/peers."
+    INDEX { ptInstanceBfdPeersInstanceName, ptInstanceBfdPeersIndex }
+    ::= { ptInstanceBfdPeersTable 1 }
+
+PtInstanceBfdPeersEntry ::= SEQUENCE {
+    ptInstanceBfdPeersInstanceName DisplayString,
+    ptInstanceBfdPeersIndex Unsigned32,
+    ptInstanceBfdPeersPeer DisplayString,
+    ptInstanceBfdPeersVrf DisplayString,
+    ptInstanceBfdPeersLocal DisplayString,
+    ptInstanceBfdPeersInterface DisplayString,
+    ptInstanceBfdPeersMultihop TruthValue,
+    ptInstanceBfdPeersProfile DisplayString,
+    ptInstanceBfdPeersStatus DisplayString,
+    ptInstanceBfdPeersDiagnostic DisplayString,
+    ptInstanceBfdPeersRemoteDiagnostic DisplayString,
+    ptInstanceBfdPeersUptime CounterBasedGauge64,
+    ptInstanceBfdPeersDowntime CounterBasedGauge64,
+    ptInstanceBfdPeersDetectMultiplier Integer32,
+    ptInstanceBfdPeersReceiveInterval Integer32,
+    ptInstanceBfdPeersTransmitInterval Integer32,
+    ptInstanceBfdPeersRemoteDetectMultiplier Integer32,
+    ptInstanceBfdPeersRemoteReceiveInterval Integer32,
+    ptInstanceBfdPeersRemoteTransmitInterval Integer32
+}
+
+ptInstanceBfdPeersInstanceName OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/name"
+    ::= { ptInstanceBfdPeersEntry 1 }
+
+ptInstanceBfdPeersIndex OBJECT-TYPE
+    SYNTAX Unsigned32 (1..4294967295)
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "a row number"
+    ::= { ptInstanceBfdPeersEntry 2 }
+
+ptInstanceBfdPeersPeer OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/bfd/peers/peer"
+    ::= { ptInstanceBfdPeersEntry 3 }
+
+ptInstanceBfdPeersVrf OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/bfd/peers/vrf"
+    ::= { ptInstanceBfdPeersEntry 4 }
+
+ptInstanceBfdPeersLocal OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/bfd/peers/local"
+    ::= { ptInstanceBfdPeersEntry 5 }
+
+ptInstanceBfdPeersInterface OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/bfd/peers/interface"
+    ::= { ptInstanceBfdPeersEntry 6 }
+
+ptInstanceBfdPeersMultihop OBJECT-TYPE
+    SYNTAX TruthValue
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/bfd/peers/multihop"
+    ::= { ptInstanceBfdPeersEntry 7 }
+
+ptInstanceBfdPeersProfile OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/bfd/peers/profile"
+    ::= { ptInstanceBfdPeersEntry 8 }
+
+ptInstanceBfdPeersStatus OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "up, down, init, shutdown. (/instance/state/bfd/peers/status)"
+    ::= { ptInstanceBfdPeersEntry 9 }
+
+ptInstanceBfdPeersDiagnostic OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/bfd/peers/diagnostic"
+    ::= { ptInstanceBfdPeersEntry 10 }
+
+ptInstanceBfdPeersRemoteDiagnostic OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/bfd/peers/remote-diagnostic"
+    ::= { ptInstanceBfdPeersEntry 11 }
+
+ptInstanceBfdPeersUptime OBJECT-TYPE
+    SYNTAX CounterBasedGauge64
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/bfd/peers/uptime"
+    ::= { ptInstanceBfdPeersEntry 12 }
+
+ptInstanceBfdPeersDowntime OBJECT-TYPE
+    SYNTAX CounterBasedGauge64
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/bfd/peers/downtime"
+    ::= { ptInstanceBfdPeersEntry 13 }
+
+ptInstanceBfdPeersDetectMultiplier OBJECT-TYPE
+    SYNTAX Integer32
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/bfd/peers/detect-multiplier"
+    ::= { ptInstanceBfdPeersEntry 14 }
+
+ptInstanceBfdPeersReceiveInterval OBJECT-TYPE
+    SYNTAX Integer32
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/bfd/peers/receive-interval"
+    ::= { ptInstanceBfdPeersEntry 15 }
+
+ptInstanceBfdPeersTransmitInterval OBJECT-TYPE
+    SYNTAX Integer32
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/bfd/peers/transmit-interval"
+    ::= { ptInstanceBfdPeersEntry 16 }
+
+ptInstanceBfdPeersRemoteDetectMultiplier OBJECT-TYPE
+    SYNTAX Integer32
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/bfd/peers/remote-detect-multiplier"
+    ::= { ptInstanceBfdPeersEntry 17 }
+
+ptInstanceBfdPeersRemoteReceiveInterval OBJECT-TYPE
+    SYNTAX Integer32
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/bfd/peers/remote-receive-interval"
+    ::= { ptInstanceBfdPeersEntry 18 }
+
+ptInstanceBfdPeersRemoteTransmitInterval OBJECT-TYPE
+    SYNTAX Integer32
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/bfd/peers/remote-transmit-interval"
+    ::= { ptInstanceBfdPeersEntry 19 }
+
+ptInstanceNtpSourcesTable OBJECT-TYPE
+    SYNTAX SEQUENCE OF PtInstanceNtpSourcesEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/state/ntp/sources"
+    ::= { portitorMIB 25 }
+
+ptInstanceNtpSourcesEntry OBJECT-TYPE
+    SYNTAX PtInstanceNtpSourcesEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "A row of /instance/state/ntp/sources."
+    INDEX { ptInstanceNtpSourcesInstanceName, ptInstanceNtpSourcesAddress }
+    ::= { ptInstanceNtpSourcesTable 1 }
+
+PtInstanceNtpSourcesEntry ::= SEQUENCE {
+    ptInstanceNtpSourcesInstanceName DisplayString,
+    ptInstanceNtpSourcesAddress DisplayString,
+    ptInstanceNtpSourcesName DisplayString,
+    ptInstanceNtpSourcesMode DisplayString,
+    ptInstanceNtpSourcesState DisplayString,
+    ptInstanceNtpSourcesStratum Integer32,
+    ptInstanceNtpSourcesPoll DisplayString,
+    ptInstanceNtpSourcesReach Integer32,
+    ptInstanceNtpSourcesLastRx CounterBasedGauge64,
+    ptInstanceNtpSourcesOffset DisplayString,
+    ptInstanceNtpSourcesError DisplayString,
+    ptInstanceNtpSourcesSamples Integer32,
+    ptInstanceNtpSourcesSpan CounterBasedGauge64,
+    ptInstanceNtpSourcesFrequency DisplayString,
+    ptInstanceNtpSourcesFreqSkew DisplayString,
+    ptInstanceNtpSourcesStdDev DisplayString,
+    ptInstanceNtpSourcesAuth DisplayString
+}
+
+ptInstanceNtpSourcesInstanceName OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/name"
+    ::= { ptInstanceNtpSourcesEntry 1 }
+
+ptInstanceNtpSourcesAddress OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/state/ntp/sources/address"
+    ::= { ptInstanceNtpSourcesEntry 2 }
+
+ptInstanceNtpSourcesName OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/ntp/sources/name"
+    ::= { ptInstanceNtpSourcesEntry 3 }
+
+ptInstanceNtpSourcesMode OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/ntp/sources/mode"
+    ::= { ptInstanceNtpSourcesEntry 4 }
+
+ptInstanceNtpSourcesState OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "selected, combined, not combined, unusable, falseticker, too variable. (/instance/state/ntp/sources/state)"
+    ::= { ptInstanceNtpSourcesEntry 5 }
+
+ptInstanceNtpSourcesStratum OBJECT-TYPE
+    SYNTAX Integer32
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/ntp/sources/stratum"
+    ::= { ptInstanceNtpSourcesEntry 6 }
+
+ptInstanceNtpSourcesPoll OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/ntp/sources/poll"
+    ::= { ptInstanceNtpSourcesEntry 7 }
+
+ptInstanceNtpSourcesReach OBJECT-TYPE
+    SYNTAX Integer32
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/ntp/sources/reach"
+    ::= { ptInstanceNtpSourcesEntry 8 }
+
+ptInstanceNtpSourcesLastRx OBJECT-TYPE
+    SYNTAX CounterBasedGauge64
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/ntp/sources/last-rx"
+    ::= { ptInstanceNtpSourcesEntry 9 }
+
+ptInstanceNtpSourcesOffset OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/ntp/sources/offset"
+    ::= { ptInstanceNtpSourcesEntry 10 }
+
+ptInstanceNtpSourcesError OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/ntp/sources/error"
+    ::= { ptInstanceNtpSourcesEntry 11 }
+
+ptInstanceNtpSourcesSamples OBJECT-TYPE
+    SYNTAX Integer32
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/ntp/sources/samples"
+    ::= { ptInstanceNtpSourcesEntry 12 }
+
+ptInstanceNtpSourcesSpan OBJECT-TYPE
+    SYNTAX CounterBasedGauge64
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/ntp/sources/span"
+    ::= { ptInstanceNtpSourcesEntry 13 }
+
+ptInstanceNtpSourcesFrequency OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/ntp/sources/frequency"
+    ::= { ptInstanceNtpSourcesEntry 14 }
+
+ptInstanceNtpSourcesFreqSkew OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/ntp/sources/freq-skew"
+    ::= { ptInstanceNtpSourcesEntry 15 }
+
+ptInstanceNtpSourcesStdDev OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/ntp/sources/std-dev"
+    ::= { ptInstanceNtpSourcesEntry 16 }
+
+ptInstanceNtpSourcesAuth OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/ntp/sources/auth"
+    ::= { ptInstanceNtpSourcesEntry 17 }
+
+ptInstanceNtpTrackingTable OBJECT-TYPE
+    SYNTAX SEQUENCE OF PtInstanceNtpTrackingEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "chronyc tracking. (/instance/state/ntp/tracking)"
+    ::= { portitorMIB 26 }
+
+ptInstanceNtpTrackingEntry OBJECT-TYPE
+    SYNTAX PtInstanceNtpTrackingEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "A row of /instance/state/ntp/tracking."
+    INDEX { ptInstanceNtpTrackingInstanceName, ptInstanceNtpTrackingName }
+    ::= { ptInstanceNtpTrackingTable 1 }
+
+PtInstanceNtpTrackingEntry ::= SEQUENCE {
+    ptInstanceNtpTrackingInstanceName DisplayString,
+    ptInstanceNtpTrackingName DisplayString,
+    ptInstanceNtpTrackingValue DisplayString
+}
+
+ptInstanceNtpTrackingInstanceName OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/name"
+    ::= { ptInstanceNtpTrackingEntry 1 }
+
+ptInstanceNtpTrackingName OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/state/ntp/tracking/name"
+    ::= { ptInstanceNtpTrackingEntry 2 }
+
+ptInstanceNtpTrackingValue OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/ntp/tracking/value"
+    ::= { ptInstanceNtpTrackingEntry 3 }
+
+ptInstanceNtpServerStatsTable OBJECT-TYPE
+    SYNTAX SEQUENCE OF PtInstanceNtpServerStatsEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "chronyc serverstats. (/instance/state/ntp/server-stats)"
+    ::= { portitorMIB 27 }
+
+ptInstanceNtpServerStatsEntry OBJECT-TYPE
+    SYNTAX PtInstanceNtpServerStatsEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "A row of /instance/state/ntp/server-stats."
+    INDEX { ptInstanceNtpServerStatsInstanceName, ptInstanceNtpServerStatsName }
+    ::= { ptInstanceNtpServerStatsTable 1 }
+
+PtInstanceNtpServerStatsEntry ::= SEQUENCE {
+    ptInstanceNtpServerStatsInstanceName DisplayString,
+    ptInstanceNtpServerStatsName DisplayString,
+    ptInstanceNtpServerStatsValue DisplayString
+}
+
+ptInstanceNtpServerStatsInstanceName OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/name"
+    ::= { ptInstanceNtpServerStatsEntry 1 }
+
+ptInstanceNtpServerStatsName OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/state/ntp/server-stats/name"
+    ::= { ptInstanceNtpServerStatsEntry 2 }
+
+ptInstanceNtpServerStatsValue OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/ntp/server-stats/value"
+    ::= { ptInstanceNtpServerStatsEntry 3 }
+
+ptInstanceNat64Pool4Table OBJECT-TYPE
+    SYNTAX SEQUENCE OF PtInstanceNat64Pool4Entry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/state/nat64/pool4"
+    ::= { portitorMIB 28 }
+
+ptInstanceNat64Pool4Entry OBJECT-TYPE
+    SYNTAX PtInstanceNat64Pool4Entry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "A row of /instance/state/nat64/pool4."
+    INDEX { ptInstanceNat64Pool4InstanceName, ptInstanceNat64Pool4Index }
+    ::= { ptInstanceNat64Pool4Table 1 }
+
+PtInstanceNat64Pool4Entry ::= SEQUENCE {
+    ptInstanceNat64Pool4InstanceName DisplayString,
+    ptInstanceNat64Pool4Index Unsigned32,
+    ptInstanceNat64Pool4Interface DisplayString,
+    ptInstanceNat64Pool4Address DisplayString
+}
+
+ptInstanceNat64Pool4InstanceName OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/name"
+    ::= { ptInstanceNat64Pool4Entry 1 }
+
+ptInstanceNat64Pool4Index OBJECT-TYPE
+    SYNTAX Unsigned32 (1..4294967295)
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "a row number"
+    ::= { ptInstanceNat64Pool4Entry 2 }
+
+ptInstanceNat64Pool4Interface OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/nat64/pool4/interface"
+    ::= { ptInstanceNat64Pool4Entry 3 }
+
+ptInstanceNat64Pool4Address OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/nat64/pool4/address"
+    ::= { ptInstanceNat64Pool4Entry 4 }
+
+ptInstanceNat64SessionsTable OBJECT-TYPE
+    SYNTAX SEQUENCE OF PtInstanceNat64SessionsEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/state/nat64/sessions"
+    ::= { portitorMIB 29 }
+
+ptInstanceNat64SessionsEntry OBJECT-TYPE
+    SYNTAX PtInstanceNat64SessionsEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "A row of /instance/state/nat64/sessions."
+    INDEX { ptInstanceNat64SessionsInstanceName, ptInstanceNat64SessionsIndex }
+    ::= { ptInstanceNat64SessionsTable 1 }
+
+PtInstanceNat64SessionsEntry ::= SEQUENCE {
+    ptInstanceNat64SessionsInstanceName DisplayString,
+    ptInstanceNat64SessionsIndex Unsigned32,
+    ptInstanceNat64SessionsProtocol DisplayString,
+    ptInstanceNat64SessionsSource6 DisplayString,
+    ptInstanceNat64SessionsPort6 DisplayString,
+    ptInstanceNat64SessionsDest6 DisplayString,
+    ptInstanceNat64SessionsDestPort6 DisplayString,
+    ptInstanceNat64SessionsSource4 DisplayString,
+    ptInstanceNat64SessionsPort4 DisplayString,
+    ptInstanceNat64SessionsDest4 DisplayString,
+    ptInstanceNat64SessionsDestPort4 DisplayString,
+    ptInstanceNat64SessionsExpires DisplayString,
+    ptInstanceNat64SessionsState DisplayString
+}
+
+ptInstanceNat64SessionsInstanceName OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/name"
+    ::= { ptInstanceNat64SessionsEntry 1 }
+
+ptInstanceNat64SessionsIndex OBJECT-TYPE
+    SYNTAX Unsigned32 (1..4294967295)
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "a row number"
+    ::= { ptInstanceNat64SessionsEntry 2 }
+
+ptInstanceNat64SessionsProtocol OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/nat64/sessions/protocol"
+    ::= { ptInstanceNat64SessionsEntry 3 }
+
+ptInstanceNat64SessionsSource6 OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/nat64/sessions/source6"
+    ::= { ptInstanceNat64SessionsEntry 4 }
+
+ptInstanceNat64SessionsPort6 OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/nat64/sessions/port6"
+    ::= { ptInstanceNat64SessionsEntry 5 }
+
+ptInstanceNat64SessionsDest6 OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/nat64/sessions/dest6"
+    ::= { ptInstanceNat64SessionsEntry 6 }
+
+ptInstanceNat64SessionsDestPort6 OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/nat64/sessions/dest-port6"
+    ::= { ptInstanceNat64SessionsEntry 7 }
+
+ptInstanceNat64SessionsSource4 OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/nat64/sessions/source4"
+    ::= { ptInstanceNat64SessionsEntry 8 }
+
+ptInstanceNat64SessionsPort4 OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/nat64/sessions/port4"
+    ::= { ptInstanceNat64SessionsEntry 9 }
+
+ptInstanceNat64SessionsDest4 OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/nat64/sessions/dest4"
+    ::= { ptInstanceNat64SessionsEntry 10 }
+
+ptInstanceNat64SessionsDestPort4 OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/nat64/sessions/dest-port4"
+    ::= { ptInstanceNat64SessionsEntry 11 }
+
+ptInstanceNat64SessionsExpires OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/nat64/sessions/expires"
+    ::= { ptInstanceNat64SessionsEntry 12 }
+
+ptInstanceNat64SessionsState OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/nat64/sessions/state"
+    ::= { ptInstanceNat64SessionsEntry 13 }
+
+ptInstanceNat64StatsTable OBJECT-TYPE
+    SYNTAX SEQUENCE OF PtInstanceNat64StatsEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/state/nat64/stats"
+    ::= { portitorMIB 30 }
+
+ptInstanceNat64StatsEntry OBJECT-TYPE
+    SYNTAX PtInstanceNat64StatsEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "A row of /instance/state/nat64/stats."
+    INDEX { ptInstanceNat64StatsInstanceName, ptInstanceNat64StatsName }
+    ::= { ptInstanceNat64StatsTable 1 }
+
+PtInstanceNat64StatsEntry ::= SEQUENCE {
+    ptInstanceNat64StatsInstanceName DisplayString,
+    ptInstanceNat64StatsName DisplayString,
+    ptInstanceNat64StatsValue CounterBasedGauge64,
+    ptInstanceNat64StatsExplanation DisplayString
+}
+
+ptInstanceNat64StatsInstanceName OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/name"
+    ::= { ptInstanceNat64StatsEntry 1 }
+
+ptInstanceNat64StatsName OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/state/nat64/stats/name"
+    ::= { ptInstanceNat64StatsEntry 2 }
+
+ptInstanceNat64StatsValue OBJECT-TYPE
+    SYNTAX CounterBasedGauge64
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/nat64/stats/value"
+    ::= { ptInstanceNat64StatsEntry 3 }
+
+ptInstanceNat64StatsExplanation OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/nat64/stats/explanation"
+    ::= { ptInstanceNat64StatsEntry 4 }
+
+ptInstanceOpenvpnTable OBJECT-TYPE
+    SYNTAX SEQUENCE OF PtInstanceOpenvpnEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/state/openvpn"
+    ::= { portitorMIB 31 }
+
+ptInstanceOpenvpnEntry OBJECT-TYPE
+    SYNTAX PtInstanceOpenvpnEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "A row of /instance/state/openvpn."
+    INDEX { ptInstanceOpenvpnInstanceName, ptInstanceOpenvpnInterface, ptInstanceOpenvpnProto }
+    ::= { ptInstanceOpenvpnTable 1 }
+
+PtInstanceOpenvpnEntry ::= SEQUENCE {
+    ptInstanceOpenvpnInstanceName DisplayString,
+    ptInstanceOpenvpnInterface DisplayString,
+    ptInstanceOpenvpnProto DisplayString,
+    ptInstanceOpenvpnDevice DisplayString,
+    ptInstanceOpenvpnConnected TruthValue,
+    ptInstanceOpenvpnError DisplayString
+}
+
+ptInstanceOpenvpnInstanceName OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/name"
+    ::= { ptInstanceOpenvpnEntry 1 }
+
+ptInstanceOpenvpnInterface OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/state/openvpn/interface"
+    ::= { ptInstanceOpenvpnEntry 2 }
+
+ptInstanceOpenvpnProto OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "udp or tcp. (/instance/state/openvpn/proto)"
+    ::= { ptInstanceOpenvpnEntry 3 }
+
+ptInstanceOpenvpnDevice OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/openvpn/device"
+    ::= { ptInstanceOpenvpnEntry 4 }
+
+ptInstanceOpenvpnConnected OBJECT-TYPE
+    SYNTAX TruthValue
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "The agent is connected to the server's management socket. (/instance/state/openvpn/connected)"
+    ::= { ptInstanceOpenvpnEntry 5 }
+
+ptInstanceOpenvpnError OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/openvpn/error"
+    ::= { ptInstanceOpenvpnEntry 6 }
+
+ptInstanceOpenvpnClientsTable OBJECT-TYPE
+    SYNTAX SEQUENCE OF PtInstanceOpenvpnClientsEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/state/openvpn/clients"
+    ::= { portitorMIB 32 }
+
+ptInstanceOpenvpnClientsEntry OBJECT-TYPE
+    SYNTAX PtInstanceOpenvpnClientsEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "A row of /instance/state/openvpn/clients."
+    INDEX { ptInstanceOpenvpnClientsInstanceName, ptInstanceOpenvpnClientsOpenvpnInterface, ptInstanceOpenvpnClientsOpenvpnProto, ptInstanceOpenvpnClientsId }
+    ::= { ptInstanceOpenvpnClientsTable 1 }
+
+PtInstanceOpenvpnClientsEntry ::= SEQUENCE {
+    ptInstanceOpenvpnClientsInstanceName DisplayString,
+    ptInstanceOpenvpnClientsOpenvpnInterface DisplayString,
+    ptInstanceOpenvpnClientsOpenvpnProto DisplayString,
+    ptInstanceOpenvpnClientsId Unsigned32,
+    ptInstanceOpenvpnClientsUser DisplayString,
+    ptInstanceOpenvpnClientsRealAddress DisplayString,
+    ptInstanceOpenvpnClientsAddress DisplayString,
+    ptInstanceOpenvpnClientsAddress6 DisplayString,
+    ptInstanceOpenvpnClientsRxBytes CounterBasedGauge64,
+    ptInstanceOpenvpnClientsTxBytes CounterBasedGauge64,
+    ptInstanceOpenvpnClientsSince DisplayString,
+    ptInstanceOpenvpnClientsCipher DisplayString,
+    ptInstanceOpenvpnClientsSource DisplayString
+}
+
+ptInstanceOpenvpnClientsInstanceName OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/name"
+    ::= { ptInstanceOpenvpnClientsEntry 1 }
+
+ptInstanceOpenvpnClientsOpenvpnInterface OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/state/openvpn/interface"
+    ::= { ptInstanceOpenvpnClientsEntry 2 }
+
+ptInstanceOpenvpnClientsOpenvpnProto OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "udp or tcp. (/instance/state/openvpn/proto)"
+    ::= { ptInstanceOpenvpnClientsEntry 3 }
+
+ptInstanceOpenvpnClientsId OBJECT-TYPE
+    SYNTAX Unsigned32 (0..4294967295)
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/state/openvpn/clients/id"
+    ::= { ptInstanceOpenvpnClientsEntry 4 }
+
+ptInstanceOpenvpnClientsUser OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/openvpn/clients/user"
+    ::= { ptInstanceOpenvpnClientsEntry 5 }
+
+ptInstanceOpenvpnClientsRealAddress OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/openvpn/clients/real-address"
+    ::= { ptInstanceOpenvpnClientsEntry 6 }
+
+ptInstanceOpenvpnClientsAddress OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/openvpn/clients/address"
+    ::= { ptInstanceOpenvpnClientsEntry 7 }
+
+ptInstanceOpenvpnClientsAddress6 OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/openvpn/clients/address6"
+    ::= { ptInstanceOpenvpnClientsEntry 8 }
+
+ptInstanceOpenvpnClientsRxBytes OBJECT-TYPE
+    SYNTAX CounterBasedGauge64
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/openvpn/clients/rx-bytes"
+    ::= { ptInstanceOpenvpnClientsEntry 9 }
+
+ptInstanceOpenvpnClientsTxBytes OBJECT-TYPE
+    SYNTAX CounterBasedGauge64
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/openvpn/clients/tx-bytes"
+    ::= { ptInstanceOpenvpnClientsEntry 10 }
+
+ptInstanceOpenvpnClientsSince OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/openvpn/clients/since"
+    ::= { ptInstanceOpenvpnClientsEntry 11 }
+
+ptInstanceOpenvpnClientsCipher OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/openvpn/clients/cipher"
+    ::= { ptInstanceOpenvpnClientsEntry 12 }
+
+ptInstanceOpenvpnClientsSource OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "Where the user is from: local or a directory server. (/instance/state/openvpn/clients/source)"
+    ::= { ptInstanceOpenvpnClientsEntry 13 }
+
+ptInstanceRateLimitsTable OBJECT-TYPE
+    SYNTAX SEQUENCE OF PtInstanceRateLimitsEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "Each rate limit's traffic and drops since it was last applied. (/instance/state/rate-limits)"
+    ::= { portitorMIB 33 }
+
+ptInstanceRateLimitsEntry OBJECT-TYPE
+    SYNTAX PtInstanceRateLimitsEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "A row of /instance/state/rate-limits."
+    INDEX { ptInstanceRateLimitsInstanceName, ptInstanceRateLimitsName }
+    ::= { ptInstanceRateLimitsTable 1 }
+
+PtInstanceRateLimitsEntry ::= SEQUENCE {
+    ptInstanceRateLimitsInstanceName DisplayString,
+    ptInstanceRateLimitsName DisplayString,
+    ptInstanceRateLimitsOrigPackets Counter64,
+    ptInstanceRateLimitsOrigBytes Counter64,
+    ptInstanceRateLimitsReplyPackets Counter64,
+    ptInstanceRateLimitsReplyBytes Counter64,
+    ptInstanceRateLimitsDropPackets Counter64,
+    ptInstanceRateLimitsDropBytes Counter64
+}
+
+ptInstanceRateLimitsInstanceName OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/name"
+    ::= { ptInstanceRateLimitsEntry 1 }
+
+ptInstanceRateLimitsName OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/state/rate-limits/name"
+    ::= { ptInstanceRateLimitsEntry 2 }
+
+ptInstanceRateLimitsOrigPackets OBJECT-TYPE
+    SYNTAX Counter64
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/rate-limits/orig-packets"
+    ::= { ptInstanceRateLimitsEntry 3 }
+
+ptInstanceRateLimitsOrigBytes OBJECT-TYPE
+    SYNTAX Counter64
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/rate-limits/orig-bytes"
+    ::= { ptInstanceRateLimitsEntry 4 }
+
+ptInstanceRateLimitsReplyPackets OBJECT-TYPE
+    SYNTAX Counter64
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/rate-limits/reply-packets"
+    ::= { ptInstanceRateLimitsEntry 5 }
+
+ptInstanceRateLimitsReplyBytes OBJECT-TYPE
+    SYNTAX Counter64
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/rate-limits/reply-bytes"
+    ::= { ptInstanceRateLimitsEntry 6 }
+
+ptInstanceRateLimitsDropPackets OBJECT-TYPE
+    SYNTAX Counter64
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/rate-limits/drop-packets"
+    ::= { ptInstanceRateLimitsEntry 7 }
+
+ptInstanceRateLimitsDropBytes OBJECT-TYPE
+    SYNTAX Counter64
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/rate-limits/drop-bytes"
+    ::= { ptInstanceRateLimitsEntry 8 }
+
+ptInstanceRateLimitsInterfacesTable OBJECT-TYPE
+    SYNTAX SEQUENCE OF PtInstanceRateLimitsInterfacesEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "A shaping rate limit's queue on each interface. (/instance/state/rate-limits/interfaces)"
+    ::= { portitorMIB 34 }
+
+ptInstanceRateLimitsInterfacesEntry OBJECT-TYPE
+    SYNTAX PtInstanceRateLimitsInterfacesEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "A row of /instance/state/rate-limits/interfaces."
+    INDEX { ptInstanceRateLimitsInterfacesInstanceName, ptInstanceRateLimitsInterfacesRate-limitsName, ptInstanceRateLimitsInterfacesInterface }
+    ::= { ptInstanceRateLimitsInterfacesTable 1 }
+
+PtInstanceRateLimitsInterfacesEntry ::= SEQUENCE {
+    ptInstanceRateLimitsInterfacesInstanceName DisplayString,
+    ptInstanceRateLimitsInterfacesRate-limitsName DisplayString,
+    ptInstanceRateLimitsInterfacesInterface DisplayString,
+    ptInstanceRateLimitsInterfacesBytes Counter64,
+    ptInstanceRateLimitsInterfacesPackets Counter64,
+    ptInstanceRateLimitsInterfacesDrops Counter64,
+    ptInstanceRateLimitsInterfacesOverlimits Counter64,
+    ptInstanceRateLimitsInterfacesBacklog Counter64,
+    ptInstanceRateLimitsInterfacesQlen Counter64
+}
+
+ptInstanceRateLimitsInterfacesInstanceName OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/name"
+    ::= { ptInstanceRateLimitsInterfacesEntry 1 }
+
+ptInstanceRateLimitsInterfacesRate-limitsName OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/state/rate-limits/name"
+    ::= { ptInstanceRateLimitsInterfacesEntry 2 }
+
+ptInstanceRateLimitsInterfacesInterface OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/instance/state/rate-limits/interfaces/interface"
+    ::= { ptInstanceRateLimitsInterfacesEntry 3 }
+
+ptInstanceRateLimitsInterfacesBytes OBJECT-TYPE
+    SYNTAX Counter64
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/rate-limits/interfaces/bytes"
+    ::= { ptInstanceRateLimitsInterfacesEntry 4 }
+
+ptInstanceRateLimitsInterfacesPackets OBJECT-TYPE
+    SYNTAX Counter64
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/rate-limits/interfaces/packets"
+    ::= { ptInstanceRateLimitsInterfacesEntry 5 }
+
+ptInstanceRateLimitsInterfacesDrops OBJECT-TYPE
+    SYNTAX Counter64
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/rate-limits/interfaces/drops"
+    ::= { ptInstanceRateLimitsInterfacesEntry 6 }
+
+ptInstanceRateLimitsInterfacesOverlimits OBJECT-TYPE
+    SYNTAX Counter64
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/rate-limits/interfaces/overlimits"
+    ::= { ptInstanceRateLimitsInterfacesEntry 7 }
+
+ptInstanceRateLimitsInterfacesBacklog OBJECT-TYPE
+    SYNTAX Counter64
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/rate-limits/interfaces/backlog"
+    ::= { ptInstanceRateLimitsInterfacesEntry 8 }
+
+ptInstanceRateLimitsInterfacesQlen OBJECT-TYPE
+    SYNTAX Counter64
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/instance/state/rate-limits/interfaces/qlen"
+    ::= { ptInstanceRateLimitsInterfacesEntry 9 }
+
+ptSystemStateHostDisksTable OBJECT-TYPE
+    SYNTAX SEQUENCE OF PtSystemStateHostDisksEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/system-state/host/disks"
+    ::= { portitorMIB 35 }
+
+ptSystemStateHostDisksEntry OBJECT-TYPE
+    SYNTAX PtSystemStateHostDisksEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "A row of /system-state/host/disks."
+    INDEX { ptSystemStateHostDisksMount }
+    ::= { ptSystemStateHostDisksTable 1 }
+
+PtSystemStateHostDisksEntry ::= SEQUENCE {
+    ptSystemStateHostDisksMount DisplayString,
+    ptSystemStateHostDisksTotal CounterBasedGauge64,
+    ptSystemStateHostDisksFree CounterBasedGauge64,
+    ptSystemStateHostDisksUsed CounterBasedGauge64
+}
+
+ptSystemStateHostDisksMount OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/system-state/host/disks/mount"
+    ::= { ptSystemStateHostDisksEntry 1 }
+
+ptSystemStateHostDisksTotal OBJECT-TYPE
+    SYNTAX CounterBasedGauge64
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/system-state/host/disks/total"
+    ::= { ptSystemStateHostDisksEntry 2 }
+
+ptSystemStateHostDisksFree OBJECT-TYPE
+    SYNTAX CounterBasedGauge64
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "Available to unprivileged users. (/system-state/host/disks/free)"
+    ::= { ptSystemStateHostDisksEntry 3 }
+
+ptSystemStateHostDisksUsed OBJECT-TYPE
+    SYNTAX CounterBasedGauge64
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/system-state/host/disks/used"
+    ::= { ptSystemStateHostDisksEntry 4 }
+
+ptSystemStateHaDhcpTable OBJECT-TYPE
+    SYNTAX SEQUENCE OF PtSystemStateHaDhcpEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "Each virtual firewall's DHCP lease sync to the standby. (/system-state/ha/dhcp)"
+    ::= { portitorMIB 36 }
+
+ptSystemStateHaDhcpEntry OBJECT-TYPE
+    SYNTAX PtSystemStateHaDhcpEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "A row of /system-state/ha/dhcp."
+    INDEX { ptSystemStateHaDhcpInstance }
+    ::= { ptSystemStateHaDhcpTable 1 }
+
+PtSystemStateHaDhcpEntry ::= SEQUENCE {
+    ptSystemStateHaDhcpInstance DisplayString,
+    ptSystemStateHaDhcpSent DisplayString,
+    ptSystemStateHaDhcpReceived DisplayString,
+    ptSystemStateHaDhcpError DisplayString
+}
+
+ptSystemStateHaDhcpInstance OBJECT-TYPE
+    SYNTAX DisplayString (SIZE (0..64))
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+        "/system-state/ha/dhcp/instance"
+    ::= { ptSystemStateHaDhcpEntry 1 }
+
+ptSystemStateHaDhcpSent OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/system-state/ha/dhcp/sent"
+    ::= { ptSystemStateHaDhcpEntry 2 }
+
+ptSystemStateHaDhcpReceived OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/system-state/ha/dhcp/received"
+    ::= { ptSystemStateHaDhcpEntry 3 }
+
+ptSystemStateHaDhcpError OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "/system-state/ha/dhcp/error"
+    ::= { ptSystemStateHaDhcpEntry 4 }
+
+ptConformance OBJECT IDENTIFIER ::= { portitorMIB 1 }
+
+ptStateGroup OBJECT-GROUP
+    OBJECTS {
+        ptSystemStateHostname,
+        ptSystemStateVersion,
+        ptSystemStateDryRun,
+        ptSystemStateGeneration,
+        ptSystemStateLastApply,
+        ptSystemStateLastError,
+        ptSystemStatePendingGeneration,
+        ptSystemStatePendingDeadline,
+        ptSystemStateHostMemTotal,
+        ptSystemStateHostMemAvailable,
+        ptSystemStateHostSwapTotal,
+        ptSystemStateHostSwapFree,
+        ptSystemStateHostCpus,
+        ptSystemStateHostCpuBusy,
+        ptSystemStateHostCpuTotal,
+        ptSystemStateHostLoad,
+        ptSystemStateHostUptime,
+        ptSystemStateHaNode,
+        ptSystemStateHa,
+        ptSystemStateHaTerm,
+        ptSystemStateHaPeerAlive,
+        ptSystemStateHaPeerSeen,
+        ptSystemStateHaVoteUntil,
+        ptSystemStateHaPromiseUntil,
+        ptSystemStateHaWatchdog,
+        ptSystemStateHaEpoch,
+        ptSystemStateHaHealth,
+        ptSystemStateHaPeerHealth,
+        ptSystemStateHaMonitored,
+        ptSystemStateErrors,
+        ptInstanceStateVrrpError,
+        ptInstanceStateBfdError,
+        ptInstanceStateNtpError,
+        ptInstanceStateNat64Error,
+        ptInstanceStateNat64Prefix,
+        ptInstanceInterfacesKind,
+        ptInstanceInterfacesState,
+        ptInstanceInterfacesMtu,
+        ptInstanceInterfacesMac,
+        ptInstanceInterfacesAddresses,
+        ptInstanceInterfacesRxBytes,
+        ptInstanceInterfacesTxBytes,
+        ptInstanceInterfacesRxPackets,
+        ptInstanceInterfacesTxPackets,
+        ptInstanceInterfacesRxErrors,
+        ptInstanceInterfacesTxErrors,
+        ptInstanceInterfacesRxDropped,
+        ptInstanceInterfacesTxDropped,
+        ptInstanceInterfacesRxOverErrors,
+        ptInstanceInterfacesRxMulticast,
+        ptInstanceInterfacesTxCarrierErrors,
+        ptInstanceInterfacesTxCollisions,
+        ptInstanceRoutesDst,
+        ptInstanceRoutesGateway,
+        ptInstanceRoutesDev,
+        ptInstanceRoutesProtocol,
+        ptInstanceRoutesMetric,
+        ptInstanceWireguardPublicKey,
+        ptInstanceWireguardListenPort,
+        ptInstanceWireguardPeersEndpoint,
+        ptInstanceWireguardPeersAllowedIps,
+        ptInstanceWireguardPeersLatestHandshake,
+        ptInstanceWireguardPeersRxBytes,
+        ptInstanceWireguardPeersTxBytes,
+        ptInstanceWireguardPeersKeepalive,
+        ptInstanceServicesState,
+        ptInstanceDhcpClientLeasesState,
+        ptInstanceDhcpClientLeasesAddress,
+        ptInstanceDhcpClientLeasesPrefixes,
+        ptInstanceDhcpClientLeasesRouter,
+        ptInstanceDhcpClientLeasesDns,
+        ptInstanceDhcpClientLeasesServer,
+        ptInstanceDhcpClientLeasesObtained,
+        ptInstanceDhcpClientLeasesExpires,
+        ptInstanceDhcpClientLeasesLastError,
+        ptInstanceDhcpServerLeasesMac,
+        ptInstanceDhcpServerLeasesHostname,
+        ptInstanceDhcpServerLeasesExpires,
+        ptInstanceIpNeighboursFamily,
+        ptInstanceIpNeighboursMac,
+        ptInstanceIpNeighboursState,
+        ptInstanceIpNeighboursRouter,
+        ptInstanceIpNeighboursVrf,
+        ptInstanceLldpNeighboursChassisId,
+        ptInstanceLldpNeighboursChassisIdSubtype,
+        ptInstanceLldpNeighboursPortId,
+        ptInstanceLldpNeighboursPortIdSubtype,
+        ptInstanceLldpNeighboursTtl,
+        ptInstanceLldpNeighboursPortDescription,
+        ptInstanceLldpNeighboursSystemName,
+        ptInstanceLldpNeighboursSystemDescription,
+        ptInstanceRulesOrigPackets,
+        ptInstanceRulesOrigBytes,
+        ptInstanceRulesReplyPackets,
+        ptInstanceRulesReplyBytes,
+        ptInstanceBgpRouterId,
+        ptInstanceBgpAsn,
+        ptInstanceBgpError,
+        ptInstanceBgpPeersRemoteAs,
+        ptInstanceBgpPeersLocalAs,
+        ptInstanceBgpPeersDescription,
+        ptInstanceBgpPeersHostname,
+        ptInstanceBgpPeersState,
+        ptInstanceBgpPeersUptime,
+        ptInstanceBgpPeersUptimeSecs,
+        ptInstanceBgpPeersMsgRcvd,
+        ptInstanceBgpPeersMsgSent,
+        ptInstanceOspfRouterId,
+        ptInstanceOspfError,
+        ptInstanceOspfAreasInterfaces,
+        ptInstanceOspfAreasFullAdjacencies,
+        ptInstanceOspfAreasLsas,
+        ptInstanceOspfInterfacesArea,
+        ptInstanceOspfInterfacesAddress,
+        ptInstanceOspfInterfacesState,
+        ptInstanceOspfInterfacesNetworkType,
+        ptInstanceOspfInterfacesCost,
+        ptInstanceOspfInterfacesPriority,
+        ptInstanceOspfInterfacesPassive,
+        ptInstanceOspfInterfacesNeighbors,
+        ptInstanceOspfInterfacesAdjacent,
+        ptInstanceOspfInterfacesDr,
+        ptInstanceOspfInterfacesBdr,
+        ptInstanceOspfNeighborsRouterId,
+        ptInstanceOspfNeighborsAddress,
+        ptInstanceOspfNeighborsInterface,
+        ptInstanceOspfNeighborsPriority,
+        ptInstanceOspfNeighborsState,
+        ptInstanceOspfNeighborsRole,
+        ptInstanceOspfNeighborsUptime,
+        ptInstanceOspfNeighborsDeadTime,
+        ptInstanceIsisSystemId,
+        ptInstanceIsisError,
+        ptInstanceIsisNeighborsSystemId,
+        ptInstanceIsisNeighborsInterface,
+        ptInstanceIsisNeighborsLevel,
+        ptInstanceIsisNeighborsState,
+        ptInstanceIsisNeighborsHoldTime,
+        ptInstanceIsisNeighborsSnpa,
+        ptInstanceIsisInterfacesState,
+        ptInstanceIsisInterfacesType,
+        ptInstanceIsisInterfacesLevel,
+        ptInstanceVrrpRoutersVersion,
+        ptInstanceVrrpRoutersPriority,
+        ptInstanceVrrpRoutersPreempt,
+        ptInstanceVrrpRoutersShutdown,
+        ptInstanceVrrpRoutersAdvertisementInterval,
+        ptInstanceVrrpRoutersV4State,
+        ptInstanceVrrpRoutersV4Mac,
+        ptInstanceVrrpRoutersV4PrimaryAddress,
+        ptInstanceVrrpRoutersV4Addresses,
+        ptInstanceVrrpRoutersV4EffectivePriority,
+        ptInstanceVrrpRoutersV4MasterAdverInterval,
+        ptInstanceVrrpRoutersV4MasterDownInterval,
+        ptInstanceVrrpRoutersV4AdvertisementsSent,
+        ptInstanceVrrpRoutersV6State,
+        ptInstanceVrrpRoutersV6Mac,
+        ptInstanceVrrpRoutersV6PrimaryAddress,
+        ptInstanceVrrpRoutersV6Addresses,
+        ptInstanceVrrpRoutersV6EffectivePriority,
+        ptInstanceVrrpRoutersV6MasterAdverInterval,
+        ptInstanceVrrpRoutersV6MasterDownInterval,
+        ptInstanceVrrpRoutersV6AdvertisementsSent,
+        ptInstanceBfdPeersPeer,
+        ptInstanceBfdPeersVrf,
+        ptInstanceBfdPeersLocal,
+        ptInstanceBfdPeersInterface,
+        ptInstanceBfdPeersMultihop,
+        ptInstanceBfdPeersProfile,
+        ptInstanceBfdPeersStatus,
+        ptInstanceBfdPeersDiagnostic,
+        ptInstanceBfdPeersRemoteDiagnostic,
+        ptInstanceBfdPeersUptime,
+        ptInstanceBfdPeersDowntime,
+        ptInstanceBfdPeersDetectMultiplier,
+        ptInstanceBfdPeersReceiveInterval,
+        ptInstanceBfdPeersTransmitInterval,
+        ptInstanceBfdPeersRemoteDetectMultiplier,
+        ptInstanceBfdPeersRemoteReceiveInterval,
+        ptInstanceBfdPeersRemoteTransmitInterval,
+        ptInstanceNtpSourcesName,
+        ptInstanceNtpSourcesMode,
+        ptInstanceNtpSourcesState,
+        ptInstanceNtpSourcesStratum,
+        ptInstanceNtpSourcesPoll,
+        ptInstanceNtpSourcesReach,
+        ptInstanceNtpSourcesLastRx,
+        ptInstanceNtpSourcesOffset,
+        ptInstanceNtpSourcesError,
+        ptInstanceNtpSourcesSamples,
+        ptInstanceNtpSourcesSpan,
+        ptInstanceNtpSourcesFrequency,
+        ptInstanceNtpSourcesFreqSkew,
+        ptInstanceNtpSourcesStdDev,
+        ptInstanceNtpSourcesAuth,
+        ptInstanceNtpTrackingValue,
+        ptInstanceNtpServerStatsValue,
+        ptInstanceNat64Pool4Interface,
+        ptInstanceNat64Pool4Address,
+        ptInstanceNat64SessionsProtocol,
+        ptInstanceNat64SessionsSource6,
+        ptInstanceNat64SessionsPort6,
+        ptInstanceNat64SessionsDest6,
+        ptInstanceNat64SessionsDestPort6,
+        ptInstanceNat64SessionsSource4,
+        ptInstanceNat64SessionsPort4,
+        ptInstanceNat64SessionsDest4,
+        ptInstanceNat64SessionsDestPort4,
+        ptInstanceNat64SessionsExpires,
+        ptInstanceNat64SessionsState,
+        ptInstanceNat64StatsValue,
+        ptInstanceNat64StatsExplanation,
+        ptInstanceOpenvpnDevice,
+        ptInstanceOpenvpnConnected,
+        ptInstanceOpenvpnError,
+        ptInstanceOpenvpnClientsUser,
+        ptInstanceOpenvpnClientsRealAddress,
+        ptInstanceOpenvpnClientsAddress,
+        ptInstanceOpenvpnClientsAddress6,
+        ptInstanceOpenvpnClientsRxBytes,
+        ptInstanceOpenvpnClientsTxBytes,
+        ptInstanceOpenvpnClientsSince,
+        ptInstanceOpenvpnClientsCipher,
+        ptInstanceOpenvpnClientsSource,
+        ptInstanceRateLimitsOrigPackets,
+        ptInstanceRateLimitsOrigBytes,
+        ptInstanceRateLimitsReplyPackets,
+        ptInstanceRateLimitsReplyBytes,
+        ptInstanceRateLimitsDropPackets,
+        ptInstanceRateLimitsDropBytes,
+        ptInstanceRateLimitsInterfacesBytes,
+        ptInstanceRateLimitsInterfacesPackets,
+        ptInstanceRateLimitsInterfacesDrops,
+        ptInstanceRateLimitsInterfacesOverlimits,
+        ptInstanceRateLimitsInterfacesBacklog,
+        ptInstanceRateLimitsInterfacesQlen,
+        ptSystemStateHostDisksTotal,
+        ptSystemStateHostDisksFree,
+        ptSystemStateHostDisksUsed,
+        ptSystemStateHaDhcpSent,
+        ptSystemStateHaDhcpReceived,
+        ptSystemStateHaDhcpError
+    }
+    STATUS current
+    DESCRIPTION
+        "Portitor's state."
+    ::= { ptConformance 1 }
+
+ptCompliance MODULE-COMPLIANCE
+    STATUS current
+    DESCRIPTION
+        "An agent with Portitor's state."
+    MODULE -- this module
+        MANDATORY-GROUPS { ptStateGroup }
+    ::= { ptConformance 2 }
+
+END

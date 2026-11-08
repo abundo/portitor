@@ -42,6 +42,15 @@ type SNMPUser struct {
 // SNMPPort is the port SNMP requests come to.
 const SNMPPort = 161
 
+// The default instance's snmpd is the AgentX master of portitor-config,
+// which serves Portitor's state (PORTITOR-MIB) on its socket: owned by
+// snmpd's user, and open to the group of portitor-config's service user.
+const (
+	SNMPAgentXSocket = "/run/snmp-agentx/master"
+	SNMPAgentXOwner  = "Debian-snmp"
+	SNMPAgentXGroup  = "portitor"
+)
+
 // SNMPAuthProtocols and SNMPPrivProtocols are what an SNMPv3 user may use,
 // in net-snmp's words. MD5 and DES are left out: broken.
 var (

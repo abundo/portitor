@@ -397,6 +397,7 @@ func (s *Server) Serve(ctx context.Context) error {
 	go s.runWitness(ctx)
 	go s.runDirectorySync(ctx)
 	go s.runSSH(ctx)
+	go s.runSNMP(ctx)
 	sc := echo.StartConfig{Address: s.cfg.Bind, HideBanner: true}
 	slog.Info("portitor-config listening", "addr", s.cfg.Bind, "dev", s.cfg.Dev, "tls", s.cfg.TLSCert != "")
 	var err error

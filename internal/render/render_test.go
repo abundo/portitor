@@ -1197,6 +1197,16 @@ func TestSnmpdConf(t *testing.T) {
 			t.Errorf("missing %q in\n%s", want, conf)
 		}
 	}
+	// The host's snmpd is portitor-config's AgentX master; a VF's isn't.
+	agentx := "master agentx\nagentXSocket unix:/run/snmp-agentx/master\nagentXPerms 0660 0750 Debian-snmp portitor\n"
+	if !in.Default || !strings.Contains(conf, agentx) {
+		t.Errorf("default %v, AgentX missing:\n%s", in.Default, conf)
+	}
+	vf := *in
+	vf.Default = false
+	if strings.Contains(SnmpdConf(&vf), "agentx") {
+		t.Error("a VF's snmpd is an AgentX master")
+	}
 	nft := Nftables(in, nil, DefaultPaths())
 	for _, want := range []string{"set AUTO_snmp_clients_v4", `ip saddr @AUTO_snmp_clients_v4 iifname "eth1" udp dport 161`, `ip6 saddr @AUTO_snmp_clients_v6 iifname "eth1" udp dport 161`} {
 		if !strings.Contains(nft, want) {

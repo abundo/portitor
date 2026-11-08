@@ -349,6 +349,24 @@ settings are kept unless --agent-fingerprint is given.`,
 	})
 
 	root.AddCommand(&cobra.Command{
+		Use:   "mib",
+		Short: "Print PORTITOR-MIB, the state's MIB for SNMP, under snmp.base_oid",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := web.LoadConfig(configFile)
+			if err != nil {
+				return err
+			}
+			text, err := web.MIBText(cfg)
+			if err != nil {
+				return err
+			}
+			fmt.Print(text)
+			return nil
+		},
+	})
+
+	root.AddCommand(&cobra.Command{
 		Use:   "witness-string",
 		Short: "Print the HA pair's witness string, for its external witness (portitor-web's web.yaml)",
 		Args:  cobra.NoArgs,

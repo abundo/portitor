@@ -54,6 +54,9 @@ type Config struct {
 	// users; empty: not. The host key is ssh_host_ed25519_key next to the
 	// database.
 	SSHListen string `yaml:"ssh_listen"`
+	// SNMP serves the state over SNMP, as an AgentX subagent of the host's
+	// snmpd (web/snmp.go).
+	SNMP SNMPConfig `yaml:"snmp"`
 	// Local is portitor-config proper: on the firewall, for its own
 	// firewall (and HA secondary) alone. Not in the file; tests run
 	// without it.
@@ -160,4 +163,13 @@ func checkDBOwner(path string) error {
 		name = u.Username
 	}
 	return fmt.Errorf("%s belongs to %s: run portitor-config as that user (sudo -u %s portitor-config ...)", dir, name, name)
+}
+
+// SNMPConfig is the AgentX subagent's: AgentX the master's socket (on a
+// firewall by default the one the agent puts in snmpd.conf,
+// fwconfig.SNMPAgentXSocket; "off" is none), BaseOID where the MIB is
+// (mib.DefaultBase until Portitor has a Private Enterprise Number).
+type SNMPConfig struct {
+	AgentX  string `yaml:"agentx"`
+	BaseOID string `yaml:"base_oid"`
 }

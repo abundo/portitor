@@ -136,6 +136,9 @@ type Type struct {
 	// Format is the typedef of portitor-types.yang the type is, whose
 	// values Go checks and makes canonical (formats.go); "" for none.
 	Format string
+	// Typedef is the name of the type as the leaf uses it: a typedef's
+	// ("counter"), or the base type's.
+	Typedef string
 }
 
 // Range is an inclusive range of a number or a length.
@@ -513,7 +516,7 @@ func convertType(y *goyang.YangType) (*Type, error) {
 	if y == nil {
 		return nil, fmt.Errorf("no type")
 	}
-	t := &Type{Kind: goyang.TypeKindToName[y.Kind], Path: y.Path}
+	t := &Type{Kind: goyang.TypeKindToName[y.Kind], Path: y.Path, Typedef: y.Name}
 	if _, ok := formats[y.Name]; ok && t.Kind == "string" {
 		t.Format = y.Name
 	}

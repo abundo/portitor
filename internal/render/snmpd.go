@@ -37,6 +37,15 @@ func SnmpdConf(in *fwconfig.Instance) string {
 	}
 	// Layers 3 (internet) and 4 (end-to-end): a router and a host.
 	b.WriteString("sysServices 76\n")
+	if in.Default {
+		// portitor-config's state (PORTITOR-MIB), as an AgentX subagent;
+		// it answers from a snapshot, but more than snmpd's default 1 s
+		// leaves room for the first one.
+		b.WriteString("\nmaster agentx\n")
+		fmt.Fprintf(b, "agentXSocket unix:%s\n", fwconfig.SNMPAgentXSocket)
+		fmt.Fprintf(b, "agentXPerms 0660 0750 %s %s\n", fwconfig.SNMPAgentXOwner, fwconfig.SNMPAgentXGroup)
+		b.WriteString("agentXTimeout 5\n")
+	}
 	if s.Community != "" {
 		b.WriteString("\n")
 		v4, v6 := splitFamilies(maskAll(s.Allow))
