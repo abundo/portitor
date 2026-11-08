@@ -19,15 +19,18 @@ import AddressListForm from '@/components/AddressListForm.vue'
 import FolderForm from '@/components/FolderForm.vue'
 import FormPane from '@/components/FormPane.vue'
 import SearchInput from '@/components/SearchInput.vue'
+import { api } from '@/api'
 import {
   addressLists,
-  addressObjects,
-  api,
+  config,
+  hosts as addressObjects,
   ipamAddresses,
   ipamPrefixes,
   ipLists,
   objectFolders,
-} from '@/api'
+  path,
+  vfPath,
+} from '@/api/config'
 import { errMsg } from '@/api/http'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
 import { useAuthStore } from '@/stores/auth'
@@ -367,7 +370,7 @@ function ifaceClient(id) {
 
 async function refreshList(row) {
   try {
-    await api.refreshIPList(row.id)
+    await config.action(path(['ip-list', row.name]), 'refresh')
     toast.add({ title: `Downloading @${row.name}`, color: 'info' })
     setTimeout(() => deploy.refresh(), 2000)
   } catch (err) {
@@ -717,11 +720,7 @@ function editPrefix(src) {
 // keeps them.
 async function savePrefix() {
   try {
-    const body = {
-      prefix: prefix.prefix,
-      description: prefix.description,
-      instance_id: store.currentId,
-    }
+    const body = { prefix: prefix.prefix, description: prefix.description }
     if (prefix.id) await ipamPrefixes.update(prefix.id, body)
     else await ipamPrefixes.create(body)
     prefixOpen.value = false
@@ -753,7 +752,7 @@ function editAddress(src, ifaceId = null) {
 }
 async function saveAddress() {
   try {
-    const body = { ...addr, instance_id: store.currentId }
+    const body = { ...addr }
     if (addr.id) await ipamAddresses.update(addr.id, body)
     else await ipamAddresses.create(body)
     addrOpen.value = false
@@ -767,7 +766,8 @@ async function onAddAddress(node) {
   let next = ''
   if (!node.auto) {
     try {
-      next = await api.nextFree(node.id)
+      next = (await config.view(`${vfPath()}/${path(['ipam-prefix', node.cidr])}`, 'next-free'))
+        .address
     } catch {
       // full; leave empty
     }
@@ -872,12 +872,12 @@ function onEdit(node) {
     router.push(`/dns/zones/${node.zone_id}`)
   else if (node.kind === 'prefix')
     show(async () =>
-      editPrefix(node.auto ? { prefix: node.cidr } : await ipamPrefixes.get(node.id)),
+      editPrefix(node.auto ? { prefix: node.cidr } : await ipamPrefixes.get(node.cidr)),
     )
   else
     show(async () =>
       editAddress(
-        node.auto ? { address: node.cidr } : await ipamAddresses.get(node.id),
+        node.auto ? { address: node.cidr } : await ipamAddresses.get(node.cidr),
         node.interface_id,
       ),
     )

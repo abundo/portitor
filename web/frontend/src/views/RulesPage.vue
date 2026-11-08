@@ -11,7 +11,8 @@ import NeedInstance from '@/components/NeedInstance.vue'
 import RulesTable from '@/components/RulesTable.vue'
 import { onMounted, ref, watch } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
-import { api as backend, instances, rateLimits, rules } from '@/api'
+import { api as backend } from '@/api'
+import { config, toEntry, vfApi, vfPath } from '@/api/config'
 import { errMsg } from '@/api/http'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
 import { useObjectStore } from '@/stores/objects'
@@ -33,11 +34,15 @@ async function loadAutoRules() {
   autoRules.value = await backend.autoRules(store.currentId).catch(() => [])
 }
 watch(() => store.currentId, loadAutoRules, { immediate: true })
+// The rules and rate limits are the virtual firewall's in the configuration
+// tree; rules by id, in their order.
+const rules = vfApi('rule', ['id'])
+const rateLimits = vfApi('rate-limit')
 // The instance's rate limits, for the rule form (Rate limits page).
 const limits = ref([])
 async function loadLimits() {
   if (!store.currentId) return
-  limits.value = await rateLimits.list({ instance_id: store.currentId }).catch(() => [])
+  limits.value = await rateLimits.list().catch(() => [])
 }
 watch(() => store.currentId, loadLimits, { immediate: true })
 // lockedRow shows a locked row of a chain's table in the rule form
@@ -191,7 +196,7 @@ async function setLogBuiltin(chain, builtin, service, on) {
   const list = (cur[field] ?? []).filter((v) => v !== item)
   if (on) list.push(item)
   try {
-    await instances.update(cur.id, { [field]: list })
+    await config.patch(vfPath(), toEntry({ [field]: list }))
   } catch (err) {
     toast.add({ title: errMsg(err, 'Save failed'), color: 'error' })
   }
@@ -405,7 +410,7 @@ function clean(b) {
       title="Rules"
       info="Evaluated top to bottom; the first match decides. Edit cells in place (changes save at once), drag the grip to reorder, right-click a row to insert a rule, comment or group. Prerouting and postrouting hold the NAT rules: port forwards, and source NAT and masquerade. A group heads the rows below it up to the next group; its chevron folds them away (only in the view: folded rules still apply). Established connections are allowed, and so is what the configured services (DHCP, DNS, WireGuard) need: those input rules are shown locked and follow the services' settings. In the default virtual firewall the agent's management port and SSH stay open to its allow_from addresses. Port forwards are accepted after the forward rules (the locked row above the last one), so a forward rule can drop what a port forward would let in. Invalid packets (of no known connection) and traffic to or through the firewall that no rule accepts are dropped; the locked rows at the top and bottom of each chain count them."
       :api="api"
-      :params="{ instance_id: store.currentId }"
+      :params="{ _vf: store.currentId }"
       :columns="[]"
       :fields="fields"
       :defaults="{

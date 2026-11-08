@@ -4,7 +4,7 @@
 <script setup>
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
-import { addressObjects } from '@/api'
+import { hosts as addressObjects } from '@/api/config'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
 import { useSearch } from '@/utils/search'
 import { useAuthStore } from '@/stores/auth'

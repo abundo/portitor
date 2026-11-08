@@ -115,10 +115,16 @@ export function vfPath() {
 // Rows have the pages' member names (snake case, as the tables' columns);
 // keys are named so too. With shallow, list reads the entries' own leaves
 // alone, without their nested lists (a virtual firewall's rules), and
-// update merges (PATCH) rather than replace, which would remove them.
-export function treeApi(listPath, keys = ['name'], { shallow = false } = {}) {
-  const idOf = (row) => keys.map((k) => row[k]).join(',')
-  const entry = (id) => `${listPath()}=${id.split(',').map(encodeURIComponent).join(',')}`
+// update merges (PATCH) rather than replace, which would remove them; with
+// merge, update merges too (a form that holds some of the entry's leaves).
+export function treeApi(listPath, keys = ['name'], { shallow = false, merge = false } = {}) {
+  // A row's id is its key's value (a number for an id), or its keys
+  // joined by ",".
+  const idOf = (row) => (keys.length === 1 ? row[keys[0]] : keys.map((k) => row[k]).join(','))
+  const entry = (id) =>
+    `${listPath()}=${(keys.length === 1 ? [String(id)] : String(id).split(','))
+      .map(encodeURIComponent)
+      .join(',')}`
   // Members starting with _ are the page's (CrudPage's params, which it
   // reloads on), not the entry's.
   const body = (row) => {
@@ -131,7 +137,10 @@ export function treeApi(listPath, keys = ['name'], { shallow = false } = {}) {
       const rows = await config.get(listPath(), 'candidate', shallow ? { shallow: '' } : {})
       return (rows ?? []).map(fromEntry).map((r) => ({ ...r, id: idOf(r) }))
     },
-    get: (id) => config.get(entry(id)).then(fromEntry),
+    get: async (id) => {
+      const r = fromEntry(await config.get(entry(id)))
+      return { ...r, id: idOf(r) }
+    },
     create: async (row) => {
       const res = await config.post(listPath(), body(row))
       const made = {
@@ -147,7 +156,7 @@ export function treeApi(listPath, keys = ['name'], { shallow = false } = {}) {
         await config.rename(entry(id), keys.map((k) => String(row[k])))
         target = now
       }
-      await (shallow ? config.patch : config.put)(entry(target), body(row))
+      await (shallow || merge ? config.patch : config.put)(entry(target), body(row))
       return { ...row, id: target }
     },
     remove: (id) => config.remove(entry(id)),
@@ -157,7 +166,11 @@ export function treeApi(listPath, keys = ['name'], { shallow = false } = {}) {
       const cur = ((await config.get(listPath())) ?? []).map(fromEntry).map(idOf)
       for (let i = 0; i < ids.length; i++) {
         if (cur[i] === ids[i]) continue
-        await config.move(entry(ids[i]), 'before', cur[i].split(','))
+        await config.move(
+          entry(ids[i]),
+          'before',
+          keys.length === 1 ? [String(cur[i])] : String(cur[i]).split(','),
+        )
         cur.splice(cur.indexOf(ids[i]), 1)
         cur.splice(i, 0, ids[i])
       }
@@ -168,8 +181,8 @@ export function treeApi(listPath, keys = ['name'], { shallow = false } = {}) {
 // vfApi is treeApi of a list of the selected virtual firewall (the top
 // bar's): instance=<name>/<list>. A page passes { _vf: store.currentId }
 // as CrudPage's params, which reloads it when another is chosen.
-export function vfApi(list, keys = ['name']) {
-  return treeApi(() => `${vfPath()}/${list}`, keys)
+export function vfApi(list, keys = ['name'], opts = {}) {
+  return treeApi(() => `${vfPath()}/${list}`, keys, opts)
 }
 
 // The shared objects' lists (not a virtual firewall's).
@@ -272,3 +285,44 @@ export const prefixLists = numbered(withLists(vfApi('prefix-list'), entries))
 export const asPathLists = withLists(vfApi('as-path-list'), entries)
 export const communityLists = withLists(vfApi('community-list'), entries)
 export const routeMaps = numbered(withLists(vfApi('route-map'), entries))
+
+// withNames renames an api's leaves between the pages' names and the
+// tree's: { folder: 'folder_id' }. A page's 0 (a select's "none") is unset.
+export function withNames(api, names) {
+  const toPage = (r) => {
+    const o = { ...r }
+    for (const [tree, page] of Object.entries(names)) {
+      if (tree in o) o[page] = o[tree]
+      delete o[tree]
+    }
+    return o
+  }
+  const toTree = (r) => {
+    const o = { ...r }
+    for (const [tree, page] of Object.entries(names)) {
+      if (page in o) o[tree] = o[page] || null
+      delete o[page]
+    }
+    return o
+  }
+  return {
+    ...api,
+    list: async (p) => (await api.list(p)).map(toPage),
+    get: async (id) => toPage(await api.get(id)),
+    create: async (r) => toPage(await api.create(toTree(r))),
+    update: async (id, r) => toPage(await api.update(id, toTree(r))),
+  }
+}
+
+// Hosts, address lists, IP lists and the folders they are in (folder_id,
+// parent_id: a folder's id, 0 none).
+export const hosts = withNames(treeApi(() => 'host'), { folder: 'folder_id' })
+export const addressLists = withNames(treeApi(() => 'address-list'), { folder: 'folder_id' })
+export const ipLists = withNames(treeApi(() => 'ip-list'), { folder: 'folder_id' })
+export const objectFolders = withNames(treeApi(() => 'object-folder', ['id']), {
+  parent: 'parent_id',
+})
+// The IPAM prefixes and addresses of the selected virtual firewall, merged
+// on update: the DHCP page sets a prefix's DHCP settings.
+export const ipamPrefixes = vfApi('ipam-prefix', ['prefix'], { merge: true })
+export const ipamAddresses = vfApi('ipam-address', ['address'], { merge: true })

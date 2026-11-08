@@ -10,7 +10,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import NeedInstance from '@/components/NeedInstance.vue'
 import SearchInput from '@/components/SearchInput.vue'
 import VrfSelect from '@/components/VrfSelect.vue'
-import { rules } from '@/api'
+import { vfApi } from '@/api/config'
 import http, { errMsg } from '@/api/http'
 import { useToast } from '@nuxt/ui/composables'
 import { useConfirm } from '@/composables/useConfirm'
@@ -43,7 +43,7 @@ const ruleText = ref({})
 async function loadRules() {
   if (!store.currentId) return
   try {
-    const list = await rules.list({ instance_id: store.currentId })
+    const list = await vfApi('rule', ['id']).list()
     ruleText.value = Object.fromEntries(list.map((r) => [r.id, r.description || `#${r.id}`]))
   } catch {
     ruleText.value = {}

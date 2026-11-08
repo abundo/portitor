@@ -16,7 +16,8 @@ import FormHeader from '@/components/FormHeader.vue'
 import NeedInstance from '@/components/NeedInstance.vue'
 import SearchInput from '@/components/SearchInput.vue'
 import ServiceRateLimit from '@/components/ServiceRateLimit.vue'
-import { dnsTemplates, dnsZones, dyndnsClients, instances, interfaces } from '@/api'
+import { dnsTemplates, dnsZones, dyndnsClients } from '@/api'
+import { config, fromEntry, toEntry, vfPath } from '@/api/config'
 import { errMsg } from '@/api/http'
 import { withLabel } from '@/composables/useInstanceRefs'
 import { usePageForm } from '@/composables/useFormGuard'
@@ -62,7 +63,7 @@ const server = reactive({
   dns_query_log_names: [],
   dns_query_log_types: [],
   dns_rate_limit: false,
-  ifaces: [], // { id, name, label, description, ipv4_mode, dns_listen, dns_from_dhcp }
+  ifaces: [], // { name, label, description, ipv4_mode, dns_listen, dns_from_dhcp }
 })
 const serverForm = usePageForm(server)
 const saving = ref(false)
@@ -71,7 +72,8 @@ let loaded = null // the rows as loaded, to save only what changed
 async function load() {
   const id = store.currentId
   if (!id) return
-  const [inst, ifs] = await Promise.all([instances.get(id), interfaces.list({ instance_id: id })])
+  const inst = fromEntry(await config.get(vfPath()))
+  const ifs = inst.interface ?? []
   loaded = { inst, ifs }
   Object.assign(server, {
     dns_upstream: inst.dns_upstream || 'root',
@@ -85,13 +87,12 @@ async function load() {
     dns_query_log_types: inst.dns_query_log_types ?? [],
     dns_rate_limit: inst.dns_rate_limit ?? false,
     ifaces: ifs.map((i) => ({
-      id: i.id,
       name: i.name,
       label: i.label,
       description: i.description,
       ipv4_mode: i.ipv4_mode,
-      dns_listen: i.dns_listen,
-      dns_from_dhcp: i.dns_from_dhcp,
+      dns_listen: !!i.dns_listen,
+      dns_from_dhcp: !!i.dns_from_dhcp,
     })),
   })
   serverForm.mark()
@@ -160,18 +161,27 @@ async function save() {
   }
   saving.value = true
   try {
+    // One change of the virtual firewall and its changed interfaces.
     const { ifaces, ...dns } = server
-    await instances.update(store.currentId, dns)
-    // Clear the flag before setting it elsewhere; the server moves it anyway.
-    const changed = ifaces
-      .filter((i) => {
-        const o = loaded.ifs.find((x) => x.id === i.id)
-        return o && (o.dns_listen !== i.dns_listen || o.dns_from_dhcp !== i.dns_from_dhcp)
-      })
-      .sort((a, b) => Number(a.dns_from_dhcp) - Number(b.dns_from_dhcp))
-    for (const i of changed) {
-      await interfaces.update(i.id, { dns_listen: i.dns_listen, dns_from_dhcp: i.dns_from_dhcp })
-    }
+    const changed = ifaces.filter((i) => {
+      const o = loaded.ifs.find((x) => x.name === i.name)
+      return o && (!!o.dns_listen !== i.dns_listen || !!o.dns_from_dhcp !== i.dns_from_dhcp)
+    })
+    await config.patch(
+      vfPath(),
+      toEntry({
+        ...dns,
+        ...(changed.length
+          ? {
+              interface: changed.map((i) => ({
+                name: i.name,
+                dns_listen: i.dns_listen,
+                dns_from_dhcp: i.dns_from_dhcp,
+              })),
+            }
+          : {}),
+      }),
+    )
     toast.add({ title: 'DNS server saved', color: 'success' })
     await Promise.all([load(), store.load()])
   } catch (err) {
@@ -370,7 +380,7 @@ const tab = computed({
                     <tbody>
                       <tr
                         v-for="i in shownIfaces"
-                        :key="i.id"
+                        :key="i.name"
                         class="border-b border-default last:border-0"
                       >
                         <td class="py-1 pr-4 font-mono">{{ withLabel(i.label, i.name) }}</td>
@@ -428,7 +438,7 @@ const tab = computed({
                     <tbody>
                       <tr
                         v-for="i in shownDhcpIfaces"
-                        :key="i.id"
+                        :key="i.name"
                         class="border-b border-default last:border-0"
                       >
                         <td class="py-1 pr-4 font-mono">{{ withLabel(i.label, i.name) }}</td>

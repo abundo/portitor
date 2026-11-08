@@ -6,7 +6,7 @@
 // forwards (DNAT), postrouting source NAT and masquerade. The rules page
 // shows each in its tab, in the order packets pass the hooks.
 import CrudPage from '@/components/CrudPage.vue'
-import { nat } from '@/api'
+import { vfApi } from '@/api/config'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
 
 const props = defineProps({
@@ -132,6 +132,8 @@ const fields = [
   { key: 'enabled', label: 'Enabled', type: 'switch' },
   { key: 'description', label: 'Description' },
 ]
+// NAT rules are the virtual firewall's nat-rule list, by id, in order.
+const nat = vfApi('nat-rule', ['id'])
 const api = {
   ...nat,
   list: async (p) => (await nat.list(p)).map((r) => ({ ...r, protocol: r.protocol || 'any' })),
@@ -147,7 +149,7 @@ const api = {
     :noun="pre ? 'port forward' : 'source NAT rule'"
     :description="description"
     :api="api"
-    :params="{ instance_id: store.currentId }"
+    :params="{ _vf: store.currentId }"
     :row-filter="ofHook"
     :columns="columns"
     :fields="fields"

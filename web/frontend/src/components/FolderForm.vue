@@ -7,7 +7,7 @@
 // one; `changed` follows a save or delete. Only an empty folder can be deleted.
 import { computed, reactive, ref, toRaw } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
-import { objectFolders } from '@/api'
+import { objectFolders } from '@/api/config'
 import { errMsg } from '@/api/http'
 import { useAuthStore } from '@/stores/auth'
 import { useConfirm } from '@/composables/useConfirm'

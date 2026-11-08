@@ -14,6 +14,7 @@ import NeedInstance from '@/components/NeedInstance.vue'
 import SearchInput from '@/components/SearchInput.vue'
 import ServiceRateLimit from '@/components/ServiceRateLimit.vue'
 import { api, instances, interfaces, ipamPrefixes } from '@/api'
+import { config, toEntry, vfPath } from '@/api/config'
 import { errMsg } from '@/api/http'
 import { withLabel } from '@/composables/useInstanceRefs'
 import { useFormGuard, usePageForm } from '@/composables/useFormGuard'
@@ -209,25 +210,32 @@ const settings = (p) => JSON.stringify(prefixFields.map((k) => p[k]))
 async function save() {
   saving.value = true
   try {
+    // One change of the virtual firewall: its dhcp-* leaves, the changed
+    // prefixes' DHCP settings (a new prefix entry made by the merge) and
+    // the changed interfaces' delegated-* settings.
     const { dhcp_enabled, dhcp_domain_name, dhcp_lease_time, dhcp_rate_limit } = server
-    await instances.update(store.currentId, {
-      dhcp_enabled,
-      dhcp_domain_name,
-      dhcp_lease_time,
-      dhcp_rate_limit,
-    })
-    for (const p of allPrefixes()) {
-      if (settings(p) === loaded.get(p.prefix)) continue
-      const body = Object.fromEntries(prefixFields.map((k) => [k, p[k]]))
-      if (!is6(p)) body.ra_enabled = body.ra_slaac = false
-      else body.dhcp_gateway = ''
-      if (p.id) await ipamPrefixes.update(p.id, body)
-      else await ipamPrefixes.create({ ...body, instance_id: store.currentId, prefix: p.prefix })
-    }
-    for (const i of server.ifaces) {
-      if (delegatedSettings(i) === loadedIfaces.get(i.id)) continue
-      await interfaces.update(i.id, Object.fromEntries(delegatedFields.map((k) => [k, i[k]])))
-    }
+    const prefixes = allPrefixes()
+      .filter((p) => settings(p) !== loaded.get(p.prefix))
+      .map((p) => {
+        const body = { prefix: p.prefix, ...Object.fromEntries(prefixFields.map((k) => [k, p[k]])) }
+        if (!is6(p)) body.ra_enabled = body.ra_slaac = false
+        else body.dhcp_gateway = ''
+        return body
+      })
+    const ifaces = server.ifaces
+      .filter((i) => delegatedSettings(i) !== loadedIfaces.get(i.id))
+      .map((i) => ({ name: i.name, ...Object.fromEntries(delegatedFields.map((k) => [k, i[k]])) }))
+    await config.patch(
+      vfPath(),
+      toEntry({
+        dhcp_enabled,
+        dhcp_domain_name,
+        dhcp_lease_time,
+        dhcp_rate_limit,
+        ...(prefixes.length ? { ipam_prefix: prefixes } : {}),
+        ...(ifaces.length ? { interface: ifaces } : {}),
+      }),
+    )
     toast.add({ title: 'DHCP server saved', color: 'success' })
     await Promise.all([load(), store.load()])
   } catch (err) {

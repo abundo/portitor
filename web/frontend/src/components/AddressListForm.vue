@@ -8,7 +8,7 @@
 import AddrInput from '@/components/AddrInput.vue'
 import { computed, reactive, ref, toRaw } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
-import { addressLists } from '@/api'
+import { addressLists } from '@/api/config'
 import { errMsg } from '@/api/http'
 import { useAuthStore } from '@/stores/auth'
 import { useConfirm } from '@/composables/useConfirm'
