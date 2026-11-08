@@ -4,6 +4,7 @@
 package web
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -288,5 +289,30 @@ func TestRecordChecks(t *testing.T) {
 	rs := env.node("instance=main/dns-zone=home.arpa").Lists["record"]
 	if rs[0].Leaf("name") != "lab" || rs[1].Leaf("type") != "A" || rs[1].Leaf("name") != "nas" || rs[1].Leaf("mac") != "aa:bb:cc:dd:ee:ff" {
 		t.Errorf("normalized: %v %v", rs[0].Leaves, rs[1].Leaves)
+	}
+}
+
+// The console's set: a list by its name, plural or table, an entry by its
+// key, leaves as strings.
+func TestConsoleSet(t *testing.T) {
+	env := newEnv(t)
+	env.host("main")
+	ctx := context.Background()
+	for _, res := range []string{"interfaces", "interface"} {
+		p, lists, err := env.srv.ConsoleSetPath(ctx, "", res, "eth3")
+		if err != nil || p != "instance=main/interface=eth3" || !lists["addresses"] {
+			t.Fatalf("%s: %q %v", res, p, err)
+		}
+	}
+	if p, _, err := env.srv.ConsoleSetPath(ctx, "", "objects", "nas"); err != nil || p != "host=nas" {
+		t.Errorf("objects: %q %v", p, err)
+	}
+	if _, _, err := env.srv.ConsoleSetPath(ctx, "nope", "interfaces", "eth3"); err == nil {
+		t.Error("a VF that isn't there")
+	}
+	code, out := env.srv.ConsoleRequest(ctx, "PATCH", "/api/config/candidate/instance=main/interface=eth3",
+		[]byte(`{"kind":"physical","enabled":"true","mtu":"1400","addresses":["10.3.0.1/24"]}`))
+	if code != 200 || env.node("instance=main/interface=eth3").Leaf("mtu") != "1400" {
+		t.Errorf("set: %d %s", code, out)
 	}
 }

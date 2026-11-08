@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strconv"
 	"strings"
 	"syscall"
 
@@ -99,43 +98,21 @@ func addConsoleCommands(root *cobra.Command, load func() (*web.Config, *web.Serv
 	var vf string
 	set := &cobra.Command{
 		Use:   "set RESOURCE NAME KEY=VALUE...",
-		Short: "Change fields of a row found by name (e.g. set interfaces ens19 addresses=192.168.1.1/24)",
-		Long: "RESOURCE is an API collection (interfaces, rules, routes, instances, objects, ...). The row " +
-			"is found by its name in the virtual firewall --vf (default: the host). A list field takes " +
-			"comma-separated values (empty: none); numbers and true/false are converted. Commit after.",
+		Short: "Change leaves of a configuration entry found by its key (e.g. set interfaces ens19 addresses=192.168.1.1/24)",
+		Long: "RESOURCE is a list of the configuration (interface, rule, route, host, ...; plurals and the " +
+			"API's collection names work too); NAME its entry's key (keys joined by \",\"), in the virtual " +
+			"firewall --vf (default: the host) for a virtual firewall's list. KEY is a leaf (kebab or snake " +
+			"case); a leaf-list takes comma-separated values (empty: none); an empty value unsets a leaf. " +
+			"The entry is made when it isn't there. Commit after.",
 		Args: cobra.MinimumNArgs(3),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			res, name := strings.Trim(args[0], "/"), args[1]
-			_, instances, err := request(cmd, http.MethodGet, "/api/instances", nil)
+			_, srv, err := load()
 			if err != nil {
 				return err
 			}
-			var instID any
-			for _, in := range instances {
-				if (vf == "" && in["is_default"] == true) || (vf != "" && in["name"] == vf) {
-					instID = in["id"]
-				}
-			}
-			if instID == nil {
-				return fmt.Errorf("no virtual firewall %q", vf)
-			}
-			path := "/api/" + res
-			_, rows, err := request(cmd, http.MethodGet, path, nil)
+			path, leafLists, err := srv.ConsoleSetPath(cmd.Context(), vf, strings.Trim(args[0], "/"), args[1])
 			if err != nil {
 				return err
-			}
-			var row map[string]any
-			for _, r := range rows {
-				if r["name"] != name && r["username"] != name {
-					continue
-				}
-				if id, ok := r["instance_id"]; ok && id != instID {
-					continue
-				}
-				row = r
-			}
-			if row == nil {
-				return fmt.Errorf("no %s named %q", res, name)
 			}
 			body := map[string]any{}
 			for _, kv := range args[2:] {
@@ -143,13 +120,25 @@ func addConsoleCommands(root *cobra.Command, load func() (*web.Config, *web.Serv
 				if !ok {
 					return fmt.Errorf("%q: KEY=VALUE", kv)
 				}
-				old, known := row[k]
-				if !known {
-					return fmt.Errorf("%s has no field %q", res, k)
+				k = strings.ReplaceAll(k, "_", "-")
+				switch {
+				case leafLists[k] && v == "":
+					body[k] = []string{}
+				case leafLists[k]:
+					vals := strings.Split(v, ",")
+					for i := range vals {
+						vals[i] = strings.TrimSpace(vals[i])
+					}
+					body[k] = vals
+				default:
+					body[k] = v
 				}
-				body[k] = convert(old, v)
 			}
-			obj, _, err := request(cmd, http.MethodPut, fmt.Sprintf("%s/%v", path, row["id"]), body)
+			at := "/api/config/candidate/" + path
+			if _, _, err := request(cmd, http.MethodPatch, at, body); err != nil {
+				return err
+			}
+			obj, _, err := request(cmd, http.MethodGet, at, nil)
 			if err != nil {
 				return err
 			}
@@ -238,36 +227,4 @@ func addConsoleCommands(root *cobra.Command, load func() (*web.Config, *web.Serv
 			},
 		})
 	}
-}
-
-// convert turns v into the type of the field's current value old.
-func convert(old any, v string) any {
-	switch old.(type) {
-	case []any:
-		out := []string{}
-		for _, s := range strings.Split(v, ",") {
-			if s = strings.TrimSpace(s); s != "" {
-				out = append(out, s)
-			}
-		}
-		return out
-	case bool:
-		b, err := strconv.ParseBool(v)
-		if err != nil {
-			return v
-		}
-		return b
-	case float64:
-		if n, err := strconv.ParseFloat(v, 64); err == nil {
-			return n
-		}
-	case nil:
-		if n, err := strconv.ParseFloat(v, 64); err == nil {
-			return n
-		}
-		if v == "" {
-			return nil
-		}
-	}
-	return v
 }

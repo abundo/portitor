@@ -6,10 +6,14 @@ package web
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strings"
 
+	"github.com/abundo/portitor/internal/schema"
 	"github.com/abundo/portitor/models"
 )
 
@@ -47,4 +51,71 @@ func (s *Server) requestAs(ctx context.Context, u *models.User, method, path str
 	s.Echo().ServeHTTP(rec, req)
 	out, _ := io.ReadAll(rec.Result().Body)
 	return rec.Code, out
+}
+
+// ConsoleSetPath is the configuration path (for /api/config/candidate) of
+// the entry the console's set names: resource a list of the virtual
+// firewall vf ("" the host) or a shared one, by its YANG name, its table
+// or its plural ("interfaces", "interface", "objects", "host"); name its
+// key, or its keys joined by ",". leafLists names its leaf-lists, whose
+// values set takes comma-separated.
+func (s *Server) ConsoleSetPath(ctx context.Context, vf, resource, name string) (path string, leafLists map[string]bool, err error) {
+	t, err := s.tree()
+	if err != nil {
+		return "", nil, err
+	}
+	cand, err := t.store.Candidate(ctx)
+	if err != nil {
+		return "", nil, err
+	}
+	want := strings.ReplaceAll(strings.ToLower(resource), "_", "-")
+	matches := func(l *schema.Node) bool {
+		table := strings.ReplaceAll(t.mapping.TableOf(l), "_", "-")
+		return l.Kind == schema.List && (l.Name == want || l.Name+"s" == want || table == want ||
+			(want == "objects" && l.Name == "host"))
+	}
+	var list *schema.Node
+	var prefix string
+	inst := t.schema.Child("instance")
+	for _, l := range inst.Children {
+		if matches(l) {
+			list = l
+		}
+	}
+	if list != nil {
+		if vf == "" {
+			for _, in := range cand.Root.Lists["instance"] {
+				if in.Leaf("is-default") == "true" {
+					vf = in.Leaf("name")
+				}
+			}
+		}
+		if cand.Root.Entry("instance", []string{vf}) == nil {
+			return "", nil, fmt.Errorf("no virtual firewall %q", vf)
+		}
+		prefix = "instance=" + url.PathEscape(vf) + "/"
+	} else {
+		for _, l := range t.schema.Children {
+			if matches(l) {
+				list = l
+			}
+		}
+	}
+	if list == nil {
+		return "", nil, fmt.Errorf("no list %q in the configuration", resource)
+	}
+	keys := strings.Split(name, ",")
+	if len(keys) != len(list.Keys) {
+		return "", nil, fmt.Errorf("%s is keyed by %s", list.Name, strings.Join(list.Keys, ", "))
+	}
+	for i, k := range keys {
+		keys[i] = url.PathEscape(k)
+	}
+	leafLists = map[string]bool{}
+	for _, c := range list.Children {
+		if c.Kind == schema.LeafList {
+			leafLists[c.Name] = true
+		}
+	}
+	return prefix + list.Name + "=" + strings.Join(keys, ","), leafLists, nil
 }
