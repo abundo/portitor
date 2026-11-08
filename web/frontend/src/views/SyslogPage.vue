@@ -12,7 +12,8 @@ import AutoRefreshButton from '@/components/AutoRefreshButton.vue'
 import CrudPage from '@/components/CrudPage.vue'
 import NeedInstance from '@/components/NeedInstance.vue'
 import ServiceLog from '@/components/ServiceLog.vue'
-import { api, syslogServers } from '@/api'
+import { api } from '@/api'
+import { treeApi } from '@/api/config'
 import { errMsg } from '@/api/http'
 import { useAutoRefresh } from '@/composables/useAutoRefresh'
 import { useAuthStore } from '@/stores/auth'
@@ -87,6 +88,8 @@ const severityItems = [
   { label: 'info (6)', value: 'info' },
   { label: 'debug (7)', value: 'debug' },
 ]
+// The host's syslog servers, in the configuration tree (keyed by id).
+const servers = treeApi(() => `instance=${encodeURIComponent(host.value?.name ?? '')}/syslog-server`, ['id'])
 const formatLabel = (v) => formatItems.find((i) => i.value === v)?.label ?? v
 const columns = [
   { key: 'address', label: 'Server', class: 'font-mono' },
@@ -237,8 +240,8 @@ const defaults = {
             v-if="host"
             title="Syslog servers"
             :description="`The remote syslog servers firewall ${firewallName} sends its journal to, with rsyslog. They are the firewall's: every virtual firewall's logs go to them. Commit to apply a change. The firewall's output chain lets the messages out to these servers by itself.`"
-            :api="syslogServers"
-            :params="{ instance_id: host.id }"
+            :api="servers"
+            :params="{ _vf: host.name }"
             :columns="columns"
             :fields="fields"
             :defaults="defaults"
