@@ -5,7 +5,6 @@ package web
 
 import (
 	"fmt"
-	"slices"
 	"strings"
 
 	"gorm.io/gorm"
@@ -57,90 +56,6 @@ func prepareAddressObject(tx *gorm.DB, o, old *models.AddressObject) error {
 	return nil
 }
 
-func deleteAddressObject(tx *gorm.DB, o *models.AddressObject) error {
-	return refuseNameInUse(tx, o.Name)
-}
-
-// prepareAddressList checks an address list: addresses, CIDRs and the
-// names of hosts and other address lists, without a list that holds
-// itself.
-func prepareAddressList(tx *gorm.DB, l, old *models.AddressList) error {
-	l.Name = strings.TrimSpace(l.Name)
-	if !netobj.ValidName(l.Name) {
-		return bad("name: letters, digits, _ . -, starting with a letter, at most 63 characters (not \"default\" or \"any\")")
-	}
-	var id uint
-	if old != nil {
-		id = old.ID
-	}
-	if err := nameFree(tx, l.Name, &models.AddressObject{}, 0); err != nil {
-		return err
-	}
-	if err := nameFree(tx, l.Name, &models.AddressList{}, id); err != nil {
-		return err
-	}
-	if err := itemFolder(tx, &l.FolderID, models.ObjectFolderAddressLists); err != nil {
-		return err
-	}
-	l.Entries = cleanList(l.Entries)
-	if len(l.Entries) == 0 {
-		return bad("at least one entry")
-	}
-	for i, e := range l.Entries {
-		if _, ok := fwconfig.IPListName(e); ok {
-			return bad(fmt.Sprintf("%q: an address list cannot hold IP lists; use both in the rule", e))
-		}
-		if netobj.IsName(e) {
-			if e == l.Name || (old != nil && e == old.Name) {
-				return bad(fmt.Sprintf("%s cannot contain itself", l.Name))
-			}
-			continue
-		}
-		p, err := fwconfig.ParseAddrOrPrefix(e)
-		if err != nil {
-			return bad(fmt.Sprintf("%q is not an address, CIDR, or the name of a host or address list", e))
-		}
-		if p.IsSingleIP() {
-			l.Entries[i] = p.Addr().String()
-		} else {
-			l.Entries[i] = p.String()
-		}
-	}
-	// Resolve the list as saved, with the others: an unknown name or a
-	// loop through other lists is refused.
-	objs, lists, err := loadNames(tx)
-	if err != nil {
-		return err
-	}
-	lists = slices.DeleteFunc(lists, func(x models.AddressList) bool { return x.ID == id && id != 0 })
-	if old != nil && old.Name != l.Name {
-		for i := range lists {
-			for j, e := range lists[i].Entries {
-				if e == old.Name {
-					lists[i].Entries[j] = l.Name
-				}
-			}
-		}
-	}
-	if _, err := netobj.New(objs, append(lists, *l)...).Expand([]string{l.Name}); err != nil {
-		return bad(err.Error())
-	}
-	if old != nil && old.Name != l.Name {
-		return eachObjectRef(tx, func(_ string, entry *string) bool {
-			if *entry == old.Name {
-				*entry = l.Name
-				return true
-			}
-			return false
-		})
-	}
-	return nil
-}
-
-func deleteAddressList(tx *gorm.DB, l *models.AddressList) error {
-	return refuseNameInUse(tx, l.Name)
-}
-
 // nameFree checks that no row of model (a host or address list table)
 // other than id has the name: the two share their names.
 func nameFree(tx *gorm.DB, name string, model any, id uint) error {
@@ -150,27 +65,6 @@ func nameFree(tx *gorm.DB, name string, model any, id uint) error {
 	}
 	if n > 0 {
 		return bad(fmt.Sprintf("there is already a host or address list named %s", name))
-	}
-	return nil
-}
-
-// refuseNameInUse refuses to delete a host or address list in use.
-func refuseNameInUse(tx *gorm.DB, name string) error {
-	var users []string
-	err := eachObjectRef(tx, func(where string, entry *string) bool {
-		if *entry == name && (len(users) == 0 || users[len(users)-1] != where) {
-			users = append(users, where)
-		}
-		return false
-	})
-	if err != nil {
-		return err
-	}
-	if len(users) > 0 {
-		if len(users) > 5 {
-			users = append(users[:5], "...")
-		}
-		return bad(fmt.Sprintf("%s is used by %s", name, strings.Join(users, ", ")))
 	}
 	return nil
 }

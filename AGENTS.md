@@ -268,6 +268,15 @@ docs and user-facing messages.
 
 ## Invariants
 
+Where a rule below names a function of `web/` that keeps references in step (a
+rename that rewrites the lists naming it, a delete refused while in use), that is
+the CRUD's version, still used by the firewalls and the imports; on the tree the
+same rule is the schema's (leafrefs follow a rename, `datastore.Tree.Rename`) and
+`internal/confcheck`'s (renames into lists of plain names, `renameIfaceRefs` and
+the like; deletes refused by the checks), and the configuration tables are only
+ever written from the candidate (`Store.OnChange`): a derived read model that code
+reads, never edits.
+
 - **The agent trusts nothing.** It re-runs `fwconfig.Validate` before rendering.
   Anything that ends up in a config file must be validated there: names by regex,
   addresses by `netip`, comments without control characters. nft strings cannot
@@ -515,11 +524,10 @@ the certificate portitor-config serves, chosen under Settings
   orders only in memory.
 - **Certificate authorities** are a firewall's: imported certificates of its host
   whose certificate is a CA (`isCA`; made by `generate.ca` or imported with their
-  key, `checkAuthority` refuses them in a virtual firewall), deployed with the host
+  key, `internal/confcheck` refuses them in a virtual firewall), deployed with the host
   like any imported certificate, so they are kept on the firewall (both hosts of a
   pair). A new certificate (`generate`, `acme.MakeCertificate`) is self-signed or
-  signed by a CA of its own firewall's host (`firewallCA`; global admins only,
-  `tenantCertificate`); a CA is never the GUI's or the ACME proxy's certificate
+  signed by a CA of its own firewall's host (the `generate` action, `hostCA`; global admins only); a CA is never the GUI's or the ACME proxy's certificate
   (`refuseCA`).
 - **DNS blocklists** (`fwconfig/dnsblocklist.go`, `internal/dnsblocklist`,
   `internal/agent/dnsblocklists.go`, `web/dnsblocklists.go`, Services → DNS →
@@ -598,7 +606,7 @@ the certificate portitor-config serves, chosen under Settings
   before it drops to its user, so a change restarts it), removed when SNMP is off.
 - **Syslog** (`fwconfig/syslog.go`, `render/rsyslog.go`, `internal/agent/syslog.go`,
   `web/syslog.go`, Services → Syslog) is the firewall's: `syslog_servers` are rows
-  of its default instance alone (`prepareSyslogServer`, and `Validate` refuses
+  of its default instance alone (`confcheck` `checkSyslogServer`, and `Validate` refuses
   another's), written by global admins only, so an HA pair's secondary sends to them
   too. rsyslog (`units.default_rsyslog`, masked by the install until used) reads the
   journal (imjournal) and only forwards, a queue per server; its config replaces
@@ -626,12 +634,12 @@ the certificate portitor-config serves, chosen under Settings
   `Users` (all of portitor-config's users: a local one's bcrypt hash, a directory
   one's `LDAP`, with `TwoFactor` their TOTP secret, the code sent with the password
   by the client's `static-challenge` (SCRV1, `splitChallenge`), each step good once; with `ovpn_require_role` the non-members `Denied`, all of them when the
-  role is gone; an instance admin's role is always their VF's, `tenantOpenVPN`) and
+  role is gone; an instance admin's role is always their VF's, `tenantTreeCheck`) and
   then the document's `Directory` (see Directory), a directory user of the required
   role's mapped groups (`RoleGroups`) counting as a member; it reports the users it
   let in that portitor-config doesn't have (`GET /v1/directory/logins`), kills sessions of users no longer allowed on
   apply, and restarts OpenVPN when the certificate's files change (`watchCert`). The
-  certificate is an instance certificate by id (`refuseOpenVPNCertificate`), read
+  certificate is an instance certificate by name (`confcheck` `checkOpenVPN`), read
   from `Paths.CertificateDir`; the client config's CA is the chain's root
   (`GET /v1/openvpn/<instance>/ca`). In bundles, `ovpn_certificate_id` is set after
   the insert (`bundleDeferred`) and `ovpn_role_id` cleared.
@@ -709,7 +717,7 @@ the certificate portitor-config serves, chosen under Settings
   `internal/agent/policyroute.go`, Routing → Policy) are per instance
   (`policy_routes`, ordered by `position`, the first match decides): a forward
   rule's match (interface and zone names, addresses and IP lists, services; kept
-  by `ifaceLists`, `eachObjectRef`, `eachServiceRef` and `eachIPListRef`) and a
+  by `ifaceLists`, `eachObjectRef`, `eachServiceRef` and the IP lists' rename) and a
   gateway (address or host, one per IP version) and/or interface (by id, removed
   with it); neither is an exception that keeps the main table. The ruleset's
   `prerouting_policy` chain (priority mangle + 1, after NAT64's, leaving marked
@@ -892,7 +900,7 @@ them first; commit only when asked to, each time.
   stale WireGuard configs are removed from `/etc/wireguard`. A default instance
   from before this layout is moved on apply (`Agent.moveDefaultInstance`). The
   GUI doesn't list it under Virtual firewalls; it is the first instance, its
-  flag never moves and it can't be deleted (`prepareInstance`, `deleteInstance`).
+  flag never moves and it can't be deleted (`confcheck` `normalizeInstance`/`checkInstance`).
 - dnsmgr2 does DNS only. The DHCP server's config (`render/dhcpd.go`, reservations
   from A/AAAA records with a MAC included, and the RAs) is rendered directly: the DHCP
   subnets of one IP version on an interface are served together, so clients get

@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
-	"reflect"
 	"slices"
 	"strings"
 	"time"
@@ -20,10 +19,8 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"github.com/abundo/portitor/internal/acme"
-	"github.com/abundo/portitor/internal/builder"
 	"github.com/abundo/portitor/internal/cron"
 	"github.com/abundo/portitor/internal/datastore"
-	"github.com/abundo/portitor/internal/datastore/sqlmap"
 	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/internal/wgkeys"
 	"github.com/abundo/portitor/models"
@@ -93,42 +90,6 @@ func lookupAction(t *datastore.Tree, p datastore.Path, name string) (configActio
 	}
 	a, ok := configActions[ss[len(ss)-1].Path()][name]
 	return a, ok
-}
-
-// entryModel decodes the entry at p of tree into dst, a pointer to the
-// model of its table, as the code that took a table's row expects it.
-func (s *Server) entryModel(tree *datastore.Tree, p datastore.Path, dst any) error {
-	t, err := s.tree()
-	if err != nil {
-		return err
-	}
-	n, _, err := tree.Find(p)
-	if err != nil {
-		return err
-	}
-	if n == nil {
-		return &notFound{p.String(tree.Root.S)}
-	}
-	table := t.mapping.TableOf(n.S)
-	if table == "" {
-		return fmt.Errorf("%s is not a row of a table", p.String(tree.Root.S))
-	}
-	rows, idx, err := t.mapping.Rows(s.db, tree)
-	if err != nil {
-		return err
-	}
-	id := idx[n]
-	for _, r := range rows[table] {
-		if fmt.Sprint(r["id"]) == fmt.Sprint(id) {
-			slice := reflect.New(reflect.SliceOf(reflect.TypeOf(dst).Elem()))
-			if err := builder.DecodeRows([]sqlmap.Row{r}, slice.Interface()); err != nil {
-				return err
-			}
-			reflect.ValueOf(dst).Elem().Set(slice.Elem().Index(0))
-			return nil
-		}
-	}
-	return errors.New("no row for " + p.String(tree.Root.S))
 }
 
 // runAction runs the action named on the entry of the request's path.

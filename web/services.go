@@ -63,26 +63,6 @@ func prepareService(tx *gorm.DB, s, old *models.Service) error {
 	return nil
 }
 
-func deleteService(tx *gorm.DB, s *models.Service) error {
-	var users []string
-	err := eachServiceRef(tx, func(where string, entry *string) bool {
-		if *entry == s.Name && (len(users) == 0 || users[len(users)-1] != where) {
-			users = append(users, where)
-		}
-		return false
-	})
-	if err != nil {
-		return err
-	}
-	if len(users) > 0 {
-		if len(users) > 5 {
-			users = append(users[:5], "...")
-		}
-		return bad(fmt.Sprintf("%s is used by %s", s.Name, strings.Join(users, ", ")))
-	}
-	return nil
-}
-
 // eachServiceRef calls visit for every entry of the rules' and policy
 // routes' service lists. Rows where visit changed an entry are saved.
 func eachServiceRef(tx *gorm.DB, visit func(where string, entry *string) bool) error {

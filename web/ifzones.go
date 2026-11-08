@@ -90,43 +90,6 @@ func checkNewIfaceName(tx *gorm.DB, instanceID uint, name, field string) error {
 	return nil
 }
 
-func prepareInterfaceZone(tx *gorm.DB, z, old *models.InterfaceZone) error {
-	if err := instanceExists(tx, z.InstanceID); err != nil {
-		return err
-	}
-	if old != nil && old.InstanceID != z.InstanceID {
-		return bad("an interface zone cannot move to another virtual firewall")
-	}
-	z.Name = strings.TrimSpace(z.Name)
-	if !fwconfig.ValidName(z.Name) {
-		return bad("name: no control characters")
-	}
-	names, err := ifaceNames(tx, z.InstanceID)
-	if err != nil {
-		return err
-	}
-	if names[z.Name] {
-		return bad(fmt.Sprintf("name: %s is an interface of this virtual firewall", z.Name))
-	}
-	if vrfExists(tx, z.InstanceID, z.Name) {
-		return bad(fmt.Sprintf("name: a VRF is named %s", z.Name))
-	}
-	z.Interfaces = dedupe(cleanList(z.Interfaces))
-	for _, m := range z.Interfaces {
-		if !names[m] {
-			return bad(fmt.Sprintf("interfaces: %q is not an interface of this virtual firewall", m))
-		}
-	}
-	if old != nil && old.Name != z.Name {
-		return renameIfaceRefs(tx, z.InstanceID, old.Name, z.Name, false)
-	}
-	return nil
-}
-
-func deleteInterfaceZone(tx *gorm.DB, z *models.InterfaceZone) error {
-	return refuseIfaceInUse(tx, z.InstanceID, z.Name)
-}
-
 // ifaceLists visits every interface list of the instance's rules, NAT
 // rules and policy routes (and, with zones, of its interface zones). Rows
 // where visit returns true are saved.
@@ -380,29 +343,6 @@ func refuseIfaceMove(tx *gorm.DB, i *models.Interface) error {
 		users = append(users[:5], "...")
 	}
 	return bad(fmt.Sprintf("%s cannot move to another virtual firewall while it is used by %s", i.Name, strings.Join(users, ", ")))
-}
-
-func deleteInterface(tx *gorm.DB, i *models.Interface) error {
-	if err := refuseDyndnsIface(tx, i); err != nil {
-		return err
-	}
-	if err := refuseCertificateIface(tx, i); err != nil {
-		return err
-	}
-	if err := refuseProxyIface(tx, i); err != nil {
-		return err
-	}
-	if err := refuseDelegatedUsers(tx, i, "be deleted"); err != nil {
-		return err
-	}
-	return removeIface(tx, i.InstanceID, i.Name)
-}
-
-func deleteLink(tx *gorm.DB, l *models.Link) error {
-	if err := removeIface(tx, l.InstanceAID, l.InterfaceA); err != nil {
-		return err
-	}
-	return removeIface(tx, l.InstanceBID, l.InterfaceB)
 }
 
 // memberLists visits the member lists of the instance's bridges, saving

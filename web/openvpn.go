@@ -142,38 +142,6 @@ func ifaceNamed(tx *gorm.DB, instanceID uint, name string) (bool, error) {
 	return n > 0, err
 }
 
-// tenantOpenVPN keeps an instance admin's OpenVPN to the users of their
-// virtual firewall: its role's members only, not every user of the
-// firewall.
-func (s *Server) tenantOpenVPN(i *models.Interface) error {
-	if i.Kind != fwconfig.KindOpenVPN {
-		return nil
-	}
-	var in models.Instance
-	var r models.Role
-	if err := s.db.First(&in, i.InstanceID).Error; err != nil {
-		return bad("OpenVPN: no such virtual firewall")
-	}
-	if err := s.db.Where("instance = ?", in.Name).First(&r).Error; err != nil {
-		return bad("OpenVPN: only a global admin sets up OpenVPN here")
-	}
-	i.OvpnRoleID = &r.ID
-	return nil
-}
-
-// refuseOpenVPNCertificate refuses deleting a certificate an OpenVPN
-// server uses.
-func refuseOpenVPNCertificate(tx *gorm.DB, c *models.Certificate) error {
-	return usedBy(tx, "certificate "+c.Name, &models.Interface{}, "ovpn_certificate_id", c.ID, func() []string {
-		var names []string
-		tx.Model(&models.Interface{}).Where("ovpn_certificate_id = ?", c.ID).Order("name").Pluck("name", &names)
-		for j := range names {
-			names[j] = "OpenVPN " + names[j]
-		}
-		return names
-	})
-}
-
 // refuseOpenVPNRole refuses deleting a role an OpenVPN server requires.
 func refuseOpenVPNRole(tx *gorm.DB, r *models.Role) error {
 	return usedBy(tx, "role "+r.Name, &models.Interface{}, "ovpn_role_id", r.ID, func() []string {

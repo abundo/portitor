@@ -4,56 +4,18 @@
 package web
 
 import (
-	"fmt"
 	"log/slog"
 	"net/http"
-	"net/netip"
-	"strings"
 
 	"github.com/labstack/echo/v5"
-	"gorm.io/gorm"
 
 	"github.com/abundo/portitor/internal/agentapi"
-	"github.com/abundo/portitor/internal/fwconfig"
-	"github.com/abundo/portitor/models"
 )
 
 // Syslog: the remote syslog servers rsyslog sends a firewall's journal to,
 // rows of its default instance (the journal is the host's, with every
 // virtual firewall's services in it), written by global admins only; and
 // the journal itself, followed by global admins only.
-
-func prepareSyslogServer(tx *gorm.DB, s, old *models.SyslogServer) error {
-	if old != nil {
-		s.InstanceID = old.InstanceID
-	}
-	var in models.Instance
-	if err := tx.Select("id", "is_default").First(&in, s.InstanceID).Error; err != nil {
-		return bad("virtual firewall does not exist")
-	}
-	if !in.IsDefault {
-		return bad("syslog servers are the firewall's: add them to its default virtual firewall")
-	}
-	s.Address = strings.TrimSpace(s.Address)
-	if a, err := netip.ParseAddr(s.Address); err == nil {
-		s.Address = a.Unmap().String()
-	}
-	if s.Port == 0 {
-		s.Port = fwconfig.SyslogPort
-	}
-	if errs := fwconfig.CheckSyslogServer(s.Server()); len(errs) > 0 {
-		return bad(fmt.Sprintf("syslog server %s: %s", s.Address, strings.Join(errs, "; ")))
-	}
-	var n int64
-	if err := tx.Model(&models.SyslogServer{}).Where("instance_id = ? AND address = ? AND port = ? AND protocol = ? AND id <> ?",
-		s.InstanceID, s.Address, s.Port, s.Protocol, s.ID).Count(&n).Error; err != nil {
-		return err
-	}
-	if n > 0 {
-		return bad(fmt.Sprintf("there is already a syslog server %s port %s/%d", s.Address, s.Protocol, s.Port))
-	}
-	return nil
-}
 
 // handleAgentSyslog passes on the state of rsyslog and the journal on the
 // firewall in ?firewall_id= (the first by default).

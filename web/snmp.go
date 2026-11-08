@@ -4,7 +4,6 @@
 package web
 
 import (
-	"fmt"
 	"strings"
 
 	"gorm.io/gorm"
@@ -55,40 +54,6 @@ func prepareInstanceSNMP(tx *gorm.DB, in *models.Instance) error {
 func presentInstance(in *models.Instance) {
 	in.HasSnmpCommunity = in.SnmpCommunity != ""
 	in.NewSnmpCommunity, in.ClearSnmpCommunity = "", false
-}
-
-func prepareSnmpUser(tx *gorm.DB, u, old *models.SnmpUser) error {
-	if old != nil {
-		u.InstanceID = old.InstanceID
-	}
-	if err := instanceExists(tx, u.InstanceID); err != nil {
-		return err
-	}
-	u.Name = strings.TrimSpace(u.Name)
-	if u.NewAuthPassword != "" {
-		u.AuthPassword = u.NewAuthPassword
-	}
-	if u.NewPrivPassword != "" {
-		u.PrivPassword = u.NewPrivPassword
-	}
-	u.NewAuthPassword, u.NewPrivPassword = "", ""
-	if u.PrivProtocol == "" {
-		u.PrivPassword = ""
-	}
-	if errs := fwconfig.CheckSNMPUser(u.User()); len(errs) > 0 {
-		return bad(fmt.Sprintf("SNMPv3 user %s: %s", u.Name, strings.Join(errs, "; ")))
-	}
-	if u.AuthPassword == u.PrivPassword {
-		return bad("SNMPv3 user " + u.Name + ": use a different privacy password than the authentication one")
-	}
-	var n int64
-	if err := tx.Model(&models.SnmpUser{}).Where("instance_id = ? AND name = ? AND id <> ?", u.InstanceID, u.Name, u.ID).Count(&n).Error; err != nil {
-		return err
-	}
-	if n > 0 {
-		return bad(fmt.Sprintf("there is already an SNMPv3 user %s", u.Name))
-	}
-	return nil
 }
 
 func presentSnmpUser(u *models.SnmpUser) {

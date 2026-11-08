@@ -84,12 +84,6 @@ func (a *access) isAdmin() bool { return a.global == models.RoleAdmin }
 // readsAll: a global admin or viewer.
 func (a *access) readsAll() bool { return a.isAdmin() || a.global == models.RoleViewer }
 
-func (a *access) canReadName(name string) bool { return a.readsAll() || a.levels[name] != "" }
-
-func (a *access) canWriteName(name string) bool {
-	return a.isAdmin() || a.levels[name] == models.RoleAdmin
-}
-
 func (a *access) canRead(id uint) bool { return a.readsAll() || a.levels[a.ids[id]] != "" }
 
 func (a *access) canWrite(id uint) bool {
@@ -146,22 +140,6 @@ func (a *access) readable() []uint {
 	return ids
 }
 
-// writable lists the rows of the instances the user changes; nil for a
-// global admin.
-func (a *access) writable() []uint {
-	if a.isAdmin() {
-		return nil
-	}
-	ids := []uint{}
-	for id, name := range a.ids {
-		if a.levels[name] == models.RoleAdmin {
-			ids = append(ids, id)
-		}
-	}
-	slices.Sort(ids)
-	return ids
-}
-
 // writesAny: a global admin or the admin of an instance.
 func (a *access) writesAny() bool { return a.isAdmin() || len(a.writableNames()) > 0 }
 
@@ -202,17 +180,6 @@ func allowInstance(c *echo.Context, id uint, write bool) (bool, error) {
 		return false, errJSON(c, http.StatusNotFound, "not found")
 	}
 	return false, errJSON(c, http.StatusForbidden, "you can't change this virtual firewall")
-}
-
-// allowRow is allowInstance for the row id of table (with an instance_id).
-func allowRow(c *echo.Context, tx *gorm.DB, table string, id uint, write bool) (bool, error) {
-	inst, err := instanceOf(tx, table, id)
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return false, errJSON(c, http.StatusNotFound, "not found")
-	} else if err != nil {
-		return false, err
-	}
-	return allowInstance(c, inst, write)
 }
 
 // scope tells which instances a row belongs to.

@@ -603,21 +603,6 @@ func insertRow(ctx context.Context, tx sqlRunner, t string, cols []string, r bun
 	return res.LastInsertId()
 }
 
-func updateRow(ctx context.Context, tx sqlRunner, t string, cols []string, id int64, r bundleRow) error {
-	var sets []string
-	var args []any
-	for _, c := range cols {
-		v, ok := r[c]
-		if !ok || c == "id" || c == "created_at" {
-			continue
-		}
-		sets = append(sets, fmt.Sprintf("%q = ?", c))
-		args = append(args, v)
-	}
-	_, err := tx.ExecContext(ctx, fmt.Sprintf("UPDATE %q SET %s WHERE id = ?", t, strings.Join(sets, ", ")), append(args, id)...)
-	return err
-}
-
 // foldersParentsFirst orders folders so each comes after its parent.
 func foldersParentsFirst(rows []bundleRow) []bundleRow {
 	var out []bundleRow

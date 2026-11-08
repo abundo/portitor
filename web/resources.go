@@ -5,7 +5,6 @@ package web
 
 import (
 	"fmt"
-	"net"
 	"net/netip"
 	"reflect"
 	"slices"
@@ -578,85 +577,6 @@ func presentWgPeer(p *models.WgPeer) {
 	p.HasClientKey = p.ClientPrivateKey != ""
 }
 
-func prepareLink(tx *gorm.DB, l, old *models.Link) error {
-	l.Name = strings.TrimSpace(l.Name)
-	if !fwconfig.ValidName(l.Name) {
-		return bad("name: no control characters")
-	}
-	if l.InstanceAID == l.InstanceBID {
-		return bad("a link connects two different virtual firewalls")
-	}
-	if err := sameFirewall(tx, l.InstanceAID, l.InstanceBID); err != nil {
-		return err
-	}
-	l.InterfaceA, l.InterfaceB = strings.TrimSpace(l.InterfaceA), strings.TrimSpace(l.InterfaceB)
-	for _, end := range []struct {
-		inst  uint
-		iface string
-		addrs *models.StringList
-		label string
-	}{
-		{l.InstanceAID, l.InterfaceA, &l.AddressesA, "side A"},
-		{l.InstanceBID, l.InterfaceB, &l.AddressesB, "side B"},
-	} {
-		if err := instanceExists(tx, end.inst); err != nil {
-			return bad(end.label + ": virtual firewall does not exist")
-		}
-		if !fwconfig.ValidIfname(end.iface) {
-			return bad(end.label + ": interface name is required")
-		}
-		if err := checkNewIfaceName(tx, end.inst, end.iface, end.label+" interface"); err != nil {
-			return err
-		}
-		addrs, err := ifaceAddrs(end.label+" addresses", *end.addrs, false)
-		if err != nil {
-			return err
-		}
-		*end.addrs = addrs
-	}
-	if old != nil {
-		if err := ifaceMoved(tx, old.InstanceAID, old.InterfaceA, l.InstanceAID, l.InterfaceA); err != nil {
-			return err
-		}
-		if err := ifaceMoved(tx, old.InstanceBID, old.InterfaceB, l.InstanceBID, l.InterfaceB); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func prepareStaticNeighbour(tx *gorm.DB, n, old *models.StaticNeighbour) error {
-	if old != nil {
-		n.InstanceID = old.InstanceID // rows stay in their instance
-	}
-	if err := instanceExists(tx, n.InstanceID); err != nil {
-		return err
-	}
-	n.Description = strings.TrimSpace(n.Description)
-	a, err := netip.ParseAddr(strings.TrimSpace(n.Address))
-	if err != nil || a.Zone() != "" || a.Is4In6() || a.IsMulticast() || a.IsUnspecified() {
-		return bad("address must be an IPv4 or IPv6 address")
-	}
-	n.Address = a.String()
-	mac, err := net.ParseMAC(strings.TrimSpace(n.MAC))
-	if err != nil || len(mac) != 6 {
-		return bad("MAC must be 6 bytes, like 0200.5e00.0101 or 02:00:5e:00:01:01")
-	}
-	n.MAC = mac.String()
-	var i models.Interface
-	if tx.First(&i, n.InterfaceID).Error != nil || i.InstanceID != n.InstanceID {
-		return bad("interface must belong to the same virtual firewall")
-	}
-	var c int64
-	if err := tx.Model(&models.StaticNeighbour{}).Where("interface_id = ? AND address = ? AND id <> ?", n.InterfaceID, n.Address, n.ID).Count(&c).Error; err != nil {
-		return err
-	}
-	if c > 0 {
-		return bad(fmt.Sprintf("%s already has a static entry on %s", n.Address, i.Name))
-	}
-	return nil
-}
-
 func prepareRoute(tx *gorm.DB, r, _ *models.Route) error {
 	if err := instanceExists(tx, r.InstanceID); err != nil {
 		return err
@@ -702,53 +622,6 @@ func prepareRoute(tx *gorm.DB, r, _ *models.Route) error {
 	}
 	if r.Bfd && r.Metric > 255 {
 		return bad("with BFD, the metric is FRR's administrative distance: 0-255")
-	}
-	return nil
-}
-
-func preparePolicyRoute(tx *gorm.DB, r, old *models.PolicyRoute) error {
-	if old != nil {
-		r.InstanceID = old.InstanceID // rows stay in their instance
-	}
-	if err := instanceExists(tx, r.InstanceID); err != nil {
-		return err
-	}
-	if err := oneOf("family", r.Family, "", "ipv4", "ipv6"); err != nil {
-		return err
-	}
-	r.InInterfaces = dedupe(cleanList(r.InInterfaces))
-	if err := checkIfaceList(tx, r.InstanceID, "incoming interfaces", r.InInterfaces); err != nil {
-		return err
-	}
-	r.SrcAddrs, r.DstAddrs = cleanList(r.SrcAddrs), cleanList(r.DstAddrs)
-	if err := checkEntries(tx, "source", r.SrcAddrs, entryRule); err != nil {
-		return err
-	}
-	if err := checkEntries(tx, "destination", r.DstAddrs, entryRule); err != nil {
-		return err
-	}
-	r.Services = dedupe(cleanList(r.Services))
-	if err := checkServices(tx, r.Services); err != nil {
-		return err
-	}
-	r.Gateway = strings.TrimSpace(r.Gateway)
-	if r.Gateway != "" {
-		if err := checkHost(tx, "gateway", r.Gateway); err != nil {
-			return err
-		}
-	}
-	if r.InterfaceID != nil {
-		var i models.Interface
-		if tx.First(&i, *r.InterfaceID).Error != nil || i.InstanceID != r.InstanceID {
-			return bad("interface must belong to the same virtual firewall")
-		}
-		if i.Vrf != "" {
-			return bad(fmt.Sprintf("interface %s is in VRF %s; policy routes use the main table", i.Name, i.Vrf))
-		}
-	}
-	r.Description = strings.TrimSpace(r.Description)
-	if old == nil && r.Position == 0 {
-		r.Position = nextPosition(tx, "policy_routes", r.InstanceID)
 	}
 	return nil
 }
@@ -994,31 +867,6 @@ func prepareIpamPrefix(tx *gorm.DB, p, _ *models.IpamPrefix) error {
 	return nil
 }
 
-func prepareIpamAddress(tx *gorm.DB, a, _ *models.IpamAddress) error {
-	if err := instanceExists(tx, a.InstanceID); err != nil {
-		return err
-	}
-	ip, err := fwconfig.ParseAddr(strings.TrimSpace(a.Address))
-	if err != nil {
-		return bad("address must be a plain IP address, e.g. 192.168.1.10")
-	}
-	a.Address = ip.String()
-	a.DnsName = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(a.DnsName), "."))
-	if a.DnsName != "" && !fwconfig.ValidDomain(a.DnsName) {
-		return bad("DNS name must be a fully qualified name, e.g. nas.home.arpa")
-	}
-	a.Mac = normalizeMAC(a.Mac)
-	if a.Mac != "" {
-		if !fwconfig.ValidMAC(a.Mac) {
-			return bad("MAC must look like 0200.0000.0001 or 02:00:00:00:00:01")
-		}
-		if a.DnsName == "" {
-			return bad("a DHCP reservation needs a DNS name (reservations are made from DNS records)")
-		}
-	}
-	return nil
-}
-
 func prepareDnsZone(tx *gorm.DB, z, old *models.DnsZone) error {
 	if err := instanceExists(tx, z.InstanceID); err != nil {
 		return err
@@ -1196,22 +1044,6 @@ func prepareDnsSoaTemplate(tx *gorm.DB, s, old *models.DnsSoaTemplate) error {
 	return checkDNS(fwconfig.DNSServer{SOATemplates: []fwconfig.DNSSOATemplate{soaDoc(s)}})
 }
 
-func prepareDnsDnssecPolicy(tx *gorm.DB, k, old *models.DnsDnssecPolicy) error {
-	for _, f := range []*string{&k.Name, &k.KskLifetime, &k.KskAlgorithm, &k.ZskLifetime, &k.ZskAlgorithm,
-		&k.PurgeKeys, &k.SignaturesValidity, &k.SignaturesValidityDnskey, &k.SignaturesRefresh} {
-		*f = strings.TrimSpace(*f)
-	}
-	if err := dnsOwner(tx, "dns_dnssec_policies", k.ID, k.InstanceID, oldInstance(old), k.Global, k.Name); err != nil {
-		return err
-	}
-	if old != nil && old.Global && !k.Global {
-		if err := stillGlobal(tx, k.Name, &models.DnsTemplate{}, "dnssec_policy_id", k.ID, k.InstanceID, templateNames(tx, "dnssec_policy_id", k.ID)); err != nil {
-			return err
-		}
-	}
-	return checkDNS(fwconfig.DNSServer{DNSSECPolicies: []fwconfig.DNSSECPolicy{dnssecDoc(k)}})
-}
-
 func prepareDnsTemplate(tx *gorm.DB, t, old *models.DnsTemplate) error {
 	t.Name = strings.TrimSpace(t.Name)
 	if err := dnsOwner(tx, "dns_templates", t.ID, t.InstanceID, oldInstance(old), t.Global, t.Name); err != nil {
@@ -1298,18 +1130,6 @@ func templateNames(tx *gorm.DB, column string, id uint) func() []string {
 		}
 		return names
 	}
-}
-
-func deleteDnsSoaTemplate(tx *gorm.DB, s *models.DnsSoaTemplate) error {
-	return usedBy(tx, s.Name, &models.DnsTemplate{}, "soa_template_id", s.ID, templateNames(tx, "soa_template_id", s.ID))
-}
-
-func deleteDnsDnssecPolicy(tx *gorm.DB, k *models.DnsDnssecPolicy) error {
-	return usedBy(tx, k.Name, &models.DnsTemplate{}, "dnssec_policy_id", k.ID, templateNames(tx, "dnssec_policy_id", k.ID))
-}
-
-func deleteDnsTemplate(tx *gorm.DB, t *models.DnsTemplate) error {
-	return usedBy(tx, t.Name, &models.DnsZone{}, "dns_template_id", t.ID, zoneNames(tx, t.ID))
 }
 
 func zoneNames(tx *gorm.DB, templateID uint) func() []string {

@@ -267,18 +267,6 @@ func firstFirewallID(tx *gorm.DB) (uint, error) {
 	return fw.ID, nil
 }
 
-// sameFirewall refuses a link between instances on different firewalls.
-func sameFirewall(tx *gorm.DB, a, b uint) error {
-	var ins []models.Instance
-	if err := tx.Select("id", "firewall_id").Where("id IN ?", []uint{a, b}).Find(&ins).Error; err != nil {
-		return err
-	}
-	if len(ins) == 2 && ins[0].FirewallID != ins[1].FirewallID {
-		return bad("a link joins virtual firewalls on the same firewall only")
-	}
-	return nil
-}
-
 // ensureFirewall creates the first firewall if there is none.
 func (s *Server) ensureFirewall() error {
 	return s.db.Transaction(func(tx *gorm.DB) error {
