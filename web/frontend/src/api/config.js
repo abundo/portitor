@@ -27,7 +27,11 @@ const url = (ds, p) => `/config/${ds}/${p}`
 
 export const config = {
   schema: () => http.get('/schema').then((r) => r.data),
-  get: (p, ds = 'candidate', params = {}) => http.get(url(ds, p), { params }).then((r) => r.data),
+  // Reads report the defaults of unset leaves, as a form shows them.
+  get: (p, ds = 'candidate', params = {}) =>
+    http
+      .get(url(ds, p), { params: { 'with-defaults': 'report-all', ...params } })
+      .then((r) => r.data),
   put: (p, body) => http.put(url('candidate', p), body).then((r) => r.data),
   patch: (p, body) => http.patch(url('candidate', p), body).then((r) => r.data),
   post: (p, body) => http.post(url('candidate', p), body).then((r) => r.data),

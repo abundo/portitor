@@ -54,8 +54,15 @@ function changed() {
 }
 
 // A global DNS template uses only global SOA templates and policies.
+// The others show, disabled, with why.
 const choices = (list, form) =>
-  list.filter((x) => !form.global || x.global).map((x) => ({ label: x.name, value: x.name }))
+  list.map((x) => ({
+    label: x.name,
+    value: x.name,
+    ...(form.global && !x.global
+      ? { disabled: true, description: 'not global: a global template takes global ones only' }
+      : {}),
+  }))
 
 // Global: the default virtual firewall's, offered to all, read-only there.
 const globalField = {

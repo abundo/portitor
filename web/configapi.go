@@ -139,8 +139,11 @@ func (s *Server) handleConfigGet(c *echo.Context) error {
 	}
 	// ?shallow: the node's own leaves (each entry's, for a list), without
 	// what is nested in it.
-	_, shallow := c.Request().URL.Query()["shallow"]
-	body, err := configJSON(tree.Visible(acc.CanRead), p, shallow)
+	// ?with-defaults=report-all (RFC 8040): unset leaves with their default.
+	q := c.Request().URL.Query()
+	_, shallow := q["shallow"]
+	body, err := configJSON(tree.Visible(acc.CanRead), p, datastore.JSONOptions{
+		SecretsSet: true, Shallow: shallow, Defaults: q.Get("with-defaults") == "report-all"})
 	if err != nil {
 		var nf *notFound
 		if errors.As(err, &nf) {
@@ -156,12 +159,11 @@ type notFound struct{ what string }
 func (e *notFound) Error() string { return e.what + " is not there" }
 
 // configJSON is the JSON of what is at p in t.
-func configJSON(t *datastore.Tree, p datastore.Path, shallow bool) ([]byte, error) {
+func configJSON(t *datastore.Tree, p datastore.Path, o datastore.JSONOptions) ([]byte, error) {
 	ss, err := datastore.ResolveAll(t.Root.S, p)
 	if err != nil {
 		return nil, err
 	}
-	o := datastore.JSONOptions{SecretsSet: true, Shallow: shallow}
 	if len(p) == 0 {
 		return t.JSON(o)
 	}

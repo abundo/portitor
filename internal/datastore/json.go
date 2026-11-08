@@ -21,6 +21,9 @@ type JSONOptions struct {
 	// an RFC 7952 annotation, "@auth-password": {"portitor:set": true}, so
 	// a client can show that it is set.
 	SecretsSet bool
+	// Defaults writes an unset leaf that has a default with it (RFC 6243
+	// report-all; RESTCONF's with-defaults=report-all).
+	Defaults bool
 	// Shallow writes a node's own leaves and leaf-lists, without its
 	// containers and lists (each entry's, for a list).
 	Shallow bool
@@ -91,6 +94,9 @@ func nodeValue(n *Node, o JSONOptions, top bool) ordered {
 		switch s.Kind {
 		case schema.Leaf:
 			v, ok := n.Leaves[s.Name]
+			if !ok && o.Defaults && s.HasDefault && !s.Secret() {
+				v, ok = s.Default, true
+			}
 			if ok && s.Secret() && !o.Secrets && o.SecretsSet {
 				out = append(out, member{"@" + name(s.Name), map[string]bool{SetAnnotation: true}})
 			}

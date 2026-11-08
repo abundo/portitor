@@ -213,6 +213,14 @@ func TestConfigAPISecretsAndMerge(t *testing.T) {
 	if !on(eth1, "snmp-serve") || eth1.Leaf("mtu") != "1400" || !on(env.node("instance=main"), "snmp-enabled") {
 		t.Errorf("merged: snmp-serve %q mtu %q", eth1.Leaf("snmp-serve"), eth1.Leaf("mtu"))
 	}
+	// with-defaults=report-all fills in the defaults of unset leaves.
+	env.put("instance=main/dns-soa-template=soa-1", map[string]any{"mname": "ns1.example.com", "rname": "hostmaster.example.com"})
+	if rec := env.mustCfg("GET", "instance=main/dns-soa-template=soa-1?with-defaults=report-all", nil); !strings.Contains(rec.Body.String(), `"refresh":"86400"`) {
+		t.Errorf("with defaults: %s", rec.Body)
+	}
+	if rec := env.mustCfg("GET", "instance=main/dns-soa-template=soa-1", nil); strings.Contains(rec.Body.String(), "refresh") {
+		t.Errorf("without: %s", rec.Body)
+	}
 	// ?shallow leaves out what is nested.
 	if rec := env.mustCfg("GET", "instance?shallow", nil); strings.Contains(rec.Body.String(), "eth1") || !strings.Contains(rec.Body.String(), `"snmp-enabled":true`) {
 		t.Errorf("shallow: %s", rec.Body)
