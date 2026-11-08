@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"slices"
 	"sort"
 
 	"gorm.io/gorm"
@@ -46,7 +47,10 @@ func (s *Server) syncNICs(firewallID uint, nics []agentapi.NICStatus) (*nicSync,
 	s.nicMu.Lock()
 	defer s.nicMu.Unlock()
 	res := &nicSync{Imported: []string{}, Missing: []missingNIC{}, Problems: []string{}}
-	err := s.db.Transaction(func(tx *gorm.DB) error {
+	// Names seen for the first time: rows of known_interfaces (no
+	// configuration), written once the change is made.
+	var newKnown []string
+	work := func(tx *gorm.DB) error {
 		var instances []models.Instance
 		var ifaces []models.Interface
 		var known []models.KnownInterface
@@ -96,9 +100,7 @@ func (s *Server) syncNICs(firewallID uint, nics []agentapi.NICStatus) (*nicSync,
 				continue
 			}
 			seen[n.Name] = true
-			if err := tx.Create(&models.KnownInterface{FirewallID: firewallID, Name: n.Name}).Error; err != nil {
-				return err
-			}
+			newKnown = append(newKnown, n.Name)
 			if inDB[n.Name] {
 				continue
 			}
@@ -120,14 +122,28 @@ func (s *Server) syncNICs(firewallID uint, nics []agentapi.NICStatus) (*nicSync,
 			res.Problems = append(res.Problems, notes...)
 		}
 		return nil
-	})
+	}
+	// A NIC not seen before is imported as a change of the candidate
+	// (viaTables); else nothing is written and the tables are only read.
+	var known []string
+	if err := s.db.Model(&models.KnownInterface{}).Where("firewall_id = ?", firewallID).Pluck("name", &known).Error; err != nil {
+		return nil, err
+	}
+	fresh := false
+	for _, n := range nics {
+		fresh = fresh || (n.Netns == "" && !slices.Contains(known, n.Name))
+	}
+	var err error
+	if fresh {
+		err = s.viaTables(context.Background(), work)
+	} else {
+		err = s.db.Transaction(work)
+	}
 	if err != nil {
 		return nil, err
 	}
-	// The tables are a cache of the candidate: what was imported into them
-	// becomes the candidate's.
-	if len(res.Imported) > 0 {
-		if err := s.syncFromTables(context.Background()); err != nil {
+	for _, name := range newKnown {
+		if err := s.db.Create(&models.KnownInterface{FirewallID: firewallID, Name: name}).Error; err != nil {
 			return nil, err
 		}
 	}

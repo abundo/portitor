@@ -35,7 +35,14 @@ const deploy = useDeployStore()
 const readOnly = computed(() => !auth.canEdit)
 const { auto, loading } = useStatusRefresh({ active: () => props.active })
 const params = computed(() => ({ _vf: store.currentId }))
-const dnsBlocklists = vfApi('dns-blocklist')
+// The feed is the form's (which public list fills the URLs), no leaf.
+const blocklistApi = vfApi('dns-blocklist')
+const withoutFeed = ({ feed, ...r }) => (void feed, r)
+const dnsBlocklists = {
+  ...blocklistApi,
+  create: (r) => blocklistApi.create(withoutFeed(r)),
+  update: (id, r) => blocklistApi.update(id, withoutFeed(r)),
+}
 const page = ref(null)
 
 const actions = [

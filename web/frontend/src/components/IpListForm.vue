@@ -10,7 +10,7 @@
 // country list (source country) has countries in place of a URL.
 import { computed, reactive, ref, toRaw } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
-import { ipLists } from '@/api/config'
+import { config, ipLists, path } from '@/api/config'
 import { errMsg } from '@/api/http'
 import { useAuthStore } from '@/stores/auth'
 import { useConfirm } from '@/composables/useConfirm'
@@ -76,13 +76,19 @@ function edit(src = {}) {
 
 async function save() {
   saving.value = true
+  // The schedule is no leaf of the list: a new list's task is made by its
+  // schedule action once the list is there.
   const body = { ...form }
-  if (!form.refresh) delete body.refresh_schedule
+  const schedule = !form.id && form.refresh ? form.refresh_schedule : ''
+  delete body.refresh_schedule
   delete body.feed
   delete body.refresh
   try {
     if (form.id) await ipLists.update(form.id, body)
-    else await ipLists.create(body)
+    else {
+      await ipLists.create(body)
+      if (schedule) await config.action(path(['ip-list', body.name]), 'schedule', { schedule })
+    }
     open.value = false
     emit('changed')
   } catch (err) {

@@ -297,9 +297,6 @@ async function moveTo(from, to) {
   const list = [...rows.value]
   const [item] = list.splice(from, 1)
   list.splice(to, 0, item)
-  // The server numbers positions like this; keep rows in step so a later
-  // PUT of a row doesn't send back a stale position.
-  list.forEach((r, i) => (r.position = (i + 1) * 10))
   rows.value = list
   try {
     await reorderTo(list.map((r) => r.id))
