@@ -783,7 +783,7 @@ singular); a custom page uses `SearchInput` above each table,
   in place, no detail view) are exempt from the table rules, and so is the
   packet capture's packet list (`PacketList`: Wireshark's display filter
   takes the search field's place), and so is the Hosts & prefixes tree
-  (`ObjectTree`, a Wunderbaum treegrid: a click opens the row's form, the
+  (`ObjectTree`, a Wunderbaum treegrid: a click shows the row's form beside the tree (`FormPane`), the
   context menu adds), and so is the Directory tree (`DirectoryPage`: a click
   shows the item's form beside the tree, `UserForm`, `RoleForm` or a server's,
   with its Save and Delete; no dialog). The rule's form is

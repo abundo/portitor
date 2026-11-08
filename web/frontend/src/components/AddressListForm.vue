@@ -3,7 +3,7 @@
 
 <script setup>
 // The form of an address list (address_lists): addresses, prefixes and the
-// names of hosts and other address lists. edit(row) opens it, edit() for a
+// names of hosts and other address lists. edit(row) shows it beside the tree, edit() for a
 // new one; `changed` follows a save or delete.
 import AddrInput from '@/components/AddrInput.vue'
 import { computed, reactive, ref, toRaw } from 'vue'
@@ -13,7 +13,8 @@ import { errMsg } from '@/api/http'
 import { useAuthStore } from '@/stores/auth'
 import { useConfirm } from '@/composables/useConfirm'
 import { useFormGuard } from '@/composables/useFormGuard'
-import { inlineField, wideModal } from '@/utils/form'
+import { inlineField } from '@/utils/form'
+import FormPane from '@/components/FormPane.vue'
 import { folderOptions } from '@/utils/folders'
 
 // folders: every folder (object_folders), for the Folder field.
@@ -64,62 +65,56 @@ async function remove() {
   }
 }
 
-defineExpose({ edit })
+// hide closes the form without asking (the page asked already).
+const hide = () => (open.value = false)
+
+defineExpose({ edit, hide, open })
 </script>
 
 <template>
-  <UModal
-    :open="open"
+  <FormPane
+    v-if="open"
     :title="!canEdit ? 'Address list' : form.id ? 'Edit address list' : 'New address list'"
-    :ui="wideModal"
-    :dismissible="false"
-    @update:open="guard.onUpdateOpen"
   >
-    <template #body>
-      <form id="addrlist-form" @submit.prevent="save">
-        <fieldset :disabled="!canEdit" class="space-y-3">
-          <UFormField :ui="inlineField" label="Name" required>
-            <UInput v-model="form.name" class="w-full" placeholder="servers" required />
-          </UFormField>
-          <UFormField
-            :ui="inlineField"
-            label="Entries"
-            help="IPv4 and IPv6 addresses and prefixes, and names of hosts or other address lists. In a rule's source or destination the list is an nftables set."
-          >
-            <AddrInput
-              v-model="form.entries"
-              multiple
-              :disabled="!canEdit"
-              placeholder="nas, 192.168.10.0/24, fd00:1::10"
-            />
-          </UFormField>
-          <UFormField :ui="inlineField" label="Description">
-            <UInput v-model="form.description" class="w-full" />
-          </UFormField>
-          <UFormField v-if="!readonly" :ui="inlineField" label="Folder">
-            <USelect v-model="form.folder_id" :items="folderItems" class="w-full" />
-          </UFormField>
-          <p v-if="readonly" class="text-sm text-muted">
-            Made from the configuration for an auto input rule; it changes with it.
-          </p>
-        </fieldset>
-      </form>
+    <template #actions>
+      <UButton
+        v-if="form.id && canEdit"
+        color="error"
+        variant="ghost"
+        icon="i-lucide-trash"
+        label="Delete"
+        @click="remove"
+      />
+      <UButton v-if="canEdit" color="neutral" variant="ghost" @click="guard.close">Cancel</UButton>
+      <UButton v-if="canEdit" type="submit" form="addrlist-form" :loading="saving">Save</UButton>
     </template>
-    <template #footer>
-      <div class="flex w-full gap-2">
-        <UButton
-          v-if="form.id && canEdit"
-          color="error"
-          variant="ghost"
-          icon="i-lucide-trash"
-          label="Delete"
-          @click="remove"
-        />
-        <UButton class="ms-auto" color="neutral" variant="ghost" @click="guard.close">{{
-          canEdit ? 'Cancel' : 'Close'
-        }}</UButton>
-        <UButton v-if="canEdit" type="submit" form="addrlist-form" :loading="saving">Save</UButton>
-      </div>
-    </template>
-  </UModal>
+    <form id="addrlist-form" @submit.prevent="save">
+      <fieldset :disabled="!canEdit" class="space-y-3">
+        <UFormField :ui="inlineField" label="Name" required>
+          <UInput v-model="form.name" class="w-full" placeholder="servers" required />
+        </UFormField>
+        <UFormField
+          :ui="inlineField"
+          label="Entries"
+          help="IPv4 and IPv6 addresses and prefixes, and names of hosts or other address lists. In a rule's source or destination the list is an nftables set."
+        >
+          <AddrInput
+            v-model="form.entries"
+            multiple
+            :disabled="!canEdit"
+            placeholder="nas, 192.168.10.0/24, fd00:1::10"
+          />
+        </UFormField>
+        <UFormField :ui="inlineField" label="Description">
+          <UInput v-model="form.description" class="w-full" />
+        </UFormField>
+        <UFormField v-if="!readonly" :ui="inlineField" label="Folder">
+          <USelect v-model="form.folder_id" :items="folderItems" class="w-full" />
+        </UFormField>
+        <p v-if="readonly" class="text-sm text-muted">
+          Made from the configuration for an auto input rule; it changes with it.
+        </p>
+      </fieldset>
+    </form>
+  </FormPane>
 </template>

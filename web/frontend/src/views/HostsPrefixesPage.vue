@@ -5,16 +5,19 @@
 // Hosts & prefixes: one tree of the named hosts and prefixes, the address
 // lists, the IP lists and the instance's prefix tree (IPAM), each a
 // top-level node. Hosts and address and IP lists can be sorted into folders
-// (object_folders), which only structure the page.
-import { computed, onMounted, reactive, ref } from 'vue'
+// (object_folders), which only structure the page. A click on a row shows
+// its form beside the tree, one form at a time.
+import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useToast } from '@nuxt/ui/composables'
 import ObjectTree from '@/components/ObjectTree.vue'
+import DhcpLeaseDetails from '@/components/DhcpLeaseDetails.vue'
 import DhcpLeasePicker from '@/components/DhcpLeasePicker.vue'
-import HostDialog from '@/components/HostDialog.vue'
-import IpListDialog from '@/components/IpListDialog.vue'
-import AddressListDialog from '@/components/AddressListDialog.vue'
-import FolderDialog from '@/components/FolderDialog.vue'
+import HostForm from '@/components/HostForm.vue'
+import IpListForm from '@/components/IpListForm.vue'
+import AddressListForm from '@/components/AddressListForm.vue'
+import FolderForm from '@/components/FolderForm.vue'
+import FormPane from '@/components/FormPane.vue'
 import SearchInput from '@/components/SearchInput.vue'
 import {
   addressLists,
@@ -32,8 +35,8 @@ import { useDeployStore } from '@/stores/deploy'
 import { useObjectStore } from '@/stores/objects'
 import { ago } from '@/utils/time'
 import { useConfirm } from '@/composables/useConfirm'
-import { useFormGuard } from '@/composables/useFormGuard'
-import { inlineField, wideModal } from '@/utils/form'
+import { confirmDiscard, useFormGuard } from '@/composables/useFormGuard'
+import { inlineField } from '@/utils/form'
 import { formatMac } from '@/utils/mac'
 import { matchesWords, searchWords, valuesText } from '@/utils/search'
 
@@ -249,10 +252,50 @@ function reloadTree() {
   loadTree().catch(showError)
 }
 
-const hostDialog = ref(null)
-const addrListDialog = ref(null)
-const listDialog = ref(null)
-const folderDialog = ref(null)
+const hostForm = ref(null)
+const addrListForm = ref(null)
+const listForm = ref(null)
+const folderForm = ref(null)
+
+// The pane beside the tree shows one form at a time. show() asks before
+// discarding the changes of the one shown, hides it and then opens the next
+// (a tick later, so the form guard records the new form, not the old one).
+function hideForms() {
+  for (const f of [hostForm, addrListForm, listForm, folderForm]) f.value?.hide()
+  prefixOpen.value = false
+  addrOpen.value = false
+  leasesIface.value = null
+}
+// A row from a DHCP lease shows the DHCP client leases of its interface
+// (by id), DHCPv4 and DHCPv6, in the pane.
+const leasesIface = ref(null)
+const ifaceLeases = computed(() => {
+  const name = ifaceList.value.find((i) => i.id === leasesIface.value)?.name
+  return clientLeases.value.filter(
+    (l) => l.instance === store.current?.name && l.interface === name,
+  )
+})
+const noDefaultRoute = (l) =>
+  !l.family && !!ifaceList.value.find((i) => i.id === leasesIface.value)?.dhcp_no_default_route
+
+async function show(openForm) {
+  if (!(await confirmDiscard())) return
+  hideForms()
+  await nextTick()
+  try {
+    await openForm()
+  } catch (err) {
+    showError(err)
+  }
+}
+// Whether a form is shown (else the pane says how to open one).
+const anyFormOpen = computed(
+  () =>
+    prefixOpen.value ||
+    addrOpen.value ||
+    leasesIface.value !== null ||
+    [hostForm, addrListForm, listForm, folderForm].some((f) => f.value?.open),
+)
 
 // The nodes of the Hosts or IP lists group: in each folder its folders,
 // then its items, both by name. count is the items a folder holds, those
@@ -633,15 +676,17 @@ function onToggle(key, expanded) {
   else collapsed.add(key)
 }
 
-// A click on a row opens its form.
+// A click on a row shows its form beside the tree; a row without one (a
+// group, an empty line) hides the form shown.
 function onOpen(data) {
   const r = data?.item
-  if (r?.type === 'folder') folderDialog.value.edit(r.obj)
-  else if (r?.type === 'host') hostDialog.value.edit(r.obj)
-  else if (r?.type === 'addrlist') addrListDialog.value.edit(r.obj)
-  else if (r?.type === 'autolist') addrListDialog.value.edit(r.obj, { readonly: true })
-  else if (r?.type === 'list') listDialog.value.edit(r.obj)
+  if (r?.type === 'folder') show(() => folderForm.value.edit(r.obj))
+  else if (r?.type === 'host') show(() => hostForm.value.edit(r.obj))
+  else if (r?.type === 'addrlist') show(() => addrListForm.value.edit(r.obj))
+  else if (r?.type === 'autolist') show(() => addrListForm.value.edit(r.obj, { readonly: true }))
+  else if (r?.type === 'list') show(() => listForm.value.edit(r.obj))
   else if (r?.type === 'ipam') onEdit(r.obj)
+  else show(() => {})
 }
 
 function rowMenu(data) {
@@ -746,22 +791,22 @@ function openMenu(event, items) {
 const addHost = (folderId) => ({
   label: 'Add host',
   icon: 'i-lucide-plus',
-  onSelect: () => hostDialog.value.edit({ folder_id: folderId }),
+  onSelect: () => show(() => hostForm.value.edit({ folder_id: folderId })),
 })
 const addAddrList = (folderId) => ({
   label: 'Add address list',
   icon: 'i-lucide-plus',
-  onSelect: () => addrListDialog.value.edit({ folder_id: folderId }),
+  onSelect: () => show(() => addrListForm.value.edit({ folder_id: folderId })),
 })
 const addList = (folderId) => ({
   label: 'Add IP list',
   icon: 'i-lucide-plus',
-  onSelect: () => listDialog.value.edit({ folder_id: folderId }),
+  onSelect: () => show(() => listForm.value.edit({ folder_id: folderId })),
 })
 const addFolder = (kind, parentId) => ({
   label: 'Add folder',
   icon: 'i-lucide-folder-plus',
-  onSelect: () => folderDialog.value.edit({ kind, parent_id: parentId }),
+  onSelect: () => show(() => folderForm.value.edit({ kind, parent_id: parentId })),
 })
 // A folder's menu adds into it; an item's adds next to it (its folder).
 function folderMenu(kind, folderId = null) {
@@ -790,8 +835,12 @@ function groupMenu(key) {
   if (!store.currentId || !auth.canEdit) return []
   return [
     [
-      { label: 'Add prefix', icon: 'i-lucide-git-branch-plus', onSelect: () => editPrefix({}) },
-      { label: 'Add address', icon: 'i-lucide-plus', onSelect: () => editAddress({}) },
+      {
+        label: 'Add prefix',
+        icon: 'i-lucide-git-branch-plus',
+        onSelect: () => show(() => editPrefix({})),
+      },
+      { label: 'Add address', icon: 'i-lucide-plus', onSelect: () => show(() => editAddress({})) },
     ],
   ]
 }
@@ -799,29 +848,38 @@ function nodeMenu(node) {
   if (node.kind !== 'prefix' || node.dhcp_lease || !auth.canEdit) return []
   return [
     [
-      { label: 'Add address', icon: 'i-lucide-plus', onSelect: () => onAddAddress(node) },
+      {
+        label: 'Add address',
+        icon: 'i-lucide-plus',
+        onSelect: () => show(() => onAddAddress(node)),
+      },
       {
         label: 'Add sub-prefix',
         icon: 'i-lucide-git-branch-plus',
-        onSelect: () => onAddPrefix(node),
+        onSelect: () => show(() => onAddPrefix(node)),
       },
     ],
   ]
 }
 
-// An auto node has no IPAM entry yet: editing it creates one, for a
+// A node from a DHCP lease shows its interface's leases. An auto node has
+// no IPAM entry yet: editing it creates one, for a
 // description on a prefix, a DNS name or MAC on an address. An
 // address that is there only for a zone's A/AAAA record opens the zone.
-async function onEdit(node) {
-  if (node.dhcp_lease) router.push('/dhcp')
+function onEdit(node) {
+  if (node.dhcp_lease) show(() => (leasesIface.value = node.interface_id))
   else if (node.auto && node.zone_id && !node.interface_id)
     router.push(`/dns/zones/${node.zone_id}`)
   else if (node.kind === 'prefix')
-    editPrefix(node.auto ? { prefix: node.cidr } : await ipamPrefixes.get(node.id))
+    show(async () =>
+      editPrefix(node.auto ? { prefix: node.cidr } : await ipamPrefixes.get(node.id)),
+    )
   else
-    editAddress(
-      node.auto ? { address: node.cidr } : await ipamAddresses.get(node.id),
-      node.interface_id,
+    show(async () =>
+      editAddress(
+        node.auto ? { address: node.cidr } : await ipamAddresses.get(node.id),
+        node.interface_id,
+      ),
     )
 }
 async function removePrefix() {
@@ -913,8 +971,8 @@ async function removeAddress() {
           </div>
           <p class="max-w-3xl text-sm text-muted">
             Named hosts and prefixes, address lists, downloaded IP lists, and the virtual firewall's
-            prefixes and addresses with their DNS names. Click a row to open it; right-click it to
-            add to it.
+            prefixes and addresses with their DNS names. Click a row to show its form beside the
+            tree; right-click it to add to it.
           </p>
         </div>
         <div v-if="auth.isAdmin || auth.canEdit" class="flex gap-2">
@@ -924,7 +982,7 @@ async function removeAddress() {
             variant="outline"
             icon="i-lucide-plus"
             label="Host"
-            @click="hostDialog.edit()"
+            @click="show(() => hostForm.edit())"
           />
           <UButton
             v-if="auth.isAdmin"
@@ -932,7 +990,7 @@ async function removeAddress() {
             variant="outline"
             icon="i-lucide-plus"
             label="Address list"
-            @click="addrListDialog.edit()"
+            @click="show(() => addrListForm.edit())"
           />
           <UButton
             v-if="auth.isAdmin"
@@ -940,14 +998,14 @@ async function removeAddress() {
             variant="outline"
             icon="i-lucide-plus"
             label="IP list"
-            @click="listDialog.edit()"
+            @click="show(() => listForm.edit())"
           />
           <UButton
             v-if="auth.canEdit"
             icon="i-lucide-plus"
             label="Prefix"
             :disabled="!store.currentId"
-            @click="editPrefix({})"
+            @click="show(() => editPrefix({}))"
           />
         </div>
       </div>
@@ -957,142 +1015,159 @@ async function removeAddress() {
       <div v-if="loading" class="flex justify-center p-6">
         <UIcon name="i-lucide-loader-2" class="size-7 animate-spin" />
       </div>
-      <UContextMenu v-else :items="menuItems">
-        <ObjectTree
-          :source="treeSource"
-          :columns="columns"
-          class="h-[calc(100vh-16rem)] min-h-96"
-          @open="onOpen"
-          @menu="(e, data) => openMenu(e, rowMenu(data))"
-          @toggle="onToggle"
-        />
-      </UContextMenu>
-    </div>
-
-    <HostDialog ref="hostDialog" :folders="folders" @changed="reloadHosts" />
-    <AddressListDialog ref="addrListDialog" :folders="folders" @changed="reloadAddrLists" />
-    <IpListDialog ref="listDialog" :folders="folders" @changed="reloadLists" />
-    <FolderDialog ref="folderDialog" :folders="folders" @changed="reloadFolders" />
-
-    <UModal
-      :open="prefixOpen"
-      :title="!auth.canEdit ? 'Prefix' : prefix.id ? 'Edit prefix' : 'Prefix settings'"
-      :ui="wideModal"
-      :dismissible="false"
-      @update:open="prefixGuard.onUpdateOpen"
-    >
-      <template #body>
-        <form id="prefix-form" @submit.prevent="savePrefix">
-          <fieldset :disabled="!auth.canEdit" class="space-y-3">
-            <UFormField :ui="inlineField" label="Prefix" required
-              ><UInput
-                v-model="prefix.prefix"
-                class="w-full font-mono"
-                placeholder="192.168.1.0/24 or fd00:1::/64"
-            /></UFormField>
-            <UFormField :ui="inlineField" label="Description"
-              ><UInput v-model="prefix.description" class="w-full"
-            /></UFormField>
-            <p class="text-sm text-muted">
-              DHCP and router advertisements are set per interface under
-              <RouterLink to="/dhcp?tab=server" class="text-primary">DHCP</RouterLink>.
-            </p>
-          </fieldset>
-        </form>
-      </template>
-      <template #footer>
-        <div class="flex w-full gap-2">
-          <UButton
-            v-if="prefix.id && auth.canEdit"
-            color="error"
-            variant="ghost"
-            icon="i-lucide-trash"
-            label="Delete"
-            @click="removePrefix"
-          />
-          <UButton class="ms-auto" color="neutral" variant="ghost" @click="prefixGuard.close">{{
-            auth.canEdit ? 'Cancel' : 'Close'
-          }}</UButton>
-          <UButton v-if="auth.canEdit" type="submit" form="prefix-form">Save</UButton>
+      <div v-else class="grid gap-4 xl:grid-cols-[minmax(0,3fr)_minmax(26rem,2fr)]">
+        <div class="min-w-0">
+          <UContextMenu :items="menuItems">
+            <ObjectTree
+              :source="treeSource"
+              :columns="columns"
+              class="h-[calc(100vh-16rem)] min-h-96"
+              @open="onOpen"
+              @menu="(e, data) => openMenu(e, rowMenu(data))"
+              @toggle="onToggle"
+            />
+          </UContextMenu>
         </div>
-      </template>
-    </UModal>
 
-    <UModal
-      :open="addrOpen"
-      :title="!auth.canEdit ? 'Address' : addr.id ? 'Edit address' : 'New address'"
-      :ui="wideModal"
-      :dismissible="false"
-      @update:open="addrGuard.onUpdateOpen"
-    >
-      <template #body>
-        <form id="addr-form" @submit.prevent="saveAddress">
-          <fieldset :disabled="!auth.canEdit" class="space-y-3">
-            <UFormField :ui="inlineField" label="Address" required
-              ><UInput
-                v-model="addr.address"
-                class="w-full font-mono"
-                placeholder="192.168.1.10"
-                :disabled="!!addrIface"
-            /></UFormField>
-            <p v-if="addrIface" class="text-sm text-muted">
-              The firewall's address on {{ ifaceName(addrIface) }}; it is set under
-              <RouterLink to="/interfaces" class="text-primary">Interfaces</RouterLink>.
-            </p>
-            <UFormField
-              :ui="inlineField"
-              label="DNS name"
-              help="Fully qualified, inside one of the virtual firewall's DNS zones."
-            >
-              <UInput
-                v-model="addr.dns_name"
-                class="w-full font-mono"
-                placeholder="nas.home.arpa"
+        <div
+          class="min-w-0 rounded-md border border-default p-3 xl:h-[calc(100vh-16rem)] xl:min-h-96"
+        >
+          <HostForm ref="hostForm" :folders="folders" @changed="reloadHosts" />
+          <AddressListForm ref="addrListForm" :folders="folders" @changed="reloadAddrLists" />
+          <IpListForm ref="listForm" :folders="folders" @changed="reloadLists" />
+          <FolderForm ref="folderForm" :folders="folders" @changed="reloadFolders" />
+          <FormPane
+            v-if="prefixOpen"
+            :title="!auth.canEdit ? 'Prefix' : prefix.id ? 'Edit prefix' : 'Prefix settings'"
+          >
+            <template #actions>
+              <UButton
+                v-if="prefix.id && auth.canEdit"
+                color="error"
+                variant="ghost"
+                icon="i-lucide-trash"
+                label="Delete"
+                @click="removePrefix"
               />
-            </UFormField>
-            <UFormField :ui="inlineField" label="MAC address (DHCP reservation)">
-              <div class="flex items-center gap-1">
-                <UInput
-                  v-model="addr.mac"
-                  class="w-full font-mono"
-                  placeholder="0200.0000.0010"
-                  @blur="addr.mac = formatMac(addr.mac)"
-                />
-                <UButton
-                  v-if="store.current?.dhcp_enabled"
-                  type="button"
-                  color="neutral"
-                  variant="ghost"
-                  icon="i-lucide-list"
-                  aria-label="Pick MAC from DHCP leases"
-                  title="Pick MAC from DHCP leases"
-                  @click="leasePickerOpen = true"
-                />
+              <UButton
+                v-if="auth.canEdit"
+                color="neutral"
+                variant="ghost"
+                @click="prefixGuard.close"
+                >Cancel</UButton
+              >
+              <UButton v-if="auth.canEdit" type="submit" form="prefix-form">Save</UButton>
+            </template>
+            <form id="prefix-form" @submit.prevent="savePrefix">
+              <fieldset :disabled="!auth.canEdit" class="space-y-3">
+                <UFormField :ui="inlineField" label="Prefix" required
+                  ><UInput
+                    v-model="prefix.prefix"
+                    class="w-full font-mono"
+                    placeholder="192.168.1.0/24 or fd00:1::/64"
+                /></UFormField>
+                <UFormField :ui="inlineField" label="Description"
+                  ><UInput v-model="prefix.description" class="w-full"
+                /></UFormField>
+                <p class="text-sm text-muted">
+                  DHCP and router advertisements are set per interface under
+                  <RouterLink to="/dhcp?tab=server" class="text-primary">DHCP</RouterLink>.
+                </p>
+              </fieldset>
+            </form>
+          </FormPane>
+          <FormPane
+            v-if="addrOpen"
+            :title="!auth.canEdit ? 'Address' : addr.id ? 'Edit address' : 'New address'"
+          >
+            <template #actions>
+              <UButton
+                v-if="addr.id && auth.canEdit"
+                color="error"
+                variant="ghost"
+                icon="i-lucide-trash"
+                label="Delete"
+                @click="removeAddress"
+              />
+              <UButton v-if="auth.canEdit" color="neutral" variant="ghost" @click="addrGuard.close"
+                >Cancel</UButton
+              >
+              <UButton v-if="auth.canEdit" type="submit" form="addr-form">Save</UButton>
+            </template>
+            <form id="addr-form" @submit.prevent="saveAddress">
+              <fieldset :disabled="!auth.canEdit" class="space-y-3">
+                <UFormField :ui="inlineField" label="Address" required
+                  ><UInput
+                    v-model="addr.address"
+                    class="w-full font-mono"
+                    placeholder="192.168.1.10"
+                    :disabled="!!addrIface"
+                /></UFormField>
+                <p v-if="addrIface" class="text-sm text-muted">
+                  The firewall's address on {{ ifaceName(addrIface) }}; it is set under
+                  <RouterLink to="/interfaces" class="text-primary">Interfaces</RouterLink>.
+                </p>
+                <UFormField
+                  :ui="inlineField"
+                  label="DNS name"
+                  help="Fully qualified, inside one of the virtual firewall's DNS zones."
+                >
+                  <UInput
+                    v-model="addr.dns_name"
+                    class="w-full font-mono"
+                    placeholder="nas.home.arpa"
+                  />
+                </UFormField>
+                <UFormField :ui="inlineField" label="MAC address (DHCP reservation)">
+                  <div class="flex items-center gap-1">
+                    <UInput
+                      v-model="addr.mac"
+                      class="w-full font-mono"
+                      placeholder="0200.0000.0010"
+                      @blur="addr.mac = formatMac(addr.mac)"
+                    />
+                    <UButton
+                      v-if="store.current?.dhcp_enabled"
+                      type="button"
+                      color="neutral"
+                      variant="ghost"
+                      icon="i-lucide-list"
+                      aria-label="Pick MAC from DHCP leases"
+                      title="Pick MAC from DHCP leases"
+                      @click="leasePickerOpen = true"
+                    />
+                  </div>
+                </UFormField>
+                <UFormField :ui="inlineField" label="Description"
+                  ><UInput v-model="addr.description" class="w-full"
+                /></UFormField>
+              </fieldset>
+            </form>
+          </FormPane>
+
+          <FormPane v-if="leasesIface !== null" :title="`DHCP leases on ${ifaceName(leasesIface)}`">
+            <template #actions>
+              <UButton color="neutral" variant="outline" to="/dhcp" label="DHCP page" />
+            </template>
+            <div class="space-y-4 text-sm">
+              <div v-for="l in ifaceLeases" :key="l.family || 'ipv4'">
+                <div class="mb-1 font-semibold">
+                  {{ l.family === 'ipv6' ? 'DHCPv6 client' : 'DHCPv4 client' }}
+                </div>
+                <DhcpLeaseDetails :lease="l" :no-default-route="noDefaultRoute(l)" />
               </div>
-            </UFormField>
-            <UFormField :ui="inlineField" label="Description"
-              ><UInput v-model="addr.description" class="w-full"
-            /></UFormField>
-          </fieldset>
-        </form>
-      </template>
-      <template #footer>
-        <div class="flex w-full gap-2">
-          <UButton
-            v-if="addr.id && auth.canEdit"
-            color="error"
-            variant="ghost"
-            icon="i-lucide-trash"
-            label="Delete"
-            @click="removeAddress"
-          />
-          <UButton class="ms-auto" color="neutral" variant="ghost" @click="addrGuard.close">{{
-            auth.canEdit ? 'Cancel' : 'Close'
-          }}</UButton>
-          <UButton v-if="auth.canEdit" type="submit" form="addr-form">Save</UButton>
+              <p v-if="!ifaceLeases.length" class="text-muted">
+                The interface's DHCP client holds no lease now.
+              </p>
+            </div>
+          </FormPane>
+
+          <p v-if="!anyFormOpen" class="p-3 text-sm text-muted">
+            Click a row to show its form here; right-click it to add to it.
+          </p>
         </div>
-      </template>
-    </UModal>
+      </div>
+    </div>
 
     <DhcpLeasePicker
       v-model:open="leasePickerOpen"

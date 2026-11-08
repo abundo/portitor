@@ -3,7 +3,7 @@
 
 <script setup>
 // The form of a folder of hosts, address lists or IP lists
-// (object_folders). edit(row) opens it, edit({ kind, parent_id }) for a new
+// (object_folders). edit(row) shows it beside the tree, edit({ kind, parent_id }) for a new
 // one; `changed` follows a save or delete. Only an empty folder can be deleted.
 import { computed, reactive, ref, toRaw } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
@@ -12,7 +12,8 @@ import { errMsg } from '@/api/http'
 import { useAuthStore } from '@/stores/auth'
 import { useConfirm } from '@/composables/useConfirm'
 import { useFormGuard } from '@/composables/useFormGuard'
-import { inlineField, wideModal } from '@/utils/form'
+import { inlineField } from '@/utils/form'
+import FormPane from '@/components/FormPane.vue'
 import { folderOptions } from '@/utils/folders'
 
 const props = defineProps({ folders: { type: Array, required: true } })
@@ -59,46 +60,37 @@ async function remove() {
   }
 }
 
-defineExpose({ edit })
+// hide closes the form without asking (the page asked already).
+const hide = () => (open.value = false)
+
+defineExpose({ edit, hide, open })
 </script>
 
 <template>
-  <UModal
-    :open="open"
-    :title="!auth.isAdmin ? 'Folder' : form.id ? 'Edit folder' : 'New folder'"
-    :ui="wideModal"
-    :dismissible="false"
-    @update:open="guard.onUpdateOpen"
-  >
-    <template #body>
-      <form id="folder-form" @submit.prevent="save">
-        <fieldset :disabled="!auth.isAdmin" class="space-y-3">
-          <UFormField :ui="inlineField" label="Name" required>
-            <UInput v-model="form.name" class="w-full" placeholder="Servers" required />
-          </UFormField>
-          <UFormField :ui="inlineField" label="Inside">
-            <USelect v-model="form.parent_id" :items="parents" class="w-full" />
-          </UFormField>
-        </fieldset>
-      </form>
+  <FormPane v-if="open" :title="!auth.isAdmin ? 'Folder' : form.id ? 'Edit folder' : 'New folder'">
+    <template #actions>
+      <UButton
+        v-if="form.id && auth.isAdmin"
+        color="error"
+        variant="ghost"
+        icon="i-lucide-trash"
+        label="Delete"
+        @click="remove"
+      />
+      <UButton v-if="auth.isAdmin" color="neutral" variant="ghost" @click="guard.close"
+        >Cancel</UButton
+      >
+      <UButton v-if="auth.isAdmin" type="submit" form="folder-form" :loading="saving">Save</UButton>
     </template>
-    <template #footer>
-      <div class="flex w-full gap-2">
-        <UButton
-          v-if="form.id && auth.isAdmin"
-          color="error"
-          variant="ghost"
-          icon="i-lucide-trash"
-          label="Delete"
-          @click="remove"
-        />
-        <UButton class="ms-auto" color="neutral" variant="ghost" @click="guard.close">{{
-          auth.isAdmin ? 'Cancel' : 'Close'
-        }}</UButton>
-        <UButton v-if="auth.isAdmin" type="submit" form="folder-form" :loading="saving"
-          >Save</UButton
-        >
-      </div>
-    </template>
-  </UModal>
+    <form id="folder-form" @submit.prevent="save">
+      <fieldset :disabled="!auth.isAdmin" class="space-y-3">
+        <UFormField :ui="inlineField" label="Name" required>
+          <UInput v-model="form.name" class="w-full" placeholder="Servers" required />
+        </UFormField>
+        <UFormField :ui="inlineField" label="Inside">
+          <USelect v-model="form.parent_id" :items="parents" class="w-full" />
+        </UFormField>
+      </fieldset>
+    </form>
+  </FormPane>
 </template>
