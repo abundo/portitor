@@ -12,7 +12,7 @@ import CrudPage from '@/components/CrudPage.vue'
 import EntriesEditor from '@/components/EntriesEditor.vue'
 import FormHeader from '@/components/FormHeader.vue'
 import NameSelect from '@/components/NameSelect.vue'
-import { ospfConfig, ospfInterfaces } from '@/api'
+import { vfApi, withLists } from '@/api/config'
 import { errMsg } from '@/api/http'
 import { usePageForm } from '@/composables/useFormGuard'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
@@ -29,7 +29,21 @@ const toast = useToast()
 const auth = useAuthStore()
 const objects = useRoutingObjects()
 const { store, ifaceList, ifaceNames, ifaceText } = useInstanceRefs()
-const { vrfName, vrfId, ofVrf } = useVrfChoice()
+const { vrfName, vrfKey, inVrfKey } = useVrfChoice()
+// OSPF is in the configuration tree: ospf=<version>,<vrf or main>, with
+// its areas, ranges, ... as lists; its interfaces ospf-interface=<version>,<name>.
+const ospfConfig = withLists(vfApi('ospf', ['version', 'vrf']), {
+  area: 'areas',
+  range: 'ranges',
+  summary: 'summaries',
+  network: 'networks',
+  redistribute: 'redistribute',
+})
+const ospfIfaceList = vfApi('ospf-interface', ['version', 'name'])
+const ospfInterfaces = {
+  ...ospfIfaceList,
+  list: async () => (await ospfIfaceList.list()).filter((i) => i.version === props.version),
+}
 // inVrf reports whether an interface (or link end, in none) is in the VRF.
 const inVrf = (name) => (ifaceList.value.find((i) => i.name === name)?.vrf || '') === vrfName.value
 const readOnly = computed(() => !auth.canEdit)
@@ -42,7 +56,6 @@ const cfg = reactive({})
 const cfgForm = usePageForm(cfg)
 const saving = ref(false)
 const defaults = () => ({
-  id: 0,
   version: props.version,
   enabled: false,
   router_id: '',
@@ -60,8 +73,8 @@ const defaults = () => ({
 async function load() {
   if (!store.currentId) return
   try {
-    const rows = await ospfConfig.list({ instance_id: store.currentId, version: props.version })
-    const row = rows.find(ofVrf)
+    const rows = await ospfConfig.list()
+    const row = rows.find((r) => r.version === props.version && inVrfKey(r))
     for (const k of Object.keys(cfg)) delete cfg[k]
     Object.assign(cfg, defaults(), row ?? {})
     cfgForm.mark()
@@ -73,12 +86,12 @@ watch(() => store.currentId, load, { immediate: true })
 
 async function save() {
   saving.value = true
-  const body = { ...cfg, instance_id: store.currentId, version: props.version, vrf_id: vrfId.value }
+  const body = { ...cfg, version: props.version, vrf: vrfKey.value }
   for (const k of ['reference_bandwidth', 'maximum_paths']) body[k] = Number(body[k]) || 0
   try {
-    const saved = cfg.id ? await ospfConfig.update(cfg.id, body) : await ospfConfig.create(body)
-    Object.assign(cfg, saved)
-    cfgForm.mark()
+    if (cfg.id) await ospfConfig.update(cfg.id, body)
+    else await ospfConfig.create(body)
+    await load()
     toast.add({ title: `${name.value} saved; commit to apply it.`, color: 'success' })
   } catch (err) {
     toast.add({ title: errMsg(err, 'Save failed'), color: 'error' })
@@ -395,7 +408,7 @@ const ifDefaults = computed(() => ({
       :title="`${name} interfaces`"
       :description="`The interfaces ${name} runs on, and their options. Link ends between virtual firewalls are interfaces too.`"
       :api="ospfInterfaces"
-      :params="{ instance_id: store.currentId, version }"
+      :params="{ _vf: store.currentId, version }"
       :row-filter="(i) => inVrf(i.name)"
       :columns="ifColumns"
       :fields="ifFields"

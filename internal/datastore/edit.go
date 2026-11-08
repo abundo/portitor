@@ -33,7 +33,9 @@ const (
 // or list entry (or the root), an array of entries for a whole list (one
 // entry object for EditCreate), a value for a leaf and an array for a
 // leaf-list. Every value is checked against its type, and state can't be
-// written.
+// written. A leaf (not a key) given "" is unset, as null, which is what an
+// empty form field means; a secret given "" is left as it is, since a
+// client that can't read it back sends it empty.
 func (t *Tree) EditJSON(p Path, op EditOp, data []byte) error {
 	ss, err := ResolveAll(t.Root.S, p)
 	if err != nil {
@@ -231,7 +233,10 @@ func (t *Tree) mergeObject(p Path, s *schema.Node, obj map[string]any) error {
 				}
 				continue
 			}
-			if raw == nil {
+			if raw == "" && c.Secret() {
+				continue
+			}
+			if raw == nil || raw == "" {
 				if err := t.deleteIfThere(here); err != nil {
 					return err
 				}

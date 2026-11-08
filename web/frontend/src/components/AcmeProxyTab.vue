@@ -12,7 +12,8 @@ import AutoRefreshButton from '@/components/AutoRefreshButton.vue'
 import CrudPage from '@/components/CrudPage.vue'
 import FormHeader from '@/components/FormHeader.vue'
 import SearchInput from '@/components/SearchInput.vue'
-import { acmeProxyPolicies, api, certificates, dyndnsClients, instances, interfaces } from '@/api'
+import { api, certificates } from '@/api'
+import { config, fromEntry, toEntry, vfApi, vfPath } from '@/api/config'
 import { errMsg } from '@/api/http'
 import { useStatusRefresh } from '@/composables/useAutoRefresh'
 import { withLabel } from '@/composables/useInstanceRefs'
@@ -40,20 +41,24 @@ const caItems = computed(() => cas.value.map((c) => ({ label: c.label, value: c.
 const certs = ref([])
 const dnsClients = ref([])
 const ifaceRows = ref([])
-const SELF = 0 // the self-signed certificate, null in the database
+// The policies, interfaces, certificate and DNS update clients by name,
+// in the configuration tree. Whether a certificate is a CA is the CRUD's
+// reading of its chain.
+const acmeProxyPolicies = vfApi('acme-proxy-policy')
+const SELF = 0 // the self-signed certificate: no acme-proxy-certificate
 const certItems = computed(() => [
   { label: 'Self-signed (made by the firewall)', value: SELF },
-  ...certs.value.filter((c) => !c.is_ca).map((c) => ({ label: c.name, value: c.id })),
+  ...certs.value.filter((c) => !c.is_ca).map((c) => ({ label: c.name, value: c.name })),
 ])
 const dnsClientItems = computed(() =>
-  dnsClients.value.map((c) => ({ label: `${c.name} (${c.zone})`, value: c.id })),
+  dnsClients.value.map((c) => ({ label: `${c.name} (${c.zone})`, value: c.name })),
 )
-const dnsClientName = (id) => dnsClients.value.find((c) => c.id === id)?.name ?? ''
+const dnsClientName = (name) => name ?? ''
 const ifaceItems = computed(() =>
-  ifaceRows.value.map((i) => ({ label: withLabel(i.label, i.name), value: i.id })),
+  ifaceRows.value.map((i) => ({ label: withLabel(i.label, i.name), value: i.name })),
 )
-const ifaceText = (id) => {
-  const i = ifaceRows.value.find((x) => x.id === id)
+const ifaceText = (name) => {
+  const i = ifaceRows.value.find((x) => x.name === name)
   return i ? withLabel(i.label, i.name) : ''
 }
 
@@ -63,8 +68,8 @@ const form = reactive({
   acme_proxy_port: 8555,
   acme_proxy_ca: 'letsencrypt',
   acme_proxy_email: '',
-  acme_proxy_certificate_id: SELF,
-  ifaces: [], // { id, name, label, description, addresses, acme_proxy_serve }
+  acme_proxy_certificate: SELF,
+  ifaces: [], // { name, label, description, addresses, acme_proxy_serve }
 })
 const pageForm = usePageForm(form)
 const saving = ref(false)
@@ -73,12 +78,13 @@ let loaded = []
 async function load() {
   const id = store.currentId
   if (!id) return
-  const [inst, ifs, cs, dcs] = await Promise.all([
-    instances.get(id),
-    interfaces.list({ instance_id: id }),
+  const [entry, cs] = await Promise.all([
+    config.get(vfPath()),
     certificates.list({ instance_id: id }),
-    dyndnsClients.list({ instance_id: id }),
   ])
+  const inst = fromEntry(entry)
+  const ifs = inst.interface ?? []
+  const dcs = inst.dns_update ?? []
   loaded = ifs
   ifaceRows.value = ifs
   certs.value = cs
@@ -88,9 +94,8 @@ async function load() {
     acme_proxy_port: inst.acme_proxy_port || 8555,
     acme_proxy_ca: inst.acme_proxy_ca || 'letsencrypt',
     acme_proxy_email: inst.acme_proxy_email ?? '',
-    acme_proxy_certificate_id: inst.acme_proxy_certificate_id ?? SELF,
+    acme_proxy_certificate: inst.acme_proxy_certificate ?? SELF,
     ifaces: ifs.map((i) => ({
-      id: i.id,
       name: i.name,
       label: i.label,
       description: i.description,
@@ -112,13 +117,22 @@ async function save() {
   try {
     const { ifaces, ...proxy } = form
     proxy.acme_proxy_port = Number(proxy.acme_proxy_port)
-    if (proxy.acme_proxy_certificate_id === SELF) proxy.acme_proxy_certificate_id = null
-    await instances.update(store.currentId, proxy)
-    for (const i of ifaces) {
-      const o = loaded.find((x) => x.id === i.id)
-      if (o && !!o.acme_proxy_serve !== i.acme_proxy_serve)
-        await interfaces.update(i.id, { acme_proxy_serve: i.acme_proxy_serve })
-    }
+    if (proxy.acme_proxy_certificate === SELF) proxy.acme_proxy_certificate = null
+    const changed = ifaces.filter((i) => {
+      const o = loaded.find((x) => x.name === i.name)
+      return o && !!o.acme_proxy_serve !== i.acme_proxy_serve
+    })
+    await config.patch(
+      vfPath(),
+      toEntry({
+        ...proxy,
+        ...(changed.length
+          ? {
+              interface: changed.map((i) => ({ name: i.name, acme_proxy_serve: i.acme_proxy_serve })),
+            }
+          : {}),
+      }),
+    )
     toast.add({ title: 'ACME proxy saved; commit to apply it.', color: 'success' })
     await Promise.all([load(), store.load()])
   } catch (err) {
@@ -179,8 +193,8 @@ const policyColumns = [
     label: 'Upstream',
     format: (p) =>
       p.challenge === 'http-01'
-        ? `HTTP-01 on ${ifaceText(p.interface_id)}`
-        : `DNS-01 by ${dnsClientName(p.dyndns_client_id)}`,
+        ? `HTTP-01 on ${ifaceText(p.interface)}`
+        : `DNS-01 by ${dnsClientName(p.dns_update)}`,
   },
   { key: 'enabled', label: 'Enabled' },
   { key: 'description', label: 'Description' },
@@ -214,7 +228,7 @@ const policyFields = computed(() => [
     hint: 'How Let’s Encrypt checks the names for the firewall. DNS-01: the firewall writes a TXT record through a DNS update client, so the names need not be reachable from the Internet. HTTP-01: the firewall answers on port 80 itself, so the names must resolve to it from the Internet (internal DNS may still give the clients’ own addresses). The names of one order must use the same challenge.',
   },
   {
-    key: 'dyndns_client_id',
+    key: 'dns_update',
     show: (form) => form.challenge !== 'http-01',
     label: 'DNS update client',
     type: 'select',
@@ -223,7 +237,7 @@ const policyFields = computed(() => [
     hint: 'Writes the TXT records of the DNS-01 challenge at Let’s Encrypt, as for a DNS-01 certificate: in its zone, following a CNAME at _acme-challenge.<name>.',
   },
   {
-    key: 'interface_id',
+    key: 'interface',
     show: (form) => form.challenge === 'http-01',
     label: 'Interface',
     type: 'select',
@@ -264,7 +278,7 @@ const policyFields = computed(() => [
             help="What the proxy presents to its clients. Self-signed: download it below and have the clients trust it (certbot: REQUESTS_CA_BUNDLE; lego and Traefik: LEGO_CA_CERTIFICATES)."
             :ui="inlineField"
           >
-            <USelect v-model="form.acme_proxy_certificate_id" :items="certItems" class="w-full" />
+            <USelect v-model="form.acme_proxy_certificate" :items="certItems" class="w-full" />
           </UFormField>
           <UFormField
             label="CA"
@@ -307,7 +321,7 @@ const policyFields = computed(() => [
             <tbody>
               <tr
                 v-for="i in shownIfaces"
-                :key="i.id"
+                :key="i.name"
                 class="border-b border-default last:border-0"
               >
                 <td class="py-1 pr-4 font-mono">{{ withLabel(i.label, i.name) }}</td>
@@ -338,7 +352,7 @@ const policyFields = computed(() => [
       title="Policies"
       description="Which hosts may get certificates for which names, and how the firewall answers Let's Encrypt for them: by DNS-01 through a DNS update client, or by HTTP-01 on an interface. A name is looked up in the policies by name order; the first that allows it from the client is used."
       :api="acmeProxyPolicies"
-      :params="{ instance_id: store.currentId }"
+      :params="{ _vf: store.currentId }"
       :columns="policyColumns"
       :fields="policyFields"
       :defaults="{ enabled: true, domains: [], sources: [], challenge: 'dns-01' }"

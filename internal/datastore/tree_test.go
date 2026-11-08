@@ -145,6 +145,13 @@ func TestJSONRoundTrip(t *testing.T) {
 	if tr.Root.Entry("instance", k("host")).Entry("interface", k("wan0")).Leaves["wg-private-key"] == "" {
 		t.Error("a replace with the annotation lost the secret")
 	}
+	// "" unsets a leaf, and leaves a secret alone.
+	must(t, tr.EditJSON(wan, EditMerge, []byte(`{"description":"uplink"}`)))
+	must(t, tr.EditJSON(wan, EditMerge, []byte(`{"description":"","wg-private-key":""}`)))
+	n := tr.Root.Entry("instance", k("host")).Entry("interface", k("wan0"))
+	if _, ok := n.Leaves["description"]; ok || n.Leaves["wg-private-key"] == "" {
+		t.Errorf("after \"\": %v", n.Leaves)
+	}
 }
 
 func TestDiffApply(t *testing.T) {

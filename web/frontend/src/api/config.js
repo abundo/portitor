@@ -60,13 +60,6 @@ const rename = (fn) => {
   return walk
 }
 
-// unsetEmpty makes the pages' '' (an empty text field, a select's "—")
-// null, which leaves a leaf unset, as the tables' empty column did; in
-// the object and its containers, not in list entries, whose keys may be ''.
-const unsetEmpty = (v) => {
-  if (!v || typeof v !== 'object' || Array.isArray(v)) return v
-  return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, x === '' ? null : unsetEmpty(x)]))
-}
 export const snake = rename((k) => k.replaceAll('-', '_'))
 export const kebab = rename((k) => (k.startsWith('_') ? k : k.replaceAll('_', '-')))
 
@@ -98,12 +91,14 @@ function secretsOf(b) {
   return b
 }
 
-// toEntry is a page's object as the entry's JSON: kebab-case names, ''
-// unset, secrets as above, and the page's own members (_*, has_*) left out.
+// toEntry is a page's object as the entry's JSON: kebab-case names,
+// secrets as above, and the page's own members (_*, has_*) left out. The
+// API takes '' (an empty field, a select's "—") as unset, but for a
+// secret, which it keeps.
 export function toEntry(row) {
   const b = { ...row }
   for (const k of Object.keys(b)) if (k.startsWith('_') || k.startsWith('has_')) delete b[k]
-  return kebab(secretsOf(unsetEmpty(b)))
+  return kebab(secretsOf(b))
 }
 
 // vfPath is the selected virtual firewall's entry: instance=<name>.
@@ -137,7 +132,11 @@ export function treeApi(listPath, keys = ['name']) {
     get: (id) => config.get(entry(id)).then(fromEntry),
     create: async (row) => {
       const res = await config.post(listPath(), body(row))
-      return { ...row, ...(res?.keys ? Object.fromEntries(keys.map((k, i) => [k, res.keys[i]])) : {}) }
+      const made = {
+        ...row,
+        ...(res?.keys ? Object.fromEntries(keys.map((k, i) => [k, res.keys[i]])) : {}),
+      }
+      return { ...made, id: idOf(made) }
     },
     update: async (id, row) => {
       let target = id
@@ -147,7 +146,7 @@ export function treeApi(listPath, keys = ['name']) {
         target = now
       }
       await config.put(entry(target), body(row))
-      return row
+      return { ...row, id: target }
     },
     remove: (id) => config.remove(entry(id)),
     // reorder puts a user-ordered list's entries in the order of ids, with
@@ -221,3 +220,53 @@ export function vfWithGlobals(list) {
     },
   }
 }
+
+// withLists renames an api's nested lists between the pages' names and
+// the tree's: { area: 'areas' } shows the area list as areas.
+export function withLists(api, names) {
+  const toPage = (r) => {
+    const o = { ...r }
+    for (const [tree, page] of Object.entries(names)) {
+      o[page] = o[tree] ?? []
+      delete o[tree]
+    }
+    return o
+  }
+  const toTree = (r) => {
+    const o = { ...r }
+    for (const [tree, page] of Object.entries(names)) {
+      if (page in o) o[tree] = o[page] ?? []
+      delete o[page]
+    }
+    return o
+  }
+  return {
+    ...api,
+    list: async (p) => (await api.list(p)).map(toPage),
+    get: async (id) => toPage(await api.get(id)),
+    create: async (r) => toPage(await api.create(toTree(r))),
+    update: async (id, r) => toPage(await api.update(id, toTree(r))),
+  }
+}
+
+// The routing objects of the selected virtual firewall; their entries are
+// the page's `entries`. Prefix-list and route-map entries are keyed by seq:
+// one without (0) gets the next after the highest, in steps of 5 as FRR
+// does, before it is written.
+const numbered = (api) => {
+  const number = (r) => {
+    let high = Math.max(0, ...(r.entries ?? []).map((e) => Number(e.seq) || 0))
+    const entries = (r.entries ?? []).map((e) => (Number(e.seq) ? e : { ...e, seq: (high += 5) }))
+    return { ...r, entries: entries.sort((a, b) => a.seq - b.seq) }
+  }
+  return {
+    ...api,
+    create: (r) => api.create(number(r)),
+    update: (id, r) => api.update(id, number(r)),
+  }
+}
+const entries = { entry: 'entries' }
+export const prefixLists = numbered(withLists(vfApi('prefix-list'), entries))
+export const asPathLists = withLists(vfApi('as-path-list'), entries)
+export const communityLists = withLists(vfApi('community-list'), entries)
+export const routeMaps = numbered(withLists(vfApi('route-map'), entries))

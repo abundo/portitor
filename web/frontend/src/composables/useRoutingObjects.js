@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { computed, ref, watch } from 'vue'
-import { asPathLists, communityLists, prefixLists, routeMaps } from '@/api'
+import { asPathLists, communityLists, prefixLists, routeMaps } from '@/api/config'
 import { useInstanceStore } from '@/stores/instances'
 
 // The routing objects of the selected instance (prefix lists, AS path and

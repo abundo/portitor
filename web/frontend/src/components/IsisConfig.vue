@@ -10,7 +10,7 @@ import { useToast } from '@nuxt/ui/composables'
 import CrudPage from '@/components/CrudPage.vue'
 import EntriesEditor from '@/components/EntriesEditor.vue'
 import FormHeader from '@/components/FormHeader.vue'
-import { isisConfig, isisInterfaces } from '@/api'
+import { vfApi } from '@/api/config'
 import { errMsg } from '@/api/http'
 import { usePageForm } from '@/composables/useFormGuard'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
@@ -23,7 +23,11 @@ const toast = useToast()
 const auth = useAuthStore()
 const objects = useRoutingObjects()
 const { store, ifaceList, ifaceNames, ifaceText } = useInstanceRefs()
-const { vrfName, vrfId, ofVrf } = useVrfChoice()
+const { vrfName, vrfKey, inVrfKey } = useVrfChoice()
+// IS-IS is in the configuration tree: isis=<vrf or main>, and its
+// interfaces isis-interface=<name>.
+const isisConfig = vfApi('isis', ['vrf'])
+const isisInterfaces = vfApi('isis-interface')
 // inVrf reports whether an interface (or link end, in none) is in the VRF.
 const inVrf = (name) => (ifaceList.value.find((i) => i.name === name)?.vrf || '') === vrfName.value
 const readOnly = computed(() => !auth.canEdit)
@@ -33,7 +37,6 @@ const cfg = reactive({})
 const cfgForm = usePageForm(cfg)
 const saving = ref(false)
 const defaults = () => ({
-  id: 0,
   enabled: false,
   net: '',
   net_interface: '',
@@ -57,8 +60,8 @@ const defaults = () => ({
 async function load() {
   if (!store.currentId) return
   try {
-    const rows = await isisConfig.list({ instance_id: store.currentId })
-    const row = rows.find(ofVrf)
+    const rows = await isisConfig.list()
+    const row = rows.find(inVrfKey)
     for (const k of Object.keys(cfg)) delete cfg[k]
     Object.assign(cfg, defaults(), row ?? {})
     cfgForm.mark()
@@ -70,17 +73,12 @@ watch(() => store.currentId, load, { immediate: true })
 
 async function save() {
   saving.value = true
-  const body = { ...cfg, instance_id: store.currentId, vrf_id: vrfId.value }
+  const body = { ...cfg, vrf: vrfKey.value }
   try {
-    const saved = cfg.id ? await isisConfig.update(cfg.id, body) : await isisConfig.create(body)
-    // The passwords are write-only: the inputs empty again after a save.
-    Object.assign(cfg, saved, {
-      new_area_password: '',
-      new_domain_password: '',
-      clear_area_password: false,
-      clear_domain_password: false,
-    })
-    cfgForm.mark()
+    if (cfg.id) await isisConfig.update(cfg.id, body)
+    else await isisConfig.create(body)
+    // Loaded again: the passwords are write-only, the inputs empty again.
+    await load()
     toast.add({ title: 'IS-IS saved; commit to apply it.', color: 'success' })
   } catch (err) {
     toast.add({ title: errMsg(err, 'Save failed'), color: 'error' })
@@ -461,7 +459,7 @@ const ifDefaults = {
       title="IS-IS interfaces"
       description="The interfaces IS-IS runs on, and their options. Link ends between virtual firewalls are interfaces too."
       :api="isisInterfaces"
-      :params="{ instance_id: store.currentId }"
+      :params="{ _vf: store.currentId }"
       :row-filter="(i) => inVrf(i.name)"
       :columns="ifColumns"
       :fields="ifFields"

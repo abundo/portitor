@@ -10,7 +10,7 @@ import CrudPage from '@/components/CrudPage.vue'
 import EntriesEditor from '@/components/EntriesEditor.vue'
 import NeedInstance from '@/components/NeedInstance.vue'
 import RouteMapEntries from '@/components/RouteMapEntries.vue'
-import { asPathLists, communityLists, prefixLists, routeMaps } from '@/api'
+import { asPathLists, communityLists, prefixLists, routeMaps } from '@/api/config'
 import { useRoutingObjects } from '@/composables/useRoutingObjects'
 import { useAuthStore } from '@/stores/auth'
 import { useInstanceStore } from '@/stores/instances'
@@ -34,7 +34,7 @@ const tab = computed({
 
 const actions = ['permit', 'deny'].map((a) => ({ label: a, value: a }))
 const entriesCount = (r) => (r.entries?.length ? String(r.entries.length) : 'none')
-const params = computed(() => ({ instance_id: store.currentId }))
+const params = computed(() => ({ _vf: store.currentId }))
 
 // Prefix lists.
 const prefixColumns = [

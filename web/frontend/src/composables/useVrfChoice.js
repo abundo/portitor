@@ -53,8 +53,25 @@ export function useVrfChoice({ all = false } = {}) {
   const vrfId = computed(() => current.value?.id ?? null)
   // ofVrf reports whether a routing row (vrf_id) is the chosen VRF's.
   const ofVrf = (row) => (row.vrf_id ?? null) === vrfId.value
+  // vrfKey is the chosen VRF in the configuration tree's routing entries'
+  // keys (bgp=main, ospf=2,blue): its name, or main; inVrfKey reports
+  // whether such an entry (its vrf) is the chosen VRF's.
+  const vrfKey = computed(() => vrfName.value || 'main')
+  const inVrfKey = (row) => (row.vrf || 'main') === vrfKey.value
   // showsName reports whether a VRF name ('' for none) is shown.
   const showsName = (name) => vrf.value === ALL_VRFS || (name || '') === vrfName.value
 
-  return { vrf, vrfList, vrfItems, current, vrfName, vrfId, ofVrf, showsName, reload: load }
+  return {
+    vrf,
+    vrfList,
+    vrfItems,
+    current,
+    vrfName,
+    vrfId,
+    ofVrf,
+    vrfKey,
+    inVrfKey,
+    showsName,
+    reload: load,
+  }
 }
