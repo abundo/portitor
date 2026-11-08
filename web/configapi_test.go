@@ -212,10 +212,32 @@ func TestConfigAPISecretsAndMerge(t *testing.T) {
 	if !on(eth1, "snmp-serve") || eth1.Leaf("mtu") != "1400" || !on(env.node("instance=main"), "snmp-enabled") {
 		t.Errorf("merged: snmp-serve %q mtu %q", eth1.Leaf("snmp-serve"), eth1.Leaf("mtu"))
 	}
+	// ?shallow leaves out what is nested.
+	if rec := env.mustCfg("GET", "instance?shallow", nil); strings.Contains(rec.Body.String(), "eth1") || !strings.Contains(rec.Body.String(), `"snmp-enabled":true`) {
+		t.Errorf("shallow: %s", rec.Body)
+	}
 	// A PUT of a whole list replaces its entries.
 	env.put("instance=main/ntp-server", []any{map[string]any{"address": "a.example"}, map[string]any{"address": "b.example"}})
 	env.put("instance=main/ntp-server", []any{map[string]any{"address": "b.example", "iburst": true}})
 	if es := env.node("instance=main").Lists["ntp-server"]; len(es) != 1 || es[0].Leaf("address") != "b.example" {
 		t.Errorf("ntp servers: %d", len(es))
+	}
+}
+
+// An interface moves to another virtual firewall, unless what refers to
+// it in the old one would be left without it.
+func TestMoveInterface(t *testing.T) {
+	env := newEnv(t)
+	env.host("main")
+	env.vf("left")
+	env.vf("right")
+	env.put("instance=left/interface=eth5", map[string]any{"kind": "physical", "enabled": true, "addresses": []string{"10.5.0.1/24"}})
+	env.mustCfg("POST", "instance=left/interface=eth5?action=move-to", map[string]any{"instance": "right"})
+	if env.node("instance=left/interface=eth5") != nil || env.node("instance=right/interface=eth5") == nil {
+		t.Fatal("not moved")
+	}
+	env.post("instance=right/rule", map[string]any{"chain": "input", "action": "accept", "enabled": true, "in-interfaces": []string{"eth5"}})
+	if rec := env.cfg("POST", "instance=right/interface=eth5?action=move-to", map[string]any{"instance": "left"}); rec.Code < 400 || env.node("instance=right/interface=eth5") == nil {
+		t.Errorf("moved from under a rule: %d %s", rec.Code, rec.Body)
 	}
 }

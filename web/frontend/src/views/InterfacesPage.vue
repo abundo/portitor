@@ -8,7 +8,7 @@ import DhcpClientLease from '@/components/DhcpClientLease.vue'
 import NeedInstance from '@/components/NeedInstance.vue'
 import SearchInput from '@/components/SearchInput.vue'
 import { computed, ref } from 'vue'
-import { interfaces } from '@/api'
+import { config, path, vfApi, vfPath } from '@/api/config'
 import http, { errMsg } from '@/api/http'
 import { useToast } from '@nuxt/ui/composables'
 import { useStatusRefresh } from '@/composables/useAutoRefresh'
@@ -83,11 +83,35 @@ const columns = [
 // VLAN's parent and a bridge's members; a name the form holds but the
 // instance lacks stays listed.
 function otherIfaces(f, keep = []) {
-  const names = ifaceList.value.filter((i) => i.id !== f.id).map((i) => i.name)
+  const names = ifaceList.value.filter((i) => i.name !== f.id).map((i) => i.name)
   return [...new Set([...names, ...keep.filter(Boolean)])].map((n) => ({
     label: ifaceText(n),
     value: n,
   }))
+}
+
+// Interfaces are in the configuration tree, under their virtual firewall;
+// _instance, the form's choice of it, moves one to another (move-to) once
+// it is saved.
+const ifaceApi = vfApi('interface')
+const here = () => store.nameOf(store.currentId)
+const interfaces = {
+  ...ifaceApi,
+  list: async () => (await ifaceApi.list()).map((r) => ({ ...r, _instance: here() })),
+  create: async (r) => {
+    const made = await ifaceApi.create(r)
+    await moveTo(made, r._instance)
+    return made
+  },
+  update: async (id, r) => {
+    const saved = await ifaceApi.update(id, r)
+    await moveTo(saved, r._instance)
+    return saved
+  },
+}
+async function moveTo(row, instance) {
+  if (instance && instance !== here())
+    await config.action(`${vfPath()}/${path(['interface', row.name])}`, 'move-to', { instance })
 }
 
 const fields = [
@@ -105,10 +129,10 @@ const fields = [
     hint: 'A short name shown before the interface name wherever an interface is picked: WAN (ens18).',
   },
   {
-    key: 'instance_id',
+    key: '_instance',
     label: 'Virtual firewall',
     type: 'select',
-    items: () => store.items,
+    items: () => store.list.map((i) => ({ label: i.name, value: i.name })),
     show: () => store.list.length > 1,
     hint: 'Changing it moves the interface to that virtual firewall, with its addresses. Its rules, routes and VLANs must go first; it leaves its interface zones.',
   },
@@ -500,7 +524,7 @@ const { search: statsSearch, filtered: statsFiltered } = useSearch(statsRows)
       title="Interfaces"
       description="Physical ports, VLANs, bridges, loopbacks, WireGuard, 6in4 tunnels (such as Hurricane Electric's tunnel broker) and VXLANs of this virtual firewall."
       :api="interfaces"
-      :params="{ instance_id: store.currentId }"
+      :params="{ _vf: store.currentId }"
       :columns="columns"
       :fields="fields"
       :item-name="(r) => `interface ${withLabel(r.label, r.name)}`"
@@ -508,6 +532,7 @@ const { search: statsSearch, filtered: statsFiltered } = useSearch(statsRows)
         (r) => [brokerOf(r)?.address, brokerOf(r)?.last_error].filter(Boolean).join(' ')
       "
       :defaults="{
+        _instance: store.nameOf(store.currentId),
         kind: 'physical',
         label: '',
         enabled: true,

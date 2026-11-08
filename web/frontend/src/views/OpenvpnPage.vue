@@ -15,7 +15,8 @@ import NameSelect from '@/components/NameSelect.vue'
 import NeedInstance from '@/components/NeedInstance.vue'
 import SearchInput from '@/components/SearchInput.vue'
 import TagsInput from '@/components/TagsInput.vue'
-import { api, certificates, interfaces } from '@/api'
+import { api, certificates } from '@/api'
+import { config, path, toEntry, vfApi, vfPath } from '@/api/config'
 import { errMsg } from '@/api/http'
 import { withLabel } from '@/composables/useInstanceRefs'
 import { useAutoRefresh } from '@/composables/useAutoRefresh'
@@ -58,9 +59,9 @@ const keys = [
   'ovpn_mode',
   'ovpn_port',
   'ovpn_listen',
-  'ovpn_certificate_id',
+  'ovpn_certificate',
   'ovpn_host',
-  'ovpn_role_id',
+  'ovpn_role',
   'ovpn_routes',
   'ovpn_redirect_gateway',
   'ovpn_dns',
@@ -71,14 +72,19 @@ const keys = [
 const form = reactive({})
 const pageForm = usePageForm(form)
 const saving = ref(false)
-const NONE = 0 // no certificate or role, null in the database
+const NONE = 0 // no certificate or role: the leaf unset
+// The server is the virtual firewall's openvpn interface in the
+// configuration tree; it names its certificate and role. Whether a
+// certificate is a CA is the CRUD's reading of its chain.
+const interfaces = vfApi('interface')
+const ifacePath = (name) => `${vfPath()}/${path(['interface', name])}`
 const OFF = 'off' // no two-factor login, '' in the database (a select item can't be '')
 
 async function load() {
   const id = store.currentId
   if (!id) return
   const [ifs, cs] = await Promise.all([
-    interfaces.list({ instance_id: id }),
+    interfaces.list(),
     certificates.list({ instance_id: id }),
   ])
   ifaceRows.value = ifs
@@ -93,8 +99,8 @@ async function load() {
     form.ovpn_tcp_addresses ??= []
     form.ovpn_routes ??= []
     form.ovpn_dns ??= []
-    form.ovpn_certificate_id ??= NONE
-    form.ovpn_role_id ??= NONE
+    form.ovpn_certificate ??= NONE
+    form.ovpn_role ??= NONE
     form.ovpn_two_factor ||= OFF
   }
   pageForm.mark()
@@ -112,7 +118,7 @@ const certItems = computed(() => [
   { label: '—', value: NONE },
   ...certs.value.map((c) => ({
     label: c.name,
-    value: c.id,
+    value: c.name,
     description: (c.domains ?? []).join(', '),
   })),
 ])
@@ -123,7 +129,7 @@ const twoFactorItems = [
 ]
 const roleItems = computed(() => [
   { label: 'Any user of the directory', value: NONE },
-  ...roles.value.map((r) => ({ label: r.name, value: r.id, description: r.description })),
+  ...roles.value.map((r) => ({ label: r.name, value: r.name, description: r.description })),
 ])
 const listenItems = computed(() =>
   ifaceRows.value
@@ -135,7 +141,6 @@ async function create() {
   saving.value = true
   try {
     await interfaces.create({
-      instance_id: store.currentId,
       name: 'ovpn0',
       kind: 'openvpn',
       enabled: false,
@@ -162,10 +167,11 @@ async function save() {
   saving.value = true
   try {
     const body = { ...form }
-    if (body.ovpn_certificate_id === NONE) body.ovpn_certificate_id = null
-    if (body.ovpn_role_id === NONE) body.ovpn_role_id = null
+    if (body.ovpn_certificate === NONE) body.ovpn_certificate = null
+    if (body.ovpn_role === NONE) body.ovpn_role = null
     if (body.ovpn_two_factor === OFF) body.ovpn_two_factor = ''
-    server.value = await interfaces.update(server.value.id, body)
+    // Merged: the form holds the server's leaves, not the interface's all.
+    await config.patch(ifacePath(server.value.name), toEntry(body))
     toast.add({ title: 'OpenVPN saved; commit to apply it.', color: 'success' })
     await load()
   } catch (err) {
@@ -199,14 +205,12 @@ const clients = computed(() =>
 const { search: clientSearch, filtered: shownClients } = useSearch(clients, (c) =>
   valuesText(c.user, c.real_address, c.address, c.address6, c.proto, c.source, c.cipher),
 )
-const certName = computed(
-  () => certs.value.find((c) => c.id === server.value?.ovpn_certificate_id)?.name ?? '',
-)
+const certName = computed(() => server.value?.ovpn_certificate ?? '')
 const infoRows = computed(() => {
   const s = server.value
   if (!s) return []
-  const login = s.ovpn_role_id
-    ? `members of role ${roles.value.find((r) => r.id === s.ovpn_role_id)?.name ?? s.ovpn_role_id}, and of its groups`
+  const login = s.ovpn_role
+    ? `members of role ${s.ovpn_role}, and of its groups`
     : s.ovpn_require_role
       ? 'no one: its required role is gone'
       : 'any user of the directory'
@@ -243,7 +247,7 @@ const cfgOpen = ref(false)
 const cfg = ref({ config: '', filename: '', warnings: [] })
 async function showConfig() {
   try {
-    cfg.value = await api.openvpnClientConfig(server.value.id)
+    cfg.value = await config.view(ifacePath(server.value.name), 'openvpn-client')
     cfgOpen.value = true
   } catch (err) {
     toast.add({ title: errMsg(err), color: 'error' })
@@ -445,7 +449,7 @@ function downloadConfig() {
                   help="The server's, from Certificates (an ACME certificate is renewed and OpenVPN restarted). Clients check it by its common name."
                   :ui="inlineField"
                 >
-                  <USelect v-model="form.ovpn_certificate_id" :items="certItems" class="w-full" />
+                  <USelect v-model="form.ovpn_certificate" :items="certItems" class="w-full" />
                 </UFormField>
                 <UFormField
                   label="Public host"
@@ -480,7 +484,7 @@ function downloadConfig() {
                   help="Only the role's members may log in, and the directory users in a group mapped to it (Admin → Directory → Authorization)."
                   :ui="inlineField"
                 >
-                  <USelect v-model="form.ovpn_role_id" :items="roleItems" class="w-full" />
+                  <USelect v-model="form.ovpn_role" :items="roleItems" class="w-full" />
                 </UFormField>
                 <p v-else class="text-xs text-muted">
                   Only the members of this virtual firewall's role log in.

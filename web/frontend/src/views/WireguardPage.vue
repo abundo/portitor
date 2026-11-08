@@ -9,7 +9,8 @@ import { useToast } from '@nuxt/ui/composables'
 import QRCode from 'qrcode'
 import CrudPage from '@/components/CrudPage.vue'
 import NeedInstance from '@/components/NeedInstance.vue'
-import { api, interfaces, wgPeers } from '@/api'
+import { api } from '@/api'
+import { config, fromEntry, path, toEntry, treeApi, vfApi, vfPath } from '@/api/config'
 import { withLabel } from '@/composables/useInstanceRefs'
 import { errMsg } from '@/api/http'
 import { useInstanceStore } from '@/stores/instances'
@@ -45,8 +46,19 @@ const tab = computed({
   set: (v) => router.replace({ query: { ...route.query, tab: v === 'info' ? undefined : v } }),
 })
 
+// The tunnels are the virtual firewall's WireGuard interfaces in the
+// configuration tree; one is chosen by name (selectedId), and its peers
+// are its wireguard-peer list.
+const interfaces = vfApi('interface')
+const ifacePath = (name) => `${vfPath()}/${path(['interface', name])}`
+const patchIface = async (name, body) => {
+  await config.patch(ifacePath(name), toEntry(body))
+  return fromEntry(await config.get(ifacePath(name)))
+}
+const wgPeers = treeApi(() => `${ifacePath(selectedId.value)}/wireguard-peer`)
+
 async function load() {
-  tunnels.value = (await interfaces.list({ instance_id: store.currentId })).filter(
+  tunnels.value = (await interfaces.list()).filter(
     (i) => i.kind === 'wireguard',
   )
   if (!tunnels.value.some((t) => t.id === selectedId.value))
@@ -86,7 +98,7 @@ async function loadFree() {
   freeWarnings.value = []
   if (!selectedId.value) return
   try {
-    const r = await api.wgNextFree(selectedId.value)
+    const r = await config.view(ifacePath(selectedId.value), 'wg-next-free')
     freeAddrs.value = r.addresses
     freeWarnings.value = r.warnings ?? []
   } catch {
@@ -115,7 +127,7 @@ const tunnelItems = computed(() =>
 async function setEnabled(enabled) {
   const t = selected.value
   try {
-    Object.assign(t, await interfaces.update(t.id, { enabled }))
+    Object.assign(t, await patchIface(t.name, { enabled }))
   } catch (err) {
     toast.add({ title: errMsg(err), color: 'error' })
     await load()
@@ -148,7 +160,7 @@ async function saveTunnel() {
   editSaving.value = true
   try {
     const t = selected.value
-    Object.assign(t, await interfaces.update(t.id, { ...editForm }))
+    Object.assign(t, await patchIface(t.name, { ...editForm }))
     editOpen.value = false
     await loadFree()
   } catch (err) {
@@ -165,7 +177,7 @@ const { auto: autoStatus, loading: statusLoading } = useStatusRefresh()
 // it (wg show, ip addr), with its peers. Never a private or preshared key.
 const peers = ref([])
 async function loadPeers() {
-  peers.value = selectedId.value ? await wgPeers.list({ interface_id: selectedId.value }) : []
+  peers.value = selectedId.value ? await wgPeers.list() : []
 }
 watch([selectedId, tab], () => tab.value === 'info' && loadPeers().catch(() => {}), {
   immediate: true,
@@ -240,7 +252,7 @@ async function rekey() {
   )
     return
   try {
-    await api.wgRekey(selected.value.id)
+    await config.action(ifacePath(selected.value.name), 'wg-rekey')
     await load()
   } catch (err) {
     toast.add({ title: errMsg(err), color: 'error' })
@@ -313,7 +325,7 @@ async function importFile(ev) {
   const name = file.name.replace(/\.conf$/i, '')
   try {
     const config = await file.text()
-    const existing = (await interfaces.list({ instance_id: store.currentId })).find(
+    const existing = (await interfaces.list()).find(
       (i) => i.name === name,
     )
     if (existing && existing.kind !== 'wireguard') {
@@ -339,7 +351,7 @@ async function importFile(ev) {
       overwrite: !!existing,
     })
     await load()
-    selectedId.value = r.interface.id
+    selectedId.value = r.interface.name
     await loadFree()
     toast.add({
       title: `Imported ${name} with ${r.peers} peer${r.peers === 1 ? '' : 's'}`,
@@ -364,7 +376,11 @@ async function showConfig(peer) {
 }
 async function loadConfig() {
   try {
-    cfg.value = await api.wgClientConfig(cfgPeer.value.id, split.value)
+    cfg.value = await config.view(
+      `${ifacePath(selectedId.value)}/${path(['wireguard-peer', cfgPeer.value.name])}`,
+      'client-config',
+      split.value ? { split: 1 } : {},
+    )
     qr.value = cfg.value.site
       ? ''
       : await QRCode.toDataURL(cfg.value.config, { margin: 1, width: 280 })
@@ -608,7 +624,7 @@ function copy(text) {
               noun="peer"
               description="Remote devices and sites. Changes take effect on the next commit."
               :api="wgPeers"
-              :params="{ interface_id: selected.id }"
+              :params="{ _vf: store.currentId, _iface: selected.id }"
               :columns="columns"
               :fields="fields"
               :defaults="peerDefaults"

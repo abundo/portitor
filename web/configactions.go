@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"net/netip"
 	"reflect"
 	"slices"
@@ -172,10 +173,19 @@ func (s *Server) runAction(c *echo.Context, ds string, p datastore.Path, name st
 	if ds != "candidate" {
 		return errJSON(c, http.StatusMethodNotAllowed, "only the candidate can be changed")
 	}
-	// A change: on the candidate's working copy, under its lock. The
-	// action answers; the copy becomes the candidate if it changed it.
+	// A change: on the candidate's working copy, under its lock, checked
+	// as any edit (checkEdit). The action's answer is held until the copy
+	// has become the candidate, or is the answer when it changed nothing.
+	scope, err := s.deployScope(currentAccess(c))
+	if err != nil {
+		return err
+	}
+	rec := httptest.NewRecorder()
 	var answered error
+	var denied string
+	var warnings []error
 	err = t.store.Edit(ctx, "", func(work *datastore.Tree) error {
+		before := work.Clone()
 		n, _, err := work.Find(p)
 		if err == nil && n == nil && a.create {
 			n, err = work.Ensure(p)
@@ -184,18 +194,26 @@ func (s *Server) runAction(c *echo.Context, ds string, p datastore.Path, name st
 			return &notFound{p.String(work.Root.S)}
 		}
 		ac := &actionCtx{tree: work, path: p, entry: n, body: body}
+		orig := c.Response()
+		c.SetResponse(rec)
 		answered = a.run(s, c, ac)
-		if !ac.changed {
+		c.SetResponse(orig)
+		if answered != nil || rec.Code >= 300 || !ac.changed {
 			return errNoChange
 		}
-		return nil
+		warnings, denied, err = s.checkEdit(acc, scope, before, work)
+		return err
 	})
 	var nf *notFound
 	switch {
-	case errors.Is(err, errNoChange), err == nil:
+	case answered != nil:
 		return answered
+	case errors.Is(err, errNoChange), err == nil:
+		return copyRecorded(c, rec, warnings)
 	case errors.As(err, &nf):
 		return errJSON(c, http.StatusNotFound, nf.Error())
+	case errors.Is(err, errForbidden):
+		return errJSON(c, http.StatusForbidden, "you may not change "+denied)
 	}
 	return configError(c, err)
 }
@@ -231,6 +249,7 @@ func init() {
 	registerAction("/instance/interface", "wg-next-free", configAction{view: true, run: delegateM((*Server).handleWgNextFree)})
 	registerAction("/instance/interface", "openvpn-client", configAction{view: true, write: true, run: delegateM((*Server).handleOpenVPNClientConfig)})
 	registerAction("/instance/interface", "wg-rekey", configAction{write: true, run: wgRekey})
+	registerAction("/instance/interface", "move-to", configAction{write: true, run: moveInterface})
 	registerAction("/instance/certificate", "download", configAction{view: true, write: true, run: delegateM((*Server).handleCertificateDownload)})
 	registerAction("/instance/certificate", "renew", configAction{op: true, write: true, run: delegateM((*Server).handleCertificateRenew)})
 	registerAction("/instance/ipam-prefix", "next-free", configAction{view: true, run: delegateM((*Server).handleNextFree)})
@@ -262,6 +281,44 @@ func wgRekey(s *Server, c *echo.Context, a *actionCtx) error {
 	a.entry.Leaves["wg-private-key"], a.entry.Leaves["wg-public-key"] = priv, pub
 	a.changed = true
 	return c.JSON(http.StatusOK, map[string]string{"wg-public-key": pub})
+}
+
+// moveInterface moves an interface, with its addresses and peers, to
+// another virtual firewall, {"instance": "<name>"}: one change, refused
+// as any other when what refers to it in the old one (rules, routes,
+// VLANs) would be left without it.
+func moveInterface(s *Server, c *echo.Context, a *actionCtx) error {
+	var req struct {
+		Instance string `json:"instance"`
+	}
+	if err := json.Unmarshal(a.body, &req); err != nil {
+		return errJSON(c, http.StatusBadRequest, "the body: "+err.Error())
+	}
+	name := a.entry.Leaf("name")
+	from := a.entry.Parent.Leaf("name")
+	if req.Instance == from {
+		return c.NoContent(http.StatusNoContent)
+	}
+	to := a.tree.Root.Entry("instance", []string{req.Instance})
+	if to == nil {
+		return errJSON(c, http.StatusBadRequest, "no virtual firewall "+req.Instance)
+	}
+	if to.Entry("interface", []string{name}) != nil {
+		return errJSON(c, http.StatusBadRequest, req.Instance+" has an interface "+name)
+	}
+	data, err := datastore.NodeJSON(a.entry, datastore.JSONOptions{Secrets: true})
+	if err != nil {
+		return err
+	}
+	if err := a.tree.Delete(a.path); err != nil {
+		return err
+	}
+	dst := datastore.Path{{Name: "instance", Keys: []string{req.Instance}}, {Name: "interface"}}
+	if err := a.tree.EditJSON(dst, datastore.EditCreate, data); err != nil {
+		return err
+	}
+	a.changed = true
+	return c.NoContent(http.StatusNoContent)
 }
 
 // generateCert makes a certificate's key and chain here: self-signed, a

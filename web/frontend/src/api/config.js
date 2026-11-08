@@ -27,7 +27,7 @@ const url = (ds, p) => `/config/${ds}/${p}`
 
 export const config = {
   schema: () => http.get('/schema').then((r) => r.data),
-  get: (p, ds = 'candidate') => http.get(url(ds, p)).then((r) => r.data),
+  get: (p, ds = 'candidate', params = {}) => http.get(url(ds, p), { params }).then((r) => r.data),
   put: (p, body) => http.put(url('candidate', p), body).then((r) => r.data),
   patch: (p, body) => http.patch(url('candidate', p), body).then((r) => r.data),
   post: (p, body) => http.post(url('candidate', p), body).then((r) => r.data),
@@ -113,8 +113,10 @@ export function vfPath() {
 // joined by ",", which CrudPage passes back to update and remove. A key
 // changed in the form renames the entry first.
 // Rows have the pages' member names (snake case, as the tables' columns);
-// keys are named so too.
-export function treeApi(listPath, keys = ['name']) {
+// keys are named so too. With shallow, list reads the entries' own leaves
+// alone, without their nested lists (a virtual firewall's rules), and
+// update merges (PATCH) rather than replace, which would remove them.
+export function treeApi(listPath, keys = ['name'], { shallow = false } = {}) {
   const idOf = (row) => keys.map((k) => row[k]).join(',')
   const entry = (id) => `${listPath()}=${id.split(',').map(encodeURIComponent).join(',')}`
   // Members starting with _ are the page's (CrudPage's params, which it
@@ -126,7 +128,7 @@ export function treeApi(listPath, keys = ['name']) {
   }
   return {
     list: async () => {
-      const rows = await config.get(listPath())
+      const rows = await config.get(listPath(), 'candidate', shallow ? { shallow: '' } : {})
       return (rows ?? []).map(fromEntry).map((r) => ({ ...r, id: idOf(r) }))
     },
     get: (id) => config.get(entry(id)).then(fromEntry),
@@ -145,7 +147,7 @@ export function treeApi(listPath, keys = ['name']) {
         await config.rename(entry(id), keys.map((k) => String(row[k])))
         target = now
       }
-      await config.put(entry(target), body(row))
+      await (shallow ? config.patch : config.put)(entry(target), body(row))
       return { ...row, id: target }
     },
     remove: (id) => config.remove(entry(id)),

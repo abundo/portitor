@@ -21,6 +21,9 @@ type JSONOptions struct {
 	// an RFC 7952 annotation, "@auth-password": {"portitor:set": true}, so
 	// a client can show that it is set.
 	SecretsSet bool
+	// Shallow writes a node's own leaves and leaf-lists, without its
+	// containers and lists (each entry's, for a list).
+	Shallow bool
 	// Indent pretty-prints.
 	Indent bool
 }
@@ -109,12 +112,15 @@ func nodeValue(n *Node, o JSONOptions, top bool) ordered {
 			}
 			out = append(out, member{name(s.Name), arr})
 		case schema.Container:
+			if o.Shallow {
+				continue
+			}
 			if c := n.Containers[s.Name]; c != nil {
 				out = append(out, member{name(s.Name), nodeValue(c, o, false)})
 			}
 		case schema.List:
 			es := n.Lists[s.Name]
-			if len(es) == 0 {
+			if len(es) == 0 || o.Shallow {
 				continue
 			}
 			arr := make([]any, len(es))

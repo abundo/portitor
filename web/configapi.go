@@ -137,7 +137,10 @@ func (s *Server) handleConfigGet(c *echo.Context) error {
 	if len(p) > 0 && !acc.CanRead(p[:1]) {
 		return errJSON(c, http.StatusNotFound, "not found")
 	}
-	body, err := configJSON(tree.Visible(acc.CanRead), p)
+	// ?shallow: the node's own leaves (each entry's, for a list), without
+	// what is nested in it.
+	_, shallow := c.Request().URL.Query()["shallow"]
+	body, err := configJSON(tree.Visible(acc.CanRead), p, shallow)
 	if err != nil {
 		var nf *notFound
 		if errors.As(err, &nf) {
@@ -153,12 +156,12 @@ type notFound struct{ what string }
 func (e *notFound) Error() string { return e.what + " is not there" }
 
 // configJSON is the JSON of what is at p in t.
-func configJSON(t *datastore.Tree, p datastore.Path) ([]byte, error) {
+func configJSON(t *datastore.Tree, p datastore.Path, shallow bool) ([]byte, error) {
 	ss, err := datastore.ResolveAll(t.Root.S, p)
 	if err != nil {
 		return nil, err
 	}
-	o := datastore.JSONOptions{SecretsSet: true}
+	o := datastore.JSONOptions{SecretsSet: true, Shallow: shallow}
 	if len(p) == 0 {
 		return t.JSON(o)
 	}

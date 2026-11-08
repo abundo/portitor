@@ -3,14 +3,17 @@
 
 <script setup>
 import CrudPage from '@/components/CrudPage.vue'
-import { instances } from '@/api'
+import { treeApi } from '@/api/config'
 import { useInstanceStore } from '@/stores/instances'
 
 const store = useInstanceStore()
+// The virtual firewalls in the configuration tree, without their contents.
+const instances = treeApi(() => 'instance', ['name'], { shallow: true })
+const firewallItems = () => store.firewalls.map((f) => ({ label: f.name, value: f.name }))
 
 const columns = [
   { key: 'name', label: 'Name', class: 'font-medium' },
-  { key: 'firewall_id', label: 'Firewall', format: (r) => store.firewallName(r.firewall_id) },
+  { key: 'firewall', label: 'Firewall' },
   { key: 'description', label: 'Description' },
 ]
 
@@ -23,10 +26,10 @@ const fields = [
     hint: 'Lowercase letters and digits, max 12.',
   },
   {
-    key: 'firewall_id',
+    key: 'firewall',
     label: 'Firewall',
     type: 'select',
-    items: () => store.firewallItems,
+    items: firewallItems,
     show: () => store.firewalls.length > 1,
     hint: 'The host it runs on. One with links stays on its firewall.',
   },
@@ -43,6 +46,7 @@ const fields = [
     :columns="columns"
     :fields="fields"
     :row-filter="(i) => !i.is_default"
+    :defaults="() => ({ firewall: store.firewalls[0]?.name })"
     new-label="New virtual firewall"
     @changed="store.load()"
   />
