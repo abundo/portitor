@@ -125,3 +125,31 @@ func TestHooks(t *testing.T) {
 		t.Errorf("dns-upstream %q", got)
 	}
 }
+
+func TestRoutingHooks(t *testing.T) {
+	tr := tree(t, `{"portitor:instance": [{"name": "host", "is-default": true, "firewall": "fw",
+		"vrf": [{"name": "blue", "route-table": 100}],
+		"prefix-list": [{"name": "lan", "family": "ipv4", "entry": [{"seq": 10, "action": "permit", "prefix": "10.0.0.0/8"}]}],
+		"route-map": [{"name": "out", "entry": [{"seq": 10, "action": "deny", "match-prefix-list": "lan", "set-metric": 5}]}],
+		"bgp-peer-group": [{"name": "core", "remote-as": "65001", "vrf": "blue"}]}]}`)
+	if err := Normalize(datastore.New(tr.Root.S), tr, datastore.ChangedEntries(datastore.New(tr.Root.S), tr)); err != nil {
+		t.Fatal(err)
+	}
+	e := tr.Root.Entry("instance", []string{"host"}).Entry("route-map", []string{"out"}).Entry("entry", []string{"10"})
+	if _, ok := e.Leaves["set-metric"]; ok {
+		t.Error("a deny entry kept what it sets")
+	}
+	// A prefix list renamed: the route map follows.
+	if err := tr.Rename(path("instance=host/prefix-list=lan"), []string{"inside"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := e.Leaf("match-prefix-list"); got != "inside" {
+		t.Errorf("match-prefix-list %q after the rename", got)
+	}
+	err := edit(t, tr, func(w *datastore.Tree) error {
+		return w.EditJSON(path("instance=host/bgp-neighbor"), datastore.EditCreate, []byte(`{"address": "192.0.2.9", "vrf": "main", "peer-group": "core"}`))
+	})
+	if err == nil || !strings.Contains(err.Error(), "VRF blue's, not the main table's") {
+		t.Errorf("a neighbour in another VRF than its group: %v", err)
+	}
+}

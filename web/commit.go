@@ -93,6 +93,16 @@ func (s *Server) deploy(ctx context.Context, username string, timeout *int, only
 	if err != nil {
 		return nil, err
 	}
+	// An instance admin's commit: what they may not change.
+	if only != nil {
+		run, err := treeBackend{s}.Running(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if err := tenantTreeCheck(run, tree, only); err != nil {
+			return nil, err
+		}
+	}
 	// What runs once it applies: the tree, or for some instances only, the
 	// running configuration with those instances from the tree.
 	runs := tree

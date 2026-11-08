@@ -148,15 +148,15 @@ submodule portitor-routing {
       px:table "route_prefix_lists";
       px:parent-column "instance_id";
       leaf name {
-        type string;
+        type word;
       }
       leaf family {
-        type string;
+        type enumeration { enum "ipv4"; enum "ipv6"; }
         default "ipv4";
         description "ipv4, ipv6";
       }
       leaf description {
-        type string;
+        type text;
       }
       list entry {
         key "seq";
@@ -165,10 +165,10 @@ submodule portitor-routing {
           type int32;
         }
         leaf action {
-          type string;
+          type enumeration { enum "permit"; enum "deny"; }
         }
         leaf prefix {
-          type string;
+          type cidr;
           description "a CIDR, or \"any\"";
         }
         leaf ge {
@@ -186,17 +186,17 @@ submodule portitor-routing {
       px:table "route_as_path_lists";
       px:parent-column "instance_id";
       leaf name {
-        type string;
+        type word;
       }
       leaf description {
-        type string;
+        type text;
       }
       list entry {
         key "action regex";
         ordered-by user;
         px:json "entries";
         leaf action {
-          type string;
+          type enumeration { enum "permit"; enum "deny"; }
         }
         leaf regex {
           type string;
@@ -208,22 +208,22 @@ submodule portitor-routing {
       px:table "route_community_lists";
       px:parent-column "instance_id";
       leaf name {
-        type string;
+        type word;
       }
       leaf kind {
-        type string;
+        type enumeration { enum "standard"; enum "expanded"; enum "large-standard"; enum "large-expanded"; }
         default "standard";
         description "fwconfig.Community*";
       }
       leaf description {
-        type string;
+        type text;
       }
       list entry {
         key "action value";
         ordered-by user;
         px:json "entries";
         leaf action {
-          type string;
+          type enumeration { enum "permit"; enum "deny"; }
         }
         leaf value {
           type string;
@@ -235,10 +235,10 @@ submodule portitor-routing {
       px:table "route_maps";
       px:parent-column "instance_id";
       leaf name {
-        type string;
+        type word;
       }
       leaf description {
-        type string;
+        type text;
       }
       list entry {
         key "seq";
@@ -247,23 +247,23 @@ submodule portitor-routing {
           type int32;
         }
         leaf action {
-          type string;
+          type enumeration { enum "permit"; enum "deny"; }
         }
         leaf description {
-          type string;
+          type text;
         }
         leaf match-prefix-list {
-          type string;
+          type leafref { path "../../../prefix-list/name"; }
           description "MatchPrefixList is a prefix list of either IP version (match ip or ipv6 address prefix-list); MatchNextHop one for the next hop.";
         }
         leaf match-next-hop {
-          type string;
+          type leafref { path "../../../prefix-list/name"; }
         }
         leaf match-as-path {
-          type string;
+          type leafref { path "../../../as-path-list/name"; }
         }
         leaf match-community {
-          type string;
+          type leafref { path "../../../community-list/name"; }
           description "a community list, large or not";
         }
         leaf match-metric {
@@ -301,11 +301,11 @@ submodule portitor-routing {
           type string;
         }
         leaf set-next-hop {
-          type string;
+          type ip-address;
           description "an address of either version";
         }
         leaf set-origin {
-          type string;
+          type enumeration { enum "igp"; enum "egp"; enum "incomplete"; }
         }
         leaf on-match-next {
           type boolean;
@@ -330,7 +330,7 @@ submodule portitor-routing {
         type uint32;
       }
       leaf router-id {
-        type string;
+        type ipv4-address;
       }
       leaf keepalive {
         type int32;
@@ -358,17 +358,17 @@ submodule portitor-routing {
         key "prefix";
         px:json "networks";
         leaf prefix {
-          type string;
+          type cidr;
         }
         leaf route-map {
-          type string;
+          type leafref { path "../../../route-map/name"; }
         }
       }
       list aggregate {
         key "prefix";
         px:json "aggregates";
         leaf prefix {
-          type string;
+          type cidr;
         }
         leaf summary-only {
           type boolean;
@@ -439,10 +439,10 @@ submodule portitor-routing {
       px:parent-column "instance_id";
       description "BgpPeerGroup is a peer group of the BGP of the main table (VrfID nil) or a VRF; its name is unique in the instance.";
       leaf name {
-        type string;
+        type word;
       }
       leaf description {
-        type string;
+        type text;
       }
       leaf remote-as {
         type string;
@@ -571,7 +571,7 @@ submodule portitor-routing {
         px:column "vrf_id";
       }
       leaf address {
-        type string;
+        type ip-address;
       }
       leaf enabled {
         type boolean;
@@ -581,7 +581,7 @@ submodule portitor-routing {
         type leafref { path "../../bgp-peer-group/name"; }
       }
       leaf description {
-        type string;
+        type text;
       }
       leaf remote-as {
         type string;
@@ -715,7 +715,7 @@ submodule portitor-routing {
         type boolean;
       }
       leaf router-id {
-        type string;
+        type ipv4-address;
       }
       leaf reference-bandwidth {
         type int32;
@@ -737,7 +737,7 @@ submodule portitor-routing {
         key "id";
         px:json "areas";
         leaf id {
-          type string;
+          type ospf-area;
           description "dotted, ParseOSPFArea";
         }
         leaf type {
@@ -751,10 +751,10 @@ submodule portitor-routing {
         key "area prefix";
         px:json "ranges";
         leaf area {
-          type string;
+          type ospf-area;
         }
         leaf prefix {
-          type string;
+          type cidr;
         }
         leaf not-advertise {
           type boolean;
@@ -768,7 +768,7 @@ submodule portitor-routing {
         key "prefix";
         px:json "summaries";
         leaf prefix {
-          type string;
+          type cidr;
         }
         leaf not-advertise {
           type boolean;
@@ -779,10 +779,10 @@ submodule portitor-routing {
         px:json "networks";
         description "OSPFv2 only";
         leaf prefix {
-          type string;
+          type cidr;
         }
         leaf area {
-          type string;
+          type ospf-area;
         }
       }
       list redistribute {
@@ -792,7 +792,7 @@ submodule portitor-routing {
           type string;
         }
         leaf route-map {
-          type string;
+          type leafref { path "../../../route-map/name"; }
         }
         leaf metric {
           type int32;
@@ -816,7 +816,7 @@ submodule portitor-routing {
         type union { type leafref { path "../../interface/name"; } type string; }
       }
       leaf area {
-        type string;
+        type ospf-area;
       }
       leaf passive {
         type boolean;
@@ -885,7 +885,7 @@ submodule portitor-routing {
         key "family level";
         px:json "default_originate";
         leaf family {
-          type string;
+          type enumeration { enum "ipv4"; enum "ipv6"; }
         }
         leaf level {
           type string;
@@ -894,7 +894,7 @@ submodule portitor-routing {
           type boolean;
         }
         leaf route-map {
-          type string;
+          type leafref { path "../../../route-map/name"; }
         }
         leaf metric {
           type int32;
@@ -905,7 +905,7 @@ submodule portitor-routing {
         key "family source level";
         px:json "redistribute";
         leaf family {
-          type string;
+          type enumeration { enum "ipv4"; enum "ipv6"; }
         }
         leaf source {
           type string;
@@ -915,7 +915,7 @@ submodule portitor-routing {
           type string;
         }
         leaf route-map {
-          type string;
+          type leafref { path "../../../route-map/name"; }
         }
         leaf metric {
           type int32;
@@ -1037,7 +1037,7 @@ submodule portitor-routing {
         ordered-by user;
       }
       leaf description {
-        type string;
+        type text;
       }
     }
     list bfd-interface {
@@ -1070,7 +1070,7 @@ submodule portitor-routing {
         type boolean;
       }
       leaf description {
-        type string;
+        type text;
       }
     }
   }

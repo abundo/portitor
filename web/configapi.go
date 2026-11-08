@@ -234,6 +234,11 @@ func (s *Server) handleConfigEdit(c *echo.Context) error {
 				return errForbidden
 			}
 		}
+		if !acc.a.isAdmin() {
+			if err := tenantTreeCheck(before, work, acc.write); err != nil {
+				return err
+			}
+		}
 		// What the save changed is checked now, as the GUI expects; the
 		// rest of the candidate at the commit.
 		changed := datastore.ChangedEntries(before, work)

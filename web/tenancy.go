@@ -15,6 +15,7 @@ import (
 
 	"github.com/abundo/portitor/internal/agentapi"
 	"github.com/abundo/portitor/internal/builder"
+	"github.com/abundo/portitor/internal/datastore"
 	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/internal/render"
 	"github.com/abundo/portitor/models"
@@ -373,4 +374,49 @@ func filterDeployments(deps []models.Deployment, names map[string]bool) []models
 		}
 	}
 	return out
+}
+
+// tenantTreeCheck refuses what an instance admin may not change in their
+// virtual firewalls (write) from before to after, beyond the paths
+// treeAccess refuses: physical NICs belong to the host, so only a global
+// admin adds, renames or removes one; and an OpenVPN server lets in the
+// virtual firewall's role, not every user of the firewall.
+func tenantTreeCheck(before, after *datastore.Tree, write map[string]bool) error {
+	for name := range write {
+		b, a := before.Root.Entry("instance", []string{name}), after.Root.Entry("instance", []string{name})
+		if a == nil {
+			continue
+		}
+		physical := func(in *datastore.Node) []string {
+			var out []string
+			if in == nil {
+				return out
+			}
+			for _, i := range in.Lists["interface"] {
+				if i.Leaf("kind") == fwconfig.KindPhysical {
+					out = append(out, i.Leaf("name"))
+				}
+			}
+			return out
+		}
+		if pb, pa := physical(b), physical(a); !slices.Equal(pb, pa) {
+			return bad(fmt.Sprintf("virtual firewall %s: only a global admin adds, renames or removes a physical interface", name))
+		}
+		for _, i := range a.Lists["interface"] {
+			if i.Leaf("kind") != fwconfig.KindOpenVPN {
+				continue
+			}
+			var old *datastore.Node
+			if b != nil {
+				old = b.Entry("interface", i.Keys())
+			}
+			if old != nil && old.Leaf("ovpn-role") == i.Leaf("ovpn-role") {
+				continue
+			}
+			if r := i.Leaf("ovpn-role"); r != instanceRoleName(name) {
+				return bad(fmt.Sprintf("virtual firewall %s: OpenVPN %s: its role is the virtual firewall's, %s", name, i.Leaf("name"), instanceRoleName(name)))
+			}
+		}
+	}
+	return nil
 }
