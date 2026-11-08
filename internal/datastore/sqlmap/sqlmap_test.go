@@ -12,7 +12,6 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
-	"github.com/abundo/portitor/internal/builder"
 	"github.com/abundo/portitor/internal/datastore"
 	"github.com/abundo/portitor/internal/dbmigrate"
 	"github.com/abundo/portitor/internal/fwconfig"
@@ -163,19 +162,18 @@ func TestImport(t *testing.T) {
 	}
 }
 
-// docs builds each firewall's document, for comparing the database before
-// and after a round trip.
+// docs is the configuration as the tables hold it, for comparing them
+// before and after a round trip.
 func docs(t *testing.T, db *gorm.DB) string {
 	t.Helper()
-	var fw models.Firewall
-	if err := db.Where("name = ?", "fw1").First(&fw).Error; err != nil {
-		t.Fatal(err)
-	}
-	doc, err := builder.BuildFirewall(db, 1, fw.ID)
+	tree, _, err := mapping(t).Import(db)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, _ := json.Marshal(doc)
+	b, err := tree.JSON(datastore.JSONOptions{Secrets: true})
+	if err != nil {
+		t.Fatal(err)
+	}
 	return string(b)
 }
 

@@ -70,7 +70,7 @@ func TestACMEProxy(t *testing.T) {
 		t.Fatalf("enable: %d %s", rec.Code, rec.Body)
 	}
 
-	doc, err := builder.Build(env.srv.db, 1)
+	doc, err := builder.Build(tablesInput(t, env.srv.db), 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +148,7 @@ func TestACMEProxyHTTP01(t *testing.T) {
 		t.Fatalf("enable: %d %s", rec.Code, rec.Body)
 	}
 
-	doc, err := builder.Build(env.srv.db, 1)
+	doc, err := builder.Build(tablesInput(t, env.srv.db), 1)
 	if err != nil {
 		t.Fatal(err)
 	}

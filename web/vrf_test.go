@@ -76,7 +76,7 @@ func TestVRF(t *testing.T) {
 		t.Errorf("delete in use: %d %s", rec.Code, rec.Body)
 	}
 
-	doc, err := builder.Build(env.srv.db, 1)
+	doc, err := builder.Build(tablesInput(t, env.srv.db), 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +154,7 @@ func TestVRFRouting(t *testing.T) {
 	}
 	env.create("/api/isis/config", map[string]any{"instance_id": a, "vrf_id": blue, "enabled": true, "net_interface": "eth2", "net_area": "49.0001"})
 
-	doc, err := builder.Build(env.srv.db, 1)
+	doc, err := builder.Build(tablesInput(t, env.srv.db), 1)
 	if err != nil {
 		t.Fatal(err)
 	}

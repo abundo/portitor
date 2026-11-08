@@ -672,7 +672,7 @@ func TestAddressLists(t *testing.T) {
 	}
 	env.create("/api/nat", map[string]any{"instance_id": inst, "kind": "masquerade", "enabled": true, "src_addrs": []string{"servers"}})
 
-	doc, err := builder.Build(env.srv.db, 1)
+	doc, err := builder.Build(tablesInput(t, env.srv.db), 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -803,7 +803,7 @@ func TestCustomServices(t *testing.T) {
 		t.Errorf("unknown service accepted: %d %s", rec.Code, rec.Body)
 	}
 
-	doc, _ := builder.Build(env.srv.db, 1)
+	doc, _ := builder.Build(tablesInput(t, env.srv.db), 1)
 	in := doc.Instances[0]
 	code := 4
 	want := []fwconfig.ServiceMatch{
@@ -851,7 +851,7 @@ func TestPortNames(t *testing.T) {
 	if rec := env.do("POST", "/api/nat", map[string]any{"instance_id": inst, "kind": "dnat", "protocol": "tcp", "dst_ports": "ghost", "to_addr": "192.168.1.10"}); rec.Code != http.StatusBadRequest {
 		t.Errorf("unknown port name accepted: %d %s", rec.Code, rec.Body)
 	}
-	doc, _ := builder.Build(env.srv.db, 1)
+	doc, _ := builder.Build(tablesInput(t, env.srv.db), 1)
 	if got := doc.Instances[0].NAT[0].DstPorts; got != "8080, https" {
 		t.Errorf("not resolved: %q", got)
 	}
@@ -977,7 +977,7 @@ func TestZoneRecordsGrid(t *testing.T) {
 		t.Fatalf("records: %+v", got)
 	}
 
-	doc, _ := builder.Build(env.srv.db, 1)
+	doc, _ := builder.Build(tablesInput(t, env.srv.db), 1)
 	var names []string
 	for _, r := range doc.Instance("main").DNS.Zones[0].Records {
 		names = append(names, r.Name+"/"+r.Type)

@@ -22,7 +22,7 @@ func TestInterfaceNormalize(t *testing.T) {
 	// A value without clamping is dropped.
 	env.create("/api/interfaces", map[string]any{"instance_id": inst, "name": "eth1", "enabled": true,
 		"mss_clamp_value": 1400})
-	doc, err := builder.BuildFirewall(env.srv.db, 1, 1)
+	doc, err := builder.BuildFirewall(tablesInput(t, env.srv.db), 1, 1)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -62,7 +62,7 @@ func TestTunnel6in4(t *testing.T) {
 		t.Errorf("stored %+v", he)
 	}
 
-	doc, err := builder.Build(env.srv.db, 1)
+	doc, err := builder.Build(tablesInput(t, env.srv.db), 1)
 	if err != nil {
 		t.Fatal(err)
 	}

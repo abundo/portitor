@@ -41,7 +41,7 @@ func TestStaticNeighbours(t *testing.T) {
 		}
 	}
 
-	doc, err := builder.Build(env.srv.db, 1)
+	doc, err := builder.Build(tablesInput(t, env.srv.db), 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +52,8 @@ func TestStaticNeighbours(t *testing.T) {
 		}
 	}
 	got, _ := json.Marshal(in.StaticNeighbours)
-	if string(got) != `[{"interface":"eth1","address":"fd00::5","mac":"02:00:5e:00:01:01"},{"interface":"eth1","address":"10.0.0.5","mac":"02:00:00:00:00:05"}]` {
+	// In key order: interface, then address.
+	if string(got) != `[{"interface":"eth1","address":"10.0.0.5","mac":"02:00:00:00:00:05"},{"interface":"eth1","address":"fd00::5","mac":"02:00:5e:00:01:01"}]` {
 		t.Errorf("document: %s", got)
 	}
 }

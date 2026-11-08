@@ -149,7 +149,7 @@ func (s *Server) Promote(ctx context.Context, username string, force bool) (*com
 	r.mu.Unlock()
 	slog.Warn("ha: promoted to primary", "firewall", me.Name, "old_primary", oldPrimary.Name, "user", username, "force", force, "epoch", me.HAEpoch+1)
 	noConfirm := 0
-	return s.deploy(ctx, username+" (promotion)", &noConfirm, nil)
+	return s.deployCandidate(ctx, username+" (promotion)", &noConfirm)
 }
 
 // PromoteHere is Promote from the console.

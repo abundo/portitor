@@ -82,7 +82,7 @@ func TestOpenVPN(t *testing.T) {
 	}
 
 	// The document: the role's members only, the certificate by name.
-	doc, err := builder.Build(env.srv.db, 1)
+	doc, err := builder.Build(tablesInput(t, env.srv.db), 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +110,7 @@ func TestOpenVPN(t *testing.T) {
 	if rec := env.do("PUT", path, map[string]any{"ovpn_role_id": nil}); rec.Code != http.StatusOK {
 		t.Fatalf("no role: %d %s", rec.Code, rec.Body)
 	}
-	doc, _ = builder.Build(env.srv.db, 1)
+	doc, _ = builder.Build(tablesInput(t, env.srv.db), 1)
 	for _, u := range doc.Instance("main").Interface("ovpn0").OpenVPN.Users {
 		if u.Denied || u.Hash == "" {
 			t.Errorf("without a role: %+v", u)
@@ -160,7 +160,7 @@ func TestOpenVPN(t *testing.T) {
 	const secret = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
 	env.srv.db.Model(&models.User{}).Where("id = ?", alice).Update("totp_secret", secret)
 	totps := func() map[string]string {
-		doc, _ = builder.Build(env.srv.db, 1)
+		doc, _ = builder.Build(tablesInput(t, env.srv.db), 1)
 		m := map[string]string{}
 		for _, u := range doc.Instance("main").Interface("ovpn0").OpenVPN.Users {
 			m[u.Name] = u.TOTP
@@ -236,7 +236,7 @@ func TestOpenVPNHA(t *testing.T) {
 		t.Errorf("peer addresses kept: %v", ifc.PeerAddresses)
 	}
 	for _, fw := range []uint{1, pair} {
-		doc, err := builder.BuildFirewall(env.srv.db, 1, fw)
+		doc, err := builder.BuildFirewall(tablesInput(t, env.srv.db), 1, fw)
 		if err != nil {
 			t.Fatalf("firewall %d: %v", fw, err)
 		}

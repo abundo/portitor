@@ -65,6 +65,20 @@ change: the document stays the contract between portitor-config and the agent.
 5. **SNMP**, read-only: the state of phase 3 through AgentX, a MIB generated from the
    modules.
 
+## Phase 4: the cut-over
+
+One cut-over, on the branch `model-driven-cutover`, merged when it works; the GUI is
+broken on the branch until then. The steps, in order:
+
+| Step | What | State |
+|---|---|---|
+| A | **Store:** the candidate is always kept (`candidate.json`, the shared working configuration, as the database is today); commits are `commits/<n>.json`; running is the live commit's; Revert sets the candidate to running. The builder reads a tree (rows made from it by the `px:` mapping, decoded into the models it takes). Deploy, changes, preview and Revert from the tree. An old database's tables are read into the tree once, at the first start, and dropped. | Done but the dropping: the tables stay, kept in step with the candidate both ways (`syncTables`, `Store.OnChange`), for the code that still reads them until step C. |
+| B | **Roles by instance name:** `roles` and `role_instances` name their instance (the only tables left that point into the configuration); access and tenancy by name. | |
+| C | **API:** `GET /api/schema` (the compiled schema for the GUI); `/api/config/...` (RESTCONF-like: RFC 7951 JSON at a path, of the candidate, running or state; PUT, PATCH, POST, DELETE on the candidate; rename and move); validation hooks per schema path (the `prepare*` checks), run when the GUI saves and at commit; actions for what is generated (WireGuard keys and client configs, certificates, OpenVPN keys, imports, bundles). The CRUD resources and their reference code go. | |
+| D | **GUI:** the API client and a schema store; `CrudPage` driven by a YANG list path (fields, types, enumerations, defaults and help from the schema, per-page overrides for layout); every view on it, by keys and names instead of ids. | |
+| E | **The rest:** HA replica (copies the commits and the candidate), promotion, bootstrap and join, the NIC import, backup and restore, bundles, the IP list tasks, the dashboard. | |
+| F | **Tests and docs.** | |
+
 ## How phase 1 works
 
 **The tables stay the store**, so everything that reads them (the builder, deploy,

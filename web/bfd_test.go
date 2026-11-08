@@ -50,7 +50,7 @@ func TestBFD(t *testing.T) {
 	env.create("/api/routes", map[string]any{"instance_id": inst, "destination": "10.1.0.0/16", "gateway": "10.0.0.2", "bfd": true, "enabled": true})
 
 	// The document has it, and the route is FRR's.
-	doc, err := builder.Build(env.srv.db, 1)
+	doc, err := builder.Build(tablesInput(t, env.srv.db), 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +72,7 @@ func TestBFD(t *testing.T) {
 		t.Errorf("not rewritten: %+v", b)
 	}
 	env.do("PUT", "/api/bfd/interfaces/"+itoa(b.ID), map[string]any{"enabled": false})
-	doc, _ = builder.Build(env.srv.db, 2)
+	doc, _ = builder.Build(tablesInput(t, env.srv.db), 2)
 	if in := doc.Instance("main"); len(in.BFD) != 0 || len(in.KernelRoutes()) != 1 {
 		t.Errorf("disabled: %+v", in.BFD)
 	}

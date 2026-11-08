@@ -123,7 +123,7 @@ func TestIPListsAndTasks(t *testing.T) {
 		t.Errorf("delete in use: %d %s", rec.Code, rec.Body)
 	}
 
-	doc, err := builder.Build(env.srv.db, 1)
+	doc, err := builder.Build(tablesInput(t, env.srv.db), 1)
 	if err != nil {
 		t.Fatal(err)
 	}

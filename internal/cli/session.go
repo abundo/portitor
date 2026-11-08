@@ -538,7 +538,7 @@ func (s *Session) command(ctx context.Context, cmd string, args []token) error {
 		if !s.candidate {
 			return errors.New("this is running mode")
 		}
-		if err := s.env.Store.Discard(s.id); err != nil {
+		if err := s.env.Store.Discard(ctx, s.id); err != nil {
 			return err
 		}
 		s.printf("The candidate's changes are discarded.\n")

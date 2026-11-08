@@ -90,7 +90,7 @@ func TestRateLimits(t *testing.T) {
 	}
 	env.create("/api/rules", map[string]any{"instance_id": inst, "chain": "forward", "action": "accept", "rate_limit": "bulk", "enabled": true})
 
-	doc, err := builder.Build(env.srv.db, 1)
+	doc, err := builder.Build(tablesInput(t, env.srv.db), 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,7 +166,7 @@ func TestServiceRateLimits(t *testing.T) {
 		t.Errorf("delete while off: %d %s", rec.Code, rec.Body)
 	}
 	env.do("PUT", instURL, map[string]any{"ntp_enabled": true, "ntp_servers": []map[string]any{{"address": "192.0.2.123"}}})
-	doc, err := builder.Build(env.srv.db, 1)
+	doc, err := builder.Build(tablesInput(t, env.srv.db), 1)
 	if err != nil {
 		t.Fatal(err)
 	}

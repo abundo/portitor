@@ -121,7 +121,7 @@ func TestRoutingObjects(t *testing.T) {
 
 	// The document holds BGP and the objects; the builder's result
 	// validates.
-	doc, err := builder.Build(env.srv.db, 1)
+	doc, err := builder.Build(tablesInput(t, env.srv.db), 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +138,7 @@ func TestRoutingObjects(t *testing.T) {
 	if rec := env.do("PUT", "/api/bgp/config/"+itoa(cfg.ID), map[string]any{"enabled": false}); rec.Code != http.StatusOK {
 		t.Fatal(rec.Body)
 	}
-	doc, _ = builder.Build(env.srv.db, 2)
+	doc, _ = builder.Build(tablesInput(t, env.srv.db), 2)
 	if in := doc.Instance("main"); in.BGP != nil || !in.RoutingPolicy.Empty() {
 		t.Errorf("BGP off: %+v", in.BGP)
 	}
@@ -211,7 +211,7 @@ func TestBGPNeighbors(t *testing.T) {
 	}
 
 	// The deployment history doesn't keep the password.
-	doc, err := builder.Build(env.srv.db, 1)
+	doc, err := builder.Build(tablesInput(t, env.srv.db), 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -272,7 +272,7 @@ func TestBGPNeighbors(t *testing.T) {
 	if rec := env.do("DELETE", "/api/interfaces/"+itoa(lo.ID), nil); rec.Code != http.StatusBadRequest {
 		t.Errorf("delete interface of a link-local neighbour: %d %s", rec.Code, rec.Body)
 	}
-	doc, _ = builder.Build(env.srv.db, 1)
+	doc, _ = builder.Build(tablesInput(t, env.srv.db), 1)
 	if p := doc.Instance("main").BGP.Neighbors[1]; p.Address != "fe80::1" || p.Interface != "lo3" {
 		t.Errorf("document neighbour %+v", p)
 	}

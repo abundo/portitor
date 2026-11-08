@@ -162,7 +162,7 @@ func (s *Server) Echo() *echo.Echo {
 	}
 	e.GET(replicaPath, s.handleReplica, noStore)
 
-	api := e.Group("/api", requireJSON, noStore, s.refuseOnReplica)
+	api := e.Group("/api", requireJSON, noStore, s.refuseOnReplica, s.syncTables)
 	api.POST("/login", s.handleLogin)
 	api.POST("/logout", s.handleLogout)
 	api.GET("/version", func(c *echo.Context) error { return c.JSON(http.StatusOK, buildinfo.Get()) })

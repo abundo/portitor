@@ -820,3 +820,124 @@ func update(tx *gorm.DB, tbl string, id int64, cols, prev map[string]any) error 
 	}
 	return nil
 }
+
+// Row is a table's row made from an entry: its columns by name.
+type Row map[string]any
+
+// Rows makes the tables' rows from t, without a database: what the
+// builder reads. Rows get ids of their own (a list keyed by id keeps its
+// id), references the ids of the rows they name, and names outside the
+// tree (firewalls, roles) the ids db has for them.
+func (m *Mapping) Rows(db *gorm.DB, tree *datastore.Tree) (map[string][]Row, Index, error) {
+	idx := Index{}
+	next := map[string]int64{}
+	ext := map[string]map[string]int64{}
+	out := map[string][]Row{}
+	type entry struct {
+		n   *datastore.Node
+		t   *table
+		row Row
+	}
+	var entries []entry
+	// Ids first: a list keyed by id keeps its own, others count on from
+	// the largest of those.
+	var assign func(n *datastore.Node)
+	used := map[string]map[int64]bool{}
+	assign = func(n *datastore.Node) {
+		for _, s := range n.S.Children {
+			if s.State {
+				continue
+			}
+			t := m.byList[s]
+			if t == nil {
+				if c := n.Containers[s.Name]; c != nil && s.Kind == schema.Container {
+					assign(c)
+				}
+				continue
+			}
+			if used[t.name] == nil {
+				used[t.name] = map[int64]bool{}
+			}
+			if t.singleton != 0 {
+				c := n.Containers[s.Name]
+				if c == nil {
+					c = n.AddContainer(s)
+				}
+				idx[c] = t.singleton
+				continue
+			}
+			for _, e := range n.Lists[s.Name] {
+				if v, ok := e.Leaves["id"]; ok && slices.Contains(t.s.Keys, "id") {
+					id := toInt(v)
+					idx[e] = id
+					used[t.name][id] = true
+					next[t.name] = max(next[t.name], id)
+				}
+				assign(e)
+			}
+		}
+	}
+	assign(tree.Root)
+	var walk func(n *datastore.Node) error
+	walk = func(n *datastore.Node) error {
+		for _, s := range n.S.Children {
+			if s.State {
+				continue
+			}
+			t := m.byList[s]
+			if t == nil {
+				if c := n.Containers[s.Name]; c != nil && s.Kind == schema.Container {
+					if err := walk(c); err != nil {
+						return err
+					}
+				}
+				continue
+			}
+			var nodes []*datastore.Node
+			if t.singleton != 0 {
+				nodes = []*datastore.Node{n.Containers[s.Name]}
+			} else {
+				nodes = n.Lists[s.Name]
+			}
+			for pos, e := range nodes {
+				if _, ok := idx[e]; !ok {
+					next[t.name]++
+					idx[e] = next[t.name]
+				}
+				row, err := m.columns(t, tree, e, pos, idx, ext, db, false)
+				if err != nil {
+					return err
+				}
+				row["id"] = idx[e]
+				entries = append(entries, entry{e, t, row})
+				if err := walk(e); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}
+	if err := walk(tree.Root); err != nil {
+		return nil, nil, err
+	}
+	for _, e := range entries {
+		refs, err := m.refColumns(e.t, tree, e.n, idx, ext, db, true)
+		if err != nil {
+			return nil, nil, err
+		}
+		for k, v := range refs {
+			e.row[k] = v
+		}
+		out[e.t.name] = append(out[e.t.name], e.row)
+	}
+	return out, idx, nil
+}
+
+// Tables are the tables the tree maps onto.
+func (m *Mapping) Tables() []string {
+	out := make([]string, len(m.tables))
+	for i, t := range m.tables {
+		out[i] = t.name
+	}
+	return out
+}

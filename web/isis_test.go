@@ -127,7 +127,7 @@ func TestISIS(t *testing.T) {
 	env.create("/api/bgp/config", map[string]any{"instance_id": inst, "enabled": true, "asn": 65000, "redist_isis_v4": true, "redist_isis_v4_map": "export"})
 	env.create("/api/ospf/config", map[string]any{"instance_id": inst, "version": 2, "enabled": true, "redistribute": []map[string]any{{"source": "isis"}}})
 
-	doc, err := builder.Build(env.srv.db, 1)
+	doc, err := builder.Build(tablesInput(t, env.srv.db), 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +150,7 @@ func TestISIS(t *testing.T) {
 	env.srv.db.Where("instance_id = ?", inst).First(&ospf)
 	env.do("PUT", "/api/ospf/config/"+itoa(ospf.ID), map[string]any{"enabled": false})
 	env.do("PUT", "/api/isis/config/"+itoa(cfg.ID), map[string]any{"enabled": false})
-	doc, _ = builder.Build(env.srv.db, 2)
+	doc, _ = builder.Build(tablesInput(t, env.srv.db), 2)
 	if in := doc.Instance("main"); in.ISIS != nil || !in.RoutingPolicy.Empty() {
 		t.Errorf("off: %+v", in)
 	}

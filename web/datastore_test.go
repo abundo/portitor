@@ -14,10 +14,13 @@ import (
 	"testing"
 
 	"golang.org/x/crypto/ssh"
+	"gorm.io/gorm"
 
+	"github.com/abundo/portitor/internal/builder"
 	"github.com/abundo/portitor/internal/cli"
 	"github.com/abundo/portitor/internal/datastore"
 	"github.com/abundo/portitor/internal/netconf"
+	"github.com/abundo/portitor/internal/schema"
 	"github.com/abundo/portitor/models"
 )
 
@@ -49,10 +52,6 @@ commit now
 	if !strings.Contains(out, "Commit 1: applied.") {
 		t.Errorf("commit: %s", out)
 	}
-	var lo models.Interface
-	if err := env.srv.db.Where("name = ?", "lo1").First(&lo).Error; err != nil {
-		t.Fatalf("lo1 not written: %v", err)
-	}
 	var dep models.Deployment
 	env.srv.db.Order("id desc").First(&dep)
 	if dep.Status != "applied" || dep.Username != "console" {
@@ -78,24 +77,24 @@ commit now
 	if !strings.Contains(out, "interface lo1 description cli") || !strings.Contains(out, "interface lo2") {
 		t.Errorf("diff: %s", out)
 	}
-	env.srv.db.Where("name = ?", "lo1").First(&lo)
-	var lo2 models.Interface
-	if lo.Description != "cli" || env.srv.db.Where("name = ?", "lo2").First(&lo2).Error != nil {
-		t.Errorf("after commit: lo1 %q, lo2 %v", lo.Description, lo2.ID)
+	run, err = cenv.Store.Running(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := run.Root.Entry("instance", []string{host.Name})
+	if h.Entry("interface", []string{"lo1"}).Leaves["description"] != "cli" || h.Entry("interface", []string{"lo2"}) == nil {
+		t.Errorf("after commit: %v", h.Lists["interface"])
 	}
 
-	// A commit that fails leaves the tables as they were.
-	var before int64
-	env.srv.db.Model(&models.Interface{}).Count(&before)
+	// A commit that fails leaves running as it was, and the candidate.
+	before, _ := cenv.Store.Running(ctx)
 	var bad bytes.Buffer
 	err = cli.RunScript(ctx, cenv, strings.NewReader("enter candidate\ninstance "+host.Name+" interface vl9 kind vlan\ncommit stay\n"), &bad)
 	if err == nil {
 		t.Fatalf("a VLAN without a parent committed: %s", bad.String())
 	}
-	var after int64
-	env.srv.db.Model(&models.Interface{}).Count(&after)
-	if after != before {
-		t.Errorf("interfaces %d → %d after a failed commit", before, after)
+	if after, _ := cenv.Store.Running(ctx); !datastore.Equal(before, after) {
+		t.Error("running changed after a failed commit")
 	}
 	if changed, _ := cenv.Store.Changed(ctx); !changed {
 		t.Error("the failed commit lost the candidate")
@@ -200,9 +199,8 @@ func TestNETCONFOverSSH(t *testing.T) {
 	if r := send(`<rpc xmlns="urn:ietf:params:xml:ns:netconf:base:1.0" message-id="2"><commit/></rpc>`); !strings.Contains(r, "<ok/>") {
 		t.Fatalf("commit: %s", r)
 	}
-	var lo models.Interface
-	if err := env.srv.db.Where("name = ?", "lo7").First(&lo).Error; err != nil {
-		t.Fatalf("lo7 not written: %v", err)
+	if !strings.Contains(r, "<ok/>") {
+		t.Fatal(r)
 	}
 	var dep models.Deployment
 	env.srv.db.Order("id desc").First(&dep)
@@ -234,4 +232,18 @@ func TestCLIState(t *testing.T) {
 	if err := cli.RunScript(ctx, cenv, strings.NewReader("enter candidate\n/ system-state hostname x\n"), &bytes.Buffer{}); err == nil {
 		t.Error("state was set")
 	}
+}
+
+// tablesInput is the builder's input from the tables a test wrote.
+func tablesInput(t *testing.T, db *gorm.DB) builder.Input {
+	t.Helper()
+	tree, _, err := tablesTree(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tree == nil {
+		root, _ := schema.Load()
+		tree = datastore.New(root)
+	}
+	return builder.Input{DB: db, Tree: tree}
 }

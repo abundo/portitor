@@ -12,8 +12,10 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
+	"github.com/abundo/portitor/internal/datastore/sqlmap"
 	"github.com/abundo/portitor/internal/dbmigrate"
 	"github.com/abundo/portitor/internal/fwconfig"
+	"github.com/abundo/portitor/internal/schema"
 	"github.com/abundo/portitor/internal/wgkeys"
 	"github.com/abundo/portitor/models"
 )
@@ -92,7 +94,7 @@ func TestBuildHome(t *testing.T) {
 	mustCreate(t, db, &models.Rule{InstanceID: main.ID, Position: 5, Chain: "forward", Kind: models.RuleKindGroup, Enabled: true, Description: "LAN"})
 	mustCreate(t, db, &models.NatRule{InstanceID: main.ID, Kind: "dnat", InInterfaces: models.StringList{"eth0"}, Protocol: "tcp", DstPorts: "443", ToAddr: "192.168.1.10", Enabled: true})
 
-	doc, err := Build(db, 42)
+	doc, err := Build(input(t, db), 42)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,7 +173,7 @@ func TestBuildReportsProblems(t *testing.T) {
 	mustCreate(t, db, &models.IpamAddress{InstanceID: main.ID, Address: "192.168.1.9", Mac: "02:00:00:00:00:09"})
 	mustCreate(t, db, &models.Rule{InstanceID: main.ID, Chain: "input", Services: models.StringList{"ghost"}, Action: "accept", Enabled: true})
 
-	_, err := Build(db, 1)
+	_, err := Build(input(t, db), 1)
 	ve, ok := err.(*fwconfig.ValidationError)
 	if !ok {
 		t.Fatalf("want ValidationError, got %v", err)
@@ -214,7 +216,7 @@ func TestBuildIPv6AndObjects(t *testing.T) {
 	mustCreate(t, db, &models.NatRule{InstanceID: main.ID, Kind: "dnat", InInterfaces: models.StringList{"eth0"}, Protocol: "tcp", DstPorts: "443", ToAddr: "nas", Enabled: true})
 	mustCreate(t, db, &models.Route{InstanceID: main.ID, Destination: "remote", Gateway: "upstream", Enabled: true})
 
-	doc, err := Build(db, 1)
+	doc, err := Build(input(t, db), 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -284,7 +286,7 @@ func TestBuildTwoPrefixesOnInterface(t *testing.T) {
 	mustCreate(t, db, &models.DnsZone{InstanceID: main.ID, Name: "home.arpa", Type: "forward"})
 	mustCreate(t, db, &models.IpamAddress{InstanceID: main.ID, Address: "10.1.2.10", DnsName: "tv.home.arpa", Mac: "02:00:00:00:00:10"})
 
-	doc, err := Build(db, 1)
+	doc, err := Build(input(t, db), 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -307,7 +309,7 @@ func TestBuildReportsObjectProblems(t *testing.T) {
 	mustCreate(t, db, &models.Rule{InstanceID: main.ID, Chain: "input", SrcAddrs: models.StringList{"hollow"}, Action: "accept", Enabled: true})
 	mustCreate(t, db, &models.NatRule{InstanceID: main.ID, Kind: "dnat", ToAddr: "net", Enabled: true})
 
-	_, err := Build(db, 1)
+	_, err := Build(input(t, db), 1)
 	ve, ok := err.(*fwconfig.ValidationError)
 	if !ok {
 		t.Fatalf("want ValidationError, got %v", err)
@@ -329,7 +331,7 @@ func TestBuildDelegatedPrefix(t *testing.T) {
 	mustCreate(t, db, &models.Interface{InstanceID: main.ID, Name: "eth1", Kind: "physical", Enabled: true, Ipv4Mode: "static", DnsListen: true,
 		Addresses: models.StringList{"192.168.1.1/24", "<eth0>:1::1/64"}})
 
-	doc, err := Build(db, 1)
+	doc, err := Build(input(t, db), 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -361,7 +363,7 @@ func TestBuildDelegatedDHCP(t *testing.T) {
 	mustCreate(t, db, &lan)
 	db.Model(&lan).Update("delegated_slaac", false)
 
-	doc, err := Build(db, 1)
+	doc, err := Build(input(t, db), 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -402,7 +404,7 @@ func TestBuildVRFRouting(t *testing.T) {
 	mustCreate(t, db, &models.IsisConfig{InstanceID: main.ID, VrfID: &blue.ID, Enabled: true, Net: "49.0001.0000.0000.0001.00"})
 	mustCreate(t, db, &models.IsisInterface{InstanceID: main.ID, Name: "eth2", IPv4: true})
 
-	doc, err := Build(db, 1)
+	doc, err := Build(input(t, db), 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -423,4 +425,19 @@ func TestBuildVRFRouting(t *testing.T) {
 	if vrf.ISIS == nil || len(vrf.ISIS.Interfaces) != 1 {
 		t.Errorf("vrf isis: %+v", vrf.ISIS)
 	}
+}
+
+// input reads the configuration rows a test made into a tree, as the
+// first start reads an old database's tables.
+func input(t *testing.T, db *gorm.DB) Input {
+	t.Helper()
+	m, err := sqlmap.New(schema.MustLoad())
+	if err != nil {
+		t.Fatal(err)
+	}
+	tree, _, err := m.Import(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return Input{DB: db, Tree: tree}
 }

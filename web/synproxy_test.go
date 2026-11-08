@@ -42,7 +42,7 @@ func TestRuleSynProxy(t *testing.T) {
 	// Without the switch, the other fields are free.
 	env.create("/api/rules", rule(map[string]any{"syn_proxy": false, "services": []string{"dns"}}))
 
-	doc, err := builder.BuildFirewall(env.srv.db, 1, 1)
+	doc, err := builder.BuildFirewall(tablesInput(t, env.srv.db), 1, 1)
 	if err != nil {
 		t.Fatal(err)
 	}

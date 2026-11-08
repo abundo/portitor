@@ -10,18 +10,23 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
 
+	"github.com/labstack/echo/v5"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 
+	"github.com/abundo/portitor/internal/builder"
 	"github.com/abundo/portitor/internal/buildinfo"
 	"github.com/abundo/portitor/internal/cli"
 	"github.com/abundo/portitor/internal/datastore"
 	"github.com/abundo/portitor/internal/datastore/sqlmap"
+	"github.com/abundo/portitor/internal/dbmigrate"
 	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/internal/netconf"
 	"github.com/abundo/portitor/internal/schema"
@@ -29,10 +34,9 @@ import (
 )
 
 // The configuration tree (dev/design-model-driven.md): the YANG schema's
-// datastore over the tables, which the CLI (and NETCONF) edit in a shared
-// candidate. A commit writes the tree into the tables (sqlmap) and deploys
-// as the GUI's commit does, so the two meet in the database: the GUI's
-// edits are in the candidate's base, which the candidate is rebased on.
+// datastore, which every frontend edits in one candidate (candidate.json
+// next to the database) and commits. A commit keeps the configuration it
+// deploys (deployed/<commit>-config.json); running is the live commit's.
 
 type treeState struct {
 	once    sync.Once
@@ -40,6 +44,10 @@ type treeState struct {
 	schema  *schema.Node
 	mapping *sqlmap.Mapping
 	store   *datastore.Store
+
+	runMu     sync.Mutex
+	runCommit int64
+	running   *datastore.Tree
 }
 
 // tree is the configuration tree, set up on first use.
@@ -57,103 +65,144 @@ func (s *Server) tree() (*treeState, error) {
 			dir = filepath.Dir(s.cfg.DB.Path)
 		}
 		t.store = datastore.NewStore(t.schema, treeBackend{s}, dir)
+		// The bridge to the code that still reads the tables.
+		t.store.OnChange = func(c *datastore.Tree) error {
+			if !s.db.Migrator().HasTable("instances") {
+				return nil
+			}
+			return s.db.Transaction(func(tx *gorm.DB) error { return t.mapping.Write(tx, c) })
+		}
 	})
 	return t, t.err
 }
 
 type treeBackend struct{ s *Server }
 
-func (b treeBackend) Current(context.Context) (*datastore.Tree, error) {
-	t, err := b.s.tree()
-	if err != nil {
-		return nil, err
+// Initial is the first candidate: an old database's configuration, read
+// once from its tables, or running.
+func (b treeBackend) Initial(ctx context.Context) (*datastore.Tree, error) {
+	if tree, ok, err := b.s.importTables(b.s.db); ok || err != nil {
+		return tree, err
 	}
-	tree, _, err := t.mapping.Import(b.s.db)
-	return tree, err
+	return b.Running(ctx)
 }
 
-// Running is the live commit's snapshot, or an empty configuration
-// before the first commit.
+// importTables reads the configuration from db's tables when it has them
+// (a database from before the tree, or its snapshot); ok is false when
+// it has none.
+func (s *Server) importTables(db *gorm.DB) (*datastore.Tree, bool, error) {
+	return tablesTree(db)
+}
+
+// tablesTree is importTables without a server.
+func tablesTree(db *gorm.DB) (*datastore.Tree, bool, error) {
+	if !db.Migrator().HasTable("instances") {
+		return nil, false, nil
+	}
+	var n int64
+	if err := db.Table("instances").Count(&n).Error; err != nil || n == 0 {
+		return nil, false, err
+	}
+	root, err := schema.Load()
+	if err != nil {
+		return nil, false, err
+	}
+	m, err := sqlmap.New(root)
+	if err != nil {
+		return nil, false, err
+	}
+	tree, _, err := m.Import(db)
+	if err != nil {
+		return nil, false, fmt.Errorf("reading the configuration from the database's tables: %w", err)
+	}
+	return tree, true, nil
+}
+
+// Running is the live commit's configuration, or an empty one before the
+// first commit. A commit from before the tree is read from its database
+// snapshot.
 func (b treeBackend) Running(context.Context) (*datastore.Tree, error) {
-	t, err := b.s.tree()
-	if err != nil {
-		return nil, err
-	}
-	commit, err := b.s.liveCommit()
-	if err != nil {
-		return nil, err
-	}
-	dir, err := b.s.snapshotDir()
-	if err != nil || commit == 0 {
-		return datastore.New(t.schema), nil
-	}
-	path := snapshotPath(dir, commit)
-	if _, err := os.Stat(path); err != nil {
-		return datastore.New(t.schema), nil
-	}
-	db, err := openSnapshot(path)
-	if err != nil {
-		return nil, err
-	}
-	defer closeDB(db)
-	tree, _, err := t.mapping.Import(db)
-	if err != nil {
-		return nil, fmt.Errorf("the running configuration (commit %d): %w", commit, err)
-	}
-	return tree, nil
-}
-
-var errValidated = errors.New("validated")
-
-// Commit writes the tree into the tables and deploys it. When that fails
-// the tables get back what they held.
-func (b treeBackend) Commit(ctx context.Context, tree *datastore.Tree, o datastore.CommitOptions) (string, error) {
 	s := b.s
 	t, err := s.tree()
 	if err != nil {
-		return "", err
+		return nil, err
 	}
+	commit, err := s.liveCommit()
+	if err != nil {
+		return nil, err
+	}
+	t.runMu.Lock()
+	defer t.runMu.Unlock()
+	if t.running != nil && t.runCommit == commit {
+		return t.running.Clone(), nil
+	}
+	tree := datastore.New(t.schema)
+	if commit > 0 {
+		loaded, err := s.loadCommit(t.schema, commit)
+		switch {
+		case err == nil:
+			tree = loaded
+		case errors.Is(err, os.ErrNotExist):
+			if old, ok, err := s.oldSnapshot(commit); err != nil {
+				return nil, err
+			} else if ok {
+				tree = old
+			}
+		default:
+			return nil, err
+		}
+	}
+	t.running, t.runCommit = tree, commit
+	return tree.Clone(), nil
+}
+
+// oldSnapshot reads a commit's configuration from its database snapshot
+// (deployed/<commit>.db), as commits were kept before the tree.
+func (s *Server) oldSnapshot(commit int64) (*datastore.Tree, bool, error) {
+	dir, err := s.snapshotDir()
+	if err != nil {
+		return nil, false, nil
+	}
+	path := filepath.Join(dir, fmt.Sprintf("%d.db", commit))
+	if _, err := os.Stat(path); err != nil {
+		return nil, false, nil
+	}
+	db, err := dbmigrate.Open(path, &gorm.Config{Logger: logger.Discard})
+	if err != nil {
+		return nil, false, err
+	}
+	defer func() {
+		if sqlDB, err := db.DB(); err == nil {
+			sqlDB.Close()
+		}
+	}()
+	return s.importTables(db)
+}
+
+// Commit deploys the tree, as the GUI's commit does.
+func (b treeBackend) Commit(ctx context.Context, tree *datastore.Tree, o datastore.CommitOptions) (string, error) {
+	s := b.s
 	if s.isReplica() {
 		return "", errors.New("this is the HA secondary: its configuration is a read-only copy of the primary's")
 	}
 	if o.Validate {
-		var problems []string
-		err := s.db.Transaction(func(tx *gorm.DB) error {
-			if err := writeTree(tx, t.mapping, tree); err != nil {
-				return err
-			}
-			fws, err := s.firewalls()
-			if err != nil {
-				return err
-			}
-			for _, fw := range fws {
-				if _, err := s.buildDoc(tx, &fw, fw.Generation+1, o.Only); err != nil {
-					problems = append(problems, firewallProblem(fws, fw, err.Error()))
-				}
-			}
-			return errValidated
-		})
-		if !errors.Is(err, errValidated) {
+		fws, err := s.firewalls()
+		if err != nil {
 			return "", err
+		}
+		var problems []string
+		for _, fw := range fws {
+			if _, err := s.buildDoc(builder.Input{DB: s.db, Tree: tree}, &fw, fw.Generation+1, o.Only); err != nil {
+				problems = append(problems, firewallProblem(fws, fw, err.Error()))
+			}
 		}
 		if len(problems) > 0 {
 			return "", errors.New(strings.Join(problems, "\n"))
 		}
 		return "The candidate is valid.", nil
 	}
-	prev, _, err := t.mapping.Import(s.db)
+	res, err := s.deploy(ctx, o.User, o.Confirm, o.Only, tree)
 	if err != nil {
-		return "", err
-	}
-	if err := s.db.Transaction(func(tx *gorm.DB) error { return writeTree(tx, t.mapping, tree) }); err != nil {
-		return "", err
-	}
-	res, err := s.deploy(ctx, o.User, o.Confirm, o.Only)
-	if err != nil {
-		if rerr := s.db.Transaction(func(tx *gorm.DB) error { return writeTree(tx, t.mapping, prev) }); rerr != nil {
-			slog.Error("restoring the configuration after a failed commit", "err", rerr)
-			return "", fmt.Errorf("%w (restoring the configuration from before the commit failed too: %v)", err, rerr)
-		}
 		var ve *fwconfig.ValidationError
 		if errors.As(err, &ve) {
 			return "", fmt.Errorf("the configuration is not valid:\n  %s", strings.Join(ve.Problems, "\n  "))
@@ -172,23 +221,51 @@ func (b treeBackend) Commit(ctx context.Context, tree *datastore.Tree, o datasto
 	return msg, nil
 }
 
-// writeTree writes the tree into the tables, and gives a new virtual
-// firewall its role.
-func writeTree(tx *gorm.DB, m *sqlmap.Mapping, tree *datastore.Tree) error {
-	if err := m.Write(tx, tree); err != nil {
+// syncFromTables reads the tables into the candidate. It bridges the
+// code that still writes the tables (the CRUD resources, bootstrap,
+// promotion, bundles) until it writes the tree (step C and E of the
+// cut-over, dev/design-model-driven.md).
+func (s *Server) syncFromTables(ctx context.Context) error {
+	t, err := s.tree()
+	if err != nil {
 		return err
 	}
-	var missing []models.Instance
-	if err := tx.Where("is_default = ? AND id NOT IN (SELECT instance_id FROM roles WHERE instance_id IS NOT NULL)", false).
-		Find(&missing).Error; err != nil {
+	tree, ok, err := s.importTables(s.db)
+	if err != nil || !ok {
 		return err
 	}
-	for i := range missing {
-		if err := createInstanceRole(tx, &missing[i]); err != nil {
-			return err
+	return t.store.Replace(ctx, tree)
+}
+
+// syncTables runs syncFromTables after an API request that may have
+// written the tables.
+func (s *Server) syncTables(next echo.HandlerFunc) echo.HandlerFunc {
+	return func(c *echo.Context) error {
+		err := next(c)
+		m, path := c.Request().Method, c.Request().URL.Path
+		if err == nil && m != http.MethodGet && m != http.MethodHead && !strings.HasPrefix(path, "/api/deploy/") {
+			if serr := s.syncFromTables(c.Request().Context()); serr != nil {
+				slog.Warn("reading the tables into the candidate", "err", serr)
+			}
 		}
+		return err
 	}
-	return nil
+}
+
+// deployCandidate commits the candidate as the GUI's commit does.
+func (s *Server) deployCandidate(ctx context.Context, user string, timeout *int) (*commitResult, error) {
+	if err := s.syncFromTables(ctx); err != nil {
+		return nil, err
+	}
+	t, err := s.tree()
+	if err != nil {
+		return nil, err
+	}
+	tree, err := t.store.Prepare(ctx, "")
+	if err != nil {
+		return nil, err
+	}
+	return s.deploy(ctx, user, timeout, nil, tree)
 }
 
 // treeAccess is a user's access, by path: global admins all, global

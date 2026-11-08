@@ -80,7 +80,7 @@ func TestDNSBlocklists(t *testing.T) {
 	// The document has the enabled lists, by name, with the key; the
 	// history's copy hides it.
 	env.do("PUT", "/api/dns/blocklists/"+itoa(id), map[string]any{"enabled": false})
-	doc, err := builder.Build(env.srv.db, 1)
+	doc, err := builder.Build(tablesInput(t, env.srv.db), 1)
 	if err != nil {
 		t.Fatal(err)
 	}

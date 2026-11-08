@@ -69,7 +69,7 @@ func TestSNMP(t *testing.T) {
 		t.Errorf("list holds the password: %s", rec.Body)
 	}
 
-	doc, err := builder.Build(env.srv.db, 1)
+	doc, err := builder.Build(tablesInput(t, env.srv.db), 1)
 	if err != nil {
 		t.Fatal(err)
 	}

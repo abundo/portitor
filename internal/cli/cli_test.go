@@ -26,7 +26,7 @@ type memory struct {
 	commits          int
 }
 
-func (m *memory) Current(context.Context) (*datastore.Tree, error) { return m.current.Clone(), nil }
+func (m *memory) Initial(context.Context) (*datastore.Tree, error) { return m.current.Clone(), nil }
 func (m *memory) Running(context.Context) (*datastore.Tree, error) { return m.running.Clone(), nil }
 func (m *memory) Commit(_ context.Context, t *datastore.Tree, o datastore.CommitOptions) (string, error) {
 	if o.Validate {

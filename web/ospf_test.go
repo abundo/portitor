@@ -122,7 +122,7 @@ func TestOSPF(t *testing.T) {
 	// BGP redistributes OSPF.
 	env.create("/api/bgp/config", map[string]any{"instance_id": inst, "enabled": true, "asn": 65000, "redist_ospf_v4": true, "redist_ospf_v4_map": "export", "redist_ospf_v6": true})
 
-	doc, err := builder.Build(env.srv.db, 1)
+	doc, err := builder.Build(tablesInput(t, env.srv.db), 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +137,7 @@ func TestOSPF(t *testing.T) {
 	var bgp models.BgpConfig
 	env.srv.db.Where("instance_id = ?", inst).First(&bgp)
 	env.do("PUT", "/api/bgp/config/"+itoa(bgp.ID), map[string]any{"enabled": false})
-	doc, _ = builder.Build(env.srv.db, 2)
+	doc, _ = builder.Build(tablesInput(t, env.srv.db), 2)
 	if in := doc.Instance("main"); in.BGP != nil || in.OSPF == nil || in.RoutingPolicy.Empty() {
 		t.Errorf("OSPF only: %+v", in)
 	}
@@ -145,7 +145,7 @@ func TestOSPF(t *testing.T) {
 	env.srv.db.Where("instance_id = ? AND version = 3", inst).First(&v3)
 	env.do("PUT", "/api/ospf/config/"+itoa(cfg.ID), map[string]any{"enabled": false})
 	env.do("PUT", "/api/ospf/config/"+itoa(v3.ID), map[string]any{"enabled": false})
-	doc, _ = builder.Build(env.srv.db, 3)
+	doc, _ = builder.Build(tablesInput(t, env.srv.db), 3)
 	if in := doc.Instance("main"); in.OSPF != nil || in.OSPF6 != nil || !in.RoutingPolicy.Empty() {
 		t.Errorf("all off: %+v", in)
 	}

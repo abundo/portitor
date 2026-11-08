@@ -67,7 +67,7 @@ func TestCertificates(t *testing.T) {
 		t.Errorf("not normalised: %+v", created)
 	}
 
-	doc, err := builder.Build(env.srv.db, 1)
+	doc, err := builder.Build(tablesInput(t, env.srv.db), 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +145,7 @@ func TestCertificateImport(t *testing.T) {
 		t.Errorf("source changed: %d %s", rec.Code, rec.Body)
 	}
 
-	doc, err := builder.Build(env.srv.db, 1)
+	doc, err := builder.Build(tablesInput(t, env.srv.db), 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -309,7 +309,7 @@ func TestCertificateAuthority(t *testing.T) {
 	}
 
 	// The CA goes to its firewall with the host, key included.
-	doc, err := builder.BuildFirewall(env.srv.db, 1, 1)
+	doc, err := builder.BuildFirewall(tablesInput(t, env.srv.db), 1, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -382,7 +382,7 @@ func TestCertificateDNS01(t *testing.T) {
 		t.Errorf("stored: %+v", created)
 	}
 
-	doc, err := builder.Build(env.srv.db, 1)
+	doc, err := builder.Build(tablesInput(t, env.srv.db), 1)
 	if err != nil {
 		t.Fatal(err)
 	}

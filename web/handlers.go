@@ -116,7 +116,11 @@ func (s *Server) handleAutoRules(c *echo.Context) error {
 	if err := s.db.First(&mi, id).Error; err != nil {
 		return errJSON(c, http.StatusNotFound, "not found")
 	}
-	doc, err := builder.BuildFirewall(s.db, 0, mi.FirewallID)
+	in, err := s.candidateInput(c.Request().Context())
+	if err != nil {
+		return err
+	}
+	doc, err := builder.BuildFirewall(in, 0, mi.FirewallID)
 	var ve *fwconfig.ValidationError
 	if err != nil && !errors.As(err, &ve) {
 		return err

@@ -52,7 +52,7 @@ func TestVXLANEVPN(t *testing.T) {
 		t.Errorf("delete of the underlay: %d %s", rec.Code, rec.Body)
 	}
 
-	doc, err := builder.Build(env.srv.db, 1)
+	doc, err := builder.Build(tablesInput(t, env.srv.db), 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +112,7 @@ func TestVRFL3VNI(t *testing.T) {
 		t.Errorf("delete of the underlay: %d %s", rec.Code, rec.Body)
 	}
 
-	doc, err := builder.Build(env.srv.db, 1)
+	doc, err := builder.Build(tablesInput(t, env.srv.db), 1)
 	if err != nil {
 		t.Fatal(err)
 	}

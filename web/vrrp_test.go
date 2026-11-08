@@ -65,7 +65,7 @@ func TestVRRP(t *testing.T) {
 	}
 
 	// The document has it, and it validates; disabled, it is shut down.
-	doc, err := builder.Build(env.srv.db, 1)
+	doc, err := builder.Build(tablesInput(t, env.srv.db), 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +74,7 @@ func TestVRRP(t *testing.T) {
 		t.Errorf("document: %+v", in.VRRP)
 	}
 	env.do("PUT", "/api/vrrp/routers/"+itoa(r.ID), map[string]any{"enabled": false, "preempt": false})
-	doc, _ = builder.Build(env.srv.db, 2)
+	doc, _ = builder.Build(tablesInput(t, env.srv.db), 2)
 	if in := doc.Instance("main"); len(in.VRRP) != 1 || !in.VRRP[0].Shutdown || !in.VRRP[0].NoPreempt {
 		t.Errorf("disabled: %+v", in.VRRP)
 	}

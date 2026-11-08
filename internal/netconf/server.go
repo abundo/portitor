@@ -215,7 +215,7 @@ func (s *session) operation(ctx context.Context, op *elem) (string, error) {
 		}
 		return ok, nil
 	case "discard-changes":
-		if err := s.env.Store.Discard(s.owner); err != nil {
+		if err := s.env.Store.Discard(ctx, s.owner); err != nil {
 			return "", err
 		}
 		return ok, nil

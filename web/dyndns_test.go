@@ -104,7 +104,7 @@ func TestDynDNS(t *testing.T) {
 		t.Errorf("move used interface: %d %s", rec.Code, rec.Body)
 	}
 
-	doc, err := builder.Build(env.srv.db, 1)
+	doc, err := builder.Build(tablesInput(t, env.srv.db), 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +187,7 @@ func TestDNSUpdateProvider(t *testing.T) {
 	}
 
 	env.create("/api/dyndns/records", map[string]any{"client_id": created.ID, "name": "home", "type": "A"})
-	doc, err := builder.Build(env.srv.db, 1)
+	doc, err := builder.Build(tablesInput(t, env.srv.db), 1)
 	if err != nil {
 		t.Fatal(err)
 	}

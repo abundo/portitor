@@ -9,6 +9,7 @@ package builder
 
 import (
 	"cmp"
+	"context"
 	"errors"
 	"fmt"
 	"maps"
@@ -16,15 +17,21 @@ import (
 	"net"
 	"net/netip"
 	"net/url"
+	"reflect"
 	"slices"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"gorm.io/gorm"
+	gormschema "gorm.io/gorm/schema"
 
+	"github.com/abundo/portitor/internal/datastore"
+	"github.com/abundo/portitor/internal/datastore/sqlmap"
 	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/internal/netobj"
+	"github.com/abundo/portitor/internal/schema"
 	"github.com/abundo/portitor/models"
 )
 
@@ -83,93 +90,179 @@ type data struct {
 	roleMappings []models.LdapRoleMapping
 }
 
-func load(db *gorm.DB) (*data, error) {
+// Input is what the builder reads: the configuration tree, and the
+// database for what is not configuration (the firewalls, the users and
+// their roles, the directory).
+type Input struct {
+	DB   *gorm.DB
+	Tree *datastore.Tree
+}
+
+var (
+	mapOnce    sync.Once
+	mapping    *sqlmap.Mapping
+	mappingErr error
+)
+
+// rows are the tree's rows, by table (sqlmap.Rows).
+func (in Input) rows() (map[string][]sqlmap.Row, error) {
+	mapOnce.Do(func() {
+		root, err := schema.Load()
+		if err != nil {
+			mappingErr = err
+			return
+		}
+		mapping, mappingErr = sqlmap.New(root)
+	})
+	if mappingErr != nil {
+		return nil, mappingErr
+	}
+	rows, _, err := mapping.Rows(in.DB, in.Tree)
+	return rows, err
+}
+
+func load(in Input) (*data, error) {
 	d := &data{}
+	rows, err := in.rows()
+	if err != nil {
+		return nil, err
+	}
+	for _, q := range []struct {
+		dst   any
+		table string
+	}{
+		{&d.instances, "instances"},
+		{&d.ifaceZones, "interface_zones"},
+		{&d.interfaces, "interfaces"},
+		{&d.peers, "wg_peers"},
+		{&d.links, "links"},
+		{&d.routes, "routes"},
+		{&d.policyRoutes, "policy_routes"},
+		{&d.neighbours, "static_neighbours"},
+		{&d.rules, "rules"},
+		{&d.nat, "nat_rules"},
+		{&d.prefixes, "ipam_prefixes"},
+		{&d.addrs, "ipam_addresses"},
+		{&d.dnsZones, "dns_zones"},
+		{&d.blocklists, "dns_blocklists"},
+		{&d.records, "dns_records"},
+		{&d.objects, "address_objects"},
+		{&d.addressLists, "address_lists"},
+		{&d.soas, "dns_soa_templates"},
+		{&d.policies, "dns_dnssec_policies"},
+		{&d.templates, "dns_templates"},
+		{&d.dyndns, "dyndns_clients"},
+		{&d.dyndnsRecs, "dyndns_records"},
+		{&d.certs, "certificates"},
+		{&d.ipLists, "ip_lists"},
+		{&d.tasks, "tasks"},
+		{&d.services, "services"},
+		{&d.portNames, "port_names"},
+		{&d.rateLimits, "rate_limits"},
+		{&d.prefixLists, "route_prefix_lists"},
+		{&d.asPathLists, "route_as_path_lists"},
+		{&d.communityLists, "route_community_lists"},
+		{&d.routeMaps, "route_maps"},
+		{&d.bgpConfigs, "bgp_configs"},
+		{&d.bgpGroups, "bgp_peer_groups"},
+		{&d.bgpNeighbors, "bgp_neighbors"},
+		{&d.ospfConfigs, "ospf_configs"},
+		{&d.ospfIfaces, "ospf_interfaces"},
+		{&d.isisConfigs, "isis_configs"},
+		{&d.isisIfaces, "isis_interfaces"},
+		{&d.vrrpRouters, "vrrp_routers"},
+		{&d.bfdIfaces, "bfd_interfaces"},
+		{&d.vrfs, "vrfs"},
+		{&d.snmpUsers, "snmp_users"},
+		{&d.syslogServers, "syslog_servers"},
+		{&d.proxyPolicies, "acme_proxy_policies"},
+		{&d.settings, "settings"},
+	} {
+		if err := decodeRows(rows[q.table], q.dst); err != nil {
+			return nil, fmt.Errorf("%s: %w", q.table, err)
+		}
+	}
+	// The default instance first, as the database gave them.
+	slices.SortStableFunc(d.instances, func(a, b models.Instance) int { return -cmpBool(a.IsDefault, b.IsDefault) })
 	for _, q := range []struct {
 		dst   any
 		order string
 	}{
-		{&d.instances, "is_default desc, name"},
-		{&d.ifaceZones, "name"},
-		{&d.interfaces, "name"},
-		{&d.peers, "name"},
-		{&d.links, "name"},
-		{&d.routes, "id"},
-		{&d.policyRoutes, "position, id"},
-		{&d.neighbours, "id"},
-		{&d.rules, "position, id"},
-		{&d.nat, "position, id"},
-		{&d.prefixes, "prefix"},
-		{&d.addrs, "address"},
-		{&d.dnsZones, "name"},
-		{&d.blocklists, "name"},
-		{&d.records, "zone_id, rank, id"},
-		{&d.objects, "name"},
-		{&d.addressLists, "name"},
-		{&d.soas, "name"},
-		{&d.policies, "name"},
-		{&d.templates, "name"},
-		{&d.dyndns, "name"},
-		{&d.dyndnsRecs, "client_id, id"},
-		{&d.certs, "name"},
-		{&d.ipLists, "name"},
-		{&d.tasks, "name"},
-		{&d.services, "name"},
-		{&d.portNames, "name"},
-		{&d.rateLimits, "name"},
-		{&d.prefixLists, "name"},
-		{&d.asPathLists, "name"},
-		{&d.communityLists, "name"},
-		{&d.routeMaps, "name"},
-		{&d.bgpConfigs, "id"},
-		{&d.bgpGroups, "name"},
-		{&d.bgpNeighbors, "id"},
-		{&d.ospfConfigs, "id"},
-		{&d.ospfIfaces, "name"},
-		{&d.isisConfigs, "id"},
-		{&d.isisIfaces, "name"},
-		{&d.vrrpRouters, "interface, vrid"},
-		{&d.bfdIfaces, "interface"},
-		{&d.vrfs, "name"},
-		{&d.snmpUsers, "name"},
-		{&d.syslogServers, "address, port, protocol"},
-		{&d.proxyPolicies, "name"},
 		{&d.ldapServers, "position, id"},
-		{&d.settings, "id"},
 		{&d.roleMappings, "id"},
 		{&d.users, "username"},
 		{&d.roleMembers, "id"},
 	} {
-		if err := db.Order(q.order).Find(q.dst).Error; err != nil {
+		if err := in.DB.Order(q.order).Find(q.dst).Error; err != nil {
 			return nil, err
 		}
 	}
 	return d, nil
 }
 
+var schemaCache = &sync.Map{}
+
+// decodeRows decodes rows into the models of the slice dst points at, by
+// their columns.
+func decodeRows(rows []sqlmap.Row, dst any) error {
+	sv := reflect.ValueOf(dst).Elem()
+	et := sv.Type().Elem()
+	sch, err := gormschema.Parse(reflect.New(et).Interface(), schemaCache, gormschema.NamingStrategy{})
+	if err != nil {
+		return err
+	}
+	ctx := context.Background()
+	for _, r := range rows {
+		v := reflect.New(et).Elem()
+		for col, val := range r {
+			f := sch.LookUpField(col)
+			if f == nil || f.DBName == "" {
+				continue
+			}
+			if s, ok := val.(string); ok && f.FieldType.Kind() == reflect.Slice && f.FieldType.Elem().Kind() != reflect.Uint8 {
+				// A JSON column: the models' list types scan their text.
+				if sc, ok := reflect.New(f.FieldType).Interface().(interface{ Scan(any) error }); ok {
+					if err := sc.Scan(s); err != nil {
+						return fmt.Errorf("%s: %w", col, err)
+					}
+					if err := f.Set(ctx, v, reflect.ValueOf(sc).Elem().Interface()); err != nil {
+						return fmt.Errorf("%s: %w", col, err)
+					}
+					continue
+				}
+			}
+			if err := f.Set(ctx, v, val); err != nil {
+				return fmt.Errorf("%s: %w", col, err)
+			}
+		}
+		sv.Set(reflect.Append(sv, v))
+	}
+	return nil
+}
+
 // Build returns the document for generation. Problems found while
 // resolving the database, and by fwconfig.Validate, come back as a
 // *fwconfig.ValidationError alongside the (possibly incomplete) document.
-func Build(db *gorm.DB, generation int64) (*fwconfig.Document, error) {
-	return build(db, generation, nil, 0)
+func Build(in Input, generation int64) (*fwconfig.Document, error) {
+	return build(in, generation, nil, 0)
 }
 
 // BuildFirewall is Build for one firewall: its instances, the links
 // between them, its tasks, and every IP list. An HA secondary gets its
 // primary's, with its own addresses on the pair's two links.
-func BuildFirewall(db *gorm.DB, generation int64, firewallID uint) (*fwconfig.Document, error) {
-	return BuildFirewallInstances(db, generation, firewallID, nil)
+func BuildFirewall(in Input, generation int64, firewallID uint) (*fwconfig.Document, error) {
+	return BuildFirewallInstances(in, generation, firewallID, nil)
 }
 
 // BuildFirewallInstances is BuildInstances for a firewall: only the named
 // instances (nil: all) of those it runs, and no fwconfig.Validate when
 // only is set.
-func BuildFirewallInstances(db *gorm.DB, generation int64, firewallID uint, only map[string]bool) (*fwconfig.Document, error) {
+func BuildFirewallInstances(in Input, generation int64, firewallID uint, only map[string]bool) (*fwconfig.Document, error) {
 	var fw models.Firewall
-	if err := db.First(&fw, firewallID).Error; err != nil {
+	if err := in.DB.First(&fw, firewallID).Error; err != nil {
 		return nil, err
 	}
-	ha, haProblem, err := haBlock(db, &fw)
+	ha, haProblem, err := haBlock(in.DB, &fw)
 	if err != nil {
 		return nil, err
 	}
@@ -177,7 +270,7 @@ func BuildFirewallInstances(db *gorm.DB, generation int64, firewallID uint, only
 	if fw.HAPrimaryID != nil {
 		runs = *fw.HAPrimaryID
 	}
-	return buildPeer(db, generation, only, runs, fw.HAPrimaryID != nil, ha, haProblem)
+	return buildPeer(in, generation, only, runs, fw.HAPrimaryID != nil, ha, haProblem)
 }
 
 // haBlock is the firewall's place in its HA pair, or nil outside one,
@@ -243,19 +336,19 @@ func configPort(s string) int {
 // tasks, and no fwconfig.Validate (the caller validates the document it
 // merges them into). Problems resolving the database come back as a
 // *fwconfig.ValidationError alongside the document.
-func BuildInstances(db *gorm.DB, generation int64, only map[string]bool) (*fwconfig.Document, error) {
-	return build(db, generation, only, 0)
+func BuildInstances(in Input, generation int64, only map[string]bool) (*fwconfig.Document, error) {
+	return build(in, generation, only, 0)
 }
 
 // build builds the instances in only (nil: all) on the firewall (0: all).
-func build(db *gorm.DB, generation int64, only map[string]bool, firewallID uint) (*fwconfig.Document, error) {
-	return buildPeer(db, generation, only, firewallID, false, nil, "")
+func build(in Input, generation int64, only map[string]bool, firewallID uint) (*fwconfig.Document, error) {
+	return buildPeer(in, generation, only, firewallID, false, nil, "")
 }
 
 // buildPeer is build, for the firewall's HA secondary when peer is set,
 // with the host's HA block (and a problem with it).
-func buildPeer(db *gorm.DB, generation int64, only map[string]bool, firewallID uint, peer bool, ha *fwconfig.HA, haProblem string) (*fwconfig.Document, error) {
-	d, err := load(db)
+func buildPeer(in Input, generation int64, only map[string]bool, firewallID uint, peer bool, ha *fwconfig.HA, haProblem string) (*fwconfig.Document, error) {
+	d, err := load(in)
 	if err != nil {
 		return nil, err
 	}

@@ -53,7 +53,7 @@ func richInstance(t *testing.T, env *testEnv, name string) uint {
 // (they are row ids).
 func docOf(t *testing.T, env *testEnv, name string) string {
 	t.Helper()
-	doc, err := builder.BuildInstances(env.srv.db, 0, map[string]bool{name: true})
+	doc, err := builder.BuildInstances(tablesInput(t, env.srv.db), 0, map[string]bool{name: true})
 	if err != nil {
 		t.Fatalf("build %s: %v", name, err)
 	}

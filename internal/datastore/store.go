@@ -14,15 +14,15 @@ import (
 	"github.com/abundo/portitor/internal/schema"
 )
 
-// Backend is where the configuration lives and runs.
+// Backend is where the configuration is committed and runs.
 type Backend interface {
-	// Current is the shared configuration as it stands: what was committed
-	// and the edits made since, in the GUI too.
-	Current(ctx context.Context) (*Tree, error)
+	// Initial is the candidate when there is none kept yet: running, or an
+	// old database's configuration at the first start.
+	Initial(ctx context.Context) (*Tree, error)
 	// Running is what the firewalls run: the live commit's.
 	Running(ctx context.Context) (*Tree, error)
-	// Commit makes t the configuration and deploys it; it leaves the
-	// configuration as it was when that fails. It says how it went.
+	// Commit keeps t as a commit and deploys it; when that fails, nothing
+	// changes. It says how it went.
 	Commit(ctx context.Context, t *Tree, o CommitOptions) (string, error)
 }
 
@@ -40,20 +40,22 @@ type CommitOptions struct {
 	Only map[string]bool
 }
 
-// Store is the candidate the CLI's (and NETCONF's) sessions share: the
-// backend's current configuration with their edits. When the current
-// configuration changes under it (an edit in the GUI, a commit), the
-// candidate's edits are made again on the new one: a rebase, in which the
-// candidate wins where both changed a leaf.
+// Store is the candidate: the working configuration that every frontend
+// (the GUI and API, the CLI, NETCONF) edits and commits, shared as the
+// database was before it. A commit leaves it as it is; discarding its
+// changes makes it running again.
 type Store struct {
 	mu      sync.Mutex
 	schema  *schema.Node
 	backend Backend
-	dir     string // candidate.json and candidate-base.json; "" keeps them in memory
+	dir     string // candidate.json; "" keeps it in memory
 
-	cand, base *Tree // nil: no edits
+	cand *Tree // nil until first used
 
 	locks map[string]string // datastore (candidate, running) → the session holding its lock
+
+	// OnChange, when set, is told each new candidate (s.mu is held).
+	OnChange func(*Tree) error
 }
 
 // LockedError is an edit or commit refused for another session's lock.
@@ -77,12 +79,16 @@ func (s *Store) Lock(ctx context.Context, owner, datastore string) error {
 	if o := s.locks[datastore]; o != "" {
 		return &LockedError{datastore, o}
 	}
-	if datastore == "candidate" && s.cand != nil {
+	if datastore == "candidate" {
 		c, err := s.candidate(ctx)
 		if err != nil {
 			return err
 		}
-		if !Equal(c, s.base) {
+		run, err := s.backend.Running(ctx)
+		if err != nil {
+			return err
+		}
+		if !Equal(c, run) {
 			return errors.New("the candidate has changes not committed or discarded")
 		}
 	}
@@ -128,24 +134,12 @@ func (s *Store) locked(owner string, datastores ...string) error {
 // NewStore is a store whose candidate is kept in dir.
 func NewStore(root *schema.Node, b Backend, dir string) *Store {
 	s := &Store{schema: root, backend: b, dir: dir}
-	s.load()
+	if dir != "" {
+		if t, err := s.read(filepath.Join(dir, "candidate.json")); err == nil {
+			s.cand = t
+		}
+	}
 	return s
-}
-
-func (s *Store) files() (cand, base string) {
-	return filepath.Join(s.dir, "candidate.json"), filepath.Join(s.dir, "candidate-base.json")
-}
-
-func (s *Store) load() {
-	if s.dir == "" {
-		return
-	}
-	cf, bf := s.files()
-	cand, err1 := s.read(cf)
-	base, err2 := s.read(bf)
-	if err1 == nil && err2 == nil {
-		s.cand, s.base = cand, base
-	}
 }
 
 func (s *Store) read(path string) (*Tree, error) {
@@ -161,50 +155,37 @@ func (s *Store) read(path string) (*Tree, error) {
 }
 
 func (s *Store) save() error {
-	if s.dir == "" {
+	if s.dir == "" || s.cand == nil {
 		return nil
 	}
-	cf, bf := s.files()
-	if s.cand == nil {
-		os.Remove(cf)
-		os.Remove(bf)
-		return nil
+	data, err := s.cand.JSON(JSONOptions{Secrets: true})
+	if err != nil {
+		return err
 	}
-	for path, t := range map[string]*Tree{cf: s.cand, bf: s.base} {
-		data, err := t.JSON(JSONOptions{Secrets: true})
-		if err != nil {
-			return err
-		}
-		tmp := path + ".tmp"
-		if err := os.WriteFile(tmp, data, 0o600); err != nil {
-			return err
-		}
-		if err := os.Rename(tmp, path); err != nil {
-			return err
-		}
-	}
-	return nil
+	return WriteFile(filepath.Join(s.dir, "candidate.json"), data)
 }
 
-// candidate is the rebased candidate; s.mu is held.
+// WriteFile writes a tree's file (0600: it holds secrets) whole or not
+// at all.
+func WriteFile(path string, data []byte) error {
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
+// candidate is the candidate; s.mu is held.
 func (s *Store) candidate(ctx context.Context) (*Tree, error) {
-	cur, err := s.backend.Current(ctx)
-	if err != nil {
-		return nil, err
-	}
 	if s.cand == nil {
-		return cur, nil
-	}
-	if Equal(s.base, cur) {
-		return s.cand, nil
-	}
-	rebased := cur.Clone()
-	if err := rebased.Apply(Diff(s.base, s.cand)); err != nil {
-		return nil, fmt.Errorf("rebasing the candidate on the changed configuration: %w", err)
-	}
-	s.cand, s.base = rebased, cur
-	if err := s.save(); err != nil {
-		return nil, err
+		t, err := s.backend.Initial(ctx)
+		if err != nil {
+			return nil, err
+		}
+		s.cand = t
+		if err := s.save(); err != nil {
+			return nil, err
+		}
 	}
 	return s.cand, nil
 }
@@ -241,37 +222,56 @@ func (s *Store) Edit(ctx context.Context, owner string, fn func(*Tree) error) er
 	if err := fn(work); err != nil {
 		return err
 	}
-	if s.cand == nil {
-		s.base = c
+	return s.set(work)
+}
+
+// set makes t the candidate; s.mu is held.
+func (s *Store) set(t *Tree) error {
+	if s.OnChange != nil {
+		if err := s.OnChange(t); err != nil {
+			return err
+		}
 	}
-	s.cand = work
+	s.cand = t
 	return s.save()
 }
 
-// Changed reports whether the candidate holds edits not in the current
-// configuration.
+// Replace makes t the candidate without OnChange: for what OnChange's
+// source changed.
+func (s *Store) Replace(ctx context.Context, t *Tree) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cand = t
+	return s.save()
+}
+
+// Changed reports whether the candidate differs from running.
 func (s *Store) Changed(ctx context.Context) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.cand == nil {
-		return false, nil
-	}
 	c, err := s.candidate(ctx)
 	if err != nil {
 		return false, err
 	}
-	return !Equal(c, s.base), nil
+	run, err := s.backend.Running(ctx)
+	if err != nil {
+		return false, err
+	}
+	return !Equal(run, c), nil
 }
 
-// Discard drops the candidate's edits.
-func (s *Store) Discard(owner string) error {
+// Discard makes the candidate running again.
+func (s *Store) Discard(ctx context.Context, owner string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.locked(owner, "candidate"); err != nil {
 		return err
 	}
-	s.cand, s.base = nil, nil
-	return s.save()
+	run, err := s.backend.Running(ctx)
+	if err != nil {
+		return err
+	}
+	return s.set(run.Clone())
 }
 
 // ValidationError is a commit's problems with the schema.
@@ -285,9 +285,26 @@ func (e *ValidationError) Error() string {
 	return msg
 }
 
+// Prepare is the candidate to commit, for a commit made outside Commit
+// (the GUI's): the locks let owner commit and it is valid by the schema.
+func (s *Store) Prepare(ctx context.Context, owner string) (*Tree, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.locked(owner, "candidate", "running"); err != nil {
+		return nil, err
+	}
+	c, err := s.candidate(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if errs := c.Validate(); len(errs) > 0 {
+		return nil, &ValidationError{errs}
+	}
+	return c.Clone(), nil
+}
+
 // Commit checks the candidate against the schema and commits it through
-// the backend. Its edits are then in the current configuration, so the
-// candidate starts over from that.
+// the backend. The candidate stays as it is.
 func (s *Store) Commit(ctx context.Context, o CommitOptions) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -301,13 +318,5 @@ func (s *Store) Commit(ctx context.Context, o CommitOptions) (string, error) {
 	if errs := c.Validate(); len(errs) > 0 {
 		return "", &ValidationError{errs}
 	}
-	msg, err := s.backend.Commit(ctx, c, o)
-	if err != nil || o.Validate {
-		return msg, err
-	}
-	s.cand, s.base = nil, nil
-	if err := s.save(); err != nil {
-		return msg, errors.Join(errors.New("committed, but removing the candidate's files failed"), err)
-	}
-	return msg, nil
+	return s.backend.Commit(ctx, c.Clone(), o)
 }

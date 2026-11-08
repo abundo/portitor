@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"os"
 	"slices"
 	"strings"
 	"time"
@@ -22,6 +21,7 @@ import (
 	"github.com/abundo/portitor/internal/agentclient"
 	"github.com/abundo/portitor/internal/builder"
 	"github.com/abundo/portitor/internal/buildinfo"
+	"github.com/abundo/portitor/internal/datastore"
 	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/internal/render"
 	"github.com/abundo/portitor/models"
@@ -63,11 +63,12 @@ type commitTarget struct {
 	skip bool
 }
 
-// deploy commits: it builds each firewall's document, applies the changed
-// ones and records the deployments. timeout nil takes the confirm timeout
-// from the settings. only names the instances to deploy from the database
+// deploy commits the configuration tree: it builds each firewall's
+// document, applies the changed ones, records the deployments and keeps
+// the configuration as the commit's. timeout nil takes the confirm timeout
+// from the settings. only names the instances to deploy from the tree
 // (nil: everything); see buildDoc.
-func (s *Server) deploy(ctx context.Context, username string, timeout *int, only map[string]bool) (*commitResult, error) {
+func (s *Server) deploy(ctx context.Context, username string, timeout *int, only map[string]bool, tree *datastore.Tree) (*commitResult, error) {
 	s.deployMu.Lock()
 	defer s.deployMu.Unlock()
 	st, err := s.settings()
@@ -79,23 +80,7 @@ func (s *Server) deploy(ctx context.Context, username string, timeout *int, only
 		return nil, err
 	}
 	commit := st.LastCommit + 1
-	// Build from the snapshot, so it is exactly what Revert restores even
-	// if an edit comes in meanwhile.
-	snap, err := s.takeSnapshot(commit)
-	if err != nil {
-		return nil, err
-	}
-	kept := false
-	defer func() {
-		if !kept {
-			os.Remove(snap)
-		}
-	}()
-	snapDB, err := openSnapshot(snap)
-	if err != nil {
-		return nil, err
-	}
-	targets, same, err := s.commitTargets(snapDB, fws, only)
+	targets, same, err := s.commitTargets(builder.Input{DB: s.db, Tree: tree}, fws, only)
 	if err == nil {
 		// Nothing changed: all are applied again.
 		if len(targets) == 0 {
@@ -105,8 +90,18 @@ func (s *Server) deploy(ctx context.Context, username string, timeout *int, only
 			err = bad("there is nothing to deploy")
 		}
 	}
-	closeDB(snapDB)
 	if err != nil {
+		return nil, err
+	}
+	// What runs once it applies: the tree, or for some instances only, the
+	// running configuration with those instances from the tree.
+	runs := tree
+	if only != nil {
+		if runs, err = s.mergeRunning(ctx, tree, only); err != nil {
+			return nil, err
+		}
+	}
+	if err := s.saveCommit(runs, commit); err != nil {
 		return nil, err
 	}
 	reached := map[uint]bool{}
@@ -259,14 +254,7 @@ func (s *Server) deploy(ctx context.Context, username string, timeout *int, only
 			slog.Warn("keeping the deployed document", "firewall", t.fw.Name, "err", err)
 		}
 	}
-	// Revert restores a snapshot of the database, which matches what
-	// runs only after a deploy of everything that succeeded.
-	if only == nil && applyErr == nil {
-		s.keepSnapshot(snap, commit)
-		kept = true
-	} else {
-		s.pruneSnapshots()
-	}
+	s.pruneSnapshots()
 	return res, applyErr
 }
 
@@ -274,10 +262,10 @@ func (s *Server) deploy(ctx context.Context, username string, timeout *int, only
 // a commit deploys to: those whose document changed, or all of them when
 // none did. Problems come back as one *fwconfig.ValidationError, each
 // named by its firewall when there are several.
-func (s *Server) commitTargets(db *gorm.DB, fws []models.Firewall, only map[string]bool) (changed, same []*commitTarget, err error) {
+func (s *Server) commitTargets(in builder.Input, fws []models.Firewall, only map[string]bool) (changed, same []*commitTarget, err error) {
 	var problems []string
 	for _, fw := range fws {
-		doc, err := s.buildDoc(db, &fw, fw.Generation+1, only)
+		doc, err := s.buildDoc(in, &fw, fw.Generation+1, only)
 		var ve *fwconfig.ValidationError
 		switch {
 		case errors.As(err, &ve):
@@ -335,28 +323,28 @@ func onlyOn(only map[string]bool, doc *fwconfig.Document) map[string]bool {
 	return out
 }
 
-// buildDoc builds a firewall's document from db. With only nil it is
-// everything on the firewall; otherwise only those instances come from db
+// buildDoc builds a firewall's document from the tree. With only nil it is
+// everything on the firewall; otherwise only those instances come from it
 // and the rest from the firewall's live document, and it is nil when only
 // names nothing on the firewall. Problems come back as a
 // *fwconfig.ValidationError alongside the document.
-func (s *Server) buildDoc(db *gorm.DB, fw *models.Firewall, gen int64, only map[string]bool) (*fwconfig.Document, error) {
+func (s *Server) buildDoc(in builder.Input, fw *models.Firewall, gen int64, only map[string]bool) (*fwconfig.Document, error) {
 	if only == nil {
-		return builder.BuildFirewall(db, gen, fw.ID)
+		return builder.BuildFirewall(in, gen, fw.ID)
 	}
 	if len(only) == 0 {
 		return nil, errForbidden
 	}
-	runs := fw.ID
+	runs := fw.Name
 	if fw.HAPrimaryID != nil {
-		runs = *fw.HAPrimaryID
-	}
-	var names []string
-	if err := db.Model(&models.Instance{}).Where("firewall_id = ?", runs).Pluck("name", &names).Error; err != nil {
-		return nil, err
+		var primary models.Firewall
+		if err := s.db.First(&primary, *fw.HAPrimaryID).Error; err != nil {
+			return nil, err
+		}
+		runs = primary.Name
 	}
 	mine := map[string]bool{}
-	for _, n := range names {
+	for _, n := range instancesOn(in.Tree, runs) {
 		if only[n] {
 			mine[n] = true
 		}
@@ -368,7 +356,7 @@ func (s *Server) buildDoc(db *gorm.DB, fw *models.Firewall, gen int64, only map[
 	if err != nil {
 		return nil, err
 	}
-	part, err := builder.BuildFirewallInstances(db, gen, fw.ID, mine)
+	part, err := builder.BuildFirewallInstances(in, gen, fw.ID, mine)
 	var problems []string
 	var ve *fwconfig.ValidationError
 	if errors.As(err, &ve) {
@@ -497,7 +485,23 @@ func (s *Server) handleDeployApply(c *echo.Context) error {
 	if only != nil && len(only) == 0 {
 		return errJSON(c, http.StatusForbidden, "you are not an admin of any virtual firewall")
 	}
-	res, err := s.deploy(c.Request().Context(), currentUser(c).Username, req.ConfirmTimeout, only)
+	t, err := s.tree()
+	if err != nil {
+		return err
+	}
+	tree, err := t.store.Prepare(c.Request().Context(), "")
+	var dve *datastore.ValidationError
+	switch {
+	case errors.As(err, &dve):
+		problems := make([]string, len(dve.Problems))
+		for i, p := range dve.Problems {
+			problems[i] = p.Error()
+		}
+		return problemsResponse(c, &fwconfig.ValidationError{Problems: problems})
+	case err != nil:
+		return errJSON(c, http.StatusConflict, err.Error())
+	}
+	res, err := s.deploy(c.Request().Context(), currentUser(c).Username, req.ConfirmTimeout, only, tree)
 	var ve *fwconfig.ValidationError
 	switch {
 	case errors.As(err, &ve):
@@ -530,7 +534,11 @@ func (s *Server) handleDeployChanges(c *echo.Context) error {
 		if err != nil {
 			return err
 		}
-		resp.Changed, resp.Problems, err = s.instanceChanges(names)
+		in, err := s.candidateInput(c.Request().Context())
+		if err != nil {
+			return err
+		}
+		resp.Changed, resp.Problems, err = s.instanceChanges(in, names)
 		if err != nil {
 			return err
 		}
@@ -540,8 +548,12 @@ func (s *Server) handleDeployChanges(c *echo.Context) error {
 	if err != nil {
 		return err
 	}
+	in, err := s.candidateInput(c.Request().Context())
+	if err != nil {
+		return err
+	}
 	for _, fw := range fws {
-		changed, problems, err := s.firewallChanged(fw.ID)
+		changed, problems, err := s.firewallChanged(in, fw.ID)
 		if err != nil {
 			return err
 		}
@@ -553,12 +565,12 @@ func (s *Server) handleDeployChanges(c *echo.Context) error {
 
 // firewallChanged tells whether the database builds another document for
 // the firewall than it runs, and how many problems it has.
-func (s *Server) firewallChanged(firewallID uint) (bool, int, error) {
+func (s *Server) firewallChanged(in builder.Input, firewallID uint) (bool, int, error) {
 	live, err := s.liveDeployment(firewallID)
 	if err != nil {
 		return false, 0, err
 	}
-	doc, err := builder.BuildFirewall(s.db, 0, firewallID)
+	doc, err := builder.BuildFirewall(in, 0, firewallID)
 	var ve *fwconfig.ValidationError
 	switch {
 	case errors.As(err, &ve):
@@ -825,8 +837,12 @@ func joinNonEmpty(a, b string) string {
 // firewallDocs builds each firewall's document for a check or preview,
 // leaving out the firewalls only names nothing on. Problems come back as
 // one *fwconfig.ValidationError alongside the documents.
-func (s *Server) firewallDocs(only map[string]bool) ([]models.Firewall, []*fwconfig.Document, error) {
+func (s *Server) firewallDocs(ctx context.Context, only map[string]bool) ([]models.Firewall, []*fwconfig.Document, error) {
 	all, err := s.firewalls()
+	if err != nil {
+		return nil, nil, err
+	}
+	in, err := s.candidateInput(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -834,7 +850,7 @@ func (s *Server) firewallDocs(only map[string]bool) ([]models.Firewall, []*fwcon
 	var docs []*fwconfig.Document
 	var problems []string
 	for _, fw := range all {
-		doc, err := s.buildDoc(s.db, &fw, fw.Generation+1, only)
+		doc, err := s.buildDoc(in, &fw, fw.Generation+1, only)
 		var ve *fwconfig.ValidationError
 		switch {
 		case errors.As(err, &ve):
@@ -867,7 +883,7 @@ func (s *Server) handleDeployCheck(c *echo.Context) error {
 	if err != nil {
 		return dbError(c, err)
 	}
-	_, docs, err := s.firewallDocs(only)
+	_, docs, err := s.firewallDocs(c.Request().Context(), only)
 	problems := []string{}
 	var ve *fwconfig.ValidationError
 	var br *badRequest
@@ -915,7 +931,7 @@ func (s *Server) handleDeployPreview(c *echo.Context) error {
 	if err != nil {
 		return dbError(c, err)
 	}
-	fws, docs, err := s.firewallDocs(only)
+	fws, docs, err := s.firewallDocs(c.Request().Context(), only)
 	if err != nil {
 		return problemsResponse(c, err)
 	}
@@ -968,7 +984,11 @@ func (s *Server) handleExportNftables(c *echo.Context) error {
 	if err != nil {
 		return agentError(c, err)
 	}
-	doc, err := s.buildDoc(s.db, fw, fw.Generation+1, only)
+	in, err := s.candidateInput(c.Request().Context())
+	if err != nil {
+		return err
+	}
+	doc, err := s.buildDoc(in, fw, fw.Generation+1, only)
 	if err != nil {
 		return problemsResponse(c, err)
 	}
@@ -991,6 +1011,61 @@ func (s *Server) handleExportNftables(c *echo.Context) error {
 }
 
 // haPeerOf is the id of the firewall's HA peer, or 0.
+// instancesOn are the names of the instances of the tree on the firewall
+// named fw.
+func instancesOn(t *datastore.Tree, fw string) []string {
+	var out []string
+	for _, in := range t.Root.Lists["instance"] {
+		if in.Leaves["firewall"] == fw {
+			out = append(out, in.Leaves["name"])
+		}
+	}
+	return out
+}
+
+// mergeRunning is running with the instances in only (and their
+// shared objects) as the tree has them: what runs after a commit of
+// those instances alone.
+func (s *Server) mergeRunning(ctx context.Context, tree *datastore.Tree, only map[string]bool) (*datastore.Tree, error) {
+	t, err := s.tree()
+	if err != nil {
+		return nil, err
+	}
+	run, err := t.store.Running(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := run.Clone()
+	root := out.Root
+	var kept []*datastore.Node
+	for _, in := range root.Lists["instance"] {
+		if !only[in.Leaves["name"]] {
+			kept = append(kept, in)
+		}
+	}
+	for _, in := range tree.Root.Lists["instance"] {
+		if only[in.Leaves["name"]] {
+			kept = append(kept, in.Clone(root))
+		}
+	}
+	slices.SortFunc(kept, func(a, b *datastore.Node) int { return datastore.CompareKeys(a.Keys(), b.Keys()) })
+	root.Lists["instance"] = kept
+	return out, nil
+}
+
+// candidateInput is the builder's input from the candidate.
+func (s *Server) candidateInput(ctx context.Context) (builder.Input, error) {
+	t, err := s.tree()
+	if err != nil {
+		return builder.Input{}, err
+	}
+	cand, err := t.store.Candidate(ctx)
+	if err != nil {
+		return builder.Input{}, err
+	}
+	return builder.Input{DB: s.db, Tree: cand}, nil
+}
+
 func haPeerOf(fws []models.Firewall, fw models.Firewall) uint {
 	if fw.HAPrimaryID != nil {
 		return *fw.HAPrimaryID

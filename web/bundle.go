@@ -498,7 +498,11 @@ func ImportBundle(ctx context.Context, db *gorm.DB, b *Bundle, name string, fire
 		return 0, nil, err
 	}
 	var problems []string
-	_, err = builder.BuildInstances(db, 0, map[string]bool{name: true})
+	tree, ok, err := tablesTree(db)
+	if err != nil || !ok {
+		return 0, nil, err
+	}
+	_, err = builder.BuildInstances(builder.Input{DB: db, Tree: tree}, 0, map[string]bool{name: true})
 	var ve *fwconfig.ValidationError
 	if errors.As(err, &ve) {
 		problems = ve.Problems

@@ -23,7 +23,7 @@ type memory struct {
 	commits                  int
 }
 
-func (m *memory) Current(context.Context) (*datastore.Tree, error) { return m.current.Clone(), nil }
+func (m *memory) Initial(context.Context) (*datastore.Tree, error) { return m.current.Clone(), nil }
 func (m *memory) Running(context.Context) (*datastore.Tree, error) { return m.running.Clone(), nil }
 func (m *memory) Commit(_ context.Context, t *datastore.Tree, o datastore.CommitOptions) (string, error) {
 	if o.Validate {
@@ -227,7 +227,11 @@ func TestLocksAndConfirmedCommit(t *testing.T) {
 	if d := m.running.Root.Entry("instance", []string{"host"}).Leaves["description"]; d != "one" {
 		t.Errorf("after cancel-commit: %q", d)
 	}
+	// The candidate keeps the cancelled change: b can't lock it until it
+	// is discarded (RFC 6241 section 7.5).
 	a.ok(`<unlock><target><candidate/></target></unlock>`)
+	b.fails(`<lock><target><candidate/></target></lock>`, "lock-denied")
+	b.ok(`<discard-changes/>`)
 	b.ok(`<lock><target><candidate/></target></lock>`)
 	// A session that ends lets its locks go.
 	b.ok(`<close-session/>`)

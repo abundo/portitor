@@ -89,19 +89,17 @@ func (s *Server) liveDocument(firewallID uint) (*fwconfig.Document, error) {
 	if !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}
-	snap := snapshotPath(dir, live.CommitID)
 	if len(live.Instances) > 0 {
 		return nil, errNoLiveDocument
 	}
-	if _, err := os.Stat(snap); err != nil {
-		return nil, errNoLiveDocument
-	}
-	db, err := openSnapshot(snap)
+	tree, ok, err := s.oldSnapshot(live.CommitID)
 	if err != nil {
 		return nil, err
 	}
-	defer closeDB(db)
-	doc, err := builder.BuildFirewall(db, live.Generation, firewallID)
+	if !ok {
+		return nil, errNoLiveDocument
+	}
+	doc, err := builder.BuildFirewall(builder.Input{DB: s.db, Tree: tree}, live.Generation, firewallID)
 	var ve *fwconfig.ValidationError
 	if err != nil && !errors.As(err, &ve) {
 		return nil, err
@@ -208,8 +206,8 @@ func (s *Server) mayFinish(a *access, dep *models.Deployment) bool {
 
 // instanceChanges tells whether the named instances differ between the
 // database and the live document, and how many problems they have.
-func (s *Server) instanceChanges(names map[string]bool) (changed bool, problems int, err error) {
-	part, err := builder.BuildInstances(s.db, 0, names)
+func (s *Server) instanceChanges(in builder.Input, names map[string]bool) (changed bool, problems int, err error) {
+	part, err := builder.BuildInstances(in, 0, names)
 	var ve *fwconfig.ValidationError
 	if errors.As(err, &ve) {
 		problems = len(ve.Problems)

@@ -6,7 +6,6 @@ package web
 import (
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -15,20 +14,17 @@ import (
 	"strings"
 
 	"github.com/labstack/echo/v5"
-	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
 
-	"github.com/abundo/portitor/internal/dbmigrate"
-	"github.com/abundo/portitor/models"
+	"github.com/abundo/portitor/internal/datastore"
+	"github.com/abundo/portitor/internal/schema"
 )
 
-// Every commit keeps a snapshot of the database it was built from
-// (<db dir>/deployed/<commit>.db), so "Revert" can throw away the
-// uncommitted changes: it restores the live commit's snapshot the way a
-// backup restore does. The document cannot be turned back into rows.
+// Every commit keeps the configuration it deployed
+// (<db dir>/deployed/<commit>-config.json): running is the live commit's,
+// and "Revert" sets the candidate back to it.
 
-// snapshotKeep is how many of the latest live commits keep a snapshot;
-// rolling back a pending one makes an older one live again.
+// snapshotKeep is how many of the latest live commits keep their
+// configuration; rolling back a pending one makes an older one live again.
 const snapshotKeep = 5
 
 // snapshotDir is the directory next to the database file.
@@ -48,54 +44,48 @@ func (s *Server) snapshotDir() (string, error) {
 	return "", errors.New("the database has no file")
 }
 
-func snapshotPath(dir string, commit int64) string {
-	return filepath.Join(dir, strconv.FormatInt(commit, 10)+".db")
+// configPath is the file of a commit's configuration.
+func configPath(dir string, commit int64) string {
+	return filepath.Join(dir, strconv.FormatInt(commit, 10)+"-config.json")
 }
 
-// takeSnapshot writes the database to a temporary file in the snapshot
-// directory; keepSnapshot or os.Remove finishes it.
-func (s *Server) takeSnapshot(commit int64) (string, error) {
+// saveCommit keeps the configuration a commit deploys.
+func (s *Server) saveCommit(t *datastore.Tree, commit int64) error {
 	dir, err := s.snapshotDir()
 	if err != nil {
-		return "", err
+		return err
 	}
-	// Snapshots hold every secret, like the database.
+	// It holds every secret.
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return "", err
+		return err
 	}
-	tmp := snapshotPath(dir, commit) + ".tmp"
-	os.Remove(tmp)
-	if err := s.db.Exec("VACUUM INTO ?", tmp).Error; err != nil {
-		return "", fmt.Errorf("snapshot: %w", err)
+	data, err := t.JSON(datastore.JSONOptions{Secrets: true})
+	if err != nil {
+		return err
 	}
-	return tmp, nil
+	return datastore.WriteFile(configPath(dir, commit), data)
 }
 
-// openSnapshot opens a snapshot for reading; close it with closeDB.
-func openSnapshot(path string) (*gorm.DB, error) {
-	return dbmigrate.Open(path, &gorm.Config{Logger: logger.Discard})
-}
-
-func closeDB(db *gorm.DB) {
-	if sqlDB, err := db.DB(); err == nil {
-		sqlDB.Close()
+// loadCommit is a commit's configuration; os.ErrNotExist when it isn't
+// kept.
+func (s *Server) loadCommit(root *schema.Node, commit int64) (*datastore.Tree, error) {
+	dir, err := s.snapshotDir()
+	if err != nil {
+		return nil, err
 	}
-}
-
-// keepSnapshot moves the temporary snapshot into place and removes the
-// snapshots of all but the latest live deployments.
-func (s *Server) keepSnapshot(tmp string, commit int64) {
-	dir := filepath.Dir(tmp)
-	if err := os.Rename(tmp, snapshotPath(dir, commit)); err != nil {
-		slog.Warn("keeping the deployment snapshot", "err", err)
-		os.Remove(tmp)
-		return
+	data, err := os.ReadFile(configPath(dir, commit))
+	if err != nil {
+		return nil, err
 	}
-	s.pruneSnapshots()
+	t := datastore.New(root)
+	if err := t.UnmarshalJSON(data); err != nil {
+		return nil, fmt.Errorf("commit %d: %w", commit, err)
+	}
+	return t, nil
 }
 
-// pruneSnapshots removes the snapshots and documents of all but the latest
-// live commits.
+// pruneSnapshots removes the configurations and documents of all but the
+// latest live commits.
 func (s *Server) pruneSnapshots() {
 	dir, err := s.snapshotDir()
 	if err != nil {
@@ -125,11 +115,13 @@ func (s *Server) pruneSnapshots() {
 	}
 }
 
-// handleDeployRevert replaces the configuration with the one the firewall
-// runs, discarding every change since the last commit.
+// handleDeployRevert sets the candidate back to the configuration the
+// firewalls run, discarding every change since the last commit.
 func (s *Server) handleDeployRevert(c *echo.Context) error {
-	s.deployMu.Lock()
-	defer s.deployMu.Unlock()
+	t, err := s.tree()
+	if err != nil {
+		return err
+	}
 	live, err := s.liveCommit()
 	if err != nil {
 		return err
@@ -137,49 +129,8 @@ func (s *Server) handleDeployRevert(c *echo.Context) error {
 	if live == 0 {
 		return errJSON(c, http.StatusConflict, "nothing has been committed yet")
 	}
-	dir, err := s.snapshotDir()
-	if err != nil {
-		return err
-	}
-	src, err := os.Open(snapshotPath(dir, live))
-	if errors.Is(err, os.ErrNotExist) {
-		var partial []string
-		if err := s.db.Model(&models.Deployment{}).Where("commit_id = ? AND instances != '[]'", live).Pluck("instances", &partial).Error; err != nil {
-			return err
-		}
-		if len(partial) > 0 {
-			return errJSON(c, http.StatusConflict, fmt.Sprintf("commit %d deployed only some virtual firewalls; revert works after a commit of everything", live))
-		}
-		return errJSON(c, http.StatusConflict, fmt.Sprintf("commit %d has no saved configuration to revert to (it was committed by an older version, or failed on a firewall)", live))
-	} else if err != nil {
-		return err
-	}
-	defer src.Close()
-
-	// Restoring migrates the file; keep the snapshot as it was.
-	tmpDir, err := os.MkdirTemp("", "portitor-revert")
-	if err != nil {
-		return err
-	}
-	defer os.RemoveAll(tmpDir)
-	path := filepath.Join(tmpDir, "revert.db")
-	dst, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o600)
-	if err != nil {
-		return err
-	}
-	_, err = io.Copy(dst, src)
-	if cerr := dst.Close(); err == nil {
-		err = cerr
-	}
-	if err != nil {
-		return err
-	}
-	if _, err := restoreDatabase(c.Request().Context(), s.db, path, restoreKeeps); err != nil {
-		var re restoreError
-		if errors.As(err, &re) {
-			return errJSON(c, http.StatusConflict, err.Error())
-		}
-		return err
+	if err := t.store.Discard(c.Request().Context(), ""); err != nil {
+		return errJSON(c, http.StatusConflict, err.Error())
 	}
 	slog.Info("uncommitted changes reverted", "user", currentUser(c).Username, "commit", live)
 	return c.JSON(http.StatusOK, map[string]any{"generation": live})

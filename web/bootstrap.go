@@ -240,7 +240,7 @@ func Bootstrap(ctx context.Context, s *Server, o BootstrapOptions) (*models.Depl
 		return nil, err
 	}
 	noConfirm := 0
-	res, err := s.deploy(ctx, "bootstrap", &noConfirm, nil)
+	res, err := s.deployCandidate(ctx, "bootstrap", &noConfirm)
 	var dep *models.Deployment
 	if res != nil && len(res.Deployments) > 0 {
 		dep = &res.Deployments[0]
