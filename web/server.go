@@ -228,23 +228,13 @@ func (s *Server) Echo() *echo.Echo {
 	(&resource[models.PortName, *models.PortName]{db: s.db, order: "name", prepare: preparePortName, beforeDelete: deletePortName}).registerRead(s, g, "/port-names")
 
 	// Instance admins use these too; the handlers check the instance.
-	for _, r := range []string{"POST /api/dns/blocklists/:id/refresh", "POST /api/certificates/:id/renew", "POST /api/wg/import", "POST /api/agent/capture", "POST /api/agent/trace", "POST /api/agent/iperf", "POST /api/agent/probe", "POST /api/agent/servicelog", "POST /api/agent/connections", "POST /api/agent/connections/flush", "POST /api/agent/dhcp/renew",
+	for _, r := range []string{"POST /api/wg/import", "POST /api/agent/capture", "POST /api/agent/trace", "POST /api/agent/iperf", "POST /api/agent/probe", "POST /api/agent/servicelog", "POST /api/agent/connections", "POST /api/agent/connections/flush", "POST /api/agent/dhcp/renew",
 		"POST /api/deploy/apply", "POST /api/deploy/confirm", "POST /api/deploy/rollback",
 		"PUT /api/config/*", "PATCH /api/config/*", "POST /api/config/*", "DELETE /api/config/*"} {
 		s.tenantWrites[r] = true
 	}
 	// The routes of the GUI from before the tree: writes made through it
 	// (legacyWrite), reads and operations as they were.
-	g.POST("/certificates/:id/renew", s.handleCertificateRenew)
-	g.GET("/certificates/:id/download", s.handleCertificateDownload)
-	g.GET("/wg/peers/:id/config", s.handleWgClientConfig)
-	g.GET("/interfaces/:id/wg-next-free", s.handleWgNextFree)
-	g.GET("/interfaces/:id/openvpn-client", s.handleOpenVPNClientConfig)
-	g.GET("/ipam/prefixes/:id/next-free", s.handleNextFree)
-	g.POST("/ip-lists/:id/refresh", s.handleIPListRefresh)
-	g.POST("/dns/blocklists/:id/refresh", s.handleDNSBlocklistRefresh)
-	g.POST("/tasks/:id/run", s.handleTaskRun)
-	g.GET("/instances/:id/bundle", s.handleExportBundle)
 	g.GET("/ipam/tree", s.handleIpamTree)
 	g.GET("/rules/auto", s.handleAutoRules)
 	g.GET("/services", func(c *echo.Context) error { return c.JSON(http.StatusOK, fwconfig.Services) })

@@ -644,6 +644,10 @@ func foldersParentsFirst(rows []bundleRow) []bundleRow {
 // handleExportBundle downloads a virtual firewall as a bundle (global
 // admins: it holds its secrets).
 func (s *Server) handleExportBundle(c *echo.Context) error {
+	// It holds the virtual firewall's secrets: global admins only.
+	if !currentAccess(c).isAdmin() {
+		return errJSON(c, http.StatusForbidden, "a bundle holds the virtual firewall's secrets: global admins only")
+	}
 	id, err := echo.PathParam[uint](c, "id")
 	if err != nil {
 		return errJSON(c, http.StatusNotFound, "not found")

@@ -58,6 +58,8 @@ func TestTenancy(t *testing.T) {
 		{"GET", "/api/config/candidate/instance=b/rule=" + ruleB, nil, http.StatusNotFound},
 		{"PATCH", "/api/config/candidate/instance=b/rule=" + ruleB, map[string]any{"description": "mine"}, http.StatusForbidden},
 		{"DELETE", "/api/config/candidate/instance=b/rule=" + ruleB, nil, http.StatusForbidden},
+		// A bundle holds the VF's secrets: not even its admin's.
+		{"GET", "/api/config/candidate/instance=a?action=bundle", nil, http.StatusForbidden},
 		{"POST", "/api/config/candidate/instance=b/rule", rule("x"), http.StatusForbidden},
 		{"POST", "/api/config/candidate/host", map[string]any{"name": "h", "addresses": []string{"10.0.0.1"}}, http.StatusForbidden},
 		{"GET", "/api/config/candidate/host", nil, http.StatusOK},

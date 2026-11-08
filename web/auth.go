@@ -185,8 +185,6 @@ var viewerDenied = map[string]bool{
 	"/api/users":         true,
 	"/api/roles":         true,
 	"/api/agent/console": true,
-	// A virtual firewall's bundle holds its secrets.
-	"/api/instances/:id/bundle": true,
 	// The directory is the global admins'.
 	"/api/directory/servers":            true,
 	"/api/directory/servers/:id":        true,

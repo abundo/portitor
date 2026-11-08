@@ -262,7 +262,7 @@ func init() {
 	registerAction("/instance/certificate", "download", configAction{view: true, write: true, run: delegateM((*Server).handleCertificateDownload)})
 	registerAction("/instance/certificate", "renew", configAction{op: true, write: true, run: delegateM((*Server).handleCertificateRenew)})
 	registerAction("/instance/ipam-prefix", "next-free", configAction{view: true, run: delegateM((*Server).handleNextFree)})
-	registerAction("/ip-list", "refresh", configAction{op: true, run: delegateM((*Server).handleIPListRefresh)})
+	registerAction("/ip-list", "refresh", configAction{op: true, write: true, run: delegateM((*Server).handleIPListRefresh)})
 	registerAction("/instance/dns-blocklist", "refresh", configAction{op: true, write: true, run: delegateM((*Server).handleDNSBlocklistRefresh)})
 	registerAction("/task", "run", configAction{op: true, write: true, run: delegateM((*Server).handleTaskRun)})
 	registerAction("/instance", "bundle", configAction{view: true, write: true, run: delegateM((*Server).handleExportBundle)})

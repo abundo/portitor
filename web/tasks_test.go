@@ -146,6 +146,14 @@ func TestIPListsAndTasks(t *testing.T) {
 	if rec := env.do("POST", "/api/config/candidate/task=nope?action=run", map[string]any{}); rec.Code != http.StatusNotFound {
 		t.Errorf("unknown task: %d", rec.Code)
 	}
+	// A viewer runs neither.
+	env.create("/api/users", map[string]string{"username": "vic", "password": "a long password", "role": "viewer"})
+	env.login("vic", "a long password")
+	for _, p := range []string{"ip-list=drop?action=refresh", "task=backup?action=run"} {
+		if rec := env.do("POST", "/api/config/candidate/"+p, map[string]any{}); rec.Code != http.StatusForbidden {
+			t.Errorf("a viewer's %s: %d %s", p, rec.Code, rec.Body)
+		}
+	}
 }
 
 // runAgent records RunTask and fails RefreshIPList.
