@@ -4,6 +4,7 @@
 package web
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"net/netip"
@@ -15,7 +16,6 @@ import (
 	"github.com/abundo/portitor/internal/agentapi"
 	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/internal/netobj"
-	"github.com/abundo/portitor/models"
 )
 
 // traceRequest is the browser's: the target is an address, the name of a
@@ -45,11 +45,7 @@ func (s *Server) handleAgentTrace(c *echo.Context) error {
 		return errJSON(c, http.StatusBadRequest, "invalid virtual firewall or interface name")
 	}
 	if !currentAccess(c).isAdmin() {
-		var inst models.Instance
-		if err := s.db.Where("name = ?", body.Instance).First(&inst).Error; err != nil {
-			return errJSON(c, http.StatusNotFound, "no such virtual firewall")
-		}
-		if ok, err := allowInstance(c, inst.ID, true); !ok {
+		if ok, err := s.allowInstanceName(c, body.Instance); !ok {
 			return err
 		}
 	}
@@ -105,10 +101,11 @@ func (s *Server) traceTarget(target, family string) (string, string) {
 	}
 	var objs netobj.Set
 	if netobj.IsName(target) {
-		var err error
-		if objs, err = nameSet(s.db); err != nil {
+		v, err := s.view(context.Background())
+		if err != nil {
 			return "", "cannot look up " + target
 		}
+		objs = nameSet(v)
 	}
 	if !objs.Has(target) {
 		if !traceDNSName.MatchString(target) || len(target) > 253 {

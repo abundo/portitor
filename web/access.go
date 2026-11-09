@@ -4,13 +4,11 @@
 package web
 
 import (
-	"errors"
+	"context"
 	"net/http"
-	"reflect"
 	"slices"
 
 	"github.com/labstack/echo/v5"
-	"gorm.io/gorm"
 
 	"github.com/abundo/portitor/models"
 )
@@ -38,7 +36,8 @@ type access struct {
 }
 
 // accessOf works out the user's levels from their roles.
-func accessOf(db *gorm.DB, u *models.User) (*access, error) {
+func (s *Server) accessOf(u *models.User) (*access, error) {
+	db := s.db
 	a := &access{global: u.Role, levels: map[string]string{}, ids: map[uint]string{}}
 	if u.Role == models.RoleAdmin {
 		return a, nil
@@ -63,15 +62,12 @@ func accessOf(db *gorm.DB, u *models.User) (*access, error) {
 			a.levels[r.Instance] = r.Level
 		}
 	}
-	if len(a.levels) > 0 && db.Migrator().HasTable("instances") {
-		var ins []struct {
-			ID   uint
-			Name string
-		}
-		if err := db.Table("instances").Select("id, name").Scan(&ins).Error; err != nil {
+	if len(a.levels) > 0 {
+		v, err := s.view(context.Background())
+		if err != nil {
 			return nil, err
 		}
-		for _, in := range ins {
+		for _, in := range v.Instances {
 			a.ids[in.ID] = in.Name
 		}
 	}
@@ -161,13 +157,6 @@ func (s *Server) readableInstanceNames(c *echo.Context) (map[string]bool, error)
 	return a.readableNames(), nil
 }
 
-// instanceOf looks up the instance a row of table belongs to.
-func instanceOf(tx *gorm.DB, table string, id uint) (uint, error) {
-	var out struct{ InstanceID uint }
-	err := tx.Table(table).Select("instance_id").Where("id = ?", id).Take(&out).Error
-	return out.InstanceID, err
-}
-
 // allowInstance tells whether the user may write (or, with write false,
 // read) the instance; when not, it has answered 404 or 403 and the
 // handler returns the error.
@@ -180,72 +169,4 @@ func allowInstance(c *echo.Context, id uint, write bool) (bool, error) {
 		return false, errJSON(c, http.StatusNotFound, "not found")
 	}
 	return false, errJSON(c, http.StatusForbidden, "you can't change this virtual firewall")
-}
-
-// scope tells which instances a row belongs to.
-type scope struct {
-	// of returns the row's instances.
-	of func(tx *gorm.DB, item any) ([]uint, error)
-	// list narrows a list to rows of the given instances.
-	list func(q *gorm.DB, ids []uint) *gorm.DB
-	// shared, if set, tells a row everyone reads (but only writers of its
-	// instances change).
-	shared func(item any) bool
-}
-
-func uintField(item any, name string) uint {
-	return uint(reflect.ValueOf(item).Elem().FieldByName(name).Uint())
-}
-
-// byField: the row has the instance id in a column (field).
-func byField(field, column string) *scope {
-	return &scope{
-		of: func(_ *gorm.DB, item any) ([]uint, error) { return []uint{uintField(item, field)}, nil },
-		list: func(q *gorm.DB, ids []uint) *gorm.DB {
-			return q.Where(column+" IN ?", ids) // column is a constant
-		},
-	}
-}
-
-// byParent: the row belongs to a row of table (through field/column),
-// which has the instance id.
-func byParent(field, column, table string) *scope {
-	return &scope{
-		of: func(tx *gorm.DB, item any) ([]uint, error) {
-			id, err := instanceOf(tx, table, uintField(item, field))
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return nil, bad(column + ": no such entry")
-			}
-			return []uint{id}, err
-		},
-		list: func(q *gorm.DB, ids []uint) *gorm.DB {
-			return q.Where(column+" IN (SELECT id FROM "+table+" WHERE instance_id IN ?)", ids)
-		},
-	}
-}
-
-// linkScope: a link belongs to the instances at both ends.
-var linkScope = &scope{
-	of: func(_ *gorm.DB, item any) ([]uint, error) {
-		return []uint{uintField(item, "InstanceAID"), uintField(item, "InstanceBID")}, nil
-	},
-	list: func(q *gorm.DB, ids []uint) *gorm.DB {
-		return q.Where("instance_a_id IN ? OR instance_b_id IN ?", ids, ids)
-	},
-}
-
-// globalScope: the row has the instance id in instance_id, and everyone
-// reads it if global (a DNS template of the default instance).
-var globalScope = &scope{
-	of: func(_ *gorm.DB, item any) ([]uint, error) { return []uint{uintField(item, "InstanceID")}, nil },
-	list: func(q *gorm.DB, ids []uint) *gorm.DB {
-		return q.Where("instance_id IN ? OR global", ids)
-	},
-	shared: func(item any) bool { return reflect.ValueOf(item).Elem().FieldByName("Global").Bool() },
-}
-
-// instanceScope: an instance is its own.
-var instanceScope = &scope{
-	of:   func(_ *gorm.DB, item any) ([]uint, error) { return []uint{uintField(item, "ID")}, nil },
-	list: func(q *gorm.DB, ids []uint) *gorm.DB { return q.Where("id IN ?", ids) },
 }

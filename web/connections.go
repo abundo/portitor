@@ -11,7 +11,6 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"github.com/abundo/portitor/internal/agentapi"
-	"github.com/abundo/portitor/models"
 )
 
 // connectionsRequest is the browser's; the agent clamps the interval and
@@ -33,8 +32,11 @@ func (s *Server) allowInstanceName(c *echo.Context, name string) (bool, error) {
 	if currentAccess(c).isAdmin() {
 		return true, nil
 	}
-	var inst models.Instance
-	if err := s.db.Where("name = ?", name).First(&inst).Error; err != nil {
+	inst, err := s.instanceNamed(c.Request().Context(), name)
+	if err != nil {
+		return false, err
+	}
+	if inst == nil {
 		return false, errJSON(c, http.StatusNotFound, "no such virtual firewall")
 	}
 	return allowInstance(c, inst.ID, true)

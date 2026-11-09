@@ -58,10 +58,16 @@ func (s *Server) handleIPListRefresh(c *echo.Context) error {
 // 404 and returns false.
 func (s *Server) loadByID(c *echo.Context, dst any) bool {
 	id, err := echo.PathParam[uint](c, "id")
-	if err == nil {
-		err = s.db.First(dst, id).Error
-	}
 	if err != nil {
+		_ = errJSON(c, http.StatusNotFound, "not found")
+		return false
+	}
+	v, err := s.view(c.Request().Context())
+	if err != nil {
+		_ = errJSON(c, http.StatusInternalServerError, err.Error())
+		return false
+	}
+	if !v.Load(dst, id) {
 		_ = errJSON(c, http.StatusNotFound, "not found")
 		return false
 	}

@@ -294,3 +294,18 @@ func ifaceNamesIn(v *confview.View, instanceID uint) map[string]bool {
 	}
 	return names
 }
+
+// instanceNamed is the candidate's instance of the name, nil when there
+// is none.
+func (s *Server) instanceNamed(ctx context.Context, name string) (*models.Instance, error) {
+	v, err := s.view(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for i := range v.Instances {
+		if v.Instances[i].Name == name {
+			return &v.Instances[i], nil
+		}
+	}
+	return nil, nil
+}

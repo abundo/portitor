@@ -18,13 +18,9 @@ import (
 // private key: ?format=pem (the certificate), chain (PEM, with the
 // intermediates) or der (the certificate, binary).
 func (s *Server) handleCertificateDownload(c *echo.Context) error {
-	id, err := echo.PathParam[uint](c, "id")
-	if err != nil {
-		return errJSON(c, http.StatusNotFound, "not found")
-	}
 	var cert models.Certificate
-	if err := s.db.First(&cert, id).Error; err != nil {
-		return errJSON(c, http.StatusNotFound, "not found")
+	if !s.loadByID(c, &cert) {
+		return nil
 	}
 	if ok, err := allowInstance(c, cert.InstanceID, false); !ok {
 		return err
@@ -33,9 +29,9 @@ func (s *Server) handleCertificateDownload(c *echo.Context) error {
 	// the agent's.
 	chain := []byte(cert.FullChain)
 	if cert.Source != fwconfig.CertSourceImport {
-		var inst models.Instance
-		if err := s.db.First(&inst, cert.InstanceID).Error; err != nil {
-			return err
+		inst, err := s.instanceByID(c.Request().Context(), cert.InstanceID)
+		if err != nil || inst == nil {
+			return errJSON(c, http.StatusNotFound, "not found")
 		}
 		a, _, err := s.instanceAgent(inst.Name)
 		if err != nil {
@@ -98,9 +94,9 @@ func (s *Server) handleCertificateRenew(c *echo.Context) error {
 	if !cert.Enabled {
 		return errJSON(c, http.StatusConflict, "the certificate is off")
 	}
-	var in models.Instance
-	if err := s.db.First(&in, cert.InstanceID).Error; err != nil {
-		return err
+	in, err := s.instanceByID(c.Request().Context(), cert.InstanceID)
+	if err != nil || in == nil {
+		return errJSON(c, http.StatusNotFound, "not found")
 	}
 	var secondaries []models.Firewall
 	if err := s.db.Where("ha_primary_id = ?", in.FirewallID).Find(&secondaries).Error; err != nil {

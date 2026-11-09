@@ -258,7 +258,7 @@ func (s *Server) handleDeleteRole(c *echo.Context) error {
 	if r.Instance != nil {
 		return errJSON(c, http.StatusBadRequest, "a virtual firewall's role goes away with the virtual firewall")
 	}
-	if err := refuseOpenVPNRole(s.db, &r); err != nil {
+	if err := s.refuseOpenVPNRole(c.Request().Context(), &r); err != nil {
 		return dbError(c, err)
 	}
 	if err := s.db.Delete(&r).Error; err != nil {

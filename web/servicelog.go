@@ -13,7 +13,6 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"github.com/abundo/portitor/internal/agentapi"
-	"github.com/abundo/portitor/models"
 )
 
 // unitName is a systemd unit name a service log may follow (the agent
@@ -32,11 +31,7 @@ func (s *Server) handleAgentServiceLog(c *echo.Context) error {
 		return errJSON(c, http.StatusBadRequest, "invalid virtual firewall or service name")
 	}
 	if !currentAccess(c).isAdmin() {
-		var inst models.Instance
-		if err := s.db.Where("name = ?", body.Instance).First(&inst).Error; err != nil {
-			return errJSON(c, http.StatusNotFound, "no such virtual firewall")
-		}
-		if ok, err := allowInstance(c, inst.ID, true); !ok {
+		if ok, err := s.allowInstanceName(c, body.Instance); !ok {
 			return err
 		}
 	}

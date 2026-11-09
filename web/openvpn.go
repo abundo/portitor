@@ -4,15 +4,16 @@
 package web
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"slices"
 	"strings"
 
 	"github.com/labstack/echo/v5"
-	"gorm.io/gorm"
 
 	"github.com/abundo/portitor/internal/agentapi"
+	"github.com/abundo/portitor/internal/confview"
 	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/models"
 )
@@ -23,15 +24,22 @@ import (
 // but in the client config.
 
 // refuseOpenVPNRole refuses deleting a role an OpenVPN server requires.
-func refuseOpenVPNRole(tx *gorm.DB, r *models.Role) error {
-	return usedBy(tx, "role "+r.Name, &models.Interface{}, "ovpn_role_id", r.ID, func() []string {
-		var names []string
-		tx.Model(&models.Interface{}).Where("ovpn_role_id = ?", r.ID).Order("name").Pluck("name", &names)
-		for j := range names {
-			names[j] = "OpenVPN " + names[j]
+func (s *Server) refuseOpenVPNRole(ctx context.Context, r *models.Role) error {
+	v, err := s.view(ctx)
+	if err != nil {
+		return err
+	}
+	var names []string
+	for _, i := range v.Interfaces {
+		if i.OvpnRoleID != nil && *i.OvpnRoleID == r.ID {
+			names = append(names, "OpenVPN "+i.Name)
 		}
-		return names
-	})
+	}
+	if len(names) > 0 {
+		slices.Sort(names)
+		return bad(fmt.Sprintf("role %s is in use by %s", r.Name, strings.Join(names, ", ")))
+	}
+	return nil
 }
 
 // handleAgentOpenVPN passes on the OpenVPN servers and their clients, for
@@ -60,17 +68,21 @@ func (s *Server) handleOpenVPNClientConfig(c *echo.Context) error {
 	if err != nil {
 		return errJSON(c, http.StatusNotFound, "not found")
 	}
-	var ifc models.Interface
-	if err := s.db.First(&ifc, id).Error; err != nil || ifc.Kind != fwconfig.KindOpenVPN {
+	v, err := s.view(c.Request().Context())
+	if err != nil {
+		return err
+	}
+	ifc := confview.ByID(v.Interfaces, id)
+	if ifc == nil || ifc.Kind != fwconfig.KindOpenVPN {
 		return errJSON(c, http.StatusNotFound, "no such OpenVPN interface")
 	}
 	// The tls-crypt key: an admin's only.
 	if ok, err := allowInstance(c, ifc.InstanceID, true); !ok {
 		return err
 	}
-	var inst models.Instance
-	if err := s.db.First(&inst, ifc.InstanceID).Error; err != nil {
-		return err
+	inst := v.InstanceByID(ifc.InstanceID)
+	if inst == nil {
+		return errJSON(c, http.StatusNotFound, "not found")
 	}
 	ag, _, err := s.instanceAgent(inst.Name)
 	if err != nil {

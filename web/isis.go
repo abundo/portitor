@@ -12,11 +12,6 @@ import (
 // one in use is refused, web/ifzones.go), route maps as BGP does
 // (eachRoutingRef).
 
-func presentIsisConfig(c *models.IsisConfig) {
-	c.HasAreaPassword, c.HasDomainPassword = c.AreaPassword != "", c.DomainPassword != ""
-	c.NewAreaPassword, c.ClearAreaPassword, c.NewDomainPassword, c.ClearDomainPassword = "", false, "", false
-}
-
 func presentIsisInterface(i *models.IsisInterface) {
 	i.HasPassword = i.Password != ""
 	i.NewPassword, i.ClearPassword = "", false

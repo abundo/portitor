@@ -11,7 +11,6 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"github.com/abundo/portitor/internal/agentapi"
-	"github.com/abundo/portitor/models"
 )
 
 // handleAgentIperf runs an iperf3 client or server on the agent and
@@ -30,11 +29,7 @@ func (s *Server) handleAgentIperf(c *echo.Context) error {
 		return errJSON(c, http.StatusBadRequest, "mode must be client or server")
 	}
 	if !currentAccess(c).isAdmin() {
-		var inst models.Instance
-		if err := s.db.Where("name = ?", req.Instance).First(&inst).Error; err != nil {
-			return errJSON(c, http.StatusNotFound, "no such virtual firewall")
-		}
-		if ok, err := allowInstance(c, inst.ID, true); !ok {
+		if ok, err := s.allowInstanceName(c, req.Instance); !ok {
 			return err
 		}
 	}

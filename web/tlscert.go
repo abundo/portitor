@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"github.com/abundo/portitor/internal/agentapi"
-	"github.com/abundo/portitor/models"
 )
 
 // certAgent is the part of the agent client the web certificate uses.
@@ -136,13 +135,19 @@ func (t *tlsCert) fetch(ctx context.Context) (chosen bool, err error) {
 	if st.WebCertificateID == nil {
 		return false, nil
 	}
-	var cert models.Certificate
-	if err := t.s.db.First(&cert, *st.WebCertificateID).Error; err != nil {
+	cert, err := t.s.certificateByID(ctx, *st.WebCertificateID)
+	if err != nil {
 		return true, err
 	}
-	var inst models.Instance
-	if err := t.s.db.First(&inst, cert.InstanceID).Error; err != nil {
+	if cert == nil {
+		return true, errors.New("the chosen certificate is not there")
+	}
+	inst, err := t.s.instanceByID(ctx, cert.InstanceID)
+	if err != nil {
 		return true, err
+	}
+	if inst == nil {
+		return true, errors.New("the chosen certificate's virtual firewall is not there")
 	}
 	a, _, err := t.s.instanceAgent(inst.Name)
 	if err != nil {

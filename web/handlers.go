@@ -23,6 +23,7 @@ import (
 	"github.com/abundo/portitor/internal/agentapi"
 	"github.com/abundo/portitor/internal/agentclient"
 	"github.com/abundo/portitor/internal/builder"
+	"github.com/abundo/portitor/internal/confview"
 	"github.com/abundo/portitor/internal/datastore"
 	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/internal/ipam"
@@ -40,23 +41,11 @@ func (s *Server) handleIpamTree(c *echo.Context) error {
 	if ok, err := allowInstance(c, id, false); !ok {
 		return err
 	}
-	var prefixes []models.IpamPrefix
-	var addrs []models.IpamAddress
-	var ifaces []models.Interface
-	if err := s.db.Where("instance_id = ?", id).Find(&prefixes).Error; err != nil {
-		return err
-	}
-	if err := s.db.Where("instance_id = ?", id).Find(&addrs).Error; err != nil {
-		return err
-	}
-	if err := s.db.Where("instance_id = ?", id).Find(&ifaces).Error; err != nil {
-		return err
-	}
-	records, err := s.zoneAddresses(id)
+	v, err := s.view(c.Request().Context())
 	if err != nil {
 		return err
 	}
-	tree := ipam.Tree(prefixes, addrs, ifaces, records)
+	tree := ipam.Tree(confview.Of(v.IpamPrefixes, id), confview.Of(v.IpamAddresses, id), confview.Of(v.Interfaces, id), zoneAddresses(v, id))
 	if tree == nil {
 		tree = []*ipam.Node{}
 	}
@@ -65,17 +54,12 @@ func (s *Server) handleIpamTree(c *echo.Context) error {
 
 // zoneAddresses lists the A and AAAA records of an instance's forward
 // zones, with their names fully qualified, in zone and record order.
-func (s *Server) zoneAddresses(instanceID uint) ([]ipam.RecordAddress, error) {
-	var zones []models.DnsZone
-	if err := s.db.Where("instance_id = ? AND type = ?", instanceID, fwconfig.ZoneForward).Order("name").Find(&zones).Error; err != nil {
-		return nil, err
-	}
+func zoneAddresses(v *confview.View, instanceID uint) []ipam.RecordAddress {
+	zones := confview.Where(confview.Of(v.DnsZones, instanceID), func(z *models.DnsZone) bool { return z.Type == fwconfig.ZoneForward })
+	slices.SortStableFunc(zones, func(a, b models.DnsZone) int { return strings.Compare(a.Name, b.Name) })
 	var out []ipam.RecordAddress
 	for _, z := range zones {
-		var records []models.DnsRecord
-		if err := s.db.Where("zone_id = ?", z.ID).Order("rank, id").Find(&records).Error; err != nil {
-			return nil, err
-		}
+		records := confview.Where(v.DnsRecords, func(r *models.DnsRecord) bool { return r.ZoneID == z.ID })
 		zone := strings.TrimSuffix(z.Name, ".")
 		domain := ""
 		for _, r := range records {
@@ -95,7 +79,7 @@ func (s *Server) zoneAddresses(instanceID uint) ([]ipam.RecordAddress, error) {
 			}
 		}
 	}
-	return out, nil
+	return out
 }
 
 // handleAutoRules lists the input rules the agent adds for an instance's
@@ -111,8 +95,11 @@ func (s *Server) handleAutoRules(c *echo.Context) error {
 	if ok, err := allowInstance(c, id, false); !ok {
 		return err
 	}
-	var mi models.Instance
-	if err := s.db.First(&mi, id).Error; err != nil {
+	mi, err := s.instanceByID(c.Request().Context(), id)
+	if err != nil {
+		return err
+	}
+	if mi == nil {
 		return errJSON(c, http.StatusNotFound, "not found")
 	}
 	in, err := s.candidateInput(c.Request().Context())
@@ -158,20 +145,19 @@ func (s *Server) handleNextFree(c *echo.Context) error {
 	if err != nil {
 		return errJSON(c, http.StatusNotFound, "not found")
 	}
-	var p models.IpamPrefix
-	if err := s.db.First(&p, id).Error; err != nil {
+	v, err := s.view(c.Request().Context())
+	if err != nil {
+		return err
+	}
+	p := confview.ByID(v.IpamPrefixes, id)
+	if p == nil {
 		return errJSON(c, http.StatusNotFound, "not found")
 	}
 	if ok, err := allowInstance(c, p.InstanceID, false); !ok {
 		return err
 	}
-	var prefixes []models.IpamPrefix
-	var addrs []models.IpamAddress
-	var ifaces []models.Interface
-	s.db.Where("instance_id = ?", p.InstanceID).Find(&prefixes)
-	s.db.Where("instance_id = ?", p.InstanceID).Find(&addrs)
-	s.db.Where("instance_id = ?", p.InstanceID).Find(&ifaces)
-	ip, err := ipam.NextFree(p, prefixes, ipam.Used(addrs, ifaces))
+	in := p.InstanceID
+	ip, err := ipam.NextFree(*p, confview.Of(v.IpamPrefixes, in), ipam.Used(confview.Of(v.IpamAddresses, in), confview.Of(v.Interfaces, in)))
 	if err != nil {
 		return errJSON(c, http.StatusConflict, err.Error())
 	}
@@ -191,29 +177,28 @@ func (s *Server) handleWgClientConfig(c *echo.Context) error {
 	if err != nil {
 		return errJSON(c, http.StatusNotFound, "not found")
 	}
-	var peer models.WgPeer
-	if err := s.db.First(&peer, id).Error; err != nil {
+	v, err := s.view(c.Request().Context())
+	if err != nil {
+		return err
+	}
+	peer := confview.ByID(v.WgPeers, id)
+	if peer == nil {
 		return errJSON(c, http.StatusNotFound, "not found")
 	}
-	var ifc models.Interface
-	if err := s.db.First(&ifc, peer.InterfaceID).Error; err != nil {
-		return err
+	ifc := confview.ByID(v.Interfaces, peer.InterfaceID)
+	if ifc == nil {
+		return errJSON(c, http.StatusNotFound, "not found")
 	}
 	// The config holds the client's private key: an admin's only.
 	if ok, err := allowInstance(c, ifc.InstanceID, true); !ok {
 		return err
 	}
-	var inst models.Instance
-	s.db.First(&inst, ifc.InstanceID)
 	st, err := s.settings()
 	if err != nil {
 		return err
 	}
 
-	objs, err := nameSet(s.db)
-	if err != nil {
-		return err
-	}
+	objs := nameSet(v)
 	addrs, err := objs.Prefixes(peer.AllowedIPs)
 	if err != nil {
 		return errJSON(c, http.StatusBadRequest, err.Error())
@@ -247,11 +232,7 @@ func (s *Server) handleWgClientConfig(c *echo.Context) error {
 		if err != nil {
 			return errJSON(c, http.StatusBadRequest, err.Error())
 		}
-		var prefixes []models.IpamPrefix
-		var ifaces []models.Interface
-		s.db.Where("instance_id = ?", ifc.InstanceID).Find(&prefixes)
-		s.db.Where("instance_id = ?", ifc.InstanceID).Find(&ifaces)
-		roots := ipam.Tree(prefixes, nil, ifaces, nil)
+		roots := ipam.Tree(confview.Of(v.IpamPrefixes, ifc.InstanceID), nil, confview.Of(v.Interfaces, ifc.InstanceID), nil)
 		cc.AllowedIPs = nil
 		for _, r := range roots {
 			if r.Kind == "prefix" && !insideAny(r.CIDR, remote) {
@@ -282,28 +263,28 @@ func (s *Server) handleWgNextFree(c *echo.Context) error {
 	if err != nil {
 		return errJSON(c, http.StatusNotFound, "not found")
 	}
-	var ifc models.Interface
-	if err := s.db.First(&ifc, id).Error; err != nil || ifc.Kind != fwconfig.KindWireGuard {
+	v, err := s.view(c.Request().Context())
+	if err != nil {
+		return err
+	}
+	ifc := confview.ByID(v.Interfaces, id)
+	if ifc == nil || ifc.Kind != fwconfig.KindWireGuard {
 		return errJSON(c, http.StatusNotFound, "no such WireGuard interface")
 	}
 	if ok, err := allowInstance(c, ifc.InstanceID, false); !ok {
 		return err
 	}
-	var prefixes []models.IpamPrefix
-	var addrs []models.IpamAddress
-	var ifaces []models.Interface
-	s.db.Where("instance_id = ?", ifc.InstanceID).Find(&prefixes)
-	s.db.Where("instance_id = ?", ifc.InstanceID).Find(&addrs)
-	s.db.Where("instance_id = ?", ifc.InstanceID).Find(&ifaces)
+	prefixes := confview.Of(v.IpamPrefixes, ifc.InstanceID)
+	addrs := confview.Of(v.IpamAddresses, ifc.InstanceID)
+	ifaces := confview.Of(v.Interfaces, ifc.InstanceID)
 
 	// Peers' allowed IPs count as used: hosts as addresses, networks
 	// behind a peer as prefixes.
-	var peers []models.WgPeer
-	s.db.Where("interface_id IN (?)", s.db.Model(&models.Interface{}).Select("id").Where("instance_id = ?", ifc.InstanceID)).Find(&peers)
-	set, err := nameSet(s.db)
-	if err != nil {
-		return err
-	}
+	peers := confview.Where(v.WgPeers, func(p *models.WgPeer) bool {
+		i := confview.ByID(v.Interfaces, p.InterfaceID)
+		return i != nil && i.InstanceID == ifc.InstanceID
+	})
+	set := nameSet(v)
 	used, usedPrefixes := ipam.Used(addrs, ifaces), prefixes
 	for _, p := range peers {
 		list, err := set.Prefixes(p.AllowedIPs)

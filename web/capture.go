@@ -13,7 +13,6 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"github.com/abundo/portitor/internal/agentapi"
-	"github.com/abundo/portitor/models"
 )
 
 // captureName is what an instance or interface name may look like here;
@@ -33,11 +32,7 @@ func (s *Server) handleAgentCapture(c *echo.Context) error {
 		return errJSON(c, http.StatusBadRequest, "invalid virtual firewall or interface name")
 	}
 	if !currentAccess(c).isAdmin() {
-		var inst models.Instance
-		if err := s.db.Where("name = ?", req.Instance).First(&inst).Error; err != nil {
-			return errJSON(c, http.StatusNotFound, "no such virtual firewall")
-		}
-		if ok, err := allowInstance(c, inst.ID, true); !ok {
+		if ok, err := s.allowInstanceName(c, req.Instance); !ok {
 			return err
 		}
 	}

@@ -259,13 +259,12 @@ func (s *Server) firewallAgent(id uint) (agentAPI, *models.Firewall, error) {
 // "", or an instance no longer in the database (deleted but still
 // running), is the first firewall's.
 func (s *Server) instanceAgent(name string) (agentAPI, *models.Firewall, error) {
-	var in models.Instance
-	err := s.db.Select("firewall_id").Where("name = ?", name).First(&in).Error
-	if name == "" || errors.Is(err, gorm.ErrRecordNotFound) {
-		return s.firstAgent()
-	}
+	in, err := s.instanceNamed(context.Background(), name)
 	if err != nil {
 		return nil, nil, err
+	}
+	if in == nil {
+		return s.firstAgent()
 	}
 	return s.firewallAgent(in.FirewallID)
 }
@@ -295,12 +294,12 @@ func (s *Server) requestFirewall(c *echo.Context) (uint, error) {
 
 // instancesOn maps each firewall id to the names of its instances.
 func (s *Server) instancesOn() (map[uint]map[string]bool, error) {
-	var ins []models.Instance
-	if err := s.db.Select("name", "firewall_id").Find(&ins).Error; err != nil {
+	v, err := s.view(context.Background())
+	if err != nil {
 		return nil, err
 	}
 	out := map[uint]map[string]bool{}
-	for _, in := range ins {
+	for _, in := range v.Instances {
 		if out[in.FirewallID] == nil {
 			out[in.FirewallID] = map[string]bool{}
 		}

@@ -351,7 +351,7 @@ func (s *Server) cliEnv(ctx context.Context, u *models.User) (*cli.Env, error) {
 	if err != nil {
 		return nil, err
 	}
-	a, err := accessOf(s.db, u)
+	a, err := s.accessOf(u)
 	if err != nil {
 		return nil, err
 	}

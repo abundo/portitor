@@ -4,6 +4,7 @@
 package web
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -172,8 +173,11 @@ func (s *Server) chosenScope(a *access, names []string, preview bool) (map[strin
 	}
 	out := map[string]bool{}
 	for _, n := range names {
-		var in models.Instance
-		if err := s.db.Where("name = ?", n).First(&in).Error; err != nil {
+		in, err := s.instanceNamed(context.Background(), n)
+		if err != nil {
+			return nil, err
+		}
+		if in == nil {
 			return nil, bad("no such virtual firewall: " + n)
 		}
 		if !a.canWrite(in.ID) && !(preview && a.canRead(in.ID)) {
@@ -324,13 +328,15 @@ func filterNeighbours(n *agentapi.NeighboursResponse, names map[string]bool) {
 }
 
 func (s *Server) filterRuleCounters(rc *agentapi.RuleCountersResponse, ids []uint, names map[string]bool) error {
-	var rules []uint
-	if err := s.db.Model(&models.Rule{}).Where("instance_id IN ?", ids).Pluck("id", &rules).Error; err != nil {
+	v, err := s.view(context.Background())
+	if err != nil {
 		return err
 	}
 	keep := map[uint32]bool{}
-	for _, id := range rules {
-		keep[uint32(id)] = true
+	for _, r := range v.Rules {
+		if slices.Contains(ids, r.InstanceID) {
+			keep[uint32(r.ID)] = true
+		}
 	}
 	for id := range rc.Rules {
 		if !keep[id] {

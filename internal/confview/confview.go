@@ -332,3 +332,54 @@ func (v *View) InstanceByID(id uint) *models.Instance {
 	}
 	return nil
 }
+
+// ByID is the row of rows with the id, nil when there is none.
+func ByID[T any, PT interface {
+	*T
+	GetID() uint
+}](rows []T, id uint) *T {
+	for i := range rows {
+		if PT(&rows[i]).GetID() == id {
+			return &rows[i]
+		}
+	}
+	return nil
+}
+
+// Where are the rows keep keeps, in their order.
+func Where[T any](rows []T, keep func(*T) bool) []T {
+	var out []T
+	for i := range rows {
+		if keep(&rows[i]) {
+			out = append(out, rows[i])
+		}
+	}
+	return out
+}
+
+// Of are the rows of the instance (their InstanceID), in their order.
+func Of[T any](rows []T, instanceID uint) []T {
+	return Where(rows, func(r *T) bool {
+		return reflect.ValueOf(r).Elem().FieldByName("InstanceID").Uint() == uint64(instanceID)
+	})
+}
+
+// Load sets *dst (a pointer to a model) to the row of its type with the
+// id, and reports whether there is one.
+func (v *View) Load(dst any, id uint) bool {
+	dv := reflect.ValueOf(dst).Elem()
+	rv := reflect.ValueOf(v).Elem()
+	for i := range rv.NumField() {
+		f := rv.Field(i)
+		if f.Kind() != reflect.Slice || f.Type().Elem() != dv.Type() {
+			continue
+		}
+		for j := range f.Len() {
+			if row := f.Index(j); row.FieldByName("ID").Uint() == uint64(id) {
+				dv.Set(row)
+				return true
+			}
+		}
+	}
+	return false
+}

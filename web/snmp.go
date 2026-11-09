@@ -15,8 +15,3 @@ func presentInstance(in *models.Instance) {
 	in.HasSnmpCommunity = in.SnmpCommunity != ""
 	in.NewSnmpCommunity, in.ClearSnmpCommunity = "", false
 }
-
-func presentSnmpUser(u *models.SnmpUser) {
-	u.HasAuthPassword, u.HasPrivPassword = u.AuthPassword != "", u.PrivPassword != ""
-	u.NewAuthPassword, u.NewPrivPassword = "", ""
-}

@@ -240,7 +240,7 @@ func (s *Server) requireRole(next echo.HandlerFunc) echo.HandlerFunc {
 		if u.TOTPRequired && u.TOTPSecret == "" && !totpSetupRoutes[c.Request().Method+" "+c.Path()] {
 			return c.JSON(http.StatusForbidden, map[string]any{"error": "set up two-factor login under My settings first", "totp_setup_required": true})
 		}
-		a, err := accessOf(s.db, u)
+		a, err := s.accessOf(u)
 		if err != nil {
 			return err
 		}
@@ -411,7 +411,7 @@ func (s *Server) handleMe(c *echo.Context) error {
 // viewer; an instance missing has none), for the GUI to show what they
 // may change.
 func (s *Server) me(c *echo.Context, u *models.User) error {
-	a, err := accessOf(s.db, u)
+	a, err := s.accessOf(u)
 	if err != nil {
 		return err
 	}

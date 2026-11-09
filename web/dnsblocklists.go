@@ -11,11 +11,6 @@ import (
 	"github.com/abundo/portitor/models"
 )
 
-func presentDnsBlocklist(b *models.DnsBlocklist) {
-	b.HasAuthKey = b.AuthKey != ""
-	b.NewAuthKey, b.ClearAuthKey = "", false
-}
-
 // handleDNSBlocklistRefresh downloads a blocklist again now, on its
 // virtual firewall's firewall, and on that firewall's HA secondary when
 // it answers.
@@ -27,9 +22,9 @@ func (s *Server) handleDNSBlocklistRefresh(c *echo.Context) error {
 	if ok, err := allowInstance(c, b.InstanceID, true); !ok {
 		return err
 	}
-	var in models.Instance
-	if err := s.db.First(&in, b.InstanceID).Error; err != nil {
-		return err
+	in, err := s.instanceByID(c.Request().Context(), b.InstanceID)
+	if err != nil || in == nil {
+		return errJSON(c, http.StatusNotFound, "not found")
 	}
 	if !b.Enabled {
 		return errJSON(c, http.StatusConflict, "the blocklist is off")
