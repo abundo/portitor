@@ -11,7 +11,9 @@ GUI work on the same configuration: what you commit in one is in the other.
 ## Starting it
 
 - **On the console** (or an SSH login to the firewall's own shell):
-  `sudo portitor-config cli`. You are the console admin and may change everything.
+  `portitor-config cli` as `portitor` (the console login of a firewall installed from
+  the ISO, and the service user), or `sudo -u portitor portitor-config cli` as another
+  user. You are the console admin and may change everything.
 - **Over SSH**, with a GUI user's name and password: set `ssh_listen` in
   `/etc/portitor/config.yaml` (for example `ssh_listen: ":2222"`), restart
   portitor-config, open the port with an input rule, and run
@@ -130,7 +132,7 @@ Without a terminal, the CLI runs the lines it is given and stops at the first er
 
 ```
 ssh -p 2222 admin@fw 'enter candidate; instance fw interface lan0 mtu 9000; commit now'
-sudo portitor-config cli < changes.txt
+portitor-config cli < changes.txt
 ```
 
 ## NETCONF
