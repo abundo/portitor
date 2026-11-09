@@ -106,13 +106,13 @@ type Group struct {
 
 // MIB is the state's objects under Base.
 type MIB struct {
-	Base    agentx.OID
-	Groups  []*Group
-	Tables  []*Table
+	Base   agentx.OID
+	Groups []*Group
+	Tables []*Table
 	// Conformance is the number of the MIB's conformance statements.
 	Conformance uint32
-	byList  map[*schema.Node]*Table
-	missing []string
+	byList      map[*schema.Node]*Table
+	missing     []string
 }
 
 // New maps root's state onto OIDs under base by reg; with assign, nodes
