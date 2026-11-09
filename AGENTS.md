@@ -227,7 +227,7 @@ docs and user-facing messages.
   `ssh_listen` serves it over SSH to the GUI's users (`cliLogin`: `authenticateUser`,
   two-factor codes, the login limits), with their access by path (`treeAccess`), and
   NETCONF as its `netconf` subsystem (`internal/netconf`, sharing the candidate and
-  the locks). The state is `config false` YANG (`portitor-state.yang`: `system-state`,
+  the locks). The state is `config false` YANG (`portitor-state.yang`: `system`,
   each instance's `state`; `schema.Node.State`, read-only to every edit, skipped by
   validation, diff and sqlmap), filled by `web/state.go` from the API's live views
   requested as the user (`requestAs`), so tenant-filtered; its leaves are named after

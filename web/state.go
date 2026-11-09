@@ -58,7 +58,7 @@ func (s *Server) stateTree(ctx context.Context, u *models.User) (*datastore.Tree
 
 	var st agentapi.Status
 	if get("/api/agent/status", &st) {
-		sys := root.AddContainer(root.S.Child("system-state"))
+		sys := root.AddContainer(root.S.Child("system"))
 		datastore.Fill(sys, st)
 		for _, in := range st.Instances {
 			n := state(in.Name)
@@ -215,7 +215,7 @@ func (s *Server) stateTree(ctx context.Context, u *models.User) (*datastore.Tree
 		}
 	}
 	if len(errs) > 0 {
-		sys := root.AddContainer(root.S.Child("system-state"))
+		sys := root.AddContainer(root.S.Child("system"))
 		sys.LeafLists["errors"] = errs
 	}
 	return tree, nil

@@ -211,14 +211,14 @@ func TestCLIState(t *testing.T) {
 		"instance "+host.Name+" ntp-enabled true\ninstance "+host.Name+" ntp-server pool.ntp.org pool true\n"+
 		"instance "+host.Name+" interface br0 kind bridge\ninstance "+host.Name+" interface br0 addresses [ 10.99.0.1/24 ]\n"+
 		"instance "+host.Name+" vrrp-router br0 7 ipv4 [ 10.99.0.9 ]\ncommit now\n")
-	out := cliScript(t, cenv, "info from state / system-state\ninfo from state / instance "+host.Name+" state\n")
+	out := cliScript(t, cenv, "show from state / system\nshow from state / instance "+host.Name+" state\n")
 	t.Log(out)
 	for _, want := range []string{"dry-run true", "generation 1", "ntp {", "vrrp {", `rate-limits "dns server" {`} {
 		if !strings.Contains(out, want) {
 			t.Errorf("state lacks %q:\n%s", want, out)
 		}
 	}
-	if err := cli.RunScript(ctx, cenv, strings.NewReader("enter candidate\n/ system-state hostname x\n"), &bytes.Buffer{}); err == nil {
+	if err := cli.RunScript(ctx, cenv, strings.NewReader("enter candidate\n/ system hostname x\n"), &bytes.Buffer{}); err == nil {
 		t.Error("state was set")
 	}
 }

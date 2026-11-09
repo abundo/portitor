@@ -74,7 +74,7 @@ entries and values (interface names where an interface is wanted, and so on).
 
 | Command | Does |
 |---|---|
-| `info [flat\|json\|detail] [path]` | shows the configuration here or at the path; `flat` as `set` lines, `detail` with defaults; in candidate mode the candidate, `info from running` what runs |
+| `show [flat\|json\|detail] [path]` | shows the configuration here or at the path; `flat` as `set` lines, `detail` with defaults; in candidate mode the candidate, `show from running` what runs |
 | `diff [flat] [path]` | shows the candidate's changes against what runs (`+` added, `-` removed) |
 | `set <path> [value]` | sets a leaf or creates an entry, without going there |
 | `delete <path> [value]` | deletes a leaf (back to its default), one value of a list, an entry or a container; it warns when other settings still name the entry |
@@ -84,13 +84,13 @@ entries and values (interface names where an interface is wanted, and so on).
 | `confirm`, `rollback` | confirms or rolls back a commit that waits for confirmation |
 | `discard stay\|now` | drops the candidate's changes |
 | `tree [path]` | shows the model below here: names, keys and types |
-| `show version`, `show deployments`, `show api <path>` | shows Portitor's version, the commits, or the answer of a GET of the API (`show api /api/agent/status`) |
+| `show deployments`, `show api <path>` | shows the commits, or the answer of a GET of the API (`show api /api/agent/status`); the version is `show from state / system version` |
 | `pwc`, `help`, `quit` | where you are, the commands, log out |
 
 ## State
 
 What the firewall runs and sees is under `state` in each virtual firewall, and
-`system-state` at the top: interfaces with their state, addresses and counters, the
+`system` at the top: interfaces with their state, addresses and counters, the
 routes, WireGuard peers, the daemons, DHCP leases (client and server), ARP/ND and
 LLDP neighbours, each rule's and rate limit's traffic, BGP, OSPF and IS-IS
 (neighbours, interfaces, areas), VRRP routers, BFD peers, NTP sources, NAT64 sessions
@@ -99,15 +99,15 @@ waiting for confirmation, memory, CPU, load, disks, and an HA pair's state).
 It is read-only and read from the firewalls when shown:
 
 ```
-info from state / instance fw state interfaces
-info from state / system-state
+show from state / instance fw state interfaces
+show from state / system
 instance fw state
-info
+show
 ```
 
-Going into `state` (in running mode) shows the state there with a plain `info`. You
-see the state of the virtual firewalls you may read; `system-state` is for global
-admins and viewers. `system-state errors` says what could not be read (a firewall
+Going into `state` (in running mode) shows the state there with a plain `show`. You
+see the state of the virtual firewalls you may read; `system` is for global
+admins and viewers. `system errors` says what could not be read (a firewall
 that doesn't answer).
 
 ## Committing
@@ -123,8 +123,8 @@ GUI.
 
 ## Pasting and scripts
 
-`info` output can be pasted back: a line ending in `{` goes into the entry, `}` comes
-back out. `info flat` writes `set / ...` lines that work from anywhere.
+`show` output can be pasted back: a line ending in `{` goes into the entry, `}` comes
+back out. `show flat` writes `set / ...` lines that work from anywhere.
 
 Without a terminal, the CLI runs the lines it is given and stops at the first error:
 
@@ -153,7 +153,7 @@ gets the modules with `<get-schema>` (RFC 6022).
   `yang:insert` places rules and other ordered entries. A replace that leaves out a
   secret keeps the secret, since a client can't read it back.
 - `<get-config>` with subtree filters; `<get>` is running with the state (config
-  false: each instance's `state` and `system-state`). Secrets are left out.
+  false: each instance's `state` and `system`). Secrets are left out.
 - `<commit>`, with `<confirmed/>` and `<confirm-timeout>` (600 s by default): a plain
   `<commit/>` while one waits confirms it, `<cancel-commit/>` rolls it back. A plain
   commit applies at once, without Settings' confirm window.

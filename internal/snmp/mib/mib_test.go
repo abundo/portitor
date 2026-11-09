@@ -81,7 +81,7 @@ func TestSnapshot(t *testing.T) {
 	m, _ := defaultMIB(t, false)
 	root := schema.MustLoad()
 	tree := datastore.New(root)
-	datastore.Fill(tree.Root.AddContainer(root.Child("system-state")), map[string]any{"hostname": "fw1", "host": map[string]any{"mem_total": 1 << 34}})
+	datastore.Fill(tree.Root.AddContainer(root.Child("system")), map[string]any{"hostname": "fw1", "host": map[string]any{"mem_total": 1 << 34}})
 	in := tree.Root.AddEntry(root.Child("instance"), map[string]string{"name": "main"})
 	datastore.FillList(in.AddContainer(in.S.Child("state")), "interfaces", []map[string]any{
 		{"name": "eth0", "mtu": 1500, "rx_bytes": 7, "addresses": []string{"192.0.2.1/24", "2001:db8::1/64"}},
@@ -111,8 +111,8 @@ func TestSnapshot(t *testing.T) {
 	}
 	idx := agentx.OID{4, 'm', 'a', 'i', 'n', 4, 'e', 't', 'h', '0'}
 	for oid, want := range map[string]any{
-		scalar("ptSystemStateHostname").String():                                                   "fw1",
-		scalar("ptSystemStateHostMemTotal").String():                                               uint64(1 << 34),
+		scalar("ptSystemHostname").String():                                                        "fw1",
+		scalar("ptSystemHostMemTotal").String():                                                    uint64(1 << 34),
 		append(col("ptInstanceInterfacesTable", "ptInstanceInterfacesMtu"), idx...).String():       int64(1500),
 		append(col("ptInstanceInterfacesTable", "ptInstanceInterfacesRxBytes"), idx...).String():   uint64(7),
 		append(col("ptInstanceInterfacesTable", "ptInstanceInterfacesAddresses"), idx...).String(): "192.0.2.1/24, 2001:db8::1/64",

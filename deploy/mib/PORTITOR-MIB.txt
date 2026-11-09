@@ -30,247 +30,247 @@ portitorMIB MODULE-IDENTITY
     DESCRIPTION "From the YANG modules' revision 2026-11-08."
     ::= { iso 3 6 1 4 1 8072 9999 9999 1 }
 
-ptSystemState OBJECT IDENTIFIER ::= { portitorMIB 2 }
+ptSystem OBJECT IDENTIFIER ::= { portitorMIB 2 }
 
-ptSystemStateHostname OBJECT-TYPE
+ptSystemHostname OBJECT-TYPE
     SYNTAX DisplayString
     MAX-ACCESS read-only
     STATUS current
     DESCRIPTION
-        "/system-state/hostname"
-    ::= { ptSystemState 1 }
+        "/system/hostname"
+    ::= { ptSystem 1 }
 
-ptSystemStateVersion OBJECT-TYPE
+ptSystemVersion OBJECT-TYPE
     SYNTAX DisplayString
     MAX-ACCESS read-only
     STATUS current
     DESCRIPTION
-        "portitor-agent's version. (/system-state/version)"
-    ::= { ptSystemState 2 }
+        "portitor-agent's version. (/system/version)"
+    ::= { ptSystem 2 }
 
-ptSystemStateDryRun OBJECT-TYPE
+ptSystemDryRun OBJECT-TYPE
     SYNTAX TruthValue
     MAX-ACCESS read-only
     STATUS current
     DESCRIPTION
-        "The agent runs no commands (a test setup). (/system-state/dry-run)"
-    ::= { ptSystemState 3 }
+        "The agent runs no commands (a test setup). (/system/dry-run)"
+    ::= { ptSystem 3 }
 
-ptSystemStateGeneration OBJECT-TYPE
+ptSystemGeneration OBJECT-TYPE
     SYNTAX CounterBasedGauge64
     MAX-ACCESS read-only
     STATUS current
     DESCRIPTION
-        "The deploy the agent runs. (/system-state/generation)"
-    ::= { ptSystemState 4 }
+        "The deploy the agent runs. (/system/generation)"
+    ::= { ptSystem 4 }
 
-ptSystemStateLastApply OBJECT-TYPE
+ptSystemLastApply OBJECT-TYPE
     SYNTAX DisplayString
     MAX-ACCESS read-only
     STATUS current
     DESCRIPTION
-        "When it last applied a configuration. (/system-state/last-apply)"
-    ::= { ptSystemState 5 }
+        "When it last applied a configuration. (/system/last-apply)"
+    ::= { ptSystem 5 }
 
-ptSystemStateLastError OBJECT-TYPE
+ptSystemLastError OBJECT-TYPE
     SYNTAX DisplayString
     MAX-ACCESS read-only
     STATUS current
     DESCRIPTION
-        "Why the last apply failed. (/system-state/last-error)"
-    ::= { ptSystemState 6 }
+        "Why the last apply failed. (/system/last-error)"
+    ::= { ptSystem 6 }
 
-ptSystemStatePendingGeneration OBJECT-TYPE
+ptSystemPendingGeneration OBJECT-TYPE
     SYNTAX CounterBasedGauge64
     MAX-ACCESS read-only
     STATUS current
     DESCRIPTION
-        "/system-state/pending/generation"
-    ::= { ptSystemState 7 }
+        "/system/pending/generation"
+    ::= { ptSystem 7 }
 
-ptSystemStatePendingDeadline OBJECT-TYPE
+ptSystemPendingDeadline OBJECT-TYPE
     SYNTAX DisplayString
     MAX-ACCESS read-only
     STATUS current
     DESCRIPTION
-        "When it is rolled back unless confirmed. (/system-state/pending/deadline)"
-    ::= { ptSystemState 8 }
+        "When it is rolled back unless confirmed. (/system/pending/deadline)"
+    ::= { ptSystem 8 }
 
-ptSystemStateHostMemTotal OBJECT-TYPE
+ptSystemHostMemTotal OBJECT-TYPE
     SYNTAX CounterBasedGauge64
     MAX-ACCESS read-only
     STATUS current
     DESCRIPTION
-        "/system-state/host/mem-total"
-    ::= { ptSystemState 9 }
+        "/system/host/mem-total"
+    ::= { ptSystem 9 }
 
-ptSystemStateHostMemAvailable OBJECT-TYPE
+ptSystemHostMemAvailable OBJECT-TYPE
     SYNTAX CounterBasedGauge64
     MAX-ACCESS read-only
     STATUS current
     DESCRIPTION
-        "/system-state/host/mem-available"
-    ::= { ptSystemState 10 }
+        "/system/host/mem-available"
+    ::= { ptSystem 10 }
 
-ptSystemStateHostSwapTotal OBJECT-TYPE
+ptSystemHostSwapTotal OBJECT-TYPE
     SYNTAX CounterBasedGauge64
     MAX-ACCESS read-only
     STATUS current
     DESCRIPTION
-        "/system-state/host/swap-total"
-    ::= { ptSystemState 11 }
+        "/system/host/swap-total"
+    ::= { ptSystem 11 }
 
-ptSystemStateHostSwapFree OBJECT-TYPE
+ptSystemHostSwapFree OBJECT-TYPE
     SYNTAX CounterBasedGauge64
     MAX-ACCESS read-only
     STATUS current
     DESCRIPTION
-        "/system-state/host/swap-free"
-    ::= { ptSystemState 12 }
+        "/system/host/swap-free"
+    ::= { ptSystem 12 }
 
-ptSystemStateHostCpus OBJECT-TYPE
+ptSystemHostCpus OBJECT-TYPE
     SYNTAX Integer32
     MAX-ACCESS read-only
     STATUS current
     DESCRIPTION
-        "/system-state/host/cpus"
-    ::= { ptSystemState 13 }
+        "/system/host/cpus"
+    ::= { ptSystem 13 }
 
-ptSystemStateHostCpuBusy OBJECT-TYPE
+ptSystemHostCpuBusy OBJECT-TYPE
     SYNTAX CounterBasedGauge64
     MAX-ACCESS read-only
     STATUS current
     DESCRIPTION
-        "CPU time busy since boot (ticks). (/system-state/host/cpu-busy)"
-    ::= { ptSystemState 14 }
+        "CPU time busy since boot (ticks). (/system/host/cpu-busy)"
+    ::= { ptSystem 14 }
 
-ptSystemStateHostCpuTotal OBJECT-TYPE
+ptSystemHostCpuTotal OBJECT-TYPE
     SYNTAX CounterBasedGauge64
     MAX-ACCESS read-only
     STATUS current
     DESCRIPTION
-        "CPU time since boot (ticks). (/system-state/host/cpu-total)"
-    ::= { ptSystemState 15 }
+        "CPU time since boot (ticks). (/system/host/cpu-total)"
+    ::= { ptSystem 15 }
 
-ptSystemStateHostLoad OBJECT-TYPE
+ptSystemHostLoad OBJECT-TYPE
     SYNTAX DisplayString
     MAX-ACCESS read-only
     STATUS current
     DESCRIPTION
-        "The load average over 1, 5 and 15 minutes. (/system-state/host/load)"
-    ::= { ptSystemState 16 }
+        "The load average over 1, 5 and 15 minutes. (/system/host/load)"
+    ::= { ptSystem 16 }
 
-ptSystemStateHostUptime OBJECT-TYPE
+ptSystemHostUptime OBJECT-TYPE
     SYNTAX CounterBasedGauge64
     MAX-ACCESS read-only
     STATUS current
     DESCRIPTION
-        "/system-state/host/uptime"
-    ::= { ptSystemState 17 }
+        "/system/host/uptime"
+    ::= { ptSystem 17 }
 
-ptSystemStateHaNode OBJECT-TYPE
+ptSystemHaNode OBJECT-TYPE
     SYNTAX DisplayString
     MAX-ACCESS read-only
     STATUS current
     DESCRIPTION
-        "primary or secondary. (/system-state/ha/node)"
-    ::= { ptSystemState 18 }
+        "primary or secondary. (/system/ha/node)"
+    ::= { ptSystem 18 }
 
-ptSystemStateHa OBJECT-TYPE
+ptSystemHa OBJECT-TYPE
     SYNTAX DisplayString
     MAX-ACCESS read-only
     STATUS current
     DESCRIPTION
-        "active, standby, ... (/system-state/ha/state)"
-    ::= { ptSystemState 19 }
+        "active, standby, ... (/system/ha/state)"
+    ::= { ptSystem 19 }
 
-ptSystemStateHaTerm OBJECT-TYPE
+ptSystemHaTerm OBJECT-TYPE
     SYNTAX CounterBasedGauge64
     MAX-ACCESS read-only
     STATUS current
     DESCRIPTION
-        "Raised at each activation. (/system-state/ha/term)"
-    ::= { ptSystemState 20 }
+        "Raised at each activation. (/system/ha/term)"
+    ::= { ptSystem 20 }
 
-ptSystemStateHaPeerAlive OBJECT-TYPE
+ptSystemHaPeerAlive OBJECT-TYPE
     SYNTAX TruthValue
     MAX-ACCESS read-only
     STATUS current
     DESCRIPTION
-        "/system-state/ha/peer-alive"
-    ::= { ptSystemState 21 }
+        "/system/ha/peer-alive"
+    ::= { ptSystem 21 }
 
-ptSystemStateHaPeerSeen OBJECT-TYPE
+ptSystemHaPeerSeen OBJECT-TYPE
     SYNTAX DisplayString
     MAX-ACCESS read-only
     STATUS current
     DESCRIPTION
-        "/system-state/ha/peer-seen"
-    ::= { ptSystemState 22 }
+        "/system/ha/peer-seen"
+    ::= { ptSystem 22 }
 
-ptSystemStateHaVoteUntil OBJECT-TYPE
+ptSystemHaVoteUntil OBJECT-TYPE
     SYNTAX DisplayString
     MAX-ACCESS read-only
     STATUS current
     DESCRIPTION
-        "The witness's vote held until then. (/system-state/ha/vote-until)"
-    ::= { ptSystemState 23 }
+        "The witness's vote held until then. (/system/ha/vote-until)"
+    ::= { ptSystem 23 }
 
-ptSystemStateHaPromiseUntil OBJECT-TYPE
+ptSystemHaPromiseUntil OBJECT-TYPE
     SYNTAX DisplayString
     MAX-ACCESS read-only
     STATUS current
     DESCRIPTION
-        "A promise to the peer to stay closed until then. (/system-state/ha/promise-until)"
-    ::= { ptSystemState 24 }
+        "A promise to the peer to stay closed until then. (/system/ha/promise-until)"
+    ::= { ptSystem 24 }
 
-ptSystemStateHaWatchdog OBJECT-TYPE
+ptSystemHaWatchdog OBJECT-TYPE
     SYNTAX DisplayString
     MAX-ACCESS read-only
     STATUS current
     DESCRIPTION
-        "/system-state/ha/watchdog"
-    ::= { ptSystemState 25 }
+        "/system/ha/watchdog"
+    ::= { ptSystem 25 }
 
-ptSystemStateHaEpoch OBJECT-TYPE
+ptSystemHaEpoch OBJECT-TYPE
     SYNTAX CounterBasedGauge64
     MAX-ACCESS read-only
     STATUS current
     DESCRIPTION
-        "The pair's number of promotions. (/system-state/ha/epoch)"
-    ::= { ptSystemState 26 }
+        "The pair's number of promotions. (/system/ha/epoch)"
+    ::= { ptSystem 26 }
 
-ptSystemStateHaHealth OBJECT-TYPE
+ptSystemHaHealth OBJECT-TYPE
     SYNTAX Integer32
     MAX-ACCESS read-only
     STATUS current
     DESCRIPTION
-        "Monitored traffic interfaces with a carrier, here. (/system-state/ha/health)"
-    ::= { ptSystemState 27 }
+        "Monitored traffic interfaces with a carrier, here. (/system/ha/health)"
+    ::= { ptSystem 27 }
 
-ptSystemStateHaPeerHealth OBJECT-TYPE
+ptSystemHaPeerHealth OBJECT-TYPE
     SYNTAX Integer32
     MAX-ACCESS read-only
     STATUS current
     DESCRIPTION
-        "/system-state/ha/peer-health"
-    ::= { ptSystemState 28 }
+        "/system/ha/peer-health"
+    ::= { ptSystem 28 }
 
-ptSystemStateHaMonitored OBJECT-TYPE
+ptSystemHaMonitored OBJECT-TYPE
     SYNTAX Integer32
     MAX-ACCESS read-only
     STATUS current
     DESCRIPTION
-        "/system-state/ha/monitored"
-    ::= { ptSystemState 29 }
+        "/system/ha/monitored"
+    ::= { ptSystem 29 }
 
-ptSystemStateErrors OBJECT-TYPE
+ptSystemErrors OBJECT-TYPE
     SYNTAX DisplayString
     MAX-ACCESS read-only
     STATUS current
     DESCRIPTION
-        "What could not be read just now (an agent that doesn't answer). (/system-state/errors)"
-    ::= { ptSystemState 30 }
+        "What could not be read just now (an agent that doesn't answer). (/system/errors)"
+    ::= { ptSystem 30 }
 
 ptInstanceTable OBJECT-TYPE
     SYNTAX SEQUENCE OF PtInstanceEntry
@@ -3504,152 +3504,152 @@ ptInstanceRateLimitsInterfacesQlen OBJECT-TYPE
         "/instance/state/rate-limits/interfaces/qlen"
     ::= { ptInstanceRateLimitsInterfacesEntry 9 }
 
-ptSystemStateHostDisksTable OBJECT-TYPE
-    SYNTAX SEQUENCE OF PtSystemStateHostDisksEntry
+ptSystemHostDisksTable OBJECT-TYPE
+    SYNTAX SEQUENCE OF PtSystemHostDisksEntry
     MAX-ACCESS not-accessible
     STATUS current
     DESCRIPTION
-        "/system-state/host/disks"
+        "/system/host/disks"
     ::= { portitorMIB 35 }
 
-ptSystemStateHostDisksEntry OBJECT-TYPE
-    SYNTAX PtSystemStateHostDisksEntry
+ptSystemHostDisksEntry OBJECT-TYPE
+    SYNTAX PtSystemHostDisksEntry
     MAX-ACCESS not-accessible
     STATUS current
     DESCRIPTION
-        "A row of /system-state/host/disks."
-    INDEX { ptSystemStateHostDisksMount }
-    ::= { ptSystemStateHostDisksTable 1 }
+        "A row of /system/host/disks."
+    INDEX { ptSystemHostDisksMount }
+    ::= { ptSystemHostDisksTable 1 }
 
-PtSystemStateHostDisksEntry ::= SEQUENCE {
-    ptSystemStateHostDisksMount DisplayString,
-    ptSystemStateHostDisksTotal CounterBasedGauge64,
-    ptSystemStateHostDisksFree CounterBasedGauge64,
-    ptSystemStateHostDisksUsed CounterBasedGauge64
+PtSystemHostDisksEntry ::= SEQUENCE {
+    ptSystemHostDisksMount DisplayString,
+    ptSystemHostDisksTotal CounterBasedGauge64,
+    ptSystemHostDisksFree CounterBasedGauge64,
+    ptSystemHostDisksUsed CounterBasedGauge64
 }
 
-ptSystemStateHostDisksMount OBJECT-TYPE
+ptSystemHostDisksMount OBJECT-TYPE
     SYNTAX DisplayString (SIZE (0..64))
     MAX-ACCESS not-accessible
     STATUS current
     DESCRIPTION
-        "/system-state/host/disks/mount"
-    ::= { ptSystemStateHostDisksEntry 1 }
+        "/system/host/disks/mount"
+    ::= { ptSystemHostDisksEntry 1 }
 
-ptSystemStateHostDisksTotal OBJECT-TYPE
+ptSystemHostDisksTotal OBJECT-TYPE
     SYNTAX CounterBasedGauge64
     MAX-ACCESS read-only
     STATUS current
     DESCRIPTION
-        "/system-state/host/disks/total"
-    ::= { ptSystemStateHostDisksEntry 2 }
+        "/system/host/disks/total"
+    ::= { ptSystemHostDisksEntry 2 }
 
-ptSystemStateHostDisksFree OBJECT-TYPE
+ptSystemHostDisksFree OBJECT-TYPE
     SYNTAX CounterBasedGauge64
     MAX-ACCESS read-only
     STATUS current
     DESCRIPTION
-        "Available to unprivileged users. (/system-state/host/disks/free)"
-    ::= { ptSystemStateHostDisksEntry 3 }
+        "Available to unprivileged users. (/system/host/disks/free)"
+    ::= { ptSystemHostDisksEntry 3 }
 
-ptSystemStateHostDisksUsed OBJECT-TYPE
+ptSystemHostDisksUsed OBJECT-TYPE
     SYNTAX CounterBasedGauge64
     MAX-ACCESS read-only
     STATUS current
     DESCRIPTION
-        "/system-state/host/disks/used"
-    ::= { ptSystemStateHostDisksEntry 4 }
+        "/system/host/disks/used"
+    ::= { ptSystemHostDisksEntry 4 }
 
-ptSystemStateHaDhcpTable OBJECT-TYPE
-    SYNTAX SEQUENCE OF PtSystemStateHaDhcpEntry
+ptSystemHaDhcpTable OBJECT-TYPE
+    SYNTAX SEQUENCE OF PtSystemHaDhcpEntry
     MAX-ACCESS not-accessible
     STATUS current
     DESCRIPTION
-        "Each virtual firewall's DHCP lease sync to the standby. (/system-state/ha/dhcp)"
+        "Each virtual firewall's DHCP lease sync to the standby. (/system/ha/dhcp)"
     ::= { portitorMIB 36 }
 
-ptSystemStateHaDhcpEntry OBJECT-TYPE
-    SYNTAX PtSystemStateHaDhcpEntry
+ptSystemHaDhcpEntry OBJECT-TYPE
+    SYNTAX PtSystemHaDhcpEntry
     MAX-ACCESS not-accessible
     STATUS current
     DESCRIPTION
-        "A row of /system-state/ha/dhcp."
-    INDEX { ptSystemStateHaDhcpInstance }
-    ::= { ptSystemStateHaDhcpTable 1 }
+        "A row of /system/ha/dhcp."
+    INDEX { ptSystemHaDhcpInstance }
+    ::= { ptSystemHaDhcpTable 1 }
 
-PtSystemStateHaDhcpEntry ::= SEQUENCE {
-    ptSystemStateHaDhcpInstance DisplayString,
-    ptSystemStateHaDhcpSent DisplayString,
-    ptSystemStateHaDhcpReceived DisplayString,
-    ptSystemStateHaDhcpError DisplayString
+PtSystemHaDhcpEntry ::= SEQUENCE {
+    ptSystemHaDhcpInstance DisplayString,
+    ptSystemHaDhcpSent DisplayString,
+    ptSystemHaDhcpReceived DisplayString,
+    ptSystemHaDhcpError DisplayString
 }
 
-ptSystemStateHaDhcpInstance OBJECT-TYPE
+ptSystemHaDhcpInstance OBJECT-TYPE
     SYNTAX DisplayString (SIZE (0..64))
     MAX-ACCESS not-accessible
     STATUS current
     DESCRIPTION
-        "/system-state/ha/dhcp/instance"
-    ::= { ptSystemStateHaDhcpEntry 1 }
+        "/system/ha/dhcp/instance"
+    ::= { ptSystemHaDhcpEntry 1 }
 
-ptSystemStateHaDhcpSent OBJECT-TYPE
+ptSystemHaDhcpSent OBJECT-TYPE
     SYNTAX DisplayString
     MAX-ACCESS read-only
     STATUS current
     DESCRIPTION
-        "/system-state/ha/dhcp/sent"
-    ::= { ptSystemStateHaDhcpEntry 2 }
+        "/system/ha/dhcp/sent"
+    ::= { ptSystemHaDhcpEntry 2 }
 
-ptSystemStateHaDhcpReceived OBJECT-TYPE
+ptSystemHaDhcpReceived OBJECT-TYPE
     SYNTAX DisplayString
     MAX-ACCESS read-only
     STATUS current
     DESCRIPTION
-        "/system-state/ha/dhcp/received"
-    ::= { ptSystemStateHaDhcpEntry 3 }
+        "/system/ha/dhcp/received"
+    ::= { ptSystemHaDhcpEntry 3 }
 
-ptSystemStateHaDhcpError OBJECT-TYPE
+ptSystemHaDhcpError OBJECT-TYPE
     SYNTAX DisplayString
     MAX-ACCESS read-only
     STATUS current
     DESCRIPTION
-        "/system-state/ha/dhcp/error"
-    ::= { ptSystemStateHaDhcpEntry 4 }
+        "/system/ha/dhcp/error"
+    ::= { ptSystemHaDhcpEntry 4 }
 
 ptConformance OBJECT IDENTIFIER ::= { portitorMIB 1 }
 
 ptStateGroup OBJECT-GROUP
     OBJECTS {
-        ptSystemStateHostname,
-        ptSystemStateVersion,
-        ptSystemStateDryRun,
-        ptSystemStateGeneration,
-        ptSystemStateLastApply,
-        ptSystemStateLastError,
-        ptSystemStatePendingGeneration,
-        ptSystemStatePendingDeadline,
-        ptSystemStateHostMemTotal,
-        ptSystemStateHostMemAvailable,
-        ptSystemStateHostSwapTotal,
-        ptSystemStateHostSwapFree,
-        ptSystemStateHostCpus,
-        ptSystemStateHostCpuBusy,
-        ptSystemStateHostCpuTotal,
-        ptSystemStateHostLoad,
-        ptSystemStateHostUptime,
-        ptSystemStateHaNode,
-        ptSystemStateHa,
-        ptSystemStateHaTerm,
-        ptSystemStateHaPeerAlive,
-        ptSystemStateHaPeerSeen,
-        ptSystemStateHaVoteUntil,
-        ptSystemStateHaPromiseUntil,
-        ptSystemStateHaWatchdog,
-        ptSystemStateHaEpoch,
-        ptSystemStateHaHealth,
-        ptSystemStateHaPeerHealth,
-        ptSystemStateHaMonitored,
-        ptSystemStateErrors,
+        ptSystemHostname,
+        ptSystemVersion,
+        ptSystemDryRun,
+        ptSystemGeneration,
+        ptSystemLastApply,
+        ptSystemLastError,
+        ptSystemPendingGeneration,
+        ptSystemPendingDeadline,
+        ptSystemHostMemTotal,
+        ptSystemHostMemAvailable,
+        ptSystemHostSwapTotal,
+        ptSystemHostSwapFree,
+        ptSystemHostCpus,
+        ptSystemHostCpuBusy,
+        ptSystemHostCpuTotal,
+        ptSystemHostLoad,
+        ptSystemHostUptime,
+        ptSystemHaNode,
+        ptSystemHa,
+        ptSystemHaTerm,
+        ptSystemHaPeerAlive,
+        ptSystemHaPeerSeen,
+        ptSystemHaVoteUntil,
+        ptSystemHaPromiseUntil,
+        ptSystemHaWatchdog,
+        ptSystemHaEpoch,
+        ptSystemHaHealth,
+        ptSystemHaPeerHealth,
+        ptSystemHaMonitored,
+        ptSystemErrors,
         ptInstanceStateVrrpError,
         ptInstanceStateBfdError,
         ptInstanceStateNtpError,
@@ -3856,12 +3856,12 @@ ptStateGroup OBJECT-GROUP
         ptInstanceRateLimitsInterfacesOverlimits,
         ptInstanceRateLimitsInterfacesBacklog,
         ptInstanceRateLimitsInterfacesQlen,
-        ptSystemStateHostDisksTotal,
-        ptSystemStateHostDisksFree,
-        ptSystemStateHostDisksUsed,
-        ptSystemStateHaDhcpSent,
-        ptSystemStateHaDhcpReceived,
-        ptSystemStateHaDhcpError
+        ptSystemHostDisksTotal,
+        ptSystemHostDisksFree,
+        ptSystemHostDisksUsed,
+        ptSystemHaDhcpSent,
+        ptSystemHaDhcpReceived,
+        ptSystemHaDhcpError
     }
     STATUS current
     DESCRIPTION

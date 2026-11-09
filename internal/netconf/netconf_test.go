@@ -242,7 +242,7 @@ func TestGetState(t *testing.T) {
 	env, _ := newEnv()
 	env.State = func(context.Context) (*datastore.Tree, error) {
 		tr := datastore.New(env.Schema)
-		sys := tr.Root.AddContainer(env.Schema.Child("system-state"))
+		sys := tr.Root.AddContainer(env.Schema.Child("system"))
 		datastore.Fill(sys, map[string]any{"hostname": "fw1", "generation": 4, "host": map[string]any{"cpus": 2, "load": []float64{0.5, 0.25, 0.1}}})
 		in := tr.Root.AddEntry(env.Schema.Child("instance"), map[string]string{"name": "host"})
 		st := in.AddContainer(in.S.Child("state"))
@@ -250,15 +250,15 @@ func TestGetState(t *testing.T) {
 		return tr, nil
 	}
 	c := dial(t, env, true)
-	r := c.rpc(`<get><filter type="subtree"><system-state ` + cfg + `/></filter></get>`)
+	r := c.rpc(`<get><filter type="subtree"><system ` + cfg + `/></filter></get>`)
 	if !strings.Contains(r, "<hostname>fw1</hostname>") || !strings.Contains(r, "<load>0.25</load>") || strings.Contains(r, "eth0") {
-		t.Errorf("get system-state:\n%s", r)
+		t.Errorf("get system:\n%s", r)
 	}
 	r = c.rpc(`<get><filter type="subtree"><instance ` + cfg + `><name>host</name><state><interfaces><name>eth0</name></interfaces></state></instance></filter></get>`)
 	if !strings.Contains(r, "<rx-bytes>1099511627776</rx-bytes>") {
 		t.Errorf("get interface state:\n%s", r)
 	}
-	c.fails(edit(`<system-state `+cfg+`><hostname>x</hostname></system-state>`), "invalid-value")
+	c.fails(edit(`<system `+cfg+`><hostname>x</hostname></system>`), "invalid-value")
 	if r := c.rpc(`<get-config><source><running/></source></get-config>`); strings.Contains(r, "fw1") {
 		t.Errorf("state in get-config: %s", r)
 	}

@@ -33,9 +33,9 @@
     "/instance/state/vrrp/routers": 23,
     "/instance/state/wireguard": 6,
     "/instance/state/wireguard/peers": 7,
-    "/system-state": 2,
-    "/system-state/ha/dhcp": 36,
-    "/system-state/host/disks": 35
+    "/system": 2,
+    "/system/ha/dhcp": 36,
+    "/system/host/disks": 35
   },
   "/instance": {
     "/instance/name": 1,
@@ -389,48 +389,48 @@
     "/instance/state/wireguard/peers@/instance/name": 1,
     "/instance/state/wireguard/peers@/instance/state/wireguard/interface": 2
   },
-  "/system-state": {
-    "/system-state/dry-run": 3,
-    "/system-state/errors": 30,
-    "/system-state/generation": 4,
-    "/system-state/ha/epoch": 26,
-    "/system-state/ha/health": 27,
-    "/system-state/ha/monitored": 29,
-    "/system-state/ha/node": 18,
-    "/system-state/ha/peer-alive": 21,
-    "/system-state/ha/peer-health": 28,
-    "/system-state/ha/peer-seen": 22,
-    "/system-state/ha/promise-until": 24,
-    "/system-state/ha/state": 19,
-    "/system-state/ha/term": 20,
-    "/system-state/ha/vote-until": 23,
-    "/system-state/ha/watchdog": 25,
-    "/system-state/host/cpu-busy": 14,
-    "/system-state/host/cpu-total": 15,
-    "/system-state/host/cpus": 13,
-    "/system-state/host/load": 16,
-    "/system-state/host/mem-available": 10,
-    "/system-state/host/mem-total": 9,
-    "/system-state/host/swap-free": 12,
-    "/system-state/host/swap-total": 11,
-    "/system-state/host/uptime": 17,
-    "/system-state/hostname": 1,
-    "/system-state/last-apply": 5,
-    "/system-state/last-error": 6,
-    "/system-state/pending/deadline": 8,
-    "/system-state/pending/generation": 7,
-    "/system-state/version": 2
+  "/system": {
+    "/system/dry-run": 3,
+    "/system/errors": 30,
+    "/system/generation": 4,
+    "/system/ha/epoch": 26,
+    "/system/ha/health": 27,
+    "/system/ha/monitored": 29,
+    "/system/ha/node": 18,
+    "/system/ha/peer-alive": 21,
+    "/system/ha/peer-health": 28,
+    "/system/ha/peer-seen": 22,
+    "/system/ha/promise-until": 24,
+    "/system/ha/state": 19,
+    "/system/ha/term": 20,
+    "/system/ha/vote-until": 23,
+    "/system/ha/watchdog": 25,
+    "/system/host/cpu-busy": 14,
+    "/system/host/cpu-total": 15,
+    "/system/host/cpus": 13,
+    "/system/host/load": 16,
+    "/system/host/mem-available": 10,
+    "/system/host/mem-total": 9,
+    "/system/host/swap-free": 12,
+    "/system/host/swap-total": 11,
+    "/system/host/uptime": 17,
+    "/system/hostname": 1,
+    "/system/last-apply": 5,
+    "/system/last-error": 6,
+    "/system/pending/deadline": 8,
+    "/system/pending/generation": 7,
+    "/system/version": 2
   },
-  "/system-state/ha/dhcp": {
-    "/system-state/ha/dhcp/error": 4,
-    "/system-state/ha/dhcp/instance": 1,
-    "/system-state/ha/dhcp/received": 3,
-    "/system-state/ha/dhcp/sent": 2
+  "/system/ha/dhcp": {
+    "/system/ha/dhcp/error": 4,
+    "/system/ha/dhcp/instance": 1,
+    "/system/ha/dhcp/received": 3,
+    "/system/ha/dhcp/sent": 2
   },
-  "/system-state/host/disks": {
-    "/system-state/host/disks/free": 3,
-    "/system-state/host/disks/mount": 1,
-    "/system-state/host/disks/total": 2,
-    "/system-state/host/disks/used": 4
+  "/system/host/disks": {
+    "/system/host/disks/free": 3,
+    "/system/host/disks/mount": 1,
+    "/system/host/disks/total": 2,
+    "/system/host/disks/used": 4
   }
 }

@@ -27,7 +27,7 @@ module portitor {
 
      Every frontend reads and writes this tree: the CLI, NETCONF, the API
      and the GUI. The state (config false) is what the firewalls run
-     and see: system-state, and each instance's state.";
+     and see: system, and each instance's state.";
 
   revision 2026-11-08 { description "First version, from the SQLite schema."; }
 

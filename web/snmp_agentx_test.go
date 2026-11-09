@@ -40,7 +40,7 @@ func TestSNMPAgentX(t *testing.T) {
 	}
 	var dryRun agentx.OID
 	for _, c := range mib.Groups[0].Scalars {
-		if c.Name == "ptSystemStateDryRun" {
+		if c.Name == "ptSystemDryRun" {
 			dryRun = mib.Base.Append(mib.Groups[0].Num, c.Num, 0)
 		}
 	}

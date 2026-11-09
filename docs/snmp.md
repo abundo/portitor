@@ -21,7 +21,7 @@ and the host's load, memory and disks (HOST-RESOURCES-MIB, UCD-SNMP-MIB).
 ## Portitor's own state (PORTITOR-MIB)
 
 The default virtual firewall's agent also answers Portitor's state: what the CLI
-shows with `info from state` (the virtual firewalls' interfaces, routes, WireGuard
+shows with `show from state` (the virtual firewalls' interfaces, routes, WireGuard
 peers, DHCP leases, neighbours, rule and rate-limit counters, BGP, OSPF, IS-IS,
 VRRP, BFD, NTP, NAT64, OpenVPN, and the host, the agent and the HA pair). It is
 served by portitor-config, connected to snmpd over AgentX, from a snapshot no more

@@ -45,12 +45,12 @@ change: the document stays the contract between portitor-config and the agent.
    candidate, `lock`/`unlock` (`Store.Lock`, which the CLI respects). Tried with
    ncclient.
 3. **Done. State in YANG** (`yang/portitor-state.yang`, `web/state.go`): `config
-   false` nodes, `system-state` at the top and `state` in each instance, filled from
+   false` nodes, `system` at the top and `state` in each instance, filled from
    the API's live views as the user asks for them (so filtered per tenant and merged
    over the firewalls): interfaces and counters, routes, WireGuard, services, DHCP
    client and server leases, IP and LLDP neighbours, rule and rate-limit counters,
    BGP, OSPF, IS-IS, VRRP, BFD, NTP, NAT64, OpenVPN, and the agent, host and HA. Leaves are named after the agent API's fields, so
-   `datastore.Fill` fills them without code per leaf. `info from state` in the CLI,
+   `datastore.Fill` fills them without code per leaf. `show from state` in the CLI,
    NETCONF `get`. A protocol's view is asked for only when the running
    configuration has it. Not yet: routing tables beyond the main one, the BGP and
    OSPF route tables, logs, and gNMI subscriptions.

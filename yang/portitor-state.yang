@@ -15,7 +15,7 @@ submodule portitor-state {
   typedef counter { type uint64; description "A count since the device or rule was last made."; }
 
   grouping system-state {
-    container system-state {
+    container system {
       config false;
       description "The firewall host: the agent and the machine. With several firewalls, the first one's.";
       leaf hostname { type string; }

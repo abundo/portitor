@@ -119,7 +119,7 @@ func (s *Session) printf(format string, args ...any) {
 
 var commands = []struct{ name, help string }{
 	{"enter", "enter candidate (edit) or running (read) mode"},
-	{"info", "show the configuration here or at a path: [from running|candidate|state] [flat|json|detail] [path]"},
+	{"show", "show the configuration here or at a path: [from running|candidate|state] [flat|json|detail] [path]; also deployments, api <path>"},
 	{"diff", "show the candidate's changes against running: [flat] [path]"},
 	{"commit", "commit the candidate: now (and leave candidate mode), stay, validate, confirmed [seconds]"},
 	{"discard", "drop the candidate's changes: now (and leave candidate mode) or stay"},
@@ -134,7 +134,6 @@ var commands = []struct{ name, help string }{
 	{"back", "go back to the previous context"},
 	{"exit", "go up one level; exit all: to the root; at the root, log out"},
 	{"quit", "log out"},
-	{"show", "show state: version, deployments, api <path>"},
 	{"help", "this list"},
 }
 
@@ -522,8 +521,6 @@ func (s *Session) command(ctx context.Context, cmd string, args []token) error {
 		return s.rename(ctx, args)
 	case "move":
 		return s.move(ctx, args)
-	case "info":
-		return s.infoCommand(ctx, args)
 	case "diff":
 		return s.diff(ctx, args)
 	case "tree":
@@ -558,7 +555,10 @@ func (s *Session) command(ctx context.Context, cmd string, args []token) error {
 		}
 		s.printf("%s\n", msg)
 	case "show":
-		return s.show(ctx, words)
+		if s.showSystem(args) {
+			return s.show(ctx, words)
+		}
+		return s.infoCommand(ctx, args)
 	}
 	return nil
 }
@@ -656,7 +656,7 @@ func (s *Session) infoCommand(ctx context.Context, args []token) error {
 		switch args[0].text {
 		case "from":
 			if len(args) < 2 {
-				return errors.New("info from running|candidate")
+				return errors.New("show from running|candidate|state")
 			}
 			switch {
 			case strings.HasPrefix("running", args[1].text):
@@ -666,7 +666,7 @@ func (s *Session) infoCommand(ctx context.Context, args []token) error {
 			case strings.HasPrefix("state", args[1].text):
 				fromState = true
 			default:
-				return errors.New("info from running|candidate|state")
+				return errors.New("show from running|candidate|state")
 			}
 			args = args[2:]
 			continue
@@ -934,13 +934,21 @@ func (s *Session) commit(ctx context.Context, words []string) error {
 	return nil
 }
 
+// showSystem tells whether show's first word is one of its own (deployments,
+// api) rather than the start of a path: a node here of that name wins.
+func (s *Session) showSystem(args []token) bool {
+	if len(args) == 0 || args[0].quoted || !slices.Contains([]string{"deployments", "api"}, args[0].text) {
+		return false
+	}
+	_, err := childOf(s.schemaHere(), args[0])
+	return err != nil
+}
+
 func (s *Session) show(ctx context.Context, words []string) error {
 	if len(words) == 0 {
-		return errors.New("show version|deployments|api <path>")
+		return errors.New("show deployments|api <path>")
 	}
 	switch {
-	case strings.HasPrefix("version", words[0]):
-		s.printf("Portitor %s\n", s.env.Version)
 	case strings.HasPrefix("deployments", words[0]):
 		code, body := s.env.API(ctx, "GET", "/api/deployments", nil)
 		if code/100 != 2 {
@@ -975,7 +983,7 @@ func (s *Session) show(ctx context.Context, words []string) error {
 		}
 		s.out.Write(append(body, '\n'))
 	default:
-		return errors.New("show version|deployments|api <path>")
+		return errors.New("show deployments|api <path>")
 	}
 	return nil
 }
