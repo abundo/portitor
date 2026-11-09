@@ -56,10 +56,23 @@ func (s *Server) stateTree(ctx context.Context, u *models.User) (*datastore.Tree
 		return in.AddContainer(in.S.Child("state"))
 	}
 
-	var st agentapi.Status
+	// The merged status leaves the host out: each firewall's is in
+	// firewalls, and system/host is the first one's.
+	var st struct {
+		agentapi.Status
+		Firewalls []struct {
+			Host *agentapi.HostStatus `json:"host"`
+		} `json:"firewalls"`
+	}
 	if get("/api/agent/status", &st) {
 		sys := root.AddContainer(root.S.Child("system"))
-		datastore.Fill(sys, st)
+		for _, fw := range st.Firewalls {
+			if fw.Host != nil {
+				st.Host = fw.Host
+				break
+			}
+		}
+		datastore.Fill(sys, st.Status)
 		for _, in := range st.Instances {
 			n := state(in.Name)
 			datastore.FillList(n, "interfaces", in.Interfaces)

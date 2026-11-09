@@ -98,3 +98,31 @@ func TestSyncNICs(t *testing.T) {
 		t.Errorf("third sync: %+v", got)
 	}
 }
+
+// hostAgent answers Status with a hostname and the host's figures.
+type hostAgent struct{ agentAPI }
+
+func (hostAgent) Status(context.Context) (*agentapi.Status, error) {
+	return &agentapi.Status{Hostname: "fw1", NICs: []agentapi.NICStatus{},
+		Host: &agentapi.HostStatus{MemTotal: 4096, CPUs: 2, Load: [3]float64{0.5, 0.25, 0.1},
+			Disks: []agentapi.DiskStatus{{Mount: "/", Total: 100, Free: 40, Used: 60}}}}, nil
+}
+
+// The merged status leaves out the host; the state's system/host is the
+// first firewall's.
+func TestStateSystemHost(t *testing.T) {
+	env := newEnv(t)
+	if err := env.srv.ensureDefaultInstance(); err != nil {
+		t.Fatal(err)
+	}
+	env.srv.newAgent = func(*models.Firewall) (agentAPI, error) { return hostAgent{}, nil }
+	rec := env.do("GET", "/api/config/state/system/host", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("state: %d %s", rec.Code, rec.Body)
+	}
+	for _, want := range []string{`"mem-total":"4096"`, `"cpus":2`, `"mount":"/"`, `"0.25"`} {
+		if !strings.Contains(strings.ReplaceAll(rec.Body.String(), " ", ""), want) {
+			t.Errorf("no %s in %s", want, rec.Body)
+		}
+	}
+}
