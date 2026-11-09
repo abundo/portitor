@@ -713,7 +713,7 @@ func (s *Server) handleDeployments(c *echo.Context) error {
 }
 
 func (s *Server) handleAgentLeases(c *echo.Context) error {
-	l, err := fromAll(c.Request().Context(), s, agentAPI.Leases, func(into, from *agentapi.LeasesResponse) {
+	l, err := fromActive(c.Request().Context(), s, agentAPI.Leases, func(into, from *agentapi.LeasesResponse) {
 		into.Client = append(into.Client, from.Client...)
 		for k, v := range from.Server {
 			if into.Server == nil {
@@ -736,9 +736,10 @@ func (s *Server) handleAgentLeases(c *echo.Context) error {
 }
 
 // handleAgentNeighbours passes on the ARP, ND and LLDP neighbours of the
-// instances' interfaces, for the Neighbours page.
+// instances' interfaces, for the Neighbours page: of an HA pair, the
+// active host's (fromActive).
 func (s *Server) handleAgentNeighbours(c *echo.Context) error {
-	n, err := fromAll(c.Request().Context(), s, agentAPI.Neighbours, func(into, from *agentapi.NeighboursResponse) {
+	n, err := fromActive(c.Request().Context(), s, agentAPI.Neighbours, func(into, from *agentapi.NeighboursResponse) {
 		into.IP, into.LLDP, into.LLDPPorts = append(into.IP, from.IP...), append(into.LLDP, from.LLDP...), append(into.LLDPPorts, from.LLDPPorts...)
 	})
 	if err != nil {

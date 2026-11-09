@@ -69,3 +69,19 @@ export function suggestDhcpRange(cidr, fwAddr = '') {
   if (outside(mid, last)) return [fmt(mid), fmt(last)]
   return [fmt(net + 1n), fmt(mid - 1n)]
 }
+
+// inPrefix says whether addr (a plain address) is in cidr (an interface
+// address such as 192.168.1.1/24, whose host part is ignored).
+export function inPrefix(addr, cidr) {
+  const [net, len] = (cidr ?? '').split('/')
+  const v6 = addr.includes(':')
+  if (v6 !== net.includes(':')) return false
+  const width = v6 ? 128n : 32n
+  const parse = v6 ? parse6 : parse4
+  const a = parse(addr)
+  const n = parse(net)
+  const bits = Number(len)
+  if (a === null || n === null || !Number.isInteger(bits) || BigInt(bits) > width) return false
+  const shift = width - BigInt(bits)
+  return a >> shift === n >> shift
+}

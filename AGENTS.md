@@ -93,7 +93,8 @@ docs and user-facing messages.
   and IP lists go to all. A proxy for one instance asks its firewall's agent
   (`instanceAgent`); the live views (status, leases, neighbours, routes, routing
   protocols, counters) ask all of them and merge (`fromAll`; an unreachable one is
-  left out when there are several); the logs and Updates are one firewall's
+  left out when there are several; leases and neighbours only an HA pair's active
+  host's, `fromActive`); the logs and Updates are one firewall's
   (`?firewall_id=`, the first by default), picked in the GUI. Tests run the server
   without `Local`, with any number of firewalls.
 - **Deploy ("commit" in the GUI)**: `web/commit.go` `deploy` takes a database

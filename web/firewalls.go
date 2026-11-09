@@ -316,6 +316,59 @@ func fromAll[T any](ctx context.Context, s *Server, get func(agentAPI, context.C
 	if err != nil {
 		return nil, err
 	}
+	return fromFirewalls(ctx, s, fws, get, merge)
+}
+
+// fromActive is fromAll but for an HA pair's standby, whose view (its
+// neighbours, its copy of the leases) is the active host's or stale: of a
+// pair, only the host that reports active is asked, both when neither does.
+func fromActive[T any](ctx context.Context, s *Server, get func(agentAPI, context.Context) (*T, error), merge func(into, from *T)) (*T, error) {
+	fws, err := s.firewalls()
+	if err != nil {
+		return nil, err
+	}
+	return fromFirewalls(ctx, s, s.activeFirewalls(ctx, fws), get, merge)
+}
+
+// activeFirewalls is fws without the HA standbys: of each pair whose hosts
+// are both in fws, the one that reports active (activeOf), or both when
+// neither does or can be asked.
+func (s *Server) activeFirewalls(ctx context.Context, fws []models.Firewall) []models.Firewall {
+	at := map[uint]int{}
+	for i, fw := range fws {
+		at[fw.ID] = i
+	}
+	skip := map[int]bool{}
+	for i, fw := range fws {
+		if fw.HAPrimaryID == nil {
+			continue
+		}
+		p, ok := at[*fw.HAPrimaryID]
+		if !ok {
+			continue
+		}
+		pair := [2]int{p, i}
+		var hosts [2]haHost
+		for k, j := range pair {
+			if a, err := s.newAgent(&fws[j]); err == nil {
+				hosts[k] = a
+			}
+		}
+		if active := activeOf(bothOf(ctx, hosts)); active >= 0 {
+			skip[pair[1-active]] = true
+		}
+	}
+	out := make([]models.Firewall, 0, len(fws))
+	for i, fw := range fws {
+		if !skip[i] {
+			out = append(out, fw)
+		}
+	}
+	return out
+}
+
+// fromFirewalls asks the agents of fws and merges the answers, as fromAll.
+func fromFirewalls[T any](ctx context.Context, s *Server, fws []models.Firewall, get func(agentAPI, context.Context) (*T, error), merge func(into, from *T)) (*T, error) {
 	var out *T
 	for _, fw := range fws {
 		a, err := s.newAgent(&fw)
