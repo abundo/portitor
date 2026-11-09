@@ -295,9 +295,6 @@ func (s *Server) syncAfter(next echo.HandlerFunc) echo.HandlerFunc {
 
 // deployCandidate commits the candidate as the GUI's commit does.
 func (s *Server) deployCandidate(ctx context.Context, user string, timeout *int) (*commitResult, error) {
-	if err := s.syncFromTables(ctx); err != nil {
-		return nil, err
-	}
 	t, err := s.tree()
 	if err != nil {
 		return nil, err

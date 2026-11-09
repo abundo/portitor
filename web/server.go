@@ -28,6 +28,7 @@ import (
 	"github.com/abundo/portitor/internal/agentapi"
 	"github.com/abundo/portitor/internal/agentclient"
 	"github.com/abundo/portitor/internal/buildinfo"
+	"github.com/abundo/portitor/internal/datastore"
 	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/internal/netobj"
 	"github.com/abundo/portitor/models"
@@ -112,6 +113,7 @@ type Server struct {
 	localHA func(ctx context.Context) (*agentapi.HAPeerConfig, *models.Firewall, error)
 	// treeState is the configuration tree and its candidate (datastore.go).
 	treeState treeState
+	viewCache viewCache // the candidate as rows (confview.go)
 }
 
 func NewServer(cfg *Config, db *gorm.DB) *Server {
@@ -179,7 +181,7 @@ func (s *Server) Echo() *echo.Echo {
 	g.POST("/me/totp/disable", s.handleTOTPDisable)
 	g.POST("/me/totp/recovery-codes", s.handleRecoveryCodes)
 
-	(&resource[models.Firewall, *models.Firewall]{db: s.db, order: "id", prepare: s.prepareFirewallHere, present: presentFirewall, afterCreate: createFirewallInstance, beforeDelete: deleteFirewall}).register(s, g, "/firewalls", s.syncAfter)
+	(&resource[models.Firewall, *models.Firewall]{db: s.db, order: "id", prepare: s.prepareFirewallHere, present: presentFirewall, afterSave: s.firewallSaved, preDelete: s.deleteFirewall}).register(s, g, "/firewalls")
 	(&resource[models.Instance, *models.Instance]{db: s.db, scope: instanceScope, order: "firewall_id, is_default desc, name", present: presentInstance}).registerRead(s, g, "/instances")
 	(&resource[models.InterfaceZone, *models.InterfaceZone]{db: s.db, scope: byField("InstanceID", "instance_id"), filters: []string{"instance_id"}, order: "name"}).registerRead(s, g, "/interface-zones")
 	(&resource[models.Interface, *models.Interface]{db: s.db, scope: byField("InstanceID", "instance_id"), filters: []string{"instance_id"}, order: "name", present: presentInterface}).registerRead(s, g, "/interfaces")
@@ -233,8 +235,8 @@ func (s *Server) Echo() *echo.Echo {
 		"PUT /api/config/*", "PATCH /api/config/*", "POST /api/config/*", "DELETE /api/config/*"} {
 		s.tenantWrites[r] = true
 	}
-	// The routes of the GUI from before the tree: writes made through it
-	// (legacyWrite), reads and operations as they were.
+	// The routes of the GUI besides the configuration API: imports, reads
+	// and operations.
 	g.GET("/ipam/tree", s.handleIpamTree)
 	g.GET("/rules/auto", s.handleAutoRules)
 	g.GET("/services", func(c *echo.Context) error { return c.JSON(http.StatusOK, fwconfig.Services) })
@@ -244,11 +246,11 @@ func (s *Server) Echo() *echo.Echo {
 	g.GET("/icmp-types", func(c *echo.Context) error {
 		return c.JSON(http.StatusOK, map[string][]fwconfig.ICMPType{"icmp": fwconfig.ICMPTypes, "icmpv6": fwconfig.ICMPv6Types})
 	})
-	g.POST("/wg/import", s.legacyWrite(s.handleWgImport))
+	g.POST("/wg/import", s.handleWgImport)
 	g.GET("/schedule/preview", s.handleSchedulePreview)
 
 	g.GET("/settings", s.handleGetSettings)
-	g.PUT("/settings", s.handlePutSettings, s.syncAfter)
+	g.PUT("/settings", s.handlePutSettings)
 	g.POST("/backup", s.handleBackup)
 	g.POST(strings.TrimPrefix(restorePath, "/api"), s.handleRestore, middleware.BodyLimit(backupMaxSize/3*4+1<<20), s.syncAfter)
 	g.GET("/users", s.handleListUsers)
@@ -264,7 +266,7 @@ func (s *Server) Echo() *echo.Echo {
 
 	// Bundles hold a virtual firewall's secrets: global admins only
 	// (no tenant or viewer write rule, and the GET in viewerDenied).
-	g.POST("/instances/import", s.legacyWrite(s.handleImportBundle))
+	g.POST("/instances/import", s.handleImportBundle)
 	g.GET("/firewalls/:id/witness", s.handleWitnessString)
 	g.POST("/firewalls/:id/switchover", s.handleSwitchover)
 	g.GET("/ha", s.handleHAStatus)
@@ -281,7 +283,7 @@ func (s *Server) Echo() *echo.Echo {
 	g.GET("/deploy/changes", s.handleDeployChanges)
 	g.POST("/deploy/preview", s.handleDeployPreview)
 	g.GET("/deploy/nftables", s.handleExportNftables)
-	g.POST("/import/nftables", s.legacyWrite(s.handleImportNftables))
+	g.POST("/import/nftables", s.handleImportNftables)
 	g.POST("/deploy/apply", s.handleDeployApply)
 	g.POST("/deploy/confirm", s.handleDeployConfirm)
 	g.POST("/deploy/rollback", s.handleDeployRollback)
@@ -432,21 +434,6 @@ func readFiles(a, b string) ([]byte, []byte, error) {
 	return da, db, err
 }
 
-// tenantAll: an instance admin adds, changes and deletes the rows.
-var tenantAll = []string{http.MethodPost, http.MethodPut, http.MethodDelete}
-
-// deleteInstanceRows deletes what the cascade can't delete in order.
-func deleteInstanceRows(tx *gorm.DB, in *models.Instance) error {
-	// The cascade would delete the DNS templates in any order, and those
-	// in use refuse it: zones first, then templates, then what they use.
-	for _, m := range []any{&models.DnsZone{}, &models.DnsTemplate{}, &models.DnsSoaTemplate{}, &models.DnsDnssecPolicy{}} {
-		if err := tx.Where("instance_id = ?", in.ID).Delete(m).Error; err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 // DefaultInstanceName is the instance created on start when there is none.
 const DefaultInstanceName = "main"
 
@@ -456,33 +443,67 @@ func (s *Server) ensureDefaultInstance() error {
 	if err := s.ensureFirewall(); err != nil {
 		return err
 	}
-	err := s.db.Transaction(func(tx *gorm.DB) error {
-		var n int64
-		if err := tx.Model(&models.Instance{}).Count(&n).Error; err != nil || n > 0 {
-			return err
-		}
-		id, err := firstFirewallID(tx)
-		if err != nil {
-			return err
-		}
-		if err := createDefaultInstance(tx, id, DefaultInstanceName); err != nil {
-			return err
-		}
-		slog.Info("created default instance", "name", DefaultInstanceName)
-		return nil
-	})
-	if err != nil {
+	ctx := context.Background()
+	v, err := s.view(ctx)
+	if err != nil || len(v.Instances) > 0 {
 		return err
 	}
-	// The tables are the candidate's cache: what was written there is the
-	// candidate's.
-	return s.syncFromTables(context.Background())
+	var fw models.Firewall
+	if err := s.db.Order("id").First(&fw).Error; err != nil {
+		return err
+	}
+	if err := s.addDefaultInstance(ctx, fw.Name, DefaultInstanceName); err != nil {
+		return err
+	}
+	slog.Info("created default instance", "name", DefaultInstanceName)
+	return nil
 }
 
+// settings are the Settings: the configuration's (the tree's settings),
+// with the commit counter and the GUI's certificate, which are
+// portitor-config's own (the table settings, row 1).
 func (s *Server) settings() (*models.Settings, error) {
-	var st models.Settings
-	if err := s.db.FirstOrCreate(&st, models.Settings{ID: 1}).Error; err != nil {
+	own, err := s.ownSettings()
+	if err != nil {
 		return nil, err
 	}
+	v, err := s.view(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	st := v.Settings
+	st.ID, st.LastCommit, st.WebCertificateID = 1, own.LastCommit, own.WebCertificateID
 	return &st, nil
+}
+
+// settingsOf is settings with the configuration's of tree.
+func (s *Server) settingsOf(tree *datastore.Tree) (*models.Settings, error) {
+	own, err := s.ownSettings()
+	if err != nil {
+		return nil, err
+	}
+	v, err := s.viewOf(tree)
+	if err != nil {
+		return nil, err
+	}
+	st := v.Settings
+	st.ID, st.LastCommit, st.WebCertificateID = 1, own.LastCommit, own.WebCertificateID
+	return &st, nil
+}
+
+// ownSettings is the row of the settings that are not configuration.
+type ownSettings struct {
+	LastCommit       int64
+	WebCertificateID *uint
+}
+
+func (s *Server) ownSettings() (*ownSettings, error) {
+	if err := s.db.Exec("INSERT OR IGNORE INTO settings (id) VALUES (1)").Error; err != nil {
+		return nil, err
+	}
+	var own ownSettings
+	if err := s.db.Table("settings").Select("last_commit, web_certificate_id").Where("id = 1").Take(&own).Error; err != nil {
+		return nil, err
+	}
+	return &own, nil
 }

@@ -6,6 +6,7 @@ package web
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"io"
@@ -391,4 +392,9 @@ func queryStrings(ctx context.Context, conn querier, query string, args ...any) 
 		out = append(out, v)
 	}
 	return out, rows.Err()
+}
+
+// querier runs a query: a connection or a transaction.
+type querier interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 }

@@ -26,17 +26,6 @@ const instanceRolePrefix = "vf-"
 
 func instanceRoleName(instance string) string { return instanceRolePrefix + instance }
 
-// createInstanceRole adds the role of a new instance, unless it has one
-// (a role outlives its instance until the commit that leaves it out). The
-// default instance, the host itself, has none: only global admins manage
-// it.
-func createInstanceRole(tx *gorm.DB, in *models.Instance) error {
-	if in.IsDefault {
-		return nil
-	}
-	return ensureInstanceRole(tx, in.Name)
-}
-
 func ensureInstanceRole(tx *gorm.DB, name string) error {
 	var n int64
 	if err := tx.Model(&models.Role{}).Where("instance = ?", name).Count(&n).Error; err != nil || n > 0 {
@@ -45,14 +34,6 @@ func ensureInstanceRole(tx *gorm.DB, name string) error {
 	return tx.Create(&models.Role{
 		Name: instanceRoleName(name), Description: "Users of virtual firewall " + name, Instance: &name,
 	}).Error
-}
-
-// renameInstanceRole follows an instance's new name.
-func renameInstanceRole(tx *gorm.DB, in, old *models.Instance) error {
-	if old == nil || old.Name == in.Name {
-		return nil
-	}
-	return renameInstanceRoles(tx, old.Name, in.Name)
 }
 
 // renameInstanceRoles makes the roles that name the instance old name new:
@@ -249,6 +230,9 @@ func (s *Server) saveRole(c *echo.Context, old *models.Role) error {
 		}
 		return nil
 	})
+	if err == nil && old != nil {
+		err = s.renameExternal(c.Request().Context(), "roles", old.Name, r.Name)
+	}
 	if err != nil {
 		return dbError(c, err)
 	}

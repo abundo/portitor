@@ -4,11 +4,6 @@
 package web
 
 import (
-	"fmt"
-	"slices"
-
-	"gorm.io/gorm"
-
 	"github.com/abundo/portitor/models"
 )
 
@@ -20,15 +15,4 @@ import (
 func presentOspfInterface(i *models.OspfInterface) {
 	i.HasAuthKey = i.AuthKey != ""
 	i.NewAuthKey, i.ClearAuthKey = "", false
-}
-
-// ospfIfaceUsers lists the OSPF interfaces named name.
-func ospfIfaceUsers(tx *gorm.DB, instanceID uint, name string) []string {
-	var versions []int
-	tx.Model(&models.OspfInterface{}).Where("instance_id = ? AND name = ?", instanceID, name).Order("version").Pluck("version", &versions)
-	var users []string
-	for _, v := range slices.Compact(versions) {
-		users = append(users, fmt.Sprintf("OSPFv%d", v))
-	}
-	return users
 }

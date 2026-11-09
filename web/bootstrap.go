@@ -5,16 +5,19 @@ package web
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/netip"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 
-	"gorm.io/gorm"
-
 	"github.com/abundo/portitor/internal/agentapi"
+	"github.com/abundo/portitor/internal/datastore"
 	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/models"
 )
@@ -222,15 +225,25 @@ func Bootstrap(ctx context.Context, s *Server, o BootstrapOptions) (*models.Depl
 		return nil, err
 	}
 
-	err = s.viaTables(ctx, func(tx *gorm.DB) error {
-		var in models.Instance
-		if err := tx.Where("is_default AND firewall_id = ?", fwID).First(&in).Error; err != nil {
+	v, err := s.view(ctx)
+	if err != nil {
+		return nil, err
+	}
+	host := ""
+	for _, in := range v.Instances {
+		if in.IsDefault && in.FirewallID == fwID {
+			host = in.Name
+		}
+	}
+	if host == "" {
+		return nil, errors.New("the firewall has no default instance")
+	}
+	err = s.editConfig(ctx, func(work *datastore.Tree) error {
+		b := &bootTree{s: s, work: work, inst: datastore.Path{{Name: "instance", Keys: []string{host}}}}
+		if err := b.network(o); err != nil {
 			return err
 		}
-		if err := bootstrapNetwork(tx, in.ID, o); err != nil {
-			return err
-		}
-		return bootstrapDNS(tx, in.ID, o)
+		return b.dns(o)
 	})
 	var br *badRequest
 	if errors.As(err, &br) {
@@ -256,22 +269,94 @@ func Bootstrap(ctx context.Context, s *Server, o BootstrapOptions) (*models.Depl
 	return dep, nil
 }
 
-func bootstrapNetwork(tx *gorm.DB, instanceID uint, o BootstrapOptions) error {
-	if _, err := bootstrapIface(tx, instanceID, o.LAN, o.Address, "LAN", o.WAN != "" && !o.DefaultRouteLAN, o.Reconfigure); err != nil {
-		return err
-	}
-	if err := bootstrapDHCP(tx, instanceID, o); err != nil {
-		return err
-	}
-	if o.WAN != "" {
-		if _, err := bootstrapIface(tx, instanceID, o.WAN, o.WANAddress, "WAN", o.DefaultRouteLAN, o.Reconfigure); err != nil {
+// bootTree makes bootstrap's configuration in the firewall's host, inst,
+// in a working copy of the candidate.
+type bootTree struct {
+	s    *Server
+	work *datastore.Tree
+	inst datastore.Path
+}
+
+func (b *bootTree) at(more ...datastore.Elem) datastore.Path {
+	return append(slices.Clone(b.inst), more...)
+}
+
+func (b *bootTree) node() *datastore.Node {
+	n, _, _ := b.work.Find(b.inst)
+	return n
+}
+
+// set sets the leaves of the entry at p (a string, bool, number or list
+// each; "" or an empty list unsets one).
+func (b *bootTree) set(p datastore.Path, leaves map[string]any) error {
+	for _, k := range slices.Sorted(maps.Keys(leaves)) {
+		lp := append(slices.Clone(p), datastore.Elem{Name: k})
+		var err error
+		switch v := leaves[k].(type) {
+		case []string:
+			if len(v) == 0 {
+				err = b.unset(lp)
+			} else {
+				err = b.work.SetList(lp, v)
+			}
+		case string:
+			if v == "" {
+				err = b.unset(lp)
+			} else {
+				err = b.work.Set(lp, v)
+			}
+		default:
+			err = b.work.Set(lp, fmt.Sprint(v))
+		}
+		if err != nil {
 			return err
 		}
 	}
+	return nil
+}
 
-	var n int64
+// unset removes the leaf (or leaf-list) at p, if it is set.
+func (b *bootTree) unset(p datastore.Path) error {
+	n, _, err := b.work.Find(p[:len(p)-1])
+	if err != nil || n == nil {
+		return err
+	}
+	leaf := p[len(p)-1].Name
+	if _, ok := n.Leaves[leaf]; !ok && len(n.LeafLists[leaf]) == 0 {
+		return nil
+	}
+	return b.work.Delete(p)
+}
+
+// create adds an entry to the list at p, given its next id if the list is
+// keyed by one.
+func (b *bootTree) create(p datastore.Path, entry map[string]any) error {
+	body, err := json.Marshal(entry)
+	if err != nil {
+		return err
+	}
+	if body, err = b.s.assignID(b.work, p, body); err != nil {
+		return err
+	}
+	return b.work.EditJSON(p, datastore.EditCreate, body)
+}
+
+func (b *bootTree) network(o BootstrapOptions) error {
+	if err := b.iface(o.LAN, o.Address, "LAN", o.WAN != "" && !o.DefaultRouteLAN, o.Reconfigure); err != nil {
+		return err
+	}
+	if err := b.dhcp(o); err != nil {
+		return err
+	}
+	if o.WAN != "" {
+		if err := b.iface(o.WAN, o.WANAddress, "WAN", o.DefaultRouteLAN, o.Reconfigure); err != nil {
+			return err
+		}
+	}
+	in := b.node()
+	routes := b.at(datastore.Elem{Name: "route"})
 	if o.Reconfigure {
-		if err := reconfigureDefaultRoute(tx, instanceID, o.Gateway); err != nil {
+		if err := b.defaultRoute(o.Gateway); err != nil {
 			return err
 		}
 	} else if o.Gateway.IsValid() {
@@ -279,69 +364,68 @@ func bootstrapNetwork(tx *gorm.DB, instanceID uint, o BootstrapOptions) error {
 		if o.Gateway.Is6() {
 			dest = "::/0"
 		}
-		if err := tx.Model(&models.Route{}).Where("instance_id = ? AND destination = ?", instanceID, dest).Count(&n).Error; err != nil {
-			return err
-		}
-		if n == 0 {
-			r := models.Route{InstanceID: instanceID, Destination: dest, Gateway: o.Gateway.String(), Enabled: true, Description: "default route"}
-			if err := prepareRoute(tx, &r, nil); err != nil {
-				return err
-			}
-			if err := tx.Create(&r).Error; err != nil {
+		if !slices.ContainsFunc(in.Lists["route"], func(r *datastore.Node) bool { return r.Leaf("destination") == dest }) {
+			if err := b.create(routes, map[string]any{"destination": dest, "gateway": o.Gateway.String(), "enabled": true, "description": "default route"}); err != nil {
 				return err
 			}
 		}
 	}
 
-	lan, wan := models.StringList{o.LAN}, models.StringList{o.WAN}
-	mgmt, err := bootstrapMgmtService(tx, o)
+	lan, wan := []string{o.LAN}, []string{o.WAN}
+	mgmt, err := b.mgmtService(o)
 	if err != nil {
 		return err
 	}
-	rules := []models.Rule{
-		{Chain: fwconfig.ChainInput, InInterfaces: lan, Services: models.StringList{mgmt}, Description: "management from the LAN"},
-		{Chain: fwconfig.ChainInput, InInterfaces: lan, Services: models.StringList{"all-icmp"}, Description: "ping from the LAN"},
+	type rule struct {
+		chain, desc string
+		in, out     []string
+		services    []string
+	}
+	rules := []rule{
+		{fwconfig.ChainInput, "management from the LAN", lan, nil, []string{mgmt}},
+		{fwconfig.ChainInput, "ping from the LAN", lan, nil, []string{"all-icmp"}},
 	}
 	if o.WAN != "" {
-		rules = append(rules, models.Rule{Chain: fwconfig.ChainForward, InInterfaces: lan, OutInterfaces: wan, Description: "LAN to WAN"})
+		rules = append(rules, rule{fwconfig.ChainForward, "LAN to WAN", lan, wan, nil})
 	}
 	for _, r := range rules {
 		// The input rules are the LAN's way in: reconfigure enables them,
 		// and creates them if missing. The forward rule is created by the
 		// first bootstrap only; reconfigure moves it to the new LAN and WAN.
-		keep := r.Chain == fwconfig.ChainInput
-		if r.OutInterfaces == nil {
-			r.OutInterfaces = models.StringList{}
+		keep := r.chain == fwconfig.ChainInput
+		var same []*datastore.Node
+		for _, e := range b.node().Lists["rule"] {
+			if e.Leaf("chain") == r.chain && e.Leaf("description") == r.desc {
+				same = append(same, e)
+			}
 		}
-		same := func() *gorm.DB {
-			return tx.Model(&models.Rule{}).Where("instance_id = ? AND chain = ? AND description = ?", instanceID, r.Chain, r.Description)
-		}
-		if err := same().Count(&n).Error; err != nil {
-			return err
-		}
-		if n > 0 {
+		if len(same) > 0 {
 			if !o.Reconfigure {
 				continue
 			}
 			// The rules follow the (new) LAN and WAN.
-			updates := map[string]any{"in_interfaces": r.InInterfaces, "out_interfaces": r.OutInterfaces}
-			if keep {
-				updates["enabled"] = true
-			}
-			if err := same().Updates(updates).Error; err != nil {
-				return err
+			for _, e := range same {
+				leaves := map[string]any{"in-interfaces": r.in, "out-interfaces": r.out}
+				if keep {
+					leaves["enabled"] = true
+				}
+				if err := b.set(datastore.PathOf(e), leaves); err != nil {
+					return err
+				}
 			}
 			continue
 		}
 		if o.Reconfigure && !keep {
 			continue
 		}
-		r.InstanceID, r.Action, r.Enabled = instanceID, fwconfig.ActionAccept, true
-		r.SrcAddrs, r.DstAddrs = models.StringList{}, models.StringList{}
-		if err := prepareRule(tx, &r, nil); err != nil {
-			return err
+		entry := map[string]any{"chain": r.chain, "in-interfaces": r.in, "description": r.desc, "action": fwconfig.ActionAccept, "enabled": true}
+		if r.out != nil {
+			entry["out-interfaces"] = r.out
 		}
-		if err := tx.Create(&r).Error; err != nil {
+		if r.services != nil {
+			entry["services"] = r.services
+		}
+		if err := b.create(b.at(datastore.Elem{Name: "rule"}), entry); err != nil {
 			return err
 		}
 	}
@@ -351,205 +435,184 @@ func bootstrapNetwork(tx *gorm.DB, instanceID uint, o BootstrapOptions) error {
 	}
 	// The LAN reaches the Internet through the WAN's address.
 	const natDesc = "masquerade to the WAN"
-	masq := func() *gorm.DB {
-		return tx.Model(&models.NatRule{}).Where("instance_id = ? AND kind = ? AND description = ?", instanceID, fwconfig.NATMasquerade, natDesc)
-	}
-	if err := masq().Count(&n).Error; err != nil {
-		return err
+	var masq []*datastore.Node
+	for _, e := range b.node().Lists["nat-rule"] {
+		if e.Leaf("kind") == fwconfig.NATMasquerade && e.Leaf("description") == natDesc {
+			masq = append(masq, e)
+		}
 	}
 	switch {
-	case n > 0 && o.Reconfigure:
-		return masq().Update("out_interfaces", wan).Error
-	case n > 0 || o.Reconfigure:
+	case len(masq) > 0 && o.Reconfigure:
+		for _, e := range masq {
+			if err := b.set(datastore.PathOf(e), map[string]any{"out-interfaces": wan}); err != nil {
+				return err
+			}
+		}
+		return nil
+	case len(masq) > 0 || o.Reconfigure:
 		return nil
 	}
-	nat := models.NatRule{InstanceID: instanceID, Kind: fwconfig.NATMasquerade, InInterfaces: models.StringList{}, OutInterfaces: wan,
-		SrcAddrs: models.StringList{}, DstAddrs: models.StringList{}, Enabled: true, Description: natDesc}
-	if err := prepareNat(tx, &nat, nil); err != nil {
-		return err
-	}
-	return tx.Create(&nat).Error
+	return b.create(b.at(datastore.Elem{Name: "nat-rule"}), map[string]any{"kind": fwconfig.NATMasquerade, "out-interfaces": wan, "enabled": true, "description": natDesc})
 }
 
-// bootstrapDHCP serves the DHCP range on the LAN prefix (bootstrapIface
-// created it, or the user did), with the default gateway, and turns the
-// instance's DHCP server on.
-func bootstrapDHCP(tx *gorm.DB, instanceID uint, o BootstrapOptions) error {
+// dhcp serves the DHCP range on the LAN prefix (iface created it, or the
+// user did), with the default gateway, and turns the instance's DHCP
+// server on.
+func (b *bootTree) dhcp(o BootstrapOptions) error {
 	if !o.DHCPStart.IsValid() {
 		return nil
 	}
-	if err := tx.Model(&models.Instance{}).Where("id = ?", instanceID).Update("dhcp_enabled", true).Error; err != nil {
-		return err
-	}
-	// Clients get the domain of the zone that holds fw (bootstrapDNS), so
+	leaves := map[string]any{"dhcp-enabled": true}
+	// Clients get the domain of the zone that holds fw (dns), so
 	// https://fw reaches the GUI; a domain the user set stays.
-	if err := tx.Model(&models.Instance{}).Where("id = ? AND dhcp_domain_name = ''", instanceID).
-		Update("dhcp_domain_name", bootstrapZone).Error; err != nil {
+	if b.node().Leaf("dhcp-domain-name") == "" {
+		leaves["dhcp-domain-name"] = bootstrapZone
+	}
+	if err := b.set(b.inst, leaves); err != nil {
 		return err
 	}
-	var p models.IpamPrefix
-	if err := tx.Where("instance_id = ? AND prefix = ?", instanceID, o.Address.Masked().String()).First(&p).Error; err != nil {
-		return err
+	prefix := o.Address.Masked().String()
+	at := b.at(datastore.Elem{Name: "ipam-prefix", Keys: []string{prefix}})
+	if p, _, _ := b.work.Find(at); p == nil {
+		return bad(fmt.Sprintf("there is no prefix %s in IPAM", prefix))
 	}
-	old := p
-	p.DhcpEnabled, p.DhcpRangeStart, p.DhcpRangeEnd = true, o.DHCPStart.String(), o.DHCPEnd.String()
+	leaves = map[string]any{"dhcp-enabled": true, "dhcp-range-start": o.DHCPStart.String(), "dhcp-range-end": o.DHCPEnd.String()}
 	if len(o.DHCPDNS) > 0 {
-		p.DhcpDnsServers = models.StringList{}
+		var dns []string
 		for _, a := range o.DHCPDNS {
-			p.DhcpDnsServers = append(p.DhcpDnsServers, a.String())
+			dns = append(dns, a.String())
 		}
+		leaves["dhcp-dns-servers"] = dns
 	}
-	if err := prepareIpamPrefix(tx, &p, &old); err != nil {
-		return err
-	}
-	return tx.Save(&p).Error
+	return b.set(at, leaves)
 }
 
 // bootstrapZone is the zone bootstrap creates, and the DHCP domain.
 const bootstrapZone = "home.arpa"
 
-// bootstrapDNS creates a starting point for DNS where there is none: the
-// SOA template soa-1, the DNS template dns-1 with the firewall as
+// dns creates a starting point for DNS where there is none: the SOA
+// template soa-1, the DNS template dns-1 with the firewall as
 // ns1.home.arpa (at the LAN address, if static), and the zone home.arpa,
-// with the firewall as fw.home.arpa (bootstrapFwRecord). The templates
-// are the instance's, global.
-func bootstrapDNS(tx *gorm.DB, instanceID uint, o BootstrapOptions) error {
-	var n int64
-	var soa models.DnsSoaTemplate
-	if err := tx.Where("instance_id = ?", instanceID).Order("id").Limit(1).Find(&soa).Error; err != nil {
-		return err
-	}
-	if soa.ID == 0 {
-		soa = models.DnsSoaTemplate{InstanceID: instanceID, Global: true, Name: "soa-1", Mname: "ns1.home.arpa", Rname: "unknown@home.arpa",
-			Refresh: 86400, Retry: 7200, Expire: 3600000, Minimum: 3600}
-		if err := prepareDnsSoaTemplate(tx, &soa, nil); err != nil {
-			return err
-		}
-		soa.Mname += "." // prepare trims the dot; the default is shown fully qualified
-		if err := tx.Create(&soa).Error; err != nil {
+// with the firewall as fw.home.arpa (fwRecord). The templates are the
+// instance's, global.
+func (b *bootTree) dns(o BootstrapOptions) error {
+	in := b.node()
+	soa := ""
+	if l := in.Lists["dns-soa-template"]; len(l) > 0 {
+		soa = l[0].Leaf("name")
+	} else {
+		soa = "soa-1"
+		if err := b.create(b.at(datastore.Elem{Name: "dns-soa-template"}), map[string]any{"name": soa, "global": true,
+			"mname": "ns1.home.arpa.", "rname": "unknown@home.arpa", "refresh": 86400, "retry": 7200, "expire": 3600000, "minimum": 3600}); err != nil {
 			return err
 		}
 	}
-	var tmpl models.DnsTemplate
-	if err := tx.Where("instance_id = ?", instanceID).Order("id").Limit(1).Find(&tmpl).Error; err != nil {
-		return err
-	}
-	if tmpl.ID == 0 {
-		ns := models.DnsNameserver{Name: "ns1.home.arpa"}
+	tmpl := ""
+	if l := in.Lists["dns-template"]; len(l) > 0 {
+		tmpl = l[0].Leaf("name")
+	} else {
+		tmpl = "dns-1"
+		ns := map[string]any{"name": "ns1.home.arpa.", "address": ""}
 		if o.Address.IsValid() {
-			ns.Address = o.Address.Addr().String()
+			ns["address"] = o.Address.Addr().String()
 		}
-		tmpl = models.DnsTemplate{InstanceID: instanceID, Global: true, Name: "dns-1", SoaTemplateID: soa.ID, DefaultTtl: 3600, Nameservers: models.DnsNameserverList{ns}}
-		if err := prepareDnsTemplate(tx, &tmpl, nil); err != nil {
-			return err
-		}
-		for i := range tmpl.Nameservers {
-			tmpl.Nameservers[i].Name += "."
-		}
-		if err := tx.Create(&tmpl).Error; err != nil {
+		if err := b.create(b.at(datastore.Elem{Name: "dns-template"}), map[string]any{"name": tmpl, "global": true,
+			"soa-template": soa, "default-ttl": 3600, "nameserver": []any{ns}}); err != nil {
 			return err
 		}
 	}
-	if err := tx.Model(&models.DnsZone{}).Where("instance_id = ?", instanceID).Count(&n).Error; err != nil {
-		return err
-	}
-	if n == 0 {
-		z := models.DnsZone{InstanceID: instanceID, Name: bootstrapZone, Type: fwconfig.ZoneForward, DnsTemplateID: &tmpl.ID}
-		if err := prepareDnsZone(tx, &z, nil); err != nil {
-			return err
-		}
-		if err := tx.Create(&z).Error; err != nil {
+	if len(in.Lists["dns-zone"]) == 0 {
+		if err := b.create(b.at(datastore.Elem{Name: "dns-zone"}), map[string]any{"name": bootstrapZone, "type": fwconfig.ZoneForward, "dns-template": tmpl}); err != nil {
 			return err
 		}
 	}
-	return bootstrapFwRecord(tx, instanceID, o)
+	return b.fwRecord(o)
 }
 
-// bootstrapFwRecord points fw.home.arpa at the static IPv4 LAN address,
-// if the instance has the zone home.arpa: it creates the A record, or
-// moves it to the new address on reconfigure.
-func bootstrapFwRecord(tx *gorm.DB, instanceID uint, o BootstrapOptions) error {
+// fwRecord points fw.home.arpa at the static IPv4 LAN address, if the
+// instance has the zone home.arpa: it creates the A record, or moves it
+// to the new address on reconfigure.
+func (b *bootTree) fwRecord(o BootstrapOptions) error {
 	if !o.Address.IsValid() || !o.Address.Addr().Is4() {
 		return nil
 	}
-	var z models.DnsZone
-	if err := tx.Where("instance_id = ? AND name = ? AND type = ?", instanceID, bootstrapZone, fwconfig.ZoneForward).Limit(1).Find(&z).Error; err != nil || z.ID == 0 {
-		return err
-	}
-	var r models.DnsRecord
-	if err := tx.Where("zone_id = ? AND name = ? AND type = ?", z.ID, "fw", "A").Order("id").Limit(1).Find(&r).Error; err != nil {
-		return err
-	}
-	if r.ID != 0 && !o.Reconfigure {
+	z := b.node().Entry("dns-zone", []string{bootstrapZone})
+	if z == nil || z.Leaf("type") != fwconfig.ZoneForward {
 		return nil
 	}
-	if r.ID == 0 {
-		var rank int
-		if err := tx.Model(&models.DnsRecord{}).Where("zone_id = ?", z.ID).Select("COALESCE(MAX(rank), 0)").Scan(&rank).Error; err != nil {
-			return err
+	var rec *datastore.Node
+	for _, r := range z.Lists["record"] {
+		if r.Leaf("name") == "fw" && r.Leaf("type") == "A" && (rec == nil || atoiLeaf(r, "id") < atoiLeaf(rec, "id")) {
+			rec = r
 		}
-		r = models.DnsRecord{ZoneID: z.ID, Rank: rank + 1, Name: "fw", Type: "A", Description: "the firewall (the GUI)"}
 	}
-	r.Value = o.Address.Addr().String()
-	if err := prepareDnsRecord(tx, &r, nil); err != nil {
-		return err
+	addr := o.Address.Addr().String()
+	switch {
+	case rec != nil && !o.Reconfigure:
+		return nil
+	case rec != nil:
+		return b.set(datastore.PathOf(rec), map[string]any{"value": addr})
 	}
-	return tx.Save(&r).Error
+	return b.create(append(datastore.PathOf(z), datastore.Elem{Name: "record"}), map[string]any{"name": "fw", "type": "A", "value": addr, "description": "the firewall (the GUI)"})
 }
 
-// bootstrapMgmtService returns the name of the management service: SSH and
-// the GUI port (when portitor-web runs here), kept at the port on reconfigure.
-func bootstrapMgmtService(tx *gorm.DB, o BootstrapOptions) (string, error) {
-	ports := models.ServicePortList{{Protocol: "tcp", DstLo: 22}}
-	if o.GUIPort > 0 && o.GUIPort != 22 {
-		ports = append(ports, models.ServicePort{Protocol: "tcp", DstLo: o.GUIPort})
+func atoiLeaf(n *datastore.Node, leaf string) int {
+	v, _ := strconv.Atoi(n.Leaf(leaf))
+	return v
+}
+
+// mgmtService returns the name of the management service: SSH and the
+// GUI port (when portitor-web runs here), kept at the port on reconfigure.
+func (b *bootTree) mgmtService(o BootstrapOptions) (string, error) {
+	const name = "portitor-mgmt"
+	port := func(p int) map[string]any {
+		return map[string]any{"protocol": "tcp", "dst-lo": p, "dst-hi": 0, "src-lo": 0, "src-hi": 0}
 	}
-	gui := models.Service{Name: "portitor-mgmt", Type: models.ServiceTypePorts, Description: "Portitor management: SSH and the GUI",
-		Ports: ports}
-	var old models.Service
-	switch err := tx.Where("name = ?", gui.Name).First(&old).Error; {
-	case errors.Is(err, gorm.ErrRecordNotFound):
-		if err := prepareService(tx, &gui, nil); err != nil {
-			return "", err
-		}
-		if err := tx.Create(&gui).Error; err != nil {
-			return "", err
-		}
+	ports := []map[string]any{port(22)}
+	if o.GUIPort > 0 && o.GUIPort != 22 {
+		ports = append(ports, port(o.GUIPort))
+	}
+	at := datastore.Path{{Name: "service", Keys: []string{name}}}
+	switch old, _, err := b.work.Find(at); {
 	case err != nil:
 		return "", err
+	case old == nil:
+		return name, b.create(datastore.Path{{Name: "service"}}, map[string]any{"name": name, "type": models.ServiceTypePorts,
+			"description": "Portitor management: SSH and the GUI", "port": ports})
 	case o.Reconfigure:
-		if err := tx.Model(&old).Update("ports", gui.Ports).Error; err != nil {
+		body, err := json.Marshal(ports)
+		if err != nil {
 			return "", err
 		}
+		return name, b.work.EditJSON(append(at, datastore.Elem{Name: "port"}), datastore.EditReplace, body)
 	}
-	return gui.Name, nil
+	return name, nil
 }
 
-// reconfigureDefaultRoute makes gw the only IPv4 default route, or removes
-// them when gw is not valid (a DHCP WAN brings its own).
-func reconfigureDefaultRoute(tx *gorm.DB, instanceID uint, gw netip.Addr) error {
-	var routes []models.Route
-	if err := tx.Where("instance_id = ? AND destination IN ?", instanceID, []string{"0.0.0.0/0", "default"}).Order("id").Find(&routes).Error; err != nil {
-		return err
+// defaultRoute makes gw the only IPv4 default route, or removes them
+// when gw is not valid (a DHCP WAN brings its own).
+func (b *bootTree) defaultRoute(gw netip.Addr) error {
+	var routes []*datastore.Node
+	for _, r := range b.node().Lists["route"] {
+		if d := r.Leaf("destination"); d == "0.0.0.0/0" || d == "default" {
+			routes = append(routes, r)
+		}
 	}
+	slices.SortFunc(routes, func(x, y *datastore.Node) int { return atoiLeaf(x, "id") - atoiLeaf(y, "id") })
 	kept := false
 	for _, r := range routes {
-		if r.Destination == "default" {
-			if a, err := netip.ParseAddr(r.Gateway); err != nil || !a.Is4() {
+		if r.Leaf("destination") == "default" {
+			if a, err := netip.ParseAddr(r.Leaf("gateway")); err != nil || !a.Is4() {
 				continue
 			}
 		}
 		if !gw.IsValid() || kept {
-			if err := tx.Delete(&r).Error; err != nil {
+			if err := b.work.Delete(datastore.PathOf(r)); err != nil {
 				return err
 			}
 			continue
 		}
-		r.Destination, r.Gateway, r.InterfaceID, r.Enabled = "0.0.0.0/0", gw.String(), nil, true
-		if err := prepareRoute(tx, &r, nil); err != nil {
-			return err
-		}
-		if err := tx.Save(&r).Error; err != nil {
+		if err := b.set(datastore.PathOf(r), map[string]any{"destination": "0.0.0.0/0", "gateway": gw.String(), "interface": "", "enabled": true}); err != nil {
 			return err
 		}
 		kept = true
@@ -557,56 +620,47 @@ func reconfigureDefaultRoute(tx *gorm.DB, instanceID uint, gw netip.Addr) error 
 	if !gw.IsValid() || kept {
 		return nil
 	}
-	r := models.Route{InstanceID: instanceID, Destination: "0.0.0.0/0", Gateway: gw.String(), Enabled: true, Description: "default route"}
-	if err := prepareRoute(tx, &r, nil); err != nil {
-		return err
-	}
-	return tx.Create(&r).Error
+	return b.create(b.at(datastore.Elem{Name: "route"}), map[string]any{"destination": "0.0.0.0/0", "gateway": gw.String(), "enabled": true, "description": "default route"})
 }
 
-// bootstrapIface enables an interface, labelled role (LAN or WAN) unless
-// the user labelled it: static with address (its prefix goes into IPAM,
-// described as role), or DHCP when address is not valid, without a default
-// route if noRoute. A static LAN gets DNS listening. With reconfigure, or DHCP, address becomes the
-// interface's only IPv4 address, taken from another interface if need be.
-func bootstrapIface(tx *gorm.DB, instanceID uint, name string, address netip.Prefix, role string, noRoute, reconfigure bool) (*models.Interface, error) {
-	var ifc models.Interface
-	if err := tx.Where("instance_id = ? AND name = ?", instanceID, name).First(&ifc).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, bad(fmt.Sprintf("the agent reports no interface %s", name))
-		}
-		return nil, err
+// iface enables an interface, labelled role (LAN or WAN) unless the user
+// labelled it: static with address (its prefix goes into IPAM, described
+// as role), or DHCP when address is not valid, without a default route if
+// noRoute. A static LAN gets DNS listening. With reconfigure, or DHCP,
+// address becomes the interface's only IPv4 address, taken from another
+// interface if need be.
+func (b *bootTree) iface(name string, address netip.Prefix, role string, noRoute, reconfigure bool) error {
+	ifc := b.node().Entry("interface", []string{name})
+	if ifc == nil {
+		return bad(fmt.Sprintf("the agent reports no interface %s", name))
 	}
-	old := ifc
-	ifc.Enabled = true
-	ifc.DhcpNoDefaultRoute = noRoute
+	leaves := map[string]any{"enabled": true, "dhcp-no-default-route": noRoute}
 	// The role as label, unless the user has labelled the interface; the
 	// description goes if the user has not written one (bootstrap used to
 	// put the role there).
-	switch ifc.Label {
+	switch ifc.Leaf("label") {
 	case "", "LAN", "WAN":
-		ifc.Label = role
+		leaves["label"] = role
 	}
-	switch ifc.Description {
+	switch ifc.Leaf("description") {
 	case "found on the firewall", "LAN", "WAN":
-		ifc.Description = ""
+		leaves["description"] = ""
 	}
 	// The firewall answers DNS on a static LAN, and DHCP hands it out
-	// there, so LAN clients find fw.home.arpa (bootstrapFwRecord).
+	// there, so LAN clients find fw.home.arpa (fwRecord).
 	if role == "LAN" && address.IsValid() {
-		ifc.DnsListen = true
+		leaves["dns-listen"] = true
 	}
 	switch {
 	case !address.IsValid():
-		ifc.Ipv4Mode = fwconfig.ModeDHCP
+		leaves["ipv4-mode"] = fwconfig.ModeDHCP
 	case address.Addr().Is4():
-		ifc.Ipv4Mode = fwconfig.ModeStatic
+		leaves["ipv4-mode"] = fwconfig.ModeStatic
 	}
-
 	// The addresses to keep: with reconfigure or DHCP no other IPv4 one,
 	// and none with the new address's IP (it comes back with its length).
-	addrs := models.StringList{}
-	for _, a := range ifc.Addresses {
+	addrs := []string{}
+	for _, a := range ifc.LeafLists["addresses"] {
 		p, err := netip.ParsePrefix(a)
 		if err != nil || (address.IsValid() && p.Addr() == address.Addr()) ||
 			(p.Addr().Is4() && (reconfigure || !address.IsValid())) {
@@ -616,59 +670,44 @@ func bootstrapIface(tx *gorm.DB, instanceID uint, name string, address netip.Pre
 	}
 	if address.IsValid() {
 		addrs = append(addrs, address.String())
-		if err := takeAddress(tx, &ifc, address.Addr(), reconfigure); err != nil {
-			return nil, err
+		if err := b.takeAddress(name, address.Addr(), reconfigure); err != nil {
+			return err
 		}
 	}
-	ifc.Addresses = addrs
-	if err := prepareInterface(tx, &ifc, &old); err != nil {
-		return nil, err
-	}
-	if err := tx.Save(&ifc).Error; err != nil {
-		return nil, err
-	}
-	if !address.IsValid() {
-		return &ifc, nil
-	}
-
-	prefix := address.Masked().String()
-	var n int64
-	if err := tx.Model(&models.IpamPrefix{}).Where("instance_id = ? AND prefix = ?", instanceID, prefix).Count(&n).Error; err != nil {
-		return nil, err
-	}
-	if n == 0 && !address.IsSingleIP() {
-		p := models.IpamPrefix{InstanceID: instanceID, Prefix: prefix, Description: role, DhcpDnsServers: models.StringList{}}
-		if err := prepareIpamPrefix(tx, &p, nil); err != nil {
-			return nil, err
-		}
-		if err := tx.Create(&p).Error; err != nil {
-			return nil, err
-		}
-	}
-	return &ifc, nil
-}
-
-// takeAddress removes ip from the other interfaces of ifc's instance, with
-// reconfigure; without, an address on another interface is an error.
-func takeAddress(tx *gorm.DB, ifc *models.Interface, ip netip.Addr, reconfigure bool) error {
-	var others []models.Interface
-	if err := tx.Where("instance_id = ? AND id <> ?", ifc.InstanceID, ifc.ID).Find(&others).Error; err != nil {
+	leaves["addresses"] = addrs
+	if err := b.set(datastore.PathOf(ifc), leaves); err != nil {
 		return err
 	}
-	for _, o := range others {
-		keep := models.StringList{}
-		for _, a := range o.Addresses {
+	if !address.IsValid() || address.IsSingleIP() {
+		return nil
+	}
+	prefix := address.Masked().String()
+	if b.node().Entry("ipam-prefix", []string{prefix}) == nil {
+		return b.create(b.at(datastore.Elem{Name: "ipam-prefix"}), map[string]any{"prefix": prefix, "description": role})
+	}
+	return nil
+}
+
+// takeAddress removes ip from the instance's other interfaces than name,
+// with reconfigure; without, an address on another interface is an error.
+func (b *bootTree) takeAddress(name string, ip netip.Addr, reconfigure bool) error {
+	for _, o := range b.node().Lists["interface"] {
+		if o.Leaf("name") == name {
+			continue
+		}
+		keep := []string{}
+		for _, a := range o.LeafLists["addresses"] {
 			if p, err := netip.ParsePrefix(a); err != nil || p.Addr() != ip {
 				keep = append(keep, a)
 			}
 		}
-		if len(keep) == len(o.Addresses) {
+		if len(keep) == len(o.LeafLists["addresses"]) {
 			continue
 		}
 		if !reconfigure {
-			return bad(fmt.Sprintf("%s is on another interface (%s)", ip, o.Name))
+			return bad(fmt.Sprintf("%s is on another interface (%s)", ip, o.Leaf("name")))
 		}
-		if err := tx.Model(&o).Update("addresses", keep).Error; err != nil {
+		if err := b.set(datastore.PathOf(o), map[string]any{"addresses": keep}); err != nil {
 			return err
 		}
 	}

@@ -23,6 +23,7 @@ import (
 	"github.com/abundo/portitor/internal/agentapi"
 	"github.com/abundo/portitor/internal/agentclient"
 	"github.com/abundo/portitor/internal/builder"
+	"github.com/abundo/portitor/internal/datastore"
 	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/internal/ipam"
 	"github.com/abundo/portitor/internal/render"
@@ -422,11 +423,14 @@ func (s *Server) handlePutSettings(c *echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return errJSON(c, http.StatusBadRequest, "invalid request")
 	}
+	// The configuration's settings, as leaves of the tree's.
+	leaves := map[string]any{}
 	if req.ConfirmTimeout != nil {
 		if *req.ConfirmTimeout < 0 || *req.ConfirmTimeout > 1800 {
 			return errJSON(c, http.StatusBadRequest, "confirm timeout must be 0-1800 seconds")
 		}
 		st.ConfirmTimeout = *req.ConfirmTimeout
+		leaves["confirm-timeout"] = st.ConfirmTimeout
 	}
 	if req.WgEndpointHost != nil {
 		h := strings.TrimSpace(*req.WgEndpointHost)
@@ -434,52 +438,70 @@ func (s *Server) handlePutSettings(c *echo.Context) error {
 			return errJSON(c, http.StatusBadRequest, "endpoint host must be a host name or IP address")
 		}
 		st.WgEndpointHost = h
+		leaves["wg-endpoint-host"] = h
 	}
 	if req.CaptureRateKbps != nil {
 		if *req.CaptureRateKbps < 0 || *req.CaptureRateKbps > 10_000_000 {
 			return errJSON(c, http.StatusBadRequest, "capture rate must be 0-10000000 kbit/s")
 		}
 		st.CaptureRateKbps = *req.CaptureRateKbps
+		leaves["capture-rate-kbps"] = st.CaptureRateKbps
 	}
 	if req.VirtualFirewalls != nil {
 		if !*req.VirtualFirewalls && st.VirtualFirewalls {
-			var n, links int64
-			if err := s.db.Model(&models.Instance{}).Where("NOT is_default").Count(&n).Error; err != nil {
+			v, err := s.view(c.Request().Context())
+			if err != nil {
 				return err
 			}
-			if err := s.db.Model(&models.Link{}).Count(&links).Error; err != nil {
-				return err
-			}
-			if n > 0 || links > 0 {
+			vfs := slices.ContainsFunc(v.Instances, func(in models.Instance) bool { return !in.IsDefault })
+			if vfs || len(v.Links) > 0 {
 				return errJSON(c, http.StatusBadRequest, "virtual firewalls can't be turned off while there are any besides the firewalls' hosts, or links")
 			}
 		}
 		st.VirtualFirewalls = *req.VirtualFirewalls
+		leaves["virtual-firewalls"] = st.VirtualFirewalls
 	}
 	if req.TOTPDefault != nil {
 		st.TOTPDefault = *req.TOTPDefault
+		leaves["totp-default"] = st.TOTPDefault
 	}
 	if req.DropIPOptionsInput != nil {
 		st.DropIPOptionsInput = *req.DropIPOptionsInput
+		leaves["drop-ip-options-input"] = st.DropIPOptionsInput
 	}
 	if req.DropIPOptionsForward != nil {
 		st.DropIPOptionsForward = *req.DropIPOptionsForward
+		leaves["drop-ip-options-forward"] = st.DropIPOptionsForward
 	}
 	oldCert := st.WebCertificateID
 	if req.WebCertificateID != nil {
 		st.WebCertificateID = nil
 		if id := *req.WebCertificateID; id != 0 {
-			var cert models.Certificate
-			if err := s.db.First(&cert, id).Error; err != nil {
+			cert, err := s.certificateByID(c.Request().Context(), id)
+			if err != nil {
+				return err
+			}
+			if cert == nil {
 				return errJSON(c, http.StatusBadRequest, "no such certificate")
 			}
-			if err := refuseCA(&cert, "the GUI's certificate"); err != nil {
+			if err := refuseCA(cert, "the GUI's certificate"); err != nil {
 				return errJSON(c, http.StatusBadRequest, err.Error())
 			}
 			st.WebCertificateID = &id
 		}
 	}
-	if err := s.db.Save(st).Error; err != nil {
+	if len(leaves) > 0 {
+		body, err := json.Marshal(leaves)
+		if err != nil {
+			return err
+		}
+		if err := s.editConfig(c.Request().Context(), func(work *datastore.Tree) error {
+			return work.EditJSON(datastore.Path{{Name: "settings"}}, datastore.EditMerge, body)
+		}); err != nil {
+			return configError(c, err)
+		}
+	}
+	if err := s.db.Exec("UPDATE settings SET web_certificate_id = ? WHERE id = 1", st.WebCertificateID).Error; err != nil {
 		return err
 	}
 	if s.webCert != nil && !equalPtr(oldCert, st.WebCertificateID) {

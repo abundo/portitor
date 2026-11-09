@@ -4,52 +4,12 @@
 package web
 
 import (
-	"strings"
-
-	"gorm.io/gorm"
-
-	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/models"
 )
 
 // SNMP, per instance: the instance's snmp_* fields (prepareInstanceSNMP),
 // its interfaces' snmp_serve, and its SNMPv3 users. The community and the
 // users' passwords are write-only.
-
-func prepareInstanceSNMP(tx *gorm.DB, in *models.Instance) error {
-	switch {
-	case in.ClearSnmpCommunity:
-		in.SnmpCommunity = ""
-	case in.NewSnmpCommunity != "":
-		in.SnmpCommunity = in.NewSnmpCommunity
-	}
-	in.NewSnmpCommunity, in.ClearSnmpCommunity = "", false
-	if in.SnmpCommunity != "" {
-		if e := fwconfig.CheckSNMPCommunity(in.SnmpCommunity); e != "" {
-			return bad("SNMP: " + e)
-		}
-	}
-	in.SnmpLocation, in.SnmpContact = strings.TrimSpace(in.SnmpLocation), strings.TrimSpace(in.SnmpContact)
-	if !fwconfig.CheckSNMPText(in.SnmpLocation) || !fwconfig.CheckSNMPText(in.SnmpContact) {
-		return bad("SNMP: location and contact must be one line of at most 255 characters")
-	}
-	in.SnmpAllow = cleanList(in.SnmpAllow)
-	if err := checkEntries(tx, "SNMP allowed clients", in.SnmpAllow, entryCIDR); err != nil {
-		return err
-	}
-	if in.SnmpEnabled && in.SnmpCommunity == "" {
-		var n int64
-		if in.ID != 0 {
-			if err := tx.Model(&models.SnmpUser{}).Where("instance_id = ? AND enabled", in.ID).Count(&n).Error; err != nil {
-				return err
-			}
-		}
-		if n == 0 {
-			return bad("SNMP: set a community (SNMPv2c) or add an SNMPv3 user first")
-		}
-	}
-	return nil
-}
 
 func presentInstance(in *models.Instance) {
 	in.HasSnmpCommunity = in.SnmpCommunity != ""

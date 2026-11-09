@@ -51,10 +51,6 @@ type configAction struct {
 	write bool
 	// create: a change that makes the entry when it isn't there.
 	create bool
-	// legacy: a change made by a handler of the CRUD's time in the tables,
-	// read into the candidate after (the tables hold it until the API is
-	// all on the tree).
-	legacy bool
 	run    func(s *Server, c *echo.Context, a *actionCtx) error
 }
 
@@ -122,7 +118,7 @@ func (s *Server) runAction(c *echo.Context, ds string, p datastore.Path, name st
 	if a.write && !acc.CanWrite(p) {
 		return errJSON(c, http.StatusForbidden, "you may not change "+p.String(tree.Root.S))
 	}
-	if a.view || a.op || a.legacy {
+	if a.view || a.op {
 		find, list := p, false
 		if a.view && len(p) > 0 && p[len(p)-1].Keys == nil {
 			find, list = p[:len(p)-1], true
@@ -131,13 +127,7 @@ func (s *Server) runAction(c *echo.Context, ds string, p datastore.Path, name st
 		if err != nil || n == nil {
 			return errJSON(c, http.StatusNotFound, "not found")
 		}
-		err = a.run(s, c, &actionCtx{tree: tree, path: p, entry: n, body: body, list: list})
-		if r, rerr := echo.UnwrapResponse(c.Response()); a.legacy && err == nil && rerr == nil && r.Status < 300 {
-			if serr := s.syncFromTables(ctx); serr != nil {
-				return serr
-			}
-		}
-		return err
+		return a.run(s, c, &actionCtx{tree: tree, path: p, entry: n, body: body, list: list})
 	}
 	if ds != "candidate" {
 		return errJSON(c, http.StatusMethodNotAllowed, "only the candidate can be changed")
@@ -190,24 +180,18 @@ func (s *Server) runAction(c *echo.Context, ds string, p datastore.Path, name st
 // errNoChange ends an Edit that changed nothing.
 var errNoChange = errors.New("no change")
 
-// delegate is an action done by a handler of the CRUD's time, which takes
-// the entry's row id as its :id: the tables hold the candidate (they are
-// kept in step with it until the API is all on the tree).
+// delegate is an action done by a handler that takes the entry's id
+// (sqlmap.IDs) as its :id.
 func delegate(h echo.HandlerFunc) func(s *Server, c *echo.Context, a *actionCtx) error {
 	return func(s *Server, c *echo.Context, a *actionCtx) error {
-		t, err := s.tree()
+		id, ok, err := s.entryID(c.Request().Context(), a.path)
 		if err != nil {
 			return err
 		}
-		tables, idx, err := t.mapping.Import(s.db)
-		if err != nil {
-			return err
-		}
-		n, _, err := tables.Find(a.path)
-		if err != nil || n == nil {
+		if !ok {
 			return errJSON(c, http.StatusNotFound, "not found")
 		}
-		c.SetPathValues(echo.PathValues{{Name: "id", Value: fmt.Sprint(idx[n])}})
+		c.SetPathValues(echo.PathValues{{Name: "id", Value: fmt.Sprint(id)}})
 		c.Request().Body = io.NopCloser(bytes.NewReader(a.body))
 		return h(c)
 	}

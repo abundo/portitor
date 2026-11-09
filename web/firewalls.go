@@ -7,10 +7,12 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -18,6 +20,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/abundo/portitor/internal/agentapi"
+	"github.com/abundo/portitor/internal/datastore"
 	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/models"
 )
@@ -31,11 +34,6 @@ func prepareFirewall(tx *gorm.DB, f, old *models.Firewall) error {
 	f.Name = strings.TrimSpace(f.Name)
 	if !fwconfig.ValidDefaultInstanceName(f.Name) {
 		return bad("name: letters, digits, '-', '_' and '.', starting with a letter or digit, at most 63 characters")
-	}
-	if old == nil {
-		if err := instanceNameFree(tx, f.Name); err != nil {
-			return err
-		}
 	}
 	f.Description = strings.TrimSpace(f.Description)
 	f.AgentURL = strings.TrimRight(strings.TrimSpace(f.AgentURL), "/")
@@ -108,7 +106,13 @@ func (s *Server) prepareFirewallHere(tx *gorm.DB, f, old *models.Firewall) error
 	if s.cfg.Local && old == nil && f.HAPrimaryID == nil {
 		return bad("portitor-config deploys to its own firewall (and its HA secondary); other firewalls are a manager's")
 	}
-	return prepareFirewall(tx, f, old)
+	if err := prepareFirewall(tx, f, old); err != nil {
+		return err
+	}
+	if old == nil {
+		return s.instanceNameFree(f.Name)
+	}
+	return nil
 }
 
 func normalizeFingerprint(fp string) string {
@@ -122,136 +126,86 @@ func presentFirewall(f *models.Firewall) {
 
 // instanceNameFree refuses a firewall name that a virtual firewall has:
 // the firewall's default instance takes its name.
-func instanceNameFree(tx *gorm.DB, name string) error {
-	var n int64
-	if err := tx.Model(&models.Instance{}).Where("name = ?", name).Count(&n).Error; err != nil {
+func (s *Server) instanceNameFree(name string) error {
+	v, err := s.view(context.Background())
+	if err != nil {
 		return err
 	}
-	if n > 0 {
-		return bad(fmt.Sprintf("name: a virtual firewall is named %s", name))
+	for _, in := range v.Instances {
+		if in.Name == name {
+			return bad(fmt.Sprintf("name: a virtual firewall is named %s", name))
+		}
 	}
 	return nil
 }
 
-// createFirewallInstance adds the new firewall's default instance; an HA
-// secondary runs its primary's.
-func createFirewallInstance(tx *gorm.DB, f *models.Firewall) error {
+// firewallSaved gives a new firewall its default instance (an HA
+// secondary runs its primary's), and makes the configuration's names of a
+// renamed one follow it.
+func (s *Server) firewallSaved(c *echo.Context, f, old *models.Firewall) error {
+	ctx := c.Request().Context()
+	if old != nil {
+		return s.renameExternal(ctx, "firewalls", old.Name, f.Name)
+	}
 	if f.HAPrimaryID != nil {
 		return nil
 	}
-	return createDefaultInstance(tx, f.ID, f.Name)
+	return s.addDefaultInstance(ctx, f.Name, f.Name)
 }
 
-// createDefaultInstance creates a firewall's default instance. It logs the
-// policy drops of all three chains, so a new host shows what it drops.
-func createDefaultInstance(tx *gorm.DB, firewallID uint, name string) error {
-	in := models.Instance{Name: name, FirewallID: firewallID,
-		LogDrops: models.StringList{fwconfig.ChainInput, fwconfig.ChainForward, fwconfig.ChainOutput}}
-	if err := prepareInstance(tx, &in, nil); err != nil {
+// addDefaultInstance makes the candidate's default instance of the
+// firewall named firewall, named name. It logs the policy drops of all
+// three chains, so a new host shows what it drops.
+func (s *Server) addDefaultInstance(ctx context.Context, firewall, name string) error {
+	body, err := json.Marshal(map[string]any{
+		"name": name, "firewall": firewall, "is-default": true,
+		"log-drops": []string{fwconfig.ChainInput, fwconfig.ChainForward, fwconfig.ChainOutput},
+	})
+	if err != nil {
 		return err
 	}
-	if !in.IsDefault {
-		return fmt.Errorf("firewall %d already has a default instance", firewallID)
-	}
-	if err := tx.Create(&in).Error; err != nil {
-		return err
-	}
-	return seedInstance(tx, &in)
+	return s.editConfig(ctx, func(work *datastore.Tree) error {
+		for _, in := range work.Root.Lists["instance"] {
+			if in.Leaf("firewall") == firewall && in.Leaf("is-default") == "true" {
+				return fmt.Errorf("firewall %s already has a default instance", firewall)
+			}
+		}
+		return work.EditJSON(datastore.Path{{Name: "instance"}}, datastore.EditCreate, body)
+	})
 }
 
 // deleteFirewall refuses to delete the last firewall, or one with
-// virtual firewalls besides its host; the host's instance goes with it.
-func deleteFirewall(tx *gorm.DB, f *models.Firewall) error {
+// virtual firewalls besides its host, and takes its host and tasks out of
+// the candidate.
+func (s *Server) deleteFirewall(c *echo.Context, f *models.Firewall) error {
 	var n int64
-	if err := tx.Model(&models.Firewall{}).Count(&n).Error; err != nil {
+	if err := s.db.Model(&models.Firewall{}).Count(&n).Error; err != nil {
 		return err
 	}
 	if n <= 1 {
 		return bad("the only firewall can't be deleted")
 	}
 	var secondary models.Firewall
-	if err := tx.Where("ha_primary_id = ?", f.ID).First(&secondary).Error; err == nil {
+	if err := s.db.Where("ha_primary_id = ?", f.ID).First(&secondary).Error; err == nil {
 		return bad(fmt.Sprintf("%s is the HA primary of %s; delete that first", f.Name, secondary.Name))
 	}
-	var instances []models.Instance
-	if err := tx.Where("firewall_id = ?", f.ID).Find(&instances).Error; err != nil {
-		return err
-	}
-	for _, in := range instances {
-		if !in.IsDefault {
-			return bad(fmt.Sprintf("virtual firewall %s is on %s; move or delete it first", in.Name, f.Name))
-		}
-	}
-	for _, in := range instances {
-		if err := deleteInstanceRows(tx, &in); err != nil {
-			return err
-		}
-		if err := tx.Delete(&in).Error; err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// prepareInstanceFirewall puts a new instance on a firewall (the first
-// one unless it names one) and makes it that firewall's default instance
-// if it has none. An instance with links stays on its firewall, and the
-// default one, the host itself, never moves.
-func prepareInstanceFirewall(tx *gorm.DB, in, old *models.Instance) error {
-	if in.FirewallID == 0 {
-		if old != nil {
-			in.FirewallID = old.FirewallID
-		} else {
-			id, err := firstFirewallID(tx)
-			if err != nil {
-				return err
+	return s.editConfig(c.Request().Context(), func(work *datastore.Tree) error {
+		for _, in := range work.Root.Lists["instance"] {
+			if in.Leaf("firewall") == f.Name && in.Leaf("is-default") != "true" {
+				return bad(fmt.Sprintf("virtual firewall %s is on %s; move or delete it first", in.Leaf("name"), f.Name))
 			}
-			in.FirewallID = id
 		}
-	}
-	var fw models.Firewall
-	if err := tx.First(&fw, in.FirewallID).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return bad("firewall: no such firewall")
-		}
-		return err
-	}
-	if fw.HAPrimaryID != nil {
-		return bad("firewall: " + fw.Name + " is an HA secondary; it runs its primary's virtual firewalls")
-	}
-	if old != nil {
-		in.IsDefault = old.IsDefault
-		if in.FirewallID == old.FirewallID {
-			return nil
-		}
-		if old.IsDefault {
-			return bad("the default virtual firewall is its firewall's host and can't move")
-		}
-		var links int64
-		if err := tx.Model(&models.Link{}).Where("instance_a_id = ? OR instance_b_id = ?", in.ID, in.ID).Count(&links).Error; err != nil {
-			return err
-		}
-		if links > 0 {
-			return bad("a virtual firewall with links can't move to another firewall; delete its links first")
+		for _, list := range []string{"instance", "task"} {
+			for _, e := range slices.Clone(work.Root.Lists[list]) {
+				if e.Leaf("firewall") == f.Name {
+					if err := work.Delete(datastore.PathOf(e)); err != nil {
+						return err
+					}
+				}
+			}
 		}
 		return nil
-	}
-	var n int64
-	if err := tx.Model(&models.Instance{}).Where("firewall_id = ? AND is_default", in.FirewallID).Count(&n).Error; err != nil {
-		return err
-	}
-	in.IsDefault = n == 0
-	if in.IsDefault {
-		return nil
-	}
-	var st models.Settings
-	if err := tx.Select("virtual_firewalls").First(&st, 1).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		return err
-	}
-	if !st.VirtualFirewalls {
-		return bad("virtual firewalls are turned off (Settings)")
-	}
-	return nil
+	})
 }
 
 // firstFirewallID is the firewall the installation started with, or the

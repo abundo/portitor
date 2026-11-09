@@ -230,3 +230,32 @@ func (m *Mapping) KeepIDs(tx *gorm.DB, idx Index) error {
 	}
 	return nil
 }
+
+// RenameExternal makes the leaves of tree that name the row old of table
+// (px:external: a firewall, a role) name new; it reports whether any did.
+func (m *Mapping) RenameExternal(tree *datastore.Tree, tbl, old, new string) bool {
+	changed := false
+	m.walkEntries(tree.Root, func(e *datastore.Node, t *table) {
+		for _, c := range t.cols {
+			if c.kind == external && c.external == tbl && e.Leaves[c.leaf.Name] == old {
+				e.Leaves[c.leaf.Name] = new
+				changed = true
+			}
+		}
+	})
+	return changed
+}
+
+// NamesExternal reports whether a leaf of tree names the row name of
+// table (px:external), and where: the path of the first.
+func (m *Mapping) NamesExternal(tree *datastore.Tree, tbl, name string) (string, bool) {
+	where := ""
+	m.walkEntries(tree.Root, func(e *datastore.Node, t *table) {
+		for _, c := range t.cols {
+			if where == "" && c.kind == external && c.external == tbl && e.Leaves[c.leaf.Name] == name {
+				where = pathKey(m.root, e)
+			}
+		}
+	})
+	return where, where != ""
+}

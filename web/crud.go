@@ -39,6 +39,11 @@ type resource[T any, PT model[T]] struct {
 	// afterCreate runs after a new row is inserted (it has its id), inside
 	// the save transaction.
 	afterCreate func(tx *gorm.DB, item PT) error
+	// afterSave runs after the change is committed, and preDelete before
+	// a delete's transaction: what they change in the configuration (the
+	// candidate), which is not in the transaction.
+	afterSave func(c *echo.Context, item, old PT) error
+	preDelete func(c *echo.Context, item PT) error
 	// present adjusts rows before they are returned (derived fields).
 	present func(item PT)
 	// beforeDelete may refuse a delete, inside the delete transaction.
@@ -231,6 +236,9 @@ func (r *resource[T, PT]) save(c *echo.Context, item, old PT, status int) error 
 		}
 		return tx.Save(item).Error
 	})
+	if err == nil && r.afterSave != nil {
+		err = r.afterSave(c, item, old)
+	}
 	if err != nil {
 		return dbError(c, err)
 	}
@@ -244,6 +252,14 @@ func (r *resource[T, PT]) remove(c *echo.Context) error {
 	item, err := r.load(c)
 	if item == nil {
 		return err
+	}
+	if r.preDelete != nil {
+		if err := r.checkWrite(c, r.db, item, nil); err != nil {
+			return dbError(c, err)
+		}
+		if err := r.preDelete(c, item); err != nil {
+			return dbError(c, err)
+		}
 	}
 	err = r.db.Transaction(func(tx *gorm.DB) error {
 		if err := r.checkWrite(c, tx, item, nil); err != nil {

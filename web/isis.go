@@ -4,8 +4,6 @@
 package web
 
 import (
-	"gorm.io/gorm"
-
 	"github.com/abundo/portitor/models"
 )
 
@@ -22,19 +20,4 @@ func presentIsisConfig(c *models.IsisConfig) {
 func presentIsisInterface(i *models.IsisInterface) {
 	i.HasPassword = i.Password != ""
 	i.NewPassword, i.ClearPassword = "", false
-}
-
-// isisIfaceUsers lists IS-IS when it runs on the interface named name.
-func isisIfaceUsers(tx *gorm.DB, instanceID uint, name string) []string {
-	var users []string
-	var n int64
-	tx.Model(&models.IsisInterface{}).Where("instance_id = ? AND name = ?", instanceID, name).Count(&n)
-	if n > 0 {
-		users = append(users, "IS-IS")
-	}
-	tx.Model(&models.IsisConfig{}).Where("instance_id = ? AND net_interface = ?", instanceID, name).Count(&n)
-	if n > 0 {
-		users = append(users, "IS-IS's NET")
-	}
-	return users
 }

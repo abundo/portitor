@@ -6,7 +6,6 @@ package web
 import (
 	"fmt"
 	"net/http"
-	"net/netip"
 	"slices"
 	"strings"
 
@@ -22,125 +21,6 @@ import (
 // (ovpn_* fields, prepareOpenVPN). Its users are the directory's
 // (directory.go). The tls-crypt key is generated here and never shown,
 // but in the client config.
-
-func prepareOpenVPN(tx *gorm.DB, i, old *models.Interface) error {
-	if i.Ipv4Mode == fwconfig.ModeDHCP {
-		return bad("OpenVPN interfaces have static addresses")
-	}
-	// Both hosts of an HA pair have the same.
-	i.PeerAddresses = models.StringList{}
-	if i.OvpnTlsCrypt == "" {
-		key, err := fwconfig.GenerateOpenVPNKey()
-		if err != nil {
-			return err
-		}
-		i.OvpnTlsCrypt = key
-	}
-	if i.OvpnMode == "" {
-		i.OvpnMode = fwconfig.OpenVPNAdaptive
-	}
-	if err := oneOf("mode", i.OvpnMode, fwconfig.OpenVPNModes...); err != nil {
-		return err
-	}
-	if !slices.Contains(fwconfig.OpenVPNTwoFactors, i.OvpnTwoFactor) {
-		return bad("two-factor login must be off (empty), user or required")
-	}
-	if i.OvpnPort == 0 {
-		i.OvpnPort = fwconfig.OpenVPNPort
-	}
-	if i.OvpnPort < 1 || i.OvpnPort > 65535 {
-		return bad("port must be 1-65535")
-	}
-	var others int64
-	if err := tx.Model(&models.Interface{}).Where("instance_id = ? AND kind = ? AND id <> ?", i.InstanceID, fwconfig.KindOpenVPN, i.ID).Count(&others).Error; err != nil {
-		return err
-	}
-	if others > 0 {
-		return bad("a virtual firewall has one OpenVPN interface")
-	}
-	tcpAddrs, err := ifaceAddrs("TCP tunnel addresses", i.OvpnTcpAddresses, false)
-	if err != nil {
-		return err
-	}
-	i.OvpnTcpAddresses = tcpAddrs
-	if i.OvpnMode != fwconfig.OpenVPNAdaptive {
-		tcpAddrs = nil // kept for the adaptive mode, unused
-	}
-	if errs := fwconfig.CheckOpenVPNAddresses(i.OvpnMode, i.Addresses, tcpAddrs); len(errs) > 0 {
-		return bad("addresses: " + strings.Join(errs, "; "))
-	}
-	tcp := *i
-	tcp.Addresses = tcpAddrs
-	if err := checkAddrsFree(tx, &tcp); err != nil {
-		return err
-	}
-	i.OvpnListen = strings.TrimSpace(i.OvpnListen)
-	if i.OvpnListen != "" {
-		if i.OvpnListen == i.Name {
-			return bad("listen interface: clients come in on another interface")
-		}
-		if ok, err := ifaceNamed(tx, i.InstanceID, i.OvpnListen); err != nil || !ok {
-			if err != nil {
-				return err
-			}
-			return bad(fmt.Sprintf("listen interface: %s is not an interface of this virtual firewall", i.OvpnListen))
-		}
-	}
-	if id := i.OvpnCertificateID; id != nil {
-		var c models.Certificate
-		if err := tx.First(&c, *id).Error; err != nil || c.InstanceID != i.InstanceID {
-			return bad("certificate: pick one of this virtual firewall")
-		}
-		if err := refuseCA(&c, "certificate"); err != nil {
-			return err
-		}
-	}
-	if id := i.OvpnRoleID; id != nil {
-		if err := tx.First(&models.Role{}, *id).Error; err != nil {
-			return bad("role: no such role")
-		}
-	}
-	// A role set once is required until it is taken away here: a deleted
-	// role lets no one in.
-	i.OvpnRequireRole = i.OvpnRoleID != nil
-	i.OvpnRoutes = cleanList(i.OvpnRoutes)
-	for _, r := range i.OvpnRoutes {
-		if p, err := netip.ParsePrefix(r); err != nil || p.Masked() != p {
-			return bad(fmt.Sprintf("routes: %s is not a network (e.g. 192.168.1.0/24)", r))
-		}
-	}
-	i.OvpnDns = cleanList(i.OvpnDns)
-	for _, d := range i.OvpnDns {
-		if _, err := netip.ParseAddr(d); err != nil {
-			return bad(fmt.Sprintf("DNS servers: %s is not an address", d))
-		}
-	}
-	i.OvpnDnsDomain = strings.TrimSuffix(strings.TrimSpace(i.OvpnDnsDomain), ".")
-	if i.OvpnDnsDomain != "" && !fwconfig.ValidDomain(i.OvpnDnsDomain) {
-		return bad("DNS domain: not a domain name")
-	}
-	i.OvpnHost = strings.TrimSpace(i.OvpnHost)
-	if i.OvpnHost != "" && !fwconfig.ValidDomain(i.OvpnHost) {
-		if _, err := netip.ParseAddr(i.OvpnHost); err != nil {
-			return bad("public host: a name or an address")
-		}
-	}
-	return nil
-}
-
-// ifaceNamed says whether the instance has an interface or link end
-// called name.
-func ifaceNamed(tx *gorm.DB, instanceID uint, name string) (bool, error) {
-	var n int64
-	if err := tx.Model(&models.Interface{}).Where("instance_id = ? AND name = ?", instanceID, name).Count(&n).Error; err != nil {
-		return false, err
-	}
-	if n > 0 {
-		return true, nil
-	}
-	err := tx.Model(&models.Link{}).Where("(instance_a_id = ? AND interface_a = ?) OR (instance_b_id = ? AND interface_b = ?)", instanceID, name, instanceID, name).Count(&n).Error
-	return n > 0, err
-}
 
 // refuseOpenVPNRole refuses deleting a role an OpenVPN server requires.
 func refuseOpenVPNRole(tx *gorm.DB, r *models.Role) error {

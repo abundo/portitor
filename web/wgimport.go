@@ -5,6 +5,7 @@ package web
 
 import (
 	"bufio"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -13,8 +14,8 @@ import (
 	"strings"
 
 	"github.com/labstack/echo/v5"
-	"gorm.io/gorm"
 
+	"github.com/abundo/portitor/internal/datastore"
 	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/internal/wgkeys"
 	"github.com/abundo/portitor/models"
@@ -28,12 +29,6 @@ type wgImport struct {
 	// Overwrite replaces the keys, port, addresses and peers of an
 	// existing WireGuard interface of that name.
 	Overwrite bool `json:"overwrite"`
-}
-
-type wgImportResult struct {
-	Interface models.Interface `json:"interface"`
-	Peers     int              `json:"peers"`
-	Warnings  []string         `json:"warnings"`
 }
 
 // parseWgQuick reads a wg-quick config: the [Interface] section into ifc,
@@ -189,70 +184,74 @@ func (s *Server) handleWgImport(c *echo.Context) error {
 	if err != nil {
 		return dbError(c, err)
 	}
-	var res wgImportResult
-	err = s.dbOf(c).Transaction(func(tx *gorm.DB) error {
-		var old models.Interface
-		ifc := models.Interface{InstanceID: req.InstanceID, Name: strings.TrimSpace(req.Name), Kind: fwconfig.KindWireGuard, Enabled: true}
-		var oldp *models.Interface
-		err := tx.Where("instance_id = ? AND name = ?", req.InstanceID, ifc.Name).First(&old).Error
-		switch {
-		case err == nil:
-			if old.Kind != fwconfig.KindWireGuard {
-				return bad(fmt.Sprintf("%s exists and is not a WireGuard interface", ifc.Name))
+	inst, err := s.instanceByID(c.Request().Context(), req.InstanceID)
+	if err != nil {
+		return err
+	}
+	if inst == nil {
+		return errJSON(c, http.StatusBadRequest, "no such virtual firewall")
+	}
+	name := strings.TrimSpace(req.Name)
+	ifc := map[string]any{
+		"wg-private-key": parsed.WgPrivateKey, "wg-public-key": parsed.WgPublicKey,
+		"wg-listen-port": parsed.WgListenPort, "addresses": append([]string{}, parsed.Addresses...),
+		"ipv4-mode": fwconfig.ModeStatic,
+	}
+	if parsed.Mtu != 0 {
+		ifc["mtu"] = parsed.Mtu
+	}
+	ps := []map[string]any{}
+	for _, p := range peers {
+		if p.PublicKey == "" {
+			return errJSON(c, http.StatusBadRequest, fmt.Sprintf("peer %s has no PublicKey", p.Name))
+		}
+		peer := map[string]any{"name": p.Name, "enabled": true, "public-key": p.PublicKey, "allowed-ips": append([]string{}, p.AllowedIPs...)}
+		if p.PresharedKey != "" {
+			peer["preshared-key"] = p.PresharedKey
+		}
+		if p.Endpoint != "" {
+			peer["endpoint"] = p.Endpoint
+		}
+		if p.Keepalive != 0 {
+			peer["keepalive"] = p.Keepalive
+		}
+		ps = append(ps, peer)
+	}
+	at := datastore.Path{{Name: "instance", Keys: []string{inst.Name}}, {Name: "interface", Keys: []string{name}}}
+	ws, err := s.userEdit(c, func(work *datastore.Tree) error {
+		old, _, err := work.Find(at)
+		if err != nil {
+			return err
+		}
+		if old != nil {
+			if old.Leaf("kind") != fwconfig.KindWireGuard {
+				return bad(fmt.Sprintf("%s exists and is not a WireGuard interface", name))
 			}
 			if !req.Overwrite {
 				return errWgExists
 			}
-			ifc = old
-			oldp = &old
-		case !errors.Is(err, gorm.ErrRecordNotFound):
-			return err
-		}
-		ifc.WgPrivateKey, ifc.WgPublicKey = parsed.WgPrivateKey, parsed.WgPublicKey
-		ifc.WgListenPort = parsed.WgListenPort
-		ifc.Addresses = parsed.Addresses
-		if ifc.Addresses == nil {
-			ifc.Addresses = models.StringList{}
-		}
-		if parsed.Mtu != 0 {
-			ifc.Mtu = parsed.Mtu
-		}
-		ifc.Ipv4Mode = fwconfig.ModeStatic
-		if err := prepareInterface(tx, &ifc, oldp); err != nil {
-			return err
-		}
-		if err := tx.Save(&ifc).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("interface_id = ?", ifc.ID).Delete(&models.WgPeer{}).Error; err != nil {
-			return err
-		}
-		for i := range peers {
-			p := &peers[i]
-			p.InterfaceID = ifc.ID
-			if p.PublicKey == "" {
-				return bad(fmt.Sprintf("peer %s has no PublicKey", p.Name))
-			}
-			if err := prepareWgPeer(tx, p, nil); err != nil {
-				return bad(fmt.Sprintf("peer %s: %s", p.Name, errText(err)))
-			}
-			if err := tx.Create(p).Error; err != nil {
+			body, _ := json.Marshal(ifc)
+			if err := work.EditJSON(at, datastore.EditMerge, body); err != nil {
 				return err
 			}
+			peersBody, _ := json.Marshal(ps)
+			return work.EditJSON(datastore.Path{at[0], at[1], {Name: "wireguard-peer"}}, datastore.EditReplace, peersBody)
 		}
-		res = wgImportResult{Interface: ifc, Peers: len(peers), Warnings: warnings}
-		return nil
+		ifc["name"], ifc["kind"], ifc["enabled"], ifc["wireguard-peer"] = name, fwconfig.KindWireGuard, true, ps
+		body, _ := json.Marshal(ifc)
+		return work.EditJSON(datastore.Path{at[0], {Name: "interface"}}, datastore.EditCreate, body)
 	})
 	if errors.Is(err, errWgExists) {
 		return errJSON(c, http.StatusConflict, fmt.Sprintf("%s exists", req.Name))
 	}
 	if err != nil {
-		return dbError(c, err)
+		return editError(c, err)
 	}
-	if res.Warnings == nil {
-		res.Warnings = []string{}
+	warn(c, ws)
+	if warnings == nil {
+		warnings = []string{}
 	}
-	return c.JSON(http.StatusOK, res)
+	return c.JSON(http.StatusOK, map[string]any{"interface": map[string]any{"name": name}, "peers": len(peers), "warnings": warnings})
 }
 
 func errText(err error) string {

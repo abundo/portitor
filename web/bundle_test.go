@@ -80,8 +80,10 @@ func TestBundleRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &b); err != nil {
 		t.Fatal(err)
 	}
-	if len(b.Tables["wg_peers"]) != 1 || len(b.Tables["dns_records"]) != 1 || len(b.Tables["roles"]) != 0 {
-		t.Errorf("bundle tables: %d peers, %d records, %d roles", len(b.Tables["wg_peers"]), len(b.Tables["dns_records"]), len(b.Tables["roles"]))
+	for _, want := range []string{`"phone"`, `"nas"`, `"unifi"`} {
+		if !strings.Contains(string(b.Config), want) {
+			t.Errorf("bundle without %s: %s", want, b.Config)
+		}
 	}
 
 	// Into another installation, under another name: the same
@@ -127,10 +129,10 @@ func TestBundleRoundTrip(t *testing.T) {
 	if n != 0 {
 		t.Error("a refused import left its instance")
 	}
-	// Another schema version is refused.
-	b.Schema--
+	// Another format is refused.
+	b.Format--
 	if rec := dst.do("POST", "/api/instances/import", map[string]any{"name": "shop5", "bundle": b}); rec.Code != http.StatusBadRequest {
-		t.Errorf("other schema: %d %s", rec.Code, rec.Body)
+		t.Errorf("other format: %d %s", rec.Code, rec.Body)
 	}
 }
 

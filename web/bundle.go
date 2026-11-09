@@ -4,291 +4,113 @@
 package web
 
 import (
+	"bytes"
 	"context"
-	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"maps"
 	"net/http"
-	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/labstack/echo/v5"
-	"gorm.io/gorm"
 
 	"github.com/abundo/portitor/internal/builder"
+	"github.com/abundo/portitor/internal/datastore"
 	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/models"
 )
 
-// A bundle is one instance as rows: every row deleting the instance would
-// delete (the tables that cascade from instances, and from those), the
-// shared objects instances use by name (bundleShared), and the rows of
-// other instances it refers to by id (a global DNS template), by name.
-// It is read and written column by column from the schema, so a new
-// table or column needs nothing here; both sides must have the same
-// schema version. Its ids are the source's: import gives the rows new
-// ones and follows them in the foreign keys. A bundle holds every secret
-// of the instance, like a backup.
+// A bundle is one virtual firewall as configuration (RFC 7951 JSON of the
+// tree, its secrets included): its entry, the shared objects
+// (bundleShared, imported by name, reused when equal) and its links, each
+// to the other instance by name. The global DNS templates of other
+// instances it uses are named (Refs), and must be there, global, where it
+// imports. Import gives the lists keyed by an id (rules, routes, records)
+// new ids, and the folders those of the folders of the same kind, name
+// and parent there. A bundle holds every secret of the virtual firewall,
+// like a backup.
 //
 // Links (they join two instances) come with the instance's name at the
 // other end: import makes a link when that instance is there by name and
 // the link is not, so it comes with whichever of the two arrives last.
 //
-// Left out: the instance's role (import makes one) and what belongs to
-// the installation (deployments, firewalls, known interfaces, users).
+// Left out: the instance's role (import makes one), OpenVPN's role (the
+// roles are the installation's), and what belongs to the installation
+// (deployments, firewalls, known interfaces, users).
 
-const bundleFormat = 1
+const bundleFormat = 2
 
-// bundleShared are the tables of objects shared by all instances, which
-// rules refer to by name: imported by name, reused when equal.
-var bundleShared = []string{"object_folders", "address_objects", "address_lists", "services", "port_names", "ip_lists"}
-
-// bundleSkip are tables that cascade from instances but are not
-// configuration of one.
-var bundleSkip = map[string]bool{"roles": true, "role_instances": true, "links": true}
-
-// bundleDeferred are the foreign keys set after the rows are in, which
-// would make cycles with the certificates (whose HTTP-01 interface is an
-// interface): the ACME proxy's certificate and an OpenVPN server's.
-var bundleDeferred = map[string]string{"instances": "acme_proxy_certificate_id", "interfaces": "ovpn_certificate_id"}
-
-type bundleRow = map[string]any
+// bundleShared are the top-level lists of objects shared by all
+// instances, which rules refer to by name, parents (folders) first.
+var bundleShared = []string{"object-folder", "host", "address-list", "service", "port-name", "ip-list"}
 
 type Bundle struct {
-	Format int   `json:"format"`
-	Schema int64 `json:"schema"`
+	Format int `json:"format"`
 	// Instance is the instance's name in the source.
 	Instance string `json:"instance"`
-	// Tables hold the instance's rows by table, "instances" its own.
-	Tables map[string][]bundleRow `json:"tables"`
-	Shared map[string][]bundleRow `json:"shared"`
-	// Refs are rows of other instances it refers to by id, found by name
-	// on import.
-	Refs map[string][]bundleRow `json:"refs"`
-	// Links are its links, each with "other": the instance at the other
-	// end, by name.
-	Links []bundleRow `json:"links"`
+	// Config is the configuration: the instance, the shared objects and
+	// its links.
+	Config json.RawMessage `json:"config"`
+	// Refs are entries of other instances it names (global DNS
+	// templates), found by name on import.
+	Refs []bundleRef `json:"refs"`
 	// Left lists what was left out.
 	Left []string `json:"left"`
 }
 
-type fkey struct{ table, from, parent, onDelete string }
-
-// schemaGraph is every table's foreign keys.
-func schemaGraph(ctx context.Context, q querier) (map[string][]fkey, error) {
-	tables, err := queryStrings(ctx, q, "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name != 'goose_db_version' ORDER BY name")
-	if err != nil {
-		return nil, err
-	}
-	g := map[string][]fkey{}
-	for _, t := range tables {
-		g[t] = nil
-		rows, err := q.QueryContext(ctx, `SELECT "table", "from", on_delete FROM pragma_foreign_key_list(?)`, t)
-		if err != nil {
-			return nil, err
-		}
-		for rows.Next() {
-			k := fkey{table: t}
-			if err := rows.Scan(&k.parent, &k.from, &k.onDelete); err != nil {
-				rows.Close()
-				return nil, err
-			}
-			g[t] = append(g[t], k)
-		}
-		rows.Close()
-	}
-	return g, nil
+type bundleRef struct {
+	List string `json:"list"`
+	Name string `json:"name"`
 }
 
-type querier interface {
-	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
-}
-
-// sqlRunner is a transaction the import writes in: its own, or the
-// caller's.
-type sqlRunner interface {
-	querier
-	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
-	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
-}
-
-// ownedTables are the tables that cascade from instances, parents first.
-func ownedTables(g map[string][]fkey) []string {
-	owned := map[string]bool{"instances": true}
-	order := []string{"instances"}
-	for changed := true; changed; {
-		changed = false
-		for _, t := range slices.Sorted(maps.Keys(g)) {
-			if owned[t] || bundleSkip[t] {
-				continue
-			}
-			for _, k := range g[t] {
-				if owned[k.parent] && k.onDelete == "CASCADE" && k.parent != t {
-					owned[t], changed = true, true
-					order = append(order, t)
-					break
-				}
-			}
-		}
-	}
-	// Parents before children by every owned foreign key (Kahn) but the
-	// deferred ones, set after the insert.
-	rest := order[1:]
-	sorted := []string{"instances"}
-	placed := map[string]bool{"instances": true}
-	for len(rest) > 0 {
-		var next []string
-		for _, t := range rest {
-			ready := true
-			for _, k := range g[t] {
-				if owned[k.parent] && !placed[k.parent] && k.parent != t && bundleDeferred[t] != k.from {
-					ready = false
-				}
-			}
-			if ready {
-				sorted = append(sorted, t)
-				placed[t] = true
-			} else {
-				next = append(next, t)
-			}
-		}
-		if len(next) == len(rest) {
-			sorted = append(sorted, next...) // a cycle: left to the deferred keys
-			break
-		}
-		rest = next
-	}
-	return sorted
-}
-
-func selectRows(ctx context.Context, q querier, query string, args ...any) ([]bundleRow, error) {
-	rows, err := q.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	cols, err := rows.Columns()
-	if err != nil {
-		return nil, err
-	}
-	out := []bundleRow{}
-	for rows.Next() {
-		vals := make([]any, len(cols))
-		ptrs := make([]any, len(cols))
-		for i := range vals {
-			ptrs[i] = &vals[i]
-		}
-		if err := rows.Scan(ptrs...); err != nil {
-			return nil, err
-		}
-		r := bundleRow{}
-		for i, c := range cols {
-			if b, ok := vals[i].([]byte); ok {
-				vals[i] = string(b)
-			}
-			r[c] = vals[i]
-		}
-		out = append(out, r)
-	}
-	return out, rows.Err()
-}
-
-func rowID(r bundleRow) int64 {
-	switch v := r["id"].(type) {
-	case int64:
-		return v
-	case float64:
-		return int64(v)
-	}
-	return 0
-}
-
-// ExportBundle reads the instance's bundle.
-func ExportBundle(ctx context.Context, db *gorm.DB, instanceID uint) (*Bundle, error) {
-	sqlDB, err := db.DB()
-	if err != nil {
-		return nil, err
-	}
-	g, err := schemaGraph(ctx, sqlDB)
-	if err != nil {
-		return nil, err
-	}
-	var version int64
-	if err := sqlDB.QueryRowContext(ctx, "SELECT max(version_id) FROM goose_db_version WHERE is_applied").Scan(&version); err != nil {
-		return nil, err
-	}
-	b := &Bundle{Format: bundleFormat, Schema: version, Tables: map[string][]bundleRow{}, Shared: map[string][]bundleRow{}, Refs: map[string][]bundleRow{}, Left: []string{}}
-	inst, err := selectRows(ctx, sqlDB, `SELECT * FROM instances WHERE id = ?`, instanceID)
-	if err != nil {
-		return nil, err
-	}
-	if len(inst) != 1 {
+// exportBundle is the bundle of the instance of tree.
+func exportBundle(tree *datastore.Tree, instance string) (*Bundle, error) {
+	in := tree.Root.Entry("instance", []string{instance})
+	if in == nil {
 		return nil, bad("no such virtual firewall")
 	}
-	b.Instance, _ = inst[0]["name"].(string)
-	b.Tables["instances"] = inst
-	ids := map[string]map[int64]bool{"instances": {int64(instanceID): true}}
-	order := ownedTables(g)
-	for _, t := range order[1:] {
-		var conds []string
-		var args []any
-		for _, k := range g[t] {
-			if k.onDelete == "CASCADE" && ids[k.parent] != nil {
-				for id := range ids[k.parent] {
-					conds = append(conds, fmt.Sprintf("%q = ?", k.from))
-					args = append(args, id)
-				}
-			}
-		}
-		if len(conds) == 0 {
-			continue
-		}
-		rows, err := selectRows(ctx, sqlDB, fmt.Sprintf("SELECT * FROM %q WHERE %s ORDER BY id", t, strings.Join(conds, " OR ")), args...)
-		if err != nil {
-			return nil, err
-		}
-		b.Tables[t] = rows
-		ids[t] = map[int64]bool{}
-		for _, r := range rows {
-			ids[t][rowID(r)] = true
+	out := datastore.New(tree.Root.S)
+	keep := map[string]bool{"instance": true, "link": true}
+	for _, l := range bundleShared {
+		keep[l] = true
+	}
+	all := tree.Clone()
+	for name := range all.Root.Lists {
+		if !keep[name] {
+			delete(all.Root.Lists, name)
 		}
 	}
-	// Rows outside the instance it refers to: a global DNS template, its
-	// SOA template and policy.
-	for t, rows := range b.Tables {
-		for _, k := range g[t] {
-			if k.parent == "instances" || slices.Contains(bundleShared, k.parent) || !slices.Contains(order, k.parent) {
-				continue
-			}
-			for _, r := range rows {
-				id, ok := r[k.from].(int64)
-				if !ok || ids[k.parent][id] || slices.ContainsFunc(b.Refs[k.parent], func(x bundleRow) bool { return rowID(x) == id }) {
-					continue
-				}
-				ref, err := selectRows(ctx, sqlDB, fmt.Sprintf("SELECT * FROM %q WHERE id = ?", k.parent), id)
-				if err != nil {
-					return nil, err
-				}
-				b.Refs[k.parent] = append(b.Refs[k.parent], ref...)
-			}
-		}
-	}
-	for _, t := range bundleShared {
-		rows, err := selectRows(ctx, sqlDB, fmt.Sprintf("SELECT * FROM %q ORDER BY id", t))
-		if err != nil {
-			return nil, err
-		}
-		b.Shared[t] = rows
-	}
-	links, err := selectRows(ctx, sqlDB, `SELECT l.*, CASE WHEN l.instance_a_id = ? THEN b.name ELSE a.name END AS other
-		FROM links l JOIN instances a ON a.id = l.instance_a_id JOIN instances b ON b.id = l.instance_b_id
-		WHERE l.instance_a_id = ? OR l.instance_b_id = ? ORDER BY l.name`, instanceID, instanceID, instanceID)
+	all.Root.Containers = map[string]*datastore.Node{}
+	all.Root.Lists["instance"] = slices.DeleteFunc(all.Root.Lists["instance"], func(e *datastore.Node) bool { return e.Leaf("name") != instance })
+	all.Root.Lists["link"] = slices.DeleteFunc(all.Root.Lists["link"], func(e *datastore.Node) bool {
+		return e.Leaf("instance-a") != instance && e.Leaf("instance-b") != instance
+	})
+	out.Root = all.Root
+	data, err := out.JSON(datastore.JSONOptions{Secrets: true})
 	if err != nil {
 		return nil, err
 	}
-	b.Links = links
+	b := &Bundle{Format: bundleFormat, Instance: instance, Config: data, Refs: []bundleRef{}, Left: []string{}}
+	// The global entries of other instances it names.
+	in.Walk(func(n *datastore.Node) {
+		for _, s := range n.S.Children {
+			p, ok := s.Ext["global-ref"]
+			v := n.Leaves[s.Name]
+			if !ok || v == "" {
+				continue
+			}
+			parts := strings.Split(p, "/")
+			if len(parts) < 2 {
+				continue
+			}
+			list := parts[len(parts)-2]
+			if in.Entry(list, []string{v}) == nil && !slices.Contains(b.Refs, bundleRef{list, v}) {
+				b.Refs = append(b.Refs, bundleRef{list, v})
+			}
+		}
+	})
 	return b, nil
 }
 
@@ -297,333 +119,189 @@ type bundleConflict struct{ msg string }
 
 func (e *bundleConflict) Error() string { return e.msg }
 
-// ImportBundle adds the bundle's instance as a new instance named name on
-// the firewall, with its shared objects, and returns its id and the
-// problems its configuration has (it is imported anyway). Ids are new.
-func ImportBundle(ctx context.Context, db *gorm.DB, b *Bundle, name string, firewallID uint) (uint, []string, error) {
+// importBundle adds the bundle's instance to work as a new instance named
+// name on the firewall, with its shared objects and links.
+func (s *Server) importBundle(work *datastore.Tree, b *Bundle, name string, fw *models.Firewall) error {
 	if b.Format != bundleFormat {
-		return 0, nil, bad(fmt.Sprintf("bundle format %d, this version reads %d", b.Format, bundleFormat))
-	}
-	if len(b.Tables["instances"]) != 1 {
-		return 0, nil, bad("the bundle holds no virtual firewall")
-	}
-	// In db's transaction when it is one (a write through the tree,
-	// throughTree), else in one of its own on a connection.
-	var tx sqlRunner
-	commit := func() error { return nil }
-	if outer, ok := db.Statement.ConnPool.(*sql.Tx); ok {
-		tx = outer
-	} else {
-		sqlDB, err := db.DB()
-		if err != nil {
-			return 0, nil, err
-		}
-		conn, err := sqlDB.Conn(ctx)
-		if err != nil {
-			return 0, nil, err
-		}
-		defer conn.Close()
-		own, err := conn.BeginTx(ctx, nil)
-		if err != nil {
-			return 0, nil, err
-		}
-		defer own.Rollback()
-		tx, commit = own, own.Commit
-	}
-	var version int64
-	if err := tx.QueryRowContext(ctx, "SELECT max(version_id) FROM goose_db_version WHERE is_applied").Scan(&version); err != nil {
-		return 0, nil, err
-	}
-	if version != b.Schema {
-		return 0, nil, bad(fmt.Sprintf("the bundle is of schema version %d, this database %d; update both to the same version", b.Schema, version))
-	}
-	g, err := schemaGraph(ctx, tx)
-	if err != nil {
-		return 0, nil, err
-	}
-	// The instance is checked as a new one would be (name, firewall,
-	// virtual firewalls on).
-	var fresh models.Instance
-	fresh.Name, fresh.FirewallID = name, firewallID
-	if err := db.Transaction(func(tx *gorm.DB) error { return prepareInstanceFirewall(tx, &fresh, nil) }); err != nil {
-		return 0, nil, err
+		return bad(fmt.Sprintf("bundle format %d, this version reads %d", b.Format, bundleFormat))
 	}
 	if !fwconfig.ValidInstanceName(name) {
-		return 0, nil, bad("name: lowercase letters and digits, starting with a letter, at most 12 characters")
+		return bad("name: lowercase letters and digits, starting with a letter, at most 12 characters")
+	}
+	if work.Root.Entry("instance", []string{name}) != nil {
+		return bad(fmt.Sprintf("name: a virtual firewall is named %s", name))
+	}
+	if fw.HAPrimaryID != nil {
+		return bad("firewall: " + fw.Name + " is an HA secondary; it runs its primary's virtual firewalls")
+	}
+	src := datastore.New(work.Root.S)
+	if err := src.UnmarshalJSON(b.Config); err != nil {
+		return bad("the bundle: " + err.Error())
+	}
+	in := src.Root.Entry("instance", []string{b.Instance})
+	if in == nil {
+		return bad("the bundle holds no virtual firewall")
 	}
 
-	if _, err := tx.ExecContext(ctx, "PRAGMA defer_foreign_keys = ON"); err != nil {
-		return 0, nil, err
-	}
-	// newIDs[table][old id] = new id.
-	newIDs := map[string]map[int64]int64{}
-	mapID := func(t string, old, nw int64) {
-		if newIDs[t] == nil {
-			newIDs[t] = map[int64]int64{}
-		}
-		newIDs[t][old] = nw
-	}
-	cols := map[string][]string{}
-	colsOf := func(t string) ([]string, error) {
-		if c, ok := cols[t]; ok {
-			return c, nil
-		}
-		c, err := queryStrings(ctx, tx, "SELECT name FROM pragma_table_info(?) ORDER BY cid", t)
-		cols[t] = c
-		return c, err
-	}
-
-	// Shared objects by name (folders by kind, parent and name), parents
-	// first.
-	for _, t := range bundleShared {
-		rows := b.Shared[t]
-		if t == "object_folders" {
-			rows = foldersParentsFirst(rows)
-		}
-		for _, r := range rows {
-			old := rowID(r)
-			fixed := remapRow(r, g[t], newIDs)
-			match := "name = ?"
-			args := []any{r["name"]}
-			if t == "object_folders" {
-				match = "kind = ? AND name = ? AND parent_id IS ?"
-				args = []any{r["kind"], r["name"], fixed["parent_id"]}
-			}
-			have, err := selectRows(ctx, tx, fmt.Sprintf("SELECT * FROM %q WHERE %s", t, match), args...)
-			if err != nil {
-				return 0, nil, err
-			}
-			c, err := colsOf(t)
-			if err != nil {
-				return 0, nil, err
-			}
-			if len(have) > 0 {
-				if t != "object_folders" && !sameRow(have[0], fixed) {
-					return 0, nil, &bundleConflict{fmt.Sprintf("%s %v exists here with other values", strings.TrimSuffix(t, "s"), r["name"])}
+	// Folders by kind, parent and name, parents first; the entries that
+	// are in one follow the folder's id here.
+	folders := map[string]string{}
+	pending := slices.Clone(src.Root.Lists["object-folder"])
+	for len(pending) > 0 {
+		var later []*datastore.Node
+		for _, f := range pending {
+			parent := f.Leaf("parent")
+			if parent != "" {
+				var ok bool
+				if parent, ok = folders[parent]; !ok {
+					later = append(later, f)
+					continue
 				}
-				mapID(t, old, rowID(have[0]))
+			}
+			var have *datastore.Node
+			for _, h := range work.Root.Lists["object-folder"] {
+				if h.Leaf("kind") == f.Leaf("kind") && h.Leaf("name") == f.Leaf("name") && h.Leaf("parent") == parent {
+					have = h
+				}
+			}
+			if have == nil {
+				id, err := s.nextID(work, f.S, "id")
+				if err != nil {
+					return err
+				}
+				obj := map[string]any{"id": id, "kind": f.Leaf("kind"), "name": f.Leaf("name")}
+				if parent != "" {
+					obj["parent"] = parent
+				}
+				body, _ := json.Marshal(obj)
+				if err := work.EditJSON(datastore.Path{{Name: "object-folder"}}, datastore.EditCreate, body); err != nil {
+					return err
+				}
+				folders[f.Leaf("id")] = strconv.FormatUint(id, 10)
+			} else {
+				folders[f.Leaf("id")] = have.Leaf("id")
+			}
+		}
+		if len(later) == len(pending) {
+			return bad("the bundle's folders refer to folders it doesn't hold")
+		}
+		pending = later
+	}
+	// The shared objects: the same here, or added.
+	for _, list := range bundleShared[1:] {
+		for _, e := range src.Root.Lists[list] {
+			if f := e.Leaf("folder"); f != "" {
+				e.Leaves["folder"] = folders[f]
+			}
+			data, err := datastore.NodeJSON(e, datastore.JSONOptions{Secrets: true})
+			if err != nil {
+				return err
+			}
+			if have := work.Root.Entry(list, e.Keys()); have != nil {
+				mine, err := datastore.NodeJSON(have, datastore.JSONOptions{Secrets: true})
+				if err != nil {
+					return err
+				}
+				if !bytes.Equal(mine, data) {
+					return &bundleConflict{fmt.Sprintf("%s %s exists here with other values", list, strings.Join(e.Keys(), " "))}
+				}
 				continue
 			}
-			id, err := insertRow(ctx, tx, t, c, fixed)
-			if err != nil {
-				return 0, nil, fmt.Errorf("%s %v: %w", t, r["name"], err)
+			if err := work.EditJSON(datastore.Path{{Name: list}}, datastore.EditCreate, data); err != nil {
+				return err
 			}
-			mapID(t, old, id)
 		}
 	}
-	// Rows of other instances it refers to, found by name.
-	for t, rows := range b.Refs {
-		for _, r := range rows {
-			var id int64
-			err := tx.QueryRowContext(ctx, fmt.Sprintf("SELECT id FROM %q WHERE name = ? AND global", t), r["name"]).Scan(&id)
-			if err != nil {
-				return 0, nil, &bundleConflict{fmt.Sprintf("it uses %s %v, which is not here (as a global one)", strings.TrimSuffix(strings.ReplaceAll(t, "_", " "), "s"), r["name"])}
+	// The global entries of other instances it names.
+	for _, r := range b.Refs {
+		found := false
+		for _, other := range work.Root.Lists["instance"] {
+			if e := other.Entry(r.List, []string{r.Name}); e != nil && e.Leaf("global") == "true" {
+				found = true
 			}
-			mapID(t, rowID(r), id)
+		}
+		if !found {
+			return &bundleConflict{fmt.Sprintf("it uses %s %s, which is not here (as a global one)", strings.ReplaceAll(r.List, "-", " "), r.Name)}
 		}
 	}
 
-	var instID int64
-	var deferred []func() error
-	for _, t := range ownedTables(g) {
-		c, err := colsOf(t)
-		if err != nil {
-			return 0, nil, err
-		}
-		for _, r := range b.Tables[t] {
-			fixed := remapRow(r, g[t], newIDs)
-			if t == "instances" {
-				fixed["name"], fixed["firewall_id"], fixed["is_default"] = name, fresh.FirewallID, fresh.IsDefault
-			}
-			if t == "interfaces" {
-				// The roles are this firewall's: an OpenVPN server that
-				// required one lets no one in until one is chosen.
-				fixed["ovpn_role_id"] = nil
-			}
-			// Set once its certificate is in.
-			var deferredCert any
-			if col := bundleDeferred[t]; col != "" && r[col] != nil {
-				deferredCert, fixed[col] = r[col], nil
-			}
-			id, err := insertRow(ctx, tx, t, c, fixed)
-			if err != nil {
-				return 0, nil, fmt.Errorf("%s: %w", t, err)
-			}
-			if deferredCert != nil {
-				col := bundleDeferred[t]
-				deferred = append(deferred, func() error {
-					cid, ok := newIDs["certificates"][toInt(deferredCert)]
-					if !ok {
-						return nil
-					}
-					_, err := tx.ExecContext(ctx, fmt.Sprintf("UPDATE %q SET %q = ? WHERE id = ?", t, col), cid, id)
-					return err
-				})
-			}
-			mapID(t, rowID(r), id)
-			if t == "instances" {
-				instID = id
-			}
+	// The instance, on the firewall: its host if it has none (a new
+	// database).
+	isDefault := !slices.ContainsFunc(work.Root.Lists["instance"], func(e *datastore.Node) bool {
+		return e.Leaf("firewall") == fw.Name && e.Leaf("is-default") == "true"
+	})
+	if !isDefault {
+		if st := work.Root.Containers["settings"]; st == nil || st.Leaf("virtual-firewalls") != "true" {
+			return bad("virtual firewalls are turned off (Settings)")
 		}
 	}
-	for _, f := range deferred {
-		if err := f(); err != nil {
-			return 0, nil, err
+	in.Leaves["name"], in.Leaves["firewall"] = name, fw.Name
+	delete(in.Leaves, "is-default")
+	if isDefault {
+		in.Leaves["is-default"] = "true"
+	}
+	for _, ifc := range in.Lists["interface"] {
+		// The roles are this installation's: an OpenVPN server that
+		// required one lets no one in until one is chosen.
+		delete(ifc.Leaves, "ovpn-role")
+	}
+	// New ids for the lists keyed by one.
+	var rekey error
+	in.Walk(func(n *datastore.Node) {
+		if rekey != nil || n == in || !slices.Equal(n.S.Keys, []string{"id"}) || n.S.Ext["json"] != "" || !n.S.Child("id").Type.Numeric() {
+			return
 		}
+		id, err := s.nextID(work, n.S, "id")
+		if err != nil {
+			rekey = err
+			return
+		}
+		n.Leaves["id"] = strconv.FormatUint(id, 10)
+	})
+	if rekey != nil {
+		return rekey
+	}
+	data, err := datastore.NodeJSON(in, datastore.JSONOptions{Secrets: true})
+	if err != nil {
+		return err
+	}
+	if err := work.EditJSON(datastore.Path{{Name: "instance"}}, datastore.EditCreate, data); err != nil {
+		return err
 	}
 	// Links to an instance that is here by name, unless there already.
-	for _, l := range b.Links {
-		var other int64
-		if err := tx.QueryRowContext(ctx, "SELECT id FROM instances WHERE name = ?", l["other"]).Scan(&other); err != nil {
+	for _, l := range src.Root.Lists["link"] {
+		side, other := "instance-a", l.Leaf("instance-b")
+		if l.Leaf("instance-a") != b.Instance {
+			side, other = "instance-b", l.Leaf("instance-a")
+		}
+		if work.Root.Entry("instance", []string{other}) == nil || work.Root.Entry("link", l.Keys()) != nil {
 			continue
 		}
-		var n int
-		if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM links WHERE name = ?", l["name"]).Scan(&n); err != nil {
-			return 0, nil, err
-		}
-		if n > 0 {
-			continue
-		}
-		row := maps.Clone(l)
-		delete(row, "other")
-		if toInt(l["instance_a_id"]) == rowID(b.Tables["instances"][0]) {
-			row["instance_a_id"], row["instance_b_id"] = instID, other
-		} else {
-			row["instance_a_id"], row["instance_b_id"] = other, instID
-		}
-		c, err := colsOf("links")
+		l.Leaves[side] = name
+		data, err := datastore.NodeJSON(l, datastore.JSONOptions{Secrets: true})
 		if err != nil {
-			return 0, nil, err
+			return err
 		}
-		if _, err := insertRow(ctx, tx, "links", c, row); err != nil {
-			return 0, nil, fmt.Errorf("link %v: %w", l["name"], err)
+		if err := work.EditJSON(datastore.Path{{Name: "link"}}, datastore.EditCreate, data); err != nil {
+			return err
 		}
 	}
-	// Name a key the ids did not follow, rather than fail at commit.
-	if bad, err := selectRows(ctx, tx, "SELECT * FROM pragma_foreign_key_check"); err == nil && len(bad) > 0 {
-		return 0, nil, fmt.Errorf("import: a foreign key the bundle does not hold: %v", bad[0])
-	}
-	if err := commit(); err != nil {
-		return 0, nil, fmt.Errorf("import: %w", err)
-	}
+	return nil
+}
 
-	var in models.Instance
-	if err := db.First(&in, instID).Error; err != nil {
-		return 0, nil, err
+// bundleProblems are what a commit would refuse in the imported instance
+// (it is imported anyway).
+func (s *Server) bundleProblems(ctx context.Context, name string) []string {
+	in, err := s.candidateInput(ctx)
+	if err != nil {
+		return []string{err.Error()}
 	}
-	if err := createInstanceRole(db, &in); err != nil {
-		return 0, nil, err
-	}
-	var problems []string
-	tree, ok, err := tablesTree(db)
-	if err != nil || !ok {
-		return 0, nil, err
-	}
-	_, err = builder.BuildInstances(builder.Input{DB: db, Tree: tree}, 0, map[string]bool{name: true})
+	_, err = builder.BuildInstances(in, 0, map[string]bool{name: true})
 	var ve *fwconfig.ValidationError
 	if errors.As(err, &ve) {
-		problems = ve.Problems
+		return ve.Problems
 	}
-	return uint(instID), problems, nil
-}
-
-func toInt(v any) int64 {
-	switch x := v.(type) {
-	case int64:
-		return x
-	case float64:
-		return int64(x)
-	}
-	return 0
-}
-
-// remapRow is the row with its foreign keys turned into the new ids, and
-// without its id.
-func remapRow(r bundleRow, keys []fkey, newIDs map[string]map[int64]int64) bundleRow {
-	out := maps.Clone(r)
-	delete(out, "id")
-	for _, k := range keys {
-		v, ok := out[k.from]
-		if !ok || v == nil {
-			continue
-		}
-		if id, ok := newIDs[k.parent][toInt(v)]; ok {
-			out[k.from] = id
-		}
-	}
-	return out
-}
-
-// sameRow compares two rows of a shared table but for their ids, times
-// and folders.
-func sameRow(have, want bundleRow) bool {
-	for k, v := range want {
-		switch k {
-		case "id", "created_at", "updated_at", "folder_id":
-			continue
-		}
-		if !reflect.DeepEqual(normalizeValue(have[k]), normalizeValue(v)) {
-			return false
-		}
-	}
-	return true
-}
-
-func normalizeValue(v any) any {
-	switch x := v.(type) {
-	case float64:
-		return int64(x)
-	case bool:
-		if x {
-			return int64(1)
-		}
-		return int64(0)
-	case []byte:
-		return string(x)
-	}
-	return v
-}
-
-func insertRow(ctx context.Context, tx sqlRunner, t string, cols []string, r bundleRow) (int64, error) {
-	var names, marks []string
-	var args []any
-	for _, c := range cols {
-		v, ok := r[c]
-		if !ok || c == "id" {
-			continue
-		}
-		names = append(names, fmt.Sprintf("%q", c))
-		marks = append(marks, "?")
-		args = append(args, v)
-	}
-	res, err := tx.ExecContext(ctx, fmt.Sprintf("INSERT INTO %q (%s) VALUES (%s)", t, strings.Join(names, ", "), strings.Join(marks, ", ")), args...)
-	if err != nil {
-		return 0, err
-	}
-	return res.LastInsertId()
-}
-
-// foldersParentsFirst orders folders so each comes after its parent.
-func foldersParentsFirst(rows []bundleRow) []bundleRow {
-	var out []bundleRow
-	done := map[int64]bool{}
-	for len(out) < len(rows) {
-		n := len(out)
-		for _, r := range rows {
-			id := rowID(r)
-			if done[id] {
-				continue
-			}
-			if p := r["parent_id"]; p == nil || done[toInt(p)] {
-				out = append(out, r)
-				done[id] = true
-			}
-		}
-		if len(out) == n {
-			break // a loop: left out
-		}
-	}
-	return out
+	return []string{}
 }
 
 // handleExportBundle downloads a virtual firewall as a bundle (global
@@ -637,7 +315,16 @@ func (s *Server) handleExportBundle(c *echo.Context) error {
 	if err != nil {
 		return errJSON(c, http.StatusNotFound, "not found")
 	}
-	b, err := ExportBundle(c.Request().Context(), s.db, id)
+	ctx := c.Request().Context()
+	v, err := s.view(ctx)
+	if err != nil {
+		return err
+	}
+	inst := v.InstanceByID(id)
+	if inst == nil {
+		return errJSON(c, http.StatusNotFound, "not found")
+	}
+	b, err := exportBundle(v.Tree, inst.Name)
 	if err != nil {
 		return dbError(c, err)
 	}
@@ -654,16 +341,40 @@ func (s *Server) handleImportBundle(c *echo.Context) error {
 	if err := c.Bind(&req); err != nil || req.Bundle == nil {
 		return errJSON(c, http.StatusBadRequest, "invalid request")
 	}
-	id, problems, err := ImportBundle(c.Request().Context(), s.dbOf(c), req.Bundle, strings.TrimSpace(req.Name), req.FirewallID)
+	fw, err := s.bundleFirewall(req.FirewallID)
+	if err != nil {
+		return dbError(c, err)
+	}
+	name := strings.TrimSpace(req.Name)
+	ws, err := s.userEdit(c, func(work *datastore.Tree) error { return s.importBundle(work, req.Bundle, name, fw) })
 	var conflict *bundleConflict
 	switch {
 	case errors.As(err, &conflict):
 		return errJSON(c, http.StatusConflict, conflict.msg)
 	case err != nil:
-		return dbError(c, err)
+		return editError(c, err)
 	}
-	if problems == nil {
-		problems = []string{}
+	warn(c, ws)
+	ctx := c.Request().Context()
+	id, _, err := s.entryID(ctx, datastore.Path{{Name: "instance", Keys: []string{name}}})
+	if err != nil {
+		return err
 	}
-	return c.JSON(http.StatusCreated, map[string]any{"id": id, "problems": problems, "left": req.Bundle.Left})
+	return c.JSON(http.StatusCreated, map[string]any{"id": id, "problems": s.bundleProblems(ctx, name), "left": req.Bundle.Left})
+}
+
+// bundleFirewall is the firewall a bundle imports to: the one with the
+// id, or the first.
+func (s *Server) bundleFirewall(id uint) (*models.Firewall, error) {
+	var err error
+	if id == 0 {
+		if id, err = firstFirewallID(s.db); err != nil {
+			return nil, err
+		}
+	}
+	var fw models.Firewall
+	if err := s.db.First(&fw, id).Error; err != nil {
+		return nil, bad("firewall: no such firewall")
+	}
+	return &fw, nil
 }

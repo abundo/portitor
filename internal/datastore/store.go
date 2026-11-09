@@ -50,7 +50,8 @@ type Store struct {
 	backend Backend
 	dir     string // candidate.json; "" keeps it in memory
 
-	cand *Tree // nil until first used
+	cand *Tree  // nil until first used
+	gen  uint64 // counts the candidates set
 
 	locks map[string]string // datastore (candidate, running) → the session holding its lock
 
@@ -198,13 +199,27 @@ func (s *Store) candidate(ctx context.Context) (*Tree, error) {
 
 // Candidate is a copy of the candidate, to read.
 func (s *Store) Candidate(ctx context.Context) (*Tree, error) {
+	t, _, err := s.CandidateGen(ctx)
+	return t, err
+}
+
+// CandidateGen is Candidate and its generation, which every new candidate
+// raises: what a cache of something made from it is keyed by.
+func (s *Store) CandidateGen(ctx context.Context) (*Tree, uint64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	c, err := s.candidate(ctx)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	return c.Clone(), nil
+	return c.Clone(), s.gen, nil
+}
+
+// Gen is the candidate's generation (CandidateGen).
+func (s *Store) Gen() uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.gen
 }
 
 // Running is the running configuration.
@@ -236,6 +251,22 @@ func (s *Store) Edit(ctx context.Context, owner string, fn func(*Tree) error) er
 	return s.set(work)
 }
 
+// EditRaw is Edit without Normalize: for a change the system makes that
+// no user may (an HA promotion moves the hosts to the other firewall).
+func (s *Store) EditRaw(ctx context.Context, fn func(*Tree) error) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	c, err := s.candidate(ctx)
+	if err != nil {
+		return err
+	}
+	work := c.Clone()
+	if err := fn(work); err != nil {
+		return err
+	}
+	return s.set(work)
+}
+
 // set makes t the candidate; s.mu is held.
 func (s *Store) set(t *Tree) error {
 	if s.OnChange != nil {
@@ -245,6 +276,7 @@ func (s *Store) set(t *Tree) error {
 	}
 	t.Renamed = nil
 	s.cand = t
+	s.gen++
 	return s.save()
 }
 
@@ -254,6 +286,7 @@ func (s *Store) Replace(ctx context.Context, t *Tree) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.cand = t
+	s.gen++
 	return s.save()
 }
 

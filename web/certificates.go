@@ -6,8 +6,6 @@ package web
 import (
 	"fmt"
 
-	"gorm.io/gorm"
-
 	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/models"
 )
@@ -39,17 +37,4 @@ func presentCertificate(c *models.Certificate) {
 		c.Chain = fwconfig.ChainPath(c.FullChain)
 		c.NotBefore, c.NotAfter = &leaf.NotBefore, &leaf.NotAfter
 	}
-}
-
-// refuseCertificateIface refuses removing an interface from its instance
-// while a certificate uses it.
-func refuseCertificateIface(tx *gorm.DB, i *models.Interface) error {
-	return usedBy(tx, i.Name, &models.Certificate{}, "interface_id", i.ID, func() []string {
-		var names []string
-		tx.Model(&models.Certificate{}).Where("interface_id = ?", i.ID).Order("name").Pluck("name", &names)
-		for j := range names {
-			names[j] = "certificate " + names[j]
-		}
-		return names
-	})
 }

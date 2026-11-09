@@ -15,6 +15,7 @@ import (
 	"github.com/labstack/echo/v5"
 	"gorm.io/gorm"
 
+	"github.com/abundo/portitor/internal/datastore"
 	"github.com/abundo/portitor/models"
 )
 
@@ -134,13 +135,21 @@ func (s *Server) Promote(ctx context.Context, username string, force bool) (*com
 		return nil, bad("this host's agent hears the primary: promote only when the primary is lost, or force it (both then own the configuration until the old primary is caught up as the secondary)")
 	}
 	var oldPrimary models.Firewall
-	err = s.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.First(&oldPrimary, *me.HAPrimaryID).Error; err != nil {
-			return err
-		}
-		return promoteRows(tx, me, &oldPrimary)
-	})
+	if err := s.db.First(&oldPrimary, *me.HAPrimaryID).Error; err != nil {
+		return nil, err
+	}
+	t, err := s.tree()
 	if err != nil {
+		return nil, err
+	}
+	// The hosts move to the other firewall, which an edit refuses.
+	if err := t.store.EditRaw(ctx, func(work *datastore.Tree) error {
+		promoteTree(work, me.Name, oldPrimary.Name)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	if err := s.db.Transaction(func(tx *gorm.DB) error { return promoteRows(tx, me, &oldPrimary) }); err != nil {
 		return nil, err
 	}
 	r := &s.role
@@ -163,23 +172,33 @@ func PromoteHere(ctx context.Context, s *Server, force bool) (*commitResult, err
 	return res, err
 }
 
-// promoteRows swaps the pair of secondary sec and primary prim: sec owns
-// the instances and tasks, with their values for it, and prim is the
-// secondary at the next epoch. Their agent URLs stay: each portitor-config
-// reaches its own agent by its agent_url (Server.agentURL).
-func promoteRows(tx *gorm.DB, sec, prim *models.Firewall) error {
-	var ids []uint
-	if err := tx.Model(&models.Instance{}).Where("firewall_id = ?", prim.ID).Pluck("id", &ids).Error; err != nil {
-		return err
-	}
-	for _, m := range []any{&models.Instance{}, &models.Task{}} {
-		if err := tx.Model(m).Where("firewall_id = ?", prim.ID).Update("firewall_id", sec.ID).Error; err != nil {
-			return err
+// promoteTree gives the configuration of the pair's primary prim to its
+// secondary sec: the instances and tasks, with the two hosts' addresses
+// on the pair's own links swapped, the only values of the instances they
+// don't share.
+func promoteTree(work *datastore.Tree, sec, prim string) {
+	for _, list := range []string{"instance", "task"} {
+		for _, e := range work.Root.Lists[list] {
+			if e.Leaf("firewall") != prim {
+				continue
+			}
+			e.Leaves["firewall"] = sec
+			for _, ifc := range e.Lists["interface"] {
+				addrs, peers := ifc.LeafLists["addresses"], ifc.LeafLists["peer-addresses"]
+				if ifc.Leaf("ha-role") == "" || len(addrs) == 0 || len(peers) != len(addrs) {
+					continue
+				}
+				ifc.LeafLists["addresses"], ifc.LeafLists["peer-addresses"] = peers, addrs
+			}
 		}
 	}
-	if err := swapHAValues(tx, ids); err != nil {
-		return err
-	}
+}
+
+// promoteRows swaps the firewalls of the pair of secondary sec and
+// primary prim: prim is the secondary at the next epoch. Their agent URLs
+// stay: each portitor-config reaches its own agent by its agent_url
+// (Server.agentURL).
+func promoteRows(tx *gorm.DB, sec, prim *models.Firewall) error {
 	witness, witnessSecret := prim.HAWitness, prim.HAWitnessSecret
 	if witness == "" {
 		witness = models.HAWitnessLocal
@@ -194,26 +213,4 @@ func promoteRows(tx *gorm.DB, sec, prim *models.Firewall) error {
 		"ha_primary_id": sec.ID, "ha_secret": sec.HASecret, "ha_epoch": sec.HAEpoch + 1,
 		"ha_witness": models.HAWitnessLocal, "ha_witness_secret": "",
 	}).Error
-}
-
-// swapHAValues swaps the two hosts' addresses on the pair's own links, the
-// only values of the instances they don't share.
-func swapHAValues(tx *gorm.DB, ids []uint) error {
-	if len(ids) == 0 {
-		return nil
-	}
-	var ifaces []models.Interface
-	if err := tx.Where("instance_id IN ? AND ha_role != ''", ids).Find(&ifaces).Error; err != nil {
-		return err
-	}
-	for _, ifc := range ifaces {
-		if len(ifc.Addresses) == 0 || len(ifc.PeerAddresses) != len(ifc.Addresses) {
-			continue
-		}
-		if err := tx.Model(&models.Interface{}).Where("id = ?", ifc.ID).
-			Updates(map[string]any{"addresses": ifc.PeerAddresses, "peer_addresses": ifc.Addresses}).Error; err != nil {
-			return err
-		}
-	}
-	return nil
 }

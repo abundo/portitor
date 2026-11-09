@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v5"
-	"gorm.io/gorm"
 
 	"github.com/abundo/portitor/internal/cron"
 	"github.com/abundo/portitor/models"
@@ -22,15 +21,6 @@ import (
 func presentIpList(l *models.IpList) {
 	l.HasPassword, l.HasApiKey = l.Password != "", l.ApiKey != ""
 	l.NewPassword, l.NewApiKey, l.RefreshSchedule = "", "", ""
-}
-
-func checkIPListRef(tx *gorm.DB, field, name string) error {
-	var n int64
-	tx.Model(&models.IpList{}).Where("name = ?", name).Count(&n)
-	if n == 0 {
-		return bad(fmt.Sprintf("%s: no IP list named %q", field, name))
-	}
-	return nil
 }
 
 // handleTaskRun runs a task on the firewall now.

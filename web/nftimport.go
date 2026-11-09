@@ -6,10 +6,12 @@ package web
 import (
 	"errors"
 	"net/http"
+	"slices"
 
 	"github.com/labstack/echo/v5"
-	"gorm.io/gorm"
 
+	"github.com/abundo/portitor/internal/confview"
+	"github.com/abundo/portitor/internal/datastore"
 	"github.com/abundo/portitor/internal/nftimport"
 	"github.com/abundo/portitor/models"
 )
@@ -40,31 +42,29 @@ func (s *Server) handleImportNftables(c *echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return errJSON(c, http.StatusBadRequest, "bad request")
 	}
-	if err := instanceExists(s.db, req.InstanceID); err != nil {
-		return errJSON(c, http.StatusBadRequest, "no such virtual firewall")
-	}
-	var inst models.Instance
-	if err := s.db.Select("firewall_id").First(&inst, req.InstanceID).Error; err != nil {
+	ctx := c.Request().Context()
+	v, err := s.view(ctx)
+	if err != nil {
 		return err
+	}
+	inst := v.InstanceByID(req.InstanceID)
+	if inst == nil {
+		return errJSON(c, http.StatusBadRequest, "no such virtual firewall")
 	}
 	a, _, err := s.firewallAgent(inst.FirewallID)
 	if err != nil {
 		return agentError(c, err)
 	}
-	parsed, err := a.ParseNftables(c.Request().Context(), req.Text)
+	parsed, err := a.ParseNftables(ctx, req.Text)
 	if err != nil {
 		return agentError(c, err)
 	}
-	opt, err := s.importOptions(req)
-	if err != nil {
-		return err
-	}
-	res, err := nftimport.Import(parsed.JSON, parsed.Text, opt)
+	res, err := nftimport.Import(parsed.JSON, parsed.Text, importOptions(v, req))
 	if err != nil {
 		return errJSON(c, http.StatusBadRequest, err.Error())
 	}
-	err = s.dbOf(c).Transaction(func(tx *gorm.DB) error {
-		if err := writeImport(tx, req, res); err != nil {
+	ws, err := s.userEdit(c, func(work *datastore.Tree) error {
+		if err := s.writeImport(work, inst, req, res); err != nil {
 			return err
 		}
 		if !req.Apply {
@@ -73,89 +73,68 @@ func (s *Server) handleImportNftables(c *echo.Context) error {
 		return nil
 	})
 	if err != nil && !errors.Is(err, errPreview) {
-		return dbError(c, err)
+		return editError(c, err)
 	}
+	warn(c, ws)
 	return c.JSON(http.StatusOK, res)
 }
 
-func (s *Server) importOptions(req nftImportRequest) (nftimport.Options, error) {
+func importOptions(v *confview.View, req nftImportRequest) nftimport.Options {
 	opt := nftimport.Options{Objects: map[string][]string{}, Services: map[string]models.Service{}, Rename: req.Rename}
-	var objs []models.AddressObject
-	if err := s.db.Find(&objs).Error; err != nil {
-		return opt, err
-	}
-	for _, o := range objs {
+	for _, o := range v.AddressObjects {
 		opt.Objects[o.Name] = o.Addresses
 	}
 	// Address lists share the names; one with the same literals is used.
-	var lists []models.AddressList
-	if err := s.db.Find(&lists).Error; err != nil {
-		return opt, err
-	}
-	for _, l := range lists {
+	for _, l := range v.AddressLists {
 		opt.Objects[l.Name] = l.Entries
 	}
-	var svcs []models.Service
-	if err := s.db.Find(&svcs).Error; err != nil {
-		return opt, err
-	}
-	for _, sv := range svcs {
+	for _, sv := range v.Services {
 		opt.Services[sv.Name] = sv
 	}
-	names, err := ifaceNames(s.db, req.InstanceID)
-	if err != nil {
-		return opt, err
-	}
-	var zones []string
-	if err := s.db.Model(&models.InterfaceZone{}).Where("instance_id = ?", req.InstanceID).Pluck("name", &zones).Error; err != nil {
-		return opt, err
-	}
-	for _, z := range zones {
-		names[z] = true
+	names := ifaceNamesIn(v, req.InstanceID)
+	for _, z := range v.InterfaceZones {
+		if z.InstanceID == req.InstanceID {
+			names[z.Name] = true
+		}
 	}
 	opt.Interfaces = names
-	return opt, nil
+	return opt
 }
 
-// writeImport writes res's rows. A rule or NAT rule the checks refuse
-// moves to res.Skipped; a host/prefix or service they refuse fails the
-// import, since rules may name it.
-func writeImport(tx *gorm.DB, req nftImportRequest, res *nftimport.Result) error {
+// writeImport adds res's entries to work. A rule or NAT rule the checks
+// refuse moves to res.Skipped; a host/prefix or service they refuse fails
+// the import, since rules may name it.
+func (s *Server) writeImport(work *datastore.Tree, inst *models.Instance, req nftImportRequest, res *nftimport.Result) error {
+	at := datastore.Path{{Name: "instance", Keys: []string{inst.Name}}}
 	if req.Replace {
-		if err := tx.Where("instance_id = ?", req.InstanceID).Delete(&models.Rule{}).Error; err != nil {
-			return err
+		for _, list := range []string{"rule", "nat-rule"} {
+			if err := work.EditJSON(append(slices.Clone(at), datastore.Elem{Name: list}), datastore.EditReplace, []byte("[]")); err != nil {
+				return err
+			}
 		}
-		if err := tx.Where("instance_id = ?", req.InstanceID).Delete(&models.NatRule{}).Error; err != nil {
-			return err
-		}
+	}
+	w, err := s.rowWriter(work)
+	if err != nil {
+		return err
 	}
 	for i := range res.Objects {
 		o := &res.Objects[i]
-		if err := prepareAddressObject(tx, o, nil); err != nil {
-			return bad("host/prefix " + o.Name + ": " + err.Error())
-		}
-		if err := tx.Create(o).Error; err != nil {
-			return err
+		if err := addChecked(w, o); err != nil {
+			return bad("host/prefix " + o.Name + ": " + errText(err))
 		}
 	}
 	for i := range res.Services {
 		sv := &res.Services[i]
-		if err := prepareService(tx, sv, nil); err != nil {
-			return bad("service " + sv.Name + ": " + err.Error())
-		}
-		if err := tx.Create(sv).Error; err != nil {
-			return err
+		if err := addChecked(w, sv); err != nil {
+			return bad("service " + sv.Name + ": " + errText(err))
 		}
 	}
 	rules := res.Rules[:0]
 	for _, r := range res.Rules {
 		r.InstanceID = req.InstanceID
-		if err := prepareRule(tx, &r, nil); err != nil {
+		if err := addChecked(w, &r); err != nil {
 			res.Skipped = append(res.Skipped, refused(r.Chain, r.Description, err))
 			continue
-		}
-		if err := tx.Create(&r).Error; err != nil {
-			return err
 		}
 		rules = append(rules, r)
 	}
@@ -163,12 +142,9 @@ func writeImport(tx *gorm.DB, req nftImportRequest, res *nftimport.Result) error
 	nat := res.NAT[:0]
 	for _, n := range res.NAT {
 		n.InstanceID = req.InstanceID
-		if err := prepareNat(tx, &n, nil); err != nil {
+		if err := addChecked(w, &n); err != nil {
 			res.Skipped = append(res.Skipped, refused(n.Kind, n.Description, err))
 			continue
-		}
-		if err := tx.Create(&n).Error; err != nil {
-			return err
 		}
 		nat = append(nat, n)
 	}
@@ -177,5 +153,5 @@ func writeImport(tx *gorm.DB, req nftImportRequest, res *nftimport.Result) error
 }
 
 func refused(where, text string, err error) nftimport.Skipped {
-	return nftimport.Skipped{Where: where, Text: text, Reason: "Portitor refused it: " + err.Error()}
+	return nftimport.Skipped{Where: where, Text: text, Reason: "Portitor refused it: " + errText(err)}
 }

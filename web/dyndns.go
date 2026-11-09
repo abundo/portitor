@@ -4,8 +4,6 @@
 package web
 
 import (
-	"gorm.io/gorm"
-
 	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/models"
 )
@@ -27,17 +25,4 @@ func presentDyndnsClient(c *models.DyndnsClient) {
 			c.Settings[f.Key] = v
 		}
 	}
-}
-
-// refuseDyndnsIface refuses removing an interface from its instance while
-// a dynamic DNS client uses it.
-func refuseDyndnsIface(tx *gorm.DB, i *models.Interface) error {
-	return usedBy(tx, i.Name, &models.DyndnsClient{}, "interface_id", i.ID, func() []string {
-		var names []string
-		tx.Model(&models.DyndnsClient{}).Where("interface_id = ?", i.ID).Order("name").Pluck("name", &names)
-		for j := range names {
-			names[j] = "DNS update " + names[j]
-		}
-		return names
-	})
 }

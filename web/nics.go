@@ -5,15 +5,15 @@ package web
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/netip"
 	"slices"
 	"sort"
 
-	"gorm.io/gorm"
-
 	"github.com/abundo/portitor/internal/agentapi"
+	"github.com/abundo/portitor/internal/datastore"
 	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/models"
 )
@@ -46,70 +46,67 @@ type missingNIC struct {
 func (s *Server) syncNICs(firewallID uint, nics []agentapi.NICStatus) (*nicSync, error) {
 	s.nicMu.Lock()
 	defer s.nicMu.Unlock()
+	ctx := context.Background()
 	res := &nicSync{Imported: []string{}, Missing: []missingNIC{}, Problems: []string{}}
-	// Names seen for the first time: rows of known_interfaces (no
+	v, err := s.view(ctx)
+	if err != nil {
+		return nil, err
+	}
+	present := map[string]bool{}
+	for _, n := range nics {
+		present[n.Name] = true
+	}
+	instName := map[uint]string{}
+	var def *models.Instance
+	for i := range v.Instances {
+		if v.Instances[i].FirewallID != firewallID {
+			continue
+		}
+		instName[v.Instances[i].ID] = v.Instances[i].Name
+		if v.Instances[i].IsDefault {
+			def = &v.Instances[i]
+		}
+	}
+	inConfig := map[string]bool{}
+	for _, i := range v.Interfaces {
+		if _, ok := instName[i.InstanceID]; !ok {
+			continue
+		}
+		inConfig[i.Name] = true
+		if i.Kind == fwconfig.KindPhysical && !present[i.Name] {
+			res.Missing = append(res.Missing, missingNIC{Instance: instName[i.InstanceID], Name: i.Name})
+		}
+	}
+	sort.Slice(res.Missing, func(a, b int) bool {
+		ma, mb := res.Missing[a], res.Missing[b]
+		return ma.Instance < mb.Instance || (ma.Instance == mb.Instance && ma.Name < mb.Name)
+	})
+	if def == nil {
+		return res, nil
+	}
+	// Names seen for the first time: rows of known_interfaces (not
 	// configuration), written once the change is made.
-	var newKnown []string
-	work := func(tx *gorm.DB) error {
-		var instances []models.Instance
-		var ifaces []models.Interface
-		var known []models.KnownInterface
-		if err := tx.Where("firewall_id = ?", firewallID).Find(&instances).Error; err != nil {
-			return err
+	var known []string
+	if err := s.db.Model(&models.KnownInterface{}).Where("firewall_id = ?", firewallID).Pluck("name", &known).Error; err != nil {
+		return nil, err
+	}
+	var fresh []agentapi.NICStatus
+	for _, n := range nics {
+		if n.Netns == "" && !slices.Contains(known, n.Name) {
+			known = append(known, n.Name)
+			fresh = append(fresh, n)
 		}
-		if err := tx.Where("instance_id IN (?)", tx.Model(&models.Instance{}).Select("id").Where("firewall_id = ?", firewallID)).Find(&ifaces).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("firewall_id = ?", firewallID).Find(&known).Error; err != nil {
-			return err
-		}
-
-		present := map[string]bool{}
-		for _, n := range nics {
-			present[n.Name] = true
-		}
-		instName := map[uint]string{}
-		var def *models.Instance
-		for i := range instances {
-			instName[instances[i].ID] = instances[i].Name
-			if instances[i].IsDefault {
-				def = &instances[i]
-			}
-		}
-		inDB := map[string]bool{}
-		for _, i := range ifaces {
-			inDB[i.Name] = true
-			if i.Kind == fwconfig.KindPhysical && !present[i.Name] {
-				res.Missing = append(res.Missing, missingNIC{Instance: instName[i.InstanceID], Name: i.Name})
-			}
-		}
-		sort.Slice(res.Missing, func(a, b int) bool {
-			ma, mb := res.Missing[a], res.Missing[b]
-			return ma.Instance < mb.Instance || (ma.Instance == mb.Instance && ma.Name < mb.Name)
-		})
-
-		if def == nil {
-			return nil
-		}
-		seen := map[string]bool{}
-		for _, k := range known {
-			seen[k.Name] = true
-		}
-		for _, n := range nics {
-			if n.Netns != "" || seen[n.Name] {
+	}
+	if len(fresh) == 0 {
+		return res, nil
+	}
+	err = s.editConfig(ctx, func(work *datastore.Tree) error {
+		res.Imported, res.Problems = []string{}, []string{}
+		for _, n := range fresh {
+			if inConfig[n.Name] {
 				continue
 			}
-			seen[n.Name] = true
-			newKnown = append(newKnown, n.Name)
-			if inDB[n.Name] {
-				continue
-			}
-			var notes []string
-			err := tx.Transaction(func(tx *gorm.DB) error {
-				var err error
-				notes, err = importNIC(tx, def.ID, n)
-				return err
-			})
+			notes, err := importNIC(work, def.Name, n)
 			var br *badRequest
 			switch {
 			case errors.As(err, &br):
@@ -122,52 +119,37 @@ func (s *Server) syncNICs(firewallID uint, nics []agentapi.NICStatus) (*nicSync,
 			res.Problems = append(res.Problems, notes...)
 		}
 		return nil
-	}
-	// A NIC not seen before is imported as a change of the candidate
-	// (viaTables); else nothing is written and the tables are only read.
-	var known []string
-	if err := s.db.Model(&models.KnownInterface{}).Where("firewall_id = ?", firewallID).Pluck("name", &known).Error; err != nil {
-		return nil, err
-	}
-	fresh := false
-	for _, n := range nics {
-		fresh = fresh || (n.Netns == "" && !slices.Contains(known, n.Name))
-	}
-	var err error
-	if fresh {
-		err = s.viaTables(context.Background(), work)
-	} else {
-		err = s.db.Transaction(work)
-	}
+	})
 	if err != nil {
 		return nil, err
 	}
-	for _, name := range newKnown {
-		if err := s.db.Create(&models.KnownInterface{FirewallID: firewallID, Name: name}).Error; err != nil {
+	for _, n := range fresh {
+		if err := s.db.Create(&models.KnownInterface{FirewallID: firewallID, Name: n.Name}).Error; err != nil {
 			return nil, err
 		}
 	}
 	return res, nil
 }
 
-// importNIC creates a physical interface in the instance as the agent
-// found it, with its static addresses. It returns notes on addresses it
-// could not carry over.
-func importNIC(tx *gorm.DB, instanceID uint, n agentapi.NICStatus) ([]string, error) {
-	var others []models.Interface
-	if err := tx.Where("instance_id = ?", instanceID).Find(&others).Error; err != nil {
-		return nil, err
+// importNIC adds a physical interface to the instance as the agent found
+// it, with its static addresses. It returns notes on addresses it could
+// not carry over; an interface the checks refuse is a *badRequest.
+func importNIC(work *datastore.Tree, instance string, n agentapi.NICStatus) ([]string, error) {
+	at := datastore.Path{{Name: "instance", Keys: []string{instance}}}
+	in, _, err := work.Find(at)
+	if err != nil || in == nil {
+		return nil, fmt.Errorf("no instance %s", instance)
 	}
 	taken := map[netip.Addr]string{}
-	for _, o := range others {
-		for _, a := range o.Addresses {
+	for _, o := range in.Lists["interface"] {
+		for _, a := range o.LeafLists["addresses"] {
 			if p, err := netip.ParsePrefix(a); err == nil {
-				taken[p.Addr()] = o.Name
+				taken[p.Addr()] = o.Leaf("name")
 			}
 		}
 	}
 	var notes []string
-	addrs := models.StringList{}
+	addrs := []string{}
 	has4 := false
 	for _, a := range n.Addresses {
 		p, err := fwconfig.ParseInterfaceAddress(a)
@@ -181,27 +163,29 @@ func importNIC(tx *gorm.DB, instanceID uint, n agentapi.NICStatus) ([]string, er
 			has4 = has4 || p.Addr().Is4()
 		}
 	}
-	ifc := models.Interface{
-		InstanceID:   instanceID,
-		Name:         n.Name,
-		Kind:         fwconfig.KindPhysical,
-		Description:  "found on the firewall",
-		Enabled:      n.Up,
-		Ipv4Mode:     fwconfig.ModeStatic,
-		Addresses:    addrs,
-		Ipv6AcceptRA: n.SLAAC,
-		Members:      models.StringList{},
-	}
+	mode := fwconfig.ModeStatic
 	if n.DHCPv4 && !has4 {
 		// Something on the host runs DHCP for it; "none" leaves that
 		// address alone, where the agent's DHCP client would compete.
-		ifc.Ipv4Mode = fwconfig.ModeNone
+		mode = fwconfig.ModeNone
 	}
-	if err := prepareInterface(tx, &ifc, nil); err != nil {
+	body, err := json.Marshal(map[string]any{
+		"name": n.Name, "kind": fwconfig.KindPhysical, "description": "found on the firewall",
+		"enabled": n.Up, "ipv4-mode": mode, "addresses": addrs, "ipv6-accept-ra": n.SLAAC,
+	})
+	if err != nil {
 		return nil, err
 	}
-	if err := tx.Create(&ifc).Error; err != nil {
-		return nil, err
+	list := append(slices.Clone(at), datastore.Elem{Name: "interface"})
+	if err := work.EditJSON(list, datastore.EditCreate, body); err != nil {
+		return nil, bad(err.Error())
+	}
+	e := in.Entry("interface", []string{n.Name})
+	if problems := entryProblems(work, e); len(problems) > 0 {
+		if err := work.Delete(datastore.PathOf(e)); err != nil {
+			return nil, err
+		}
+		return nil, bad(problems[0].Error())
 	}
 	return notes, nil
 }

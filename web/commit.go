@@ -71,7 +71,9 @@ type commitTarget struct {
 func (s *Server) deploy(ctx context.Context, username string, timeout *int, only map[string]bool, tree *datastore.Tree) (*commitResult, error) {
 	s.deployMu.Lock()
 	defer s.deployMu.Unlock()
-	st, err := s.settings()
+	// The settings of the tree: deploy may run under the candidate's lock
+	// (a commit from the CLI), so not the candidate's.
+	st, err := s.settingsOf(tree)
 	if err != nil {
 		return nil, err
 	}
@@ -173,7 +175,7 @@ func (s *Server) deploy(ctx context.Context, username string, timeout *int, only
 	// Burn the numbers even if the apply fails, so every attempt an agent
 	// sees has a unique generation.
 	st.LastCommit = commit
-	if err := s.db.Save(st).Error; err != nil {
+	if err := s.db.Exec("UPDATE settings SET last_commit = ? WHERE id = 1", commit).Error; err != nil {
 		return nil, err
 	}
 	for _, t := range targets {

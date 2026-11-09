@@ -4,32 +4,16 @@
 package web
 
 import (
-	"fmt"
 	"net/http"
-	"strings"
 
 	"github.com/labstack/echo/v5"
 
-	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/models"
 )
 
 func presentDnsBlocklist(b *models.DnsBlocklist) {
 	b.HasAuthKey = b.AuthKey != ""
 	b.NewAuthKey, b.ClearAuthKey = "", false
-}
-
-// prepareBlocklistAllow normalises an instance's allowed names.
-func prepareBlocklistAllow(in *models.Instance) error {
-	in.DnsBlocklistAllow = cleanList(in.DnsBlocklistAllow)
-	for i, n := range in.DnsBlocklistAllow {
-		n = strings.ToLower(strings.TrimSuffix(strings.TrimPrefix(n, "*."), "."))
-		if !fwconfig.ValidDomain(n) {
-			return bad(fmt.Sprintf("allowed names: %q is not a valid domain", n))
-		}
-		in.DnsBlocklistAllow[i] = n
-	}
-	return nil
 }
 
 // handleDNSBlocklistRefresh downloads a blocklist again now, on its

@@ -6,10 +6,12 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
 
+	"github.com/abundo/portitor/internal/datastore"
 	"github.com/abundo/portitor/models"
 )
 
@@ -52,6 +54,17 @@ func ImportBundleFile(ctx context.Context, s *Server, path, name string) ([]stri
 	if name == "" {
 		name = b.Instance
 	}
-	_, problems, err := ImportBundle(ctx, s.db, &b, strings.TrimSpace(name), 0)
-	return problems, err
+	name = strings.TrimSpace(name)
+	fw, err := s.bundleFirewall(0)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.editConfig(ctx, func(work *datastore.Tree) error { return s.importBundle(work, &b, name, fw) }); err != nil {
+		var br *badRequest
+		if errors.As(err, &br) {
+			return nil, errors.New(br.msg)
+		}
+		return nil, err
+	}
+	return s.bundleProblems(ctx, name), nil
 }

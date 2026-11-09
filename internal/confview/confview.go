@@ -10,6 +10,7 @@ package confview
 
 import (
 	"context"
+	"database/sql/driver"
 	"fmt"
 	"reflect"
 	"slices"
@@ -75,8 +76,20 @@ type View struct {
 	AcmeProxyPolicies   []models.AcmeProxyPolicy
 	Settings            models.Settings
 
-	// Index is each entry's id.
+	// Tree is the tree, and Index each of its entries' ids. Neither is
+	// to be changed.
+	Tree  *datastore.Tree
 	Index sqlmap.Index
+}
+
+// ID is the id of the entry at p, if there is one.
+func (v *View) ID(p datastore.Path) (uint, bool) {
+	n, _, err := v.Tree.Find(p)
+	if err != nil || n == nil {
+		return 0, false
+	}
+	id, ok := v.Index[n]
+	return uint(id), ok
 }
 
 var (
@@ -118,7 +131,7 @@ func LoadWith(db *gorm.DB, tree *datastore.Tree, ids sqlmap.IDs) (*View, error) 
 	if err != nil {
 		return nil, err
 	}
-	v := &View{Index: idx}
+	v := &View{Tree: tree, Index: idx}
 	for _, q := range []struct {
 		dst   any
 		table string
@@ -247,6 +260,75 @@ func DecodeRows(rows []sqlmap.Row, dst any) error {
 			}
 		}
 		sv.Set(reflect.Append(sv, v))
+	}
+	return nil
+}
+
+// RowOf is the row of a model (a pointer to one of package models'
+// structs): its table and its columns, as sqlmap.Adder takes them.
+func RowOf(model any) (string, sqlmap.Row, error) {
+	sch, err := gormschema.Parse(model, schemaCache, gormschema.NamingStrategy{})
+	if err != nil {
+		return "", nil, err
+	}
+	rv := reflect.ValueOf(model)
+	for rv.Kind() == reflect.Pointer {
+		rv = rv.Elem()
+	}
+	ctx := context.Background()
+	row := sqlmap.Row{}
+	for _, f := range sch.Fields {
+		if f.DBName == "" {
+			continue
+		}
+		v, zero := f.ValueOf(ctx, rv)
+		if zero && f.FieldType.Kind() == reflect.Pointer {
+			row[f.DBName] = nil
+			continue
+		}
+		if vr, ok := v.(driver.Valuer); ok {
+			if v, err = vr.Value(); err != nil {
+				return "", nil, fmt.Errorf("%s.%s: %w", sch.Table, f.DBName, err)
+			}
+		}
+		row[f.DBName] = plainValue(reflect.ValueOf(v))
+	}
+	return sch.Table, row, nil
+}
+
+// plainValue is v as the database driver gives a column: int64, float64,
+// bool, string, []byte or nil.
+func plainValue(v reflect.Value) any {
+	for v.IsValid() && v.Kind() == reflect.Pointer {
+		if v.IsNil() {
+			return nil
+		}
+		v = v.Elem()
+	}
+	if !v.IsValid() {
+		return nil
+	}
+	switch v.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return v.Int()
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return int64(v.Uint())
+	case reflect.Float32, reflect.Float64:
+		return v.Float()
+	case reflect.Bool:
+		return v.Bool()
+	case reflect.String:
+		return v.String()
+	}
+	return v.Interface()
+}
+
+// InstanceByID is the instance with the id, nil when there is none.
+func (v *View) InstanceByID(id uint) *models.Instance {
+	for i := range v.Instances {
+		if v.Instances[i].ID == id {
+			return &v.Instances[i]
+		}
 	}
 	return nil
 }
