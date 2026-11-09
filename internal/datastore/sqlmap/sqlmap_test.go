@@ -188,7 +188,13 @@ func TestWriteUnchanged(t *testing.T) {
 	}
 	var stamps []string
 	db.Raw("SELECT name || updated_at FROM interfaces ORDER BY id").Scan(&stamps)
-	if err := db.Transaction(func(tx *gorm.DB) error { return m.Write(tx, tree) }); err != nil {
+	if err := db.Transaction(func(tx *gorm.DB) error {
+		idx, err := m.AssignIDs(tx, tree)
+		if err != nil {
+			return err
+		}
+		return m.Write(tx, tree, idx)
+	}); err != nil {
 		t.Fatal(err)
 	}
 	var after []string
@@ -235,7 +241,13 @@ func TestWriteChanges(t *testing.T) {
 	for _, r := range tree.Root.Entry("instance", []string{"host"}).Lists["rule"] {
 		r.LeafLists["in-interfaces"] = []string{"lan1"}
 	}
-	if err := db.Transaction(func(tx *gorm.DB) error { return m.Write(tx, tree) }); err != nil {
+	if err := db.Transaction(func(tx *gorm.DB) error {
+		idx, err := m.AssignIDs(tx, tree)
+		if err != nil {
+			return err
+		}
+		return m.Write(tx, tree, idx)
+	}); err != nil {
 		t.Fatal(err)
 	}
 	back, idx2, err := m.Import(db)
@@ -287,7 +299,7 @@ func jsonInt(n int64) string {
 // their roles, the firewalls (the hosts and their agents), the directory,
 // and what portitor-config records.
 var notConfiguration = []string{"users", "roles", "role_members", "role_instances", "firewalls", "ldap_servers",
-	"ldap_role_mappings", "deployments", "known_interfaces", "goose_db_version"}
+	"ldap_role_mappings", "deployments", "known_interfaces", "goose_db_version", "config_ids"}
 
 // notMapped are columns of mapped tables that are not leaves.
 var notMapped = map[string][]string{"settings": {"last_commit", "web_certificate_id"}}

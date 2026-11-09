@@ -9,7 +9,6 @@ package builder
 
 import (
 	"cmp"
-	"context"
 	"errors"
 	"fmt"
 	"maps"
@@ -17,72 +16,23 @@ import (
 	"net"
 	"net/netip"
 	"net/url"
-	"reflect"
 	"slices"
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 
 	"gorm.io/gorm"
-	gormschema "gorm.io/gorm/schema"
 
+	"github.com/abundo/portitor/internal/confview"
 	"github.com/abundo/portitor/internal/datastore"
-	"github.com/abundo/portitor/internal/datastore/sqlmap"
 	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/internal/netobj"
-	"github.com/abundo/portitor/internal/schema"
 	"github.com/abundo/portitor/models"
 )
 
 type data struct {
-	instances      []models.Instance
-	ifaceZones     []models.InterfaceZone
-	interfaces     []models.Interface
-	peers          []models.WgPeer
-	links          []models.Link
-	routes         []models.Route
-	policyRoutes   []models.PolicyRoute
-	neighbours     []models.StaticNeighbour
-	rules          []models.Rule
-	nat            []models.NatRule
-	prefixes       []models.IpamPrefix
-	addrs          []models.IpamAddress
-	dnsZones       []models.DnsZone
-	blocklists     []models.DnsBlocklist
-	records        []models.DnsRecord
-	objects        []models.AddressObject
-	addressLists   []models.AddressList
-	soas           []models.DnsSoaTemplate
-	policies       []models.DnsDnssecPolicy
-	templates      []models.DnsTemplate
-	dyndns         []models.DyndnsClient
-	dyndnsRecs     []models.DyndnsRecord
-	certs          []models.Certificate
-	ipLists        []models.IpList
-	tasks          []models.Task
-	services       []models.Service
-	portNames      []models.PortName
-	rateLimits     []models.RateLimit
-	prefixLists    []models.RoutePrefixList
-	asPathLists    []models.RouteAsPathList
-	communityLists []models.RouteCommunityList
-	routeMaps      []models.RouteMap
-	bgpConfigs     []models.BgpConfig
-	bgpGroups      []models.BgpPeerGroup
-	bgpNeighbors   []models.BgpNeighbor
-	ospfConfigs    []models.OspfConfig
-	ospfIfaces     []models.OspfInterface
-	isisConfigs    []models.IsisConfig
-	isisIfaces     []models.IsisInterface
-	vrrpRouters    []models.VrrpRouter
-	bfdIfaces      []models.BfdInterface
-	vrfs           []models.Vrf
-	snmpUsers      []models.SnmpUser
-	syslogServers  []models.SyslogServer
-	proxyPolicies  []models.AcmeProxyPolicy
-	ldapServers    []models.LdapServer
-	settings       []models.Settings // the one row, if any
+	*confview.View
+	ldapServers []models.LdapServer
 	// The users, role members and the directory's group mappings, for
 	// OpenVPN's logins.
 	users        []models.User
@@ -98,92 +48,12 @@ type Input struct {
 	Tree *datastore.Tree
 }
 
-var (
-	mapOnce    sync.Once
-	mapping    *sqlmap.Mapping
-	mappingErr error
-)
-
-// rows are the tree's rows, by table (sqlmap.Rows).
-func (in Input) rows() (map[string][]sqlmap.Row, error) {
-	mapOnce.Do(func() {
-		root, err := schema.Load()
-		if err != nil {
-			mappingErr = err
-			return
-		}
-		mapping, mappingErr = sqlmap.New(root)
-	})
-	if mappingErr != nil {
-		return nil, mappingErr
-	}
-	rows, _, err := mapping.Rows(in.DB, in.Tree)
-	return rows, err
-}
-
 func load(in Input) (*data, error) {
-	d := &data{}
-	rows, err := in.rows()
+	v, err := confview.Load(in.DB, in.Tree)
 	if err != nil {
 		return nil, err
 	}
-	for _, q := range []struct {
-		dst   any
-		table string
-	}{
-		{&d.instances, "instances"},
-		{&d.ifaceZones, "interface_zones"},
-		{&d.interfaces, "interfaces"},
-		{&d.peers, "wg_peers"},
-		{&d.links, "links"},
-		{&d.routes, "routes"},
-		{&d.policyRoutes, "policy_routes"},
-		{&d.neighbours, "static_neighbours"},
-		{&d.rules, "rules"},
-		{&d.nat, "nat_rules"},
-		{&d.prefixes, "ipam_prefixes"},
-		{&d.addrs, "ipam_addresses"},
-		{&d.dnsZones, "dns_zones"},
-		{&d.blocklists, "dns_blocklists"},
-		{&d.records, "dns_records"},
-		{&d.objects, "address_objects"},
-		{&d.addressLists, "address_lists"},
-		{&d.soas, "dns_soa_templates"},
-		{&d.policies, "dns_dnssec_policies"},
-		{&d.templates, "dns_templates"},
-		{&d.dyndns, "dyndns_clients"},
-		{&d.dyndnsRecs, "dyndns_records"},
-		{&d.certs, "certificates"},
-		{&d.ipLists, "ip_lists"},
-		{&d.tasks, "tasks"},
-		{&d.services, "services"},
-		{&d.portNames, "port_names"},
-		{&d.rateLimits, "rate_limits"},
-		{&d.prefixLists, "route_prefix_lists"},
-		{&d.asPathLists, "route_as_path_lists"},
-		{&d.communityLists, "route_community_lists"},
-		{&d.routeMaps, "route_maps"},
-		{&d.bgpConfigs, "bgp_configs"},
-		{&d.bgpGroups, "bgp_peer_groups"},
-		{&d.bgpNeighbors, "bgp_neighbors"},
-		{&d.ospfConfigs, "ospf_configs"},
-		{&d.ospfIfaces, "ospf_interfaces"},
-		{&d.isisConfigs, "isis_configs"},
-		{&d.isisIfaces, "isis_interfaces"},
-		{&d.vrrpRouters, "vrrp_routers"},
-		{&d.bfdIfaces, "bfd_interfaces"},
-		{&d.vrfs, "vrfs"},
-		{&d.snmpUsers, "snmp_users"},
-		{&d.syslogServers, "syslog_servers"},
-		{&d.proxyPolicies, "acme_proxy_policies"},
-		{&d.settings, "settings"},
-	} {
-		if err := decodeRows(rows[q.table], q.dst); err != nil {
-			return nil, fmt.Errorf("%s: %w", q.table, err)
-		}
-	}
-	// The default instance first, as the database gave them.
-	slices.SortStableFunc(d.instances, func(a, b models.Instance) int { return -cmpBool(a.IsDefault, b.IsDefault) })
+	d := &data{View: v}
 	for _, q := range []struct {
 		dst   any
 		order string
@@ -198,46 +68,6 @@ func load(in Input) (*data, error) {
 		}
 	}
 	return d, nil
-}
-
-var schemaCache = &sync.Map{}
-
-// decodeRows decodes rows into the models of the slice dst points at, by
-// their columns.
-func decodeRows(rows []sqlmap.Row, dst any) error {
-	sv := reflect.ValueOf(dst).Elem()
-	et := sv.Type().Elem()
-	sch, err := gormschema.Parse(reflect.New(et).Interface(), schemaCache, gormschema.NamingStrategy{})
-	if err != nil {
-		return err
-	}
-	ctx := context.Background()
-	for _, r := range rows {
-		v := reflect.New(et).Elem()
-		for col, val := range r {
-			f := sch.LookUpField(col)
-			if f == nil || f.DBName == "" {
-				continue
-			}
-			if s, ok := val.(string); ok && f.FieldType.Kind() == reflect.Slice && f.FieldType.Elem().Kind() != reflect.Uint8 {
-				// A JSON column: the models' list types scan their text.
-				if sc, ok := reflect.New(f.FieldType).Interface().(interface{ Scan(any) error }); ok {
-					if err := sc.Scan(s); err != nil {
-						return fmt.Errorf("%s: %w", col, err)
-					}
-					if err := f.Set(ctx, v, reflect.ValueOf(sc).Elem().Interface()); err != nil {
-						return fmt.Errorf("%s: %w", col, err)
-					}
-					continue
-				}
-			}
-			if err := f.Set(ctx, v, val); err != nil {
-				return fmt.Errorf("%s: %w", col, err)
-			}
-		}
-		sv.Set(reflect.Append(sv, v))
-	}
-	return nil
 }
 
 // Build returns the document for generation. Problems found while
@@ -363,15 +193,15 @@ func buildPeer(in Input, generation int64, only map[string]bool, firewallID uint
 	}
 
 	ifaceByID := map[uint]models.Interface{}
-	for _, i := range d.interfaces {
+	for _, i := range d.Interfaces {
 		ifaceByID[i.ID] = i
 	}
 	instName := map[uint]string{}
-	for _, in := range d.instances {
+	for _, in := range d.Instances {
 		instName[in.ID] = in.Name
 	}
 	// Named hosts/prefixes are expanded here; the agent sees addresses only.
-	objs := netobj.New(d.objects, d.addressLists...)
+	objs := netobj.New(d.AddressObjects, d.AddressLists...)
 	failed := false // set by expand and expandServices; callers drop what they failed on
 	expand := func(where string, fn func([]string) ([]string, error), list []string) []string {
 		out, err := fn(list)
@@ -382,12 +212,12 @@ func buildPeer(in Input, generation int64, only map[string]bool, firewallID uint
 		return out
 	}
 	// And custom port names: the agent sees their numbers.
-	portNames := make(map[string]int, len(d.portNames))
-	for _, p := range d.portNames {
+	portNames := make(map[string]int, len(d.PortNames))
+	for _, p := range d.PortNames {
 		portNames[p.Name] = p.Port
 	}
 	// So are services: the agent sees protocol matches only.
-	services := netobj.NewServices(d.services)
+	services := netobj.NewServices(d.Services)
 	expandServices := func(where string, names []string) []fwconfig.ServiceMatch {
 		out, err := services.Expand(names)
 		if err != nil {
@@ -400,7 +230,7 @@ func buildPeer(in Input, generation int64, only map[string]bool, firewallID uint
 	doc := &fwconfig.Document{Version: fwconfig.Version, Generation: generation, Instances: []fwconfig.Instance{}, Links: []fwconfig.Link{}, HA: ha}
 
 	onFirewall := map[uint]bool{}
-	for _, mi := range d.instances {
+	for _, mi := range d.Instances {
 		if firewallID != 0 && mi.FirewallID != firewallID {
 			continue
 		}
@@ -423,13 +253,11 @@ func buildPeer(in Input, generation int64, only map[string]bool, firewallID uint
 				in.LogInvalid = append(in.LogInvalid, c)
 			}
 		}
-		if len(d.settings) > 0 {
-			if d.settings[0].DropIPOptionsInput {
-				in.DropIPOptions = append(in.DropIPOptions, fwconfig.ChainInput)
-			}
-			if d.settings[0].DropIPOptionsForward {
-				in.DropIPOptions = append(in.DropIPOptions, fwconfig.ChainForward)
-			}
+		if d.Settings.DropIPOptionsInput {
+			in.DropIPOptions = append(in.DropIPOptions, fwconfig.ChainInput)
+		}
+		if d.Settings.DropIPOptionsForward {
+			in.DropIPOptions = append(in.DropIPOptions, fwconfig.ChainForward)
 		}
 		for _, svc := range mi.LogAuto {
 			if !contains(in.LogAuto, svc) {
@@ -437,26 +265,26 @@ func buildPeer(in Input, generation int64, only map[string]bool, firewallID uint
 			}
 		}
 		var prefixes []models.IpamPrefix
-		for _, p := range d.prefixes {
+		for _, p := range d.IpamPrefixes {
 			if p.InstanceID == mi.ID {
 				prefixes = append(prefixes, p)
 			}
 		}
 		var addrs []models.IpamAddress
-		for _, a := range d.addrs {
+		for _, a := range d.IpamAddresses {
 			if a.InstanceID == mi.ID {
 				addrs = append(addrs, a)
 			}
 		}
 
 		in.InterfaceZones = []fwconfig.InterfaceZone{}
-		for _, z := range d.ifaceZones {
+		for _, z := range d.InterfaceZones {
 			if z.InstanceID == mi.ID {
 				in.InterfaceZones = append(in.InterfaceZones, fwconfig.InterfaceZone{Name: z.Name, Interfaces: append([]string{}, z.Interfaces...)})
 			}
 		}
 
-		for _, mif := range d.interfaces {
+		for _, mif := range d.Interfaces {
 			if mif.InstanceID != mi.ID {
 				continue
 			}
@@ -499,7 +327,7 @@ func buildPeer(in Input, generation int64, only map[string]bool, firewallID uint
 			}
 			if mif.Kind == fwconfig.KindWireGuard {
 				wg := &fwconfig.WireGuard{PrivateKey: mif.WgPrivateKey, ListenPort: mif.WgListenPort, Peers: []fwconfig.WGPeer{}}
-				for _, p := range d.peers {
+				for _, p := range d.WgPeers {
 					if p.InterfaceID != mif.ID || !p.Enabled {
 						continue
 					}
@@ -564,7 +392,7 @@ func buildPeer(in Input, generation int64, only map[string]bool, firewallID uint
 			}
 			return out, nil
 		}
-		for _, r := range d.rules {
+		for _, r := range d.Rules {
 			if r.InstanceID != mi.ID || !r.Enabled {
 				continue
 			}
@@ -603,7 +431,7 @@ func buildPeer(in Input, generation int64, only map[string]bool, firewallID uint
 		}
 		// The rate limits of the services that are switched on to them.
 		serviceLimit := map[string]string{}
-		for _, l := range d.rateLimits {
+		for _, l := range d.RateLimits {
 			if l.InstanceID == mi.ID && l.Service != "" {
 				serviceLimit[l.Service] = l.Name
 			}
@@ -613,7 +441,7 @@ func buildPeer(in Input, generation int64, only map[string]bool, firewallID uint
 				delete(serviceLimit, s)
 			}
 		}
-		for _, l := range d.rateLimits {
+		for _, l := range d.RateLimits {
 			if l.InstanceID == mi.ID {
 				in.RateLimits = append(in.RateLimits, fwconfig.RateLimit{
 					Name: l.Name, Rate: l.Rate, Unit: l.Unit, Per: l.Per, Burst: l.Burst,
@@ -621,7 +449,7 @@ func buildPeer(in Input, generation int64, only map[string]bool, firewallID uint
 				})
 			}
 		}
-		for _, n := range d.nat {
+		for _, n := range d.NatRules {
 			if n.InstanceID != mi.ID || !n.Enabled {
 				continue
 			}
@@ -663,19 +491,19 @@ func buildPeer(in Input, generation int64, only map[string]bool, firewallID uint
 		}
 		// A 6in4 tunnel's default route: the tunnel is point to point, so
 		// no gateway.
-		for _, mif := range d.interfaces {
+		for _, mif := range d.Interfaces {
 			if mif.InstanceID == mi.ID && mif.Kind == fwconfig.Kind6in4 && mif.TunnelDefaultRoute && mif.Enabled {
 				in.Routes = append(in.Routes, fwconfig.Route{Destination: "::/0", Interface: mif.Name, Metric: fwconfig.TunnelRouteMetric})
 			}
 		}
 		vrfName := map[uint]string{}
-		for _, v := range d.vrfs {
+		for _, v := range d.Vrfs {
 			if v.InstanceID == mi.ID {
 				vrfName[v.ID] = v.Name
 				in.VRFs = append(in.VRFs, fwconfig.VRF{Name: v.Name, Table: v.RouteTable, Description: v.Description, EVPN: v.EVPN()})
 			}
 		}
-		for _, r := range d.routes {
+		for _, r := range d.Routes {
 			if r.InstanceID != mi.ID || !r.Enabled {
 				continue
 			}
@@ -721,7 +549,7 @@ func buildPeer(in Input, generation int64, only map[string]bool, firewallID uint
 			}
 		}
 
-		for _, r := range d.policyRoutes {
+		for _, r := range d.PolicyRoutes {
 			if r.InstanceID != mi.ID || !r.Enabled {
 				continue
 			}
@@ -752,7 +580,7 @@ func buildPeer(in Input, generation int64, only map[string]bool, firewallID uint
 			}
 		}
 
-		for _, n := range d.neighbours {
+		for _, n := range d.StaticNeighbours {
 			ifc, ok := ifaceByID[n.InterfaceID]
 			if n.InstanceID != mi.ID || !n.Enabled || !ok || !ifc.Enabled {
 				continue
@@ -773,7 +601,7 @@ func buildPeer(in Input, generation int64, only map[string]bool, firewallID uint
 		if mi.Dns64 {
 			in.DNS.DNS64 = mi.Nat64Prefix
 		}
-		for _, b := range d.blocklists {
+		for _, b := range d.DnsBlocklists {
 			if b.InstanceID == mi.ID && b.Enabled {
 				in.DNS.Blocklists = append(in.DNS.Blocklists, fwconfig.DNSBlocklist{Name: b.Name, URLs: b.Urls, Key: b.AuthKey, Action: b.Action, Refresh: b.Refresh})
 			}
@@ -792,7 +620,7 @@ func buildPeer(in Input, generation int64, only map[string]bool, firewallID uint
 		case fwconfig.UpstreamForward, "":
 			in.DNS.Forwarders = expand("instance "+mi.Name+": dns forwarders", objs.Hosts, mi.DnsForwarders)
 		case fwconfig.UpstreamDHCP:
-			for _, mif := range d.interfaces {
+			for _, mif := range d.Interfaces {
 				if mif.InstanceID == mi.ID && mif.DnsFromDhcp && mif.Ipv4Mode == fwconfig.ModeDHCP {
 					in.DNS.DHCPInterface = mif.Name
 				}
@@ -805,7 +633,7 @@ func buildPeer(in Input, generation int64, only map[string]bool, firewallID uint
 		// DHCP and router advertisements hand out as the DNS server.
 		listenAddr := map[string]map[bool]string{}
 		for _, ifc := range in.Interfaces {
-			for _, mif := range d.interfaces {
+			for _, mif := range d.Interfaces {
 				if mif.InstanceID == mi.ID && mif.Name == ifc.Name && mif.DnsListen {
 					in.DNS.ListenInterfaces = append(in.DNS.ListenInterfaces, ifc.Name)
 				}
@@ -820,7 +648,7 @@ func buildPeer(in Input, generation int64, only map[string]bool, firewallID uint
 			}
 		}
 		var forwardZones []*fwconfig.DNSZone
-		for _, z := range d.dnsZones {
+		for _, z := range d.DnsZones {
 			if z.InstanceID != mi.ID {
 				continue
 			}
@@ -837,7 +665,7 @@ func buildPeer(in Input, generation int64, only map[string]bool, firewallID uint
 				}
 			}
 			domain := ""
-			for _, r := range d.records {
+			for _, r := range d.DnsRecords {
 				if r.ZoneID != z.ID {
 					continue
 				}
@@ -880,11 +708,11 @@ func buildPeer(in Input, generation int64, only map[string]bool, firewallID uint
 		}
 		// The addresses of the templates' nameservers, in the zone their
 		// name is in (glue for a nameserver inside its own zone).
-		for _, z := range d.dnsZones {
+		for _, z := range d.DnsZones {
 			if z.InstanceID != mi.ID || z.DnsTemplateID == nil {
 				continue
 			}
-			for _, t := range d.templates {
+			for _, t := range d.DnsTemplates {
 				if t.ID == *z.DnsTemplateID {
 					addNameserverRecords(forwardZones, t.Nameservers)
 				}
@@ -947,7 +775,7 @@ func buildPeer(in Input, generation int64, only map[string]bool, firewallID uint
 					DNSServers: dns,
 				}
 				if pfx.Addr().Is4() {
-					if mif, ok := ifaceByName(d.interfaces, mi.ID, serveOn); ok && mif.Xlat464 {
+					if mif, ok := ifaceByName(d.Interfaces, mi.ID, serveOn); ok && mif.Xlat464 {
 						sub.IPv6OnlyPreferred = fwconfig.IPv6OnlyWait
 					}
 					sub.Gateway = p.DhcpGateway
@@ -979,16 +807,16 @@ func buildPeer(in Input, generation int64, only map[string]bool, firewallID uint
 				}
 			}
 		}
-		delegatedRA(&in, mi, d.interfaces)
+		delegatedRA(&in, mi, d.Interfaces)
 		for i, ra := range in.RA {
-			if mif, ok := ifaceByName(d.interfaces, mi.ID, ra.Interface); ok && mif.Xlat464 {
+			if mif, ok := ifaceByName(d.Interfaces, mi.ID, ra.Interface); ok && mif.Xlat464 {
 				in.RA[i].NAT64Prefix = mi.Nat64Prefix
 			}
 		}
 		if mi.Nat64 {
 			in.NAT64 = &fwconfig.NAT64{Prefix: mi.Nat64Prefix, Pool4: mi.Nat64Pool4}
 			for _, ifc := range in.Interfaces {
-				if mif, ok := ifaceByName(d.interfaces, mi.ID, ifc.Name); ok && mif.Xlat464 {
+				if mif, ok := ifaceByName(d.Interfaces, mi.ID, ifc.Name); ok && mif.Xlat464 {
 					in.NAT64.Interfaces = append(in.NAT64.Interfaces, ifc.Name)
 				}
 			}
@@ -1001,7 +829,7 @@ func buildPeer(in Input, generation int64, only map[string]bool, firewallID uint
 				RateLimit: serviceLimit["ntp"],
 			}
 			for _, ifc := range in.Interfaces {
-				if mif, ok := ifaceByName(d.interfaces, mi.ID, ifc.Name); ok && mif.NtpServe {
+				if mif, ok := ifaceByName(d.Interfaces, mi.ID, ifc.Name); ok && mif.NtpServe {
 					in.NTP.Interfaces = append(in.NTP.Interfaces, ifc.Name)
 				}
 			}
@@ -1015,20 +843,20 @@ func buildPeer(in Input, generation int64, only map[string]bool, firewallID uint
 				Community: mi.SnmpCommunity,
 			}
 			for _, ifc := range in.Interfaces {
-				if mif, ok := ifaceByName(d.interfaces, mi.ID, ifc.Name); ok && mif.SnmpServe {
+				if mif, ok := ifaceByName(d.Interfaces, mi.ID, ifc.Name); ok && mif.SnmpServe {
 					in.SNMP.Interfaces = append(in.SNMP.Interfaces, ifc.Name)
 				}
 			}
-			for i := range d.snmpUsers {
-				if u := &d.snmpUsers[i]; u.InstanceID == mi.ID && u.Enabled {
+			for i := range d.SnmpUsers {
+				if u := &d.SnmpUsers[i]; u.InstanceID == mi.ID && u.Enabled {
 					in.SNMP.Users = append(in.SNMP.Users, u.User())
 				}
 			}
 		}
 
 		if mi.IsDefault {
-			for i := range d.syslogServers {
-				if s := &d.syslogServers[i]; s.InstanceID == mi.ID && s.Enabled {
+			for i := range d.SyslogServers {
+				if s := &d.SyslogServers[i]; s.InstanceID == mi.ID && s.Enabled {
 					if in.Syslog == nil {
 						in.Syslog = &fwconfig.Syslog{}
 					}
@@ -1037,7 +865,7 @@ func buildPeer(in Input, generation int64, only map[string]bool, firewallID uint
 			}
 		}
 
-		for _, c := range d.dyndns {
+		for _, c := range d.DyndnsClients {
 			if c.InstanceID != mi.ID || !c.Enabled {
 				continue
 			}
@@ -1047,7 +875,7 @@ func buildPeer(in Input, generation int64, only map[string]bool, firewallID uint
 				continue
 			}
 			var recs []models.DyndnsRecord
-			for _, r := range d.dyndnsRecs {
+			for _, r := range d.DyndnsRecords {
 				if r.ClientID == c.ID {
 					recs = append(recs, r)
 				}
@@ -1055,7 +883,7 @@ func buildPeer(in Input, generation int64, only map[string]bool, firewallID uint
 			in.DynDNS = append(in.DynDNS, DynDNS(&c, ifc.Name, recs))
 		}
 
-		for _, c := range d.certs {
+		for _, c := range d.Certificates {
 			if c.InstanceID != mi.ID || !c.Enabled {
 				continue
 			}
@@ -1064,7 +892,7 @@ func buildPeer(in Input, generation int64, only map[string]bool, firewallID uint
 				continue
 			}
 			if c.Challenge == fwconfig.ChallengeDNS01 {
-				i := slices.IndexFunc(d.dyndns, func(dc models.DyndnsClient) bool {
+				i := slices.IndexFunc(d.DyndnsClients, func(dc models.DyndnsClient) bool {
 					return c.DyndnsClientID != nil && dc.ID == *c.DyndnsClientID && dc.InstanceID == mi.ID
 				})
 				if i < 0 {
@@ -1072,7 +900,7 @@ func buildPeer(in Input, generation int64, only map[string]bool, firewallID uint
 					continue
 				}
 				cert := Certificate(&c, "")
-				cert.DNS01 = DNS01(&d.dyndns[i])
+				cert.DNS01 = DNS01(&d.DyndnsClients[i])
 				in.Certificates = append(in.Certificates, cert)
 				continue
 			}
@@ -1089,7 +917,7 @@ func buildPeer(in Input, generation int64, only map[string]bool, firewallID uint
 		// OpenVPN, once the certificates are known.
 		for i := range in.Interfaces {
 			if ifc := &in.Interfaces[i]; ifc.Kind == fwconfig.KindOpenVPN {
-				if mif, ok := ifaceByName(d.interfaces, mi.ID, ifc.Name); ok {
+				if mif, ok := ifaceByName(d.Interfaces, mi.ID, ifc.Name); ok {
 					ifc.OpenVPN = d.openVPN(&mi, &mif, &in, addf)
 				}
 			}
@@ -1108,14 +936,14 @@ func buildPeer(in Input, generation int64, only map[string]bool, firewallID uint
 			in.VRFs[i].OSPF, in.VRFs[i].OSPF6 = d.ospf(mi.ID, 2, v), d.ospf(mi.ID, 3, v)
 			in.VRFs[i].ISIS = d.isis(mi.ID, v)
 		}
-		for i := range d.vrrpRouters {
-			if r := &d.vrrpRouters[i]; r.InstanceID == mi.ID {
+		for i := range d.VrrpRouters {
+			if r := &d.VrrpRouters[i]; r.InstanceID == mi.ID {
 				in.VRRP = append(in.VRRP, r.Router())
 			}
 		}
 		// A disabled BFD interface is left out: no BFD there.
-		for i := range d.bfdIfaces {
-			if b := &d.bfdIfaces[i]; b.InstanceID == mi.ID && b.Enabled {
+		for i := range d.BfdInterfaces {
+			if b := &d.BfdInterfaces[i]; b.InstanceID == mi.ID && b.Enabled {
 				bi := b.BFD()
 				bi.DetectMultiplier = cmp.Or(bi.DetectMultiplier, mi.BfdDetectMultiplier)
 				bi.ReceiveInterval = cmp.Or(bi.ReceiveInterval, mi.BfdReceiveInterval)
@@ -1152,7 +980,7 @@ func buildPeer(in Input, generation int64, only map[string]bool, firewallID uint
 		}
 		return doc, nil
 	}
-	for _, l := range d.links {
+	for _, l := range d.Links {
 		if a, b := onFirewall[l.InstanceAID], onFirewall[l.InstanceBID]; !a || !b {
 			if a || b {
 				addf("link %s: its virtual firewalls are on different firewalls", l.Name)
@@ -1169,7 +997,7 @@ func buildPeer(in Input, generation int64, only map[string]bool, firewallID uint
 	// IP lists stay references ("@name") in rules; the agent downloads
 	// them.
 	listName := map[uint]string{}
-	for _, l := range d.ipLists {
+	for _, l := range d.IpLists {
 		listName[l.ID] = l.Name
 		doc.IPLists = append(doc.IPLists, fwconfig.IPList{
 			Name: l.Name, Source: l.Source, URL: l.Url,
@@ -1177,7 +1005,7 @@ func buildPeer(in Input, generation int64, only map[string]bool, firewallID uint
 			Countries: []string(l.Countries),
 		})
 	}
-	for _, t := range d.tasks {
+	for _, t := range d.Tasks {
 		if !t.Enabled || (firewallID != 0 && t.FirewallID != firewallID) {
 			continue
 		}
@@ -1238,13 +1066,13 @@ type haPair struct {
 func pairLinks(d *data, firewallID uint, peer bool, ha *fwconfig.HA, addf func(string, ...any)) haPair {
 	var out haPair
 	on := map[uint]bool{}
-	for _, in := range d.instances {
+	for _, in := range d.Instances {
 		if in.FirewallID == firewallID && in.IsDefault {
 			on[in.ID] = true
 		}
 	}
-	for i := range d.interfaces {
-		ifc := &d.interfaces[i]
+	for i := range d.Interfaces {
+		ifc := &d.Interfaces[i]
 		if !on[ifc.InstanceID] || ifc.HaRole == "" {
 			continue
 		}
@@ -1280,8 +1108,8 @@ func pairLinks(d *data, firewallID uint, peer bool, ha *fwconfig.HA, addf func(s
 
 // vrfByName is an instance's VRF of that name.
 func (d *data) vrfByName(instanceID uint, name string) *models.Vrf {
-	for i := range d.vrfs {
-		if v := &d.vrfs[i]; v.InstanceID == instanceID && v.Name == name {
+	for i := range d.Vrfs {
+		if v := &d.Vrfs[i]; v.InstanceID == instanceID && v.Name == name {
 			return v
 		}
 	}
@@ -1301,7 +1129,7 @@ func inVRF(id *uint, vrf *models.Vrf) bool {
 // instance is in vrf (nil: in none). OSPF and IS-IS interfaces belong to
 // the routing of their interface's VRF.
 func (d *data) ifaceInVRF(instanceID uint, name string, vrf *models.Vrf) bool {
-	for _, ifc := range d.interfaces {
+	for _, ifc := range d.Interfaces {
 		if ifc.InstanceID == instanceID && ifc.Name == name {
 			if vrf == nil {
 				return ifc.Vrf == ""
@@ -1316,8 +1144,8 @@ func (d *data) ifaceInVRF(instanceID uint, name string, vrf *models.Vrf) bool {
 // when it is enabled, or nil.
 func (d *data) bgp(instanceID uint, vrf *models.Vrf) *fwconfig.BGP {
 	var cfg *models.BgpConfig
-	for i := range d.bgpConfigs {
-		if c := &d.bgpConfigs[i]; c.InstanceID == instanceID && inVRF(c.VrfID, vrf) {
+	for i := range d.BgpConfigs {
+		if c := &d.BgpConfigs[i]; c.InstanceID == instanceID && inVRF(c.VrfID, vrf) {
 			cfg = c
 		}
 	}
@@ -1357,14 +1185,14 @@ func (d *data) bgp(instanceID uint, vrf *models.Vrf) *fwconfig.BGP {
 			b.Redistribute = append(b.Redistribute, fwconfig.BGPRedistribute{Family: r.family, Source: r.src, RouteMap: r.routeMap})
 		}
 	}
-	for _, g := range d.bgpGroups {
+	for _, g := range d.BgpPeerGroups {
 		if g.InstanceID == instanceID && inVRF(g.VrfID, vrf) {
 			p := g.Peer()
 			p.Name = g.Name
 			b.PeerGroups = append(b.PeerGroups, p)
 		}
 	}
-	for _, n := range d.bgpNeighbors {
+	for _, n := range d.BgpNeighbors {
 		if n.InstanceID == instanceID && n.Enabled && inVRF(n.VrfID, vrf) {
 			p := n.Peer()
 			p.Address, p.PeerGroup, p.Interface = n.Address, n.PeerGroup, n.Interface
@@ -1378,8 +1206,8 @@ func (d *data) bgp(instanceID uint, vrf *models.Vrf) *fwconfig.BGP {
 // nil) or a VRF when it is enabled, or nil.
 func (d *data) ospf(instanceID uint, version int, vrf *models.Vrf) *fwconfig.OSPF {
 	var cfg *models.OspfConfig
-	for i := range d.ospfConfigs {
-		if c := &d.ospfConfigs[i]; c.InstanceID == instanceID && c.Version == version && inVRF(c.VrfID, vrf) {
+	for i := range d.OspfConfigs {
+		if c := &d.OspfConfigs[i]; c.InstanceID == instanceID && c.Version == version && inVRF(c.VrfID, vrf) {
 			cfg = c
 		}
 	}
@@ -1400,8 +1228,8 @@ func (d *data) ospf(instanceID uint, version int, vrf *models.Vrf) *fwconfig.OSP
 		Networks:            slices.Clone([]fwconfig.OSPFNetwork(cfg.Networks)),
 		Redistribute:        slices.Clone([]fwconfig.OSPFRedistribute(cfg.Redistribute)),
 	}
-	for i := range d.ospfIfaces {
-		if ifc := &d.ospfIfaces[i]; ifc.InstanceID == instanceID && ifc.Version == version && d.ifaceInVRF(instanceID, ifc.Name, vrf) {
+	for i := range d.OspfInterfaces {
+		if ifc := &d.OspfInterfaces[i]; ifc.InstanceID == instanceID && ifc.Version == version && d.ifaceInVRF(instanceID, ifc.Name, vrf) {
 			o.Interfaces = append(o.Interfaces, ifc.Interface())
 		}
 	}
@@ -1412,8 +1240,8 @@ func (d *data) ospf(instanceID uint, version int, vrf *models.Vrf) *fwconfig.OSP
 // when it is enabled, or nil.
 func (d *data) isis(instanceID uint, vrf *models.Vrf) *fwconfig.ISIS {
 	var cfg *models.IsisConfig
-	for i := range d.isisConfigs {
-		if c := &d.isisConfigs[i]; c.InstanceID == instanceID && inVRF(c.VrfID, vrf) {
+	for i := range d.IsisConfigs {
+		if c := &d.IsisConfigs[i]; c.InstanceID == instanceID && inVRF(c.VrfID, vrf) {
 			cfg = c
 		}
 	}
@@ -1438,7 +1266,7 @@ func (d *data) isis(instanceID uint, vrf *models.Vrf) *fwconfig.ISIS {
 	if cfg.NetInterface != "" {
 		// The NET follows the interface's IPv4 address; without one, the
 		// NET made when it was saved.
-		for _, ifc := range d.interfaces {
+		for _, ifc := range d.Interfaces {
 			if ifc.InstanceID == instanceID && ifc.Name == cfg.NetInterface {
 				if net, ok := fwconfig.ISISNetFromAddresses(cfg.NetArea, ifc.Addresses); ok {
 					s.NET = net
@@ -1446,8 +1274,8 @@ func (d *data) isis(instanceID uint, vrf *models.Vrf) *fwconfig.ISIS {
 			}
 		}
 	}
-	for i := range d.isisIfaces {
-		if ifc := &d.isisIfaces[i]; ifc.InstanceID == instanceID && d.ifaceInVRF(instanceID, ifc.Name, vrf) {
+	for i := range d.IsisInterfaces {
+		if ifc := &d.IsisInterfaces[i]; ifc.InstanceID == instanceID && d.ifaceInVRF(instanceID, ifc.Name, vrf) {
 			s.Interfaces = append(s.Interfaces, ifc.Interface())
 		}
 	}
@@ -1458,22 +1286,22 @@ func (d *data) isis(instanceID uint, vrf *models.Vrf) *fwconfig.ISIS {
 // (BGP, OSPF or IS-IS): off, they stay out of the document.
 func (d *data) routingPolicy(in *fwconfig.Instance, instanceID uint) {
 	rp := &in.RoutingPolicy
-	for _, l := range d.prefixLists {
+	for _, l := range d.RoutePrefixLists {
 		if l.InstanceID == instanceID {
 			rp.PrefixLists = append(rp.PrefixLists, fwconfig.PrefixList{Name: l.Name, Family: l.Family, Description: l.Description, Entries: slices.Clone([]fwconfig.PrefixListEntry(l.Entries))})
 		}
 	}
-	for _, l := range d.asPathLists {
+	for _, l := range d.RouteAsPathLists {
 		if l.InstanceID == instanceID {
 			rp.ASPathLists = append(rp.ASPathLists, fwconfig.ASPathList{Name: l.Name, Description: l.Description, Entries: slices.Clone([]fwconfig.ASPathEntry(l.Entries))})
 		}
 	}
-	for _, l := range d.communityLists {
+	for _, l := range d.RouteCommunityLists {
 		if l.InstanceID == instanceID {
 			rp.CommunityLists = append(rp.CommunityLists, fwconfig.CommunityList{Name: l.Name, Kind: l.Kind, Description: l.Description, Entries: slices.Clone([]fwconfig.CommunityEntry(l.Entries))})
 		}
 	}
-	for _, m := range d.routeMaps {
+	for _, m := range d.RouteMaps {
 		if m.InstanceID == instanceID {
 			rp.RouteMaps = append(rp.RouteMaps, fwconfig.RouteMap{Name: m.Name, Description: m.Description, Entries: slices.Clone([]fwconfig.RouteMapEntry(m.Entries))})
 		}
@@ -1507,16 +1335,16 @@ func (d *data) openVPN(mi *models.Instance, mif *models.Interface, in *fwconfig.
 	if o.Mode == fwconfig.OpenVPNAdaptive {
 		o.TCPAddresses = slices.Clone([]string(mif.OvpnTcpAddresses))
 	}
-	i := slices.IndexFunc(d.certs, func(c models.Certificate) bool {
+	i := slices.IndexFunc(d.Certificates, func(c models.Certificate) bool {
 		return mif.OvpnCertificateID != nil && c.ID == *mif.OvpnCertificateID && c.InstanceID == mi.ID
 	})
 	switch {
 	case i < 0:
 		addf("instance %s: OpenVPN %s: choose a certificate of this virtual firewall", mi.Name, mif.Name)
-	case !d.certs[i].Enabled:
-		addf("instance %s: OpenVPN %s: its certificate %s is disabled", mi.Name, mif.Name, d.certs[i].Name)
+	case !d.Certificates[i].Enabled:
+		addf("instance %s: OpenVPN %s: its certificate %s is disabled", mi.Name, mif.Name, d.Certificates[i].Name)
 	default:
-		o.Certificate = d.certs[i].Name
+		o.Certificate = d.Certificates[i].Name
 	}
 	o.Users, o.RequireRole = d.openVPNUsers(mif), mif.OvpnRequireRole
 	if mif.OvpnRoleID != nil {
@@ -1586,22 +1414,22 @@ func (d *data) directory() *fwconfig.Directory {
 func (d *data) acmeProxy(mi *models.Instance, in *fwconfig.Instance, prefixes func(where string, list []string) []string, addf func(string, ...any)) *fwconfig.ACMEProxy {
 	x := &fwconfig.ACMEProxy{Port: mi.AcmeProxyPort, CA: mi.AcmeProxyCa, Email: mi.AcmeProxyEmail, Interfaces: []string{}, Policies: []fwconfig.ACMEProxyPolicy{}}
 	for _, ifc := range in.Interfaces {
-		if mif, ok := ifaceByName(d.interfaces, mi.ID, ifc.Name); ok && mif.AcmeProxyServe {
+		if mif, ok := ifaceByName(d.Interfaces, mi.ID, ifc.Name); ok && mif.AcmeProxyServe {
 			x.Interfaces = append(x.Interfaces, ifc.Name)
 		}
 	}
 	if id := mi.AcmeProxyCertificateID; id != nil {
-		i := slices.IndexFunc(d.certs, func(c models.Certificate) bool { return c.ID == *id && c.InstanceID == mi.ID })
+		i := slices.IndexFunc(d.Certificates, func(c models.Certificate) bool { return c.ID == *id && c.InstanceID == mi.ID })
 		switch {
 		case i < 0:
 			addf("instance %s: ACME proxy: its certificate is not in this instance", mi.Name)
-		case !d.certs[i].Enabled:
-			addf("instance %s: ACME proxy: its certificate %s is disabled", mi.Name, d.certs[i].Name)
+		case !d.Certificates[i].Enabled:
+			addf("instance %s: ACME proxy: its certificate %s is disabled", mi.Name, d.Certificates[i].Name)
 		default:
-			x.Certificate = d.certs[i].Name
+			x.Certificate = d.Certificates[i].Name
 		}
 	}
-	for _, p := range d.proxyPolicies {
+	for _, p := range d.AcmeProxyPolicies {
 		if p.InstanceID != mi.ID || !p.Enabled {
 			continue
 		}
@@ -1610,23 +1438,23 @@ func (d *data) acmeProxy(mi *models.Instance, in *fwconfig.Instance, prefixes fu
 			Sources: prefixes("instance "+mi.Name+": ACME proxy policy "+p.Name, p.Sources),
 		}
 		if p.Challenge == fwconfig.ChallengeHTTP01 {
-			i := slices.IndexFunc(d.interfaces, func(ifc models.Interface) bool {
+			i := slices.IndexFunc(d.Interfaces, func(ifc models.Interface) bool {
 				return p.InterfaceID != nil && ifc.ID == *p.InterfaceID && ifc.InstanceID == mi.ID
 			})
 			if i < 0 {
 				addf("instance %s: ACME proxy policy %s: its interface is not in this instance", mi.Name, p.Name)
 				continue
 			}
-			pol.Challenge, pol.Interface = fwconfig.ChallengeHTTP01, d.interfaces[i].Name
+			pol.Challenge, pol.Interface = fwconfig.ChallengeHTTP01, d.Interfaces[i].Name
 		} else {
-			i := slices.IndexFunc(d.dyndns, func(dc models.DyndnsClient) bool {
+			i := slices.IndexFunc(d.DyndnsClients, func(dc models.DyndnsClient) bool {
 				return p.DyndnsClientID != nil && dc.ID == *p.DyndnsClientID && dc.InstanceID == mi.ID
 			})
 			if i < 0 {
 				addf("instance %s: ACME proxy policy %s: its DNS update client is not in this instance", mi.Name, p.Name)
 				continue
 			}
-			pol.Challenge, pol.DNS01 = fwconfig.ChallengeDNS01, DNS01(&d.dyndns[i])
+			pol.Challenge, pol.DNS01 = fwconfig.ChallengeDNS01, DNS01(&d.DyndnsClients[i])
 		}
 		x.Policies = append(x.Policies, pol)
 	}
@@ -1685,9 +1513,9 @@ func RecordName(domain, name string) string {
 // if it doesn't exist.
 func (d *data) addDNSTemplate(dns *fwconfig.DNSServer, id uint) string {
 	var t *models.DnsTemplate
-	for i := range d.templates {
-		if d.templates[i].ID == id {
-			t = &d.templates[i]
+	for i := range d.DnsTemplates {
+		if d.DnsTemplates[i].ID == id {
+			t = &d.DnsTemplates[i]
 		}
 	}
 	if t == nil {
@@ -1697,7 +1525,7 @@ func (d *data) addDNSTemplate(dns *fwconfig.DNSServer, id uint) string {
 		return t.Name
 	}
 	zt := fwconfig.DNSZoneTemplate{Name: t.Name, DefaultTTL: t.DefaultTtl, Nameservers: t.Nameservers.Names()}
-	for _, s := range d.soas {
+	for _, s := range d.DnsSoaTemplates {
 		if s.ID != t.SoaTemplateID {
 			continue
 		}
@@ -1709,7 +1537,7 @@ func (d *data) addDNSTemplate(dns *fwconfig.DNSServer, id uint) string {
 			})
 		}
 	}
-	for _, k := range d.policies {
+	for _, k := range d.DnsDnssecPolicies {
 		if t.DnssecPolicyID == nil || k.ID != *t.DnssecPolicyID {
 			continue
 		}
@@ -1867,7 +1695,3 @@ func resolvePortNames(ports string, names map[string]int) string {
 	}
 	return strings.Join(parts, ",")
 }
-
-// DecodeRows decodes rows of a table (sqlmap.Rows) into dst, a pointer to
-// a slice of the table's model.
-func DecodeRows(rows []sqlmap.Row, dst any) error { return decodeRows(rows, dst) }

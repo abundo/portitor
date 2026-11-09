@@ -84,10 +84,14 @@ func (s *Server) tree() (*treeState, error) {
 				if err := syncInstanceRoles(tx, c); err != nil {
 					return err
 				}
+				idx, err := t.mapping.AssignIDs(tx, c)
+				if err != nil {
+					return err
+				}
 				if !tx.Migrator().HasTable("instances") {
 					return nil
 				}
-				return t.mapping.Write(tx, c)
+				return t.mapping.Write(tx, c, idx)
 			})
 		}
 	})
@@ -263,8 +267,11 @@ func (s *Server) syncFromTables(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	tree, ok, err := s.importTables(s.db)
-	if err != nil || !ok {
+	tree, idx, err := t.mapping.Import(s.db)
+	if err != nil {
+		return err
+	}
+	if err := s.db.Transaction(func(tx *gorm.DB) error { return t.mapping.KeepIDs(tx, idx) }); err != nil {
 		return err
 	}
 	return t.store.Replace(ctx, tree)

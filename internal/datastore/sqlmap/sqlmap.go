@@ -455,10 +455,11 @@ func readJSONColumn(n *datastore.Node, j *jsonCol, v any) error {
 	return nil
 }
 
-// Write makes the tables hold t: rows updated where their entry's columns
-// changed, inserted for new entries and deleted for those gone. Run it in
-// a transaction; it defers the foreign keys to its commit.
-func (m *Mapping) Write(tx *gorm.DB, tree *datastore.Tree) error {
+// Write makes the tables hold t, its entries' rows having the ids of idx
+// (AssignIDs): rows updated where their entry's columns changed, inserted
+// for new entries and deleted for those gone. Run it in a transaction; it
+// defers the foreign keys to its commit.
+func (m *Mapping) Write(tx *gorm.DB, tree *datastore.Tree, idx Index) error {
 	if err := tx.Exec("PRAGMA defer_foreign_keys = ON").Error; err != nil {
 		return err
 	}
@@ -466,24 +467,13 @@ func (m *Mapping) Write(tx *gorm.DB, tree *datastore.Tree) error {
 	if err != nil {
 		return err
 	}
-	oldByPath := map[string]*datastore.Node{}
-	for n := range oldIdx {
-		oldByPath[pathKey(m.root, n)] = n
-	}
-	// An entry renamed keeps its row, and so do the entries below it.
-	for _, r := range tree.Renamed {
-		from := r.Path.String(m.root)
-		to := slices.Clone(r.Path)
-		to[len(to)-1] = datastore.Elem{Name: to[len(to)-1].Name, Keys: r.Keys}
-		toKey := to.String(m.root)
-		moved := map[string]*datastore.Node{}
-		for k, n := range oldByPath {
-			if k == from || strings.HasPrefix(k, from+"/") {
-				moved[toKey+strings.TrimPrefix(k, from)] = n
-				delete(oldByPath, k)
-			}
+	oldByID := map[string]map[int64]*datastore.Node{}
+	for n, id := range oldIdx {
+		t := m.byList[n.S].name
+		if oldByID[t] == nil {
+			oldByID[t] = map[int64]*datastore.Node{}
 		}
-		maps.Copy(oldByPath, moved)
+		oldByID[t][id] = n
 	}
 	ext := map[string]map[string]int64{}
 	newIdx := Index{}
@@ -522,9 +512,12 @@ func (m *Mapping) Write(tx *gorm.DB, tree *datastore.Tree) error {
 				if err != nil {
 					return err
 				}
-				if oe := oldByPath[pathKey(m.root, e)]; oe != nil {
-					id := oldIdx[oe]
-					newIdx[e] = id
+				id, ok := idx[e]
+				if !ok {
+					return fmt.Errorf("%s: it has no id", pathKey(m.root, e))
+				}
+				newIdx[e] = id
+				if oe := oldByID[t.name][id]; oe != nil {
 					prev, err := m.columns(t, old, oe, position(oe), oldIdx, ext, tx, true)
 					if err != nil {
 						return err
@@ -532,16 +525,16 @@ func (m *Mapping) Write(tx *gorm.DB, tree *datastore.Tree) error {
 					if err := update(tx, t.name, id, cols, prev); err != nil {
 						return err
 					}
-					delete(oldByPath, pathKey(m.root, e))
+					delete(oldByID[t.name], id)
 				} else {
 					if t.singleton != 0 {
 						return fmt.Errorf("%s: row %d is missing", t.name, t.singleton)
 					}
-					id, err := insert(tx, t.name, cols)
-					if err != nil {
+					cols["id"] = id
+					if _, err := insert(tx, t.name, cols); err != nil {
 						return err
 					}
-					newIdx[e] = id
+					delete(cols, "id")
 				}
 				entries = append(entries, entry{e, t, cols})
 				if err := walk(e); err != nil {
@@ -565,9 +558,11 @@ func (m *Mapping) Write(tx *gorm.DB, tree *datastore.Tree) error {
 		}
 	}
 	// What is gone, children before parents.
-	gone := make([]*datastore.Node, 0, len(oldByPath))
-	for _, n := range oldByPath {
-		gone = append(gone, n)
+	var gone []*datastore.Node
+	for _, byID := range oldByID {
+		for _, n := range byID {
+			gone = append(gone, n)
+		}
 	}
 	sort.Slice(gone, func(i, j int) bool { return depth(gone[i]) > depth(gone[j]) })
 	for _, n := range gone {
@@ -842,13 +837,16 @@ func update(tx *gorm.DB, tbl string, id int64, cols, prev map[string]any) error 
 // Row is a table's row made from an entry: its columns by name.
 type Row map[string]any
 
-// Rows makes the tables' rows from t, without a database: what the
-// builder reads. Rows get ids of their own (a list keyed by id keeps its
-// id), references the ids of the rows they name, and names outside the
-// tree (firewalls, roles) the ids db has for them.
-func (m *Mapping) Rows(db *gorm.DB, tree *datastore.Tree) (map[string][]Row, Index, error) {
+// Rows makes the tables' rows from t, without the tables: what the
+// builder and the readers of the configuration read (package confview).
+// Rows have the ids of ids (a list keyed by id has its own; an entry ids
+// doesn't know gets one above them), references the ids of the rows they
+// name, and names outside the tree (firewalls, roles) the ids db has for
+// them.
+func (m *Mapping) Rows(db *gorm.DB, tree *datastore.Tree, ids IDs) (map[string][]Row, Index, error) {
 	idx := Index{}
 	next := map[string]int64{}
+	maps.Copy(next, ids.max)
 	ext := map[string]map[string]int64{}
 	out := map[string][]Row{}
 	type entry struct {
@@ -857,45 +855,22 @@ func (m *Mapping) Rows(db *gorm.DB, tree *datastore.Tree) (map[string][]Row, Ind
 		row Row
 	}
 	var entries []entry
-	// Ids first: a list keyed by id keeps its own, others count on from
-	// the largest of those.
-	var assign func(n *datastore.Node)
-	used := map[string]map[int64]bool{}
-	assign = func(n *datastore.Node) {
-		for _, s := range n.S.Children {
-			if s.State {
-				continue
-			}
-			t := m.byList[s]
-			if t == nil {
-				if c := n.Containers[s.Name]; c != nil && s.Kind == schema.Container {
-					assign(c)
-				}
-				continue
-			}
-			if used[t.name] == nil {
-				used[t.name] = map[int64]bool{}
-			}
-			if t.singleton != 0 {
-				c := n.Containers[s.Name]
-				if c == nil {
-					c = n.AddContainer(s)
-				}
-				idx[c] = t.singleton
-				continue
-			}
-			for _, e := range n.Lists[s.Name] {
-				if v, ok := e.Leaves["id"]; ok && slices.Contains(t.s.Keys, "id") {
-					id := toInt(v)
-					idx[e] = id
-					used[t.name][id] = true
-					next[t.name] = max(next[t.name], id)
-				}
-				assign(e)
-			}
+	// Ids first: a list keyed by id keeps its own, others theirs of ids,
+	// and new ones count on from the largest of those.
+	m.walkEntries(tree.Root, func(e *datastore.Node, t *table) {
+		if t.singleton != 0 {
+			idx[e] = t.singleton
+			return
 		}
-	}
-	assign(tree.Root)
+		if v, ok := e.Leaves["id"]; ok && slices.Contains(t.s.Keys, "id") {
+			idx[e] = toInt(v)
+			next[t.name] = max(next[t.name], idx[e])
+			return
+		}
+		if r, ok := ids.byPath[pathKey(m.root, e)]; ok && r.tbl == t.name {
+			idx[e] = r.id
+		}
+	})
 	var walk func(n *datastore.Node) error
 	walk = func(n *datastore.Node) error {
 		for _, s := range n.S.Children {
