@@ -4,7 +4,9 @@
 package sqlmap
 
 import (
+	"cmp"
 	"fmt"
+	"slices"
 
 	"gorm.io/gorm"
 
@@ -22,11 +24,12 @@ type Adder struct {
 	byID map[*table]map[int64]*datastore.Node
 	idx  Index
 	ext  map[string]map[int64]string
+	pos  map[*datastore.Node]int64 // the position column of the entries added
 }
 
 // NewAdder adds to tree, whose entries have the ids of idx (confview).
 func (m *Mapping) NewAdder(db *gorm.DB, tree *datastore.Tree, idx Index) *Adder {
-	a := &Adder{m: m, db: db, tree: tree, byID: map[*table]map[int64]*datastore.Node{}, idx: Index{}, ext: map[string]map[int64]string{}}
+	a := &Adder{m: m, db: db, tree: tree, byID: map[*table]map[int64]*datastore.Node{}, idx: Index{}, ext: map[string]map[int64]string{}, pos: map[*datastore.Node]int64{}}
 	for n, id := range idx {
 		a.index(n, id)
 	}
@@ -129,6 +132,25 @@ func (a *Adder) Add(tbl string, row Row) (*datastore.Node, error) {
 			return nil, &datastore.Error{Path: datastore.PathOf(parent).String(a.m.root) + "/" + t.s.Name, Msg: fmt.Sprintf("%v exists", keys)}
 		}
 		n = parent.AddEntry(t.s, leaves)
+		// In an ordered list, after the entries of a lower or the same
+		// position (those there before count as lower).
+		if t.position != "" {
+			a.pos[n] = toInt(row[t.position])
+			list := parent.Lists[t.s.Name]
+			slices.SortStableFunc(list, func(x, y *datastore.Node) int {
+				px, okx := a.pos[x]
+				py, oky := a.pos[y]
+				switch {
+				case !okx && !oky:
+					return 0
+				case !okx:
+					return -1
+				case !oky:
+					return 1
+				}
+				return cmp.Compare(px, py)
+			})
+		}
 	}
 	for _, c := range t.cols {
 		if c.kind == leafList {

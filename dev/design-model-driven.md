@@ -3,7 +3,7 @@
 
 # Design: a model-driven configuration
 
-Status: phases 1 to 3 implemented, 2026-11-08. There are no production systems, so no
+Status: phases 1 to 5 implemented; the configuration tables gone (step G), 2026-11-09. There are no production systems, so no
 migration is planned beyond what portitor-config does itself.
 
 ## Goals
@@ -25,11 +25,11 @@ change: the document stays the contract between portitor-config and the agent.
 | YANG modules | `yang/` | the schema: module `portitor`, submodules by area, extensions `portitor-extensions` |
 | Schema | `internal/schema` | compiles the modules (goyang) into the tree the frontends walk: kinds, keys, order, types, defaults, descriptions, extensions |
 | Datastore | `internal/datastore` | the configuration as a tree: set, delete, rename (rewriting references), move, validate, JSON (RFC 7951), diff, patch; the shared candidate (`Store`) |
-| SQL bridge | `internal/datastore/sqlmap` | reads the tree from the tables and writes it back, keeping row ids |
+| Rows | `internal/datastore/sqlmap`, `internal/confview` | the tree as rows (the `px:` mapping), decoded into the models, for the builder and the code of before the tree; entries from rows for the imports (`Adder`); the entries' ids kept by path (`config_ids`) |
 | NETCONF | `internal/netconf` | the NETCONF server on the datastore: framing, XML, edit-config, subtree filters, commit, locks, get-schema |
 | CLI | `internal/cli` | the command line, its help and completion from the schema; the terminal, scripts and the SSH server |
 | State | `yang/portitor-state.yang`, `web/state.go` | the live data as `config false` YANG, from the API's live views |
-| Backend | `web/datastore.go` | Current (the tables), Running (the live commit's snapshot), Commit (write and deploy); access by role; SSH logins |
+| Backend | `web/datastore.go` | the candidate (`candidate.json`), Running (the live commit's configuration), Commit (deploy); access by role; SSH logins |
 
 ## The phases
 
@@ -90,7 +90,11 @@ broken on the branch until then. The steps, in order:
 | E | **The rest:** HA replica (copies the commits and the candidate), promotion, bootstrap and join, the NIC import, backup and restore, bundles, the IP list tasks, the dashboard. | Done. The replica reads the copied tables into its candidate and fetches the live commit's configuration (`GET /ha/v1/commits/<n>`); promotion reads the tables in before it commits. `iso/portitor-setup.py`, `dev/seed.sh` and the console's `set` write through `/api/config`. Code of the CRUD's time that writes configuration into the tables runs as one change of the candidate: `viaTables` (bootstrap, a new NIC's import) or `legacyWrite` (the WireGuard, nftables and bundle imports), each in a transaction rolled back, read into the candidate, normalized and checked. The CRUD's configuration resources only answer reads (`registerRead`); their writes, `registerTree` and the bulk record, reorder and rekey routes are gone. A new IP list's task comes from its `schedule` action. Backup and restore stay as they were: a restore keeps this installation's deployments, so running stays its live commit, and the backup's configuration becomes the candidate. Left on the tables: Settings and the firewalls, which also write rows that are not configuration (`syncAfter`), and the reads that need row ids. |
 | F | **Tests and docs.** | Docs: AGENTS.md (the tree as the configuration, `/api/config`, `checkEdit`, secrets, access by path, adding a feature) and the portitor-web guide (`set`, the API by path). Tests: the web tests are on the tree (`treetest_test.go` helpers), with the API's behaviour the GUI relies on (secret annotation, `""`, `null`, merges, shallow, defaults, list PUTs, `move-to`, `chain`, record checks, the console's `set`, the replica's commit). The frontend has no test runner: its pages are checked by hand (lint and build only). After the cut-over (decided): the configuration tables stay, as a read model of the tree, written only from the candidate (`Store.OnChange`); code that reads them moves to the tree when it is touched, and the tables are not dropped. Done since: the routes by row id that the entries' actions replaced are gone (two actions' access tightened to the routes': bundle export global admins only, IP list refresh a write), the CRUD's dead write code is gone (~110 functions), and the GUI's table exports are reads alone. Phase 5, SNMP, done since. |
 
+| G | **The tables go** (decided 2026-11-09): the configuration tables, the read model, are dropped (migration 94); SQLite keeps what is not configuration. | Done. Entries' ids are kept by path in `config_ids` (`sqlmap.AssignIDs`, on every change of the candidate: kept across a rename, never another entry's, given back to an entry made again at a deleted one's path). `confview` is the candidate as rows (the models, with those ids), cached per candidate generation (`Store.CandidateGen`): the builder, the handlers that took rows and the GUI's 13 remaining reads of rows (`configreads.go`) read it. Writes are tree edits: firewalls (their host, rename and delete), Settings (`last_commit` and `web_certificate_id` stay in `settings`), bootstrap, NICs, the WireGuard and nftables imports (models added as rows, `rowWriter`/`sqlmap.Adder`), promotion (`Store.EditRaw`), bundles (format 2: the tree's JSON). A backup and the replica's copy carry the candidate and `ids.json` in the copy's table `config_snapshot`. `Import`, `Write`, the CRUD's reference code and the configuration's goose history in tests are gone. Not done: a migration of the tree's JSON for a renamed or removed leaf (a new leaf needs none). |
+
 ## How phase 1 works
+
+(As built in phase 1, with the tables; they are gone since step G.)
 
 **The tables stay the store**, so everything that reads them (the builder, deploy,
 Revert, the HA replica, bundles, the GUI) works unchanged. The YANG modules map onto

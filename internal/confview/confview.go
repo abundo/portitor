@@ -265,7 +265,9 @@ func DecodeRows(rows []sqlmap.Row, dst any) error {
 }
 
 // RowOf is the row of a model (a pointer to one of package models'
-// structs): its table and its columns, as sqlmap.Adder takes them.
+// structs): its table and its columns, as sqlmap.Adder takes them. A zero
+// field with a default (gorm:"default:...") has its default, as gorm's
+// Create gave it.
 func RowOf(model any) (string, sqlmap.Row, error) {
 	sch, err := gormschema.Parse(model, schemaCache, gormschema.NamingStrategy{})
 	if err != nil {
@@ -282,6 +284,12 @@ func RowOf(model any) (string, sqlmap.Row, error) {
 			continue
 		}
 		v, zero := f.ValueOf(ctx, rv)
+		// A zero value takes the field's default, as gorm's Create gives
+		// it.
+		if zero && f.HasDefaultValue && f.DefaultValueInterface != nil {
+			row[f.DBName] = plainValue(reflect.ValueOf(f.DefaultValueInterface))
+			continue
+		}
 		if zero && f.FieldType.Kind() == reflect.Pointer {
 			row[f.DBName] = nil
 			continue

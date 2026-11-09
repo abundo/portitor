@@ -207,7 +207,7 @@ func (s *Server) Echo() *echo.Echo {
 	g.GET("/settings", s.handleGetSettings)
 	g.PUT("/settings", s.handlePutSettings)
 	g.POST("/backup", s.handleBackup)
-	g.POST(strings.TrimPrefix(restorePath, "/api"), s.handleRestore, middleware.BodyLimit(backupMaxSize/3*4+1<<20), s.syncAfter)
+	g.POST(strings.TrimPrefix(restorePath, "/api"), s.handleRestore, middleware.BodyLimit(backupMaxSize/3*4+1<<20))
 	g.GET("/users", s.handleListUsers)
 	g.POST("/users", s.handleCreateUser)
 	g.PUT("/users/:id", s.handleUpdateUser)

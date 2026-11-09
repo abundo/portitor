@@ -24,6 +24,7 @@ import (
 
 	"github.com/abundo/portitor/internal/agent"
 	"github.com/abundo/portitor/internal/builder"
+	"github.com/abundo/portitor/internal/datastore"
 	"github.com/abundo/portitor/internal/dbmigrate"
 	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/internal/ipam"
@@ -57,12 +58,14 @@ func newEnv(t *testing.T) *testEnv {
 	if err := dbmigrate.Up(db); err != nil {
 		t.Fatal(err)
 	}
-	// Most tests use several instances.
-	if err := db.Save(&models.Settings{ID: 1, ConfirmTimeout: 120, CaptureRateKbps: 1000, VirtualFirewalls: true}).Error; err != nil {
-		t.Fatal(err)
-	}
 	cfg := &Config{JWTSecret: strings.Repeat("s", 32), Dev: true}
 	srv := NewServer(cfg, db)
+	// Most tests use several instances.
+	if err := srv.editConfig(t.Context(), func(work *datastore.Tree) error {
+		return work.Set(datastore.Path{{Name: "settings"}, {Name: "virtual-firewalls"}}, "true")
+	}); err != nil {
+		t.Fatal(err)
+	}
 	srv.static = os.DirFS(t.TempDir())
 	env := &testEnv{t: t, srv: srv, e: srv.Echo()}
 	if err := CreateUser(srv, "admin", "correct horse battery"); err != nil {
@@ -377,8 +380,7 @@ func TestDeployEndToEnd(t *testing.T) {
 	}
 
 	// Revert discards uncommitted edits, new rows included.
-	var nRules, nDeployed int64
-	env.srv.db.Model(&models.Rule{}).Count(&nDeployed)
+	nDeployed := len(env.view().Rules)
 	env.patch("instance=main/nat-rule="+nat, map[string]any{"enabled": false})
 	env.post("instance=main/rule", map[string]any{"chain": "input", "action": "drop", "enabled": true})
 	if got := changes(); !strings.Contains(got, `"changed":true`) {
@@ -390,8 +392,7 @@ func TestDeployEndToEnd(t *testing.T) {
 	if got := changes(); !strings.Contains(got, `"changed":false`) {
 		t.Errorf("changes after revert: %s", got)
 	}
-	env.srv.db.Model(&models.Rule{}).Count(&nRules)
-	if nRules != nDeployed {
+	if nRules := len(env.view().Rules); nRules != nDeployed {
 		t.Errorf("rules after revert: %d, want %d", nRules, nDeployed)
 	}
 	if fw := firstFirewall(t, env); fw.AgentURL != ts.URL {
@@ -439,8 +440,7 @@ func TestAutoRulesAntiLockout(t *testing.T) {
 	if err := env.srv.ensureDefaultInstance(); err != nil {
 		t.Fatal(err)
 	}
-	var main models.Instance
-	env.srv.db.Where("is_default = ?", true).First(&main)
+	main := env.instanceRow("")
 	env.vf("guest")
 	fake := &statusAgent{antiLockout: &render.AntiLockout{Port: 8443, SSHPort: 22, AllowFrom: []string{"192.168.1.0/24"}}}
 	env.srv.newAgent = func(*models.Firewall) (agentAPI, error) { return fake, nil }
@@ -954,13 +954,11 @@ func TestEnsureDefaultInstance(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	var got []models.Instance
-	env.srv.db.Find(&got)
+	got := env.view().Instances
 	if len(got) != 1 || got[0].Name != DefaultInstanceName || !got[0].IsDefault || got[0].DhcpLeaseTime != 86400 {
 		t.Errorf("instances: %+v", got)
 	}
-	var rules []models.Rule
-	env.srv.db.Find(&rules)
+	rules := env.view().Rules
 	if len(rules) != 1 || rules[0].Chain != "output" || rules[0].Action != "accept" || !rules[0].Enabled || len(rules[0].OutInterfaces) != 0 {
 		t.Errorf("seeded rules: %+v", rules)
 	}

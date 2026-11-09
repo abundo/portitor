@@ -66,23 +66,6 @@ func (m *Mapping) AssignIDs(tx *gorm.DB, tree *datastore.Tree) (Index, error) {
 	}
 	changed := map[string]idRow{}
 	var gone []string
-	// A database from before the ids were kept: its tables' row ids.
-	if len(ids.byPath) == 0 && tx.Migrator().HasTable("instances") {
-		_, old, err := m.Import(tx)
-		if err != nil {
-			return nil, err
-		}
-		for n, id := range old {
-			t := m.byList[n.S]
-			if t.singleton != 0 || slices.Contains(n.S.Keys, "id") {
-				continue
-			}
-			r := idRow{t.name, id}
-			p := pathKey(m.root, n)
-			ids.byPath[p], changed[p] = r, r
-			ids.max[r.tbl] = max(ids.max[r.tbl], id)
-		}
-	}
 	for _, r := range tree.Renamed {
 		from := r.Path.String(m.root)
 		to := slices.Clone(r.Path)
@@ -105,19 +88,6 @@ func (m *Mapping) AssignIDs(tx *gorm.DB, tree *datastore.Tree) (Index, error) {
 		}
 		maps.Copy(ids.byPath, moved)
 		maps.Copy(changed, moved)
-	}
-	// Ids the tables have given are not given again.
-	if tx.Migrator().HasTable("instances") {
-		var seqs []struct {
-			Name string
-			Seq  int64
-		}
-		if err := tx.Raw("SELECT name, seq FROM sqlite_sequence").Scan(&seqs).Error; err != nil {
-			return nil, err
-		}
-		for _, q := range seqs {
-			ids.max[q.Name] = max(ids.max[q.Name], q.Seq)
-		}
 	}
 	idx := Index{}
 	m.walkEntries(tree.Root, func(e *datastore.Node, t *table) {
@@ -185,50 +155,6 @@ func (m *Mapping) walkEntries(n *datastore.Node, fn func(e *datastore.Node, t *t
 			m.walkEntries(e, fn)
 		}
 	}
-}
-
-// KeepIDs makes the ids kept in db (a transaction) those of idx, a tree
-// read from the tables (Import): for the code that still writes them.
-func (m *Mapping) KeepIDs(tx *gorm.DB, idx Index) error {
-	ids, err := LoadIDs(tx)
-	if err != nil {
-		return err
-	}
-	byID := map[idRow]string{}
-	for p, r := range ids.byPath {
-		byID[r] = p
-	}
-	set := map[string]idRow{}
-	for n, id := range idx {
-		t := m.byList[n.S]
-		if t == nil || t.singleton != 0 || slices.Contains(n.S.Keys, "id") {
-			continue
-		}
-		set[pathKey(m.root, n)] = idRow{t.name, id}
-	}
-	var gone []string
-	for p, r := range set {
-		if q, ok := byID[r]; ok && q != p {
-			if _, still := set[q]; !still || set[q] != r {
-				gone = append(gone, q)
-			}
-		}
-	}
-	for chunk := range slices.Chunk(gone, 500) {
-		if err := tx.Exec("DELETE FROM config_ids WHERE path IN ?", chunk).Error; err != nil {
-			return err
-		}
-	}
-	for _, p := range slices.Sorted(maps.Keys(set)) {
-		r := set[p]
-		if old, ok := ids.byPath[p]; ok && old == r {
-			continue
-		}
-		if err := tx.Exec("INSERT INTO config_ids (path, tbl, id) VALUES (?, ?, ?) ON CONFLICT (path) DO UPDATE SET tbl = excluded.tbl, id = excluded.id", p, r.tbl, r.id).Error; err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // RenameExternal makes the leaves of tree that name the row old of table

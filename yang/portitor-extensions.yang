@@ -7,10 +7,10 @@ module portitor-extensions {
   prefix px;
 
   description
-    "Extensions of Portitor's YANG modules. secret is for good. The others
-     map the configuration onto the SQLite tables it is stored in while
-     portitor-config still reads those (dev/design-model-driven.md); they
-     go with the tables.";
+    "Extensions of Portitor's YANG modules. secret marks a secret. The
+     others map the configuration onto rows (package sqlmap): the models
+     portitor-config's code of before the tree reads it as (confview), with
+     their ids; there are no tables behind them.";
 
   revision 2026-11-08 { description "First version."; }
 

@@ -14,7 +14,8 @@ export function crud(path) {
   }
 }
 
-// reads returns list/get of a configuration table: the tree's read model
+// reads returns list/get of a list of the configuration as rows, with their
+// ids (web/configreads.go)
 // (the configuration is written through /api/config, api/config.js).
 export function reads(path) {
   return {

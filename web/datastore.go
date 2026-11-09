@@ -16,9 +16,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/labstack/echo/v5"
 	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
 
 	"github.com/abundo/portitor/internal/builder"
 	"github.com/abundo/portitor/internal/buildinfo"
@@ -26,7 +24,6 @@ import (
 	"github.com/abundo/portitor/internal/confcheck"
 	"github.com/abundo/portitor/internal/datastore"
 	"github.com/abundo/portitor/internal/datastore/sqlmap"
-	"github.com/abundo/portitor/internal/dbmigrate"
 	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/internal/netconf"
 	"github.com/abundo/portitor/internal/schema"
@@ -70,8 +67,7 @@ func (s *Server) tree() (*treeState, error) {
 		t.store = datastore.NewStore(t.schema, treeBackend{s}, dir)
 		t.store.Normalize, t.store.Check = confcheck.Normalize, confcheck.Check
 		// The roles name the virtual firewalls: they follow a rename, and
-		// a new one gets its role. And the bridge to the code that still
-		// reads the tables.
+		// a new one gets its role. New entries get their ids.
 		t.store.OnChange = func(c *datastore.Tree) error {
 			return s.db.Transaction(func(tx *gorm.DB) error {
 				for _, r := range c.Renamed {
@@ -88,10 +84,7 @@ func (s *Server) tree() (*treeState, error) {
 				if err != nil {
 					return err
 				}
-				if !tx.Migrator().HasTable("instances") {
-					return nil
-				}
-				return t.mapping.Write(tx, c, idx)
+				return clearWebCertificate(tx, idx)
 			})
 		}
 	})
@@ -100,56 +93,13 @@ func (s *Server) tree() (*treeState, error) {
 
 type treeBackend struct{ s *Server }
 
-// Initial is the first candidate: an old database's configuration, read
-// once from its tables, or running.
+// Initial is the first candidate: running.
 func (b treeBackend) Initial(ctx context.Context) (*datastore.Tree, error) {
-	if tree, ok, err := b.s.importTables(b.s.db); ok || err != nil {
-		return tree, err
-	}
 	return b.Running(ctx)
 }
 
-// importTables reads the configuration from db's tables when it has them
-// (a database from before the tree, or its snapshot); ok is false when
-// it has none.
-func (s *Server) importTables(db *gorm.DB) (*datastore.Tree, bool, error) {
-	return tablesTree(db)
-}
-
-// tablesTree is importTables without a server.
-func tablesTree(db *gorm.DB) (*datastore.Tree, bool, error) {
-	if !db.Migrator().HasTable("instances") {
-		return nil, false, nil
-	}
-	// Configuration: a virtual firewall, or the settings.
-	var n, st int64
-	if err := db.Table("instances").Count(&n).Error; err != nil {
-		return nil, false, err
-	}
-	if err := db.Table("settings").Count(&st).Error; err != nil {
-		return nil, false, err
-	}
-	if n == 0 && st == 0 {
-		return nil, false, nil
-	}
-	root, err := schema.Load()
-	if err != nil {
-		return nil, false, err
-	}
-	m, err := sqlmap.New(root)
-	if err != nil {
-		return nil, false, err
-	}
-	tree, _, err := m.Import(db)
-	if err != nil {
-		return nil, false, fmt.Errorf("reading the configuration from the database's tables: %w", err)
-	}
-	return tree, true, nil
-}
-
 // Running is the live commit's configuration, or an empty one before the
-// first commit. A commit from before the tree is read from its database
-// snapshot.
+// first commit.
 func (b treeBackend) Running(context.Context) (*datastore.Tree, error) {
 	s := b.s
 	t, err := s.tree()
@@ -171,13 +121,7 @@ func (b treeBackend) Running(context.Context) (*datastore.Tree, error) {
 		switch {
 		case err == nil:
 			tree = loaded
-		case errors.Is(err, os.ErrNotExist):
-			if old, ok, err := s.oldSnapshot(commit); err != nil {
-				return nil, err
-			} else if ok {
-				tree = old
-			}
-		default:
+		case !errors.Is(err, os.ErrNotExist):
 			return nil, err
 		}
 	}
@@ -191,29 +135,6 @@ func (s *Server) forgetRunning() {
 	t.runMu.Lock()
 	t.running = nil
 	t.runMu.Unlock()
-}
-
-// oldSnapshot reads a commit's configuration from its database snapshot
-// (deployed/<commit>.db), as commits were kept before the tree.
-func (s *Server) oldSnapshot(commit int64) (*datastore.Tree, bool, error) {
-	dir, err := s.snapshotDir()
-	if err != nil {
-		return nil, false, nil
-	}
-	path := filepath.Join(dir, fmt.Sprintf("%d.db", commit))
-	if _, err := os.Stat(path); err != nil {
-		return nil, false, nil
-	}
-	db, err := dbmigrate.Open(path, &gorm.Config{Logger: logger.Discard})
-	if err != nil {
-		return nil, false, err
-	}
-	defer func() {
-		if sqlDB, err := db.DB(); err == nil {
-			sqlDB.Close()
-		}
-	}()
-	return s.importTables(db)
 }
 
 // Commit deploys the tree, as the GUI's commit does.
@@ -256,41 +177,6 @@ func (b treeBackend) Commit(ctx context.Context, tree *datastore.Tree, o datasto
 		msg += "\nConfirm it (confirm), or it is rolled back."
 	}
 	return msg, nil
-}
-
-// syncFromTables reads the tables into the candidate. It bridges the
-// code that still writes the tables (the CRUD resources, bootstrap,
-// promotion, bundles) until it writes the tree (step C and E of the
-// cut-over, dev/design-model-driven.md).
-func (s *Server) syncFromTables(ctx context.Context) error {
-	t, err := s.tree()
-	if err != nil {
-		return err
-	}
-	tree, idx, err := t.mapping.Import(s.db)
-	if err != nil {
-		return err
-	}
-	if err := s.db.Transaction(func(tx *gorm.DB) error { return t.mapping.KeepIDs(tx, idx) }); err != nil {
-		return err
-	}
-	return t.store.Replace(ctx, tree)
-}
-
-// syncAfter reads the tables into the candidate after a request that
-// wrote configuration into them: the handlers from before the tree (a
-// firewall made or deleted, Settings, an import, a bundle, a restore). The
-// tables are otherwise the candidate's cache, written from it.
-func (s *Server) syncAfter(next echo.HandlerFunc) echo.HandlerFunc {
-	return func(c *echo.Context) error {
-		err := next(c)
-		if r, rerr := echo.UnwrapResponse(c.Response()); err == nil && rerr == nil && r.Status < 300 {
-			if serr := s.syncFromTables(c.Request().Context()); serr != nil {
-				slog.Warn("reading the tables into the candidate", "err", serr)
-			}
-		}
-		return err
-	}
 }
 
 // deployCandidate commits the candidate as the GUI's commit does.
@@ -474,4 +360,19 @@ func (s *Server) runSSH(ctx context.Context) {
 	if err := srv.Serve(ctx); err != nil {
 		slog.Error("CLI: SSH", "err", err)
 	}
+}
+
+// clearWebCertificate forgets the certificate chosen for portitor-config
+// (settings.web_certificate_id) when the configuration no longer has it.
+func clearWebCertificate(tx *gorm.DB, idx sqlmap.Index) error {
+	var cert *uint
+	if err := tx.Table("settings").Select("web_certificate_id").Where("id = 1").Scan(&cert).Error; err != nil || cert == nil {
+		return err
+	}
+	for n, id := range idx {
+		if n.S.Name == "certificate" && uint(id) == *cert {
+			return nil
+		}
+	}
+	return tx.Exec("UPDATE settings SET web_certificate_id = NULL WHERE id = 1").Error
 }

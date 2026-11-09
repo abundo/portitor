@@ -14,10 +14,11 @@ are in [README.md](README.md).
 | `cmd/portitor-web` | One binary, two programs by name: `portitor-web` is the portal (`portal.go`: `start`, `witness`, `check`); run as `portitor-config` (a symlink, `main.go`) the firewall's configuration, GUI and API: `start`, `migrate`, `createadmin`, `set-agent`, `agent-url`, `bootstrap` (ISO first boot), `fingerprint`, `witness-string`, `promote`, `import-vf` and the console commands (`console.go`, `cli` among them) |
 | `cmd/portitor-agent` | Agent daemon on the firewall: `start`, `init`, `render`, `netns-exec`; run as `portitor` (a symlink, `cli.go`) it is a CLI over the agent's root-only socket `<run_dir>/agent.sock`: `show ...` over the GET routes, and actions that change no configuration (`confirm`, `rollback`, `request dhcp renew`, `request iplist update`, `request blocklist update`, `clear connections`) over the POST routes in `localWrites` |
 | `internal/fwconfig` | The desired-state document and `Validate()`. **The contract between web and agent.** |
-| `yang` | The YANG modules: the configuration's schema (module `portitor`, a submodule per area, the state in `portitor-state`, `portitor-extensions`), embedded by `yang.go`; first drafted from the tables by `dev/yanggen`, edited by hand since |
+| `yang` | The YANG modules: the configuration's schema (module `portitor`, a submodule per area, the state in `portitor-state`, `portitor-extensions`), embedded by `yang.go`; first drafted from the tables (by `dev/yanggen`, gone with them), edited by hand since |
 | `internal/schema` | The modules compiled (goyang) into the tree every frontend walks: kinds, keys, order, types and their checks, defaults, descriptions, `px:` extensions |
 | `internal/datastore` | The configuration as a tree of the schema: set, delete, rename (rewriting leafrefs), move, validate, RFC 7951 JSON, diff and patch, the CLI's text and flat forms; `Store`, the shared candidate with its rebase and commit |
-| `internal/datastore/sqlmap` | The tree read from and written into the SQLite tables, by the modules' `px:` extensions, keeping row ids |
+| `internal/datastore/sqlmap` | The tree as rows, by the modules' `px:` extensions (`Rows`; `Adder` makes entries from rows, for the imports); the entries' ids kept by path (`IDs`, `AssignIDs`, the table `config_ids`) |
+| `internal/confview` | The candidate (or any tree) as rows decoded into the `models` structs, a slice per list, with their ids (`View`, `Load`, `RowOf`): what the builder and portitor-config's code of before the tree read; no tables behind it |
 | `internal/netconf` | NETCONF (RFC 6241/6242) on the datastore, the SSH server's `netconf` subsystem: framing (1.0 and chunked), XML, `edit-config` with every operation, subtree filters, `commit` with `confirmed-commit`, locks (`Store.Lock`), `get-schema` |
 | `internal/snmp` | SNMP for the state, read-only: `agentx` the subagent side of AgentX (RFC 2741: open, register, get, getnext, getbulk; a `Master` for tests), `mib` the YANG state as SNMP objects (a list a table indexed by its and its parents' keys, the top-level state container scalars) under a base OID, the numbers in `oids.json` (never reused; `go test ./internal/snmp/mib -update` numbers new state nodes and writes `deploy/mib/PORTITOR-MIB.txt`), the MIB text and a snapshot for answers |
 | `internal/cli` | The CLI (SR Linux style): commands, path parsing, `?` help and Tab completion from the schema, the terminal (x/term), scripts, and the SSH server |
@@ -42,11 +43,11 @@ are in [README.md](README.md).
 | `internal/netobj` | Named hosts/prefixes (`address_objects`) and address lists (`address_lists`): name checks and expansion |
 | `internal/dbmigrate` | Opens the SQLite database; goose migrations (the schema's source of truth) |
 | `models` | GORM mapping |
-| `web` | Echo v5 server (`server.go`: routes): auth, the configuration API (`configapi.go`: `/api/schema`, `/api/config`, `checkEdit`; entries' actions `configactions.go`), the CRUD's reads of the tables (`crud.go`, `registerRead`) and its code of before the tree (`resources.go`, `crudtree.go`: `legacyWrite`, `viaTables`), firewalls (`firewalls.go`), commits (`commit.go`), other handlers (`handlers.go`), Revert snapshots (`revert.go`), tenancy (`tenancy.go`), roles (`roles.go`, `access.go`), VRFs (`vrf.go`), rename/delete reference keeping (`objects.go`, `services.go`, `ratelimits.go`, `ifzones.go`, `bgp.go`, `ospf.go`, `isis.go`, `vrrp.go`, `bfd.go`, `delegated.go`), folders for hosts and IP lists (`folders.go`, GUI only), agent proxies (`console.go`, `capture.go`, `probe.go`, `trace.go`, `iperf.go`, `servicelog.go`, `syslog.go`, `connections.go`), WireGuard config import (`wgimport.go`), backup/restore (`backup.go`), `config.yaml` (`config.go`), the HA replica and promotion (`replica.go`, `promote.go`), the witness (`witness.go`, `portalwitness.go`), and portitor-web, the portal (`portal.go`, `portal.html`) |
+| `web` | Echo v5 server (`server.go`: routes): auth, the configuration API (`configapi.go`: `/api/schema`, `/api/config`, `checkEdit`; entries' actions `configactions.go`), the configuration as rows (`confview.go`: `view`, cached per candidate, `userEdit`, `editConfig`, `rowWriter`), the GUI's reads of rows (`configreads.go`), the firewalls' CRUD (`crud.go`, `firewalls.go`), commits (`commit.go`), other handlers (`handlers.go`), the commits' configurations (`revert.go`), tenancy (`tenancy.go`), roles (`roles.go`, `access.go`), agent proxies (`console.go`, `capture.go`, `probe.go`, `trace.go`, `iperf.go`, `servicelog.go`, `syslog.go`, `connections.go`), WireGuard config import (`wgimport.go`), backup/restore (`backup.go`, `snapshot.go`: the database with the configuration in it), `config.yaml` (`config.go`), the HA replica and promotion (`replica.go`, `promote.go`), the witness (`witness.go`, `portalwitness.go`), and portitor-web, the portal (`portal.go`, `portal.html`) |
 | `web/frontend` | Vue SPA; `CrudPage.vue` drives most pages from field/column schemas, on a YANG list (`api/config.js`: `treeApi`, `vfApi`) |
 | `docs` | User guides; every `docs/*.md` is bundled into the GUI's Help page (`src/docs.js`), and links between them stay in the GUI |
 | `deploy` | systemd units and example configs |
-| `dev` | Dev configs and `seed.sh`; `dev/lab` runs a real apply in two podman containers; `dev/yanggen` drafted `yang/` from the tables |
+| `dev` | Dev configs and `seed.sh`; `dev/lab` runs a real apply in two podman containers |
 | `install.py` | Installs/updates a firewall (agent and portitor-config) and portitor-web (the portal) from a GitHub release (`.goreleaser.yaml`), `--source` or `--local`; moves an old portitor-web's database to portitor-config on the same host (`move_web_database`) and lists it in that host's `web.yaml` (`link_local_config`), or, from a host of its own, to the firewall its database deploys to (`old_web_database`, `move_remote_database`, `link_remote_config`); the agent runs its copy in `/usr/lib/portitor` for GUI updates |
 | `iso` | Installer ISO: Debian netinst + preseed (`build.sh`), setup (`portitor-setup.py`, installed as `portitor-setup`: runs `portitor-config bootstrap` at first boot, `--reconfigure` when run again; role `agent` is the same firewall, ending with a portal string for portitor-web, role `web` portitor-web alone, which adds a firewall with `--join`; roles `primary` and `secondary` an HA pair: the secondary only its HA link and management, ending with a secondary string (its agent's token) that the primary's `--join` adds and commits), QEMU test VM (`vm.sh`), end-to-end tests (`test.sh`, `test-split.sh`, `test-update.sh`, `make iso-e2e`) |
 
@@ -215,13 +216,14 @@ docs and user-facing messages.
   in `dev/design-model-driven.md`, user guide `docs/cli.md`): the YANG modules are the
   configuration's schema; the CLI (SR Linux style) takes its commands, help and
   completion from it. Its sessions share a candidate (`datastore.Store`,
-  `candidate.json` next to the database), the tables' configuration (`sqlmap.Import`,
-  by the modules' `px:` extensions) with their edits, rebased when the tables change.
-  The candidate is the configuration: every write goes to it, and the tables are its
-  cache, written from it on each change (`Store.OnChange`, `sqlmap.Write`, keeping
-  row ids by path), for the code that still reads them. A commit runs `deploy` on the
-  candidate and keeps it as `deployed/<commit>-config.json`; running is the live
-  commit's. `portitor-config cli` is the console admin's;
+  `candidate.json` next to the database): the configuration, which every write goes
+  to; there are no configuration tables. Each change gives new entries their ids
+  (`Store.OnChange`, `sqlmap.AssignIDs`: by path in `config_ids`, kept across a
+  rename, never another entry's; a list keyed by `id` has its own). Code that reads
+  the configuration as rows reads `confview` (`Server.view`: the candidate's rows,
+  cached per candidate generation, `Store.CandidateGen`). A commit runs `deploy` on
+  the candidate and keeps it as `deployed/<commit>-config.json`; running is the live
+  commit's, the first candidate running. `portitor-config cli` is the console admin's;
   `ssh_listen` serves it over SSH to the GUI's users (`cliLogin`: `authenticateUser`,
   two-factor codes, the login limits), with their access by path (`treeAccess`), and
   NETCONF as its `netconf` subsystem (`internal/netconf`, sharing the candidate and
@@ -243,16 +245,22 @@ docs and user-facing messages.
   schema, the hooks of `internal/confcheck` (normalizing on edit, checks per list
   path, from the CRUD's `prepare*`), and the build (`buildProblems`); it may not add
   a problem, and problems it didn't add come back as warnings
-  (`X-Portitor-Warnings`, toasted). Code from before the tree that writes the tables
-  runs as one change of the candidate: `legacyWrite` (a request: the imports) or
-  `viaTables` (bootstrap, a new NIC); Settings, the firewalls and a restore, which
-  also write rows that are not configuration, read the tables into the candidate
-  after (`syncAfter`). An HA replica reads the copied tables into its candidate and
-  fetches the live commit's configuration (`GET /ha/v1/commits/<n>`).
-- **Revert** discards uncommitted database edits by restoring the live
-  commit's snapshot (`<db dir>/deployed/<commit>.db`, `liveCommit`); the newest
+  (`X-Portitor-Warnings`, toasted). Server code edits the candidate too: a request's
+  as its user, checked like an API edit (`userEdit`: the WireGuard and nftables
+  imports, bundles), portitor-config's own with the store's normalizing alone
+  (`editConfig`: bootstrap, a new NIC, a firewall's host, Settings), and an HA
+  promotion without it (`Store.EditRaw`: the hosts move to the other firewall). An
+  import that makes models adds them as rows (`rowWriter`, `sqlmap.Adder`), an entry
+  the checks refuse taken out again (`addChecked`). A firewall's or role's rename
+  renames the configuration's names of it (`renameExternal`, `px:external`). A backup
+  and the HA replica's copy are the database with the candidate and `ids.json` in its
+  table `config_snapshot` (`writeSnapshot`); a restore or a copy makes those the
+  candidate (`takeSnapshot`), and the replica fetches the live commit's configuration
+  (`GET /ha/v1/commits/<n>`).
+- **Revert** sets the candidate back to running (`Store.Discard`), the live commit's
+  configuration (`<db dir>/deployed/<commit>-config.json`, `liveCommit`); the newest
   `snapshotKeep` are kept, with each firewall's live document
-  (`<commit>-<firewall id>.json`). A document can't be turned back into rows.
+  (`<commit>-<firewall id>.json`). A document can't be turned back into a tree.
 - **Live data** (status, leases, neighbours, counters, logs) is fetched from the
   agent per request and filtered per tenant (`filter*` in `web/tenancy.go`).
   Logs are polled with `after` cursors from the agent's ring buffers
@@ -269,14 +277,13 @@ docs and user-facing messages.
 
 ## Invariants
 
-Where a rule below names a function of `web/` that keeps references in step (a
-rename that rewrites the lists naming it, a delete refused while in use), that is
-the CRUD's version, still used by the firewalls and the imports; on the tree the
-same rule is the schema's (leafrefs follow a rename, `datastore.Tree.Rename`) and
+Where a rule below names a function of `web/` that kept references in step (a
+rename that rewrites the lists naming it, a delete refused while in use), that was
+the CRUD's, which is gone with the configuration tables; the same rule is the
+schema's (leafrefs follow a rename, `datastore.Tree.Rename`) and
 `internal/confcheck`'s (renames into lists of plain names, `renameIfaceRefs` and
-the like; deletes refused by the checks), and the configuration tables are only
-ever written from the candidate (`Store.OnChange`): a derived read model that code
-reads, never edits.
+the like; deletes refused by the checks). The configuration is the tree alone; its
+rows (`confview`) are a view that code reads, never edits.
 
 - **The agent trusts nothing.** It re-runs `fwconfig.Validate` before rendering.
   Anything that ends up in a config file must be validated there: names by regex,
@@ -385,7 +392,7 @@ the certificate portitor-config serves, chosen under Settings
   names (link ends included) and interface zone names of the instance; an
   interface zone is a group of zero or more interfaces. An empty list matches
   *any* interface, so a list must never lose entries silently: renaming an
-  interface, link end or zone rewrites the lists (`web/ifzones.go`), deleting one
+  interface, link end or zone rewrites the lists (confcheck's `renameIfaceRefs`), deleting one
   that a rule uses is refused, and a non-empty list that resolves to no enabled
   interface (`Instance.MatchInterfaces`) makes the renderer skip the rule. An
   interface matches its VRRP devices too (`Instance.AddVRRPDevices`, in
@@ -407,14 +414,15 @@ the certificate portitor-config serves, chosen under Settings
   unless `interfaces.delegated_slaac` is off, and with `delegated_dhcp` a DHCPv6
   subnet whose range is the interface's host parts (`delegated_range_*`, "::1000")
   in the delegated form (`<wan0>:1::1000/128`, `delegatedRA`); renaming the delegating interface
-  rewrites them (`web/delegated.go`), deleting or moving it is refused.
+  rewrites them (confcheck), deleting or moving it is refused.
 - **Named hosts/prefixes never reach the agent.** `builder.Build` expands names
   (`netobj`) and drops a rule it cannot resolve; an object with no addresses is an
   error, never an empty list (an empty address list matches *any*). Entries are
-  stored by name, so renaming an object rewrites them (`web/objects.go`) and deleting
-  one in use is refused. A new address field that should accept names must be added
-  to `eachObjectRef` and expanded in the builder.
-- **Address lists** (`address_lists`, `web/objects.go`) hold addresses, CIDRs and
+  stored by name, so renaming an object rewrites them (leafrefs) and deleting
+  one in use is refused. A new address field that should accept names is a union with
+  leafrefs to `host/name` and `address-list/name` in YANG (as `allowed-ips`), and is
+  expanded in the builder.
+- **Address lists** (`address_lists`) hold addresses, CIDRs and
   names of hosts and other lists; they share one namespace with `address_objects`
   (`nameFree`), so any address field takes either by name, and `netobj.New(objs,
   lists...)` resolves both (a loop is an error). In a filter rule's source or
@@ -422,7 +430,7 @@ the certificate portitor-config serves, chosen under Settings
   `Instance.AddressSets`; the renderer declares one set per IP version
   (`render.AddressSetName`) and leaves out a version the list has nothing of
   (`dropEmptySets`). Anywhere else it is expanded like a host. Renaming one, or a
-  host it holds, rewrites the entries (`eachObjectRef` visits the lists); deleting
+  host it holds, rewrites the entries (leafrefs); deleting
   one in use is refused.
 - **Services never reach the agent either.** A rule's `services` list names
   custom services (`services` table) and predefined ones (`netobj.Predefined`);
@@ -431,43 +439,43 @@ the certificate portitor-config serves, chosen under Settings
   cannot resolve (an empty list matches *any* protocol). The renderer writes
   one nft rule per match and IP version (`fwconfig.Rule.Matches`). A custom
   name can't be a predefined one. Renaming one rewrites the rules
-  (`web/services.go`); deleting one in use is refused. NAT keeps its own
+  (leafrefs); deleting one in use is refused. NAT keeps its own
   protocol and port list, with numbers, ranges and the built-in port names
   (`fwconfig.Services`), which the agent resolves.
 - **IP lists reach the agent as references.** A filter rule's address list may hold
   `@name` (not NAT, not other address fields): it matches either IP version and
   renders as the list's `<key>_v4`/`<key>_v6` set (`render.IPListKey`: the name, or a hash of a name nft would not take). One nft match takes one operand, so a
   list with literals and IP lists renders one rule per operand. Renaming a list
-  rewrites the rules (`web/tasks.go`); deleting one a rule or task uses is refused.
-- **Routing objects and BGP** (`web/bgp.go`) are per instance: prefix lists, AS
+  rewrites the rules (leafrefs); deleting one a rule or task uses is refused.
+- **Routing objects and BGP** are per instance: prefix lists, AS
   path and community lists and route maps (`route_*` tables, entries as JSON),
   `bgp_configs` (one per instance and VRF), peer groups and neighbours (each of
   the main table's BGP or a VRF's, `vrf_id`; see VRFs). They refer to each
   other by name, as FRR does: renaming one rewrites the references
-  (`eachRoutingRef`), deleting one in use is refused, a row never moves to another
-  instance, and a new reference field goes in `eachRoutingRef`. Off (the default),
+  (leafrefs), deleting one in use is refused, an entry never moves to another
+  instance, and a new reference field is a leafref. Off (the default),
   the builder leaves BGP out of the document; the objects are left out unless BGP
   or OSPF is on (`Instance.FRRRunning`), and with neither (nor VRRP or BFD) the agent stops FRR. A
   neighbour's update source may name an interface; renaming the interface
   rewrites it (`renameIfaceRefs`). FRR runs zebra, staticd, bgpd, ospfd, ospf6d, vrrpd and bfdd as the
   instance needs them (the daemons file); static routes stay the agent's (kernel
   routes), so "redistribute static" renders as `redistribute kernel`.
-- **OSPF** (`web/ospf.go`) is per instance and version (2: OSPFv2, IPv4,
+- **OSPF** is per instance and version (2: OSPFv2, IPv4,
   `Instance.OSPF`; 3: OSPFv3, IPv6, `Instance.OSPF6`): `ospf_configs` (one per
   instance, version and VRF) and `ospf_interfaces`, by interface name (link ends
-  included), which `renameIfaceRefs` rewrites and `refuseIfaceInUse` keeps from
-  being deleted. Its route maps are in `eachRoutingRef`. Area ids are stored
+  included), which a rename rewrites and a delete of is refused (confcheck).
+  Its route maps are leafrefs. Area ids are stored
   dotted. OSPFv2's network statements and interface areas are exclusive, as in
   FRR.
-- **IS-IS** (`web/isis.go`, `fwconfig/isis.go`) is per instance: `isis_configs` (one
+- **IS-IS** (`fwconfig/isis.go`) is per instance: `isis_configs` (one
   per instance and VRF) and `isis_interfaces`, by interface name (link ends included), which
-  `renameIfaceRefs` rewrites and `refuseIfaceInUse` keeps from being deleted. One
-  isisd process (`fwconfig.ISISTag`) for IPv4 and IPv6; its route maps are in
-  `eachRoutingRef`. IS-IS is LLC frames, not IP: no auto rules, and on a WireGuard
+  a rename rewrites and a delete of is refused (confcheck). One
+  isisd process (`fwconfig.ISISTag`) for IPv4 and IPv6; its route maps are
+  leafrefs. IS-IS is LLC frames, not IP: no auto rules, and on a WireGuard
   or 6in4 interface (`fwconfig.ISISLayer3`) it may only be passive.
-- **VRRP** (`web/vrrp.go`, `fwconfig/vrrp.go`) is per instance: `vrrp_routers`, on
-  an interface by name (link ends included; `renameIfaceRefs` rewrites it,
-  `refuseIfaceInUse` keeps it from being deleted), with IPv4 and IPv6 virtual
+- **VRRP** (`fwconfig/vrrp.go`) is per instance: `vrrp_routers`, on
+  an interface by name (link ends included; confcheck rewrites it on a rename,
+  and refuses its delete), with IPv4 and IPv6 virtual
   addresses in the interface's static prefixes (IPv6 also link-local). FRR's vrrpd
   runs them (they start FRR, `Instance.FRRRunning`); the agent makes one macvlan
   device per virtual router and IP version (`fwconfig.VRRPDevices`: virtual MAC,
@@ -476,7 +484,7 @@ the certificate portitor-config serves, chosen under Settings
   (`internal/agent/vrrp.go`); the device is in its interface's VRF
   (`VRRPDevice.VRF`, and `Instance.VRFOf` knows it). A disabled row is shut down
   in FRR, not left out.
-- **BFD** (`web/bfd.go`, `fwconfig/bfd.go`) is per instance: `bfd_interfaces`, by
+- **BFD** (`fwconfig/bfd.go`) is per instance: `bfd_interfaces`, by
   interface name (link ends included; `renameIfaceRefs` rewrites it, removing the
   interface removes it), each a bfdd profile (`fwconfig.BFDProfile`). Static routes,
   OSPF interfaces and BGP neighbours and peer groups have a `bfd` flag, used only on
@@ -507,7 +515,7 @@ the certificate portitor-config serves, chosen under Settings
   `<state>/nat64.json` or it isn't running (`planNAT64`), and keeps the devices,
   rules and tables (`planNAT64Devices`, `planNAT64Rules`).
 - **ACME proxy** (`fwconfig/acmeproxy.go`, `internal/acmeserver`,
-  `internal/agent/acmeproxy.go`, `web/acmeproxy.go`): per instance
+  `internal/agent/acmeproxy.go`): per instance
   (`instances.acme_proxy_*`, `interfaces.acme_proxy_serve`, `acme_proxy_policies`),
   an HTTPS ACME server in the instance netns on `Port` (auto input rule "acme proxy",
   from the policies' sources, `ACMEProxy.Clients`). A name is allowed by the first
@@ -588,7 +596,7 @@ the certificate portitor-config serves, chosen under Settings
   clock is the host's; netns-exec drops CAP_SYS_TIME). It answers clients on the
   interfaces with `ntp_serve` (the auto input rule "ntp server", like
   `dns_listen`), of those the `ntp_allow` prefixes (chrony `allow`; names expanded
-  by the builder, in `eachObjectRef`), or `allow all` when empty. chronyd can't
+  by the builder; leafrefs in YANG), or `allow all` when empty. chronyd can't
   reload: a changed chrony.conf restarts it. The NTP page's Info tab is `GET
   /v1/ntp` (`internal/agent/ntp.go`): chronyc on the host through each chronyd's
   command socket (`InstanceFiles.ChronySocket`, a VF's in
@@ -601,7 +609,7 @@ the certificate portitor-config serves, chosen under Settings
   made by the agent for `Debian-snmp`. It answers on the interfaces with
   `snmp_serve` (the auto input rule "snmp"), from the `snmp_allow` prefixes (the
   rule's source set `snmp_clients`, and the community's sources; names expanded by
-  the builder, in `eachObjectRef`). The community and the users' passwords are
+  the builder; leafrefs in YANG). The community and the users' passwords are
   write-only secrets (`NewSnmpCommunity`/`ClearSnmpCommunity`, `SnmpUser.NewAuthPassword`/
   `NewPrivPassword`); snmpd.conf is a `Secret` file (0600, read by snmpd as root
   before it drops to its user, so a change restarts it), removed when SNMP is off.
@@ -690,8 +698,8 @@ the certificate portitor-config serves, chosen under Settings
   unicast`, rd, route targets), rendered from the main table's AS (`l3vniBGP`,
   connected and static) when the VRF runs no BGP of its own. It needs the main
   table's EVPN; its underlay follows a rename and is refused on delete. The underlay
-  follows a rename and is refused on delete (`web/ifzones.go`).
-- **VRFs** (`fwconfig/vrf.go`, `web/vrf.go`, Routing → VRF) are per instance
+  follows a rename and is refused on delete (confcheck).
+- **VRFs** (`fwconfig/vrf.go`, Routing → VRF) are per instance
   (`vrfs`: name, `route_table`, unique in the instance; the namespace makes them
   per instance), not interfaces: an interface is in one by name
   (`interfaces.vrf`, `Interface.VRF`, "" is main; a rename rewrites it, a VRF in
@@ -726,7 +734,7 @@ the certificate portitor-config serves, chosen under Settings
   `internal/agent/policyroute.go`, Routing → Policy) are per instance
   (`policy_routes`, ordered by `position`, the first match decides): a forward
   rule's match (interface and zone names, addresses and IP lists, services; kept
-  by `ifaceLists`, `eachObjectRef`, `eachServiceRef` and the IP lists' rename) and a
+  by the leafrefs and confcheck) and a
   gateway (address or host, one per IP version) and/or interface (by id, removed
   with it); neither is an exception that keeps the main table. The ruleset's
   `prerouting_policy` chain (priority mangle + 1, after NAT64's, leaving marked
@@ -740,17 +748,19 @@ the certificate portitor-config serves, chosen under Settings
 - **Dual stack:** rule and NAT address lists may mix IPv4 and IPv6;
   `fwconfig.MatchFamilies` decides which versions a rule is rendered for, and
   validation uses the same function.
-- **Schema changes:** a new goose file in `internal/dbmigrate/sql/` (SQLite), plus
-  the model change. Tests run the real migrations, with foreign keys enforced as in
-  production; a test checks every model field has a column. SQLite's `ALTER TABLE`
-  only adds, drops and renames columns; anything else rebuilds the table (create,
-  copy, drop, rename) in a `-- +goose NO TRANSACTION` migration that turns
-  `foreign_keys` off around it. Ids are `AUTOINCREMENT` so a deleted row's id is
-  never reused (rule ids mark connections). A data move SQL cannot compute (prefix
-  containment, say) is a Go migration registered in `dbmigrate.provider`
-  (`interface_addresses.go`). A new configuration table or column also gets its list
-  or leaf in `yang/` (see Configuration tree); a table that is not configuration goes
-  in `notConfiguration` (`internal/datastore/sqlmap`).
+- **Schema changes:** the configuration's are the YANG modules' (and the model's
+  field, with its `px:` mapping; `confview`'s `TestEveryFieldMapped` fails until a
+  field has its leaf and a leaf its field). A new leaf needs nothing more: an absent
+  leaf takes its default. Renaming or removing one breaks reading the candidate and
+  the kept commits, which have it: there is no migration of the tree's JSON yet. The
+  database holds what is not configuration (users, roles, firewalls, the directory,
+  deployments, known NICs, `config_ids`, the commit counter): a new goose file in
+  `internal/dbmigrate/sql/` (SQLite), plus the model change (`models.Stored`, whose
+  fields a test checks have columns). Tests run the real migrations, with foreign
+  keys enforced as in production. SQLite's `ALTER TABLE` only adds, drops and renames
+  columns; anything else rebuilds the table (create, copy, drop, rename) in a
+  `-- +goose NO TRANSACTION` migration that turns `foreign_keys` off around it. Ids
+  are `AUTOINCREMENT` so a deleted row's id is never reused.
 - **Roles:** a user is `admin`, `viewer` or `none` (`models.RoleAdmin`/`RoleViewer`/
   `RoleNone`): global access. Roles (`roles`, `role_members`, `role_instances`) grant
   instances, by name, at a level (admin/viewer); each instance but the default has its
@@ -868,9 +878,9 @@ singular); a custom page uses `SearchInput` above each table,
    `internal/schema/formats.go`), with their `px:` mapping; that puts them in the API,
    the CLI and NETCONF. Their checks that need more than the type go in
    `internal/confcheck` (normalize on edit, check per list path).
-5. Migration + model (the tables are the candidate's cache until the code reading
-   them reads the tree; `TestEveryColumnMapped` fails until a column has its leaf),
-   and the `builder.Build` mapping.
+5. The model's field (`models`, the row `confview` decodes the entry into;
+   `TestEveryFieldMapped` fails until field and leaf match), and the `builder.Build`
+   mapping.
 6. A page or fields in `web/frontend`: most pages are a `CrudPage` on `vfApi(list)`
    or `treeApi`, rows with the leaves' names in snake case.
 

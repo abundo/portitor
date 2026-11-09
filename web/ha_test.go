@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	"github.com/abundo/portitor/internal/agentapi"
+	"github.com/abundo/portitor/internal/confview"
 	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/models"
 )
@@ -104,18 +105,14 @@ func TestPromote(t *testing.T) {
 	if p.AgentURL != "https://192.0.2.3:8443" || q.AgentURL != "https://192.0.2.1:8443" {
 		t.Errorf("agent URLs: %s / %s", p.AgentURL, q.AgentURL)
 	}
-	var n int64
-	env.srv.db.Model(&models.Instance{}).Where("firewall_id = ?", 1).Count(&n)
-	if n != 0 {
+	if n := len(rows(env, func(v *confview.View) []models.Instance { return v.Instances }, func(in *models.Instance) bool { return in.FirewallID == 1 })); n != 0 {
 		t.Errorf("%d instances left on the old primary", n)
 	}
-	var mgmt models.Interface
-	env.srv.db.Where("name = ?", "mgmt0").First(&mgmt)
+	mgmt := env.ifaceRow("mgmt0")
 	if !slices.Equal(mgmt.Addresses, models.StringList{"192.0.2.3/24"}) || !slices.Equal(mgmt.PeerAddresses, models.StringList{"192.0.2.1/24"}) {
 		t.Errorf("mgmt0 swapped: %v / %v", mgmt.Addresses, mgmt.PeerAddresses)
 	}
-	var lan models.Interface
-	env.srv.db.Where("name = ?", "lan").First(&lan)
+	lan := env.ifaceRow("lan")
 	if !slices.Equal(lan.Addresses, models.StringList{"10.0.0.1/24"}) {
 		t.Errorf("the shared lan changed: %v", lan.Addresses)
 	}
@@ -194,9 +191,9 @@ func TestReplicaCopy(t *testing.T) {
 	if err := rep.srv.copyPrimary(context.Background()); err != nil {
 		t.Fatalf("copy: %v", err)
 	}
-	var fws, lans int64
+	var fws int64
 	rep.srv.db.Model(&models.Firewall{}).Where("name = ? AND ha_primary_id = 1", "fw1b").Count(&fws)
-	rep.srv.db.Model(&models.Interface{}).Where("name = ?", "lan").Count(&lans)
+	lans := len(rows(rep, func(v *confview.View) []models.Interface { return v.Interfaces }, func(i *models.Interface) bool { return i.Name == "lan" }))
 	if fws != 1 || lans != 1 {
 		t.Fatalf("the copy lacks the primary's configuration: %d %d", fws, lans)
 	}

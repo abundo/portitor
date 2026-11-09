@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/abundo/portitor/internal/builder"
+	"github.com/abundo/portitor/internal/confview"
 	"github.com/abundo/portitor/models"
 )
 
@@ -115,7 +116,7 @@ func TestBundleRoundTrip(t *testing.T) {
 		t.Fatalf("import beside the source: %d %s", rec.Code, rec.Body)
 	}
 	var n int64
-	src.srv.db.Model(&models.AddressObject{}).Where("name = ?", "nas").Count(&n)
+	n = int64(len(rows(src, func(v *confview.View) []models.AddressObject { return v.AddressObjects }, func(o *models.AddressObject) bool { return o.Name == "nas" })))
 	if n != 1 {
 		t.Errorf("%d hosts named nas", n)
 	}
@@ -125,7 +126,7 @@ func TestBundleRoundTrip(t *testing.T) {
 	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "nas") {
 		t.Errorf("conflicting host: %d %s", rec.Code, rec.Body)
 	}
-	dst.srv.db.Model(&models.Instance{}).Where("name = ?", "shop4").Count(&n)
+	n = int64(len(rows(dst, func(v *confview.View) []models.Instance { return v.Instances }, func(in *models.Instance) bool { return in.Name == "shop4" })))
 	if n != 0 {
 		t.Error("a refused import left its instance")
 	}
@@ -151,9 +152,7 @@ func TestBundleLinks(t *testing.T) {
 		t.Fatal(err)
 	}
 	links := func() []models.Link {
-		var ls []models.Link
-		dst.srv.db.Find(&ls)
-		return ls
+		return dst.view().Links
 	}
 	if rec := dst.do("POST", "/api/instances/import", map[string]any{"name": "right", "bundle": bundleOf(t, src, "right")}); rec.Code != http.StatusCreated {
 		t.Fatalf("import right: %d %s", rec.Code, rec.Body)

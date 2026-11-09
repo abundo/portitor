@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -36,9 +37,10 @@ func (env *testEnv) backup() []byte {
 func objectNames(t *testing.T, env *testEnv) []string {
 	t.Helper()
 	var names []string
-	if err := env.srv.db.Model(&models.AddressObject{}).Order("name").Pluck("name", &names).Error; err != nil {
-		t.Fatal(err)
+	for _, o := range env.view().AddressObjects {
+		names = append(names, o.Name)
 	}
+	slices.Sort(names)
 	return names
 }
 
@@ -78,7 +80,7 @@ func TestBackupRestore(t *testing.T) {
 	env.post("host", map[string]any{"name": "printer", "addresses": []string{"192.168.1.20"}})
 	env.do("PUT", "/api/settings", map[string]any{"wg_endpoint_host": "new.example.com"})
 	env.do("PUT", "/api/firewalls/1", map[string]any{"name": "firewall", "agent_url": "https://10.0.0.2:8443", "agent_token": "new-token"})
-	env.srv.db.Model(&models.Settings{}).Where("id = 1").Update("last_commit", 7)
+	env.srv.db.Exec("UPDATE settings SET last_commit = 7 WHERE id = 1")
 	env.srv.db.Model(&models.Firewall{}).Where("id = 1").Update("generation", 9)
 	if err := env.srv.db.Exec("DELETE FROM users WHERE username = 'gone'").Error; err != nil {
 		t.Fatal(err)

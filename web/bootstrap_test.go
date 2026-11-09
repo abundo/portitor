@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/abundo/portitor/internal/agentapi"
+	"github.com/abundo/portitor/internal/confview"
 	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/models"
 )
@@ -31,11 +32,17 @@ func (f *applyAgent) Apply(_ context.Context, doc fwconfig.Document, _ int) (*ag
 // stays there, so the applied document lacks it.
 func ifaceLabel(t *testing.T, s *Server, name string) string {
 	t.Helper()
-	var ifc models.Interface
-	if err := s.db.Where("name = ?", name).First(&ifc).Error; err != nil {
+	v, err := s.view(t.Context())
+	if err != nil {
 		t.Fatal(err)
 	}
-	return ifc.Label
+	for _, i := range v.Interfaces {
+		if i.Name == name {
+			return i.Label
+		}
+	}
+	t.Fatalf("no interface %s", name)
+	return ""
 }
 
 func TestBootstrap(t *testing.T) {
@@ -128,12 +135,8 @@ func TestBootstrap(t *testing.T) {
 	if len(in.NAT) != 0 {
 		t.Errorf("NAT without a WAN: %+v", in.NAT)
 	}
-	var soa models.DnsSoaTemplate
-	var tmpl models.DnsTemplate
-	var zone models.DnsZone
-	env.srv.db.First(&soa)
-	env.srv.db.First(&tmpl)
-	env.srv.db.First(&zone)
+	v := env.view()
+	soa, tmpl, zone := v.DnsSoaTemplates[0], v.DnsTemplates[0], v.DnsZones[0]
 	if soa.Name != "soa-1" || soa.Mname != "ns1.home.arpa" || soa.Rname != "unknown.home.arpa" || soa.Refresh != 86400 {
 		t.Errorf("SOA template %+v", soa)
 	}
@@ -145,12 +148,15 @@ func TestBootstrap(t *testing.T) {
 		t.Errorf("zone %+v", zone)
 	}
 	var fw models.DnsRecord
-	env.srv.db.Where("zone_id = ? AND name = ?", zone.ID, "fw").First(&fw)
+	for _, r := range v.DnsRecords {
+		if r.ZoneID == zone.ID && r.Name == "fw" {
+			fw = r
+		}
+	}
 	if fw.Type != "A" || fw.Value != "192.168.1.1" {
 		t.Errorf("fw record %+v", fw)
 	}
-	var lanIfc models.Interface
-	env.srv.db.Where("name = ?", opts.LAN).First(&lanIfc)
+	lanIfc := env.ifaceRow(opts.LAN)
 	if !lanIfc.DnsListen {
 		t.Error("DNS does not listen on the static LAN")
 	}
@@ -423,9 +429,8 @@ func TestBootstrapNoGUIPort(t *testing.T) {
 	if fw := firstFirewall(t, env); fw.AgentURL != "https://192.168.1.1:8443" {
 		t.Errorf("agent URL %q", fw.AgentURL)
 	}
-	var mgmt models.Service
-	if err := env.srv.db.Where("name = ?", "portitor-mgmt").First(&mgmt).Error; err != nil || len(mgmt.Ports) != 1 || mgmt.Ports[0].DstLo != 22 {
-		t.Errorf("management service: %+v %v", mgmt.Ports, err)
+	if mgmt := rows(env, func(v *confview.View) []models.Service { return v.Services }, func(s *models.Service) bool { return s.Name == "portitor-mgmt" }); len(mgmt) != 1 || len(mgmt[0].Ports) != 1 || mgmt[0].Ports[0].DstLo != 22 {
+		t.Errorf("management service: %+v", mgmt)
 	}
 	in := fake.applied.Instances[0]
 	var input, forward int

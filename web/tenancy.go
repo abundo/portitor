@@ -91,22 +91,7 @@ func (s *Server) liveDocument(firewallID uint) (*fwconfig.Document, error) {
 	if !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}
-	if len(live.Instances) > 0 {
-		return nil, errNoLiveDocument
-	}
-	tree, ok, err := s.oldSnapshot(live.CommitID)
-	if err != nil {
-		return nil, err
-	}
-	if !ok {
-		return nil, errNoLiveDocument
-	}
-	doc, err := builder.BuildFirewall(builder.Input{DB: s.db, Tree: tree}, live.Generation, firewallID)
-	var ve *fwconfig.ValidationError
-	if err != nil && !errors.As(err, &ve) {
-		return nil, err
-	}
-	return doc, nil
+	return nil, errNoLiveDocument
 }
 
 // mergeInstances is live with the instances of part in place of those of

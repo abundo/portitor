@@ -1067,7 +1067,7 @@ def move_web_database(host: Host) -> bool:
     log(f"==> Moving portitor-web's database to portitor-config on {host}")
     host.run(f"systemctl stop {WEB_UNIT} 2>/dev/null || true", desc=f"systemctl stop {WEB_UNIT}")
     host.run(
-        f"for f in portitor.db portitor.db-wal portitor.db-shm; do "
+        f"for f in portitor.db portitor.db-wal portitor.db-shm candidate.json ids.json; do "
         f"[ -e {OLD_WEB_DB_DIR}/$f ] && install -o {WEB_USER} -g {WEB_USER} -m 0600 {OLD_WEB_DB_DIR}/$f {CONFIG_DB_DIR}/$f; done; "
         f"[ -d {OLD_WEB_DB_DIR}/deployed ] && cp -a {OLD_WEB_DB_DIR}/deployed {CONFIG_DB_DIR}/ && chown -R {WEB_USER}:{WEB_USER} {CONFIG_DB_DIR}/deployed; "
         f"mv {old} {old}.moved-to-portitor-config",
@@ -1172,13 +1172,14 @@ def move_remote_database(web: Host, fw: Host) -> bool:
                 f"{fw} has a portitor-config database with users ({new}); move it aside there "
                 f"to move {web}'s {old} in its place, or copy that one over yourself"
             )
-        fw.run(f"for f in portitor.db portitor.db-wal portitor.db-shm; do "
+        fw.run(f"for f in portitor.db portitor.db-wal portitor.db-shm candidate.json ids.json; do "
                f"[ ! -e {CONFIG_DB_DIR}/$f ] || mv {CONFIG_DB_DIR}/$f {CONFIG_DB_DIR}/$f.unused; done",
                desc=f"set the new, empty {new} aside (.unused)")
     web.run(f"systemctl stop {WEB_UNIT} 2>/dev/null || true", desc=f"systemctl stop {WEB_UNIT} on {web}")
     pack = (
         f"t=$(mktemp -d) && python3 -I -c {shlex.quote(DB_BACKUP)} {old} $t/portitor.db && "
         f"{{ [ ! -d {OLD_WEB_DB_DIR}/deployed ] || cp -a {OLD_WEB_DB_DIR}/deployed $t/; }} && "
+        f"for f in candidate.json ids.json; do [ ! -e {OLD_WEB_DB_DIR}/$f ] || cp -a {OLD_WEB_DB_DIR}/$f $t/; done && "
         f"cd $t && tar -czf - *; rc=$?; cd /; rm -rf \"$t\"; exit $rc"
     )
     with tempfile.TemporaryDirectory(prefix="portitor-db-") as tmp:
@@ -1186,7 +1187,7 @@ def move_remote_database(web: Host, fw: Host) -> bool:
         web.run_to_file(pack, archive, f"copy {old} and {OLD_WEB_DB_DIR}/deployed")
         fw.run(
             f"tar -C {CONFIG_DB_DIR} --no-same-owner -xzf - && chown -R {WEB_USER}:{WEB_USER} {CONFIG_DB_DIR} && "
-            f"chmod 0600 {new}",
+            f"chmod 0600 {CONFIG_DB_DIR}/portitor.db {CONFIG_DB_DIR}/*.json",
             desc=f"unpack it in {CONFIG_DB_DIR}", stdin_file=archive,
         )
     web.run(f"mv {old} {old}.moved-to-portitor-config", desc=f"mv {old} {old}.moved-to-portitor-config")

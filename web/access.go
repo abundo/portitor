@@ -27,8 +27,7 @@ import (
 const ctxAccess = "access"
 
 // access is what one user may do, by instance name. ids names the
-// instances' rows for the handlers that still take row ids (the tables kept
-// in step with the candidate, until the API is on the tree).
+// instances by their ids (config_ids), for the handlers that take them.
 type access struct {
 	global string
 	levels map[string]string
@@ -88,15 +87,6 @@ func (a *access) canWrite(id uint) bool {
 
 // canReadAny: a row of several instances (a link) is seen from either end.
 func (a *access) canReadAny(ids []uint) bool { return slices.ContainsFunc(ids, a.canRead) }
-
-func (a *access) canWriteAll(ids []uint) bool {
-	for _, id := range ids {
-		if !a.canWrite(id) {
-			return false
-		}
-	}
-	return true
-}
 
 // readableNames lists the names of the instances the user reads;
 // meaningless if readsAll.

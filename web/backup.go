@@ -25,13 +25,15 @@ import (
 	"gorm.io/gorm/logger"
 
 	"github.com/abundo/portitor/internal/buildinfo"
+	"github.com/abundo/portitor/internal/datastore"
 	"github.com/abundo/portitor/internal/dbmigrate"
-	"github.com/abundo/portitor/models"
 )
 
-// A backup is a snapshot of the whole database (VACUUM INTO), encrypted
-// with an age passphrase because it holds every secret: `age -d` decrypts
-// it outside Portitor. Restore also takes an unencrypted database file.
+// A backup is a copy of the database with the configuration in it
+// (writeSnapshot), encrypted with an age passphrase because it holds
+// every secret: `age -d` decrypts it outside Portitor. Restore also takes
+// an unencrypted database file. Restore makes the backup's configuration
+// the candidate: a commit deploys it.
 
 // backupMaxSize limits a restored database; the request carries it base64
 // encoded in JSON.
@@ -62,7 +64,7 @@ func (s *Server) handleBackup(c *echo.Context) error {
 	}
 	defer os.RemoveAll(dir)
 	snap := filepath.Join(dir, "snapshot.db")
-	if err := s.db.Exec("VACUUM INTO ?", snap).Error; err != nil {
+	if err := s.writeSnapshot(c.Request().Context(), snap); err != nil {
 		return err
 	}
 	var out bytes.Buffer
@@ -167,7 +169,8 @@ func (s *Server) handleRestore(c *echo.Context) error {
 	} else if len(deps) > 0 {
 		return errJSON(c, http.StatusConflict, "a deployment is waiting for confirmation; confirm or roll it back first")
 	}
-	res, err := restoreDatabase(c.Request().Context(), s.db, path, restoreKeeps)
+	ctx := c.Request().Context()
+	res, _, err := s.restore(ctx, path, restoreKeeps, s.firewallsHere)
 	if err != nil {
 		var re restoreError
 		if errors.As(err, &re) {
@@ -177,6 +180,56 @@ func (s *Server) handleRestore(c *echo.Context) error {
 	}
 	slog.Info("backup restored", "user", currentUser(c).Username, "schema_version", res.SchemaVersion, "migrated", res.Migrated)
 	return c.JSON(http.StatusOK, res)
+}
+
+// restore replaces this installation's state with the copy at path
+// (restoreDatabase), and its candidate with the copy's configuration,
+// fixed up by fix.
+func (s *Server) restore(ctx context.Context, path string, keeps []string, fix func(*datastore.Tree)) (*restoreResult, map[string][]byte, error) {
+	files, err := readSnapshot(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	res, err := restoreDatabase(ctx, s.db, path, keeps)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := s.takeSnapshot(ctx, files, fix); err != nil {
+		return nil, nil, err
+	}
+	return res, files, nil
+}
+
+// firewallsHere puts what the configuration has on a firewall this
+// installation doesn't have on the first one, a default instance only
+// where that one has none.
+func (s *Server) firewallsHere(tree *datastore.Tree) {
+	fws, err := s.firewalls()
+	if err != nil || len(fws) == 0 {
+		return
+	}
+	known := map[string]bool{}
+	for _, fw := range fws {
+		known[fw.Name] = true
+	}
+	hasDefault := false
+	for _, in := range tree.Root.Lists["instance"] {
+		hasDefault = hasDefault || (in.Leaf("firewall") == fws[0].Name && in.Leaf("is-default") == "true")
+	}
+	for _, list := range []string{"instance", "task"} {
+		for _, e := range tree.Root.Lists[list] {
+			if fw := e.Leaf("firewall"); fw == "" || known[fw] {
+				continue
+			}
+			if list == "instance" && e.Leaf("is-default") == "true" {
+				if hasDefault {
+					continue
+				}
+				hasDefault = true
+			}
+			e.Leaves["firewall"] = fws[0].Name
+		}
+	}
 }
 
 // restoreError is a problem with the backup, not the server.
@@ -199,8 +252,8 @@ func restoreDatabase(ctx context.Context, db *gorm.DB, path string, keeps []stri
 	if err != nil {
 		return nil, err
 	}
-	var cur models.Settings
-	if err := db.FirstOrCreate(&cur, models.Settings{ID: 1}).Error; err != nil {
+	var cur int64
+	if err := db.Table("settings").Select("COALESCE(MAX(last_commit), 0)").Scan(&cur).Error; err != nil {
 		return nil, err
 	}
 
@@ -288,23 +341,20 @@ func restoreDatabase(ctx context.Context, db *gorm.DB, path string, keeps []stri
 	if _, err := tx.ExecContext(ctx, `DELETE FROM main.role_members WHERE user_id NOT IN (SELECT id FROM main.users)`); err != nil {
 		return nil, err
 	}
-	r, err := tx.ExecContext(ctx, `UPDATE main.settings SET last_commit = max(last_commit, ?) WHERE id = 1`, cur.LastCommit)
+	r, err := tx.ExecContext(ctx, `UPDATE main.settings SET last_commit = max(last_commit, ?) WHERE id = 1`, cur)
 	if err != nil {
 		return nil, err
 	}
 	if n, _ := r.RowsAffected(); n == 0 {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO main.settings (id, confirm_timeout, wg_endpoint_host, last_commit, updated_at)
-			VALUES (1, ?, ?, ?, ?)`, cur.ConfirmTimeout, cur.WgEndpointHost, cur.LastCommit, time.Now()); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO main.settings (id, last_commit) VALUES (1, ?)`, cur); err != nil {
 			return nil, err
 		}
 	}
 	// What was on a firewall this installation doesn't have goes to the
 	// first one.
-	for _, t := range []string{"instances", "tasks", "known_interfaces"} {
-		if _, err := tx.ExecContext(ctx, `UPDATE OR IGNORE main.`+t+` SET firewall_id = (SELECT min(id) FROM main.firewalls)
-			WHERE firewall_id NOT IN (SELECT id FROM main.firewalls)`); err != nil {
-			return nil, err
-		}
+	if _, err := tx.ExecContext(ctx, `UPDATE OR IGNORE main.known_interfaces SET firewall_id = (SELECT min(id) FROM main.firewalls)
+		WHERE firewall_id NOT IN (SELECT id FROM main.firewalls)`); err != nil {
+		return nil, err
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM main.known_interfaces WHERE firewall_id NOT IN (SELECT id FROM main.firewalls)`); err != nil {
 		return nil, err

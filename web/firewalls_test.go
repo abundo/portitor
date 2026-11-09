@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/abundo/portitor/internal/agentapi"
+	"github.com/abundo/portitor/internal/confview"
 	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/models"
 )
@@ -131,9 +132,8 @@ func TestFirewallsDeploy(t *testing.T) {
 
 	// The second firewall's host is its default instance, named after it,
 	// and the token never comes back.
-	var host models.Instance
-	if err := env.srv.db.Where("firewall_id = ? AND is_default", branch).First(&host).Error; err != nil || host.Name != "branch" {
-		t.Fatalf("branch host: %+v %v", host, err)
+	if host := rows(env, func(v *confview.View) []models.Instance { return v.Instances }, func(in *models.Instance) bool { return in.FirewallID == uint(branch) && in.IsDefault }); len(host) != 1 || host[0].Name != "branch" {
+		t.Fatalf("branch host: %+v", host)
 	}
 	if rec := env.do("GET", "/api/firewalls", nil); strings.Contains(rec.Body.String(), "secret") || !strings.Contains(rec.Body.String(), `"has_agent_token":true`) {
 		t.Errorf("firewalls: %s", rec.Body)
@@ -160,8 +160,6 @@ func TestFirewallsDeploy(t *testing.T) {
 	}
 
 	// A change on the branch deploys there only.
-	var shop models.Instance
-	env.srv.db.Where("name = ?", "shop").First(&shop)
 	env.post("instance=shop/rule", map[string]any{"chain": "input", "action": "drop", "enabled": true})
 	if rec := env.do("POST", "/api/deploy/apply", map[string]any{}); rec.Code != http.StatusOK {
 		t.Fatalf("commit: %d %s", rec.Code, rec.Body)
@@ -233,9 +231,6 @@ func TestFirewallsPendingConfirm(t *testing.T) {
 
 func TestFirewallsRules(t *testing.T) {
 	env, _, branch := twoFirewalls(t)
-	var guest, shop models.Instance
-	env.srv.db.Where("name = ?", "guest").First(&guest)
-	env.srv.db.Where("name = ?", "shop").First(&shop)
 
 	// A link stays on one firewall.
 	if rec := env.cfg("POST", "link", map[string]any{"name": "l1", "instance-a": "guest", "instance-b": "shop", "interface-a": "to-shop", "interface-b": "to-guest"}); rec.Code != http.StatusBadRequest {
@@ -267,9 +262,7 @@ func TestFirewallsRules(t *testing.T) {
 	if rec := env.do("DELETE", "/api/firewalls/"+itoa(branch), nil); rec.Code != http.StatusNoContent {
 		t.Errorf("delete: %d %s", rec.Code, rec.Body)
 	}
-	var n int64
-	env.srv.db.Model(&models.Instance{}).Where("name = ?", "branch").Count(&n)
-	if n != 0 {
+	if n := len(rows(env, func(v *confview.View) []models.Instance { return v.Instances }, func(in *models.Instance) bool { return in.Name == "branch" })); n != 0 {
 		t.Error("the deleted firewall's host stayed")
 	}
 	if rec := env.do("DELETE", "/api/firewalls/1", nil); rec.Code != http.StatusBadRequest {
@@ -300,9 +293,7 @@ func TestFirewallsHAPair(t *testing.T) {
 	env.do("PUT", "/api/firewalls/1", map[string]any{"name": "firewall", "agent_url": "https://127.0.0.1:8443", "agent_fingerprint": fp})
 	pair := env.create("/api/firewalls", map[string]any{"name": "fw1b", "ha_primary_id": 1, "agent_url": "https://192.0.2.3:8443", "agent_fingerprint": fp})
 	agents[pair] = &fleetAgent{}
-	var n int64
-	env.srv.db.Model(&models.Instance{}).Where("firewall_id = ?", pair).Count(&n)
-	if n != 0 {
+	if n := len(rows(env, func(v *confview.View) []models.Instance { return v.Instances }, func(in *models.Instance) bool { return in.FirewallID == uint(pair) })); n != 0 {
 		t.Errorf("the secondary has %d instances of its own", n)
 	}
 	// A role is only for the host's own physical interface.
@@ -418,11 +409,7 @@ func addHALinks(t *testing.T, env *testEnv) {
 
 func instanceID(t *testing.T, env *testEnv, name string) uint {
 	t.Helper()
-	var in models.Instance
-	if err := env.srv.db.Where("name = ?", name).First(&in).Error; err != nil {
-		t.Fatal(err)
-	}
-	return in.ID
+	return env.instanceRow(name).ID
 }
 
 func TestFirewallsHADegradedCommit(t *testing.T) {

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/abundo/portitor/internal/confview"
 	"github.com/abundo/portitor/internal/wgkeys"
 	"github.com/abundo/portitor/models"
 )
@@ -24,13 +25,14 @@ func TestWgImport(t *testing.T) {
 	if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), priv) || !strings.Contains(rec.Body.String(), "dns") {
 		t.Fatalf("%d %s", rec.Code, rec.Body)
 	}
-	var ifc models.Interface
-	env.srv.db.Where("name = ?", "wg5").First(&ifc)
+	ifc := env.ifaceRow("wg5")
 	if ifc.WgPrivateKey != priv || ifc.WgPublicKey != pub || ifc.WgListenPort != 51821 || len(ifc.Addresses) != 2 || ifc.Addresses[1] != "fd00:99::1/128" {
 		t.Fatalf("interface %+v", ifc)
 	}
-	var peers []models.WgPeer
-	env.srv.db.Where("interface_id = ?", ifc.ID).Find(&peers)
+	peersOf := func() []models.WgPeer {
+		return rows(env, func(v *confview.View) []models.WgPeer { return v.WgPeers }, func(p *models.WgPeer) bool { return p.InterfaceID == ifc.ID })
+	}
+	peers := peersOf()
 	if len(peers) != 1 || peers[0].Name != "phone" || peers[0].Keepalive != 25 {
 		t.Fatalf("peers %+v", peers)
 	}
@@ -41,9 +43,7 @@ func TestWgImport(t *testing.T) {
 	if rec := env.do("POST", "/api/wg/import", body); rec.Code != http.StatusOK {
 		t.Fatalf("overwrite: %d %s", rec.Code, rec.Body)
 	}
-	var n int64
-	env.srv.db.Model(&models.WgPeer{}).Where("interface_id = ?", ifc.ID).Count(&n)
-	if n != 1 {
+	if n := len(peersOf()); n != 1 {
 		t.Errorf("overwrite left %d peers", n)
 	}
 	body["config"] = "[Interface]\nPrivateKey = nope\n"

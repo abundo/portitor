@@ -7,10 +7,12 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/abundo/portitor/internal/agentapi"
+	"github.com/abundo/portitor/internal/confview"
 	"github.com/abundo/portitor/internal/render"
 	"github.com/abundo/portitor/models"
 )
@@ -31,8 +33,7 @@ func TestSyncNICs(t *testing.T) {
 	if err := env.srv.ensureDefaultInstance(); err != nil {
 		t.Fatal(err)
 	}
-	var main models.Instance
-	env.srv.db.First(&main)
+	main := env.instanceRow("")
 	env.vf("lan")
 	env.post("instance=lan/interface", map[string]any{"kind": "physical", "name": "eth9", "enabled": true})
 	env.post("instance=lan/interface", map[string]any{"kind": "physical", "name": "eth3", "enabled": true})
@@ -66,8 +67,8 @@ func TestSyncNICs(t *testing.T) {
 	if len(got.Missing) != 1 || got.Missing[0] != (missingNIC{Instance: "lan", Name: "eth9"}) {
 		t.Errorf("missing: %+v", got.Missing)
 	}
-	var ifaces []models.Interface
-	env.srv.db.Where("instance_id = ?", main.ID).Order("name").Find(&ifaces)
+	ifaces := confview.Of(env.view().Interfaces, main.ID)
+	slices.SortFunc(ifaces, func(a, b models.Interface) int { return strings.Compare(a.Name, b.Name) })
 	if len(ifaces) != 2 {
 		t.Fatalf("interfaces: %+v", ifaces)
 	}
@@ -81,9 +82,7 @@ func TestSyncNICs(t *testing.T) {
 	if got := strings.Join(ifaces[1].Addresses, " "); got != "10.1.2.1/24 2001:db8::1/64" {
 		t.Errorf("eth1 addresses: %s", got)
 	}
-	var prefixes, addrs int64
-	env.srv.db.Model(&models.IpamPrefix{}).Count(&prefixes)
-	env.srv.db.Model(&models.IpamAddress{}).Count(&addrs)
+	prefixes, addrs := len(env.view().IpamPrefixes), len(env.view().IpamAddresses)
 	if prefixes != 1 || addrs != 0 {
 		t.Errorf("IPAM: %d prefixes, %d addresses", prefixes, addrs)
 	}

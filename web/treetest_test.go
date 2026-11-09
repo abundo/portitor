@@ -7,10 +7,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 
 	"github.com/abundo/portitor/internal/builder"
+	"github.com/abundo/portitor/internal/confview"
 	"github.com/abundo/portitor/internal/datastore"
+	"github.com/abundo/portitor/models"
 )
 
 // Helpers for tests that set up the configuration through the tree
@@ -119,15 +122,72 @@ func (env *testEnv) post(path string, body any) string {
 // on reports whether the boolean leaf of n is true (its default too).
 func on(n *datastore.Node, leaf string) bool { return n != nil && n.Leaf(leaf) == "true" }
 
-// rowID is the id of the table's row of the entry named name (in the
-// tables, the candidate's cache), for what still takes row ids.
+// view is the candidate as rows (confview).
+func (env *testEnv) view() *confview.View {
+	env.t.Helper()
+	v, err := env.srv.view(env.t.Context())
+	if err != nil {
+		env.t.Fatal(err)
+	}
+	return v
+}
+
+// rowID is the id of the entry of the table named name (its row's in
+// confview), for what takes ids.
 func (env *testEnv) rowID(table, name string) uint {
 	env.t.Helper()
-	var id uint
-	if err := env.srv.db.Table(table).Select("id").Where("name = ?", name).Scan(&id).Error; err != nil || id == 0 {
-		env.t.Fatalf("no %s %s: %v", table, name, err)
+	rv := reflect.ValueOf(env.view()).Elem()
+	for i := range rv.NumField() {
+		f := rv.Field(i)
+		if f.Kind() != reflect.Slice || f.Len() == 0 || f.Type().Elem().Kind() != reflect.Struct {
+			continue
+		}
+		if tbl, _, _ := confview.RowOf(f.Index(0).Addr().Interface()); tbl != table {
+			continue
+		}
+		for j := range f.Len() {
+			if row := f.Index(j); row.FieldByName("Name").String() == name {
+				return uint(row.FieldByName("ID").Uint())
+			}
+		}
 	}
-	return id
+	env.t.Fatalf("no %s %s", table, name)
+	return 0
+}
+
+// rows are the rows of a list of the candidate that keep keeps (nil: all).
+func rows[T any](env *testEnv, of func(*confview.View) []T, keep func(*T) bool) []T {
+	env.t.Helper()
+	all := of(env.view())
+	if keep == nil {
+		return all
+	}
+	return confview.Where(all, keep)
+}
+
+// instanceRow is the candidate's instance of the name; the default one
+// for "".
+func (env *testEnv) instanceRow(name string) models.Instance {
+	env.t.Helper()
+	for _, in := range env.view().Instances {
+		if in.Name == name || (name == "" && in.IsDefault) {
+			return in
+		}
+	}
+	env.t.Fatalf("no instance %q", name)
+	return models.Instance{}
+}
+
+// ifaceRow is the candidate's (first) interface of the name.
+func (env *testEnv) ifaceRow(name string) models.Interface {
+	env.t.Helper()
+	for _, i := range env.view().Interfaces {
+		if i.Name == name {
+			return i
+		}
+	}
+	env.t.Fatalf("no interface %q", name)
+	return models.Interface{}
 }
 
 // rowIDOf is the row id of an entry keyed by its id (a rule's is its row's).

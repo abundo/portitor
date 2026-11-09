@@ -330,7 +330,7 @@ func (s *Server) copyPrimary(ctx context.Context) error {
 	if !s.isReplica() {
 		return nil
 	}
-	if _, err := restoreDatabase(ctx, s.db, tmp, replicaKeeps); err != nil {
+	if _, _, err := s.restore(ctx, tmp, replicaKeeps, nil); err != nil {
 		return fail(fmt.Errorf("the primary's database: %w", err))
 	}
 	if err := s.replicaTree(ctx, client, peer); err != nil {
@@ -399,14 +399,11 @@ func (s *Server) handleReplicaCommit(c *echo.Context) error {
 	return c.Blob(http.StatusOK, "application/json", data)
 }
 
-// replicaTree brings the replica's configuration tree in step with the
-// copy of the primary's database: the candidate is the tables (they are
-// the primary's candidate's), running the live commit's configuration,
-// fetched from the primary when this host doesn't have it.
+// replicaTree brings the replica's running configuration in step with the
+// copy of the primary's database (which brought its candidate): the live
+// commit's configuration, fetched from the primary when this host doesn't
+// have it.
 func (s *Server) replicaTree(ctx context.Context, client *http.Client, peer agentapi.HAPeerConfig) error {
-	if err := s.syncFromTables(ctx); err != nil {
-		return fmt.Errorf("the copy's candidate: %w", err)
-	}
 	commit, err := s.liveCommit()
 	if err != nil || commit == 0 {
 		return err
@@ -467,7 +464,7 @@ func (s *Server) handleReplica(c *echo.Context) error {
 	f.Close()
 	os.Remove(tmp)
 	defer os.Remove(tmp)
-	if err := s.db.Exec("VACUUM INTO ?", tmp).Error; err != nil {
+	if err := s.writeSnapshot(c.Request().Context(), tmp); err != nil {
 		return err
 	}
 	data, err := os.ReadFile(tmp)

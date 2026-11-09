@@ -1043,16 +1043,6 @@ func buildPeer(in Input, generation int64, only map[string]bool, firewallID uint
 	return doc, nil
 }
 
-func cmpBool(a, b bool) int {
-	switch {
-	case a == b:
-		return 0
-	case a:
-		return 1
-	}
-	return -1
-}
-
 // haPair is what the two hosts of a pair have on the HA link.
 type haPair struct {
 	link       string // the interface

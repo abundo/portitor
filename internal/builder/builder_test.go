@@ -12,6 +12,8 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
+	"github.com/abundo/portitor/internal/confview"
+	"github.com/abundo/portitor/internal/datastore"
 	"github.com/abundo/portitor/internal/datastore/sqlmap"
 	"github.com/abundo/portitor/internal/dbmigrate"
 	"github.com/abundo/portitor/internal/fwconfig"
@@ -32,9 +34,57 @@ func testDB(t *testing.T) *gorm.DB {
 	return db
 }
 
+// testTrees are the configuration trees the tests make, by database.
+var testTrees = map[*gorm.DB]*testTree{}
+
+type testTree struct {
+	tree *datastore.Tree
+	add  *sqlmap.Adder
+	ids  map[string]uint // the last id given, by table
+}
+
+// mustCreate makes v: a row of the database, or of a table of the
+// configuration an entry of the test's tree, with the id the table would
+// have given it (kept in config_ids).
 func mustCreate(t *testing.T, db *gorm.DB, v any) {
 	t.Helper()
-	if err := db.Create(v).Error; err != nil {
+	tbl, row, err := confview.RowOf(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := confview.Mapping()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Columns(tbl) == nil {
+		if err := db.Create(v).Error; err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	tt := testTrees[db]
+	if tt == nil {
+		tree := datastore.New(schema.MustLoad())
+		tt = &testTree{tree: tree, add: m.NewAdder(db, tree, sqlmap.Index{}), ids: map[string]uint{}}
+		testTrees[db] = tt
+		t.Cleanup(func() { delete(testTrees, db) })
+	}
+	id := uint(0)
+	if n, ok := row["id"].(int64); ok {
+		id = uint(n)
+	}
+	if id == 0 {
+		tt.ids[tbl]++
+		id = tt.ids[tbl]
+		row["id"] = int64(id)
+		v.(interface{ SetID(uint) }).SetID(id)
+	}
+	tt.ids[tbl] = max(tt.ids[tbl], id)
+	n, err := tt.add.Add(tbl, row)
+	if err != nil {
+		t.Fatalf("%s: %v", tbl, err)
+	}
+	if err := db.Exec("INSERT INTO config_ids (path, tbl, id) VALUES (?, ?, ?)", datastore.PathOf(n).String(tt.tree.Root.S), tbl, id).Error; err != nil {
 		t.Fatal(err)
 	}
 }
@@ -361,7 +411,9 @@ func TestBuildDelegatedDHCP(t *testing.T) {
 	lan := models.Interface{InstanceID: main.ID, Name: "eth1", Kind: "physical", Enabled: true, Ipv4Mode: "static", DnsListen: true,
 		Addresses: models.StringList{"<eth0>:1::1/64"}, DelegatedDhcp: true, DelegatedRangeStart: "::1000", DelegatedRangeEnd: "::1fff"}
 	mustCreate(t, db, &lan)
-	db.Model(&lan).Update("delegated_slaac", false)
+	if err := testTrees[db].tree.Set(datastore.Path{{Name: "instance", Keys: []string{"main"}}, {Name: "interface", Keys: []string{"eth1"}}, {Name: "delegated-slaac"}}, "false"); err != nil {
+		t.Fatal(err)
+	}
 
 	doc, err := Build(input(t, db), 1)
 	if err != nil {
@@ -427,17 +479,12 @@ func TestBuildVRFRouting(t *testing.T) {
 	}
 }
 
-// input reads the configuration rows a test made into a tree, as the
-// first start reads an old database's tables.
+// input is the configuration a test made (mustCreate).
 func input(t *testing.T, db *gorm.DB) Input {
 	t.Helper()
-	m, err := sqlmap.New(schema.MustLoad())
-	if err != nil {
-		t.Fatal(err)
+	tt := testTrees[db]
+	if tt == nil {
+		return Input{DB: db, Tree: datastore.New(schema.MustLoad())}
 	}
-	tree, _, err := m.Import(db)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return Input{DB: db, Tree: tree}
+	return Input{DB: db, Tree: tt.tree.Clone()}
 }

@@ -1,25 +1,22 @@
 // SPDX-FileCopyrightText: 2026 The Portitor contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// Package sqlmap reads the configuration tree from portitor-config's
-// SQLite tables and writes it back, as the px: extensions of the YANG
-// modules map them: a list is a table (px:table), its entries rows under
-// their parent's row (px:parent-column), in order (px:position); a leaf
-// is a column of its name, or of a row id (px:column) of the entry a
-// leafref names; a nested list is a JSON column (px:json). It goes when
-// the tables do (dev/design-model-driven.md).
-//
-// Write keeps row ids: an entry at the same path keeps its row, so rules
-// keep the ids their connections are marked with.
+// Package sqlmap maps the configuration tree onto rows, as the px:
+// extensions of the YANG modules say: a list is a table (px:table), its
+// entries rows under their parent's row (px:parent-column), in order
+// (px:position); a leaf is a column of its name, or of a row id
+// (px:column) of the entry a leafref names; a nested list is a JSON column
+// (px:json). The rows are portitor-config's code's view of the
+// configuration (package confview, Rows) and what its imports make it
+// with (Adder); there are no tables behind them. The entries' ids are
+// kept by path (IDs, the table config_ids).
 package sqlmap
 
 import (
 	"encoding/json"
 	"fmt"
 	"maps"
-	"reflect"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -165,119 +162,6 @@ func (m *Mapping) column(s *schema.Node) (*col, error) {
 // Index maps a tree's entries (and the singleton containers) to their
 // rows' ids.
 type Index map[*datastore.Node]int64
-
-// Import reads the configuration from the tables.
-func (m *Mapping) Import(db *gorm.DB) (*datastore.Tree, Index, error) {
-	tree := datastore.New(m.root)
-	idx := Index{}
-	byID := map[*table]map[int64]*datastore.Node{}
-	ext := map[string]map[int64]string{}
-	type pending struct {
-		n  *datastore.Node
-		c  *col
-		id int64
-	}
-	var deferred []pending
-	for _, t := range m.tables {
-		byID[t] = map[int64]*datastore.Node{}
-		order := "id"
-		if t.position != "" {
-			order = quote(t.position) + ", id"
-		}
-		var rows []map[string]any
-		if err := db.Table(t.name).Order(order).Find(&rows).Error; err != nil {
-			return nil, nil, fmt.Errorf("%s: %w", t.name, err)
-		}
-		for _, row := range rows {
-			id := toInt(row["id"])
-			parent := tree.Root
-			if t.parent != nil {
-				if parent = byID[t.parent][toInt(row[t.parentCol])]; parent == nil {
-					continue // an orphan; foreign keys keep there being none
-				}
-			}
-			leaves := map[string]string{}
-			var refs []pending
-			for _, c := range t.cols {
-				v := row[c.column]
-				switch c.kind {
-				case plain:
-					if s, ok := leafValue(c, v); ok {
-						leaves[c.leaf.Name] = s
-					}
-				case external:
-					if v == nil {
-						continue
-					}
-					names, err := externalNames(db, ext, c.external)
-					if err != nil {
-						return nil, nil, err
-					}
-					if name, ok := names[toInt(v)]; ok {
-						leaves[c.leaf.Name] = name
-					}
-				case ref:
-					if v == nil {
-						if c.nullValue != "" {
-							leaves[c.leaf.Name] = c.nullValue
-						}
-						continue
-					}
-					refs = append(refs, pending{c: c, id: toInt(v)})
-				}
-			}
-			// Keys that are references resolve now: their targets'
-			// tables come first.
-			for _, r := range refs {
-				if !r.c.leaf.IsKey() {
-					continue
-				}
-				tgt := byID[r.c.target][r.id]
-				if tgt == nil {
-					return nil, nil, fmt.Errorf("%s %d: %s names row %d of %s, which is missing", t.name, id, r.c.column, r.id, r.c.target.name)
-				}
-				leaves[r.c.leaf.Name] = keyOf(tgt, r.c.leaf)
-			}
-			var n *datastore.Node
-			if t.singleton != 0 {
-				if id != t.singleton {
-					continue
-				}
-				n = parent.AddContainer(t.s)
-				for k, v := range leaves {
-					n.Leaves[k] = v
-				}
-			} else {
-				n = parent.AddEntry(t.s, leaves)
-			}
-			for _, c := range t.cols {
-				if c.kind == leafList {
-					if vs := listValue(row[c.column]); len(vs) > 0 {
-						n.LeafLists[c.leaf.Name] = vs
-					}
-				}
-			}
-			for _, j := range t.jsons {
-				if err := readJSONColumn(n, j, row[j.column]); err != nil {
-					return nil, nil, fmt.Errorf("%s %d: %s: %w", t.name, id, j.column, err)
-				}
-			}
-			for _, r := range refs {
-				if !r.c.leaf.IsKey() {
-					deferred = append(deferred, pending{n: n, c: r.c, id: r.id})
-				}
-			}
-			idx[n] = id
-			byID[t][id] = n
-		}
-	}
-	for _, d := range deferred {
-		if tgt := byID[d.c.target][d.id]; tgt != nil {
-			d.n.Leaves[d.c.leaf.Name] = keyOf(tgt, d.c.leaf)
-		}
-	}
-	return tree, idx, nil
-}
 
 // keyOf is the value a reference leaf takes for the entry tgt: the key
 // its path ends at.
@@ -453,139 +337,6 @@ func readJSONColumn(n *datastore.Node, j *jsonCol, v any) error {
 		n.AddEntry(j.list, leaves)
 	}
 	return nil
-}
-
-// Write makes the tables hold t, its entries' rows having the ids of idx
-// (AssignIDs): rows updated where their entry's columns changed, inserted
-// for new entries and deleted for those gone. Run it in a transaction; it
-// defers the foreign keys to its commit.
-func (m *Mapping) Write(tx *gorm.DB, tree *datastore.Tree, idx Index) error {
-	if err := tx.Exec("PRAGMA defer_foreign_keys = ON").Error; err != nil {
-		return err
-	}
-	old, oldIdx, err := m.Import(tx)
-	if err != nil {
-		return err
-	}
-	oldByID := map[string]map[int64]*datastore.Node{}
-	for n, id := range oldIdx {
-		t := m.byList[n.S].name
-		if oldByID[t] == nil {
-			oldByID[t] = map[int64]*datastore.Node{}
-		}
-		oldByID[t][id] = n
-	}
-	ext := map[string]map[string]int64{}
-	newIdx := Index{}
-	type entry struct {
-		n       *datastore.Node
-		t       *table
-		written map[string]any
-	}
-	var entries []entry
-	var walk func(n *datastore.Node) error
-	walk = func(n *datastore.Node) error {
-		for _, s := range n.S.Children {
-			t := m.byList[s]
-			if t == nil {
-				if s.Kind == schema.Container {
-					if c := n.Containers[s.Name]; c != nil {
-						if err := walk(c); err != nil {
-							return err
-						}
-					}
-				}
-				continue
-			}
-			var nodes []*datastore.Node
-			if t.singleton != 0 {
-				c := n.Containers[s.Name]
-				if c == nil {
-					c = n.AddContainer(s)
-				}
-				nodes = []*datastore.Node{c}
-			} else {
-				nodes = n.Lists[s.Name]
-			}
-			for pos, e := range nodes {
-				cols, err := m.columns(t, tree, e, pos, newIdx, ext, tx, false)
-				if err != nil {
-					return err
-				}
-				id, ok := idx[e]
-				if !ok {
-					return fmt.Errorf("%s: it has no id", pathKey(m.root, e))
-				}
-				newIdx[e] = id
-				if oe := oldByID[t.name][id]; oe != nil {
-					prev, err := m.columns(t, old, oe, position(oe), oldIdx, ext, tx, true)
-					if err != nil {
-						return err
-					}
-					if err := update(tx, t.name, id, cols, prev); err != nil {
-						return err
-					}
-					delete(oldByID[t.name], id)
-				} else {
-					if t.singleton != 0 {
-						return fmt.Errorf("%s: row %d is missing", t.name, t.singleton)
-					}
-					cols["id"] = id
-					if _, err := insert(tx, t.name, cols); err != nil {
-						return err
-					}
-					delete(cols, "id")
-				}
-				entries = append(entries, entry{e, t, cols})
-				if err := walk(e); err != nil {
-					return err
-				}
-			}
-		}
-		return nil
-	}
-	if err := walk(tree.Root); err != nil {
-		return err
-	}
-	// The references to entries inserted above, now that they have ids.
-	for _, e := range entries {
-		refs, err := m.refColumns(e.t, tree, e.n, newIdx, ext, tx, true)
-		if err != nil {
-			return err
-		}
-		if err := update(tx, e.t.name, newIdx[e.n], refs, e.written); err != nil {
-			return err
-		}
-	}
-	// What is gone, children before parents.
-	var gone []*datastore.Node
-	for _, byID := range oldByID {
-		for _, n := range byID {
-			gone = append(gone, n)
-		}
-	}
-	sort.Slice(gone, func(i, j int) bool { return depth(gone[i]) > depth(gone[j]) })
-	for _, n := range gone {
-		if err := tx.Exec("DELETE FROM "+quote(m.byList[n.S].name)+" WHERE id = ?", oldIdx[n]).Error; err != nil {
-			return fmt.Errorf("%s: deleting %s: %w", m.byList[n.S].name, pathKey(m.root, n), err)
-		}
-	}
-	return nil
-}
-
-func position(e *datastore.Node) int {
-	if e.Parent == nil {
-		return 0
-	}
-	return slices.Index(e.Parent.Lists[e.S.Name], e)
-}
-
-func depth(n *datastore.Node) int {
-	d := 0
-	for x := n; x.Parent != nil; x = x.Parent {
-		d++
-	}
-	return d
 }
 
 func pathKey(root *schema.Node, n *datastore.Node) string {
@@ -779,66 +530,11 @@ func (o ordered) MarshalJSON() ([]byte, error) {
 	return []byte(b.String()), nil
 }
 
-func quote(ident string) string { return `"` + strings.ReplaceAll(ident, `"`, `""`) + `"` }
-
-func sortedKeys(m map[string]any) []string {
-	ks := make([]string, 0, len(m))
-	for k := range m {
-		ks = append(ks, k)
-	}
-	sort.Strings(ks)
-	return ks
-}
-
-func insert(tx *gorm.DB, tbl string, cols map[string]any) (int64, error) {
-	ks := sortedKeys(cols)
-	names := make([]string, len(ks))
-	args := make([]any, len(ks))
-	for i, k := range ks {
-		names[i], args[i] = quote(k), cols[k]
-	}
-	q := "INSERT INTO " + quote(tbl) + " (" + strings.Join(names, ", ") + ") VALUES (" + strings.TrimSuffix(strings.Repeat("?, ", len(ks)), ", ") + ")"
-	if err := tx.Exec(q, args...).Error; err != nil {
-		return 0, fmt.Errorf("%s: %w", tbl, err)
-	}
-	if id, ok := cols["id"]; ok {
-		return toInt(id), nil
-	}
-	var id int64
-	if err := tx.Raw("SELECT last_insert_rowid()").Scan(&id).Error; err != nil {
-		return 0, err
-	}
-	return id, nil
-}
-
-// update writes the columns of cols that differ from prev.
-func update(tx *gorm.DB, tbl string, id int64, cols, prev map[string]any) error {
-	var sets []string
-	var args []any
-	for _, k := range sortedKeys(cols) {
-		if p, ok := prev[k]; ok && reflect.DeepEqual(p, cols[k]) {
-			continue
-		}
-		sets = append(sets, quote(k)+" = ?")
-		args = append(args, cols[k])
-	}
-	if len(sets) == 0 {
-		return nil
-	}
-	sets = append(sets, `"updated_at" = ?`)
-	args = append(args, time.Now().UTC())
-	args = append(args, id)
-	if err := tx.Exec("UPDATE "+quote(tbl)+" SET "+strings.Join(sets, ", ")+" WHERE id = ?", args...).Error; err != nil {
-		return fmt.Errorf("%s %d: %w", tbl, id, err)
-	}
-	return nil
-}
-
 // Row is a table's row made from an entry: its columns by name.
 type Row map[string]any
 
-// Rows makes the tables' rows from t, without the tables: what the
-// builder and the readers of the configuration read (package confview).
+// Rows makes the rows of t: what the builder and the readers of the
+// configuration read (package confview).
 // Rows have the ids of ids (a list keyed by id has its own; an entry ids
 // doesn't know gets one above them), references the ids of the rows they
 // name, and names outside the tree (firewalls, roles) the ids db has for
@@ -926,7 +622,7 @@ func (m *Mapping) Rows(db *gorm.DB, tree *datastore.Tree, ids IDs) (map[string][
 	return out, idx, nil
 }
 
-// Tables are the tables the tree maps onto.
+// Tables are the tables (lists of rows) the tree maps onto.
 func (m *Mapping) Tables() []string {
 	out := make([]string, len(m.tables))
 	for i, t := range m.tables {
@@ -941,4 +637,29 @@ func (m *Mapping) TableOf(s *schema.Node) string {
 		return t.name
 	}
 	return ""
+}
+
+// Columns are the columns of the table's rows: its id, its parent's and
+// position's, and those of its leaves and JSON lists.
+func (m *Mapping) Columns(tbl string) []string {
+	for _, t := range m.tables {
+		if t.name != tbl {
+			continue
+		}
+		out := []string{"id"}
+		if t.parentCol != "" {
+			out = append(out, t.parentCol)
+		}
+		if t.position != "" {
+			out = append(out, t.position)
+		}
+		for _, c := range t.cols {
+			out = append(out, c.column)
+		}
+		for _, j := range t.jsons {
+			out = append(out, j.column)
+		}
+		return out
+	}
+	return nil
 }

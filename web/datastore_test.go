@@ -13,13 +13,10 @@ import (
 	"testing"
 
 	"golang.org/x/crypto/ssh"
-	"gorm.io/gorm"
 
-	"github.com/abundo/portitor/internal/builder"
 	"github.com/abundo/portitor/internal/cli"
 	"github.com/abundo/portitor/internal/datastore"
 	"github.com/abundo/portitor/internal/netconf"
-	"github.com/abundo/portitor/internal/schema"
 	"github.com/abundo/portitor/models"
 )
 
@@ -39,10 +36,7 @@ func TestCLICommit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var host models.Instance
-	if err := env.srv.db.Where("is_default = ?", true).First(&host).Error; err != nil {
-		t.Fatal(err)
-	}
+	host := env.instanceRow("")
 	out := cliScript(t, cenv, `enter candidate
 instance `+host.Name+` interface lo1 kind loopback
 instance `+host.Name+` interface lo1 addresses [ 10.99.0.1/32 ]
@@ -136,8 +130,7 @@ func TestNETCONFOverSSH(t *testing.T) {
 	if err := env.srv.ensureDefaultInstance(); err != nil {
 		t.Fatal(err)
 	}
-	var host models.Instance
-	env.srv.db.Where("is_default = ?", true).First(&host)
+	host := env.instanceRow("")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	dir := t.TempDir()
@@ -213,8 +206,7 @@ func TestCLIState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var host models.Instance
-	env.srv.db.Where("is_default = ?", true).First(&host)
+	host := env.instanceRow("")
 	cliScript(t, cenv, "enter candidate\ninstance "+host.Name+" interface lo1 kind loopback\ninstance "+host.Name+" rule 77 chain input\n"+
 		"instance "+host.Name+" ntp-enabled true\ninstance "+host.Name+" ntp-server pool.ntp.org pool true\n"+
 		"instance "+host.Name+" interface br0 kind bridge\ninstance "+host.Name+" interface br0 addresses [ 10.99.0.1/24 ]\n"+
@@ -229,20 +221,6 @@ func TestCLIState(t *testing.T) {
 	if err := cli.RunScript(ctx, cenv, strings.NewReader("enter candidate\n/ system-state hostname x\n"), &bytes.Buffer{}); err == nil {
 		t.Error("state was set")
 	}
-}
-
-// tablesInput is the builder's input from the tables a test wrote.
-func tablesInput(t *testing.T, db *gorm.DB) builder.Input {
-	t.Helper()
-	tree, _, err := tablesTree(db)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if tree == nil {
-		root, _ := schema.Load()
-		tree = datastore.New(root)
-	}
-	return builder.Input{DB: db, Tree: tree}
 }
 
 // A virtual firewall renamed in the CLI keeps its role and members; one
@@ -269,8 +247,6 @@ func TestCLIInstanceRoles(t *testing.T) {
 		t.Errorf("grant: %v", g)
 	}
 
-	var host models.Instance
-	env.srv.db.Where("is_default = ?", true).First(&host)
 	var fw models.Firewall
 	env.srv.db.First(&fw)
 	cliScript(t, cenv, "enter candidate\ninstance shop firewall "+fw.Name+"\n")

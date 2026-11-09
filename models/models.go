@@ -1,9 +1,11 @@
 // SPDX-FileCopyrightText: 2026 The Portitor contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// Package models is the GORM mapping of portitor-web's database. The schema
-// itself is owned by the goose migrations in internal/dbmigrate/sql; keep
-// both in step.
+// Package models is the rows of portitor-config: those of its database
+// (Stored: users, roles, firewalls, the directory, deployments), whose
+// schema the goose migrations in internal/dbmigrate/sql own, and the
+// configuration's, which are the tree's entries as rows (package confview,
+// the YANG modules' px: mapping; there are no tables behind them).
 package models
 
 import (
@@ -1248,19 +1250,11 @@ type Deployment struct {
 	Instances StringList `json:"instances"`
 }
 
-// All lists every model; a dbmigrate test checks that the migrated schema
-// has a column for every field.
-func All() []any {
-	return []any{
-		&User{}, &Settings{}, &Instance{}, &InterfaceZone{}, &Interface{}, &WgPeer{}, &Link{},
-		&Route{}, &Rule{}, &NatRule{}, &IpamPrefix{}, &IpamAddress{}, &DnsZone{}, &DnsRecord{}, &Deployment{},
-		&AddressObject{}, &DnsSoaTemplate{}, &DnsDnssecPolicy{}, &DnsTemplate{}, &KnownInterface{},
-		&DyndnsClient{}, &DyndnsRecord{}, &Certificate{}, &IpList{}, &Task{}, &Service{}, &RateLimit{}, &ObjectFolder{}, &Role{}, &RoleMember{}, &RoleInstance{},
-		&RoutePrefixList{}, &RouteAsPathList{}, &RouteCommunityList{}, &RouteMap{}, &BgpConfig{}, &BgpPeerGroup{}, &BgpNeighbor{},
-		&OspfConfig{}, &OspfInterface{}, &IsisConfig{}, &IsisInterface{}, &VrrpRouter{}, &BfdInterface{}, &AddressList{},
-		&SnmpUser{}, &LdapServer{}, &LdapRoleMapping{}, &Vrf{}, &AcmeProxyPolicy{}, &StaticNeighbour{}, &PortName{}, &PolicyRoute{},
-		&SyslogServer{},
-	}
+// Stored lists the models stored in the database (the configuration's
+// are rows of the tree, package confview); a dbmigrate test checks that
+// the migrated schema has a column for every field.
+func Stored() []any {
+	return []any{&User{}, &Firewall{}, &Deployment{}, &KnownInterface{}, &Role{}, &RoleMember{}, &RoleInstance{}, &LdapServer{}, &LdapRoleMapping{}}
 }
 
 // AcmeProxyPolicy allows the ACME proxy's clients in Sources (any when

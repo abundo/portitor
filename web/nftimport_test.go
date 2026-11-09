@@ -36,10 +36,20 @@ func TestImportNftables(t *testing.T) {
 	env.post("instance=main/interface", map[string]any{"kind": "physical", "name": "lan", "enabled": true})
 	env.post("instance=main/rule", map[string]any{"chain": "input", "action": "drop", "enabled": true})
 
-	count := func(model any) int64 {
-		var n int64
-		env.srv.db.Model(model).Count(&n)
-		return n
+	count := func(model any) int {
+		v := env.view()
+		switch model.(type) {
+		case *models.Rule:
+			return len(v.Rules)
+		case *models.NatRule:
+			return len(v.NatRules)
+		case *models.AddressObject:
+			return len(v.AddressObjects)
+		case *models.Service:
+			return len(v.Services)
+		}
+		t.Fatalf("count %T", model)
+		return 0
 	}
 	before := count(&models.Rule{})
 	body := map[string]any{"instance_id": inst, "text": "x", "rename": map[string]string{"eth0": "wan", "eth1": "lan"}}
