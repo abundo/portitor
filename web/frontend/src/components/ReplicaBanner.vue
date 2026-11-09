@@ -5,8 +5,9 @@
 // ReplicaBanner: on an HA secondary's portitor-config, whose configuration
 // is a read-only copy of the primary's (web/replica.go). It names the
 // primary and the last copy, and lets a global admin promote this host
-// when the primary is lost (web/promote.go).
+// when the primary is lost (web/promote.go). On the primary's, it says so.
 import { computed, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { useToast } from '@nuxt/ui/composables'
 import { api } from '@/api'
 import { errMsg } from '@/api/http'
@@ -18,6 +19,7 @@ import { inlineField, wideModal } from '@/utils/form'
 
 const auth = useAuthStore()
 const deploy = useDeployStore()
+const router = useRouter()
 const toast = useToast()
 const { ask } = useConfirm()
 
@@ -65,6 +67,20 @@ async function promote() {
 </script>
 
 <template>
+  <div v-if="auth.user?.ha_primary && !auth.user?.replica" class="flex items-center">
+    <UTooltip
+      text="This host is its HA pair's primary: the pair's configuration is changed here, and its secondary keeps a read-only copy"
+    >
+      <UBadge
+        color="primary"
+        variant="subtle"
+        icon="i-lucide-crown"
+        label="HA primary"
+        :class="auth.isAdmin ? 'cursor-pointer' : ''"
+        @click="auth.isAdmin && router.push('/firewalls')"
+      />
+    </UTooltip>
+  </div>
   <div v-if="auth.user?.replica" class="flex items-center">
     <UTooltip
       text="This host's configuration is a read-only copy of its HA primary's: change it there"

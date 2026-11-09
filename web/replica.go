@@ -95,6 +95,22 @@ func (s *Server) isReplica() bool {
 	return r.replica
 }
 
+// isPrimary tells whether this portitor-config is an HA primary's (or one
+// promoted here, whose agent may still answer as the secondary until the
+// promotion's commit is applied).
+func (s *Server) isPrimary() bool {
+	if !s.cfg.Local {
+		return false
+	}
+	r := &s.role
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.promoted {
+		return true
+	}
+	return r.known && !r.replica && r.peer.Node == fwconfig.HAPrimary
+}
+
 // agentFingerprint reads the SHA-256 of the certificate of the agent at
 // url.
 func agentFingerprint(ctx context.Context, rawURL string) (string, error) {

@@ -425,7 +425,9 @@ func (s *Server) me(c *echo.Context, u *models.User) error {
 		VirtualFirewalls bool              `json:"virtual_firewalls"`
 		// Replica: this is an HA secondary's portitor-config, read-only.
 		Replica bool `json:"replica"`
-	}{u, a.levels, st.VirtualFirewalls, s.isReplica()})
+		// HAPrimary: this is an HA primary's portitor-config.
+		HAPrimary bool `json:"ha_primary"`
+	}{u, a.levels, st.VirtualFirewalls, s.isReplica(), s.isPrimary()})
 }
 
 // checkNameEmail checks a user's full name and email (trimmed): the
