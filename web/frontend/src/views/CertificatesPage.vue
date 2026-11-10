@@ -58,6 +58,8 @@ const states = computed(() => {
 })
 const stateColor = { ok: 'success', error: 'error', expired: 'error', issuing: 'info' }
 const imported = (row) => row.source === 'import'
+// What a stored certificate is, by its chain: a path of one is self-signed.
+const kindOf = (row) => (chainOf(row)?.length === 1 ? 'self-signed' : 'imported')
 // writable: the selected VF's certificates can be changed.
 const writable = computed(() => auth.canEdit)
 
@@ -593,7 +595,7 @@ const fields = computed(() => [
                         certificate authority
                       </div>
                       <div v-else-if="imported(node.row)" class="text-xs font-normal text-muted">
-                        imported
+                        {{ kindOf(node.row) }}
                       </div>
                       <div v-if="!node.row.enabled" class="text-xs font-normal text-muted">
                         disabled
