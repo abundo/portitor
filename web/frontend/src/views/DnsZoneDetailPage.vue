@@ -69,7 +69,7 @@ const dirty = computed(
     zone.value &&
     (form.name !== zone.value.name ||
       form.dns_template !== (zone.value.dns_template ?? NONE) ||
-      form.description !== zone.value.description),
+      form.description !== (zone.value.description ?? '')),
 )
 
 function fill(z) {
