@@ -61,6 +61,18 @@ func TestPlanAddresses(t *testing.T) {
 		Addresses: []string{"192.168.1.1/24", "fd00::1/64"}}, have["eth1"]),
 		"fw-guest ip addr del 10.0.0.1/8 dev eth1",
 		"fw-guest ip addr add fd00::1/64 dev eth1")
+	// The HA link: the other node's fixed link-local address goes (a
+	// promotion), the kernel's stays, its own is added without DAD.
+	link, err := parseLinks([]byte(`[{"ifname":"ha0","flags":["UP"],"mtu":1500,"addr_info":[
+	 {"family":"inet6","local":"fe80::1","prefixlen":64,"scope":"link"},
+	 {"family":"inet6","local":"fe80::be24:11ff:feca:4735","prefixlen":64,"scope":"link"}]}]`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	equal(t, planAddresses("", fwconfig.Interface{Name: "ha0", HARole: fwconfig.HARoleLink, IPv4Mode: fwconfig.ModeStatic,
+		Addresses: []string{"fe80::2/64"}}, link[0]),
+		"ip addr del fe80::1/64 dev ha0",
+		"ip addr add fe80::2/64 dev ha0 nodad")
 }
 
 func TestForeignDHCPAddrs(t *testing.T) {

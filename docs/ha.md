@@ -58,10 +58,12 @@ setup does the steps below ([An HA pair from the ISO](appliance.md#an-ha-pair-fr
 By hand, everything is done in the primary's portitor-config.
 
 1. **The two links.** On the primary's host, under *Network → Interfaces*, give one
-   physical interface the *HA role* *HA link* and another *Management*. Each gets its
-   address(es), and under *HA peer addresses* the secondary's, in the same prefix and
-   order (`169.254.1.1/30` and `169.254.1.2/30` on the HA link). The management
-   interface also gets its *Management gateway*, which the host uses for its own
+   physical interface the *HA role* *HA link* and another *Management*. The HA link
+   takes no address: the hosts use the IPv6 link-local addresses `fe80::1` (primary)
+   and `fe80::2` (secondary) on it, fixed by role, and each virtual firewall
+   `fe80::<id>:1` and `fe80::<id>:2` on a device of its own there. The management
+   interface gets its address(es), and under *HA peer addresses* the secondary's, in the
+   same prefix and order, and its *Management gateway*, which the host uses for its own
    traffic while its traffic interfaces are closed; it must not be the pair itself.
 2. **The primary's agent URL** under *Admin → Firewalls* is its management address
    (`https://172.25.38.1:8443`), not `127.0.0.1`: the secondary and the witness use it.
@@ -76,11 +78,12 @@ By hand, everything is done in the primary's portitor-config.
    *Witness string* to the third host (see [The witness](#the-witness)).
 5. **Commit.** Both hosts get the configuration; confirm it as usual.
 
-A commit lists what is missing (`HA: interface ens20: the secondary needs an address of
-its own for each address (peer addresses)`). The agents reach each other on their HA
-link addresses and their management addresses, both on the agent's port: in each
-`/etc/portitor/agent.yaml`, `listen` on all addresses (`":8443"`), and `allow_from`
-the peer's and the witness's addresses.
+A commit lists what is missing (`HA: interface ens21: the secondary needs an address of
+its own for each address (peer addresses)`). The agents reach each other on the HA
+link's link-local addresses and their management addresses, both on the agent's port:
+in each `/etc/portitor/agent.yaml`, `listen` on all addresses (`":8443"`, which takes
+IPv6 too), and `allow_from` the witness's addresses (the peer's heartbeats carry the
+pair's secret, which `allow_from` doesn't apply to).
 
 Everything else (traffic interfaces, rules, routes, services, virtual firewalls) is
 the same on both hosts. VRRP is refused on a pair: the pair shares its addresses
@@ -221,8 +224,8 @@ copy of the configuration becomes the pair's.
   then both believe they own the configuration until the old primary is caught up.
 
 The promotion swaps the two hosts in the configuration: the virtual firewalls and
-tasks move to the secondary, the HA link and management addresses swap with their
-*HA peer addresses*, the old primary becomes the secondary, the pair's **epoch** goes
+tasks move to the secondary, the management addresses swap with their *HA peer
+addresses* (and the HA link's by role), the old primary becomes the secondary, the pair's **epoch** goes
 up, and it commits. The commit skips the old primary while it is away.
 
 When the old primary comes back, it hears its peer answer as primary at a higher epoch:
@@ -237,8 +240,9 @@ Lost with the primary: changes made there since the secondary's last copy, and t
 ## Troubleshooting
 
 - **Both hosts show *peer: not heard*.** The heartbeats go to the agent on the peer's
-  HA link and management addresses: check `listen` and `allow_from` in each
-  `agent.yaml`, and the fingerprints. The agents log `ha:` lines (`journalctl -u
+  HA link (`fe80::1`, `fe80::2`) and management addresses: check `listen` and
+  `allow_from` in each `agent.yaml`, the fingerprints, and that IPv6 is not turned off
+  on the HA link (`ping fe80::2%ens20` from the primary). The agents log `ha:` lines (`journalctl -u
   portitor-agent | grep ha:`).
 - **A host shows *fenced*.** It hears neither its peer nor the witness. Check both
   links and that the witness is up (portitor-web logs `witness:` lines). *stale* is an

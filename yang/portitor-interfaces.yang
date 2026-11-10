@@ -206,7 +206,7 @@ submodule portitor-interfaces {
       leaf-list peer-addresses {
         type interface-address;
         ordered-by user;
-        description "PeerAddresses are the HA secondary's static addresses in place of Addresses, one each, in the same prefixes, on an interface with an HaRole: all else is the same on both hosts.";
+        description "PeerAddresses are the HA secondary's static addresses in place of Addresses, one each, in the same prefixes, on the management interface (HaRole management): all else is the same on both hosts. The HA link has neither: its addresses are IPv6 link-local by node (fwconfig.HALinkAddress).";
       }
       leaf ovpn-mode {
         type enumeration { enum "adaptive"; enum "udp"; enum "tcp"; }

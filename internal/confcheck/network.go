@@ -205,7 +205,8 @@ func normalizeInterface(c *Ctx, i *datastore.Node) error {
 	case "":
 		clear(i, "ha-gateway", "peer-addresses")
 	case fwconfig.HARoleLink:
-		clear(i, "ha-gateway")
+		// Its addresses are link-local by node (fwconfig.HALinkAddress).
+		clear(i, "ha-gateway", "addresses", "peer-addresses", "ipv4-mode")
 	}
 	if !on(i, "dhcpv6") {
 		clear(i, "dhcpv6-pd")

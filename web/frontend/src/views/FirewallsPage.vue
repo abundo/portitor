@@ -132,7 +132,7 @@ const fields = [
         .filter((x) => x.id !== f.id && !x.ha_primary_id)
         .map((x) => ({ label: x.name, value: x.id })),
     disabled: (f) => !!f.id,
-    hint: "Makes it the HA secondary of that firewall: it runs the primary's virtual firewalls and tasks, with the same addresses, and a commit deploys to both. Only its HA link and management interfaces have addresses of their own (HA peer addresses under Network → Interfaces). Set when the firewall is created.",
+    hint: "Makes it the HA secondary of that firewall: it runs the primary's virtual firewalls and tasks, with the same addresses, and a commit deploys to both. Only its management interface has addresses of its own (HA peer addresses under Network → Interfaces); on the HA link the hosts use IPv6 link-local addresses by role. Set when the firewall is created.",
   },
   {
     key: 'ha_state',

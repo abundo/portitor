@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"net/netip"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -649,7 +650,8 @@ func planHASync(ns string, d *fwconfig.HASync, have map[string]ipLink) []command
 	var stale []string
 	found := false
 	for _, a := range l.AddrInfo {
-		if a.Family != "inet" {
+		// The kernel's own link-local address stays.
+		if ip, err := netip.ParseAddr(a.Local); err != nil || (ip.Is6() && ip.IsLinkLocalUnicast() && !fwconfig.IsHALinkAddress(ip)) {
 			continue
 		}
 		if a.Local == addr.Addr().String() && a.Prefixlen == addr.Bits() {
@@ -662,7 +664,7 @@ func planHASync(ns string, d *fwconfig.HASync, have map[string]ipLink) []command
 		cmds = append(cmds, ipCmd(ns, "addr", "del", s, "dev", d.Name))
 	}
 	if !found {
-		cmds = append(cmds, ipCmd(ns, "addr", "add", d.Address, "dev", d.Name))
+		cmds = append(cmds, addrAdd(ns, d.Address, d.Name))
 	}
 	return cmds
 }

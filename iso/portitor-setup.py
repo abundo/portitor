@@ -92,7 +92,8 @@ finished. role (both, agent or web) picks the split setups; agent reads
 web_from (portitor-web's address or network, default the LAN network), web
 reads lan and address (its own interface), gateway and join (a portal
 string, optional). primary and secondary read mgmt (a name or MAC address),
-mgmt_address, mgmt_gateway, ha_link and ha_address; primary may read join (a
+mgmt_address, mgmt_gateway and ha_link (no address: the hosts use IPv6
+link-local addresses on it); primary may read join (a
 secondary string), and secondary needs no lan or address.
 """
 
@@ -186,6 +187,9 @@ HA_ROLES = ("primary", "secondary")
 # The agent's port, on every address in an HA pair: the peer and the
 # witness reach it over the HA link and management.
 AGENT_PORT = 8443
+# The secondary's address on the HA link (fwconfig.HALinkAddress), until the
+# pair's first commit gives the agent the link.
+HA_LINK_SECONDARY = "fe80::2/64"
 # A secondary string: what the primary needs to add this host as its HA
 # secondary (sudo portitor-setup --join on the primary). It holds the
 # agent's token.
@@ -499,7 +503,6 @@ def secondary_string(a: dict) -> str:
     d = {
         "name": portal_name(a),
         "mgmt": str(a["mgmt_address"]),
-        "ha": str(a["ha_address"]),
         "token": AGENT_TOKEN.read_text(encoding="utf-8").strip(),
         "agent_fingerprint": agent_fingerprint(),
         "config_fingerprint": cert_fingerprint(),
@@ -519,7 +522,6 @@ def decode_secondary(text: str) -> dict:
         if not isinstance(d, dict):
             raise ValueError
         d["mgmt"] = ipaddress.IPv4Interface(d["mgmt"])
-        d["ha"] = ipaddress.IPv4Interface(d["ha"])
     except (ValueError, KeyError, TypeError):
         raise ValueError("the secondary string is damaged; copy it again") from None
     if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]{0,62}", str(d.get("name", ""))) \
@@ -577,11 +579,13 @@ def interfaces(instance: str) -> list:
     return api("GET", cfg_path(entry("instance", instance), "interface") + "?shallow") or []
 
 
-def ha_interface(instance: str, nic: str, role: str, address: str, gateway: str = "", description: str = "") -> None:
+def ha_interface(instance: str, nic: str, role: str, address: str = "", gateway: str = "", description: str = "") -> None:
     """Gives nic its HA role and address on the host's virtual firewall
-    (merged into the interface, made physical when it isn't there)."""
-    body = {"ha-role": role, "addresses": [address], "enabled": True, "ipv4-mode": "static",
-            "description": description, "ha-monitor": False}
+    (merged into the interface, made physical when it isn't there). The HA
+    link has none: its addresses are IPv6 link-local by node."""
+    body = {"ha-role": role, "enabled": True, "description": description, "ha-monitor": False}
+    if address:
+        body["addresses"], body["ipv4-mode"] = [address], "static"
     if role == "management":
         body["ha-gateway"] = gateway
     if not any(i.get("name") == nic for i in interfaces(instance)):
@@ -600,7 +604,7 @@ def step_ha_primary(a: dict) -> None:
     agent and portitor-config at its management address, for the secondary
     and the witness."""
     inst = default_instance()
-    ha_interface(inst, a["ha_link"], "ha_link", str(a["ha_address"]), description="HA link")
+    ha_interface(inst, a["ha_link"], "ha_link", description="HA link")
     ha_interface(inst, a["mgmt"], "management", str(a["mgmt_address"]), str(a["mgmt_gateway"]), "Management")
     # The GUI and SSH from the management network, as from the LAN.
     rules_path = cfg_path(entry("instance", inst), "rule")
@@ -619,27 +623,27 @@ def step_ha_primary(a: dict) -> None:
 
 def add_secondary(a: dict, d: dict) -> None:
     """Primary role: adds the host of a secondary string as the HA secondary,
-    with its addresses on the two links, and commits the pair."""
+    with its management address, and commits the pair."""
     fw = own_firewall()
     if any(f.get("ha_primary_id") == fw["id"] for f in api("GET", "/api/firewalls") or []):
         raise RuntimeError(f"{fw['name']} has an HA secondary already (Admin -> Firewalls)")
     inst = default_instance()
     links = {i["ha-role"]: i for i in interfaces(inst) if i.get("ha-role")}
-    for role, peer in (("ha_link", d["ha"]), ("management", d["mgmt"])):
-        ifc = links.get(role)
-        if not ifc or not ifc.get("addresses"):
-            raise RuntimeError(f"this host has no {role} interface with an address: run the primary's setup first")
-        own = ipaddress.IPv4Interface(ifc["addresses"][0])
-        if own.network != peer.network or own.ip == peer.ip:
-            raise RuntimeError(f"the secondary's {role} address {peer} is not another address in {own.network}")
+    if "ha_link" not in links:
+        raise RuntimeError("this host has no HA link interface: run the primary's setup first")
+    ifc, peer = links.get("management"), d["mgmt"]
+    if not ifc or not ifc.get("addresses"):
+        raise RuntimeError("this host has no management interface with an address: run the primary's setup first")
+    own = ipaddress.IPv4Interface(ifc["addresses"][0])
+    if own.network != peer.network or own.ip == peer.ip:
+        raise RuntimeError(f"the secondary's management address {peer} is not another address in {own.network}")
     ip = d["mgmt"].ip
     api("POST", "/api/firewalls", {"name": d["name"], "agent_url": f"https://{ip}:{AGENT_PORT}",
                                    "agent_token": d["token"], "agent_fingerprint": d["agent_fingerprint"],
                                    "config_url": f"https://{ip}:{GUI_PORT}", "config_fingerprint": d["config_fingerprint"],
                                    "ha_primary_id": fw["id"]})
-    for role, peer in (("ha_link", d["ha"]), ("management", d["mgmt"])):
-        api("PATCH", cfg_path(entry("instance", inst), entry("interface", links[role]["name"])),
-            {"peer-addresses": [str(peer)]})
+    api("PATCH", cfg_path(entry("instance", inst), entry("interface", ifc["name"])),
+        {"peer-addresses": [str(peer)]})
     commit(f"the HA pair with {d['name']}")
 
 
@@ -672,7 +676,7 @@ RemainAfterExit=yes
 ExecStart=/usr/sbin/ip link set {mgmt} up
 ExecStart=/usr/sbin/ip addr replace {a['mgmt_address']} dev {mgmt}
 ExecStart=/usr/sbin/ip link set {ha} up
-ExecStart=/usr/sbin/ip addr replace {a['ha_address']} dev {ha}
+ExecStart=/usr/sbin/ip addr replace {HA_LINK_SECONDARY} dev {ha} nodad
 ExecStart=-/usr/sbin/ip route replace default via {a['mgmt_gateway']} dev {mgmt} proto 99
 
 [Install]
@@ -869,7 +873,9 @@ def step_agent_config(a: dict) -> None:
         # management, and the witness over management: see docs/ha.md.
         head = ("# portitor-config on this host, the HA peer and the witness are its clients.\n"
                 f'listen: ":{AGENT_PORT}"')
-        allow = ["127.0.0.1/32", str(a["mgmt_address"].network), str(a["ha_address"].network)]
+        # The peer's heartbeats over the HA link carry the pair's secret,
+        # which allow_from doesn't apply to.
+        allow = ["127.0.0.1/32", str(a["mgmt_address"].network)]
     else:
         head = f"""# portitor-config runs on this host and is the only client of the API.
 listen: {AGENT_LISTEN}"""
@@ -1181,7 +1187,6 @@ def read_answers() -> dict:
         "mgmt_address": ipaddress.IPv4Interface(raw["mgmt_address"]) if ha else None,
         "mgmt_gateway": ipaddress.IPv4Address(raw["mgmt_gateway"]) if ha else None,
         "ha_link": nic("ha_link") if ha else "",
-        "ha_address": ipaddress.IPv4Interface(raw["ha_address"]) if ha else None,
     }
     if role == "secondary":
         a["wan"], a["wan_address"] = "", None
@@ -1220,7 +1225,7 @@ def load_state() -> dict:
 def state_of(a: dict) -> dict:
     """The answers as strings, without the password; a DHCP LAN is "dhcp"."""
     state = {k: str(a[k]) if a.get(k) else "" for k in ("role", "lan", "wan", "wan_address", "gateway", "tz", "hostname", "keyboard", "web_from",
-                                                         "mgmt", "mgmt_address", "mgmt_gateway", "ha_link", "ha_address")}
+                                                         "mgmt", "mgmt_address", "mgmt_gateway", "ha_link")}
     state["address"] = str(a["address"] or "dhcp")
     state["dns"] = " ".join(a["dns"])
     state["dhcp_range"] = fmt_range(a.get("dhcp_range"))
@@ -1240,7 +1245,7 @@ def answers_of(state: dict) -> dict:
         "dns": parse_dns(state.get("dns") or PUBLIC_DNS),
         "mgmt": state.get("mgmt", ""), "mgmt_address": iface("mgmt_address"),
         "mgmt_gateway": ipaddress.IPv4Address(state["mgmt_gateway"]) if state.get("mgmt_gateway") else None,
-        "ha_link": state.get("ha_link", ""), "ha_address": iface("ha_address"),
+        "ha_link": state.get("ha_link", ""),
     }
 
 
@@ -1278,7 +1283,7 @@ def summary(a: dict) -> list[str]:
     out = [f"Runs            {a['role']}: {dict(ROLES)[a['role']]}"]
     if a["role"] == "secondary":
         out += [f"Management      {nic_label(a['mgmt'])} {a['mgmt_address']}, gateway {a['mgmt_gateway']}",
-                f"HA link         {nic_label(a['ha_link'])} {a['ha_address']}"]
+                f"HA link         {nic_label(a['ha_link'])}"]
     elif a["role"] == "web":
         out += [f"Interface       {nic_label(a['lan'])}",
                 f"Address         {a['address'] or 'DHCP'}",
@@ -1294,7 +1299,7 @@ def summary(a: dict) -> list[str]:
             out.append(f"portitor-web    {a['web_from']}")
         if a["role"] == "primary" and a.get("mgmt"):
             out += [f"Management      {nic_label(a['mgmt'])} {a['mgmt_address']}, gateway {a['mgmt_gateway']}",
-                    f"HA link         {nic_label(a['ha_link'])} {a['ha_address']}"]
+                    f"HA link         {nic_label(a['ha_link'])}"]
     out += [f"DNS servers     {' '.join(a['dns'])}",
             f"Host name       {a['hostname']}",
             f"Time zone       {a['tz']}",
@@ -1736,9 +1741,8 @@ class HAPage(Page):
         yield Static("What the host itself uses while it is the standby: updates, NTP, the witness. "
                      "It must not be the pair.", classes="hint")
         yield row("HA link", Select([], id="ha_link", prompt="choose the HA link interface"))
-        yield row("HA link address", Input(st.get("ha_address") or ("169.254.1.1/30" if role == "primary" else "169.254.1.2/30"),
-                                           id="ha_address"))
-        yield Static("This host's; the other host has another address in the same network.", classes="hint")
+        yield Static("No address: the hosts use the IPv6 link-local addresses fe80::1 (primary) and "
+                     "fe80::2 (secondary) on it.", classes="hint")
         yield Button("Reload interfaces", id="reload")
 
     def on_mount(self) -> None:
@@ -1760,7 +1764,7 @@ class HAPage(Page):
         a = self.a
         for k in ("mgmt", "ha_link"):
             a[k] = ""
-        a["mgmt_address"] = a["ha_address"] = a["mgmt_gateway"] = None
+        a["mgmt_address"] = a["mgmt_gateway"] = None
         if a["role"] not in HA_ROLES:
             return
         a["mgmt"] = self.nic("#mgmt", "management interface")
@@ -1770,11 +1774,10 @@ class HAPage(Page):
             raise ValueError("the LAN, WAN, management and HA link interfaces must all differ")
         a["mgmt_address"] = self.field("Management address", check_address, self.value("#mgmt_address"))
         a["mgmt_gateway"] = self.field("Gateway", check_gateway, self.value("#mgmt_gateway"), a["mgmt_address"])
-        a["ha_address"] = self.field("HA link address", check_address, self.value("#ha_address"), a["mgmt_address"])
         if a["role"] == "primary":
             for other in (a["address"], a["wan_address"]):
-                if other and (a["mgmt_address"].network.overlaps(other.network) or a["ha_address"].network.overlaps(other.network)):
-                    raise ValueError("the management and HA link networks must differ from the LAN's and WAN's")
+                if other and a["mgmt_address"].network.overlaps(other.network):
+                    raise ValueError("the management network must differ from the LAN's and WAN's")
         else:
             # The secondary is reached on its management address.
             a["lan"], a["address"], a["gateway"] = a["mgmt"], a["mgmt_address"], a["mgmt_gateway"]

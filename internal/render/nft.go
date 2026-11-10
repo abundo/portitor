@@ -742,11 +742,15 @@ func AutoInputRules(in *fwconfig.Instance) []AutoRule {
 	// The HA peer's portitor-config, copying the configuration, and its
 	// heartbeats.
 	if h := in.HAConfig; h != nil {
-		if h.Port != 0 {
+		if h.Port != 0 && len(h.From) > 0 {
 			out = append(out, AutoRule{Service: HAConfigService, Protocol: "tcp", DstPort: h.Port, Source: h.From, SourceSet: HAConfigSet})
 		}
-		if h.AgentPort != 0 && h.AgentPort != h.Port {
+		if h.AgentPort != 0 && h.AgentPort != h.Port && len(h.From) > 0 {
 			out = append(out, AutoRule{Service: HAAgentService, Protocol: "tcp", DstPort: h.AgentPort, Source: h.From, SourceSet: HAAgentSet})
+		}
+		if h.Link != "" {
+			out = append(out, AutoRule{Service: HAAgentService, InInterfaces: []string{h.Link}, Protocol: "tcp", DstPort: h.AgentPort,
+				Source: []string{h.LinkPeer}, SourceSet: HAAgentLinkSet})
 		}
 	}
 	// SNMP requests on its interfaces, from the allowed clients if listed.

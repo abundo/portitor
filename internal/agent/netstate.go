@@ -349,7 +349,12 @@ func planAddresses(ns string, ifc fwconfig.Interface, have ipLink) []command {
 			continue
 		}
 		present[p] = true
-		if want[p] || a.Dynamic || a.Scope == "link" || a.Scope == "host" {
+		if want[p] || a.Dynamic || a.Scope == "host" {
+			continue
+		}
+		// The kernel's link-local address stays; an HA link's fixed one
+		// that is the other node's (after a promotion) goes.
+		if a.Scope == "link" && (ifc.HARole != fwconfig.HARoleLink || !fwconfig.IsHALinkAddress(p.Addr())) {
 			continue
 		}
 		if p.Addr().Is4() && ifc.IPv4Mode == fwconfig.ModeDHCP {
@@ -365,9 +370,19 @@ func planAddresses(ns string, ifc fwconfig.Interface, have ipLink) []command {
 	}
 	sort.Strings(add)
 	for _, p := range add {
-		cmds = append(cmds, ipCmd(ns, "addr", "add", p, "dev", ifc.Name))
+		cmds = append(cmds, addrAdd(ns, p, ifc.Name))
 	}
 	return cmds
+}
+
+// addrAdd adds an address; an HA link's link-local one skips duplicate
+// address detection, so heartbeats and conntrackd can bind it at once
+// (the peer's is another, by node).
+func addrAdd(ns, prefix, dev string) command {
+	if p, err := netip.ParsePrefix(prefix); err == nil && fwconfig.IsHALinkAddress(p.Addr()) {
+		return ipCmd(ns, "addr", "add", prefix, "dev", dev, "nodad")
+	}
+	return ipCmd(ns, "addr", "add", prefix, "dev", dev)
 }
 
 // planRoutes reconciles the agent's own (proto 99) routes, of the main

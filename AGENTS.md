@@ -132,8 +132,10 @@ docs and user-facing messages.
   be the HA secondary of another (`firewalls.ha_primary_id`, set at creation). It has
   no instances of its own: `builder.BuildFirewall` builds the primary's, the same but
   for `HA.Node` and the addresses on the pair's two links, physical interfaces of the
-  default instance with `Interface.HARole` (`pairLinks`, `peer_addresses`): the HA
-  link (a direct cable) and management (`HAGateway`, with the witness); a pair
+  default instance with `Interface.HARole` (`pairLinks`): the HA link (a direct cable;
+  IPv6 link-local addresses by node, `fwconfig.HALinkAddress`, `fe80::1` and `fe80::2`,
+  a VF's `fe80::<id>:1`/`:2`, added `nodad`, never entered or discovered) and
+  management (`peer_addresses`, `HAGateway`, with the witness); a pair
   without both is refused, and VRRP on one. Each physical traffic interface gets a
   MAC shared by the hosts (`DeriveHAMAC`). The standby's traffic interfaces are closed
   by the gate (`render.Gate`, netdev table `portitor_gate`, per namespace, on
@@ -173,7 +175,7 @@ docs and user-facing messages.
   the active host's agent sends each instance's leases to the standby's
   (`internal/agent/dhcprepl.go`, see DHCP server). conntrackd
   (`fwconfig.ConntrackSync`, `render/conntrackd.go`: FTFW over UDP 3780 into the
-  kernel table) runs per instance: the default instance's over the HA link, a VF's over
+  kernel table, between link-local addresses) runs per instance: the default instance's over the HA link, a VF's over
   a macvlan on it in its namespace (`fwconfig.HASync`, `ha-<instance id>`). DHCP clients
   run on the active host alone and pause on a closing one, keeping the address:
   removing it would flush the masqueraded connections, here and through conntrackd on

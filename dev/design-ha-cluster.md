@@ -272,8 +272,12 @@ standby, so previews match on both hosts.
 
 conntrackd runs per namespace, and the HA link is one interface in the root
 namespace. Each VF gets a macvlan device on the HA link, in its namespace
-(`fwconfig.HASync`, `ha-<instance id>`, names may not start with `ha-`), with an address
-in a `169.254.16.0/20` and up /30 by instance id, so no column keeps it. VLANs were
+(`fwconfig.HASync`, `ha-<instance id>`, names may not start with `ha-`), with an IPv6
+link-local address by instance id and node (`fwconfig.HALinkAddress`: `fe80::<id>:1` on
+the primary, `fe80::<id>:2` on the secondary; the HA link itself `fe80::1` and
+`fe80::2`), so no column keeps it and nothing is discovered: each host knows the peer's
+by its role, and a promotion swaps them. They are added `nodad`, so conntrackd and the
+heartbeats bind them at once. VLANs were
 planned, but tagged frames may not survive a hypervisor's access port, and a macvlan
 works on a cable and a VM NIC alike. The default instance uses the link itself.
 

@@ -961,14 +961,13 @@ func buildPeer(in Input, generation int64, only map[string]bool, firewallID uint
 		if ha != nil && pair.link != "" {
 			if in.Default {
 				in.ConntrackSync = &fwconfig.ConntrackSync{Interface: pair.link, This: pair.this, Peer: pair.peer}
-			} else if p, q, ok := fwconfig.HASyncAddrs(mi.ID); !ok {
+			} else if mi.ID > math.MaxUint32 {
 				addf("%s: no address left on the HA link for its connections", in.Name)
 			} else {
-				if ha.Node == fwconfig.HASecondary {
-					p, q = q, p
-				}
+				id := uint32(mi.ID)
+				p, q := fwconfig.HALinkAddress(ha.Node, id), fwconfig.HALinkAddress(otherNode(ha.Node), id)
 				name := fwconfig.HASyncPrefix + strconv.FormatUint(uint64(mi.ID), 10)
-				in.HASync = &fwconfig.HASync{Name: name, Parent: pair.link, Address: netip.PrefixFrom(p, 30).String()}
+				in.HASync = &fwconfig.HASync{Name: name, Parent: pair.link, Address: netip.PrefixFrom(p, fwconfig.HALinkBits).String()}
 				in.ConntrackSync = &fwconfig.ConntrackSync{Interface: name, This: p.String(), Peer: q.String()}
 			}
 		}
@@ -1047,13 +1046,22 @@ func buildPeer(in Input, generation int64, only map[string]bool, firewallID uint
 // haPair is what the two hosts of a pair have on the HA link.
 type haPair struct {
 	link       string // the interface
-	this, peer string // IPv4 addresses on it
+	this, peer string // IPv6 link-local addresses on it
+}
+
+// otherNode is the pair's other node.
+func otherNode(node string) string {
+	if node == fwconfig.HASecondary {
+		return fwconfig.HAPrimary
+	}
+	return fwconfig.HASecondary
 }
 
 // pairLinks gives the host its own addresses on the pair's two links
-// (peer: it is the secondary, which has their peer addresses), and adds
-// the HA link's path to ha. firewallID is the primary. All else is the
-// same on both hosts.
+// (peer: it is the secondary, which has the management interface's peer
+// addresses), and adds the HA link's path to ha. The HA link's addresses
+// are link-local by node (fwconfig.HALinkAddress), never entered.
+// firewallID is the primary. All else is the same on both hosts.
 func pairLinks(d *data, firewallID uint, peer bool, ha *fwconfig.HA, addf func(string, ...any)) haPair {
 	var out haPair
 	on := map[uint]bool{}
@@ -1067,6 +1075,15 @@ func pairLinks(d *data, firewallID uint, peer bool, ha *fwconfig.HA, addf func(s
 		if !on[ifc.InstanceID] || ifc.HaRole == "" {
 			continue
 		}
+		if ifc.HaRole == fwconfig.HARoleLink {
+			if out.link == "" {
+				this, other := fwconfig.HALinkAddress(ha.Node, 0), fwconfig.HALinkAddress(otherNode(ha.Node), 0)
+				out = haPair{link: ifc.Name, this: this.String(), peer: other.String()}
+			}
+			ifc.Ipv4Mode = fwconfig.ModeStatic
+			ifc.Addresses = models.StringList{netip.PrefixFrom(fwconfig.HALinkAddress(ha.Node, 0), fwconfig.HALinkBits).String()}
+			continue
+		}
 		if len(ifc.PeerAddresses) != len(ifc.Addresses) || len(ifc.Addresses) == 0 {
 			addf("HA: interface %s: the secondary needs an address of its own for each address (peer addresses)", ifc.Name)
 			continue
@@ -1076,13 +1093,6 @@ func pairLinks(d *data, firewallID uint, peer bool, ha *fwconfig.HA, addf func(s
 			pb, err2 := fwconfig.ParseInterfaceAddress(ifc.PeerAddresses[j])
 			if err1 != nil || err2 != nil || pa.Masked() != pb.Masked() || pa.Addr() == pb.Addr() {
 				addf("HA: interface %s: peer address %s is not another address of %s", ifc.Name, ifc.PeerAddresses[j], a)
-				continue
-			}
-			if ifc.HaRole == fwconfig.HARoleLink && out.link == "" && pa.Addr().Is4() {
-				out = haPair{link: ifc.Name, this: pa.Addr().String(), peer: pb.Addr().String()}
-				if peer {
-					out.this, out.peer = out.peer, out.this
-				}
 			}
 		}
 		if peer {
@@ -1091,7 +1101,7 @@ func pairLinks(d *data, firewallID uint, peer bool, ha *fwconfig.HA, addf func(s
 	}
 	if out.link != "" {
 		if u, err := url.Parse(ha.Peer); err == nil {
-			ha.PeerLink = "https://" + net.JoinHostPort(out.peer, u.Port())
+			ha.PeerLink = (&url.URL{Scheme: "https", Host: net.JoinHostPort(out.peer+"%"+out.link, u.Port())}).String()
 		}
 	}
 	return out

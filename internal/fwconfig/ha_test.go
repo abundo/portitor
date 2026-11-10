@@ -4,6 +4,7 @@
 package fwconfig
 
 import (
+	"net/netip"
 	"slices"
 	"strings"
 	"testing"
@@ -121,7 +122,7 @@ func TestHABlackholes(t *testing.T) {
 		{Name: "lan.10", Kind: KindVLAN, Enabled: true, Parent: "lan", Addresses: []string{"198.51.100.1/24"}, VRF: "red"},
 		{Name: "lo1", Kind: KindLoopback, Enabled: true, Addresses: []string{"203.0.113.1/32"}},
 		{Name: "off", Kind: KindPhysical, Addresses: []string{"203.0.113.1/24"}},
-		{Name: "ha0", Kind: KindPhysical, Enabled: true, HARole: HARoleLink, Addresses: []string{"169.254.1.1/30"}},
+		{Name: "ha0", Kind: KindPhysical, Enabled: true, HARole: HARoleLink, Addresses: []string{"fe80::1/64"}},
 	}}
 	var got []string
 	for _, r := range in.HABlackholes() {
@@ -168,8 +169,32 @@ func TestHAConfigAccess(t *testing.T) {
 			t.Errorf("default: %+v", h)
 		}
 	}
-	doc.HA.Peer, doc.HA.PeerConfig = "https://peer.example:8443", ""
+	// The HA link's peer is link-local, on its interface: the agent's
+	// port alone, there.
+	doc.HA.AgentPort, doc.HA.PeerLink = 8443, "https://[fe80::1%25ha0]:8443"
+	if h := doc.Expand().Instances[0].HAConfig; h == nil || h.Link != "ha0" || h.LinkPeer != "fe80::1" || slices.Contains(h.From, "fe80::1") {
+		t.Errorf("link: %+v", h)
+	}
+	doc.HA.Peer, doc.HA.PeerConfig, doc.HA.PeerLink = "https://peer.example:8443", "", ""
 	if in := doc.Expand().Instances[0]; in.HAConfig != nil {
 		t.Errorf("peer by name: %+v", in.HAConfig)
+	}
+}
+
+func TestHALinkAddress(t *testing.T) {
+	for _, c := range []struct {
+		node string
+		id   uint32
+		want string
+	}{{HAPrimary, 0, "fe80::1"}, {HASecondary, 0, "fe80::2"}, {HAPrimary, 7, "fe80::7:1"}, {HASecondary, 0x12345, "fe80::1:2345:2"}} {
+		a := HALinkAddress(c.node, c.id)
+		if a.String() != c.want || !IsHALinkAddress(a) {
+			t.Errorf("%s %d: %s", c.node, c.id, a)
+		}
+	}
+	for _, s := range []string{"fe80::be24:11ff:feca:4735", "fe80::3", "fd00::1", "169.254.1.1", "fe80::1:0:0:0:1", "fe80::1:0:1:0:1"} {
+		if IsHALinkAddress(netip.MustParseAddr(s)) {
+			t.Errorf("%s is not one", s)
+		}
 	}
 }

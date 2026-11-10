@@ -580,7 +580,7 @@ func TestPlanBlackhole(t *testing.T) {
 }
 
 func TestPlanHASync(t *testing.T) {
-	d := &fwconfig.HASync{Name: "ha-7", Parent: "ens20", Address: "169.254.16.29/30"}
+	d := &fwconfig.HASync{Name: "ha-7", Parent: "ens20", Address: "fe80::7:1/64"}
 	lines := func(cmds []command) []string {
 		var out []string
 		for _, c := range cmds {
@@ -588,16 +588,18 @@ func TestPlanHASync(t *testing.T) {
 		}
 		return out
 	}
-	want := []string{": link add link ens20 name ha-7 netns fw-a type macvlan mode bridge", "fw-a: link set dev ha-7 up", "fw-a: addr add 169.254.16.29/30 dev ha-7"}
+	want := []string{": link add link ens20 name ha-7 netns fw-a type macvlan mode bridge", "fw-a: link set dev ha-7 up", "fw-a: addr add fe80::7:1/64 dev ha-7 nodad"}
 	if got := lines(planHASync("fw-a", d, nil)); !slices.Equal(got, want) {
 		t.Errorf("new:\n%q", got)
 	}
-	have := map[string]ipLink{"ha-7": {Flags: []string{"UP"}, AddrInfo: []ipAddr{{Family: "inet", Local: "169.254.16.29", Prefixlen: 30}}}}
+	kernel := ipAddr{Family: "inet6", Local: "fe80::a407:acff:fef3:1701", Prefixlen: 64}
+	have := map[string]ipLink{"ha-7": {Flags: []string{"UP"}, AddrInfo: []ipAddr{{Family: "inet6", Local: "fe80::7:1", Prefixlen: 64}, kernel}}}
 	if got := lines(planHASync("fw-a", d, have)); len(got) != 0 {
 		t.Errorf("in step: %q", got)
 	}
-	have["ha-7"] = ipLink{Flags: []string{"UP"}, AddrInfo: []ipAddr{{Family: "inet", Local: "169.254.16.30", Prefixlen: 30}}}
-	if got := lines(planHASync("fw-a", d, have)); !slices.Equal(got, []string{"fw-a: addr del 169.254.16.30/30 dev ha-7", "fw-a: addr add 169.254.16.29/30 dev ha-7"}) {
+	// Promoted: the other node's address goes, and so does an old IPv4 one.
+	have["ha-7"] = ipLink{Flags: []string{"UP"}, AddrInfo: []ipAddr{{Family: "inet6", Local: "fe80::7:2", Prefixlen: 64}, {Family: "inet", Local: "169.254.16.30", Prefixlen: 30}, kernel}}
+	if got := lines(planHASync("fw-a", d, have)); !slices.Equal(got, []string{"fw-a: addr del fe80::7:2/64 dev ha-7", "fw-a: addr del 169.254.16.30/30 dev ha-7", "fw-a: addr add fe80::7:1/64 dev ha-7 nodad"}) {
 		t.Errorf("swapped: %q", got)
 	}
 }

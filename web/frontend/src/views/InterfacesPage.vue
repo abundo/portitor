@@ -149,7 +149,7 @@ const fields = [
       { value: 'management', label: 'Management' },
     ],
     show: (f) => f.kind === 'physical' && !!store.current?.is_default,
-    hint: "An HA pair needs both: the HA link, a direct cable between the hosts, and the management interface, on a network of its own with the witness. They stay up on the standby, with an address for each host. Traffic interfaces are the same on both hosts, and closed on the standby.",
+    hint: "An HA pair needs both: the HA link, a direct cable between the hosts, and the management interface, on a network of its own with the witness. They stay up on the standby. The management interface has an address for each host; the HA link needs none: the hosts use the IPv6 link-local addresses fe80::1 (primary) and fe80::2 (secondary) on it. Traffic interfaces are the same on both hosts, and closed on the standby.",
   },
   {
     key: 'ha_monitor',
@@ -201,7 +201,7 @@ const fields = [
       f.kind === 'wireguard' || f.kind === 'loopback' || f.kind === 'openvpn'
         ? modes.filter((m) => m.value !== 'dhcp')
         : modes,
-    show: (f) => !is6in4(f),
+    show: (f) => !is6in4(f) && f.ha_role !== 'ha_link',
     hint: 'Static: the addresses below. DHCP client: IPv4 from a DHCP server, and no addresses below.',
   },
   {
@@ -217,7 +217,7 @@ const fields = [
     type: 'tags',
     placeholder: '192.168.1.1/24',
     disabled: (f) => f.ipv4_mode === 'dhcp',
-    show: (f) => !is6in4(f),
+    show: (f) => !is6in4(f) && f.ha_role !== 'ha_link',
     hint: 'Addresses of the firewall on this interface with their prefix length, IPv4 and IPv6, as many as needed: 192.168.1.1/24, fd00:1::1/64. Their prefixes appear under Hosts & prefixes; DHCP and router advertisements are turned on for them under DHCP. An IPv6 address in the prefix delegated to another interface names it: <wan0>:2000::1/64 is subnet 2000 of the prefix wan0 gets, host ::1; its /64 is announced with router advertisements (SLAAC), and can get a DHCPv6 server under DHCP.',
   },
   {
@@ -225,8 +225,8 @@ const fields = [
     label: 'HA peer addresses',
     type: 'tags',
     placeholder: '192.168.1.2/24',
-    show: (f) => !!f.ha_role,
-    hint: "The HA secondary's own addresses on this link, one for each address above in the same prefix and order. Traffic interfaces have the same addresses on both hosts.",
+    show: (f) => f.ha_role === 'management',
+    hint: "The HA secondary's own addresses on this interface, one for each address above in the same prefix and order. Traffic interfaces have the same addresses on both hosts.",
   },
   {
     key: 'addresses',

@@ -369,16 +369,17 @@ const SampleTLSCrypt = "-----BEGIN OpenVPN Static key V1-----\n" +
 // tests.
 func SampleHA(doc Document) Document {
 	fp := strings.Repeat("ab", 32)
-	doc.HA = &HA{Node: HAPrimary, Peer: "https://192.0.2.2:8443", PeerFingerprint: fp, PeerLink: "https://192.0.2.130:8443",
+	doc.HA = &HA{Node: HAPrimary, Peer: "https://192.0.2.2:8443", PeerFingerprint: fp, PeerLink: "https://[fe80::2%25ha0]:8443",
 		Secret: strings.Repeat("s", 43)}
 	for i := range doc.Instances {
 		in := &doc.Instances[i]
 		in.VRRP = nil
 		if in.Default {
 			in.Interfaces = append(slices.Clone(in.Interfaces),
-				Interface{Name: "ha0", Kind: KindPhysical, Enabled: true, IPv4Mode: ModeStatic, Addresses: []string{"192.0.2.129/25"}, HARole: HARoleLink},
+				Interface{Name: "ha0", Kind: KindPhysical, Enabled: true, IPv4Mode: ModeStatic, Addresses: []string{"fe80::1/64"}, HARole: HARoleLink},
 				Interface{Name: "mgmt0", Kind: KindPhysical, Enabled: true, IPv4Mode: ModeStatic, Addresses: []string{"192.0.2.1/25"},
 					HARole: HARoleManagement, HAGateway: "192.0.2.126"})
+			in.ConntrackSync = &ConntrackSync{Interface: "ha0", This: "fe80::1", Peer: "fe80::2"}
 		}
 	}
 	return doc

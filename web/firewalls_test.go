@@ -360,7 +360,7 @@ func TestFirewallsHAPair(t *testing.T) {
 		t.Errorf("MAC on a link or a bridge: %+v", in.HAInterface(fwconfig.HARoleLink))
 	}
 	// The heartbeat's two paths.
-	if prim.HA.PeerLink != "https://169.254.1.2:8443" || sec.HA.PeerLink != "https://169.254.1.1:8443" {
+	if prim.HA.PeerLink != "https://[fe80::2%25ha0]:8443" || sec.HA.PeerLink != "https://[fe80::1%25ha0]:8443" {
 		t.Errorf("HA links: %s %s", prim.HA.PeerLink, sec.HA.PeerLink)
 	}
 	// Each knows its peer by the URL the peer is reached at, and the pair's
@@ -371,8 +371,8 @@ func TestFirewallsHAPair(t *testing.T) {
 	}
 	// Connections sync over the HA link, each host to the other.
 	if c, d := prim.Instance("main").ConntrackSync, in.ConntrackSync; c == nil || d == nil ||
-		*c != (fwconfig.ConntrackSync{Interface: "ha0", This: "169.254.1.1", Peer: "169.254.1.2"}) ||
-		*d != (fwconfig.ConntrackSync{Interface: "ha0", This: "169.254.1.2", Peer: "169.254.1.1"}) {
+		*c != (fwconfig.ConntrackSync{Interface: "ha0", This: "fe80::1", Peer: "fe80::2"}) ||
+		*d != (fwconfig.ConntrackSync{Interface: "ha0", This: "fe80::2", Peer: "fe80::1"}) {
 		t.Errorf("conntrack sync: %+v %+v", c, d)
 	}
 	var dep models.Deployment
@@ -405,7 +405,7 @@ func haPair(t *testing.T) (*testEnv, map[uint]*fleetAgent, uint) {
 func addHALinks(t *testing.T, env *testEnv) {
 	t.Helper()
 	env.put("instance=main/interface=ha0", map[string]any{"kind": "physical", "enabled": true, "ipv4-mode": "static",
-		"addresses": []string{"169.254.1.1/30"}, "peer-addresses": []string{"169.254.1.2/30"}, "ha-role": fwconfig.HARoleLink})
+		"ha-role": fwconfig.HARoleLink})
 	env.put("instance=main/interface=mgmt0", map[string]any{"kind": "physical", "enabled": true, "ipv4-mode": "static",
 		"addresses": []string{"192.0.2.1/24"}, "peer-addresses": []string{"192.0.2.3/24"}, "ha-role": fwconfig.HARoleManagement, "ha-gateway": "192.0.2.254"})
 }

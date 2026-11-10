@@ -105,29 +105,43 @@ const HASyncPrefix = "ha-"
 
 // HASync is a virtual firewall's own way to its peer on an HA pair: a
 // macvlan device on the host's HA link, in the instance's namespace, with
-// an address of its own. So conntrackd there reaches the peer's, on a
+// a link-local address of its own (HALinkAddress). So conntrackd there reaches the peer's, on a
 // cable or a hypervisor's access port alike, which tagged VLANs may not
 // survive.
 type HASync struct {
 	Name    string `json:"name"`
 	Parent  string `json:"parent"`
-	Address string `json:"address"` // CIDR, this host's
+	Address string `json:"address"` // CIDR, this host's, link-local
 }
 
-// haSyncBase is where the virtual firewalls' /30s start, above the HA
-// link's own addresses.
-var haSyncBase = netip.MustParseAddr("169.254.16.0")
+// HALinkBits is the prefix length of the pair's addresses on the HA link.
+const HALinkBits = 64
 
-// HASyncAddrs are the primary's and the secondary's addresses in the /30
-// of the instance id, false when the ids have run out of 169.254.0.0/16.
-func HASyncAddrs(id uint) (primary, secondary netip.Addr, ok bool) {
-	if id >= (0xffff-0x1000)/4 {
-		return primary, secondary, false
+// HALinkAddress is a host's IPv6 link-local address on the HA link, by its
+// node (HAPrimary or HASecondary): fe80::1 and fe80::2 for the default
+// instance (id 0), fe80::<id>:1 and fe80::<id>:2 for a virtual firewall's
+// device on it. Fixed by role, so neither host has to discover the other,
+// and a promotion only swaps them; no address is entered for the link.
+func HALinkAddress(node string, id uint32) netip.Addr {
+	var b [16]byte
+	b[0], b[1] = 0xfe, 0x80
+	b[10], b[11], b[12], b[13] = byte(id>>24), byte(id>>16), byte(id>>8), byte(id)
+	b[15] = 1
+	if node == HASecondary {
+		b[15] = 2
 	}
-	b := haSyncBase.As4()
-	n := uint(b[2])<<8 + uint(b[3]) + id*4
-	return netip.AddrFrom4([4]byte{b[0], b[1], byte(n >> 8), byte(n + 1)}),
-		netip.AddrFrom4([4]byte{b[0], b[1], byte(n >> 8), byte(n + 2)}), true
+	return netip.AddrFrom16(b)
+}
+
+// IsHALinkAddress reports whether a is one of HALinkAddress's: the agent
+// removes those it no longer wants from the HA link, leaving the kernel's
+// own link-local address alone.
+func IsHALinkAddress(a netip.Addr) bool {
+	if !a.Is6() || !a.IsLinkLocalUnicast() {
+		return false
+	}
+	b := a.WithZone("").As16()
+	return b[2]|b[3]|b[4]|b[5]|b[6]|b[7]|b[8]|b[9]|b[14] == 0 && (b[15] == 1 || b[15] == 2)
 }
 
 // haBlackholeMetric is above any route in use.
@@ -175,33 +189,47 @@ func (in *Instance) HAInterface(role string) *Interface {
 
 // HAConfigAccess is what Expand gives an HA host's default instance from
 // HA: the ports of its portitor-config and agent, opened to the peer's
-// addresses (the auto rule render.HAConfigService).
+// addresses (the auto rule render.HAConfigService), and the agent's to the
+// peer's link-local address on the HA link (Link, LinkPeer).
 type HAConfigAccess struct {
 	Port      int
 	AgentPort int
 	From      []string
+	Link      string
+	LinkPeer  string
 }
 
 // configAccess: the peer's addresses are those written as addresses in
-// its agent and portitor-config URLs; a name gives none.
+// its agent and portitor-config URLs; a name gives none. A link-local
+// address (PeerLink's) is known on its interface alone.
 func (h *HA) configAccess() *HAConfigAccess {
 	if h == nil || (h.ConfigPort == 0 && h.AgentPort == 0) {
 		return nil
 	}
-	var from []string
+	acc := &HAConfigAccess{Port: h.ConfigPort, AgentPort: h.AgentPort}
 	for _, s := range []string{h.Peer, h.PeerLink, h.PeerConfig} {
 		u, err := url.Parse(s)
 		if err != nil {
 			continue
 		}
-		if a, err := netip.ParseAddr(u.Hostname()); err == nil && !slices.Contains(from, a.Unmap().String()) {
-			from = append(from, a.Unmap().String())
+		a, err := netip.ParseAddr(u.Hostname())
+		if err != nil {
+			continue
+		}
+		if a.Zone() != "" {
+			if acc.Link == "" && h.AgentPort != 0 {
+				acc.Link, acc.LinkPeer = a.Zone(), a.WithZone("").String()
+			}
+			continue
+		}
+		if !slices.Contains(acc.From, a.Unmap().String()) {
+			acc.From = append(acc.From, a.Unmap().String())
 		}
 	}
-	if len(from) == 0 {
+	if len(acc.From) == 0 && acc.Link == "" {
 		return nil
 	}
-	return &HAConfigAccess{Port: h.ConfigPort, AgentPort: h.AgentPort, From: from}
+	return acc
 }
 
 var (
@@ -317,8 +345,8 @@ func (v *validator) haInterfaces(d *Document) {
 			if !strings.HasPrefix(h.Name, HASyncPrefix) || !ValidIfname(h.Name) || !ValidIfname(h.Parent) || in.Default {
 				v.addf("%s: invalid HA sync device %q on %q", p, h.Name, h.Parent)
 			}
-			if a, err := ParseInterfaceAddress(h.Address); err != nil || !a.Addr().Is4() {
-				v.addf("%s: HA sync device: %q is not an IPv4 address with its prefix", p, h.Address)
+			if a, err := ParseInterfaceAddress(h.Address); err != nil || !a.Addr().IsLinkLocalUnicast() || !a.Addr().Is6() {
+				v.addf("%s: HA sync device: %q is not an IPv6 link-local address with its prefix", p, h.Address)
 			}
 		}
 		if d.HA == nil {
@@ -366,7 +394,7 @@ const ConntrackSyncPort = 3780
 
 // ConntrackSync runs conntrackd in the instance on an HA pair: each host
 // sends its connections to the other over Interface, from This to Peer
-// (IPv4 addresses on it), and the other puts them in its kernel's table at
+// (IPv6 link-local addresses on it, HALinkAddress), and the other puts them in its kernel's table at
 // once, so they live on after a failover.
 type ConntrackSync struct {
 	Interface string `json:"interface"`
@@ -383,8 +411,8 @@ func (v *validator) conntrackSync(p string, in *Instance) {
 		v.addf("%s: conntrack sync: invalid interface %q", p, c.Interface)
 	}
 	for _, a := range []string{c.This, c.Peer} {
-		if ip, err := netip.ParseAddr(a); err != nil || !ip.Is4() {
-			v.addf("%s: conntrack sync: %q is not an IPv4 address", p, a)
+		if ip, err := netip.ParseAddr(a); err != nil || !ip.Is6() || !ip.IsLinkLocalUnicast() || ip.Zone() != "" {
+			v.addf("%s: conntrack sync: %q is not an IPv6 link-local address", p, a)
 		}
 	}
 	if c.This == c.Peer {

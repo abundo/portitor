@@ -508,8 +508,10 @@ type Interface struct {
 	// host part (192.168.1.1/24, fd00:1::1/64), IPv4 and IPv6 mixed.
 	Addresses StringList `json:"addresses"`
 	// PeerAddresses are the HA secondary's static addresses in place of
-	// Addresses, one each, in the same prefixes, on an interface with an
-	// HaRole: all else is the same on both hosts.
+	// Addresses, one each, in the same prefixes, on the management
+	// interface: all else is the same on both hosts. The HA link has
+	// neither: its addresses are link-local by node
+	// (fwconfig.HALinkAddress).
 	PeerAddresses StringList `json:"peer_addresses"`
 	// HaRole makes it one of an HA pair's own two links
 	// (fwconfig.Interface.HARole); HaGateway is the management one's

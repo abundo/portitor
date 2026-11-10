@@ -31,6 +31,9 @@ const (
 const (
 	HAAgentService = "portitor-agent peer"
 	HAAgentSet     = "portitor_agent_peer"
+	// HAAgentLinkSet is the source set of the same rule on the HA link,
+	// from the peer's link-local address.
+	HAAgentLinkSet = "portitor_agent_peer_link"
 )
 
 // haOutputRules are the output chain's accepts of what this host sends its
@@ -57,11 +60,15 @@ func haOutputRules(in *fwconfig.Instance) []string {
 			}
 		}
 	}
+	if h.Link != "" && h.AgentPort != 0 {
+		out = append(out, fmt.Sprintf("oifname %s ip6 daddr %s tcp dport %d accept %s", quotedSet([]string{h.Link}), h.LinkPeer, h.AgentPort, comment("auto", HAAgentService)))
+	}
 	return slices.Compact(out)
 }
 
 // ConntrackdConf renders conntrackd.conf for an instance on an HA pair
-// (fwconfig.ConntrackSync): FTFW over UDP to the peer, and the peer's
+// (fwconfig.ConntrackSync): FTFW over UDP to the peer's link-local
+// address on the HA link (Interface, which link-local needs), and the peer's
 // connections straight into the kernel's table (no external cache), so
 // nothing has to commit them when the host takes over. The firewall's own
 // connections are left out. A virtual firewall's lock file and control
@@ -80,8 +87,8 @@ func ConntrackdConf(in *fwconfig.Instance) string {
 		DisableExternalCache On
 	}
 	UDP {
-		IPv4_address %s
-		IPv4_Destination_Address %s
+		IPv6_address %s
+		IPv6_Destination_Address %s
 		Port %d
 		Interface %s
 		SndSocketBuffer 1249280
@@ -103,9 +110,9 @@ General {
 	Filter From Userspace {
 		Address Ignore {
 			IPv4_address 127.0.0.1
-			IPv4_address %s
-			IPv4_address %s
 			IPv6_address ::1
+			IPv6_address %s
+			IPv6_address %s
 		}
 	}
 }
