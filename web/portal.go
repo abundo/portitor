@@ -185,7 +185,12 @@ func (p *Portal) proxy(name string, target *url.URL, tr http.RoundTripper) *http
 	return &httputil.ReverseProxy{
 		Rewrite: func(r *httputil.ProxyRequest) {
 			r.Out.URL.Path = strings.TrimPrefix(r.In.URL.Path, prefix)
-			r.Out.URL.RawPath = ""
+			// Keep the escaped form: a key with a slash in it
+			// (192.168.1.0%2F24) must not become two path steps.
+			r.Out.URL.RawPath = strings.TrimPrefix(r.In.URL.EscapedPath(), prefix)
+			if r.Out.URL.RawPath == r.Out.URL.Path {
+				r.Out.URL.RawPath = ""
+			}
 			r.SetURL(target)
 			r.SetXForwarded()
 			r.Out.Host = r.In.Host

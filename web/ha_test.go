@@ -457,3 +457,31 @@ func TestPairSession(t *testing.T) {
 		t.Errorf("cookie paths: %v", paths)
 	}
 }
+
+// A key with a slash in it (a prefix, 192.168.1.0%2F24) reaches the
+// firewall escaped: the portal must not turn it into two path steps.
+func TestPortalKeepsEscapedPath(t *testing.T) {
+	var got string
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.URL.EscapedPath()
+	}))
+	defer backend.Close()
+	cfg := &PortalConfig{Firewalls: []PortalFirewall{{Name: "fw1", URL: backend.URL}}}
+	if err := cfg.check(); err != nil {
+		t.Fatal(err)
+	}
+	p, err := NewPortal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	portal := httptest.NewServer(p.Handler())
+	defer portal.Close()
+	res, err := http.Get(portal.URL + "/fw/fw1/api/config/candidate/instance=main/ipam-prefix=192.168.1.0%2F24")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if want := "/api/config/candidate/instance=main/ipam-prefix=192.168.1.0%2F24"; got != want {
+		t.Errorf("path at the firewall: %s, want %s", got, want)
+	}
+}
