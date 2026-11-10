@@ -21,7 +21,14 @@
 // ports: a port list, with port names and their ports suggested.
 // mac: a MAC address, shown as 1122.3344.5566; colons and dashes are taken too.
 // custom: the page's `field-<key>` slot ({ form }) edits the value.
-// Column: { key, label, format: (row, rows) => string, class }
+// Column: { key, label, format: (row, rows) => string, class, inline }
+// grid: the table is a DataGrid (resize, reorder, sort, filter per column).
+// A column whose field (the same key) is text, number, select, switch, mac
+// or textarea is edited in place (double-click), saved at once, where the
+// field is shown and enabled for the row; `inline: false` leaves it to the
+// form. A cell's text that doesn't fit ends in an ellipsis, all of it in its
+// tooltip. A `cell-<key>` slot renders the grid's cell too; sorting and
+// filtering use the column's text (format).
 // Cells can be overridden with a `cell-<key>` slot, or the whole table with
 // the `table` slot ({ rows, openCreate, openEdit, openView, remove, moveTo,
 // saveRow, createAt }). openView shows a row read-only, for rows that can't
@@ -31,7 +38,19 @@
 // text, plus searchText(row)), Delete is in the form and asks Yes/No, and
 // the form's labels sit beside their fields on a wide screen. The `table`
 // slot brings its own search.
-import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import {
+  computed,
+  defineAsyncComponent,
+  defineComponent,
+  h,
+  nextTick,
+  onMounted,
+  reactive,
+  ref,
+  useSlots,
+  watch,
+} from 'vue'
+import { useRouter } from 'vue-router'
 import { useToast } from '@nuxt/ui/composables'
 import AddrInput from '@/components/AddrInput.vue'
 import PortMenu from '@/components/PortMenu.vue'
@@ -48,6 +67,9 @@ import { useFormGuard } from '@/composables/useFormGuard'
 import { inlineField, wideModal, widerModal } from '@/utils/form'
 import { formatMac } from '@/utils/mac'
 import { useSearch, valuesText } from '@/utils/search'
+
+// Loaded with the first grid: AG Grid is most of its size.
+const DataGrid = defineAsyncComponent(() => import('@/components/DataGrid.vue'))
 
 const props = defineProps({
   title: { type: String, required: true },
@@ -94,10 +116,17 @@ const props = defineProps({
   formOnly: { type: Boolean, default: false },
   // bare: no card and no title, for a table inside another page's tab.
   bare: { type: Boolean, default: false },
+  // grid: show the rows in a DataGrid; gridKey names its kept layout.
+  grid: { type: Boolean, default: true },
+  // actionsWidth: the grid's first column's width with `row-actions` (px).
+  actionsWidth: { type: Number, default: 76 },
+  gridKey: { type: String, default: '' },
 })
 const emit = defineEmits(['changed'])
 
 const toast = useToast()
+const slots = useSlots()
+const router = useRouter()
 const { confirmDelete } = useConfirm()
 const noun = computed(() => props.noun || props.title.replace(/s$/, '').toLowerCase())
 const describe = (row) =>
@@ -145,6 +174,113 @@ const tableColumns = computed(() => [
   { id: 'actions', header: '' },
   ...props.columns.map((c) => ({ accessorKey: c.key, header: c.label })),
 ])
+
+// gridColumns turns the columns into DataGrid (AG Grid) column definitions.
+const gridColumns = computed(() =>
+  props.columns.map((c) => {
+    const f =
+      c.inline !== false && props.fields.find((x) => x.key === c.key && inlineTypes.has(x.type))
+    const def = { colId: c.key, headerName: c.label, cellRenderer: gridCell(c) }
+    if (!f) return { ...def, valueGetter: (p) => display(c, p.data) }
+    Object.assign(def, {
+      field: c.key,
+      editable: (p) =>
+        !viewOnly(p.data) && (f.show ? f.show(p.data) : true) && !f.disabled?.(p.data),
+      valueFormatter: (p) => display(c, p.data),
+      getQuickFilterText: (p) => display(c, p.data),
+    })
+    if (f.type === 'number')
+      Object.assign(def, { cellDataType: 'number', cellEditor: 'agNumberCellEditor' })
+    else if (f.type === 'switch')
+      Object.assign(def, {
+        cellDataType: 'boolean',
+        cellEditor: 'agCheckboxCellEditor',
+      })
+    else if (f.type === 'select') {
+      const items = itemsOf(f).map((it) => (typeof it === 'object' ? it : { label: it, value: it }))
+      Object.assign(def, {
+        cellEditor: 'agSelectCellEditor',
+        cellEditorParams: {
+          values: items.map((it) => it.value),
+          formatValue: (v) => items.find((it) => it.value === v)?.label ?? v,
+        },
+      })
+    } else if (f.type === 'textarea')
+      Object.assign(def, {
+        cellDataType: 'text',
+        cellEditor: 'agLargeTextCellEditor',
+        cellEditorPopup: true,
+      })
+    else
+      Object.assign(def, {
+        cellDataType: 'text',
+        cellEditor: 'agTextCellEditor',
+        valueParser: f.type === 'mac' ? (p) => formatMac(p.newValue) : undefined,
+      })
+    // Ours, not AG Grid's for the data type (a switch's checkbox).
+    def.cellRenderer = gridCell(c)
+    return def
+  }),
+)
+
+const inlineTypes = new Set([undefined, 'text', 'number', 'select', 'switch', 'mac', 'textarea'])
+
+// gridCell renders a column's cells in the grid: its cell-<key> slot or its
+// text, on one line clipped with an ellipsis, all of the text as the tooltip.
+const gridCells = {}
+function gridCell(col) {
+  gridCells[col.key] ??= defineComponent({
+    props: { params: Object },
+    setup: (p) => () => {
+      const row = p.params.data
+      const text = String(display(col, row))
+      const slot = slots[`cell-${col.key}`]
+      return h(
+        'span',
+        { class: ['dg-clip', col.class], title: text || undefined },
+        slot ? slot({ row }) : text,
+      )
+    },
+  })
+  return gridCells[col.key]
+}
+
+// searchColumn is a hidden column the grid's search finds searchText in.
+const gridAllColumns = computed(() =>
+  props.searchText
+    ? [
+        ...gridColumns.value,
+        {
+          colId: '_search',
+          hide: true,
+          lockVisible: true,
+          valueGetter: (p) => props.searchText(p.data) ?? '',
+        },
+      ]
+    : gridColumns.value,
+)
+
+function openGridRow(row) {
+  if (props.editRow?.(row)) return
+  const to = props.editTo?.(row)
+  if (to) router.push(to)
+  else openRow(row)
+}
+
+async function onGridReorder(order) {
+  rows.value = order
+  try {
+    await reorderTo(order.map((r) => r.id))
+    emit('changed')
+  } catch (err) {
+    toast.add({ title: errMsg(err, 'Reorder failed'), color: 'error' })
+    await load()
+  }
+}
+
+async function onCellEdit({ row, revert }) {
+  if (!(await saveRow({ ...row }))) revert()
+}
 
 function display(col, row) {
   if (col.format) return col.format(row, rows.value)
@@ -421,6 +557,24 @@ defineExpose({ reload: load, openEdit, openView, openCreate })
       :save-row="saveRow"
       :create-at="createAt"
     />
+    <DataGrid
+      v-else-if="grid"
+      :rows="rows"
+      :columns="gridAllColumns"
+      edit
+      :reorder="!!reorder && !readOnly"
+      :actions-width="$slots['row-actions'] ? actionsWidth : 0"
+      :view-only="viewOnly"
+      :state-key="gridKey || title"
+      :empty-text="'Nothing here yet.'"
+      @edit="openGridRow"
+      @cell-edit="onCellEdit"
+      @reorder="onGridReorder"
+    >
+      <template v-if="$slots['row-actions']" #row-actions="{ row }">
+        <slot name="row-actions" :row="row" />
+      </template>
+    </DataGrid>
     <div v-else ref="tableWrap">
       <div class="mb-2">
         <SearchInput v-model="search" />

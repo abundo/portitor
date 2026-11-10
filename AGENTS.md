@@ -834,6 +834,19 @@ singular); a custom page uses `SearchInput` above each table,
   table is wider than the screen. Tables have no Delete button. The Edit button
   is `<UButton icon="i-lucide-pencil" variant="outline" size="sm" />` (with
   `i-lucide-eye` instead when read-only), in every table and data table.
+- **Data grid:** a table of entries is `DataGrid.vue` (AG Grid Community, only the
+  modules it uses registered, loaded with the first grid): columns resized and
+  moved by dragging, sorted by a click on the header (shift-click adds a column),
+  filtered per column in the row under the header, each viewer's layout kept in
+  localStorage with a reset button. `CrudPage` shows one (`grid`, the default;
+  `cell-<key>` slots render its cells, `row-actions` follow Edit, `reorder` drags
+  rows by a grip, never while sorted or filtered). Every column whose field (same
+  key) is text, number, select, switch, MAC or textarea is edited in place
+  (double-click) where the field is shown and enabled for the row, unless it has
+  `inline: false`, and saved at once through the API's checks; a failed save
+  puts the old value back. Lists, tags and addresses are edited in the form.
+  Rows are one line: a cell's text that doesn't fit ends in an ellipsis, all of
+  it in the cell's tooltip.
 - **Compact tables:** rows are dense so many fit on the screen. `UTable`'s cell
   padding is set once in `vite.config.js` (`ui.table.slots`: `th` `px-2 py-1.5`,
   `td` `px-2 py-1`); don't add padding back per table. A plain `<table>` uses

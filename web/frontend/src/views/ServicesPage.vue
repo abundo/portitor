@@ -38,7 +38,12 @@ const typeLabel = (t) => serviceTypes.find((it) => it.value === t)?.label ?? t
 const columns = [
   { key: 'name', label: 'Name', class: 'font-mono font-medium' },
   { key: 'type', label: 'Protocol type', format: (r) => typeLabel(r.type) },
-  { key: 'match', label: 'Matches', class: 'font-mono' },
+  {
+    key: 'match',
+    label: 'Matches',
+    class: 'font-mono text-xs',
+    format: (r) => serviceMatches(r).join(', '),
+  },
   { key: 'description', label: 'Description' },
 ]
 const fields = [
@@ -104,6 +109,7 @@ const portColumns = [
           :fields="fields"
           :defaults="newService"
           new-label="New service"
+          grid-key="services"
           :search-text="(row) => serviceMatches(row).join(' ')"
           @changed="objects.load(true)"
         >
@@ -155,6 +161,7 @@ const portColumns = [
           :defaults="() => ({ name: '', port: null, description: '' })"
           noun="port name"
           new-label="New port name"
+          grid-key="port-names"
           @changed="objects.load(true)"
         />
 
