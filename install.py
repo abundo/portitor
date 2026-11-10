@@ -90,7 +90,7 @@ from typing import Sequence
 
 # Bump when the installer itself changes, so a release's copy can tell
 # whether it is newer than the one running.
-INSTALLER_VERSION = 10
+INSTALLER_VERSION = 11
 INSTALLER_FILENAME = "install.py"
 # Where the agent host keeps a copy, for updates from the GUI.
 INSTALLER_DEST = "/usr/lib/portitor/install.py"
