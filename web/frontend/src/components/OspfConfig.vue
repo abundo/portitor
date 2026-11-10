@@ -71,7 +71,7 @@ const defaults = () => ({
   redistribute: [],
 })
 async function load() {
-  if (!store.currentId) return
+  if (!store.currentName) return
   try {
     const rows = await ospfConfig.list()
     const row = rows.find((r) => r.version === props.version && inVrfKey(r))
@@ -82,7 +82,7 @@ async function load() {
     toast.add({ title: errMsg(err, `Failed to load ${name.value}`), color: 'error' })
   }
 }
-watch(() => store.currentId, load, { immediate: true })
+watch(() => store.currentName, load, { immediate: true })
 
 async function save() {
   saving.value = true
@@ -408,7 +408,7 @@ const ifDefaults = computed(() => ({
       :title="`${name} interfaces`"
       :description="`The interfaces ${name} runs on, and their options. Link ends between virtual firewalls are interfaces too.`"
       :api="ospfInterfaces"
-      :params="{ _vf: store.currentId, version }"
+      :params="{ _vf: store.currentName, version }"
       :row-filter="(i) => inVrf(i.name)"
       :columns="ifColumns"
       :fields="ifFields"

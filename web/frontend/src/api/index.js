@@ -14,33 +14,9 @@ export function crud(path) {
   }
 }
 
-// reads returns list/get of a list of the configuration as rows, with their
-// ids (web/configreads.go)
-// (the configuration is written through /api/config, api/config.js).
-export function reads(path) {
-  return {
-    list: (params) => http.get(path, { params }).then((r) => r.data ?? []),
-    get: (id) => http.get(`${path}/${id}`).then((r) => r.data),
-  }
-}
-
 export const firewalls = crud('/firewalls')
-export const instances = reads('/instances')
-export const interfaceZones = reads('/interface-zones')
-export const interfaces = reads('/interfaces')
-export const links = reads('/links')
-export const routes = reads('/routes')
-export const bgpPeerGroups = reads('/bgp/peer-groups')
-export const bgpNeighbors = reads('/bgp/neighbors')
-export const ospfInterfaces = reads('/ospf/interfaces')
-export const isisInterfaces = reads('/isis/interfaces')
-// VRFs of an instance (Routing → VRF).
-export const vrfs = reads('/vrfs')
 export const directoryServers = crud('/directory/servers')
 export const directoryMappings = crud('/directory/mappings')
-export const ipamPrefixes = reads('/ipam/prefixes')
-export const certificates = reads('/certificates')
-export const ipLists = reads('/ip-lists')
 
 export const api = {
   // code: a TOTP or recovery code, for a user with two-factor login on (a
@@ -64,11 +40,10 @@ export const api = {
   acmeCAs: () => http.get('/certificates/cas').then((r) => r.data ?? []),
   dnsProviders: () => http.get('/dyndns/providers').then((r) => r.data ?? []),
 
-  ipamTree: (instanceId) =>
-    http.get('/ipam/tree', { params: { instance_id: instanceId } }).then((r) => r.data),
+  ipamTree: (instance) => http.get('/ipam/tree', { params: { instance } }).then((r) => r.data),
   // Input rules the agent adds for the instance's services, read-only.
-  autoRules: (instanceId) =>
-    http.get('/rules/auto', { params: { instance_id: instanceId } }).then((r) => r.data ?? []),
+  autoRules: (instance) =>
+    http.get('/rules/auto', { params: { instance } }).then((r) => r.data ?? []),
   // Built-in port names that NAT port fields accept ([{ name, port,
   // description }], fwconfig.Services).
   services: () => http.get('/services').then((r) => r.data),

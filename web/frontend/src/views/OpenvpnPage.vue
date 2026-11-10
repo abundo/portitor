@@ -80,12 +80,9 @@ const ifacePath = (name) => `${vfPath()}/${path(['interface', name])}`
 const OFF = 'off' // no two-factor login, '' in the database (a select item can't be '')
 
 async function load() {
-  const id = store.currentId
+  const id = store.currentName
   if (!id) return
-  const [ifs, cs] = await Promise.all([
-    interfaces.list(),
-    certificatesOf(() => store.nameOf(id)).list(),
-  ])
+  const [ifs, cs] = await Promise.all([interfaces.list(), certificatesOf(() => id).list()])
   ifaceRows.value = ifs
   certs.value = cs.filter((c) => !c.is_ca)
   // The roles are a global admin's to see.
@@ -104,7 +101,7 @@ async function load() {
   }
   pageForm.mark()
 }
-watch(() => store.currentId, load, { immediate: true })
+watch(() => store.currentName, load, { immediate: true })
 
 const modeItems = [
   { label: 'Adaptive: UDP, and TCP where UDP is blocked', value: 'adaptive' },

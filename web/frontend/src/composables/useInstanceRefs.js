@@ -2,11 +2,16 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { computed, ref, watch } from 'vue'
-import { interfaceZones, interfaces, links, vrfs } from '@/api'
+import { treeApi, vfApi } from '@/api/config'
 import { useInstanceStore } from '@/stores/instances'
 
-// Interfaces, interface zones and VRFs of the selected instance, as select items,
-// id -> name lookups and the names rules may list.
+const interfaceZones = vfApi('interface-zone')
+const interfaces = vfApi('interface', ['name'], { shallow: true })
+const links = treeApi(() => 'link')
+const vrfs = vfApi('vrf')
+
+// Interfaces, interface zones and VRFs of the selected virtual firewall, as
+// select items, labels and the names rules may list.
 export function useInstanceRefs() {
   const store = useInstanceStore()
   const ifaceZoneList = ref([])
@@ -15,16 +20,15 @@ export function useInstanceRefs() {
   const vrfList = ref([])
 
   async function load() {
-    if (!store.currentId) return
-    const params = { instance_id: store.currentId }
+    if (!store.currentName) return
     ;[ifaceZoneList.value, ifaceList.value, linkList.value, vrfList.value] = await Promise.all([
-      interfaceZones.list(params),
-      interfaces.list(params),
+      interfaceZones.list(),
+      interfaces.list(),
       links.list(),
-      vrfs.list(params),
+      vrfs.list(),
     ])
   }
-  watch(() => store.currentId, load, { immediate: true })
+  watch(() => store.currentName, load, { immediate: true })
 
   // ifaceText shows an interface name of the instance with its label:
   // "WAN (ens18)", or the bare name when it has none (link ends, zones).
@@ -33,15 +37,7 @@ export function useInstanceRefs() {
   // ifaceListText renders a rule's interface list; empty matches any interface.
   const ifaceListText = (list) => (list?.length ? list.map(ifaceText).join(', ') : 'any')
 
-  const ifaceItems = computed(() =>
-    ifaceList.value.map((i) => ({
-      label: ifaceText(i.name),
-      value: i.id,
-      description: i.description || '',
-    })),
-  )
-  // The same by name, for the pages on the configuration tree, whose
-  // entries name their interface and VRF.
+  // The interfaces as select items, by name.
   const ifaceNameItems = computed(() =>
     ifaceList.value.map((i) => ({
       label: ifaceText(i.name),
@@ -50,14 +46,14 @@ export function useInstanceRefs() {
     })),
   )
   const vrfItems = computed(() => vrfList.value.map((v) => ({ label: v.name, value: v.name })))
-  const ifaceName = (id) => ifaceText(ifaceList.value.find((i) => i.id === id)?.name ?? '')
 
-  // Interface names of the instance: its interfaces and its link ends.
+  // Interface names of the virtual firewall: its interfaces and its link
+  // ends.
   const ifaceNames = computed(() => {
-    const id = store.currentId
+    const me = store.currentName
     const ends = linkList.value.flatMap((l) => [
-      ...(l.instance_a_id === id ? [l.interface_a] : []),
-      ...(l.instance_b_id === id ? [l.interface_b] : []),
+      ...(l.instance_a === me ? [l.interface_a] : []),
+      ...(l.instance_b === me ? [l.interface_b] : []),
     ])
     return [...new Set([...ifaceList.value.map((i) => i.name), ...ends])].sort()
   })
@@ -69,11 +65,11 @@ export function useInstanceRefs() {
   // The same as select items ({ label, value, description }), so pickers can
   // show each interface's label and each interface's and zone's description.
   const ifaceRefItems = computed(() => {
-    const id = store.currentId
+    const me = store.currentName
     const desc = new Map(ifaceList.value.map((i) => [i.name, i.description]))
     for (const l of linkList.value) {
-      if (l.instance_a_id === id) desc.set(l.interface_a, l.description)
-      if (l.instance_b_id === id) desc.set(l.interface_b, l.description)
+      if (l.instance_a === me) desc.set(l.interface_a, l.description)
+      if (l.instance_b === me) desc.set(l.interface_b, l.description)
     }
     return [
       ...ifaceZoneList.value.map((z) => ({
@@ -96,10 +92,8 @@ export function useInstanceRefs() {
     ifaceZoneList,
     ifaceList,
     vrfList,
-    ifaceItems,
     ifaceNameItems,
     vrfItems,
-    ifaceName,
     ifaceText,
     ifaceListText,
     ifaceNames,

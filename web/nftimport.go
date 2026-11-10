@@ -18,23 +18,24 @@ import (
 
 // Import of an nftables file into a virtual firewall: the agent reads the
 // file with nft (in a network namespace of its own), nftimport maps it,
-// and the rows are written as uncommitted changes, each through the same
-// checks as the CRUD. A preview runs the same transaction and rolls it
-// back. Hosts/prefixes and services are shared, so this is a global
+// and its entries are written into the candidate, each through the checks
+// of an API edit (addChecked, userEdit). A preview makes the same edit and
+// throws it away. Hosts/prefixes and services are shared, so this is a global
 // admin's (a POST not in tenantWrites).
 
 type nftImportRequest struct {
-	InstanceID uint   `json:"instance_id"`
+	// Instance is the virtual firewall's name.
+	Instance string `json:"instance"`
 	Text       string `json:"text"`
 	// Rename maps the file's interface names to the virtual firewall's.
 	Rename map[string]string `json:"rename"`
 	// Replace deletes the virtual firewall's rules and NAT rules first.
 	Replace bool `json:"replace"`
-	// Apply writes the rows; without it the answer is a preview.
+	// Apply keeps the edit; without it the answer is a preview.
 	Apply bool `json:"apply"`
 }
 
-// errPreview rolls a preview's transaction back.
+// errPreview throws a preview's edit away.
 var errPreview = errors.New("preview")
 
 func (s *Server) handleImportNftables(c *echo.Context) error {
@@ -47,9 +48,9 @@ func (s *Server) handleImportNftables(c *echo.Context) error {
 	if err != nil {
 		return err
 	}
-	inst := v.InstanceByID(req.InstanceID)
+	inst, err := s.namedInstance(c, req.Instance, true)
 	if inst == nil {
-		return errJSON(c, http.StatusBadRequest, "no such virtual firewall")
+		return err
 	}
 	a, _, err := s.firewallAgent(inst.FirewallID)
 	if err != nil {
@@ -59,7 +60,7 @@ func (s *Server) handleImportNftables(c *echo.Context) error {
 	if err != nil {
 		return agentError(c, err)
 	}
-	res, err := nftimport.Import(parsed.JSON, parsed.Text, importOptions(v, req))
+	res, err := nftimport.Import(parsed.JSON, parsed.Text, importOptions(v, inst.ID, req))
 	if err != nil {
 		return errJSON(c, http.StatusBadRequest, err.Error())
 	}
@@ -79,7 +80,7 @@ func (s *Server) handleImportNftables(c *echo.Context) error {
 	return c.JSON(http.StatusOK, res)
 }
 
-func importOptions(v *confview.View, req nftImportRequest) nftimport.Options {
+func importOptions(v *confview.View, instanceID uint, req nftImportRequest) nftimport.Options {
 	opt := nftimport.Options{Objects: map[string][]string{}, Services: map[string]models.Service{}, Rename: req.Rename}
 	for _, o := range v.AddressObjects {
 		opt.Objects[o.Name] = o.Addresses
@@ -91,9 +92,9 @@ func importOptions(v *confview.View, req nftImportRequest) nftimport.Options {
 	for _, sv := range v.Services {
 		opt.Services[sv.Name] = sv
 	}
-	names := ifaceNamesIn(v, req.InstanceID)
+	names := ifaceNamesIn(v, instanceID)
 	for _, z := range v.InterfaceZones {
-		if z.InstanceID == req.InstanceID {
+		if z.InstanceID == instanceID {
 			names[z.Name] = true
 		}
 	}
@@ -131,7 +132,7 @@ func (s *Server) writeImport(work *datastore.Tree, inst *models.Instance, req nf
 	}
 	rules := res.Rules[:0]
 	for _, r := range res.Rules {
-		r.InstanceID = req.InstanceID
+		r.InstanceID = inst.ID
 		if err := addChecked(w, &r); err != nil {
 			res.Skipped = append(res.Skipped, refused(r.Chain, r.Description, err))
 			continue
@@ -141,7 +142,7 @@ func (s *Server) writeImport(work *datastore.Tree, inst *models.Instance, req nf
 	res.Rules = rules
 	nat := res.NAT[:0]
 	for _, n := range res.NAT {
-		n.InstanceID = req.InstanceID
+		n.InstanceID = inst.ID
 		if err := addChecked(w, &n); err != nil {
 			res.Skipped = append(res.Skipped, refused(n.Kind, n.Description, err))
 			continue

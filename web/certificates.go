@@ -24,17 +24,3 @@ func refuseCA(c *models.Certificate, what string) error {
 	}
 	return nil
 }
-
-// presentCertificate hides an imported certificate's key and shows what
-// its chain says.
-func presentCertificate(c *models.Certificate) {
-	c.HasPrivKey, c.NewPrivKey = c.PrivKey != "", ""
-	if c.Source != fwconfig.CertSourceImport {
-		return
-	}
-	if leaf := fwconfig.ChainLeaf(c.FullChain); leaf != nil {
-		c.IsCA, c.Issuer = leaf.IsCA, leaf.Issuer.CommonName
-		c.Chain = fwconfig.ChainPath(c.FullChain)
-		c.NotBefore, c.NotAfter = &leaf.NotBefore, &leaf.NotAfter
-	}
-}

@@ -17,7 +17,8 @@ import SearchInput from '@/components/SearchInput.vue'
 
 const open = defineModel('open', { type: Boolean, default: false })
 const props = defineProps({
-  instanceId: { type: Number, required: true },
+  // instance is the virtual firewall's name.
+  instance: { type: String, required: true },
   // Interface and zone names of the virtual firewall, as select items.
   ifaces: { type: Array, default: () => [] },
 })
@@ -67,7 +68,7 @@ async function run(apply) {
   busy.value = true
   try {
     const r = await api.importNftables({
-      instance_id: props.instanceId,
+      instance: props.instance,
       text: form.text,
       rename: form.rename,
       replace: form.replace,

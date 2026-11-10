@@ -166,7 +166,7 @@ func TestBGPNeighbors(t *testing.T) {
 	if doc.Instance("main").BGP.Neighbors[0].Password != secret {
 		t.Error("password not in the document")
 	}
-	b, _ := json.Marshal(redactDoc(*doc))
+	b, _ := json.Marshal(doc.Redacted())
 	if strings.Contains(string(b), secret) {
 		t.Error("password in the redacted document")
 	}

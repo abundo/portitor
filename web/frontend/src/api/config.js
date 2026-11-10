@@ -111,7 +111,7 @@ export function toEntry(row) {
 // vfPath is the selected virtual firewall's entry: instance=<name>.
 export function vfPath() {
   const store = useInstanceStore()
-  return path(['instance', store.nameOf(store.currentId)])
+  return path(['instance', store.currentName])
 }
 
 // treeApi is the list/create/update/remove CrudPage takes, of the entries
@@ -186,7 +186,7 @@ export function treeApi(listPath, keys = ['name'], { shallow = false, merge = fa
 }
 
 // vfApi is treeApi of a list of the selected virtual firewall (the top
-// bar's): instance=<name>/<list>. A page passes { _vf: store.currentId }
+// bar's): instance=<name>/<list>. A page passes { _vf: store.currentName }
 // as CrudPage's params, which reloads it when another is chosen.
 export function vfApi(list, keys = ['name'], opts = {}) {
   return treeApi(() => `${vfPath()}/${list}`, keys, opts)
@@ -230,7 +230,7 @@ export function vfWithGlobals(list) {
     ...own,
     list: async () => {
       const store = useInstanceStore()
-      const me = store.nameOf(store.currentId)
+      const me = store.currentName
       const others = store.list.filter((i) => i.is_default && i.name !== me)
       const rows = (await own.list()).map((r) => ({ ...r, _owner: me }))
       for (const i of others) {
@@ -397,13 +397,13 @@ export function certificatesOf(instance) {
     },
     get: async (name) => withChain(await base.get(name), await config.view(entryPath(name), 'chain')),
     create: async (body) => {
-      const { generate, import_ca, instance_id, ...rest } = body
+      const { generate, import_ca, ...rest } = body
       if (generate) {
         await config.action(entryPath(rest.name), 'generate', {
           domains: generate.domains ?? [],
           'common-name': generate.common_name || '',
-          'key-type': generate.key_type,
-          days: generate.days,
+          ...(generate.key_type ? { 'key-type': generate.key_type } : {}),
+          ...(Number(generate.days) ? { days: Number(generate.days) } : {}),
           ca: !!generate.ca,
           ...(generate.signed_by ? { 'signed-by': generate.signed_by } : {}),
         })

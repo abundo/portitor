@@ -40,9 +40,9 @@ type IPList struct {
 	URL    string `json:"url"`
 	// Username and Password are HTTP basic auth (URL source).
 	Username string `json:"username,omitempty"`
-	Password string `json:"password,omitempty"`
+	Password string `json:"password,omitempty" secret:"true"`
 	// APIKey is the CrowdSec bouncer key (cscli bouncers add).
-	APIKey string `json:"api_key,omitempty"`
+	APIKey string `json:"api_key,omitempty" secret:"true"`
 	// Countries are ISO 3166-1 alpha-2 codes, upper case (country source).
 	Countries []string `json:"countries,omitempty"`
 }

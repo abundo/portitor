@@ -47,7 +47,7 @@ const toast = useToast()
 const router = useRouter()
 const auth = useAuthStore()
 const { confirmDelete } = useConfirm()
-const { store, ifaceName, ifaceList } = useInstanceRefs()
+const { store, ifaceText, ifaceList } = useInstanceRefs()
 const deploy = useDeployStore()
 const objects = useObjectStore()
 const hosts = ref([])
@@ -86,11 +86,11 @@ async function loadFolders() {
 // The DHCP clients' leases: the tree lists them next to the static addresses.
 const clientLeases = ref([])
 async function loadTree() {
-  if (!store.currentId) return
+  if (!store.currentName) return
   const [t, leases, auto] = await Promise.all([
-    api.ipamTree(store.currentId),
+    api.ipamTree(store.currentName),
     api.agentLeases().catch(() => null),
-    api.autoRules(store.currentId).catch(() => []),
+    api.autoRules(store.currentName).catch(() => []),
   ])
   tree.value = t
   clientLeases.value = leases?.client ?? []
@@ -167,12 +167,11 @@ const shownTree = computed(() => {
     const n = v4num(ip)
     const addrNode = {
       kind: 'address',
-      id: 0,
       auto: true,
       dhcp_lease: true,
       cidr: ip,
       description: `DHCP lease (${l.state})`,
-      interface_id: iface.id,
+      interface: iface.name,
       used_frac: 0,
       children: [],
     }
@@ -185,12 +184,11 @@ const shownTree = computed(() => {
     const pfx = v4prefix(l.address)
     const prefixNode = {
       kind: 'prefix',
-      id: 0,
       auto: true,
       dhcp_lease: true,
       cidr: pfx.cidr,
       description: 'from a DHCP lease',
-      interface_id: iface.id,
+      interface: iface.name,
       used_frac: 0,
       children: [addrNode],
     }
@@ -210,7 +208,7 @@ function nodeText(n) {
     n.cidr,
     n.description,
     n.dns_name,
-    n.interface_id ? ifaceName(n.interface_id) : '',
+    n.interface ? ifaceText(n.interface) : '',
     formatMac(n.mac),
   )
 }
@@ -270,16 +268,15 @@ function hideForms() {
   leasesIface.value = null
 }
 // A row from a DHCP lease shows the DHCP client leases of its interface
-// (by id), DHCPv4 and DHCPv6, in the pane.
+// (by name), DHCPv4 and DHCPv6, in the pane.
 const leasesIface = ref(null)
-const ifaceLeases = computed(() => {
-  const name = ifaceList.value.find((i) => i.id === leasesIface.value)?.name
-  return clientLeases.value.filter(
-    (l) => l.instance === store.current?.name && l.interface === name,
-  )
-})
+const ifaceLeases = computed(() =>
+  clientLeases.value.filter(
+    (l) => l.instance === store.current?.name && l.interface === leasesIface.value,
+  ),
+)
 const noDefaultRoute = (l) =>
-  !l.family && !!ifaceList.value.find((i) => i.id === leasesIface.value)?.dhcp_no_default_route
+  !l.family && !!ifaceList.value.find((i) => i.name === leasesIface.value)?.dhcp_no_default_route
 
 async function show(openForm) {
   if (!(await confirmDiscard())) return
@@ -358,19 +355,19 @@ const sourceLabel = { crowdsec: 'CrowdSec LAPI', url: 'URL', country: 'Countries
 const ipListSource = (l) => (l.source === 'country' ? (l.countries ?? []).join(' ') : l.url)
 
 // Whether the DNS server listens on the interface's addresses.
-function dnsListen(id) {
-  return !!ifaceList.value.find((i) => i.id === id)?.dns_listen
+function dnsListen(name) {
+  return !!ifaceList.value.find((i) => i.name === name)?.dns_listen
 }
 
 // The addresses the interface gets as a client: DHCP (IPv4), SLAAC (IPv6).
-function ifaceClient(id) {
-  const i = ifaceList.value.find((i) => i.id === id)
+function ifaceClient(name) {
+  const i = ifaceList.value.find((i) => i.name === name)
   return [...(i?.ipv4_mode === 'dhcp' ? ['dhcp'] : []), ...(i?.ipv6_accept_ra ? ['slaac'] : [])]
 }
 
 async function refreshList(row) {
   try {
-    await config.action(path(['ip-list', row.name]), 'refresh')
+    await config.action(path(['ip-list', row.name]), 'update')
     toast.add({ title: `Downloading @${row.name}`, color: 'info' })
     setTimeout(() => deploy.refresh(), 2000)
   } catch (err) {
@@ -496,12 +493,12 @@ function listNode(l) {
 // The badges of a prefix or address of the IPAM tree.
 function ipamBadges(n) {
   let html = ''
-  const id = n.interface_id
-  if (id) html += badge(ifaceName(id), 'primary')
-  if (n.kind === 'address' && id) {
-    const dns = dnsListen(id)
+  const name = n.interface
+  if (name) html += badge(ifaceText(name), 'primary')
+  if (n.kind === 'address' && name) {
+    const dns = dnsListen(name)
     if (dns) html += badge('DNS', 'success', 'The DNS server listens on this address')
-    const client = ifaceClient(id)
+    const client = ifaceClient(name)
     if (client.includes('dhcp'))
       html += badge(
         'DHCP Client',
@@ -515,7 +512,7 @@ function ipamBadges(n) {
         'The interface also takes an IPv6 address from router advertisements',
       )
   }
-  if (n.zone_id)
+  if (n.zone)
     html += badge(
       n.cidr.includes(':') ? 'AAAA' : 'A',
       'neutral',
@@ -583,7 +580,7 @@ function groupNode(key, title, iconName, count, description, children) {
 
 function ipamEmpty() {
   if (searching.value && shownTree.value.length) return 'No prefix or address matches.'
-  if (store.currentId) return 'No prefixes yet: give an interface an address, or add a prefix.'
+  if (store.currentName) return 'No prefixes yet: give an interface an address, or add a prefix.'
   return 'No virtual firewall yet: create one under Virtual firewalls.'
 }
 
@@ -737,7 +734,7 @@ const addrGuard = useFormGuard(addr, addrOpen)
 // The interface the address is configured on (from the tree), if any.
 const addrIface = ref(null)
 const leasePickerOpen = ref(false)
-function editAddress(src, ifaceId = null) {
+function editAddress(src, iface = null) {
   Object.keys(addr).forEach((k) => delete addr[k])
   Object.assign(addr, {
     address: '',
@@ -747,7 +744,7 @@ function editAddress(src, ifaceId = null) {
     ...src,
   })
   addr.mac = formatMac(addr.mac)
-  addrIface.value = ifaceId
+  addrIface.value = iface
   addrOpen.value = true
 }
 async function saveAddress() {
@@ -832,7 +829,7 @@ function groupMenu(key) {
   if (key === 'group:hosts') return folderMenu('hosts')
   if (key === 'group:addrlists') return folderMenu('address_lists')
   if (key === 'group:lists') return folderMenu('ip_lists')
-  if (!store.currentId || !auth.canEdit) return []
+  if (!store.currentName || !auth.canEdit) return []
   return [
     [
       {
@@ -867,8 +864,8 @@ function nodeMenu(node) {
 // description on a prefix, a DNS name or MAC on an address. An
 // address that is there only for a zone's A/AAAA record opens the zone.
 function onEdit(node) {
-  if (node.dhcp_lease) show(() => (leasesIface.value = node.interface_id))
-  else if (node.auto && node.zone_id && !node.interface_id)
+  if (node.dhcp_lease) show(() => (leasesIface.value = node.interface))
+  else if (node.auto && node.zone && !node.interface)
     router.push(`/dns/zones/${encodeURIComponent(node.zone)}`)
   else if (node.kind === 'prefix')
     show(async () =>
@@ -878,7 +875,7 @@ function onEdit(node) {
     show(async () =>
       editAddress(
         node.auto ? { address: node.cidr } : await ipamAddresses.get(node.cidr),
-        node.interface_id,
+        node.interface,
       ),
     )
 }
@@ -1004,7 +1001,7 @@ async function removeAddress() {
             v-if="auth.canEdit"
             icon="i-lucide-plus"
             label="Prefix"
-            :disabled="!store.currentId"
+            :disabled="!store.currentName"
             @click="show(() => editPrefix({}))"
           />
         </div>
@@ -1104,7 +1101,7 @@ async function removeAddress() {
                     :disabled="!!addrIface"
                 /></UFormField>
                 <p v-if="addrIface" class="text-sm text-muted">
-                  The firewall's address on {{ ifaceName(addrIface) }}; it is set under
+                  The firewall's address on {{ ifaceText(addrIface) }}; it is set under
                   <RouterLink to="/interfaces" class="text-primary">Interfaces</RouterLink>.
                 </p>
                 <UFormField
@@ -1145,7 +1142,7 @@ async function removeAddress() {
             </form>
           </FormPane>
 
-          <FormPane v-if="leasesIface !== null" :title="`DHCP leases on ${ifaceName(leasesIface)}`">
+          <FormPane v-if="leasesIface !== null" :title="`DHCP leases on ${ifaceText(leasesIface)}`">
             <template #actions>
               <UButton color="neutral" variant="outline" to="/dhcp" label="DHCP page" />
             </template>

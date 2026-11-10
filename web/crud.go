@@ -40,9 +40,12 @@ type resource[T any, PT model[T]] struct {
 	afterCreate func(tx *gorm.DB, item PT) error
 	// afterSave runs after the change is committed, and preDelete before
 	// a delete's transaction: what they change in the configuration (the
-	// candidate), which is not in the transaction.
+	// candidate), which can't be in the transaction (the candidate's
+	// edits write the database themselves). Each pair is undone as a
+	// whole: a failed afterSave has the row put back as it was (a new one
+	// deleted), and a delete that fails runs the undo preDelete returned.
 	afterSave func(c *echo.Context, item, old PT) error
-	preDelete func(c *echo.Context, item PT) error
+	preDelete func(c *echo.Context, item PT) (undo func() error, err error)
 	// present adjusts rows before they are returned (derived fields).
 	present func(item PT)
 	// beforeDelete may refuse a delete, inside the delete transaction.
@@ -181,7 +184,9 @@ func (r *resource[T, PT]) save(c *echo.Context, item, old PT, status int) error 
 		return tx.Save(item).Error
 	})
 	if err == nil && r.afterSave != nil {
-		err = r.afterSave(c, item, old)
+		if err = r.afterSave(c, item, old); err != nil {
+			err = errors.Join(err, r.undoSave(item, old))
+		}
 	}
 	if err != nil {
 		return dbError(c, err)
@@ -197,11 +202,12 @@ func (r *resource[T, PT]) remove(c *echo.Context) error {
 	if item == nil {
 		return err
 	}
+	var undo func() error
 	if r.preDelete != nil {
 		if err := r.checkWrite(c, r.db, item, nil); err != nil {
 			return dbError(c, err)
 		}
-		if err := r.preDelete(c, item); err != nil {
+		if undo, err = r.preDelete(c, item); err != nil {
 			return dbError(c, err)
 		}
 	}
@@ -216,10 +222,21 @@ func (r *resource[T, PT]) remove(c *echo.Context) error {
 		}
 		return tx.Delete(item).Error
 	})
+	if err != nil && undo != nil {
+		err = errors.Join(err, undo())
+	}
 	if err != nil {
 		return dbError(c, err)
 	}
 	return c.NoContent(http.StatusNoContent)
+}
+
+// undoSave puts the row back as it was before a save: old, or none.
+func (r *resource[T, PT]) undoSave(item, old PT) error {
+	if old == nil {
+		return r.db.Delete(item).Error
+	}
+	return r.db.Save(old).Error
 }
 
 // dbError maps validation and constraint errors to 4xx answers.

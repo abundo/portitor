@@ -71,7 +71,7 @@ func TestACMEProxy(t *testing.T) {
 	if !found {
 		t.Error("no auto rule")
 	}
-	if red := redactDoc(*doc); red.Instance("main").ACMEProxy.Policies[0].DNS01.TSIG.Secret != "<redacted>" || x.Policies[0].DNS01.TSIG.Secret != "c2VjcmV0" {
+	if red := doc.Redacted(); red.Instance("main").ACMEProxy.Policies[0].DNS01.TSIG.Secret != "<redacted>" || x.Policies[0].DNS01.TSIG.Secret != "c2VjcmV0" {
 		t.Error("TSIG secret not redacted, or redacted in place")
 	}
 
@@ -128,7 +128,7 @@ func TestACMEProxyHTTP01(t *testing.T) {
 	if !found {
 		t.Error("no HTTP-01 auto rule on wan")
 	}
-	if red := redactDoc(*doc); red.Instance("main").ACMEProxy.Policies[0].DNS01 != nil {
+	if red := doc.Redacted(); red.Instance("main").ACMEProxy.Policies[0].DNS01 != nil {
 		t.Error("redacting added a DNS update client")
 	}
 	if rec := env.cfg("DELETE", "instance=main/interface=wan", nil); rec.Code != http.StatusBadRequest {

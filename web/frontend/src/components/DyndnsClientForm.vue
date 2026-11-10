@@ -143,7 +143,7 @@ defineExpose({
     noun="dynamic zone"
     :item-name="(c) => `dynamic zone ${c.zone} (${c.name})`"
     :api="clientApi"
-    :params="{ _vf: store.currentId }"
+    :params="{ _vf: store.currentName }"
     :columns="[]"
     :fields="clientFields"
     :defaults="{

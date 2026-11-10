@@ -121,7 +121,7 @@ watch(
         <AppMenu />
       </aside>
       <main class="min-w-0 flex-1 overflow-auto p-4 md:p-6">
-        <router-view :key="instances.currentId ?? 0" />
+        <router-view :key="instances.currentName ?? 0" />
       </main>
     </div>
     <AppLogPanel v-if="logPanel.open" />

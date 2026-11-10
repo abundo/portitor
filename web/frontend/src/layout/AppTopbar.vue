@@ -41,7 +41,7 @@ onMounted(async () => {
 })
 
 const current = computed({
-  get: () => instances.currentId ?? undefined,
+  get: () => instances.currentName ?? undefined,
   // The page is remounted for the new instance: unsaved changes are lost.
   set: async (v) => (await confirmDiscard()) && instances.select(v),
 })
@@ -153,8 +153,8 @@ const userMenu = computed(() => [
           color="neutral"
           variant="ghost"
           aria-label="Console"
-          :disabled="!instances.currentId"
-          @click="openConsoleWindow(instances.currentId)"
+          :disabled="!instances.currentName"
+          @click="openConsoleWindow(instances.currentName)"
         />
       </UTooltip>
       <UTooltip v-if="auth.canEdit" text="Open packet capture window">
@@ -163,8 +163,8 @@ const userMenu = computed(() => [
           color="neutral"
           variant="ghost"
           aria-label="Packet capture"
-          :disabled="!instances.currentId"
-          @click="openCaptureWindow(instances.currentId)"
+          :disabled="!instances.currentName"
+          @click="openCaptureWindow(instances.currentName)"
         />
       </UTooltip>
       <UTooltip text="Switch between dark and light mode">

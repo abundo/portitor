@@ -3,10 +3,6 @@
 
 package web
 
-import (
-	"github.com/abundo/portitor/models"
-)
-
 // Routing policy objects (prefix lists, AS path lists, community lists,
 // route maps) and BGP, per instance. They refer to each other by name:
 // renaming an object rewrites the references to it, deleting one in use
@@ -20,14 +16,6 @@ const (
 	refRouteMap   = "route map"
 	refPeerGroup  = "peer group"
 )
-
-func presentPeerGroup(g *models.BgpPeerGroup) { presentPeerSettings(&g.BgpPeerSettings) }
-func presentNeighbor(n *models.BgpNeighbor)   { presentPeerSettings(&n.BgpPeerSettings) }
-
-func presentPeerSettings(s *models.BgpPeerSettings) {
-	s.HasPassword = s.Password != ""
-	s.NewPassword, s.ClearPassword = "", false
-}
 
 // routingObjects are the names of an instance's routing objects.
 type routingObjects struct {

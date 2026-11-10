@@ -182,7 +182,6 @@ func (s *Server) Echo() *echo.Echo {
 	g.POST("/me/totp/recovery-codes", s.handleRecoveryCodes)
 
 	(&resource[models.Firewall, *models.Firewall]{db: s.db, order: "id", prepare: s.prepareFirewallHere, present: presentFirewall, afterSave: s.firewallSaved, preDelete: s.deleteFirewall}).register(s, g, "/firewalls")
-	s.registerViewReads(g)
 
 	// Instance admins use these too; the handlers check the instance.
 	for _, r := range []string{"POST /api/wg/import", "POST /api/agent/capture", "POST /api/agent/trace", "POST /api/agent/iperf", "POST /api/agent/probe", "POST /api/agent/servicelog", "POST /api/agent/connections", "POST /api/agent/connections/flush", "POST /api/agent/dhcp/renew",

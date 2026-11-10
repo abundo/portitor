@@ -34,7 +34,7 @@ const historyColumns = computed(() => [
 const chosen = ref([])
 const deployable = computed(() =>
   instanceStore.list
-    .filter((i) => auth.levelOf(i.id) === 'admin')
+    .filter((i) => auth.levelOf(i.name) === 'admin')
     .map((i) => ({ label: i.name, value: i.name })),
 )
 const check = ref(null)

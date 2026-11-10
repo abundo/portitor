@@ -41,7 +41,7 @@ let controller = null
 // The rules' descriptions, for the rule (ct mark) that accepted a connection.
 const ruleText = ref({})
 async function loadRules() {
-  if (!store.currentId) return
+  if (!store.currentName) return
   try {
     const list = await vfApi('rule', ['id']).list()
     ruleText.value = Object.fromEntries(list.map((r) => [r.id, r.description || `#${r.id}`]))
@@ -140,7 +140,7 @@ onMounted(() => {
 })
 onBeforeUnmount(stop)
 watch(
-  () => store.currentId,
+  () => store.currentName,
   () => {
     snapshot.value = null
     loadRules()

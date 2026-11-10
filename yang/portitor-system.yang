@@ -22,16 +22,16 @@ submodule portitor-system {
       px:singleton 1;
       description "Settings of the firewalls, for every virtual firewall.";
       leaf confirm-timeout {
-        type int32;
+        type int32 { range "0..1800"; }
         default 120;
         description "ConfirmTimeout is the default commit-confirm window in seconds; 0 applies without confirmation.";
       }
       leaf wg-endpoint-host {
-        type string;
+        type host-or-address;
         description "WgEndpointHost is the public name/address road-warrior clients connect to, for generated client configs.";
       }
       leaf capture-rate-kbps {
-        type int32;
+        type int32 { range "0..10000000"; }
         default 1000;
         description "CaptureRateKbps caps a packet capture's stream from the agent (kbit/s); 0 is unlimited.";
       }

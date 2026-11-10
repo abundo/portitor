@@ -70,6 +70,52 @@ type Node struct {
 	// Ext holds Portitor's extensions by name without the prefix
 	// ("secret": "", "table": "rules").
 	Ext map[string]string
+	// Actions are a list's actions (YANG 1.1), by name.
+	Actions []*Action
+}
+
+// Action is an action of a list's entries: what is done or generated
+// rather than set (new keys, a certificate made, a download started),
+// which every frontend runs: the API's ?action=, the CLI's tools and
+// NETCONF's <action>.
+type Action struct {
+	Name        string
+	Description string
+	// Kind is its px:action: ActionView, ActionOperation, ActionChange or
+	// ActionCreate.
+	Kind string
+	// Input and Output are containers of the action's leaves (and lists),
+	// never nil; their Parent is nil.
+	Input, Output *Node
+}
+
+// The kinds of actions (px:action).
+const (
+	// ActionView answers from the configuration (the datastore asked),
+	// changing nothing.
+	ActionView = "view"
+	// ActionOperation has the firewalls do something with the entry
+	// (renew a certificate, download a list); it changes no
+	// configuration.
+	ActionOperation = "operation"
+	// ActionChange changes the candidate, as an edit.
+	ActionChange = "change"
+	// ActionCreate is a change that makes the entry when it isn't there.
+	ActionCreate = "create"
+)
+
+// Writes reports whether running the action takes the right to change
+// the entry; a view takes the right to read it.
+func (a *Action) Writes() bool { return a.Kind != ActionView }
+
+// Action is the action of n named name, or nil.
+func (n *Node) Action(name string) *Action {
+	for _, a := range n.Actions {
+		if a.Name == name {
+			return a
+		}
+	}
+	return nil
 }
 
 // Child is the child named name, or nil.
@@ -423,10 +469,19 @@ func addChildren(n *Node, e *goyang.Entry, ranks map[string]int) error {
 			return fmt.Errorf("%s: choice and case are not supported", c.Path())
 		}
 		if c.RPC != nil {
+			if n.Kind != List {
+				return fmt.Errorf("%s: an action belongs to a list's entries", c.Path())
+			}
+			a, err := convertAction(c, ranks)
+			if err != nil {
+				return err
+			}
+			n.Actions = append(n.Actions, a)
 			continue
 		}
 		entries = append(entries, c)
 	}
+	slices.SortFunc(n.Actions, func(a, b *Action) int { return strings.Compare(a.Name, b.Name) })
 	sort.Slice(entries, func(i, j int) bool {
 		ki, kj := slices.Index(n.Keys, entries[i].Name), slices.Index(n.Keys, entries[j].Name)
 		if ki >= 0 || kj >= 0 {
@@ -510,6 +565,41 @@ func convert(e *goyang.Entry, ranks map[string]int, state bool) (*Node, error) {
 		}
 	}
 	return n, nil
+}
+
+// convertAction is an action's schema; its leaves are checked as any
+// configuration's.
+func convertAction(e *goyang.Entry, ranks map[string]int) (*Action, error) {
+	a := &Action{Name: e.Name, Description: strings.Join(strings.Fields(e.Description), " ")}
+	for _, x := range e.Exts {
+		if x.Keyword == "px:action" {
+			a.Kind = x.Argument
+		}
+	}
+	switch a.Kind {
+	case ActionView, ActionOperation, ActionChange, ActionCreate:
+	default:
+		return nil, fmt.Errorf("%s: px:action is view, operation, change or create, not %q", e.Path(), a.Kind)
+	}
+	io := func(name string, y *goyang.Entry) (*Node, error) {
+		if y == nil {
+			return &Node{Name: name, Kind: Container, byName: map[string]*Node{}, Ext: map[string]string{}}, nil
+		}
+		n, err := convert(y, ranks, false)
+		if err != nil {
+			return nil, err
+		}
+		n.Name, n.Kind = name, Container
+		return n, nil
+	}
+	var err error
+	if a.Input, err = io("input", e.RPC.Input); err != nil {
+		return nil, err
+	}
+	if a.Output, err = io("output", e.RPC.Output); err != nil {
+		return nil, err
+	}
+	return a, nil
 }
 
 func convertType(y *goyang.YangType) (*Type, error) {

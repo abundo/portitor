@@ -61,7 +61,13 @@ type Env struct {
 	// of the firewalls filled in; nil: no state.
 	State func(ctx context.Context) (*datastore.Tree, error)
 	// API answers an API request as the user, for show api.
-	API     func(ctx context.Context, method, path string, body []byte) (int, []byte)
+	API func(ctx context.Context, method, path string, body []byte) (int, []byte)
+	// Action runs the action named on the entry at p as the user, with
+	// its input (datastore.ReadValues of the action's Input), and answers
+	// its output and a change's warnings. candidate is a view's datastore
+	// (an operation and a change act on the candidate). The CLI's tools
+	// and NETCONF's <action> run actions with it.
+	Action  func(ctx context.Context, p datastore.Path, name string, input *datastore.Node, candidate bool) (output *datastore.Node, warnings []string, err error)
 	Version string
 }
 
@@ -129,6 +135,7 @@ var commands = []struct{ name, help string }{
 	{"delete", "delete a leaf, leaf-list value, container or entry: delete <path> [value]"},
 	{"rename", "give an entry new keys, rewriting what refers to it: rename <path> to <keys>"},
 	{"move", "move an entry of an ordered list: move <path> first|last|before <keys>|after <keys>"},
+	{"tools", "run an action of an entry: tools <path> <action> [<input> <value>]..."},
 	{"tree", "show the schema below here or a path"},
 	{"pwc", "show the present working context"},
 	{"back", "go back to the previous context"},
@@ -523,6 +530,8 @@ func (s *Session) command(ctx context.Context, cmd string, args []token) error {
 		return s.move(ctx, args)
 	case "diff":
 		return s.diff(ctx, args)
+	case "tools":
+		return s.tools(ctx, args)
 	case "tree":
 		n, err := s.schemaPath(args)
 		if err != nil {

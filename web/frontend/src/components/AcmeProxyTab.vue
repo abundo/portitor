@@ -75,11 +75,11 @@ const saving = ref(false)
 let loaded = []
 
 async function load() {
-  const id = store.currentId
+  const id = store.currentName
   if (!id) return
   const [entry, cs] = await Promise.all([
     config.get(vfPath()),
-    certificatesOf(() => store.nameOf(id)).list(),
+    certificatesOf(() => id).list(),
   ])
   const inst = fromEntry(entry)
   const ifs = inst.interface ?? []
@@ -104,7 +104,7 @@ async function load() {
   })
   pageForm.mark()
 }
-watch(() => store.currentId, load, { immediate: true })
+watch(() => store.currentName, load, { immediate: true })
 
 const { search: ifaceSearch, filtered: shownIfaces } = useSearch(
   () => form.ifaces,
@@ -351,7 +351,7 @@ const policyFields = computed(() => [
       title="Policies"
       description="Which hosts may get certificates for which names, and how the firewall answers Let's Encrypt for them: by DNS-01 through a DNS update client, or by HTTP-01 on an interface. A name is looked up in the policies by name order; the first that allows it from the client is used."
       :api="acmeProxyPolicies"
-      :params="{ _vf: store.currentId }"
+      :params="{ _vf: store.currentName }"
       :columns="policyColumns"
       :fields="policyFields"
       :defaults="{ enabled: true, domains: [], sources: [], challenge: 'dns-01' }"

@@ -134,7 +134,7 @@ func TestCertificateImport(t *testing.T) {
 			t.Errorf("HTTP-01 rule for an imported certificate: %+v", r)
 		}
 	}
-	if red := redactDoc(*doc); red.Instance("main").Certificates[0].PrivKey != "<redacted>" || main.Certificates[0].PrivKey != key {
+	if red := doc.Redacted(); red.Instance("main").Certificates[0].PrivKey != "<redacted>" || main.Certificates[0].PrivKey != key {
 		t.Error("key not redacted, or redacted in place")
 	}
 }
@@ -270,7 +270,7 @@ func TestCertificateAuthority(t *testing.T) {
 	if !found {
 		t.Error("CA not deployed with the host")
 	}
-	if rec := env.do("PUT", "/api/settings", map[string]any{"web_certificate_id": env.rowID("certificates", "ca")}); rec.Code != http.StatusBadRequest {
+	if rec := env.do("PUT", "/api/settings", map[string]any{"web_certificate": map[string]any{"instance": "main", "name": "ca"}}); rec.Code != http.StatusBadRequest {
 		t.Errorf("CA as the GUI's certificate: %d %s", rec.Code, rec.Body)
 	}
 
@@ -331,7 +331,7 @@ func TestCertificateDNS01(t *testing.T) {
 			t.Errorf("HTTP-01 auto rule for DNS-01: %+v", r)
 		}
 	}
-	red := redactDoc(*doc)
+	red := doc.Redacted()
 	if r := red.Instance("main").Certificates[0].DNS01; r.TSIG.Secret != "<redacted>" || c.DNS01.TSIG.Secret != "c2VjcmV0" {
 		t.Errorf("redacted: %+v, original %+v", r.TSIG, c.DNS01.TSIG)
 	}

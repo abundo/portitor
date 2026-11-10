@@ -15,16 +15,8 @@ import CrudPage from '@/components/CrudPage.vue'
 import FormHeader from '@/components/FormHeader.vue'
 import NeedInstance from '@/components/NeedInstance.vue'
 import SearchInput from '@/components/SearchInput.vue'
-import {
-  api,
-  bgpNeighbors,
-  bgpPeerGroups,
-  instances,
-  isisInterfaces,
-  ospfInterfaces,
-  routes,
-} from '@/api'
-import { vfApi } from '@/api/config'
+import { api } from '@/api'
+import { config, fromEntry, toEntry, vfApi, vfPath } from '@/api/config'
 import { errMsg } from '@/api/http'
 import { usePageForm } from '@/composables/useFormGuard'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
@@ -53,14 +45,18 @@ const loading = ref(false)
 // What asks for BFD: static routes, BGP neighbours (or their peer group) and
 // OSPF and IS-IS interfaces with it on, loaded with the sessions.
 const users = ref({ routes: [], neighbors: [], groups: [], ospf: [], isis: [] })
+const routes = vfApi('route', ['id'])
+const bgpNeighbors = vfApi('bgp-neighbor', ['vrf', 'address'])
+const bgpPeerGroups = vfApi('bgp-peer-group')
+const ospfInterfaces = vfApi('ospf-interface', ['version', 'name'])
+const isisInterfaces = vfApi('isis-interface')
 async function loadUsers() {
-  const params = { instance_id: store.currentId }
   const [r, n, g, o, s] = await Promise.all([
-    routes.list(params),
-    bgpNeighbors.list(params),
-    bgpPeerGroups.list(params),
-    ospfInterfaces.list(params),
-    isisInterfaces.list(params),
+    routes.list(),
+    bgpNeighbors.list(),
+    bgpPeerGroups.list(),
+    ospfInterfaces.list(),
+    isisInterfaces.list(),
   ])
   users.value = { routes: r, neighbors: n, groups: g, ospf: o, isis: s }
 }
@@ -90,8 +86,8 @@ function usedBy(p) {
   const out = []
   if (u.routes.some((r) => r.enabled && r.bfd && sameAddr(r.gateway, p.peer))) out.push('Static')
   const groupBfd = new Set(u.groups.filter((g) => g.bfd).map((g) => g.name))
-  // A neighbour of the session's VRF's BGP.
-  const vrfOf = (n) => vrfList.value.find((v) => v.id === n.vrf_id)?.name ?? ''
+  // A neighbour of the session's VRF's BGP (its vrf: a VRF's name, or main).
+  const vrfOf = (n) => (n.vrf && n.vrf !== 'main' ? n.vrf : '')
   if (
     u.neighbors.some(
       (n) =>
@@ -103,7 +99,7 @@ function usedBy(p) {
   )
     out.push('BGP')
   const version = p.peer?.includes(':') ? 3 : 2
-  if (u.ospf.some((o) => o.bfd && o.version === version && o.name === p.interface))
+  if (u.ospf.some((o) => o.bfd && Number(o.version) === version && o.name === p.interface))
     out.push(version === 3 ? 'OSPFv3' : 'OSPF')
   if (u.isis.some((i) => i.bfd && i.name === p.interface)) out.push('IS-IS')
   return out
@@ -158,9 +154,8 @@ const savingTimers = ref(false)
 // The timers an interface that sets none gets: the defaults, else FRR's.
 const effective = reactive({ rx: 300, tx: 300, mult: 3 })
 async function loadTimers() {
-  const id = store.currentId
-  if (!id) return
-  const inst = await instances.get(id)
+  if (!store.currentName) return
+  const inst = fromEntry(await config.get(vfPath(), 'candidate', { shallow: '' }))
   for (const k of Object.keys(timers)) timers[k] = inst[k] || ''
   Object.assign(effective, {
     rx: inst.bfd_receive_interval || 300,
@@ -169,13 +164,13 @@ async function loadTimers() {
   })
   timersForm.mark()
 }
-watch(() => store.currentId, loadTimers, { immediate: true })
+watch(() => store.currentName, loadTimers, { immediate: true })
 async function saveTimers() {
   savingTimers.value = true
   try {
     const body = {}
     for (const [k, v] of Object.entries(timers)) body[k] = v === '' || v == null ? 0 : Number(v)
-    await instances.update(store.currentId, body)
+    await config.patch(vfPath(), toEntry(body))
     toast.add({ title: 'BFD defaults saved', color: 'success' })
     await loadTimers()
   } catch (err) {
@@ -285,7 +280,7 @@ const defaults = {
           title="BFD interfaces"
           description="BFD on the interfaces of this virtual firewall: fast detection of a lost neighbour. Static routes (their gateway), OSPF and IS-IS interfaces and BGP neighbours turn BFD on in their own settings, and use it on the interfaces listed and enabled here, with these timers (empty: the default timers above)."
           :api="bfdInterfaces"
-          :params="{ _vf: store.currentId }"
+          :params="{ _vf: store.currentName }"
           :columns="columns"
           :fields="fields"
           :defaults="defaults"

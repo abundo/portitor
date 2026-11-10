@@ -34,21 +34,21 @@ func TestTreeInterfaceAddresses(t *testing.T) {
 	if want := "[10.99.0.1 192.168.1.0/24 192.168.2.0/24 fd00:1::/64]"; fmt.Sprint(got) != want {
 		t.Fatalf("roots %v, want %s", got, want)
 	}
-	if r := roots[0]; r.Kind != "address" || !r.Auto || r.ID != 0 || *r.InterfaceID != 8 {
+	if r := roots[0]; r.Kind != "address" || !r.Auto || r.Interface != "wg0" {
 		t.Errorf("/32 interface address: %+v", r)
 	}
 	lan := roots[1]
-	if lan.Auto || lan.ID != 1 || lan.InterfaceID == nil || *lan.InterfaceID != 7 || len(lan.Children) != 2 {
+	if lan.Auto || lan.Interface != "eth1" || len(lan.Children) != 2 {
 		t.Fatalf("stored prefix: %+v", lan)
 	}
-	if gw := lan.Children[0]; gw.ID != 10 || gw.Auto || gw.InterfaceID == nil || *gw.InterfaceID != 7 || gw.DnsName != "gw.home.arpa" {
+	if gw := lan.Children[0]; gw.CIDR != "192.168.1.1" || gw.Auto || gw.Interface != "eth1" || gw.DnsName != "gw.home.arpa" {
 		t.Errorf("IPAM address on an interface: %+v", gw)
 	}
-	if nas := lan.Children[1]; nas.InterfaceID != nil {
+	if nas := lan.Children[1]; nas.Interface != "" {
 		t.Errorf("IPAM address on no interface: %+v", nas)
 	}
 	for _, r := range roots[2:] {
-		if r.Kind != "prefix" || !r.Auto || r.ID != 0 || *r.InterfaceID != 7 || len(r.Children) != 1 || !r.Children[0].Auto {
+		if r.Kind != "prefix" || !r.Auto || r.Interface != "eth1" || len(r.Children) != 1 || !r.Children[0].Auto {
 			t.Errorf("interface prefix: %+v", r)
 		}
 	}
@@ -139,12 +139,12 @@ func TestTreeRecordAddresses(t *testing.T) {
 	prefixes := []models.IpamPrefix{pfx(1, "192.168.0.0/16"), pfx(2, "192.168.1.0/24")}
 	addrs := []models.IpamAddress{{Base: models.Base{ID: 10}, Address: "192.168.1.10", DnsName: "nas.home.arpa"}}
 	records := []RecordAddress{
-		{ZoneID: 5, Name: "printer.home.arpa", Address: "192.168.1.20", Mac: "02:00:00:00:00:20", Description: "hall"},
-		{ZoneID: 5, Name: "files.home.arpa", Address: "192.168.1.10"},
-		{ZoneID: 6, Name: "lp.lab.arpa", Address: "192.168.1.20"},
-		{ZoneID: 5, Name: "cam.home.arpa", Address: "192.168.9.9"},
-		{ZoneID: 5, Name: "www.home.arpa", Address: "203.0.113.1"},
-		{ZoneID: 5, Name: "bad.home.arpa", Address: "nonsense"},
+		{Zone: "home.arpa.", Name: "printer.home.arpa", Address: "192.168.1.20", Mac: "02:00:00:00:00:20", Description: "hall"},
+		{Zone: "home.arpa.", Name: "files.home.arpa", Address: "192.168.1.10"},
+		{Zone: "lab.arpa.", Name: "lp.lab.arpa", Address: "192.168.1.20"},
+		{Zone: "home.arpa.", Name: "cam.home.arpa", Address: "192.168.9.9"},
+		{Zone: "home.arpa.", Name: "www.home.arpa", Address: "203.0.113.1"},
+		{Zone: "home.arpa.", Name: "bad.home.arpa", Address: "nonsense"},
 	}
 	roots := Tree(prefixes, addrs, nil, records)
 	if len(roots) != 1 || roots[0].CIDR != "192.168.0.0/16" {
@@ -154,17 +154,17 @@ func TestTreeRecordAddresses(t *testing.T) {
 	if len(top) != 2 || top[0].CIDR != "192.168.1.0/24" || top[1].CIDR != "192.168.9.9" {
 		t.Fatalf("children of /16: %+v", top)
 	}
-	if cam := top[1]; !cam.Auto || cam.ZoneID == nil || *cam.ZoneID != 5 || cam.DnsName != "cam.home.arpa" {
+	if cam := top[1]; !cam.Auto || cam.Zone != "home.arpa." || cam.DnsName != "cam.home.arpa" {
 		t.Errorf("record in the /16: %+v", cam)
 	}
 	lan := top[0].Children
 	if len(lan) != 2 {
 		t.Fatalf("children of /24: %+v", lan)
 	}
-	if nas := lan[0]; nas.ID != 10 || nas.Auto || nas.DnsName != "nas.home.arpa, files.home.arpa" || *nas.ZoneID != 5 {
+	if nas := lan[0]; nas.CIDR != "192.168.1.10" || nas.Auto || nas.DnsName != "nas.home.arpa, files.home.arpa" || nas.Zone != "home.arpa." {
 		t.Errorf("record for an IPAM address: %+v", nas)
 	}
-	if p := lan[1]; !p.Auto || p.ID != 0 || *p.ZoneID != 5 || p.DnsName != "printer.home.arpa, lp.lab.arpa" ||
+	if p := lan[1]; !p.Auto || p.Zone != "home.arpa." || p.DnsName != "printer.home.arpa, lp.lab.arpa" ||
 		p.Mac != "02:00:00:00:00:20" || p.Description != "hall" {
 		t.Errorf("records for one address: %+v", p)
 	}

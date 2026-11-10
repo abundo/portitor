@@ -34,7 +34,7 @@ const store = useInstanceStore()
 const deploy = useDeployStore()
 const readOnly = computed(() => !auth.canEdit)
 const { auto, loading } = useStatusRefresh({ active: () => props.active })
-const params = computed(() => ({ _vf: store.currentId }))
+const params = computed(() => ({ _vf: store.currentName }))
 // The feed is the form's (which public list fills the URLs), no leaf.
 const blocklistApi = vfApi('dns-blocklist')
 const withoutFeed = ({ feed, ...r }) => (void feed, r)
@@ -169,7 +169,7 @@ const defaults = () => ({
 
 async function download(row) {
   try {
-    await config.action(`${vfPath()}/${path(['dns-blocklist', row.name])}`, 'refresh')
+    await config.action(`${vfPath()}/${path(['dns-blocklist', row.name])}`, 'update')
     toast.add({ title: `Downloading ${row.name}`, color: 'info' })
     setTimeout(() => deploy.refresh(), 2000)
   } catch (err) {
@@ -183,12 +183,12 @@ const allowForm = usePageForm(allow)
 const saving = ref(false)
 
 async function loadAllow() {
-  if (!store.currentId) return
+  if (!store.currentName) return
   const inst = fromEntry(await config.get(vfPath()))
   allow.names = inst.dns_blocklist_allow ?? []
   allowForm.mark()
 }
-watch(() => store.currentId, loadAllow, { immediate: true })
+watch(() => store.currentName, loadAllow, { immediate: true })
 
 async function saveAllow() {
   saving.value = true

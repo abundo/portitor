@@ -94,7 +94,7 @@ function otherIfaces(f, keep = []) {
 // _instance, the form's choice of it, moves one to another (move-to) once
 // it is saved.
 const ifaceApi = vfApi('interface')
-const here = () => store.nameOf(store.currentId)
+const here = () => store.currentName
 const interfaces = {
   ...ifaceApi,
   list: async () => (await ifaceApi.list()).map((r) => ({ ...r, _instance: here() })),
@@ -524,7 +524,7 @@ const { search: statsSearch, filtered: statsFiltered } = useSearch(statsRows)
       title="Interfaces"
       description="Physical ports, VLANs, bridges, loopbacks, WireGuard, 6in4 tunnels (such as Hurricane Electric's tunnel broker) and VXLANs of this virtual firewall."
       :api="interfaces"
-      :params="{ _vf: store.currentId }"
+      :params="{ _vf: store.currentName }"
       :columns="columns"
       :fields="fields"
       :item-name="(r) => `interface ${withLabel(r.label, r.name)}`"
@@ -532,7 +532,7 @@ const { search: statsSearch, filtered: statsFiltered } = useSearch(statsRows)
         (r) => [brokerOf(r)?.address, brokerOf(r)?.last_error].filter(Boolean).join(' ')
       "
       :defaults="{
-        _instance: store.nameOf(store.currentId),
+        _instance: store.currentName,
         kind: 'physical',
         label: '',
         enabled: true,

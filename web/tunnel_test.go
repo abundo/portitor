@@ -78,7 +78,7 @@ func TestTunnel6in4(t *testing.T) {
 	if !slices.Contains(in.Routes, fwconfig.Route{Destination: "::/0", Interface: "he0", Metric: fwconfig.TunnelRouteMetric}) {
 		t.Errorf("no default route through the tunnel: %+v", in.Routes)
 	}
-	if b, _ := json.Marshal(redactDoc(*doc)); strings.Contains(string(b), key) {
+	if b, _ := json.Marshal(doc.Redacted()); strings.Contains(string(b), key) {
 		t.Error("update key in the deployment history")
 	}
 

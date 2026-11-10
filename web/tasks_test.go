@@ -129,7 +129,7 @@ func TestIPListsAndTasks(t *testing.T) {
 	if got := doc.Instances[0].Rules[1].SrcAddrs; strings.Join(got, " ") != "@cs @drop 192.0.2.0/24" {
 		t.Errorf("rule addresses: %v", got)
 	}
-	red := redactDoc(*doc)
+	red := doc.Redacted()
 	if red.IPLists[0].APIKey != "<redacted>" || red.IPLists[1].Password != "<redacted>" || doc.IPLists[0].APIKey != key {
 		t.Errorf("redaction: %+v / %+v", red.IPLists, doc.IPLists)
 	}
@@ -140,7 +140,7 @@ func TestIPListsAndTasks(t *testing.T) {
 	if rec := env.do("POST", "/api/config/candidate/task=backup?action=run", map[string]any{}); rec.Code != http.StatusAccepted || fake.ran != "backup" {
 		t.Errorf("run: %d %s %q", rec.Code, rec.Body, fake.ran)
 	}
-	if rec := env.do("POST", "/api/config/candidate/ip-list=drop?action=refresh", map[string]any{}); rec.Code != http.StatusBadGateway || !strings.Contains(rec.Body.String(), "not deployed") {
+	if rec := env.do("POST", "/api/config/candidate/ip-list=drop?action=update", map[string]any{}); rec.Code != http.StatusBadGateway || !strings.Contains(rec.Body.String(), "not deployed") {
 		t.Errorf("refresh error: %d %s", rec.Code, rec.Body)
 	}
 	if rec := env.do("POST", "/api/config/candidate/task=nope?action=run", map[string]any{}); rec.Code != http.StatusNotFound {
@@ -149,7 +149,7 @@ func TestIPListsAndTasks(t *testing.T) {
 	// A viewer runs neither.
 	env.create("/api/users", map[string]string{"username": "vic", "password": "a long password", "role": "viewer"})
 	env.login("vic", "a long password")
-	for _, p := range []string{"ip-list=drop?action=refresh", "task=backup?action=run"} {
+	for _, p := range []string{"ip-list=drop?action=update", "task=backup?action=run"} {
 		if rec := env.do("POST", "/api/config/candidate/"+p, map[string]any{}); rec.Code != http.StatusForbidden {
 			t.Errorf("a viewer's %s: %d %s", p, rec.Code, rec.Body)
 		}

@@ -105,7 +105,7 @@ const saving = ref(false)
 const xlatIfaces = ref([])
 
 async function load() {
-  const id = store.currentId
+  const id = store.currentName
   if (!id) return
   const inst = fromEntry(await config.get(vfPath()))
   const ifs = inst.interface ?? []
@@ -118,7 +118,7 @@ async function load() {
   xlatIfaces.value = ifs.filter((i) => i.xlat464).map((i) => withLabel(i.label, i.name))
   pageForm.mark()
 }
-watch(() => store.currentId, load, { immediate: true })
+watch(() => store.currentName, load, { immediate: true })
 
 async function save() {
   saving.value = true

@@ -103,6 +103,8 @@ func (s *Session) Suggest(ctx context.Context, line string) (partial string, ite
 		items = append(items, s.dirItems(ctx, args)...)
 	case "set", "delete", "tree":
 		items = s.pathItems(ctx, args)
+	case "tools":
+		items = s.toolsItems(ctx, args)
 	case "rename":
 		if _, to, ok := splitAt(args, "to"); ok {
 			if len(to) == 0 {

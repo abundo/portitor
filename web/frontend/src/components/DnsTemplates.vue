@@ -12,7 +12,7 @@ import { useInstanceStore } from '@/stores/instances'
 
 const emit = defineEmits(['changed'])
 const store = useInstanceStore()
-const params = computed(() => ({ _vf: store.currentId }))
+const params = computed(() => ({ _vf: store.currentName }))
 const dnsSoaTemplates = vfWithGlobals('dns-soa-template')
 const dnsDnssecPolicies = vfWithGlobals('dnssec-policy')
 // A template's nameservers are its nameserver list's entries.
@@ -28,7 +28,7 @@ const dnsTemplates = {
   create: (r) => templateList.create(withNameserver(r)),
   update: (id, r) => templateList.update(id, withNameserver(r)),
 }
-const own = () => store.nameOf(store.currentId)
+const own = () => store.currentName
 // The rows this virtual firewall uses: its own and the global ones.
 const usable = (r) => r._owner === own() || r.global
 // Another virtual firewall's global row is used, never changed, here.
@@ -46,7 +46,7 @@ async function loadRefs() {
   policies.value = p.filter(usable)
   templatesPage.value?.reload()
 }
-watch(() => store.currentId, loadRefs, { immediate: true })
+watch(() => store.currentName, loadRefs, { immediate: true })
 
 function changed() {
   loadRefs()

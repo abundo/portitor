@@ -14,6 +14,40 @@ submodule portitor-interfaces {
   grouping interfaces {
     list interface {
       key "name";
+      action wg-rekey {
+        px:action "change";
+        description "Gives a WireGuard interface a new key pair; its peers need the new public key.";
+        output {
+          leaf wg-public-key {
+            type wg-key;
+          }
+        }
+      }
+      action move-to {
+        px:action "change";
+        description "Moves the interface, with its addresses and peers, to another virtual firewall; refused when what refers to it in this one would be left without it.";
+        input {
+          leaf instance {
+            type name;
+            mandatory true;
+            description "The virtual firewall it moves to.";
+          }
+        }
+      }
+      action wg-next-free {
+        px:action "view";
+        description "A WireGuard interface's next free peer addresses, one per IP version of its addresses, the same host number in each if it can.";
+        output {
+          leaf-list addresses {
+            type string;
+            ordered-by user;
+          }
+          leaf-list warnings {
+            type string;
+            ordered-by user;
+          }
+        }
+      }
       px:table "interfaces";
       px:parent-column "instance_id";
       leaf name {

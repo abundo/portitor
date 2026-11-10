@@ -31,7 +31,6 @@ func TestImportNftables(t *testing.T) {
 	env := newEnv(t)
 	env.srv.newAgent = func(*models.Firewall) (agentAPI, error) { return parseAgent{}, nil }
 	env.host("main")
-	inst := env.rowID("instances", "main")
 	env.post("instance=main/interface", map[string]any{"kind": "physical", "name": "wan", "enabled": true})
 	env.post("instance=main/interface", map[string]any{"kind": "physical", "name": "lan", "enabled": true})
 	env.post("instance=main/rule", map[string]any{"chain": "input", "action": "drop", "enabled": true})
@@ -52,7 +51,7 @@ func TestImportNftables(t *testing.T) {
 		return 0
 	}
 	before := count(&models.Rule{})
-	body := map[string]any{"instance_id": inst, "text": "x", "rename": map[string]string{"eth0": "wan", "eth1": "lan"}}
+	body := map[string]any{"instance": "main", "text": "x", "rename": map[string]string{"eth0": "wan", "eth1": "lan"}}
 	var res nftimport.Result
 	rec := env.do("POST", "/api/import/nftables", body)
 	_ = json.Unmarshal(rec.Body.Bytes(), &res)

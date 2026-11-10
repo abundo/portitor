@@ -176,20 +176,28 @@ func (s *Server) addDefaultInstance(ctx context.Context, firewall, name string) 
 
 // deleteFirewall refuses to delete the last firewall, or one with
 // virtual firewalls besides its host, and takes its host and tasks out of
-// the candidate.
-func (s *Server) deleteFirewall(c *echo.Context, f *models.Firewall) error {
+// the candidate; undo puts them back.
+func (s *Server) deleteFirewall(c *echo.Context, f *models.Firewall) (undo func() error, err error) {
 	var n int64
 	if err := s.db.Model(&models.Firewall{}).Count(&n).Error; err != nil {
-		return err
+		return nil, err
 	}
 	if n <= 1 {
-		return bad("the only firewall can't be deleted")
+		return nil, bad("the only firewall can't be deleted")
 	}
 	var secondary models.Firewall
 	if err := s.db.Where("ha_primary_id = ?", f.ID).First(&secondary).Error; err == nil {
-		return bad(fmt.Sprintf("%s is the HA primary of %s; delete that first", f.Name, secondary.Name))
+		return nil, bad(fmt.Sprintf("%s is the HA primary of %s; delete that first", f.Name, secondary.Name))
 	}
-	return s.editConfig(c.Request().Context(), func(work *datastore.Tree) error {
+	// The entries taken out, as JSON with their secrets, by list.
+	type removed struct {
+		list string
+		data []byte
+	}
+	var taken []removed
+	ctx := context.WithoutCancel(c.Request().Context())
+	err = s.editConfig(ctx, func(work *datastore.Tree) error {
+		taken = nil
 		for _, in := range work.Root.Lists["instance"] {
 			if in.Leaf("firewall") == f.Name && in.Leaf("is-default") != "true" {
 				return bad(fmt.Sprintf("virtual firewall %s is on %s; move or delete it first", in.Leaf("name"), f.Name))
@@ -197,15 +205,36 @@ func (s *Server) deleteFirewall(c *echo.Context, f *models.Firewall) error {
 		}
 		for _, list := range []string{"instance", "task"} {
 			for _, e := range slices.Clone(work.Root.Lists[list]) {
-				if e.Leaf("firewall") == f.Name {
-					if err := work.Delete(datastore.PathOf(e)); err != nil {
-						return err
-					}
+				if e.Leaf("firewall") != f.Name {
+					continue
 				}
+				data, err := datastore.NodeJSON(e, datastore.JSONOptions{Secrets: true})
+				if err != nil {
+					return err
+				}
+				if err := work.Delete(datastore.PathOf(e)); err != nil {
+					return err
+				}
+				taken = append(taken, removed{list, data})
 			}
 		}
 		return nil
 	})
+	if err != nil {
+		return nil, err
+	}
+	// Made again at their paths, the entries get their ids back
+	// (sqlmap.AssignIDs).
+	return func() error {
+		return s.editConfig(ctx, func(work *datastore.Tree) error {
+			for _, r := range taken {
+				if err := work.EditJSON(datastore.Path{{Name: r.list}}, datastore.EditCreate, r.data); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+	}, nil
 }
 
 // firstFirewallID is the firewall the installation started with, or the

@@ -14,6 +14,15 @@ submodule portitor-services {
   grouping services {
     list ipam-prefix {
       key "prefix";
+      action next-free {
+        px:action "view";
+        description "The prefix's next free address.";
+        output {
+          leaf address {
+            type ip-address;
+          }
+        }
+      }
       px:table "ipam_prefixes";
       px:parent-column "instance_id";
       description "IpamPrefix is a node in the prefix tree. Parent/child relations are not stored; they follow from CIDR containment within an instance.";
@@ -239,6 +248,16 @@ submodule portitor-services {
     }
     list dns-blocklist {
       key "name";
+      action update {
+        px:action "operation";
+        description "Downloads the blocklist again now, on its firewall (and an HA standby that answers).";
+        output {
+          leaf started {
+            type string;
+            description "What the firewall started on.";
+          }
+        }
+      }
       px:table "dns_blocklists";
       px:parent-column "instance_id";
       description "DnsBlocklist is a list of domains the instance's DNS server does not resolve (fwconfig.DNSBlocklist), which the agent downloads from Urls.";
@@ -356,6 +375,74 @@ submodule portitor-services {
     }
     list certificate {
       key "name";
+      action chain {
+        px:action "view";
+        description "What an imported certificate's chain says, and whether the certificate has its key.";
+        output {
+          leaf is-ca {
+            type boolean;
+          }
+          leaf issuer {
+            type string;
+          }
+          leaf-list chain {
+            type string;
+            ordered-by user;
+            description "The certification path, the certificate first.";
+          }
+          leaf not-before {
+            type string;
+          }
+          leaf not-after {
+            type string;
+          }
+          leaf has-key {
+            type boolean;
+          }
+        }
+      }
+      action renew {
+        px:action "operation";
+        description "Orders an ACME certificate now, on its firewall (and its HA standby, which copies it).";
+        output {
+          leaf started {
+            type string;
+            description "What the firewall started on.";
+          }
+        }
+      }
+      action generate {
+        px:action "create";
+        description "Makes the certificate's key and chain here: self-signed, a CA (on a firewall's host, global admins only), or signed by a CA of its firewall's host.";
+        input {
+          leaf-list domains {
+            type string;
+            ordered-by user;
+            description "DNS names (*.example.com too) and IP addresses; none for a CA.";
+          }
+          leaf common-name {
+            type text { length "0..64"; }
+            description "The subject's common name; the first domain (a CA: its name) when empty.";
+          }
+          leaf key-type {
+            type cert-key-type;
+            default "ec256";
+          }
+          leaf days {
+            type int32 { range "1..36500"; }
+            default 365;
+          }
+          leaf ca {
+            type boolean;
+            default false;
+            description "A certificate authority, self-signed.";
+          }
+          leaf signed-by {
+            type string;
+            description "A CA of the firewall's host that signs it; self-signed when empty.";
+          }
+        }
+      }
       px:table "certificates";
       px:parent-column "instance_id";
       description "Certificate is a TLS certificate the agent gets from an ACME CA (Let's Encrypt) and renews, the CA's HTTP-01 requests coming in on Interface; or one imported with its key (Source fwconfig.CertSourceImport), which has no ACME settings and no interface.";
@@ -390,7 +477,7 @@ submodule portitor-services {
         description "Ca is a fwconfig.ACMECAs name or an ACME directory URL.";
       }
       leaf key-type {
-        type string;
+        type cert-key-type;
         default "ec256";
       }
       leaf challenge {

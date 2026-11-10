@@ -85,9 +85,51 @@ entries and values (interface names where an interface is wanted, and so on).
 | `commit stay\|now\|validate\|confirmed [seconds]` | commits the candidate (`now` also leaves candidate mode); `validate` only checks it; `confirmed` rolls back unless confirmed in time |
 | `confirm`, `rollback` | confirms or rolls back a commit that waits for confirmation |
 | `discard stay\|now` | drops the candidate's changes |
+| `tools <path> <action> [<input> <value>]...` | runs an action of an entry (see [Actions](#actions)) |
 | `tree [path]` | shows the model below here: names, keys and types |
 | `show deployments`, `show api <path>` | shows the commits, or the answer of a GET of the API (`show api /api/agent/status`); the version is `show from state / system version` |
 | `pwc`, `help`, `quit` | where you are, the commands, log out |
+
+## Actions
+
+Some things are done rather than set: a WireGuard interface's new keys, a
+certificate made or renewed, an IP list downloaded now. They are actions of an
+entry, run with `tools`, its path, the action and its input:
+
+```
+tools instance fw interface wg0 wg-rekey
+tools instance fw interface wg0 wg-next-free
+tools instance fw interface lan5 move-to instance branch
+tools instance fw certificate web generate domains [ fw.example.com ] days 365
+tools instance fw certificate le renew
+tools ip-list spamhaus update
+tools ip-list spamhaus schedule schedule "0 */6 * * *"
+tools task backup run
+```
+
+`?` after the entry lists its actions, and after the action its input. A leaf-list
+takes its values in `[ ]` or one at a time. What an action answers is shown as
+leaves (`wg-public-key ...`).
+
+| Action | Of | Does |
+|---|---|---|
+| `wg-rekey` | interface (WireGuard) | new key pair; its peers need the new public key |
+| `wg-next-free` | interface (WireGuard) | the next free peer addresses |
+| `move-to instance <vf>` | interface | moves it, with its addresses and peers, to another virtual firewall |
+| `chain` | certificate | what an imported certificate's chain says |
+| `generate` | certificate | makes a self-signed certificate or CA, or one signed by a CA of the firewall's host |
+| `renew` | certificate | orders an ACME certificate now |
+| `next-free` | ipam-prefix | the prefix's next free address |
+| `update` | ip-list, dns-blocklist | downloads the list now |
+| `schedule schedule <cron>` | ip-list | adds a task that downloads it on schedule |
+| `run` | task | runs the task now |
+
+A change (`wg-rekey`, `move-to`, `generate`, `schedule`) edits the candidate, so it
+needs candidate mode and a commit, like `set`. A view (`wg-next-free`, `chain`,
+`next-free`) reads the mode's configuration, and an operation (`renew`, `update`,
+`run`) has the firewall do it now, in either mode. What gives a file (a WireGuard
+peer's or OpenVPN client's config, a certificate download, a virtual firewall's
+bundle) is the GUI's alone.
 
 ## State
 
@@ -159,6 +201,17 @@ gets the modules with `<get-schema>` (RFC 6022).
 - `<commit>`, with `<confirmed/>` and `<confirm-timeout>` (600 s by default): a plain
   `<commit/>` while one waits confirms it, `<cancel-commit/>` rolls it back. A plain
   commit applies at once, without Settings' confirm window.
+- `<action>` (RFC 7950) runs the [actions](#actions): the path to the entry, and
+  innermost the action with its input, on the candidate. The reply holds the output,
+  or `<ok/>`:
+
+  ```xml
+  <action xmlns="urn:ietf:params:xml:ns:yang:1">
+    <instance xmlns="urn:portitor:config"><name>fw</name>
+      <interface><name>wg0</name><wg-rekey/></interface>
+    </instance>
+  </action>
+  ```
 - `<validate>`, `<discard-changes>`, `<copy-config>` to the candidate (from running
   or an inline config), and `<lock>`/`<unlock>` on candidate and running. A lock
   keeps the CLI's sessions out too, and goes when its session ends.

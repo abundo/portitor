@@ -235,7 +235,7 @@ func IFBName(name string) string {
 }
 
 type WireGuard struct {
-	PrivateKey string   `json:"private_key"`
+	PrivateKey string   `json:"private_key" secret:"true"`
 	ListenPort int      `json:"listen_port,omitempty"`
 	Peers      []WGPeer `json:"peers"`
 }
@@ -243,7 +243,7 @@ type WireGuard struct {
 type WGPeer struct {
 	Name         string   `json:"name"`
 	PublicKey    string   `json:"public_key"`
-	PresharedKey string   `json:"preshared_key,omitempty"`
+	PresharedKey string   `json:"preshared_key,omitempty" secret:"true"`
 	Endpoint     string   `json:"endpoint,omitempty"`
 	AllowedIPs   []string `json:"allowed_ips"`
 	// Networks are the networks behind a site peer. They are allowed
@@ -819,7 +819,7 @@ type DynDNS struct {
 	Provider string `json:"provider,omitempty"`
 	// ProviderSettings are the provider's fields (DNSProvider.Fields), by
 	// key, secrets included.
-	ProviderSettings map[string]string `json:"provider_settings,omitempty"`
+	ProviderSettings map[string]string `json:"provider_settings,omitempty" secret:"provider"`
 	// Server is the zone's primary nameserver (RFC 2136 only): an IP
 	// address, with an optional port (192.0.2.53, [2001:db8::53]:5353).
 	Server string `json:"server,omitempty"`
@@ -836,7 +836,7 @@ type DynDNS struct {
 type TSIG struct {
 	Name      string `json:"name"`
 	Algorithm string `json:"algorithm"`
-	Secret    string `json:"secret"`
+	Secret    string `json:"secret" secret:"true"`
 }
 
 // TSIGAlgorithms are the algorithms a TSIG key may use.

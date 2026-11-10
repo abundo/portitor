@@ -94,7 +94,7 @@ func TestDynDNS(t *testing.T) {
 	if len(d) != 1 || d[0].Interface != "eth0" || d[0].TSIG.Secret != secret || len(d[0].Records) != 4 || d[0].Records[0].Type != "A" {
 		t.Fatalf("document: %+v", d)
 	}
-	if r := redactDoc(*doc); r.Instance("main").DynDNS[0].TSIG.Secret != "<redacted>" || doc.Instance("main").DynDNS[0].TSIG.Secret != secret {
+	if r := doc.Redacted(); r.Instance("main").DynDNS[0].TSIG.Secret != "<redacted>" || doc.Instance("main").DynDNS[0].TSIG.Secret != secret {
 		t.Error("redaction")
 	}
 
@@ -160,7 +160,7 @@ func TestDNSUpdateProvider(t *testing.T) {
 	if d.Provider != "glesys" || d.Server != "" || d.ProviderSettings["api_key"] != token {
 		t.Fatalf("document: %+v", d)
 	}
-	red := redactDoc(*doc)
+	red := doc.Redacted()
 	if r := red.Instance("main").DynDNS[0].ProviderSettings; r["api_key"] != "<redacted>" {
 		t.Errorf("redaction: %v", r)
 	}

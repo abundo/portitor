@@ -4,7 +4,7 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import SearchInput from '@/components/SearchInput.vue'
-import { interfaces } from '@/api'
+import { config, fromEntry, path } from '@/api/config'
 import { useLogPanel } from '@/composables/useLogPanel'
 import { withLabel } from '@/composables/useInstanceRefs'
 import { useInstanceStore } from '@/stores/instances'
@@ -61,18 +61,27 @@ const instStore = useInstanceStore()
 // With several firewalls the logs are one firewall's: the selected VF's,
 // until another is picked here.
 watch(
-  () => instStore.current?.firewall_id ?? null,
+  () => instStore.firewallId,
   (id) => setFirewall(id),
   { immediate: true },
 )
 const ifaceLabels = ref(new Map())
 async function loadIfaces() {
   try {
-    const list = await interfaces.list()
+    // Each virtual firewall's interfaces, without their nested lists.
+    const lists = await Promise.all(
+      instStore.list.map(async (vf) => {
+        const rows = await config.get(`${path(['instance', vf.name])}/interface`, 'candidate', {
+          shallow: '',
+        })
+        return (rows ?? []).map(fromEntry).map((i) => ({ ...i, vf: vf.name }))
+      }),
+    )
     ifaceLabels.value = new Map(
-      list
+      lists
+        .flat()
         .filter((i) => i.label)
-        .map((i) => [`${instStore.nameOf(i.instance_id)}/${i.name}`, i.label]),
+        .map((i) => [`${i.vf}/${i.name}`, i.label]),
     )
   } catch {
     // Bare names are fine.

@@ -33,14 +33,13 @@ import (
 
 // ----- IPAM -----
 
+// handleIpamTree is the prefix tree of the instance ?instance=<name>.
 func (s *Server) handleIpamTree(c *echo.Context) error {
-	id, err := echo.QueryParam[uint](c, "instance_id")
-	if err != nil {
-		return errJSON(c, http.StatusBadRequest, "instance_id is required")
-	}
-	if ok, err := allowInstance(c, id, false); !ok {
+	in, err := s.namedInstance(c, c.QueryParam("instance"), false)
+	if in == nil {
 		return err
 	}
+	id := in.ID
 	v, err := s.view(c.Request().Context())
 	if err != nil {
 		return err
@@ -75,7 +74,7 @@ func zoneAddresses(v *confview.View, instanceID uint) []ipam.RecordAddress {
 				} else {
 					name += "." + zone
 				}
-				out = append(out, ipam.RecordAddress{ZoneID: z.ID, Zone: z.Name, Name: name, Address: r.Value, Mac: r.Mac, Description: r.Description})
+				out = append(out, ipam.RecordAddress{Zone: z.Name, Name: name, Address: r.Value, Mac: r.Mac, Description: r.Description})
 			}
 		}
 	}
@@ -83,24 +82,14 @@ func zoneAddresses(v *confview.View, instanceID uint) []ipam.RecordAddress {
 }
 
 // handleAutoRules lists the input rules the agent adds for an instance's
-// services (DHCP, DNS, WireGuard), rendered from the current database. A
+// (?instance=<name>) services (DHCP, DNS, WireGuard), rendered from the current database. A
 // configuration with problems still lists what it can. For the default
 // instance it also asks the agent for its anti-lockout rule, which comes
 // from agent.yaml; an unreachable agent just leaves it out.
 func (s *Server) handleAutoRules(c *echo.Context) error {
-	id, err := echo.QueryParam[uint](c, "instance_id")
-	if err != nil {
-		return errJSON(c, http.StatusBadRequest, "instance_id is required")
-	}
-	if ok, err := allowInstance(c, id, false); !ok {
-		return err
-	}
-	mi, err := s.instanceByID(c.Request().Context(), id)
-	if err != nil {
-		return err
-	}
+	mi, err := s.namedInstance(c, c.QueryParam("instance"), false)
 	if mi == nil {
-		return errJSON(c, http.StatusNotFound, "not found")
+		return err
 	}
 	in, err := s.candidateInput(c.Request().Context())
 	if err != nil {
@@ -370,125 +359,166 @@ func suggestBits(ip netip.Addr) int {
 
 type settingsView struct {
 	models.Settings
+	// WebCertificate is the certificate portitor-config serves (kept by
+	// its id, settings.web_certificate_id), or nil for tls_cert.
+	WebCertificate *certRef `json:"web_certificate"`
 	// WebTLS says portitor-web serves HTTPS itself (tls_cert), so a
 	// web certificate takes effect.
 	WebTLS bool `json:"web_tls"`
 }
 
-func (s *Server) handleGetSettings(c *echo.Context) error {
-	st, err := s.settings()
-	if err != nil {
-		return err
-	}
-	return c.JSON(http.StatusOK, settingsView{*st, s.cfg.TLSCert != ""})
+// certRef names a certificate: its virtual firewall's name and its own.
+type certRef struct {
+	Instance string `json:"instance"`
+	Name     string `json:"name"`
 }
 
-func (s *Server) handlePutSettings(c *echo.Context) error {
-	st, err := s.settings()
+func (s *Server) handleGetSettings(c *echo.Context) error {
+	v, err := s.settingsView(c.Request().Context())
 	if err != nil {
 		return err
 	}
+	return c.JSON(http.StatusOK, v)
+}
+
+// settingsView is the Settings as the GUI has them.
+func (s *Server) settingsView(ctx context.Context) (*settingsView, error) {
+	st, err := s.settings()
+	if err != nil {
+		return nil, err
+	}
+	v := &settingsView{Settings: *st, WebTLS: s.cfg.TLSCert != ""}
+	if st.WebCertificateID != nil {
+		cert, err := s.certificateByID(ctx, *st.WebCertificateID)
+		if err != nil {
+			return nil, err
+		}
+		if cert != nil {
+			in, err := s.instanceByID(ctx, cert.InstanceID)
+			if err != nil {
+				return nil, err
+			}
+			if in != nil {
+				v.WebCertificate = &certRef{in.Name, cert.Name}
+			}
+		}
+	}
+	return v, nil
+}
+
+// certificateNamed is the candidate's certificate ref names, nil when
+// there is none.
+func (s *Server) certificateNamed(ctx context.Context, ref certRef) (*models.Certificate, error) {
+	v, err := s.view(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for i, c := range v.Certificates {
+		if in := v.InstanceByID(c.InstanceID); in != nil && in.Name == ref.Instance && c.Name == ref.Name {
+			return &v.Certificates[i], nil
+		}
+	}
+	return nil, nil
+}
+
+// handlePutSettings changes the Settings: the configuration's as an edit
+// of the tree's settings, checked like any other (checkEdit: the leaves'
+// ranges and types, virtual firewalls off with more than a host on a
+// firewall), and portitor-config's own certificate.
+func (s *Server) handlePutSettings(c *echo.Context) error {
 	var req struct {
-		ConfirmTimeout  *int    `json:"confirm_timeout"`
-		WgEndpointHost  *string `json:"wg_endpoint_host"`
-		CaptureRateKbps *int    `json:"capture_rate_kbps"`
-		// WebCertificateID: absent keeps, 0 clears.
-		WebCertificateID *uint `json:"web_certificate_id"`
-		VirtualFirewalls *bool `json:"virtual_firewalls"`
-		TOTPDefault      *bool `json:"totp_default"`
+		ConfirmTimeout   *int    `json:"confirm_timeout"`
+		WgEndpointHost   *string `json:"wg_endpoint_host"`
+		CaptureRateKbps  *int    `json:"capture_rate_kbps"`
+		VirtualFirewalls *bool   `json:"virtual_firewalls"`
+		TOTPDefault      *bool   `json:"totp_default"`
 		// The IPv4 packets with options dropped to the firewall and
 		// through it.
 		DropIPOptionsInput   *bool `json:"drop_ip_options_input"`
 		DropIPOptionsForward *bool `json:"drop_ip_options_forward"`
+		// WebCertificate: absent keeps, null clears.
+		WebCertificate optional[certRef] `json:"web_certificate"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return errJSON(c, http.StatusBadRequest, "invalid request")
 	}
-	// The configuration's settings, as leaves of the tree's.
+	// The certificate is checked first, so a refused one changes nothing.
+	var certID *uint
+	if ref := req.WebCertificate.value; ref != nil {
+		cert, err := s.certificateNamed(c.Request().Context(), *ref)
+		if err != nil {
+			return err
+		}
+		if cert == nil {
+			return errJSON(c, http.StatusBadRequest, "no such certificate")
+		}
+		if err := refuseCA(cert, "the GUI's certificate"); err != nil {
+			return errJSON(c, http.StatusBadRequest, err.Error())
+		}
+		certID = &cert.ID
+	}
 	leaves := map[string]any{}
-	if req.ConfirmTimeout != nil {
-		if *req.ConfirmTimeout < 0 || *req.ConfirmTimeout > 1800 {
-			return errJSON(c, http.StatusBadRequest, "confirm timeout must be 0-1800 seconds")
-		}
-		st.ConfirmTimeout = *req.ConfirmTimeout
-		leaves["confirm-timeout"] = st.ConfirmTimeout
-	}
-	if req.WgEndpointHost != nil {
-		h := strings.TrimSpace(*req.WgEndpointHost)
-		if h != "" && !fwconfig.ValidEndpoint(h+":1") && !fwconfig.ValidEndpoint("["+h+"]:1") {
-			return errJSON(c, http.StatusBadRequest, "endpoint host must be a host name or IP address")
-		}
-		st.WgEndpointHost = h
-		leaves["wg-endpoint-host"] = h
-	}
-	if req.CaptureRateKbps != nil {
-		if *req.CaptureRateKbps < 0 || *req.CaptureRateKbps > 10_000_000 {
-			return errJSON(c, http.StatusBadRequest, "capture rate must be 0-10000000 kbit/s")
-		}
-		st.CaptureRateKbps = *req.CaptureRateKbps
-		leaves["capture-rate-kbps"] = st.CaptureRateKbps
-	}
-	if req.VirtualFirewalls != nil {
-		if !*req.VirtualFirewalls && st.VirtualFirewalls {
-			v, err := s.view(c.Request().Context())
-			if err != nil {
-				return err
-			}
-			vfs := slices.ContainsFunc(v.Instances, func(in models.Instance) bool { return !in.IsDefault })
-			if vfs || len(v.Links) > 0 {
-				return errJSON(c, http.StatusBadRequest, "virtual firewalls can't be turned off while there are any besides the firewalls' hosts, or links")
-			}
-		}
-		st.VirtualFirewalls = *req.VirtualFirewalls
-		leaves["virtual-firewalls"] = st.VirtualFirewalls
-	}
-	if req.TOTPDefault != nil {
-		st.TOTPDefault = *req.TOTPDefault
-		leaves["totp-default"] = st.TOTPDefault
-	}
-	if req.DropIPOptionsInput != nil {
-		st.DropIPOptionsInput = *req.DropIPOptionsInput
-		leaves["drop-ip-options-input"] = st.DropIPOptionsInput
-	}
-	if req.DropIPOptionsForward != nil {
-		st.DropIPOptionsForward = *req.DropIPOptionsForward
-		leaves["drop-ip-options-forward"] = st.DropIPOptionsForward
-	}
-	oldCert := st.WebCertificateID
-	if req.WebCertificateID != nil {
-		st.WebCertificateID = nil
-		if id := *req.WebCertificateID; id != 0 {
-			cert, err := s.certificateByID(c.Request().Context(), id)
-			if err != nil {
-				return err
-			}
-			if cert == nil {
-				return errJSON(c, http.StatusBadRequest, "no such certificate")
-			}
-			if err := refuseCA(cert, "the GUI's certificate"); err != nil {
-				return errJSON(c, http.StatusBadRequest, err.Error())
-			}
-			st.WebCertificateID = &id
-		}
-	}
+	putLeaf(leaves, "confirm-timeout", req.ConfirmTimeout)
+	putLeaf(leaves, "wg-endpoint-host", req.WgEndpointHost)
+	putLeaf(leaves, "capture-rate-kbps", req.CaptureRateKbps)
+	putLeaf(leaves, "virtual-firewalls", req.VirtualFirewalls)
+	putLeaf(leaves, "totp-default", req.TOTPDefault)
+	putLeaf(leaves, "drop-ip-options-input", req.DropIPOptionsInput)
+	putLeaf(leaves, "drop-ip-options-forward", req.DropIPOptionsForward)
 	if len(leaves) > 0 {
 		body, err := json.Marshal(leaves)
 		if err != nil {
 			return err
 		}
-		if err := s.editConfig(c.Request().Context(), func(work *datastore.Tree) error {
+		warnings, err := s.userEdit(c, func(work *datastore.Tree) error {
 			return work.EditJSON(datastore.Path{{Name: "settings"}}, datastore.EditMerge, body)
-		}); err != nil {
-			return configError(c, err)
+		})
+		if err != nil {
+			return editError(c, err)
+		}
+		warn(c, warnings)
+	}
+	if req.WebCertificate.set {
+		old, err := s.settings()
+		if err != nil {
+			return err
+		}
+		if err := s.db.Exec("UPDATE settings SET web_certificate_id = ? WHERE id = 1", certID).Error; err != nil {
+			return err
+		}
+		if s.webCert != nil && !equalPtr(old.WebCertificateID, certID) {
+			s.webCert.reset()
 		}
 	}
-	if err := s.db.Exec("UPDATE settings SET web_certificate_id = ? WHERE id = 1", st.WebCertificateID).Error; err != nil {
+	v, err := s.settingsView(c.Request().Context())
+	if err != nil {
 		return err
 	}
-	if s.webCert != nil && !equalPtr(oldCert, st.WebCertificateID) {
-		s.webCert.reset()
+	return c.JSON(http.StatusOK, v)
+}
+
+// optional is a JSON member that may be absent (set false), null (value
+// nil) or a value.
+type optional[T any] struct {
+	set   bool
+	value *T
+}
+
+func (o *optional[T]) UnmarshalJSON(data []byte) error {
+	o.set = true
+	if string(data) == "null" {
+		o.value = nil
+		return nil
 	}
-	return c.JSON(http.StatusOK, settingsView{*st, s.cfg.TLSCert != ""})
+	o.value = new(T)
+	return json.Unmarshal(data, o.value)
+}
+
+// putLeaf sets leaves[name] to *v when the request gave it.
+func putLeaf[T any](leaves map[string]any, name string, v *T) {
+	if v != nil {
+		leaves[name] = *v
+	}
 }
 
 func (s *Server) handleListUsers(c *echo.Context) error {
@@ -1060,161 +1090,6 @@ func (s *Server) handleAgentDNSQueryLog(c *echo.Context) error {
 	return c.JSON(http.StatusOK, l)
 }
 
-// redactDoc strips key material before a document is stored in the
-// deployment history.
-func redactDoc(doc fwconfig.Document) fwconfig.Document {
-	out := doc
-	if doc.HA != nil {
-		ha := *doc.HA
-		ha.Secret = "<redacted>"
-		if ha.WitnessSecret != "" {
-			ha.WitnessSecret = "<redacted>"
-		}
-		out.HA = &ha
-	}
-	if doc.Directory != nil {
-		dir := fwconfig.Directory{Servers: slices.Clone(doc.Directory.Servers)}
-		for k := range dir.Servers {
-			if dir.Servers[k].BindPassword != "" {
-				dir.Servers[k].BindPassword = "<redacted>"
-			}
-		}
-		out.Directory = &dir
-	}
-	out.Instances = make([]fwconfig.Instance, len(doc.Instances))
-	for i, in := range doc.Instances {
-		cp := in
-		cp.Interfaces = make([]fwconfig.Interface, len(in.Interfaces))
-		for j, ifc := range in.Interfaces {
-			if ifc.WireGuard != nil {
-				wg := *ifc.WireGuard
-				wg.PrivateKey = "<redacted>"
-				wg.Peers = make([]fwconfig.WGPeer, len(ifc.WireGuard.Peers))
-				for k, p := range ifc.WireGuard.Peers {
-					if p.PresharedKey != "" {
-						p.PresharedKey = "<redacted>"
-					}
-					wg.Peers[k] = p
-				}
-				ifc.WireGuard = &wg
-			}
-			if ifc.OpenVPN != nil {
-				o := *ifc.OpenVPN
-				o.TLSCrypt = "<redacted>"
-				o.Users = slices.Clone(o.Users)
-				for k := range o.Users {
-					if o.Users[k].Hash != "" {
-						o.Users[k].Hash = "<redacted>"
-					}
-					if o.Users[k].TOTP != "" {
-						o.Users[k].TOTP = "<redacted>"
-					}
-				}
-				ifc.OpenVPN = &o
-			}
-			if ifc.Tunnel != nil && ifc.Tunnel.TunnelBroker != nil {
-				t, tb := *ifc.Tunnel, *ifc.Tunnel.TunnelBroker
-				tb.UpdateKey = "<redacted>"
-				t.TunnelBroker = &tb
-				ifc.Tunnel = &t
-			}
-			cp.Interfaces[j] = ifc
-		}
-		cp.Certificates = slices.Clone(in.Certificates)
-		for j := range cp.Certificates {
-			if cp.Certificates[j].PrivKey != "" {
-				cp.Certificates[j].PrivKey = "<redacted>"
-			}
-			if d := cp.Certificates[j].DNS01; d != nil {
-				r := *d
-				r.TSIG, r.ProviderSettings = redactTSIG(d.TSIG), redactProviderSettings(d.Provider, d.ProviderSettings)
-				cp.Certificates[j].DNS01 = &r
-			}
-		}
-		if x := in.ACMEProxy; x != nil {
-			r := *x
-			r.Policies = slices.Clone(x.Policies)
-			for j := range r.Policies {
-				if d := r.Policies[j].DNS01; d != nil {
-					rd := *d
-					rd.TSIG, rd.ProviderSettings = redactTSIG(d.TSIG), redactProviderSettings(d.Provider, d.ProviderSettings)
-					r.Policies[j].DNS01 = &rd
-				}
-			}
-			cp.ACMEProxy = &r
-		}
-		cp.DNS.Blocklists = slices.Clone(in.DNS.Blocklists)
-		for j := range cp.DNS.Blocklists {
-			if cp.DNS.Blocklists[j].Key != "" {
-				cp.DNS.Blocklists[j].Key = "<redacted>"
-			}
-		}
-		cp.DynDNS = make([]fwconfig.DynDNS, len(in.DynDNS))
-		for j, d := range in.DynDNS {
-			d.TSIG, d.ProviderSettings = redactTSIG(d.TSIG), redactProviderSettings(d.Provider, d.ProviderSettings)
-			cp.DynDNS[j] = d
-		}
-		cp.BGP, cp.OSPF, cp.ISIS = redactBGP(in.BGP), redactOSPF(in.OSPF), redactISIS(in.ISIS)
-		cp.VRFs = slices.Clone(in.VRFs)
-		for j := range cp.VRFs {
-			v := &cp.VRFs[j]
-			v.BGP, v.OSPF, v.ISIS = redactBGP(v.BGP), redactOSPF(v.OSPF), redactISIS(v.ISIS)
-		}
-		if in.SNMP != nil {
-			s := *in.SNMP
-			if s.Community != "" {
-				s.Community = "<redacted>"
-			}
-			s.Users = slices.Clone(s.Users)
-			for k := range s.Users {
-				s.Users[k].AuthPassword = "<redacted>"
-				if s.Users[k].PrivPassword != "" {
-					s.Users[k].PrivPassword = "<redacted>"
-				}
-			}
-			cp.SNMP = &s
-		}
-		out.Instances[i] = cp
-	}
-	out.IPLists = make([]fwconfig.IPList, len(doc.IPLists))
-	for i, l := range doc.IPLists {
-		if l.Password != "" {
-			l.Password = "<redacted>"
-		}
-		if l.APIKey != "" {
-			l.APIKey = "<redacted>"
-		}
-		out.IPLists[i] = l
-	}
-	return out
-}
-
-func redactTSIG(t *fwconfig.TSIG) *fwconfig.TSIG {
-	if t == nil {
-		return nil
-	}
-	r := *t
-	r.Secret = "<redacted>"
-	return &r
-}
-
-// redactProviderSettings masks a DNS provider's secret settings, and any
-// it doesn't know.
-func redactProviderSettings(provider string, settings map[string]string) map[string]string {
-	p := fwconfig.FindDNSProvider(provider)
-	if p == nil || len(settings) == 0 {
-		return settings
-	}
-	out := make(map[string]string, len(settings))
-	for k, v := range settings {
-		if f := p.Field(k); f == nil || f.Secret {
-			v = "<redacted>"
-		}
-		out[k] = v
-	}
-	return out
-}
-
 // insideAny reports whether prefix cidr lies within one of the prefixes.
 func insideAny(cidr string, prefixes []string) bool {
 	p, err := netip.ParsePrefix(cidr)
@@ -1231,59 +1106,4 @@ func insideAny(cidr string, prefixes []string) bool {
 
 func equalPtr[T comparable](a, b *T) bool {
 	return a == b || a != nil && b != nil && *a == *b
-}
-
-// redactBGP is a copy of a BGP with the peers' passwords masked.
-func redactBGP(in *fwconfig.BGP) *fwconfig.BGP {
-	if in == nil {
-		return nil
-	}
-	b := *in
-	redact := func(peers []fwconfig.BGPPeer) []fwconfig.BGPPeer {
-		out := slices.Clone(peers)
-		for k := range out {
-			if out[k].Password != "" {
-				out[k].Password = "<redacted>"
-			}
-		}
-		return out
-	}
-	b.PeerGroups, b.Neighbors = redact(b.PeerGroups), redact(b.Neighbors)
-	return &b
-}
-
-// redactOSPF is a copy of an OSPF with the interfaces' MD5 keys masked.
-func redactOSPF(in *fwconfig.OSPF) *fwconfig.OSPF {
-	if in == nil {
-		return nil
-	}
-	o := *in
-	o.Interfaces = slices.Clone(o.Interfaces)
-	for k := range o.Interfaces {
-		if o.Interfaces[k].AuthKey != "" {
-			o.Interfaces[k].AuthKey = "<redacted>"
-		}
-	}
-	return &o
-}
-
-// redactISIS is a copy of an IS-IS with its passwords masked.
-func redactISIS(in *fwconfig.ISIS) *fwconfig.ISIS {
-	if in == nil {
-		return nil
-	}
-	s := *in
-	if s.AreaPassword != "" {
-		s.AreaPassword = "<redacted>"
-	}
-	if s.DomainPassword != "" {
-		s.DomainPassword = "<redacted>"
-	}
-	s.Interfaces = slices.Clone(s.Interfaces)
-	for k := range s.Interfaces {
-		if s.Interfaces[k].Password != "" {
-			s.Interfaces[k].Password = "<redacted>"
-		}
-	}
-	return &s
 }

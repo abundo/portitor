@@ -39,7 +39,7 @@ const auth = useAuthStore()
 const store = useInstanceStore()
 const objects = useRoutingObjects()
 const { ifaceList, ifaceText } = useInstanceRefs()
-const { vrf, vrfItems, vrfName, vrfId, vrfKey, inVrfKey } = useVrfChoice()
+const { vrf, vrfItems, vrfName, vrfKey, inVrfKey } = useVrfChoice()
 // BGP is in the configuration tree: bgp=<vrf or main> (its networks and
 // aggregates lists), bgp-peer-group=<name> and bgp-neighbor=<vrf>,<address>,
 // each naming its VRF (main for the main table).
@@ -190,7 +190,7 @@ const defaults = () => ({
   redist_isis_v6_map: '',
 })
 async function loadCfg() {
-  if (!store.currentId) return
+  if (!store.currentName) return
   try {
     const rows = await bgpConfig.list()
     const row = rows.find(ofVrf)
@@ -201,7 +201,7 @@ async function loadCfg() {
     toast.add({ title: errMsg(err, 'Failed to load BGP'), color: 'error' })
   }
 }
-watch([() => store.currentId, vrfId], loadCfg, { immediate: true })
+watch([() => store.currentName, vrf], loadCfg, { immediate: true })
 
 async function saveCfg() {
   savingCfg.value = true
@@ -247,9 +247,9 @@ const redistributions = [
 // ----- Peer groups and neighbours.
 const groups = ref([])
 async function loadGroups() {
-  if (store.currentId) groups.value = await bgpPeerGroups.list()
+  if (store.currentName) groups.value = await bgpPeerGroups.list()
 }
-watch(() => store.currentId, loadGroups, { immediate: true })
+watch(() => store.currentName, loadGroups, { immediate: true })
 const neighborPage = ref(null)
 function groupsChanged() {
   loadGroups()
@@ -387,10 +387,10 @@ const groupFields = [{ key: 'name', label: 'Name', required: true }, ...peerFiel
 
 const neighborRows = ref([])
 async function loadNeighborRows() {
-  if (store.currentId)
+  if (store.currentName)
     neighborRows.value = await bgpNeighbors.list()
 }
-watch(() => store.currentId, loadNeighborRows, { immediate: true })
+watch(() => store.currentName, loadNeighborRows, { immediate: true })
 // The neighbours of the chosen VRF's BGP.
 const vrfNeighbors = computed(() => neighborRows.value.filter(ofVrf))
 const neighborColumns = [
@@ -726,7 +726,7 @@ const neighborFields = computed(() => [
             title="Peer groups"
             description="Settings shared by the neighbours in a group."
             :api="bgpPeerGroups"
-            :params="{ _vf: store.currentId }"
+            :params="{ _vf: store.currentName }"
             :row-filter="ofVrf"
             :columns="groupColumns"
             :fields="groupFields"
@@ -744,7 +744,7 @@ const neighborFields = computed(() => [
             title="Neighbours"
             description="The BGP neighbours (peers) of this virtual firewall. The firewall opens TCP port 179 to and from them by itself."
             :api="bgpNeighbors"
-            :params="{ _vf: store.currentId }"
+            :params="{ _vf: store.currentName }"
             :row-filter="ofVrf"
             :columns="neighborColumns"
             :fields="neighborFields"

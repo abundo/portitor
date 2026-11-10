@@ -32,7 +32,7 @@ const instances = useInstanceStore()
           color="neutral"
           variant="ghost"
           label="Open in window"
-          @click="openConsoleWindow(instances.currentId)"
+          @click="openConsoleWindow(instances.currentName)"
         />
       </template>
     </ConsoleTerminal>

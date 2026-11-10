@@ -17,23 +17,21 @@ import (
 	"github.com/abundo/portitor/models"
 )
 
-// Node is a prefix or address of the tree. ID is its IpamPrefix or
-// IpamAddress id, or 0 when it is there only because an interface has the
-// address (Auto): a prefix of an interface address, or the address itself;
-// or because a DNS zone has an A/AAAA record for it (Auto, ZoneID set).
-// InterfaceID is the interface an address is configured on, or a prefix
-// of one of its addresses (the first such interface).
+// Node is a prefix or address of the tree, by its CIDR: an IpamPrefix or
+// IpamAddress, or one there only because an interface has the address
+// (Auto): a prefix of an interface address, or the address itself; or
+// because a DNS zone has an A/AAAA record for it (Auto, Zone set).
+// Interface is the interface an address is configured on, or a prefix of
+// one of its addresses (the first such interface), by name.
 type Node struct {
 	Kind        string  `json:"kind"` // prefix | address
-	ID          uint    `json:"id"`
 	Auto        bool    `json:"auto,omitempty"`
 	CIDR        string  `json:"cidr"` // prefix, or address without length
 	Description string  `json:"description,omitempty"`
 	DnsName     string  `json:"dns_name,omitempty"`
 	Mac         string  `json:"mac,omitempty"`
-	InterfaceID *uint   `json:"interface_id,omitempty"`
-	ZoneID      *uint   `json:"zone_id,omitempty"` // zone of the first A/AAAA record for the address
-	Zone        string  `json:"zone,omitempty"`    // that zone's name
+	Interface   string  `json:"interface,omitempty"`
+	Zone        string  `json:"zone,omitempty"` // the zone of the first A/AAAA record for the address
 	DhcpEnabled bool    `json:"dhcp_enabled,omitempty"`
 	RaEnabled   bool    `json:"ra_enabled,omitempty"`
 	RaSlaac     bool    `json:"ra_slaac,omitempty"`
@@ -47,7 +45,6 @@ type Node struct {
 
 // RecordAddress is the address of an A or AAAA record of a DNS zone.
 type RecordAddress struct {
-	ZoneID      uint
 	Zone        string // the zone's name
 	Name        string // fully qualified, without the trailing dot
 	Address     string
@@ -67,7 +64,7 @@ func Tree(prefixes []models.IpamPrefix, addrs []models.IpamAddress, ifaces []mod
 		if err != nil {
 			continue
 		}
-		n := &Node{Kind: "prefix", ID: p.ID, CIDR: pfx.Masked().String(), Description: p.Description,
+		n := &Node{Kind: "prefix", CIDR: pfx.Masked().String(), Description: p.Description,
 			DhcpEnabled: p.DhcpEnabled, RaEnabled: p.RaEnabled, RaSlaac: p.RaSlaac, Children: []*Node{}, pfx: pfx.Masked()}
 		if p.DhcpEnabled && p.DhcpRangeStart != "" {
 			n.DhcpRange = p.DhcpRangeStart + " - " + p.DhcpRangeEnd
@@ -76,21 +73,20 @@ func Tree(prefixes []models.IpamPrefix, addrs []models.IpamAddress, ifaces []mod
 		nodes = append(nodes, n)
 		stored[n.pfx] = n
 	}
-	onIface := map[netip.Addr]uint{}
+	onIface := map[netip.Addr]string{}
 	for _, ia := range InterfaceAddresses(ifaces) {
-		onIface[ia.Prefix.Addr()] = ia.InterfaceID
+		onIface[ia.Prefix.Addr()] = ia.Interface
 		pfx := ia.Prefix.Masked()
-		id := ia.InterfaceID
 		if n := stored[pfx]; n != nil {
-			if n.InterfaceID == nil {
-				n.InterfaceID = &id
+			if n.Interface == "" {
+				n.Interface = ia.Interface
 			}
 			continue
 		}
 		if pfx.IsSingleIP() {
 			continue
 		}
-		n := &Node{Kind: "prefix", Auto: true, CIDR: pfx.String(), InterfaceID: &id, Children: []*Node{}, pfx: pfx}
+		n := &Node{Kind: "prefix", Auto: true, CIDR: pfx.String(), Interface: ia.Interface, Children: []*Node{}, pfx: pfx}
 		nodes = append(nodes, n)
 		stored[pfx] = n
 	}
@@ -119,16 +115,16 @@ func Tree(prefixes []models.IpamPrefix, addrs []models.IpamAddress, ifaces []mod
 		if err != nil {
 			continue
 		}
-		n := &Node{Kind: "address", ID: a.ID, CIDR: addr.String(), Description: a.Description, DnsName: a.DnsName,
+		n := &Node{Kind: "address", CIDR: addr.String(), Description: a.Description, DnsName: a.DnsName,
 			Mac: a.Mac, Children: []*Node{}, pfx: netip.PrefixFrom(addr, addr.BitLen())}
-		if id, ok := onIface[addr]; ok {
-			n.InterfaceID = &id
+		if name, ok := onIface[addr]; ok {
+			n.Interface = name
 			delete(onIface, addr)
 		}
 		addrNodes = append(addrNodes, n)
 	}
-	for addr, id := range onIface {
-		addrNodes = append(addrNodes, &Node{Kind: "address", Auto: true, CIDR: addr.String(), InterfaceID: &id,
+	for addr, name := range onIface {
+		addrNodes = append(addrNodes, &Node{Kind: "address", Auto: true, CIDR: addr.String(), Interface: name,
 			Children: []*Node{}, pfx: netip.PrefixFrom(addr, addr.BitLen())})
 	}
 	byAddr := map[netip.Addr]*Node{}
@@ -159,9 +155,8 @@ func Tree(prefixes []models.IpamPrefix, addrs []models.IpamAddress, ifaces []mod
 			parent.Children = append(parent.Children, n)
 			byAddr[addr] = n
 		}
-		if n.ZoneID == nil {
-			id := r.ZoneID
-			n.ZoneID, n.Zone = &id, r.Zone
+		if n.Zone == "" {
+			n.Zone = r.Zone
 		}
 		if !slices.Contains(strings.Split(n.DnsName, ", "), r.Name) {
 			n.DnsName = strings.TrimPrefix(n.DnsName+", "+r.Name, ", ")
@@ -245,7 +240,7 @@ func rangeSize(start, end string) float64 {
 
 // IfaceAddress is an address configured on an interface.
 type IfaceAddress struct {
-	InterfaceID uint
+	Interface string // its name
 	Prefix      netip.Prefix // the address with its prefix length
 }
 
@@ -255,7 +250,7 @@ func InterfaceAddresses(ifaces []models.Interface) []IfaceAddress {
 	for _, i := range ifaces {
 		for _, a := range i.Addresses {
 			if p, err := netip.ParsePrefix(a); err == nil {
-				out = append(out, IfaceAddress{i.ID, p})
+				out = append(out, IfaceAddress{i.Name, p})
 			}
 		}
 	}

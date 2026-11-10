@@ -251,6 +251,7 @@ func (s *Server) cliEnv(ctx context.Context, u *models.User) (*cli.Env, error) {
 		API: func(ctx context.Context, method, path string, body []byte) (int, []byte) {
 			return s.requestAs(ctx, u, method, path, body)
 		},
+		Action: s.actionAs(u),
 	}
 	env.Host, _ = os.Hostname()
 	if i := strings.IndexByte(env.Host, '.'); i > 0 {

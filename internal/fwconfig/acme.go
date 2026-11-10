@@ -44,7 +44,7 @@ type Certificate struct {
 	// FullChain and PrivKey are an imported certificate: the leaf first,
 	// then any intermediates, and its private key, PEM.
 	FullChain string `json:"fullchain,omitempty"`
-	PrivKey   string `json:"privkey,omitempty"`
+	PrivKey   string `json:"privkey,omitempty" secret:"true"`
 	// Domains are the DNS names in the certificate (its subject
 	// alternative names). HTTP-01 cannot validate wildcards.
 	Domains []string `json:"domains"`
@@ -73,7 +73,7 @@ type DNS01 struct {
 	Client string `json:"client"`
 	// Provider, ProviderSettings, Server, Zone and TSIG are as in DynDNS.
 	Provider         string            `json:"provider,omitempty"`
-	ProviderSettings map[string]string `json:"provider_settings,omitempty"`
+	ProviderSettings map[string]string `json:"provider_settings,omitempty" secret:"provider"`
 	Server           string            `json:"server,omitempty"`
 	Zone             string            `json:"zone"`
 	TSIG             *TSIG             `json:"tsig,omitempty"`

@@ -34,7 +34,7 @@ const tab = computed({
 
 const actions = ['permit', 'deny'].map((a) => ({ label: a, value: a }))
 const entriesCount = (r) => (r.entries?.length ? String(r.entries.length) : 'none')
-const params = computed(() => ({ _vf: store.currentId }))
+const params = computed(() => ({ _vf: store.currentName }))
 
 // Prefix lists.
 const prefixColumns = [

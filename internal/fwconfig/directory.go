@@ -31,7 +31,7 @@ type LDAPServer struct {
 	// CACert (PEM) verifies the server's certificate; empty: the system's.
 	CACert       string `json:"ca_cert,omitempty"`
 	BindDN       string `json:"bind_dn,omitempty"`
-	BindPassword string `json:"bind_password,omitempty"`
+	BindPassword string `json:"bind_password,omitempty" secret:"true"`
 	BaseDN       string `json:"base_dn"`
 	// UserFilter finds the user, %s the escaped name.
 	UserFilter string `json:"user_filter"`

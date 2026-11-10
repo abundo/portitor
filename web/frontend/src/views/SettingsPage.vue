@@ -4,7 +4,8 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
-import { api, certificates } from '@/api'
+import { api } from '@/api'
+import { certificatesOf } from '@/api/config'
 import { errMsg } from '@/api/http'
 import { useDeployStore } from '@/stores/deploy'
 import { useInstanceStore } from '@/stores/instances'
@@ -16,10 +17,12 @@ const toast = useToast()
 const deploy = useDeployStore()
 const instStore = useInstanceStore()
 const auth = useAuthStore()
+// NONE is the certificate select's "none" (a select item can't be '').
+const NONE = 'none'
 const settings = reactive({
   confirm_timeout: 120,
   capture_rate_kbps: 1000,
-  web_certificate_id: 0,
+  web_cert: NONE,
   virtual_firewalls: false,
   totp_default: false,
   drop_ip_options_input: false,
@@ -29,36 +32,50 @@ const settingsForm = usePageForm(settings)
 const webTLS = ref(false)
 const version = ref(null)
 
-// Every instance's certificates, for the one portitor-web serves.
+// Every virtual firewall's certificates, for the one portitor-web serves;
+// a select item is "<virtual firewall>/<name>", NONE for none.
 const certs = ref([])
 const certItems = computed(() => [
-  { label: 'None (tls_cert from web.yaml)', value: 0 },
+  { label: 'None (tls_cert from web.yaml)', value: NONE },
   ...certs.value
     .filter((c) => !c.is_ca)
     .map((c) => ({
-      label: `${instStore.nameOf(c.instance_id)}/${c.name} (${c.domains.join(', ')})`,
-      value: c.id,
+      label: `${c.vf}/${c.name} (${(c.domains ?? []).join(', ')})`,
+      value: `${c.vf}/${c.name}`,
     })),
 ])
+const certValue = (ref) => (ref ? `${ref.instance}/${ref.name}` : NONE)
+function certRef(v) {
+  if (v === NONE) return null
+  const i = v.indexOf('/')
+  return { instance: v.slice(0, i), name: v.slice(i + 1) }
+}
 
 async function load() {
-  const s = await api.settings()
-  Object.assign(settings, s, { web_certificate_id: s.web_certificate_id ?? 0 })
-  webTLS.value = s.web_tls
+  const { web_certificate, web_tls, ...s } = await api.settings()
+  Object.assign(settings, s, { web_cert: certValue(web_certificate) })
+  webTLS.value = web_tls
   settingsForm.mark()
   version.value = await api.version()
-  certs.value = await certificates.list()
+  const lists = await Promise.all(
+    instStore.list.map(async (vf) =>
+      (await certificatesOf(() => vf.name).list()).map((c) => ({ ...c, vf: vf.name })),
+    ),
+  )
+  certs.value = lists.flat()
 }
 onMounted(load)
 
 async function saveSettings() {
   try {
+    const { web_cert, ...rest } = settings
     const s = await api.saveSettings({
-      ...settings,
+      ...rest,
       confirm_timeout: Number(settings.confirm_timeout),
       capture_rate_kbps: Number(settings.capture_rate_kbps),
+      web_certificate: certRef(web_cert),
     })
-    settings.web_certificate_id = s.web_certificate_id ?? 0
+    settings.web_cert = certValue(s.web_certificate)
     settings.virtual_firewalls = s.virtual_firewalls
     if (auth.user) auth.user.virtual_firewalls = s.virtual_firewalls
     settingsForm.mark()
@@ -86,7 +103,7 @@ async function saveSettings() {
       <div class="space-y-3">
         <UFormField label="Certificate">
           <USelect
-            v-model="settings.web_certificate_id"
+            v-model="settings.web_cert"
             :items="certItems"
             class="w-full max-w-xl"
             :disabled="!webTLS"

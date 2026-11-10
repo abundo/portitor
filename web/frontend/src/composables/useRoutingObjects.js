@@ -16,16 +16,15 @@ export function useRoutingObjects() {
   const maps = ref([])
 
   async function reload() {
-    if (!store.currentId) return
-    const params = { instance_id: store.currentId }
+    if (!store.currentName) return
     ;[prefix.value, asPath.value, community.value, maps.value] = await Promise.all([
-      prefixLists.list(params),
-      asPathLists.list(params),
-      communityLists.list(params),
-      routeMaps.list(params),
+      prefixLists.list(),
+      asPathLists.list(),
+      communityLists.list(),
+      routeMaps.list(),
     ])
   }
-  watch(() => store.currentId, reload, { immediate: true })
+  watch(() => store.currentName, reload, { immediate: true })
 
   const item = (o, extra = '') => ({
     label: o.name,

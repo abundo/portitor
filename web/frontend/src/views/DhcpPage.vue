@@ -13,8 +13,8 @@ import FormHeader from '@/components/FormHeader.vue'
 import NeedInstance from '@/components/NeedInstance.vue'
 import SearchInput from '@/components/SearchInput.vue'
 import ServiceRateLimit from '@/components/ServiceRateLimit.vue'
-import { api, instances, interfaces, ipamPrefixes } from '@/api'
-import { config, toEntry, vfPath } from '@/api/config'
+import { api } from '@/api'
+import { config, fromEntry, ipamPrefixes, toEntry, vfApi, vfPath } from '@/api/config'
 import { errMsg } from '@/api/http'
 import { withLabel } from '@/composables/useInstanceRefs'
 import { useFormGuard, usePageForm } from '@/composables/useFormGuard'
@@ -82,7 +82,7 @@ const prefixFields = [
 ]
 function prefixRow(cidr, stored, fwAddr = '') {
   return {
-    id: stored?.id ?? 0,
+    id: cidr,
     prefix: cidr,
     description: stored?.description ?? '',
     fw_addr: fwAddr, // the firewall's address in the prefix
@@ -139,36 +139,37 @@ const server = reactive({
   dhcp_domain_name: '',
   dhcp_lease_time: 86400,
   dhcp_rate_limit: false,
-  ifaces: [], // { id, name, label, description, ipv4_mode, ipv6_accept_ra, prefixes: [prefixRow], delegated: [prefix], delegated_* }
+  ifaces: [], // { id (its name), name, label, description, ipv4_mode, ipv6_accept_ra, prefixes: [prefixRow], delegated: [prefix], delegated_* }
   orphans: [],
 })
 const serverForm = usePageForm(server)
 const saving = ref(false)
+// The virtual firewall's interfaces, without their nested lists.
+const interfaces = vfApi('interface', ['name'], { shallow: true })
 let loaded = new Map() // prefix -> its settings as loaded, to save only what changed
-let loadedIfaces = new Map() // interface id -> its delegated_* settings as loaded
+let loadedIfaces = new Map() // interface name -> its delegated_* settings as loaded
 
 async function load() {
-  const id = store.currentId
-  if (!id) return
-  const params = { instance_id: id }
+  const name = store.currentName
+  if (!name) return
   const [inst, ifs, stored, tree] = await Promise.all([
-    instances.get(id),
-    interfaces.list(params),
-    ipamPrefixes.list(params),
-    api.ipamTree(id),
+    config.get(vfPath(), 'candidate', { shallow: '' }).then(fromEntry),
+    interfaces.list(),
+    ipamPrefixes.list(),
+    api.ipamTree(name),
   ])
   const byPrefix = new Map(stored.map((p) => [p.prefix, p]))
-  // The tree's prefix nodes of an interface address carry its id; the
+  // The tree's prefix nodes of an interface address name it; the
   // firewall's address is the interface's address node inside.
   const onIface = new Map()
   const walk = (nodes) => {
     for (const n of nodes) {
       if (n.kind !== 'prefix') continue
-      if (n.interface_id) {
-        const addr = n.children.find((c) => c.kind === 'address' && c.interface_id)
-        const list = onIface.get(n.interface_id) ?? []
+      if (n.interface) {
+        const addr = n.children.find((c) => c.kind === 'address' && c.interface)
+        const list = onIface.get(n.interface) ?? []
         list.push(prefixRow(n.cidr, byPrefix.get(n.cidr), addr?.cidr))
-        onIface.set(n.interface_id, list)
+        onIface.set(n.interface, list)
       }
       walk(n.children)
     }
@@ -181,13 +182,13 @@ async function load() {
     dhcp_lease_time: inst.dhcp_lease_time,
     dhcp_rate_limit: inst.dhcp_rate_limit ?? false,
     ifaces: ifs.map((i) => ({
-      id: i.id,
+      id: i.name,
       name: i.name,
       label: i.label,
       description: i.description,
       ipv4_mode: i.ipv4_mode,
       ipv6_accept_ra: i.ipv6_accept_ra,
-      prefixes: onIface.get(i.id) ?? [],
+      prefixes: onIface.get(i.name) ?? [],
       delegated: delegatedPrefixes(i.addresses),
       delegated_dhcp: i.delegated_dhcp ?? false,
       delegated_range_start: i.delegated_range_start ?? '',
@@ -202,7 +203,7 @@ async function load() {
   loadedIfaces = new Map(server.ifaces.map((i) => [i.id, delegatedSettings(i)]))
   serverForm.mark()
 }
-watch(() => store.currentId, load, { immediate: true })
+watch(() => store.currentName, load, { immediate: true })
 
 const allPrefixes = () => [...server.ifaces.flatMap((i) => i.prefixes), ...server.orphans]
 const settings = (p) => JSON.stringify(prefixFields.map((k) => p[k]))

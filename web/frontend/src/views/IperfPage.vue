@@ -60,7 +60,7 @@ const directionItems = [
   { label: 'Both', value: 'both' },
 ]
 watch(
-  () => store.currentId,
+  () => store.currentName,
   () => (form.interface = NONE),
 )
 

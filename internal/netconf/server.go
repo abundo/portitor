@@ -5,7 +5,8 @@
 // 6242's netconf subsystem) on the configuration tree of internal/datastore:
 // the candidate (shared with the CLI) and running, edit-config with every
 // operation, subtree filters, validate, commit with confirmed-commit,
-// locks, and get-schema for the YANG modules. Running is written only by
+// locks, get-schema for the YANG modules, and the modules' actions
+// (RFC 7950 <action>). Running is written only by
 // a commit, as on SR Linux.
 package netconf
 
@@ -155,6 +156,9 @@ const ok = "<ok/>"
 func (s *session) operation(ctx context.Context, op *elem) (string, error) {
 	if op.Space == nsMonitoring && op.Local == "get-schema" {
 		return s.getSchema(op)
+	}
+	if op.Space == nsYang && op.Local == "action" {
+		return s.action(ctx, op)
 	}
 	if op.Space != nsBase {
 		return "", protocolErr("operation-not-supported", "the operation %s (%s)", op.Local, op.Space)

@@ -132,7 +132,7 @@ const fields = [
       noun="VRF"
       description="VRFs of this virtual firewall: each routes the interfaces in it (Network → Interfaces) by its own table, apart from the main table and the other VRFs. Static routes go in one by their VRF or their interface's. With an L3VNI a VRF is an L3VPN over EVPN/VXLAN with the same VRFs at other VTEPs."
       :api="vrfs"
-      :params="{ _vf: store.currentId }"
+      :params="{ _vf: store.currentName }"
       :columns="columns"
       :fields="fields"
       :search-text="(r) => membersOf(r.name)"

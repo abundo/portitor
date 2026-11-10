@@ -50,7 +50,7 @@ const templates = ref([])
 async function loadTemplates() {
   templates.value = await vfWithGlobals('dns-template').list()
 }
-watch(() => store.currentId, loadTemplates, { immediate: true })
+watch(() => store.currentName, loadTemplates, { immediate: true })
 
 // The DNS server: the instance's dns_* fields, and per interface whether
 // BIND answers on it and whether its DHCP lease gives the upstream servers.
@@ -77,7 +77,7 @@ const saving = ref(false)
 let loaded = null // the rows as loaded, to save only what changed
 
 async function load() {
-  const id = store.currentId
+  const id = store.currentName
   if (!id) return
   const inst = fromEntry(await config.get(vfPath()))
   const ifs = inst.interface ?? []
@@ -104,7 +104,7 @@ async function load() {
   })
   serverForm.mark()
 }
-watch(() => store.currentId, load, { immediate: true })
+watch(() => store.currentName, load, { immediate: true })
 
 const fallback = computed({
   get: () => server.dns_forward_mode !== 'only',
@@ -322,7 +322,7 @@ const tab = computed({
             noun="DNS zone"
             description="Zones served by this virtual firewall's DNS server (BIND, via dnsmgr2). Names of IPAM addresses go into the matching forward zone; PTRs in reverse zones are generated. Open a zone to edit its records. A forward-only zone has no records: its queries go to its forwarders. A forward dynamic zone is kept on another nameserver by DNS updates (RFC 2136 or a DNS hosting provider's API), its A and AAAA records following an interface's addresses."
             :api="zonesApi"
-            :params="{ _vf: store.currentId }"
+            :params="{ _vf: store.currentName }"
             :columns="zoneColumns"
             :fields="zoneFields"
             :defaults="zoneDefaults"

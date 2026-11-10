@@ -197,6 +197,28 @@ func TestNETCONFOverSSH(t *testing.T) {
 	if dep.Username != "admin" || dep.Status != "applied" {
 		t.Errorf("deployment %+v", dep)
 	}
+
+	// Actions (RFC 7950 <action>): one with input and no output, one with
+	// output, and one refused.
+	action := func(id, inner string) string {
+		return send(`<rpc xmlns="urn:ietf:params:xml:ns:netconf:base:1.0" message-id="` + id + `"><action xmlns="urn:ietf:params:xml:ns:yang:1">` +
+			`<instance xmlns="urn:portitor:config"><name>` + host.Name + `</name>` + inner + `</instance></action></rpc>`)
+	}
+	if r := action("3", `<certificate><name>n1</name><generate><domains>n1.example.com</domains><days>30</days></generate></certificate>`); !strings.Contains(r, "<ok/>") {
+		t.Errorf("generate: %s", r)
+	}
+	send(`<rpc xmlns="urn:ietf:params:xml:ns:netconf:base:1.0" message-id="4"><edit-config><target><candidate/></target><config>` +
+		`<instance xmlns="urn:portitor:config"><name>` + host.Name + `</name><interface><name>wg7</name><kind>wireguard</kind></interface></instance>` +
+		`</config></edit-config></rpc>`)
+	if r := action("5", `<interface><name>wg7</name><wg-rekey/></interface>`); !strings.Contains(r, `<wg-public-key xmlns="urn:portitor:config">`) {
+		t.Errorf("wg-rekey: %s", r)
+	}
+	if r := action("6", `<interface><name>lo7</name><wg-rekey/></interface>`); !strings.Contains(r, "<rpc-error>") || !strings.Contains(r, "not a WireGuard interface") {
+		t.Errorf("wg-rekey of a loopback: %s", r)
+	}
+	if r := action("7", `<certificate><name>n2</name><generate><days>0</days></generate></certificate>`); !strings.Contains(r, "invalid-value") {
+		t.Errorf("generate with days 0: %s", r)
+	}
 }
 
 func TestCLIState(t *testing.T) {

@@ -16,8 +16,8 @@ const loaded = ref(false)
 
 onMounted(async () => {
   await store.load()
-  const id = Number(route.query.instance)
-  if (store.list.some((i) => i.id === id)) store.currentId = id
+  const name = String(route.query.instance ?? '')
+  if (store.list.some((i) => i.name === name)) store.currentName = name
   loaded.value = true
   document.title = `Packet capture · ${store.current?.name ?? ''} · Portitor`
 })

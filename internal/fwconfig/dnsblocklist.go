@@ -49,7 +49,7 @@ type DNSBlocklist struct {
 	Name string   `json:"name"`
 	URLs []string `json:"urls"`
 	// Key replaces BlocklistKeyPlaceholder in the URLs.
-	Key     string `json:"key,omitempty"`
+	Key     string `json:"key,omitempty" secret:"true"`
 	Action  string `json:"action"`
 	Refresh int    `json:"refresh,omitempty"` // minutes; 0: DefaultBlocklistRefresh
 }

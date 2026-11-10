@@ -32,7 +32,7 @@ const missingNeeded = computed(() => missing.value.some((p) => p.needed))
 
 // The firewall the selected virtual firewall is on. Its host's memory and
 // CPU are a global reader's only (the server leaves them out otherwise).
-const firewallId = computed(() => instances.current?.firewall_id ?? null)
+const firewallId = computed(() => instances.firewallId)
 const fw = computed(() => {
   const list = st.value?.firewalls ?? []
   return list.find((f) => f.id === firewallId.value) ?? list[0] ?? null
@@ -336,7 +336,7 @@ const memPath = computed(() => usagePath('mem'))
               variant="outline"
               label="Show logs"
               title="The services' logs in a window of their own, while you use the rest of the GUI"
-              @click="openServiceLogWindow(instances.currentId)"
+              @click="openServiceLogWindow(instances.currentName)"
             />
           </div>
           <div v-if="!units.length" class="text-sm text-muted">

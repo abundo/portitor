@@ -47,7 +47,7 @@ type OpenVPN struct {
 	Certificate string `json:"certificate"`
 	// TLSCrypt is the static key (OpenVPN's format) that authenticates
 	// and encrypts the TLS handshake; clients have it too.
-	TLSCrypt string `json:"tls_crypt"`
+	TLSCrypt string `json:"tls_crypt" secret:"true"`
 	// Users are the firewall's users. A user it doesn't have may log in
 	// through the Directory, and is then copied to the users.
 	Users []OpenVPNUser `json:"users,omitempty"`
@@ -87,10 +87,10 @@ type OpenVPN struct {
 // the secret of a user with two-factor login on, with TwoFactor only.
 type OpenVPNUser struct {
 	Name   string `json:"name"`
-	Hash   string `json:"hash,omitempty"`
+	Hash   string `json:"hash,omitempty" secret:"true"`
 	LDAP   bool   `json:"ldap,omitempty"`
 	Denied bool   `json:"denied,omitempty"`
-	TOTP   string `json:"totp,omitempty"`
+	TOTP   string `json:"totp,omitempty" secret:"true"`
 }
 
 // OpenVPN modes and protocols.

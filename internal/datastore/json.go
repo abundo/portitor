@@ -29,6 +29,9 @@ type JSONOptions struct {
 	Shallow bool
 	// Indent pretty-prints.
 	Indent bool
+	// Bare writes the top-level names without the module (an action's
+	// input and output in the API).
+	Bare bool
 }
 
 // SetAnnotation is the annotation SecretsSet writes.
@@ -47,7 +50,7 @@ func (t *Tree) JSON(o JSONOptions) ([]byte, error) {
 
 // NodeJSON writes n as a JSON object of RFC 7951.
 func NodeJSON(n *Node, o JSONOptions) ([]byte, error) {
-	v := nodeValue(n, o, n.Parent == nil)
+	v := nodeValue(n, o, n.Parent == nil && !o.Bare)
 	if o.Indent {
 		return json.MarshalIndent(v, "", "  ")
 	}

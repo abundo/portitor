@@ -218,8 +218,8 @@ function drag(key, event) {
           color="neutral"
           variant="ghost"
           title="Capture in a window of its own, while you use the rest of the GUI"
-          :disabled="!store.currentId"
-          @click="openCaptureWindow(store.currentId)"
+          :disabled="!store.currentName"
+          @click="openCaptureWindow(store.currentName)"
           >Open in window</UButton
         >
       </div>

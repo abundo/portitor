@@ -45,12 +45,18 @@ func (s *Server) ConsoleRequest(ctx context.Context, method, path string, body [
 // requestAs answers an API request in-process as the user u: the CLI's
 // requests, with every check the API makes for u.
 func (s *Server) requestAs(ctx context.Context, u *models.User, method, path string, body []byte) (int, []byte) {
+	rec := s.recordAs(ctx, u, method, path, body)
+	out, _ := io.ReadAll(rec.Result().Body)
+	return rec.Code, out
+}
+
+// recordAs is requestAs's whole answer, its headers too.
+func (s *Server) recordAs(ctx context.Context, u *models.User, method, path string, body []byte) *httptest.ResponseRecorder {
 	req := httptest.NewRequestWithContext(context.WithValue(ctx, consoleUserKey{}, u), method, path, bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	s.Echo().ServeHTTP(rec, req)
-	out, _ := io.ReadAll(rec.Result().Body)
-	return rec.Code, out
+	return rec
 }
 
 // ConsoleSetPath is the configuration path (for /api/config/candidate) of

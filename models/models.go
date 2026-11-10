@@ -376,7 +376,7 @@ type Settings struct {
 	// WebCertificateID is the certificate (Certificates page) portitor-web
 	// serves HTTPS with, when it serves HTTPS itself (tls_cert); nil
 	// serves tls_cert.
-	WebCertificateID *uint `json:"web_certificate_id"`
+	WebCertificateID *uint `json:"-"`
 	// VirtualFirewalls shows the Virtual firewalls and Links pages and
 	// allows more than one instance; it can't be turned off while there are.
 	VirtualFirewalls bool `json:"virtual_firewalls"`
@@ -447,13 +447,8 @@ type Instance struct {
 	SnmpLocation string     `json:"snmp_location"`
 	SnmpContact  string     `json:"snmp_contact"`
 	SnmpAllow    StringList `json:"snmp_allow"`
-	// The community is write-only: NewSnmpCommunity sets it (empty keeps
-	// it), ClearSnmpCommunity removes it, HasSnmpCommunity tells whether
-	// there is one.
-	SnmpCommunity      string `json:"-"`
-	NewSnmpCommunity   string `gorm:"-" json:"new_snmp_community,omitempty"`
-	ClearSnmpCommunity bool   `gorm:"-" json:"clear_snmp_community,omitempty"`
-	HasSnmpCommunity   bool   `gorm:"-" json:"has_snmp_community"`
+	// SnmpCommunity is a secret (px:secret).
+	SnmpCommunity string `json:"-"`
 	// AcmeProxyEnabled runs an ACME server for the hosts behind the
 	// firewall on AcmeProxyPort of the interfaces with AcmeProxyServe,
 	// presenting AcmeProxyCertificateID (self-signed when nil); it gets
@@ -586,12 +581,10 @@ type Interface struct {
 	TunnelDefaultRoute bool `json:"tunnel_default_route"`
 	// The Hurricane Electric tunnel broker account that keeps the tunnel's
 	// endpoint up to date; an empty HeTunnelID is none. HeUpdateKey is a
-	// secret, set through NewHeUpdateKey (empty keeps it).
-	HeTunnelID     string `gorm:"column:he_tunnel_id" json:"he_tunnel_id"`
-	HeUsername     string `json:"he_username"`
-	HeUpdateKey    string `json:"-"`
-	NewHeUpdateKey string `gorm:"-" json:"new_he_update_key"`
-	HasHeUpdateKey bool   `gorm:"-" json:"has_he_update_key"`
+	// secret (px:secret).
+	HeTunnelID  string `gorm:"column:he_tunnel_id" json:"he_tunnel_id"`
+	HeUsername  string `json:"he_username"`
+	HeUpdateKey string `json:"-"`
 
 	// A VXLAN's VNI, local VTEP address, underlay interface (empty: as
 	// routed), UDP port (0: 4789) and remote VTEPs (fwconfig.VXLAN).
@@ -708,8 +701,6 @@ type WgPeer struct {
 	// ClientPrivateKey is kept only when the key pair was generated
 	// here, so a complete client config can be exported.
 	ClientPrivateKey string `json:"-"`
-	HasPresharedKey  bool   `gorm:"-" json:"has_preshared_key"`
-	HasClientKey     bool   `gorm:"-" json:"has_client_key"`
 }
 
 // Link is a point-to-point connection between two instances (veth pair).
@@ -990,14 +981,10 @@ type DnsBlocklist struct {
 	Description string     `json:"description"`
 	Enabled     bool       `json:"enabled"`
 	Urls        StringList `json:"urls"`
-	// AuthKey fills {key} in the URLs. It is set through NewAuthKey
-	// (empty keeps it, ClearAuthKey removes it) and never sent back.
-	AuthKey      string `json:"-"`
-	NewAuthKey   string `gorm:"-" json:"auth_key,omitempty"`
-	ClearAuthKey bool   `gorm:"-" json:"clear_auth_key,omitempty"`
-	HasAuthKey   bool   `gorm:"-" json:"has_auth_key"`
-	Action       string `json:"action"`  // fwconfig.Blocklist*
-	Refresh      int    `json:"refresh"` // minutes between downloads
+	// AuthKey fills {key} in the URLs; a secret (px:secret).
+	AuthKey string `json:"-"`
+	Action  string `json:"action"`  // fwconfig.Blocklist*
+	Refresh int    `json:"refresh"` // minutes between downloads
 }
 
 // DnsSoaTemplate belongs to an instance; Global (the default instance's
@@ -1082,25 +1069,17 @@ type DyndnsClient struct {
 	InterfaceID uint   `json:"interface_id"`
 	// Provider is a fwconfig.DNSProviders name.
 	Provider string `json:"provider"`
-	// ProviderSettings are the provider's fields, secrets included; never
-	// sent back. They are written through Settings.
+	// ProviderSettings are the provider's fields, secrets included (the
+	// provider-setting list's values are secrets).
 	ProviderSettings StringMap `json:"-"`
-	// Settings are, written, the fields to store (an empty secret keeps
-	// the stored one) and, read, the fields that are not secret.
-	Settings map[string]string `gorm:"-" json:"provider_settings"`
-	// SecretsSet lists the secret fields that have a stored value.
-	SecretsSet    []string `gorm:"-" json:"provider_secrets_set"`
-	Server        string   `json:"server"`
-	Zone          string   `json:"zone"`
-	TsigName      string   `json:"tsig_name"`
-	TsigAlgorithm string   `json:"tsig_algorithm"`
-	// TsigSecret is set through NewTsigSecret and never sent back.
+	Server           string    `json:"server"`
+	Zone             string    `json:"zone"`
+	TsigName         string    `json:"tsig_name"`
+	TsigAlgorithm    string    `json:"tsig_algorithm"`
+	// TsigSecret is a secret (px:secret).
 	TsigSecret     string `json:"-"`
 	RetryInterval  int    `json:"retry_interval"`
 	VerifyInterval int    `json:"verify_interval"`
-	// NewTsigSecret replaces the stored secret when not empty.
-	NewTsigSecret string `gorm:"-" json:"tsig_secret,omitempty"`
-	HasTsigSecret bool   `gorm:"-" json:"has_tsig_secret"`
 }
 
 // Certificate is a TLS certificate the agent gets from an ACME CA (Let's
@@ -1127,42 +1106,9 @@ type Certificate struct {
 	InterfaceID    *uint `json:"interface_id"`
 	DyndnsClientID *uint `json:"dyndns_client_id"`
 	// FullChain and PrivKey are an imported certificate's PEM chain and
-	// key. The key is set through NewPrivKey and never shown.
-	FullChain  string `json:"fullchain"`
-	PrivKey    string `json:"-"`
-	NewPrivKey string `gorm:"-" json:"privkey,omitempty"`
-	HasPrivKey bool   `gorm:"-" json:"has_privkey"`
-	// Generate, when set on a save of an imported certificate, makes a new
-	// certificate and key in place of FullChain and NewPrivKey.
-	Generate *CertGenerate `gorm:"-" json:"generate,omitempty"`
-	// ImportCA, on the save of an imported certificate, refuses one that
-	// is not a CA (the Certificate authorities tab's Import CA).
-	ImportCA bool `gorm:"-" json:"import_ca,omitempty"`
-	// IsCA, Issuer, Chain (the certification path from the top down,
-	// fwconfig.ChainPath), NotBefore and NotAfter are read from an imported
-	// certificate's chain when it is shown. A CA is the firewall's: it is
-	// on the host alone, and signs the certificates of the host and its
-	// virtual firewalls.
-	IsCA      bool       `gorm:"-" json:"is_ca"`
-	Issuer    string     `gorm:"-" json:"issuer,omitempty"`
-	Chain     []string   `gorm:"-" json:"chain,omitempty"`
-	NotBefore *time.Time `gorm:"-" json:"not_before,omitempty"`
-	NotAfter  *time.Time `gorm:"-" json:"not_after,omitempty"`
-}
-
-// CertGenerate is what a new certificate is made with: its SANs (DNS
-// names, wildcards and IP addresses; none for a CA), CN (default the first
-// SAN, or the certificate's name for a CA), key type (fwconfig.CertKeyTypes)
-// and lifetime in days. CA makes a certificate authority (on a firewall's
-// host); CAID is the CA, a certificate of the same firewall's host, that
-// signs a server certificate, self-signed when nil.
-type CertGenerate struct {
-	Domains    []string `json:"domains"`
-	CommonName string   `json:"common_name"`
-	KeyType    string   `json:"key_type"`
-	Days       int      `json:"days"`
-	CA         bool     `json:"ca"`
-	CAID       *uint    `json:"ca_id"`
+	// key, a secret (px:secret).
+	FullChain string `json:"fullchain"`
+	PrivKey   string `json:"-"`
 }
 
 // DyndnsRecord is a record a DyndnsClient maintains. A/AAAA without Value
@@ -1189,18 +1135,9 @@ type IpList struct {
 	Username    string `json:"username"`
 	// Countries are ISO 3166-1 alpha-2 codes (source country).
 	Countries StringList `json:"countries"`
-	// Password and ApiKey are set through NewPassword and NewApiKey and
-	// never sent back.
+	// Password and ApiKey are secrets (px:secret).
 	Password string `json:"-"`
 	ApiKey   string `json:"-"`
-	// NewPassword and NewApiKey replace the stored secret when not empty.
-	NewPassword string `gorm:"-" json:"password,omitempty"`
-	NewApiKey   string `gorm:"-" json:"api_key,omitempty"`
-	HasPassword bool   `gorm:"-" json:"has_password"`
-	HasApiKey   bool   `gorm:"-" json:"has_api_key"`
-	// RefreshSchedule, on create, adds a task that downloads the list on
-	// that schedule on each firewall (web.createIpListTasks).
-	RefreshSchedule string `gorm:"-" json:"refresh_schedule,omitempty"`
 }
 
 // Task runs on the firewall on a cron schedule (fwconfig.Task): it
@@ -1289,13 +1226,6 @@ type SnmpUser struct {
 	// PrivProtocol empty: authentication only (authNoPriv).
 	PrivProtocol string `json:"priv_protocol"`
 	PrivPassword string `json:"-"`
-
-	// The passwords are write-only: NewAuthPassword and NewPrivPassword
-	// set them (empty keeps them), Has* tell whether there is one.
-	NewAuthPassword string `gorm:"-" json:"new_auth_password,omitempty"`
-	NewPrivPassword string `gorm:"-" json:"new_priv_password,omitempty"`
-	HasAuthPassword bool   `gorm:"-" json:"has_auth_password"`
-	HasPrivPassword bool   `gorm:"-" json:"has_priv_password"`
 }
 
 // SyslogServer is a remote syslog server rsyslog sends the host's journal

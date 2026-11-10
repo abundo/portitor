@@ -34,7 +34,7 @@ type TunnelBroker struct {
 	Username string `json:"username"`
 	// UpdateKey is the tunnel's update key (Advanced tab), or the
 	// account's password. A secret.
-	UpdateKey string `json:"update_key"`
+	UpdateKey string `json:"update_key" secret:"true"`
 }
 
 // TunnelRouteMetric is the metric of the IPv6 default route through a 6in4

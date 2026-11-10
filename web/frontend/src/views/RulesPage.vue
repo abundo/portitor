@@ -30,10 +30,10 @@ onMounted(() => objects.load().catch(() => {}))
 // configuration; they are shown read-only above the input rules.
 const autoRules = ref([])
 async function loadAutoRules() {
-  if (!store.currentId) return
-  autoRules.value = await backend.autoRules(store.currentId).catch(() => [])
+  if (!store.currentName) return
+  autoRules.value = await backend.autoRules(store.currentName).catch(() => [])
 }
-watch(() => store.currentId, loadAutoRules, { immediate: true })
+watch(() => store.currentName, loadAutoRules, { immediate: true })
 // The rules and rate limits are the virtual firewall's in the configuration
 // tree; rules by id, in their order.
 const rules = vfApi('rule', ['id'])
@@ -41,10 +41,10 @@ const rateLimits = vfApi('rate-limit')
 // The instance's rate limits, for the rule form (Rate limits page).
 const limits = ref([])
 async function loadLimits() {
-  if (!store.currentId) return
+  if (!store.currentName) return
   limits.value = await rateLimits.list().catch(() => [])
 }
-watch(() => store.currentId, loadLimits, { immediate: true })
+watch(() => store.currentName, loadLimits, { immediate: true })
 // lockedRow shows a locked row of a chain's table in the rule form
 // (read-only): an auto rule, or { builtin } for the reverse path check, IP options, the invalid packets, the port
 // forwards' accept or the policy. What it matches takes the Services field's
@@ -410,7 +410,7 @@ function clean(b) {
       title="Rules"
       info="Evaluated top to bottom; the first match decides. Edit cells in place (changes save at once), drag the grip to reorder, right-click a row to insert a rule, comment or group. Prerouting and postrouting hold the NAT rules: port forwards, and source NAT and masquerade. A group heads the rows below it up to the next group; its chevron folds them away (only in the view: folded rules still apply). Established connections are allowed, and so is what the configured services (DHCP, DNS, WireGuard) need: those input rules are shown locked and follow the services' settings. In the default virtual firewall the agent's management port and SSH stay open to its allow_from addresses. Port forwards are accepted after the forward rules (the locked row above the last one), so a forward rule can drop what a port forward would let in. Invalid packets (of no known connection) and traffic to or through the firewall that no rule accepts are dropped; the locked rows at the top and bottom of each chain count them."
       :api="api"
-      :params="{ _vf: store.currentId }"
+      :params="{ _vf: store.currentName }"
       :columns="[]"
       :fields="fields"
       :defaults="{
@@ -493,9 +493,9 @@ function clean(b) {
       </template>
     </CrudPage>
     <NftImportDialog
-      v-if="store.currentId"
+      v-if="store.currentName"
       v-model:open="importOpen"
-      :instance-id="store.currentId"
+      :instance="store.currentName"
       :ifaces="ifaceRefItems"
       @imported="imported"
     />

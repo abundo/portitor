@@ -41,7 +41,7 @@ const saving = ref(false)
 let loaded = [] // the interfaces as loaded, to save only what changed
 
 async function load() {
-  const id = store.currentId
+  const id = store.currentName
   if (!id) return
   const inst = fromEntry(await config.get(vfPath()))
   const ifs = inst.interface ?? []
@@ -63,7 +63,7 @@ async function load() {
   })
   pageForm.mark()
 }
-watch(() => store.currentId, load, { immediate: true })
+watch(() => store.currentName, load, { immediate: true })
 
 const { search: ifaceSearch, filtered: shownIfaces } = useSearch(
   () => form.ifaces,
@@ -260,7 +260,7 @@ const userDefaults = {
         title="SNMPv3 users"
         description="Read-only users with their own passwords: authenticated (SHA) and, with privacy, encrypted (AES)."
         :api="snmpUsers"
-        :params="{ _vf: store.currentId }"
+        :params="{ _vf: store.currentName }"
         :columns="userColumns"
         :fields="userFields"
         :defaults="userDefaults"

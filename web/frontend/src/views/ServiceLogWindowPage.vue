@@ -23,8 +23,8 @@ const items = computed(() => units.value.map((u) => ({ label: u, value: u, slot:
 
 onMounted(async () => {
   await store.load()
-  const id = Number(route.query.instance)
-  if (store.list.some((i) => i.id === id)) store.currentId = id
+  const asked = String(route.query.instance ?? '')
+  if (store.list.some((i) => i.name === asked)) store.currentName = asked
   const name = store.current?.name ?? ''
   document.title = `Service logs · ${name} · Portitor`
   try {

@@ -129,7 +129,7 @@ function clean(b) {
       description="Route forwarded traffic by its source, destination, incoming interface or service, through a gateway or interface of its own instead of the routing table."
       info="Tried top to bottom; the first match decides, and drag the grip to reorder. A policy route without a gateway or interface is an exception: what it matches keeps the main table. While a policy route's gateway can't be reached (its interface down), its traffic takes the main table. Traffic from the firewall itself, and on interfaces in a VRF, isn't policy-routed. Traffic sent out of a second uplink needs source NAT there (a masquerade NAT rule), so its replies come back the same way. The firewall rules still decide what may pass."
       :api="api"
-      :params="{ _vf: store.currentId }"
+      :params="{ _vf: store.currentName }"
       :columns="columns"
       :fields="fields"
       :defaults="{

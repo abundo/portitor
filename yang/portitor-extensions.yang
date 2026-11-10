@@ -73,6 +73,14 @@ module portitor-extensions {
     description "The list's entries are a JSON array of objects in this column of the parent's row.";
   }
 
+  extension action {
+    argument kind;
+    description
+      "An action's kind: view (answers from the datastore asked, changes
+       nothing), operation (the firewalls do something with the entry; no
+       configuration changes), change (changes the candidate, as an edit) or
+       create (a change that makes the entry when it isn't there).";
+  }
   extension json-map {
     argument column;
     description "The list's entries (name, value) are a JSON object in this column of the parent's row.";

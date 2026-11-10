@@ -47,7 +47,7 @@ const familyItems = [
   { label: 'IPv6', value: 'ipv6' },
 ]
 watch(
-  () => store.currentId,
+  () => store.currentName,
   () => (form.interface = NONE),
 )
 // A port to start from per protocol: HTTPS, DNS.

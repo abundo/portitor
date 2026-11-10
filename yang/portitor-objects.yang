@@ -73,6 +73,33 @@ submodule portitor-objects {
     }
     list ip-list {
       key "name";
+      action update {
+        px:action "operation";
+        description "Downloads the IP list on every firewall now.";
+        output {
+          leaf started {
+            type string;
+            description "What the firewall started on.";
+          }
+        }
+      }
+      action schedule {
+        px:action "change";
+        description "Adds a task downloading the list on schedule on each firewall but an HA secondary, named after the list (and the firewall, with several).";
+        input {
+          leaf schedule {
+            type string;
+            mandatory true;
+            description "When, as crontab(5): 0 */6 * * *.";
+          }
+        }
+        output {
+          leaf-list tasks {
+            type string;
+            ordered-by user;
+          }
+        }
+      }
       px:table "ip_lists";
       description "IpList is an address list the agent downloads (fwconfig.IPList). Rules use it by name as \"@name\" in their address lists.";
       leaf name {
@@ -176,6 +203,16 @@ submodule portitor-objects {
     }
     list task {
       key "name";
+      action run {
+        px:action "operation";
+        description "Runs the task on its firewall now.";
+        output {
+          leaf started {
+            type string;
+            description "What the firewall started on.";
+          }
+        }
+      }
       px:table "tasks";
       description "Task runs on the firewall on a cron schedule (fwconfig.Task): it downloads IpListID, or runs Command as the agent's console user.";
       leaf name {

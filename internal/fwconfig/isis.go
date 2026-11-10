@@ -36,9 +36,9 @@ type ISIS struct {
 	// AreaPassword authenticates the level-1 LSPs and SNPs, DomainPassword
 	// the level-2 ones; each of type ISISAuthClear or ISISAuthMD5 ("" is
 	// MD5). Empty: no authentication.
-	AreaPassword       string `json:"area_password,omitempty"`
+	AreaPassword       string `json:"area_password,omitempty" secret:"true"`
 	AreaPasswordType   string `json:"area_password_type,omitempty"`
-	DomainPassword     string `json:"domain_password,omitempty"`
+	DomainPassword     string `json:"domain_password,omitempty" secret:"true"`
 	DomainPasswordType string `json:"domain_password_type,omitempty"`
 	// DefaultOriginate announces a default route into a level.
 	DefaultOriginate []ISISDefault      `json:"default_originate,omitempty"`
@@ -112,7 +112,7 @@ type ISISInterface struct {
 	BFD bool `json:"bfd,omitempty"`
 	// Password authenticates the hellos on the interface (PasswordType as
 	// ISIS.AreaPasswordType).
-	Password     string `json:"password,omitempty"`
+	Password     string `json:"password,omitempty" secret:"true"`
 	PasswordType string `json:"password_type,omitempty"`
 }
 

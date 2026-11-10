@@ -81,7 +81,7 @@ func TestDNSBlocklists(t *testing.T) {
 		strings.Join(dns.BlocklistAllow, ",") != "example.com,cdn.example" {
 		t.Errorf("document: %+v %v", dns.Blocklists, dns.BlocklistAllow)
 	}
-	if red := redactDoc(*doc); red.Instance("main").DNS.Blocklists[0].Key != "<redacted>" || doc.Instance("main").DNS.Blocklists[0].Key != key {
+	if red := doc.Redacted(); red.Instance("main").DNS.Blocklists[0].Key != "<redacted>" || doc.Instance("main").DNS.Blocklists[0].Key != key {
 		t.Errorf("redacted: %+v", red.Instance("main").DNS.Blocklists)
 	}
 }

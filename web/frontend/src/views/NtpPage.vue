@@ -121,7 +121,7 @@ const serverColumns = [
 ]
 
 async function load() {
-  const id = store.currentId
+  const id = store.currentName
   if (!id) return
   const inst = fromEntry(await config.get(vfPath()))
   const ifs = inst.interface ?? []
@@ -145,7 +145,7 @@ async function load() {
   })
   pageForm.mark()
 }
-watch(() => store.currentId, load, { immediate: true })
+watch(() => store.currentName, load, { immediate: true })
 
 const { search: ifaceSearch, filtered: shownIfaces } = useSearch(
   () => form.ifaces,

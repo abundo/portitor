@@ -7,6 +7,17 @@ Architecture and conventions for agents working in this repository. Setup, build
 and test commands are in [DEV.md](DEV.md); the product overview and security model
 are in [README.md](README.md).
 
+## Design before features
+
+A feature must fit the architecture: in the layer that owns it, through the
+existing seams (the tree, confcheck, the builder, render, the agent), keeping the
+invariants below. If it can't be added that way without a workaround (a special
+case in a layer that shouldn't know about it, duplicated logic, state kept beside
+the tree), don't build the workaround. Stop, before writing code or as soon as it
+shows up, and tell the maintainer: what doesn't fit and why, the refactor you'd
+recommend and its rough size, and any smaller part of the feature that fits
+cleanly now. Go on only once they've chosen.
+
 ## Layout
 
 | Path | What |
@@ -15,24 +26,25 @@ are in [README.md](README.md).
 | `cmd/portitor-agent` | Agent daemon on the firewall: `start`, `init`, `render`, `netns-exec`; run as `portitor` (a symlink, `cli.go`) it is a CLI over the agent's root-only socket `<run_dir>/agent.sock`: `show ...` over the GET routes, and actions that change no configuration (`confirm`, `rollback`, `request dhcp renew`, `request iplist update`, `request blocklist update`, `clear connections`) over the POST routes in `localWrites` |
 | `internal/fwconfig` | The desired-state document and `Validate()`. **The contract between web and agent.** |
 | `yang` | The YANG modules: the configuration's schema (module `portitor`, a submodule per area, the state in `portitor-state`, `portitor-extensions`), embedded by `yang.go`; first drafted from the tables (by `dev/yanggen`, gone with them), edited by hand since |
-| `internal/schema` | The modules compiled (goyang) into the tree every frontend walks: kinds, keys, order, types and their checks, defaults, descriptions, `px:` extensions |
+| `internal/schema` | The modules compiled (goyang) into the tree every frontend walks: kinds, keys, order, types and their checks, defaults, descriptions, `px:` extensions, the lists' actions (`Action`: kind `px:action`, typed input and output) |
 | `internal/datastore` | The configuration as a tree of the schema: set, delete, rename (rewriting leafrefs), move, validate, RFC 7951 JSON, diff and patch, the CLI's text and flat forms; `Store`, the shared candidate with its rebase and commit |
 | `internal/datastore/sqlmap` | The tree as rows, by the modules' `px:` extensions (`Rows`; `Adder` makes entries from rows, for the imports); the entries' ids kept by path (`IDs`, `AssignIDs`, the table `config_ids`) |
 | `internal/confview` | The candidate (or any tree) as rows decoded into the `models` structs, a slice per list, with their ids (`View`, `Load`, `RowOf`): what the builder and portitor-config's code of before the tree read; no tables behind it |
-| `internal/netconf` | NETCONF (RFC 6241/6242) on the datastore, the SSH server's `netconf` subsystem: framing (1.0 and chunked), XML, `edit-config` with every operation, subtree filters, `commit` with `confirmed-commit`, locks (`Store.Lock`), `get-schema` |
+| `internal/netconf` | NETCONF (RFC 6241/6242) on the datastore, the SSH server's `netconf` subsystem: framing (1.0 and chunked), XML, `edit-config` with every operation, subtree filters, `commit` with `confirmed-commit`, locks (`Store.Lock`), `get-schema`, the modules' actions (RFC 7950 `<action>`, `action.go`, through `Env.Action`) |
 | `internal/snmp` | SNMP for the state, read-only: `agentx` the subagent side of AgentX (RFC 2741: open, register, get, getnext, getbulk; a `Master` for tests), `mib` the YANG state as SNMP objects (a list a table indexed by its and its parents' keys, the top-level state container scalars) under a base OID, the numbers in `oids.json` (never reused; `go test ./internal/snmp/mib -update` numbers new state nodes and writes `deploy/mib/PORTITOR-MIB.txt`), the MIB text and a snapshot for answers |
-| `internal/cli` | The CLI (SR Linux style): commands, path parsing, `?` help and Tab completion from the schema, the terminal (x/term), scripts, and the SSH server |
+| `internal/cli` | The CLI (SR Linux style): commands, path parsing, `?` help and Tab completion from the schema, the terminal (x/term), scripts, and the SSH server; `tools` runs the actions (`tools.go`, SR Linux style) |
 | `internal/render` | Pure functions: document → nftables, WireGuard, named.conf, the DHCP server's dhcpd.json (`dhcpd.go`), chrony.conf (`chrony.go`), snmpd.conf (`snmpd.go`), rsyslog.conf (`rsyslog.go`), openvpn.conf (`openvpn.go`), dnsmgr2 config, FRR (`frr.go`: frr.conf with BGP, OSPF, IS-IS, VRRP and BFD, daemons, vtysh.conf) |
 | `internal/agent` | Agent: apply/reconcile, commit-confirm, DHCP and DHCPv6 (prefix delegation) clients (woken when their interface gets a carrier, `linkwatch.go`), IP lists, task scheduler, packet log (NFLOG), DNS query log (BIND logs to the journal, followed with `journalctl`, filtered by the agent, `querylog.go`), WireGuard endpoint re-resolving, packet capture (tcpdump, streamed rate-limited), connectivity tests (ICMP echo on a raw socket, TCP connect, UDP datagram, from the agent's own sockets opened in the instance netns by `withNetns`, streamed as JSON lines, `probe.go`), traceroute (`mtr --raw`, streamed as JSON lines, `trace.go`), iperf3 tests (client or server, `--json-stream` read into JSON lines, a server's port in the ruleset's timeout set `render.IperfServerSet` while it runs, `iperf.go`), service logs (`journalctl --follow` of a status service unit, streamed as text, `servicelog.go`), the host's whole journal (`POST /v1/journal`) and rsyslog's state (`GET /v1/syslog`, `syslog.go`), LLDP (sent and heard on raw sockets, `lldp.go`), neighbours (ARP/ND, LLDP), NAT64 (a Jool instance per namespace; its sessions and counters for `GET /v1/nat64`, `nat64.go`), traffic shaping (CAKE, IFB devices for receiving, HTB classes for the rate limits that shape (`fwconfig.Instance.Shapers`) by packet mark `render.ShaperMark`; planned from `tc -j` output, `shaping.go`; their traffic and the policers' drop counters `render.RateLimitDropCounter`, `ratelimits.go`), BGP, OSPF, IS-IS, VRRP and BFD state (FRR's JSON through `vtysh`, `bgp.go`, `ospf.go`, `isis.go`, `vrrp.go`, `bfd.go`), VRRP's macvlan devices (`vrrp.go`), 6in4 tunnels' endpoint updates at Hurricane Electric's tunnel broker (from the instance netns, on address changes, `tunnelbroker.go`), VXLANs' learning, EVPN bridge port flags and static flood lists (`vxlan.go`), OpenVPN's logins through its management socket, checked as portitor-config checks a login, against the document's users and `Directory` (`openvpn.go`), the VRFs' source rules and sysctls for the firewall's services (`vrf.go`), status (the host's memory, CPU times, load and disk use from /proc and statfs, `host.go`), API server |
 | `internal/dhcpd` | The DHCPv4 and DHCPv6 server and the IPv6 router advertisements, `portitor-agent dhcpd <instance>` (`portitor-dhcpd@.service`, every instance's, as the user `portitor-dhcp`): the DHCPv4 wire format read tolerantly and written as clients expect (`packet4.go`), the handlers as pure functions over the store and a clock (`v4.go`, `v6.go`), the append-only lease log (`store.go`), the ARP check before an offer (`probe.go`), sockets per interface, reload and the control socket (`run.go`), the replication to an HA standby (`repl.go`), and the router advertisements (`ra.go`: the message, the timing and the deprecation of a removed prefix as pure functions; `rarun.go`: a raw ICMPv6 socket and goroutine per interface) |
 | `internal/dyndns` | DNS update client ("DNS update" in the GUI): RFC 2136 (from ifnsupdate), sent from the instance netns, or a DNS hosting provider's API through libdns (`providers.go`, matching `fwconfig.DNSProviders`), called from the host |
 | `internal/acme` | ACME certificates through lego: accounts, orders, the stored chain and key (`<state_dir>/certificates/`); the agent's `acme.go` schedules them and answers HTTP-01 in the instance netns, opening port 80 by the `acme_http` set (`render.ACMEHTTPSet`), or DNS-01 (`dns01.go`: the TXT record at `_acme-challenge.<domain>` after its CNAMEs, lego's `EffectiveFQDN`) through a DNS update client's provider (`dyndns.TXTUpdater`, copied into the certificate as `fwconfig.DNS01` by the builder) |
 | `internal/acmeserver` | ACME server (RFC 8555 subset: accounts, orders, HTTP-01, finalize), with the policy, validation and issuing left to `Hooks`; used by the agent's ACME proxy (`acmeproxy.go`) |
-| `internal/nftimport` | nftables file (`nft -j list ruleset`, read by the agent's `POST /v1/nftables/parse` in a new network namespace, `nftparse.go`) → rules, NAT rules, hosts/prefixes, services, and what it leaves out, with jumped-to chains inlined in groups; written by `web/nftimport.go` through the CRUD's `prepare*` checks, a preview being the same transaction rolled back |
+| `internal/nftimport` | nftables file (`nft -j list ruleset`, read by the agent's `POST /v1/nftables/parse` in a new network namespace, `nftparse.go`) → rules, NAT rules, hosts/prefixes, services, and what it leaves out, with jumped-to chains inlined in groups; written by `web/nftimport.go` into the candidate (`userEdit`, each entry through `addChecked`), a preview being the same edit thrown away |
 | `internal/iplist` | Downloads IP lists (CrowdSec LAPI decisions, plain-text lists with ranges and JSON lines, and countries' RIR delegations from `CountrySources`: ipverse, then ipdeny); the public blocklists the GUI offers are `web/frontend/src/utils/ipListFeeds.js`, the countries `utils/countries.js` |
 | `internal/dnsblocklist` | Downloads DNS blocklists (RPZ zone files, domain lists, hosts files, zipped or not; conditional requests) and writes their names, checked, as RPZ records; the public lists the GUI offers are `web/frontend/src/utils/dnsBlocklistFeeds.js` |
 | `internal/ldapauth` | LDAP/Active Directory search-and-bind login, test and tree browsing (from factum2), shared by portitor-config's logins (`web/directory.go`) and the agent's OpenVPN logins |
 | `internal/wgkeys` | WireGuard key generation (wg(8) base64) |
+| `internal/wgimport` | wg-quick config file → the interface's keys, port, addresses and MTU, and its peers (`Parse`, pure); written by `web/wgimport.go` |
 | `internal/buildinfo` | Version, commit and date, set at link time (Makefile `LDFLAGS`, `.goreleaser.yaml`) |
 | `internal/totp` | TOTP codes (RFC 6238), shared by portitor-config's two-factor login and the agent's OpenVPN logins |
 | `internal/cron` | crontab(5) schedule parser for tasks (shared by web and agent) |
@@ -43,7 +55,7 @@ are in [README.md](README.md).
 | `internal/netobj` | Named hosts/prefixes (`address_objects`) and address lists (`address_lists`): name checks and expansion |
 | `internal/dbmigrate` | Opens the SQLite database; goose migrations (the schema's source of truth) |
 | `models` | GORM mapping |
-| `web` | Echo v5 server (`server.go`: routes): auth, the configuration API (`configapi.go`: `/api/schema`, `/api/config`, `checkEdit`; entries' actions `configactions.go`), the configuration as rows (`confview.go`: `view`, cached per candidate, `userEdit`, `editConfig`, `rowWriter`), the GUI's reads of rows (`configreads.go`), the firewalls' CRUD (`crud.go`, `firewalls.go`), commits (`commit.go`), other handlers (`handlers.go`), the commits' configurations (`revert.go`), tenancy (`tenancy.go`), roles (`roles.go`, `access.go`), agent proxies (`console.go`, `capture.go`, `probe.go`, `trace.go`, `iperf.go`, `servicelog.go`, `syslog.go`, `connections.go`), WireGuard config import (`wgimport.go`), backup/restore (`backup.go`, `snapshot.go`: the database with the configuration in it), `config.yaml` (`config.go`), the HA replica and promotion (`replica.go`, `promote.go`), the witness (`witness.go`, `portalwitness.go`), and portitor-web, the portal (`portal.go`, `portal.html`) |
+| `web` | Echo v5 server (`server.go`: routes): auth, the configuration API (`configapi.go`: `/api/schema`, `/api/config`, `checkEdit`; the YANG actions' handlers and the GUI's own file actions `configactions.go`), the configuration as rows (`confview.go`: `view`, cached per candidate, `userEdit`, `editConfig`, `rowWriter`), the firewalls' CRUD (`crud.go`, `firewalls.go`), commits (`commit.go`), other handlers (`handlers.go`), the commits' configurations (`revert.go`), tenancy (`tenancy.go`), roles (`roles.go`, `access.go`), agent proxies (`console.go`, `capture.go`, `probe.go`, `trace.go`, `iperf.go`, `servicelog.go`, `syslog.go`, `connections.go`), WireGuard config import (`wgimport.go`), backup/restore (`backup.go`, `snapshot.go`: the database with the configuration in it), `config.yaml` (`config.go`), the HA replica and promotion (`replica.go`, `promote.go`), the witness (`witness.go`, `portalwitness.go`), and portitor-web, the portal (`portal.go`, `portal.html`) |
 | `web/frontend` | Vue SPA; `CrudPage.vue` drives most pages from field/column schemas, on a YANG list (`api/config.js`: `treeApi`, `vfApi`) |
 | `docs` | User guides; every `docs/*.md` is bundled into the GUI's Help page (`src/docs.js`), and links between them stay in the GUI |
 | `deploy` | systemd units and example configs |
@@ -196,15 +208,17 @@ docs and user-facing messages.
   hears a peer that is primary at a higher epoch is stale (`haManager.staleLocked`):
   closed, and refuses documents of an earlier epoch (`POST /v1/apply`),
   until it is caught up as the secondary.
-- **Bundles** (`web/bundle.go`): a virtual firewall as rows, read and written
-  column by column from the schema's foreign keys (`schemaGraph`): every table that
-  cascades from `instances` (but its role and links), the shared objects
-  (`bundleShared`, matched by name on import, a different one a conflict) and rows of
-  other instances it refers to by id (a global DNS template, by name). Import gives
-  new ids in foreign-key order (`ownedTables`, Kahn) and needs the same schema
-  version. A new table or column needs nothing there. Global admins only: a bundle
-  holds the instance's secrets (`GET /api/instances/:id/bundle`,
-  `POST /api/instances/import`).
+- **Bundles** (`web/bundle.go`): a virtual firewall as configuration, RFC 7951 JSON
+  of the tree with its secrets: its entry, the shared objects (`bundleShared`,
+  imported by name, reused when equal, a different one a conflict) and its links,
+  each with the other instance by name (made on import once both are there). The
+  global DNS templates of other instances it uses are named (`Refs`) and must be
+  there, global, where it imports. Import gives the lists keyed by an id new ids,
+  and folders those of the same kind, name and parent there. Left out: the
+  instance's role (import makes one), OpenVPN's role, and what is the
+  installation's (deployments, firewalls, known NICs, users). A new leaf or list
+  needs nothing there. Global admins only: a bundle holds the instance's secrets
+  (the instance's `bundle` action, `POST /api/instances/import`).
 - **Console configuration** (`web/consolecli.go`, `cmd/portitor-web/console.go`):
   `portitor-config` `api METHOD PATH [JSON]`, `set RESOURCE NAME
   KEY=VALUE...` (`--vf`, default the host), `commit [--confirm N]`, `confirm` and
@@ -239,8 +253,19 @@ docs and user-facing messages.
   state (`?shallow`, `?with-defaults=report-all`; a set secret marked by an RFC 7952
   annotation `"@leaf": {"portitor:set": true}`), PUT, PATCH, POST (a list keyed by a
   numeric id gets the next one, `assignID`/`nextID`, never reused), DELETE, and
-  `?action=` for rename, move and the entries' actions (`configactions.go`: views,
-  operations, changes). A JSON edit takes `""` on a leaf as unset and keeps a secret
+  `?action=` for rename, move and the entries' actions. An action is declared in
+  YANG (`action`, its kind `px:action`: view, operation, change or create; typed input
+  and output; `schema.Action`) and handled in `web/configactions.go`
+  (`registerAction`; `TestActionHandlers` holds the two together); `runAction` checks
+  the input by its schema (`datastore.ReadValues`) and the user's access, and runs a
+  change as an edit (`checkEdit`). The CLI's `tools <path> <action> ...` and NETCONF's
+  `<action>` run them through the API in-process (`Env.Action`, `actionAs`). What
+  answers a file (a WireGuard peer's or OpenVPN client's config, a certificate
+  download, a bundle) fits no other frontend: it is the GUI's alone, not in YANG
+  (`registerGUIAction`). The GUI names configuration entries, never their ids
+  (`config_ids` are the server's): a virtual firewall by name (`?instance=`, the
+  imports' `instance`, `instances` store's `currentName`), the IPAM tree's nodes their
+  interface and zone by name, Settings' certificate as `{instance, name}`. A JSON edit takes `""` on a leaf as unset and keeps a secret
   given `""` or left out of a PUT; `null` removes it. Every change is checked by
   `checkEdit`: the user's access by path (`treeAccess`, `tenantTreeCheck`), the
   schema, the hooks of `internal/confcheck` (normalizing on edit, checks per list
@@ -274,7 +299,8 @@ docs and user-facing messages.
   index.html's `<base>` (`utils/base.js`: `BASE`, `apiURL`): every API, WebSocket and
   router path starts with it, and the capture worker gets it as its name. Pinia stores (`stores/`): `auth`, `deploy` (polls the
   agent's status and rule counters, and the uncommitted changes, which a write
-  rechecks through `changed()`), `instances` (the selected VF), `objects`.
+  rechecks through `changed()`), `instances` (the virtual firewalls from the tree, the selected one by name,
+  `currentName`), `objects`.
 
 ## Invariants
 
@@ -359,19 +385,19 @@ rows (`confview`) are a view that code reads, never edits.
   the change confirmed: a crash or a failed rollback leaves it for the next start. A
   failed rollback keeps the change pending and retries. `RolledBack` means the
   restore succeeded; `RollbackErrors` says it didn't.
-- **Secrets:** fields tagged `json:"-"` (WireGuard private/preshared keys, TSIG
-  secrets, DNS blocklist keys, DNS update provider settings, IP list passwords and API keys, agent token, the HA pair's and witness's secrets, password hashes, TOTP secrets and recovery code hashes, imported certificates' and certificate authorities' keys, OpenVPN's tls-crypt key, LDAP bind passwords) never reach
-  the browser. The generic CRUD
-  `PUT` merges the body onto the stored row, so those fields can't be overwritten
-  through the API either. In the tree a secret is a `px:secret` leaf, never read
-  back over `/api/config` (only marked as set) and kept when a write leaves it out;
-  the GUI writes it as `new_<leaf>` (empty keeps it) or `clear_<leaf>` (`treeApi`'s
-  `secretsOf`). The CRUD's models still have write-only `gorm:"-"` fields that
-  `prepare` copies and `present` clears (`DyndnsClient.NewTsigSecret`,
-  `IpList.NewPassword`/`NewApiKey`, `BgpPeerSettings.NewPassword` with
-  `ClearPassword`, `Instance.NewSnmpCommunity` with `ClearSnmpCommunity`,
-  `SnmpUser.NewAuthPassword`/`NewPrivPassword`, `OspfInterface.NewAuthKey` with `ClearAuthKey`, `IsisConfig.NewAreaPassword`/`NewDomainPassword` and `IsisInterface.NewPassword` with their `Clear*`, `LdapServer.NewBindPassword` with `ClearBindPassword`, `Certificate.NewPrivKey` for an imported certificate; a DNS update provider's secret settings come in
-  through `DyndnsClient.Settings`, where an empty one keeps the stored value).
+- **Secrets:** fields tagged `json:"-"` (the agent token, the HA pair's and witness's
+  secrets, password hashes, TOTP secrets and recovery code hashes, LDAP bind
+  passwords) never reach the browser; the CRUD's `PUT` (firewalls, the directory)
+  merges the body onto the stored row, so those fields can't be overwritten through
+  it either. In the tree a secret is a `px:secret` leaf (WireGuard private/preshared
+  keys, TSIG secrets, DNS blocklist keys, DNS update provider settings, IP list
+  passwords and API keys, imported certificates' and CAs' keys, OpenVPN's tls-crypt
+  key, ...), never read back over `/api/config` (only marked as set) and kept when a
+  write leaves it out; the GUI writes it as `new_<leaf>` (empty keeps it) or
+  `clear_<leaf>` (`treeApi`'s `secretsOf`). In the document a secret is a field
+  tagged `secret:"true"` (`secret:"provider"` for a DNS provider's settings), which
+  `fwconfig.Document.Redacted` masks for the deployment history;
+  `TestSecretsTagged` fails on a field that looks secret without the tag.
   A BGP password, OSPF MD5 key or IS-IS password is in frr.conf, so that is a `Secret` file
   `Bundle.Redacted` masks; so are snmpd.conf and openvpn.conf (the tls-crypt key).
   The document carries OpenVPN's users' bcrypt hashes (and, with two-factor login,
@@ -553,7 +579,7 @@ the certificate portitor-config serves, chosen under Settings
   changed. A download never reaches BIND as it is: only names checked by
   `dnsblocklist.Parse` are written, each `name CNAME .` (no `$INCLUDE`, redirects or
   passthru from a feed). The key (`Key`, URLhaus's Auth-Key) fills `{key}` in the URLs,
-  over https only; it is write-only (`DnsBlocklist.NewAuthKey`/`ClearAuthKey`) and
+  over https only; it is a secret (`px:secret`) and
   redacted in history and in errors.
 - **DHCP server** (`internal/dhcpd`, `render/dhcpd.go`, `internal/agent/dhcprepl.go`;
   design in `dev/design-ha-cluster.md`): Portitor's own, one process per instance with
@@ -611,8 +637,7 @@ the certificate portitor-config serves, chosen under Settings
   `snmp_serve` (the auto input rule "snmp"), from the `snmp_allow` prefixes (the
   rule's source set `snmp_clients`, and the community's sources; names expanded by
   the builder; leafrefs in YANG). The community and the users' passwords are
-  write-only secrets (`NewSnmpCommunity`/`ClearSnmpCommunity`, `SnmpUser.NewAuthPassword`/
-  `NewPrivPassword`); snmpd.conf is a `Secret` file (0600, read by snmpd as root
+  secrets (`px:secret`); snmpd.conf is a `Secret` file (0600, read by snmpd as root
   before it drops to its user, so a change restarts it), removed when SNMP is off.
   The default instance's snmpd is also the AgentX master (`master agentx`, socket
   `fwconfig.SNMPAgentXSocket`, owned by snmpd's user and open to the group
@@ -659,8 +684,8 @@ the certificate portitor-config serves, chosen under Settings
   apply, and restarts OpenVPN when the certificate's files change (`watchCert`). The
   certificate is an instance certificate by name (`confcheck` `checkOpenVPN`), read
   from `Paths.CertificateDir`; the client config's CA is the chain's root
-  (`GET /v1/openvpn/<instance>/ca`). In bundles, `ovpn_certificate_id` is set after
-  the insert (`bundleDeferred`) and `ovpn_role_id` cleared.
+  (`GET /v1/openvpn/<instance>/ca`). A bundle leaves the required role out (the
+  roles are the installation's).
 - **Directory** (`web/directory.go`, `internal/ldapauth`, Admin → Directory, from
   factum2): the users, roles and the OpenLDAP/AD servers (`ldap_servers`, global, in
   `position` order). Every login takes `authenticateUser`'s path: a local user's
@@ -676,8 +701,8 @@ the certificate portitor-config serves, chosen under Settings
 - **6in4 tunnels** (`fwconfig/tunnel.go`, Network → Interfaces, kind 6in4): interfaces of kind
   `6in4` (a `sit` device, `remote`/`local any`, recreated when either changes), with
   auto rules for IP protocol 41 from and to the server (input and output). With a
-  Hurricane Electric account (`TunnelBroker`; the update key is a write-only secret,
-  `NewHeUpdateKey`) the agent sends the endpoint when the instance's IPv4 source
+  Hurricane Electric account (`TunnelBroker`; the update key is a secret) the
+  agent sends the endpoint when the instance's IPv4 source
   towards the server changes and daily, answering pings to that address for 45 s
   around it (`render.TunnelBrokerPingSet`, a timeout set: HE's pinger is unknown). Loading `sit` adds `sit0` to every
   namespace; the stale-device cleanup skips such fallback devices
@@ -872,7 +897,8 @@ singular); a custom page uses `SearchInput` above each table,
 
 ## Adding a feature end to end
 
-1. Add fields to `fwconfig` and validate them in `validate.go` (with a test case).
+1. Add fields to `fwconfig` and validate them in `validate.go` (with a test case);
+   tag a secret `secret:"true"` so the deployment history masks it.
 2. Render them in `internal/render` (with a test; `nft -c` covers syntax).
 3. Apply them in `internal/agent` if they need more than a file.
 4. The leaves (or list) in `yang/`, typed (`portitor-types.yang`, formats in
@@ -883,7 +909,12 @@ singular); a custom page uses `SearchInput` above each table,
    `TestEveryFieldMapped` fails until field and leaf match), and the `builder.Build`
    mapping.
 6. A page or fields in `web/frontend`: most pages are a `CrudPage` on `vfApi(list)`
-   or `treeApi`, rows with the leaves' names in snake case.
+   or `treeApi`, rows with the leaves' names in snake case, entries named by their
+   keys (never ids).
+7. Something done rather than set (new keys, a download now) is an action: an
+   `action` with `px:action` and typed input and output in YANG, its handler
+   registered in `web/configactions.go`; the API, the CLI's `tools` and NETCONF run
+   it. Only what answers a file is a GUI action.
 
 ## Licence
 

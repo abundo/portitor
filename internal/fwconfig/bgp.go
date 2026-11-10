@@ -94,7 +94,7 @@ type BGPPeer struct {
 	// a group that has one may leave it empty.
 	RemoteAS    string `json:"remote_as,omitempty"`
 	Description string `json:"description,omitempty"`
-	Password    string `json:"password,omitempty"` // TCP MD5
+	Password    string `json:"password,omitempty" secret:"true"` // TCP MD5
 	// EBGPMultihop is the TTL of an eBGP session to a neighbour that is
 	// not directly connected; 0 is off.
 	EBGPMultihop int `json:"ebgp_multihop,omitempty"`

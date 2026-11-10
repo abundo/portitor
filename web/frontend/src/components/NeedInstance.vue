@@ -7,7 +7,7 @@ const store = useInstanceStore()
 </script>
 
 <template>
-  <slot v-if="store.currentId" />
+  <slot v-if="store.currentName" />
   <div v-else class="card">
     <UAlert
       icon="i-lucide-boxes"

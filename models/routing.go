@@ -177,12 +177,6 @@ type BgpPeerSettings struct {
 	// The L2VPN EVPN address family.
 	EvpnActivate             bool `json:"evpn_activate"`
 	EvpnRouteReflectorClient bool `json:"evpn_route_reflector_client"`
-
-	// The password is write-only: NewPassword sets it (empty keeps it),
-	// ClearPassword removes it, HasPassword tells whether there is one.
-	NewPassword   string `gorm:"-" json:"new_password,omitempty"`
-	ClearPassword bool   `gorm:"-" json:"clear_password,omitempty"`
-	HasPassword   bool   `gorm:"-" json:"has_password"`
 }
 
 // Peer is the settings as the document holds them.
@@ -290,12 +284,6 @@ type OspfInterface struct {
 	AuthKeyID     int    `json:"auth_key_id"`
 	AuthKey       string `json:"-"`
 	Bfd           bool   `json:"bfd"` // BFD for the neighbours, if the interface has it
-
-	// The MD5 key (OSPFv2) is write-only: NewAuthKey sets it (empty keeps
-	// it), ClearAuthKey removes it, HasAuthKey tells whether there is one.
-	NewAuthKey   string `gorm:"-" json:"new_auth_key,omitempty"`
-	ClearAuthKey bool   `gorm:"-" json:"clear_auth_key,omitempty"`
-	HasAuthKey   bool   `gorm:"-" json:"has_auth_key"`
 }
 
 // Interface is the interface as the document holds it.
@@ -332,15 +320,6 @@ type IsisConfig struct {
 	AreaPasswordType    string                              `json:"area_password_type"`
 	DomainPassword      string                              `json:"-"`
 	DomainPasswordType  string                              `json:"domain_password_type"`
-
-	// The passwords are write-only: New* sets one (empty keeps it), Clear*
-	// removes it, Has* tells whether there is one.
-	NewAreaPassword     string `gorm:"-" json:"new_area_password,omitempty"`
-	ClearAreaPassword   bool   `gorm:"-" json:"clear_area_password,omitempty"`
-	HasAreaPassword     bool   `gorm:"-" json:"has_area_password"`
-	NewDomainPassword   string `gorm:"-" json:"new_domain_password,omitempty"`
-	ClearDomainPassword bool   `gorm:"-" json:"clear_domain_password,omitempty"`
-	HasDomainPassword   bool   `gorm:"-" json:"has_domain_password"`
 }
 
 // IsisInterface is IS-IS on an interface of the instance, by name.
@@ -360,11 +339,6 @@ type IsisInterface struct {
 	Bfd             bool   `json:"bfd"` // BFD for the neighbours, if the interface has it
 	Password        string `json:"-"`
 	PasswordType    string `json:"password_type"`
-
-	// The hello password is write-only, as IsisConfig's.
-	NewPassword   string `gorm:"-" json:"new_password,omitempty"`
-	ClearPassword bool   `gorm:"-" json:"clear_password,omitempty"`
-	HasPassword   bool   `gorm:"-" json:"has_password"`
 }
 
 // Interface is the interface as the document holds it.

@@ -65,7 +65,7 @@ func TestWebCertificate(t *testing.T) {
 	env.host("main")
 	env.put("instance=main/interface=wan", map[string]any{"kind": "physical", "ipv4-mode": "dhcp", "enabled": true})
 	env.put("instance=main/certificate=web", map[string]any{"enabled": true, "interface": "wan", "domains": []string{"a.example.com"}})
-	id := env.rowID("certificates", "web")
+	web := map[string]any{"instance": "main", "name": "web"}
 
 	tc := env.srv.newTLSCert(&fallback)
 	env.srv.webCert = tc
@@ -81,10 +81,10 @@ func TestWebCertificate(t *testing.T) {
 	if chosen, err := tc.fetch(context.Background()); chosen || err != nil || dns() != "fallback.example.com" {
 		t.Fatalf("none chosen: %v %v %q", chosen, err, dns())
 	}
-	if rec := env.do("PUT", "/api/settings", map[string]any{"web_certificate_id": 9999}); rec.Code != http.StatusBadRequest {
+	if rec := env.do("PUT", "/api/settings", map[string]any{"web_certificate": map[string]any{"instance": "main", "name": "nope"}}); rec.Code != http.StatusBadRequest {
 		t.Fatalf("unknown certificate accepted: %d", rec.Code)
 	}
-	if rec := env.do("PUT", "/api/settings", map[string]any{"web_certificate_id": id}); rec.Code != http.StatusOK {
+	if rec := env.do("PUT", "/api/settings", map[string]any{"web_certificate": web}); rec.Code != http.StatusOK {
 		t.Fatalf("choose: %d %s", rec.Code, rec.Body)
 	}
 	// Chosen but not issued yet: still tls_cert.
@@ -111,14 +111,14 @@ func TestWebCertificate(t *testing.T) {
 	}
 	// Cleared: back to tls_cert at once, cache gone.
 	env.srv.webCert = tc
-	if rec := env.do("PUT", "/api/settings", map[string]any{"web_certificate_id": 0}); rec.Code != http.StatusOK {
+	if rec := env.do("PUT", "/api/settings", map[string]any{"web_certificate": nil}); rec.Code != http.StatusOK {
 		t.Fatalf("clear: %d %s", rec.Code, rec.Body)
 	}
 	if _, err := os.Stat(tc.cache); dns() != "fallback.example.com" || !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("cleared: %q %v", dns(), err)
 	}
 	// Deleting the chosen certificate clears the choice.
-	env.do("PUT", "/api/settings", map[string]any{"web_certificate_id": id})
+	env.do("PUT", "/api/settings", map[string]any{"web_certificate": web})
 	if rec := env.cfg("DELETE", "instance=main/certificate=web", nil); rec.Code >= 300 {
 		t.Fatalf("delete: %d %s", rec.Code, rec.Body)
 	}

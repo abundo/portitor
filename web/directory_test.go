@@ -163,7 +163,7 @@ func TestDirectoryLogin(t *testing.T) {
 			t.Errorf("dave: %+v", u)
 		}
 	}
-	b, _ := json.Marshal(redactDoc(*doc))
+	b, _ := json.Marshal(doc.Redacted())
 	if strings.Contains(string(b), bindPW) {
 		t.Error("redacted document holds the bind password")
 	}

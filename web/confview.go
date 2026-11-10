@@ -309,3 +309,23 @@ func (s *Server) instanceNamed(ctx context.Context, name string) (*models.Instan
 	}
 	return nil, nil
 }
+
+// namedInstance is the candidate's instance named name, if the user may
+// read it (with write, change it); when not, it has answered (400, 404 or
+// 403) and returns nil with the answer's error.
+func (s *Server) namedInstance(c *echo.Context, name string, write bool) (*models.Instance, error) {
+	if name == "" {
+		return nil, errJSON(c, http.StatusBadRequest, "instance is required")
+	}
+	in, err := s.instanceNamed(c.Request().Context(), name)
+	if err != nil {
+		return nil, err
+	}
+	if in == nil {
+		return nil, errJSON(c, http.StatusNotFound, "no virtual firewall "+name)
+	}
+	if ok, err := allowInstance(c, in.ID, write); !ok {
+		return nil, err
+	}
+	return in, nil
+}

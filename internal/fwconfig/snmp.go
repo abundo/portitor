@@ -24,7 +24,7 @@ type SNMP struct {
 	// answers any client there.
 	Allow []string `json:"allow,omitempty"`
 	// Community is the SNMPv2c read-only community; empty: no SNMPv2c.
-	Community string     `json:"community,omitempty"`
+	Community string     `json:"community,omitempty" secret:"true"`
 	Users     []SNMPUser `json:"users,omitempty"`
 }
 
@@ -34,9 +34,9 @@ type SNMP struct {
 type SNMPUser struct {
 	Name         string `json:"name"`
 	AuthProtocol string `json:"auth_protocol"`
-	AuthPassword string `json:"auth_password"`
+	AuthPassword string `json:"auth_password" secret:"true"`
 	PrivProtocol string `json:"priv_protocol,omitempty"`
-	PrivPassword string `json:"priv_password,omitempty"`
+	PrivPassword string `json:"priv_password,omitempty" secret:"true"`
 }
 
 // SNMPPort is the port SNMP requests come to.

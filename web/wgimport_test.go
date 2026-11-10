@@ -16,11 +16,10 @@ import (
 func TestWgImport(t *testing.T) {
 	env := newEnv(t)
 	env.host("main")
-	inst := env.rowID("instances", "main")
 	priv, pub, _ := wgkeys.Generate()
 	_, peerPub, _ := wgkeys.Generate()
 	conf := "[Interface]\nPrivateKey = " + priv + "\nAddress = 10.99.0.1/24, fd00:99::1\nListenPort = 51821\nDNS = 1.1.1.1\n\n# phone\n[Peer]\nPublicKey = " + peerPub + "\nAllowedIPs = 10.99.0.2/32\nPersistentKeepalive = 25\n"
-	body := map[string]any{"instance_id": inst, "name": "wg5", "config": conf}
+	body := map[string]any{"instance": "main", "name": "wg5", "config": conf}
 	rec := env.do("POST", "/api/wg/import", body)
 	if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), priv) || !strings.Contains(rec.Body.String(), "dns") {
 		t.Fatalf("%d %s", rec.Code, rec.Body)

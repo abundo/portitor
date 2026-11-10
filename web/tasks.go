@@ -18,11 +18,6 @@ import (
 // address lists, so renaming a list rewrites them, and a list that a rule
 // or task uses cannot be deleted.
 
-func presentIpList(l *models.IpList) {
-	l.HasPassword, l.HasApiKey = l.Password != "", l.ApiKey != ""
-	l.NewPassword, l.NewApiKey, l.RefreshSchedule = "", "", ""
-}
-
 // handleTaskRun runs a task on the firewall now.
 func (s *Server) handleTaskRun(c *echo.Context) error {
 	var t models.Task

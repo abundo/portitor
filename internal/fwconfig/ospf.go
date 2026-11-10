@@ -110,7 +110,7 @@ type OSPFInterface struct {
 	NetworkType string `json:"network_type,omitempty"` // "" (the interface's), OSPFBroadcast, OSPFPointToPoint
 	// AuthKey (OSPFv2) authenticates with MD5 key AuthKeyID.
 	AuthKeyID int    `json:"auth_key_id,omitempty"`
-	AuthKey   string `json:"auth_key,omitempty"`
+	AuthKey   string `json:"auth_key,omitempty" secret:"true"`
 	// BFD watches the neighbours on the interface with BFD, when the
 	// interface has it.
 	BFD bool `json:"bfd,omitempty"`

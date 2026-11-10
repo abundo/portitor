@@ -174,7 +174,7 @@ watch(
           color="neutral"
           variant="ghost"
           aria-label="Open console window"
-          @click.stop.prevent="openConsoleWindow(instances.currentId)"
+          @click.stop.prevent="openConsoleWindow(instances.currentName)"
         />
       </UTooltip>
     </template>

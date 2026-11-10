@@ -24,7 +24,7 @@ import { useSearch, valuesText } from '@/utils/search'
 const { store, ifaceNameItems, ifaceText } = useInstanceRefs()
 // The certificates of the selected virtual firewall, and of its firewall's
 // host (the CAs), in the configuration tree, by name.
-const certificates = certificatesOf(() => store.nameOf(store.currentId))
+const certificates = certificatesOf(() => store.currentName)
 const hostCertificates = certificatesOf(() => store.host?.name)
 const auth = useAuthStore()
 const deploy = useDeployStore()
@@ -39,7 +39,7 @@ const caLabel = (name) => cas.value.find((c) => c.name === name)?.label ?? name
 // records.
 const dnsClients = ref([])
 watch(
-  () => store.currentId,
+  () => store.currentName,
   async (id) => (dnsClients.value = id ? await dnsUpdatesShallow.list() : []),
   { immediate: true },
 )
@@ -80,9 +80,9 @@ const tab = computed({
 // The Store tab: the instance's certificates with what the agent holds.
 const rows = ref([])
 async function loadRows() {
-  rows.value = store.currentId ? await certificates.list() : []
+  rows.value = store.currentName ? await certificates.list() : []
 }
-watch([() => store.currentId, tab], loadRows, { immediate: true })
+watch([() => store.currentName, tab], loadRows, { immediate: true })
 const { search, filtered } = useSearch(rows, (r) =>
   valuesText(r.name, r.domains, states.value[r.name]),
 )
@@ -692,7 +692,7 @@ const fields = computed(() => [
           noun="certificate"
           description="TLS certificates from Let's Encrypt (ACME), got by the firewall and renewed when two thirds of their lifetime have passed. The CA checks each domain over HTTP on port 80 (HTTP-01), which the firewall opens on the certificate's interface only while it answers, or by a TXT record the firewall writes through a DNS update client (DNS-01), which also works for internal names and wildcards. A certificate from elsewhere is imported with its key on the Certificate store tab, and is never renewed. To serve the GUI itself with one, choose it under Settings → Portitor web."
           :api="acmeAPI"
-          :params="{ _vf: store.currentId }"
+          :params="{ _vf: store.currentName }"
           :columns="columns"
           :fields="fields"
           :defaults="{

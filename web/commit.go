@@ -187,7 +187,7 @@ func (s *Server) deploy(ctx context.Context, username string, timeout *int, only
 	res := &commitResult{Commit: commit, Status: "applied", Deployments: []models.Deployment{}, Results: map[string]*agentapi.ApplyResult{}}
 	var applyErr error
 	for _, t := range targets {
-		docJSON, _ := json.Marshal(redactDoc(*t.doc))
+		docJSON, _ := json.Marshal(t.doc.Redacted())
 		t.dep = models.Deployment{FirewallID: t.fw.ID, CommitID: commit, Generation: t.doc.Generation, Username: username,
 			Document: string(docJSON), DocHash: docHash(*t.doc), Instances: models.StringList{}}
 		if only != nil {
@@ -632,7 +632,7 @@ func (s *Server) firewallChanged(in builder.Input, firewallID uint) (bool, int, 
 	if json.Unmarshal([]byte(live.Document), &old) != nil {
 		return true, 0, nil
 	}
-	return docHash(old) != docHash(redactDoc(*doc)), 0, nil
+	return docHash(old) != docHash(doc.Redacted()), 0, nil
 }
 
 func (s *Server) handleDeployConfirm(c *echo.Context) error {

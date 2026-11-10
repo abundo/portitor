@@ -117,7 +117,7 @@ func TestAuthRequired(t *testing.T) {
 	env := newEnv(t)
 	cookie := env.cookie
 	env.cookie = nil
-	if rec := env.do("GET", "/api/instances", nil); rec.Code != http.StatusUnauthorized {
+	if rec := env.do("GET", "/api/config/candidate/instance", nil); rec.Code != http.StatusUnauthorized {
 		t.Errorf("unauthenticated: %d", rec.Code)
 	}
 	if rec := env.do("POST", "/api/login", map[string]string{"username": "admin", "password": "wrong"}); rec.Code != http.StatusUnauthorized {
@@ -126,7 +126,7 @@ func TestAuthRequired(t *testing.T) {
 	env.cookie = cookie
 
 	// CSRF: a form post is refused even with a valid cookie.
-	req := httptest.NewRequest("POST", "/api/instances", strings.NewReader("name=x"))
+	req := httptest.NewRequest("POST", "/api/config/candidate/instance", strings.NewReader("name=x"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(cookie)
 	rec := httptest.NewRecorder()
@@ -409,11 +409,10 @@ func TestDeployEndToEnd(t *testing.T) {
 func TestAutoRules(t *testing.T) {
 	env := newEnv(t)
 	env.host("main")
-	inst := env.rowID("instances", "main")
 	env.post("instance=main/interface", map[string]any{"name": "wan", "kind": "physical", "enabled": true, "ipv4-mode": "dhcp"})
 	env.post("instance=main/interface", map[string]any{"name": "wg0", "kind": "wireguard", "enabled": true, "ipv4-mode": "none", "wg-listen-port": 51820})
 
-	rec := env.do("GET", fmt.Sprintf("/api/rules/auto?instance_id=%d", inst), nil)
+	rec := env.do("GET", "/api/rules/auto?instance=main", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("auto rules: %d %s", rec.Code, rec.Body)
 	}
@@ -430,7 +429,7 @@ func TestAutoRules(t *testing.T) {
 	if want := "dhcp client [wan] 68|iperf3 server [] 0|wireguard wg0 [] 51820"; strings.Join(names, "|") != want {
 		t.Errorf("got %q, want %q", strings.Join(names, "|"), want)
 	}
-	if rec := env.do("GET", "/api/rules/auto?instance_id=999", nil); rec.Code != http.StatusNotFound {
+	if rec := env.do("GET", "/api/rules/auto?instance=nope", nil); rec.Code != http.StatusNotFound {
 		t.Errorf("unknown instance: %d", rec.Code)
 	}
 }
@@ -445,9 +444,9 @@ func TestAutoRulesAntiLockout(t *testing.T) {
 	fake := &statusAgent{antiLockout: &render.AntiLockout{Port: 8443, SSHPort: 22, AllowFrom: []string{"192.168.1.0/24"}}}
 	env.srv.newAgent = func(*models.Firewall) (agentAPI, error) { return fake, nil }
 
-	get := func(id uint) string {
+	get := func(name string) string {
 		t.Helper()
-		rec := env.do("GET", fmt.Sprintf("/api/rules/auto?instance_id=%d", id), nil)
+		rec := env.do("GET", "/api/rules/auto?instance="+name, nil)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("auto rules: %d %s", rec.Code, rec.Body)
 		}
@@ -462,14 +461,14 @@ func TestAutoRulesAntiLockout(t *testing.T) {
 		}
 		return strings.Join(out, "|")
 	}
-	if got, want := get(main.ID), "anti-lockout tcp 22 [192.168.1.0/24]|anti-lockout tcp 8443 [192.168.1.0/24]"; got != want {
+	if got, want := get(main.Name), "anti-lockout tcp 22 [192.168.1.0/24]|anti-lockout tcp 8443 [192.168.1.0/24]"; got != want {
 		t.Errorf("default: got %q, want %q", got, want)
 	}
-	if got := get(env.rowID("instances", "guest")); got != "" {
+	if got := get("guest"); got != "" {
 		t.Errorf("anti-lockout belongs to the default instance only: %q", got)
 	}
 	fake.antiLockout = nil
-	if got := get(main.ID); got != "" {
+	if got := get(main.Name); got != "" {
 		t.Errorf("disabled: %q", got)
 	}
 }
@@ -894,7 +893,7 @@ func TestZoneRecordsGrid(t *testing.T) {
 	// The A records show up in the prefix tree, fully qualified.
 	env.post("instance=main/ipam-prefix", map[string]any{"prefix": "192.168.0.0/16"})
 	var tree []ipam.Node
-	_ = json.Unmarshal(env.do("GET", "/api/ipam/tree?instance_id="+itoa(env.rowID("instances", "main")), nil).Body.Bytes(), &tree)
+	_ = json.Unmarshal(env.do("GET", "/api/ipam/tree?instance=main", nil).Body.Bytes(), &tree)
 	var addrs []string
 	for _, n := range tree[0].Children {
 		addrs = append(addrs, n.CIDR+"="+n.DnsName)
@@ -987,7 +986,7 @@ func TestViewerRole(t *testing.T) {
 	}
 	env.login("ann", "a long password")
 
-	if rec := env.do("GET", "/api/instances", nil); rec.Code != http.StatusOK {
+	if rec := env.do("GET", "/api/config/candidate/instance?shallow", nil); rec.Code != http.StatusOK {
 		t.Errorf("viewer read: %d %s", rec.Code, rec.Body)
 	}
 	if rec := env.do("PUT", "/api/me", map[string]string{"full_name": "Ann", "role": "admin"}); rec.Code != http.StatusOK {
@@ -1120,11 +1119,10 @@ func TestInterfaceAddresses(t *testing.T) {
 
 	// The tree shows the interfaces' prefixes and addresses without IPAM
 	// entries.
-	inst := env.rowID("instances", "main")
-	tree := env.do("GET", "/api/ipam/tree?instance_id="+itoa(inst), nil).Body.String()
+	tree := env.do("GET", "/api/ipam/tree?instance=main", nil).Body.String()
 	for _, want := range []string{
-		`"kind":"prefix","id":0,"auto":true,"cidr":"192.168.1.0/24"`,
-		`"kind":"address","id":0,"auto":true,"cidr":"192.168.1.1","interface_id":` + itoa(env.rowID("interfaces", "eth1")),
+		`"kind":"prefix","auto":true,"cidr":"192.168.1.0/24"`,
+		`"kind":"address","auto":true,"cidr":"192.168.1.1","interface":"eth1"`,
 		`"cidr":"2001:db8::/64"`,
 		`"cidr":"fd00:1::/64"`,
 	} {

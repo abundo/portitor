@@ -19,6 +19,12 @@ submodule portitor-types {
     type string;
     description "Free text, one line: no control characters.";
   }
+  typedef cert-key-type {
+    type enumeration {
+      enum ec256; enum ec384; enum rsa2048; enum rsa3072; enum rsa4096;
+    }
+    description "A certificate's key type (fwconfig.CertKeyTypes).";
+  }
   typedef name {
     type string { length "1..max"; }
     description "A name: not empty, no control characters.";

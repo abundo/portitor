@@ -17,18 +17,17 @@ export const useAuthStore = defineStore('auth', {
     // read-only copy of the primary's (ReplicaBanner).
     replica: (s) => !!s.user?.replica,
     readsAll: (s) => s.user?.role === 'admin' || s.user?.role === 'viewer',
-    // levelOf(id): 'admin', 'viewer' or '' on an instance (access is by
-    // instance name). The server checks the same; this only hides what
-    // would be refused.
-    levelOf: (s) => (id) => {
+    // levelOf(name): 'admin', 'viewer' or '' on a virtual firewall (access
+    // is by name). The server checks the same; this only hides what would
+    // be refused.
+    levelOf: (s) => (name) => {
       if (s.user?.role === 'admin') return 'admin'
-      const name = useInstanceStore().list.find((i) => i.id === id)?.name
       const level = (name && s.user?.access?.[name]) ?? ''
       return level || (s.user?.role === 'viewer' ? 'viewer' : '')
     },
     // canEdit: an admin of the instance selected in the top bar.
     canEdit() {
-      return !this.replica && this.levelOf(useInstanceStore().currentId) === 'admin'
+      return !this.replica && this.levelOf(useInstanceStore().currentName) === 'admin'
     },
     // canDeploy: a global admin, or the admin of an instance (who deploys
     // just their instances).

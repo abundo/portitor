@@ -66,7 +66,7 @@ func TestSNMP(t *testing.T) {
 		len(s.Users) != 1 || s.Users[0].AuthPassword != auth || s.Users[0].PrivPassword != priv {
 		t.Fatalf("snmp %+v", s)
 	}
-	b, _ := json.Marshal(redactDoc(*doc))
+	b, _ := json.Marshal(doc.Redacted())
 	for _, secret := range []string{community, auth, priv} {
 		if strings.Contains(string(b), secret) {
 			t.Errorf("redacted document holds %q", secret)

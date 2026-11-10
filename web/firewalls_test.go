@@ -7,6 +7,8 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/http/httptest"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -14,6 +16,7 @@ import (
 
 	"github.com/abundo/portitor/internal/agentapi"
 	"github.com/abundo/portitor/internal/confview"
+	"github.com/abundo/portitor/internal/datastore"
 	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/models"
 )
@@ -592,5 +595,65 @@ func TestWitnessVoteOutlastsHosts(t *testing.T) {
 				t.Errorf("the witness's vote ends %s before the host's", hostUntil.Sub(pv.until))
 			}
 		})
+	}
+}
+
+// TestFirewallUndo: a firewall's row and its entries in the candidate
+// change together: a new firewall whose host can't be made is not kept,
+// and a delete's undo puts the host and tasks back with their ids.
+func TestFirewallUndo(t *testing.T) {
+	env := newEnv(t)
+	ctx := context.Background()
+	// The candidate has a host for a firewall "two" already, so a new
+	// firewall "two" can't get one.
+	if err := env.srv.editConfig(ctx, func(work *datastore.Tree) error {
+		return work.EditJSON(datastore.Path{{Name: "instance"}}, datastore.EditCreate,
+			[]byte(`{"name":"two-host","firewall":"two","is-default":true}`))
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if rec := env.do("POST", "/api/firewalls", map[string]any{"name": "two"}); rec.Code/100 == 2 {
+		t.Fatalf("firewall without its host: %d %s", rec.Code, rec.Body)
+	}
+	var n int64
+	env.srv.db.Model(&models.Firewall{}).Where("name = ?", "two").Count(&n)
+	if n != 0 {
+		t.Errorf("the firewall was kept without its host")
+	}
+	if err := env.srv.editConfig(ctx, func(work *datastore.Tree) error {
+		return work.Delete(datastore.Path{{Name: "instance", Keys: []string{"two-host"}}})
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if rec := env.do("POST", "/api/firewalls", map[string]any{"name": "three"}); rec.Code != http.StatusCreated {
+		t.Fatalf("new firewall: %d %s", rec.Code, rec.Body)
+	}
+	env.mustCfg("POST", "task", map[string]any{"name": "t3", "firewall": "three", "kind": fwconfig.TaskCommand, "schedule": "0 * * * *", "command": "true"})
+	var fw models.Firewall
+	if err := env.srv.db.Where("name = ?", "three").First(&fw).Error; err != nil {
+		t.Fatal(err)
+	}
+	before, err := env.srv.view(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := env.e.NewContext(httptest.NewRequest("DELETE", "/", nil), httptest.NewRecorder())
+	undo, err := env.srv.deleteFirewall(c, &fw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v, _ := env.srv.view(ctx); slices.ContainsFunc(v.Instances, func(in models.Instance) bool { return in.Name == "three" }) {
+		t.Fatal("the host is still there")
+	}
+	if err := undo(); err != nil {
+		t.Fatal(err)
+	}
+	after, err := env.srv.view(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(before.Instances, after.Instances) || !reflect.DeepEqual(before.Tasks, after.Tasks) {
+		t.Errorf("undo:\n%+v\n%+v\nwant\n%+v\n%+v", after.Instances, after.Tasks, before.Instances, before.Tasks)
 	}
 }

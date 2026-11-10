@@ -93,7 +93,7 @@ func TestOpenVPN(t *testing.T) {
 	if got := strings.Join(o.TCPAddresses, " "); got != "10.9.0.1/24 fd00:9::1/64" {
 		t.Errorf("tcp addresses %s", got)
 	}
-	b, _ := json.Marshal(redactDoc(*doc))
+	b, _ := json.Marshal(doc.Redacted())
 	if strings.Contains(string(b), "Static key") || strings.Contains(string(b), hashes["alice"]) {
 		t.Error("redacted document holds secrets")
 	}
@@ -171,7 +171,7 @@ func TestOpenVPN(t *testing.T) {
 	if err := doc.Validate(); err != nil {
 		t.Error(err)
 	}
-	if b, _ := json.Marshal(redactDoc(*doc)); strings.Contains(string(b), secret) {
+	if b, _ := json.Marshal(doc.Redacted()); strings.Contains(string(b), secret) {
 		t.Error("redacted document holds the TOTP secret")
 	}
 	if !strings.Contains(client(), "auth-user-pass\nauth-nocache\nstatic-challenge \"Authenticator code\" 1\n") {

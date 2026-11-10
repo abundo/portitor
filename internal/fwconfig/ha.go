@@ -38,10 +38,10 @@ type HA struct {
 	// Secret is shared by the pair for the heartbeat (/v1/ha/heartbeat)
 	// and the copy of the certificates; the secondary's portitor-config
 	// copies the primary's database with it too.
-	Secret string `json:"secret"`
+	Secret string `json:"secret" secret:"true"`
 	// WitnessSecret, when the pair's witness is external (portitor-web on
 	// a third host), opens GET /v1/ha and POST /v1/ha/vote to it alone.
-	WitnessSecret string `json:"witness_secret,omitempty"`
+	WitnessSecret string `json:"witness_secret,omitempty" secret:"true"`
 	// PeerConfig is the peer's portitor-config (https://...), its tls_cert
 	// pinned by PeerConfigFingerprint: where the secondary's
 	// portitor-config copies the configuration from. Empty: none.

@@ -5,6 +5,7 @@ package web
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"net/url"
 	"slices"
 	"strings"
 	"time"
@@ -22,41 +24,38 @@ import (
 	"github.com/abundo/portitor/internal/cron"
 	"github.com/abundo/portitor/internal/datastore"
 	"github.com/abundo/portitor/internal/fwconfig"
+	"github.com/abundo/portitor/internal/schema"
 	"github.com/abundo/portitor/internal/wgkeys"
 	"github.com/abundo/portitor/models"
 )
 
 // Actions on the configuration's entries: what is generated or done
 // rather than set (a WireGuard interface's new keys, a certificate made or
-// renewed, a peer's client config, a download started), by the entry's
-// path:
+// renewed, a download started), by the entry's path:
 //
-//	GET  /api/config/<ds>/<path>?action=<view>      a view (a client config, the next free address)
-//	POST /api/config/candidate/<path>?action=<do>  a change or an operation
+//	GET  /api/config/<ds>/<path>?action=<view>      a view (the next free address)
+//	POST /api/config/candidate/<path>?action=<do>  an operation or a change
 //
-// An action is registered by the list's schema path; rename and move are
-// every entry's (configapi.go).
+// The YANG modules declare them (action, with px:action its kind and its
+// typed input and output): the CLI's tools and NETCONF's <action> run them
+// through here too (Env.Action). Their handlers are here, by the list's
+// schema path and the action's name; the input they get is checked and
+// canonical (datastore.ReadValues), and what they answer is the output's
+// JSON. A view asked of a whole list (its path without keys) gets the
+// list's parent as its entry and answers each entry's output by key, if
+// it can (chain).
+//
+// The GUI's own actions, which answer a file (a client config, a
+// download, a bundle), fit no other frontend and are not in YANG
+// (guiActions): views, of a GET. Rename and move are every entry's
+// (configapi.go).
 
-// configAction is one action of a list's entries.
-type configAction struct {
-	// view: a GET, of the datastore asked for; else a POST, of the
-	// candidate.
-	view bool
-	// op: a POST that changes no configuration (the agent renews a
-	// certificate, downloads an IP list): run on a copy of the candidate,
-	// not under its lock.
-	op bool
-	// write: the user must be allowed to change the entry (else to read
-	// it).
-	write bool
-	// create: a change that makes the entry when it isn't there.
-	create bool
-	run    func(s *Server, c *echo.Context, a *actionCtx) error
-}
+// actionHandler runs an action.
+type actionHandler func(s *Server, c *echo.Context, a *actionCtx) error
 
 // actionCtx is what an action gets: the tree it acts on (a copy for a
-// view, the candidate's working copy for a change), the entry and its
-// path.
+// view or operation, the candidate's working copy for a change), the entry
+// and its path.
 type actionCtx struct {
 	tree  *datastore.Tree
 	path  datastore.Path
@@ -69,23 +68,57 @@ type actionCtx struct {
 	changed bool
 }
 
-var configActions = map[string]map[string]configAction{}
+// actionHandlers are the YANG actions' handlers, by list path and name
+// ("/instance/interface wg-rekey"); TestActionHandlers checks that each
+// action has one, and each one its action.
+var actionHandlers = map[string]actionHandler{}
 
-func registerAction(listPath, name string, a configAction) {
-	if configActions[listPath] == nil {
-		configActions[listPath] = map[string]configAction{}
-	}
-	configActions[listPath][name] = a
+func registerAction(listPath, name string, h actionHandler) {
+	actionHandlers[listPath+" "+name] = h
 }
 
-// lookupAction is the action named on the entry at p, if there is one.
-func lookupAction(t *datastore.Tree, p datastore.Path, name string) (configAction, bool) {
+// guiAction is one of the GUI's own actions: a view (GET) that answers a
+// file. write: the user must be allowed to change the entry (it hands out
+// its secrets), else to read it.
+type guiAction struct {
+	write bool
+	run   actionHandler
+}
+
+var guiActions = map[string]guiAction{}
+
+func registerGUIAction(listPath, name string, a guiAction) {
+	guiActions[listPath+" "+name] = a
+}
+
+// resolvedAction is an action as runAction runs it.
+type resolvedAction struct {
+	kind  string       // a schema.Action* kind
+	write bool         // the user must be allowed to change the entry
+	input *schema.Node // the input's schema; nil for a GUI action
+	run   actionHandler
+}
+
+// lookupAction is the action named on the entry (or list) at p, if there
+// is one.
+func lookupAction(t *datastore.Tree, p datastore.Path, name string) (resolvedAction, bool) {
 	ss, err := datastore.ResolveAll(t.Root.S, p)
 	if err != nil || len(ss) == 0 {
-		return configAction{}, false
+		return resolvedAction{}, false
 	}
-	a, ok := configActions[ss[len(ss)-1].Path()][name]
-	return a, ok
+	list := ss[len(ss)-1]
+	key := list.Path() + " " + name
+	if a := list.Action(name); a != nil {
+		h := actionHandlers[key]
+		if h == nil {
+			return resolvedAction{}, false
+		}
+		return resolvedAction{kind: a.Kind, write: a.Writes(), input: a.Input, run: h}, true
+	}
+	if g, ok := guiActions[key]; ok {
+		return resolvedAction{kind: schema.ActionView, write: g.write, run: g.run}, true
+	}
+	return resolvedAction{}, false
 }
 
 // runAction runs the action named on the entry of the request's path.
@@ -109,8 +142,18 @@ func (s *Server) runAction(c *echo.Context, ds string, p datastore.Path, name st
 	if !ok {
 		return errJSON(c, http.StatusBadRequest, "no action "+name+" here")
 	}
-	if a.view != (c.Request().Method == http.MethodGet) {
+	view, op := a.kind == schema.ActionView, a.kind == schema.ActionOperation
+	if view != (c.Request().Method == http.MethodGet) {
 		return errJSON(c, http.StatusMethodNotAllowed, "action "+name+": the wrong method")
+	}
+	if a.input != nil {
+		in, err := datastore.ReadValues(a.input, body)
+		if err != nil {
+			return errJSON(c, http.StatusBadRequest, "action "+name+": "+err.Error())
+		}
+		if body, err = datastore.ValuesJSON(in); err != nil {
+			return err
+		}
 	}
 	if len(p) > 0 && !acc.CanRead(p[:1]) {
 		return errJSON(c, http.StatusNotFound, "not found")
@@ -118,9 +161,9 @@ func (s *Server) runAction(c *echo.Context, ds string, p datastore.Path, name st
 	if a.write && !acc.CanWrite(p) {
 		return errJSON(c, http.StatusForbidden, "you may not change "+p.String(tree.Root.S))
 	}
-	if a.view || a.op {
+	if view || op {
 		find, list := p, false
-		if a.view && len(p) > 0 && p[len(p)-1].Keys == nil {
+		if view && len(p) > 0 && p[len(p)-1].Keys == nil {
 			find, list = p[:len(p)-1], true
 		}
 		n, _, err := tree.Find(find)
@@ -146,7 +189,7 @@ func (s *Server) runAction(c *echo.Context, ds string, p datastore.Path, name st
 	err = t.store.Edit(ctx, "", func(work *datastore.Tree) error {
 		before := work.Clone()
 		n, _, err := work.Find(p)
-		if err == nil && n == nil && a.create {
+		if err == nil && n == nil && a.kind == schema.ActionCreate {
 			n, err = work.Ensure(p)
 		}
 		if err != nil || n == nil {
@@ -198,20 +241,22 @@ func delegate(h echo.HandlerFunc) func(s *Server, c *echo.Context, a *actionCtx)
 }
 
 func init() {
-	registerAction("/instance/interface/wireguard-peer", "client-config", configAction{view: true, write: true, run: delegateM((*Server).handleWgClientConfig)})
-	registerAction("/instance/interface", "wg-next-free", configAction{view: true, run: delegateM((*Server).handleWgNextFree)})
-	registerAction("/instance/interface", "openvpn-client", configAction{view: true, write: true, run: delegateM((*Server).handleOpenVPNClientConfig)})
-	registerAction("/instance/interface", "wg-rekey", configAction{write: true, run: wgRekey})
-	registerAction("/instance/interface", "move-to", configAction{write: true, run: moveInterface})
-	registerAction("/instance/certificate", "chain", configAction{view: true, run: certChain})
-	registerAction("/instance/certificate", "download", configAction{view: true, write: true, run: delegateM((*Server).handleCertificateDownload)})
-	registerAction("/instance/certificate", "renew", configAction{op: true, write: true, run: delegateM((*Server).handleCertificateRenew)})
-	registerAction("/instance/ipam-prefix", "next-free", configAction{view: true, run: delegateM((*Server).handleNextFree)})
-	registerAction("/ip-list", "refresh", configAction{op: true, write: true, run: delegateM((*Server).handleIPListRefresh)})
-	registerAction("/instance/dns-blocklist", "refresh", configAction{op: true, write: true, run: delegateM((*Server).handleDNSBlocklistRefresh)})
-	registerAction("/task", "run", configAction{op: true, write: true, run: delegateM((*Server).handleTaskRun)})
-	registerAction("/instance", "bundle", configAction{view: true, write: true, run: delegateM((*Server).handleExportBundle)})
-	registerAction("/instance/certificate", "generate", configAction{write: true, create: true, run: generateCert})
+	registerAction("/instance/interface", "wg-rekey", wgRekey)
+	registerAction("/instance/interface", "move-to", moveInterface)
+	registerAction("/instance/interface", "wg-next-free", delegateM((*Server).handleWgNextFree))
+	registerAction("/instance/certificate", "chain", certChain)
+	registerAction("/instance/certificate", "renew", delegateM((*Server).handleCertificateRenew))
+	registerAction("/instance/certificate", "generate", generateCert)
+	registerAction("/instance/ipam-prefix", "next-free", delegateM((*Server).handleNextFree))
+	registerAction("/ip-list", "update", delegateM((*Server).handleIPListRefresh))
+	registerAction("/ip-list", "schedule", ipListSchedule)
+	registerAction("/instance/dns-blocklist", "update", delegateM((*Server).handleDNSBlocklistRefresh))
+	registerAction("/task", "run", delegateM((*Server).handleTaskRun))
+
+	registerGUIAction("/instance/interface/wireguard-peer", "client-config", guiAction{write: true, run: delegateM((*Server).handleWgClientConfig)})
+	registerGUIAction("/instance/interface", "openvpn-client", guiAction{write: true, run: delegateM((*Server).handleOpenVPNClientConfig)})
+	registerGUIAction("/instance/certificate", "download", guiAction{write: true, run: delegateM((*Server).handleCertificateDownload)})
+	registerGUIAction("/instance", "bundle", guiAction{write: true, run: delegateM((*Server).handleExportBundle)})
 }
 
 // delegateM is delegate for a method of the server.
@@ -350,9 +395,6 @@ func generateCert(s *Server, c *echo.Context, a *actionCtx) error {
 	if !g.CA {
 		cn = dnsName(cn)
 	}
-	if len(cn) > 64 || strings.ContainsFunc(cn, func(r rune) bool { return r < 0x20 || r == 0x7f }) {
-		return errJSON(c, http.StatusBadRequest, "common-name: at most 64 characters, no control characters")
-	}
 	req := acme.CertRequest{KeyType: g.KeyType, Days: g.Days, CA: g.CA}
 	if g.CA {
 		if g.SignedBy != "" {
@@ -376,15 +418,6 @@ func generateCert(s *Server, c *echo.Context, a *actionCtx) error {
 		}
 	}
 	req.CommonName, req.Names = cn, names
-	if req.KeyType == "" {
-		req.KeyType = fwconfig.CertKeyTypes[0]
-	}
-	if !slices.Contains(fwconfig.CertKeyTypes, req.KeyType) {
-		return errJSON(c, http.StatusBadRequest, "key-type: one of "+strings.Join(fwconfig.CertKeyTypes, ", "))
-	}
-	if g.Days < 1 || g.Days > 36500 {
-		return errJSON(c, http.StatusBadRequest, "days: 1-36500")
-	}
 	if g.SignedBy != "" {
 		ca := hostCA(a.tree, in, g.SignedBy)
 		if ca == nil {
@@ -426,10 +459,6 @@ func hostCA(t *datastore.Tree, in *datastore.Node, name string) *datastore.Node 
 	return nil
 }
 
-func init() {
-	registerAction("/ip-list", "schedule", configAction{write: true, run: ipListSchedule})
-}
-
 // ipListSchedule gives an IP list a task downloading it on schedule, on
 // each firewall but an HA secondary, named after the list (and the
 // firewall, with several).
@@ -468,4 +497,65 @@ func ipListSchedule(s *Server, c *echo.Context, a *actionCtx) error {
 	}
 	a.changed = true
 	return c.JSON(http.StatusOK, map[string]any{"tasks": made})
+}
+
+// configURLPath is p as /api/config's path (RFC 8040):
+// instance=main/interface=eth1; parseConfigPath reads it.
+func configURLPath(p datastore.Path) string {
+	parts := make([]string, len(p))
+	for i, e := range p {
+		parts[i] = url.PathEscape(e.Name)
+		if e.Keys != nil {
+			keys := make([]string, len(e.Keys))
+			for j, k := range e.Keys {
+				keys[j] = strings.ReplaceAll(url.PathEscape(k), ",", "%2C")
+			}
+			parts[i] += "=" + strings.Join(keys, ",")
+		}
+	}
+	return strings.Join(parts, "/")
+}
+
+// actionAs is the CLI's and NETCONF's Env.Action for the user u: the API's
+// action, run in-process as u, its output read by the action's schema.
+func (s *Server) actionAs(u *models.User) func(ctx context.Context, p datastore.Path, name string, input *datastore.Node, candidate bool) (*datastore.Node, []string, error) {
+	return func(ctx context.Context, p datastore.Path, name string, input *datastore.Node, candidate bool) (*datastore.Node, []string, error) {
+		t, err := s.tree()
+		if err != nil {
+			return nil, nil, err
+		}
+		ss, err := datastore.ResolveAll(t.schema, p)
+		if err != nil || len(ss) == 0 || p[len(p)-1].Keys == nil {
+			return nil, nil, fmt.Errorf("%s: not an entry", p.CLI())
+		}
+		a := ss[len(ss)-1].Action(name)
+		if a == nil {
+			return nil, nil, fmt.Errorf("%s has no action %s", ss[len(ss)-1].Name, name)
+		}
+		method, ds, body := http.MethodPost, "candidate", []byte(nil)
+		if a.Kind == schema.ActionView {
+			method = http.MethodGet
+			if !candidate {
+				ds = "running"
+			}
+		} else if input != nil {
+			if body, err = datastore.ValuesJSON(input); err != nil {
+				return nil, nil, err
+			}
+		}
+		rec := s.recordAs(ctx, u, method, "/api/config/"+ds+"/"+configURLPath(p)+"?action="+url.QueryEscape(name), body)
+		out, _ := io.ReadAll(rec.Result().Body)
+		if rec.Code/100 != 2 {
+			return nil, nil, errors.New(apiError(out))
+		}
+		var warnings []string
+		if w := rec.Header().Get("X-Portitor-Warnings"); w != "" {
+			warnings = strings.Split(w, "; ")
+		}
+		output, err := datastore.ReadValues(a.Output, out)
+		if err != nil {
+			return nil, warnings, fmt.Errorf("action %s answered what its output isn't: %w", name, err)
+		}
+		return output, warnings, nil
+	}
 }

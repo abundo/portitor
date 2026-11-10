@@ -34,7 +34,7 @@ const familyItems = [
   { label: 'IPv6', value: 'ipv6' },
 ]
 watch(
-  () => store.currentId,
+  () => store.currentName,
   () => (form.interface = NONE),
 )
 

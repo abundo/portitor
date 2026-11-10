@@ -58,7 +58,7 @@ const defaults = () => ({
   redistribute: [],
 })
 async function load() {
-  if (!store.currentId) return
+  if (!store.currentName) return
   try {
     const rows = await isisConfig.list()
     const row = rows.find(inVrfKey)
@@ -69,7 +69,7 @@ async function load() {
     toast.add({ title: errMsg(err, 'Failed to load IS-IS'), color: 'error' })
   }
 }
-watch(() => store.currentId, load, { immediate: true })
+watch(() => store.currentName, load, { immediate: true })
 
 async function save() {
   saving.value = true
@@ -459,7 +459,7 @@ const ifDefaults = {
       title="IS-IS interfaces"
       description="The interfaces IS-IS runs on, and their options. Link ends between virtual firewalls are interfaces too."
       :api="isisInterfaces"
-      :params="{ _vf: store.currentId }"
+      :params="{ _vf: store.currentName }"
       :row-filter="(i) => inVrf(i.name)"
       :columns="ifColumns"
       :fields="ifFields"

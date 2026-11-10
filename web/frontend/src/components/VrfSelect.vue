@@ -7,11 +7,13 @@
 // ones, so unsaved changes are asked about first, as for another virtual
 // firewall.
 import { confirmDiscard } from '@/composables/useFormGuard'
+import { ALL_VRFS } from '@/composables/useVrfChoice'
 
 defineProps({
   items: { type: Array, required: true },
 })
-const model = defineModel({ type: Number, required: true })
+// The model is a VRF's name, '' the main table, ALL_VRFS all of them.
+const model = defineModel({ type: String, required: true })
 
 async function choose(v) {
   if (v !== model.value && (await confirmDiscard())) model.value = v
@@ -20,7 +22,7 @@ async function choose(v) {
 
 <template>
   <USelect
-    v-if="items.some((i) => i.value > 0)"
+    v-if="items.some((i) => i.value && i.value !== ALL_VRFS)"
     :model-value="model"
     :items="items"
     class="w-64"

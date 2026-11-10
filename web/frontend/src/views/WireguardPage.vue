@@ -345,7 +345,7 @@ async function importFile(ev) {
     )
     if (!ok) return
     const r = await api.wgImport({
-      instance_id: store.currentId,
+      instance: store.currentName,
       name,
       config,
       overwrite: !!existing,
@@ -624,7 +624,7 @@ function copy(text) {
               noun="peer"
               description="Remote devices and sites. Changes take effect on the next commit."
               :api="wgPeers"
-              :params="{ _vf: store.currentId, _iface: selected.id }"
+              :params="{ _vf: store.currentName, _iface: selected.id }"
               :columns="columns"
               :fields="fields"
               :defaults="peerDefaults"

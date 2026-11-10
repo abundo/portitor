@@ -5,10 +5,10 @@ import { BASE } from '@/utils/base'
 
 // Opens the console of an instance (a shell in its network namespace) in its
 // own browser window, or brings that instance's open window to the front.
-export function openConsoleWindow(instanceId) {
+export function openConsoleWindow(instance) {
   const w = window.open(
-    `${BASE}console/window?instance=${encodeURIComponent(instanceId)}`,
-    `portitor-console-${instanceId}`,
+    `${BASE}console/window?instance=${encodeURIComponent(instance)}`,
+    `portitor-console-${instance}`,
     'popup,width=960,height=600',
   )
   w?.focus()
