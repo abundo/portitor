@@ -161,9 +161,9 @@ const fields = [
   {
     key: 'ha_gateway',
     label: 'Management gateway',
-    placeholder: '172.25.38.10',
+    placeholder: '172.25.38.10 or peer',
     show: (f) => f.ha_role === 'management',
-    hint: 'What the host itself uses while its traffic interfaces are closed. It must not be the pair: the standby reaches the witness and updates through it.',
+    hint: 'What the host itself uses while its traffic interfaces are closed: the standby reaches updates, NTP and downloads through it. An address on the management network that is not one of the pair, or peer: each host uses the other, and the active host forwards and masquerades what the standby sends.',
   },
   {
     key: 'parent',

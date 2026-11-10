@@ -193,6 +193,7 @@ func Nftables(in *fwconfig.Instance, lockout *AntiLockout, paths Paths) string {
 	writeInvalidDrop(b, in, fwconfig.ChainForward)
 	writeVRFLabels(b, in, fwconfig.ChainForward)
 	b.WriteString("\t\tmeta l4proto ipv6-icmp icmpv6 type { destination-unreachable, packet-too-big, time-exceeded, parameter-problem } accept\n")
+	writeHAPeerGateway(b, in, fwconfig.ChainForward)
 	// Port forwards are accepted after the rules, so a rule can drop
 	// what a DNAT would let in.
 	writeRules(b, in, fwconfig.ChainForward)
@@ -302,6 +303,7 @@ func Nftables(in *fwconfig.Instance, lockout *AntiLockout, paths Paths) string {
 		}
 	}
 	writeNAT64Masquerade(b, in)
+	writeHAPeerGateway(b, in, "postrouting_nat")
 	b.WriteString("\t}\n")
 	b.WriteString("}\n")
 	for _, name := range lists {

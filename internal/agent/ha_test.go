@@ -236,6 +236,16 @@ func TestPlanHARules(t *testing.T) {
 	if got = lines(planHARules("-6", m, true, nil)); len(got) != 0 {
 		t.Errorf("ipv6: %q", got)
 	}
+	// With the peer as the gateway, the open host keeps none: its own
+	// traffic leaves by its traffic interfaces.
+	pm := *m
+	pm.peer = true
+	if got = lines(planHARules("-4", &pm, false, have)); len(got) != 3 {
+		t.Errorf("peer gateway, open: %q", got)
+	}
+	if got = lines(planHARules("-4", &pm, true, nil)); !slices.Equal(got, want) {
+		t.Errorf("peer gateway, closed: %q", got)
+	}
 }
 
 func TestPlanHARoutes(t *testing.T) {

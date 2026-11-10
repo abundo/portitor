@@ -19,7 +19,9 @@ import (
 // management address always uses table fwconfig.HAMgmtTable, and on a
 // closed host everything the host itself sends does too, but for the
 // routes in main more specific than a default route (the HA link's).
-// NTP, apt, ACME and syslog then work on the standby. Forwarded traffic is
+// NTP, apt, ACME and syslog then work on the standby. With the peer as the
+// gateway (Interface.HAGatewayPeer) the table is the closed host's alone:
+// the open one forwards for it. Forwarded traffic is
 // not touched: the gate drops it. The rules are proto 99, the agent's.
 const (
 	haSourcePref   = 1000 // from <management address> lookup the table
@@ -32,6 +34,10 @@ type haMgmt struct {
 	dev     string
 	gateway string
 	addrs   []netip.Prefix
+	// peer: the gateway is the peer's management address, used only while
+	// closed: the open host's own traffic leaves by its traffic interfaces,
+	// and what it sends from its management address too.
+	peer bool
 }
 
 // haMgmtOf is the document's management routing, nil outside a pair.
@@ -52,7 +58,7 @@ func haMgmtOf(doc *fwconfig.Document) *haMgmt {
 	if err != nil {
 		return nil
 	}
-	m := &haMgmt{dev: ifc.Name, gateway: ifc.HAGateway}
+	m := &haMgmt{dev: ifc.Name, gateway: ifc.HAGateway, peer: ifc.HAGatewayPeer}
 	for _, s := range ifc.Addresses {
 		if p, err := fwconfig.ParseInterfaceAddress(s); err == nil && p.Addr().Is4() == gw.Is4() {
 			m.addrs = append(m.addrs, p)
@@ -95,6 +101,9 @@ func planHARules(fam string, m *haMgmt, closed bool, have []ipRule) []command {
 	var want []rule
 	if m != nil && m.family() == fam {
 		for _, a := range m.addrs {
+			if m.peer && !closed {
+				break
+			}
 			want = append(want, rule{haSourcePref, a.Addr().String(), []string{"from", a.Addr().String(), "lookup", table}})
 		}
 		if closed {

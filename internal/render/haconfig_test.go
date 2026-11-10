@@ -50,3 +50,29 @@ func TestHAConfigRule(t *testing.T) {
 		t.Error("the portitor-config peer rule belongs to the default instance only")
 	}
 }
+
+func TestHAPeerGateway(t *testing.T) {
+	doc := fwconfig.SampleHA(fwconfig.SampleDocument())
+	opts := Options{Paths: DefaultPaths(), Units: DefaultUnits()}
+	b, err := Render(doc, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(mustFile(t, b, "/etc/nftables.d/portitor.nft"), HAPeerGatewayService) {
+		t.Error("an address as the gateway forwards nothing")
+	}
+	mgmt := doc.Instances[0].HAInterface(fwconfig.HARoleManagement)
+	mgmt.HAGateway, mgmt.HAGatewayPeer = "192.0.2.2", true
+	if b, err = Render(doc, opts); err != nil {
+		t.Fatal(err)
+	}
+	nft := mustFile(t, b, "/etc/nftables.d/portitor.nft")
+	for _, want := range []string{
+		`iifname "mgmt0" ip saddr 192.0.2.2 oifname != "mgmt0" accept comment "auto: ha peer gateway"`,
+		`ip saddr 192.0.2.2 oifname != "mgmt0" counter masquerade comment "auto: ha peer gateway"`,
+	} {
+		if !strings.Contains(nft, want) {
+			t.Errorf("missing %q:\n%s", want, nft)
+		}
+	}
+}

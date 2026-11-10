@@ -202,6 +202,10 @@ type Interface struct {
 	// HAGateway is the management interface's gateway, for what the host
 	// itself sends while its traffic interfaces are closed.
 	HAGateway string `json:"ha_gateway,omitempty"`
+	// HAGatewayPeer says HAGateway is the peer's management address: the
+	// host uses it only while closed, and the open host forwards and
+	// masquerades what comes from it (HAPeerGateway).
+	HAGatewayPeer bool `json:"ha_gateway_peer,omitempty"`
 	// HAMonitor counts the interface's carrier in the host's health: a
 	// standby with more monitored interfaces up takes over.
 	HAMonitor bool `json:"ha_monitor,omitempty"`

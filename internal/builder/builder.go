@@ -293,22 +293,23 @@ func buildPeer(in Input, generation int64, only map[string]bool, firewallID uint
 				mac = fwconfig.DeriveHAMAC(ha.Secret, mif.Name)
 			}
 			ifc := fwconfig.Interface{
-				Name:         mif.Name,
-				Kind:         mif.Kind,
-				Description:  mif.Description,
-				Enabled:      mif.Enabled,
-				Parent:       mif.Parent,
-				VLANID:       mif.VlanID,
-				Members:      []string(mif.Members),
-				VRF:          mif.Vrf,
-				MTU:          mif.Mtu,
-				IPv4Mode:     mif.Ipv4Mode,
-				Addresses:    []string(mif.Addresses),
-				IPv6AcceptRA: mif.Ipv6AcceptRA,
-				HARole:       mif.HaRole,
-				HAGateway:    mif.HaGateway,
-				MAC:          mac,
-				HAMonitor:    mac != "" && mif.HaMonitor,
+				Name:          mif.Name,
+				Kind:          mif.Kind,
+				Description:   mif.Description,
+				Enabled:       mif.Enabled,
+				Parent:        mif.Parent,
+				VLANID:        mif.VlanID,
+				Members:       []string(mif.Members),
+				VRF:           mif.Vrf,
+				MTU:           mif.Mtu,
+				IPv4Mode:      mif.Ipv4Mode,
+				Addresses:     []string(mif.Addresses),
+				IPv6AcceptRA:  mif.Ipv6AcceptRA,
+				HARole:        mif.HaRole,
+				HAGateway:     pair.mgmtGateway(mif.HaGateway),
+				HAGatewayPeer: mif.HaGateway == fwconfig.HAGatewayPeer && mif.HaRole == fwconfig.HARoleManagement,
+				MAC:           mac,
+				HAMonitor:     mac != "" && mif.HaMonitor,
 				// Only meaningful for a DHCP client.
 				DHCPNoDefaultRoute: mif.DhcpNoDefaultRoute && mif.Ipv4Mode == fwconfig.ModeDHCP,
 				DHCPv6:             mif.Dhcpv6,
@@ -1047,6 +1048,7 @@ func buildPeer(in Input, generation int64, only map[string]bool, firewallID uint
 type haPair struct {
 	link       string // the interface
 	this, peer string // IPv6 link-local addresses on it
+	gateway    string // the management gateway "peer": the other host's address
 }
 
 // otherNode is the pair's other node.
@@ -1055,6 +1057,15 @@ func otherNode(node string) string {
 		return fwconfig.HAPrimary
 	}
 	return fwconfig.HASecondary
+}
+
+// mgmtGateway is the management gateway as entered, "peer" resolved to the
+// other host's address ("" outside a pair, which validation refuses).
+func (p haPair) mgmtGateway(gw string) string {
+	if gw == fwconfig.HAGatewayPeer {
+		return p.gateway
+	}
+	return gw
 }
 
 // pairLinks gives the host its own addresses on the pair's two links
@@ -1093,6 +1104,15 @@ func pairLinks(d *data, firewallID uint, peer bool, ha *fwconfig.HA, addf func(s
 			pb, err2 := fwconfig.ParseInterfaceAddress(ifc.PeerAddresses[j])
 			if err1 != nil || err2 != nil || pa.Masked() != pb.Masked() || pa.Addr() == pb.Addr() {
 				addf("HA: interface %s: peer address %s is not another address of %s", ifc.Name, ifc.PeerAddresses[j], a)
+			}
+		}
+		if ifc.HaGateway == fwconfig.HAGatewayPeer && len(ifc.PeerAddresses) > 0 {
+			other := ifc.PeerAddresses[0]
+			if peer {
+				other = ifc.Addresses[0]
+			}
+			if p, err := fwconfig.ParseInterfaceAddress(other); err == nil {
+				out.gateway = p.Addr().String()
 			}
 		}
 		if peer {

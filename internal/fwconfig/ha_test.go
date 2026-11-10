@@ -80,6 +80,7 @@ func TestValidateHAInterfaces(t *testing.T) {
 		{"gateway elsewhere", func(d *Document) { iface(&d.Instances[0], HARoleManagement).HAGateway = "198.51.100.1" }, "is not on the interface"},
 		{"gateway is its own address", func(d *Document) { iface(&d.Instances[0], HARoleManagement).HAGateway = "192.0.2.1" }, "is not on the interface"},
 		{"a gateway on the HA link", func(d *Document) { iface(&d.Instances[0], HARoleLink).HAGateway = "192.0.2.130" }, "only the management interface"},
+		{"the peer as a link's gateway", func(d *Document) { iface(&d.Instances[0], HARoleLink).HAGatewayPeer = true }, "only the management interface has the peer"},
 		{"a gateway on a traffic interface", func(d *Document) { d.Instances[0].Interfaces[0].HAGateway = "192.0.2.130" }, "only the management interface"},
 		{"VRRP on a pair", func(d *Document) { d.Instances[1].VRRP = SampleDocument().Instances[1].VRRP }, "VRRP is not used"},
 		{"multicast mac", func(d *Document) { d.Instances[0].Interfaces[0].MAC = "03:11:22:33:44:55" }, "locally administered"},

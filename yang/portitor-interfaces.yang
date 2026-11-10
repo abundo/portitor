@@ -278,7 +278,8 @@ submodule portitor-interfaces {
         description "HaRole makes it one of an HA pair's own two links (fwconfig.Interface.HARole); HaGateway is the management one's gateway.";
       }
       leaf ha-gateway {
-        type ip-address;
+        type union { type ip-address; type enumeration { enum "peer"; } }
+        description "HaGateway is the management interface's gateway; peer is the other host's management address, which forwards and masquerades what the closed host sends.";
       }
       leaf ha-monitor {
         type boolean;

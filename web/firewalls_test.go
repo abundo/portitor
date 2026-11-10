@@ -415,6 +415,25 @@ func instanceID(t *testing.T, env *testEnv, name string) uint {
 	return env.instanceRow(name).ID
 }
 
+// TestFirewallsHAPeerGateway: "peer" as the management gateway is each
+// host's the other's management address.
+func TestFirewallsHAPeerGateway(t *testing.T) {
+	env, agents, pair := haPair(t)
+	env.mustCfg("PATCH", "instance=main/interface=mgmt0", map[string]any{"ha-gateway": fwconfig.HAGatewayPeer})
+	if rec := env.do("POST", "/api/deploy/apply", map[string]any{}); rec.Code != http.StatusOK {
+		t.Fatalf("commit: %d %s", rec.Code, rec.Body)
+	}
+	for _, c := range []struct {
+		id uint
+		gw string
+	}{{1, "192.0.2.3"}, {pair, "192.0.2.1"}} {
+		m := agents[c.id].last().Instance("main").HAInterface(fwconfig.HARoleManagement)
+		if m.HAGateway != c.gw || !m.HAGatewayPeer {
+			t.Errorf("firewall %d: gateway %q peer %v, want %s", c.id, m.HAGateway, m.HAGatewayPeer, c.gw)
+		}
+	}
+}
+
 func TestFirewallsHADegradedCommit(t *testing.T) {
 	env, agents, pair := haPair(t)
 	agents[pair].down = true

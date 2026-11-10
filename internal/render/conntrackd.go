@@ -119,3 +119,29 @@ General {
 `, c.This, c.Peer, fwconfig.ConntrackSyncPort, c.Interface, lock, ctl, c.This, c.Peer)
 	return b.String()
 }
+
+// HAPeerGatewayService is the auto rule by which the open host of a pair
+// is its peer's management gateway (fwconfig.Instance.HAPeerGateway).
+const HAPeerGatewayService = "ha peer gateway"
+
+// writeHAPeerGateway writes, when the pair's hosts are each other's
+// management gateway, the forward chain's accept of what the peer sends
+// from its management address to anywhere but the management network, or
+// (chain "postrouting_nat") its masquerade there. The closed host's gate
+// drops what it would forward, so only the open host does.
+func writeHAPeerGateway(b *strings.Builder, in *fwconfig.Instance, chain string) {
+	dev, addr := in.HAPeerGateway()
+	a, err := netip.ParseAddr(addr)
+	if err != nil {
+		return
+	}
+	fam := "ip"
+	if a.Is6() {
+		fam = "ip6"
+	}
+	if chain == fwconfig.ChainForward {
+		fmt.Fprintf(b, "\t\tiifname %s %s saddr %s oifname != %s accept %s\n", quotedSet([]string{dev}), fam, a, quotedSet([]string{dev}), comment("auto", HAPeerGatewayService))
+		return
+	}
+	fmt.Fprintf(b, "\t\t%s saddr %s oifname != %s counter masquerade %s\n", fam, a, quotedSet([]string{dev}), comment("auto", HAPeerGatewayService))
+}

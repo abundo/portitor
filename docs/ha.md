@@ -64,7 +64,8 @@ By hand, everything is done in the primary's portitor-config.
    `fe80::<id>:1` and `fe80::<id>:2` on a device of its own there. The management
    interface gets its address(es), and under *HA peer addresses* the secondary's, in the
    same prefix and order, and its *Management gateway*, which the host uses for its own
-   traffic while its traffic interfaces are closed; it must not be the pair itself.
+   traffic while its traffic interfaces are closed: a router on the management
+   network, or `peer` (see [The management gateway](#the-management-gateway)).
 2. **The primary's agent URL** under *Admin → Firewalls* is its management address
    (`https://172.25.38.1:8443`), not `127.0.0.1`: the secondary and the witness use it.
    Set its *portitor-config URL* (`https://172.25.38.1:8444`) and *fingerprint*
@@ -163,6 +164,23 @@ the standby's are behind its closed interfaces, so a takeover starts nothing.
 
 Each static traffic prefix has a blackhole route at the highest metric, so traffic for
 the clients of a dead link isn't sent out of the WAN while the standby takes over.
+
+## The management gateway
+
+The traffic interfaces of the standby are closed, so what the host sends itself
+(updates, NTP, ACME, IP list and DNS blocklist downloads, syslog) goes by the
+management interface's *Management gateway*. It is one of two:
+
+- **A router on the management network**, with its own way out. The pair's own
+  traffic then doesn't depend on either host.
+- **`peer`**, when there is no such router (one address from the ISP, say): each host
+  uses the other's management address. The active host forwards what the standby sends
+  from its management address and masquerades it where it leaves (the auto rule *ha
+  peer gateway*), as it does the LAN's. Only the closed host uses the gateway; the
+  active host's own traffic leaves by its traffic interfaces. After a takeover the
+  roles swap with no change. The standby reaches the internet only while the active
+  host and the management network are up, which is when it has traffic to carry
+  anyway.
 
 ## The witness
 

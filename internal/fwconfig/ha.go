@@ -63,6 +63,23 @@ type HA struct {
 	AgentPort int `json:"agent_port,omitempty"`
 }
 
+// HAGatewayPeer, as the management interface's gateway, is the peer's
+// management address (Interface.HAGatewayPeer).
+const HAGatewayPeer = "peer"
+
+// HAPeerGateway is the peer's management address when the pair's hosts
+// are each other's management gateway, "" otherwise, with the interface:
+// the open host forwards and masquerades what comes from it.
+func (in *Instance) HAPeerGateway() (dev, addr string) {
+	if !in.Default {
+		return "", ""
+	}
+	if ifc := in.HAInterface(HARoleManagement); ifc != nil && ifc.HAGatewayPeer {
+		return ifc.Name, ifc.HAGateway
+	}
+	return "", ""
+}
+
 // HAMgmtTable is the routing table of what an HA host sends from its
 // management address, and on the standby all it sends itself: the main
 // table points at traffic interfaces, which are closed there.
@@ -305,6 +322,9 @@ func (v *validator) haInterfaces(d *Document) {
 			}
 			if ifc.MAC != "" && ifc.Kind != KindPhysical {
 				v.addf("%s: interface %s: only a physical interface has a mac", p, ifc.Name)
+			}
+			if ifc.HAGatewayPeer && ifc.HARole != HARoleManagement {
+				v.addf("%s: interface %s: only the management interface has the peer as its gateway", p, ifc.Name)
 			}
 			switch ifc.HARole {
 			case "":
