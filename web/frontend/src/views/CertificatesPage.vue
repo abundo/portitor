@@ -11,7 +11,7 @@ import NeedInstance from '@/components/NeedInstance.vue'
 import SearchInput from '@/components/SearchInput.vue'
 import TagsInput from '@/components/TagsInput.vue'
 import { api } from '@/api'
-import { certificatesOf, dnsUpdatesShallow } from '@/api/config'
+import { certificateAuthorities, certificatesOf, dnsUpdatesShallow } from '@/api/config'
 import { errMsg } from '@/api/http'
 import { useFormGuard } from '@/composables/useFormGuard'
 import { useInstanceRefs } from '@/composables/useInstanceRefs'
@@ -22,10 +22,10 @@ import { ago, when } from '@/utils/time'
 import { useSearch, valuesText } from '@/utils/search'
 
 const { store, ifaceNameItems, ifaceText } = useInstanceRefs()
-// The certificates of the selected virtual firewall, and of its firewall's
-// host (the CAs), in the configuration tree, by name.
+// The certificates of the selected virtual firewall, and the firewall's
+// CAs, in the configuration tree, by name.
 const certificates = certificatesOf(() => store.currentName)
-const hostCertificates = certificatesOf(() => store.host?.name)
+const authorityAPI = certificateAuthorities()
 const auth = useAuthStore()
 const deploy = useDeployStore()
 onMounted(() => deploy.refresh())
@@ -198,7 +198,7 @@ const validity = (row) =>
   states.value[row.name]?.not_after ? states.value[row.name] : row.not_after ? row : null
 async function download(row, format) {
   try {
-    const res = await (row._host ? hostCertificates : certificates).download(row.name, format)
+    const res = await (row._ca ? authorityAPI : certificates).download(row.name, format)
     const name =
       /filename="([^"]+)"/.exec(res.headers['content-disposition'] ?? '')?.[1] ?? row.name
     const url = URL.createObjectURL(res.data)
@@ -280,17 +280,13 @@ const keyTypeItems = [
   { label: 'RSA 3072', value: 'rsa3072' },
   { label: 'RSA 4096', value: 'rsa4096' },
 ]
-// The firewall's CAs: imported certificates of its host that are CAs. They
-// are deployed with the host, so they are kept on the firewall (on both
-// hosts of an HA pair).
-const host = computed(() => store.host)
+// The firewall's CAs (certificate-authority), kept in portitor-config,
+// never deployed.
 const authorities = ref([])
 async function loadCAs() {
-  authorities.value = host.value
-    ? (await hostCertificates.list()).filter((r) => r.is_ca).map((r) => ({ ...r, _host: true }))
-    : []
+  authorities.value = (await authorityAPI.list()).map((r) => ({ ...r, _ca: true }))
 }
-watch(() => host.value?.id, loadCAs, { immediate: true })
+onMounted(loadCAs)
 const issuerItems = computed(() => [
   { label: 'Self-signed', value: 0 },
   ...(auth.isAdmin
@@ -341,26 +337,20 @@ async function saveGenerate() {
   }
 }
 
-// The Certificate authorities tab: the firewall's CAs, on its host, made
-// here or imported with their key. A new CA's gen_* fields go to the API as
-// its generate request.
+// The Certificate authorities tab: the firewall's CAs, made here or
+// imported with their key. A new CA's gen_* fields go to the API as its
+// generate request.
 const caAPI = {
-  ...hostCertificates,
-  list: async () =>
-    (await hostCertificates.list()).filter((r) => r.is_ca).map((r) => ({ ...r, _host: true })),
+  ...authorityAPI,
+  list: async () => (await authorityAPI.list()).map((r) => ({ ...r, _ca: true })),
   create: ({ mode, gen_common_name, gen_key_type, gen_days, ...body }) =>
-    hostCertificates
+    authorityAPI
       .create({
         ...body,
-        source: 'import',
-        enabled: true,
         ...(mode === 'import'
-          ? { import_ca: true }
+          ? {}
           : {
-              fullchain: '',
-              privkey: '',
               generate: {
-                ca: true,
                 common_name: gen_common_name,
                 key_type: gen_key_type,
                 days: Number(gen_days),
@@ -368,8 +358,8 @@ const caAPI = {
             }),
       })
       .finally(loadCAs),
-  update: (id, body) => hostCertificates.update(id, body).finally(loadCAs),
-  remove: (id) => hostCertificates.remove(id).finally(loadCAs),
+  update: (id, body) => authorityAPI.update(id, body).finally(loadCAs),
+  remove: (id) => authorityAPI.remove(id).finally(loadCAs),
 }
 // caPage is the tab's CrudPage: Import CA opens its form in import mode.
 const caPage = ref(null)
@@ -449,7 +439,9 @@ const columns = [
     key: 'interface',
     label: 'Validation',
     format: (r) =>
-      dns01(r) ? `DNS-01 · ${dnsClientName(r.dns_update)}` : `HTTP-01 · ${ifaceText(r.interface ?? '')}`,
+      dns01(r)
+        ? `DNS-01 · ${dnsClientName(r.dns_update)}`
+        : `HTTP-01 · ${ifaceText(r.interface ?? '')}`,
   },
   { key: 'ca', label: 'CA', format: (r) => caLabel(r.ca) },
   { key: 'state', label: 'State' },
@@ -611,9 +603,7 @@ const fields = computed(() => [
                       {{ authorityAt[node.key]?.name ?? node.label }}
                       <div class="text-xs text-muted">
                         {{
-                          authorityAt[node.key]
-                            ? `certificate authority of firewall ${host?.name ?? ''}`
-                            : 'issuer'
+                          authorityAt[node.key] ? 'certificate authority of the firewall' : 'issuer'
                         }}
                       </div>
                     </div>
@@ -752,9 +742,8 @@ const fields = computed(() => [
           ref="caPage"
           title="Certificate authorities"
           noun="certificate authority"
-          :description="`The certificate authorities of firewall ${host?.name ?? ''}, kept on its host. They are deployed with the host like any imported certificate, so they are stored on the firewall itself (on both hosts of an HA pair), and sign the server certificates of the host and its virtual firewalls (Sign, or Create certificate on the Certificate store tab). Export a CA and add it to the trust store of the hosts that should trust those certificates. Global admins manage them.`"
+          description="The firewall's certificate authorities. They stay in Portitor's configuration (on both hosts of an HA pair) and are not deployed; they sign the server certificates of the host and its virtual firewalls (Sign, or Create certificate on the Certificate store tab). Export a CA and add it to the trust store of the hosts that should trust those certificates. Global admins manage them."
           :api="caAPI"
-          :params="{ _vf: host?.id }"
           shared
           :columns="caColumns"
           :fields="caFields"

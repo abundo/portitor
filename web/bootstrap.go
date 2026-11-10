@@ -494,29 +494,37 @@ const bootstrapZone = "home.arpa"
 // template soa-1, the DNS template dns-1 with the firewall as
 // ns1.home.arpa (at the LAN address, if static), and the zone home.arpa,
 // with the firewall as fw.home.arpa (fwRecord). The templates are the
-// instance's, global.
+// firewall's (top level), for every virtual firewall; the instance's own
+// are used where it has them.
 func (b *bootTree) dns(o BootstrapOptions) error {
-	in := b.node()
-	soa := ""
-	if l := in.Lists["dns-soa-template"]; len(l) > 0 {
-		soa = l[0].Leaf("name")
-	} else {
-		soa = "soa-1"
-		if err := b.create(b.at(datastore.Elem{Name: "dns-soa-template"}), map[string]any{"name": soa, "global": true,
-			"mname": "ns1.home.arpa.", "rname": "unknown@home.arpa", "refresh": 86400, "retry": 7200, "expire": 3600000, "minimum": 3600}); err != nil {
-			return err
+	in, root := b.node(), b.work.Root
+	first := func(list string) string {
+		for _, n := range []*datastore.Node{in, root} {
+			if l := n.Lists[list]; len(l) > 0 {
+				return l[0].Leaf("name")
+			}
 		}
+		return ""
 	}
-	tmpl := ""
-	if l := in.Lists["dns-template"]; len(l) > 0 {
-		tmpl = l[0].Leaf("name")
-	} else {
+	tmpl := first("dns-template")
+	if tmpl == "" {
+		// The firewall's template uses the firewall's SOA template.
+		soa := ""
+		if l := root.Lists["dns-soa-template"]; len(l) > 0 {
+			soa = l[0].Leaf("name")
+		} else {
+			soa = "soa-1"
+			if err := b.create(datastore.Path{{Name: "dns-soa-template"}}, map[string]any{"name": soa,
+				"mname": "ns1.home.arpa.", "rname": "unknown@home.arpa", "refresh": 86400, "retry": 7200, "expire": 3600000, "minimum": 3600}); err != nil {
+				return err
+			}
+		}
 		tmpl = "dns-1"
 		ns := map[string]any{"name": "ns1.home.arpa.", "address": ""}
 		if o.Address.IsValid() {
 			ns["address"] = o.Address.Addr().String()
 		}
-		if err := b.create(b.at(datastore.Elem{Name: "dns-template"}), map[string]any{"name": tmpl, "global": true,
+		if err := b.create(datastore.Path{{Name: "dns-template"}}, map[string]any{"name": tmpl,
 			"soa-template": soa, "default-ttl": 3600, "nameserver": []any{ns}}); err != nil {
 			return err
 		}

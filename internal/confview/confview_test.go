@@ -107,9 +107,9 @@ func seed(t *testing.T, db *gorm.DB, add *adder) {
 	add.create(t, &models.BgpNeighbor{InstanceID: host.ID, Address: "192.0.2.1", Enabled: true, BgpPeerSettings: models.BgpPeerSettings{RemoteAs: "65001", Password: "pw"}})
 	add.create(t, &models.RoutePrefixList{InstanceID: host.ID, Name: "lan", Family: "ipv4",
 		Entries: models.JSONList[fwconfig.PrefixListEntry]{{Seq: 10, Action: "permit", Prefix: "192.168.0.0/16", LE: 24}}})
-	soa := models.DnsSoaTemplate{InstanceID: host.ID, Global: true, Name: "std", Mname: "ns1.example.com.", Rname: "hostmaster.example.com.", Refresh: 86400, Retry: 7200, Expire: 3600000, Minimum: 3600}
+	soa := models.DnsSoaTemplate{Name: "std", Mname: "ns1.example.com.", Rname: "hostmaster.example.com.", Refresh: 86400, Retry: 7200, Expire: 3600000, Minimum: 3600}
 	add.create(t, &soa)
-	tmpl := models.DnsTemplate{InstanceID: host.ID, Global: true, Name: "std", SoaTemplateID: soa.ID, DefaultTtl: 3600,
+	tmpl := models.DnsTemplate{Name: "std", SoaTemplateID: soa.ID, DefaultTtl: 3600,
 		Nameservers: models.DnsNameserverList{{Name: "ns1.example.com."}}}
 	add.create(t, &tmpl)
 	zone := models.DnsZone{InstanceID: vf.ID, Name: "blue.example.com", Type: "forward", DnsTemplateID: &tmpl.ID}

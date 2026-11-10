@@ -50,7 +50,7 @@ type colKind uint8
 const (
 	plain colKind = iota
 	leafList
-	ref      // a row id of the entry a leafref or px:global-ref names
+	ref      // a row id of the entry a leafref names
 	external // a row id of a table outside the tree, by name
 )
 
@@ -145,11 +145,9 @@ func (m *Mapping) column(s *schema.Node) (*col, error) {
 		c.kind, c.external = external, ext
 		return c, nil
 	}
-	path := s.Ext["global-ref"]
-	if path == "" {
-		if refs := s.Type.Leafrefs(); len(refs) > 0 {
-			path = refs[0]
-		}
+	var path string
+	if refs := s.Type.Leafrefs(); len(refs) > 0 {
+		path = refs[0]
 	}
 	tgt := datastore.LeafrefTarget(s, path)
 	if tgt == nil || m.byList[tgt.Parent] == nil {
@@ -166,11 +164,7 @@ type Index map[*datastore.Node]int64
 // keyOf is the value a reference leaf takes for the entry tgt: the key
 // its path ends at.
 func keyOf(tgt *datastore.Node, leaf *schema.Node) string {
-	path := leaf.Ext["global-ref"]
-	if path == "" {
-		path = leaf.Type.Leafrefs()[0]
-	}
-	parts := strings.Split(path, "/")
+	parts := strings.Split(leaf.Type.Leafrefs()[0], "/")
 	return tgt.Leaves[parts[len(parts)-1]]
 }
 
@@ -640,26 +634,32 @@ func (m *Mapping) TableOf(s *schema.Node) string {
 }
 
 // Columns are the columns of the table's rows: its id, its parent's and
-// position's, and those of its leaves and JSON lists.
+// position's, and those of its leaves and JSON lists; of every list that
+// maps onto it (a virtual firewall's DNS templates and the firewall's).
 func (m *Mapping) Columns(tbl string) []string {
+	var out []string
+	add := func(c string) {
+		if !slices.Contains(out, c) {
+			out = append(out, c)
+		}
+	}
 	for _, t := range m.tables {
 		if t.name != tbl {
 			continue
 		}
-		out := []string{"id"}
+		add("id")
 		if t.parentCol != "" {
-			out = append(out, t.parentCol)
+			add(t.parentCol)
 		}
 		if t.position != "" {
-			out = append(out, t.position)
+			add(t.position)
 		}
 		for _, c := range t.cols {
-			out = append(out, c.column)
+			add(c.column)
 		}
 		for _, j := range t.jsons {
-			out = append(out, j.column)
+			add(j.column)
 		}
-		return out
 	}
-	return nil
+	return out
 }

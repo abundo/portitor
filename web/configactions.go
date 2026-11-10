@@ -247,6 +247,8 @@ func init() {
 	registerAction("/instance/certificate", "chain", certChain)
 	registerAction("/instance/certificate", "renew", delegateM((*Server).handleCertificateRenew))
 	registerAction("/instance/certificate", "generate", generateCert)
+	registerAction("/certificate-authority", "chain", certChain)
+	registerAction("/certificate-authority", "generate", generateCA)
 	registerAction("/instance/ipam-prefix", "next-free", delegateM((*Server).handleNextFree))
 	registerAction("/ip-list", "update", delegateM((*Server).handleIPListRefresh))
 	registerAction("/ip-list", "schedule", ipListSchedule)
@@ -256,6 +258,7 @@ func init() {
 	registerGUIAction("/instance/interface/wireguard-peer", "client-config", guiAction{write: true, run: delegateM((*Server).handleWgClientConfig)})
 	registerGUIAction("/instance/interface", "openvpn-client", guiAction{write: true, run: delegateM((*Server).handleOpenVPNClientConfig)})
 	registerGUIAction("/instance/certificate", "download", guiAction{write: true, run: delegateM((*Server).handleCertificateDownload)})
+	registerGUIAction("/certificate-authority", "download", guiAction{run: caDownload})
 	registerGUIAction("/instance", "bundle", guiAction{write: true, run: delegateM((*Server).handleExportBundle)})
 }
 
@@ -281,9 +284,9 @@ func wgRekey(s *Server, c *echo.Context, a *actionCtx) error {
 	return c.JSON(http.StatusOK, map[string]string{"wg-public-key": pub})
 }
 
-// certChain is what an imported certificate's chain says (CA or not,
-// issuer, the certification path, validity) and whether it has its key:
-// of the entry, or, asked of the whole list, of each by name.
+// certChain is what an imported certificate's (or a CA's) chain says (CA
+// or not, issuer, the certification path, validity) and whether it has
+// its key: of the entry, or, asked of the whole list, of each by name.
 func certChain(s *Server, c *echo.Context, a *actionCtx) error {
 	type info struct {
 		IsCA      bool       `json:"is-ca"`
@@ -295,7 +298,7 @@ func certChain(s *Server, c *echo.Context, a *actionCtx) error {
 	}
 	of := func(n *datastore.Node) info {
 		in := info{HasKey: n.Leaf("priv-key") != ""}
-		if n.Leaf("source") != fwconfig.CertSourceImport {
+		if n.Leaf("source") != fwconfig.CertSourceImport && n.S.Name != "certificate-authority" {
 			return in
 		}
 		if leaf := fwconfig.ChainLeaf(n.Leaf("full-chain")); leaf != nil {
@@ -309,7 +312,7 @@ func certChain(s *Server, c *echo.Context, a *actionCtx) error {
 		return c.JSON(http.StatusOK, of(a.entry))
 	}
 	out := map[string]info{}
-	for _, e := range a.entry.Lists["certificate"] {
+	for _, e := range a.entry.Lists[a.path[len(a.path)-1].Name] {
 		out[e.Leaf("name")] = of(e)
 	}
 	return c.JSON(http.StatusOK, out)
@@ -353,27 +356,22 @@ func moveInterface(s *Server, c *echo.Context, a *actionCtx) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
-// generateCert makes a certificate's key and chain here: self-signed, a
-// CA (on the firewall's host alone), or signed by a CA of the host of its
-// firewall. The certificate is an imported one from then on.
+// generateCert makes a certificate's key and chain here: self-signed, or
+// signed by one of the firewall's CAs (certificate-authority). The
+// certificate is an imported one from then on.
 func generateCert(s *Server, c *echo.Context, a *actionCtx) error {
 	var g struct {
 		Domains    []string `json:"domains"`
 		CommonName string   `json:"common-name"`
 		KeyType    string   `json:"key-type"`
 		Days       int      `json:"days"`
-		CA         bool     `json:"ca"`
 		SignedBy   string   `json:"signed-by"`
 	}
 	if err := json.Unmarshal(a.body, &g); err != nil {
 		return errJSON(c, http.StatusBadRequest, "the body: "+err.Error())
 	}
-	in := a.entry.Parent
-	if (g.CA || g.SignedBy != "") && !currentAccess(c).isAdmin() {
-		return errJSON(c, http.StatusForbidden, "certificate authorities: global admins only")
-	}
-	if g.CA && in.Leaf("is-default") != "true" {
-		return errJSON(c, http.StatusBadRequest, "a CA belongs to the firewall: add it on the firewall's host, not in a virtual firewall")
+	if g.SignedBy != "" && !currentAccess(c).isAdmin() {
+		return errJSON(c, http.StatusForbidden, "signed by a certificate authority: global admins only")
 	}
 	san := func(d string) bool {
 		_, err := netip.ParseAddr(d)
@@ -391,37 +389,21 @@ func generateCert(s *Server, c *echo.Context, a *actionCtx) error {
 			names = append(names, d)
 		}
 	}
-	cn := strings.TrimSpace(g.CommonName)
-	if !g.CA {
-		cn = dnsName(cn)
+	cn := dnsName(strings.TrimSpace(g.CommonName))
+	if cn != "" && !slices.Contains(names, cn) && san(cn) {
+		names = slices.Insert(names, 0, cn)
 	}
-	req := acme.CertRequest{KeyType: g.KeyType, Days: g.Days, CA: g.CA}
-	if g.CA {
-		if g.SignedBy != "" {
-			return errJSON(c, http.StatusBadRequest, "a CA here is self-signed: it signs server certificates, no other CA")
-		}
-		if len(names) > 0 {
-			return errJSON(c, http.StatusBadRequest, "a CA has no subject alternative names")
-		}
-		if cn == "" {
-			cn = a.entry.Leaf("name")
-		}
-	} else {
-		if cn != "" && !slices.Contains(names, cn) && san(cn) {
-			names = slices.Insert(names, 0, cn)
-		}
-		if len(names) == 0 || len(names) > 100 {
-			return errJSON(c, http.StatusBadRequest, "domains: 1-100 DNS names or IP addresses")
-		}
-		if cn == "" {
-			cn = names[0]
-		}
+	if len(names) == 0 || len(names) > 100 {
+		return errJSON(c, http.StatusBadRequest, "domains: 1-100 DNS names or IP addresses")
 	}
-	req.CommonName, req.Names = cn, names
+	if cn == "" {
+		cn = names[0]
+	}
+	req := acme.CertRequest{KeyType: g.KeyType, Days: g.Days, CommonName: cn, Names: names}
 	if g.SignedBy != "" {
-		ca := hostCA(a.tree, in, g.SignedBy)
+		ca := firewallCA(a.tree, g.SignedBy)
 		if ca == nil {
-			return errJSON(c, http.StatusBadRequest, "signed-by: pick a CA of this firewall")
+			return errJSON(c, http.StatusBadRequest, "signed-by: pick one of the firewall's certificate authorities, with its key")
 		}
 		req.IssuerChain, req.IssuerKey = ca.Leaf("full-chain"), ca.Leaf("priv-key")
 	}
@@ -441,22 +423,46 @@ func generateCert(s *Server, c *echo.Context, a *actionCtx) error {
 	return c.NoContent(http.StatusOK)
 }
 
-// hostCA is the CA certificate name of the host of in's firewall, or nil.
-func hostCA(t *datastore.Tree, in *datastore.Node, name string) *datastore.Node {
-	for _, h := range t.Root.Lists["instance"] {
-		if h.Leaf("is-default") != "true" || h.Leaf("firewall") != in.Leaf("firewall") {
-			continue
-		}
-		ca := h.Entry("certificate", []string{name})
-		if ca == nil || ca.Leaf("source") != fwconfig.CertSourceImport {
-			return nil
-		}
-		if leaf := fwconfig.ChainLeaf(ca.Leaf("full-chain")); leaf == nil || !leaf.IsCA {
-			return nil
-		}
-		return ca
+// generateCA makes one of the firewall's certificate authorities here: a
+// new key and a self-signed CA certificate.
+func generateCA(s *Server, c *echo.Context, a *actionCtx) error {
+	var g struct {
+		CommonName string `json:"common-name"`
+		KeyType    string `json:"key-type"`
+		Days       int    `json:"days"`
 	}
-	return nil
+	if err := json.Unmarshal(a.body, &g); err != nil {
+		return errJSON(c, http.StatusBadRequest, "the body: "+err.Error())
+	}
+	cn := strings.TrimSpace(g.CommonName)
+	if cn == "" {
+		cn = a.entry.Leaf("name")
+	}
+	chain, key, err := acme.MakeCertificate(acme.CertRequest{KeyType: g.KeyType, Days: g.Days, CA: true, CommonName: cn})
+	if err != nil {
+		return errJSON(c, http.StatusBadRequest, err.Error())
+	}
+	a.entry.Leaves["full-chain"], a.entry.Leaves["priv-key"] = chain, key
+	a.changed = true
+	return c.NoContent(http.StatusOK)
+}
+
+// caDownload answers a CA's certificate, as ?format asks (never its key).
+func caDownload(s *Server, c *echo.Context, a *actionCtx) error {
+	return sendCertificate(c, a.entry.Leaf("name"), []byte(a.entry.Leaf("full-chain")))
+}
+
+// firewallCA is the firewall's certificate authority name, with its key,
+// or nil.
+func firewallCA(t *datastore.Tree, name string) *datastore.Node {
+	ca := t.Root.Entry("certificate-authority", []string{name})
+	if ca == nil || ca.Leaf("priv-key") == "" {
+		return nil
+	}
+	if leaf := fwconfig.ChainLeaf(ca.Leaf("full-chain")); leaf == nil || !leaf.IsCA {
+		return nil
+	}
+	return ca
 }
 
 // ipListSchedule gives an IP list a task downloading it on schedule, on

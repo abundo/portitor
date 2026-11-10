@@ -212,8 +212,8 @@ docs and user-facing messages.
   of the tree with its secrets: its entry, the shared objects (`bundleShared`,
   imported by name, reused when equal, a different one a conflict) and its links,
   each with the other instance by name (made on import once both are there). The
-  global DNS templates of other instances it uses are named (`Refs`) and must be
-  there, global, where it imports. Import gives the lists keyed by an id new ids,
+  firewall's DNS templates it uses are named (`Refs`) and must be there where it
+  imports. Import gives the lists keyed by an id new ids,
   and folders those of the same kind, name and parent there. Left out: the
   instance's role (import makes one), OpenVPN's role, and what is the
   installation's (deployments, firewalls, known NICs, users). A new leaf or list
@@ -558,13 +558,12 @@ the certificate portitor-config serves, chosen under Settings
   only 30 s. Upstream calls share `certManager.order`. The clients' accounts, the
   self-signed certificate and the issue log are in `<state_dir>/acmeproxy/<instance>`;
   orders only in memory.
-- **Certificate authorities** are a firewall's: imported certificates of its host
-  whose certificate is a CA (`isCA`; made by `generate.ca` or imported with their
-  key, `internal/confcheck` refuses them in a virtual firewall), deployed with the host
-  like any imported certificate, so they are kept on the firewall (both hosts of a
-  pair). A new certificate (`generate`, `acme.MakeCertificate`) is self-signed or
-  signed by a CA of its own firewall's host (the `generate` action, `hostCA`; global admins only); a CA is never the GUI's or the ACME proxy's certificate
-  (`refuseCA`).
+- **Certificate authorities** are the firewall's: the top-level list
+  `certificate-authority` (no table; made by its `generate` action or imported with
+  their key, `normalizeCA`), kept in the configuration and never deployed (a signed
+  chain carries its CA). An instance's certificate may not be a CA (`isCA`). A new
+  certificate (`generate`, `acme.MakeCertificate`) is self-signed or signed by one of
+  them (`signed-by`, `firewallCA`; global admins only).
 - **DNS blocklists** (`fwconfig/dnsblocklist.go`, `internal/dnsblocklist`,
   `internal/agent/dnsblocklists.go`, `web/dnsblocklists.go`, Services → DNS →
   Blocklists) are per instance (`dns_blocklists`; `instances.dns_blocklist_allow`):
@@ -648,9 +647,9 @@ the certificate portitor-config serves, chosen under Settings
   `TestRegistryAndMIB` fails until `go test ./internal/snmp/mib -update` gives it
   one. `PORTITOR_SNMPD_TEST=1` runs the session against a real snmpd.
 - **Syslog** (`fwconfig/syslog.go`, `render/rsyslog.go`, `internal/agent/syslog.go`,
-  `web/syslog.go`, Services → Syslog) is the firewall's: `syslog_servers` are rows
-  of its default instance alone (`confcheck` `checkSyslogServer`, and `Validate` refuses
-  another's), written by global admins only, so an HA pair's secondary sends to them
+  `web/syslog.go`, Services → Syslog) is the firewall's: the top-level list
+  `syslog-server`, which the builder gives each firewall's default instance (`Validate`
+  refuses another's), written by global admins only, so an HA pair's secondary sends to them
   too. rsyslog (`units.default_rsyslog`, masked by the install until used) reads the
   journal (imjournal) and only forwards, a queue per server; its config replaces
   `/etc/rsyslog.conf` and a change restarts it. Servers are addresses, not names, so
@@ -958,13 +957,14 @@ them first; commit only when asked to, each time.
   addresses from all of them, each with the interface's address in it as its server
   id.
 - DNS templates (SOA templates, DNSSEC policies, zone templates) belong to an
-  instance (`instance_id`); the default instance's may be `global`, read by all and
-  used by any instance's zones and templates, changed only by its own admins
-  (in the tree, entries of the default instance with `global` on, shown read-only in
-  the other virtual firewalls; checks in `internal/confcheck/services.go`). A global template needs a global SOA and policy, one in use
-  elsewhere stays global, and names are unique per instance and a global one's
-  across all, since the builder copies into each instance only the ones its zones
-  use, and zones refer to them by name. A zone without a template gets the built-in
+  instance, or to the firewall: the top-level lists of the same names, read by all,
+  written by global admins, whose rows share the instance lists' tables
+  (`instance_id` 0; `sqlmap` maps two lists onto one table, ids unique per table).
+  An instance's references are unions of leafrefs to its own list and the top-level
+  one; the firewall's template takes the firewall's SOA and policy only. Names of an
+  instance's may not be the firewall's (`checkDNSScope` in
+  `internal/confcheck/services.go`), since the builder copies into each instance only
+  the ones its zones use, and zones refer to them by name. A zone without a template gets the built-in
   localhost SOA/NS. dnsmgr2 writes only `dnssec-policy "<name>"`; the policy body
   is rendered into `named.conf`.
 - Debian/Ubuntu confine named and chronyd (and `wg`) with AppArmor: a path outside the

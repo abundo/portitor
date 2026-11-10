@@ -10,8 +10,8 @@ servers (a SIEM, Graylog, a central rsyslog or syslog-ng) with
 [rsyslog](https://www.rsyslog.com/).
 
 Syslog is the firewall's, not a virtual firewall's: the page shows the firewall of
-the virtual firewall selected in the top bar, and its servers are kept on the
-firewall's default virtual firewall. Global admins and viewers see the page; only
+the virtual firewall selected in the top bar, and its servers are the
+configuration's top-level `syslog-server` list (in the CLI). Global admins and viewers see the page; only
 global admins change the servers and follow the journal, which holds every virtual
 firewall's logs. On an HA pair both hosts send their own journal to the servers.
 

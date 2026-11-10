@@ -78,115 +78,39 @@ submodule portitor-services {
       key "name";
       px:table "dns_soa_templates";
       px:parent-column "instance_id";
-      description "DnsSoaTemplate belongs to an instance; Global (the default instance's only) lends it to all, read-only. Minimum is the SOA minimum (negative-caching TTL); the serial is dnsmgr2's.";
-      leaf name {
-        type string;
-      }
-      leaf global {
-        type boolean;
-      }
-      leaf mname {
-        type domain-name;
-        mandatory true;
-      }
-      leaf rname {
-        type string;
-        mandatory true;
-      }
-      leaf refresh {
-        type int64;
-        default 86400;
-      }
-      leaf retry {
-        type int64;
-        default 7200;
-      }
-      leaf expire {
-        type int64;
-        default 3600000;
-      }
-      leaf minimum {
-        type int64;
-        default 3600;
-      }
+      description "DnsSoaTemplate is a virtual firewall's own SOA template; the firewall's, for every virtual firewall, are the top-level dns-soa-template. Minimum is the SOA minimum (negative-caching TTL); the serial is dnsmgr2's.";
+      uses dns-soa-template-fields;
     }
     list dnssec-policy {
       key "name";
       px:table "dns_dnssec_policies";
       px:parent-column "instance_id";
-      description "DnsDnssecPolicy belongs to an instance, and may be Global as a DnsSoaTemplate.";
-      leaf name {
-        type string;
-      }
-      leaf global {
-        type boolean;
-      }
-      leaf ksk-lifetime {
-        type string;
-      }
-      leaf ksk-algorithm {
-        type string;
-        mandatory true;
-      }
-      leaf zsk-lifetime {
-        type string;
-      }
-      leaf zsk-algorithm {
-        type string;
-        mandatory true;
-      }
-      leaf purge-keys {
-        type string;
-      }
-      leaf signatures-validity {
-        type string;
-      }
-      leaf signatures-validity-dnskey {
-        type string;
-      }
-      leaf signatures-refresh {
-        type string;
-      }
+      description "DnsDnssecPolicy is a virtual firewall's own DNSSEC policy; the firewall's are the top-level dnssec-policy.";
+      uses dnssec-policy-fields;
     }
     list dns-template {
       key "name";
       px:table "dns_templates";
       px:parent-column "instance_id";
-      description "DnsTemplate is a zone template: SOA, default TTL, apex NS and an optional DNSSEC policy, of its instance or global. It belongs to an instance, and may be Global as a DnsSoaTemplate (then its SOA and policy are global too).";
+      description "DnsTemplate is a virtual firewall's own zone template: SOA, default TTL, apex NS and an optional DNSSEC policy, its own or the firewall's (top level). The firewall's templates are the top-level dns-template.";
       leaf name {
         type string;
       }
-      leaf global {
-        type boolean;
-      }
       leaf soa-template {
-        type string;
-        px:global-ref "../../dns-soa-template/name";
+        type union {
+          type leafref { path "../../dns-soa-template/name"; }
+          type leafref { path "../../../dns-soa-template/name"; }
+        }
         px:column "soa_template_id";
       }
-      leaf default-ttl {
-        type int64;
-        default 3600;
-      }
       leaf dnssec-policy {
-        type string;
-        px:global-ref "../../dnssec-policy/name";
+        type union {
+          type leafref { path "../../dnssec-policy/name"; }
+          type leafref { path "../../../dnssec-policy/name"; }
+        }
         px:column "dnssec_policy_id";
       }
-      list nameserver {
-        key "name address";
-        ordered-by user;
-        px:json "nameservers";
-        leaf name {
-          type domain-name;
-        }
-        leaf address {
-          type union { type ip-address; type string { length "0"; } }
-        }
-      }
-      leaf description {
-        type text;
-      }
+      uses dns-template-fields;
     }
     list dns-zone {
       key "name";
@@ -203,8 +127,10 @@ submodule portitor-services {
         type text;
       }
       leaf dns-template {
-        type string;
-        px:global-ref "../../dns-template/name";
+        type union {
+          type leafref { path "../../dns-template/name"; }
+          type leafref { path "../../../dns-template/name"; }
+        }
         px:column "dns_template_id";
         description "DnsTemplateID nil: built-in SOA and NS (localhost).";
       }
@@ -413,16 +339,16 @@ submodule portitor-services {
       }
       action generate {
         px:action "create";
-        description "Makes the certificate's key and chain here: self-signed, a CA (on a firewall's host, global admins only), or signed by a CA of its firewall's host.";
+        description "Makes the certificate's key and chain here: self-signed, or signed by one of the firewall's certificate authorities (global admins only).";
         input {
           leaf-list domains {
             type string;
             ordered-by user;
-            description "DNS names (*.example.com too) and IP addresses; none for a CA.";
+            description "DNS names (*.example.com too) and IP addresses.";
           }
           leaf common-name {
             type text { length "0..64"; }
-            description "The subject's common name; the first domain (a CA: its name) when empty.";
+            description "The subject's common name; the first domain when empty.";
           }
           leaf key-type {
             type cert-key-type;
@@ -432,14 +358,9 @@ submodule portitor-services {
             type int32 { range "1..36500"; }
             default 365;
           }
-          leaf ca {
-            type boolean;
-            default false;
-            description "A certificate authority, self-signed.";
-          }
           leaf signed-by {
             type string;
-            description "A CA of the firewall's host that signs it; self-signed when empty.";
+            description "The firewall's certificate authority (certificate-authority) that signs it; self-signed when empty.";
           }
         }
       }
@@ -570,11 +491,99 @@ submodule portitor-services {
         px:secret;
       }
     }
+  }
+
+  grouping dns-soa-template-fields {
+    leaf name {
+      type string;
+    }
+    leaf mname {
+      type domain-name;
+      mandatory true;
+    }
+    leaf rname {
+      type string;
+      mandatory true;
+    }
+    leaf refresh {
+      type int64;
+      default 86400;
+    }
+    leaf retry {
+      type int64;
+      default 7200;
+    }
+    leaf expire {
+      type int64;
+      default 3600000;
+    }
+    leaf minimum {
+      type int64;
+      default 3600;
+    }
+  }
+
+  grouping dnssec-policy-fields {
+    leaf name {
+      type string;
+    }
+    leaf ksk-lifetime {
+      type string;
+    }
+    leaf ksk-algorithm {
+      type string;
+      mandatory true;
+    }
+    leaf zsk-lifetime {
+      type string;
+    }
+    leaf zsk-algorithm {
+      type string;
+      mandatory true;
+    }
+    leaf purge-keys {
+      type string;
+    }
+    leaf signatures-validity {
+      type string;
+    }
+    leaf signatures-validity-dnskey {
+      type string;
+    }
+    leaf signatures-refresh {
+      type string;
+    }
+  }
+
+  grouping dns-template-fields {
+    leaf default-ttl {
+      type int64;
+      default 3600;
+    }
+    list nameserver {
+      key "name address";
+      ordered-by user;
+      px:json "nameservers";
+      leaf name {
+        type domain-name;
+      }
+      leaf address {
+        type union { type ip-address; type string { length "0"; } }
+      }
+    }
+    leaf description {
+      type text;
+    }
+  }
+
+  // What is the firewall's, not a virtual firewall's: the servers its
+  // journal goes to, its certificate authorities, and the DNS templates
+  // every virtual firewall may use.
+  grouping firewall-services {
     list syslog-server {
       key "id";
       px:table "syslog_servers";
-      px:parent-column "instance_id";
-      description "SyslogServer is a remote syslog server rsyslog sends the host's journal to: a server of a firewall's default instance. Disabled, it is left out.";
+      description "SyslogServer is a remote syslog server rsyslog sends the firewall's journal to (the host's, with every virtual firewall's logs). Disabled, it is left out.";
       leaf id {
         type uint32;
       }
@@ -606,6 +615,98 @@ submodule portitor-services {
         type string;
         default "info";
       }
+    }
+    list certificate-authority {
+      key "name";
+      description "A certificate authority of the firewall: imported with its key, or made by generate. It signs the virtual firewalls' certificates (their generate's signed-by) and stays in portitor-config: it is not deployed. Global admins only.";
+      action chain {
+        px:action "view";
+        description "What the CA's chain says, and whether it has its key.";
+        output {
+          leaf is-ca {
+            type boolean;
+          }
+          leaf issuer {
+            type string;
+          }
+          leaf-list chain {
+            type string;
+            ordered-by user;
+            description "The certification path, the certificate first.";
+          }
+          leaf not-before {
+            type string;
+          }
+          leaf not-after {
+            type string;
+          }
+          leaf has-key {
+            type boolean;
+          }
+        }
+      }
+      action generate {
+        px:action "create";
+        description "Makes a self-signed CA here, its key and certificate.";
+        input {
+          leaf common-name {
+            type text { length "0..64"; }
+            description "The subject's common name; the CA's name when empty.";
+          }
+          leaf key-type {
+            type cert-key-type;
+            default "ec256";
+          }
+          leaf days {
+            type int32 { range "1..36500"; }
+            default 3650;
+          }
+        }
+      }
+      leaf name {
+        type string;
+      }
+      leaf description {
+        type text;
+      }
+      leaf full-chain {
+        type string;
+        description "The CA's certificate (and those above it) in PEM.";
+      }
+      leaf priv-key {
+        type string;
+        px:secret;
+        description "The CA's key in PEM, never shown.";
+      }
+    }
+    list dns-soa-template {
+      key "name";
+      px:table "dns_soa_templates";
+      description "The firewall's SOA templates, for the firewall's DNS templates and every virtual firewall's own.";
+      uses dns-soa-template-fields;
+    }
+    list dnssec-policy {
+      key "name";
+      px:table "dns_dnssec_policies";
+      description "The firewall's DNSSEC policies, for the firewall's DNS templates and every virtual firewall's own.";
+      uses dnssec-policy-fields;
+    }
+    list dns-template {
+      key "name";
+      px:table "dns_templates";
+      description "The firewall's zone templates, which every virtual firewall's zones may use. Their SOA template and DNSSEC policy are the firewall's too.";
+      leaf name {
+        type string;
+      }
+      leaf soa-template {
+        type leafref { path "../../dns-soa-template/name"; }
+        px:column "soa_template_id";
+      }
+      leaf dnssec-policy {
+        type leafref { path "../../dnssec-policy/name"; }
+        px:column "dnssec_policy_id";
+      }
+      uses dns-template-fields;
     }
   }
 }

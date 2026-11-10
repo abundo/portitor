@@ -146,7 +146,7 @@ func TestObjectHooks(t *testing.T) {
 		"a predefined name":    {"service=ssh", `{"type": "tcp/udp/sctp", "port": [{"protocol": "tcp", "dst-lo": 2222, "dst-hi": 0, "src-lo": 0, "src-hi": 0}]}`, "predefined"},
 		"CrowdSec, no key":     {"ip-list=cs", `{"source": "crowdsec", "url": "https://lapi.example/"}`, "bouncer API key"},
 		"a key over http":      {"ip-list=cs", `{"source": "crowdsec", "url": "http://lapi.example/", "api-key": "k"}`, "unencrypted"},
-		"syslog in a VF":       {"instance=lab/syslog-server=7", `{"address": "192.0.2.1", "protocol": "udp"}`, "firewall's"},
+		"syslog over sctp":     {"syslog-server=7", `{"address": "192.0.2.1", "protocol": "sctp"}`, "protocol"},
 		"a bad schedule":       {"task=t", `{"kind": "command", "schedule": "every day", "command": "true"}`, "schedule"},
 		"shaping with a burst": {"instance=lab/rate-limit=s", `{"rate": 10, "shape": true, "burst": 5, "unit": "pps"}`, "unit"},
 	} {
@@ -192,7 +192,8 @@ func TestServiceHooks(t *testing.T) {
 		{"name": "host", "is-default": true, "firewall": "fw",
 		 "interface": [{"name": "wan0", "kind": "physical"}],
 		 "dns-soa-template": [{"name": "std", "mname": "ns1.example.com", "rname": "hostmaster.example.com"}]},
-		{"name": "lab", "firewall": "fw", "interface": [{"name": "eth1", "kind": "physical"}]}]}`)
+		{"name": "lab", "firewall": "fw", "interface": [{"name": "eth1", "kind": "physical"}]}],
+		"portitor:dns-soa-template": [{"name": "fw-std", "mname": "ns1.example.com", "rname": "hostmaster.example.com"}]}`)
 	work := tr.Clone()
 	must := func(err error) {
 		t.Helper()
@@ -215,10 +216,10 @@ func TestServiceHooks(t *testing.T) {
 		t.Errorf("checks: %v", errs)
 	}
 	for what, c := range map[string]struct{ at, body, want string }{
-		"a second OpenVPN":      {"instance=lab/interface=ovpn1", `{"kind": "openvpn", "addresses": ["10.9.0.1/24"], "ovpn-mode": "udp"}`, "one OpenVPN"},
-		"a global SOA in a VF":  {"instance=lab/dns-soa-template=mine", `{"global": true, "mname": "ns.lab.example", "rname": "h.lab.example"}`, "default virtual firewall's"},
-		"SNMP with no way in":   {"instance=lab", `{"snmp-enabled": true}`, "community"},
-		"a TSIG key, no secret": {"instance=lab/dns-update=up", `{"interface": "eth1", "server": "192.0.2.53", "zone": "example.com", "tsig-name": "k"}`, "secret"},
+		"a second OpenVPN":                {"instance=lab/interface=ovpn1", `{"kind": "openvpn", "addresses": ["10.9.0.1/24"], "ovpn-mode": "udp"}`, "one OpenVPN"},
+		"the firewall's SOA name in a VF": {"instance=lab/dns-soa-template=fw-std", `{"mname": "ns.lab.example", "rname": "h.lab.example"}`, "the firewall has"},
+		"SNMP with no way in":             {"instance=lab", `{"snmp-enabled": true}`, "community"},
+		"a TSIG key, no secret":           {"instance=lab/dns-update=up", `{"interface": "eth1", "server": "192.0.2.53", "zone": "example.com", "tsig-name": "k"}`, "secret"},
 	} {
 		err := edit(t, work, func(w *datastore.Tree) error {
 			return w.EditJSON(path(c.at), datastore.EditMerge, []byte(c.body))

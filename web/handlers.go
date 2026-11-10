@@ -452,9 +452,6 @@ func (s *Server) handlePutSettings(c *echo.Context) error {
 		if cert == nil {
 			return errJSON(c, http.StatusBadRequest, "no such certificate")
 		}
-		if err := refuseCA(cert, "the GUI's certificate"); err != nil {
-			return errJSON(c, http.StatusBadRequest, err.Error())
-		}
 		certID = &cert.ID
 	}
 	leaves := map[string]any{}

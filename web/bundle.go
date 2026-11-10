@@ -25,12 +25,12 @@ import (
 // A bundle is one virtual firewall as configuration (RFC 7951 JSON of the
 // tree, its secrets included): its entry, the shared objects
 // (bundleShared, imported by name, reused when equal) and its links, each
-// to the other instance by name. The global DNS templates of other
-// instances it uses are named (Refs), and must be there, global, where it
-// imports. Import gives the lists keyed by an id (rules, routes, records)
-// new ids, and the folders those of the folders of the same kind, name
-// and parent there. A bundle holds every secret of the virtual firewall,
-// like a backup.
+// to the other instance by name. The firewall's DNS templates it uses
+// (top-level lists) are named (Refs), and must be there where it imports.
+// Import gives the lists keyed by an id (rules, routes, records) new ids,
+// and the folders those of the folders of the same kind, name and parent
+// there. A bundle holds every secret of the virtual firewall, like a
+// backup.
 //
 // Links (they join two instances) come with the instance's name at the
 // other end: import makes a link when that instance is there by name and
@@ -53,8 +53,8 @@ type Bundle struct {
 	// Config is the configuration: the instance, the shared objects and
 	// its links.
 	Config json.RawMessage `json:"config"`
-	// Refs are entries of other instances it names (global DNS
-	// templates), found by name on import.
+	// Refs are the firewall's entries it names (its DNS templates, SOA
+	// templates and DNSSEC policies), found by name on import.
 	Refs []bundleRef `json:"refs"`
 	// Left lists what was left out.
 	Left []string `json:"left"`
@@ -93,21 +93,20 @@ func exportBundle(tree *datastore.Tree, instance string) (*Bundle, error) {
 		return nil, err
 	}
 	b := &Bundle{Format: bundleFormat, Instance: instance, Config: data, Refs: []bundleRef{}, Left: []string{}}
-	// The global entries of other instances it names.
+	// The firewall's entries it names that the bundle leaves out (its DNS
+	// templates).
 	in.Walk(func(n *datastore.Node) {
 		for _, s := range n.S.Children {
-			p, ok := s.Ext["global-ref"]
 			v := n.Leaves[s.Name]
-			if !ok || v == "" {
+			if v == "" || len(s.Type.Leafrefs()) == 0 {
 				continue
 			}
-			parts := strings.Split(p, "/")
-			if len(parts) < 2 {
+			tg := tree.Referenced(n, s, v)
+			if tg == nil || tg.Parent != tree.Root || keep[tg.S.Name] {
 				continue
 			}
-			list := parts[len(parts)-2]
-			if in.Entry(list, []string{v}) == nil && !slices.Contains(b.Refs, bundleRef{list, v}) {
-				b.Refs = append(b.Refs, bundleRef{list, v})
+			if r := (bundleRef{tg.S.Name, v}); !slices.Contains(b.Refs, r) {
+				b.Refs = append(b.Refs, r)
 			}
 		}
 	})
@@ -212,16 +211,10 @@ func (s *Server) importBundle(work *datastore.Tree, b *Bundle, name string, fw *
 			}
 		}
 	}
-	// The global entries of other instances it names.
+	// The firewall's entries it names.
 	for _, r := range b.Refs {
-		found := false
-		for _, other := range work.Root.Lists["instance"] {
-			if e := other.Entry(r.List, []string{r.Name}); e != nil && e.Leaf("global") == "true" {
-				found = true
-			}
-		}
-		if !found {
-			return &bundleConflict{fmt.Sprintf("it uses %s %s, which is not here (as a global one)", strings.ReplaceAll(r.List, "-", " "), r.Name)}
+		if work.Root.Entry(r.List, []string{r.Name}) == nil {
+			return &bundleConflict{fmt.Sprintf("it uses the firewall's %s %s, which is not here", strings.ReplaceAll(r.List, "-", " "), r.Name)}
 		}
 	}
 

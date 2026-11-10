@@ -1145,40 +1145,49 @@ func TestDnsTemplatesGlobal(t *testing.T) {
 		t.Fatal(err)
 	}
 	env.vf("other")
-	soa := func(global bool) map[string]any {
-		return map[string]any{"global": global, "mname": "ns1.example.com", "rname": "hostmaster.example.com",
-			"refresh": 86400, "retry": 7200, "expire": 3600000, "minimum": 3600}
-	}
-	tmpl := func(soa string, global bool) map[string]any {
-		return map[string]any{"global": global, "soa-template": soa, "default-ttl": 3600,
+	soa := map[string]any{"mname": "ns1.example.com", "rname": "hostmaster.example.com",
+		"refresh": 86400, "retry": 7200, "expire": 3600000, "minimum": 3600}
+	tmpl := func(soa string) map[string]any {
+		return map[string]any{"soa-template": soa, "default-ttl": 3600,
 			"nameserver": []map[string]string{{"name": "ns1.example.com", "address": ""}}}
 	}
-	env.put("instance=main/dns-soa-template=local", soa(false))
-	env.put("instance=main/dns-soa-template=global", soa(true))
+	env.put("instance=main/dns-soa-template=local", soa)
+	env.put("dns-soa-template=fw", soa)
 	for what, c := range map[string]struct {
 		path string
 		body map[string]any
 	}{
-		"global outside the default VF":    {"instance=other/dns-soa-template=x", soa(true)},
-		"global name taken":                {"instance=other/dns-soa-template=global", soa(false)},
-		"global template with a local SOA": {"instance=main/dns-template=t", tmpl("local", true)},
-		"another VF's SOA":                 {"instance=other/dns-template=t", tmpl("local", false)},
+		"the firewall's name in a VF":         {"instance=other/dns-soa-template=fw", soa},
+		"a VF's name for the firewall's":      {"dns-soa-template=local", soa},
+		"the firewall's template, a VF's SOA": {"dns-template=t", tmpl("local")},
+		"another VF's SOA":                    {"instance=other/dns-template=t", tmpl("local")},
 	} {
 		if rec := env.cfg("PUT", c.path, c.body); rec.Code != http.StatusBadRequest {
 			t.Errorf("%s: %d %s", what, rec.Code, rec.Body)
 		}
 	}
-	// The same name in two VFs is fine when neither is global.
-	env.put("instance=other/dns-soa-template=local", soa(false))
-	env.put("instance=main/dns-template=gt", tmpl("global", true))
-	env.put("instance=other/dns-template=ot", tmpl("global", false))
+	// The same name in two VFs is fine; a VF's template may use the
+	// firewall's SOA, and its zones the firewall's templates.
+	env.put("instance=other/dns-soa-template=local", soa)
+	env.put("dns-template=gt", tmpl("fw"))
+	env.put("instance=other/dns-template=ot", tmpl("fw"))
 	env.put("instance=other/dns-zone=example.com", map[string]any{"dns-template": "gt"})
+	env.put("instance=other/dns-zone=example.org", map[string]any{"dns-template": "ot"})
 
-	if rec := env.cfg("PATCH", "instance=main/dns-template=gt", map[string]any{"global": false}); rec.Code != http.StatusBadRequest {
-		t.Errorf("template used by another VF made local: %d %s", rec.Code, rec.Body)
+	if rec := env.cfg("DELETE", "dns-template=gt", nil); rec.Code != http.StatusBadRequest {
+		t.Errorf("template used by a VF's zone deleted: %d %s", rec.Code, rec.Body)
 	}
-	if rec := env.cfg("PATCH", "instance=main/dns-soa-template=global", map[string]any{"global": false}); rec.Code != http.StatusBadRequest {
-		t.Errorf("SOA used by a global template made local: %d %s", rec.Code, rec.Body)
+	// A rename follows into the VF.
+	env.mustCfg("POST", "dns-template=gt?action=rename", map[string]any{"keys": []string{"std"}})
+	if z := env.node("instance=other/dns-zone=example.com"); z.Leaf("dns-template") != "std" {
+		t.Errorf("zone after the rename: %v", z.Leaves)
+	}
+	doc, err := builder.Build(env.input(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dns := doc.Instance("other").DNS; dns.ZoneTemplate("std") == nil || dns.ZoneTemplate("ot") == nil || len(dns.SOATemplates) != 1 || dns.SOATemplates[0].Name != "fw" {
+		t.Errorf("other's DNS: %+v %+v", dns.ZoneTemplates, dns.SOATemplates)
 	}
 	// Deleting a VF deletes its zones and templates.
 	env.mustCfg("DELETE", "instance=other", nil)

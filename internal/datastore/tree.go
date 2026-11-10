@@ -653,8 +653,8 @@ func (t *Tree) Move(p Path, where string, ref []string) error {
 	return nil
 }
 
-// Rename gives an entry new keys and rewrites the leafrefs (and px:global-ref
-// leaves) that name it, as a rename in the GUI rewrites references.
+// Rename gives an entry new keys and rewrites the leafrefs that name it, as
+// a rename in the GUI rewrites references.
 func (t *Tree) Rename(p Path, keys []string) error {
 	n, _, err := t.Find(p)
 	if err != nil {
@@ -712,7 +712,7 @@ func (t *Tree) Rename(p Path, keys []string) error {
 }
 
 // eachRef calls fn for every value of a leaf or leaf-list that may refer
-// to an entry: of a leafref type (or union with one), or px:global-ref.
+// to an entry: of a leafref type (or union with one).
 func (t *Tree) eachRef(fn func(holder *Node, leaf *schema.Node, value string, set func(string))) {
 	var walk func(n *Node)
 	walk = func(n *Node) {
@@ -744,12 +744,7 @@ func (t *Tree) eachRef(fn func(holder *Node, leaf *schema.Node, value string, se
 	walk(t.Root)
 }
 
-func isRef(s *schema.Node) bool {
-	if _, ok := s.Ext["global-ref"]; ok {
-		return true
-	}
-	return len(s.Type.Leafrefs()) > 0
-}
+func isRef(s *schema.Node) bool { return len(s.Type.Leafrefs()) > 0 }
 
 // A target is a leaf a reference may name: the leaf of an entry (a key)
 // or of a container.
@@ -758,42 +753,11 @@ type target struct {
 	leaf  string
 }
 
-// targets are what the leaf of holder may refer to, by its leafref paths
-// (and px:global-ref, with the entries marked global in other instances).
+// targets are what the leaf of holder may refer to, by its leafref paths.
 func (t *Tree) targets(holder *Node, leaf *schema.Node) []target {
 	var out []target
 	for _, path := range leaf.Type.Leafrefs() {
 		out = append(out, evalPath(holder, path)...)
-	}
-	if path, ok := leaf.Ext["global-ref"]; ok {
-		out = append(out, evalPath(holder, path)...)
-		out = append(out, t.globals(holder, path)...)
-	}
-	return out
-}
-
-// globals are the entries the px:global-ref path names in every instance
-// but holder's, of those with global true.
-func (t *Tree) globals(holder *Node, path string) []target {
-	// The path climbs to the instance entry, then down to the list.
-	ups, rest := splitUps(path)
-	inst := holder
-	for i := 1; i < ups && inst != nil; i++ {
-		inst = inst.Parent
-	}
-	if inst == nil || inst.Parent == nil {
-		return nil
-	}
-	var out []target
-	for _, other := range inst.Parent.Lists[inst.S.Name] {
-		if other == inst {
-			continue
-		}
-		for _, tg := range descend(other, rest) {
-			if tg.entry.Leaf("global") == "true" {
-				out = append(out, tg)
-			}
-		}
 	}
 	return out
 }

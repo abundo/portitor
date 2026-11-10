@@ -3,11 +3,12 @@
 
 <script setup>
 // DNS templates: the selected virtual firewall's SOA templates, DNSSEC
-// policies and DNS templates, plus the default virtual firewall's global
-// ones, which the others see read-only.
+// policies and DNS templates, and the firewall's (top level, for every
+// virtual firewall), which only global admins change.
 import { computed, ref, watch } from 'vue'
 import CrudPage from '@/components/CrudPage.vue'
 import { vfWithGlobals } from '@/api/config'
+import { useAuthStore } from '@/stores/auth'
 import { useInstanceStore } from '@/stores/instances'
 
 const emit = defineEmits(['changed'])
@@ -28,12 +29,9 @@ const dnsTemplates = {
   create: (r) => templateList.create(withNameserver(r)),
   update: (id, r) => templateList.update(id, withNameserver(r)),
 }
-const own = () => store.currentName
-// The rows this virtual firewall uses: its own and the global ones.
-const usable = (r) => r._owner === own() || r.global
-// Another virtual firewall's global row is used, never changed, here.
-const foreign = (r) => r._owner !== own()
-const isDefault = computed(() => !!store.current?.is_default)
+const auth = useAuthStore()
+// The firewall's rows are read-only but to global admins.
+const foreign = (r) => r.global && !auth.isAdmin
 
 // SOA templates and DNSSEC policies feed the DNS templates' selects.
 const soas = ref([])
@@ -42,8 +40,8 @@ const templatesPage = ref(null)
 
 async function loadRefs() {
   const [s, p] = await Promise.all([dnsSoaTemplates.list(), dnsDnssecPolicies.list()])
-  soas.value = s.filter(usable)
-  policies.value = p.filter(usable)
+  soas.value = s
+  policies.value = p
   templatesPage.value?.reload()
 }
 watch(() => store.currentName, loadRefs, { immediate: true })
@@ -53,31 +51,34 @@ function changed() {
   emit('changed')
 }
 
-// A global DNS template uses only global SOA templates and policies.
-// The others show, disabled, with why.
+// The firewall's DNS template uses only the firewall's SOA templates and
+// policies. The others show, disabled, with why.
 const choices = (list, form) =>
   list.map((x) => ({
     label: x.name,
     value: x.name,
     ...(form.global && !x.global
-      ? { disabled: true, description: 'not global: a global template takes global ones only' }
+      ? {
+          disabled: true,
+          description: "this virtual firewall's: the firewall's template takes the firewall's",
+        }
       : {}),
   }))
 
-// Global: the default virtual firewall's, offered to all, read-only there.
+// The firewall's: for every virtual firewall; chosen when made (global
+// admins only), never moved.
 const globalField = {
   key: 'global',
-  label: 'Global',
+  label: "The firewall's",
   type: 'switch',
-  hint: 'Visible in all virtual firewalls, read-only there.',
-  show: () => isDefault.value,
+  hint: 'For every virtual firewall, changed by global admins only. Chosen when made.',
+  show: (form) => auth.isAdmin && !form.id,
 }
 const globalColumn = {
   key: 'global',
-  label: 'Global',
-  format: (r) => (foreign(r) ? 'global (default VF)' : r.global ? 'yes' : ''),
+  label: 'Of',
+  format: (r) => (r.global ? 'the firewall' : 'this VF'),
 }
-
 
 // Nameservers are rows of a name and an optional IPv4 or IPv6 address (a
 // second row of the name for the other); the builder adds the address of
@@ -230,7 +231,7 @@ const templateFields = [
   { key: 'description', label: 'Description' },
   {
     ...globalField,
-    hint: 'Visible in all virtual firewalls, read-only there. Its SOA template and DNSSEC policy must be global too.',
+    hint: "For every virtual firewall, changed by global admins only. Chosen when made. Its SOA template and DNSSEC policy are the firewall's too.",
   },
 ]
 const templateDefaults = () => ({
@@ -246,10 +247,9 @@ const templateDefaults = () => ({
       ref="templatesPage"
       title="DNS templates"
       noun="DNS template"
-      description="A zone's template gives it its SOA, default TTL, NS records and optional DNSSEC policy. The default virtual firewall's global templates are shown read-only in the others."
+      description="A zone's template gives it its SOA, default TTL, NS records and optional DNSSEC policy. The firewall's templates are for every virtual firewall."
       :api="dnsTemplates"
       :params="params"
-      :row-filter="usable"
       :row-read-only="foreign"
       :columns="templateColumns"
       :fields="templateFields"
@@ -310,7 +310,6 @@ const templateDefaults = () => ({
       description="Start of authority for the zones whose DNS template uses it. The serial is set by dnsmgr2 on each change (YYYYMMDDnn)."
       :api="dnsSoaTemplates"
       :params="params"
-      :row-filter="usable"
       :row-read-only="foreign"
       :columns="soaColumns"
       :fields="soaFields"
@@ -324,7 +323,6 @@ const templateDefaults = () => ({
       description="BIND dnssec-policy statements. Zones whose DNS template has a policy are signed by BIND (inline signing); keys are kept in the virtual firewall's BIND directory."
       :api="dnsDnssecPolicies"
       :params="params"
-      :row-filter="usable"
       :row-read-only="foreign"
       :columns="policyColumns"
       :fields="policyFields"

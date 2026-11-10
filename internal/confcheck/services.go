@@ -18,10 +18,12 @@ import (
 // here the GUI's normalizing, and what takes several rows.
 
 func init() {
-	register("/instance/dns-soa-template", hook{normalize: normalizeSOA, check: func(c *Ctx, e *datastore.Node) []error {
-		return append(checkDNSScope(c, e), checkSOA(e)...)
-	}})
-	register("/instance/dns-template", hook{check: checkDNSTemplate})
+	for _, at := range []string{"/instance", ""} {
+		register(at+"/dns-soa-template", hook{normalize: normalizeSOA, check: func(c *Ctx, e *datastore.Node) []error {
+			return append(checkDNSScope(c, e), checkSOA(e)...)
+		}})
+		register(at+"/dns-template", hook{check: checkDNSTemplate})
+	}
 	register("/instance/dns-blocklist", hook{check: checkBlocklist})
 	register("/instance/dns-update", hook{normalize: normalizeDynDNS, check: checkDynDNS})
 	register("/instance/dns-update/record", hook{normalize: normalizeDynDNSRecord, check: checkDynDNSRecord})
@@ -46,9 +48,6 @@ func checkInstanceServices(c *Ctx, in *datastore.Node) []error {
 		if _, err := fwconfig.ACMEDirectory(ca); err != nil {
 			errs = append(errs, fail("acme-proxy-ca: %v", err))
 		}
-	}
-	if crt := in.Entry("certificate", []string{in.Leaf("acme-proxy-certificate")}); crt != nil && isCA(crt) {
-		errs = append(errs, fail("acme-proxy-certificate: %s is a certificate authority; pick a server certificate", crt.Leaf("name")))
 	}
 	if on(in, "acme-proxy-enabled") && !anyOn(in, "acme-proxy-policy") {
 		errs = append(errs, fail("acme-proxy-enabled: add a policy first"))
@@ -106,80 +105,28 @@ func normalizeSOA(c *Ctx, s *datastore.Node) error {
 	return nil
 }
 
-// checkDNSScope: only the default instance's SOA templates, DNSSEC
-// policies and DNS templates may be global, a global one's name is unique
-// over every instance, and an instance's own can't take a global one's
-// name (zones and templates refer to them by name).
+// checkDNSScope: zones and templates name SOA templates, DNSSEC policies
+// and DNS templates by name, their virtual firewall's or the firewall's
+// (top level), so a virtual firewall's can't take the name of the
+// firewall's, nor the firewall's the name of any virtual firewall's.
 func checkDNSScope(c *Ctx, e *datastore.Node) []error {
-	var errs []error
-	in, list, name := instanceOf(e), e.S.Name, e.Leaf("name")
-	global := on(e, "global")
-	if global && !on(in, "is-default") {
-		errs = append(errs, fail("global: only the default virtual firewall's can be global"))
-	}
-	for _, other := range c.T.Root.Lists["instance"] {
-		if other == in {
-			continue
+	list, name := e.S.Name, e.Leaf("name")
+	if instanceOf(e) != nil {
+		if c.T.Root.Entry(list, []string{name}) != nil {
+			return []error{fail("name: the firewall has a %s %s", strings.ReplaceAll(list, "-", " "), name)}
 		}
-		if o := other.Entry(list, []string{name}); o != nil && (global || on(o, "global")) {
-			errs = append(errs, fail("name: %q is in use (in %s)", name, other.Leaf("name")))
+		return nil
+	}
+	for _, in := range c.T.Root.Lists["instance"] {
+		if in.Entry(list, []string{name}) != nil {
+			return []error{fail("name: %q is in use (in %s)", name, in.Leaf("name"))}
 		}
 	}
-	// Used by another instance's templates or zones: it stays global.
-	if !global && on(in, "is-default") {
-		for _, other := range c.T.Root.Lists["instance"] {
-			if other != in && usesDNS(other, list, name) {
-				errs = append(errs, fail("global: %s stays global; %s uses it", name, other.Leaf("name")))
-				break
-			}
-		}
-	}
-	return errs
-}
-
-// usesDNS reports whether in's templates or zones name the entry of list.
-func usesDNS(in *datastore.Node, list, name string) bool {
-	switch list {
-	case "dns-soa-template", "dnssec-policy":
-		leaf := "soa-template"
-		if list == "dnssec-policy" {
-			leaf = "dnssec-policy"
-		}
-		for _, t := range in.Lists["dns-template"] {
-			if t.Leaf(leaf) == name {
-				return true
-			}
-		}
-	case "dns-template":
-		for _, z := range in.Lists["dns-zone"] {
-			if z.Leaf("dns-template") == name {
-				return true
-			}
-		}
-	}
-	return false
+	return nil
 }
 
 func checkDNSTemplate(c *Ctx, t *datastore.Node) []error {
-	errs := append(checkDNSScope(c, t), checkZoneTemplate(c, t)...)
-	if !on(t, "global") {
-		return errs
-	}
-	def := c.T.Root
-	for _, in := range c.T.Root.Lists["instance"] {
-		if on(in, "is-default") {
-			def = in
-		}
-	}
-	if s := def.Entry("dns-soa-template", []string{t.Leaf("soa-template")}); s != nil && !on(s, "global") {
-		errs = append(errs, fail("soa-template: a global DNS template needs a global SOA template"))
-	}
-	if p := t.Leaf("dnssec-policy"); p != "" {
-		if k := def.Entry("dnssec-policy", []string{p}); k != nil && !on(k, "global") {
-			errs = append(errs, fail("dnssec-policy: a global DNS template needs a global DNSSEC policy"))
-		}
-	}
-	return errs
+	return append(checkDNSScope(c, t), checkZoneTemplate(c, t)...)
 }
 
 func checkBlocklist(c *Ctx, b *datastore.Node) []error {
@@ -345,6 +292,7 @@ func checkBFDInterface(c *Ctx, b *datastore.Node) []error {
 
 func init() {
 	register("/instance/certificate", hook{normalize: normalizeCertificate, check: checkCertificate})
+	register("/certificate-authority", hook{normalize: normalizeCA, check: checkCA})
 	register("/instance/ospf", hook{normalize: normalizeOSPF, check: checkOSPF})
 	register("/instance/ospf-interface", hook{normalize: normalizeOSPFInterface, check: func(c *Ctx, e *datastore.Node) []error {
 		var v fwconfig.OSPFInterface
@@ -397,9 +345,6 @@ func checkOpenVPN(c *Ctx, i *datastore.Node) []error {
 	for _, e := range fwconfig.CheckOpenVPNAddresses(mode, i.LeafLists["addresses"], tcp) {
 		errs = append(errs, fail("addresses: %s", e))
 	}
-	if crt := in.Entry("certificate", []string{i.Leaf("ovpn-certificate")}); crt != nil && isCA(crt) {
-		errs = append(errs, fail("ovpn-certificate: %s is a certificate authority; pick a server certificate", crt.Leaf("name")))
-	}
 	if l := i.Leaf("ovpn-listen"); l != "" {
 		if l == name {
 			errs = append(errs, fail("ovpn-listen: clients come in on another interface"))
@@ -425,9 +370,6 @@ func normalizeCertificate(c *Ctx, crt *datastore.Node) error {
 		// An ACME certificate made here becomes an imported one (generate).
 	} else if old != nil && old.Leaf("source") != crt.Leaf("source") {
 		return fail("source: can't change; add a new certificate")
-	}
-	if old != nil && isCA(old) != isCA(crt) {
-		return fail("can't change between a CA and a server certificate; add a new one")
 	}
 	if crt.Leaf("source") == fwconfig.CertSourceImport {
 		return normalizeImported(crt)
@@ -461,8 +403,8 @@ func checkCertificate(c *Ctx, crt *datastore.Node) []error {
 	if !fwconfig.ValidFileName(crt.Leaf("name")) {
 		errs = append(errs, fail("name: no control characters or /, not . or .., at most 255 bytes"))
 	}
-	if isCA(crt) && !on(instanceOf(crt), "is-default") {
-		errs = append(errs, fail("a CA belongs to the firewall: add it on the firewall's host, not in a virtual firewall"))
+	if isCA(crt) {
+		errs = append(errs, fail("a certificate authority is the firewall's: add it under certificate-authority"))
 	}
 	if crt.Leaf("source") != fwconfig.CertSourceACME {
 		return errs
@@ -540,6 +482,31 @@ func normalizeOSPFInterface(c *Ctx, i *datastore.Node) error {
 
 // normalizeImported checks an imported certificate's chain against its
 // key and takes its names from it.
+// normalizeCA is one of the firewall's certificate authorities: its
+// certificate, a CA's, and its key.
+func normalizeCA(c *Ctx, ca *datastore.Node) error {
+	for _, l := range []string{"full-chain", "priv-key"} {
+		if v, ok := ca.Leaves[l]; ok && v != "" {
+			ca.Leaves[l] = strings.TrimSpace(v) + "\n"
+		}
+	}
+	leaf, err := fwconfig.ParseImported(ca.Leaf("full-chain"), ca.Leaf("priv-key"))
+	if err != nil {
+		return fail("certificate and key: %v", err)
+	}
+	if !leaf.IsCA {
+		return fail("full-chain: %s is not a certificate authority", leaf.Subject.CommonName)
+	}
+	return nil
+}
+
+func checkCA(c *Ctx, ca *datastore.Node) []error {
+	if !fwconfig.ValidFileName(ca.Leaf("name")) {
+		return []error{fail("name: no control characters or /, not . or .., at most 255 bytes")}
+	}
+	return nil
+}
+
 func normalizeImported(crt *datastore.Node) error {
 	for _, l := range []string{"full-chain", "priv-key"} {
 		if v, ok := crt.Leaves[l]; ok && v != "" {

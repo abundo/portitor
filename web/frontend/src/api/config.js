@@ -160,7 +160,10 @@ export function treeApi(listPath, keys = ['name'], { shallow = false, merge = fa
       let target = id
       const now = idOf(row)
       if (now && now !== id) {
-        await config.rename(entry(id), keys.map((k) => String(row[k])))
+        await config.rename(
+          entry(id),
+          keys.map((k) => String(row[k])),
+        )
         target = now
       }
       await (shallow || merge ? config.patch : config.put)(entry(target), body(row))
@@ -221,25 +224,32 @@ export const services = {
 export const portNames = treeApi(() => 'port-name')
 
 // vfWithGlobals is vfApi of a list of DNS templates, whose rows are the
-// selected virtual firewall's and the global ones of the default virtual
-// firewalls (of each firewall), read-only in the others. A row's _owner is
-// its virtual firewall's name.
+// selected virtual firewall's and the firewall's (the top-level list of
+// the same name), each with global: true and the id fw/<name>. A create
+// with global goes to the firewall's list; a row stays where it is.
 export function vfWithGlobals(list) {
   const own = vfApi(list)
+  const fw = treeApi(() => list)
+  const FW = 'fw/'
+  const isFW = (id) => String(id).startsWith(FW)
+  const strip = ({ global, ...r }) => r
+  const mine = (r) => ({ ...r, global: false })
+  const theirs = (r) => ({ ...r, global: true, id: FW + r.id })
   return {
     ...own,
     list: async () => {
-      const store = useInstanceStore()
-      const me = store.currentName
-      const others = store.list.filter((i) => i.is_default && i.name !== me)
-      const rows = (await own.list()).map((r) => ({ ...r, _owner: me }))
-      for (const i of others) {
-        const theirs = (await config.get(`${path(['instance', i.name])}/${list}`)) ?? []
-        for (const r of theirs.map(fromEntry))
-          if (r.global) rows.push({ ...r, id: `${i.name}/${r.name}`, _owner: i.name })
-      }
-      return rows
+      const [a, b] = await Promise.all([own.list(), fw.list()])
+      return [...a.map(mine), ...b.map(theirs)]
     },
+    get: async (id) =>
+      isFW(id) ? theirs(await fw.get(String(id).slice(FW.length))) : mine(await own.get(id)),
+    create: async (r) =>
+      r.global ? theirs(await fw.create(strip(r))) : mine(await own.create(strip(r))),
+    update: async (id, r) =>
+      isFW(id)
+        ? theirs(await fw.update(String(id).slice(FW.length), strip(r)))
+        : mine(await own.update(id, strip(r))),
+    remove: (id) => (isFW(id) ? fw.remove(String(id).slice(FW.length)) : own.remove(id)),
   }
 }
 
@@ -323,12 +333,24 @@ export function withNames(api, names) {
 
 // Hosts, address lists, IP lists and the folders they are in (folder_id,
 // parent_id: a folder's id, 0 none).
-export const hosts = withNames(treeApi(() => 'host'), { folder: 'folder_id' })
-export const addressLists = withNames(treeApi(() => 'address-list'), { folder: 'folder_id' })
-export const ipLists = withNames(treeApi(() => 'ip-list'), { folder: 'folder_id' })
-export const objectFolders = withNames(treeApi(() => 'object-folder', ['id']), {
-  parent: 'parent_id',
-})
+export const hosts = withNames(
+  treeApi(() => 'host'),
+  { folder: 'folder_id' },
+)
+export const addressLists = withNames(
+  treeApi(() => 'address-list'),
+  { folder: 'folder_id' },
+)
+export const ipLists = withNames(
+  treeApi(() => 'ip-list'),
+  { folder: 'folder_id' },
+)
+export const objectFolders = withNames(
+  treeApi(() => 'object-folder', ['id']),
+  {
+    parent: 'parent_id',
+  },
+)
 // The IPAM prefixes and addresses of the selected virtual firewall, merged
 // on update: the DHCP page sets a prefix's DHCP settings.
 export const ipamPrefixes = vfApi('ipam-prefix', ['prefix'], { merge: true })
@@ -345,7 +367,7 @@ const withSettings = ({ provider_setting: ps, ...r }) => ({
   provider_settings: Object.fromEntries((ps ?? []).map((s) => [s.name, s.value ?? ''])),
   provider_secrets_set: (ps ?? []).filter((s) => s.has_value).map((s) => s.name),
 })
- 
+
 const withSetting = ({ provider_settings: ps, provider_secrets_set, ...r }) => ({
   ...r,
   provider_setting: Object.entries(ps ?? {}).map(([name, value]) => ({ name, value })),
@@ -363,12 +385,69 @@ export const dnsUpdatePath = (name) => `${vfPath()}/${path(['dns-update', name])
 // (the zone's page edits them).
 export const dnsZones = vfApi('dns-zone', ['name'], { shallow: true })
 
+// certificateAuthorities is the firewall's CAs (the top-level list
+// certificate-authority), as the certificates page has them: each row with
+// what its chain says (the chain view), common_name its subject's, and
+// has_privkey; fullchain and privkey for the chain and the (write-only)
+// key. A create with generate makes the CA here (the generate action).
+export function certificateAuthorities() {
+  const listPath = () => 'certificate-authority'
+  const entryPath = (name) => `${listPath()}=${encodeURIComponent(name)}`
+  const base = treeApi(listPath, ['name'], { merge: true })
+  const toTree = ({ fullchain, privkey, description, name }) => ({
+    name,
+    description,
+    ...(fullchain !== undefined ? { full_chain: fullchain } : {}),
+    new_priv_key: privkey || '',
+  })
+  const withChain = (r, info = {}) => {
+    const { full_chain: fullchain, ...o } = r
+    const i = fromEntry(info)
+    return {
+      ...o,
+      ...i,
+      common_name: i.chain?.[0] ?? '',
+      fullchain: fullchain ?? '',
+      is_ca: true,
+      has_privkey: !!info['has-key'],
+    }
+  }
+  return {
+    ...base,
+    list: async () => {
+      const [rows, chains] = await Promise.all([
+        base.list(),
+        config.view(listPath(), 'chain').catch(() => ({})),
+      ])
+      return rows.map((r) => withChain(r, chains[r.name]))
+    },
+    get: async (name) =>
+      withChain(await base.get(name), await config.view(entryPath(name), 'chain')),
+    create: async (body) => {
+      const { generate, ...rest } = body
+      if (generate) {
+        await config.action(entryPath(rest.name), 'generate', {
+          'common-name': generate.common_name || '',
+          ...(generate.key_type ? { 'key-type': generate.key_type } : {}),
+          ...(Number(generate.days) ? { days: Number(generate.days) } : {}),
+        })
+        if (rest.description)
+          await config.patch(entryPath(rest.name), toEntry({ description: rest.description }))
+        return { ...rest, id: rest.name }
+      }
+      return base.create(toTree(rest))
+    },
+    update: (id, body) => base.update(id, toTree(body)),
+    download: (name, format) => config.download(entryPath(name), 'download', { format }),
+  }
+}
+
 // certificatesOf is the certificates of the virtual firewall instance()
 // names, as the certificates page has them: each row with what its chain
 // says (is_ca, issuer, chain, not_before, not_after; the chain view) and
 // has_privkey; fullchain and privkey for the chain and the (write-only)
 // key. A create with generate makes the certificate here (the generate
-// action), one with import_ca refuses a certificate that is no CA.
+// action).
 export function certificatesOf(instance) {
   const listPath = () => `${path(['instance', instance()])}/certificate`
   const entryPath = (name) => `${listPath()}=${encodeURIComponent(name)}`
@@ -395,16 +474,16 @@ export function certificatesOf(instance) {
       ])
       return rows.map((r) => withChain(r, chains[r.name]))
     },
-    get: async (name) => withChain(await base.get(name), await config.view(entryPath(name), 'chain')),
+    get: async (name) =>
+      withChain(await base.get(name), await config.view(entryPath(name), 'chain')),
     create: async (body) => {
-      const { generate, import_ca, ...rest } = body
+      const { generate, ...rest } = body
       if (generate) {
         await config.action(entryPath(rest.name), 'generate', {
           domains: generate.domains ?? [],
           'common-name': generate.common_name || '',
           ...(generate.key_type ? { 'key-type': generate.key_type } : {}),
           ...(Number(generate.days) ? { days: Number(generate.days) } : {}),
-          ca: !!generate.ca,
           ...(generate.signed_by ? { 'signed-by': generate.signed_by } : {}),
         })
         await config.patch(
@@ -413,12 +492,7 @@ export function certificatesOf(instance) {
         )
         return { ...rest, id: rest.name }
       }
-      const made = await base.create(toTree({ ...rest, source: 'import' }))
-      if (import_ca && !(await config.view(entryPath(rest.name), 'chain'))['is-ca']) {
-        await config.remove(entryPath(rest.name))
-        throw new Error(`${rest.name} is not a certificate authority`)
-      }
-      return made
+      return base.create(toTree({ ...rest, source: 'import' }))
     },
     update: (id, body) => base.update(id, toTree(body)),
     download: (name, format) => config.download(entryPath(name), 'download', { format }),

@@ -48,11 +48,12 @@ func (a *Adder) index(n *datastore.Node, id int64) {
 	a.idx[n] = id
 }
 
-// Node is the entry of the table's row id, nil when there is none.
+// Node is the entry of the table's row id, nil when there is none (of
+// any list the table's rows are: ids are unique per table).
 func (a *Adder) Node(tbl string, id int64) *datastore.Node {
 	for t, ids := range a.byID {
-		if t.name == tbl {
-			return ids[id]
+		if n := ids[id]; t.name == tbl && n != nil {
+			return n
 		}
 	}
 	return nil
@@ -64,10 +65,26 @@ func (a *Adder) Node(tbl string, id int64) *datastore.Node {
 // an id (one made up, for a new entry) can be named by the rows added
 // after it. An entry that is there already is an error.
 func (a *Adder) Add(tbl string, row Row) (*datastore.Node, error) {
+	// Two lists may share a table (a virtual firewall's DNS templates and
+	// the firewall's): a row with a parent is the nested list's, one
+	// without (0) the top-level list's.
 	var t *table
 	for _, x := range a.m.tables {
-		if x.name == tbl {
+		if x.name != tbl {
+			continue
+		}
+		if x.parent == nil || toInt(row[x.parentCol]) != 0 {
 			t = x
+			if x.parent != nil {
+				break
+			}
+		}
+	}
+	if t == nil {
+		for _, x := range a.m.tables {
+			if x.name == tbl {
+				t = x
+			}
 		}
 	}
 	if t == nil {
@@ -108,7 +125,7 @@ func (a *Adder) Add(tbl string, row Row) (*datastore.Node, error) {
 				}
 				continue
 			}
-			tgt := a.byID[c.target][toInt(v)]
+			tgt := a.Node(c.target.name, toInt(v))
 			if tgt == nil {
 				return nil, fmt.Errorf("%s: %s names %s %d, which is not there", tbl, c.column, c.target.name, toInt(v))
 			}

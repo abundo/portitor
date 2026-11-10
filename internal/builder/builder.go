@@ -855,8 +855,9 @@ func buildPeer(in Input, generation int64, only map[string]bool, firewallID uint
 		}
 
 		if mi.IsDefault {
+			// The firewall's syslog servers, sent the host's journal.
 			for i := range d.SyslogServers {
-				if s := &d.SyslogServers[i]; s.InstanceID == mi.ID && s.Enabled {
+				if s := &d.SyslogServers[i]; s.Enabled {
 					if in.Syslog == nil {
 						in.Syslog = &fwconfig.Syslog{}
 					}

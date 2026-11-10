@@ -101,8 +101,7 @@ Revert, the HA replica, bundles, the GUI) works unchanged. The YANG modules map 
 them with extensions that go with the tables: `px:table` (a list's rows),
 `px:parent-column`, `px:position` (an ordered-by user list's order), `px:column` (a
 leaf that is a row id of the entry a leafref names), `px:external` (a row id of a table
-that is not configuration: firewalls, roles), `px:global-ref` (a DNS template of the
-instance, or a global one), `px:null-value` (`main` for the main table's VRF id NULL),
+that is not configuration: firewalls, roles), `px:null-value` (`main` for the main table's VRF id NULL),
 `px:nullable`, `px:json` and `px:json-map` (a nested list in a JSON column).
 `TestEveryColumnMapped` fails when a table or column has no YANG mapping.
 

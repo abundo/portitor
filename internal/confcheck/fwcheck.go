@@ -168,15 +168,17 @@ func fwScalar(s *schema.Node, v string) any {
 }
 
 func init() {
-	register("/instance/dnssec-policy", hook{check: func(c *Ctx, e *datastore.Node) []error {
-		errs := checkDNSScope(c, e)
-		for _, b := range []string{"default", "insecure", "none"} {
-			if e.Leaf("name") == b {
-				errs = append(errs, fail("name: %s is one of BIND's own policies", b))
+	for _, at := range []string{"/instance", ""} {
+		register(at+"/dnssec-policy", hook{check: func(c *Ctx, e *datastore.Node) []error {
+			errs := checkDNSScope(c, e)
+			for _, b := range []string{"default", "insecure", "none"} {
+				if e.Leaf("name") == b {
+					errs = append(errs, fail("name: %s is one of BIND's own policies", b))
+				}
 			}
-		}
-		return errs
-	}})
+			return errs
+		}})
+	}
 }
 
 // checkDynDNSDoc is fwconfig's check of a DNS update client and its
@@ -237,19 +239,14 @@ func checkSOA(s *datastore.Node) []error {
 }
 
 // checkZoneTemplate is fwconfig's check of a DNS template, with the SOA
-// template and DNSSEC policy it uses (its instance's, or global ones).
+// template and DNSSEC policy it uses (its virtual firewall's, or the
+// firewall's).
 func checkZoneTemplate(c *Ctx, t *datastore.Node) []error {
-	in := instanceOf(t)
 	find := func(list, name string) *datastore.Node {
-		if e := in.Entry(list, []string{name}); e != nil {
+		if e := t.Parent.Entry(list, []string{name}); e != nil {
 			return e
 		}
-		for _, o := range c.T.Root.Lists["instance"] {
-			if e := o.Entry(list, []string{name}); e != nil && on(e, "global") {
-				return e
-			}
-		}
-		return nil
+		return c.T.Root.Entry(list, []string{name})
 	}
 	zt := fwconfig.DNSZoneTemplate{Name: t.Leaf("name"), SOA: t.Leaf("soa-template"), DNSSECPolicy: t.Leaf("dnssec-policy")}
 	zt.DefaultTTL, _ = strconv.ParseInt(t.Leaf("default-ttl"), 10, 64)

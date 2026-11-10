@@ -22,8 +22,10 @@ module portitor {
   description
     "The configuration of a Portitor firewall, and of its HA secondary:
      settings, virtual firewalls (instance) with their interfaces, routing,
-     filter and NAT rules and services, links between them, and the
-     objects they share (hosts, address lists, IP lists, services).
+     filter and NAT rules and services, links between them, the
+     objects they share (hosts, address lists, IP lists, services), and
+     what is the firewall's alone (syslog servers, certificate
+     authorities, the DNS templates every virtual firewall may use).
 
      Every frontend reads and writes this tree: the CLI, NETCONF, the API
      and the GUI. The state (config false) is what the firewalls run
@@ -33,5 +35,6 @@ module portitor {
 
   uses system;
   uses objects;
+  uses firewall-services;
   uses system-state;
 }

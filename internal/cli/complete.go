@@ -287,7 +287,7 @@ func (s *Session) valueItems(tree *datastore.Tree, path datastore.Path, leaf *sc
 		}
 	}
 	collect(leaf.Type)
-	if len(leaf.Type.Leafrefs()) > 0 || leaf.Ext["global-ref"] != "" {
+	if len(leaf.Type.Leafrefs()) > 0 {
 		work := tree.Clone()
 		if holder, err := work.Ensure(path[:len(path)-1]); err == nil {
 			words = append(words, work.RefValues(holder, leaf)...)

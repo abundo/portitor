@@ -189,7 +189,7 @@ two hosts by those fingerprints.
 | | Rules | One tab per hook, in the order packets pass them: *Prerouting* (port forwards, DNAT; with Hairpin a port forward also works from the LAN to the public address), *Input*, *Forward* and *Output* filter rules, and *Postrouting* (masquerade and SNAT). The filter rules have per-rule traffic counters and counts of what each chain drops by default (invalid packets, no rule matched); every row, the locked ones included, can log to the log panel's *Logged packets*. The Service column names the services a rule matches (empty: any protocol); its search can create a new one. See [Writing firewall rules](rules.md). |
 | | Services | What the rules' Service column matches: TCP, UDP or SCTP port ranges (with source ports if wanted), an ICMP or ICMPv6 type and code, or an IP protocol number. Your own next to predefined ones such as `ssh`, `dns`, `ping` or `gre`. Its Ports tab holds the port names that NAT port fields accept: built-in ones (`https`) and your own, which you add, rename and delete here. |
 | | Connections | The virtual firewall's connection table (conntrack), streamed from the firewall, with each connection's start time. |
-| Services | DNS | Three tabs. *DNS zones*: the zones and records the virtual firewall serves. *DNS templates*: the virtual firewall's SOA templates, DNSSEC policies and zone templates. One of the default virtual firewall (`main`) can be made *Global*: it is then shown, read-only, and usable in all virtual firewalls; a global DNS template needs a global SOA template and DNSSEC policy. A name is unique in a virtual firewall, and a global one in all. *DNS server*: the virtual firewall's DNS server (BIND), which always runs; its upstream (forwarders, the root servers, or the DNS servers from the DHCP lease on one interface, configured as BIND's forwarders; forwarding can fall back to the root servers); the interfaces it answers on; query logging, with filters, to the log panel's *DNS queries*. *New dynamic zone* (dynamic DNS) keeps the records of a zone on another nameserver in step with an interface's addresses (the WAN, say): on your own nameserver (by IP address or DNS name, looked up in the virtual firewall) by RFC 2136 dynamic update (TSIG signed), sent from the virtual firewall, or at a DNS hosting provider through its API, called from the firewall host (Bunny DNS, Cloudflare, deSEC, easyDNS, Gandi, GleSYS, GoDaddy, Hetzner DNS, Loopia, Namecheap, NameSilo, netcup, Njalla, OVHcloud, Porkbun). A provider's tokens and keys are stored on the server and never shown again; leave one empty to keep it. Its records are edited like a zone's, its nameserver or provider under *Settings*. |
+| Services | DNS | Three tabs. *DNS zones*: the zones and records the virtual firewall serves. *DNS templates*: the virtual firewall's SOA templates, DNSSEC policies and zone templates, and the firewall's (*Of*: the firewall), which every virtual firewall's zones and templates may use. A global admin makes one the firewall's (*The firewall's*, when it is made; it never moves); the firewall's DNS template takes the firewall's SOA template and DNSSEC policy only. A name is unique in a virtual firewall, and one of the firewall's in all. *DNS server*: the virtual firewall's DNS server (BIND), which always runs; its upstream (forwarders, the root servers, or the DNS servers from the DHCP lease on one interface, configured as BIND's forwarders; forwarding can fall back to the root servers); the interfaces it answers on; query logging, with filters, to the log panel's *DNS queries*. *New dynamic zone* (dynamic DNS) keeps the records of a zone on another nameserver in step with an interface's addresses (the WAN, say): on your own nameserver (by IP address or DNS name, looked up in the virtual firewall) by RFC 2136 dynamic update (TSIG signed), sent from the virtual firewall, or at a DNS hosting provider through its API, called from the firewall host (Bunny DNS, Cloudflare, deSEC, easyDNS, Gandi, GleSYS, GoDaddy, Hetzner DNS, Loopia, Namecheap, NameSilo, netcup, Njalla, OVHcloud, Porkbun). A provider's tokens and keys are stored on the server and never shown again; leave one empty to keep it. Its records are edited like a zone's, its nameserver or provider under *Settings*. |
 | | DHCP | Two tabs. *DHCP info*: active leases, and the leases of the firewall's own DHCP clients. *DHCP server config*: the virtual firewall's DHCP server on or off, its domain name and lease time, and the interfaces with the prefixes of their addresses, each with a DHCP switch. Badges on an interface: *DHCP Client* (it gets its IPv4 address by DHCP), *SLAAC-C* (it takes an IPv6 address from router advertisements), *RA* (it sends router advertisements). Edit an interface for its range, gateway and DNS servers, and on IPv6 prefixes router advertisements and SLAAC. An interface's addresses in a delegated prefix (`<wan0>:2000::1/64`) show as rows marked *delegated*: their DHCPv6 switch, range (host parts) and SLAAC are the interface's, for each of its delegated /64s. Several prefixes with DHCP on one interface form a Kea shared network: clients get addresses from all of them. |
 | | WireGuard | Tunnels, road-warrior and [site-to-site](#site-to-site-wireguard) peers; generates client and site configs, and imports a wg-quick config file. |
 | | Certificates | TLS certificates from Let's Encrypt, got and renewed by the firewall; see [Certificates](#certificates). |
@@ -250,8 +250,8 @@ capture*) and **deploys** it. An
 counters or logged packets, nor the agent's log, Settings, Updates, Users or Roles.
 Named hosts and prefixes, address lists, services, IP lists, tasks and links are
 shared: everyone reads and uses them, a global admin changes them. DNS templates belong to
-a virtual firewall, and its admin changes them; the default virtual firewall's global ones are
-read-only in the others.
+a virtual firewall, and its admin changes them; the firewall's are usable in every virtual
+firewall and changed by a global admin.
 
 A virtual firewall admin's deploy takes their virtual firewalls from the database and everything
 else as the firewall runs it, so another tenant's unfinished changes stay where they
@@ -441,31 +441,28 @@ never shown again, and the deployment history keeps it redacted.
 ### Certificate authorities
 
 A certificate authority (CA) belongs to the **firewall**, not to a virtual firewall:
-the *Certificate authorities* tab shows the CAs of the firewall the selected virtual
-firewall is on, kept on its host. A CA is deployed with the host like any imported
-certificate, key included, so it is stored on the firewall itself (on both hosts of
-an HA pair), and the deployment history keeps the key redacted. Global admins
-manage CAs.
+the *Certificate authorities* tab shows the firewall's CAs (`certificate-authority`
+in the CLI). A CA stays in Portitor's configuration, key included (on both hosts of
+an HA pair, with the rest of it), and is not deployed: the certificates it signs
+carry it in their chain. Global admins manage CAs.
 
 - **New CA** makes one (a common name, the key type, ten years by default), or
   imports an existing CA with its key (*Import a CA with its key*), which then signs
-  too. A CA can't be added to a virtual firewall, nor be the GUI's or the ACME
-  proxy's certificate.
+  too. A CA can't be added as a certificate (of a virtual firewall or the host).
 - **Export** on its row downloads its certificate (PEM or DER, without the key).
   Add it to the trust store of the hosts that should trust what it signs, e.g.
   `/usr/local/share/ca-certificates/<name>.crt` and `update-ca-certificates` on
   Debian, or *Trusted Root Certification Authorities* on Windows.
 - **Sign for &lt;VF&gt;** on its row opens *Create certificate* (below) for the
-  virtual firewall selected in the top bar, signed by that CA. A CA signs the
-  certificates of its own firewall's host and virtual firewalls only.
+  virtual firewall selected in the top bar, signed by that CA.
 
 Deleting a CA leaves the certificates it signed as they are.
 
 ### Created certificates
 
 *Create certificate* on the *Certificate store* tab makes a new key and a server certificate for
-it in the selected virtual firewall (or host): *Signed by* a certificate authority
-of its firewall (global admins only) or self-signed, for the SANs you give (DNS
+it in the selected virtual firewall (or host): *Signed by* one of the firewall's
+certificate authorities (global admins only) or self-signed, for the SANs you give (DNS
 names, wildcards and IP addresses), valid for the days you give (825 by default,
 the most Apple's systems accept), but never past its CA's end. Its chain holds its CA after it. It is
 then an imported certificate like any other: deployed at the next commit, never

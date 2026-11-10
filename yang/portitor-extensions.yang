@@ -44,19 +44,12 @@ module portitor-extensions {
     argument name;
     description
       "The leaf's column, when it holds a row id: of the entry the leafref
-       points at, of the px:global-ref entry, or of the px:external row.";
+       points at, or of the px:external row.";
   }
 
   extension external {
     argument table;
     description "The leaf names a row of this table, which is not configuration (firewalls, roles).";
-  }
-
-  extension global-ref {
-    argument path;
-    description
-      "The leaf names an entry at path (relative, as a leafref's), or one
-       with global true in another instance.";
   }
 
   extension null-value {

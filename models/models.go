@@ -987,13 +987,13 @@ type DnsBlocklist struct {
 	Refresh int    `json:"refresh"` // minutes between downloads
 }
 
-// DnsSoaTemplate belongs to an instance; Global (the default instance's
-// only) lends it to all, read-only. Minimum is the SOA minimum
-// (negative-caching TTL); the serial is dnsmgr2's.
+// DnsSoaTemplate is a virtual firewall's SOA template, or the firewall's
+// (InstanceID 0: a top-level dns-soa-template, for every virtual
+// firewall). Minimum is the SOA minimum (negative-caching TTL); the serial
+// is dnsmgr2's.
 type DnsSoaTemplate struct {
 	Base
 	InstanceID uint   `json:"instance_id"`
-	Global     bool   `json:"global"`
 	Name       string `json:"name"`
 	Mname      string `json:"mname"`
 	Rname      string `json:"rname"`
@@ -1003,12 +1003,11 @@ type DnsSoaTemplate struct {
 	Minimum    int64  `json:"minimum"`
 }
 
-// DnsDnssecPolicy belongs to an instance, and may be Global as a
-// DnsSoaTemplate.
+// DnsDnssecPolicy is a virtual firewall's DNSSEC policy, or the
+// firewall's (InstanceID 0), as a DnsSoaTemplate.
 type DnsDnssecPolicy struct {
 	Base
 	InstanceID               uint   `json:"instance_id"`
-	Global                   bool   `json:"global"`
 	Name                     string `json:"name"`
 	KskLifetime              string `json:"ksk_lifetime"`
 	KskAlgorithm             string `json:"ksk_algorithm"`
@@ -1021,13 +1020,12 @@ type DnsDnssecPolicy struct {
 }
 
 // DnsTemplate is a zone template: SOA, default TTL, apex NS and an
-// optional DNSSEC policy, of its instance or global. It belongs to an
-// instance, and may be Global as a DnsSoaTemplate (then its SOA and policy
-// are global too).
+// optional DNSSEC policy. A virtual firewall's uses its own SOA template
+// and policy or the firewall's; the firewall's (InstanceID 0, for every
+// virtual firewall's zones) only the firewall's.
 type DnsTemplate struct {
 	Base
 	InstanceID     uint              `json:"instance_id"`
-	Global         bool              `json:"global"`
 	Name           string            `json:"name"`
 	SoaTemplateID  uint              `json:"soa_template_id"`
 	DefaultTtl     int64             `json:"default_ttl"`
@@ -1229,10 +1227,10 @@ type SnmpUser struct {
 }
 
 // SyslogServer is a remote syslog server rsyslog sends the host's journal
-// to: a server of a firewall's default instance. Disabled, it is left out.
+// to: the firewall's, deployed with its default instance. Disabled, it is
+// left out.
 type SyslogServer struct {
 	Base
-	InstanceID  uint   `json:"instance_id"`
 	Enabled     bool   `json:"enabled"`
 	Description string `json:"description"`
 	Address     string `json:"address"`

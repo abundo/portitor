@@ -18,8 +18,9 @@ import (
 )
 
 // The objects the virtual firewalls share (hosts, address lists, IP
-// lists, services, port names, folders, tasks), and per instance rate
-// limits and syslog servers; and what a new virtual firewall starts with.
+// lists, services, port names, folders, tasks), the firewall's syslog
+// servers, and per instance rate limits; and what a new virtual firewall
+// starts with.
 
 func init() {
 	register("/host", hook{check: checkHost})
@@ -30,7 +31,7 @@ func init() {
 	register("/object-folder", hook{normalize: normalizeFolder, check: checkFolder})
 	register("/task", hook{normalize: normalizeTask, check: checkTask})
 	register("/instance/rate-limit", hook{normalize: normalizeRateLimit, check: checkRateLimit})
-	register("/instance/syslog-server", hook{check: checkSyslogServer})
+	register("/syslog-server", hook{check: checkSyslogServer})
 }
 
 func checkHost(c *Ctx, o *datastore.Node) []error {
@@ -356,9 +357,6 @@ func checkRateLimit(c *Ctx, l *datastore.Node) []error {
 }
 
 func checkSyslogServer(c *Ctx, s *datastore.Node) []error {
-	if !on(instanceOf(s), "is-default") {
-		return []error{fail("syslog servers are the firewall's: add them to its default virtual firewall")}
-	}
 	port := num(s, "port")
 	if port == 0 {
 		port = fwconfig.SyslogPort

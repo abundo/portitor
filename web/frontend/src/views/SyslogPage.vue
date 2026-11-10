@@ -3,8 +3,8 @@
 
 <!-- Syslog: the firewall's journal and rsyslog, which sends it to remote
      syslog servers (Syslog info), and those servers (Syslog configuration).
-     Both are the firewall's, not a virtual firewall's: the servers are rows
-     of its host, the default virtual firewall. -->
+     Both are the firewall's, not a virtual firewall's: the servers are the
+     top-level list syslog-server. -->
 <script setup>
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -69,7 +69,7 @@ const stateColor = (s) =>
   'neutral'
 const protocolLabel = (s) => `${s.protocol.toUpperCase()} ${s.port}`
 
-// ----- Configuration: the host's syslog servers.
+// ----- Configuration: the firewall's syslog servers.
 const protocolItems = [
   { label: 'UDP', value: 'udp' },
   { label: 'TCP', value: 'tcp' },
@@ -88,8 +88,11 @@ const severityItems = [
   { label: 'info (6)', value: 'info' },
   { label: 'debug (7)', value: 'debug' },
 ]
-// The host's syslog servers, in the configuration tree (keyed by id).
-const servers = treeApi(() => `instance=${encodeURIComponent(host.value?.name ?? '')}/syslog-server`, ['id'])
+// The firewall's syslog servers, top-level in the configuration tree (keyed by id).
+const servers = treeApi(
+  () => `instance=${encodeURIComponent(host.value?.name ?? '')}/syslog-server`,
+  ['id'],
+)
 const formatLabel = (v) => formatItems.find((i) => i.value === v)?.label ?? v
 const columns = [
   { key: 'address', label: 'Server', class: 'font-mono' },

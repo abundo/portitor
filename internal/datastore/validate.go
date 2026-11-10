@@ -12,8 +12,7 @@ import (
 )
 
 // Validate checks the tree against its schema: every value's type,
-// mandatory leaves, and that what a leafref (or px:global-ref) names
-// exists. A union with a member that takes the value as it is, a string
+// mandatory leaves, and that what a leafref names exists. A union with a member that takes the value as it is, a string
 // say, needs no target. The problems come back sorted by path.
 func (t *Tree) Validate() []error {
 	var errs []error
@@ -95,11 +94,7 @@ func (t *Tree) checkRef(n *Node, s *schema.Node, v string) string {
 			return ""
 		}
 	}
-	paths := s.Type.Leafrefs()
-	if p, ok := s.Ext["global-ref"]; ok {
-		paths = append(paths, p)
-	}
-	return fmt.Sprintf("%q doesn't name a %s", v, describePaths(paths))
+	return fmt.Sprintf("%q doesn't name a %s", v, describePaths(s.Type.Leafrefs()))
 }
 
 func describePaths(paths []string) string {

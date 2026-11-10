@@ -119,7 +119,8 @@ leaves (`wg-public-key ...`).
 | `wg-next-free` | interface (WireGuard) | the next free peer addresses |
 | `move-to instance <vf>` | interface | moves it, with its addresses and peers, to another virtual firewall |
 | `chain` | certificate | what an imported certificate's chain says |
-| `generate` | certificate | makes a self-signed certificate or CA, or one signed by a CA of the firewall's host |
+| `generate` | certificate | makes a self-signed certificate, or one signed by one of the firewall's CAs |
+| `generate` | certificate-authority | makes a self-signed CA |
 | `renew` | certificate | orders an ACME certificate now |
 | `next-free` | ipam-prefix | the prefix's next free address |
 | `update` | ip-list, dns-blocklist | downloads the list now |
