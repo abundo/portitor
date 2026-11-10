@@ -21,7 +21,7 @@ require (
 	github.com/goccy/go-yaml v1.19.2
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/insomniacslk/dhcp v0.0.0-20260901064844-234b97448fae
-	github.com/labstack/echo/v5 v5.3.1
+	github.com/labstack/echo/v5 v5.4.1
 	github.com/libdns/bunny v1.6.1
 	github.com/libdns/cloudflare v0.2.2
 	github.com/libdns/desec v1.1.1
