@@ -87,6 +87,7 @@ entries and values (interface names where an interface is wanted, and so on).
 | `discard stay\|now` | drops the candidate's changes |
 | `tools <path> <action> [<input> <value>]...` | runs an action of an entry (see [Actions](#actions)) |
 | `tree [path]` | shows the model below here: names, keys and types |
+| `show interface [name]` | the interfaces as they run: a table of every virtual firewall's (name, kind, admin and operational state, MTU, MAC, addresses), or a named one's detail with its counters; inside a virtual firewall, its own. Directly in a virtual firewall `interface` is its configuration list, which wins there |
 | `show deployments`, `show api <path>` | shows the commits, or the answer of a GET of the API (`show api /api/agent/status`); the version is `show from state / system version` |
 | `pwc`, `help`, `quit` | where you are, the commands, log out |
 

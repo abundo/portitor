@@ -72,6 +72,9 @@ func (s *Session) Suggest(ctx context.Context, line string) (partial string, ite
 			if len(args) == 1 && args[0].text == "api" {
 				items = []Item{{"<path>", "/api/..."}}
 			}
+			if len(args) == 1 && args[0].text == "interface" {
+				items = s.interfaceItems(ctx)
+			}
 			break
 		}
 		for len(args) > 0 && !args[0].quoted {
@@ -91,7 +94,7 @@ func (s *Session) Suggest(ctx context.Context, line string) (partial string, ite
 		if len(args) == 0 {
 			if cmd == "show" {
 				items = words("from", "flat", "json", "detail")
-				for _, it := range []Item{{"deployments", "the commits and their deployments"}, {"api", "the answer of a GET of the API"}} {
+				for _, it := range []Item{{"interface", "the interfaces' state: all, or one's detail"}, {"deployments", "the commits and their deployments"}, {"api", "the answer of a GET of the API"}} {
 					if s.showSystem([]token{{text: it.Word}}) {
 						items = append(items, it)
 					}

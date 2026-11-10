@@ -125,7 +125,7 @@ func (s *Session) printf(format string, args ...any) {
 
 var commands = []struct{ name, help string }{
 	{"enter", "enter candidate (edit) or running (read) mode"},
-	{"show", "show the configuration here or at a path: [from running|candidate|state] [flat|json|detail] [path]; also deployments, api <path>"},
+	{"show", "show the configuration here or at a path: [from running|candidate|state] [flat|json|detail] [path]; also interface [name], deployments, api <path>"},
 	{"diff", "show the candidate's changes against running: [flat] [path]"},
 	{"commit", "commit the candidate: now (and leave candidate mode), stay, validate, confirmed [seconds]"},
 	{"discard", "drop the candidate's changes: now (and leave candidate mode) or stay"},
@@ -943,10 +943,10 @@ func (s *Session) commit(ctx context.Context, words []string) error {
 	return nil
 }
 
-// showSystem tells whether show's first word is one of its own (deployments,
-// api) rather than the start of a path: a node here of that name wins.
+// showSystem tells whether show's first word is one of its own (interface,
+// deployments, api) rather than the start of a path: a node here of that name wins.
 func (s *Session) showSystem(args []token) bool {
-	if len(args) == 0 || args[0].quoted || !slices.Contains([]string{"deployments", "api"}, args[0].text) {
+	if len(args) == 0 || args[0].quoted || !slices.Contains([]string{"interface", "deployments", "api"}, args[0].text) {
 		return false
 	}
 	_, err := childOf(s.schemaHere(), args[0])
@@ -955,9 +955,11 @@ func (s *Session) showSystem(args []token) bool {
 
 func (s *Session) show(ctx context.Context, words []string) error {
 	if len(words) == 0 {
-		return errors.New("show deployments|api <path>")
+		return errors.New("show interface [name]|deployments|api <path>")
 	}
 	switch {
+	case words[0] == "interface":
+		return s.showInterface(ctx, words)
 	case strings.HasPrefix("deployments", words[0]):
 		code, body := s.env.API(ctx, "GET", "/api/deployments", nil)
 		if code/100 != 2 {
@@ -992,7 +994,7 @@ func (s *Session) show(ctx context.Context, words []string) error {
 		}
 		s.out.Write(append(body, '\n'))
 	default:
-		return errors.New("show deployments|api <path>")
+		return errors.New("show interface [name]|deployments|api <path>")
 	}
 	return nil
 }

@@ -337,3 +337,53 @@ func TestShowWords(t *testing.T) {
 		t.Errorf("show offers %v", have)
 	}
 }
+
+func TestShowInterface(t *testing.T) {
+	s, out, m := newTest(t)
+	run(t, s,
+		"enter candidate",
+		"instance host is-default true",
+		"instance host interface wan0 description uplink",
+		"instance fw interface lan0 enabled false",
+		"commit now",
+	)
+	s.env.State = func(context.Context) (*datastore.Tree, error) {
+		tr := m.running.Clone()
+		for _, inst := range tr.Root.Lists["instance"] {
+			st := inst.AddContainer(inst.S.Child("state"))
+			ls := st.S.Child("interfaces")
+			name := map[string]string{"host": "wan0", "fw": "lan0"}[inst.Leaves["name"]]
+			d := st.AddEntry(ls, map[string]string{"name": name, "kind": "ethernet", "state": "up", "mtu": "1500", "rx-bytes": "1234"})
+			d.LeafLists["addresses"] = []string{"192.0.2.1/24", "2001:db8::1/64"}
+			st.AddEntry(ls, map[string]string{"name": "vrf1", "kind": "vrf", "state": "up"})
+		}
+		return tr, nil
+	}
+	out.Reset()
+	run(t, s, "show interface")
+	for _, want := range []string{"VF", "host", "wan0", "enable", "lan0", "disable", "2001:db8::1/64", "vrf1"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("show interface lacks %q:\n%s", want, out)
+		}
+	}
+	out.Reset()
+	run(t, s, "show interface wan0")
+	for _, want := range []string{"instance host interface wan0", "uplink", "oper-state", "1234"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("show interface wan0 lacks %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out.String(), "lan0") {
+		t.Errorf("show interface wan0 shows lan0:\n%s", out)
+	}
+	if err := s.Exec(context.Background(), "show interface nosuch"); err == nil {
+		t.Error("show interface of a missing one")
+	}
+	// Inside a virtual firewall where interface is not a node, that one's alone.
+	s.cwd = datastore.Path{{Name: "instance", Keys: []string{"fw"}}, {Name: "state"}, {Name: "vrrp"}}
+	out.Reset()
+	run(t, s, "show interface")
+	if strings.Contains(out.String(), "wan0") || !strings.Contains(out.String(), "lan0") {
+		t.Errorf("show interface in fw:\n%s", out)
+	}
+}
