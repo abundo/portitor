@@ -722,6 +722,9 @@ type firewallStatus struct {
 	// Host is the firewall's memory, disks and CPU (the whole host: a
 	// global reader's only).
 	Host *agentapi.HostStatus `json:"host,omitempty"`
+	// Local marks the firewall this portitor-config runs on, on a replica
+	// only: its virtual firewalls are the primary's, but its host is its own.
+	Local bool `json:"local,omitempty"`
 }
 
 // handleAgentStatus merges the firewalls' agent status: their instances,
@@ -739,8 +742,14 @@ func (s *Server) handleAgentStatus(c *echo.Context) error {
 	sync := &nicSync{Imported: []string{}, Missing: []missingNIC{}, Problems: []string{}}
 	statuses := []firewallStatus{}
 	var mismatch string
+	var localID uint
+	if replica {
+		if lf, err := s.localFirewall(c.Request().Context()); err == nil {
+			localID = lf.ID
+		}
+	}
 	for _, fw := range fws {
-		fs := firewallStatus{ID: fw.ID, Name: fw.Name}
+		fs := firewallStatus{ID: fw.ID, Name: fw.Name, Local: localID != 0 && fw.ID == localID}
 		st, err := s.firewallStatus(c.Request().Context(), &fw)
 		if err != nil {
 			if len(fws) == 1 {

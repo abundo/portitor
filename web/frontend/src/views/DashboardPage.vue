@@ -32,7 +32,11 @@ const missingNeeded = computed(() => missing.value.some((p) => p.needed))
 
 // The firewall the selected virtual firewall is on. Its host's memory and
 // CPU are a global reader's only (the server leaves them out otherwise).
-const firewallId = computed(() => instances.firewallId)
+// On a replica (an HA secondary's GUI) the virtual firewalls are the
+// primary's, but the host is the one the GUI runs on (`local`).
+const firewallId = computed(
+  () => st.value?.firewalls?.find((f) => f.local)?.id ?? instances.firewallId,
+)
 const fw = computed(() => {
   const list = st.value?.firewalls ?? []
   return list.find((f) => f.id === firewallId.value) ?? list[0] ?? null
