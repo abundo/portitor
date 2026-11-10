@@ -60,7 +60,7 @@ const builtins = {
     match: 'ip hdrlength > 5 (input: not IGMP)',
     action: 'drop',
     description:
-      'IP options: IPv4 packets with options, dropped before the rules and established connections (Settings)',
+      'IP options: IPv4 packets with options, dropped before the rules and established connections (Firewall → Options)',
   },
   invalid: {
     match: 'ct state invalid',

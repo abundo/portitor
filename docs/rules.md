@@ -36,7 +36,7 @@ locked rows show where the built-in parts sit. Before any chain, packets that fa
 interface's [reverse path check](#reverse-path-check) are dropped (a locked row in
 input and forward).
 
-1. **IP options** (input and forward, when switched on under Settings): IPv4 packets
+1. **IP options** (input and forward, when switched on under Firewall → Options): IPv4 packets
    with IP options are dropped, before anything else. See [IP options](#ip-options).
 2. **Established connections** are allowed. Rules only decide the *first* packet of a
    connection; the replies and the rest of the connection follow automatically. You

@@ -75,6 +75,9 @@ const sections = computed(() => [
       { label: 'Rules', icon: 'i-lucide-shield-check', to: '/rules' },
       { label: 'Services', icon: 'i-lucide-plug', to: '/services' },
       { label: 'Rate limits', icon: 'i-lucide-gauge', to: '/rate-limits' },
+      ...(auth.isAdmin
+        ? [{ label: 'Options', icon: 'i-lucide-sliders-horizontal', to: '/options' }]
+        : []),
       ...(auth.canDeploy
         ? [{ label: 'Connections', icon: 'i-lucide-activity', to: '/connections' }]
         : []),

@@ -791,7 +791,7 @@ function onKeydown(event, index) {
               :hidden="!autoOpen"
               class="cursor-pointer"
               @click="emit('view', { builtin: 'ip_options' })"
-              title="IPv4 packets with IP options, dropped before the rules and established connections (Settings)"
+              title="IPv4 packets with IP options, dropped before the rules and established connections (Firewall → Options)"
             >
               <td class="text-center text-muted">
                 <UIcon name="i-lucide-lock" class="size-3.5 align-middle" />
