@@ -58,9 +58,7 @@ const patchIface = async (name, body) => {
 const wgPeers = treeApi(() => `${ifacePath(selectedId.value)}/wireguard-peer`)
 
 async function load() {
-  tunnels.value = (await interfaces.list()).filter(
-    (i) => i.kind === 'wireguard',
-  )
+  tunnels.value = (await interfaces.list()).filter((i) => i.kind === 'wireguard')
   if (!tunnels.value.some((t) => t.id === selectedId.value))
     selectedId.value = tunnels.value[0]?.id ?? null
 }
@@ -325,9 +323,7 @@ async function importFile(ev) {
   const name = file.name.replace(/\.conf$/i, '')
   try {
     const config = await file.text()
-    const existing = (await interfaces.list()).find(
-      (i) => i.name === name,
-    )
+    const existing = (await interfaces.list()).find((i) => i.name === name)
     if (existing && existing.kind !== 'wireguard') {
       toast.add({ title: `${name} exists and is not a WireGuard interface`, color: 'error' })
       return

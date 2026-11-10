@@ -77,10 +77,7 @@ let loaded = []
 async function load() {
   const id = store.currentName
   if (!id) return
-  const [entry, cs] = await Promise.all([
-    config.get(vfPath()),
-    certificatesOf(() => id).list(),
-  ])
+  const [entry, cs] = await Promise.all([config.get(vfPath()), certificatesOf(() => id).list()])
   const inst = fromEntry(entry)
   const ifs = inst.interface ?? []
   const dcs = inst.dns_update ?? []
@@ -127,7 +124,10 @@ async function save() {
         ...proxy,
         ...(changed.length
           ? {
-              interface: changed.map((i) => ({ name: i.name, acme_proxy_serve: i.acme_proxy_serve })),
+              interface: changed.map((i) => ({
+                name: i.name,
+                acme_proxy_serve: i.acme_proxy_serve,
+              })),
             }
           : {}),
       }),

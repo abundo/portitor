@@ -232,7 +232,7 @@ export function vfWithGlobals(list) {
   const fw = treeApi(() => list)
   const FW = 'fw/'
   const isFW = (id) => String(id).startsWith(FW)
-  const strip = ({ global, ...r }) => r
+  const strip = ({ global: _global, ...r }) => r
   const mine = (r) => ({ ...r, global: false })
   const theirs = (r) => ({ ...r, global: true, id: FW + r.id })
   return {
@@ -368,7 +368,7 @@ const withSettings = ({ provider_setting: ps, ...r }) => ({
   provider_secrets_set: (ps ?? []).filter((s) => s.has_value).map((s) => s.name),
 })
 
-const withSetting = ({ provider_settings: ps, provider_secrets_set, ...r }) => ({
+const withSetting = ({ provider_settings: ps, provider_secrets_set: _secretsSet, ...r }) => ({
   ...r,
   provider_setting: Object.entries(ps ?? {}).map(([name, value]) => ({ name, value })),
 })

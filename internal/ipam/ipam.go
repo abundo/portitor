@@ -240,8 +240,8 @@ func rangeSize(start, end string) float64 {
 
 // IfaceAddress is an address configured on an interface.
 type IfaceAddress struct {
-	Interface string // its name
-	Prefix      netip.Prefix // the address with its prefix length
+	Interface string       // its name
+	Prefix    netip.Prefix // the address with its prefix length
 }
 
 // InterfaceAddresses returns the valid addresses of ifaces.

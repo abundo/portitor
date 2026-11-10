@@ -26,7 +26,7 @@ import (
 type nftImportRequest struct {
 	// Instance is the virtual firewall's name.
 	Instance string `json:"instance"`
-	Text       string `json:"text"`
+	Text     string `json:"text"`
 	// Rename maps the file's interface names to the virtual firewall's.
 	Rename map[string]string `json:"rename"`
 	// Replace deletes the virtual firewall's rules and NAT rules first.

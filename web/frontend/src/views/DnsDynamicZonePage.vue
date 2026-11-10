@@ -9,7 +9,13 @@ import DyndnsClientForm from '@/components/DyndnsClientForm.vue'
 import DyndnsState from '@/components/DyndnsState.vue'
 import FormHeader from '@/components/FormHeader.vue'
 import ZoneRecordsTable from '@/components/ZoneRecordsTable.vue'
-import { config, dnsUpdatePath, dnsUpdates as dyndnsClients, fromEntry, toEntry } from '@/api/config'
+import {
+  config,
+  dnsUpdatePath,
+  dnsUpdates as dyndnsClients,
+  fromEntry,
+  toEntry,
+} from '@/api/config'
 import { errMsg } from '@/api/http'
 import { useAuthStore } from '@/stores/auth'
 import { useDeployStore } from '@/stores/deploy'
@@ -114,9 +120,7 @@ useUnsaved(() => !deleted.value && dirty.value)
         <UButton to="/dns?tab=zones" color="neutral" variant="ghost" icon="i-lucide-arrow-left" />
         <span class="font-mono">{{ client.zone }}</span>
         <UBadge color="neutral" variant="subtle">{{ dynamicZoneLabel }}</UBadge>
-        <span class="text-sm font-normal text-muted"
-          >instance {{ store.current?.name }}</span
-        >
+        <span class="text-sm font-normal text-muted">instance {{ store.current?.name }}</span>
       </template>
       <UButton
         color="neutral"

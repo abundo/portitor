@@ -22,8 +22,8 @@ import (
 type wgImport struct {
 	// Instance is the virtual firewall's name.
 	Instance string `json:"instance"`
-	Name       string `json:"name"`
-	Config     string `json:"config"`
+	Name     string `json:"name"`
+	Config   string `json:"config"`
 	// Overwrite replaces the keys, port, addresses and peers of an
 	// existing WireGuard interface of that name.
 	Overwrite bool `json:"overwrite"`

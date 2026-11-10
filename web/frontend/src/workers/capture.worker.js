@@ -249,9 +249,7 @@ const handlers = {
 onmessage = (e) => {
   const m = e.data
   if (m.type === 'start')
-    start(m.body).catch((err) =>
-      postMessage({ type: 'ended', error: String(err?.message ?? err) }),
-    )
+    start(m.body).catch((err) => postMessage({ type: 'ended', error: String(err?.message ?? err) }))
   else if (m.type === 'stop') stop()
   else if (handlers[m.type]) {
     try {

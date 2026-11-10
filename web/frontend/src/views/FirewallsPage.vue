@@ -38,7 +38,7 @@ const statusOf = (id) => deploy.status?.firewalls?.find((f) => f.id === id)
 const inPair = (f) => !!f.id && (!!f.ha_primary_id || isPrimary(f))
 const when = (t) => (t ? new Date(t).toLocaleString() : '')
 const stateText = {
-  active: 'active: open, forwarding and answering for the pair\'s addresses',
+  active: "active: open, forwarding and answering for the pair's addresses",
   standby: 'standby: closed, ready to take over',
   fenced: 'fenced: closed, hears neither its peer nor the witness',
   stale: 'stale: closed, its peer was promoted while it was away',
@@ -49,7 +49,11 @@ function haRows(f) {
   if (!ha?.node) return []
   const rows = [
     ['State', stateText[ha.state] || ha.state],
-    ['Peer', (ha.peer_alive ? 'alive' : 'not heard') + (ha.peer_seen ? `, last heard ${when(ha.peer_seen)}` : '')],
+    [
+      'Peer',
+      (ha.peer_alive ? 'alive' : 'not heard') +
+        (ha.peer_seen ? `, last heard ${when(ha.peer_seen)}` : ''),
+    ],
     ['Witness vote', ha.vote_until ? `until ${when(ha.vote_until)}` : 'none'],
     ['Monitored interfaces', `${ha.health} of ${ha.monitored} up, peer ${ha.peer_health}`],
     ['Watchdog', ha.watchdog || ''],
@@ -232,7 +236,9 @@ const fields = [
             </tr>
           </tbody>
         </table>
-        <p v-else class="text-sm text-muted">Not known: the agent doesn't answer, or the pair isn't committed yet.</p>
+        <p v-else class="text-sm text-muted">
+          Not known: the agent doesn't answer, or the pair isn't committed yet.
+        </p>
         <UButton
           size="xs"
           variant="outline"

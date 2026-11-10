@@ -246,9 +246,7 @@ useUnsaved(() => !deleted.value && (!!dirty.value || recordsDirty.value))
         <UBadge v-if="effective.policy" color="success" variant="subtle" icon="i-lucide-lock">
           DNSSEC: {{ effective.policy.name }}
         </UBadge>
-        <span class="text-sm font-normal text-muted"
-          >instance {{ store.current?.name }}</span
-        >
+        <span class="text-sm font-normal text-muted">instance {{ store.current?.name }}</span>
       </template>
       <template v-if="auth.canEdit">
         <UButton

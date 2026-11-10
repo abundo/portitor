@@ -247,10 +247,7 @@ const zoneColumns = [
   {
     key: 'template',
     label: 'DNS template',
-    format: (r) =>
-      forwardOnly(r) || dynamic(r)
-        ? ''
-        : (r.dns_template ?? 'built-in'),
+    format: (r) => (forwardOnly(r) || dynamic(r) ? '' : (r.dns_template ?? 'built-in')),
   },
   { key: 'forwarders', label: 'Forwarders', format: (r) => (r.forwarders ?? []).join(', ') },
   { key: 'state', label: 'State', format: () => '' },

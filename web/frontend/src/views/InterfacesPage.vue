@@ -149,7 +149,7 @@ const fields = [
       { value: 'management', label: 'Management' },
     ],
     show: (f) => f.kind === 'physical' && !!store.current?.is_default,
-    hint: "An HA pair needs both: the HA link, a direct cable between the hosts, and the management interface, on a network of its own with the witness. They stay up on the standby. The management interface has an address for each host; the HA link needs none: the hosts use the IPv6 link-local addresses fe80::1 (primary) and fe80::2 (secondary) on it. Traffic interfaces are the same on both hosts, and closed on the standby.",
+    hint: 'An HA pair needs both: the HA link, a direct cable between the hosts, and the management interface, on a network of its own with the witness. They stay up on the standby. The management interface has an address for each host; the HA link needs none: the hosts use the IPv6 link-local addresses fe80::1 (primary) and fe80::2 (secondary) on it. Traffic interfaces are the same on both hosts, and closed on the standby.',
   },
   {
     key: 'ha_monitor',

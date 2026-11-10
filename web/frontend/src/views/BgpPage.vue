@@ -387,8 +387,7 @@ const groupFields = [{ key: 'name', label: 'Name', required: true }, ...peerFiel
 
 const neighborRows = ref([])
 async function loadNeighborRows() {
-  if (store.currentName)
-    neighborRows.value = await bgpNeighbors.list()
+  if (store.currentName) neighborRows.value = await bgpNeighbors.list()
 }
 watch(() => store.currentName, loadNeighborRows, { immediate: true })
 // The neighbours of the chosen VRF's BGP.

@@ -9,7 +9,18 @@
 // leaf name; `only` lists the leaves to show, in order.
 
 // label makes a leaf's name a label: "ha-gateway" is "HA gateway".
-const words = { ha: 'HA', ip: 'IP', ipv4: 'IPv4', ipv6: 'IPv6', mac: 'MAC', dns: 'DNS', dhcp: 'DHCP', vrf: 'VRF', id: 'ID', mtu: 'MTU' }
+const words = {
+  ha: 'HA',
+  ip: 'IP',
+  ipv4: 'IPv4',
+  ipv6: 'IPv6',
+  mac: 'MAC',
+  dns: 'DNS',
+  dhcp: 'DHCP',
+  vrf: 'VRF',
+  id: 'ID',
+  mtu: 'MTU',
+}
 export function label(name) {
   const s = name
     .split('-')
@@ -43,7 +54,8 @@ export function defaultsOf(list) {
     if (c.kind === 'leaf-list') d[c.name] = []
     else if (c.default != null) {
       const t = c.type?.base
-      d[c.name] = t === 'boolean' ? c.default === 'true' : /^u?int/.test(t) ? Number(c.default) : c.default
+      d[c.name] =
+        t === 'boolean' ? c.default === 'true' : /^u?int/.test(t) ? Number(c.default) : c.default
     } else if (c.type?.base === 'boolean') d[c.name] = false
   }
   return d
@@ -59,12 +71,12 @@ export function schemaFields(list, { only, overrides = {}, hide = [] } = {}) {
     .map((name) => {
       const leaf = leaves.find((c) => c.name === name)
       if (!leaf) return overrides[name] ? { key: name, ...overrides[name] } : null
-      return { ...fieldOf(leaf), ...(overrides[name] ?? {}) }
+      return { ...fieldOf(leaf), ...overrides[name] }
     })
     .filter(Boolean)
 }
 
 // schemaColumns makes CrudPage's columns of the leaves named.
 export function schemaColumns(list, names, overrides = {}) {
-  return names.map((name) => ({ key: name, label: label(name), ...(overrides[name] ?? {}) }))
+  return names.map((name) => ({ key: name, label: label(name), ...overrides[name] }))
 }

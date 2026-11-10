@@ -158,10 +158,7 @@ async function save() {
     // The servers replace the list (a merge would keep removed ones);
     // the rest is merged into the virtual firewall and its interfaces.
     const { ifaces, ntp_servers: servers, ...ntp } = form
-    await config.put(
-      `${vfPath()}/ntp-server`,
-      servers.filter((s) => s.address).map(toEntry),
-    )
+    await config.put(`${vfPath()}/ntp-server`, servers.filter((s) => s.address).map(toEntry))
     const changed = ifaces.filter((i) => {
       const o = loaded.find((x) => x.name === i.name)
       return o && !!o.ntp_serve !== i.ntp_serve
