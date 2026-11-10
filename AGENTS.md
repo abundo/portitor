@@ -7,6 +7,8 @@ Architecture and conventions for agents working in this repository. Setup, build
 and test commands are in [DEV.md](DEV.md); the product overview and security model
 are in [README.md](README.md).
 
+For any critical decision, call advisor on Fable 5.1
+
 ## Design before features
 
 A feature must fit the architecture: in the layer that owns it, through the
@@ -28,7 +30,7 @@ cleanly now. Go on only once they've chosen.
 | `yang` | The YANG modules: the configuration's schema (module `portitor`, a submodule per area, the state in `portitor-state`, `portitor-extensions`), embedded by `yang.go`; first drafted from the tables (by `dev/yanggen`, gone with them), edited by hand since |
 | `internal/schema` | The modules compiled (goyang) into the tree every frontend walks: kinds, keys, order, types and their checks, defaults, descriptions, `px:` extensions, the lists' actions (`Action`: kind `px:action`, typed input and output) |
 | `internal/datastore` | The configuration as a tree of the schema: set, delete, rename (rewriting leafrefs), move, validate, RFC 7951 JSON, diff and patch, the CLI's text and flat forms; `Store`, the shared candidate with its rebase and commit |
-| `internal/datastore/sqlmap` | The tree as rows, by the modules' `px:` extensions (`Rows`; `Adder` makes entries from rows, for the imports); the entries' ids kept by path (`IDs`, `AssignIDs`, the table `config_ids`) |
+| `internal/datastore/sqlmap` | The tree as rows, by the modules' `px:` extensions (`Rows`; `Adder` makes entries from rows, for the imports); the entries' ids kept by path (`IDs`, `AssignIDs`, the table `config_ids`); `legacy.go` reads the configuration tables of a release before the tree (`Import`, `SeedIDs`, `HighWater`), for migration 94 alone |
 | `internal/confview` | The candidate (or any tree) as rows decoded into the `models` structs, a slice per list, with their ids (`View`, `Load`, `RowOf`): what the builder and portitor-config's code of before the tree read; no tables behind it |
 | `internal/netconf` | NETCONF (RFC 6241/6242) on the datastore, the SSH server's `netconf` subsystem: framing (1.0 and chunked), XML, `edit-config` with every operation, subtree filters, `commit` with `confirmed-commit`, locks (`Store.Lock`), `get-schema`, the modules' actions (RFC 7950 `<action>`, `action.go`, through `Env.Action`) |
 | `internal/snmp` | SNMP for the state, read-only: `agentx` the subagent side of AgentX (RFC 2741: open, register, get, getnext, getbulk; a `Master` for tests), `mib` the YANG state as SNMP objects (a list a table indexed by its and its parents' keys, the top-level state container scalars) under a base OID, the numbers in `oids.json` (never reused; `go test ./internal/snmp/mib -update` numbers new state nodes and writes `deploy/mib/PORTITOR-MIB.txt`), the MIB text and a snapshot for answers |
@@ -53,7 +55,7 @@ cleanly now. Go on only once they've chosen.
 | `internal/builder` | Database → `fwconfig.Document` (resolves ids, IPAM, DHCP scopes, DNS names) |
 | `internal/ipam` | Prefix tree by CIDR containment, next free address |
 | `internal/netobj` | Named hosts/prefixes (`address_objects`) and address lists (`address_lists`): name checks and expansion |
-| `internal/dbmigrate` | Opens the SQLite database; goose migrations (the schema's source of truth) |
+| `internal/dbmigrate` | Opens the SQLite database; goose migrations (the schema's source of truth); migration 94 (`config_to_tree.go`, Go) reads the old configuration tables into the tree before it drops them, into `config_snapshot` with a marker that `web.adoptLegacyConfig` takes at the first start (the live commit's `deployed/<commit>-config.json`, `ids.json`; the table then goes) |
 | `models` | GORM mapping |
 | `web` | Echo v5 server (`server.go`: routes): auth, the configuration API (`configapi.go`: `/api/schema`, `/api/config`, `checkEdit`; the YANG actions' handlers and the GUI's own file actions `configactions.go`), the configuration as rows (`confview.go`: `view`, cached per candidate, `userEdit`, `editConfig`, `rowWriter`), the firewalls' CRUD (`crud.go`, `firewalls.go`), commits (`commit.go`), other handlers (`handlers.go`), the commits' configurations (`revert.go`), tenancy (`tenancy.go`), roles (`roles.go`, `access.go`), agent proxies (`console.go`, `capture.go`, `probe.go`, `trace.go`, `iperf.go`, `servicelog.go`, `syslog.go`, `connections.go`), WireGuard config import (`wgimport.go`), backup/restore (`backup.go`, `snapshot.go`: the database with the configuration in it), `config.yaml` (`config.go`), the HA replica and promotion (`replica.go`, `promote.go`), the witness (`witness.go`, `portalwitness.go`), and portitor-web, the portal (`portal.go`, `portal.html`) |
 | `web/frontend` | Vue SPA; `CrudPage.vue` drives most pages from field/column schemas, on a YANG list (`api/config.js`: `treeApi`, `vfApi`) |
@@ -787,7 +789,11 @@ the certificate portitor-config serves, chosen under Settings
   keys enforced as in production. SQLite's `ALTER TABLE` only adds, drops and renames
   columns; anything else rebuilds the table (create, copy, drop, rename) in a
   `-- +goose NO TRANSACTION` migration that turns `foreign_keys` off around it. Ids
-  are `AUTOINCREMENT` so a deleted row's id is never reused.
+  are `AUTOINCREMENT` so a deleted row's id is never reused. The configuration tables
+  are gone (migration 94): a database from before it is read once by `sqlmap.Import`,
+  so a table `Import` needs (`px:table`) stays in the YANG while such a release can
+  still update; `make iso-e2e-update` and `iso-e2e-split-update` from the last release
+  test it.
 - **Roles:** a user is `admin`, `viewer` or `none` (`models.RoleAdmin`/`RoleViewer`/
   `RoleNone`): global access. Roles (`roles`, `role_members`, `role_instances`) grant
   instances, by name, at a level (admin/viewer); each instance but the default has its
