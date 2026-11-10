@@ -92,9 +92,9 @@ func TestEditAndCommit(t *testing.T) {
 		t.Fatalf("commits %d, candidate mode %v", m.commits, s.candidate)
 	}
 	out.Reset()
-	run(t, s, "show instance host interface wan0")
+	run(t, s, "info instance host interface wan0")
 	if want := "kind vlan\nvlan-id 7\naddresses [ 192.0.2.1/24 2001:db8::1/64 ]\n"; out.String() != want {
-		t.Errorf("show:\n%s", out.String())
+		t.Errorf("info:\n%s", out.String())
 	}
 }
 
@@ -106,7 +106,7 @@ func TestPasteInfo(t *testing.T) {
 		"instance host rule 7 in-interfaces [ wan0 ]",
 	)
 	out.Reset()
-	run(t, s, "show")
+	run(t, s, "info")
 	text := out.String()
 	// Into an empty candidate, the text makes the same configuration.
 	s2, out2, _ := newTest(t)
@@ -114,7 +114,7 @@ func TestPasteInfo(t *testing.T) {
 	for _, l := range strings.Split(text, "\n") {
 		run(t, s2, l)
 	}
-	run(t, s2, "show")
+	run(t, s2, "info")
 	if out2.String() != text {
 		t.Errorf("pasted:\n%s\nwant:\n%s", out2.String(), text)
 	}
@@ -136,7 +136,7 @@ func TestRenameAndDelete(t *testing.T) {
 		t.Errorf("context %q", s.cwd.CLI())
 	}
 	out.Reset()
-	run(t, s, "show / instance host route 1 interface")
+	run(t, s, "info / instance host route 1 interface")
 	if out.String() != "interface uplink\n" {
 		t.Errorf("route after rename: %q", out.String())
 	}
@@ -249,7 +249,7 @@ func TestSSH(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	out, err := sess.CombinedOutput("enter candidate; instance host description ssh; commit now; show instance host")
+	out, err := sess.CombinedOutput("enter candidate; instance host description ssh; commit now; info instance host")
 	if err != nil {
 		t.Fatalf("%v: %s", err, out)
 	}
@@ -317,24 +317,31 @@ func (s *syncBuffer) String() string {
 	return s.b.String()
 }
 
-// show's own words give way to a node of that name here, and the path
-// takes the place of version, which is under system.
+// show takes its reports alone, info the tree: version is under system.
 func TestShowWords(t *testing.T) {
 	s, _, _ := newTest(t)
-	if err := s.Exec(context.Background(), "show version"); err == nil {
-		t.Error("show version at the root works")
+	if err := s.Exec(context.Background(), "info version"); err == nil {
+		t.Error("info version at the root works")
 	}
-	run(t, s, "enter candidate", "instance host ospf 2 main")
-	if s.showSystem([]token{{text: "version"}}) {
-		t.Error("version taken as show's own word")
+	run(t, s, "enter candidate", "instance host interface wan0", "info", "exit all")
+	if err := s.Exec(context.Background(), "show instance"); err == nil {
+		t.Error("show takes a path")
 	}
 	_, items := s.Suggest(context.Background(), "show ")
 	var have []string
 	for _, it := range items {
 		have = append(have, it.Word)
 	}
-	if !slices.Contains(have, "deployments") || slices.Contains(have, "version") {
+	if !slices.Equal(have, []string{"interface", "deployments", "api"}) {
 		t.Errorf("show offers %v", have)
+	}
+	_, items = s.Suggest(context.Background(), "info ")
+	have = nil
+	for _, it := range items {
+		have = append(have, it.Word)
+	}
+	if !slices.Contains(have, "from") || !slices.Contains(have, "instance") || slices.Contains(have, "deployments") {
+		t.Errorf("info offers %v", have)
 	}
 }
 
@@ -379,8 +386,8 @@ func TestShowInterface(t *testing.T) {
 	if err := s.Exec(context.Background(), "show interface nosuch"); err == nil {
 		t.Error("show interface of a missing one")
 	}
-	// Inside a virtual firewall where interface is not a node, that one's alone.
-	s.cwd = datastore.Path{{Name: "instance", Keys: []string{"fw"}}, {Name: "state"}, {Name: "vrrp"}}
+	// Inside a virtual firewall, that one's alone.
+	s.cwd = datastore.Path{{Name: "instance", Keys: []string{"fw"}}}
 	out.Reset()
 	run(t, s, "show interface")
 	if strings.Contains(out.String(), "wan0") || !strings.Contains(out.String(), "lan0") {

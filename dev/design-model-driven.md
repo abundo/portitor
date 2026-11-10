@@ -50,7 +50,7 @@ change: the document stays the contract between portitor-config and the agent.
    over the firewalls): interfaces and counters, routes, WireGuard, services, DHCP
    client and server leases, IP and LLDP neighbours, rule and rate-limit counters,
    BGP, OSPF, IS-IS, VRRP, BFD, NTP, NAT64, OpenVPN, and the agent, host and HA. Leaves are named after the agent API's fields, so
-   `datastore.Fill` fills them without code per leaf. `show from state` in the CLI,
+   `datastore.Fill` fills them without code per leaf. `info from state` in the CLI,
    NETCONF `get`. A protocol's view is asked for only when the running
    configuration has it. Not yet: routing tables beyond the main one, the BGP and
    OSPF route tables, logs, and gNMI subscriptions.

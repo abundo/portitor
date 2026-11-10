@@ -67,16 +67,18 @@ func (s *Session) Suggest(ctx context.Context, line string) (partial string, ite
 		if len(args) == 0 {
 			items = words("now", "stay")
 		}
-	case "show", "diff":
-		if cmd == "show" && s.showSystem(args) {
-			if len(args) == 1 && args[0].text == "api" {
-				items = []Item{{"<path>", "/api/..."}}
+	case "show":
+		switch {
+		case len(args) == 0:
+			for _, r := range showReports {
+				items = append(items, Item{r.name, r.help})
 			}
-			if len(args) == 1 && args[0].text == "interface" {
-				items = s.interfaceItems(ctx)
-			}
-			break
+		case len(args) == 1 && strings.HasPrefix("api", args[0].text):
+			items = []Item{{"<path>", "/api/..."}}
+		case len(args) == 1 && strings.HasPrefix("interface", args[0].text):
+			items = s.interfaceItems(ctx)
 		}
+	case "info", "diff":
 		for len(args) > 0 && !args[0].quoted {
 			if args[0].text == "from" && len(args) == 1 {
 				return partial, filter(words("running", "candidate", "state"), partial)
@@ -92,13 +94,8 @@ func (s *Session) Suggest(ctx context.Context, line string) (partial string, ite
 			break
 		}
 		if len(args) == 0 {
-			if cmd == "show" {
+			if cmd == "info" {
 				items = words("from", "flat", "json", "detail")
-				for _, it := range []Item{{"interface", "the interfaces' state: all, or one's detail"}, {"deployments", "the commits and their deployments"}, {"api", "the answer of a GET of the API"}} {
-					if s.showSystem([]token{{text: it.Word}}) {
-						items = append(items, it)
-					}
-				}
 			} else {
 				items = words("flat")
 			}

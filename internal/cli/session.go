@@ -125,7 +125,8 @@ func (s *Session) printf(format string, args ...any) {
 
 var commands = []struct{ name, help string }{
 	{"enter", "enter candidate (edit) or running (read) mode"},
-	{"show", "show the configuration here or at a path: [from running|candidate|state] [flat|json|detail] [path]; also interface [name], deployments, api <path>"},
+	{"info", "show the configuration or state here or at a path: [from running|candidate|state] [flat|json|detail] [path]"},
+	{"show", "show a report: interface [name], deployments, api <path>"},
 	{"diff", "show the candidate's changes against running: [flat] [path]"},
 	{"commit", "commit the candidate: now (and leave candidate mode), stay, validate, confirmed [seconds]"},
 	{"discard", "drop the candidate's changes: now (and leave candidate mode) or stay"},
@@ -563,11 +564,10 @@ func (s *Session) command(ctx context.Context, cmd string, args []token) error {
 			return err
 		}
 		s.printf("%s\n", msg)
-	case "show":
-		if s.showSystem(args) {
-			return s.show(ctx, words)
-		}
+	case "info":
 		return s.infoCommand(ctx, args)
+	case "show":
+		return s.show(ctx, words)
 	}
 	return nil
 }
@@ -665,7 +665,7 @@ func (s *Session) infoCommand(ctx context.Context, args []token) error {
 		switch args[0].text {
 		case "from":
 			if len(args) < 2 {
-				return errors.New("show from running|candidate|state")
+				return errors.New("info from running|candidate|state")
 			}
 			switch {
 			case strings.HasPrefix("running", args[1].text):
@@ -675,7 +675,7 @@ func (s *Session) infoCommand(ctx context.Context, args []token) error {
 			case strings.HasPrefix("state", args[1].text):
 				fromState = true
 			default:
-				return errors.New("show from running|candidate|state")
+				return errors.New("info from running|candidate|state")
 			}
 			args = args[2:]
 			continue
@@ -943,14 +943,11 @@ func (s *Session) commit(ctx context.Context, words []string) error {
 	return nil
 }
 
-// showSystem tells whether show's first word is one of its own (interface,
-// deployments, api) rather than the start of a path: a node here of that name wins.
-func (s *Session) showSystem(args []token) bool {
-	if len(args) == 0 || args[0].quoted || !slices.Contains([]string{"interface", "deployments", "api"}, args[0].text) {
-		return false
-	}
-	_, err := childOf(s.schemaHere(), args[0])
-	return err != nil
+// showReports are show's reports, for help and completion.
+var showReports = []struct{ name, help string }{
+	{"interface", "the interfaces' state: all, or one's detail"},
+	{"deployments", "the commits and their deployments"},
+	{"api", "the answer of a GET of the API"},
 }
 
 func (s *Session) show(ctx context.Context, words []string) error {
@@ -958,7 +955,7 @@ func (s *Session) show(ctx context.Context, words []string) error {
 		return errors.New("show interface [name]|deployments|api <path>")
 	}
 	switch {
-	case words[0] == "interface":
+	case strings.HasPrefix("interface", words[0]):
 		return s.showInterface(ctx, words)
 	case strings.HasPrefix("deployments", words[0]):
 		code, body := s.env.API(ctx, "GET", "/api/deployments", nil)

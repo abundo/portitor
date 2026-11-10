@@ -76,7 +76,7 @@ entries and values (interface names where an interface is wanted, and so on).
 
 | Command | Does |
 |---|---|
-| `show [flat\|json\|detail] [path]` | shows the configuration here or at the path; `flat` as `set` lines, `detail` with defaults; in candidate mode the candidate, `show from running` what runs |
+| `info [flat\|json\|detail] [path]` | shows the configuration here or at the path; `flat` as `set` lines, `detail` with defaults; in candidate mode the candidate, `info from running` what runs, `info from state` the state |
 | `diff [flat] [path]` | shows the candidate's changes against what runs (`+` added, `-` removed) |
 | `set <path> [value]` | sets a leaf or creates an entry, without going there |
 | `delete <path> [value]` | deletes a leaf (back to its default), one value of a list, an entry or a container; it warns when other settings still name the entry |
@@ -87,8 +87,8 @@ entries and values (interface names where an interface is wanted, and so on).
 | `discard stay\|now` | drops the candidate's changes |
 | `tools <path> <action> [<input> <value>]...` | runs an action of an entry (see [Actions](#actions)) |
 | `tree [path]` | shows the model below here: names, keys and types |
-| `show interface [name]` | the interfaces as they run: a table of every virtual firewall's (name, kind, admin and operational state, MTU, MAC, addresses), or a named one's detail with its counters; inside a virtual firewall, its own. Directly in a virtual firewall `interface` is its configuration list, which wins there |
-| `show deployments`, `show api <path>` | shows the commits, or the answer of a GET of the API (`show api /api/agent/status`); the version is `show from state / system version` |
+| `show interface [name]` | the interfaces as they run: a table of every virtual firewall's (name, kind, admin and operational state, MTU, MAC, addresses), or a named one's detail with its counters; inside a virtual firewall, its own |
+| `show deployments`, `show api <path>` | shows the commits, or the answer of a GET of the API (`show api /api/agent/status`); the version is `info from state / system version`. `show` takes only these reports; the tree is `info`'s |
 | `pwc`, `help`, `quit` | where you are, the commands, log out |
 
 ## Actions
@@ -144,13 +144,13 @@ waiting for confirmation, memory, CPU, load, disks, and an HA pair's state).
 It is read-only and read from the firewalls when shown:
 
 ```
-show from state / instance fw state interfaces
-show from state / system
+info from state / instance fw state interfaces
+info from state / system
 instance fw state
-show
+info
 ```
 
-Going into `state` (in running mode) shows the state there with a plain `show`. You
+Going into `state` (in running mode) shows the state there with a plain `info`. You
 see the state of the virtual firewalls you may read; `system` is for global
 admins and viewers. `system errors` says what could not be read (a firewall
 that doesn't answer).
@@ -168,8 +168,8 @@ GUI.
 
 ## Pasting and scripts
 
-`show` output can be pasted back: a line ending in `{` goes into the entry, `}` comes
-back out. `show flat` writes `set / ...` lines that work from anywhere.
+`info` output can be pasted back: a line ending in `{` goes into the entry, `}` comes
+back out. `info flat` writes `set / ...` lines that work from anywhere.
 
 Without a terminal, the CLI runs the lines it is given and stops at the first error:
 

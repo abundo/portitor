@@ -18,8 +18,7 @@ import (
 // from the state (each instance's state/interfaces), with the admin state
 // and description of a configured one from the running configuration. Without
 // a name a table of them all, with one each such device's detail and
-// counters. Inside a virtual firewall (where there is no interface node, as
-// under its bgp), that one's alone.
+// counters. Inside a virtual firewall, that one's alone.
 func (s *Session) showInterface(ctx context.Context, words []string) error {
 	if len(words) > 2 {
 		return errors.New("show interface [name]")
