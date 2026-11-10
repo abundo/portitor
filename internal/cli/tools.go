@@ -25,7 +25,7 @@ func (s *Session) tools(ctx context.Context, args []token) error {
 		return err
 	}
 	if (a.Kind == schema.ActionChange || a.Kind == schema.ActionCreate) && !s.candidate {
-		return fmt.Errorf("%s changes the candidate: enter candidate first", a.Name)
+		return fmt.Errorf("%s changes the candidate: configure first", a.Name)
 	}
 	input, err := toolsInput(a, in)
 	if err != nil {

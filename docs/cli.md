@@ -29,11 +29,12 @@ are never shown.
 ## Modes
 
 The CLI starts in **running** mode, where it shows what the firewall runs. To make
-changes, enter **candidate** mode:
+changes, enter **candidate** mode with `configure` (short for `configure candidate`;
+`configure running` goes back):
 
 ```
 --{ running }--[  ]--
-admin@fw# enter candidate
+admin@fw# configure
 
 --{ candidate shared default }--[  ]--
 admin@fw#
@@ -174,7 +175,7 @@ back out. `info flat` writes `set / ...` lines that work from anywhere.
 Without a terminal, the CLI runs the lines it is given and stops at the first error:
 
 ```
-ssh -p 2222 admin@fw 'enter candidate; instance fw interface lan0 mtu 9000; commit now'
+ssh -p 2222 admin@fw 'configure; instance fw interface lan0 mtu 9000; commit now'
 portitor-config cli < changes.txt
 ```
 

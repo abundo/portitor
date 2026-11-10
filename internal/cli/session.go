@@ -7,7 +7,7 @@
 // help text and completion comes from the schema, so a feature in the YANG
 // modules is in the CLI without code here.
 //
-//	enter candidate
+//	configure
 //	instance host interface wan0 mtu 1500
 //	instance host interface lan0 {
 //	    addresses [ 192.168.1.1/24 ]
@@ -124,7 +124,7 @@ func (s *Session) printf(format string, args ...any) {
 }
 
 var commands = []struct{ name, help string }{
-	{"enter", "enter candidate (edit) or running (read) mode"},
+	{"configure", "enter candidate (edit, the default) or running (read) mode: configure [candidate|running]"},
 	{"info", "show the configuration or state here or at a path: [from running|candidate|state] [flat|json|detail] [path]"},
 	{"show", "show a report: interface [name], deployments, api <path>"},
 	{"diff", "show the candidate's changes against running: [flat] [path]"},
@@ -436,7 +436,7 @@ func (s *Session) statement(ctx context.Context, toks []token, set bool) error {
 
 func (s *Session) edit(ctx context.Context, p datastore.Path, fn func(*datastore.Tree) error) error {
 	if !s.candidate {
-		return errors.New("this is running mode: enter candidate to change the configuration")
+		return errors.New("this is running mode: configure to change the configuration")
 	}
 	if !s.env.Access.CanWrite(p) {
 		return fmt.Errorf("you may not change %s", p.CLI())
@@ -491,9 +491,9 @@ func (s *Session) command(ctx context.Context, cmd string, args []token) error {
 			s.printf("  %-10s %s\n", c.name, c.help)
 		}
 		s.printf("  A path of the tree goes there (an entry is made in candidate mode); a path to a leaf\n  and a value sets it. ? lists what may follow, Tab completes.\n")
-	case "enter":
+	case "configure":
 		switch {
-		case strings.HasPrefix("candidate", arg(0)) && arg(0) != "":
+		case strings.HasPrefix("candidate", arg(0)):
 			if s.env.ReadOnly != "" {
 				return errors.New(s.env.ReadOnly)
 			}
@@ -501,7 +501,7 @@ func (s *Session) command(ctx context.Context, cmd string, args []token) error {
 		case strings.HasPrefix("running", arg(0)) && arg(0) != "":
 			s.candidate = false
 		default:
-			return errors.New("enter candidate or enter running")
+			return errors.New("configure candidate or configure running")
 		}
 	case "pwc":
 		s.printf("%s\n", s.Prompt())
@@ -897,7 +897,7 @@ func flatChange(c datastore.Change, root *schema.Node) string {
 
 func (s *Session) commit(ctx context.Context, words []string) error {
 	if !s.candidate {
-		return errors.New("this is running mode: enter candidate first")
+		return errors.New("this is running mode: configure first")
 	}
 	o := datastore.CommitOptions{User: s.env.User, Owner: s.id, Only: s.env.Only}
 	how := "stay"

@@ -209,7 +209,7 @@ func TestLocksAndConfirmedCommit(t *testing.T) {
 	b.fails(`<lock><target><candidate/></target></lock>`, "lock-denied")
 	b.fails(edit(`<instance `+cfg+`><name>host</name></instance>`), "lock-denied")
 	// The CLI respects the lock too.
-	if err := cli.RunScript(context.Background(), env, strings.NewReader("enter candidate\ninstance host description x\n"), &strings.Builder{}); err == nil {
+	if err := cli.RunScript(context.Background(), env, strings.NewReader("configure\ninstance host description x\n"), &strings.Builder{}); err == nil {
 		t.Error("the CLI edited a locked candidate")
 	}
 	a.ok(edit(`<instance ` + cfg + `><name>host</name><description>one</description></instance>`))

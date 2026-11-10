@@ -51,9 +51,9 @@ func (s *Session) Suggest(ctx context.Context, line string) (partial string, ite
 	switch cmd {
 	case "":
 		items = s.pathItems(ctx, toks)
-	case "enter":
+	case "configure":
 		if len(args) == 0 {
-			items = []Item{{"candidate", "edit the shared candidate"}, {"running", "read the running configuration"}}
+			items = []Item{{"candidate", "edit the shared candidate (the default)"}, {"running", "read the running configuration"}}
 		}
 	case "commit":
 		if len(args) == 0 {

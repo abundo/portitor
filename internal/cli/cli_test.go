@@ -67,7 +67,7 @@ func TestEditAndCommit(t *testing.T) {
 		t.Error("a change in running mode")
 	}
 	run(t, s,
-		"enter candidate",
+		"configure",
 		"instance host is-default true",
 		"instance host interface wan0",
 		"kind vlan",
@@ -100,7 +100,7 @@ func TestEditAndCommit(t *testing.T) {
 
 func TestPasteInfo(t *testing.T) {
 	s, out, _ := newTest(t)
-	run(t, s, "enter candidate",
+	run(t, s, "configure",
 		"instance host interface wan0 description \"the uplink\"",
 		"instance host rule 7 chain input",
 		"instance host rule 7 in-interfaces [ wan0 ]",
@@ -110,7 +110,7 @@ func TestPasteInfo(t *testing.T) {
 	text := out.String()
 	// Into an empty candidate, the text makes the same configuration.
 	s2, out2, _ := newTest(t)
-	run(t, s2, "enter candidate")
+	run(t, s2, "configure")
 	for _, l := range strings.Split(text, "\n") {
 		run(t, s2, l)
 	}
@@ -125,7 +125,7 @@ func TestPasteInfo(t *testing.T) {
 
 func TestRenameAndDelete(t *testing.T) {
 	s, out, _ := newTest(t)
-	run(t, s, "enter candidate",
+	run(t, s, "configure",
 		"instance host interface wan0 kind physical",
 		"instance host route 1 destination default",
 		"instance host route 1 interface wan0",
@@ -152,7 +152,7 @@ func TestRenameAndDelete(t *testing.T) {
 
 func TestSuggest(t *testing.T) {
 	s, _, _ := newTest(t)
-	run(t, s, "enter candidate", "instance host interface wan0 kind physical")
+	run(t, s, "configure", "instance host interface wan0 kind physical")
 	ctx := context.Background()
 	if line, _ := s.Complete(ctx, "instance host inter"); line != "instance host interface" {
 		t.Errorf("complete: %q", line)
@@ -189,7 +189,7 @@ func TestScript(t *testing.T) {
 	m := &memory{current: datastore.New(root), running: datastore.New(root)}
 	env := &Env{Store: datastore.NewStore(root, m, ""), Schema: root, User: "admin", Access: allowAll{}}
 	var out bytes.Buffer
-	err := RunScript(context.Background(), env, strings.NewReader(splitCommands(`enter candidate; instance host description "a; b"; commit now`)), &out)
+	err := RunScript(context.Background(), env, strings.NewReader(splitCommands(`configure; instance host description "a; b"; commit now`)), &out)
 	if err != nil || m.commits != 1 {
 		t.Fatalf("script: %v (%d commits)", err, m.commits)
 	}
@@ -249,7 +249,7 @@ func TestSSH(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	out, err := sess.CombinedOutput("enter candidate; instance host description ssh; commit now; info instance host")
+	out, err := sess.CombinedOutput("configure; instance host description ssh; commit now; info instance host")
 	if err != nil {
 		t.Fatalf("%v: %s", err, out)
 	}
@@ -273,8 +273,8 @@ func TestTerminal(t *testing.T) {
 	tm := NewTerminal(env, pipeRW{in, &out})
 	done := make(chan error, 1)
 	go func() { done <- tm.Run(context.Background()) }()
-	// Tab completes "ente" to "enter ", ? lists the modes, then the line runs.
-	for _, k := range []string{"ente\t", "?", "candidate\r", "inst\t", "host description x\r", "exit\r"} {
+	// Tab completes "configu" to "configure ", ? lists the modes, then the line runs.
+	for _, k := range []string{"configu\t", "?", "candidate\r", "inst\t", "host description x\r", "exit\r"} {
 		if _, err := keys.Write([]byte(k)); err != nil {
 			t.Fatal(err)
 		}
@@ -290,7 +290,7 @@ func TestTerminal(t *testing.T) {
 		t.Fatal("the terminal hangs")
 	}
 	got := out.String()
-	for _, want := range []string{"enter ", "edit the shared candidate", "candidate shared default", "instance "} {
+	for _, want := range []string{"configure ", "edit the shared candidate", "candidate shared default", "instance "} {
 		if !strings.Contains(got, want) {
 			t.Errorf("terminal output lacks %q:\n%s", want, got)
 		}
@@ -323,7 +323,7 @@ func TestShowWords(t *testing.T) {
 	if err := s.Exec(context.Background(), "info version"); err == nil {
 		t.Error("info version at the root works")
 	}
-	run(t, s, "enter candidate", "instance host interface wan0", "info", "exit all")
+	run(t, s, "configure", "instance host interface wan0", "info", "exit all")
 	if err := s.Exec(context.Background(), "show instance"); err == nil {
 		t.Error("show takes a path")
 	}
@@ -348,7 +348,7 @@ func TestShowWords(t *testing.T) {
 func TestShowInterface(t *testing.T) {
 	s, out, m := newTest(t)
 	run(t, s,
-		"enter candidate",
+		"configure",
 		"instance host is-default true",
 		"instance host interface wan0 description uplink",
 		"instance fw interface lan0 enabled false",

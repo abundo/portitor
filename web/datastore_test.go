@@ -37,7 +37,7 @@ func TestCLICommit(t *testing.T) {
 		t.Fatal(err)
 	}
 	host := env.instanceRow("")
-	out := cliScript(t, cenv, `enter candidate
+	out := cliScript(t, cenv, `configure
 instance `+host.Name+` interface lo1 kind loopback
 instance `+host.Name+` interface lo1 addresses [ 10.99.0.1/32 ]
 commit now
@@ -59,9 +59,9 @@ commit now
 	}
 
 	// An edit in the CLI, then one in the GUI: the commit has both.
-	cliScript(t, cenv, "enter candidate\ninstance "+host.Name+" interface lo1 description cli\n")
+	cliScript(t, cenv, "configure\ninstance "+host.Name+" interface lo1 description cli\n")
 	env.put("instance="+host.Name+"/interface=lo2", map[string]any{"kind": "loopback", "enabled": true, "ipv4-mode": "static"})
-	out = cliScript(t, cenv, "enter candidate\ndiff flat\ncommit stay\n")
+	out = cliScript(t, cenv, "configure\ndiff flat\ncommit stay\n")
 	if strings.Contains(out, "pending") {
 		cliScript(t, cenv, "confirm\n")
 	}
@@ -80,7 +80,7 @@ commit now
 	// A commit that fails leaves running as it was, and the candidate.
 	before, _ := cenv.Store.Running(ctx)
 	var bad bytes.Buffer
-	err = cli.RunScript(ctx, cenv, strings.NewReader("enter candidate\ninstance "+host.Name+" interface vl9 kind vlan\ncommit stay\n"), &bad)
+	err = cli.RunScript(ctx, cenv, strings.NewReader("configure\ninstance "+host.Name+" interface vl9 kind vlan\ncommit stay\n"), &bad)
 	if err == nil {
 		t.Fatalf("a VLAN without a parent committed: %s", bad.String())
 	}
@@ -105,7 +105,7 @@ func TestCLIAccess(t *testing.T) {
 		t.Fatal(err)
 	}
 	if cenv.ReadOnly == "" {
-		t.Error("a viewer may enter candidate")
+		t.Error("a viewer may enter the candidate")
 	}
 	if cenv.Access.CanWrite(datastore.Path{{Name: "host", Keys: []string{"x"}}}) {
 		t.Error("a viewer may write")
@@ -229,7 +229,7 @@ func TestCLIState(t *testing.T) {
 		t.Fatal(err)
 	}
 	host := env.instanceRow("")
-	cliScript(t, cenv, "enter candidate\ninstance "+host.Name+" interface lo1 kind loopback\ninstance "+host.Name+" rule 77 chain input\n"+
+	cliScript(t, cenv, "configure\ninstance "+host.Name+" interface lo1 kind loopback\ninstance "+host.Name+" rule 77 chain input\n"+
 		"instance "+host.Name+" ntp-enabled true\ninstance "+host.Name+" ntp-server pool.ntp.org pool true\n"+
 		"instance "+host.Name+" interface br0 kind bridge\ninstance "+host.Name+" interface br0 addresses [ 10.99.0.1/24 ]\n"+
 		"instance "+host.Name+" vrrp-router br0 7 ipv4 [ 10.99.0.9 ]\ncommit now\n")
@@ -240,7 +240,7 @@ func TestCLIState(t *testing.T) {
 			t.Errorf("state lacks %q:\n%s", want, out)
 		}
 	}
-	if err := cli.RunScript(ctx, cenv, strings.NewReader("enter candidate\n/ system hostname x\n"), &bytes.Buffer{}); err == nil {
+	if err := cli.RunScript(ctx, cenv, strings.NewReader("configure\n/ system hostname x\n"), &bytes.Buffer{}); err == nil {
 		t.Error("state was set")
 	}
 }
@@ -260,7 +260,7 @@ func TestCLIInstanceRoles(t *testing.T) {
 	env.do("PUT", "/api/roles/"+itoa(r.ID), map[string]any{"members": []map[string]any{{"user_id": ann, "level": "admin"}}})
 	ops := env.create("/api/roles", map[string]any{"name": "ops", "instances": []string{"lab"}})
 
-	cliScript(t, cenv, "enter candidate\nrename instance lab to lab2\n")
+	cliScript(t, cenv, "configure\nrename instance lab to lab2\n")
 	roles := env.roles()
 	if got := roles["vf-lab2"]; got.ID != r.ID || len(got.Members) != 1 || got.Instance == nil || *got.Instance != "lab2" {
 		t.Errorf("renamed: %+v", roles)
@@ -271,7 +271,7 @@ func TestCLIInstanceRoles(t *testing.T) {
 
 	var fw models.Firewall
 	env.srv.db.First(&fw)
-	cliScript(t, cenv, "enter candidate\ninstance shop firewall "+fw.Name+"\n")
+	cliScript(t, cenv, "configure\ninstance shop firewall "+fw.Name+"\n")
 	if _, ok := env.roles()["vf-shop"]; !ok {
 		t.Errorf("no role for a virtual firewall made in the CLI: %v", env.roles())
 	}

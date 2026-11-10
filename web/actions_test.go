@@ -83,7 +83,7 @@ func TestCLITools(t *testing.T) {
 	}
 	host := env.instanceRow("").Name
 	wg := "instance " + host + " interface wg9"
-	out := cliScript(t, cenv, `enter candidate
+	out := cliScript(t, cenv, `configure
 `+wg+` kind wireguard
 `+wg+` addresses [ 10.98.0.1/24 ]
 tools `+wg+` wg-rekey
@@ -97,17 +97,17 @@ tools `+wg+` wg-next
 		t.Error("wg-rekey made no key")
 	}
 
-	cliScript(t, cenv, "enter candidate\ntools instance "+host+" certificate c2 generate domains [ c2.example.com ] days 30 key-type ec384\n")
+	cliScript(t, cenv, "configure\ntools instance "+host+" certificate c2 generate domains [ c2.example.com ] days 30 key-type ec384\n")
 	cand, _ = cenv.Store.Candidate(ctx)
 	if c := cand.Root.Entry("instance", []string{host}).Entry("certificate", []string{"c2"}); c == nil || c.Leaves["source"] != fwconfig.CertSourceImport {
 		t.Errorf("generate made %v", c)
 	}
 
 	for script, want := range map[string]string{
-		"tools " + wg + " wg-rekey\n":                                                   "enter candidate first",
-		"enter candidate\ntools " + wg + " bogus\n":                                     "no action",
-		"enter candidate\ntools instance " + host + " certificate c3 generate days 0\n": "days",
-		"enter candidate\ntools " + wg + " move-to\n":                                   "mandatory",
+		"tools " + wg + " wg-rekey\n":                                             "configure first",
+		"configure\ntools " + wg + " bogus\n":                                     "no action",
+		"configure\ntools instance " + host + " certificate c3 generate days 0\n": "days",
+		"configure\ntools " + wg + " move-to\n":                                   "mandatory",
 	} {
 		var b bytes.Buffer
 		if err := cli.RunScript(ctx, cenv, strings.NewReader(script), &b); err == nil || !strings.Contains(err.Error()+b.String(), want) {
