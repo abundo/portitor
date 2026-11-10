@@ -139,7 +139,11 @@ function schedule() {
 
 async function start(body) {
   stop()
-  session?.delete()
+  try {
+    session?.delete()
+  } catch {
+    // a broken session must not keep a new capture from starting
+  }
   session = null
   chunks = []
   size = 0
@@ -244,7 +248,10 @@ const handlers = {
 
 onmessage = (e) => {
   const m = e.data
-  if (m.type === 'start') start(m.body)
+  if (m.type === 'start')
+    start(m.body).catch((err) =>
+      postMessage({ type: 'ended', error: String(err?.message ?? err) }),
+    )
   else if (m.type === 'stop') stop()
   else if (handlers[m.type]) {
     try {

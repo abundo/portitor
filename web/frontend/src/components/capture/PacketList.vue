@@ -56,6 +56,13 @@ async function refresh() {
   const my = ++seq
   const res = await props.load(start, count)
   if (my !== seq) return
+  // A new capture (or a narrower filter) can be shorter than where the list
+  // was scrolled to: go back to its end rather than show nothing.
+  if (start > 0 && start >= res.matched) {
+    el.scrollTop = Math.max(0, res.matched * rowH - height)
+    lastTop = el.scrollTop // not a scroll up: follow stays as it is
+    return refresh()
+  }
   matched.value = res.matched
   rows.value = res.frames
   first.value = start
