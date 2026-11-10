@@ -6,14 +6,25 @@
 The major changes in each release. A release's notes on GitHub are its section
 here (`dev/release-notes.sh`); the full list is `git log <previous tag>..<tag>`.
 
-## Unreleased
+## v0.9.0
 
 ### New
 
+- **HA pairs:** two firewalls as one active host and a passive standby with the
+  same addresses and MAC addresses, replacing VRRP on a pair. A witness (the
+  primary's portitor-config, or portitor-web) gives the vote; the standby's
+  traffic interfaces are closed by a gate; connections survive a failover
+  (conntrackd), and a lost carrier on a monitored interface or `portitor request ha
+  switchover` hands the pair over. The standby's portitor-config is a read-only
+  replica that can be promoted; ISO roles `primary` and `secondary` set a pair
+  up. See [High availability](docs/ha.md).
+- **Own DHCP server:** DHCPv4 and DHCPv6, and the IPv6 router advertisements,
+  by Portitor's own `portitor-dhcpd`, replacing Kea and radvd. Leases are
+  copied to an HA standby; DHCPv6 can serve a delegated prefix.
 - **Command line:** the whole configuration from the console or over SSH, in the
   style of Nokia SR Linux: a shared candidate, `info`, `diff`, `commit confirmed`,
   `?` help and Tab completion, all from the configuration's YANG model (`yang/`).
-  `sudo portitor-config cli` on the console; `ssh_listen` in
+  `portitor-config cli` as the user `portitor` on the console; `ssh_listen` in
   `/etc/portitor/config.yaml` for SSH, with the GUI's users and two-factor login.
   See [Command line](docs/cli.md).
 - **NETCONF** on the same SSH port (subsystem `netconf`): the candidate, `edit-config`
@@ -23,9 +34,43 @@ here (`dev/release-notes.sh`); the full list is `git log <previous tag>..<tag>`.
   DHCP leases, neighbours, rule and rate-limit counters, BGP, OSPF, IS-IS, VRRP, BFD,
   NTP, NAT64, OpenVPN, the host and HA, read-only, in the CLI (`info from state`)
   and NETCONF `get`.
+- **SNMP for the state:** the YANG state as PORTITOR-MIB, served through AgentX by
+  portitor-config to the default instance's snmpd.
+- **GUI:** every table is a data grid (resize, move and sort columns, a filter per
+  column, cells edited in place); Hosts & prefixes shows an entry's form beside
+  the tree; IP options have their own page, Firewall → Options; Renew on an ACME
+  certificate orders it now; an HA primary badge in the top bar.
 - **ISO:** the installed system has a serial console on `ttyS0` (115200 baud) as
   well as the screen: boot menu, kernel messages and a login. In Proxmox VE, add a
   serial port and use the xterm.js console, where copy and paste work.
+
+### Changed
+
+- The configuration is the tree alone: the SQLite database keeps users, roles,
+  firewalls, the directory, deployments and known NICs, not the configuration.
+  The GUI works through `/api/config` and names entries, never their ids.
+- Syslog servers, certificate authorities and the DNS templates every virtual
+  firewall may use are top-level lists.
+- The Neighbours page groups by interface and shows the DHCP leases; of an HA
+  pair, the active host's only.
+- The dashboard has boxes around services, VPN and announcements.
+
+### Fixed
+
+- A second packet capture starts after the first.
+- A key with a slash in it (a prefix such as `192.168.1.0/24`) was refused when
+  edited through portitor-web, the portal.
+- A disabled OpenVPN server may be without a certificate.
+- echo is v5.4.1, which fixes the vulnerabilities reported in v5.3.1.
+
+### Upgrading
+
+- The update migrates the database: it drops the configuration tables, and
+  moves the configuration into the tree (`candidate.json` and `ids.json` next to
+  the database). Take a backup first.
+- Kea and radvd are stopped and masked by the update (their packages and lease
+  files stay); Portitor's own server answers from then on, so a client's lease
+  is renewed or re-requested rather than copied over.
 
 ## v0.8.0
 
