@@ -14,10 +14,12 @@
 # --list --json) and deploys. The update itself installs this tree's release
 # archive with its install.py --local, as a transient unit like the agent's
 # update job (a GitHub release is all the GUI can install). Afterwards the
-# agent and portitor-config must report this tree's version, the units run
-# (portitor-web as the portal in front of portitor-config), the
-# database (migrated) still has its interfaces, the GUI logs in, the new
-# agent's check lists the new version installed, and a deploy applies. Logs in
+# agent and portitor-config must report this tree's version, the units run,
+# the database (migrated) still has its interfaces, the GUI logs in, the new
+# agent's check lists the new version installed, and a deploy applies. A
+# release before portitor-config (portitor-web's own database) ends with
+# portitor-web as the portal in front of portitor-config at /fw/<host>/; from
+# one that has it (the layout variable) the GUI stays where it was. Logs in
 # build/vm-update/. KEEP=1 leaves the virtual machine running. Needs what
 # iso/test.sh needs, and gh or curl to reach GitHub.
 set -euo pipefail
@@ -27,9 +29,10 @@ DIR=build/vm-update
 REPO=${GITHUB_REPO:-abundo/portitor}
 export VM_DIR=$DIR VM_GUI_PORT=${VM_GUI_PORT:-28444}
 GUI=https://127.0.0.1:$VM_GUI_PORT
-# The firewall's API: portitor-web's own before the update, then portitor-web
-# as the portal serves portitor-config at /fw/<host name>/ (install.py moves
-# the database, iso/test.answers has no host name: portitor).
+# The firewall's API: from a release before portitor-config, portitor-web's own
+# before the update, then portitor-web as the portal serves portitor-config at
+# /fw/<host name>/ (install.py moves the database, iso/test.answers has no host
+# name: portitor); otherwise portitor-config's, before and after.
 API=$GUI
 PASSWORD=$(sed -n 's/^password: *//p' iso/test.answers)
 
@@ -93,6 +96,11 @@ until guest test -e /var/lib/portitor/firstboot.done 2>/dev/null; do
 	((SECONDS < deadline)) || { echo "no firstboot.done after 20 minutes; see $DIR/boot.log" >&2; exit 1; }
 	sleep 10
 done
+
+# layout: config when the release has portitor-config on the host (its GUI at
+# $GUI, no portal), web when portitor-web is the GUI (the update moves it).
+if guest systemctl cat portitor-config.service >/dev/null 2>&1; then layout=config; else layout=web; fi
+log "Layout of $from: $layout"
 
 check() {
 	local what=$1; shift
@@ -160,8 +168,13 @@ versions() {
 	fi
 }
 units() {
-	local u=(portitor-agent portitor-web)
-	[[ $API == "$GUI" ]] || u+=(portitor-config)
+	local u=(portitor-agent)
+	if [[ $layout == config ]]; then
+		u+=(portitor-config)
+	else
+		u+=(portitor-web)
+		[[ $API == "$GUI" ]] || u+=(portitor-config)
+	fi
 	for unit in "${u[@]}"; do
 		check "$unit running" systemctl is-active --quiet "$unit.service"
 	done
@@ -205,11 +218,13 @@ else
 fi
 
 log "Checking $to"
-API=$GUI/fw/portitor
+[[ $layout == config ]] || API=$GUI/fw/portitor
 units
 login && {
 	versions "$to"
-	ifaces_after=$(api "$API/api/interfaces" | json 'sorted(x["name"] for x in j)')
+	# The configuration is read through /api/config now (the old /api/interfaces
+	# is gone): every instance's interfaces.
+	ifaces_after=$(api "$API/api/config/candidate/instance" | json 'sorted(i["name"] for x in j for i in x.get("interface", []))')
 	if [[ $ifaces_after == "$ifaces_before" ]]; then
 		echo "ok    interfaces kept: $ifaces_after"
 	else

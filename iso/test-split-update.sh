@@ -13,13 +13,17 @@
 #   build/vm-sup-web  role web    (iso/test-split-web.answers), 192.168.1.10
 #
 # Builds the old release's two test ISOs with that release's own iso/ files,
-# installs and boots both, joins the firewall as that release does, and
+# installs and boots both, joins the firewall as that release does (a release
+# before portitor-config: portitor-web with the firewall's database; since
+# then portitor-web is the portal to the firewall's portitor-config, the
+# mode variable), and
 # deploys through portitor-web. Then the web VM gets SSH as root to the
 # firewall and runs this tree's install.py --local there, as a transient unit,
 # with no host given: it must find the firewall in portitor-web's database,
 # update it first and move the database to its portitor-config, and make
 # portitor-web the portal to it. Afterwards: the versions, the units, the
-# database moved (the interfaces kept), the GUI login through the portal at
+# database moved (the interfaces kept; a release that has portitor-config has
+# it already), the GUI login through the portal at
 # /fw/fw/, portitor-config reaching its agent and a deploy. Logs in
 # build/vm-sup-*. KEEP=1 leaves the virtual machines running. Needs what
 # iso/test-split.sh needs, and gh or curl to reach GitHub.
@@ -153,12 +157,26 @@ gui() { guest web python3 /root/gui.py "$1" "$PASSWORD" "${@:2}"; }
 names() { python3 -c 'import json, sys; print(sorted(x["name"] for x in json.load(sys.stdin)))'; }
 
 log "Joining the firewall ($from)"
-join=$(guest fw portitor-setup --show-join | grep -o 'portitor-join:[A-Za-z0-9_-]*') ||
-	{ echo "no join string from portitor-setup --show-join on fw" >&2; exit 1; }
-check web "portitor-web bootstrap --join" \
-	runuser -u portitor -- portitor-web -f /etc/portitor/web.yaml bootstrap --join "$join"
-ifaces_before=$(gui https://127.0.0.1 get /api/interfaces | names) || fail "interfaces before the update"
-check web "deploy ($from)" python3 /root/gui.py https://127.0.0.1 "$PASSWORD" deploy
+# mode: portal when the release's setup prints a portal string (portitor-web
+# serves the firewall's own portitor-config), legacy when it prints a join
+# string (portitor-web has the database, which the update moves).
+shown=$(guest fw portitor-setup --show-join) || shown=
+if grep -q 'portitor-portal:' <<<"$shown"; then
+	mode=portal
+	join=$(grep -o 'portitor-portal:[A-Za-z0-9_-]*' <<<"$shown")
+	check web "portitor-setup --join" portitor-setup --join "$join"
+	before=https://127.0.0.1/fw/fw
+else
+	mode=legacy
+	join=$(grep -o 'portitor-join:[A-Za-z0-9_-]*' <<<"$shown") ||
+		{ echo "no join or portal string from portitor-setup --show-join on fw" >&2; exit 1; }
+	check web "portitor-web bootstrap --join" \
+		runuser -u portitor -- portitor-web -f /etc/portitor/web.yaml bootstrap --join "$join"
+	before=https://127.0.0.1
+fi
+log "Mode of $from: $mode"
+ifaces_before=$(gui "$before" get /api/interfaces | names) || fail "interfaces before the update"
+check web "deploy ($from)" python3 /root/gui.py "$before" "$PASSWORD" deploy
 ((failed == 0)) || { log "FAILED before the update (logs in build/vm-sup-*/)"; exit 1; }
 
 log "SSH from the web VM to the firewall as root"
@@ -207,14 +225,21 @@ for name in fw web; do
 done
 check fw "portitor-agent running" systemctl is-active --quiet portitor-agent.service
 check fw "portitor-config running" systemctl is-active --quiet portitor-config.service
-check fw "the database moved in" test -s /var/lib/portitor-config/portitor.db
-check fw "portitor-web trusted (trusted_proxies)" grep -q '^trusted_proxies:.*192\.168\.1\.10' /etc/portitor/config.yaml
 check fw "nftables firewall table loaded" nft list table inet firewall
 check web "portitor-web running" systemctl is-active --quiet portitor-web.service
-check web "the old database set aside" test -e /var/lib/portitor-web/portitor.db.moved-to-portitor-config
-check web "web.yaml lists the firewall" grep -q 'url: https://192.168.1.1:8444' /etc/portitor/web.yaml
+if [[ $mode == legacy ]]; then
+	check web "web.yaml lists the firewall" grep -q 'url: https://192.168.1.1:8444' /etc/portitor/web.yaml
+	check fw "the database moved in" test -s /var/lib/portitor-config/portitor.db
+	check fw "portitor-web trusted (trusted_proxies)" grep -q '^trusted_proxies:.*192\.168\.1\.10' /etc/portitor/config.yaml
+	check web "the old database set aside" test -e /var/lib/portitor-web/portitor.db.moved-to-portitor-config
+else
+	check web "web.yaml lists the firewall" grep -q 'url: https://192.168.1.1:443$' /etc/portitor/web.yaml
+fi
 portal=https://127.0.0.1/fw/fw
-if ifaces_after=$(gui "$portal" get /api/interfaces | names) && [[ $ifaces_after == "$ifaces_before" ]]; then
+# The configuration is read through /api/config now (the old /api/interfaces
+# is gone): every instance's interfaces.
+names_new() { python3 -c 'import json, sys; print(sorted(i["name"] for x in json.load(sys.stdin) for i in x.get("interface", [])))'; }
+if ifaces_after=$(gui "$portal" get /api/config/candidate/instance | names_new) && [[ $ifaces_after == "$ifaces_before" ]]; then
 	echo "ok    interfaces kept through the portal: $ifaces_after"
 else
 	fail "interfaces: $ifaces_before before, ${ifaces_after:-none} after"
