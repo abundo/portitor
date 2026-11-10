@@ -65,9 +65,10 @@ here (`dev/release-notes.sh`); the full list is `git log <previous tag>..<tag>`.
 
 ### Upgrading
 
-- The update migrates the database: it drops the configuration tables, and
-  moves the configuration into the tree (`candidate.json` and `ids.json` next to
-  the database). Take a backup first.
+- The update migrates the database: the configuration is read from its tables
+  into the tree (the live commit's `deployed/<commit>-config.json` and
+  `ids.json` next to the database, with the entries' ids kept) at the first
+  start, and the tables are dropped. It is one way: take a backup first.
 - Kea and radvd are stopped and masked by the update (their packages and lease
   files stay); Portitor's own server answers from then on, so a client's lease
   is renewed or re-requested rather than copied over.
