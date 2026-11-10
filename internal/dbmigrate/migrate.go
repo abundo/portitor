@@ -47,7 +47,7 @@ func provider(db *gorm.DB) (*goose.Provider, error) {
 	if err != nil {
 		return nil, err
 	}
-	return goose.NewProvider(goose.DialectSQLite3, sqlDB, fsys, goose.WithGoMigrations(interfaceAddresses, rateLimitShape, xlat464, serviceRateLimits, openVPNTCPAddresses))
+	return goose.NewProvider(goose.DialectSQLite3, sqlDB, fsys, goose.WithGoMigrations(interfaceAddresses, rateLimitShape, xlat464, serviceRateLimits, openVPNTCPAddresses, configToTree))
 }
 
 func Up(db *gorm.DB) error {

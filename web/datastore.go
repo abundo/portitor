@@ -24,6 +24,7 @@ import (
 	"github.com/abundo/portitor/internal/confcheck"
 	"github.com/abundo/portitor/internal/datastore"
 	"github.com/abundo/portitor/internal/datastore/sqlmap"
+	"github.com/abundo/portitor/internal/dbmigrate"
 	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/internal/netconf"
 	"github.com/abundo/portitor/internal/schema"
@@ -64,6 +65,9 @@ func (s *Server) tree() (*treeState, error) {
 			dir = filepath.Dir(s.cfg.DB.Path)
 		}
 		t.dir = dir
+		if t.err = s.adoptLegacyConfig(dir); t.err != nil {
+			return
+		}
 		t.store = datastore.NewStore(t.schema, treeBackend{s}, dir)
 		t.store.Normalize, t.store.Check = confcheck.Normalize, confcheck.Check
 		// The roles name the virtual firewalls: they follow a rename, and
@@ -376,4 +380,60 @@ func clearWebCertificate(tx *gorm.DB, idx sqlmap.Index) error {
 		}
 	}
 	return tx.Exec("UPDATE settings SET web_certificate_id = NULL WHERE id = 1").Error
+}
+
+// adoptLegacyConfig takes the configuration that migration 94 read from the
+// old configuration tables (dbmigrate.LegacyMarker in config_snapshot) as
+// this installation's: it is what the firewalls run, so it is the live
+// commit's configuration (deployed/<commit>-config.json, which the first
+// candidate is), or, before any commit, the candidate. A file that is there
+// already is kept. Then the table goes, so it is done once.
+func (s *Server) adoptLegacyConfig(dir string) error {
+	if dir == "" || !s.db.Migrator().HasTable(dbmigrate.SnapshotTable) {
+		return nil
+	}
+	var rows []struct {
+		Name string
+		Data []byte
+	}
+	if err := s.db.Table(dbmigrate.SnapshotTable).Find(&rows).Error; err != nil {
+		return err
+	}
+	files := map[string][]byte{}
+	for _, r := range rows {
+		files[r.Name] = r.Data
+	}
+	if files[dbmigrate.LegacyMarker] == nil {
+		return nil // a backup's copy, for takeSnapshot
+	}
+	write := func(path string, data []byte) error {
+		if _, err := os.Stat(path); err == nil {
+			return nil
+		}
+		return datastore.WriteFile(path, data)
+	}
+	commit, err := s.liveCommit()
+	if err != nil {
+		return err
+	}
+	if cand := files["candidate.json"]; len(cand) > 0 {
+		path := filepath.Join(dir, "candidate.json")
+		if commit > 0 {
+			deployed := filepath.Join(dir, "deployed")
+			if err := os.MkdirAll(deployed, 0o700); err != nil {
+				return err
+			}
+			path = configPath(deployed, commit)
+		}
+		if err := write(path, cand); err != nil {
+			return err
+		}
+	}
+	if ids := files["ids.json"]; len(ids) > 0 {
+		if err := write(filepath.Join(dir, "ids.json"), ids); err != nil {
+			return err
+		}
+	}
+	slog.Info("the configuration of the old tables is now the tree's", "commit", commit)
+	return s.db.Migrator().DropTable(dbmigrate.SnapshotTable)
 }
