@@ -328,7 +328,8 @@ func (v *validator) openVPN(p string, in *Instance, ifc *Interface) {
 	if o.Listen != "" && in.Interface(o.Listen) == nil {
 		v.addf("%s: unknown listen interface %q", p, o.Listen)
 	}
-	if !slices.ContainsFunc(in.Certificates, func(c Certificate) bool { return c.Name == o.Certificate }) {
+	// A disabled server isn't run, so it may be without a certificate yet.
+	if (ifc.Enabled || o.Certificate != "") && !slices.ContainsFunc(in.Certificates, func(c Certificate) bool { return c.Name == o.Certificate }) {
 		v.addf("%s: unknown certificate %q", p, o.Certificate)
 	}
 	if !tlsCryptRe.MatchString(o.TLSCrypt) {

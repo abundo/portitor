@@ -1360,6 +1360,8 @@ func (d *data) openVPN(mi *models.Instance, mif *models.Interface, in *fwconfig.
 		return mif.OvpnCertificateID != nil && c.ID == *mif.OvpnCertificateID && c.InstanceID == mi.ID
 	})
 	switch {
+	case (i < 0 || !d.Certificates[i].Enabled) && !mif.Enabled:
+		// A disabled server isn't run: it may be without one (it is added so).
 	case i < 0:
 		addf("instance %s: OpenVPN %s: choose a certificate of this virtual firewall", mi.Name, mif.Name)
 	case !d.Certificates[i].Enabled:
