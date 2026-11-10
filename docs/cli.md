@@ -90,6 +90,8 @@ entries and values (interface names where an interface is wanted, and so on).
 | `tree [path]` | shows the model below here: names, keys and types |
 | `show interface [name]` | the interfaces as they run: a table of every virtual firewall's (name, kind, admin and operational state, MTU, MAC, addresses), or a named one's detail with its counters; inside a virtual firewall, its own |
 | `show deployments`, `show api <path>` | shows the commits, or the answer of a GET of the API (`show api /api/agent/status`); the version is `info from state / system version`. `show` takes only these reports; the tree is `info`'s |
+| `pager [on\|off]` | long output in a terminal is shown a screen at a time (Space: next screen, Enter: next line, `q`: stop); `pager off` shows it all at once for this session |
+| `<command> \| grep [-i] [-v] <pattern>` | keeps the lines of the output that match the regular expression (`-i` ignoring case, `-v` those that don't); stages chain: `info flat \| grep wan0 \| grep -v mtu` |
 | `pwc`, `help`, `quit` | where you are, the commands, log out |
 
 ## Actions

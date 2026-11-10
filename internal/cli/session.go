@@ -81,6 +81,10 @@ type Session struct {
 	prev      datastore.Path
 	blocks    []datastore.Path // contexts of the { } blocks open, for pasted text
 	done      bool
+	// page shows a command's output a screen at a time (a terminal's);
+	// nil: no pager. noPager is set by "pager off".
+	page    func(text string)
+	noPager bool
 }
 
 // NewSession starts a session in running mode at the root.
@@ -142,11 +146,42 @@ var commands = []struct{ name, help string }{
 	{"back", "go back to the previous context"},
 	{"exit", "go up one level; exit all: to the root; at the root, log out"},
 	{"quit", "log out"},
+	{"pager", "show long output a screen at a time: pager [on|off]"},
 	{"help", "this list"},
 }
 
-// Exec runs one line.
+// Exec runs one line: a command or statement, its output filtered by the
+// stages after a "|" (grep) and shown through the pager when there is one.
 func (s *Session) Exec(ctx context.Context, line string) error {
+	line, stages, err := splitPipe(line)
+	if err != nil {
+		return err
+	}
+	if len(stages) == 0 && (s.page == nil || s.noPager) {
+		return s.exec(ctx, line)
+	}
+	orig := s.out
+	var buf bytes.Buffer
+	s.out = &buf
+	err = s.exec(ctx, line)
+	s.out = orig
+	paged := s.page != nil && !s.noPager // after the line: "pager off" is not paged
+	text := buf.String()
+	for _, st := range stages {
+		text = st.apply(text)
+	}
+	switch {
+	case text == "":
+	case paged:
+		s.page(text)
+	default:
+		io.WriteString(s.out, text)
+	}
+	return err
+}
+
+// exec runs one line without a pipe.
+func (s *Session) exec(ctx context.Context, line string) error {
 	toks, _, err := lex(line)
 	if err != nil {
 		return err
@@ -160,7 +195,7 @@ func (s *Session) Exec(ctx context.Context, line string) error {
 		}
 		s.cwd = s.blocks[len(s.blocks)-1]
 		s.blocks = s.blocks[:len(s.blocks)-1]
-		return s.Exec(ctx, rest(line, 1))
+		return s.exec(ctx, rest(line, 1))
 	}
 	if cmd := s.commandOf(toks[0]); cmd != "" {
 		return s.command(ctx, cmd, toks[1:])
@@ -490,6 +525,7 @@ func (s *Session) command(ctx context.Context, cmd string, args []token) error {
 		for _, c := range commands {
 			s.printf("  %-10s %s\n", c.name, c.help)
 		}
+		s.printf("  Output may be piped: info | grep [-i] [-v] <pattern>\n")
 		s.printf("  A path of the tree goes there (an entry is made in candidate mode); a path to a leaf\n  and a value sets it. ? lists what may follow, Tab completes.\n")
 	case "configure":
 		switch {
@@ -503,6 +539,24 @@ func (s *Session) command(ctx context.Context, cmd string, args []token) error {
 		default:
 			return errors.New("configure candidate or configure running")
 		}
+	case "pager":
+		switch arg(0) {
+		case "on":
+			s.noPager = false
+		case "off":
+			s.noPager = true
+		case "":
+		default:
+			return errors.New("pager on or pager off")
+		}
+		state := "on"
+		switch {
+		case s.noPager:
+			state = "off"
+		case s.page == nil:
+			state = "on (this session has no terminal, so there is no paging)"
+		}
+		s.printf("The pager is %s.\n", state)
 	case "pwc":
 		s.printf("%s\n", s.Prompt())
 	case "back":

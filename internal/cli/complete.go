@@ -32,6 +32,22 @@ func (s *Session) Suggest(ctx context.Context, line string) (partial string, ite
 		partial = toks[len(toks)-1].text
 		toks = toks[:len(toks)-1]
 	}
+	if i := slices.IndexFunc(toks, func(t token) bool { return t.is("|") }); i >= 0 {
+		// after a pipe: grep and its options
+		for j := len(toks) - 1; j >= 0; j-- {
+			if toks[j].is("|") {
+				i = j
+				break
+			}
+		}
+		switch after := toks[i+1:]; {
+		case len(after) == 0:
+			items = []Item{{"grep", "keep the lines that match a pattern: grep [-i] [-v] <pattern>"}}
+		case after[0].is("grep") && (len(after) == 1 || strings.HasPrefix(after[len(after)-1].text, "-")):
+			items = []Item{{"-i", "ignore case"}, {"-v", "keep the lines that don't match"}, {"<pattern>", "a regular expression"}}
+		}
+		return partial, filter(items, partial)
+	}
 	if len(toks) == 0 {
 		for _, c := range commands {
 			items = append(items, Item{c.name, c.help})
@@ -49,6 +65,10 @@ func (s *Session) Suggest(ctx context.Context, line string) (partial string, ite
 		return out
 	}
 	switch cmd {
+	case "pager":
+		if len(args) == 0 {
+			items = []Item{{"on", "show long output a screen at a time"}, {"off", "show it all at once"}}
+		}
 	case "":
 		items = s.pathItems(ctx, toks)
 	case "configure":

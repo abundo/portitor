@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"slices"
@@ -392,5 +393,66 @@ func TestShowInterface(t *testing.T) {
 	run(t, s, "show interface")
 	if strings.Contains(out.String(), "wan0") || !strings.Contains(out.String(), "lan0") {
 		t.Errorf("show interface in fw:\n%s", out)
+	}
+}
+
+func TestPipeGrep(t *testing.T) {
+	s, out, _ := newTest(t)
+	run(t, s, "configure",
+		"instance host interface wan0 description \"the uplink\"",
+		"instance host interface lan0 mtu 9000",
+	)
+	out.Reset()
+	run(t, s, "info flat | grep wan0")
+	if got := out.String(); !strings.Contains(got, "wan0") || strings.Contains(got, "lan0") {
+		t.Errorf("grep wan0:\n%s", got)
+	}
+	out.Reset()
+	run(t, s, "info flat | grep -v wan0 | grep -i MTU")
+	if got := out.String(); !strings.Contains(got, "lan0") || strings.Contains(got, "wan0") {
+		t.Errorf("grep -v | grep -i:\n%s", got)
+	}
+	for _, line := range []string{"info | cat", "info | grep", "info | grep -x a", "info | grep ("} {
+		if err := s.Exec(context.Background(), line); err == nil {
+			t.Errorf("%q: no error", line)
+		}
+	}
+	out.Reset()
+	run(t, s, `set instance host interface wan0 description "a | b"`)
+	if out.Len() != 0 {
+		t.Errorf("quoted pipe: %q", out.String())
+	}
+}
+
+func TestPager(t *testing.T) {
+	s, out, _ := newTest(t)
+	var paged []string
+	s.page = func(text string) { paged = append(paged, text) }
+	run(t, s, "pwc", "pager off", "pwc")
+	if len(paged) != 1 || !strings.Contains(out.String(), "The pager is off.") {
+		t.Errorf("paged %q, out %q", paged, out.String())
+	}
+	run(t, s, "pager on", "pwc | grep zzz", "pwc | grep running")
+	if len(paged) != 2 {
+		t.Errorf("paged %q", paged)
+	}
+}
+
+func TestTerminalPage(t *testing.T) {
+	var screen bytes.Buffer
+	in := bytes.NewBufferString(" q")
+	tm := NewTerminal(&Env{}, struct {
+		io.Reader
+		io.Writer
+	}{in, &screen})
+	tm.SetSize(80, 5)
+	var text strings.Builder
+	for i := 1; i <= 12; i++ {
+		fmt.Fprintf(&text, "line%d\n", i)
+	}
+	tm.page(text.String())
+	got := screen.String()
+	if !strings.Contains(got, "line8") || strings.Contains(got, "line9") || strings.Count(got, "--More--") != 2 {
+		t.Errorf("screen:\n%q", got)
 	}
 }
