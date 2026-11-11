@@ -23,6 +23,7 @@ fi
 
 # In PATH, next to the binaries: run again, it changes the LAN and WAN.
 install -D -m 0755 "$d/portitor-setup.py" /usr/bin/portitor-setup
+install -D -m 0644 "$d/portitor-setup.bash" /usr/share/bash-completion/completions/portitor-setup
 install -D -m 0644 "$d/portitor-firstboot.service" /etc/systemd/system/portitor-firstboot.service
 systemctl enable portitor-firstboot.service
 # Password recovery: a GRUB entry that boots into portitor-recover (no root

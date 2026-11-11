@@ -109,6 +109,7 @@ CLI_LINK = f"{BIN_DIR}/portitor"
 # install and update so it follows the release's commands; the bash-completion
 # package loads it.
 CLI_COMPLETION = "/usr/share/bash-completion/completions/portitor"
+COMPLETION_DIR = str(Path(CLI_COMPLETION).parent)
 ETC_DIR = "/etc/portitor"
 WEB_CONFIG = f"{ETC_DIR}/web.yaml"
 AGENT_CONFIG = f"{ETC_DIR}/agent.yaml"
@@ -556,6 +557,17 @@ def mask_generators(host: Host) -> None:
         )
 
 
+def install_completion(host: Host, command: str) -> None:
+    """Bash completion of a command, cobra's "<command> completion bash",
+    written like the portitor command's (CLI_COMPLETION)."""
+    bin_ = shlex.quote(f"{BIN_DIR}/{command}")
+    dest = shlex.quote(f"{COMPLETION_DIR}/{command}")
+    host.run(
+        f"mkdir -p {shlex.quote(COMPLETION_DIR)} && {bin_} completion bash >{dest}",
+        desc=f"{command} completion bash >{COMPLETION_DIR}/{command}",
+    )
+
+
 def install_agent(host: Host, binary: Path, deploy: Path, version: str, assume_yes: bool) -> None:
     log(f"==> Installing portitor-agent {version} on {host}")
     new_config = not host.exists(AGENT_CONFIG)
@@ -563,11 +575,8 @@ def install_agent(host: Host, binary: Path, deploy: Path, version: str, assume_y
         host.put(deploy / "agent.yaml", AGENT_CONFIG, "0600")
     host.put(binary, AGENT_BIN, "0755")
     host.run(f"ln -sfn portitor-agent {shlex.quote(CLI_LINK)}", desc=f"ln -s portitor-agent {CLI_LINK}")
-    host.run(
-        f"mkdir -p {shlex.quote(str(Path(CLI_COMPLETION).parent))}"
-        f" && {shlex.quote(CLI_LINK)} completion bash >{shlex.quote(CLI_COMPLETION)}",
-        desc=f"portitor completion bash >{CLI_COMPLETION}",
-    )
+    install_completion(host, "portitor")
+    install_completion(host, "portitor-agent")
     host.put(Path(__file__).resolve(), INSTALLER_DEST, "0755", name=INSTALLER_FILENAME)
     actions = {u: install_unit(host, deploy / "systemd" / u, assume_yes) for u in AGENT_UNITS}
     ensure_dhcp_user(host)
@@ -806,6 +815,7 @@ def install_web(
     if new_config:
         host.put(deploy / "web.yaml", WEB_CONFIG, "0640", group=WEB_USER)
     host.put(binary, WEB_BIN, "0755")
+    install_completion(host, "portitor-web")
     if host.exists(OLD_WIREGASM_DIR):
         host.run(f"rm -rf {OLD_WIREGASM_DIR}")
     action = install_unit(host, deploy / "systemd" / WEB_UNIT, assume_yes)
@@ -1022,6 +1032,7 @@ def install_config(
     set_agent_url(host)
     host.put(binary, WEB_BIN, "0755")
     host.run(f"ln -sfn portitor-web {shlex.quote(CONFIG_LINK)}", desc=f"ln -s portitor-web {CONFIG_LINK}")
+    install_completion(host, "portitor-config")
     action = install_unit(host, deploy / "systemd" / CONFIG_UNIT, assume_yes)
     host.systemctl("daemon-reload")
     run_config = f"runuser -u {WEB_USER} -- {CONFIG_LINK} -f {CONFIG_FILE}"
