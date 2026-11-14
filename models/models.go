@@ -404,8 +404,11 @@ type Instance struct {
 	IsDefault  bool `json:"is_default"`
 	FirewallID uint `json:"firewall_id"`
 
-	DnsUpstream         string     `json:"dns_upstream"` // fwconfig.Upstream*
-	DnsForwarders       StringList `json:"dns_forwarders"`
+	DnsUpstream   string     `json:"dns_upstream"` // fwconfig.Upstream*
+	DnsForwarders StringList `json:"dns_forwarders"`
+	// The host's own resolver (fwconfig.Resolver), the default instance only.
+	ResolverServers     StringList `json:"resolver_servers"`
+	ResolverFromDhcp    bool       `json:"resolver_from_dhcp"`
 	DnsForwardMode      string     `json:"dns_forward_mode"` // fwconfig.ForwardFirst or ForwardOnly
 	DnsAllowRecursion   StringList `json:"dns_allow_recursion"`
 	DnsDnssecValidation string     `json:"dns_dnssec_validation"` // fwconfig.DNSSECValidationAuto or No

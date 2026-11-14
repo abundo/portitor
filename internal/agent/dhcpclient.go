@@ -250,7 +250,9 @@ func (m *dhcpManager) update(k dhcpKey, fn func(l *Lease)) (dnsChanged bool) {
 	}
 	before := slices.Clone(l.DNS)
 	fn(l)
-	return !slices.Equal(before, l.DNS)
+	// The order is the server's, kept; a server that only reorders its
+	// option is no change worth rewriting files for.
+	return !slices.Equal(slices.Sorted(slices.Values(before)), slices.Sorted(slices.Values(l.DNS)))
 }
 
 // loop runs k's client, starting from saved (nil: none) with a Renew.
@@ -455,7 +457,7 @@ func leaseStatus(l *Lease, lease *nclient4.Lease) {
 	for _, ip := range ack.DNS() {
 		l.DNS = append(l.DNS, ip.String())
 	}
-	slices.Sort(l.DNS)
+	// In the server's order: the first is the one to ask first.
 	l.Server = ""
 	if s := ack.ServerIdentifier(); s != nil {
 		l.Server = s.String()

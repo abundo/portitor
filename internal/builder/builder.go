@@ -630,6 +630,26 @@ func buildPeer(in Input, generation int64, only map[string]bool, firewallID uint
 				addf("instance %s: DNS upstream is the DHCP lease of an interface, but no DHCP client interface is chosen", mi.Name)
 			}
 		}
+		if len(mi.ResolverServers) > 0 || mi.ResolverFromDhcp {
+			if !mi.IsDefault {
+				addf("instance %s: only the default instance has the host's resolver", mi.Name)
+			} else {
+				// Following a lease needs its interface (dns-from-dhcp, a DHCP
+				// client); without one, as after the WAN went static, the
+				// servers stand, and with none the file is left alone.
+				r := &fwconfig.Resolver{Servers: mi.ResolverServers}
+				if mi.ResolverFromDhcp {
+					for _, mif := range d.Interfaces {
+						if mif.InstanceID == mi.ID && mif.DnsFromDhcp && mif.Ipv4Mode == fwconfig.ModeDHCP {
+							r.DHCPInterface = mif.Name
+						}
+					}
+				}
+				if len(r.Servers) > 0 || r.DHCPInterface != "" {
+					in.Resolver = r
+				}
+			}
+		}
 		// interface -> its first IPv4 and first global IPv6 address, which
 		// DHCP and router advertisements hand out as the DNS server.
 		listenAddr := map[string]map[bool]string{}

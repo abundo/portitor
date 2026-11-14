@@ -54,6 +54,13 @@ type BootstrapOptions struct {
 	DHCPStart, DHCPEnd netip.Addr
 	// DHCPDNS, if set, are the DNS servers DHCP hands out.
 	DHCPDNS []netip.Addr
+	// ResolverDNS and ResolverDHCP make the host's own resolver
+	// (/etc/resolv.conf, fwconfig.Resolver) the agent's: these servers, and/or
+	// the DNS servers of the DHCP lease of the WAN (else the LAN), which
+	// takes over from them while it has any. Neither leaves the setting as
+	// it is.
+	ResolverDNS  []netip.Addr
+	ResolverDHCP bool
 	// Reconfigure runs after a deploy too (portitor-setup run again): the
 	// LAN and WAN get exactly these settings, the IPv4 default route is the
 	// gateway or none, and the GUI and ping rules move to the LAN.
@@ -61,6 +68,12 @@ type BootstrapOptions struct {
 }
 
 func (o *BootstrapOptions) check() error {
+	if len(o.ResolverDNS) > fwconfig.MaxResolverServers {
+		return fmt.Errorf("at most %d resolver DNS servers", fwconfig.MaxResolverServers)
+	}
+	if o.ResolverDHCP && o.resolverInterface() == "" {
+		return errors.New("the resolver follows DHCP, but neither the WAN nor the LAN uses DHCP")
+	}
 	if o.AgentFingerprint == "" && !o.Reconfigure {
 		return errors.New("the agent fingerprint is required")
 	}
@@ -341,6 +354,53 @@ func (b *bootTree) create(p datastore.Path, entry map[string]any) error {
 	return b.work.EditJSON(p, datastore.EditCreate, body)
 }
 
+// resolverInterface is the DHCP interface the resolver follows: the WAN,
+// else the LAN; "" when neither uses DHCP.
+func (o *BootstrapOptions) resolverInterface() string {
+	switch {
+	case o.WAN != "" && !o.WANAddress.IsValid():
+		return o.WAN
+	case !o.Address.IsValid():
+		return o.LAN
+	}
+	return ""
+}
+
+// resolver sets the host's resolver (ResolverDNS, ResolverDHCP) and which
+// interface's lease it follows (dns-from-dhcp, at most one).
+func (b *bootTree) resolver(o BootstrapOptions) error {
+	if len(o.ResolverDNS) == 0 && !o.ResolverDHCP {
+		return nil
+	}
+	from := ""
+	if o.ResolverDHCP {
+		from = o.resolverInterface()
+	}
+	servers := []string{}
+	for _, a := range o.ResolverDNS {
+		servers = append(servers, a.String())
+	}
+	if err := b.set(b.inst, map[string]any{"resolver-servers": servers, "resolver-from-dhcp": o.ResolverDHCP}); err != nil {
+		return err
+	}
+	if !o.ResolverDHCP {
+		return nil // dns-from-dhcp may be the DNS server's upstream's
+	}
+	var change []string // the interfaces whose flag differs
+	for _, ifc := range b.node().Lists["interface"] {
+		if name := ifc.Leaf("name"); (name == from) != (ifc.Leaf("dns-from-dhcp") == "true") {
+			change = append(change, name)
+		}
+	}
+	for _, name := range change {
+		ifc := b.node().Entry("interface", []string{name})
+		if err := b.set(datastore.PathOf(ifc), map[string]any{"dns-from-dhcp": name == from}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (b *bootTree) network(o BootstrapOptions) error {
 	if err := b.iface(o.LAN, o.Address, "LAN", o.WAN != "" && !o.DefaultRouteLAN, o.Reconfigure); err != nil {
 		return err
@@ -352,6 +412,9 @@ func (b *bootTree) network(o BootstrapOptions) error {
 		if err := b.iface(o.WAN, o.WANAddress, "WAN", o.DefaultRouteLAN, o.Reconfigure); err != nil {
 			return err
 		}
+	}
+	if err := b.resolver(o); err != nil {
+		return err
 	}
 	in := b.node()
 	routes := b.at(datastore.Elem{Name: "route"})

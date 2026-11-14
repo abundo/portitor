@@ -237,7 +237,7 @@ func configCommand() *cobra.Command {
 	root.AddCommand(agentURLCmd)
 
 	var bo web.BootstrapOptions
-	var tokenFile, address, wanAddress, gateway, dhcpRange, dhcpDNS, defaultRoute string
+	var tokenFile, address, wanAddress, gateway, dhcpRange, dhcpDNS, defaultRoute, resolverDNS string
 	bootstrap := &cobra.Command{
 		Use:   "bootstrap",
 		Short: "Configure and deploy this new firewall (the installer ISO's first boot)",
@@ -311,6 +311,13 @@ settings are kept unless --agent-fingerprint is given.`,
 				}
 				bo.DHCPDNS = append(bo.DHCPDNS, ip)
 			}
+			for _, d := range strings.FieldsFunc(resolverDNS, func(r rune) bool { return r == ',' || r == ' ' }) {
+				ip, err := netip.ParseAddr(d)
+				if err != nil {
+					return fmt.Errorf("--dns: %w", err)
+				}
+				bo.ResolverDNS = append(bo.ResolverDNS, ip)
+			}
 			return printDeployment(web.Bootstrap(cmd.Context(), srv, bo))
 		},
 	}
@@ -326,6 +333,8 @@ settings are kept unless --agent-fingerprint is given.`,
 	bf.StringVar(&defaultRoute, "default-route", "wan", "which DHCP interface takes the default route when both the LAN and the WAN use DHCP: lan or wan")
 	bf.StringVar(&dhcpRange, "dhcp-range", "", "DHCP server on the static LAN, e.g. 192.168.1.100-192.168.1.199 (optional)")
 	bf.StringVar(&dhcpDNS, "dhcp-dns", "", "DNS servers DHCP hands out, comma separated (default: the firewall, if its DNS listens on the LAN)")
+	bf.StringVar(&resolverDNS, "dns", "", "DNS servers of the firewall's own resolver (/etc/resolv.conf), comma separated, up to three (optional)")
+	bf.BoolVar(&bo.ResolverDHCP, "dns-from-dhcp", false, "the firewall's own resolver follows the DNS servers of the DHCP lease of the WAN (else the LAN), as --dns until it has them")
 	bf.IntVar(&bo.GUIPort, "gui-port", 443, "port to open for the GUI on the LAN, 0 for none")
 	bf.BoolVar(&bo.Reconfigure, "reconfigure", false, "change the LAN and WAN of a deployed installation")
 	root.AddCommand(bootstrap)

@@ -121,7 +121,7 @@ submodule portitor-interfaces {
       }
       leaf dns-from-dhcp {
         type boolean;
-        description "DnsFromDhcp: with DNS upstream dhcp, the DNS servers of this interface's DHCP lease are the forwarders. At most one per instance.";
+        description "DnsFromDhcp: the DNS servers of this interface's DHCP lease are the forwarders with DNS upstream dhcp, and the host's resolver with resolver-from-dhcp. At most one per instance.";
       }
       leaf dhcpv6 {
         type boolean;

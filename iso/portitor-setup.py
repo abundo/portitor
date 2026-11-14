@@ -8,11 +8,12 @@ once. A text UI (Textual, python3-textual) asks for the keyboard layout
 (applied at once, so the password is typed with it), the LAN and WAN
 interfaces, the LAN address (static or DHCP), a DHCP server on a static
 LAN (its range), the WAN address (DHCP, or static with the default
-gateway), the DNS servers (by default those the DHCP server on the DHCP WAN,
-or LAN, offers), a password and the time zone; before applying, LAN and WAN can be swapped. Then it:
+gateway), the DNS servers (empty: those the DHCP server on the DHCP WAN,
+or LAN, offers, which the firewall then follows as its lease changes), a password and the time zone; before applying, LAN and WAN can be swapped. Then it:
 
-  - writes /etc/resolv.conf (the agent does not manage the firewall's own
-    resolver; the one from the installation may be unreachable now),
+  - writes /etc/resolv.conf (the one from the installation may be unreachable
+    now; once the configuration is deployed the agent keeps it, from these
+    servers or the DHCP lease's, see `portitor-config bootstrap --dns`),
   - creates the SQLite database and writes /etc/portitor/config.yaml, with a
     self-signed certificate for the GUI on port 443 (portitor-config),
   - creates the GUI user portitor, and sets the console user's password,
@@ -87,7 +88,7 @@ address, optional), wan_address
 (empty: DHCP), default_route (lan or wan, default wan: the DHCP
 interface that takes the default route when both use DHCP), gateway (on the static WAN, else on the LAN), dhcp_range
 (a DHCP server on the static LAN, e.g. 192.168.1.100-192.168.1.199,
-optional), dns (space separated), password, hostname (default portitor, may include the domain), timezone and keyboard (an XKB layout, e.g. se). The file is removed when the setup has
+optional), dns (space separated; empty: the DHCP server's, when the LAN or WAN uses DHCP), password, hostname (default portitor, may include the domain), timezone and keyboard (an XKB layout, e.g. se). The file is removed when the setup has
 finished. role (both, agent or web) picks the split setups; agent reads
 web_from (portitor-web's address or network, default the LAN network), web
 reads lan and address (its own interface), gateway and join (a portal
@@ -119,7 +120,7 @@ import urllib.request
 from pathlib import Path
 from typing import Callable
 
-from textual import on, work
+from textual import events, on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
@@ -389,7 +390,10 @@ def fmt_range(r: tuple | None) -> str:
     return f"{r[0]}-{r[1]}" if r else ""
 
 
-def parse_dns(answer: str) -> list[str]:
+def parse_dns(answer: str, dhcp: bool = False) -> list[str]:
+    """The DNS servers typed; empty (from the DHCP server, at apply) only where dhcp says one is used."""
+    if dhcp and not answer.strip():
+        return []
     try:
         servers = [str(ipaddress.ip_address(a)) for a in answer.replace(",", " ").split()]
     except ValueError:
@@ -397,6 +401,15 @@ def parse_dns(answer: str) -> list[str]:
     if not 1 <= len(servers) <= 3:
         raise ValueError("one to three IP addresses, separated by spaces")
     return servers
+
+
+def dhcp_dns_nic(a: dict) -> str:
+    """The interface whose DHCP server offers the DNS servers: the DHCP WAN, else the DHCP LAN."""
+    if a.get("wan") and not a.get("wan_address"):
+        return a["wan"]
+    if a.get("lan") and not a.get("address"):
+        return a["lan"]
+    return ""
 
 
 def check_web_from(text: str) -> str:
@@ -723,10 +736,15 @@ def step_links(a: dict) -> None:
 
 
 def step_dns(a: dict) -> None:
+    dns = a["dns"]
+    if not dns:
+        # Left empty: what the DHCP server offers, to install with (the agent
+        # then follows the lease, step_bootstrap).
+        dns = offered_dns(dhcp_dns_nic(a)) or PUBLIC_DNS.split()
     if RESOLV_CONF.is_symlink():
         RESOLV_CONF.unlink()
     write(RESOLV_CONF, "# Written by the Portitor first-boot setup.\n"
-          + "".join(f"nameserver {d}\n" for d in a["dns"]), 0o644)
+          + "".join(f"nameserver {d}\n" for d in dns), 0o644)
 
 
 def step_keyboard(a: dict) -> None:
@@ -784,7 +802,10 @@ def step_config(a: dict) -> None:
     address."""
     if not a.get("reconfigure") or a.get("new_cert") or not WEB_CERT.exists():
         step_cert(a)
-    proxies = f"[{a['web_from']}]" if a.get("web_from") else "[]"
+    # An HA host's portitor-web is on the management network (its agent accepts
+    # only that network), so that is what it trusts to pass the browser's address.
+    web_from = a.get("web_from") or (str(a["mgmt_address"].network) if a["role"] in HA_ROLES else "")
+    proxies = f"[{web_from}]" if web_from else "[]"
     write(CONFIG_YAML, f"""# /etc/portitor/config.yaml - written by the first-boot setup.
 # portitor-config runs on the firewall; the ruleset lets the LAN reach it.
 bind: ":{GUI_PORT}"
@@ -914,9 +935,15 @@ def portal_name(a: dict) -> str:
     return a["hostname"].split(".", 1)[0]
 
 
+def gui_ip(a: dict):
+    """The address portitor-web reaches this host's GUI on: an HA host's management
+    address (its LAN is traffic, and the standby's is closed), else the LAN's."""
+    return a["mgmt_address"].ip if a["role"] in HA_ROLES else a["address"].ip
+
+
 def portal_string(a: dict) -> str:
-    """Agent role: what portitor-web needs to serve this firewall's GUI."""
-    d = {"name": portal_name(a), "url": f"https://{a['address'].ip}:{GUI_PORT}", "fingerprint": cert_fingerprint()}
+    """What portitor-web needs to serve this host's GUI (an agent or an HA host)."""
+    d = {"name": portal_name(a), "url": f"https://{gui_ip(a)}:{GUI_PORT}", "fingerprint": cert_fingerprint()}
     raw = json.dumps(d, separators=(",", ":")).encode()
     return PORTAL_PREFIX + base64.urlsafe_b64encode(raw).decode().rstrip("=")
 
@@ -983,6 +1010,12 @@ def step_bootstrap(a: dict) -> None:
         argv += ["--gateway", str(a["gateway"])]
     if route_from(a) == "lan":
         argv += ["--default-route", "lan"]
+    # The firewall's own resolver is the agent's from here: these servers, or
+    # (empty) the DHCP lease's, which it follows as the lease changes.
+    if a["dns"]:
+        argv += ["--dns", " ".join(a["dns"])]
+    else:
+        argv.append("--dns-from-dhcp")
     if a.get("reconfigure"):
         # The agent settings stay as they are.
         argv.append("--reconfigure")
@@ -1176,7 +1209,7 @@ def read_answers() -> dict:
         "gateway": ipaddress.IPv4Address(raw["gateway"]) if raw.get("gateway") else None,
         "dhcp_range": None,
         "default_route": raw.get("default_route") or "wan",
-        "dns": parse_dns(raw.get("dns") or PUBLIC_DNS),
+        "dns": parse_dns(raw.get("dns") or "", True),
         "password": raw["password"],
         "tz": raw.get("timezone") or "Etc/UTC",
         "hostname": check_hostname(raw.get("hostname") or "portitor"),
@@ -1191,6 +1224,8 @@ def read_answers() -> dict:
     if role == "secondary":
         a["wan"], a["wan_address"] = "", None
         a["lan"], a["address"], a["gateway"] = a["mgmt"], a["mgmt_address"], a["mgmt_gateway"]
+    if not a["dns"] and not dhcp_dns_nic(a):
+        a["dns"] = parse_dns(PUBLIC_DNS)
     if a["join"] and role == "primary":
         decode_secondary(a["join"])
     if role == "agent":
@@ -1242,7 +1277,7 @@ def answers_of(state: dict) -> dict:
         "lan": state.get("lan", ""), "address": iface("address"),
         "wan": state.get("wan", ""), "wan_address": iface("wan_address"),
         "gateway": ipaddress.IPv4Address(state["gateway"]) if state.get("gateway") else None,
-        "dns": parse_dns(state.get("dns") or PUBLIC_DNS),
+        "dns": parse_dns(state.get("dns") or "", True),
         "mgmt": state.get("mgmt", ""), "mgmt_address": iface("mgmt_address"),
         "mgmt_gateway": ipaddress.IPv4Address(state["mgmt_gateway"]) if state.get("mgmt_gateway") else None,
         "ha_link": state.get("ha_link", ""),
@@ -1300,7 +1335,7 @@ def summary(a: dict) -> list[str]:
         if a["role"] == "primary" and a.get("mgmt"):
             out += [f"Management      {nic_label(a['mgmt'])} {a['mgmt_address']}, gateway {a['mgmt_gateway']}",
                     f"HA link         {nic_label(a['ha_link'])}"]
-    out += [f"DNS servers     {' '.join(a['dns'])}",
+    out += [f"DNS servers     {' '.join(a['dns']) or 'from DHCP'}",
             f"Host name       {a['hostname']}",
             f"Time zone       {a['tz']}",
             f"Keyboard        {a['keyboard']}"]
@@ -1320,21 +1355,33 @@ The browser warns about the self-signed certificate; its SHA-256 fingerprint is
 
 
 def join_text(a: dict) -> str:
-    """Agent role: the portal string for portitor-web, and how to use it."""
+    """Agent role or HA host: the portal string for portitor-web, and how to use it."""
     d = decode_portal(portal_string(a))
-    return f"""This firewall's GUI: https://{a['address'].ip}/ (user {GUI_USER}). To serve it from
+    ip = gui_ip(a)
+    return f"""This firewall's GUI: https://{ip}/ (user {GUI_USER}). To serve it from
 portitor-web on another host too, run sudo portitor-setup --join there (installed
 from the ISO as "web") and paste this portal string:
 
 {portal_string(a)}
 
-Easiest is to copy it over SSH (ssh {CONSOLE_USER}@{a['address'].ip}, then sudo
+Easiest is to copy it over SSH (ssh {CONSOLE_USER}@{ip}, then sudo
 portitor-setup --show-join). A portitor-web installed with install.py takes the
 same under firewalls: in {WEB_YAML}:
   - name: {d['name']}
     url: {d['url']}
     fingerprint: {d['fingerprint']}
 It names no secret: the users log in to the firewall itself.
+"""
+
+
+def ha_portal_text(a: dict) -> str:
+    """An HA host: the portal string, which names the host by its host name: the
+    two hosts of a pair need different ones (a portal keeps one entry per name)."""
+    return f"""{join_text(a)}
+Give the pair's two hosts different host names: portitor-web keeps one entry per
+name, so a second host of the same name replaces the first. Both are added to the
+same portitor-web. Its address must be on the management network, and it is the
+witness too (see High availability in the GUI's Help).
 """
 
 
@@ -1350,7 +1397,8 @@ Easiest is to copy it over SSH (ssh {CONSOLE_USER}@{a['mgmt_address'].ip}, then 
 portitor-setup --show-join). The primary then adds this host and commits the pair;
 from then on this host's portitor-config is a read-only copy of the primary's
 (log in with the primary's users).
-"""
+
+""" + ha_portal_text(a)
 
 
 def primary_text(a: dict) -> str:
@@ -1359,7 +1407,8 @@ def primary_text(a: dict) -> str:
 here. For a failover by itself, give the pair an external witness: see High
 availability in the GUI's Help.
 
-{gui_text(a)}"""
+{gui_text(a)}
+{ha_portal_text(a)}"""
 
 
 def intro(role: str) -> str:
@@ -1417,6 +1466,7 @@ class Page(VerticalScroll):
     def compose(self) -> ComposeResult:
         yield Static(self.heading, classes="heading")
         yield from self.body()
+        yield Label("", id="keyhelp")
         yield Label("", id="error")
         with Horizontal(id="buttons"):
             yield from self.buttons()
@@ -1450,6 +1500,19 @@ class Page(VerticalScroll):
 
     def error(self, msg: str) -> None:
         self.query_one("#error", Label).update(msg)
+
+    def on_descendant_focus(self, event: events.DescendantFocus) -> None:
+        """Says how the focused widget is used: a list opens on Enter, not on arrival."""
+        w = event.widget
+        if isinstance(w, Select):
+            text = "Enter or \u2193 opens the list \u00b7 \u2191\u2193 choose \u00b7 Enter picks \u00b7 Esc closes"
+        elif isinstance(w, Input):
+            text = "Type the value \u00b7 Enter goes on to the next step"
+        elif isinstance(w, Button):
+            text = "Enter presses the button"
+        else:
+            text = ""
+        self.query_one("#keyhelp", Label).update(text)
 
     def focus_primary(self) -> None:
         for w in self.query(self.primary or "Input, Select, OptionList, Button"):
@@ -1554,8 +1617,8 @@ class NetworkPage(Page):
             yield Static("The WAN interface connects to the Internet, which the firewall needs for updates; "
                          "the LAN interface is where you reach the GUI from. Plug in a cable to see "
                          "which interface it is; Reload updates the link state.", classes="text")
-            yield row("WAN interface", Select([], id="wan", prompt="choose the WAN interface"))
-            yield row("LAN interface", Select([], id="lan", prompt="choose the LAN interface"))
+            yield row("WAN interface", Select([], id="wan", prompt="choose the WAN interface (Enter)"))
+            yield row("LAN interface", Select([], id="lan", prompt="choose the LAN interface (Enter)"))
             yield Button("Reload interfaces", id="reload")
             yield row("WAN IPv4", Select(MODES, id="wan_mode", allow_blank=False,
                                          value="static" if st.get("wan_address") else "dhcp"))
@@ -1585,16 +1648,23 @@ class NetworkPage(Page):
             yield Static("The interface this host is reached on (the GUI) and reaches the firewall through. "
                          "Plug in a cable to see which interface it is; Reload updates the link state.",
                          classes="text")
-            yield row("Interface", Select([], id="lan", prompt="choose the interface"))
+            yield row("Interface", Select([], id="lan", prompt="choose the interface (Enter)"))
             yield Button("Reload interfaces", id="reload")
             yield row("IPv4", Select(MODES, id="lan_mode", allow_blank=False, value="static" if static else "dhcp"))
             yield row("Address", Input(st.get("address", "") if static else "", id="address", placeholder="192.168.1.10/24"))
             yield row("Default gateway", Input(st.get("gateway", ""), id="gateway", placeholder="192.168.1.1"))
-        yield row("DNS servers", Input(st.get("dns") or PUBLIC_DNS, id="dns"))
-        yield Static("DNS servers " + ("this host uses" if kind == "host" else "the firewall itself uses")
-                     + ": during the rest of the installation (packages, Portitor) and afterwards for "
-                     + ("updates." if kind == "host" else "updates and IP lists.")
-                     + " Filled in from the DHCP server on the DHCP interface, when one answers.", classes="hint")
+        yield row("DNS servers", Input(st.get("dns") or (PUBLIC_DNS if kind == "dns" else ""), id="dns",
+                                       placeholder="" if kind == "dns" else "empty: from DHCP"))
+        if kind == "dns":
+            hint = "DNS servers the firewall itself uses until the pair is committed: one to three addresses."
+        elif kind == "host":
+            hint = ("DNS servers this host uses, for updates. Leave empty to use the ones the DHCP server "
+                    "offers now (" + PUBLIC_DNS + " if none answers); they are not followed afterwards.")
+        else:
+            hint = ("DNS servers the firewall itself uses, for updates and IP lists. Leave empty to use the "
+                    "ones the DHCP server on the DHCP interface offers (the WAN's, else the LAN's); the "
+                    "firewall then follows them as the lease changes (" + PUBLIC_DNS + " until it has them).")
+        yield Static(hint, classes="hint")
         if role == "agent":
             yield row("portitor-web from", Input(st.get("web_from", ""), id="web_from", placeholder="the LAN network"))
             yield Static("portitor-web, which serves this firewall's GUI too, calls it from this address or "
@@ -1602,37 +1672,8 @@ class NetworkPage(Page):
                          "limits). The GUI is open from the LAN.", classes="hint")
 
     def on_mount(self) -> None:
-        # The last answers keep their DNS servers.
-        self.dns_auto, self.dns_asked = "", "-" if self.state.get("dns") else ""
         self.reload()
         self.modes()
-
-    def dhcp_nic(self) -> str:
-        """The interface whose DHCP server suggests the DNS servers: the DHCP WAN, else the DHCP LAN."""
-        if self.kind() == "agent":
-            return ""
-        for wid, mode in (("#wan", "#wan_mode"), ("#lan", "#lan_mode")):
-            for select in self.query(wid).results(Select):
-                if not select.is_blank() and not self.static(mode):
-                    return str(select.value)
-        return ""
-
-    def suggest_dns(self) -> None:
-        nic = self.dhcp_nic()
-        if nic and nic != self.dns_asked and self.dns_asked != "-":
-            self.dns_asked = nic
-            self.ask_dns(nic)
-
-    @work(thread=True, exclusive=True, group="dns")
-    def ask_dns(self, nic: str) -> None:
-        if dns := offered_dns(nic):
-            self.app.call_from_thread(self.fill_dns, " ".join(dns))
-
-    def fill_dns(self, dns: str) -> None:
-        """The DHCP server's DNS servers, unless the field was changed."""
-        field = self.query_one("#dns", Input)
-        if field.value.strip() in (PUBLIC_DNS, self.dns_auto):
-            field.value = self.dns_auto = dns
 
     @on(Button.Pressed, "#reload")
     def reload(self) -> None:
@@ -1657,7 +1698,6 @@ class NetworkPage(Page):
             rng.disabled = dhcp.disabled or dhcp.value == "off"
             if not rng.disabled and not rng.value.strip():
                 self.fill_range()
-        self.suggest_dns()
 
     @on(Input.Changed, "#address")
     def fill_range(self) -> None:
@@ -1711,7 +1751,7 @@ class NetworkPage(Page):
                             if a["wan_address"] else None)
             routes = list(self.query("#default_route").results(Select))
             a["default_route"] = str(routes[0].value) if routes and not routes[0].disabled else "wan"
-        a["dns"] = self.field("DNS servers", parse_dns, self.value("#dns"))
+        a["dns"] = self.field("DNS servers", parse_dns, self.value("#dns"), bool(dhcp_dns_nic(a)))
         a["web_from"] = ""
         if a["role"] == "agent":
             a["web_from"] = self.field("portitor-web from", check_web_from,
@@ -1735,12 +1775,12 @@ class HAPage(Page):
                         if role == "primary" else
                         "At the end this setup shows a string for the primary, which adds this host and "
                         "configures the rest."), classes="text")
-        yield row("Management", Select([], id="mgmt", prompt="choose the management interface"))
+        yield row("Management", Select([], id="mgmt", prompt="choose the management interface (Enter)"))
         yield row("Address", Input(st.get("mgmt_address", ""), id="mgmt_address", placeholder="172.25.38.1/24"))
         yield row("Gateway", Input(st.get("mgmt_gateway", ""), id="mgmt_gateway", placeholder="172.25.38.254"))
         yield Static("What the host itself uses while it is the standby: updates, NTP, the witness. "
                      "It must not be the pair.", classes="hint")
-        yield row("HA link", Select([], id="ha_link", prompt="choose the HA link interface"))
+        yield row("HA link", Select([], id="ha_link", prompt="choose the HA link interface (Enter)"))
         yield Static("No address: the hosts use the IPv6 link-local addresses fe80::1 (primary) and "
                      "fe80::2 (secondary) on it.", classes="hint")
         yield Button("Reload interfaces", id="reload")
@@ -2210,7 +2250,8 @@ class SetupApp(App):
     .row { height: auto; }
     .label { width: 20; padding: 1 1 0 0; }
     .row Input, .row Select { width: 1fr; }
-    #error { color: $error; padding: 1 0 0 0; }
+    #keyhelp { color: $text-muted; padding: 1 0 0 0; }
+    #error { color: $error; padding: 0; }
     #buttons { height: auto; padding: 1 0; }
     #buttons Button { margin-right: 2; }
     #layouts { height: 1fr; min-height: 10; }
@@ -2285,7 +2326,7 @@ def main() -> int:
                        help="portitor-web only: serve the firewall of a portal string; an HA primary: add the "
                             "secondary of a secondary string (asked for without one)")
     group.add_argument("--show-join", action="store_true",
-                       help="agent role: print the portal string for portitor-web; an HA secondary: the string for the primary")
+                       help="agent role or an HA host: print the portal string for portitor-web; an HA secondary: also the string for the primary")
     args = parser.parse_args()
     if os.geteuid() != 0:
         if shutil.which("sudo"):
@@ -2294,11 +2335,11 @@ def main() -> int:
         return 1
     state = load_state()
     if args.join is not None or args.show_join:
-        want = ("web", "primary") if args.join is not None else ("agent", "secondary")
+        want = ("web", "primary") if args.join is not None else ("agent", "primary", "secondary")
         role = state.get("role") or "both"
         if not DONE.exists() or role not in want:
             say(f"{'--join' if args.join is not None else '--show-join'} is for a machine set up as "
-                f"\"{want[0]}\" or \"{want[1]}\"")
+                + " or ".join(f"\"{w}\"" for w in want))
             return 1
         if args.join:
             if role == "primary":
@@ -2307,7 +2348,8 @@ def main() -> int:
         if args.show_join:
             # Plain text, to copy over SSH.
             a = {**answers_of(state), "role": role, "hostname": state.get("hostname") or current_hostname()}
-            say(secondary_text(a) if role == "secondary" else join_text(a))
+            say(secondary_text(a) if role == "secondary" else
+                ha_portal_text(a) if role == "primary" else join_text(a))
             return 0
         return run_tui("join", state)
     if DONE.exists():

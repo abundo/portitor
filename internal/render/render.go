@@ -50,6 +50,8 @@ type Paths struct {
 	// RsyslogConf is rsyslog's config: the default instance's syslog
 	// servers (fwconfig.Syslog).
 	RsyslogConf string `yaml:"rsyslog_conf" json:"rsyslog_conf"`
+	// ResolvConf is the host's resolver file (fwconfig.Resolver).
+	ResolvConf string `yaml:"resolv_conf" json:"resolv_conf"`
 	// FRRDir is FRR's config directory: the default instance's frr.conf
 	// and daemons are in it, and a virtual firewall's unit mounts the
 	// instance's over FRRDir/<instance> (FRR's pathspace).
@@ -76,6 +78,7 @@ func DefaultPaths() Paths {
 		OpenVPNDir:     "/etc/openvpn/server",
 		ConntrackdConf: "/etc/conntrackd/conntrackd.conf",
 		RsyslogConf:    "/etc/rsyslog.conf",
+		ResolvConf:     "/etc/resolv.conf",
 		FRRDir:         "/etc/frr",
 		FRRRunDir:      "/run/frr",
 		FRRStateDir:    "/var/lib/frr",
@@ -118,6 +121,8 @@ type InstanceFiles struct {
 	// Rsyslog is the default instance's alone (fwconfig.Syslog): empty
 	// for the others.
 	Rsyslog string
+	// ResolvConf is the default instance's alone (fwconfig.Resolver).
+	ResolvConf string
 	// OpenVPNUDP and OpenVPNTCP are the OpenVPN processes' configs;
 	// OpenVPNRun holds their management sockets (OpenVPNSocket), which
 	// the agent alone opens.
@@ -172,6 +177,7 @@ func (p Paths) Files(in *fwconfig.Instance) InstanceFiles {
 			Snmpd:        p.SnmpdConf,
 			Conntrackd:   p.ConntrackdConf,
 			Rsyslog:      p.RsyslogConf,
+			ResolvConf:   p.ResolvConf,
 			OpenVPNUDP:   filepath.Join(p.OpenVPNDir, "portitor-udp.conf"),
 			OpenVPNTCP:   filepath.Join(p.OpenVPNDir, "portitor-tcp.conf"),
 			OpenVPNRun:   filepath.Join(p.RunDir, "openvpn", in.Name),
@@ -448,6 +454,9 @@ func Render(doc fwconfig.Document, opt Options) (*Bundle, error) {
 		}
 		if in.Syslog != nil && in.Default {
 			add(f.Rsyslog, RsyslogConf(in), 0o644, false)
+		}
+		if conf, ok := ResolvConf(in, opt.DHCPDNS[in.Name]); ok && in.Default {
+			add(f.ResolvConf, conf, 0o644, false)
 		}
 		for _, ifc := range in.OpenVPNDevices() {
 			add(f.OpenVPNConf(ifc.OpenVPN.Proto), OpenVPNConf(in, ifc, opt.Paths), 0o600, true)

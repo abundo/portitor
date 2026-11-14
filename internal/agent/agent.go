@@ -409,8 +409,8 @@ func (a *Agent) rollbackLocked(ctx context.Context) (*ApplyResult, error) {
 	return res, nil
 }
 
-// onDHCPChange re-renders an instance's BIND config when the upstream DNS
-// servers learned by DHCP change.
+// onDHCPChange re-renders an instance's BIND config, and the host's
+// resolv.conf, when the DNS servers learned by DHCP change.
 func (a *Agent) onDHCPChange(instance string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -418,27 +418,39 @@ func (a *Agent) onDHCPChange(instance string) {
 		return
 	}
 	in := a.applied.Instance(instance)
-	if in == nil || !in.DNS.Enabled || in.DNS.ForwardMode == fwconfig.ForwardOff ||
-		in.DNS.Upstream != fwconfig.UpstreamDHCP && !in.DNS.ForwardFromDHCP {
+	if in == nil {
+		return
+	}
+	named := in.DNS.Enabled && in.DNS.ForwardMode != fwconfig.ForwardOff &&
+		(in.DNS.Upstream == fwconfig.UpstreamDHCP || in.DNS.ForwardFromDHCP)
+	resolver := in.Default && in.Resolver != nil && in.Resolver.DHCPInterface != ""
+	if !named && !resolver {
 		return
 	}
 	b, err := render.Render(*a.applied, a.renderOptions())
 	if err != nil {
 		return
 	}
-	f := b.File(a.cfg.Paths.Files(in).NamedConf)
-	if f == nil {
-		return
+	files := a.cfg.Paths.Files(in)
+	if resolver {
+		// Nothing to write (no servers yet): the file stays as it is.
+		if f := b.File(files.ResolvConf); f != nil {
+			if _, err := a.writeFile(*f); err != nil {
+				slog.Error("update resolv.conf", "err", err)
+			}
+		}
 	}
-	changed, err := a.writeFile(*f)
-	if err != nil {
-		slog.Error("update named.conf", "err", err)
-		return
-	}
-	if changed {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-		defer cancel()
-		_, _ = a.run.Run(ctx, "", "systemctl", "reload-or-restart", a.cfg.Units.Named(in))
+	if named {
+		if f := b.File(files.NamedConf); f != nil {
+			changed, err := a.writeFile(*f)
+			if err != nil {
+				slog.Error("update named.conf", "err", err)
+			} else if changed {
+				ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+				defer cancel()
+				_, _ = a.run.Run(ctx, "", "systemctl", "reload-or-restart", a.cfg.Units.Named(in))
+			}
+		}
 	}
 	a.log.Take()
 }

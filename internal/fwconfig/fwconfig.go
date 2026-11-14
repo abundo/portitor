@@ -61,6 +61,9 @@ type Instance struct {
 	StaticNeighbours []StaticNeighbour `json:"static_neighbours,omitempty"`
 	DHCP             DHCPServer        `json:"dhcp"`
 	DNS              DNSServer         `json:"dns"`
+	// Resolver, when set (the default instance only), is where the host's
+	// own /etc/resolv.conf comes from; absent, the file is not the agent's.
+	Resolver *Resolver `json:"resolver,omitempty"`
 	// RA lists the interfaces that send IPv6 router advertisements.
 	RA []RAInterface `json:"ra,omitempty"`
 	// NAT64, when set, translates IPv6 to IPv4 (stateful NAT64, Jool).

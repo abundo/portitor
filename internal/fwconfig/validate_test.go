@@ -284,6 +284,13 @@ func TestValidateCatchesProblems(t *testing.T) {
 			d.Instances[0].DNS.Upstream, d.Instances[0].DNS.DHCPInterface = UpstreamDHCP, "eth1"
 		}, "eth1 is not a DHCP client"},
 		{"dns dhcp interface not dhcp upstream", func(d *Document) { d.Instances[0].DNS.DHCPInterface = "eth0" }, "only for upstream dhcp"},
+		{"resolver empty", func(d *Document) { d.Instances[0].Resolver = &Resolver{} }, "needs DNS servers or a DHCP interface"},
+		{"resolver bad server", func(d *Document) { d.Instances[0].Resolver = &Resolver{Servers: []string{"dns.example"}} }, `invalid DNS server "dns.example"`},
+		{"resolver too many", func(d *Document) {
+			d.Instances[0].Resolver = &Resolver{Servers: []string{"192.0.2.1", "192.0.2.2", "192.0.2.3", "192.0.2.4"}}
+		}, "at most 3 DNS servers"},
+		{"resolver static interface", func(d *Document) { d.Instances[0].Resolver = &Resolver{DHCPInterface: "eth1"} }, "eth1 is not a DHCP client"},
+		{"resolver unknown interface", func(d *Document) { d.Instances[0].Resolver = &Resolver{DHCPInterface: "nope"} }, `unknown DHCP interface "nope"`},
 		{"dns unknown template", func(d *Document) { d.Instances[0].DNS.Zones[0].Template = "work" }, `unknown template "work"`},
 		{"dns forward-only no forwarders", func(d *Document) {
 			d.Instances[0].DNS.Zones = append(d.Instances[0].DNS.Zones, DNSZone{Name: "int.example.com", Type: ZoneForwardOnly})

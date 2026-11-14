@@ -63,7 +63,7 @@ cleanly now. Go on only once they've chosen.
 | `deploy` | systemd units and example configs |
 | `dev` | Dev configs and `seed.sh`; `dev/lab` runs a real apply in two podman containers |
 | `install.py` | Installs/updates a firewall (agent and portitor-config) and portitor-web (the portal) from a GitHub release (`.goreleaser.yaml`), `--source` or `--local`; moves an old portitor-web's database to portitor-config on the same host (`move_web_database`) and lists it in that host's `web.yaml` (`link_local_config`), or, from a host of its own, to the firewall its database deploys to (`old_web_database`, `move_remote_database`, `link_remote_config`); the agent runs its copy in `/usr/lib/portitor` for GUI updates |
-| `iso` | Installer ISO: Debian netinst + preseed (`build.sh`), setup (`portitor-setup.py`, installed as `portitor-setup`: runs `portitor-config bootstrap` at first boot, `--reconfigure` when run again; role `agent` is the same firewall, ending with a portal string for portitor-web, role `web` portitor-web alone, which adds a firewall with `--join`; roles `primary` and `secondary` an HA pair: the secondary only its HA link and management, ending with a secondary string (its agent's token) that the primary's `--join` adds and commits), QEMU test VM (`vm.sh`), end-to-end tests (`test.sh`, `test-split.sh`, `test-update.sh`, `make iso-e2e`) |
+| `iso` | Installer ISO: Debian netinst + preseed + an apt repository of `packages.txt` and its dependencies, so the installation needs no network (`build.sh`, `target.sh`), setup (`portitor-setup.py`, installed as `portitor-setup`: runs `portitor-config bootstrap` at first boot, `--reconfigure` when run again; role `agent` is the same firewall, ending with a portal string for portitor-web, role `web` portitor-web alone, which adds a firewall with `--join`; roles `primary` and `secondary` an HA pair: the secondary only its HA link and management, ending with a secondary string (its agent's token) that the primary's `--join` adds and commits), QEMU test VM (`vm.sh`), end-to-end tests (`test.sh`, `test-split.sh`, `test-update.sh`, `make iso-e2e`) |
 
 ## Terms
 
@@ -620,6 +620,16 @@ the certificate portitor-config serves, chosen under Settings
   preferred lifetime of 0, and an interface taken out gets a last RA with every
   lifetime 0; a process that stops sends none, so a restart or an HA standby never
   withdraws the router.
+- **Host resolver** (`fwconfig/resolver.go`, `render/resolvconf.go`, `agent.onDHCPChange`):
+  the default instance's `/etc/resolv.conf` (`Paths.ResolvConf`) is the agent's only when
+  the instance has `resolver-servers` and/or `resolver-from-dhcp` (absent: the file is not
+  ours, as on installs from before). From the DHCP lease of the interface with
+  `dns-from-dhcp` (shared with the DNS server's upstream; in the lease's order) while it has
+  DNS servers, else the servers; with neither the file is left alone, never written empty.
+  A lease change rewrites it outside an apply. A DHCP resolver whose interface is gone
+  (WAN made static) falls back to the servers in the builder, no error. `portitor-config
+  bootstrap --dns` / `--dns-from-dhcp` set it, from the installer's DNS servers field.
+
 - **NTP** (`fwconfig/ntp.go`, `render/chrony.go`): chrony per instance
   (`instances.ntp_*`), its servers JSON. The default instance's chrony.service sets
   the host's clock; a virtual firewall's `portitor-chrony@` runs `chronyd -x` (the
@@ -823,7 +833,9 @@ the certificate portitor-config serves, chosen under Settings
   --list --json` is the interface between agent and installer; keep its fields stable.
   An update installs the Debian packages in `install.py`'s `AGENT_PACKAGES` that are
   missing (masking their distribution units first); a release that needs a new
-  package adds it there and to `iso/preseed.cfg`.
+  package adds it there and to `iso/packages.txt` (the ISO installs from its own
+  repository, with no network: `iso/build.sh` downloads that list and its
+  dependencies, `iso/target.sh` installs them).
   BIND comes from ISC's Debian repository (`bind.debian.net/bind`, key in
   `deploy/apt/isc-bind.asc`): the ISO's preseed adds it (`apt-setup/local0`), an
   update adds it where the release has a suite (`add_bind_repo`).

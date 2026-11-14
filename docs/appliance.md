@@ -26,9 +26,7 @@ AppArmor stays on. Debian's profiles for BIND and chrony get Portitor's paths ad
    (`dd if=portitor-….iso of=/dev/sdX bs=4M`) and boot the machine from it. BIOS and
    UEFI both work.
 2. The Debian installer runs by itself. It asks which disk to install on and asks
-   before erasing it. It asks for network settings only when there is no DHCP. It
-   downloads the packages, so one interface needs Internet access during the
-   installation.
+   before erasing it. It needs no network: the packages are on the ISO.
 3. The machine reboots into the first-boot setup on the screen.
 
 The installed system also has a serial console on the first serial port (`ttyS0`,
@@ -59,9 +57,16 @@ watch). It asks for:
   LAN address as gateway and the DNS servers below (their IPv4 ones).
 - **WAN IPv4**: *DHCP* (the default), which also brings the default gateway, or
   *Static*, with the WAN address and its prefix length and the **default gateway**.
-- **DNS servers** the firewall itself uses, for updates and IP lists. The default is
-  `1.1.1.1 8.8.8.8`. They are written to `/etc/resolv.conf`; the agent does not change
-  that file, not even from the WAN's DHCP lease.
+- **DNS servers** the firewall itself uses, for updates and IP lists, up to three. Left
+  empty with DHCP on the WAN (or, without a WAN, on the LAN), the firewall uses the DNS
+  servers the ISP's DHCP server hands out, in its order, and follows them when the lease
+  changes; the setup asks the DHCP server once, to have DNS while it installs (`1.1.1.1
+  8.8.8.8` if none answers), and the agent takes over `/etc/resolv.conf` once the
+  configuration is deployed. Servers typed are used as they are. Either way the file is the
+  agent's from then on (the host's resolver, `resolver-servers` and `resolver-from-dhcp` on
+  the default virtual firewall, with the interface that has *Use DNS from DHCP*, the one
+  the DNS server's upstream uses too); it is left alone until there is a server to put in
+  it. A firewall installed before this keeps its `/etc/resolv.conf` as it is.
 - **Password**: for the user `portitor`, both in the GUI and as the console login,
   which has sudo.
 - **Time zone**: used by scheduled tasks.
@@ -201,6 +206,12 @@ On the primary, paste it at the end of the setup, or later with `sudo portitor-s
 two links, and commits the pair. Then set up an external witness for a failover by
 itself (see [The witness](ha.md#the-witness)).
 
+Each host of a pair prints a portal string too (`sudo portitor-setup --show-join`,
+with their management addresses), which a portal's `--join` takes: add both, with
+different host names, to the same portitor-web. It must be on the management network;
+the pair's hosts trust that network as `trusted_proxies`. See [Step by step from the
+ISO](ha.md#step-by-step-from-the-iso).
+
 ## Updates
 
 *Admin → Updates* updates the firewall. Nothing happens until you click a button.
@@ -244,8 +255,8 @@ commit from it would replace the firewall's configuration.
 
 ## Building the ISO
 
-`iso/build.sh` remasters Debian's netinst ISO. It needs `xorriso` and `curl`, and Go
-and npm to build Portitor from the source tree:
+`iso/build.sh` remasters Debian's netinst ISO. It needs `xorriso`, `curl` and `podman`
+(or `docker`), and Go and npm to build Portitor from the source tree:
 
 ```sh
 iso/build.sh                     # this tree -> build/portitor-<version>-amd64.iso
@@ -254,7 +265,12 @@ iso/build.sh --release v1.2.0    # a GitHub release instead
 
 It downloads the current Debian 13 netinst ISO (checked against Debian's SHA256SUMS)
 and caches it in `~/.cache/portitor-iso`. It adds `preseed.cfg`, the Portitor release
-archive and the first-boot setup to the ISO, and replaces the boot menus.
+archive and the first-boot setup to the ISO, and replaces the boot menus. It also adds
+a package repository, so that the installation needs no network: the packages of
+`iso/packages.txt` and everything they depend on, downloaded in a Debian 13 container
+(with ISC's BIND repository) and cached in `~/.cache/portitor-iso` while the list is
+unchanged (`--refresh-packages` downloads them again). The installed system has
+Debian's package sources for later updates.
 
 `iso/vm.sh` runs the ISO in QEMU with a WAN and a LAN interface, and forwards the GUI
 to `https://127.0.0.1:28443/`:

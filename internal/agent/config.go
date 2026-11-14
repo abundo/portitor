@@ -122,6 +122,7 @@ func (c *Config) applyDefaults() {
 		{&c.Paths.OpenVPNDir, def.OpenVPNDir},
 		{&c.Paths.ConntrackdConf, def.ConntrackdConf},
 		{&c.Paths.RsyslogConf, def.RsyslogConf},
+		{&c.Paths.ResolvConf, def.ResolvConf},
 		{&c.Paths.FRRDir, def.FRRDir},
 		{&c.Paths.FRRRunDir, def.FRRRunDir},
 		{&c.Paths.FRRStateDir, def.FRRStateDir},

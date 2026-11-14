@@ -744,6 +744,9 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 	if in.Syslog != nil {
 		v.syslog(p, in)
 	}
+	if in.Resolver != nil {
+		v.resolver(p, in, ifaces)
+	}
 	if in.DNS.DNS64 != "" {
 		if err := CheckNAT64Prefix(in.DNS.DNS64); err != nil {
 			v.addf("%s: dns64: %v", p, err)

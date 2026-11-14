@@ -106,6 +106,16 @@ submodule portitor-system {
         default "forward";
         description "Where the DNS server resolves what it isn't authoritative for: the forwarders, the root servers, or the DNS servers of the DHCP lease (fwconfig.Upstream*). A new virtual firewall gets root.";
       }
+      leaf-list resolver-servers {
+        type ip-address;
+        ordered-by user;
+        max-elements 3;
+        description "ResolverServers: the DNS servers of the host's own resolver (/etc/resolv.conf, fwconfig.Resolver), the default instance only; with resolver-from-dhcp they are used until the lease has DNS servers. Neither this nor resolver-from-dhcp: the file is not Portitor's.";
+      }
+      leaf resolver-from-dhcp {
+        type boolean;
+        description "ResolverFromDhcp: the host's resolver is the DNS servers of the DHCP lease of the interface with dns-from-dhcp, kept up to date as the lease changes. The default instance only.";
+      }
       leaf dns-dnssec-validation {
         type enumeration { enum "auto"; enum "no"; }
         default "auto";

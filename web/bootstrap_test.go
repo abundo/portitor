@@ -446,3 +446,73 @@ func TestBootstrapNoGUIPort(t *testing.T) {
 		t.Errorf("rules %+v, NAT %+v", in.Rules, in.NAT)
 	}
 }
+
+// The host's resolver follows the DHCP WAN's lease, with the servers given
+// until it has one; a reconfigure to a static WAN keeps only the servers.
+func TestBootstrapResolver(t *testing.T) {
+	env := newEnv(t)
+	fake := &applyAgent{statusAgent: statusAgent{nics: []agentapi.NICStatus{
+		{Name: "enp1s0", Addresses: []string{}},
+		{Name: "enp2s0", Addresses: []string{}},
+	}}}
+	env.srv.newAgent = func(*models.Firewall) (agentAPI, error) { return fake, nil }
+	o := BootstrapOptions{
+		AgentURL: "https://127.0.0.1:8443", AgentToken: strings.Repeat("t", 43), AgentFingerprint: strings.Repeat("ab", 32),
+		LAN: "enp2s0", Address: netip.MustParsePrefix("192.168.1.1/24"), WAN: "enp1s0", GUIPort: 443,
+		ResolverDHCP: true, ResolverDNS: []netip.Addr{netip.MustParseAddr("1.1.1.1")},
+	}
+	if _, err := Bootstrap(context.Background(), env.srv, o); err != nil {
+		t.Fatal(err)
+	}
+	r := fake.applied.Instances[0].Resolver
+	if r == nil || r.DHCPInterface != "enp1s0" || !slices.Equal(r.Servers, []string{"1.1.1.1"}) {
+		t.Fatalf("resolver %+v", r)
+	}
+
+	o.Reconfigure, o.AgentFingerprint, o.ResolverDHCP = true, "", false
+	o.WANAddress, o.Gateway = netip.MustParsePrefix("198.51.100.2/24"), netip.MustParseAddr("198.51.100.1")
+	if _, err := Bootstrap(context.Background(), env.srv, o); err != nil {
+		t.Fatal(err)
+	}
+	r = fake.applied.Instances[0].Resolver
+	if r == nil || r.DHCPInterface != "" || !slices.Equal(r.Servers, []string{"1.1.1.1"}) {
+		t.Fatalf("resolver after a static WAN %+v", r)
+	}
+
+	o.ResolverDHCP = true
+	if _, err := Bootstrap(context.Background(), env.srv, o); err == nil || !strings.Contains(err.Error(), "neither the WAN nor the LAN uses DHCP") {
+		t.Errorf("DHCP resolver without a DHCP interface: %v", err)
+	}
+}
+
+// Servers alone leave dns-from-dhcp as it is: the DNS server's upstream may use it.
+func TestBootstrapResolverServersKeepFlag(t *testing.T) {
+	env := newEnv(t)
+	fake := &applyAgent{statusAgent: statusAgent{nics: []agentapi.NICStatus{
+		{Name: "enp1s0", Addresses: []string{}},
+		{Name: "enp2s0", Addresses: []string{}},
+	}}}
+	env.srv.newAgent = func(*models.Firewall) (agentAPI, error) { return fake, nil }
+	o := BootstrapOptions{
+		AgentURL: "https://127.0.0.1:8443", AgentToken: strings.Repeat("t", 43), AgentFingerprint: strings.Repeat("ab", 32),
+		LAN: "enp2s0", Address: netip.MustParsePrefix("192.168.1.1/24"), WAN: "enp1s0", GUIPort: 443,
+		ResolverDHCP: true,
+	}
+	if _, err := Bootstrap(context.Background(), env.srv, o); err != nil {
+		t.Fatal(err)
+	}
+	o.Reconfigure, o.AgentFingerprint, o.ResolverDHCP = true, "", false
+	o.ResolverDNS = []netip.Addr{netip.MustParseAddr("9.9.9.9")}
+	if _, err := Bootstrap(context.Background(), env.srv, o); err != nil {
+		t.Fatal(err)
+	}
+	v, err := env.srv.view(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, i := range v.Interfaces {
+		if i.Name == "enp1s0" && !i.DnsFromDhcp {
+			t.Errorf("dns-from-dhcp was cleared by a resolver with servers only")
+		}
+	}
+}
