@@ -31,12 +31,37 @@ const form = reactive({
   timeout: 2,
   size: 56,
   payload: '',
+  name: '',
+  query: 'A',
+  expect: '',
+  path: '/',
 })
 const protocolItems = [
   { label: 'Ping (ICMP)', value: 'icmp' },
   { label: 'TCP connect', value: 'tcp' },
   { label: 'UDP', value: 'udp' },
+  { label: 'ARP ping', value: 'arp' },
+  { label: 'DNS query', value: 'dns' },
+  { label: 'HTTP', value: 'http' },
+  { label: 'HTTPS', value: 'https' },
 ]
+const queryTypes = [
+  'A',
+  'AAAA',
+  'CNAME',
+  'MX',
+  'NS',
+  'PTR',
+  'SOA',
+  'SRV',
+  'TXT',
+  'CAA',
+  'DS',
+  'DNSKEY',
+]
+// The protocols that take a port, and the one to start from.
+const defaultPort = { tcp: 443, udp: 53, dns: 53, http: 80, https: 443 }
+const hasPort = (p) => p in defaultPort
 const ifaceItems = computed(() => [
   { label: 'None (the routing table decides)', value: NONE },
   ...ifaceNames.value.map((n) => ({ label: ifaceText(n), value: n })),
@@ -50,12 +75,12 @@ watch(
   () => store.currentName,
   () => (form.interface = NONE),
 )
-// A port to start from per protocol: HTTPS, DNS.
+// A port to start from per protocol, unless the user changed it.
 watch(
   () => form.protocol,
-  (p) => {
-    if (p === 'tcp' && form.port === 53) form.port = 443
-    if (p === 'udp' && form.port === 443) form.port = 53
+  (p, old) => {
+    if (p in defaultPort && (!(old in defaultPort) || form.port === defaultPort[old]))
+      form.port = defaultPort[p]
   },
 )
 
@@ -118,6 +143,7 @@ function onEvent(ev) {
         rtt: ev.rtt_us != null ? ev.rtt_us / 1000 : null,
         from: ev.from ?? '',
         error: ev.error ?? '',
+        info: ev.info ?? '',
       }
       stats.sent++
       stats[p.status] = (stats[p.status] ?? 0) + 1
@@ -151,7 +177,7 @@ async function start() {
   lastTarget.value = form.target.trim()
   running.value = true
   controller = new AbortController()
-  const ports = form.protocol !== 'icmp'
+  const p = form.protocol
   try {
     const res = await fetch(apiURL('/agent/probe'), {
       method: 'POST',
@@ -163,12 +189,16 @@ async function start() {
         target: lastTarget.value,
         family: form.family === 'auto' ? '' : form.family,
         protocol: form.protocol,
-        port: ports ? Number(form.port) || 0 : 0,
+        port: hasPort(p) ? Number(form.port) || 0 : 0,
         count: Number(form.count) || 0,
         interval: Math.round(Number(form.interval) * 1000) || 0,
         timeout: Math.round(Number(form.timeout) * 1000) || 0,
         size: form.protocol === 'icmp' ? Number(form.size) || 0 : 0,
-        payload: form.protocol === 'udp' ? form.payload : '',
+        payload: p === 'udp' ? form.payload : '',
+        name: p === 'dns' ? form.name.trim() : '',
+        query: p === 'dns' ? form.query : '',
+        expect: p === 'dns' ? form.expect.trim() : '',
+        path: p === 'http' || p === 'https' ? form.path.trim() || '/' : '',
       }),
       signal: controller.signal,
     })
@@ -206,7 +236,9 @@ const canStart = computed(
     store.current &&
     auth.canEdit &&
     form.target.trim().length > 0 &&
-    (form.protocol === 'icmp' || (form.port >= 1 && form.port <= 65535)),
+    (!hasPort(form.protocol) || (form.port >= 1 && form.port <= 65535)) &&
+    (form.protocol !== 'arp' || form.interface !== NONE) &&
+    (form.protocol !== 'dns' || form.name.trim().length > 0),
 )
 
 const ms = (v) => (v == null ? '–' : v < 10 ? v.toFixed(2) : v < 100 ? v.toFixed(1) : v.toFixed(0))
@@ -237,16 +269,25 @@ const statusText = {
 }
 // What "ok" and "refused" mean differ by protocol.
 const okText = computed(
-  () => ({ icmp: 'Replies', tcp: 'Connected', udp: 'Answered' })[probed.value?.protocol] ?? 'OK',
+  () =>
+    ({
+      icmp: 'Replies',
+      tcp: 'Connected',
+      udp: 'Answered',
+      arp: 'Replies',
+      dns: 'Answered',
+      http: 'Responses',
+      https: 'Responses',
+    })[probed.value?.protocol] ?? 'OK',
 )
 const statusClass = (s) =>
   s === 'ok' ? 'text-success' : s === 'timeout' || s === 'error' ? 'text-error' : 'text-warning'
 const detail = (p) =>
   p.status === 'refused'
-    ? probed.value?.protocol === 'tcp'
+    ? ['tcp', 'http', 'https'].includes(probed.value?.protocol)
       ? 'reset: the port is closed'
       : 'port unreachable'
-    : [p.error, p.from && `from ${p.from}`].filter(Boolean).join(' ')
+    : [p.info, p.error, p.from && `from ${p.from}`].filter(Boolean).join(' ')
 
 // The probes table, newest first.
 const rows = computed(() => probes.value.toReversed())
@@ -318,10 +359,16 @@ function onMove(e) {
       <UFormField label="Test">
         <USelect v-model="form.protocol" :items="protocolItems" class="w-36" :disabled="running" />
       </UFormField>
-      <UFormField label="Source interface">
+      <UFormField
+        label="Source interface"
+        :title="form.protocol === 'arp' ? 'ARP asks on this interface\'s link' : ''"
+      >
         <USelect v-model="form.interface" :items="ifaceItems" class="w-64" :disabled="running" />
       </UFormField>
-      <UFormField label="Destination" class="min-w-64 flex-1">
+      <UFormField
+        :label="form.protocol === 'dns' ? 'DNS server' : 'Destination'"
+        class="min-w-64 flex-1"
+      >
         <UInput
           v-model="form.target"
           class="w-full font-mono"
@@ -334,12 +381,13 @@ function onMove(e) {
         </datalist>
       </UFormField>
       <UFormField
+        v-if="form.protocol !== 'arp'"
         label="IP version"
         title="For a named host or DNS name with both an IPv4 and an IPv6 address"
       >
         <USelect v-model="form.family" :items="familyItems" class="w-28" :disabled="running" />
       </UFormField>
-      <UFormField v-if="form.protocol !== 'icmp'" label="Port">
+      <UFormField v-if="hasPort(form.protocol)" label="Port">
         <UInput
           v-model.number="form.port"
           type="number"
@@ -348,6 +396,36 @@ function onMove(e) {
           class="w-24"
           :disabled="running"
         />
+      </UFormField>
+      <UFormField v-if="form.protocol === 'dns'" label="Query" title="The name to ask for">
+        <UInput
+          v-model="form.name"
+          class="w-56 font-mono"
+          placeholder="example.com"
+          :disabled="running"
+        />
+      </UFormField>
+      <UFormField v-if="form.protocol === 'dns'" label="Type">
+        <USelect v-model="form.query" :items="queryTypes" class="w-28" :disabled="running" />
+      </UFormField>
+      <UFormField
+        v-if="form.protocol === 'dns'"
+        label="Expected answer"
+        title="An answer the response must hold; empty accepts any response that is not an error"
+      >
+        <UInput
+          v-model="form.expect"
+          class="w-48 font-mono"
+          placeholder="any answer"
+          :disabled="running"
+        />
+      </UFormField>
+      <UFormField
+        v-if="form.protocol === 'http' || form.protocol === 'https'"
+        label="Path"
+        title="GET request path; the destination is sent as the Host"
+      >
+        <UInput v-model="form.path" class="w-40 font-mono" placeholder="/" :disabled="running" />
       </UFormField>
       <UFormField label="Count" title="How many probes; empty or 0 keeps going until Stop">
         <UInput
@@ -409,6 +487,18 @@ function onMove(e) {
       A UDP probe succeeds when the service answers the datagram; an ICMP port unreachable counts as
       refused. Many services ignore what they don't understand, so no answer may only mean the
       payload was wrong.
+    </p>
+
+    <p v-if="form.protocol === 'arp' && !running && !stats.sent" class="text-sm text-muted">
+      An ARP ping asks who has an IPv4 address on the source interface's link, so the host has to be
+      on that network. It works when pings are blocked, and bypasses the firewall's rules.
+    </p>
+    <p
+      v-if="(form.protocol === 'http' || form.protocol === 'https') && !running && !stats.sent"
+      class="text-sm text-muted"
+    >
+      Sends a GET and counts any HTTP response as OK, whatever its status; redirects are not
+      followed and the certificate is not checked.
     </p>
 
     <div v-if="running || stats.sent" class="flex items-center gap-2 text-sm text-muted">

@@ -8,6 +8,7 @@ import (
 	"net/netip"
 	"testing"
 
+	"github.com/miekg/dns"
 	"golang.org/x/net/icmp"
 	"golang.org/x/net/ipv4"
 	"golang.org/x/net/ipv6"
@@ -144,5 +145,84 @@ func TestProbeICMP(t *testing.T) {
 			}
 		}
 		p.conn.Close()
+	}
+}
+
+func TestNewProberApp(t *testing.T) {
+	in := &fwconfig.Instance{Name: "main", Interfaces: []fwconfig.Interface{{Name: "lan"}}}
+	ok := []agentapi.ProbeRequest{
+		{Target: "192.0.2.1", Protocol: "arp", Interface: "lan"},
+		{Target: "192.0.2.53", Protocol: "dns", Port: 53, Name: "_sip._tcp.example.com", Query: "srv", Expect: "x"},
+		{Target: "192.0.2.53", Protocol: "dns", Port: 53, Name: "1.2.0.192.in-addr.arpa.", Query: "ptr"},
+		{Target: "192.0.2.1", Protocol: "https", Port: 443, Name: "example.com", Path: "/a?b=c"},
+		{Target: "2001:db8::1", Protocol: "http", Port: 80, Name: "2001:db8::1"},
+	}
+	for _, r := range ok {
+		if _, err := newProber(in, &r); err != nil {
+			t.Errorf("%+v: %v", r, err)
+		}
+	}
+	for _, bad := range []agentapi.ProbeRequest{
+		{Target: "192.0.2.1", Protocol: "arp"},
+		{Target: "2001:db8::1", Protocol: "arp", Interface: "lan"},
+		{Target: "192.0.2.53", Protocol: "dns", Port: 53, Name: "a b"},
+		{Target: "192.0.2.53", Protocol: "dns", Port: 53, Name: "example.com", Query: "AXFR"},
+		{Target: "192.0.2.53", Protocol: "dns", Port: 53, Name: "example.com", Query: "NOPE"},
+		{Target: "192.0.2.1", Protocol: "http", Port: 80, Name: "example.com", Path: "x"},
+		{Target: "192.0.2.1", Protocol: "http", Port: 80, Name: "example.com", Path: "/a b"},
+		{Target: "192.0.2.1", Protocol: "http", Port: 80, Name: "bad host"},
+	} {
+		if _, err := newProber(in, &bad); err == nil {
+			t.Errorf("%+v accepted", bad)
+		}
+	}
+}
+
+func TestARPFrame(t *testing.T) {
+	mac := net.HardwareAddr{2, 0, 0, 0, 0, 1}
+	target := netip.MustParseAddr("192.0.2.1")
+	req := arpFrame(mac, netip.MustParseAddr("192.0.2.2"), target)
+	if len(req) != 42 || req[21] != 1 || !netip.AddrFrom4([4]byte(req[38:42])).IsValid() {
+		t.Fatalf("% x", req)
+	}
+	if _, ok := parseARPReply(target, req); ok {
+		t.Error("a request taken for a reply")
+	}
+	reply := append([]byte(nil), req...)
+	reply[21] = 2
+	copy(reply[22:28], []byte{2, 0, 0, 0, 0, 9})
+	copy(reply[28:32], []byte{192, 0, 2, 1})
+	if m, ok := parseARPReply(target, reply); !ok || m.String() != "02:00:00:00:00:09" {
+		t.Errorf("%v %v", m, ok)
+	}
+	if _, ok := parseARPReply(netip.MustParseAddr("192.0.2.7"), reply); ok {
+		t.Error("another host's reply taken")
+	}
+}
+
+func TestDNSMatches(t *testing.T) {
+	ans := []string{"192.0.2.1", "2001:db8:0::1", "Host.Example.COM.", `"v=spf1"`}
+	for _, w := range []string{"192.0.2.1", "2001:db8::1", "host.example.com", "v=spf1"} {
+		if !dnsMatches(ans, w) {
+			t.Errorf("%q not matched", w)
+		}
+	}
+	if dnsMatches(ans, "192.0.2.2") {
+		t.Error("matched a missing answer")
+	}
+}
+
+func TestDNSAnswers(t *testing.T) {
+	m := new(dns.Msg)
+	for _, s := range []string{"example.com. 60 IN A 192.0.2.1", "example.com. 60 IN MX 10 mail.example.com.", `example.com. 60 IN TXT "v=spf1"`} {
+		rr, err := dns.NewRR(s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		m.Answer = append(m.Answer, rr)
+	}
+	got := dnsAnswers(m)
+	if len(got) != 3 || got[0] != "192.0.2.1" || got[1] != "10 mail.example.com." || got[2] != `"v=spf1"` {
+		t.Errorf("%q", got)
 	}
 }

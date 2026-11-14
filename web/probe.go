@@ -13,7 +13,8 @@ import (
 	"github.com/abundo/portitor/internal/agentapi"
 )
 
-// handleAgentProbe runs a connectivity test (ICMP echo, TCP connect or UDP)
+// handleAgentProbe runs a connectivity test (ICMP echo, TCP connect, UDP,
+// ARP, DNS query, HTTP or HTTPS request)
 // on the agent and passes its events (JSON lines) to the browser as they
 // come. The target is an address, a named host or a DNS name, as for a
 // traceroute. The browser closing the request stops it.
@@ -25,8 +26,14 @@ func (s *Server) handleAgentProbe(c *echo.Context) error {
 	if !captureName.MatchString(req.Instance) || (req.Interface != "" && !captureName.MatchString(req.Interface)) {
 		return errJSON(c, http.StatusBadRequest, "invalid virtual firewall or interface name")
 	}
-	if req.Protocol != "icmp" && req.Protocol != "tcp" && req.Protocol != "udp" {
-		return errJSON(c, http.StatusBadRequest, "protocol must be icmp, tcp or udp")
+	switch req.Protocol {
+	case "icmp", "tcp", "udp", "dns", "http", "https":
+	case "arp":
+		if req.Interface == "" {
+			return errJSON(c, http.StatusBadRequest, "ARP needs a source interface")
+		}
+	default:
+		return errJSON(c, http.StatusBadRequest, "protocol must be icmp, tcp, udp, arp, dns, http or https")
 	}
 	if !currentAccess(c).isAdmin() {
 		if ok, err := s.allowInstanceName(c, req.Instance); !ok {
@@ -34,6 +41,9 @@ func (s *Server) handleAgentProbe(c *echo.Context) error {
 		}
 	}
 	target := req.Target
+	if req.Protocol == "http" || req.Protocol == "https" {
+		req.Name = target // the Host header and SNI, whatever address it is
+	}
 	addr, msg := s.traceTarget(req.Target, req.Family)
 	if msg != "" {
 		return errJSON(c, http.StatusBadRequest, msg)

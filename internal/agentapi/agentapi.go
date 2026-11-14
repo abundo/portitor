@@ -845,7 +845,9 @@ const (
 // ProbeRequest starts a connectivity test (POST /v1/probe) from the
 // instance's namespace: every Interval milliseconds, Count times (0: until
 // the client disconnects, at most ProbeMaxTime), an ICMP echo, a TCP
-// connect to Port, or a UDP datagram to Port that waits for an answer. The
+// connect to Port, a UDP datagram to Port that waits for an answer, an ARP
+// request on Interface (IPv4, on the link), a DNS query to the server Target
+// on Port, or an HTTP or HTTPS GET of Path from Target on Port. The
 // answer is a stream of ProbeEvents, one JSON object per line. An error
 // before the first probe is a JSON ErrorResponse.
 type ProbeRequest struct {
@@ -857,8 +859,8 @@ type ProbeRequest struct {
 	// resolves in the instance's namespace (of Family, if given).
 	Target   string `json:"target"`
 	Family   string `json:"family,omitempty"`   // "", "ipv4" or "ipv6"
-	Protocol string `json:"protocol"`           // "icmp", "tcp" or "udp"
-	Port     int    `json:"port,omitempty"`     // tcp and udp
+	Protocol string `json:"protocol"`           // "icmp", "tcp", "udp", "arp", "dns", "http" or "https"
+	Port     int    `json:"port,omitempty"`     // tcp, udp, dns, http and https
 	Count    int    `json:"count,omitempty"`    // probes; 0 until stopped
 	Interval int    `json:"interval,omitempty"` // ms; 0 is ProbeDefaultInterval
 	Timeout  int    `json:"timeout,omitempty"`  // ms; 0 is ProbeDefaultTimeout
@@ -866,6 +868,17 @@ type ProbeRequest struct {
 	Size int `json:"size,omitempty"`
 	// Payload is what a UDP probe sends (may be empty).
 	Payload string `json:"payload,omitempty"`
+	// Name is what a DNS probe asks for (Query is its record type, "A" by
+	// default) and, for an HTTP or HTTPS probe, the host name for the Host
+	// header and SNI (the portal fills it in with the typed destination; the
+	// connection goes to Target).
+	Name  string `json:"name,omitempty"`
+	Query string `json:"query,omitempty"`
+	// Expect is an answer a DNS probe must get (any record of the answer
+	// equal to it); empty counts any answer without an error code.
+	Expect string `json:"expect,omitempty"`
+	// Path is an HTTP or HTTPS probe's request path ("/" by default).
+	Path string `json:"path,omitempty"`
 }
 
 // ProbeEvent is the address probed ("target", first, with the protocol and
@@ -874,7 +887,9 @@ type ProbeRequest struct {
 // answer; RTTus is its round trip), "refused" (a TCP reset or an ICMP port
 // unreachable: the host answers, the port is closed; RTTus too),
 // "unreachable" (an ICMP error from From, with Error saying which), "timeout"
-// or "error" (the probe could not be sent). Probes are numbered from 1 (Seq)
+// or "error" (the probe could not be sent, or a DNS answer was an error or
+// not the expected one). Info is what an ok probe learned: the MAC address
+// that answered an ARP request, a DNS answer, an HTTP status line. Probes are numbered from 1 (Seq)
 // and At is when one was sent (Unix milliseconds); results may come out of
 // order when the timeout is longer than the interval.
 type ProbeEvent struct {
@@ -888,6 +903,7 @@ type ProbeEvent struct {
 	RTTus    int64  `json:"rtt_us,omitempty"`
 	From     string `json:"from,omitempty"`
 	Error    string `json:"error,omitempty"`
+	Info     string `json:"info,omitempty"`
 }
 
 // Connectivity test limits, enforced by the agent.
@@ -900,6 +916,8 @@ const (
 	ProbeDefaultSize     = 56
 	ProbeMaxSize         = 9000
 	ProbeMaxPayload      = 1400
+	ProbeMaxExpect       = 255
+	ProbeMaxPath         = 1024
 	ProbeMaxCount        = 100000
 	// ProbeMaxTime ends any test, counted or not.
 	ProbeMaxTime = 24 * time.Hour

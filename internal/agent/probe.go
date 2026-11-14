@@ -31,7 +31,8 @@ import (
 // probes counts the running connectivity tests (agentapi.ProbeMaxSessions).
 var probes atomic.Int32
 
-// handleProbe sends ICMP echoes, TCP connects or UDP datagrams from the
+// handleProbe sends ICMP echoes, TCP connects, UDP datagrams, ARP requests,
+// DNS queries or HTTP requests from the
 // instance's namespace at an interval and streams each one's result as an
 // agentapi.ProbeEvent, one JSON line each. The sockets are the agent's own,
 // opened in the namespace (withNetns). The client disconnecting stops it.
@@ -56,6 +57,9 @@ func (a *Agent) handleProbe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ns := in.NetnsName()
+	if (req.Protocol == "http" || req.Protocol == "https") && req.Name == "" {
+		req.Name = req.Target // the Host header and SNI; the address is dialed
+	}
 	if _, err := netip.ParseAddr(req.Target); err != nil {
 		if len(req.Target) > 253 || !dnsName.MatchString(req.Target) {
 			writeError(w, http.StatusBadRequest, fmt.Errorf("target %q is not an IP address or a DNS name", req.Target))
@@ -82,8 +86,15 @@ func (a *Agent) handleProbe(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithTimeout(r.Context(), agentapi.ProbeMaxTime)
 	defer cancel()
-	if p.proto == "icmp" {
+	switch p.proto {
+	case "icmp":
 		if err := p.listen(ctx); err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		defer p.conn.Close()
+	case "arp":
+		if err := p.listenARP(ctx); err != nil {
 			writeError(w, http.StatusInternalServerError, err)
 			return
 		}
@@ -145,9 +156,20 @@ type prober struct {
 	timeout  time.Duration
 	size     int
 	payload  []byte
+	// DNS: the name, record type and expected answer; HTTP: the Host name
+	// and path.
+	name   string
+	qtype  uint16
+	expect string
+	path   string
+	// ARP: the interface's index, its address and the sender's IPv4
+	// address, and the requests waiting for an answer.
+	ifi      *net.Interface
+	senderIP netip.Addr
+	arpWait  []chan arpAnswer
 
-	// ICMP: the raw socket, the echo id and the echoes waiting for an
-	// answer, by sequence number.
+	// ICMP and ARP: the raw socket; ICMP: the echo id and the echoes waiting
+	// for an answer, by sequence number.
 	conn    net.PacketConn
 	id      int
 	mu      sync.Mutex
@@ -163,13 +185,23 @@ func newProber(in *fwconfig.Instance, req *agentapi.ProbeRequest) (*prober, erro
 	p := &prober{netns: in.NetnsName(), proto: req.Protocol, addr: addr.Unmap()}
 	switch req.Protocol {
 	case "icmp":
-	case "tcp", "udp":
+	case "tcp", "udp", "dns", "http", "https":
 		if req.Port < 1 || req.Port > 65535 {
 			return nil, fmt.Errorf("port %d is not 1-65535", req.Port)
 		}
 		p.port = req.Port
+		if err := p.setupApp(req); err != nil {
+			return nil, err
+		}
+	case "arp":
+		if !p.addr.Is4() {
+			return nil, errors.New("ARP needs an IPv4 address")
+		}
+		if req.Interface == "" {
+			return nil, errors.New("ARP needs a source interface")
+		}
 	default:
-		return nil, fmt.Errorf("protocol %q is not icmp, tcp or udp", req.Protocol)
+		return nil, fmt.Errorf("protocol %q is not icmp, tcp, udp, arp, dns, http or https", req.Protocol)
 	}
 	if req.Interface != "" {
 		if in.Interface(req.Interface) == nil {
@@ -234,6 +266,12 @@ func (p *prober) probe(ctx context.Context, seq int) agentapi.ProbeEvent {
 		p.connect(ctx, &ev)
 	case "udp":
 		p.datagram(ctx, &ev)
+	case "arp":
+		p.arp(ctx, &ev)
+	case "dns":
+		p.dnsQuery(ctx, &ev)
+	case "http", "https":
+		p.httpGet(ctx, &ev)
 	}
 	return ev
 }
