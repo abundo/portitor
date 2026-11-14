@@ -51,11 +51,115 @@ forwards. Either host can be active; a failover changes no configuration.
   hung agent but not a hung kernel; on Proxmox, add the `i6300esb` watchdog device.
 - **conntrackd** on both (`install.py` installs it).
 
+## Step by step from the ISO
+
+Three machines, set up in this order. The two firewalls come first, the portal last,
+because it needs both firewalls' fingerprints and the witness string. Every machine
+is installed from the same [installer ISO](appliance.md); the first-boot setup asks
+what it is.
+
+**Before you start.** Cable the HA link between the two firewalls, and put both
+*management* interfaces (and the portal's second interface) on the same management
+network. Both firewalls need the same interface names. Note the management address of
+each host.
+
+1. **Install the primary.** At first boot pick the machine type *primary*. It asks, besides the
+   usual, for the *management* interface, its address and gateway (optional: left empty,
+   the secondary uses the primary as its gateway, `peer` below), and the *HA link*
+   interface (no address). Choose a password for the user `portitor`: it is the
+   password of the GUI and of the console and SSH on this host. Wait for the setup to
+   finish: it ends by asking for a secondary string. Choose *Later* for now.
+2. **Install the secondary.** Pick *secondary*. It asks only for its management
+   interface, address and gateway (optional, as on the primary), and its HA link. At the end it shows a **secondary
+   string** (`portitor-secondary:...`). It holds the secondary's agent token: keep it
+   to yourself. `sudo portitor-setup --show-join` on the secondary shows it again.
+3. **Add the secondary to the primary.** Paste the string into the primary's setup,
+   or log in on the primary (`ssh portitor@<primary management address>`) and run:
+
+   ```
+   sudo portitor-setup --join
+   ```
+
+   and paste it when asked. This adds the secondary under *Admin → Firewalls* and
+   commits the pair. Check it with `portitor show ha` on either host.
+4. **Log in.** The GUI is `https://<management address>/` on either host, user
+   `portitor`, with the **primary's** password: the secondary's portitor-config is a
+   read-only copy of the primary's database, so the primary's users apply on both.
+   Configure the pair (rules, interfaces, services) on the primary only.
+5. **Install the portal (and witness).** Pick *web*, with the two interfaces (one on
+   the management network). At the end choose *Later*: the pair's hosts are added
+   next, one at a time.
+6. **Add both firewalls to the portal.** Each host of a pair prints a **portal
+   string** (`portitor-portal:...`): on each firewall run
+
+   ```
+   sudo portitor-setup --show-join
+   ```
+
+   (on the secondary it prints the secondary string too; the portal string is the
+   last part). Then on the portal host, once for each string:
+
+   ```
+   sudo portitor-setup --join
+   ```
+
+   and paste it when asked, or `sudo portitor-setup --join <portal string>`. The
+   strings name the hosts by their **host names**, which must differ (a portal keeps
+   one entry per name: the second would replace the first). They hold each host's
+   management address, GUI port (443) and certificate fingerprint, and no secret.
+   Each firewall already trusts the management network for `trusted_proxies`, so the
+   portal needs an address there.
+7. **Check.** On the portal host:
+
+   ```
+   portitor-web check                      # both must answer
+   ```
+
+   `does not answer` means the portal cannot reach the firewall's GUI: a wrong
+   address, or a portal that is not on the management network. The firewall's ruleset
+   lets the management interface reach SSH and the GUI, not ping, so a failed ping
+   proves nothing.
+
+   Without the ISO (`install.py`), add each host under `firewalls:` in
+   `/etc/portitor/web.yaml` by hand (`url: https://<management address>:443`,
+   `fingerprint` from `portitor-config fingerprint` on the host), and put the portal's
+   address in `trusted_proxies` in the host's `/etc/portitor/config.yaml`
+   (`sudo systemctl restart portitor-config`).
+8. **Let both logins work as one.** In the primary's GUI, under *Admin → Firewalls*,
+   check that each host has its *portitor-config URL* (`https://<management address>:443`)
+   and *fingerprint*. The portal uses them to know the two hosts are a pair and to
+   share the login. The setup fills them in on its own; check them if the login on the
+   portal asks again for the other host.
+9. **The witness, for automatic failover.** In the primary's GUI, under *Admin →
+   Firewalls*, set *HA witness* to *External* on the primary and commit. Then on the
+   primary run `portitor-config witness-string` (or copy the *Witness string* from the
+   form) and put it into the portal's `/etc/portitor/web.yaml`:
+
+   ```yaml
+   witness:
+     - portitor-witness:eyJwYWlyIjoi...
+   ```
+
+   Restart `portitor-web`. The portal is now the pair's witness. Without this step the
+   pair works, but if the primary fails the secondary stays closed until you open it
+   by hand (see [The witness](#the-witness)).
+10. **Open the portal** at `https://<portal address>/`. Log in at each firewall with
+    `portitor` and the primary's password.
+
+**If the login says "wrong username or password"** on a host where the console
+password works: the console login (a system account) and the GUI login (portitor-config's
+database) are separate. Set the GUI password again on the primary:
+
+```
+sudo -u portitor portitor-config createadmin portitor
+```
+
+The secondary follows within about 15 seconds.
+
 ## Setting up a pair
 
-From the installer ISO, choose *primary* and *secondary* as the machine types: the
-setup does the steps below ([An HA pair from the ISO](appliance.md#an-ha-pair-from-the-iso)).
-By hand, everything is done in the primary's portitor-config.
+By hand, or with the ISO, everything is done in the primary's portitor-config; the ISO's
+steps are listed above.
 
 1. **The two links.** On the primary's host, under *Network → Interfaces*, give one
    physical interface the *HA role* *HA link* and another *Management*. The HA link

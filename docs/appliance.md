@@ -37,18 +37,27 @@ where copy and paste work, unlike in the noVNC console.
 
 ## First-boot setup
 
-The setup is a text UI of a few pages, with *Back* and *Next* (Tab moves between
-fields, Enter goes on, Escape goes back). It first asks for the **keyboard layout**:
-pick one from the list, or type to search the layout names and codes (e.g. `se`). It
-applies at once, so the password is typed with it.
+The setup is a text UI with its steps in a list on the left and the selected step's
+form on the right. *Back* and *Next* move between steps, as do F7 and F8; Tab
+moves between fields, Enter goes on, Escape goes to the step list, and F10 jumps to
+the last step, *Apply*, where it applies. A step in the list shows a check once its
+answers are taken, and a lock until you have reached it. The pane you are in has the
+accent-coloured border, and a line under each form says which keys work there.
 
-Next it asks what the machine runs (see [Firewall and portal on separate hosts](#firewall-and-portal-on-separate-hosts)). The network
-page lists the network interfaces with their MAC addresses and whether a cable is
-plugged in (*Reload interfaces* updates the list, so you can plug cables in and
-watch). It asks for:
+1. **Keyboard layout**: pick one from the list, or type to search the layout names
+   and codes (e.g. `se`). It applies at once, so the password is typed with it.
+2. **Machine type**: what the machine runs (see [Firewall and portal on separate hosts](#firewall-and-portal-on-separate-hosts)).
+3. **Interfaces**: the network interfaces are in one column with their MAC addresses
+   and whether a cable is plugged in (*Reload interfaces* updates the list, so you can
+   plug cables in and watch); the roles of the machine type (*WAN*, *LAN*, and for an
+   HA pair *Management* and *HA link*) are in the other. Pick an
+   interface with the arrow keys and press the role's number to give it that role (the
+   role then shows after the interface). A role replaces the interface's old one, and is
+   taken from another interface that had it. Delete clears the picked interface's role. The *LAN* is where you reach the
+   GUI from; the *WAN* is where the firewall reaches the Internet, for updates and IP lists.
+4. **Addresses**: for each interface of step 3 (the *Addresses* page names them), and
+   for the rest:
 
-- **LAN interface**: where you reach the GUI from.
-- **WAN interface**: where the firewall reaches the Internet, for updates and IP lists.
 - **LAN IPv4**: *Static* (the default), with the LAN address and its prefix
   length, e.g. `192.168.1.1/24`, or *DHCP*. A DHCP LAN takes no default route from its
   lease; the default route belongs to the WAN.
@@ -162,8 +171,11 @@ secret. Log in over SSH (`ssh portitor@<LAN address>`) and run `sudo portitor-se
 --show-join`, which prints it as plain text, to copy it.
 
 **The portal (web).** The setup asks for the host's interface, DHCP or a static
-address with its default gateway, the DNS servers, the password for the console user
-`portitor`, and the time zone. The interface is configured in `/etc/network/interfaces`
+address with its default gateway (the *Firewalls* interface, which reaches the
+firewalls), optionally a second interface, the *Portal LAN*, with DHCP or a static
+address and no gateway, where users browse the portal (it listens on every address,
+and its address is the one the login screen shows), the DNS servers, the password for
+the console user `portitor`, and the time zone. The interfaces are configured in `/etc/network/interfaces`
 and portitor-agent and portitor-config are disabled: this host has no firewall and no
 users of its own. At the end, paste a firewall's portal string and choose *Add*, or
 choose *Later*: log in over SSH and run `sudo portitor-setup --join` (it asks), or
@@ -185,7 +197,8 @@ Two more machine types set up an [HA pair](ha.md):
   the rest.
 
 Both ask, besides the usual, for the **management** interface, its address and its
-gateway (what the host itself uses while it is the standby), and the **HA link**
+gateway (what the host itself uses while it is the standby; optional: left empty, the
+other host of the pair is the gateway, see [HA](ha.md#the-management-gateway)), and the **HA link**
 interface, which needs no address: the hosts use the IPv6 link-local addresses
 `fe80::1` (primary) and `fe80::2` (secondary) on it. The two networks must not share a switch.
 

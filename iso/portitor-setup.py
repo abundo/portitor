@@ -33,8 +33,14 @@ or LAN, offers, which the firewall then follows as its lease changes), a passwor
 Every step can be repeated; a failed one is retried with the same answers.
 
 The text UI has the steps in a list on the left and the form of the selected
-one on the right; Up and Down in the list switch step, Enter or Tab move into
-the form, Escape back to the list. Run again, every step is open at once.
+one on the right: keyboard layout, machine type, interfaces (the NICs in one
+column, the roles WAN, LAN, management, HA link in another, numbered:
+arrows pick a NIC, a digit gives it that role), addresses (or
+DHCP) of those interfaces, account, apply. Up and Down in the list switch step,
+Enter or Tab move into the form, Escape back to the list; F8 and F7 go
+to the next and previous step, F10 to the last step, where it applies. A step
+shows done (a check) once its answers are taken, locked until it is reached.
+Run again, every step is open at once.
 
 Split setups: the setup first asks what the machine runs. A firewall always
 keeps its configuration itself (portitor-config); portitor-web on another
@@ -93,7 +99,8 @@ finished. role (both, agent or web) picks the split setups; agent reads
 web_from (portitor-web's address or network, default the LAN network), web
 reads lan and address (its own interface), gateway and join (a portal
 string, optional). primary and secondary read mgmt (a name or MAC address),
-mgmt_address, mgmt_gateway and ha_link (no address: the hosts use IPv6
+mgmt_address, mgmt_gateway (optional: empty, the other host of the pair is the
+gateway) and ha_link (no address: the hosts use IPv6
 link-local addresses on it); primary may read join (a
 secondary string), and secondary needs no lan or address.
 """
@@ -120,6 +127,7 @@ import urllib.request
 from pathlib import Path
 from typing import Callable
 
+from rich.cells import cell_len
 from textual import events, on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -352,6 +360,12 @@ def check_gateway(text: str, addr: ipaddress.IPv4Interface) -> ipaddress.IPv4Add
     if gw not in addr.network or gw == addr.ip:
         raise ValueError(f"must be another address in {addr.network}")
     return gw
+
+
+def check_mgmt_gateway(text: str, addr: ipaddress.IPv4Interface) -> ipaddress.IPv4Address | None:
+    """The management gateway, optional: empty is the other host of the pair
+    (the open one forwards for the closed one)."""
+    return check_gateway(text, addr) if text.strip() else None
 
 
 def check_dhcp_range(text: str, addr: ipaddress.IPv4Interface) -> tuple[ipaddress.IPv4Address, ipaddress.IPv4Address]:
@@ -600,7 +614,8 @@ def ha_interface(instance: str, nic: str, role: str, address: str = "", gateway:
     if address:
         body["addresses"], body["ipv4-mode"] = [address], "static"
     if role == "management":
-        body["ha-gateway"] = gateway
+        # Empty: the other host of the pair is the gateway.
+        body["ha-gateway"] = gateway or "peer"
     if not any(i.get("name") == nic for i in interfaces(instance)):
         body["kind"] = "physical"
     api("PATCH", cfg_path(entry("instance", instance), entry("interface", nic)), body)
@@ -618,7 +633,7 @@ def step_ha_primary(a: dict) -> None:
     and the witness."""
     inst = default_instance()
     ha_interface(inst, a["ha_link"], "ha_link", description="HA link")
-    ha_interface(inst, a["mgmt"], "management", str(a["mgmt_address"]), str(a["mgmt_gateway"]), "Management")
+    ha_interface(inst, a["mgmt"], "management", str(a["mgmt_address"]), str(a["mgmt_gateway"] or ""), "Management")
     # The GUI and SSH from the management network, as from the LAN.
     rules_path = cfg_path(entry("instance", inst), "rule")
     rules = api("GET", rules_path) or []
@@ -676,6 +691,10 @@ def step_ha_network(a: dict) -> None:
     """Secondary role: its management address and HA link until the pair's
     first commit (the agent's then), so the primary reaches its agent."""
     mgmt, ha = a["mgmt"], a["ha_link"]
+    # Without a gateway the primary is it, which this host doesn't know yet:
+    # no route until the first commit.
+    gateway_line = (f"ExecStart=-/usr/sbin/ip route replace default via {a['mgmt_gateway']} dev {mgmt} proto 99\n"
+                    if a["mgmt_gateway"] else "")
     write(HA_NET_UNIT, f"""# Written by the Portitor setup: this HA secondary's management address and
 # HA link until the pair's first commit, when portitor-agent takes them over.
 [Unit]
@@ -690,8 +709,7 @@ ExecStart=/usr/sbin/ip link set {mgmt} up
 ExecStart=/usr/sbin/ip addr replace {a['mgmt_address']} dev {mgmt}
 ExecStart=/usr/sbin/ip link set {ha} up
 ExecStart=/usr/sbin/ip addr replace {HA_LINK_SECONDARY} dev {ha} nodad
-ExecStart=-/usr/sbin/ip route replace default via {a['mgmt_gateway']} dev {mgmt} proto 99
-
+{gateway_line}
 [Install]
 WantedBy=multi-user.target
 """, 0o644)
@@ -778,7 +796,8 @@ def step_cert(a: dict) -> None:
     names = [host, host.split(".", 1)[0], "fw", "fw.home.arpa"]
     dns = ",".join(f"DNS:{n}" for n in dict.fromkeys(names))
     # A DHCP LAN has no fixed address to name.
-    san = f"IP:{a['address'].ip},{dns}" if a["address"] else dns
+    ips = [str(x.ip) for x in (a["address"], a.get("portal_address")) if x]
+    san = ",".join([f"IP:{i}" for i in ips] + [dns])
     run([
         "openssl", "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1",
         "-nodes", "-days", "3650", "-subj", f"/CN={host}",
@@ -957,11 +976,18 @@ def step_host_network(a: dict) -> None:
             stanza += f"    gateway {a['gateway']}\n"
     else:
         stanza = f"iface {nic} inet dhcp\n"
+    # The portal LAN, where users browse the portal: no default gateway
+    # (a DHCP lease's has a worse metric).
+    portal = a.get("portal") or ""
+    if portal:
+        stanza += f"\nauto {portal}\n"
+        stanza += (f"iface {portal} inet static\n    address {a['portal_address']}\n" if a.get("portal_address")
+                   else f"iface {portal} inet dhcp\n    metric 200\n")
     # The old configuration (run again), then a clean slate.
     run(["ifdown", "--force", "-a"], check=False, quiet=True)
     for n in nics():
         run(["ip", "addr", "flush", "dev", n["name"]], check=False, quiet=True)
-        if n["name"] != nic:
+        if n["name"] not in (nic, portal):
             run(["ip", "link", "set", n["name"], "down"], check=False, quiet=True)
     write(NET_INTERFACES, f"""# Written by the Portitor setup: portitor-web only; no agent runs here.
 auto lo
@@ -970,7 +996,7 @@ iface lo inet loopback
 auto {nic}
 {stanza}""", 0o644)
     # ifdown -a took lo down too.
-    run(["ifup", "lo", nic])
+    run(["ifup", "lo", nic] + ([portal] if portal else []))
 
 
 def step_no_agent(a: dict) -> None:
@@ -1069,12 +1095,14 @@ def dhcp_address(nic: str, wait: int = 30) -> str:
 def step_issue(a: dict) -> None:
     fp = run(["openssl", "x509", "-in", str(WEB_CERT), "-noout", "-fingerprint", "-sha256"], quiet=True).stdout
     fp = fp.strip().split("=", 1)[-1]
-    if a["address"]:
-        host = issue_host = str(a["address"].ip)
+    # The portal's users browse it on the portal LAN, if it has one.
+    nic, addr = (a["portal"], a.get("portal_address")) if a.get("portal") else (a["lan"], a["address"])
+    if addr:
+        host = issue_host = str(addr.ip)
     else:
-        # agetty shows the LAN's current address.
-        host = dhcp_address(a["lan"]) or f"<the DHCP address of {a['lan']}>"
-        issue_host = "\\4{" + a["lan"] + "}"
+        # agetty shows the current address.
+        host = dhcp_address(nic) or f"<the DHCP address of {nic}>"
+        issue_host = "\\4{" + nic + "}"
     a["url"], a["cert_fp"] = f"https://{host}/", fp
     write(ISSUE, f"""Portitor firewall. GUI: https://{issue_host}/ (user {GUI_USER})
 Certificate SHA-256: {fp}
@@ -1218,8 +1246,11 @@ def read_answers() -> dict:
         "join": raw.get("join", ""),
         "mgmt": nic("mgmt") if ha else "",
         "mgmt_address": ipaddress.IPv4Interface(raw["mgmt_address"]) if ha else None,
-        "mgmt_gateway": ipaddress.IPv4Address(raw["mgmt_gateway"]) if ha else None,
+        "mgmt_gateway": ipaddress.IPv4Address(raw["mgmt_gateway"]) if ha and raw.get("mgmt_gateway") else None,
         "ha_link": nic("ha_link") if ha else "",
+        "portal": nic("portal") if raw.get("portal") and role == "web" else "",
+        "portal_address": (ipaddress.IPv4Interface(raw["portal_address"])
+                           if raw.get("portal_address") and role == "web" else None),
     }
     if role == "secondary":
         a["wan"], a["wan_address"] = "", None
@@ -1260,7 +1291,7 @@ def load_state() -> dict:
 def state_of(a: dict) -> dict:
     """The answers as strings, without the password; a DHCP LAN is "dhcp"."""
     state = {k: str(a[k]) if a.get(k) else "" for k in ("role", "lan", "wan", "wan_address", "gateway", "tz", "hostname", "keyboard", "web_from",
-                                                         "mgmt", "mgmt_address", "mgmt_gateway", "ha_link")}
+                                                         "mgmt", "mgmt_address", "mgmt_gateway", "ha_link", "portal", "portal_address")}
     state["address"] = str(a["address"] or "dhcp")
     state["dns"] = " ".join(a["dns"])
     state["dhcp_range"] = fmt_range(a.get("dhcp_range"))
@@ -1281,6 +1312,7 @@ def answers_of(state: dict) -> dict:
         "mgmt": state.get("mgmt", ""), "mgmt_address": iface("mgmt_address"),
         "mgmt_gateway": ipaddress.IPv4Address(state["mgmt_gateway"]) if state.get("mgmt_gateway") else None,
         "ha_link": state.get("ha_link", ""),
+        "portal": state.get("portal", ""), "portal_address": iface("portal_address"),
     }
 
 
@@ -1317,12 +1349,14 @@ def nic_label(name: str) -> str:
 def summary(a: dict) -> list[str]:
     out = [f"Runs            {a['role']}: {dict(ROLES)[a['role']]}"]
     if a["role"] == "secondary":
-        out += [f"Management      {nic_label(a['mgmt'])} {a['mgmt_address']}, gateway {a['mgmt_gateway']}",
+        out += [f"Management      {nic_label(a['mgmt'])} {a['mgmt_address']}, gateway {a['mgmt_gateway'] or 'the other host'}",
                 f"HA link         {nic_label(a['ha_link'])}"]
     elif a["role"] == "web":
-        out += [f"Interface       {nic_label(a['lan'])}",
+        out += [f"Firewalls       {nic_label(a['lan'])}",
                 f"Address         {a['address'] or 'DHCP'}",
                 f"Default gateway {a['gateway'] or 'from DHCP'}"]
+        if a.get("portal"):
+            out.append(f"Portal LAN      {nic_label(a['portal'])} {a.get('portal_address') or 'DHCP'}")
     else:
         out += [f"WAN interface   {nic_label(a['wan'])}",
                 f"WAN address     {a['wan_address'] or ('DHCP (no default route)' if route_from(a) == 'lan' else 'DHCP')}",
@@ -1333,7 +1367,7 @@ def summary(a: dict) -> list[str]:
         if a["role"] == "agent":
             out.append(f"portitor-web    {a['web_from']}")
         if a["role"] == "primary" and a.get("mgmt"):
-            out += [f"Management      {nic_label(a['mgmt'])} {a['mgmt_address']}, gateway {a['mgmt_gateway']}",
+            out += [f"Management      {nic_label(a['mgmt'])} {a['mgmt_address']}, gateway {a['mgmt_gateway'] or 'the other host'}",
                     f"HA link         {nic_label(a['ha_link'])}"]
     out += [f"DNS servers     {' '.join(a['dns']) or 'from DHCP'}",
             f"Host name       {a['hostname']}",
@@ -1435,22 +1469,33 @@ def intro(role: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+HELP_FORM = "Tab: next field · F8: next step · Esc: step list"
+# The step list's marks; the Linux console's font has no ✓.
+LINUX_CONSOLE = os.environ.get("TERM") == "linux"
+MARK_DONE = "+" if LINUX_CONSOLE else "✓"
+MARK_LOCKED = "x" if LINUX_CONSOLE else "\U0001f512"
+
+# The interfaces each machine type needs, in the order of the roles' numbers.
+NIC_ROLES = {
+    "both": [("wan", "WAN"), ("lan", "LAN")],
+    "agent": [("wan", "WAN"), ("lan", "LAN")],
+    "web": [("lan", "Firewalls"), ("portal", "Portal LAN")],
+    "primary": [("wan", "WAN"), ("lan", "LAN"), ("mgmt", "Management"), ("ha_link", "HA link")],
+    "secondary": [("mgmt", "Management"), ("ha_link", "HA link")],
+}
+TAGS = {"Management": "Mgmt", "HA link": "HA"}  # on the interface's line, which is short
+NIC_KEYS = ("wan", "lan", "mgmt", "ha_link", "portal")
+OPTIONAL_ROLES = ("portal",)  # a role that may stay without an interface
+
+
+def nic_roles(role: str, reconfigure: bool) -> list[tuple[str, str]]:
+    """The roles to give interfaces. Run again, an HA pair's HA link and
+    management stay as they are."""
+    return [(k, t) for k, t in NIC_ROLES[role] if not (reconfigure and k in ("mgmt", "ha_link"))]
+
+
 def row(label: str, widget: Widget) -> Horizontal:
     return Horizontal(Label(label, classes="label"), widget, classes="row")
-
-
-def nic_options() -> list[tuple[str, str]]:
-    return [(f"{n['name']:<16} {n['mac']:<18} {'link' if n['carrier'] else 'no link':<8} {n['driver']} {n['speed']}".rstrip(),
-             n["name"]) for n in nics()]
-
-
-def set_nic_options(select: Select, default: str) -> None:
-    """Fills select with the interfaces, keeping its choice (or default)."""
-    current = default if select.is_blank() else select.value
-    options = nic_options()
-    select.set_options(options)
-    if any(v == current for _, v in options):
-        select.value = current
 
 
 class Page(VerticalScroll):
@@ -1462,11 +1507,14 @@ class Page(VerticalScroll):
     next_label = "Next"
     primary = ""  # selector of the widget that takes the focus
     first = False
+    # The one line under the form; a page with its own keys says them here.
+    help = HELP_FORM
 
     def compose(self) -> ComposeResult:
+        self.border_title = self.title
         yield Static(self.heading, classes="heading")
         yield from self.body()
-        yield Label("", id="keyhelp")
+        yield Label(self.help, id="keyhelp")
         yield Label("", id="error")
         with Horizontal(id="buttons"):
             yield from self.buttons()
@@ -1495,6 +1543,9 @@ class Page(VerticalScroll):
         except ValueError as exc:
             raise ValueError(f"{name}: {exc}") from None
 
+    def on_show(self) -> None:
+        """The page is shown (again): refresh what the earlier pages decide."""
+
     def save(self) -> None:
         """Takes the answers into self.a; ValueError says what is wrong."""
 
@@ -1505,13 +1556,11 @@ class Page(VerticalScroll):
         """Says how the focused widget is used: a list opens on Enter, not on arrival."""
         w = event.widget
         if isinstance(w, Select):
-            text = "Enter or \u2193 opens the list \u00b7 \u2191\u2193 choose \u00b7 Enter picks \u00b7 Esc closes"
-        elif isinstance(w, Input):
-            text = "Type the value \u00b7 Enter goes on to the next step"
+            text = "Enter: open the list \u00b7 \u2191\u2193 choose \u00b7 Enter: pick \u00b7 Esc: close"
         elif isinstance(w, Button):
-            text = "Enter presses the button"
+            text = "Enter: press the button \u00b7 Tab: next field \u00b7 Esc: step list"
         else:
-            text = ""
+            text = self.help
         self.query_one("#keyhelp", Label).update(text)
 
     def focus_primary(self) -> None:
@@ -1531,7 +1580,7 @@ class Page(VerticalScroll):
 
 
 class KeyboardPage(Page):
-    title = "Keyboard layout"
+    title = "Keyboard"
     heading = "Keyboard layout"
     primary = "#layouts"
 
@@ -1601,29 +1650,190 @@ class RolePage(Page):
 MODES = [("Static", "static"), ("DHCP", "dhcp")]
 
 
+class NicPage(Page):
+    """Gives interfaces their roles (WAN, LAN, HA link, ...): the interfaces
+    in one list, the roles in another, numbered. Up and Down pick an
+    interface, a digit gives it that role (replacing its old one, and taking
+    the role from another interface); Enter in the roles list does the same."""
+
+    title = "Interfaces"
+    heading = "Assign the interfaces"
+    primary = "#nics, #next"
+    help = "↑↓: pick interface · 1-9: its role · Del: clear · F8: next step"
+
+    def body(self) -> ComposeResult:
+        self.roles = nic_roles(self.a["role"], self.app.reconfigure)
+        self.assign: dict[str, str] = {k: v for k, _ in self.roles if (v := self.a.get(k) or self.state.get(k))}
+        self.nic_list: list[dict[str, str]] = []
+        if not self.roles:
+            yield Static("Nothing to assign here: this HA pair's management and HA link interfaces are kept as "
+                         "they are.", classes="text")
+            return
+        yield Static({
+            "web": "Firewalls: the interface this host reaches the firewalls through (and is reached on). "
+                   "Portal LAN, optional: another interface, where users browse the portal.",
+            "secondary": "An HA secondary needs only its HA link, a direct cable to the primary, and its "
+                         "management interface; the primary configures the rest.",
+        }.get(self.a["role"], "The WAN connects to the Internet, which the firewall needs for updates; the LAN "
+                              "is where you reach the GUI from.")
+            + " Plug in a cable to see which interface it is (up: link).", classes="text")
+        with Horizontal(id="nic_cols"):
+            with Vertical(id="nic_left"):
+                yield Label("Interfaces", classes="colhead")
+                yield OptionList(id="nics")
+            with Vertical(id="nic_right"):
+                yield Label("Roles", classes="colhead")
+                yield OptionList(id="roles")
+        yield Button("Reload interfaces", id="reload")
+
+    def on_mount(self) -> None:
+        if self.roles:
+            self.query_one("#roles", OptionList).add_options(
+                [Option("", id=f"role_{k}") for k, _ in self.roles])
+            self.load()
+
+    def role_of(self, nic: str) -> str:
+        return next((t for k, t in self.roles if self.assign.get(k) == nic), "")
+
+    def nic_text(self, i: int) -> str:
+        """Two lines (the console is 80 columns): name and role; the MAC address and link."""
+        n = self.nic_list[i]
+        role = self.role_of(n["name"])
+        return (f"{n['name']}" + (f"  \u2192 {TAGS.get(role, role)}" if role else "")
+                + f"\n{n['mac']} {'up' if n['carrier'] else '--'}")
+
+    def role_text(self, j: int) -> str:
+        return f"{j + 1}  {self.roles[j][1]}"
+
+    def show(self) -> None:
+        """The prompts again, from the assignments."""
+        nics_l, roles_l = self.query_one("#nics", OptionList), self.query_one("#roles", OptionList)
+        for i in range(len(self.nic_list)):
+            nics_l.replace_option_prompt_at_index(i, self.nic_text(i))
+        for j in range(len(self.roles)):
+            roles_l.replace_option_prompt_at_index(j, self.role_text(j))
+
+    @on(Button.Pressed, "#reload")
+    def load(self) -> None:
+        nics_l, roles_l = self.query_one("#nics", OptionList), self.query_one("#roles", OptionList)
+        keep = nics_l.highlighted or 0
+        self.nic_list = nics()[:26]
+        names = {n["name"] for n in self.nic_list}
+        self.assign = {k: v for k, v in self.assign.items() if v in names}
+        nics_l.clear_options()
+        nics_l.add_options([Option(self.nic_text(i), id=f"nic{i}") for i in range(len(self.nic_list))])
+        if self.nic_list:
+            nics_l.highlighted = min(keep, len(self.nic_list) - 1)
+        if roles_l.highlighted is None:
+            roles_l.highlighted = 0
+        self.show()
+
+    def give(self, j: int) -> None:
+        """The highlighted interface gets role j; an interface has one role
+        and a role one interface."""
+        nics_l, roles_l = self.query_one("#nics", OptionList), self.query_one("#roles", OptionList)
+        if nics_l.highlighted is None or not 0 <= j < len(self.roles):
+            return
+        nic, key = self.nic_list[nics_l.highlighted]["name"], self.roles[j][0]
+        roles_l.highlighted = j
+        # Replaces the interface's role, and takes the role from another interface.
+        self.assign = {k: v for k, v in self.assign.items() if v != nic}
+        self.assign[key] = nic
+        self.show()
+
+    def clear(self) -> None:
+        nics_l = self.query_one("#nics", OptionList)
+        if nics_l.highlighted is not None:
+            nic = self.nic_list[nics_l.highlighted]["name"]
+            self.assign = {k: v for k, v in self.assign.items() if v != nic}
+            self.show()
+
+    @on(OptionList.OptionSelected, "#nics")
+    def _nic_chosen(self) -> None:
+        self.query_one("#roles", OptionList).focus()
+
+    @on(OptionList.OptionSelected, "#roles")
+    def _role_chosen(self, event: OptionList.OptionSelected) -> None:
+        self.give(event.option_index)
+        self.query_one("#nics", OptionList).focus()
+
+    def on_key(self, event: events.Key) -> None:
+        if not self.roles:
+            return
+        ch = event.character or ""
+        if len(ch) == 1 and "1" <= ch <= "9":
+            self.give(int(ch) - 1)
+        elif event.key == "left":
+            self.query_one("#nics", OptionList).focus()
+        elif event.key == "right":
+            self.query_one("#roles", OptionList).focus()
+        elif event.key in ("delete", "backspace"):
+            self.clear()
+        else:
+            return
+        event.stop()
+        event.prevent_default()
+
+    def save(self) -> None:
+        a = self.a
+        missing = [t for k, t in self.roles if k not in self.assign and k not in OPTIONAL_ROLES]
+        if missing:
+            raise ValueError("give an interface to: " + ", ".join(missing))
+        for k in NIC_KEYS:
+            if k in self.assign:
+                a[k] = self.assign[k]
+            elif not self.app.reconfigure or any(k == r for r, _ in self.roles):
+                a[k] = ""
+
+
 class NetworkPage(Page):
-    title = "Network"
-    heading = "Network"
+    """The addresses (or DHCP) of the interfaces the last page assigned."""
+
+    title = "Addresses"
+    heading = "Addresses"
 
     def kind(self) -> str:
         """fw: the firewall's LAN and WAN; host: portitor-web only; dns: an
         HA secondary, whose LAN and WAN the primary configures."""
         return {"web": "host", "secondary": "dns"}.get(self.a["role"], "fw")
 
+    def ha(self) -> bool:
+        """The management address is asked here (an HA pair's first setup)."""
+        return self.a["role"] in HA_ROLES and not self.app.reconfigure
+
+    def portal_nic(self) -> str:
+        return self.a["portal"] if "portal" in self.a else self.state.get("portal", "")
+
+    def nic_of(self, key: str) -> str:
+        return self.portal_nic() if key == "portal" else self.a.get(key) or self.state.get(key) or ""
+
+    def section_text(self, key: str, title: str) -> str:
+        nic = self.nic_of(key)
+        return f"{title}: {nic_label(nic)}" if nic else title
+
+    def section(self, key: str, title: str) -> Static:
+        return Static(self.section_text(key, title), id=f"sec_{key}", classes="section")
+
+    def on_show(self) -> None:
+        """The interfaces may have changed on the last page."""
+        for box in self.query("#portal_box"):
+            box.display = bool(self.portal_nic())
+        for w in self.query(".section").results(Static):
+            key = (w.id or "")[4:]
+            w.update(self.section_text(key, self.titles[key]))
+
     def body(self) -> ComposeResult:
         kind, st, role = self.kind(), self.state, self.a["role"]
         static = st.get("address", "") not in ("", "dhcp")
+        self.titles = {"wan": "WAN", "lan": "Firewalls" if kind == "host" else "LAN",
+                       "mgmt": "Management", "ha_link": "HA link", "portal": "Portal LAN"}
         if kind == "fw":
-            yield Static("The WAN interface connects to the Internet, which the firewall needs for updates; "
-                         "the LAN interface is where you reach the GUI from. Plug in a cable to see "
-                         "which interface it is; Reload updates the link state.", classes="text")
-            yield row("WAN interface", Select([], id="wan", prompt="choose the WAN interface (Enter)"))
-            yield row("LAN interface", Select([], id="lan", prompt="choose the LAN interface (Enter)"))
-            yield Button("Reload interfaces", id="reload")
+            yield self.section("wan", "WAN")
             yield row("WAN IPv4", Select(MODES, id="wan_mode", allow_blank=False,
                                          value="static" if st.get("wan_address") else "dhcp"))
             yield row("WAN address", Input(st.get("wan_address", ""), id="wan_address", placeholder="203.0.113.2/24"))
             yield row("Default gateway", Input(st.get("gateway", ""), id="gateway", placeholder="203.0.113.1"))
+            yield self.section("lan", "LAN")
             if role != "agent":
                 yield row("LAN IPv4", Select(MODES, id="lan_mode", allow_blank=False,
                                              value="dhcp" if st.get("address") == "dhcp" else "static"))
@@ -1642,17 +1852,37 @@ class NetworkPage(Page):
                                      if self.app.reconfigure else ""), classes="hint")
         elif kind == "dns":
             yield Static("An HA secondary takes its LAN, WAN and everything else from the primary once the "
-                         "pair is committed; it needs only its HA link and management interfaces (the next "
-                         "step) and the DNS servers it uses until then.", classes="text")
-        elif kind == "host":
-            yield Static("The interface this host is reached on (the GUI) and reaches the firewall through. "
-                         "Plug in a cable to see which interface it is; Reload updates the link state.",
-                         classes="text")
-            yield row("Interface", Select([], id="lan", prompt="choose the interface (Enter)"))
-            yield Button("Reload interfaces", id="reload")
+                         "pair is committed; it needs only its management address and the DNS servers it "
+                         "uses until then." if self.ha() else
+                         "An HA secondary takes its LAN, WAN and everything else from the primary once the "
+                         "pair is committed; here only the DNS servers it uses until then.", classes="text")
+        else:
+            yield self.section("lan", "Firewalls")
             yield row("IPv4", Select(MODES, id="lan_mode", allow_blank=False, value="static" if static else "dhcp"))
             yield row("Address", Input(st.get("address", "") if static else "", id="address", placeholder="192.168.1.10/24"))
             yield row("Default gateway", Input(st.get("gateway", ""), id="gateway", placeholder="192.168.1.1"))
+            # Shown when the last page gave an interface the role.
+            pstatic = st.get("portal_address", "") not in ("", "dhcp")
+            with Vertical(id="portal_box"):
+                yield self.section("portal", "Portal LAN")
+                yield row("IPv4", Select(MODES, id="portal_mode", allow_blank=False,
+                                         value="static" if pstatic else "dhcp"))
+                yield row("Address", Input(st.get("portal_address", "") if pstatic else "", id="portal_address",
+                                           placeholder="10.0.0.10/24"))
+                yield Static("Where users browse the portal, which proxies to the firewalls. No default "
+                             "gateway: that is the firewalls' interface's.", classes="hint")
+        if self.ha():
+            yield self.section("mgmt", "Management")
+            yield row("Address", Input(st.get("mgmt_address", ""), id="mgmt_address", placeholder="172.25.38.1/24"))
+            yield row("Gateway", Input(st.get("mgmt_gateway", ""), id="mgmt_gateway", placeholder="optional, e.g. 172.25.38.254"))
+            yield Static("What the host itself uses while it is the standby: updates, NTP, the witness. "
+                         "Optional: left empty, the other host of the pair is the gateway (the active one "
+                         "forwards for the standby). A static address; the network must not be the pair's.",
+                         classes="hint")
+            yield self.section("ha_link", "HA link")
+            yield Static("No address: the hosts use the IPv6 link-local addresses fe80::1 (primary) and "
+                         "fe80::2 (secondary) on it.", classes="hint")
+        yield Static("DNS", classes="subhead")
         yield row("DNS servers", Input(st.get("dns") or (PUBLIC_DNS if kind == "dns" else ""), id="dns",
                                        placeholder="" if kind == "dns" else "empty: from DHCP"))
         if kind == "dns":
@@ -1672,18 +1902,12 @@ class NetworkPage(Page):
                          "limits). The GUI is open from the LAN.", classes="hint")
 
     def on_mount(self) -> None:
-        self.reload()
         self.modes()
-
-    @on(Button.Pressed, "#reload")
-    def reload(self) -> None:
-        for sid, key in (("#lan", "lan"), ("#wan", "wan")):
-            for select in self.query(sid).results(Select):
-                set_nic_options(select, self.state.get(key, ""))
 
     @on(Select.Changed)
     def modes(self) -> None:
         for sid, ids in (("#lan_mode", ["#address"] + (["#gateway"] if self.kind() == "host" else [])),
+                         ("#portal_mode", ["#portal_address"]),
                          ("#wan_mode", ["#wan_address", "#gateway"])):
             for mode in self.query(sid).results(Select):
                 for i in ids:
@@ -1712,12 +1936,6 @@ class NetworkPage(Page):
             except ValueError:
                 rng.value = default_dhcp_range(addr)
 
-    def nic(self, wid: str, name: str) -> str:
-        select = self.query_one(wid, Select)
-        if select.is_blank():
-            raise ValueError(f"choose the {name}")
-        return select.value
-
     def static(self, wid: str) -> bool:
         modes = self.query(wid).results(Select)
         return all(m.value == "static" for m in modes)
@@ -1725,22 +1943,27 @@ class NetworkPage(Page):
     def save(self) -> None:
         a, kind = self.a, self.kind()
         a["dhcp_range"] = None
+        a["mgmt_address"] = a["mgmt_gateway"] = a["portal_address"] = None
         if kind == "dns":
             a["wan"], a["wan_address"], a["default_route"], a["web_from"] = "", None, "wan", ""
             if self.app.reconfigure:
                 a.update({k: v for k, v in answers_of(self.state).items() if k != "dns"})
+            else:
+                a["mgmt_address"] = self.field("Management address", check_address, self.value("#mgmt_address"))
+                a["mgmt_gateway"] = self.field("Gateway", check_mgmt_gateway, self.value("#mgmt_gateway"), a["mgmt_address"])
+                # The secondary is reached on its management address.
+                a["lan"], a["address"], a["gateway"] = a["mgmt"], a["mgmt_address"], a["mgmt_gateway"]
             a["dns"] = self.field("DNS servers", parse_dns, self.value("#dns"))
             return
         if kind == "host":
-            a["lan"] = self.nic("#lan", "interface")
             a["address"] = self.field("Address", check_address, self.value("#address")) if self.static("#lan_mode") else None
             a["gateway"] = self.field("Default gateway", check_gateway, self.value("#gateway"), a["address"]) if a["address"] else None
             a["wan"], a["wan_address"] = "", None
+            a["portal_address"] = None
+            if a.get("portal"):
+                a["portal_address"] = (self.field("Portal LAN address", check_address, self.value("#portal_address"),
+                                                  a["address"]) if self.static("#portal_mode") else None)
         else:
-            a["wan"] = self.nic("#wan", "WAN interface")
-            a["lan"] = self.nic("#lan", "LAN interface")
-            if a["lan"] == a["wan"]:
-                raise ValueError("the LAN and WAN interfaces must differ (Swap on the last page swaps them)")
             a["address"] = self.field("LAN address", check_address, self.value("#address")) if self.static("#lan_mode") else None
             on = a["address"] and self.query_one("#dhcp_mode", Select).value == "on"
             a["dhcp_range"] = self.field("DHCP range", check_dhcp_range, self.value("#dhcp_range"), a["address"]) if on else None
@@ -1751,76 +1974,17 @@ class NetworkPage(Page):
                             if a["wan_address"] else None)
             routes = list(self.query("#default_route").results(Select))
             a["default_route"] = str(routes[0].value) if routes and not routes[0].disabled else "wan"
+            if self.ha():
+                a["mgmt_address"] = self.field("Management address", check_address, self.value("#mgmt_address"))
+                a["mgmt_gateway"] = self.field("Gateway", check_mgmt_gateway, self.value("#mgmt_gateway"), a["mgmt_address"])
+                for other in (a["address"], a["wan_address"]):
+                    if other and a["mgmt_address"].network.overlaps(other.network):
+                        raise ValueError("the management network must differ from the LAN's and WAN's")
         a["dns"] = self.field("DNS servers", parse_dns, self.value("#dns"), bool(dhcp_dns_nic(a)))
         a["web_from"] = ""
         if a["role"] == "agent":
             a["web_from"] = self.field("portitor-web from", check_web_from,
                                        self.value("#web_from") or str(a["address"].network))
-
-
-class HAPage(Page):
-    title = "HA pair"
-    heading = "HA link and management"
-
-    def body(self) -> ComposeResult:
-        st, role = self.state, self.a["role"]
-        if role not in HA_ROLES:
-            yield Static("Only for an HA pair (machine type primary or secondary): nothing to set here.",
-                         classes="text")
-            return
-        yield Static("An HA pair needs two interfaces of its own on each host: the HA link, a direct cable "
-                     "between the two, and the management interface, on a network of its own with the "
-                     "witness (the portal) and the GUI. The two must not share a switch. "
-                     + ("The secondary's setup then shows a string to add it here (sudo portitor-setup --join)."
-                        if role == "primary" else
-                        "At the end this setup shows a string for the primary, which adds this host and "
-                        "configures the rest."), classes="text")
-        yield row("Management", Select([], id="mgmt", prompt="choose the management interface (Enter)"))
-        yield row("Address", Input(st.get("mgmt_address", ""), id="mgmt_address", placeholder="172.25.38.1/24"))
-        yield row("Gateway", Input(st.get("mgmt_gateway", ""), id="mgmt_gateway", placeholder="172.25.38.254"))
-        yield Static("What the host itself uses while it is the standby: updates, NTP, the witness. "
-                     "It must not be the pair.", classes="hint")
-        yield row("HA link", Select([], id="ha_link", prompt="choose the HA link interface (Enter)"))
-        yield Static("No address: the hosts use the IPv6 link-local addresses fe80::1 (primary) and "
-                     "fe80::2 (secondary) on it.", classes="hint")
-        yield Button("Reload interfaces", id="reload")
-
-    def on_mount(self) -> None:
-        self.reload()
-
-    @on(Button.Pressed, "#reload")
-    def reload(self) -> None:
-        for sid in ("#mgmt", "#ha_link"):
-            for select in self.query(sid).results(Select):
-                set_nic_options(select, self.state.get(sid[1:], ""))
-
-    def nic(self, wid: str, name: str) -> str:
-        select = self.query_one(wid, Select)
-        if select.is_blank():
-            raise ValueError(f"choose the {name}")
-        return str(select.value)
-
-    def save(self) -> None:
-        a = self.a
-        for k in ("mgmt", "ha_link"):
-            a[k] = ""
-        a["mgmt_address"] = a["mgmt_gateway"] = None
-        if a["role"] not in HA_ROLES:
-            return
-        a["mgmt"] = self.nic("#mgmt", "management interface")
-        a["ha_link"] = self.nic("#ha_link", "HA link interface")
-        used = [a["mgmt"], a["ha_link"]] + ([a["lan"], a["wan"]] if a["role"] == "primary" else [])
-        if len(set(used)) != len(used):
-            raise ValueError("the LAN, WAN, management and HA link interfaces must all differ")
-        a["mgmt_address"] = self.field("Management address", check_address, self.value("#mgmt_address"))
-        a["mgmt_gateway"] = self.field("Gateway", check_gateway, self.value("#mgmt_gateway"), a["mgmt_address"])
-        if a["role"] == "primary":
-            for other in (a["address"], a["wan_address"]):
-                if other and a["mgmt_address"].network.overlaps(other.network):
-                    raise ValueError("the management network must differ from the LAN's and WAN's")
-        else:
-            # The secondary is reached on its management address.
-            a["lan"], a["address"], a["gateway"] = a["mgmt"], a["mgmt_address"], a["mgmt_gateway"]
 
 
 class AccountPage(Page):
@@ -1876,6 +2040,7 @@ class AccountPage(Page):
             a["reconfigure"] = True
             # The certificate names the LAN address and the host name.
             a["new_cert"] = (str(a["address"] or "dhcp") != self.state.get("address")
+                             or str(a.get("portal_address") or "") != self.state.get("portal_address", "")
                              or a["hostname"] != (self.state.get("hostname") or current_hostname()))
 
 
@@ -1920,13 +2085,20 @@ class Wizard(Screen):
     the current one first; going back does not. A first setup opens a step
     after the one before it was answered; run again, every step is open."""
 
-    BINDINGS = [Binding("escape", "steps", "Steps")]
+    # Priority: they work in an input and a list too.
+    BINDINGS = [
+        Binding("f8", "next", "Next", priority=True),
+        Binding("f7", "back", "Back", priority=True),
+        Binding("f10", "apply", "Apply", priority=True),
+        Binding("escape", "steps", "Steps"),
+    ]
 
     def __init__(self, kinds: list[type[Page]], reconfigure: bool) -> None:
         super().__init__()
         self.reconfigure = reconfigure
         self.kinds = kinds
         self.forms: list[Page | None] = [None] * len(kinds)
+        self.done: set[int] = set()  # the steps whose answers are taken
         self.at = 0
         self.reached = len(kinds) - 1 if reconfigure else 0
         self.marked = self.reached if reconfigure else -1
@@ -1934,11 +2106,22 @@ class Wizard(Screen):
     def compose(self) -> ComposeResult:
         yield Header(icon=" ")
         with Horizontal(id="wizard"):
-            yield Steps(*[Option(f"{i + 1}. {c.title}", id=f"step{i}") for i, c in enumerate(self.kinds)], id="steps")
+            yield Steps(*[Option(self.step_label(i), id=f"step{i}") for i in range(len(self.kinds))], id="steps")
             yield Vertical(id="pages")
         yield Footer()
 
+    def step_label(self, i: int) -> str:
+        """A step in the list: done (its answers taken), locked (not reached) or open."""
+        mark = MARK_DONE if i in self.done else MARK_LOCKED if i > self.reached else " "
+        return f"{mark}{' ' * (3 - cell_len(mark))}{i + 1}. {self.kinds[i].title}"
+
+    def label_steps(self) -> None:
+        steps = self.query_one("#steps", OptionList)
+        for i in range(len(self.kinds)):
+            steps.replace_option_prompt_at_index(i, self.step_label(i))
+
     async def on_mount(self) -> None:
+        self.query_one("#steps").border_title = "Steps"
         # Run again, the forms are all there at once, so Apply takes them all.
         for i in range(len(self.kinds) - 1 if self.reconfigure else 0):
             await self.ensure(i)
@@ -1981,7 +2164,9 @@ class Wizard(Screen):
                 p.display = j == i
         self.at = i
         self.mark()
+        self.label_steps()
         self.query_one("#steps", OptionList).highlighted = i
+        page.on_show()
         if focus:
             page.focus_primary()
 
@@ -1997,14 +2182,17 @@ class Wizard(Screen):
             page.error(str(exc))
             return False
         page.error("")
+        self.done.add(i)
         if a.get("role") != role:
             # The later forms were made for another role.
             for j in range(i + 1, len(self.kinds)):
                 if self.forms[j]:
                     await self.forms[j].remove()
                     self.forms[j] = None
+            self.done = {j for j in self.done if j <= i}
             self.reached = min(self.reached, i + 1)
             self.mark()
+            self.label_steps()
         return True
 
     async def go(self, i: int, focus: bool = False) -> bool:
@@ -2034,6 +2222,19 @@ class Wizard(Screen):
 
     def action_steps(self) -> None:
         self.query_one("#steps", OptionList).focus()
+
+    async def action_next(self) -> None:
+        if self.at < len(self.kinds) - 1:
+            await self.go(self.at + 1, focus=True)
+
+    async def action_back(self) -> None:
+        if self.at > 0:
+            await self.go(self.at - 1, focus=True)
+
+    async def action_apply(self) -> None:
+        """F10: takes every step's answers and shows the summary; on the summary, applies."""
+        last = len(self.kinds) - 1
+        await self.go(last + 1 if self.at == last else last, focus=True)
 
 
 class LogPage(Screen):
@@ -2219,6 +2420,8 @@ CONSOLE_CSS = """
 Input, OptionList, SelectCurrent, Button, #log { border: solid $panel-lighten-2; }
 Input:focus, OptionList:focus, Select:focus > SelectCurrent, Button:focus { border: solid $accent; }
 SelectOverlay { border: solid $accent; }
+#steps, Page { border: solid $panel-lighten-2; }
+#steps:focus, Page:focus-within { border: solid $accent; }
 Button { height: 3; }
 Button:focus { text-style: bold; }
 """
@@ -2239,9 +2442,17 @@ class SetupApp(App):
     CSS = """
     #body { padding: 0 2; }
     #wizard { height: 1fr; }
-    #steps { width: 26; height: 100%; margin: 1 0 0 1; }
+    #steps { width: 24; height: 100%; margin: 1 0 0 1; }
+    #steps, Page { border: round $panel-lighten-2; border-title-color: $text-muted; }
+    #steps:focus, Page:focus-within { border: round $accent; border-title-color: $accent; border-title-style: bold; }
+    .section, .subhead { text-style: bold; color: $accent; padding: 1 0 0 0; }
+    .colhead { text-style: bold; color: $text-muted; }
+    #nic_cols, #portal_box { height: auto; }
+    #nic_left { width: 1fr; height: auto; }
+    #nic_right { width: 18; height: auto; margin-left: 1; }
+    #nics, #roles { height: auto; max-height: 14; }
     #pages { width: 1fr; height: 100%; }
-    Page { height: 100%; padding: 0 2; }
+    Page { height: 100%; padding: 0 1; }
     Page > .heading { padding: 1 0; }
     .heading { text-style: bold; padding: 1 2; }
     #body > .heading { padding: 1 0; }
@@ -2250,7 +2461,7 @@ class SetupApp(App):
     .row { height: auto; }
     .label { width: 20; padding: 1 1 0 0; }
     .row Input, .row Select { width: 1fr; }
-    #keyhelp { color: $text-muted; padding: 1 0 0 0; }
+    #keyhelp { color: $text-muted; padding: 1 0 0 0; height: auto; width: 100%; }
     #error { color: $error; padding: 0; }
     #buttons { height: auto; padding: 1 0; }
     #buttons Button { margin-right: 2; }
@@ -2269,9 +2480,9 @@ class SetupApp(App):
         self.a: dict = {"join": ""}
         if self.reconfigure:
             self.a["role"] = state.get("role") or "both"
-            self.pages = [KeyboardPage, NetworkPage, AccountPage, SummaryPage]
+            self.pages = [KeyboardPage, NicPage, NetworkPage, AccountPage, SummaryPage]
         else:
-            self.pages = [KeyboardPage, RolePage, NetworkPage, HAPage, AccountPage, SummaryPage]
+            self.pages = [KeyboardPage, RolePage, NicPage, NetworkPage, AccountPage, SummaryPage]
 
     def on_mount(self) -> None:
         if self.mode == "join":
