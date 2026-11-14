@@ -34,15 +34,29 @@ type gate struct {
 	open bool
 	// devs are the devices to gate, by namespace.
 	devs map[string][]string
-	// down are those that stay down, not enabled in the document.
-	down map[string]bool
+	// down are those that stay down, not enabled in the document, by
+	// namespace: two instances may have a device of the same name.
+	down map[string]map[string]bool
 }
 
 func newGate(run Runner, file string) *gate {
-	g := &gate{run: run, file: file, devs: map[string][]string{}, down: map[string]bool{}}
+	g := &gate{run: run, file: file, devs: map[string][]string{}, down: map[string]map[string]bool{}}
 	// A gate left by an earlier run: this host may have left its pair
 	// since, and it closes at start until it decides otherwise.
 	_ = readJSON(file, &g.devs)
+	// The devices the document leaves down, so a repair after a restart
+	// doesn't bring them up. Missing (an earlier run): all are enabled.
+	var down map[string][]string
+	_ = readJSON(g.downFile(), &down)
+	for ns, devs := range down {
+		if _, ok := g.devs[ns]; !ok {
+			continue
+		}
+		g.down[ns] = map[string]bool{}
+		for _, d := range devs {
+			g.down[ns][d] = true
+		}
+	}
 	return g
 }
 
@@ -101,8 +115,9 @@ func (g *gate) set(ctx context.Context, ns string, devs, down []string) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.devs[ns] = slices.Clone(devs)
+	g.down[ns] = make(map[string]bool, len(devs))
 	for _, d := range devs {
-		g.down[d] = slices.Contains(down, d)
+		g.down[ns][d] = slices.Contains(down, d)
 	}
 	g.save()
 	return g.load(ctx, ns)
@@ -117,6 +132,7 @@ func (g *gate) remove(ctx context.Context, ns string, exists bool) error {
 		return nil
 	}
 	delete(g.devs, ns)
+	delete(g.down, ns)
 	g.save()
 	// A host that left its pair starts closed if it joins one again.
 	if len(g.devs) == 0 {
@@ -143,7 +159,27 @@ func (g *gate) namespaces() []string {
 	return slices.Sorted(maps.Keys(g.devs))
 }
 
+// downFile is where the devices that stay down are kept, beside the gate's.
+func (g *gate) downFile() string { return g.file + ".down" }
+
 func (g *gate) save() {
+	down := map[string][]string{}
+	for ns, m := range g.down {
+		if _, ok := g.devs[ns]; !ok {
+			continue
+		}
+		for d, isDown := range m {
+			if isDown {
+				down[ns] = append(down[ns], d)
+			}
+		}
+		slices.Sort(down[ns])
+	}
+	// The down state first: a crash between the two leaves devices that are
+	// gated and, at worst, one more kept down than the document says.
+	if err := writeJSON(g.downFile(), down, 0o644); err != nil {
+		slog.Error("ha: gate down state", "err", err)
+	}
 	if err := writeJSON(g.file, g.devs, 0o644); err != nil {
 		slog.Error("ha: gate state", "err", err)
 	}
@@ -281,7 +317,7 @@ func (g *gate) check(ctx context.Context) ([]string, error) {
 			continue
 		}
 		for _, d := range lost {
-			if !g.down[d] {
+			if !g.down[ns][d] {
 				if _, err := g.run.Run(ctx, ns, "ip", "link", "set", "dev", d, "up"); err != nil {
 					errs = append(errs, err)
 				}
