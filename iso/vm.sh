@@ -18,6 +18,10 @@
 #
 # VM_UEFI=1 boots with OVMF instead of the BIOS.
 #
+# VM_OFFLINE=1 gives the NICs no way out (QEMU's restrict=on: DHCP, and the GUI
+# forward, still work), to show that an installation needs no network. The tests
+# install this way.
+#
 # For several virtual machines at once (iso/test-split.sh): VM_DIR (default
 # build/vm) holds the disk and sockets, VM_ID=N (0-9, default 0) makes the
 # MAC addresses 52:54:00:00:0N:01 and :02, and VM_LAN=LOCAL,REMOTE puts NIC 2
@@ -31,6 +35,8 @@ DIR=${VM_DIR:-build/vm}
 DISK=$DIR/disk.qcow2
 GUI_PORT=${VM_GUI_PORT:-28443}
 MAC=52:54:00:00:0${VM_ID:-0}
+restrict=""
+[[ -n ${VM_OFFLINE:-} ]] && restrict=,restrict=on
 
 if [[ -n ${VM_LAN:-} ]]; then
 	lan_local=${VM_LAN%%,*} lan_remote=${VM_LAN#*,}
@@ -38,13 +44,13 @@ if [[ -n ${VM_LAN:-} ]]; then
 	lan=(-netdev "dgram,id=lan,local.type=unix,local.path=$lan_local,remote.type=unix,remote.path=$lan_remote"
 		-device "virtio-net-pci,netdev=lan,mac=$MAC:02")
 else
-	lan=(-nic "user,model=virtio-net-pci,mac=$MAC:02,net=192.168.1.0/24,host=192.168.1.2,hostfwd=tcp:127.0.0.1:$GUI_PORT-192.168.1.1:443")
+	lan=(-nic "user,model=virtio-net-pci,mac=$MAC:02,net=192.168.1.0/24,host=192.168.1.2,hostfwd=tcp:127.0.0.1:$GUI_PORT-192.168.1.1:443$restrict")
 fi
 
 args=(
 	-machine q35,accel=kvm:tcg -cpu max -m 2048 -smp 2
 	-drive "file=$DISK,if=virtio,format=qcow2"
-	-nic "user,model=virtio-net-pci,mac=$MAC:01"
+	-nic "user,model=virtio-net-pci,mac=$MAC:01$restrict"
 	"${lan[@]}"
 	-display none
 	-device virtio-serial
@@ -78,7 +84,7 @@ run)
 	exec qemu-system-x86_64 "${args[@]}"
 	;;
 *)
-	sed -n '5,26p' "$0" | sed 's/^# \{0,1\}//'
+	sed -n '5,31p' "$0" | sed 's/^# \{0,1\}//'
 	exit 2
 	;;
 esac

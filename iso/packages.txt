@@ -1,0 +1,46 @@
+# SPDX-FileCopyrightText: 2026 The Portitor contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# The packages the installed firewall has beyond the installer's base system.
+# iso/build.sh downloads them, with everything they depend on, into the
+# repository on the ISO (/portitor/repo); iso/target.sh installs them from it,
+# so the installation needs no network. Keep it in step with install.py's
+# AGENT_PACKAGES (which finds them all installed, and calls no apt).
+#
+# linux-image-amd64 and linux-headers-amd64 come from the same download, so the
+# headers jool-dkms builds against are those of the kernel that boots.
+linux-image-amd64
+linux-headers-amd64
+dbus
+libpam-systemd
+chrony
+snmpd
+conntrackd
+openvpn
+rsyslog
+nftables
+iproute2
+wireguard-tools
+bind9
+bind9-utils
+bind9-dnsutils
+frr
+frr-pythontools
+python3
+python3-textual
+openssl
+sudo
+console-setup
+ca-certificates
+iputils-ping
+tcpdump
+tshark
+mtr-tiny
+iperf3
+jool-dkms
+jool-tools
+less
+bash-completion
+openssh-client
+openssh-server
+qemu-guest-agent

@@ -3,14 +3,46 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 # Runs in the installed system (chroot) at the end of the installation:
-# installs Portitor from the release archive on the ISO and prepares the
-# first-boot setup (portitor-setup.py).
+# installs the packages from the repository on the ISO (no network), Portitor
+# from the release archive on the ISO, and prepares the first-boot setup
+# (portitor-setup.py).
 set -eu
 d=/tmp/portitor-iso
 
+# The packages (packages.txt) from the ISO's repository alone: its apt source
+# is the only one, and what it holds is complete (iso/build.sh resolves it as
+# for an empty system). Not signed: it is the installer's own medium.
+echo "deb [trusted=yes] file:$d/repo ./" >"$d/offline.list"
+apt_iso() {
+	DEBIAN_FRONTEND=noninteractive apt-get -q -o Dir::Etc::sourcelist="$d/offline.list" \
+		-o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0 "$@"
+}
+# What d-i's preseed answers for these (the installer's debconf is not this one's).
+debconf-set-selections <<'DEBCONF'
+wireshark-common wireshark-common/install-setuid boolean false
+iperf3 iperf3/start_daemon boolean false
+DEBCONF
+apt_iso update
+# shellcheck disable=SC2046
+apt_iso install -y --no-install-recommends $(sed 's/#.*//' "$d/packages.txt")
+rm -rf /var/lib/apt/lists/*
+
+# The package sources for later: Debian's, and ISC's BIND repository (as
+# install.py adds it; written here so that it finds it and does not call apt).
+# Nothing is fetched now.
 mkdir -p "$d/release"
 tar -xzf "$d/portitor.tar.gz" -C "$d/release"
 root=$(dirname "$(find "$d/release" -maxdepth 2 -name install.py | head -n 1)")
+install -m 0644 "$root/deploy/apt/isc-bind.asc" /usr/share/keyrings/isc-bind.asc
+echo "deb [signed-by=/usr/share/keyrings/isc-bind.asc] https://bind.debian.net/bind trixie main" \
+	>/etc/apt/sources.list.d/isc-bind.list
+cat >/etc/apt/sources.list <<'SOURCES'
+# The installation used the ISO alone. Debian 13's mirrors, for updates.
+deb http://deb.debian.org/debian trixie main non-free-firmware
+deb http://deb.debian.org/debian trixie-updates main non-free-firmware
+deb http://deb.debian.org/debian-security trixie-security main non-free-firmware
+SOURCES
+
 # Binaries, units, example configs and /usr/lib/portitor/install.py.
 # Nothing is started; portitor-setup configures and starts both.
 python3 "$root/install.py" --local "$root" --web --agent --yes

@@ -83,13 +83,18 @@ The third host runs portitor-web. It plays two roles:
 
 To set it up:
 
-1. Install both firewalls as for a firewall and portal (ISO *agent*, or
-   `./install.py --web --agent 192.0.2.5,192.0.2.6` from the portal host), and add
-   both hosts to the portal.
-2. Set up the pair in the primary's GUI ([Setting up a pair](ha.md#setting-up-a-pair)).
-3. Under *Admin → Firewalls*, set *HA witness* to *External* on the primary, then
-   commit. Copy the *Witness string* under `witness:` in the portal's `web.yaml`, and
-   let the portal's address in through both agents' `allow_from`.
+1. Install the two firewalls (ISO *primary*, then *secondary*, which the primary
+   adds with `sudo portitor-setup --join`), then the portal (ISO *web*). With
+   `install.py`: `./install.py --web --agent 192.0.2.5,192.0.2.6` from the portal host.
+2. Add both hosts to the portal: `sudo portitor-setup --show-join` on each firewall
+   prints a portal string, which `sudo portitor-setup --join` on the portal takes (the
+   two hosts need different host names). With `install.py`, add each under `firewalls:`
+   in the portal's `web.yaml` and its address to `trusted_proxies` on both.
+3. Set *HA witness* to *External* on the primary, commit, and copy the *Witness string*
+   under `witness:` in the portal's `web.yaml`. The portal must be on the management
+   network (both agents' `allow_from`).
+
+The commands, in order, are in [Step by step from the ISO](ha.md#step-by-step-from-the-iso).
 
 `./install.py` on the portal host updates the pair one host at a time, the secondary
 first; each host hands over before its agent restarts, so one host keeps forwarding.

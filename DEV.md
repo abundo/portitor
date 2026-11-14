@@ -134,7 +134,7 @@ the tag is new and the CHANGELOG section, then runs `test-all`. The rest of the 
 3. **Installer:** if `install.py`, `deploy/` or the packages changed since the last
    tag (`git diff <last tag> -- install.py deploy/ iso/`), `INSTALLER_VERSION` is
    bumped once for the release; a new Debian package is in `AGENT_PACKAGES` and
-   `iso/preseed.cfg`; a new path named or chronyd uses is in `deploy/apparmor/`.
+   `iso/packages.txt`; a new path named or chronyd uses is in `deploy/apparmor/`.
 4. **Lab** (a real apply as root): `make lab-clean lab-up lab-seed lab-deploy`, then
    in the GUI deploy a change and let it roll back, deploy and confirm, and check
    with `dev/lab/lab.sh client` that a LAN host gets a lease, resolves names and
@@ -180,7 +180,10 @@ GitHub (the ISO uses it). `--list --json` is what the agent runs for *Admin → 
 `iso/build.sh` remasters the Debian 13 netinst ISO with xorriso: `preseed.cfg`, new
 boot menus (`grub.cfg` for UEFI, `isolinux.cfg` for BIOS), and `/portitor` with the
 release archive, `late.sh`/`target.sh` (run at the end of the installation) and the
-first-boot setup `portitor-setup.py`. See [docs/appliance.md](docs/appliance.md).
+first-boot setup `portitor-setup.py`, and `/portitor/repo`, an apt repository of
+`packages.txt` and its dependencies (downloaded in a Debian 13 container, with ISC's
+BIND repository; needs podman or docker), from which `target.sh` installs, so the
+installation needs no network. The tests install with `VM_OFFLINE=1`. See [docs/appliance.md](docs/appliance.md).
 
 `make iso-e2e` (`iso/test.sh`) does it all and checks the result: builds a test
 ISO, installs and boots it, then checks through the QEMU guest agent and the GUI that

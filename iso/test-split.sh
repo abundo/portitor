@@ -47,7 +47,7 @@ done
 log "Installing both (serial consoles in build/vm-{fw,web}/install.log)"
 pids=()
 for name in fw web; do
-	VM_SERIAL=build/vm-$name/install.log timeout 45m bash -c "$(declare -f vm); vm $name install build/vm-$name/test.iso" &
+	VM_OFFLINE=1 VM_SERIAL=build/vm-$name/install.log timeout 45m bash -c "$(declare -f vm); vm $name install build/vm-$name/test.iso" &
 	pids+=($!)
 done
 for i in 0 1; do

@@ -36,7 +36,7 @@ if [[ -z $iso ]]; then
 fi
 
 log "Installing (serial console in $DIR/install.log)"
-VM_SERIAL=$DIR/install.log timeout 45m iso/vm.sh install "$iso" ||
+VM_OFFLINE=1 VM_SERIAL=$DIR/install.log timeout 45m iso/vm.sh install "$iso" ||
 	{ echo "the install failed or timed out; see $DIR/install.log" >&2; exit 1; }
 
 log "Booting (serial console in $DIR/boot.log)"
@@ -79,7 +79,12 @@ done
 check "no failed units" sh -c 'test -z "$(systemctl list-units --failed --plain --no-legend)" || { systemctl list-units --failed --plain --no-legend; false; }'
 check "LAN has $LAN_ADDRESS" sh -c "ip -o addr show | grep -qF ' $LAN_ADDRESS '"
 check "nftables firewall table loaded" nft list table inet firewall
-check "bind9 from ISC's repository" sh -c "apt-cache policy bind9 | grep -A1 '^ \\*\\*\\*' | grep -qF bind.debian.net"
+# (The installation had no network, so apt has no lists to name the origin of
+# the installed version; ISC's builds carry ".gbp" in theirs, Debian's don't.)
+check "bind9 from ISC's repository" sh -c "dpkg-query -W -f '\${Version}' bind9 | grep -qF .gbp"
+check "ISC's apt source is there for updates" grep -rqF bind.debian.net/bind /etc/apt/sources.list.d
+check "jool's kernel module is built" sh -c "dkms status | grep -q jool.*installed"
+check "headers match the kernel that boots" sh -c 'test -d /lib/modules/$(uname -r)/build'
 
 jar=$DIR/cookies
 rm -f "$jar"

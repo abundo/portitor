@@ -3,20 +3,25 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 # Builds the Portitor installer ISO (amd64): Debian 13's netinst ISO with
-# a preseed (preseed.cfg), Portitor as a release archive, and the first-boot
-# setup (portitor-setup.py). See docs/appliance.md.
+# a preseed (preseed.cfg), Portitor as a release archive, the first-boot
+# setup (portitor-setup.py) and a package repository (packages.txt and
+# everything they need), so that the installation needs no network.
+# See docs/appliance.md.
 #
 #   iso/build.sh                     Portitor from this tree (make release)
 #   iso/build.sh --release v1.2.0    Portitor from a GitHub release
 #   iso/build.sh --debian-iso FILE   use this netinst ISO (else downloaded)
+#   iso/build.sh --refresh-packages  download the packages again (else kept in the
+#                                    cache while iso/packages.txt is unchanged)
 #   iso/build.sh -o FILE             output (default build/portitor-<version>-amd64.iso)
 #   iso/build.sh --test              unattended, for iso/vm.sh: erases /dev/vda without
 #                                    asking, serial console, first-boot answers from
 #                                    iso/test.answers (never for real hardware)
 #   iso/build.sh --answers FILE      --test with these first-boot answers
 #
-# Needs xorriso, curl, sha256sum; --source also go and npm. --release uses gh
-# when it is logged in (a private repository), else curl.
+# Needs xorriso, curl, sha256sum and podman (or docker, for the packages);
+# --source also go and npm. --release uses gh when it is logged in (a private
+# repository), else curl.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -25,16 +30,17 @@ REPO=${GITHUB_REPO:-abundo/portitor}
 CACHE=${XDG_CACHE_HOME:-$HOME/.cache}/portitor-iso
 ARCH=amd64
 
-release="" debian_iso="" out="" test="" answers=iso/test.answers
+release="" debian_iso="" out="" test="" refresh="" answers=iso/test.answers
 while (($#)); do
 	case $1 in
 	--source) release="" ;;
 	--release) release=${2:?--release needs a tag}; shift ;;
 	--debian-iso) debian_iso=${2:?}; shift ;;
+	--refresh-packages) refresh=1 ;;
 	-o) out=${2:?}; shift ;;
 	--test) test=1 ;;
 	--answers) answers=${2:?--answers needs a file}; test=1; shift ;;
-	-h | --help) sed -n '5,19p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+	-h | --help) sed -n '5,24p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
 	*) echo "unknown argument $1" >&2; exit 2 ;;
 	esac
 	shift
@@ -64,6 +70,52 @@ if [[ -z $debian_iso ]]; then
 	[[ $(sha256sum "$debian_iso" | cut -d' ' -f1) == "$sum" ]] || { echo "checksum mismatch: $debian_iso" >&2; exit 1; }
 	log "$name: sha256 ok"
 fi
+
+# ----- Packages -----
+# What the installed system has beyond the installer's base: iso/packages.txt
+# with everything it depends on, as a flat apt repository on the ISO. The list
+# is resolved as on an empty system (no dpkg status), in a Debian 13 container
+# with ISC's BIND repository (as install.py adds it), so the repository is
+# complete whatever the base ISO holds. Kept in the cache while packages.txt
+# and the key are unchanged; --refresh-packages downloads again (security
+# updates since).
+ctr=$(command -v podman || command -v docker || true)
+[[ -n $ctr ]] || { echo "podman or docker is required (for the packages)" >&2; exit 1; }
+key=$(cat iso/packages.txt deploy/apt/isc-bind.asc | sha256sum | cut -c1-16)
+repo=$CACHE/repo-$key
+if [[ -n $refresh || ! -f $repo/Release ]]; then
+	log "Downloading the packages (iso/packages.txt and their dependencies)"
+	rm -rf "$repo" "$repo.partial"
+	mkdir -p "$repo.partial"
+	"$ctr" run --rm --platform linux/amd64 --security-opt label=disable \
+		-v "$PWD/iso/packages.txt:/packages.txt:ro" \
+		-v "$PWD/deploy/apt/isc-bind.asc:/isc-bind.asc:ro" \
+		-v "$repo.partial:/out" \
+		docker.io/library/debian:trixie bash -eu -c '
+export DEBIAN_FRONTEND=noninteractive
+# The image deletes downloaded packages; here they are the product.
+rm -f /etc/apt/apt.conf.d/docker-clean
+echo "APT::Keep-Downloaded-Packages \"true\";" >/etc/apt/apt.conf.d/99keep
+apt-get update -q
+apt-get install -y -q --no-install-recommends ca-certificates apt-utils
+install -m 0644 /isc-bind.asc /usr/share/keyrings/isc-bind.asc
+echo "deb [signed-by=/usr/share/keyrings/isc-bind.asc] https://bind.debian.net/bind trixie main" \
+	>/etc/apt/sources.list.d/isc-bind.list
+apt-get update -q
+apt-get clean
+pkgs=$(sed "s/#.*//" /packages.txt | tr -s "[:space:]" " ")
+apt-get install -y -q --no-install-recommends --download-only -o Dir::State::status=/dev/null $pkgs
+cp /var/cache/apt/archives/*.deb /out/
+cd /out
+apt-ftparchive packages . >Packages
+gzip -9kf Packages
+apt-ftparchive release . >Release
+' || { rm -rf "$repo.partial"; exit 1; }
+	mv "$repo.partial" "$repo"
+	# Older repositories of the cache are of no use.
+	find "$CACHE" -maxdepth 1 -name 'repo-*' ! -name "repo-$key" -exec rm -rf {} +
+fi
+log "Packages: $(ls "$repo"/*.deb | wc -l) files, $(du -sh "$repo" | cut -f1)"
 
 # ----- Portitor -----
 payload=$work/portitor
@@ -104,7 +156,7 @@ else
 	cp -r deploy "$stage/"
 	tar -czf "$payload/portitor.tar.gz" -C "$stage" .
 fi
-cp iso/late.sh iso/target.sh iso/portitor-setup.py iso/portitor-setup.bash iso/portitor-firstboot.service \
+cp iso/late.sh iso/target.sh iso/packages.txt iso/portitor-setup.py iso/portitor-setup.bash iso/portitor-firstboot.service \
 	iso/portitor-recover.sh iso/portitor-recovery.service iso/42_portitor_recovery "$payload/"
 cp iso/preseed.cfg iso/grub.cfg iso/isolinux.cfg "$work/"
 if [[ -n $test ]]; then
@@ -136,6 +188,7 @@ rm -f "$out"
 if ! xorriso -indev "$debian_iso" -outdev "$out" \
 	-map "$work/preseed.cfg" /preseed.cfg \
 	-map "$payload" /portitor \
+	-map "$repo" /portitor/repo \
 	-map "$work/grub.cfg" /boot/grub/grub.cfg \
 	-map "$work/isolinux.cfg" /isolinux/isolinux.cfg \
 	-map iso/portitor.txt /isolinux/portitor.txt \
