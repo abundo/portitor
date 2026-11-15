@@ -58,6 +58,30 @@ because it needs both firewalls' fingerprints and the witness string. Every mach
 is installed from the same [installer ISO](appliance.md); the first-boot setup asks
 what it is.
 
+**The shortest way: from the portal.** Nothing has to be copied between hosts, which
+helps on physical hardware or a hypervisor console without paste:
+
+1. Install the portal (ISO *web*) and log in.
+2. Install the primary (ISO *primary*; choose *Later* when it asks for a secondary
+   string) and add it in the portal (*Add firewall*).
+3. Install the secondary (ISO *secondary*; ignore the secondary string it shows).
+4. In the portal, *Add HA secondary*: pick the primary, give the secondary's
+   management address and an SSH login for it (the user `portitor` and its
+   password), confirm the secondary's SSH host key, and give a login for the
+   primary's host (its host key was confirmed when you added it). Leave *This portal
+   is the pair's witness* checked.
+
+The portal logs in to the secondary and reads its details (`portitor-config
+secondary-info`: name, ports, agent token and the two certificate fingerprints),
+logs in to the primary and gives them to `portitor-config add-secondary`, which adds
+the secondary under *Admin → Firewalls*, sets the primary's management *HA peer
+address* and commits the pair, and with the witness checked sets *HA witness* to
+*External* and has the portal take the pair's `witness-string` (it must reach both hosts'
+management addresses). The secondary is added to the portal, too. The agent token
+travels over the two SSH connections only and is never kept by the portal. The SSH
+passwords are used for these connections and not stored. The steps below are the
+same by hand.
+
 **Before you start.** Cable the HA link between the two firewalls, and put both
 *management* interfaces (and the portal's second interface) on the same management
 network. Both firewalls need the same interface names. Note the management address of

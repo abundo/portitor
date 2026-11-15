@@ -382,6 +382,47 @@ settings are kept unless --agent-fingerprint is given.`,
 	})
 
 	root.AddCommand(&cobra.Command{
+		Use:   "secondary-info",
+		Short: "On a new host: print as JSON what an HA primary needs to add it as its secondary, with the agent's token (portitor-web reads it over SSH)",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, srv, err := load()
+			if err != nil {
+				return err
+			}
+			info, err := web.ReadSecondaryInfo(srv, cfg)
+			if err != nil {
+				return err
+			}
+			return json.NewEncoder(cmd.OutOrStdout()).Encode(info)
+		},
+	})
+
+	var externalWitness bool
+	addSecondary := &cobra.Command{
+		Use:   "add-secondary",
+		Short: "On an HA primary: add the host of secondary-info's JSON (standard input; address filled in) as its secondary, and commit the pair",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			var info web.SecondaryInfo
+			if err := json.NewDecoder(io.LimitReader(os.Stdin, 1<<16)).Decode(&info); err != nil {
+				return fmt.Errorf("standard input: %w", err)
+			}
+			_, srv, err := load()
+			if err != nil {
+				return err
+			}
+			if err := web.AddSecondary(cmd.Context(), srv, info, externalWitness); err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "%s is the HA secondary.\n", info.Name)
+			return nil
+		},
+	}
+	addSecondary.Flags().BoolVar(&externalWitness, "external-witness", false, "the pair's witness is a third host's (portitor-web): witness-string then prints its string")
+	root.AddCommand(addSecondary)
+
+	root.AddCommand(&cobra.Command{
 		Use:   "mib",
 		Short: "Print PORTITOR-MIB, the state's MIB for SNMP, under snmp.base_oid",
 		Args:  cobra.NoArgs,

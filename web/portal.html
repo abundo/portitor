@@ -68,7 +68,7 @@ footer { margin-top: 2rem; color: var(--muted); font-size: 12px; }
   <div class="page">
     <h1>Firewalls</h1>
     <p class="lead">Each firewall's GUI opens in a tab of its own. A firewall keeps its configuration on the firewall; log in to it there.</p>
-    <div class="actions" style="justify-content:flex-start"><button class="btn primary" id="add">Add firewall</button> <button class="btn" id="refresh">Refresh</button></div>
+    <div class="actions" style="justify-content:flex-start"><button class="btn primary" id="add">Add firewall</button> <button class="btn" id="add-ha">Add HA secondary</button> <button class="btn" id="refresh">Refresh</button></div>
     <table><thead><tr><th>Firewall</th><th>portitor-config</th><th>Description</th><th></th></tr></thead><tbody id="fw-rows"></tbody></table>
     <h2>HA witness</h2>
     <p class="lead">The pairs this portal is the third vote of. Paste a witness string (<span class="mono">portitor-config witness-string</span> on the primary).</p>
@@ -101,6 +101,31 @@ footer { margin-top: 2rem; color: var(--muted); font-size: 12px; }
     </div>
     <p id="a-err" class="error" hidden></p>
     <div class="actions"><button type="button" class="btn" id="a-cancel">Cancel</button><button type="button" class="btn primary" id="a-save" hidden>Add firewall</button></div>
+  </form>
+</dialog>
+<dialog id="pair-dlg">
+  <form method="dialog" id="pair-form">
+    <h1>Add HA secondary</h1>
+    <p class="lead">Install the secondary from the ISO (role secondary) first. Portitor logs in over SSH to the new host and to the primary, hands the secondary's details from one to the other and commits the pair: nothing is copied by hand. The credentials are not kept.</p>
+    <label for="p-primary">Primary (a firewall of the portal)</label><select id="p-primary"></select>
+    <h2>Secondary host</h2>
+    <div class="row"><div><label for="p-host">Host (its management address)</label><input id="p-host" placeholder="192.0.2.3"></div><div class="narrow"><label for="p-port">SSH port</label><input id="p-port" value="22" inputmode="numeric"></div></div>
+    <div class="row"><div><label for="p-user">SSH user</label><input id="p-user" value="portitor" autocomplete="off"></div><div><label for="p-pass">Password</label><input id="p-pass" type="password" autocomplete="off"></div></div>
+    <label for="p-key">Or a private key (PEM)</label><textarea id="p-key" rows="2" class="mono" autocomplete="off"></textarea>
+    <div id="p-hostkey" class="box" hidden>
+      <div>The secondary presents this SSH host key. Compare it with the one on its console (<span class="mono">ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub</span>):</div>
+      <div class="mono" id="p-hostkey-fp"></div>
+    </div>
+    <h2>Primary host</h2>
+    <p class="lead">The primary's host key was confirmed when it was added.</p>
+    <div class="row"><div><label for="p-puser">SSH user</label><input id="p-puser" value="portitor" autocomplete="off"></div><div><label for="p-ppass">Password</label><input id="p-ppass" type="password" autocomplete="off"></div><div class="narrow"><label for="p-pport">SSH port</label><input id="p-pport" value="22" inputmode="numeric"></div></div>
+    <label for="p-pkey">Or a private key (PEM)</label><textarea id="p-pkey" rows="2" class="mono" autocomplete="off"></textarea>
+    <h2>Pair</h2>
+    <label for="p-name">Name of the secondary in the portal (its host name when empty)</label><input id="p-name" autocomplete="off">
+    <label for="p-desc">Description</label><input id="p-desc" autocomplete="off">
+    <label><input type="checkbox" id="p-witness" checked> This portal is the pair's witness (it must reach both hosts' management addresses)</label>
+    <p id="p-err" class="error" hidden></p>
+    <div class="actions"><button type="button" class="btn" id="p-cancel">Cancel</button><button type="button" class="btn primary" id="p-go">Add secondary</button></div>
   </form>
 </dialog>
 <script src="/portal/portal.js"></script>

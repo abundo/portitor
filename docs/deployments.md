@@ -95,6 +95,9 @@ To set it up:
    in the portal (*HA witness*, or `portitor-web add-witness`). The portal must be on the management
    network (both agents' `allow_from`).
 
+With a portal, the portal's *Add HA secondary* does the pairing and the witness over SSH, without strings
+to copy (see [High availability](ha.md)).
+
 The commands, in order, are in [Step by step from the ISO](ha.md#step-by-step-from-the-iso).
 
 `./install.py` on the portal host updates the pair one host at a time, the secondary

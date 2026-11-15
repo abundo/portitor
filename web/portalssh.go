@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"strconv"
 	"strings"
 	"time"
@@ -55,21 +56,57 @@ type SSHProbeResult struct {
 
 var errHostKeyUnconfirmed = errors.New("host key not confirmed")
 
-// portalInfoCommand reads the firewall's portitor-config configuration: as
-// root directly, otherwise as the service user through sudo.
-func portalInfoCommand(user string) string {
-	const cmd = "portitor-config portal-info"
+// configCommand runs a portitor-config command on the firewall: as root
+// directly, otherwise as the service user through sudo.
+func configCommand(user string, args ...string) string {
+	cmd := "portitor-config " + strings.Join(args, " ")
 	if user == "root" || user == "portitor" {
 		return cmd
 	}
 	return "sudo -n -u portitor " + cmd
 }
 
-// RunSSHProbe connects to the host, checks (or asks for) its host key,
-// logs in and runs portitor-config portal-info.
-func RunSSHProbe(ctx context.Context, p SSHProbe) (*SSHProbeResult, error) {
+// sshConn is a logged-in SSH connection to a firewall, to run the fixed
+// portitor-config commands the portal needs.
+type sshConn struct {
+	client *ssh.Client
+	user   string
+	host   string
+	// Remote is the address the connection reached.
+	Remote netip.Addr
+}
+
+func (c *sshConn) Close() { _ = c.client.Close() }
+
+// run runs a command with stdin, and returns its standard output. The
+// error holds its standard error, which no command prints a secret to.
+func (c *sshConn) run(cmd string, stdin []byte) ([]byte, error) {
+	sess, err := c.client.NewSession()
+	if err != nil {
+		return nil, err
+	}
+	defer sess.Close()
+	var out, errOut bytes.Buffer
+	sess.Stdout, sess.Stderr = &out, &errOut
+	if stdin != nil {
+		sess.Stdin = bytes.NewReader(stdin)
+	}
+	if err := sess.Run(cmd); err != nil {
+		msg := strings.TrimSpace(errOut.String())
+		if msg == "" {
+			msg = err.Error()
+		}
+		return nil, errors.New(msg)
+	}
+	return out.Bytes(), nil
+}
+
+// dialSSH connects to the host, checking its host key against p.HostKey
+// (empty asks for it: the result then has Confirm and the key, and no
+// connection) and logging in.
+func dialSSH(ctx context.Context, p SSHProbe) (*sshConn, *SSHProbeResult, error) {
 	if p.Host == "" || p.User == "" {
-		return nil, errors.New("host and user are needed")
+		return nil, nil, errors.New("host and user are needed")
 	}
 	if p.Port == 0 {
 		p.Port = 22
@@ -78,7 +115,7 @@ func RunSSHProbe(ctx context.Context, p SSHProbe) (*SSHProbeResult, error) {
 	if p.PrivateKey != "" {
 		signer, err := ssh.ParsePrivateKey([]byte(p.PrivateKey))
 		if err != nil {
-			return nil, fmt.Errorf("private key: %w", err)
+			return nil, nil, fmt.Errorf("private key: %w", err)
 		}
 		methods = append(methods, ssh.PublicKeys(signer))
 	}
@@ -103,38 +140,42 @@ func RunSSHProbe(ctx context.Context, p SSHProbe) (*SSHProbeResult, error) {
 	var d net.Dialer
 	conn, err := d.DialContext(ctx, "tcp", addr)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	defer conn.Close()
-	_ = conn.SetDeadline(time.Now().Add(30 * time.Second))
+	_ = conn.SetDeadline(time.Now().Add(60 * time.Second))
 	cc, chans, reqs, err := ssh.NewClientConn(conn, addr, cfg)
 	if err != nil {
+		conn.Close()
 		if res.Confirm {
 			if p.HostKey != "" {
-				return nil, fmt.Errorf("the host key is %s, not the confirmed %s", res.HostKey, p.HostKey)
+				return nil, nil, fmt.Errorf("the host key is %s, not the confirmed %s", res.HostKey, p.HostKey)
 			}
-			return res, nil
+			return nil, res, nil
 		}
-		return nil, fmt.Errorf("ssh: %w", err)
+		return nil, nil, fmt.Errorf("ssh: %w", err)
 	}
-	client := ssh.NewClient(cc, chans, reqs)
-	defer client.Close()
-	sess, err := client.NewSession()
+	c := &sshConn{client: ssh.NewClient(cc, chans, reqs), user: p.User, host: p.Host}
+	if ta, ok := conn.RemoteAddr().(*net.TCPAddr); ok {
+		c.Remote, _ = netip.AddrFromSlice(ta.IP)
+		c.Remote = c.Remote.Unmap()
+	}
+	return c, res, nil
+}
+
+// RunSSHProbe connects to the host, checks (or asks for) its host key,
+// logs in and runs portitor-config portal-info.
+func RunSSHProbe(ctx context.Context, p SSHProbe) (*SSHProbeResult, error) {
+	c, res, err := dialSSH(ctx, p)
+	if err != nil || c == nil {
+		return res, err
+	}
+	defer c.Close()
+	out, err := c.run(configCommand(p.User, "portal-info"), nil)
 	if err != nil {
-		return nil, err
-	}
-	defer sess.Close()
-	var out, errOut bytes.Buffer
-	sess.Stdout, sess.Stderr = &out, &errOut
-	if err := sess.Run(portalInfoCommand(p.User)); err != nil {
-		msg := strings.TrimSpace(errOut.String())
-		if msg == "" {
-			msg = err.Error()
-		}
-		return nil, fmt.Errorf("portitor-config portal-info on %s: %s", p.Host, msg)
+		return nil, fmt.Errorf("portitor-config portal-info on %s: %w", p.Host, err)
 	}
 	var info PortalInfo
-	if err := json.Unmarshal(out.Bytes(), &info); err != nil {
+	if err := json.Unmarshal(out, &info); err != nil {
 		return nil, fmt.Errorf("portitor-config portal-info: unexpected answer: %w", err)
 	}
 	scheme := "https"

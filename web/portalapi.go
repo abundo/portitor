@@ -246,6 +246,22 @@ func (p *Portal) handleProbe(w http.ResponseWriter, r *http.Request) {
 	portalJSON(w, res)
 }
 
+// handlePair makes a firewall the HA secondary of one in the portal.
+func (p *Portal) handlePair(w http.ResponseWriter, r *http.Request) {
+	var req PairRequest
+	if err := readBody(r, &req); err != nil {
+		portalError(w, r, http.StatusBadRequest, "bad request")
+		return
+	}
+	res, err := p.PairSecondary(r.Context(), req)
+	if err != nil {
+		slog.Info("portal: pairing failed", "primary", req.Primary, "secondary", req.Secondary.Host, "err", err)
+		portalError(w, r, http.StatusBadGateway, err.Error())
+		return
+	}
+	portalJSON(w, res)
+}
+
 func (p *Portal) handleWitnesses(w http.ResponseWriter, r *http.Request) {
 	type pair struct {
 		Pair  string   `json:"pair"`

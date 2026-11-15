@@ -411,6 +411,7 @@ func (p *Portal) Handler() http.Handler {
 	mux.HandleFunc("PUT /portal/v1/firewalls/{name}", p.authed(p.handlePutFirewall))
 	mux.HandleFunc("DELETE /portal/v1/firewalls/{name}", p.authed(p.handleDeleteFirewall))
 	mux.HandleFunc("POST /portal/v1/probe", p.authed(p.handleProbe))
+	mux.HandleFunc("POST /portal/v1/pair", p.authed(p.handlePair))
 	mux.HandleFunc("GET /portal/v1/witness", p.authed(p.handleWitnesses))
 	mux.HandleFunc("POST /portal/v1/witness", p.authed(p.handlePutWitness))
 	mux.HandleFunc("DELETE /portal/v1/witness/{pair}", p.authed(p.handleDeleteWitness))

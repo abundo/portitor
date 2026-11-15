@@ -196,7 +196,7 @@ func TestSSHProbe(t *testing.T) {
 	if _, err := RunSSHProbe(context.Background(), p); err == nil {
 		t.Error("wrong password accepted")
 	}
-	if portalInfoCommand("alice") != "sudo -n -u portitor portitor-config portal-info" {
+	if configCommand("alice", "portal-info") != "sudo -n -u portitor portitor-config portal-info" {
 		t.Error("a user other than root runs it as the service user")
 	}
 }

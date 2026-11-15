@@ -24,7 +24,7 @@ cleanly now. Go on only once they've chosen.
 
 | Path | What |
 |---|---|
-| `cmd/portitor-web` | One binary, two programs by name: `portitor-web` is the portal (`portal.go`: `start`, `witness`, `check`, `createadmin`, `add-firewall`, `add-witness`); run as `portitor-config` (a symlink, `main.go`) the firewall's configuration, GUI and API: `start`, `migrate`, `createadmin`, `set-agent`, `agent-url`, `bootstrap` (ISO first boot), `fingerprint`, `portal-info`, `witness-string`, `promote`, `import-vf` and the console commands (`console.go`, `cli` among them) |
+| `cmd/portitor-web` | One binary, two programs by name: `portitor-web` is the portal (`portal.go`: `start`, `witness`, `check`, `createadmin`, `add-firewall`, `add-witness`); run as `portitor-config` (a symlink, `main.go`) the firewall's configuration, GUI and API: `start`, `migrate`, `createadmin`, `set-agent`, `agent-url`, `bootstrap` (ISO first boot), `fingerprint`, `portal-info`, `secondary-info`, `add-secondary`, `witness-string`, `promote`, `import-vf` and the console commands (`console.go`, `cli` among them) |
 | `cmd/portitor-agent` | Agent daemon on the firewall: `start`, `init`, `render`, `netns-exec`; run as `portitor` (a symlink, `cli.go`) it is a CLI over the agent's root-only socket `<run_dir>/agent.sock`: `show ...` over the GET routes, and actions that change no configuration (`confirm`, `rollback`, `request dhcp renew`, `request iplist update`, `request blocklist update`, `clear connections`) over the POST routes in `localWrites` |
 | `internal/fwconfig` | The desired-state document and `Validate()`. **The contract between web and agent.** |
 | `yang` | The YANG modules: the configuration's schema (module `portitor`, a submodule per area, the state in `portitor-state`, `portitor-extensions`), embedded by `yang.go`; first drafted from the tables (by `dev/yanggen`, gone with them), edited by hand since |
@@ -102,7 +102,18 @@ docs and user-facing messages.
   is added by `POST /portal/v1/probe`: SSH to the host (the host key is returned for
   the administrator to confirm before any login; credentials are never stored), which
   runs `portitor-config portal-info` (as the service user through `sudo` unless root)
-  for its port and `tls_cert` fingerprint. It serves each firewall it lists at `/fw/<name>/` with
+  for its port and `tls_cert` fingerprint. An HA secondary is
+paired the same way, without a string copied by hand (`web/portalpair.go`, `POST
+/portal/v1/pair`, `PairSecondary`): over SSH to the new host `portitor-config
+secondary-info` (`web/pairing.go`: name, ports, the agent token and both
+fingerprints, which portitor-config holds; the portal adds the address it reached the
+host on), then over SSH to the primary (its `ssh-host-key` checked) `portitor-config
+add-secondary` (`AddSecondary`, in-process console requests: the firewall row with
+`ha_primary_id`, the management interface's `peer-addresses`, commit and confirm;
+`portitor-setup --join` runs it too, so the logic is there alone), and with the
+witness option `--external-witness` and `witness-string` into the portal's witness
+list. The token goes on standard input only, the SSH credentials are never kept, and
+the portal runs these fixed commands only (`configCommand`). It serves each firewall it lists at `/fw/<name>/` with
   `httputil.ReverseProxy` to that firewall's portitor-config (its `tls_cert` pinned
   and asked for by `PinnedServerName`, so a certificate chosen under Settings never
   breaks the pin), streams flushed as they come, the console's WebSocket passed

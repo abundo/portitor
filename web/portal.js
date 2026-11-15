@@ -135,6 +135,7 @@ function drawPortal() {
     view.append($('portal-page').content.cloneNode(true))
     views.prepend(view)
     $('add').onclick = openAdd
+    $('add-ha').onclick = openPair
     $('refresh').onclick = () => refresh().catch((e) => showError(e.message))
     $('w-add').onclick = async () => {
       try { await api('POST', 'witness', { string: $('w-str').value }); $('w-str').value = ''; showError(''); drawWitness() } catch (e) { showError(e.message) }
@@ -231,6 +232,54 @@ $('a-save').onclick = async () => {
     select($('a-name').value.trim())
   } catch (e) {
     addError(e.message)
+  }
+}
+
+// The HA secondary dialog: the portal pairs the new host with a primary it
+// serves over SSH, the secondary's host key confirmed first.
+let pairKey = ''
+function openPair() {
+  for (const id of ['p-host', 'p-pass', 'p-key', 'p-ppass', 'p-pkey', 'p-name', 'p-desc']) $(id).value = ''
+  pairKey = ''
+  $('p-hostkey').hidden = $('p-err').hidden = true
+  $('p-go').textContent = 'Add secondary'
+  const sel = $('p-primary')
+  sel.replaceChildren(...firewalls.map((f) => el('option', { value: f.name }, f.name)))
+  if (active !== 'portal' && firewalls.some((f) => f.name === active)) sel.value = active
+  $('pair-dlg').showModal()
+}
+function pairError(msg) { $('p-err').textContent = msg || ''; $('p-err').hidden = !msg }
+$('p-cancel').onclick = () => $('pair-dlg').close()
+$('pair-dlg').addEventListener('cancel', (e) => e.preventDefault())
+$('p-go').onclick = async () => {
+  pairError('')
+  const btn = $('p-go')
+  btn.disabled = true
+  try {
+    const res = await api('POST', 'pair', {
+      primary: $('p-primary').value, name: $('p-name').value.trim(), description: $('p-desc').value.trim(),
+      witness: $('p-witness').checked,
+      secondary: { host: $('p-host').value.trim(), port: parseInt($('p-port').value, 10) || 22, user: $('p-user').value.trim(),
+        password: $('p-pass').value, private_key: $('p-key').value, host_key: pairKey },
+      primary_ssh: { port: parseInt($('p-pport').value, 10) || 22, user: $('p-puser').value.trim(),
+        password: $('p-ppass').value, private_key: $('p-pkey').value },
+    })
+    if (res.confirm) {
+      pairKey = res.host_key
+      $('p-hostkey-fp').textContent = pairKey
+      $('p-hostkey').hidden = false
+      btn.textContent = 'Trust this host key and add'
+      return
+    }
+    $('pair-dlg').close()
+    await refresh()
+    if (res.warning) showError(res.warning)
+    drawWitness()
+    if (res.firewall) select(res.firewall.name)
+  } catch (e) {
+    pairError(e.message)
+  } finally {
+    btn.disabled = false
   }
 }
 

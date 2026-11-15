@@ -653,28 +653,14 @@ def step_ha_primary(a: dict) -> None:
 
 def add_secondary(a: dict, d: dict) -> None:
     """Primary role: adds the host of a secondary string as the HA secondary,
-    with its management address, and commits the pair."""
-    fw = own_firewall()
-    if any(f.get("ha_primary_id") == fw["id"] for f in api("GET", "/api/firewalls") or []):
-        raise RuntimeError(f"{fw['name']} has an HA secondary already (Admin -> Firewalls)")
-    inst = default_instance()
-    links = {i["ha-role"]: i for i in interfaces(inst) if i.get("ha-role")}
-    if "ha_link" not in links:
-        raise RuntimeError("this host has no HA link interface: run the primary's setup first")
-    ifc, peer = links.get("management"), d["mgmt"]
-    if not ifc or not ifc.get("addresses"):
-        raise RuntimeError("this host has no management interface with an address: run the primary's setup first")
-    own = ipaddress.IPv4Interface(ifc["addresses"][0])
-    if own.network != peer.network or own.ip == peer.ip:
-        raise RuntimeError(f"the secondary's management address {peer} is not another address in {own.network}")
-    ip = d["mgmt"].ip
-    api("POST", "/api/firewalls", {"name": d["name"], "agent_url": f"https://{ip}:{AGENT_PORT}",
-                                   "agent_token": d["token"], "agent_fingerprint": d["agent_fingerprint"],
-                                   "config_url": f"https://{ip}:{GUI_PORT}", "config_fingerprint": d["config_fingerprint"],
-                                   "ha_primary_id": fw["id"]})
-    api("PATCH", cfg_path(entry("instance", inst), entry("interface", ifc["name"])),
-        {"peer-addresses": [str(peer)]})
-    commit(f"the HA pair with {d['name']}")
+    with its management address, and commits the pair: `portitor-config
+    add-secondary` does it (the portal runs the same over SSH)."""
+    info = {"name": d["name"], "address": str(d["mgmt"]), "agent_port": AGENT_PORT, "config_port": GUI_PORT,
+            "token": d["token"], "agent_fingerprint": d["agent_fingerprint"],
+            "config_fingerprint": d["config_fingerprint"]}
+    proc = run(config("add-secondary"), stdin=json.dumps(info), check=False, quiet=True)
+    if proc.returncode != 0:
+        raise RuntimeError((proc.stderr or proc.stdout or "portitor-config add-secondary failed").strip())
 
 
 def join_secondary(a: dict, text: str) -> bool:
@@ -1425,7 +1411,8 @@ witness too (see High availability in the GUI's Help).
 
 def secondary_text(a: dict) -> str:
     """Secondary role: the string for the primary, and how to use it."""
-    return f"""This host is ready to be the HA secondary. On the primary, run
+    return f"""This host is ready to be the HA secondary. In the portal, Add HA secondary
+does the rest without this string. Or, on the primary, run
 sudo portitor-setup --join and paste this secondary string (it holds this host's
 agent token: keep it to yourself):
 
@@ -1441,9 +1428,10 @@ from then on this host's portitor-config is a read-only copy of the primary's
 
 def primary_text(a: dict) -> str:
     return f"""This host is the primary of an HA pair. Install the secondary from the ISO
-("secondary"), and paste the string its setup shows into sudo portitor-setup --join
-here. For a failover by itself, give the pair an external witness: see High
-availability in the GUI's Help.
+("secondary"). Then add it in the portal (Add HA secondary: nothing to copy), or
+paste the string its setup shows into sudo portitor-setup --join here. For a
+failover by itself, give the pair an external witness (the portal's Add HA
+secondary does): see High availability in the GUI's Help.
 
 {gui_text(a)}
 {ha_portal_text(a)}"""

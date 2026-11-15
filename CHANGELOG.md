@@ -8,6 +8,15 @@ here (`dev/release-notes.sh`); the full list is `git log <previous tag>..<tag>`.
 
 ## Unreleased
 
+### Added
+
+- **The portal pairs an HA secondary** (*Add HA secondary*): install the portal,
+  the primary and the secondary, add the primary to the portal, and the portal
+  connects the pair over SSH, with nothing copied by hand: it reads the new host's
+  details (`portitor-config secondary-info`), has the primary add and commit the
+  secondary (`portitor-config add-secondary`), and, if you like, becomes the pair's
+  witness. `portitor-setup --join` uses the same command.
+
 ### Changed
 
 - **portitor-web is a standalone portal with a configuration of its own**: its

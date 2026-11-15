@@ -124,6 +124,17 @@ connection and never kept. Give the firewall a name and add it; its GUI opens in
 tab. *Enter by hand* takes the URL (`https://<firewall>:8444`; `http://` only to
 this host) and the SHA-256 of its `tls_cert` (`portitor-config fingerprint` there).
 
+**Adding an HA secondary** (*Add HA secondary*): pairs a new host with a firewall the
+portal already serves, with nothing copied by hand. portitor-web logs in to the new host
+over SSH (its host key confirmed first) and runs `portitor-config secondary-info`, then
+logs in to the primary (the host key from when it was added) and pipes the result to
+`portitor-config add-secondary`, which adds the secondary, gives the management
+interface its peer address and commits the pair. With *This portal is the pair's
+witness* it also sets the pair's witness to external and adds its `witness-string`.
+The new host is added to the portal's firewalls. The agent token goes over standard
+input only, and is not kept; the users are root or one that may run
+`sudo -u portitor portitor-config ...`. See [High availability](ha.md).
+
 On each firewall, add portitor-web's address to `trusted_proxies` in its
 `config.yaml`. The HA pair's shared login needs each host's *portitor-config URL* and
 *fingerprint* under *Firewalls*: portitor-web knows the two hosts by those
