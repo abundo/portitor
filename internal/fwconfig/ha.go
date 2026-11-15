@@ -353,7 +353,7 @@ func (v *validator) haInterfaces(d *Document) {
 				v.addf("%s: interface %s: only the management interface has an HA gateway", p, ifc.Name)
 			}
 			if ifc.HARole == HARoleManagement {
-				v.haGateway(p, ifc)
+				v.haGateway(p, ifc, d.HA != nil)
 			}
 		}
 		for _, role := range []string{HARoleLink, HARoleManagement} {
@@ -394,8 +394,13 @@ func (v *validator) haInterfaces(d *Document) {
 	}
 }
 
-// haGateway checks the management gateway: an address on the interface.
-func (v *validator) haGateway(p string, ifc Interface) {
+// haGateway checks the management gateway: an address on the interface. The
+// peer as gateway has no address until the secondary is added: outside a
+// pair (inPair false) that is fine, nothing uses the gateway yet.
+func (v *validator) haGateway(p string, ifc Interface, inPair bool) {
+	if ifc.HAGatewayPeer && ifc.HAGateway == "" && !inPair {
+		return
+	}
 	gw, err := netip.ParseAddr(ifc.HAGateway)
 	if err != nil {
 		v.addf("%s: interface %s: the management interface needs a gateway", p, ifc.Name)
