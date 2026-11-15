@@ -17,6 +17,7 @@ import (
 	"github.com/abundo/portitor/internal/datastore/sqlmap"
 	"github.com/abundo/portitor/internal/dbmigrate"
 	"github.com/abundo/portitor/internal/fwconfig"
+	"github.com/abundo/portitor/internal/records"
 	"github.com/abundo/portitor/internal/schema"
 	"github.com/abundo/portitor/internal/wgkeys"
 	"github.com/abundo/portitor/models"
@@ -51,7 +52,7 @@ type adder struct {
 }
 
 func newAdder(t *testing.T, db *gorm.DB, tree *datastore.Tree) *adder {
-	return &adder{a: testMapping(t).NewAdder(db, tree, sqlmap.Index{}), next: 1000}
+	return &adder{a: testMapping(t).NewAdder(recOf(db), tree, sqlmap.Index{}), next: 1000}
 }
 
 func (a *adder) create(t *testing.T, model any) {
@@ -78,9 +79,7 @@ func ptr(v uint) *uint { return &v }
 func seed(t *testing.T, db *gorm.DB, add *adder) {
 	t.Helper()
 	fw := models.Firewall{Name: "fw1"}
-	if err := db.Create(&fw).Error; err != nil {
-		t.Fatal(err)
-	}
+	add.create(t, &fw)
 	host := models.Instance{Name: "host", IsDefault: true, FirewallID: fw.ID, DnsUpstream: "forward", DnsForwardMode: "first",
 		NtpServers: models.JSONList[fwconfig.NTPServer]{{Address: "pool.ntp.org", Pool: true}}}
 	add.create(t, &host)
@@ -155,7 +154,7 @@ func TestRows(t *testing.T) {
 	if errs := tree.Validate(); len(errs) > 0 {
 		t.Fatalf("the seed is not valid: %v", errs)
 	}
-	v, err := Load(db, tree)
+	v, err := Load(recOf(db), tree)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +163,11 @@ func TestRows(t *testing.T) {
 	}
 	host := v.Instances[0]
 	var fw models.Firewall
-	db.Where("name = ?", "fw1").First(&fw)
+	for _, f := range v.Firewalls {
+		if f.Name == "fw1" {
+			fw = f
+		}
+	}
 	if host.FirewallID != fw.ID || len(v.Tasks) != 1 || v.Tasks[0].FirewallID != fw.ID {
 		t.Errorf("firewall %d: host on %d, tasks %+v", fw.ID, host.FirewallID, v.Tasks)
 	}
@@ -219,8 +222,8 @@ func TestRows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	v1, _ := LoadWith(db, tree, ids)
-	v2, _ := LoadWith(db, back, ids)
+	v1, _ := LoadWith(recOf(db), tree, ids)
+	v2, _ := LoadWith(recOf(db), back, ids)
 	v1.Tree, v1.Index, v2.Tree, v2.Index = nil, nil, nil, nil
 	if !reflect.DeepEqual(v1, v2) {
 		t.Error("the tree's JSON makes other rows")
@@ -236,16 +239,25 @@ func schemaRoot(t *testing.T) *schema.Node {
 	return root
 }
 
-// assign gives tree's entries their ids in db, and returns them.
+// recs are the records of each test database: the ids are kept in the
+// records, so every use of a database shares them.
+var recs = map[*gorm.DB]*records.GORM{}
+
+func recOf(db *gorm.DB) *records.GORM {
+	if r, ok := recs[db]; ok {
+		return r
+	}
+	recs[db] = records.NewGORM(db, "")
+	return recs[db]
+}
+
+// assign gives tree's entries their ids, and returns all the ids kept.
 func assign(t *testing.T, db *gorm.DB, tree *datastore.Tree) (sqlmap.IDs, error) {
 	t.Helper()
-	if err := db.Transaction(func(tx *gorm.DB) error {
-		_, err := testMapping(t).AssignIDs(tx, tree)
-		return err
-	}); err != nil {
+	if err := recOf(db).FollowChange(testMapping(t), tree); err != nil {
 		return sqlmap.IDs{}, err
 	}
-	return sqlmap.LoadIDs(db)
+	return recOf(db).IDs()
 }
 
 // TestIDs: an entry keeps its id across a rename, a new one gets another,
@@ -257,7 +269,7 @@ func TestIDs(t *testing.T) {
 	}
 	idOf := func(tr *datastore.Tree, p datastore.Path) uint {
 		t.Helper()
-		v, err := Load(db, tr)
+		v, err := Load(recOf(db), tr)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -311,7 +323,13 @@ func TestIDs(t *testing.T) {
 }
 
 // notMapped are fields of the models that are not leaves.
-var notMapped = map[string][]string{"settings": {"last_commit", "web_certificate_id"}}
+var notMapped = map[string][]string{
+	"settings": {"last_commit", "web_certificate_id"},
+	// The runtime values (sessions.json), not configuration.
+	"users": {"token_version", "totp_last_step", "totp_pending"},
+	// The generation of the last deployment: runtime.
+	"firewalls": {"generation"},
+}
 
 // TestEveryFieldMapped keeps the YANG modules and the models in step: a
 // model's field needs its leaf (or a place above), and a row's column its
@@ -359,3 +377,38 @@ func checkFields(t *testing.T, m *sqlmap.Mapping, model any) {
 
 // wgKey is wg0's private key, a secret.
 var wgKey string
+
+// A rename whose commit was refused is put back: so is the entry's id.
+func TestUndoRenames(t *testing.T) {
+	db, tree := seeded(t)
+	if _, err := assign(t, db, tree); err != nil {
+		t.Fatal(err)
+	}
+	at := func(name string) datastore.Path {
+		return datastore.Path{{Name: "instance", Keys: []string{"host"}}, {Name: "interface", Keys: []string{name}}}
+	}
+	ids, _ := recOf(db).IDs()
+	was := func(p datastore.Path) int64 { id, _ := ids.ID(p.String(tree.Root.S)); return id }
+	lan := was(at("lan0"))
+	if lan == 0 {
+		t.Fatal("no id")
+	}
+	if err := tree.Rename(at("lan0"), []string{"lan1"}); err != nil {
+		t.Fatal(err)
+	}
+	renamed := append([]datastore.Renamed(nil), tree.Renamed...)
+	if _, err := assign(t, db, tree); err != nil {
+		t.Fatal(err)
+	}
+	ids, _ = recOf(db).IDs()
+	if was(at("lan1")) != lan || was(at("lan0")) != 0 {
+		t.Fatalf("not moved: %d %d", was(at("lan1")), was(at("lan0")))
+	}
+	if err := recOf(db).UpdateIDs(func(ids sqlmap.IDs) { testMapping(t).UndoRenames(ids, renamed) }); err != nil {
+		t.Fatal(err)
+	}
+	ids, _ = recOf(db).IDs()
+	if was(at("lan0")) != lan || was(at("lan1")) != 0 {
+		t.Errorf("not put back: %d %d", was(at("lan0")), was(at("lan1")))
+	}
+}

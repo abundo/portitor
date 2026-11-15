@@ -18,10 +18,8 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
-	"gorm.io/gorm"
 
 	"github.com/abundo/portitor/internal/agent"
-	"github.com/abundo/portitor/models"
 )
 
 // consoleEnv runs portitor-web against a real dry-run agent whose console
@@ -154,8 +152,11 @@ func TestConsoleClosesOnRevoke(t *testing.T) {
 	_ = conn.Write(ctx, websocket.MessageText, []byte(`{"cols":80,"rows":24}`))
 
 	// A password change elsewhere revokes every session of the user.
-	if err := env.srv.db.Model(&models.User{}).Where("username = ?", "admin").
-		Update("token_version", gorm.Expr("token_version + 1")).Error; err != nil {
+	admin, err := env.srv.rec.UserNamed("admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := env.srv.rec.SaveUser(admin, true); err != nil {
 		t.Fatal(err)
 	}
 	for {

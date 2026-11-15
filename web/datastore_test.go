@@ -45,8 +45,7 @@ commit now
 	if !strings.Contains(out, "Commit 1: applied.") {
 		t.Errorf("commit: %s", out)
 	}
-	var dep models.Deployment
-	env.srv.db.Order("id desc").First(&dep)
+	dep := env.lastDeployment()
 	if dep.Status != "applied" || dep.Username != "console" {
 		t.Errorf("deployment %+v", dep)
 	}
@@ -97,9 +96,11 @@ func TestCLIAccess(t *testing.T) {
 	if err := CreateUser(env.srv, "viewer", "correct horse battery"); err != nil {
 		t.Fatal(err)
 	}
-	env.srv.db.Model(&models.User{}).Where("username = ?", "viewer").Update("role", models.RoleViewer)
-	var u models.User
-	env.srv.db.Where("username = ?", "viewer").First(&u)
+	u := env.userNamed("viewer")
+	u.Role = models.RoleViewer
+	if err := env.srv.rec.SaveUser(&u, false); err != nil {
+		t.Fatal(err)
+	}
 	cenv, err := env.srv.cliEnv(context.Background(), &u)
 	if err != nil {
 		t.Fatal(err)
@@ -135,7 +136,6 @@ func TestNETCONFOverSSH(t *testing.T) {
 	defer cancel()
 	dir := t.TempDir()
 	env.srv.cfg.SSHListen = "127.0.0.1:0"
-	env.srv.cfg.DB.Path = filepath.Join(dir, "db.sqlite")
 	key, err := cli.LoadHostKey(filepath.Join(dir, "key"))
 	if err != nil {
 		t.Fatal(err)
@@ -192,8 +192,7 @@ func TestNETCONFOverSSH(t *testing.T) {
 	if !strings.Contains(r, "<ok/>") {
 		t.Fatal(r)
 	}
-	var dep models.Deployment
-	env.srv.db.Order("id desc").First(&dep)
+	dep := env.lastDeployment()
 	if dep.Username != "admin" || dep.Status != "applied" {
 		t.Errorf("deployment %+v", dep)
 	}
@@ -270,9 +269,33 @@ func TestCLIInstanceRoles(t *testing.T) {
 	}
 
 	var fw models.Firewall
-	env.srv.db.First(&fw)
+	fw = env.firstFirewall()
 	cliScript(t, cenv, "configure\ninstance shop firewall "+fw.Name+"\n")
 	if _, ok := env.roles()["vf-shop"]; !ok {
 		t.Errorf("no role for a virtual firewall made in the CLI: %v", env.roles())
+	}
+}
+
+// A virtual firewall deleted and committed in the CLI takes its role with it:
+// the commit runs under the CLI's session, and what it does afterwards edits
+// the candidate too.
+func TestCLICommitDeletingAnInstanceDropsItsRole(t *testing.T) {
+	env, _ := consoleEnv(t, "")
+	ctx := context.Background()
+	cenv, err := env.srv.ConsoleCLI(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env.vf("lab")
+	if _, ok := env.roles()["vf-lab"]; !ok {
+		t.Fatal("no role for the new virtual firewall")
+	}
+	cliScript(t, cenv, "configure\ncommit now\n")
+	out := cliScript(t, cenv, "configure\ndelete instance lab\ncommit now\n")
+	if strings.Contains(out, "pending") {
+		out += cliScript(t, cenv, "confirm\n")
+	}
+	if _, ok := env.roles()["vf-lab"]; ok {
+		t.Error("the deleted virtual firewall's role is still there")
 	}
 }

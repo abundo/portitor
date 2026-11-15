@@ -12,7 +12,6 @@ import (
 	"strings"
 
 	"github.com/abundo/portitor/internal/datastore"
-	"github.com/abundo/portitor/models"
 )
 
 // SetAgent sets the first firewall's agent connection (install.py, for
@@ -21,19 +20,21 @@ func SetAgent(s *Server, url, token, fingerprint string) error {
 	if err := s.ensureFirewall(); err != nil {
 		return err
 	}
-	id, err := firstFirewallID(s.db)
+	id, err := s.firstFirewallID()
 	if err != nil {
 		return err
 	}
-	var fw models.Firewall
-	if err := s.db.First(&fw, id).Error; err != nil {
+	fw, err := s.rec.Firewall(id)
+	if err != nil {
 		return err
 	}
-	fw.AgentURL, fw.NewAgentToken, fw.AgentFingerprint = url, token, fingerprint
-	if err := prepareFirewall(s.db, &fw, &fw); err != nil {
+	// The firewall's own checks, as its CRUD runs them.
+	c := *fw
+	c.AgentURL, c.NewAgentToken, c.AgentFingerprint = url, token, fingerprint
+	if err := checkFirewallFields(&c); err != nil {
 		return err
 	}
-	return s.db.Save(&fw).Error
+	return s.rec.SetAgentConnection(id, c.AgentURL, c.AgentToken, c.AgentFingerprint)
 }
 
 // ImportBundleFile adds the bundle in path as a virtual firewall named

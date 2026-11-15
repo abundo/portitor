@@ -17,7 +17,6 @@ import (
 	"gorm.io/gorm/logger"
 
 	"github.com/abundo/portitor/internal/dbmigrate"
-	"github.com/abundo/portitor/models"
 )
 
 const testPassphrase = "a long enough passphrase"
@@ -28,7 +27,7 @@ func (env *testEnv) backup() []byte {
 	if rec.Code != http.StatusOK {
 		env.t.Fatalf("backup: %d %s", rec.Code, rec.Body)
 	}
-	if cd := rec.Header().Get("Content-Disposition"); !strings.Contains(cd, ".db.age") {
+	if cd := rec.Header().Get("Content-Disposition"); !strings.Contains(cd, ".tar.age") {
 		env.t.Errorf("Content-Disposition %q", cd)
 	}
 	return rec.Body.Bytes()
@@ -57,12 +56,8 @@ func TestBackupRestore(t *testing.T) {
 	if err := CreateUser(env.srv, "gone", "another long password"); err != nil {
 		t.Fatal(err)
 	}
-	if err := env.srv.db.Exec("INSERT INTO roles (name) VALUES ('ops')").Error; err != nil {
-		t.Fatal(err)
-	}
-	if err := env.srv.db.Exec("INSERT INTO role_members (role_id, user_id, level) SELECT r.id, u.id, 'viewer' FROM roles r, users u WHERE u.username IN ('stays', 'gone')"); err.Error != nil || err.RowsAffected != 2 {
-		t.Fatalf("role member: %v %d", err.Error, err.RowsAffected)
-	}
+	env.create("/api/roles", map[string]any{"name": "ops", "members": []map[string]any{
+		{"user_id": env.userNamed("stays").ID, "level": "viewer"}, {"user_id": env.userNamed("gone").ID, "level": "viewer"}}})
 	data := env.backup()
 
 	// The download is age encrypted with the passphrase.
@@ -72,17 +67,17 @@ func TestBackupRestore(t *testing.T) {
 		t.Fatal(err)
 	}
 	plain, _ := io.ReadAll(r)
-	if !bytes.HasPrefix(plain, sqliteMagic) {
-		t.Fatal("decrypted backup is not SQLite")
+	if !isTar(plain) {
+		t.Fatal("decrypted backup is not an archive")
 	}
 
 	// Change things after the backup.
 	env.post("host", map[string]any{"name": "printer", "addresses": []string{"192.168.1.20"}})
 	env.do("PUT", "/api/settings", map[string]any{"wg_endpoint_host": "new.example.com"})
 	env.do("PUT", "/api/firewalls/1", map[string]any{"name": "firewall", "agent_url": "https://10.0.0.2:8443", "agent_token": "new-token"})
-	env.srv.db.Exec("UPDATE settings SET last_commit = 7 WHERE id = 1")
-	env.srv.db.Model(&models.Firewall{}).Where("id = 1").Update("generation", 9)
-	if err := env.srv.db.Exec("DELETE FROM users WHERE username = 'gone'").Error; err != nil {
+	_ = env.srv.rec.SetLastCommit(7)
+	_ = env.srv.rec.SetGeneration(1, 9)
+	if err := env.srv.rec.DeleteUser(env.userNamed("gone").ID); err != nil {
 		t.Fatal(err)
 	}
 	if err := CreateUser(env.srv, "later", "another long password"); err != nil {
@@ -118,14 +113,18 @@ func TestBackupRestore(t *testing.T) {
 	if fw.AgentURL != "https://10.0.0.2:8443" || fw.AgentToken != "new-token" || fw.Generation != 9 || st.LastCommit != 7 {
 		t.Errorf("agent settings: %q %q %d %d", fw.AgentURL, fw.AgentToken, fw.Generation, st.LastCommit)
 	}
-	var n int64
-	env.srv.db.Model(&models.User{}).Where("username = ?", "later").Count(&n)
-	if n != 1 {
-		t.Error("restore replaced the users")
+	// The backup is the configuration, users and roles with it: a user made
+	// since is gone, one deleted since is back with their memberships.
+	if _, err := env.srv.rec.UserNamed("later"); err == nil {
+		t.Error("a user made after the backup survived the restore")
 	}
 	var members []string
-	env.srv.db.Raw("SELECT u.username FROM role_members m JOIN users u ON u.id = m.user_id").Scan(&members)
-	if strings.Join(members, ",") != "stays" {
+	ms, _ := env.srv.rec.RoleMembers()
+	for _, m := range ms {
+		members = append(members, env.userID(m.UserID).Username)
+	}
+	slices.Sort(members)
+	if strings.Join(members, ",") != "gone,stays" {
 		t.Errorf("role members after restore: %v", members)
 	}
 	if rec := env.do("GET", "/api/me", nil); rec.Code != http.StatusOK {
@@ -140,7 +139,7 @@ func TestBackupRestore(t *testing.T) {
 		t.Errorf("id %d reused (sequence was %d)", next, printerID)
 	}
 
-	// An unencrypted database file restores too.
+	// The unencrypted archive restores too.
 	if rec := env.do("POST", "/api/backup/restore", map[string]any{"data": plain}); rec.Code != http.StatusOK {
 		t.Fatalf("plain restore: %d %s", rec.Code, rec.Body)
 	}

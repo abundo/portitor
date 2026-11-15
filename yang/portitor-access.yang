@@ -1,0 +1,235 @@
+// SPDX-FileCopyrightText: 2026 The Portitor contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+submodule portitor-access {
+  yang-version 1.1;
+  belongs-to portitor { prefix pt; }
+  import portitor-extensions { prefix px; }
+  include portitor-types;
+
+  description "Portitor configuration: who may log in, and how (the directory).";
+
+  revision 2026-11-15 { description "The directory's servers, the users, their roles and the mappings from directory groups."; }
+
+  // The lists here are committed alone (web/globals.go, globalLists): what
+  // runs of them is the file global.json, so they take effect at once and a
+  // rolled back commit doesn't take them along. Global admins only.
+  grouping access {
+    list user {
+      key "username";
+      px:table "users";
+      description "A person who logs in, to the GUI, the CLI and an OpenVPN server. Their runtime values (the sessions' token version, the TOTP step last used) are not configuration: they are kept apart.";
+      leaf username {
+        type name;
+      }
+      leaf full-name {
+        type text;
+      }
+      leaf email {
+        type text;
+      }
+      leaf date-format {
+        type string;
+        default "locale";
+        description "How the GUI shows dates and times, one of models.DateFormats.";
+      }
+      leaf password-hash {
+        type string;
+        px:secret;
+        description "The bcrypt hash of the password, or @LDAP for a user copied from a directory server, whose password is the server's.";
+      }
+      leaf ldap-server {
+        type leafref { path "../../ldap-server/name"; }
+        description "The directory server the user was copied from on their first login; empty for a local user.";
+      }
+      leaf role {
+        type enumeration { enum "admin"; enum "viewer"; enum "none"; }
+        description "The user's global access: admin, viewer, or none (the access of their roles' virtual firewalls only).";
+      }
+      leaf totp-secret {
+        type string;
+        px:secret;
+        description "The base32 TOTP secret of a user with two-factor login on.";
+      }
+      leaf recovery-codes {
+        type string;
+        px:secret;
+        description "The unused recovery codes' SHA-256 hashes (hex, a JSON list).";
+      }
+      leaf totp-required {
+        type boolean;
+        description "The user must set up two-factor login before they may do anything else; an admin sets it.";
+      }
+    }
+    list role {
+      key "name";
+      px:table "roles";
+      description "A group of users with access to virtual firewalls: each virtual firewall but the default has its own (instance), and a role made by hand grants the instances it names. Members are admins or viewers of what it grants.";
+      leaf name {
+        type name;
+      }
+      leaf description {
+        type text;
+      }
+      leaf instance {
+        type name;
+        px:nullable;
+        description "The virtual firewall this is the role of; empty for a role made by hand. Made and renamed with the virtual firewall, removed at the commit that leaves it out.";
+      }
+      list member {
+        key "user";
+        px:table "role_members";
+        px:parent-column "role_id";
+        leaf user {
+          type leafref { path "../../../user/username"; }
+          px:column "user_id";
+        }
+        leaf level {
+          type enumeration { enum "admin"; enum "viewer"; }
+        }
+      }
+      list grant {
+        key "instance";
+        px:table "role_instances";
+        px:parent-column "role_id";
+        description "An instance a role made by hand grants, by name (it may be one not committed yet).";
+        leaf instance {
+          type name;
+        }
+      }
+    }
+    list ldap-role-mapping {
+      key "id";
+      px:table "ldap_role_mappings";
+      description "The members of a directory group (by DN) are members of a role, at a level; synced at each login.";
+      leaf id {
+        type uint32;
+      }
+      leaf group-dn {
+        type string;
+      }
+      leaf role {
+        type leafref { path "../../role/name"; }
+        px:column "role_id";
+      }
+      leaf level {
+        type enumeration { enum "admin"; enum "viewer"; }
+      }
+    }
+    list firewall {
+      key "name";
+      px:table "firewalls";
+      description "A host portitor-config deploys to, through its agent; one that is the HA secondary of another runs that one's virtual firewalls. Every virtual firewall is on one, and each has one default virtual firewall, its host. The generation of the last deployment (runtime) is kept apart.";
+      leaf name {
+        type name;
+      }
+      leaf description {
+        type text;
+      }
+      leaf agent-url {
+        type string;
+        description "The portitor-agent API, https://host:port, as the network reaches it (its HA peer, a witness); the host's own portitor-config uses its configured agent_url.";
+      }
+      leaf agent-token {
+        type string;
+        px:secret;
+        description "Authenticates to the agent.";
+      }
+      leaf agent-fingerprint {
+        type string;
+        description "Pins the agent's self-signed certificate (SHA-256 of the DER, hex); empty verifies against the system's CAs.";
+      }
+      leaf ha-primary {
+        type leafref { path "../../firewall/name"; }
+        px:column "ha_primary_id";
+        description "Makes this the HA secondary of that firewall: it runs the primary's virtual firewalls and has none of its own.";
+      }
+      leaf ha-secret {
+        type string;
+        px:secret;
+        description "The pair's heartbeat secret, on the secondary.";
+      }
+      leaf ha-epoch {
+        type int64;
+        description "The pair's number of promotions.";
+      }
+      leaf ha-witness {
+        type string;
+        description "On the primary, who the pair's witness is: local (its portitor-config) or external (one on a third host).";
+      }
+      leaf ha-witness-secret {
+        type string;
+        px:secret;
+        description "Opens the vote of an external witness.";
+      }
+      leaf config-url {
+        type string;
+        description "The host's portitor-config as its HA peer reaches it, pinned by config-fingerprint: the secondary copies the primary's configuration from there.";
+      }
+      leaf config-fingerprint {
+        type string;
+      }
+    }
+    list ldap-server {
+      key "name";
+      ordered-by user;
+      px:table "ldap_servers";
+      px:position "position";
+      description "A directory server (OpenLDAP or Active Directory) a login is tried at, in this order: one that is down or doesn't accept the password is passed over.";
+      leaf name {
+        type name;
+      }
+      leaf description {
+        type text;
+      }
+      leaf enabled {
+        type boolean;
+      }
+      leaf server-type {
+        type string;
+        description "ldapauth.TypeGeneric, TypeOpenLDAP or TypeAD; the user filter and attributes default from it.";
+      }
+      leaf host {
+        type host-or-address;
+      }
+      leaf port {
+        type int32 { range "0..65535"; }
+        description "0 is the TLS mode's default port.";
+      }
+      leaf tls-mode {
+        type string;
+        description "ldapauth.TLSNone, TLSStartTLS or TLSLDAPS.";
+      }
+      leaf skip-tls-verify {
+        type boolean;
+      }
+      leaf ca-cert {
+        type string;
+        description "The CA's certificate (PEM) the server's is checked against; empty: the system's.";
+      }
+      leaf bind-dn {
+        type string;
+      }
+      leaf bind-password {
+        type string;
+        px:secret;
+      }
+      leaf base-dn {
+        type string;
+      }
+      leaf user-filter {
+        type string;
+        description "Finds the user, %s the name; empty: the server type's default.";
+      }
+      leaf attr-email {
+        type string;
+      }
+      leaf attr-display-name {
+        type string;
+      }
+      leaf attr-groups {
+        type string;
+      }
+    }
+  }
+}

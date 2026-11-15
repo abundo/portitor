@@ -63,6 +63,16 @@ type Config struct {
 	Local bool `yaml:"-"`
 }
 
+// Dir is the directory portitor-config keeps its files in (the candidate, what
+// runs of the global lists, the ids, the deployed commits, the SSH host key):
+// next to the database file, as it always was; "" for none (nothing is kept).
+func (c *Config) Dir() string {
+	if c.DB.Path == "" {
+		return ""
+	}
+	return filepath.Dir(c.DB.Path)
+}
+
 type DBConfig struct {
 	// Path is the SQLite database file; its directory must be writable
 	// (WAL mode keeps -wal and -shm files next to it).

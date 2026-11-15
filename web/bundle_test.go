@@ -6,6 +6,7 @@ package web
 import (
 	"encoding/json"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 
@@ -101,9 +102,8 @@ func TestBundleRoundTrip(t *testing.T) {
 	if got, want := docOf(t, dst, "shop2"), docOf(t, src, "shop"); got != want {
 		t.Errorf("imported configuration differs:\n got %s\nwant %s", got, want)
 	}
-	var role models.Role
-	if err := dst.srv.db.Where("name = ?", "vf-shop2").First(&role).Error; err != nil {
-		t.Errorf("no role for the imported instance: %v", err)
+	if roles, _ := dst.srv.rec.Roles(); !slices.ContainsFunc(roles, func(r models.Role) bool { return r.Name == "vf-shop2" }) {
+		t.Errorf("no role for the imported instance: %+v", roles)
 	}
 
 	// Beside the source it is refused: both would have eth1 and eth2.

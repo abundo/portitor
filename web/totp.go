@@ -17,8 +17,8 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v5"
-	"gorm.io/gorm"
 
+	"github.com/abundo/portitor/internal/records"
 	"github.com/abundo/portitor/internal/totp"
 	"github.com/abundo/portitor/models"
 )
@@ -85,12 +85,10 @@ func newRecoveryCodes() ([]string, string, error) {
 // two-factor login on, and uses it up: a TOTP step is good once, a
 // recovery code is removed. The updates are conditional, so two requests
 // can't both use one code.
-func checkSecondFactor(db *gorm.DB, u *models.User, code string) (bool, error) {
+func checkSecondFactor(rec records.Store, u *models.User, code string) (bool, error) {
 	code = normalizeCode(code)
 	if step := totp.Match(u.TOTPSecret, code, time.Now()); step != 0 {
-		res := db.Model(&models.User{}).Where("id = ? AND totp_last_step < ?", u.ID, step).
-			Update("totp_last_step", step)
-		return res.RowsAffected == 1, res.Error
+		return rec.UseTOTPStep(u.ID, step)
 	}
 	if code == "" || u.RecoveryCodes == "" {
 		return false, nil
@@ -106,12 +104,11 @@ func checkSecondFactor(db *gorm.DB, u *models.User, code string) (bool, error) {
 			if err != nil {
 				return false, err
 			}
-			res := db.Model(&models.User{}).Where("id = ? AND recovery_codes = ?", u.ID, u.RecoveryCodes).
-				Update("recovery_codes", string(rest))
-			if res.RowsAffected == 1 {
+			ok, err := rec.UseRecoveryCode(u.ID, u.RecoveryCodes, string(rest))
+			if ok {
 				slog.Info("recovery code used", "user", u.Username, "left", len(hashes)-1)
 			}
-			return res.RowsAffected == 1, res.Error
+			return ok, err
 		}
 	}
 	return false, nil
@@ -128,7 +125,7 @@ func recoveryLeft(u *models.User) int {
 // with their password when the request has one.
 func (s *Server) ownTOTP(c *echo.Context, password *string) (*models.User, error) {
 	u := currentUser(c)
-	if password != nil && !checkPassword(c.Request().Context(), s.db, u, *password) {
+	if password != nil && !checkPassword(c.Request().Context(), s, u, *password) {
 		return nil, errJSON(c, http.StatusForbidden, "password is wrong")
 	}
 	return u, nil
@@ -158,7 +155,7 @@ func (s *Server) handleTOTPSetup(c *echo.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := s.db.Model(u).Update("totp_pending", secret).Error; err != nil {
+	if err := s.rec.BeginTOTP(u, secret); err != nil {
 		return err
 	}
 	return c.JSON(http.StatusOK, map[string]string{"secret": secret, "uri": totpURI(u.Username, secret)})
@@ -188,9 +185,7 @@ func (s *Server) handleTOTPEnable(c *echo.Context) error {
 	if err != nil {
 		return err
 	}
-	err = s.db.Model(u).Updates(map[string]any{"totp_secret": u.TOTPPending, "totp_pending": "",
-		"totp_last_step": step, "recovery_codes": hashes}).Error
-	if err != nil {
+	if err = s.rec.EnableTOTP(u, step, hashes); err != nil {
 		return err
 	}
 	slog.Info("two-factor login enabled", "user", u.Username)
@@ -213,7 +208,7 @@ func (s *Server) handleTOTPDisable(c *echo.Context) error {
 	if u.TOTPRequired {
 		return errJSON(c, http.StatusForbidden, "an admin requires two-factor login of your user")
 	}
-	if err := clearTOTP(s.db, u); err != nil {
+	if err := s.rec.ClearTOTP(u); err != nil {
 		return err
 	}
 	slog.Info("two-factor login disabled", "user", u.Username)
@@ -240,7 +235,7 @@ func (s *Server) handleRecoveryCodes(c *echo.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := s.db.Model(u).Update("recovery_codes", hashes).Error; err != nil {
+	if err := s.rec.SetRecoveryCodes(u, hashes); err != nil {
 		return err
 	}
 	return c.JSON(http.StatusOK, map[string]any{"recovery_codes": codes})
@@ -256,31 +251,26 @@ func (s *Server) handleResetUserTOTP(c *echo.Context) error {
 	if id == currentUser(c).ID {
 		return errJSON(c, http.StatusBadRequest, "turn off your own two-factor login under My settings")
 	}
-	var u models.User
-	if err := s.db.First(&u, id).Error; err != nil {
+	u, err := s.rec.User(id)
+	if err != nil {
 		return errJSON(c, http.StatusNotFound, "not found")
 	}
 	// A managed user's too: their manager's next commit brings it back.
-	if err := clearTOTP(s.db, &u); err != nil {
+	if err := s.rec.ClearTOTP(u); err != nil {
 		return err
 	}
 	slog.Info("two-factor login reset", "user", u.Username, "by", currentUser(c).Username)
 	return c.NoContent(http.StatusNoContent)
 }
 
-func clearTOTP(db *gorm.DB, u *models.User) error {
-	return db.Model(u).Updates(map[string]any{"totp_secret": "", "totp_pending": "",
-		"totp_last_step": 0, "recovery_codes": ""}).Error
-}
-
 // ResetTOTP turns off a user's two-factor login (portitor-web reset-2fa),
 // for a user locked out, a managed one included.
 func ResetTOTP(s *Server, username string) error {
-	var u models.User
-	if err := s.db.Where("username = ?", username).First(&u).Error; err != nil {
+	u, err := s.rec.UserNamed(username)
+	if err != nil {
 		return fmt.Errorf("user %s: %w", username, err)
 	}
-	if err := clearTOTP(s.db, &u); err != nil {
+	if err := s.rec.ClearTOTP(u); err != nil {
 		return err
 	}
 	slog.Info("two-factor login reset on the console", "user", u.Username)

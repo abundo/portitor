@@ -107,8 +107,7 @@ func TestTenancy(t *testing.T) {
 	if slices.Contains(descs("b"), "pending") || !slices.Contains(descs("b"), "b's") {
 		t.Errorf("b: %v", descs("b"))
 	}
-	var dep models.Deployment
-	env.srv.db.Order("id desc").First(&dep)
+	dep := env.lastDeployment()
 	if !slices.Equal(dep.Instances, models.StringList{"a"}) {
 		t.Errorf("deployment instances: %v", dep.Instances)
 	}

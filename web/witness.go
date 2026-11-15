@@ -261,12 +261,12 @@ func (s *Server) catchUp(ctx context.Context, fw models.Firewall) {
 	res, err := a.Apply(ctx, doc, 0)
 	if err != nil {
 		dep.Message = "catching up: " + err.Error()
-		s.db.Save(dep)
+		_ = s.rec.UpdateDeployment(dep)
 		return
 	}
 	dep.Status = "applied"
 	dep.Message = fmt.Sprintf("caught up %s", time.Now().Format(time.TimeOnly))
 	dep.Log = joinLog(res.Log)
-	s.db.Save(dep)
+	_ = s.rec.UpdateDeployment(dep)
 	slog.Info("caught up", "firewall", fw.Name, "commit", dep.CommitID, "generation", dep.Generation)
 }

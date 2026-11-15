@@ -427,11 +427,14 @@ func (s *Server) certificateNamed(ctx context.Context, ref certRef) (*models.Cer
 // firewall), and portitor-config's own certificate.
 func (s *Server) handlePutSettings(c *echo.Context) error {
 	var req struct {
-		ConfirmTimeout   *int    `json:"confirm_timeout"`
-		WgEndpointHost   *string `json:"wg_endpoint_host"`
-		CaptureRateKbps  *int    `json:"capture_rate_kbps"`
-		VirtualFirewalls *bool   `json:"virtual_firewalls"`
-		TOTPDefault      *bool   `json:"totp_default"`
+		ConfirmTimeout  *int    `json:"confirm_timeout"`
+		WgEndpointHost  *string `json:"wg_endpoint_host"`
+		CaptureRateKbps *int    `json:"capture_rate_kbps"`
+		// How much of the deployment history is kept.
+		KeepDeployments    *int  `json:"keep_deployments"`
+		KeepDeploymentDays *int  `json:"keep_deployment_days"`
+		VirtualFirewalls   *bool `json:"virtual_firewalls"`
+		TOTPDefault        *bool `json:"totp_default"`
 		// The IPv4 packets with options dropped to the firewall and
 		// through it.
 		DropIPOptionsInput   *bool `json:"drop_ip_options_input"`
@@ -458,6 +461,8 @@ func (s *Server) handlePutSettings(c *echo.Context) error {
 	putLeaf(leaves, "confirm-timeout", req.ConfirmTimeout)
 	putLeaf(leaves, "wg-endpoint-host", req.WgEndpointHost)
 	putLeaf(leaves, "capture-rate-kbps", req.CaptureRateKbps)
+	putLeaf(leaves, "keep-deployments", req.KeepDeployments)
+	putLeaf(leaves, "keep-deployment-days", req.KeepDeploymentDays)
 	putLeaf(leaves, "virtual-firewalls", req.VirtualFirewalls)
 	putLeaf(leaves, "totp-default", req.TOTPDefault)
 	putLeaf(leaves, "drop-ip-options-input", req.DropIPOptionsInput)
@@ -480,7 +485,7 @@ func (s *Server) handlePutSettings(c *echo.Context) error {
 		if err != nil {
 			return err
 		}
-		if err := s.db.Exec("UPDATE settings SET web_certificate_id = ? WHERE id = 1", certID).Error; err != nil {
+		if err := s.rec.SetWebCertificate(certID); err != nil {
 			return err
 		}
 		if s.webCert != nil && !equalPtr(old.WebCertificateID, certID) {
@@ -519,8 +524,8 @@ func putLeaf[T any](leaves map[string]any, name string, v *T) {
 }
 
 func (s *Server) handleListUsers(c *echo.Context) error {
-	users := []models.User{}
-	if err := s.db.Order("username").Find(&users).Error; err != nil {
+	users, err := s.rec.Users()
+	if err != nil {
 		return err
 	}
 	return c.JSON(http.StatusOK, users)
@@ -564,7 +569,7 @@ func (s *Server) handleCreateUser(c *echo.Context) error {
 	if err := setPassword(&u, req.Password); err != nil {
 		return errJSON(c, http.StatusBadRequest, err.Error())
 	}
-	if err := s.db.Create(&u).Error; err != nil {
+	if err := s.rec.CreateUser(&u); err != nil {
 		return dbError(c, err)
 	}
 	return c.JSON(http.StatusCreated, u)
@@ -603,11 +608,12 @@ func (s *Server) handleUpdateUser(c *echo.Context) error {
 	if id == currentUser(c).ID && req.Role != currentUser(c).Role {
 		return errJSON(c, http.StatusBadRequest, "you cannot change your own role")
 	}
-	var u models.User
-	if err := s.db.First(&u, id).Error; err != nil {
+	up, err := s.rec.User(id)
+	if err != nil {
 		return errJSON(c, http.StatusNotFound, "not found")
 	}
-	changed := false
+	u := *up
+	changed, revoke := false, false
 	if req.FullName != nil || req.Email != nil {
 		name, email := u.FullName, u.Email
 		if req.FullName != nil {
@@ -624,15 +630,14 @@ func (s *Server) handleUpdateUser(c *echo.Context) error {
 	}
 	if u.Role != req.Role {
 		u.Role = req.Role
-		u.TokenVersion++
-		changed = true
+		changed, revoke = true, true
 	}
 	if req.TOTPRequired != nil && *req.TOTPRequired != u.TOTPRequired {
 		u.TOTPRequired = *req.TOTPRequired
 		changed = true
 	}
 	if changed {
-		if err := s.db.Save(&u).Error; err != nil {
+		if err := s.rec.SaveUser(&u, revoke); err != nil {
 			return err
 		}
 	}
@@ -655,17 +660,17 @@ func (s *Server) handleSetUserPassword(c *echo.Context) error {
 	if id == currentUser(c).ID {
 		return errJSON(c, http.StatusBadRequest, "change your own password under Change password")
 	}
-	var u models.User
-	if err := s.db.First(&u, id).Error; err != nil {
+	up, err := s.rec.User(id)
+	if err != nil {
 		return errJSON(c, http.StatusNotFound, "not found")
 	}
+	u := *up
 	if err := setPassword(&u, req.Password); err != nil {
 		return errJSON(c, http.StatusBadRequest, err.Error())
 	}
 	// A directory user becomes a local one.
 	u.LdapServer = ""
-	u.TokenVersion++
-	if err := s.db.Save(&u).Error; err != nil {
+	if err := s.rec.SaveUser(&u, true); err != nil {
 		return err
 	}
 	return c.NoContent(http.StatusNoContent)
@@ -679,11 +684,10 @@ func (s *Server) handleDeleteUser(c *echo.Context) error {
 	if id == currentUser(c).ID {
 		return errJSON(c, http.StatusBadRequest, "you cannot delete yourself")
 	}
-	var u models.User
-	if err := s.db.First(&u, id).Error; err != nil {
+	if _, err := s.rec.User(id); err != nil {
 		return errJSON(c, http.StatusNotFound, "not found")
 	}
-	if err := s.db.Delete(&models.User{}, id).Error; err != nil {
+	if err := s.rec.DeleteUser(id); err != nil {
 		return err
 	}
 	return c.NoContent(http.StatusNoContent)
@@ -725,8 +729,8 @@ func (s *Server) handleDeployments(c *echo.Context) error {
 	if n, err := strconv.Atoi(c.QueryParam("limit")); err == nil && n > 0 && n <= 500 {
 		limit = n
 	}
-	deps := []models.Deployment{}
-	if err := s.db.Order("id desc").Limit(limit).Find(&deps).Error; err != nil {
+	deps, err := s.rec.RecentDeployments(limit)
+	if err != nil {
 		return err
 	}
 	names, err := s.readableInstanceNames(c)

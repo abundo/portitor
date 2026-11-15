@@ -377,6 +377,10 @@ type Settings struct {
 	// serves HTTPS with, when it serves HTTPS itself (tls_cert); nil
 	// serves tls_cert.
 	WebCertificateID *uint `json:"-"`
+	// KeepDeployments and KeepDeploymentDays bound the deployment history:
+	// the newest N, and those not older than that many days (0: no limit).
+	KeepDeployments    int `json:"keep_deployments"`
+	KeepDeploymentDays int `json:"keep_deployment_days"`
 	// VirtualFirewalls shows the Virtual firewalls and Links pages and
 	// allows more than one instance; it can't be turned off while there are.
 	VirtualFirewalls bool `json:"virtual_firewalls"`

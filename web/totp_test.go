@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/abundo/portitor/internal/totp"
-	"github.com/abundo/portitor/models"
 )
 
 func TestTOTPLogin(t *testing.T) {
@@ -60,7 +59,8 @@ func TestTOTPLogin(t *testing.T) {
 	if got := login(code); got != http.StatusUnauthorized {
 		t.Errorf("login with a used code: %d", got)
 	}
-	env.srv.db.Model(&models.User{}).Where("username = ?", "admin").Update("totp_last_step", 0)
+	// The next period's code is a new one.
+	code = totp.Code(key, time.Now().Unix()/totp.Period+1)
 	if got := login(code); got != http.StatusOK {
 		t.Errorf("login with a code: %d", got)
 	}
@@ -79,8 +79,7 @@ func TestTOTPLogin(t *testing.T) {
 	if err := CreateUser(env.srv, "other", pw); err != nil {
 		t.Fatal(err)
 	}
-	var admin models.User
-	env.srv.db.Where("username = ?", "admin").First(&admin)
+	admin := env.userNamed("admin")
 	env.login("other", pw)
 	if rec := env.do("DELETE", "/api/users/"+itoa(admin.ID)+"/totp", nil); rec.Code != http.StatusNoContent {
 		t.Fatalf("reset: %d %s", rec.Code, rec.Body)
@@ -97,14 +96,12 @@ func TestTOTPRequired(t *testing.T) {
 		t.Fatalf("settings: %d %s", rec.Code, rec.Body)
 	}
 	id := env.create("/api/users", map[string]any{"username": "bob", "password": pw, "role": "admin"})
-	var bob models.User
-	env.srv.db.First(&bob, id)
+	bob := env.userID(id)
 	if !bob.TOTPRequired {
 		t.Fatal("the default under Settings was not copied")
 	}
 	off := env.create("/api/users", map[string]any{"username": "carol", "password": pw, "role": "viewer", "totp_required": false})
-	var carol models.User
-	env.srv.db.First(&carol, off)
+	carol := env.userID(off)
 	if carol.TOTPRequired {
 		t.Error("totp_required false not kept")
 	}
@@ -131,7 +128,7 @@ func TestTOTPRequired(t *testing.T) {
 	if rec := env.do("PUT", "/api/users/"+itoa(off), map[string]any{"role": "viewer", "totp_required": true}); rec.Code != http.StatusOK {
 		t.Fatalf("update: %d %s", rec.Code, rec.Body)
 	}
-	env.srv.db.First(&carol, off)
+	carol = env.userID(off)
 	if !carol.TOTPRequired {
 		t.Error("totp_required not set")
 	}

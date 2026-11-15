@@ -42,23 +42,31 @@ type testEnv struct {
 // firstFirewall reads the firewall the installation started with.
 func firstFirewall(t *testing.T, env *testEnv) models.Firewall {
 	t.Helper()
-	var fw models.Firewall
-	if err := env.srv.db.Order("id").First(&fw).Error; err != nil {
-		t.Fatal(err)
-	}
-	return fw
+	return env.firstFirewall()
 }
 
 func newEnv(t *testing.T) *testEnv {
 	t.Helper()
-	db, err := dbmigrate.Open(filepath.Join(t.TempDir(), "db.sqlite"), &gorm.Config{Logger: logger.Discard})
+	return newEnvIn(t, "")
+}
+
+// newEnvIn is newEnv with its database and the configuration's files in
+// dir ("": the database in a directory of its own, the files in memory).
+func newEnvIn(t *testing.T, dir string) *testEnv {
+	t.Helper()
+	cfg := &Config{JWTSecret: strings.Repeat("s", 32), Dev: true}
+	if dir == "" {
+		dir = t.TempDir()
+	}
+	path := filepath.Join(dir, "portitor.db")
+	cfg.DB.Path = path
+	db, err := dbmigrate.Open(path, &gorm.Config{Logger: logger.Discard})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := dbmigrate.Up(db); err != nil {
 		t.Fatal(err)
 	}
-	cfg := &Config{JWTSecret: strings.Repeat("s", 32), Dev: true}
 	srv := NewServer(cfg, db)
 	// Most tests use several instances.
 	if err := srv.editConfig(t.Context(), func(work *datastore.Tree) error {
@@ -373,8 +381,7 @@ func TestDeployEndToEnd(t *testing.T) {
 	if rec := env.do("POST", "/api/deploy/confirm", map[string]any{}); rec.Code != http.StatusOK {
 		t.Fatalf("confirm: %d %s", rec.Code, rec.Body)
 	}
-	var dep models.Deployment
-	env.srv.db.Order("id desc").First(&dep)
+	dep := env.lastDeployment()
 	if dep.Status != "confirmed" || dep.Generation != 2 {
 		t.Errorf("deployment %+v", dep)
 	}
@@ -1005,7 +1012,7 @@ func TestViewerRole(t *testing.T) {
 			continue
 		}
 		read := r.Method == http.MethodGet || r.Method == http.MethodHead
-		want := !read && !viewerWrites[r.Method+" "+r.Path] || read && viewerDenied[r.Path]
+		want := !read && routeLevelOf(r.Method, r.Path) != anyUser || read && routeLevelOf(r.Method, r.Path) == globalOnly
 		path := strings.ReplaceAll(r.Path, ":id", "1")
 		rec := env.do(r.Method, path, map[string]any{})
 		if got := rec.Code == http.StatusForbidden && strings.Contains(rec.Body.String(), "can't do this"); got != want {
@@ -1027,10 +1034,11 @@ func TestViewerRole(t *testing.T) {
 	if rec := env.do("PUT", fmt.Sprintf("/api/users/%d", admin.ID), map[string]string{"role": "viewer"}); rec.Code != http.StatusBadRequest {
 		t.Errorf("own role: %d", rec.Code)
 	}
-	var ann models.User
-	if err := env.srv.db.First(&ann, id).Error; err != nil || ann.Role != models.RoleAdmin || ann.TokenVersion == 0 {
-		t.Errorf("ann: %+v %v", ann, err)
+	annp, err := env.srv.rec.User(id)
+	if err != nil || annp.Role != models.RoleAdmin || annp.TokenVersion == 0 {
+		t.Fatalf("ann: %+v %v", annp, err)
 	}
+	ann := *annp
 
 	// An admin sets ann's password, which ends her sessions; not their own.
 	if rec := env.do("POST", fmt.Sprintf("/api/users/%d/password", id), map[string]string{"password": "short"}); rec.Code != http.StatusBadRequest {
@@ -1042,8 +1050,8 @@ func TestViewerRole(t *testing.T) {
 	if rec := env.do("POST", fmt.Sprintf("/api/users/%d/password", id), map[string]string{"password": "another long password"}); rec.Code != http.StatusNoContent {
 		t.Fatalf("set password: %d %s", rec.Code, rec.Body)
 	}
-	var ann2 models.User
-	env.srv.db.First(&ann2, id)
+	ann2p, _ := env.srv.rec.User(id)
+	ann2 := *ann2p
 	if ann2.TokenVersion <= ann.TokenVersion || bcrypt.CompareHashAndPassword([]byte(ann2.PasswordHash), []byte("another long password")) != nil {
 		t.Errorf("ann after reset: %+v", ann2)
 	}
@@ -1198,8 +1206,7 @@ func TestDnsTemplatesGlobal(t *testing.T) {
 func TestUserNameEmail(t *testing.T) {
 	env := newEnv(t)
 	id := env.create("/api/users", map[string]string{"username": "ann", "full_name": "Ann Example", "email": "ann@example.com", "password": "a long password", "role": "viewer"})
-	var u models.User
-	env.srv.db.First(&u, id)
+	u := env.userID(id)
 	if u.FullName != "Ann Example" || u.Email != "ann@example.com" {
 		t.Errorf("created: %+v", u)
 	}
@@ -1213,7 +1220,7 @@ func TestUserNameEmail(t *testing.T) {
 	if rec := env.do("PUT", url, map[string]any{"role": "viewer", "full_name": " Ann E. "}); rec.Code != http.StatusOK {
 		t.Fatalf("update: %d %s", rec.Code, rec.Body)
 	}
-	env.srv.db.First(&u, id)
+	u = env.userID(id)
 	if u.FullName != "Ann E." || u.Email != "ann@example.com" {
 		t.Errorf("updated: %+v", u)
 	}

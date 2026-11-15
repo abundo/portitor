@@ -12,6 +12,8 @@ import (
 
 	"github.com/labstack/echo/v5"
 	"gorm.io/gorm"
+
+	"github.com/abundo/portitor/internal/records"
 )
 
 // model is a pointer to a struct embedding models.Base.
@@ -247,6 +249,9 @@ func dbError(c *echo.Context, err error) error {
 	}
 	if errors.Is(err, errForbidden) {
 		return errJSON(c, http.StatusForbidden, "you can't change this")
+	}
+	if errors.Is(err, records.ErrExists) {
+		return errJSON(c, http.StatusConflict, "an entry with that name/value already exists")
 	}
 	msg := err.Error()
 	switch {

@@ -35,6 +35,16 @@ submodule portitor-system {
         default 1000;
         description "CaptureRateKbps caps a packet capture's stream from the agent (kbit/s); 0 is unlimited.";
       }
+      leaf keep-deployments {
+        type int32 { range "0..1000000"; }
+        default 500;
+        description "KeepDeployments is how many of the newest deployments the history keeps; 0 keeps all (the deployment each firewall runs is never forgotten).";
+      }
+      leaf keep-deployment-days {
+        type int32 { range "0..36500"; }
+        default 365;
+        description "KeepDeploymentDays forgets the deployments older than this many days; 0 keeps all (the deployment each firewall runs is never forgotten).";
+      }
       leaf virtual-firewalls {
         type boolean;
         description "VirtualFirewalls shows the Virtual firewalls and Links pages and allows more than one instance; it can't be turned off while there are.";
@@ -218,8 +228,7 @@ submodule portitor-system {
         px:column "acme_proxy_certificate_id";
       }
       leaf firewall {
-        type string;
-        px:external "firewalls";
+        type leafref { path "../../firewall/name"; }
         px:column "firewall_id";
       }
       leaf dns-rate-limit {

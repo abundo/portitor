@@ -149,7 +149,11 @@ func TestOpenVPN(t *testing.T) {
 	// Two-factor login: alice's TOTP secret in the document (not in its
 	// redacted copy), and the client asks for the code.
 	const secret = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
-	env.srv.db.Model(&models.User{}).Where("id = ?", alice).Update("totp_secret", secret)
+	au := env.userID(alice)
+	au.TOTPSecret = secret
+	if err := env.srv.rec.SaveUser(&au, false); err != nil {
+		t.Fatal(err)
+	}
 	totps := func() map[string]string {
 		doc, _ = builder.Build(env.input(), 1)
 		m := map[string]string{}

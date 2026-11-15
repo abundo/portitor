@@ -200,16 +200,12 @@ func Bootstrap(ctx context.Context, s *Server, o BootstrapOptions) (*models.Depl
 	if st.LastCommit > 0 && !o.Reconfigure {
 		return nil, errors.New("this installation has been deployed already; configure it in the GUI, or run portitor-setup")
 	}
-	fwID, err := firstFirewallID(s.db)
+	fwID, err := s.firstFirewallID()
 	if err != nil {
 		return nil, err
 	}
 	if o.AgentFingerprint != "" {
-		if err := s.db.Model(&models.Firewall{}).Where("id = ?", fwID).Updates(map[string]any{
-			"agent_url":         strings.TrimRight(o.AgentURL, "/"),
-			"agent_token":       o.AgentToken,
-			"agent_fingerprint": normalizeFingerprint(o.AgentFingerprint),
-		}).Error; err != nil {
+		if err := s.rec.SetAgentConnection(fwID, strings.TrimRight(o.AgentURL, "/"), o.AgentToken, normalizeFingerprint(o.AgentFingerprint)); err != nil {
 			return nil, err
 		}
 	}

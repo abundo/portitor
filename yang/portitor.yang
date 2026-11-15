@@ -15,6 +15,7 @@ module portitor {
   include portitor-firewall;
   include portitor-services;
   include portitor-objects;
+  include portitor-access;
   include portitor-state;
 
   organization "The Portitor contributors";
@@ -36,5 +37,6 @@ module portitor {
   uses system;
   uses objects;
   uses firewall-services;
+  uses access;
   uses system-state;
 }

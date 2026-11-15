@@ -34,7 +34,7 @@ func (s *Server) handleAgentSyslog(c *echo.Context) error {
 // handleAgentJournal follows the whole journal of a firewall (firewall_id,
 // the first by default) and passes the text to the browser as it comes.
 // The journal holds every virtual firewall's services, so it is a global
-// admin's (a POST outside tenantWrites).
+// admin's (a POST outside routePolicy).
 func (s *Server) handleAgentJournal(c *echo.Context) error {
 	var body struct {
 		FirewallID uint `json:"firewall_id"`
@@ -44,7 +44,7 @@ func (s *Server) handleAgentJournal(c *echo.Context) error {
 		return errJSON(c, http.StatusBadRequest, "invalid request")
 	}
 	if body.FirewallID == 0 {
-		id, err := firstFirewallID(s.db)
+		id, err := s.firstFirewallID()
 		if err != nil {
 			return agentError(c, err)
 		}

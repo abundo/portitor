@@ -45,7 +45,7 @@ func (s *Server) view(ctx context.Context) (*confview.View, error) {
 	if err != nil {
 		return nil, err
 	}
-	v, err := confview.Load(s.db, cand)
+	v, err := confview.Load(s.rec, cand)
 	if err != nil {
 		return nil, err
 	}
@@ -55,7 +55,7 @@ func (s *Server) view(ctx context.Context) (*confview.View, error) {
 
 // viewOf is tree's rows, with the ids kept for its entries.
 func (s *Server) viewOf(tree *datastore.Tree) (*confview.View, error) {
-	return confview.Load(s.db, tree)
+	return confview.Load(s.rec, tree)
 }
 
 // entryID is the id of the candidate's entry at p (sqlmap.IDs): what
@@ -189,7 +189,7 @@ func (s *Server) rowWriter(work *datastore.Tree) (*rowWriter, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &rowWriter{s: s, work: work, add: t.mapping.NewAdder(s.db, work, v.Index), tmp: 1 << 40}, nil
+	return &rowWriter{s: s, work: work, add: t.mapping.NewAdder(s.rec, work, v.Index), tmp: 1 << 40}, nil
 }
 
 // create adds model as a new entry, and sets its ID: a list keyed by id

@@ -18,6 +18,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -88,9 +89,8 @@ func (s *Server) isReplica() bool {
 		return false
 	}
 	if !r.known {
-		var n int64
-		s.db.Model(&models.Firewall{}).Where("ha_primary_id IS NOT NULL").Count(&n)
-		return n > 0
+		fws, _ := s.rec.Firewalls()
+		return slices.ContainsFunc(fws, func(f models.Firewall) bool { return f.HAPrimaryID != nil })
 	}
 	return r.replica
 }
@@ -179,11 +179,12 @@ func (s *Server) localFirewall(ctx context.Context) (*models.Firewall, error) {
 	if err != nil {
 		return nil, err
 	}
-	var fw models.Firewall
-	if err := s.db.Where("agent_fingerprint = ?", fp).Order("id").First(&fw).Error; err != nil {
+	fws, _ := s.rec.Firewalls()
+	i := slices.IndexFunc(fws, func(f models.Firewall) bool { return f.AgentFingerprint == fp })
+	if i < 0 {
 		return nil, fmt.Errorf("no firewall here has the certificate fingerprint of this host's agent (%s)", fp)
 	}
-	return &fw, nil
+	return &fws[i], nil
 }
 
 // localPeerConfig asks this host's agent for its place in the pair.
@@ -240,9 +241,8 @@ func (s *Server) primaryHere(me *models.Firewall) bool {
 	if me == nil || me.HAPrimaryID != nil {
 		return false
 	}
-	var n int64
-	s.db.Model(&models.Firewall{}).Where("ha_primary_id = ?", me.ID).Count(&n)
-	return n > 0
+	sec, _ := s.secondaryOf(me.ID)
+	return sec != nil
 }
 
 // runRole follows the host's role, and copies the primary's database
@@ -292,22 +292,34 @@ func (s *Server) copyPrimary(ctx context.Context) error {
 	}
 	tlsCfg.MinVersion, tlsCfg.ServerName = tls.VersionTLS12, PinnedServerName
 	client := &http.Client{Timeout: time.Minute, Transport: &http.Transport{TLSClientConfig: tlsCfg}}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(peer.URL, "/")+replicaPath, nil)
-	if err != nil {
-		return fail(err)
+	get := func(path string) (*http.Response, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(peer.URL, "/")+path, nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Authorization", "Bearer "+peer.Secret)
+		if etag != "" {
+			req.Header.Set("If-None-Match", etag)
+		}
+		return client.Do(req)
 	}
-	req.Header.Set("Authorization", "Bearer "+peer.Secret)
-	if etag != "" {
-		req.Header.Set("If-None-Match", etag)
+	// The primary's files; one of a release that kept them in a database file
+	// (which is all there is to take from it: it is updated after this one)
+	// has no such route.
+	legacy := false
+	res, err := get(replicaBundlePath)
+	if err == nil && res.StatusCode == http.StatusNotFound {
+		res.Body.Close()
+		legacy = true
+		res, err = get(replicaPath)
 	}
-	res, err := client.Do(req)
 	if err != nil {
 		return fail(fmt.Errorf("the primary's portitor-config: %w", err))
 	}
 	defer res.Body.Close()
 	switch res.StatusCode {
 	case http.StatusNotModified:
-		// The same database; running's commit may have come since.
+		// The same copy; running's commit may have come since.
 		if err := s.replicaTree(ctx, client, peer); err != nil {
 			return fail(err)
 		}
@@ -320,25 +332,12 @@ func (s *Server) copyPrimary(ctx context.Context) error {
 		b, _ := io.ReadAll(io.LimitReader(res.Body, 4096))
 		return fail(fmt.Errorf("the primary's portitor-config: HTTP %d %s", res.StatusCode, strings.TrimSpace(string(b))))
 	}
-	dir, err := s.snapshotDir()
+	body, err := io.ReadAll(io.LimitReader(res.Body, backupMaxSize+1))
 	if err != nil {
 		return fail(err)
 	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return fail(err)
-	}
-	tmp := filepath.Join(dir, "replica.db.tmp")
-	defer os.Remove(tmp)
-	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
-	if err != nil {
-		return fail(err)
-	}
-	_, err = io.Copy(f, io.LimitReader(res.Body, backupMaxSize))
-	if cerr := f.Close(); err == nil {
-		err = cerr
-	}
-	if err != nil {
-		return fail(err)
+	if len(body) > backupMaxSize {
+		return fail(errors.New("the primary's copy is too large"))
 	}
 	// Not over a promotion of this host.
 	s.replMu.Lock()
@@ -346,8 +345,16 @@ func (s *Server) copyPrimary(ctx context.Context) error {
 	if !s.isReplica() {
 		return nil
 	}
-	if _, _, err := s.restore(ctx, tmp, replicaKeeps, nil); err != nil {
-		return fail(fmt.Errorf("the primary's database: %w", err))
+	if legacy {
+		err = s.takeLegacyCopy(ctx, body)
+	} else {
+		var files map[string][]byte
+		if files, _, err = decodeCopy(body); err == nil {
+			err = s.takeSnapshot(ctx, files, nil, false)
+		}
+	}
+	if err != nil {
+		return fail(fmt.Errorf("the primary's copy: %w", err))
 	}
 	if err := s.replicaTree(ctx, client, peer); err != nil {
 		return fail(err)
@@ -361,7 +368,30 @@ func (s *Server) copyPrimary(ctx context.Context) error {
 	return nil
 }
 
+// takeLegacyCopy takes the database file of a primary of a release before the
+// files (its tables are adopted into the tree): this installation's state is
+// replaced by it, as that release's replica did.
+func (s *Server) takeLegacyCopy(ctx context.Context, data []byte) error {
+	dir, err := s.snapshotDir()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	tmp := filepath.Join(dir, "replica.db.tmp")
+	defer os.Remove(tmp)
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		return err
+	}
+	_, _, err = s.restore(ctx, tmp, replicaKeeps, nil)
+	return err
+}
+
+// replicaPath is the database file an earlier release's primary gives; the
+// primary of this one gives replicaBundlePath's archive of files (copybundle.go).
 const replicaPath = "/ha/v1/database"
+const replicaBundlePath = "/ha/v2/bundle"
 
 // replicaCommitPath + <commit> is a commit's configuration
 // (deployed/<commit>-config.json), which the replica's running is.
@@ -374,9 +404,15 @@ func (s *Server) pairAuthorized(c *echo.Context) (bool, error) {
 	if !s.cfg.Local || s.isReplica() {
 		return false, errJSON(c, http.StatusConflict, "this portitor-config is not the primary's")
 	}
-	var secrets []string
-	if err := s.db.Model(&models.Firewall{}).Where("ha_primary_id IS NOT NULL AND ha_secret != ''").Pluck("ha_secret", &secrets).Error; err != nil {
+	fws, err := s.rec.Firewalls()
+	if err != nil {
 		return false, err
+	}
+	var secrets []string
+	for _, f := range fws {
+		if f.HAPrimaryID != nil && f.HASecret != "" {
+			secrets = append(secrets, f.HASecret)
+		}
 	}
 	got := c.Request().Header.Get("Authorization")
 	ok := false
@@ -459,31 +495,18 @@ func (s *Server) replicaTree(ctx context.Context, client *http.Client, peer agen
 	return nil
 }
 
-// handleReplica gives the secondary's portitor-config this database, the
-// pair's secret its key. Its ETag is its content's SHA-256.
-func (s *Server) handleReplica(c *echo.Context) error {
+// handleReplicaBundle gives the secondary's portitor-config this state, the
+// pair's secret its key. Its ETag is its content's SHA-256: the archive is the
+// same bytes while the state is the same.
+func (s *Server) handleReplicaBundle(c *echo.Context) error {
 	if ok, err := s.pairAuthorized(c); !ok {
 		return err
 	}
-	dir, err := s.snapshotDir()
+	files, err := s.snapshotFiles(c.Request().Context(), true)
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return err
-	}
-	f, err := os.CreateTemp(dir, "replica-*.db")
-	if err != nil {
-		return err
-	}
-	tmp := f.Name()
-	f.Close()
-	os.Remove(tmp)
-	defer os.Remove(tmp)
-	if err := s.writeSnapshot(c.Request().Context(), tmp); err != nil {
-		return err
-	}
-	data, err := os.ReadFile(tmp)
+	data, err := encodeCopy(files, "replica")
 	if err != nil {
 		return err
 	}
@@ -495,7 +518,7 @@ func (s *Server) handleReplica(c *echo.Context) error {
 	if c.Request().Header.Get("If-None-Match") == etag {
 		return c.NoContent(http.StatusNotModified)
 	}
-	return c.Blob(http.StatusOK, "application/vnd.sqlite3", data)
+	return c.Blob(http.StatusOK, "application/x-tar", data)
 }
 
 // readOnlyAllowed are the writes a replica takes: logging in and out, the

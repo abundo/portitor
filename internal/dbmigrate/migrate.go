@@ -11,6 +11,7 @@ package dbmigrate
 import (
 	"context"
 	"embed"
+	"errors"
 	"fmt"
 	"io/fs"
 	"log/slog"
@@ -47,10 +48,24 @@ func provider(db *gorm.DB) (*goose.Provider, error) {
 	if err != nil {
 		return nil, err
 	}
-	return goose.NewProvider(goose.DialectSQLite3, sqlDB, fsys, goose.WithGoMigrations(interfaceAddresses, rateLimitShape, xlat464, serviceRateLimits, openVPNTCPAddresses, configToTree))
+	return goose.NewProvider(goose.DialectSQLite3, sqlDB, fsys, goose.WithGoMigrations(interfaceAddresses, rateLimitShape, xlat464, serviceRateLimits, openVPNTCPAddresses, dropConfigTablesMigration))
 }
 
+// MinVersion is the oldest schema Up migrates: the one that drops the
+// configuration's tables (0.9.0's). An older database holds its configuration
+// in those tables, which this release no longer reads: it has to be taken
+// through 0.9.0 first, or the configuration would be lost.
+const MinVersion = 94
+
+// ErrTooOld is Up's refusal of a database older than MinVersion.
+var ErrTooOld = errors.New("this database is from before Portitor 0.9.0: install 0.9.0 and start it once (it moves the configuration into its new form), then update to this release")
+
 func Up(db *gorm.DB) error {
+	if current, _, err := Versions(db); err != nil {
+		return err
+	} else if current > 0 && current < MinVersion {
+		return fmt.Errorf("%w (schema version %d, this release needs %d)", ErrTooOld, current, MinVersion)
+	}
 	provider, err := provider(db)
 	if err != nil {
 		return err

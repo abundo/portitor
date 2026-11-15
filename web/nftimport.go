@@ -21,7 +21,7 @@ import (
 // and its entries are written into the candidate, each through the checks
 // of an API edit (addChecked, userEdit). A preview makes the same edit and
 // throws it away. Hosts/prefixes and services are shared, so this is a global
-// admin's (a POST not in tenantWrites).
+// admin's (a POST not in routePolicy).
 
 type nftImportRequest struct {
 	// Instance is the virtual firewall's name.

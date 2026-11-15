@@ -16,7 +16,6 @@ import (
 	"slices"
 	"sync"
 
-	"gorm.io/gorm"
 	gormschema "gorm.io/gorm/schema"
 
 	"github.com/abundo/portitor/internal/datastore"
@@ -73,6 +72,13 @@ type View struct {
 	Vrfs                []models.Vrf
 	SnmpUsers           []models.SnmpUser
 	SyslogServers       []models.SyslogServer
+	LdapServers         []models.LdapServer
+	Users               []models.User
+	Firewalls           []models.Firewall
+	Roles               []models.Role
+	RoleMembers         []models.RoleMember
+	RoleInstances       []models.RoleInstance
+	LdapRoleMappings    []models.LdapRoleMapping
 	AcmeProxyPolicies   []models.AcmeProxyPolicy
 	Settings            models.Settings
 
@@ -113,21 +119,21 @@ func Mapping() (*sqlmap.Mapping, error) {
 
 // Load is tree's view: the ids kept in db (sqlmap.LoadIDs), and db's ids
 // of the firewalls and roles the tree names.
-func Load(db *gorm.DB, tree *datastore.Tree) (*View, error) {
-	ids, err := sqlmap.LoadIDs(db)
+func Load(src sqlmap.Source, tree *datastore.Tree) (*View, error) {
+	ids, err := src.IDs()
 	if err != nil {
 		return nil, err
 	}
-	return LoadWith(db, tree, ids)
+	return LoadWith(src, tree, ids)
 }
 
 // LoadWith is Load with ids given.
-func LoadWith(db *gorm.DB, tree *datastore.Tree, ids sqlmap.IDs) (*View, error) {
+func LoadWith(src sqlmap.Source, tree *datastore.Tree, ids sqlmap.IDs) (*View, error) {
 	m, err := Mapping()
 	if err != nil {
 		return nil, err
 	}
-	rows, idx, err := m.Rows(db, tree, ids)
+	rows, idx, err := m.Rows(src, tree, ids)
 	if err != nil {
 		return nil, err
 	}
@@ -181,6 +187,13 @@ func LoadWith(db *gorm.DB, tree *datastore.Tree, ids sqlmap.IDs) (*View, error) 
 		{&v.Vrfs, "vrfs"},
 		{&v.SnmpUsers, "snmp_users"},
 		{&v.SyslogServers, "syslog_servers"},
+		{&v.LdapServers, "ldap_servers"},
+		{&v.Users, "users"},
+		{&v.Firewalls, "firewalls"},
+		{&v.Roles, "roles"},
+		{&v.RoleMembers, "role_members"},
+		{&v.RoleInstances, "role_instances"},
+		{&v.LdapRoleMappings, "ldap_role_mappings"},
 		{&v.AcmeProxyPolicies, "acme_proxy_policies"},
 	} {
 		if err := DecodeRows(rows[q.table], q.dst); err != nil {

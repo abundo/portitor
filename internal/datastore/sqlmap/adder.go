@@ -8,8 +8,6 @@ import (
 	"fmt"
 	"slices"
 
-	"gorm.io/gorm"
-
 	"github.com/abundo/portitor/internal/datastore"
 	"github.com/abundo/portitor/internal/schema"
 )
@@ -19,7 +17,7 @@ import (
 // import) writes the tree with.
 type Adder struct {
 	m    *Mapping
-	db   *gorm.DB
+	db   Source
 	tree *datastore.Tree
 	byID map[*table]map[int64]*datastore.Node
 	idx  Index
@@ -28,7 +26,7 @@ type Adder struct {
 }
 
 // NewAdder adds to tree, whose entries have the ids of idx (confview).
-func (m *Mapping) NewAdder(db *gorm.DB, tree *datastore.Tree, idx Index) *Adder {
+func (m *Mapping) NewAdder(db Source, tree *datastore.Tree, idx Index) *Adder {
 	a := &Adder{m: m, db: db, tree: tree, byID: map[*table]map[int64]*datastore.Node{}, idx: Index{}, ext: map[string]map[int64]string{}, pos: map[*datastore.Node]int64{}}
 	for n, id := range idx {
 		a.index(n, id)
@@ -97,40 +95,9 @@ func (a *Adder) Add(tbl string, row Row) (*datastore.Node, error) {
 			return nil, fmt.Errorf("%s: %s %d is not there", tbl, t.parentCol, pid)
 		}
 	}
-	leaves := map[string]string{}
-	for _, c := range t.cols {
-		v := row[c.column]
-		switch c.kind {
-		case plain:
-			if s, ok := leafValue(c, v); ok {
-				leaves[c.leaf.Name] = s
-			}
-		case external:
-			if v == nil || toInt(v) == 0 {
-				continue
-			}
-			names, err := externalNames(a.db, a.ext, c.external)
-			if err != nil {
-				return nil, err
-			}
-			name, ok := names[toInt(v)]
-			if !ok {
-				return nil, fmt.Errorf("%s: no %s %d", tbl, c.external, toInt(v))
-			}
-			leaves[c.leaf.Name] = name
-		case ref:
-			if v == nil || toInt(v) == 0 {
-				if c.nullValue != "" {
-					leaves[c.leaf.Name] = c.nullValue
-				}
-				continue
-			}
-			tgt := a.Node(c.target.name, toInt(v))
-			if tgt == nil {
-				return nil, fmt.Errorf("%s: %s names %s %d, which is not there", tbl, c.column, c.target.name, toInt(v))
-			}
-			leaves[c.leaf.Name] = keyOf(tgt, c.leaf)
-		}
+	leaves, err := a.leavesOf(t, tbl, row)
+	if err != nil {
+		return nil, err
 	}
 	var n *datastore.Node
 	if t.singleton != 0 {
@@ -186,6 +153,82 @@ func (a *Adder) Add(tbl string, row Row) (*datastore.Node, error) {
 	}
 	return n, nil
 }
+
+// leavesOf are the leaves of the entry a row of the table t makes.
+func (a *Adder) leavesOf(t *table, tbl string, row Row) (map[string]string, error) {
+	leaves := map[string]string{}
+	for _, c := range t.cols {
+		v := row[c.column]
+		switch c.kind {
+		case plain:
+			if s, ok := leafValue(c, v); ok {
+				leaves[c.leaf.Name] = s
+			}
+		case external:
+			if v == nil || toInt(v) == 0 {
+				continue
+			}
+			names, err := externalNames(a.db, a.ext, c.external)
+			if err != nil {
+				return nil, err
+			}
+			name, ok := names[toInt(v)]
+			if !ok {
+				return nil, fmt.Errorf("%s: no %s %d", tbl, c.external, toInt(v))
+			}
+			leaves[c.leaf.Name] = name
+		case ref:
+			if v == nil || toInt(v) == 0 {
+				if c.nullValue != "" {
+					leaves[c.leaf.Name] = c.nullValue
+				}
+				continue
+			}
+			tgt := a.Node(c.target.name, toInt(v))
+			if tgt == nil {
+				return nil, fmt.Errorf("%s: %s names %s %d, which is not there", tbl, c.column, c.target.name, toInt(v))
+			}
+			leaves[c.leaf.Name] = keyOf(tgt, c.leaf)
+		}
+	}
+	return leaves, nil
+}
+
+// Update makes the leaves and leaf-lists of the existing entry n those of
+// row (of n's table), keys included: rename the entry first (Tree.Rename,
+// which rewrites what names it).
+func (a *Adder) Update(n *datastore.Node, row Row) error {
+	t := a.m.byList[n.S]
+	if t == nil {
+		return fmt.Errorf("%s is not a list of the configuration", n.S.Name)
+	}
+	leaves, err := a.leavesOf(t, t.name, row)
+	if err != nil {
+		return err
+	}
+	n.Leaves = leaves
+	for _, c := range t.cols {
+		if c.kind == leafList {
+			delete(n.LeafLists, c.leaf.Name)
+			if vs := listValue(row[c.column]); len(vs) > 0 {
+				n.LeafLists[c.leaf.Name] = vs
+			}
+		}
+	}
+	return nil
+}
+
+// Table is the name of the table whose row the entry n is.
+func (a *Adder) Table(n *datastore.Node) string {
+	if t := a.m.byList[n.S]; t != nil {
+		return t.name
+	}
+	return ""
+}
+
+// Index is the id of every entry the adder knows: those it was given and
+// those it added with an id.
+func (a *Adder) Index() Index { return a.idx }
 
 // List is the list whose entries are the table's rows, nil for none.
 func (a *Adder) List(tbl string) *schema.Node {

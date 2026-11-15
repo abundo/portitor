@@ -29,8 +29,8 @@ func (s *Server) handleDNSBlocklistRefresh(c *echo.Context) error {
 	if !b.Enabled {
 		return errJSON(c, http.StatusConflict, "the blocklist is off")
 	}
-	var secondaries []models.Firewall
-	if err := s.db.Where("ha_primary_id = ?", in.FirewallID).Find(&secondaries).Error; err != nil {
+	secondaries, err := s.secondariesOf(in.FirewallID)
+	if err != nil {
 		return err
 	}
 	for _, fw := range secondaries {

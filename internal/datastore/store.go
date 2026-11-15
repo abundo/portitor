@@ -38,6 +38,12 @@ type CommitOptions struct {
 	// Only are the virtual firewalls an instance admin's commit deploys
 	// (nil: all).
 	Only map[string]bool
+	// Scope are the top-level lists a commit takes from the candidate, the
+	// rest of the configuration staying what runs (nil: all).
+	Scope []string
+	// NoDeploy: a scoped commit that only makes the lists run; the
+	// documents follow at the next commit.
+	NoDeploy bool
 }
 
 // Store is the candidate: the working configuration that every frontend
@@ -50,8 +56,9 @@ type Store struct {
 	backend Backend
 	dir     string // candidate.json; "" keeps it in memory
 
-	cand *Tree  // nil until first used
-	gen  uint64 // counts the candidates set
+	cand *Tree     // nil until first used
+	gen  uint64    // counts the candidates set
+	seen FileStamp // of candidate.json when it was last read or written here
 
 	locks map[string]string // datastore (candidate, running) → the session holding its lock
 
@@ -142,11 +149,26 @@ func (s *Store) locked(owner string, datastores ...string) error {
 func NewStore(root *schema.Node, b Backend, dir string) *Store {
 	s := &Store{schema: root, backend: b, dir: dir}
 	if dir != "" {
-		if t, err := s.read(filepath.Join(dir, "candidate.json")); err == nil {
+		if t, err := s.read(s.path()); err == nil {
 			s.cand = t
 		}
+		s.seen = StampOf(s.path())
 	}
 	return s
+}
+
+func (s *Store) path() string { return filepath.Join(s.dir, "candidate.json") }
+
+// lockFile takes the lock the processes that share the candidate (the daemon
+// and the console commands beside it) hold from reading it to writing it.
+func (s *Store) lockFile() func() {
+	if s.dir == "" {
+		return func() {}
+	}
+	if u, err := LockDir(s.dir, ".candidate.lock"); err == nil {
+		return u
+	}
+	return func() {}
 }
 
 func (s *Store) read(path string) (*Tree, error) {
@@ -169,7 +191,11 @@ func (s *Store) save() error {
 	if err != nil {
 		return err
 	}
-	return WriteFile(filepath.Join(s.dir, "candidate.json"), data)
+	if err := WriteFile(s.path(), data); err != nil {
+		return err
+	}
+	s.seen = StampOf(s.path())
+	return nil
 }
 
 // WriteFile writes a tree's file (0600: it holds secrets) whole or not
@@ -184,6 +210,16 @@ func WriteFile(path string, data []byte) error {
 
 // candidate is the candidate; s.mu is held.
 func (s *Store) candidate(ctx context.Context) (*Tree, error) {
+	// Another process may have changed the file (a console command that
+	// resets a password): it is read again.
+	if s.dir != "" && s.cand != nil {
+		if now := StampOf(s.path()); now != s.seen && now != (FileStamp{}) {
+			if t, err := s.read(s.path()); err == nil {
+				s.cand, s.seen = t, now
+				s.gen++
+			}
+		}
+	}
 	if s.cand == nil {
 		t, err := s.backend.Initial(ctx)
 		if err != nil {
@@ -232,6 +268,7 @@ func (s *Store) Running(ctx context.Context) (*Tree, error) {
 func (s *Store) Edit(ctx context.Context, owner string, fn func(*Tree) error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	defer s.lockFile()()
 	if err := s.locked(owner, "candidate"); err != nil {
 		return err
 	}
@@ -256,6 +293,7 @@ func (s *Store) Edit(ctx context.Context, owner string, fn func(*Tree) error) er
 func (s *Store) EditRaw(ctx context.Context, fn func(*Tree) error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	defer s.lockFile()()
 	c, err := s.candidate(ctx)
 	if err != nil {
 		return err
@@ -285,6 +323,7 @@ func (s *Store) set(t *Tree) error {
 func (s *Store) Replace(ctx context.Context, t *Tree) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	defer s.lockFile()()
 	s.cand = t
 	s.gen++
 	return s.save()
@@ -309,6 +348,7 @@ func (s *Store) Changed(ctx context.Context) (bool, error) {
 func (s *Store) Discard(ctx context.Context, owner string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	defer s.lockFile()()
 	if err := s.locked(owner, "candidate"); err != nil {
 		return err
 	}
@@ -360,10 +400,19 @@ func (s *Store) Commit(ctx context.Context, o CommitOptions) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if errs := s.validate(c); len(errs) > 0 {
-		return "", &ValidationError{errs}
+	// A commit of some lists is checked as far as it goes by the backend:
+	// what else the candidate holds doesn't stop it.
+	if len(o.Scope) == 0 {
+		if errs := s.validate(c); len(errs) > 0 {
+			return "", &ValidationError{errs}
+		}
 	}
-	return s.backend.Commit(ctx, c.Clone(), o)
+	// The backend runs without the store's lock, as the GUI's commit does
+	// (Prepare): what it does afterwards edits the candidate too.
+	clone := c.Clone()
+	s.mu.Unlock()
+	defer s.mu.Lock()
+	return s.backend.Commit(ctx, clone, o)
 }
 
 // validate is the schema's problems with t, then Check's.

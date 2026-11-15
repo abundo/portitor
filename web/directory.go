@@ -10,16 +10,19 @@ import (
 	"log/slog"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/labstack/echo/v5"
 	"golang.org/x/crypto/bcrypt"
-	"gorm.io/gorm"
 
 	"github.com/abundo/portitor/internal/agentapi"
+	"github.com/abundo/portitor/internal/confview"
+	"github.com/abundo/portitor/internal/datastore"
 	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/internal/ldapauth"
+	"github.com/abundo/portitor/internal/records"
 	"github.com/abundo/portitor/models"
 )
 
@@ -45,24 +48,23 @@ var directoryAuth = ldapauth.Authenticate
 //
 // It returns the user, nil for a wrong user name or password (or no
 // server that accepts it), and an error only for the database.
-func authenticateUser(ctx context.Context, db *gorm.DB, username, password string) (*models.User, error) {
-	var u models.User
-	err := db.Where("username = ?", username).First(&u).Error
+func authenticateUser(ctx context.Context, s *Server, username, password string) (*models.User, error) {
+	u, err := s.rec.UserNamed(username)
 	switch {
-	case errors.Is(err, gorm.ErrRecordNotFound):
-		return authenticateNewDirectoryUser(ctx, db, username, password)
+	case errors.Is(err, records.ErrNotFound):
+		return authenticateNewDirectoryUser(ctx, s, username, password)
 	case err != nil:
 		return nil, err
 	case u.PasswordHash == models.LDAPPassword:
-		return authenticateDirectoryUser(ctx, db, &u, password)
+		return authenticateDirectoryUser(ctx, s, u, password)
 	case bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(password)) == nil:
-		return &u, nil
+		return u, nil
 	}
 	return nil, nil
 }
 
-func authenticateNewDirectoryUser(ctx context.Context, db *gorm.DB, username, password string) (*models.User, error) {
-	server, info, err := directoryLogin(ctx, db, username, password)
+func authenticateNewDirectoryUser(ctx context.Context, s *Server, username, password string) (*models.User, error) {
+	server, info, err := directoryLogin(ctx, s, username, password)
 	if err != nil || info == nil {
 		if info == nil {
 			// The time a bcrypt check takes, as for a local user.
@@ -70,12 +72,7 @@ func authenticateNewDirectoryUser(ctx context.Context, db *gorm.DB, username, pa
 		}
 		return nil, err
 	}
-	var u *models.User
-	err = db.Transaction(func(tx *gorm.DB) error {
-		var err error
-		u, err = copyDirectoryUser(tx, username, server, info)
-		return err
-	})
+	u, err := s.rec.CopyDirectoryUser(username, server, directoryUserOf(info))
 	if err != nil {
 		return nil, err
 	}
@@ -83,113 +80,31 @@ func authenticateNewDirectoryUser(ctx context.Context, db *gorm.DB, username, pa
 	return u, nil
 }
 
-func authenticateDirectoryUser(ctx context.Context, db *gorm.DB, u *models.User, password string) (*models.User, error) {
-	server, info, err := directoryLogin(ctx, db, u.Username, password)
+func authenticateDirectoryUser(ctx context.Context, s *Server, u *models.User, password string) (*models.User, error) {
+	server, info, err := directoryLogin(ctx, s, u.Username, password)
 	if err != nil || info == nil {
 		return nil, err
 	}
-	err = db.Transaction(func(tx *gorm.DB) error {
-		return updateDirectoryUser(tx, u, server, info)
-	})
-	if err != nil {
+	if err := s.rec.UpdateDirectoryUser(u, server, directoryUserOf(info)); err != nil {
 		return nil, err
 	}
 	return u, nil
 }
 
-// copyDirectoryUser adds a user the directory let in, with no global role,
-// and gives them their groups' roles. A user of that name already there
-// is updated instead, if it came from the directory.
-func copyDirectoryUser(tx *gorm.DB, username, server string, info *ldapauth.UserInfo) (*models.User, error) {
-	var u models.User
-	err := tx.Where("username = ?", username).First(&u).Error
-	switch {
-	case err == nil && u.PasswordHash != models.LDAPPassword:
-		return nil, nil // a local user since: theirs is the local password
-	case err == nil:
-		return &u, updateDirectoryUser(tx, &u, server, info)
-	case !errors.Is(err, gorm.ErrRecordNotFound):
-		return nil, err
-	}
-	u = models.User{Username: username, PasswordHash: models.LDAPPassword, LdapServer: server, Role: models.RoleNone,
-		FullName: info.DisplayName, Email: info.Email}
-	if err := tx.Create(&u).Error; err != nil {
-		return nil, err
-	}
-	return &u, syncDirectoryRoles(tx, &u, info.Groups)
-}
-
-// updateDirectoryUser takes what the directory has of a user: name, email,
-// server and mapped roles.
-func updateDirectoryUser(tx *gorm.DB, u *models.User, server string, info *ldapauth.UserInfo) error {
-	if info.DisplayName != "" {
-		u.FullName = info.DisplayName
-	}
-	if info.Email != "" {
-		u.Email = info.Email
-	}
-	u.LdapServer = server
-	if err := tx.Model(u).Updates(map[string]any{"full_name": u.FullName, "email": u.Email, "ldap_server": server}).Error; err != nil {
-		return err
-	}
-	return syncDirectoryRoles(tx, u, info.Groups)
-}
-
-// syncDirectoryRoles makes a directory user a member of the roles their
-// groups map to, at the highest level mapped, and no member of the other
-// roles any group maps to. Roles no group maps to are left as an admin set
-// them.
-func syncDirectoryRoles(tx *gorm.DB, u *models.User, groups []string) error {
-	var mappings []models.LdapRoleMapping
-	if err := tx.Find(&mappings).Error; err != nil {
-		return err
-	}
-	mapped := map[uint]bool{}
-	want := map[uint]string{}
-	for _, m := range mappings {
-		mapped[m.RoleID] = true
-		if ldapauth.InGroups(groups, []string{m.GroupDn}) && want[m.RoleID] != models.RoleAdmin {
-			want[m.RoleID] = m.Level
-		}
-	}
-	var have []models.RoleMember
-	if err := tx.Where("user_id = ?", u.ID).Find(&have).Error; err != nil {
-		return err
-	}
-	for _, m := range have {
-		if !mapped[m.RoleID] {
-			continue
-		}
-		level, ok := want[m.RoleID]
-		switch {
-		case !ok:
-			if err := tx.Delete(&models.RoleMember{}, m.ID).Error; err != nil {
-				return err
-			}
-		case level != m.Level:
-			if err := tx.Model(&models.RoleMember{}).Where("id = ?", m.ID).Update("level", level).Error; err != nil {
-				return err
-			}
-		}
-		delete(want, m.RoleID)
-	}
-	for roleID, level := range want {
-		if err := tx.Create(&models.RoleMember{RoleID: roleID, UserID: u.ID, Level: level}).Error; err != nil {
-			return err
-		}
-	}
-	return nil
+// directoryUserOf is what the directory said of a user, for the records.
+func directoryUserOf(info *ldapauth.UserInfo) records.DirectoryUser {
+	return records.DirectoryUser{DisplayName: info.DisplayName, Email: info.Email, Groups: info.Groups}
 }
 
 // directoryLogin checks a password at the enabled servers in order: one
 // that is down or doesn't accept it is passed over. It returns the server
 // that accepted it and what it has of the user; no info when none did.
-func directoryLogin(ctx context.Context, db *gorm.DB, username, password string) (string, *ldapauth.UserInfo, error) {
+func directoryLogin(ctx context.Context, s *Server, username, password string) (string, *ldapauth.UserInfo, error) {
 	if password == "" || !fwconfig.ValidOpenVPNUser(username) {
 		return "", nil, nil
 	}
-	var servers []models.LdapServer
-	if err := db.Where("enabled").Order("position, id").Find(&servers).Error; err != nil {
+	servers, err := s.enabledDirectoryServers(ctx)
+	if err != nil {
 		return "", nil, err
 	}
 	for i := range servers {
@@ -209,9 +124,9 @@ func directoryLogin(ctx context.Context, db *gorm.DB, username, password string)
 
 // checkPassword checks a logged-in user's password (to change their
 // two-factor login): their hash, or the directory's.
-func checkPassword(ctx context.Context, db *gorm.DB, u *models.User, password string) bool {
+func checkPassword(ctx context.Context, s *Server, u *models.User, password string) bool {
 	if u.PasswordHash == models.LDAPPassword {
-		_, info, err := directoryLogin(ctx, db, u.Username, password)
+		_, info, err := directoryLogin(ctx, s, u.Username, password)
 		return err == nil && info != nil
 	}
 	return bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(password)) == nil
@@ -219,7 +134,7 @@ func checkPassword(ctx context.Context, db *gorm.DB, u *models.User, password st
 
 // ----- directory servers -----
 
-func prepareLdapServer(tx *gorm.DB, l, old *models.LdapServer) error {
+func prepareLdapServer(v *confview.View, l, old *models.LdapServer) error {
 	l.Name, l.Host = strings.TrimSpace(l.Name), strings.TrimSpace(l.Host)
 	l.BindDn, l.BaseDn = strings.TrimSpace(l.BindDn), strings.TrimSpace(l.BaseDn)
 	l.UserFilter = strings.TrimSpace(l.UserFilter)
@@ -257,18 +172,14 @@ func prepareLdapServer(tx *gorm.DB, l, old *models.LdapServer) error {
 	if errs := fwconfig.CheckLDAPServer(l.Server()); len(errs) > 0 {
 		return bad(fmt.Sprintf("directory server %s: %s", l.Name, strings.Join(errs, "; ")))
 	}
-	var n int64
-	if err := tx.Model(&models.LdapServer{}).Where("name = ? AND id <> ?", l.Name, l.ID).Count(&n).Error; err != nil {
-		return err
-	}
-	if n > 0 {
-		return bad(fmt.Sprintf("there is already a directory server %s", l.Name))
+	for _, o := range v.LdapServers {
+		if o.Name == l.Name && o.ID != l.ID {
+			return bad(fmt.Sprintf("there is already a directory server %s", l.Name))
+		}
 	}
 	if old == nil {
 		// Last in the login order.
-		var last int
-		tx.Model(&models.LdapServer{}).Select("COALESCE(MAX(position), 0)").Scan(&last)
-		l.Position = last + 1
+		l.Position = len(v.LdapServers) + 1
 	} else {
 		l.Position = old.Position
 	}
@@ -276,6 +187,7 @@ func prepareLdapServer(tx *gorm.DB, l, old *models.LdapServer) error {
 }
 
 func presentLdapServer(l *models.LdapServer) {
+	l.Position++ // the API counts from 1; the tree's order from 0
 	l.HasBindPassword = l.BindPassword != ""
 	l.NewBindPassword, l.ClearBindPassword = "", false
 }
@@ -288,29 +200,74 @@ func (s *Server) handleReorderLdapServers(c *echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return errJSON(c, http.StatusBadRequest, "invalid request")
 	}
-	err := s.db.Transaction(func(tx *gorm.DB) error {
-		var n int64
-		if err := tx.Model(&models.LdapServer{}).Count(&n).Error; err != nil {
-			return err
-		}
-		if int(n) != len(req.IDs) {
-			return bad("list every directory server once")
-		}
-		for i, id := range req.IDs {
-			res := tx.Model(&models.LdapServer{}).Where("id = ?", id).Update("position", i+1)
-			if res.Error != nil {
-				return res.Error
+	v, err := s.view(c.Request().Context())
+	if err != nil {
+		return err
+	}
+	if len(req.IDs) != len(v.LdapServers) {
+		return dbError(c, bad("list every directory server once"))
+	}
+	seen := map[uint]bool{}
+	for _, id := range req.IDs {
+		if seen[id] || directoryServer(v, id) == nil {
+			if seen[id] {
+				return dbError(c, bad("list every directory server once"))
 			}
-			if res.RowsAffected != 1 {
-				return bad(fmt.Sprintf("no directory server %d", id))
+			return dbError(c, bad(fmt.Sprintf("no directory server %d", id)))
+		}
+		seen[id] = true
+	}
+	r := s.directoryServers()
+	if ok, err := r.write(c, func(work *datastore.Tree, w *rowWriter) error {
+		// In order: each moved last, the first one ends up first.
+		for _, id := range req.IDs {
+			n := w.add.Node("ldap_servers", int64(id))
+			if err := work.Move(datastore.PathOf(n), "last", nil); err != nil {
+				return err
 			}
 		}
 		return nil
-	})
-	if err != nil {
-		return dbError(c, err)
+	}); !ok {
+		return err
 	}
 	return c.NoContent(http.StatusNoContent)
+}
+
+// directoryServer is the server of the rows with the id, nil for none.
+func directoryServer(v *confview.View, id uint) *models.LdapServer {
+	for i := range v.LdapServers {
+		if v.LdapServers[i].ID == id {
+			return &v.LdapServers[i]
+		}
+	}
+	return nil
+}
+
+// directoryServers is the directory servers' CRUD (a global list of the
+// tree, committed on write).
+func (s *Server) directoryServers() *treeResource[models.LdapServer, *models.LdapServer] {
+	return &treeResource[models.LdapServer, *models.LdapServer]{
+		s: s, list: "ldap-server", table: "ldap_servers",
+		rows:    func(v *confview.View) []models.LdapServer { return v.LdapServers },
+		named:   func(l *models.LdapServer) string { return l.Name },
+		prepare: prepareLdapServer, present: presentLdapServer,
+	}
+}
+
+// enabledDirectoryServers are the servers a login is tried at, in order,
+// as committed.
+func (s *Server) enabledDirectoryServers(ctx context.Context) ([]models.LdapServer, error) {
+	idx, err := s.accessIndex(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var out []models.LdapServer
+	for _, l := range idx.view.LdapServers {
+		if l.Enabled {
+			out = append(out, l)
+		}
+	}
+	return out, nil
 }
 
 // handleTestLdapServer connects to a server as the form has it (the stored
@@ -321,9 +278,10 @@ func (s *Server) handleTestLdapServer(c *echo.Context) error {
 		return errJSON(c, http.StatusBadRequest, "invalid request")
 	}
 	if l.ID != 0 {
-		var old models.LdapServer
-		if err := s.db.First(&old, l.ID).Error; err == nil {
-			l.BindPassword = old.BindPassword
+		if v, err := s.view(c.Request().Context()); err == nil {
+			if old := directoryServer(v, l.ID); old != nil {
+				l.BindPassword = old.BindPassword
+			}
 		}
 	}
 	if l.NewBindPassword != "" {
@@ -347,8 +305,12 @@ func (s *Server) handleBrowseLdapServer(c *echo.Context) error {
 	if err != nil {
 		return errJSON(c, http.StatusNotFound, "not found")
 	}
-	var l models.LdapServer
-	if err := s.db.First(&l, id).Error; err != nil {
+	v, err := s.view(c.Request().Context())
+	if err != nil {
+		return err
+	}
+	l := directoryServer(v, id)
+	if l == nil {
 		return errJSON(c, http.StatusNotFound, "not found")
 	}
 	ctx, cancel := context.WithTimeout(c.Request().Context(), 15*time.Second)
@@ -360,7 +322,7 @@ func (s *Server) handleBrowseLdapServer(c *echo.Context) error {
 	return c.JSON(http.StatusOK, entries)
 }
 
-func prepareLdapRoleMapping(tx *gorm.DB, m, _ *models.LdapRoleMapping) error {
+func prepareLdapRoleMapping(v *confview.View, m, _ *models.LdapRoleMapping) error {
 	m.GroupDn = strings.TrimSpace(m.GroupDn)
 	if m.GroupDn == "" || len(m.GroupDn) > 1024 || strings.ContainsFunc(m.GroupDn, func(r rune) bool { return r < 0x20 || r == 0x7f }) {
 		return bad("group DN: one line of at most 1024 characters")
@@ -371,17 +333,26 @@ func prepareLdapRoleMapping(tx *gorm.DB, m, _ *models.LdapRoleMapping) error {
 	if !validLevel(m.Level) {
 		return bad("level must be admin or viewer")
 	}
-	if err := tx.First(&models.Role{}, m.RoleID).Error; err != nil {
+	if !slices.ContainsFunc(v.Roles, func(r models.Role) bool { return r.ID == m.RoleID }) {
 		return bad("role: no such role")
 	}
-	var n int64
-	if err := tx.Model(&models.LdapRoleMapping{}).Where("lower(group_dn) = lower(?) AND role_id = ? AND id <> ?", m.GroupDn, m.RoleID, m.ID).Count(&n).Error; err != nil {
-		return err
-	}
-	if n > 0 {
-		return bad("that group is mapped to that role already")
+	for _, o := range v.LdapRoleMappings {
+		if o.ID != m.ID && o.RoleID == m.RoleID && strings.EqualFold(o.GroupDn, m.GroupDn) {
+			return bad("that group is mapped to that role already")
+		}
 	}
 	return nil
+}
+
+// roleMappings is the directory's group mappings' CRUD (a global list of the
+// tree, committed on write).
+func (s *Server) roleMappings() *treeResource[models.LdapRoleMapping, *models.LdapRoleMapping] {
+	return &treeResource[models.LdapRoleMapping, *models.LdapRoleMapping]{
+		s: s, list: "ldap-role-mapping", table: "ldap_role_mappings",
+		rows:    func(v *confview.View) []models.LdapRoleMapping { return v.LdapRoleMappings },
+		named:   func(m *models.LdapRoleMapping) string { return strconv.FormatUint(uint64(m.ID), 10) },
+		prepare: prepareLdapRoleMapping,
+	}
 }
 
 // ----- OpenVPN's directory logins -----
@@ -433,11 +404,8 @@ func (s *Server) copyDirectoryLogin(l agentapi.DirectoryLogin) error {
 	if !fwconfig.ValidOpenVPNUser(l.User) {
 		return nil
 	}
-	return s.db.Transaction(func(tx *gorm.DB) error {
-		info := &ldapauth.UserInfo{DN: l.DN, Email: l.Email, DisplayName: l.DisplayName, Groups: slices.Clone(l.Groups)}
-		_, err := copyDirectoryUser(tx, l.User, l.Server, info)
-		return err
-	})
+	_, err := s.rec.CopyDirectoryUser(l.User, l.Server, records.DirectoryUser{DisplayName: l.DisplayName, Email: l.Email, Groups: slices.Clone(l.Groups)})
+	return err
 }
 
 // sleepCtx sleeps d or until ctx is done; false when it is.

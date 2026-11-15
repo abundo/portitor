@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -145,10 +146,11 @@ func (s *Server) witnessString(fw *models.Firewall) (string, error) {
 	if fw.HAPrimaryID != nil {
 		return "", bad(fw.Name + " is a secondary: its primary has the pair's witness string")
 	}
-	var sec models.Firewall
-	if err := s.db.Where("ha_primary_id = ?", fw.ID).First(&sec).Error; err != nil {
+	secp, _ := s.secondaryOf(fw.ID)
+	if secp == nil {
 		return "", bad(fw.Name + " is not the primary of an HA pair")
 	}
+	sec := *secp
 	if fw.HAWitness != models.HAWitnessExternal || fw.HAWitnessSecret == "" {
 		return "", bad("the pair's witness is its portitor-config: set HA witness to external first")
 	}
@@ -172,11 +174,11 @@ func (s *Server) handleWitnessString(c *echo.Context) error {
 	if err != nil {
 		return errJSON(c, http.StatusNotFound, "not found")
 	}
-	var fw models.Firewall
-	if err := s.db.First(&fw, id).Error; err != nil {
+	fw, err := s.rec.Firewall(id)
+	if err != nil {
 		return errJSON(c, http.StatusNotFound, "not found")
 	}
-	str, err := s.witnessString(&fw)
+	str, err := s.witnessString(fw)
 	if err != nil {
 		return dbError(c, err)
 	}
@@ -186,11 +188,19 @@ func (s *Server) handleWitnessString(c *echo.Context) error {
 // WitnessString is the witness string of this portitor-config's pair, for
 // the console.
 func WitnessString(s *Server) (string, error) {
-	var fw models.Firewall
-	if err := s.db.Where("id IN (?)", s.db.Model(&models.Firewall{}).Select("ha_primary_id").Where("ha_primary_id IS NOT NULL")).First(&fw).Error; err != nil {
+	var fw *models.Firewall
+	if fws, err := s.rec.Firewalls(); err == nil {
+		for _, f := range fws {
+			if f.HAPrimaryID == nil && slices.ContainsFunc(fws, func(o models.Firewall) bool { return o.HAPrimaryID != nil && *o.HAPrimaryID == f.ID }) {
+				fw = &f
+				break
+			}
+		}
+	}
+	if fw == nil {
 		return "", errors.New("no HA pair here")
 	}
-	str, err := s.witnessString(&fw)
+	str, err := s.witnessString(fw)
 	var br *badRequest
 	if errors.As(err, &br) {
 		return "", errors.New(br.msg)

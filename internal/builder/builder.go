@@ -9,7 +9,6 @@ package builder
 
 import (
 	"cmp"
-	"errors"
 	"fmt"
 	"maps"
 	"math"
@@ -21,10 +20,9 @@ import (
 	"strconv"
 	"strings"
 
-	"gorm.io/gorm"
-
 	"github.com/abundo/portitor/internal/confview"
 	"github.com/abundo/portitor/internal/datastore"
+	"github.com/abundo/portitor/internal/datastore/sqlmap"
 	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/internal/netobj"
 	"github.com/abundo/portitor/models"
@@ -44,29 +42,31 @@ type data struct {
 // database for what is not configuration (the firewalls, the users and
 // their roles, the directory).
 type Input struct {
-	DB   *gorm.DB
+	Rec  Records
 	Tree *datastore.Tree
 }
 
+// Records is what the builder reads besides the tree: the ids and names the
+// mapping needs.
+type Records interface {
+	sqlmap.Source
+}
+
 func load(in Input) (*data, error) {
-	v, err := confview.Load(in.DB, in.Tree)
+	v, err := confview.Load(in.Rec, in.Tree)
 	if err != nil {
 		return nil, err
 	}
 	d := &data{View: v}
-	for _, q := range []struct {
-		dst   any
-		order string
-	}{
-		{&d.ldapServers, "position, id"},
-		{&d.roleMappings, "id"},
-		{&d.users, "username"},
-		{&d.roleMembers, "id"},
-	} {
-		if err := in.DB.Order(q.order).Find(q.dst).Error; err != nil {
-			return nil, err
-		}
-	}
+	d.ldapServers = v.LdapServers // the tree's: a document is a function of its tree
+	// The users, memberships and mappings are the tree's too, in the
+	// order the rows were made.
+	d.roleMappings = slices.Clone(v.LdapRoleMappings)
+	slices.SortStableFunc(d.roleMappings, func(a, b models.LdapRoleMapping) int { return int(a.ID) - int(b.ID) })
+	d.users = slices.Clone(v.Users)
+	slices.SortStableFunc(d.users, func(a, b models.User) int { return strings.Compare(a.Username, b.Username) })
+	d.roleMembers = slices.Clone(v.RoleMembers)
+	slices.SortStableFunc(d.roleMembers, func(a, b models.RoleMember) int { return int(a.ID) - int(b.ID) })
 	return d, nil
 }
 
@@ -88,44 +88,50 @@ func BuildFirewall(in Input, generation int64, firewallID uint) (*fwconfig.Docum
 // instances (nil: all) of those it runs, and no fwconfig.Validate when
 // only is set.
 func BuildFirewallInstances(in Input, generation int64, firewallID uint, only map[string]bool) (*fwconfig.Document, error) {
-	var fw models.Firewall
-	if err := in.DB.First(&fw, firewallID).Error; err != nil {
-		return nil, err
-	}
-	ha, haProblem, err := haBlock(in.DB, &fw)
+	// The firewalls are the tree's too.
+	d, err := load(in)
 	if err != nil {
 		return nil, err
 	}
+	i := slices.IndexFunc(d.Firewalls, func(f models.Firewall) bool { return f.ID == firewallID })
+	if i < 0 {
+		return nil, fmt.Errorf("no firewall %d", firewallID)
+	}
+	fw := d.Firewalls[i]
+	ha, haProblem := haBlock(d.Firewalls, &fw)
 	runs := firewallID
 	if fw.HAPrimaryID != nil {
 		runs = *fw.HAPrimaryID
 	}
-	return buildPeer(in, generation, only, runs, fw.HAPrimaryID != nil, ha, haProblem)
+	return buildPeer(in, d, generation, only, runs, fw.HAPrimaryID != nil, ha, haProblem)
 }
 
 // haBlock is the firewall's place in its HA pair, or nil outside one,
 // with a problem when the pair can't reach each other's agents.
-func haBlock(db *gorm.DB, fw *models.Firewall) (*fwconfig.HA, string, error) {
+func haBlock(fws []models.Firewall, fw *models.Firewall) (*fwconfig.HA, string) {
+	// The firewall's secondary, if it has one (the first, by id).
+	secondary := slices.IndexFunc(fws, func(f models.Firewall) bool { return f.HAPrimaryID != nil && *f.HAPrimaryID == fw.ID })
 	var peer models.Firewall
 	ha := &fwconfig.HA{}
-	switch err := db.Where("ha_primary_id = ?", fw.ID).First(&peer).Error; {
+	switch {
 	case fw.HAPrimaryID != nil:
-		if err := db.First(&peer, *fw.HAPrimaryID).Error; err != nil {
-			return nil, "", err
+		p := slices.IndexFunc(fws, func(f models.Firewall) bool { return f.ID == *fw.HAPrimaryID })
+		if p < 0 {
+			return nil, fmt.Sprintf("HA: %s's primary is not there", fw.Name)
 		}
+		peer = fws[p]
 		ha.Node, ha.Secret, ha.Epoch = fwconfig.HASecondary, fw.HASecret, fw.HAEpoch
 		if peer.HAWitness == models.HAWitnessExternal {
 			ha.WitnessSecret = peer.HAWitnessSecret
 		}
-	case err == nil:
+	case secondary >= 0:
+		peer = fws[secondary]
 		ha.Node, ha.Secret, ha.Epoch = fwconfig.HAPrimary, peer.HASecret, peer.HAEpoch
 		if fw.HAWitness == models.HAWitnessExternal {
 			ha.WitnessSecret = fw.HAWitnessSecret
 		}
-	case errors.Is(err, gorm.ErrRecordNotFound):
-		return nil, "", nil
 	default:
-		return nil, "", err
+		return nil, ""
 	}
 	if peer.ConfigURL != "" && peer.ConfigFingerprint != "" {
 		ha.PeerConfig, ha.PeerConfigFingerprint = peer.ConfigURL, peer.ConfigFingerprint
@@ -135,13 +141,13 @@ func haBlock(db *gorm.DB, fw *models.Firewall) (*fwconfig.HA, string, error) {
 	ha.Peer, ha.PeerFingerprint = peer.AgentURL, peer.AgentFingerprint
 	if u, err := url.Parse(ha.Peer); err == nil {
 		if a, err := netip.ParseAddr(u.Hostname()); (err == nil && a.IsLoopback()) || u.Hostname() == "localhost" {
-			return nil, fmt.Sprintf("HA: %s's agent URL is a loopback address, which %s can't reach; set its address on the network", peer.Name, fw.Name), nil
+			return nil, fmt.Sprintf("HA: %s's agent URL is a loopback address, which %s can't reach; set its address on the network", peer.Name, fw.Name)
 		}
 	}
 	if ha.PeerFingerprint == "" {
-		return nil, fmt.Sprintf("HA: %s needs its agent's certificate fingerprint, which %s pins", peer.Name, fw.Name), nil
+		return nil, fmt.Sprintf("HA: %s needs its agent's certificate fingerprint, which %s pins", peer.Name, fw.Name)
 	}
-	return ha, "", nil
+	return ha, ""
 }
 
 // configPort is the port of a portitor-config URL (https://host[:port]),
@@ -172,15 +178,17 @@ func BuildInstances(in Input, generation int64, only map[string]bool) (*fwconfig
 
 // build builds the instances in only (nil: all) on the firewall (0: all).
 func build(in Input, generation int64, only map[string]bool, firewallID uint) (*fwconfig.Document, error) {
-	return buildPeer(in, generation, only, firewallID, false, nil, "")
+	return buildPeer(in, nil, generation, only, firewallID, false, nil, "")
 }
 
 // buildPeer is build, for the firewall's HA secondary when peer is set,
 // with the host's HA block (and a problem with it).
-func buildPeer(in Input, generation int64, only map[string]bool, firewallID uint, peer bool, ha *fwconfig.HA, haProblem string) (*fwconfig.Document, error) {
-	d, err := load(in)
-	if err != nil {
-		return nil, err
+func buildPeer(in Input, d *data, generation int64, only map[string]bool, firewallID uint, peer bool, ha *fwconfig.HA, haProblem string) (*fwconfig.Document, error) {
+	if d == nil {
+		var err error
+		if d, err = load(in); err != nil {
+			return nil, err
+		}
 	}
 	var problems []string
 	addf := func(format string, args ...any) { problems = append(problems, fmt.Sprintf(format, args...)) }

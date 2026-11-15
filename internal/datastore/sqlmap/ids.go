@@ -4,11 +4,11 @@
 package sqlmap
 
 import (
+	"encoding/json"
+	"fmt"
 	"maps"
 	"slices"
 	"strings"
-
-	"gorm.io/gorm"
 
 	"github.com/abundo/portitor/internal/datastore"
 	"github.com/abundo/portitor/internal/schema"
@@ -28,26 +28,85 @@ type idRow struct {
 	id  int64
 }
 
-// LoadIDs reads the ids kept in db; none when it has no table for them.
-func LoadIDs(db *gorm.DB) (IDs, error) {
-	ids := IDs{byPath: map[string]idRow{}, max: map[string]int64{}}
-	if db == nil || !db.Migrator().HasTable("config_ids") {
-		return ids, nil
-	}
-	var rows []struct {
-		Path string
-		Tbl  string
-		ID   int64
-	}
-	if err := db.Table("config_ids").Select("path, tbl, id").Find(&rows).Error; err != nil {
-		return ids, err
-	}
-	for _, r := range rows {
-		ids.byPath[r.Path] = idRow{r.Tbl, r.ID}
-		ids.max[r.Tbl] = max(ids.max[r.Tbl], r.ID)
-	}
-	return ids, nil
+// NewIDs is no ids kept yet.
+func NewIDs() IDs { return IDs{byPath: map[string]idRow{}, max: map[string]int64{}} }
+
+// Set keeps id for the entry at path, of the table tbl.
+func (ids IDs) Set(path, tbl string, id int64) {
+	ids.byPath[path] = idRow{tbl, id}
+	ids.max[tbl] = max(ids.max[tbl], id)
 }
+
+// Each calls fn for every path of the ids that starts with prefix, with its
+// table and id.
+func (ids IDs) Each(prefix string, fn func(path, tbl string, id int64)) {
+	for p, r := range ids.byPath {
+		if strings.HasPrefix(p, prefix) {
+			fn(p, r.tbl, r.id)
+		}
+	}
+}
+
+// Delete forgets the id kept for a path (the highest id each table gave stays).
+func (ids IDs) Delete(path string) { delete(ids.byPath, path) }
+
+// SetMax raises the highest id given in a table: ids above it are never
+// another entry's, whatever entries there are now (a database's autoincrement
+// counter, after rows deleted).
+func (ids IDs) SetMax(tbl string, n int64) { ids.max[tbl] = max(ids.max[tbl], n) }
+
+// Clone is a copy of the ids, which Set may change.
+func (ids IDs) Clone() IDs { return ids.clone() }
+
+func (ids IDs) clone() IDs {
+	return IDs{byPath: maps.Clone(ids.byPath), max: maps.Clone(ids.max)}
+}
+
+// idsFile is IDs as JSON: the version of the format, and each path's
+// table and id.
+type idsFile struct {
+	Version int               `json:"version"`
+	Paths   map[string][2]any `json:"paths"`
+}
+
+// MarshalJSON writes the ids in a stable order.
+func (ids IDs) MarshalJSON() ([]byte, error) {
+	f := idsFile{Version: 1, Paths: make(map[string][2]any, len(ids.byPath))}
+	for p, r := range ids.byPath {
+		f.Paths[p] = [2]any{r.tbl, r.id}
+	}
+	return json.Marshal(f)
+}
+
+// UnmarshalJSON reads what MarshalJSON wrote.
+func (ids *IDs) UnmarshalJSON(b []byte) error {
+	var f struct {
+		Version int                           `json:"version"`
+		Paths   map[string][2]json.RawMessage `json:"paths"`
+	}
+	if err := json.Unmarshal(b, &f); err != nil {
+		return err
+	}
+	if f.Version != 1 {
+		return fmt.Errorf("ids: unsupported version %d", f.Version)
+	}
+	*ids = NewIDs()
+	for p, r := range f.Paths {
+		var tbl string
+		var id int64
+		if err := json.Unmarshal(r[0], &tbl); err != nil {
+			return fmt.Errorf("ids: %s: %w", p, err)
+		}
+		if err := json.Unmarshal(r[1], &id); err != nil {
+			return fmt.Errorf("ids: %s: %w", p, err)
+		}
+		ids.Set(p, tbl, id)
+	}
+	return nil
+}
+
+// Equal tells whether both keep the same ids.
+func (ids IDs) Equal(o IDs) bool { return maps.Equal(ids.byPath, o.byPath) }
 
 // ID is the id kept for the entry at path.
 func (ids IDs) ID(path string) (int64, bool) {
@@ -55,17 +114,13 @@ func (ids IDs) ID(path string) (int64, bool) {
 	return r.id, ok
 }
 
-// AssignIDs gives every entry of tree that has none an id, moves those of
-// the entries tree.Renamed lists along with them, and keeps them in db (a
-// transaction). An entry deleted keeps its row, so one made again at the
-// same path gets its id back, and no other entry ever gets it.
-func (m *Mapping) AssignIDs(tx *gorm.DB, tree *datastore.Tree) (Index, error) {
-	ids, err := LoadIDs(tx)
-	if err != nil {
-		return nil, err
-	}
-	changed := map[string]idRow{}
-	var gone []string
+// PlanIDs gives every entry of tree that has none an id, and moves those of
+// the entries tree.Renamed lists along with them: the ids afterwards (ids is
+// not changed), and the index of the tree's entries by id. It is pure; what
+// keeps the ids is the caller's. An entry deleted keeps its id, so one made
+// again at the same path gets it back, and no other entry ever gets it.
+func (m *Mapping) PlanIDs(ids IDs, tree *datastore.Tree) (IDs, Index) {
+	ids = ids.clone()
 	for _, r := range tree.Renamed {
 		from := r.Path.String(m.root)
 		to := slices.Clone(r.Path)
@@ -75,7 +130,6 @@ func (m *Mapping) AssignIDs(tx *gorm.DB, tree *datastore.Tree) (Index, error) {
 		for k := range ids.byPath {
 			if k == toKey || strings.HasPrefix(k, toKey+"/") {
 				delete(ids.byPath, k)
-				gone = append(gone, k)
 			}
 		}
 		moved := map[string]idRow{}
@@ -83,11 +137,9 @@ func (m *Mapping) AssignIDs(tx *gorm.DB, tree *datastore.Tree) (Index, error) {
 			if k == from || strings.HasPrefix(k, from+"/") {
 				moved[toKey+strings.TrimPrefix(k, from)] = row
 				delete(ids.byPath, k)
-				gone = append(gone, k)
 			}
 		}
 		maps.Copy(ids.byPath, moved)
-		maps.Copy(changed, moved)
 	}
 	idx := Index{}
 	m.walkEntries(tree.Root, func(e *datastore.Node, t *table) {
@@ -107,23 +159,30 @@ func (m *Mapping) AssignIDs(tx *gorm.DB, tree *datastore.Tree) (Index, error) {
 		ids.max[t.name]++
 		r := idRow{t.name, ids.max[t.name]}
 		ids.byPath[p] = r
-		changed[p] = r
 		idx[e] = r.id
 	})
-	if len(gone) > 0 {
-		for chunk := range slices.Chunk(gone, 500) {
-			if err := tx.Exec("DELETE FROM config_ids WHERE path IN ?", chunk).Error; err != nil {
-				return nil, err
+	return ids, idx
+}
+
+// UndoRenames moves the ids back that PlanIDs moved for the renames: a rename
+// made to the candidate that the commit then refused (what is put back is the
+// entries, so their ids go back too).
+func (m *Mapping) UndoRenames(ids IDs, renamed []datastore.Renamed) {
+	for i := len(renamed) - 1; i >= 0; i-- {
+		r := renamed[i]
+		from := r.Path.String(m.root)
+		to := slices.Clone(r.Path)
+		to[len(to)-1] = datastore.Elem{Name: to[len(to)-1].Name, Keys: r.Keys}
+		toKey := to.String(m.root)
+		moved := map[string]idRow{}
+		for k, row := range ids.byPath {
+			if k == toKey || strings.HasPrefix(k, toKey+"/") {
+				moved[from+strings.TrimPrefix(k, toKey)] = row
+				delete(ids.byPath, k)
 			}
 		}
+		maps.Copy(ids.byPath, moved)
 	}
-	for _, p := range slices.Sorted(maps.Keys(changed)) {
-		r := changed[p]
-		if err := tx.Exec("INSERT INTO config_ids (path, tbl, id) VALUES (?, ?, ?) ON CONFLICT (path) DO UPDATE SET tbl = excluded.tbl, id = excluded.id", p, r.tbl, r.id).Error; err != nil {
-			return nil, err
-		}
-	}
-	return idx, nil
 }
 
 // walkEntries calls fn for every entry of n (and below) that is a row:

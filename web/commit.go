@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v5"
-	"gorm.io/gorm"
 
 	"github.com/abundo/portitor/internal/agentapi"
 	"github.com/abundo/portitor/internal/agentclient"
@@ -63,14 +62,81 @@ type commitTarget struct {
 	skip bool
 }
 
+// commitPlan is a commit once prepared: what it deploys, to whom, and with
+// what confirm window. The phases below take it in turn (deploy), and each
+// can run on its own over agents that are fakes.
+type commitPlan struct {
+	commit  int64
+	st      *models.Settings
+	fws     []models.Firewall
+	targets []*commitTarget
+	only    map[string]bool
+	tree    *datastore.Tree
+	// runs is what runs once the commit applies: the tree, or for some
+	// instances only, the running configuration with those from the tree.
+	runs *datastore.Tree
+	// confirm is the commit's confirm timeout, applyConfirm the one the
+	// agents get: several firewalls apply together, so each waits for the
+	// others (jointConfirm without a timeout).
+	confirm, applyConfirm int
+	together              bool
+}
+
 // deploy commits the configuration tree: it builds each firewall's
 // document, applies the changed ones, records the deployments and keeps
 // the configuration as the commit's. timeout nil takes the confirm timeout
 // from the settings. only names the instances to deploy from the tree
 // (nil: everything); see buildDoc.
+//
+// The order of the phases matters: the agents are all asked for a pending
+// change before any is applied, the numbers are burned before the first
+// apply, and the deployments are recorded even when an apply failed.
 func (s *Server) deploy(ctx context.Context, username string, timeout *int, only map[string]bool, tree *datastore.Tree) (*commitResult, error) {
 	s.deployMu.Lock()
 	defer s.deployMu.Unlock()
+	if only == nil {
+		// The global lists are written by others meanwhile (a password
+		// changed while this commit was prepared): what a full commit makes
+		// run of them is the candidate as it is now, not as it was cloned.
+		t, err := s.tree()
+		if err != nil {
+			return nil, err
+		}
+		fresh, err := t.store.Candidate(ctx)
+		if err != nil {
+			return nil, err
+		}
+		tree = tree.Clone()
+		tree.CopyLists(fresh, t.globals...)
+	}
+	return s.deployLocked(ctx, username, timeout, only, tree)
+}
+
+// deployLocked is deploy with s.deployMu held.
+func (s *Server) deployLocked(ctx context.Context, username string, timeout *int, only map[string]bool, tree *datastore.Tree) (*commitResult, error) {
+	p, err := s.prepareCommit(ctx, timeout, only, tree)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.checkAgents(ctx, p); err != nil {
+		return nil, err
+	}
+	if err := s.reserveNumbers(p); err != nil {
+		return nil, err
+	}
+	res, applyErr := s.applyTargets(ctx, p, username)
+	s.settleTargets(ctx, p, applyErr)
+	if err := s.recordDeployments(p, res); err != nil {
+		return nil, err
+	}
+	return res, applyErr
+}
+
+// prepareCommit builds the documents and picks the firewalls to deploy to,
+// checks what the commit may not do (a firewall's problems, an instance
+// admin's limits) and keeps the configuration as the commit's. It asks no
+// agent and changes nothing the agents see.
+func (s *Server) prepareCommit(ctx context.Context, timeout *int, only map[string]bool, tree *datastore.Tree) (*commitPlan, error) {
 	// The settings of the tree: deploy may run under the candidate's lock
 	// (a commit from the CLI), so not the candidate's.
 	st, err := s.settingsOf(tree)
@@ -81,8 +147,17 @@ func (s *Server) deploy(ctx context.Context, username string, timeout *int, only
 	if err != nil {
 		return nil, err
 	}
-	commit := st.LastCommit + 1
-	targets, same, err := s.commitTargets(builder.Input{DB: s.db, Tree: tree}, fws, only)
+	if only != nil {
+		// An instance admin's commit builds what runs of the global lists (the
+		// users) too, not what is only in the candidate.
+		run, err := s.treeState.store.Running(ctx)
+		if err != nil {
+			return nil, err
+		}
+		tree = tree.Clone()
+		tree.CopyLists(run, s.treeState.globals...)
+	}
+	targets, same, err := s.commitTargets(builder.Input{Rec: s.rec, Tree: tree}, fws, only)
 	if err == nil {
 		// Nothing changed: all are applied again.
 		if len(targets) == 0 {
@@ -93,6 +168,9 @@ func (s *Server) deploy(ctx context.Context, username string, timeout *int, only
 		}
 	}
 	if err != nil {
+		return nil, err
+	}
+	if err := validateTargets(targets); err != nil {
 		return nil, err
 	}
 	if errs := s.firewallProblems(tree); len(errs) > 0 {
@@ -112,30 +190,59 @@ func (s *Server) deploy(ctx context.Context, username string, timeout *int, only
 			return nil, err
 		}
 	}
-	// What runs once it applies: the tree, or for some instances only, the
-	// running configuration with those instances from the tree.
 	runs := tree
 	if only != nil {
 		if runs, err = s.mergeRunning(ctx, tree, only); err != nil {
 			return nil, err
 		}
 	}
+	commit := st.LastCommit + 1
 	if err := s.saveCommit(runs, commit); err != nil {
 		return nil, err
 	}
+	// The global lists of what is committed run from now on.
+	if err := s.saveGlobals(runs); err != nil {
+		return nil, err
+	}
+	confirm := st.ConfirmTimeout
+	if timeout != nil {
+		confirm = *timeout
+	}
+	return &commitPlan{commit: commit, st: st, fws: fws, targets: targets, only: only, tree: tree, runs: runs, confirm: confirm}, nil
+}
+
+// validateTargets checks each document again, whatever built it: nothing
+// invalid is sent to an agent (which checks it again itself, as it trusts
+// nothing).
+func validateTargets(targets []*commitTarget) error {
+	for _, t := range targets {
+		if err := t.doc.Validate(); err != nil {
+			return fmt.Errorf("firewall %s: %w", t.fw.Name, err)
+		}
+	}
+	return nil
+}
+
+// checkAgents asks every target's agent whether it is waiting for a
+// confirmation (the commit is refused then, before anything is applied) and
+// marks the targets to skip: an HA host that can't be reached is skipped
+// when its peer can be (the witness keeps it fenced unless it hears that
+// peer). It also sets the plan's confirm windows.
+func (s *Server) checkAgents(ctx context.Context, p *commitPlan) error {
+	var err error
 	reached := map[uint]bool{}
 	var unreached []*commitTarget
 	var reachErr error
-	for _, t := range targets {
+	for _, t := range p.targets {
 		if t.a, err = s.newAgent(&t.fw); err != nil {
-			return nil, bad(fmt.Sprintf("firewall %s: %v", t.fw.Name, err))
+			return bad(fmt.Sprintf("firewall %s: %v", t.fw.Name, err))
 		}
 		// The history may not know yet that a change timed out.
 		as, err := t.a.Status(ctx)
 		if err != nil && agentclient.Refused(err) {
 			// It answers but refuses (a wrong token): not skipped as
 			// unreachable, which it isn't.
-			return nil, bad(fmt.Sprintf("firewall %s: %v", t.fw.Name, err))
+			return bad(fmt.Sprintf("firewall %s: %v", t.fw.Name, err))
 		}
 		if err != nil {
 			unreached = append(unreached, t)
@@ -144,68 +251,71 @@ func (s *Server) deploy(ctx context.Context, username string, timeout *int, only
 		}
 		reached[t.fw.ID] = true
 		if as.Pending != nil {
-			return nil, errPending
+			return errPending
 		}
 	}
-	// An HA host that can't be reached is skipped when its peer can be
-	// (the witness keeps it fenced unless it hears that peer).
 	for _, t := range unreached {
-		peer := haPeerOf(fws, t.fw)
-		if peer == 0 || (!reached[peer] && !s.answers(ctx, fws, peer)) {
-			return nil, reachErr
+		peer := haPeerOf(p.fws, t.fw)
+		if peer == 0 || (!reached[peer] && !s.answers(ctx, p.fws, peer)) {
+			return reachErr
 		}
 		t.skip = true
 	}
-
-	confirm := st.ConfirmTimeout
-	if timeout != nil {
-		confirm = *timeout
-	}
 	applying := 0
-	for _, t := range targets {
+	for _, t := range p.targets {
 		if !t.skip {
 			applying++
 		}
 	}
-	together := applying > 1
-	applyConfirm := confirm
-	if together && applyConfirm == 0 {
-		applyConfirm = jointConfirm
+	p.together = applying > 1
+	p.applyConfirm = p.confirm
+	if p.together && p.applyConfirm == 0 {
+		p.applyConfirm = jointConfirm
 	}
-	// Burn the numbers even if the apply fails, so every attempt an agent
-	// sees has a unique generation.
-	st.LastCommit = commit
-	if err := s.db.Exec("UPDATE settings SET last_commit = ? WHERE id = 1", commit).Error; err != nil {
-		return nil, err
+	return nil
+}
+
+// reserveNumbers burns the commit's number and each firewall's generation
+// even if the apply fails, so every attempt an agent sees has a unique one.
+func (s *Server) reserveNumbers(p *commitPlan) error {
+	p.st.LastCommit = p.commit
+	if err := s.rec.SetLastCommit(p.commit); err != nil {
+		return err
 	}
-	for _, t := range targets {
-		if err := s.db.Model(&models.Firewall{}).Where("id = ?", t.fw.ID).Update("generation", t.doc.Generation).Error; err != nil {
-			return nil, err
+	for _, t := range p.targets {
+		if err := s.rec.SetGeneration(t.fw.ID, t.doc.Generation); err != nil {
+			return err
 		}
 	}
+	return nil
+}
 
-	res := &commitResult{Commit: commit, Status: "applied", Deployments: []models.Deployment{}, Results: map[string]*agentapi.ApplyResult{}}
+// applyTargets applies the document to each target in turn, noting the
+// outcome in its deployment: a skipped one is left, and after a failure the
+// rest are not tried. The error is the failure's.
+func (s *Server) applyTargets(ctx context.Context, p *commitPlan, username string) (*commitResult, error) {
+	res := &commitResult{Commit: p.commit, Status: "applied", Deployments: []models.Deployment{}, Results: map[string]*agentapi.ApplyResult{}}
 	var applyErr error
-	for _, t := range targets {
+	for _, t := range p.targets {
 		docJSON, _ := json.Marshal(t.doc.Redacted())
-		t.dep = models.Deployment{FirewallID: t.fw.ID, CommitID: commit, Generation: t.doc.Generation, Username: username,
+		t.dep = models.Deployment{FirewallID: t.fw.ID, CommitID: p.commit, Generation: t.doc.Generation, Username: username,
 			Document: string(docJSON), DocHash: docHash(*t.doc), Instances: models.StringList{}}
-		if only != nil {
-			t.dep.Instances = sortedNames(onlyOn(only, t.doc))
+		if p.only != nil {
+			t.dep.Instances = sortedNames(onlyOn(p.only, t.doc))
 		}
 		if t.skip {
 			t.dep.Status, t.dep.Message = "skipped", "not reachable; it catches up when it answers"
 			continue
 		}
 		if applyErr != nil {
-			t.dep.Status, t.dep.Message = "failed", "not applied: firewall "+failedName(targets)+" failed"
+			t.dep.Status, t.dep.Message = "failed", "not applied: firewall "+failedName(p.targets)+" failed"
 			continue
 		}
-		r, err := t.a.Apply(ctx, *t.doc, applyConfirm)
+		r, err := t.a.Apply(ctx, *t.doc, p.applyConfirm)
 		switch {
 		case err != nil:
 			applyErr = fmt.Errorf("firewall %s: %w", t.fw.Name, err)
-			if !together {
+			if !p.together {
 				applyErr = err
 			}
 			t.dep.Status, t.dep.Message = "failed", err.Error()
@@ -230,20 +340,28 @@ func (s *Server) deploy(ctx context.Context, username string, timeout *int, only
 		}
 		res.Results[t.fw.Name] = r
 	}
+	return res, applyErr
+}
+
+// settleTargets finishes what several firewalls applied together: when one
+// failed the others, waiting for confirmation, are rolled back; without a
+// confirm timeout they are all confirmed. A single firewall's change stays
+// as it is (confirmed by the browser or rolled back by its agent).
+func (s *Server) settleTargets(ctx context.Context, p *commitPlan, applyErr error) {
 	switch {
-	case applyErr != nil && together:
-		for _, t := range targets {
+	case applyErr != nil && p.together:
+		for _, t := range p.targets {
 			if t.dep.Status != "pending" {
 				continue
 			}
 			if err := s.finishTarget(context.WithoutCancel(ctx), t, false); err != nil {
-				t.dep.Message = "rolling back after firewall " + failedName(targets) + " failed: " + err.Error()
+				t.dep.Message = "rolling back after firewall " + failedName(p.targets) + " failed: " + err.Error()
 				continue
 			}
-			t.dep.Status, t.dep.Message = "rolled_back", "rolled back: firewall "+failedName(targets)+" failed"
+			t.dep.Status, t.dep.Message = "rolled_back", "rolled back: firewall "+failedName(p.targets)+" failed"
 		}
-	case together && confirm == 0:
-		for _, t := range targets {
+	case p.together && p.confirm == 0:
+		for _, t := range p.targets {
 			if t.skip {
 				continue
 			}
@@ -254,10 +372,25 @@ func (s *Server) deploy(ctx context.Context, username string, timeout *int, only
 			t.dep.Status, t.dep.Message = "applied", ""
 		}
 	}
+}
 
-	for _, t := range targets {
-		if err := s.db.Create(&t.dep).Error; err != nil {
-			return nil, err
+// pruneDeployments forgets the deployments beyond what the settings keep.
+func (s *Server) pruneDeployments(st *models.Settings) {
+	var older time.Time
+	if st.KeepDeploymentDays > 0 {
+		older = time.Now().AddDate(0, 0, -st.KeepDeploymentDays)
+	}
+	if err := s.rec.PruneDeployments(st.KeepDeployments, older); err != nil {
+		slog.Warn("pruning the deployment history", "err", err)
+	}
+}
+
+// recordDeployments writes each target's deployment and sets the commit's
+// status, keeps the documents that run, and tidies up after the commit.
+func (s *Server) recordDeployments(p *commitPlan, res *commitResult) error {
+	for _, t := range p.targets {
+		if err := s.rec.RecordDeployment(&t.dep); err != nil {
+			return err
 		}
 		res.Deployments = append(res.Deployments, t.dep)
 		switch t.dep.Status {
@@ -269,19 +402,20 @@ func (s *Server) deploy(ctx context.Context, username string, timeout *int, only
 				res.Status = "pending"
 			}
 		}
-		if err := s.keepDocument(t.doc, commit, t.fw.ID); err != nil {
+		if err := s.keepDocument(t.doc, p.commit, t.fw.ID); err != nil {
 			slog.Warn("keeping the deployed document", "firewall", t.fw.Name, "err", err)
 		}
 	}
 	s.pruneSnapshots()
+	s.pruneDeployments(p.st)
 	// The store's lock may be held (a CLI or NETCONF commit): the trees
 	// are at hand.
 	if res.Status == "applied" {
-		if err := dropInstanceRoles(s.db, tree, runs); err != nil {
+		if err := s.dropInstanceRoles(p.tree, p.runs); err != nil {
 			slog.Warn("removing the roles of deleted virtual firewalls", "err", err)
 		}
 	}
-	return res, applyErr
+	return nil
 }
 
 // dropStaleRoles removes the roles of the instances gone from running and
@@ -299,7 +433,7 @@ func (s *Server) dropStaleRoles(ctx context.Context) {
 	if err != nil {
 		return
 	}
-	if err := dropInstanceRoles(s.db, cand, run); err != nil {
+	if err := s.dropInstanceRoles(cand, run); err != nil {
 		slog.Warn("removing the roles of deleted virtual firewalls", "err", err)
 	}
 }
@@ -383,8 +517,8 @@ func (s *Server) buildDoc(in builder.Input, fw *models.Firewall, gen int64, only
 	}
 	runs := fw.Name
 	if fw.HAPrimaryID != nil {
-		var primary models.Firewall
-		if err := s.db.First(&primary, *fw.HAPrimaryID).Error; err != nil {
+		primary, err := s.rec.Firewall(*fw.HAPrimaryID)
+		if err != nil {
 			return nil, err
 		}
 		runs = primary.Name
@@ -427,25 +561,14 @@ func (s *Server) buildDoc(in builder.Input, fw *models.Firewall, gen int64, only
 
 // latestDeployment is the firewall's latest deployment, or nil.
 func (s *Server) latestDeployment(firewallID uint) (*models.Deployment, error) {
-	var dep models.Deployment
-	err := s.db.Where("firewall_id = ?", firewallID).Order("commit_id desc, id desc").First(&dep).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, nil
-	}
-	return &dep, err
+	return s.rec.LatestDeployment(firewallID)
 }
 
 // liveDeployment is the latest deployment the firewall runs (or runs
 // pending confirmation); a failed or rolled back one left the previous
 // one in place.
 func (s *Server) liveDeployment(firewallID uint) (*models.Deployment, error) {
-	var dep models.Deployment
-	err := s.db.Where("firewall_id = ? AND status IN ?", firewallID, []string{"applied", "pending", "confirmed"}).
-		Order("commit_id desc, id desc").First(&dep).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, nil
-	}
-	return &dep, err
+	return s.rec.LiveDeployment(firewallID)
 }
 
 // pendingDeployments are the firewalls' latest deployments that wait for
@@ -648,17 +771,7 @@ func (s *Server) handleDeployConfirm(c *echo.Context) error {
 			return errJSON(c, http.StatusForbidden, "this change deployed virtual firewalls you are not an admin of")
 		}
 	}
-	var errs []string
-	for i := range deps {
-		dep := &deps[i]
-		fw, err := s.finishDeployment(c.Request().Context(), dep, true)
-		if err != nil {
-			errs = append(errs, firewallName(fw)+err.Error())
-			continue
-		}
-		dep.Status, dep.Message = "confirmed", "confirmed by "+currentUser(c).Username
-		s.db.Save(dep)
-	}
+	errs, _ := s.finishPending(c.Request().Context(), deps, true, currentUser(c).Username)
 	if len(errs) > 0 {
 		return c.JSON(http.StatusBadGateway, map[string]any{"error": strings.Join(errs, "; ")})
 	}
@@ -679,18 +792,10 @@ func (s *Server) handleDeployRollback(c *echo.Context) error {
 			return errJSON(c, http.StatusForbidden, "only a global admin rolls back a change of virtual firewalls you are not an admin of")
 		}
 	}
-	var errs []string
+	errs, done := s.finishPending(c.Request().Context(), deps, false, currentUser(c).Username)
 	results := map[string]*agentapi.ApplyResult{}
-	for i := range deps {
-		dep := &deps[i]
-		fw, err := s.finishDeployment(c.Request().Context(), dep, false)
-		if err != nil {
-			errs = append(errs, firewallName(fw)+err.Error())
-			continue
-		}
-		results[fw.Name] = &agentapi.ApplyResult{RolledBack: true}
-		dep.Status, dep.Message = "rolled_back", "rolled back by "+currentUser(c).Username
-		s.db.Save(dep)
+	for _, name := range done {
+		results[name] = &agentapi.ApplyResult{RolledBack: true}
 	}
 	if len(errs) > 0 {
 		return c.JSON(http.StatusBadGateway, map[string]any{"error": strings.Join(errs, "; ")})
@@ -840,7 +945,7 @@ func (s *Server) firewallStatus(ctx context.Context, fw *models.Firewall) (*agen
 		} else {
 			dep.Status, dep.Message = "rolled_back", fmt.Sprintf("rolled back on the firewall or not confirmed in time; agent restored generation %d", st.Generation)
 		}
-		s.db.Save(dep)
+		_ = s.rec.UpdateDeployment(dep)
 	}
 	return st, nil
 }
@@ -1121,7 +1226,7 @@ func (s *Server) candidateInput(ctx context.Context) (builder.Input, error) {
 	if err != nil {
 		return builder.Input{}, err
 	}
-	return builder.Input{DB: s.db, Tree: cand}, nil
+	return builder.Input{Rec: s.rec, Tree: cand}, nil
 }
 
 func haPeerOf(fws []models.Firewall, fw models.Firewall) uint {
@@ -1162,15 +1267,37 @@ func (s *Server) finishTarget(ctx context.Context, t *commitTarget, confirm bool
 	return err
 }
 
+// finishPending confirms (or rolls back) each pending deployment, noting it
+// in the history as done by the user. It goes on after a failure; errs are
+// the failures, named by firewall, and done the firewalls that finished.
+func (s *Server) finishPending(ctx context.Context, deps []models.Deployment, confirm bool, username string) (errs, done []string) {
+	for i := range deps {
+		dep := &deps[i]
+		fw, err := s.finishDeployment(ctx, dep, confirm)
+		if err != nil {
+			errs = append(errs, firewallName(fw)+err.Error())
+			continue
+		}
+		if confirm {
+			dep.Status, dep.Message = "confirmed", "confirmed by "+username
+		} else {
+			dep.Status, dep.Message = "rolled_back", "rolled back by "+username
+		}
+		_ = s.rec.UpdateDeployment(dep)
+		done = append(done, fw.Name)
+	}
+	return errs, done
+}
+
 // finishDeployment confirms (or rolls back) a pending deployment.
 func (s *Server) finishDeployment(ctx context.Context, dep *models.Deployment, confirm bool) (*models.Firewall, error) {
-	var fw models.Firewall
-	if err := s.db.First(&fw, dep.FirewallID).Error; err != nil {
+	fw, err := s.rec.Firewall(dep.FirewallID)
+	if err != nil {
 		return nil, err
 	}
-	a, err := s.newAgent(&fw)
+	a, err := s.newAgent(fw)
 	if err != nil {
-		return &fw, bad(err.Error())
+		return fw, bad(err.Error())
 	}
-	return &fw, s.finishTarget(ctx, &commitTarget{fw: fw, a: a, dep: *dep}, confirm)
+	return fw, s.finishTarget(ctx, &commitTarget{fw: *fw, a: a, dep: *dep}, confirm)
 }

@@ -12,8 +12,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -29,11 +27,13 @@ import (
 	"github.com/abundo/portitor/internal/dbmigrate"
 )
 
-// A backup is a copy of the database with the configuration in it
-// (writeSnapshot), encrypted with an age passphrase because it holds
-// every secret: `age -d` decrypts it outside Portitor. Restore also takes
-// an unencrypted database file. Restore makes the backup's configuration
-// the candidate: a commit deploys it.
+// A backup is a copy of the configuration's files (copybundle.go), encrypted
+// with an age passphrase because it holds every secret: `age -d backup | tar x`
+// opens it outside Portitor. Restore also takes the unencrypted archive.
+// Restore makes the backup's configuration the candidate (and what runs of the
+// users, roles and directory the backup's): a commit deploys it. A backup made
+// by a release that kept the configuration in a database file is restored with
+// that release, which an update then follows.
 
 // backupMaxSize limits a restored database; the request carries it base64
 // encoded in JSON.
@@ -58,53 +58,56 @@ func (s *Server) handleBackup(c *echo.Context) error {
 	if len(req.Passphrase) < minPasswordLen {
 		return errJSON(c, http.StatusBadRequest, fmt.Sprintf("passphrase must be at least %d characters", minPasswordLen))
 	}
-	dir, err := os.MkdirTemp("", "portitor-backup")
+	files, err := s.snapshotFiles(c.Request().Context(), false)
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(dir)
-	snap := filepath.Join(dir, "snapshot.db")
-	if err := s.writeSnapshot(c.Request().Context(), snap); err != nil {
+	archive, err := encodeCopy(files, "backup")
+	if err != nil {
 		return err
 	}
 	var out bytes.Buffer
-	if err := encryptBackup(&out, snap, req.Passphrase); err != nil {
+	if err := encryptBackup(&out, archive, req.Passphrase); err != nil {
 		return err
 	}
 	ver := buildinfo.Version
 	if ver != "dev" && !strings.HasPrefix(ver, "v") {
 		ver = "v" + ver
 	}
-	name := "portitor-" + ver + "-" + time.Now().Format("20060102-150405") + ".db.age"
+	name := "portitor-" + ver + "-" + time.Now().Format("20060102-150405") + ".tar.age"
 	c.Response().Header().Set(echo.HeaderContentDisposition, `attachment; filename="`+name+`"`)
 	slog.Info("backup downloaded", "user", currentUser(c).Username, "bytes", out.Len())
 	return c.Stream(http.StatusOK, "application/octet-stream", &out)
 }
 
-func encryptBackup(w io.Writer, path, passphrase string) error {
+func encryptBackup(w io.Writer, data []byte, passphrase string) error {
 	r, err := age.NewScryptRecipient(passphrase)
 	if err != nil {
 		return err
 	}
-	f, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
 	enc, err := age.Encrypt(w, r)
 	if err != nil {
 		return err
 	}
-	if _, err := io.Copy(enc, f); err != nil {
+	if _, err := enc.Write(data); err != nil {
 		return err
 	}
 	return enc.Close()
 }
 
-// decryptBackup returns the database file in data: plain SQLite, or age
-// (binary or armored) encrypted with passphrase.
+// errOldBackup is the refusal of a backup that is a database file.
+var errOldBackup = errors.New("this backup is a database file, made by a release that kept the configuration there: restore it with that release (0.9.x), then update this one")
+
+// isTar tells whether data starts like a tar archive.
+func isTar(data []byte) bool { return len(data) > 262 && string(data[257:262]) == "ustar" }
+
+// decryptBackup returns the archive in data: plain, or age (binary or
+// armored) encrypted with passphrase.
 func decryptBackup(data []byte, passphrase string) ([]byte, error) {
 	if bytes.HasPrefix(data, sqliteMagic) {
+		return nil, errOldBackup
+	}
+	if isTar(data) {
 		return data, nil
 	}
 	var in io.Reader = bytes.NewReader(data)
@@ -113,7 +116,7 @@ func decryptBackup(data []byte, passphrase string) ([]byte, error) {
 	case bytes.HasPrefix(bytes.TrimSpace(data), []byte(armor.Header)):
 		in = armor.NewReader(bytes.NewReader(bytes.TrimSpace(data)))
 	default:
-		return nil, errors.New("not a Portitor backup (neither an age encrypted file nor an SQLite database)")
+		return nil, errors.New("not a Portitor backup (neither an age encrypted file nor an archive)")
 	}
 	id, err := age.NewScryptIdentity(passphrase)
 	if err != nil {
@@ -134,8 +137,11 @@ func decryptBackup(data []byte, passphrase string) ([]byte, error) {
 	if len(out) > backupMaxSize {
 		return nil, errors.New("backup is too large")
 	}
-	if !bytes.HasPrefix(out, sqliteMagic) {
-		return nil, errors.New("the decrypted backup is not an SQLite database")
+	if bytes.HasPrefix(out, sqliteMagic) {
+		return nil, errOldBackup
+	}
+	if !isTar(out) {
+		return nil, errors.New("the decrypted backup is not an archive")
 	}
 	return out, nil
 }
@@ -152,14 +158,9 @@ func (s *Server) handleRestore(c *echo.Context) error {
 	if err != nil {
 		return errJSON(c, http.StatusBadRequest, err.Error())
 	}
-	dir, err := os.MkdirTemp("", "portitor-restore")
+	files, _, err := decodeCopy(data)
 	if err != nil {
-		return err
-	}
-	defer os.RemoveAll(dir)
-	path := filepath.Join(dir, "restore.db")
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		return err
+		return errJSON(c, http.StatusBadRequest, err.Error())
 	}
 
 	s.deployMu.Lock()
@@ -169,17 +170,16 @@ func (s *Server) handleRestore(c *echo.Context) error {
 	} else if len(deps) > 0 {
 		return errJSON(c, http.StatusConflict, "a deployment is waiting for confirmation; confirm or roll it back first")
 	}
-	ctx := c.Request().Context()
-	res, _, err := s.restore(ctx, path, restoreKeeps, s.firewallsHere)
-	if err != nil {
+	// The firewalls stay this installation's: hosts with their agents.
+	if err := s.takeSnapshot(c.Request().Context(), files, s.firewallsHere, true); err != nil {
 		var re restoreError
 		if errors.As(err, &re) {
 			return errJSON(c, http.StatusBadRequest, err.Error())
 		}
 		return err
 	}
-	slog.Info("backup restored", "user", currentUser(c).Username, "schema_version", res.SchemaVersion, "migrated", res.Migrated)
-	return c.JSON(http.StatusOK, res)
+	slog.Info("backup restored", "user", currentUser(c).Username)
+	return c.JSON(http.StatusOK, map[string]any{"restored": true})
 }
 
 // restore replaces this installation's state with the copy at path
@@ -194,7 +194,7 @@ func (s *Server) restore(ctx context.Context, path string, keeps []string, fix f
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := s.takeSnapshot(ctx, files, fix); err != nil {
+	if err := s.takeSnapshot(ctx, files, fix, slices.Contains(keeps, "firewalls")); err != nil {
 		return nil, nil, err
 	}
 	return res, files, nil

@@ -130,6 +130,23 @@ func (n *Node) Clone(parent *Node) *Node {
 // Clone copies the tree.
 func (t *Tree) Clone() *Tree { return &Tree{Root: t.Root.Clone(nil)} }
 
+// CopyLists makes the named top-level lists of t those of from (copied),
+// whole: entries t has that from has not go.
+func (t *Tree) CopyLists(from *Tree, names ...string) {
+	for _, name := range names {
+		es := from.Root.Lists[name]
+		if len(es) == 0 {
+			delete(t.Root.Lists, name)
+			continue
+		}
+		out := make([]*Node, len(es))
+		for i, e := range es {
+			out[i] = e.Clone(t.Root)
+		}
+		t.Root.Lists[name] = out
+	}
+}
+
 // Elem is a step of a path: a container, a list entry (with its keys),
 // or a leaf or leaf-list at the end.
 type Elem struct {

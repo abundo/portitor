@@ -56,7 +56,6 @@ func TestWebCertificate(t *testing.T) {
 	env := newEnv(t)
 	fake := &certFakeAgent{}
 	env.srv.newAgent = func(*models.Firewall) (agentAPI, error) { return fake, nil }
-	env.srv.cfg.DB.Path = t.TempDir() + "/portitor.db"
 	fb := testCertFiles(t, "fallback.example.com")
 	fallback, err := tls.X509KeyPair([]byte(fb.FullChain), []byte(fb.PrivKey))
 	if err != nil {

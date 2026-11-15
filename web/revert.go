@@ -27,21 +27,13 @@ import (
 // configuration; rolling back a pending one makes an older one live again.
 const snapshotKeep = 5
 
-// snapshotDir is the directory next to the database file.
+// snapshotDir is the directory the commits' configurations are kept in.
 func (s *Server) snapshotDir() (string, error) {
-	var rows []struct {
-		Name string
-		File string
+	dir := s.cfg.Dir()
+	if dir == "" {
+		return "", errors.New("there is no data directory")
 	}
-	if err := s.db.Raw("PRAGMA database_list").Scan(&rows).Error; err != nil {
-		return "", err
-	}
-	for _, r := range rows {
-		if r.Name == "main" && r.File != "" {
-			return filepath.Join(filepath.Dir(r.File), "deployed"), nil
-		}
-	}
-	return "", errors.New("the database has no file")
+	return filepath.Join(dir, "deployed"), nil
 }
 
 // configPath is the file of a commit's configuration.
@@ -91,9 +83,7 @@ func (s *Server) pruneSnapshots() {
 	if err != nil {
 		return
 	}
-	var commits []int64
-	s.db.Table("deployments").Distinct("commit_id").Where("status IN ?", []string{"applied", "pending", "confirmed"}).
-		Order("commit_id desc").Limit(snapshotKeep).Pluck("commit_id", &commits)
+	commits, _ := s.rec.LiveCommits(snapshotKeep)
 	// Each firewall's live document stays, however old.
 	fws, _ := s.firewalls()
 	for _, fw := range fws {

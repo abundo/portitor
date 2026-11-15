@@ -98,8 +98,8 @@ func (s *Server) handleCertificateRenew(c *echo.Context) error {
 	if err != nil || in == nil {
 		return errJSON(c, http.StatusNotFound, "not found")
 	}
-	var secondaries []models.Firewall
-	if err := s.db.Where("ha_primary_id = ?", in.FirewallID).Find(&secondaries).Error; err != nil {
+	secondaries, err := s.secondariesOf(in.FirewallID)
+	if err != nil {
 		return err
 	}
 	for _, fw := range secondaries {

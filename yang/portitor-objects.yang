@@ -246,8 +246,7 @@ submodule portitor-objects {
         description "seconds; 0 is the default";
       }
       leaf firewall {
-        type string;
-        px:external "firewalls";
+        type leafref { path "../../firewall/name"; }
         px:column "firewall_id";
         description "FirewallID is the firewall the task runs on.";
       }

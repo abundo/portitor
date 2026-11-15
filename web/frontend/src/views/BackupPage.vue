@@ -36,7 +36,7 @@ async function downloadBackup() {
   try {
     const res = await api.backup(backupPass.value)
     const name =
-      /filename="([^"]+)"/.exec(res.headers['content-disposition'] ?? '')?.[1] ?? 'portitor.db.age'
+      /filename="([^"]+)"/.exec(res.headers['content-disposition'] ?? '')?.[1] ?? 'portitor.tar.age'
     const url = URL.createObjectURL(res.data)
     const a = document.createElement('a')
     a.href = url
@@ -77,9 +77,7 @@ async function restoreBackup() {
   try {
     const res = await api.restore(await readBase64(restoreFile.value), restorePass.value)
     toast.add({
-      title: res.migrated
-        ? `Backup restored (upgraded from schema ${res.schema_version})`
-        : 'Backup restored',
+      title: 'Backup restored',
       description: 'Review the changes and commit.',
       color: 'success',
     })
@@ -120,20 +118,22 @@ async function restoreBackup() {
     <div class="card">
       <div class="mb-1 text-lg font-semibold">Restore</div>
       <p class="mb-4 text-sm text-muted">
-        Replaces the configuration with a backup; a backup from an older version is upgraded. Users,
-        deployment history and the agent connection under Settings stay as they are. Nothing changes
-        on the firewall until you deploy.
+        Replaces the configuration with a backup, the users, roles and directory included (you may be
+        logged out if the backup has no such user). The firewalls under Firewalls (agent connection),
+        the deployment history and the sessions stay as they are. Nothing changes on the firewall until
+        you deploy. A backup made by a release before this one kept its configuration in a database
+        file: restore it with that release, then update.
       </p>
       <form class="space-y-3" @submit.prevent="restoreBackup">
         <UFormField label="Backup file">
           <input
             type="file"
-            accept=".age,.db,.sqlite"
+            accept=".age,.tar"
             class="block w-full text-sm file:mr-3 file:rounded file:border-0 file:bg-elevated file:px-3 file:py-1.5"
             @change="onRestoreFile"
           />
         </UFormField>
-        <UFormField label="Passphrase" help="Not needed for an unencrypted database file.">
+        <UFormField label="Passphrase" help="Not needed for an unencrypted archive.">
           <UInput v-model="restorePass" type="password" class="w-full" autocomplete="off" />
         </UFormField>
         <UButton

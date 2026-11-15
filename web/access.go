@@ -36,23 +36,11 @@ type access struct {
 
 // accessOf works out the user's levels from their roles.
 func (s *Server) accessOf(u *models.User) (*access, error) {
-	db := s.db
 	a := &access{global: u.Role, levels: map[string]string{}, ids: map[uint]string{}}
 	if u.Role == models.RoleAdmin {
 		return a, nil
 	}
-	var rows []struct {
-		Instance string
-		Level    string
-	}
-	err := db.Raw(`
-		SELECT r.instance AS instance, m.level AS level
-		  FROM role_members m JOIN roles r ON r.id = m.role_id
-		 WHERE m.user_id = ? AND r.instance IS NOT NULL
-		UNION ALL
-		SELECT ri.instance, m.level
-		  FROM role_members m JOIN role_instances ri ON ri.role_id = m.role_id
-		 WHERE m.user_id = ?`, u.ID, u.ID).Scan(&rows).Error
+	rows, err := s.rec.UserGrants(u.ID)
 	if err != nil {
 		return nil, err
 	}

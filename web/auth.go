@@ -19,6 +19,7 @@ import (
 	"github.com/labstack/echo/v5"
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/abundo/portitor/internal/records"
 	"github.com/abundo/portitor/models"
 )
 
@@ -104,11 +105,11 @@ func (s *Server) requireAuth(next echo.HandlerFunc) echo.HandlerFunc {
 		if err != nil {
 			return errJSON(c, http.StatusUnauthorized, "session expired")
 		}
-		var u models.User
-		if err := s.db.First(&u, claims.UserID).Error; err != nil || u.TokenVersion != claims.TokenVersion {
+		u, err := s.rec.User(claims.UserID)
+		if err != nil || u.TokenVersion != claims.TokenVersion {
 			return errJSON(c, http.StatusUnauthorized, "session revoked")
 		}
-		c.Set(ctxUser, &u)
+		c.Set(ctxUser, u)
 		c.Set(ctxRemember, claims.Remember)
 		c.Set(ctxClaims, claims)
 		return next(c)
@@ -121,12 +122,19 @@ func (s *Server) requireAuth(next echo.HandlerFunc) echo.HandlerFunc {
 // the other; pair is that pair's firewall rows. Otherwise it is
 // jwt_secret.
 func (s *Server) sessionKey() (key []byte, pair []models.Firewall) {
-	var sec models.Firewall
-	if s.db.Where("ha_primary_id IS NOT NULL AND ha_secret != ''").Order("id").First(&sec).Error != nil {
+	fws, err := s.rec.Firewalls()
+	if err != nil {
 		return s.jwtKey, nil
 	}
-	if s.db.Where("id IN ?", []uint{sec.ID, *sec.HAPrimaryID}).Find(&pair).Error != nil {
-		pair = nil
+	i := slices.IndexFunc(fws, func(f models.Firewall) bool { return f.HAPrimaryID != nil && f.HASecret != "" })
+	if i < 0 {
+		return s.jwtKey, nil
+	}
+	sec := fws[i]
+	for _, f := range fws {
+		if f.ID == sec.ID || f.ID == *sec.HAPrimaryID {
+			pair = append(pair, f)
+		}
 	}
 	mac := hmac.New(sha256.New, []byte(sec.HASecret))
 	mac.Write([]byte("portitor-config session"))
@@ -174,62 +182,12 @@ func (s *Server) sessionValid(claims *sessionClaims) bool {
 	if claims == nil || claims.ExpiresAt == nil || !time.Now().Before(claims.ExpiresAt.Time) {
 		return false
 	}
-	var u models.User
-	return s.db.First(&u, claims.UserID).Error == nil && u.TokenVersion == claims.TokenVersion
+	u, err := s.rec.User(claims.UserID)
+	return err == nil && u.TokenVersion == claims.TokenVersion
 }
 
-// viewerDenied are the GET routes only a global admin may use: they hand
-// out a root shell, or the user and role lists. (A WireGuard client
-// config, with its private key, takes an admin of the peer's instance.)
-var viewerDenied = map[string]bool{
-	"/api/users":         true,
-	"/api/roles":         true,
-	"/api/agent/console": true,
-	// The directory is the global admins'.
-	"/api/directory/servers":            true,
-	"/api/directory/servers/:id":        true,
-	"/api/directory/servers/:id/browse": true,
-	"/api/directory/mappings":           true,
-	"/api/directory/mappings/:id":       true,
-}
-
-// tenantDenied are the GET routes a user without a global role (RoleNone)
-// may not use either: they show the whole firewall, not one instance.
-var tenantDenied = map[string]bool{
-	"/api/settings":              true,
-	"/api/system":                true,
-	"/api/agent/logs":            true,
-	"/api/agent/syslog":          true,
-	"/api/firewalls":             true,
-	"/api/firewalls/:id":         true,
-	"/api/firewalls/:id/witness": true,
-}
-
-// viewerWrites are the requests other than GET a viewer may make: their own
-// profile and password, and the deploy preview, which changes nothing.
-var viewerWrites = map[string]bool{
-	"PUT /api/me":                      true,
-	"POST /api/me/password":            true,
-	"POST /api/me/totp/setup":          true,
-	"POST /api/me/totp/enable":         true,
-	"POST /api/me/totp/disable":        true,
-	"POST /api/me/totp/recovery-codes": true,
-	"POST /api/deploy/preview":         true,
-}
-
-// totpSetupRoutes are all a user who must use two-factor login may do
-// before they have set it up.
-var totpSetupRoutes = map[string]bool{
-	"GET /api/me":              true,
-	"PUT /api/me":              true,
-	"GET /api/me/totp":         true,
-	"POST /api/me/totp/setup":  true,
-	"POST /api/me/totp/enable": true,
-}
-
-// requireRole lets a global admin through, limits everyone else to reading,
-// and lets the requests in tenantWrites through to an instance admin, whose
-// handlers check the instance. It runs after requireAuth and matches the
+// requireRole lets a global admin through and everyone else as routePolicy
+// (authz.go) says. It runs after requireAuth and matches the
 // route pattern, so it cannot be dodged with another spelling of the path.
 func (s *Server) requireRole(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(c *echo.Context) error {
@@ -237,7 +195,7 @@ func (s *Server) requireRole(next echo.HandlerFunc) echo.HandlerFunc {
 		if u == nil {
 			return errJSON(c, http.StatusUnauthorized, "not logged in")
 		}
-		if u.TOTPRequired && u.TOTPSecret == "" && !totpSetupRoutes[c.Request().Method+" "+c.Path()] {
+		if u.TOTPRequired && u.TOTPSecret == "" && !totpSetup[c.Request().Method+" "+c.Path()] {
 			return c.JSON(http.StatusForbidden, map[string]any{"error": "set up two-factor login under My settings first", "totp_setup_required": true})
 		}
 		a, err := s.accessOf(u)
@@ -248,12 +206,7 @@ func (s *Server) requireRole(next echo.HandlerFunc) echo.HandlerFunc {
 		if a.isAdmin() {
 			return next(c)
 		}
-		method, path := c.Request().Method, c.Path()
-		allowed := viewerWrites[method+" "+path] || s.tenantWrites[method+" "+path] && a.writesAny()
-		if method == http.MethodGet || method == http.MethodHead {
-			allowed = !viewerDenied[path] && (a.readsAll() || !tenantDenied[path])
-		}
-		if !allowed {
+		if !permitted(a, c.Request().Method, c.Path()) {
 			return errJSON(c, http.StatusForbidden, "your user can't do this")
 		}
 		return next(c)
@@ -368,7 +321,7 @@ func (s *Server) handleLogin(c *echo.Context) error {
 		return errJSON(c, http.StatusBadRequest, "invalid request")
 	}
 	// Local users, then the directory (directory.go).
-	found, err := authenticateUser(c.Request().Context(), s.db, req.Username, req.Password)
+	found, err := authenticateUser(c.Request().Context(), s, req.Username, req.Password)
 	if err != nil {
 		return err
 	}
@@ -382,7 +335,7 @@ func (s *Server) handleLogin(c *echo.Context) error {
 		if strings.TrimSpace(req.Code) == "" {
 			return c.JSON(http.StatusUnauthorized, map[string]any{"error": "enter the code from your authenticator app", "totp_required": true})
 		}
-		ok, err := checkSecondFactor(s.db, &u, req.Code)
+		ok, err := checkSecondFactor(s.rec, &u, req.Code)
 		if err != nil {
 			return err
 		}
@@ -459,22 +412,23 @@ func (s *Server) handleUpdateMe(c *echo.Context) error {
 	if msg := checkNameEmail(req.FullName, req.Email); msg != "" {
 		return errJSON(c, http.StatusBadRequest, msg)
 	}
-	fields := map[string]any{"full_name": req.FullName, "email": req.Email}
-	if req.DateFormat != nil {
-		if !slices.Contains(models.DateFormats, *req.DateFormat) {
-			return errJSON(c, http.StatusBadRequest, "invalid date format")
-		}
-		fields["date_format"] = *req.DateFormat
+	if req.DateFormat != nil && !slices.Contains(models.DateFormats, *req.DateFormat) {
+		return errJSON(c, http.StatusBadRequest, "invalid date format")
 	}
-	u := currentUser(c)
-	err := s.db.Model(u).Updates(fields).Error
+	cur := currentUser(c)
+	u, err := s.rec.User(cur.ID)
 	if err != nil {
-		return dbError(c, err)
-	}
-	if err := s.db.First(u, u.ID).Error; err != nil {
 		return err
 	}
-	return s.me(c, u)
+	u.FullName, u.Email = req.FullName, req.Email
+	if req.DateFormat != nil {
+		u.DateFormat = *req.DateFormat
+	}
+	if err := s.rec.SaveUser(u, false); err != nil {
+		return dbError(c, err)
+	}
+	*cur = *u
+	return s.me(c, cur)
 }
 
 // handleChangePassword changes the caller's password and revokes their
@@ -497,8 +451,7 @@ func (s *Server) handleChangePassword(c *echo.Context) error {
 	if err := setPassword(u, req.New); err != nil {
 		return errJSON(c, http.StatusBadRequest, err.Error())
 	}
-	u.TokenVersion++
-	if err := s.db.Save(u).Error; err != nil {
+	if err := s.rec.SaveUser(u, true); err != nil {
 		return err
 	}
 	remember, _ := c.Get(ctxRemember).(bool)
@@ -522,13 +475,23 @@ func setPassword(u *models.User, password string) error {
 
 // CreateUser adds or resets an admin (portitor-web createadmin).
 func CreateUser(s *Server, username, password string) error {
-	var u models.User
-	s.db.Where("username = ?", username).First(&u)
-	u.Username = username
-	u.Role = models.RoleAdmin
-	if err := setPassword(&u, password); err != nil {
+	u, err := s.rec.UserNamed(username)
+	if errors.Is(err, records.ErrNotFound) {
+		u, err = &models.User{}, nil
+	}
+	if err != nil {
 		return err
 	}
-	u.TokenVersion++
-	return s.db.Save(&u).Error
+	u.Username = username
+	u.Role = models.RoleAdmin
+	if err := setPassword(u, password); err != nil {
+		return err
+	}
+	if u.ID == 0 {
+		if err := s.rec.CreateUser(u); err != nil {
+			return err
+		}
+		return s.rec.SaveUser(u, true)
+	}
+	return s.rec.SaveUser(u, true)
 }

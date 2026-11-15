@@ -479,9 +479,15 @@ func ipListSchedule(s *Server, c *echo.Context, a *actionCtx) error {
 	if _, err := cron.Parse(req.Schedule); err != nil {
 		return errJSON(c, http.StatusBadRequest, "refresh schedule: "+err.Error())
 	}
-	var fws []models.Firewall
-	if err := s.db.Where("ha_primary_id IS NULL").Order("id").Find(&fws).Error; err != nil {
+	all, err := s.rec.Firewalls()
+	if err != nil {
 		return err
+	}
+	var fws []models.Firewall
+	for _, fw := range all {
+		if fw.HAPrimaryID == nil {
+			fws = append(fws, fw)
+		}
 	}
 	root, list := a.tree.Root, a.entry.Leaf("name")
 	var made []string

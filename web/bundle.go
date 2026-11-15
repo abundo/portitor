@@ -98,7 +98,8 @@ func exportBundle(tree *datastore.Tree, instance string) (*Bundle, error) {
 	in.Walk(func(n *datastore.Node) {
 		for _, s := range n.S.Children {
 			v := n.Leaves[s.Name]
-			if v == "" || len(s.Type.Leafrefs()) == 0 {
+			// An OpenVPN server's role is the installation's, left out.
+			if v == "" || len(s.Type.Leafrefs()) == 0 || s.Name == "ovpn-role" {
 				continue
 			}
 			tg := tree.Referenced(n, s, v)
@@ -361,13 +362,13 @@ func (s *Server) handleImportBundle(c *echo.Context) error {
 func (s *Server) bundleFirewall(id uint) (*models.Firewall, error) {
 	var err error
 	if id == 0 {
-		if id, err = firstFirewallID(s.db); err != nil {
+		if id, err = s.firstFirewallID(); err != nil {
 			return nil, err
 		}
 	}
-	var fw models.Firewall
-	if err := s.db.First(&fw, id).Error; err != nil {
+	fw, err := s.rec.Firewall(id)
+	if err != nil {
 		return nil, bad("firewall: no such firewall")
 	}
-	return &fw, nil
+	return fw, nil
 }

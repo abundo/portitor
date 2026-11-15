@@ -21,8 +21,6 @@ import (
 	"strings"
 	"time"
 
-	"gorm.io/gorm"
-
 	"github.com/abundo/portitor/internal/datastore"
 	"github.com/abundo/portitor/internal/schema"
 )
@@ -168,20 +166,23 @@ func keyOf(tgt *datastore.Node, leaf *schema.Node) string {
 	return tgt.Leaves[parts[len(parts)-1]]
 }
 
-func externalNames(db *gorm.DB, cache map[string]map[int64]string, tbl string) (map[int64]string, error) {
+// Source is where the mapping gets what lives outside the tree: the ids kept
+// for its entries, and the names of the records (firewalls, roles) that the
+// tree names by id.
+type Source interface {
+	// IDs are the ids kept by path.
+	IDs() (IDs, error)
+	// ExternalNames are the names of a table's records by id.
+	ExternalNames(table string) (map[int64]string, error)
+}
+
+func externalNames(src Source, cache map[string]map[int64]string, tbl string) (map[int64]string, error) {
 	if names, ok := cache[tbl]; ok {
 		return names, nil
 	}
-	var rows []struct {
-		ID   int64
-		Name string
-	}
-	if err := db.Table(tbl).Select("id, name").Find(&rows).Error; err != nil {
+	names, err := src.ExternalNames(tbl)
+	if err != nil {
 		return nil, fmt.Errorf("%s: %w", tbl, err)
-	}
-	names := map[int64]string{}
-	for _, r := range rows {
-		names[r.ID] = r.Name
 	}
 	cache[tbl] = names
 	return names, nil
@@ -339,7 +340,7 @@ func pathKey(root *schema.Node, n *datastore.Node) string {
 
 // columns are the row of entry e (at pos in its list). Its references to
 // other entries are 0 or NULL where those have no row yet, unless strict.
-func (m *Mapping) columns(t *table, tree *datastore.Tree, e *datastore.Node, pos int, idx Index, ext map[string]map[string]int64, db *gorm.DB, strict bool) (map[string]any, error) {
+func (m *Mapping) columns(t *table, tree *datastore.Tree, e *datastore.Node, pos int, idx Index, ext map[string]map[string]int64, db Source, strict bool) (map[string]any, error) {
 	out := map[string]any{}
 	if t.parent != nil {
 		pid, ok := idx[parentEntry(e)]
@@ -393,7 +394,7 @@ func parentEntry(e *datastore.Node) *datastore.Node { return e.Parent }
 
 // refColumns are the columns of e's references to other entries. Without
 // strict, a reference to an entry without a row yet is NULL (or 0).
-func (m *Mapping) refColumns(t *table, tree *datastore.Tree, e *datastore.Node, idx Index, ext map[string]map[string]int64, db *gorm.DB, strict bool) (map[string]any, error) {
+func (m *Mapping) refColumns(t *table, tree *datastore.Tree, e *datastore.Node, idx Index, ext map[string]map[string]int64, db Source, strict bool) (map[string]any, error) {
 	out := map[string]any{}
 	for _, c := range t.cols {
 		if c.kind != ref {
@@ -420,19 +421,16 @@ func (m *Mapping) refColumns(t *table, tree *datastore.Tree, e *datastore.Node, 
 	return out, nil
 }
 
-func externalID(db *gorm.DB, cache map[string]map[string]int64, tbl, name string) (int64, error) {
+func externalID(src Source, cache map[string]map[string]int64, tbl, name string) (int64, error) {
 	ids, ok := cache[tbl]
 	if !ok {
-		var rows []struct {
-			ID   int64
-			Name string
-		}
-		if err := db.Table(tbl).Select("id, name").Find(&rows).Error; err != nil {
+		names, err := src.ExternalNames(tbl)
+		if err != nil {
 			return 0, err
 		}
 		ids = map[string]int64{}
-		for _, r := range rows {
-			ids[r.Name] = r.ID
+		for id, n := range names {
+			ids[n] = id
 		}
 		cache[tbl] = ids
 	}
@@ -533,7 +531,7 @@ type Row map[string]any
 // doesn't know gets one above them), references the ids of the rows they
 // name, and names outside the tree (firewalls, roles) the ids db has for
 // them.
-func (m *Mapping) Rows(db *gorm.DB, tree *datastore.Tree, ids IDs) (map[string][]Row, Index, error) {
+func (m *Mapping) Rows(db Source, tree *datastore.Tree, ids IDs) (map[string][]Row, Index, error) {
 	idx := Index{}
 	next := map[string]int64{}
 	maps.Copy(next, ids.max)

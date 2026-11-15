@@ -232,9 +232,9 @@ submodule portitor-interfaces {
         type boolean;
       }
       leaf ovpn-role {
-        type string;
-        px:external "roles";
+        type leafref { path "../../../role/name"; }
         px:column "ovpn_role_id";
+        description "The role whose members may log in (with ovpn-require-role); renaming the role renames this.";
       }
       leaf-list ovpn-routes {
         type cidr;

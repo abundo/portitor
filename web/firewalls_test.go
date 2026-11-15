@@ -7,8 +7,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"net/http/httptest"
-	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -117,7 +115,13 @@ func instanceNames(doc *fwconfig.Document) []string {
 // and a second one, "branch", with "shop"; each has its own agent.
 func twoFirewalls(t *testing.T) (*testEnv, map[uint]*fleetAgent, uint) {
 	t.Helper()
-	env := newEnv(t)
+	return twoFirewallsIn(t, "")
+}
+
+// twoFirewallsIn is twoFirewalls with the configuration's files in dir.
+func twoFirewallsIn(t *testing.T, dir string) (*testEnv, map[uint]*fleetAgent, uint) {
+	t.Helper()
+	env := newEnvIn(t, dir)
 	if err := env.srv.ensureDefaultInstance(); err != nil {
 		t.Fatal(err)
 	}
@@ -170,8 +174,7 @@ func TestFirewallsDeploy(t *testing.T) {
 	if len(agents[1].applied) != 1 || len(agents[branch].applied) != 2 {
 		t.Errorf("applies: first %d, branch %d", len(agents[1].applied), len(agents[branch].applied))
 	}
-	var fws []models.Firewall
-	env.srv.db.Order("id").Find(&fws)
+	fws, _ := env.srv.rec.Firewalls()
 	if fws[0].Generation != 1 || fws[1].Generation != 2 {
 		t.Errorf("generations: %d %d", fws[0].Generation, fws[1].Generation)
 	}
@@ -200,8 +203,8 @@ func TestFirewallsFailedApplyRollsBack(t *testing.T) {
 	if agents[1].rolledBack != 1 || len(agents[1].confirmed) != 0 {
 		t.Errorf("first firewall: rolled back %d, confirmed %v", agents[1].rolledBack, agents[1].confirmed)
 	}
-	var deps []models.Deployment
-	env.srv.db.Order("firewall_id").Find(&deps)
+	deps, _ := env.srv.rec.RecentDeployments(0)
+	slices.SortFunc(deps, func(a, b models.Deployment) int { return int(a.FirewallID) - int(b.FirewallID) })
 	if len(deps) != 2 || deps[0].Status != "rolled_back" || deps[1].Status != "failed" {
 		t.Errorf("deployments: %+v", deps)
 	}
@@ -375,8 +378,7 @@ func TestFirewallsHAPair(t *testing.T) {
 		*d != (fwconfig.ConntrackSync{Interface: "ha0", This: "fe80::2", Peer: "fe80::1"}) {
 		t.Errorf("conntrack sync: %+v %+v", c, d)
 	}
-	var dep models.Deployment
-	env.srv.db.Where("firewall_id = ?", pair).Order("id desc").First(&dep)
+	dep := env.deploymentOf(uint(pair))
 	if strings.Contains(dep.Document, prim.HA.Secret) {
 		t.Error("the pair's secret is in the deployment history")
 	}
@@ -441,17 +443,15 @@ func TestFirewallsHADegradedCommit(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("commit with the secondary down: %d %s", rec.Code, rec.Body)
 	}
-	var dep models.Deployment
-	env.srv.db.Where("firewall_id = ?", pair).Order("id desc").First(&dep)
+	dep := env.deploymentOf(uint(pair))
 	if dep.Status != "skipped" || len(agents[1].applied) != 1 {
 		t.Fatalf("secondary %s, primary applied %d", dep.Status, len(agents[1].applied))
 	}
 	// Back, it catches up with that commit.
 	agents[pair].down = false
-	var fw models.Firewall
-	env.srv.db.First(&fw, pair)
+	fw := env.firewall(pair)
 	env.srv.catchUp(context.Background(), fw)
-	env.srv.db.First(&dep, dep.ID)
+	dep = env.deploymentOf(dep.FirewallID)
 	if dep.Status != "applied" || len(agents[pair].applied) != 1 || agents[pair].last().Generation != dep.Generation {
 		t.Errorf("after catching up: %s, applied %d", dep.Status, len(agents[pair].applied))
 	}
@@ -468,8 +468,7 @@ func TestWitness(t *testing.T) {
 	s := env.srv
 	s.witness = &witness{started: time.Now().Add(-time.Minute), pairs: map[string]*pairVote{}}
 	var p, q models.Firewall
-	s.db.First(&p, 1)
-	s.db.First(&q, pair)
+	p, q = firewallOf(t, s, 1), firewallOf(t, s, pair)
 	ctx := context.Background()
 
 	// Both answer: the primary gets the vote, and keeps it.
@@ -634,8 +633,14 @@ func TestFirewallUndo(t *testing.T) {
 	if rec := env.do("POST", "/api/firewalls", map[string]any{"name": "two"}); rec.Code/100 == 2 {
 		t.Fatalf("firewall without its host: %d %s", rec.Code, rec.Body)
 	}
-	var n int64
-	env.srv.db.Model(&models.Firewall{}).Where("name = ?", "two").Count(&n)
+	var n int
+	if all, _ := env.srv.rec.Firewalls(); true {
+		for _, f := range all {
+			if f.Name == "two" {
+				n++
+			}
+		}
+	}
 	if n != 0 {
 		t.Errorf("the firewall was kept without its host")
 	}
@@ -649,30 +654,61 @@ func TestFirewallUndo(t *testing.T) {
 		t.Fatalf("new firewall: %d %s", rec.Code, rec.Body)
 	}
 	env.mustCfg("POST", "task", map[string]any{"name": "t3", "firewall": "three", "kind": fwconfig.TaskCommand, "schedule": "0 * * * *", "command": "true"})
-	var fw models.Firewall
-	if err := env.srv.db.Where("name = ?", "three").First(&fw).Error; err != nil {
-		t.Fatal(err)
+	fws, _ := env.srv.rec.Firewalls()
+	var three models.Firewall
+	for _, f := range fws {
+		if f.Name == "three" {
+			three = f
+		}
 	}
 	before, err := env.srv.view(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	c := env.e.NewContext(httptest.NewRequest("DELETE", "/", nil), httptest.NewRecorder())
-	undo, err := env.srv.deleteFirewall(c, &fw)
-	if err != nil {
-		t.Fatal(err)
+	// A virtual firewall on it: refused, nothing changed.
+	env.mustCfg("POST", "instance", map[string]any{"name": "extra", "firewall": "three"})
+	if rec := env.do("DELETE", "/api/firewalls/"+itoa(three.ID), nil); rec.Code != http.StatusBadRequest {
+		t.Fatalf("delete with a virtual firewall on it: %d %s", rec.Code, rec.Body)
 	}
-	if v, _ := env.srv.view(ctx); slices.ContainsFunc(v.Instances, func(in models.Instance) bool { return in.Name == "three" }) {
-		t.Fatal("the host is still there")
+	if env.node("instance=three") == nil || env.node("firewall=three") == nil {
+		t.Error("a refused delete changed the candidate")
 	}
-	if err := undo(); err != nil {
-		t.Fatal(err)
+	env.mustCfg("DELETE", "instance=extra", nil)
+	// Without: the firewall goes with its host and tasks, and runs no more.
+	if rec := env.do("DELETE", "/api/firewalls/"+itoa(three.ID), nil); rec.Code != http.StatusNoContent {
+		t.Fatalf("delete: %d %s", rec.Code, rec.Body)
 	}
 	after, err := env.srv.view(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(before.Instances, after.Instances) || !reflect.DeepEqual(before.Tasks, after.Tasks) {
-		t.Errorf("undo:\n%+v\n%+v\nwant\n%+v\n%+v", after.Instances, after.Tasks, before.Instances, before.Tasks)
+	if slices.ContainsFunc(after.Instances, func(in models.Instance) bool { return in.Name == "three" }) || len(after.Tasks) != len(before.Tasks)-1 {
+		t.Errorf("host or task left: %+v / %d tasks (was %d)", after.Instances, len(after.Tasks), len(before.Tasks))
+	}
+	if _, err := env.srv.rec.Firewall(three.ID); err == nil {
+		t.Error("the deleted firewall still runs")
+	}
+}
+
+// A firewall without a host (an HA secondary) is renamed through its CRUD and
+// keeps its id, which the deployments name it by; one with a host can't be
+// (as before: the host would move).
+func TestFirewallRename(t *testing.T) {
+	env, _, branch := twoFirewalls(t)
+	fp := strings.Repeat("ab", 32)
+	pair := env.create("/api/firewalls", map[string]any{"name": "fw1x", "ha_primary_id": 1, "agent_url": "https://192.0.2.3:8443", "agent_fingerprint": fp, "agent_token": "tok"})
+	before := env.firewall(pair)
+	if rec := env.do("PUT", "/api/firewalls/"+itoa(pair), map[string]any{"name": "fw1b", "agent_url": before.AgentURL, "agent_fingerprint": fp}); rec.Code != http.StatusOK {
+		t.Fatalf("rename: %d %s", rec.Code, rec.Body)
+	}
+	after := env.firewall(pair)
+	if after.Name != "fw1b" || after.ID != pair || after.AgentToken != "tok" || after.HAPrimaryID == nil || after.HASecret != before.HASecret {
+		t.Errorf("after: %+v", after)
+	}
+	if env.node("firewall=fw1b") == nil || env.node("firewall=fw1x") != nil {
+		t.Error("the candidate did not follow the rename")
+	}
+	if rec := env.do("PUT", "/api/firewalls/"+itoa(branch), map[string]any{"name": "branch2"}); rec.Code != http.StatusBadRequest {
+		t.Errorf("a firewall with a host renamed: %d %s", rec.Code, rec.Body)
 	}
 }

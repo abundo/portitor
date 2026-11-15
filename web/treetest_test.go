@@ -4,11 +4,13 @@
 package web
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http/httptest"
 	"reflect"
 	"strings"
+	"testing"
 
 	"github.com/abundo/portitor/internal/builder"
 	"github.com/abundo/portitor/internal/confview"
@@ -198,4 +200,117 @@ func (env *testEnv) rowIDOf(table, id string) uint {
 		env.t.Fatal(err)
 	}
 	return n
+}
+
+// lastDeployment is the newest deployment of any firewall.
+func (env *testEnv) lastDeployment() models.Deployment {
+	env.t.Helper()
+	deps, err := env.srv.rec.RecentDeployments(1)
+	if err != nil || len(deps) == 0 {
+		env.t.Fatalf("no deployment: %v", err)
+	}
+	return deps[0]
+}
+
+// deploymentOf is the firewall's newest deployment.
+func (env *testEnv) deploymentOf(firewallID uint) models.Deployment {
+	env.t.Helper()
+	dep, err := env.srv.rec.LatestDeployment(firewallID)
+	if err != nil || dep == nil {
+		env.t.Fatalf("firewall %d has no deployment: %v", firewallID, err)
+	}
+	return *dep
+}
+
+// userNamed is the user running of that name.
+func (env *testEnv) userNamed(name string) models.User {
+	env.t.Helper()
+	u, err := env.srv.rec.UserNamed(name)
+	if err != nil {
+		env.t.Fatalf("user %s: %v", name, err)
+	}
+	return *u
+}
+
+// userID is the user running with the id.
+func (env *testEnv) userID(id uint) models.User {
+	env.t.Helper()
+	u, err := env.srv.rec.User(id)
+	if err != nil {
+		env.t.Fatalf("user %d: %v", id, err)
+	}
+	return *u
+}
+
+// member is the user's membership of the role, if there is one.
+func (env *testEnv) member(user, role uint) (models.RoleMember, bool) {
+	env.t.Helper()
+	ms, err := env.srv.rec.RoleMembers()
+	if err != nil {
+		env.t.Fatal(err)
+	}
+	for _, m := range ms {
+		if m.UserID == user && m.RoleID == role {
+			return m, true
+		}
+	}
+	return models.RoleMember{}, false
+}
+
+// addMember makes the user a member of the role, as an admin of it would.
+func (env *testEnv) addMember(role, user uint, level string) {
+	env.t.Helper()
+	roles, err := env.srv.rec.Roles()
+	if err != nil {
+		env.t.Fatal(err)
+	}
+	for _, r := range roles {
+		if r.ID == role {
+			r.Members = append(r.Members, models.RoleMember{UserID: user, Level: level})
+			if err := env.srv.rec.SaveRole(&r, r.Members, r.Instances); err != nil {
+				env.t.Fatal(err)
+			}
+			return
+		}
+	}
+	env.t.Fatalf("no role %d", role)
+}
+
+// firewall is the firewall running with the id.
+func (env *testEnv) firewall(id uint) models.Firewall {
+	env.t.Helper()
+	return firewallOf(env.t, env.srv, id)
+}
+
+func firewallOf(t *testing.T, s *Server, id uint) models.Firewall {
+	t.Helper()
+	f, err := s.rec.Firewall(id)
+	if err != nil {
+		t.Fatalf("firewall %d: %v", id, err)
+	}
+	return *f
+}
+
+// firstFirewall is the first firewall.
+func (env *testEnv) firstFirewall() models.Firewall {
+	env.t.Helper()
+	fws, err := env.srv.rec.Firewalls()
+	if err != nil || len(fws) == 0 {
+		env.t.Fatalf("no firewall: %v", err)
+	}
+	return fws[0]
+}
+
+// setFirewall sets leaves of a firewall's entry and commits the list, as an
+// admin's write would.
+func (env *testEnv) setFirewall(name string, leaves map[string]any) {
+	env.t.Helper()
+	env.patch("firewall="+name, leaves)
+	tr, err := env.srv.tree()
+	if err != nil {
+		env.t.Fatal(err)
+	}
+	if _, err := tr.store.Commit(context.Background(), datastore.CommitOptions{User: "test", Scope: []string{"firewall"}, NoDeploy: true}); err != nil {
+		env.t.Fatal(err)
+	}
 }

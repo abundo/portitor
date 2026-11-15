@@ -25,7 +25,6 @@ import (
 	"github.com/abundo/portitor/internal/datastore"
 	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/internal/schema"
-	"github.com/abundo/portitor/models"
 )
 
 // The configuration API, on the datastore (RESTCONF-like, RFC 8040's paths
@@ -363,7 +362,7 @@ func formatConfigPath(p datastore.Path) string {
 // buildProblems are the problems the commit's build finds in tree, for
 // the instances only (nil: all).
 func (s *Server) buildProblems(tree *datastore.Tree, only map[string]bool) []error {
-	_, _, err := s.firewallDocsOf(builder.Input{DB: s.db, Tree: tree}, only)
+	_, _, err := s.firewallDocsOf(builder.Input{Rec: s.rec, Tree: tree}, only)
 	var ve *fwconfig.ValidationError
 	if !errors.As(err, &ve) {
 		return nil
@@ -593,13 +592,11 @@ func newProblems(before, after []error) []error {
 // HA secondary (which runs its primary's), and only one per firewall
 // while Settings has virtual firewalls off.
 func (s *Server) firewallProblems(tree *datastore.Tree) []error {
-	fws, err := s.firewalls()
-	if err != nil {
-		return []error{err}
-	}
-	byName := map[string]models.Firewall{}
-	for _, fw := range fws {
-		byName[fw.Name] = fw
+	// The firewalls are the tree's own (a reference to one that isn't there
+	// is the schema's problem).
+	secondary := map[string]bool{}
+	for _, fw := range tree.Root.Lists["firewall"] {
+		secondary[fw.Leaf("name")] = fw.Leaf("ha-primary") != ""
 	}
 	vfs := true
 	if st := tree.Root.Containers["settings"]; st != nil {
@@ -610,11 +607,7 @@ func (s *Server) firewallProblems(tree *datastore.Tree) []error {
 	for _, in := range tree.Root.Lists["instance"] {
 		at := datastore.PathOf(in).String(tree.Root.S)
 		name := in.Leaf("firewall")
-		fw, ok := byName[name]
-		switch {
-		case !ok:
-			errs = append(errs, &datastore.Error{Path: at, Msg: "firewall: no firewall " + name})
-		case fw.HAPrimaryID != nil:
+		if secondary[name] {
 			errs = append(errs, &datastore.Error{Path: at, Msg: "firewall: " + name + " is an HA secondary; it runs its primary's virtual firewalls"})
 		}
 		count[name]++
@@ -660,7 +653,14 @@ func (s *Server) checkEdit(acc treeAccess, scope map[string]bool, before, work *
 	// what was already wrong is a warning.
 	was := s.buildProblems(before, scope)
 	warnings = s.buildProblems(work, scope)
-	if errs := newProblems(was, warnings); len(errs) > 0 {
+	// A firewall made, or its pair changed, is not refused for what the
+	// documents lack of it yet (an HA pair needs its links, which are
+	// configured after the pair is made): the commit refuses them.
+	onlyFirewalls := true
+	for _, ch := range datastore.Diff(before, work) {
+		onlyFirewalls = onlyFirewalls && len(ch.Path) > 0 && ch.Path[0].Name == "firewall"
+	}
+	if errs := newProblems(was, warnings); len(errs) > 0 && !onlyFirewalls {
 		return nil, "", &datastore.ValidationError{Problems: errs}
 	}
 	return warnings, "", nil

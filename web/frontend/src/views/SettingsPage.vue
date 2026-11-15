@@ -22,6 +22,8 @@ const NONE = 'none'
 const settings = reactive({
   confirm_timeout: 120,
   capture_rate_kbps: 1000,
+  keep_deployments: 500,
+  keep_deployment_days: 365,
   web_cert: NONE,
   virtual_firewalls: false,
   totp_default: false,
@@ -72,6 +74,8 @@ async function saveSettings() {
       ...rest,
       confirm_timeout: Number(settings.confirm_timeout),
       capture_rate_kbps: Number(settings.capture_rate_kbps),
+      keep_deployments: Number(settings.keep_deployments),
+      keep_deployment_days: Number(settings.keep_deployment_days),
       web_certificate: certRef(web_cert),
     })
     settings.web_cert = certValue(s.web_certificate)
@@ -152,6 +156,18 @@ async function saveSettings() {
           help="The most a packet capture sends from the agent to portitor-config. When it falls behind, the firewall drops captured packets rather than slow down. 0 is unlimited."
         >
           <UInput v-model="settings.capture_rate_kbps" type="number" min="0" class="w-40" />
+        </UFormField>
+        <UFormField
+          label="Deployment history: newest to keep"
+          help="How many of the newest deployments the history keeps. 0 keeps all. The deployment each firewall runs is never forgotten."
+        >
+          <UInput v-model="settings.keep_deployments" type="number" min="0" class="w-40" />
+        </UFormField>
+        <UFormField
+          label="Deployment history: days to keep"
+          help="Deployments older than this many days are forgotten. 0 keeps all."
+        >
+          <UInput v-model="settings.keep_deployment_days" type="number" min="0" class="w-40" />
         </UFormField>
         <div class="flex items-center gap-3">
           <UBadge v-if="deploy.error" color="error" variant="subtle" :label="deploy.error" />

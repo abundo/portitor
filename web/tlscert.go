@@ -53,7 +53,7 @@ const (
 
 func (s *Server) newTLSCert(fallback *tls.Certificate) *tlsCert {
 	t := &tlsCert{s: s, fallback: fallback, kick: make(chan struct{}, 1),
-		cache: filepath.Join(filepath.Dir(s.cfg.DB.Path), "tls-certificate.pem")}
+		cache: filepath.Join(s.cfg.Dir(), "tls-certificate.pem")}
 	if st, err := s.settings(); err == nil && st.WebCertificateID != nil {
 		if data, err := os.ReadFile(t.cache); err == nil {
 			if err := t.set(data); err != nil {

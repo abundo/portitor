@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v5"
-	"gorm.io/gorm"
 
 	"github.com/abundo/portitor/internal/datastore"
 	"github.com/abundo/portitor/models"
@@ -66,11 +65,10 @@ func (s *Server) haStatus(ctx context.Context) haStatus {
 	if _, me, err := s.localHA(ctx); me != nil && err == nil {
 		st.Local = me.Name
 		if me.HAPrimaryID != nil {
-			var p models.Firewall
-			if s.db.First(&p, *me.HAPrimaryID).Error == nil {
+			if p, err := s.rec.Firewall(*me.HAPrimaryID); err == nil {
 				st.Primary = p.Name
 			}
-		} else if peer := haPeerOfID(s.db, me.ID); peer != nil {
+		} else if peer := s.haPeerOfID(me.ID); peer != nil {
 			st.Primary = peer.Name
 		}
 	}
@@ -78,9 +76,9 @@ func (s *Server) haStatus(ctx context.Context) haStatus {
 }
 
 // haPeerOfID is the firewall's HA peer, or nil.
-func haPeerOfID(db *gorm.DB, id uint) *models.Firewall {
-	fws := []models.Firewall{}
-	if db.Order("id").Find(&fws).Error != nil {
+func (s *Server) haPeerOfID(id uint) *models.Firewall {
+	fws, err := s.rec.Firewalls()
+	if err != nil {
 		return nil
 	}
 	for _, fw := range fws {
@@ -134,8 +132,8 @@ func (s *Server) Promote(ctx context.Context, username string, force bool) (*com
 	if pc.PeerAlive && !force {
 		return nil, bad("this host's agent hears the primary: promote only when the primary is lost, or force it (both then own the configuration until the old primary is caught up as the secondary)")
 	}
-	var oldPrimary models.Firewall
-	if err := s.db.First(&oldPrimary, *me.HAPrimaryID).Error; err != nil {
+	oldPrimary, err := s.rec.Firewall(*me.HAPrimaryID)
+	if err != nil {
 		return nil, err
 	}
 	t, err := s.tree()
@@ -149,7 +147,7 @@ func (s *Server) Promote(ctx context.Context, username string, force bool) (*com
 	}); err != nil {
 		return nil, err
 	}
-	if err := s.db.Transaction(func(tx *gorm.DB) error { return promoteRows(tx, me, &oldPrimary) }); err != nil {
+	if err := s.rec.PromoteFirewalls(me, oldPrimary); err != nil {
 		return nil, err
 	}
 	r := &s.role
@@ -192,25 +190,4 @@ func promoteTree(work *datastore.Tree, sec, prim string) {
 			}
 		}
 	}
-}
-
-// promoteRows swaps the firewalls of the pair of secondary sec and
-// primary prim: prim is the secondary at the next epoch. Their agent URLs
-// stay: each portitor-config reaches its own agent by its agent_url
-// (Server.agentURL).
-func promoteRows(tx *gorm.DB, sec, prim *models.Firewall) error {
-	witness, witnessSecret := prim.HAWitness, prim.HAWitnessSecret
-	if witness == "" {
-		witness = models.HAWitnessLocal
-	}
-	if err := tx.Model(&models.Firewall{}).Where("id = ?", sec.ID).Updates(map[string]any{
-		"ha_primary_id": nil, "ha_secret": "", "ha_epoch": 0,
-		"ha_witness": witness, "ha_witness_secret": witnessSecret,
-	}).Error; err != nil {
-		return err
-	}
-	return tx.Model(&models.Firewall{}).Where("id = ?", prim.ID).Updates(map[string]any{
-		"ha_primary_id": sec.ID, "ha_secret": sec.HASecret, "ha_epoch": sec.HAEpoch + 1,
-		"ha_witness": models.HAWitnessLocal, "ha_witness_secret": "",
-	}).Error
 }

@@ -16,15 +16,12 @@ import (
 	"strings"
 	"sync"
 
-	"gorm.io/gorm"
-
 	"github.com/abundo/portitor/internal/builder"
 	"github.com/abundo/portitor/internal/buildinfo"
 	"github.com/abundo/portitor/internal/cli"
 	"github.com/abundo/portitor/internal/confcheck"
 	"github.com/abundo/portitor/internal/datastore"
 	"github.com/abundo/portitor/internal/datastore/sqlmap"
-	"github.com/abundo/portitor/internal/dbmigrate"
 	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/internal/netconf"
 	"github.com/abundo/portitor/internal/schema"
@@ -37,59 +34,96 @@ import (
 // deploys (deployed/<commit>-config.json); running is the live commit's.
 
 type treeState struct {
-	once    sync.Once
-	err     error
-	schema  *schema.Node
-	mapping *sqlmap.Mapping
-	store   *datastore.Store
+	once     sync.Once // the adoptions
+	coreOnce sync.Once
+	err      error
+	schema   *schema.Node
+	mapping  *sqlmap.Mapping
+	store    *datastore.Store
 
 	dir       string            // the database's, where the candidate and ids.json are; "" in memory
 	idMarks   map[string]uint64 // assignID's high-water marks, by list path
 	runMu     sync.Mutex
 	runCommit int64
 	running   *datastore.Tree
+	runStamp  datastore.FileStamp // of global.json, when running was read
+	globals   []string            // the global lists (globals.go)
 }
 
-// tree is the configuration tree, set up on first use.
-func (s *Server) tree() (*treeState, error) {
+// core is the configuration tree's set-up that needs nothing else: the
+// schema, the mapping, the store (which reads running lazily). Running and
+// what it reads use it, so the adoptions that tree() makes after it can read
+// running too.
+func (s *Server) core() (*treeState, error) {
 	t := &s.treeState
-	t.once.Do(func() {
+	t.coreOnce.Do(func() {
 		if t.schema, t.err = schema.Load(); t.err != nil {
 			return
 		}
 		if t.mapping, t.err = sqlmap.New(t.schema); t.err != nil {
 			return
 		}
-		dir := ""
-		if s.cfg.DB.Path != "" {
-			dir = filepath.Dir(s.cfg.DB.Path)
-		}
+		dir := configDir(s.cfg)
 		t.dir = dir
-		if t.err = s.adoptLegacyConfig(dir); t.err != nil {
+		if t.err = s.refuseLegacyConfig(); t.err != nil {
 			return
 		}
+		t.globals = slices.Clone(globalLists)
 		t.store = datastore.NewStore(t.schema, treeBackend{s}, dir)
 		t.store.Normalize, t.store.Check = confcheck.Normalize, confcheck.Check
 		// The roles name the virtual firewalls: they follow a rename, and
 		// a new one gets its role. New entries get their ids.
-		t.store.OnChange = func(c *datastore.Tree) error {
-			return s.db.Transaction(func(tx *gorm.DB) error {
-				for _, r := range c.Renamed {
-					if len(r.Path) == 1 && r.Path[0].Name == "instance" {
-						if err := renameInstanceRoles(tx, r.Path[0].Keys[0], r.Keys[0]); err != nil {
-							return err
-						}
-					}
-				}
-				if err := syncInstanceRoles(tx, c); err != nil {
-					return err
-				}
-				idx, err := t.mapping.AssignIDs(tx, c)
-				if err != nil {
-					return err
-				}
-				return clearWebCertificate(tx, idx)
-			})
+		t.store.OnChange = func(c *datastore.Tree) error { return s.rec.FollowChange(t.mapping, c) }
+	})
+	return t, t.err
+}
+
+// Ready sets the configuration up now (tree), so that what an earlier release
+// kept in the database is in the tree before the first request; called once a
+// Server is made, before it serves.
+func (s *Server) Ready() error {
+	if _, err := s.tree(); err != nil {
+		return err
+	}
+	// Every file now, and the mark that this directory has them: the next
+	// release has no tables to make them from, and refuses a directory
+	// without it (update through this release first).
+	if err := s.rec.Seed(); err != nil {
+		return err
+	}
+	return s.writeLayout()
+}
+
+// layoutVersion is the layout of the data directory: 2 has the files
+// (candidate, global lists, ids, deployments, ...) and no configuration in the
+// database.
+const layoutVersion = 2
+
+// writeLayout marks the directory as having layout layoutVersion.
+func (s *Server) writeLayout() error {
+	dir := s.cfg.Dir()
+	if dir == "" {
+		return nil
+	}
+	path := filepath.Join(dir, "layout.json")
+	want := fmt.Sprintf("{\"layout\": %d}\n", layoutVersion)
+	if got, err := os.ReadFile(path); err == nil && string(got) == want {
+		return nil
+	}
+	return datastore.WriteFile(path, []byte(want))
+}
+
+// tree is the configuration tree, set up on first use: core, then what an
+// earlier release kept in the database moved into it before anything is
+// served (the others wait for this).
+func (s *Server) tree() (*treeState, error) {
+	t, err := s.core()
+	if err != nil {
+		return nil, err
+	}
+	t.once.Do(func() {
+		if t.err = s.adoptFirewalls(context.Background(), t, false); t.err == nil {
+			t.err = s.adoptAccess(context.Background(), t, false)
 		}
 	})
 	return t, t.err
@@ -106,7 +140,8 @@ func (b treeBackend) Initial(ctx context.Context) (*datastore.Tree, error) {
 // first commit.
 func (b treeBackend) Running(context.Context) (*datastore.Tree, error) {
 	s := b.s
-	t, err := s.tree()
+	// Not s.tree(): its adoptions read running.
+	t, err := s.core()
 	if err != nil {
 		return nil, err
 	}
@@ -114,9 +149,11 @@ func (b treeBackend) Running(context.Context) (*datastore.Tree, error) {
 	if err != nil {
 		return nil, err
 	}
+	// What runs of the global lists may have been written by another process.
+	stamp := s.globalsStamp()
 	t.runMu.Lock()
 	defer t.runMu.Unlock()
-	if t.running != nil && t.runCommit == commit {
+	if t.running != nil && t.runCommit == commit && t.runStamp == stamp {
 		return t.running.Clone(), nil
 	}
 	tree := datastore.New(t.schema)
@@ -129,7 +166,10 @@ func (b treeBackend) Running(context.Context) (*datastore.Tree, error) {
 			return nil, err
 		}
 	}
-	t.running, t.runCommit = tree, commit
+	if err := s.overlayGlobals(t, tree); err != nil {
+		return nil, err
+	}
+	t.running, t.runCommit, t.runStamp = tree, commit, stamp
 	return tree.Clone(), nil
 }
 
@@ -147,6 +187,13 @@ func (b treeBackend) Commit(ctx context.Context, tree *datastore.Tree, o datasto
 	if s.isReplica() {
 		return "", errors.New("this is the HA secondary: its configuration is a read-only copy of the primary's")
 	}
+	if len(o.Scope) > 0 {
+		res, err := s.commitScoped(ctx, o.User, tree, o.Scope, !o.NoDeploy)
+		if err != nil {
+			return "", err
+		}
+		return res.message(), nil
+	}
 	if o.Validate {
 		fws, err := s.firewalls()
 		if err != nil {
@@ -154,7 +201,7 @@ func (b treeBackend) Commit(ctx context.Context, tree *datastore.Tree, o datasto
 		}
 		var problems []string
 		for _, fw := range fws {
-			if _, err := s.buildDoc(builder.Input{DB: s.db, Tree: tree}, &fw, fw.Generation+1, o.Only); err != nil {
+			if _, err := s.buildDoc(builder.Input{Rec: s.rec, Tree: tree}, &fw, fw.Generation+1, o.Only); err != nil {
 				problems = append(problems, firewallProblem(fws, fw, err.Error()))
 			}
 		}
@@ -210,7 +257,14 @@ type treeAccess struct {
 // shared resources.
 var sharedReadable = []string{"host", "address-list", "ip-list", "object-folder", "service", "port-name"}
 
+// adminLists are the top-level lists only global admins read: they hold
+// what logs people in.
+var adminLists = []string{"ldap-server", "user", "role", "ldap-role-mapping"}
+
 func (t treeAccess) CanRead(p datastore.Path) bool {
+	if len(p) > 0 && slices.Contains(adminLists, p[0].Name) {
+		return t.a.isAdmin()
+	}
 	if t.a.readsAll() || len(p) == 0 {
 		return true
 	}
@@ -321,7 +375,7 @@ func (s *Server) cliLogin(ctx context.Context, addr net.Addr, username, password
 	if s.limiter.blocked(ip) {
 		return nil, false, errors.New("too many failed logins; try again later")
 	}
-	u, err := authenticateUser(ctx, s.db, username, password)
+	u, err := authenticateUser(ctx, s, username, password)
 	if err != nil {
 		return nil, false, err
 	}
@@ -333,7 +387,7 @@ func (s *Server) cliLogin(ctx context.Context, addr net.Addr, username, password
 		if strings.TrimSpace(code) == "" {
 			return nil, true, nil
 		}
-		ok, err := checkSecondFactor(s.db, u, code)
+		ok, err := checkSecondFactor(s.rec, u, code)
 		if err != nil {
 			return nil, false, err
 		}
@@ -354,7 +408,7 @@ func (s *Server) runSSH(ctx context.Context) {
 	if s.cfg.SSHListen == "" {
 		return
 	}
-	keyFile := filepath.Join(filepath.Dir(s.cfg.DB.Path), "ssh_host_ed25519_key")
+	keyFile := filepath.Join(s.cfg.Dir(), "ssh_host_ed25519_key")
 	key, err := cli.LoadHostKey(keyFile)
 	if err != nil {
 		slog.Error("CLI: the SSH host key", "file", keyFile, "err", err)
@@ -367,73 +421,20 @@ func (s *Server) runSSH(ctx context.Context) {
 	}
 }
 
-// clearWebCertificate forgets the certificate chosen for portitor-config
-// (settings.web_certificate_id) when the configuration no longer has it.
-func clearWebCertificate(tx *gorm.DB, idx sqlmap.Index) error {
-	var cert *uint
-	if err := tx.Table("settings").Select("web_certificate_id").Where("id = 1").Scan(&cert).Error; err != nil || cert == nil {
-		return err
-	}
-	for n, id := range idx {
-		if n.S.Name == "certificate" && uint(id) == *cert {
-			return nil
-		}
-	}
-	return tx.Exec("UPDATE settings SET web_certificate_id = NULL WHERE id = 1").Error
-}
-
-// adoptLegacyConfig takes the configuration that migration 94 read from the
-// old configuration tables (dbmigrate.LegacyMarker in config_snapshot) as
-// this installation's: it is what the firewalls run, so it is the live
-// commit's configuration (deployed/<commit>-config.json, which the first
-// candidate is), or, before any commit, the candidate. A file that is there
-// already is kept. Then the table goes, so it is done once.
-func (s *Server) adoptLegacyConfig(dir string) error {
-	if dir == "" || !s.db.Migrator().HasTable(dbmigrate.SnapshotTable) {
+// refuseLegacyConfig stops a database that 0.9.0 migrated but did not start
+// on: its configuration is still in config_snapshot, waiting to be taken
+// into the tree (as 0.9.0 does at its first start), which this release no
+// longer does.
+func (s *Server) refuseLegacyConfig() error {
+	if !s.db.Migrator().HasTable(snapshotTable) {
 		return nil
 	}
-	var rows []struct {
-		Name string
-		Data []byte
-	}
-	if err := s.db.Table(dbmigrate.SnapshotTable).Find(&rows).Error; err != nil {
+	var n int64
+	if err := s.db.Table(snapshotTable).Where("name = ?", "legacy-import").Count(&n).Error; err != nil {
 		return err
 	}
-	files := map[string][]byte{}
-	for _, r := range rows {
-		files[r.Name] = r.Data
+	if n > 0 {
+		return errors.New("the database holds a configuration 0.9.0 read from its old tables and nothing has taken it yet: start Portitor 0.9.0 once, then update to this release")
 	}
-	if files[dbmigrate.LegacyMarker] == nil {
-		return nil // a backup's copy, for takeSnapshot
-	}
-	write := func(path string, data []byte) error {
-		if _, err := os.Stat(path); err == nil {
-			return nil
-		}
-		return datastore.WriteFile(path, data)
-	}
-	commit, err := s.liveCommit()
-	if err != nil {
-		return err
-	}
-	if cand := files["candidate.json"]; len(cand) > 0 {
-		path := filepath.Join(dir, "candidate.json")
-		if commit > 0 {
-			deployed := filepath.Join(dir, "deployed")
-			if err := os.MkdirAll(deployed, 0o700); err != nil {
-				return err
-			}
-			path = configPath(deployed, commit)
-		}
-		if err := write(path, cand); err != nil {
-			return err
-		}
-	}
-	if ids := files["ids.json"]; len(ids) > 0 {
-		if err := write(filepath.Join(dir, "ids.json"), ids); err != nil {
-			return err
-		}
-	}
-	slog.Info("the configuration of the old tables is now the tree's", "commit", commit)
-	return s.db.Migrator().DropTable(dbmigrate.SnapshotTable)
+	return nil
 }

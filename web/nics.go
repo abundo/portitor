@@ -86,8 +86,8 @@ func (s *Server) syncNICs(firewallID uint, nics []agentapi.NICStatus) (*nicSync,
 	}
 	// Names seen for the first time: rows of known_interfaces (not
 	// configuration), written once the change is made.
-	var known []string
-	if err := s.db.Model(&models.KnownInterface{}).Where("firewall_id = ?", firewallID).Pluck("name", &known).Error; err != nil {
+	known, err := s.rec.KnownNICs(firewallID)
+	if err != nil {
 		return nil, err
 	}
 	var fresh []agentapi.NICStatus
@@ -123,10 +123,12 @@ func (s *Server) syncNICs(firewallID uint, nics []agentapi.NICStatus) (*nicSync,
 	if err != nil {
 		return nil, err
 	}
-	for _, n := range fresh {
-		if err := s.db.Create(&models.KnownInterface{FirewallID: firewallID, Name: n.Name}).Error; err != nil {
-			return nil, err
-		}
+	names := make([]string, len(fresh))
+	for i, n := range fresh {
+		names[i] = n.Name
+	}
+	if err := s.rec.RememberNICs(firewallID, names); err != nil {
+		return nil, err
 	}
 	return res, nil
 }

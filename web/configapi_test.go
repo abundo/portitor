@@ -19,7 +19,7 @@ func TestConfigAPI(t *testing.T) {
 	env.srv.newAgent = func(*models.Firewall) (agentAPI, error) { return &neighboursAgent{}, nil }
 	env.host("main")
 	var fw models.Firewall
-	env.srv.db.First(&fw)
+	fw = env.firstFirewall()
 	want := func(rec interface {
 		Result() *http.Response
 	}, code int, what string) {

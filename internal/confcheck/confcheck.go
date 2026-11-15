@@ -107,7 +107,7 @@ func Check(t *datastore.Tree) []error {
 		}
 	}
 	walk(t.Root)
-	return errs
+	return append(errs, checkAccess(t)...)
 }
 
 // CheckEntries is the checks of the given entries alone.

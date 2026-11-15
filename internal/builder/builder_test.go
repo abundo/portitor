@@ -17,6 +17,7 @@ import (
 	"github.com/abundo/portitor/internal/datastore/sqlmap"
 	"github.com/abundo/portitor/internal/dbmigrate"
 	"github.com/abundo/portitor/internal/fwconfig"
+	"github.com/abundo/portitor/internal/records"
 	"github.com/abundo/portitor/internal/schema"
 	"github.com/abundo/portitor/internal/wgkeys"
 	"github.com/abundo/portitor/models"
@@ -65,9 +66,17 @@ func mustCreate(t *testing.T, db *gorm.DB, v any) {
 	tt := testTrees[db]
 	if tt == nil {
 		tree := datastore.New(schema.MustLoad())
-		tt = &testTree{tree: tree, add: m.NewAdder(db, tree, sqlmap.Index{}), ids: map[string]uint{}}
+		tt = &testTree{tree: tree, add: m.NewAdder(recOf(db), tree, sqlmap.Index{}), ids: map[string]uint{}}
 		testTrees[db] = tt
 		t.Cleanup(func() { delete(testTrees, db) })
+		// The first firewall, as an installation starts with.
+		if _, err := tt.add.Add("firewalls", sqlmap.Row{"id": int64(1), "name": "firewall"}); err != nil {
+			t.Fatal(err)
+		}
+		tt.ids["firewalls"] = 1
+		if err := db.Exec("INSERT INTO config_ids (path, tbl, id) VALUES ('/firewall[name=firewall]', 'firewalls', 1)").Error; err != nil {
+			t.Fatal(err)
+		}
 	}
 	id := uint(0)
 	if n, ok := row["id"].(int64); ok {
@@ -484,7 +493,18 @@ func input(t *testing.T, db *gorm.DB) Input {
 	t.Helper()
 	tt := testTrees[db]
 	if tt == nil {
-		return Input{DB: db, Tree: datastore.New(schema.MustLoad())}
+		return Input{Rec: recOf(db), Tree: datastore.New(schema.MustLoad())}
 	}
-	return Input{DB: db, Tree: tt.tree.Clone()}
+	return Input{Rec: recOf(db), Tree: tt.tree.Clone()}
+}
+
+// recs are the records of each test database (the ids live in them).
+var recs = map[*gorm.DB]*records.GORM{}
+
+func recOf(db *gorm.DB) *records.GORM {
+	if r, ok := recs[db]; ok {
+		return r
+	}
+	recs[db] = records.NewGORM(db, "")
+	return recs[db]
 }

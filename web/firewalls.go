@@ -17,11 +17,12 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v5"
-	"gorm.io/gorm"
 
 	"github.com/abundo/portitor/internal/agentapi"
+	"github.com/abundo/portitor/internal/confview"
 	"github.com/abundo/portitor/internal/datastore"
 	"github.com/abundo/portitor/internal/fwconfig"
+	"github.com/abundo/portitor/internal/records"
 	"github.com/abundo/portitor/models"
 )
 
@@ -30,7 +31,9 @@ import (
 // default instance: its host, created with it and named after it. A commit
 // builds one document per firewall (builder.BuildFirewall).
 
-func prepareFirewall(tx *gorm.DB, f, old *models.Firewall) error {
+// checkFirewallFields normalizes and checks what a firewall's fields say of
+// its name and how its agent and portitor-config are reached.
+func checkFirewallFields(f *models.Firewall) error {
 	f.Name = strings.TrimSpace(f.Name)
 	if !fwconfig.ValidDefaultInstanceName(f.Name) {
 		return bad("name: letters, digits, '-', '_' and '.', starting with a letter or digit, at most 63 characters")
@@ -63,10 +66,26 @@ func prepareFirewall(tx *gorm.DB, f, old *models.Firewall) error {
 	default:
 		return bad("HA witness: local or external")
 	}
-	// The generation is the agent's, counted by deploys only.
-	f.Generation = 0
+	return nil
+}
+
+// prepareFirewall checks a firewall before it is written (v is the
+// candidate's rows; old is nil on create): its fields, what a change may not
+// touch (the generation, the pair), and a new one's pair. portitor-config
+// (Local) has its own firewall and its HA secondary alone.
+func (s *Server) prepareFirewall(v *confview.View, f, old *models.Firewall) error {
+	if s.cfg.Local && old == nil && f.HAPrimaryID == nil {
+		return bad("portitor-config deploys to its own firewall (and its HA secondary); other firewalls are a manager's")
+	}
+	if err := checkFirewallFields(f); err != nil {
+		return err
+	}
+	for _, o := range v.Firewalls {
+		if o.Name == f.Name && o.ID != f.ID {
+			return bad("there is already a firewall " + f.Name)
+		}
+	}
 	if old != nil {
-		f.Generation = old.Generation
 		// A firewall is made a secondary, or not, when it is created; a
 		// promotion swaps the pair (promote.go).
 		f.HAPrimaryID, f.HASecret, f.HAEpoch = old.HAPrimaryID, old.HASecret, old.HAEpoch
@@ -76,23 +95,23 @@ func prepareFirewall(tx *gorm.DB, f, old *models.Firewall) error {
 		}
 		return nil
 	}
+	if in := slices.IndexFunc(v.Instances, func(in models.Instance) bool { return in.Name == f.Name }); in >= 0 {
+		return bad(fmt.Sprintf("name: a virtual firewall is named %s", f.Name))
+	}
 	f.HAWitnessSecret = ""
 	if f.HAWitness == models.HAWitnessExternal {
 		f.HAWitnessSecret = newHASecret()
 	}
 	if f.HAPrimaryID != nil {
-		var p models.Firewall
-		if err := tx.First(&p, *f.HAPrimaryID).Error; err != nil {
+		pi := slices.IndexFunc(v.Firewalls, func(o models.Firewall) bool { return o.ID == *f.HAPrimaryID })
+		if pi < 0 {
 			return bad("HA primary: no such firewall")
 		}
+		p := v.Firewalls[pi]
 		if p.HAPrimaryID != nil {
 			return bad("HA primary: " + p.Name + " is a secondary itself")
 		}
-		var n int64
-		if err := tx.Model(&models.Firewall{}).Where("ha_primary_id = ?", p.ID).Count(&n).Error; err != nil {
-			return err
-		}
-		if n > 0 {
+		if slices.ContainsFunc(v.Firewalls, func(o models.Firewall) bool { return o.HAPrimaryID != nil && *o.HAPrimaryID == p.ID }) {
 			return bad("HA primary: " + p.Name + " has a secondary already")
 		}
 		f.HASecret = newHASecret()
@@ -100,63 +119,49 @@ func prepareFirewall(tx *gorm.DB, f, old *models.Firewall) error {
 	return nil
 }
 
-// prepareFirewallHere is prepareFirewall; portitor-config (Local) has its
-// own firewall and its HA secondary alone.
-func (s *Server) prepareFirewallHere(tx *gorm.DB, f, old *models.Firewall) error {
-	if s.cfg.Local && old == nil && f.HAPrimaryID == nil {
-		return bad("portitor-config deploys to its own firewall (and its HA secondary); other firewalls are a manager's")
+// firewallsResource is the firewalls' CRUD (a global list of the tree,
+// committed on write): a new one gets its default instance, a renamed one is
+// named by the configuration's firewall leaves as before (they are leafrefs),
+// and a deleted one takes its host and tasks with it.
+func (s *Server) firewallsResource() *treeResource[models.Firewall, *models.Firewall] {
+	return &treeResource[models.Firewall, *models.Firewall]{
+		s: s, list: "firewall", table: "firewalls", restore: []string{"instance", "task"},
+		rows:    func(v *confview.View) []models.Firewall { return v.Firewalls },
+		named:   func(f *models.Firewall) string { return f.Name },
+		prepare: s.prepareFirewall,
+		present: s.presentFirewall,
+		onWrite: func(c *echo.Context, work *datastore.Tree, f, old *models.Firewall) error {
+			if old != nil || f.HAPrimaryID != nil {
+				return nil
+			}
+			return addDefaultInstanceTo(work, f.Name, f.Name)
+		},
+		onDelete: s.deleteFirewall,
 	}
-	if err := prepareFirewall(tx, f, old); err != nil {
-		return err
-	}
-	if old == nil {
-		return s.instanceNameFree(f.Name)
-	}
-	return nil
 }
 
 func normalizeFingerprint(fp string) string {
 	return strings.ToLower(strings.ReplaceAll(strings.TrimSpace(fp), ":", ""))
 }
 
-func presentFirewall(f *models.Firewall) {
+func (s *Server) presentFirewall(f *models.Firewall) {
 	f.HasAgentToken = f.AgentToken != ""
 	f.NewAgentToken = ""
-}
-
-// instanceNameFree refuses a firewall name that a virtual firewall has:
-// the firewall's default instance takes its name.
-func (s *Server) instanceNameFree(name string) error {
-	v, err := s.view(context.Background())
-	if err != nil {
-		return err
+	if gens, err := s.rec.Generations(); err == nil {
+		f.Generation = gens[f.ID]
 	}
-	for _, in := range v.Instances {
-		if in.Name == name {
-			return bad(fmt.Sprintf("name: a virtual firewall is named %s", name))
-		}
-	}
-	return nil
-}
-
-// firewallSaved gives a new firewall its default instance (an HA
-// secondary runs its primary's), and makes the configuration's names of a
-// renamed one follow it.
-func (s *Server) firewallSaved(c *echo.Context, f, old *models.Firewall) error {
-	ctx := c.Request().Context()
-	if old != nil {
-		return s.renameExternal(ctx, "firewalls", old.Name, f.Name)
-	}
-	if f.HAPrimaryID != nil {
-		return nil
-	}
-	return s.addDefaultInstance(ctx, f.Name, f.Name)
 }
 
 // addDefaultInstance makes the candidate's default instance of the
-// firewall named firewall, named name. It logs the policy drops of all
-// three chains, so a new host shows what it drops.
+// firewall named firewall, named name.
 func (s *Server) addDefaultInstance(ctx context.Context, firewall, name string) error {
+	return s.editConfig(ctx, func(work *datastore.Tree) error { return addDefaultInstanceTo(work, firewall, name) })
+}
+
+// addDefaultInstanceTo adds the default instance of the firewall to work. It
+// logs the policy drops of all three chains, so a new host shows what it
+// drops.
+func addDefaultInstanceTo(work *datastore.Tree, firewall, name string) error {
 	body, err := json.Marshal(map[string]any{
 		"name": name, "firewall": firewall, "is-default": true,
 		"log-drops": []string{fwconfig.ChainInput, fwconfig.ChainForward, fwconfig.ChainOutput},
@@ -164,124 +169,107 @@ func (s *Server) addDefaultInstance(ctx context.Context, firewall, name string) 
 	if err != nil {
 		return err
 	}
-	return s.editConfig(ctx, func(work *datastore.Tree) error {
-		for _, in := range work.Root.Lists["instance"] {
-			if in.Leaf("firewall") == firewall && in.Leaf("is-default") == "true" {
-				return fmt.Errorf("firewall %s already has a default instance", firewall)
-			}
+	for _, in := range work.Root.Lists["instance"] {
+		if in.Leaf("firewall") == firewall && in.Leaf("is-default") == "true" {
+			return fmt.Errorf("firewall %s already has a default instance", firewall)
 		}
-		return work.EditJSON(datastore.Path{{Name: "instance"}}, datastore.EditCreate, body)
-	})
+	}
+	return work.EditJSON(datastore.Path{{Name: "instance"}}, datastore.EditCreate, body)
 }
 
-// deleteFirewall refuses to delete the last firewall, or one with
-// virtual firewalls besides its host, and takes its host and tasks out of
-// the candidate; undo puts them back.
-func (s *Server) deleteFirewall(c *echo.Context, f *models.Firewall) (undo func() error, err error) {
-	var n int64
-	if err := s.db.Model(&models.Firewall{}).Count(&n).Error; err != nil {
-		return nil, err
+// deleteFirewall refuses to delete the last firewall, one that is the HA
+// primary of another, or one with virtual firewalls besides its host, and
+// takes its host and tasks out of the candidate (put back with them when the
+// commit of the deletion is refused).
+func (s *Server) deleteFirewall(c *echo.Context, work *datastore.Tree, v *confview.View, f *models.Firewall) error {
+	if len(v.Firewalls) <= 1 {
+		return bad("the only firewall can't be deleted")
 	}
-	if n <= 1 {
-		return nil, bad("the only firewall can't be deleted")
+	if i := slices.IndexFunc(v.Firewalls, func(o models.Firewall) bool { return o.HAPrimaryID != nil && *o.HAPrimaryID == f.ID }); i >= 0 {
+		return bad(fmt.Sprintf("%s is the HA primary of %s; delete that first", f.Name, v.Firewalls[i].Name))
 	}
-	var secondary models.Firewall
-	if err := s.db.Where("ha_primary_id = ?", f.ID).First(&secondary).Error; err == nil {
-		return nil, bad(fmt.Sprintf("%s is the HA primary of %s; delete that first", f.Name, secondary.Name))
-	}
-	// The entries taken out, as JSON with their secrets, by list.
-	type removed struct {
-		list string
-		data []byte
-	}
-	var taken []removed
-	ctx := context.WithoutCancel(c.Request().Context())
-	err = s.editConfig(ctx, func(work *datastore.Tree) error {
-		taken = nil
-		for _, in := range work.Root.Lists["instance"] {
-			if in.Leaf("firewall") == f.Name && in.Leaf("is-default") != "true" {
-				return bad(fmt.Sprintf("virtual firewall %s is on %s; move or delete it first", in.Leaf("name"), f.Name))
-			}
+	for _, in := range work.Root.Lists["instance"] {
+		if in.Leaf("firewall") == f.Name && in.Leaf("is-default") != "true" {
+			return bad(fmt.Sprintf("virtual firewall %s is on %s; move or delete it first", in.Leaf("name"), f.Name))
 		}
-		for _, list := range []string{"instance", "task"} {
-			for _, e := range slices.Clone(work.Root.Lists[list]) {
-				if e.Leaf("firewall") != f.Name {
-					continue
-				}
-				data, err := datastore.NodeJSON(e, datastore.JSONOptions{Secrets: true})
-				if err != nil {
-					return err
-				}
+	}
+	for _, list := range []string{"instance", "task"} {
+		for _, e := range slices.Clone(work.Root.Lists[list]) {
+			if e.Leaf("firewall") == f.Name {
 				if err := work.Delete(datastore.PathOf(e)); err != nil {
 					return err
 				}
-				taken = append(taken, removed{list, data})
 			}
 		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
 	}
-	// Made again at their paths, the entries get their ids back
-	// (sqlmap.AssignIDs).
-	return func() error {
-		return s.editConfig(ctx, func(work *datastore.Tree) error {
-			for _, r := range taken {
-				if err := work.EditJSON(datastore.Path{{Name: r.list}}, datastore.EditCreate, r.data); err != nil {
-					return err
-				}
-			}
-			return nil
-		})
-	}, nil
+	return nil
 }
 
 // firstFirewallID is the firewall the installation started with, or the
 // oldest one left.
-func firstFirewallID(tx *gorm.DB) (uint, error) {
-	var fw models.Firewall
-	if err := tx.Order("id").First(&fw).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return 0, bad("there is no firewall")
-		}
+func (s *Server) firstFirewallID() (uint, error) {
+	fws, err := s.rec.Firewalls()
+	if err != nil {
 		return 0, err
 	}
-	return fw.ID, nil
+	if len(fws) == 0 {
+		return 0, bad("there is no firewall")
+	}
+	return fws[0].ID, nil
 }
+
+// secondariesOf are the firewalls that are the HA secondary of the primary.
+func (s *Server) secondariesOf(primaryID uint) ([]models.Firewall, error) {
+	fws, err := s.rec.Firewalls()
+	if err != nil {
+		return nil, err
+	}
+	var out []models.Firewall
+	for _, fw := range fws {
+		if fw.HAPrimaryID != nil && *fw.HAPrimaryID == primaryID {
+			out = append(out, fw)
+		}
+	}
+	return out, nil
+}
+
+// secondaryOf is the primary's HA secondary, or nil.
+func (s *Server) secondaryOf(primaryID uint) (*models.Firewall, error) {
+	sec, err := s.secondariesOf(primaryID)
+	if err != nil || len(sec) == 0 {
+		return nil, err
+	}
+	return &sec[0], nil
+}
+
+// firewall is the firewall by id: records.ErrNotFound when there is
+// none.
+func (s *Server) firewall(id uint) (*models.Firewall, error) { return s.rec.Firewall(id) }
 
 // ensureFirewall creates the first firewall if there is none.
 func (s *Server) ensureFirewall() error {
-	return s.db.Transaction(func(tx *gorm.DB) error {
-		var n int64
-		if err := tx.Model(&models.Firewall{}).Count(&n).Error; err != nil || n > 0 {
-			return err
-		}
-		return tx.Create(&models.Firewall{Name: "firewall"}).Error
-	})
+	return s.rec.EnsureFirewall("firewall")
 }
 
 // firewalls lists every firewall, the first first.
 func (s *Server) firewalls() ([]models.Firewall, error) {
-	var fws []models.Firewall
-	err := s.db.Order("id").Find(&fws).Error
-	return fws, err
+	return s.rec.Firewalls()
 }
 
 // firewallAgent is the agent of the firewall.
 func (s *Server) firewallAgent(id uint) (agentAPI, *models.Firewall, error) {
-	var fw models.Firewall
-	if err := s.db.First(&fw, id).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, nil, bad("no such firewall")
-		}
+	fw, err := s.rec.Firewall(id)
+	if errors.Is(err, records.ErrNotFound) {
+		return nil, nil, bad("no such firewall")
+	}
+	if err != nil {
 		return nil, nil, err
 	}
-	a, err := s.newAgent(&fw)
+	a, err := s.newAgent(fw)
 	if err != nil {
-		return nil, &fw, bad(fmt.Sprintf("firewall %s: %v", fw.Name, err))
+		return nil, fw, bad(fmt.Sprintf("firewall %s: %v", fw.Name, err))
 	}
-	return a, &fw, nil
+	return a, fw, nil
 }
 
 // instanceAgent is the agent of the firewall the named instance is on.
@@ -301,7 +289,7 @@ func (s *Server) instanceAgent(name string) (agentAPI, *models.Firewall, error) 
 // firstAgent is the agent of the first firewall, for what is not yet
 // asked per firewall.
 func (s *Server) firstAgent() (agentAPI, *models.Firewall, error) {
-	id, err := firstFirewallID(s.db)
+	id, err := s.firstFirewallID()
 	if err != nil {
 		return nil, nil, err
 	}
@@ -312,7 +300,7 @@ func (s *Server) firstAgent() (agentAPI, *models.Firewall, error) {
 // first one.
 func (s *Server) requestFirewall(c *echo.Context) (uint, error) {
 	if c.QueryParam("firewall_id") == "" {
-		return firstFirewallID(s.db)
+		return s.firstFirewallID()
 	}
 	id, err := echo.QueryParam[uint](c, "firewall_id")
 	if err != nil {
@@ -450,23 +438,24 @@ func (s *Server) handleSwitchover(c *echo.Context) error {
 	if err != nil {
 		return errJSON(c, http.StatusNotFound, "not found")
 	}
-	var fw models.Firewall
-	if err := s.db.First(&fw, id).Error; err != nil {
+	fwp, err := s.rec.Firewall(id)
+	if err != nil {
 		return errJSON(c, http.StatusNotFound, "not found")
 	}
+	fw := *fwp
 	pair := []models.Firewall{fw}
 	if fw.HAPrimaryID != nil {
-		var p models.Firewall
-		if err := s.db.First(&p, *fw.HAPrimaryID).Error; err != nil {
+		p, err := s.rec.Firewall(*fw.HAPrimaryID)
+		if err != nil {
 			return dbError(c, err)
 		}
-		pair = append(pair, p)
+		pair = append(pair, *p)
 	} else {
-		var q models.Firewall
-		if err := s.db.Where("ha_primary_id = ?", fw.ID).First(&q).Error; err != nil {
+		q, _ := s.secondaryOf(fw.ID)
+		if q == nil {
 			return errJSON(c, http.StatusConflict, fw.Name+" is not in an HA pair")
 		}
-		pair = append(pair, q)
+		pair = append(pair, *q)
 	}
 	ctx, cancel := context.WithTimeout(c.Request().Context(), 5*time.Second)
 	defer cancel()

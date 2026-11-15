@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/abundo/portitor/internal/datastore"
+
 	"github.com/abundo/portitor/internal/agentapi"
 	"github.com/abundo/portitor/internal/builder"
 	"github.com/abundo/portitor/internal/ldapauth"
@@ -89,15 +91,13 @@ func TestDirectoryLogin(t *testing.T) {
 	// A user the firewall doesn't have: copied in, with no global role,
 	// their group's role, and the server they came from.
 	env.login("dave", "davepass")
-	var dave models.User
-	env.srv.db.Where("username = ?", "dave").First(&dave)
+	dave := env.userNamed("dave")
 	if dave.PasswordHash != models.LDAPPassword || dave.LdapServer != "ad" || dave.Role != models.RoleNone || dave.FullName != "DAVE" || dave.Email != "dave@example.com" {
 		t.Fatalf("dave: %+v", dave)
 	}
 	memberOf := func(u, r uint) bool {
-		var n int64
-		env.srv.db.Model(&models.RoleMember{}).Where("user_id = ? AND role_id = ?", u, r).Count(&n)
-		return n > 0
+		_, ok := env.member(u, r)
+		return ok
 	}
 	if !memberOf(dave.ID, role) {
 		t.Error("dave not in his group's role")
@@ -114,7 +114,7 @@ func TestDirectoryLogin(t *testing.T) {
 	}
 	// A role an admin gave by hand stays; the mapped role follows the
 	// group at the next login.
-	env.srv.db.Create(&models.RoleMember{RoleID: other, UserID: dave.ID, Level: models.RoleViewer})
+	env.addMember(other, dave.ID, models.RoleViewer)
 	dir["dave"] = nil
 	env.login("dave", "davepass")
 	if memberOf(dave.ID, role) || !memberOf(dave.ID, other) {
@@ -123,22 +123,37 @@ func TestDirectoryLogin(t *testing.T) {
 	env.login("admin", "correct horse battery")
 
 	// With no server enabled, a copied user can't log in.
-	env.srv.db.Model(&models.LdapServer{}).Where("1 = 1").Update("enabled", false)
+	setServers := func(enabled bool) {
+		for _, l := range env.servers() {
+			if rec := env.do("PUT", "/api/directory/servers/"+itoa(l.ID), map[string]any{"enabled": enabled}); rec.Code != http.StatusOK {
+				t.Fatalf("enabled %v: %d %s", enabled, rec.Code, rec.Body)
+			}
+		}
+	}
+	setServers(false)
 	if rec := env.do("POST", "/api/login", map[string]string{"username": "dave", "password": "davepass"}); rec.Code != http.StatusUnauthorized {
 		t.Errorf("no server: %d", rec.Code)
 	}
-	env.srv.db.Model(&models.LdapServer{}).Where("1 = 1").Update("enabled", true)
+	setServers(true)
 
 	// The login order.
 	var down models.LdapServer
-	env.srv.db.Where("name = ?", "down").First(&down)
+	for _, l := range env.servers() {
+		if l.Name == "down" {
+			down = l
+		}
+	}
 	if rec := env.do("POST", "/api/directory/servers/reorder", map[string]any{"ids": []uint{ad.ID, down.ID}}); rec.Code != http.StatusNoContent {
 		t.Fatalf("reorder: %d %s", rec.Code, rec.Body)
 	}
 	if rec := env.do("POST", "/api/directory/servers/reorder", map[string]any{"ids": []uint{ad.ID}}); rec.Code != http.StatusBadRequest {
 		t.Errorf("reorder with one missing: %d", rec.Code)
 	}
-	env.srv.db.First(&ad, ad.ID)
+	for _, l := range env.servers() {
+		if l.ID == ad.ID {
+			ad = l
+		}
+	}
 	if ad.Position != 1 {
 		t.Errorf("ad at %d", ad.Position)
 	}
@@ -187,6 +202,7 @@ func (a *directoryAgent) DirectoryLogins(_ context.Context, after int64) (*agent
 // The users the directory let in to OpenVPN are copied in from the agent.
 func TestDirectoryLoginsFromAgent(t *testing.T) {
 	env := newEnv(t)
+	env.create("/api/directory/servers", map[string]any{"name": "ad", "enabled": true, "host": "dc1.example.com", "base_dn": "dc=example,dc=com"})
 	role := env.create("/api/roles", map[string]any{"name": "vpn"})
 	env.create("/api/directory/mappings", map[string]any{"group_dn": vpnGroup, "role_id": role, "level": "admin"})
 	fake := &directoryAgent{logins: []agentapi.DirectoryLogin{
@@ -196,28 +212,119 @@ func TestDirectoryLoginsFromAgent(t *testing.T) {
 	}}
 	env.srv.newAgent = func(*models.Firewall) (agentAPI, error) { return fake, nil }
 	var fw models.Firewall
-	env.srv.db.First(&fw)
+	fw = env.firstFirewall()
 	after := map[uint]int64{}
 	env.srv.syncDirectoryLogins(context.Background(), &fw, after)
 	if after[fw.ID] != 3 {
 		t.Errorf("cursor %d", after[fw.ID])
 	}
-	var frank, admin models.User
-	env.srv.db.Where("username = ?", "frank").First(&frank)
-	env.srv.db.Where("username = ?", "admin").First(&admin)
+	frank, admin := env.userNamed("frank"), env.userNamed("admin")
 	if frank.PasswordHash != models.LDAPPassword || frank.LdapServer != "ad" || frank.Role != models.RoleNone {
 		t.Errorf("frank: %+v", frank)
 	}
-	var m models.RoleMember
-	if err := env.srv.db.Where("user_id = ? AND role_id = ?", frank.ID, role).First(&m).Error; err != nil || m.Level != models.RoleAdmin {
-		t.Errorf("frank's role: %+v %v", m, err)
+	if m, ok := env.member(frank.ID, role); !ok || m.Level != models.RoleAdmin {
+		t.Errorf("frank's role: %+v %v", m, ok)
 	}
 	if admin.PasswordHash == models.LDAPPassword || admin.LdapServer != "" {
 		t.Errorf("admin: %+v", admin)
 	}
-	var n int64
-	env.srv.db.Model(&models.User{}).Where("username = ?", "a b").Count(&n)
-	if n != 0 {
+	if _, err := env.srv.rec.UserNamed("a b"); err == nil {
 		t.Error("a b copied")
+	}
+}
+
+// servers are the directory servers the API lists.
+func (env *testEnv) servers() []models.LdapServer {
+	env.t.Helper()
+	var out []models.LdapServer
+	rec := env.do("GET", "/api/directory/servers", nil)
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		env.t.Fatalf("servers: %v %s", err, rec.Body)
+	}
+	return out
+}
+
+// The directory's servers are the tree's, committed on write: a viewer
+// doesn't read them (they are what logs people in), and a backup brings
+// them back.
+func TestDirectoryServersInTheTree(t *testing.T) {
+	env := newEnv(t)
+	mk := func(name string) {
+		env.create("/api/directory/servers", map[string]any{"name": name, "enabled": true, "host": name + ".example.com", "base_dn": "dc=example,dc=com"})
+	}
+	mk("one")
+	// They run at once, with the candidate otherwise untouched.
+	if servers, err := env.srv.enabledDirectoryServers(context.Background()); err != nil || len(servers) != 1 {
+		t.Fatalf("running's servers: %v %+v", err, servers)
+	}
+	if rec := env.do("GET", "/api/config/changes", nil); strings.Contains(rec.Body.String(), "ldap") {
+		t.Errorf("a committed server shows as a change: %s", rec.Body)
+	}
+
+	// A viewer reads no server, over the API or the tree.
+	env.create("/api/users", map[string]string{"username": "vera", "password": "a long password", "role": "viewer"})
+	env.login("vera", "a long password")
+	if rec := env.do("GET", "/api/directory/servers", nil); rec.Code != http.StatusForbidden {
+		t.Errorf("viewer, server list: %d", rec.Code)
+	}
+	if rec := env.do("GET", "/api/config/candidate/ldap-server", nil); rec.Code == http.StatusOK && strings.Contains(rec.Body.String(), "one.example.com") {
+		t.Errorf("viewer read a server over /api/config: %d %s", rec.Code, rec.Body)
+	}
+	if rec := env.do("GET", "/api/config/candidate", nil); strings.Contains(rec.Body.String(), "one.example.com") {
+		t.Errorf("viewer read a server in the whole tree: %s", rec.Body)
+	}
+	env.login("admin", "correct horse battery")
+
+	// The backup holds them.
+	data := env.backup()
+	for _, l := range env.servers() {
+		if rec := env.do("DELETE", "/api/directory/servers/"+itoa(l.ID), nil); rec.Code != http.StatusNoContent {
+			t.Fatalf("delete: %d %s", rec.Code, rec.Body)
+		}
+	}
+	mk("two")
+	if rec := env.do("POST", "/api/backup/restore", map[string]any{"data": data, "passphrase": testPassphrase}); rec.Code != http.StatusOK {
+		t.Fatalf("restore: %d %s", rec.Code, rec.Body)
+	}
+	got := env.servers()
+	if len(got) != 1 || got[0].Name != "one" {
+		t.Errorf("servers after the restore: %+v", got)
+	}
+	if servers, _ := env.srv.enabledDirectoryServers(context.Background()); len(servers) != 1 || servers[0].Name != "one" {
+		t.Errorf("running's servers after the restore: %+v", servers)
+	}
+}
+
+// A backup from before the servers were in the tree has them in its
+// database: restoring it adopts them, with their ids.
+func TestRestoreAnOldBackupAdoptsTheServers(t *testing.T) {
+	env := newEnv(t)
+	tr, _ := env.srv.tree()
+	cand, _ := tr.store.Candidate(context.Background())
+	data, err := cand.JSON(datastore.JSONOptions{Secrets: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// What the restored database holds: a row, as the old release wrote it.
+	if err := env.srv.db.Create(&models.LdapServer{Position: 1, Name: "old", Enabled: true, Host: "old.example.com", Port: 389, BaseDn: "dc=x", BindPassword: ""}).Error; err != nil {
+		t.Fatal(err)
+	}
+	var id uint
+	env.srv.db.Raw("SELECT id FROM ldap_servers WHERE name = 'old'").Scan(&id)
+	// And its users, the admin among them (the same, as a restore of one's
+	// own backup would be).
+	admin := env.userNamed("admin")
+	if err := env.srv.db.Exec("INSERT INTO users (id, username, password_hash, role) VALUES (?, ?, ?, 'admin')", admin.ID, admin.Username, admin.PasswordHash).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := env.srv.takeSnapshot(context.Background(), map[string][]byte{"candidate.json": data}, nil, true); err != nil {
+		t.Fatal(err)
+	}
+	got := env.servers()
+	if len(got) != 1 || got[0].Name != "old" || got[0].ID != id {
+		t.Fatalf("servers: %+v (row id %d)", got, id)
+	}
+	if servers, _ := env.srv.enabledDirectoryServers(context.Background()); len(servers) != 1 {
+		t.Errorf("running's servers: %+v", servers)
 	}
 }
