@@ -10,6 +10,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -79,7 +80,13 @@ func configCommand() *cobra.Command {
 		if err != nil {
 			return nil, nil, err
 		}
-		return cfg, web.NewServer(cfg, db), nil
+		srv := web.NewServer(cfg, db)
+		// What an earlier release kept in the database moves into the
+		// configuration before anything is served or asked.
+		if err := srv.Ready(); err != nil {
+			return nil, nil, err
+		}
+		return cfg, srv, nil
 	}
 
 	start := &cobra.Command{
@@ -354,6 +361,23 @@ settings are kept unless --agent-fingerprint is given.`,
 			}
 			fmt.Println(fp)
 			return nil
+		},
+	})
+
+	root.AddCommand(&cobra.Command{
+		Use:   "portal-info",
+		Short: "Print as JSON what portitor-web needs of this firewall: portitor-config's port and certificate fingerprint (portitor-web reads it over SSH)",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := web.LoadConfig(configFile)
+			if err != nil {
+				return err
+			}
+			info, err := web.ReadPortalInfo(cfg)
+			if err != nil {
+				return err
+			}
+			return json.NewEncoder(cmd.OutOrStdout()).Encode(info)
 		},
 	})
 

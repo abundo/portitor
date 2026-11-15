@@ -26,19 +26,23 @@ import (
 
 	"github.com/abundo/portitor/internal/agentclient"
 	"github.com/abundo/portitor/internal/buildinfo"
+	"github.com/abundo/portitor/internal/datastore"
 	"github.com/abundo/portitor/internal/fwconfig"
 )
 
-// portitor-web is a portal: it has no database and no configuration of
-// its own. Each firewall keeps its configuration in its own
-// portitor-config; portitor-web serves the firewalls it lists (web.yaml)
-// at /fw/<name>/, passing the GUI, the API, the console and the streams
-// through to that portitor-config, whose login, roles and checks apply as
-// they do there. The session cookie of each is kept to its path (both
-// hosts' paths for an HA pair). It is also the witness of the HA pairs it
-// is given (witness:, portalwitness.go).
+// portitor-web is a portal with a configuration of its own, a tree of
+// portitor-portal.yang (PortalStore): the firewalls whose GUIs it serves, the
+// witness strings of the HA pairs it is the witness of, and its users. It
+// serves each firewall at /fw/<name>/, passing the GUI, the API, the console
+// and the streams through to that firewall's portitor-config, whose login,
+// roles and checks apply as they do there, and shows them as tabs (portal.html).
+// The session cookie of each is kept to its path (both hosts' paths for an HA
+// pair). A firewall is added by reading its fingerprints over SSH
+// (portalssh.go). What it needs to start is web.yaml.
 
-// PortalConfig is /etc/portitor/web.yaml.
+// PortalConfig is /etc/portitor/web.yaml: what portitor-web needs to start.
+// The firewalls and the witness strings are the configuration's, in the data
+// directory; those listed here are taken in once, when it has none yet.
 type PortalConfig struct {
 	Bind string `yaml:"bind"`
 	// Dev drops the HTTPS requirement of the firewalls' URLs on loopback
@@ -46,13 +50,21 @@ type PortalConfig struct {
 	Dev bool `yaml:"dev"`
 	// TLSCert/TLSKey serve HTTPS directly; otherwise put a reverse proxy
 	// in front.
-	TLSCert   string           `yaml:"tls_cert"`
-	TLSKey    string           `yaml:"tls_key"`
+	TLSCert string `yaml:"tls_cert"`
+	TLSKey  string `yaml:"tls_key"`
+	// DataDir holds portal.json (the configuration) and the session key.
+	DataDir string `yaml:"data_dir"`
+	// SSHListen serves the configuration's CLI and NETCONF over SSH to the
+	// portal's users (empty: not).
+	SSHListen string `yaml:"ssh_listen"`
+	// Firewalls and Witness of an older web.yaml: taken into the
+	// configuration at the first start.
 	Firewalls []PortalFirewall `yaml:"firewalls"`
-	// Witness are witness strings (portitor-config witness-string on an
-	// HA primary): the pairs this portitor-web is the third vote of.
-	Witness []string `yaml:"witness"`
+	Witness   []string         `yaml:"witness"`
 }
+
+// DefaultPortalDataDir is where portitor-web keeps its files.
+const DefaultPortalDataDir = "/var/lib/portitor-web"
 
 // PortalFirewall is one firewall's portitor-config: its URL, and the
 // SHA-256 fingerprint of its tls_cert (portitor-config fingerprint).
@@ -60,8 +72,10 @@ type PortalConfig struct {
 // certificate chosen there under Settings changes nothing here.
 type PortalFirewall struct {
 	Name        string `yaml:"name" json:"name"`
-	URL         string `yaml:"url" json:"-"`
-	Fingerprint string `yaml:"fingerprint" json:"-"`
+	Description string `yaml:"description" json:"description,omitempty"`
+	URL         string `yaml:"url" json:"url"`
+	Fingerprint string `yaml:"fingerprint" json:"fingerprint,omitempty"`
+	SSHHostKey  string `yaml:"ssh_host_key" json:"ssh_host_key,omitempty"`
 }
 
 func LoadPortalConfig(path string) (*PortalConfig, error) {
@@ -76,6 +90,9 @@ func LoadPortalConfig(path string) (*PortalConfig, error) {
 	if cfg.Bind == "" {
 		cfg.Bind = "127.0.0.1:8080"
 	}
+	if cfg.DataDir == "" {
+		cfg.DataDir = DefaultPortalDataDir
+	}
 	if err := cfg.check(); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
@@ -88,36 +105,45 @@ func (c *PortalConfig) check() error {
 	}
 	seen := map[string]bool{}
 	for i := range c.Firewalls {
-		f := &c.Firewalls[i]
-		// A firewall's own name (fwconfig.ValidDefaultInstanceName).
-		if !fwconfig.ValidDefaultInstanceName(f.Name) {
-			return fmt.Errorf("firewalls: name %q: letters, digits, '-', '_' and '.', starting with a letter or digit, at most 63 characters", f.Name)
+		if err := CheckPortalFirewall(&c.Firewalls[i]); err != nil {
+			return fmt.Errorf("firewalls: %w", err)
 		}
-		if seen[f.Name] {
-			return fmt.Errorf("firewalls: %s twice", f.Name)
+		if seen[c.Firewalls[i].Name] {
+			return fmt.Errorf("firewalls: %s twice", c.Firewalls[i].Name)
 		}
-		seen[f.Name] = true
-		f.URL = strings.TrimRight(f.URL, "/")
-		u, err := url.Parse(f.URL)
-		if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || (u.Path != "" && u.Path != "/") {
-			return fmt.Errorf("firewalls: %s: url must be https://<host>:<port> of its portitor-config", f.Name)
-		}
-		switch {
-		case u.Scheme == "https":
-			f.Fingerprint = normalizeFingerprint(f.Fingerprint)
-			if len(f.Fingerprint) != 64 {
-				return fmt.Errorf("firewalls: %s: fingerprint: the SHA-256 of its tls_cert (portitor-config fingerprint there)", f.Name)
-			}
-		case u.Scheme == "http" && isLoopback(u.Hostname()):
-			// portitor-config on this host, without TLS.
-		default:
-			return fmt.Errorf("firewalls: %s: url must be https:// (http:// only to this host)", f.Name)
-		}
+		seen[c.Firewalls[i].Name] = true
 	}
 	for _, w := range c.Witness {
 		if _, err := ParseWitness(w); err != nil {
 			return fmt.Errorf("witness: %w", err)
 		}
+	}
+	return nil
+}
+
+// CheckPortalFirewall checks a firewall and normalizes its URL and
+// fingerprint.
+func CheckPortalFirewall(f *PortalFirewall) error {
+	// A firewall's own name (fwconfig.ValidDefaultInstanceName).
+	if !fwconfig.ValidDefaultInstanceName(f.Name) {
+		return fmt.Errorf("name %q: letters, digits, '-', '_' and '.', starting with a letter or digit, at most 63 characters", f.Name)
+	}
+	f.URL = strings.TrimRight(f.URL, "/")
+	u, err := url.Parse(f.URL)
+	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || (u.Path != "" && u.Path != "/") {
+		return fmt.Errorf("%s: url must be https://<host>:<port> of its portitor-config", f.Name)
+	}
+	switch {
+	case u.Scheme == "https":
+		f.Fingerprint = normalizeFingerprint(f.Fingerprint)
+		if len(f.Fingerprint) != 64 {
+			return fmt.Errorf("%s: fingerprint: the SHA-256 of its tls_cert (portitor-config fingerprint there)", f.Name)
+		}
+	case u.Scheme == "http" && isLoopback(u.Hostname()):
+		// portitor-config on this host, without TLS.
+		f.Fingerprint = ""
+	default:
+		return fmt.Errorf("%s: url must be https:// (http:// only to this host)", f.Name)
 	}
 	return nil
 }
@@ -132,22 +158,106 @@ func isLoopback(host string) bool {
 
 // Portal is portitor-web's server.
 type Portal struct {
-	cfg     *PortalConfig
+	cfg   *PortalConfig
+	store *PortalStore
+	key   []byte
+	page  *template.Template
+
+	mu      sync.RWMutex
+	fws     []PortalFirewall
 	proxies map[string]*httputil.ReverseProxy
 	clients map[string]*http.Client
-	page    *template.Template
+
+	witnessMu     sync.Mutex
+	witnessCancel context.CancelFunc
+	witnessStrs   []string
+	ctx           context.Context
+
+	limits loginLimits
 }
 
-//go:embed portal.html
+//go:embed portal.html portal.js
 var portalFS embed.FS
 
+// NewPortal opens the configuration in cfg.DataDir (taking in web.yaml's
+// firewalls and witness strings the first time) and makes the proxies.
 func NewPortal(cfg *PortalConfig) (*Portal, error) {
-	p := &Portal{cfg: cfg, proxies: map[string]*httputil.ReverseProxy{}, clients: map[string]*http.Client{}}
+	store, err := OpenPortalConfigStore(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return NewPortalWith(cfg, store)
+}
+
+// OpenPortalConfigStore opens the configuration, taking in web.yaml's
+// firewalls and witness strings the first time.
+func OpenPortalConfigStore(cfg *PortalConfig) (*PortalStore, error) {
+	store, err := OpenPortalStore(cfg.DataDir)
+	if err != nil {
+		return nil, err
+	}
+	if !store.Exists() {
+		if err := importPortalConfig(store, cfg); err != nil {
+			return nil, err
+		}
+	}
+	return store, nil
+}
+
+// NewPortalWith is NewPortal on a store already open.
+func NewPortalWith(cfg *PortalConfig, store *PortalStore) (*Portal, error) {
+	p := &Portal{cfg: cfg, store: store, limits: loginLimits{fails: map[string][]time.Time{}}}
 	var err error
 	if p.page, err = template.ParseFS(portalFS, "portal.html"); err != nil {
 		return nil, err
 	}
-	for _, f := range cfg.Firewalls {
+	if p.key, err = loadSessionKey(cfg.DataDir); err != nil {
+		return nil, err
+	}
+	if err := p.reload(); err != nil {
+		return nil, err
+	}
+	store.OnChange(func() {
+		if err := p.reload(); err != nil {
+			slog.Warn("portal: reload", "err", err)
+		}
+		p.restartWitness()
+	})
+	return p, nil
+}
+
+// importPortalConfig makes the configuration of an older web.yaml's lists.
+func importPortalConfig(store *PortalStore, cfg *PortalConfig) error {
+	return store.Edit(func(t *datastore.Tree) error {
+		for _, f := range cfg.Firewalls {
+			leaves := map[string]string{"name": f.Name, "url": f.URL}
+			if f.Fingerprint != "" {
+				leaves["fingerprint"] = f.Fingerprint
+			}
+			if f.Description != "" {
+				leaves["description"] = f.Description
+			}
+			t.Root.AddEntry(t.Root.S.Child("firewall"), leaves)
+		}
+		for _, str := range cfg.Witness {
+			w, _ := ParseWitness(str)
+			t.Root.AddEntry(t.Root.S.Child("witness"), map[string]string{"pair": w.Pair, "string": w.String()})
+		}
+		return nil
+	})
+}
+
+// reload makes the proxies of the configuration's firewalls.
+func (p *Portal) reload() error {
+	fws := p.store.Firewalls()
+	proxies := map[string]*httputil.ReverseProxy{}
+	clients := map[string]*http.Client{}
+	for i := range fws {
+		f := &fws[i]
+		if err := CheckPortalFirewall(f); err != nil {
+			slog.Warn("portal: firewall left out", "firewall", f.Name, "err", err)
+			continue
+		}
 		target, _ := url.Parse(f.URL)
 		tr := &http.Transport{
 			Proxy:                 nil,
@@ -159,16 +269,32 @@ func NewPortal(cfg *PortalConfig) (*Portal, error) {
 		if target.Scheme == "https" {
 			tlsCfg, err := agentclient.PinnedTLS("portitor-config "+f.Name, f.Fingerprint)
 			if err != nil {
-				return nil, err
+				return err
 			}
 			tlsCfg.MinVersion = tls.VersionTLS12
 			tlsCfg.ServerName = PinnedServerName
 			tr.TLSClientConfig = tlsCfg
 		}
-		p.proxies[f.Name] = p.proxy(f.Name, target, tr)
-		p.clients[f.Name] = &http.Client{Transport: tr, Timeout: 3 * time.Second}
+		proxies[f.Name] = p.proxy(f.Name, target, tr)
+		clients[f.Name] = &http.Client{Transport: tr, Timeout: 3 * time.Second}
 	}
-	return p, nil
+	p.mu.Lock()
+	p.fws, p.proxies, p.clients = fws, proxies, clients
+	p.mu.Unlock()
+	return nil
+}
+
+func (p *Portal) firewalls() []PortalFirewall {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return slices.Clone(p.fws)
+}
+
+func (p *Portal) proxyFor(name string) (*httputil.ReverseProxy, bool) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	rp, ok := p.proxies[name]
+	return rp, ok
 }
 
 // prefix is where a firewall is served.
@@ -195,6 +321,7 @@ func (p *Portal) proxy(name string, target *url.URL, tr http.RoundTripper) *http
 			r.SetXForwarded()
 			r.Out.Host = r.In.Host
 			r.Out.Header.Set("X-Forwarded-Prefix", prefix)
+			stripPortalCookie(r.Out)
 		},
 		Transport:     tr,
 		FlushInterval: -1,
@@ -230,7 +357,8 @@ func (p *Portal) proxy(name string, target *url.URL, tr http.RoundTripper) *http
 func (p *Portal) pairPrefixes(name string, fps []string) []string {
 	out := []string{portalPrefix(name)}
 	var own string
-	for _, f := range p.cfg.Firewalls {
+	fws := p.firewalls()
+	for _, f := range fws {
 		if f.Name == name {
 			own = f.Fingerprint
 		}
@@ -238,7 +366,7 @@ func (p *Portal) pairPrefixes(name string, fps []string) []string {
 	if own == "" || !slices.Contains(fps, own) {
 		return out
 	}
-	for _, f := range p.cfg.Firewalls {
+	for _, f := range fws {
 		if f.Name != name && f.Fingerprint != "" && slices.Contains(fps, f.Fingerprint) {
 			out = append(out, portalPrefix(f.Name))
 		}
@@ -268,39 +396,46 @@ func portalCookies(h http.Header, prefixes []string) {
 	}
 }
 
-// Handler serves the portal.
+// Handler serves the portal: its shell and API (behind its own login), and
+// each firewall at /fw/<name>/ (behind it too).
 func (p *Portal) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /{$}", p.handleRoot)
+	mux.HandleFunc("GET /{$}", p.handlePage)
 	mux.HandleFunc("GET /portal/{$}", p.handlePage)
-	mux.HandleFunc("GET /portal/v1/firewalls", p.handleFirewalls)
-	mux.HandleFunc("/fw/{name}", func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := p.proxies[r.PathValue("name")]; !ok {
+	mux.HandleFunc("GET /portal/portal.js", p.handleScript)
+	mux.HandleFunc("POST /portal/v1/login", p.handleLogin)
+	mux.HandleFunc("POST /portal/v1/logout", p.handleLogout)
+	mux.HandleFunc("GET /portal/v1/session", p.authed(p.handleSession))
+	mux.HandleFunc("GET /portal/v1/firewalls", p.authed(p.handleFirewalls))
+	mux.HandleFunc("POST /portal/v1/firewalls", p.authed(p.handlePutFirewall))
+	mux.HandleFunc("PUT /portal/v1/firewalls/{name}", p.authed(p.handlePutFirewall))
+	mux.HandleFunc("DELETE /portal/v1/firewalls/{name}", p.authed(p.handleDeleteFirewall))
+	mux.HandleFunc("POST /portal/v1/probe", p.authed(p.handleProbe))
+	mux.HandleFunc("GET /portal/v1/witness", p.authed(p.handleWitnesses))
+	mux.HandleFunc("POST /portal/v1/witness", p.authed(p.handlePutWitness))
+	mux.HandleFunc("DELETE /portal/v1/witness/{pair}", p.authed(p.handleDeleteWitness))
+	mux.HandleFunc("GET /portal/v1/config", p.authed(p.handleConfig))
+	mux.HandleFunc("/fw/{name}", p.authed(func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := p.proxyFor(r.PathValue("name")); !ok {
 			http.NotFound(w, r)
 			return
 		}
 		http.Redirect(w, r, portalPrefix(r.PathValue("name"))+"/", http.StatusFound)
-	})
-	mux.HandleFunc("/fw/{name}/", func(w http.ResponseWriter, r *http.Request) {
+	}))
+	mux.HandleFunc("/fw/{name}/", p.authed(func(w http.ResponseWriter, r *http.Request) {
 		name := r.PathValue("name")
-		rp, ok := p.proxies[name]
+		rp, ok := p.proxyFor(name)
 		if !ok {
 			http.NotFound(w, r)
 			return
 		}
-		rest := strings.TrimPrefix(r.URL.Path, portalPrefix(name))
-		if r.Method == http.MethodGet && !strings.HasPrefix(rest, "/api/") && !strings.HasPrefix(rest, "/assets/") {
-			// The GUI's page: the firewall / opens next time.
-			http.SetCookie(w, &http.Cookie{Name: lastFirewallCookie, Value: name, Path: "/", MaxAge: 365 * 24 * 3600,
-				HttpOnly: true, Secure: r.TLS != nil, SameSite: http.SameSiteLaxMode})
-		}
 		rp.ServeHTTP(w, r)
-	})
+	}))
 	return mux
 }
 
-// portalHeaders are the portal's own pages' (the proxied ones bring
-// portitor-config's).
+// portalHeaders are the portal's own pages': what the shell frames is its
+// own origin (the firewalls at /fw/).
 func portalHeaders(w http.ResponseWriter) {
 	h := w.Header()
 	h.Set("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'")
@@ -310,23 +445,33 @@ func portalHeaders(w http.ResponseWriter) {
 	h.Set("Cache-Control", "no-store")
 }
 
-// portalStatus is a firewall on the portal's page.
+// portalStatus is a firewall in the portal's list.
 type portalStatus struct {
-	Name    string `json:"name"`
-	Path    string `json:"path"`
-	Version string `json:"version,omitempty"`
-	Error   string `json:"error,omitempty"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	URL         string `json:"url,omitempty"`
+	Path        string `json:"path"`
+	Version     string `json:"version,omitempty"`
+	Error       string `json:"error,omitempty"`
 }
 
 // statuses asks every portitor-config for its version, at once.
 func (p *Portal) statuses(ctx context.Context) []portalStatus {
-	out := make([]portalStatus, len(p.cfg.Firewalls))
+	fws := p.firewalls()
+	out := make([]portalStatus, len(fws))
 	var wg sync.WaitGroup
-	for i, f := range p.cfg.Firewalls {
-		out[i] = portalStatus{Name: f.Name, Path: portalPrefix(f.Name) + "/"}
+	for i, f := range fws {
+		out[i] = portalStatus{Name: f.Name, Description: f.Description, URL: f.URL, Path: portalPrefix(f.Name) + "/"}
+		p.mu.RLock()
+		client := p.clients[f.Name]
+		p.mu.RUnlock()
 		wg.Go(func() {
+			if client == nil {
+				out[i].Error = "not valid"
+				return
+			}
 			req, _ := http.NewRequestWithContext(ctx, http.MethodGet, f.URL+"/api/version", nil)
-			res, err := p.clients[f.Name].Do(req)
+			res, err := client.Do(req)
 			if err != nil {
 				out[i].Error = "does not answer"
 				return
@@ -347,64 +492,93 @@ func (p *Portal) statuses(ctx context.Context) []portalStatus {
 // Check asks every firewall's portitor-config for its version.
 func (p *Portal) Check(ctx context.Context) []portalStatus { return p.statuses(ctx) }
 
-// lastFirewallCookie names the firewall whose GUI the browser opened last.
-const lastFirewallCookie = "portitor_firewall"
+// Store is the portal's configuration.
+func (p *Portal) Store() *PortalStore { return p.store }
 
-// handleRoot opens a firewall's GUI, whose switcher picks the others: the
-// one opened last, else the first. Without firewalls, the list says so.
-func (p *Portal) handleRoot(w http.ResponseWriter, r *http.Request) {
-	if len(p.cfg.Firewalls) == 0 {
-		p.handlePage(w, r)
-		return
-	}
-	name := p.cfg.Firewalls[0].Name
-	if c, err := r.Cookie(lastFirewallCookie); err == nil {
-		if _, ok := p.proxies[c.Value]; ok {
-			name = c.Value
-		}
-	}
-	http.Redirect(w, r, portalPrefix(name)+"/", http.StatusFound)
-}
-
-// handlePage lists the firewalls, with their versions or why they don't
-// answer (/portal/).
+// handlePage is the shell: the login, the tabs, the firewalls' list.
 func (p *Portal) handlePage(w http.ResponseWriter, r *http.Request) {
 	portalHeaders(w)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	data := struct {
-		Firewalls []portalStatus
-		Version   string
-	}{p.statuses(r.Context()), buildinfo.Version}
-	if err := p.page.Execute(w, data); err != nil {
+	if err := p.page.Execute(w, struct{ Version string }{buildinfo.Version}); err != nil {
 		slog.Warn("portal page", "err", err)
 	}
 }
 
-// handleFirewalls lists the firewalls for the GUI's firewall switcher.
-func (p *Portal) handleFirewalls(w http.ResponseWriter, r *http.Request) {
+func (p *Portal) handleScript(w http.ResponseWriter, r *http.Request) {
 	portalHeaders(w)
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(p.statuses(r.Context()))
+	data, _ := portalFS.ReadFile("portal.js")
+	w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+	_, _ = w.Write(data)
+}
+
+// restartWitness runs the witness of the configuration's strings, again
+// when they changed.
+func (p *Portal) restartWitness() {
+	p.witnessMu.Lock()
+	defer p.witnessMu.Unlock()
+	if p.ctx == nil {
+		return
+	}
+	// A restart loses the vote's state: only when the strings changed.
+	if cur := p.store.Witnesses(); p.witnessCancel != nil && slices.Equal(cur, p.witnessStrs) {
+		return
+	}
+	if p.witnessCancel != nil {
+		p.witnessCancel()
+		p.witnessCancel = nil
+	}
+	strs := p.store.Witnesses()
+	if len(strs) == 0 {
+		p.witnessStrs = nil
+		return
+	}
+	w, err := NewWitness(strs)
+	if err != nil {
+		slog.Warn("portal: witness", "err", err)
+		return
+	}
+	ctx, cancel := context.WithCancel(p.ctx)
+	p.witnessCancel = cancel
+	p.witnessStrs = strs
+	go w.Run(ctx)
+}
+
+// warnWebYAML says when web.yaml lists firewalls or witness strings the
+// configuration lacks: they are taken in once, at the first start, and
+// never again.
+func (p *Portal) warnWebYAML() {
+	have := map[string]bool{}
+	for _, f := range p.firewalls() {
+		have[f.Name] = true
+	}
+	for _, f := range p.cfg.Firewalls {
+		if !have[f.Name] {
+			slog.Warn("web.yaml lists a firewall the portal's configuration does not have; it is ignored (add it in the portal, or portitor-web add-firewall)", "firewall", f.Name)
+		}
+	}
+	if len(p.cfg.Witness) > 0 && len(p.store.Witnesses()) == 0 {
+		slog.Warn("web.yaml lists witness strings the portal's configuration does not have; they are ignored (portitor-web add-witness)")
+	}
 }
 
 // Serve runs until ctx is cancelled: the portal, and the witness of the
 // pairs it is given.
 func (p *Portal) Serve(ctx context.Context) error {
 	srv := &http.Server{Addr: p.cfg.Bind, Handler: p.Handler(), ReadHeaderTimeout: 30 * time.Second}
-	if len(p.cfg.Witness) > 0 {
-		w, err := NewWitness(p.cfg.Witness)
-		if err != nil {
-			return err
-		}
-		go w.Run(ctx)
-	}
+	p.witnessMu.Lock()
+	p.ctx = ctx
+	p.witnessMu.Unlock()
+	p.restartWitness()
+	go p.store.Watch(ctx)
+	go p.runSSH(ctx)
+	p.warnWebYAML()
 	go func() {
 		<-ctx.Done()
 		sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = srv.Shutdown(sctx)
 	}()
-	slog.Info("portitor-web listening", "addr", p.cfg.Bind, "firewalls", len(p.cfg.Firewalls), "witness", len(p.cfg.Witness), "tls", p.cfg.TLSCert != "")
+	slog.Info("portitor-web listening", "addr", p.cfg.Bind, "firewalls", len(p.firewalls()), "witness", len(p.store.Witnesses()), "tls", p.cfg.TLSCert != "")
 	var err error
 	if p.cfg.TLSCert != "" {
 		srv.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12}
@@ -416,4 +590,16 @@ func (p *Portal) Serve(ctx context.Context) error {
 		return nil
 	}
 	return err
+}
+
+// stripPortalCookie takes the portal's own session cookie out of a request
+// for a firewall: the firewall's GUI has no use for it.
+func stripPortalCookie(r *http.Request) {
+	cs := r.Cookies()
+	r.Header.Del("Cookie")
+	for _, c := range cs {
+		if c.Name != portalCookie {
+			r.AddCookie(c)
+		}
+	}
 }

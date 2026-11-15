@@ -37,6 +37,9 @@ type JSONOptions struct {
 // SetAnnotation is the annotation SecretsSet writes.
 const SetAnnotation = schema.Module + ":set"
 
+// setAnnotation is the annotation in the module of s.
+func setAnnotation(s *schema.Node) string { return s.Module() + ":set" }
+
 // MarshalJSON writes the tree as RFC 7951 JSON: top-level names
 // qualified with the module, 64-bit numbers as strings.
 func (t *Tree) MarshalJSON() ([]byte, error) {
@@ -89,7 +92,7 @@ func nodeValue(n *Node, o JSONOptions, top bool) ordered {
 	out := ordered{}
 	name := func(s string) string {
 		if top {
-			return schema.Module + ":" + s
+			return n.S.Module() + ":" + s
 		}
 		return s
 	}
@@ -101,7 +104,7 @@ func nodeValue(n *Node, o JSONOptions, top bool) ordered {
 				v, ok = s.Default, true
 			}
 			if ok && s.Secret() && !o.Secrets && o.SecretsSet {
-				out = append(out, member{"@" + name(s.Name), map[string]bool{SetAnnotation: true}})
+				out = append(out, member{"@" + name(s.Name), map[string]bool{setAnnotation(n.S): true}})
 			}
 			if !ok || (s.Secret() && !o.Secrets) {
 				continue
@@ -110,7 +113,7 @@ func nodeValue(n *Node, o JSONOptions, top bool) ordered {
 		case schema.LeafList:
 			vs, ok := n.LeafLists[s.Name]
 			if ok && s.Secret() && !o.Secrets && o.SecretsSet {
-				out = append(out, member{"@" + name(s.Name), map[string]bool{SetAnnotation: true}})
+				out = append(out, member{"@" + name(s.Name), map[string]bool{setAnnotation(n.S): true}})
 			}
 			if !ok || (s.Secret() && !o.Secrets) {
 				continue
@@ -225,7 +228,7 @@ func readObject(n *Node, data []byte, p Path, root *schema.Node) error {
 	for name, raw := range obj {
 		local := name
 		if i := strings.IndexByte(name, ':'); i >= 0 {
-			if name[:i] != schema.Module {
+			if name[:i] != root.Name {
 				return fmt.Errorf("%s: unknown module of %q", p.String(root), name)
 			}
 			local = name[i+1:]

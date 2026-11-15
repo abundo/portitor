@@ -27,7 +27,7 @@ func (s *session) action(ctx context.Context, op *elem) (string, error) {
 	at, e := s.env.Schema, op.Children[0]
 	var p datastore.Path
 	for {
-		if e.Space != schema.Namespace {
+		if e.Space != s.env.Schema.ModuleNamespace() {
 			return "", protocolErr("unknown-namespace", "%s (%s)", e.Local, e.Space)
 		}
 		c := at.Child(e.Local)

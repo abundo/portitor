@@ -129,7 +129,7 @@ check() {
 # The GUI's API from inside the web VM (python3: curl may not be installed):
 # gui BASE get PATH prints the answer, gui BASE deploy applies and confirms.
 cat >build/vm-sup-web/gui.py <<'EOF'
-import http.cookiejar, json, ssl, sys, time, urllib.request
+import http.cookiejar, json, ssl, sys, time, urllib.error, urllib.request
 base, password, action = sys.argv[1:4]
 ctx = ssl.create_default_context()
 ctx.check_hostname, ctx.verify_mode = False, ssl.CERT_NONE
@@ -138,8 +138,21 @@ op = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx),
 def call(path, body=None):
     data = None if body is None else json.dumps(body).encode()
     return op.open(urllib.request.Request(base + path, data, {"Content-Type": "application/json"}), timeout=60).read().decode()
+def portal_login():
+    # Behind portitor-web (/fw/<name>) of this release its own login comes
+    # first; an older portitor-web has none.
+    if "/fw/" not in base:
+        return
+    req = urllib.request.Request(base.split("/fw/")[0] + "/portal/v1/login",
+                                 json.dumps({"user": "portitor", "password": password}).encode(), {"Content-Type": "application/json"})
+    try:
+        op.open(req, timeout=60).close()
+    except urllib.error.HTTPError as e:
+        if e.code not in (404, 405):
+            raise
 for i in range(60):
     try:
+        portal_login()
         call("/api/login", {"username": "portitor", "password": password})
         break
     except Exception as e:
@@ -211,6 +224,9 @@ else
 	tail -n 20 build/vm-sup-web/update.log | sed 's/^/      /' >&2
 fi
 
+# portitor-web has users of its own now: one for the test.
+check web "portal user" sh -c "printf '%s\n' '$PASSWORD' | runuser -u portitor -- portitor-web -f /etc/portitor/web.yaml createadmin portitor"
+
 log "Checking $to"
 for bin in fw:portitor-agent web:portitor-web fw:portitor-web; do
 	got=$(guest "${bin%%:*}" "${bin#*:}" --version | awk '{ print $NF }') || got=?
@@ -228,12 +244,12 @@ check fw "portitor-config running" systemctl is-active --quiet portitor-config.s
 check fw "nftables firewall table loaded" nft list table inet firewall
 check web "portitor-web running" systemctl is-active --quiet portitor-web.service
 if [[ $mode == legacy ]]; then
-	check web "web.yaml lists the firewall" grep -q 'url: https://192.168.1.1:8444' /etc/portitor/web.yaml
+	check web "the portal lists the firewall" sh -c "runuser -u portitor -- portitor-web -f /etc/portitor/web.yaml list-firewalls | grep -q 'https://192.168.1.1:8444\$'"
 	check fw "the database moved in" test -s /var/lib/portitor-config/portitor.db
 	check fw "portitor-web trusted (trusted_proxies)" grep -q '^trusted_proxies:.*192\.168\.1\.10' /etc/portitor/config.yaml
 	check web "the old database set aside" test -e /var/lib/portitor-web/portitor.db.moved-to-portitor-config
 else
-	check web "web.yaml lists the firewall" grep -q 'url: https://192.168.1.1:443$' /etc/portitor/web.yaml
+	check web "the portal lists the firewall" sh -c "runuser -u portitor -- portitor-web -f /etc/portitor/web.yaml list-firewalls | grep -q 'https://192.168.1.1:443\$'"
 fi
 portal=https://127.0.0.1/fw/fw
 # The configuration is read through /api/config now (the old /api/interfaces

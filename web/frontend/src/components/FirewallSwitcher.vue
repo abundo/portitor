@@ -7,9 +7,10 @@
 // for the two hosts of an HA pair, which share one. field: as a form field
 // (the login page), else in the top bar, where without the portal it picks
 // one of this GUI's firewalls when several have instances, and the VF select
-// beside it lists that one's.
+// beside it lists that one's. In a tab of the portal (framed) the portal's own
+// tabs switch firewalls, so the pick is left out.
 import { computed, onMounted, ref } from 'vue'
-import { BASE, portal } from '@/utils/base'
+import { BASE, framed, portal } from '@/utils/base'
 import { confirmDiscard } from '@/composables/useFormGuard'
 import { useInstanceStore } from '@/stores/instances'
 
@@ -19,7 +20,7 @@ const firewalls = ref([])
 const here = BASE.split('/')[2] ?? ''
 
 onMounted(async () => {
-  if (!portal) return
+  if (!portal || framed) return
   try {
     const res = await fetch('/portal/v1/firewalls', { credentials: 'same-origin' })
     if (res.ok) firewalls.value = await res.json()
@@ -55,7 +56,7 @@ const local = computed({
 </script>
 
 <template>
-  <template v-if="portal && firewalls.length > 1">
+  <template v-if="portal && !framed && firewalls.length > 1">
     <UFormField v-if="field" label="Firewall">
       <USelect v-model="current" :items="items" class="w-full" />
     </UFormField>

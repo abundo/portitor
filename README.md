@@ -302,7 +302,7 @@ TLS reverse proxy in front (see [portitor-config](docs/portitor-web.md#portitor-
 
 Then open the GUI (`https://<firewall>:8444`), configure the default virtual firewall
 `main` (created on first start), and deploy. For portitor-web, the portal, list the
-firewall in its `/etc/portitor/web.yaml` (see [portitor-web](docs/portitor-web.md#portitor-web)).
+firewall in the portal (*Add firewall*; see [portitor-web](docs/portitor-web.md#portitor-web)).
 [docs/portitor-web.md](docs/portitor-web.md) describes the configuration file, the
 commands and the GUI. [docs/rules.md](docs/rules.md) is a guide to writing firewall rules,
 port forwards and hairpin NAT.

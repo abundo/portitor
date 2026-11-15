@@ -48,7 +48,8 @@ pick in the top bar switches between them. Each firewall has its own login.
   ([Firewall and portal on separate hosts](appliance.md#firewall-and-portal-on-separate-hosts)).
   The portal string of another firewall adds that firewall to the same portal.
 - **install.py:** on the portal host, `./install.py --web --agent 192.168.1.1`. Add
-  each firewall under `firewalls:` in `/etc/portitor/web.yaml`, and put the portal's
+  `sudo -u portitor portitor-web createadmin <user>`, log in to the portal and add each
+  firewall (*Add firewall* reads its fingerprint over SSH), and put the portal's
   address in `trusted_proxies` in each firewall's `config.yaml`
   ([portitor-web](portitor-web.md#portitor-web)).
 
@@ -88,10 +89,10 @@ To set it up:
    `install.py`: `./install.py --web --agent 192.0.2.5,192.0.2.6` from the portal host.
 2. Add both hosts to the portal: `sudo portitor-setup --show-join` on each firewall
    prints a portal string, which `sudo portitor-setup --join` on the portal takes (the
-   two hosts need different host names). With `install.py`, add each under `firewalls:`
-   in the portal's `web.yaml` and its address to `trusted_proxies` on both.
-3. Set *HA witness* to *External* on the primary, commit, and copy the *Witness string*
-   under `witness:` in the portal's `web.yaml`. The portal must be on the management
+   two hosts need different host names). With `install.py`, add each in the portal
+   (*Add firewall*) and its address to `trusted_proxies` on both.
+3. Set *HA witness* to *External* on the primary, commit, and add the *Witness string*
+   in the portal (*HA witness*, or `portitor-web add-witness`). The portal must be on the management
    network (both agents' `allow_from`).
 
 The commands, in order, are in [Step by step from the ISO](ha.md#step-by-step-from-the-iso).

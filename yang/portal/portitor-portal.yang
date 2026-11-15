@@ -1,0 +1,79 @@
+// SPDX-FileCopyrightText: 2026 The Portitor contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+module portitor-portal {
+  yang-version 1.1;
+  namespace "urn:portitor:portal";
+  prefix pp;
+
+  import portitor-extensions { prefix px; }
+
+  organization "The Portitor contributors";
+  contact "https://github.com/abundo/portitor";
+  description
+    "The configuration of portitor-web, the portal: the firewalls whose GUIs
+     it serves, the witness strings of the HA pairs it is the witness of,
+     and the users who may log in to the portal. What it needs to start
+     (the listen address, TLS certificate and data directory) is in web.yaml.";
+
+  revision 2026-11-15 { description "First version."; }
+
+  list firewall {
+    key "name";
+    ordered-by user;
+    description "A firewall: its portitor-config, served at /fw/<name>/, a tab of the portal.";
+    leaf name {
+      type string {
+        length "1..63";
+        pattern '[A-Za-z0-9][A-Za-z0-9._-]*';
+      }
+      description "Letters, digits, '-', '_' and '.', starting with a letter or digit.";
+    }
+    leaf description {
+      type string;
+    }
+    leaf url {
+      type string { pattern 'https?://[^/?#@\s]+/?'; }
+      mandatory true;
+      description "Its portitor-config: https://<host>:<port>; http:// to this host only.";
+    }
+    leaf fingerprint {
+      type string { pattern '([0-9A-Fa-f]{2}:?){31}[0-9A-Fa-f]{2}'; }
+      description "The SHA-256 of its portitor-config's tls_cert, pinned. Empty for http:// to this host.";
+    }
+    leaf ssh-host-key {
+      type string;
+      description "The SSH host key (SHA256:...) of the host, as the administrator confirmed it when the firewall was added.";
+    }
+  }
+
+  list witness {
+    key "pair";
+    description "An HA pair this portal is the witness of.";
+    leaf pair {
+      type string { length "1..63"; }
+    }
+    leaf string {
+      type string;
+      mandatory true;
+      px:secret;
+      description "The pair's witness string (portitor-config witness-string): it holds the witness secret.";
+    }
+  }
+
+  list user {
+    key "name";
+    description "A user of the portal.";
+    leaf name {
+      type string {
+        length "1..64";
+        pattern '[A-Za-z0-9][A-Za-z0-9._@-]*';
+      }
+    }
+    leaf password-hash {
+      type string;
+      px:secret;
+      description "The bcrypt hash of the password.";
+    }
+  }
+}

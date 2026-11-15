@@ -24,13 +24,14 @@ cleanly now. Go on only once they've chosen.
 
 | Path | What |
 |---|---|
-| `cmd/portitor-web` | One binary, two programs by name: `portitor-web` is the portal (`portal.go`: `start`, `witness`, `check`); run as `portitor-config` (a symlink, `main.go`) the firewall's configuration, GUI and API: `start`, `migrate`, `createadmin`, `set-agent`, `agent-url`, `bootstrap` (ISO first boot), `fingerprint`, `witness-string`, `promote`, `import-vf` and the console commands (`console.go`, `cli` among them) |
+| `cmd/portitor-web` | One binary, two programs by name: `portitor-web` is the portal (`portal.go`: `start`, `witness`, `check`, `createadmin`, `add-firewall`, `add-witness`); run as `portitor-config` (a symlink, `main.go`) the firewall's configuration, GUI and API: `start`, `migrate`, `createadmin`, `set-agent`, `agent-url`, `bootstrap` (ISO first boot), `fingerprint`, `portal-info`, `witness-string`, `promote`, `import-vf` and the console commands (`console.go`, `cli` among them) |
 | `cmd/portitor-agent` | Agent daemon on the firewall: `start`, `init`, `render`, `netns-exec`; run as `portitor` (a symlink, `cli.go`) it is a CLI over the agent's root-only socket `<run_dir>/agent.sock`: `show ...` over the GET routes, and actions that change no configuration (`confirm`, `rollback`, `request dhcp renew`, `request iplist update`, `request blocklist update`, `clear connections`) over the POST routes in `localWrites` |
 | `internal/fwconfig` | The desired-state document and `Validate()`. **The contract between web and agent.** |
 | `yang` | The YANG modules: the configuration's schema (module `portitor`, a submodule per area, the state in `portitor-state`, `portitor-extensions`), embedded by `yang.go`; first drafted from the tables (by `dev/yanggen`, gone with them), edited by hand since |
 | `internal/schema` | The modules compiled (goyang) into the tree every frontend walks: kinds, keys, order, types and their checks, defaults, descriptions, `px:` extensions, the lists' actions (`Action`: kind `px:action`, typed input and output) |
 | `internal/datastore` | The configuration as a tree of the schema: set, delete, rename (rewriting leafrefs), move, validate, RFC 7951 JSON, diff and patch, the CLI's text and flat forms; `Store`, the shared candidate with its rebase and commit |
-| `internal/datastore/sqlmap` | The tree as rows, by the modules' `px:` extensions (`Rows`; `Adder` makes entries from rows, for the imports); the entries' ids kept by path (`IDs`, `AssignIDs`, the table `config_ids`); `legacy.go` reads the configuration tables of a release before the tree (`Import`, `SeedIDs`, `HighWater`), for migration 94 alone |
+| `internal/datastore/sqlmap` | The tree as rows, by the modules' `px:` extensions (`Rows`; `Adder` makes entries from rows, for the imports); the entries' ids kept by path (`IDs`, the pure `PlanIDs`; stored by `records` in `entry-ids.json`) |
+| `internal/records` | What portitor-config keeps besides the configuration tree, as one interface (`Store`: history, counters, firewalls, users and TOTP, the directory, roles, the ids and external names the tree mapping needs; `FollowChange` is the one transaction a candidate change takes), implemented on GORM (`gorm.go`) for now so the database can go (`dev/design-no-database.md`), with the entries' ids (`entry-ids.json`), the commit counter and web certificate (`state.json`), the deployment log (`deployments.jsonl`, pruned by Settings' `keep-deployments` and `keep-deployment-days`) and the known interfaces (`known-nics.json`) in files next to the database (`files.go`, `deploylog.go`; seeded from the old tables at the first start; a backup carries the ids, the replica's copy all of them); `web`, the builder and `confview` use it (`Server.rec`), never `*gorm.DB`, except the generic CRUD and the database file's operations (`Server.db`); contract tests in `records_test.go` run on every implementation |
 | `internal/confview` | The candidate (or any tree) as rows decoded into the `models` structs, a slice per list, with their ids (`View`, `Load`, `RowOf`): what the builder and portitor-config's code of before the tree read; no tables behind it |
 | `internal/netconf` | NETCONF (RFC 6241/6242) on the datastore, the SSH server's `netconf` subsystem: framing (1.0 and chunked), XML, `edit-config` with every operation, subtree filters, `commit` with `confirmed-commit`, locks (`Store.Lock`), `get-schema`, the modules' actions (RFC 7950 `<action>`, `action.go`, through `Env.Action`) |
 | `internal/snmp` | SNMP for the state, read-only: `agentx` the subagent side of AgentX (RFC 2741: open, register, get, getnext, getbulk; a `Master` for tests), `mib` the YANG state as SNMP objects (a list a table indexed by its and its parents' keys, the top-level state container scalars) under a base OID, the numbers in `oids.json` (never reused; `go test ./internal/snmp/mib -update` numbers new state nodes and writes `deploy/mib/PORTITOR-MIB.txt`), the MIB text and a snapshot for answers |
@@ -55,15 +56,15 @@ cleanly now. Go on only once they've chosen.
 | `internal/builder` | Database → `fwconfig.Document` (resolves ids, IPAM, DHCP scopes, DNS names) |
 | `internal/ipam` | Prefix tree by CIDR containment, next free address |
 | `internal/netobj` | Named hosts/prefixes (`address_objects`) and address lists (`address_lists`): name checks and expansion |
-| `internal/dbmigrate` | Opens the SQLite database; goose migrations (the schema's source of truth); migration 94 (`config_to_tree.go`, Go) reads the old configuration tables into the tree before it drops them, into `config_snapshot` with a marker that `web.adoptLegacyConfig` takes at the first start (the live commit's `deployed/<commit>-config.json`, `ids.json`; the table then goes) |
+| `internal/dbmigrate` | Opens the SQLite database; goose migrations (the schema's source of truth); migration 94 (`drop_config_tables.go`) drops the old configuration tables, and `Up` refuses a database older than it (`MinVersion`, 0.9.0's schema: upgrade to 0.9.0 first, which moved the configuration into the tree), as `install.py` (`check_upgrade_path`) refuses the update before replacing anything |
 | `models` | GORM mapping |
-| `web` | Echo v5 server (`server.go`: routes): auth, the configuration API (`configapi.go`: `/api/schema`, `/api/config`, `checkEdit`; the YANG actions' handlers and the GUI's own file actions `configactions.go`), the configuration as rows (`confview.go`: `view`, cached per candidate, `userEdit`, `editConfig`, `rowWriter`), the firewalls' CRUD (`crud.go`, `firewalls.go`), commits (`commit.go`), other handlers (`handlers.go`), the commits' configurations (`revert.go`), tenancy (`tenancy.go`), roles (`roles.go`, `access.go`), agent proxies (`console.go`, `capture.go`, `probe.go`, `trace.go`, `iperf.go`, `servicelog.go`, `syslog.go`, `connections.go`), WireGuard config import (`wgimport.go`), backup/restore (`backup.go`, `snapshot.go`: the database with the configuration in it), `config.yaml` (`config.go`), the HA replica and promotion (`replica.go`, `promote.go`), the witness (`witness.go`, `portalwitness.go`), and portitor-web, the portal (`portal.go`, `portal.html`) |
+| `web` | Echo v5 server (`server.go`: routes): auth, the configuration API (`configapi.go`: `/api/schema`, `/api/config`, `checkEdit`; the YANG actions' handlers and the GUI's own file actions `configactions.go`), the configuration as rows (`confview.go`: `view`, cached per candidate, `userEdit`, `editConfig`, `rowWriter`), the firewalls' CRUD (`crud.go`, `firewalls.go`), commits (`commit.go`), other handlers (`handlers.go`), the commits' configurations (`revert.go`), tenancy (`tenancy.go`), roles (`roles.go`, `access.go`), agent proxies (`console.go`, `capture.go`, `probe.go`, `trace.go`, `iperf.go`, `servicelog.go`, `syslog.go`, `connections.go`), WireGuard config import (`wgimport.go`), backup/restore (`backup.go`, `snapshot.go`: the database with the configuration in it), `config.yaml` (`config.go`), the HA replica and promotion (`replica.go`, `promote.go`), the witness (`witness.go`, `portalwitness.go`), and portitor-web, the portal (`portal.go`, `portalapi.go`, `portalstore.go`, `portalssh.go`, `portal.html`, `portal.js`) |
 | `web/frontend` | Vue SPA; `CrudPage.vue` drives most pages from field/column schemas, on a YANG list (`api/config.js`: `treeApi`, `vfApi`) |
 | `docs` | User guides; every `docs/*.md` is bundled into the GUI's Help page (`src/docs.js`), and links between them stay in the GUI |
 | `deploy` | systemd units and example configs |
 | `dev` | Dev configs and `seed.sh`; `dev/lab` runs a real apply in two podman containers |
 | `install.py` | Installs/updates a firewall (agent and portitor-config) and portitor-web (the portal) from a GitHub release (`.goreleaser.yaml`), `--source` or `--local`; moves an old portitor-web's database to portitor-config on the same host (`move_web_database`) and lists it in that host's `web.yaml` (`link_local_config`), or, from a host of its own, to the firewall its database deploys to (`old_web_database`, `move_remote_database`, `link_remote_config`); the agent runs its copy in `/usr/lib/portitor` for GUI updates |
-| `iso` | Installer ISO: Debian netinst + preseed + an apt repository of `packages.txt` and its dependencies, so the installation needs no network (`build.sh`, `target.sh`), setup (`portitor-setup.py`, installed as `portitor-setup`: runs `portitor-config bootstrap` at first boot, `--reconfigure` when run again; role `agent` is the same firewall, ending with a portal string for portitor-web, role `web` portitor-web alone, which adds a firewall with `--join`; roles `primary` and `secondary` an HA pair: the secondary only its HA link and management, ending with a secondary string (its agent's token) that the primary's `--join` adds and commits), QEMU test VM (`vm.sh`), end-to-end tests (`test.sh`, `test-split.sh`, `test-update.sh`, `make iso-e2e`) |
+| `iso` | Installer ISO: Debian netinst + preseed + an apt repository of `packages.txt` and its dependencies, so the installation needs no network (`build.sh`, `target.sh`), setup (`portitor-setup.py`, installed as `portitor-setup`: runs `portitor-config bootstrap` at first boot, `--reconfigure` when run again; role `agent` is the same firewall, ending with a portal string for portitor-web, role `web` portitor-web alone (its first user made with the console password, `portitor-web createadmin`), which adds a firewall with `--join` (`portitor-web add-firewall`); roles `primary` and `secondary` an HA pair: the secondary only its HA link and management, ending with a secondary string (its agent's token) that the primary's `--join` adds and commits), QEMU test VM (`vm.sh`), end-to-end tests (`test.sh`, `test-split.sh`, `test-update.sh`, `make iso-e2e`) |
 
 ## Terms
 
@@ -80,8 +81,28 @@ docs and user-facing messages.
   certificate fingerprint (`agentclient.New`), usually on 127.0.0.1. On the
   firewall, the root-only socket `<run_dir>/agent.sock` serves the GET routes and
   `localWrites` without the token (`localHandler`), for the `portitor` CLI.
-- **portitor-web, the portal** (`web/portal.go`, `web.yaml`), is optional and has no
-  database and no users: it serves each firewall it lists at `/fw/<name>/` with
+- **portitor-web, the portal** (`web/portal.go`, `portalapi.go`, `portalstore.go`,
+  `portalssh.go`, `web.yaml`), is optional and standalone, with a configuration of
+  its own: a tree of the YANG module `yang/portal/portitor-portal.yang`
+  (`schema.LoadPortal`; `firewall`, `witness` (the string is `px:secret`) and `user`
+  lists), kept as a firewall's is: a `datastore.Store` candidate (`candidate.json`)
+  and what runs, `<data_dir>/portal.json` (`PortalStore`, whose `portalBackend`
+  commits by writing it; `portalCheck` is its `Store.Check`; proxies and the witness are
+  rebuilt on a commit, and when another process commits, `Watch`). The GUI's and the
+  console's edits are an edit and a commit in one (`PortalStore.Edit`). The same
+  frontends reach it as a firewall's: `portitor-web cli`, the CLI and NETCONF over
+  SSH on `ssh_listen` (`portalcli.go`; the portal's users, all access), with the
+  module's name, namespace and files taken from the schema root (`schema.Compile`,
+  `Node.ModuleNamespace`), not constants. `web.yaml` is only what it needs to start (`bind`, TLS, `data_dir`); its
+  old `firewalls:` and `witness:` are taken into an empty tree once. It has its own
+  users (`portitor-web createadmin`, bcrypt hash `px:secret`, a signed cookie, key
+  in `session.key`), and everything but its shell and login is behind them,
+  `/fw/<name>/` too. The shell (`portal.html`, `portal.js`) shows each firewall in a
+  kept-alive iframe tab (portitor-config allows `frame-ancestors 'self'`). A firewall
+  is added by `POST /portal/v1/probe`: SSH to the host (the host key is returned for
+  the administrator to confirm before any login; credentials are never stored), which
+  runs `portitor-config portal-info` (as the service user through `sudo` unless root)
+  for its port and `tls_cert` fingerprint. It serves each firewall it lists at `/fw/<name>/` with
   `httputil.ReverseProxy` to that firewall's portitor-config (its `tls_cert` pinned
   and asked for by `PinnedServerName`, so a certificate chosen under Settings never
   breaks the pin), streams flushed as they come, the console's WebSocket passed
@@ -92,10 +113,9 @@ docs and user-facing messages.
   but an HA pair's: portitor-config signs sessions with a key made from the pair's
   secret (`sessionKey`; the users are the replica's copy) and names both hosts'
   `config_fingerprint`s in `X-Portitor-Pair` (`PairHeader`), and the portal sets the
-  cookie on the paths of the firewalls it pins by them (`pairPrefixes`). `/` opens
-  the firewall opened last (cookie `portitor_firewall`); `/portal/` is the list, and
-  `/portal/v1/firewalls` lists them for the GUI's switcher (login page and top bar).
-- **Firewalls** (`firewalls`, `web/firewalls.go`, Admin → Firewalls): the hosts
+  cookie on the paths of the firewalls it pins by them (`pairPrefixes`). `/` is the
+  shell, and `/portal/v1/firewalls` lists the firewalls for it and the GUI's switcher.
+- **Firewalls** (the global list `firewall` of the tree, `web/firewalls.go`, Admin → Firewalls; `firewallsResource`, a `treeResource` committed on write; each one's generation is runtime, `records.Generations`, in `sessions.json`; instances' and tasks' `firewall` leaves are leafrefs, so a rename follows; a backup keeps this installation's own, a replica's copy takes the primary's whole): the hosts
   portitor-config deploys to, each with its agent (URL, token, fingerprint) and its
   `generation`: its own firewall, and its HA secondary (`prepareFirewallHere`
   refuses others). The agent URL is the host's address on the network; a
@@ -111,8 +131,8 @@ docs and user-facing messages.
   host's, `fromActive`); the logs and Updates are one firewall's
   (`?firewall_id=`, the first by default), picked in the GUI. Tests run the server
   without `Local`, with any number of firewalls.
-- **Deploy ("commit" in the GUI)**: `web/commit.go` `deploy` takes a database
-  snapshot (`web/revert.go`) numbered by `settings.last_commit`, `buildDoc`
+- **Deploy ("commit" in the GUI)**: `web/commit.go` `deploy` (phases `prepareCommit`, `checkAgents`, `reserveNumbers`, `applyTargets`, `settleTargets`, `recordDeployments` over a `commitPlan`; confirm and rollback `finishPending`) takes a database
+  snapshot (`web/revert.go`) numbered by the commit counter (`records` `Own`, `state.json`), `buildDoc`
   runs `builder.BuildFirewall` on it for each firewall (merged into the
   firewall's live document for an instance admin), and each firewall whose
   document changed (all of them when none did) gets `POST /v1/apply` with a
@@ -200,7 +220,7 @@ docs and user-facing messages.
   whose fingerprint is that of the agent at `agent_url`, asked for
   `GET /v1/ha/peer-config`): the secondary's (unless its database has it as the
   primary of the pair: promoted there, `primaryHere`), or a primary's taken over
-  (stale), is a replica, which copies the primary's database (`GET /ha/v1/database`, the pair's
+  (stale), is a replica, which copies the primary's files (`GET /ha/v2/bundle`, the pair's
   secret, ETag its SHA-256; `restoreDatabase` with `replicaKeeps`) every 15 s, and
   refuses writes but `readOnlyAllowed` (`refuseOnReplica`); a pair whose agent has
   not answered yet is read-only too (`isReplica`). `POST /api/ha/promote` (or
@@ -237,7 +257,7 @@ docs and user-facing messages.
   completion from it. Its sessions share a candidate (`datastore.Store`,
   `candidate.json` next to the database): the configuration, which every write goes
   to; there are no configuration tables. Each change gives new entries their ids
-  (`Store.OnChange`, `sqlmap.AssignIDs`: by path in `config_ids`, kept across a
+  (`Store.OnChange`, `records` `FollowChange` with `sqlmap.PlanIDs`: by path in `entry-ids.json`, kept across a
   rename, never another entry's; a list keyed by `id` has its own). Code that reads
   the configuration as rows reads `confview` (`Server.view`: the candidate's rows,
   cached per candidate generation, `Store.CandidateGen`). A commit runs `deploy` on
@@ -251,7 +271,7 @@ docs and user-facing messages.
   validation, diff and sqlmap), filled by `web/state.go` from the API's live views
   requested as the user (`requestAs`), so tenant-filtered; its leaves are named after
   the agent API's JSON fields, which `datastore.Fill` maps. Not
-  in the tree: users, roles, firewalls, the directory, deployments.
+  in the tree: firewalls, deployments (users, roles and the directory are global lists, `web/globals.go`).
   The GUI and API clients use `/api/config` (`web/configapi.go`): RFC 8040 paths
   (`instance=main/interface=eth1`) and RFC 7951 JSON, GET of candidate, running or
   state (`?shallow`, `?with-defaults=report-all`; a set secret marked by an RFC 7952
@@ -282,11 +302,24 @@ docs and user-facing messages.
   promotion without it (`Store.EditRaw`: the hosts move to the other firewall). An
   import that makes models adds them as rows (`rowWriter`, `sqlmap.Adder`), an entry
   the checks refuse taken out again (`addChecked`). A firewall's or role's rename
-  renames the configuration's names of it (`renameExternal`, `px:external`). A backup
-  and the HA replica's copy are the database with the candidate and `ids.json` in its
-  table `config_snapshot` (`writeSnapshot`); a restore or a copy makes those the
-  candidate (`takeSnapshot`), and the replica fetches the live commit's configuration
-  (`GET /ha/v1/commits/<n>`).
+  renames the configuration's names of it (leafrefs follow in the candidate; what the live commit names stays until the next commit, so nothing reads what runs as rows: `accessIndex` reads `global.json` alone). A backup
+  and the HA replica's copy are a tar archive of the configuration's files (`web/copybundle.go`:
+  `encodeCopy`/`decodeCopy`, a manifest with the format, an allow-list of names, read into memory,
+  deterministic bytes: the replica's ETag; `snapshotFiles`; a backup is that archive age-encrypted); a restore or a copy makes those the
+  candidate and what runs of the global lists (`takeSnapshot`, a backup keeping this installation's
+  firewalls), and the replica fetches the live commit's configuration
+  (`GET /ha/v1/commits/<n>`). The archive is `GET /ha/v2/bundle`; the database file of an earlier
+  release's primary (`/ha/v1/database`) is still taken by a replica (`takeLegacyCopy`), and an
+  earlier release's backup (a database file) is refused. `Ready()` makes every file and writes
+  `layout.json`; the data directory is `Config.Dir()` (next to `db.path`).
+- **Global lists and the scoped commit** (`web/globals.go`; design in
+  `dev/design-no-database.md`): `globalLists` are top-level lists whose running
+  state is `global.json`, not the live commit's file (`treeBackend.Running`
+  overlays them; a backup and the replica's copy carry it), so they commit alone and at once (`CommitOptions.Scope`,
+  `commitScoped`: only those lists leave the candidate, a firewall whose document
+  changes is deployed, a failed deployment is a warning) and a pending commit's
+  rollback doesn't take them along. Now `ldap-server`; the users and roles are to follow. `treeResource`
+  (`web/treeresource.go`) is the old CRUD's routes over such a list.
 - **Revert** sets the candidate back to running (`Store.Discard`), the live commit's
   configuration (`<db dir>/deployed/<commit>-config.json`, `liveCommit`); the newest
   `snapshotKeep` are kept, with each firewall's live document
@@ -669,7 +702,7 @@ the certificate portitor-config serves, chosen under Settings
   `/etc/rsyslog.conf` and a change restarts it. Servers are addresses, not names, so
   the output chain accepts what goes to them (auto rule "syslog",
   `syslogOutputRules`). The whole journal (`POST /api/agent/journal`) holds every
-  instance's logs: global admins only; `GET /api/agent/syslog` is in `tenantDenied`.
+  instance's logs: global admins only; `GET /api/agent/syslog` is `readsEverything` in `routePolicy`.
 - **OpenVPN** (`fwconfig/openvpn.go`, `render/openvpn.go`, `internal/agent/openvpn.go`,
   `web/openvpn.go`, VPN → OpenVPN): an interface of kind `openvpn`, at most one per
   instance, with the server in `ovpn_*` columns (`fwconfig.OpenVPN`). The interface is a
@@ -700,8 +733,10 @@ the certificate portitor-config serves, chosen under Settings
   (`GET /v1/openvpn/<instance>/ca`). A bundle leaves the required role out (the
   roles are the installation's).
 - **Directory** (`web/directory.go`, `internal/ldapauth`, Admin → Directory, from
-  factum2): the users, roles and the OpenLDAP/AD servers (`ldap_servers`, global, in
-  `position` order). Every login takes `authenticateUser`'s path: a local user's
+  factum2): the users, roles and the OpenLDAP/AD servers (the global list `ldap-server`
+  of the tree, in its order; `directoryServers()`, a `treeResource` committed on
+  write; the first of the old tables to move, adopted once by `adoptDirectory`; global
+  admins alone read it, `adminLists`). Every login takes `authenticateUser`'s path: a local user's
   bcrypt hash; a directory user's (`password_hash` `models.LDAPPassword`,
   `users.ldap_server`) at the servers; an unknown user at the servers, then copied in
   with the global role `none`. `ldap_role_mappings` (group DN → role, level) give the
@@ -710,7 +745,7 @@ the certificate portitor-config serves, chosen under Settings
   `Document.Directory` (only with an OpenVPN server; bind passwords redacted in
   history) and keeps the unknown users it let in, which `runDirectorySync` copies in
   every 30 s (not on a replica). Servers are reached from the host. Directory routes
-  are global-admin-only (`viewerDenied`).
+  are global-admin-only (`globalOnly` in `routePolicy`).
 - **6in4 tunnels** (`fwconfig/tunnel.go`, Network → Interfaces, kind 6in4): interfaces of kind
   `6in4` (a `sit` device, `remote`/`local any`, recreated when either changes), with
   auto rules for IP protocol 41 from and to the server (input and output). With a
@@ -792,33 +827,36 @@ the certificate portitor-config serves, chosen under Settings
   field has its leaf and a leaf its field). A new leaf needs nothing more: an absent
   leaf takes its default. Renaming or removing one breaks reading the candidate and
   the kept commits, which have it: there is no migration of the tree's JSON yet. The
-  database holds what is not configuration (users, roles, firewalls, the directory,
-  deployments, known NICs, `config_ids`, the commit counter): a new goose file in
+  database holds what is not configuration (the firewalls; the old tables of the users, roles and directory stay until the database goes, read once by `adoptAccess`):
+  a new goose file in
   `internal/dbmigrate/sql/` (SQLite), plus the model change (`models.Stored`, whose
   fields a test checks have columns). Tests run the real migrations, with foreign
   keys enforced as in production. SQLite's `ALTER TABLE` only adds, drops and renames
   columns; anything else rebuilds the table (create, copy, drop, rename) in a
   `-- +goose NO TRANSACTION` migration that turns `foreign_keys` off around it. Ids
   are `AUTOINCREMENT` so a deleted row's id is never reused. The configuration tables
-  are gone (migration 94): a database from before it is read once by `sqlmap.Import`,
-  so a table `Import` needs (`px:table`) stays in the YANG while such a release can
-  still update; `make iso-e2e-update` and `iso-e2e-split-update` from the last release
-  test it.
+  are gone (migration 94, 0.9.0's schema): an older database is refused (`dbmigrate.MinVersion`;
+  a 0.9.0 one not yet started, with its configuration still in `config_snapshot`, by
+  `web.refuseLegacyConfig`), so no code reads the old tables; `make iso-e2e-update` and
+  `iso-e2e-split-update` from the last release test the update. The migrations before 94
+  only make the tables it drops, for a new database; squashing them into a baseline is left.
 - **Roles:** a user is `admin`, `viewer` or `none` (`models.RoleAdmin`/`RoleViewer`/
-  `RoleNone`): global access. Roles (`roles`, `role_members`, `role_instances`) grant
+  `RoleNone`): global access. Users, roles (members, grants) and the directory's mappings are global lists of the tree (`web/accessstore.go`: `treeRecords` answers `records.Store`'s users, roles and directory from what runs, and writes what runs and the candidate together; `confcheck.checkAccess` keeps an admin with a local password). A user's runtime values (token version, TOTP step, a setup in progress, used recovery codes) are `sessions.json` (`records.Sessions`), not the tree. Roles grant
   instances, by name, at a level (admin/viewer); each instance but the default has its
-  own role (`roles.instance`), made when the candidate gets the instance and renamed
-  with it, and removed with its grants at the commit that leaves the instance out
-  (`web/roles.go`: `syncInstanceRoles`, `renameInstanceRoles`, `dropInstanceRoles`). `accessOf` (`web/access.go`) merges
-  them; `requireRole` (`web/auth.go`) denies by default: everyone but a global admin
-  gets GET routes except `viewerDenied` (and `tenantDenied` for `none`), and only
-  the writes in `viewerWrites`, plus `tenantWrites` for an instance admin, whose
-  handlers must check the instance (`allowInstance`). On `/api/config` access is by
+  own role (`role.instance`), made when the candidate gets the instance and renamed
+  with it (`followInstanceRoles`, in the candidate and what runs together), and removed with its grants at the commit that leaves the instance out
+  (`dropInstanceRoles`). `accessOf` (`web/access.go`) merges
+  them; `requireRole` (`web/auth.go`) denies by default, by the one table
+  `routePolicy` (`web/authz.go`, keyed by route pattern): everyone but a global admin
+  gets GET routes except the `globalOnly` ones (and the `readsEverything` ones for `none`),
+  and only the `anyUser` writes, plus the `instanceAdmin` ones for an instance admin, whose
+  handlers must check the instance (`allowInstance`); `TestRoutePolicy` fails on an entry
+  that names no route. On `/api/config` access is by
   path (`treeAccess`): an instance admin writes their virtual firewalls' subtrees,
   everyone reads the shared lists, global admins write those. A CRUD `resource` with
   a `scope` filters its lists per instance; one without is shared. A new route is global-admin-only for writes
   automatically; a new GET of instance data must filter it, and one that hands out
-  secrets must check the instance or go in `viewerDenied`. `TestViewerRole` sweeps
+  secrets must check the instance or be `globalOnly` in `routePolicy`. `TestViewerRole` sweeps
   every route, `TestTenancy` the instance checks. An instance admin's deploy merges
   their instances from the database into the live deployment's document
   (`web/tenancy.go`, `deployed/<commit>-<firewall id>.json`); only a full deploy keeps a snapshot

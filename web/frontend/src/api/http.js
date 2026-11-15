@@ -40,7 +40,11 @@ http.interceptors.response.use(
     return res
   },
   (err) => {
-    if (err.response?.status === 401 && !err.config.url?.endsWith('/login')) {
+    if (err.response?.status === 401 && err.response.headers?.['x-portitor-portal'] === 'login') {
+      // The portal's session ended, not this firewall's: the portal's page
+      // (this GUI is a tab of it) shows its login.
+      window.top.postMessage({ portitor: 'portal-login' }, window.location.origin)
+    } else if (err.response?.status === 401 && !err.config.url?.endsWith('/login')) {
       onUnauthorized()
     }
     return Promise.reject(err)

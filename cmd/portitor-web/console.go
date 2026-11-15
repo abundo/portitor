@@ -4,6 +4,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -180,34 +181,7 @@ func addConsoleCommands(root *cobra.Command, load func() (*web.Config, *web.Serv
 			if err != nil {
 				return err
 			}
-			fd := int(os.Stdin.Fd())
-			if !term.IsTerminal(fd) {
-				return cli.RunScript(cmd.Context(), env, os.Stdin, os.Stdout)
-			}
-			old, err := term.MakeRaw(fd)
-			if err != nil {
-				return err
-			}
-			defer term.Restore(fd, old)
-			tm := cli.NewTerminal(env, struct {
-				io.Reader
-				io.Writer
-			}{os.Stdin, os.Stdout})
-			resize := func() {
-				if w, h, err := term.GetSize(fd); err == nil {
-					tm.SetSize(w, h)
-				}
-			}
-			resize()
-			winch := make(chan os.Signal, 1)
-			signal.Notify(winch, syscall.SIGWINCH)
-			defer signal.Stop(winch)
-			go func() {
-				for range winch {
-					resize()
-				}
-			}()
-			return tm.Run(cmd.Context())
+			return runCLI(cmd.Context(), env)
 		},
 	})
 	for _, a := range []struct{ use, path, done string }{
@@ -227,4 +201,37 @@ func addConsoleCommands(root *cobra.Command, load func() (*web.Config, *web.Serv
 			},
 		})
 	}
+}
+
+// runCLI runs the CLI for env on the terminal, or its script on stdin when
+// that is not one.
+func runCLI(ctx context.Context, env *cli.Env) error {
+	fd := int(os.Stdin.Fd())
+	if !term.IsTerminal(fd) {
+		return cli.RunScript(ctx, env, os.Stdin, os.Stdout)
+	}
+	old, err := term.MakeRaw(fd)
+	if err != nil {
+		return err
+	}
+	defer term.Restore(fd, old)
+	tm := cli.NewTerminal(env, struct {
+		io.Reader
+		io.Writer
+	}{os.Stdin, os.Stdout})
+	resize := func() {
+		if w, h, err := term.GetSize(fd); err == nil {
+			tm.SetSize(w, h)
+		}
+	}
+	resize()
+	winch := make(chan os.Signal, 1)
+	signal.Notify(winch, syscall.SIGWINCH)
+	defer signal.Stop(winch)
+	go func() {
+		for range winch {
+			resize()
+		}
+	}()
+	return tm.Run(ctx)
 }

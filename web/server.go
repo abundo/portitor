@@ -19,6 +19,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/coder/websocket"
 	"github.com/labstack/echo/v5"
@@ -31,6 +32,7 @@ import (
 	"github.com/abundo/portitor/internal/datastore"
 	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/internal/netobj"
+	"github.com/abundo/portitor/internal/records"
 	"github.com/abundo/portitor/models"
 )
 
@@ -87,16 +89,23 @@ type agentAPI interface {
 }
 
 type Server struct {
-	cfg      *Config
-	db       *gorm.DB
-	jwtKey   []byte
-	limiter  loginLimiter
-	deployMu sync.Mutex
+	cfg *Config
+	// db is the database as it is outside the records (records.go): the
+	// generic CRUD of resource[T] (firewalls, the directory's servers and
+	// mappings), whose hooks take a *gorm.DB, and the database file's own
+	// operations (backup, restore, snapshot, the replica's copy). Nothing
+	// else uses it; phases 3 and 5 of dev/design-no-database.md remove it.
+	db *gorm.DB
+	// rec is what portitor-config keeps besides the configuration tree.
+	rec    records.Store
+	access accessCache
+	// bothTrees is above 0 while editAccess edits the candidate.
+	bothTrees atomic.Int32
+	jwtKey    []byte
+	limiter   loginLimiter
+	deployMu  sync.Mutex
 	// nicMu serializes syncNICs (every open browser polls the status).
 	nicMu sync.Mutex
-	// tenantWrites are the routes ("POST /api/rules") an instance admin
-	// may use besides reading; their handlers check the instance.
-	tenantWrites map[string]bool
 	// newAgent builds a client for a firewall's agent (at agentURL).
 	newAgent func(f *models.Firewall) (agentAPI, error)
 	static   fs.FS
@@ -123,6 +132,7 @@ func NewServer(cfg *Config, db *gorm.DB) *Server {
 		jwtKey: []byte(cfg.JWTSecret),
 		static: staticFS(),
 	}
+	s.rec = &treeRecords{Store: records.NewGORM(db, configDir(cfg)), s: s}
 	s.newAgent = func(f *models.Firewall) (agentAPI, error) {
 		return agentclient.New(s.agentURL(f), f.AgentToken, f.AgentFingerprint)
 	}
@@ -150,9 +160,9 @@ func (s *Server) Echo() *echo.Echo {
 	e.Use(middleware.SecureWithConfig(middleware.SecureConfig{
 		XSSProtection:         "0",
 		ContentTypeNosniff:    "nosniff",
-		XFrameOptions:         "DENY",
+		XFrameOptions:         "SAMEORIGIN",
 		ReferrerPolicy:        "same-origin",
-		ContentSecurityPolicy: "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'",
+		ContentSecurityPolicy: "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'self'",
 	}))
 	e.Use(captureWorkerCSP)
 	if nets, _ := s.cfg.trustedProxies(); len(nets) > 0 {
@@ -162,7 +172,7 @@ func (s *Server) Echo() *echo.Echo {
 		}
 		e.IPExtractor = echo.ExtractIPFromXFFHeader(opts...)
 	}
-	e.GET(replicaPath, s.handleReplica, noStore)
+	e.GET(replicaBundlePath, s.handleReplicaBundle, noStore)
 	e.GET(replicaCommitPath+":commit", s.handleReplicaCommit, noStore)
 
 	api := e.Group("/api", requireJSON, noStore, s.refuseOnReplica)
@@ -170,7 +180,6 @@ func (s *Server) Echo() *echo.Echo {
 	api.POST("/logout", s.handleLogout)
 	api.GET("/version", func(c *echo.Context) error { return c.JSON(http.StatusOK, buildinfo.Get()) })
 
-	s.tenantWrites = map[string]bool{}
 	g := api.Group("", s.requireAuth, s.requireRole)
 	g.GET("/me", s.handleMe)
 	g.PUT("/me", s.handleUpdateMe)
@@ -181,14 +190,8 @@ func (s *Server) Echo() *echo.Echo {
 	g.POST("/me/totp/disable", s.handleTOTPDisable)
 	g.POST("/me/totp/recovery-codes", s.handleRecoveryCodes)
 
-	(&resource[models.Firewall, *models.Firewall]{db: s.db, order: "id", prepare: s.prepareFirewallHere, present: presentFirewall, afterSave: s.firewallSaved, preDelete: s.deleteFirewall}).register(s, g, "/firewalls")
+	s.firewallsResource().register(g, "/firewalls")
 
-	// Instance admins use these too; the handlers check the instance.
-	for _, r := range []string{"POST /api/wg/import", "POST /api/agent/capture", "POST /api/agent/trace", "POST /api/agent/iperf", "POST /api/agent/probe", "POST /api/agent/servicelog", "POST /api/agent/connections", "POST /api/agent/connections/flush", "POST /api/agent/dhcp/renew",
-		"POST /api/deploy/apply", "POST /api/deploy/confirm", "POST /api/deploy/rollback",
-		"PUT /api/config/*", "PATCH /api/config/*", "POST /api/config/*", "DELETE /api/config/*"} {
-		s.tenantWrites[r] = true
-	}
 	// The routes of the GUI besides the configuration API: imports, reads
 	// and operations.
 	g.GET("/ipam/tree", s.handleIpamTree)
@@ -219,7 +222,7 @@ func (s *Server) Echo() *echo.Echo {
 	g.DELETE("/roles/:id", s.handleDeleteRole)
 
 	// Bundles hold a virtual firewall's secrets: global admins only
-	// (no tenant or viewer write rule, and the GET in viewerDenied).
+	// (not in routePolicy).
 	g.POST("/instances/import", s.handleImportBundle)
 	g.GET("/firewalls/:id/witness", s.handleWitnessString)
 	g.POST("/firewalls/:id/switchover", s.handleSwitchover)
@@ -258,8 +261,8 @@ func (s *Server) Echo() *echo.Echo {
 	g.GET("/agent/syslog", s.handleAgentSyslog)
 	g.GET("/agent/nat64", s.handleAgentNAT64)
 	g.GET("/agent/openvpn", s.handleAgentOpenVPN)
-	(&resource[models.LdapServer, *models.LdapServer]{db: s.db, order: "position, id", prepare: prepareLdapServer, present: presentLdapServer}).register(s, g, "/directory/servers")
-	(&resource[models.LdapRoleMapping, *models.LdapRoleMapping]{db: s.db, order: "group_dn, role_id", prepare: prepareLdapRoleMapping}).register(s, g, "/directory/mappings")
+	s.directoryServers().register(g, "/directory/servers")
+	s.roleMappings().register(g, "/directory/mappings")
 	g.POST("/directory/servers/reorder", s.handleReorderLdapServers)
 	g.POST("/directory/servers/test", s.handleTestLdapServer)
 	g.GET("/directory/servers/:id/browse", s.handleBrowseLdapServer)
@@ -402,10 +405,14 @@ func (s *Server) ensureDefaultInstance() error {
 	if err != nil || len(v.Instances) > 0 {
 		return err
 	}
-	var fw models.Firewall
-	if err := s.db.Order("id").First(&fw).Error; err != nil {
+	fws, err := s.rec.Firewalls()
+	if err != nil {
 		return err
 	}
+	if len(fws) == 0 {
+		return records.ErrNotFound
+	}
+	fw := fws[0]
 	if err := s.addDefaultInstance(ctx, fw.Name, DefaultInstanceName); err != nil {
 		return err
 	}
@@ -417,7 +424,7 @@ func (s *Server) ensureDefaultInstance() error {
 // with the commit counter and the GUI's certificate, which are
 // portitor-config's own (the table settings, row 1).
 func (s *Server) settings() (*models.Settings, error) {
-	own, err := s.ownSettings()
+	own, err := s.rec.Own()
 	if err != nil {
 		return nil, err
 	}
@@ -432,7 +439,7 @@ func (s *Server) settings() (*models.Settings, error) {
 
 // settingsOf is settings with the configuration's of tree.
 func (s *Server) settingsOf(tree *datastore.Tree) (*models.Settings, error) {
-	own, err := s.ownSettings()
+	own, err := s.rec.Own()
 	if err != nil {
 		return nil, err
 	}
@@ -445,19 +452,8 @@ func (s *Server) settingsOf(tree *datastore.Tree) (*models.Settings, error) {
 	return &st, nil
 }
 
-// ownSettings is the row of the settings that are not configuration.
-type ownSettings struct {
-	LastCommit       int64
-	WebCertificateID *uint
-}
-
-func (s *Server) ownSettings() (*ownSettings, error) {
-	if err := s.db.Exec("INSERT OR IGNORE INTO settings (id) VALUES (1)").Error; err != nil {
-		return nil, err
-	}
-	var own ownSettings
-	if err := s.db.Table("settings").Select("last_commit, web_certificate_id").Where("id = 1").Take(&own).Error; err != nil {
-		return nil, err
-	}
-	return &own, nil
+// configDir is the directory of the database, where the candidate and the
+// other files of the configuration are; "" for a database in memory.
+func configDir(cfg *Config) string {
+	return cfg.Dir()
 }

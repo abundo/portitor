@@ -43,7 +43,7 @@ func portalCommand() *cobra.Command {
 	}
 	start := &cobra.Command{
 		Use:   "start",
-		Short: "Serve the firewalls' GUIs at /fw/<name>/, and be the witness of the pairs under witness:",
+		Short: "Serve the portal: the firewalls' GUIs as tabs, at /fw/<name>/, and be the HA pairs' witness",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := load()
@@ -64,17 +64,21 @@ func portalCommand() *cobra.Command {
 
 	root.AddCommand(&cobra.Command{
 		Use:   "witness",
-		Short: "Only be the witness of the HA pairs under witness:, without the GUI",
+		Short: "Only be the witness of the HA pairs given by add-witness, without the GUI",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := load()
 			if err != nil {
 				return err
 			}
-			if len(cfg.Witness) == 0 {
-				return fmt.Errorf("%s has no witness: entries (portitor-config witness-string on an HA primary)", configFile)
+			store, err := openStore(cfg)
+			if err != nil {
+				return err
 			}
-			w, err := web.NewWitness(cfg.Witness)
+			if len(store.Witnesses()) == 0 {
+				return fmt.Errorf("no witness strings in %s (portitor-web add-witness, from portitor-config witness-string on an HA primary)", cfg.DataDir)
+			}
+			w, err := web.NewWitness(store.Witnesses())
 			if err != nil {
 				return err
 			}
@@ -86,8 +90,112 @@ func portalCommand() *cobra.Command {
 	})
 
 	root.AddCommand(&cobra.Command{
+		Use:   "createadmin <user>",
+		Short: "Make a portal user, or change their password (read from the terminal or standard input)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := load()
+			if err != nil {
+				return err
+			}
+			store, err := openStore(cfg)
+			if err != nil {
+				return err
+			}
+			pw, err := readPassword()
+			if err != nil {
+				return err
+			}
+			if err := web.CreatePortalUser(store, args[0], pw); err != nil {
+				return err
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), "ok")
+			return nil
+		},
+	})
+
+	var addDesc, addFP string
+	addFW := &cobra.Command{
+		Use:   "add-firewall <name> <url>",
+		Short: "Add or change a firewall by its portitor-config URL and certificate fingerprint (the GUI reads them over SSH)",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := load()
+			if err != nil {
+				return err
+			}
+			store, err := openStore(cfg)
+			if err != nil {
+				return err
+			}
+			f := web.PortalFirewall{Name: args[0], URL: args[1], Fingerprint: addFP, Description: addDesc}
+			if err := web.CheckPortalFirewall(&f); err != nil {
+				return err
+			}
+			return store.PutFirewall(f)
+		},
+	}
+	addFW.Flags().StringVar(&addFP, "fingerprint", "", "SHA-256 of its tls_cert (portitor-config fingerprint there)")
+	addFW.Flags().StringVar(&addDesc, "description", "", "description")
+	root.AddCommand(addFW)
+
+	root.AddCommand(&cobra.Command{
+		Use:   "cli",
+		Short: "The portal's configuration CLI (the same as portitor-config cli); it reads commands from stdin when that is not a terminal",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := load()
+			if err != nil {
+				return err
+			}
+			store, err := openStore(cfg)
+			if err != nil {
+				return err
+			}
+			return runCLI(cmd.Context(), store.CLIEnv("console"))
+		},
+	})
+
+	root.AddCommand(&cobra.Command{
+		Use:   "list-firewalls",
+		Short: "Print the firewalls, one per line: name and URL (install.py reads them)",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := load()
+			if err != nil {
+				return err
+			}
+			store, err := openStore(cfg)
+			if err != nil {
+				return err
+			}
+			for _, f := range store.Firewalls() {
+				fmt.Fprintln(cmd.OutOrStdout(), f.Name, f.URL)
+			}
+			return nil
+		},
+	})
+
+	root.AddCommand(&cobra.Command{
+		Use:   "add-witness <witness string>",
+		Short: "Be the witness of an HA pair (portitor-config witness-string on its primary)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := load()
+			if err != nil {
+				return err
+			}
+			store, err := openStore(cfg)
+			if err != nil {
+				return err
+			}
+			return store.PutWitness(args[0])
+		},
+	})
+
+	root.AddCommand(&cobra.Command{
 		Use:   "check",
-		Short: "Check web.yaml and ask each firewall's portitor-config for its version",
+		Short: "Check the configuration and ask each firewall's portitor-config for its version",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := load()
@@ -97,6 +205,9 @@ func portalCommand() *cobra.Command {
 			p, err := web.NewPortal(cfg)
 			if err != nil {
 				return err
+			}
+			if len(p.Check(cmd.Context())) == 0 {
+				fmt.Println("no firewalls")
 			}
 			bad := 0
 			for _, st := range p.Check(cmd.Context()) {
@@ -108,10 +219,16 @@ func portalCommand() *cobra.Command {
 				fmt.Printf("%-16s portitor-config %s\n", st.Name, st.Version)
 			}
 			if bad > 0 {
-				return fmt.Errorf("%d of %d firewalls do not answer", bad, len(cfg.Firewalls))
+				return fmt.Errorf("%d firewalls do not answer", bad)
 			}
 			return nil
 		},
 	})
 	return root
+}
+
+// openStore opens the portal's configuration, taking in an older web.yaml's
+// lists the first time.
+func openStore(cfg *web.PortalConfig) (*web.PortalStore, error) {
+	return web.OpenPortalConfigStore(cfg)
 }

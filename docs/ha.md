@@ -120,9 +120,9 @@ each host.
    lets the management interface reach SSH and the GUI, not ping, so a failed ping
    proves nothing.
 
-   Without the ISO (`install.py`), add each host under `firewalls:` in
-   `/etc/portitor/web.yaml` by hand (`url: https://<management address>:443`,
-   `fingerprint` from `portitor-config fingerprint` on the host), and put the portal's
+   Without the ISO (`install.py`), add each host in the portal (*Add firewall*,
+   which reads the fingerprint over SSH; or by hand, `https://<management address>:443` and
+   the `portitor-config fingerprint` of the host), and put the portal's
    address in `trusted_proxies` in the host's `/etc/portitor/config.yaml`
    (`sudo systemctl restart portitor-config`).
 8. **Let both logins work as one.** In the primary's GUI, under *Admin → Firewalls*,
@@ -133,14 +133,9 @@ each host.
 9. **The witness, for automatic failover.** In the primary's GUI, under *Admin →
    Firewalls*, set *HA witness* to *External* on the primary and commit. Then on the
    primary run `portitor-config witness-string` (or copy the *Witness string* from the
-   form) and put it into the portal's `/etc/portitor/web.yaml`:
-
-   ```yaml
-   witness:
-     - portitor-witness:eyJwYWlyIjoi...
-   ```
-
-   Restart `portitor-web`. The portal is now the pair's witness. Without this step the
+   form) and add it in the portal's *HA witness* (the *Portal* tab), or
+   `sudo -u portitor portitor-web add-witness portitor-witness:eyJwYWlyIjoi...`.
+   The portal is now the pair's witness. Without this step the
    pair works, but if the primary fails the secondary stays closed until you open it
    by hand (see [The witness](#the-witness)).
 10. **Open the portal** at `https://<portal address>/`. Log in at each firewall with
@@ -293,15 +288,8 @@ A pair has one witness, never two: two could each vote for another host.
 - **External** (*HA witness*: *External*): portitor-web on a third host on the
   management network, which may be the portal or not. Set it on the primary under
   *Admin → Firewalls*, commit, and copy the *Witness string* (or `portitor-config
-  witness-string` on the primary's console) into `/etc/portitor/web.yaml` on the third
-  host:
-
-  ```yaml
-  witness:
-    - portitor-witness:eyJwYWlyIjoi...
-  ```
-
-  `portitor-web start` (the portal) is then the witness too; `portitor-web witness`
+  witness-string` on the primary's console) into the portal's *HA witness* on the third
+  host (or `portitor-web add-witness <string>` there). `portitor-web start` (the portal) is then the witness too; `portitor-web witness`
   is the witness alone, without the GUI. The string holds both agents' URLs and
   certificate fingerprints, and the pair's witness secret, which opens nothing on the
   agents but the state and the vote. The agents must let the third host in
@@ -333,6 +321,13 @@ has the same as `portitor show ha` under *HA state*, with *Switch over*.
 
 `./install.py` updates a pair one host at a time, the secondary first. Each agent
 restart hands over cleanly, so clients lose a packet or two at most each time.
+
+Keep to that order across the release that moved portitor-config's state from its
+database into files: the secondary's portitor-config, updated first, still copies
+the database file of a primary that has not been updated (and adopts its users, roles,
+directory and firewalls from it); a primary that has been updated gives its secondary
+the files, which one not updated cannot read. Update the pair together, and the
+secondary first.
 
 ## Promoting the secondary
 

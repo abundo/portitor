@@ -8,12 +8,13 @@ next to portitor-agent, holds it in an SQLite database, serves the GUI and the R
 API, and deploys to its agent (and to its [HA secondary](ha.md)). Nothing outside
 the firewall is needed to change it.
 
-**portitor-web** is optional: a portal on another host to the GUIs of several
-firewalls. It has no database and no users of its own. It serves each firewall it
-lists at `/fw/<name>/`, passing the GUI, the API, the console and the captures
+**portitor-web** is optional: a standalone portal on another host to the GUIs of
+several firewalls. It has users and a configuration of its own (no database): the
+firewalls, the HA witness strings and the users, a tree of a YANG module kept in
+`portal.json` in its data directory. It shows each firewall's GUI in a tab, and
+serves each at `/fw/<name>/`, passing the GUI, the API, the console and the captures
 through to that firewall's portitor-config, whose login, users and roles apply as
-they do there. A *Firewall* pick, on the login page and in the top bar, switches
-between them. Each has its own login, but the two hosts of an HA pair share one: a
+they do there. Each has its own login, but the two hosts of an HA pair share one: a
 login on either is good on both. It is also the [witness](ha.md#the-witness) of HA
 pairs.
 
@@ -76,37 +77,57 @@ the configuration is read-only).
 
 ## portitor-web
 
-`/etc/portitor/web.yaml`:
+`/etc/portitor/web.yaml` holds what it needs to start:
 
 | Key | Default | |
 |---|---|---|
 | `bind` | `127.0.0.1:8080` | Listen address. |
 | `tls_cert`, `tls_key` | | Serve HTTPS directly; otherwise put a TLS reverse proxy in front. |
-| `firewalls` | none | The firewalls: `name` (letters, digits, `-`, `_` and `.`, starting with a letter or digit, at most 63, as a firewall's name), `url` of its portitor-config (`https://<firewall>:8444`; `http://` only to this host) and `fingerprint`, the SHA-256 of its `tls_cert` (`portitor-config fingerprint` on the firewall). |
-| `witness` | none | The witness strings of the HA pairs this host is the [witness](ha.md#the-witness) of. |
+| `data_dir` | `/var/lib/portitor-web` | Holds `portal.json` (what runs, with secrets: keep it private), `candidate.json` and the session and SSH host keys. |
+| `ssh_listen` | none | Serve the configuration's CLI and NETCONF over SSH (`:2222`) to the portal's users. |
 
-```yaml
-firewalls:
-  - name: office
-    url: https://192.0.2.1:8444
-    fingerprint: 3f1c...e0
-```
-
-On each firewall, add portitor-web's address to `trusted_proxies` in its
-`config.yaml`. Then:
+The configuration is a tree of a YANG module, kept as a firewall's is: a candidate
+that you change and commit, and what runs. It is changed in the portal's GUI (each
+change is committed at once, with anything else the candidate holds), with the CLI and
+NETCONF as on a firewall (see [the CLI](cli.md)), or from the console:
 
 ```sh
-portitor-web start      # serve the portal at / and each firewall at /fw/<name>/
-portitor-web witness    # only the witness of the pairs under witness:, without the GUI
-portitor-web check      # check web.yaml and ask each firewall's portitor-config for its version
+portitor-web cli                            # the configuration CLI: configure, set, commit; as portitor-config cli
+portitor-web createadmin <user>             # make a portal user, or change their password
+portitor-web start                          # serve the portal at / and each firewall at /fw/<name>/
+portitor-web add-firewall <name> <url> --fingerprint <sha256>   # without the GUI
+portitor-web add-witness <witness string>   # be the witness of an HA pair
+portitor-web witness                        # only the witness of those pairs, without the GUI
+portitor-web check                          # ask each firewall's portitor-config for its version
 ```
 
-`/` opens the GUI of the firewall the browser opened last, or the first one listed.
-The list of firewalls (`/portal/`, and `/portal/v1/firewalls` for the *Firewall*
-pick) names them and their versions to anyone who reaches portitor-web; everything
-else is behind each firewall's login. The HA pair's shared login needs each host's
-*portitor-config URL* and *fingerprint* under *Firewalls*: portitor-web knows the
-two hosts by those fingerprints.
+`ssh_listen` serves the same CLI to the portal's users over SSH, and NETCONF as its
+`netconf` subsystem (`get-schema` gives `portitor-portal`); `commit confirmed` is not
+supported, there being nothing to roll back to. The module is `portitor-portal`:
+`firewall` (name, description, url, fingerprint), `witness` and `user`.
+
+Run them as the service user (`sudo -u portitor ...`). A `web.yaml` of an earlier
+release that lists `firewalls:` and `witness:` has them taken into the
+configuration once, at the first start.
+
+**Logging in.** Everything but the login is behind the portal's own users:
+the firewalls' GUIs too, which then ask for the firewall's login. There is no user
+at first; make one with `createadmin`.
+
+**Adding a firewall** (the *Portal* tab, *Add firewall*): enter the firewall's host
+and an SSH user with a password or private key. portitor-web shows the host's SSH host key,
+which you compare with the firewall's and confirm; only then does it log in, once,
+and run `portitor-config portal-info`, which gives portitor-config's port and
+certificate fingerprint. The user is root, or one that may run
+`sudo -u portitor portitor-config portal-info`. The credentials are used for that
+connection and never kept. Give the firewall a name and add it; its GUI opens in a
+tab. *Enter by hand* takes the URL (`https://<firewall>:8444`; `http://` only to
+this host) and the SHA-256 of its `tls_cert` (`portitor-config fingerprint` there).
+
+On each firewall, add portitor-web's address to `trusted_proxies` in its
+`config.yaml`. The HA pair's shared login needs each host's *portitor-config URL* and
+*fingerprint* under *Firewalls*: portitor-web knows the two hosts by those
+fingerprints.
 
 ## First steps
 
@@ -552,23 +573,26 @@ progress are lost when the agent restarts, and the client orders again.
 
 ## Backup and restore
 
-*Settings → General → Backup* downloads the whole configuration database, encrypted with
+*Settings → General → Backup* downloads the whole configuration (the candidate, what runs
+of the users, roles and directory, the ids the entries are known by), encrypted with
 a passphrase you choose (at least 10 characters). The file holds every secret (WireGuard
-keys, TSIG secrets, IP list credentials, imported certificates' keys, the agent token), so keep the passphrase safe;
+keys, TSIG secrets, IP list credentials, imported certificates' keys, password hashes, the
+agent token of the firewalls, which are not in a backup), so keep the passphrase safe;
 it cannot be recovered. The file is in [age](https://age-encryption.org) format:
-`age -d portitor-….db.age > portitor.db` gives the SQLite database.
+`age -d portitor-….tar.age | tar x` gives its files.
 
-*Restore* takes such a file and its passphrase, or an unencrypted `portitor.db`. It
-checks the file, upgrades a backup from an older Portitor version (a backup from a newer
-version is refused), and replaces the configuration in one step. It keeps:
+*Restore* takes such a file and its passphrase, or the unencrypted archive. It checks the
+archive (a backup from a newer Portitor is refused) and replaces the configuration in one
+step, the users, roles and directory with it. It keeps:
 
-- the users, so you stay logged in,
+- the sessions (you stay logged in if your user is in the backup),
 - the deployment history,
 - the firewalls under *Firewalls* (agent URL, token, fingerprint), so a backup restores
   onto a reinstalled firewall; a virtual firewall or task of the backup on a firewall
   this installation doesn't have goes to the first one.
 
-Restore changes only the database. Review the changes on *Deploy* and apply them as
+A backup made by a release before this one is a database file: restore it with the release
+that made it (0.9.x), then update. Review the changes on *Deploy* and apply them as
 usual. Restore is refused while an apply waits for confirmation.
 
 ## Secrets

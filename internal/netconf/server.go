@@ -24,7 +24,6 @@ import (
 	"github.com/abundo/portitor/internal/cli"
 	"github.com/abundo/portitor/internal/datastore"
 	"github.com/abundo/portitor/internal/schema"
-	"github.com/abundo/portitor/yang"
 )
 
 var sessionIDs atomic.Uint32
@@ -50,7 +49,7 @@ func capabilities(root *schema.Node) []string {
 		"urn:ietf:params:netconf:capability:validate:1.1",
 		"urn:ietf:params:netconf:capability:rollback-on-error:1.0",
 		nsMonitoring + "?module=ietf-netconf-monitoring&revision=2010-10-04",
-		schema.Namespace + "?module=" + schema.Module + "&revision=" + root.Revision,
+		root.Namespace + "?module=" + root.Name + "&revision=" + root.Revision,
 		"urn:portitor:extensions?module=portitor-extensions&revision=" + root.Revision,
 	}
 }
@@ -273,7 +272,7 @@ func (s *session) data(t *datastore.Tree, f *elem, monitoring bool) (string, err
 	if monitoring && f != nil {
 		for _, c := range f.Children {
 			if c.Space == nsMonitoring && c.Local == "netconf-state" {
-				b.WriteString(schemaList())
+				b.WriteString(schemaList(s.env.Schema))
 			}
 		}
 	}
@@ -471,7 +470,7 @@ func (s *session) getSchema(op *elem) (string, error) {
 	if f := op.child("format"); f != nil && !strings.HasSuffix(f.text(), "yang") {
 		return "", appErr("invalid-value", "", "format %s: only yang", f.text())
 	}
-	data, err := fs.ReadFile(yang.Files, id.text()+".yang")
+	data, err := fs.ReadFile(s.env.Schema.Files, id.text()+".yang")
 	if err != nil {
 		return "", appErr("invalid-value", "", "no schema %q", id.text())
 	}
@@ -479,14 +478,13 @@ func (s *session) getSchema(op *elem) (string, error) {
 }
 
 // schemaList is netconf-state's schemas (RFC 6022), for get.
-func schemaList() string {
-	names, _ := fs.Glob(yang.Files, "*.yang")
-	root := schema.MustLoad()
+func schemaList(root *schema.Node) string {
+	names, _ := fs.Glob(root.Files, "*.yang")
 	var b strings.Builder
 	b.WriteString(`<netconf-state xmlns="` + nsMonitoring + `"><schemas>`)
 	for _, n := range names {
 		id := strings.TrimSuffix(n, ".yang")
-		ns := schema.Namespace
+		ns := root.Namespace
 		if id == "portitor-extensions" {
 			ns = "urn:portitor:extensions"
 		}

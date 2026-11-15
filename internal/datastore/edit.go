@@ -178,7 +178,7 @@ func (t *Tree) editList(p Path, s *schema.Node, op EditOp, v any) error {
 func (t *Tree) entryPath(p Path, s *schema.Node, obj map[string]any) (Path, error) {
 	keys := make([]string, len(s.Keys))
 	for i, k := range s.Keys {
-		raw, ok := objMember(obj, k)
+		raw, ok := objMember(obj, s.Module(), k)
 		if !ok {
 			return nil, errAt(t, p, "an entry without its key %s", k)
 		}
@@ -206,7 +206,7 @@ func (t *Tree) mergeObject(p Path, s *schema.Node, obj map[string]any) error {
 		}
 		local := name
 		if i := strings.IndexByte(name, ':'); i >= 0 {
-			if name[:i] != schema.Module {
+			if name[:i] != s.Module() {
 				return errAt(t, p, "unknown module of %q", name)
 			}
 			local = name[i+1:]
@@ -216,7 +216,7 @@ func (t *Tree) mergeObject(p Path, s *schema.Node, obj map[string]any) error {
 		}
 	}
 	for _, c := range s.Children {
-		raw, ok := objMember(obj, c.Name)
+		raw, ok := objMember(obj, s.Module(), c.Name)
 		if !ok {
 			continue
 		}
@@ -275,11 +275,11 @@ func (t *Tree) mergeObject(p Path, s *schema.Node, obj map[string]any) error {
 }
 
 // objMember is obj's member name, plain or qualified with the module.
-func objMember(obj map[string]any, name string) (any, bool) {
+func objMember(obj map[string]any, module, name string) (any, bool) {
 	if v, ok := obj[name]; ok {
 		return v, true
 	}
-	v, ok := obj[schema.Module+":"+name]
+	v, ok := obj[module+":"+name]
 	return v, ok
 }
 
@@ -363,7 +363,7 @@ func KeepSecrets(old, new *Node) { keepSecrets(old, new, nil) }
 // node was made from, sets to null: those it removes.
 func keepSecrets(old, new *Node, body map[string]any) {
 	nulled := func(name string) bool {
-		v, ok := objMember(body, name)
+		v, ok := objMember(body, old.S.Module(), name)
 		return ok && v == nil
 	}
 	for name, v := range old.Leaves {
@@ -382,7 +382,7 @@ func keepSecrets(old, new *Node, body map[string]any) {
 	}
 	for name, oc := range old.Containers {
 		if nc := new.Containers[name]; nc != nil {
-			sub, _ := objMember(body, name)
+			sub, _ := objMember(body, old.S.Module(), name)
 			m, _ := sub.(map[string]any)
 			keepSecrets(oc, nc, m)
 		}

@@ -100,7 +100,7 @@ func escape(s string) string {
 func writeNode(b *strings.Builder, n *datastore.Node, top bool) {
 	ns := ""
 	if top {
-		ns = ` xmlns="` + schema.Namespace + `"`
+		ns = ` xmlns="` + n.S.ModuleNamespace() + `"`
 	}
 	for _, s := range n.S.Children {
 		switch s.Kind {
@@ -137,7 +137,7 @@ func filter(t *datastore.Tree, f *elem) *datastore.Tree {
 	out := datastore.New(t.Root.S)
 	var mine []*elem
 	for _, c := range f.Children {
-		if c.Space == "" || c.Space == schema.Namespace {
+		if c.Space == "" || c.Space == t.Root.S.ModuleNamespace() {
 			mine = append(mine, c)
 		}
 	}

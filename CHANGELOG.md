@@ -6,6 +6,37 @@
 The major changes in each release. A release's notes on GitHub are its section
 here (`dev/release-notes.sh`); the full list is `git log <previous tag>..<tag>`.
 
+## Unreleased
+
+### Changed
+
+- **portitor-web is a standalone portal with a configuration of its own**: its
+  firewalls, HA witness strings and users are a tree of a YANG module
+  (`portitor-portal.yang`) in `portal.json` in its data directory
+  (`/var/lib/portitor-web`), no longer lists in `web.yaml`. It has a login (make a
+  user with `portitor-web createadmin`), shows each firewall's GUI in a tab, and
+  adds a firewall by logging in to it over SSH once to read its address and
+  certificate fingerprint (the host key is confirmed first; the credentials are not
+  kept). `firewalls:` and `witness:` of an existing `web.yaml` are taken in once.
+  It is kept as a firewall's configuration is, a candidate and what runs, and is
+  reached by `portitor-web cli`, and the CLI and NETCONF over SSH (`ssh_listen`).
+  portitor-config now allows being framed by the same origin, and has a
+  `portal-info` command for the SSH step.
+
+- **portitor-config keeps its state in files**, not in its database: the
+  candidate, what runs of the users, roles, directory and firewalls
+  (`global.json`), the ids, the commit counter, the deployment history, the known
+  interfaces and the sessions' values, next to where the database was. The first
+  start of this release moves what the database held into them (users, roles, the
+  directory, firewalls, the ids, the history); the database is not written
+  after that, and the release after this one does not read it, so **update to
+  this release before the one after**. A database from before 0.9.0 is refused
+  (update to 0.9.0 first, as before).
+- **Backups are an archive** (`age -d backup | tar x`), the users, roles and
+  directory with them: a restore brings them back. A backup made by a release before
+  this one is a database file; restore it with the release that made it.
+- **An HA pair is updated secondary first**, and together (see the HA guide).
+
 ## v0.9.0
 
 ### New

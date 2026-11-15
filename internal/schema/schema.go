@@ -12,12 +12,14 @@ import (
 	"fmt"
 	"io/fs"
 	"math"
+	"path"
 	"regexp"
 	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"testing/fstest"
 
 	goyang "github.com/openconfig/goyang/pkg/yang"
 
@@ -65,8 +67,11 @@ type Node struct {
 	// State is a config false node, or one below it: read-only, filled
 	// from the firewalls.
 	State bool
-	// Revision is the module's newest revision, on the root.
-	Revision string
+	// Revision is the module's newest revision, on the root, with its
+	// XML namespace and the files of its modules (NETCONF's get-schema).
+	Revision  string
+	Namespace string
+	Files     fs.FS
 	// Ext holds Portitor's extensions by name without the prefix
 	// ("secret": "", "table": "rules").
 	Ext map[string]string
@@ -374,9 +379,55 @@ var (
 	loadErr  error
 )
 
+// ModuleNamespace is the XML namespace of the module n is in.
+func (n *Node) ModuleNamespace() string {
+	for n.Parent != nil {
+		n = n.Parent
+	}
+	return n.Namespace
+}
+
+// Module is the name of the module n is in: the root's.
+func (n *Node) Module() string {
+	for n.Parent != nil {
+		n = n.Parent
+	}
+	return n.Name
+}
+
+// PortalModule is portitor-web's module (portitor-portal.yang): its
+// firewalls, witness strings and users.
+const PortalModule = "portitor-portal"
+
+var (
+	portalOnce     sync.Once
+	portalCompiled *Node
+	portalErr      error
+)
+
+// LoadPortal returns the compiled schema of portitor-web's configuration.
+func LoadPortal() (*Node, error) {
+	portalOnce.Do(func() {
+		files := fstest.MapFS{}
+		for _, fsys := range []struct {
+			fs   fs.FS
+			name string
+		}{{yang.Files, "portitor-extensions.yang"}, {yang.Portal, "portal/portitor-portal.yang"}} {
+			data, err := fs.ReadFile(fsys.fs, fsys.name)
+			if err != nil {
+				portalErr = err
+				return
+			}
+			files[path.Base(fsys.name)] = &fstest.MapFile{Data: data}
+		}
+		portalCompiled, portalErr = Compile(files, PortalModule)
+	})
+	return portalCompiled, portalErr
+}
+
 // Load returns the compiled schema of the embedded modules.
 func Load() (*Node, error) {
-	once.Do(func() { compiled, loadErr = compile(yang.Files) })
+	once.Do(func() { compiled, loadErr = Compile(yang.Files, Module) })
 	return compiled, loadErr
 }
 
@@ -389,7 +440,8 @@ func MustLoad() *Node {
 	return n
 }
 
-func compile(files fs.FS) (*Node, error) {
+// Compile compiles the module of that name out of the .yang files in files.
+func Compile(files fs.FS, module string) (*Node, error) {
 	ms := goyang.NewModules()
 	names, err := fs.Glob(files, "*.yang")
 	if err != nil {
@@ -407,12 +459,16 @@ func compile(files fs.FS) (*Node, error) {
 	if errs := ms.Process(); len(errs) > 0 {
 		return nil, fmt.Errorf("yang: %v", errs)
 	}
-	m, errs := ms.GetModule(Module)
+	m, errs := ms.GetModule(module)
 	if len(errs) > 0 {
 		return nil, fmt.Errorf("yang: %v", errs)
 	}
-	root := &Node{Name: Module, Kind: Container, byName: map[string]*Node{}, Ext: map[string]string{}, Description: m.Description}
+	root := &Node{Name: module, Kind: Container, byName: map[string]*Node{}, Ext: map[string]string{}, Description: m.Description}
+	root.Files = files
 	if mod, ok := m.Node.(*goyang.Module); ok {
+		if mod.Namespace != nil {
+			root.Namespace = mod.Namespace.Name
+		}
 		for _, r := range mod.Revision {
 			if r.Name > root.Revision {
 				root.Revision = r.Name
@@ -422,6 +478,18 @@ func compile(files fs.FS) (*Node, error) {
 	if err := addChildren(root, m, fileRanks(names)); err != nil {
 		return nil, err
 	}
+	// An action's input and output have no parent: they carry the
+	// module's namespace themselves.
+	var tag func(n *Node)
+	tag = func(n *Node) {
+		for _, a := range n.Actions {
+			a.Input.Namespace, a.Output.Namespace = root.Namespace, root.Namespace
+		}
+		for _, c := range n.Children {
+			tag(c)
+		}
+	}
+	tag(root)
 	return root, nil
 }
 

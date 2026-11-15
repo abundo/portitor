@@ -63,7 +63,7 @@ type editor struct {
 func (ed *editor) apply(p datastore.Path, s *schema.Node, es []*elem, inherited string) error {
 	replaced := map[string]bool{} // leaf-lists already replaced by this request
 	for _, fe := range es {
-		if s.Parent == nil && fe.Space != schema.Namespace {
+		if s.Parent == nil && fe.Space != s.ModuleNamespace() {
 			return protocolErr("unknown-namespace", "the namespace %q", fe.Space)
 		}
 		c := s.Child(fe.Local)

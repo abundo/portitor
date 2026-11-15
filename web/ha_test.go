@@ -29,10 +29,11 @@ func asHost(t *testing.T, env *testEnv, id uint, pc agentapi.HAPeerConfig) {
 	t.Helper()
 	env.srv.cfg.Local, env.srv.cfg.AgentURL = true, "https://127.0.0.1:8443"
 	env.srv.localHA = func(context.Context) (*agentapi.HAPeerConfig, *models.Firewall, error) {
-		var fw models.Firewall
-		if err := env.srv.db.First(&fw, id).Error; err != nil {
+		fwp, err := env.srv.rec.Firewall(id)
+		if err != nil {
 			return nil, nil, err
 		}
+		fw := *fwp
 		out := pc
 		return &out, &fw, nil
 	}
@@ -44,8 +45,7 @@ func asHost(t *testing.T, env *testEnv, id uint, pc agentapi.HAPeerConfig) {
 func TestAgentURL(t *testing.T) {
 	env, _, pair := haPair(t)
 	var prim, sec models.Firewall
-	env.srv.db.First(&prim, 1)
-	env.srv.db.First(&sec, pair)
+	prim, sec = env.firewall(1), env.firewall(pair)
 	prim.AgentFingerprint, sec.AgentFingerprint = strings.Repeat("ab", 32), strings.Repeat("cd", 32)
 	if u := env.srv.agentURL(&prim); u != "https://192.0.2.1:8443" {
 		t.Errorf("not local: %s", u)
@@ -84,8 +84,7 @@ func TestPromote(t *testing.T) {
 	if rec := env.do("GET", "/api/me", nil); !strings.Contains(rec.Body.String(), `"replica":true`) {
 		t.Errorf("me: %s", rec.Body)
 	}
-	var sec models.Firewall
-	env.srv.db.First(&sec, pair)
+	sec := env.firewall(pair)
 
 	// The primary lost: promoted, the secondary commits as the primary.
 	agents[1].down = true
@@ -97,8 +96,7 @@ func TestPromote(t *testing.T) {
 		t.Error("still a replica after the promotion")
 	}
 	var p, q models.Firewall
-	env.srv.db.First(&p, pair)
-	env.srv.db.First(&q, 1)
+	p, q = env.firewall(pair), env.firewall(1)
 	if p.HAPrimaryID != nil || q.HAPrimaryID == nil || *q.HAPrimaryID != pair || q.HAEpoch != 1 || q.HASecret != sec.HASecret || p.HASecret != "" {
 		t.Fatalf("after: %+v / %+v", p, q)
 	}
@@ -127,8 +125,7 @@ func TestPromote(t *testing.T) {
 	}
 	// The old primary is skipped, and caught up as the secondary with its
 	// own address.
-	var dep models.Deployment
-	env.srv.db.Where("firewall_id = ?", 1).Order("id desc").First(&dep)
+	dep := env.deploymentOf(1)
 	if dep.Status != "skipped" {
 		t.Fatalf("old primary's deployment: %s %s", dep.Status, dep.Message)
 	}
@@ -171,8 +168,7 @@ func TestReplicaCopy(t *testing.T) {
 	ts := httptest.NewTLSServer(prim.e)
 	defer ts.Close()
 	sum := sha256.Sum256(ts.Certificate().Raw)
-	var sec models.Firewall
-	prim.srv.db.First(&sec, pair)
+	sec := prim.firewall(pair)
 
 	prim.commit()
 
@@ -192,7 +188,13 @@ func TestReplicaCopy(t *testing.T) {
 		t.Fatalf("copy: %v", err)
 	}
 	var fws int64
-	rep.srv.db.Model(&models.Firewall{}).Where("name = ? AND ha_primary_id = 1", "fw1b").Count(&fws)
+	if all, _ := rep.srv.rec.Firewalls(); true {
+		for _, f := range all {
+			if f.Name == "fw1b" && f.HAPrimaryID != nil && *f.HAPrimaryID == 1 {
+				fws++
+			}
+		}
+	}
 	lans := len(rows(rep, func(v *confview.View) []models.Interface { return v.Interfaces }, func(i *models.Interface) bool { return i.Name == "lan" }))
 	if fws != 1 || lans != 1 {
 		t.Fatalf("the copy lacks the primary's configuration: %d %d", fws, lans)
@@ -225,7 +227,7 @@ func TestReplicaCopy(t *testing.T) {
 	// A replica gives no copy.
 	ts2 := httptest.NewTLSServer(rep.e)
 	defer ts2.Close()
-	req, _ := http.NewRequest(http.MethodGet, ts2.URL+replicaPath, nil)
+	req, _ := http.NewRequest(http.MethodGet, ts2.URL+replicaBundlePath, nil)
 	req.Header.Set("Authorization", "Bearer "+sec.HASecret)
 	res, err := ts2.Client().Do(req)
 	if err != nil || res.StatusCode != http.StatusConflict {
@@ -243,7 +245,7 @@ func TestPortal(t *testing.T) {
 	env.e = env.srv.Echo()
 	backend := httptest.NewServer(env.e)
 	defer backend.Close()
-	cfg := &PortalConfig{Firewalls: []PortalFirewall{{Name: "fw1", URL: backend.URL}, {Name: "fw2", URL: "http://127.0.0.1:1"}}}
+	cfg := &PortalConfig{DataDir: t.TempDir(), Firewalls: []PortalFirewall{{Name: "fw1", URL: backend.URL}, {Name: "fw2", URL: "http://127.0.0.1:1"}}}
 	if err := cfg.check(); err != nil {
 		t.Fatal(err)
 	}
@@ -253,7 +255,11 @@ func TestPortal(t *testing.T) {
 	}
 	portal := httptest.NewServer(p.Handler())
 	defer portal.Close()
-	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	// Nothing is served without the portal's login.
+	if res, err := http.Get(portal.URL + "/fw/fw1/"); err != nil || res.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("a firewall without the portal's login: %v %v", res, err)
+	}
+	client := portalClient(t, p, portal.URL)
 	get := func(path string) *http.Response {
 		t.Helper()
 		res, err := client.Get(portal.URL + path)
@@ -292,26 +298,18 @@ func TestPortal(t *testing.T) {
 		t.Fatalf("login through the portal: %d %v", res.StatusCode, c)
 	}
 	// The list has both; one of them does not answer.
-	if b := body(get("/portal/")); !strings.Contains(b, `href="/fw/fw1/"`) || !strings.Contains(b, "does not answer") {
-		t.Errorf("portal page: %s", b)
+	if b := body(get("/portal/v1/firewalls")); !strings.Contains(b, `"path":"/fw/fw1/"`) || !strings.Contains(b, "does not answer") {
+		t.Errorf("portal list: %s", b)
 	}
-	// / opens the first firewall, or the one opened last.
-	if res := get("/"); res.StatusCode != http.StatusFound || res.Header.Get("Location") != "/fw/fw1/" {
-		t.Errorf("/: %d %s", res.StatusCode, res.Header.Get("Location"))
-	}
-	req, _ := http.NewRequest("GET", portal.URL+"/", nil)
-	req.AddCookie(&http.Cookie{Name: lastFirewallCookie, Value: "fw2"})
-	if res, err := client.Do(req); err != nil || res.Header.Get("Location") != "/fw/fw2/" {
-		t.Errorf("/ after fw2: %v %v", res, err)
-	}
-	if c := get("/fw/fw1/rules").Cookies(); len(c) == 0 || c[0].Name != lastFirewallCookie || c[0].Value != "fw1" {
-		t.Errorf("the GUI's page does not remember its firewall: %v", c)
+	// The shell is the tabs' page.
+	if b := body(get("/")); !strings.Contains(b, `id="bar"`) {
+		t.Errorf("portal shell: %s", b)
 	}
 	// Without its own address in X-Forwarded-For trusted, portitor-config
 	// sees the portal's; with trusted_proxies, the browser's.
 	env.srv.cfg.TrustedProxies = []string{"127.0.0.1"}
 	env.e = env.srv.Echo()
-	req = httptest.NewRequest("GET", "/api/version", nil)
+	req := httptest.NewRequest("GET", "/api/version", nil)
 	req.RemoteAddr = "127.0.0.1:5000"
 	req.Header.Set("X-Forwarded-For", "198.51.100.7")
 	ctx := env.e.NewContext(req, httptest.NewRecorder())
@@ -346,8 +344,7 @@ func TestWitnessString(t *testing.T) {
 	if rec := env.do("PUT", "/api/firewalls/1", map[string]any{"ha_witness": "external"}); rec.Code != http.StatusOK {
 		t.Fatalf("external witness: %d %s", rec.Code, rec.Body)
 	}
-	var fw models.Firewall
-	env.srv.db.First(&fw, 1)
+	fw := env.firewall(1)
 	if len(fw.HAWitnessSecret) < 32 {
 		t.Fatal("no witness secret")
 	}
@@ -376,8 +373,7 @@ func TestWitnessString(t *testing.T) {
 	if agents[1].last().HA.WitnessSecret != fw.HAWitnessSecret {
 		t.Error("the primary's document lacks the witness secret")
 	}
-	var dep models.Deployment
-	env.srv.db.Where("firewall_id = ?", 1).Order("id desc").First(&dep)
+	dep := env.deploymentOf(1)
 	if strings.Contains(dep.Document, fw.HAWitnessSecret) {
 		t.Error("the witness secret is in the deployment history")
 	}
@@ -439,7 +435,7 @@ func TestPairSession(t *testing.T) {
 	}
 
 	// portitor-web sets it on both hosts' paths, not on another firewall's.
-	p := &Portal{cfg: &PortalConfig{Firewalls: []PortalFirewall{{Name: "a", Fingerprint: fpA}, {Name: "b", Fingerprint: fpB}, {Name: "c", Fingerprint: fpC}}}}
+	p := &Portal{fws: []PortalFirewall{{Name: "a", Fingerprint: fpA}, {Name: "b", Fingerprint: fpB}, {Name: "c", Fingerprint: fpC}}}
 	if got := p.pairPrefixes("a", []string{fpA, fpB}); strings.Join(got, " ") != "/fw/a /fw/b" {
 		t.Errorf("pair paths: %v", got)
 	}
@@ -466,7 +462,7 @@ func TestPortalKeepsEscapedPath(t *testing.T) {
 		got = r.URL.EscapedPath()
 	}))
 	defer backend.Close()
-	cfg := &PortalConfig{Firewalls: []PortalFirewall{{Name: "fw1", URL: backend.URL}}}
+	cfg := &PortalConfig{DataDir: t.TempDir(), Firewalls: []PortalFirewall{{Name: "fw1", URL: backend.URL}}}
 	if err := cfg.check(); err != nil {
 		t.Fatal(err)
 	}
@@ -476,7 +472,7 @@ func TestPortalKeepsEscapedPath(t *testing.T) {
 	}
 	portal := httptest.NewServer(p.Handler())
 	defer portal.Close()
-	res, err := http.Get(portal.URL + "/fw/fw1/api/config/candidate/instance=main/ipam-prefix=192.168.1.0%2F24")
+	res, err := portalClient(t, p, portal.URL).Get(portal.URL + "/fw/fw1/api/config/candidate/instance=main/ipam-prefix=192.168.1.0%2F24")
 	if err != nil {
 		t.Fatal(err)
 	}

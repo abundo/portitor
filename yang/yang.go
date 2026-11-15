@@ -12,3 +12,9 @@ import "embed"
 //
 //go:embed *.yang
 var Files embed.FS
+
+// Portal is portitor-web's module (portal/portitor-portal.yang), which
+// imports portitor-extensions from Files.
+//
+//go:embed portal/*.yang
+var Portal embed.FS

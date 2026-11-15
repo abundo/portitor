@@ -112,6 +112,7 @@ CLI_COMPLETION = "/usr/share/bash-completion/completions/portitor"
 COMPLETION_DIR = str(Path(CLI_COMPLETION).parent)
 ETC_DIR = "/etc/portitor"
 WEB_CONFIG = f"{ETC_DIR}/web.yaml"
+WEB_DATA_DIR = "/var/lib/portitor-web"
 AGENT_CONFIG = f"{ETC_DIR}/agent.yaml"
 SYSTEMD_DIR = "/etc/systemd/system"
 WEB_USER = "portitor"
@@ -260,6 +261,27 @@ def version_newer(tag: str, installed: str) -> bool:
     if rel is None:
         return False
     return cur is None or rel > cur
+
+
+# The oldest release an update to a later one starts from: 0.9.0 moved the
+# configuration from the database's tables into the tree, and later releases
+# no longer read the tables (dbmigrate.MinVersion).
+MIN_UPGRADE_FROM = (0, 9, 0)
+
+
+def check_upgrade_path(tag: str, installed: dict[str, str]) -> None:
+    """Refuse, before anything is replaced, an update from before 0.9.0 to a
+    release after it: it would leave a database it can't read."""
+    rel = parse_version(tag)
+    if rel is None or rel <= MIN_UPGRADE_FROM:
+        return
+    for name, stamp in installed.items():
+        cur = parse_version(stamp)
+        if cur is not None and cur < MIN_UPGRADE_FROM:
+            raise InstallError(
+                f"{name} is {stamp}: install 0.9.0 first (and start it once, so it moves the "
+                f"configuration into its new form), then update to {tag}"
+            )
 
 
 def versions_equal(tag: str, installed: str) -> bool:
@@ -807,10 +829,11 @@ def install_web(
     host: Host, binary: Path, deploy: Path, version: str, assume_yes: bool,
     moved_to: Host | None = None, moved_address: str = "",
 ) -> None:
-    """portitor-web, the portal: no database, the firewalls in web.yaml.
+    """portitor-web, the portal: its configuration (firewalls, users) in its data directory.
     moved_to is the firewall its old database went to (at moved_address)."""
     log(f"==> Installing portitor-web {version} on {host}")
     ensure_user(host)
+    host.run(f"install -d -o {WEB_USER} -g {WEB_USER} -m 0750 {WEB_DATA_DIR}", desc="create the portal's data directory")
     new_config = not host.exists(WEB_CONFIG)
     if new_config:
         host.put(deploy / "web.yaml", WEB_CONFIG, "0640", group=WEB_USER)
@@ -827,15 +850,19 @@ def install_web(
         link_local_config(host)
     if new_config:
         log("==> portitor-web is installed but not started. Next steps:")
-        log(f"    list the firewalls under firewalls: in {WEB_CONFIG}: on each,")
-        log("      url https://<firewall>:8444 and fingerprint (portitor-config fingerprint there),")
-        log(f"      and this host's address under trusted_proxies: in its {CONFIG_FILE}")
+        log(f"    make a portal user: sudo -u {WEB_USER} portitor-web createadmin <user>")
+        log("    start it, log in, and add the firewalls there (Add firewall reads their")
+        log("      fingerprints over SSH); or list them under firewalls: in " + WEB_CONFIG)
+        log("      before the first start (taken in once)")
+        log(f"    this host's address under trusted_proxies: in each firewall's {CONFIG_FILE}")
         log(f"    systemctl enable --now {WEB_UNIT}")
         return
     if action == "installed":
         host.systemctl("enable", WEB_UNIT)
     host.systemctl("restart", WEB_UNIT)
     verify_version(host, WEB_BIN, version)
+    log(f"    portitor-web has users of its own now: until one exists the portal is locked; make one with\n"
+        f"      sudo -u {WEB_USER} portitor-web createadmin <user>")
 
 
 def ensure_user(host: Host) -> None:
@@ -856,12 +883,23 @@ def portal_name(host: Host) -> str:
     return name[:63] or "firewall"
 
 
+def portal_firewalls(host: Host) -> list[tuple[str, str]]:
+    """The firewalls in portitor-web's configuration on host: (name, URL) of
+    `portitor-web list-firewalls`. An older portitor-web (before the portal
+    had a configuration of its own) has no such command: web.yaml's list."""
+    proc = host.run(f"runuser -u {WEB_USER} -- {WEB_BIN} -f {WEB_CONFIG} list-firewalls",
+                    check=False, mutate=False, capture=True, root=True)
+    if proc.returncode == 0:
+        return [tuple(line.split(None, 1)) for line in (proc.stdout or "").splitlines() if len(line.split(None, 1)) == 2]
+    text = host.read(WEB_CONFIG, root=True) or ""
+    return re.findall(r"^\s*-\s*name:\s*(\S+)\s*\n\s*url:\s*[\"']?([^\s\"']+)", text, re.M)
+
+
 def link_local_config(host: Host) -> None:
     """portitor-web serves portitor-config on the same host, when its
     web.yaml lists no firewall: it adds that one, and portitor-config trusts
     portitor-web's X-Forwarded-For (127.0.0.1)."""
-    web = host.read(WEB_CONFIG) or ""
-    if re.search(r"^\s*-\s*name:", web, re.M) or host.dry_run:
+    if host.dry_run or portal_firewalls(host):
         return
     proc = host.run(f"runuser -u {WEB_USER} -- {CONFIG_LINK} -f {CONFIG_FILE} fingerprint",
                     check=False, mutate=False, capture=True, root=True)
@@ -870,7 +908,7 @@ def link_local_config(host: Host) -> None:
         warn(f"portitor-config fingerprint failed on {host}; list it under firewalls: in {WEB_CONFIG} yourself")
         return
     name = portal_name(host)
-    add_portal_firewall(host, web, name, CONFIG_LOCAL_URL, fp, "This host's portitor-config")
+    add_portal_firewall(host, name, CONFIG_LOCAL_URL, fp, "This host's portitor-config")
     log(f"    portitor-web serves this host's portitor-config as firewall {name}")
     if add_trusted_proxy(host, "127.0.0.1", "portitor-web on this host"):
         host.systemctl("try-restart", CONFIG_UNIT, check=False)
@@ -892,7 +930,7 @@ def link_remote_config(web: Host, fw: Host, address: str) -> None:
     port = config_port(fw)
     url_host = f"[{address}]" if ":" in address else address
     name = portal_name(fw)
-    add_portal_firewall(web, web.read(WEB_CONFIG, root=True) or "", name, f"https://{url_host}:{port}", fp,
+    add_portal_firewall(web, name, f"https://{url_host}:{port}", fp,
                         "The firewall portitor-web's database moved to")
     log(f"    portitor-web serves {fw}'s portitor-config as firewall {name}")
     # The address web reaches fw from, which fw sees in the connections.
@@ -908,14 +946,11 @@ def link_remote_config(web: Host, fw: Host, address: str) -> None:
         fw.systemctl("try-restart", CONFIG_UNIT, check=False)
 
 
-def add_portal_firewall(host: Host, web: str, name: str, url: str, fp: str, note: str) -> None:
-    """Writes web.yaml (text web) on host with this one firewall listed."""
-    block = f"firewalls:\n  - name: {name}\n    url: {url}\n    fingerprint: {fp}\n"
-    if re.search(r"^firewalls:.*$", web, re.M):
-        web = re.sub(r"^firewalls:.*\n?", block, web, count=1, flags=re.M)
-    else:
-        web = web.rstrip("\n") + f"\n\n# {note} (install.py).\n" + block
-    host.put_text(web, WEB_CONFIG, "0640", group=WEB_USER)
+def add_portal_firewall(host: Host, name: str, url: str, fp: str, note: str) -> None:
+    """Adds (or changes) the firewall in portitor-web's configuration on host."""
+    host.run(f"runuser -u {WEB_USER} -- {WEB_BIN} -f {WEB_CONFIG} add-firewall {shlex.quote(name)} {shlex.quote(url)} "
+             f"--fingerprint {fp} --description {shlex.quote(note + ' (install.py)')}",
+             desc=f"add firewall {name} to portitor-web", root=True)
 
 
 def add_trusted_proxy(host: Host, addr: str, note: str) -> bool:
@@ -1124,7 +1159,7 @@ def old_web_database(web: Host) -> tuple[list[str], str] | None:
         return None
     if agent_enabled(web):
         return None
-    if re.search(r"^\s*-\s*name:", web.read(WEB_CONFIG, root=True) or "", re.M):
+    if portal_firewalls(web):
         return None
     if web.run(f"systemctl is-enabled --quiet {WEB_UNIT}", check=False, mutate=False).returncode != 0:
         return None
@@ -1215,8 +1250,8 @@ def agent_hosts_from_settings(web: Host) -> list[str]:
     firewalls: in web.yaml, and the HA peers their portitor-configs deploy
     to (`portitor-config agent-url --all` there). One on localhost is the web
     host itself."""
-    text = web.read(WEB_CONFIG) if web.exists(WEB_CONFIG) else None
-    if not text:
+    listed = portal_firewalls(web) if web.exists(WEB_CONFIG) else []
+    if not listed:
         return []
     hosts: list[str] = []
 
@@ -1229,7 +1264,7 @@ def agent_hosts_from_settings(web: Host) -> list[str]:
         if host not in hosts:
             hosts.append(host)
 
-    for url in re.findall(r"^\s*url:\s*[\"']?([^\s\"']+)", text, re.M):
+    for _name, url in listed:
         add(url, web)
     # Their HA peers, which their portitor-configs know; one that can't be
     # asked (no SSH yet, an older release) is left to --agent.
@@ -2044,6 +2079,7 @@ def main_release(args: argparse.Namespace) -> int:
         raise InstallError(f"{rel.tag} has no archive for {', '.join(missing)}")
     if rel.broken:
         warn(f"{rel.tag} is marked broken: {rel.broken}")
+    check_upgrade_path(rel.tag, installed)
     log(f"==> Installing {rel.tag}: " + ", ".join(plan.describe()))
     ensure_sudo(plan, args.dry_run)
 

@@ -115,6 +115,9 @@ ctx.check_hostname, ctx.verify_mode = False, ssl.CERT_NONE
 op = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx),
                                  urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
 gui = "https://127.0.0.1/fw/fw"
+# The portal's own login (the setup made the user), then the firewall's.
+op.open(urllib.request.Request("https://127.0.0.1/portal/v1/login", json.dumps({"user": "portitor", "password": sys.argv[1]}).encode(),
+                               {"Content-Type": "application/json"}), timeout=10).close()
 op.open(urllib.request.Request(gui + "/api/login", json.dumps({"username": "portitor", "password": sys.argv[1]}).encode(),
                                {"Content-Type": "application/json"}), timeout=10).close()
 print(op.open(gui + "/api/agent/status", timeout=30).read().decode()[:500])

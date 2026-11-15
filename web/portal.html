@@ -7,38 +7,102 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Portitor</title>
 <style>
-:root { --bg: #ffffff; --fg: #18181b; --muted: #71717a; --line: #e4e4e7; --accent: #16a34a; --error: #dc2626; }
+:root { --bg: #ffffff; --fg: #18181b; --muted: #71717a; --line: #e4e4e7; --panel: #f4f4f5; --accent: #16a34a; --error: #dc2626; }
 @media (prefers-color-scheme: dark) {
-  :root { --bg: #18181b; --fg: #f4f4f5; --muted: #a1a1aa; --line: #3f3f46; --accent: #4ade80; --error: #f87171; }
+  :root { --bg: #18181b; --fg: #f4f4f5; --muted: #a1a1aa; --line: #3f3f46; --panel: #27272a; --accent: #4ade80; --error: #f87171; }
 }
-body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.5 system-ui, sans-serif; }
-main { max-width: 48rem; margin: 0 auto; padding: 2rem 1rem; }
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.5 system-ui, sans-serif; display: flex; flex-direction: column; }
+[hidden] { display: none !important; }
+#bar { display: flex; align-items: stretch; gap: 2px; padding: 4px 8px 0; background: var(--panel); border-bottom: 1px solid var(--line); overflow-x: auto; }
+#bar button.tab { border: 1px solid transparent; border-bottom: 0; background: none; color: var(--muted); padding: 6px 14px; border-radius: 6px 6px 0 0; cursor: pointer; font: inherit; white-space: nowrap; }
+#bar button.tab.active { background: var(--bg); color: var(--fg); border-color: var(--line); font-weight: 600; }
+#bar button.tab .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); margin-right: 6px; }
+#bar button.tab .dot.down { background: var(--error); }
+#bar .spacer { flex: 1; }
+#bar .who { color: var(--muted); padding: 6px 8px; white-space: nowrap; }
+#views { flex: 1; position: relative; min-height: 0; }
+#views iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: var(--bg); }
+.page { max-width: 56rem; margin: 0 auto; padding: 1.5rem 1rem; overflow: auto; height: 100%; }
 h1 { font-size: 1.25rem; margin: 0 0 0.25rem; }
-p { color: var(--muted); margin: 0 0 1.5rem; }
+h2 { font-size: 1rem; margin: 2rem 0 0.5rem; }
+p.lead { color: var(--muted); margin: 0 0 1rem; }
 table { width: 100%; border-collapse: collapse; }
 th, td { text-align: left; padding: 0.25rem 0.5rem; border-bottom: 1px solid var(--line); }
 th { color: var(--muted); font-weight: 500; }
-a { color: var(--accent); font-weight: 600; text-decoration: none; }
-a:hover { text-decoration: underline; }
+a, .link { color: var(--accent); font-weight: 600; text-decoration: none; cursor: pointer; background: none; border: 0; font: inherit; padding: 0; }
+a:hover, .link:hover { text-decoration: underline; }
 .error { color: var(--error); }
+.muted { color: var(--muted); }
+.mono { font-family: ui-monospace, monospace; font-size: 12px; word-break: break-all; }
+button.btn { font: inherit; padding: 5px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--fg); cursor: pointer; }
+button.btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+button.btn:disabled { opacity: 0.5; cursor: default; }
+input, textarea, select { font: inherit; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); width: 100%; }
+label { display: block; margin: 0.6rem 0 0.15rem; color: var(--muted); font-size: 12px; }
+dialog { border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--fg); width: min(34rem, 94vw); padding: 1.25rem; }
+dialog::backdrop { background: rgba(0,0,0,0.4); }
+.row { display: flex; gap: 8px; } .row > * { flex: 1; } .row > .narrow { flex: 0 0 6rem; }
+.actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 1rem; }
+#login { max-width: 22rem; margin: 6rem auto; padding: 0 1rem; }
 footer { margin-top: 2rem; color: var(--muted); font-size: 12px; }
+.box { border: 1px solid var(--line); border-radius: 6px; padding: 0.5rem 0.75rem; background: var(--panel); margin-top: 0.75rem; }
 </style>
 </head>
 <body>
-<main>
-<h1>Portitor</h1>
-<p>Each firewall keeps its configuration on the firewall; log in to it there.</p>
-<table>
-<thead><tr><th>Firewall</th><th>portitor-config</th></tr></thead>
-<tbody>
-{{range .Firewalls}}<tr>
-<td><a href="{{.Path}}">{{.Name}}</a></td>
-<td>{{if .Error}}<span class="error">{{.Error}}</span>{{else}}{{.Version}}{{end}}</td>
-</tr>
-{{else}}<tr><td colspan="2">No firewalls: list them under firewalls: in /etc/portitor/web.yaml.</td></tr>
-{{end}}</tbody>
-</table>
-<footer>portitor-web {{.Version}}</footer>
-</main>
+<form id="login" hidden>
+  <h1>Portitor</h1>
+  <p class="lead">Log in to portitor-web. Each firewall has its own login too.</p>
+  <label for="l-user">User</label><input id="l-user" autocomplete="username" required>
+  <label for="l-pass">Password</label><input id="l-pass" type="password" autocomplete="current-password" required>
+  <p id="l-err" class="error" hidden></p>
+  <div class="actions"><button class="btn primary" type="submit">Log in</button></div>
+  <footer>portitor-web {{.Version}}</footer>
+</form>
+
+<div id="bar" role="tablist" hidden></div>
+<div id="views" hidden></div>
+
+<template id="portal-page">
+  <div class="page">
+    <h1>Firewalls</h1>
+    <p class="lead">Each firewall's GUI opens in a tab of its own. A firewall keeps its configuration on the firewall; log in to it there.</p>
+    <div class="actions" style="justify-content:flex-start"><button class="btn primary" id="add">Add firewall</button> <button class="btn" id="refresh">Refresh</button></div>
+    <table><thead><tr><th>Firewall</th><th>portitor-config</th><th>Description</th><th></th></tr></thead><tbody id="fw-rows"></tbody></table>
+    <h2>HA witness</h2>
+    <p class="lead">The pairs this portal is the third vote of. Paste a witness string (<span class="mono">portitor-config witness-string</span> on the primary).</p>
+    <table><thead><tr><th>Pair</th><th>Hosts</th><th></th></tr></thead><tbody id="w-rows"></tbody></table>
+    <div class="row" style="margin-top:0.5rem"><input id="w-str" placeholder="portitor-witness:..."><button class="btn narrow" id="w-add">Add</button></div>
+    <p id="page-err" class="error" hidden></p>
+    <footer>portitor-web {{.Version}}</footer>
+  </div>
+</template>
+
+<dialog id="add-dlg">
+  <form method="dialog" id="add-form">
+    <h1>Add firewall</h1>
+    <p class="lead">Portitor logs in to the firewall over SSH once to read its address and certificate fingerprint. The credentials are not kept.</p>
+    <div id="ssh-part">
+      <div class="row"><div><label for="a-host">Host</label><input id="a-host" placeholder="192.0.2.1 or fw.example.com"></div><div class="narrow"><label for="a-port">SSH port</label><input id="a-port" value="22" inputmode="numeric"></div></div>
+      <div class="row"><div><label for="a-user">SSH user</label><input id="a-user" value="root" autocomplete="off"></div><div><label for="a-pass">Password</label><input id="a-pass" type="password" autocomplete="off"></div></div>
+      <label for="a-key">Or a private key (PEM)</label><textarea id="a-key" rows="3" class="mono" autocomplete="off"></textarea>
+      <div id="hostkey" class="box" hidden>
+        <div>The host presents this SSH host key. Compare it with the firewall's (<span class="mono">ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub</span>):</div>
+        <div class="mono" id="hostkey-fp"></div>
+      </div>
+      <div class="actions"><button type="button" class="btn" id="a-fill">Enter by hand</button><button type="button" class="btn primary" id="a-connect">Connect</button></div>
+    </div>
+    <div id="found" hidden>
+      <label for="a-name">Name</label><input id="a-name" placeholder="office" autocomplete="off">
+      <label for="a-desc">Description</label><input id="a-desc" autocomplete="off">
+      <label for="a-url">portitor-config URL</label><input id="a-url" placeholder="https://192.0.2.1:8444">
+      <label for="a-fp">Certificate fingerprint (SHA-256)</label><input id="a-fp" class="mono">
+    </div>
+    <p id="a-err" class="error" hidden></p>
+    <div class="actions"><button type="button" class="btn" id="a-cancel">Cancel</button><button type="button" class="btn primary" id="a-save" hidden>Add firewall</button></div>
+  </form>
+</dialog>
+<script src="/portal/portal.js"></script>
 </body>
 </html>

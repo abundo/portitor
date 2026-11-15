@@ -117,12 +117,21 @@ jar=$DIR/cookies
 api() { curl -skf -b "$jar" "$@"; }
 login() {
 	local deadline=$((SECONDS + 300))
-	until curl -skf -o /dev/null "$API/api/version"; do
+	rm -f "$jar"
+	# Behind the portal (/fw/<name>), its own login comes first: the user made
+	# for it after the update (portitor-web createadmin).
+	if [[ $API == */fw/* ]]; then
+		until curl -skf -c "$jar" -o /dev/null -H 'Content-Type: application/json' \
+			-d "{\"user\":\"portitor\",\"password\":\"$PASSWORD\"}" "${API%%/fw/*}/portal/v1/login"; do
+			((SECONDS < deadline)) || { fail "portal login at ${API%%/fw/*}"; return 1; }
+			sleep 3
+		done
+	fi
+	until curl -skf -b "$jar" -o /dev/null "$API/api/version"; do
 		((SECONDS < deadline)) || { fail "the GUI did not answer at $API"; return 1; }
 		sleep 3
 	done
-	rm -f "$jar"
-	curl -skf -c "$jar" -o /dev/null -H 'Content-Type: application/json' \
+	curl -skf -b "$jar" -c "$jar" -o /dev/null -H 'Content-Type: application/json' \
 		-d "{\"username\":\"portitor\",\"password\":\"$PASSWORD\"}" "$API/api/login" ||
 		{ fail "GUI login at $API"; return 1; }
 }
@@ -218,7 +227,11 @@ else
 fi
 
 log "Checking $to"
-[[ $layout == config ]] || API=$GUI/fw/portitor
+if [[ $layout == web ]]; then
+	API=$GUI/fw/portitor
+	# portitor-web has users of its own now: one for the test.
+	check "portal user" sh -c "printf '%s\n' '$PASSWORD' | runuser -u portitor -- portitor-web -f /etc/portitor/web.yaml createadmin portitor"
+fi
 units
 login && {
 	versions "$to"

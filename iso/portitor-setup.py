@@ -44,7 +44,8 @@ Run again, every step is open at once.
 
 Split setups: the setup first asks what the machine runs. A firewall always
 keeps its configuration itself (portitor-config); portitor-web on another
-host is a portal to the GUIs of its firewalls, with no database.
+host is a portal to the GUIs of its firewalls, with users and a configuration
+of its own (no database).
 
   both   the above: the firewall with its GUI.
   agent  the same firewall, its GUI served by portitor-web on another host
@@ -58,8 +59,8 @@ host is a portal to the GUIs of its firewalls, with no database.
          /etc/network/interfaces (DHCP or static), the agent is disabled, and
          the portal string of a firewall is pasted (now, or later over SSH
          with `sudo portitor-setup --join`): that adds the firewall to
-         /etc/portitor/web.yaml. Log in to each firewall there with its own
-         users.
+         the portal's configuration. Log in to the portal as the GUI user, and
+         then to each firewall there with its own users.
 
 HA pairs (docs/ha.md):
 
@@ -146,6 +147,7 @@ ETC = Path("/etc/portitor")
 # portitor-web, the portal (web), and portitor-config, the firewall's
 # configuration and GUI (both, agent).
 WEB_YAML = ETC / "web.yaml"
+WEB_DATA = Path("/var/lib/portitor-web")
 CONFIG_YAML = ETC / "config.yaml"
 AGENT_YAML = ETC / "agent.yaml"
 # The GUI's certificate, which portitor-web pins (agent).
@@ -744,6 +746,11 @@ def config(*args: str) -> list[str]:
     return ["runuser", "-u", WEB_USER, "--", "portitor-config", "-f", str(CONFIG_YAML), *args]
 
 
+def web_config(*args: str) -> list[str]:
+    """portitor-web's own commands (the portal's configuration), as the service user."""
+    return ["runuser", "-u", WEB_USER, "--", "portitor-web", "-f", str(WEB_YAML), *args]
+
+
 def step_links(a: dict) -> None:
     # Only the LAN and the WAN stay up; the others are imported as they
     # are, so down.
@@ -845,30 +852,25 @@ db:
 def step_portal_config(a: dict) -> None:
     """portitor-web only: the portal, its firewalls added with portal strings."""
     step_cert(a)
-    old = read(WEB_YAML)
-    firewalls = old[old.index("firewalls:"):] if "firewalls:" in old and "# written by the first-boot setup" in old else "firewalls: []\n"
+    # What it needs to start; the firewalls, witness strings and users are
+    # its configuration (data_dir, changed by portitor-web's commands).
     write(WEB_YAML, f"""# /etc/portitor/web.yaml - written by the first-boot setup.
 # portitor-web: the portal to the firewalls' GUIs (sudo portitor-setup --join
-# adds one).
+# adds one). Its configuration is in {WEB_DATA}.
 bind: ":{GUI_PORT}"
 tls_cert: {WEB_CERT}
 tls_key: {WEB_KEY}
-
-{firewalls}""", 0o640, WEB_GROUP)
+data_dir: {WEB_DATA}
+""", 0o640, WEB_GROUP)
+    run(["install", "-d", "-o", WEB_USER, "-g", WEB_GROUP, "-m", "0750", str(WEB_DATA)])
     run(["systemctl", "daemon-reload"])
 
 
 def add_portal_firewall(d: dict) -> None:
     """portitor-web only: serves the firewall of a portal string, in place of
-    one of the same name."""
-    text = read(WEB_YAML)
-    head, sep, rest = text.partition("firewalls:")
-    if not sep:
-        raise RuntimeError(f"{WEB_YAML} has no firewalls:")
-    entries = re.findall(r"^  - name: (\S+)\n    url: (\S+)\n    fingerprint: (\S+)\n", rest, re.M)
-    entries = [e for e in entries if e[0] != d["name"]] + [(d["name"], d["url"], d["fingerprint"])]
-    block = "".join(f"  - name: {n}\n    url: {u}\n    fingerprint: {f}\n" for n, u, f in entries)
-    write(WEB_YAML, head + "firewalls:\n" + block, 0o640, WEB_GROUP)
+    one of the same name (portitor-web's configuration: a commit)."""
+    run(web_config("add-firewall", d["name"], d["url"], "--fingerprint", d["fingerprint"],
+                   "--description", "Added by portitor-setup --join"))
 
 
 def step_console_password(a: dict) -> None:
@@ -884,8 +886,10 @@ def step_users(a: dict) -> None:
     run(["usermod", "-aG", "wireshark", CONSOLE_USER])
     if not a["password"]:
         return
-    # The portal has no users: each firewall has its own.
-    if a["role"] != "web":
+    # The portal has users of its own (each firewall has its own too).
+    if a["role"] == "web":
+        run(web_config("createadmin", GUI_USER), stdin=a["password"] + "\n")
+    else:
         run(config("createadmin", GUI_USER), stdin=a["password"] + "\n")
 
 
@@ -1070,7 +1074,7 @@ def step_web(a: dict) -> None:
     ctx.verify_mode = ssl.CERT_NONE
     for _ in range(30):
         try:
-            path = "/portal/v1/firewalls" if a["role"] == "web" else "/api/version"
+            path = "/" if a["role"] == "web" else "/api/version"
             urllib.request.urlopen(f"https://127.0.0.1:{GUI_PORT}{path}", context=ctx, timeout=10).close()
             return
         except OSError:
