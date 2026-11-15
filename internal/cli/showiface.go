@@ -71,6 +71,19 @@ func (s *Session) showInterface(ctx context.Context, words []string) error {
 		}
 		return "enable"
 	}
+	// kind is the configured interface's kind, else the device's link kind:
+	// a real NIC has none, so it is physical.
+	kind := func(d device) string {
+		if d.config != nil {
+			if k := d.config.Leaf("kind"); k != "" {
+				return k
+			}
+		}
+		if k := d.state.Leaves["kind"]; k != "" {
+			return k
+		}
+		return "physical"
+	}
 	or := func(v, none string) string {
 		if v == "" {
 			return none
@@ -91,7 +104,7 @@ func (s *Session) showInterface(ctx context.Context, words []string) error {
 			if len(addrs) > 0 {
 				first = addrs[0]
 			}
-			row := []string{d.state.Leaves["name"], or(d.state.Leaves["kind"], "-"), admin(d.config),
+			row := []string{d.state.Leaves["name"], kind(d), admin(d.config),
 				or(d.state.Leaves["state"], "-"), or(d.state.Leaves["mtu"], "-"), or(d.state.Leaves["mac"], "-"), first}
 			if vfs > 1 {
 				row = append([]string{d.vf}, row...)
@@ -113,7 +126,7 @@ func (s *Session) showInterface(ctx context.Context, words []string) error {
 		if d.config != nil && d.config.Leaves["description"] != "" {
 			fmt.Fprintf(w, "  description\t%s\n", d.config.Leaves["description"])
 		}
-		fmt.Fprintf(w, "  kind\t%s\n", or(d.state.Leaves["kind"], "-"))
+		fmt.Fprintf(w, "  kind\t%s\n", kind(d))
 		fmt.Fprintf(w, "  admin-state\t%s\n", admin(d.config))
 		fmt.Fprintf(w, "  oper-state\t%s\n", or(d.state.Leaves["state"], "-"))
 		fmt.Fprintf(w, "  mtu\t%s\n", or(d.state.Leaves["mtu"], "-"))
