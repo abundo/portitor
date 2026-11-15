@@ -64,7 +64,7 @@ are at the top, as are `settings`.
 - `[ ... ]` sets all the values of a list (`addresses`, `in-interfaces`); a single
   value adds one.
 - `/` starts a path from the top: `/ instance fw route 1 gateway 192.0.2.1`.
-- `exit` goes up one level, `exit all` to the top, `back` to where you were before.
+- `exit` goes up one level, `exit all` to the top, `back` goes up one level too, but stops at the top instead of leaving the CLI.
 - A value with spaces is quoted: `description "the uplink"`.
 
 Going to an entry that doesn't exist creates it, in candidate mode. Names may be

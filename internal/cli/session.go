@@ -143,7 +143,7 @@ var commands = []struct{ name, help string }{
 	{"tools", "run an action of an entry: tools <path> <action> [<input> <value>]..."},
 	{"tree", "show the schema below here or a path"},
 	{"pwc", "show the present working context"},
-	{"back", "go back to the previous context"},
+	{"back", "go up one level (stays at the top)"},
 	{"exit", "go up one level; exit all: to the root; at the root, log out"},
 	{"quit", "log out"},
 	{"pager", "show long output a screen at a time: pager [on|off]"},
@@ -560,7 +560,9 @@ func (s *Session) command(ctx context.Context, cmd string, args []token) error {
 	case "pwc":
 		s.printf("%s\n", s.Prompt())
 	case "back":
-		s.cwd, s.prev = s.prev, s.cwd
+		if len(s.cwd) > 0 {
+			s.prev, s.cwd = s.cwd, s.cwd[:len(s.cwd)-1]
+		}
 	case "exit":
 		switch {
 		case arg(0) == "all":
