@@ -58,7 +58,7 @@ cleanly now. Go on only once they've chosen.
 | `internal/netobj` | Named hosts/prefixes (`address_objects`) and address lists (`address_lists`): name checks and expansion |
 | `internal/dbmigrate` | Opens the SQLite database; goose migrations (the schema's source of truth); migration 94 (`drop_config_tables.go`) drops the old configuration tables, and `Up` refuses a database older than it (`MinVersion`, 0.9.0's schema: upgrade to 0.9.0 first, which moved the configuration into the tree), as `install.py` (`check_upgrade_path`) refuses the update before replacing anything |
 | `models` | GORM mapping |
-| `web` | Echo v5 server (`server.go`: routes): auth, the configuration API (`configapi.go`: `/api/schema`, `/api/config`, `checkEdit`; the YANG actions' handlers and the GUI's own file actions `configactions.go`), the configuration as rows (`confview.go`: `view`, cached per candidate, `userEdit`, `editConfig`, `rowWriter`), the firewalls' CRUD (`crud.go`, `firewalls.go`), commits (`commit.go`), other handlers (`handlers.go`), the commits' configurations (`revert.go`), tenancy (`tenancy.go`), roles (`roles.go`, `access.go`), agent proxies (`console.go`, `capture.go`, `probe.go`, `trace.go`, `iperf.go`, `servicelog.go`, `syslog.go`, `connections.go`), WireGuard config import (`wgimport.go`), backup/restore (`backup.go`, `snapshot.go`: the database with the configuration in it), `config.yaml` (`config.go`), the HA replica and promotion (`replica.go`, `promote.go`), the witness (`witness.go`, `portalwitness.go`), and portitor-web, the portal (`portal.go`, `portalapi.go`, `portalstore.go`, `portalssh.go`, `portal.html`, `portal.js`) |
+| `web` | Echo v5 server (`server.go`: routes): auth, the configuration API (`configapi.go`: `/api/schema`, `/api/config`, `checkEdit`; the YANG actions' handlers and the GUI's own file actions `configactions.go`), the configuration as rows (`confview.go`: `view`, cached per candidate, `userEdit`, `editConfig`, `rowWriter`), the firewalls' CRUD (`crud.go`, `firewalls.go`), commits (`commit.go`), other handlers (`handlers.go`), the commits' configurations (`revert.go`), tenancy (`tenancy.go`), roles (`roles.go`, `access.go`), agent proxies (`console.go`, `capture.go`, `probe.go`, `trace.go`, `iperf.go`, `servicelog.go`, `syslog.go`, `connections.go`), WireGuard config import (`wgimport.go`), backup/restore (`backup.go`, `snapshot.go`: the database with the configuration in it), `config.yaml` (`config.go`), the HA replica and promotion (`replica.go`, `promote.go`), the witness (`witness.go`, `portalwitness.go`), and portitor-web, the portal (`portal.go`, `portalapi.go`, `portalstore.go`, `portalssh.go`, `portalpair.go`; its GUI is `web/frontend`'s `portal.html`, `src/portal/`) |
 | `web/frontend` | Vue SPA; `CrudPage.vue` drives most pages from field/column schemas, on a YANG list (`api/config.js`: `treeApi`, `vfApi`) |
 | `docs` | User guides; every `docs/*.md` is bundled into the GUI's Help page (`src/docs.js`), and links between them stay in the GUI |
 | `deploy` | systemd units and example configs |
@@ -84,8 +84,9 @@ docs and user-facing messages.
 - **portitor-web, the portal** (`web/portal.go`, `portalapi.go`, `portalstore.go`,
   `portalssh.go`, `web.yaml`), is optional and standalone, with a configuration of
   its own: a tree of the YANG module `yang/portal/portitor-portal.yang`
-  (`schema.LoadPortal`; `firewall`, `witness` (the string is `px:secret`) and `user`
-  lists), kept as a firewall's is: a `datastore.Store` candidate (`candidate.json`)
+  (`schema.LoadPortal`; `firewall`, `ha-firewall` (an HA pair as one firewall: its
+  `primary` and `secondary` hosts; names shared with `firewall`, `portalCheck`),
+  `witness` (the string is `px:secret`) and `user` lists), kept as a firewall's is: a `datastore.Store` candidate (`candidate.json`)
   and what runs, `<data_dir>/portal.json` (`PortalStore`, whose `portalBackend`
   commits by writing it; `portalCheck` is its `Store.Check`; proxies and the witness are
   rebuilt on a commit, and when another process commits, `Watch`). The GUI's and the
@@ -97,23 +98,33 @@ docs and user-facing messages.
   old `firewalls:` and `witness:` are taken into an empty tree once. It has its own
   users (`portitor-web createadmin`, bcrypt hash `px:secret`, a signed cookie, key
   in `session.key`), and everything but its shell and login is behind them,
-  `/fw/<name>/` too. The shell (`portal.html`, `portal.js`) shows each firewall in a
-  kept-alive iframe tab (portitor-config allows `frame-ancestors 'self'`). A firewall
+  `/fw/<name>/` too. Its GUI is a second entry of the Vue frontend (`web/frontend/portal.html`,
+  `src/portal/`: hash routes, `/portal/v1` through `src/portal/api.js`), built into
+  `web/static` beside `index.html` and served from `staticFS()` (`handlePage`, the assets
+  before login), sharing the firewall GUI's frame (`layout/AppShell.vue`, which knows no
+  store), `DataGrid`, dialogs and form rules. A firewall's GUI opens as a page of its own
+  (`/fw/<name>/`), whose top bar leads back (`PortalLink`). A firewall
   is added by `POST /portal/v1/probe`: SSH to the host (the host key is returned for
   the administrator to confirm before any login; credentials are never stored), which
   runs `portitor-config portal-info` (as the service user through `sudo` unless root)
-  for its port and `tls_cert` fingerprint. An HA secondary is
-paired the same way, without a string copied by hand (`web/portalpair.go`, `POST
-/portal/v1/pair`, `PairSecondary`): over SSH to the new host `portitor-config
-secondary-info` (`web/pairing.go`: name, ports, the agent token and both
-fingerprints, which portitor-config holds; the portal adds the address it reached the
-host on), then over SSH to the primary (its `ssh-host-key` checked) `portitor-config
-add-secondary` (`AddSecondary`, in-process console requests: the firewall row with
-`ha_primary_id`, the management interface's `peer-addresses`, commit and confirm;
-`portitor-setup --join` runs it too, so the logic is there alone), and with the
-witness option `--external-witness` and `witness-string` into the portal's witness
-list. The token goes on standard input only, the SSH credentials are never kept, and
-the portal runs these fixed commands only (`configCommand`). It serves each firewall it lists at `/fw/<name>/` with
+  for its port and `tls_cert` fingerprint. An HA firewall's hosts are added one at a
+  time the same way (`web/portalpair.go`, `POST /portal/v1/ha/<name>/<role>`,
+  `AddHAHost`); when the second is added the portal pairs them, unless they are a pair
+  already (each portitor-config's public `GET /api/pair`: replica or not, and its pair's
+  `config_fingerprint`s): over SSH to the secondary `portitor-config secondary-info`
+  (`web/pairing.go`: name, ports, the agent token and both fingerprints, which
+  portitor-config holds; the portal adds the address it reached the host on), then over
+  SSH to the primary (its confirmed host key) `portitor-config add-secondary`
+  (`AddSecondary`, in-process console requests: the firewall row with `ha_primary_id`,
+  the management interface's `peer-addresses`, commit and confirm; `portitor-setup
+  --join` runs it too, so the logic is there alone), and with the HA firewall's
+  `witness` `--external-witness` and `witness-string` into the portal's witness list.
+  The login to the host added first is asked for again (`HAHostRequest.Other`, 409
+  without it). The token goes on standard input only, the SSH credentials are never
+  kept, and the portal runs these fixed commands only (`configCommand`). An HA firewall
+  is served at `/fw/<name>/` from its host that answers as no replica (`settleHA`,
+  asked every 5 s by `watchRoles`; one transport per host, `hostsTransport`), its
+  session cookie on that one path. It serves each firewall it lists at `/fw/<name>/` with
   `httputil.ReverseProxy` to that firewall's portitor-config (its `tls_cert` pinned
   and asked for by `PinnedServerName`, so a certificate chosen under Settings never
   breaks the pin), streams flushed as they come, the console's WebSocket passed

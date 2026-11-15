@@ -1031,6 +1031,11 @@ func firewallLeaves(f *models.Firewall, primary string) map[string]string {
 }
 
 func (t *treeRecords) EnsureFirewall(name string) error {
+	// Nothing to make: no write, which a portitor-config whose role is not
+	// known yet (an HA pair's, at start) would refuse.
+	if fws, err := t.Firewalls(); err == nil && len(fws) > 0 {
+		return nil
+	}
 	_, err := t.s.editAccess(context.Background(), func(e *accessEnv, strict bool) error {
 		if len(e.tree.Root.Lists["firewall"]) > 0 {
 			return nil

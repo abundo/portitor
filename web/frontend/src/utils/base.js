@@ -12,7 +12,7 @@ export const apiURL = (path) => `${BASE}api${path}`
 
 // portal: served by portitor-web, which lists its firewalls at
 // /portal/v1/firewalls.
-export const portal = /^\/fw\/[a-z][a-z0-9-]*\/$/.test(BASE)
+export const portal = /^\/fw\/[A-Za-z0-9][A-Za-z0-9._-]*(@(primary|secondary))?\/$/.test(BASE)
 
 // framed: the GUI is a tab of the portal's page (an iframe of its own origin),
 // whose tabs switch firewalls; its own firewall pick is left out then.

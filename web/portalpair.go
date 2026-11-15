@@ -9,140 +9,262 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
+	"time"
 )
 
-// PairRequest makes a firewall the HA secondary of one the portal serves,
-// without anything copied by hand: the portal reads the secondary's
-// information over SSH (portitor-config secondary-info), hands it to the
-// primary over SSH (add-secondary), which makes and commits the pair, adds
-// the secondary to its own firewalls and, with Witness, becomes the pair's
-// witness. The SSH credentials serve these connections only.
-type PairRequest struct {
-	// Primary is the portal's firewall that gets the secondary.
-	Primary string `json:"primary"`
-	// Name and Description are the secondary's in the portal; the name is
-	// the secondary's host name when empty.
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	// Secondary is how to reach the new host over SSH; its HostKey is
-	// empty until the administrator has confirmed it.
-	Secondary SSHProbe `json:"secondary"`
-	// PrimarySSH is the login to the primary's host (the host and its host
-	// key are the portal's: the key was confirmed when it was added).
-	PrimarySSH struct {
-		Port       int    `json:"port"`
-		User       string `json:"user"`
-		Password   string `json:"password"`
-		PrivateKey string `json:"private_key"`
-	} `json:"primary_ssh"`
-	// Witness makes the portal the pair's witness.
-	Witness bool `json:"witness"`
+// An HA firewall's hosts are added one at a time, each over SSH as a
+// firewall is (portal-info, its host key confirmed first). When the second
+// one is added the portal connects them, without anything copied by hand:
+// unless they are a pair already (each portitor-config names its pair's
+// fingerprints, GET /api/pair), it reads the secondary's information over
+// SSH (portitor-config secondary-info) and hands it to the primary over SSH
+// (add-secondary), which makes and commits the pair; with the HA firewall's
+// witness flag the primary names the portal as the pair's witness
+// (--external-witness) and the portal takes its witness string. The
+// credentials serve these connections only, and the secondary's
+// information (its agent's token) is never kept.
+
+// SSHLogin is a login to a host whose address and host key the portal has.
+type SSHLogin struct {
+	Port       int    `json:"port"`
+	User       string `json:"user"`
+	Password   string `json:"password"`
+	PrivateKey string `json:"private_key"`
 }
 
-// PairResult is its answer: the host key to confirm, or what was done.
-type PairResult struct {
-	HostKey  string          `json:"host_key,omitempty"`
-	Confirm  bool            `json:"confirm,omitempty"`
-	Firewall *PortalFirewall `json:"firewall,omitempty"`
-	// Warning says what did not work after the pair was made.
+// HAHostRequest adds a host to an HA firewall.
+type HAHostRequest struct {
+	// Firewall is the HA firewall, Role "primary" or "secondary".
+	Firewall string `json:"firewall"`
+	Role     string `json:"role"`
+	// SSH reaches the new host; its HostKey is empty until the
+	// administrator has confirmed it.
+	SSH SSHProbe `json:"ssh"`
+	// Other is the login to the host added before, needed when the two
+	// are not a pair yet (the portal pairs them).
+	Other *SSHLogin `json:"other,omitempty"`
+}
+
+// HAHostResult is its answer: the host key to confirm, or what was done.
+type HAHostResult struct {
+	HostKey string `json:"host_key,omitempty"`
+	Confirm bool   `json:"confirm,omitempty"`
+	// Paired: the portal paired the hosts now; Connected: they are a pair
+	// (now or already).
+	Paired    bool `json:"paired,omitempty"`
+	Connected bool `json:"connected,omitempty"`
+	// Warning says what did not work after the host was added.
 	Warning string `json:"warning,omitempty"`
 }
 
-// PairSecondary does a PairRequest.
-func (p *Portal) PairSecondary(ctx context.Context, req PairRequest) (*PairResult, error) {
-	var primary *PortalFirewall
-	for _, f := range p.store.Firewalls() {
-		if f.Name == req.Primary {
-			primary = &f
-		}
+// errNeedLogin is AddHAHost's when the hosts must be paired and the login
+// to the other one is missing.
+var errNeedLogin = errors.New("the two hosts are not a pair yet: the login to the other host is needed to pair them")
+
+func otherRole(role string) string {
+	if role == "primary" {
+		return "secondary"
 	}
-	if primary == nil {
-		return nil, fmt.Errorf("there is no firewall %s", req.Primary)
+	return "primary"
+}
+
+// AddHAHost does an HAHostRequest.
+func (p *Portal) AddHAHost(ctx context.Context, req HAHostRequest) (*HAHostResult, error) {
+	ha, ok := p.store.HAFirewall(req.Firewall)
+	if !ok {
+		return nil, fmt.Errorf("there is no HA firewall %s", req.Firewall)
 	}
-	pu, err := url.Parse(primary.URL)
-	if err != nil || pu.Hostname() == "" {
-		return nil, fmt.Errorf("%s has no usable address", primary.Name)
+	if req.Role != "primary" && req.Role != "secondary" {
+		return nil, fmt.Errorf("role %q: primary or secondary", req.Role)
 	}
-	if primary.SSHHostKey == "" {
-		return nil, fmt.Errorf("the SSH host key of %s was not recorded when it was added: remove it and add it again", primary.Name)
+	other := ha.Primary
+	if req.Role == "primary" {
+		other = ha.Secondary
 	}
-	if req.PrimarySSH.User == "" {
-		return nil, errors.New("the login to the primary's host is needed")
+	if other != nil && other.SSHHostKey == "" {
+		return nil, fmt.Errorf("the SSH host key of %s was not recorded: remove that host and add it again", other.Name)
 	}
 
-	sec, res, err := dialSSH(ctx, req.Secondary)
+	conn, res, err := dialSSH(ctx, req.SSH)
 	if err != nil {
 		return nil, err
 	}
-	if sec == nil {
-		return &PairResult{HostKey: res.HostKey, Confirm: true}, nil
+	if conn == nil {
+		return &HAHostResult{HostKey: res.HostKey, Confirm: true}, nil
 	}
-	defer sec.Close()
-	out, err := sec.run(configCommand(req.Secondary.User, "secondary-info"), nil)
+	defer conn.Close()
+	host, err := readPortalInfo(conn, req.SSH.Host, req.SSH.User)
 	if err != nil {
-		return nil, fmt.Errorf("portitor-config secondary-info on %s: %w", req.Secondary.Host, err)
+		return nil, err
+	}
+	host.Name, host.SSHHostKey = ha.Name+"/"+req.Role, res.HostKey
+	check := ha
+	if req.Role == "primary" {
+		check.Primary = host
+	} else {
+		check.Secondary = host
+	}
+	if err := CheckPortalHA(&check); err != nil {
+		return nil, err
+	}
+	done := &HAHostResult{}
+	if other != nil {
+		connected, err := areConnected(ctx, host, other)
+		if err != nil {
+			return nil, err
+		}
+		done.Connected = connected
+		if !connected {
+			if req.Other == nil || req.Other.User == "" {
+				return nil, errNeedLogin
+			}
+			oc, err := dialKnown(ctx, other, *req.Other)
+			if err != nil {
+				return nil, err
+			}
+			defer oc.Close()
+			sec, secUser, pri, priUser := conn, req.SSH.User, oc, req.Other.User
+			if req.Role == "primary" {
+				sec, secUser, pri, priUser = oc, req.Other.User, conn, req.SSH.User
+			}
+			err = pairHosts(sec, secUser, pri, priUser, ha.Witness)
+			switch {
+			case errors.Is(err, errInPair):
+				// The secondary says it is in a pair already: a pair the
+				// portal could not see (a portitor-config without GET
+				// /api/pair). Taken as it is.
+				done.Connected = true
+				done.Warning = "the secondary is in a pair already, so it was added as it is; the portal could not confirm the pair (update portitor-config on both hosts)"
+			case err != nil:
+				return nil, err
+			default:
+				done.Paired, done.Connected = true, true
+			}
+			if done.Paired && ha.Witness {
+				wstr, err := pri.run(configCommand(priUser, "witness-string"), nil)
+				if err == nil {
+					err = p.store.PutWitness(strings.TrimSpace(string(wstr)))
+				}
+				if err != nil {
+					done.Warning = "the pair's witness string was not added: " + err.Error()
+				}
+			}
+		}
+	}
+	if err := p.store.SetHAHost(ha.Name, req.Role, host); err != nil {
+		w := "the portal could not keep the host: " + err.Error()
+		if done.Paired {
+			w = "the pair is made, but " + w
+		}
+		done.Warning = strings.TrimSpace(w + " " + done.Warning)
+	}
+	return done, nil
+}
+
+// readPortalInfo runs portal-info on a host: its portitor-config, which an
+// HA firewall reaches over https.
+func readPortalInfo(c *sshConn, addr, user string) (*PortalFirewall, error) {
+	out, err := c.run(configCommand(user, "portal-info"), nil)
+	if err != nil {
+		return nil, fmt.Errorf("portitor-config portal-info on %s: %w", addr, err)
+	}
+	var info PortalInfo
+	if err := json.Unmarshal(out, &info); err != nil {
+		return nil, fmt.Errorf("portitor-config portal-info: unexpected answer: %w", err)
+	}
+	if !info.TLS {
+		return nil, errors.New("portitor-config serves plain HTTP there: an HA pair needs its tls_cert")
+	}
+	return &PortalFirewall{URL: "https://" + net.JoinHostPort(addr, strconv.Itoa(info.Port)), Fingerprint: info.Fingerprint}, nil
+}
+
+// dialKnown logs in to a host the portal has, its host key the one
+// confirmed when it was added.
+func dialKnown(ctx context.Context, h *PortalFirewall, l SSHLogin) (*sshConn, error) {
+	u, err := url.Parse(h.URL)
+	if err != nil || u.Hostname() == "" {
+		return nil, fmt.Errorf("%s has no usable address", h.Name)
+	}
+	c, _, err := dialSSH(ctx, SSHProbe{Host: u.Hostname(), Port: l.Port, User: l.User,
+		Password: l.Password, PrivateKey: l.PrivateKey, HostKey: h.SSHHostKey})
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", h.Name, err)
+	}
+	if c == nil {
+		return nil, fmt.Errorf("the SSH host key of %s is not the one that was confirmed when it was added", h.Name)
+	}
+	return c, nil
+}
+
+// areConnected tells whether two hosts' portitor-configs are a pair: either
+// names the other's fingerprint (GET /api/pair). One that does not answer
+// is not known to be in a pair: secondary-info and add-secondary refuse
+// what can't be paired.
+func areConnected(ctx context.Context, a, b *PortalFirewall) (bool, error) {
+	pairOf := func(h *PortalFirewall) ([]string, error) {
+		tr, err := hostTransport(h)
+		if err != nil {
+			return nil, err
+		}
+		_, role, err := ask(ctx, &http.Client{Transport: tr, Timeout: 5 * time.Second}, h.URL)
+		if err != nil {
+			return nil, nil
+		}
+		var out []string
+		for _, fp := range role.Pair {
+			out = append(out, normalizeFingerprint(fp))
+		}
+		return out, nil
+	}
+	pa, err := pairOf(a)
+	if err != nil {
+		return false, err
+	}
+	pb, err := pairOf(b)
+	if err != nil {
+		return false, err
+	}
+	return slices.Contains(pa, normalizeFingerprint(b.Fingerprint)) || slices.Contains(pb, normalizeFingerprint(a.Fingerprint)), nil
+}
+
+// errInPair is pairHosts' when secondary-info refuses a host that is in a
+// pair already.
+var errInPair = errors.New("the secondary is in a pair already")
+
+// pairHosts makes the host of sec the HA secondary of the host of pri:
+// secondary-info there, add-secondary here with it on standard input.
+func pairHosts(sec *sshConn, secUser string, pri *sshConn, priUser string, witness bool) error {
+	out, err := sec.run(configCommand(secUser, "secondary-info"), nil)
+	if err != nil && strings.Contains(err.Error(), "part of a pair") {
+		return errInPair
+	}
+	if err != nil {
+		return fmt.Errorf("portitor-config secondary-info on %s: %w", sec.host, err)
 	}
 	var info SecondaryInfo
 	if err := json.Unmarshal(out, &info); err != nil {
-		return nil, errors.New("portitor-config secondary-info: unexpected answer")
+		return errors.New("portitor-config secondary-info: unexpected answer")
 	}
 	// The address the host answered on is the one the primary will use.
 	if !sec.Remote.IsValid() {
-		return nil, errors.New("the secondary's address is unknown")
+		return errors.New("the secondary's address is unknown")
 	}
 	info.Address = sec.Remote.String()
-	if req.Name != "" {
-		info.Name = strings.TrimSpace(req.Name)
-	}
 	if err := checkSecondaryInfo(&info); err != nil {
-		return nil, err
+		return err
 	}
-	for _, f := range p.store.Firewalls() {
-		if f.Name == info.Name {
-			return nil, fmt.Errorf("there is a firewall %s in the portal already: give the secondary another name", info.Name)
-		}
-	}
-
-	port := req.PrimarySSH.Port
-	if port == 0 {
-		port = 22
-	}
-	pri, _, err := dialSSH(ctx, SSHProbe{Host: pu.Hostname(), Port: port, User: req.PrimarySSH.User,
-		Password: req.PrimarySSH.Password, PrivateKey: req.PrimarySSH.PrivateKey, HostKey: primary.SSHHostKey})
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", primary.Name, err)
-	}
-	if pri == nil {
-		return nil, fmt.Errorf("the SSH host key of %s is not the one that was confirmed when it was added", primary.Name)
-	}
-	defer pri.Close()
 	args := []string{"add-secondary"}
-	if req.Witness {
+	if witness {
 		args = append(args, "--external-witness")
 	}
 	body, _ := json.Marshal(info)
-	if _, err := pri.run(configCommand(req.PrimarySSH.User, args...), body); err != nil {
-		return nil, fmt.Errorf("portitor-config add-secondary on %s: %w", primary.Name, err)
+	if _, err := pri.run(configCommand(priUser, args...), body); err != nil {
+		return fmt.Errorf("portitor-config add-secondary on %s: %w", pri.host, err)
 	}
-
-	cfgURL := "https://" + net.JoinHostPort(info.Address, strconv.Itoa(info.ConfigPort))
-	fw := PortalFirewall{Name: info.Name, Description: req.Description, URL: cfgURL,
-		Fingerprint: info.ConfigFingerprint, SSHHostKey: res.HostKey}
-	done := &PairResult{Firewall: &fw}
-	if err := p.store.PutFirewall(fw); err != nil {
-		done.Warning = "the pair is made, but the portal could not add " + fw.Name + ": " + err.Error()
-	}
-	if req.Witness {
-		wstr, err := pri.run(configCommand(req.PrimarySSH.User, "witness-string"), nil)
-		if err == nil {
-			err = p.store.PutWitness(strings.TrimSpace(string(wstr)))
-		}
-		if err != nil {
-			done.Warning = strings.TrimSpace(done.Warning + " The pair's witness string was not added: " + err.Error())
-		}
-	}
-	return done, nil
+	return nil
 }

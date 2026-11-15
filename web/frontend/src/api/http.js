@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import axios from 'axios'
-import { BASE } from '@/utils/base'
+import { BASE, framed } from '@/utils/base'
 
 // Every mutating request is JSON: the server refuses anything else, which
 // (with the SameSite=Strict cookie) is the CSRF defence.
@@ -41,9 +41,9 @@ http.interceptors.response.use(
   },
   (err) => {
     if (err.response?.status === 401 && err.response.headers?.['x-portitor-portal'] === 'login') {
-      // The portal's session ended, not this firewall's: the portal's page
-      // (this GUI is a tab of it) shows its login.
-      window.top.postMessage({ portitor: 'portal-login' }, window.location.origin)
+      // The portal's session ended, not this firewall's: the portal's login.
+      if (framed) window.top.postMessage({ portitor: 'portal-login' }, window.location.origin)
+      else window.location.assign('/#/login')
     } else if (err.response?.status === 401 && !err.config.url?.endsWith('/login')) {
       onUnauthorized()
     }

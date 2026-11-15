@@ -16,6 +16,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/abundo/portitor/internal/agentapi"
 	"github.com/abundo/portitor/internal/confview"
@@ -253,6 +254,10 @@ func TestPortal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	p.static = fstest.MapFS{
+		"portal.html":        {Data: []byte(`<div id="app"></div><script src="./assets/portal-x.js"></script>`)},
+		"assets/portal-x.js": {Data: []byte("1")},
+	}
 	portal := httptest.NewServer(p.Handler())
 	defer portal.Close()
 	// Nothing is served without the portal's login.
@@ -301,9 +306,12 @@ func TestPortal(t *testing.T) {
 	if b := body(get("/portal/v1/firewalls")); !strings.Contains(b, `"path":"/fw/fw1/"`) || !strings.Contains(b, "does not answer") {
 		t.Errorf("portal list: %s", b)
 	}
-	// The shell is the tabs' page.
-	if b := body(get("/")); !strings.Contains(b, `id="bar"`) {
-		t.Errorf("portal shell: %s", b)
+	// The portal's GUI, and its files before any login.
+	if b := body(get("/")); !strings.Contains(b, `id="app"`) {
+		t.Errorf("portal page: %s", b)
+	}
+	if res, err := http.Get(portal.URL + "/assets/portal-x.js"); err != nil || res.StatusCode != http.StatusOK {
+		t.Errorf("asset before login: %v %v", res, err)
 	}
 	// Without its own address in X-Forwarded-For trusted, portitor-config
 	// sees the portal's; with trusted_proxies, the browser's.

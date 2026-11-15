@@ -18,6 +18,22 @@ module portitor-portal {
 
   revision 2026-11-15 { description "First version."; }
 
+  grouping host {
+    description "One host's portitor-config, as the portal reaches it.";
+    leaf url {
+      type string { pattern 'https?://[^/?#@\s]+/?'; }
+      description "Its portitor-config: https://<host>:<port>.";
+    }
+    leaf fingerprint {
+      type string { pattern '([0-9A-Fa-f]{2}:?){31}[0-9A-Fa-f]{2}'; }
+      description "The SHA-256 of its portitor-config's tls_cert, pinned.";
+    }
+    leaf ssh-host-key {
+      type string;
+      description "The SSH host key (SHA256:...) of the host, as the administrator confirmed it when it was added.";
+    }
+  }
+
   list firewall {
     key "name";
     ordered-by user;
@@ -44,6 +60,40 @@ module portitor-portal {
     leaf ssh-host-key {
       type string;
       description "The SSH host key (SHA256:...) of the host, as the administrator confirmed it when the firewall was added.";
+    }
+  }
+
+  list ha-firewall {
+    key "name";
+    ordered-by user;
+    description
+      "An HA pair, one firewall in the portal, served at /fw/<name>/ by
+       whichever of its hosts is primary now. Its hosts are added one at a
+       time; once both are there the portal pairs them (the secondary's
+       information carried over SSH to the primary, add-secondary), unless
+       they are a pair already. A name is a firewall's or an HA firewall's,
+       never both.";
+    leaf name {
+      type string {
+        length "1..63";
+        pattern '[A-Za-z0-9][A-Za-z0-9._-]*';
+      }
+    }
+    leaf description {
+      type string;
+    }
+    leaf witness {
+      type boolean;
+      default true;
+      description "Make this portal the pair's witness when it pairs the hosts.";
+    }
+    container primary {
+      description "The host installed as the pair's primary.";
+      uses host;
+    }
+    container secondary {
+      description "The host installed as the pair's secondary (ISO role secondary).";
+      uses host;
     }
   }
 

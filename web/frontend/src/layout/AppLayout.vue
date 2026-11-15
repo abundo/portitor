@@ -3,11 +3,10 @@
 
 <script setup>
 import { setWarningsHandler } from '@/api/http'
-import { onMounted, ref } from 'vue'
-import { useRoute } from 'vue-router'
-import { watch } from 'vue'
+import { onMounted, ref, watch } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import AppMenu from './AppMenu.vue'
+import AppShell from './AppShell.vue'
 import AppTopbar from './AppTopbar.vue'
 import AppLogPanel from './AppLogPanel.vue'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
@@ -16,40 +15,21 @@ import { useInstanceStore } from '@/stores/instances'
 import { useDeployStore } from '@/stores/deploy'
 import { useLogPanel } from '@/composables/useLogPanel'
 import { useAuthStore } from '@/stores/auth'
+import { api } from '@/api'
 
 const instances = useInstanceStore()
 const auth = useAuthStore()
 const deploy = useDeployStore()
-const mobileMenu = ref(false)
-// On a wide screen the menu is a sidebar the button hides and shows, and the
-// browser remembers which; on a narrow one it is always hidden and the
-// button opens it as a slideover.
-const MENU_KEY = 'menu.open'
-const wide = window.matchMedia('(min-width: 1024px)')
-const sidebar = ref(readSidebar())
-
-function readSidebar() {
+// The version in the top bar is cosmetic: left out when it can't be read.
+const build = ref(null)
+onMounted(async () => {
   try {
-    return localStorage.getItem(MENU_KEY) !== 'false'
+    build.value = await api.version()
   } catch {
-    return true
+    // leave it out
   }
-}
-
-function toggleMenu() {
-  if (!wide.matches) {
-    mobileMenu.value = !mobileMenu.value
-    return
-  }
-  sidebar.value = !sidebar.value
-  try {
-    localStorage.setItem(MENU_KEY, String(sidebar.value))
-  } catch {
-    // Not remembered; the toggle works without it.
-  }
-}
+})
 const { state: logPanel, note } = useLogPanel()
-const route = useRoute()
 const toast = useToast()
 
 // What a save leaves for the commit to refuse (AGENTS.md: messages are
@@ -70,11 +50,6 @@ watch(
     }
   },
   { immediate: true },
-)
-
-watch(
-  () => route.path,
-  () => (mobileMenu.value = false),
 )
 
 // The status call imports new physical interfaces of the firewall into
@@ -111,26 +86,18 @@ watch(
 </script>
 
 <template>
-  <div class="flex h-screen flex-col overflow-hidden">
-    <AppTopbar @toggle-menu="toggleMenu" />
-    <div class="flex min-h-0 flex-1">
-      <aside
-        v-if="sidebar"
-        class="hidden w-60 shrink-0 overflow-y-auto border-r border-default p-3 lg:block"
-      >
-        <AppMenu />
-      </aside>
-      <main class="min-w-0 flex-1 overflow-auto p-4 md:p-6">
-        <router-view :key="instances.currentName ?? 0" />
-      </main>
-    </div>
-    <AppLogPanel v-if="logPanel.open" />
-  </div>
-  <USlideover v-model:open="mobileMenu" side="left" title="Menu">
-    <template #body>
+  <AppShell :build="build">
+    <template #topbar>
+      <AppTopbar />
+    </template>
+    <template #menu>
       <AppMenu />
     </template>
-  </USlideover>
+    <router-view :key="instances.currentName ?? 0" />
+    <template #bottom>
+      <AppLogPanel v-if="logPanel.open" />
+    </template>
+  </AppShell>
   <ServiceDialog />
   <ConfirmDialog />
 </template>

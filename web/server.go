@@ -179,6 +179,7 @@ func (s *Server) Echo() *echo.Echo {
 	api.POST("/login", s.handleLogin)
 	api.POST("/logout", s.handleLogout)
 	api.GET("/version", func(c *echo.Context) error { return c.JSON(http.StatusOK, buildinfo.Get()) })
+	api.GET("/pair", s.handlePairRole)
 
 	g := api.Group("", s.requireAuth, s.requireRole)
 	g.GET("/me", s.handleMe)
@@ -304,6 +305,11 @@ func (s *Server) Echo() *echo.Echo {
 // isPortalPrefix: a path portitor-web serves a firewall at (portalPrefix).
 func isPortalPrefix(p string) bool {
 	name, ok := strings.CutPrefix(p, "/fw/")
+	// An HA firewall's host alone: /fw/<name>@primary or @secondary.
+	if n, role, found := strings.Cut(name, "@"); found {
+		name = n
+		ok = ok && (role == "primary" || role == "secondary")
+	}
 	return ok && fwconfig.ValidDefaultInstanceName(name)
 }
 

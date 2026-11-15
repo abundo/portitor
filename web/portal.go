@@ -6,11 +6,10 @@ package web
 import (
 	"context"
 	"crypto/tls"
-	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"html/template"
+	"io/fs"
 	"log/slog"
 	"net"
 	"net/http"
@@ -76,6 +75,43 @@ type PortalFirewall struct {
 	URL         string `yaml:"url" json:"url"`
 	Fingerprint string `yaml:"fingerprint" json:"fingerprint,omitempty"`
 	SSHHostKey  string `yaml:"ssh_host_key" json:"ssh_host_key,omitempty"`
+}
+
+// PortalHA is an HA firewall: a pair served as one firewall, from whichever
+// host is primary now. Primary and Secondary are nil until added; their
+// Name is <name>/<role>, for messages.
+type PortalHA struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	Witness     bool            `json:"witness"`
+	Primary     *PortalFirewall `json:"primary,omitempty"`
+	Secondary   *PortalFirewall `json:"secondary,omitempty"`
+}
+
+// CheckPortalHA checks an HA firewall's name and its hosts (https only:
+// a pair's portitor-configs have their tls_cert).
+func CheckPortalHA(ha *PortalHA) error {
+	if !fwconfig.ValidDefaultInstanceName(ha.Name) {
+		return fmt.Errorf("name %q: letters, digits, '-', '_' and '.', starting with a letter or digit, at most 63 characters", ha.Name)
+	}
+	for _, h := range []*PortalFirewall{ha.Primary, ha.Secondary} {
+		if h == nil {
+			continue
+		}
+		c := *h
+		c.Name = ha.Name
+		if err := CheckPortalFirewall(&c); err != nil {
+			return fmt.Errorf("%s: %w", h.Name, err)
+		}
+		if c.Fingerprint == "" {
+			return fmt.Errorf("%s: an HA pair's portitor-config is reached over https", h.Name)
+		}
+		h.URL, h.Fingerprint = c.URL, c.Fingerprint
+	}
+	if ha.Primary != nil && ha.Secondary != nil && ha.Primary.Fingerprint == ha.Secondary.Fingerprint {
+		return errors.New("the primary and the secondary are the same host")
+	}
+	return nil
 }
 
 func LoadPortalConfig(path string) (*PortalConfig, error) {
@@ -161,12 +197,18 @@ type Portal struct {
 	cfg   *PortalConfig
 	store *PortalStore
 	key   []byte
-	page  *template.Template
+	// static is the frontend (web/static): portal.html and its assets.
+	static fs.FS
 
 	mu      sync.RWMutex
 	fws     []PortalFirewall
+	has     []PortalHA
 	proxies map[string]*httputil.ReverseProxy
+	// clients are by firewall name, an HA firewall's hosts by
+	// <name>/<role>.
 	clients map[string]*http.Client
+	// active is the host (<name>/<role>) each HA firewall is served from.
+	active map[string]string
 
 	witnessMu     sync.Mutex
 	witnessCancel context.CancelFunc
@@ -175,9 +217,6 @@ type Portal struct {
 
 	limits loginLimits
 }
-
-//go:embed portal.html portal.js
-var portalFS embed.FS
 
 // NewPortal opens the configuration in cfg.DataDir (taking in web.yaml's
 // firewalls and witness strings the first time) and makes the proxies.
@@ -207,10 +246,8 @@ func OpenPortalConfigStore(cfg *PortalConfig) (*PortalStore, error) {
 // NewPortalWith is NewPortal on a store already open.
 func NewPortalWith(cfg *PortalConfig, store *PortalStore) (*Portal, error) {
 	p := &Portal{cfg: cfg, store: store, limits: loginLimits{fails: map[string][]time.Time{}}}
+	p.static = staticFS()
 	var err error
-	if p.page, err = template.ParseFS(portalFS, "portal.html"); err != nil {
-		return nil, err
-	}
 	if p.key, err = loadSessionKey(cfg.DataDir); err != nil {
 		return nil, err
 	}
@@ -247,9 +284,11 @@ func importPortalConfig(store *PortalStore, cfg *PortalConfig) error {
 	})
 }
 
-// reload makes the proxies of the configuration's firewalls.
+// reload makes the proxies of the configuration's firewalls and HA
+// firewalls.
 func (p *Portal) reload() error {
 	fws := p.store.Firewalls()
+	has := p.store.HAFirewalls()
 	proxies := map[string]*httputil.ReverseProxy{}
 	clients := map[string]*http.Client{}
 	for i := range fws {
@@ -259,29 +298,119 @@ func (p *Portal) reload() error {
 			continue
 		}
 		target, _ := url.Parse(f.URL)
-		tr := &http.Transport{
-			Proxy:                 nil,
-			ForceAttemptHTTP2:     false,
-			MaxIdleConnsPerHost:   16,
-			IdleConnTimeout:       90 * time.Second,
-			ResponseHeaderTimeout: 5 * time.Minute,
+		tr, err := hostTransport(f)
+		if err != nil {
+			return err
 		}
-		if target.Scheme == "https" {
-			tlsCfg, err := agentclient.PinnedTLS("portitor-config "+f.Name, f.Fingerprint)
+		proxies[f.Name] = p.proxy(f.Name, func() *url.URL { return target }, tr)
+		clients[f.Name] = &http.Client{Transport: tr, Timeout: 3 * time.Second}
+	}
+	for i := range has {
+		ha := &has[i]
+		if err := CheckPortalHA(ha); err != nil {
+			slog.Warn("portal: HA firewall left out", "firewall", ha.Name, "err", err)
+			continue
+		}
+		// One transport per host, picked by the request's host: each
+		// pins its own certificate.
+		byHost := map[string]http.RoundTripper{}
+		for _, h := range ha.hosts() {
+			tr, err := hostTransport(h)
 			if err != nil {
 				return err
 			}
-			tlsCfg.MinVersion = tls.VersionTLS12
-			tlsCfg.ServerName = PinnedServerName
-			tr.TLSClientConfig = tlsCfg
+			u, _ := url.Parse(h.URL)
+			byHost[u.Host] = tr
+			clients[h.Name] = &http.Client{Transport: tr, Timeout: 3 * time.Second}
+			// Each host also at /fw/<name>@<role>/, for a look at the
+			// replica ('@' is in no firewall's name).
+			proxies[hostPath(h.Name)] = p.proxy(hostPath(h.Name), func() *url.URL { return u }, tr)
 		}
-		proxies[f.Name] = p.proxy(f.Name, target, tr)
-		clients[f.Name] = &http.Client{Transport: tr, Timeout: 3 * time.Second}
+		if len(byHost) == 0 {
+			continue
+		}
+		name := ha.Name
+		proxies[name] = p.proxy(name, func() *url.URL { return p.activeURL(name) }, hostsTransport(byHost))
 	}
 	p.mu.Lock()
-	p.fws, p.proxies, p.clients = fws, proxies, clients
+	p.fws, p.has, p.proxies, p.clients = fws, has, proxies, clients
 	p.mu.Unlock()
 	return nil
+}
+
+// hosts are an HA firewall's hosts that have been added, primary first.
+func (ha *PortalHA) hosts() []*PortalFirewall {
+	var out []*PortalFirewall
+	for _, h := range []*PortalFirewall{ha.Primary, ha.Secondary} {
+		if h != nil {
+			out = append(out, h)
+		}
+	}
+	return out
+}
+
+// hostPath is where an HA firewall's host (<name>/<role>) is served alone,
+// under /fw/: <name>@<role>.
+func hostPath(host string) string { return strings.Replace(host, "/", "@", 1) }
+
+// hostTransport is the transport to one portitor-config, its certificate
+// pinned.
+func hostTransport(f *PortalFirewall) (*http.Transport, error) {
+	tr := &http.Transport{
+		Proxy:                 nil,
+		ForceAttemptHTTP2:     false,
+		MaxIdleConnsPerHost:   16,
+		IdleConnTimeout:       90 * time.Second,
+		ResponseHeaderTimeout: 5 * time.Minute,
+	}
+	if strings.HasPrefix(f.URL, "https:") {
+		tlsCfg, err := agentclient.PinnedTLS("portitor-config "+f.Name, f.Fingerprint)
+		if err != nil {
+			return nil, err
+		}
+		tlsCfg.MinVersion = tls.VersionTLS12
+		tlsCfg.ServerName = PinnedServerName
+		tr.TLSClientConfig = tlsCfg
+	}
+	return tr, nil
+}
+
+// hostsTransport sends a request by the transport of its host.
+type hostsTransport map[string]http.RoundTripper
+
+func (h hostsTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	tr, ok := h[r.URL.Host]
+	if !ok {
+		return nil, fmt.Errorf("no transport for %s", r.URL.Host)
+	}
+	return tr.RoundTrip(r)
+}
+
+// activeURL is the URL of the HA firewall's host that serves it now: the
+// one last seen not a replica (refreshRoles), else the primary as added.
+func (p *Portal) activeURL(name string) *url.URL {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	for _, ha := range p.has {
+		if ha.Name != name {
+			continue
+		}
+		hosts := ha.hosts()
+		var pick *PortalFirewall
+		for _, h := range hosts {
+			if h.Name == p.active[name] {
+				pick = h
+			}
+		}
+		if pick == nil && len(hosts) > 0 {
+			pick = hosts[0]
+		}
+		if pick != nil {
+			u, _ := url.Parse(pick.URL)
+			return u
+		}
+	}
+	return &url.URL{Scheme: "https", Host: "invalid"}
 }
 
 func (p *Portal) firewalls() []PortalFirewall {
@@ -306,7 +435,7 @@ func portalPrefix(name string) string { return "/fw/" + name }
 // there). The Host header is the browser's, so the console's WebSocket
 // passes its origin check, and responses are flushed as they come
 // (captures, traces, logs).
-func (p *Portal) proxy(name string, target *url.URL, tr http.RoundTripper) *httputil.ReverseProxy {
+func (p *Portal) proxy(name string, target func() *url.URL, tr http.RoundTripper) *httputil.ReverseProxy {
 	prefix := portalPrefix(name)
 	return &httputil.ReverseProxy{
 		Rewrite: func(r *httputil.ProxyRequest) {
@@ -317,7 +446,7 @@ func (p *Portal) proxy(name string, target *url.URL, tr http.RoundTripper) *http
 			if r.Out.URL.RawPath == r.Out.URL.Path {
 				r.Out.URL.RawPath = ""
 			}
-			r.SetURL(target)
+			r.SetURL(target())
 			r.SetXForwarded()
 			r.Out.Host = r.In.Host
 			r.Out.Header.Set("X-Forwarded-Prefix", prefix)
@@ -402,7 +531,8 @@ func (p *Portal) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", p.handlePage)
 	mux.HandleFunc("GET /portal/{$}", p.handlePage)
-	mux.HandleFunc("GET /portal/portal.js", p.handleScript)
+	mux.HandleFunc("GET /assets/", p.handleAsset)
+	mux.HandleFunc("GET /favicon.svg", p.handleAsset)
 	mux.HandleFunc("POST /portal/v1/login", p.handleLogin)
 	mux.HandleFunc("POST /portal/v1/logout", p.handleLogout)
 	mux.HandleFunc("GET /portal/v1/session", p.authed(p.handleSession))
@@ -411,7 +541,12 @@ func (p *Portal) Handler() http.Handler {
 	mux.HandleFunc("PUT /portal/v1/firewalls/{name}", p.authed(p.handlePutFirewall))
 	mux.HandleFunc("DELETE /portal/v1/firewalls/{name}", p.authed(p.handleDeleteFirewall))
 	mux.HandleFunc("POST /portal/v1/probe", p.authed(p.handleProbe))
-	mux.HandleFunc("POST /portal/v1/pair", p.authed(p.handlePair))
+	mux.HandleFunc("POST /portal/v1/ha", p.authed(p.handlePutHA))
+	mux.HandleFunc("PUT /portal/v1/ha/{name}", p.authed(p.handlePutHA))
+	mux.HandleFunc("DELETE /portal/v1/ha/{name}", p.authed(p.handleDeleteHA))
+	mux.HandleFunc("POST /portal/v1/ha/{name}/{role}", p.authed(p.handleHAHost))
+	mux.HandleFunc("DELETE /portal/v1/ha/{name}/{role}", p.authed(p.handleRemoveHAHost))
+	mux.HandleFunc("GET /portal/v1/version", p.handleVersion)
 	mux.HandleFunc("GET /portal/v1/witness", p.authed(p.handleWitnesses))
 	mux.HandleFunc("POST /portal/v1/witness", p.authed(p.handlePutWitness))
 	mux.HandleFunc("DELETE /portal/v1/witness/{pair}", p.authed(p.handleDeleteWitness))
@@ -439,55 +574,197 @@ func (p *Portal) Handler() http.Handler {
 // own origin (the firewalls at /fw/).
 func portalHeaders(w http.ResponseWriter) {
 	h := w.Header()
-	h.Set("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'")
+	h.Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'")
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("X-Frame-Options", "DENY")
 	h.Set("Referrer-Policy", "same-origin")
 	h.Set("Cache-Control", "no-store")
 }
 
-// portalStatus is a firewall in the portal's list.
+// portalStatus is a firewall or an HA firewall in the portal's list. An HA
+// firewall's Version and Error are those of the host it is served from.
 type portalStatus struct {
 	Name        string `json:"name"`
+	Kind        string `json:"kind"` // "firewall" or "ha"
 	Description string `json:"description,omitempty"`
 	URL         string `json:"url,omitempty"`
+	// A firewall's pinned fingerprint and confirmed SSH host key.
+	Fingerprint string `json:"fingerprint,omitempty"`
+	SSHHostKey  string `json:"ssh_host_key,omitempty"`
 	Path        string `json:"path"`
 	Version     string `json:"version,omitempty"`
 	Error       string `json:"error,omitempty"`
+	// An HA firewall's: whether the portal is to be its witness, its
+	// hosts, the one it is served from, and whether they are a pair.
+	Witness   bool         `json:"witness,omitempty"`
+	Hosts     []hostStatus `json:"hosts,omitempty"`
+	Active    string       `json:"active,omitempty"`
+	Connected bool         `json:"connected,omitempty"`
 }
 
-// statuses asks every portitor-config for its version, at once.
+// hostStatus is one host of an HA firewall, as it answers now.
+type hostStatus struct {
+	Role        string `json:"role"` // as added: primary or secondary
+	URL         string `json:"url"`
+	Path        string `json:"path"` // this host alone
+	Fingerprint string `json:"fingerprint"`
+	Version     string `json:"version,omitempty"`
+	Error       string `json:"error,omitempty"`
+	// Replica: a read-only copy of the pair's primary; Known: its role is
+	// known (its agent answered).
+	Replica bool `json:"replica"`
+	Known   bool `json:"known"`
+	// Pair is the config fingerprints of the pair it is in.
+	Pair []string `json:"-"`
+}
+
+// ask asks one portitor-config for its version and its place in a pair.
+func ask(ctx context.Context, client *http.Client, base string) (version string, role pairRole, err error) {
+	if client == nil {
+		return "", role, errors.New("not valid")
+	}
+	get := func(path string, v any) error {
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, base+path, nil)
+		res, err := client.Do(req)
+		if err != nil {
+			return errors.New("does not answer")
+		}
+		defer res.Body.Close()
+		if res.StatusCode != http.StatusOK || json.NewDecoder(res.Body).Decode(v) != nil {
+			return fmt.Errorf("answers HTTP %d", res.StatusCode)
+		}
+		return nil
+	}
+	var v buildinfo.Info
+	if err := get("/api/version", &v); err != nil {
+		return "", role, err
+	}
+	// An older portitor-config has no /api/pair: no pair known.
+	_ = get("/api/pair", &role)
+	return v.Version, role, nil
+}
+
+// statuses asks every portitor-config for its version, at once, and an HA
+// firewall's hosts for their roles too (which it is served from follows).
 func (p *Portal) statuses(ctx context.Context) []portalStatus {
-	fws := p.firewalls()
-	out := make([]portalStatus, len(fws))
+	p.mu.RLock()
+	fws, has := slices.Clone(p.fws), slices.Clone(p.has)
+	clients := p.clients
+	p.mu.RUnlock()
+	out := make([]portalStatus, len(fws)+len(has))
 	var wg sync.WaitGroup
 	for i, f := range fws {
-		out[i] = portalStatus{Name: f.Name, Description: f.Description, URL: f.URL, Path: portalPrefix(f.Name) + "/"}
-		p.mu.RLock()
-		client := p.clients[f.Name]
-		p.mu.RUnlock()
+		out[i] = portalStatus{Name: f.Name, Kind: "firewall", Description: f.Description, URL: f.URL,
+			Fingerprint: f.Fingerprint, SSHHostKey: f.SSHHostKey, Path: portalPrefix(f.Name) + "/"}
 		wg.Go(func() {
-			if client == nil {
-				out[i].Error = "not valid"
-				return
-			}
-			req, _ := http.NewRequestWithContext(ctx, http.MethodGet, f.URL+"/api/version", nil)
-			res, err := client.Do(req)
+			v, _, err := ask(ctx, clients[f.Name], f.URL)
 			if err != nil {
-				out[i].Error = "does not answer"
-				return
+				out[i].Error = err.Error()
 			}
-			defer res.Body.Close()
-			var v buildinfo.Info
-			if res.StatusCode != http.StatusOK || json.NewDecoder(res.Body).Decode(&v) != nil {
-				out[i].Error = fmt.Sprintf("answers HTTP %d", res.StatusCode)
-				return
-			}
-			out[i].Version = v.Version
+			out[i].Version = v
 		})
 	}
+	for j, ha := range has {
+		i := len(fws) + j
+		out[i] = portalStatus{Name: ha.Name, Kind: "ha", Description: ha.Description, Path: portalPrefix(ha.Name) + "/", Witness: ha.Witness}
+		for _, h := range ha.hosts() {
+			out[i].Hosts = append(out[i].Hosts, hostStatus{Role: strings.TrimPrefix(h.Name, ha.Name+"/"), URL: h.URL,
+				Fingerprint: h.Fingerprint, Path: portalPrefix(hostPath(h.Name)) + "/"})
+		}
+		for k := range out[i].Hosts {
+			hs := &out[i].Hosts[k]
+			wg.Go(func() {
+				v, role, err := ask(ctx, clients[ha.Name+"/"+hs.Role], hs.URL)
+				if err != nil {
+					hs.Error = err.Error()
+				}
+				hs.Version, hs.Replica, hs.Known = v, role.Replica, role.Known
+				for _, fp := range role.Pair {
+					hs.Pair = append(hs.Pair, normalizeFingerprint(fp))
+				}
+			})
+		}
+	}
 	wg.Wait()
+	for j := range has {
+		p.settleHA(&out[len(fws)+j])
+	}
 	return out
+}
+
+// settleHA picks the host an HA firewall is served from (the one that
+// answers and is not a replica; else the one it was; else the first that
+// answers) and tells whether its hosts are paired.
+func (p *Portal) settleHA(st *portalStatus) {
+	p.mu.Lock()
+	if p.active == nil {
+		p.active = map[string]string{}
+	}
+	cur := strings.TrimPrefix(p.active[st.Name], st.Name+"/")
+	pick := ""
+	for _, h := range st.Hosts {
+		if h.Error == "" && h.Known && !h.Replica {
+			pick = h.Role
+		}
+	}
+	if pick == "" {
+		for _, h := range st.Hosts {
+			if h.Role == cur && h.Error == "" {
+				pick = cur
+			}
+		}
+	}
+	if pick == "" {
+		for _, h := range st.Hosts {
+			if h.Error == "" {
+				pick = h.Role
+				break
+			}
+		}
+	}
+	if pick == "" {
+		pick = cur
+	}
+	if pick == "" && len(st.Hosts) > 0 {
+		pick = st.Hosts[0].Role
+	}
+	if pick != "" {
+		p.active[st.Name] = st.Name + "/" + pick
+	}
+	p.mu.Unlock()
+	st.Active = pick
+	st.Error = "no host added yet"
+	for _, h := range st.Hosts {
+		if h.Role == pick {
+			st.Version, st.Error, st.URL = h.Version, h.Error, h.URL
+		}
+	}
+	if len(st.Hosts) == 2 {
+		a, b := st.Hosts[0], st.Hosts[1]
+		st.Connected = slices.Contains(a.Pair, normalizeFingerprint(b.Fingerprint)) ||
+			slices.Contains(b.Pair, normalizeFingerprint(a.Fingerprint))
+	}
+}
+
+// watchRoles asks the HA firewalls' hosts for their roles every few
+// seconds, so that a pair is served from its new primary after a failover
+// whether or not anyone looks at the list.
+func (p *Portal) watchRoles(ctx context.Context) {
+	tick := time.NewTicker(5 * time.Second)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+			p.mu.RLock()
+			n := len(p.has)
+			p.mu.RUnlock()
+			if n > 0 {
+				p.statuses(ctx)
+			}
+		}
+	}
 }
 
 // Check asks every firewall's portitor-config for its version.
@@ -496,20 +773,36 @@ func (p *Portal) Check(ctx context.Context) []portalStatus { return p.statuses(c
 // Store is the portal's configuration.
 func (p *Portal) Store() *PortalStore { return p.store }
 
-// handlePage is the shell: the login, the tabs, the firewalls' list.
+// handlePage is the portal's own GUI (portal.html of the frontend, built
+// into web/static beside the firewall GUI's index.html): its login and
+// pages, a single-page application whose routes are in the URL's hash.
 func (p *Portal) handlePage(w http.ResponseWriter, r *http.Request) {
-	portalHeaders(w)
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := p.page.Execute(w, struct{ Version string }{buildinfo.Version}); err != nil {
-		slog.Warn("portal page", "err", err)
+	if r.URL.Path != "/" {
+		http.Redirect(w, r, "/", http.StatusFound)
+		return
 	}
+	page, err := fs.ReadFile(p.static, "portal.html")
+	if err != nil {
+		http.Error(w, "the GUI is not built (web/static)", http.StatusNotFound)
+		return
+	}
+	portalHeaders(w)
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write(page)
 }
 
-func (p *Portal) handleScript(w http.ResponseWriter, r *http.Request) {
+// handleAsset serves the GUI's files (scripts, styles, icons), before any
+// login: they are the same for everyone, and the login page needs them.
+func (p *Portal) handleAsset(w http.ResponseWriter, r *http.Request) {
 	portalHeaders(w)
-	data, _ := portalFS.ReadFile("portal.js")
-	w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
-	_, _ = w.Write(data)
+	// Hashed names: the same name is always the same file.
+	if strings.HasPrefix(r.URL.Path, "/assets/") {
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	} else {
+		w.Header().Set("Cache-Control", "no-cache")
+	}
+	http.FileServerFS(p.static).ServeHTTP(w, r)
 }
 
 // restartWitness runs the witness of the configuration's strings, again
@@ -572,6 +865,7 @@ func (p *Portal) Serve(ctx context.Context) error {
 	p.restartWitness()
 	go p.store.Watch(ctx)
 	go p.runSSH(ctx)
+	go p.watchRoles(ctx)
 	p.warnWebYAML()
 	go func() {
 		<-ctx.Done()

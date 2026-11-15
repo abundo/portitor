@@ -175,6 +175,32 @@ func (s *Server) pairHeader(c *echo.Context, pair []models.Firewall) {
 	}
 }
 
+// pairRole is GET /api/pair, before any login: whether this
+// portitor-config is a replica (read-only, a copy of its pair's primary's) and
+// the config_fingerprints of its HA pair (none outside a pair). portitor-web
+// (the portal) serves an HA firewall from the host that is not a replica, and
+// tells by the fingerprints whether its two hosts are paired. Nothing in it
+// is secret: the fingerprints are those of certificates every client sees.
+type pairRole struct {
+	Replica bool     `json:"replica"`
+	Known   bool     `json:"known"`
+	Pair    []string `json:"pair"`
+}
+
+func (s *Server) handlePairRole(c *echo.Context) error {
+	_, pair := s.sessionKey()
+	out := pairRole{Replica: s.isReplica(), Pair: []string{}}
+	s.role.mu.Lock()
+	out.Known = s.role.known
+	s.role.mu.Unlock()
+	for _, f := range pair {
+		if f.ConfigFingerprint != "" {
+			out.Pair = append(out.Pair, f.ConfigFingerprint)
+		}
+	}
+	return c.JSON(http.StatusOK, out)
+}
+
 // sessionValid tells whether a session requireAuth accepted still would:
 // it has not expired, and its user still exists with the same token
 // version. For connections that outlive the request (the console).

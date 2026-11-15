@@ -1435,8 +1435,8 @@ witness too (see High availability in the GUI's Help).
 
 def secondary_text(a: dict) -> str:
     """Secondary role: the string for the primary, and how to use it."""
-    return f"""This host is ready to be the HA secondary. In the portal, Add HA secondary
-does the rest without this string. Or, on the primary, run
+    return f"""This host is ready to be the HA secondary. In the portal, an HA firewall
+(Add HA firewall, then its two hosts) does the rest without this string. Or, on the primary, run
 sudo portitor-setup --join and paste this secondary string (it holds this host's
 agent token: keep it to yourself):
 
@@ -1452,10 +1452,10 @@ from then on this host's portitor-config is a read-only copy of the primary's
 
 def primary_text(a: dict) -> str:
     return f"""This host is the primary of an HA pair. Install the secondary from the ISO
-("secondary"). Then add it in the portal (Add HA secondary: nothing to copy), or
+("secondary"). Then add both in the portal (Add HA firewall: nothing to copy), or
 paste the string its setup shows into sudo portitor-setup --join here. For a
-failover by itself, give the pair an external witness (the portal's Add HA
-secondary does): see High availability in the GUI's Help.
+failover by itself, give the pair an external witness (the portal's HA
+firewall does): see High availability in the GUI's Help.
 
 {gui_text(a)}
 {ha_portal_text(a)}"""

@@ -19,6 +19,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/abundo/portitor/internal/buildinfo"
 	"github.com/abundo/portitor/internal/datastore"
 )
 
@@ -194,6 +195,12 @@ func (p *Portal) handleSession(w http.ResponseWriter, r *http.Request) {
 	portalJSON(w, map[string]string{"user": p.sessionUser(r)})
 }
 
+// handleVersion is the portal's build, before any login (the login page
+// shows it).
+func (p *Portal) handleVersion(w http.ResponseWriter, r *http.Request) {
+	portalJSON(w, buildinfo.Get())
+}
+
 func (p *Portal) handleFirewalls(w http.ResponseWriter, r *http.Request) {
 	portalJSON(w, p.statuses(r.Context()))
 }
@@ -211,7 +218,7 @@ func (p *Portal) handlePutFirewall(w http.ResponseWriter, r *http.Request) {
 		portalError(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
-	if r.Method == http.MethodPost && p.store.Tree().Root.Entry("firewall", []string{f.Name}) != nil {
+	if r.Method == http.MethodPost && p.nameTaken(f.Name) {
 		portalError(w, r, http.StatusConflict, "there is a firewall "+f.Name+" already")
 		return
 	}
@@ -246,20 +253,81 @@ func (p *Portal) handleProbe(w http.ResponseWriter, r *http.Request) {
 	portalJSON(w, res)
 }
 
-// handlePair makes a firewall the HA secondary of one in the portal.
-func (p *Portal) handlePair(w http.ResponseWriter, r *http.Request) {
-	var req PairRequest
+// handlePutHA adds an HA firewall (POST) or changes its description and
+// witness flag (PUT).
+func (p *Portal) handlePutHA(w http.ResponseWriter, r *http.Request) {
+	var ha PortalHA
+	ha.Witness = true
+	if err := readBody(r, &ha); err != nil {
+		portalError(w, r, http.StatusBadRequest, "bad request")
+		return
+	}
+	if name := r.PathValue("name"); name != "" {
+		ha.Name = name
+		if _, ok := p.store.HAFirewall(name); !ok {
+			portalError(w, r, http.StatusNotFound, "there is no HA firewall "+name)
+			return
+		}
+	} else if p.nameTaken(ha.Name) {
+		portalError(w, r, http.StatusConflict, "there is a firewall "+ha.Name+" already")
+		return
+	}
+	ha.Primary, ha.Secondary = nil, nil
+	if err := CheckPortalHA(&ha); err != nil {
+		portalError(w, r, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := p.store.PutHA(ha); err != nil {
+		portalError(w, r, http.StatusBadRequest, err.Error())
+		return
+	}
+	portalJSON(w, ha)
+}
+
+// nameTaken tells whether a firewall or HA firewall has the name.
+func (p *Portal) nameTaken(name string) bool {
+	t := p.store.Tree()
+	return t.Root.Entry("firewall", []string{name}) != nil || t.Root.Entry("ha-firewall", []string{name}) != nil
+}
+
+func (p *Portal) handleDeleteHA(w http.ResponseWriter, r *http.Request) {
+	if err := p.store.DeleteHA(r.PathValue("name")); err != nil {
+		portalError(w, r, http.StatusNotFound, err.Error())
+		return
+	}
+	portalJSON(w, map[string]string{})
+}
+
+// handleHAHost adds a host to an HA firewall, pairing the two when it is
+// the second.
+func (p *Portal) handleHAHost(w http.ResponseWriter, r *http.Request) {
+	var req HAHostRequest
 	if err := readBody(r, &req); err != nil {
 		portalError(w, r, http.StatusBadRequest, "bad request")
 		return
 	}
-	res, err := p.PairSecondary(r.Context(), req)
+	req.Firewall, req.Role = r.PathValue("name"), r.PathValue("role")
+	res, err := p.AddHAHost(r.Context(), req)
 	if err != nil {
-		slog.Info("portal: pairing failed", "primary", req.Primary, "secondary", req.Secondary.Host, "err", err)
-		portalError(w, r, http.StatusBadGateway, err.Error())
+		slog.Info("portal: adding an HA host failed", "firewall", req.Firewall, "role", req.Role, "host", req.SSH.Host, "err", err)
+		status := http.StatusBadGateway
+		if errors.Is(err, errNeedLogin) {
+			status = http.StatusConflict
+		}
+		portalError(w, r, status, err.Error())
 		return
 	}
 	portalJSON(w, res)
+}
+
+// handleRemoveHAHost takes a host out of an HA firewall (the pair is not
+// changed).
+func (p *Portal) handleRemoveHAHost(w http.ResponseWriter, r *http.Request) {
+	if err := p.store.SetHAHost(r.PathValue("name"), r.PathValue("role"), nil); err != nil {
+		portalError(w, r, http.StatusBadRequest, err.Error())
+		return
+	}
+	portalJSON(w, map[string]string{})
 }
 
 func (p *Portal) handleWitnesses(w http.ResponseWriter, r *http.Request) {

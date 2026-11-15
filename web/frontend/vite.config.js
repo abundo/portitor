@@ -79,12 +79,22 @@ export default defineConfig({
     // Straight into the directory portitor-web serves (and embeds).
     outDir: '../static',
     emptyOutDir: true,
+    // Two pages: the firewall's GUI (index.html, portitor-config) and
+    // portitor-web's own (portal.html, the portal), sharing the chunks.
+    rollupOptions: {
+      input: {
+        index: fileURLToPath(new URL('./index.html', import.meta.url)),
+        portal: fileURLToPath(new URL('./portal.html', import.meta.url)),
+      },
+    },
   },
   server: {
     // The Help page bundles ../../docs (src/docs.js).
     fs: { allow: ['.', '../../docs'] },
     proxy: {
       '/api': { target: 'http://127.0.0.1:8080', changeOrigin: true, ws: true },
+      // portitor-web's API, for portal.html under the dev server.
+      '/portal/v1': { target: 'http://127.0.0.1:8080', changeOrigin: true },
     },
   },
 })

@@ -63,13 +63,13 @@ helps on physical hardware or a hypervisor console without paste:
 
 1. Install the portal (ISO *web*) and log in.
 2. Install the primary (ISO *primary*; choose *Later* when it asks for a secondary
-   string) and add it in the portal (*Add firewall*).
-3. Install the secondary (ISO *secondary*; ignore the secondary string it shows).
-4. In the portal, *Add HA secondary*: pick the primary, give the secondary's
-   management address and an SSH login for it (the user `portitor` and its
-   password), confirm the secondary's SSH host key, and give a login for the
-   primary's host (its host key was confirmed when you added it). Leave *This portal
-   is the pair's witness* checked.
+   string) and the secondary (ISO *secondary*; ignore the secondary string it shows).
+3. In the portal, *Add HA firewall*: give the pair a name and leave *Witness* on.
+4. In its form, *Add* the primary: its address and an SSH login (the user
+   `portitor` and its password), and confirm its SSH host key.
+5. *Add* the secondary the same way, at its management address. The two are not a
+   pair yet, so the portal also asks for the login to the primary (its host key was
+   confirmed in step 4).
 
 The portal logs in to the secondary and reads its details (`portitor-config
 secondary-info`: name, ports, agent token and the two certificate fingerprints),
@@ -77,7 +77,9 @@ logs in to the primary and gives them to `portitor-config add-secondary`, which 
 the secondary under *Admin → Firewalls*, sets the primary's management *HA peer
 address* and commits the pair, and with the witness checked sets *HA witness* to
 *External* and has the portal take the pair's `witness-string` (it must reach both hosts'
-management addresses). The secondary is added to the portal, too. The agent token
+management addresses). The pair is one firewall in the portal, served by whichever
+host is primary now. Adding two hosts that are a pair already only checks that they
+are, and asks for no second login. The agent token
 travels over the two SSH connections only and is never kept by the portal. The SSH
 passwords are used for these connections and not stored. The steps below are the
 same by hand.
@@ -132,7 +134,10 @@ each host.
    one entry per name: the second would replace the first). They hold each host's
    management address, GUI port (443) and certificate fingerprint, and no secret.
    Each firewall already trusts the management network for `trusted_proxies`, so the
-   portal needs an address there.
+   portal needs an address there. The strings add the two hosts as two firewalls of
+   the portal; to have the pair as one, served by whichever host is primary now, add
+   it in the portal's GUI instead (*Add HA firewall*, then its two hosts: a pair
+   already made is only checked).
 7. **Check.** On the portal host:
 
    ```
@@ -157,7 +162,7 @@ each host.
 9. **The witness, for automatic failover.** In the primary's GUI, under *Admin →
    Firewalls*, set *HA witness* to *External* on the primary and commit. Then on the
    primary run `portitor-config witness-string` (or copy the *Witness string* from the
-   form) and add it in the portal's *HA witness* (the *Portal* tab), or
+   form) and add it in the portal's *HA witness* page, or
    `sudo -u portitor portitor-web add-witness portitor-witness:eyJwYWlyIjoi...`.
    The portal is now the pair's witness. Without this step the
    pair works, but if the primary fails the secondary stays closed until you open it

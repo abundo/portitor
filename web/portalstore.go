@@ -72,6 +72,16 @@ func portalCheck(t *datastore.Tree) []error {
 			errs = append(errs, fmt.Errorf("firewall %s: %w", f.Name, err))
 		}
 	}
+	// An HA firewall shares /fw/<name>/ with the firewalls.
+	for _, e := range t.Root.Lists["ha-firewall"] {
+		ha := portalHAOf(e)
+		if t.Root.Entry("firewall", []string{ha.Name}) != nil {
+			errs = append(errs, fmt.Errorf("ha-firewall %s: there is a firewall %s", ha.Name, ha.Name))
+		}
+		if err := CheckPortalHA(&ha); err != nil {
+			errs = append(errs, fmt.Errorf("ha-firewall %s: %w", ha.Name, err))
+		}
+	}
 	for _, e := range t.Root.Lists["witness"] {
 		w, err := ParseWitness(e.Leaf("string"))
 		switch {
@@ -235,6 +245,92 @@ func (s *PortalStore) Firewalls() []PortalFirewall {
 	return out
 }
 
+// portalHAOf is an ha-firewall entry.
+func portalHAOf(e *datastore.Node) PortalHA {
+	ha := PortalHA{Name: e.Leaf("name"), Description: e.Leaf("description"), Witness: e.Leaf("witness") != "false"}
+	host := func(role string) *PortalFirewall {
+		c := e.Containers[role]
+		if c == nil || c.Leaf("url") == "" {
+			return nil
+		}
+		return &PortalFirewall{Name: ha.Name + "/" + role, URL: c.Leaf("url"), Fingerprint: c.Leaf("fingerprint"), SSHHostKey: c.Leaf("ssh-host-key")}
+	}
+	ha.Primary, ha.Secondary = host("primary"), host("secondary")
+	return ha
+}
+
+// HAFirewalls are the HA firewalls, in order.
+func (s *PortalStore) HAFirewalls() []PortalHA {
+	t := s.Tree()
+	var out []PortalHA
+	for _, e := range t.Root.Lists["ha-firewall"] {
+		out = append(out, portalHAOf(e))
+	}
+	return out
+}
+
+// HAFirewall is one HA firewall; ok is false for none.
+func (s *PortalStore) HAFirewall(name string) (PortalHA, bool) {
+	e := s.Tree().Root.Entry("ha-firewall", []string{name})
+	if e == nil {
+		return PortalHA{}, false
+	}
+	return portalHAOf(e), true
+}
+
+// PutHA adds an HA firewall or changes its description and witness flag,
+// keeping its hosts.
+func (s *PortalStore) PutHA(ha PortalHA) error {
+	return s.Edit(func(t *datastore.Tree) error {
+		e := t.Root.Entry("ha-firewall", []string{ha.Name})
+		if e == nil {
+			if t.Root.Entry("firewall", []string{ha.Name}) != nil {
+				return fmt.Errorf("there is a firewall %s already", ha.Name)
+			}
+			e = t.Root.AddEntry(t.Root.S.Child("ha-firewall"), map[string]string{"name": ha.Name})
+		}
+		delete(e.Leaves, "description")
+		if ha.Description != "" {
+			e.Leaves["description"] = ha.Description
+		}
+		e.Leaves["witness"] = fmt.Sprint(ha.Witness)
+		return nil
+	})
+}
+
+// SetHAHost sets (h nil: removes) the host of an HA firewall in role
+// ("primary" or "secondary").
+func (s *PortalStore) SetHAHost(name, role string, h *PortalFirewall) error {
+	return s.Edit(func(t *datastore.Tree) error {
+		e := t.Root.Entry("ha-firewall", []string{name})
+		if e == nil {
+			return fmt.Errorf("there is no HA firewall %s", name)
+		}
+		if role != "primary" && role != "secondary" {
+			return fmt.Errorf("role %q: primary or secondary", role)
+		}
+		if h == nil {
+			delete(e.Containers, role)
+			return nil
+		}
+		c := e.AddContainer(e.S.Child(role))
+		c.Leaves = map[string]string{"url": h.URL}
+		for k, v := range map[string]string{"fingerprint": h.Fingerprint, "ssh-host-key": h.SSHHostKey} {
+			if v != "" {
+				c.Leaves[k] = v
+			}
+		}
+		return nil
+	})
+}
+
+// DeleteHA removes an HA firewall from the portal (the pair is not changed).
+func (s *PortalStore) DeleteHA(name string) error {
+	return s.Edit(func(t *datastore.Tree) error {
+		return t.Delete(datastore.Path{{Name: "ha-firewall", Keys: []string{name}}})
+	})
+}
+
 // Witnesses are the witness strings.
 func (s *PortalStore) Witnesses() []string {
 	t := s.Tree()
@@ -255,6 +351,9 @@ func (s *PortalStore) PutFirewall(f PortalFirewall) error {
 			}
 		}
 		fw := t.Root.S.Child("firewall")
+		if t.Root.Entry("ha-firewall", []string{f.Name}) != nil {
+			return fmt.Errorf("there is an HA firewall %s already", f.Name)
+		}
 		if e := t.Root.Entry("firewall", []string{f.Name}); e != nil {
 			e.Leaves = leaves
 			return nil

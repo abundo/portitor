@@ -10,9 +10,10 @@ the firewall is needed to change it.
 
 **portitor-web** is optional: a standalone portal on another host to the GUIs of
 several firewalls. It has users and a configuration of its own (no database): the
-firewalls, the HA witness strings and the users, a tree of a YANG module kept in
-`portal.json` in its data directory. It shows each firewall's GUI in a tab, and
-serves each at `/fw/<name>/`, passing the GUI, the API, the console and the captures
+firewalls, the HA firewalls, the HA witness strings and the users, a tree of a YANG
+module kept in `portal.json` in its data directory. Its own GUI looks and works like a
+firewall's: *Firewalls* lists them as they answer now, and *Open* loads a firewall's
+own GUI, whose top bar has a *Portal* button back. It serves each at `/fw/<name>/`, passing the GUI, the API, the console and the captures
 through to that firewall's portitor-config, whose login, users and roles apply as
 they do there. Each has its own login, but the two hosts of an HA pair share one: a
 login on either is good on both. It is also the [witness](ha.md#the-witness) of HA
@@ -114,26 +115,31 @@ configuration once, at the first start.
 the firewalls' GUIs too, which then ask for the firewall's login. There is no user
 at first; make one with `createadmin`.
 
-**Adding a firewall** (the *Portal* tab, *Add firewall*): enter the firewall's host
+**Adding a firewall** (*Firewalls*, *Add firewall*): enter the firewall's host
 and an SSH user with a password or private key. portitor-web shows the host's SSH host key,
 which you compare with the firewall's and confirm; only then does it log in, once,
 and run `portitor-config portal-info`, which gives portitor-config's port and
 certificate fingerprint. The user is root, or one that may run
 `sudo -u portitor portitor-config portal-info`. The credentials are used for that
-connection and never kept. Give the firewall a name and add it; its GUI opens in a
-tab. *Enter by hand* takes the URL (`https://<firewall>:8444`; `http://` only to
+connection and never kept. Give the firewall a name and add it. *Enter by hand* takes the URL (`https://<firewall>:8444`; `http://` only to
 this host) and the SHA-256 of its `tls_cert` (`portitor-config fingerprint` there).
 
-**Adding an HA secondary** (*Add HA secondary*): pairs a new host with a firewall the
-portal already serves, with nothing copied by hand. portitor-web logs in to the new host
-over SSH (its host key confirmed first) and runs `portitor-config secondary-info`, then
-logs in to the primary (the host key from when it was added) and pipes the result to
-`portitor-config add-secondary`, which adds the secondary, gives the management
-interface its peer address and commits the pair. With *This portal is the pair's
-witness* it also sets the pair's witness to external and adds its `witness-string`.
-The new host is added to the portal's firewalls. The agent token goes over standard
-input only, and is not kept; the users are root or one that may run
-`sudo -u portitor portitor-config ...`. See [High availability](ha.md).
+**Adding an HA pair** (*Add HA firewall*): an HA pair is one firewall in the portal,
+served at `/fw/<name>/` by whichever host is primary now (each portitor-config says
+whether it is a replica, `GET /api/pair`; the portal asks every 5 s, so after a
+failover the pair is served by its new primary). Give it a name; its form then lists
+its two hosts, *Primary* and *Secondary*, each added with *Add* as a firewall is (SSH,
+the host key confirmed first, `portitor-config portal-info`). When the second is added
+the portal connects them, with nothing copied by hand, unless they are a pair already:
+it asks for the login to the other host too (its host key is the one confirmed when
+it was added), runs `portitor-config secondary-info` on the secondary and pipes the
+result to `portitor-config add-secondary` on the primary, which adds the secondary,
+gives the management interface its peer address and commits the pair. With *Witness*
+on (the default) it also sets the pair's witness to external and adds its
+`witness-string` under *HA witness*. The agent token goes over standard input only,
+and is not kept; the users are root or one that may run
+`sudo -u portitor portitor-config ...`. Removing a host or the HA firewall changes
+nothing on the pair, and leaves its witness string. See [High availability](ha.md).
 
 On each firewall, add portitor-web's address to `trusted_proxies` in its
 `config.yaml`. The HA pair's shared login needs each host's *portitor-config URL* and

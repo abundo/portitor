@@ -2,7 +2,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useInstanceStore } from '@/stores/instances'
@@ -11,34 +11,17 @@ import { useLogPanel } from '@/composables/useLogPanel'
 import { openConsoleWindow } from '@/composables/useConsoleWindow'
 import { openCaptureWindow } from '@/composables/useCaptureWindow'
 import { confirmDiscard } from '@/composables/useFormGuard'
-import { api } from '@/api'
 import ConfirmBanner from '@/components/ConfirmBanner.vue'
 import ChangesBanner from '@/components/ChangesBanner.vue'
 import ReplicaBanner from '@/components/ReplicaBanner.vue'
 import FirewallSwitcher from '@/components/FirewallSwitcher.vue'
-
-defineEmits(['toggle-menu'])
+import PortalLink from '@/components/PortalLink.vue'
 
 const auth = useAuthStore()
 const instances = useInstanceStore()
 const deploy = useDeployStore()
 const router = useRouter()
 const { state: logPanel, toggle: toggleLog } = useLogPanel()
-
-// goreleaser stamps the tag without its v (1.2.3), the Makefile `git describe`.
-const build = ref(null)
-const version = computed(() => {
-  const v = build.value?.version
-  if (!v) return ''
-  return /^\d/.test(v) ? `v${v}` : v
-})
-onMounted(async () => {
-  try {
-    build.value = await api.version()
-  } catch {
-    // the version is cosmetic; leave it out
-  }
-})
 
 const current = computed({
   get: () => instances.currentName ?? undefined,
@@ -87,92 +70,76 @@ const userMenu = computed(() => [
 </script>
 
 <template>
-  <header class="flex h-14 shrink-0 items-center gap-3 border-b border-default px-3 md:px-4">
-    <UTooltip text="Show or hide the menu">
-      <UButton
-        icon="i-lucide-menu"
-        color="neutral"
-        variant="ghost"
-        aria-label="Menu"
-        @click="$emit('toggle-menu')"
+  <!-- The top bar's contents after AppShell's logo and version. -->
+  <PortalLink />
+  <FirewallSwitcher />
+  <div v-if="auth.user?.virtual_firewalls" class="ml-2 flex items-center gap-2">
+    <span class="hidden text-sm text-muted md:inline">VF</span>
+    <USelect v-model="current" :items="instances.topItems" class="w-56" placeholder="none" />
+  </div>
+  <ReplicaBanner />
+  <ConfirmBanner />
+  <ChangesBanner v-if="!auth.replica" />
+  <div class="ml-auto flex items-center gap-2">
+    <UTooltip
+      v-if="!auth.canEdit && !auth.replica"
+      text="Your user can look at this virtual firewall but not change it"
+    >
+      <UBadge color="neutral" variant="outline" icon="i-lucide-eye" label="Read-only" />
+    </UTooltip>
+    <UTooltip v-if="deploy.status?.version_mismatch" :text="deploy.status.version_mismatch">
+      <UBadge
+        color="warning"
+        variant="subtle"
+        icon="i-lucide-triangle-alert"
+        label="Version mismatch"
+        class="cursor-pointer"
+        @click="router.push('/updates')"
       />
     </UTooltip>
-    <RouterLink to="/" class="flex items-center gap-2 font-semibold">
-      <UIcon name="i-lucide-shield" class="size-6 text-primary" />
-      <span class="hidden sm:inline">Portitor</span>
-    </RouterLink>
-    <UTooltip v-if="version" :text="`commit ${build.commit.slice(0, 12)}, ${build.date}`">
-      <span class="hidden font-mono text-xs text-muted sm:inline">{{ version }}</span>
+    <UTooltip :text="agentChip.title ?? ''">
+      <UBadge
+        :color="agentChip.color"
+        variant="subtle"
+        :label="agentChip.label"
+        class="cursor-pointer"
+        @click="router.push('/')"
+      />
     </UTooltip>
-    <FirewallSwitcher />
-    <div v-if="auth.user?.virtual_firewalls" class="ml-2 flex items-center gap-2">
-      <span class="hidden text-sm text-muted md:inline">VF</span>
-      <USelect v-model="current" :items="instances.topItems" class="w-56" placeholder="none" />
-    </div>
-    <ReplicaBanner />
-    <ConfirmBanner />
-    <ChangesBanner v-if="!auth.replica" />
-    <div class="ml-auto flex items-center gap-2">
-      <UTooltip
-        v-if="!auth.canEdit && !auth.replica"
-        text="Your user can look at this virtual firewall but not change it"
-      >
-        <UBadge color="neutral" variant="outline" icon="i-lucide-eye" label="Read-only" />
-      </UTooltip>
-      <UTooltip v-if="deploy.status?.version_mismatch" :text="deploy.status.version_mismatch">
-        <UBadge
-          color="warning"
-          variant="subtle"
-          icon="i-lucide-triangle-alert"
-          label="Version mismatch"
-          class="cursor-pointer"
-          @click="router.push('/updates')"
-        />
-      </UTooltip>
-      <UTooltip :text="agentChip.title ?? ''">
-        <UBadge
-          :color="agentChip.color"
-          variant="subtle"
-          :label="agentChip.label"
-          class="cursor-pointer"
-          @click="router.push('/')"
-        />
-      </UTooltip>
-      <UTooltip :text="logPanel.open ? 'Hide log panel' : 'Show agent log and logged packets'">
-        <UButton
-          icon="i-lucide-terminal"
-          color="neutral"
-          :variant="logPanel.open ? 'soft' : 'ghost'"
-          aria-label="Log panel"
-          @click="toggleLog"
-        />
-      </UTooltip>
-      <UTooltip v-if="auth.isAdmin" text="Open console window">
-        <UButton
-          icon="i-lucide-square-terminal"
-          color="neutral"
-          variant="ghost"
-          aria-label="Console"
-          :disabled="!instances.currentName"
-          @click="openConsoleWindow(instances.currentName)"
-        />
-      </UTooltip>
-      <UTooltip v-if="auth.canEdit" text="Open packet capture window">
-        <UButton
-          icon="i-lucide-radio-tower"
-          color="neutral"
-          variant="ghost"
-          aria-label="Packet capture"
-          :disabled="!instances.currentName"
-          @click="openCaptureWindow(instances.currentName)"
-        />
-      </UTooltip>
-      <UTooltip text="Switch between dark and light mode">
-        <UColorModeButton />
-      </UTooltip>
-      <UDropdownMenu :items="userMenu">
-        <UButton icon="i-lucide-user" color="neutral" variant="ghost" aria-label="User menu" />
-      </UDropdownMenu>
-    </div>
-  </header>
+    <UTooltip :text="logPanel.open ? 'Hide log panel' : 'Show agent log and logged packets'">
+      <UButton
+        icon="i-lucide-terminal"
+        color="neutral"
+        :variant="logPanel.open ? 'soft' : 'ghost'"
+        aria-label="Log panel"
+        @click="toggleLog"
+      />
+    </UTooltip>
+    <UTooltip v-if="auth.isAdmin" text="Open console window">
+      <UButton
+        icon="i-lucide-square-terminal"
+        color="neutral"
+        variant="ghost"
+        aria-label="Console"
+        :disabled="!instances.currentName"
+        @click="openConsoleWindow(instances.currentName)"
+      />
+    </UTooltip>
+    <UTooltip v-if="auth.canEdit" text="Open packet capture window">
+      <UButton
+        icon="i-lucide-radio-tower"
+        color="neutral"
+        variant="ghost"
+        aria-label="Packet capture"
+        :disabled="!instances.currentName"
+        @click="openCaptureWindow(instances.currentName)"
+      />
+    </UTooltip>
+    <UTooltip text="Switch between dark and light mode">
+      <UColorModeButton />
+    </UTooltip>
+    <UDropdownMenu :items="userMenu">
+      <UButton icon="i-lucide-user" color="neutral" variant="ghost" aria-label="User menu" />
+    </UDropdownMenu>
+  </div>
 </template>

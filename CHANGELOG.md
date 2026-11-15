@@ -10,12 +10,15 @@ here (`dev/release-notes.sh`); the full list is `git log <previous tag>..<tag>`.
 
 ### Added
 
-- **The portal pairs an HA secondary** (*Add HA secondary*): install the portal,
-  the primary and the secondary, add the primary to the portal, and the portal
-  connects the pair over SSH, with nothing copied by hand: it reads the new host's
-  details (`portitor-config secondary-info`), has the primary add and commit the
-  secondary (`portitor-config add-secondary`), and, if you like, becomes the pair's
-  witness. `portitor-setup --join` uses the same command.
+- **An HA pair is one firewall in the portal** (*Add HA firewall*): add its primary
+  and its secondary to it one at a time, and when the second is there the portal
+  connects them over SSH, with nothing copied by hand, unless they are a pair
+  already: it reads the secondary's details (`portitor-config secondary-info`), has
+  the primary add and commit the secondary (`portitor-config add-secondary`), and,
+  if you like, becomes the pair's witness. `portitor-setup --join` uses the same
+  command. The pair is served at one path by whichever host is primary now
+  (portitor-config's new `GET /api/pair` says whether it is a replica), and follows
+  a failover.
 
 ### Changed
 
@@ -23,7 +26,9 @@ here (`dev/release-notes.sh`); the full list is `git log <previous tag>..<tag>`.
   firewalls, HA witness strings and users are a tree of a YANG module
   (`portitor-portal.yang`) in `portal.json` in its data directory
   (`/var/lib/portitor-web`), no longer lists in `web.yaml`. It has a login (make a
-  user with `portitor-web createadmin`), shows each firewall's GUI in a tab, and
+  user with `portitor-web createadmin`), a GUI of its own in the firewall GUI's
+  look (the same layout, grids and dialogs), which opens each firewall's GUI as a
+  page with a *Portal* button back, and
   adds a firewall by logging in to it over SSH once to read its address and
   certificate fingerprint (the host key is confirmed first; the credentials are not
   kept). `firewalls:` and `witness:` of an existing `web.yaml` are taken in once.
