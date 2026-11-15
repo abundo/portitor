@@ -1080,7 +1080,7 @@ func otherNode(node string) string {
 }
 
 // mgmtGateway is the management gateway as entered, "peer" resolved to the
-// other host's address ("" outside a pair, which validation refuses).
+// other host's address ("" until the secondary is added).
 func (p haPair) mgmtGateway(gw string) string {
 	if gw == fwconfig.HAGatewayPeer {
 		return p.gateway
