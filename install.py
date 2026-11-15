@@ -825,6 +825,11 @@ def install_apparmor(host: Host, deploy: Path) -> None:
             host.run(f"apparmor_parser -r {shlex.quote(profile)}", check=False)
 
 
+# The hosts whose old portitor-web database this run moved into their own
+# portitor-config (move_web_database), which install_web then lists.
+LOCAL_DB_MOVED: set[str] = set()
+
+
 def install_web(
     host: Host, binary: Path, deploy: Path, version: str, assume_yes: bool,
     moved_to: Host | None = None, moved_address: str = "",
@@ -845,8 +850,9 @@ def install_web(
     host.systemctl("daemon-reload")
     if moved_to:
         link_remote_config(host, moved_to, moved_address)
-    # portitor-config on this host is its firewall, unless it lists others.
-    elif host.exists(CONFIG_FILE):
+    # Only when this run moved the old portitor-web's database to portitor-config
+    # on this host: that firewall was what it served. Never on a plain update.
+    elif str(host) in LOCAL_DB_MOVED and host.exists(CONFIG_FILE):
         link_local_config(host)
     if new_config:
         log("==> portitor-web is installed but not started. Next steps:")
@@ -1064,6 +1070,8 @@ def install_config(
     host.run(f"install -d -o {WEB_USER} -g {WEB_USER} -m 0700 {CONFIG_DB_DIR}")
     host.run(f"systemctl stop {CONFIG_UNIT} 2>/dev/null || true", desc=f"systemctl stop {CONFIG_UNIT}")
     moved = move_remote_database(db_from, host) if db_from else move_web_database(host)
+    if moved and not db_from:
+        LOCAL_DB_MOVED.add(str(host))
     set_agent_url(host)
     host.put(binary, WEB_BIN, "0755")
     host.run(f"ln -sfn portitor-web {shlex.quote(CONFIG_LINK)}", desc=f"ln -s portitor-web {CONFIG_LINK}")

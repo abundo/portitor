@@ -102,8 +102,10 @@ docs and user-facing messages.
   `src/portal/`: hash routes, `/portal/v1` through `src/portal/api.js`), built into
   `web/static` beside `index.html` and served from `staticFS()` (`handlePage`, the assets
   before login), sharing the firewall GUI's frame (`layout/AppShell.vue`, which knows no
-  store), `DataGrid`, dialogs and form rules. A firewall's GUI opens as a page of its own
-  (`/fw/<name>/`), whose top bar leads back (`PortalLink`). A firewall
+  store), `DataGrid`, dialogs and form rules. A firewall's GUI opens in a tab of the
+  portal (`src/portal/tabs.js`: an iframe of `/fw/<name>/`, kept loaded; closing it or
+  logging out asks the frame's `window.portitorConfirmDiscard`); opened on its own, its
+  top bar leads back (`PortalLink`, hidden when framed). A firewall
   is added by `POST /portal/v1/probe`: SSH to the host (the host key is returned for
   the administrator to confirm before any login; credentials are never stored), which
   runs `portitor-config portal-info` (as the service user through `sudo` unless root)

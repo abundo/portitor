@@ -46,6 +46,10 @@ export async function confirmDiscard() {
   return true
 }
 
+// The portal (portitor-web) shows a firewall's GUI in a tab, an iframe of its
+// own origin: it asks the same question before it closes the tab or logs out.
+window.portitorConfirmDiscard = confirmDiscard
+
 export function useUnsaved(dirty, discard = () => {}) {
   const entry = { dirty, discard }
   forms.add(entry)

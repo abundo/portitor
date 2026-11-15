@@ -16,6 +16,8 @@ const props = defineProps({
   build: { type: Object, default: null },
   home: { type: String, default: '/' },
   title: { type: String, default: 'Portitor' },
+  // fill: the height of its parent, not the screen's (the portal's tabs above it).
+  fill: { type: Boolean, default: false },
 })
 
 // goreleaser stamps the tag without its v (1.2.3), the Makefile `git describe`.
@@ -59,7 +61,7 @@ watch(
 </script>
 
 <template>
-  <div class="flex h-screen flex-col overflow-hidden">
+  <div class="flex flex-col overflow-hidden" :class="fill ? 'h-full' : 'h-screen'">
     <header class="flex h-14 shrink-0 items-center gap-3 border-b border-default px-3 md:px-4">
       <UTooltip text="Show or hide the menu">
         <UButton

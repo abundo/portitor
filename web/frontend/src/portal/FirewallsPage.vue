@@ -2,8 +2,8 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
 <script setup>
-// The portal's firewalls and HA firewalls, as they answer now. Open loads a
-// firewall's own GUI (/fw/<name>/; an HA firewall's from the host that is
+// The portal's firewalls and HA firewalls, as they answer now. Open shows a
+// firewall's own GUI in a tab of the portal (/fw/<name>/; an HA firewall's from the host that is
 // primary now); Edit its form, with Delete.
 import { computed, ref } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
@@ -13,6 +13,7 @@ import { useAutoRefresh } from '@/composables/useAutoRefresh'
 import FirewallDialog from './FirewallDialog.vue'
 import HADialog from './HADialog.vue'
 import { portal } from './api'
+import { openTab } from './tabs'
 
 const toast = useToast()
 const rows = ref([])
@@ -93,7 +94,7 @@ async function created(name) {
 }
 
 function openFirewall(row) {
-  window.location.assign(row.path)
+  openTab(row.name, row.path)
 }
 </script>
 
@@ -127,7 +128,7 @@ function openFirewall(row) {
         <UButton
           size="sm"
           variant="soft"
-          icon="i-lucide-external-link"
+          icon="i-lucide-panel-top-open"
           :disabled="!!row.error"
           :title="`Open ${row.name}'s GUI`"
           aria-label="Open"
