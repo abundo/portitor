@@ -253,9 +253,17 @@ monitor* on the interface); turn it off for one a failover wouldn't help. After 
 monitored handover, that host doesn't hand over again for a minute, so a flapping link
 moves the traffic there and back at most.
 
-**There is no automatic failback.** A host that comes back joins as the standby. Move
-the traffic by hand with *Switch over* under *Admin → Firewalls* (on either host's
-form), or `portitor request ha switchover` on the active host.
+**The primary takes over again.** The configuration is edited on the primary: while
+the secondary is active, its portitor-config is a read-only copy, and the primary's is
+on the standby. So by default (*Primary takes over again* on the primary's form under
+*Admin → Firewalls*), when the secondary took over or stayed active while the primary
+was gone (a crash, a reboot, an update), and the primary has been back, with at least
+as many monitored interfaces up, for 30 seconds, the secondary hands over to it (no
+more than once a minute). A switchover to the secondary while the primary stays up
+is left alone. Turned off, a host that comes back joins as the
+standby: move the traffic by hand with *Switch over* under *Admin → Firewalls* (on
+either host's form), or `portitor request ha switchover` on the active host. Commit
+after changing it.
 
 **Handover.** A switchover, a monitored handover and a clean stop of the active agent
 (an update, a reboot) hand over: the active host closes and the standby opens at once,

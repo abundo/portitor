@@ -348,6 +348,9 @@ type Firewall struct {
 	// (HAWitnessExternal), which opens the vote with HAWitnessSecret.
 	HAWitness       string `gorm:"column:ha_witness" json:"ha_witness"`
 	HAWitnessSecret string `gorm:"column:ha_witness_secret" json:"-"`
+	// HAPreempt, on the primary, makes an active secondary hand over to
+	// the primary when it is back (fwconfig.HA.Preempt).
+	HAPreempt bool `gorm:"column:ha_preempt" json:"ha_preempt"` // the leaf's default is true; a gorm default would make false unwritable (confview.RowOf)
 	// ConfigURL is the host's portitor-config as its HA peer reaches it,
 	// pinned by ConfigFingerprint (its tls_cert): the secondary copies the
 	// primary's database from there (replica.go).

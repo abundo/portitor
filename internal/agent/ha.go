@@ -77,6 +77,12 @@ type haManager struct {
 	health, peerHealth int
 	worseSince         time.Time
 	lastMove           time.Time
+	// primaryLost: since this host opened, the primary has gone unheard
+	// for haDeadAfter; only then does a secondary hand back (preemptSays),
+	// so a switchover to it stays. primaryBack is since when it has heard
+	// the primary back and healthy.
+	primaryLost bool
+	primaryBack time.Time
 	// monitored are the devices that count, by namespace.
 	monitored map[string][]string
 	// handover: the peer has closed and told this host to open.
@@ -217,6 +223,7 @@ func (h *haManager) tick(ctx context.Context) {
 	case haOpen:
 		h.term = max(h.term, h.peer.Term) + 1
 		h.active, h.handover = true, false
+		h.primaryLost, h.primaryBack = !h.facts(now).peerAlive(), time.Time{}
 	case haClose:
 		// active stays true until the gate is closed.
 	default:
@@ -228,6 +235,9 @@ func (h *haManager) tick(ctx context.Context) {
 		reason := "the console asked"
 		if h.monitorSays(now) {
 			hand, reason = true, "the standby has more monitored interfaces up"
+			h.lastMove = now
+		} else if h.preemptSays(now) {
+			hand, reason = true, "the primary is back"
 			h.lastMove = now
 		}
 		h.switching = false
@@ -309,6 +319,28 @@ func (h *haManager) monitorSays(now time.Time) bool {
 		return false
 	}
 	return haShouldHandOver(f)
+}
+
+// preemptSays tells whether an active secondary hands back to the primary
+// now; h.mu held.
+func (h *haManager) preemptSays(now time.Time) bool {
+	if !h.cfg.Preempt || h.cfg.Node != fwconfig.HASecondary {
+		return false
+	}
+	if now.Sub(h.peerSeen) >= haDeadAfter {
+		h.primaryLost, h.primaryBack = true, time.Time{}
+		return false
+	}
+	back := h.primaryLost && h.peer.Node == fwconfig.HAPrimary && h.peer.Epoch == h.cfg.Epoch &&
+		!h.peer.Active && h.health >= 0 && h.peerHealth >= h.health
+	if !back {
+		h.primaryBack = time.Time{}
+		return false
+	}
+	if h.primaryBack.IsZero() {
+		h.primaryBack = now
+	}
+	return haShouldPreempt(haPreempt{now: now, since: h.primaryBack, lastMove: h.lastMove})
 }
 
 // handOver closes this host and tells its peer to open. It promises to

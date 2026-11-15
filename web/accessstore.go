@@ -1025,6 +1025,9 @@ func firewallLeaves(f *models.Firewall, primary string) map[string]string {
 	}
 	put("ha-witness", f.HAWitness)
 	put("ha-witness-secret", f.HAWitnessSecret)
+	if !f.HAPreempt {
+		l["ha-preempt"] = "false"
+	}
 	put("config-url", f.ConfigURL)
 	put("config-fingerprint", f.ConfigFingerprint)
 	return l
@@ -1086,11 +1089,15 @@ func (t *treeRecords) PromoteFirewalls(sec, prim *models.Firewall) error {
 		if witness == "" {
 			witness = models.HAWitnessLocal
 		}
-		for _, k := range []string{"ha-primary", "ha-secret", "ha-epoch", "ha-witness", "ha-witness-secret"} {
+		preempt, hasPreempt := pn.Leaves["ha-preempt"]
+		for _, k := range []string{"ha-primary", "ha-secret", "ha-epoch", "ha-witness", "ha-witness-secret", "ha-preempt"} {
 			delete(sn.Leaves, k)
 			delete(pn.Leaves, k)
 		}
 		sn.Leaves["ha-witness"] = witness
+		if hasPreempt {
+			sn.Leaves["ha-preempt"] = preempt
+		}
 		if witnessSecret != "" {
 			sn.Leaves["ha-witness-secret"] = witnessSecret
 		}

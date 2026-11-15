@@ -157,6 +157,11 @@ submodule portitor-access {
         type string;
         description "On the primary, who the pair's witness is: local (its portitor-config) or external (one on a third host).";
       }
+      leaf ha-preempt {
+        type boolean;
+        default true;
+        description "On the primary: when the secondary is active and the primary is back and healthy, the secondary hands over to it. The configuration is edited on the primary.";
+      }
       leaf ha-witness-secret {
         type string;
         px:secret;

@@ -489,3 +489,32 @@ func TestPortalKeepsEscapedPath(t *testing.T) {
 		t.Errorf("path at the firewall: %s, want %s", got, want)
 	}
 }
+
+func TestHAPreempt(t *testing.T) {
+	env, agents, pair := haPairConfigured(t)
+	// On by default, on both hosts, and in the list the GUI reads.
+	if !env.firewall(1).HAPreempt || agents[1].last().HA == nil || !agents[1].last().HA.Preempt || !agents[pair].last().HA.Preempt {
+		t.Fatalf("preempt not on by default: %+v / %+v", agents[1].last().HA, agents[pair].last().HA)
+	}
+	if rec := env.do("GET", "/api/firewalls", nil); !strings.Contains(rec.Body.String(), `"ha_preempt":true`) {
+		t.Errorf("list: %s", rec.Body)
+	}
+	if rec := env.do("PUT", "/api/firewalls/1", map[string]any{"ha_preempt": false}); rec.Code != http.StatusOK {
+		t.Fatalf("off: %d %s", rec.Code, rec.Body)
+	}
+	if rec := env.do("POST", "/api/deploy/apply", map[string]any{}); rec.Code != http.StatusOK {
+		t.Fatalf("commit: %d %s", rec.Code, rec.Body)
+	}
+	if env.firewall(1).HAPreempt || agents[1].last().HA.Preempt || agents[pair].last().HA.Preempt {
+		t.Error("preempt still on")
+	}
+	// A promotion takes it to the new primary.
+	asHost(t, env, pair, agentapi.HAPeerConfig{Node: fwconfig.HASecondary})
+	agents[1].down = true
+	if rec := env.do("POST", "/api/ha/promote", map[string]any{}); rec.Code != http.StatusOK {
+		t.Fatalf("promote: %d %s", rec.Code, rec.Body)
+	}
+	if env.firewall(pair).HAPreempt || agents[pair].last().HA.Preempt {
+		t.Error("promotion turned preempt on")
+	}
+}

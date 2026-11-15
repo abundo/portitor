@@ -61,6 +61,10 @@ type HA struct {
 	// AgentPort is this host's agent port, opened to the peer's addresses
 	// for the heartbeat. 0: none.
 	AgentPort int `json:"agent_port,omitempty"`
+	// Preempt makes an active secondary hand over to the primary once it
+	// has heard it, healthy, for a while: the primary is where the
+	// configuration is edited.
+	Preempt bool `json:"preempt,omitempty"`
 }
 
 // HAGatewayPeer, as the management interface's gateway, is the peer's

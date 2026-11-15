@@ -198,7 +198,11 @@ docs and user-facing messages.
   once with the vote; the old host takes no vote until the promise ends
   (`noVoteUntil`, also after a restart). `Interface.HAMonitor` counts a traffic
   interface's carrier in the host's health, sent in heartbeats: when the standby has
-  more for 2 s the active host hands over, at most once a minute. Each activation raises `term` (`<state>/ha-term`, separate from the
+  more for 2 s the active host hands over, at most once a minute. With `HA.Preempt`
+  (the primary's `ha-preempt`, default true) an active secondary hands over to the
+  primary once it has heard it closed, at the pair's epoch and at least as healthy, for
+  30 s, after it went unheard since this host opened (`primaryLost`, so a switchover
+  stays) (`preemptSays`, `haShouldPreempt`): the configuration is edited on the primary. Each activation raises `term` (`<state>/ha-term`, separate from the
   epoch). An open host arms `/dev/watchdog` (2 s, softdog if there is nothing better),
   fed by that loop alone; with none, or `nowayout`, it won't open on a vote, only on
   the console's (`portitor request ha active`). Apply loads the gate after moving a

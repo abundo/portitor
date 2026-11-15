@@ -569,6 +569,60 @@ func TestHAShouldHandOver(t *testing.T) {
 	}
 }
 
+func TestHAPreempt(t *testing.T) {
+	back := func(mod func(h *haManager)) *haManager {
+		h := &haManager{cfg: &fwconfig.HA{Node: fwconfig.HASecondary, Preempt: true, Epoch: 3},
+			peer: agentapi.HAHeartbeat{Node: fwconfig.HAPrimary, Epoch: 3}, health: 2, peerHealth: 2, primaryLost: true}
+		if mod != nil {
+			mod(h)
+		}
+		return h
+	}
+	// says heartbeats the peer from t0 to t0+d and asks at the end.
+	says := func(h *haManager, d time.Duration) bool {
+		var got bool
+		for at := t0; !at.After(t0.Add(d)); at = at.Add(time.Second) {
+			h.peerSeen = at
+			got = h.preemptSays(at)
+		}
+		return got
+	}
+	cases := []struct {
+		name string
+		mod  func(h *haManager)
+		d    time.Duration
+		want bool
+	}{
+		{"back long enough", nil, haPreemptHold, true},
+		{"back too briefly", nil, haPreemptHold - time.Second, false},
+		{"off", func(h *haManager) { h.cfg.Preempt = false }, haPreemptHold, false},
+		{"this is the primary", func(h *haManager) { h.cfg.Node = fwconfig.HAPrimary }, haPreemptHold, false},
+		{"primary less healthy", func(h *haManager) { h.peerHealth = 1 }, haPreemptHold, false},
+		{"primary healthier", func(h *haManager) { h.peerHealth = 3 }, haPreemptHold, true},
+		{"other epoch", func(h *haManager) { h.peer.Epoch = 2 }, haPreemptHold, false},
+		{"primary active", func(h *haManager) { h.peer.Active = true }, haPreemptHold, false},
+		{"never lost: a switchover", func(h *haManager) { h.primaryLost = false }, time.Hour, false},
+		{"health unknown", func(h *haManager) { h.health, h.peerHealth = -1, -1 }, haPreemptHold, false},
+		{"damped", func(h *haManager) { h.lastMove = t0.Add(haPreemptHold - time.Second) }, haPreemptHold, false},
+	}
+	for _, c := range cases {
+		if got := says(back(c.mod), c.d); got != c.want {
+			t.Errorf("%s: got %v", c.name, got)
+		}
+	}
+	// A gap in the heartbeats marks the primary lost and starts the hold
+	// again.
+	h := back(func(h *haManager) { h.primaryLost = false })
+	h.peerSeen = t0
+	h.preemptSays(t0)
+	if h.preemptSays(t0.Add(haDeadAfter)) || !h.primaryLost {
+		t.Fatal("primary unheard: not lost, or preempted")
+	}
+	if !says(h, haPreemptHold) {
+		t.Error("primary back after a gap: no preempt")
+	}
+}
+
 func TestPlanBlackhole(t *testing.T) {
 	want := []fwconfig.Route{{Destination: "192.0.2.0/24", Metric: 2147483647, Blackhole: true}}
 	lines := func(have []ipRoute) []string {

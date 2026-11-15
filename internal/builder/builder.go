@@ -120,13 +120,13 @@ func haBlock(fws []models.Firewall, fw *models.Firewall) (*fwconfig.HA, string) 
 			return nil, fmt.Sprintf("HA: %s's primary is not there", fw.Name)
 		}
 		peer = fws[p]
-		ha.Node, ha.Secret, ha.Epoch = fwconfig.HASecondary, fw.HASecret, fw.HAEpoch
+		ha.Node, ha.Secret, ha.Epoch, ha.Preempt = fwconfig.HASecondary, fw.HASecret, fw.HAEpoch, peer.HAPreempt
 		if peer.HAWitness == models.HAWitnessExternal {
 			ha.WitnessSecret = peer.HAWitnessSecret
 		}
 	case secondary >= 0:
 		peer = fws[secondary]
-		ha.Node, ha.Secret, ha.Epoch = fwconfig.HAPrimary, peer.HASecret, peer.HAEpoch
+		ha.Node, ha.Secret, ha.Epoch, ha.Preempt = fwconfig.HAPrimary, peer.HASecret, peer.HAEpoch, fw.HAPreempt
 		if fw.HAWitness == models.HAWitnessExternal {
 			ha.WitnessSecret = fw.HAWitnessSecret
 		}

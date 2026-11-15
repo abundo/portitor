@@ -90,7 +90,7 @@ func (g *GORM) EnsureFirewall(name string) error {
 		if err := tx.Model(&models.Firewall{}).Count(&n).Error; err != nil || n > 0 {
 			return err
 		}
-		return tx.Create(&models.Firewall{Name: name}).Error
+		return tx.Create(&models.Firewall{Name: name, HAPreempt: true}).Error
 	})
 }
 
@@ -134,7 +134,7 @@ func (g *GORM) PromoteFirewalls(sec, prim *models.Firewall) error {
 		}
 		if err := tx.Model(&models.Firewall{}).Where("id = ?", sec.ID).Updates(map[string]any{
 			"ha_primary_id": nil, "ha_secret": "", "ha_epoch": 0,
-			"ha_witness": witness, "ha_witness_secret": witnessSecret,
+			"ha_witness": witness, "ha_witness_secret": witnessSecret, "ha_preempt": prim.HAPreempt,
 		}).Error; err != nil {
 			return err
 		}

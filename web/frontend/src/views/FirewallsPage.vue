@@ -162,6 +162,13 @@ const fields = [
     hint: "The pair's third vote, which a host needs to open when it doesn't hear its peer. This firewall's portitor-config goes with this host: when it is lost, nothing takes over by itself (open the other by hand with portitor request ha active, or promote it). An external witness (portitor-web, or portitor-web witness, on a third host on the management network) gets the witness string below, and fails over by itself; commit after changing this.",
   },
   {
+    key: 'ha_preempt',
+    label: 'Primary takes over again',
+    type: 'switch',
+    show: isPrimary,
+    hint: "When the secondary is active and this primary is back and healthy for 30 s, the secondary hands over to it. The configuration is edited on the primary: while the secondary is active its portitor-config is a read-only replica. Commit after changing this.",
+  },
+  {
     key: 'witness_string',
     label: 'Witness string',
     type: 'custom',

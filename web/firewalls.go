@@ -99,6 +99,7 @@ func (s *Server) prepareFirewall(v *confview.View, f, old *models.Firewall) erro
 		return bad(fmt.Sprintf("name: a virtual firewall is named %s", f.Name))
 	}
 	f.HAWitnessSecret = ""
+	f.HAPreempt = true // the leaf's default; the form shows it on a pair's primary only
 	if f.HAWitness == models.HAWitnessExternal {
 		f.HAWitnessSecret = newHASecret()
 	}

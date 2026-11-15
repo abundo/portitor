@@ -36,6 +36,10 @@ const (
 	// haDamping: after a monitored handover, none for this long, so a
 	// flapping link doesn't flip the pair.
 	haDamping = time.Minute
+	// haPreemptHold: an active secondary hands back to the primary (HA.Preempt)
+	// once it has heard it, healthy, for this long: the primary's services
+	// have started and a rebooting one isn't caught halfway.
+	haPreemptHold = 30 * time.Second
 	// haWatchdogTimeout resets a host whose HA loop stops while open. With
 	// haMargin it must be less than the witness's vote, 4 s: a hung host
 	// is gone before its vote can move.
@@ -149,8 +153,25 @@ func (f haHealth) better() bool {
 
 // haShouldHandOver: the standby has been healthier for haMonitorHold, and
 // the last such handover is long enough ago. A pair with equal counts stays
-// where it is, and there is no failback.
+// where it is; failback is haShouldPreempt's.
 func haShouldHandOver(f haHealth) bool {
 	return f.better() && !f.worseSince.IsZero() && f.now.Sub(f.worseSince) >= haMonitorHold &&
+		(f.lastMove.IsZero() || f.now.Sub(f.lastMove) >= haDamping)
+}
+
+// haPreempt is what an active secondary with HA.Preempt looks at.
+type haPreempt struct {
+	now time.Time
+	// since: the primary has been heard, at the pair's epoch, closed and at
+	// least as healthy as this host since then; zero: it isn't.
+	since    time.Time
+	lastMove time.Time
+}
+
+// haShouldPreempt: the primary has been back and healthy for
+// haPreemptHold, and the last handover is long enough ago. Health equal
+// or better, so the monitor doesn't hand straight back.
+func haShouldPreempt(f haPreempt) bool {
+	return !f.since.IsZero() && f.now.Sub(f.since) >= haPreemptHold &&
 		(f.lastMove.IsZero() || f.now.Sub(f.lastMove) >= haDamping)
 }
