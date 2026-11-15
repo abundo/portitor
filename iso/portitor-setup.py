@@ -196,6 +196,9 @@ ROLES = [
     ("secondary", "the secondary of an HA pair: its HA link and management; the primary configures the rest"),
 ]
 HA_ROLES = ("primary", "secondary")
+# The role shown in the shell prompt (step_hostname); none on a lone firewall.
+PROMPT_LABELS = {"primary": "primary", "secondary": "secondary", "web": "portal", "agent": "firewall"}
+PROMPT_FILE = Path("/etc/debian_chroot")
 # The agent's port, on every address in an HA pair: the peer and the
 # witness reach it over the HA link and management.
 AGENT_PORT = 8443
@@ -781,6 +784,15 @@ def step_hostname(a: dict) -> None:
     i = next((n + 1 for n, ln in enumerate(lines) if ln.startswith("127.0.0.1")), 0)
     lines.insert(i, f"127.0.1.1\t{names}")
     write(HOSTS, "\n".join(lines) + "\n", 0o644)
+    # Debian's bashrc puts /etc/debian_chroot before the prompt in brackets,
+    # "(primary)admin@portitor:~$", so the hosts of a split or HA setup,
+    # which share a host name by default, are told apart. The role is the
+    # setup's: a promotion doesn't change it.
+    label = PROMPT_LABELS.get(a["role"], "")
+    if label:
+        write(PROMPT_FILE, label + "\n", 0o644)
+    else:
+        PROMPT_FILE.unlink(missing_ok=True)
 
 
 def step_database(a: dict) -> None:
