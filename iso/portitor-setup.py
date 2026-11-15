@@ -98,7 +98,8 @@ interface that takes the default route when both use DHCP), gateway (on the stat
 optional), dns (space separated; empty: the DHCP server's, when the LAN or WAN uses DHCP), password, hostname (default portitor, may include the domain), timezone and keyboard (an XKB layout, e.g. se). The file is removed when the setup has
 finished. role (both, agent or web) picks the split setups; agent reads
 web_from (portitor-web's address or network, default the LAN network), web
-reads lan and address (its own interface), gateway and join (a portal
+reads lan and address (its own interface), gateway, portal, portal_address, portal_gateway,
+gateway_on (lan or portal: the one interface with the default gateway, static or from DHCP) and join (a portal
 string, optional). primary and secondary read mgmt (a name or MAC address),
 mgmt_address, mgmt_gateway (optional: empty, the other host of the pair is the
 gateway) and ha_link (no address: the hosts use IPv6
@@ -365,7 +366,7 @@ def check_gateway(text: str, addr: ipaddress.IPv4Interface) -> ipaddress.IPv4Add
 
 
 def check_mgmt_gateway(text: str, addr: ipaddress.IPv4Interface) -> ipaddress.IPv4Address | None:
-    """The management gateway, optional: empty is the other host of the pair
+    """A gateway, optional (the management one: empty is the other host of the pair
     (the open one forwards for the closed one)."""
     return check_gateway(text, addr) if text.strip() else None
 
@@ -425,6 +426,9 @@ def dhcp_dns_nic(a: dict) -> str:
         return a["wan"]
     if a.get("lan") and not a.get("address"):
         return a["lan"]
+    # portitor-web's second interface, the portal LAN.
+    if a.get("role") == "web" and a.get("portal") and not a.get("portal_address"):
+        return a["portal"]
     return ""
 
 
@@ -960,19 +964,25 @@ def portal_string(a: dict) -> str:
 def step_host_network(a: dict) -> None:
     """portitor-web only: no agent configures this host, ifupdown does."""
     nic = a["lan"]
-    if a["address"]:
-        stanza = f"iface {nic} inet static\n    address {a['address']}\n"
-        if a["gateway"]:
-            stanza += f"    gateway {a['gateway']}\n"
-    else:
-        stanza = f"iface {nic} inet dhcp\n"
-    # The portal LAN, where users browse the portal: no default gateway
-    # (a DHCP lease's has a worse metric).
     portal = a.get("portal") or ""
+    # One default gateway, on the management interface or the portal LAN
+    # (a static one in its stanza, or its DHCP lease's). A DHCP interface
+    # that doesn't carry it has the lease's default route removed.
+    via = "portal" if portal and a.get("gateway_on") == "portal" else "lan"
+
+    def iface_stanza(name: str, address, gateway, mine: bool) -> str:
+        if address:
+            out = f"iface {name} inet static\n    address {address}\n"
+            return out + (f"    gateway {gateway}\n" if gateway and mine else "")
+        out = f"iface {name} inet dhcp\n"
+        if not mine:
+            out += f"    metric 200\n    post-up ip route del default dev {name} || true\n"
+        return out
+
+    stanza = iface_stanza(nic, a["address"], a["gateway"], via == "lan")
     if portal:
         stanza += f"\nauto {portal}\n"
-        stanza += (f"iface {portal} inet static\n    address {a['portal_address']}\n" if a.get("portal_address")
-                   else f"iface {portal} inet dhcp\n    metric 200\n")
+        stanza += iface_stanza(portal, a.get("portal_address"), a.get("portal_gateway"), via == "portal")
     # The old configuration (run again), then a clean slate.
     run(["ifdown", "--force", "-a"], check=False, quiet=True)
     for n in nics():
@@ -1241,7 +1251,14 @@ def read_answers() -> dict:
         "portal": nic("portal") if raw.get("portal") and role == "web" else "",
         "portal_address": (ipaddress.IPv4Interface(raw["portal_address"])
                            if raw.get("portal_address") and role == "web" else None),
+        "portal_gateway": (ipaddress.IPv4Address(raw["portal_gateway"])
+                           if raw.get("portal_gateway") and role == "web" else None),
+        "gateway_on": "portal" if raw.get("gateway_on") == "portal" and raw.get("portal") and role == "web" else "lan",
     }
+    if a["gateway_on"] == "portal":
+        a["gateway"] = None
+    else:
+        a["portal_gateway"] = None
     if role == "secondary":
         a["wan"], a["wan_address"] = "", None
         a["lan"], a["address"], a["gateway"] = a["mgmt"], a["mgmt_address"], a["mgmt_gateway"]
@@ -1281,11 +1298,13 @@ def load_state() -> dict:
 def state_of(a: dict) -> dict:
     """The answers as strings, without the password; a DHCP LAN is "dhcp"."""
     state = {k: str(a[k]) if a.get(k) else "" for k in ("role", "lan", "wan", "wan_address", "gateway", "tz", "hostname", "keyboard", "web_from",
-                                                         "mgmt", "mgmt_address", "mgmt_gateway", "ha_link", "portal", "portal_address")}
+                                                         "mgmt", "mgmt_address", "mgmt_gateway", "ha_link", "portal", "portal_address",
+                                                         "portal_gateway")}
     state["address"] = str(a["address"] or "dhcp")
     state["dns"] = " ".join(a["dns"])
     state["dhcp_range"] = fmt_range(a.get("dhcp_range"))
     state["default_route"] = route_from(a)
+    state["gateway_on"] = a.get("gateway_on") or "lan"
     return state
 
 
@@ -1303,6 +1322,8 @@ def answers_of(state: dict) -> dict:
         "mgmt_gateway": ipaddress.IPv4Address(state["mgmt_gateway"]) if state.get("mgmt_gateway") else None,
         "ha_link": state.get("ha_link", ""),
         "portal": state.get("portal", ""), "portal_address": iface("portal_address"),
+        "portal_gateway": ipaddress.IPv4Address(state["portal_gateway"]) if state.get("portal_gateway") else None,
+        "gateway_on": state.get("gateway_on") or "lan",
     }
 
 
@@ -1342,11 +1363,14 @@ def summary(a: dict) -> list[str]:
         out += [f"Management      {nic_label(a['mgmt'])} {a['mgmt_address']}, gateway {a['mgmt_gateway'] or 'the other host'}",
                 f"HA link         {nic_label(a['ha_link'])}"]
     elif a["role"] == "web":
-        out += [f"Firewalls       {nic_label(a['lan'])}",
+        out += [f"Management      {nic_label(a['lan'])}",
                 f"Address         {a['address'] or 'DHCP'}",
-                f"Default gateway {a['gateway'] or 'from DHCP'}"]
+                ]
         if a.get("portal"):
             out.append(f"Portal LAN      {nic_label(a['portal'])} {a.get('portal_address') or 'DHCP'}")
+        on_portal = bool(a.get("portal")) and a.get("gateway_on") == "portal"
+        gw = a.get("portal_gateway") if on_portal else a["gateway"]
+        out.append(f"Default gateway {gw or 'from DHCP'}" + (" (on the Portal LAN)" if on_portal else ""))
     else:
         out += [f"WAN interface   {nic_label(a['wan'])}",
                 f"WAN address     {a['wan_address'] or ('DHCP (no default route)' if route_from(a) == 'lan' else 'DHCP')}",
@@ -1471,7 +1495,7 @@ MARK_LOCKED = "x" if LINUX_CONSOLE else "\U0001f512"
 NIC_ROLES = {
     "both": [("wan", "WAN"), ("lan", "LAN")],
     "agent": [("wan", "WAN"), ("lan", "LAN")],
-    "web": [("lan", "Firewalls"), ("portal", "Portal LAN")],
+    "web": [("lan", "Management"), ("portal", "Portal LAN")],
     "primary": [("wan", "WAN"), ("lan", "LAN"), ("mgmt", "Management"), ("ha_link", "HA link")],
     "secondary": [("mgmt", "Management"), ("ha_link", "HA link")],
 }
@@ -1662,7 +1686,9 @@ class NicPage(Page):
                          "they are.", classes="text")
             return
         yield Static({
-            "web": "Firewalls: the interface this host reaches the firewalls through (and is reached on). "
+            "web": "Management: the interface this host uses to reach the firewalls. With an HA pair it is not for the "
+                   "Internet: the primary can be down, so the default gateway belongs on the LAN, the "
+                   "gateway that moves with the active firewall. "
                    "Portal LAN, optional: another interface, where users browse the portal.",
             "secondary": "An HA secondary needs only its HA link, a direct cable to the primary, and its "
                          "management interface; the primary configures the rest.",
@@ -1817,7 +1843,7 @@ class NetworkPage(Page):
     def body(self) -> ComposeResult:
         kind, st, role = self.kind(), self.state, self.a["role"]
         static = st.get("address", "") not in ("", "dhcp")
-        self.titles = {"wan": "WAN", "lan": "Firewalls" if kind == "host" else "LAN",
+        self.titles = {"wan": "WAN", "lan": "Management" if kind == "host" else "LAN",
                        "mgmt": "Management", "ha_link": "HA link", "portal": "Portal LAN"}
         if kind == "fw":
             yield self.section("wan", "WAN")
@@ -1849,10 +1875,13 @@ class NetworkPage(Page):
                          "An HA secondary takes its LAN, WAN and everything else from the primary once the "
                          "pair is committed; here only the DNS servers it uses until then.", classes="text")
         else:
-            yield self.section("lan", "Firewalls")
+            yield self.section("lan", "Management")
             yield row("IPv4", Select(MODES, id="lan_mode", allow_blank=False, value="static" if static else "dhcp"))
             yield row("Address", Input(st.get("address", "") if static else "", id="address", placeholder="192.168.1.10/24"))
             yield row("Default gateway", Input(st.get("gateway", ""), id="gateway", placeholder="192.168.1.1"))
+            yield Static("Static: the gateway's address; DHCP: the lease's. With an HA pair the default gateway "
+                         "belongs on the LAN (the one that moves with the active firewall), not here: the "
+                         "primary can be down.", classes="hint")
             # Shown when the last page gave an interface the role.
             pstatic = st.get("portal_address", "") not in ("", "dhcp")
             with Vertical(id="portal_box"):
@@ -1861,8 +1890,14 @@ class NetworkPage(Page):
                                          value="static" if pstatic else "dhcp"))
                 yield row("Address", Input(st.get("portal_address", "") if pstatic else "", id="portal_address",
                                            placeholder="10.0.0.10/24"))
-                yield Static("Where users browse the portal, which proxies to the firewalls. No default "
-                             "gateway: that is the firewalls' interface's.", classes="hint")
+                yield row("Default gateway", Input(st.get("portal_gateway", ""), id="portal_gateway",
+                                                   placeholder="10.0.0.1"))
+                yield row("Gateway on", Select([("Management", "lan"), ("Portal LAN", "portal")], id="gateway_on",
+                                               allow_blank=False,
+                                               value="portal" if st.get("gateway_on") == "portal" else "lan"))
+                yield Static("Where users browse the portal, which proxies to the firewalls. The host has one "
+                             "default gateway: on the Management interface or on this one, as set under "
+                             "Gateway on.", classes="hint")
         if self.ha():
             yield self.section("mgmt", "Management")
             yield row("Address", Input(st.get("mgmt_address", ""), id="mgmt_address", placeholder="172.25.38.1/24"))
@@ -1881,7 +1916,8 @@ class NetworkPage(Page):
             hint = "DNS servers the firewall itself uses until the pair is committed: one to three addresses."
         elif kind == "host":
             hint = ("DNS servers this host uses, for updates. Leave empty to use the ones the DHCP server "
-                    "offers now (" + PUBLIC_DNS + " if none answers); they are not followed afterwards.")
+                    "of an interface on DHCP offers now (" + PUBLIC_DNS + " if none answers); they are not "
+                    "followed afterwards. Required when both interfaces are static.")
         else:
             hint = ("DNS servers the firewall itself uses, for updates and IP lists. Leave empty to use the "
                     "ones the DHCP server on the DHCP interface offers (the WAN's, else the LAN's); the "
@@ -1899,11 +1935,17 @@ class NetworkPage(Page):
     @on(Select.Changed)
     def modes(self) -> None:
         for sid, ids in (("#lan_mode", ["#address"] + (["#gateway"] if self.kind() == "host" else [])),
-                         ("#portal_mode", ["#portal_address"]),
+                         ("#portal_mode", ["#portal_address", "#portal_gateway"]),
                          ("#wan_mode", ["#wan_address", "#gateway"])):
             for mode in self.query(sid).results(Select):
                 for i in ids:
                     self.query_one(i).disabled = mode.value == "dhcp"
+        # Only the interface that carries the default gateway takes one.
+        for on in self.query("#gateway_on").results(Select):
+            for gid, mine in (("#gateway", "lan"), ("#portal_gateway", "portal")):
+                for g in self.query(gid).results(Input):
+                    if on.value != mine:
+                        g.disabled = True
         # Only one DHCP interface takes the default route.
         for route in self.query("#default_route").results(Select):
             route.disabled = self.static("#lan_mode") or self.static("#wan_mode")
@@ -1949,12 +1991,18 @@ class NetworkPage(Page):
             return
         if kind == "host":
             a["address"] = self.field("Address", check_address, self.value("#address")) if self.static("#lan_mode") else None
-            a["gateway"] = self.field("Default gateway", check_gateway, self.value("#gateway"), a["address"]) if a["address"] else None
+            a["gateway"] = self.field("Default gateway", check_mgmt_gateway, self.value("#gateway"), a["address"]) if a["address"] else None
             a["wan"], a["wan_address"] = "", None
-            a["portal_address"] = None
+            a["portal_address"] = a["portal_gateway"] = None
+            a["gateway_on"] = "lan"
             if a.get("portal"):
                 a["portal_address"] = (self.field("Portal LAN address", check_address, self.value("#portal_address"),
                                                   a["address"]) if self.static("#portal_mode") else None)
+                if self.query_one("#gateway_on", Select).value == "portal":
+                    a["gateway_on"], a["gateway"] = "portal", None
+                    if a["portal_address"]:
+                        a["portal_gateway"] = self.field("Default gateway", check_mgmt_gateway,
+                                                         self.value("#portal_gateway"), a["portal_address"])
         else:
             a["address"] = self.field("LAN address", check_address, self.value("#address")) if self.static("#lan_mode") else None
             on = a["address"] and self.query_one("#dhcp_mode", Select).value == "on"
@@ -2100,7 +2148,7 @@ class Wizard(Screen):
         with Horizontal(id="wizard"):
             yield Steps(*[Option(self.step_label(i), id=f"step{i}") for i in range(len(self.kinds))], id="steps")
             yield Vertical(id="pages")
-        yield Footer()
+        yield StatusBar()
 
     def step_label(self, i: int) -> str:
         """A step in the list: done (its answers taken), locked (not reached) or open."""
@@ -2257,7 +2305,7 @@ class ProgressPage(LogPage):
         with Horizontal(id="buttons"):
             yield Button("Retry", id="retry", variant="primary", disabled=True)
             yield Button("Give up", id="giveup", variant="error", disabled=True)
-        yield Footer()
+        yield StatusBar()
 
     def on_mount(self) -> None:
         self.log_to_me()
@@ -2324,7 +2372,7 @@ class JoinPage(LogPage):
             if self.optional:
                 yield Button("Later", id="later")
             yield Button("Add", id="deploy", variant="primary")
-        yield Footer()
+        yield StatusBar()
 
     def on_mount(self) -> None:
         self.log_to_me()
@@ -2396,7 +2444,7 @@ class DonePage(Screen):
         with Horizontal(id="buttons"):
             yield Button("Continue to the login prompt" if self.app.mode == "first" else "Exit",
                          id="exit", variant="primary")
-        yield Footer()
+        yield StatusBar()
 
     def on_mount(self) -> None:
         self.query_one("#exit").focus()
@@ -2419,6 +2467,18 @@ Button:focus { text-style: bold; }
 """
 
 
+# build.sh writes the release's version here in the ISO's copy.
+SETUP_VERSION = "dev"
+
+
+class StatusBar(Horizontal):
+    """The key hints, with the version at the bottom right."""
+
+    def compose(self) -> ComposeResult:
+        yield Footer()
+        yield Static(SETUP_VERSION, id="version")
+
+
 class SetupApp(App):
     TITLE = "Portitor setup"
     # Ctrl-Q does not reach the app in every terminal (xterm.js); priority
@@ -2433,6 +2493,9 @@ class SetupApp(App):
 
     CSS = """
     #body { padding: 0 2; }
+    StatusBar { dock: bottom; height: 1; }
+    StatusBar Footer { dock: none; width: 1fr; }
+    StatusBar #version { width: auto; padding: 0 1; color: $text-muted; background: $panel; }
     #wizard { height: 1fr; }
     #steps { width: 24; height: 100%; margin: 1 0 0 1; }
     #steps, Page { border: round $panel-lighten-2; border-title-color: $text-muted; }
