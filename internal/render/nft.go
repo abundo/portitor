@@ -46,14 +46,29 @@ func (l *AntiLockout) Ports() []int {
 	return out
 }
 
-// Rules describe the anti-lockout rule for the GUI's read-only list, one
-// row per port.
+// Rules describe the anti-lockout rule for the GUI's read-only list: one
+// row with all its ports.
 func (l *AntiLockout) Rules() []AutoRule {
-	var out []AutoRule
-	for _, p := range l.Ports() {
-		out = append(out, AutoRule{Service: AntiLockoutService, Protocol: "tcp", DstPort: p, Source: l.AllowFrom})
+	ports := l.Ports()
+	if len(ports) == 0 {
+		return nil
 	}
-	return out
+	return []AutoRule{{Service: AntiLockoutService, Protocol: "tcp", DstPorts: ports, Source: l.AllowFrom}}
+}
+
+// portsMatch is the nft operand matching these ports: one, or a set.
+func portsMatch(ports []int) string {
+	strs := make([]string, len(ports))
+	for i, p := range ports {
+		strs[i] = strconv.Itoa(p)
+	}
+	switch len(strs) {
+	case 0:
+		return ""
+	case 1:
+		return strs[0]
+	}
+	return "{ " + strings.Join(strs, ", ") + " }"
 }
 
 // Nftables renders the complete ruleset for one instance. The output is fed
@@ -139,15 +154,7 @@ func Nftables(in *fwconfig.Instance, lockout *AntiLockout, paths Paths) string {
 	b.WriteString("\t\tmeta l4proto ipv6-icmp icmpv6 type { nd-router-solicit, nd-router-advert, nd-neighbor-solicit, nd-neighbor-advert, destination-unreachable, packet-too-big, time-exceeded, parameter-problem } accept\n")
 	b.WriteString("\t\tmeta l4proto icmp icmp type { destination-unreachable, time-exceeded, parameter-problem } accept\n")
 	if lockout != nil && in.Default && lockout.Port > 0 {
-		ports := lockout.Ports()
-		dport := strconv.Itoa(ports[0])
-		if len(ports) > 1 {
-			strs := make([]string, len(ports))
-			for i, p := range ports {
-				strs[i] = strconv.Itoa(p)
-			}
-			dport = "{ " + strings.Join(strs, ", ") + " }"
-		}
+		dport := portsMatch(lockout.Ports())
 		v4, v6 := splitFamilies(lockout.AllowFrom)
 		for _, m := range []struct {
 			key   string
@@ -617,6 +624,8 @@ type AutoRule struct {
 	Protocol     string   `json:"protocol"` // tcp, udp, "tcp,udp", OSPF's (OSPFService, OSPF6Service: IPv4 or IPv6, no port) or VRRPService (no port)
 	SrcPort      int      `json:"src_port,omitempty"`
 	DstPort      int      `json:"dst_port"`
+	// DstPorts, when set, are the destination ports in place of DstPort.
+	DstPorts []int `json:"dst_ports,omitempty"`
 	// Source limits the source addresses: the anti-lockout rule's
 	// (AntiLockout.Rule, rendered on its own), the BGP neighbours' and
 	// OSPFv2's networks, which Hosts & prefixes lists read-only.
@@ -744,15 +753,18 @@ func AutoInputRules(in *fwconfig.Instance) []AutoRule {
 	// The HA peer's portitor-config, copying the configuration, and its
 	// heartbeats.
 	if h := in.HAConfig; h != nil {
-		if h.Port != 0 && len(h.From) > 0 {
-			out = append(out, AutoRule{Service: HAConfigService, Protocol: "tcp", DstPort: h.Port, Source: h.From, SourceSet: HAConfigSet})
-		}
-		if h.AgentPort != 0 && h.AgentPort != h.Port && len(h.From) > 0 {
-			out = append(out, AutoRule{Service: HAAgentService, Protocol: "tcp", DstPort: h.AgentPort, Source: h.From, SourceSet: HAAgentSet})
+		if ports := peerPorts(h); len(ports) > 0 && len(h.From) > 0 {
+			out = append(out, AutoRule{Service: HAConfigService, Protocol: "tcp", DstPorts: ports, Source: h.From, SourceSet: HAConfigSet})
 		}
 		if h.Link != "" {
 			out = append(out, AutoRule{Service: HAAgentService, InInterfaces: []string{h.Link}, Protocol: "tcp", DstPort: h.AgentPort,
 				Source: []string{h.LinkPeer}, SourceSet: HAAgentLinkSet})
+		}
+		// Pings to the management interface, for checking connectivity.
+		if h.Mgmt != "" {
+			out = append(out,
+				AutoRule{Service: HAMgmtPingService, InInterfaces: []string{h.Mgmt}, Protocol: "icmp"},
+				AutoRule{Service: HAMgmtPingService, InInterfaces: []string{h.Mgmt}, Protocol: "icmpv6"})
 		}
 	}
 	// SNMP requests on its interfaces, from the allowed clients if listed.
@@ -1057,6 +1069,10 @@ func (r AutoRule) match(iif string) string {
 		parts = append(parts, tunnel6in4Proto)
 	case TunnelBrokerPingService:
 		parts = append(parts, "ip daddr @"+TunnelBrokerPingSet+" icmp type echo-request")
+	case "icmp":
+		parts = append(parts, "meta l4proto icmp icmp type echo-request")
+	case "icmpv6":
+		parts = append(parts, "meta l4proto ipv6-icmp icmpv6 type echo-request")
 	case "tcp,udp":
 		if r.PortSet != "" {
 			parts = append(parts, "meta l4proto { tcp, udp } th dport @"+r.PortSet)
@@ -1069,6 +1085,8 @@ func (r AutoRule) match(iif string) string {
 		}
 		if r.PortSet != "" {
 			parts = append(parts, fmt.Sprintf("%s dport @%s", r.Protocol, r.PortSet))
+		} else if len(r.DstPorts) > 0 {
+			parts = append(parts, fmt.Sprintf("%s dport %s", r.Protocol, portsMatch(r.DstPorts)))
 		} else {
 			parts = append(parts, fmt.Sprintf("%s dport %d", r.Protocol, r.DstPort))
 		}

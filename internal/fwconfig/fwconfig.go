@@ -925,6 +925,11 @@ func (d Document) Expand() Document {
 		out.Instances[i].addVRFDevices()
 		if out.Instances[i].Default {
 			out.Instances[i].HAConfig = d.HA.configAccess()
+			if acc := out.Instances[i].HAConfig; acc != nil {
+				if ifc := out.Instances[i].HAInterface(HARoleManagement); ifc != nil && ifc.Enabled {
+					acc.Mgmt = ifc.Name
+				}
+			}
 		}
 	}
 	return out

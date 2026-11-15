@@ -464,11 +464,11 @@ func TestAutoRulesAntiLockout(t *testing.T) {
 			if r.Service == render.IperfService { // every instance's
 				continue
 			}
-			out = append(out, fmt.Sprintf("%s %s %d %v", r.Service, r.Protocol, r.DstPort, r.Source))
+			out = append(out, fmt.Sprintf("%s %s %d %v %v", r.Service, r.Protocol, r.DstPort, r.DstPorts, r.Source))
 		}
 		return strings.Join(out, "|")
 	}
-	if got, want := get(main.Name), "anti-lockout tcp 22 [192.168.1.0/24]|anti-lockout tcp 8443 [192.168.1.0/24]"; got != want {
+	if got, want := get(main.Name), "anti-lockout tcp 0 [22 8443] [192.168.1.0/24]"; got != want {
 		t.Errorf("default: got %q, want %q", got, want)
 	}
 	if got := get("guest"); got != "" {

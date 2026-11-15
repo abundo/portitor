@@ -20,21 +20,37 @@ const (
 )
 
 // HAConfigService is the auto rule letting the HA peer's portitor-config
-// reach this host's (fwconfig.HAConfigAccess), from the HAConfigSet set.
+// and agent reach this host's (fwconfig.HAConfigAccess: both ports in one
+// rule), from the HAConfigSet set.
 const (
-	HAConfigService = "portitor-config peer"
-	HAConfigSet     = "portitor_config_peer"
+	HAConfigService = "portitor peer"
+	HAConfigSet     = "portitor_peer"
 )
 
+// HAMgmtPingService is the auto rule answering pings (ICMP and ICMPv6
+// echo requests) on an HA host's management interface, from anyone.
+const HAMgmtPingService = "ha management ping"
+
 // HAAgentService is the auto rule letting the HA peer's agent reach this
-// host's for the heartbeat, from the HAAgentSet set.
+// host's for the heartbeat on the HA link.
 const (
 	HAAgentService = "portitor-agent peer"
-	HAAgentSet     = "portitor_agent_peer"
 	// HAAgentLinkSet is the source set of the same rule on the HA link,
 	// from the peer's link-local address.
 	HAAgentLinkSet = "portitor_agent_peer_link"
 )
+
+// peerPorts are the ports HAConfigService opens: portitor-config's and
+// the agent's, each once.
+func peerPorts(h *fwconfig.HAConfigAccess) []int {
+	var out []int
+	for _, p := range []int{h.Port, h.AgentPort} {
+		if p != 0 && !slices.Contains(out, p) {
+			out = append(out, p)
+		}
+	}
+	return out
+}
 
 // haOutputRules are the output chain's accepts of what this host sends its
 // HA peer: heartbeats and the copy of the configuration. A rule closing the
@@ -54,10 +70,8 @@ func haOutputRules(in *fwconfig.Instance) []string {
 		if a.Is6() {
 			fam = "ip6"
 		}
-		for _, port := range []int{h.AgentPort, h.Port} {
-			if port != 0 {
-				out = append(out, fmt.Sprintf("%s daddr %s tcp dport %d accept %s", fam, a, port, comment("auto", HAAgentService)))
-			}
+		if dport := portsMatch(peerPorts(h)); dport != "" {
+			out = append(out, fmt.Sprintf("%s daddr %s tcp dport %s accept %s", fam, a, dport, comment("auto", HAConfigService)))
 		}
 	}
 	if h.Link != "" && h.AgentPort != 0 {

@@ -26,15 +26,16 @@ func TestHAConfigRule(t *testing.T) {
 	}
 	nft := mustFile(t, b, "/etc/nftables.d/portitor.nft")
 	for _, want := range []string{
-		"ip saddr @AUTO_portitor_config_peer_v4 tcp dport 8444 accept",
-		"ip6 saddr @AUTO_portitor_config_peer_v6 tcp dport 8444 accept",
-		"ip saddr @AUTO_portitor_agent_peer_v4 tcp dport 8443 accept",
+		"ip saddr @AUTO_portitor_peer_v4 tcp dport { 8444, 8443 } accept",
+		"ip6 saddr @AUTO_portitor_peer_v6 tcp dport { 8444, 8443 } accept",
+		`iifname "mgmt0" meta l4proto icmp icmp type echo-request accept comment "auto: ha management ping"`,
+		`iifname "mgmt0" meta l4proto ipv6-icmp icmpv6 type echo-request accept`,
 		"192.168.1.2", "2001:db8::2",
 		`ip6 saddr @AUTO_portitor_agent_peer_link_v6 iifname "ha0" tcp dport 8443 accept`,
 		`oifname "ha0" ip6 daddr fe80::2 tcp dport 8443 accept`,
 		`ip6 saddr @AUTO_conntrack_sync_v6 iifname "ha0" udp dport 3780 accept`,
-		"ip daddr 192.168.1.2 tcp dport 8444 accept",
-		"ip6 daddr 2001:db8::2 tcp dport 8444 accept",
+		"ip daddr 192.168.1.2 tcp dport { 8444, 8443 } accept",
+		"ip6 daddr 2001:db8::2 tcp dport { 8444, 8443 } accept",
 	} {
 		if !strings.Contains(nft, want) {
 			t.Errorf("missing %q:\n%s", want, nft)
@@ -47,7 +48,7 @@ func TestHAConfigRule(t *testing.T) {
 		}
 	}
 	if guest := mustFile(t, b, "/etc/portitor/instances/guest/nftables.nft"); strings.Contains(guest, HAConfigService) {
-		t.Error("the portitor-config peer rule belongs to the default instance only")
+		t.Error("the portitor peer rule belongs to the default instance only")
 	}
 }
 

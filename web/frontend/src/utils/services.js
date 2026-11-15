@@ -88,7 +88,8 @@ export function autoService(a) {
   if (a.protocol === 'ospf' || a.protocol === 'ospfv3' || a.protocol === 'vrrp') return a.protocol
   const protos = a.protocol === 'tcp,udp' ? ['tcp', 'udp'] : [a.protocol]
   const from = a.src_port ? ` from ${a.src_port}` : ''
-  const port = a.dst_port || `@${a.port_set}`
+  if (a.protocol === 'icmp' || a.protocol === 'icmpv6') return `${a.protocol} echo-request`
+  const port = a.dst_ports?.length ? a.dst_ports.join(',') : a.dst_port || `@${a.port_set}`
   return protos.map((p) => `${p}/${port}${from}`).join(', ')
 }
 // autoFamily is the IP versions of an auto rule's source addresses.
@@ -100,9 +101,14 @@ export function autoFamily(a) {
   if (v6 === 0) return 'IPv4'
   return v6 === a.source.length ? 'IPv6' : 'any'
 }
+// What opens an auto rule's port set (render.ACMEHTTPSet, IperfServerSet).
+const portSetWhile = {
+  acme_http: 'open only while a certificate is being ordered',
+  iperf3_server: 'open only while an iperf3 server runs',
+}
 export const autoDescription = (a) =>
   a.service === 'anti-lockout'
     ? 'anti-lockout, from portitor-agent config'
-    : a.port_set
-      ? `${a.service}, open only while a certificate is being ordered`
+    : a.port_set && portSetWhile[a.port_set]
+      ? `${a.service}, ${portSetWhile[a.port_set]}`
       : a.service

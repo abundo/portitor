@@ -207,13 +207,15 @@ func (in *Instance) HAInterface(role string) *Interface {
 // HAConfigAccess is what Expand gives an HA host's default instance from
 // HA: the ports of its portitor-config and agent, opened to the peer's
 // addresses (the auto rule render.HAConfigService), and the agent's to the
-// peer's link-local address on the HA link (Link, LinkPeer).
+// peer's link-local address on the HA link (Link, LinkPeer). Mgmt is the
+// management interface, which answers pings (render.HAMgmtPingService).
 type HAConfigAccess struct {
 	Port      int
 	AgentPort int
 	From      []string
 	Link      string
 	LinkPeer  string
+	Mgmt      string
 }
 
 // configAccess: the peer's addresses are those written as addresses in

@@ -108,7 +108,7 @@ const autoListDescriptions = {
   ospf6_networks: 'OSPFv3 networks, allowed to send OSPF',
   snmp_clients: 'SNMP allowed clients, allowed to UDP port 161',
   conntrack_sync: 'The HA peer, allowed to send conntrackd sync (UDP port 3780)',
-  portitor_config_peer: "The HA peer, allowed to this host's portitor-config",
+  portitor_peer: "The HA peer, allowed to this host's portitor-config and agent",
 }
 // Several rules may share a set, so one list each, with the entries of all
 // of them.

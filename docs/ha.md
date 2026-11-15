@@ -403,6 +403,6 @@ Lost with the primary: changes made there since the secondary's last copy, and t
 - **The secondary's copy fails** (the *HA secondary* badge shows the error): check
   the *portitor-config URL* and *fingerprint* of the primary under *Firewalls*
   (commit after setting them), and that the secondary reaches port 8444 there (the
-  auto rule *portitor-config peer* on the primary).
+  auto rule *portitor peer* on the primary).
 - **A commit lists HA problems.** Each names the host and what is missing (an HA link
   or management interface, a peer address, a management gateway).
