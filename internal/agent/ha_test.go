@@ -473,6 +473,10 @@ func TestHAPairOverHeartbeats(t *testing.T) {
 	// Rule 3: the primary opens on the secondary's promise alone.
 	waitHAState(t, a, agentapi.HAActive, 3*time.Second)
 	waitHAState(t, b, agentapi.HAStandby, 3*time.Second)
+	// active is set before the gate opens (open runs outside the lock).
+	for deadline := time.Now().Add(time.Second); !a.h.gate.isOpen() && time.Now().Before(deadline); {
+		time.Sleep(10 * time.Millisecond)
+	}
 	if !a.h.gate.isOpen() || b.h.gate.isOpen() {
 		t.Fatalf("gates: %v %v", a.h.gate.isOpen(), b.h.gate.isOpen())
 	}
