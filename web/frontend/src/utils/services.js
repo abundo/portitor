@@ -89,6 +89,7 @@ export function autoService(a) {
   const protos = a.protocol === 'tcp,udp' ? ['tcp', 'udp'] : [a.protocol]
   const from = a.src_port ? ` from ${a.src_port}` : ''
   if (a.protocol === 'icmp' || a.protocol === 'icmpv6') return `${a.protocol} echo-request`
+  if (a.protocol === 'icmp,icmpv6') return 'icmp, icmpv6 echo-request'
   const port = a.dst_ports?.length ? a.dst_ports.join(',') : a.dst_port || `@${a.port_set}`
   return protos.map((p) => `${p}/${port}${from}`).join(', ')
 }

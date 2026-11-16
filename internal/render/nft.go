@@ -621,7 +621,7 @@ type AutoRule struct {
 	Service string `json:"service"`
 	// InInterfaces limits the rule to these interfaces; empty is any.
 	InInterfaces []string `json:"in_interfaces"`
-	Protocol     string   `json:"protocol"` // tcp, udp, "tcp,udp", OSPF's (OSPFService, OSPF6Service: IPv4 or IPv6, no port) or VRRPService (no port)
+	Protocol     string   `json:"protocol"` // tcp, udp, "tcp,udp", icmp, icmpv6, "icmp,icmpv6" (echo requests), OSPF's (OSPFService, OSPF6Service: IPv4 or IPv6, no port) or VRRPService (no port)
 	SrcPort      int      `json:"src_port,omitempty"`
 	DstPort      int      `json:"dst_port"`
 	// DstPorts, when set, are the destination ports in place of DstPort.
@@ -762,9 +762,7 @@ func AutoInputRules(in *fwconfig.Instance) []AutoRule {
 		}
 		// Pings to the management interface, for checking connectivity.
 		if h.Mgmt != "" {
-			out = append(out,
-				AutoRule{Service: HAMgmtPingService, InInterfaces: []string{h.Mgmt}, Protocol: "icmp"},
-				AutoRule{Service: HAMgmtPingService, InInterfaces: []string{h.Mgmt}, Protocol: "icmpv6"})
+			out = append(out, AutoRule{Service: HAMgmtPingService, InInterfaces: []string{h.Mgmt}, Protocol: "icmp,icmpv6"})
 		}
 	}
 	// SNMP requests on its interfaces, from the allowed clients if listed.
@@ -1013,6 +1011,16 @@ func writeAutoSet(b *strings.Builder, r AutoRule) {
 // interface match (iifMatches).
 func (r AutoRule) matches(in *fwconfig.Instance) []string {
 	var out []string
+	if r.Protocol == "icmp,icmpv6" {
+		// Echo requests of both versions: one rule, rendered as one match
+		// per version.
+		for _, p := range []string{"icmp", "icmpv6"} {
+			v := r
+			v.Protocol = p
+			out = append(out, v.matches(in)...)
+		}
+		return out
+	}
 	if len(r.InInterfaces) == 0 {
 		out = r.sourceMatches("")
 	}
