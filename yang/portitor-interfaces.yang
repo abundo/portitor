@@ -232,7 +232,7 @@ submodule portitor-interfaces {
         type boolean;
       }
       leaf ovpn-role {
-        type leafref { path "../../../role/name"; }
+        type leafref { path "/role/name"; }
         px:column "ovpn_role_id";
         description "The role whose members may log in (with ovpn-require-role); renaming the role renames this.";
       }
@@ -326,7 +326,7 @@ submodule portitor-interfaces {
           type endpoint;
         }
         leaf-list allowed-ips {
-          type union { type leafref { path "../../../../host/name"; } type leafref { path "../../../../address-list/name"; } type cidr; }
+          type union { type leafref { path "/host/name"; } type leafref { path "/address-list/name"; } type cidr; }
           ordered-by user;
         }
         leaf keepalive {
@@ -338,7 +338,7 @@ submodule portitor-interfaces {
           description "ClientPrivateKey is kept only when the key pair was generated here, so a complete client config can be exported.";
         }
         leaf-list networks {
-          type union { type leafref { path "../../../../host/name"; } type leafref { path "../../../../address-list/name"; } type cidr; }
+          type union { type leafref { path "/host/name"; } type leafref { path "/address-list/name"; } type cidr; }
           ordered-by user;
           description "Networks behind a site peer: routed through the interface.";
         }

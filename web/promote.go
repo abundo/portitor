@@ -171,23 +171,24 @@ func PromoteHere(ctx context.Context, s *Server, force bool) (*commitResult, err
 }
 
 // promoteTree gives the configuration of the pair's primary prim to its
-// secondary sec: the instances and tasks, with the two hosts' addresses
-// on the pair's own links swapped, the only values of the instances they
-// don't share.
+// secondary sec: the virtual firewalls and tasks, with the two hosts'
+// addresses on the pair's own links swapped, the only values they don't
+// share.
+// The host (the top level) is the primary's by the firewalls' rows, which
+// the promotion swaps; its links are its own.
 func promoteTree(work *datastore.Tree, sec, prim string) {
 	for _, list := range []string{"instance", "task"} {
 		for _, e := range work.Root.Lists[list] {
-			if e.Leaf("firewall") != prim {
-				continue
-			}
-			e.Leaves["firewall"] = sec
-			for _, ifc := range e.Lists["interface"] {
-				addrs, peers := ifc.LeafLists["addresses"], ifc.LeafLists["peer-addresses"]
-				if ifc.Leaf("ha-role") == "" || len(addrs) == 0 || len(peers) != len(addrs) {
-					continue
-				}
-				ifc.LeafLists["addresses"], ifc.LeafLists["peer-addresses"] = peers, addrs
+			if e.Leaf("firewall") == prim {
+				e.Leaves["firewall"] = sec
 			}
 		}
+	}
+	for _, ifc := range work.Root.Lists["interface"] {
+		addrs, peers := ifc.LeafLists["addresses"], ifc.LeafLists["peer-addresses"]
+		if ifc.Leaf("ha-role") == "" || len(addrs) == 0 || len(peers) != len(addrs) {
+			continue
+		}
+		ifc.LeafLists["addresses"], ifc.LeafLists["peer-addresses"] = peers, addrs
 	}
 }

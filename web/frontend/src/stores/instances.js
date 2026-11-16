@@ -3,13 +3,32 @@
 
 import { defineStore } from 'pinia'
 import { firewalls } from '@/api'
-import { treeApi } from '@/api/config'
+import { config, fromEntry, treeApi } from '@/api/config'
 
 const KEY = 'fw:vf'
 
 // The virtual firewalls (the configuration's instances, by name), without
-// their nested lists.
+// their nested lists; and the host, the default one, whose configuration is
+// the top level (its name the leaf host-name), on the firewall that is no
+// HA secondary.
 const instanceList = treeApi(() => 'instance', ['name'], { shallow: true })
+
+async function hostOf(fws) {
+  const top = fromEntry(
+    (await config.get('', 'candidate', { shallow: '' }).catch(() => null)) ?? {},
+  )
+  if (!top.host_name) return null
+  const leaves = Object.fromEntries(
+    Object.entries(top).filter(
+      ([, v]) =>
+        v === null ||
+        typeof v !== 'object' ||
+        (Array.isArray(v) && v.every((x) => typeof x !== 'object')),
+    ),
+  )
+  const fw = fws.find((f) => !f.ha_primary_id)?.name ?? ''
+  return { ...leaves, name: top.host_name, id: top.host_name, is_default: true, firewall: fw }
+}
 
 function stored() {
   try {
@@ -28,6 +47,8 @@ export const useInstanceStore = defineStore('instances', {
   state: () => ({ list: [], firewalls: [], currentName: stored() }),
   getters: {
     current: (s) => s.list.find((i) => i.name === s.currentName) ?? null,
+    // hostName is the host's name ('' when it can't be read).
+    hostName: (s) => s.list.find((i) => i.is_default)?.name ?? '',
     items: (s) =>
       s.list.map((i) => {
         const fw = s.firewalls.length > 1 && !i.is_default ? i.firewall : ''
@@ -65,10 +86,10 @@ export const useInstanceStore = defineStore('instances', {
   },
   actions: {
     async load() {
-      ;[this.list, this.firewalls] = await Promise.all([
-        instanceList.list(),
-        firewalls.list().catch(() => []),
-      ])
+      const [vfs, fws] = await Promise.all([instanceList.list(), firewalls.list().catch(() => [])])
+      const host = await hostOf(fws)
+      this.firewalls = fws
+      this.list = host ? [host, ...vfs] : vfs
       if (!this.list.some((i) => i.name === this.currentName)) {
         this.select(this.list.find((i) => i.is_default)?.name ?? this.list[0]?.name ?? null)
       }

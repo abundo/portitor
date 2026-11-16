@@ -152,20 +152,8 @@ func AddSecondary(ctx context.Context, s *Server, info SecondaryInfo, externalWi
 			return fmt.Errorf("there is a firewall %s already", info.Name)
 		}
 	}
-	var insts []map[string]any
-	if err := s.consoleJSON(ctx, http.MethodGet, "/api/config/candidate/instance?shallow", nil, &insts); err != nil {
-		return err
-	}
-	inst := ""
-	for _, i := range insts {
-		if d, _ := i["is-default"].(bool); d {
-			inst, _ = i["name"].(string)
-		}
-	}
-	if inst == "" {
-		return errors.New("no default virtual firewall")
-	}
-	ifPath := "/api/config/candidate/instance=" + url.PathEscape(inst) + "/interface"
+	// The host's interfaces: the top level's.
+	ifPath := "/api/config/candidate/interface"
 	var ifs []map[string]any
 	if err := s.consoleJSON(ctx, http.MethodGet, ifPath+"?shallow", nil, &ifs); err != nil {
 		return err

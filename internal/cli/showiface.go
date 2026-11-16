@@ -42,8 +42,8 @@ func (s *Session) showInterface(ctx context.Context, words []string) error {
 	}
 	var devs []device
 	vfs := 0
-	for _, inst := range t.Root.Lists["instance"] {
-		vf := inst.Leaves["name"]
+	for _, inst := range scopes(t) {
+		vf := scopeName(inst)
 		if only != "" && vf != only {
 			continue
 		}
@@ -178,8 +178,8 @@ func (s *Session) interfaceItems(ctx context.Context) []Item {
 		only = s.cwd[0].Keys[0]
 	}
 	var items []Item
-	for _, inst := range t.Root.Lists["instance"] {
-		vf := inst.Leaves["name"]
+	for _, inst := range scopes(t) {
+		vf := scopeName(inst)
 		if only != "" && vf != only {
 			continue
 		}
@@ -191,4 +191,22 @@ func (s *Session) interfaceItems(ctx context.Context) []Item {
 		}
 	}
 	return items
+}
+
+// scopes are the host (the top level, when it has its host-name) and the
+// virtual firewalls (the instance list): where interfaces are.
+func scopes(t *datastore.Tree) []*datastore.Node {
+	var out []*datastore.Node
+	if t.Root.Leaf("host-name") != "" {
+		out = append(out, t.Root)
+	}
+	return append(out, t.Root.Lists["instance"]...)
+}
+
+// scopeName is a scope's name: the host's host-name, or the instance's.
+func scopeName(n *datastore.Node) string {
+	if n.Parent == nil {
+		return n.Leaf("host-name")
+	}
+	return n.Leaves["name"]
 }

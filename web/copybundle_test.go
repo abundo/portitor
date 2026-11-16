@@ -60,7 +60,7 @@ func TestDecodeCopyChecksTheArchive(t *testing.T) {
 		"a directory":      tarOf(t, man1, tar.Header{Name: "candidate.json", Typeflag: tar.TypeDir}),
 		"twice":            tarOf(t, man1, cand, cand),
 		"no manifest":      tarOf(t, cand),
-		"a later format":   tarOf(t, tar.Header{Name: "manifest.json", Typeflag: tar.TypeReg, Linkname: `{"format":3}`}, cand),
+		"a later format":   tarOf(t, tar.Header{Name: "manifest.json", Typeflag: tar.TypeReg, Linkname: `{"format":4}`}, cand),
 		"no configuration": tarOf(t, man1),
 		"garbage":          []byte("not an archive at all"),
 	} {

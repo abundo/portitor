@@ -189,6 +189,7 @@ func (s *Server) instanceNamesKnown(ctx context.Context) (map[string]bool, error
 	if err != nil {
 		return nil, err
 	}
+	// The virtual firewalls: the host is global admins' alone, no role's.
 	for _, tr := range []*datastore.Tree{cand, run} {
 		for _, in := range tr.Root.Lists["instance"] {
 			out[in.Leaf("name")] = true

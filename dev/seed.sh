@@ -38,60 +38,61 @@ req PUT /settings "{\"confirm_timeout\":120,\"wg_endpoint_host\":\"home.example.
 # The configuration, through /api/config (dev/design-model-driven.md): by
 # path and the YANG leaves' names. cfg METHOD PATH [JSON].
 cfg() { req "$1" "/config/candidate/$2" ${3:+"$3"} >/dev/null; }
-M=instance=main
+# The host (the default virtual firewall "main") is the top level: its lists
+# are at /config/candidate/<list>, a virtual firewall's under instance=<name>.
 
-# portitor-config start creates the default instance "main"; update it.
-cfg PATCH $M '{"description":"Home","dns-upstream":"forward","dns-forwarders":["9.9.9.9"],"dhcp-enabled":true,"dhcp-domain-name":"home.arpa","dhcp-lease-time":43200}'
-cfg PUT $M/interface=eth0 '{"kind":"physical","description":"ISP","ipv4-mode":"dhcp","ipv6-accept-ra":true,"enabled":true}'
-cfg PUT $M/interface=eth1 '{"kind":"physical","description":"LAN switch","enabled":true,"dns-listen":true,"addresses":["192.168.1.1/24","fd00:1::1/64"]}'
-cfg PUT $M/interface=eth1.20 '{"kind":"vlan","parent":"eth1","vlan-id":20,"enabled":true,"dns-listen":true,"addresses":["192.168.20.1/24"]}'
-cfg PUT $M/interface=wg0 '{"kind":"wireguard","wg-listen-port":51820,"enabled":true,"dns-listen":true,"addresses":["10.99.0.1/24"]}'
-cfg PUT $M/interface-zone=wan '{"interfaces":["eth0"],"description":"Internet"}'
-cfg PUT $M/interface-zone=trusted '{"interfaces":["eth1","wg0"],"description":"LAN and VPN clients"}'
-cfg PUT $M/interface-zone=iot '{"interfaces":["eth1.20"],"description":"Untrusted gadgets"}'
+# portitor-config start names the host "main"; update it.
+cfg PATCH "" '{"portitor:description":"Home","portitor:dns-upstream":"forward","portitor:dns-forwarders":["9.9.9.9"],"portitor:dhcp-enabled":true,"portitor:dhcp-domain-name":"home.arpa","portitor:dhcp-lease-time":43200}'
+cfg PUT interface=eth0 '{"kind":"physical","description":"ISP","ipv4-mode":"dhcp","ipv6-accept-ra":true,"enabled":true}'
+cfg PUT interface=eth1 '{"kind":"physical","description":"LAN switch","enabled":true,"dns-listen":true,"addresses":["192.168.1.1/24","fd00:1::1/64"]}'
+cfg PUT interface=eth1.20 '{"kind":"vlan","parent":"eth1","vlan-id":20,"enabled":true,"dns-listen":true,"addresses":["192.168.20.1/24"]}'
+cfg PUT interface=wg0 '{"kind":"wireguard","wg-listen-port":51820,"enabled":true,"dns-listen":true,"addresses":["10.99.0.1/24"]}'
+cfg PUT interface-zone=wan '{"interfaces":["eth0"],"description":"Internet"}'
+cfg PUT interface-zone=trusted '{"interfaces":["eth1","wg0"],"description":"LAN and VPN clients"}'
+cfg PUT interface-zone=iot '{"interfaces":["eth1.20"],"description":"Untrusted gadgets"}'
 # Empty until the link to the guest instance exists (below).
-cfg PUT $M/interface-zone=guest '{}'
+cfg PUT interface-zone=guest '{}'
 
 # The zones before the addresses with DNS names in them.
-cfg PUT $M/dns-zone=home.arpa '{"type":"forward"}'
-cfg PUT $M/dns-zone=192.168.1.0%2F24 '{"type":"reverse4"}'
+cfg PUT dns-zone=home.arpa '{"type":"forward"}'
+cfg PUT dns-zone=192.168.1.0%2F24 '{"type":"reverse4"}'
 
-cfg PUT $M/ipam-prefix=192.168.0.0%2F16 '{"description":"Home"}'
-cfg PUT $M/ipam-prefix=192.168.1.0%2F24 '{"description":"LAN","dhcp-enabled":true,"dhcp-range-start":"192.168.1.100","dhcp-range-end":"192.168.1.199"}'
-cfg PUT $M/ipam-prefix=192.168.20.0%2F24 '{"description":"IoT","dhcp-enabled":true,"dhcp-range-start":"192.168.20.100","dhcp-range-end":"192.168.20.199"}'
-cfg PUT $M/ipam-prefix=10.99.0.0%2F24 '{"description":"WireGuard"}'
-cfg PUT $M/ipam-prefix=10.255.0.0%2F30 '{"description":"link to guest"}'
-cfg PUT $M/ipam-address=192.168.1.1 '{"dns-name":"gw.home.arpa"}'
-cfg PUT $M/ipam-address=192.168.1.10 '{"dns-name":"nas.home.arpa","mac":"02:00:00:00:00:10","description":"NAS"}'
+cfg PUT ipam-prefix=192.168.0.0%2F16 '{"description":"Home"}'
+cfg PUT ipam-prefix=192.168.1.0%2F24 '{"description":"LAN","dhcp-enabled":true,"dhcp-range-start":"192.168.1.100","dhcp-range-end":"192.168.1.199"}'
+cfg PUT ipam-prefix=192.168.20.0%2F24 '{"description":"IoT","dhcp-enabled":true,"dhcp-range-start":"192.168.20.100","dhcp-range-end":"192.168.20.199"}'
+cfg PUT ipam-prefix=10.99.0.0%2F24 '{"description":"WireGuard"}'
+cfg PUT ipam-prefix=10.255.0.0%2F30 '{"description":"link to guest"}'
+cfg PUT ipam-address=192.168.1.1 '{"dns-name":"gw.home.arpa"}'
+cfg PUT ipam-address=192.168.1.10 '{"dns-name":"nas.home.arpa","mac":"02:00:00:00:00:10","description":"NAS"}'
 # IPv6 on the LAN: router advertisements with SLAAC, plus DHCPv6.
-cfg PUT $M/ipam-prefix=fd00%3A1%3A%3A%2F64 '{"description":"LAN IPv6","ra-enabled":true,"ra-slaac":true,"dhcp-enabled":true,"dhcp-range-start":"fd00:1::1000","dhcp-range-end":"fd00:1::1fff"}'
-cfg PUT $M/ipam-address=fd00%3A1%3A%3A10 '{"dns-name":"nas.home.arpa","mac":"02:00:00:00:00:10"}'
+cfg PUT ipam-prefix=fd00%3A1%3A%3A%2F64 '{"description":"LAN IPv6","ra-enabled":true,"ra-slaac":true,"dhcp-enabled":true,"dhcp-range-start":"fd00:1::1000","dhcp-range-end":"fd00:1::1fff"}'
+cfg PUT ipam-address=fd00%3A1%3A%3A10 '{"dns-name":"nas.home.arpa","mac":"02:00:00:00:00:10"}'
 cfg PUT host=nas '{"addresses":["192.168.1.10","fd00:1::10"],"description":"NAS, both IP versions"}'
 
-cfg POST $M/dns-zone=home.arpa/record '{"name":"files","type":"CNAME","value":"nas"}'
+cfg POST dns-zone=home.arpa/record '{"name":"files","type":"CNAME","value":"nas"}'
 
 cfg PUT service=iot-cloud '{"type":"tcp/udp/sctp","port":[{"protocol":"tcp","dst-lo":443,"dst-hi":0,"src-lo":0,"src-hi":0},{"protocol":"tcp","dst-lo":8883,"dst-hi":0,"src-lo":0,"src-hi":0}],"description":"HTTPS and MQTT over TLS"}'
-rule() { cfg POST "$1/rule" "$2"; }
-rule $M '{"chain":"forward","in-interfaces":["eth1"],"out-interfaces":["wan"],"action":"accept","enabled":true,"description":"LAN to Internet"}'
-rule $M '{"chain":"forward","in-interfaces":["eth1"],"out-interfaces":["iot"],"action":"accept","enabled":true,"description":"LAN manages IoT"}'
-rule $M '{"chain":"forward","in-interfaces":["iot"],"out-interfaces":["wan"],"services":["iot-cloud"],"action":"accept","enabled":true,"description":"IoT cloud only"}'
-rule $M '{"chain":"forward","in-interfaces":["wg0"],"action":"accept","enabled":true,"description":"VPN clients anywhere"}'
-rule $M '{"chain":"forward","in-interfaces":["guest"],"out-interfaces":["wan"],"action":"accept","enabled":true,"description":"Guests to Internet"}'
-rule $M '{"chain":"input","in-interfaces":["wan"],"services":["ping","ping6"],"action":"accept","enabled":true,"description":"Ping from Internet"}'
-rule $M '{"chain":"forward","in-interfaces":["wg0"],"dst-addrs":["nas"],"services":["ssh"],"action":"accept","enabled":true,"description":"SSH to the NAS (IPv4 and IPv6)"}'
-cfg POST $M/nat-rule '{"kind":"dnat","in-interfaces":["wan"],"protocol":"tcp","dst-ports":"8443","to-addr":"nas","to-port":443,"enabled":true,"description":"NAS web"}'
-rule $M '{"chain":"input","in-interfaces":["trusted"],"action":"accept","enabled":true,"description":"LAN and VPN to the firewall"}'
-rule $M '{"chain":"input","in-interfaces":["iot"],"action":"reject","enabled":true,"description":"IoT to the firewall"}'
-cfg POST $M/nat-rule '{"kind":"masquerade","out-interfaces":["wan"],"enabled":true,"description":"Internet sharing"}'
-cfg PUT $M/interface=wg0/wireguard-peer=phone '{"allowed-ips":["10.99.0.2/32"],"enabled":true}'
-cfg PUT $M/interface=wg0/wireguard-peer=laptop '{"allowed-ips":["10.99.0.3/32"],"enabled":true}'
+rule() { cfg POST "${1:+$1/}rule" "$2"; }
+rule "" '{"chain":"forward","in-interfaces":["eth1"],"out-interfaces":["wan"],"action":"accept","enabled":true,"description":"LAN to Internet"}'
+rule "" '{"chain":"forward","in-interfaces":["eth1"],"out-interfaces":["iot"],"action":"accept","enabled":true,"description":"LAN manages IoT"}'
+rule "" '{"chain":"forward","in-interfaces":["iot"],"out-interfaces":["wan"],"services":["iot-cloud"],"action":"accept","enabled":true,"description":"IoT cloud only"}'
+rule "" '{"chain":"forward","in-interfaces":["wg0"],"action":"accept","enabled":true,"description":"VPN clients anywhere"}'
+rule "" '{"chain":"forward","in-interfaces":["guest"],"out-interfaces":["wan"],"action":"accept","enabled":true,"description":"Guests to Internet"}'
+rule "" '{"chain":"input","in-interfaces":["wan"],"services":["ping","ping6"],"action":"accept","enabled":true,"description":"Ping from Internet"}'
+rule "" '{"chain":"forward","in-interfaces":["wg0"],"dst-addrs":["nas"],"services":["ssh"],"action":"accept","enabled":true,"description":"SSH to the NAS (IPv4 and IPv6)"}'
+cfg POST nat-rule '{"kind":"dnat","in-interfaces":["wan"],"protocol":"tcp","dst-ports":"8443","to-addr":"nas","to-port":443,"enabled":true,"description":"NAS web"}'
+rule "" '{"chain":"input","in-interfaces":["trusted"],"action":"accept","enabled":true,"description":"LAN and VPN to the firewall"}'
+rule "" '{"chain":"input","in-interfaces":["iot"],"action":"reject","enabled":true,"description":"IoT to the firewall"}'
+cfg POST nat-rule '{"kind":"masquerade","out-interfaces":["wan"],"enabled":true,"description":"Internet sharing"}'
+cfg PUT interface=wg0/wireguard-peer=phone '{"allowed-ips":["10.99.0.2/32"],"enabled":true}'
+cfg PUT interface=wg0/wireguard-peer=laptop '{"allowed-ips":["10.99.0.3/32"],"enabled":true}'
 
 G=instance=guest
 cfg PUT $G '{"firewall":"firewall","description":"Guest Wi-Fi, isolated","dhcp-enabled":true}'
 cfg PUT $G/interface=eth2 '{"kind":"physical","description":"Guest AP","enabled":true,"addresses":["192.168.50.1/24"]}'
 cfg PUT $G/ipam-prefix=192.168.50.0%2F24 '{"dhcp-enabled":true,"dhcp-range-start":"192.168.50.100","dhcp-range-end":"192.168.50.200","dhcp-dns-servers":["9.9.9.9"]}'
 cfg PUT link=guestup '{"instance-a":"main","interface-a":"lk-guest","addresses-a":["10.255.0.1/30"],"instance-b":"guest","interface-b":"lk-main","addresses-b":["10.255.0.2/30"]}'
-cfg PATCH $M/interface-zone=guest '{"interfaces":["lk-guest"]}'
+cfg PATCH interface-zone=guest '{"interfaces":["lk-guest"]}'
 # The guest instance names its two interfaces directly, without zones.
 rule $G '{"chain":"forward","in-interfaces":["eth2"],"out-interfaces":["lk-main"],"dst-addrs":["192.168.0.0/16"],"action":"reject","enabled":true,"description":"No access to home"}'
 rule $G '{"chain":"forward","in-interfaces":["eth2"],"out-interfaces":["lk-main"],"action":"accept","enabled":true}'

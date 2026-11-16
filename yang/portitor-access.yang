@@ -39,7 +39,7 @@ submodule portitor-access {
         description "The bcrypt hash of the password, or @LDAP for a user copied from a directory server, whose password is the server's.";
       }
       leaf ldap-server {
-        type leafref { path "../../ldap-server/name"; }
+        type leafref { path "/ldap-server/name"; }
         description "The directory server the user was copied from on their first login; empty for a local user.";
       }
       leaf role {
@@ -81,7 +81,7 @@ submodule portitor-access {
         px:table "role_members";
         px:parent-column "role_id";
         leaf user {
-          type leafref { path "../../../user/username"; }
+          type leafref { path "/user/username"; }
           px:column "user_id";
         }
         leaf level {
@@ -109,7 +109,7 @@ submodule portitor-access {
         type string;
       }
       leaf role {
-        type leafref { path "../../role/name"; }
+        type leafref { path "/role/name"; }
         px:column "role_id";
       }
       leaf level {
@@ -140,7 +140,7 @@ submodule portitor-access {
         description "Pins the agent's self-signed certificate (SHA-256 of the DER, hex); empty verifies against the system's CAs.";
       }
       leaf ha-primary {
-        type leafref { path "../../firewall/name"; }
+        type leafref { path "/firewall/name"; }
         px:column "ha_primary_id";
         description "Makes this the HA secondary of that firewall: it runs the primary's virtual firewalls and has none of its own.";
       }

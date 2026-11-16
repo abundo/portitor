@@ -68,11 +68,11 @@ submodule portitor-routing {
         type uint32;
       }
       leaf destination {
-        type union { type leafref { path "../../../host/name"; } type leafref { path "../../../address-list/name"; } type route-destination; }
+        type union { type leafref { path "/host/name"; } type leafref { path "/address-list/name"; } type route-destination; }
         mandatory true;
       }
       leaf gateway {
-        type union { type leafref { path "../../../host/name"; } type leafref { path "../../../address-list/name"; } type ip-address; }
+        type union { type leafref { path "/host/name"; } type leafref { path "/address-list/name"; } type ip-address; }
       }
       leaf interface {
         type leafref { path "../../interface/name"; }
@@ -116,19 +116,19 @@ submodule portitor-routing {
         type enumeration { enum "ipv4"; enum "ipv6"; }
       }
       leaf-list src-addrs {
-        type union { type leafref { path "../../../host/name"; } type leafref { path "../../../address-list/name"; } type rule-address; }
+        type union { type leafref { path "/host/name"; } type leafref { path "/address-list/name"; } type rule-address; }
         ordered-by user;
       }
       leaf-list dst-addrs {
-        type union { type leafref { path "../../../host/name"; } type leafref { path "../../../address-list/name"; } type rule-address; }
+        type union { type leafref { path "/host/name"; } type leafref { path "/address-list/name"; } type rule-address; }
         ordered-by user;
       }
       leaf-list services {
-        type union { type leafref { path "../../../service/name"; } type string; }
+        type union { type leafref { path "/service/name"; } type string; }
         ordered-by user;
       }
       leaf gateway {
-        type union { type leafref { path "../../../host/name"; } type leafref { path "../../../address-list/name"; } type ip-address; }
+        type union { type leafref { path "/host/name"; } type leafref { path "/address-list/name"; } type ip-address; }
         description "Gateway is an address or a host's name (one address per IP version); \"\" is none.";
       }
       leaf interface {

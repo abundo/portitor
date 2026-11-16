@@ -90,16 +90,12 @@ func (s *Server) ConsoleSetPath(ctx context.Context, vf, resource, name string) 
 	}
 	if list != nil {
 		if vf == "" {
-			for _, in := range cand.Root.Lists["instance"] {
-				if in.Leaf("is-default") == "true" {
-					vf = in.Leaf("name")
-				}
-			}
+			vf = hostName(cand)
 		}
-		if cand.Root.Entry("instance", []string{vf}) == nil {
+		if instNode(cand, vf) == nil {
 			return "", nil, fmt.Errorf("no virtual firewall %q", vf)
 		}
-		prefix = "instance=" + url.PathEscape(vf) + "/"
+		prefix = instPathString(cand, vf)
 	} else {
 		for _, l := range t.schema.Children {
 			if matches(l) {

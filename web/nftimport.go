@@ -106,7 +106,7 @@ func importOptions(v *confview.View, instanceID uint, req nftImportRequest) nfti
 // refuse moves to res.Skipped; a host/prefix or service they refuse fails
 // the import, since rules may name it.
 func (s *Server) writeImport(work *datastore.Tree, inst *models.Instance, req nftImportRequest, res *nftimport.Result) error {
-	at := datastore.Path{{Name: "instance", Keys: []string{inst.Name}}}
+	at := instPath(work, inst.Name)
 	if req.Replace {
 		for _, list := range []string{"rule", "nat-rule"} {
 			if err := work.EditJSON(append(slices.Clone(at), datastore.Elem{Name: list}), datastore.EditReplace, []byte("[]")); err != nil {

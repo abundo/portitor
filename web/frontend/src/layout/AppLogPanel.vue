@@ -4,7 +4,7 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import SearchInput from '@/components/SearchInput.vue'
-import { config, fromEntry, path } from '@/api/config'
+import { config, fromEntry, instAt } from '@/api/config'
 import { useLogPanel } from '@/composables/useLogPanel'
 import { withLabel } from '@/composables/useInstanceRefs'
 import { useInstanceStore } from '@/stores/instances'
@@ -71,7 +71,7 @@ async function loadIfaces() {
     // Each virtual firewall's interfaces, without their nested lists.
     const lists = await Promise.all(
       instStore.list.map(async (vf) => {
-        const rows = await config.get(`${path(['instance', vf.name])}/interface`, 'candidate', {
+        const rows = await config.get(instAt(vf.name, 'interface'), 'candidate', {
           shallow: '',
         })
         return (rows ?? []).map(fromEntry).map((i) => ({ ...i, vf: vf.name }))

@@ -64,202 +64,20 @@ submodule portitor-system {
     list instance {
       key "name";
       px:table "instances";
-      description "A virtual firewall: its own network namespace, routing table, firewall, DNS and DHCP server. The default one of a firewall is its host.";
+      description "A virtual firewall: its own network namespace, routing table, firewall, DNS and DHCP server. The firewall's host (its root namespace) is not one of them: its configuration is at the top level.";
       leaf name {
         type string;
       }
-      leaf description {
-        type text;
-      }
-      leaf is-default {
-        type boolean;
-        description "IsDefault: the firewall's host itself (its root namespace); one per firewall.";
-      }
-      leaf-list dns-forwarders {
-        type union { type leafref { path "../../host/name"; } type leafref { path "../../address-list/name"; } type ip-address; }
-        ordered-by user;
-      }
-      leaf dns-forward-mode {
-        type enumeration { enum "first"; enum "only"; }
-        default "first";
-        description "fwconfig.ForwardFirst or ForwardOnly";
-      }
-      leaf-list dns-allow-recursion {
-        type union { type leafref { path "../../host/name"; } type leafref { path "../../address-list/name"; } type cidr; }
-        ordered-by user;
-      }
-      leaf dhcp-enabled {
-        type boolean;
-      }
-      leaf dhcp-domain-name {
-        type domain-name;
-      }
-      leaf dhcp-lease-time {
-        type int32;
-        default 86400;
-      }
-      leaf-list log-drops {
-        type enumeration { enum "input"; enum "forward"; enum "output"; }
-        ordered-by user;
-        description "LogDrops lists the filter chains whose policy drops are logged, LogInvalid those whose invalid packet drops are, and LogAuto the auto input rules (by service) whose matches are.";
-      }
-      leaf-list log-invalid {
-        type enumeration { enum "input"; enum "forward"; enum "output"; }
-        ordered-by user;
-      }
-      leaf-list log-auto {
-        type string;
-        ordered-by user;
-      }
-      leaf dns-upstream {
-        type enumeration { enum "forward"; enum "root"; enum "dhcp"; }
-        default "forward";
-        description "Where the DNS server resolves what it isn't authoritative for: the forwarders, the root servers, or the DNS servers of the DHCP lease (fwconfig.Upstream*). A new virtual firewall gets root.";
-      }
-      leaf-list resolver-servers {
-        type ip-address;
-        ordered-by user;
-        max-elements 3;
-        description "ResolverServers: the DNS servers of the host's own resolver (/etc/resolv.conf, fwconfig.Resolver), the default instance only; with resolver-from-dhcp they are used until the lease has DNS servers. Neither this nor resolver-from-dhcp: the file is not Portitor's.";
-      }
-      leaf resolver-from-dhcp {
-        type boolean;
-        description "ResolverFromDhcp: the host's resolver is the DNS servers of the DHCP lease of the interface with dns-from-dhcp, kept up to date as the lease changes. The default instance only.";
-      }
-      leaf dns-dnssec-validation {
-        type enumeration { enum "auto"; enum "no"; }
-        default "auto";
-        description "fwconfig.DNSSECValidationAuto or No";
-      }
-      leaf dns-query-log {
-        type boolean;
-        description "DNS query logging, and its filters (fwconfig.DNSQueryLog); clients may name hosts/prefixes.";
-      }
-      leaf-list dns-query-log-clients {
-        type union { type leafref { path "../../host/name"; } type leafref { path "../../address-list/name"; } type cidr; }
-        ordered-by user;
-      }
-      leaf-list dns-query-log-names {
-        type domain-name;
-        ordered-by user;
-      }
-      leaf-list dns-query-log-types {
-        type string;
-        ordered-by user;
-      }
-      leaf nat64-prefix {
-        type cidr;
-        default "64:ff9b::/96";
-        description "Nat64Prefix is the prefix of the NAT64 serving the instance's clients; Dns64 synthesizes AAAA records in it, and an interface's Xlat464 announces it.";
-      }
-      leaf dns64 {
-        type boolean;
-      }
-      leaf nat64 {
-        type boolean;
-        description "Nat64 translates the prefix to IPv4 here (Jool), from Nat64Pool4's IPv4 prefixes, or the outgoing interface's address when empty.";
-      }
-      leaf-list nat64-pool4 {
-        type cidr;
-        ordered-by user;
-      }
-      leaf ntp-enabled {
-        type boolean;
-        description "NtpEnabled runs chrony with NtpServers as its time sources; it answers clients in NtpAllow (any when empty, hosts/prefixes by name) on the interfaces with NtpServe.";
-      }
-      list ntp-server {
-        key "address";
-        ordered-by user;
-        px:json "ntp_servers";
-        leaf address {
-          type host-or-address;
-        }
-        leaf pool {
-          type boolean;
-        }
-        leaf iburst {
-          type boolean;
-        }
-        leaf nts {
-          type boolean;
-          description "NTS authenticates the server (Network Time Security, RFC 8915).";
-        }
-      }
-      leaf-list ntp-allow {
-        type union { type leafref { path "../../host/name"; } type leafref { path "../../address-list/name"; } type cidr; }
-        ordered-by user;
-      }
-      leaf snmp-enabled {
-        type boolean;
-        description "SnmpEnabled runs snmpd, read-only, answering clients in SnmpAllow (any when empty, hosts/prefixes by name) on the interfaces with SnmpServe, with the SNMPv2c SnmpCommunity (none when empty) and the instance's SnmpUsers (SNMPv3).";
-      }
-      leaf snmp-location {
-        type text;
-      }
-      leaf snmp-contact {
-        type text;
-      }
-      leaf-list snmp-allow {
-        type union { type leafref { path "../../host/name"; } type leafref { path "../../address-list/name"; } type cidr; }
-        ordered-by user;
-      }
-      leaf snmp-community {
-        type string;
-        px:secret;
-        description "The community is write-only: NewSnmpCommunity sets it (empty keeps it), ClearSnmpCommunity removes it, HasSnmpCommunity tells whether there is one.";
-      }
-      leaf acme-proxy-enabled {
-        type boolean;
-        description "AcmeProxyEnabled runs an ACME server for the hosts behind the firewall on AcmeProxyPort of the interfaces with AcmeProxyServe, presenting AcmeProxyCertificateID (self-signed when nil); it gets their certificates from AcmeProxyCa (an ACME CA name or directory URL) by DNS-01 or HTTP-01, as its AcmeProxyPolicies allow.";
-      }
-      leaf acme-proxy-port {
-        type int32;
-        default 8555;
-      }
-      leaf acme-proxy-ca {
-        type string;
-        default "letsencrypt";
-      }
-      leaf acme-proxy-email {
-        type email;
-      }
-      leaf acme-proxy-certificate {
-        type leafref { path "../certificate/name"; }
-        px:column "acme_proxy_certificate_id";
-      }
       leaf firewall {
-        type leafref { path "../../firewall/name"; }
+        type leafref { path "/firewall/name"; }
         px:column "firewall_id";
       }
-      leaf dns-rate-limit {
-        type boolean;
-        description "DnsRateLimit, DhcpRateLimit and NtpRateLimit police what comes in to those servers (fwconfig.ServiceRateLimit) with the instance's rate limit of that service (RateLimit.Service).";
-      }
-      leaf dhcp-rate-limit {
-        type boolean;
-      }
-      leaf ntp-rate-limit {
-        type boolean;
-      }
-      leaf-list dns-blocklist-allow {
-        type string;
-        ordered-by user;
-        description "DnsBlocklistAllow are domains no DnsBlocklist blocks, nor the names below them (fwconfig.DNSServer.BlocklistAllow).";
-      }
-      leaf bfd-detect-multiplier {
-        type int32;
-        description "BfdDetectMultiplier, BfdReceiveInterval and BfdTransmitInterval (ms) are the timers of the BFD interfaces that set none; 0: FRR's (3, 300, 300).";
-      }
-      leaf bfd-receive-interval {
-        type int32;
-      }
-      leaf bfd-transmit-interval {
-        type int32;
-      }
+      uses vf-settings;
       uses interfaces;
       uses routing;
       uses firewall;
       uses services;
+      uses vf-dns-templates;
       uses instance-state;
     }
     list link {
@@ -273,7 +91,7 @@ submodule portitor-system {
         type text;
       }
       leaf instance-a {
-        type leafref { path "../../instance/name"; }
+        type union { type leafref { path "/instance/name"; } type leafref { path "/host-name"; } }
         px:column "instance_a_id";
       }
       leaf interface-a {
@@ -285,7 +103,7 @@ submodule portitor-system {
         ordered-by user;
       }
       leaf instance-b {
-        type leafref { path "../../instance/name"; }
+        type union { type leafref { path "/instance/name"; } type leafref { path "/host-name"; } }
         px:column "instance_b_id";
       }
       leaf interface-b {
@@ -297,5 +115,206 @@ submodule portitor-system {
         ordered-by user;
       }
     }
+  }
+
+  // What the firewall's host (the top level) and each virtual firewall
+  // (instance) set alike.
+  grouping vf-settings {
+    leaf description {
+      type text;
+    }
+    leaf-list dns-forwarders {
+      type union { type leafref { path "/host/name"; } type leafref { path "/address-list/name"; } type ip-address; }
+      ordered-by user;
+    }
+    leaf dns-forward-mode {
+      type enumeration { enum "first"; enum "only"; }
+      default "first";
+      description "fwconfig.ForwardFirst or ForwardOnly";
+    }
+    leaf-list dns-allow-recursion {
+      type union { type leafref { path "/host/name"; } type leafref { path "/address-list/name"; } type cidr; }
+      ordered-by user;
+    }
+    leaf dhcp-enabled {
+      type boolean;
+    }
+    leaf dhcp-domain-name {
+      type domain-name;
+    }
+    leaf dhcp-lease-time {
+      type int32;
+      default 86400;
+    }
+    leaf-list log-drops {
+      type enumeration { enum "input"; enum "forward"; enum "output"; }
+      ordered-by user;
+      description "LogDrops lists the filter chains whose policy drops are logged, LogInvalid those whose invalid packet drops are, and LogAuto the auto input rules (by service) whose matches are.";
+    }
+    leaf-list log-invalid {
+      type enumeration { enum "input"; enum "forward"; enum "output"; }
+      ordered-by user;
+    }
+    leaf-list log-auto {
+      type string;
+      ordered-by user;
+    }
+    leaf dns-upstream {
+      type enumeration { enum "forward"; enum "root"; enum "dhcp"; }
+      default "forward";
+      description "Where the DNS server resolves what it isn't authoritative for: the forwarders, the root servers, or the DNS servers of the DHCP lease (fwconfig.Upstream*). A new virtual firewall gets root.";
+    }
+    leaf-list resolver-servers {
+      type ip-address;
+      ordered-by user;
+      max-elements 3;
+      description "ResolverServers: the DNS servers of the host's own resolver (/etc/resolv.conf, fwconfig.Resolver), the default instance only; with resolver-from-dhcp they are used until the lease has DNS servers. Neither this nor resolver-from-dhcp: the file is not Portitor's.";
+    }
+    leaf resolver-from-dhcp {
+      type boolean;
+      description "ResolverFromDhcp: the host's resolver is the DNS servers of the DHCP lease of the interface with dns-from-dhcp, kept up to date as the lease changes. The default instance only.";
+    }
+    leaf dns-dnssec-validation {
+      type enumeration { enum "auto"; enum "no"; }
+      default "auto";
+      description "fwconfig.DNSSECValidationAuto or No";
+    }
+    leaf dns-query-log {
+      type boolean;
+      description "DNS query logging, and its filters (fwconfig.DNSQueryLog); clients may name hosts/prefixes.";
+    }
+    leaf-list dns-query-log-clients {
+      type union { type leafref { path "/host/name"; } type leafref { path "/address-list/name"; } type cidr; }
+      ordered-by user;
+    }
+    leaf-list dns-query-log-names {
+      type domain-name;
+      ordered-by user;
+    }
+    leaf-list dns-query-log-types {
+      type string;
+      ordered-by user;
+    }
+    leaf nat64-prefix {
+      type cidr;
+      default "64:ff9b::/96";
+      description "Nat64Prefix is the prefix of the NAT64 serving the instance's clients; Dns64 synthesizes AAAA records in it, and an interface's Xlat464 announces it.";
+    }
+    leaf dns64 {
+      type boolean;
+    }
+    leaf nat64 {
+      type boolean;
+      description "Nat64 translates the prefix to IPv4 here (Jool), from Nat64Pool4's IPv4 prefixes, or the outgoing interface's address when empty.";
+    }
+    leaf-list nat64-pool4 {
+      type cidr;
+      ordered-by user;
+    }
+    leaf ntp-enabled {
+      type boolean;
+      description "NtpEnabled runs chrony with NtpServers as its time sources; it answers clients in NtpAllow (any when empty, hosts/prefixes by name) on the interfaces with NtpServe.";
+    }
+    list ntp-server {
+      key "address";
+      ordered-by user;
+      px:json "ntp_servers";
+      leaf address {
+        type host-or-address;
+      }
+      leaf pool {
+        type boolean;
+      }
+      leaf iburst {
+        type boolean;
+      }
+      leaf nts {
+        type boolean;
+        description "NTS authenticates the server (Network Time Security, RFC 8915).";
+      }
+    }
+    leaf-list ntp-allow {
+      type union { type leafref { path "/host/name"; } type leafref { path "/address-list/name"; } type cidr; }
+      ordered-by user;
+    }
+    leaf snmp-enabled {
+      type boolean;
+      description "SnmpEnabled runs snmpd, read-only, answering clients in SnmpAllow (any when empty, hosts/prefixes by name) on the interfaces with SnmpServe, with the SNMPv2c SnmpCommunity (none when empty) and the instance's SnmpUsers (SNMPv3).";
+    }
+    leaf snmp-location {
+      type text;
+    }
+    leaf snmp-contact {
+      type text;
+    }
+    leaf-list snmp-allow {
+      type union { type leafref { path "/host/name"; } type leafref { path "/address-list/name"; } type cidr; }
+      ordered-by user;
+    }
+    leaf snmp-community {
+      type string;
+      px:secret;
+      description "The community is write-only: NewSnmpCommunity sets it (empty keeps it), ClearSnmpCommunity removes it, HasSnmpCommunity tells whether there is one.";
+    }
+    leaf acme-proxy-enabled {
+      type boolean;
+      description "AcmeProxyEnabled runs an ACME server for the hosts behind the firewall on AcmeProxyPort of the interfaces with AcmeProxyServe, presenting AcmeProxyCertificateID (self-signed when nil); it gets their certificates from AcmeProxyCa (an ACME CA name or directory URL) by DNS-01 or HTTP-01, as its AcmeProxyPolicies allow.";
+    }
+    leaf acme-proxy-port {
+      type int32;
+      default 8555;
+    }
+    leaf acme-proxy-ca {
+      type string;
+      default "letsencrypt";
+    }
+    leaf acme-proxy-email {
+      type email;
+    }
+    leaf acme-proxy-certificate {
+      type leafref { path "../certificate/name"; }
+      px:column "acme_proxy_certificate_id";
+    }
+    leaf dns-rate-limit {
+      type boolean;
+      description "DnsRateLimit, DhcpRateLimit and NtpRateLimit police what comes in to those servers (fwconfig.ServiceRateLimit) with the instance's rate limit of that service (RateLimit.Service).";
+    }
+    leaf dhcp-rate-limit {
+      type boolean;
+    }
+    leaf ntp-rate-limit {
+      type boolean;
+    }
+    leaf-list dns-blocklist-allow {
+      type string;
+      ordered-by user;
+      description "DnsBlocklistAllow are domains no DnsBlocklist blocks, nor the names below them (fwconfig.DNSServer.BlocklistAllow).";
+    }
+    leaf bfd-detect-multiplier {
+      type int32;
+      description "BfdDetectMultiplier, BfdReceiveInterval and BfdTransmitInterval (ms) are the timers of the BFD interfaces that set none; 0: FRR's (3, 300, 300).";
+    }
+    leaf bfd-receive-interval {
+      type int32;
+    }
+    leaf bfd-transmit-interval {
+      type int32;
+    }
+  }
+
+  // The firewall's host: its root namespace, configured at the top level
+  // (the agent's default instance, named host-name).
+  grouping host {
+    leaf host-name {
+      type string;
+      px:column "name";
+      description "The host's name: the firewall's name when it was made. The agent names the host's DHCP server and state after it.";
+    }
+    uses vf-settings;
+    uses interfaces;
+    uses routing;
+    uses firewall;
+    uses services;
+    uses instance-state;
   }
 }

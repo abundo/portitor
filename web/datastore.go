@@ -37,9 +37,12 @@ import (
 type treeState struct {
 	coreOnce sync.Once
 	err      error
-	schema   *schema.Node
-	mapping  *sqlmap.Mapping
-	store    *datastore.Store
+	// migrateOnce: migrateHost, once core is there (it reads running).
+	migrateOnce sync.Once
+	migrateErr  error
+	schema      *schema.Node
+	mapping     *sqlmap.Mapping
+	store       *datastore.Store
 
 	dir       string            // the data directory, where the candidate and ids.json are; "" in memory
 	idMarks   map[string]uint64 // assignID's high-water marks, by list path
@@ -78,6 +81,57 @@ func (s *Server) core() (*treeState, error) {
 	return t, t.err
 }
 
+// migrateHost finishes, once, what reading a configuration of 1.0.0 began
+// (datastore.Migrate, hostToRoot): the candidate is written again in this
+// release's shape, and the kept ids of the host's entries move with them
+// to the top level, so they keep their ids (a rule's is its connection
+// mark).
+func (s *Server) migrateHost(t *treeState) error {
+	ctx := context.Background()
+	cand, err := t.store.Candidate(ctx)
+	if err != nil {
+		return err
+	}
+	if !cand.Migrated {
+		return nil
+	}
+	if err := s.migrateEntryIDs(cand); err != nil {
+		return err
+	}
+	cand.Migrated = false
+	return t.store.Replace(ctx, cand)
+}
+
+// migrateEntryIDs moves the kept ids of the host of tree, a tree read in
+// 1.0.0's shape (Migrated), from the instance it was (/instance[name=<host>])
+// to the top level. An id already kept at the new path stays.
+func (s *Server) migrateEntryIDs(tree *datastore.Tree) error {
+	host := tree.Root.Leaf("host-name")
+	if !tree.Migrated || host == "" || tree.Root.Entry("instance", []string{host}) != nil {
+		return nil
+	}
+	return s.rec.UpdateIDs(func(ids sqlmap.IDs) {
+		type kept struct {
+			tbl string
+			id  int64
+		}
+		have := map[string]kept{}
+		var paths []string
+		ids.Each("/instance[", func(p, tbl string, id int64) {
+			paths = append(paths, p)
+			have[p] = kept{tbl, id}
+		})
+		datastore.MigrateIDPaths(paths, host, func(from, to string) {
+			if _, taken := ids.ID(to); taken {
+				return
+			}
+			k := have[from]
+			ids.Delete(from)
+			ids.Set(to, k.tbl, k.id)
+		})
+	})
+}
+
 // Ready sets the configuration up now (tree), refusing a data directory
 // this release can't read before the first request; called once a Server is
 // made, before it serves.
@@ -101,8 +155,14 @@ func (s *Server) Ready() error {
 // layoutVersion is the layout of the data directory: 2 has the files
 // (candidate, global lists, ids, deployments, ...) and no configuration in the
 // database. 1.0.0 wrote it first, after taking what the database held into
-// the files; a directory without it is older and refused (checkLayout).
-const layoutVersion = 2
+// the files; a directory without it is older and refused (checkLayout). 3
+// (1.1.0) has the host at the top level of the configuration, which 1.0.0
+// would misread, so it refuses it; this release reads 2 and migrates it
+// (migrateHost) until 1.2.0.
+const layoutVersion = 3
+
+// layoutOldest is the oldest layout this release reads.
+const layoutOldest = 2
 
 // errBefore100 refuses a data directory of a release before 1.0.0.
 func errBefore100(dir string) error {
@@ -131,7 +191,7 @@ func checkLayout(dir, dbPath string) error {
 		switch {
 		case l.Layout > layoutVersion:
 			return fmt.Errorf("the data directory %s has layout %d, of a later release (this one reads %d): update Portitor", dir, l.Layout, layoutVersion)
-		case l.Layout < layoutVersion:
+		case l.Layout < layoutOldest:
 			return errBefore100(dir)
 		}
 		return nil
@@ -169,7 +229,14 @@ func (s *Server) writeLayout() error {
 }
 
 // tree is the configuration tree, set up on first use (core).
-func (s *Server) tree() (*treeState, error) { return s.core() }
+func (s *Server) tree() (*treeState, error) {
+	t, err := s.core()
+	if err != nil {
+		return nil, err
+	}
+	t.migrateOnce.Do(func() { t.migrateErr = s.migrateHost(t) })
+	return t, t.migrateErr
+}
 
 type treeBackend struct{ s *Server }
 
@@ -293,11 +360,30 @@ type treeAccess struct {
 	read     map[string]bool // instance names
 	write    map[string]bool
 	readOnly bool
+	// host is the host's name: its configuration is the top level's lists
+	// and leaves that a virtual firewall has too (hostScope), global
+	// admins' alone (to change; viewers read it), by either path.
+	host string
 }
+
+// hostScope reports whether p is in the host's configuration, the top
+// level's (or named as its instance of 1.0.0), and the path below.
+func (t treeAccess) hostScope(p datastore.Path) (datastore.Path, bool) {
+	if len(p) > 0 && p[0].Name == "instance" && len(p[0].Keys) == 1 && t.host != "" && p[0].Keys[0] == t.host {
+		return p[1:], true
+	}
+	if len(p) == 0 || p[0].Name == "instance" || slices.Contains(sharedReadable, p[0].Name) || slices.Contains(adminLists, p[0].Name) {
+		return p, false
+	}
+	return p, hostSchema().Child("instance").Child(p[0].Name) != nil || p[0].Name == "host-name"
+}
+
+// hostSchema is the configuration's schema (its top level).
+func hostSchema() *schema.Node { return schema.MustLoad() }
 
 // sharedReadable are the top-level lists everyone reads, as the API's
 // shared resources.
-var sharedReadable = []string{"host", "address-list", "ip-list", "object-folder", "service", "port-name"}
+var sharedReadable = []string{"host", "address-list", "ip-list", "object-folder", "service", "port-name", "dns-soa-template", "dnssec-policy", "dns-template"}
 
 // adminLists are the top-level lists only global admins read: they hold
 // what logs people in.
@@ -309,6 +395,9 @@ func (t treeAccess) CanRead(p datastore.Path) bool {
 	}
 	if t.a.readsAll() || len(p) == 0 {
 		return true
+	}
+	if _, ok := t.hostScope(p); ok {
+		return false // readsAll above
 	}
 	if p[0].Name == "instance" {
 		return len(p[0].Keys) == 0 || t.read[p[0].Keys[0]]
@@ -323,12 +412,17 @@ func (t treeAccess) CanWrite(p datastore.Path) bool {
 	if t.a.isAdmin() {
 		return true
 	}
+	// The host's: global admins' alone (above), also named as its
+	// instance of 1.0.0.
+	if _, ok := t.hostScope(p); ok {
+		return false
+	}
 	// An instance admin changes their virtual firewall, but not where it
 	// runs or what it is.
 	if len(p) < 2 || p[0].Name != "instance" || len(p[0].Keys) == 0 || !t.write[p[0].Keys[0]] {
 		return false
 	}
-	return p[1].Name != "firewall" && p[1].Name != "is-default"
+	return p[1].Name != "firewall"
 }
 
 // cliEnv is the CLI's environment for the user u.
@@ -345,7 +439,7 @@ func (s *Server) cliEnv(ctx context.Context, u *models.User) (*cli.Env, error) {
 	if s.cfg.Local {
 		s.checkRole(ctx)
 	}
-	acc := treeAccess{a: a, read: read, write: write}
+	acc := treeAccess{a: a, read: read, write: write, host: s.currentHostName()}
 	env := &cli.Env{
 		Store: t.store, Schema: t.schema, User: u.Username, Access: acc, Version: buildinfo.Version,
 		API: func(ctx context.Context, method, path string, body []byte) (int, []byte) {

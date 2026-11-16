@@ -61,28 +61,21 @@ func (a *Adder) Node(tbl string, id int64) *datastore.Node {
 // an id (one made up, for a new entry) can be named by the rows added
 // after it. An entry that is there already is an error.
 func (a *Adder) Add(tbl string, row Row) (*datastore.Node, error) {
-	// Two lists may share a table (a virtual firewall's DNS templates and
-	// the firewall's): a row with a parent is the nested list's, one
-	// without (0) the top-level list's.
-	var t *table
-	for _, x := range a.m.tables {
-		if x.name != tbl {
-			continue
+	// Lists may share a table (the host's interfaces at the top level and
+	// a virtual firewall's; a virtual firewall's DNS templates and the
+	// firewall's): the one whose parent has the row's parent id, or, for
+	// a row without one (0), the list of no parent.
+	if rt := a.m.rootTable; rt != nil && rt.name == tbl && row["is_default"] == true {
+		// The top level's row (confview gives it is_default): its leaves.
+		if err := a.Update(a.tree.Root, row); err != nil {
+			return nil, err
 		}
-		if x.parent == nil || toInt(row[x.parentCol]) != 0 {
-			t = x
-			if x.parent != nil {
-				break
-			}
+		if id := toInt(row["id"]); id != 0 {
+			a.index(a.tree.Root, id)
 		}
+		return a.tree.Root, nil
 	}
-	if t == nil {
-		for _, x := range a.m.tables {
-			if x.name == tbl {
-				t = x
-			}
-		}
-	}
+	t := a.tableFor(tbl, row)
 	if t == nil {
 		return nil, fmt.Errorf("%s is not a table of the configuration", tbl)
 	}
@@ -200,6 +193,15 @@ func (a *Adder) Update(n *datastore.Node, row Row) error {
 			}
 		}
 	}
+	for _, j := range t.jsons {
+		if _, ok := row[j.column]; !ok {
+			continue
+		}
+		delete(n.Lists, j.list.Name)
+		if err := readJSONColumn(n, j, row[j.column]); err != nil {
+			return fmt.Errorf("%s: %s: %w", t.name, j.column, err)
+		}
+	}
 	return nil
 }
 
@@ -218,9 +220,32 @@ func (a *Adder) Index() Index { return a.idx }
 // List is the list whose entries are the table's rows, nil for none.
 func (a *Adder) List(tbl string) *schema.Node {
 	for _, t := range a.m.tables {
-		if t.name == tbl && t.singleton == 0 {
+		if t.name == tbl && t.singleton == 0 && t != a.m.rootTable {
 			return t.s
 		}
 	}
 	return nil
+}
+
+// tableFor is the table of tbl a row is of (see Add).
+func (a *Adder) tableFor(tbl string, row Row) *table {
+	var fallback *table
+	for _, x := range a.m.tables {
+		if x.name != tbl || x == a.m.rootTable {
+			continue
+		}
+		if fallback == nil {
+			fallback = x
+		}
+		if x.parent == nil {
+			if toInt(row[x.parentCol]) == 0 || x.parentCol == "" {
+				fallback = x
+			}
+			continue
+		}
+		if pid := toInt(row[x.parentCol]); pid != 0 && a.byID[x.parent][pid] != nil {
+			return x
+		}
+	}
+	return fallback
 }

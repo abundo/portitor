@@ -181,3 +181,89 @@ func bundleOf(t *testing.T, env *testEnv, name string) Bundle {
 	}
 	return b
 }
+
+// The host's bundle (the top level's configuration, as an instance entry):
+// into an installation without a host it becomes the host, into one with
+// one a virtual firewall; the same configuration either way.
+func TestBundleOfTheHost(t *testing.T) {
+	src := newEnv(t)
+	if err := src.srv.ensureDefaultInstance(); err != nil {
+		t.Fatal(err)
+	}
+	src.put("interface=eth4", map[string]any{"kind": "physical", "enabled": true, "ipv4-mode": "static", "addresses": []string{"10.4.0.1/24"}})
+	src.post("rule", map[string]any{"chain": "input", "action": "accept", "enabled": true, "in-interfaces": []string{"eth4"}})
+	rec := src.do("GET", "/api/config/candidate/?action=bundle", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("export: %d %s", rec.Code, rec.Body)
+	}
+	var b Bundle
+	if err := json.Unmarshal(rec.Body.Bytes(), &b); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b.Config), `"eth4"`) || strings.Contains(string(b.Config), "host-name") {
+		t.Errorf("the host's bundle: %s", b.Config)
+	}
+	want := docOf(t, src, "main")
+
+	// No host yet: it becomes the host.
+	dst := newEnv(t)
+	if err := dst.srv.ensureFirewall(); err != nil {
+		t.Fatal(err)
+	}
+	if rec := dst.do("POST", "/api/instances/import", map[string]any{"name": "fw", "bundle": b}); rec.Code != http.StatusCreated {
+		t.Fatalf("import as the host: %d %s", rec.Code, rec.Body)
+	}
+	tr, _ := dst.srv.tree()
+	cand, _ := tr.store.Candidate(t.Context())
+	if hostName(cand) != "fw" || cand.Root.Entry("interface", []string{"eth4"}) == nil {
+		t.Errorf("the imported host: %v", cand.Root.Leaves)
+	}
+	if got := docOf(t, dst, "fw"); got != want {
+		t.Errorf("the imported host differs:\n got %s\nwant %s", got, want)
+	}
+
+	// With a host: a virtual firewall.
+	vf := newEnv(t)
+	vf.do("PUT", "/api/settings", map[string]any{"virtual_firewalls": true})
+	if err := vf.srv.ensureDefaultInstance(); err != nil {
+		t.Fatal(err)
+	}
+	if rec := vf.do("POST", "/api/instances/import", map[string]any{"name": "copy", "bundle": b}); rec.Code != http.StatusCreated {
+		t.Fatalf("import as a virtual firewall: %d %s", rec.Code, rec.Body)
+	}
+	if vf.node("instance=copy/interface=eth4") == nil {
+		t.Error("the virtual firewall lacks the host's interface")
+	}
+}
+
+// A bundle 1.0.0 made of its host (the instance with is-default), with the
+// DNS templates bootstrap makes (soa-1, dns-1), imported as a virtual
+// firewall where the firewall has templates of those names: its own shadow
+// them, and its zone is served with them.
+func TestA100HostBundleWithTemplates(t *testing.T) {
+	cfg := `{"portitor:instance": [{"name": "main", "is-default": true, "firewall": "firewall",
+		"interface": [{"name": "eth4", "kind": "physical", "enabled": true, "addresses": ["10.4.0.1/24"]}],
+		"dns-soa-template": [{"name": "soa-1", "mname": "ns1.old.example", "rname": "h.old.example"}],
+		"dns-template": [{"name": "dns-1", "soa-template": "soa-1", "nameserver": [{"name": "ns1.old.example", "address": ""}]}],
+		"dns-zone": [{"name": "old.example", "dns-template": "dns-1"}]}]}`
+	b := Bundle{Format: bundleFormat, Instance: "main", Config: json.RawMessage(cfg), Refs: []bundleRef{}, Left: []string{}}
+	env := newEnv(t)
+	env.do("PUT", "/api/settings", map[string]any{"virtual_firewalls": true})
+	if err := env.srv.ensureDefaultInstance(); err != nil {
+		t.Fatal(err)
+	}
+	soa := map[string]any{"mname": "ns1.home.arpa", "rname": "h.home.arpa"}
+	env.put("dns-soa-template=soa-1", soa)
+	env.put("dns-template=dns-1", map[string]any{"soa-template": "soa-1", "nameserver": []map[string]string{{"name": "ns1.home.arpa", "address": ""}}})
+	if rec := env.do("POST", "/api/instances/import", map[string]any{"name": "old", "bundle": b}); rec.Code != http.StatusCreated {
+		t.Fatalf("import: %d %s", rec.Code, rec.Body)
+	}
+	doc, err := builder.Build(env.input(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dns := doc.Instance("old").DNS
+	if zt := dns.ZoneTemplate("dns-1"); zt == nil || len(dns.SOATemplates) != 1 || dns.SOATemplates[0].MName != "ns1.old.example." && dns.SOATemplates[0].MName != "ns1.old.example" {
+		t.Errorf("the imported VF's DNS: %+v %+v", dns.ZoneTemplates, dns.SOATemplates)
+	}
+}

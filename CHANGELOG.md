@@ -18,6 +18,16 @@ here (`dev/release-notes.sh`); the full list is `git log <previous tag>..<tag>`.
   the data directory. The old `portitor.db` is left where it is, unread.
 - **A restore no longer gives an id again** that was given after the backup was made
   (entries' ids, and rules' ids, which mark their connections).
+- **The host's configuration is the top level of the configuration tree**, not an
+  instance: in the CLI, NETCONF and `/api/config`, `interface eth1` is the host's
+  interface and `instance guest interface eth1` a virtual firewall's, also with
+  virtual firewalls on. The host's name is the leaf `host-name`; its own DNS
+  templates are the firewall's (`dns-template` and the like at the top level),
+  which every virtual firewall may use. Old paths (`instance main interface eth1`)
+  are still taken, with a warning, until 1.2.0. SNMP: the host's state has new OIDs
+  (`PORTITOR-MIB`), under the top level's `state`.
+- **One firewall per configuration** (and its HA secondary): portitor-config refuses
+  a second firewall of its own, as it did when it ran on the firewall.
 
 ### Upgrading
 
@@ -29,6 +39,20 @@ here (`dev/release-notes.sh`); the full list is `git log <previous tag>..<tag>`.
 - An HA pair: update both hosts together, the secondary first. A 1.1.0 secondary
   copies from a 1.0.0 primary; a primary before 1.0.0 is refused.
 - A backup made before 1.0.0 (a database file) is refused, as in 1.0.0.
+- 1.0.0's configuration (its candidate, kept commits, backups, bundles and an HA
+  primary's copy) is read and moved to the new shape: the host's entries keep their
+  ids, so rules keep their connection marks, and the firewalls get the same
+  documents. The data directory is marked layout 3 and copies are format 3, which
+  1.0.0 refuses ("update first"); so update an HA pair's secondary first.
+- Until 1.2.0, scripts and clients that name the host as `instance <host-name>` keep
+  working for paths below it and for the entry itself: the CLI and `/api/config`
+  take them with a warning, NETCONF `edit-config` takes them (without one), and a GET
+  of `instance=<host-name>` answers the host in 1.0.0's shape; a PUT of it is refused.
+  What no longer has the host: the list `instance` (a GET of it, a NETCONF subtree
+  filter on `<instance><name>…`), which holds the virtual firewalls alone. Drop the
+  `instance` step.
+- The host keeps its name (`host-name`), and is global admins' alone: a role can't
+  grant it (a grant of it of 1.0.0 gives nothing, and goes at the next commit).
 
 ## v1.0.0
 

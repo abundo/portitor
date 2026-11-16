@@ -103,7 +103,7 @@ func TestHooks(t *testing.T) {
 	if err := Normalize(tr, work, datastore.ChangedEntries(tr, work)); err != nil {
 		t.Fatal(err)
 	}
-	wg := work.Root.Entry("instance", []string{"host"}).Entry("interface", []string{"wg0"})
+	wg := work.Root.Entry("interface", []string{"wg0"})
 	if wg.Leaves["wg-private-key"] == "" || wg.Leaves["wg-public-key"] == "" {
 		t.Errorf("no keys: %v", wg.Leaves)
 	}
@@ -168,7 +168,7 @@ func TestRoutingHooks(t *testing.T) {
 	if err := Normalize(datastore.New(tr.Root.S), tr, datastore.ChangedEntries(datastore.New(tr.Root.S), tr)); err != nil {
 		t.Fatal(err)
 	}
-	e := tr.Root.Entry("instance", []string{"host"}).Entry("route-map", []string{"out"}).Entry("entry", []string{"10"})
+	e := tr.Root.Entry("route-map", []string{"out"}).Entry("entry", []string{"10"})
 	if _, ok := e.Leaves["set-metric"]; ok {
 		t.Error("a deny entry kept what it sets")
 	}
@@ -192,8 +192,10 @@ func TestServiceHooks(t *testing.T) {
 		{"name": "host", "is-default": true, "firewall": "fw",
 		 "interface": [{"name": "wan0", "kind": "physical"}],
 		 "dns-soa-template": [{"name": "std", "mname": "ns1.example.com", "rname": "hostmaster.example.com"}]},
-		{"name": "lab", "firewall": "fw", "interface": [{"name": "eth1", "kind": "physical"}]}],
-		"portitor:dns-soa-template": [{"name": "fw-std", "mname": "ns1.example.com", "rname": "hostmaster.example.com"}]}`)
+		{"name": "lab", "firewall": "fw", "interface": [{"name": "eth1", "kind": "physical"}],
+		 "dns-zone": [{"name": "lab.example", "dns-template": "fw-t"}]}],
+		"portitor:dns-soa-template": [{"name": "fw-std", "mname": "ns1.example.com", "rname": "hostmaster.example.com"}],
+		"portitor:dns-template": [{"name": "fw-t", "soa-template": "fw-std", "nameserver": [{"name": "ns1.example.com", "address": ""}]}]}`)
 	work := tr.Clone()
 	must := func(err error) {
 		t.Helper()
@@ -208,7 +210,7 @@ func TestServiceHooks(t *testing.T) {
 	if o.Leaf("ovpn-tls-crypt") == "" || o.Leaf("ovpn-require-role") != "true" {
 		t.Errorf("OpenVPN: %v", o.Leaves)
 	}
-	crt := work.Root.Entry("instance", []string{"host"}).Entry("certificate", []string{"web"})
+	crt := work.Root.Entry("certificate", []string{"web"})
 	if got := crt.LeafLists["domains"]; len(got) != 2 || got[0] != "fw.example.com" {
 		t.Errorf("domains %v", got)
 	}
@@ -216,10 +218,10 @@ func TestServiceHooks(t *testing.T) {
 		t.Errorf("checks: %v", errs)
 	}
 	for what, c := range map[string]struct{ at, body, want string }{
-		"a second OpenVPN":                {"instance=lab/interface=ovpn1", `{"kind": "openvpn", "addresses": ["10.9.0.1/24"], "ovpn-mode": "udp"}`, "one OpenVPN"},
-		"the firewall's SOA name in a VF": {"instance=lab/dns-soa-template=fw-std", `{"mname": "ns.lab.example", "rname": "h.lab.example"}`, "the firewall has"},
-		"SNMP with no way in":             {"instance=lab", `{"snmp-enabled": true}`, "community"},
-		"a TSIG key, no secret":           {"instance=lab/dns-update=up", `{"interface": "eth1", "server": "192.0.2.53", "zone": "example.com", "tsig-name": "k"}`, "secret"},
+		"a second OpenVPN": {"instance=lab/interface=ovpn1", `{"kind": "openvpn", "addresses": ["10.9.0.1/24"], "ovpn-mode": "udp"}`, "one OpenVPN"},
+		"the firewall's SOA name in a VF that uses it": {"instance=lab/dns-soa-template=fw-std", `{"mname": "ns.lab.example", "rname": "h.lab.example"}`, "used here too"},
+		"SNMP with no way in":                          {"instance=lab", `{"snmp-enabled": true}`, "community"},
+		"a TSIG key, no secret":                        {"instance=lab/dns-update=up", `{"interface": "eth1", "server": "192.0.2.53", "zone": "example.com", "tsig-name": "k"}`, "secret"},
 	} {
 		err := edit(t, work, func(w *datastore.Tree) error {
 			return w.EditJSON(path(c.at), datastore.EditMerge, []byte(c.body))

@@ -220,6 +220,26 @@ func LoadWith(tree *datastore.Tree, ids sqlmap.IDs) (*View, error) {
 	if len(settings) > 0 {
 		v.Settings = settings[0]
 	}
+	// The top level's row is the host's, the default instance: on the
+	// firewall that is no other's HA secondary (there is one per tree).
+	if id, ok := idx[tree.Root]; ok {
+		var fw uint
+		for _, f := range v.Firewalls {
+			if f.HAPrimaryID == nil {
+				fw = f.ID
+				break
+			}
+		}
+		for i := range v.Instances {
+			if in := &v.Instances[i]; int64(in.ID) == id {
+				in.IsDefault, in.FirewallID = true, fw
+			}
+		}
+		// No host yet (a new installation, before its first firewall).
+		if tree.Root.Leaf("host-name") == "" {
+			v.Instances = slices.DeleteFunc(v.Instances, func(in models.Instance) bool { return in.IsDefault })
+		}
+	}
 	// The default instance first.
 	slices.SortStableFunc(v.Instances, func(a, b models.Instance) int {
 		switch {

@@ -102,12 +102,15 @@ type resolvedAction struct {
 // lookupAction is the action named on the entry (or list) at p, if there
 // is one.
 func lookupAction(t *datastore.Tree, p datastore.Path, name string) (resolvedAction, bool) {
-	ss, err := datastore.ResolveAll(t.Root.S, p)
-	if err != nil || len(ss) == 0 {
-		return resolvedAction{}, false
+	list := t.Root.S // the top level: the host's own
+	if p = t.ResolveHost(p); len(p) > 0 {
+		ss, err := datastore.ResolveAll(t.Root.S, p)
+		if err != nil || len(ss) == 0 {
+			return resolvedAction{}, false
+		}
+		list = ss[len(ss)-1]
 	}
-	list := ss[len(ss)-1]
-	key := list.Path() + " " + name
+	key := handlerPath(list) + " " + name
 	if a := list.Action(name); a != nil {
 		h := actionHandlers[key]
 		if h == nil {
@@ -119,6 +122,24 @@ func lookupAction(t *datastore.Tree, p datastore.Path, name string) (resolvedAct
 		return resolvedAction{kind: schema.ActionView, write: g.write, run: g.run}, true
 	}
 	return resolvedAction{}, false
+}
+
+// handlerPath is the path the handlers of a list's actions are registered
+// by: the host's lists at the top level have their virtual firewalls'
+// (/interface is /instance/interface).
+func handlerPath(list *schema.Node) string {
+	p := list.Path()
+	if list.Parent == nil {
+		return "/instance" // the host's own: the top level
+	}
+	root := list
+	for root.Parent != nil {
+		root = root.Parent
+	}
+	if inst := root.Child("instance"); inst != nil && !strings.HasPrefix(p, "/instance/") && inst.Find(p) != nil {
+		return "/instance" + p
+	}
+	return p
 }
 
 // runAction runs the action named on the entry of the request's path.
@@ -330,11 +351,11 @@ func moveInterface(s *Server, c *echo.Context, a *actionCtx) error {
 		return errJSON(c, http.StatusBadRequest, "the body: "+err.Error())
 	}
 	name := a.entry.Leaf("name")
-	from := a.entry.Parent.Leaf("name")
+	from := nodeName(a.entry.Parent)
 	if req.Instance == from {
 		return c.NoContent(http.StatusNoContent)
 	}
-	to := a.tree.Root.Entry("instance", []string{req.Instance})
+	to := instNode(a.tree, req.Instance)
 	if to == nil {
 		return errJSON(c, http.StatusBadRequest, "no virtual firewall "+req.Instance)
 	}
@@ -348,7 +369,7 @@ func moveInterface(s *Server, c *echo.Context, a *actionCtx) error {
 	if err := a.tree.Delete(a.path); err != nil {
 		return err
 	}
-	dst := datastore.Path{{Name: "instance", Keys: []string{req.Instance}}, {Name: "interface"}}
+	dst := append(instPath(a.tree, req.Instance), datastore.Elem{Name: "interface"})
 	if err := a.tree.EditJSON(dst, datastore.EditCreate, data); err != nil {
 		return err
 	}

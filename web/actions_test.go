@@ -23,7 +23,7 @@ func TestActionHandlers(t *testing.T) {
 	inYANG := map[string]bool{}
 	root.Walk(func(n *schema.Node) {
 		for _, a := range n.Actions {
-			key := n.Path() + " " + a.Name
+			key := handlerPath(n) + " " + a.Name
 			inYANG[key] = true
 			if actionHandlers[key] == nil {
 				t.Errorf("%s: no handler (registerAction)", key)
@@ -93,13 +93,13 @@ tools `+wg+` wg-next
 		t.Errorf("tools: %s", out)
 	}
 	cand, _ := cenv.Store.Candidate(ctx)
-	if cand.Root.Entry("instance", []string{host}).Entry("interface", []string{"wg9"}).Leaves["wg-private-key"] == "" {
+	if instNode(cand, host).Entry("interface", []string{"wg9"}).Leaves["wg-private-key"] == "" {
 		t.Error("wg-rekey made no key")
 	}
 
 	cliScript(t, cenv, "configure\ntools instance "+host+" certificate c2 generate domains [ c2.example.com ] days 30 key-type ec384\n")
 	cand, _ = cenv.Store.Candidate(ctx)
-	if c := cand.Root.Entry("instance", []string{host}).Entry("certificate", []string{"c2"}); c == nil || c.Leaves["source"] != fwconfig.CertSourceImport {
+	if c := instNode(cand, host).Entry("certificate", []string{"c2"}); c == nil || c.Leaves["source"] != fwconfig.CertSourceImport {
 		t.Errorf("generate made %v", c)
 	}
 

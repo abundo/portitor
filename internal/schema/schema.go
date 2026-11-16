@@ -474,6 +474,13 @@ func Compile(files fs.FS, module string) (*Node, error) {
 				root.Revision = r.Name
 			}
 		}
+		// The module's own px: statements are the root's (px:table:
+		// the top level is an entry's row too, the host's).
+		for _, x := range mod.Extensions {
+			if name, ok := strings.CutPrefix(x.Keyword, "px:"); ok {
+				root.Ext[name] = x.Argument
+			}
+		}
 	}
 	if err := addChildren(root, m, fileRanks(names)); err != nil {
 		return nil, err

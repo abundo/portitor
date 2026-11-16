@@ -94,7 +94,16 @@ func configRequest(c *echo.Context) (ds string, p datastore.Path, err error) {
 // treeAccessOf is the request user's access to the tree.
 func (s *Server) treeAccessOf(c *echo.Context) treeAccess {
 	a := currentAccess(c)
-	return treeAccess{a: a, read: a.readableNames(), write: a.writableNames(), readOnly: s.isReplica()}
+	return treeAccess{a: a, read: a.readableNames(), write: a.writableNames(), readOnly: s.isReplica(), host: s.currentHostName()}
+}
+
+// currentHostName is the candidate's host's name, "" when it can't be read.
+func (s *Server) currentHostName() string {
+	v, err := s.view(context.Background())
+	if err != nil {
+		return ""
+	}
+	return hostName(v.Tree)
 }
 
 func (s *Server) handleSchema(c *echo.Context) error {
@@ -159,6 +168,15 @@ func (e *notFound) Error() string { return e.what + " is not there" }
 
 // configJSON is the JSON of what is at p in t.
 func configJSON(t *datastore.Tree, p datastore.Path, o datastore.JSONOptions) ([]byte, error) {
+	if len(p) > 0 && len(t.ResolveHost(p)) == 0 {
+		// The host named as its instance of 1.0.0 (until 1.2.0): it, in
+		// that shape, not the whole configuration.
+		entry, err := hostAsEntry(t)
+		if err != nil {
+			return nil, err
+		}
+		return datastore.NodeJSON(entry, o)
+	}
 	ss, err := datastore.ResolveAll(t.Root.S, p)
 	if err != nil {
 		return nil, err
@@ -534,6 +552,25 @@ func (s *Server) assignID(work *datastore.Tree, p datastore.Path, body []byte) (
 // nextID is the next id of a list keyed by a number: above every entry's
 // in the candidate and running, and above every one given before (ids.json,
 // so a deleted entry's id is never given again).
+// markKey is the high-water mark a list's ids count on: its schema path,
+// one for the host's list at the top level and the virtual firewalls' of
+// the same place (/instance/rule), so their ids never meet, as when the
+// host was an instance.
+func markKey(list *schema.Node) string {
+	p := list.Path()
+	if strings.HasPrefix(p, "/instance/") {
+		return p
+	}
+	root := list
+	for root.Parent != nil {
+		root = root.Parent
+	}
+	if inst := root.Child("instance"); inst != nil && inst.Find(strings.TrimPrefix(p, "/")) != nil {
+		return "/instance" + p
+	}
+	return p
+}
+
 func (s *Server) nextID(work *datastore.Tree, list *schema.Node, key string) (uint64, error) {
 	t, err := s.tree()
 	if err != nil {
@@ -547,14 +584,15 @@ func (s *Server) nextID(work *datastore.Tree, list *schema.Node, key string) (ui
 		}
 	}
 	marks := t.idMarks
-	next := marks[list.Path()]
+	mark := markKey(list)
+	next := marks[mark]
 	trees := []*datastore.Tree{work}
 	if run, err := (treeBackend{s}).Running(context.Background()); err == nil {
 		trees = append(trees, run)
 	}
 	for _, tr := range trees {
 		tr.Root.Walk(func(n *datastore.Node) {
-			if n.S == list {
+			if n.S == list || n.S.Kind == schema.List && markKey(n.S) == mark {
 				if id, err := strconv.ParseUint(n.Leaf(key), 10, 64); err == nil && id > next {
 					next = id
 				}
@@ -562,7 +600,7 @@ func (s *Server) nextID(work *datastore.Tree, list *schema.Node, key string) (ui
 		})
 	}
 	next++
-	marks[list.Path()] = next
+	marks[mark] = next
 	if t.dir != "" {
 		data, _ := json.Marshal(marks)
 		if err := datastore.WriteFile(path, data); err != nil {
@@ -603,15 +641,13 @@ func (s *Server) firewallProblems(tree *datastore.Tree) []error {
 		vfs = st.Leaf("virtual-firewalls") == "true"
 	}
 	var errs []error
-	count := map[string]int{}
 	for _, in := range tree.Root.Lists["instance"] {
 		at := datastore.PathOf(in).String(tree.Root.S)
 		name := in.Leaf("firewall")
 		if secondary[name] {
 			errs = append(errs, &datastore.Error{Path: at, Msg: "firewall: " + name + " is an HA secondary; it runs its primary's virtual firewalls"})
 		}
-		count[name]++
-		if !vfs && count[name] == 2 {
+		if !vfs {
 			errs = append(errs, &datastore.Error{Path: at, Msg: "virtual firewalls are off (Settings): a firewall has its host alone"})
 		}
 	}
@@ -662,6 +698,10 @@ func (s *Server) checkEdit(acc treeAccess, scope map[string]bool, before, work *
 	}
 	if errs := newProblems(was, warnings); len(errs) > 0 && !onlyFirewalls {
 		return nil, "", &datastore.ValidationError{Problems: errs}
+	}
+	// Paths of 1.0.0 the edit took (the host as an instance), until 1.2.0.
+	for _, d := range work.Deprecated {
+		warnings = append(warnings, errors.New(d))
 	}
 	return warnings, "", nil
 }

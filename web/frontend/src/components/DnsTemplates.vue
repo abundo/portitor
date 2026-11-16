@@ -72,7 +72,7 @@ const globalField = {
   label: "The firewall's",
   type: 'switch',
   hint: 'For every virtual firewall, changed by global admins only. Chosen when made.',
-  show: (form) => auth.isAdmin && !form.id,
+  show: (form) => auth.isAdmin && !form.id && !store.current?.is_default,
 }
 const globalColumn = {
   key: 'global',

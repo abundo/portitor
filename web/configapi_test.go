@@ -80,7 +80,7 @@ func TestConfigAPI(t *testing.T) {
 	// A replace keeps the secret; a rename follows into the rules.
 	want(env.do("PUT", "/api/config/candidate/instance=lab/interface=eth1", map[string]any{"kind": "physical", "enabled": true, "addresses": []string{"10.1.0.1/24"}}), http.StatusOK, "replace eth1")
 	cand, _ := env.srv.treeState.store.Candidate(t.Context())
-	if cand.Root.Entry("instance", []string{"lab"}).Entry("interface", []string{"eth1"}).Leaves["wg-private-key"] != "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=" {
+	if instNode(cand, "lab").Entry("interface", []string{"eth1"}).Leaves["wg-private-key"] != "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=" {
 		t.Error("the replace lost the secret")
 	}
 	want(env.do("POST", "/api/config/candidate/instance=lab/rule", map[string]any{"id": 900, "chain": "input", "action": "accept", "in-interfaces": []string{"eth1"}}), http.StatusCreated, "rule 900")
@@ -223,7 +223,7 @@ func TestConfigAPISecretsAndMerge(t *testing.T) {
 		t.Errorf("without: %s", rec.Body)
 	}
 	// ?shallow leaves out what is nested.
-	if rec := env.mustCfg("GET", "instance?shallow", nil); strings.Contains(rec.Body.String(), "eth1") || !strings.Contains(rec.Body.String(), `"snmp-enabled":true`) {
+	if rec := env.mustCfg("GET", "?shallow", nil); strings.Contains(rec.Body.String(), "eth1") || !strings.Contains(rec.Body.String(), `"portitor:snmp-enabled":true`) {
 		t.Errorf("shallow: %s", rec.Body)
 	}
 	// A PUT of a whole list replaces its entries.
@@ -300,7 +300,7 @@ func TestConsoleSet(t *testing.T) {
 	ctx := context.Background()
 	for _, res := range []string{"interfaces", "interface"} {
 		p, lists, err := env.srv.ConsoleSetPath(ctx, "", res, "eth3")
-		if err != nil || p != "instance=main/interface=eth3" || !lists["addresses"] {
+		if err != nil || p != "interface=eth3" || !lists["addresses"] {
 			t.Fatalf("%s: %q %v", res, p, err)
 		}
 	}
@@ -314,5 +314,62 @@ func TestConsoleSet(t *testing.T) {
 		[]byte(`{"kind":"physical","enabled":"true","mtu":"1400","addresses":["10.3.0.1/24"]}`))
 	if code != 200 || env.node("instance=main/interface=eth3").Leaf("mtu") != "1400" {
 		t.Errorf("set: %d %s", code, out)
+	}
+}
+
+// Until 1.2.0 the host may be named as the instance it was in 1.0.0: the
+// API and the CLI take such a path, edit the top level, and warn.
+func TestHostAsAnInstanceIsDeprecated(t *testing.T) {
+	env, _ := consoleEnv(t, "")
+	if err := env.srv.ensureDefaultInstance(); err != nil {
+		t.Fatal(err)
+	}
+	host := env.instanceRow("").Name
+	rec := env.cfg("PUT", "instance="+host+"/interface=eth7", map[string]any{"kind": "physical", "enabled": true})
+	if rec.Code/100 != 2 || !strings.Contains(rec.Header().Get("X-Portitor-Warnings")+rec.Body.String(), "top level") {
+		t.Errorf("API: %d %s %q", rec.Code, rec.Body, rec.Header().Get("X-Portitor-Warnings"))
+	}
+	if env.node("interface=eth7") == nil {
+		t.Error("the interface is not the host's")
+	}
+	cenv, err := env.srv.ConsoleCLI(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := cliScript(t, cenv, "configure\ninstance "+host+" interface eth8 kind physical\n")
+	if !strings.Contains(out, "warning: instance "+host) || env.node("interface=eth8") == nil {
+		t.Errorf("CLI: %s", out)
+	}
+}
+
+// The host's own entry of 1.0.0, instance=<host>: a GET answers it in that
+// shape, a PATCH with its members (its name and is-default too) changes the
+// top level's, and a PUT, which would replace the whole configuration, is
+// refused.
+func TestTheHostsEntryAsAnInstance(t *testing.T) {
+	env := newEnv(t)
+	if err := env.srv.ensureDefaultInstance(); err != nil {
+		t.Fatal(err)
+	}
+	env.vf("guest")
+	env.put("interface=eth4", map[string]any{"kind": "physical", "enabled": true})
+	rec := env.mustCfg("GET", "instance=main", nil)
+	if b := rec.Body.String(); !strings.Contains(b, `"name":"main"`) || !strings.Contains(b, "eth4") || strings.Contains(b, "guest") {
+		t.Errorf("GET: %s", b)
+	}
+	if rec := env.cfg("PATCH", "instance=main", map[string]any{"name": "main", "is-default": true, "firewall": "firewall", "snmp-location": "rack 3"}); rec.Code/100 != 2 {
+		t.Fatalf("PATCH: %d %s", rec.Code, rec.Body)
+	}
+	if got := env.node("").Leaf("snmp-location"); got != "rack 3" {
+		t.Errorf("snmp-location %q", got)
+	}
+	if rec := env.cfg("PUT", "instance=main", map[string]any{"name": "main", "description": "all gone?"}); rec.Code != http.StatusBadRequest {
+		t.Errorf("PUT: %d %s", rec.Code, rec.Body)
+	}
+	if env.node("instance=guest") == nil || env.node("interface=eth4") == nil {
+		t.Error("the configuration lost entries")
+	}
+	if rec := env.cfg("DELETE", "instance=main", nil); rec.Code < 400 {
+		t.Errorf("DELETE: %d %s", rec.Code, rec.Body)
 	}
 }

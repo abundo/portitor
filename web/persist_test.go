@@ -4,17 +4,21 @@
 package web
 
 import (
+	"archive/tar"
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/abundo/portitor/internal/confcheck"
 	"github.com/abundo/portitor/internal/datastore"
 
 	"github.com/abundo/portitor/internal/fwconfig"
@@ -85,7 +89,7 @@ func TestFilesSurviveARestart(t *testing.T) {
 	}
 	d1, _ := env.srv.rec.RecentDeployments(0)
 	d2, _ := again.rec.RecentDeployments(0)
-	if len(d1) != 2 || len(d2) != 2 || d1[0].ID != d2[0].ID || d1[0].Status != d2[0].Status {
+	if len(d1) != 1 || len(d2) != 1 || d1[0].ID != d2[0].ID || d1[0].Status != d2[0].Status {
 		t.Errorf("deployments: %d %d", len(d1), len(d2))
 	}
 	var fw models.Firewall
@@ -453,17 +457,31 @@ func TestReadyMakesEveryFile(t *testing.T) {
 		}
 	}
 	b, _ := os.ReadFile(filepath.Join(dir, "layout.json"))
-	if !strings.Contains(string(b), `"layout": 2`) {
+	if !strings.Contains(string(b), `"layout": 3`) {
 		t.Errorf("layout.json %q", b)
 	}
 }
 
-// The data directory 1.0.0 left (testdata/release-1.0.0, made by that release
-// with a commit, a second firewall, a directory server and a change pending;
-// no database): this release opens it with no database and builds the same
-// documents, the admin logs in, and the pending change is still the candidate.
+// The data directory 1.0.0 left (testdata/release-1.0.0, made by that release:
+// an HA pair whose host has interfaces, rules, NAT, a route, its own DNS
+// templates and a zone, a virtual firewall linked to it, the firewall's DNS
+// templates and a syslog server, a commit and a change pending). This release
+// moves the host from the instance list to the top level, keeps every entry's
+// id, writes the candidate in its shape, and builds the same documents; the
+// admin logs in, and the pending change is still the candidate.
 func TestOpensA100DataDirectory(t *testing.T) {
-	dir, srv := openEarlier(t, filepath.Join("testdata", "release-1.0.0"))
+	src := filepath.Join("testdata", "release-1.0.0")
+	var was struct {
+		Paths map[string][2]any `json:"paths"`
+	}
+	b, err := os.ReadFile(filepath.Join(src, "entry-ids.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(b, &was); err != nil {
+		t.Fatal(err)
+	}
+	dir, srv := openEarlier(t, src)
 	want, err := os.ReadFile(filepath.Join(dir, "built.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -477,22 +495,100 @@ func TestOpensA100DataDirectory(t *testing.T) {
 		t.Fatalf("1.0.0's admin can't log in: %d %s", rec.Code, rec.Body)
 	}
 	fws, err := srv.rec.Firewalls()
-	if err != nil || len(fws) != 2 || fws[1].Name != "branch" || fws[1].AgentToken != "secret" {
+	if err != nil || len(fws) != 2 || fws[1].Name != "fw1b" || fws[1].HAPrimaryID == nil {
 		t.Errorf("firewalls: %v %+v", err, fws)
 	}
 	if live, err := srv.liveCommit(); err != nil || live != 1 {
 		t.Errorf("the live commit: %d %v", live, err)
 	}
-	if servers, err := srv.enabledDirectoryServers(context.Background()); err != nil || len(servers) != 1 || servers[0].Name != "down" {
-		t.Errorf("directory servers: %v %+v", err, servers)
-	}
 	tr, _ := srv.tree()
-	if changed, err := tr.store.Changed(context.Background()); err != nil || !changed {
+	ctx := context.Background()
+	if changed, err := tr.store.Changed(ctx); err != nil || !changed {
 		t.Errorf("the change 1.0.0 left pending is gone: %v", err)
+	}
+	// The host is the top level, in the candidate and in the file.
+	cand, _ := tr.store.Candidate(ctx)
+	if hostName(cand) != "main" || cand.Root.Entry("interface", []string{"lan"}) == nil || cand.Root.Entry("instance", []string{"main"}) != nil {
+		t.Errorf("the host: %v", cand.Root.Leaves)
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, "candidate.json")); !strings.Contains(string(b), `"portitor:host-name"`) || strings.Contains(string(b), `"is-default"`) {
+		t.Error("candidate.json is not written in this release's shape")
+	}
+	// Every entry keeps its id: the host's at the top level.
+	ids, err := srv.rec.IDs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	moved := 0
+	for p, v := range was.Paths {
+		to := p
+		switch {
+		case p == "/instance[name=main]":
+			to = "/"
+		case strings.HasPrefix(p, "/instance[name=main]/"):
+			to = strings.TrimPrefix(p, "/instance[name=main]")
+		}
+		if to != p {
+			moved++
+		}
+		if id, ok := ids.ID(to); !ok || float64(id) != v[1].(float64) {
+			t.Errorf("%s: id %d (%v), was %v at %s", to, id, ok, v[1], p)
+		}
+	}
+	if moved < 5 {
+		t.Errorf("only %d of the host's ids", moved)
+	}
+	// The migration adds no change: the candidate is running and the
+	// pending rule.
+	run, _ := tr.store.Running(ctx)
+	if d := datastore.Diff(run, cand); len(d) == 0 || len(d) > 6 {
+		t.Errorf("changes after the migration: %v", d)
+	} else {
+		for _, ch := range d {
+			if len(ch.Path) == 0 || ch.Path[0].Name != "rule" {
+				t.Errorf("a change beside the pending rule: %v", ch.Path)
+			}
+		}
+	}
+	// A new rule of the host's gets an id after every rule's of 1.0.0.
+	top := 0
+	for _, in := range instNodes(cand) {
+		for _, r := range in.Lists["rule"] {
+			n, _ := strconv.Atoi(r.Leaf("id"))
+			top = max(top, n)
+		}
+	}
+	env2 := &testEnv{t: t, srv: srv, e: srv.Echo()}
+	env2.login("admin", "correct horse battery")
+	id := env2.post("rule", map[string]any{"chain": "input", "action": "accept", "enabled": true})
+	if n, _ := strconv.Atoi(id); n <= top {
+		t.Errorf("a new rule's id %s, 1.0.0's went to %d", id, top)
+	}
+	// The host keeps its name.
+	if rec := env2.cfg("PATCH", "", map[string]any{"portitor:host-name": "other"}); rec.Code != http.StatusBadRequest {
+		t.Errorf("the host renamed: %d %s", rec.Code, rec.Body)
 	}
 	// No database is made.
 	if _, err := os.Stat(filepath.Join(dir, "portitor.db")); err == nil {
 		t.Error("a database file was made")
+	}
+}
+
+// A 1.0.0 directory whose configuration has two hosts (several firewalls of
+// their own, which only tests made) is refused with why, before anything
+// is written.
+func TestTwoHostsAreRefused(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.CopyFS(dir, os.DirFS(filepath.Join("testdata", "release-1.0.0-two-hosts"))); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := os.ReadFile(filepath.Join(dir, "candidate.json"))
+	err := NewServer(&Config{JWTSecret: "s", Dev: true, DB: DBConfig{Path: filepath.Join(dir, "portitor.db")}}).Ready()
+	if err == nil || !strings.Contains(err.Error(), "two hosts") {
+		t.Errorf("opened: %v", err)
+	}
+	if after, _ := os.ReadFile(filepath.Join(dir, "candidate.json")); string(after) != string(before) {
+		t.Error("the candidate was written")
 	}
 }
 
@@ -521,7 +617,7 @@ func TestLayoutGate(t *testing.T) {
 		}
 	}
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "layout.json"), []byte(`{"layout": 3}`), 0o600)
+	os.WriteFile(filepath.Join(dir, "layout.json"), []byte(`{"layout": 4}`), 0o600)
 	if err := open(dir); err == nil || !strings.Contains(err.Error(), "later release") {
 		t.Errorf("a later layout: %v", err)
 	}
@@ -531,7 +627,7 @@ func TestLayoutGate(t *testing.T) {
 	if err := open(dir); err != nil {
 		t.Fatal(err)
 	}
-	if b, _ := os.ReadFile(filepath.Join(dir, "layout.json")); !strings.Contains(string(b), `"layout": 2`) {
+	if b, _ := os.ReadFile(filepath.Join(dir, "layout.json")); !strings.Contains(string(b), `"layout": 3`) {
 		t.Errorf("layout.json %q", b)
 	}
 
@@ -547,5 +643,83 @@ func TestLayoutGate(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "portitor.db")); err != nil {
 		t.Errorf("the old database: %v", err)
+	}
+}
+
+// An HA secondary updated first copies its 1.0.0 primary: a copy of format
+// 2 whose configuration has the host as an instance is read, migrated, and
+// the host's ids move with it.
+func TestTakesA100Copy(t *testing.T) {
+	src := filepath.Join("testdata", "release-1.0.0")
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	put := func(name string, data []byte) {
+		if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0o600, Size: int64(len(data)), Typeflag: tar.TypeReg, Format: tar.FormatUSTAR}); err != nil {
+			t.Fatal(err)
+		}
+		tw.Write(data)
+	}
+	put("manifest.json", []byte(`{"format":2,"kind":"replica"}`))
+	for _, f := range copyFiles {
+		if b, err := os.ReadFile(filepath.Join(src, f)); err == nil {
+			put(f, b)
+		}
+	}
+	tw.Close()
+	files, man, err := decodeCopy(buf.Bytes())
+	if err != nil || man.Format != 2 {
+		t.Fatalf("a 1.0.0 copy: %v %+v", err, man)
+	}
+	env := newEnvIn(t, t.TempDir())
+	if err := env.srv.takeSnapshot(context.Background(), files, nil, false); err != nil {
+		t.Fatal(err)
+	}
+	tr, _ := env.srv.tree()
+	cand, _ := tr.store.Candidate(context.Background())
+	if hostName(cand) != "main" || cand.Root.Entry("interface", []string{"lan"}) == nil {
+		t.Errorf("the host after the copy: %v", cand.Root.Leaves)
+	}
+	ids, _ := env.srv.rec.IDs()
+	if _, ok := ids.ID("/interface[name=lan]"); !ok {
+		t.Error("the host's ids did not move")
+	}
+	if _, ok := ids.ID("/instance[name=main]/interface[name=lan]"); ok {
+		t.Error("the host's ids are still the instance's")
+	}
+}
+
+// In 1.0.0 the host and a virtual firewall could each have a DNS template of
+// one name, which neither shared. The host's are the firewall's now; the
+// virtual firewall's own shadows it, so the migrated configuration has no
+// problem and builds.
+func TestA100HostAndVFTemplateOfOneName(t *testing.T) {
+	src := t.TempDir()
+	if err := os.CopyFS(src, os.DirFS(filepath.Join("testdata", "release-1.0.0"))); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(src, "candidate.json")
+	b, _ := os.ReadFile(path)
+	var tree map[string]any
+	if err := json.Unmarshal(b, &tree); err != nil {
+		t.Fatal(err)
+	}
+	for _, in := range tree["portitor:instance"].([]any) {
+		if in := in.(map[string]any); in["name"] == "guest" {
+			in["dns-soa-template"] = []any{map[string]any{"name": "host-soa", "mname": "ns.guest.example", "rname": "h.guest.example"}}
+		}
+	}
+	b, _ = json.Marshal(tree)
+	os.WriteFile(path, b, 0o600)
+	_, srv := openEarlier(t, src)
+	tr, _ := srv.tree()
+	cand, _ := tr.store.Candidate(context.Background())
+	if errs := append(cand.Validate(), confcheck.Check(cand)...); len(errs) > 0 {
+		t.Errorf("problems after the migration: %v", errs)
+	}
+	if cand.Root.Entry("dns-soa-template", []string{"host-soa"}) == nil || cand.Root.Entry("instance", []string{"guest"}).Entry("dns-soa-template", []string{"host-soa"}) == nil {
+		t.Error("the two templates")
+	}
+	if _, docs, err := srv.firewallDocs(context.Background(), nil); err != nil || len(docs) == 0 {
+		t.Errorf("build: %v", err)
 	}
 }

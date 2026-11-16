@@ -17,15 +17,13 @@ func testSecondaryInfo() SecondaryInfo {
 // A primary with its two links and no secondary gets one from the
 // information of secondary-info, and the pair is committed.
 func TestAddSecondary(t *testing.T) {
-	env, agents, branch := twoFirewalls(t)
+	env, agents, _ := twoFirewalls(t)
 	env.mustCfg("DELETE", "instance=shop", nil)
-	env.do("DELETE", "/api/firewalls/"+itoa(branch), nil)
-	delete(agents, branch)
 	env.do("PUT", "/api/firewalls/1", map[string]any{"name": "firewall", "agent_url": "https://192.0.2.1:8443",
 		"agent_fingerprint": strings.Repeat("ab", 32)})
 	ctx := t.Context()
-	// The new row's id is not reused from the deleted branch.
-	secID := branch + 1
+	// The secondary is the second firewall.
+	secID := uint(2)
 	agents[secID] = &fleetAgent{}
 
 	// Without the links: nothing to pair.

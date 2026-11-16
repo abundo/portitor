@@ -76,12 +76,12 @@ func (env *testEnv) node(path string) *datastore.Node {
 	return n
 }
 
-// host makes the default virtual firewall, the first firewall's host, as
-// an installation starts with; name is its name.
+// host names the host (the default virtual firewall, the top level), as
+// an installation starts with.
 func (env *testEnv) host(name string) {
 	env.t.Helper()
-	fw := firstFirewall(env.t, env)
-	env.mustCfg("POST", "instance", map[string]any{"name": name, "firewall": fw.Name, "is-default": true})
+	firstFirewall(env.t, env)
+	env.mustCfg("PATCH", "", map[string]any{"portitor:host-name": name})
 }
 
 // vf makes a virtual firewall on the first firewall.

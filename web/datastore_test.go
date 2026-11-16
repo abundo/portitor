@@ -53,7 +53,7 @@ commit now
 	if err != nil {
 		t.Fatal(err)
 	}
-	if run.Root.Entry("instance", []string{host.Name}).Entry("interface", []string{"lo1"}) == nil {
+	if instNode(run, host.Name).Entry("interface", []string{"lo1"}) == nil {
 		t.Error("running lacks lo1")
 	}
 
@@ -71,7 +71,7 @@ commit now
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := run.Root.Entry("instance", []string{host.Name})
+	h := instNode(run, host.Name)
 	if h.Entry("interface", []string{"lo1"}).Leaves["description"] != "cli" || h.Entry("interface", []string{"lo2"}) == nil {
 		t.Errorf("after commit: %v", h.Lists["interface"])
 	}

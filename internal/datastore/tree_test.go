@@ -38,7 +38,6 @@ func sample(t *testing.T) *Tree {
 	t.Helper()
 	tr := New(schema.MustLoad())
 	host := p("instance", k("host"))
-	must(t, tr.Set(append(host, Elem{Name: "is-default"}), "true"))
 	must(t, tr.Set(append(host, p("interface", k("wan0"), "kind")...), "physical"))
 	must(t, tr.SetList(append(host, p("interface", k("wan0"), "addresses")...), []string{"192.0.2.10/24"}))
 	must(t, tr.Set(append(host, p("interface", k("lan0"), "mtu")...), "1500"))
@@ -197,7 +196,7 @@ func TestTextAndFlat(t *testing.T) {
 	tr := sample(t)
 	var b bytes.Buffer
 	Text(&b, tr.Root, TextOptions{})
-	want := "instance host {\n    is-default true\n    interface lan0 {\n        mtu 1500\n    }\n"
+	want := "instance host {\n    interface lan0 {\n        mtu 1500\n    }\n"
 	if !strings.HasPrefix(b.String(), want) {
 		t.Errorf("text:\n%s", b.String())
 	}

@@ -71,6 +71,17 @@ func TestTenancy(t *testing.T) {
 		{"PATCH", "/api/config/candidate/instance=a", map[string]any{"description": "tina's"}, http.StatusOK},
 		{"PUT", "/api/config/candidate/instance=a/interface=eth7", map[string]any{"kind": "physical", "enabled": true}, http.StatusBadRequest},
 		{"POST", "/api/deploy/revert", map[string]any{}, http.StatusForbidden},
+		// The host's configuration, the top level's, is not theirs, by
+		// either path.
+		{"GET", "/api/config/candidate/interface", nil, http.StatusNotFound},
+		{"GET", "/api/config/candidate/rule", nil, http.StatusNotFound},
+		{"GET", "/api/config/candidate/certificate", nil, http.StatusNotFound},
+		{"GET", "/api/config/candidate/host-name", nil, http.StatusNotFound},
+		{"GET", "/api/config/state/state", nil, http.StatusNotFound},
+		{"GET", "/api/config/candidate/instance=main/interface", nil, http.StatusNotFound},
+		{"POST", "/api/config/candidate/rule", rule("x"), http.StatusForbidden},
+		{"PATCH", "/api/config/candidate/", map[string]any{"portitor:description": "tina's"}, http.StatusForbidden},
+		{"POST", "/api/config/candidate/instance=main/rule", rule("x"), http.StatusForbidden},
 	} {
 		if rec := env.do(tc.method, tc.path, tc.body); rec.Code != tc.want {
 			t.Errorf("%s %s: %d %s, want %d", tc.method, tc.path, rec.Code, rec.Body, tc.want)
@@ -163,4 +174,13 @@ func (*neighboursAgent) RateLimits(context.Context) (*agentapi.RateLimitsRespons
 		r.Instances[inst] = map[string]agentapi.RateLimitStats{"ssh": {DropPackets: 3}}
 	}
 	return r, nil
+}
+
+// The host is global admins' alone: a role can't grant it.
+func TestARoleGrantsTheHost(t *testing.T) {
+	env := newEnv(t)
+	env.host("main")
+	if rec := env.do("POST", "/api/roles", map[string]any{"name": "hosts", "instances": []string{"main"}}); rec.Code != http.StatusBadRequest {
+		t.Errorf("a grant of the host: %d %s", rec.Code, rec.Body)
+	}
 }

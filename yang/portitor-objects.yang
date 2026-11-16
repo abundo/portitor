@@ -25,7 +25,7 @@ submodule portitor-objects {
         description "ObjectFolder*";
       }
       leaf parent {
-        type leafref { path "../../object-folder/id"; }
+        type leafref { path "/object-folder/id"; }
         px:column "parent_id";
       }
       leaf name {
@@ -48,7 +48,7 @@ submodule portitor-objects {
         type text;
       }
       leaf folder {
-        type leafref { path "../../object-folder/id"; }
+        type leafref { path "/object-folder/id"; }
         px:column "folder_id";
       }
     }
@@ -60,14 +60,14 @@ submodule portitor-objects {
         type name;
       }
       leaf-list entries {
-        type union { type leafref { path "../../host/name"; } type leafref { path "../../address-list/name"; } type address-or-prefix; }
+        type union { type leafref { path "/host/name"; } type leafref { path "/address-list/name"; } type address-or-prefix; }
         ordered-by user;
       }
       leaf description {
         type text;
       }
       leaf folder {
-        type leafref { path "../../object-folder/id"; }
+        type leafref { path "/object-folder/id"; }
         px:column "folder_id";
       }
     }
@@ -129,7 +129,7 @@ submodule portitor-objects {
         px:secret;
       }
       leaf folder {
-        type leafref { path "../../object-folder/id"; }
+        type leafref { path "/object-folder/id"; }
         px:column "folder_id";
       }
       leaf-list countries {
@@ -235,7 +235,7 @@ submodule portitor-objects {
         description "fwconfig.Task*";
       }
       leaf ip-list {
-        type leafref { path "../../ip-list/name"; }
+        type leafref { path "/ip-list/name"; }
         px:column "ip_list_id";
       }
       leaf command {
@@ -246,7 +246,7 @@ submodule portitor-objects {
         description "seconds; 0 is the default";
       }
       leaf firewall {
-        type leafref { path "../../firewall/name"; }
+        type leafref { path "/firewall/name"; }
         px:column "firewall_id";
         description "FirewallID is the firewall the task runs on.";
       }

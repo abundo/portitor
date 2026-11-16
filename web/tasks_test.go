@@ -209,11 +209,4 @@ func TestIPListRefreshTasks(t *testing.T) {
 	if task := env.node("task=drop"); task == nil || task.Leaf("schedule") != "17 3 * * *" || !on(task, "enabled") || task.Leaf("kind") != "iplist" || task.Leaf("ip-list") != "drop" {
 		t.Fatalf("tasks: %v", tasks())
 	}
-
-	env.create("/api/firewalls", map[string]any{"name": "branch", "agent_url": "https://192.0.2.2:8443", "agent_token": "secret"})
-	env.put("ip-list=fh", map[string]any{"url": "https://example.com/fh.txt"})
-	env.mustCfg("POST", "ip-list=fh?action=schedule", map[string]any{"schedule": "@daily"})
-	if got := strings.Join(tasks(), " "); !strings.Contains(got, "fh-branch") || len(tasks()) != 3 {
-		t.Errorf("tasks: %s", got)
-	}
 }

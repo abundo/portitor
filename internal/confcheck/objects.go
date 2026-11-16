@@ -87,7 +87,7 @@ func normalizeIPList(c *Ctx, l *datastore.Node) error {
 	// Renamed: the rules and policy routes that name it follow.
 	if old := c.old(l); old != nil && old.Leaf("name") != l.Leaf("name") {
 		from, to := fwconfig.IPListRef+old.Leaf("name"), fwconfig.IPListRef+l.Leaf("name")
-		for _, in := range c.T.Root.Lists["instance"] {
+		for _, in := range instances(c.T) {
 			for _, list := range []string{"rule", "policy-route"} {
 				for _, r := range in.Lists[list] {
 					for _, leaf := range []string{"src-addrs", "dst-addrs"} {
@@ -204,7 +204,7 @@ func normalizePortName(c *Ctx, p *datastore.Node) error {
 		return nil
 	}
 	from, to := old.Leaf("name"), p.Leaf("name")
-	for _, in := range c.T.Root.Lists["instance"] {
+	for _, in := range instances(c.T) {
 		for _, n := range in.Lists["nat-rule"] {
 			ports, ok := n.Leaves["dst-ports"]
 			if !ok {
@@ -264,16 +264,15 @@ func normalizeTask(c *Ctx, t *datastore.Node) error {
 	} else {
 		clear(t, "ip-list")
 	}
-	// Without a firewall, the only one: the firewall of the one default
-	// virtual firewall (an HA secondary has none).
+	// Without a firewall, the host's: the one that is no HA secondary.
 	if t.Leaf("firewall") == "" {
 		var fws []string
-		for _, in := range c.T.Root.Lists["instance"] {
-			if on(in, "is-default") {
-				fws = append(fws, in.Leaf("firewall"))
+		for _, f := range c.T.Root.Lists["firewall"] {
+			if f.Leaf("ha-primary") == "" {
+				fws = append(fws, f.Leaf("name"))
 			}
 		}
-		if len(fws) == 1 && fws[0] != "" {
+		if len(fws) == 1 {
 			t.Leaves["firewall"] = fws[0]
 		}
 	}
@@ -456,7 +455,7 @@ func nextRuleID(c *Ctx) uint64 {
 		if t == nil {
 			continue
 		}
-		for _, in := range t.Root.Lists["instance"] {
+		for _, in := range instances(t) {
 			for _, r := range in.Lists["rule"] {
 				if id, _ := strconv.ParseUint(r.Leaf("id"), 10, 32); id > max {
 					max = id

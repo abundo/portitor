@@ -23,7 +23,22 @@ export function path(...steps) {
     .join('/')
 }
 
-const url = (ds, p) => `/config/${ds}/${p}`
+// A path may start with "/": the host's lists are the top level's, so
+// `${vfPath()}/rule` is "/rule" for the host.
+const url = (ds, p) => `/config/${ds}/${String(p).replace(/^\/+/, '')}`
+
+// atTop is whether p names the top level (the host's own leaves), whose
+// members RFC 7951 names with their module, "portitor:dns-forwarders".
+const atTop = (p) => String(p).replace(/^\/+/, '') === ''
+const withModule = (p, body) =>
+  atTop(p) && body && typeof body === 'object' && !Array.isArray(body)
+    ? Object.fromEntries(
+        Object.entries(body).map(([k, v]) => [
+          k.includes(':') || k.startsWith('@') ? k : `portitor:${k}`,
+          v,
+        ]),
+      )
+    : body
 
 export const config = {
   schema: () => http.get('/schema').then((r) => r.data),
@@ -32,8 +47,8 @@ export const config = {
     http
       .get(url(ds, p), { params: { 'with-defaults': 'report-all', ...params } })
       .then((r) => r.data),
-  put: (p, body) => http.put(url('candidate', p), body).then((r) => r.data),
-  patch: (p, body) => http.patch(url('candidate', p), body).then((r) => r.data),
+  put: (p, body) => http.put(url('candidate', p), withModule(p, body)).then((r) => r.data),
+  patch: (p, body) => http.patch(url('candidate', p), withModule(p, body)).then((r) => r.data),
   post: (p, body) => http.post(url('candidate', p), body).then((r) => r.data),
   remove: (p) => http.delete(url('candidate', p)),
   rename: (p, keys) =>
@@ -78,12 +93,14 @@ export function fromEntry(v) {
   if (Array.isArray(v)) return v.map(fromEntry)
   if (!v || typeof v !== 'object') return v
   const out = {}
+  // The top level's members have their module's name: dropped.
+  const local = (k) => k.replace(/^portitor:/, '')
   for (const [k, x] of Object.entries(v)) {
     if (k.startsWith('@')) {
-      if (x?.['portitor:set']) out[`has_${k.slice(1).replaceAll('-', '_')}`] = true
+      if (x?.['portitor:set']) out[`has_${local(k.slice(1)).replaceAll('-', '_')}`] = true
       continue
     }
-    out[k.replaceAll('-', '_')] = fromEntry(x)
+    out[local(k).replaceAll('-', '_')] = fromEntry(x)
   }
   return out
 }
@@ -108,11 +125,22 @@ export function toEntry(row) {
   return kebab(secretsOf(b))
 }
 
-// vfPath is the selected virtual firewall's entry: instance=<name>.
+// vfPath is the selected virtual firewall's entry: instance=<name>, or
+// the top level ("") for the host, whose configuration it is.
 export function vfPath() {
-  const store = useInstanceStore()
-  return path(['instance', store.currentName])
+  return instPath(useInstanceStore().currentName)
 }
+
+// instPath is the path of the virtual firewall named name: "" for the
+// host (the top level), else instance=<name>.
+export function instPath(name) {
+  const store = useInstanceStore()
+  return name && name === store.hostName ? '' : path(['instance', name])
+}
+
+// instAt is a path in the virtual firewall named name: instAt('blue',
+// 'rule') is instance=blue/rule, the host's rule.
+export const instAt = (name, ...rest) => [instPath(name), ...rest].filter(Boolean).join('/')
 
 // treeApi is the list/create/update/remove CrudPage takes, of the entries
 // of a YANG list: listPath() is the list's path (instance=main/syslog-server)
@@ -192,7 +220,7 @@ export function treeApi(listPath, keys = ['name'], { shallow = false, merge = fa
 // bar's): instance=<name>/<list>. A page passes { _vf: store.currentName }
 // as CrudPage's params, which reloads it when another is chosen.
 export function vfApi(list, keys = ['name'], opts = {}) {
-  return treeApi(() => `${vfPath()}/${list}`, keys, opts)
+  return treeApi(() => instAt(useInstanceStore().currentName, list), keys, opts)
 }
 
 // The shared objects' lists (not a virtual firewall's).
@@ -235,9 +263,12 @@ export function vfWithGlobals(list) {
   const strip = ({ global: _global, ...r }) => r
   const mine = (r) => ({ ...r, global: false })
   const theirs = (r) => ({ ...r, global: true, id: FW + r.id })
+  // The host's are the firewall's: one list, the top level's.
+  const atHost = () => vfPath() === ''
   return {
     ...own,
     list: async () => {
+      if (atHost()) return (await fw.list()).map(theirs)
       const [a, b] = await Promise.all([own.list(), fw.list()])
       return [...a.map(mine), ...b.map(theirs)]
     },
@@ -449,7 +480,7 @@ export function certificateAuthorities() {
 // key. A create with generate makes the certificate here (the generate
 // action).
 export function certificatesOf(instance) {
-  const listPath = () => `${path(['instance', instance()])}/certificate`
+  const listPath = () => instAt(instance(), 'certificate')
   const entryPath = (name) => `${listPath()}=${encodeURIComponent(name)}`
   const base = treeApi(listPath, ['name'], { merge: true })
   const derived = ['is_ca', 'issuer', 'chain', 'not_before', 'not_after', 'has_key']

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/labstack/echo/v5"
@@ -71,8 +72,8 @@ func (s *Server) handleWgImport(c *echo.Context) error {
 		}
 		ps = append(ps, peer)
 	}
-	at := datastore.Path{{Name: "instance", Keys: []string{inst.Name}}, {Name: "interface", Keys: []string{name}}}
 	ws, err := s.userEdit(c, func(work *datastore.Tree) error {
+		at := append(instPath(work, inst.Name), datastore.Elem{Name: "interface", Keys: []string{name}})
 		old, _, err := work.Find(at)
 		if err != nil {
 			return err
@@ -89,11 +90,11 @@ func (s *Server) handleWgImport(c *echo.Context) error {
 				return err
 			}
 			peersBody, _ := json.Marshal(ps)
-			return work.EditJSON(datastore.Path{at[0], at[1], {Name: "wireguard-peer"}}, datastore.EditReplace, peersBody)
+			return work.EditJSON(append(slices.Clone(at), datastore.Elem{Name: "wireguard-peer"}), datastore.EditReplace, peersBody)
 		}
 		ifc["name"], ifc["kind"], ifc["enabled"], ifc["wireguard-peer"] = name, fwconfig.KindWireGuard, true, ps
 		body, _ := json.Marshal(ifc)
-		return work.EditJSON(datastore.Path{at[0], {Name: "interface"}}, datastore.EditCreate, body)
+		return work.EditJSON(append(instPath(work, inst.Name), datastore.Elem{Name: "interface"}), datastore.EditCreate, body)
 	})
 	if errors.Is(err, errWgExists) {
 		return errJSON(c, http.StatusConflict, fmt.Sprintf("%s exists", req.Name))

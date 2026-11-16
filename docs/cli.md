@@ -46,24 +46,30 @@ made in the GUI included.
 
 ## Paths and values
 
-The tree is the YANG model's: `instance <name>` is a virtual firewall (the host's has
-its firewall's name), with `interface <name>`, `rule <id>`, `route <id>`, `vrf
-<name>`, `bgp <vrf>` and so on below it. Hosts, address lists, IP lists and services
-are at the top, as are `settings`.
+The tree is the YANG model's. The firewall's host (the default virtual firewall) is
+the top level: `interface <name>`, `rule <id>`, `route <id>`, `vrf <name>`, `bgp
+<vrf>` and so on are the host's, and `host-name` is its name. `instance <name>` is a
+virtual firewall, with the same lists below it. Hosts, address lists, IP lists,
+services, the firewall's DNS templates, syslog servers and CAs are at the top too, as
+are `settings`.
+
+Before 1.1.0 the host was an instance too, `instance <its name> interface wan0`.
+Such a path is still taken, with a warning, until 1.2.0; leave out the `instance`
+step.
 
 - A path to a leaf and a value sets it:
-  `instance fw interface wan0 mtu 1500`
+  `interface wan0 mtu 1500`
 - A path to an entry or container goes there. Later paths are from there:
 
   ```
-  instance fw interface wan0
+  interface wan0
   kind physical
   addresses [ 192.0.2.10/24 2001:db8::10/64 ]
   ```
 
 - `[ ... ]` sets all the values of a list (`addresses`, `in-interfaces`); a single
   value adds one.
-- `/` starts a path from the top: `/ instance fw route 1 gateway 192.0.2.1`.
+- `/` starts a path from the top: `/ route 1 gateway 192.0.2.1`, `/ instance guest route 1 gateway 10.5.0.254`.
 - `exit` goes up one level, `exit all` to the top, `back` goes up one level too, but stops at the top instead of leaving the CLI.
 - A value with spaces is quoted: `description "the uplink"`.
 
@@ -101,11 +107,11 @@ certificate made or renewed, an IP list downloaded now. They are actions of an
 entry, run with `tools`, its path, the action and its input:
 
 ```
-tools instance fw interface wg0 wg-rekey
-tools instance fw interface wg0 wg-next-free
-tools instance fw interface lan5 move-to instance branch
-tools instance fw certificate web generate domains [ fw.example.com ] days 365
-tools instance fw certificate le renew
+tools interface wg0 wg-rekey
+tools interface wg0 wg-next-free
+tools interface lan5 move-to instance guest
+tools certificate web generate domains [ fw.example.com ] days 365
+tools certificate le renew
 tools ip-list spamhaus update
 tools ip-list spamhaus schedule schedule "0 */6 * * *"
 tools task backup run
@@ -148,9 +154,10 @@ waiting for confirmation, memory, CPU, load, disks, and an HA pair's state).
 It is read-only and read from the firewalls when shown:
 
 ```
-info from state / instance fw state interfaces
+info from state / state interfaces
+info from state / instance guest state interfaces
 info from state / system
-instance fw state
+state
 info
 ```
 
@@ -178,7 +185,7 @@ back out. `info flat` writes `set / ...` lines that work from anywhere.
 Without a terminal, the CLI runs the lines it is given and stops at the first error:
 
 ```
-ssh -p 2222 admin@fw 'configure; instance fw interface lan0 mtu 9000; commit now'
+ssh -p 2222 admin@fw 'configure; interface lan0 mtu 9000; commit now'
 portitor-config cli < changes.txt
 ```
 

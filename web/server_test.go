@@ -200,8 +200,11 @@ func TestValidationAndSecrets(t *testing.T) {
 	if rec := env.cfg("PATCH", "instance=other", map[string]any{"is-default": true}); rec.Code != http.StatusBadRequest {
 		t.Errorf("a second default: %d %s", rec.Code, rec.Body)
 	}
-	if rec := env.cfg("PATCH", "instance=main", map[string]any{"is-default": false}); rec.Code != http.StatusBadRequest {
-		t.Errorf("the default given up: %d %s", rec.Code, rec.Body)
+	// The host's entry of 1.0.0 merges into the top level; is-default is
+	// gone, and the host stays.
+	env.mustCfg("PATCH", "instance=main", map[string]any{"is-default": false})
+	if env.node("").Leaf("host-name") != "main" {
+		t.Error("the host gave up its name")
 	}
 	env.mustCfg("DELETE", "instance=other", nil)
 	if rec := env.cfg("POST", "instance", map[string]any{"name": "main", "firewall": fw}); rec.Code != http.StatusBadRequest {
@@ -1140,28 +1143,30 @@ func TestInterfaceAddresses(t *testing.T) {
 
 // DNS templates belong to a virtual firewall; the default one's may be
 // global, used read-only by the others.
+// The host's DNS templates are the firewall's (the top level's): every
+// virtual firewall's zones and templates may use them; a virtual
+// firewall's own are its alone and can't take their names.
 func TestDnsTemplatesGlobal(t *testing.T) {
 	env := newEnv(t)
 	if err := env.srv.ensureDefaultInstance(); err != nil {
 		t.Fatal(err)
 	}
 	env.vf("other")
+	env.vf("third")
 	soa := map[string]any{"mname": "ns1.example.com", "rname": "hostmaster.example.com",
 		"refresh": 86400, "retry": 7200, "expire": 3600000, "minimum": 3600}
 	tmpl := func(soa string) map[string]any {
 		return map[string]any{"soa-template": soa, "default-ttl": 3600,
 			"nameserver": []map[string]string{{"name": "ns1.example.com", "address": ""}}}
 	}
-	env.put("instance=main/dns-soa-template=local", soa)
 	env.put("dns-soa-template=fw", soa)
+	env.put("instance=other/dns-soa-template=own", soa)
 	for what, c := range map[string]struct {
 		path string
 		body map[string]any
 	}{
-		"the firewall's name in a VF":         {"instance=other/dns-soa-template=fw", soa},
-		"a VF's name for the firewall's":      {"dns-soa-template=local", soa},
-		"the firewall's template, a VF's SOA": {"dns-template=t", tmpl("local")},
-		"another VF's SOA":                    {"instance=other/dns-template=t", tmpl("local")},
+		"the firewall's template, a VF's SOA": {"dns-template=t", tmpl("own")},
+		"another VF's SOA":                    {"instance=third/dns-template=t", tmpl("own")},
 	} {
 		if rec := env.cfg("PUT", c.path, c.body); rec.Code != http.StatusBadRequest {
 			t.Errorf("%s: %d %s", what, rec.Code, rec.Body)
@@ -1169,11 +1174,18 @@ func TestDnsTemplatesGlobal(t *testing.T) {
 	}
 	// The same name in two VFs is fine; a VF's template may use the
 	// firewall's SOA, and its zones the firewall's templates.
-	env.put("instance=other/dns-soa-template=local", soa)
+	env.put("instance=third/dns-soa-template=own", soa)
 	env.put("dns-template=gt", tmpl("fw"))
 	env.put("instance=other/dns-template=ot", tmpl("fw"))
 	env.put("instance=other/dns-zone=example.com", map[string]any{"dns-template": "gt"})
 	env.put("instance=other/dns-zone=example.org", map[string]any{"dns-template": "ot"})
+	// A VF's own may share a name of the firewall's (it shadows it), but
+	// not an SOA template it uses through one of the firewall's templates.
+	env.put("instance=third/dns-template=gt", tmpl("own"))
+	if rec := env.cfg("PUT", "instance=other/dns-soa-template=fw", soa); rec.Code != http.StatusBadRequest {
+		t.Errorf("an SOA template the VF uses the firewall's of: %d %s", rec.Code, rec.Body)
+	}
+	env.put("instance=third/dns-soa-template=fw", soa)
 
 	if rec := env.cfg("DELETE", "dns-template=gt", nil); rec.Code != http.StatusBadRequest {
 		t.Errorf("template used by a VF's zone deleted: %d %s", rec.Code, rec.Body)

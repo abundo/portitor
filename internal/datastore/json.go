@@ -171,6 +171,11 @@ func LeafrefTarget(s *schema.Node, path string) *schema.Node { return leafrefTar
 func leafrefTarget(s *schema.Node, path string) *schema.Node {
 	ups, rest := splitUps(path)
 	n := s.Parent
+	if ups < 0 {
+		for n != nil && n.Parent != nil {
+			n = n.Parent
+		}
+	}
 	for i := 1; i < ups && n != nil; i++ {
 		n = n.Parent
 	}
@@ -201,6 +206,11 @@ func (t *Tree) UnmarshalJSON(data []byte) error {
 	if t.Root == nil {
 		return fmt.Errorf("datastore: UnmarshalJSON into a tree without a schema")
 	}
+	data, migrated, err := Migrate(t.Root.S.Name, data)
+	if err != nil {
+		return err
+	}
+	t.Migrated = migrated
 	root := newNode(t.Root.S, nil)
 	if err := readObject(root, data, PathOf(root), t.Root.S); err != nil {
 		return err
@@ -211,6 +221,7 @@ func (t *Tree) UnmarshalJSON(data []byte) error {
 
 // ReadJSON reads JSON into the node at p: an object of its members.
 func (t *Tree) ReadJSON(p Path, data []byte) error {
+	p = t.HostPath(p)
 	n, err := t.Ensure(p)
 	if err != nil {
 		return err

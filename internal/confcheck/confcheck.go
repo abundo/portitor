@@ -78,7 +78,7 @@ func pathEqual(a, b datastore.Path) bool {
 func Normalize(before, t *datastore.Tree, changed []*datastore.Node) error {
 	c := &Ctx{T: t, Before: before}
 	for _, e := range changed {
-		if h := hooks[e.S.Path()]; h.normalize != nil {
+		if h := hookFor(e); h.normalize != nil {
 			if err := h.normalize(c, e); err != nil {
 				return at(e, err)
 			}
@@ -106,6 +106,7 @@ func Check(t *datastore.Tree) []error {
 			}
 		}
 	}
+	errs = append(errs, checkEntry(c, t.Root)...) // the host
 	walk(t.Root)
 	return append(errs, checkAccess(t)...)
 }
@@ -121,7 +122,7 @@ func CheckEntries(t *datastore.Tree, entries []*datastore.Node) []error {
 }
 
 func checkEntry(c *Ctx, e *datastore.Node) []error {
-	h := hooks[e.S.Path()]
+	h := hookFor(e)
 	if h.check == nil {
 		return nil
 	}
@@ -151,14 +152,54 @@ func rootOf(n *datastore.Node) *datastore.Node {
 // fail is a check's problem.
 func fail(format string, args ...any) error { return fmt.Errorf(format, args...) }
 
-// instanceOf is the instance entry e is in, or nil.
+// instanceOf is the node of the virtual firewall e is in: its instance
+// entry, or the top level for the host's (isHost).
 func instanceOf(e *datastore.Node) *datastore.Node {
+	if in := vfOf(e); in != nil {
+		return in
+	}
+	return rootOf(e)
+}
+
+// vfOf is the instance entry (a virtual firewall) e is in, or nil for the
+// host's entries and the top level's own lists.
+func vfOf(e *datastore.Node) *datastore.Node {
 	for n := e; n != nil; n = n.Parent {
 		if n.Parent != nil && n.Parent.Parent == nil && n.S.Name == "instance" {
 			return n
 		}
 	}
 	return nil
+}
+
+// isHost reports whether in (instanceOf's) is the host: the top level.
+func isHost(in *datastore.Node) bool { return in != nil && in.Parent == nil }
+
+// instName is the name of instanceOf's node: an instance's, or the host's
+// host-name.
+func instName(in *datastore.Node) string {
+	if isHost(in) {
+		return in.Leaf("host-name")
+	}
+	return in.Leaf("name")
+}
+
+// hookFor is the hook of e's list: by its schema path; the host's lists at
+// the top level, and the top level itself, have their virtual firewalls'
+// (/interface is /instance/interface, / is /instance) unless they have
+// their own.
+func hookFor(e *datastore.Node) hook {
+	p := e.S.Path()
+	if h, ok := hooks[p]; ok {
+		return h
+	}
+	if p == "/" {
+		return hooks["/instance"]
+	}
+	if root := rootOf(e).S; root.Child("instance") != nil && root.Child("instance").Find(p) != nil {
+		return hooks["/instance"+p]
+	}
+	return hook{}
 }
 
 // dedupe drops repeated values, keeping the first.
@@ -170,4 +211,18 @@ func dedupe(vs []string) []string {
 		}
 	}
 	return out
+}
+
+// instances are the host (the top level) and every virtual firewall.
+func instances(t *datastore.Tree) []*datastore.Node {
+	return append([]*datastore.Node{t.Root}, t.Root.Lists["instance"]...)
+}
+
+// instanceNamed is the virtual firewall named name, or the top level for
+// the host's host-name; nil for neither.
+func instanceNamed(t *datastore.Tree, name string) *datastore.Node {
+	if name != "" && name == t.Root.Leaf("host-name") {
+		return t.Root
+	}
+	return t.Root.Entry("instance", []string{name})
 }

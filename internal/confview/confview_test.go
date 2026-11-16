@@ -260,7 +260,7 @@ func TestIDs(t *testing.T) {
 		return id
 	}
 	at := func(name string) datastore.Path {
-		return datastore.Path{{Name: "instance", Keys: []string{"host"}}, {Name: "interface", Keys: []string{name}}}
+		return datastore.Path{{Name: "interface", Keys: []string{name}}}
 	}
 	lan, wan := idOf(tree, at("lan0")), idOf(tree, at("wan0"))
 	if lan == wan || lan == 0 {
@@ -269,7 +269,7 @@ func TestIDs(t *testing.T) {
 	if err := tree.Rename(at("lan0"), []string{"lan1"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := tree.EditJSON(datastore.Path{{Name: "instance", Keys: []string{"host"}}, {Name: "interface"}}, datastore.EditCreate,
+	if err := tree.EditJSON(datastore.Path{{Name: "interface"}}, datastore.EditCreate,
 		[]byte(`{"name": "dmz0", "kind": "physical"}`)); err != nil {
 		t.Fatal(err)
 	}
@@ -290,7 +290,7 @@ func TestIDs(t *testing.T) {
 	if _, err := assign(t, db, tree); err != nil {
 		t.Fatal(err)
 	}
-	if err := tree.EditJSON(datastore.Path{{Name: "instance", Keys: []string{"host"}}, {Name: "interface"}}, datastore.EditCreate,
+	if err := tree.EditJSON(datastore.Path{{Name: "interface"}}, datastore.EditCreate,
 		[]byte(`{"name": "dmz0", "kind": "physical"}`)); err != nil {
 		t.Fatal(err)
 	}
@@ -309,6 +309,8 @@ var notMapped = map[string][]string{
 	"users": {"token_version", "totp_last_step", "totp_pending"},
 	// The generation of the last deployment: runtime.
 	"firewalls": {"generation"},
+	// The host's: the top level's row (Load sets them).
+	"instances": {"is_default"},
 }
 
 // TestEveryFieldMapped keeps the YANG modules and the models in step: a
@@ -362,7 +364,7 @@ func TestUndoRenames(t *testing.T) {
 		t.Fatal(err)
 	}
 	at := func(name string) datastore.Path {
-		return datastore.Path{{Name: "instance", Keys: []string{"host"}}, {Name: "interface", Keys: []string{name}}}
+		return datastore.Path{{Name: "interface", Keys: []string{name}}}
 	}
 	ids, _ := recOf(db).IDs()
 	was := func(p datastore.Path) int64 { id, _ := ids.ID(p.String(tree.Root.S)); return id }

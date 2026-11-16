@@ -7,7 +7,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -74,7 +73,7 @@ func checkFirewallFields(f *models.Firewall) error {
 // touch (the generation, the pair), and a new one's pair. portitor-config
 // (Local) has its own firewall and its HA secondary alone.
 func (s *Server) prepareFirewall(v *confview.View, f, old *models.Firewall) error {
-	if s.cfg.Local && old == nil && f.HAPrimaryID == nil {
+	if old == nil && f.HAPrimaryID == nil && slices.ContainsFunc(v.Firewalls, func(o models.Firewall) bool { return o.HAPrimaryID == nil }) {
 		return bad("portitor-config deploys to its own firewall (and its HA secondary); other firewalls are a manager's")
 	}
 	if err := checkFirewallFields(f); err != nil {
@@ -159,23 +158,17 @@ func (s *Server) addDefaultInstance(ctx context.Context, firewall, name string) 
 	return s.editConfig(ctx, func(work *datastore.Tree) error { return addDefaultInstanceTo(work, firewall, name) })
 }
 
-// addDefaultInstanceTo adds the default instance of the firewall to work. It
-// logs the policy drops of all three chains, so a new host shows what it
-// drops.
+// addDefaultInstanceTo gives work its host (the default instance, the top
+// level), named name, on the firewall. It logs the policy drops of all
+// three chains, so a new host shows what it drops.
 func addDefaultInstanceTo(work *datastore.Tree, firewall, name string) error {
-	body, err := json.Marshal(map[string]any{
-		"name": name, "firewall": firewall, "is-default": true,
-		"log-drops": []string{fwconfig.ChainInput, fwconfig.ChainForward, fwconfig.ChainOutput},
-	})
-	if err != nil {
+	if h := hostName(work); h != "" {
+		return fmt.Errorf("the configuration has its host %s already (firewall %s is another's)", h, firewall)
+	}
+	if err := work.Set(datastore.Path{{Name: "host-name"}}, name); err != nil {
 		return err
 	}
-	for _, in := range work.Root.Lists["instance"] {
-		if in.Leaf("firewall") == firewall && in.Leaf("is-default") == "true" {
-			return fmt.Errorf("firewall %s already has a default instance", firewall)
-		}
-	}
-	return work.EditJSON(datastore.Path{{Name: "instance"}}, datastore.EditCreate, body)
+	return work.SetList(datastore.Path{{Name: "log-drops"}}, []string{fwconfig.ChainInput, fwconfig.ChainForward, fwconfig.ChainOutput})
 }
 
 // deleteFirewall refuses to delete the last firewall, one that is the HA
@@ -190,7 +183,7 @@ func (s *Server) deleteFirewall(c *echo.Context, work *datastore.Tree, v *confvi
 		return bad(fmt.Sprintf("%s is the HA primary of %s; delete that first", f.Name, v.Firewalls[i].Name))
 	}
 	for _, in := range work.Root.Lists["instance"] {
-		if in.Leaf("firewall") == f.Name && in.Leaf("is-default") != "true" {
+		if in.Leaf("firewall") == f.Name {
 			return bad(fmt.Sprintf("virtual firewall %s is on %s; move or delete it first", in.Leaf("name"), f.Name))
 		}
 	}

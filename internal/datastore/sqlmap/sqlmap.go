@@ -30,6 +30,10 @@ type Mapping struct {
 	root   *schema.Node
 	tables []*table // parents before children
 	byList map[*schema.Node]*table
+	// rootTable is the top level's own row (the module's px:table: the
+	// host's instance row), nil without one. The lists below it with a
+	// px:parent-column are its children; those without are of no row.
+	rootTable *table
 }
 
 type table struct {
@@ -92,6 +96,9 @@ func New(root *schema.Node) (*Mapping, error) {
 			if id, ok := c.Ext["singleton"]; ok {
 				t.singleton, _ = strconv.ParseInt(id, 10, 64)
 			}
+			if t.parent != nil && t.parent == m.rootTable && t.parentCol == "" {
+				t.parent = nil
+			}
 			if t.parent != nil && t.parentCol == "" {
 				return fmt.Errorf("%s: a table below %s needs px:parent-column", c.Path(), parent.name)
 			}
@@ -103,7 +110,12 @@ func New(root *schema.Node) (*Mapping, error) {
 		}
 		return nil
 	}
-	if err := walk(root, nil); err != nil {
+	if name, ok := root.Ext["table"]; ok {
+		m.rootTable = &table{s: root, name: name}
+		m.tables = append(m.tables, m.rootTable)
+		m.byList[root] = m.rootTable
+	}
+	if err := walk(root, m.rootTable); err != nil {
 		return nil, err
 	}
 	for _, t := range m.tables {
@@ -137,6 +149,10 @@ func (m *Mapping) column(s *schema.Node) (*col, error) {
 		return c, nil
 	}
 	c.column = idCol
+	if len(s.Type.Leafrefs()) == 0 {
+		// A plain leaf in a column of another name.
+		return c, nil
+	}
 	var path string
 	if refs := s.Type.Leafrefs(); len(refs) > 0 {
 		path = refs[0]
@@ -156,8 +172,15 @@ type Index map[*datastore.Node]int64
 // keyOf is the value a reference leaf takes for the entry tgt: the key
 // its path ends at.
 func keyOf(tgt *datastore.Node, leaf *schema.Node) string {
-	parts := strings.Split(leaf.Type.Leafrefs()[0], "/")
-	return tgt.Leaves[parts[len(parts)-1]]
+	// The first of its paths whose leaf tgt has (a link's end: an
+	// instance's name, or the host's host-name).
+	for _, p := range leaf.Type.Leafrefs() {
+		parts := strings.Split(p, "/")
+		if v, ok := tgt.Leaves[parts[len(parts)-1]]; ok {
+			return v
+		}
+	}
+	return ""
 }
 
 // Source is where the mapping gets what lives outside the tree: the ids kept
@@ -314,6 +337,9 @@ func readJSONColumn(n *datastore.Node, j *jsonCol, v any) error {
 }
 
 func pathKey(root *schema.Node, n *datastore.Node) string {
+	if n.Parent == nil {
+		return "/" // the top level's own row
+	}
 	return datastore.PathOf(n).String(root)
 }
 
@@ -544,6 +570,18 @@ func (m *Mapping) Rows(tree *datastore.Tree, ids IDs) (map[string][]Row, Index, 
 			}
 		}
 		return nil
+	}
+	if t := m.rootTable; t != nil {
+		if _, ok := idx[tree.Root]; !ok {
+			next[t.name]++
+			idx[tree.Root] = next[t.name]
+		}
+		row, err := m.columns(t, tree, tree.Root, 0, idx, false)
+		if err != nil {
+			return nil, nil, err
+		}
+		row["id"] = idx[tree.Root]
+		entries = append(entries, entry{tree.Root, t, row})
 	}
 	if err := walk(tree.Root); err != nil {
 		return nil, nil, err

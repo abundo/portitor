@@ -37,6 +37,36 @@ const (
 // empty form field means; a secret given "" is left as it is, since a
 // client that can't read it back sends it empty.
 func (t *Tree) EditJSON(p Path, op EditOp, data []byte) error {
+	if q, ok := t.hostPath(p); ok && len(q) == 0 {
+		// The host's entry of 1.0.0, which is the top level: a merge of its
+		// members (not its key, firewall or is-default) there; a replace
+		// would replace the whole configuration.
+		t.HostPath(p)
+		if op != EditMerge {
+			return errAt(t, p, "the host is the top level since 1.1.0: change it there, not as an instance")
+		}
+		var obj map[string]json.RawMessage
+		if err := json.Unmarshal(data, &obj); err != nil {
+			return errAt(t, p, "the body: %v", err)
+		}
+		top := map[string]json.RawMessage{}
+		for k, v := range obj {
+			switch k {
+			case "name", "firewall", "is-default":
+				continue
+			}
+			if !strings.Contains(k, ":") {
+				k = t.Root.S.Name + ":" + k
+			}
+			top[k] = v
+		}
+		b, err := json.Marshal(top)
+		if err != nil {
+			return err
+		}
+		p, data = Path{}, b
+	}
+	p = t.HostPath(p)
 	ss, err := ResolveAll(t.Root.S, p)
 	if err != nil {
 		return err

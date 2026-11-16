@@ -32,9 +32,16 @@ module portitor {
      and the GUI. The state (config false) is what the firewalls run
      and see: system, and each instance's state.";
 
+  revision 2026-11-16 {
+    description "1.1.0: the firewall's host (the default instance) is the top level
+      (grouping host, host-name), not an instance; its lists' leafrefs to the top
+      level's lists are absolute.";
+  }
   revision 2026-11-08 { description "First version, from the SQLite schema."; }
 
+  px:table "instances";
   uses system;
+  uses host;
   uses objects;
   uses firewall-services;
   uses access;

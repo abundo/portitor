@@ -14,7 +14,6 @@ import (
 
 	"github.com/abundo/portitor/internal/agentapi"
 	"github.com/abundo/portitor/internal/confview"
-	"github.com/abundo/portitor/internal/datastore"
 	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/models"
 )
@@ -111,8 +110,10 @@ func instanceNames(doc *fwconfig.Document) []string {
 	return out
 }
 
-// twoFirewalls sets up the first firewall with a virtual firewall "guest"
-// and a second one, "branch", with "shop"; each has its own agent.
+// twoFirewalls sets up the firewall with virtual firewalls "guest" and
+// "shop", and its agent. Since 1.1.0 a configuration is one firewall's (and
+// its HA secondary's), so the second firewall of before is gone: the id it
+// returns is 0.
 func twoFirewalls(t *testing.T) (*testEnv, map[uint]*fleetAgent, uint) {
 	t.Helper()
 	return twoFirewallsIn(t, "")
@@ -126,57 +127,50 @@ func twoFirewallsIn(t *testing.T, dir string) (*testEnv, map[uint]*fleetAgent, u
 		t.Fatal(err)
 	}
 	env.do("PUT", "/api/settings", map[string]any{"virtual_firewalls": true, "confirm_timeout": 0})
-	branch := env.create("/api/firewalls", map[string]any{"name": "branch", "agent_url": "https://192.0.2.2:8443", "agent_token": "secret"})
-	agents := map[uint]*fleetAgent{1: {}, branch: {}}
+	agents := map[uint]*fleetAgent{1: {}}
 	env.srv.newAgent = func(f *models.Firewall) (agentAPI, error) { return agents[f.ID], nil }
 	env.vf("guest")
-	env.mustCfg("POST", "instance", map[string]any{"name": "shop", "firewall": "branch"})
-	return env, agents, branch
+	env.vf("shop")
+	return env, agents, 0
 }
 
+// A commit deploys both hosts of an HA pair, the configuration's two
+// firewalls, and confirms them together.
 func TestFirewallsDeploy(t *testing.T) {
-	env, agents, branch := twoFirewalls(t)
+	env, agents, pair := haPair(t)
 
-	// The second firewall's host is its default instance, named after it,
-	// and the token never comes back.
-	if host := rows(env, func(v *confview.View) []models.Instance { return v.Instances }, func(in *models.Instance) bool { return in.FirewallID == uint(branch) && in.IsDefault }); len(host) != 1 || host[0].Name != "branch" {
-		t.Fatalf("branch host: %+v", host)
+	// The host is the default instance, on the primary; the token never
+	// comes back.
+	if host := rows(env, func(v *confview.View) []models.Instance { return v.Instances }, func(in *models.Instance) bool { return in.IsDefault }); len(host) != 1 || host[0].Name != "main" || host[0].FirewallID != 1 {
+		t.Fatalf("host: %+v", host)
 	}
-	if rec := env.do("GET", "/api/firewalls", nil); strings.Contains(rec.Body.String(), "secret") || !strings.Contains(rec.Body.String(), `"has_agent_token":true`) {
+	if rec := env.do("GET", "/api/firewalls", nil); strings.Contains(rec.Body.String(), "secret") {
 		t.Errorf("firewalls: %s", rec.Body)
 	}
 
-	// The first commit deploys each firewall its own instances.
 	rec := env.do("POST", "/api/deploy/apply", map[string]any{})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("commit: %d %s", rec.Code, rec.Body)
 	}
-	if got := instanceNames(agents[1].last()); !slices.Equal(got, []string{"guest", "main"}) {
-		t.Errorf("first firewall got %v", got)
-	}
-	if got := instanceNames(agents[branch].last()); !slices.Equal(got, []string{"branch", "shop"}) {
-		t.Errorf("branch got %v", got)
-	}
-	// Together they waited for confirmation, and were confirmed at once
-	// since the confirm timeout is 0.
-	if len(agents[1].confirmed) != 1 || len(agents[branch].confirmed) != 1 {
-		t.Errorf("confirmed: %v %v", agents[1].confirmed, agents[branch].confirmed)
+	for _, id := range []uint{1, pair} {
+		if got := instanceNames(agents[id].last()); !slices.Equal(got, []string{"guest", "main"}) {
+			t.Errorf("firewall %d got %v", id, got)
+		}
+		if len(agents[id].confirmed) != 1 {
+			t.Errorf("firewall %d confirmed %v", id, agents[id].confirmed)
+		}
 	}
 	if rec := env.do("GET", "/api/deploy/changes", nil); !strings.Contains(rec.Body.String(), `"changed":false`) {
 		t.Errorf("changes after commit: %s", rec.Body)
 	}
 
-	// A change on the branch deploys there only.
-	env.post("instance=shop/rule", map[string]any{"chain": "input", "action": "drop", "enabled": true})
+	// A change deploys both again.
+	env.post("instance=guest/rule", map[string]any{"chain": "input", "action": "drop", "enabled": true})
 	if rec := env.do("POST", "/api/deploy/apply", map[string]any{}); rec.Code != http.StatusOK {
 		t.Fatalf("commit: %d %s", rec.Code, rec.Body)
 	}
-	if len(agents[1].applied) != 1 || len(agents[branch].applied) != 2 {
-		t.Errorf("applies: first %d, branch %d", len(agents[1].applied), len(agents[branch].applied))
-	}
-	fws, _ := env.srv.rec.Firewalls()
-	if fws[0].Generation != 1 || fws[1].Generation != 2 {
-		t.Errorf("generations: %d %d", fws[0].Generation, fws[1].Generation)
+	if len(agents[1].applied) != 2 || len(agents[pair].applied) != 2 {
+		t.Errorf("applies: primary %d, secondary %d", len(agents[1].applied), len(agents[pair].applied))
 	}
 	st, _ := env.srv.settings()
 	if st.LastCommit != 2 {
@@ -184,7 +178,7 @@ func TestFirewallsDeploy(t *testing.T) {
 	}
 
 	// Revert works from the latest commit's snapshot.
-	env.post("instance=shop/rule", map[string]any{"chain": "input", "action": "accept", "enabled": true})
+	env.post("instance=guest/rule", map[string]any{"chain": "input", "action": "accept", "enabled": true})
 	if rec := env.do("POST", "/api/deploy/revert", map[string]any{}); rec.Code != http.StatusOK {
 		t.Fatalf("revert: %d %s", rec.Code, rec.Body)
 	}
@@ -194,35 +188,25 @@ func TestFirewallsDeploy(t *testing.T) {
 }
 
 func TestFirewallsFailedApplyRollsBack(t *testing.T) {
-	env, agents, branch := twoFirewalls(t)
-	agents[branch].fail = true
+	env, agents, pair := haPair(t)
+	agents[pair].fail = true
 	rec := env.do("POST", "/api/deploy/apply", map[string]any{})
-	if rec.Code != http.StatusBadGateway || !strings.Contains(rec.Body.String(), "firewall branch") {
+	if rec.Code != http.StatusBadGateway || !strings.Contains(rec.Body.String(), "firewall fw1b") {
 		t.Fatalf("commit: %d %s", rec.Code, rec.Body)
 	}
 	if agents[1].rolledBack != 1 || len(agents[1].confirmed) != 0 {
-		t.Errorf("first firewall: rolled back %d, confirmed %v", agents[1].rolledBack, agents[1].confirmed)
+		t.Errorf("primary: rolled back %d, confirmed %v", agents[1].rolledBack, agents[1].confirmed)
 	}
-	deps, _ := env.srv.rec.RecentDeployments(0)
-	slices.SortFunc(deps, func(a, b models.Deployment) int { return int(a.FirewallID) - int(b.FirewallID) })
-	if len(deps) != 2 || deps[0].Status != "rolled_back" || deps[1].Status != "failed" {
-		t.Errorf("deployments: %+v", deps)
-	}
-	// Nothing runs from that commit, so there is nothing to revert to.
 	if rec := env.do("POST", "/api/deploy/revert", map[string]any{}); rec.Code != http.StatusConflict {
 		t.Errorf("revert: %d %s", rec.Code, rec.Body)
 	}
 }
 
 func TestFirewallsPendingConfirm(t *testing.T) {
-	env, agents, branch := twoFirewalls(t)
+	env, agents, pair := haPair(t)
 	env.do("PUT", "/api/settings", map[string]any{"confirm_timeout": 60})
 	if rec := env.do("POST", "/api/deploy/apply", map[string]any{}); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"status":"pending"`) {
 		t.Fatalf("commit: %d %s", rec.Code, rec.Body)
-	}
-	// The status shows the commit as pending; another commit waits.
-	if rec := env.do("GET", "/api/agent/status", nil); !strings.Contains(rec.Body.String(), `"pending":{"generation":1`) {
-		t.Errorf("status: %s", rec.Body)
 	}
 	if rec := env.do("POST", "/api/deploy/apply", map[string]any{}); rec.Code != http.StatusConflict {
 		t.Errorf("second commit: %d %s", rec.Code, rec.Body)
@@ -230,65 +214,40 @@ func TestFirewallsPendingConfirm(t *testing.T) {
 	if rec := env.do("POST", "/api/deploy/confirm", map[string]any{}); rec.Code != http.StatusOK {
 		t.Fatalf("confirm: %d %s", rec.Code, rec.Body)
 	}
-	if len(agents[1].confirmed) != 1 || len(agents[branch].confirmed) != 1 {
-		t.Errorf("confirmed: %v %v", agents[1].confirmed, agents[branch].confirmed)
+	if len(agents[1].confirmed) != 1 || len(agents[pair].confirmed) != 1 {
+		t.Errorf("confirmed: %v %v", agents[1].confirmed, agents[pair].confirmed)
 	}
 }
 
+// The configuration is one firewall's (and its HA secondary's): another
+// firewall is refused, names stay apart, the only firewall stays.
 func TestFirewallsRules(t *testing.T) {
-	env, _, branch := twoFirewalls(t)
-
-	// A link stays on one firewall.
-	if rec := env.cfg("POST", "link", map[string]any{"name": "l1", "instance-a": "guest", "instance-b": "shop", "interface-a": "to-shop", "interface-b": "to-guest"}); rec.Code != http.StatusBadRequest {
-		t.Errorf("link across firewalls: %d %s", rec.Code, rec.Body)
-	}
-	// A firewall's name can't be a virtual firewall's, and one with
-	// virtual firewalls besides its host stays.
-	if rec := env.do("POST", "/api/firewalls", map[string]any{"name": "guest"}); rec.Code != http.StatusBadRequest {
-		t.Errorf("firewall named like a virtual firewall: %d %s", rec.Code, rec.Body)
-	}
-	// A firewall's name, its host's, is freer than a virtual firewall's.
-	if rec := env.do("POST", "/api/firewalls", map[string]any{"name": "Branch-Office_2.lab"}); rec.Code != http.StatusCreated && rec.Code != http.StatusOK {
-		t.Errorf("firewall name: %d %s", rec.Code, rec.Body)
+	env, _, _ := twoFirewalls(t)
+	if rec := env.do("POST", "/api/firewalls", map[string]any{"name": "branch"}); rec.Code != http.StatusBadRequest {
+		t.Errorf("a second firewall: %d %s", rec.Code, rec.Body)
 	}
 	if rec := env.cfg("POST", "instance", map[string]any{"name": "Shop-2", "firewall": "firewall"}); rec.Code != http.StatusBadRequest {
 		t.Errorf("virtual firewall name: %d %s", rec.Code, rec.Body)
 	}
-	if rec := env.do("POST", "/api/firewalls", map[string]any{"name": "../etc"}); rec.Code != http.StatusBadRequest {
-		t.Errorf("firewall name ../etc: %d %s", rec.Code, rec.Body)
-	}
-	if rec := env.do("DELETE", "/api/firewalls/"+itoa(branch), nil); rec.Code != http.StatusBadRequest {
-		t.Errorf("delete with a virtual firewall: %d %s", rec.Code, rec.Body)
-	}
-	// The host never moves; another virtual firewall may.
-	if rec := env.cfg("PATCH", "instance=branch", map[string]any{"firewall": "firewall"}); rec.Code != http.StatusBadRequest {
-		t.Errorf("host moved: %d %s", rec.Code, rec.Body)
-	}
-	env.patch("instance=shop", map[string]any{"firewall": "firewall"})
-	if rec := env.do("DELETE", "/api/firewalls/"+itoa(branch), nil); rec.Code != http.StatusNoContent {
-		t.Errorf("delete: %d %s", rec.Code, rec.Body)
-	}
-	if n := len(rows(env, func(v *confview.View) []models.Instance { return v.Instances }, func(in *models.Instance) bool { return in.Name == "branch" })); n != 0 {
-		t.Error("the deleted firewall's host stayed")
+	if rec := env.cfg("POST", "instance", map[string]any{"name": "main", "firewall": "firewall"}); rec.Code < 400 {
+		t.Errorf("a virtual firewall named like the host: %d %s", rec.Code, rec.Body)
 	}
 	if rec := env.do("DELETE", "/api/firewalls/1", nil); rec.Code != http.StatusBadRequest {
 		t.Errorf("delete the only firewall: %d %s", rec.Code, rec.Body)
 	}
+	if rec := env.cfg("DELETE", "instance=main", nil); rec.Code < 400 {
+		t.Errorf("the host deleted: %d %s", rec.Code, rec.Body)
+	}
 }
 
 func TestFirewallsLiveData(t *testing.T) {
-	env, agents, branch := twoFirewalls(t)
-	agents[1].vrrp, agents[branch].vrrp = "guest", "shop"
-	agents[1].log, agents[branch].log = "first log", "branch log"
-	rec := env.do("GET", "/api/agent/vrrp", nil)
-	if !strings.Contains(rec.Body.String(), `"guest"`) || !strings.Contains(rec.Body.String(), `"shop"`) {
-		t.Errorf("vrrp of both firewalls: %s", rec.Body)
-	}
+	env, agents, pair := haPair(t)
+	agents[1].log, agents[pair].log = "first log", "second log"
 	if rec := env.do("GET", "/api/agent/logs", nil); !strings.Contains(rec.Body.String(), "first log") {
 		t.Errorf("logs: %s", rec.Body)
 	}
-	if rec := env.do("GET", "/api/agent/logs?firewall_id="+itoa(branch), nil); !strings.Contains(rec.Body.String(), "branch log") {
-		t.Errorf("branch logs: %s", rec.Body)
+	if rec := env.do("GET", "/api/agent/logs?firewall_id="+itoa(pair), nil); !strings.Contains(rec.Body.String(), "second log") {
+		t.Errorf("secondary's logs: %s", rec.Body)
 	}
 }
 
@@ -391,10 +350,8 @@ func TestFirewallsHAPair(t *testing.T) {
 // "fw1b" with addresses of its own; the branch stays out of it.
 func haPair(t *testing.T) (*testEnv, map[uint]*fleetAgent, uint) {
 	t.Helper()
-	env, agents, branch := twoFirewalls(t)
+	env, agents, _ := twoFirewalls(t)
 	env.mustCfg("DELETE", "instance=shop", nil)
-	env.do("DELETE", "/api/firewalls/"+itoa(branch), nil)
-	delete(agents, branch)
 	fp := strings.Repeat("ab", 32)
 	env.do("PUT", "/api/firewalls/1", map[string]any{"name": "firewall", "agent_url": "https://192.0.2.1:8443", "agent_fingerprint": fp})
 	pair := env.create("/api/firewalls", map[string]any{"name": "fw1b", "ha_primary_id": 1, "agent_url": "https://192.0.2.3:8443", "agent_fingerprint": fp})
@@ -617,84 +574,35 @@ func TestWitnessVoteOutlastsHosts(t *testing.T) {
 }
 
 // TestFirewallUndo: a firewall's row and its entries in the candidate
-// change together: a new firewall whose host can't be made is not kept,
-// and a delete's undo puts the host and tasks back with their ids.
+// change together: a second firewall of its own is refused with nothing
+// changed, and deleting an HA secondary takes its tasks along.
 func TestFirewallUndo(t *testing.T) {
-	env := newEnv(t)
-	ctx := context.Background()
-	// The candidate has a host for a firewall "two" already, so a new
-	// firewall "two" can't get one.
-	if err := env.srv.editConfig(ctx, func(work *datastore.Tree) error {
-		return work.EditJSON(datastore.Path{{Name: "instance"}}, datastore.EditCreate,
-			[]byte(`{"name":"two-host","firewall":"two","is-default":true}`))
-	}); err != nil {
-		t.Fatal(err)
-	}
+	env, _, pair := haPair(t)
+	before, _ := env.srv.view(context.Background())
 	if rec := env.do("POST", "/api/firewalls", map[string]any{"name": "two"}); rec.Code/100 == 2 {
-		t.Fatalf("firewall without its host: %d %s", rec.Code, rec.Body)
+		t.Fatalf("a second firewall: %d %s", rec.Code, rec.Body)
 	}
-	var n int
-	if all, _ := env.srv.rec.Firewalls(); true {
-		for _, f := range all {
-			if f.Name == "two" {
-				n++
-			}
-		}
+	if env.node("firewall=two") != nil {
+		t.Error("a refused firewall is in the candidate")
 	}
-	if n != 0 {
-		t.Errorf("the firewall was kept without its host")
-	}
-	if err := env.srv.editConfig(ctx, func(work *datastore.Tree) error {
-		return work.Delete(datastore.Path{{Name: "instance", Keys: []string{"two-host"}}})
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	if rec := env.do("POST", "/api/firewalls", map[string]any{"name": "three"}); rec.Code != http.StatusCreated {
-		t.Fatalf("new firewall: %d %s", rec.Code, rec.Body)
-	}
-	env.mustCfg("POST", "task", map[string]any{"name": "t3", "firewall": "three", "kind": fwconfig.TaskCommand, "schedule": "0 * * * *", "command": "true"})
-	fws, _ := env.srv.rec.Firewalls()
-	var three models.Firewall
-	for _, f := range fws {
-		if f.Name == "three" {
-			three = f
-		}
-	}
-	before, err := env.srv.view(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// A virtual firewall on it: refused, nothing changed.
-	env.mustCfg("POST", "instance", map[string]any{"name": "extra", "firewall": "three"})
-	if rec := env.do("DELETE", "/api/firewalls/"+itoa(three.ID), nil); rec.Code != http.StatusBadRequest {
-		t.Fatalf("delete with a virtual firewall on it: %d %s", rec.Code, rec.Body)
-	}
-	if env.node("instance=three") == nil || env.node("firewall=three") == nil {
-		t.Error("a refused delete changed the candidate")
-	}
-	env.mustCfg("DELETE", "instance=extra", nil)
-	// Without: the firewall goes with its host and tasks, and runs no more.
-	if rec := env.do("DELETE", "/api/firewalls/"+itoa(three.ID), nil); rec.Code != http.StatusNoContent {
+	env.mustCfg("POST", "task", map[string]any{"name": "t2", "firewall": "fw1b", "kind": fwconfig.TaskCommand, "schedule": "0 * * * *", "command": "true"})
+	if rec := env.do("DELETE", "/api/firewalls/"+itoa(pair), nil); rec.Code != http.StatusNoContent {
 		t.Fatalf("delete: %d %s", rec.Code, rec.Body)
 	}
-	after, err := env.srv.view(ctx)
-	if err != nil {
-		t.Fatal(err)
+	after, _ := env.srv.view(context.Background())
+	if len(after.Tasks) != len(before.Tasks) || hostName(after.Tree) != "main" {
+		t.Errorf("after: %d tasks (was %d), host %q", len(after.Tasks), len(before.Tasks), hostName(after.Tree))
 	}
-	if slices.ContainsFunc(after.Instances, func(in models.Instance) bool { return in.Name == "three" }) || len(after.Tasks) != len(before.Tasks)-1 {
-		t.Errorf("host or task left: %+v / %d tasks (was %d)", after.Instances, len(after.Tasks), len(before.Tasks))
-	}
-	if _, err := env.srv.rec.Firewall(three.ID); err == nil {
+	if _, err := env.srv.rec.Firewall(pair); err == nil {
 		t.Error("the deleted firewall still runs")
 	}
 }
 
-// A firewall without a host (an HA secondary) is renamed through its CRUD and
-// keeps its id, which the deployments name it by; one with a host can't be
-// (as before: the host would move).
+// A firewall is renamed through its CRUD and keeps its id, which the
+// deployments name it by: an HA secondary, and the primary, whose host keeps
+// its name and whose virtual firewalls follow.
 func TestFirewallRename(t *testing.T) {
-	env, _, branch := twoFirewalls(t)
+	env, _, _ := twoFirewalls(t)
 	fp := strings.Repeat("ab", 32)
 	pair := env.create("/api/firewalls", map[string]any{"name": "fw1x", "ha_primary_id": 1, "agent_url": "https://192.0.2.3:8443", "agent_fingerprint": fp, "agent_token": "tok"})
 	before := env.firewall(pair)
@@ -708,7 +616,10 @@ func TestFirewallRename(t *testing.T) {
 	if env.node("firewall=fw1b") == nil || env.node("firewall=fw1x") != nil {
 		t.Error("the candidate did not follow the rename")
 	}
-	if rec := env.do("PUT", "/api/firewalls/"+itoa(branch), map[string]any{"name": "branch2"}); rec.Code != http.StatusBadRequest {
-		t.Errorf("a firewall with a host renamed: %d %s", rec.Code, rec.Body)
+	if rec := env.do("PUT", "/api/firewalls/1", map[string]any{"name": "fw-a"}); rec.Code != http.StatusOK {
+		t.Fatalf("the primary renamed: %d %s", rec.Code, rec.Body)
+	}
+	if g := env.node("instance=guest"); g == nil || g.Leaf("firewall") != "fw-a" || env.node("").Leaf("host-name") != "main" {
+		t.Errorf("after the primary's rename: guest %v, host %v", g, env.node("").Leaves)
 	}
 }

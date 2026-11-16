@@ -106,20 +106,45 @@ func normalizeSOA(c *Ctx, s *datastore.Node) error {
 }
 
 // checkDNSScope: zones and templates name SOA templates, DNSSEC policies
-// and DNS templates by name, their virtual firewall's or the firewall's
-// (top level), so a virtual firewall's can't take the name of the
-// firewall's, nor the firewall's the name of any virtual firewall's.
+// and DNS templates by name, their virtual firewall's or the firewall's (the
+// top level, the host's), and a virtual firewall's own shadows the
+// firewall's of its name. The builder copies into a virtual firewall the
+// ones its zones use, by name, so it can't have its own SOA template or
+// policy of a name and use the firewall's of that name (through one of the
+// firewall's DNS templates).
 func checkDNSScope(c *Ctx, e *datastore.Node) []error {
 	list, name := e.S.Name, e.Leaf("name")
-	if instanceOf(e) != nil {
-		if c.T.Root.Entry(list, []string{name}) != nil {
-			return []error{fail("name: the firewall has a %s %s", strings.ReplaceAll(list, "-", " "), name)}
+	if list == "dns-template" {
+		return nil // a zone names its own first
+	}
+	clash := func(vf *datastore.Node) bool {
+		if vf.Entry(list, []string{name}) == nil || c.T.Root.Entry(list, []string{name}) == nil {
+			return false
+		}
+		leaf := "soa-template"
+		if list == "dnssec-policy" {
+			leaf = "dnssec-policy"
+		}
+		for _, z := range vf.Lists["dns-zone"] {
+			t := z.Leaf("dns-template")
+			if t == "" || vf.Entry("dns-template", []string{t}) != nil {
+				continue
+			}
+			if ft := c.T.Root.Entry("dns-template", []string{t}); ft != nil && ft.Leaf(leaf) == name {
+				return true
+			}
+		}
+		return false
+	}
+	if vf := vfOf(e); vf != nil {
+		if clash(vf) {
+			return []error{fail("name: the firewall's %s %s is used here too (by a DNS template of the firewall's); name this one otherwise", strings.ReplaceAll(list, "-", " "), name)}
 		}
 		return nil
 	}
-	for _, in := range c.T.Root.Lists["instance"] {
-		if in.Entry(list, []string{name}) != nil {
-			return []error{fail("name: %q is in use (in %s)", name, in.Leaf("name"))}
+	for _, vf := range c.T.Root.Lists["instance"] {
+		if clash(vf) {
+			return []error{fail("name: %q is in use (in %s), which uses this one too", name, vf.Leaf("name"))}
 		}
 	}
 	return nil

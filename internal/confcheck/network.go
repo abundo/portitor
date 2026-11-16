@@ -48,13 +48,25 @@ func num(e *datastore.Node, leaf string) int {
 	return n
 }
 
+// normalizeInstance is a virtual firewall's, and the host's (the top
+// level, in).
 func normalizeInstance(c *Ctx, in *datastore.Node) error {
-	if old := c.old(in); old != nil && on(old, "is-default") != on(in, "is-default") {
-		return fail("is-default: the default virtual firewall is the firewall's host; it stays the default")
-	} else if old != nil && on(in, "is-default") && old.Leaf("firewall") != in.Leaf("firewall") {
-		return fail("firewall: the default virtual firewall is its firewall's host and can't move")
+	// New: a virtual firewall made, or the host given its name (a new
+	// installation's first firewall).
+	isNew := c.old(in) == nil
+	if isHost(in) {
+		was := ""
+		if old := c.old(in); old != nil {
+			was = old.Leaf("host-name")
+		}
+		// The agent names the host's DHCP server, its leases and DUID, and
+		// its state after it, and links name it by it.
+		if was != "" && in.Leaf("host-name") != was {
+			return fail("host-name: the host keeps its name (%s)", was)
+		}
+		isNew = in.Leaf("host-name") != "" && was == ""
 	}
-	if c.old(in) == nil {
+	if isNew {
 		if _, ok := in.Leaves["dns-upstream"]; !ok {
 			set(in, "dns-upstream", fwconfig.UpstreamRoot)
 		}
@@ -87,29 +99,25 @@ func normalizeInstance(c *Ctx, in *datastore.Node) error {
 	return nil
 }
 
+// checkInstance is a virtual firewall's, and the host's (the top level).
 func checkInstance(c *Ctx, in *datastore.Node) []error {
 	var errs []error
-	name := in.Leaf("name")
-	if on(in, "is-default") {
-		if !fwconfig.ValidDefaultInstanceName(name) {
-			errs = append(errs, fail("name: letters, digits, '-', '_' and '.', starting with a letter or digit, at most 63 characters"))
+	name := instName(in)
+	switch {
+	case isHost(in):
+		if name != "" && !fwconfig.ValidDefaultInstanceName(name) {
+			errs = append(errs, fail("host-name: letters, digits, '-', '_' and '.', starting with a letter or digit, at most 63 characters"))
 		}
-	} else if !fwconfig.ValidInstanceName(name) {
+	case !fwconfig.ValidInstanceName(name):
 		errs = append(errs, fail("name: lowercase letters and digits, starting with a letter, at most 12 characters"))
-	}
-	// One default (the host) per firewall, which the others need.
-	hasDefault := false
-	for _, o := range c.T.Root.Lists["instance"] {
-		if o.Leaf("firewall") != in.Leaf("firewall") || !on(o, "is-default") {
-			continue
+	case name == c.T.Root.Leaf("host-name"):
+		errs = append(errs, fail("name: the host is named %s", name))
+	default:
+		// On the firewall of the host: not on an HA secondary, which runs
+		// its primary's.
+		if fw := c.T.Root.Entry("firewall", []string{in.Leaf("firewall")}); fw != nil && fw.Leaf("ha-primary") != "" {
+			errs = append(errs, fail("firewall: %s is an HA secondary; it runs its primary's virtual firewalls", in.Leaf("firewall")))
 		}
-		if o != in && on(in, "is-default") {
-			errs = append(errs, fail("is-default: %s is the default virtual firewall of %s", o.Leaf("name"), in.Leaf("firewall")))
-		}
-		hasDefault = true
-	}
-	if !hasDefault {
-		errs = append(errs, fail("firewall: %s has no default virtual firewall (its host)", in.Leaf("firewall")))
 	}
 	for _, s := range in.LeafLists["log-auto"] {
 		if !fwconfig.ValidAutoService(s) {
@@ -355,7 +363,7 @@ func checkInterface(c *Ctx, i *datastore.Node) []error {
 			errs = append(errs, fail("ha-role: the pair's links have static addresses"))
 		case i.Leaf("vrf") != "":
 			errs = append(errs, fail("ha-role: not on an interface in a VRF"))
-		case !on(in, "is-default"):
+		case !isHost(in):
 			errs = append(errs, fail("ha-role: on an interface of the firewall itself, not of a virtual firewall"))
 		}
 		for _, o := range in.Lists["interface"] {
@@ -422,7 +430,7 @@ func ifaceNames(c *Ctx, in *datastore.Node) map[string]bool {
 	for _, i := range in.Lists["interface"] {
 		out[i.Leaf("name")] = true
 	}
-	name := in.Leaf("name")
+	name := instName(in)
 	for _, l := range c.T.Root.Lists["link"] {
 		if l.Leaf("instance-a") == name {
 			out[l.Leaf("interface-a")] = true
@@ -509,8 +517,8 @@ func checkLink(c *Ctx, l *datastore.Node) []error {
 	if a == b {
 		return []error{fail("a link connects two different virtual firewalls")}
 	}
-	ia, ib := c.T.Root.Entry("instance", []string{a}), c.T.Root.Entry("instance", []string{b})
-	if ia != nil && ib != nil && ia.Leaf("firewall") != ib.Leaf("firewall") {
+	ia, ib := instanceNamed(c.T, a), instanceNamed(c.T, b)
+	if ia != nil && ib != nil && !isHost(ia) && !isHost(ib) && ia.Leaf("firewall") != ib.Leaf("firewall") {
 		errs = append(errs, fail("a link connects virtual firewalls on one firewall; %s is on %s, %s on %s", a, ia.Leaf("firewall"), b, ib.Leaf("firewall")))
 	}
 	for _, end := range []struct {
@@ -528,7 +536,7 @@ func checkLink(c *Ctx, l *datastore.Node) []error {
 			errs = append(errs, fail("%s: a VRF is named %s", end.side, end.iface))
 		}
 		if end.in.Entry("interface", []string{end.iface}) != nil {
-			errs = append(errs, fail("%s: %s is an interface of %s", end.side, end.iface, end.in.Leaf("name")))
+			errs = append(errs, fail("%s: %s is an interface of %s", end.side, end.iface, instName(end.in)))
 		}
 	}
 	return errs
@@ -607,7 +615,7 @@ func normalizeLink(c *Ctx, l *datastore.Node) error {
 	}
 	for _, end := range []string{"a", "b"} {
 		from, to := old.Leaf("interface-"+end), l.Leaf("interface-"+end)
-		in := c.T.Root.Entry("instance", []string{l.Leaf("instance-" + end)})
+		in := instanceNamed(c.T, l.Leaf("instance-"+end))
 		if from == to || in == nil {
 			continue
 		}

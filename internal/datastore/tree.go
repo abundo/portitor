@@ -41,6 +41,48 @@ type Tree struct {
 	// candidate, for Store.OnChange (data outside the tree that names
 	// them); a clone starts without.
 	Renamed []Renamed
+	// Migrated: UnmarshalJSON read it in an earlier release's shape
+	// (Migrate), so what keeps it should write it again.
+	Migrated bool
+	// Deprecated are the warnings of paths of an earlier release that an
+	// edit or a find took (HostPath), for the frontends to pass on.
+	Deprecated []string
+}
+
+// HostPath is p in this release's shape: until 1.2.0 a path may name the
+// host as the instance it was in 1.0.0 (instance <host-name> ...), which
+// is the top level now; such a path is taken, with a warning in
+// t.Deprecated.
+func (t *Tree) HostPath(p Path) Path {
+	q, ok := t.hostPath(p)
+	if ok {
+		host := t.Root.Leaf("host-name")
+		msg := fmt.Sprintf("instance %s: the host's configuration is at the top level since 1.1.0; leave out \"instance %s\" (accepted until 1.2.0)", host, host)
+		if !slices.Contains(t.Deprecated, msg) {
+			t.Deprecated = append(t.Deprecated, msg)
+		}
+	}
+	return q
+}
+
+// ResolveHost is HostPath without the warning: for reading a tree others
+// may read too.
+func (t *Tree) ResolveHost(p Path) Path {
+	q, _ := t.hostPath(p)
+	return q
+}
+
+// hostPath is HostPath without the warning (a find, which changes
+// nothing, on a tree others may read), and whether it took the host's.
+func (t *Tree) hostPath(p Path) (Path, bool) {
+	if len(p) == 0 || p[0].Name != "instance" || len(p[0].Keys) != 1 || t.Root.S.Ext["table"] == "" {
+		return p, false
+	}
+	host := t.Root.Leaf("host-name")
+	if host == "" || p[0].Keys[0] != host || t.Root.Entry("instance", p[0].Keys) != nil {
+		return p, false
+	}
+	return slices.Clone(p[1:]), true
 }
 
 // Renamed is an entry renamed: its path before, and its new keys.
@@ -128,7 +170,7 @@ func (n *Node) Clone(parent *Node) *Node {
 }
 
 // Clone copies the tree.
-func (t *Tree) Clone() *Tree { return &Tree{Root: t.Root.Clone(nil)} }
+func (t *Tree) Clone() *Tree { return &Tree{Root: t.Root.Clone(nil), Migrated: t.Migrated} }
 
 // CopyLists makes the named top-level lists of t those of from (copied),
 // whole: entries t has that from has not go.
@@ -311,6 +353,7 @@ func writable(ss []*schema.Node) error {
 // schema, for a leaf or leaf-list), or nil when an entry or container is
 // missing.
 func (t *Tree) Find(p Path) (node *Node, leaf *schema.Node, err error) {
+	p, _ = t.hostPath(p)
 	ss, err := Resolve(t.Root.S, p)
 	if err != nil {
 		return nil, nil, err
@@ -338,6 +381,7 @@ func (t *Tree) Find(p Path) (node *Node, leaf *schema.Node, err error) {
 // Ensure returns the node at p (a container or entry), creating what is
 // missing along it. New entries' keys are checked against their types.
 func (t *Tree) Ensure(p Path) (*Node, error) {
+	p = t.HostPath(p)
 	ss, err := Resolve(t.Root.S, p)
 	if err != nil {
 		return nil, err
@@ -482,6 +526,7 @@ func (t *Tree) splitLeaf(p Path, kinds ...schema.Kind) (Path, *schema.Node, erro
 
 // Set sets a leaf. A key can't be set: Rename changes it.
 func (t *Tree) Set(p Path, value string) error {
+	p = t.HostPath(p)
 	np, leaf, err := t.splitLeaf(p, schema.Leaf)
 	if err != nil {
 		return err
@@ -503,6 +548,7 @@ func (t *Tree) Set(p Path, value string) error {
 
 // SetList replaces a leaf-list's values (none removes it).
 func (t *Tree) SetList(p Path, values []string) error {
+	p = t.HostPath(p)
 	np, leaf, err := t.splitLeaf(p, schema.LeafList)
 	if err != nil {
 		return err
@@ -531,6 +577,7 @@ func (t *Tree) SetList(p Path, values []string) error {
 
 // Add adds a value to a leaf-list, at its end, if it isn't there.
 func (t *Tree) Add(p Path, value string) error {
+	p = t.HostPath(p)
 	np, leaf, err := t.splitLeaf(p, schema.LeafList)
 	if err != nil {
 		return err
@@ -553,6 +600,10 @@ func (t *Tree) Add(p Path, value string) error {
 // a container or a list entry. With value, only that value of a
 // leaf-list. Deleting what isn't there is an error.
 func (t *Tree) Delete(p Path, value ...string) error {
+	if q, _ := t.hostPath(p); len(p) > 0 && len(q) == 0 {
+		return errAt(t, p, "the host can't be deleted")
+	}
+	p = t.HostPath(p)
 	if len(p) == 0 {
 		t.Root = newNode(t.Root.S, nil)
 		return nil
@@ -636,6 +687,7 @@ func (t *Tree) prune(n *Node) {
 // Move moves an entry of an ordered-by user list: where is first, last,
 // before or after (the entry with keys ref).
 func (t *Tree) Move(p Path, where string, ref []string) error {
+	p = t.HostPath(p)
 	n, _, err := t.Find(p)
 	if err != nil {
 		return err
@@ -673,6 +725,7 @@ func (t *Tree) Move(p Path, where string, ref []string) error {
 // Rename gives an entry new keys and rewrites the leafrefs that name it, as
 // a rename in the GUI rewrites references.
 func (t *Tree) Rename(p Path, keys []string) error {
+	p = t.HostPath(p)
 	n, _, err := t.Find(p)
 	if err != nil {
 		return err
@@ -779,7 +832,18 @@ func (t *Tree) targets(holder *Node, leaf *schema.Node) []target {
 	return out
 }
 
+// splitUps splits a leafref path into its ".." steps and the names below:
+// an absolute path (/host/name, prefixes dropped) has ups -1.
 func splitUps(path string) (int, []string) {
+	if strings.HasPrefix(path, "/") {
+		parts := strings.Split(path[1:], "/")
+		for i, p := range parts {
+			if j := strings.IndexByte(p, ':'); j >= 0 {
+				parts[i] = p[j+1:]
+			}
+		}
+		return -1, parts
+	}
 	ups := 0
 	parts := strings.Split(path, "/")
 	for len(parts) > 0 && parts[0] == ".." {
@@ -789,15 +853,21 @@ func splitUps(path string) (int, []string) {
 	return ups, parts
 }
 
-// evalPath evaluates a relative leafref path from the node holding the
-// leaf: the first ".." is the holder, each further one its parent; then
-// down by names to the leaf.
+// evalPath evaluates a leafref path from the node holding the leaf: a
+// relative one's first ".." is the holder, each further one its parent; an
+// absolute one starts at the root; then down by names to the leaf.
 func evalPath(holder *Node, path string) []target {
 	ups, rest := splitUps(path)
 	if ups == 0 || len(rest) == 0 {
 		return nil
 	}
 	n := holder
+	if ups < 0 {
+		for n.Parent != nil {
+			n = n.Parent
+		}
+		return descend(n, rest)
+	}
 	for i := 1; i < ups; i++ {
 		if n = n.Parent; n == nil {
 			return nil

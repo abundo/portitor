@@ -49,7 +49,7 @@ func (s *Server) stateTree(ctx context.Context, u *models.User) (*datastore.Tree
 	// state is an instance's state container, the instance made in the
 	// state tree when running doesn't have it (yet).
 	state := func(name string) *datastore.Node {
-		in := root.Entry("instance", []string{name})
+		in := instNode(tree, name)
 		if in == nil {
 			in = root.AddEntry(root.S.Child("instance"), map[string]string{"name": name})
 		}
@@ -116,9 +116,9 @@ func (s *Server) stateTree(ctx context.Context, u *models.User) (*datastore.Tree
 		// A rule's id is unique over the instances: its instance is the
 		// one running it.
 		owner := map[string]string{}
-		for _, in := range root.Lists["instance"] {
+		for _, in := range instNodes(tree) {
 			for _, r := range in.Lists["rule"] {
-				owner[r.Leaves["id"]] = in.Leaves["name"]
+				owner[r.Leaves["id"]] = nodeName(in)
 			}
 		}
 		ids := make([]uint32, 0, len(rc.Rules))
@@ -237,7 +237,7 @@ func (s *Server) stateTree(ctx context.Context, u *models.User) (*datastore.Tree
 // anyInstance reports whether an instance of the running configuration
 // is so.
 func anyInstance(root *datastore.Node, fn func(*datastore.Node) bool) bool {
-	for _, in := range root.Lists["instance"] {
+	for _, in := range instNodes(&datastore.Tree{Root: root}) {
 		if fn(in) {
 			return true
 		}
@@ -280,7 +280,7 @@ func withKeys(v any, keys map[string]any) map[string]any {
 // bgpConfigured reports whether a running instance has BGP, so that
 // state asks FRR only then.
 func (s *Server) bgpConfigured(root *datastore.Node) bool {
-	for _, in := range root.Lists["instance"] {
+	for _, in := range instNodes(&datastore.Tree{Root: root}) {
 		for _, b := range in.Lists["bgp"] {
 			if b.Leaves["enabled"] == "true" {
 				return true

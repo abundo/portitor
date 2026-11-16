@@ -17,6 +17,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -400,7 +401,7 @@ func (s *Server) ensureDefaultInstance() error {
 	}
 	ctx := context.Background()
 	v, err := s.view(ctx)
-	if err != nil || len(v.Instances) > 0 {
+	if err != nil || slices.ContainsFunc(v.Instances, func(in models.Instance) bool { return in.IsDefault }) {
 		return err
 	}
 	fws, err := s.rec.Firewalls()

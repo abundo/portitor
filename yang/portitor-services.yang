@@ -45,7 +45,7 @@ submodule portitor-services {
         type ip-address;
       }
       leaf-list dhcp-dns-servers {
-        type union { type leafref { path "../../../host/name"; } type leafref { path "../../../address-list/name"; } type ip-address; }
+        type union { type leafref { path "/host/name"; } type leafref { path "/address-list/name"; } type ip-address; }
         ordered-by user;
       }
       leaf ra-enabled {
@@ -74,44 +74,6 @@ submodule portitor-services {
         type text;
       }
     }
-    list dns-soa-template {
-      key "name";
-      px:table "dns_soa_templates";
-      px:parent-column "instance_id";
-      description "DnsSoaTemplate is a virtual firewall's own SOA template; the firewall's, for every virtual firewall, are the top-level dns-soa-template. Minimum is the SOA minimum (negative-caching TTL); the serial is dnsmgr2's.";
-      uses dns-soa-template-fields;
-    }
-    list dnssec-policy {
-      key "name";
-      px:table "dns_dnssec_policies";
-      px:parent-column "instance_id";
-      description "DnsDnssecPolicy is a virtual firewall's own DNSSEC policy; the firewall's are the top-level dnssec-policy.";
-      uses dnssec-policy-fields;
-    }
-    list dns-template {
-      key "name";
-      px:table "dns_templates";
-      px:parent-column "instance_id";
-      description "DnsTemplate is a virtual firewall's own zone template: SOA, default TTL, apex NS and an optional DNSSEC policy, its own or the firewall's (top level). The firewall's templates are the top-level dns-template.";
-      leaf name {
-        type string;
-      }
-      leaf soa-template {
-        type union {
-          type leafref { path "../../dns-soa-template/name"; }
-          type leafref { path "../../../dns-soa-template/name"; }
-        }
-        px:column "soa_template_id";
-      }
-      leaf dnssec-policy {
-        type union {
-          type leafref { path "../../dnssec-policy/name"; }
-          type leafref { path "../../../dnssec-policy/name"; }
-        }
-        px:column "dnssec_policy_id";
-      }
-      uses dns-template-fields;
-    }
     list dns-zone {
       key "name";
       px:table "dns_zones";
@@ -129,13 +91,13 @@ submodule portitor-services {
       leaf dns-template {
         type union {
           type leafref { path "../../dns-template/name"; }
-          type leafref { path "../../../dns-template/name"; }
+          type leafref { path "/dns-template/name"; }
         }
         px:column "dns_template_id";
         description "DnsTemplateID nil: built-in SOA and NS (localhost).";
       }
       leaf-list forwarders {
-        type union { type leafref { path "../../../host/name"; } type leafref { path "../../../address-list/name"; } type ip-address; }
+        type union { type leafref { path "/host/name"; } type leafref { path "/address-list/name"; } type ip-address; }
         ordered-by user;
         description "Forwarders: the DNS servers of a forward-only zone (addresses or named hosts).";
       }
@@ -443,7 +405,7 @@ submodule portitor-services {
         ordered-by user;
       }
       leaf-list sources {
-        type union { type leafref { path "../../../host/name"; } type leafref { path "../../../address-list/name"; } type cidr; }
+        type union { type leafref { path "/host/name"; } type leafref { path "/address-list/name"; } type cidr; }
         ordered-by user;
       }
       leaf challenge {
@@ -490,6 +452,50 @@ submodule portitor-services {
         type string;
         px:secret;
       }
+    }
+  }
+
+
+  // A virtual firewall's own DNS templates; the host's are the firewall's
+  // (firewall-services), which every virtual firewall may use too.
+  grouping vf-dns-templates {
+    list dns-soa-template {
+      key "name";
+      px:table "dns_soa_templates";
+      px:parent-column "instance_id";
+      description "DnsSoaTemplate is a virtual firewall's own SOA template; the firewall's (the host's), for every virtual firewall, are the top-level dns-soa-template. Minimum is the SOA minimum (negative-caching TTL); the serial is dnsmgr2's.";
+      uses dns-soa-template-fields;
+    }
+    list dnssec-policy {
+      key "name";
+      px:table "dns_dnssec_policies";
+      px:parent-column "instance_id";
+      description "DnsDnssecPolicy is a virtual firewall's own DNSSEC policy; the firewall's are the top-level dnssec-policy.";
+      uses dnssec-policy-fields;
+    }
+    list dns-template {
+      key "name";
+      px:table "dns_templates";
+      px:parent-column "instance_id";
+      description "DnsTemplate is a virtual firewall's own zone template: SOA, default TTL, apex NS and an optional DNSSEC policy, its own or the firewall's (top level). The firewall's templates are the top-level dns-template.";
+      leaf name {
+        type string;
+      }
+      leaf soa-template {
+        type union {
+          type leafref { path "../../dns-soa-template/name"; }
+          type leafref { path "/dns-soa-template/name"; }
+        }
+        px:column "soa_template_id";
+      }
+      leaf dnssec-policy {
+        type union {
+          type leafref { path "../../dnssec-policy/name"; }
+          type leafref { path "/dnssec-policy/name"; }
+        }
+        px:column "dnssec_policy_id";
+      }
+      uses dns-template-fields;
     }
   }
 

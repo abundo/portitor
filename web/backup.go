@@ -177,8 +177,7 @@ func (s *Server) handleRestore(c *echo.Context) error {
 }
 
 // firewallsHere puts what the configuration has on a firewall this
-// installation doesn't have on the first one, a default instance only
-// where that one has none.
+// installation doesn't have (virtual firewalls, tasks) on the first one.
 func (s *Server) firewallsHere(tree *datastore.Tree) {
 	fws, err := s.firewalls()
 	if err != nil || len(fws) == 0 {
@@ -188,20 +187,10 @@ func (s *Server) firewallsHere(tree *datastore.Tree) {
 	for _, fw := range fws {
 		known[fw.Name] = true
 	}
-	hasDefault := false
-	for _, in := range tree.Root.Lists["instance"] {
-		hasDefault = hasDefault || (in.Leaf("firewall") == fws[0].Name && in.Leaf("is-default") == "true")
-	}
 	for _, list := range []string{"instance", "task"} {
 		for _, e := range tree.Root.Lists[list] {
 			if fw := e.Leaf("firewall"); fw == "" || known[fw] {
 				continue
-			}
-			if list == "instance" && e.Leaf("is-default") == "true" {
-				if hasDefault {
-					continue
-				}
-				hasDefault = true
 			}
 			e.Leaves["firewall"] = fws[0].Name
 		}

@@ -127,7 +127,7 @@ func TestEditGetCommit(t *testing.T) {
 	for _, base11 := range []bool{true, false} {
 		env, m := newEnv()
 		c := dial(t, env, base11)
-		c.ok(edit(`<instance ` + cfg + `><name>host</name><is-default>true</is-default>
+		c.ok(edit(`<instance ` + cfg + `><name>host</name>
 			<interface><name>wan0</name><kind>physical</kind><addresses>192.0.2.1/24</addresses><addresses>2001:db8::1/64</addresses></interface>
 			<interface><name>lan0</name><mtu>9000</mtu><wg-private-key>MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=</wg-private-key></interface>
 			</instance>`))
@@ -261,5 +261,24 @@ func TestGetState(t *testing.T) {
 	c.fails(edit(`<system `+cfg+`><hostname>x</hostname></system>`), "invalid-value")
 	if r := c.rpc(`<get-config><source><running/></source></get-config>`); strings.Contains(r, "fw1") {
 		t.Errorf("state in get-config: %s", r)
+	}
+}
+
+// Until 1.2.0 an edit may name the host as the instance it was in 1.0.0
+// (its host-name): it edits the top level.
+func TestEditTheHostAsAnInstance(t *testing.T) {
+	env, _ := newEnv()
+	c := dial(t, env, true)
+	c.ok(edit(`<host-name ` + cfg + `>main</host-name>`))
+	c.ok(edit(`<instance ` + cfg + `><name>main</name>
+		<interface><name>wan0</name><kind>physical</kind></interface>
+		</instance>`))
+	r := c.rpc(`<get-config><source><candidate/></source><filter type="subtree"><interface ` + cfg + `/></filter></get-config>`)
+	if !strings.Contains(r, "<name>wan0</name>") {
+		t.Errorf("the host's interfaces:\n%s", r)
+	}
+	r = c.rpc(`<get-config><source><candidate/></source><filter type="subtree"><instance ` + cfg + `/></filter></get-config>`)
+	if strings.Contains(r, "<name>main</name>") {
+		t.Errorf("the host became a virtual firewall:\n%s", r)
 	}
 }

@@ -248,7 +248,7 @@ func Bootstrap(ctx context.Context, s *Server, o BootstrapOptions) (*models.Depl
 		return nil, errors.New("the firewall has no default instance")
 	}
 	err = s.editConfig(ctx, func(work *datastore.Tree) error {
-		b := &bootTree{s: s, work: work, inst: datastore.Path{{Name: "instance", Keys: []string{host}}}}
+		b := &bootTree{s: s, work: work, inst: instPath(work, host)}
 		if err := b.network(o); err != nil {
 			return err
 		}

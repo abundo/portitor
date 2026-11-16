@@ -193,6 +193,9 @@ func (m *Mapping) UndoRenames(ids IDs, renamed []datastore.Renamed) {
 // the entries of mapped lists and the singleton containers, parents
 // first. State is skipped.
 func (m *Mapping) walkEntries(n *datastore.Node, fn func(e *datastore.Node, t *table)) {
+	if n.Parent == nil && m.rootTable != nil {
+		fn(n, m.rootTable)
+	}
 	for _, s := range n.S.Children {
 		if s.State {
 			continue

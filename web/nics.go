@@ -137,7 +137,7 @@ func (s *Server) syncNICs(firewallID uint, nics []agentapi.NICStatus) (*nicSync,
 // it, with its static addresses. It returns notes on addresses it could
 // not carry over; an interface the checks refuse is a *badRequest.
 func importNIC(work *datastore.Tree, instance string, n agentapi.NICStatus) ([]string, error) {
-	at := datastore.Path{{Name: "instance", Keys: []string{instance}}}
+	at := instPath(work, instance)
 	in, _, err := work.Find(at)
 	if err != nil || in == nil {
 		return nil, fmt.Errorf("no instance %s", instance)

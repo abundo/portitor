@@ -144,10 +144,13 @@ docs and user-facing messages.
   `generation`: its own firewall, and its HA secondary (`prepareFirewallHere`
   refuses others). The agent URL is the host's address on the network; a
   portitor-config reaches its own agent, the one with its agent's fingerprint, at
-  its `agent_url` (`Server.agentURL`), so the replica's copy of the rows works too. Every instance is on one (`instances.firewall_id`), and each
-  firewall has one default instance, its host, created with it and named after
-  it (`instances_one_default` is per firewall). A link joins instances on one
-  firewall, a task runs on one (`tasks.firewall_id`), known NICs are per firewall,
+  its `agent_url` (`Server.agentURL`), so the replica's copy of the rows works too. A
+  configuration is one firewall's and its HA secondary's (`prepareFirewall` refuses a
+  second firewall of its own); its host, the default instance, is the configuration's
+  top level (see Configuration tree), named `host-name` when the first firewall is
+  made (`addDefaultInstanceTo`), on the firewall that is no secondary (confview sets
+  its row's `firewall_id`). Every virtual firewall is on one (`instance/firewall`). A
+  link joins instances on one firewall (an end may be the host, by its `host-name`), a task runs on one (`tasks.firewall_id`), known NICs are per firewall,
   and IP lists go to all. A proxy for one instance asks its firewall's agent
   (`instanceAgent`); the live views (status, leases, neighbours, routes, routing
   protocols, counters) ask all of them and merge (`fromAll`; an unreachable one is
@@ -294,14 +297,34 @@ docs and user-facing messages.
   `ssh_listen` serves it over SSH to the GUI's users (`cliLogin`: `authenticateUser`,
   two-factor codes, the login limits), with their access by path (`treeAccess`), and
   NETCONF as its `netconf` subsystem (`internal/netconf`, sharing the candidate and
-  the locks). The state is `config false` YANG (`portitor-state.yang`: `system`,
-  each instance's `state`; `schema.Node.State`, read-only to every edit, skipped by
+  the locks). The firewall's host (the default instance) is the tree's top level
+  (since 1.1.0; `yang/portitor-system.yang` grouping `host`: `host-name`, the
+  `vf-settings` leaves and the lists a virtual firewall has), and the virtual
+  firewalls are the `instance` list, whose `vf-dns-templates` the host has not: its
+  DNS templates are the firewall's (`firewall-services`). The module's `px:table
+  "instances"` makes the top level the host's row (`sqlmap` `rootTable`, path key
+  `/`; its lists with a `px:parent-column` are its children, those without of no
+  row); leafrefs from a list both have to a top-level list are absolute
+  (`/host/name`). confcheck's hooks and the actions' handlers of `/instance/<list>`
+  serve the host's `/<list>` (`hookFor`, `handlerPath`); `instanceOf` is an entry's
+  instance or the top level (`isHost`), `vfOf` its instance alone; web's `instPath`,
+  `instNode`, `instNodes` (`web/host.go`) and the GUI's `instPath`/`instAt`
+  (`api/config.js`) name either by name. Until 1.2.0 a path may name the host as
+  `instance <host-name>` (`Tree.HostPath`, in every edit and find; an edit's
+  `Tree.Deprecated` warns in the API and the CLI). A tree of 1.0.0 (the host as the
+  instance with `is-default`) is migrated where a whole tree is read
+  (`datastore.Migrate`, `hostToRoot`, in `Tree.UnmarshalJSON`: the candidate, kept
+  commits, copies, backups, bundles), the host's kept ids move with it
+  (`migrateEntryIDs`, `datastore.MigrateIDPaths`), and the candidate is written again
+  (`migrateHost`, once at the first `tree()`); the data directory is layout 3 and
+  copies format 3, 2 still read. The state is `config false` YANG
+  (`portitor-state.yang`: `system`, the host's and each instance's `state`; `schema.Node.State`, read-only to every edit, skipped by
   validation, diff and sqlmap), filled by `web/state.go` from the API's live views
   requested as the user (`requestAs`), so tenant-filtered; its leaves are named after
   the agent API's JSON fields, which `datastore.Fill` maps. Not
   in the tree: firewalls, deployments (users, roles and the directory are global lists, `web/globals.go`).
   The GUI and API clients use `/api/config` (`web/configapi.go`): RFC 8040 paths
-  (`instance=main/interface=eth1`) and RFC 7951 JSON, GET of candidate, running or
+  (`interface=eth1`, the host's; `instance=guest/interface=eth1`) and RFC 7951 JSON, GET of candidate, running or
   state (`?shallow`, `?with-defaults=report-all`; a set secret marked by an RFC 7952
   annotation `"@leaf": {"portitor:set": true}`), PUT, PATCH, POST (a list keyed by a
   numeric id gets the next one, `assignID`/`nextID`, never reused), DELETE, and
@@ -1033,7 +1056,9 @@ them first; commit only when asked to, each time.
   the same path on the host and for named, because dnsmgr2 writes their paths into
   `named.conf.dnsmgr2` on the host (a tmpfs hides the other instances').
   `install.py` moves older files in (`move_bind_dirs`).
-- **The default instance is the host, laid out like one.** Its files are in the
+- **The default instance is the host, laid out like one.** It is the configuration
+  tree's top level (see Configuration tree), the agent's document's instance with
+  `Default`. Its files are in the
   distribution's standard places (`/etc/nftables.d/portitor.nft`, `/etc/wireguard`,
   `/etc/bind/named.conf`, named's own directories without a
   subdirectory) and run by the distribution's units (`named`, `frr`, ...;
@@ -1046,8 +1071,8 @@ them first; commit only when asked to, each time.
   distribution unit is stopped only while it runs from our file, and only our
   stale WireGuard configs are removed from `/etc/wireguard`. A default instance
   from before this layout is moved on apply (`Agent.moveDefaultInstance`). The
-  GUI doesn't list it under Virtual firewalls; it is the first instance, its
-  flag never moves and it can't be deleted (`confcheck` `normalizeInstance`/`checkInstance`).
+  GUI doesn't list it under Virtual firewalls; it is the first instance (the
+  `instances` store's `hostName`), and it can't be deleted.
 - dnsmgr2 does DNS only. The DHCP server's config (`render/dhcpd.go`, reservations
   from A/AAAA records with a MAC included, and the RAs) is rendered directly: the DHCP
   subnets of one IP version on an interface are served together, so clients get

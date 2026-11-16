@@ -894,9 +894,7 @@ func (s *Server) followInstanceRoles(c *datastore.Tree) error {
 	}
 	var instances []string
 	for _, in := range c.Root.Lists["instance"] {
-		if in.Leaf("is-default") != "true" {
-			instances = append(instances, in.Leaf("name"))
-		}
+		instances = append(instances, in.Leaf("name"))
 	}
 	apply := func(tree *datastore.Tree) (changed bool, err error) {
 		for _, r := range renames {

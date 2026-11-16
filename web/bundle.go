@@ -67,9 +67,17 @@ type bundleRef struct {
 
 // exportBundle is the bundle of the instance of tree.
 func exportBundle(tree *datastore.Tree, instance string) (*Bundle, error) {
-	in := tree.Root.Entry("instance", []string{instance})
+	in := instNode(tree, instance)
 	if in == nil {
 		return nil, bad("no such virtual firewall")
+	}
+	// The host goes as an instance entry, as a virtual firewall does.
+	var entry *datastore.Node
+	if isHostNode(in) {
+		var err error
+		if entry, err = hostAsEntry(tree); err != nil {
+			return nil, err
+		}
 	}
 	out := datastore.New(tree.Root.S)
 	keep := map[string]bool{"instance": true, "link": true}
@@ -83,7 +91,11 @@ func exportBundle(tree *datastore.Tree, instance string) (*Bundle, error) {
 		}
 	}
 	all.Root.Containers = map[string]*datastore.Node{}
+	all.Root.Leaves, all.Root.LeafLists = map[string]string{}, map[string][]string{}
 	all.Root.Lists["instance"] = slices.DeleteFunc(all.Root.Lists["instance"], func(e *datastore.Node) bool { return e.Leaf("name") != instance })
+	if entry != nil {
+		all.Root.Lists["instance"] = []*datastore.Node{entry.Clone(all.Root)}
+	}
 	all.Root.Lists["link"] = slices.DeleteFunc(all.Root.Lists["link"], func(e *datastore.Node) bool {
 		return e.Leaf("instance-a") != instance && e.Leaf("instance-b") != instance
 	})
@@ -95,7 +107,7 @@ func exportBundle(tree *datastore.Tree, instance string) (*Bundle, error) {
 	b := &Bundle{Format: bundleFormat, Instance: instance, Config: data, Refs: []bundleRef{}, Left: []string{}}
 	// The firewall's entries it names that the bundle leaves out (its DNS
 	// templates).
-	in.Walk(func(n *datastore.Node) {
+	walkInstance(in, func(n *datastore.Node) {
 		for _, s := range n.S.Children {
 			v := n.Leaves[s.Name]
 			// An OpenVPN server's role is the installation's, left out.
@@ -103,7 +115,7 @@ func exportBundle(tree *datastore.Tree, instance string) (*Bundle, error) {
 				continue
 			}
 			tg := tree.Referenced(n, s, v)
-			if tg == nil || tg.Parent != tree.Root || keep[tg.S.Name] {
+			if tg == nil || tg.Parent != tree.Root || keep[tg.S.Name] || entry != nil && entry.S.Child(tg.S.Name) != nil {
 				continue
 			}
 			if r := (bundleRef{tg.S.Name, v}); !slices.Contains(b.Refs, r) {
@@ -128,7 +140,7 @@ func (s *Server) importBundle(work *datastore.Tree, b *Bundle, name string, fw *
 	if !fwconfig.ValidInstanceName(name) {
 		return bad("name: lowercase letters and digits, starting with a letter, at most 12 characters")
 	}
-	if work.Root.Entry("instance", []string{name}) != nil {
+	if instNode(work, name) != nil {
 		return bad(fmt.Sprintf("name: a virtual firewall is named %s", name))
 	}
 	if fw.HAPrimaryID != nil {
@@ -138,9 +150,16 @@ func (s *Server) importBundle(work *datastore.Tree, b *Bundle, name string, fw *
 	if err := src.UnmarshalJSON(b.Config); err != nil {
 		return bad("the bundle: " + err.Error())
 	}
-	in := src.Root.Entry("instance", []string{b.Instance})
+	in := instNode(src, b.Instance)
 	if in == nil {
 		return bad("the bundle holds no virtual firewall")
+	}
+	if isHostNode(in) {
+		// A bundle of 1.0.0's host, read in this release's shape.
+		var err error
+		if in, err = hostAsEntry(src); err != nil {
+			return err
+		}
 	}
 
 	// Folders by kind, parent and name, parents first; the entries that
@@ -221,19 +240,13 @@ func (s *Server) importBundle(work *datastore.Tree, b *Bundle, name string, fw *
 
 	// The instance, on the firewall: its host if it has none (a new
 	// installation).
-	isDefault := !slices.ContainsFunc(work.Root.Lists["instance"], func(e *datastore.Node) bool {
-		return e.Leaf("firewall") == fw.Name && e.Leaf("is-default") == "true"
-	})
+	isDefault := hostName(work) == ""
 	if !isDefault {
 		if st := work.Root.Containers["settings"]; st == nil || st.Leaf("virtual-firewalls") != "true" {
 			return bad("virtual firewalls are turned off (Settings)")
 		}
 	}
 	in.Leaves["name"], in.Leaves["firewall"] = name, fw.Name
-	delete(in.Leaves, "is-default")
-	if isDefault {
-		in.Leaves["is-default"] = "true"
-	}
 	for _, ifc := range in.Lists["interface"] {
 		// The roles are this installation's: an OpenVPN server that
 		// required one lets no one in until one is chosen.
@@ -259,7 +272,11 @@ func (s *Server) importBundle(work *datastore.Tree, b *Bundle, name string, fw *
 	if err != nil {
 		return err
 	}
-	if err := work.EditJSON(datastore.Path{{Name: "instance"}}, datastore.EditCreate, data); err != nil {
+	if isDefault {
+		if err := entryAsHost(work, in, name); err != nil {
+			return err
+		}
+	} else if err := work.EditJSON(datastore.Path{{Name: "instance"}}, datastore.EditCreate, data); err != nil {
 		return err
 	}
 	// Links to an instance that is here by name, unless there already.
@@ -268,7 +285,7 @@ func (s *Server) importBundle(work *datastore.Tree, b *Bundle, name string, fw *
 		if l.Leaf("instance-a") != b.Instance {
 			side, other = "instance-b", l.Leaf("instance-a")
 		}
-		if work.Root.Entry("instance", []string{other}) == nil || work.Root.Entry("link", l.Keys()) != nil {
+		if instNode(work, other) == nil || work.Root.Entry("link", l.Keys()) != nil {
 			continue
 		}
 		l.Leaves[side] = name

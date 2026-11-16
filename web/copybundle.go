@@ -30,8 +30,14 @@ import (
 // copyFiles (nothing is ever extracted to a path the archive names), only
 // regular files, a manifest with the format first, and a size limit.
 
-// copyFormat is the archive's format.
-const copyFormat = 2
+// copyFormat is the archive's format: 3 since 1.1.0, whose configuration
+// has the host at the top level (an older release refuses it, as it must:
+// it would misread it); 2 is 1.0.0's, which this one reads and migrates
+// (datastore.Migrate), so an HA secondary updated first copies its primary.
+const copyFormat = 3
+
+// copyFormatOldest is the oldest format this release reads.
+const copyFormatOldest = 2
 
 // copyFiles are the names a copy may hold.
 var copyFiles = []string{"candidate.json", "global.json", "entry-ids.json", "ids.json", "deployments.jsonl", "known-nics.json", "sessions.json"}
@@ -111,7 +117,7 @@ func decodeCopy(data []byte) (map[string][]byte, *copyManifest, error) {
 			if err := json.Unmarshal(b, man); err != nil {
 				return nil, nil, fmt.Errorf("manifest: %w", err)
 			}
-			if man.Format != copyFormat {
+			if man.Format < copyFormatOldest || man.Format > copyFormat {
 				return nil, nil, fmt.Errorf("the copy is of format %d; this version reads %d (made by a newer Portitor? update first)", man.Format, copyFormat)
 			}
 			continue

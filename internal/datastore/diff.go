@@ -196,6 +196,11 @@ func ChangedEntries(a, b *Tree) []*Node {
 				break
 			}
 		}
+		if deepest == nil && b.Root.S.Ext["table"] != "" {
+			// A change of the top level itself (a leaf, an entry added or
+			// removed there): its own row's (the host's).
+			deepest = b.Root
+		}
 		if deepest != nil && !seen[deepest] {
 			seen[deepest] = true
 			out = append(out, deepest)

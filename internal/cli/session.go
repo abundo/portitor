@@ -476,7 +476,17 @@ func (s *Session) edit(ctx context.Context, p datastore.Path, fn func(*datastore
 	if !s.env.Access.CanWrite(p) {
 		return fmt.Errorf("you may not change %s", p.CLI())
 	}
-	return s.env.Store.Edit(ctx, s.id, fn)
+	var deprecated []string
+	err := s.env.Store.Edit(ctx, s.id, func(t *datastore.Tree) error {
+		err := fn(t)
+		deprecated = t.Deprecated
+		return err
+	})
+	// A path of an earlier release taken (the host as an instance).
+	for _, d := range deprecated {
+		s.printf("warning: %s\n", d)
+	}
+	return err
 }
 
 // tree is the configuration a command shows: the candidate in candidate

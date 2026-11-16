@@ -69,7 +69,6 @@ func TestEditAndCommit(t *testing.T) {
 	}
 	run(t, s,
 		"configure",
-		"instance host is-default true",
 		"instance host interface wan0",
 		"kind vlan",
 		"vlan-id 7",
@@ -180,7 +179,7 @@ func TestSuggest(t *testing.T) {
 	if !found {
 		t.Errorf("leafref values: %v", items)
 	}
-	if line, _ := s.Complete(ctx, "comm"); line != "commit " {
+	if line, _ := s.Complete(ctx, "commi"); line != "commit " {
 		t.Errorf("command: %q", line)
 	}
 }
@@ -350,17 +349,17 @@ func TestShowInterface(t *testing.T) {
 	s, out, m := newTest(t)
 	run(t, s,
 		"configure",
-		"instance host is-default true",
-		"instance host interface wan0 description uplink",
+		"host-name host",
+		"interface wan0 description uplink",
 		"instance fw interface lan0 enabled false",
 		"commit now",
 	)
 	s.env.State = func(context.Context) (*datastore.Tree, error) {
 		tr := m.running.Clone()
-		for _, inst := range tr.Root.Lists["instance"] {
+		for _, inst := range append([]*datastore.Node{tr.Root}, tr.Root.Lists["instance"]...) {
 			st := inst.AddContainer(inst.S.Child("state"))
 			ls := st.S.Child("interfaces")
-			name := map[string]string{"host": "wan0", "fw": "lan0"}[inst.Leaves["name"]]
+			name := map[string]string{"host": "wan0", "fw": "lan0"}[scopeName(inst)]
 			d := st.AddEntry(ls, map[string]string{"name": name, "kind": "ethernet", "state": "up", "mtu": "1500", "rx-bytes": "1234"})
 			d.LeafLists["addresses"] = []string{"192.0.2.1/24", "2001:db8::1/64"}
 			st.AddEntry(ls, map[string]string{"name": "vrf1", "kind": "vrf", "state": "up"})
@@ -376,7 +375,7 @@ func TestShowInterface(t *testing.T) {
 	}
 	out.Reset()
 	run(t, s, "show interface wan0")
-	for _, want := range []string{"instance host interface wan0", "uplink", "oper-state", "1234"} {
+	for _, want := range []string{"interface wan0", "uplink", "oper-state", "1234"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("show interface wan0 lacks %q:\n%s", want, out)
 		}

@@ -107,6 +107,10 @@ func (s *Server) takeSnapshot(ctx context.Context, files map[string][]byte, fix 
 			return err
 		}
 	}
+	// A copy of 1.0.0: its host's ids move with it to the top level.
+	if err := s.migrateEntryIDs(tree); err != nil {
+		return err
+	}
 	if err := t.store.Replace(ctx, tree); err != nil {
 		return err
 	}
