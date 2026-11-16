@@ -49,7 +49,7 @@ function setFrame(name, el) {
 }
 
 const menu = [
-  { label: 'Firewalls', icon: 'i-lucide-shield', to: '/' },
+  { label: 'Firewalls', icon: 'i-lucide-shield', to: '/', exact: true },
   { label: 'HA witness', icon: 'i-lucide-scale', to: '/witness' },
 ]
 
