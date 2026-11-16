@@ -22,6 +22,11 @@ req() { # method path [json]
 		"$URL/api$2" ${3:+-d "$3"}
 }
 
+# Through the portal (the lab): its login first, then the firewall's.
+if [[ -n ${PORTAL_URL:-} ]]; then
+	curl -sS --fail-with-body -c "$JAR" -H 'Content-Type: application/json' "$PORTAL_URL/portal/v1/login" \
+		-d "{\"user\":\"$PORTAL_USER\",\"password\":\"$PORTAL_PASS\"}" >/dev/null
+fi
 req POST /login "{\"username\":\"$USER\",\"password\":\"$PASS\"}" >/dev/null
 
 AGENT_URL=${AGENT_URL:-https://127.0.0.1:8443}

@@ -167,7 +167,8 @@ elif action == "deploy":
 EOF
 put web build/vm-sup-web/gui.py /root/gui.py >/dev/null
 gui() { guest web python3 /root/gui.py "$1" "$PASSWORD" "${@:2}"; }
-names() { python3 -c 'import json, sys; print(sorted(x["name"] for x in json.load(sys.stdin)))'; }
+# Every instance's interfaces, from /api/config (0.9.0 has the tree already).
+names() { python3 -c 'import json, sys; print(sorted(i["name"] for x in json.load(sys.stdin) for i in x.get("interface", [])))'; }
 
 log "Joining the firewall ($from)"
 # mode: portal when the release's setup prints a portal string (portitor-web
@@ -188,7 +189,7 @@ else
 	before=https://127.0.0.1
 fi
 log "Mode of $from: $mode"
-ifaces_before=$(gui "$before" get /api/interfaces | names) || fail "interfaces before the update"
+ifaces_before=$(gui "$before" get /api/config/candidate/instance | names) || fail "interfaces before the update"
 check web "deploy ($from)" python3 /root/gui.py "$before" "$PASSWORD" deploy
 ((failed == 0)) || { log "FAILED before the update (logs in build/vm-sup-*/)"; exit 1; }
 

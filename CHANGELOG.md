@@ -6,9 +6,9 @@
 The major changes in each release. A release's notes on GitHub are its section
 here (`dev/release-notes.sh`); the full list is `git log <previous tag>..<tag>`.
 
-## Unreleased
+## v1.0.0
 
-### Added
+### New
 
 - **An HA pair is one firewall in the portal** (*Add HA firewall*): add its primary
   and its secondary to it one at a time, and when the second is there the portal
@@ -19,6 +19,22 @@ here (`dev/release-notes.sh`); the full list is `git log <previous tag>..<tag>`.
   command. The pair is served at one path by whichever host is primary now
   (portitor-config's new `GET /api/pair` says whether it is a replica), and follows
   a failover.
+
+- **HA preemption** (`ha-preempt` on the primary, default on): an active secondary
+  hands back to the primary once the primary is heard again, closed and at least as
+  healthy, for 30 s. A switchover by hand while the primary stays up is left alone.
+- **Connectivity tests** have ARP ping, DNS query, and HTTP and HTTPS GET, besides
+  ICMP, TCP and UDP.
+- **The host's resolver** (`resolver-servers`, `resolver-from-dhcp` on the default
+  virtual firewall): the agent writes `/etc/resolv.conf`, following the DNS servers
+  of a DHCP lease. `portitor-config bootstrap` takes `--dns` and `--dns-from-dhcp`,
+  and the installer's DNS field may be left empty to use DHCP's.
+- **CLI:** a pager (`pager on|off`) and `| grep [-i] [-v]` filters on output.
+- **Bash completion** for `portitor-agent`, `portitor-config`, `portitor-web` and
+  `portitor-setup`.
+- **The installer ISO needs no network**: it carries its packages in a repository
+  of its own. The console's login screen shows the interfaces and their addresses,
+  and the shell prompt shows the host's role.
 
 ### Changed
 
@@ -50,6 +66,30 @@ here (`dev/release-notes.sh`); the full list is `git log <previous tag>..<tag>`.
   directory with them: a restore brings them back. A backup made by a release before
   this one is a database file; restore it with the release that made it.
 - **An HA pair is updated secondary first**, and together (see the HA guide).
+- **CLI:** `back` goes up one level instead of switching between the last two
+  contexts; `show interface` shows the configured kind (`physical` for a real NIC).
+- **Auto rules:** the HA management ping is one rule for ICMP and ICMPv6, the
+  portitor peer access one rule, and anti-lockout one row.
+- **Setup:** the HA management gateway is optional (empty, the other host is the
+  gateway); a portal host's first interface is Management, with one optional
+  default gateway on either interface.
+
+### Fixed
+
+- The HA gate kept devices left down by name alone: two virtual firewalls with a
+  device of the same name, or a restart, could bring the wrong one up. They are now
+  kept per namespace and across restarts.
+- A primary without its secondary yet was refused the peer as its management
+  gateway.
+
+### Upgrading
+
+- **Update to 1.0.0 before any later release**: its first start moves what the
+  database holds into files, and the release after it no longer reads the database.
+  From before 0.9.0, update to 0.9.0 first.
+- An HA pair: update the secondary first, then the primary, together.
+- portitor-web has users of its own: make one with
+  `sudo -u portitor-web portitor-web createadmin <user>` before logging in.
 
 ## v0.9.0
 

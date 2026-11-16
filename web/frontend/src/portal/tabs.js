@@ -11,7 +11,8 @@ const KEY = 'portal-tabs'
 function restore() {
   try {
     const t = JSON.parse(sessionStorage.getItem(KEY) || '{}')
-    if (Array.isArray(t.open)) return { open: t.open, active: t.open.includes(t.active) ? t.active : '' }
+    if (Array.isArray(t.open))
+      return { open: t.open, active: t.open.includes(t.active) ? t.active : '' }
   } catch {
     // none kept
   }
@@ -65,7 +66,8 @@ export async function closeTab(name) {
 
 // closeAll closes every tab (logout), false when one keeps its changes.
 export async function closeAll() {
-  for (const t of [...tabs.open]) if (!(await mayClose(t.name))) return false
+  // A copy: a tab may be closed while another's discard dialog is open.
+  for (const t of tabs.open.slice()) if (!(await mayClose(t.name))) return false
   tabs.open.splice(0)
   tabs.active = ''
   return true

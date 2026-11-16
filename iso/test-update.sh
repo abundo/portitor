@@ -196,7 +196,7 @@ units
 login && {
 	versions "$from"
 	update_check "$from"
-	ifaces_before=$(api "$API/api/interfaces" | json 'sorted(x["name"] for x in j)')
+	ifaces_before=$(api "$API/api/config/candidate/instance" | json 'sorted(i["name"] for x in j for i in x.get("interface", []))')
 	deploy "$from"
 }
 ((failed == 0)) || { log "FAILED before the update (logs in $DIR/)"; exit 1; }

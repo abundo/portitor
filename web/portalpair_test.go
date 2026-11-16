@@ -142,7 +142,7 @@ func TestPortalHAFirewall(t *testing.T) {
 		}
 		return []string{info.ConfigFingerprint, strings.Repeat("ab", 32)}
 	}
-	var refuse bool // secondary-info refuses: in a pair already
+	var refuse bool  // secondary-info refuses: in a pair already
 	var flipped bool // under mu: the secondary is primary now
 	isFlipped := func() bool {
 		mu.Lock()

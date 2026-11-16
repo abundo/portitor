@@ -110,25 +110,35 @@ const userMenu = [
       </div>
     </nav>
     <div class="relative min-h-0 flex-1">
-  <div v-show="tabs.active === ''" class="h-full">
-  <AppShell fill :build="build">
-    <template #topbar>
-      <UBadge color="neutral" variant="subtle" label="portitor-web" class="hidden sm:inline-flex" />
-      <div class="ml-auto flex items-center gap-2">
-        <UTooltip text="Switch between dark and light mode">
-          <UColorModeButton />
-        </UTooltip>
-        <UDropdownMenu :items="userMenu">
-          <UButton icon="i-lucide-user" color="neutral" variant="ghost" aria-label="User menu" />
-        </UDropdownMenu>
+      <div v-show="tabs.active === ''" class="h-full">
+        <AppShell fill :build="build">
+          <template #topbar>
+            <UBadge
+              color="neutral"
+              variant="subtle"
+              label="portitor-web"
+              class="hidden sm:inline-flex"
+            />
+            <div class="ml-auto flex items-center gap-2">
+              <UTooltip text="Switch between dark and light mode">
+                <UColorModeButton />
+              </UTooltip>
+              <UDropdownMenu :items="userMenu">
+                <UButton
+                  icon="i-lucide-user"
+                  color="neutral"
+                  variant="ghost"
+                  aria-label="User menu"
+                />
+              </UDropdownMenu>
+            </div>
+          </template>
+          <template #menu>
+            <UNavigationMenu :items="menu" orientation="vertical" class="w-full" />
+          </template>
+          <router-view />
+        </AppShell>
       </div>
-    </template>
-    <template #menu>
-      <UNavigationMenu :items="menu" orientation="vertical" class="w-full" />
-    </template>
-    <router-view />
-  </AppShell>
-  </div>
       <iframe
         v-for="t in tabs.open"
         v-show="tabs.active === t.name"

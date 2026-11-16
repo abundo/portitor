@@ -14,7 +14,7 @@
 #
 #   dev/lab/lab.sh up        build images and binaries, start, install
 #   dev/lab/lab.sh install   rebuild binaries and reinstall (after code changes)
-#   dev/lab/lab.sh seed      the dev/seed.sh network (login admin / admin)
+#   dev/lab/lab.sh seed      the dev/seed.sh network (login admin / portitor-lab)
 #   dev/lab/lab.sh deploy    apply and confirm
 #   dev/lab/lab.sh client    throwaway shell on the LAN that got a DHCP lease
 #   dev/lab/lab.sh shell fw|mgmt
@@ -30,10 +30,10 @@ RT=podman
 PREFIX=${LAB_PREFIX:-fwlab}
 WEB_PORT=${LAB_WEB_PORT:-28080}
 URL=http://127.0.0.1:$WEB_PORT/fw/fw
-ADMIN_PASS=admin
-# bcrypt of "admin". portitor-web requires 10+ characters, so the lab user is
-# created with a throwaway password and this hash is written over it.
-ADMIN_HASH='$2a$10$JDdXPU6gxUFuW8OxWw/ALejgfEkZ4sGpwIM86YY2rHeiEtkXiGMYW'
+# The lab's admin on portitor-config and on the portal (10+ characters, as
+# portitor-config requires; the users are in the configuration, not the database).
+ADMIN_PASS=portitor-lab
+PORTAL=http://127.0.0.1:$WEB_PORT
 
 NETWORKS=(wan lan guest)
 
@@ -105,9 +105,7 @@ cmd_install() {
 	ex fw install -d -o portitor -g portitor -m 0700 /var/lib/portitor-config
 	ex fw runuser -u portitor -- portitor-config migrate
 	if ! ex fw test -e /var/lib/portitor-config/.lab; then
-		openssl rand -hex 16 | $RT exec -i "$PREFIX-fw" runuser -u portitor -- portitor-config createadmin admin >/dev/null
-		ex fw runuser -u portitor -- sqlite3 /var/lib/portitor-config/portitor.db \
-			"update users set password_hash = '$ADMIN_HASH' where username = 'admin'"
+		printf '%s\n' "$ADMIN_PASS" | $RT exec -i "$PREFIX-fw" runuser -u portitor -- portitor-config createadmin admin >/dev/null
 		ex fw sh -c 'fp=$(openssl x509 -in /etc/portitor/agent.crt -outform DER | sha256sum | cut -d" " -f1)
 			runuser -u portitor -- portitor-config set-agent --url https://192.168.1.1:8443 --token-file - --fingerprint "$fp" </etc/portitor/agent.token
 			touch /var/lib/portitor-config/.lab'
@@ -124,9 +122,12 @@ cmd_install() {
 	ex mgmt sed -i "s/fingerprint: .*/fingerprint: $fp/" /etc/portitor/web.yaml
 	ex mgmt systemctl daemon-reload
 	ex mgmt systemctl enable portitor-web.service
+	# The portal has users of its own; everything but its login page waits for one.
+	ex mgmt install -d -o portitor -g portitor -m 0750 /var/lib/portitor-web
+	printf '%s\n' "$ADMIN_PASS" | $RT exec -i "$PREFIX-mgmt" runuser -u portitor -- portitor-web -f /etc/portitor/web.yaml createadmin admin >/dev/null
 	ex mgmt systemctl restart portitor-web.service
-	until curl -fso /dev/null "$URL/"; do sleep 1; done
-	log "GUI on $URL (admin / $ADMIN_PASS)"
+	until curl -fso /dev/null "$PORTAL/"; do sleep 1; done
+	log "GUI on $URL (admin / $ADMIN_PASS, on the portal and the firewall)"
 }
 
 cmd_up() {
@@ -137,7 +138,8 @@ cmd_up() {
 
 cmd_seed() {
 	log "seeding"
-	AGENT_URL=https://192.168.1.1:8443 \
+	PORTAL_URL=$PORTAL PORTAL_USER=admin PORTAL_PASS=$ADMIN_PASS \
+		AGENT_URL=https://192.168.1.1:8443 \
 		AGENT_TOKEN=$(ex fw cat /etc/portitor/agent.token) \
 		AGENT_FINGERPRINT=$(ex fw cat /etc/portitor/agent.crt | openssl x509 -outform DER | sha256sum | cut -d' ' -f1) \
 		dev/seed.sh "$URL" admin "$ADMIN_PASS"
@@ -149,6 +151,8 @@ cmd_deploy() {
 	# shellcheck disable=SC2064
 	trap "rm -f '$jar'" RETURN
 	req() { curl -sS --fail-with-body -b "$jar" -c "$jar" -X POST -H 'Content-Type: application/json' "$URL/api$1" -d "$2"; echo; }
+	curl -sS --fail-with-body -c "$jar" -H 'Content-Type: application/json' "$PORTAL/portal/v1/login" \
+		-d "{\"user\":\"admin\",\"password\":\"$ADMIN_PASS\"}" >/dev/null
 	req /login "{\"username\":\"admin\",\"password\":\"$ADMIN_PASS\"}" >/dev/null
 	log "apply"
 	local res

@@ -166,7 +166,7 @@ const fields = [
     label: 'Primary takes over again',
     type: 'switch',
     show: isPrimary,
-    hint: "When the secondary is active and this primary is back and healthy for 30 s, the secondary hands over to it. The configuration is edited on the primary: while the secondary is active its portitor-config is a read-only replica. Commit after changing this.",
+    hint: 'When the secondary is active and this primary is back and healthy for 30 s, the secondary hands over to it. The configuration is edited on the primary: while the secondary is active its portitor-config is a read-only replica. Commit after changing this.',
   },
   {
     key: 'witness_string',

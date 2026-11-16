@@ -75,7 +75,7 @@ async function restoreBackup() {
     return
   restoring.value = true
   try {
-    const res = await api.restore(await readBase64(restoreFile.value), restorePass.value)
+    await api.restore(await readBase64(restoreFile.value), restorePass.value)
     toast.add({
       title: 'Backup restored',
       description: 'Review the changes and commit.',
@@ -118,11 +118,11 @@ async function restoreBackup() {
     <div class="card">
       <div class="mb-1 text-lg font-semibold">Restore</div>
       <p class="mb-4 text-sm text-muted">
-        Replaces the configuration with a backup, the users, roles and directory included (you may be
-        logged out if the backup has no such user). The firewalls under Firewalls (agent connection),
-        the deployment history and the sessions stay as they are. Nothing changes on the firewall until
-        you deploy. A backup made by a release before this one kept its configuration in a database
-        file: restore it with that release, then update.
+        Replaces the configuration with a backup, the users, roles and directory included (you may
+        be logged out if the backup has no such user). The firewalls under Firewalls (agent
+        connection), the deployment history and the sessions stay as they are. Nothing changes on
+        the firewall until you deploy. A backup made by a release before this one kept its
+        configuration in a database file: restore it with that release, then update.
       </p>
       <form class="space-y-3" @submit.prevent="restoreBackup">
         <UFormField label="Backup file">

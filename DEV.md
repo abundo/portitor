@@ -95,7 +95,7 @@ the release build in them, the way README's *Install* does on real machines:
   (`/fw/fw/`), and plays the ISP on the firewall's WAN (DHCP and NAT to the outside).
 
 ```sh
-make lab-up       # images, containers, release build, install; GUI on http://127.0.0.1:28080/fw/fw/, admin / admin
+make lab-up       # images, containers, release build, install; GUI on http://127.0.0.1:28080/fw/fw/, admin / portitor-lab (portal and firewall)
 make lab-seed     # the dev/seed.sh network, agent settings
 make lab-deploy   # apply (and confirm, when there is something to roll back to)
 make lab-install  # after code changes: rebuild and reinstall both binaries
