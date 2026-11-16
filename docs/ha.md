@@ -48,7 +48,8 @@ forwards. Either host can be active; a failover changes no configuration.
   addresses.
 - **A watchdog.** The active host arms one, so a hung host resets and the standby
   takes over. The agent loads `softdog` if there is nothing better, which covers a
-  hung agent but not a hung kernel; on Proxmox, add the `i6300esb` watchdog device.
+  hung agent but not a hung kernel; a hardware watchdog covers both (see [The
+  watchdog](#the-watchdog)).
 - **conntrackd** on both (`install.py` installs it).
 
 ## Step by step from the ISO
@@ -336,6 +337,46 @@ A pair has one witness, never two: two could each vote for another host.
   goes with the primary: when the primary is lost, the secondary stays closed until you
   open it by hand (`portitor request ha active`) and
   [promote](#promoting-the-secondary) it.
+
+## The watchdog
+
+A host that hangs while active is the one case the leases alone don't settle: its
+gate stays open, so it may go on answering ARP for the pair's addresses, or
+forwarding half of the traffic, while the standby takes over with the witness's
+vote. The watchdog ends that. The active host arms `/dev/watchdog` and the agent's
+HA loop feeds it every tick; if the loop stops for 2 seconds, the watchdog resets the
+host, which comes back closed. A closed host disarms it, and a clean stop of the agent
+disarms it first.
+
+What it catches depends on where it runs:
+
+- **`softdog`**, the kernel's software watchdog, is a timer in the kernel. It resets
+  the host when the agent hangs or dies, but a hung kernel stops its timer too, and
+  then nothing resets the host.
+- **A hardware watchdog** (a chip on the board, or one the hypervisor emulates)
+  counts down on its own and resets the machine whatever the kernel does.
+
+**Adding one on Proxmox.** Give each firewall VM the emulated Intel 6300ESB. The
+web GUI has no setting for it: on the Proxmox node's shell (the node's *Shell* in
+the GUI, or SSH as root), run
+
+```
+qm set <vmid> --watchdog model=i6300esb,action=reset
+```
+
+Then shut the VM down and start it again (a reboot from inside keeps the old
+hardware). Debian loads its driver, `i6300esb`, at boot on its own. Do it on the
+standby first and switch over between the two.
+
+**On physical hardware** the board's watchdog usually has a driver Debian loads on
+its own (`iTCO_wdt` on Intel chipsets, `sp5100_tco` on AMD, or the BMC's through
+`ipmi_watchdog`); some boards need it turned on in the firmware setup.
+
+**Checking.** `portitor show ha` names the watchdog the host has: hardware, `softdog`
+or none. A host with none, or with one that can't be stopped (`nowayout`), never opens
+on the witness's vote, only by hand. If it still says `softdog` after adding the
+device, `softdog` was loaded first: reboot the host, or check `ls
+/sys/class/watchdog/` and `dmesg | grep -i watchdog` for the driver.
 
 ## On the console
 
