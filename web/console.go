@@ -22,7 +22,10 @@ import (
 // all a browser WebSocket can see.
 //
 // The session is checked again every consoleRecheck: a console closes when
-// its session expires or is revoked (password changed, user deleted).
+// its session expires or is revoked (password changed, user deleted), or
+// when its user may no longer open one (consoleAllowed): the user's access
+// is evaluated again rather than trusting every role change to revoke the
+// session.
 //
 // ?instance= names the instance whose network namespace the shell runs in.
 func (s *Server) handleAgentConsole(c *echo.Context) error {
@@ -83,7 +86,7 @@ func (s *Server) handleAgentConsole(c *echo.Context) error {
 	for {
 		select {
 		case <-recheck.C:
-			if s.sessionValid(claims) {
+			if s.consoleAllowed(claims) {
 				continue
 			}
 			slog.Info("console session ended", "user", user.Username)
@@ -102,6 +105,25 @@ func (s *Server) handleAgentConsole(c *echo.Context) error {
 		}
 		return nil
 	}
+}
+
+// consoleAllowed says whether the session may still hold a console: it is
+// valid and its user, as they are now, passes what routePolicy asks of
+// GET /api/agent/console (globalOnly: a global admin) and has two-factor
+// login set up where it is required.
+func (s *Server) consoleAllowed(claims *sessionClaims) bool {
+	if !s.sessionValid(claims) {
+		return false
+	}
+	u, err := s.rec.User(claims.UserID)
+	if err != nil {
+		return false
+	}
+	if u.TOTPRequired && u.TOTPSecret == "" {
+		return false
+	}
+	a, err := s.accessOf(u)
+	return err == nil && a.isAdmin()
 }
 
 // consoleRecheck is how often an open console checks its session.

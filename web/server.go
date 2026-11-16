@@ -8,7 +8,9 @@ package web
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/tls"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"html"
@@ -143,8 +145,13 @@ func (s *Server) Echo() *echo.Echo {
 			_ = c.JSON(he.Code, map[string]any{"error": http.StatusText(he.Code)})
 			return
 		}
-		slog.Error("request failed", "path", c.Request().URL.Path, "err", err)
-		_ = c.JSON(http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		// An unexpected error's text may say more than a client should
+		// know (paths, internals): it is logged, and the client gets an id
+		// to find it by.
+		id := requestID()
+		slog.Error("request failed", "request_id", id, "method", c.Request().Method, "path", c.Request().URL.Path, "err", err)
+		c.Response().Header().Set("X-Request-Id", id)
+		_ = c.JSON(http.StatusInternalServerError, map[string]any{"error": "internal error (request " + id + ")", "request_id": id})
 	}
 	e.Use(middleware.Recover())
 	e.Use(middleware.BodyLimitWithConfig(middleware.BodyLimitConfig{
@@ -457,4 +464,11 @@ func (s *Server) settingsOf(tree *datastore.Tree) (*models.Settings, error) {
 // of the configuration are; "" for none (in memory).
 func configDir(cfg *Config) string {
 	return cfg.Dir()
+}
+
+// requestID names one failed request in the log and in its answer.
+func requestID() string {
+	var b [8]byte
+	_, _ = rand.Read(b[:])
+	return hex.EncodeToString(b[:])
 }

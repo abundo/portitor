@@ -20,6 +20,8 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/abundo/portitor/internal/agent"
+	"github.com/abundo/portitor/models"
+	"github.com/golang-jwt/jwt/v5"
 )
 
 // consoleEnv runs portitor-web against a real dry-run agent whose console
@@ -171,5 +173,77 @@ func TestConsoleClosesOnRevoke(t *testing.T) {
 			t.Fatalf("got %v, want a close for the revoked session", err)
 		}
 		return
+	}
+}
+
+// An open console closes when its user is no longer a global admin.
+func TestConsoleClosesOnDemotion(t *testing.T) {
+	old := consoleRecheck
+	consoleRecheck = 50 * time.Millisecond
+	t.Cleanup(func() { consoleRecheck = old })
+	env, ws := consoleEnv(t, "")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	conn, _, err := dialConsole(ctx, env, ws.URL, ws.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.CloseNow()
+	_ = conn.Write(ctx, websocket.MessageText, []byte(`{"cols":80,"rows":24}`))
+
+	admin, err := env.srv.rec.UserNamed("admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Another admin with a password, so admin may be demoted.
+	other := models.User{Username: "other", Role: models.RoleAdmin, PasswordHash: admin.PasswordHash}
+	if err := env.srv.rec.CreateUser(&other); err != nil {
+		t.Fatal(err)
+	}
+	admin.Role = models.RoleViewer
+	if err := env.srv.rec.SaveUser(admin, false); err != nil {
+		t.Fatal(err)
+	}
+	for {
+		_, _, err := conn.Read(ctx)
+		if err == nil {
+			continue
+		}
+		if websocket.CloseStatus(err) != websocket.StatusPolicyViolation {
+			if strings.Contains(err.Error(), "no login shell") {
+				t.Skip(err)
+			}
+			t.Fatalf("got %v, want a close for the demoted user", err)
+		}
+		return
+	}
+}
+
+// consoleAllowed checks the user's access as it is now, not only the
+// session's token version: a demoted user with a token still valid loses
+// the console.
+func TestConsoleAllowedChecksAccess(t *testing.T) {
+	env, _ := consoleEnv(t, "")
+	admin := env.userNamed("admin")
+	claimsOf := func(u models.User) *sessionClaims {
+		return &sessionClaims{UserID: u.ID, TokenVersion: u.TokenVersion,
+			RegisteredClaims: jwt.RegisteredClaims{ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour))}}
+	}
+	if !env.srv.consoleAllowed(claimsOf(admin)) {
+		t.Fatal("an admin may not hold a console")
+	}
+	other := models.User{Username: "other", Role: models.RoleAdmin, PasswordHash: admin.PasswordHash}
+	if err := env.srv.rec.CreateUser(&other); err != nil {
+		t.Fatal(err)
+	}
+	admin.Role = models.RoleViewer
+	if err := env.srv.rec.SaveUser(&admin, false); err != nil {
+		t.Fatal(err)
+	}
+	if env.srv.consoleAllowed(claimsOf(env.userNamed("admin"))) {
+		t.Error("a viewer with a valid session may hold a console")
+	}
+	if !env.srv.consoleAllowed(claimsOf(env.userNamed("other"))) {
+		t.Error("the other admin may not hold a console")
 	}
 }
