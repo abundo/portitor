@@ -71,8 +71,8 @@ one host, a firewall and a portal, and an HA pair with a portal. The
 ## How it fits together
 
 ```
- browser ──► portitor-web (portal: /fw/<name>/, no database)     optional, on another host
-                  │  HTTPS, pinned certificate; each firewall's own login
+ browser ──► portitor-web (portal: its own login and configuration) optional, on another host
+                  │  HTTPS, pinned certificate; then each firewall's own login
                   ▼
  browser ──► portitor-config (Vue GUI + REST API, files)           runs on the firewall
                   │  HTTPS on 127.0.0.1, bearer token, pinned certificate
@@ -99,8 +99,11 @@ one host, a firewall and a portal, and an HA pair with a portal. The
   agent re-checks everything it is sent.
 - **portitor-agent** validates the document again, renders every config file
   (`internal/render`) and makes the system match. It never reads portitor-config's files.
-- **portitor-web** (optional) passes each firewall's GUI through, at `/fw/<name>/`.
-  It has no database and no users: the firewall's login and roles apply.
+- **portitor-web** (optional), the portal, has its own users and a small configuration
+  of its own (the firewalls, HA firewalls and witness strings, in `portal.json`). It
+  adds firewalls and HA pairs over SSH, and passes each firewall's GUI through at
+  `/fw/<name>/`, where the firewall's own login and roles apply as well. It holds no
+  firewall configuration and no agent tokens.
 - **Virtual firewalls** are separate firewalls on one host. The default virtual firewall is the host itself; every
   other virtual firewall is a Linux network namespace (`fw-<name>`) with its own interfaces,
   routing table, nftables ruleset, BIND and DHCP server. **Links** are veth pairs between
@@ -166,8 +169,8 @@ one host, a firewall and a portal, and an HA pair with a portal. The
   in (an IP list, say). A new drop rule does not end connections that are already
   established.
 - **Agent API.** TLS 1.3 only, bearer token (constant-time compare), client address
-  allowlist. portitor-web pins the agent's self-signed certificate by SHA-256
-  fingerprint.
+  allowlist. portitor-config pins the agent's self-signed certificate by SHA-256
+  fingerprint, and the portal pins each portitor-config's certificate the same way.
 - **Untrusted input.** Every name, address and comment is validated on both sides
   before it reaches an nftables, BIND, DHCP or WireGuard file.
 - **GUI.** bcrypt passwords, login rate limiting, HttpOnly SameSite=Strict session
@@ -176,7 +179,7 @@ one host, a firewall and a portal, and an HA pair with a portal. The
 - **Console.** *Console* in the menu (or its own window, from the top bar) is a
   shell on the firewall that the agent runs as `console_user` in `agent.yaml`
   (default `portitor`; `none` turns it off). The shell has that user's rights,
-  which on a host set up by `install.py` include sudo. portitor-web allows the
+  which on a host set up by `install.py` include sudo. portitor-config allows the
   WebSocket from its own origin only, and logs who opened it. An open console closes
   when its session expires or is revoked (password changed, user deleted). Command
   tasks run as the same user, and `none` turns them off too.
@@ -206,7 +209,7 @@ On an update it restarts the agent first (it rejects document fields it does not
 so it must not be older than portitor-config), then stops portitor-config, checks its
 data directory and starts it again, then portitor-web. An installation older than 1.0.0
 is refused: update it to 1.0.0 first. From portitor-web's host it finds the
-firewalls in `web.yaml` and their HA peers (or `--agent HOST,HOST...`), and updates them
+firewalls in the portal's configuration (`portitor-web list-firewalls`) and their HA peers (or `--agent HOST,HOST...`), and updates them
 one at a time, an HA pair's secondary first, waiting until each hears its peer again, so
 one host of the pair keeps forwarding. A
 systemd unit you changed is shown as a diff and kept unless you confirm. `--dry-run`

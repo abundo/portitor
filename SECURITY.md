@@ -11,7 +11,8 @@ Do not open a public issue.
 
 Include what you can of:
 
-- the affected component (`portitor-web`, `portitor-agent`, `install.py`) and version
+- the affected component (`portitor-config`, `portitor-agent`, `portitor-web` (the
+  portal), `install.py`, the installer ISO) and version
   (shown in the GUI's top bar),
 - steps to reproduce, or a proof of concept,
 - the impact as you see it.
@@ -35,17 +36,50 @@ Portitor is a firewall, so we are especially interested in:
 - secrets (WireGuard keys, agent token, password hashes) leaking to the browser or
   into deployment history.
 
-Two setups are supported:
+## Security model
 
-- **Split** (`install.py`): portitor-web runs on a trusted host other than the
-  firewall, and reaches the agent API over the network, limited to its address by
-  `allow_from`.
-- **Appliance** (the ISO): portitor-web runs on the firewall itself, and the agent API
-  listens on 127.0.0.1 only. The API does not tell local users apart, so any process
-  on the firewall that can read the agent token (`/etc/portitor/agent.token`, root
-  only) or run as portitor-web's user can reconfigure the firewall. Local accounts on
-  the appliance should be treated as administrators.
+**On the firewall.** portitor-config (the GUI, REST API, CLI over SSH and NETCONF)
+keeps the configuration in files in its data directory and runs as the unprivileged
+user `portitor`. The agent runs as root and makes the changes. portitor-config
+reaches the agent over HTTPS with a bearer token (`/etc/portitor/agent.token`, root
+only) and the agent's pinned certificate. The agent checks every document it gets
+again, whoever sent it.
 
-In both, portitor-web is not meant to be exposed to the internet, and every GUI user
-has full control (there are no roles). See [Safety](README.md#safety) for the security
-model.
+- On a single firewall the agent listens on 127.0.0.1 only. The API does not tell
+  local users apart: any process that can read the token, or run as `portitor`
+  (which can read the data directory with every secret in it), can reconfigure the
+  firewall. Treat local accounts on a firewall as administrators.
+- On an HA pair the agent also listens on the management network, limited by
+  `allow_from`. Its clients there are the other host's portitor-config (with the
+  token) and its peer agent and the witness. Those two use the pair's or the
+  witness's secret, which opens only the HA routes (heartbeats, votes, DHCP lease
+  copies), not configuration.
+- `allow_from` also gets an always-on accept rule for the agent's port, SSH and
+  portitor-config's port (anti-lockout). Keep it to the management network, never
+  the WAN.
+
+**GUI users and roles.** portitor-config's users are global **admins**, **viewers**
+or **none**. Roles also grant virtual firewalls one at a time, at admin or viewer
+level. A global admin can do everything, including open a root-capable console,
+download a backup with every secret in it and update the firewall: give that role
+only to someone you would give root. Viewers can't change anything, and they don't see
+private keys. A virtual firewall admin changes and deploys their own virtual firewalls
+only. Secrets are never sent to the browser, except in the downloads that exist to
+carry them (an encrypted backup, a WireGuard or OpenVPN client config). Users can log
+in through LDAP or Active Directory, and two-factor login is available. See
+[Users and sessions](docs/portitor-web.md#users-and-sessions).
+
+**The portal (portitor-web), optional.** It runs on a host of its own, with its own
+users and configuration in its data directory (`portal.json`: the firewalls' URLs and
+certificate fingerprints, the HA witness strings, the users' password hashes). Keep it
+private. Every portal user has full access to the portal. Behind it, each firewall
+still asks for its own login (an HA pair shares one login across both hosts). The
+portal pins each firewall's certificate. It holds no agent tokens and no firewall
+configuration. SSH credentials used to add a firewall are used for that connection
+only, and the host key is confirmed first. A witness string lets the portal vote in
+its pair's failover. It does not let the portal change configuration. On each
+firewall, list the portal in `trusted_proxies` only, so that no other host can pick
+the client address the login limits count.
+
+Neither portitor-config nor the portal is meant to be exposed to the internet. See
+[Safety](README.md#safety) for the protections on the firewall itself.

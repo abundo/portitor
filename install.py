@@ -24,8 +24,8 @@ update it to 1.0.0 first, which moves what its database held into files.
 What gets installed:
   (default)       whatever is installed on this host. When that includes
                   portitor-web, also the firewalls it serves (the hosts of
-                  the URLs under firewalls: in web.yaml, and their HA
-                  peers).
+                  the firewalls in its configuration, portitor-web
+                  list-firewalls, and their HA peers).
   --web [HOST]    portitor-web on HOST (default this host), over SSH like
                   --agent (plus the firewalls, as above)
   --agent [HOST]  portitor-agent and portitor-config on HOST (default this
@@ -998,9 +998,9 @@ def configured_elsewhere(host: Host) -> bool:
 
 
 def agent_hosts_from_settings(web: Host) -> list[str]:
-    """The firewalls portitor-web on web serves: the hosts of the URLs under
-    firewalls: in web.yaml, and the HA peers their portitor-configs deploy
-    to (`portitor-config agent-url --all` there). One on localhost is the web
+    """The firewalls portitor-web on web serves: the hosts of the URLs in the
+    portal's configuration (web.yaml's list before it had one), and the HA
+    peers their portitor-configs deploy to (`portitor-config agent-url --all` there). One on localhost is the web
     host itself."""
     listed = portal_firewalls(web) if web.exists(WEB_CONFIG) else []
     if not listed:

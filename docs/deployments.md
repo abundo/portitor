@@ -13,10 +13,12 @@ Portitor runs in one of three layouts:
 
 In every layout, each firewall keeps its own configuration. **portitor-config**, on
 the firewall next to **portitor-agent**, holds the configuration, serves the GUI and
-deploys to the agent. **portitor-web**, the portal, holds no configuration and has no
-users. It passes each firewall's GUI through at `/fw/<name>/`, and the firewall's own
-login applies (see [portitor-config and portitor-web](portitor-web.md)). If the
-portal is down, you can still open each firewall's GUI directly and change it.
+deploys to the agent. **portitor-web**, the portal, has its own login and a small
+configuration of its own: which firewalls and HA firewalls it serves, and the HA
+witness strings (`portal.json`). It holds no firewall configuration. It passes each
+firewall's GUI through at `/fw/<name>/`, where the firewall's own login applies too
+(see [portitor-config and portitor-web](portitor-web.md)). If the portal is down, you
+can still open each firewall's GUI directly and change it.
 
 ## Everything on one host
 
@@ -41,7 +43,8 @@ without changing the firewall's configuration.
 
 The firewall is the same as on one host. A second host runs portitor-web, so the GUI
 is reached in one place. One portal can list several firewalls, and the *Firewall*
-pick in the top bar switches between them. Each firewall has its own login.
+pick in the top bar switches between them. You log in to the portal first, then to
+each firewall.
 
 - **ISO:** pick *agent* on the firewall and copy the portal string it prints at the
   end. Then pick *web* on the portal host and paste the string there
@@ -74,7 +77,8 @@ read-only copy, so it can be promoted if the primary is lost.
 
 The third host runs portitor-web. It plays two roles:
 
-- **The portal.** It lists both hosts. A login on either host is good on both.
+- **The portal.** It lists the pair as one *HA firewall* and serves it from whichever
+  host is primary now. A login to the pair is good on both hosts.
 - **The witness.** A host opens only with the witness's vote or a handover from its
   peer. With the portal as the [external witness](ha.md#the-witness), the standby
   takes over by itself when the active host fails. Without an external witness, the
@@ -84,19 +88,21 @@ The third host runs portitor-web. It plays two roles:
 
 To set it up:
 
-1. Install the two firewalls (ISO *primary*, then *secondary*, which the primary
-   adds with `sudo portitor-setup --join`), then the portal (ISO *web*). With
-   `install.py`: `./install.py --web --agent 192.0.2.5,192.0.2.6` from the portal host.
-2. Add both hosts to the portal: `sudo portitor-setup --show-join` on each firewall
-   prints a portal string, which `sudo portitor-setup --join` on the portal takes (the
-   two hosts need different host names). With `install.py`, add each in the portal
-   (*Add firewall*) and its address to `trusted_proxies` on both.
-3. Set *HA witness* to *External* on the primary, commit, and add the *Witness string*
-   in the portal (*HA witness*, or `portitor-web add-witness`). The portal must be on the management
-   network (both agents' `allow_from`).
+1. Install the two firewalls (ISO *primary* and *secondary*) and the portal (ISO
+   *web*). With `install.py`: `./install.py --web --agent 192.0.2.5,192.0.2.6` from
+   the portal host, then `sudo -u portitor portitor-web createadmin <user>`.
+2. In the portal, *Add HA firewall*: give the pair a name, then *Add* its *Primary*
+   and its *Secondary* host (SSH, with the host key confirmed first). When the second
+   host is added, the portal pairs them and, with *Witness* on (the default), makes
+   itself the pair's external witness. You copy nothing by hand. The portal must be
+   on the management network (both agents' `allow_from`). With `install.py`, also
+   add the portal's address to `trusted_proxies` on both hosts.
 
-With a portal, the portal's *Add HA firewall* (an HA pair as one firewall, its two hosts added to it) does the pairing and the witness over SSH, without strings
-to copy (see [High availability](ha.md)).
+Without the portal's help, the strings do the same. The primary adds the secondary
+with `sudo portitor-setup --join`. Then set *HA witness* to *External* on the
+primary, commit, and add its *Witness string* in the portal (*HA witness*, or
+`portitor-web add-witness`). A portal string given to the portal's `sudo
+portitor-setup --join` adds a host as a plain firewall, not as part of an HA firewall.
 
 The commands, in order, are in [Step by step from the ISO](ha.md#step-by-step-from-the-iso).
 

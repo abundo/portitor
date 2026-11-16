@@ -151,7 +151,8 @@ as long as you do not confirm the change.
 
 A firewall always keeps its own configuration and serves its GUI. portitor-web, the
 portal, can serve the GUIs of several firewalls from another host: each at
-`/fw/<name>/`, with the firewall's own login and users. The setup first asks what the
+`/fw/<name>/`. You log in to the portal with its own users, then to each firewall with
+that firewall's own login and users. The setup first asks what the
 machine runs:
 
 - **both**: the firewall with its GUI, as above.
@@ -176,12 +177,16 @@ firewalls), optionally a second interface, the *Portal LAN*, with DHCP or a stat
 address and no gateway, where users browse the portal (it listens on every address,
 and its address is the one the login screen shows), the DNS servers, the password for
 the console user `portitor`, and the time zone. The interfaces are configured in `/etc/network/interfaces`
-and portitor-agent and portitor-config are disabled: this host has no firewall and no
-users of its own. At the end, paste a firewall's portal string and choose *Add*, or
-choose *Later*: log in over SSH and run `sudo portitor-setup --join` (it asks), or
-`sudo portitor-setup --join <portal string>`. Each adds the firewall to
-`/etc/portitor/web.yaml`; one of the same name is replaced. A portitor-web installed
-with `install.py` takes the same entry by hand under `firewalls:` (see
+and portitor-agent and portitor-config are disabled: this host has no firewall. The
+portal gets its first user, `portitor`, with the console password; make more in the
+portal's GUI or with `sudo -u portitor portitor-web createadmin <user>`. At the end,
+paste a firewall's portal string and choose *Add*, or choose *Later*: log in over SSH
+and run `sudo portitor-setup --join` (it asks), or `sudo portitor-setup --join <portal
+string>`. Each adds the firewall to the portal's configuration (`portal.json` in
+`/var/lib/portitor-web`) and commits it; one of the same name is replaced.
+`/etc/portitor/web.yaml` holds only what the portal needs to start. You can also add
+firewalls in the portal's GUI (*Add firewall*, over SSH), which is the way for a
+portitor-web installed with `install.py` (see
 [portitor-web](portitor-web.md#portitor-web)).
 
 Run again, `sudo portitor-setup` changes on the firewall what it changes for *both*,
@@ -219,9 +224,11 @@ On the primary, paste it at the end of the setup, or later with `sudo portitor-s
 two links, and commits the pair. Then set up an external witness for a failover by
 itself (see [The witness](ha.md#the-witness)).
 
-Each host of a pair prints a portal string too (`sudo portitor-setup --show-join`,
-with their management addresses), which a portal's `--join` takes: add both, with
-different host names, to the same portitor-web. It must be on the management network;
+In the portal, add the pair with *Add HA firewall*: it adds both hosts over SSH as one
+firewall, and pairs them and sets itself up as their witness if they aren't paired yet.
+Each host of a pair also prints a portal string (`sudo portitor-setup --show-join`,
+with their management addresses), which a portal's `--join` takes, but that adds the
+hosts as two plain firewalls (with different host names). It must be on the management network;
 the pair's hosts trust that network as `trusted_proxies`. See [Step by step from the
 ISO](ha.md#step-by-step-from-the-iso).
 

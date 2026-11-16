@@ -258,7 +258,7 @@ A user is an **admin** or a **viewer**.
   firewall's status, leases, rule counters and logs. A viewer can't change anything
   except their own name and password. They can't see WireGuard client configs, which
   hold private keys, and they can't use the console, Updates, Settings or Users.
-  Portitor-web refuses a viewer's changes; the GUI hides the buttons for them and
+  portitor-config refuses a viewer's changes; the GUI hides the buttons for them and
   shows *Read-only* in the top bar.
 
 New users get the role you pick in Settings → Users. Users that existed before roles
