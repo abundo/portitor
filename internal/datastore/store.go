@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sync"
@@ -57,6 +58,10 @@ type Store struct {
 	cand *Tree     // nil until first used
 	gen  uint64    // counts the candidates set
 	seen FileStamp // of candidate.json when it was last read or written here
+	// bad is why candidate.json, there, could not be read: no candidate is
+	// made in its place until it reads, or Discard or Replace sets one (the
+	// file kept beside it, BadSuffix).
+	bad error
 
 	locks map[string]string // datastore (candidate, running) → the session holding its lock
 
@@ -147,13 +152,34 @@ func (s *Store) locked(owner string, datastores ...string) error {
 func NewStore(root *schema.Node, b Backend, dir string) *Store {
 	s := &Store{schema: root, backend: b, dir: dir}
 	if dir != "" {
-		if t, err := s.read(s.path()); err == nil {
+		t, err := s.read(s.path())
+		switch {
+		case err == nil:
 			s.cand = t
+		case !errors.Is(err, fs.ErrNotExist):
+			s.bad = err
 		}
 		s.seen = StampOf(s.path())
 	}
 	return s
 }
+
+// BadSuffix names the copy of an unreadable candidate.json kept when a new
+// candidate replaces it.
+const BadSuffix = ".corrupt"
+
+// CorruptError is a candidate.json that is there and can't be read.
+type CorruptError struct {
+	Path string
+	Err  error
+}
+
+func (e *CorruptError) Error() string {
+	return fmt.Sprintf("the candidate %s can't be read (%v): fix or remove it, or discard the candidate (it is kept as %s%s)",
+		e.Path, e.Err, e.Path, BadSuffix)
+}
+
+func (e *CorruptError) Unwrap() error { return e.Err }
 
 func (s *Store) path() string { return filepath.Join(s.dir, "candidate.json") }
 
@@ -191,34 +217,69 @@ func (s *Store) save() error {
 	if err != nil {
 		return err
 	}
+	if s.bad != nil {
+		// The unreadable file is kept for a look at what went wrong.
+		if err := os.Rename(s.path(), s.path()+BadSuffix); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("keeping the unreadable candidate: %w", err)
+		}
+	}
 	if err := WriteFile(s.path(), data); err != nil {
 		return err
 	}
+	s.bad = nil
 	s.seen = StampOf(s.path())
 	return nil
 }
 
 // WriteFile writes a tree's file (0600: it holds secrets) whole or not
-// at all.
+// at all, on disk before it returns: the file and then its directory are
+// synced, so a power loss leaves the old file or the new one.
 func WriteFile(path string, data []byte) error {
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	_, err = f.Write(data)
+	if err == nil {
+		err = f.Sync()
+	}
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	d, err := os.Open(filepath.Dir(path))
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	return d.Sync()
 }
 
 // candidate is the candidate; s.mu is held.
 func (s *Store) candidate(ctx context.Context) (*Tree, error) {
 	// Another process may have changed the file (a console command that
 	// resets a password): it is read again.
-	if s.dir != "" && s.cand != nil {
+	if s.dir != "" && (s.cand != nil || s.bad != nil) {
 		if now := StampOf(s.path()); now != s.seen && now != (FileStamp{}) {
 			if t, err := s.read(s.path()); err == nil {
-				s.cand, s.seen = t, now
+				s.cand, s.seen, s.bad = t, now, nil
 				s.gen++
 			}
 		}
+	}
+	if s.cand == nil && s.bad != nil && StampOf(s.path()) == (FileStamp{}) {
+		s.bad = nil // removed: a new candidate is made
+	}
+	if s.cand == nil && s.bad != nil {
+		return nil, &CorruptError{Path: s.path(), Err: s.bad}
 	}
 	if s.cand == nil {
 		t, err := s.backend.Initial(ctx)
