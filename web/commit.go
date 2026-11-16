@@ -94,6 +94,7 @@ type commitPlan struct {
 func (s *Server) deploy(ctx context.Context, username string, timeout *int, only map[string]bool, tree *datastore.Tree) (*commitResult, error) {
 	s.deployMu.Lock()
 	defer s.deployMu.Unlock()
+	defer s.notifyReplica()
 	if only == nil {
 		// The global lists are written by others meanwhile (a password
 		// changed while this commit was prepared): what a full commit makes
@@ -1286,6 +1287,7 @@ func (s *Server) finishPending(ctx context.Context, deps []models.Deployment, co
 		_ = s.rec.UpdateDeployment(dep)
 		done = append(done, fw.Name)
 	}
+	s.notifyReplica()
 	return errs, done
 }
 

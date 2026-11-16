@@ -6,6 +6,7 @@ package records
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -67,24 +68,33 @@ type stateJSON struct {
 
 func (f *fileState) path(name string) string { return filepath.Join(f.dir, name) }
 
-// begin takes the state's lock, and with write the lock the other processes
-// that keep the files take too, and forgets what another process changed.
-// The caller ends with the function it returns.
-func (f *fileState) begin(write bool) (end func()) {
+// begin takes the state's lock and forgets what another process changed,
+// for a read. The caller ends with the function it returns.
+func (f *fileState) begin() (end func()) {
+	f.mu.Lock()
+	f.refresh()
+	return f.mu.Unlock
+}
+
+// beginWrite takes the state's lock and the lock the other processes that
+// keep the files take too, and forgets what another process changed. A lock
+// that can't be taken is an error: the write never goes on without it.
+func (f *fileState) beginWrite() (end func(), err error) {
 	f.mu.Lock()
 	unlock := func() {}
-	if write && f.dir != "" {
-		// A directory that can't be locked is one that can't be written:
-		// the write says so.
-		if u, err := datastore.LockDir(f.dir, ".records.lock"); err == nil {
-			unlock = u
+	if f.dir != "" {
+		u, err := datastore.LockDir(f.dir, ".records.lock")
+		if err != nil {
+			f.mu.Unlock()
+			return nil, fmt.Errorf("locking the records: %w", err)
 		}
+		unlock = u
 	}
 	f.refresh()
 	return func() {
 		unlock()
 		f.mu.Unlock()
-	}
+	}, nil
 }
 
 // refresh marks what another process changed as not loaded.

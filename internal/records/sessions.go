@@ -120,7 +120,7 @@ func (f *fileState) mergeSessions(b []byte) error {
 // Runtime fills the runtime values into users, as the rows of the models
 // have them.
 func (g *Files) Runtime(users ...*models.User) error {
-	defer g.files.begin(false)()
+	defer g.files.begin()()
 	if err := g.files.loadSessions(); err != nil {
 		return err
 	}
@@ -192,7 +192,11 @@ func (g *Files) ForgetRecoveryCodes(userID uint, codes []string) error {
 // changeSession changes a user's runtime values with fn under the lock the
 // other processes share; it returns the values after.
 func (g *Files) changeSession(id uint, fn func(r *sessionRec) bool) (sessionRec, bool, error) {
-	defer g.files.begin(true)()
+	end, err := g.files.beginWrite()
+	if err != nil {
+		return sessionRec{}, false, err
+	}
+	defer end()
 	if err := g.files.loadSessions(); err != nil {
 		return sessionRec{}, false, err
 	}

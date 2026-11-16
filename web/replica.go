@@ -72,6 +72,9 @@ type hostRole struct {
 	roleErr string
 	// fingerprint of the local agent's certificate, once read.
 	fingerprint string
+	// wake: the primary said it committed (POST replicaNotifyPath); the
+	// replica copies at once instead of at the next replicaEvery.
+	wake chan struct{}
 }
 
 // isReplica tells whether this portitor-config is read-only: an HA
@@ -262,6 +265,8 @@ func (s *Server) runRole(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
+		case <-s.role.wake:
+			lastTry = time.Time{}
 		}
 		s.checkRole(ctx)
 	}
@@ -282,12 +287,10 @@ func (s *Server) copyPrimary(ctx context.Context) error {
 	if peer.URL == "" {
 		return fail(errors.New("the primary's portitor-config is not known: set its portitor-config URL and fingerprint under Firewalls, and commit"))
 	}
-	tlsCfg, err := agentclient.PinnedTLS("the primary's portitor-config", peer.Fingerprint)
+	client, err := peerClient("the primary's portitor-config", peer.Fingerprint, time.Minute)
 	if err != nil {
 		return fail(err)
 	}
-	tlsCfg.MinVersion, tlsCfg.ServerName = tls.VersionTLS12, PinnedServerName
-	client := &http.Client{Timeout: time.Minute, Transport: &http.Transport{TLSClientConfig: tlsCfg}}
 	get := func(path string) (*http.Response, error) {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(peer.URL, "/")+path, nil)
 		if err != nil {
@@ -359,6 +362,79 @@ func (s *Server) copyPrimary(ctx context.Context) error {
 
 // replicaBundlePath is the primary's archive of files (copybundle.go).
 const replicaBundlePath = "/ha/v2/bundle"
+
+// replicaNotifyPath is where the primary tells the replica it committed.
+const replicaNotifyPath = "/ha/v2/notify"
+
+// peerClient is an HTTPS client to the pair's other portitor-config, its
+// certificate pinned.
+func peerClient(what, fingerprint string, timeout time.Duration) (*http.Client, error) {
+	tlsCfg, err := agentclient.PinnedTLS(what, fingerprint)
+	if err != nil {
+		return nil, err
+	}
+	tlsCfg.MinVersion, tlsCfg.ServerName = tls.VersionTLS12, PinnedServerName
+	return &http.Client{Timeout: timeout, Transport: &http.Transport{TLSClientConfig: tlsCfg}}, nil
+}
+
+// notifyReplica tells the secondary's portitor-config that this primary
+// committed, so it copies the files at once rather than up to replicaEvery
+// later: that narrows, not closes, the window in which a lost primary takes
+// its last changes with it. It doesn't wait, and a failure is only logged:
+// the replica still copies at its interval.
+func (s *Server) notifyReplica() {
+	r := &s.role
+	r.mu.Lock()
+	known, replica, peer := r.known, r.replica, r.peer
+	r.mu.Unlock()
+	if !s.cfg.Local || !known || replica || peer.URL == "" || peer.Secret == "" {
+		return
+	}
+	go func() {
+		client, err := peerClient("the secondary's portitor-config", peer.Fingerprint, 10*time.Second)
+		if err != nil {
+			slog.Warn("replica: notifying the secondary", "err", err)
+			return
+		}
+		req, err := http.NewRequest(http.MethodPost, strings.TrimRight(peer.URL, "/")+replicaNotifyPath, nil)
+		if err != nil {
+			return
+		}
+		req.Header.Set("Authorization", "Bearer "+peer.Secret)
+		res, err := client.Do(req)
+		if err != nil {
+			slog.Warn("replica: notifying the secondary", "err", err)
+			return
+		}
+		res.Body.Close()
+		// A secondary before this release has no such route (404): it
+		// copies at its interval.
+		if res.StatusCode != http.StatusNoContent && res.StatusCode != http.StatusNotFound {
+			slog.Warn("replica: notifying the secondary", "status", res.StatusCode)
+		}
+	}()
+}
+
+// handleReplicaNotify is the primary telling this replica it committed: the
+// pair's secret (from this host's agent) its key. It only wakes the copy.
+func (s *Server) handleReplicaNotify(c *echo.Context) error {
+	r := &s.role
+	r.mu.Lock()
+	replica, secret := r.known && r.replica, r.peer.Secret
+	r.mu.Unlock()
+	if !s.cfg.Local || !replica || secret == "" {
+		return errJSON(c, http.StatusConflict, "this portitor-config is not a replica")
+	}
+	if subtle.ConstantTimeCompare([]byte(c.Request().Header.Get("Authorization")), []byte("Bearer "+secret)) != 1 {
+		slog.Warn("replica: refused a notification", "remote", c.RealIP())
+		return errJSON(c, http.StatusUnauthorized, "unauthorized")
+	}
+	select {
+	case r.wake <- struct{}{}:
+	default:
+	}
+	return c.NoContent(http.StatusNoContent)
+}
 
 // replicaCommitPath + <commit> is a commit's configuration
 // (deployed/<commit>-config.json), which the replica's running is.

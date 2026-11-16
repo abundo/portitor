@@ -17,6 +17,7 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"github.com/abundo/portitor/internal/agentapi"
 	"github.com/abundo/portitor/internal/confview"
@@ -516,5 +517,45 @@ func TestHAPreempt(t *testing.T) {
 	}
 	if env.firewall(pair).HAPreempt || agents[pair].last().HA.Preempt {
 		t.Error("promotion turned preempt on")
+	}
+}
+
+// A primary's commit wakes the replica's copy at once.
+func TestReplicaNotify(t *testing.T) {
+	prim, _, pair := haPairConfigured(t)
+	sec := prim.firewall(pair)
+	rep := newEnv(t)
+	asHost(t, rep, 1, agentapi.HAPeerConfig{Node: fwconfig.HASecondary, URL: "https://192.0.2.1", Secret: sec.HASecret})
+	ts := httptest.NewTLSServer(rep.e)
+	defer ts.Close()
+	sum := sha256.Sum256(ts.Certificate().Raw)
+
+	// A wrong secret wakes nothing.
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+replicaNotifyPath, nil)
+	req.Header.Set("Authorization", "Bearer wrong")
+	if res, err := ts.Client().Do(req); err != nil || res.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("notify with a wrong secret: %v %v", res, err)
+	}
+	select {
+	case <-rep.srv.role.wake:
+		t.Fatal("woken by a wrong secret")
+	default:
+	}
+
+	asHost(t, prim, 1, agentapi.HAPeerConfig{Node: fwconfig.HAPrimary, URL: ts.URL, Fingerprint: hex.EncodeToString(sum[:]), Secret: sec.HASecret})
+	prim.commit()
+	select {
+	case <-rep.srv.role.wake:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the commit did not wake the replica")
+	}
+
+	// The primary takes no notification.
+	pts := httptest.NewTLSServer(prim.e)
+	defer pts.Close()
+	req, _ = http.NewRequest(http.MethodPost, pts.URL+replicaNotifyPath, nil)
+	req.Header.Set("Authorization", "Bearer "+sec.HASecret)
+	if res, err := pts.Client().Do(req); err != nil || res.StatusCode != http.StatusConflict {
+		t.Errorf("notify to the primary: %v %v", res, err)
 	}
 }

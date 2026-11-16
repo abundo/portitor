@@ -130,6 +130,7 @@ func NewServer(cfg *Config) *Server {
 		return agentclient.New(s.agentURL(f), f.AgentToken, f.AgentFingerprint)
 	}
 	s.localHA = s.localPeerConfig
+	s.role.wake = make(chan struct{}, 1)
 	return s
 }
 
@@ -167,6 +168,7 @@ func (s *Server) Echo() *echo.Echo {
 	}
 	e.GET(replicaBundlePath, s.handleReplicaBundle, noStore)
 	e.GET(replicaCommitPath+":commit", s.handleReplicaCommit, noStore)
+	e.POST(replicaNotifyPath, s.handleReplicaNotify, noStore)
 
 	api := e.Group("/api", requireJSON, noStore, s.refuseOnReplica)
 	api.POST("/login", s.handleLogin)

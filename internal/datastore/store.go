@@ -159,14 +159,16 @@ func (s *Store) path() string { return filepath.Join(s.dir, "candidate.json") }
 
 // lockFile takes the lock the processes that share the candidate (the daemon
 // and the console commands beside it) hold from reading it to writing it.
-func (s *Store) lockFile() func() {
+// A lock that can't be taken is an error: nothing goes on without it.
+func (s *Store) lockFile() (unlock func(), err error) {
 	if s.dir == "" {
-		return func() {}
+		return func() {}, nil
 	}
-	if u, err := LockDir(s.dir, ".candidate.lock"); err == nil {
-		return u
+	u, err := LockDir(s.dir, ".candidate.lock")
+	if err != nil {
+		return nil, fmt.Errorf("locking the candidate: %w", err)
 	}
-	return func() {}
+	return u, nil
 }
 
 func (s *Store) read(path string) (*Tree, error) {
@@ -266,7 +268,11 @@ func (s *Store) Running(ctx context.Context) (*Tree, error) {
 func (s *Store) Edit(ctx context.Context, owner string, fn func(*Tree) error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	defer s.lockFile()()
+	unlock, err := s.lockFile()
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	if err := s.locked(owner, "candidate"); err != nil {
 		return err
 	}
@@ -291,7 +297,11 @@ func (s *Store) Edit(ctx context.Context, owner string, fn func(*Tree) error) er
 func (s *Store) EditRaw(ctx context.Context, fn func(*Tree) error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	defer s.lockFile()()
+	unlock, err := s.lockFile()
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	c, err := s.candidate(ctx)
 	if err != nil {
 		return err
@@ -321,7 +331,11 @@ func (s *Store) set(t *Tree) error {
 func (s *Store) Replace(ctx context.Context, t *Tree) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	defer s.lockFile()()
+	unlock, err := s.lockFile()
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	s.cand = t
 	s.gen++
 	return s.save()
@@ -346,7 +360,11 @@ func (s *Store) Changed(ctx context.Context) (bool, error) {
 func (s *Store) Discard(ctx context.Context, owner string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	defer s.lockFile()()
+	unlock, err := s.lockFile()
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	if err := s.locked(owner, "candidate"); err != nil {
 		return err
 	}

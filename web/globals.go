@@ -224,6 +224,7 @@ func (s *Server) commitScoped(ctx context.Context, user string, cand *datastore.
 	}
 	s.deployMu.Lock()
 	defer s.deployMu.Unlock()
+	defer s.notifyReplica()
 	if _, err := s.commitGlobalsOf(ctx, t, func(base *datastore.Tree) error {
 		base.CopyLists(cand, scope...)
 		return nil

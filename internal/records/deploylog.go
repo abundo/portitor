@@ -185,7 +185,11 @@ func (f *fileState) encodeDeployments() ([]byte, error) {
 }
 
 func (g *Files) RecordDeployment(dep *models.Deployment) error {
-	defer g.files.begin(true)()
+	end, err := g.files.beginWrite()
+	if err != nil {
+		return err
+	}
+	defer end()
 	if err := g.files.loadDeployments(); err != nil {
 		return err
 	}
@@ -202,7 +206,11 @@ func (g *Files) RecordDeployment(dep *models.Deployment) error {
 }
 
 func (g *Files) UpdateDeployment(dep *models.Deployment) error {
-	defer g.files.begin(true)()
+	end, err := g.files.beginWrite()
+	if err != nil {
+		return err
+	}
+	defer end()
 	if err := g.files.loadDeployments(); err != nil {
 		return err
 	}
@@ -243,7 +251,7 @@ func isLive(d *models.Deployment) bool {
 }
 
 func (g *Files) LatestDeployment(firewallID uint) (*models.Deployment, error) {
-	defer g.files.begin(false)()
+	defer g.files.begin()()
 	if err := g.files.loadDeployments(); err != nil {
 		return nil, err
 	}
@@ -255,7 +263,7 @@ func (g *Files) LatestDeployment(firewallID uint) (*models.Deployment, error) {
 }
 
 func (g *Files) LiveDeployment(firewallID uint) (*models.Deployment, error) {
-	defer g.files.begin(false)()
+	defer g.files.begin()()
 	if err := g.files.loadDeployments(); err != nil {
 		return nil, err
 	}
@@ -283,7 +291,7 @@ func (f *fileState) settled(firewallID uint) *models.Deployment {
 }
 
 func (g *Files) RecentDeployments(limit int) ([]models.Deployment, error) {
-	defer g.files.begin(false)()
+	defer g.files.begin()()
 	if err := g.files.loadDeployments(); err != nil {
 		return nil, err
 	}
@@ -299,7 +307,7 @@ func (g *Files) RecentDeployments(limit int) ([]models.Deployment, error) {
 }
 
 func (g *Files) LiveCommits(limit int) ([]int64, error) {
-	defer g.files.begin(false)()
+	defer g.files.begin()()
 	if err := g.files.loadDeployments(); err != nil {
 		return nil, err
 	}
@@ -318,7 +326,11 @@ func (g *Files) LiveCommits(limit int) ([]int64, error) {
 }
 
 func (g *Files) PruneDeployments(keep int, olderThan time.Time) error {
-	defer g.files.begin(true)()
+	end, err := g.files.beginWrite()
+	if err != nil {
+		return err
+	}
+	defer end()
 	if err := g.files.loadDeployments(); err != nil {
 		return err
 	}
@@ -404,7 +416,7 @@ func (f *fileState) writeNICs() error {
 }
 
 func (g *Files) KnownNICs(firewallID uint) ([]string, error) {
-	defer g.files.begin(false)()
+	defer g.files.begin()()
 	if err := g.files.loadNICs(); err != nil {
 		return nil, err
 	}
@@ -412,7 +424,11 @@ func (g *Files) KnownNICs(firewallID uint) ([]string, error) {
 }
 
 func (g *Files) RememberNICs(firewallID uint, names []string) error {
-	defer g.files.begin(true)()
+	end, err := g.files.beginWrite()
+	if err != nil {
+		return err
+	}
+	defer end()
 	if err := g.files.loadNICs(); err != nil {
 		return err
 	}

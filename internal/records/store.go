@@ -27,7 +27,7 @@ func NewFiles(dir string) *Files {
 }
 
 func (g *Files) Own() (Own, error) {
-	defer g.files.begin(false)()
+	defer g.files.begin()()
 	if err := g.files.loadState(); err != nil {
 		return Own{}, err
 	}
@@ -43,7 +43,11 @@ func (g *Files) Own() (Own, error) {
 }
 
 func (g *Files) SetLastCommit(n int64) error {
-	defer g.files.begin(true)()
+	end, err := g.files.beginWrite()
+	if err != nil {
+		return err
+	}
+	defer end()
 	if err := g.files.loadState(); err != nil {
 		return err
 	}
@@ -53,7 +57,11 @@ func (g *Files) SetLastCommit(n int64) error {
 }
 
 func (g *Files) SetWebCertificate(id *uint) error {
-	defer g.files.begin(true)()
+	end, err := g.files.beginWrite()
+	if err != nil {
+		return err
+	}
+	defer end()
 	if err := g.files.loadState(); err != nil {
 		return err
 	}
@@ -65,7 +73,11 @@ func (g *Files) SetWebCertificate(id *uint) error {
 // SetGeneration raises the generation handed to the firewall's agent; it is
 // the file's, never lowered (a restore knows nothing of it).
 func (g *Files) SetGeneration(id uint, generation int64) error {
-	defer g.files.begin(true)()
+	end, err := g.files.beginWrite()
+	if err != nil {
+		return err
+	}
+	defer end()
 	if err := g.files.loadSessions(); err != nil {
 		return err
 	}
@@ -77,7 +89,7 @@ func (g *Files) SetGeneration(id uint, generation int64) error {
 }
 
 func (g *Files) Generations() (map[uint]int64, error) {
-	defer g.files.begin(false)()
+	defer g.files.begin()()
 	if err := g.files.loadSessions(); err != nil {
 		return nil, err
 	}
@@ -100,7 +112,7 @@ func (g *Files) UseTOTPStep(userID uint, step int64) (bool, error) {
 }
 
 func (g *Files) IDs() (sqlmap.IDs, error) {
-	defer g.files.begin(false)()
+	defer g.files.begin()()
 	if err := g.files.loadIDs(); err != nil {
 		return sqlmap.IDs{}, err
 	}
@@ -108,7 +120,11 @@ func (g *Files) IDs() (sqlmap.IDs, error) {
 }
 
 func (g *Files) AssignIDs(m *sqlmap.Mapping, tree *datastore.Tree) (sqlmap.Index, error) {
-	defer g.files.begin(true)()
+	end, err := g.files.beginWrite()
+	if err != nil {
+		return nil, err
+	}
+	defer end()
 	if err := g.files.loadIDs(); err != nil {
 		return nil, err
 	}
@@ -122,7 +138,11 @@ func (g *Files) AssignIDs(m *sqlmap.Mapping, tree *datastore.Tree) (sqlmap.Index
 }
 
 func (g *Files) Seed() error {
-	defer g.files.begin(true)()
+	end, err := g.files.beginWrite()
+	if err != nil {
+		return err
+	}
+	defer end()
 	f := &g.files
 	for _, load := range []func() error{f.loadIDs, f.loadState, f.loadDeployments, f.loadNICs, f.loadSessions} {
 		if err := load(); err != nil {
@@ -133,7 +153,11 @@ func (g *Files) Seed() error {
 }
 
 func (g *Files) UpdateIDs(fn func(ids sqlmap.IDs)) error {
-	defer g.files.begin(true)()
+	end, err := g.files.beginWrite()
+	if err != nil {
+		return err
+	}
+	defer end()
 	if err := g.files.loadIDs(); err != nil {
 		return err
 	}
@@ -143,7 +167,7 @@ func (g *Files) UpdateIDs(fn func(ids sqlmap.IDs)) error {
 }
 
 func (g *Files) ExportState(forReplica bool) (map[string][]byte, error) {
-	defer g.files.begin(false)()
+	defer g.files.begin()()
 	if err := g.files.loadIDs(); err != nil {
 		return nil, err
 	}
@@ -178,7 +202,11 @@ func (g *Files) ExportState(forReplica bool) (map[string][]byte, error) {
 }
 
 func (g *Files) ImportState(files map[string][]byte) error {
-	defer g.files.begin(true)()
+	end, err := g.files.beginWrite()
+	if err != nil {
+		return err
+	}
+	defer end()
 	if b, ok := files[entryIDsFile]; ok {
 		var ids sqlmap.IDs
 		if err := json.Unmarshal(b, &ids); err != nil {
@@ -226,7 +254,11 @@ func (g *Files) ImportState(files map[string][]byte) error {
 }
 
 func (g *Files) FollowChange(m *sqlmap.Mapping, c *datastore.Tree) error {
-	defer g.files.begin(true)()
+	end, err := g.files.beginWrite()
+	if err != nil {
+		return err
+	}
+	defer end()
 	if err := g.files.loadIDs(); err != nil {
 		return err
 	}

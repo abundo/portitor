@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -546,5 +547,17 @@ func TestTwoStoresOnOneDirectory(t *testing.T) {
 	a.RememberNICs(fw, []string{"eth8"})
 	if n, _ := b.KnownNICs(fw); len(n) != 2 {
 		t.Errorf("known interfaces: %v", n)
+	}
+}
+
+// A write whose lock can't be taken is refused, never done unlocked.
+func TestWriteNeedsLock(t *testing.T) {
+	dir := t.TempDir()
+	f := NewFiles(dir)
+	if err := os.Mkdir(filepath.Join(dir, ".records.lock"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.SetLastCommit(7); err == nil || !strings.Contains(err.Error(), "locking") {
+		t.Fatalf("write without the lock: %v", err)
 	}
 }
