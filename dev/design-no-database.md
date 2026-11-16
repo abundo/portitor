@@ -3,7 +3,7 @@
 
 # Design: no database
 
-Status: decisions D1, D2, D8, D9 and the scoped commit made 2026-11-14. Phase 0 done 2026-11-15 (`internal/records`), but for the generic CRUD (firewalls, the directory's servers and mappings) and the database file's operations, which keep `Server.db` until phases 3 and 5. Phases 1 and 4 done 2026-11-15. Phase 2 done 2026-11-15 (see "Global lists and the scoped commit": the users, roles and directory are global lists; `treeRecords`); Phase 3 done 2026-11-15 (firewalls are a global list too); phase 5 (the database goes) remains. Builds on `design-model-driven.md`
+Status: decisions D1, D2, D8, D9 and the scoped commit made 2026-11-14. Phase 0 done 2026-11-15 (`internal/records`), but for the generic CRUD (firewalls, the directory's servers and mappings) and the database file's operations, which keep `Server.db` until phases 3 and 5. Phases 1 and 4 done 2026-11-15. Phase 2 done 2026-11-15 (see "Global lists and the scoped commit": the users, roles and directory are global lists; `treeRecords`); Phase 3 done 2026-11-15 (firewalls are a global list too). Phase 5 done in two releases: stage A in 1.0.0 (2026-11-16), stage B (no database) for 1.1.0, built 2026-11-16. Builds on `design-model-driven.md`
 (the configuration is the tree; the tables are gone since 0.9.0).
 
 ## Goal
@@ -438,9 +438,8 @@ Phase 5 needs two releases: this one adopts what the database holds and still
 depends on SQLite to read it once; the next has no database at all (stage B:
 GORM's sessions, goose, `dbmigrate`, `migrate`, the old tables, the adoptions and
 the old readers are removed) and refuses a data directory without `layout.json`,
-telling the user to update through this release first. Stage B is not started in
-this tree: nothing is committed, so a release must be cut from a commit with
-stage A and without stage B.
+telling the user to update through this release first. 1.0.0 was released from
+stage A; stage B followed on `main` (below).
 
 Stage A: everything but the adoption is independent of the database.
 
@@ -466,3 +465,58 @@ Stage A: everything but the adoption is independent of the database.
 - **Not done:** the last-firewall and pair rules are still handler-only (not
   `confcheck`'s, so `/api/config` and the CLI skip them); `make iso-e2e-update`,
   the real upgrade test, has not been run.
+
+## Phase 5, stage B as built (no database, 1.1.0)
+
+- **Gone:** `internal/dbmigrate` (goose, the SQL migrations, `MinVersion`), GORM's
+  `records` implementation and its seeding from the old tables, the adoptions
+  (`adoptAccess`, `adoptFirewalls`, `adoptions.json` no longer written), the
+  replica's database copy (`/ha/v1/database`, `takeLegacyCopy`), `restoreDatabase`
+  and the `config_snapshot` reader, the generic CRUD `resource[T]` (`crud.go`; its
+  error helpers are `errors.go`), `Server.db`, `ConnectDB`, `models.Stored`,
+  `KnownInterface` and `User.AfterFind`, `px:external` (in sqlmap and the
+  extensions module: nothing named a row outside the tree any more), and the
+  database moves in `install.py` (`move_web_database`, `move_remote_database`,
+  `old_web_database`, `link_*_config`).
+- **records.** `Files` (`store.go`, `NewFiles(dir)`) implements `Kept`: history,
+  counters, ids, sessions and generations. `web`'s `treeRecords` embeds it and
+  answers the users, roles, directory and firewalls from the tree, so `Store` as a
+  whole is only ever `treeRecords`. A copy without `entry-ids.json` is refused.
+- **confview** reads the models' columns itself (`fields.go`: embedded structs,
+  `gorm:"column:"`, `gorm:"-"`, `gorm:"default:"`, relations skipped, gorm's
+  snake-case naming with its initialisms), the tables from one list
+  (`viewTables`, `tableOf`) instead of gorm's pluralising. Checked, before gorm left
+  the module, against gorm's parser for every model (tables, columns, defaults,
+  `RowOf`) and its decoder on seeded rows: the same.
+- **The start gate** (`checkLayout`, in `core`): no data directory is memory (tests);
+  `layout.json` at `layoutVersion` opens; a higher one is refused ("a later
+  release"); a lower one, or none with `candidate.json`, `global.json`,
+  `entry-ids.json`, `deployed/` or the database file there, is refused ("update to
+  Portitor 1.0.0 and start it once"); an empty or missing directory is a new
+  installation and gets its `layout.json` at once. A `portitor.db` beside a 1.0.0
+  directory is never read or removed. The root guard is `CheckDataDir`.
+- **The first firewall** came from migration 63; `Ready()` makes it now
+  (`ensureFirewall`), since `install.py` runs `set-agent` right after `migrate`.
+- **`portitor-config migrate`** stays, as the layout check: 1.0.0's `install.py`
+  (the agent's copy, which runs a GUI update) calls it on the new binary.
+- **install.py** refuses an installation older than 1.0.0 (`MIN_UPGRADE_FROM`) and,
+  for every firewall, a data directory with the old files and no `layout.json`
+  (`check_data_dirs`, as root), before anything is replaced, for releases,
+  `--source` and `--local`.
+- **Found on the way, fixed:** a restore set the ids' high-water marks back to the
+  backup's (`entry-ids.json` and `ids.json`), so an entry or rule made after the
+  backup could have its id given again (a rule's id is its connections' mark); the
+  test that should have caught it read `sqlite_sequence`, which nothing wrote since
+  0.9.0. The copy's marks are now raised to this installation's (`IDs.KeepHigher`).
+  A copy without `global.json` is refused before the candidate is replaced.
+- **Acceptance:** `web/testdata/release-1.0.0` is a data directory written by 1.0.0
+  (two firewalls, a directory server, a commit and a pending change, no database);
+  `TestOpensA100DataDirectory` opens it and builds the documents 1.0.0 built,
+  `TestLayoutGate` the refusals.
+- **Still there:** `gorm.io/gorm` and SQLite in `go.mod`, indirect, for dnsmgr2's
+  `dnsmgr` package, which `internal/render` imports for its config types (dnsmgr2
+  has a database of its own); both binaries link them. Removing them is a change in
+  dnsmgr2 (its types apart from its storage). The models keep their `gorm:` tags as
+  plain column names. `make iso-e2e-update` from 1.0.0 has not been run. The e2e
+  update scripts start from 1.0.0 or later (their branches for a release before
+  portitor-config are gone) and check `layout.json` after the update.

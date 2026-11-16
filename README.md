@@ -74,7 +74,7 @@ one host, a firewall and a portal, and an HA pair with a portal. The
  browser ──► portitor-web (portal: /fw/<name>/, no database)     optional, on another host
                   │  HTTPS, pinned certificate; each firewall's own login
                   ▼
- browser ──► portitor-config (Vue GUI + REST API, SQLite)          runs on the firewall
+ browser ──► portitor-config (Vue GUI + REST API, files)           runs on the firewall
                   │  HTTPS on 127.0.0.1, bearer token, pinned certificate
                   ▼
              portitor-agent (root daemon)                         runs on the firewall
@@ -93,12 +93,12 @@ one host, a firewall and a portal, and an HA pair with a portal. The
                   └─ FRR            BGP, OSPF, VRRP and BFD, per virtual firewall that uses them
 ```
 
-- **portitor-config** holds the firewall's configuration in an SQLite database. On
+- **portitor-config** holds the firewall's configuration in files (a YANG tree). On
   *Deploy* it builds a complete desired-state document (`internal/fwconfig`) and sends
   it to the agent (and to its HA secondary's). It runs as an unprivileged user; the
   agent re-checks everything it is sent.
 - **portitor-agent** validates the document again, renders every config file
-  (`internal/render`) and makes the system match. It never reads the database.
+  (`internal/render`) and makes the system match. It never reads portitor-config's files.
 - **portitor-web** (optional) passes each firewall's GUI through, at `/fw/<name>/`.
   It has no database and no users: the firewall's login and roles apply.
 - **Virtual firewalls** are separate firewalls on one host. The default virtual firewall is the host itself; every
@@ -203,8 +203,9 @@ user and its sudoers entry. Download it from a release, then:
 ```
 
 On an update it restarts the agent first (it rejects document fields it does not know,
-so it must not be older than portitor-config), then stops portitor-config, migrates the
-database and starts it again, then portitor-web. From portitor-web's host it finds the
+so it must not be older than portitor-config), then stops portitor-config, checks its
+data directory and starts it again, then portitor-web. An installation older than 1.0.0
+is refused: update it to 1.0.0 first. From portitor-web's host it finds the
 firewalls in `web.yaml` and their HA peers (or `--agent HOST,HOST...`), and updates them
 one at a time, an HA pair's secondary first, waiting until each hears its peer again, so
 one host of the pair keeps forwarding. A
@@ -295,7 +296,7 @@ cat /etc/portitor/agent.token | sudo -u portitor portitor-config set-agent --tok
 systemctl enable --now portitor-config
 ```
 
-Run portitor-config commands as `portitor`, so the database files SQLite creates stay
+Run portitor-config commands as `portitor`, so the files they write in its data directory stay
 writable for the service; as root it refuses. Its session cookie needs HTTPS: set
 `tls_cert` and `tls_key` in `config.yaml` (install.py makes a self-signed one), or put a
 TLS reverse proxy in front (see [portitor-config](docs/portitor-web.md#portitor-config)).

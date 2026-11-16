@@ -6,6 +6,30 @@
 The major changes in each release. A release's notes on GitHub are its section
 here (`dev/release-notes.sh`); the full list is `git log <previous tag>..<tag>`.
 
+## Unreleased (1.1.0)
+
+### Changed
+
+- **No database.** portitor-config keeps everything in files in its data directory
+  (the directory of `db.path`, which `config.yaml` keeps naming): the configuration
+  tree, the users, roles, directory and firewalls in it, and the deployment log,
+  counters and sessions beside it. portitor-config's own SQLite database, GORM code
+  and migrations are gone; `portitor-config migrate` now only checks that it can read
+  the data directory. The old `portitor.db` is left where it is, unread.
+- **A restore no longer gives an id again** that was given after the backup was made
+  (entries' ids, and rules' ids, which mark their connections).
+
+### Upgrading
+
+- **Update to 1.0.0 first.** An installation older than 1.0.0 is refused, by
+  `install.py` and the GUI's update before anything is replaced, and by
+  portitor-config at start ("update to Portitor 1.0.0 and start it once"): 1.0.0
+  moves what the database holds into files and marks the data directory
+  (`layout.json`). The path is 0.9.0, then 1.0.0, then 1.1.0.
+- An HA pair: update both hosts together, the secondary first. A 1.1.0 secondary
+  copies from a 1.0.0 primary; a primary before 1.0.0 is refused.
+- A backup made before 1.0.0 (a database file) is refused, as in 1.0.0.
+
 ## v1.0.0
 
 ### New

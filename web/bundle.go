@@ -220,7 +220,7 @@ func (s *Server) importBundle(work *datastore.Tree, b *Bundle, name string, fw *
 	}
 
 	// The instance, on the firewall: its host if it has none (a new
-	// database).
+	// installation).
 	isDefault := !slices.ContainsFunc(work.Root.Lists["instance"], func(e *datastore.Node) bool {
 		return e.Leaf("firewall") == fw.Name && e.Leaf("is-default") == "true"
 	})
@@ -320,7 +320,7 @@ func (s *Server) handleExportBundle(c *echo.Context) error {
 	}
 	b, err := exportBundle(v.Tree, inst.Name)
 	if err != nil {
-		return dbError(c, err)
+		return writeError(c, err)
 	}
 	return c.JSON(http.StatusOK, b)
 }
@@ -337,7 +337,7 @@ func (s *Server) handleImportBundle(c *echo.Context) error {
 	}
 	fw, err := s.bundleFirewall(req.FirewallID)
 	if err != nil {
-		return dbError(c, err)
+		return writeError(c, err)
 	}
 	name := strings.TrimSpace(req.Name)
 	ws, err := s.userEdit(c, func(work *datastore.Tree) error { return s.importBundle(work, req.Bundle, name, fw) })

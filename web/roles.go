@@ -138,11 +138,8 @@ func (s *Server) saveRole(c *echo.Context, old *models.Role) error {
 	if errors.Is(err, records.ErrNoSuchUser) {
 		err = bad("no such user")
 	}
-	if err == nil && old != nil {
-		err = s.renameExternal(c.Request().Context(), "roles", old.Name, r.Name)
-	}
 	if err != nil {
-		return dbError(c, err)
+		return writeError(c, err)
 	}
 	status := http.StatusOK
 	if old == nil {
@@ -167,7 +164,7 @@ func (s *Server) handleDeleteRole(c *echo.Context) error {
 		return errJSON(c, http.StatusBadRequest, "a virtual firewall's role goes away with the virtual firewall")
 	}
 	if err := s.refuseOpenVPNRole(c.Request().Context(), r); err != nil {
-		return dbError(c, err)
+		return writeError(c, err)
 	}
 	if err := s.rec.DeleteRole(r.ID); err != nil {
 		return err

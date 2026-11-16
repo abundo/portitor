@@ -37,7 +37,7 @@ type HA struct {
 	PeerLink string `json:"peer_link"`
 	// Secret is shared by the pair for the heartbeat (/v1/ha/heartbeat)
 	// and the copy of the certificates; the secondary's portitor-config
-	// copies the primary's database with it too.
+	// copies the primary's configuration with it too.
 	Secret string `json:"secret" secret:"true"`
 	// WitnessSecret, when the pair's witness is external (portitor-web on
 	// a third host), opens GET /v1/ha and POST /v1/ha/vote to it alone.

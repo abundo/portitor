@@ -5,6 +5,7 @@ package web
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -30,18 +31,17 @@ import (
 
 // The configuration tree (dev/design-model-driven.md): the YANG schema's
 // datastore, which every frontend edits in one candidate (candidate.json
-// next to the database) and commits. A commit keeps the configuration it
+// in the data directory) and commits. A commit keeps the configuration it
 // deploys (deployed/<commit>-config.json); running is the live commit's.
 
 type treeState struct {
-	once     sync.Once // the adoptions
 	coreOnce sync.Once
 	err      error
 	schema   *schema.Node
 	mapping  *sqlmap.Mapping
 	store    *datastore.Store
 
-	dir       string            // the database's, where the candidate and ids.json are; "" in memory
+	dir       string            // the data directory, where the candidate and ids.json are; "" in memory
 	idMarks   map[string]uint64 // assignID's high-water marks, by list path
 	runMu     sync.Mutex
 	runCommit int64
@@ -65,7 +65,7 @@ func (s *Server) core() (*treeState, error) {
 		}
 		dir := configDir(s.cfg)
 		t.dir = dir
-		if t.err = s.refuseLegacyConfig(); t.err != nil {
+		if t.err = checkLayout(dir, s.cfg.DB.Path); t.err != nil {
 			return
 		}
 		t.globals = slices.Clone(globalLists)
@@ -78,17 +78,21 @@ func (s *Server) core() (*treeState, error) {
 	return t, t.err
 }
 
-// Ready sets the configuration up now (tree), so that what an earlier release
-// kept in the database is in the tree before the first request; called once a
-// Server is made, before it serves.
+// Ready sets the configuration up now (tree), refusing a data directory
+// this release can't read before the first request; called once a Server is
+// made, before it serves.
 func (s *Server) Ready() error {
 	if _, err := s.tree(); err != nil {
 		return err
 	}
-	// Every file now, and the mark that this directory has them: the next
-	// release has no tables to make them from, and refuses a directory
-	// without it (update through this release first).
+	// Every file now, and the mark of the layout.
 	if err := s.rec.Seed(); err != nil {
+		return err
+	}
+	// A new installation has its first firewall from the start (set-agent
+	// sets its agent before anything else runs), as the database's
+	// migrations of earlier releases gave it.
+	if err := s.ensureFirewall(); err != nil {
 		return err
 	}
 	return s.writeLayout()
@@ -96,8 +100,59 @@ func (s *Server) Ready() error {
 
 // layoutVersion is the layout of the data directory: 2 has the files
 // (candidate, global lists, ids, deployments, ...) and no configuration in the
-// database.
+// database. 1.0.0 wrote it first, after taking what the database held into
+// the files; a directory without it is older and refused (checkLayout).
 const layoutVersion = 2
+
+// errBefore100 refuses a data directory of a release before 1.0.0.
+func errBefore100(dir string) error {
+	return fmt.Errorf("the data directory %s is from a release before 1.0.0, which kept its data in a database this release no longer reads: update to Portitor 1.0.0 and start it once, then to this release", dir)
+}
+
+// checkLayout refuses a data directory this release can't read: one of a
+// release before 1.0.0 (no layout.json, but the database or the files there)
+// or of a later release (a higher layout). A new one gets its layout.json now,
+// so that a restart before Ready still knows it. dbPath is the database file
+// of earlier releases (db.path).
+func checkLayout(dir, dbPath string) error {
+	if dir == "" {
+		return nil
+	}
+	path := filepath.Join(dir, "layout.json")
+	b, err := os.ReadFile(path)
+	switch {
+	case err == nil:
+		var l struct {
+			Layout int `json:"layout"`
+		}
+		if err := json.Unmarshal(b, &l); err != nil {
+			return fmt.Errorf("%s: %w", path, err)
+		}
+		switch {
+		case l.Layout > layoutVersion:
+			return fmt.Errorf("the data directory %s has layout %d, of a later release (this one reads %d): update Portitor", dir, l.Layout, layoutVersion)
+		case l.Layout < layoutVersion:
+			return errBefore100(dir)
+		}
+		return nil
+	case !errors.Is(err, os.ErrNotExist):
+		return err
+	}
+	old := []string{"candidate.json", "global.json", "entry-ids.json", "deployed"}
+	if dbPath != "" {
+		old = append(old, filepath.Base(dbPath))
+	}
+	for _, name := range old {
+		if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
+			return errBefore100(dir)
+		}
+	}
+	// A new installation.
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return err
+	}
+	return datastore.WriteFile(path, []byte(fmt.Sprintf("{\"layout\": %d}\n", layoutVersion)))
+}
 
 // writeLayout marks the directory as having layout layoutVersion.
 func (s *Server) writeLayout() error {
@@ -113,21 +168,8 @@ func (s *Server) writeLayout() error {
 	return datastore.WriteFile(path, []byte(want))
 }
 
-// tree is the configuration tree, set up on first use: core, then what an
-// earlier release kept in the database moved into it before anything is
-// served (the others wait for this).
-func (s *Server) tree() (*treeState, error) {
-	t, err := s.core()
-	if err != nil {
-		return nil, err
-	}
-	t.once.Do(func() {
-		if t.err = s.adoptFirewalls(context.Background(), t, false); t.err == nil {
-			t.err = s.adoptAccess(context.Background(), t, false)
-		}
-	})
-	return t, t.err
-}
+// tree is the configuration tree, set up on first use (core).
+func (s *Server) tree() (*treeState, error) { return s.core() }
 
 type treeBackend struct{ s *Server }
 
@@ -419,22 +461,4 @@ func (s *Server) runSSH(ctx context.Context) {
 	if err := srv.Serve(ctx); err != nil {
 		slog.Error("CLI: SSH", "err", err)
 	}
-}
-
-// refuseLegacyConfig stops a database that 0.9.0 migrated but did not start
-// on: its configuration is still in config_snapshot, waiting to be taken
-// into the tree (as 0.9.0 does at its first start), which this release no
-// longer does.
-func (s *Server) refuseLegacyConfig() error {
-	if !s.db.Migrator().HasTable(snapshotTable) {
-		return nil
-	}
-	var n int64
-	if err := s.db.Table(snapshotTable).Where("name = ?", "legacy-import").Count(&n).Error; err != nil {
-		return err
-	}
-	if n > 0 {
-		return errors.New("the database holds a configuration 0.9.0 read from its old tables and nothing has taken it yet: start Portitor 0.9.0 once, then update to this release")
-	}
-	return nil
 }

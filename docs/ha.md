@@ -110,7 +110,7 @@ each host.
    commits the pair. Check it with `portitor show ha` on either host.
 4. **Log in.** The GUI is `https://<management address>/` on either host, user
    `portitor`, with the **primary's** password: the secondary's portitor-config is a
-   read-only copy of the primary's database, so the primary's users apply on both.
+   read-only copy of the primary's, so the primary's users apply on both.
    Configure the pair (rules, interfaces, services) on the primary only.
 5. **Install the portal (and witness).** Pick *web*, with the two interfaces (one on
    the management network). At the end choose *Later*: the pair's hosts are added
@@ -172,7 +172,7 @@ each host.
 
 **If the login says "wrong username or password"** on a host where the console
 password works: the console login (a system account) and the GUI login (portitor-config's
-database) are separate. Set the GUI password again on the primary:
+users) are separate. Set the GUI password again on the primary:
 
 ```
 sudo -u portitor portitor-config createadmin portitor
@@ -219,7 +219,7 @@ the same on both hosts. VRRP is refused on a pair: the pair shares its addresses
 itself.
 
 From that commit on, the secondary's portitor-config is a **replica**: it copies the
-primary's database every 15 seconds (when it changed), users included, and refuses
+primary's configuration every 15 seconds (when it changed), users included, and refuses
 changes. Its GUI shows an *HA secondary* badge with the last copy. Log in there with
 the primary's users.
 
@@ -359,12 +359,9 @@ has the same as `portitor show ha` under *HA state*, with *Switch over*.
 `./install.py` updates a pair one host at a time, the secondary first. Each agent
 restart hands over cleanly, so clients lose a packet or two at most each time.
 
-Keep to that order across the release that moved portitor-config's state from its
-database into files: the secondary's portitor-config, updated first, still copies
-the database file of a primary that has not been updated (and adopts its users, roles,
-directory and firewalls from it); a primary that has been updated gives its secondary
-the files, which one not updated cannot read. Update the pair together, and the
-secondary first.
+A secondary of a newer release copies from a primary of an older one, but not the other
+way round: update the pair together, and the secondary first. Both hosts must be on 1.0.0
+or later before a later release: from an older one, update the pair to 1.0.0 first.
 
 ## Promoting the secondary
 

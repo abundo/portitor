@@ -9,14 +9,11 @@
 package confview
 
 import (
-	"context"
 	"database/sql/driver"
 	"fmt"
 	"reflect"
 	"slices"
 	"sync"
-
-	gormschema "gorm.io/gorm/schema"
 
 	"github.com/abundo/portitor/internal/datastore"
 	"github.com/abundo/portitor/internal/datastore/sqlmap"
@@ -98,6 +95,78 @@ func (v *View) ID(p datastore.Path) (uint, bool) {
 	return uint(id), ok
 }
 
+// viewTables are the View's lists and their tables, in the order they are
+// decoded.
+var viewTables = []struct{ field, table string }{
+	{"Instances", "instances"},
+	{"InterfaceZones", "interface_zones"},
+	{"Interfaces", "interfaces"},
+	{"WgPeers", "wg_peers"},
+	{"Links", "links"},
+	{"Routes", "routes"},
+	{"PolicyRoutes", "policy_routes"},
+	{"StaticNeighbours", "static_neighbours"},
+	{"Rules", "rules"},
+	{"NatRules", "nat_rules"},
+	{"IpamPrefixes", "ipam_prefixes"},
+	{"IpamAddresses", "ipam_addresses"},
+	{"DnsZones", "dns_zones"},
+	{"DnsBlocklists", "dns_blocklists"},
+	{"DnsRecords", "dns_records"},
+	{"AddressObjects", "address_objects"},
+	{"AddressLists", "address_lists"},
+	{"ObjectFolders", "object_folders"},
+	{"DnsSoaTemplates", "dns_soa_templates"},
+	{"DnsDnssecPolicies", "dns_dnssec_policies"},
+	{"DnsTemplates", "dns_templates"},
+	{"DyndnsClients", "dyndns_clients"},
+	{"DyndnsRecords", "dyndns_records"},
+	{"Certificates", "certificates"},
+	{"IpLists", "ip_lists"},
+	{"Tasks", "tasks"},
+	{"Services", "services"},
+	{"PortNames", "port_names"},
+	{"RateLimits", "rate_limits"},
+	{"RoutePrefixLists", "route_prefix_lists"},
+	{"RouteAsPathLists", "route_as_path_lists"},
+	{"RouteCommunityLists", "route_community_lists"},
+	{"RouteMaps", "route_maps"},
+	{"BgpConfigs", "bgp_configs"},
+	{"BgpPeerGroups", "bgp_peer_groups"},
+	{"BgpNeighbors", "bgp_neighbors"},
+	{"OspfConfigs", "ospf_configs"},
+	{"OspfInterfaces", "ospf_interfaces"},
+	{"IsisConfigs", "isis_configs"},
+	{"IsisInterfaces", "isis_interfaces"},
+	{"VrrpRouters", "vrrp_routers"},
+	{"BfdInterfaces", "bfd_interfaces"},
+	{"Vrfs", "vrfs"},
+	{"SnmpUsers", "snmp_users"},
+	{"SyslogServers", "syslog_servers"},
+	{"LdapServers", "ldap_servers"},
+	{"Users", "users"},
+	{"Firewalls", "firewalls"},
+	{"Roles", "roles"},
+	{"RoleMembers", "role_members"},
+	{"RoleInstances", "role_instances"},
+	{"LdapRoleMappings", "ldap_role_mappings"},
+	{"AcmeProxyPolicies", "acme_proxy_policies"},
+}
+
+// tableOf is the table of each model type: the View's, and the settings'.
+var tableOf = func() map[reflect.Type]string {
+	out := map[reflect.Type]string{reflect.TypeFor[models.Settings](): "settings"}
+	vt := reflect.TypeFor[View]()
+	for _, q := range viewTables {
+		f, ok := vt.FieldByName(q.field)
+		if !ok {
+			panic("confview: View has no " + q.field)
+		}
+		out[f.Type.Elem()] = q.table
+	}
+	return out
+}()
+
 var (
 	mapOnce    sync.Once
 	mapping    *sqlmap.Mapping
@@ -124,79 +193,23 @@ func Load(src sqlmap.Source, tree *datastore.Tree) (*View, error) {
 	if err != nil {
 		return nil, err
 	}
-	return LoadWith(src, tree, ids)
+	return LoadWith(tree, ids)
 }
 
 // LoadWith is Load with ids given.
-func LoadWith(src sqlmap.Source, tree *datastore.Tree, ids sqlmap.IDs) (*View, error) {
+func LoadWith(tree *datastore.Tree, ids sqlmap.IDs) (*View, error) {
 	m, err := Mapping()
 	if err != nil {
 		return nil, err
 	}
-	rows, idx, err := m.Rows(src, tree, ids)
+	rows, idx, err := m.Rows(tree, ids)
 	if err != nil {
 		return nil, err
 	}
 	v := &View{Tree: tree, Index: idx}
-	for _, q := range []struct {
-		dst   any
-		table string
-	}{
-		{&v.Instances, "instances"},
-		{&v.InterfaceZones, "interface_zones"},
-		{&v.Interfaces, "interfaces"},
-		{&v.WgPeers, "wg_peers"},
-		{&v.Links, "links"},
-		{&v.Routes, "routes"},
-		{&v.PolicyRoutes, "policy_routes"},
-		{&v.StaticNeighbours, "static_neighbours"},
-		{&v.Rules, "rules"},
-		{&v.NatRules, "nat_rules"},
-		{&v.IpamPrefixes, "ipam_prefixes"},
-		{&v.IpamAddresses, "ipam_addresses"},
-		{&v.DnsZones, "dns_zones"},
-		{&v.DnsBlocklists, "dns_blocklists"},
-		{&v.DnsRecords, "dns_records"},
-		{&v.AddressObjects, "address_objects"},
-		{&v.AddressLists, "address_lists"},
-		{&v.ObjectFolders, "object_folders"},
-		{&v.DnsSoaTemplates, "dns_soa_templates"},
-		{&v.DnsDnssecPolicies, "dns_dnssec_policies"},
-		{&v.DnsTemplates, "dns_templates"},
-		{&v.DyndnsClients, "dyndns_clients"},
-		{&v.DyndnsRecords, "dyndns_records"},
-		{&v.Certificates, "certificates"},
-		{&v.IpLists, "ip_lists"},
-		{&v.Tasks, "tasks"},
-		{&v.Services, "services"},
-		{&v.PortNames, "port_names"},
-		{&v.RateLimits, "rate_limits"},
-		{&v.RoutePrefixLists, "route_prefix_lists"},
-		{&v.RouteAsPathLists, "route_as_path_lists"},
-		{&v.RouteCommunityLists, "route_community_lists"},
-		{&v.RouteMaps, "route_maps"},
-		{&v.BgpConfigs, "bgp_configs"},
-		{&v.BgpPeerGroups, "bgp_peer_groups"},
-		{&v.BgpNeighbors, "bgp_neighbors"},
-		{&v.OspfConfigs, "ospf_configs"},
-		{&v.OspfInterfaces, "ospf_interfaces"},
-		{&v.IsisConfigs, "isis_configs"},
-		{&v.IsisInterfaces, "isis_interfaces"},
-		{&v.VrrpRouters, "vrrp_routers"},
-		{&v.BfdInterfaces, "bfd_interfaces"},
-		{&v.Vrfs, "vrfs"},
-		{&v.SnmpUsers, "snmp_users"},
-		{&v.SyslogServers, "syslog_servers"},
-		{&v.LdapServers, "ldap_servers"},
-		{&v.Users, "users"},
-		{&v.Firewalls, "firewalls"},
-		{&v.Roles, "roles"},
-		{&v.RoleMembers, "role_members"},
-		{&v.RoleInstances, "role_instances"},
-		{&v.LdapRoleMappings, "ldap_role_mappings"},
-		{&v.AcmeProxyPolicies, "acme_proxy_policies"},
-	} {
-		if err := DecodeRows(rows[q.table], q.dst); err != nil {
+	rv := reflect.ValueOf(v).Elem()
+	for _, q := range viewTables {
+		if err := DecodeRows(rows[q.table], rv.FieldByName(q.field).Addr().Interface()); err != nil {
 			return nil, fmt.Errorf("%s: %w", q.table, err)
 		}
 	}
@@ -237,38 +250,20 @@ func (v *View) Copy() *View {
 	return &c
 }
 
-var schemaCache = &sync.Map{}
-
 // DecodeRows decodes rows into the models of the slice dst points at, by
-// their columns.
+// their columns (fields.go).
 func DecodeRows(rows []sqlmap.Row, dst any) error {
 	sv := reflect.ValueOf(dst).Elem()
 	et := sv.Type().Elem()
-	sch, err := gormschema.Parse(reflect.New(et).Interface(), schemaCache, gormschema.NamingStrategy{})
-	if err != nil {
-		return err
-	}
-	ctx := context.Background()
+	info := infoOf(et)
 	for _, r := range rows {
 		v := reflect.New(et).Elem()
 		for col, val := range r {
-			f := sch.LookUpField(col)
-			if f == nil || f.DBName == "" {
+			f := info.byColumn[col]
+			if f == nil {
 				continue
 			}
-			if s, ok := val.(string); ok && f.FieldType.Kind() == reflect.Slice && f.FieldType.Elem().Kind() != reflect.Uint8 {
-				// A JSON column: the models' list types scan their text.
-				if sc, ok := reflect.New(f.FieldType).Interface().(interface{ Scan(any) error }); ok {
-					if err := sc.Scan(s); err != nil {
-						return fmt.Errorf("%s: %w", col, err)
-					}
-					if err := f.Set(ctx, v, reflect.ValueOf(sc).Elem().Interface()); err != nil {
-						return fmt.Errorf("%s: %w", col, err)
-					}
-					continue
-				}
-			}
-			if err := f.Set(ctx, v, val); err != nil {
+			if err := setField(v.FieldByIndex(f.index), val); err != nil {
 				return fmt.Errorf("%s: %w", col, err)
 			}
 		}
@@ -279,45 +274,60 @@ func DecodeRows(rows []sqlmap.Row, dst any) error {
 
 // RowOf is the row of a model (a pointer to one of package models'
 // structs): its table and its columns, as sqlmap.Adder takes them. A zero
-// field with a default (gorm:"default:...") has its default, as gorm's
-// Create gave it.
+// field with a default (gorm:"default:...") has its default.
 func RowOf(model any) (string, sqlmap.Row, error) {
-	sch, err := gormschema.Parse(model, schemaCache, gormschema.NamingStrategy{})
-	if err != nil {
-		return "", nil, err
-	}
 	rv := reflect.ValueOf(model)
 	for rv.Kind() == reflect.Pointer {
 		rv = rv.Elem()
 	}
-	ctx := context.Background()
+	table, ok := tableOf[rv.Type()]
+	if !ok {
+		return "", nil, fmt.Errorf("%s is no list of the configuration", rv.Type())
+	}
+	info := infoOf(rv.Type())
 	row := sqlmap.Row{}
-	for _, f := range sch.Fields {
-		if f.DBName == "" {
+	for i := range info.fields {
+		f := &info.fields[i]
+		fv := rv.FieldByIndex(f.index)
+		if fv.IsZero() && f.hasDef {
+			v, err := defaultValue(f)
+			if err != nil {
+				return "", nil, fmt.Errorf("%s.%s: %w", table, f.column, err)
+			}
+			row[f.column] = v
 			continue
 		}
-		v, zero := f.ValueOf(ctx, rv)
-		// A zero value takes the field's default, as gorm's Create gives
-		// it.
-		if zero && f.HasDefaultValue && f.DefaultValueInterface != nil {
-			row[f.DBName] = plainValue(reflect.ValueOf(f.DefaultValueInterface))
+		if fv.Kind() == reflect.Pointer && fv.IsNil() {
+			row[f.column] = nil
 			continue
 		}
-		if zero && f.FieldType.Kind() == reflect.Pointer {
-			row[f.DBName] = nil
-			continue
-		}
+		v := fv.Interface()
 		if vr, ok := v.(driver.Valuer); ok {
+			var err error
 			if v, err = vr.Value(); err != nil {
-				return "", nil, fmt.Errorf("%s.%s: %w", sch.Table, f.DBName, err)
+				return "", nil, fmt.Errorf("%s.%s: %w", table, f.column, err)
 			}
 		}
-		row[f.DBName] = plainValue(reflect.ValueOf(v))
+		row[f.column] = plainValue(reflect.ValueOf(v))
 	}
-	return sch.Table, row, nil
+	return table, row, nil
 }
 
-// plainValue is v as the database driver gives a column: int64, float64,
+// Columns are the columns of a model type (a pointer to one of package
+// models' structs), with its table.
+func Columns(model any) (string, []string) {
+	t := reflect.TypeOf(model)
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	var cols []string
+	for _, f := range infoOf(t).fields {
+		cols = append(cols, f.column)
+	}
+	return tableOf[t], cols
+}
+
+// plainValue is v as a row's column holds it: int64, float64,
 // bool, string, []byte or nil.
 func plainValue(v reflect.Value) any {
 	for v.IsValid() && v.Kind() == reflect.Pointer {

@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package fwconfig is the desired-state document exchanged between
-// portitor-web (which builds it from the database) and portitor-agent (which
-// renders and applies it on the firewall). The agent never reads the web
-// database; this document is the whole contract.
+// portitor-config (which builds it from its configuration) and portitor-agent
+// (which renders and applies it on the firewall). The agent never reads
+// portitor-config's files; this document is the whole contract.
 //
 // Every virtual instance is a Linux network namespace with its own
 // interfaces, routing table, nftables ruleset, DNS and DHCP server. The
@@ -304,8 +304,8 @@ const (
 // addresses. A version is left out when a non-empty list has none of its
 // addresses (Family and an icmp/icmpv6 Protocol narrow it further).
 type Rule struct {
-	// ID identifies the rule across deployments (portitor-web's database
-	// id). A rule with an ID gets named nftables counters and marks the
+	// ID identifies the rule across deployments (its entry's id in
+	// portitor-config). A rule with an ID gets named nftables counters and marks the
 	// connections it accepts with it, so their traffic is counted under
 	// the rule (render.RuleCounter); 0 is a plain counter. IDs are unique
 	// in the document and not set on comment rows.

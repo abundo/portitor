@@ -28,7 +28,7 @@ import (
 
 // A commit deploys to every firewall whose document changed (all of them
 // when none did, which applies the configuration again). It is numbered
-// by Settings.LastCommit, which names its database snapshot for Revert;
+// by Settings.LastCommit, which names its configuration's snapshot for Revert;
 // each firewall it deploys to gets a Deployment with that firewall's own
 // generation. Several firewalls change together: each apply waits for
 // confirmation, so when one fails the others are rolled back at once, and
@@ -614,7 +614,7 @@ func (s *Server) settlePending(ctx context.Context) ([]models.Deployment, error)
 }
 
 // liveCommit is the newest commit that the firewalls run: each firewall
-// runs its live deployment's commit or the database at a later one, since
+// runs its live deployment's commit or the configuration at a later one, since
 // a commit skips the firewalls it does not change. 0: nothing deployed.
 func (s *Server) liveCommit() (int64, error) {
 	fws, err := s.firewalls()
@@ -649,7 +649,7 @@ func (s *Server) handleDeployApply(c *echo.Context) error {
 	}
 	only, err := s.chosenScope(currentAccess(c), req.Instances, false)
 	if err != nil {
-		return dbError(c, err)
+		return writeError(c, err)
 	}
 	if only != nil && len(only) == 0 {
 		return errJSON(c, http.StatusForbidden, "you are not an admin of any virtual firewall")
@@ -685,7 +685,7 @@ func (s *Server) handleDeployApply(c *echo.Context) error {
 	return c.JSON(http.StatusOK, res)
 }
 
-// handleDeployChanges tells whether the database differs from what is
+// handleDeployChanges tells whether the candidate differs from what is
 // deployed, for the "uncommitted changes" banner.
 func (s *Server) handleDeployChanges(c *echo.Context) error {
 	resp := struct {
@@ -729,7 +729,7 @@ func (s *Server) handleDeployChanges(c *echo.Context) error {
 	return c.JSON(http.StatusOK, resp)
 }
 
-// firewallChanged tells whether the database builds another document for
+// firewallChanged tells whether the candidate builds another document for
 // the firewall than it runs, and how many problems it has.
 func (s *Server) firewallChanged(in builder.Input, firewallID uint) (bool, int, error) {
 	live, err := s.liveDeployment(firewallID)
@@ -1044,7 +1044,7 @@ func (s *Server) handleDeployCheck(c *echo.Context) error {
 	}
 	only, err := s.chosenScope(currentAccess(c), names, true)
 	if err != nil {
-		return dbError(c, err)
+		return writeError(c, err)
 	}
 	_, docs, err := s.firewallDocs(c.Request().Context(), only)
 	problems := []string{}
@@ -1092,7 +1092,7 @@ func (s *Server) handleDeployPreview(c *echo.Context) error {
 	_ = c.Bind(&req)
 	only, err := s.chosenScope(currentAccess(c), req.Instances, true)
 	if err != nil {
-		return dbError(c, err)
+		return writeError(c, err)
 	}
 	fws, docs, err := s.firewallDocs(c.Request().Context(), only)
 	if err != nil {
@@ -1141,7 +1141,7 @@ func (s *Server) handleExportNftables(c *echo.Context) error {
 	live := c.QueryParam("from") == "live"
 	only, err := s.chosenScope(currentAccess(c), []string{name}, true)
 	if err != nil {
-		return dbError(c, err)
+		return writeError(c, err)
 	}
 	a, fw, err := s.instanceAgent(name)
 	if err != nil {

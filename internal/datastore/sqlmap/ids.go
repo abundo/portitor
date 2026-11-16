@@ -50,10 +50,14 @@ func (ids IDs) Each(prefix string, fn func(path, tbl string, id int64)) {
 // Delete forgets the id kept for a path (the highest id each table gave stays).
 func (ids IDs) Delete(path string) { delete(ids.byPath, path) }
 
-// SetMax raises the highest id given in a table: ids above it are never
-// another entry's, whatever entries there are now (a database's autoincrement
-// counter, after rows deleted).
-func (ids IDs) SetMax(tbl string, n int64) { ids.max[tbl] = max(ids.max[tbl], n) }
+// KeepHigher raises the highest id each table gave to o's where that is
+// higher: ids taken from a copy (a restore) never give an id this
+// installation gave since.
+func (ids IDs) KeepHigher(o IDs) {
+	for tbl, n := range o.max {
+		ids.max[tbl] = max(ids.max[tbl], n)
+	}
+}
 
 // Clone is a copy of the ids, which Set may change.
 func (ids IDs) Clone() IDs { return ids.clone() }
@@ -214,33 +218,4 @@ func (m *Mapping) walkEntries(n *datastore.Node, fn func(e *datastore.Node, t *t
 			m.walkEntries(e, fn)
 		}
 	}
-}
-
-// RenameExternal makes the leaves of tree that name the row old of table
-// (px:external: a firewall, a role) name new; it reports whether any did.
-func (m *Mapping) RenameExternal(tree *datastore.Tree, tbl, old, new string) bool {
-	changed := false
-	m.walkEntries(tree.Root, func(e *datastore.Node, t *table) {
-		for _, c := range t.cols {
-			if c.kind == external && c.external == tbl && e.Leaves[c.leaf.Name] == old {
-				e.Leaves[c.leaf.Name] = new
-				changed = true
-			}
-		}
-	})
-	return changed
-}
-
-// NamesExternal reports whether a leaf of tree names the row name of
-// table (px:external), and where: the path of the first.
-func (m *Mapping) NamesExternal(tree *datastore.Tree, tbl, name string) (string, bool) {
-	where := ""
-	m.walkEntries(tree.Root, func(e *datastore.Node, t *table) {
-		for _, c := range t.cols {
-			if where == "" && c.kind == external && c.external == tbl && e.Leaves[c.leaf.Name] == name {
-				where = pathKey(m.root, e)
-			}
-		}
-	})
-	return where, where != ""
 }

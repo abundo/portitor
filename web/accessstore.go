@@ -25,7 +25,7 @@ import (
 // what runs of them, and what it changes written to what runs and to the
 // candidate together (never one alone: the next full commit would undo it).
 type treeRecords struct {
-	records.Store
+	records.Kept
 	s *Server
 }
 
@@ -881,7 +881,7 @@ func (t *treeRecords) FollowChange(m *sqlmap.Mapping, c *datastore.Tree) error {
 	if err := t.s.followInstanceRoles(c); err != nil {
 		return err
 	}
-	return t.Store.FollowChange(m, c)
+	return t.Kept.FollowChange(m, c)
 }
 
 func (s *Server) followInstanceRoles(c *datastore.Tree) error {
@@ -981,7 +981,7 @@ func (t *treeRecords) Firewalls() ([]models.Firewall, error) {
 	if err != nil {
 		return nil, err
 	}
-	gens, err := t.Store.Generations()
+	gens, err := t.Kept.Generations()
 	if err != nil {
 		return nil, err
 	}

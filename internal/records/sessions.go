@@ -9,14 +9,12 @@ import (
 	"os"
 	"slices"
 
-	"gorm.io/gorm"
-
 	"github.com/abundo/portitor/internal/datastore"
 	"github.com/abundo/portitor/models"
 )
 
 // The users' runtime values, which are not configuration and are never in a
-// commit or a backup, are in sessions.json next to the database, by user id:
+// commit or a backup, are in sessions.json in the data directory, by user id:
 //
 //   - the token version, which a session carries and which ends it when
 //     raised (a password or role change, a delete, a logout everywhere);
@@ -45,9 +43,8 @@ type sessionsJSON struct {
 	Generations map[uint]int64 `json:"generations,omitempty"`
 }
 
-// loadSessions loads the values (or seeds them from db's users table), under
-// f.mu.
-func (f *fileState) loadSessions(db *gorm.DB) error {
+// loadSessions loads the values, under f.mu.
+func (f *fileState) loadSessions() error {
 	if f.sessLoaded {
 		return nil
 	}
@@ -71,22 +68,6 @@ func (f *fileState) loadSessions(db *gorm.DB) error {
 			return nil
 		case !errors.Is(err, os.ErrNotExist):
 			return err
-		}
-	}
-	if db != nil && db.Migrator().HasTable("users") {
-		var rows []struct {
-			ID           uint
-			TokenVersion int
-			TOTPLastStep int64  `gorm:"column:totp_last_step"`
-			TOTPPending  string `gorm:"column:totp_pending"`
-		}
-		if err := db.Table("users").Select("id, token_version, totp_last_step, totp_pending").Find(&rows).Error; err != nil {
-			return err
-		}
-		for _, r := range rows {
-			if r.TokenVersion != 0 || r.TOTPLastStep != 0 || r.TOTPPending != "" {
-				f.sess[r.ID] = sessionRec{TokenVersion: r.TokenVersion, TOTPLastStep: r.TOTPLastStep, TOTPPending: r.TOTPPending}
-			}
 		}
 	}
 	f.sessLoaded = true
@@ -138,9 +119,9 @@ func (f *fileState) mergeSessions(b []byte) error {
 
 // Runtime fills the runtime values into users, as the rows of the models
 // have them.
-func (g *GORM) Runtime(users ...*models.User) error {
+func (g *Files) Runtime(users ...*models.User) error {
 	defer g.files.begin(false)()
-	if err := g.files.loadSessions(g.db); err != nil {
+	if err := g.files.loadSessions(); err != nil {
 		return err
 	}
 	for _, u := range users {
@@ -159,20 +140,17 @@ func (g *GORM) Runtime(users ...*models.User) error {
 	return nil
 }
 
-// withRuntime is Runtime, for the records' own use.
-func (g *GORM) withRuntime(users ...*models.User) error { return g.Runtime(users...) }
-
-func (g *GORM) Revoke(userID uint) (int, error) {
+func (g *Files) Revoke(userID uint) (int, error) {
 	r, _, err := g.changeSession(userID, func(r *sessionRec) bool { r.TokenVersion++; return true })
 	return r.TokenVersion, err
 }
 
-func (g *GORM) SetTOTPPending(userID uint, secret string) error {
+func (g *Files) SetTOTPPending(userID uint, secret string) error {
 	_, _, err := g.changeSession(userID, func(r *sessionRec) bool { r.TOTPPending = secret; return true })
 	return err
 }
 
-func (g *GORM) EnableTOTPState(userID uint, step int64) error {
+func (g *Files) EnableTOTPState(userID uint, step int64) error {
 	_, _, err := g.changeSession(userID, func(r *sessionRec) bool {
 		r.TOTPPending, r.TOTPLastStep, r.UsedRecovery = "", step, nil
 		return true
@@ -180,7 +158,7 @@ func (g *GORM) EnableTOTPState(userID uint, step int64) error {
 	return err
 }
 
-func (g *GORM) ClearTOTPState(userID uint) error {
+func (g *Files) ClearTOTPState(userID uint) error {
 	_, _, err := g.changeSession(userID, func(r *sessionRec) bool {
 		r.TOTPPending, r.TOTPLastStep, r.UsedRecovery = "", 0, nil
 		return true
@@ -188,7 +166,7 @@ func (g *GORM) ClearTOTPState(userID uint) error {
 	return err
 }
 
-func (g *GORM) MarkRecoveryCodeUsed(userID uint, hash string) (bool, error) {
+func (g *Files) MarkRecoveryCodeUsed(userID uint, hash string) (bool, error) {
 	_, ok, err := g.changeSession(userID, func(r *sessionRec) bool {
 		if slices.Contains(r.UsedRecovery, hash) {
 			return false
@@ -199,7 +177,7 @@ func (g *GORM) MarkRecoveryCodeUsed(userID uint, hash string) (bool, error) {
 	return ok, err
 }
 
-func (g *GORM) ForgetRecoveryCodes(userID uint, codes []string) error {
+func (g *Files) ForgetRecoveryCodes(userID uint, codes []string) error {
 	_, _, err := g.changeSession(userID, func(r *sessionRec) bool {
 		kept := slices.DeleteFunc(slices.Clone(r.UsedRecovery), func(h string) bool { return !slices.Contains(codes, h) })
 		if len(kept) == len(r.UsedRecovery) {
@@ -213,9 +191,9 @@ func (g *GORM) ForgetRecoveryCodes(userID uint, codes []string) error {
 
 // changeSession changes a user's runtime values with fn under the lock the
 // other processes share; it returns the values after.
-func (g *GORM) changeSession(id uint, fn func(r *sessionRec) bool) (sessionRec, bool, error) {
+func (g *Files) changeSession(id uint, fn func(r *sessionRec) bool) (sessionRec, bool, error) {
 	defer g.files.begin(true)()
-	if err := g.files.loadSessions(g.db); err != nil {
+	if err := g.files.loadSessions(); err != nil {
 		return sessionRec{}, false, err
 	}
 	r := g.files.sess[id]

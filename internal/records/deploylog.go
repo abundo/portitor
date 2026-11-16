@@ -13,13 +13,11 @@ import (
 	"sort"
 	"time"
 
-	"gorm.io/gorm"
-
 	"github.com/abundo/portitor/internal/datastore"
 	"github.com/abundo/portitor/models"
 )
 
-// The deployments and the interfaces seen, in files next to the database
+// The deployments and the interfaces seen, in files in the data directory
 // (deployments.jsonl, known-nics.json), with the other files of files.go.
 //
 // deployments.jsonl is an append-only log, one JSON object per line:
@@ -80,8 +78,8 @@ func fromRec(r depRec) models.Deployment {
 	return d
 }
 
-// loadDeployments reads the log (or seeds it from db's table), under f.mu.
-func (f *fileState) loadDeployments(db *gorm.DB) error {
+// loadDeployments reads the log, under f.mu.
+func (f *fileState) loadDeployments() error {
 	if f.depsLoaded {
 		return nil
 	}
@@ -94,17 +92,6 @@ func (f *fileState) loadDeployments(db *gorm.DB) error {
 			return nil
 		case !errors.Is(err, os.ErrNotExist):
 			return err
-		}
-	}
-	// From before the log: the table.
-	if db != nil && db.Migrator().HasTable("deployments") {
-		var rows []models.Deployment
-		if err := db.Order("id").Find(&rows).Error; err != nil {
-			return err
-		}
-		f.deps = rows
-		for _, d := range rows {
-			f.depNext = max(f.depNext, d.ID+1)
 		}
 	}
 	f.depsLoaded = true
@@ -197,9 +184,9 @@ func (f *fileState) encodeDeployments() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func (g *GORM) RecordDeployment(dep *models.Deployment) error {
+func (g *Files) RecordDeployment(dep *models.Deployment) error {
 	defer g.files.begin(true)()
-	if err := g.files.loadDeployments(g.db); err != nil {
+	if err := g.files.loadDeployments(); err != nil {
 		return err
 	}
 	now := time.Now()
@@ -214,9 +201,9 @@ func (g *GORM) RecordDeployment(dep *models.Deployment) error {
 	return nil
 }
 
-func (g *GORM) UpdateDeployment(dep *models.Deployment) error {
+func (g *Files) UpdateDeployment(dep *models.Deployment) error {
 	defer g.files.begin(true)()
-	if err := g.files.loadDeployments(g.db); err != nil {
+	if err := g.files.loadDeployments(); err != nil {
 		return err
 	}
 	i := slices.IndexFunc(g.files.deps, func(d models.Deployment) bool { return d.ID == dep.ID })
@@ -255,9 +242,9 @@ func isLive(d *models.Deployment) bool {
 	return d.Status == "applied" || d.Status == "pending" || d.Status == "confirmed"
 }
 
-func (g *GORM) LatestDeployment(firewallID uint) (*models.Deployment, error) {
+func (g *Files) LatestDeployment(firewallID uint) (*models.Deployment, error) {
 	defer g.files.begin(false)()
-	if err := g.files.loadDeployments(g.db); err != nil {
+	if err := g.files.loadDeployments(); err != nil {
 		return nil, err
 	}
 	out := g.files.newest(func(d *models.Deployment) bool { return d.FirewallID == firewallID })
@@ -267,9 +254,9 @@ func (g *GORM) LatestDeployment(firewallID uint) (*models.Deployment, error) {
 	return &out[0], nil
 }
 
-func (g *GORM) LiveDeployment(firewallID uint) (*models.Deployment, error) {
+func (g *Files) LiveDeployment(firewallID uint) (*models.Deployment, error) {
 	defer g.files.begin(false)()
-	if err := g.files.loadDeployments(g.db); err != nil {
+	if err := g.files.loadDeployments(); err != nil {
 		return nil, err
 	}
 	return g.files.live(firewallID), nil
@@ -295,9 +282,9 @@ func (f *fileState) settled(firewallID uint) *models.Deployment {
 	return &out[0]
 }
 
-func (g *GORM) RecentDeployments(limit int) ([]models.Deployment, error) {
+func (g *Files) RecentDeployments(limit int) ([]models.Deployment, error) {
 	defer g.files.begin(false)()
-	if err := g.files.loadDeployments(g.db); err != nil {
+	if err := g.files.loadDeployments(); err != nil {
 		return nil, err
 	}
 	out := slices.Clone(g.files.deps)
@@ -311,9 +298,9 @@ func (g *GORM) RecentDeployments(limit int) ([]models.Deployment, error) {
 	return out, nil
 }
 
-func (g *GORM) LiveCommits(limit int) ([]int64, error) {
+func (g *Files) LiveCommits(limit int) ([]int64, error) {
 	defer g.files.begin(false)()
-	if err := g.files.loadDeployments(g.db); err != nil {
+	if err := g.files.loadDeployments(); err != nil {
 		return nil, err
 	}
 	seen := map[int64]bool{}
@@ -330,9 +317,9 @@ func (g *GORM) LiveCommits(limit int) ([]int64, error) {
 	return commits, nil
 }
 
-func (g *GORM) PruneDeployments(keep int, olderThan time.Time) error {
+func (g *Files) PruneDeployments(keep int, olderThan time.Time) error {
 	defer g.files.begin(true)()
-	if err := g.files.loadDeployments(g.db); err != nil {
+	if err := g.files.loadDeployments(); err != nil {
 		return err
 	}
 	// What a firewall needs stays, however old: the deployment it runs (a
@@ -379,7 +366,7 @@ func (g *GORM) PruneDeployments(keep int, olderThan time.Time) error {
 
 // Known NICs: firewall id -> names.
 
-func (f *fileState) loadNICs(db *gorm.DB) error {
+func (f *fileState) loadNICs() error {
 	if f.nicsLoaded {
 		return nil
 	}
@@ -395,15 +382,6 @@ func (f *fileState) loadNICs(db *gorm.DB) error {
 			return nil
 		case !errors.Is(err, os.ErrNotExist):
 			return err
-		}
-	}
-	if db != nil && db.Migrator().HasTable("known_interfaces") {
-		var rows []models.KnownInterface
-		if err := db.Order("firewall_id, name").Find(&rows).Error; err != nil {
-			return err
-		}
-		for _, r := range rows {
-			f.nics[r.FirewallID] = append(f.nics[r.FirewallID], r.Name)
 		}
 	}
 	f.nicsLoaded = true
@@ -425,17 +403,17 @@ func (f *fileState) writeNICs() error {
 	return nil
 }
 
-func (g *GORM) KnownNICs(firewallID uint) ([]string, error) {
+func (g *Files) KnownNICs(firewallID uint) ([]string, error) {
 	defer g.files.begin(false)()
-	if err := g.files.loadNICs(g.db); err != nil {
+	if err := g.files.loadNICs(); err != nil {
 		return nil, err
 	}
 	return slices.Clone(g.files.nics[firewallID]), nil
 }
 
-func (g *GORM) RememberNICs(firewallID uint, names []string) error {
+func (g *Files) RememberNICs(firewallID uint, names []string) error {
 	defer g.files.begin(true)()
-	if err := g.files.loadNICs(g.db); err != nil {
+	if err := g.files.loadNICs(); err != nil {
 		return err
 	}
 	have := g.files.nics[firewallID]

@@ -4,68 +4,231 @@
 package records
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
 	"slices"
 	"testing"
 	"time"
 
-	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
-
 	"github.com/abundo/portitor/internal/confview"
 	"github.com/abundo/portitor/internal/datastore"
 	"github.com/abundo/portitor/internal/datastore/sqlmap"
-	"github.com/abundo/portitor/internal/dbmigrate"
 	"github.com/abundo/portitor/internal/schema"
 	"github.com/abundo/portitor/models"
 )
 
-// implementations are the Stores the contract is checked on; a new
-// implementation adds itself here, with a way to make a firewall it can
-// attach deployments to.
+// harness is a Kept the contract is checked on, with a way to number the
+// firewalls deployments are attached to (they are the tree's: here only ids).
 type harness struct {
-	store    Store
+	store    Kept
 	firewall func(t *testing.T, name string) uint
-	// add makes a firewall of the given fields (an HA pair's, say).
-	add func(t *testing.T, fw models.Firewall) uint
-	// put stores a row (a role, a mapping) a test needs to exist.
-	put func(t *testing.T, row any)
 }
 
-func gormHarness(t *testing.T) harness {
-	t.Helper()
-	db, err := dbmigrate.Open(filepath.Join(t.TempDir(), "db.sqlite"), &gorm.Config{Logger: logger.Discard})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := dbmigrate.Up(db); err != nil {
-		t.Fatal(err)
-	}
-	h := harness{
-		store: NewGORM(db, ""),
-		add: func(t *testing.T, fw models.Firewall) uint {
-			if err := db.Create(&fw).Error; err != nil {
-				t.Fatal(err)
-			}
-			return fw.ID
-		},
-	}
-	h.put = func(t *testing.T, row any) {
-		if err := db.Create(row).Error; err != nil {
-			t.Fatal(err)
+func filesHarness(dir string) func(t *testing.T) harness {
+	return func(t *testing.T) harness {
+		d := dir
+		if d == "disk" {
+			d = t.TempDir()
 		}
+		var next uint
+		return harness{store: NewFiles(d), firewall: func(*testing.T, string) uint { next++; return next }}
 	}
-	h.firewall = func(t *testing.T, name string) uint { return h.add(t, models.Firewall{Name: name}) }
-	return h
 }
 
-var implementations = map[string]func(*testing.T) harness{"gorm": gormHarness}
+var implementations = map[string]func(*testing.T) harness{"memory": filesHarness(""), "files": filesHarness("disk")}
 
 func each(t *testing.T, f func(t *testing.T, h harness)) {
 	for name, mk := range implementations {
 		t.Run(name, func(t *testing.T) { f(t, mk(t)) })
+	}
+}
+
+// openIn is a Files on dir, and the id of a firewall to attach deployments to.
+func openIn(t *testing.T, dir string) *Files {
+	t.Helper()
+	return NewFiles(dir)
+}
+
+const fw = uint(1)
+
+// A TOTP step is good once.
+func TestTOTPUsedOnce(t *testing.T) {
+	each(t, func(t *testing.T, h harness) {
+		if err := h.store.EnableTOTPState(7, 50); err != nil {
+			t.Fatal(err)
+		}
+		if ok, _ := h.store.UseTOTPStep(7, 50); ok {
+			t.Error("the step of enabling was accepted again")
+		}
+		if ok, _ := h.store.UseTOTPStep(7, 51); !ok {
+			t.Error("a newer step was refused")
+		}
+		if ok, _ := h.store.UseTOTPStep(7, 51); ok {
+			t.Error("a step was accepted twice")
+		}
+		if ok, _ := h.store.MarkRecoveryCodeUsed(7, "a"); !ok {
+			t.Error("a recovery code was refused")
+		}
+		if ok, _ := h.store.MarkRecoveryCodeUsed(7, "a"); ok {
+			t.Error("a recovery code was used twice")
+		}
+		u := &models.User{Base: models.Base{ID: 7}, RecoveryCodes: `["a","b"]`}
+		if err := h.store.Runtime(u); err != nil || u.RecoveryCodes != `["b"]` || u.TOTPLastStep != 51 {
+			t.Errorf("runtime: %v %+v", err, u)
+		}
+		if err := h.store.ClearTOTPState(7); err != nil {
+			t.Fatal(err)
+		}
+		u = &models.User{Base: models.Base{ID: 7}}
+		if h.store.Runtime(u); u.TOTPLastStep != 0 {
+			t.Errorf("cleared: %+v", u)
+		}
+	})
+}
+
+// The ids and the counters are in files: a new Files on the same directory
+// sees them.
+func TestStateFiles(t *testing.T) {
+	dir := t.TempDir()
+	g := openIn(t, dir)
+	if err := g.Seed(); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []string{"entry-ids.json", "state.json", "deployments.jsonl", "known-nics.json", "sessions.json"} {
+		if _, err := os.Stat(filepath.Join(dir, f)); err != nil {
+			t.Errorf("%s was not made: %v", f, err)
+		}
+	}
+	if err := g.SetLastCommit(9); err != nil {
+		t.Fatal(err)
+	}
+	m, err := confview.Mapping()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := g.FollowChange(m, treeOf(t, "main", "shop")); err != nil {
+		t.Fatal(err)
+	}
+	again := openIn(t, dir)
+	ids, _ := again.IDs()
+	main, shop := idOf(t, ids, "/instance[name=main]"), idOf(t, ids, "/instance[name=shop]")
+	if main == shop || shop == 0 {
+		t.Errorf("ids %d %d", main, shop)
+	}
+	if own, _ := again.Own(); own.LastCommit != 9 {
+		t.Errorf("counter after reopening: %+v", own)
+	}
+
+	// The counter is the highest given anywhere: a deployment, or a kept
+	// commit's file, beyond the file's own.
+	again.RecordDeployment(&models.Deployment{FirewallID: fw, CommitID: 12, Status: "applied"})
+	if own, _ := again.Own(); own.LastCommit != 12 {
+		t.Errorf("counter with a deployment of 12: %+v", own)
+	}
+	os.MkdirAll(filepath.Join(dir, "deployed"), 0o700)
+	os.WriteFile(filepath.Join(dir, "deployed", "15-config.json"), []byte("{}"), 0o600)
+	if own, _ := again.Own(); own.LastCommit != 15 {
+		t.Errorf("counter with a commit file of 15: %+v", own)
+	}
+
+	// A rename keeps the entry's id.
+	renamed := treeOf(t, "main", "shop")
+	if err := renamed.Rename(datastore.Path{{Name: "instance", Keys: []string{"shop"}}}, []string{"store"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := again.FollowChange(m, renamed); err != nil {
+		t.Fatal(err)
+	}
+	ids, _ = again.IDs()
+	if idOf(t, ids, "/instance[name=store]") != shop {
+		t.Errorf("the renamed instance got another id")
+	}
+
+	// A copy carries the ids; a copy without them is refused.
+	files, _ := again.ExportState(false)
+	other := openIn(t, t.TempDir())
+	if err := other.ImportState(files); err != nil {
+		t.Fatal(err)
+	}
+	oids, _ := other.IDs()
+	if idOf(t, oids, "/instance[name=store]") != shop {
+		t.Error("the copy's ids were not taken")
+	}
+	if err := other.ImportState(map[string][]byte{}); err == nil {
+		t.Error("a copy with no ids was taken")
+	}
+}
+
+// The replica's copy carries the deployments and known interfaces; a
+// backup's import leaves the installation's own history.
+func TestDeploymentLogReplica(t *testing.T) {
+	g := openIn(t, t.TempDir())
+	g.RecordDeployment(&models.Deployment{FirewallID: fw, CommitID: 3, Generation: 3, Status: "applied", Document: "{}"})
+	g.RememberNICs(fw, []string{"eth0", "eth1"})
+
+	backup, _ := g.ExportState(false)
+	if _, ok := backup["deployments.jsonl"]; ok {
+		t.Error("a backup carries the deployments")
+	}
+	replica, _ := g.ExportState(true)
+	other := openIn(t, t.TempDir())
+	if err := other.ImportState(replica); err != nil {
+		t.Fatal(err)
+	}
+	if d, _ := other.LiveDeployment(fw); d == nil || d.CommitID != 3 {
+		t.Errorf("the copy's deployment: %+v", d)
+	}
+	if n, _ := other.KnownNICs(fw); len(n) != 2 {
+		t.Errorf("the copy's NICs: %v", n)
+	}
+	if err := other.ImportState(backup); err != nil {
+		t.Fatal(err)
+	}
+	if d, _ := other.LiveDeployment(fw); d == nil {
+		t.Error("a backup replaced the deployments")
+	}
+}
+
+// The users' runtime values are in sessions.json: a deleted user's version
+// stays, and the replica's copy merges them by maximum.
+func TestSessions(t *testing.T) {
+	dir := t.TempDir()
+	g := openIn(t, dir)
+	const id = 3
+	for range 4 {
+		g.Revoke(id)
+	}
+	g.UseTOTPStep(id, 77)
+	g.SetTOTPPending(id, "PEND")
+	got := &models.User{Base: models.Base{ID: id}}
+	if openIn(t, dir).Runtime(got); got.TokenVersion != 4 || got.TOTPLastStep != 77 || got.TOTPPending != "PEND" {
+		t.Fatalf("reopened: %+v", got)
+	}
+
+	// The copy the replica takes: each value the larger.
+	other := openIn(t, t.TempDir())
+	other.changeSession(id, func(r *sessionRec) bool { r.TokenVersion, r.TOTPLastStep = 9, 5; return true })
+	files, _ := g.ExportState(true)
+	if _, ok := files["sessions.json"]; !ok {
+		t.Fatal("the replica's copy lacks the sessions")
+	}
+	if backup, _ := g.ExportState(false); backup["sessions.json"] != nil {
+		t.Error("a backup carries the sessions")
+	}
+	if err := other.ImportState(files); err != nil {
+		t.Fatal(err)
+	}
+	merged := &models.User{Base: models.Base{ID: id}}
+	other.Runtime(merged)
+	if merged.TokenVersion != 9 || merged.TOTPLastStep != 77 {
+		t.Errorf("merged: %+v", merged)
+	}
+
+	// Generations only rise.
+	g.SetGeneration(fw, 5)
+	g.SetGeneration(fw, 2)
+	if gens, _ := openIn(t, dir).Generations(); gens[fw] != 5 {
+		t.Errorf("generations: %v", gens)
 	}
 }
 
@@ -170,190 +333,6 @@ func TestCounters(t *testing.T) {
 	})
 }
 
-func TestFirewalls(t *testing.T) {
-	each(t, func(t *testing.T, h harness) {
-		if _, err := h.store.Firewall(9999); !errors.Is(err, ErrNotFound) {
-			t.Fatalf("a missing firewall: %v", err)
-		}
-		// Added when there is none, and only then (a new database has its
-		// first firewall already, or EnsureFirewall makes it).
-		if err := h.store.EnsureFirewall("first"); err != nil {
-			t.Fatal(err)
-		}
-		before, _ := h.store.Firewalls()
-		if len(before) != 1 {
-			t.Fatalf("after EnsureFirewall: %+v", before)
-		}
-		if err := h.store.EnsureFirewall("other"); err != nil {
-			t.Fatal(err)
-		}
-		second := h.firewall(t, "second")
-		fws, err := h.store.Firewalls()
-		if err != nil || len(fws) != 2 || fws[0].ID != before[0].ID || fws[1].ID != second {
-			t.Fatalf("firewalls: %v %+v", err, fws)
-		}
-
-		if err := h.store.SetAgentConnection(second, "https://192.0.2.2:8443", "tok", "ab12"); err != nil {
-			t.Fatal(err)
-		}
-		if err := h.store.SetGeneration(second, 9); err != nil {
-			t.Fatal(err)
-		}
-		got, _ := h.store.Firewall(second)
-		if got.AgentURL != "https://192.0.2.2:8443" || got.AgentToken != "tok" || got.AgentFingerprint != "ab12" {
-			t.Errorf("second: %+v", got)
-		}
-		gens, _ := h.store.Generations()
-		if gens[second] != 9 || gens[fws[0].ID] != 0 {
-			t.Errorf("generations: %v", gens)
-		}
-		// Only raised.
-		_ = h.store.SetGeneration(second, 3)
-		if gens, _ = h.store.Generations(); gens[second] != 9 {
-			t.Errorf("a generation was lowered: %v", gens)
-		}
-		if one, _ := h.store.Firewall(fws[0].ID); one.AgentURL != "" {
-			t.Errorf("the first one changed: %+v", one)
-		}
-	})
-}
-
-// A promotion swaps the pair in one go: the secondary becomes the primary
-// with the old primary's witness, the old primary its secondary at the
-// next epoch with the pair's secret.
-func TestPromoteFirewalls(t *testing.T) {
-	each(t, func(t *testing.T, h harness) {
-		prim := h.add(t, models.Firewall{Name: "prim", HAWitness: models.HAWitnessExternal, HAWitnessSecret: "w"})
-		pid := prim
-		sec := h.add(t, models.Firewall{Name: "sec", HAPrimaryID: &pid, HASecret: "pair", HAEpoch: 4})
-		p, _ := h.store.Firewall(prim)
-		s, _ := h.store.Firewall(sec)
-		if err := h.store.PromoteFirewalls(s, p); err != nil {
-			t.Fatal(err)
-		}
-		np, _ := h.store.Firewall(prim)
-		ns, _ := h.store.Firewall(sec)
-		if ns.HAPrimaryID != nil || ns.HASecret != "" || ns.HAEpoch != 0 || ns.HAWitness != models.HAWitnessExternal || ns.HAWitnessSecret != "w" {
-			t.Errorf("new primary: %+v", ns)
-		}
-		if np.HAPrimaryID == nil || *np.HAPrimaryID != sec || np.HASecret != "pair" || np.HAEpoch != 5 || np.HAWitness != models.HAWitnessLocal || np.HAWitnessSecret != "" {
-			t.Errorf("new secondary: %+v", np)
-		}
-	})
-}
-
-func TestUsers(t *testing.T) {
-	each(t, func(t *testing.T, h harness) {
-		if _, err := h.store.User(9999); !errors.Is(err, ErrNotFound) {
-			t.Fatalf("a missing user: %v", err)
-		}
-		if _, err := h.store.UserNamed("nobody"); !errors.Is(err, ErrNotFound) {
-			t.Fatalf("a missing user by name: %v", err)
-		}
-		u := &models.User{Username: "ann", FullName: "Ann", Role: models.RoleViewer, PasswordHash: "x"}
-		if err := h.store.CreateUser(u); err != nil || u.ID == 0 {
-			t.Fatalf("create: %v", err)
-		}
-		if err := h.store.CreateUser(&models.User{Username: "ann", PasswordHash: "x", Role: models.RoleViewer}); err == nil {
-			t.Error("a second ann was made")
-		}
-		bob := &models.User{Username: "bob", PasswordHash: "x", Role: models.RoleAdmin}
-		if err := h.store.CreateUser(bob); err != nil {
-			t.Fatal(err)
-		}
-		list, _ := h.store.Users()
-		if len(list) < 2 || list[len(list)-2].Username != "ann" {
-			t.Errorf("users by name: %+v", list)
-		}
-
-		// A save of the configuration leaves the runtime values alone: a
-		// stale copy doesn't undo a step another request accepted.
-		stale, _ := h.store.User(u.ID)
-		if ok, err := h.store.UseTOTPStep(u.ID, 100); !ok || err != nil {
-			t.Fatalf("step: %v %v", ok, err)
-		}
-		stale.FullName = "Ann A"
-		if err := h.store.SaveUser(stale, false); err != nil {
-			t.Fatal(err)
-		}
-		if ok, _ := h.store.UseTOTPStep(u.ID, 100); ok {
-			t.Error("a save of the user let a step be used twice")
-		}
-		got, _ := h.store.User(u.ID)
-		if got.FullName != "Ann A" || got.TOTPLastStep != 100 || got.TokenVersion != 0 {
-			t.Errorf("after save: %+v", got)
-		}
-
-		// Revoking counts up, in the stored user and the one saved.
-		if err := h.store.SaveUser(got, true); err != nil || got.TokenVersion != 1 {
-			t.Fatalf("revoke: %v, version %d", err, got.TokenVersion)
-		}
-		if again, _ := h.store.User(u.ID); again.TokenVersion != 1 {
-			t.Errorf("stored version %d", again.TokenVersion)
-		}
-
-		if err := h.store.DeleteUser(u.ID); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := h.store.User(u.ID); !errors.Is(err, ErrNotFound) {
-			t.Errorf("after delete: %v", err)
-		}
-	})
-}
-
-// A TOTP step and a recovery code are each good once, even when two
-// requests present them together.
-func TestTOTPUsedOnce(t *testing.T) {
-	each(t, func(t *testing.T, h harness) {
-		u := &models.User{Username: "ann", PasswordHash: "x", Role: models.RoleViewer}
-		if err := h.store.CreateUser(u); err != nil {
-			t.Fatal(err)
-		}
-		if err := h.store.BeginTOTP(u, "SECRET"); err != nil || u.TOTPPending != "SECRET" {
-			t.Fatalf("begin: %v %q", err, u.TOTPPending)
-		}
-		if err := h.store.EnableTOTP(u, 50, `["a","b"]`); err != nil {
-			t.Fatal(err)
-		}
-		got, _ := h.store.User(u.ID)
-		if got.TOTPSecret != "SECRET" || got.TOTPPending != "" || got.TOTPLastStep != 50 || got.RecoveryCodes != `["a","b"]` {
-			t.Fatalf("enabled: %+v", got)
-		}
-		if ok, _ := h.store.UseTOTPStep(u.ID, 50); ok {
-			t.Error("the step of enabling was accepted again")
-		}
-		if ok, _ := h.store.UseTOTPStep(u.ID, 51); !ok {
-			t.Error("a newer step was refused")
-		}
-		if ok, _ := h.store.UseTOTPStep(u.ID, 51); ok {
-			t.Error("a step was accepted twice")
-		}
-
-		if ok, _ := h.store.UseRecoveryCode(u.ID, `["a","b"]`, `["b"]`); !ok {
-			t.Error("a recovery code was refused")
-		}
-		// The second request read the same list: refused.
-		if ok, _ := h.store.UseRecoveryCode(u.ID, `["a","b"]`, `["a"]`); ok {
-			t.Error("a recovery code was used twice")
-		}
-		got, _ = h.store.User(u.ID)
-		if got.RecoveryCodes != `["b"]` {
-			t.Errorf("codes: %q", got.RecoveryCodes)
-		}
-
-		if err := h.store.SetRecoveryCodes(got, `["c"]`); err != nil {
-			t.Fatal(err)
-		}
-		if err := h.store.ClearTOTP(got); err != nil {
-			t.Fatal(err)
-		}
-		got, _ = h.store.User(u.ID)
-		if got.TOTPSecret != "" || got.TOTPLastStep != 0 || got.RecoveryCodes != "" {
-			t.Errorf("cleared: %+v", got)
-		}
-	})
-}
-
 func TestPlanMemberships(t *testing.T) {
 	mappings := []models.LdapRoleMapping{
 		{GroupDn: "CN=ops,DC=x", RoleID: 1, Level: models.RoleViewer},
@@ -374,99 +353,6 @@ func TestPlanMemberships(t *testing.T) {
 	if len(p.Add) != 1 || p.Add[0].RoleID != 2 || p.Add[0].UserID != 7 || p.Add[0].Level != models.RoleViewer {
 		t.Errorf("added: %+v", p.Add)
 	}
-}
-
-func TestDirectoryUsers(t *testing.T) {
-	each(t, func(t *testing.T, h harness) {
-		role := &models.Role{Name: "ops"}
-		h.put(t, role)
-		h.put(t, &models.LdapRoleMapping{GroupDn: "CN=ops,DC=x", RoleID: role.ID, Level: models.RoleAdmin})
-
-		u, err := h.store.CopyDirectoryUser("carol", "corp", DirectoryUser{DisplayName: "Carol", Email: "c@x", Groups: []string{"CN=ops,DC=x"}})
-		if err != nil || u == nil || u.Role != models.RoleNone || u.PasswordHash != models.LDAPPassword || u.LdapServer != "corp" {
-			t.Fatalf("copy: %+v %v", u, err)
-		}
-		grants, _ := h.store.UserGrants(u.ID)
-		_ = grants // the role names no instance, so there is no grant yet
-		again, err := h.store.CopyDirectoryUser("carol", "corp", DirectoryUser{DisplayName: "Carol C"})
-		if err != nil || again == nil || again.FullName != "Carol C" {
-			t.Fatalf("copy again: %+v %v", again, err)
-		}
-		// A local user of that name is theirs: nothing is copied over it.
-		local := &models.User{Username: "dave", PasswordHash: "bcrypt", Role: models.RoleViewer}
-		if err := h.store.CreateUser(local); err != nil {
-			t.Fatal(err)
-		}
-		if got, err := h.store.CopyDirectoryUser("dave", "corp", DirectoryUser{DisplayName: "Dave"}); err != nil || got != nil {
-			t.Fatalf("copy over a local user: %+v %v", got, err)
-		}
-		if err := h.store.UpdateDirectoryUser(again, "other", DirectoryUser{Email: "new@x"}); err != nil {
-			t.Fatal(err)
-		}
-		if got, _ := h.store.User(u.ID); got.LdapServer != "other" || got.Email != "new@x" || got.FullName != "Carol C" {
-			t.Errorf("updated: %+v", got)
-		}
-	})
-}
-
-func TestRoles(t *testing.T) {
-	each(t, func(t *testing.T, h harness) {
-		ann := &models.User{Username: "ann", PasswordHash: "x", Role: models.RoleViewer}
-		if err := h.store.CreateUser(ann); err != nil {
-			t.Fatal(err)
-		}
-		shop := "shop"
-		own := &models.Role{Name: "vf-shop", Instance: &shop}
-		if err := h.store.SaveRole(own, []models.RoleMember{{UserID: ann.ID, Level: models.RoleAdmin}}, []string{"ignored"}); err != nil {
-			t.Fatal(err)
-		}
-		// An instance's role grants its instance, whatever is asked.
-		if !slices.Equal(own.Instances, []string{"shop"}) || len(own.Members) != 1 {
-			t.Errorf("own role: %+v", own)
-		}
-		byHand := &models.Role{Name: "ops"}
-		if err := h.store.SaveRole(byHand, nil, []string{"a", "b"}); err != nil || byHand.ID == 0 {
-			t.Fatalf("by hand: %v", err)
-		}
-		// Updating replaces members and grants.
-		byHand.Description = "operators"
-		if err := h.store.SaveRole(byHand, []models.RoleMember{{UserID: ann.ID, Level: models.RoleViewer}}, []string{"b"}); err != nil {
-			t.Fatal(err)
-		}
-		roles, err := h.store.Roles()
-		if err != nil || len(roles) != 2 || roles[0].Name != "vf-shop" || roles[1].Name != "ops" {
-			t.Fatalf("roles (instance roles first): %v %+v", err, roles)
-		}
-		if !slices.Equal(roles[1].Instances, []string{"b"}) || len(roles[1].Members) != 1 || roles[1].Description != "operators" {
-			t.Errorf("ops: %+v", roles[1])
-		}
-		grants, _ := h.store.UserGrants(ann.ID)
-		if len(grants) != 2 {
-			t.Errorf("grants: %+v", grants)
-		}
-		if err := h.store.SaveRole(&models.Role{Name: "bad"}, []models.RoleMember{{UserID: 9999, Level: models.RoleViewer}}, nil); !errors.Is(err, ErrNoSuchUser) {
-			t.Errorf("a member that is no user: %v", err)
-		}
-		if members, _ := h.store.RoleMembers(); len(members) != 2 {
-			t.Errorf("members after the refused save: %+v", members)
-		}
-
-		// The roles of instances gone from the configuration go, hand-made
-		// roles stay (their grants of a gone instance go).
-		if err := h.store.DropInstanceRoles([]string{"b"}); err != nil {
-			t.Fatal(err)
-		}
-		roles, _ = h.store.Roles()
-		if len(roles) != 1 || roles[0].Name != "ops" || !slices.Equal(roles[0].Instances, []string{"b"}) {
-			t.Errorf("after drop: %+v", roles)
-		}
-		if err := h.store.DeleteRole(byHand.ID); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := h.store.Role(byHand.ID); !errors.Is(err, ErrNotFound) {
-			t.Errorf("after delete: %v", err)
-		}
-	})
 }
 
 // treeOf is a tree with the named instances.
@@ -490,137 +376,12 @@ func idOf(t *testing.T, ids sqlmap.IDs, path string) int64 {
 	return id
 }
 
-// The ids and the counters are in files next to the database: a new
-// Store on the same directory sees them, and the first one seeds them from
-// the old tables.
-func TestStateFiles(t *testing.T) {
-	dir := t.TempDir()
-	db, err := dbmigrate.Open(filepath.Join(dir, "db.sqlite"), &gorm.Config{Logger: logger.Discard})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := dbmigrate.Up(db); err != nil {
-		t.Fatal(err)
-	}
-	// An installation from before the files: its ids and counters are in
-	// tables.
-	for _, q := range []string{
-		"INSERT INTO config_ids (path, tbl, id) VALUES ('/instance[name=main]', 'instances', 7)",
-		"INSERT OR IGNORE INTO settings (id) VALUES (1)",
-		"UPDATE settings SET last_commit = 5, web_certificate_id = 3 WHERE id = 1",
-	} {
-		if err := db.Exec(q).Error; err != nil {
-			t.Fatal(err)
-		}
-	}
-	g := NewGORM(db, dir)
-	ids, err := g.IDs()
-	if err != nil || idOf(t, ids, "/instance[name=main]") != 7 {
-		t.Fatalf("seeded ids: %v", err)
-	}
-	own, _ := g.Own()
-	if own.LastCommit != 5 || own.WebCertificateID == nil || *own.WebCertificateID != 3 {
-		t.Fatalf("seeded state: %+v", own)
-	}
-	for _, f := range []string{"entry-ids.json", "state.json"} {
-		if _, err := os.Stat(filepath.Join(dir, f)); err != nil {
-			t.Errorf("%s was not written: %v", f, err)
-		}
-	}
-
-	// The tables no longer matter: the files do.
-	db.Exec("DELETE FROM config_ids")
-	db.Exec("UPDATE settings SET last_commit = 0")
-	if err := g.SetLastCommit(9); err != nil {
-		t.Fatal(err)
-	}
-	m, err := confview.Mapping()
-	if err != nil {
-		t.Fatal(err)
-	}
-	tree := treeOf(t, "main", "shop")
-	if err := g.FollowChange(m, tree); err != nil {
-		t.Fatal(err)
-	}
-	again := NewGORM(db, dir)
-	ids, _ = again.IDs()
-	if idOf(t, ids, "/instance[name=main]") != 7 {
-		t.Error("main lost its id")
-	}
-	shop := idOf(t, ids, "/instance[name=shop]")
-	if shop == 7 || shop == 0 {
-		t.Errorf("shop's id %d", shop)
-	}
-	if own, _ := again.Own(); own.LastCommit != 9 {
-		t.Errorf("counter after reopening: %+v", own)
-	}
-
-	// The counter is the highest given anywhere: a deployment, or a kept
-	// commit's file, beyond the file's own.
-	fw, _ := g.Firewalls()
-	again.RecordDeployment(&models.Deployment{FirewallID: fw[0].ID, CommitID: 12, Status: "applied"})
-	if own, _ := again.Own(); own.LastCommit != 12 {
-		t.Errorf("counter with a deployment of 12: %+v", own)
-	}
-	os.MkdirAll(filepath.Join(dir, "deployed"), 0o700)
-	os.WriteFile(filepath.Join(dir, "deployed", "15-config.json"), []byte("{}"), 0o600)
-	if own, _ := again.Own(); own.LastCommit != 15 {
-		t.Errorf("counter with a commit file of 15: %+v", own)
-	}
-
-	// A rename keeps the entry's id, and one deleted keeps its id for the
-	// same path.
-	renamed := treeOf(t, "main", "shop")
-	if err := renamed.Rename(datastore.Path{{Name: "instance", Keys: []string{"shop"}}}, []string{"store"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := again.FollowChange(m, renamed); err != nil {
-		t.Fatal(err)
-	}
-	ids, _ = again.IDs()
-	if idOf(t, ids, "/instance[name=store]") != shop {
-		t.Errorf("the renamed instance got another id")
-	}
-
-	// A copy carries the ids; a copy without them takes the database's table.
-	files, _ := again.ExportState(false)
-	other := NewGORM(db, t.TempDir())
-	if err := other.ImportState(files); err != nil {
-		t.Fatal(err)
-	}
-	oids, _ := other.IDs()
-	if idOf(t, oids, "/instance[name=store]") != shop {
-		t.Error("the copy's ids were not taken")
-	}
-	db.Exec("INSERT INTO config_ids (path, tbl, id) VALUES ('/instance[name=old]', 'instances', 4)")
-	if err := other.ImportState(map[string][]byte{}); err != nil {
-		t.Fatal(err)
-	}
-	oids, _ = other.IDs()
-	if idOf(t, oids, "/instance[name=old]") != 4 {
-		t.Error("a copy with no ids did not take the table's")
-	}
-}
-
-func openIn(t *testing.T, dir string) (*GORM, *gorm.DB) {
-	t.Helper()
-	db, err := dbmigrate.Open(filepath.Join(dir, "db.sqlite"), &gorm.Config{Logger: logger.Discard})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := dbmigrate.Up(db); err != nil {
-		t.Fatal(err)
-	}
-	return NewGORM(db, dir), db
-}
-
 // The deployments are a log in a file: a new Store on the directory has
 // them, a change of status is a line of its own, a last line cut short by a
 // crash is ignored, and pruning keeps what a firewall runs.
 func TestDeploymentLog(t *testing.T) {
 	dir := t.TempDir()
-	g, db := openIn(t, dir)
-	fw := g.firewallOrFail(t)
+	g := openIn(t, dir)
 	add := func(commit int64, status string) *models.Deployment {
 		d := &models.Deployment{FirewallID: fw, CommitID: commit, Status: status, Document: `{"secret":"redacted"}`, DocHash: "h", Instances: models.StringList{"a"}}
 		if err := g.RecordDeployment(d); err != nil {
@@ -636,7 +397,7 @@ func TestDeploymentLog(t *testing.T) {
 	}
 	add(3, "failed")
 
-	again, _ := NewGORM(db, dir), 0
+	again := openIn(t, dir)
 	got, _ := again.LiveDeployment(fw)
 	if got == nil || got.CommitID != 2 || got.Status != "confirmed" || got.Message != "ok" || got.Document != `{"secret":"redacted"}` || got.DocHash != "h" || len(got.Instances) != 1 {
 		t.Fatalf("reread: %+v", got)
@@ -649,7 +410,7 @@ func TestDeploymentLog(t *testing.T) {
 	f, _ := os.OpenFile(filepath.Join(dir, "deployments.jsonl"), os.O_APPEND|os.O_WRONLY, 0o600)
 	f.WriteString(`{"add": {"id": 99, "commit_id"`)
 	f.Close()
-	cut := NewGORM(db, dir)
+	cut := openIn(t, dir)
 	if recent, _ := cut.RecentDeployments(0); len(recent) != 4 {
 		t.Errorf("a cut line changed the log: %d", len(recent))
 	}
@@ -679,72 +440,9 @@ func TestDeploymentLog(t *testing.T) {
 	if recent, _ = cut.RecentDeployments(0); len(recent) != 2 || recent[0].CommitID != 5 || recent[1].CommitID != 4 {
 		t.Errorf("after pruning by age: %+v", recent)
 	}
-	reopened := NewGORM(db, dir)
+	reopened := openIn(t, dir)
 	if recent, _ = reopened.RecentDeployments(0); len(recent) != 2 {
 		t.Errorf("pruning was not written: %+v", recent)
-	}
-}
-
-func (g *GORM) firewallOrFail(t *testing.T) uint {
-	t.Helper()
-	fws, err := g.Firewalls()
-	if err != nil || len(fws) == 0 {
-		g.EnsureFirewall("fw")
-		fws, err = g.Firewalls()
-	}
-	if err != nil || len(fws) == 0 {
-		t.Fatalf("no firewall: %v", err)
-	}
-	return fws[0].ID
-}
-
-// An installation from before the log has its deployments and known
-// interfaces in tables: the first use takes them, and the replica's copy
-// carries both files.
-func TestDeploymentLogSeedAndReplica(t *testing.T) {
-	dir := t.TempDir()
-	g, db := openIn(t, dir)
-	fw := g.firewallOrFail(t)
-	db.Create(&models.Deployment{FirewallID: fw, CommitID: 3, Generation: 3, Status: "applied", Document: "{}"})
-	db.Create(&models.KnownInterface{FirewallID: fw, Name: "eth0"})
-	db.Create(&models.KnownInterface{FirewallID: fw, Name: "eth1"})
-	g = NewGORM(db, dir)
-	if d, _ := g.LiveDeployment(fw); d == nil || d.CommitID != 3 {
-		t.Fatalf("seeded deployment: %+v", d)
-	}
-	if n, _ := g.KnownNICs(fw); !slices.Equal(n, []string{"eth0", "eth1"}) {
-		t.Fatalf("seeded NICs: %v", n)
-	}
-	// What is in the files wins from now on.
-	db.Exec("DELETE FROM deployments")
-	db.Exec("DELETE FROM known_interfaces")
-	if d, _ := NewGORM(db, dir).LiveDeployment(fw); d == nil {
-		t.Error("the table was read again")
-	}
-
-	backup, _ := g.ExportState(false)
-	if _, ok := backup["deployments.jsonl"]; ok {
-		t.Error("a backup carries the deployments")
-	}
-	replica, _ := g.ExportState(true)
-	other, odb := openIn(t, t.TempDir())
-	ofw := other.firewallOrFail(t)
-	_ = odb
-	if err := other.ImportState(replica); err != nil {
-		t.Fatal(err)
-	}
-	if d, _ := other.LiveDeployment(fw); d == nil || d.CommitID != 3 {
-		t.Errorf("the copy's deployment: %+v (firewall %d)", d, ofw)
-	}
-	if n, _ := other.KnownNICs(fw); len(n) != 2 {
-		t.Errorf("the copy's NICs: %v", n)
-	}
-	// A backup's import leaves the installation's own history.
-	if err := other.ImportState(backup); err != nil {
-		t.Fatal(err)
-	}
-	if d, _ := other.LiveDeployment(fw); d == nil {
-		t.Error("a backup replaced the deployments")
 	}
 }
 
@@ -753,8 +451,7 @@ func TestDeploymentLogSeedAndReplica(t *testing.T) {
 // must leave it.
 func TestPruneKeepsTheRollbackTarget(t *testing.T) {
 	dir := t.TempDir()
-	g, _ := openIn(t, dir)
-	fw := g.firewallOrFail(t)
+	g := openIn(t, dir)
 	old := &models.Deployment{FirewallID: fw, CommitID: 1, Status: "confirmed"}
 	g.RecordDeployment(old)
 	g.files.mu.Lock()
@@ -790,9 +487,8 @@ func TestPruneKeepsTheRollbackTarget(t *testing.T) {
 // neither gives an id or a number the other has given.
 func TestTwoStoresOnOneDirectory(t *testing.T) {
 	dir := t.TempDir()
-	a, db := openIn(t, dir)
-	b := NewGORM(db, dir)
-	fw := a.firewallOrFail(t)
+	a := openIn(t, dir)
+	b := openIn(t, dir)
 	m, err := confview.Mapping()
 	if err != nil {
 		t.Fatal(err)
@@ -850,73 +546,5 @@ func TestTwoStoresOnOneDirectory(t *testing.T) {
 	a.RememberNICs(fw, []string{"eth8"})
 	if n, _ := b.KnownNICs(fw); len(n) != 2 {
 		t.Errorf("known interfaces: %v", n)
-	}
-}
-
-// The users' runtime values are in sessions.json, not the users' rows: an
-// installation from before has them in the table and they are taken from
-// there, a save of a user leaves them alone, a deleted user's version stays,
-// and the replica's copy merges them by maximum.
-func TestSessions(t *testing.T) {
-	dir := t.TempDir()
-	g, db := openIn(t, dir)
-	u := &models.User{Username: "ann", PasswordHash: "x", Role: models.RoleViewer}
-	if err := g.CreateUser(u); err != nil {
-		t.Fatal(err)
-	}
-	// From before: the table's columns.
-	db.Exec("UPDATE users SET token_version = 4, totp_last_step = 77, totp_pending = 'PEND' WHERE id = ?", u.ID)
-	g = NewGORM(db, dir)
-	got, _ := g.User(u.ID)
-	if got.TokenVersion != 4 || got.TOTPLastStep != 77 || got.TOTPPending != "PEND" {
-		t.Fatalf("seeded: %+v", got)
-	}
-	db.Exec("UPDATE users SET token_version = 0, totp_last_step = 0, totp_pending = ''")
-	if again, _ := NewGORM(db, dir).User(u.ID); again.TokenVersion != 4 {
-		t.Errorf("the table was read again: %+v", again)
-	}
-
-	// A save leaves the values; a revoke raises the version in the user too.
-	got.FullName = "Ann"
-	if err := g.SaveUser(got, true); err != nil || got.TokenVersion != 5 {
-		t.Fatalf("revoke: %v %d", err, got.TokenVersion)
-	}
-	stale := *got
-	stale.TokenVersion = 0
-	if err := g.SaveUser(&stale, false); err != nil {
-		t.Fatal(err)
-	}
-	if now, _ := g.User(u.ID); now.TokenVersion != 5 || now.TOTPLastStep != 77 {
-		t.Errorf("a save changed the runtime values: %+v", now)
-	}
-
-	// A deleted user's version stays above the sessions it ended.
-	if err := g.DeleteUser(u.ID); err != nil {
-		t.Fatal(err)
-	}
-	reopened := NewGORM(db, dir)
-	ghost := &models.User{Base: models.Base{ID: u.ID}}
-	reopened.withRuntime(ghost)
-	if ghost.TokenVersion != 6 {
-		t.Errorf("version after the delete: %d", ghost.TokenVersion)
-	}
-
-	// The copy the replica takes: each value the larger.
-	other, _ := openIn(t, t.TempDir())
-	other.changeSession(u.ID, func(r *sessionRec) bool { r.TokenVersion, r.TOTPLastStep = 9, 5; return true })
-	files, _ := g.ExportState(true)
-	if _, ok := files["sessions.json"]; !ok {
-		t.Fatal("the replica's copy lacks the sessions")
-	}
-	if backup, _ := g.ExportState(false); backup["sessions.json"] != nil {
-		t.Error("a backup carries the sessions")
-	}
-	if err := other.ImportState(files); err != nil {
-		t.Fatal(err)
-	}
-	merged := &models.User{Base: models.Base{ID: u.ID}}
-	other.withRuntime(merged)
-	if merged.TokenVersion != 9 || merged.TOTPLastStep != 77 {
-		t.Errorf("merged: %+v", merged)
 	}
 }

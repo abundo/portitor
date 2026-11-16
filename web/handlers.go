@@ -82,7 +82,7 @@ func zoneAddresses(v *confview.View, instanceID uint) []ipam.RecordAddress {
 }
 
 // handleAutoRules lists the input rules the agent adds for an instance's
-// (?instance=<name>) services (DHCP, DNS, WireGuard), rendered from the current database. A
+// (?instance=<name>) services (DHCP, DNS, WireGuard), rendered from the candidate. A
 // configuration with problems still lists what it can. For the default
 // instance it also asks the agent for its anti-lockout rule, which comes
 // from agent.yaml; an unreachable agent just leaves it out.
@@ -570,7 +570,7 @@ func (s *Server) handleCreateUser(c *echo.Context) error {
 		return errJSON(c, http.StatusBadRequest, err.Error())
 	}
 	if err := s.rec.CreateUser(&u); err != nil {
-		return dbError(c, err)
+		return writeError(c, err)
 	}
 	return c.JSON(http.StatusCreated, u)
 }

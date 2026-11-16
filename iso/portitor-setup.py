@@ -14,7 +14,7 @@ or LAN, offers, which the firewall then follows as its lease changes), a passwor
   - writes /etc/resolv.conf (the one from the installation may be unreachable
     now; once the configuration is deployed the agent keeps it, from these
     servers or the DHCP lease's, see `portitor-config bootstrap --dns`),
-  - creates the SQLite database and writes /etc/portitor/config.yaml, with a
+  - creates the data directory and writes /etc/portitor/config.yaml, with a
     self-signed certificate for the GUI on port 443 (portitor-config),
   - creates the GUI user portitor, and sets the console user's password,
   - sets the agent up on 127.0.0.1 (portitor-config runs on the firewall),
@@ -75,7 +75,7 @@ HA pairs (docs/ha.md):
              addresses until the pair's first commit, the agent listens on
              every address, and portitor-config gets its own agent (set-agent)
              with no bootstrap: the primary's configuration replaces its
-             database. It ends by showing the secondary string (again: `sudo
+             own. It ends by showing the secondary string (again: `sudo
              portitor-setup --show-join`), which holds the agent's token.
 
 Run again (`sudo portitor-setup`) after it has finished, it changes the
@@ -83,7 +83,7 @@ network: the LAN and WAN interfaces (swapped, too) and addresses, the
 LAN's DHCP server (turned on or its range changed; off leaves it as it is),
 the default gateway, the DNS servers, the time zone and the keyboard layout, with the last answers
 (SETUP_STATE) as defaults; a password is optional there. It leaves the
-database, the agent and every other interface alone, runs `portitor-config
+configuration's files, the agent and every other interface alone, runs `portitor-config
 bootstrap --reconfigure`, and makes a new GUI certificate when the LAN
 address changes (a portitor-web that serves the firewall then needs its new
 fingerprint).
@@ -173,8 +173,8 @@ PUBLIC_DNS = "1.1.1.1 8.8.8.8"
 CONSOLE_USER = "portitor"
 WEB_GROUP = "portitor"
 # The service user of portitor-config and portitor-web; it runs every
-# portitor-config command, so the database files stay writable for the
-# service.
+# portitor-config command, so the data directory's files stay writable for
+# the service.
 WEB_USER = "portitor"
 CONFIG_DB_DIR = Path("/var/lib/portitor-config")
 AGENT_TOKEN = ETC / "agent.token"
@@ -715,7 +715,7 @@ WantedBy=multi-user.target
 
 def step_own_agent(a: dict) -> None:
     """Secondary role: portitor-config's own firewall, its agent, without a
-    bootstrap: the primary's configuration replaces this database once the
+    bootstrap: the primary's configuration replaces this one once the
     pair is committed."""
     run(config("set-agent", "--url", f"https://127.0.0.1:{AGENT_PORT}", "--token-file", "-",
                "--fingerprint", a["fingerprint"]), stdin=AGENT_TOKEN.read_text(encoding="utf-8"))

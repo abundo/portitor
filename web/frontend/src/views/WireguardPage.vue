@@ -188,7 +188,7 @@ const live = computed(() => {
     iface: inst?.interfaces?.find((i) => i.name === name),
   }
 })
-// The configured peers by public key, with the live ones the database
+// The configured peers by public key, with the live ones the configuration
 // doesn't know (shown with their key only).
 const peerRows = computed(() => {
   const livePeers = live.value.wg?.peers ?? []

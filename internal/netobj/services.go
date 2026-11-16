@@ -56,7 +56,7 @@ func named(name string, s models.Service) models.Service {
 }
 
 // Predefined are the services every installation has, by name. They are
-// not stored in the database; rules name them like custom services.
+// not stored in the configuration; rules name them like custom services.
 var Predefined = []models.Service{
 	named("all", ipProto(0, "Any protocol")),
 	named("all-tcp", ports("Any TCP port", tcp(1, 65535))),

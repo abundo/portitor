@@ -24,7 +24,6 @@ import (
 	"github.com/coder/websocket"
 	"github.com/labstack/echo/v5"
 	"github.com/labstack/echo/v5/middleware"
-	"gorm.io/gorm"
 
 	"github.com/abundo/portitor/internal/agentapi"
 	"github.com/abundo/portitor/internal/agentclient"
@@ -90,12 +89,6 @@ type agentAPI interface {
 
 type Server struct {
 	cfg *Config
-	// db is the database as it is outside the records (records.go): the
-	// generic CRUD of resource[T] (firewalls, the directory's servers and
-	// mappings), whose hooks take a *gorm.DB, and the database file's own
-	// operations (backup, restore, snapshot, the replica's copy). Nothing
-	// else uses it; phases 3 and 5 of dev/design-no-database.md remove it.
-	db *gorm.DB
 	// rec is what portitor-config keeps besides the configuration tree.
 	rec    records.Store
 	access accessCache
@@ -114,7 +107,7 @@ type Server struct {
 	// witness is the HA pairs' third vote (witness.go).
 	witness *witness
 	// role is the host's place in its HA pair, and replMu keeps a copy of
-	// the primary's database and a promotion apart (replica.go).
+	// the primary's files and a promotion apart (replica.go).
 	role   hostRole
 	replMu sync.Mutex
 	// localHA asks this host's agent for its place in the pair
@@ -125,14 +118,13 @@ type Server struct {
 	viewCache viewCache // the candidate as rows (confview.go)
 }
 
-func NewServer(cfg *Config, db *gorm.DB) *Server {
+func NewServer(cfg *Config) *Server {
 	s := &Server{
 		cfg:    cfg,
-		db:     db,
 		jwtKey: []byte(cfg.JWTSecret),
 		static: staticFS(),
 	}
-	s.rec = &treeRecords{Store: records.NewGORM(db, configDir(cfg)), s: s}
+	s.rec = &treeRecords{Kept: records.NewFiles(configDir(cfg)), s: s}
 	s.newAgent = func(f *models.Firewall) (agentAPI, error) {
 		return agentclient.New(s.agentURL(f), f.AgentToken, f.AgentFingerprint)
 	}
@@ -458,8 +450,8 @@ func (s *Server) settingsOf(tree *datastore.Tree) (*models.Settings, error) {
 	return &st, nil
 }
 
-// configDir is the directory of the database, where the candidate and the
-// other files of the configuration are; "" for a database in memory.
+// configDir is the data directory, where the candidate and the other files
+// of the configuration are; "" for none (in memory).
 func configDir(cfg *Config) string {
 	return cfg.Dir()
 }

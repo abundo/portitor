@@ -38,7 +38,7 @@ func SetAgent(s *Server, url, token, fingerprint string) error {
 }
 
 // ImportBundleFile adds the bundle in path as a virtual firewall named
-// name on the first firewall. Into a database without instances (a new
+// name on the first firewall. Into a configuration without instances (a new
 // portitor-config, before its first start) it becomes the host.
 func ImportBundleFile(ctx context.Context, s *Server, path, name string) ([]string, error) {
 	data, err := os.ReadFile(path)

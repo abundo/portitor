@@ -482,7 +482,7 @@ func (s *Server) handleConfigDiscard(c *echo.Context) error {
 // rules, routes, DNS records, ...) its id when the body has none: one
 // above every id the list has had, here or in running, and never one given
 // before (a rule's id marks its connections), from the high-water marks in
-// ids.json next to the database. The store's lock is held.
+// ids.json in the data directory. The store's lock is held.
 func (s *Server) assignID(work *datastore.Tree, p datastore.Path, body []byte) ([]byte, error) {
 	ss, err := datastore.ResolveAll(work.Root.S, p)
 	if err != nil || len(ss) == 0 || len(p) == 0 || p[len(p)-1].Keys != nil {

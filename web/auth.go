@@ -117,7 +117,7 @@ func (s *Server) requireAuth(next echo.HandlerFunc) echo.HandlerFunc {
 }
 
 // sessionKey signs the sessions. On a host of an HA pair it is made from
-// the pair's secret, which both hosts' databases hold (the secondary's a
+// the pair's secret, which both hosts' configurations hold (the secondary's a
 // copy of the primary's, users included), so a session of one is one of
 // the other; pair is that pair's firewall rows. Otherwise it is
 // jwt_secret.
@@ -451,7 +451,7 @@ func (s *Server) handleUpdateMe(c *echo.Context) error {
 		u.DateFormat = *req.DateFormat
 	}
 	if err := s.rec.SaveUser(u, false); err != nil {
-		return dbError(c, err)
+		return writeError(c, err)
 	}
 	*cur = *u
 	return s.me(c, cur)

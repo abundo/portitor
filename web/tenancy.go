@@ -22,13 +22,13 @@ import (
 	"github.com/abundo/portitor/models"
 )
 
-// Per-instance deploy. A global admin deploys the whole database. An
-// instance admin deploys their instances from the database and everything
+// Per-instance deploy. A global admin deploys the whole candidate. An
+// instance admin deploys their instances from the candidate and everything
 // else (other instances, links, IP lists, tasks) as the firewall runs it,
 // so they never push another tenant's unfinished changes. "As the firewall
 // runs it" is the live deployment's document, kept unredacted next to the
-// snapshots (<db dir>/deployed/<commit>-<firewall id>.json, 0600, like the
-// database).
+// snapshots (<data dir>/deployed/<commit>-<firewall id>.json, 0600, like the
+// other files).
 
 // docPath is where a commit keeps a firewall's document. A commit from
 // before firewalls kept it at legacyDocPath, as the first firewall's.
@@ -64,7 +64,7 @@ func (s *Server) keepDocument(doc *fwconfig.Document, commit int64, firewallID u
 var errNoLiveDocument = bad("a global admin has to deploy the whole configuration once before a virtual firewall admin can deploy")
 
 // liveDocument is the document the firewall runs. Deployments from before
-// documents were kept fall back to their database snapshot.
+// documents were kept fall back to their commit's snapshot.
 func (s *Server) liveDocument(firewallID uint) (*fwconfig.Document, error) {
 	live, err := s.liveDeployment(firewallID)
 	if err != nil {
@@ -195,7 +195,7 @@ func (s *Server) mayFinish(a *access, dep *models.Deployment) bool {
 }
 
 // instanceChanges tells whether the named instances differ between the
-// database and the live document, and how many problems they have.
+// candidate and the live document, and how many problems they have.
 func (s *Server) instanceChanges(in builder.Input, names map[string]bool) (changed bool, problems int, err error) {
 	part, err := builder.BuildInstances(in, 0, names)
 	var ve *fwconfig.ValidationError

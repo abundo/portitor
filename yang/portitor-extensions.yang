@@ -12,6 +12,7 @@ module portitor-extensions {
      portitor-config's code of before the tree reads it as (confview), with
      their ids; there are no tables behind them.";
 
+  revision 2026-11-16 { description "px:external removed: nothing is outside the tree."; }
   revision 2026-11-08 { description "First version."; }
 
   extension secret {
@@ -44,12 +45,7 @@ module portitor-extensions {
     argument name;
     description
       "The leaf's column, when it holds a row id: of the entry the leafref
-       points at, or of the px:external row.";
-  }
-
-  extension external {
-    argument table;
-    description "The leaf names a row of this table, which is not configuration (firewalls, roles).";
+       points at.";
   }
 
   extension null-value {

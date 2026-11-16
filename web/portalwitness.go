@@ -180,7 +180,7 @@ func (s *Server) handleWitnessString(c *echo.Context) error {
 	}
 	str, err := s.witnessString(fw)
 	if err != nil {
-		return dbError(c, err)
+		return writeError(c, err)
 	}
 	return c.JSON(http.StatusOK, map[string]string{"witness": str})
 }

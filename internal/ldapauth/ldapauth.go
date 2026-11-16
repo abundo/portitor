@@ -6,7 +6,7 @@
 // copy of the user needs (name, email, groups), and a browser of the
 // server's tree for the Directory page. portitor-config uses it for GUI
 // logins, the agent for OpenVPN's (fwconfig.Directory). It knows nothing
-// of the database: callers hand it a Config.
+// of where users are kept: callers hand it a Config.
 package ldapauth
 
 import (

@@ -7,7 +7,7 @@ import { api } from '@/api'
 // Agent status, polled every 30 s, every 5 s while a page showing it is open
 // and visible (watch/unwatch), and every 3 s while a change awaits confirmation so the
 // banner can count down and the rollback is noticed. changes says whether
-// the database differs from what is deployed. rates keeps each interface's
+// the configuration differs from what is deployed. rates keeps each interface's
 // receive and send rate (bytes/s) over the last 5 minutes, from the counters'
 // differences between polls, by "instance/interface"; cpu each firewall's CPU
 // use (0..1) over the same window, from its busy and total jiffies, and its

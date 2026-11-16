@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"strings"
 	"testing"
 
@@ -18,10 +17,6 @@ import (
 
 	"github.com/abundo/portitor/internal/datastore"
 
-	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
-
-	"github.com/abundo/portitor/internal/dbmigrate"
 	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/models"
 )
@@ -53,7 +48,7 @@ func builtDocs(t *testing.T, s *Server) []byte {
 func restart(t *testing.T, env *testEnv, dir string) *Server {
 	t.Helper()
 	cfg := *env.srv.cfg
-	srv := NewServer(&cfg, env.srv.db)
+	srv := NewServer(&cfg)
 	srv.newAgent = env.srv.newAgent
 	srv.static = env.srv.static
 	return srv
@@ -100,9 +95,10 @@ func TestFilesSurviveARestart(t *testing.T) {
 	}
 }
 
-// HEAD_DATA is the directory of an installation made by an earlier release
-// (the database and the files next to it, with built.json: the documents
-// that release would send). This version opens it and builds the same.
+// HEAD_DATA is the data directory of an installation made by an earlier
+// release (1.0.0 or later: the files, with built.json, the documents that
+// release would send, and access.json and firewalls.json, what it had). This
+// version opens it and builds the same; testdata/release-1.0.0 is one.
 // openEarlier is the data of an earlier release in src, copied and opened.
 func openEarlier(t *testing.T, src string) (string, *Server) {
 	t.Helper()
@@ -126,14 +122,7 @@ func openEarlier(t *testing.T, src string) (string, *Server) {
 			t.Fatal(err)
 		}
 	}
-	db, err := dbmigrate.Open(filepath.Join(dir, "portitor.db"), &gorm.Config{Logger: logger.Discard})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := dbmigrate.Up(db); err != nil {
-		t.Fatal(err)
-	}
-	srv := NewServer(&Config{JWTSecret: "s", Dev: true, DB: DBConfig{Path: filepath.Join(dir, "portitor.db")}}, db)
+	srv := NewServer(&Config{JWTSecret: "s", Dev: true, DB: DBConfig{Path: filepath.Join(dir, "portitor.db")}})
 	if err := srv.Ready(); err != nil { // as the start of the daemon does
 		t.Fatal(err)
 	}
@@ -432,55 +421,6 @@ func TestOpensAnEarlierReleasesFirewalls(t *testing.T) {
 	adoptedAccess(t, dir, srv)
 }
 
-// A secondary updated before its primary takes the database file an earlier
-// release's primary gives (HEAD_FWDATA/replica.db): its users, roles, directory
-// and firewalls are adopted into the tree, with the ids they had.
-func TestReplicaTakesAnEarlierPrimarysCopy(t *testing.T) {
-	src := os.Getenv("HEAD_FWDATA")
-	if src == "" {
-		t.Skip("HEAD_FWDATA not set")
-	}
-	data, err := os.ReadFile(filepath.Join(src, "replica.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	env := newEnv(t)
-	if err := env.srv.takeLegacyCopy(context.Background(), data); err != nil {
-		t.Fatal(err)
-	}
-	for _, name := range []string{"admin", "alice", "bob"} {
-		if _, err := env.srv.rec.UserNamed(name); err != nil {
-			t.Errorf("user %s: %v", name, err)
-		}
-	}
-	if _, err := env.srv.rec.UserNamed("gone"); err == nil {
-		t.Error("a user deleted on the primary is there")
-	}
-	roles, _ := env.srv.rec.Roles()
-	if !slices.ContainsFunc(roles, func(r models.Role) bool { return r.Name == "vpn" && len(r.Members) == 1 }) {
-		t.Errorf("roles: %+v", roles)
-	}
-	dir, _ := os.ReadFile(filepath.Join(src, "firewalls.json"))
-	var was struct {
-		Firewalls []struct {
-			ID   uint
-			Name string
-		}
-	}
-	if err := json.Unmarshal(dir, &was); err != nil {
-		t.Fatal(err)
-	}
-	fws, _ := env.srv.rec.Firewalls()
-	if len(fws) != len(was.Firewalls) {
-		t.Fatalf("firewalls: %+v", fws)
-	}
-	for i, w := range was.Firewalls {
-		if fws[i].ID != w.ID || fws[i].Name != w.Name {
-			t.Errorf("firewall %d: %+v, was %+v", i, fws[i], w)
-		}
-	}
-}
-
 // A backup an earlier release made (HEAD_FWDATA/backup.db.age) is a database
 // file: this release says to restore it with that one.
 func TestAnEarlierReleasesBackupIsRefused(t *testing.T) {
@@ -500,14 +440,14 @@ func TestAnEarlierReleasesBackupIsRefused(t *testing.T) {
 }
 
 // Ready makes every file and marks the directory, whatever has been asked
-// before: the next release has no tables to make a missing file from.
+// before.
 func TestReadyMakesEveryFile(t *testing.T) {
 	env := newEnv(t)
 	dir := env.srv.cfg.Dir()
 	if err := env.srv.Ready(); err != nil {
 		t.Fatal(err)
 	}
-	for _, f := range []string{"candidate.json", "global.json", "entry-ids.json", "state.json", "deployments.jsonl", "known-nics.json", "sessions.json", "adoptions.json", "layout.json"} {
+	for _, f := range []string{"candidate.json", "global.json", "entry-ids.json", "state.json", "deployments.jsonl", "known-nics.json", "sessions.json", "layout.json"} {
 		if _, err := os.Stat(filepath.Join(dir, f)); err != nil {
 			t.Errorf("%s: %v", f, err)
 		}
@@ -515,5 +455,97 @@ func TestReadyMakesEveryFile(t *testing.T) {
 	b, _ := os.ReadFile(filepath.Join(dir, "layout.json"))
 	if !strings.Contains(string(b), `"layout": 2`) {
 		t.Errorf("layout.json %q", b)
+	}
+}
+
+// The data directory 1.0.0 left (testdata/release-1.0.0, made by that release
+// with a commit, a second firewall, a directory server and a change pending;
+// no database): this release opens it with no database and builds the same
+// documents, the admin logs in, and the pending change is still the candidate.
+func TestOpensA100DataDirectory(t *testing.T) {
+	dir, srv := openEarlier(t, filepath.Join("testdata", "release-1.0.0"))
+	want, err := os.ReadFile(filepath.Join(dir, "built.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := builtDocs(t, srv); string(got) != string(want) {
+		t.Errorf("this version builds other documents from 1.0.0's data:\n%s\n---\n%s", want, got)
+	}
+	env := &testEnv{t: t, srv: srv, e: srv.Echo()}
+	rec := env.do("POST", "/api/login", map[string]string{"username": "admin", "password": "correct horse battery"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("1.0.0's admin can't log in: %d %s", rec.Code, rec.Body)
+	}
+	fws, err := srv.rec.Firewalls()
+	if err != nil || len(fws) != 2 || fws[1].Name != "branch" || fws[1].AgentToken != "secret" {
+		t.Errorf("firewalls: %v %+v", err, fws)
+	}
+	if live, err := srv.liveCommit(); err != nil || live != 1 {
+		t.Errorf("the live commit: %d %v", live, err)
+	}
+	if servers, err := srv.enabledDirectoryServers(context.Background()); err != nil || len(servers) != 1 || servers[0].Name != "down" {
+		t.Errorf("directory servers: %v %+v", err, servers)
+	}
+	tr, _ := srv.tree()
+	if changed, err := tr.store.Changed(context.Background()); err != nil || !changed {
+		t.Errorf("the change 1.0.0 left pending is gone: %v", err)
+	}
+	// No database is made.
+	if _, err := os.Stat(filepath.Join(dir, "portitor.db")); err == nil {
+		t.Error("a database file was made")
+	}
+}
+
+// A data directory this release can't read is refused before anything is
+// read or written: one of a release before 1.0.0 (no layout.json, with its
+// database or its files), and one of a later release. A database left beside
+// a 1.0.0 directory is left alone.
+func TestLayoutGate(t *testing.T) {
+	open := func(dir string) error {
+		return NewServer(&Config{JWTSecret: "s", Dev: true, DB: DBConfig{Path: filepath.Join(dir, "portitor.db")}}).Ready()
+	}
+	for name, files := range map[string]map[string]string{
+		"database":   {"portitor.db": "SQLite format 3\x00"},
+		"candidate":  {"candidate.json": "{}"},
+		"old layout": {"layout.json": `{"layout": 1}`, "candidate.json": "{}"},
+	} {
+		dir := t.TempDir()
+		for f, c := range files {
+			os.WriteFile(filepath.Join(dir, f), []byte(c), 0o600)
+		}
+		if err := open(dir); err == nil || !strings.Contains(err.Error(), "update to Portitor 1.0.0") {
+			t.Errorf("%s: %v", name, err)
+		}
+		if _, err := os.Stat(filepath.Join(dir, "global.json")); err == nil {
+			t.Errorf("%s: a refused directory was written", name)
+		}
+	}
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "layout.json"), []byte(`{"layout": 3}`), 0o600)
+	if err := open(dir); err == nil || !strings.Contains(err.Error(), "later release") {
+		t.Errorf("a later layout: %v", err)
+	}
+
+	// A new directory, even one that doesn't exist yet.
+	dir = filepath.Join(t.TempDir(), "new")
+	if err := open(dir); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, "layout.json")); !strings.Contains(string(b), `"layout": 2`) {
+		t.Errorf("layout.json %q", b)
+	}
+
+	// 1.0.0's directory with its old database beside it: opened, the
+	// database kept.
+	dir = t.TempDir()
+	if err := os.CopyFS(dir, os.DirFS(filepath.Join("testdata", "release-1.0.0"))); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(dir, "portitor.db"), []byte("SQLite format 3\x00"), 0o600)
+	if err := open(dir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "portitor.db")); err != nil {
+		t.Errorf("the old database: %v", err)
 	}
 }

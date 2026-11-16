@@ -128,8 +128,8 @@ iso-e2e-update:
 	iso/test-update.sh $(FROM)
 
 # The same for the split setup, in two virtual machines: install.py on
-# portitor-web's host updates the firewall and moves the database to its
-# portitor-config. KEEP=1 leaves both running.
+# portitor-web's host updates the firewall it serves, then itself. KEEP=1
+# leaves both running.
 iso-e2e-split-update:
 	iso/test-split-update.sh $(FROM)
 

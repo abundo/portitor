@@ -48,8 +48,7 @@ type colKind uint8
 const (
 	plain colKind = iota
 	leafList
-	ref      // a row id of the entry a leafref names
-	external // a row id of a table outside the tree, by name
+	ref // a row id of the entry a leafref names
 )
 
 type col struct {
@@ -57,7 +56,6 @@ type col struct {
 	column    string
 	kind      colKind
 	target    *table // ref: the referenced list's table
-	external  string
 	nullValue string
 	nullable  bool
 }
@@ -139,10 +137,6 @@ func (m *Mapping) column(s *schema.Node) (*col, error) {
 		return c, nil
 	}
 	c.column = idCol
-	if ext, ok := s.Ext["external"]; ok {
-		c.kind, c.external = external, ext
-		return c, nil
-	}
 	var path string
 	if refs := s.Type.Leafrefs(); len(refs) > 0 {
 		path = refs[0]
@@ -167,25 +161,10 @@ func keyOf(tgt *datastore.Node, leaf *schema.Node) string {
 }
 
 // Source is where the mapping gets what lives outside the tree: the ids kept
-// for its entries, and the names of the records (firewalls, roles) that the
-// tree names by id.
+// for its entries.
 type Source interface {
 	// IDs are the ids kept by path.
 	IDs() (IDs, error)
-	// ExternalNames are the names of a table's records by id.
-	ExternalNames(table string) (map[int64]string, error)
-}
-
-func externalNames(src Source, cache map[string]map[int64]string, tbl string) (map[int64]string, error) {
-	if names, ok := cache[tbl]; ok {
-		return names, nil
-	}
-	names, err := src.ExternalNames(tbl)
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", tbl, err)
-	}
-	cache[tbl] = names
-	return names, nil
 }
 
 // zero is a leaf's value when absent: its default, or its type's zero.
@@ -340,7 +319,7 @@ func pathKey(root *schema.Node, n *datastore.Node) string {
 
 // columns are the row of entry e (at pos in its list). Its references to
 // other entries are 0 or NULL where those have no row yet, unless strict.
-func (m *Mapping) columns(t *table, tree *datastore.Tree, e *datastore.Node, pos int, idx Index, ext map[string]map[string]int64, db Source, strict bool) (map[string]any, error) {
+func (m *Mapping) columns(t *table, tree *datastore.Tree, e *datastore.Node, pos int, idx Index, strict bool) (map[string]any, error) {
 	out := map[string]any{}
 	if t.parent != nil {
 		pid, ok := idx[parentEntry(e)]
@@ -364,22 +343,12 @@ func (m *Mapping) columns(t *table, tree *datastore.Tree, e *datastore.Node, pos
 			}
 			b, _ := json.Marshal(vs)
 			out[c.column] = string(b)
-		case external:
-			if !set {
-				out[c.column] = nil
-				continue
-			}
-			id, err := externalID(db, ext, c.external, v)
-			if err != nil {
-				return nil, fmt.Errorf("%s: %w", pathKey(m.root, e), err)
-			}
-			out[c.column] = id
 		}
 	}
 	for _, j := range t.jsons {
 		out[j.column] = jsonColumn(e, j)
 	}
-	r, err := m.refColumns(t, tree, e, idx, ext, db, strict)
+	r, err := m.refColumns(t, tree, e, idx, strict)
 	if err != nil {
 		return nil, err
 	}
@@ -394,7 +363,7 @@ func parentEntry(e *datastore.Node) *datastore.Node { return e.Parent }
 
 // refColumns are the columns of e's references to other entries. Without
 // strict, a reference to an entry without a row yet is NULL (or 0).
-func (m *Mapping) refColumns(t *table, tree *datastore.Tree, e *datastore.Node, idx Index, ext map[string]map[string]int64, db Source, strict bool) (map[string]any, error) {
+func (m *Mapping) refColumns(t *table, tree *datastore.Tree, e *datastore.Node, idx Index, strict bool) (map[string]any, error) {
 	out := map[string]any{}
 	for _, c := range t.cols {
 		if c.kind != ref {
@@ -419,26 +388,6 @@ func (m *Mapping) refColumns(t *table, tree *datastore.Tree, e *datastore.Node, 
 		out[c.column] = id
 	}
 	return out, nil
-}
-
-func externalID(src Source, cache map[string]map[string]int64, tbl, name string) (int64, error) {
-	ids, ok := cache[tbl]
-	if !ok {
-		names, err := src.ExternalNames(tbl)
-		if err != nil {
-			return 0, err
-		}
-		ids = map[string]int64{}
-		for id, n := range names {
-			ids[n] = id
-		}
-		cache[tbl] = ids
-	}
-	id, ok := ids[name]
-	if !ok {
-		return 0, fmt.Errorf("there is no %s %q", strings.TrimSuffix(tbl, "s"), name)
-	}
-	return id, nil
 }
 
 // columnValue is a leaf's value for its column.
@@ -528,14 +477,12 @@ type Row map[string]any
 // Rows makes the rows of t: what the builder and the readers of the
 // configuration read (package confview).
 // Rows have the ids of ids (a list keyed by id has its own; an entry ids
-// doesn't know gets one above them), references the ids of the rows they
-// name, and names outside the tree (firewalls, roles) the ids db has for
-// them.
-func (m *Mapping) Rows(db Source, tree *datastore.Tree, ids IDs) (map[string][]Row, Index, error) {
+// doesn't know gets one above them), and references the ids of the rows
+// they name.
+func (m *Mapping) Rows(tree *datastore.Tree, ids IDs) (map[string][]Row, Index, error) {
 	idx := Index{}
 	next := map[string]int64{}
 	maps.Copy(next, ids.max)
-	ext := map[string]map[string]int64{}
 	out := map[string][]Row{}
 	type entry struct {
 		n   *datastore.Node
@@ -585,7 +532,7 @@ func (m *Mapping) Rows(db Source, tree *datastore.Tree, ids IDs) (map[string][]R
 					next[t.name]++
 					idx[e] = next[t.name]
 				}
-				row, err := m.columns(t, tree, e, pos, idx, ext, db, false)
+				row, err := m.columns(t, tree, e, pos, idx, false)
 				if err != nil {
 					return err
 				}
@@ -602,7 +549,7 @@ func (m *Mapping) Rows(db Source, tree *datastore.Tree, ids IDs) (map[string][]R
 		return nil, nil, err
 	}
 	for _, e := range entries {
-		refs, err := m.refColumns(e.t, tree, e.n, idx, ext, db, true)
+		refs, err := m.refColumns(e.t, tree, e.n, idx, true)
 		if err != nil {
 			return nil, nil, err
 		}

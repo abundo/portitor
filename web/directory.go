@@ -47,7 +47,7 @@ var directoryAuth = ldapauth.Authenticate
 //     copied in, with no global role.
 //
 // It returns the user, nil for a wrong user name or password (or no
-// server that accepts it), and an error only for the database.
+// server that accepts it), and an error only for the records.
 func authenticateUser(ctx context.Context, s *Server, username, password string) (*models.User, error) {
 	u, err := s.rec.UserNamed(username)
 	switch {
@@ -205,15 +205,15 @@ func (s *Server) handleReorderLdapServers(c *echo.Context) error {
 		return err
 	}
 	if len(req.IDs) != len(v.LdapServers) {
-		return dbError(c, bad("list every directory server once"))
+		return writeError(c, bad("list every directory server once"))
 	}
 	seen := map[uint]bool{}
 	for _, id := range req.IDs {
 		if seen[id] || directoryServer(v, id) == nil {
 			if seen[id] {
-				return dbError(c, bad("list every directory server once"))
+				return writeError(c, bad("list every directory server once"))
 			}
-			return dbError(c, bad(fmt.Sprintf("no directory server %d", id)))
+			return writeError(c, bad(fmt.Sprintf("no directory server %d", id)))
 		}
 		seen[id] = true
 	}

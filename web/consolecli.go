@@ -20,7 +20,7 @@ import (
 // Configuration from the console: portitor-config (or portitor-web) run
 // with an "api", "set" or "commit" command answers one API request
 // in-process, as consoleUser, a global admin. Whoever can run it can read
-// the database already (root, or its service user), so it asks for no
+// the data directory already (root, or its service user), so it asks for no
 // password. The user rides in the request's context, which a request
 // from the network never carries; every check of the API applies.
 

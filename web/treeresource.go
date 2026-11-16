@@ -129,7 +129,7 @@ func (r *treeResource[T, PT]) create(c *echo.Context) error {
 		return err
 	}
 	if err := r.prepare(v, item, nil); err != nil {
-		return dbError(c, err)
+		return writeError(c, err)
 	}
 	if ok, err := r.write(c, func(work *datastore.Tree, w *rowWriter) error {
 		if _, err := w.create(item); err != nil {
@@ -160,7 +160,7 @@ func (r *treeResource[T, PT]) update(c *echo.Context) error {
 	}
 	item.SetID(id)
 	if err := r.prepare(v, item, old); err != nil {
-		return dbError(c, err)
+		return writeError(c, err)
 	}
 	oldName := r.named(old)
 	if ok, err := r.write(c, func(work *datastore.Tree, w *rowWriter) error {

@@ -77,7 +77,7 @@ const NONE = 0 // no certificate or role: the leaf unset
 // configuration tree; it names its certificate and role.
 const interfaces = vfApi('interface')
 const ifacePath = (name) => `${vfPath()}/${path(['interface', name])}`
-const OFF = 'off' // no two-factor login, '' in the database (a select item can't be '')
+const OFF = 'off' // no two-factor login, '' in the configuration (a select item can't be '')
 
 async function load() {
   const id = store.currentName

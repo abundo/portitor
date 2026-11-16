@@ -4,12 +4,12 @@
 # portitor-config and portitor-web
 
 Every firewall keeps its own configuration: **portitor-config**, on the firewall
-next to portitor-agent, holds it in an SQLite database, serves the GUI and the REST
+next to portitor-agent, keeps it in files in its data directory, serves the GUI and the REST
 API, and deploys to its agent (and to its [HA secondary](ha.md)). Nothing outside
 the firewall is needed to change it.
 
 **portitor-web** is optional: a standalone portal on another host to the GUIs of
-several firewalls. It has users and a configuration of its own (no database): the
+several firewalls. It has users and a configuration of its own: the
 firewalls, the HA firewalls, the HA witness strings and the users, a tree of a YANG
 module kept in `portal.json` in its data directory. Its own GUI looks and works like a
 firewall's: *Firewalls* lists them as they answer now, and *Open* loads a firewall's
@@ -33,7 +33,7 @@ Installing them is covered in the [README](../README.md#install); the
 | `bind` | `127.0.0.1:8080` (install.py: `:8444`) | Listen address. `start --bind` overrides it. |
 | `jwt_secret` | | Signs session cookies. At least 32 characters: `openssl rand -base64 32`. |
 | `tls_cert`, `tls_key` | | Serve HTTPS directly. Set both or neither. A certificate chosen under *Settings → Portitor web* takes their place for browsers; see [The GUI's own certificate](#the-guis-own-certificate). portitor-web and the HA peer always get `tls_cert`, which they pin. |
-| `db.path` | `/var/lib/portitor-config/portitor.db` | SQLite database. Its directory must be writable by the service user (`-wal` and `-shm` files go next to it). |
+| `db.path` | `/var/lib/portitor-config/portitor.db` | Names the data directory: the directory of this path (the candidate, the commits, the users and firewalls, the deployment log, ...), which must be writable by the service user. The file itself was the database of releases before 1.1.0 and is no longer read. |
 | `trusted_proxies` | none | Addresses or networks whose `X-Forwarded-For` is believed: portitor-web's. The login limits then count the browser's address, not portitor-web's. |
 | `agent_url` | `https://127.0.0.1:8443` | This host's agent, which tells portitor-config its place in an HA pair. |
 | `dev` | `false` | Serves the frontend from disk and drops the cookie's Secure flag. Development only. |
@@ -46,7 +46,7 @@ upgrades for the console.
 ```sh
 # as the service user (sudo -u portitor ...); as root it refuses
 portitor-config start                 # serve the GUI and API
-portitor-config migrate               # apply database migrations; start never migrates
+portitor-config migrate               # check that this release can read the data directory (install.py runs it)
 portitor-config createadmin <user>    # create an admin, or reset a user's password and make them admin
 portitor-config reset-2fa <user>      # turn off a user's two-factor login
 portitor-config set-agent ...         # this firewall's agent: URL, token, fingerprint (install.py)
@@ -55,7 +55,7 @@ portitor-config bootstrap ...         # first configuration of an ISO install (p
 portitor-config fingerprint           # the SHA-256 of tls_cert, for portitor-web and the HA peer
 portitor-config witness-string        # the HA pair's witness string, for an external witness
 portitor-config promote [--force]     # make this HA secondary the primary (ha.md)
-portitor-config import-vf <bundle>    # add a virtual firewall from a bundle (into a new database: the host)
+portitor-config import-vf <bundle>    # add a virtual firewall from a bundle (into a new installation: the host)
 portitor-config api|set|commit|confirm|rollback ...   # configuration from the console (below)
 ```
 
@@ -200,7 +200,7 @@ fingerprints.
   firewall. *Review* opens the Deploy page, *Commit* applies at once with the default
   auto-rollback, and *Revert* discards every uncommitted change: the configuration
   goes back to what the firewall runs (users and the agent connection stay). Each
-  commit keeps a copy of the database in `deployed/` next to it for this; the last
+  commit keeps its configuration in `deployed/` in the data directory for this; the last
   five are kept.
 - **Confirm banner** (yellow). Shows while an apply waits for confirmation; see below.
 
@@ -291,15 +291,15 @@ shared: everyone reads and uses them, a global admin changes them. DNS templates
 a virtual firewall, and its admin changes them; the firewall's are usable in every virtual
 firewall and changed by a global admin.
 
-A virtual firewall admin's deploy takes their virtual firewalls from the database and everything
+A virtual firewall admin's deploy takes their virtual firewalls from the candidate and everything
 else as the firewall runs it, so another tenant's unfinished changes stay where they
 are. They can confirm or roll back their own deploy; one change waits for
-confirmation at a time, firewall-wide. A global admin deploys the whole database,
+confirmation at a time, firewall-wide. A global admin deploys the whole candidate,
 every tenant's changes included, unless they pick virtual firewalls under *Virtual firewalls* on the
-Deploy page: then, like a virtual firewall admin's deploy, only those come from the database.
+Deploy page: then, like a virtual firewall admin's deploy, only those come from the candidate.
 A virtual firewall admin with several virtual firewalls can pick some of them the same way. Before a virtual firewall admin can deploy, a global admin
 must have deployed once. *Revert* (a global admin's) needs the last deploy to be one
-of everything: it restores the database as it was then.
+of everything: it restores the configuration as it was then.
 
 An admin can reset another user's password: open the user and pick *Reset password*,
 then enter the new password twice. Your own password is changed under *Change
@@ -339,7 +339,7 @@ expires. To end every session of a user at once, change the password. Changing
 
 ## Deploying
 
-Edits are saved in the database only. Nothing changes on the firewall until you apply.
+Edits are saved in the candidate only. Nothing changes on the firewall until you apply.
 
 On *Deploy*:
 
@@ -516,7 +516,7 @@ the browser reaches, e.g. `0.0.0.0:443`. portitor-web and the HA peer still get
 `tls_cert`, which they pin (they ask for it by name). Behind portitor-web, the
 browser sees portitor-web's certificate instead. It fetches the chain and key from the agent
 at once, every hour after and when the choice changes, and uses a renewed one
-without a restart. The last one fetched is kept next to the database
+without a restart. The last one fetched is kept in the data directory
 (`tls-certificate.pem`, 0600), so a restart while the agent is unreachable still
 has it; before the first is fetched, and when none is chosen, portitor-config serves
 `tls_cert`, and tries again every minute. The certificate's domain must be the name you browse
@@ -608,8 +608,8 @@ step, the users, roles and directory with it. It keeps:
   onto a reinstalled firewall; a virtual firewall or task of the backup on a firewall
   this installation doesn't have goes to the first one.
 
-A backup made by a release before this one is a database file: restore it with the release
-that made it (0.9.x), then update. Review the changes on *Deploy* and apply them as
+A backup made by a release before 1.0.0 is a database file: restore it with the release
+that made it (0.9.x), then update through 1.0.0. Review the changes on *Deploy* and apply them as
 usual. Restore is refused while an apply waits for confirmation.
 
 ## Secrets

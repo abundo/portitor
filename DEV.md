@@ -11,14 +11,11 @@ binary (release build, `-tags release`).
   default `GOTOOLCHAIN=auto` an older local Go downloads it)
 - Node.js 22.18+ or 24.12+
 
-Schema migrations are a dedicated command: `portitor-config migrate`. `start` never
-migrates.
-
-GORM models (`models/`) are the application
-mapping, not the source of schema.
-
-goose is used for migrations: `internal/dbmigrate/sql/NNNNN_name.sql`. Add a new
-file for every schema change and keep `models/` in step.
+portitor-config keeps no database: the configuration is the YANG tree
+(`candidate.json`, the commits in `deployed/`, the global lists in `global.json`)
+and the rest is files (`internal/records`), in the data directory, the directory of
+`db.path`. `portitor-config migrate` checks that the directory is one this release
+reads (and makes a new one); `start` does the same.
 
 ### Frontend stack
 
@@ -33,7 +30,7 @@ its own state, such as the applied configuration and IP list downloads, under it
 
 ```sh
 make dev-agent         # terminal 1: dry-run agent on https://127.0.0.1:8443
-make dev-web           # terminal 2: migrate, then portitor-config's GUI/API on http://127.0.0.1:8080
+make dev-web           # terminal 2: portitor-config's GUI/API on http://127.0.0.1:8080
 make dev-seed          # admin / dev-password-123, a sample home network, agent settings
 make dev-portal        # optional: portitor-web, the portal, on http://127.0.0.1:8090/fw/dev/
 cd web/frontend && npm install && npm run dev   # optional: Vite with hot reload on :5173
@@ -41,8 +38,9 @@ cd web/frontend && npm install && npm run dev   # optional: Vite with hot reload
 
 `dev/agent.yaml`, `dev/config.yaml` (portitor-config) and `dev/web.yaml` (the portal)
 are the dev configs; runtime files (token,
-certificate, rendered configs, agent state, logs, the SQLite database
-`portitor.db`) go to `dev/run/`. Delete `dev/run/portitor.db*` for an empty database.
+certificate, rendered configs, agent state, logs, portitor-config's data directory)
+go to `dev/run/`. Delete `dev/run/` (or its `*.json*` and `deployed/`) for an empty
+configuration.
 
 The packet capture page's viewer, Wiregasm (Wireshark in WebAssembly, about 20 MB
 gzipped, GPL-2.0-or-later), is the npm package `@goodtools/wiregasm`: `npm run build`
@@ -70,8 +68,9 @@ make fmt               # gofmt + prettier; CI fails on unformatted files
   `PORTITOR_NETNS_TEST=1 unshare -rnm sh -c 'mount -t tmpfs none /run && go test -run InNetns ./internal/agent/'`.
 - `internal/dyndns`: the DNS update client against an in-memory nameserver and an
   in-memory libdns provider, and TSIG against a real one on localhost.
-- `internal/builder`, `web`: a temporary SQLite database with the real goose
-  migrations and foreign keys enforced. `TestDeployEndToEnd` drives portitor-web against a real dry-run agent over
+- `internal/builder`, `web`: a configuration tree in memory or in a temporary data
+  directory; `web/testdata/release-1.0.0` is a data directory 1.0.0 left, which
+  `TestOpensA100DataDirectory` opens. `TestDeployEndToEnd` drives portitor-web against a real dry-run agent over
   TLS with certificate pinning.
 
 Nothing in `make test` runs a real apply as root; the lab below does.

@@ -25,7 +25,7 @@ func (s *Server) handleCertificateDownload(c *echo.Context) error {
 	if ok, err := allowInstance(c, cert.InstanceID, false); !ok {
 		return err
 	}
-	// An imported certificate is the one in the database; an ACME one is
+	// An imported certificate is the one in the configuration; an ACME one is
 	// the agent's.
 	chain := []byte(cert.FullChain)
 	if cert.Source != fwconfig.CertSourceImport {

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 The Portitor contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// Package builder turns portitor-web's database into the fwconfig.Document
+// Package builder turns portitor-config's configuration into the fwconfig.Document
 // that portitor-agent applies. It resolves references (instance ids to names,
 // DHCP prefixes to serving interfaces, names of hosts and services) and
 // reports what it cannot resolve; fwconfig.Validate does the rest.
@@ -39,8 +39,7 @@ type data struct {
 }
 
 // Input is what the builder reads: the configuration tree, and the
-// database for what is not configuration (the firewalls, the users and
-// their roles, the directory).
+// records for the ids of its entries.
 type Input struct {
 	Rec  Records
 	Tree *datastore.Tree
@@ -71,7 +70,7 @@ func load(in Input) (*data, error) {
 }
 
 // Build returns the document for generation. Problems found while
-// resolving the database, and by fwconfig.Validate, come back as a
+// resolving the configuration, and by fwconfig.Validate, come back as a
 // *fwconfig.ValidationError alongside the (possibly incomplete) document.
 func Build(in Input, generation int64) (*fwconfig.Document, error) {
 	return build(in, generation, nil, 0)
@@ -170,7 +169,7 @@ func configPort(s string) int {
 // BuildInstances builds only the named instances, for a deploy that
 // changes those and keeps the rest as deployed: no links, IP lists or
 // tasks, and no fwconfig.Validate (the caller validates the document it
-// merges them into). Problems resolving the database come back as a
+// merges them into). Problems resolving the configuration come back as a
 // *fwconfig.ValidationError alongside the document.
 func BuildInstances(in Input, generation int64, only map[string]bool) (*fwconfig.Document, error) {
 	return build(in, generation, only, 0)
@@ -1657,7 +1656,7 @@ func contains(list []string, s string) bool {
 	return false
 }
 
-// ruleID is a rule's database id as its fwconfig.Rule ID (a connection
+// ruleID is a rule's id as its fwconfig.Rule ID (a connection
 // mark, 32 bits); an id that does not fit gets no rule counters.
 func ruleID(id uint) uint32 {
 	if id > math.MaxUint32 {

@@ -1,10 +1,10 @@
 // SPDX-FileCopyrightText: 2026 The Portitor contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// portitor-web is the portal to the firewalls' GUIs, with no database of
+// portitor-web is the portal to the firewalls' GUIs, with a configuration of
 // its own, and the witness of HA pairs. Run as "portitor-config" (a
 // symlink) it is portitor-config: the firewall's own configuration, its
-// database, GUI and API, on the firewall. See AGENTS.md.
+// data, GUI and API, on the firewall. See AGENTS.md.
 package main
 
 import (
@@ -25,7 +25,6 @@ import (
 	"golang.org/x/term"
 
 	"github.com/abundo/portitor/internal/buildinfo"
-	"github.com/abundo/portitor/internal/dbmigrate"
 	"github.com/abundo/portitor/models"
 	"github.com/abundo/portitor/web"
 )
@@ -76,13 +75,12 @@ func configCommand() *cobra.Command {
 		if bind != "" {
 			cfg.Bind = bind
 		}
-		db, err := web.ConnectDB(cfg.DB)
-		if err != nil {
+		if err := web.CheckDataDir(cfg); err != nil {
 			return nil, nil, err
 		}
-		srv := web.NewServer(cfg, db)
-		// What an earlier release kept in the database moves into the
-		// configuration before anything is served or asked.
+		srv := web.NewServer(cfg)
+		// A data directory this release can't read is refused before
+		// anything is served or asked.
 		if err := srv.Ready(); err != nil {
 			return nil, nil, err
 		}
@@ -91,7 +89,7 @@ func configCommand() *cobra.Command {
 
 	start := &cobra.Command{
 		Use:   "start",
-		Short: "Serve the GUI and API (run `migrate` first after upgrades)",
+		Short: "Serve the GUI and API",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, srv, err := load()
 			if err != nil {
@@ -107,17 +105,10 @@ func configCommand() *cobra.Command {
 
 	root.AddCommand(&cobra.Command{
 		Use:   "migrate",
-		Short: "Apply database schema migrations",
+		Short: "Check that this release can read the data directory (a new one is made); install.py runs it after an update",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := web.LoadConfig(configFile)
-			if err != nil {
-				return err
-			}
-			db, err := web.ConnectDB(cfg.DB)
-			if err != nil {
-				return err
-			}
-			return dbmigrate.Up(db)
+			_, _, err := load()
+			return err
 		},
 	})
 
@@ -191,7 +182,7 @@ func configCommand() *cobra.Command {
 	var importName string
 	importVF := &cobra.Command{
 		Use:   "import-vf <bundle.json>",
-		Short: "Add a virtual firewall from a bundle; into a new database, the host's configuration",
+		Short: "Add a virtual firewall from a bundle; into a new installation, the host's configuration",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, srv, err := load()
@@ -218,20 +209,12 @@ func configCommand() *cobra.Command {
 		Short: "Print the first firewall's agent URL, or with --all every firewall's, one per line (install.py updates those hosts)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := web.LoadConfig(configFile)
+			_, srv, err := load()
 			if err != nil {
 				return err
 			}
-			db, err := web.ConnectDB(cfg.DB)
+			urls, err := srv.AgentURLs(allAgents)
 			if err != nil {
-				return err
-			}
-			q := db.Model(&models.Firewall{}).Order("id")
-			if !allAgents {
-				q = q.Limit(1)
-			}
-			var urls []string
-			if err := q.Pluck("agent_url", &urls).Error; err != nil {
 				return err
 			}
 			for _, u := range urls {

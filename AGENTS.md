@@ -31,7 +31,7 @@ cleanly now. Go on only once they've chosen.
 | `internal/schema` | The modules compiled (goyang) into the tree every frontend walks: kinds, keys, order, types and their checks, defaults, descriptions, `px:` extensions, the lists' actions (`Action`: kind `px:action`, typed input and output) |
 | `internal/datastore` | The configuration as a tree of the schema: set, delete, rename (rewriting leafrefs), move, validate, RFC 7951 JSON, diff and patch, the CLI's text and flat forms; `Store`, the shared candidate with its rebase and commit |
 | `internal/datastore/sqlmap` | The tree as rows, by the modules' `px:` extensions (`Rows`; `Adder` makes entries from rows, for the imports); the entries' ids kept by path (`IDs`, the pure `PlanIDs`; stored by `records` in `entry-ids.json`) |
-| `internal/records` | What portitor-config keeps besides the configuration tree, as one interface (`Store`: history, counters, firewalls, users and TOTP, the directory, roles, the ids and external names the tree mapping needs; `FollowChange` is the one transaction a candidate change takes), implemented on GORM (`gorm.go`) for now so the database can go (`dev/design-no-database.md`), with the entries' ids (`entry-ids.json`), the commit counter and web certificate (`state.json`), the deployment log (`deployments.jsonl`, pruned by Settings' `keep-deployments` and `keep-deployment-days`) and the known interfaces (`known-nics.json`) in files next to the database (`files.go`, `deploylog.go`; seeded from the old tables at the first start; a backup carries the ids, the replica's copy all of them); `web`, the builder and `confview` use it (`Server.rec`), never `*gorm.DB`, except the generic CRUD and the database file's operations (`Server.db`); contract tests in `records_test.go` run on every implementation |
+| `internal/records` | What portitor-config keeps besides the configuration tree, as one interface (`Store`: history, counters, firewalls, users and TOTP, the directory, roles, the ids the tree mapping needs; `FollowChange` is the one transaction a candidate change takes): `Files` (`store.go`) implements what is kept in files (`Kept`): the entries' ids (`entry-ids.json`), the commit counter and web certificate (`state.json`), the deployment log (`deployments.jsonl`, pruned by Settings' `keep-deployments` and `keep-deployment-days`), the known interfaces (`known-nics.json`) and the users' runtime values and firewalls' generations (`sessions.json`) (`files.go`, `deploylog.go`, `sessions.go`; a backup carries the ids, the replica's copy all of them, a copy's ids never lowering the highest given here); web's `treeRecords` answers the users, roles, directory and firewalls from the tree on top of it; `web`, the builder and `confview` use it (`Server.rec`); contract tests in `records_test.go` |
 | `internal/confview` | The candidate (or any tree) as rows decoded into the `models` structs, a slice per list, with their ids (`View`, `Load`, `RowOf`): what the builder and portitor-config's code of before the tree read; no tables behind it |
 | `internal/netconf` | NETCONF (RFC 6241/6242) on the datastore, the SSH server's `netconf` subsystem: framing (1.0 and chunked), XML, `edit-config` with every operation, subtree filters, `commit` with `confirmed-commit`, locks (`Store.Lock`), `get-schema`, the modules' actions (RFC 7950 `<action>`, `action.go`, through `Env.Action`) |
 | `internal/snmp` | SNMP for the state, read-only: `agentx` the subagent side of AgentX (RFC 2741: open, register, get, getnext, getbulk; a `Master` for tests), `mib` the YANG state as SNMP objects (a list a table indexed by its and its parents' keys, the top-level state container scalars) under a base OID, the numbers in `oids.json` (never reused; `go test ./internal/snmp/mib -update` numbers new state nodes and writes `deploy/mib/PORTITOR-MIB.txt`), the MIB text and a snapshot for answers |
@@ -56,25 +56,25 @@ cleanly now. Go on only once they've chosen.
 | `internal/builder` | Database → `fwconfig.Document` (resolves ids, IPAM, DHCP scopes, DNS names) |
 | `internal/ipam` | Prefix tree by CIDR containment, next free address |
 | `internal/netobj` | Named hosts/prefixes (`address_objects`) and address lists (`address_lists`): name checks and expansion |
-| `internal/dbmigrate` | Opens the SQLite database; goose migrations (the schema's source of truth); migration 94 (`drop_config_tables.go`) drops the old configuration tables, and `Up` refuses a database older than it (`MinVersion`, 0.9.0's schema: upgrade to 0.9.0 first, which moved the configuration into the tree), as `install.py` (`check_upgrade_path`) refuses the update before replacing anything |
-| `models` | GORM mapping |
-| `web` | Echo v5 server (`server.go`: routes): auth, the configuration API (`configapi.go`: `/api/schema`, `/api/config`, `checkEdit`; the YANG actions' handlers and the GUI's own file actions `configactions.go`), the configuration as rows (`confview.go`: `view`, cached per candidate, `userEdit`, `editConfig`, `rowWriter`), the firewalls' CRUD (`crud.go`, `firewalls.go`), commits (`commit.go`), other handlers (`handlers.go`), the commits' configurations (`revert.go`), tenancy (`tenancy.go`), roles (`roles.go`, `access.go`), agent proxies (`console.go`, `capture.go`, `probe.go`, `trace.go`, `iperf.go`, `servicelog.go`, `syslog.go`, `connections.go`), WireGuard config import (`wgimport.go`), backup/restore (`backup.go`, `snapshot.go`: the database with the configuration in it), `config.yaml` (`config.go`), the HA replica and promotion (`replica.go`, `promote.go`), the witness (`witness.go`, `portalwitness.go`), and portitor-web, the portal (`portal.go`, `portalapi.go`, `portalstore.go`, `portalssh.go`, `portalpair.go`; its GUI is `web/frontend`'s `portal.html`, `src/portal/`) |
+| `models` | The configuration's rows (their `gorm:"column:..."` tags name the columns, read by `confview/fields.go`; no GORM) and the deployments |
+| `web` | Echo v5 server (`server.go`: routes): auth, the configuration API (`configapi.go`: `/api/schema`, `/api/config`, `checkEdit`; the YANG actions' handlers and the GUI's own file actions `configactions.go`), the configuration as rows (`confview.go`: `view`, cached per candidate, `userEdit`, `editConfig`, `rowWriter`), the firewalls (`firewalls.go`, a `treeResource`), the handlers' errors (`errors.go`), commits (`commit.go`), other handlers (`handlers.go`), the commits' configurations (`revert.go`), tenancy (`tenancy.go`), roles (`roles.go`, `access.go`), agent proxies (`console.go`, `capture.go`, `probe.go`, `trace.go`, `iperf.go`, `servicelog.go`, `syslog.go`, `connections.go`), WireGuard config import (`wgimport.go`), backup/restore (`backup.go`, `snapshot.go`: the configuration's files, `copybundle.go`), `config.yaml` (`config.go`), the HA replica and promotion (`replica.go`, `promote.go`), the witness (`witness.go`, `portalwitness.go`), and portitor-web, the portal (`portal.go`, `portalapi.go`, `portalstore.go`, `portalssh.go`, `portalpair.go`; its GUI is `web/frontend`'s `portal.html`, `src/portal/`) |
 | `web/frontend` | Vue SPA; `CrudPage.vue` drives most pages from field/column schemas, on a YANG list (`api/config.js`: `treeApi`, `vfApi`) |
 | `docs` | User guides; every `docs/*.md` is bundled into the GUI's Help page (`src/docs.js`), and links between them stay in the GUI |
 | `deploy` | systemd units and example configs |
 | `dev` | Dev configs and `seed.sh`; `dev/lab` runs a real apply in two podman containers |
-| `install.py` | Installs/updates a firewall (agent and portitor-config) and portitor-web (the portal) from a GitHub release (`.goreleaser.yaml`), `--source` or `--local`; moves an old portitor-web's database to portitor-config on the same host (`move_web_database`) and lists it in that host's `web.yaml` (`link_local_config`), or, from a host of its own, to the firewall its database deploys to (`old_web_database`, `move_remote_database`, `link_remote_config`); the agent runs its copy in `/usr/lib/portitor` for GUI updates |
+| `install.py` | Installs/updates a firewall (agent and portitor-config) and portitor-web (the portal) from a GitHub release (`.goreleaser.yaml`), `--source` or `--local`; refuses, before replacing anything, an installation older than 1.0.0 (`check_upgrade_path`, `MIN_UPGRADE_FROM`) or a data directory without `layout.json` (`check_data_dirs`); the agent runs its copy in `/usr/lib/portitor` for GUI updates |
 | `iso` | Installer ISO: Debian netinst + preseed + an apt repository of `packages.txt` and its dependencies, so the installation needs no network (`build.sh`, `target.sh`), setup (`portitor-setup.py`, installed as `portitor-setup`: runs `portitor-config bootstrap` at first boot, `--reconfigure` when run again; role `agent` is the same firewall, ending with a portal string for portitor-web, role `web` portitor-web alone (its first user made with the console password, `portitor-web createadmin`), which adds a firewall with `--join` (`portitor-web add-firewall`); roles `primary` and `secondary` an HA pair: the secondary only its HA link and management, ending with a secondary string (its agent's token) that the primary's `--join` adds and commits), QEMU test VM (`vm.sh`), end-to-end tests (`test.sh`, `test-split.sh`, `test-update.sh`, `make iso-e2e`) |
 
 ## Terms
 
-An *instance* (code, API, database) is a **virtual firewall** (short **VF**) in the GUI,
+An *instance* (code, API) is a **virtual firewall** (short **VF**) in the GUI,
 docs and user-facing messages.
 
 ## How it fits together
 
 - **Processes.** On every firewall, portitor-config (portitor-web run under that
-  name, `Config.Local`, `/etc/portitor/config.yaml`) owns the SQLite database, the
+  name, `Config.Local`, `/etc/portitor/config.yaml`) owns the data directory
+  (`Config.Dir()`, the directory of `db.path`; files only, no database), the
   GUI and the API, as the service user; the agent runs as root and owns the system.
   They talk over the agent's HTTPS API (`internal/agent/server.go`, `/v1/...`; wire
   types in `agentapi`): a bearer token (`token_file` in `agent.yaml`) and a pinned
@@ -155,8 +155,8 @@ docs and user-facing messages.
   host's, `fromActive`); the logs and Updates are one firewall's
   (`?firewall_id=`, the first by default), picked in the GUI. Tests run the server
   without `Local`, with any number of firewalls.
-- **Deploy ("commit" in the GUI)**: `web/commit.go` `deploy` (phases `prepareCommit`, `checkAgents`, `reserveNumbers`, `applyTargets`, `settleTargets`, `recordDeployments` over a `commitPlan`; confirm and rollback `finishPending`) takes a database
-  snapshot (`web/revert.go`) numbered by the commit counter (`records` `Own`, `state.json`), `buildDoc`
+- **Deploy ("commit" in the GUI)**: `web/commit.go` `deploy` (phases `prepareCommit`, `checkAgents`, `reserveNumbers`, `applyTargets`, `settleTargets`, `recordDeployments` over a `commitPlan`; confirm and rollback `finishPending`) takes a snapshot of
+  the candidate (`web/revert.go`) numbered by the commit counter (`records` `Own`, `state.json`), `buildDoc`
   runs `builder.BuildFirewall` on it for each firewall (merged into the
   firewall's live document for an instance admin), and each firewall whose
   document changed (all of them when none did) gets `POST /v1/apply` with a
@@ -246,10 +246,10 @@ docs and user-facing messages.
 - **HA replica and promotion** (`web/replica.go`, `web/promote.go`): portitor-config
   runs on both hosts of a pair. Its role is its agent's (`runRole`: the firewall row
   whose fingerprint is that of the agent at `agent_url`, asked for
-  `GET /v1/ha/peer-config`): the secondary's (unless its database has it as the
+  `GET /v1/ha/peer-config`): the secondary's (unless its configuration has it as the
   primary of the pair: promoted there, `primaryHere`), or a primary's taken over
   (stale), is a replica, which copies the primary's files (`GET /ha/v2/bundle`, the pair's
-  secret, ETag its SHA-256; `restoreDatabase` with `replicaKeeps`) every 15 s, and
+  secret, ETag its SHA-256; `takeSnapshot`) every 15 s, and
   refuses writes but `readOnlyAllowed` (`refuseOnReplica`); a pair whose agent has
   not answered yet is read-only too (`isReplica`). `POST /api/ha/promote` (or
   `portitor-config promote`) on a replica whose agent no longer hears the primary
@@ -277,13 +277,13 @@ docs and user-facing messages.
   `rollback` run one API request in-process as the console admin
   (`ConsoleRequest`); the user rides in the request's context, which no network
   request carries, and every API check applies. Running them takes access to the
-  database (root, or the service user).
+  data directory (root, or the service user).
 - **Configuration tree and CLI** (`yang/`, `internal/schema`, `internal/datastore`,
   `internal/datastore/sqlmap`, `internal/cli`, `web/datastore.go`; design and phases
   in `dev/design-model-driven.md`, user guide `docs/cli.md`): the YANG modules are the
   configuration's schema; the CLI (SR Linux style) takes its commands, help and
   completion from it. Its sessions share a candidate (`datastore.Store`,
-  `candidate.json` next to the database): the configuration, which every write goes
+  `candidate.json` in the data directory): the configuration, which every write goes
   to; there are no configuration tables. Each change gives new entries their ids
   (`Store.OnChange`, `records` `FollowChange` with `sqlmap.PlanIDs`: by path in `entry-ids.json`, kept across a
   rename, never another entry's; a list keyed by `id` has its own). Code that reads
@@ -336,10 +336,15 @@ docs and user-facing messages.
   deterministic bytes: the replica's ETag; `snapshotFiles`; a backup is that archive age-encrypted); a restore or a copy makes those the
   candidate and what runs of the global lists (`takeSnapshot`, a backup keeping this installation's
   firewalls), and the replica fetches the live commit's configuration
-  (`GET /ha/v1/commits/<n>`). The archive is `GET /ha/v2/bundle`; the database file of an earlier
-  release's primary (`/ha/v1/database`) is still taken by a replica (`takeLegacyCopy`), and an
-  earlier release's backup (a database file) is refused. `Ready()` makes every file and writes
-  `layout.json`; the data directory is `Config.Dir()` (next to `db.path`).
+  (`GET /ha/v1/commits/<n>`). The archive is `GET /ha/v2/bundle` (a primary before 1.0.0 has none:
+  the replica says to update it), and a backup of a release before 1.0.0 (a database file) is
+  refused. A copy without `global.json` or `entry-ids.json` is refused before anything changes, and
+  its ids (`entry-ids.json`, `ids.json`) never lower the highest this installation gave. The data
+  directory is `Config.Dir()` (the directory of `db.path`): `checkLayout` (in `core`) refuses one
+  without `layout.json` that has the files or the database of a release before 1.0.0 ("update to
+  1.0.0 first") or one of a higher layout, and gives a new one its `layout.json`; `Ready()` makes
+  every file and the first firewall (`ensureFirewall`). A `portitor.db` left there is never read
+  or removed.
 - **Global lists and the scoped commit** (`web/globals.go`; design in
   `dev/design-no-database.md`): `globalLists` are top-level lists whose running
   state is `global.json`, not the live commit's file (`treeBackend.Running`
@@ -469,7 +474,7 @@ rows (`confview`) are a view that code reads, never edits.
   TOTP secrets) and the LDAP bind passwords,
   redacted in history like the other secrets.
   Deployment history stores a redacted document. The exceptions are the backup
-  download (`web/backup.go`): the whole database, age-encrypted with the user's
+  download (`web/backup.go`): the configuration's files, age-encrypted with the user's
   passphrase; and a WireGuard peer's client config (`render.WireGuardClientConf`),
   with its generated private key and preshared key; an OpenVPN client config
   (`web/openvpn.go`), with the server's tls-crypt key; and the agent's
@@ -854,20 +859,13 @@ the certificate portitor-config serves, chosen under Settings
   field, with its `px:` mapping; `confview`'s `TestEveryFieldMapped` fails until a
   field has its leaf and a leaf its field). A new leaf needs nothing more: an absent
   leaf takes its default. Renaming or removing one breaks reading the candidate and
-  the kept commits, which have it: there is no migration of the tree's JSON yet. The
-  database holds what is not configuration (the firewalls; the old tables of the users, roles and directory stay until the database goes, read once by `adoptAccess`):
-  a new goose file in
-  `internal/dbmigrate/sql/` (SQLite), plus the model change (`models.Stored`, whose
-  fields a test checks have columns). Tests run the real migrations, with foreign
-  keys enforced as in production. SQLite's `ALTER TABLE` only adds, drops and renames
-  columns; anything else rebuilds the table (create, copy, drop, rename) in a
-  `-- +goose NO TRANSACTION` migration that turns `foreign_keys` off around it. Ids
-  are `AUTOINCREMENT` so a deleted row's id is never reused. The configuration tables
-  are gone (migration 94, 0.9.0's schema): an older database is refused (`dbmigrate.MinVersion`;
-  a 0.9.0 one not yet started, with its configuration still in `config_snapshot`, by
-  `web.refuseLegacyConfig`), so no code reads the old tables; `make iso-e2e-update` and
-  `iso-e2e-split-update` from the last release test the update. The migrations before 94
-  only make the tables it drops, for a new database; squashing them into a baseline is left.
+  the kept commits, which have it: there is no migration of the tree's JSON yet.
+  What is not configuration is in files (`internal/records`): a new kind of
+  runtime state or history is a field or a file there (with its place in the
+  copies, `copyFiles` and `ExportState`), never a database. There is no database
+  since 1.1.0; 1.0.0 moved what the database held into files and wrote
+  `layout.json` (`layoutVersion`), which a change of the data directory's layout
+  raises, with a reader of the old layout for one release.
 - **Roles:** a user is `admin`, `viewer` or `none` (`models.RoleAdmin`/`RoleViewer`/
   `RoleNone`): global access. Users, roles (members, grants) and the directory's mappings are global lists of the tree (`web/accessstore.go`: `treeRecords` answers `records.Store`'s users, roles and directory from what runs, and writes what runs and the candidate together; `confcheck.checkAccess` keeps an admin with a local password). A user's runtime values (token version, TOTP step, a setup in progress, used recovery codes) are `sessions.json` (`records.Sessions`), not the tree. Roles grant
   instances, by name, at a level (admin/viewer); each instance but the default has its
@@ -881,16 +879,16 @@ the certificate portitor-config serves, chosen under Settings
   handlers must check the instance (`allowInstance`); `TestRoutePolicy` fails on an entry
   that names no route. On `/api/config` access is by
   path (`treeAccess`): an instance admin writes their virtual firewalls' subtrees,
-  everyone reads the shared lists, global admins write those. A CRUD `resource` with
+  everyone reads the shared lists, global admins write those. A `treeResource` (`web/treeresource.go`) with
   a `scope` filters its lists per instance; one without is shared. A new route is global-admin-only for writes
   automatically; a new GET of instance data must filter it, and one that hands out
   secrets must check the instance or be `globalOnly` in `routePolicy`. `TestViewerRole` sweeps
   every route, `TestTenancy` the instance checks. An instance admin's deploy merges
-  their instances from the database into the live deployment's document
+  their instances from the candidate into the live deployment's document
   (`web/tenancy.go`, `deployed/<commit>-<firewall id>.json`); only a full deploy keeps a snapshot
   for Revert.
-- **Database files:** portitor-config refuses to run as root against a database
-  directory owned by another user; root would leave root-owned `-wal`/`-shm` files.
+- **Data directory:** portitor-config refuses to run as root against a data
+  directory owned by another user (`CheckDataDir`); root would leave root-owned files.
   Scripts run it as the service user (`runuser -u portitor --`).
 - **Updates from the GUI** (`internal/agent/system.go`): the Debian upgrade and the
   Portitor update run as transient systemd units (`systemd-run`), never as children
@@ -1028,7 +1026,7 @@ them first; commit only when asked to, each time.
 ## Gotchas
 
 - Echo v5 handlers are `func(c *echo.Context) error`. Parse path ids with
-  `echo.PathParam[uint]`, never pass the raw string to GORM (it becomes SQL).
+  `echo.PathParam[uint]`.
 - named keeps its files in `paths.bind_cache_dir` (its working directory) and
   `bind_run_dir`, each virtual firewall's unit mounting `<dir>/<instance>` over them;
   its zone files are in `<bind_zones_dir>/<instance>` (`InstanceFiles.BindZones`) at

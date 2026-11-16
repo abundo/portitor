@@ -12,24 +12,21 @@ import (
 	"strings"
 	"sync"
 
-	"gorm.io/gorm"
-
 	"github.com/abundo/portitor/internal/datastore"
 	"github.com/abundo/portitor/internal/datastore/sqlmap"
 	"github.com/abundo/portitor/models"
 )
 
-// What portitor-config keeps in files next to its database, not in it:
+// What portitor-config keeps in files in its data directory, besides the
+// configuration tree:
 //
 //   - entry-ids.json: the ids kept for the configuration's entries by path
 //     (sqlmap.IDs). Part of a backup and of the replica's copy.
 //   - state.json: the commit counter and the certificate portitor-config
 //     serves. The installation's own: not in a backup.
 //
-// With no directory (a database in memory, tests) they are kept in memory
-// alone. A directory that has no file yet is seeded from the database's old
-// tables (config_ids and settings), which phase 5 of
-// dev/design-no-database.md drops.
+// With no directory (tests) they are kept in memory alone. A file not there
+// yet starts empty.
 const (
 	entryIDsFile = "entry-ids.json"
 	stateFile    = "state.json"
@@ -120,8 +117,8 @@ func (f *fileState) wrote(name string) {
 	f.seen[name] = datastore.StampOf(f.path(name))
 }
 
-// loadIDs loads the entry ids (or seeds them from db's table), under f.mu.
-func (f *fileState) loadIDs(db *gorm.DB) error {
+// loadIDs loads the entry ids, under f.mu.
+func (f *fileState) loadIDs() error {
 	if f.idsLoaded {
 		return nil
 	}
@@ -138,27 +135,7 @@ func (f *fileState) loadIDs(db *gorm.DB) error {
 			return err
 		}
 	}
-	return f.seedIDs(db)
-}
-
-// seedIDs takes the ids from the database's table config_ids, and writes
-// them, under f.mu.
-func (f *fileState) seedIDs(db *gorm.DB) error {
-	ids := sqlmap.NewIDs()
-	if db != nil && db.Migrator().HasTable("config_ids") {
-		var rows []struct {
-			Path string
-			Tbl  string
-			ID   int64
-		}
-		if err := db.Table("config_ids").Select("path, tbl, id").Find(&rows).Error; err != nil {
-			return err
-		}
-		for _, r := range rows {
-			ids.Set(r.Path, r.Tbl, r.ID)
-		}
-	}
-	return f.setIDs(ids)
+	return f.setIDs(sqlmap.NewIDs())
 }
 
 // setIDs keeps ids, in memory and in the file, under f.mu.
@@ -177,9 +154,8 @@ func (f *fileState) setIDs(ids sqlmap.IDs) error {
 	return nil
 }
 
-// loadState loads the state (or seeds it from db's table settings), under
-// f.mu.
-func (f *fileState) loadState(db *gorm.DB) error {
+// loadState loads the state, under f.mu.
+func (f *fileState) loadState() error {
 	if f.stLoaded {
 		return nil
 	}
@@ -196,15 +172,6 @@ func (f *fileState) loadState(db *gorm.DB) error {
 		}
 	}
 	st := stateJSON{Version: 1}
-	if db != nil && db.Migrator().HasTable("settings") && db.Migrator().HasColumn("settings", "last_commit") {
-		var row struct {
-			LastCommit       int64
-			WebCertificateID *uint
-		}
-		if err := db.Table("settings").Select("last_commit, web_certificate_id").Where("id = 1").Take(&row).Error; err == nil {
-			st.LastCommit, st.WebCertificateID = row.LastCommit, row.WebCertificateID
-		}
-	}
 	return f.setState(st)
 }
 

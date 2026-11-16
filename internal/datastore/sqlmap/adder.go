@@ -17,17 +17,15 @@ import (
 // import) writes the tree with.
 type Adder struct {
 	m    *Mapping
-	db   Source
 	tree *datastore.Tree
 	byID map[*table]map[int64]*datastore.Node
 	idx  Index
-	ext  map[string]map[int64]string
 	pos  map[*datastore.Node]int64 // the position column of the entries added
 }
 
 // NewAdder adds to tree, whose entries have the ids of idx (confview).
-func (m *Mapping) NewAdder(db Source, tree *datastore.Tree, idx Index) *Adder {
-	a := &Adder{m: m, db: db, tree: tree, byID: map[*table]map[int64]*datastore.Node{}, idx: Index{}, ext: map[string]map[int64]string{}, pos: map[*datastore.Node]int64{}}
+func (m *Mapping) NewAdder(tree *datastore.Tree, idx Index) *Adder {
+	a := &Adder{m: m, tree: tree, byID: map[*table]map[int64]*datastore.Node{}, idx: Index{}, pos: map[*datastore.Node]int64{}}
 	for n, id := range idx {
 		a.index(n, id)
 	}
@@ -164,19 +162,6 @@ func (a *Adder) leavesOf(t *table, tbl string, row Row) (map[string]string, erro
 			if s, ok := leafValue(c, v); ok {
 				leaves[c.leaf.Name] = s
 			}
-		case external:
-			if v == nil || toInt(v) == 0 {
-				continue
-			}
-			names, err := externalNames(a.db, a.ext, c.external)
-			if err != nil {
-				return nil, err
-			}
-			name, ok := names[toInt(v)]
-			if !ok {
-				return nil, fmt.Errorf("%s: no %s %d", tbl, c.external, toInt(v))
-			}
-			leaves[c.leaf.Name] = name
 		case ref:
 			if v == nil || toInt(v) == 0 {
 				if c.nullValue != "" {

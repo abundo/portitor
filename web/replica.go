@@ -17,7 +17,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -35,7 +34,7 @@ import (
 
 // portitor-config runs on both hosts of an HA pair, and the primary's owns
 // the pair's configuration. The secondary's is a replica: it copies the
-// primary's database (GET /ha/v1/database, with the pair's secret) every
+// primary's files (GET /ha/v2/bundle, with the pair's secret) every
 // replicaEvery and whenever it changed, and is read-only, so the
 // configuration survives the primary's loss and the secondary can be
 // promoted (promote.go). A primary taken over by a promotion while it was
@@ -43,8 +42,8 @@ import (
 // way, until it is caught up as its secondary.
 //
 // Which one a portitor-config is, its own agent tells it (GET
-// /v1/ha/peer-config): the agent at agent_url, known in the database by
-// its certificate's fingerprint; a secondary that the database has as the
+// /v1/ha/peer-config): the agent at agent_url, known in the configuration by
+// its certificate's fingerprint; a secondary that the configuration has as the
 // primary was promoted here. A replica takes the peer's portitor-config
 // and the pair's secret from there too (fwconfig.HA.PeerConfig), from the
 // document the primary deployed.
@@ -58,7 +57,7 @@ const (
 type hostRole struct {
 	mu sync.Mutex
 	// known: the agent has answered once. Before, a portitor-config with
-	// a pair in its database is read-only.
+	// a pair in its configuration is read-only.
 	known   bool
 	replica bool
 	peer    agentapi.HAPeerConfig
@@ -217,10 +216,10 @@ func (s *Server) checkRole(ctx context.Context) {
 		r.mu.Unlock()
 		return
 	}
-	// A secondary whose database has it the primary of the pair was
+	// A secondary whose configuration has it the primary of the pair was
 	// promoted here, and its agent waits for the promotion's commit (one
 	// that failed, before a restart). A stale agent is a primary taken
-	// over: its database is the old one.
+	// over: its configuration is the old one.
 	replica := pc.Stale || (pc.Node == fwconfig.HASecondary && !s.primaryHere(me))
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -235,7 +234,7 @@ func (s *Server) checkRole(ctx context.Context) {
 	r.known, r.replica, r.peer = true, replica, *pc
 }
 
-// primaryHere tells whether the database has the firewall the primary of
+// primaryHere tells whether the configuration has the firewall the primary of
 // a pair.
 func (s *Server) primaryHere(me *models.Firewall) bool {
 	if me == nil || me.HAPrimaryID != nil {
@@ -245,7 +244,7 @@ func (s *Server) primaryHere(me *models.Firewall) bool {
 	return sec != nil
 }
 
-// runRole follows the host's role, and copies the primary's database
+// runRole follows the host's role, and copies the primary's files
 // while it is a replica, until ctx is cancelled.
 func (s *Server) runRole(ctx context.Context) {
 	s.checkRole(ctx)
@@ -268,10 +267,7 @@ func (s *Server) runRole(ctx context.Context) {
 	}
 }
 
-// replicaKeeps: a replica copies every table but the schema's version.
-var replicaKeeps = []string{"goose_db_version"}
-
-// copyPrimary copies the primary's database into this one, when it changed.
+// copyPrimary copies the primary's files into this one's, when they changed.
 func (s *Server) copyPrimary(ctx context.Context) error {
 	r := &s.role
 	r.mu.Lock()
@@ -303,15 +299,12 @@ func (s *Server) copyPrimary(ctx context.Context) error {
 		}
 		return client.Do(req)
 	}
-	// The primary's files; one of a release that kept them in a database file
-	// (which is all there is to take from it: it is updated after this one)
-	// has no such route.
-	legacy := false
+	// The primary's files (a primary from before 1.0.0, which kept them in a
+	// database file, has no such route: update it).
 	res, err := get(replicaBundlePath)
 	if err == nil && res.StatusCode == http.StatusNotFound {
 		res.Body.Close()
-		legacy = true
-		res, err = get(replicaPath)
+		return fail(errors.New("the primary's portitor-config is older than 1.0.0 and gives no copy this release can take: update the primary"))
 	}
 	if err != nil {
 		return fail(fmt.Errorf("the primary's portitor-config: %w", err))
@@ -345,13 +338,9 @@ func (s *Server) copyPrimary(ctx context.Context) error {
 	if !s.isReplica() {
 		return nil
 	}
-	if legacy {
-		err = s.takeLegacyCopy(ctx, body)
-	} else {
-		var files map[string][]byte
-		if files, _, err = decodeCopy(body); err == nil {
-			err = s.takeSnapshot(ctx, files, nil, false)
-		}
+	var files map[string][]byte
+	if files, _, err = decodeCopy(body); err == nil {
+		err = s.takeSnapshot(ctx, files, nil, false)
 	}
 	if err != nil {
 		return fail(fmt.Errorf("the primary's copy: %w", err))
@@ -368,29 +357,7 @@ func (s *Server) copyPrimary(ctx context.Context) error {
 	return nil
 }
 
-// takeLegacyCopy takes the database file of a primary of a release before the
-// files (its tables are adopted into the tree): this installation's state is
-// replaced by it, as that release's replica did.
-func (s *Server) takeLegacyCopy(ctx context.Context, data []byte) error {
-	dir, err := s.snapshotDir()
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return err
-	}
-	tmp := filepath.Join(dir, "replica.db.tmp")
-	defer os.Remove(tmp)
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return err
-	}
-	_, _, err = s.restore(ctx, tmp, replicaKeeps, nil)
-	return err
-}
-
-// replicaPath is the database file an earlier release's primary gives; the
-// primary of this one gives replicaBundlePath's archive of files (copybundle.go).
-const replicaPath = "/ha/v1/database"
+// replicaBundlePath is the primary's archive of files (copybundle.go).
 const replicaBundlePath = "/ha/v2/bundle"
 
 // replicaCommitPath + <commit> is a commit's configuration
@@ -429,7 +396,7 @@ func (s *Server) pairAuthorized(c *echo.Context) (bool, error) {
 }
 
 // handleReplicaCommit gives the secondary's portitor-config a commit's
-// configuration, every secret in it (as the database has them).
+// configuration, every secret in it (as the configuration has them).
 func (s *Server) handleReplicaCommit(c *echo.Context) error {
 	if ok, err := s.pairAuthorized(c); !ok {
 		return err
@@ -452,7 +419,7 @@ func (s *Server) handleReplicaCommit(c *echo.Context) error {
 }
 
 // replicaTree brings the replica's running configuration in step with the
-// copy of the primary's database (which brought its candidate): the live
+// copy of the primary's files (which brought its candidate): the live
 // commit's configuration, fetched from the primary when this host doesn't
 // have it.
 func (s *Server) replicaTree(ctx context.Context, client *http.Client, peer agentapi.HAPeerConfig) error {

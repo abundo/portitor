@@ -6,7 +6,6 @@ package web
 import (
 	"errors"
 	"fmt"
-	"log"
 	"net"
 	"os"
 	"os/user"
@@ -14,13 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
-	"time"
 
 	"github.com/goccy/go-yaml"
-	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
-
-	"github.com/abundo/portitor/internal/dbmigrate"
 )
 
 // DefaultConfigFile is portitor-web's (PortalConfig).
@@ -51,8 +45,8 @@ type Config struct {
 	// place in an HA pair (role.go); default https://127.0.0.1:8443.
 	AgentURL string `yaml:"agent_url"`
 	// SSHListen serves the CLI over SSH there (":2222"), to the GUI's
-	// users; empty: not. The host key is ssh_host_ed25519_key next to the
-	// database.
+	// users; empty: not. The host key is ssh_host_ed25519_key in the data
+	// directory.
 	SSHListen string `yaml:"ssh_listen"`
 	// SNMP serves the state over SNMP, as an AgentX subagent of the host's
 	// snmpd (web/snmp.go).
@@ -65,7 +59,9 @@ type Config struct {
 
 // Dir is the directory portitor-config keeps its files in (the candidate, what
 // runs of the global lists, the ids, the deployed commits, the SSH host key):
-// next to the database file, as it always was; "" for none (nothing is kept).
+// the directory of db.path, where the database file of releases before 1.1.0
+// was (the key stays: every config.yaml has it); "" for none (nothing is
+// kept).
 func (c *Config) Dir() string {
 	if c.DB.Path == "" {
 		return ""
@@ -74,8 +70,8 @@ func (c *Config) Dir() string {
 }
 
 type DBConfig struct {
-	// Path is the SQLite database file; its directory must be writable
-	// (WAL mode keeps -wal and -shm files next to it).
+	// Path names the data directory: its directory is (the file itself, the
+	// database of releases before 1.1.0, is no longer read).
 	Path string `yaml:"path"`
 }
 
@@ -135,26 +131,18 @@ func (c *Config) trustedProxies() ([]*net.IPNet, error) {
 	return out, nil
 }
 
-func ConnectDB(c DBConfig) (*gorm.DB, error) {
-	if err := checkDBOwner(c.Path); err != nil {
-		return nil, err
+// CheckDataDir refuses root when the data directory belongs to another
+// user: files it would write (the candidate, the commits, the locks) would be
+// owned by root and break the service.
+func CheckDataDir(c *Config) error {
+	if c.Dir() == "" {
+		return nil
 	}
-	// Not-found is a normal answer (lookups by name), not worth logging.
-	lg := logger.New(log.New(os.Stderr, "", log.LstdFlags), logger.Config{
-		SlowThreshold:             time.Second,
-		LogLevel:                  logger.Warn,
-		IgnoreRecordNotFoundError: true,
-	})
-	db, err := dbmigrate.Open(c.Path, &gorm.Config{Logger: lg})
-	if err != nil {
-		return nil, fmt.Errorf("database %s: %w", c.Path, err)
-	}
-	return db, nil
+	return checkDBOwner(c.DB.Path)
 }
 
-// checkDBOwner refuses root when the database directory belongs to another
-// user: files SQLite creates (the database, -wal, -shm) would be owned by
-// root and break the service.
+// checkDBOwner refuses root when the directory of path belongs to another
+// user.
 func checkDBOwner(path string) error {
 	if os.Geteuid() != 0 {
 		return nil

@@ -16,8 +16,7 @@ import (
 
 // Backend is where the configuration is committed and runs.
 type Backend interface {
-	// Initial is the candidate when there is none kept yet: running, or an
-	// old database's configuration at the first start.
+	// Initial is the candidate when there is none kept yet: running.
 	Initial(ctx context.Context) (*Tree, error)
 	// Running is what the firewalls run: the live commit's.
 	Running(ctx context.Context) (*Tree, error)
@@ -47,8 +46,7 @@ type CommitOptions struct {
 }
 
 // Store is the candidate: the working configuration that every frontend
-// (the GUI and API, the CLI, NETCONF) edits and commits, shared as the
-// database was before it. A commit leaves it as it is; discarding its
+// (the GUI and API, the CLI, NETCONF) edits and commits, shared by all. A commit leaves it as it is; discarding its
 // changes makes it running again.
 type Store struct {
 	mu      sync.Mutex

@@ -2,21 +2,22 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package records is what portitor-config keeps besides the configuration
-// tree: the interface in front of everything its database holds, so that the
-// database can go (dev/design-no-database.md). It is shaped after the three
-// homes of that design, and a method is a domain operation that the tree
-// plus a JSON file could implement: no SQL, column names or ordering strings
-// cross it.
+// tree, and its interface to the tree's own records (users, roles, the
+// directory, firewalls), shaped after the three homes of
+// dev/design-no-database.md: a method is a domain operation on the tree or a
+// JSON file.
 //
 //   - History (deployments, known NICs): append and query.
 //   - Runtime (the commit counter, and later the sessions' and TOTP's
 //     counters, generations and the HA epoch): its own methods, never a save
 //     of a whole row; an operation that was one conditional update stays one.
 //   - Directory data (users, roles, the LDAP directory, firewalls): reads and
-//     coarse writes, which phases 2 and 3 move into the tree.
+//     coarse writes of lists of the tree.
 //
-// GORM implements it for now (gorm.go); the contract tests (records_test.go)
-// run against any implementation.
+// Files implements what is kept in files (Kept: history, counters, ids,
+// sessions, generations; store.go); the users, roles, directory and
+// firewalls are lists of the configuration tree, which web's treeRecords
+// answers on top of Files. The contract tests (records_test.go) run on Files.
 package records
 
 import (
@@ -36,6 +37,21 @@ var ErrExists = errors.New("already exists")
 
 // ErrNoSuchUser is SaveRole's refusal of a member that is no user.
 var ErrNoSuchUser = errors.New("no such user")
+
+// Kept is what is kept in files, not in the tree: what Files implements.
+type Kept interface {
+	History
+	Counters
+	Ids
+	Sessions
+	// SetGeneration records the generation last handed to the agent
+	// (runtime: never carried by saving the whole firewall; only raised).
+	SetGeneration(id uint, generation int64) error
+	// Generations are those of every firewall that has one.
+	Generations() (map[uint]int64, error)
+}
+
+var _ Kept = (*Files)(nil)
 
 // Store is every kind of record, composed of the parts below.
 type Store interface {
@@ -214,8 +230,7 @@ type Roles interface {
 }
 
 // Ids are what ties the records to the configuration tree: the ids kept for
-// its entries (rules' connection marks, instances' HA addresses), and the
-// names of records outside the tree that it names by id.
+// its entries (rules' connection marks, instances' HA addresses).
 type Ids interface {
 	sqlmap.Source
 	// FollowChange makes the records follow a change of the candidate, all
@@ -224,8 +239,7 @@ type Ids interface {
 	// and the web certificate is forgotten when its entry is gone.
 	FollowChange(m *sqlmap.Mapping, c *datastore.Tree) error
 	// Seed makes every file there is (ids, counters, deployments, known
-	// interfaces, sessions) now, from the database's old tables where there is
-	// none yet: the next release has no tables to seed from.
+	// interfaces, sessions) now, empty where there is none yet.
 	Seed() error
 	// UpdateIDs changes the ids kept with fn (sqlmap.IDs.Set), all or
 	// nothing: for what is adopted into the tree with the ids it had.
@@ -240,8 +254,8 @@ type Ids interface {
 	// to take over).
 	ExportState(forReplica bool) (map[string][]byte, error)
 	// ImportState makes a copy's files (ExportState's) this installation's;
-	// a copy that has no ids (one from before they were files) has them in
-	// the database's old table. What a copy does not carry stays as it is.
+	// a copy without the ids is refused. What a copy does not carry stays as
+	// it is.
 	ImportState(files map[string][]byte) error
 }
 

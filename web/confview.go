@@ -80,22 +80,6 @@ func (s *Server) editConfig(ctx context.Context, fn func(*datastore.Tree) error)
 	return t.store.Edit(ctx, "", fn)
 }
 
-// renameExternal makes the configuration's names of a firewall or role
-// (px:external) follow its rename.
-func (s *Server) renameExternal(ctx context.Context, table, old, new string) error {
-	if old == new {
-		return nil
-	}
-	t, err := s.tree()
-	if err != nil {
-		return err
-	}
-	return s.editConfig(ctx, func(work *datastore.Tree) error {
-		t.mapping.RenameExternal(work, table, old, new)
-		return nil
-	})
-}
-
 // certificateByID is the candidate's certificate with the id, nil when
 // there is none.
 func (s *Server) certificateByID(ctx context.Context, id uint) (*models.Certificate, error) {
@@ -189,7 +173,7 @@ func (s *Server) rowWriter(work *datastore.Tree) (*rowWriter, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &rowWriter{s: s, work: work, add: t.mapping.NewAdder(s.rec, work, v.Index), tmp: 1 << 40}, nil
+	return &rowWriter{s: s, work: work, add: t.mapping.NewAdder(work, v.Index), tmp: 1 << 40}, nil
 }
 
 // create adds model as a new entry, and sets its ID: a list keyed by id

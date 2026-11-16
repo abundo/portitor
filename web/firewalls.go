@@ -257,6 +257,23 @@ func (s *Server) firewalls() ([]models.Firewall, error) {
 	return s.rec.Firewalls()
 }
 
+// AgentURLs are the agent URLs of the firewalls, the first first; with all
+// false the first alone (portitor-config agent-url, for install.py).
+func (s *Server) AgentURLs(all bool) ([]string, error) {
+	fws, err := s.firewalls()
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, f := range fws {
+		out = append(out, f.AgentURL)
+		if !all {
+			break
+		}
+	}
+	return out, nil
+}
+
 // firewallAgent is the agent of the firewall.
 func (s *Server) firewallAgent(id uint) (agentAPI, *models.Firewall, error) {
 	fw, err := s.rec.Firewall(id)
@@ -274,7 +291,7 @@ func (s *Server) firewallAgent(id uint) (agentAPI, *models.Firewall, error) {
 }
 
 // instanceAgent is the agent of the firewall the named instance is on.
-// "", or an instance no longer in the database (deleted but still
+// "", or an instance no longer in the configuration (deleted but still
 // running), is the first firewall's.
 func (s *Server) instanceAgent(name string) (agentAPI, *models.Firewall, error) {
 	in, err := s.instanceNamed(context.Background(), name)
@@ -448,7 +465,7 @@ func (s *Server) handleSwitchover(c *echo.Context) error {
 	if fw.HAPrimaryID != nil {
 		p, err := s.rec.Firewall(*fw.HAPrimaryID)
 		if err != nil {
-			return dbError(c, err)
+			return writeError(c, err)
 		}
 		pair = append(pair, *p)
 	} else {

@@ -84,7 +84,7 @@ Before it applies anything it shows the answers: *Apply* applies them, *Change* 
 back to them, and *Swap LAN and WAN* swaps the LAN and WAN interfaces (the addresses stay with the LAN and the WAN), for
 when you picked them the wrong way round.
 
-Then it creates the database, starts the agent and the GUI, and deploys a first
+Then it creates portitor-config's data directory, starts the agent and the GUI, and deploys a first
 configuration:
 
 - the LAN interface with its address, or DHCP, labelled *LAN*,
@@ -139,7 +139,7 @@ It then deploys at once, without the confirm timeout:
   again; the new fingerprint is shown (a portitor-web that serves this firewall needs
   it too: the new portal string, below).
 
-Everything else stays: the database, the agent, other interfaces (an interface that
+Everything else stays: the configuration, the agent, other interfaces (an interface that
 was the LAN or WAN before stays enabled), rules, NAT and DHCP. Run it at the console:
 an SSH session over the old LAN address drops.
 
@@ -235,8 +235,7 @@ ISO](ha.md#step-by-step-from-the-iso).
   removes packages, and it keeps configuration files you have changed. Security updates
   are marked.
 - **Install** next to a Portitor release runs `install.py --install <release>` on the
-  firewall. It updates the agent first, then portitor-config (and migrates its
-  database), and restarts both. The GUI is away for a moment; reload the page when the update is
+  firewall. It updates the agent first, then portitor-config, and restarts both. The GUI is away for a moment; reload the page when the update is
   done. *Go back* installs an older release the same way.
 - **Reboot firewall**. After a kernel update, a banner says a reboot is needed.
   Traffic stops until the firewall is back up.
@@ -251,20 +250,10 @@ Updating from the GUI needs a copy of `install.py` on the firewall
 this feature puts it there. A portitor-web on another host is updated on its own host
 with `install.py`, which updates its firewalls first.
 
-An ISO firewall from before portitor-config ran portitor-web with the database. The
-update moves that database to portitor-config, which listens on port 8444 on the
-firewall, and portitor-web stays on port 443 as the portal to it: the GUI is at the same
-address, under `/fw/<host name>/`. Log in again afterwards. `sudo portitor-setup`, run
-again, puts portitor-config itself on port 443.
-
-A portitor-web on a host of its own, from before portitor-config, had the database
-there. Update it from that host with `install.py`, which needs SSH to the firewall
-(as for `--agent`): it finds the firewall in the database, updates it first, copies
-the database to its portitor-config and lists it in `web.yaml`, and the firewall
-trusts portitor-web's address (`trusted_proxies`). The GUI is then at
-`/fw/<firewall's host name>/`. Updating the firewall alone first (from the GUI)
-leaves its portitor-config stopped and empty; don't create an admin there, as a
-commit from it would replace the firewall's configuration.
+An installation older than 1.0.0 can't be updated to a later release directly: update it
+to 1.0.0 first and let it start once (it moves what its database held into files and
+marks its data directory with `layout.json`), then to the release you want. `install.py`
+refuses the update before it replaces anything, and so does the GUI's *Install*.
 
 ## Building the ISO
 

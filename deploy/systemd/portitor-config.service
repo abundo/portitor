@@ -23,7 +23,7 @@ ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
 PrivateDevices=yes
-# The SQLite database (db.path in config.yaml).
+# The data directory (the directory of db.path in config.yaml).
 StateDirectory=portitor-config
 StateDirectoryMode=0700
 

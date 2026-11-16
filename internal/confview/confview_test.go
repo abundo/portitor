@@ -4,18 +4,12 @@
 package confview
 
 import (
-	"path/filepath"
 	"reflect"
 	"slices"
 	"testing"
 
-	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
-	gormschema "gorm.io/gorm/schema"
-
 	"github.com/abundo/portitor/internal/datastore"
 	"github.com/abundo/portitor/internal/datastore/sqlmap"
-	"github.com/abundo/portitor/internal/dbmigrate"
 	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/internal/records"
 	"github.com/abundo/portitor/internal/schema"
@@ -23,16 +17,12 @@ import (
 	"github.com/abundo/portitor/models"
 )
 
-func testDB(t *testing.T) *gorm.DB {
+// testDB is a test's records (the ids are kept in them).
+type testDB struct{ rec *records.Files }
+
+func newTestDB(t *testing.T) *testDB {
 	t.Helper()
-	db, err := dbmigrate.Open(filepath.Join(t.TempDir(), "db.sqlite"), &gorm.Config{Logger: logger.Discard})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := dbmigrate.Up(db); err != nil {
-		t.Fatal(err)
-	}
-	return db
+	return &testDB{rec: records.NewFiles("")}
 }
 
 func testMapping(t *testing.T) *sqlmap.Mapping {
@@ -51,8 +41,8 @@ type adder struct {
 	next uint
 }
 
-func newAdder(t *testing.T, db *gorm.DB, tree *datastore.Tree) *adder {
-	return &adder{a: testMapping(t).NewAdder(recOf(db), tree, sqlmap.Index{}), next: 1000}
+func newAdder(t *testing.T, db *testDB, tree *datastore.Tree) *adder {
+	return &adder{a: testMapping(t).NewAdder(tree, sqlmap.Index{}), next: 1000}
 }
 
 func (a *adder) create(t *testing.T, model any) {
@@ -76,7 +66,7 @@ func ptr(v uint) *uint { return &v }
 // seed makes a configuration that uses every kind of mapping: id
 // references, global DNS templates, JSON columns, ordered lists, nested
 // tables and external names.
-func seed(t *testing.T, db *gorm.DB, add *adder) {
+func seed(t *testing.T, db *testDB, add *adder) {
 	t.Helper()
 	fw := models.Firewall{Name: "fw1"}
 	add.create(t, &fw)
@@ -139,9 +129,9 @@ func seed(t *testing.T, db *gorm.DB, add *adder) {
 }
 
 // seeded is the seed's tree, and its database (the firewall).
-func seeded(t *testing.T) (*gorm.DB, *datastore.Tree) {
+func seeded(t *testing.T) (*testDB, *datastore.Tree) {
 	t.Helper()
-	db := testDB(t)
+	db := newTestDB(t)
 	tree := datastore.New(schemaRoot(t))
 	seed(t, db, newAdder(t, db, tree))
 	return db, tree
@@ -222,8 +212,8 @@ func TestRows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	v1, _ := LoadWith(recOf(db), tree, ids)
-	v2, _ := LoadWith(recOf(db), back, ids)
+	v1, _ := LoadWith(tree, ids)
+	v2, _ := LoadWith(back, ids)
 	v1.Tree, v1.Index, v2.Tree, v2.Index = nil, nil, nil, nil
 	if !reflect.DeepEqual(v1, v2) {
 		t.Error("the tree's JSON makes other rows")
@@ -239,20 +229,10 @@ func schemaRoot(t *testing.T) *schema.Node {
 	return root
 }
 
-// recs are the records of each test database: the ids are kept in the
-// records, so every use of a database shares them.
-var recs = map[*gorm.DB]*records.GORM{}
-
-func recOf(db *gorm.DB) *records.GORM {
-	if r, ok := recs[db]; ok {
-		return r
-	}
-	recs[db] = records.NewGORM(db, "")
-	return recs[db]
-}
+func recOf(db *testDB) *records.Files { return db.rec }
 
 // assign gives tree's entries their ids, and returns all the ids kept.
-func assign(t *testing.T, db *gorm.DB, tree *datastore.Tree) (sqlmap.IDs, error) {
+func assign(t *testing.T, db *testDB, tree *datastore.Tree) (sqlmap.IDs, error) {
 	t.Helper()
 	if err := recOf(db).FollowChange(testMapping(t), tree); err != nil {
 		return sqlmap.IDs{}, err
@@ -349,28 +329,25 @@ func TestEveryFieldMapped(t *testing.T) {
 
 func checkFields(t *testing.T, m *sqlmap.Mapping, model any) {
 	t.Helper()
-	sch, err := gormschema.Parse(model, schemaCache, gormschema.NamingStrategy{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	cols := m.Columns(sch.Table)
+	table, all := Columns(model)
+	cols := m.Columns(table)
 	if cols == nil {
-		t.Errorf("table %s has no list in the YANG modules (px:table)", sch.Table)
+		t.Errorf("table %s has no list in the YANG modules (px:table)", table)
 		return
 	}
 	var fields []string
-	for _, f := range sch.Fields {
-		if f.DBName == "" || f.DBName == "created_at" || f.DBName == "updated_at" || slices.Contains(notMapped[sch.Table], f.DBName) {
+	for _, c := range all {
+		if c == "created_at" || c == "updated_at" || slices.Contains(notMapped[table], c) {
 			continue
 		}
-		fields = append(fields, f.DBName)
-		if !slices.Contains(cols, f.DBName) {
-			t.Errorf("%s.%s has no leaf in the YANG modules", sch.Table, f.DBName)
+		fields = append(fields, c)
+		if !slices.Contains(cols, c) {
+			t.Errorf("%s.%s has no leaf in the YANG modules", table, c)
 		}
 	}
 	for _, c := range cols {
 		if !slices.Contains(fields, c) {
-			t.Errorf("%s: column %s has no field in the model", sch.Table, c)
+			t.Errorf("%s: column %s has no field in the model", table, c)
 		}
 	}
 }

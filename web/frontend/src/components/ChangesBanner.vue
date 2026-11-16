@@ -59,7 +59,7 @@ async function commit() {
   }
 }
 
-// Revert puts the database back to what the firewall runs; nothing is
+// Revert puts the configuration back to what the firewall runs; nothing is
 // applied.
 async function revert() {
   if (

@@ -13,7 +13,6 @@ require (
 	github.com/coder/websocket v1.8.15
 	github.com/creack/pty v1.1.24
 	github.com/florianl/go-nflog/v2 v2.3.0
-	github.com/glebarez/sqlite v1.11.0
 	github.com/go-acme/lego/v4 v4.35.2
 	github.com/go-asn1-ber/asn1-ber v1.5.8
 	github.com/go-jose/go-jose/v4 v4.1.4
@@ -41,7 +40,6 @@ require (
 	github.com/mdlayher/packet v1.1.2
 	github.com/miekg/dns v1.1.72
 	github.com/openconfig/goyang v1.6.3
-	github.com/pressly/goose/v3 v3.27.0
 	github.com/spf13/cobra v1.10.2
 	github.com/vishvananda/netlink v1.3.1
 	github.com/vishvananda/netns v0.0.5
@@ -51,7 +49,6 @@ require (
 	golang.org/x/term v0.46.0
 	golang.org/x/time v0.15.0
 	gopkg.in/yaml.v3 v3.0.1
-	gorm.io/gorm v1.31.2
 )
 
 require (
@@ -61,6 +58,7 @@ require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/gaissmai/bart v0.29.0 // indirect
 	github.com/glebarez/go-sqlite v1.23.0 // indirect
+	github.com/glebarez/sqlite v1.11.0 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
@@ -72,17 +70,14 @@ require (
 	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/mdlayher/netlink v1.9.1-0.20260312172110-2a932c0fc1ae // indirect
 	github.com/mdlayher/socket v0.5.1 // indirect
-	github.com/mfridman/interpolate v0.0.2 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/ovh/go-ovh v1.9.0 // indirect
 	github.com/pierrec/lz4/v4 v4.1.25 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/seancfoley/bintree v1.4.0 // indirect
 	github.com/seancfoley/ipaddress-go v1.8.3 // indirect
-	github.com/sethvargo/go-retry v0.3.0 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/u-root/uio v0.0.0-20230220225925-ffce2a382923 // indirect
-	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/mod v0.41.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/sync v0.23.0 // indirect
@@ -90,6 +85,7 @@ require (
 	golang.org/x/tools v0.49.0 // indirect
 	gopkg.in/ini.v1 v1.67.1 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
+	gorm.io/gorm v1.31.2 // indirect
 	modernc.org/libc v1.75.3 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.0 // indirect

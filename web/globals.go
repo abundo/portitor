@@ -5,21 +5,15 @@ package web
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"maps"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 
-	"gorm.io/gorm"
-
 	"github.com/abundo/portitor/internal/builder"
-	"github.com/abundo/portitor/internal/confview"
 	"github.com/abundo/portitor/internal/datastore"
-	"github.com/abundo/portitor/internal/datastore/sqlmap"
 	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/models"
 )
@@ -37,12 +31,9 @@ import (
 // the directory's group mappings (dev/design-no-database.md).
 var globalLists = []string{"firewall", "ldap-server", "user", "role", "ldap-role-mapping"}
 
-// accessLists are the global lists adoptAccess takes from the old tables.
-var accessLists = []string{"ldap-server", "user", "role", "ldap-role-mapping"}
-
 func (t *treeState) isGlobal(name string) bool { return slices.Contains(t.globals, name) }
 
-// dataDir is the directory next to the database file, where global.json is.
+// dataDir is the data directory, where global.json is.
 func (s *Server) dataDir() (string, error) {
 	dir, err := s.snapshotDir()
 	if err != nil {
@@ -191,7 +182,7 @@ func (s *Server) writeGlobalsFile(t *treeState, tree *datastore.Tree) error {
 	return nil
 }
 
-// lockData takes the lock of the files next to the database that the
+// lockData takes the lock of the files in the data directory that the
 // processes of one installation share (a console command runs beside the
 // daemon): held from reading what runs of the global lists to writing it.
 // It is not re-entrant.
@@ -342,261 +333,4 @@ func (r *scopedResult) message() string {
 		return fmt.Sprintf("Commit %d: %s.", r.Result.Commit, r.Result.Status)
 	}
 	return "Committed (nothing to deploy)."
-}
-
-// adopted is the file that names the lists taken from the database's old
-// tables (adoptions.json next to it), each once.
-func (s *Server) adopted() (map[string]bool, string, error) {
-	dir, err := s.dataDir()
-	if err != nil {
-		return nil, "", err
-	}
-	path := filepath.Join(dir, "adoptions.json")
-	out := map[string]bool{}
-	b, err := os.ReadFile(path)
-	switch {
-	case errors.Is(err, os.ErrNotExist):
-		return out, path, nil
-	case err != nil:
-		return nil, "", err
-	}
-	var names []string
-	if err := json.Unmarshal(b, &names); err != nil {
-		return nil, "", fmt.Errorf("adoptions.json: %w", err)
-	}
-	for _, n := range names {
-		out[n] = true
-	}
-	return out, path, nil
-}
-
-// markAdopted notes that a list has been taken from the database.
-func (s *Server) markAdopted(name string) error {
-	done, path, err := s.adopted()
-	if err != nil {
-		return err
-	}
-	done[name] = true
-	b, err := json.Marshal(slices.Sorted(maps.Keys(done)))
-	if err != nil {
-		return err
-	}
-	return datastore.WriteFile(path, b)
-}
-
-// accessTables are the old tables of the global lists, in the order their
-// rows are added (a row names the entries before it).
-var accessTables = []struct {
-	table string
-	rows  func(db *gorm.DB) ([]any, error)
-}{
-	{"ldap_servers", func(db *gorm.DB) ([]any, error) { return loadRows[models.LdapServer](db, "position, id") }},
-	{"users", func(db *gorm.DB) ([]any, error) { return loadRows[models.User](db, "id") }},
-	{"roles", func(db *gorm.DB) ([]any, error) { return loadRows[models.Role](db, "id") }},
-	{"role_members", func(db *gorm.DB) ([]any, error) { return loadRows[models.RoleMember](db, "id") }},
-	{"role_instances", func(db *gorm.DB) ([]any, error) { return loadRows[models.RoleInstance](db, "id") }},
-	{"ldap_role_mappings", func(db *gorm.DB) ([]any, error) { return loadRows[models.LdapRoleMapping](db, "id") }},
-}
-
-func loadRows[T any](db *gorm.DB, order string) ([]any, error) {
-	var rows []T
-	if err := db.Order(order).Find(&rows).Error; err != nil {
-		return nil, err
-	}
-	out := make([]any, len(rows))
-	for i := range rows {
-		out[i] = &rows[i]
-	}
-	return out, nil
-}
-
-// adoptAccess takes the users, their roles and the directory of the
-// database's old tables into the tree, once: into global.json with the ids
-// the rows had (a session carries a user's id) and the highest id each table
-// ever gave (a deleted user's id is never given again, whatever cookie
-// carries it), and into the candidate when that has none of the lists. force
-// does it again for a database that was restored.
-func (s *Server) adoptAccess(ctx context.Context, t *treeState, force bool) error {
-	const marker = "access"
-	done, _, err := s.adopted()
-	if err != nil {
-		return err
-	}
-	if done[marker] && !force {
-		return nil
-	}
-	for _, name := range accessLists {
-		if !t.isGlobal(name) {
-			return nil // another set of global lists than this adoption knows
-		}
-	}
-	acc := datastore.New(t.schema)
-	add := t.mapping.NewAdder(s.rec, acc, sqlmap.Index{})
-	var any bool
-	for _, tb := range accessTables {
-		if !s.db.Migrator().HasTable(tb.table) {
-			continue
-		}
-		rows, err := tb.rows(s.db)
-		if err != nil {
-			return err
-		}
-		for _, row := range rows {
-			tbl, r, err := confview.RowOf(row)
-			if err != nil {
-				return err
-			}
-			if _, err := add.Add(tbl, r); err != nil {
-				return fmt.Errorf("adopting %s: %w", tb.table, err)
-			}
-			any = true
-		}
-	}
-	// The highest id each table gave, deleted rows' too.
-	seq := map[string]int64{}
-	var seqRows []struct {
-		Name string
-		Seq  int64
-	}
-	if s.db.Migrator().HasTable("sqlite_sequence") {
-		if err := s.db.Table("sqlite_sequence").Select("name, seq").Find(&seqRows).Error; err != nil {
-			return err
-		}
-	}
-	for _, r := range seqRows {
-		seq[r.Name] = r.Seq
-	}
-	if err := s.rec.UpdateIDs(func(ids sqlmap.IDs) {
-		for n, id := range add.Index() {
-			ids.Set(datastore.PathOf(n).String(t.schema), add.Table(n), id)
-		}
-		for _, tb := range accessTables {
-			ids.SetMax(tb.table, seq[tb.table])
-		}
-	}); err != nil {
-		return err
-	}
-	if any {
-		// What runs of the lists is what the database had.
-		unlock, err := s.lockData()
-		if err != nil {
-			return err
-		}
-		run, err := s.globalsTree(t)
-		if err == nil {
-			run.CopyLists(acc, accessLists...)
-			err = s.writeGlobals(t, run)
-		}
-		unlock()
-		if err != nil {
-			return err
-		}
-		s.forgetRunning()
-		// The candidate has them too, unless it has some of its own.
-		if err := t.store.EditRaw(ctx, func(work *datastore.Tree) error {
-			// Whole, or not at all: the lists name each other. The roles the
-			// candidate made for its virtual firewalls meanwhile stay.
-			if !force && len(work.Root.Lists["user"]) > 0 {
-				return nil // its own (a restore replaces them: they are the copy's)
-			}
-			own := work.Root.Lists["role"]
-			work.CopyLists(acc, accessLists...)
-			for _, r := range own {
-				if work.Root.Entry("role", r.Keys()) == nil {
-					work.Root.Lists["role"] = append(work.Root.Lists["role"], r)
-				}
-			}
-			return nil
-		}); err != nil {
-			return err
-		}
-	}
-	return s.markAdopted(marker)
-}
-
-// adoptFirewalls takes the firewalls of the database's old table into the
-// tree, once: into global.json with the ids they had (the deployments name
-// them) and the highest id the table gave, their generations into the runtime
-// file, and into the candidate when that has none. force does it again for a
-// restored database (a restored old backup keeps this installation's own).
-func (s *Server) adoptFirewalls(ctx context.Context, t *treeState, force bool) error {
-	const marker = "firewalls"
-	done, _, err := s.adopted()
-	if err != nil {
-		return err
-	}
-	if done[marker] && !force {
-		return nil
-	}
-	if !t.isGlobal("firewall") || !s.db.Migrator().HasTable("firewalls") {
-		return nil
-	}
-	rows, err := loadRows[models.Firewall](s.db, "id")
-	if err != nil {
-		return err
-	}
-	acc := datastore.New(t.schema)
-	add := t.mapping.NewAdder(s.rec, acc, sqlmap.Index{})
-	// A secondary names its primary: the primaries first (a promotion swaps
-	// the pair's rows in place, so a secondary may have the lower id).
-	for _, secondary := range []bool{false, true} {
-		for _, r := range rows {
-			f := r.(*models.Firewall)
-			if (f.HAPrimaryID != nil) != secondary {
-				continue
-			}
-			tbl, row, err := confview.RowOf(f)
-			if err != nil {
-				return err
-			}
-			if _, err := add.Add(tbl, row); err != nil {
-				return fmt.Errorf("adopting firewall %s: %w", f.Name, err)
-			}
-		}
-	}
-	var seq int64
-	if s.db.Migrator().HasTable("sqlite_sequence") {
-		_ = s.db.Raw("SELECT COALESCE(MAX(seq), 0) FROM sqlite_sequence WHERE name = 'firewalls'").Scan(&seq).Error
-	}
-	if err := s.rec.UpdateIDs(func(ids sqlmap.IDs) {
-		for n, id := range add.Index() {
-			ids.Set(datastore.PathOf(n).String(t.schema), add.Table(n), id)
-		}
-		ids.SetMax("firewalls", seq)
-	}); err != nil {
-		return err
-	}
-	for _, r := range rows {
-		f := r.(*models.Firewall)
-		if f.Generation > 0 {
-			if err := s.rec.SetGeneration(f.ID, f.Generation); err != nil {
-				return err
-			}
-		}
-	}
-	if len(rows) > 0 {
-		unlock, err := s.lockData()
-		if err != nil {
-			return err
-		}
-		run, err := s.globalsTree(t)
-		if err == nil {
-			run.CopyLists(acc, "firewall")
-			err = s.writeGlobals(t, run)
-		}
-		unlock()
-		if err != nil {
-			return err
-		}
-		s.forgetRunning()
-		if err := t.store.EditRaw(ctx, func(work *datastore.Tree) error {
-			if len(work.Root.Lists["firewall"]) == 0 {
-				work.CopyLists(acc, "firewall")
-			}
-			return nil
-		}); err != nil {
-			return err
-		}
-	}
-	return s.markAdopted(marker)
 }

@@ -1,11 +1,11 @@
 // SPDX-FileCopyrightText: 2026 The Portitor contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// Package models is the rows of portitor-config: those of its database
-// (Stored: users, roles, firewalls, the directory, deployments), whose
-// schema the goose migrations in internal/dbmigrate/sql own, and the
-// configuration's, which are the tree's entries as rows (package confview,
-// the YANG modules' px: mapping; there are no tables behind them).
+// Package models is the rows of portitor-config: the configuration's, which
+// are the tree's entries as rows (package confview, the YANG modules' px:
+// mapping; there are no tables behind them), and the deployments
+// (records' deployments.jsonl). The gorm tags name the columns, as when they
+// were tables (confview/fields.go reads them).
 package models
 
 import (
@@ -14,8 +14,6 @@ import (
 	"errors"
 	"slices"
 	"time"
-
-	"gorm.io/gorm"
 
 	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/internal/ldapauth"
@@ -265,12 +263,6 @@ type User struct {
 	TOTPEnabled bool `gorm:"-" json:"totp_enabled"`
 }
 
-// AfterFind sets TOTPEnabled.
-func (u *User) AfterFind(*gorm.DB) error {
-	u.TOTPEnabled = u.TOTPSecret != ""
-	return nil
-}
-
 // DateFormats are the values of User.DateFormat: the browser's language,
 // YYYY-MM-DD, MM-DD-YYYY and DD-MM-YYYY (with a 24-hour time).
 var DateFormats = []string{"locale", "iso", "mdy", "dmy"}
@@ -353,7 +345,7 @@ type Firewall struct {
 	HAPreempt bool `gorm:"column:ha_preempt" json:"ha_preempt"` // the leaf's default is true; a gorm default would make false unwritable (confview.RowOf)
 	// ConfigURL is the host's portitor-config as its HA peer reaches it,
 	// pinned by ConfigFingerprint (its tls_cert): the secondary copies the
-	// primary's database from there (replica.go).
+	// primary's configuration from there (replica.go).
 	ConfigURL         string `json:"config_url"`
 	ConfigFingerprint string `json:"config_fingerprint"`
 }
@@ -1166,15 +1158,6 @@ type Task struct {
 	Timeout    int  `json:"timeout"` // seconds; 0 is the default
 }
 
-// KnownInterface is a physical interface the agent has reported
-// (web/nics.go). A new one is imported into its firewall's default instance once, so
-// deleting it there sticks.
-type KnownInterface struct {
-	FirewallID uint      `gorm:"primaryKey" json:"firewall_id"`
-	Name       string    `gorm:"primaryKey" json:"name"`
-	CreatedAt  time.Time `json:"created_at"`
-}
-
 // Deployment is one push to the agent.
 type Deployment struct {
 	Base
@@ -1192,16 +1175,9 @@ type Deployment struct {
 	// than the column.
 	DocHash string `json:"-"`
 	Log     string `json:"log"`
-	// Instances lists the instances built from the database; the others
+	// Instances lists the instances built from the candidate; the others
 	// kept what was deployed. Empty: all of them.
 	Instances StringList `json:"instances"`
-}
-
-// Stored lists the models stored in the database (the configuration's
-// are rows of the tree, package confview); a dbmigrate test checks that
-// the migrated schema has a column for every field.
-func Stored() []any {
-	return []any{&User{}, &Firewall{}, &Deployment{}, &KnownInterface{}, &Role{}, &RoleMember{}, &RoleInstance{}, &LdapServer{}, &LdapRoleMapping{}}
 }
 
 // AcmeProxyPolicy allows the ACME proxy's clients in Sources (any when

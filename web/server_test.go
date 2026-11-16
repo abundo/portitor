@@ -19,13 +19,10 @@ import (
 
 	"github.com/labstack/echo/v5"
 	"golang.org/x/crypto/bcrypt"
-	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
 
 	"github.com/abundo/portitor/internal/agent"
 	"github.com/abundo/portitor/internal/builder"
 	"github.com/abundo/portitor/internal/datastore"
-	"github.com/abundo/portitor/internal/dbmigrate"
 	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/internal/ipam"
 	"github.com/abundo/portitor/internal/render"
@@ -60,14 +57,10 @@ func newEnvIn(t *testing.T, dir string) *testEnv {
 	}
 	path := filepath.Join(dir, "portitor.db")
 	cfg.DB.Path = path
-	db, err := dbmigrate.Open(path, &gorm.Config{Logger: logger.Discard})
-	if err != nil {
+	srv := NewServer(cfg)
+	if err := srv.Ready(); err != nil {
 		t.Fatal(err)
 	}
-	if err := dbmigrate.Up(db); err != nil {
-		t.Fatal(err)
-	}
-	srv := NewServer(cfg, db)
 	// Most tests use several instances.
 	if err := srv.editConfig(t.Context(), func(work *datastore.Tree) error {
 		return work.Set(datastore.Path{{Name: "settings"}, {Name: "virtual-firewalls"}}, "true")

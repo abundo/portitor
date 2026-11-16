@@ -4,18 +4,13 @@
 package builder
 
 import (
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
-	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
-
 	"github.com/abundo/portitor/internal/confview"
 	"github.com/abundo/portitor/internal/datastore"
 	"github.com/abundo/portitor/internal/datastore/sqlmap"
-	"github.com/abundo/portitor/internal/dbmigrate"
 	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/internal/records"
 	"github.com/abundo/portitor/internal/schema"
@@ -23,20 +18,24 @@ import (
 	"github.com/abundo/portitor/models"
 )
 
-func testDB(t *testing.T) *gorm.DB {
+// testDB is a test's records (the ids are kept in them).
+type testRecs struct{ rec *records.Files }
+
+func testDB(t *testing.T) *testRecs {
 	t.Helper()
-	db, err := dbmigrate.Open(filepath.Join(t.TempDir(), "db.sqlite"), &gorm.Config{Logger: logger.Discard})
-	if err != nil {
+	return &testRecs{rec: records.NewFiles("")}
+}
+
+// setID keeps the id of the entry at path.
+func setID(t *testing.T, db *testRecs, path, tbl string, id int64) {
+	t.Helper()
+	if err := db.rec.UpdateIDs(func(ids sqlmap.IDs) { ids.Set(path, tbl, id) }); err != nil {
 		t.Fatal(err)
 	}
-	if err := dbmigrate.Up(db); err != nil {
-		t.Fatal(err)
-	}
-	return db
 }
 
 // testTrees are the configuration trees the tests make, by database.
-var testTrees = map[*gorm.DB]*testTree{}
+var testTrees = map[*testRecs]*testTree{}
 
 type testTree struct {
 	tree *datastore.Tree
@@ -47,7 +46,7 @@ type testTree struct {
 // mustCreate makes v: a row of the database, or of a table of the
 // configuration an entry of the test's tree, with the id the table would
 // have given it (kept in config_ids).
-func mustCreate(t *testing.T, db *gorm.DB, v any) {
+func mustCreate(t *testing.T, db *testRecs, v any) {
 	t.Helper()
 	tbl, row, err := confview.RowOf(v)
 	if err != nil {
@@ -58,15 +57,12 @@ func mustCreate(t *testing.T, db *gorm.DB, v any) {
 		t.Fatal(err)
 	}
 	if m.Columns(tbl) == nil {
-		if err := db.Create(v).Error; err != nil {
-			t.Fatal(err)
-		}
-		return
+		t.Fatalf("%s is no list of the configuration", tbl)
 	}
 	tt := testTrees[db]
 	if tt == nil {
 		tree := datastore.New(schema.MustLoad())
-		tt = &testTree{tree: tree, add: m.NewAdder(recOf(db), tree, sqlmap.Index{}), ids: map[string]uint{}}
+		tt = &testTree{tree: tree, add: m.NewAdder(tree, sqlmap.Index{}), ids: map[string]uint{}}
 		testTrees[db] = tt
 		t.Cleanup(func() { delete(testTrees, db) })
 		// The first firewall, as an installation starts with.
@@ -74,9 +70,7 @@ func mustCreate(t *testing.T, db *gorm.DB, v any) {
 			t.Fatal(err)
 		}
 		tt.ids["firewalls"] = 1
-		if err := db.Exec("INSERT INTO config_ids (path, tbl, id) VALUES ('/firewall[name=firewall]', 'firewalls', 1)").Error; err != nil {
-			t.Fatal(err)
-		}
+		setID(t, db, "/firewall[name=firewall]", "firewalls", 1)
 	}
 	id := uint(0)
 	if n, ok := row["id"].(int64); ok {
@@ -93,9 +87,7 @@ func mustCreate(t *testing.T, db *gorm.DB, v any) {
 	if err != nil {
 		t.Fatalf("%s: %v", tbl, err)
 	}
-	if err := db.Exec("INSERT INTO config_ids (path, tbl, id) VALUES (?, ?, ?)", datastore.PathOf(n).String(tt.tree.Root.S), tbl, id).Error; err != nil {
-		t.Fatal(err)
-	}
+	setID(t, db, datastore.PathOf(n).String(tt.tree.Root.S), tbl, int64(id))
 }
 
 func ptr(v uint) *uint { return &v }
@@ -489,7 +481,7 @@ func TestBuildVRFRouting(t *testing.T) {
 }
 
 // input is the configuration a test made (mustCreate).
-func input(t *testing.T, db *gorm.DB) Input {
+func input(t *testing.T, db *testRecs) Input {
 	t.Helper()
 	tt := testTrees[db]
 	if tt == nil {
@@ -498,13 +490,4 @@ func input(t *testing.T, db *gorm.DB) Input {
 	return Input{Rec: recOf(db), Tree: tt.tree.Clone()}
 }
 
-// recs are the records of each test database (the ids live in them).
-var recs = map[*gorm.DB]*records.GORM{}
-
-func recOf(db *gorm.DB) *records.GORM {
-	if r, ok := recs[db]; ok {
-		return r
-	}
-	recs[db] = records.NewGORM(db, "")
-	return recs[db]
-}
+func recOf(db *testRecs) *records.Files { return db.rec }

@@ -11,8 +11,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/abundo/portitor/internal/datastore"
-
 	"github.com/abundo/portitor/internal/agentapi"
 	"github.com/abundo/portitor/internal/builder"
 	"github.com/abundo/portitor/internal/ldapauth"
@@ -292,39 +290,5 @@ func TestDirectoryServersInTheTree(t *testing.T) {
 	}
 	if servers, _ := env.srv.enabledDirectoryServers(context.Background()); len(servers) != 1 || servers[0].Name != "one" {
 		t.Errorf("running's servers after the restore: %+v", servers)
-	}
-}
-
-// A backup from before the servers were in the tree has them in its
-// database: restoring it adopts them, with their ids.
-func TestRestoreAnOldBackupAdoptsTheServers(t *testing.T) {
-	env := newEnv(t)
-	tr, _ := env.srv.tree()
-	cand, _ := tr.store.Candidate(context.Background())
-	data, err := cand.JSON(datastore.JSONOptions{Secrets: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	// What the restored database holds: a row, as the old release wrote it.
-	if err := env.srv.db.Create(&models.LdapServer{Position: 1, Name: "old", Enabled: true, Host: "old.example.com", Port: 389, BaseDn: "dc=x", BindPassword: ""}).Error; err != nil {
-		t.Fatal(err)
-	}
-	var id uint
-	env.srv.db.Raw("SELECT id FROM ldap_servers WHERE name = 'old'").Scan(&id)
-	// And its users, the admin among them (the same, as a restore of one's
-	// own backup would be).
-	admin := env.userNamed("admin")
-	if err := env.srv.db.Exec("INSERT INTO users (id, username, password_hash, role) VALUES (?, ?, ?, 'admin')", admin.ID, admin.Username, admin.PasswordHash).Error; err != nil {
-		t.Fatal(err)
-	}
-	if err := env.srv.takeSnapshot(context.Background(), map[string][]byte{"candidate.json": data}, nil, true); err != nil {
-		t.Fatal(err)
-	}
-	got := env.servers()
-	if len(got) != 1 || got[0].Name != "old" || got[0].ID != id {
-		t.Fatalf("servers: %+v (row id %d)", got, id)
-	}
-	if servers, _ := env.srv.enabledDirectoryServers(context.Background()); len(servers) != 1 {
-		t.Errorf("running's servers: %+v", servers)
 	}
 }

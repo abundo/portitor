@@ -5,26 +5,20 @@ package web
 
 import (
 	"bytes"
-	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
-	"slices"
 	"strings"
 	"time"
 
 	"filippo.io/age"
 	"filippo.io/age/armor"
 	"github.com/labstack/echo/v5"
-	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
 
 	"github.com/abundo/portitor/internal/buildinfo"
 	"github.com/abundo/portitor/internal/datastore"
-	"github.com/abundo/portitor/internal/dbmigrate"
 )
 
 // A backup is a copy of the configuration's files (copybundle.go), encrypted
@@ -35,7 +29,7 @@ import (
 // by a release that kept the configuration in a database file is restored with
 // that release, which an update then follows.
 
-// backupMaxSize limits a restored database; the request carries it base64
+// backupMaxSize limits a restored backup; the request carries it base64
 // encoded in JSON.
 const backupMaxSize = 256 << 20
 
@@ -96,7 +90,7 @@ func encryptBackup(w io.Writer, data []byte, passphrase string) error {
 }
 
 // errOldBackup is the refusal of a backup that is a database file.
-var errOldBackup = errors.New("this backup is a database file, made by a release that kept the configuration there: restore it with that release (0.9.x), then update this one")
+var errOldBackup = errors.New("this backup is a database file, made by a release that kept the configuration there: restore it with that release (0.9.x), then update through 1.0.0")
 
 // isTar tells whether data starts like a tar archive.
 func isTar(data []byte) bool { return len(data) > 262 && string(data[257:262]) == "ustar" }
@@ -182,24 +176,6 @@ func (s *Server) handleRestore(c *echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{"restored": true})
 }
 
-// restore replaces this installation's state with the copy at path
-// (restoreDatabase), and its candidate with the copy's configuration,
-// fixed up by fix.
-func (s *Server) restore(ctx context.Context, path string, keeps []string, fix func(*datastore.Tree)) (*restoreResult, map[string][]byte, error) {
-	files, err := readSnapshot(path)
-	if err != nil {
-		return nil, nil, err
-	}
-	res, err := restoreDatabase(ctx, s.db, path, keeps)
-	if err != nil {
-		return nil, nil, err
-	}
-	if err := s.takeSnapshot(ctx, files, fix, slices.Contains(keeps, "firewalls")); err != nil {
-		return nil, nil, err
-	}
-	return res, files, nil
-}
-
 // firewallsHere puts what the configuration has on a firewall this
 // installation doesn't have on the first one, a default instance only
 // where that one has none.
@@ -236,215 +212,3 @@ func (s *Server) firewallsHere(tree *datastore.Tree) {
 type restoreError string
 
 func (e restoreError) Error() string { return string(e) }
-
-type restoreResult struct {
-	// SchemaVersion is the backup's schema version before migration.
-	SchemaVersion int64 `json:"schema_version"`
-	Migrated      bool  `json:"migrated"`
-}
-
-// restoreDatabase replaces the configuration in db with the database file
-// at path, which it checks and migrates first. It copies every table in
-// one transaction, except keeps (restoreKeeps for a backup) and the commit
-// number in settings, which stay those of this installation.
-func restoreDatabase(ctx context.Context, db *gorm.DB, path string, keeps []string) (*restoreResult, error) {
-	res, err := prepareRestore(path)
-	if err != nil {
-		return nil, err
-	}
-	var cur int64
-	if err := db.Table("settings").Select("COALESCE(MAX(last_commit), 0)").Scan(&cur).Error; err != nil {
-		return nil, err
-	}
-
-	sqlDB, err := db.DB()
-	if err != nil {
-		return nil, err
-	}
-	// ATTACH is per connection.
-	conn, err := sqlDB.Conn(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer conn.Close()
-	// The backup's schema must not run SQL functions (views, triggers).
-	if _, err := conn.ExecContext(ctx, "PRAGMA trusted_schema = OFF"); err != nil {
-		return nil, err
-	}
-	defer conn.ExecContext(context.WithoutCancel(ctx), "PRAGMA trusted_schema = ON")
-	if _, err := conn.ExecContext(ctx, "ATTACH DATABASE ? AS bk", path); err != nil {
-		return nil, err
-	}
-	defer conn.ExecContext(context.WithoutCancel(ctx), "DETACH DATABASE bk")
-
-	tables, err := queryStrings(ctx, conn, "SELECT name FROM main.sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
-	if err != nil {
-		return nil, err
-	}
-	cols := map[string][]string{}
-	for _, t := range tables {
-		if slices.Contains(keeps, t) {
-			continue
-		}
-		mine, err := queryStrings(ctx, conn, "SELECT name FROM pragma_table_info(?, 'main') ORDER BY name", t)
-		if err != nil {
-			return nil, err
-		}
-		theirs, err := queryStrings(ctx, conn, "SELECT name FROM pragma_table_info(?, 'bk') ORDER BY name", t)
-		if err != nil {
-			return nil, err
-		}
-		if !slices.Equal(mine, theirs) {
-			return nil, restoreError(fmt.Sprintf("the backup's table %s does not match this version's schema (only in the backup: %s; only here: %s)",
-				t, missing(theirs, mine), missing(mine, theirs)))
-		}
-		var kind string
-		if err := conn.QueryRowContext(ctx, "SELECT type FROM bk.sqlite_master WHERE name = ?", t).Scan(&kind); err != nil || kind != "table" {
-			return nil, restoreError(fmt.Sprintf("the backup's %s is not a table", t))
-		}
-		cols[t] = mine
-	}
-
-	tx, err := conn.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-	// Checked at commit: rows go in table by table, in any order.
-	if _, err := tx.ExecContext(ctx, "PRAGMA defer_foreign_keys = ON"); err != nil {
-		return nil, err
-	}
-	// Every table is cleared before any is filled: ON DELETE CASCADE acts
-	// at once, and would empty a table already filled.
-	for _, t := range tables {
-		if _, ok := cols[t]; !ok {
-			continue
-		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM main."`+t+`"`); err != nil {
-			return nil, fmt.Errorf("clear %s: %w", t, err)
-		}
-	}
-	for _, t := range tables {
-		c, ok := cols[t]
-		if !ok {
-			continue
-		}
-		list := `"` + strings.Join(c, `", "`) + `"`
-		// AUTOINCREMENT keeps its counter, so the ids of rows deleted
-		// here are not reused (rule ids mark connections).
-		if _, err := tx.ExecContext(ctx, `INSERT INTO main."`+t+`" (`+list+`) SELECT `+list+` FROM bk."`+t+`"`); err != nil {
-			return nil, fmt.Errorf("restore %s: %w", t, err)
-		}
-	}
-	// Users stay those of this installation: a membership of a user
-	// deleted since the backup goes with that user.
-	if _, err := tx.ExecContext(ctx, `DELETE FROM main.role_members WHERE user_id NOT IN (SELECT id FROM main.users)`); err != nil {
-		return nil, err
-	}
-	r, err := tx.ExecContext(ctx, `UPDATE main.settings SET last_commit = max(last_commit, ?) WHERE id = 1`, cur)
-	if err != nil {
-		return nil, err
-	}
-	if n, _ := r.RowsAffected(); n == 0 {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO main.settings (id, last_commit) VALUES (1, ?)`, cur); err != nil {
-			return nil, err
-		}
-	}
-	// What was on a firewall this installation doesn't have goes to the
-	// first one.
-	if _, err := tx.ExecContext(ctx, `UPDATE OR IGNORE main.known_interfaces SET firewall_id = (SELECT min(id) FROM main.firewalls)
-		WHERE firewall_id NOT IN (SELECT id FROM main.firewalls)`); err != nil {
-		return nil, err
-	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM main.known_interfaces WHERE firewall_id NOT IN (SELECT id FROM main.firewalls)`); err != nil {
-		return nil, err
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("restore: %w", err)
-	}
-	return res, nil
-}
-
-// prepareRestore checks the database file at path and migrates it to this
-// version's schema.
-func prepareRestore(path string) (*restoreResult, error) {
-	bk, err := dbmigrate.Open(path, &gorm.Config{Logger: logger.Discard})
-	if err != nil {
-		return nil, restoreError("not a readable SQLite database: " + err.Error())
-	}
-	sqlDB, err := bk.DB()
-	if err != nil {
-		return nil, err
-	}
-	defer sqlDB.Close()
-	if err := bk.Exec("PRAGMA trusted_schema = OFF").Error; err != nil {
-		return nil, restoreError("not a readable SQLite database: " + err.Error())
-	}
-	var check []string
-	if err := bk.Raw("PRAGMA integrity_check").Scan(&check).Error; err != nil {
-		return nil, restoreError("not a readable SQLite database: " + err.Error())
-	}
-	if len(check) != 1 || check[0] != "ok" {
-		return nil, restoreError("the backup database is damaged: " + strings.Join(check, "; "))
-	}
-	current, latest, err := dbmigrate.Versions(bk)
-	switch {
-	case err != nil:
-		return nil, restoreError("not a Portitor database: " + err.Error())
-	case current == 0:
-		return nil, restoreError("not a Portitor database")
-	case current > latest:
-		return nil, restoreError(fmt.Sprintf("the backup comes from a newer Portitor (schema %d, this version has %d); update first", current, latest))
-	}
-	res := &restoreResult{SchemaVersion: current}
-	if current < latest {
-		if err := dbmigrate.Up(bk); err != nil {
-			return nil, restoreError("migrating the backup: " + err.Error())
-		}
-		res.Migrated = true
-	}
-	var bad []map[string]any
-	if err := bk.Raw("PRAGMA foreign_key_check").Scan(&bad).Error; err != nil {
-		return nil, err
-	}
-	if len(bad) > 0 {
-		return nil, restoreError(fmt.Sprintf("the backup has %d rows with broken references", len(bad)))
-	}
-	return res, nil
-}
-
-// missing lists the names in a that b lacks, or "none".
-func missing(a, b []string) string {
-	var out []string
-	for _, n := range a {
-		if !slices.Contains(b, n) {
-			out = append(out, n)
-		}
-	}
-	if len(out) == 0 {
-		return "none"
-	}
-	return strings.Join(out, ", ")
-}
-
-func queryStrings(ctx context.Context, conn querier, query string, args ...any) ([]string, error) {
-	rows, err := conn.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []string
-	for rows.Next() {
-		var v string
-		if err := rows.Scan(&v); err != nil {
-			return nil, err
-		}
-		out = append(out, v)
-	}
-	return out, rows.Err()
-}
-
-// querier runs a query: a connection or a transaction.
-type querier interface {
-	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
-}

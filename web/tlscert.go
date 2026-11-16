@@ -29,7 +29,7 @@ type certAgent interface {
 // tlsCert serves HTTPS for portitor-web: the certificate chosen under
 // Settings (Portitor web, settings.web_certificate_id), fetched from the
 // agent, or tls_cert while none is chosen or fetched yet. The last one
-// fetched is kept next to the database (0600), so a restart while the agent
+// fetched is kept in the data directory (0600), so a restart while the agent
 // is unreachable still has it.
 type tlsCert struct {
 	s     *Server

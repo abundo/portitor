@@ -5,18 +5,16 @@ package web
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"io"
 	"net/http"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
 	"filippo.io/age"
-	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
-
-	"github.com/abundo/portitor/internal/dbmigrate"
+	"github.com/abundo/portitor/internal/datastore"
 )
 
 const testPassphrase = "a long enough passphrase"
@@ -45,7 +43,11 @@ func objectNames(t *testing.T, env *testEnv) []string {
 
 func TestBackupRestore(t *testing.T) {
 	env := newEnv(t)
+	if err := env.srv.ensureDefaultInstance(); err != nil {
+		t.Fatal(err)
+	}
 	env.post("host", map[string]any{"name": "nas", "addresses": []string{"192.168.1.10"}})
+	env.post("instance=main/rule", map[string]any{"chain": "input", "action": "accept", "enabled": true})
 	env.do("PUT", "/api/settings", map[string]any{"wg_endpoint_host": "old.example.com"})
 	env.do("PUT", "/api/firewalls/1", map[string]any{"name": "firewall", "agent_url": "https://10.0.0.1:8443"})
 	// Role memberships come back; one of a user deleted since the backup
@@ -73,6 +75,8 @@ func TestBackupRestore(t *testing.T) {
 
 	// Change things after the backup.
 	env.post("host", map[string]any{"name": "printer", "addresses": []string{"192.168.1.20"}})
+	printerID := env.rowID("address_objects", "printer")
+	ruleAfter := env.post("instance=main/rule", map[string]any{"chain": "input", "action": "accept", "enabled": true})
 	env.do("PUT", "/api/settings", map[string]any{"wg_endpoint_host": "new.example.com"})
 	env.do("PUT", "/api/firewalls/1", map[string]any{"name": "firewall", "agent_url": "https://10.0.0.2:8443", "agent_token": "new-token"})
 	_ = env.srv.rec.SetLastCommit(7)
@@ -131,12 +135,14 @@ func TestBackupRestore(t *testing.T) {
 		t.Errorf("session after restore: %d", rec.Code)
 	}
 	// A new row does not reuse the id of a row the restore removed.
-	var printerID, next uint
-	env.srv.db.Raw("SELECT seq FROM sqlite_sequence WHERE name = 'address_objects'").Scan(&printerID)
 	env.post("host", map[string]any{"name": "scanner", "addresses": []string{"192.168.1.30"}})
-	next = env.rowID("address_objects", "scanner")
+	next := env.rowID("address_objects", "scanner")
 	if next <= printerID {
 		t.Errorf("id %d reused (sequence was %d)", next, printerID)
+	}
+	// Nor a rule (its id is its connections' mark) one made since.
+	if rule := env.post("instance=main/rule", map[string]any{"chain": "input", "action": "drop", "enabled": true}); rule <= ruleAfter || len(rule) < len(ruleAfter) {
+		t.Errorf("rule id %s after the restore, %s was given before it", rule, ruleAfter)
 	}
 
 	// The unencrypted archive restores too.
@@ -155,22 +161,23 @@ func TestBackupPassphrase(t *testing.T) {
 	}
 }
 
-func TestRestoreRefusesNewerSchema(t *testing.T) {
+// A copy without the global lists (global.json) is refused, and changes
+// nothing.
+func TestRestoreRefusesACopyWithoutGlobals(t *testing.T) {
 	env := newEnv(t)
-	path := filepath.Join(t.TempDir(), "snap.db")
-	if err := env.srv.db.Exec("VACUUM INTO ?", path).Error; err != nil {
-		t.Fatal(err)
-	}
-	// Pretend the backup comes from a later version.
-	bk, err := dbmigrate.Open(path, &gorm.Config{Logger: logger.Discard})
+	tr, _ := env.srv.tree()
+	cand, _ := tr.store.Candidate(context.Background())
+	data, err := cand.JSON(datastore.JSONOptions{Secrets: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	bk.Exec("INSERT INTO goose_db_version (version_id, is_applied) VALUES (99999, 1)")
-	sqlDB, _ := bk.DB()
-	sqlDB.Close()
-	_, err = restoreDatabase(t.Context(), env.srv.db, path, restoreKeeps)
-	if err == nil || !strings.Contains(err.Error(), "newer Portitor") {
-		t.Errorf("newer schema: %v", err)
+	env.post("host", map[string]any{"name": "nas", "addresses": []string{"192.168.1.10"}})
+	err = env.srv.takeSnapshot(context.Background(), map[string][]byte{"candidate.json": data, "entry-ids.json": []byte("{}")}, nil, true)
+	var re restoreError
+	if !errors.As(err, &re) {
+		t.Fatalf("a copy without global.json: %v", err)
+	}
+	if got := objectNames(t, env); strings.Join(got, ",") != "nas" {
+		t.Errorf("the refused copy changed the candidate: %v", got)
 	}
 }

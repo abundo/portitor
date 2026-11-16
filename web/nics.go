@@ -23,7 +23,7 @@ import (
 type nicSync struct {
 	// Imported: new interfaces created in the default instance.
 	Imported []string `json:"imported"`
-	// Missing: physical interfaces in the database the firewall does not have.
+	// Missing: physical interfaces in the configuration the firewall does not have.
 	Missing []missingNIC `json:"missing"`
 	// Problems: interfaces or addresses that could not be imported.
 	Problems []string `json:"problems"`
@@ -40,7 +40,7 @@ type missingNIC struct {
 //
 // An imported interface mirrors what is configured now (link state,
 // static addresses), so that deploying does not take down, say,
-// the management port. Each name is imported once (models.KnownInterface):
+// the management port. Each name is imported once (known-nics.json, records.KnownNICs):
 // deleting the interface afterwards sticks. Interfaces in instance
 // namespaces were put there by a deploy, so they are declared already.
 func (s *Server) syncNICs(firewallID uint, nics []agentapi.NICStatus) (*nicSync, error) {
