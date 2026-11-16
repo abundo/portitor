@@ -29,6 +29,18 @@ const updateTimeout = 5 * 60 * 1000
 
 const jobs = computed(() => Object.fromEntries((sys.value?.jobs ?? []).map((j) => [j.name, j])))
 const running = computed(() => (sys.value?.jobs ?? []).some((j) => j.state === 'running'))
+// The jobs' output is one card with a tab per job: the one picked, else the
+// running one, else the one started last.
+const jobList = computed(() =>
+  [...(sys.value?.jobs ?? [])].sort((a, b) => (b.started ?? '').localeCompare(a.started ?? '')),
+)
+const pickedJob = ref('')
+const shownJob = computed(
+  () =>
+    jobList.value.find((j) => j.name === pickedJob.value) ??
+    jobList.value.find((j) => j.state === 'running') ??
+    jobList.value[0],
+)
 const releases = computed(() => sys.value?.releases?.releases ?? [])
 const installed = computed(() => sys.value?.releases?.installed ?? {})
 const shownReleases = computed(() => {
@@ -421,20 +433,33 @@ async function reboot() {
       </div>
     </div>
 
-    <div v-for="j in sys?.jobs ?? []" :key="j.name" class="card">
-      <div class="mb-2 flex items-center gap-3">
-        <div class="font-semibold">{{ jobTitle[j.name] ?? j.name }}</div>
-        <UBadge :color="stateColor(j.state)" variant="subtle" :label="j.state" />
-        <span class="text-xs text-muted">
-          <template v-if="j.started">started {{ when(j.started) }}</template>
-          <template v-if="j.finished"> · finished {{ when(j.finished) }}</template>
-        </span>
+    <div v-if="jobList.length" class="card">
+      <div class="mb-2 flex flex-wrap items-center gap-2">
+        <div class="mr-2 font-semibold">Output</div>
+        <UButton
+          v-for="j in jobList"
+          :key="j.name"
+          size="sm"
+          :variant="j.name === shownJob?.name ? 'soft' : 'ghost'"
+          :color="j.name === shownJob?.name ? 'primary' : 'neutral'"
+          @click="pickedJob = j.name"
+        >
+          {{ jobTitle[j.name] ?? j.name }}
+          <UBadge :color="stateColor(j.state)" variant="subtle" size="sm" :label="j.state" />
+        </UButton>
       </div>
-      <pre
-        v-if="j.output"
-        class="max-h-96 overflow-auto rounded bg-elevated p-3 font-mono text-xs whitespace-pre-wrap"
-        >{{ terminalText(j.output) }}</pre
-      >
+      <template v-if="shownJob">
+        <div class="mb-2 text-xs text-muted">
+          <template v-if="shownJob.started">started {{ when(shownJob.started) }}</template>
+          <template v-if="shownJob.finished"> · finished {{ when(shownJob.finished) }}</template>
+        </div>
+        <pre
+          v-if="shownJob.output"
+          class="max-h-96 overflow-auto rounded bg-elevated p-3 font-mono text-xs whitespace-pre-wrap"
+          >{{ terminalText(shownJob.output) }}</pre
+        >
+        <div v-else class="text-sm text-muted">No output.</div>
+      </template>
     </div>
   </div>
 </template>
