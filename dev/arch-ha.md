@@ -40,7 +40,21 @@ epoch). An open host arms `/dev/watchdog` (2 s, softdog if there is nothing bett
 fed by that loop alone; with none, or `nowayout`, it won't open on a vote, only on
 the console's (`portitor request ha active`). Apply loads the gate after moving a
 device and before it comes up; `gate.check` looks for devices a closed gate lost
-(6.12 detaches them) every second. The host's own traffic uses table
+(6.12 detaches them) on each link event of a gated device (`gatewatch.go`) and
+every second. So that a device something else brings up in that window passes
+nothing, a closed gate has a second layer in the same transaction: `inet`, `arp`
+and `bridge` tables `portitor_gate` (`render.GateFamilies`, priority -500, ahead
+of defrag, conntrack and the raw chains) that drop by the names of the gate devices
+and those stacked on them (`fwconfig.Instance.GateCover`, kept in
+`gate.json.cover`); they hook the namespace, not a device, so nothing detaches
+them, and they are deleted when the gate opens. A kernel that refuses them gets the
+netdev gate alone, logged. Closed, a local send out a traffic interface fails with
+`EPERM` (the netdev gate alone dropped it silently): the RA sender takes that as
+held (`dhcpd.heldByGate`) and keeps its schedule; FRR may log send errors on a
+standby. Packet sockets (the DHCPv4 client, GARP) pass the second
+layer: in that window only the netdev gate would hold them. `dev/lab/gate-test.py`'s
+`test_churn` measures it (`GATE_RULES`: the ruleset `render.Gate` emits,
+`PORTITOR_GATE_OUT=<file> go test ./internal/render -run TestGate`). The host's own traffic uses table
 `fwconfig.HAMgmtTable`: `from <management address>` always, and everything from
 `iif lo` while closed (proto 99, `hamgmt.go`). At takeover (`onTakeover`): GARP and
 NA twice, the DHCP server sends its initial RAs again (control op `advertise`), BGP is cleared. The witness

@@ -339,7 +339,8 @@ rows (`confview`) are a view that code reads, never edits.
   each namespace, its loop devices (`n64-*`) and the `ip rule`s with protocol 99
   (NAT64's IPv4 ones, the VRF source rules at `agent.VRFSourcePref`, the policy
   routes' at `fwconfig.PolicyRouteTable(i)` and an HA pair's at 1000-1002), the
-  netdev table `portitor_gate` with the policy routes' tables,
+  netdev table `portitor_gate` and its second layer, the `inet`, `arp` and
+  `bridge` tables `portitor_gate` (`render.GateFamilies`), with the policy routes' tables,
   and, without EVPN, the all-zero forwarding entries (flood list) of its vxlan devices. Leave everything else alone (docker, libvirt, other tables).
   Accept rules set the connection mark (`ct mark`) to the rule's id, so the
   rule counters (`render.RuleCounter`) count whole connections; the agent owns

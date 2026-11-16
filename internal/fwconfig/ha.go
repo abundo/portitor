@@ -108,6 +108,37 @@ func (in *Instance) GateDevices() []string {
 	return out
 }
 
+// GateCover are the device names the gate's second layer drops on (render.Gate):
+// the gate devices and every device stacked on them, VLANs on a parent and
+// bridges with a member among them, transitively. The netdev gate on the
+// lowest device holds them all, but the namespace-wide hooks see the upper
+// device's name, and kernel 6.12 can detach the netdev gate from a device
+// that is made again or moved.
+func (in *Instance) GateCover() []string {
+	out := in.GateDevices()
+	for {
+		grew := false
+		for _, ifc := range in.Interfaces {
+			if slices.Contains(out, ifc.Name) {
+				continue
+			}
+			stacked := ifc.Kind == KindVLAN && slices.Contains(out, ifc.Parent)
+			if ifc.Kind == KindBridge {
+				for _, m := range ifc.Members {
+					stacked = stacked || slices.Contains(out, m)
+				}
+			}
+			if stacked {
+				out = append(out, ifc.Name)
+				grew = true
+			}
+		}
+		if !grew {
+			return out
+		}
+	}
+}
+
 // MonitoredDevices are the enabled devices whose carrier counts in the
 // host's health.
 func (in *Instance) MonitoredDevices() []string {

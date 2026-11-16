@@ -303,6 +303,161 @@ def test_speed():
     report("open or close takes well under 100 ms", max(times) < 100)
 
 
+ETH_P_ALL = 0x0003
+
+
+def held_devices(ns):
+    """The devices both gate chains hold, read as the agent's gate.check does."""
+    p = sh(ns, "nft -j list table netdev portitor_gate", check=False)
+    if p.returncode:
+        return set()
+    import json
+    chains = [o["chain"] for o in json.loads(p.stdout)["nftables"] if "chain" in o]
+    sets = []
+    for c in chains:
+        d = c.get("dev", [])
+        sets.append({d} if isinstance(d, str) else set(d))
+    return set.intersection(*sets) if sets else set()
+
+
+def churn_gate(ns, devs):
+    """The gate under test: what render.Gate emits when GATE_RULES names a
+    file of it (PORTITOR_GATE_OUT=<file> go test ./internal/render -run
+    TestGate; for a0 and its VLAN a0.5), else the netdev gate alone."""
+    rules = os.environ.get("GATE_RULES")
+    if not rules:
+        gate(ns, devs)
+        return
+    assert devs == ["a0"]
+    with open(rules) as f:
+        sh(ns, "nft -f -", stdin=f.read())
+
+
+def repair(ns, devs):
+    """The agent's gate.check: a lost device down, the gate again, then up."""
+    have = sh(ns, "ip -o link show", check=False).stdout
+    lost = [d for d in devs if f" {d}:" in have or f" {d}@" in have]
+    lost = [d for d in lost if d not in held_devices(ns)]
+    if not lost:
+        return
+    for d in lost:
+        sh(ns, f"ip link set dev {d} down", check=False)
+    sh(ns, "nft delete table netdev portitor_gate", check=False)
+    churn_gate(ns, devs)
+    for d in lost:
+        sh(ns, f"ip link set dev {d} up", check=False)
+
+
+def test_churn():
+    """Zero frames escape a closed standby while its device is made again or
+    moved out and back, with the agent's watch repairing the gate; once with
+    the repair alone raising the device, once with another program (ifupdown,
+    networkd, a person) raising it the moment it appears."""
+    import threading
+    cycles = int(os.environ.get("GATE_CHURN_CYCLES", "40"))
+    info("churn gate", "render.Gate from " + os.environ["GATE_RULES"] if os.environ.get("GATE_RULES") else "the netdev gate alone")
+    for rogue in (False, True):
+        for how in ("recreate", "move", "vlan"):
+            topo()
+            target = "192.0.2.1"
+            if how == "vlan":
+                # Moving a0 out deletes its VLAN: it is made again once a0 is
+                # back, and the second layer holds it by name (GateCover).
+                sh("peer", "ip link add link b0 name b0.5 type vlan id 5 && ip addr add 198.51.100.2/24 dev b0.5 && ip link set b0.5 up")
+                target = "198.51.100.1"
+            sh(None, "ip netns del vf", check=False)
+            sh(None, "ip netns add vf")
+            churn_gate("sb", ["a0"])
+            # Namespace-wide counters: they hook no device, so nothing detaches
+            # them, and they come after the gate's second layer (priority -500).
+            sh("sb", "nft -f -", stdin="""table inet probe {
+  chain pre {
+    type filter hook prerouting priority -450
+    iifname { "a0", "a0.5" } counter
+  }
+}
+table arp probe {
+  chain in {
+    type filter hook input priority -400
+    iifname { "a0", "a0.5" } counter
+  }
+}
+""")
+            stop = threading.Event()
+            out = []
+            with In("peer"):
+                cap = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.htons(ETH_P_ALL))
+            cap.settimeout(0.05)
+
+            def capture():
+                while not stop.is_set():
+                    try:
+                        f, addr = cap.recvfrom(2048)
+                    except (TimeoutError, socket.timeout):
+                        continue
+                    # Every frame arriving at the peer, LLDP aside: only the
+                    # standby is on b0, and a device made again may send
+                    # before its MAC address is set.
+                    if addr[0] == "b0" and addr[2] != socket.PACKET_OUTGOING and f[12:14] != b"\x88\xcc":
+                        out.append(f)
+
+            mon = subprocess.Popen(["ip", "-n", "sb", "monitor", "link"], stdout=subprocess.PIPE, text=True)
+
+            def watch():
+                for line in mon.stdout:
+                    if "a0" in line:
+                        try:
+                            repair("sb", ["a0"])
+                        except RuntimeError:
+                            # The device went away meanwhile; the agent logs and tries again.
+                            repair("sb", ["a0"]) if "a0" in sh("sb", "ip -o link show", check=False).stdout else None
+
+            def hammer():
+                # Another program raising the device whenever it is down,
+                # racing the repair's own down as well.
+                while not stop.is_set():
+                    sh("sb", "ip link set a0 up; ip link set a0.5 up", check=False)
+
+            threads = [threading.Thread(target=capture, daemon=True), threading.Thread(target=watch, daemon=True)]
+            if rogue:
+                threads.append(threading.Thread(target=hammer, daemon=True))
+            for t in threads:
+                t.start()
+            pinger = subprocess.Popen(["ip", "netns", "exec", "peer", "ping", "-q", "-i", "0.002", "-W", "1", target],
+                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            for _ in range(cycles):
+                if how == "recreate":
+                    sh("sb", "ip link del a0", check=False)
+                    sh("sb", f"ip link add a0 type veth peer name b0 && ip link set a0 address {MAC_SB} "
+                             f"&& ip addr add 192.0.2.1/24 dev a0 && ip link set b0 netns peer")
+                    sh("peer", f"ip link set b0 address {MAC_PEER} && ip addr add 192.0.2.2/24 dev b0 && ip link set b0 up")
+                else:
+                    sh("sb", "ip link set a0 netns vf")
+                    sh("vf", "ip link set a0 netns sb")
+                    sh("sb", "ip addr add 192.0.2.1/24 dev a0", check=False)
+                    if how == "vlan":
+                        sh("sb", "ip link add link a0 name a0.5 type vlan id 5 && ip addr add 198.51.100.1/24 dev a0.5", check=False)
+                time.sleep(0.05)
+            time.sleep(0.5)
+            pinger.terminate()
+            pinger.wait()
+            stop.set()
+            mon.terminate()
+            for t in threads:
+                t.join(2)
+            import json
+            ingress = 0
+            for fam in ("inet", "arp"):
+                rs = json.loads(sh("sb", f"nft -j list table {fam} probe").stdout)["nftables"]
+                ingress += sum(r["rule"]["expr"][-1]["counter"]["packets"] for r in rs if "rule" in r)
+            held = "a0" in held_devices("sb")
+            who = "another program raises it" if rogue else "only the repair raises it"
+            detail = f"{len(out)} frames out ({', '.join(describe(out)) or '-'}), {ingress} packets in, over {cycles} cycles"
+            report(f"churn, device { {'recreate': 'made again', 'move': 'moved out and back', 'vlan': 'moved out and back, its VLAN made again'}[how] }, {who}: nothing escapes",
+                   not out and ingress == 0, detail)
+            report(f"churn, {how}, {who}: the gate holds the device afterwards", held)
+
+
 def garp(ns, dev, mac, ip):
     m, a = bytes.fromhex(mac.replace(":", "")), socket.inet_aton(ip)
     pkt = BROADCAST + m + b"\x08\x06" + struct.pack("!HHBBH", 1, 0x0800, 6, 4, 1) + m + a + b"\0" * 6 + a
@@ -370,7 +525,7 @@ def main():
     subprocess.run(["mount", "-t", "tmpfs", "tmpfs", "/run"], check=True)
     os.makedirs("/run/netns", exist_ok=True)
     print(f"kernel {os.uname().release}, {sh(None, 'nft --version').stdout.strip()}", flush=True)
-    for test in (test_ping, test_boot, test_packet_sockets, test_stacked, test_device_lifecycle, test_commit, test_speed, test_failover):
+    for test in (test_ping, test_boot, test_packet_sockets, test_stacked, test_device_lifecycle, test_commit, test_churn, test_speed, test_failover):
         print(f"--- {test.__name__}", flush=True)
         try:
             test()

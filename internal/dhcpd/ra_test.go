@@ -8,7 +8,9 @@ import (
 	"encoding/hex"
 	"net"
 	"net/netip"
+	"os"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -204,5 +206,14 @@ func TestDeprecate(t *testing.T) {
 	}
 	if g := deprecate(gone, cur, cur, now.Add(3*time.Hour)); len(g) != 0 {
 		t.Fatalf("expired: %v", g)
+	}
+}
+
+func TestHeldByGate(t *testing.T) {
+	if !heldByGate(&net.OpError{Op: "write", Err: os.NewSyscallError("sendmsg", syscall.EPERM)}) {
+		t.Error("EPERM from the ruleset counts as held")
+	}
+	if heldByGate(&net.OpError{Op: "write", Err: os.NewSyscallError("sendmsg", syscall.ENETDOWN)}) {
+		t.Error("ENETDOWN is a failure to retry")
 	}
 }

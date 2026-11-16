@@ -686,7 +686,7 @@ func (a *Agent) applyGate(ctx context.Context, exp *fwconfig.Document, in *fwcon
 			down = append(down, ifc.Name)
 		}
 	}
-	if err := a.gate.set(ctx, ns, devs, down); err != nil {
+	if err := a.gate.set(ctx, ns, devs, in.GateCover(), down); err != nil {
 		return fmt.Errorf("instance %s: the HA gate: %w", in.Name, err)
 	}
 	return nil

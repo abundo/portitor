@@ -199,3 +199,22 @@ func TestHALinkAddress(t *testing.T) {
 		}
 	}
 }
+
+func TestGateCover(t *testing.T) {
+	in := Instance{Interfaces: []Interface{
+		{Name: "br0", Kind: KindBridge, Members: []string{"ens22.5"}},
+		{Name: "ens18", Kind: KindPhysical},
+		{Name: "ens20", Kind: KindPhysical, HARole: HARoleLink},
+		{Name: "ens20.7", Kind: KindVLAN, Parent: "ens20"},
+		{Name: "ens22", Kind: KindPhysical},
+		{Name: "ens22.5", Kind: KindVLAN, Parent: "ens22"},
+		{Name: "ens22.5.9", Kind: KindVLAN, Parent: "ens22.5"},
+		{Name: "wg0", Kind: KindWireGuard},
+	}}
+	got := in.GateCover()
+	slices.Sort(got)
+	want := []string{"br0", "ens18", "ens22", "ens22.5", "ens22.5.9"}
+	if !slices.Equal(got, want) {
+		t.Errorf("GateCover = %v, want %v", got, want)
+	}
+}

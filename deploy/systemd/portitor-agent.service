@@ -15,6 +15,10 @@ Type=simple
 ExecStart=/usr/bin/portitor-agent -f /etc/portitor/agent.yaml start
 Restart=on-failure
 RestartSec=5
+# SIGTERM to the agent alone: on a stop it hands over and closes the HA gate
+# with nft, which a signal to the whole cgroup would kill mid-close. The rest
+# is killed once the agent has exited.
+KillMode=mixed
 RuntimeDirectory=portitor
 RuntimeDirectoryPreserve=yes
 StateDirectory=portitor

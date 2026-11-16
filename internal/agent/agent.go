@@ -162,7 +162,7 @@ func (a *Agent) Start(ctx context.Context) error {
 		slog.Warn("unconfirmed change found at startup; rolling back", "generation", pending.Generation)
 		if pending.Previous != nil {
 			exp := pending.Previous.Expand()
-			a.ha.boot(ctx, pending.Previous.HA, gateDevices(&exp))
+			a.ha.boot(ctx, pending.Previous.HA, gateDevices(&exp), gateCover(&exp))
 			// The file stays until the previous config is back, so a
 			// failed restore is tried again at the next start.
 			if err := a.applyLocked(ctx, *pending.Previous); err != nil {
@@ -188,7 +188,7 @@ func (a *Agent) Start(ctx context.Context) error {
 	}
 	// Closed before anything else: a restarted agent has lost its leases.
 	exp := doc.Expand()
-	a.ha.boot(ctx, doc.HA, gateDevices(&exp))
+	a.ha.boot(ctx, doc.HA, gateDevices(&exp), gateCover(&exp))
 	slog.Info("re-applying last configuration", "generation", doc.Generation)
 	if err := a.applyLocked(ctx, doc); err != nil {
 		a.lastError = err.Error()

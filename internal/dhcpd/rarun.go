@@ -253,10 +253,22 @@ func (a *advertiser) write(msg []byte, dst net.IP) bool {
 	}
 	cm := &ipv6.ControlMessage{HopLimit: 255, Src: src.AsSlice(), IfIndex: a.index}
 	if _, err := a.conn.WriteTo(msg, cm, &net.IPAddr{IP: dst, Zone: a.name}); err != nil {
+		if heldByGate(err) {
+			slog.Debug("ra: held by the HA gate", "interface", a.name, "to", dst)
+			return true
+		}
 		slog.Warn("ra: not sent", "interface", a.name, "to", dst, "err", err)
 		return false
 	}
 	return true
+}
+
+// heldByGate says whether a send failed because the ruleset dropped it: on
+// a closed HA standby the gate's second layer does (render.Gate). That is
+// no failure to retry each second: the schedule goes on, and a takeover
+// sends the initial advertisements again (control op advertise).
+func heldByGate(err error) bool {
+	return errors.Is(err, syscall.EPERM)
 }
 
 // linkLocal is the interface's link-local address, once DAD is done.

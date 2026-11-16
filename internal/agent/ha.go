@@ -102,9 +102,12 @@ type haManager struct {
 	onActive   func()
 	onTakeover func()
 	// onLoose runs after the gate check closed devices it had lost: they
-	// came back without their addresses. reapplying keeps one at a time.
-	onLoose    func()
-	reapplying atomic.Bool
+	// came back without their addresses. reapplying keeps one at a time;
+	// reapplyAgain asks the running one for another, for devices lost
+	// while it ran (it may have read them before they went).
+	onLoose      func()
+	reapplying   atomic.Bool
+	reapplyAgain atomic.Bool
 	// syncCerts copies the peer's certificates, every haCertSync while
 	// the host is closed.
 	syncCerts func(context.Context, *fwconfig.HA)
@@ -142,7 +145,7 @@ func (h *haManager) heard(now time.Time, node string, epoch, term int64, active 
 
 // boot closes a restarted host's gates: it has forgotten its leases, and
 // waits out any promise it may have given, a handover's the longest.
-func (h *haManager) boot(ctx context.Context, cfg *fwconfig.HA, devs map[string][]string) {
+func (h *haManager) boot(ctx context.Context, cfg *fwconfig.HA, devs, cover map[string][]string) {
 	h.mu.Lock()
 	h.cfg = cfg
 	if cfg != nil {
@@ -154,7 +157,7 @@ func (h *haManager) boot(ctx context.Context, cfg *fwconfig.HA, devs map[string]
 		return
 	}
 	for ns, d := range devs {
-		if err := h.gate.set(ctx, ns, d, nil); err != nil {
+		if err := h.gate.set(ctx, ns, d, cover[ns], nil); err != nil {
 			slog.Error("ha: closing the gate at start", "netns", ns, "err", err)
 		}
 	}
@@ -661,14 +664,32 @@ func (h *haManager) checkGate(ctx context.Context) {
 		}
 		if len(loose) > 0 {
 			slog.Error("ha: the closed gate had lost interfaces; closed them again", "interfaces", loose)
-			if h.onLoose != nil && h.reapplying.CompareAndSwap(false, true) {
-				go func() {
-					defer h.reapplying.Store(false)
-					h.onLoose()
-				}()
-			}
+			h.reapply()
 		}
 	}
+}
+
+// reapply runs onLoose, or has the running one go again.
+func (h *haManager) reapply() {
+	if h.onLoose == nil {
+		return
+	}
+	h.reapplyAgain.Store(true)
+	if !h.reapplying.CompareAndSwap(false, true) {
+		return
+	}
+	go func() {
+		for {
+			for h.reapplyAgain.Swap(false) {
+				h.onLoose()
+			}
+			h.reapplying.Store(false)
+			// One asked between the last run and the store above.
+			if !h.reapplyAgain.Load() || !h.reapplying.CompareAndSwap(false, true) {
+				return
+			}
+		}
+	}()
 }
 
 // copyCerts copies the peer's certificates while the host is closed.
@@ -806,6 +827,20 @@ func gateDevices(exp *fwconfig.Document) map[string][]string {
 	for i := range exp.Instances {
 		in := &exp.Instances[i]
 		out[in.NetnsName()] = in.GateDevices()
+	}
+	return out
+}
+
+// gateCover are the names the gate's second layer drops on per namespace,
+// of an expanded document on an HA pair.
+func gateCover(exp *fwconfig.Document) map[string][]string {
+	out := map[string][]string{}
+	if exp.HA == nil {
+		return out
+	}
+	for i := range exp.Instances {
+		in := &exp.Instances[i]
+		out[in.NetnsName()] = in.GateCover()
 	}
 	return out
 }

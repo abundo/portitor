@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -26,15 +27,19 @@ import (
 // gateRunner fakes nft and ip for the gate: nft fails while refuse is set.
 type gateRunner struct {
 	refuse bool
-	loads  []string
-	cmds   []string
-	links  string
-	chains string
+	// noSecond: the namespace has no second layer (someone's nft took it).
+	noSecond bool
+	loads    []string
+	cmds     []string
+	links    string
+	chains   string
 }
 
 func (r *gateRunner) Run(ctx context.Context, ns, name string, args ...string) ([]byte, error) {
 	line := name + " " + strings.Join(args, " ")
 	switch {
+	case name == "nft" && r.noSecond && slices.Contains(args, "inet"):
+		return nil, errors.New("no such table")
 	case name == "nft":
 		return []byte(r.chains), nil
 	case strings.HasPrefix(line, "ip -j link"):
@@ -85,7 +90,7 @@ func TestGateCheck(t *testing.T) {
 		chains: `{"nftables":[{"chain":{"name":"ingress","dev":"ens22"}},{"chain":{"name":"egress","dev":"ens22"}}]}`,
 	}
 	g := newGate(r, filepath.Join(t.TempDir(), "gate.json"))
-	if err := g.set(t.Context(), "", []string{"ens18", "ens22"}, nil); err != nil {
+	if err := g.set(t.Context(), "", []string{"ens18", "ens22"}, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	r.loads = nil
@@ -119,7 +124,7 @@ func TestGateCheckBringsADeviceUpByTheDocument(t *testing.T) {
 		chains: `{"nftables":[{"chain":{"name":"ingress"}},{"chain":{"name":"egress"}}]}`,
 	}
 	g := newGate(r, filepath.Join(t.TempDir(), "gate.json"))
-	if err := g.set(t.Context(), "", []string{"lan", "off"}, []string{"off"}); err != nil {
+	if err := g.set(t.Context(), "", []string{"lan", "off"}, nil, []string{"off"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := g.check(t.Context()); err != nil {
@@ -133,7 +138,7 @@ func TestGateCheckBringsADeviceUpByTheDocument(t *testing.T) {
 func TestGateClosesByDevicesWhenNftFails(t *testing.T) {
 	r := &gateRunner{links: `[{"ifname":"ens18","flags":["UP"]}]`}
 	g := newGate(r, filepath.Join(t.TempDir(), "gate.json"))
-	if err := g.set(t.Context(), "", []string{"ens18"}, nil); err != nil {
+	if err := g.set(t.Context(), "", []string{"ens18"}, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	r.refuse = true
@@ -149,7 +154,7 @@ func TestGateRememberedAcrossRestarts(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "gate.json")
 	r := &gateRunner{}
 	g := newGate(r, file)
-	if err := g.set(t.Context(), "fw-a", []string{"ens20"}, nil); err != nil {
+	if err := g.set(t.Context(), "fw-a", []string{"ens20"}, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	// A host that left its pair finds the gate it must take away.
@@ -174,7 +179,7 @@ func TestGateRememberedAcrossRestarts(t *testing.T) {
 func TestGateClosedAfterLeavingAPair(t *testing.T) {
 	r := &gateRunner{}
 	g := newGate(r, filepath.Join(t.TempDir(), "gate.json"))
-	if err := g.set(t.Context(), "", []string{"ens18"}, nil); err != nil {
+	if err := g.set(t.Context(), "", []string{"ens18"}, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := g.setOpen(t.Context(), true); err != nil {
@@ -187,7 +192,7 @@ func TestGateClosedAfterLeavingAPair(t *testing.T) {
 		t.Error("still open after leaving")
 	}
 	r.loads = nil
-	if err := g.set(t.Context(), "", []string{"ens18"}, nil); err != nil {
+	if err := g.set(t.Context(), "", []string{"ens18"}, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if len(r.loads) != 1 || !strings.Contains(r.loads[0], "policy drop") {
@@ -712,7 +717,7 @@ func TestNoVoteAfterHandover(t *testing.T) {
 	}
 	// A restart may have forgotten a handover.
 	h := newTestHA(t, fwconfig.HASecondary)
-	h.boot(t.Context(), h.cfg, nil)
+	h.boot(t.Context(), h.cfg, nil, nil)
 	h.giveVote(4*time.Second, false)
 	if st := h.status(); st.VoteUntil != nil {
 		t.Errorf("took a vote after a restart: %+v", st)
@@ -778,5 +783,120 @@ func TestTakesLeases(t *testing.T) {
 	h.active = true
 	if h.takesLeases(9) == nil {
 		t.Error("the active host took leases")
+	}
+}
+
+// A kernel that refuses the second layer still gets the netdev gate, and an
+// open gate leaves no second layer behind to drop.
+func TestGateFallsBackToNetdev(t *testing.T) {
+	r := &secondRefuser{gateRunner: gateRunner{links: `[{"ifname":"ens18","flags":["UP"]}]`}}
+	g := newGate(r, filepath.Join(t.TempDir(), "gate.json"))
+	if err := g.set(t.Context(), "", []string{"ens18"}, []string{"ens18", "ens18.5"}, nil); err != nil {
+		t.Fatalf("closing: %v", err)
+	}
+	if len(r.loads) == 0 || !strings.Contains(r.loads[len(r.loads)-1], "policy drop;") {
+		t.Fatalf("no netdev gate: %q", r.loads)
+	}
+	r.loads = nil
+	if err := g.setOpen(t.Context(), true); err != nil {
+		t.Fatalf("opening: %v", err)
+	}
+	for _, fam := range []string{"inet", "arp", "bridge"} {
+		if !slices.ContainsFunc(r.loads, func(l string) bool { return strings.Contains(l, "delete table "+fam+" portitor_gate") }) {
+			t.Errorf("open leaves the %s table: %q", fam, r.loads)
+		}
+	}
+}
+
+// The second layer's names are remembered, and loaded with the gate.
+func TestGateCoverRemembered(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "gate.json")
+	r := &gateRunner{}
+	g := newGate(r, file)
+	if err := g.set(t.Context(), "fw-a", []string{"ens20"}, []string{"ens20", "br0"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	g = newGate(r, file)
+	r.loads = nil
+	if err := g.setOpen(t.Context(), false); err != nil {
+		t.Fatal(err)
+	}
+	if len(r.loads) != 1 || !strings.Contains(r.loads[0], `iifname { "ens20", "br0" } drop`) {
+		t.Errorf("loads %q", r.loads)
+	}
+}
+
+// secondRefuser refuses any transaction with the second layer in it.
+type secondRefuser struct{ gateRunner }
+
+func (r *secondRefuser) RunInput(ctx context.Context, ns string, stdin []byte, name string, args ...string) ([]byte, error) {
+	if name == "nft" && strings.Contains(string(stdin), "table inet portitor_gate {") {
+		return nil, errors.New("not supported")
+	}
+	return r.gateRunner.RunInput(ctx, ns, stdin, name, args...)
+}
+
+// A second layer someone took away is loaded again, with no device down.
+func TestGateCheckRestoresTheSecondLayer(t *testing.T) {
+	r := &gateRunner{
+		links:  `[{"ifname":"ens18","flags":["UP"]}]`,
+		chains: `{"nftables":[{"chain":{"name":"ingress","dev":"ens18"}},{"chain":{"name":"egress","dev":"ens18"}}]}`,
+	}
+	g := newGate(r, filepath.Join(t.TempDir(), "gate.json"))
+	if err := g.set(t.Context(), "", []string{"ens18"}, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	r.loads, r.noSecond = nil, true
+	loose, err := g.check(t.Context())
+	if err != nil || len(loose) != 0 {
+		t.Fatalf("loose %v, err %v", loose, err)
+	}
+	if len(r.loads) != 1 || !strings.Contains(r.loads[0], "table inet portitor_gate {") {
+		t.Errorf("loads %q", r.loads)
+	}
+	if len(r.cmds) != 0 {
+		t.Errorf("commands %q", r.cmds)
+	}
+}
+
+// Once the kernel refused the second layer, check doesn't try it each
+// second; an apply does.
+func TestGateRefusedSecondLayerNotRetried(t *testing.T) {
+	r := &secondRefuser{gateRunner: gateRunner{links: `[{"ifname":"ens18","flags":["UP"]}]`, noSecond: true,
+		chains: `{"nftables":[{"chain":{"name":"ingress","dev":"ens18"}},{"chain":{"name":"egress","dev":"ens18"}}]}`}}
+	g := newGate(r, filepath.Join(t.TempDir(), "gate.json"))
+	if err := g.set(t.Context(), "", []string{"ens18"}, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	r.loads = nil
+	if _, err := g.check(t.Context()); err != nil || len(r.loads) != 0 {
+		t.Errorf("err %v, loads %q", err, r.loads)
+	}
+}
+
+// Devices lost while a re-apply runs get one more: the running one may
+// have read them before they went.
+func TestReapplyAgainWhileRunning(t *testing.T) {
+	h := &haManager{}
+	started, release := make(chan struct{}, 4), make(chan struct{})
+	var runs atomic.Int32
+	h.onLoose = func() {
+		runs.Add(1)
+		started <- struct{}{}
+		<-release
+	}
+	h.reapply()
+	<-started
+	h.reapply() // lost again while the first runs
+	h.reapply() // and again: still one more, not two
+	release <- struct{}{}
+	<-started
+	release <- struct{}{}
+	deadline := time.Now().Add(2 * time.Second)
+	for h.reapplying.Load() && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if n := runs.Load(); n != 2 {
+		t.Errorf("onLoose ran %d times, want 2", n)
 	}
 }
