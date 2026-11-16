@@ -157,7 +157,7 @@ else
 	tar -czf "$payload/portitor.tar.gz" -C "$stage" .
 fi
 cp iso/late.sh iso/target.sh iso/packages.txt iso/portitor-setup.py iso/portitor-setup.bash iso/portitor-firstboot.service \
-	iso/portitor-recover.sh iso/portitor-recovery.service iso/42_portitor_recovery "$payload/"
+	iso/portitor-recover.sh iso/portitor-recovery.service iso/portitor-issue.sh iso/portitor-issue.service iso/42_portitor_recovery "$payload/"
 # The setup shows the release's version at the bottom right.
 sed -i "s/^SETUP_VERSION = .*/SETUP_VERSION = \"$version\"/" "$payload/portitor-setup.py"
 cp iso/preseed.cfg iso/grub.cfg iso/isolinux.cfg "$work/"

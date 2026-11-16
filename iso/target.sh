@@ -63,6 +63,10 @@ systemctl enable portitor-firstboot.service
 install -D -m 0755 "$d/portitor-recover.sh" /usr/sbin/portitor-recover
 install -D -m 0644 "$d/portitor-recovery.service" /etc/systemd/system/portitor-recovery.service
 install -D -m 0755 "$d/42_portitor_recovery" /etc/grub.d/42_portitor_recovery
+# The interfaces and their addresses on the login screen.
+install -D -m 0755 "$d/portitor-issue.sh" /usr/sbin/portitor-issue
+install -D -m 0644 "$d/portitor-issue.service" /etc/systemd/system/portitor-issue.service
+systemctl enable portitor-issue.service
 # A serial console beside the screen: the GRUB menu, the kernel's messages and
 # a login on ttyS0 (systemd's getty generator starts one for a console= on a
 # serial port). tty0 is named last, so /dev/console, and the first-boot setup
