@@ -7,7 +7,7 @@ Architecture and conventions for agents working in this repository. Setup, build
 and test commands are in [DEV.md](DEV.md); the product overview and security model
 are in [README.md](README.md).
 
-For any critical decision, call advisor on Fable 5.1
+For any critical decision, call the advisor.
 
 ## Design before features
 
@@ -27,7 +27,7 @@ cleanly now. Go on only once they've chosen.
 | `cmd/portitor-web` | One binary, two programs by name: `portitor-web` is the portal (`portal.go`: `start`, `witness`, `check`, `createadmin`, `add-firewall`, `add-witness`); run as `portitor-config` (a symlink, `main.go`) the firewall's configuration, GUI and API: `start`, `migrate`, `createadmin`, `set-agent`, `agent-url`, `bootstrap` (ISO first boot), `fingerprint`, `portal-info`, `secondary-info`, `add-secondary`, `witness-string`, `promote`, `import-vf` and the console commands (`console.go`, `cli` among them) |
 | `cmd/portitor-agent` | Agent daemon on the firewall: `start`, `init`, `render`, `netns-exec`; run as `portitor` (a symlink, `cli.go`) it is a CLI over the agent's root-only socket `<run_dir>/agent.sock`: `show ...` over the GET routes, and actions that change no configuration (`confirm`, `rollback`, `request dhcp renew`, `request iplist update`, `request blocklist update`, `clear connections`) over the POST routes in `localWrites` |
 | `internal/fwconfig` | The desired-state document and `Validate()`. **The contract between web and agent.** |
-| `yang` | The YANG modules: the configuration's schema (module `portitor`, a submodule per area, the state in `portitor-state`, `portitor-extensions`), embedded by `yang.go`; first drafted from the tables (by `dev/yanggen`, gone with them), edited by hand since |
+| `yang` | The YANG modules: the configuration's schema (module `portitor`, a submodule per area, the state in `portitor-state`, `portitor-extensions`), embedded by `yang.go`; edited by hand |
 | `internal/schema` | The modules compiled (goyang) into the tree every frontend walks: kinds, keys, order, types and their checks, defaults, descriptions, `px:` extensions, the lists' actions (`Action`: kind `px:action`, typed input and output) |
 | `internal/datastore` | The configuration as a tree of the schema: set, delete, rename (rewriting leafrefs), move, validate, RFC 7951 JSON, diff and patch, the CLI's text and flat forms; `Store`, the shared candidate with its rebase and commit |
 | `internal/datastore/sqlmap` | The tree as rows, by the modules' `px:` extensions (`Rows`; `Adder` makes entries from rows, for the imports); the entries' ids kept by path (`IDs`, the pure `PlanIDs`; stored by `records` in `entry-ids.json`) |
@@ -61,9 +61,9 @@ cleanly now. Go on only once they've chosen.
 | `web/frontend` | Vue SPA; `CrudPage.vue` drives most pages from field/column schemas, on a YANG list (`api/config.js`: `treeApi`, `vfApi`) |
 | `docs` | User guides; every `docs/*.md` is bundled into the GUI's Help page (`src/docs.js`), and links between them stay in the GUI |
 | `deploy` | systemd units and example configs |
-| `dev` | Dev configs and `seed.sh`; `dev/lab` runs a real apply in two podman containers |
+| `dev` | Dev configs and `seed.sh`; design docs (`design-*.md`) and code maps moved out of this file (`arch-*.md`); `dev/lab` runs a real apply in two podman containers |
 | `install.py` | Installs/updates a firewall (agent and portitor-config) and portitor-web (the portal) from a GitHub release (`.goreleaser.yaml`), `--source` or `--local`; refuses, before replacing anything, an installation older than 1.0.0 (`check_upgrade_path`, `MIN_UPGRADE_FROM`) or a data directory without `layout.json` (`check_data_dirs`); the agent runs its copy in `/usr/lib/portitor` for GUI updates |
-| `iso` | Installer ISO: Debian netinst + preseed + an apt repository of `packages.txt` and its dependencies, so the installation needs no network (`build.sh`, `target.sh`), setup (`portitor-setup.py`, installed as `portitor-setup`: runs `portitor-config bootstrap` at first boot, `--reconfigure` when run again; role `agent` is the same firewall, ending with a portal string for portitor-web, role `web` portitor-web alone (its first user made with the console password, `portitor-web createadmin`), which adds a firewall with `--join` (`portitor-web add-firewall`); roles `primary` and `secondary` an HA pair: the secondary only its HA link and management, ending with a secondary string (its agent's token) that the primary's `--join` adds and commits), QEMU test VM (`vm.sh`), end-to-end tests (`test.sh`, `test-split.sh`, `test-update.sh`, `make iso-e2e`) |
+| `iso` | Installer ISO: Debian netinst + preseed + an apt repository of `packages.txt` and its dependencies, so the installation needs no network (`build.sh`, `target.sh`), setup (`portitor-setup.py`, installed as `portitor-setup`: runs `portitor-config bootstrap` at first boot, `--reconfigure` when run again; role `both` the firewall with its GUI (agent and portitor-config), role `agent` the same firewall, ending with a portal string for portitor-web, role `web` portitor-web alone (its first user made with the console password, `portitor-web createadmin`), which adds a firewall with `--join` (`portitor-web add-firewall`); roles `primary` and `secondary` an HA pair: the secondary only its HA link and management, ending with a secondary string (its agent's token) that the primary's `--join` adds and commits), QEMU test VM (`vm.sh`), end-to-end tests (`test.sh`, `test-split.sh`, `test-update.sh`, `make iso-e2e`) |
 
 ## Terms
 
@@ -81,68 +81,14 @@ docs and user-facing messages.
   certificate fingerprint (`agentclient.New`), usually on 127.0.0.1. On the
   firewall, the root-only socket `<run_dir>/agent.sock` serves the GET routes and
   `localWrites` without the token (`localHandler`), for the `portitor` CLI.
-- **portitor-web, the portal** (`web/portal.go`, `portalapi.go`, `portalstore.go`,
-  `portalssh.go`, `web.yaml`), is optional and standalone, with a configuration of
-  its own: a tree of the YANG module `yang/portal/portitor-portal.yang`
-  (`schema.LoadPortal`; `firewall`, `ha-firewall` (an HA pair as one firewall: its
-  `primary` and `secondary` hosts; names shared with `firewall`, `portalCheck`),
-  `witness` (the string is `px:secret`) and `user` lists), kept as a firewall's is: a `datastore.Store` candidate (`candidate.json`)
-  and what runs, `<data_dir>/portal.json` (`PortalStore`, whose `portalBackend`
-  commits by writing it; `portalCheck` is its `Store.Check`; proxies and the witness are
-  rebuilt on a commit, and when another process commits, `Watch`). The GUI's and the
-  console's edits are an edit and a commit in one (`PortalStore.Edit`). The same
-  frontends reach it as a firewall's: `portitor-web cli`, the CLI and NETCONF over
-  SSH on `ssh_listen` (`portalcli.go`; the portal's users, all access), with the
-  module's name, namespace and files taken from the schema root (`schema.Compile`,
-  `Node.ModuleNamespace`), not constants. `web.yaml` is only what it needs to start (`bind`, TLS, `data_dir`); its
-  old `firewalls:` and `witness:` are taken into an empty tree once. It has its own
-  users (`portitor-web createadmin`, bcrypt hash `px:secret`, a signed cookie, key
-  in `session.key`), and everything but its shell and login is behind them,
-  `/fw/<name>/` too. Its GUI is a second entry of the Vue frontend (`web/frontend/portal.html`,
-  `src/portal/`: hash routes, `/portal/v1` through `src/portal/api.js`), built into
-  `web/static` beside `index.html` and served from `staticFS()` (`handlePage`, the assets
-  before login), sharing the firewall GUI's frame (`layout/AppShell.vue`, which knows no
-  store), `DataGrid`, dialogs and form rules. A firewall's GUI opens in a tab of the
-  portal (`src/portal/tabs.js`: an iframe of `/fw/<name>/`, kept loaded; closing it or
-  logging out asks the frame's `window.portitorConfirmDiscard`); opened on its own, its
-  top bar leads back (`PortalLink`, hidden when framed). A firewall
-  is added by `POST /portal/v1/probe`: SSH to the host (the host key is returned for
-  the administrator to confirm before any login; credentials are never stored), which
-  runs `portitor-config portal-info` (as the service user through `sudo` unless root)
-  for its port and `tls_cert` fingerprint. An HA firewall's hosts are added one at a
-  time the same way (`web/portalpair.go`, `POST /portal/v1/ha/<name>/<role>`,
-  `AddHAHost`); when the second is added the portal pairs them, unless they are a pair
-  already (each portitor-config's public `GET /api/pair`: replica or not, and its pair's
-  `config_fingerprint`s): over SSH to the secondary `portitor-config secondary-info`
-  (`web/pairing.go`: name, ports, the agent token and both fingerprints, which
-  portitor-config holds; the portal adds the address it reached the host on), then over
-  SSH to the primary (its confirmed host key) `portitor-config add-secondary`
-  (`AddSecondary`, in-process console requests: the firewall row with `ha_primary_id`,
-  the management interface's `peer-addresses`, commit and confirm; `portitor-setup
-  --join` runs it too, so the logic is there alone), and with the HA firewall's
-  `witness` `--external-witness` and `witness-string` into the portal's witness list.
-  The login to the host added first is asked for again (`HAHostRequest.Other`, 409
-  without it). The token goes on standard input only, the SSH credentials are never
-  kept, and the portal runs these fixed commands only (`configCommand`). An HA firewall
-  is served at `/fw/<name>/` from its host that answers as no replica (`settleHA`,
-  asked every 5 s by `watchRoles`; one transport per host, `hostsTransport`), its
-  session cookie on that one path. It serves each firewall it lists at `/fw/<name>/` with
-  `httputil.ReverseProxy` to that firewall's portitor-config (its `tls_cert` pinned
-  and asked for by `PinnedServerName`, so a certificate chosen under Settings never
-  breaks the pin), streams flushed as they come, the console's WebSocket passed
-  through, the browser's `Host` kept, `X-Forwarded-For` (believed by portitor-config
-  from `trusted_proxies` only, for the login limits) and `X-Forwarded-Prefix`, which
-  portitor-config writes into index.html as `<base>` (`serveIndex`). Session cookies
-  are kept to `/fw/<name>/` (`portalCookies`), so each firewall has its own login,
-  but an HA pair's: portitor-config signs sessions with a key made from the pair's
-  secret (`sessionKey`; the users are the replica's copy) and names both hosts'
-  `config_fingerprint`s in `X-Portitor-Pair` (`PairHeader`), and the portal sets the
-  cookie on the paths of the firewalls it pins by them (`pairPrefixes`). `/` is the
-  shell, and `/portal/v1/firewalls` lists the firewalls for it and the GUI's switcher.
+- **portitor-web, the portal** (`web/portal*.go`, `web.yaml`, GUI `src/portal/`):
+  optional and standalone, with its own YANG tree, users and GUI; it adds firewalls
+  and HA pairs over SSH, proxies each at `/fw/<name>/` with its pinned certificate,
+  and can be an HA pair's witness. The code map is in
+  [dev/arch-portal.md](dev/arch-portal.md).
 - **Firewalls** (the global list `firewall` of the tree, `web/firewalls.go`, Admin → Firewalls; `firewallsResource`, a `treeResource` committed on write; each one's generation is runtime, `records.Generations`, in `sessions.json`; instances' and tasks' `firewall` leaves are leafrefs, so a rename follows; a backup keeps this installation's own, a replica's copy takes the primary's whole): the hosts
   portitor-config deploys to, each with its agent (URL, token, fingerprint) and its
-  `generation`: its own firewall, and its HA secondary (`prepareFirewallHere`
-  refuses others). The agent URL is the host's address on the network; a
+  `generation`: its own firewall, and its HA secondary. The agent URL is the host's address on the network; a
   portitor-config reaches its own agent, the one with its agent's fingerprint, at
   its `agent_url` (`Server.agentURL`), so the replica's copy of the rows works too. A
   configuration is one firewall's and its HA secondary's (`prepareFirewall` refuses a
@@ -156,8 +102,7 @@ docs and user-facing messages.
   protocols, counters) ask all of them and merge (`fromAll`; an unreachable one is
   left out when there are several; leases and neighbours only an HA pair's active
   host's, `fromActive`); the logs and Updates are one firewall's
-  (`?firewall_id=`, the first by default), picked in the GUI. Tests run the server
-  without `Local`, with any number of firewalls.
+  (`?firewall_id=`, the first by default), picked in the GUI.
 - **Deploy ("commit" in the GUI)**: `web/commit.go` `deploy` (phases `prepareCommit`, `checkAgents`, `reserveNumbers`, `applyTargets`, `settleTargets`, `recordDeployments` over a `commitPlan`; confirm and rollback `finishPending`) takes a snapshot of
   the candidate (`web/revert.go`) numbered by the commit counter (`records` `Own`, `state.json`), `buildDoc`
   runs `builder.BuildFirewall` on it for each firewall (merged into the
@@ -175,77 +120,10 @@ docs and user-facing messages.
   (`/v1/confirm`) or the agent rolls back on timeout. `POST /v1/render` is the
   preview, with the same code and no apply. Only one change can be pending at a
   time (`deployMu`, and the agent is asked).
-- **HA pairs** (`fwconfig/ha.go`, `internal/agent/ha.go`, `hastate.go`, `gate.go`,
-  `hamgmt.go`, `hatakeover.go`, `watchdog.go`, `web/witness.go`; design in
-  `dev/design-ha-cluster.md`): active/passive with the same addresses. A firewall may
-  be the HA secondary of another (`firewalls.ha_primary_id`, set at creation). It has
-  no instances of its own: `builder.BuildFirewall` builds the primary's, the same but
-  for `HA.Node` and the addresses on the pair's two links, physical interfaces of the
-  default instance with `Interface.HARole` (`pairLinks`): the HA link (a direct cable;
-  IPv6 link-local addresses by node, `fwconfig.HALinkAddress`, `fe80::1` and `fe80::2`,
-  a VF's `fe80::<id>:1`/`:2`, added `nodad`, never entered or discovered) and
-  management (`peer_addresses`, `HAGateway`, with the witness); a pair
-  without both is refused, and VRRP on one. Each physical traffic interface gets a
-  MAC shared by the hosts (`DeriveHAMAC`). The standby's traffic interfaces are closed
-  by the gate (`render.Gate`, netdev table `portitor_gate`, per namespace, on
-  `Instance.GateDevices`; LLDP passes); services run on both, and opening or closing
-  is one nft transaction, never an apply. A loop in `haManager` (no `Agent.mu`, so it
-  never waits for a commit) applies `haDecide` every `haTick`: a host stays open with
-  a vote (witness, `V` 4 s) or a promise (the standby's heartbeat answer, 2 s, either
-  path every 500 ms, `POST /v1/ha/heartbeat`); it opens with a vote once promises it
-  gave have run out and it hears no active peer; at start the primary opens on a
-  promise, so a healthy pair runs without the witness. It closes 1 s before its
-  leases end. A handover (`haManager.handOver`: monitoring, `portitor request ha
-  switchover`, a clean stop) gives up the vote, promises to stay closed as long as
-  that vote lasts, closes, and tells the peer (`POST /v1/ha/handover`), which opens at
-  once with the vote; the old host takes no vote until the promise ends
-  (`noVoteUntil`, also after a restart). `Interface.HAMonitor` counts a traffic
-  interface's carrier in the host's health, sent in heartbeats: when the standby has
-  more for 2 s the active host hands over, at most once a minute. With `HA.Preempt`
-  (the primary's `ha-preempt`, default true) an active secondary hands over to the
-  primary once it has heard it closed, at the pair's epoch and at least as healthy, for
-  30 s, after it went unheard since this host opened (`primaryLost`, so a switchover
-  stays) (`preemptSays`, `haShouldPreempt`): the configuration is edited on the primary. Each activation raises `term` (`<state>/ha-term`, separate from the
-  epoch). An open host arms `/dev/watchdog` (2 s, softdog if there is nothing better),
-  fed by that loop alone; with none, or `nowayout`, it won't open on a vote, only on
-  the console's (`portitor request ha active`). Apply loads the gate after moving a
-  device and before it comes up; `gate.check` looks for devices a closed gate lost
-  (6.12 detaches them) every second. The host's own traffic uses table
-  `fwconfig.HAMgmtTable`: `from <management address>` always, and everything from
-  `iif lo` while closed (proto 99, `hamgmt.go`). At takeover (`onTakeover`): GARP and
-  NA twice, the DHCP server sends its initial RAs again (control op `advertise`), BGP is cleared. The witness
-  (`witness.vote`): every 1 s it asks both hosts in parallel and keeps its vote on the
-  host reporting active, else its holder; it moves only once the old holder's has run
-  out, plus `witnessGrace`, or at once to an active host that reports a vote, which
-  only a handover gives it. A pair has one witness (`firewalls.ha_witness` on the
-  primary): its portitor-config (`local`, `Server.runWitness`; not a replica's; it
-  dies with the primary, so failover is by hand), or `external`, portitor-web given
-  the pair's witness string (`web/portalwitness.go`, `WitnessPair`: both agents and
-  `ha_witness_secret`, which opens only `GET /v1/ha` and `POST /v1/ha/vote`,
-  `haManager.witnessAuth`). A commit skips an unreachable host whose peer answers
-  (deployment `skipped`), and the primary's portitor-config applies that commit's
-  document there when it answers again (`catchUp`). The DHCP servers run on both hosts;
-  the active host's agent sends each instance's leases to the standby's
-  (`internal/agent/dhcprepl.go`, see DHCP server). conntrackd
-  (`fwconfig.ConntrackSync`, `render/conntrackd.go`: FTFW over UDP 3780 into the
-  kernel table, between link-local addresses) runs per instance: the default instance's over the HA link, a VF's over
-  a macvlan on it in its namespace (`fwconfig.HASync`, `ha-<instance id>`). DHCP clients
-  run on the active host alone and pause on a closing one, keeping the address:
-  removing it would flush the masqueraded connections, here and through conntrackd on
-  the peer. Each static traffic prefix has a blackhole route at the highest metric
-  (`Instance.HABlackholes`), so a dead link's traffic doesn't leave by the WAN. The default instance
-  opens the ports of this host's agent and portitor-config to the peer, both ways
-  (`fwconfig.HAConfigAccess`, made by `Expand`; auto rules `render.HAConfigService`,
-  `HAAgentService`, `haOutputRules`). DNS updates and the tunnel broker run on the
-  active host only (`haManager.isStandby`, `Agent.reconcileActive`). ACME certificates
-  are ordered by the active host; the standby copies them, keys included, from
-  `GET /v1/ha/certificates` (the pair's secret, which therefore opens the keys too)
-  every minute (`certManager.adopt`, `acme.WriteRaw`), so it has them when it takes
-  over. `portitor show ha` and a firewall's form (Admin → Firewalls, *HA state*) show
-  `GET /v1/ha`, with each instance's DHCP lease sync (`Agent.haStatus`, which takes no
-  `Agent.mu`: the witness asks every second); `POST /api/firewalls/:id/switchover`
-  hands the pair over from whichever host answers as active. The user guide is
-  `docs/ha.md`.
+- **HA pairs**: active/passive with the same addresses, the standby closed by the
+  gate, a witness voting; the code map (files, functions, routes, timings) is in
+  [dev/arch-ha.md](dev/arch-ha.md), the design in `dev/design-ha-cluster.md`, the
+  user guide `docs/ha.md`.
 - **HA replica and promotion** (`web/replica.go`, `web/promote.go`): portitor-config
   runs on both hosts of a pair. Its role is its agent's (`runRole`: the firewall row
   whose fingerprint is that of the agent at `agent_url`, asked for
@@ -344,7 +222,7 @@ docs and user-facing messages.
   given `""` or left out of a PUT; `null` removes it. Every change is checked by
   `checkEdit`: the user's access by path (`treeAccess`, `tenantTreeCheck`), the
   schema, the hooks of `internal/confcheck` (normalizing on edit, checks per list
-  path, from the CRUD's `prepare*`), and the build (`buildProblems`); it may not add
+  path, once the CRUD's `prepare*`), and the build (`buildProblems`); it may not add
   a problem, and problems it didn't add come back as warnings
   (`X-Portitor-Warnings`, toasted). Server code edits the candidate too: a request's
   as its user, checked like an API edit (`userEdit`: the WireGuard and nftables
@@ -374,8 +252,8 @@ docs and user-facing messages.
   overlays them; a backup and the replica's copy carry it), so they commit alone and at once (`CommitOptions.Scope`,
   `commitScoped`: only those lists leave the candidate, a firewall whose document
   changes is deployed, a failed deployment is a warning) and a pending commit's
-  rollback doesn't take them along. Now `ldap-server`; the users and roles are to follow. `treeResource`
-  (`web/treeresource.go`) is the old CRUD's routes over such a list.
+  rollback doesn't take them along. `treeResource`
+  (`web/treeresource.go`) serves the old per-table routes over such a list.
 - **Revert** sets the candidate back to running (`Store.Discard`), the live commit's
   configuration (`<db dir>/deployed/<commit>-config.json`, `liveCommit`); the newest
   `snapshotKeep` are kept, with each firewall's live document
@@ -397,12 +275,10 @@ docs and user-facing messages.
 
 ## Invariants
 
-Where a rule below names a function of `web/` that kept references in step (a
-rename that rewrites the lists naming it, a delete refused while in use), that was
-the CRUD's, which is gone with the configuration tables; the same rule is the
-schema's (leafrefs follow a rename, `datastore.Tree.Rename`) and
-`internal/confcheck`'s (renames into lists of plain names, `renameIfaceRefs` and
-the like; deletes refused by the checks). The configuration is the tree alone; its
+References are kept in step by the schema (leafrefs follow a rename,
+`datastore.Tree.Rename`) and by `internal/confcheck` (renames into lists of plain
+names, `renameIfaceRefs` and the like; deletes of what is in use refused by the
+checks). The configuration is the tree alone; its
 rows (`confview`) are a view that code reads, never edits.
 
 - **The agent trusts nothing.** It re-runs `fwconfig.Validate` before rendering.
@@ -480,7 +356,7 @@ rows (`confview`) are a view that code reads, never edits.
   restore succeeded; `RollbackErrors` says it didn't.
 - **Secrets:** fields tagged `json:"-"` (the agent token, the HA pair's and witness's
   secrets, password hashes, TOTP secrets and recovery code hashes, LDAP bind
-  passwords) never reach the browser; the CRUD's `PUT` (firewalls, the directory)
+  passwords) never reach the browser; a `treeResource`'s `PUT` (firewalls, the directory)
   merges the body onto the stored row, so those fields can't be overwritten through
   it either. In the tree a secret is a `px:secret` leaf (WireGuard private/preshared
   keys, TSIG secrets, DNS blocklist keys, DNS update provider settings, IP list
@@ -543,8 +419,7 @@ the certificate portitor-config serves, chosen under Settings
   leafrefs to `host/name` and `address-list/name` in YANG (as `allowed-ips`), and is
   expanded in the builder.
 - **Address lists** (`address_lists`) hold addresses, CIDRs and
-  names of hosts and other lists; they share one namespace with `address_objects`
-  (`nameFree`), so any address field takes either by name, and `netobj.New(objs,
+  names of hosts and other lists; they share one namespace with `address_objects`, so any address field takes either by name, and `netobj.New(objs,
   lists...)` resolves both (a loop is an error). In a filter rule's source or
   destination the builder writes a list as `$name` and adds it, expanded, to
   `Instance.AddressSets`; the renderer declares one set per IP version
@@ -791,7 +666,7 @@ the certificate portitor-config serves, chosen under Settings
 - **Directory** (`web/directory.go`, `internal/ldapauth`, Admin → Directory, from
   factum2): the users, roles and the OpenLDAP/AD servers (the global list `ldap-server`
   of the tree, in its order; `directoryServers()`, a `treeResource` committed on
-  write; the first of the old tables to move, adopted once by `adoptDirectory`; global
+  write; global
   admins alone read it, `adminLists`). Every login takes `authenticateUser`'s path: a local user's
   bcrypt hash; a directory user's (`password_hash` `models.LDAPPassword`,
   `users.ldap_server`) at the servers; an unknown user at the servers, then copied in
@@ -827,8 +702,7 @@ the certificate portitor-config serves, chosen under Settings
   `vni <n>` and the VRF's `router bgp` the L2VPN EVPN family (`advertise ipv4
   unicast`, rd, route targets), rendered from the main table's AS (`l3vniBGP`,
   connected and static) when the VRF runs no BGP of its own. It needs the main
-  table's EVPN; its underlay follows a rename and is refused on delete. The underlay
-  follows a rename and is refused on delete (confcheck).
+  table's EVPN; its underlay follows a rename and is refused on delete.
 - **VRFs** (`fwconfig/vrf.go`, Routing → VRF) are per instance
   (`vrfs`: name, `route_table`, unique in the instance; the namespace makes them
   per instance), not interfaces: an interface is in one by name
@@ -881,8 +755,10 @@ the certificate portitor-config serves, chosen under Settings
 - **Schema changes:** the configuration's are the YANG modules' (and the model's
   field, with its `px:` mapping; `confview`'s `TestEveryFieldMapped` fails until a
   field has its leaf and a leaf its field). A new leaf needs nothing more: an absent
-  leaf takes its default. Renaming or removing one breaks reading the candidate and
-  the kept commits, which have it: there is no migration of the tree's JSON yet.
+  leaf takes its default. Renaming or removing one breaks reading the candidate, the kept
+  commits, backups, bundles and replica copies, which have it: since production
+  (1.0.0) such a change needs a migration on read (`datastore.Migrate`, as
+  `hostToRoot`), old CLI/API paths kept or translated for a release, and a test.
   What is not configuration is in files (`internal/records`): a new kind of
   runtime state or history is a field or a file there (with its place in the
   copies, `copyFiles` and `ExportState`), never a database. There is no database
@@ -1044,7 +920,8 @@ shebang. Files that cannot hold a comment go in `REUSE.toml`. Commits carry a DC
 Committing directly to `main` is fine; no feature branch is needed.
 
 **Never commit on your own.** Leave changes uncommitted so the maintainer can test
-them first; commit only when asked to, each time.
+them first; commit only when asked to, each time: a yes covers that change
+alone. Push only when asked.
 
 ## Gotchas
 
