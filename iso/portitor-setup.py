@@ -928,6 +928,9 @@ allow_from:
 {allow_lines}console_user: {CONSOLE_USER}
 """, 0o600)
     run(["systemctl", "enable", "portitor-agent.service"])
+    # The boot-time policy, from the next boot: closed until the agent has
+    # applied (anti-lockout from allow_from above).
+    run(["systemctl", "enable", "portitor-early.service"])
     run(["systemctl", "restart", "portitor-agent.service"])
     # SSH is open from the LAN (the portitor-mgmt service).
     run(["systemctl", "enable", "--now", "ssh.service"])
@@ -1005,6 +1008,7 @@ auto {nic}
 
 def step_no_agent(a: dict) -> None:
     run(["systemctl", "disable", "--now", "portitor-agent.service"])
+    run(["systemctl", "disable", "portitor-early.service"], check=False, quiet=True)
 
 
 def join(a: dict, text: str) -> bool:

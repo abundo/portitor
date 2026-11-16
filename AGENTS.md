@@ -25,7 +25,7 @@ cleanly now. Go on only once they've chosen.
 | Path | What |
 |---|---|
 | `cmd/portitor-web` | One binary, two programs by name: `portitor-web` is the portal (`portal.go`: `start`, `witness`, `check`, `createadmin`, `add-firewall`, `add-witness`); run as `portitor-config` (a symlink, `main.go`) the firewall's configuration, GUI and API: `start`, `migrate`, `createadmin`, `set-agent`, `agent-url`, `bootstrap` (ISO first boot), `fingerprint`, `portal-info`, `secondary-info`, `add-secondary`, `witness-string`, `promote`, `import-vf` and the console commands (`console.go`, `cli` among them) |
-| `cmd/portitor-agent` | Agent daemon on the firewall: `start`, `init`, `render`, `netns-exec`; run as `portitor` (a symlink, `cli.go`) it is a CLI over the agent's root-only socket `<run_dir>/agent.sock`: `show ...` over the GET routes, and actions that change no configuration (`confirm`, `rollback`, `request dhcp renew`, `request iplist update`, `request blocklist update`, `clear connections`) over the POST routes in `localWrites` |
+| `cmd/portitor-agent` | Agent daemon on the firewall: `start`, `init`, `render`, `netns-exec`, `early` (the boot-time policy); run as `portitor` (a symlink, `cli.go`) it is a CLI over the agent's root-only socket `<run_dir>/agent.sock`: `show ...` over the GET routes, and actions that change no configuration (`confirm`, `rollback`, `request dhcp renew`, `request iplist update`, `request blocklist update`, `clear connections`) over the POST routes in `localWrites` |
 | `internal/fwconfig` | The desired-state document and `Validate()`. **The contract between web and agent.** |
 | `yang` | The YANG modules: the configuration's schema (module `portitor`, a submodule per area, the state in `portitor-state`, `portitor-extensions`), embedded by `yang.go`; edited by hand |
 | `internal/schema` | The modules compiled (goyang) into the tree every frontend walks: kinds, keys, order, types and their checks, defaults, descriptions, `px:` extensions, the lists' actions (`Action`: kind `px:action`, typed input and output) |
@@ -339,7 +339,10 @@ rows (`confview`) are a view that code reads, never edits.
   each namespace, its loop devices (`n64-*`) and the `ip rule`s with protocol 99
   (NAT64's IPv4 ones, the VRF source rules at `agent.VRFSourcePref`, the policy
   routes' at `fwconfig.PolicyRouteTable(i)` and an HA pair's at 1000-1002), the
-  netdev table `portitor_gate` and its second layer, the `inet`, `arp` and
+  boot-time policy `inet portitor_early` (`render.Early`, loaded by `portitor-agent early`
+  from `portitor-early.service` before the network, from `agent.yaml` alone; removed by
+  `dropEarly` right after `applyLocked` loads the default instance's ruleset, a failed
+  removal an apply error), the netdev table `portitor_gate` and its second layer, the `inet`, `arp` and
   `bridge` tables `portitor_gate` (`render.GateFamilies`), with the policy routes' tables,
   and, without EVPN, the all-zero forwarding entries (flood list) of its vxlan devices. Leave everything else alone (docker, libvirt, other tables).
   Accept rules set the connection mark (`ct mark`) to the rule's id, so the

@@ -128,9 +128,13 @@ SSH_USER_DEFAULT = "portitor"
 DHCP_USER = "portitor-dhcp"
 WEB_UNIT = "portitor-web.service"
 AGENT_UNIT = "portitor-agent.service"
+# The boot-time policy (render.Early): enabled with the agent, never started
+# on a running host; the agent's first apply at the next boot removes it.
+EARLY_UNIT = "portitor-early.service"
 # The per-instance units are started by the agent, never enabled.
 AGENT_UNITS = (
     AGENT_UNIT,
+    EARLY_UNIT,
     "portitor-named@.service",
     "portitor-dhcpd@.service",
     "portitor-frr@.service",
@@ -612,10 +616,15 @@ def install_agent(host: Host, binary: Path, deploy: Path, version: str, assume_y
         log("    remove the firewall's interfaces from netplan, NetworkManager or systemd-networkd")
         log("      (a second DHCP client on the WAN keeps the agent from getting a lease)")
         log(f"    systemctl enable --now {AGENT_UNIT}")
+        log(f"    systemctl enable {EARLY_UNIT}   # closed at boot until the agent applies")
         return
     install_packages(host, deploy)
     if actions[AGENT_UNIT] == "installed":
         host.systemctl("enable", AGENT_UNIT)
+    # Enabled alone: it takes effect at the next boot, and the agent (which
+    # removes it) is the one restarted here.
+    if agent_enabled(host):
+        host.systemctl("enable", EARLY_UNIT)
     host.systemctl("restart", AGENT_UNIT)
     if not host.dry_run and not agent_answers(host):
         warn(f"{AGENT_UNIT} does not answer on {host}; see journalctl -u {AGENT_UNIT}")

@@ -157,6 +157,14 @@ one host, a firewall and a portal, and an HA pair with a portal. The
 - **Anti-lockout.** The agent always accepts its API port, SSH (22) and
   portitor-config's port (8444, `config_port`) from `allow_from`, whatever rules
   are deployed.
+- **Closed at boot.** Before any interface is configured, `portitor-early.service`
+  loads a minimal policy (`table inet portitor_early`): nothing is forwarded, and
+  the host takes only loopback, established traffic, essential ICMP, DHCP replies
+  and the anti-lockout rule. The agent removes it once it has loaded the host's
+  ruleset. If the agent can't apply (or there is no configuration yet), the host
+  stays closed: with `anti_lockout: false` or no `allow_from` beyond loopback (the
+  installer's default for a firewall that is no HA pair), only the console reaches
+  it then, where `nft delete table inet portitor_early` opens it again.
 - **Atomic rulesets.** Each ruleset is checked with `nft -c` before anything changes,
   and loaded as a single transaction, before the virtual firewall's interfaces come up or
   forwarding is turned on. A failed apply restores the previous configuration; if

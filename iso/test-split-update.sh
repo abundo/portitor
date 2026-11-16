@@ -215,6 +215,7 @@ for name in fw web; do
 	check "$name" "no failed units" sh -c 'test -z "$(systemctl list-units --failed --plain --no-legend)" || { systemctl list-units --failed --plain --no-legend; false; }'
 done
 check fw "portitor-agent running" systemctl is-active --quiet portitor-agent.service
+check fw "boot-time policy enabled" systemctl is-enabled --quiet portitor-early.service
 check fw "portitor-config running" systemctl is-active --quiet portitor-config.service
 check fw "nftables firewall table loaded" nft list table inet firewall
 check web "portitor-web running" systemctl is-active --quiet portitor-web.service

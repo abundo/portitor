@@ -65,6 +65,20 @@ func main() {
 		},
 	})
 
+	root.AddCommand(&cobra.Command{
+		Use:   "early",
+		Short: "Load the boot-time policy that closes the host until the agent applies (portitor-early.service)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := agent.LoadConfig(configFile)
+			if err != nil {
+				// Closed all the same, without the anti-lockout rule.
+				slog.Error("boot-time policy without anti-lockout", "err", err)
+				cfg = nil
+			}
+			return agent.LoadEarly(cmd.Context(), cfg, &agent.ExecRunner{Log: &agent.OpLog{}})
+		},
+	})
+
 	var hosts []string
 	var tokenFile, certFile, keyFile string
 	initCmd := &cobra.Command{

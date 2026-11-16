@@ -103,8 +103,11 @@ check fw "portitor-config running" systemctl is-active --quiet portitor-config.s
 check fw "portitor-web not running" sh -c '! systemctl is-active --quiet portitor-web.service'
 check fw "LAN has 192.168.1.1/24" sh -c "ip -o addr show | grep -qF ' 192.168.1.1/24 '"
 check fw "nftables firewall table loaded" nft list table inet firewall
+check fw "boot-time policy enabled" systemctl is-enabled --quiet portitor-early.service
+check fw "no boot-time policy left after the apply" sh -c '! nft list table inet portitor_early >/dev/null 2>&1'
 check web "portitor-web running" systemctl is-active --quiet portitor-web.service
 check web "portitor-agent not running" sh -c '! systemctl is-active --quiet portitor-agent.service'
+check web "no boot-time policy on the portal" sh -c '! systemctl is-enabled --quiet portitor-early.service'
 check web "portitor-config not running" sh -c '! systemctl is-active --quiet portitor-config.service'
 check web "the firewall answers on the LAN" ping -c 3 -W 2 192.168.1.1
 # The GUI from inside the web VM (python3: curl may not be installed).

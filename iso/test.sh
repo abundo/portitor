@@ -79,6 +79,8 @@ done
 check "no failed units" sh -c 'test -z "$(systemctl list-units --failed --plain --no-legend)" || { systemctl list-units --failed --plain --no-legend; false; }'
 check "LAN has $LAN_ADDRESS" sh -c "ip -o addr show | grep -qF ' $LAN_ADDRESS '"
 check "nftables firewall table loaded" nft list table inet firewall
+check "boot-time policy enabled" systemctl is-enabled --quiet portitor-early.service
+check "no boot-time policy left after the apply" sh -c '! nft list table inet portitor_early >/dev/null 2>&1'
 # (The installation had no network, so apt has no lists to name the origin of
 # the installed version; ISC's builds carry ".gbp" in theirs, Debian's don't.)
 check "bind9 from ISC's repository" sh -c "dpkg-query -W -f '\${Version}' bind9 | grep -qF .gbp"

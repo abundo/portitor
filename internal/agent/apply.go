@@ -111,6 +111,13 @@ func (a *Agent) applyLocked(ctx context.Context, doc fwconfig.Document) error {
 		if err := a.do(ctx, command{Netns: in.NetnsName(), Name: "nft", Args: []string{"-f", path}}); err != nil {
 			return fmt.Errorf("instance %s: %w", in.Name, err)
 		}
+		// The host's ruleset replaces the boot-time policy (early.go),
+		// only once it is loaded: a drop in either table is final.
+		if in.Default {
+			if err := a.dropEarly(ctx); err != nil {
+				return fmt.Errorf("removing the boot-time policy: %w", err)
+			}
+		}
 	}
 
 	// Stop services of instances that are going away before their

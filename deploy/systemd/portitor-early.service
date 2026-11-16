@@ -1,0 +1,23 @@
+# SPDX-FileCopyrightText: 2026 The Portitor contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+[Unit]
+Description=Portitor boot-time firewall policy (closed until the agent applies)
+Documentation=file:///usr/share/doc/portitor/README.md
+# Before any interface is configured: the host drops what it would forward
+# and all input but loopback, DHCP replies, essential ICMP and the
+# anti-lockout rule until portitor-agent has loaded its ruleset, which then
+# removes this policy (table inet portitor_early).
+DefaultDependencies=no
+After=local-fs.target
+Before=network-pre.target portitor-agent.service shutdown.target
+Wants=network-pre.target
+Conflicts=shutdown.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/portitor-agent -f /etc/portitor/agent.yaml early
+
+[Install]
+WantedBy=sysinit.target

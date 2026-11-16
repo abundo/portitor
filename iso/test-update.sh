@@ -164,6 +164,7 @@ units() {
 	done
 	check "no failed units" sh -c 'test -z "$(systemctl list-units --failed --plain --no-legend)" || { systemctl list-units --failed --plain --no-legend; false; }'
 	check "nftables firewall table loaded" nft list table inet firewall
+	check "boot-time policy enabled" systemctl is-enabled --quiet portitor-early.service
 }
 
 log "Checking $from"
