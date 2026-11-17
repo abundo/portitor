@@ -97,7 +97,8 @@ entries and values (interface names where an interface is wanted, and so on).
 | `show interface [name]` | the interfaces as they run: a table of every virtual firewall's (name, kind, admin and operational state, MTU, MAC, addresses), or a named one's detail with its counters; inside a virtual firewall, its own |
 | `show deployments`, `show api <path>` | shows the commits, or the answer of a GET of the API (`show api /api/agent/status`); the version is `info from state / system version`. `show` takes only these reports; the tree is `info`'s |
 | `pager [on\|off]` | long output in a terminal is shown a screen at a time (Space: next screen, Enter: next line, `q`: stop); `pager off` shows it all at once for this session |
-| `<command> \| grep [-i] [-v] <pattern>` | keeps the lines of the output that match the regular expression (`-i` ignoring case, `-v` those that don't); stages chain: `info flat \| grep wan0 \| grep -v mtu` |
+| `<command> \| grep [-iEFvwx] [-A n] [-B n] [-C n] <pattern>` | keeps the lines of the output that match the regular expression (`-i` ignoring case, `-v` those that don't, `-F` a fixed string, `-w` whole words, `-x` whole lines, `-E` accepted: the expressions are extended ones; `-A`, `-B`, `-C` add n lines of context after, before or around each match, groups apart separated by `--`); stages chain: `info flat \| grep wan0 \| grep -v mtu` |
+| `<command> \| wc [-lwmc]` | counts the output's lines (`-l`), words (`-w`), characters (`-m`) or bytes (`-c`); without options lines, words and bytes: `info flat \| grep wan0 \| wc -l` |
 | `pwc`, `help`, `quit` | where you are, the commands, log out |
 
 ## Actions

@@ -42,9 +42,23 @@ func (s *Session) Suggest(ctx context.Context, line string) (partial string, ite
 		}
 		switch after := toks[i+1:]; {
 		case len(after) == 0:
-			items = []Item{{"grep", "keep the lines that match a pattern: grep [-i] [-v] <pattern>"}}
+			items = []Item{
+				{"grep", "keep the lines that match a pattern: grep [-iEFvwx] [-A n] [-B n] [-C n] <pattern>"},
+				{"wc", "count lines, words, characters or bytes: wc [-lwmc]"},
+			}
+		case after[0].is("grep") && len(after) > 1 && slices.Contains([]string{"-A", "-B", "-C"}, after[len(after)-1].text):
+			items = []Item{{"<n>", "lines of context"}}
 		case after[0].is("grep") && (len(after) == 1 || strings.HasPrefix(after[len(after)-1].text, "-")):
-			items = []Item{{"-i", "ignore case"}, {"-v", "keep the lines that don't match"}, {"<pattern>", "a regular expression"}}
+			items = []Item{
+				{"-i", "ignore case"}, {"-v", "keep the lines that don't match"},
+				{"-E", "extended regular expression (the default)"}, {"-F", "the pattern is a fixed string"},
+				{"-w", "match whole words"}, {"-x", "match whole lines"},
+				{"-A", "lines of context after a match"}, {"-B", "lines of context before a match"},
+				{"-C", "lines of context around a match"},
+				{"<pattern>", "a regular expression"},
+			}
+		case after[0].is("wc"):
+			items = []Item{{"-l", "lines"}, {"-w", "words"}, {"-m", "characters"}, {"-c", "bytes"}}
 		}
 		return partial, filter(items, partial)
 	}

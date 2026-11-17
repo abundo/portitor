@@ -411,7 +411,7 @@ func TestPipeGrep(t *testing.T) {
 	if got := out.String(); !strings.Contains(got, "lan0") || strings.Contains(got, "wan0") {
 		t.Errorf("grep -v | grep -i:\n%s", got)
 	}
-	for _, line := range []string{"info | cat", "info | grep", "info | grep -x a", "info | grep ("} {
+	for _, line := range []string{"info | cat", "info | grep", "info | grep ("} {
 		if err := s.Exec(context.Background(), line); err == nil {
 			t.Errorf("%q: no error", line)
 		}
@@ -454,4 +454,47 @@ func TestTerminalPage(t *testing.T) {
 	if !strings.Contains(got, "line8") || strings.Contains(got, "line9") || strings.Count(got, "--More--") != 2 {
 		t.Errorf("screen:\n%q", got)
 	}
+}
+
+func TestPipeGrepOptions(t *testing.T) {
+	text := "a1\nb2\nwan0 x\nc3\nd4\ne5\nwan01\nf6\n"
+	cases := []struct{ line, want string }{
+		{"grep -A1 wan0", "wan0 x\nc3\n--\nwan01\nf6\n"},
+		{"grep -B 1 wan0", "b2\nwan0 x\n--\ne5\nwan01\n"},
+		{"grep -C1 wan0", "b2\nwan0 x\nc3\n--\ne5\nwan01\nf6\n"},
+		{"grep -C 2 wan0", "a1\nb2\nwan0 x\nc3\nd4\ne5\nwan01\nf6\n"},
+		{"grep -w wan0", "wan0 x\n"},
+		{"grep -x wan01", "wan01\n"},
+		{"grep -F a1", "a1\n"},
+		{"grep -F .", ""},
+		{"grep -iE WAN0|B2", "b2\nwan0 x\nwan01\n"},
+		{`grep -vx "[a-f][0-9]"`, "wan0 x\nwan01\n"},
+		{"wc -l", "8\n"},
+		{"wc -w", "9\n"},
+		{"wc", "      8       9      31\n"},
+		{"wc -lc", "      8      31\n"},
+	}
+	for _, c := range cases {
+		st, err := parseStage(lexOrDie(t, c.line))
+		if err != nil {
+			t.Errorf("%s: %v", c.line, err)
+			continue
+		}
+		if got := st.apply(text); got != c.want {
+			t.Errorf("%s:\n%q\nwant\n%q", c.line, got, c.want)
+		}
+	}
+	for _, line := range []string{"grep -A", "grep -A x a", "grep -q a", "wc -z", "wc a"} {
+		if _, err := parseStage(lexOrDie(t, line)); err == nil {
+			t.Errorf("%q: no error", line)
+		}
+	}
+}
+
+func lexOrDie(t *testing.T, line string) []token {
+	toks, _, err := lex(line)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return toks
 }

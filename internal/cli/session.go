@@ -151,7 +151,7 @@ var commands = []struct{ name, help string }{
 }
 
 // Exec runs one line: a command or statement, its output filtered by the
-// stages after a "|" (grep) and shown through the pager when there is one.
+// stages after a "|" (grep, wc) and shown through the pager when there is one.
 func (s *Session) Exec(ctx context.Context, line string) error {
 	line, stages, err := splitPipe(line)
 	if err != nil {
@@ -535,7 +535,7 @@ func (s *Session) command(ctx context.Context, cmd string, args []token) error {
 		for _, c := range commands {
 			s.printf("  %-10s %s\n", c.name, c.help)
 		}
-		s.printf("  Output may be piped: info | grep [-i] [-v] <pattern>\n")
+		s.printf("  Output may be piped: info | grep [-iEFvwx] [-A n] [-B n] [-C n] <pattern>, info | wc [-lwmc]\n")
 		s.printf("  A path of the tree goes there (an entry is made in candidate mode); a path to a leaf\n  and a value sets it. ? lists what may follow, Tab completes.\n")
 	case "configure":
 		switch {
