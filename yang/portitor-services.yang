@@ -14,65 +14,17 @@ submodule portitor-services {
   grouping services {
     list ipam-prefix {
       key "prefix";
-      action next-free {
-        px:action "view";
-        description "The prefix's next free address.";
-        output {
-          leaf address {
-            type ip-address;
-          }
-        }
-      }
       px:table "ipam_prefixes";
       px:parent-column "instance_id";
-      description "IpamPrefix is a node in the prefix tree. Parent/child relations are not stored; they follow from CIDR containment within an instance.";
-      leaf prefix {
-        type ip-prefix;
-      }
-      leaf description {
-        type text;
-      }
-      leaf dhcp-enabled {
-        type boolean;
-      }
-      leaf dhcp-range-start {
-        type ip-address;
-      }
-      leaf dhcp-range-end {
-        type ip-address;
-      }
-      leaf dhcp-gateway {
-        type ip-address;
-      }
-      leaf-list dhcp-dns-servers {
-        type union { type leafref { path "/host/name"; } type leafref { path "/address-list/name"; } type ip-address; }
-        ordered-by user;
-      }
-      leaf ra-enabled {
-        type boolean;
-        description "RaEnabled sends IPv6 router advertisements for the prefix on the interface that has an address in it; RaSlaac lets clients pick their own address (/64 only).";
-      }
-      leaf ra-slaac {
-        type boolean;
-      }
+      description "IpamPrefix is a node in the prefix tree, outside the VRFs (a VRF's are its own, vrf/ipam-prefix). Parent/child relations are not stored; they follow from CIDR containment within an instance's VRF.";
+      uses ipam-prefix-fields;
     }
     list ipam-address {
       key "address";
       px:table "ipam_addresses";
       px:parent-column "instance_id";
-      description "IpamAddress is a single address. With DnsName it gets an A/AAAA record; with Mac also a DHCP reservation. The firewall's own addresses are configured on the interface (Interface.Addresses).";
-      leaf address {
-        type ip-address;
-      }
-      leaf dns-name {
-        type domain-name;
-      }
-      leaf mac {
-        type mac-address;
-      }
-      leaf description {
-        type text;
-      }
+      description "IpamAddress is a single address outside the VRFs (a VRF's are its own, vrf/ipam-address). With DnsName it gets an A/AAAA record; with Mac also a DHCP reservation. The firewall's own addresses are configured on the interface (Interface.Addresses).";
+      uses ipam-address-fields;
     }
     list dns-zone {
       key "name";
@@ -458,6 +410,62 @@ submodule portitor-services {
 
   // A virtual firewall's own DNS templates; the host's are the firewall's
   // (firewall-services), which every virtual firewall may use too.
+  grouping ipam-prefix-fields {
+    action next-free {
+      px:action "view";
+      description "The prefix's next free address.";
+      output {
+        leaf address {
+          type ip-address;
+        }
+      }
+    }
+    leaf prefix {
+      type ip-prefix;
+    }
+    leaf description {
+      type text;
+    }
+    leaf dhcp-enabled {
+      type boolean;
+    }
+    leaf dhcp-range-start {
+      type ip-address;
+    }
+    leaf dhcp-range-end {
+      type ip-address;
+    }
+    leaf dhcp-gateway {
+      type ip-address;
+    }
+    leaf-list dhcp-dns-servers {
+      type union { type leafref { path "/host/name"; } type leafref { path "/address-list/name"; } type ip-address; }
+      ordered-by user;
+    }
+    leaf ra-enabled {
+      type boolean;
+      description "RaEnabled sends IPv6 router advertisements for the prefix on the interface that has an address in it; RaSlaac lets clients pick their own address (/64 only).";
+    }
+    leaf ra-slaac {
+      type boolean;
+    }
+  }
+
+  grouping ipam-address-fields {
+    leaf address {
+      type ip-address;
+    }
+    leaf dns-name {
+      type domain-name;
+    }
+    leaf mac {
+      type mac-address;
+    }
+    leaf description {
+      type text;
+    }
+  }
+
   grouping vf-dns-templates {
     list dns-soa-template {
       key "name";

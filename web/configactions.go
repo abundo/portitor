@@ -275,6 +275,7 @@ func init() {
 	registerAction("/certificate-authority", "chain", certChain)
 	registerAction("/certificate-authority", "generate", generateCA)
 	registerAction("/instance/ipam-prefix", "next-free", delegateM((*Server).handleNextFree))
+	registerAction("/instance/vrf/ipam-prefix", "next-free", delegateM((*Server).handleNextFree))
 	registerAction("/ip-list", "update", delegateM((*Server).handleIPListRefresh))
 	registerAction("/ip-list", "schedule", ipListSchedule)
 	registerAction("/instance/dns-blocklist", "update", delegateM((*Server).handleDNSBlocklistRefresh))

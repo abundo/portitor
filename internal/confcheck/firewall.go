@@ -19,6 +19,8 @@ func init() {
 	register("/instance/nat-rule", hook{normalize: normalizeNAT, check: checkNAT})
 	register("/instance/ipam-prefix", hook{normalize: normalizeIpamPrefix, check: checkIpamPrefix})
 	register("/instance/ipam-address", hook{check: checkIpamAddress})
+	register("/instance/vrf/ipam-prefix", hook{normalize: normalizeIpamPrefix, check: checkIpamPrefix})
+	register("/instance/vrf/ipam-address", hook{check: checkIpamAddress})
 	register("/instance/dns-zone", hook{normalize: normalizeDNSZone, check: checkDNSZone})
 }
 
@@ -223,6 +225,13 @@ func checkIpamPrefix(c *Ctx, p *datastore.Node) []error {
 			errs = append(errs, fail("dhcp-gateway: IPv6 clients learn the gateway from router advertisements; leave it empty"))
 		}
 	}
+	// One DHCP server per instance, its leases by address: a prefix is
+	// served in one VRF (or outside them).
+	if on(p, "dhcp-enabled") || on(p, "ra-enabled") {
+		if o := servedElsewhere(p); o != "" {
+			errs = append(errs, fail("%s has DHCP or router advertisements %s already; a virtual firewall serves a prefix in one VRF", pfx, o))
+		}
+	}
 	if !on(p, "dhcp-enabled") {
 		return errs
 	}
@@ -239,6 +248,33 @@ func checkIpamPrefix(c *Ctx, p *datastore.Node) []error {
 		errs = append(errs, fail("dhcp-range-start is after its end"))
 	}
 	return errs
+}
+
+// servedElsewhere names where else in p's instance (outside the VRFs, or
+// in VRF <name>) the prefix of p has DHCP or router advertisements, "" if
+// nowhere.
+func servedElsewhere(p *datastore.Node) string {
+	in := p.Parent
+	if in.S.Name == "vrf" {
+		in = in.Parent
+	}
+	where := func(holder *datastore.Node, what string) string {
+		for _, o := range holder.Lists["ipam-prefix"] {
+			if o != p && o.Leaf("prefix") == p.Leaf("prefix") && (on(o, "dhcp-enabled") || on(o, "ra-enabled")) {
+				return what
+			}
+		}
+		return ""
+	}
+	if w := where(in, "outside the VRFs"); w != "" {
+		return w
+	}
+	for _, v := range in.Lists["vrf"] {
+		if w := where(v, "in VRF "+v.Leaf("name")); w != "" {
+			return w
+		}
+	}
+	return ""
 }
 
 func checkIpamAddress(c *Ctx, a *datastore.Node) []error {

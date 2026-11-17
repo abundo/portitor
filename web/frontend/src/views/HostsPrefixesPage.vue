@@ -4,7 +4,8 @@
 <script setup>
 // Hosts & prefixes: one tree of the named hosts and prefixes, the address
 // lists, the IP lists and the instance's prefix tree (IPAM), each a
-// top-level node. Hosts and address and IP lists can be sorted into folders
+// top-level node. The prefix tree is main's, then one node per VRF with
+// that VRF's tree (a VRF's prefixes and addresses are its own lists). Hosts and address and IP lists can be sorted into folders
 // (object_folders), which only structure the page. A click on a row shows
 // its form beside the tree, one form at a time.
 import { computed, nextTick, onMounted, reactive, ref } from 'vue'
@@ -14,6 +15,7 @@ import ObjectTree from '@/components/ObjectTree.vue'
 import DhcpLeaseDetails from '@/components/DhcpLeaseDetails.vue'
 import DhcpLeasePicker from '@/components/DhcpLeasePicker.vue'
 import HostForm from '@/components/HostForm.vue'
+import NameSelect from '@/components/NameSelect.vue'
 import IpListForm from '@/components/IpListForm.vue'
 import AddressListForm from '@/components/AddressListForm.vue'
 import FolderForm from '@/components/FolderForm.vue'
@@ -24,8 +26,8 @@ import {
   addressLists,
   config,
   hosts as addressObjects,
-  ipamAddresses,
-  ipamPrefixes,
+  ipamAddressesIn,
+  ipamPrefixesIn,
   ipLists,
   objectFolders,
   path,
@@ -47,7 +49,7 @@ const toast = useToast()
 const router = useRouter()
 const auth = useAuthStore()
 const { confirmDelete } = useConfirm()
-const { store, ifaceText, ifaceList } = useInstanceRefs()
+const { store, ifaceText, ifaceList, vrfList, vrfItems } = useInstanceRefs()
 const deploy = useDeployStore()
 const objects = useObjectStore()
 const hosts = ref([])
@@ -56,7 +58,7 @@ const lists = ref([])
 const folders = ref([])
 const tree = ref([])
 // Keys of the collapsed nodes: the top-level nodes (group:*), the folders
-// (folder:<id>) and the prefixes (prefix:<cidr>). Not reactive: the tree
+// (folder:<id>), the VRFs (vrf:<name>) and the prefixes (<vrf>/prefix:<cidr>). Not reactive: the tree
 // folds itself, this only keeps the state when the nodes are built again.
 const collapsed = new Set()
 // Search: a host, IP list, folder, prefix or address matches when its row
@@ -154,15 +156,34 @@ function placeLease(nodes, ip, n) {
   return p ? (placeLease(p.children, ip, n) ?? p) : null
 }
 
-// The tree with the DHCP client leases of the instance's interfaces:
-// the address under the deepest prefix holding it, or under the lease's
+// setVrf marks each node of a VRF's tree with the VRF ("" main).
+function setVrf(nodes, vrf) {
+  for (const n of nodes) {
+    n.vrf = vrf
+    setVrf(n.children, vrf)
+  }
+  return nodes
+}
+
+// The trees by VRF ("" main first, then the VRFs by name), with the DHCP
+// client leases of the instance's interfaces: the address under the
+// deepest prefix of its interface's VRF holding it, or under the lease's
 // own prefix. These nodes (dhcp_lease) have no IPAM entry.
 const shownTree = computed(() => {
-  const nodes = JSON.parse(JSON.stringify(tree.value))
+  const byVrf = new Map([['', []]])
+  for (const v of [...vrfList.value].sort((a, b) => a.name.localeCompare(b.name)))
+    byVrf.set(v.name, [])
+  for (const n of JSON.parse(JSON.stringify(tree.value))) {
+    const vrf = n.vrf || ''
+    if (!byVrf.has(vrf)) byVrf.set(vrf, [])
+    if (n.kind !== 'vrf') byVrf.get(vrf).push(setVrf([n], vrf)[0])
+  }
   for (const l of clientLeases.value) {
     if (l.instance !== store.current?.name || !l.address || l.address.includes(':')) continue
     const iface = ifaceList.value.find((i) => i.name === l.interface)
     if (!iface) continue
+    const vrf = iface.vrf || ''
+    const nodes = byVrf.get(vrf) ?? byVrf.get('')
     const [ip] = l.address.split('/')
     const n = v4num(ip)
     const addrNode = {
@@ -172,6 +193,7 @@ const shownTree = computed(() => {
       cidr: ip,
       description: `DHCP lease (${l.state})`,
       interface: iface.name,
+      vrf,
       used_frac: 0,
       children: [],
     }
@@ -189,6 +211,7 @@ const shownTree = computed(() => {
       cidr: pfx.cidr,
       description: 'from a DHCP lease',
       interface: iface.name,
+      vrf,
       used_frac: 0,
       children: [addrNode],
     }
@@ -198,7 +221,7 @@ const shownTree = computed(() => {
     )
     nodes.splice(at < 0 ? nodes.length : at, 0, prefixNode)
   }
-  return nodes
+  return byVrf
 })
 
 // The tree as the search finds it: a node that matches, with all it
@@ -219,7 +242,20 @@ function pruneTree(nodes) {
     return children.length ? [{ ...n, children }] : []
   })
 }
-const foundTree = computed(() => (searching.value ? pruneTree(shownTree.value) : shownTree.value))
+// The trees by VRF as the search finds them; a VRF whose name matches
+// keeps all of its tree.
+const foundTree = computed(() => {
+  if (!searching.value) return shownTree.value
+  const out = new Map()
+  for (const [vrf, nodes] of shownTree.value) {
+    if (vrf && matchesWords(valuesText('vrf', vrf), words.value)) out.set(vrf, nodes)
+    else {
+      const found = pruneTree(nodes)
+      if (found.length || !vrf) out.set(vrf, found)
+    }
+  }
+  return out
+})
 onMounted(async () => {
   deploy.refresh()
   try {
@@ -392,6 +428,8 @@ const svgPath = {
   folder:
     '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
   dot: '<circle cx="12" cy="12" r="1"/>',
+  route:
+    '<circle cx="6" cy="19" r="3"/><path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15"/><circle cx="18" cy="5" r="3"/>',
 }
 const icon = (name, cls = 'text-muted') =>
   `<i class="wb-icon ${cls}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${svgPath[name]}</svg></i>`
@@ -536,7 +574,7 @@ function ipamBadges(n) {
 }
 
 function ipamNode(n) {
-  const key = `${n.kind}:${n.cidr}`
+  const key = `${n.vrf ?? ''}/${n.kind}:${n.cidr}`
   let description = esc(n.description)
   if (n.dns_name) description += ` ${muted(n.dns_name, 'font-mono text-xs')}`
   if (n.auto && !n.description && !n.dns_name)
@@ -578,8 +616,29 @@ function groupNode(key, title, iconName, count, description, children) {
   }
 }
 
+// A VRF's node: its tree, and what the right click adds goes into it.
+function vrfNode(vrf, nodes) {
+  const key = `vrf:${vrf}`
+  return {
+    key,
+    title: `VRF ${vrf}`,
+    icon: icon('route', 'text-primary'),
+    expanded: isOpen(key),
+    children: nodes.length
+      ? nodes.map(ipamNode)
+      : [
+          empty(
+            `empty:${key}`,
+            searching.value ? 'No prefix or address matches.' : 'No prefixes yet.',
+          ),
+        ],
+    cells: { description: muted(`Prefixes and addresses in VRF ${vrf}`, 'text-xs') },
+    item: { type: 'vrf', vrf },
+  }
+}
+
 function ipamEmpty() {
-  if (searching.value && shownTree.value.length) return 'No prefix or address matches.'
+  if (searching.value && shownTree.value.get('')?.length) return 'No prefix or address matches.'
   if (store.currentName) return 'No prefixes yet: give an interface an address, or add a prefix.'
   return 'No virtual firewall yet: create one under Virtual firewalls.'
 }
@@ -621,7 +680,11 @@ const treeSource = computed(() => {
       ),
     listNode,
   )
-  const ipamChildren = foundTree.value.map(ipamNode)
+  const ipamChildren = []
+  for (const [vrf, nodes] of foundTree.value) {
+    if (vrf) ipamChildren.push(vrfNode(vrf, nodes))
+    else ipamChildren.push(...nodes.map(ipamNode))
+  }
   return [
     groupNode(
       'group:hosts',
@@ -697,6 +760,7 @@ function rowMenu(data) {
   if (r?.type === 'addrlist') return folderMenu('address_lists', r.obj.folder_id)
   if (r?.type === 'list') return listMenu(r.obj)
   if (r?.type === 'ipam') return nodeMenu(r.obj)
+  if (r?.type === 'vrf') return addMenu(r.vrf)
   return []
 }
 
@@ -704,13 +768,17 @@ function rowMenu(data) {
 const prefixOpen = ref(false)
 const prefix = reactive({})
 const prefixGuard = useFormGuard(prefix, prefixOpen)
+// The VRF of the prefix edited, as stored ('' none); null for a new one.
+const prefixWas = ref(null)
 function editPrefix(src) {
   Object.keys(prefix).forEach((k) => delete prefix[k])
   Object.assign(prefix, {
+    vrf: '',
     prefix: '',
     description: '',
     ...src,
   })
+  prefixWas.value = prefix.id ? prefix.vrf : null
   prefixOpen.value = true
 }
 // DHCP and router advertisements are set on the DHCP page; the generic PUT
@@ -718,8 +786,7 @@ function editPrefix(src) {
 async function savePrefix() {
   try {
     const body = { prefix: prefix.prefix, description: prefix.description }
-    if (prefix.id) await ipamPrefixes.update(prefix.id, body)
-    else await ipamPrefixes.create(body)
+    await saveIn(ipamPrefixesIn, prefixWas.value, prefix.vrf, prefix.id, body)
     prefixOpen.value = false
     reloadTree()
   } catch (err) {
@@ -727,16 +794,31 @@ async function savePrefix() {
   }
 }
 
+// saveIn saves an entry (id, null for a new one) of the VRF was, now in
+// the VRF vrf ('' none) of the lists of apiIn: a move to another VRF makes
+// it there, with all it holds (DHCP settings too), and deletes it here.
+async function saveIn(apiIn, was, vrf, id, body) {
+  if (!id) return apiIn(vrf).create(body)
+  if (was === vrf) return apiIn(vrf).update(id, body)
+  const old = await apiIn(was).get(id)
+  delete old.id
+  await apiIn(vrf).create({ ...old, ...body })
+  await apiIn(was).remove(id)
+}
+
 // ----- address modal -----
 const addrOpen = ref(false)
 const addr = reactive({})
 const addrGuard = useFormGuard(addr, addrOpen)
+// The VRF of the address edited, as stored ('' none); null for a new one.
+const addrWas = ref(null)
 // The interface the address is configured on (from the tree), if any.
 const addrIface = ref(null)
 const leasePickerOpen = ref(false)
 function editAddress(src, iface = null) {
   Object.keys(addr).forEach((k) => delete addr[k])
   Object.assign(addr, {
+    vrf: '',
     address: '',
     description: '',
     dns_name: '',
@@ -744,14 +826,14 @@ function editAddress(src, iface = null) {
     ...src,
   })
   addr.mac = formatMac(addr.mac)
+  addrWas.value = addr.id ? addr.vrf : null
   addrIface.value = iface
   addrOpen.value = true
 }
 async function saveAddress() {
   try {
-    const body = { ...addr }
-    if (addr.id) await ipamAddresses.update(addr.id, body)
-    else await ipamAddresses.create(body)
+    const { vrf, ...body } = addr
+    await saveIn(ipamAddressesIn, addrWas.value, vrf, addr.id, body)
     addrOpen.value = false
     reloadTree()
   } catch (err) {
@@ -763,17 +845,23 @@ async function onAddAddress(node) {
   let next = ''
   if (!node.auto) {
     try {
-      next = (await config.view(`${vfPath()}/${path(['ipam-prefix', node.cidr])}`, 'next-free'))
-        .address
+      next = (
+        await config.view(
+          `${vfPath()}/${node.vrf ? path(['vrf', node.vrf], ['ipam-prefix', node.cidr]) : path(['ipam-prefix', node.cidr])}`,
+          'next-free',
+        )
+      ).address
     } catch {
       // full; leave empty
     }
   }
-  editAddress({ address: next })
+  editAddress({ vrf: node.vrf ?? '', address: next })
 }
 function onAddPrefix(node) {
-  editPrefix({ prefix: node.cidr })
+  editPrefix({ vrf: node.vrf ?? '', prefix: node.cidr })
 }
+// The VRFs a prefix or address may be in.
+
 // ----- context menu (right click on a row): the adds -----
 const menuItems = ref([])
 // The row's handler runs before the UContextMenu's: a row with nothing to
@@ -829,15 +917,23 @@ function groupMenu(key) {
   if (key === 'group:hosts') return folderMenu('hosts')
   if (key === 'group:addrlists') return folderMenu('address_lists')
   if (key === 'group:lists') return folderMenu('ip_lists')
+  return addMenu('')
+}
+// The adds of the prefix tree (vrf "") or a VRF's node, into that VRF.
+function addMenu(vrf) {
   if (!store.currentName || !auth.canEdit) return []
   return [
     [
       {
         label: 'Add prefix',
         icon: 'i-lucide-git-branch-plus',
-        onSelect: () => show(() => editPrefix({})),
+        onSelect: () => show(() => editPrefix({ vrf: vrf })),
       },
-      { label: 'Add address', icon: 'i-lucide-plus', onSelect: () => show(() => editAddress({})) },
+      {
+        label: 'Add address',
+        icon: 'i-lucide-plus',
+        onSelect: () => show(() => editAddress({ vrf: vrf })),
+      },
     ],
   ]
 }
@@ -869,24 +965,30 @@ function onEdit(node) {
     router.push(`/dns/zones/${encodeURIComponent(node.zone)}`)
   else if (node.kind === 'prefix')
     show(async () =>
-      editPrefix(node.auto ? { prefix: node.cidr } : await ipamPrefixes.get(node.cidr)),
+      editPrefix(
+        node.auto
+          ? { vrf: node.vrf ?? '', prefix: node.cidr }
+          : { ...(await ipamPrefixesIn(node.vrf).get(node.cidr)), vrf: node.vrf ?? '' },
+      ),
     )
   else
     show(async () =>
       editAddress(
-        node.auto ? { address: node.cidr } : await ipamAddresses.get(node.cidr),
+        node.auto
+          ? { vrf: node.vrf ?? '', address: node.cidr }
+          : { ...(await ipamAddressesIn(node.vrf).get(node.cidr)), vrf: node.vrf ?? '' },
         node.interface,
       ),
     )
 }
 async function removePrefix() {
   const ok = await confirmDelete(
-    `prefix ${prefix.prefix}`,
+    `prefix ${prefix.prefix}${prefixWas.value ? ` in VRF ${prefixWas.value}` : ''}`,
     'Addresses inside stay; a prefix of an interface address stays listed, without its settings.',
   )
   if (!ok) return
   try {
-    await ipamPrefixes.remove(prefix.id)
+    await ipamPrefixesIn(prefixWas.value).remove(prefix.id)
     prefixOpen.value = false
     reloadTree()
   } catch (err) {
@@ -894,9 +996,10 @@ async function removePrefix() {
   }
 }
 async function removeAddress() {
-  if (!(await confirmDelete(`address ${addr.address}`))) return
+  const where = addrWas.value ? ` in VRF ${addrWas.value}` : ''
+  if (!(await confirmDelete(`address ${addr.address}${where}`))) return
   try {
-    await ipamAddresses.remove(addr.id)
+    await ipamAddressesIn(addrWas.value).remove(addr.id)
     addrOpen.value = false
     reloadTree()
   } catch (err) {
@@ -954,13 +1057,15 @@ async function removeAddress() {
                     can be deleted.
                   </p>
                   <p>
-                    <b>Prefixes & IP addresses</b> nest by containment. The addresses of the
-                    firewall's interfaces and their prefixes are listed automatically. DHCP and
-                    router advertisements (SLAAC) are set per interface under DHCP; a prefix they
-                    serve shows a badge. An address with a DNS name gets an A/AAAA record, and with
-                    a MAC also a fixed DHCP lease. The A/AAAA records of the DNS zones are listed
-                    under their prefix; editing one opens its zone. So is the address of an
-                    interface that is a DHCP client, from its lease.
+                    <b>Prefixes & IP addresses</b> nest by containment, each VRF's apart: those
+                    outside the VRFs are listed first, each VRF's under its own node, and the same
+                    prefix may be in several VRFs. The addresses of the firewall's interfaces and
+                    their prefixes are listed automatically. DHCP and router advertisements (SLAAC)
+                    are set per interface under DHCP; a prefix they serve shows a badge. An address
+                    with a DNS name gets an A/AAAA record, and with a MAC also a fixed DHCP lease.
+                    The A/AAAA records of the DNS zones are listed under their prefix; editing one
+                    opens its zone. So is the address of an interface that is a DHCP client, from
+                    its lease.
                   </p>
                 </div>
               </template>
@@ -1057,6 +1162,9 @@ async function removeAddress() {
             </template>
             <form id="prefix-form" @submit.prevent="savePrefix">
               <fieldset :disabled="!auth.canEdit" class="space-y-3">
+                <UFormField :ui="inlineField" label="VRF" help="— is outside the VRFs."
+                  ><NameSelect v-model="prefix.vrf" :items="vrfItems"
+                /></UFormField>
                 <UFormField :ui="inlineField" label="Prefix" required
                   ><UInput
                     v-model="prefix.prefix"
@@ -1093,6 +1201,9 @@ async function removeAddress() {
             </template>
             <form id="addr-form" @submit.prevent="saveAddress">
               <fieldset :disabled="!auth.canEdit" class="space-y-3">
+                <UFormField :ui="inlineField" label="VRF" help="— is outside the VRFs."
+                  ><NameSelect v-model="addr.vrf" :items="vrfItems" :disabled="!!addrIface"
+                /></UFormField>
                 <UFormField :ui="inlineField" label="Address" required
                   ><UInput
                     v-model="addr.address"

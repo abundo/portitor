@@ -868,7 +868,9 @@ type NatRule struct {
 // stored; they follow from CIDR containment within an instance.
 type IpamPrefix struct {
 	Base
-	InstanceID     uint       `json:"instance_id"`
+	InstanceID uint `json:"instance_id"`
+	// VrfID is the VRF the prefix is in; nil is main.
+	VrfID          *uint      `json:"vrf_id"`
 	Prefix         string     `json:"prefix"`
 	Description    string     `json:"description"`
 	DhcpEnabled    bool       `json:"dhcp_enabled"`
@@ -956,7 +958,9 @@ const (
 // configured on the interface (Interface.Addresses).
 type IpamAddress struct {
 	Base
-	InstanceID  uint   `json:"instance_id"`
+	InstanceID uint `json:"instance_id"`
+	// VrfID is the VRF the address is in; nil is main.
+	VrfID       *uint  `json:"vrf_id"`
 	Address     string `json:"address"`
 	DnsName     string `json:"dns_name"`
 	Mac         string `json:"mac"`

@@ -383,9 +383,15 @@ export const objectFolders = withNames(
   },
 )
 // The IPAM prefixes and addresses of the selected virtual firewall, merged
-// on update: the DHCP page sets a prefix's DHCP settings.
+// on update: the DHCP page sets a prefix's DHCP settings. Those outside the
+// VRFs; a VRF's are its own lists (ipamPrefixesIn).
 export const ipamPrefixes = vfApi('ipam-prefix', ['prefix'], { merge: true })
 export const ipamAddresses = vfApi('ipam-address', ['address'], { merge: true })
+// The prefixes and addresses of the VRF vrf ('' outside the VRFs).
+export const ipamPrefixesIn = (vrf) =>
+  vrf ? vfApi(path(['vrf', vrf], 'ipam-prefix'), ['prefix'], { merge: true }) : ipamPrefixes
+export const ipamAddressesIn = (vrf) =>
+  vrf ? vfApi(path(['vrf', vrf], 'ipam-address'), ['address'], { merge: true }) : ipamAddresses
 
 // DNS update clients of the selected virtual firewall (the dynamic zones):
 // a page's provider_settings ({ key: value }) are the provider-setting

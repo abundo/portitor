@@ -737,7 +737,13 @@ the certificate portitor-config serves, chosen under Settings
   and a NET interface must be in its VRF (`routingVRF` in validation). The renderer
   writes `router ... vrf <name>` and a `vrf` block for staticd's BFD routes; the
   agent asks vtysh with `vrf <name>` (`inVRF`), so the status answers carry a
-  `vrf`. EVPN's sessions are the main table's (a VRF joins with its L3VNI), and 464XLAT is not allowed in a VRF.
+  `vrf`. A VRF has its own IPAM, the lists `vrf/ipam-prefix` and
+  `vrf/ipam-address` (the same tables, parent column `vrf_id`; their rows have no
+  `instance_id`, `prefixPlace`): the IPAM tree (a root per VRF, `ipam.Node.Vrf`),
+  next free addresses and the builder's DHCP and RA scopes stay within a VRF
+  (`ipamIn`), and a prefix is served in one place per instance (one DHCP server,
+  leases by address; `servedElsewhere`).
+  EVPN's sessions are the main table's (a VRF joins with its L3VNI), and 464XLAT is not allowed in a VRF.
 - **Policy routes** (`fwconfig/policyroute.go`, `render/policyroute.go`,
   `internal/agent/policyroute.go`, Routing → Policy) are per instance
   (`policy_routes`, ordered by `position`, the first match decides): a forward

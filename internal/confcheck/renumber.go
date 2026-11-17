@@ -35,18 +35,25 @@ func renumber(c *Ctx, i, old *datastore.Node) {
 
 func movePrefixSettings(c *Ctx, i *datastore.Node, from, to netip.Prefix) {
 	in := instanceOf(i)
-	src := in.Entry("ipam-prefix", []string{from.String()})
+	// The interface's prefixes are its VRF's.
+	holder := in
+	if v := i.Leaf("vrf"); v != "" {
+		if holder = in.Entry("vrf", []string{v}); holder == nil {
+			return
+		}
+	}
+	src := holder.Entry("ipam-prefix", []string{from.String()})
 	if src == nil || (!on(src, "dhcp-enabled") && !on(src, "ra-enabled")) {
 		return
 	}
 	for _, o := range in.Lists["interface"] {
-		if o != i && slices.Contains(prefixDiff(o.LeafLists["addresses"], nil), from) {
+		if o != i && o.Leaf("vrf") == i.Leaf("vrf") && slices.Contains(prefixDiff(o.LeafLists["addresses"], nil), from) {
 			return // still served there
 		}
 	}
-	dst := in.Entry("ipam-prefix", []string{to.String()})
+	dst := holder.Entry("ipam-prefix", []string{to.String()})
 	if dst == nil {
-		dst = in.AddEntry(in.S.Child("ipam-prefix"), map[string]string{"prefix": to.String()})
+		dst = holder.AddEntry(holder.S.Child("ipam-prefix"), map[string]string{"prefix": to.String()})
 	} else if on(dst, "dhcp-enabled") || on(dst, "ra-enabled") {
 		return // the new prefix has its own settings
 	}

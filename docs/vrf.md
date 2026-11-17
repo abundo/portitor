@@ -145,6 +145,25 @@ like for any other (and their auto rules match them). What they fetch or ask
 themselves (DNS resolving, NTP servers, DNS updates) goes through the main
 table.
 
+## Prefixes and addresses
+
+Under Network → Hosts & prefixes, each VRF has its own prefix tree: the
+prefixes and addresses outside the VRFs are listed directly under *Prefixes &
+IP addresses*, and each VRF's under a *VRF <name>* node, with the addresses of
+its interfaces. The same prefix may be outside the VRFs and in several VRFs. A
+prefix's or address's form asks for its VRF (— is none); right-click a VRF's
+node to add a prefix or address in it. The next free address of a prefix
+counts only the addresses of its own VRF.
+
+A prefix with DHCP or router advertisements is served on the interface of its
+own VRF that has an address in it (one outside the VRFs on an interface
+outside them). A virtual firewall has one DHCP server, so DHCP and router
+advertisements can be on for a prefix in one place only.
+
+In the CLI and the API a VRF's prefixes and addresses are the VRF's own lists:
+`vrf red ipam-prefix 10.0.0.0/24`, `vrf=red/ipam-prefix=10.0.0.0%2F24`.
+Renaming a VRF keeps them; deleting it deletes them.
+
 ## VPN
 
 A WireGuard interface can be put in a VRF: the tunnel's inside is then the

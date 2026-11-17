@@ -271,15 +271,30 @@ func buildPeer(in Input, d *data, generation int64, only map[string]bool, firewa
 				in.LogAuto = append(in.LogAuto, svc)
 			}
 		}
+		// IPAM: the instance's (outside the VRFs) and its VRFs' (rows of
+		// a VRF have the VRF, not the instance).
+		ipamVRF := map[uint]string{}
+		for _, v := range d.Vrfs {
+			if v.InstanceID == mi.ID {
+				ipamVRF[v.ID] = v.Name
+			}
+		}
+		mine := func(instanceID uint, vrfID *uint) bool {
+			if vrfID != nil {
+				_, ok := ipamVRF[*vrfID]
+				return ok
+			}
+			return instanceID == mi.ID
+		}
 		var prefixes []models.IpamPrefix
 		for _, p := range d.IpamPrefixes {
-			if p.InstanceID == mi.ID {
+			if mine(p.InstanceID, p.VrfID) {
 				prefixes = append(prefixes, p)
 			}
 		}
 		var addrs []models.IpamAddress
 		for _, a := range d.IpamAddresses {
-			if a.InstanceID == mi.ID {
+			if mine(a.InstanceID, a.VrfID) {
 				addrs = append(addrs, a)
 			}
 		}
@@ -763,8 +778,15 @@ func buildPeer(in Input, d *data, generation int64, only map[string]bool, firewa
 				continue
 			}
 			pfx = pfx.Masked()
+			vrf := ""
+			if p.VrfID != nil {
+				vrf = ipamVRF[*p.VrfID]
+			}
 			var serveOn, gw string
 			for _, ifc := range in.Interfaces {
+				if ifc.VRF != vrf {
+					continue // a prefix is served in its VRF
+				}
 				for _, a := range ifc.Addresses {
 					if ap, err := netip.ParsePrefix(a); err == nil && pfx.Contains(ap.Addr()) && ap.Bits() == pfx.Bits() {
 						serveOn, gw = ifc.Name, ap.Addr().String()

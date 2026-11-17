@@ -33,7 +33,10 @@ import (
 
 // ----- IPAM -----
 
-// handleIpamTree is the prefix tree of the instance ?instance=<name>.
+// handleIpamTree is the prefix tree of the instance ?instance=<name>: a
+// tree per VRF, main's first, each root with its VRF's name ("" main). A
+// VRF with nothing in it is a root of kind "vrf", so it can be shown (and
+// added to).
 func (s *Server) handleIpamTree(c *echo.Context) error {
 	in, err := s.namedInstance(c, c.QueryParam("instance"), false)
 	if in == nil {
@@ -44,11 +47,74 @@ func (s *Server) handleIpamTree(c *echo.Context) error {
 	if err != nil {
 		return err
 	}
-	tree := ipam.Tree(confview.Of(v.IpamPrefixes, id), confview.Of(v.IpamAddresses, id), confview.Of(v.Interfaces, id), zoneAddresses(v, id))
-	if tree == nil {
-		tree = []*ipam.Node{}
+	tree := []*ipam.Node{}
+	for _, vrf := range append([]string{""}, vrfNames(v, id)...) {
+		var records []ipam.RecordAddress
+		if vrf == "" {
+			records = zoneAddresses(v, id) // DNS answers from the main table
+		}
+		set := ipamIn(v, id, vrf)
+		roots := ipam.Tree(set.prefixes, set.addrs, set.ifaces, records)
+		if len(roots) == 0 && vrf != "" {
+			roots = []*ipam.Node{{Kind: "vrf", CIDR: vrf, Children: []*ipam.Node{}}}
+		}
+		for _, r := range roots {
+			r.Vrf = vrf
+		}
+		tree = append(tree, roots...)
 	}
 	return c.JSON(http.StatusOK, tree)
+}
+
+// vrfNames are an instance's VRFs by name, sorted.
+func vrfNames(v *confview.View, instanceID uint) []string {
+	var out []string
+	for _, r := range confview.Of(v.Vrfs, instanceID) {
+		out = append(out, r.Name)
+	}
+	slices.Sort(out)
+	return out
+}
+
+// ipamSet is what IPAM knows of one VRF of an instance.
+type ipamSet struct {
+	prefixes []models.IpamPrefix
+	addrs    []models.IpamAddress
+	ifaces   []models.Interface
+}
+
+// ipamIn is the IPAM of the VRF vrf of an instance ("" outside the VRFs):
+// its prefixes and addresses (a VRF's are its own lists, vrf/ipam-*), and
+// the interfaces in it.
+func ipamIn(v *confview.View, instanceID uint, vrf string) ipamSet {
+	ifaces := confview.Where(confview.Of(v.Interfaces, instanceID), func(i *models.Interface) bool { return i.Vrf == vrf })
+	if vrf == "" {
+		return ipamSet{confview.Of(v.IpamPrefixes, instanceID), confview.Of(v.IpamAddresses, instanceID), ifaces}
+	}
+	var id uint
+	for _, r := range confview.Of(v.Vrfs, instanceID) {
+		if r.Name == vrf {
+			id = r.ID
+		}
+	}
+	in := func(vid *uint) bool { return id != 0 && vid != nil && *vid == id }
+	return ipamSet{
+		prefixes: confview.Where(v.IpamPrefixes, func(p *models.IpamPrefix) bool { return in(p.VrfID) }),
+		addrs:    confview.Where(v.IpamAddresses, func(a *models.IpamAddress) bool { return in(a.VrfID) }),
+		ifaces:   ifaces,
+	}
+}
+
+// prefixPlace is the instance and VRF name ("" none) of an IPAM prefix: a
+// VRF's prefix's row has the VRF, not the instance.
+func prefixPlace(v *confview.View, p *models.IpamPrefix) (instanceID uint, vrf string) {
+	if p.VrfID == nil {
+		return p.InstanceID, ""
+	}
+	if r := confview.ByID(v.Vrfs, *p.VrfID); r != nil {
+		return r.InstanceID, r.Name
+	}
+	return 0, ""
 }
 
 // zoneAddresses lists the A and AAAA records of an instance's forward
@@ -142,11 +208,12 @@ func (s *Server) handleNextFree(c *echo.Context) error {
 	if p == nil {
 		return errJSON(c, http.StatusNotFound, "not found")
 	}
-	if ok, err := allowInstance(c, p.InstanceID, false); !ok {
+	in, vrf := prefixPlace(v, p)
+	if ok, err := allowInstance(c, in, false); !ok {
 		return err
 	}
-	in := p.InstanceID
-	ip, err := ipam.NextFree(*p, confview.Of(v.IpamPrefixes, in), ipam.Used(confview.Of(v.IpamAddresses, in), confview.Of(v.Interfaces, in)))
+	set := ipamIn(v, in, vrf)
+	ip, err := ipam.NextFree(*p, set.prefixes, ipam.Used(set.addrs, set.ifaces))
 	if err != nil {
 		return errJSON(c, http.StatusConflict, err.Error())
 	}
@@ -221,7 +288,8 @@ func (s *Server) handleWgClientConfig(c *echo.Context) error {
 		if err != nil {
 			return errJSON(c, http.StatusBadRequest, err.Error())
 		}
-		roots := ipam.Tree(confview.Of(v.IpamPrefixes, ifc.InstanceID), nil, confview.Of(v.Interfaces, ifc.InstanceID), nil)
+		set := ipamIn(v, ifc.InstanceID, ifc.Vrf)
+		roots := ipam.Tree(set.prefixes, nil, set.ifaces, nil)
 		cc.AllowedIPs = nil
 		for _, r := range roots {
 			if r.Kind == "prefix" && !insideAny(r.CIDR, remote) {
@@ -263,9 +331,8 @@ func (s *Server) handleWgNextFree(c *echo.Context) error {
 	if ok, err := allowInstance(c, ifc.InstanceID, false); !ok {
 		return err
 	}
-	prefixes := confview.Of(v.IpamPrefixes, ifc.InstanceID)
-	addrs := confview.Of(v.IpamAddresses, ifc.InstanceID)
-	ifaces := confview.Of(v.Interfaces, ifc.InstanceID)
+	vs := ipamIn(v, ifc.InstanceID, ifc.Vrf)
+	prefixes, addrs, ifaces := vs.prefixes, vs.addrs, vs.ifaces
 
 	// Peers' allowed IPs count as used: hosts as addresses, networks
 	// behind a peer as prefixes.

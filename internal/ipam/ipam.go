@@ -24,7 +24,8 @@ import (
 // Interface is the interface an address is configured on, or a prefix of
 // one of its addresses (the first such interface), by name.
 type Node struct {
-	Kind        string  `json:"kind"` // prefix | address
+	Kind        string  `json:"kind"`          // prefix | address | vrf (an empty VRF)
+	Vrf         string  `json:"vrf,omitempty"` // a root's VRF, "" main
 	Auto        bool    `json:"auto,omitempty"`
 	CIDR        string  `json:"cidr"` // prefix, or address without length
 	Description string  `json:"description,omitempty"`

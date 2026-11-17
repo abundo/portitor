@@ -14,7 +14,7 @@ import NeedInstance from '@/components/NeedInstance.vue'
 import SearchInput from '@/components/SearchInput.vue'
 import ServiceRateLimit from '@/components/ServiceRateLimit.vue'
 import { api } from '@/api'
-import { config, fromEntry, ipamPrefixes, toEntry, vfApi, vfPath } from '@/api/config'
+import { config, fromEntry, ipamPrefixesIn, toEntry, vfApi, vfPath } from '@/api/config'
 import { errMsg } from '@/api/http'
 import { withLabel } from '@/composables/useInstanceRefs'
 import { useFormGuard, usePageForm } from '@/composables/useFormGuard'
@@ -70,7 +70,9 @@ const { search: clientSearch, filtered: shownClientLeases } = useSearch(clientLe
 
 // The DHCP settings a prefix (ipam_prefixes) holds. A prefix is served on
 // the interface with an address of the same prefix, so the page lists the
-// interfaces with the prefixes of their addresses.
+// interfaces with the prefixes of their addresses. A prefix is its VRF's
+// (vrf, '' outside the VRFs, whose prefixes are the VRF's own list): its
+// id is "<vrf>,<prefix>".
 const prefixFields = [
   'dhcp_enabled',
   'dhcp_range_start',
@@ -80,9 +82,10 @@ const prefixFields = [
   'ra_enabled',
   'ra_slaac',
 ]
-function prefixRow(cidr, stored, fwAddr = '') {
+function prefixRow(cidr, stored, fwAddr = '', vrf = stored?.vrf ?? '') {
   return {
-    id: cidr,
+    id: `${vrf},${cidr}`,
+    vrf,
     prefix: cidr,
     description: stored?.description ?? '',
     fw_addr: fwAddr, // the firewall's address in the prefix
@@ -152,13 +155,22 @@ let loadedIfaces = new Map() // interface name -> its delegated_* settings as lo
 async function load() {
   const name = store.currentName
   if (!name) return
-  const [inst, ifs, stored, tree] = await Promise.all([
+  const [inst, ifs, tree] = await Promise.all([
     config.get(vfPath(), 'candidate', { shallow: '' }).then(fromEntry),
     interfaces.list(),
-    ipamPrefixes.list(),
     api.ipamTree(name),
   ])
-  const byPrefix = new Map(stored.map((p) => [p.prefix, p]))
+  // The prefixes outside the VRFs and each VRF's (the tree's roots name
+  // the VRFs), each with its vrf ('' none) and id "<vrf>,<prefix>".
+  const vrfs = ['', ...new Set(tree.map((n) => n.vrf).filter(Boolean))]
+  const stored = (
+    await Promise.all(
+      vrfs.map(async (vrf) =>
+        (await ipamPrefixesIn(vrf).list()).map((p) => ({ ...p, vrf, id: `${vrf},${p.prefix}` })),
+      ),
+    )
+  ).flat()
+  const byPrefix = new Map(stored.map((p) => [p.id, p]))
   // The tree's prefix nodes of an interface address name it; the
   // firewall's address is the interface's address node inside.
   const onIface = new Map()
@@ -168,14 +180,15 @@ async function load() {
       if (n.interface) {
         const addr = n.children.find((c) => c.kind === 'address' && c.interface)
         const list = onIface.get(n.interface) ?? []
-        list.push(prefixRow(n.cidr, byPrefix.get(n.cidr), addr?.cidr))
+        const vrf = n.vrf || '' // a root's; its children are in its VRF
+        list.push(prefixRow(n.cidr, byPrefix.get(`${vrf},${n.cidr}`), addr?.cidr, vrf))
         onIface.set(n.interface, list)
       }
-      walk(n.children)
+      walk(n.children.map((c) => ({ ...c, vrf: n.vrf })))
     }
   }
   walk(tree)
-  const served = new Set([...onIface.values()].flat().map((p) => p.prefix))
+  const served = new Set([...onIface.values()].flat().map((p) => p.id))
   Object.assign(server, {
     dhcp_enabled: inst.dhcp_enabled,
     dhcp_domain_name: inst.dhcp_domain_name ?? '',
@@ -196,10 +209,10 @@ async function load() {
       delegated_slaac: i.delegated_slaac ?? true,
     })),
     orphans: stored
-      .filter((p) => (p.dhcp_enabled || p.ra_enabled) && !served.has(p.prefix))
+      .filter((p) => (p.dhcp_enabled || p.ra_enabled) && !served.has(p.id))
       .map((p) => prefixRow(p.prefix, p)),
   })
-  loaded = new Map(allPrefixes().map((p) => [p.prefix, settings(p)]))
+  loaded = new Map(allPrefixes().map((p) => [p.id, settings(p)]))
   loadedIfaces = new Map(server.ifaces.map((i) => [i.id, delegatedSettings(i)]))
   serverForm.mark()
 }
@@ -215,14 +228,23 @@ async function save() {
     // prefixes' DHCP settings (a new prefix entry made by the merge) and
     // the changed interfaces' delegated-* settings.
     const { dhcp_enabled, dhcp_domain_name, dhcp_lease_time, dhcp_rate_limit } = server
-    const prefixes = allPrefixes()
-      .filter((p) => settings(p) !== loaded.get(p.prefix))
-      .map((p) => {
-        const body = { prefix: p.prefix, ...Object.fromEntries(prefixFields.map((k) => [k, p[k]])) }
-        if (!is6(p)) body.ra_enabled = body.ra_slaac = false
-        else body.dhcp_gateway = ''
-        return body
-      })
+    // A VRF's prefixes are its own list.
+    const changed = allPrefixes().filter((p) => settings(p) !== loaded.get(p.id))
+    const bodyOf = (p) => {
+      const body = {
+        prefix: p.prefix,
+        ...Object.fromEntries(prefixFields.map((k) => [k, p[k]])),
+      }
+      if (!is6(p)) body.ra_enabled = body.ra_slaac = false
+      else body.dhcp_gateway = ''
+      return body
+    }
+    const prefixes = changed.filter((p) => !p.vrf).map(bodyOf)
+    const vrfNames = [...new Set(changed.map((p) => p.vrf).filter(Boolean))]
+    const vrf = vrfNames.map((name) => ({
+      name,
+      ipam_prefix: changed.filter((p) => p.vrf === name).map(bodyOf),
+    }))
     const ifaces = server.ifaces
       .filter((i) => delegatedSettings(i) !== loadedIfaces.get(i.id))
       .map((i) => ({ name: i.name, ...Object.fromEntries(delegatedFields.map((k) => [k, i[k]])) }))
@@ -234,6 +256,7 @@ async function save() {
         dhcp_lease_time,
         dhcp_rate_limit,
         ...(prefixes.length ? { ipam_prefix: prefixes } : {}),
+        ...(vrf.length ? { vrf } : {}),
         ...(ifaces.length ? { interface: ifaces } : {}),
       }),
     )
@@ -449,7 +472,7 @@ const autoLeases = useAutoRefresh(loadLeases, { seconds: 10, active: () => tab.v
                   <template v-for="i in shownIfaces" :key="i.id">
                     <tr
                       v-for="(p, idx) in ifaceRows(i).length ? ifaceRows(i) : [null]"
-                      :key="p?.prefix ?? p?.delegated ?? 'none'"
+                      :key="p?.id ?? p?.delegated ?? 'none'"
                       class="border-b border-default last:border-0"
                     >
                       <template v-if="idx === 0">
@@ -607,13 +630,13 @@ const autoLeases = useAutoRefresh(loadLeases, { seconds: 10, active: () => tab.v
                   <div class="mt-1 flex flex-wrap gap-2">
                     <UButton
                       v-for="p in server.orphans"
-                      :key="p.prefix"
+                      :key="p.id"
                       size="xs"
                       color="neutral"
                       variant="outline"
                       class="font-mono"
                       :icon="readOnly ? 'i-lucide-eye' : 'i-lucide-pencil'"
-                      :label="p.prefix"
+                      :label="p.vrf ? `${p.prefix} (VRF ${p.vrf})` : p.prefix"
                       type="button"
                       @click="openDetail(p.prefix, [p])"
                     />
@@ -636,7 +659,7 @@ const autoLeases = useAutoRefresh(loadLeases, { seconds: 10, active: () => tab.v
       <template #body>
         <form id="dhcp-detail-form" @submit.prevent="saveDetail">
           <fieldset :disabled="readOnly" class="space-y-6">
-            <div v-for="p in detail.prefixes" :key="p.prefix" class="space-y-3">
+            <div v-for="p in detail.prefixes" :key="p.id" class="space-y-3">
               <div class="border-b border-default pb-1">
                 <span class="font-mono font-semibold">{{ p.prefix }}</span>
                 <span v-if="p.description" class="ms-2 text-sm text-muted">{{

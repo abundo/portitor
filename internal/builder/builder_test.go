@@ -491,3 +491,26 @@ func input(t *testing.T, db *testRecs) Input {
 }
 
 func recOf(db *testRecs) *records.Files { return db.rec }
+
+// TestBuildDHCPInVRF: a prefix is served on an interface of its own VRF,
+// never on one of another VRF with an address in it.
+func TestBuildDHCPInVRF(t *testing.T) {
+	db := testDB(t)
+	main := models.Instance{Name: "main", IsDefault: true, FirewallID: 1, DhcpEnabled: true}
+	mustCreate(t, db, &main)
+	red := models.Vrf{InstanceID: main.ID, Name: "red", RouteTable: 10}
+	mustCreate(t, db, &red)
+	mustCreate(t, db, &models.Interface{InstanceID: main.ID, Name: "eth1", Kind: "physical", Enabled: true, Ipv4Mode: "static", Addresses: models.StringList{"10.0.0.1/24"}})
+	mustCreate(t, db, &models.Interface{InstanceID: main.ID, Name: "eth2", Kind: "physical", Enabled: true, Ipv4Mode: "static", Vrf: "red", Addresses: models.StringList{"10.0.0.2/24"}})
+	mustCreate(t, db, &models.IpamPrefix{InstanceID: main.ID, Prefix: "10.0.0.0/24"})
+	mustCreate(t, db, &models.IpamPrefix{InstanceID: main.ID, VrfID: &red.ID, Prefix: "10.0.0.0/24", DhcpEnabled: true, DhcpRangeStart: "10.0.0.150", DhcpRangeEnd: "10.0.0.199"})
+
+	doc, err := Build(input(t, db), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	subs := doc.Instance("main").DHCP.Subnets
+	if len(subs) != 1 || subs[0].Interface != "eth2" || subs[0].Gateway != "10.0.0.2" {
+		t.Errorf("subnets = %+v", subs)
+	}
+}
