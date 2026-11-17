@@ -109,15 +109,16 @@ const autoListDescriptions = {
   ospf_networks: 'OSPFv2 networks, allowed to send OSPF',
   ospf6_networks: 'OSPFv3 networks, allowed to send OSPF',
   snmp_clients: 'SNMP allowed clients, allowed to UDP port 161',
-  conntrack_sync: 'The HA peer, allowed to send conntrackd sync (UDP port 3780)',
-  portitor_peer: "The HA peer, allowed to this host's portitor-config and agent",
 }
+// The HA pair's own sets (render.ConntrackSyncSet, HAConfigSet,
+// HAAgentLinkSet): the peer's addresses, generated, not lists to show.
+const hiddenAutoSets = new Set(['conntrack_sync', 'portitor_peer', 'portitor_agent_peer_link'])
 // Several rules may share a set, so one list each, with the entries of all
 // of them.
 const autoLists = computed(() => {
   const byName = new Map()
   for (const r of autoRules.value) {
-    if (!r.source_set || !r.source?.length) continue
+    if (!r.source_set || !r.source?.length || hiddenAutoSets.has(r.source_set)) continue
     let l = byName.get(r.source_set)
     if (!l) {
       l = {
