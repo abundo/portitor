@@ -1590,6 +1590,17 @@ type HAStatus struct {
 	Monitored  int `json:"monitored"`
 	// DHCP is how each instance's DHCP leases reach the peer.
 	DHCP []HADHCPSync `json:"dhcp,omitempty"`
+	// LinkSeen and MgmtSeen are the peer's last answers over the HA link
+	// and over management: a pair heard on one path alone has lost its
+	// redundancy.
+	LinkSeen *time.Time `json:"link_seen,omitempty"`
+	MgmtSeen *time.Time `json:"mgmt_seen,omitempty"`
+	// WitnessSeen is the last vote from the witness (not the console's).
+	WitnessSeen *time.Time `json:"witness_seen,omitempty"`
+	// Version is this host's release, PeerVersion the peer's as its
+	// heartbeats tell it ("" from a release before they did).
+	Version     string `json:"version,omitempty"`
+	PeerVersion string `json:"peer_version,omitempty"`
 }
 
 // HADHCPSync is how an instance's DHCP leases reach the HA peer: the last
@@ -1615,6 +1626,8 @@ type HAHeartbeatRequest struct {
 	// VoteMS, on a handover: what is left of this host's vote, which it
 	// has given up and the peer takes over.
 	VoteMS int `json:"vote_ms,omitempty"`
+	// Version is the sender's release.
+	Version string `json:"version,omitempty"`
 }
 
 // HADHCPRequest carries an instance's DHCP leases from an HA pair's
@@ -1642,6 +1655,8 @@ type HAHeartbeat struct {
 	Health int    `json:"health"`
 	// PromiseMS, if not 0: the host stays closed for that long.
 	PromiseMS int `json:"promise_ms,omitempty"`
+	// Version is the answering host's release.
+	Version string `json:"version,omitempty"`
 }
 
 // HAPeerConfig is where the host's portitor-config copies the pair's

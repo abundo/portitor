@@ -5,8 +5,10 @@
 import { ref } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import CrudPage from '@/components/CrudPage.vue'
+import HAPairs from '@/components/HAPairs.vue'
 import { api, firewalls } from '@/api'
 import { errMsg } from '@/api/http'
+import { config, path } from '@/api/config'
 import { useConfirm } from '@/composables/useConfirm'
 import { useDeployStore } from '@/stores/deploy'
 import { useInstanceStore } from '@/stores/instances'
@@ -85,6 +87,50 @@ async function switchover(f) {
     toast.add({ title: errMsg(err), color: 'error' })
   } finally {
     switching.value = false
+  }
+}
+
+// The pair's check (the firewall's check action) and the switchover test.
+const checked = ref(null)
+const checking = ref(false)
+const icon = {
+  ok: 'i-lucide-circle-check',
+  warn: 'i-lucide-triangle-alert',
+  fail: 'i-lucide-circle-x',
+}
+const tone = { ok: 'text-success', warn: 'text-warning', fail: 'text-error' }
+const pairPath = (f) => path(['firewall', f.name])
+async function checkPair(f) {
+  checking.value = true
+  try {
+    checked.value = await config.view(pairPath(f), 'check')
+  } catch (err) {
+    toast.add({ title: errMsg(err), color: 'error' })
+  } finally {
+    checking.value = false
+  }
+}
+const testing = ref(false)
+async function testSwitchover(f) {
+  const yes = await useConfirm().ask({
+    title: 'Test switchover',
+    message: 'Switch the pair over to its standby and back?',
+    detail:
+      'Only when the check says the pair can fail over. The active host hands over, and back after a few seconds; clients lose a packet or two each time.',
+  })
+  if (!yes) return
+  testing.value = true
+  try {
+    const r = await config.action(pairPath(f), 'test-switchover')
+    toast.add({
+      title: `Switched to ${r.to} in ${r['there-ms']} ms and back to ${r.from} in ${r['back-ms']} ms`,
+      description: 'Until the other host was active, as the agents tell it.',
+      color: 'success',
+    })
+  } catch (err) {
+    toast.add({ title: errMsg(err), color: 'error' })
+  } finally {
+    testing.value = false
   }
 }
 
@@ -202,69 +248,102 @@ const fields = [
 </script>
 
 <template>
-  <CrudPage
-    title="Firewalls"
-    description="This firewall and its HA secondary, each through its agent: portitor-config deploys to its own firewall and its secondary only. portitor-agent init on a host prints its agent's token and certificate fingerprint. The firewall's host is a virtual firewall of its own."
-    :api="firewalls"
-    shared
-    noun="firewall"
-    :columns="columns"
-    :fields="fields"
-    new-label="New firewall"
-    @changed="instStore.load()"
-  >
-    <template #field-witness_string="{ form }">
-      <div class="space-y-2">
-        <div class="flex gap-2">
-          <UButton size="xs" variant="outline" label="Show" @click="showWitness(form)" />
-          <UButton
-            v-if="witness"
-            size="xs"
-            variant="outline"
-            icon="i-lucide-copy"
-            label="Copy"
-            @click="copyWitness"
-          />
+  <div class="space-y-6">
+    <CrudPage
+      title="Firewalls"
+      description="This firewall and its HA secondary, each through its agent: portitor-config deploys to its own firewall and its secondary only. portitor-agent init on a host prints its agent's token and certificate fingerprint. The firewall's host is a virtual firewall of its own."
+      :api="firewalls"
+      shared
+      noun="firewall"
+      :columns="columns"
+      :fields="fields"
+      new-label="New firewall"
+      @changed="instStore.load()"
+    >
+      <template #field-witness_string="{ form }">
+        <div class="space-y-2">
+          <div class="flex gap-2">
+            <UButton size="xs" variant="outline" label="Show" @click="showWitness(form)" />
+            <UButton
+              v-if="witness"
+              size="xs"
+              variant="outline"
+              icon="i-lucide-copy"
+              label="Copy"
+              @click="copyWitness"
+            />
+          </div>
+          <p v-if="witness" class="font-mono text-xs break-all">{{ witness }}</p>
+          <p class="text-xs text-muted">
+            Under witness: in portitor-web's web.yaml on the third host. It holds the witness
+            secret, which opens the vote alone.
+          </p>
         </div>
-        <p v-if="witness" class="font-mono text-xs break-all">{{ witness }}</p>
-        <p class="text-xs text-muted">
-          Under witness: in portitor-web's web.yaml on the third host. It holds the witness secret,
-          which opens the vote alone.
-        </p>
-      </div>
-    </template>
-    <template #field-ha_state="{ form }">
-      <div class="space-y-2">
-        <table v-if="haRows(form).length" class="text-sm">
-          <tbody>
-            <tr v-for="[k, v] in haRows(form)" :key="k">
-              <td class="py-1 pr-4 align-top text-muted whitespace-nowrap">{{ k }}</td>
-              <td class="py-1">{{ v }}</td>
-            </tr>
-          </tbody>
-        </table>
-        <p v-else class="text-sm text-muted">
-          Not known: the agent doesn't answer, or the pair isn't committed yet.
-        </p>
-        <UButton
-          size="xs"
-          variant="outline"
-          icon="i-lucide-arrow-left-right"
-          label="Switch over"
-          :loading="switching"
-          @click="switchover(form)"
-        />
-      </div>
-    </template>
-    <template #cell-ha_primary_id="{ row }">
-      <span :class="['fenced', 'stale'].includes(statusOf(row.id)?.ha?.state) ? 'text-error' : ''">
-        {{ columns.find((c) => c.key === 'ha_primary_id').format(row) }}
-      </span>
-    </template>
-    <template #cell-status="{ row }">
-      <span :class="statusOf(row.id)?.error ? 'text-error' : 'text-muted'">
-        {{ columns.find((c) => c.key === 'status').format(row) }}
-      </span>
-    </template>
-  </CrudPage>
+      </template>
+      <template #field-ha_state="{ form }">
+        <div class="space-y-2">
+          <table v-if="haRows(form).length" class="text-sm">
+            <tbody>
+              <tr v-for="[k, v] in haRows(form)" :key="k">
+                <td class="py-1 pr-4 align-top text-muted whitespace-nowrap">{{ k }}</td>
+                <td class="py-1">{{ v }}</td>
+              </tr>
+            </tbody>
+          </table>
+          <p v-else class="text-sm text-muted">
+            Not known: the agent doesn't answer, or the pair isn't committed yet.
+          </p>
+          <div class="flex flex-wrap gap-2">
+            <UButton
+              size="xs"
+              variant="outline"
+              icon="i-lucide-arrow-left-right"
+              label="Switch over"
+              :loading="switching"
+              @click="switchover(form)"
+            />
+            <UButton
+              size="xs"
+              variant="outline"
+              icon="i-lucide-list-checks"
+              label="Check pair"
+              :loading="checking"
+              @click="checkPair(form)"
+            />
+            <UButton
+              size="xs"
+              variant="outline"
+              icon="i-lucide-flask-conical"
+              label="Test switchover"
+              :loading="testing"
+              @click="testSwitchover(form)"
+            />
+          </div>
+          <table v-if="checked" class="text-sm">
+            <tbody>
+              <tr v-for="c in checked.checks" :key="c.name">
+                <td class="py-1 pr-2 align-top">
+                  <UIcon :name="icon[c.status]" :class="['size-4', tone[c.status]]" />
+                </td>
+                <td class="py-1">{{ c.message }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </template>
+      <template #cell-ha_primary_id="{ row }">
+        <span
+          :class="['fenced', 'stale'].includes(statusOf(row.id)?.ha?.state) ? 'text-error' : ''"
+        >
+          {{ columns.find((c) => c.key === 'ha_primary_id').format(row) }}
+        </span>
+      </template>
+      <template #cell-status="{ row }">
+        <span :class="statusOf(row.id)?.error ? 'text-error' : 'text-muted'">
+          {{ columns.find((c) => c.key === 'status').format(row) }}
+        </span>
+      </template>
+    </CrudPage>
+    <HAPairs />
+  </div>
 </template>

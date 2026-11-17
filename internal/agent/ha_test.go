@@ -348,7 +348,7 @@ func TestHAPromises(t *testing.T) {
 		t.Fatalf("answer %+v", hb)
 	}
 	sent := time.Now()
-	active.answered(sent, &hb)
+	active.answered(sent, &hb, "")
 	if !active.held.Equal(sent.Add(haPromise)) {
 		t.Errorf("held from the send: %v", active.held.Sub(sent))
 	}

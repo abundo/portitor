@@ -136,8 +136,12 @@ func handlerPath(list *schema.Node) string {
 	for root.Parent != nil {
 		root = root.Parent
 	}
-	if inst := root.Child("instance"); inst != nil && !strings.HasPrefix(p, "/instance/") && inst.Find(p) != nil {
-		return "/instance" + p
+	// A list the host and every virtual firewall have (not a top-level one
+	// whose name an instance's leaf has too, as firewall).
+	if inst := root.Child("instance"); inst != nil && !strings.HasPrefix(p, "/instance/") {
+		if n := inst.Find(p); n != nil && n.Kind == schema.List {
+			return "/instance" + p
+		}
 	}
 	return p
 }

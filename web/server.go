@@ -91,7 +91,11 @@ type agentAPI interface {
 }
 
 type Server struct {
-	cfg *Config
+	// serving: this process is the service (Serve), not a console command
+	// run in-process, which holds none of the service's memory (the
+	// replica's copy reports, hasummary.go).
+	serving atomic.Bool
+	cfg     *Config
 	// rec is what portitor-config keeps besides the configuration tree.
 	rec    records.Store
 	access accessCache
@@ -358,6 +362,7 @@ func (s *Server) Serve(ctx context.Context) error {
 	if err := s.ensureDefaultInstance(); err != nil {
 		return err
 	}
+	s.serving.Store(true)
 	e := s.Echo()
 	if s.cfg.Local {
 		go s.runRole(ctx)

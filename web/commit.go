@@ -856,6 +856,7 @@ func (s *Server) handleAgentStatus(c *echo.Context) error {
 	statuses := []firewallStatus{}
 	var mismatch string
 	var localID uint
+	haSts := map[uint]*agentapi.HAStatus{}
 	if replica {
 		if lf, err := s.localFirewall(c.Request().Context()); err == nil {
 			localID = lf.ID
@@ -875,6 +876,7 @@ func (s *Server) handleAgentStatus(c *echo.Context) error {
 		fs.Hostname, fs.Version, fs.Generation, fs.Pending = st.Hostname, st.Version, st.Generation, st.Pending
 		if st.HA != nil && st.HA.Node != "" {
 			fs.HA = st.HA
+			haSts[fw.ID] = st.HA
 		}
 		fs.Host = st.Host
 		fs.VersionMismatch = buildinfo.Mismatch(st.Version)
@@ -918,7 +920,10 @@ func (s *Server) handleAgentStatus(c *echo.Context) error {
 	if err != nil {
 		return err
 	}
-	if names != nil {
+	var pairs []haPairSummary
+	if names == nil {
+		pairs = s.haPairs(c.Request().Context(), fws, haSts)
+	} else {
 		filterStatus(merged, names)
 		sync = nil
 		for i := range statuses {
@@ -930,7 +935,8 @@ func (s *Server) handleAgentStatus(c *echo.Context) error {
 		NICSync         *nicSync         `json:"nic_sync"`
 		VersionMismatch string           `json:"version_mismatch,omitempty"`
 		Firewalls       []firewallStatus `json:"firewalls"`
-	}{merged, sync, mismatch, statuses})
+		HAPairs         []haPairSummary  `json:"ha_pairs,omitempty"`
+	}{merged, sync, mismatch, statuses, pairs})
 }
 
 // firewallStatus asks the firewall's agent for its status, and settles

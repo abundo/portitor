@@ -66,6 +66,8 @@
     "/state/wireguard": 40,
     "/state/wireguard/peers": 41,
     "/system": 2,
+    "/system/ha-pair": 69,
+    "/system/ha-pair/checks": 70,
     "/system/ha/dhcp": 36,
     "/system/host/disks": 35
   },
@@ -747,16 +749,20 @@
     "/system/generation": 4,
     "/system/ha/epoch": 26,
     "/system/ha/health": 27,
+    "/system/ha/link-seen": 31,
+    "/system/ha/mgmt-seen": 32,
     "/system/ha/monitored": 29,
     "/system/ha/node": 18,
     "/system/ha/peer-alive": 21,
     "/system/ha/peer-health": 28,
     "/system/ha/peer-seen": 22,
+    "/system/ha/peer-version": 34,
     "/system/ha/promise-until": 24,
     "/system/ha/state": 19,
     "/system/ha/term": 20,
     "/system/ha/vote-until": 23,
     "/system/ha/watchdog": 25,
+    "/system/ha/witness-seen": 33,
     "/system/host/cpu-busy": 14,
     "/system/host/cpu-total": 15,
     "/system/host/cpus": 13,
@@ -772,6 +778,19 @@
     "/system/pending/deadline": 8,
     "/system/pending/generation": 7,
     "/system/version": 2
+  },
+  "/system/ha-pair": {
+    "/system/ha-pair/active": 4,
+    "/system/ha-pair/failover-ready": 5,
+    "/system/ha-pair/name": 1,
+    "/system/ha-pair/primary": 2,
+    "/system/ha-pair/secondary": 3
+  },
+  "/system/ha-pair/checks": {
+    "/system/ha-pair/checks/message": 4,
+    "/system/ha-pair/checks/name": 2,
+    "/system/ha-pair/checks/status": 3,
+    "/system/ha-pair/checks@/system/ha-pair/name": 1
   },
   "/system/ha/dhcp": {
     "/system/ha/dhcp/error": 4,

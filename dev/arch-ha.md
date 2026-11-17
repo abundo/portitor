@@ -87,6 +87,6 @@ are ordered by the active host; the standby copies them, keys included, from
 every minute (`certManager.adopt`, `acme.WriteRaw`), so it has them when it takes
 over. `portitor show ha` and a firewall's form (Admin → Firewalls, *HA state*) show
 `GET /v1/ha`, with each instance's DHCP lease sync (`Agent.haStatus`, which takes no
-`Agent.mu`: the witness asks every second); `POST /api/firewalls/:id/switchover`
+`Agent.mu`: the witness asks every second); The pair as one (`web/hasummary.go`, `pairSummary`, pure; design `dev/design-ha-usability.md`): from both hosts' `GET /v1/ha` (with each path's last answer `link_seen`/`mgmt_seen`, recorded by `beat` per path; the witness's last vote `witness_seen`; both releases, carried by the heartbeats), the witness setting and the copy (`configCopy`: the primary's `replication`, a replica's last copy), checks `ok`/`warn`/`fail` and `failover_ready`; in the merged status as `ha_pairs` (global readers) and in the state as `system/ha-pair`, shown by `HAPairs.vue` under Admin → Firewalls. The firewall's actions `check` (view: the summary from both agents asked now, with `interfaceCheck` and `haLinkCheck` over the live document) and `test-switchover` (operation: refused unless `failover_ready`, over and back with `switchSettle` between, timed until the other agent reports active) are `web/hacheck.go`. `POST /api/firewalls/:id/switchover`
 hands the pair over from whichever host answers as active. The user guide is
 `docs/ha.md`.

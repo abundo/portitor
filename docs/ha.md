@@ -35,6 +35,8 @@ forwards. Either host can be active; a failover changes no configuration.
 
   The two must not share a failure: with one switch carrying both, losing that switch
   would close both healthy hosts.
+  The HA link is required, not only recommended: the hosts sync their connections
+  (conntrackd) over it unencrypted, which must not cross a shared network.
 - **portitor-agent and portitor-config on both** (`install.py --agent HOST` installs
   both).
 - **An external witness** for an automatic failover: portitor-web on a third host on
@@ -291,6 +293,39 @@ In the lab, with a download through the pair held open across each event:
 | Clean restart of the active agent | One ping lost at most | Survives |
 | A traffic interface's carrier lost on the active host | 2.7 to 2.9 s | Survives |
 | Active host hard reset | 5 to 6 s | Survives |
+
+## The pair at a glance
+
+*Admin → Firewalls* shows each pair below the firewalls: which host is active, and
+whether the pair **can fail over** now. Each check is green, amber (it works, with less
+margin) or red (a failover would not happen, or would lose something):
+
+| Check | Red | Amber |
+|---|---|---|
+| Active host | No host is active | |
+| Standby | The standby doesn't answer, is fenced or stale | It has fewer monitored interfaces up |
+| Heartbeat paths | The hosts don't hear each other | One of HA link and management is silent |
+| Witness | | The primary's portitor-config is the witness, or the witness hasn't voted lately |
+| Watchdog | A host has none | A host has softdog |
+| Configuration | The secondary hasn't copied it | Its last copy is old |
+| Release | | The hosts run different releases |
+| DHCP leases | | A virtual firewall's leases don't reach the standby |
+
+The same is in the state tree (`info from state / system ha-pair` in the CLI, SNMP); the
+console's `portitor-config cli` leaves out the configuration check, which only the
+running service knows (over SSH it is there).
+
+**Check pair** on a pair's form (on either host) (or `tools firewall <name> check` in the CLI) asks
+both hosts now and adds what only they can tell: whether each has every interface the
+pair runs, by name, and what LLDP hears on the HA link (a switch there is amber: if
+management goes through the same switch, one failure closes the pair). LLDP is not
+heard through a hypervisor's Linux bridge; the check is then left out.
+
+**Test switchover** (`tools firewall <name> test-switchover`), on the primary's
+portitor-config (the secondary's is a read-only copy), switches the pair to the
+standby and back, only when the check says it can fail over, and tells how long each
+took until the other host was active. Clients lose a packet or two each time. Run it
+after setting up a pair, and after changing its network.
 
 ## What the pair keeps in step
 

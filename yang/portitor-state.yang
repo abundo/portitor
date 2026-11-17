@@ -70,6 +70,28 @@ submodule portitor-state {
           leaf received { type string; }
           leaf error { type string; }
         }
+        leaf link-seen { type string; description "The peer's last answer over the HA link."; }
+        leaf mgmt-seen { type string; description "The peer's last answer over management."; }
+        leaf witness-seen { type string; description "The witness's last vote."; }
+        leaf peer-version { type string; description "The peer's release, as its heartbeats tell it."; }
+      }
+      list ha-pair {
+        key "name";
+        description
+          "Each HA pair as one: which host is active, whether the standby is
+           ready, the configuration on both, and whether it can fail over now
+           (docs/ha.md).";
+        leaf name { type string; description "The primary's name."; }
+        leaf primary { type string; }
+        leaf secondary { type string; }
+        leaf active { type string; description "The active host; none when empty."; }
+        leaf failover-ready { type boolean; description "No check fails."; }
+        list checks {
+          key "name";
+          leaf name { type string; description "active, standby, paths, witness, watchdog, configuration, release or dhcp."; }
+          leaf status { type string; description "ok, warn or fail."; }
+          leaf message { type string; }
+        }
       }
       leaf-list errors { type string; description "What could not be read just now (an agent that doesn't answer)."; }
     }

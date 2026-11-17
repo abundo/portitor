@@ -51,6 +51,13 @@ func (f *fleetAgent) HAVote(context.Context, int) (*agentapi.HAStatus, error) {
 	return &agentapi.HAStatus{}, nil
 }
 
+func (f *fleetAgent) Neighbours(context.Context) (*agentapi.NeighboursResponse, error) {
+	if f.down {
+		return nil, errDown
+	}
+	return &agentapi.NeighboursResponse{}, nil
+}
+
 func (f *fleetAgent) Status(context.Context) (*agentapi.Status, error) {
 	if f.down {
 		return nil, errDown

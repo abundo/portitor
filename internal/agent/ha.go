@@ -19,6 +19,7 @@ import (
 
 	"github.com/abundo/portitor/internal/agentapi"
 	"github.com/abundo/portitor/internal/agentclient"
+	"github.com/abundo/portitor/internal/buildinfo"
 	"github.com/abundo/portitor/internal/fwconfig"
 )
 
@@ -66,6 +67,10 @@ type haManager struct {
 	noVoteUntil time.Time
 	peerSeen    time.Time
 	peer        agentapi.HAHeartbeat
+	// linkSeen and mgmtSeen are the peer's last answers on each path,
+	// witnessSeen the witness's last vote, peerVersion the peer's release.
+	linkSeen, mgmtSeen, witnessSeen time.Time
+	peerVersion                     string
 	// clients are the two paths' agent clients, reused for their
 	// connections.
 	clients map[string]*agentclient.Client
@@ -198,6 +203,9 @@ func (h *haManager) giveVote(d time.Duration, forced bool) {
 		return
 	}
 	h.vote, h.forced = now.Add(min(d, haMaxVote)), forced
+	if !forced {
+		h.witnessSeen = now
+	}
 }
 
 // facts is what haDecide needs; h.mu held.
@@ -210,7 +218,7 @@ func (h *haManager) facts(now time.Time) haFacts {
 
 // request is this host's heartbeat; h.mu held and h.cfg set.
 func (h *haManager) request() agentapi.HAHeartbeatRequest {
-	return agentapi.HAHeartbeatRequest{Node: h.cfg.Node, Epoch: h.cfg.Epoch, Term: h.term, Active: h.active, Health: h.health}
+	return agentapi.HAHeartbeatRequest{Node: h.cfg.Node, Epoch: h.cfg.Epoch, Term: h.term, Active: h.active, Health: h.health, Version: buildinfo.Version}
 }
 
 // tick looks at the leases and acts; it feeds the watchdog while active.
@@ -479,8 +487,8 @@ func (h *haManager) shutdown() {
 func (h *haManager) loop(ctx context.Context) {
 	t := time.NewTicker(haTick)
 	defer t.Stop()
-	go h.beat(ctx, func(c *fwconfig.HA) string { return c.Peer })
-	go h.beat(ctx, func(c *fwconfig.HA) string { return c.PeerLink })
+	go h.beat(ctx, haPathMgmt, func(c *fwconfig.HA) string { return c.Peer })
+	go h.beat(ctx, haPathLink, func(c *fwconfig.HA) string { return c.PeerLink })
 	go h.checkGate(ctx)
 	go h.watchGate(ctx)
 	go h.copyCerts(ctx)
@@ -512,7 +520,7 @@ func (h *haManager) client(cfg *fwconfig.HA, url string) (*agentclient.Client, e
 
 // beat sends a heartbeat over one path every haBeat, until ctx is
 // cancelled. Each path runs apart, so a dead one costs the other nothing.
-func (h *haManager) beat(ctx context.Context, path func(*fwconfig.HA) string) {
+func (h *haManager) beat(ctx context.Context, name string, path func(*fwconfig.HA) string) {
 	t := time.NewTicker(haBeat)
 	defer t.Stop()
 	for {
@@ -540,16 +548,31 @@ func (h *haManager) beat(ctx context.Context, path func(*fwconfig.HA) string) {
 		hb, err := c.HAHeartbeat(bctx, req)
 		cancel()
 		if err == nil {
-			h.answered(sent, hb)
+			h.answered(sent, hb, name)
 		}
 	}
 }
 
-// answered records the peer's answer to a heartbeat sent at sent.
-func (h *haManager) answered(sent time.Time, hb *agentapi.HAHeartbeat) {
+// The heartbeats' two paths.
+const (
+	haPathMgmt = "mgmt"
+	haPathLink = "link"
+)
+
+// answered records the peer's answer to a heartbeat sent at sent over a
+// path (haPathMgmt, haPathLink, or "" for none in particular).
+func (h *haManager) answered(sent time.Time, hb *agentapi.HAHeartbeat, path string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.heard(time.Now(), hb.Node, hb.Epoch, hb.Term, hb.Active, hb.Health)
+	now := time.Now()
+	h.heard(now, hb.Node, hb.Epoch, hb.Term, hb.Active, hb.Health)
+	h.peerVersion = hb.Version
+	switch path {
+	case haPathMgmt:
+		h.mgmtSeen = now
+	case haPathLink:
+		h.linkSeen = now
+	}
 	if hb.PromiseMS > 0 {
 		if until := sent.Add(time.Duration(hb.PromiseMS) * time.Millisecond); until.After(h.held) {
 			h.held = until
@@ -567,7 +590,8 @@ func (h *haManager) answer(req agentapi.HAHeartbeatRequest) agentapi.HAHeartbeat
 	}
 	now := time.Now()
 	h.heard(now, req.Node, req.Epoch, req.Term, req.Active, req.Health)
-	out := agentapi.HAHeartbeat{Node: h.cfg.Node, Epoch: h.cfg.Epoch, Term: h.term, Active: h.active, Health: h.health}
+	h.peerVersion = req.Version
+	out := agentapi.HAHeartbeat{Node: h.cfg.Node, Epoch: h.cfg.Epoch, Term: h.term, Active: h.active, Health: h.health, Version: buildinfo.Version}
 	if haGives(h.active, h.cfg.Node == fwconfig.HAPrimary, req.Active, req.Node == fwconfig.HAPrimary) {
 		if until := now.Add(haPromise); until.After(h.given) {
 			h.given = until
@@ -738,6 +762,8 @@ func (h *haManager) status() *agentapi.HAStatus {
 		until := h.held
 		st.PromiseUntil = &until
 	}
+	st.LinkSeen, st.MgmtSeen, st.WitnessSeen = timePtr(h.linkSeen), timePtr(h.mgmtSeen), timePtr(h.witnessSeen)
+	st.Version, st.PeerVersion = buildinfo.Version, h.peerVersion
 	switch {
 	case h.active:
 		st.State = agentapi.HAActive

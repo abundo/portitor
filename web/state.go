@@ -63,6 +63,7 @@ func (s *Server) stateTree(ctx context.Context, u *models.User) (*datastore.Tree
 		Firewalls []struct {
 			Host *agentapi.HostStatus `json:"host"`
 		} `json:"firewalls"`
+		HAPairs []haPairSummary `json:"ha_pairs"`
 	}
 	if get("/api/agent/status", &st) {
 		sys := root.AddContainer(root.S.Child("system"))
@@ -73,6 +74,7 @@ func (s *Server) stateTree(ctx context.Context, u *models.User) (*datastore.Tree
 			}
 		}
 		datastore.Fill(sys, st.Status)
+		datastore.FillList(sys, "ha-pair", st.HAPairs)
 		for _, in := range st.Instances {
 			n := state(in.Name)
 			datastore.FillList(n, "interfaces", in.Interfaces)
