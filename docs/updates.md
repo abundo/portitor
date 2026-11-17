@@ -24,6 +24,24 @@ Read the release notes before you install a release: the *Dashboard* shows them.
 - Commit or revert pending changes, and confirm any commit that waits.
 - Plan a reboot for a quiet time.
 
+## If an update fails
+
+Before Portitor changes anything, it checks that the new release can read the
+firewall's configuration. If it can't (for example, *Go back* to a release older
+than the one that last converted the configuration), the update is refused and
+nothing changes.
+
+Each update keeps a copy of the release that was installed, with its
+configuration as it was before the update. After the update, Portitor checks that
+the firewall's services start and answer. If a step or a check fails, it puts the
+previous release and its configuration back, starts them again, and stops: the
+message says which release runs now. With portitor-manager, the firewalls updated
+before the failing one stay on the new release, and those after it are not
+touched.
+
+Operating system packages that the update installed stay installed. They don't
+affect the previous release.
+
 ## Updating a firewall cluster
 
 Update the **secondary first**, then the primary. Each firewall hands its traffic

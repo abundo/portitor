@@ -158,7 +158,7 @@ func portalCommand() *cobra.Command {
 
 	root.AddCommand(&cobra.Command{
 		Use:   "list-firewalls",
-		Short: "Print the firewalls, one per line: name and URL (install.py reads them)",
+		Short: "Print the firewalls and the firewall clusters' hosts (<cluster>/primary, <cluster>/secondary), one per line: name and URL (install.py reads them)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := load()
@@ -171,6 +171,13 @@ func portalCommand() *cobra.Command {
 			}
 			for _, f := range store.Firewalls() {
 				fmt.Fprintln(cmd.OutOrStdout(), f.Name, f.URL)
+			}
+			for _, ha := range store.HAFirewalls() {
+				for _, h := range []*web.PortalFirewall{ha.Primary, ha.Secondary} {
+					if h != nil {
+						fmt.Fprintln(cmd.OutOrStdout(), h.Name, h.URL)
+					}
+				}
 			}
 			return nil
 		},

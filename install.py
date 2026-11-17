@@ -19,6 +19,17 @@ know, so it must never be older than portitor-config. On a first install,
 when a config was just created, the data directory is made but nothing is
 started; the installer prints the remaining steps.
 
+Before anything is replaced, the release's portitor-config reads a copy of
+each firewall's data directory (`migrate`); one it can't read (an older
+release than the data's) is refused with nothing changed. Each host then
+keeps its installed release in /var/lib/portitor-previous (binaries, units,
+/etc/portitor and the data directories of the services updated there, copied
+while they are stopped). After the restarts the agent must answer and
+portitor-config and portitor-manager listen; when a step or a check fails, the
+host is put back to its previous release (its data directory too, from before
+the migration) and the update stops: the hosts before it stay updated. Debian
+packages installed by the update stay.
+
 An installation older than 1.0.0 is refused before anything is replaced:
 update it to 1.0.0 first, which moves what its database held into files.
 
@@ -88,7 +99,7 @@ from typing import Sequence
 
 # Bump when the installer itself changes, so a release's copy can tell
 # whether it is newer than the one running.
-INSTALLER_VERSION = 14
+INSTALLER_VERSION = 15
 INSTALLER_FILENAME = "install.py"
 # Where the agent host keeps a copy, for updates from the GUI.
 INSTALLER_DEST = "/usr/lib/portitor/install.py"
@@ -637,7 +648,7 @@ def install_agent(host: Host, binary: Path, deploy: Path, version: str, assume_y
         host.systemctl("enable", EARLY_UNIT)
     host.systemctl("restart", AGENT_UNIT)
     if not host.dry_run and not agent_answers(host):
-        warn(f"{AGENT_UNIT} does not answer on {host}; see journalctl -u {AGENT_UNIT}")
+        raise InstallError(f"{AGENT_UNIT} does not answer on {host}; see journalctl -u {AGENT_UNIT}")
     verify_version(host, AGENT_BIN, version)
 
 
@@ -654,6 +665,169 @@ def agent_answers(host: Host, timeout: float = 20) -> bool:
         if time.monotonic() >= deadline:
             return False
         time.sleep(1)
+
+
+# ---------------------------------------------------------------------------
+# The previous release, kept for a restore
+# ---------------------------------------------------------------------------
+
+# Each host keeps one copy of what an update replaces, taken before it does:
+# the binaries and their links, the units, /etc/portitor and the data
+# directories of the services updated there, copied while those are stopped.
+# An update that fails on a host (a step, or a health check after the
+# restarts) puts it back there, so the old binaries run on the data directory
+# they read, and the update stops. Root only: it holds the secrets.
+PREVIOUS_ROOT = "/var/lib/portitor-previous"
+PREVIOUS_DIR = f"{PREVIOUS_ROOT}/previous"
+PREVIOUS_FILES = (AGENT_BIN, CLI_LINK, WEB_BIN, OLD_WEB_BIN, CONFIG_LINK, INSTALLER_DEST, f"{BIN_DIR}/portitor-setup")
+# Restarted by a restore when they were running before the update.
+PREVIOUS_UNITS = (AGENT_UNIT, CONFIG_UNIT, WEB_UNIT)
+
+
+def take_previous(host: Host, config: bool, manager: bool) -> bool:
+    """Copies the installed release on host into PREVIOUS_DIR (one, the
+    last), stopping portitor-config (config) and portitor-manager (manager)
+    so that their data directories are copied whole. False when nothing is
+    installed there yet: a first install has nothing to go back to."""
+    if not (host.exists(AGENT_BIN) or host.exists(WEB_BIN) or host.exists(OLD_WEB_BIN)):
+        return False
+    dirs = ([CONFIG_DB_DIR] if config else []) + ([WEB_DATA_DIR] if manager else [])
+    stop = ([CONFIG_UNIT] if config else []) + ([WEB_UNIT] if manager else [])
+    version = host.version(WEB_BIN) or host.version(AGENT_BIN) or "unknown"
+    q = shlex.quote
+    new = q(f"{PREVIOUS_DIR}.new")
+    script = "\n".join([
+        "set -e",
+        f"rm -rf {new}",
+        f"install -d -m 0700 {q(PREVIOUS_ROOT)} {new} {new}/files {new}/data",
+        f": >{new}/active",
+        f"for u in {' '.join(PREVIOUS_UNITS)}; do",
+        f"  if systemctl is-active --quiet \"$u\"; then echo \"$u\" >>{new}/active; fi",
+        "done",
+        *[f"systemctl stop {u} 2>/dev/null || true" for u in stop],
+        f"for f in {' '.join(q(f) for f in PREVIOUS_FILES)} {SYSTEMD_DIR}/portitor-*.service {ETC_DIR}; do",
+        f"  if [ -e \"$f\" ] || [ -L \"$f\" ]; then cp -a --parents \"$f\" {new}/files/; fi",
+        "done",
+        f": >{new}/data.list",
+        f"for d in {' '.join(q(d) for d in dirs)}; do",
+        f"  if [ -d \"$d\" ]; then cp -a --parents \"$d\" {new}/data/; echo \"$d\" >>{new}/data.list; fi",
+        "done",
+        f"echo {q(version)} >{new}/version",
+        f"rm -rf {q(PREVIOUS_DIR)}",
+        f"mv {new} {q(PREVIOUS_DIR)}",
+    ])
+    log(f"==> Keeping Portitor {version} on {host} for a restore ({PREVIOUS_DIR})")
+    host.run(script, desc=f"copy Portitor {version} (binaries, units, {ETC_DIR}"
+             + "".join(f", {d}" for d in dirs) + f") to {PREVIOUS_DIR}")
+    return True
+
+
+def restore_previous(host: Host) -> str:
+    """Puts PREVIOUS_DIR back on host: the data directories replaced by their
+    copies, the files over the new ones, and the units that ran restarted
+    (portitor-config's data first, then the agent: the agent is never older
+    than portitor-config). The restored version; raises if it doesn't run."""
+    p = shlex.quote(PREVIOUS_DIR)
+    version = (host.read(f"{PREVIOUS_DIR}/version", root=True) or "").strip() or "the previous release"
+    # Read before the restore: a read that fails afterwards must not pass
+    # for "nothing ran", which would skip the checks.
+    active_text = host.read(f"{PREVIOUS_DIR}/active", root=True)
+    if active_text is None and not host.dry_run:
+        raise InstallError(f"{host}: can't read {PREVIOUS_DIR}/active")
+    active = set((active_text or "").split())
+    log(f"==> Restoring Portitor {version} on {host}")
+    script = "\n".join([
+        "set -e",
+        f"test -d {p}",
+        f"systemctl stop {CONFIG_UNIT} {WEB_UNIT} 2>/dev/null || true",
+        f"while read -r d; do [ -n \"$d\" ] || continue; rm -rf \"$d\"; cp -a {p}/data\"$d\" \"$(dirname \"$d\")/\"; done <{p}/data.list",
+        # Each top-level entry: "files/." would give / the mode of files (0700).
+        f"for e in {p}/files/*; do cp -a --remove-destination \"$e\" /; done",
+        "systemctl daemon-reload",
+        f"if grep -qx {AGENT_UNIT} {p}/active; then systemctl restart {AGENT_UNIT}; fi",
+        f"for u in {CONFIG_UNIT} {WEB_UNIT}; do if grep -qx \"$u\" {p}/active; then systemctl start \"$u\"; fi; done",
+    ])
+    host.run(script, desc=f"restore {PREVIOUS_DIR} (data directories, binaries, units) and restart what ran")
+    if host.dry_run:
+        return version
+    if AGENT_UNIT in active and not agent_answers(host):
+        raise InstallError(f"{host}: the restored {AGENT_UNIT} does not answer; see journalctl -u {AGENT_UNIT}")
+    if CONFIG_UNIT in active:
+        service_healthy(host, CONFIG_UNIT, CONFIG_FILE, "8444")
+    if WEB_UNIT in active:
+        service_healthy(host, WEB_UNIT, WEB_CONFIG, "8080")
+    return version
+
+
+def service_healthy(host: Host, unit: str, config_file: str, default_port: str, timeout: float = 60) -> None:
+    """Raises unless unit is active and listening on its config's bind port
+    within timeout, and still active 5 s later (a unit failing at start is
+    active for a moment between its restarts)."""
+    if host.dry_run:
+        return
+    text = host.read(config_file, root=True) or ""
+    m = re.search(r"^bind:\s*[\"']?([^\s\"'#]+)", text, re.M)
+    port = (m.group(1).rpartition(":")[2] if m else "") or default_port
+    probe = f"systemctl is-active --quiet {unit} && ss -Hltn 'sport = :{port}' | grep -q ."
+    deadline = time.monotonic() + timeout
+    while host.run(probe, check=False, mutate=False, root=True).returncode != 0:
+        if time.monotonic() >= deadline:
+            raise InstallError(f"{host}: {unit} does not listen on port {port} after {timeout:.0f} s; "
+                               f"see journalctl -u {unit}")
+        time.sleep(1)
+    time.sleep(5)
+    if host.run(f"systemctl is-active --quiet {unit}", check=False, mutate=False, root=True).returncode != 0:
+        raise InstallError(f"{host}: {unit} stopped after it started; see journalctl -u {unit}")
+
+
+def check_config_reads(host: Host, binary: Path, version: str) -> None:
+    """Before anything is replaced: the release's portitor-config reads
+    (migrates) a copy of the data directory, so a release that can't (a
+    later layout, an older release than the one that migrated it) is
+    refused with nothing changed."""
+    if host.dry_run or not host.exists(f"{CONFIG_DB_DIR}/layout.json"):
+        return
+    log(f"==> Checking that portitor-config {version} reads the data directory on {host}")
+    tmp = host.run("mktemp -d /var/tmp/portitor-check.XXXXXX", desc="mktemp -d /var/tmp/portitor-check.XXXXXX",
+                   capture=True).stdout.strip()
+    if not tmp.startswith("/var/tmp/portitor-check."):
+        raise InstallError(f"{host}: mktemp printed {tmp!r}")
+    t = shlex.quote(tmp)
+    try:
+        host.put(binary, f"{tmp}/portitor-manager", "0755", name="portitor-manager")
+        script = "\n".join([
+            "set -e",
+            f"chmod 0711 {t}",
+            f"ln -s portitor-manager {t}/portitor-config",
+            f"cp -a {CONFIG_DB_DIR} {t}/data",
+            f"chown -R {WEB_USER}: {t}/data",
+            f"sed '/^db:/,/^[^[:space:]#]/ s#^\\([[:space:]]*path:\\).*#\\1 {tmp}/data/portitor.db#' {CONFIG_FILE} >{t}/config.yaml",
+            f"chown {WEB_USER} {t}/config.yaml",
+            f"chmod 0600 {t}/config.yaml",
+            f"runuser -u {WEB_USER} -- {t}/portitor-config -f {t}/config.yaml migrate",
+        ])
+        proc = host.run(script, desc=f"portitor-config {version} migrate, on a copy of {CONFIG_DB_DIR}",
+                        check=False, capture=True)
+        if proc.returncode != 0:
+            raise InstallError(
+                f"{host}: portitor-config {version} can't read the data directory, so nothing was changed:\n"
+                + ((proc.stderr or "") + (proc.stdout or "")).strip()
+            )
+    finally:
+        host.run(f"rm -rf {t}", desc=f"rm -rf {tmp}", check=False)
+
+
+def restore_after(host: Host, kept: bool, exc: BaseException, updated: list[str]) -> InstallError:
+    """The error to stop the update with after it failed on host: host put
+    back to its previous release when one was kept."""
+    rest = (f" Already updated: {', '.join(updated)}." if updated else "")
+    if not kept:
+        return InstallError(f"{exc}\n{host}: there was no previous release to restore.{rest}")
+    try:
+        version = restore_previous(host)
+    except InstallError as err:
+        return InstallError(f"{exc}\nRESTORING {host} FAILED: {err}\nThe copy is kept in {PREVIOUS_DIR}.{rest}")
+    return InstallError(f"{exc}\n{host} is back on Portitor {version}; the update stopped there.{rest}")
 
 
 def add_bind_repo(host: Host, deploy: Path) -> bool:
@@ -869,6 +1043,7 @@ def install_web(host: Host, binary: Path, deploy: Path, version: str, assume_yes
         log(f"    {WEB_UNIT} is disabled on {host}; not started")
         return
     host.systemctl("restart", WEB_UNIT)
+    service_healthy(host, WEB_UNIT, WEB_CONFIG, "8080")
     verify_version(host, WEB_BIN, version)
 
 
@@ -998,15 +1173,36 @@ def install(
     # One at a time, an HA pair's secondary first (make_plan's order): each
     # agent restarts fenced unless it hears its peer, so the next waits
     # until the restarted one does, and one host of the pair keeps forwarding.
+    # Each host keeps its installed release (take_previous) and goes back to
+    # it when its update fails, which stops the update there: the hosts
+    # before it stay updated, those after it are left alone.
+    for agent in plan.agents:
+        check_config_reads(agent, roots[archs[agent_key(agent)]] / "portitor-manager", version)
+    web_here = plan.web is not None and any(same_host(plan.web, a) for a in plan.agents)
+    updated: list[str] = []
     for agent in plan.agents:
         root = roots[archs[agent_key(agent)]]
-        install_agent(agent, root / "portitor-agent", deploy, version, assume_yes)
-        install_config(agent, root / "portitor-manager", deploy, version, assume_yes)
+        kept = take_previous(agent, config=True, manager=web_here and same_host(plan.web, agent))
+        try:
+            install_agent(agent, root / "portitor-agent", deploy, version, assume_yes)
+            install_config(agent, root / "portitor-manager", deploy, version, assume_yes)
+        except (InstallError, KeyboardInterrupt) as exc:
+            raise restore_after(agent, kept, exc if str(exc) else InstallError("interrupted"), updated) from None
+        updated.append(str(agent))
         if agent.name in plan.ha_agents:
             wait_for_ha_peer(agent)
     if plan.web:
-        install_web(plan.web, roots[archs["web"]] / "portitor-manager", deploy, version, assume_yes)
+        # On a firewall's host, the copy taken with the firewall's.
+        kept = web_here or take_previous(plan.web, config=False, manager=True)
+        try:
+            install_web(plan.web, roots[archs["web"]] / "portitor-manager", deploy, version, assume_yes)
+        except (InstallError, KeyboardInterrupt) as exc:
+            raise restore_after(plan.web, kept, exc if str(exc) else InstallError("interrupted"), updated) from None
     log("==> Done")
+
+
+def same_host(a: Host, b: Host) -> bool:
+    return a.name == b.name or (a.local and b.local)
 
 
 def install_config(host: Host, binary: Path, deploy: Path, version: str, assume_yes: bool) -> None:
@@ -1067,6 +1263,7 @@ def install_config(host: Host, binary: Path, deploy: Path, version: str, assume_
     if action == "installed":
         host.systemctl("enable", CONFIG_UNIT)
     host.systemctl("restart", CONFIG_UNIT)
+    service_healthy(host, CONFIG_UNIT, CONFIG_FILE, "8444")
     verify_version(host, WEB_BIN, version)
 
 

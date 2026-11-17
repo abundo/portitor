@@ -112,6 +112,17 @@ Keep these apart; each has one meaning.
   higher layout, or one of before 1.0.0 (files or `portitor.db` but no
   `layout.json`: "update to 1.0.0 first"). A change of layout raises
   `layoutVersion` and keeps a reader of the old one for one release.
+- **Updates**: `install.py` runs the target release's `portitor-config migrate`
+  on a copy of the data directory before it replaces anything
+  (`check_config_reads`), so a release that can't read it (a downgrade past a
+  layout or tree migration) is refused. Each host keeps its installed release in
+  `/var/lib/portitor-previous/previous` (root 0700: binaries and links, units,
+  `/etc/portitor`, `active` units, `version`, and the data directories in
+  `data.list`, copied while their services are stopped); a failed step or health
+  check restores it (data directories replaced, files copied over with
+  `--remove-destination`, the units in `active` restarted). Not restored: Debian
+  packages, the agent's `state_dir`, one-way moves (`migrate_manager`,
+  `retire_kea`, `retire_radvd`).
 - **Copy format**: `copyFormat` (3) in a backup's or replica copy's manifest;
   `copyFormatOldest` (2) is still read. A copy without `global.json` or
   `entry-ids.json` is refused before anything changes.
