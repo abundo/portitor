@@ -98,7 +98,9 @@ interface that takes the default route when both use DHCP), gateway (on the stat
 optional), dns (space separated; empty: the DHCP server's, when the LAN or WAN uses DHCP), password, hostname (default portitor, may include the domain), timezone and keyboard (an XKB layout, e.g. se). The file is removed when the setup has
 finished. role (both, agent or web) picks the split setups; agent reads
 web_from (portitor-manager's address or network, default the LAN network), web
-reads lan and address (its own interface), gateway, portal, portal_address, portal_gateway,
+reads lan and address (its own interface: the LAN, or with cluster yes the
+Management interface), gateway and, with cluster yes (the manager of a firewall
+cluster), portal (its optional LAN), portal_address, portal_gateway,
 gateway_on (lan or portal: the one interface with the default gateway, static or from DHCP) and join (a portal
 string, optional). primary and secondary read mgmt (a name or MAC address),
 mgmt_address, mgmt_gateway (optional: empty, the other host of the pair is the
@@ -197,6 +199,33 @@ ROLES = [
 ]
 # The roles as the setup shows them ("web" is the manager's in the answers).
 ROLE_NAMES = {"both": "firewall", "agent": "managed", "web": "manager", "primary": "primary", "secondary": "secondary"}
+# The machine types as the setup offers them, in two groups. The manager is
+# in both: "web" with cluster false or true (a["cluster"], kept in setup.json).
+# (choice id, role, cluster, label, text)
+ROLE_GROUPS = [
+    ("Standalone", [
+        ("both", "both", False, "Firewall and manager", "a firewall with its own GUI"),
+        ("agent", "agent", False, "Firewall", "a firewall managed by a manager on another host (its own GUI too)"),
+        ("web", "web", False, "Manager", "manages firewalls on other hosts; one interface, the LAN"),
+    ]),
+    ("Firewall cluster", [
+        ("primary", "primary", False, "Primary", "the firewall, with its cluster link and management"),
+        ("secondary", "secondary", False, "Secondary", "its cluster link and management; the primary configures the rest"),
+        ("web_cluster", "web", True, "Manager", "manages the cluster and is its witness; Management, and a LAN (optional)"),
+    ]),
+]
+CHOICES = {cid: (role, cluster, f"{group}: {label}", text)
+           for group, items in ROLE_GROUPS for cid, role, cluster, label, text in items}
+
+
+def choice_of(role: str, cluster: bool) -> str:
+    """The machine type's choice id of a role."""
+    return "web_cluster" if role == "web" and cluster else role
+
+
+def manager_cluster(a: dict) -> bool:
+    """portitor-manager for a firewall cluster: Management and an optional LAN."""
+    return a.get("role") == "web" and bool(a.get("cluster"))
 HA_ROLES = ("primary", "secondary")
 # The role shown in the shell prompt (step_hostname); none on a lone firewall.
 PROMPT_LABELS = {"primary": "primary", "secondary": "secondary", "web": "manager", "agent": "firewall"}
@@ -1235,12 +1264,14 @@ def read_answers() -> dict:
     role = raw.get("role") or "both"
     if role == "manager":
         role = "web"  # the manager's role is "web" in the answers
+    cluster = role == "web" and raw.get("cluster", "").lower() in ("yes", "true", "1")
     if role not in dict(ROLES):
         raise RuntimeError(f"{ANSWERS}: no role {role!r}")
 
     ha = role in HA_ROLES
     a = {
         "role": role,
+        "cluster": cluster,
         "lan": nic("lan") if role != "secondary" else "",
         "address": (None if role == "secondary" or raw["address"].lower() == "dhcp"
                     else ipaddress.IPv4Interface(raw["address"])),
@@ -1260,12 +1291,12 @@ def read_answers() -> dict:
         "mgmt_address": ipaddress.IPv4Interface(raw["mgmt_address"]) if ha else None,
         "mgmt_gateway": ipaddress.IPv4Address(raw["mgmt_gateway"]) if ha and raw.get("mgmt_gateway") else None,
         "ha_link": nic("ha_link") if ha else "",
-        "portal": nic("portal") if raw.get("portal") and role == "web" else "",
+        "portal": nic("portal") if raw.get("portal") and cluster else "",
         "portal_address": (ipaddress.IPv4Interface(raw["portal_address"])
-                           if raw.get("portal_address") and role == "web" else None),
+                           if raw.get("portal_address") and cluster else None),
         "portal_gateway": (ipaddress.IPv4Address(raw["portal_gateway"])
-                           if raw.get("portal_gateway") and role == "web" else None),
-        "gateway_on": "portal" if raw.get("gateway_on") == "portal" and raw.get("portal") and role == "web" else "lan",
+                           if raw.get("portal_gateway") and cluster else None),
+        "gateway_on": "portal" if raw.get("gateway_on") == "portal" and raw.get("portal") and cluster else "lan",
     }
     if a["gateway_on"] == "portal":
         a["gateway"] = None
@@ -1317,6 +1348,7 @@ def state_of(a: dict) -> dict:
     state["dhcp_range"] = fmt_range(a.get("dhcp_range"))
     state["default_route"] = route_from(a)
     state["gateway_on"] = a.get("gateway_on") or "lan"
+    state["cluster"] = manager_cluster(a)
     return state
 
 
@@ -1336,6 +1368,7 @@ def answers_of(state: dict) -> dict:
         "portal": state.get("portal", ""), "portal_address": iface("portal_address"),
         "portal_gateway": ipaddress.IPv4Address(state["portal_gateway"]) if state.get("portal_gateway") else None,
         "gateway_on": state.get("gateway_on") or "lan",
+        "cluster": bool(state.get("cluster")),
     }
 
 
@@ -1370,19 +1403,21 @@ def nic_label(name: str) -> str:
 
 
 def summary(a: dict) -> list[str]:
-    out = [f"Runs            {ROLE_NAMES[a['role']]}: {dict(ROLES)[a['role']]}"]
+    _, _, label, text = CHOICES[choice_of(a["role"], manager_cluster(a))]
+    out = [f"Runs            {label}: {text}"]
     if a["role"] == "secondary":
         out += [f"Management      {nic_label(a['mgmt'])} {a['mgmt_address']}, gateway {a['mgmt_gateway'] or 'the other host'}",
                 f"Cluster link    {nic_label(a['ha_link'])}"]
     elif a["role"] == "web":
-        out += [f"Management      {nic_label(a['lan'])}",
+        lan = "Management" if manager_cluster(a) else "LAN"
+        out += [f"{lan:<16}{nic_label(a['lan'])}",
                 f"Address         {a['address'] or 'DHCP'}",
                 ]
         if a.get("portal"):
-            out.append(f"Manager LAN      {nic_label(a['portal'])} {a.get('portal_address') or 'DHCP'}")
+            out.append(f"LAN             {nic_label(a['portal'])} {a.get('portal_address') or 'DHCP'}")
         on_portal = bool(a.get("portal")) and a.get("gateway_on") == "portal"
         gw = a.get("portal_gateway") if on_portal else a["gateway"]
-        out.append(f"Default gateway {gw or 'from DHCP'}" + (" (on the Manager LAN)" if on_portal else ""))
+        out.append(f"Default gateway {gw or 'from DHCP'}" + (" (on the LAN)" if on_portal else ""))
     else:
         out += [f"WAN interface   {nic_label(a['wan'])}",
                 f"WAN address     {a['wan_address'] or ('DHCP (no default route)' if route_from(a) == 'lan' else 'DHCP')}",
@@ -1507,7 +1542,8 @@ MARK_LOCKED = "x" if LINUX_CONSOLE else "\U0001f512"
 NIC_ROLES = {
     "both": [("wan", "WAN"), ("lan", "LAN")],
     "agent": [("wan", "WAN"), ("lan", "LAN")],
-    "web": [("lan", "Management"), ("portal", "Manager LAN")],
+    "web": [("lan", "LAN")],
+    "web_cluster": [("lan", "Management"), ("portal", "LAN")],
     "primary": [("wan", "WAN"), ("lan", "LAN"), ("mgmt", "Management"), ("ha_link", "Cluster link")],
     "secondary": [("mgmt", "Management"), ("ha_link", "Cluster link")],
 }
@@ -1516,10 +1552,11 @@ NIC_KEYS = ("wan", "lan", "mgmt", "ha_link", "portal")
 OPTIONAL_ROLES = ("portal",)  # a role that may stay without an interface
 
 
-def nic_roles(role: str, reconfigure: bool) -> list[tuple[str, str]]:
+def nic_roles(a: dict, reconfigure: bool) -> list[tuple[str, str]]:
     """The roles to give interfaces. Run again, an HA pair's HA link and
     management stay as they are."""
-    return [(k, t) for k, t in NIC_ROLES[role] if not (reconfigure and k in ("mgmt", "ha_link"))]
+    roles = NIC_ROLES[choice_of(a["role"], manager_cluster(a))]
+    return [(k, t) for k, t in roles if not (reconfigure and k in ("mgmt", "ha_link"))]
 
 
 def row(label: str, widget: Widget) -> Horizontal:
@@ -1660,11 +1697,17 @@ class RolePage(Page):
     primary = "#roles"
 
     def body(self) -> ComposeResult:
-        yield OptionList(*[Option(f"{ROLE_NAMES[r]:<9} {t}", id=r) for r, t in ROLES], id="roles")
+        options: list[Option] = []
+        for group, items in ROLE_GROUPS:
+            options.append(Option(group, id=f"group_{len(options)}", disabled=True))
+            options += [Option(f"  {label:<21} {text}", id=cid) for cid, _, _, label, text in items]
+        yield OptionList(*options, id="roles")
 
     def on_mount(self) -> None:
         roles = self.query_one("#roles", OptionList)
-        roles.highlighted = [r for r, _ in ROLES].index(self.state.get("role") or "both")
+        cid = choice_of(self.state.get("role") or "both", bool(self.state.get("cluster")))
+        ids = [roles.get_option_at_index(i).id for i in range(roles.option_count)]
+        roles.highlighted = ids.index(cid if cid in CHOICES else "both")
 
     @on(OptionList.OptionSelected)
     async def _chosen(self) -> None:
@@ -1672,7 +1715,10 @@ class RolePage(Page):
 
     def save(self) -> None:
         roles = self.query_one("#roles", OptionList)
-        self.a["role"] = roles.get_option_at_index(roles.highlighted or 0).id
+        cid = roles.get_option_at_index(roles.highlighted or 0).id
+        if cid not in CHOICES:
+            raise ValueError("pick a machine type")
+        self.a["role"], self.a["cluster"], _, _ = CHOICES[cid]
 
 
 MODES = [("Static", "static"), ("DHCP", "dhcp")]
@@ -1690,7 +1736,7 @@ class NicPage(Page):
     help = "↑↓: pick interface · 1-9: its role · Del: clear · F8: next step"
 
     def body(self) -> ComposeResult:
-        self.roles = nic_roles(self.a["role"], self.app.reconfigure)
+        self.roles = nic_roles(self.a, self.app.reconfigure)
         self.assign: dict[str, str] = {k: v for k, _ in self.roles if (v := self.a.get(k) or self.state.get(k))}
         self.nic_list: list[dict[str, str]] = []
         if not self.roles:
@@ -1698,13 +1744,14 @@ class NicPage(Page):
                          "they are.", classes="text")
             return
         yield Static({
-            "web": "Management: the interface this host uses to reach the firewalls. With a firewall cluster it is not for the "
+            "web": "LAN: the interface this host uses to reach the firewalls, and where users browse portitor-manager.",
+            "web_cluster": "Management: the interface this host uses to reach the firewalls. With a firewall cluster it is not for the "
                    "Internet: the primary can be down, so the default gateway belongs on the LAN, the "
                    "gateway that moves with the active firewall. "
-                   "Manager LAN, optional: another interface, where users browse portitor-manager.",
+                   "LAN, optional: another interface, where users browse portitor-manager.",
             "secondary": "A cluster secondary needs only its cluster link, a direct cable to the primary, and its "
                          "management interface; the primary configures the rest.",
-        }.get(self.a["role"], "The WAN connects to the Internet, which the firewall needs for updates; the LAN "
+        }.get(choice_of(self.a["role"], manager_cluster(self.a)), "The WAN connects to the Internet, which the firewall needs for updates; the LAN "
                               "is where you reach the GUI from.")
             + " Plug in a cable to see which interface it is (up: link).", classes="text")
         with Horizontal(id="nic_cols"):
@@ -1814,6 +1861,8 @@ class NicPage(Page):
                 a[k] = self.assign[k]
             elif not self.app.reconfigure or any(k == r for r, _ in self.roles):
                 a[k] = ""
+        if a["role"] == "web" and not manager_cluster(a):
+            a["portal"] = ""  # a standalone manager has the one interface
 
 
 class NetworkPage(Page):
@@ -1855,8 +1904,9 @@ class NetworkPage(Page):
     def body(self) -> ComposeResult:
         kind, st, role = self.kind(), self.state, self.a["role"]
         static = st.get("address", "") not in ("", "dhcp")
-        self.titles = {"wan": "WAN", "lan": "Management" if kind == "host" else "LAN",
-                       "mgmt": "Management", "ha_link": "Cluster link", "portal": "Manager LAN"}
+        mgr_cluster = manager_cluster(self.a)
+        self.titles = {"wan": "WAN", "lan": "Management" if mgr_cluster else "LAN",
+                       "mgmt": "Management", "ha_link": "Cluster link", "portal": "LAN"}
         if kind == "fw":
             yield self.section("wan", "WAN")
             yield row("WAN IPv4", Select(MODES, id="wan_mode", allow_blank=False,
@@ -1887,24 +1937,25 @@ class NetworkPage(Page):
                          "A cluster secondary takes its LAN, WAN and everything else from the primary once the "
                          "pair is committed; here only the DNS servers it uses until then.", classes="text")
         else:
-            yield self.section("lan", "Management")
+            yield self.section("lan", self.titles["lan"])
             yield row("IPv4", Select(MODES, id="lan_mode", allow_blank=False, value="static" if static else "dhcp"))
             yield row("Address", Input(st.get("address", "") if static else "", id="address", placeholder="192.168.1.10/24"))
             yield row("Default gateway", Input(st.get("gateway", ""), id="gateway", placeholder="192.168.1.1"))
-            yield Static("Static: the gateway's address; DHCP: the lease's. With a firewall cluster the default gateway "
-                         "belongs on the LAN (the one that moves with the active firewall), not here: the "
-                         "primary can be down.", classes="hint")
+            yield Static("Static: the gateway's address; DHCP: the lease's." + (
+                         " With a firewall cluster the default gateway belongs on the LAN (the one that moves "
+                         "with the active firewall), not here: the primary can be down." if mgr_cluster else ""),
+                         classes="hint")
             # Shown when the last page gave an interface the role.
             pstatic = st.get("portal_address", "") not in ("", "dhcp")
             with Vertical(id="portal_box"):
-                yield self.section("portal", "Manager LAN")
+                yield self.section("portal", "LAN")
                 yield row("IPv4", Select(MODES, id="portal_mode", allow_blank=False,
                                          value="static" if pstatic else "dhcp"))
                 yield row("Address", Input(st.get("portal_address", "") if pstatic else "", id="portal_address",
                                            placeholder="10.0.0.10/24"))
                 yield row("Default gateway", Input(st.get("portal_gateway", ""), id="portal_gateway",
                                                    placeholder="10.0.0.1"))
-                yield row("Gateway on", Select([("Management", "lan"), ("Manager LAN", "portal")], id="gateway_on",
+                yield row("Gateway on", Select([("Management", "lan"), ("LAN", "portal")], id="gateway_on",
                                                allow_blank=False,
                                                value="portal" if st.get("gateway_on") == "portal" else "lan"))
                 yield Static("Where users browse portitor-manager, which proxies to the firewalls. The host has one "
@@ -2008,7 +2059,7 @@ class NetworkPage(Page):
             a["portal_address"] = a["portal_gateway"] = None
             a["gateway_on"] = "lan"
             if a.get("portal"):
-                a["portal_address"] = (self.field("Manager LAN address", check_address, self.value("#portal_address"),
+                a["portal_address"] = (self.field("LAN address", check_address, self.value("#portal_address"),
                                                   a["address"]) if self.static("#portal_mode") else None)
                 if self.query_one("#gateway_on", Select).value == "portal":
                     a["gateway_on"], a["gateway"] = "portal", None
@@ -2547,6 +2598,7 @@ class SetupApp(App):
         self.a: dict = {"join": ""}
         if self.reconfigure:
             self.a["role"] = state.get("role") or "both"
+            self.a["cluster"] = bool(state.get("cluster"))
             self.pages = [KeyboardPage, NicPage, NetworkPage, AccountPage, SummaryPage]
         else:
             self.pages = [KeyboardPage, RolePage, NicPage, NetworkPage, AccountPage, SummaryPage]
