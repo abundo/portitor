@@ -61,7 +61,7 @@ func (v *validator) addf(format string, args ...any) {
 	v.problems = append(v.problems, fmt.Sprintf(format, args...))
 }
 
-// Validate checks the whole document. It is run by portitor-web before
+// Validate checks the whole document. It is run by portitor-config before
 // sending and again by portitor-agent before rendering; the agent must not
 // trust its input, since every string ends up in a root-owned config file.
 func (d *Document) Validate() error {
@@ -150,7 +150,7 @@ func (v *validator) instance(in *Instance, ifaceOwner map[string]string) {
 			v.addf("%s: %s and %s names are for VRRP devices", ip, VRRPDevicePrefix4, VRRPDevicePrefix6)
 		}
 		if strings.HasPrefix(ifc.Name, HASyncPrefix) {
-			v.addf("%s: %s names are for HA sync devices", ip, HASyncPrefix)
+			v.addf("%s: %s names are for cluster sync devices", ip, HASyncPrefix)
 		}
 		if strings.HasPrefix(ifc.Name, NAT64DevicePrefix) {
 			v.addf("%s: %s names are for NAT64 devices", ip, NAT64DevicePrefix)
@@ -1220,7 +1220,7 @@ type PortRange struct{ Lo, Hi int }
 func ParsePorts(s string) ([]PortRange, error) { return ParsePortsNamed(s, nil) }
 
 // ParsePortsNamed is ParsePorts that also takes the names in extra (custom
-// port names, which portitor-web resolves before the agent sees them).
+// port names, which portitor-config resolves before the agent sees them).
 func ParsePortsNamed(s string, extra map[string]int) ([]PortRange, error) {
 	var out []PortRange
 	for _, part := range strings.Split(s, ",") {
@@ -1255,7 +1255,7 @@ func ParsePortsNamed(s string, extra map[string]int) ([]PortRange, error) {
 	return out, nil
 }
 
-// Name checks shared with portitor-web, so bad names are rejected when
+// Name checks shared with portitor-config, so bad names are rejected when
 // entered rather than at deploy time.
 
 func ValidInstanceName(s string) bool { return instanceNameRe.MatchString(s) }

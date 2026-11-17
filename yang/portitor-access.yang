@@ -119,7 +119,7 @@ submodule portitor-access {
     list firewall {
       key "name";
       px:table "firewalls";
-      description "A host portitor-config deploys to, through its agent; one that is the HA secondary of another runs that one's virtual firewalls. Every virtual firewall is on one, and each has one default virtual firewall, its host. The generation of the last deployment (runtime) is kept apart.";
+      description "A host portitor-config deploys to, through its agent; one that is the cluster secondary of another runs that one's virtual firewalls. Every virtual firewall is on one, and each has one default virtual firewall, its host. The generation of the last deployment (runtime) is kept apart.";
       leaf name {
         type name;
       }
@@ -139,32 +139,43 @@ submodule portitor-access {
         type string;
         description "Pins the agent's self-signed certificate (SHA-256 of the DER, hex); empty verifies against the system's CAs.";
       }
-      leaf ha-primary {
+      leaf cluster-primary {
         type leafref { path "/firewall/name"; }
         px:column "ha_primary_id";
-        description "Makes this the HA secondary of that firewall: it runs the primary's virtual firewalls and has none of its own.";
+        px:was "ha-primary";
+        description "Makes this the secondary of that firewall in a firewall cluster: it runs the primary's virtual firewalls and has none of its own.";
       }
-      leaf ha-secret {
+      leaf cluster-secret {
         type string;
         px:secret;
-        description "The pair's heartbeat secret, on the secondary.";
+        px:column "ha_secret";
+        px:was "ha-secret";
+        description "The cluster's heartbeat secret, on the secondary.";
       }
-      leaf ha-epoch {
+      leaf cluster-epoch {
         type int64;
-        description "The pair's number of promotions.";
+        px:column "ha_epoch";
+        px:was "ha-epoch";
+        description "The cluster's number of promotions.";
       }
-      leaf ha-witness {
+      leaf cluster-witness {
         type string;
-        description "On the primary, who the pair's witness is: local (its portitor-config) or external (one on a third host).";
+        px:column "ha_witness";
+        px:was "ha-witness";
+        description "On the primary, who the cluster's witness is: local (its portitor-config) or external (portitor-manager on a third host).";
       }
-      leaf ha-preempt {
+      leaf cluster-preempt {
         type boolean;
         default true;
+        px:column "ha_preempt";
+        px:was "ha-preempt";
         description "On the primary: when the secondary is active and the primary is back and healthy, the secondary hands over to it. The configuration is edited on the primary.";
       }
-      leaf ha-witness-secret {
+      leaf cluster-witness-secret {
         type string;
         px:secret;
+        px:column "ha_witness_secret";
+        px:was "ha-witness-secret";
         description "Opens the vote of an external witness.";
       }
       leaf config-url {
@@ -176,7 +187,7 @@ submodule portitor-access {
       }
       action check {
         px:action "view";
-        description "The HA pair this firewall is in, checked: which host is active, whether the standby is ready, the heartbeat paths, the witness, the watchdogs, the configuration's copy, the releases, the interfaces both hosts need and what is heard on the HA link (docs/ha.md).";
+        description "The firewall cluster this firewall is in, checked: which firewall is active, whether the standby is ready, the heartbeat paths, the witness, the watchdogs, the configuration's copy, the releases, the interfaces both firewalls need and what is heard on the cluster link.";
         output {
           leaf primary { type string; }
           leaf secondary { type string; }
@@ -192,7 +203,7 @@ submodule portitor-access {
       }
       action test-switchover {
         px:action "operation";
-        description "Switches the pair over to the standby and back, when its check says it can fail over, and tells how long each took until the other host was active. Clients lose a packet or two each time.";
+        description "Switches the cluster over to the standby and back, when its check says it can fail over, and tells how long each took until the other firewall was active. Clients lose a packet or two each time.";
         output {
           leaf from { type string; description "The host active before, and after."; }
           leaf to { type string; }

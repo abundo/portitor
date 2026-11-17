@@ -54,6 +54,8 @@ type Node struct {
 	Parent   *Node
 	Children []*Node // keys first, then in the modules' order
 	byName   map[string]*Node
+	// was are the children by the names they had before (px:was).
+	was map[string]*Node
 
 	Keys          []string // a list's key leaves
 	OrderedByUser bool     // a list or leaf-list
@@ -125,6 +127,10 @@ func (n *Node) Action(name string) *Action {
 
 // Child is the child named name, or nil.
 func (n *Node) Child(name string) *Node { return n.byName[name] }
+
+// Renamed is the child that was named old before its px:was release
+// (accepted in paths until the release after), or nil.
+func (n *Node) Renamed(old string) *Node { return n.was[old] }
 
 // Secret reports whether the leaf is a secret: written, never read back.
 func (n *Node) Secret() bool {
@@ -395,7 +401,7 @@ func (n *Node) Module() string {
 	return n.Name
 }
 
-// PortalModule is portitor-web's module (portitor-portal.yang): its
+// PortalModule is portitor-manager's module (portitor-portal.yang): its
 // firewalls, witness strings and users.
 const PortalModule = "portitor-portal"
 
@@ -405,7 +411,7 @@ var (
 	portalErr      error
 )
 
-// LoadPortal returns the compiled schema of portitor-web's configuration.
+// LoadPortal returns the compiled schema of portitor-manager's configuration.
 func LoadPortal() (*Node, error) {
 	portalOnce.Do(func() {
 		files := fstest.MapFS{}
@@ -585,6 +591,12 @@ func addChildren(n *Node, e *goyang.Entry, ranks map[string]int) error {
 		child.Parent = n
 		n.Children = append(n.Children, child)
 		n.byName[child.Name] = child
+		if old := child.Ext["was"]; old != "" {
+			if n.was == nil {
+				n.was = map[string]*Node{}
+			}
+			n.was[old] = child
+		}
 	}
 	return nil
 }

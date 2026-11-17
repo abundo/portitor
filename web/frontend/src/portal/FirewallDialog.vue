@@ -93,7 +93,7 @@ async function remove() {
   if (
     !(await confirmDelete(
       `firewall ${props.row.name}`,
-      'The portal stops serving it; the firewall is not changed.',
+      'portitor-manager stops serving it; the firewall is not changed.',
     ))
   )
     return

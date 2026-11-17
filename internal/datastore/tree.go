@@ -54,6 +54,12 @@ type Tree struct {
 // is the top level now; such a path is taken, with a warning in
 // t.Deprecated.
 func (t *Tree) HostPath(p Path) Path {
+	p, renamed := t.renamedPath(p)
+	for _, r := range renamed {
+		if !slices.Contains(t.Deprecated, r) {
+			t.Deprecated = append(t.Deprecated, r)
+		}
+	}
 	q, ok := t.hostPath(p)
 	if ok {
 		host := t.Root.Leaf("host-name")
@@ -68,8 +74,39 @@ func (t *Tree) HostPath(p Path) Path {
 // ResolveHost is HostPath without the warning: for reading a tree others
 // may read too.
 func (t *Tree) ResolveHost(p Path) Path {
+	p, _ = t.renamedPath(p)
 	q, _ := t.hostPath(p)
 	return q
+}
+
+// renamedPath is p with the names nodes had before 1.1.0 (px:was) given
+// their new ones, until 1.2.0, and the warnings for those it renamed.
+func (t *Tree) renamedPath(p Path) (Path, []string) {
+	return RenamedPath(t.Root.S, p)
+}
+
+// RenamedPath is p, from root, with the names nodes had before 1.1.0
+// (px:was) given their new ones, and the warnings for those it renamed.
+func RenamedPath(root *schema.Node, p Path) (Path, []string) {
+	var warn []string
+	at := root
+	for i, e := range p {
+		if at == nil {
+			break
+		}
+		c := at.Child(e.Name)
+		if c == nil {
+			if c = at.Renamed(e.Name); c != nil {
+				if warn == nil {
+					p = slices.Clone(p)
+				}
+				p[i].Name = c.Name
+				warn = append(warn, fmt.Sprintf("%s is %s since 1.1.0 (the old name is accepted until 1.2.0)", e.Name, c.Name))
+			}
+		}
+		at = c
+	}
+	return p, warn
 }
 
 // hostPath is HostPath without the warning (a find, which changes
@@ -531,6 +568,7 @@ func (t *Tree) Set(p Path, value string) error {
 	if err != nil {
 		return err
 	}
+	value = renamedValue(leaf.Name, value) // a value of before 1.1.0, until 1.2.0
 	if leaf.IsKey() {
 		return errAt(t, p, "%s is a key; rename the entry to change it", leaf.Name)
 	}

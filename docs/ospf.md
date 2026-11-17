@@ -81,12 +81,11 @@ Each [VRF](vrf.md) can run OSPFv2 and OSPFv3 of its own, on its interfaces: choo
 the VRF at the top of the page. The interface lists then show the VRF's
 interfaces only; see [VRFs](vrf.md#routing-protocols).
 
-## How it runs
+## Restarts
 
-OSPF runs in the same FRR as BGP, from the same files (`frr.conf`, `daemons`; see
-[BGP](bgp.md#how-it-runs)). Turning OSPFv2 or OSPFv3 on or off changes the daemons
-FRR runs, which restarts FRR (and resets the BGP sessions); other changes are
-reloaded with `frr-reload.py`, which keeps the adjacencies up.
+OSPF runs in the same FRR as BGP. Turning OSPFv2 or OSPFv3 on or off restarts FRR,
+which resets the BGP sessions; other changes are applied without a restart and keep
+the adjacencies up.
 
 *Static* in *Redistribute* means the static routes Portitor installs: FRR's
 `redistribute kernel`.

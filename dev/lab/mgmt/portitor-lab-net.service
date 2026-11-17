@@ -4,7 +4,7 @@
 # Static addresses on the lab networks (they have no podman IPAM).
 [Unit]
 Description=Lab: WAN (ISP side) and LAN addresses
-Before=dnsmasq.service portitor-web.service
+Before=dnsmasq.service portitor-manager.service
 
 [Service]
 Type=oneshot

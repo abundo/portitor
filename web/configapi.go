@@ -84,11 +84,22 @@ func parseConfigPath(raw string) (datastore.Path, error) {
 }
 
 // configRequest is a request's datastore and path.
-func configRequest(c *echo.Context) (ds string, p datastore.Path, err error) {
+func (s *Server) configRequest(c *echo.Context) (ds string, p datastore.Path, err error) {
 	rest := strings.TrimPrefix(c.Request().URL.EscapedPath(), configPrefix)
 	ds, raw, _ := strings.Cut(rest, "/")
-	p, err = parseConfigPath(raw)
-	return ds, p, err
+	if p, err = parseConfigPath(raw); err != nil {
+		return ds, p, err
+	}
+	// Names of before 1.1.0 (px:was), until 1.2.0.
+	t, err := s.tree()
+	if err != nil {
+		return ds, p, err
+	}
+	p, renamed := datastore.RenamedPath(t.schema, p)
+	if len(renamed) > 0 {
+		c.Response().Header().Add("X-Portitor-Warnings", strings.Join(renamed, "; "))
+	}
+	return ds, p, nil
 }
 
 // treeAccessOf is the request user's access to the tree.
@@ -115,7 +126,7 @@ func (s *Server) handleSchema(c *echo.Context) error {
 }
 
 func (s *Server) handleConfigGet(c *echo.Context) error {
-	ds, p, err := configRequest(c)
+	ds, p, err := s.configRequest(c)
 	if err != nil {
 		return errJSON(c, http.StatusBadRequest, "path: "+err.Error())
 	}
@@ -237,7 +248,7 @@ func configJSON(t *datastore.Tree, p datastore.Path, o datastore.JSONOptions) ([
 
 // handleConfigEdit is every change of the candidate.
 func (s *Server) handleConfigEdit(c *echo.Context) error {
-	ds, p, err := configRequest(c)
+	ds, p, err := s.configRequest(c)
 	if err != nil {
 		return errJSON(c, http.StatusBadRequest, "path: "+err.Error())
 	}
@@ -286,7 +297,7 @@ func (s *Server) handleConfigEdit(c *echo.Context) error {
 	switch {
 	case errors.Is(err, errForbidden):
 		if acc.readOnly {
-			return errJSON(c, http.StatusForbidden, "this is the HA secondary: its configuration is a read-only copy of the primary's")
+			return errJSON(c, http.StatusForbidden, "this is the cluster secondary: its configuration is a read-only copy of the primary's")
 		}
 		return errJSON(c, http.StatusForbidden, "you may not change "+denied)
 	case err != nil:
@@ -634,7 +645,7 @@ func (s *Server) firewallProblems(tree *datastore.Tree) []error {
 	// is the schema's problem).
 	secondary := map[string]bool{}
 	for _, fw := range tree.Root.Lists["firewall"] {
-		secondary[fw.Leaf("name")] = fw.Leaf("ha-primary") != ""
+		secondary[fw.Leaf("name")] = fw.Leaf("cluster-primary") != ""
 	}
 	vfs := true
 	if st := tree.Root.Containers["settings"]; st != nil {
@@ -645,7 +656,7 @@ func (s *Server) firewallProblems(tree *datastore.Tree) []error {
 		at := datastore.PathOf(in).String(tree.Root.S)
 		name := in.Leaf("firewall")
 		if secondary[name] {
-			errs = append(errs, &datastore.Error{Path: at, Msg: "firewall: " + name + " is an HA secondary; it runs its primary's virtual firewalls"})
+			errs = append(errs, &datastore.Error{Path: at, Msg: "firewall: " + name + " is a cluster secondary; it runs its primary's virtual firewalls"})
 		}
 		if !vfs {
 			errs = append(errs, &datastore.Error{Path: at, Msg: "virtual firewalls are off (Settings): a firewall has its host alone"})

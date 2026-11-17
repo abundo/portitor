@@ -29,7 +29,7 @@ type treeRecords struct {
 	s *Server
 }
 
-var errReplica = errors.New("this is the HA secondary: its users are a read-only copy of the primary's")
+var errReplica = errors.New("this is the cluster secondary: its users are a read-only copy of the primary's")
 
 // accessIndex is what runs of the users and roles, as the rows of the
 // models, looked up by id and name.
@@ -1016,15 +1016,15 @@ func firewallLeaves(f *models.Firewall, primary string) map[string]string {
 	put("agent-url", f.AgentURL)
 	put("agent-token", f.AgentToken)
 	put("agent-fingerprint", f.AgentFingerprint)
-	put("ha-primary", primary)
-	put("ha-secret", f.HASecret)
+	put("cluster-primary", primary)
+	put("cluster-secret", f.HASecret)
 	if f.HAEpoch != 0 {
-		l["ha-epoch"] = strconv.FormatInt(f.HAEpoch, 10)
+		l["cluster-epoch"] = strconv.FormatInt(f.HAEpoch, 10)
 	}
-	put("ha-witness", f.HAWitness)
-	put("ha-witness-secret", f.HAWitnessSecret)
+	put("cluster-witness", f.HAWitness)
+	put("cluster-witness-secret", f.HAWitnessSecret)
 	if !f.HAPreempt {
-		l["ha-preempt"] = "false"
+		l["cluster-preempt"] = "false"
 	}
 	put("config-url", f.ConfigURL)
 	put("config-fingerprint", f.ConfigFingerprint)
@@ -1087,24 +1087,24 @@ func (t *treeRecords) PromoteFirewalls(sec, prim *models.Firewall) error {
 		if witness == "" {
 			witness = models.HAWitnessLocal
 		}
-		preempt, hasPreempt := pn.Leaves["ha-preempt"]
-		for _, k := range []string{"ha-primary", "ha-secret", "ha-epoch", "ha-witness", "ha-witness-secret", "ha-preempt"} {
+		preempt, hasPreempt := pn.Leaves["cluster-preempt"]
+		for _, k := range []string{"cluster-primary", "cluster-secret", "cluster-epoch", "cluster-witness", "cluster-witness-secret", "cluster-preempt"} {
 			delete(sn.Leaves, k)
 			delete(pn.Leaves, k)
 		}
-		sn.Leaves["ha-witness"] = witness
+		sn.Leaves["cluster-witness"] = witness
 		if hasPreempt {
-			sn.Leaves["ha-preempt"] = preempt
+			sn.Leaves["cluster-preempt"] = preempt
 		}
 		if witnessSecret != "" {
-			sn.Leaves["ha-witness-secret"] = witnessSecret
+			sn.Leaves["cluster-witness-secret"] = witnessSecret
 		}
-		pn.Leaves["ha-primary"] = s.Name
+		pn.Leaves["cluster-primary"] = s.Name
 		if sec.HASecret != "" {
-			pn.Leaves["ha-secret"] = sec.HASecret
+			pn.Leaves["cluster-secret"] = sec.HASecret
 		}
-		pn.Leaves["ha-epoch"] = strconv.FormatInt(sec.HAEpoch+1, 10)
-		pn.Leaves["ha-witness"] = models.HAWitnessLocal
+		pn.Leaves["cluster-epoch"] = strconv.FormatInt(sec.HAEpoch+1, 10)
+		pn.Leaves["cluster-witness"] = models.HAWitnessLocal
 		return nil
 	})
 	return err

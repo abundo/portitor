@@ -190,7 +190,7 @@ func promoteTree(work *datastore.Tree, sec, prim string) {
 	}
 	for _, ifc := range work.Root.Lists["interface"] {
 		addrs, peers := ifc.LeafLists["addresses"], ifc.LeafLists["peer-addresses"]
-		if ifc.Leaf("ha-role") == "" || len(addrs) == 0 || len(peers) != len(addrs) {
+		if ifc.Leaf("cluster-role") == "" || len(addrs) == 0 || len(peers) != len(addrs) {
 			continue
 		}
 		ifc.LeafLists["addresses"], ifc.LeafLists["peer-addresses"] = peers, addrs

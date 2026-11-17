@@ -70,7 +70,7 @@ func (st *replicationStatus) warning() string {
 	if st == nil || st.Replicated {
 		return ""
 	}
-	msg := "the configuration runs, but the HA secondary has not copied it yet: losing this host now loses it"
+	msg := "the configuration runs, but the cluster secondary has not copied it yet: losing this host now loses it"
 	switch {
 	case st.Error != "":
 		msg += " (the secondary's copy failed: " + st.Error + ")"

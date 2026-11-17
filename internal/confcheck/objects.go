@@ -268,7 +268,7 @@ func normalizeTask(c *Ctx, t *datastore.Node) error {
 	if t.Leaf("firewall") == "" {
 		var fws []string
 		for _, f := range c.T.Root.Lists["firewall"] {
-			if f.Leaf("ha-primary") == "" {
+			if f.Leaf("cluster-primary") == "" {
 				fws = append(fws, f.Leaf("name"))
 			}
 		}

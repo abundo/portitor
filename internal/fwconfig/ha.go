@@ -39,7 +39,7 @@ type HA struct {
 	// and the copy of the certificates; the secondary's portitor-config
 	// copies the primary's configuration with it too.
 	Secret string `json:"secret" secret:"true"`
-	// WitnessSecret, when the pair's witness is external (portitor-web on
+	// WitnessSecret, when the pair's witness is external (portitor-manager on
 	// a third host), opens GET /v1/ha and POST /v1/ha/vote to it alone.
 	WitnessSecret string `json:"witness_secret,omitempty" secret:"true"`
 	// PeerConfig is the peer's portitor-config (https://...), its tls_cert
@@ -306,42 +306,42 @@ func (v *validator) ha(h *HA) {
 		return
 	}
 	if h.Node != HAPrimary && h.Node != HASecondary {
-		v.addf("ha: node must be %s or %s", HAPrimary, HASecondary)
+		v.addf("cluster: node must be %s or %s", HAPrimary, HASecondary)
 	}
 	if u, err := url.Parse(h.Peer); err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || (u.Path != "" && u.Path != "/") || u.RawQuery != "" {
-		v.addf("ha: peer must be the other host's agent URL (https://<address>:8443)")
+		v.addf("cluster: peer must be the other host's agent URL (https://<address>:8443)")
 	}
 	if !haFingerprintRe.MatchString(h.PeerFingerprint) {
-		v.addf("ha: peer fingerprint must be 64 lowercase hex characters")
+		v.addf("cluster: peer fingerprint must be 64 lowercase hex characters")
 	}
 	if !haSecretRe.MatchString(h.Secret) {
-		v.addf("ha: secret must be 32-128 URL-safe base64 characters")
+		v.addf("cluster: secret must be 32-128 URL-safe base64 characters")
 	}
 	if h.WitnessSecret != "" && (!haSecretRe.MatchString(h.WitnessSecret) || h.WitnessSecret == h.Secret) {
-		v.addf("ha: witness secret must be 32-128 URL-safe base64 characters, not the pair's secret")
+		v.addf("cluster: witness secret must be 32-128 URL-safe base64 characters, not the cluster's secret")
 	}
 	if h.PeerConfig != "" {
 		if u, err := url.Parse(h.PeerConfig); err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || (u.Path != "" && u.Path != "/") || u.RawQuery != "" {
-			v.addf("ha: peer config must be the other host's portitor-config URL (https://<address>:<port>)")
+			v.addf("cluster: peer config must be the other host's portitor-config URL (https://<address>:<port>)")
 		}
 		if !haFingerprintRe.MatchString(h.PeerConfigFingerprint) {
-			v.addf("ha: peer config fingerprint must be 64 lowercase hex characters")
+			v.addf("cluster: peer config fingerprint must be 64 lowercase hex characters")
 		}
 	}
 	if h.Epoch < 0 {
-		v.addf("ha: epoch must not be negative")
+		v.addf("cluster: epoch must not be negative")
 	}
 	if h.ConfigPort < 0 || h.ConfigPort > 65535 {
-		v.addf("ha: config port must be 1-65535")
+		v.addf("cluster: config port must be 1-65535")
 	}
 	if h.AgentPort < 0 || h.AgentPort > 65535 {
-		v.addf("ha: agent port must be 1-65535")
+		v.addf("cluster: agent port must be 1-65535")
 	}
 	if u, err := url.Parse(h.PeerLink); err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || (u.Path != "" && u.Path != "/") || u.RawQuery != "" {
-		v.addf("ha: peer link must be the other host's agent URL on the HA link")
+		v.addf("cluster: peer link must be the other host's agent URL on the cluster link")
 	}
 	if h.PeerLink == h.Peer {
-		v.addf("ha: the HA link and the management network must be two paths")
+		v.addf("cluster: the cluster link and the management network must be two paths")
 	}
 }
 
@@ -366,28 +366,28 @@ func (v *validator) haInterfaces(d *Document) {
 			switch ifc.HARole {
 			case "":
 				if ifc.HAGateway != "" {
-					v.addf("%s: interface %s: only the management interface has an HA gateway", p, ifc.Name)
+					v.addf("%s: interface %s: only the management interface has a cluster gateway", p, ifc.Name)
 				}
 				continue
 			case HARoleLink, HARoleManagement:
 			default:
-				v.addf("%s: interface %s: HA role must be %s or %s", p, ifc.Name, HARoleLink, HARoleManagement)
+				v.addf("%s: interface %s: cluster role must be cluster link or management", p, ifc.Name)
 				continue
 			}
 			if !in.Default {
-				v.addf("%s: interface %s: an HA role is the host's, on an interface of its default instance", p, ifc.Name)
+				v.addf("%s: interface %s: a cluster role is the host's, on an interface of its default instance", p, ifc.Name)
 			}
 			if ifc.Kind != KindPhysical {
-				v.addf("%s: interface %s: an HA role needs a physical interface", p, ifc.Name)
+				v.addf("%s: interface %s: a cluster role needs a physical interface", p, ifc.Name)
 			}
 			if ifc.MAC != "" {
-				v.addf("%s: interface %s: an HA link or management interface keeps its own mac", p, ifc.Name)
+				v.addf("%s: interface %s: a cluster link or management interface keeps its own mac", p, ifc.Name)
 			}
 			if ifc.VRF != "" {
-				v.addf("%s: interface %s: an HA link or management interface can't be in a VRF", p, ifc.Name)
+				v.addf("%s: interface %s: a cluster link or management interface can't be in a VRF", p, ifc.Name)
 			}
 			if ifc.HARole == HARoleLink && ifc.HAGateway != "" {
-				v.addf("%s: interface %s: only the management interface has an HA gateway", p, ifc.Name)
+				v.addf("%s: interface %s: only the management interface has a cluster gateway", p, ifc.Name)
 			}
 			if ifc.HARole == HARoleManagement {
 				v.haGateway(p, ifc, d.HA != nil)
@@ -400,17 +400,17 @@ func (v *validator) haInterfaces(d *Document) {
 		}
 		if h := in.HASync; h != nil {
 			if !strings.HasPrefix(h.Name, HASyncPrefix) || !ValidIfname(h.Name) || !ValidIfname(h.Parent) || in.Default {
-				v.addf("%s: invalid HA sync device %q on %q", p, h.Name, h.Parent)
+				v.addf("%s: invalid cluster sync device %q on %q", p, h.Name, h.Parent)
 			}
 			if a, err := ParseInterfaceAddress(h.Address); err != nil || !a.Addr().IsLinkLocalUnicast() || !a.Addr().Is6() {
-				v.addf("%s: HA sync device: %q is not an IPv6 link-local address with its prefix", p, h.Address)
+				v.addf("%s: cluster sync device: %q is not an IPv6 link-local address with its prefix", p, h.Address)
 			}
 		}
 		if d.HA == nil {
 			continue
 		}
 		if len(in.VRRP) > 0 {
-			v.addf("%s: VRRP is not used on an HA pair: the pair shares its addresses", p)
+			v.addf("%s: VRRP is not used on a firewall cluster: the cluster shares its addresses", p)
 		}
 		if !in.Default {
 			continue
@@ -418,7 +418,7 @@ func (v *validator) haInterfaces(d *Document) {
 		for _, role := range []string{HARoleLink, HARoleManagement} {
 			ifc := in.HAInterface(role)
 			if ifc == nil {
-				v.addf("%s: an HA pair needs a physical interface with the role %s", p, role)
+				v.addf("%s: a firewall cluster needs a physical interface with the cluster role %s", p, roleName(role))
 				continue
 			}
 			if !ifc.Enabled {
@@ -480,4 +480,12 @@ func (v *validator) conntrackSync(p string, in *Instance) {
 	if c.This == c.Peer {
 		v.addf("%s: conntrack sync: this host and its peer have the same address", p)
 	}
+}
+
+// roleName is an interface's cluster role as the GUI names it.
+func roleName(role string) string {
+	if role == HARoleLink {
+		return "cluster link"
+	}
+	return role
 }

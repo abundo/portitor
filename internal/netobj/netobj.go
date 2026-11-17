@@ -4,7 +4,7 @@
 // Package netobj resolves named hosts and prefixes (models.AddressObject)
 // and address lists (models.AddressList), which share one set of names.
 // Wherever the GUI takes addresses, an entry may be a name instead;
-// portitor-web expands names when it builds the document, so the agent
+// portitor-config expands names when it builds the document, so the agent
 // only ever sees addresses (a filter rule's address lists reach it as
 // fwconfig.AddressSets, expanded too).
 package netobj

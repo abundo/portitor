@@ -77,7 +77,7 @@ async function removeHost(role) {
   const ok = await ask({
     title: 'Remove host',
     message: `Remove the ${role} host from ${props.row.name}?`,
-    detail: 'The portal forgets it; the pair is not changed.',
+    detail: 'portitor-manager forgets it; the cluster is not changed.',
   })
   if (!ok) return
   try {
@@ -91,8 +91,8 @@ async function removeHost(role) {
 async function remove() {
   if (
     !(await confirmDelete(
-      `HA firewall ${props.row.name}`,
-      'The portal stops serving it; the pair is not changed. If the portal is its witness, the witness string stays under HA witness.',
+      `Firewall cluster ${props.row.name}`,
+      'portitor-manager stops serving it; the cluster is not changed. If portitor-manager is its witness, the witness string stays under Cluster witness.',
     ))
   )
     return
@@ -109,7 +109,7 @@ async function remove() {
 <template>
   <UModal
     :open="open"
-    :title="isNew ? 'Add HA firewall' : `HA firewall ${row.name}`"
+    :title="isNew ? 'Add firewall cluster' : `Firewall cluster ${row.name}`"
     :ui="wideModal"
     :dismissible="false"
     @update:open="guard.onUpdateOpen"
@@ -117,9 +117,10 @@ async function remove() {
     <template #body>
       <form id="ha-form" class="space-y-3" @submit.prevent="save">
         <p v-if="isNew" class="text-sm text-muted">
-          An HA pair as one firewall: served from whichever host is primary now. Add its primary and
-          its secondary next (install the secondary from the ISO, role secondary); once both are
-          here the portal pairs them over SSH, unless they are a pair already.
+          A firewall cluster as one firewall: served from whichever firewall is primary now. Add its
+          primary and its secondary next (install the secondary from the ISO, role secondary); once
+          both are here portitor-manager sets up the cluster over SSH, unless they are a cluster
+          already.
         </p>
         <UFormField :ui="inlineField" label="Name" required help="Its path: /fw/<name>/.">
           <UInput v-model="form.name" class="w-full" :disabled="!isNew" autocomplete="off" />
@@ -130,7 +131,7 @@ async function remove() {
         <UFormField
           :ui="inlineField"
           label="Witness"
-          help="When it pairs the hosts, the portal becomes the pair's witness. It must reach both hosts' management addresses."
+          help="When it sets up the cluster, portitor-manager becomes its witness. It must reach both firewalls' management addresses."
         >
           <USwitch v-model="form.witness" />
         </UFormField>
@@ -160,7 +161,7 @@ async function remove() {
                       variant="ghost"
                       icon="i-lucide-external-link"
                       :disabled="!!hostOf(role).error"
-                      title="Open this host's GUI alone (its own login)"
+                      title="Open this firewall's GUI alone (its own login)"
                       @click="openHost(hostOf(role))"
                     >
                       Open
@@ -193,7 +194,7 @@ async function remove() {
             :description="
               row.connected
                 ? undefined
-                : 'Remove one of them and add it again: the portal pairs them when the second is added.'
+                : 'Remove one of them and add it again: portitor-manager sets up the cluster when the second is added.'
             "
           />
         </template>

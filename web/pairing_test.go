@@ -27,7 +27,7 @@ func TestAddSecondary(t *testing.T) {
 	agents[secID] = &fleetAgent{}
 
 	// Without the links: nothing to pair.
-	if err := AddSecondary(ctx, env.srv, testSecondaryInfo(), false); err == nil || !strings.Contains(err.Error(), "HA link") {
+	if err := AddSecondary(ctx, env.srv, testSecondaryInfo(), false); err == nil || !strings.Contains(err.Error(), "cluster link") {
 		t.Fatalf("no links: %v", err)
 	}
 	addHALinks(t, env)

@@ -111,7 +111,7 @@ func TestCheckBGPObjects(t *testing.T) {
 	}
 }
 
-// A disabled BGP is left out of the document by portitor-web; the
+// A disabled BGP is left out of the document by portitor-config; the
 // validator still checks one that is there.
 func TestBGPRunning(t *testing.T) {
 	doc := SampleDocument()

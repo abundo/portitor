@@ -31,7 +31,7 @@ import (
 // A pair has one witness, never two (each could vote for another host):
 // portitor-config on the primary (Firewall.HAWitness local, the default),
 // or an external one on a third host, which survives the primary's loss:
-// portitor-web, or portitor-web witness alone (portalwitness.go), given
+// portitor-manager, or portitor-manager witness alone (portalwitness.go), given
 // the pair's witness string.
 //
 // portitor-config's round also catches up a host a commit skipped while it

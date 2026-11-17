@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // portitor-agent runs on the firewall. It applies configuration pushed by
-// portitor-web and reports status. See AGENTS.md for the architecture.
+// portitor-config and reports status. See AGENTS.md for the architecture.
 package main
 
 import (

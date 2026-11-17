@@ -15,13 +15,6 @@ config.
 The server is an interface of kind **OpenVPN server** (`ovpn0`): firewall rules,
 interface zones, NAT, DNS and the other services treat it like any interface.
 
-- On the **default virtual firewall** (the host itself) OpenVPN runs as the
-  distribution's `openvpn-server@portitor-udp.service` and
-  `openvpn-server@portitor-tcp.service`, from `/etc/openvpn/server/`.
-- On **another virtual firewall** it runs in the virtual firewall
-  (`portitor-openvpn-udp@<name>.service`,
-  `portitor-openvpn-tcp@<name>.service`).
-
 Changing the server's settings restarts
 OpenVPN, which disconnects the clients for a moment (they reconnect by
 themselves); changing who may log in does not.
@@ -90,10 +83,8 @@ as a first login to the GUI would.
   another is chosen. On a virtual firewall whose admin is not a global admin, the
   users are always the members of that virtual firewall's role.
 
-The password is checked by portitor-agent, which OpenVPN asks for each login
-(through its management socket): no password is written to a file, and no
-script runs. The agent reaches the directory servers from the firewall host. A
-refused login is answered after two seconds, and logged in the agent's log with
+The firewall checks each password itself: no password is written to a file. A
+refused login is answered after two seconds, and logged in the firewall's log with
 the user name and the client's address.
 
 - **Two-factor code**: asks for a code from the user's authenticator app after
@@ -150,10 +141,8 @@ The **OpenVPN info** tab shows each OpenVPN process (UDP, TCP) and the connected
 user, address, tunnel addresses, traffic, and what checked the password (`local`
 or the directory server's name).
 
-## HA pairs
+## Firewall clusters
 
-Both hosts of an HA pair run the server, with the same tunnel addresses (no HA
-peer addresses): only the active host has clients, and the LAN reaches them
-through the VRRP gateway. Point clients at the address the active host has (a
-VRRP virtual address on the WAN). After a failover they reconnect to the other
-host, log in again, and find the same server address, gateway and DNS server.
+Both firewalls of a cluster run the server, with the same tunnel addresses: only the
+active firewall has clients. After a failover the clients reconnect to the other
+firewall, log in again, and find the same server address, gateway and DNS server.

@@ -24,7 +24,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-// consoleEnv runs portitor-web against a real dry-run agent whose console
+// consoleEnv runs portitor-config against a real dry-run agent whose console
 // user is the test's own user (or consoleUser, when set).
 func consoleEnv(t *testing.T, consoleUser string) (*testEnv, *httptest.Server) {
 	t.Helper()

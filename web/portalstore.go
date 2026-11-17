@@ -16,9 +16,9 @@ import (
 	"github.com/abundo/portitor/internal/schema"
 )
 
-// PortalStore is portitor-web's configuration, kept as portitor-config keeps a
+// PortalStore is portitor-manager's configuration, kept as portitor-config keeps a
 // firewall's: a tree of the portal's YANG module (portitor-portal.yang), with
-// a candidate (candidate.json, a datastore.Store, which the GUI, `portitor-web
+// a candidate (candidate.json, a datastore.Store, which the GUI, `portitor-manager
 // cli`, SSH CLI and NETCONF share) and what runs (portal.json, RFC 7951
 // JSON). A commit makes the candidate run: the proxies and the witness
 // follow.
@@ -48,7 +48,7 @@ func OpenPortalStore(dir string) (*PortalStore, error) {
 		return nil, err
 	}
 	if dir == "" {
-		return nil, errors.New("portitor-web: no data directory")
+		return nil, errors.New("portitor-manager: no data directory")
 	}
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return nil, err
@@ -73,13 +73,13 @@ func portalCheck(t *datastore.Tree) []error {
 		}
 	}
 	// An HA firewall shares /fw/<name>/ with the firewalls.
-	for _, e := range t.Root.Lists["ha-firewall"] {
+	for _, e := range t.Root.Lists["cluster"] {
 		ha := portalHAOf(e)
 		if t.Root.Entry("firewall", []string{ha.Name}) != nil {
-			errs = append(errs, fmt.Errorf("ha-firewall %s: there is a firewall %s", ha.Name, ha.Name))
+			errs = append(errs, fmt.Errorf("cluster %s: there is a firewall %s", ha.Name, ha.Name))
 		}
 		if err := CheckPortalHA(&ha); err != nil {
-			errs = append(errs, fmt.Errorf("ha-firewall %s: %w", ha.Name, err))
+			errs = append(errs, fmt.Errorf("cluster %s: %w", ha.Name, err))
 		}
 	}
 	for _, e := range t.Root.Lists["witness"] {
@@ -88,7 +88,7 @@ func portalCheck(t *datastore.Tree) []error {
 		case err != nil:
 			errs = append(errs, fmt.Errorf("witness %s: %w", e.Leaf("pair"), err))
 		case w.Pair != e.Leaf("pair"):
-			errs = append(errs, fmt.Errorf("witness %s: the string is of the pair %s", e.Leaf("pair"), w.Pair))
+			errs = append(errs, fmt.Errorf("witness %s: the string is of the cluster %s", e.Leaf("pair"), w.Pair))
 		}
 	}
 	return errs
@@ -173,7 +173,7 @@ func (s *PortalStore) refresh() {
 }
 
 // Watch checks every few seconds whether another process committed
-// (portitor-web cli beside the daemon), until ctx is done.
+// (portitor-manager cli beside the daemon), until ctx is done.
 func (s *PortalStore) Watch(ctx context.Context) {
 	tick := time.NewTicker(3 * time.Second)
 	defer tick.Stop()
@@ -245,7 +245,7 @@ func (s *PortalStore) Firewalls() []PortalFirewall {
 	return out
 }
 
-// portalHAOf is an ha-firewall entry.
+// portalHAOf is a cluster entry.
 func portalHAOf(e *datastore.Node) PortalHA {
 	ha := PortalHA{Name: e.Leaf("name"), Description: e.Leaf("description"), Witness: e.Leaf("witness") != "false"}
 	host := func(role string) *PortalFirewall {
@@ -263,7 +263,7 @@ func portalHAOf(e *datastore.Node) PortalHA {
 func (s *PortalStore) HAFirewalls() []PortalHA {
 	t := s.Tree()
 	var out []PortalHA
-	for _, e := range t.Root.Lists["ha-firewall"] {
+	for _, e := range t.Root.Lists["cluster"] {
 		out = append(out, portalHAOf(e))
 	}
 	return out
@@ -271,7 +271,7 @@ func (s *PortalStore) HAFirewalls() []PortalHA {
 
 // HAFirewall is one HA firewall; ok is false for none.
 func (s *PortalStore) HAFirewall(name string) (PortalHA, bool) {
-	e := s.Tree().Root.Entry("ha-firewall", []string{name})
+	e := s.Tree().Root.Entry("cluster", []string{name})
 	if e == nil {
 		return PortalHA{}, false
 	}
@@ -282,12 +282,12 @@ func (s *PortalStore) HAFirewall(name string) (PortalHA, bool) {
 // keeping its hosts.
 func (s *PortalStore) PutHA(ha PortalHA) error {
 	return s.Edit(func(t *datastore.Tree) error {
-		e := t.Root.Entry("ha-firewall", []string{ha.Name})
+		e := t.Root.Entry("cluster", []string{ha.Name})
 		if e == nil {
 			if t.Root.Entry("firewall", []string{ha.Name}) != nil {
 				return fmt.Errorf("there is a firewall %s already", ha.Name)
 			}
-			e = t.Root.AddEntry(t.Root.S.Child("ha-firewall"), map[string]string{"name": ha.Name})
+			e = t.Root.AddEntry(t.Root.S.Child("cluster"), map[string]string{"name": ha.Name})
 		}
 		delete(e.Leaves, "description")
 		if ha.Description != "" {
@@ -302,9 +302,9 @@ func (s *PortalStore) PutHA(ha PortalHA) error {
 // ("primary" or "secondary").
 func (s *PortalStore) SetHAHost(name, role string, h *PortalFirewall) error {
 	return s.Edit(func(t *datastore.Tree) error {
-		e := t.Root.Entry("ha-firewall", []string{name})
+		e := t.Root.Entry("cluster", []string{name})
 		if e == nil {
-			return fmt.Errorf("there is no HA firewall %s", name)
+			return fmt.Errorf("there is no cluster firewall %s", name)
 		}
 		if role != "primary" && role != "secondary" {
 			return fmt.Errorf("role %q: primary or secondary", role)
@@ -327,7 +327,7 @@ func (s *PortalStore) SetHAHost(name, role string, h *PortalFirewall) error {
 // DeleteHA removes an HA firewall from the portal (the pair is not changed).
 func (s *PortalStore) DeleteHA(name string) error {
 	return s.Edit(func(t *datastore.Tree) error {
-		return t.Delete(datastore.Path{{Name: "ha-firewall", Keys: []string{name}}})
+		return t.Delete(datastore.Path{{Name: "cluster", Keys: []string{name}}})
 	})
 }
 
@@ -351,8 +351,8 @@ func (s *PortalStore) PutFirewall(f PortalFirewall) error {
 			}
 		}
 		fw := t.Root.S.Child("firewall")
-		if t.Root.Entry("ha-firewall", []string{f.Name}) != nil {
-			return fmt.Errorf("there is an HA firewall %s already", f.Name)
+		if t.Root.Entry("cluster", []string{f.Name}) != nil {
+			return fmt.Errorf("there is a cluster firewall %s already", f.Name)
 		}
 		if e := t.Root.Entry("firewall", []string{f.Name}); e != nil {
 			e.Leaves = leaves

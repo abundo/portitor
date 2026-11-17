@@ -3,6 +3,12 @@
 
 # Deployments
 
+> **Developer reference.** This was a user guide until 1.1.0; the user guides are now
+> docs/install.md, docs/portitor-manager.md and docs/cluster.md. It is kept here for its implementation details (timings,
+> mechanisms, file names, commands). It still uses the names of before 1.1.0:
+> *portitor-web* is portitor-manager, an *HA pair* a firewall cluster, *open/closed*
+> active/standby (and fenced), the *HA link* the cluster link.
+
 Portitor runs in one of three layouts:
 
 | | Hosts | For |

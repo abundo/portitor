@@ -30,7 +30,7 @@ const ha = ref(null)
 const busy = ref(false)
 const force = ref(false)
 
-const label = computed(() => (ha.value?.stale ? 'Taken over' : 'HA secondary'))
+const label = computed(() => (ha.value?.stale ? 'Taken over' : 'Cluster secondary'))
 
 // On the primary: whether the secondary holds its configuration, asked every
 // 15 s (the replica's interval).
@@ -41,11 +41,11 @@ const primaryTip = computed(() => {
   const r = replication.value
   if (!r || r.replicated)
     return (
-      "This host is its HA pair's primary: the pair's configuration is changed here, and its secondary keeps a read-only copy" +
+      "This firewall is its cluster's primary: the cluster's configuration is changed here, and its secondary keeps a read-only copy" +
       (r?.copied ? ` (copied ${clock(r.copied)})` : '')
     )
   let tip =
-    'The configuration runs, but the HA secondary has not copied it yet: losing this host now loses it.'
+    'The configuration runs, but the secondary has not copied it yet: losing this firewall now loses it.'
   if (r.error) tip += ` The secondary's copy failed: ${r.error}`
   else if (!r.reported)
     tip += ' The secondary has not reported a copy: it may be unreachable or need an update.'
@@ -91,7 +91,7 @@ async function promote() {
   if (
     !(await ask({
       title: 'Promote',
-      message: `Make ${ha.value?.local || 'this host'} the primary in place of ${primary}?`,
+      message: `Make ${ha.value?.local || 'this firewall'} the primary in place of ${primary}?`,
       detail: `Its copy of the configuration becomes the pair's and is committed here; ${primary} becomes the secondary and is caught up when it answers. Changes on ${primary} since the last copy are lost.`,
     }))
   )
@@ -118,7 +118,7 @@ async function promote() {
         :color="unprotected ? 'warning' : 'primary'"
         variant="subtle"
         :icon="unprotected ? 'i-lucide-triangle-alert' : 'i-lucide-crown'"
-        :label="unprotected ? 'HA primary · not copied' : 'HA primary'"
+        :label="unprotected ? 'Cluster primary · not copied' : 'Cluster primary'"
         :class="auth.isAdmin ? 'cursor-pointer' : ''"
         @click="auth.isAdmin && router.push('/firewalls')"
       />
@@ -126,7 +126,7 @@ async function promote() {
   </div>
   <div v-if="auth.user?.replica" class="flex items-center">
     <UTooltip
-      text="This host's configuration is a read-only copy of its HA primary's: change it there"
+      text="This firewall's configuration is a read-only copy of its cluster primary's: change it there"
     >
       <UBadge
         color="warning"
@@ -137,7 +137,7 @@ async function promote() {
         @click="show"
       />
     </UTooltip>
-    <UModal v-model:open="open" title="HA secondary" :dismissible="false" :ui="wideModal">
+    <UModal v-model:open="open" title="Cluster secondary" :dismissible="false" :ui="wideModal">
       <template #body>
         <div v-if="ha" class="space-y-3 text-sm">
           <p v-if="ha.stale">
@@ -146,13 +146,13 @@ async function promote() {
             secondary.
           </p>
           <p v-else>
-            The configuration of this HA pair is kept on its primary; this host keeps a read-only
-            copy, so that it can take over the configuration if the primary is lost.
+            The configuration of this firewall cluster is kept on its primary; this firewall keeps a
+            read-only copy, so that it can take over the configuration if the primary is lost.
           </p>
           <UFormField label="This host" :ui="inlineField">{{ ha.local || '?' }}</UFormField>
           <UFormField label="Primary" :ui="inlineField">{{ ha.primary || '?' }}</UFormField>
           <UFormField label="Primary heard" :ui="inlineField">
-            {{ ha.peer_alive ? 'yes' : 'no: its agent does not answer this host' }}
+            {{ ha.peer_alive ? 'yes' : 'no: its agent does not answer this firewall' }}
           </UFormField>
           <UFormField label="Last copy" :ui="inlineField">
             {{ ha.last_copy ? clock(ha.last_copy) : 'none yet' }}
@@ -162,8 +162,8 @@ async function promote() {
           </UFormField>
           <template v-if="auth.isAdmin && !ha.stale">
             <p class="text-muted">
-              Promote this host when the primary is lost: it becomes the primary, with its copy of
-              the configuration.
+              Promote this firewall when the primary is lost: it becomes the primary, with its copy
+              of the configuration.
             </p>
             <UFormField v-if="ha.peer_alive" label="Force" :ui="inlineField">
               <UCheckbox

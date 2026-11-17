@@ -74,7 +74,7 @@ func (s *Server) stateTree(ctx context.Context, u *models.User) (*datastore.Tree
 			}
 		}
 		datastore.Fill(sys, st.Status)
-		datastore.FillList(sys, "ha-pair", st.HAPairs)
+		datastore.FillList(sys, "clusters", st.HAPairs)
 		for _, in := range st.Instances {
 			n := state(in.Name)
 			datastore.FillList(n, "interfaces", in.Interfaces)

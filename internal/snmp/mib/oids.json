@@ -66,9 +66,9 @@
     "/state/wireguard": 40,
     "/state/wireguard/peers": 41,
     "/system": 2,
-    "/system/ha-pair": 69,
-    "/system/ha-pair/checks": 70,
-    "/system/ha/dhcp": 36,
+    "/system/cluster/dhcp": 36,
+    "/system/clusters": 69,
+    "/system/clusters/checks": 70,
     "/system/host/disks": 35
   },
   "/instance": {
@@ -744,25 +744,25 @@
     "/state/wireguard/peers@/state/wireguard/interface": 1
   },
   "/system": {
+    "/system/cluster/epoch": 26,
+    "/system/cluster/health": 27,
+    "/system/cluster/link-seen": 31,
+    "/system/cluster/mgmt-seen": 32,
+    "/system/cluster/monitored": 29,
+    "/system/cluster/node": 18,
+    "/system/cluster/peer-alive": 21,
+    "/system/cluster/peer-health": 28,
+    "/system/cluster/peer-seen": 22,
+    "/system/cluster/peer-version": 34,
+    "/system/cluster/promise-until": 24,
+    "/system/cluster/state": 19,
+    "/system/cluster/term": 20,
+    "/system/cluster/vote-until": 23,
+    "/system/cluster/watchdog": 25,
+    "/system/cluster/witness-seen": 33,
     "/system/dry-run": 3,
     "/system/errors": 30,
     "/system/generation": 4,
-    "/system/ha/epoch": 26,
-    "/system/ha/health": 27,
-    "/system/ha/link-seen": 31,
-    "/system/ha/mgmt-seen": 32,
-    "/system/ha/monitored": 29,
-    "/system/ha/node": 18,
-    "/system/ha/peer-alive": 21,
-    "/system/ha/peer-health": 28,
-    "/system/ha/peer-seen": 22,
-    "/system/ha/peer-version": 34,
-    "/system/ha/promise-until": 24,
-    "/system/ha/state": 19,
-    "/system/ha/term": 20,
-    "/system/ha/vote-until": 23,
-    "/system/ha/watchdog": 25,
-    "/system/ha/witness-seen": 33,
     "/system/host/cpu-busy": 14,
     "/system/host/cpu-total": 15,
     "/system/host/cpus": 13,
@@ -779,24 +779,24 @@
     "/system/pending/generation": 7,
     "/system/version": 2
   },
-  "/system/ha-pair": {
-    "/system/ha-pair/active": 4,
-    "/system/ha-pair/failover-ready": 5,
-    "/system/ha-pair/name": 1,
-    "/system/ha-pair/primary": 2,
-    "/system/ha-pair/secondary": 3
+  "/system/cluster/dhcp": {
+    "/system/cluster/dhcp/error": 4,
+    "/system/cluster/dhcp/instance": 1,
+    "/system/cluster/dhcp/received": 3,
+    "/system/cluster/dhcp/sent": 2
   },
-  "/system/ha-pair/checks": {
-    "/system/ha-pair/checks/message": 4,
-    "/system/ha-pair/checks/name": 2,
-    "/system/ha-pair/checks/status": 3,
-    "/system/ha-pair/checks@/system/ha-pair/name": 1
+  "/system/clusters": {
+    "/system/clusters/active": 4,
+    "/system/clusters/failover-ready": 5,
+    "/system/clusters/name": 1,
+    "/system/clusters/primary": 2,
+    "/system/clusters/secondary": 3
   },
-  "/system/ha/dhcp": {
-    "/system/ha/dhcp/error": 4,
-    "/system/ha/dhcp/instance": 1,
-    "/system/ha/dhcp/received": 3,
-    "/system/ha/dhcp/sent": 2
+  "/system/clusters/checks": {
+    "/system/clusters/checks/message": 4,
+    "/system/clusters/checks/name": 2,
+    "/system/clusters/checks/status": 3,
+    "/system/clusters/checks@/system/clusters/name": 1
   },
   "/system/host/disks": {
     "/system/host/disks/free": 3,

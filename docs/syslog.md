@@ -3,7 +3,7 @@
 
 # Syslog
 
-A firewall keeps its logs in the systemd journal: the agent's, the firewall's
+A firewall keeps its logs in the systemd journal: the firewall's, the firewall's
 services' (BIND, the DHCP server, FRR, OpenVPN, ...) and those of every virtual firewall on it.
 Under **Services → Syslog** you see the journal and send it to remote syslog
 servers (a SIEM, Graylog, a central rsyslog or syslog-ng) with
@@ -13,7 +13,7 @@ Syslog is the firewall's, not a virtual firewall's: the page shows the firewall 
 the virtual firewall selected in the top bar, and its servers are the
 configuration's top-level `syslog-server` list (in the CLI). Global admins and viewers see the page; only
 global admins change the servers and follow the journal, which holds every virtual
-firewall's logs. On an HA pair both hosts send their own journal to the servers.
+firewall's logs. In a firewall cluster both firewalls send their own logs to the servers.
 
 ## Syslog info
 

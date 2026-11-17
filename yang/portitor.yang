@@ -21,7 +21,7 @@ module portitor {
   organization "The Portitor contributors";
   contact "https://github.com/abundo/portitor";
   description
-    "The configuration of a Portitor firewall, and of its HA secondary:
+    "The configuration of a Portitor firewall, and of its cluster secondary:
      settings, virtual firewalls (instance) with their interfaces, routing,
      filter and NAT rules and services, links between them, the
      objects they share (hosts, address lists, IP lists, services), and

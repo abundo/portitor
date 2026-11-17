@@ -16,7 +16,7 @@ GUI work on the same configuration: what you commit in one is in the other.
   user. You are the console admin and may change everything.
 - **Over SSH**, with a GUI user's name and password: set `ssh_listen` in
   `/etc/portitor/config.yaml` (for example `ssh_listen: ":2222"`), restart
-  portitor-config, open the port with an input rule, and run
+  Portitor, open the port with an input rule, and run
   `ssh -p 2222 admin@<firewall>`. A user with two-factor login is asked for the
   code. The port is separate from the firewall's own SSH (port 22), which stays the
   Linux login.
@@ -150,8 +150,8 @@ What the firewall runs and sees is under `state` in each virtual firewall, and
 routes, WireGuard peers, the daemons, DHCP leases (client and server), ARP/ND and
 LLDP neighbours, each rule's and rate limit's traffic, BGP, OSPF and IS-IS
 (neighbours, interfaces, areas), VRRP routers, BFD peers, NTP sources, NAT64 sessions
-and OpenVPN clients, and the agent and machine (version, the commit it runs, a commit
-waiting for confirmation, memory, CPU, load, disks, and an HA pair's state).
+and OpenVPN clients, and the firewall and machine (version, the commit it runs, a commit
+waiting for confirmation, memory, CPU, load, disks, and a firewall cluster's state).
 It is read-only and read from the firewalls when shown:
 
 ```

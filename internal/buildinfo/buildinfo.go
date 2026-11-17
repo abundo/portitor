@@ -29,7 +29,7 @@ func Get() Info {
 }
 
 // Mismatch says how the agent's version differs from this program's, or ""
-// when they match. portitor-web and the agent are released together and
+// when they match. portitor-config and the agent are released together and
 // should run the same version; a dev build (Version "dev") is not
 // compared. A leading v is ignored: goreleaser stamps 1.2.3, the Makefile
 // `git describe` v1.2.3.

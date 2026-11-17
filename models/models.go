@@ -307,7 +307,11 @@ type RoleMember struct {
 	Level  string `json:"level"`
 }
 
-// Firewall is a host portitor-web deploys to, through its agent. The
+// ClusterLink is the cluster-role of a firewall cluster's own link between
+// its two firewalls (fwconfig.HARoleLink in the document).
+const ClusterLink = "cluster_link"
+
+// Firewall is a host portitor-config deploys to, through its agent. The
 // first one (ID 1) is the one the installation started with.
 type Firewall struct {
 	Base
@@ -326,7 +330,7 @@ type Firewall struct {
 	// (SHA-256 of the DER, hex). Empty means verify against system CAs.
 	AgentFingerprint string `json:"agent_fingerprint"`
 	// Generation is the agent's monotonic deploy id: the last one
-	// portitor-web handed out to it.
+	// portitor-config handed out to it.
 	Generation int64 `json:"generation"`
 	// HAPrimaryID makes it the HA secondary of that firewall: it runs the
 	// primary's instances, with their peer_* values, and has none of its own.
@@ -368,7 +372,7 @@ type Settings struct {
 	// CaptureRateKbps caps a packet capture's stream from the agent
 	// (kbit/s); 0 is unlimited.
 	CaptureRateKbps int `gorm:"default:1000" json:"capture_rate_kbps"`
-	// WebCertificateID is the certificate (Certificates page) portitor-web
+	// WebCertificateID is the certificate (Certificates page) portitor-config
 	// serves HTTPS with, when it serves HTTPS itself (tls_cert); nil
 	// serves tls_cert.
 	WebCertificateID *uint `json:"-"`
@@ -515,9 +519,9 @@ type Interface struct {
 	// neither: its addresses are link-local by node
 	// (fwconfig.HALinkAddress).
 	PeerAddresses StringList `json:"peer_addresses"`
-	// HaRole makes it one of an HA pair's own two links
-	// (fwconfig.Interface.HARole); HaGateway is the management one's
-	// gateway.
+	// HaRole (leaf cluster-role) makes it one of a firewall cluster's own
+	// two links: ClusterLink or fwconfig.HARoleManagement; HaGateway is the
+	// management one's gateway.
 	HaRole    string `gorm:"column:ha_role" json:"ha_role"`
 	HaGateway string `gorm:"column:ha_gateway" json:"ha_gateway"`
 	// HaMonitor counts the carrier of a traffic interface on a pair: the

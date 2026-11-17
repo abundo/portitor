@@ -90,7 +90,7 @@ submodule portitor-services {
       key "name";
       action update {
         px:action "operation";
-        description "Downloads the blocklist again now, on its firewall (and an HA standby that answers).";
+        description "Downloads the blocklist again now, on its firewall (and a cluster standby that answers).";
         output {
           leaf started {
             type string;

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 The Portitor contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// Package agentclient is portitor-web's client for the portitor-agent API.
+// Package agentclient is portitor-config's client for the portitor-agent API.
 package agentclient
 
 import (

@@ -8,7 +8,7 @@
 #   fwlab-fw    portitor-agent as root, not dry-run, and portitor-config (the
 #               configuration, GUI on 192.168.1.1:8444). eth0 WAN (DHCP from
 #               mgmt), eth1 LAN 192.168.1.1/24, eth2 guest.
-#   fwlab-mgmt  portitor-web, the portal, on lan0 192.168.1.2, published on
+#   fwlab-mgmt  portitor-manager, the portal, on lan0 192.168.1.2, published on
 #               http://127.0.0.1:$LAB_WEB_PORT (the firewall at /fw/fw/). Also
 #               the ISP: DHCP and NAT on wan0 198.51.100.1/24.
 #
@@ -95,8 +95,8 @@ cmd_install() {
 	ex fw systemctl restart portitor-agent.service
 
 	log "installing portitor-config on fw"
-	$RT cp build/portitor-web "$PREFIX-fw:/usr/bin/portitor-web"
-	ex fw ln -sfn portitor-web /usr/bin/portitor-config
+	$RT cp build/portitor-manager "$PREFIX-fw:/usr/bin/portitor-manager"
+	ex fw ln -sfn portitor-manager /usr/bin/portitor-config
 	$RT cp deploy/systemd/portitor-config.service "$PREFIX-fw:/etc/systemd/system/portitor-config.service"
 	ex fw sh -c 'test -e /etc/portitor/config.crt ||
 		{ openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 3650 \
@@ -114,18 +114,18 @@ cmd_install() {
 	ex fw systemctl enable portitor-config.service
 	ex fw systemctl restart portitor-config.service
 
-	log "installing portitor-web on mgmt"
-	$RT cp build/portitor-web "$PREFIX-mgmt:/usr/bin/portitor-web"
-	$RT cp deploy/systemd/portitor-web.service "$PREFIX-mgmt:/etc/systemd/system/portitor-web.service"
+	log "installing portitor-manager on mgmt"
+	$RT cp build/portitor-manager "$PREFIX-mgmt:/usr/bin/portitor-manager"
+	$RT cp deploy/systemd/portitor-manager.service "$PREFIX-mgmt:/etc/systemd/system/portitor-manager.service"
 	local fp
 	fp=$(ex fw runuser -u portitor -- portitor-config fingerprint)
-	ex mgmt sed -i "s/fingerprint: .*/fingerprint: $fp/" /etc/portitor/web.yaml
+	ex mgmt sed -i "s/fingerprint: .*/fingerprint: $fp/" /etc/portitor/manager.yaml
 	ex mgmt systemctl daemon-reload
-	ex mgmt systemctl enable portitor-web.service
+	ex mgmt systemctl enable portitor-manager.service
 	# The portal has users of its own; everything but its login page waits for one.
-	ex mgmt install -d -o portitor -g portitor -m 0750 /var/lib/portitor-web
-	printf '%s\n' "$ADMIN_PASS" | $RT exec -i "$PREFIX-mgmt" runuser -u portitor -- portitor-web -f /etc/portitor/web.yaml createadmin admin >/dev/null
-	ex mgmt systemctl restart portitor-web.service
+	ex mgmt install -d -o portitor -g portitor -m 0750 /var/lib/portitor-manager
+	printf '%s\n' "$ADMIN_PASS" | $RT exec -i "$PREFIX-mgmt" runuser -u portitor -- portitor-manager -f /etc/portitor/manager.yaml createadmin admin >/dev/null
+	ex mgmt systemctl restart portitor-manager.service
 	until curl -fso /dev/null "$PORTAL/"; do sleep 1; done
 	log "GUI on $URL (admin / $ADMIN_PASS, on the portal and the firewall)"
 }
@@ -176,7 +176,7 @@ cmd_shell() { $RT exec -it "$PREFIX-${1:?fw or mgmt}" bash; }
 cmd_logs() {
 	case ${1:?fw or mgmt} in
 	fw) ex fw journalctl -f -u portitor-agent -u portitor-config -u 'portitor-named@*' -u 'portitor-dhcpd@*' -u 'portitor-frr@*' -u 'portitor-chrony@*' -u 'portitor-snmpd@*' -u 'portitor-openvpn-*' -u 'openvpn-server@*' -u named -u frr -u chrony -u snmpd ;;
-	mgmt) ex mgmt journalctl -f -u portitor-web -u dnsmasq ;;
+	mgmt) ex mgmt journalctl -f -u portitor-manager -u dnsmasq ;;
 	*) echo "fw or mgmt" >&2; exit 2 ;;
 	esac
 }

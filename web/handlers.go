@@ -429,7 +429,7 @@ type settingsView struct {
 	// WebCertificate is the certificate portitor-config serves (kept by
 	// its id, settings.web_certificate_id), or nil for tls_cert.
 	WebCertificate *certRef `json:"web_certificate"`
-	// WebTLS says portitor-web serves HTTPS itself (tls_cert), so a
+	// WebTLS says portitor-config serves HTTPS itself (tls_cert), so a
 	// web certificate takes effect.
 	WebTLS bool `json:"web_tls"`
 }

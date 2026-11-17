@@ -147,7 +147,7 @@ func (s *Session) Suggest(ctx context.Context, line string) (partial string, ite
 			break
 		}
 		items = s.dirItems(ctx, args)
-		if p, err := s.parsePath(args); err == nil && p.node.Kind == schema.List && len(args) > 0 {
+		if p, err := s.parseQuiet(args); err == nil && p.node.Kind == schema.List && len(args) > 0 {
 			items = append(items, Item{"to", "the new keys follow"})
 		}
 	case "move":
@@ -160,7 +160,7 @@ func (s *Session) Suggest(ctx context.Context, line string) (partial string, ite
 			}
 		}
 		items = s.dirItems(ctx, args)
-		if p, err := s.parsePath(args); err == nil && p.node.Kind == schema.List && len(args) > 0 {
+		if p, err := s.parseQuiet(args); err == nil && p.node.Kind == schema.List && len(args) > 0 {
 			items = append(items, words("first", "last", "before", "after")...)
 		}
 	}

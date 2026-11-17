@@ -25,7 +25,7 @@ import (
 	"github.com/abundo/portitor/models"
 )
 
-// Firewalls are the hosts portitor-web deploys to, each through its own
+// Firewalls are the hosts portitor-config deploys to, each through its own
 // agent. Every instance is on one firewall, and each firewall has one
 // default instance: its host, created with it and named after it. A commit
 // builds one document per firewall (builder.BuildFirewall).
@@ -63,7 +63,7 @@ func checkFirewallFields(f *models.Firewall) error {
 		f.HAWitness = models.HAWitnessLocal
 	case models.HAWitnessLocal, models.HAWitnessExternal:
 	default:
-		return bad("HA witness: local or external")
+		return bad("cluster witness: local or external")
 	}
 	return nil
 }
@@ -74,7 +74,7 @@ func checkFirewallFields(f *models.Firewall) error {
 // (Local) has its own firewall and its HA secondary alone.
 func (s *Server) prepareFirewall(v *confview.View, f, old *models.Firewall) error {
 	if old == nil && f.HAPrimaryID == nil && slices.ContainsFunc(v.Firewalls, func(o models.Firewall) bool { return o.HAPrimaryID == nil }) {
-		return bad("portitor-config deploys to its own firewall (and its HA secondary); other firewalls are a manager's")
+		return bad("portitor-config deploys to its own firewall (and its cluster secondary); other firewalls are a manager's")
 	}
 	if err := checkFirewallFields(f); err != nil {
 		return err
@@ -105,14 +105,14 @@ func (s *Server) prepareFirewall(v *confview.View, f, old *models.Firewall) erro
 	if f.HAPrimaryID != nil {
 		pi := slices.IndexFunc(v.Firewalls, func(o models.Firewall) bool { return o.ID == *f.HAPrimaryID })
 		if pi < 0 {
-			return bad("HA primary: no such firewall")
+			return bad("cluster primary: no such firewall")
 		}
 		p := v.Firewalls[pi]
 		if p.HAPrimaryID != nil {
-			return bad("HA primary: " + p.Name + " is a secondary itself")
+			return bad("cluster primary: " + p.Name + " is a secondary itself")
 		}
 		if slices.ContainsFunc(v.Firewalls, func(o models.Firewall) bool { return o.HAPrimaryID != nil && *o.HAPrimaryID == p.ID }) {
-			return bad("HA primary: " + p.Name + " has a secondary already")
+			return bad("cluster primary: " + p.Name + " has a secondary already")
 		}
 		f.HASecret = newHASecret()
 	}
@@ -180,7 +180,7 @@ func (s *Server) deleteFirewall(c *echo.Context, work *datastore.Tree, v *confvi
 		return bad("the only firewall can't be deleted")
 	}
 	if i := slices.IndexFunc(v.Firewalls, func(o models.Firewall) bool { return o.HAPrimaryID != nil && *o.HAPrimaryID == f.ID }); i >= 0 {
-		return bad(fmt.Sprintf("%s is the HA primary of %s; delete that first", f.Name, v.Firewalls[i].Name))
+		return bad(fmt.Sprintf("%s is the cluster primary of %s; delete that first", f.Name, v.Firewalls[i].Name))
 	}
 	for _, in := range work.Root.Lists["instance"] {
 		if in.Leaf("firewall") == f.Name {
@@ -464,7 +464,7 @@ func (s *Server) handleSwitchover(c *echo.Context) error {
 	} else {
 		q, _ := s.secondaryOf(fw.ID)
 		if q == nil {
-			return errJSON(c, http.StatusConflict, fw.Name+" is not in an HA pair")
+			return errJSON(c, http.StatusConflict, fw.Name+" is not in a firewall cluster")
 		}
 		pair = append(pair, *q)
 	}
@@ -482,8 +482,8 @@ func (s *Server) handleSwitchover(c *echo.Context) error {
 		if err := a.HASwitchover(ctx); err != nil {
 			return agentError(c, err)
 		}
-		slog.Info("ha: switchover", "from", pair[i].Name, "user", currentUser(c).Username)
+		slog.Info("cluster: switchover", "from", pair[i].Name, "user", currentUser(c).Username)
 		return c.JSON(http.StatusOK, map[string]string{"from": pair[i].Name})
 	}
-	return errJSON(c, http.StatusConflict, "no host of the pair answers as active")
+	return errJSON(c, http.StatusConflict, "no host of the cluster answers as active")
 }

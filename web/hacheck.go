@@ -62,7 +62,7 @@ func pairOf(s *Server, c *echo.Context, a *actionCtx) (prim, sec *models.Firewal
 		prim, sec = &fws[i], q
 	}
 	if prim == nil || sec == nil {
-		return nil, nil, errJSON(c, http.StatusConflict, name+" is not in an HA pair")
+		return nil, nil, errJSON(c, http.StatusConflict, name+" is not in a firewall cluster")
 	}
 	return prim, sec, nil
 }
@@ -104,7 +104,7 @@ func checkPair(s *Server, c *echo.Context, a *actionCtx) error {
 	// The hosts' names, releases, interfaces and neighbours: for those who
 	// read every instance, as GET /api/firewalls (readsEverything).
 	if !currentAccess(c).readsAll() {
-		return errJSON(c, http.StatusForbidden, "only a global admin or viewer may check a pair")
+		return errJSON(c, http.StatusForbidden, "only a global admin or viewer may check a cluster")
 	}
 	prim, sec, err := pairOf(s, c, a)
 	if prim == nil {
@@ -143,7 +143,7 @@ func testSwitchover(s *Server, c *echo.Context, a *actionCtx) error {
 				why = append(why, ck.Message)
 			}
 		}
-		return errJSON(c, http.StatusConflict, "the pair can't fail over now: "+strings.Join(why, "; "))
+		return errJSON(c, http.StatusConflict, "the cluster can't fail over now: "+strings.Join(why, "; "))
 	}
 	pair := map[string]*models.Firewall{prim.Name: prim, sec.Name: sec}
 	from := pair[p.Active]
@@ -156,7 +156,7 @@ func testSwitchover(s *Server, c *echo.Context, a *actionCtx) error {
 	if err != nil {
 		return agentError(c, err)
 	}
-	slog.Info("ha: switchover test", "from", from.Name, "to", to.Name, "ms", there.Milliseconds(), "user", user)
+	slog.Info("cluster: switchover test", "from", from.Name, "to", to.Name, "ms", there.Milliseconds(), "user", user)
 	// Back even when the request goes away meanwhile (a closed tab, a
 	// proxy's timeout): a test leaves the pair as it found it.
 	ctx = context.WithoutCancel(ctx)
@@ -165,7 +165,7 @@ func testSwitchover(s *Server, c *echo.Context, a *actionCtx) error {
 	if err != nil {
 		return errJSON(c, http.StatusBadGateway, fmt.Sprintf("switched over to %s in %d ms, but not back: %v (switch back by hand)", to.Name, there.Milliseconds(), err))
 	}
-	slog.Info("ha: switchover test", "from", to.Name, "to", from.Name, "ms", back.Milliseconds(), "user", user)
+	slog.Info("cluster: switchover test", "from", to.Name, "to", from.Name, "ms", back.Milliseconds(), "user", user)
 	return c.JSON(http.StatusOK, map[string]any{
 		"from": from.Name, "to": to.Name,
 		"there-ms": there.Milliseconds(), "back-ms": back.Milliseconds(),
@@ -245,7 +245,7 @@ func interfaceCheck(doc *fwconfig.Document, hosts [2]*pairHost) haCheck {
 	if len(missing) > 0 {
 		return haCheck{Name: "interfaces", Status: checkFail, Message: strings.Join(missing, "; ") + ": both hosts need the same interface names"}
 	}
-	return haCheck{Name: "interfaces", Status: checkOK, Message: "both hosts have the interfaces the pair runs"}
+	return haCheck{Name: "interfaces", Status: checkOK, Message: "both hosts have the interfaces the cluster runs"}
 }
 
 // haLinkCheck: on the HA link, LLDP should hear the peer alone. A switch
@@ -284,9 +284,9 @@ func haLinkCheck(doc *fwconfig.Document, hosts [2]*pairHost) (haCheck, bool) {
 	case len(others) > 0:
 		slices.Sort(others)
 		others = slices.Compact(others)
-		return haCheck{Name: "ha-link", Status: checkWarn, Message: strings.Join(others, "; ") + " on the HA link: if management goes through the same device, one failure closes the pair"}, true
+		return haCheck{Name: "cluster-link", Status: checkWarn, Message: strings.Join(others, "; ") + " on the cluster link: if management goes through the same device, one failure stops the cluster"}, true
 	case heard:
-		return haCheck{Name: "ha-link", Status: checkOK, Message: "the HA link reaches the peer directly"}, true
+		return haCheck{Name: "cluster-link", Status: checkOK, Message: "the cluster link reaches the peer directly"}, true
 	}
 	return haCheck{}, false
 }

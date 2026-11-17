@@ -26,7 +26,7 @@ type certAgent interface {
 	Certificate(ctx context.Context, instance, name string) (*agentapi.CertificateFiles, error)
 }
 
-// tlsCert serves HTTPS for portitor-web: the certificate chosen under
+// tlsCert serves HTTPS for portitor-manager: the certificate chosen under
 // Settings (Portitor web, settings.web_certificate_id), fetched from the
 // agent, or tls_cert while none is chosen or fetched yet. The last one
 // fetched is kept in the data directory (0600), so a restart while the agent
@@ -43,7 +43,7 @@ type tlsCert struct {
 }
 
 // PinnedServerName is the TLS server name a client that pins
-// portitor-config's tls_cert asks for (portitor-web, the HA peer).
+// portitor-config's tls_cert asks for (portitor-manager, the HA peer).
 const PinnedServerName = "portitor-config.invalid"
 
 const (
@@ -94,7 +94,7 @@ func (t *tlsCert) reset() {
 func (t *tlsCert) get(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	// portitor-web and the HA peer pin tls_cert, asked for by name, so a
+	// portitor-manager and the HA peer pin tls_cert, asked for by name, so a
 	// certificate chosen under Settings never breaks them.
 	if t.cur != nil && (hello == nil || hello.ServerName != PinnedServerName) {
 		return t.cur, nil
@@ -182,10 +182,10 @@ func (t *tlsCert) fetch(ctx context.Context) (chosen bool, err error) {
 }
 
 // CertFingerprint is the SHA-256 of the first certificate in the PEM file
-// path, hex: what portitor-web and the HA peer pin.
+// path, hex: what portitor-manager and the HA peer pin.
 func CertFingerprint(path string) (string, error) {
 	if path == "" {
-		return "", errors.New("no tls_cert: portitor-config serves plain HTTP, which portitor-web reaches on this host only")
+		return "", errors.New("no tls_cert: portitor-config serves plain HTTP, which portitor-manager reaches on this host only")
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {

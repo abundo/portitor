@@ -263,7 +263,7 @@ func (s *Server) handleResetUserTOTP(c *echo.Context) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
-// ResetTOTP turns off a user's two-factor login (portitor-web reset-2fa),
+// ResetTOTP turns off a user's two-factor login (portitor-config reset-2fa),
 // for a user locked out, a managed one included.
 func ResetTOTP(s *Server, username string) error {
 	u, err := s.rec.UserNamed(username)

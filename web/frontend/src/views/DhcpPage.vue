@@ -418,9 +418,9 @@ const autoLeases = useAutoRefresh(loadLeases, { seconds: 10, active: () => tab.v
             <p class="mb-4 text-sm text-muted">
               Portitor's DHCPv4 and DHCPv6 server, for the clients on this virtual firewall's
               interfaces. DHCP is served per prefix of an interface address; several on one
-              interface are served together, and clients get addresses from all of them. On an HA
-              pair the standby has every lease, so clients keep their addresses after a failover.
-              Fixed leases are addresses with a MAC and a DNS name under
+              interface are served together, and clients get addresses from all of them. In a
+              firewall cluster pair the standby has every lease, so clients keep their addresses
+              after a failover. Fixed leases are addresses with a MAC and a DNS name under
               <RouterLink to="/hosts-prefixes" class="text-primary">Hosts & prefixes</RouterLink>.
             </p>
             <fieldset :disabled="readOnly" class="space-y-3">

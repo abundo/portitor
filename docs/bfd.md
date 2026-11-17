@@ -60,7 +60,7 @@ and take a healthy neighbour down.
 
 ## Static routes with BFD
 
-A static route with BFD is not installed by the agent like the others but by FRR
+A static route with BFD is not installed by the firewall like the others but by FRR
 (`staticd`), which installs it while the BFD session to its gateway is up and
 withdraws it while it is down. Such a route needs a gateway, and its metric is FRR's
 administrative distance (0-255; 0 is FRR's default, 1): among routes to the same

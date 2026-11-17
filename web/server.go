@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 The Portitor contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// Package web is portitor-web: the REST API behind the Vue GUI, and the
+// Package web is portitor-config: the REST API behind the Vue GUI, and the
 // place configuration is built and pushed to portitor-agent.
 package web
 
@@ -109,7 +109,7 @@ type Server struct {
 	// newAgent builds a client for a firewall's agent (at agentURL).
 	newAgent func(f *models.Firewall) (agentAPI, error)
 	static   fs.FS
-	// webCert serves HTTPS when portitor-web does (tls_cert); nil otherwise.
+	// webCert serves HTTPS when portitor-config does (tls_cert); nil otherwise.
 	webCert *tlsCert
 	// witness is the HA pairs' third vote (witness.go).
 	witness *witness
@@ -235,7 +235,8 @@ func (s *Server) Echo() *echo.Echo {
 	g.GET("/firewalls/:id/witness", s.handleWitnessString)
 	g.POST("/firewalls/:id/switchover", s.handleSwitchover)
 	g.GET("/ha", s.handleHAStatus)
-	g.POST("/ha/promote", s.handlePromote)
+	g.POST("/cluster/promote", s.handlePromote)
+	g.POST("/ha/promote", s.handlePromote) // before 1.1.0, until 1.2.0
 	// The configuration on the datastore (configapi.go).
 	g.GET("/schema", s.handleSchema)
 	g.GET("/config/changes", s.handleConfigChanges)
@@ -309,7 +310,7 @@ func (s *Server) Echo() *echo.Echo {
 	return e
 }
 
-// isPortalPrefix: a path portitor-web serves a firewall at (portalPrefix).
+// isPortalPrefix: a path portitor-manager serves a firewall at (portalPrefix).
 func isPortalPrefix(p string) bool {
 	name, ok := strings.CutPrefix(p, "/fw/")
 	// An HA firewall's host alone: /fw/<name>@primary or @secondary.
@@ -321,7 +322,7 @@ func isPortalPrefix(p string) bool {
 }
 
 // serveIndex answers the SPA's routes, and every path that is not one of
-// its files, with index.html, its <base> the path portitor-web serves this
+// its files, with index.html, its <base> the path portitor-manager serves this
 // firewall at (X-Forwarded-Prefix), or / without one.
 func (s *Server) serveIndex(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(c *echo.Context) error {

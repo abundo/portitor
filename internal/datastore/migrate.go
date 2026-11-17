@@ -17,7 +17,8 @@ import (
 // commits, copies, backups, bundles. Each must leave a tree of this
 // release's shape alone, so reading one twice is reading it once.
 var migrations = map[string][]func(obj map[string]json.RawMessage) (bool, error){
-	"portitor": {hostToRoot},
+	"portitor":        {hostToRoot, haToCluster},
+	"portitor-portal": {portalHAToCluster},
 }
 
 // Migrate is data, a whole tree's JSON of the module, in this release's
@@ -142,4 +143,110 @@ func MigrateIDPaths(paths []string, host string, move func(from, to string)) boo
 		moved = true
 	}
 	return moved
+}
+
+// haToClusterLeaves are the leaves an HA pair's were named by before 1.1.0,
+// which made it a firewall cluster: the firewall's and the interface's.
+var haToClusterLeaves = map[string]string{
+	"ha-primary":        "cluster-primary",
+	"ha-secret":         "cluster-secret",
+	"ha-epoch":          "cluster-epoch",
+	"ha-witness":        "cluster-witness",
+	"ha-preempt":        "cluster-preempt",
+	"ha-witness-secret": "cluster-witness-secret",
+	"ha-role":           "cluster-role",
+	"ha-gateway":        "cluster-gateway",
+	"ha-monitor":        "cluster-monitor",
+}
+
+// haToCluster (1.1.0): the firewalls' and interfaces' ha-* leaves are
+// cluster-*, and an interface's role ha_link is cluster_link. Interfaces
+// are the host's (the top level, after hostToRoot) and each virtual
+// firewall's.
+func haToCluster(obj map[string]json.RawMessage) (bool, error) {
+	const pfx = "portitor:"
+	changed := false
+	lists := func(raw json.RawMessage, fn func(e map[string]json.RawMessage) bool) (json.RawMessage, bool) {
+		var es []map[string]json.RawMessage
+		if json.Unmarshal(raw, &es) != nil {
+			return raw, false // readObject says what is wrong with it
+		}
+		c := false
+		for _, e := range es {
+			c = fn(e) || c
+		}
+		if !c {
+			return raw, false
+		}
+		out, err := json.Marshal(es)
+		if err != nil {
+			return raw, false
+		}
+		return out, true
+	}
+	leaves := func(e map[string]json.RawMessage) bool {
+		c := false
+		for old, name := range haToClusterLeaves {
+			v, ok := e[old]
+			if !ok {
+				continue
+			}
+			if _, have := e[name]; !have {
+				if old == "ha-role" && string(v) == `"ha_link"` {
+					v = json.RawMessage(`"cluster_link"`)
+				}
+				e[name] = v
+			}
+			delete(e, old)
+			c = true
+		}
+		return c
+	}
+	for _, name := range []string{"firewall", "interface"} {
+		if raw, ok := obj[pfx+name]; ok {
+			if out, c := lists(raw, leaves); c {
+				obj[pfx+name], changed = out, true
+			}
+		}
+	}
+	if raw, ok := obj[pfx+"instance"]; ok {
+		out, c := lists(raw, func(in map[string]json.RawMessage) bool {
+			raw, ok := in["interface"]
+			if !ok {
+				return false
+			}
+			out, c := lists(raw, leaves)
+			if c {
+				in["interface"] = out
+			}
+			return c
+		})
+		if c {
+			obj[pfx+"instance"], changed = out, true
+		}
+	}
+	return changed, nil
+}
+
+// portalHAToCluster (1.1.0): the manager's ha-firewall list is cluster.
+func portalHAToCluster(obj map[string]json.RawMessage) (bool, error) {
+	const old, name = "portitor-portal:ha-firewall", "portitor-portal:cluster"
+	v, ok := obj[old]
+	if !ok {
+		return false, nil
+	}
+	if _, have := obj[name]; !have {
+		obj[name] = v
+	}
+	delete(obj, old)
+	return true, nil
+}
+
+// renamedValue is v of the leaf name in this release: a value of before
+// 1.1.0 given under the leaf's old name, until 1.2.0.
+func renamedValue(name, v string) string {
+	if name == "cluster-role" && v == "ha_link" {
+		return "cluster_link"
+	}
+	return v
 }

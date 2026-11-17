@@ -291,7 +291,7 @@ func itoa(n uint) string {
 	return string(b)
 }
 
-// TestDeployEndToEnd drives portitor-web against a real (dry-run)
+// TestDeployEndToEnd drives portitor-config against a real (dry-run)
 // portitor-agent over TLS with certificate pinning.
 func TestDeployEndToEnd(t *testing.T) {
 	env := newEnv(t)

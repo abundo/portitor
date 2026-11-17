@@ -19,7 +19,7 @@ import (
 type Config struct {
 	// Listen is the management API address, e.g. "192.168.1.1:8443".
 	Listen string `yaml:"listen"`
-	// TokenFile holds the bearer token portitor-web authenticates with.
+	// TokenFile holds the bearer token portitor-config authenticates with.
 	TokenFile string `yaml:"token_file"`
 	TLSCert   string `yaml:"tls_cert"`
 	TLSKey    string `yaml:"tls_key"`
@@ -32,7 +32,7 @@ type Config struct {
 	// and ConfigPort from AllowFrom in the default instance. Default true.
 	AntiLockout *bool `yaml:"anti_lockout"`
 	// ConfigPort is portitor-config's port on this host (the GUI, which
-	// portitor-web elsewhere reaches too), kept open by the anti-lockout
+	// portitor-config elsewhere reaches too), kept open by the anti-lockout
 	// rule. Default 8444; 0 leaves it out.
 	ConfigPort *int `yaml:"config_port"`
 	// DryRun renders and logs, but changes nothing. For development on a

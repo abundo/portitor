@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 The Portitor contributors
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-# Development config of portitor-web, the portal: `make dev-portal`, in
+# Development config of portitor-manager: `make dev-portal`, in
 # front of `make dev-web`. Not for production.
 bind: 127.0.0.1:8090
 dev: true

@@ -3,6 +3,12 @@
 
 # Installer ISO and updates
 
+> **Developer reference.** This was a user guide until 1.1.0; the user guides are now
+> docs/install.md and docs/updates.md. It is kept here for its implementation details (timings,
+> mechanisms, file names, commands). It still uses the names of before 1.1.0:
+> *portitor-web* is portitor-manager, an *HA pair* a firewall cluster, *open/closed*
+> active/standby (and fenced), the *HA link* the cluster link.
+
 The Portitor ISO installs a complete firewall on an amd64 machine: Debian 13, the
 programs the agent needs (nftables, BIND, WireGuard), portitor-agent and
 portitor-config, which keeps the firewall's configuration and serves its GUI. A single

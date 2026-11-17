@@ -15,7 +15,7 @@ async function go() {
 </script>
 
 <template>
-  <UTooltip v-if="portal && !framed" text="Back to portitor-web's firewalls">
+  <UTooltip v-if="portal && !framed" text="Back to portitor-manager's firewalls">
     <UButton
       icon="i-lucide-layout-grid"
       color="neutral"

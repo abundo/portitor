@@ -29,7 +29,7 @@ import (
 	"github.com/abundo/portitor/internal/fwconfig"
 )
 
-// portitor-web is a portal with a configuration of its own, a tree of
+// portitor-manager is a portal with a configuration of its own, a tree of
 // portitor-portal.yang (PortalStore): the firewalls whose GUIs it serves, the
 // witness strings of the HA pairs it is the witness of, and its users. It
 // serves each firewall at /fw/<name>/, passing the GUI, the API, the console
@@ -37,9 +37,9 @@ import (
 // roles and checks apply as they do there, and shows them as tabs (portal.html).
 // The session cookie of each is kept to its path (both hosts' paths for an HA
 // pair). A firewall is added by reading its fingerprints over SSH
-// (portalssh.go). What it needs to start is web.yaml.
+// (portalssh.go). What it needs to start is manager.yaml.
 
-// PortalConfig is /etc/portitor/web.yaml: what portitor-web needs to start.
+// PortalConfig is /etc/portitor/manager.yaml (web.yaml before 1.1.0): what portitor-manager needs to start.
 // The firewalls and the witness strings are the configuration's, in the data
 // directory; those listed here are taken in once, when it has none yet.
 type PortalConfig struct {
@@ -62,12 +62,13 @@ type PortalConfig struct {
 	Witness   []string         `yaml:"witness"`
 }
 
-// DefaultPortalDataDir is where portitor-web keeps its files.
-const DefaultPortalDataDir = "/var/lib/portitor-web"
+// DefaultPortalDataDir is where portitor-manager keeps its files
+// (/var/lib/portitor-web before 1.1.0, moved by install.py).
+const DefaultPortalDataDir = "/var/lib/portitor-manager"
 
 // PortalFirewall is one firewall's portitor-config: its URL, and the
 // SHA-256 fingerprint of its tls_cert (portitor-config fingerprint).
-// portitor-web asks for that certificate by PinnedServerName, so a
+// portitor-manager asks for that certificate by PinnedServerName, so a
 // certificate chosen there under Settings changes nothing here.
 type PortalFirewall struct {
 	Name        string `yaml:"name" json:"name"`
@@ -104,7 +105,7 @@ func CheckPortalHA(ha *PortalHA) error {
 			return fmt.Errorf("%s: %w", h.Name, err)
 		}
 		if c.Fingerprint == "" {
-			return fmt.Errorf("%s: an HA pair's portitor-config is reached over https", h.Name)
+			return fmt.Errorf("%s: a firewall cluster's portitor-config is reached over https", h.Name)
 		}
 		h.URL, h.Fingerprint = c.URL, c.Fingerprint
 	}
@@ -116,6 +117,13 @@ func CheckPortalHA(ha *PortalHA) error {
 
 func LoadPortalConfig(path string) (*PortalConfig, error) {
 	data, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) && path == DefaultConfigFile {
+		// Until 1.2.0: a manager not yet moved by install.py.
+		if old, oerr := os.ReadFile(OldConfigFile); oerr == nil {
+			slog.Warn("reading the config file of before 1.1.0; rename it", "file", OldConfigFile, "to", DefaultConfigFile)
+			path, data, err = OldConfigFile, old, nil
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -192,7 +200,7 @@ func isLoopback(host string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
-// Portal is portitor-web's server.
+// Portal is portitor-manager's server.
 type Portal struct {
 	cfg   *PortalConfig
 	store *PortalStore
@@ -308,7 +316,7 @@ func (p *Portal) reload() error {
 	for i := range has {
 		ha := &has[i]
 		if err := CheckPortalHA(ha); err != nil {
-			slog.Warn("portal: HA firewall left out", "firewall", ha.Name, "err", err)
+			slog.Warn("portal: cluster firewall left out", "firewall", ha.Name, "err", err)
 			continue
 		}
 		// One transport per host, picked by the request's host: each
@@ -837,7 +845,7 @@ func (p *Portal) restartWitness() {
 	go w.Run(ctx)
 }
 
-// warnWebYAML says when web.yaml lists firewalls or witness strings the
+// warnWebYAML says when manager.yaml lists firewalls or witness strings the
 // configuration lacks: they are taken in once, at the first start, and
 // never again.
 func (p *Portal) warnWebYAML() {
@@ -847,11 +855,11 @@ func (p *Portal) warnWebYAML() {
 	}
 	for _, f := range p.cfg.Firewalls {
 		if !have[f.Name] {
-			slog.Warn("web.yaml lists a firewall the portal's configuration does not have; it is ignored (add it in the portal, or portitor-web add-firewall)", "firewall", f.Name)
+			slog.Warn("manager.yaml lists a firewall the portal's configuration does not have; it is ignored (add it in the portal, or portitor-manager add-firewall)", "firewall", f.Name)
 		}
 	}
 	if len(p.cfg.Witness) > 0 && len(p.store.Witnesses()) == 0 {
-		slog.Warn("web.yaml lists witness strings the portal's configuration does not have; they are ignored (portitor-web add-witness)")
+		slog.Warn("manager.yaml lists witness strings the portal's configuration does not have; they are ignored (portitor-manager add-witness)")
 	}
 }
 
@@ -873,7 +881,7 @@ func (p *Portal) Serve(ctx context.Context) error {
 		defer cancel()
 		_ = srv.Shutdown(sctx)
 	}()
-	slog.Info("portitor-web listening", "addr", p.cfg.Bind, "firewalls", len(p.firewalls()), "witness", len(p.store.Witnesses()), "tls", p.cfg.TLSCert != "")
+	slog.Info("portitor-manager listening", "addr", p.cfg.Bind, "firewalls", len(p.firewalls()), "witness", len(p.store.Witnesses()), "tls", p.cfg.TLSCert != "")
 	var err error
 	if p.cfg.TLSCert != "" {
 		srv.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12}

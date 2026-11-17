@@ -18,7 +18,7 @@ const icon = {
 }
 const tone = { ok: 'text-success', warn: 'text-warning', fail: 'text-error' }
 const label = {
-  active: 'Active host',
+  active: 'Active firewall',
   standby: 'Standby',
   paths: 'Heartbeat paths',
   witness: 'Witness',
@@ -35,7 +35,7 @@ const label = {
       <template #header>
         <div class="flex flex-wrap items-center gap-3">
           <UIcon name="i-lucide-server-cog" class="size-5" />
-          <span class="font-semibold">HA pair {{ p.primary }} / {{ p.secondary }}</span>
+          <span class="font-semibold">Firewall cluster {{ p.primary }} / {{ p.secondary }}</span>
           <UBadge
             :color="p.active ? 'success' : 'error'"
             variant="subtle"

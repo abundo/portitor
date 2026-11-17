@@ -15,20 +15,20 @@ import (
 	"github.com/abundo/portitor/web"
 )
 
-// portalCommand is portitor-web's: the portal to the firewalls' own
-// portitor-configs, and the witness of HA pairs (web.yaml).
+// portalCommand is portitor-manager's: the manager of the firewalls' own
+// portitor-configs, and the witness of firewall clusters (manager.yaml).
 func portalCommand() *cobra.Command {
 	var configFile, bind string
 	var debug bool
 	root := &cobra.Command{
-		Use:              "portitor-web",
-		Short:            "Portitor: the portal to the firewalls' GUIs, and the HA pairs' witness",
+		Use:              "portitor-manager",
+		Short:            "Portitor: the manager of the firewalls, and the firewall clusters' witness",
 		SilenceUsage:     true,
 		SilenceErrors:    true,
 		Version:          buildinfo.Version,
 		PersistentPreRun: setLogging(&debug),
 	}
-	root.PersistentFlags().StringVarP(&configFile, "config", "f", web.DefaultConfigFile, "config file")
+	root.PersistentFlags().StringVarP(&configFile, "config", "f", web.DefaultConfigFile, "config file (before 1.1.0 "+web.OldConfigFile+", still read when it is missing)")
 	root.PersistentFlags().BoolVarP(&debug, "debug", "d", false, "debug logging")
 
 	load := func() (*web.PortalConfig, error) {
@@ -43,7 +43,7 @@ func portalCommand() *cobra.Command {
 	}
 	start := &cobra.Command{
 		Use:   "start",
-		Short: "Serve the portal: the firewalls' GUIs as tabs, at /fw/<name>/, and be the HA pairs' witness",
+		Short: "Serve portitor-manager: the firewalls' GUIs as tabs, at /fw/<name>/, and be the firewall clusters' witness",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := load()
@@ -64,7 +64,7 @@ func portalCommand() *cobra.Command {
 
 	root.AddCommand(&cobra.Command{
 		Use:   "witness",
-		Short: "Only be the witness of the HA pairs given by add-witness, without the GUI",
+		Short: "Only be the witness of the firewall clusters given by add-witness, without the GUI",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := load()
@@ -76,7 +76,7 @@ func portalCommand() *cobra.Command {
 				return err
 			}
 			if len(store.Witnesses()) == 0 {
-				return fmt.Errorf("no witness strings in %s (portitor-web add-witness, from portitor-config witness-string on an HA primary)", cfg.DataDir)
+				return fmt.Errorf("no witness strings in %s (portitor-manager add-witness, from portitor-config witness-string on a cluster primary)", cfg.DataDir)
 			}
 			w, err := web.NewWitness(store.Witnesses())
 			if err != nil {
@@ -91,7 +91,7 @@ func portalCommand() *cobra.Command {
 
 	root.AddCommand(&cobra.Command{
 		Use:   "createadmin <user>",
-		Short: "Make a portal user, or change their password (read from the terminal or standard input)",
+		Short: "Make a portitor-manager user, or change their password (read from the terminal or standard input)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := load()
@@ -141,7 +141,7 @@ func portalCommand() *cobra.Command {
 
 	root.AddCommand(&cobra.Command{
 		Use:   "cli",
-		Short: "The portal's configuration CLI (the same as portitor-config cli); it reads commands from stdin when that is not a terminal",
+		Short: "portitor-manager's configuration CLI (the same as portitor-config cli); it reads commands from stdin when that is not a terminal",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := load()
@@ -178,7 +178,7 @@ func portalCommand() *cobra.Command {
 
 	root.AddCommand(&cobra.Command{
 		Use:   "add-witness <witness string>",
-		Short: "Be the witness of an HA pair (portitor-config witness-string on its primary)",
+		Short: "Be the witness of a firewall cluster (portitor-config witness-string on its primary)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := load()

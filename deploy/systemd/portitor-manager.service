@@ -1,10 +1,10 @@
 # SPDX-FileCopyrightText: 2026 The Portitor contributors
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-# portitor-web: the portal to the firewalls' portitor-configs, and the
-# witness of HA pairs; its configuration is /var/lib/portitor-web/portal.json.
+# portitor-manager: the manager of the firewalls (their portitor-configs), and the
+# witness of firewall clusters; its configuration is /var/lib/portitor-manager/portal.json.
 [Unit]
-Description=Portitor portal
+Description=Portitor manager
 After=network-online.target
 Wants=network-online.target
 
@@ -12,7 +12,7 @@ Wants=network-online.target
 Type=simple
 User=portitor
 Group=portitor
-ExecStart=/usr/bin/portitor-web -f /etc/portitor/web.yaml start
+ExecStart=/usr/bin/portitor-manager -f /etc/portitor/manager.yaml start
 Restart=on-failure
 RestartSec=5
 NoNewPrivileges=yes
@@ -21,7 +21,7 @@ NoNewPrivileges=yes
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 ProtectSystem=strict
-StateDirectory=portitor-web
+StateDirectory=portitor-manager
 StateDirectoryMode=0750
 ProtectHome=yes
 PrivateTmp=yes

@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: 2026 The Portitor contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// portitor-web is the portal to the firewalls' GUIs, with a configuration of
-// its own, and the witness of HA pairs. Run as "portitor-config" (a
+// portitor-manager is the manager of the firewalls: their GUIs, with a
+// configuration of its own, and the witness of firewall clusters. Run as "portitor-config" (a
 // symlink) it is portitor-config: the firewall's own configuration, its
 // data, GUI and API, on the firewall. See AGENTS.md.
 package main
@@ -31,8 +31,12 @@ import (
 
 func main() {
 	root := portalCommand()
-	if filepath.Base(os.Args[0]) == "portitor-config" {
+	switch filepath.Base(os.Args[0]) {
+	case "portitor-config":
 		root = configCommand()
+	case "portitor-web":
+		// The manager's name before 1.1.0, kept as a symlink until 1.2.0.
+		fmt.Fprintln(os.Stderr, "portitor-web is now portitor-manager; the old name goes away in 1.2.0")
 	}
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, "Error:", err)
@@ -331,7 +335,7 @@ settings are kept unless --agent-fingerprint is given.`,
 
 	root.AddCommand(&cobra.Command{
 		Use:   "fingerprint",
-		Short: "Print the SHA-256 fingerprint of tls_cert, which portitor-web and the HA peer pin",
+		Short: "Print the SHA-256 fingerprint of tls_cert, which portitor-manager and the cluster peer pin",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := web.LoadConfig(configFile)
@@ -349,7 +353,7 @@ settings are kept unless --agent-fingerprint is given.`,
 
 	root.AddCommand(&cobra.Command{
 		Use:   "portal-info",
-		Short: "Print as JSON what portitor-web needs of this firewall: portitor-config's port and certificate fingerprint (portitor-web reads it over SSH)",
+		Short: "Print as JSON what portitor-manager needs of this firewall: portitor-config's port and certificate fingerprint (portitor-manager reads it over SSH)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := web.LoadConfig(configFile)
@@ -366,7 +370,7 @@ settings are kept unless --agent-fingerprint is given.`,
 
 	root.AddCommand(&cobra.Command{
 		Use:   "secondary-info",
-		Short: "On a new host: print as JSON what an HA primary needs to add it as its secondary, with the agent's token (portitor-web reads it over SSH)",
+		Short: "On a new host: print as JSON what a cluster primary needs to add it as its secondary, with the agent's token (portitor-manager reads it over SSH)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, srv, err := load()
@@ -384,7 +388,7 @@ settings are kept unless --agent-fingerprint is given.`,
 	var externalWitness bool
 	addSecondary := &cobra.Command{
 		Use:   "add-secondary",
-		Short: "On an HA primary: add the host of secondary-info's JSON (standard input; address filled in) as its secondary, and commit the pair",
+		Short: "On a cluster primary: add the host of secondary-info's JSON (standard input; address filled in) as its secondary, and commit the cluster",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var info web.SecondaryInfo
@@ -398,11 +402,11 @@ settings are kept unless --agent-fingerprint is given.`,
 			if err := web.AddSecondary(cmd.Context(), srv, info, externalWitness); err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "%s is the HA secondary.\n", info.Name)
+			fmt.Fprintf(cmd.OutOrStdout(), "%s is the cluster secondary.\n", info.Name)
 			return nil
 		},
 	}
-	addSecondary.Flags().BoolVar(&externalWitness, "external-witness", false, "the pair's witness is a third host's (portitor-web): witness-string then prints its string")
+	addSecondary.Flags().BoolVar(&externalWitness, "external-witness", false, "the cluster's witness is a third host's (portitor-manager): witness-string then prints its string")
 	root.AddCommand(addSecondary)
 
 	root.AddCommand(&cobra.Command{
@@ -425,7 +429,7 @@ settings are kept unless --agent-fingerprint is given.`,
 
 	root.AddCommand(&cobra.Command{
 		Use:   "witness-string",
-		Short: "Print the HA pair's witness string, for its external witness (portitor-web's web.yaml)",
+		Short: "Print the firewall cluster's witness string, for its external witness (portitor-manager add-witness)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, srv, err := load()
@@ -444,7 +448,7 @@ settings are kept unless --agent-fingerprint is given.`,
 	var force bool
 	promote := &cobra.Command{
 		Use:   "promote",
-		Short: "Make this HA secondary the primary, its primary lost, and commit",
+		Short: "Make this cluster secondary the primary, its primary lost, and commit",
 		Long: `Run on the HA secondary whose primary is lost. Its copy of the
 configuration becomes the pair's: the instances and tasks move to it, with
 the two hosts' values swapped (addresses and peer addresses, router ids,

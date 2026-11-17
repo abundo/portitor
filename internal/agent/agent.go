@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package agent is portitor-agent: it runs on the firewall as root,
-// receives fwconfig documents from portitor-web over an authenticated TLS
+// receives fwconfig documents from portitor-config over an authenticated TLS
 // API, and makes the system match them.
 package agent
 

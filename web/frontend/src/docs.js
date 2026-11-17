@@ -10,8 +10,8 @@ const files = import.meta.glob('../../../docs/*.md', {
   eager: true,
 })
 
-// The portitor-web guide first, then by title.
-const FIRST = 'portitor-web'
+// The installation guide first, then by title.
+const FIRST = 'install'
 
 export const docs = Object.entries(files)
   .map(([path, markdown]) => {

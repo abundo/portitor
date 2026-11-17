@@ -85,10 +85,11 @@ async function remove() {
   <div class="card">
     <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
       <div>
-        <div class="text-lg font-semibold">HA witness</div>
+        <div class="text-lg font-semibold">Cluster witness</div>
         <p class="max-w-3xl text-sm text-muted">
-          The HA pairs this portal is the third vote of. Pairing an HA firewall's hosts adds its
-          pair here; a pair made elsewhere is added by its witness string (<span class="font-mono"
+          The firewall clusters this portitor-manager is the third vote of. Pairing a cluster's
+          firewalls adds its pair here; a pair made elsewhere is added by its witness string (<span
+            class="font-mono"
             >portitor-config witness-string</span
           >
           on the primary).

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package agentapi is the wire format of portitor-agent's management API,
-// shared by the agent and its client in portitor-web.
+// shared by the agent and its client in portitor-config.
 package agentapi
 
 import (
@@ -354,7 +354,7 @@ type TunnelBrokerStatus struct {
 }
 
 // CertificateFiles is a stored certificate with its private key
-// (GET /v1/certificates/{instance}/{name}), for portitor-web's own HTTPS.
+// (GET /v1/certificates/{instance}/{name}), for portitor-config's own HTTPS.
 type CertificateFiles struct {
 	FullChain string `json:"fullchain"`
 	PrivKey   string `json:"privkey"`
@@ -592,7 +592,7 @@ type DNSQueryLogResponse struct {
 }
 
 // ConsoleResize is the one text message on the console WebSocket
-// (/v1/console, and /api/agent/console in portitor-web, which passes
+// (/v1/console, and /api/agent/console in portitor-config, which passes
 // messages through). Binary messages are terminal data both ways.
 type ConsoleResize struct {
 	Cols uint16 `json:"cols"`
@@ -693,7 +693,7 @@ type CaptureRequest struct {
 	Snaplen    int    `json:"snaplen,omitempty"`     // bytes per packet; 0 is CaptureMaxSnaplen
 	MaxPackets int    `json:"max_packets,omitempty"` // 0 is CaptureMaxPackets
 	MaxSeconds int    `json:"max_seconds,omitempty"` // 0 is CaptureMaxSeconds
-	// RateKbps caps the stream to portitor-web (kbit/s); 0 is unlimited.
+	// RateKbps caps the stream to portitor-config (kbit/s); 0 is unlimited.
 	RateKbps int `json:"rate_kbps,omitempty"`
 }
 
@@ -705,7 +705,7 @@ const (
 	CaptureMaxFilterLen = 1024
 	// CaptureMaxSessions is how many captures may run at once.
 	CaptureMaxSessions = 2
-	// CaptureDefaultRateKbps is portitor-web's default stream rate.
+	// CaptureDefaultRateKbps is portitor-config's default stream rate.
 	CaptureDefaultRateKbps = 1000
 )
 

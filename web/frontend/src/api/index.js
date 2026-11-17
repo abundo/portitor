@@ -104,7 +104,7 @@ export const api = {
   // The HA pair: this portitor-config's place, the promotion of a
   // secondary, and the pair's witness string (its primary).
   haStatus: () => http.get('/ha').then((r) => r.data),
-  haPromote: (force) => http.post('/ha/promote', { force }).then((r) => r.data),
+  haPromote: (force) => http.post('/cluster/promote', { force }).then((r) => r.data),
   haSwitchover: (firewallId) =>
     http.post(`/firewalls/${firewallId}/switchover`).then((r) => r.data),
   witnessString: (firewallId) =>

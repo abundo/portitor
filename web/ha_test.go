@@ -443,7 +443,7 @@ func TestPairSession(t *testing.T) {
 		t.Errorf("the pair's session on the other host: %d %s", rec.Code, rec.Body)
 	}
 
-	// portitor-web sets it on both hosts' paths, not on another firewall's.
+	// portitor-manager sets it on both hosts' paths, not on another firewall's.
 	p := &Portal{fws: []PortalFirewall{{Name: "a", Fingerprint: fpA}, {Name: "b", Fingerprint: fpB}, {Name: "c", Fingerprint: fpC}}}
 	if got := p.pairPrefixes("a", []string{fpA, fpB}); strings.Join(got, " ") != "/fw/a /fw/b" {
 		t.Errorf("pair paths: %v", got)

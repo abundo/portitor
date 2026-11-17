@@ -153,7 +153,7 @@ func (a *Agent) replicate(ctx context.Context, instance, sock string) {
 			// The peer that just took over refuses them, as it should.
 			if !strings.Contains(err.Error(), "takes no leases") {
 				if err.Error() != lastErr {
-					slog.Warn("ha: DHCP leases not sent to the peer", "instance", instance, "err", err)
+					slog.Warn("cluster: DHCP leases not sent to the peer", "instance", instance, "err", err)
 				}
 				msg := err.Error()
 				a.repl.note(instance, func(s *agentapi.HADHCPSync) { s.Error = msg })
@@ -164,7 +164,7 @@ func (a *Agent) replicate(ctx context.Context, instance, sock string) {
 			continue
 		}
 		if lastErr != "" || ch.Snapshot {
-			slog.Info("ha: DHCP leases sent to the peer", "instance", instance, "snapshot", ch.Snapshot, "leases", len(ch.Leases))
+			slog.Info("cluster: DHCP leases sent to the peer", "instance", instance, "snapshot", ch.Snapshot, "leases", len(ch.Leases))
 			lastErr = ""
 		}
 		now := time.Now()
@@ -205,7 +205,7 @@ func (h *haManager) takesLeases(term int64) error {
 	defer h.mu.Unlock()
 	switch {
 	case h.cfg == nil:
-		return errors.New("not on an HA pair")
+		return errors.New("not on a firewall cluster")
 	case h.active:
 		return errors.New("the active host takes no leases")
 	case term < max(h.term, h.peer.Term):

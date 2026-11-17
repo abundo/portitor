@@ -119,7 +119,7 @@ func (s *Server) userEdit(c *echo.Context, fn func(work *datastore.Tree) error) 
 		warnings, denied, err = s.checkEdit(acc, scope, before, work)
 		if errors.Is(err, errForbidden) {
 			if acc.readOnly {
-				return &forbiddenError{"this is the HA secondary: its configuration is a read-only copy of the primary's"}
+				return &forbiddenError{"this is the cluster secondary: its configuration is a read-only copy of the primary's"}
 			}
 			return &forbiddenError{"you may not change " + denied}
 		}
@@ -150,7 +150,12 @@ func editError(c *echo.Context, err error) error {
 // the GUI shows.
 func warn(c *echo.Context, warnings []error) {
 	if len(warnings) > 0 {
-		c.Response().Header().Set("X-Portitor-Warnings", joinErrors(warnings))
+		h := c.Response().Header()
+		w := joinErrors(warnings)
+		if old := h.Get("X-Portitor-Warnings"); old != "" {
+			w = old + "; " + w // the path's (configRequest)
+		}
+		h.Set("X-Portitor-Warnings", w)
 	}
 }
 

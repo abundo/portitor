@@ -118,4 +118,4 @@ install `jool-dkms`, `jool-tools` and the kernel headers. With Secure Boot, the
 module must be signed with a key enrolled with `mokutil`, or it won't load.
 
 A firewall that has rebooted, or a virtual firewall that is made again,
-gets its Jool instance back at the next commit or start of the agent.
+gets its Jool instance back at the next commit or start of the firewall.

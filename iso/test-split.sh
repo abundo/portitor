@@ -3,14 +3,14 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 # End-to-end test of the split setup (make iso-e2e-split): a firewall and
-# portitor-web, the portal to its GUI, in two QEMU virtual machines of
+# portitor-manager, the portal to its GUI, in two QEMU virtual machines of
 # iso/vm.sh, on a LAN of their own (a link between their second NICs):
 #
 #   build/vm-fw   role agent  (iso/test-split-fw.answers), LAN 192.168.1.1
 #   build/vm-web  role web    (iso/test-split-web.answers), 192.168.1.10
 #
 # Builds a test ISO for each, installs both at once and boots them. When both
-# first-boot setups have finished, portitor-web serves the firewall with the
+# first-boot setups have finished, portitor-manager serves the firewall with the
 # portal string `portitor-setup --show-join` prints on it (`portitor-setup
 # --join STRING`), and the checks run through the QEMU guest agents: the
 # units of each role, the firewall's LAN address and ruleset, and from the
@@ -27,7 +27,7 @@ log() { printf '\033[1m==> [%dm%02ds] %s\033[0m\n' $((SECONDS / 60)) $((SECONDS 
 fail() { printf '\033[1;31mFAIL: %s\033[0m\n' "$*" >&2; failed=1; }
 failed=0
 
-# vm NAME CMD...: iso/vm.sh for the firewall (fw) or portitor-web (web).
+# vm NAME CMD...: iso/vm.sh for the firewall (fw) or portitor-manager (web).
 vm() {
 	local name=$1; shift
 	local id=1 other=web
@@ -100,12 +100,12 @@ for name in fw web; do
 done
 check fw "portitor-agent running" systemctl is-active --quiet portitor-agent.service
 check fw "portitor-config running" systemctl is-active --quiet portitor-config.service
-check fw "portitor-web not running" sh -c '! systemctl is-active --quiet portitor-web.service'
+check fw "portitor-manager not running" sh -c '! systemctl is-active --quiet portitor-manager.service'
 check fw "LAN has 192.168.1.1/24" sh -c "ip -o addr show | grep -qF ' 192.168.1.1/24 '"
 check fw "nftables firewall table loaded" nft list table inet firewall
 check fw "boot-time policy enabled" systemctl is-enabled --quiet portitor-early.service
 check fw "no boot-time policy left after the apply" sh -c '! nft list table inet portitor_early >/dev/null 2>&1'
-check web "portitor-web running" systemctl is-active --quiet portitor-web.service
+check web "portitor-manager running" systemctl is-active --quiet portitor-manager.service
 check web "portitor-agent not running" sh -c '! systemctl is-active --quiet portitor-agent.service'
 check web "no boot-time policy on the portal" sh -c '! systemctl is-enabled --quiet portitor-early.service'
 check web "portitor-config not running" sh -c '! systemctl is-active --quiet portitor-config.service'

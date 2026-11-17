@@ -45,7 +45,7 @@ SOURCES
 
 # Binaries, units, example configs and /usr/lib/portitor/install.py.
 # Nothing is started; portitor-setup configures and starts both.
-python3 "$root/install.py" --local "$root" --web --agent --yes
+python3 "$root/install.py" --local "$root" --manager --agent --yes
 
 # In a VM the host owns the CPU microcode; the installer adds it by CPU vendor
 # regardless. Purged before update-grub so no microcode initrd stays listed.

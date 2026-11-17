@@ -140,7 +140,7 @@ func ValidURL(s string) error {
 
 // PlainTextCredentials tells whether l sends its credentials (API key,
 // password) unencrypted across a network: over http:// to a host that is
-// not a loopback address. portitor-web refuses to store such a list; the
+// not a loopback address. portitor-config refuses to store such a list; the
 // agent still takes one, so a configuration made before keeps working.
 func PlainTextCredentials(l IPList) bool {
 	if l.APIKey == "" && l.Username == "" && l.Password == "" {

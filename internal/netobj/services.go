@@ -217,7 +217,7 @@ func Matches(s models.Service) []fwconfig.ServiceMatch {
 }
 
 // Services resolves the service names rules hold: custom services
-// (models.Service) and the predefined ones. portitor-web expands them when
+// (models.Service) and the predefined ones. portitor-config expands them when
 // it builds the document, so the agent only ever sees protocol matches.
 type Services map[string]models.Service
 

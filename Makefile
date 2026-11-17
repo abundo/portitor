@@ -15,22 +15,22 @@ LDFLAGS := -s -w \
 # go install puts it in $(go env GOPATH)/bin, which need not be on PATH.
 GORELEASER ?= $(or $(shell command -v goreleaser),$(shell go env GOPATH)/bin/goreleaser)
 
-.PHONY: build portitor-web portitor-agent frontend release test lint fmt \
+.PHONY: build portitor-manager portitor-agent frontend release test lint fmt \
 	install-agent install-web dev-agent dev-web dev-portal dev-seed \
 	lab-up lab-install lab-seed lab-deploy lab-down lab-clean iso iso-test iso-e2e iso-e2e-split iso-e2e-update iso-e2e-split-update test-all release-check clean
 
-build: portitor-web portitor-agent
+build: portitor-manager portitor-agent
 
-portitor-web portitor-agent:
+portitor-manager portitor-agent:
 	go build -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$@ ./cmd/$@
-	ln -sfn portitor-web $(BUILD_DIR)/portitor-config
+	ln -sfn portitor-manager $(BUILD_DIR)/portitor-config
 
 frontend:
 	cd web/frontend && npm ci && npm run build
 
-# Self-contained portitor-web with the frontend embedded.
+# Self-contained portitor-manager with the frontend embedded.
 release: frontend
-	go build -tags release -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/portitor-web ./cmd/portitor-web
+	go build -tags release -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/portitor-manager ./cmd/portitor-manager
 	go build -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/portitor-agent ./cmd/portitor-agent
 
 test:
@@ -62,11 +62,11 @@ install-agent: portitor-agent
 	test -e $(DESTDIR)/etc/portitor/agent.yaml || install -D -m 0600 deploy/agent.yaml $(DESTDIR)/etc/portitor/agent.yaml
 
 install-web: release
-	install -D -m 0755 $(BUILD_DIR)/portitor-web $(DESTDIR)$(PREFIX)/bin/portitor-web
-	install -D -m 0644 deploy/systemd/portitor-web.service $(DESTDIR)/etc/systemd/system/portitor-web.service
+	install -D -m 0755 $(BUILD_DIR)/portitor-manager $(DESTDIR)$(PREFIX)/bin/portitor-manager
+	install -D -m 0644 deploy/systemd/portitor-manager.service $(DESTDIR)/etc/systemd/system/portitor-manager.service
 	install -D -m 0644 deploy/systemd/portitor-config.service $(DESTDIR)/etc/systemd/system/portitor-config.service
-	ln -sfn portitor-web $(DESTDIR)$(PREFIX)/bin/portitor-config
-	test -e $(DESTDIR)/etc/portitor/web.yaml || install -D -m 0600 deploy/web.yaml $(DESTDIR)/etc/portitor/web.yaml
+	ln -sfn portitor-manager $(DESTDIR)$(PREFIX)/bin/portitor-config
+	test -e $(DESTDIR)/etc/portitor/manager.yaml || install -D -m 0600 deploy/manager.yaml $(DESTDIR)/etc/portitor/manager.yaml
 
 # ----- development: portitor-config with SQLite in dev/run, a dry-run
 # agent, and the portal in front (see DEV.md) -----
@@ -76,15 +76,15 @@ dev-agent: portitor-agent
 		--token-file dev/run/agent.token --tls-cert dev/run/agent.crt --tls-key dev/run/agent.key
 	$(BUILD_DIR)/portitor-agent -f dev/agent.yaml start
 
-dev-web: portitor-web
+dev-web: portitor-manager
 	mkdir -p dev/run
 	$(BUILD_DIR)/portitor-config -f dev/config.yaml migrate
 	$(BUILD_DIR)/portitor-config -f dev/config.yaml start
 
-dev-portal: portitor-web
-	$(BUILD_DIR)/portitor-web -f dev/web.yaml start
+dev-portal: portitor-manager
+	$(BUILD_DIR)/portitor-manager -f dev/manager.yaml start
 
-dev-seed: portitor-web
+dev-seed: portitor-manager
 	echo 'dev-password-123' | $(BUILD_DIR)/portitor-config -f dev/config.yaml createadmin admin
 	dev/seed.sh
 
@@ -115,8 +115,8 @@ iso-test:
 iso-e2e:
 	iso/test.sh
 
-# The split setup: the agent and portitor-web in two virtual machines on a LAN
-# of their own; portitor-web joins the firewall and reaches its agent (about
+# The split setup: the agent and portitor-manager in two virtual machines on a LAN
+# of their own; portitor-manager joins the firewall and reaches its agent (about
 # 7 minutes). KEEP=1 leaves both running.
 iso-e2e-split:
 	iso/test-split.sh
@@ -129,7 +129,7 @@ iso-e2e-update:
 	iso/test-update.sh $(FROM)
 
 # The same for the split setup, in two virtual machines: install.py on
-# portitor-web's host updates the firewall it serves, then itself. KEEP=1
+# portitor-manager's host updates the firewall it serves, then itself. KEEP=1
 # leaves both running.
 iso-e2e-split-update:
 	iso/test-split-update.sh $(FROM)

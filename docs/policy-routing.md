@@ -61,7 +61,7 @@ its carrier or is not there), its traffic takes the routing table, as without
 the policy route, and it comes back to the policy route when the link does. A
 gateway that stops answering on a link that stays up is not noticed.
 
-For the carrier, the agent sets `ignore_routes_with_linkdown` on the interface
+For the carrier, the firewall sets `ignore_routes_with_linkdown` on the interface
 the route leaves by: the policy route's interface, or the one with an address
 in the gateway's network. Give the interface when the gateway is on an
 interface with a DHCP address.
@@ -79,7 +79,7 @@ interface with a DHCP address.
 
 The policy routes become an nftables chain in prerouting (after the NAT64
 chain) that marks the packets of each: the first policy route `0x5100`, the
-second `0x5101`, and so on. For each, the agent adds a routing rule `fwmark
+second `0x5101`, and so on. For each, the firewall adds a routing rule `fwmark
 <mark> lookup <table>` and the policy route's default route in that table (6500
 for the first, 6501 for the second...), both with protocol 99. The routes are
 on the *Routing → Tables* page; on the firewall, `ip rule` and `ip route show

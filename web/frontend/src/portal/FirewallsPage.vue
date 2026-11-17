@@ -35,7 +35,7 @@ function stateText(r) {
   if (r.kind === 'ha') {
     if (!r.hosts?.length) return 'no hosts yet'
     if (r.hosts.length < 2) return `only the ${r.hosts[0].role}`
-    const pair = r.connected ? 'paired' : 'not paired'
+    const pair = r.connected ? 'clustered' : 'not clustered'
     return r.error ? `${pair}; ${r.active}: ${r.error}` : `${pair}; served by the ${r.active}`
   }
   return r.error || 'answers'
@@ -47,7 +47,7 @@ const columns = computed(() => [
     field: 'kind',
     headerName: 'Kind',
     maxWidth: 120,
-    valueFormatter: (p) => (p.value === 'ha' ? 'HA pair' : 'Firewall'),
+    valueFormatter: (p) => (p.value === 'ha' ? 'Firewall cluster' : 'Firewall'),
   },
   {
     colId: 'state',
@@ -105,13 +105,15 @@ function openFirewall(row) {
         <div class="text-lg font-semibold">Firewalls</div>
         <p class="max-w-3xl text-sm text-muted">
           Each firewall's GUI is its own portitor-config's, which keeps its configuration and its
-          login. An HA pair is one firewall here, served by whichever host is primary now; its two
-          hosts share one login.
+          login. A firewall cluster is one firewall here, served by whichever firewall is primary
+          now; its two firewalls share one login.
         </p>
       </div>
       <div class="flex gap-2">
         <UButton icon="i-lucide-plus" @click="addFirewall">Add firewall</UButton>
-        <UButton icon="i-lucide-plus" variant="outline" @click="addHA">Add HA firewall</UButton>
+        <UButton icon="i-lucide-plus" variant="outline" @click="addHA"
+          >Add firewall cluster</UButton
+        >
         <AutoRefreshButton :auto="auto" :loading="loading" />
       </div>
     </div>

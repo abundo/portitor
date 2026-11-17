@@ -63,7 +63,7 @@ The tunnel only connects the two ends. To use it:
 
 The tunnel server sends to the IPv4 endpoint it has been told. When the firewall's
 address changes (a new DHCP lease), Hurricane Electric must be told the new one.
-With a Tunnel ID, the agent does that itself, with Hurricane Electric's update API
+With a Tunnel ID, the firewall does that itself, with Hurricane Electric's update API
 (`https://ipv4.tunnelbroker.net/nic/update`):
 
 - when the tunnel is committed, and whenever the virtual firewall's IPv4 address
@@ -86,7 +86,7 @@ not get through.
 ## The ping check
 
 Hurricane Electric pings a new endpoint before it takes it, from an address it
-doesn't publish. No rule is needed for it: while the agent sends an update, the
+doesn't publish. No rule is needed for it: while the firewall sends an update, the
 auto rule `tunnel broker ping` answers pings to the address being sent, from
 anyone, for 45 seconds (the `tunnelbroker_ping` set), and only then. Behind NAT,
 the router in front must pass the ping on to the firewall as well.

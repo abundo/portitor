@@ -27,7 +27,7 @@ func TestValidateHA(t *testing.T) {
 		want   string
 	}{
 		{"witness secret short", func(h *HA) { h.WitnessSecret = "short" }, "witness secret must be"},
-		{"witness secret is the pair's", func(h *HA) { h.WitnessSecret = h.Secret }, "not the pair's secret"},
+		{"witness secret is the pair's", func(h *HA) { h.WitnessSecret = h.Secret }, "not the cluster's secret"},
 		{"peer config not https", func(h *HA) { h.PeerConfig = "http://192.0.2.2:8444" }, "peer config must be"},
 		{"peer config with a path", func(h *HA) { h.PeerConfig = "https://192.0.2.2:8444/x" }, "peer config must be"},
 		{"peer config without its pin", func(h *HA) { h.PeerConfigFingerprint = "" }, "peer config fingerprint"},
@@ -57,12 +57,12 @@ func TestValidateHAInterfaces(t *testing.T) {
 		mutate func(d *Document)
 		want   string
 	}{
-		{"unknown role", func(d *Document) { iface(&d.Instances[0], HARoleLink).HARole = "other" }, "HA role must be"},
-		{"no HA link", func(d *Document) { iface(&d.Instances[0], HARoleLink).HARole = "" }, "with the role ha_link"},
+		{"unknown role", func(d *Document) { iface(&d.Instances[0], HARoleLink).HARole = "other" }, "cluster role must be"},
+		{"no HA link", func(d *Document) { iface(&d.Instances[0], HARoleLink).HARole = "" }, "with the cluster role cluster link"},
 		{"no management", func(d *Document) {
 			m := iface(&d.Instances[0], HARoleManagement)
 			m.HARole, m.HAGateway = "", ""
-		}, "with the role management"},
+		}, "with the cluster role management"},
 		{"two HA links", func(d *Document) {
 			m := iface(&d.Instances[0], HARoleManagement)
 			m.HARole, m.HAGateway = HARoleLink, ""

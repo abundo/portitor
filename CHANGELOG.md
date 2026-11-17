@@ -10,6 +10,33 @@ here (`dev/release-notes.sh`); the full list is `git log <previous tag>..<tag>`.
 
 ### Changed
 
+- **portitor-web is portitor-manager**: the binary, its unit
+  (`portitor-manager.service`), its config file (`/etc/portitor/manager.yaml`) and its
+  data directory (`/var/lib/portitor-manager`). `install.py` moves an existing
+  installation over (the old unit stopped and replaced, `web.yaml` and
+  `/var/lib/portitor-web` moved). Until 1.2.0, `portitor-web` stays a symlink that runs
+  portitor-manager with a warning, `web.yaml` is still read when `manager.yaml` is
+  missing, and `install.py --web` is `--manager`. The ISO's machine type *web* is shown
+  as *manager*. portitor-config keeps its name.
+- **HA pairs are firewall clusters**, in the GUI, the messages, the CLI and the
+  configuration's names. The leaves `ha-role` (its value `ha_link`: `cluster_link`),
+  `ha-gateway`, `ha-monitor`, `ha-primary`, `ha-secret`, `ha-epoch`, `ha-witness`,
+  `ha-preempt` and `ha-witness-secret` are `cluster-*`; the state's `system ha` is
+  `system cluster` and `system ha-pair` is `system clusters`; portitor-manager's
+  `ha-firewall` list is `cluster`. A stored configuration (the candidate, kept commits,
+  backups, bundles, the replica's copy) is migrated when it is read. Until 1.2.0 the
+  old names are taken in CLI and API paths, API bodies and the CLI's `set`, with a warning
+  (the YANG extension `px:was`); NETCONF takes the new names only. SNMP keeps the objects' numbers; their names in `PORTITOR-MIB`
+  follow. `portitor show ha` and `portitor request ha ...` are `show cluster` and
+  `request cluster ...` (`ha` still works until 1.2.0), and `POST /api/ha/promote` is
+  `/api/cluster/promote` (the old route stays until 1.2.0). The agent's wire protocol
+  and the document between portitor-config and the agent are unchanged, so a cluster
+  updates one firewall at a time.
+- **The user guides are organised by task**: installing, a first LAN/WAN firewall,
+  VPNs, backup and recovery, updates, lost connectivity, firewall clusters with a
+  runbook, and portitor-manager, ahead of the feature guides. Implementation details
+  moved out of them into `dev/` (`arch-*-guide.md`, `arch-moved-from-docs.md`).
+
 - **No database.** portitor-config keeps everything in files in its data directory
   (the directory of `db.path`, which `config.yaml` keeps naming): the configuration
   tree, the users, roles, directory and firewalls in it, and the deployment log,

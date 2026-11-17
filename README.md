@@ -55,23 +55,23 @@ office networks. It manages:
   Wireshark (Wiregasm) in the browser, traceroute (mtr), and a console on the firewall
 - users and roles: global admins and viewers, and per-virtual-firewall admins
   (multitenancy), each virtual firewall's daemons sandboxed apart
-- HA pairs: two firewalls, active and standby, with the same addresses and a witness's
-  vote; DHCP leases and connections copied to the standby, the configuration to the
-  secondary, which can be promoted
+- firewall clusters: two firewalls, active and standby, with the same addresses and a
+  witness's vote; DHCP leases and connections copied to the standby, the configuration
+  to the secondary, which can be promoted
 - encrypted backups, deployment history with revert, and Debian and Portitor updates
   from the GUI
 
 Every firewall keeps its own configuration: portitor-config, on the firewall, serves
 its GUI and keeps the configuration, and a small root daemon next to it, the agent,
-makes the changes. An optional portal, portitor-web, serves the GUIs of several
-firewalls from another host. [Deployments](docs/deployments.md) shows the three layouts:
-one host, a firewall and a portal, and an HA pair with a portal. The
-[installer ISO](docs/appliance.md) sets up a firewall from scratch.
+makes the changes. An optional portitor-manager manages several firewalls and firewall
+clusters from another host. The [installer ISO](docs/install.md) sets up a standalone
+firewall, a managed one, portitor-manager, or the two firewalls of a
+[firewall cluster](docs/cluster.md).
 
 ## How it fits together
 
 ```
- browser ──► portitor-web (portal: its own login and configuration) optional, on another host
+ browser ──► portitor-manager (its own login and configuration)      optional, on another host
                   │  HTTPS, pinned certificate; then each firewall's own login
                   ▼
  browser ──► portitor-config (Vue GUI + REST API, files)           runs on the firewall
@@ -95,13 +95,13 @@ one host, a firewall and a portal, and an HA pair with a portal. The
 
 - **portitor-config** holds the firewall's configuration in files (a YANG tree). On
   *Deploy* it builds a complete desired-state document (`internal/fwconfig`) and sends
-  it to the agent (and to its HA secondary's). It runs as an unprivileged user; the
+  it to the agent (and to its cluster secondary's). It runs as an unprivileged user; the
   agent re-checks everything it is sent.
 - **portitor-agent** validates the document again, renders every config file
   (`internal/render`) and makes the system match. It never reads portitor-config's files.
-- **portitor-web** (optional), the portal, has its own users and a small configuration
-  of its own (the firewalls, HA firewalls and witness strings, in `portal.json`). It
-  adds firewalls and HA pairs over SSH, and passes each firewall's GUI through at
+- **portitor-manager** (optional) has its own users and a small configuration of its
+  own (the firewalls, firewall clusters and witness strings, in `portal.json`). It
+  adds firewalls and clusters over SSH, and passes each firewall's GUI through at
   `/fw/<name>/`, where the firewall's own login and roles apply as well. It holds no
   firewall configuration and no agent tokens.
 - **Virtual firewalls** are separate firewalls on one host. The default virtual firewall is the host itself; every
@@ -163,7 +163,7 @@ one host, a firewall and a portal, and an HA pair with a portal. The
   and the anti-lockout rule. The agent removes it once it has loaded the host's
   ruleset. If the agent can't apply (or there is no configuration yet), the host
   stays closed: with `anti_lockout: false` or no `allow_from` beyond loopback (the
-  installer's default for a firewall that is no HA pair), only the console reaches
+  installer's default for a firewall that is not in a cluster), only the console reaches
   it then, where `nft delete table inet portitor_early` opens it again.
 - **Atomic rulesets.** Each ruleset is checked with `nft -c` before anything changes,
   and loaded as a single transaction, before the virtual firewall's interfaces come up or
@@ -197,29 +197,29 @@ one host, a firewall and a portal, and an HA pair with a portal. The
 **Single box, from the ISO.** The installer ISO (amd64) installs Debian 13 with
 everything on it, the GUI included. At the first boot it asks for the LAN interface,
 its address and a password, then you continue in the GUI. See
-[docs/appliance.md](docs/appliance.md), which also covers updating Debian and Portitor
-from the GUI (*Admin → Updates*) and building the ISO (`iso/build.sh`).
+[docs/install.md](docs/install.md) and [docs/updates.md](docs/updates.md); building
+the ISO (`iso/build.sh`) is in [DEV.md](DEV.md).
 
 **With install.py.** `install.py` installs and updates from a GitHub release (SHA-256
-verified): portitor-agent and portitor-config on the firewall, and portitor-web, the
-portal, where you want it, on this host or over SSH as `portitor` (`--ssh-user`; a user
+verified): portitor-agent and portitor-config on the firewall, and portitor-manager
+where you want it, on this host or over SSH as `portitor` (`--ssh-user`; a user
 with passwordless sudo, or root). If it cannot log in, it prints how to create that
 user and its sudoers entry. Download it from a release, then:
 
 ```sh
 ./install.py --agent 192.168.1.1            # first install of a firewall: binaries, units, example configs
-./install.py --web --agent 192.168.1.1      # ... and portitor-web here, the portal to it
+./install.py --manager --agent 192.168.1.1  # ... and portitor-manager here, managing it
 ./install.py                                # later: pick a release; updates what is installed
 ./install.py --install latest --yes         # unattended update
 ```
 
 On an update it restarts the agent first (it rejects document fields it does not know,
 so it must not be older than portitor-config), then stops portitor-config, checks its
-data directory and starts it again, then portitor-web. An installation older than 1.0.0
-is refused: update it to 1.0.0 first. From portitor-web's host it finds the
-firewalls in the portal's configuration (`portitor-web list-firewalls`) and their HA peers (or `--agent HOST,HOST...`), and updates them
-one at a time, an HA pair's secondary first, waiting until each hears its peer again, so
-one host of the pair keeps forwarding. A
+data directory and starts it again, then portitor-manager. An installation older than 1.0.0
+is refused: update it to 1.0.0 first. From portitor-manager's host it finds the
+firewalls in its configuration (`portitor-manager list-firewalls`) and their cluster peers (or `--agent HOST,HOST...`), and updates them
+one at a time, a cluster's secondary first, waiting until each hears its peer again, so
+one firewall of the cluster keeps forwarding. A
 systemd unit you changed is shown as a diff and kept unless you confirm. `--dry-run`
 shows what would change; `--source` builds and installs a source checkout instead.
 
@@ -310,14 +310,14 @@ systemctl enable --now portitor-config
 Run portitor-config commands as `portitor`, so the files they write in its data directory stay
 writable for the service; as root it refuses. Its session cookie needs HTTPS: set
 `tls_cert` and `tls_key` in `config.yaml` (install.py makes a self-signed one), or put a
-TLS reverse proxy in front (see [portitor-config](docs/portitor-web.md#portitor-config)).
+TLS reverse proxy in front.
 
 Then open the GUI (`https://<firewall>:8444`), configure the default virtual firewall
-`main` (created on first start), and deploy. For portitor-web, the portal, list the
-firewall in the portal (*Add firewall*; see [portitor-web](docs/portitor-web.md#portitor-web)).
-[docs/portitor-web.md](docs/portitor-web.md) describes the configuration file, the
-commands and the GUI. [docs/rules.md](docs/rules.md) is a guide to writing firewall rules,
-port forwards and hairpin NAT.
+`main` (created on first start), and deploy. With portitor-manager, add the firewall
+there (*Add firewall*; see [docs/portitor-manager.md](docs/portitor-manager.md)).
+[docs/gui.md](docs/gui.md) describes the GUI, and [docs/rules.md](docs/rules.md) is a
+guide to writing firewall rules, port forwards and hairpin NAT. The Help page in the GUI
+has every guide.
 
 ## Not yet supported
 
@@ -335,7 +335,7 @@ either version 3 of the License, or (at your option) any later version. See
 [LICENSE](LICENSE). If you run a modified Portitor that others use over a network, the
 AGPL requires you to offer them its source.
 
-portitor-web includes Wiregasm (Wireshark compiled to WebAssembly, the packet capture
+portitor-manager (the binary portitor-config runs from) includes Wiregasm (Wireshark compiled to WebAssembly, the packet capture
 viewer), licensed under the GNU GPL version 2 or later; its licence and source are at
 `/wiregasm/LICENSE` and `/wiregasm/SOURCE` in the GUI.
 

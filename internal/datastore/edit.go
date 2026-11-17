@@ -242,7 +242,23 @@ func (t *Tree) mergeObject(p Path, s *schema.Node, obj map[string]any) error {
 			local = name[i+1:]
 		}
 		if s.Child(local) == nil {
-			return errAt(t, p, "%s has no %q", nameOf(s), local)
+			c := s.Renamed(local)
+			if c == nil {
+				return errAt(t, p, "%s has no %q", nameOf(s), local)
+			}
+			// A name of before 1.1.0 (px:was), until 1.2.0.
+			if _, have := objMember(obj, s.Module(), c.Name); !have {
+				v := obj[name]
+				if str, ok := v.(string); ok {
+					v = renamedValue(c.Name, str)
+				}
+				obj[c.Name] = v
+			}
+			delete(obj, name)
+			msg := fmt.Sprintf("%s is %s since 1.1.0 (the old name is accepted until 1.2.0)", local, c.Name)
+			if !slices.Contains(t.Deprecated, msg) {
+				t.Deprecated = append(t.Deprecated, msg)
+			}
 		}
 	}
 	for _, c := range s.Children {

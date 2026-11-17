@@ -50,7 +50,7 @@ function setFrame(name, el) {
 
 const menu = [
   { label: 'Firewalls', icon: 'i-lucide-shield', to: '/', exact: true },
-  { label: 'HA witness', icon: 'i-lucide-scale', to: '/witness' },
+  { label: 'Cluster witness', icon: 'i-lucide-scale', to: '/witness' },
 ]
 
 const userMenu = [
@@ -84,7 +84,7 @@ const userMenu = [
         @click="tabs.active = ''"
       >
         <UIcon name="i-lucide-layout-grid" class="size-4" />
-        portitor-web
+        portitor-manager
       </button>
       <div
         v-for="t in tabs.open"
@@ -116,7 +116,7 @@ const userMenu = [
             <UBadge
               color="neutral"
               variant="subtle"
-              label="portitor-web"
+              label="portitor-manager"
               class="hidden sm:inline-flex"
             />
             <div class="ml-auto flex items-center gap-2">

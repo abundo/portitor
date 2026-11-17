@@ -58,9 +58,12 @@ async function add() {
     open.value = false
     emit('saved')
     if (res.paired)
-      toast.add({ title: `${props.firewall.name}: the hosts are paired`, color: 'success' })
+      toast.add({ title: `${props.firewall.name}: the cluster is set up`, color: 'success' })
     else if (res.connected)
-      toast.add({ title: `${props.firewall.name}: the hosts are a pair already`, color: 'info' })
+      toast.add({
+        title: `${props.firewall.name}: the firewalls are a cluster already`,
+        color: 'info',
+      })
     if (res.warning) toast.add({ title: 'Added, but', description: res.warning, color: 'warning' })
   } catch (e) {
     if (e.status === 409 && otherHost.value) {
@@ -87,9 +90,9 @@ async function add() {
       <form id="ha-host-form" class="space-y-3" @submit.prevent="add">
         <p class="text-sm text-muted">
           <template v-if="role === 'secondary'">
-            The host installed from the ISO with role secondary, at its management address.
+            The firewall installed from the ISO with role secondary, at its management address.
           </template>
-          <template v-else>The host installed as the pair's primary.</template>
+          <template v-else>The firewall installed as the cluster's primary.</template>
           Portitor logs in over SSH to read its portitor-config's address and certificate. The
           credentials are not kept.
         </p>
@@ -97,9 +100,9 @@ async function add() {
         <template v-if="needOther">
           <div class="pt-2 text-sm font-semibold">The {{ otherRole }} ({{ otherHost?.url }})</div>
           <p class="text-sm text-muted">
-            The two hosts are not a pair yet: Portitor logs in to the {{ otherRole }} too, hands the
-            secondary's details from one to the other and commits the pair. Its host key was
-            confirmed when it was added.
+            The two firewalls are not a cluster yet: Portitor logs in to the {{ otherRole }} too,
+            hands the secondary's details from one to the other and commits the cluster. Its host
+            key was confirmed when it was added.
           </p>
           <SshFields v-model="other" :host="false" />
         </template>
@@ -109,7 +112,13 @@ async function add() {
       <div class="flex w-full justify-end gap-2">
         <UButton color="neutral" variant="ghost" @click="guard.close">Cancel</UButton>
         <UButton type="submit" form="ha-host-form" :loading="busy">
-          {{ hostKey ? 'Trust this host key and add' : needOther ? 'Add and pair' : 'Add' }}
+          {{
+            hostKey
+              ? 'Trust this host key and add'
+              : needOther
+                ? 'Add and set up the cluster'
+                : 'Add'
+          }}
         </UButton>
       </div>
     </template>

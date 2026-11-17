@@ -220,7 +220,7 @@ func (a *Agent) routes() *http.ServeMux {
 		// A document from before the pair's last promotion is a stale
 		// portitor-config's.
 		if h := req.Document.HA; h != nil && h.Epoch < a.ha.epoch() {
-			writeError(w, http.StatusConflict, fmt.Errorf("the HA pair was promoted since (epoch %d, this configuration's %d): its configuration is the new primary's", a.ha.epoch(), h.Epoch))
+			writeError(w, http.StatusConflict, fmt.Errorf("the firewall cluster was promoted since (epoch %d, this configuration's %d): its configuration is the new primary's", a.ha.epoch(), h.Epoch))
 			return
 		}
 		// Apply must finish even if the client goes away (its own rules
@@ -465,7 +465,7 @@ func listenSocket(path string) (net.Listener, error) {
 }
 
 // localWrites are the POST routes the local socket serves: actions for
-// the console when portitor-web can't reach the firewall, none of which
+// the console when portitor-config can't reach the firewall, none of which
 // changes the configuration.
 var localWrites = map[string]bool{
 	"/v1/confirm":                true,
@@ -480,7 +480,7 @@ var localWrites = map[string]bool{
 
 // localHandler serves the API's GET routes and localWrites, without the
 // token: the socket's permissions already limit it to root.
-// Configuration changes go through portitor-web.
+// Configuration changes go through portitor-config.
 func localHandler(api http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && !(r.Method == http.MethodPost && localWrites[r.URL.Path]) {
@@ -541,7 +541,7 @@ func writeJSONResponse(w http.ResponseWriter, status int, v any) {
 }
 
 // handleCertificate hands out a stored certificate and its key, for
-// portitor-web's tls_certificate. Only a complete one (acme.Load).
+// portitor-config's tls_certificate. Only a complete one (acme.Load).
 func (a *Agent) handleCertificate(w http.ResponseWriter, r *http.Request) {
 	inst, name := r.PathValue("instance"), r.PathValue("name")
 	if !fwconfig.ValidDefaultInstanceName(inst) || !fwconfig.ValidFileName(name) {

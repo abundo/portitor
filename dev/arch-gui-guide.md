@@ -3,6 +3,12 @@
 
 # portitor-config and portitor-web
 
+> **Developer reference.** This was a user guide until 1.1.0; the user guides are now
+> docs/gui.md, docs/certificates.md, docs/backup.md and docs/portitor-manager.md. It is kept here for its implementation details (timings,
+> mechanisms, file names, commands). It still uses the names of before 1.1.0:
+> *portitor-web* is portitor-manager, an *HA pair* a firewall cluster, *open/closed*
+> active/standby (and fenced), the *HA link* the cluster link.
+
 Every firewall keeps its own configuration: **portitor-config**, on the firewall
 next to portitor-agent, keeps it in files in its data directory, serves the GUI and the REST
 API, and deploys to its agent (and to its [HA secondary](ha.md)). Nothing outside

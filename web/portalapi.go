@@ -113,7 +113,7 @@ func (p *Portal) authed(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user := p.sessionUser(r)
 		if user == "" {
-			portalError(w, r, http.StatusUnauthorized, "log in to portitor-web")
+			portalError(w, r, http.StatusUnauthorized, "log in to portitor-manager")
 			return
 		}
 		if r.Method != http.MethodGet && r.Method != http.MethodHead && strings.HasPrefix(r.URL.Path, "/portal/v1/") &&
@@ -265,7 +265,7 @@ func (p *Portal) handlePutHA(w http.ResponseWriter, r *http.Request) {
 	if name := r.PathValue("name"); name != "" {
 		ha.Name = name
 		if _, ok := p.store.HAFirewall(name); !ok {
-			portalError(w, r, http.StatusNotFound, "there is no HA firewall "+name)
+			portalError(w, r, http.StatusNotFound, "there is no cluster firewall "+name)
 			return
 		}
 	} else if p.nameTaken(ha.Name) {
@@ -287,7 +287,7 @@ func (p *Portal) handlePutHA(w http.ResponseWriter, r *http.Request) {
 // nameTaken tells whether a firewall or HA firewall has the name.
 func (p *Portal) nameTaken(name string) bool {
 	t := p.store.Tree()
-	return t.Root.Entry("firewall", []string{name}) != nil || t.Root.Entry("ha-firewall", []string{name}) != nil
+	return t.Root.Entry("firewall", []string{name}) != nil || t.Root.Entry("cluster", []string{name}) != nil
 }
 
 func (p *Portal) handleDeleteHA(w http.ResponseWriter, r *http.Request) {
@@ -309,7 +309,7 @@ func (p *Portal) handleHAHost(w http.ResponseWriter, r *http.Request) {
 	req.Firewall, req.Role = r.PathValue("name"), r.PathValue("role")
 	res, err := p.AddHAHost(r.Context(), req)
 	if err != nil {
-		slog.Info("portal: adding an HA host failed", "firewall", req.Firewall, "role", req.Role, "host", req.SSH.Host, "err", err)
+		slog.Info("portal: adding a cluster host failed", "firewall", req.Firewall, "role", req.Role, "host", req.SSH.Host, "err", err)
 		status := http.StatusBadGateway
 		if errors.Is(err, errNeedLogin) {
 			status = http.StatusConflict

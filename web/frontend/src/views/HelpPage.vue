@@ -65,11 +65,19 @@ const html = computed(() => {
 // TOPICS groups the docs as the main menu (AppMenu.vue) groups the pages;
 // a doc not listed here goes under Other.
 const TOPICS = [
-  { label: 'General', children: ['portitor-web', 'appliance'] },
-  { label: 'Network', children: ['nat64', 'tunnels'] },
-  { label: 'Routing', children: ['bfd', 'vrrp', 'isis', 'ospf', 'bgp'] },
-  { label: 'Firewall', children: ['rules', 'shaping', 'crowdsec'] },
-  { label: 'Services', children: ['dns-blocklists', 'ntp', 'snmp', 'syslog'] },
+  {
+    label: 'Get started',
+    children: ['install', 'first-firewall', 'vpn', 'backup', 'updates', 'troubleshooting'],
+  },
+  { label: 'Firewall clusters', children: ['cluster', 'cluster-runbook'] },
+  { label: 'Using Portitor', children: ['gui', 'portitor-manager', 'cli', 'directory'] },
+  { label: 'Firewall', children: ['rules', 'shaping', 'crowdsec', 'blocklists'] },
+  { label: 'VPN', children: ['openvpn', 'tunnels'] },
+  { label: 'Services', children: ['certificates', 'dns-blocklists', 'ntp', 'snmp', 'syslog'] },
+  {
+    label: 'Advanced networking',
+    children: ['nat64', 'vxlan', 'vrf', 'policy-routing', 'bfd', 'vrrp', 'isis', 'ospf', 'bgp'],
+  },
 ]
 
 const items = computed(() => {

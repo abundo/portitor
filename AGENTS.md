@@ -24,7 +24,7 @@ cleanly now. Go on only once they've chosen.
 
 | Path | What |
 |---|---|
-| `cmd/portitor-web` | One binary, two programs by name: `portitor-web` is the portal (`portal.go`: `start`, `witness`, `check`, `createadmin`, `add-firewall`, `add-witness`); run as `portitor-config` (a symlink, `main.go`) the firewall's configuration, GUI and API: `start`, `migrate`, `createadmin`, `set-agent`, `agent-url`, `bootstrap` (ISO first boot), `fingerprint`, `portal-info`, `secondary-info`, `add-secondary`, `witness-string`, `promote`, `import-vf` and the console commands (`console.go`, `cli` among them) |
+| `cmd/portitor-manager` | One binary, two programs by name: `portitor-manager` is the portal (`portal.go`: `start`, `witness`, `check`, `createadmin`, `add-firewall`, `add-witness`); run as `portitor-config` (a symlink, `main.go`) the firewall's configuration, GUI and API: `start`, `migrate`, `createadmin`, `set-agent`, `agent-url`, `bootstrap` (ISO first boot), `fingerprint`, `portal-info`, `secondary-info`, `add-secondary`, `witness-string`, `promote`, `import-vf` and the console commands (`console.go`, `cli` among them) |
 | `cmd/portitor-agent` | Agent daemon on the firewall: `start`, `init`, `render`, `netns-exec`, `early` (the boot-time policy); run as `portitor` (a symlink, `cli.go`) it is a CLI over the agent's root-only socket `<run_dir>/agent.sock`: `show ...` over the GET routes, and actions that change no configuration (`confirm`, `rollback`, `request dhcp renew`, `request iplist update`, `request blocklist update`, `clear connections`) over the POST routes in `localWrites` |
 | `internal/fwconfig` | The desired-state document and `Validate()`. **The contract between web and agent.** |
 | `yang` | The YANG modules: the configuration's schema (module `portitor`, a submodule per area, the state in `portitor-state`, `portitor-extensions`), embedded by `yang.go`; edited by hand |
@@ -57,22 +57,28 @@ cleanly now. Go on only once they've chosen.
 | `internal/ipam` | Prefix tree by CIDR containment, next free address |
 | `internal/netobj` | Named hosts/prefixes (`address_objects`) and address lists (`address_lists`): name checks and expansion |
 | `models` | The configuration's rows (their `gorm:"column:..."` tags name the columns, read by `confview/fields.go`; no GORM) and the deployments |
-| `web` | Echo v5 server (`server.go`: routes): auth, the configuration API (`configapi.go`: `/api/schema`, `/api/config`, `checkEdit`; the YANG actions' handlers and the GUI's own file actions `configactions.go`), the configuration as rows (`confview.go`: `view`, cached per candidate, `userEdit`, `editConfig`, `rowWriter`), the firewalls (`firewalls.go`, a `treeResource`), the handlers' errors (`errors.go`), commits (`commit.go`), other handlers (`handlers.go`), the commits' configurations (`revert.go`), tenancy (`tenancy.go`), roles (`roles.go`, `access.go`), agent proxies (`console.go`, `capture.go`, `probe.go`, `trace.go`, `iperf.go`, `servicelog.go`, `syslog.go`, `connections.go`), WireGuard config import (`wgimport.go`), backup/restore (`backup.go`, `snapshot.go`: the configuration's files, `copybundle.go`), `config.yaml` (`config.go`), the HA replica and promotion (`replica.go`, `promote.go`), the witness (`witness.go`, `portalwitness.go`), and portitor-web, the portal (`portal.go`, `portalapi.go`, `portalstore.go`, `portalssh.go`, `portalpair.go`; its GUI is `web/frontend`'s `portal.html`, `src/portal/`) |
+| `web` | Echo v5 server (`server.go`: routes): auth, the configuration API (`configapi.go`: `/api/schema`, `/api/config`, `checkEdit`; the YANG actions' handlers and the GUI's own file actions `configactions.go`), the configuration as rows (`confview.go`: `view`, cached per candidate, `userEdit`, `editConfig`, `rowWriter`), the firewalls (`firewalls.go`, a `treeResource`), the handlers' errors (`errors.go`), commits (`commit.go`), other handlers (`handlers.go`), the commits' configurations (`revert.go`), tenancy (`tenancy.go`), roles (`roles.go`, `access.go`), agent proxies (`console.go`, `capture.go`, `probe.go`, `trace.go`, `iperf.go`, `servicelog.go`, `syslog.go`, `connections.go`), WireGuard config import (`wgimport.go`), backup/restore (`backup.go`, `snapshot.go`: the configuration's files, `copybundle.go`), `config.yaml` (`config.go`), the HA replica and promotion (`replica.go`, `promote.go`), the witness (`witness.go`, `portalwitness.go`), and portitor-manager, the portal (`portal.go`, `portalapi.go`, `portalstore.go`, `portalssh.go`, `portalpair.go`; its GUI is `web/frontend`'s `portal.html`, `src/portal/`) |
 | `web/frontend` | Vue SPA; `CrudPage.vue` drives most pages from field/column schemas, on a YANG list (`api/config.js`: `treeApi`, `vfApi`) |
-| `docs` | User guides; every `docs/*.md` is bundled into the GUI's Help page (`src/docs.js`), and links between them stay in the GUI |
+| `docs` | User guides, by task first (install, first-firewall, vpn, backup, updates, troubleshooting, cluster, cluster-runbook, portitor-manager, gui), then by feature; every `docs/*.md` is bundled into the GUI's Help page (`src/docs.js`, grouped by `TOPICS` in `views/HelpPage.vue`), and links between them stay in the GUI. No implementation details: those are `dev/` (the guides replaced at 1.1.0 are `dev/arch-*-guide.md`, `dev/arch-moved-from-docs.md`) |
 | `deploy` | systemd units and example configs |
 | `dev` | Dev configs and `seed.sh`; design docs (`design-*.md`) and code maps moved out of this file (`arch-*.md`; `arch-files.md`: the data directory's files, locks, numbers, crash recovery, migrations and rollback); `dev/lab` runs a real apply in two podman containers |
-| `install.py` | Installs/updates a firewall (agent and portitor-config) and portitor-web (the portal) from a GitHub release (`.goreleaser.yaml`), `--source` or `--local`; refuses, before replacing anything, an installation older than 1.0.0 (`check_upgrade_path`, `MIN_UPGRADE_FROM`) or a data directory without `layout.json` (`check_data_dirs`); the agent runs its copy in `/usr/lib/portitor` for GUI updates |
-| `iso` | Installer ISO: Debian netinst + preseed + an apt repository of `packages.txt` and its dependencies, so the installation needs no network (`build.sh`, `target.sh`), setup (`portitor-setup.py`, installed as `portitor-setup`: runs `portitor-config bootstrap` at first boot, `--reconfigure` when run again; role `both` the firewall with its GUI (agent and portitor-config), role `agent` the same firewall, ending with a portal string for portitor-web, role `web` portitor-web alone (its first user made with the console password, `portitor-web createadmin`), which adds a firewall with `--join` (`portitor-web add-firewall`); roles `primary` and `secondary` an HA pair: the secondary only its HA link and management, ending with a secondary string (its agent's token) that the primary's `--join` adds and commits), QEMU test VM (`vm.sh`), end-to-end tests (`test.sh`, `test-split.sh`, `test-update.sh`, `make iso-e2e`) |
+| `install.py` | Installs/updates a firewall (agent and portitor-config) and portitor-manager (the portal) from a GitHub release (`.goreleaser.yaml`), `--source` or `--local`; refuses, before replacing anything, an installation older than 1.0.0 (`check_upgrade_path`, `MIN_UPGRADE_FROM`) or a data directory without `layout.json` (`check_data_dirs`); the agent runs its copy in `/usr/lib/portitor` for GUI updates |
+| `iso` | Installer ISO: Debian netinst + preseed + an apt repository of `packages.txt` and its dependencies, so the installation needs no network (`build.sh`, `target.sh`), setup (`portitor-setup.py`, installed as `portitor-setup`: runs `portitor-config bootstrap` at first boot, `--reconfigure` when run again; role `both` the firewall with its GUI (agent and portitor-config), role `agent` the same firewall, ending with a portal string for portitor-manager, role `web` portitor-manager alone (its first user made with the console password, `portitor-manager createadmin`), which adds a firewall with `--join` (`portitor-manager add-firewall`); roles `primary` and `secondary` an HA pair: the secondary only its HA link and management, ending with a secondary string (its agent's token) that the primary's `--join` adds and commits), QEMU test VM (`vm.sh`), end-to-end tests (`test.sh`, `test-split.sh`, `test-update.sh`, `make iso-e2e`) |
 
 ## Terms
 
 An *instance* (code, API) is a **virtual firewall** (short **VF**) in the GUI,
-docs and user-facing messages.
+docs and user-facing messages. An *HA pair* (code: `ha*`, `fwconfig.HA`, the agent's
+`/v1/ha` and `/ha/v2` routes) is a **firewall cluster** in the GUI, docs, messages and
+the configuration's names (`cluster-*` leaves, `system cluster`); its *HA link* is the
+**cluster link**, and *open/closed* (the gate) is **active/standby** (or fenced) to the
+user. *The portal* is **portitor-manager** (until 1.1.0 named portitor-web; the code
+keeps `portal*`). User docs (`docs/`) hold no implementation details: no file paths
+inside the program, units, function or set names; those go in `dev/`.
 
 ## How it fits together
 
-- **Processes.** On every firewall, portitor-config (portitor-web run under that
+- **Processes.** On every firewall, portitor-config (portitor-manager run under that
   name, `Config.Local`, `/etc/portitor/config.yaml`) owns the data directory
   (`Config.Dir()`, the directory of `db.path`; files only, no database), the
   GUI and the API, as the service user; the agent runs as root and owns the system.
@@ -81,7 +87,7 @@ docs and user-facing messages.
   certificate fingerprint (`agentclient.New`), usually on 127.0.0.1. On the
   firewall, the root-only socket `<run_dir>/agent.sock` serves the GET routes and
   `localWrites` without the token (`localHandler`), for the `portitor` CLI.
-- **portitor-web, the portal** (`web/portal*.go`, `web.yaml`, GUI `src/portal/`):
+- **portitor-manager, the portal** (`web/portal*.go`, `manager.yaml`, GUI `src/portal/`):
   optional and standalone, with its own YANG tree, users and GUI; it adds firewalls
   and HA pairs over SSH, proxies each at `/fw/<name>/` with its pinned certificate,
   and can be an HA pair's witness. The code map is in
@@ -123,7 +129,7 @@ docs and user-facing messages.
 - **HA pairs**: active/passive with the same addresses, the standby closed by the
   gate, a witness voting; the code map (files, functions, routes, timings) is in
   [dev/arch-ha.md](dev/arch-ha.md), the design in `dev/design-ha-cluster.md`, the
-  user guide `docs/ha.md`.
+  user guides `docs/cluster.md` and `docs/cluster-runbook.md`.
 - **HA replica and promotion** (`web/replica.go`, `web/promote.go`): portitor-config
   runs on both hosts of a pair. Its role is its agent's (`runRole`: the firewall row
   whose fingerprint is that of the agent at `agent_url`, asked for
@@ -152,7 +158,7 @@ docs and user-facing messages.
   installation's (deployments, firewalls, known NICs, users). A new leaf or list
   needs nothing there. Global admins only: a bundle holds the instance's secrets
   (the instance's `bundle` action, `POST /api/instances/import`).
-- **Console configuration** (`web/consolecli.go`, `cmd/portitor-web/console.go`):
+- **Console configuration** (`web/consolecli.go`, `cmd/portitor-manager/console.go`):
   `portitor-config` `api METHOD PATH [JSON]`, `set RESOURCE NAME
   KEY=VALUE...` (`--vf`, default the host), `commit [--confirm N]`, `confirm` and
   `rollback` run one API request in-process as the console admin
@@ -768,7 +774,13 @@ the certificate portitor-config serves, chosen under Settings
   leaf takes its default. Renaming or removing one breaks reading the candidate, the kept
   commits, backups, bundles and replica copies, which have it: since production
   (1.0.0) such a change needs a migration on read (`datastore.Migrate`, as
-  `hostToRoot`), old CLI/API paths kept or translated for a release, and a test.
+  `hostToRoot` and `haToCluster`), old CLI/API paths kept or translated for a release,
+  and a test. A renamed node carries `px:was "<old name>"`: `schema.Node.Renamed`
+  finds it, so CLI paths (`childOf`), API paths (`datastore.RenamedPath`, in
+  `configRequest` and `Tree.HostPath`), API bodies (`mergeObject`, a value through
+  `renamedValue`) and the agent's state fields (`fillObject`) take the old name, with
+  a warning; keep its `px:column` so the model's field stays, and rename its keys in
+  `internal/snmp/mib/oids.json` so the SNMP numbers stay.
   What is not configuration is in files (`internal/records`): a new kind of
   runtime state or history is a field or a file there (with its place in the
   copies, `copyFiles` and `ExportState`), never a database. There is no database
@@ -1004,5 +1016,5 @@ alone. Push only when asked.
   Its wrapper class (camelCase API) is not used: the worker calls the Emscripten
   module's bindings directly. The worker script alone
   gets a CSP with `unsafe-eval` and `wasm-unsafe-eval` (`captureWorkerCSP`).
-- `pkill -f portitor-web` also matches a shell whose command line contains that text;
-  anchor the pattern (`pkill -f '^./build/portitor-web'`).
+- `pkill -f portitor-manager` also matches a shell whose command line contains that text;
+  anchor the pattern (`pkill -f '^./build/portitor-manager'`).

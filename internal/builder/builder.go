@@ -116,7 +116,7 @@ func haBlock(fws []models.Firewall, fw *models.Firewall) (*fwconfig.HA, string) 
 	case fw.HAPrimaryID != nil:
 		p := slices.IndexFunc(fws, func(f models.Firewall) bool { return f.ID == *fw.HAPrimaryID })
 		if p < 0 {
-			return nil, fmt.Sprintf("HA: %s's primary is not there", fw.Name)
+			return nil, fmt.Sprintf("cluster: %s's primary is not there", fw.Name)
 		}
 		peer = fws[p]
 		ha.Node, ha.Secret, ha.Epoch, ha.Preempt = fwconfig.HASecondary, fw.HASecret, fw.HAEpoch, peer.HAPreempt
@@ -140,11 +140,11 @@ func haBlock(fws []models.Firewall, fw *models.Firewall) (*fwconfig.HA, string) 
 	ha.Peer, ha.PeerFingerprint = peer.AgentURL, peer.AgentFingerprint
 	if u, err := url.Parse(ha.Peer); err == nil {
 		if a, err := netip.ParseAddr(u.Hostname()); (err == nil && a.IsLoopback()) || u.Hostname() == "localhost" {
-			return nil, fmt.Sprintf("HA: %s's agent URL is a loopback address, which %s can't reach; set its address on the network", peer.Name, fw.Name)
+			return nil, fmt.Sprintf("cluster: %s's agent URL is a loopback address, which %s can't reach; set its address on the network", peer.Name, fw.Name)
 		}
 	}
 	if ha.PeerFingerprint == "" {
-		return nil, fmt.Sprintf("HA: %s needs its agent's certificate fingerprint, which %s pins", peer.Name, fw.Name)
+		return nil, fmt.Sprintf("cluster: %s needs its agent's certificate fingerprint, which %s pins", peer.Name, fw.Name)
 	}
 	return ha, ""
 }
@@ -327,7 +327,7 @@ func buildPeer(in Input, d *data, generation int64, only map[string]bool, firewa
 				IPv4Mode:      mif.Ipv4Mode,
 				Addresses:     []string(mif.Addresses),
 				IPv6AcceptRA:  mif.Ipv6AcceptRA,
-				HARole:        mif.HaRole,
+				HARole:        haRole(mif.HaRole),
 				HAGateway:     pair.mgmtGateway(mif.HaGateway),
 				HAGatewayPeer: mif.HaGateway == fwconfig.HAGatewayPeer && mif.HaRole == fwconfig.HARoleManagement,
 				MAC:           mac,
@@ -1012,7 +1012,7 @@ func buildPeer(in Input, d *data, generation int64, only map[string]bool, firewa
 			if in.Default {
 				in.ConntrackSync = &fwconfig.ConntrackSync{Interface: pair.link, This: pair.this, Peer: pair.peer}
 			} else if mi.ID > math.MaxUint32 {
-				addf("%s: no address left on the HA link for its connections", in.Name)
+				addf("%s: no address left on the cluster link for its connections", in.Name)
 			} else {
 				id := uint32(mi.ID)
 				p, q := fwconfig.HALinkAddress(ha.Node, id), fwconfig.HALinkAddress(otherNode(ha.Node), id)
@@ -1135,7 +1135,7 @@ func pairLinks(d *data, firewallID uint, peer bool, ha *fwconfig.HA, addf func(s
 		if !on[ifc.InstanceID] || ifc.HaRole == "" {
 			continue
 		}
-		if ifc.HaRole == fwconfig.HARoleLink {
+		if ifc.HaRole == models.ClusterLink {
 			if out.link == "" {
 				this, other := fwconfig.HALinkAddress(ha.Node, 0), fwconfig.HALinkAddress(otherNode(ha.Node), 0)
 				out = haPair{link: ifc.Name, this: this.String(), peer: other.String()}
@@ -1145,14 +1145,14 @@ func pairLinks(d *data, firewallID uint, peer bool, ha *fwconfig.HA, addf func(s
 			continue
 		}
 		if len(ifc.PeerAddresses) != len(ifc.Addresses) || len(ifc.Addresses) == 0 {
-			addf("HA: interface %s: the secondary needs an address of its own for each address (peer addresses)", ifc.Name)
+			addf("cluster: interface %s: the secondary needs an address of its own for each address (peer addresses)", ifc.Name)
 			continue
 		}
 		for j, a := range ifc.Addresses {
 			pa, err1 := fwconfig.ParseInterfaceAddress(a)
 			pb, err2 := fwconfig.ParseInterfaceAddress(ifc.PeerAddresses[j])
 			if err1 != nil || err2 != nil || pa.Masked() != pb.Masked() || pa.Addr() == pb.Addr() {
-				addf("HA: interface %s: peer address %s is not another address of %s", ifc.Name, ifc.PeerAddresses[j], a)
+				addf("cluster: interface %s: peer address %s is not another address of %s", ifc.Name, ifc.PeerAddresses[j], a)
 			}
 		}
 		if ifc.HaGateway == fwconfig.HAGatewayPeer && len(ifc.PeerAddresses) > 0 {
@@ -1766,4 +1766,12 @@ func resolvePortNames(ports string, names map[string]int) string {
 		}
 	}
 	return strings.Join(parts, ",")
+}
+
+// haRole is an interface's cluster-role as the document has it.
+func haRole(role string) string {
+	if role == models.ClusterLink {
+		return fwconfig.HARoleLink
+	}
+	return role
 }

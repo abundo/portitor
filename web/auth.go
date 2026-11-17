@@ -159,7 +159,7 @@ func (s *Server) parseSession(value string) (*sessionClaims, error) {
 
 // PairHeader names, on a response that sets the session cookie, the
 // fingerprints of the portitor-configs of this host's HA pair (their
-// config_fingerprint), so that portitor-web, which pins them by those,
+// config_fingerprint), so that portitor-manager, which pins them by those,
 // sets the cookie for each of them (portalCookies).
 const PairHeader = "X-Portitor-Pair"
 
@@ -177,7 +177,7 @@ func (s *Server) pairHeader(c *echo.Context, pair []models.Firewall) {
 
 // pairRole is GET /api/pair, before any login: whether this
 // portitor-config is a replica (read-only, a copy of its pair's primary's) and
-// the config_fingerprints of its HA pair (none outside a pair). portitor-web
+// the config_fingerprints of its HA pair (none outside a pair). portitor-manager
 // (the portal) serves an HA firewall from the host that is not a replica, and
 // tells by the fingerprints whether its two hosts are paired. Nothing in it
 // is secret: the fingerprints are those of certificates every client sees.
@@ -499,7 +499,7 @@ func setPassword(u *models.User, password string) error {
 	return nil
 }
 
-// CreateUser adds or resets an admin (portitor-web createadmin).
+// CreateUser adds or resets an admin (portitor-config or portitor-manager createadmin).
 func CreateUser(s *Server, username, password string) error {
 	u, err := s.rec.UserNamed(username)
 	if errors.Is(err, records.ErrNotFound) {

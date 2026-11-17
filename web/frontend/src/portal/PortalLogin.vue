@@ -52,7 +52,7 @@ async function submit() {
       </template>
       <form class="space-y-4" @submit.prevent="submit">
         <p class="text-sm text-muted">
-          Log in to portitor-web. Each firewall has its own login too.
+          Log in to portitor-manager. Each firewall has its own login too.
         </p>
         <UFormField label="Username">
           <UInput v-model="username" class="w-full" autocomplete="username" autofocus required />

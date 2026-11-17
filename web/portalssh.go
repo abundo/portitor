@@ -21,7 +21,7 @@ import (
 )
 
 // PortalInfo is what `portitor-config portal-info` prints on a firewall: what
-// portitor-web needs to serve its GUI.
+// portitor-manager needs to serve its GUI.
 type PortalInfo struct {
 	// Port is the port of portitor-config's bind address.
 	Port int `json:"port"`

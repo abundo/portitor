@@ -9,7 +9,7 @@ version: 2
 
 project_name: portitor
 
-# portitor-web embeds the built frontend (web/static) with -tags release.
+# portitor-manager embeds the built frontend (web/static) with -tags release.
 before:
   hooks:
     - npm --prefix web/frontend ci
@@ -18,8 +18,23 @@ before:
 # {{.Version}} is the tag without its v (v1.2.3 -> 1.2.3); the Makefile
 # stamps `git describe` (with the v). install.py treats them as equal.
 builds:
+  - id: portitor-manager
+    main: ./cmd/portitor-manager
+    binary: portitor-manager
+    env: [CGO_ENABLED=0]
+    goos: [linux]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    tags: [release]
+    ldflags:
+      - -s -w -X github.com/abundo/portitor/internal/buildinfo.Version={{.Version}} -X github.com/abundo/portitor/internal/buildinfo.Commit={{.Commit}} -X github.com/abundo/portitor/internal/buildinfo.Date={{.CommitDate}}
+
+  # The same binary as portitor-web, until 1.2.0: the install.py of 1.0.x
+  # looks for portitor-web (and deploy/web.yaml) in an archive before it
+  # hands over to the archive's own install.py, which installs
+  # portitor-manager.
   - id: portitor-web
-    main: ./cmd/portitor-web
+    main: ./cmd/portitor-manager
     binary: portitor-web
     env: [CGO_ENABLED=0]
     goos: [linux]
@@ -46,9 +61,13 @@ archives:
       - LICENSE
       - README.md
       - install.py
-      # **/* alone skips the files directly in deploy/ (agent.yaml, web.yaml).
+      # **/* alone skips the files directly in deploy/ (agent.yaml, manager.yaml).
       - deploy/*.yaml
       - deploy/**/*
+      # The ISO's first-boot setup, which install.py replaces where it is
+      # installed, so it follows the release's names.
+      - iso/portitor-setup.py
+      - iso/portitor-setup.bash
 
 checksum:
   name_template: "{{ .ProjectName }}_{{ .Version }}_checksums.txt"

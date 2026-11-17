@@ -72,12 +72,11 @@ Renaming an interface renames it here; an interface IS-IS uses can't be deleted.
 route map IS-IS uses can't be deleted either, and renaming it rewrites IS-IS's
 reference ([Routing objects](bgp.md#routing-objects)).
 
-## How it runs
+## Restarts
 
-IS-IS runs in the same FRR as BGP and OSPF, from the same files (`frr.conf`,
-`daemons`; see [BGP](bgp.md#how-it-runs)), as the process `router isis portitor`.
-Turning IS-IS on or off changes the daemons FRR runs, which restarts FRR (and resets
-the other protocols' sessions); other changes are reloaded with `frr-reload.py`.
+IS-IS runs in the same FRR as BGP and OSPF, as the process `router isis portitor`.
+Turning IS-IS on or off restarts FRR, which resets the other protocols' sessions;
+other changes are applied without a restart.
 
 *Static* in *Redistribute* means the static routes Portitor installs: FRR's
 `redistribute kernel`.

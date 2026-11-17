@@ -54,7 +54,7 @@ func TestPortalConfigInTree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// web.yaml's list was taken in once.
+	// manager.yaml's list was taken in once.
 	if fws := p.store.Firewalls(); len(fws) != 1 || fws[0].Name != "old" {
 		t.Fatalf("imported firewalls: %+v", fws)
 	}

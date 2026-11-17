@@ -1,18 +1,8 @@
 # SPDX-FileCopyrightText: 2026 The Portitor contributors
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-# /etc/portitor/web.yaml - portitor-web: the portal to the firewalls' GUIs.
-# This is what it needs to start. Its configuration (the firewalls, the HA
-# witness strings and the users) is a tree in data_dir/portal.json, changed in
-# the portal's GUI (Add firewall reads a firewall's certificate fingerprint
-# over SSH) or by portitor-web createadmin, add-firewall and add-witness.
-# Put a TLS reverse proxy in front, or set tls_cert/tls_key.
+# Not used: portitor-web is portitor-manager since 1.1.0, whose example
+# config is manager.yaml. This file stays in the release archive until 1.2.0
+# because the install.py of 1.0.x looks for it before it hands over to the
+# archive's own install.py.
 bind: 127.0.0.1:8080
-# tls_cert: /etc/portitor/web.crt
-# tls_key: /etc/portitor/web.key
-# data_dir: /var/lib/portitor-web
-# ssh_listen: ":2222"   # the configuration's CLI and NETCONF over SSH
-
-# firewalls: and witness: of an older web.yaml are taken into the
-# configuration once, at the first start with an empty data_dir; after that
-# the file's lists are ignored.

@@ -581,6 +581,7 @@ var readOnlyAllowed = map[string]bool{
 	"/api/system/jobs":             true,
 	"/api/system/reboot":           true,
 	"/api/ha/promote":              true,
+	"/api/cluster/promote":         true,
 }
 
 // refuseOnReplica keeps a replica's configuration as the primary's.
@@ -590,6 +591,6 @@ func (s *Server) refuseOnReplica(next echo.HandlerFunc) echo.HandlerFunc {
 		if m == http.MethodGet || m == http.MethodHead || readOnlyAllowed[c.Request().URL.Path] || !s.isReplica() {
 			return next(c)
 		}
-		return errJSON(c, http.StatusConflict, "this is the HA secondary: its configuration is a read-only copy of the primary's; change it there, or promote this host if the primary is lost")
+		return errJSON(c, http.StatusConflict, "this is the cluster secondary: its configuration is a read-only copy of the primary's; change it there, or promote this host if the primary is lost")
 	}
 }

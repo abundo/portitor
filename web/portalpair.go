@@ -64,7 +64,7 @@ type HAHostResult struct {
 
 // errNeedLogin is AddHAHost's when the hosts must be paired and the login
 // to the other one is missing.
-var errNeedLogin = errors.New("the two hosts are not a pair yet: the login to the other host is needed to pair them")
+var errNeedLogin = errors.New("the two hosts are not a cluster yet: the login to the other host is needed to set up the cluster")
 
 func otherRole(role string) string {
 	if role == "primary" {
@@ -77,7 +77,7 @@ func otherRole(role string) string {
 func (p *Portal) AddHAHost(ctx context.Context, req HAHostRequest) (*HAHostResult, error) {
 	ha, ok := p.store.HAFirewall(req.Firewall)
 	if !ok {
-		return nil, fmt.Errorf("there is no HA firewall %s", req.Firewall)
+		return nil, fmt.Errorf("there is no cluster firewall %s", req.Firewall)
 	}
 	if req.Role != "primary" && req.Role != "secondary" {
 		return nil, fmt.Errorf("role %q: primary or secondary", req.Role)
@@ -139,7 +139,7 @@ func (p *Portal) AddHAHost(ctx context.Context, req HAHostRequest) (*HAHostResul
 				// portal could not see (a portitor-config without GET
 				// /api/pair). Taken as it is.
 				done.Connected = true
-				done.Warning = "the secondary is in a pair already, so it was added as it is; the portal could not confirm the pair (update portitor-config on both hosts)"
+				done.Warning = "the secondary is in a cluster already, so it was added as it is; the portal could not confirm the cluster (update portitor-config on both hosts)"
 			case err != nil:
 				return nil, err
 			default:
@@ -151,7 +151,7 @@ func (p *Portal) AddHAHost(ctx context.Context, req HAHostRequest) (*HAHostResul
 					err = p.store.PutWitness(strings.TrimSpace(string(wstr)))
 				}
 				if err != nil {
-					done.Warning = "the pair's witness string was not added: " + err.Error()
+					done.Warning = "the cluster's witness string was not added: " + err.Error()
 				}
 			}
 		}
@@ -159,7 +159,7 @@ func (p *Portal) AddHAHost(ctx context.Context, req HAHostRequest) (*HAHostResul
 	if err := p.store.SetHAHost(ha.Name, req.Role, host); err != nil {
 		w := "the portal could not keep the host: " + err.Error()
 		if done.Paired {
-			w = "the pair is made, but " + w
+			w = "the cluster is made, but " + w
 		}
 		done.Warning = strings.TrimSpace(w + " " + done.Warning)
 	}
@@ -178,7 +178,7 @@ func readPortalInfo(c *sshConn, addr, user string) (*PortalFirewall, error) {
 		return nil, fmt.Errorf("portitor-config portal-info: unexpected answer: %w", err)
 	}
 	if !info.TLS {
-		return nil, errors.New("portitor-config serves plain HTTP there: an HA pair needs its tls_cert")
+		return nil, errors.New("portitor-config serves plain HTTP there: a firewall cluster needs its tls_cert")
 	}
 	return &PortalFirewall{URL: "https://" + net.JoinHostPort(addr, strconv.Itoa(info.Port)), Fingerprint: info.Fingerprint}, nil
 }
@@ -234,13 +234,14 @@ func areConnected(ctx context.Context, a, b *PortalFirewall) (bool, error) {
 
 // errInPair is pairHosts' when secondary-info refuses a host that is in a
 // pair already.
-var errInPair = errors.New("the secondary is in a pair already")
+var errInPair = errors.New("the secondary is in a cluster already")
 
 // pairHosts makes the host of sec the HA secondary of the host of pri:
 // secondary-info there, add-secondary here with it on standard input.
 func pairHosts(sec *sshConn, secUser string, pri *sshConn, priUser string, witness bool) error {
 	out, err := sec.run(configCommand(secUser, "secondary-info"), nil)
-	if err != nil && strings.Contains(err.Error(), "part of a pair") {
+	// "a pair" is the message of a portitor-config before 1.1.0.
+	if err != nil && (strings.Contains(err.Error(), "part of a cluster") || strings.Contains(err.Error(), "part of a pair")) {
 		return errInPair
 	}
 	if err != nil {

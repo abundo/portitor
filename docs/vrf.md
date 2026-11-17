@@ -128,7 +128,7 @@ from making them the same.
 
 The firewall's own services run outside the VRFs, and answer on the VRFs'
 interfaces too: DNS, the DHCP server, router advertisements, NTP, SNMP, SSH and
-the GUI. For that the agent sets, in a virtual firewall with VRFs:
+the GUI. For that the firewall sets, in a virtual firewall with VRFs:
 
 - `tcp_l3mdev_accept` and `udp_l3mdev_accept`: sockets outside the VRFs accept
   what comes in on a VRF's interface;

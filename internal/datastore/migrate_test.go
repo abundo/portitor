@@ -85,3 +85,84 @@ func TestMigrateIDPaths(t *testing.T) {
 		t.Errorf("moved %v", got)
 	}
 }
+
+// A tree of before 1.1.0 names an HA pair's leaves ha-*: they are
+// cluster-*, on the firewalls and on the host's and the virtual firewalls'
+// interfaces, and the link's role ha_link is cluster_link.
+func TestMigrateHAToCluster(t *testing.T) {
+	old := `{
+ "portitor:host-name": "main",
+ "portitor:interface": [
+  {"name": "ha0", "kind": "physical", "ha-role": "ha_link"},
+  {"name": "mgmt0", "kind": "physical", "ha-role": "management", "ha-gateway": "peer", "ha-monitor": false}],
+ "portitor:instance": [{"name": "blue", "interface": [{"name": "eth1", "kind": "physical", "ha-monitor": false}]}],
+ "portitor:firewall": [{"name": "a", "ha-witness": "external", "ha-preempt": false},
+  {"name": "b", "ha-primary": "a", "ha-epoch": 2}]
+}`
+	tr := New(schema.MustLoad())
+	if err := tr.UnmarshalJSON([]byte(old)); err != nil {
+		t.Fatal(err)
+	}
+	if !tr.Migrated {
+		t.Error("not marked migrated")
+	}
+	r := tr.Root
+	if l := r.Entry("interface", []string{"ha0"}); l.Leaf("cluster-role") != "cluster_link" {
+		t.Errorf("ha0: %v", l.Leaves)
+	}
+	if m := r.Entry("interface", []string{"mgmt0"}); m.Leaf("cluster-role") != "management" || m.Leaf("cluster-gateway") != "peer" || m.Leaf("cluster-monitor") != "false" {
+		t.Errorf("mgmt0: %v", m.Leaves)
+	}
+	if e := r.Entry("instance", []string{"blue"}).Entry("interface", []string{"eth1"}); e.Leaf("cluster-monitor") != "false" {
+		t.Errorf("blue eth1: %v", e.Leaves)
+	}
+	if a := r.Entry("firewall", []string{"a"}); a.Leaf("cluster-witness") != "external" || a.Leaf("cluster-preempt") != "false" {
+		t.Errorf("a: %v", a.Leaves)
+	}
+	if b := r.Entry("firewall", []string{"b"}); b.Leaf("cluster-primary") != "a" || b.Leaf("cluster-epoch") != "2" {
+		t.Errorf("b: %v", b.Leaves)
+	}
+
+	portal := New(mustPortal(t))
+	if err := portal.UnmarshalJSON([]byte(`{"portitor-portal:ha-firewall": [{"name": "pair"}]}`)); err != nil {
+		t.Fatal(err)
+	}
+	if portal.Root.Entry("cluster", []string{"pair"}) == nil || !portal.Migrated {
+		t.Errorf("portal: %v", portal.Root.Lists)
+	}
+}
+
+// Until 1.2.0 an edit may name the leaves by their names of before 1.1.0,
+// in its path and in its body, with a warning.
+func TestRenamedNames(t *testing.T) {
+	tr := New(schema.MustLoad())
+	if err := tr.EditJSON(Path{{Name: "interface", Keys: []string{"ha0"}}}, EditMerge,
+		[]byte(`{"kind": "physical", "ha-role": "ha_link"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := tr.Set(Path{{Name: "interface", Keys: []string{"ha0"}}, {Name: "ha-monitor"}}, "false"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tr.Set(Path{{Name: "interface", Keys: []string{"mgmt0"}}, {Name: "ha-role"}}, "ha_link"); err != nil {
+		t.Fatal(err)
+	}
+	if got := tr.Root.Entry("interface", []string{"mgmt0"}).Leaf("cluster-role"); got != "cluster_link" {
+		t.Errorf("set ha-role ha_link: %q", got)
+	}
+	ifc := tr.Root.Entry("interface", []string{"ha0"})
+	if ifc.Leaf("cluster-role") != "cluster_link" || ifc.Leaf("cluster-monitor") != "false" || ifc.Leaf("ha-role") != "" {
+		t.Errorf("interface: %v", ifc.Leaves)
+	}
+	if len(tr.Deprecated) != 2 { // the same warning once
+		t.Errorf("warnings: %q", tr.Deprecated)
+	}
+}
+
+func mustPortal(t *testing.T) *schema.Node {
+	t.Helper()
+	p, err := schema.LoadPortal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
+}

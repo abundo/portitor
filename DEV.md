@@ -4,7 +4,7 @@
 # Development
 
 The web GUI's frontend is a Vue 3 SPA
-that's either served from disk (dev) or embedded into the `portitor-web`
+that's either served from disk (dev) or embedded into the `portitor-manager`
 binary (release build, `-tags release`).
 
 - Go 1.26+ (go.mod pins the `toolchain` that CI and releases build with; with the
@@ -32,11 +32,11 @@ its own state, such as the applied configuration and IP list downloads, under it
 make dev-agent         # terminal 1: dry-run agent on https://127.0.0.1:8443
 make dev-web           # terminal 2: portitor-config's GUI/API on http://127.0.0.1:8080
 make dev-seed          # admin / dev-password-123, a sample home network, agent settings
-make dev-portal        # optional: portitor-web, the portal, on http://127.0.0.1:8090/fw/dev/
+make dev-portal        # optional: portitor-manager, on http://127.0.0.1:8090/fw/dev/
 cd web/frontend && npm install && npm run dev   # optional: Vite with hot reload on :5173
 ```
 
-`dev/agent.yaml`, `dev/config.yaml` (portitor-config) and `dev/web.yaml` (the portal)
+`dev/agent.yaml`, `dev/config.yaml` (portitor-config) and `dev/manager.yaml` (portitor-manager)
 are the dev configs; runtime files (token,
 certificate, rendered configs, agent state, logs, portitor-config's data directory)
 go to `dev/run/`. Delete `dev/run/` (or its `*.json*` and `deployed/`) for an empty
@@ -70,7 +70,7 @@ make fmt               # gofmt + prettier; CI fails on unformatted files
   in-memory libdns provider, and TSIG against a real one on localhost.
 - `internal/builder`, `web`: a configuration tree in memory or in a temporary data
   directory; `web/testdata/release-1.0.0` is a data directory 1.0.0 left, which
-  `TestOpensA100DataDirectory` opens. `TestDeployEndToEnd` drives portitor-web against a real dry-run agent over
+  `TestOpensA100DataDirectory` opens. `TestDeployEndToEnd` drives portitor-config against a real dry-run agent over
   TLS with certificate pinning.
 
 Nothing in `make test` runs a real apply as root; the lab below does.
@@ -90,7 +90,7 @@ the release build in them, the way README's *Install* does on real machines:
 - **fwlab-fw** runs `portitor-agent` as root and applies for real: nftables, the
   `fw-guest` namespace, VLAN, WireGuard, veth link, BIND and the DHCP server. Its
   `portitor-config` keeps the configuration (GUI on 192.168.1.1:8444).
-- **fwlab-mgmt** runs `portitor-web`, the portal to the firewall's GUI over the LAN
+- **fwlab-mgmt** runs `portitor-manager`, serving the firewall's GUI over the LAN
   (`/fw/fw/`), and plays the ISP on the firewall's WAN (DHCP and NAT to the outside).
 
 ```sh
@@ -167,7 +167,7 @@ From a checkout, `./install.py --source` builds (`make release`, CGO off) and in
 target a firewall. A remote agent of another architecture gets a cross-built binary.
 
 An install removes `/usr/share/portitor/wiregasm`, where older installers put
-Wiregasm; it is now part of portitor-web.
+Wiregasm; it is now part of portitor-manager.
 
 `--local PATH` installs a release archive or an extracted release directory without
 GitHub (the ISO uses it). `--list --json` is what the agent runs for *Admin → Updates*;
@@ -182,7 +182,7 @@ release archive, `late.sh`/`target.sh` (run at the end of the installation) and 
 first-boot setup `portitor-setup.py`, and `/portitor/repo`, an apt repository of
 `packages.txt` and its dependencies (downloaded in a Debian 13 container, with ISC's
 BIND repository; needs podman or docker), from which `target.sh` installs, so the
-installation needs no network. The tests install with `VM_OFFLINE=1`. See [docs/appliance.md](docs/appliance.md).
+installation needs no network. The tests install with `VM_OFFLINE=1`. Building it (`iso/build.sh`, `iso/vm.sh`) is in [dev/arch-appliance-guide.md](dev/arch-appliance-guide.md#building-the-iso).
 
 `make iso-e2e` (`iso/test.sh`) does it all and checks the result: builds a test
 ISO, installs and boots it, then checks through the QEMU guest agent and the GUI that
@@ -199,8 +199,8 @@ curl -k https://127.0.0.1:28443/api/version    # after a minute or two
 `make iso-e2e-split` (`iso/test-split.sh`) tests the split setup the same way: two
 VMs (`build/vm-fw`, role agent, and `build/vm-web`, role web, answers in
 `iso/test-split-*.answers`) on a LAN of their own (`VM_LAN` of `iso/vm.sh`: a QEMU
-datagram link between their second NICs). portitor-web serves the firewall with the
-portal string of `portitor-setup --show-join` (`portitor-setup --join STRING`), then
+datagram link between their second NICs). portitor-manager serves the firewall with the
+manager string of `portitor-setup --show-join` (`portitor-setup --join STRING`), then
 the checks run in both VMs, including the GUI login through the portal and the
 agent's status from the web VM.
 

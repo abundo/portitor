@@ -206,7 +206,7 @@ submodule portitor-interfaces {
       leaf-list peer-addresses {
         type interface-address;
         ordered-by user;
-        description "PeerAddresses are the HA secondary's static addresses in place of Addresses, one each, in the same prefixes, on the management interface (HaRole management): all else is the same on both hosts. The HA link has neither: its addresses are IPv6 link-local by node (fwconfig.HALinkAddress).";
+        description "PeerAddresses are the cluster secondary's static addresses in place of Addresses, one each, in the same prefixes, on the management interface (HaRole management): all else is the same on both hosts. The HA link has neither: its addresses are IPv6 link-local by node (fwconfig.HALinkAddress).";
       }
       leaf ovpn-mode {
         type enumeration { enum "adaptive"; enum "udp"; enum "tcp"; }
@@ -273,18 +273,24 @@ submodule portitor-interfaces {
       leaf rpf {
         type boolean;
       }
-      leaf ha-role {
-        type enumeration { enum "ha_link"; enum "management"; }
-        description "HaRole makes it one of an HA pair's own two links (fwconfig.Interface.HARole); HaGateway is the management one's gateway.";
+      leaf cluster-role {
+        type enumeration { enum "cluster_link"; enum "management"; }
+        px:column "ha_role";
+        px:was "ha-role";
+        description "Makes it one of a firewall cluster's own two links: the cluster link between the two firewalls, or management.";
       }
-      leaf ha-gateway {
+      leaf cluster-gateway {
         type union { type ip-address; type enumeration { enum "peer"; } }
-        description "HaGateway is the management interface's gateway; peer is the other host's management address, which forwards and masquerades what the closed host sends.";
+        px:column "ha_gateway";
+        px:was "ha-gateway";
+        description "The management interface's gateway, for the firewall's own traffic while it is the standby; peer is the other firewall's management address.";
       }
-      leaf ha-monitor {
+      leaf cluster-monitor {
         type boolean;
         default true;
-        description "HaMonitor counts the carrier of a traffic interface on a pair: the standby takes over when it has more of them up.";
+        px:column "ha_monitor";
+        px:was "ha-monitor";
+        description "Watches the link of a traffic interface in a firewall cluster: the standby takes over when it has more watched links up.";
       }
       leaf delegated-dhcp {
         type boolean;

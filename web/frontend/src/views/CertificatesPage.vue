@@ -744,7 +744,7 @@ const fields = computed(() => [
           ref="caPage"
           title="Certificate authorities"
           noun="certificate authority"
-          description="The firewall's certificate authorities. They stay in Portitor's configuration (on both hosts of an HA pair) and are not deployed; they sign the server certificates of the host and its virtual firewalls (Sign, or Create certificate on the Certificate store tab). Export a CA and add it to the trust store of the hosts that should trust those certificates. Global admins manage them."
+          description="The firewall's certificate authorities. They stay in Portitor's configuration (on both firewalls of a cluster) and are not deployed; they sign the server certificates of the host and its virtual firewalls (Sign, or Create certificate on the Certificate store tab). Export a CA and add it to the trust store of the hosts that should trust those certificates. Global admins manage them."
           :api="caAPI"
           shared
           :columns="caColumns"

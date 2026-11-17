@@ -85,7 +85,7 @@ submodule portitor-objects {
       }
       action schedule {
         px:action "change";
-        description "Adds a task downloading the list on schedule on each firewall but an HA secondary, named after the list (and the firewall, with several).";
+        description "Adds a task downloading the list on schedule on each firewall but a cluster secondary, named after the list (and the firewall, with several).";
         input {
           leaf schedule {
             type string;

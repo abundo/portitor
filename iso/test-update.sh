@@ -62,8 +62,9 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 make -s release
 to=$(build/portitor-agent --version | awk '{ print $NF }')
 stage=$(mktemp -d "$DIR/stage.XXXXXX")
 trap 'rm -rf "$stage"' EXIT
-cp build/portitor-web build/portitor-agent install.py LICENSE README.md "$stage/"
+cp build/portitor-manager build/portitor-agent install.py LICENSE README.md "$stage/"
 cp -r deploy "$stage/"
+mkdir -p "$stage/iso" && cp iso/portitor-setup.py iso/portitor-setup.bash "$stage/iso/"
 tar -czf "$DIR/to.tar.gz" -C "$stage" .
 rm -rf "$stage"
 log "Updating $from -> $to"
@@ -153,9 +154,9 @@ versions() {
 	web=$(curl -skf "$API/api/version" | json 'j["version"]') || web=?
 	agent=$(guest portitor-agent --version | awk '{ print $NF }') || agent=?
 	if [[ ${web#v} == "${1#v}" && ${agent#v} == "${1#v}" ]]; then
-		echo "ok    portitor-web and the agent are $1"
+		echo "ok    portitor-config and the agent are $1"
 	else
-		fail "versions: portitor-web $web, agent $agent, want $1"
+		fail "versions: portitor-config $web, agent $agent, want $1"
 	fi
 }
 units() {
@@ -164,7 +165,9 @@ units() {
 	done
 	check "no failed units" sh -c 'test -z "$(systemctl list-units --failed --plain --no-legend)" || { systemctl list-units --failed --plain --no-legend; false; }'
 	check "nftables firewall table loaded" nft list table inet firewall
-	check "boot-time policy enabled" systemctl is-enabled --quiet portitor-early.service
+	# The boot-time policy came after 1.0.0: checked after the update only.
+	[[ ${1:-} == after ]] && check "boot-time policy enabled" systemctl is-enabled --quiet portitor-early.service
+	return 0
 }
 
 log "Checking $from"
@@ -183,7 +186,7 @@ iso/qga.py "$DIR/qga.sock" --put "$DIR/to.tar.gz" /root/portitor-update/portitor
 	{ echo "cannot copy the release archive into the guest" >&2; exit 1; }
 guest tar -xzf /root/portitor-update/portitor.tar.gz -C /root/portitor-update >/dev/null
 # A transient unit, as the agent's update job: install.py restarts the agent
-# and portitor-web, and the guest agent's command must not be in their way.
+# and portitor-manager, and the guest agent's command must not be in their way.
 guest systemd-run --unit=portitor-test-update.service --property=RemainAfterExit=yes \
 	--setenv=DEBIAN_FRONTEND=noninteractive -- \
 	python3 /root/portitor-update/install.py --local /root/portitor-update --yes --skip-self-update >/dev/null
@@ -203,13 +206,16 @@ else
 fi
 
 log "Checking $to"
-units
+units after
 check "the data directory has its layout" test -s /var/lib/portitor-config/layout.json
 login && {
 	versions "$to"
 	# The configuration is read through /api/config now (the old /api/interfaces
 	# is gone): every instance's interfaces.
-	ifaces_after=$(api "$API/api/config/candidate/instance" | json 'sorted(i["name"] for x in j for i in x.get("interface", []))')
+	# Since 1.1.0 the host's interfaces are the top level's, a virtual
+	# firewall's under its instance.
+	ifaces_after=$({ api "$API/api/config/candidate/interface"; echo; api "$API/api/config/candidate/instance" || echo '[]'; } |
+		python3 -c 'import json, sys; s = sys.stdin.read(); d = json.JSONDecoder(); a, n = d.raw_decode(s.lstrip()); b = d.raw_decode(s.lstrip()[n:].lstrip())[0]; t = [a, b]; print(sorted([i["name"] for i in t[0]] + [i["name"] for x in t[1] for i in x.get("interface", [])]))')
 	if [[ $ifaces_after == "$ifaces_before" ]]; then
 		echo "ok    interfaces kept: $ifaces_after"
 	else

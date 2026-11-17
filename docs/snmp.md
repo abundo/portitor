@@ -5,26 +5,22 @@
 
 Under **Services → SNMP**, each virtual firewall can run an SNMP agent
 ([net-snmp](http://www.net-snmp.org/)'s snmpd), so management platforms (LibreNMS,
-Zabbix, PRTG, Observium, ...) can monitor it. The agent is read-only and answers
+Zabbix, PRTG, Observium, ...) can monitor it. The firewall is read-only and answers
 the whole tree it has: the system group, interfaces and their counters (IF-MIB),
 addresses, routes and protocol statistics (IP-MIB, IP-FORWARD-MIB, TCP/UDP-MIB),
 and the host's load, memory and disks (HOST-RESOURCES-MIB, UCD-SNMP-MIB).
 
-- On the **default virtual firewall** (the host itself) snmpd runs as the
-  distribution's `snmpd.service`. Its config replaces `/etc/snmp/snmpd.conf` (the
-  original is kept as `snmpd.conf.portitor-orig`).
-- On **another virtual firewall** snmpd runs in the virtual firewall
-  (`portitor-snmpd@<name>.service`), so it shows that virtual firewall's
-  interfaces, addresses and routes. The system-wide values (load, memory, disks)
-  are the host's.
+Each virtual firewall has its own SNMP agent, which shows that virtual firewall's
+interfaces, addresses and routes. The system-wide values (load, memory, disks) are
+the firewall's.
 
 ## Portitor's own state (PORTITOR-MIB)
 
 The default virtual firewall's agent also answers Portitor's state: what the CLI
 shows with `info from state` (the virtual firewalls' interfaces, routes, WireGuard
 peers, DHCP leases, neighbours, rule and rate-limit counters, BGP, OSPF, IS-IS,
-VRRP, BFD, NTP, NAT64, OpenVPN, and the host, the agent and the HA pair). It is
-served by portitor-config, connected to snmpd over AgentX, from a snapshot no more
+VRRP, BFD, NTP, NAT64, OpenVPN, and the host, and the firewall cluster). It is
+served by Portitor, connected to snmpd over AgentX, from a snapshot no more
 than about 10 seconds old, for every virtual firewall (the host's agent is the
 whole firewall's). A virtual firewall's own agent doesn't answer it.
 
@@ -65,7 +61,7 @@ Each user is read-only, with:
 Passwords can't contain spaces, quotes, `#` or `\`. They are write-only, as the
 community is. A disabled user is left out.
 
-The agent keeps its engine id (which SNMPv3 managers know it by) across restarts.
+The firewall keeps its engine id (which SNMPv3 managers know it by) across restarts.
 
 ## Answering requests
 

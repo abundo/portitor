@@ -82,7 +82,7 @@ func (s *Server) startOnAgent(c *echo.Context, firewallID uint, name string, sta
 }
 
 // handleSchedulePreview parses ?schedule= and returns its next runs in
-// portitor-web's time zone, for the task editor.
+// portitor-config's time zone, for the task editor.
 func (s *Server) handleSchedulePreview(c *echo.Context) error {
 	sched, err := cron.Parse(c.QueryParam("schedule"))
 	if err != nil {

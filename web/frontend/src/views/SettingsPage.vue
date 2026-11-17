@@ -118,7 +118,7 @@ async function saveSettings() {
           variant="subtle"
           icon="i-lucide-info"
           title="portitor-config does not serve HTTPS itself"
-          description="Set tls_cert and tls_key in config.yaml (install.py and the ISO's setup do) and restart it to choose a certificate here; behind portitor-web or a reverse proxy, give that the certificate instead."
+          description="Set tls_cert and tls_key in config.yaml (install.py and the ISO's setup do) and restart it to choose a certificate here; behind portitor-manager or a reverse proxy, give that the certificate instead."
         />
         <UFormField
           label="Virtual firewalls"

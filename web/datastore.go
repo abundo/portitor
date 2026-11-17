@@ -294,7 +294,7 @@ func (s *Server) forgetRunning() {
 func (b treeBackend) Commit(ctx context.Context, tree *datastore.Tree, o datastore.CommitOptions) (string, error) {
 	s := b.s
 	if s.isReplica() {
-		return "", errors.New("this is the HA secondary: its configuration is a read-only copy of the primary's")
+		return "", errors.New("this is the cluster secondary: its configuration is a read-only copy of the primary's")
 	}
 	if len(o.Scope) > 0 {
 		res, err := s.commitScoped(ctx, o.User, tree, o.Scope, !o.NoDeploy)
@@ -471,7 +471,7 @@ func (s *Server) cliEnv(ctx context.Context, u *models.User) (*cli.Env, error) {
 	}
 	switch {
 	case s.isReplica():
-		env.ReadOnly = "this is the HA secondary: its configuration is a read-only copy of the primary's"
+		env.ReadOnly = "this is the cluster secondary: its configuration is a read-only copy of the primary's"
 		acc.readOnly = true
 	case !a.writesAny():
 		env.ReadOnly = "you may read the configuration, not change it"

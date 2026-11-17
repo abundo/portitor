@@ -13,6 +13,7 @@ import (
 	"github.com/abundo/portitor/internal/datastore"
 	"github.com/abundo/portitor/internal/fwconfig"
 	"github.com/abundo/portitor/internal/wgkeys"
+	"github.com/abundo/portitor/models"
 )
 
 // The virtual firewalls, their interfaces and links, routes and static
@@ -115,8 +116,8 @@ func checkInstance(c *Ctx, in *datastore.Node) []error {
 	default:
 		// On the firewall of the host: not on an HA secondary, which runs
 		// its primary's.
-		if fw := c.T.Root.Entry("firewall", []string{in.Leaf("firewall")}); fw != nil && fw.Leaf("ha-primary") != "" {
-			errs = append(errs, fail("firewall: %s is an HA secondary; it runs its primary's virtual firewalls", in.Leaf("firewall")))
+		if fw := c.T.Root.Entry("firewall", []string{in.Leaf("firewall")}); fw != nil && fw.Leaf("cluster-primary") != "" {
+			errs = append(errs, fail("firewall: %s is a cluster secondary; it runs its primary's virtual firewalls", in.Leaf("firewall")))
 		}
 	}
 	for _, s := range in.LeafLists["log-auto"] {
@@ -209,12 +210,12 @@ func normalizeInterface(c *Ctx, i *datastore.Node) error {
 	if kind != fwconfig.KindVXLAN {
 		clear(i, "vxlan-vni", "vxlan-local", "vxlan-device", "vxlan-port", "vxlan-remotes")
 	}
-	switch i.Leaf("ha-role") {
+	switch i.Leaf("cluster-role") {
 	case "":
-		clear(i, "ha-gateway", "peer-addresses")
-	case fwconfig.HARoleLink:
+		clear(i, "cluster-gateway", "peer-addresses")
+	case models.ClusterLink:
 		// Its addresses are link-local by node (fwconfig.HALinkAddress).
-		clear(i, "ha-gateway", "addresses", "peer-addresses", "ipv4-mode")
+		clear(i, "cluster-gateway", "addresses", "peer-addresses", "ipv4-mode")
 	}
 	if !on(i, "dhcpv6") {
 		clear(i, "dhcpv6-pd")
@@ -353,22 +354,22 @@ func checkInterface(c *Ctx, i *datastore.Node) []error {
 		errs = append(errs, checkOpenVPN(c, i)...)
 	}
 	errs = append(errs, checkDelegatedDHCP(i)...)
-	if role := i.Leaf("ha-role"); role != "" {
+	if role := i.Leaf("cluster-role"); role != "" {
 		switch {
-		case role == fwconfig.HARoleManagement && i.Leaf("ha-gateway") == "":
+		case role == fwconfig.HARoleManagement && i.Leaf("cluster-gateway") == "":
 			errs = append(errs, fail("ha-gateway: the management interface needs its gateway"))
 		case kind != fwconfig.KindPhysical:
-			errs = append(errs, fail("ha-role: a physical interface only"))
+			errs = append(errs, fail("cluster-role: a physical interface only"))
 		case mode == fwconfig.ModeDHCP:
-			errs = append(errs, fail("ha-role: the pair's links have static addresses"))
+			errs = append(errs, fail("cluster-role: the cluster's links have static addresses"))
 		case i.Leaf("vrf") != "":
-			errs = append(errs, fail("ha-role: not on an interface in a VRF"))
+			errs = append(errs, fail("cluster-role: not on an interface in a VRF"))
 		case !isHost(in):
-			errs = append(errs, fail("ha-role: on an interface of the firewall itself, not of a virtual firewall"))
+			errs = append(errs, fail("cluster-role: on an interface of the firewall itself, not of a virtual firewall"))
 		}
 		for _, o := range in.Lists["interface"] {
-			if o != i && o.Leaf("ha-role") == role {
-				errs = append(errs, fail("ha-role: %s has it", o.Leaf("name")))
+			if o != i && o.Leaf("cluster-role") == role {
+				errs = append(errs, fail("cluster-role: %s has it", o.Leaf("name")))
 			}
 		}
 	}

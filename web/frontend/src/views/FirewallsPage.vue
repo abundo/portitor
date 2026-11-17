@@ -41,9 +41,9 @@ const inPair = (f) => !!f.id && (!!f.ha_primary_id || isPrimary(f))
 const when = (t) => (t ? new Date(t).toLocaleString() : '')
 const stateText = {
   active: "active: open, forwarding and answering for the pair's addresses",
-  standby: 'standby: closed, ready to take over',
-  fenced: 'fenced: closed, hears neither its peer nor the witness',
-  stale: 'stale: closed, its peer was promoted while it was away',
+  standby: 'standby: ready to take over',
+  fenced: 'fenced: hears neither its peer nor the witness, so it does not take over',
+  stale: 'stale: replaced by a promotion while it was away',
 }
 // haRows: what the host says of its place in the pair.
 function haRows(f) {
@@ -74,9 +74,9 @@ const switching = ref(false)
 async function switchover(f) {
   const yes = await useConfirm().ask({
     title: 'Switch over',
-    message: 'Hand the pair over to its standby?',
+    message: 'Hand the cluster over to its standby?',
     detail:
-      'The active host closes and the standby opens at once, with the same addresses; clients lose a packet or two. There is no automatic switch back.',
+      'The standby becomes active at once, with the same addresses; clients lose a packet or two.',
   })
   if (!yes) return
   switching.value = true
@@ -114,9 +114,9 @@ const testing = ref(false)
 async function testSwitchover(f) {
   const yes = await useConfirm().ask({
     title: 'Test switchover',
-    message: 'Switch the pair over to its standby and back?',
+    message: 'Switch the cluster over to its standby and back?',
     detail:
-      'Only when the check says the pair can fail over. The active host hands over, and back after a few seconds; clients lose a packet or two each time.',
+      'Only when the check says the cluster can fail over. The active firewall hands over, and back after a few seconds; clients lose a packet or two each time.',
   })
   if (!yes) return
   testing.value = true
@@ -124,7 +124,7 @@ async function testSwitchover(f) {
     const r = await config.action(pairPath(f), 'test-switchover')
     toast.add({
       title: `Switched to ${r.to} in ${r['there-ms']} ms and back to ${r.from} in ${r['back-ms']} ms`,
-      description: 'Until the other host was active, as the agents tell it.',
+      description: 'Until the other firewall was active, as the agents tell it.',
       color: 'success',
     })
   } catch (err) {
@@ -148,7 +148,7 @@ const columns = [
   },
   {
     key: 'ha_primary_id',
-    label: 'HA',
+    label: 'Cluster',
     format: (r) => {
       let role = ''
       if (r.ha_primary_id) role = `secondary of ${instStore.firewallName(r.ha_primary_id)}`
@@ -174,7 +174,7 @@ const fields = [
   { key: 'description', label: 'Description' },
   {
     key: 'ha_primary_id',
-    label: 'HA secondary of',
+    label: 'Cluster secondary of',
     type: 'select',
     nullable: true,
     items: (f) =>
@@ -182,11 +182,11 @@ const fields = [
         .filter((x) => x.id !== f.id && !x.ha_primary_id)
         .map((x) => ({ label: x.name, value: x.id })),
     disabled: (f) => !!f.id,
-    hint: "Makes it the HA secondary of that firewall: it runs the primary's virtual firewalls and tasks, with the same addresses, and a commit deploys to both. Only its management interface has addresses of its own (HA peer addresses under Network → Interfaces); on the HA link the hosts use IPv6 link-local addresses by role. Set when the firewall is created.",
+    hint: "Makes it the secondary of that firewall in a firewall cluster: it runs the primary's virtual firewalls and tasks, with the same addresses, and a commit deploys to both. Only its management interface has addresses of its own (Cluster peer addresses under Network → Interfaces). Set when the firewall is created.",
   },
   {
     key: 'ha_state',
-    label: 'HA state',
+    label: 'Cluster state',
     type: 'custom',
     show: inPair,
   },
@@ -194,18 +194,18 @@ const fields = [
     key: 'agent_url',
     label: 'Agent URL',
     placeholder: 'https://192.168.1.1:8443',
-    hint: "Its address on the network, which its HA peer and the witness use too: in a pair, its management address (not 127.0.0.1). portitor-config reaches its own host's agent at the agent_url in its config.yaml.",
+    hint: "Its address on the network, which its cluster peer and the witness use too: in a cluster, its management address (not 127.0.0.1). portitor-config reaches its own host's agent at the agent_url in its config.yaml.",
   },
   {
     key: 'ha_witness',
-    label: 'HA witness',
+    label: 'Cluster witness',
     type: 'select',
     items: [
       { label: "This firewall's portitor-config", value: 'local' },
-      { label: 'External: portitor-web on a third host', value: 'external' },
+      { label: 'External: portitor-manager on a third host', value: 'external' },
     ],
     show: isPrimary,
-    hint: "The pair's third vote, which a host needs to open when it doesn't hear its peer. This firewall's portitor-config goes with this host: when it is lost, nothing takes over by itself (open the other by hand with portitor request ha active, or promote it). An external witness (portitor-web, or portitor-web witness, on a third host on the management network) gets the witness string below, and fails over by itself; commit after changing this.",
+    hint: "The cluster's third vote, which a standby needs to become active when it can't hear its peer. This firewall's portitor-config goes down with this firewall: when it is lost, nothing takes over by itself (see the cluster runbook). An external witness (portitor-manager on a third host on the management network) gets the witness string below, and the cluster fails over by itself; commit after changing this.",
   },
   {
     key: 'ha_preempt',
@@ -225,7 +225,7 @@ const fields = [
     label: 'portitor-config URL',
     placeholder: 'https://192.168.1.1:8444',
     show: (f) => !!f.ha_primary_id || instStore.firewalls.some((x) => x.ha_primary_id === f.id),
-    hint: "This host's portitor-config as its HA peer reaches it. The secondary copies the primary's configuration from there, and either takes it over when promoted.",
+    hint: "This firewall's portitor-config as its cluster peer reaches it. The secondary copies the primary's configuration from there, and either takes it over when promoted.",
   },
   {
     key: 'config_fingerprint',
@@ -251,7 +251,7 @@ const fields = [
   <div class="space-y-6">
     <CrudPage
       title="Firewalls"
-      description="This firewall and its HA secondary, each through its agent: portitor-config deploys to its own firewall and its secondary only. portitor-agent init on a host prints its agent's token and certificate fingerprint. The firewall's host is a virtual firewall of its own."
+      description="This firewall and its cluster secondary, each through its agent: portitor-config deploys to its own firewall and its secondary only. portitor-agent init on a host prints its agent's token and certificate fingerprint. The firewall's host is a virtual firewall of its own."
       :api="firewalls"
       shared
       noun="firewall"
@@ -275,8 +275,8 @@ const fields = [
           </div>
           <p v-if="witness" class="font-mono text-xs break-all">{{ witness }}</p>
           <p class="text-xs text-muted">
-            Under witness: in portitor-web's web.yaml on the third host. It holds the witness
-            secret, which opens the vote alone.
+            In portitor-manager on the third host (Cluster witness, or portitor-manager
+            add-witness). It holds the witness secret, which opens the vote alone.
           </p>
         </div>
       </template>
@@ -291,7 +291,7 @@ const fields = [
             </tbody>
           </table>
           <p v-else class="text-sm text-muted">
-            Not known: the agent doesn't answer, or the pair isn't committed yet.
+            Not known: the agent doesn't answer, or the cluster isn't committed yet.
           </p>
           <div class="flex flex-wrap gap-2">
             <UButton
@@ -306,7 +306,7 @@ const fields = [
               size="xs"
               variant="outline"
               icon="i-lucide-list-checks"
-              label="Check pair"
+              label="Check cluster"
               :loading="checking"
               @click="checkPair(form)"
             />

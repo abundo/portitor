@@ -17,8 +17,12 @@ import (
 	"github.com/goccy/go-yaml"
 )
 
-// DefaultConfigFile is portitor-web's (PortalConfig).
-const DefaultConfigFile = "/etc/portitor/web.yaml"
+// DefaultConfigFile is portitor-manager's (PortalConfig).
+const DefaultConfigFile = "/etc/portitor/manager.yaml"
+
+// OldConfigFile is portitor-manager's before 1.1.0, read when DefaultConfigFile
+// is missing, until 1.2.0.
+const OldConfigFile = "/etc/portitor/web.yaml"
 
 // DefaultLocalConfigFile is portitor-config's (Config).
 const DefaultLocalConfigFile = "/etc/portitor/config.yaml"
@@ -38,7 +42,7 @@ type Config struct {
 	TLSCert string `yaml:"tls_cert"`
 	TLSKey  string `yaml:"tls_key"`
 	// TrustedProxies are the addresses (CIDRs) whose X-Forwarded-For is
-	// believed: portitor-web's, which passes the browser's on, so the login
+	// believed: portitor-manager's, which passes the browser's on, so the login
 	// limits count the browser's address.
 	TrustedProxies []string `yaml:"trusted_proxies"`
 	// AgentURL is this host's own agent, which tells portitor-config its

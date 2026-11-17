@@ -117,24 +117,3 @@ Each [VRF](vrf.md) can run a BGP of its own, for its interfaces and table: choos
 the VRF at the top of the page, then configure it like the main table's. Its
 neighbours, peer groups and BGP info are its own; see
 [VRFs](vrf.md#routing-protocols).
-
-## How it runs
-
-The default virtual firewall (the host) runs the distribution's `frr.service` from
-`/etc/frr` (`frr.conf`, `daemons`, `vtysh.conf`; files that were there before are
-kept as `*.portitor-orig`). Every other virtual firewall runs
-`portitor-frr@<name>.service`, with its files in
-`/etc/portitor/instances/<name>/frr`, mounted as FRR's *pathspace*
-`/etc/frr/<name>`. Its daemons keep the capability CAP_SYS_ADMIN, which FRR needs to
-start, where the other daemons of a virtual firewall drop it.
-
-A changed configuration is applied with FRR's `frr-reload.py`, which keeps the
-sessions up; a change to the daemons FRR runs, or a reload that fails, restarts it.
-
-*Static* in *Redistribute* means the static routes Portitor installs (in the kernel
-routing table, so FRR sees them as kernel routes): FRR's `redistribute kernel`.
-
-On the firewall, as root, `vtysh` (`vtysh -N <name>` for a virtual firewall) shows
-everything FRR has: `show bgp summary`, `show bgp neighbors`, `show bgp ipv4
-unicast`. *BGP info* leaves out the BGP table of an address family with more than
-2000 routes (a full Internet table); vtysh shows it.

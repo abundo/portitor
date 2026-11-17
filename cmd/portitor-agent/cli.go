@@ -202,9 +202,10 @@ func cliCommand() *cobra.Command {
 		},
 	})
 	show.AddCommand(&cobra.Command{
-		Use:   "ha",
-		Short: "This host's place in its HA pair and its quorum",
-		Args:  cobra.NoArgs,
+		Use:     "cluster",
+		Aliases: []string{"ha"}, // before 1.1.0, until 1.2.0
+		Short:   "This firewall's place in its firewall cluster",
+		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
 			defer cancel()
@@ -224,7 +225,7 @@ func cliCommand() *cobra.Command {
 }
 
 // addActions adds the commands that act without changing the
-// configuration, for the console when portitor-web can't reach the
+// configuration, for the console when portitor-config can't reach the
 // firewall.
 func addActions(root *cobra.Command, client func() *agentclient.Client, instance *string) {
 	call := func(cmd *cobra.Command, f func(ctx context.Context, c *agentclient.Client) error) error {
@@ -367,9 +368,9 @@ func addActions(root *cobra.Command, client func() *agentclient.Client, instance
 	var minutes int
 	haActive := &cobra.Command{
 		Use:   "active",
-		Short: "Let this HA host be active without its peer or the witness (logged)",
-		Long: "Gives this HA host the witness's vote, so it opens once its promises have run out. " +
-			"Only when the other host is known to be down: two active hosts answer for the same addresses.",
+		Short: "Make this firewall active without its peer or the witness (logged)",
+		Long: "Gives this firewall the witness's vote, so it becomes active within seconds. " +
+			"Only when the other firewall is known to be off: two active firewalls answer for the same addresses.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return call(cmd, func(ctx context.Context, c *agentclient.Client) error {
@@ -385,8 +386,8 @@ func addActions(root *cobra.Command, client func() *agentclient.Client, instance
 	haActive.Flags().IntVar(&minutes, "minutes", 60, "how long")
 	haSwitchover := &cobra.Command{
 		Use:   "switchover",
-		Short: "Move the traffic to the standby (on the active host)",
-		Long:  "The active host closes and hands over to its standby, which opens at once. There is no automatic failback, so this is how traffic moves back.",
+		Short: "Move the traffic to the standby (on the active firewall)",
+		Long:  "The active firewall hands over to its standby, which becomes active at once.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return call(cmd, func(ctx context.Context, c *agentclient.Client) error {
@@ -398,7 +399,7 @@ func addActions(root *cobra.Command, client func() *agentclient.Client, instance
 			})
 		},
 	}
-	haReq := &cobra.Command{Use: "ha", Short: "HA pair"}
+	haReq := &cobra.Command{Use: "cluster", Aliases: []string{"ha"}, Short: "Firewall cluster"}
 	haReq.AddCommand(haActive, haSwitchover)
 	request.AddCommand(haReq)
 
@@ -436,7 +437,7 @@ func hint(err error) error {
 
 func printHA(w io.Writer, st *agentapi.HAStatus) {
 	if st.Node == "" {
-		fmt.Fprintln(w, "Not in an HA pair.")
+		fmt.Fprintln(w, "Not in a firewall cluster.")
 		return
 	}
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
@@ -445,13 +446,13 @@ func printHA(w io.Writer, st *agentapi.HAStatus) {
 	state := st.State
 	switch st.State {
 	case agentapi.HAActive:
-		state += ": open, forwarding and answering for the pair's addresses"
+		state += ": forwarding and answering for the cluster's addresses"
 	case agentapi.HAStandby:
-		state += ": closed, ready to take over"
+		state += ": ready to take over"
 	case agentapi.HAFenced:
-		state += ": closed, hears neither its peer nor the witness"
+		state += ": hears neither its peer nor the witness, so it doesn't take over"
 	case agentapi.HAStale:
-		state += ": closed, the peer was promoted while this host was away, until the new primary catches it up"
+		state += ": replaced by a promotion while it was away; not forwarding until the new primary catches it up"
 	}
 	fmt.Fprintf(tw, "State:\t%s\n", state)
 	peer := "not heard"

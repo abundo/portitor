@@ -2,8 +2,9 @@
 # SPDX-FileCopyrightText: 2026 The Portitor contributors
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Install or update Portitor: on a firewall portitor-agent and
-portitor-config (its configuration, GUI and API), and portitor-web, the
-portal to the firewalls' GUIs, on this host or another (over SSH).
+portitor-config (its configuration, GUI and API), and portitor-manager, the
+manager of the firewalls (portitor-web before 1.1.0), on this host or
+another (over SSH).
 
 Binaries go to /usr/bin, systemd units to /etc/systemd/system, example
 configs to /etc/portitor (only when missing; config.yaml gets a generated
@@ -12,7 +13,7 @@ shows a diff and asks before overwriting (--yes overwrites).
 
 An update restarts portitor-agent (its per-instance units follow), stops
 portitor-config, runs `portitor-config migrate` (which checks that it can
-read its data directory) and restarts it, and restarts portitor-web. The
+read its data directory) and restarts it, and restarts portitor-manager. The
 firewall is updated first: the agent rejects document fields it does not
 know, so it must never be older than portitor-config. On a first install,
 when a config was just created, the data directory is made but nothing is
@@ -23,17 +24,18 @@ update it to 1.0.0 first, which moves what its database held into files.
 
 What gets installed:
   (default)       whatever is installed on this host. When that includes
-                  portitor-web, also the firewalls it serves (the hosts of
-                  the firewalls in its configuration, portitor-web
-                  list-firewalls, and their HA peers).
-  --web [HOST]    portitor-web on HOST (default this host), over SSH like
-                  --agent (plus the firewalls, as above)
+                  portitor-manager, also the firewalls it serves (the hosts
+                  of the firewalls in its configuration, portitor-manager
+                  list-firewalls, and their cluster peers).
+  --manager [HOST]  portitor-manager on HOST (default this host), over SSH
+                  like --agent (plus the firewalls, as above); --web is the
+                  same, until 1.2.0
   --agent [HOST]  portitor-agent and portitor-config on HOST (default this
                   host), over SSH as
                   --ssh-user (default portitor, which needs passwordless
                   sudo; the installer prints how to set that up), or root.
                   Repeat it, or separate hosts by commas, for several. Agents
-                  are updated one at a time, an HA pair's secondary first,
+                  are updated one at a time, a cluster's secondary first,
                   each waiting until the one before hears its HA peer again,
                   so one host of the pair keeps forwarding.
   --no-agent      never the agent
@@ -86,7 +88,7 @@ from typing import Sequence
 
 # Bump when the installer itself changes, so a release's copy can tell
 # whether it is newer than the one running.
-INSTALLER_VERSION = 13
+INSTALLER_VERSION = 14
 INSTALLER_FILENAME = "install.py"
 # Where the agent host keeps a copy, for updates from the GUI.
 INSTALLER_DEST = "/usr/lib/portitor/install.py"
@@ -97,7 +99,11 @@ USER_AGENT = "portitor-install.py"
 ARCHIVE_OS = "linux"
 
 BIN_DIR = "/usr/bin"
-WEB_BIN = f"{BIN_DIR}/portitor-web"
+# The one binary: portitor-manager, and portitor-config by that name (a
+# symlink). portitor-web, its name before 1.1.0, stays a symlink to it until
+# 1.2.0.
+WEB_BIN = f"{BIN_DIR}/portitor-manager"
+OLD_WEB_BIN = f"{BIN_DIR}/portitor-web"
 AGENT_BIN = f"{BIN_DIR}/portitor-agent"
 # The portitor command (show lldp neighbours, ...) is the agent run by this name.
 CLI_LINK = f"{BIN_DIR}/portitor"
@@ -107,12 +113,16 @@ CLI_LINK = f"{BIN_DIR}/portitor"
 CLI_COMPLETION = "/usr/share/bash-completion/completions/portitor"
 COMPLETION_DIR = str(Path(CLI_COMPLETION).parent)
 ETC_DIR = "/etc/portitor"
-WEB_CONFIG = f"{ETC_DIR}/web.yaml"
-WEB_DATA_DIR = "/var/lib/portitor-web"
+WEB_CONFIG = f"{ETC_DIR}/manager.yaml"
+WEB_DATA_DIR = "/var/lib/portitor-manager"
+# portitor-manager's before 1.1.0 (portitor-web), moved by migrate_manager.
+OLD_WEB_CONFIG = f"{ETC_DIR}/web.yaml"
+OLD_WEB_DATA_DIR = "/var/lib/portitor-web"
+OLD_WEB_UNIT = "portitor-web.service"
 AGENT_CONFIG = f"{ETC_DIR}/agent.yaml"
 SYSTEMD_DIR = "/etc/systemd/system"
 WEB_USER = "portitor"
-# portitor-config: portitor-web run as portitor-config on the firewall,
+# portitor-config: portitor-manager run as portitor-config on the firewall,
 # its configuration, GUI and API. It touches its data directory only as
 # WEB_USER, so the files it writes stay writable for the service.
 CONFIG_LINK = f"{BIN_DIR}/portitor-config"
@@ -126,7 +136,7 @@ AGENT_APPLIED = "/var/lib/portitor/applied.json"
 SSH_USER_DEFAULT = "portitor"
 # Portitor's DHCP servers run as this user (portitor-dhcpd@.service).
 DHCP_USER = "portitor-dhcp"
-WEB_UNIT = "portitor-web.service"
+WEB_UNIT = "portitor-manager.service"
 AGENT_UNIT = "portitor-agent.service"
 # The boot-time policy (render.Early): enabled with the agent, never started
 # on a running host; the agent's first apply at the next boot removes it.
@@ -198,7 +208,7 @@ APPARMOR_DIR = "/etc/apparmor.d"
 APPARMOR_BEGIN = "# BEGIN portitor (managed by install.py)"
 APPARMOR_END = "# END portitor"
 LOCAL_NAMES = {"localhost", "127.0.0.1", "::1", ""}
-# Where install.py once put Wiregasm, which portitor-web now embeds; removed on
+# Where install.py once put Wiregasm, which portitor-manager now embeds; removed on
 # install.
 OLD_WIREGASM_DIR = "/usr/share/portitor/wiregasm"
 
@@ -309,7 +319,7 @@ def same_base(tag: str, installed: str) -> bool:
 
 
 def version_of_output(text: str) -> str | None:
-    """`portitor-web --version` prints "portitor-web version <stamp>"."""
+    """`portitor-manager --version` prints "portitor-manager version <stamp>"."""
     m = re.search(r"\bversion\s+(\S+)", text)
     return m[1] if m else None
 
@@ -544,7 +554,7 @@ class Plan:
         if self.agent_order_note:
             out.append(self.agent_order_note)
         if self.web:
-            out.append(f"portitor-web on {self.web}")
+            out.append(f"portitor-manager on {self.web}")
         return out
 
 
@@ -638,6 +648,7 @@ def agent_answers(host: Host, timeout: float = 20) -> bool:
     answers."""
     deadline = time.monotonic() + timeout
     while True:
+        # "show ha", not "show cluster": an agent before 1.1.0 knows only that.
         if host.run(f"{CLI_LINK} show ha >/dev/null 2>&1", check=False, mutate=False, root=True).returncode == 0:
             return True
         if time.monotonic() >= deadline:
@@ -826,34 +837,86 @@ def install_apparmor(host: Host, deploy: Path) -> None:
 
 
 def install_web(host: Host, binary: Path, deploy: Path, version: str, assume_yes: bool) -> None:
-    """portitor-web, the portal: its configuration (firewalls, users) in its data directory."""
-    log(f"==> Installing portitor-web {version} on {host}")
+    """portitor-manager: its configuration (firewalls, users) in its data directory."""
+    log(f"==> Installing portitor-manager {version} on {host}")
     ensure_user(host)
-    host.run(f"install -d -o {WEB_USER} -g {WEB_USER} -m 0750 {WEB_DATA_DIR}", desc="create the portal's data directory")
+    had_old, was_enabled = migrate_manager(host)
+    update_setup(host, deploy)
+    host.run(f"install -d -o {WEB_USER} -g {WEB_USER} -m 0750 {WEB_DATA_DIR}", desc="create the manager's data directory")
     new_config = not host.exists(WEB_CONFIG)
     if new_config:
-        host.put(deploy / "web.yaml", WEB_CONFIG, "0640", group=WEB_USER)
-    host.put(binary, WEB_BIN, "0755")
-    install_completion(host, "portitor-web")
+        host.put(deploy / "manager.yaml", WEB_CONFIG, "0640", group=WEB_USER)
+    install_binary(host, binary)
+    install_completion(host, "portitor-manager")
     if host.exists(OLD_WIREGASM_DIR):
         host.run(f"rm -rf {OLD_WIREGASM_DIR}")
     action = install_unit(host, deploy / "systemd" / WEB_UNIT, assume_yes)
     host.systemctl("daemon-reload")
     if new_config:
-        log("==> portitor-web is installed but not started. Next steps:")
-        log(f"    make a portal user: sudo -u {WEB_USER} portitor-web createadmin <user>")
+        log("==> portitor-manager is installed but not started. Next steps:")
+        log(f"    make a user: sudo -u {WEB_USER} portitor-manager createadmin <user>")
         log("    start it, log in, and add the firewalls there (Add firewall reads their")
         log("      fingerprints over SSH); or list them under firewalls: in " + WEB_CONFIG)
         log("      before the first start (taken in once)")
         log(f"    this host's address under trusted_proxies: in each firewall's {CONFIG_FILE}")
         log(f"    systemctl enable --now {WEB_UNIT}")
         return
-    if action == "installed":
+    # Enabled where it ran before: the ISO installs it on every host, and
+    # disables it where the host is a firewall.
+    if was_enabled or (action == "installed" and not had_old):
         host.systemctl("enable", WEB_UNIT)
+    if host.run(f"systemctl is-enabled --quiet {WEB_UNIT}", check=False, mutate=False).returncode != 0:
+        log(f"    {WEB_UNIT} is disabled on {host}; not started")
+        return
     host.systemctl("restart", WEB_UNIT)
     verify_version(host, WEB_BIN, version)
-    log(f"    portitor-web has users of its own now: until one exists the portal is locked; make one with\n"
-        f"      sudo -u {WEB_USER} portitor-web createadmin <user>")
+
+
+# The ISO's first-boot setup (iso/target.sh), and its completion.
+SETUP_BIN = f"{BIN_DIR}/portitor-setup"
+SETUP_COMPLETION = f"{COMPLETION_DIR}/portitor-setup"
+
+
+def update_setup(host: Host, deploy: Path) -> None:
+    """Replaces the ISO's portitor-setup on host, where it is installed, with
+    the release's, so that it follows the release's names and files. An
+    archive without it (before 1.1.0) leaves it as it is."""
+    src = deploy.parent / "iso" / "portitor-setup.py"
+    if not src.is_file() or not host.exists(SETUP_BIN):
+        return
+    host.put(src, SETUP_BIN, "0755")
+    bash = deploy.parent / "iso" / "portitor-setup.bash"
+    if bash.is_file():
+        host.put(bash, SETUP_COMPLETION, "0644")
+
+
+def install_binary(host: Host, binary: Path) -> None:
+    """The binary as portitor-manager, with portitor-web (its name before
+    1.1.0) a symlink to it until 1.2.0."""
+    host.put(binary, WEB_BIN, "0755")
+    host.run(f"ln -sfn portitor-manager {shlex.quote(OLD_WEB_BIN)}", desc=f"ln -s portitor-manager {OLD_WEB_BIN}")
+
+
+def migrate_manager(host: Host) -> tuple[bool, bool]:
+    """Moves portitor-web (before 1.1.0) to portitor-manager's names: its
+    unit stopped and removed, web.yaml to manager.yaml, its data directory
+    to WEB_DATA_DIR. Whether the old unit was there, and enabled."""
+    had_old = host.exists(f"{SYSTEMD_DIR}/{OLD_WEB_UNIT}")
+    if not had_old:
+        enabled = False
+    else:
+        enabled = host.run(f"systemctl is-enabled --quiet {OLD_WEB_UNIT}", check=False, mutate=False).returncode == 0
+        log(f"==> portitor-web is portitor-manager now: replacing {OLD_WEB_UNIT}")
+        host.run(f"systemctl disable --now {OLD_WEB_UNIT} 2>/dev/null || true", desc=f"systemctl disable --now {OLD_WEB_UNIT}")
+        host.run(f"rm -f {SYSTEMD_DIR}/{OLD_WEB_UNIT}", desc=f"rm {SYSTEMD_DIR}/{OLD_WEB_UNIT}")
+    if host.exists(OLD_WEB_CONFIG) and not host.exists(WEB_CONFIG):
+        host.run(f"mv {OLD_WEB_CONFIG} {WEB_CONFIG}", desc=f"mv {OLD_WEB_CONFIG} {WEB_CONFIG}")
+        host.run(f"sed -i 's#^data_dir: *{OLD_WEB_DATA_DIR}/*$#data_dir: {WEB_DATA_DIR}#' {WEB_CONFIG}",
+                 desc=f"data_dir in {WEB_CONFIG}")
+    if host.exists(OLD_WEB_DATA_DIR) and not host.exists(f"{WEB_DATA_DIR}/portal.json"):
+        host.run(f"rmdir {WEB_DATA_DIR} 2>/dev/null || true; mv {OLD_WEB_DATA_DIR} {WEB_DATA_DIR}",
+                 desc=f"mv {OLD_WEB_DATA_DIR} {WEB_DATA_DIR}")
+    return had_old, enabled
 
 
 def ensure_user(host: Host) -> None:
@@ -867,16 +930,30 @@ def ensure_user(host: Host) -> None:
 
 
 def portal_firewalls(host: Host) -> list[tuple[str, str]]:
-    """The firewalls in portitor-web's configuration on host: (name, URL) of
-    `portitor-web list-firewalls`. An older portitor-web (before the portal
-    had a configuration of its own) has no such command: web.yaml's list."""
-    proc = host.run(f"runuser -u {WEB_USER} -- {WEB_BIN} -f {WEB_CONFIG} list-firewalls",
+    """The firewalls in portitor-manager's configuration on host: (name, URL)
+    of `portitor-manager list-firewalls` (portitor-web and web.yaml before
+    1.1.0). An older one (before it had a configuration of its own) has no
+    such command: the config file's list."""
+    binary, config = manager_paths(host)
+    proc = host.run(f"runuser -u {WEB_USER} -- {binary} -f {config} list-firewalls",
                     check=False, mutate=False, capture=True, root=True)
     if proc.returncode == 0:
         return [tuple(line.split(None, 1)) for line in (proc.stdout or "").splitlines() if len(line.split(None, 1)) == 2]
-    text = host.read(WEB_CONFIG, root=True) or ""
+    text = host.read(config, root=True) or ""
     return re.findall(r"^\s*-\s*name:\s*(\S+)\s*\n\s*url:\s*[\"']?([^\s\"']+)", text, re.M)
 
+
+
+def manager_paths(host: Host) -> tuple[str, str]:
+    """The installed manager's binary and config file: portitor-manager's,
+    or portitor-web's before 1.1.0."""
+    if host.exists(WEB_CONFIG) or not host.exists(OLD_WEB_CONFIG):
+        return WEB_BIN, WEB_CONFIG
+    return OLD_WEB_BIN, OLD_WEB_CONFIG
+
+
+def manager_installed(host: Host) -> bool:
+    return host.exists(WEB_CONFIG) or host.exists(OLD_WEB_CONFIG)
 
 
 def local_agent_url(host: Host) -> str:
@@ -924,16 +1001,16 @@ def install(
     for agent in plan.agents:
         root = roots[archs[agent_key(agent)]]
         install_agent(agent, root / "portitor-agent", deploy, version, assume_yes)
-        install_config(agent, root / "portitor-web", deploy, version, assume_yes)
+        install_config(agent, root / "portitor-manager", deploy, version, assume_yes)
         if agent.name in plan.ha_agents:
             wait_for_ha_peer(agent)
     if plan.web:
-        install_web(plan.web, roots[archs["web"]] / "portitor-web", deploy, version, assume_yes)
+        install_web(plan.web, roots[archs["web"]] / "portitor-manager", deploy, version, assume_yes)
     log("==> Done")
 
 
 def install_config(host: Host, binary: Path, deploy: Path, version: str, assume_yes: bool) -> None:
-    """portitor-config on the firewall: the portitor-web binary run as
+    """portitor-config on the firewall: the portitor-manager binary run as
     portitor-config, with its own config, certificate, data directory and
     unit, set to deploy to the local agent. A new one is not started: it
     needs an admin."""
@@ -954,8 +1031,12 @@ def install_config(host: Host, binary: Path, deploy: Path, version: str, assume_
     host.run(f"install -d -o {WEB_USER} -g {WEB_USER} -m 0700 {CONFIG_DB_DIR}")
     host.run(f"systemctl stop {CONFIG_UNIT} 2>/dev/null || true", desc=f"systemctl stop {CONFIG_UNIT}")
     set_agent_url(host)
-    host.put(binary, WEB_BIN, "0755")
-    host.run(f"ln -sfn portitor-web {shlex.quote(CONFIG_LINK)}", desc=f"ln -s portitor-web {CONFIG_LINK}")
+    install_binary(host, binary)
+    update_setup(host, deploy)
+    if not manager_installed(host):
+        # The ISO installs the manager's unit everywhere, disabled.
+        migrate_manager(host)
+    host.run(f"ln -sfn portitor-manager {shlex.quote(CONFIG_LINK)}", desc=f"ln -s portitor-manager {CONFIG_LINK}")
     install_completion(host, "portitor-config")
     action = install_unit(host, deploy / "systemd" / CONFIG_UNIT, assume_yes)
     host.systemctl("daemon-reload")
@@ -981,7 +1062,7 @@ def install_config(host: Host, binary: Path, deploy: Path, version: str, assume_
             log(f"    portitor-agent init, then: cat {ETC_DIR}/agent.token | sudo -u {WEB_USER} portitor-config set-agent --token-file - --fingerprint <its fingerprint>")
         log(f"    sudo -u {WEB_USER} portitor-config createadmin admin")
         log(f"    systemctl enable --now {CONFIG_UNIT}")
-        log(f"    for portitor-web: URL https://<this host>:8444, fingerprint: sudo -u {WEB_USER} portitor-config fingerprint")
+        log(f"    for portitor-manager: URL https://<this host>:8444, fingerprint: sudo -u {WEB_USER} portitor-config fingerprint")
         return
     if action == "installed":
         host.systemctl("enable", CONFIG_UNIT)
@@ -990,7 +1071,7 @@ def install_config(host: Host, binary: Path, deploy: Path, version: str, assume_
 
 
 def agent_enabled(host: Host) -> bool:
-    """True when host runs the agent: the ISO's portitor-web alone has it
+    """True when host runs the agent: the ISO's portitor-manager alone has it
     installed but disabled."""
     return host.run(f"systemctl is-enabled --quiet {AGENT_UNIT}", check=False, mutate=False).returncode == 0
 
@@ -1007,11 +1088,11 @@ def configured_elsewhere(host: Host) -> bool:
 
 
 def agent_hosts_from_settings(web: Host) -> list[str]:
-    """The firewalls portitor-web on web serves: the hosts of the URLs in the
+    """The firewalls portitor-manager on web serves: the hosts of the URLs in the
     portal's configuration (web.yaml's list before it had one), and the HA
     peers their portitor-configs deploy to (`portitor-config agent-url --all` there). One on localhost is the web
     host itself."""
-    listed = portal_firewalls(web) if web.exists(WEB_CONFIG) else []
+    listed = portal_firewalls(web) if manager_installed(web) else []
     if not listed:
         return []
     hosts: list[str] = []
@@ -1077,7 +1158,7 @@ def wait_for_ha_peer(host: Host, timeout: float = 60) -> None:
             return
         time.sleep(2)
     warn(f"portitor-agent on {host} does not hear its HA peer after {timeout:.0f} s; "
-         f"see `portitor show ha` there")
+         f"see `portitor show cluster` there")
 
 
 def make_plan(args: argparse.Namespace) -> Plan:
@@ -1086,16 +1167,16 @@ def make_plan(args: argparse.Namespace) -> Plan:
     if args.agent and not agent_hosts:
         raise InstallError("--agent: no host")
     if web_host is None and not agent_hosts:
-        # The binary is portitor-config's too: portitor-web is installed
-        # where its web.yaml is.
-        if Path(WEB_CONFIG).exists():
+        # The binary is portitor-config's too: portitor-manager is installed
+        # where its config file is.
+        if Path(WEB_CONFIG).exists() or Path(OLD_WEB_CONFIG).exists():
             web_host = "localhost"
         elif Path(AGENT_BIN).exists():
             agent_hosts = ["localhost"]
         if web_host is None and not agent_hosts:
             raise InstallError(
                 "Portitor is not installed on this host. For a first install pass "
-                "--web [HOST] and/or --agent [HOST]."
+                "--manager [HOST] and/or --agent [HOST]."
             )
     web = Host(web_host, args.ssh_user, args.dry_run) if web_host is not None else None
     if web:
@@ -1103,9 +1184,9 @@ def make_plan(args: argparse.Namespace) -> Plan:
     if web and not agent_hosts and not args.no_agent:
         agent_hosts = agent_hosts_from_settings(web)
         if agent_hosts:
-            log(f"==> portitor-web's firewalls: {', '.join(agent_hosts)}")
+            log(f"==> portitor-manager's firewalls: {', '.join(agent_hosts)}")
         else:
-            log(f"==> No firewalls in {WEB_CONFIG}; not updating a firewall")
+            log(f"==> No firewalls in {manager_paths(web)[1]}; not updating a firewall")
     if args.no_agent:
         agent_hosts = []
     elif web and not agent_hosts and agent_enabled(web):
@@ -1181,7 +1262,7 @@ def needed_archs(plan: Plan, archs: dict[str, str]) -> dict[str, set[str]]:
     """Architecture -> the binaries the hosts of it need."""
     out: dict[str, set[str]] = {}
     if plan.web:
-        out.setdefault(archs["web"], set()).add("portitor-web")
+        out.setdefault(archs["web"], set()).add("portitor-manager")
     for a in plan.agents:
         out.setdefault(archs[agent_key(a)], set()).add("portitor-agent")
     return out
@@ -1190,7 +1271,7 @@ def needed_archs(plan: Plan, archs: dict[str, str]) -> dict[str, set[str]]:
 def installed_versions(plan: Plan) -> dict[str, str]:
     out = {}
     if plan.web:
-        out["web"] = plan.web.version(WEB_BIN) or "not installed"
+        out["web"] = plan.web.version(manager_paths(plan.web)[0]) or "not installed"
     for i, a in enumerate(plan.agents):
         out[agent_key(a, first=i == 0)] = a.version(AGENT_BIN) or "not installed"
     return out
@@ -1381,7 +1462,7 @@ def download_archive(client: GithubClient, rel: Release, arch: str, checksums: d
 
 
 def is_release_root(path: Path) -> bool:
-    files = ("portitor-web", "portitor-agent", "deploy/agent.yaml", "deploy/web.yaml")
+    files = ("portitor-manager", "portitor-agent", "deploy/agent.yaml", "deploy/manager.yaml")
     return all((path / f).is_file() for f in files)
 
 
@@ -1402,7 +1483,7 @@ def extract_archive(archive: Path, dest: Path) -> Path:
     subs = [p for p in dest.iterdir() if p.is_dir() and is_release_root(p)]
     if len(subs) == 1:
         return subs[0]
-    raise InstallError(f"{archive.name} does not contain portitor-web, portitor-agent and deploy/{{agent,web}}.yaml")
+    raise InstallError(f"{archive.name} does not contain portitor-manager, portitor-agent and deploy/{{agent,manager}}.yaml")
 
 
 def prepare_roots(client: GithubClient, rel: Release, archs: set[str], work: Path) -> dict[str, Path]:
@@ -1875,15 +1956,15 @@ def main_source(args: argparse.Namespace) -> int:
     roots = {local_arch(): build_dir}
     # What each architecture needs: the local one always gets both (make release).
     needs = needed_archs(plan, archs)
-    needs[local_arch()] = {"portitor-web", "portitor-agent"}
+    needs[local_arch()] = {"portitor-manager", "portitor-agent"}
     for arch, names in needs.items():
         if arch == local_arch():
             continue
         cross = build_dir / f"{ARCHIVE_OS}_{arch}"
         log(f"==> Building {', '.join(sorted(names))} for {arch}")
         if not args.skip_build:
-            # release builds the frontend into portitor-web, as for this host.
-            target = "release" if "portitor-web" in names else "portitor-agent"
+            # release builds the frontend into portitor-manager, as for this host.
+            target = "release" if "portitor-manager" in names else "portitor-agent"
             build(["make", target, f"BUILD_DIR={cross.relative_to(REPO_DIR)}"],
                   {"CGO_ENABLED": "0", "GOOS": ARCHIVE_OS, "GOARCH": arch}, args.dry_run)
         roots[arch] = cross
@@ -1895,7 +1976,7 @@ def main_source(args: argparse.Namespace) -> int:
                     return 0
                 raise InstallError(f"{root / name} is missing; run without --skip-build")
     # Stamped into the binary; with a dry run or --skip-build, that is build/'s.
-    proc = subprocess.run([str(build_dir / "portitor-web"), "--version"], capture_output=True, text=True, check=False)
+    proc = subprocess.run([str(build_dir / "portitor-manager"), "--version"], capture_output=True, text=True, check=False)
     version = version_of_output(proc.stdout) or git_describe()
 
     ensure_sudo(plan, args.dry_run)
@@ -1912,7 +1993,7 @@ def main_local(args: argparse.Namespace) -> int:
     try:
         if path.is_dir():
             if not is_release_root(path):
-                raise InstallError(f"{path} does not contain portitor-web, portitor-agent and deploy/{{agent,web}}.yaml")
+                raise InstallError(f"{path} does not contain portitor-manager, portitor-agent and deploy/{{agent,manager}}.yaml")
             root = path
         elif path.is_file():
             work = Path(tempfile.mkdtemp(prefix="portitor-local-"))
@@ -1939,7 +2020,7 @@ def main_local(args: argparse.Namespace) -> int:
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="Install or update portitor-web and portitor-agent.",
+        description="Install or update portitor-manager and portitor-agent.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -1950,7 +2031,7 @@ Examples:
   ./install.py --source --dry-run       from this tree, show what would change
   ./install.py --source --agent 192.168.1.1   this tree's agent onto the firewall only
   ./install.py --source --web gui.example.net --agent fw.example.net   this tree onto both
-  ./install.py --install latest --agent fw1,fw2   both hosts of an HA pair, secondary first
+  ./install.py --install latest --agent fw1,fw2   both firewalls of a cluster, secondary first
   ./install.py --local portitor_1.2.0_linux_amd64.tar.gz --web --agent
 
 Environment:
@@ -1959,8 +2040,8 @@ Environment:
 """,
     )
     what = p.add_argument_group("what to install (default: what is installed on this host)")
-    what.add_argument("--web", nargs="?", const="localhost", metavar="HOST",
-                      help="portitor-web on HOST (default this host)")
+    what.add_argument("--manager", "--web", dest="web", nargs="?", const="localhost", metavar="HOST",
+                      help="portitor-manager on HOST (default this host); --web until 1.2.0")
     what.add_argument("--agent", nargs="?", const="localhost", action="append", metavar="HOST[,HOST...]",
                       help="portitor-agent on HOST (default this host); repeat it, or separate hosts "
                            "by commas, for several (one at a time, HA secondaries first)")

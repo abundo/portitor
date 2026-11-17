@@ -168,132 +168,132 @@ ptSystemHostUptime OBJECT-TYPE
         "/system/host/uptime"
     ::= { ptSystem 17 }
 
-ptSystemHaNode OBJECT-TYPE
+ptSystemClusterNode OBJECT-TYPE
     SYNTAX DisplayString
     MAX-ACCESS read-only
     STATUS current
     DESCRIPTION
-        "primary or secondary. (/system/ha/node)"
+        "primary or secondary. (/system/cluster/node)"
     ::= { ptSystem 18 }
 
-ptSystemHa OBJECT-TYPE
+ptSystemCluster OBJECT-TYPE
     SYNTAX DisplayString
     MAX-ACCESS read-only
     STATUS current
     DESCRIPTION
-        "active, standby, ... (/system/ha/state)"
+        "active, standby, ... (/system/cluster/state)"
     ::= { ptSystem 19 }
 
-ptSystemHaTerm OBJECT-TYPE
+ptSystemClusterTerm OBJECT-TYPE
     SYNTAX CounterBasedGauge64
     MAX-ACCESS read-only
     STATUS current
     DESCRIPTION
-        "Raised at each activation. (/system/ha/term)"
+        "Raised at each activation. (/system/cluster/term)"
     ::= { ptSystem 20 }
 
-ptSystemHaPeerAlive OBJECT-TYPE
+ptSystemClusterPeerAlive OBJECT-TYPE
     SYNTAX TruthValue
     MAX-ACCESS read-only
     STATUS current
     DESCRIPTION
-        "/system/ha/peer-alive"
+        "/system/cluster/peer-alive"
     ::= { ptSystem 21 }
 
-ptSystemHaPeerSeen OBJECT-TYPE
+ptSystemClusterPeerSeen OBJECT-TYPE
     SYNTAX DisplayString
     MAX-ACCESS read-only
     STATUS current
     DESCRIPTION
-        "/system/ha/peer-seen"
+        "/system/cluster/peer-seen"
     ::= { ptSystem 22 }
 
-ptSystemHaVoteUntil OBJECT-TYPE
+ptSystemClusterVoteUntil OBJECT-TYPE
     SYNTAX DisplayString
     MAX-ACCESS read-only
     STATUS current
     DESCRIPTION
-        "The witness's vote held until then. (/system/ha/vote-until)"
+        "The witness's vote held until then. (/system/cluster/vote-until)"
     ::= { ptSystem 23 }
 
-ptSystemHaPromiseUntil OBJECT-TYPE
+ptSystemClusterPromiseUntil OBJECT-TYPE
     SYNTAX DisplayString
     MAX-ACCESS read-only
     STATUS current
     DESCRIPTION
-        "A promise to the peer to stay closed until then. (/system/ha/promise-until)"
+        "A promise to the peer to stay standby until then. (/system/cluster/promise-until)"
     ::= { ptSystem 24 }
 
-ptSystemHaWatchdog OBJECT-TYPE
+ptSystemClusterWatchdog OBJECT-TYPE
     SYNTAX DisplayString
     MAX-ACCESS read-only
     STATUS current
     DESCRIPTION
-        "/system/ha/watchdog"
+        "/system/cluster/watchdog"
     ::= { ptSystem 25 }
 
-ptSystemHaEpoch OBJECT-TYPE
+ptSystemClusterEpoch OBJECT-TYPE
     SYNTAX CounterBasedGauge64
     MAX-ACCESS read-only
     STATUS current
     DESCRIPTION
-        "The pair's number of promotions. (/system/ha/epoch)"
+        "The pair's number of promotions. (/system/cluster/epoch)"
     ::= { ptSystem 26 }
 
-ptSystemHaHealth OBJECT-TYPE
+ptSystemClusterHealth OBJECT-TYPE
     SYNTAX Integer32
     MAX-ACCESS read-only
     STATUS current
     DESCRIPTION
-        "Monitored traffic interfaces with a carrier, here. (/system/ha/health)"
+        "Monitored traffic interfaces with a carrier, here. (/system/cluster/health)"
     ::= { ptSystem 27 }
 
-ptSystemHaPeerHealth OBJECT-TYPE
+ptSystemClusterPeerHealth OBJECT-TYPE
     SYNTAX Integer32
     MAX-ACCESS read-only
     STATUS current
     DESCRIPTION
-        "/system/ha/peer-health"
+        "/system/cluster/peer-health"
     ::= { ptSystem 28 }
 
-ptSystemHaMonitored OBJECT-TYPE
+ptSystemClusterMonitored OBJECT-TYPE
     SYNTAX Integer32
     MAX-ACCESS read-only
     STATUS current
     DESCRIPTION
-        "/system/ha/monitored"
+        "/system/cluster/monitored"
     ::= { ptSystem 29 }
 
-ptSystemHaLinkSeen OBJECT-TYPE
+ptSystemClusterLinkSeen OBJECT-TYPE
     SYNTAX DisplayString
     MAX-ACCESS read-only
     STATUS current
     DESCRIPTION
-        "The peer's last answer over the HA link. (/system/ha/link-seen)"
+        "The peer's last answer over the cluster link. (/system/cluster/link-seen)"
     ::= { ptSystem 31 }
 
-ptSystemHaMgmtSeen OBJECT-TYPE
+ptSystemClusterMgmtSeen OBJECT-TYPE
     SYNTAX DisplayString
     MAX-ACCESS read-only
     STATUS current
     DESCRIPTION
-        "The peer's last answer over management. (/system/ha/mgmt-seen)"
+        "The peer's last answer over management. (/system/cluster/mgmt-seen)"
     ::= { ptSystem 32 }
 
-ptSystemHaWitnessSeen OBJECT-TYPE
+ptSystemClusterWitnessSeen OBJECT-TYPE
     SYNTAX DisplayString
     MAX-ACCESS read-only
     STATUS current
     DESCRIPTION
-        "The witness's last vote. (/system/ha/witness-seen)"
+        "The witness's last vote. (/system/cluster/witness-seen)"
     ::= { ptSystem 33 }
 
-ptSystemHaPeerVersion OBJECT-TYPE
+ptSystemClusterPeerVersion OBJECT-TYPE
     SYNTAX DisplayString
     MAX-ACCESS read-only
     STATUS current
     DESCRIPTION
-        "The peer's release, as its heartbeats tell it. (/system/ha/peer-version)"
+        "The peer's release, as its heartbeats tell it. (/system/cluster/peer-version)"
     ::= { ptSystem 34 }
 
 ptSystemErrors OBJECT-TYPE
@@ -3634,182 +3634,182 @@ ptSystemHostDisksUsed OBJECT-TYPE
         "/system/host/disks/used"
     ::= { ptSystemHostDisksEntry 4 }
 
-ptSystemHaDhcpTable OBJECT-TYPE
-    SYNTAX SEQUENCE OF PtSystemHaDhcpEntry
+ptSystemClusterDhcpTable OBJECT-TYPE
+    SYNTAX SEQUENCE OF PtSystemClusterDhcpEntry
     MAX-ACCESS not-accessible
     STATUS current
     DESCRIPTION
-        "Each virtual firewall's DHCP lease sync to the standby. (/system/ha/dhcp)"
+        "Each virtual firewall's DHCP lease sync to the standby. (/system/cluster/dhcp)"
     ::= { portitorMIB 36 }
 
-ptSystemHaDhcpEntry OBJECT-TYPE
-    SYNTAX PtSystemHaDhcpEntry
+ptSystemClusterDhcpEntry OBJECT-TYPE
+    SYNTAX PtSystemClusterDhcpEntry
     MAX-ACCESS not-accessible
     STATUS current
     DESCRIPTION
-        "A row of /system/ha/dhcp."
-    INDEX { ptSystemHaDhcpInstance }
-    ::= { ptSystemHaDhcpTable 1 }
+        "A row of /system/cluster/dhcp."
+    INDEX { ptSystemClusterDhcpInstance }
+    ::= { ptSystemClusterDhcpTable 1 }
 
-PtSystemHaDhcpEntry ::= SEQUENCE {
-    ptSystemHaDhcpInstance DisplayString,
-    ptSystemHaDhcpSent DisplayString,
-    ptSystemHaDhcpReceived DisplayString,
-    ptSystemHaDhcpError DisplayString
+PtSystemClusterDhcpEntry ::= SEQUENCE {
+    ptSystemClusterDhcpInstance DisplayString,
+    ptSystemClusterDhcpSent DisplayString,
+    ptSystemClusterDhcpReceived DisplayString,
+    ptSystemClusterDhcpError DisplayString
 }
 
-ptSystemHaDhcpInstance OBJECT-TYPE
+ptSystemClusterDhcpInstance OBJECT-TYPE
     SYNTAX DisplayString (SIZE (0..64))
     MAX-ACCESS not-accessible
     STATUS current
     DESCRIPTION
-        "/system/ha/dhcp/instance"
-    ::= { ptSystemHaDhcpEntry 1 }
+        "/system/cluster/dhcp/instance"
+    ::= { ptSystemClusterDhcpEntry 1 }
 
-ptSystemHaDhcpSent OBJECT-TYPE
+ptSystemClusterDhcpSent OBJECT-TYPE
     SYNTAX DisplayString
     MAX-ACCESS read-only
     STATUS current
     DESCRIPTION
-        "/system/ha/dhcp/sent"
-    ::= { ptSystemHaDhcpEntry 2 }
+        "/system/cluster/dhcp/sent"
+    ::= { ptSystemClusterDhcpEntry 2 }
 
-ptSystemHaDhcpReceived OBJECT-TYPE
+ptSystemClusterDhcpReceived OBJECT-TYPE
     SYNTAX DisplayString
     MAX-ACCESS read-only
     STATUS current
     DESCRIPTION
-        "/system/ha/dhcp/received"
-    ::= { ptSystemHaDhcpEntry 3 }
+        "/system/cluster/dhcp/received"
+    ::= { ptSystemClusterDhcpEntry 3 }
 
-ptSystemHaDhcpError OBJECT-TYPE
+ptSystemClusterDhcpError OBJECT-TYPE
     SYNTAX DisplayString
     MAX-ACCESS read-only
     STATUS current
     DESCRIPTION
-        "/system/ha/dhcp/error"
-    ::= { ptSystemHaDhcpEntry 4 }
+        "/system/cluster/dhcp/error"
+    ::= { ptSystemClusterDhcpEntry 4 }
 
-ptSystemHaPairTable OBJECT-TYPE
-    SYNTAX SEQUENCE OF PtSystemHaPairEntry
+ptSystemClustersTable OBJECT-TYPE
+    SYNTAX SEQUENCE OF PtSystemClustersEntry
     MAX-ACCESS not-accessible
     STATUS current
     DESCRIPTION
-        "Each HA pair as one: which host is active, whether the standby is ready, the configuration on both, and whether it can fail over now (docs/ha.md). (/system/ha-pair)"
+        "Each firewall cluster as one: which firewall is active, whether the standby is ready, the configuration on both, and whether it can fail over now. (/system/clusters)"
     ::= { portitorMIB 69 }
 
-ptSystemHaPairEntry OBJECT-TYPE
-    SYNTAX PtSystemHaPairEntry
+ptSystemClustersEntry OBJECT-TYPE
+    SYNTAX PtSystemClustersEntry
     MAX-ACCESS not-accessible
     STATUS current
     DESCRIPTION
-        "A row of /system/ha-pair."
-    INDEX { ptSystemHaPairName }
-    ::= { ptSystemHaPairTable 1 }
+        "A row of /system/clusters."
+    INDEX { ptSystemClustersName }
+    ::= { ptSystemClustersTable 1 }
 
-PtSystemHaPairEntry ::= SEQUENCE {
-    ptSystemHaPairName DisplayString,
-    ptSystemHaPairPrimary DisplayString,
-    ptSystemHaPairSecondary DisplayString,
-    ptSystemHaPairActive DisplayString,
-    ptSystemHaPairFailoverReady TruthValue
+PtSystemClustersEntry ::= SEQUENCE {
+    ptSystemClustersName DisplayString,
+    ptSystemClustersPrimary DisplayString,
+    ptSystemClustersSecondary DisplayString,
+    ptSystemClustersActive DisplayString,
+    ptSystemClustersFailoverReady TruthValue
 }
 
-ptSystemHaPairName OBJECT-TYPE
+ptSystemClustersName OBJECT-TYPE
     SYNTAX DisplayString (SIZE (0..64))
     MAX-ACCESS not-accessible
     STATUS current
     DESCRIPTION
-        "The primary's name. (/system/ha-pair/name)"
-    ::= { ptSystemHaPairEntry 1 }
+        "The primary's name. (/system/clusters/name)"
+    ::= { ptSystemClustersEntry 1 }
 
-ptSystemHaPairPrimary OBJECT-TYPE
+ptSystemClustersPrimary OBJECT-TYPE
     SYNTAX DisplayString
     MAX-ACCESS read-only
     STATUS current
     DESCRIPTION
-        "/system/ha-pair/primary"
-    ::= { ptSystemHaPairEntry 2 }
+        "/system/clusters/primary"
+    ::= { ptSystemClustersEntry 2 }
 
-ptSystemHaPairSecondary OBJECT-TYPE
+ptSystemClustersSecondary OBJECT-TYPE
     SYNTAX DisplayString
     MAX-ACCESS read-only
     STATUS current
     DESCRIPTION
-        "/system/ha-pair/secondary"
-    ::= { ptSystemHaPairEntry 3 }
+        "/system/clusters/secondary"
+    ::= { ptSystemClustersEntry 3 }
 
-ptSystemHaPairActive OBJECT-TYPE
+ptSystemClustersActive OBJECT-TYPE
     SYNTAX DisplayString
     MAX-ACCESS read-only
     STATUS current
     DESCRIPTION
-        "The active host; none when empty. (/system/ha-pair/active)"
-    ::= { ptSystemHaPairEntry 4 }
+        "The active host; none when empty. (/system/clusters/active)"
+    ::= { ptSystemClustersEntry 4 }
 
-ptSystemHaPairFailoverReady OBJECT-TYPE
+ptSystemClustersFailoverReady OBJECT-TYPE
     SYNTAX TruthValue
     MAX-ACCESS read-only
     STATUS current
     DESCRIPTION
-        "No check fails. (/system/ha-pair/failover-ready)"
-    ::= { ptSystemHaPairEntry 5 }
+        "No check fails. (/system/clusters/failover-ready)"
+    ::= { ptSystemClustersEntry 5 }
 
-ptSystemHaPairChecksTable OBJECT-TYPE
-    SYNTAX SEQUENCE OF PtSystemHaPairChecksEntry
+ptSystemClustersChecksTable OBJECT-TYPE
+    SYNTAX SEQUENCE OF PtSystemClustersChecksEntry
     MAX-ACCESS not-accessible
     STATUS current
     DESCRIPTION
-        "/system/ha-pair/checks"
+        "/system/clusters/checks"
     ::= { portitorMIB 70 }
 
-ptSystemHaPairChecksEntry OBJECT-TYPE
-    SYNTAX PtSystemHaPairChecksEntry
+ptSystemClustersChecksEntry OBJECT-TYPE
+    SYNTAX PtSystemClustersChecksEntry
     MAX-ACCESS not-accessible
     STATUS current
     DESCRIPTION
-        "A row of /system/ha-pair/checks."
-    INDEX { ptSystemHaPairChecksHa-pairName, ptSystemHaPairChecksName }
-    ::= { ptSystemHaPairChecksTable 1 }
+        "A row of /system/clusters/checks."
+    INDEX { ptSystemClustersChecksClustersName, ptSystemClustersChecksName }
+    ::= { ptSystemClustersChecksTable 1 }
 
-PtSystemHaPairChecksEntry ::= SEQUENCE {
-    ptSystemHaPairChecksHa-pairName DisplayString,
-    ptSystemHaPairChecksName DisplayString,
-    ptSystemHaPairChecksStatus DisplayString,
-    ptSystemHaPairChecksMessage DisplayString
+PtSystemClustersChecksEntry ::= SEQUENCE {
+    ptSystemClustersChecksClustersName DisplayString,
+    ptSystemClustersChecksName DisplayString,
+    ptSystemClustersChecksStatus DisplayString,
+    ptSystemClustersChecksMessage DisplayString
 }
 
-ptSystemHaPairChecksHa-pairName OBJECT-TYPE
+ptSystemClustersChecksClustersName OBJECT-TYPE
     SYNTAX DisplayString (SIZE (0..64))
     MAX-ACCESS not-accessible
     STATUS current
     DESCRIPTION
-        "The primary's name. (/system/ha-pair/name)"
-    ::= { ptSystemHaPairChecksEntry 1 }
+        "The primary's name. (/system/clusters/name)"
+    ::= { ptSystemClustersChecksEntry 1 }
 
-ptSystemHaPairChecksName OBJECT-TYPE
+ptSystemClustersChecksName OBJECT-TYPE
     SYNTAX DisplayString (SIZE (0..64))
     MAX-ACCESS not-accessible
     STATUS current
     DESCRIPTION
-        "active, standby, paths, witness, watchdog, configuration, release or dhcp. (/system/ha-pair/checks/name)"
-    ::= { ptSystemHaPairChecksEntry 2 }
+        "active, standby, paths, witness, watchdog, configuration, release or dhcp. (/system/clusters/checks/name)"
+    ::= { ptSystemClustersChecksEntry 2 }
 
-ptSystemHaPairChecksStatus OBJECT-TYPE
+ptSystemClustersChecksStatus OBJECT-TYPE
     SYNTAX DisplayString
     MAX-ACCESS read-only
     STATUS current
     DESCRIPTION
-        "ok, warn or fail. (/system/ha-pair/checks/status)"
-    ::= { ptSystemHaPairChecksEntry 3 }
+        "ok, warn or fail. (/system/clusters/checks/status)"
+    ::= { ptSystemClustersChecksEntry 3 }
 
-ptSystemHaPairChecksMessage OBJECT-TYPE
+ptSystemClustersChecksMessage OBJECT-TYPE
     SYNTAX DisplayString
     MAX-ACCESS read-only
     STATUS current
     DESCRIPTION
-        "/system/ha-pair/checks/message"
-    ::= { ptSystemHaPairChecksEntry 4 }
+        "/system/clusters/checks/message"
+    ::= { ptSystemClustersChecksEntry 4 }
 
 ptInterfacesTable OBJECT-TYPE
     SYNTAX SEQUENCE OF PtInterfacesEntry
@@ -6711,22 +6711,22 @@ ptStateGroup OBJECT-GROUP
         ptSystemHostCpuTotal,
         ptSystemHostLoad,
         ptSystemHostUptime,
-        ptSystemHaNode,
-        ptSystemHa,
-        ptSystemHaTerm,
-        ptSystemHaPeerAlive,
-        ptSystemHaPeerSeen,
-        ptSystemHaVoteUntil,
-        ptSystemHaPromiseUntil,
-        ptSystemHaWatchdog,
-        ptSystemHaEpoch,
-        ptSystemHaHealth,
-        ptSystemHaPeerHealth,
-        ptSystemHaMonitored,
-        ptSystemHaLinkSeen,
-        ptSystemHaMgmtSeen,
-        ptSystemHaWitnessSeen,
-        ptSystemHaPeerVersion,
+        ptSystemClusterNode,
+        ptSystemCluster,
+        ptSystemClusterTerm,
+        ptSystemClusterPeerAlive,
+        ptSystemClusterPeerSeen,
+        ptSystemClusterVoteUntil,
+        ptSystemClusterPromiseUntil,
+        ptSystemClusterWatchdog,
+        ptSystemClusterEpoch,
+        ptSystemClusterHealth,
+        ptSystemClusterPeerHealth,
+        ptSystemClusterMonitored,
+        ptSystemClusterLinkSeen,
+        ptSystemClusterMgmtSeen,
+        ptSystemClusterWitnessSeen,
+        ptSystemClusterPeerVersion,
         ptSystemErrors,
         ptVrrpError,
         ptBfdError,
@@ -6942,15 +6942,15 @@ ptStateGroup OBJECT-GROUP
         ptSystemHostDisksTotal,
         ptSystemHostDisksFree,
         ptSystemHostDisksUsed,
-        ptSystemHaDhcpSent,
-        ptSystemHaDhcpReceived,
-        ptSystemHaDhcpError,
-        ptSystemHaPairPrimary,
-        ptSystemHaPairSecondary,
-        ptSystemHaPairActive,
-        ptSystemHaPairFailoverReady,
-        ptSystemHaPairChecksStatus,
-        ptSystemHaPairChecksMessage,
+        ptSystemClusterDhcpSent,
+        ptSystemClusterDhcpReceived,
+        ptSystemClusterDhcpError,
+        ptSystemClustersPrimary,
+        ptSystemClustersSecondary,
+        ptSystemClustersActive,
+        ptSystemClustersFailoverReady,
+        ptSystemClustersChecksStatus,
+        ptSystemClustersChecksMessage,
         ptInterfacesKind,
         ptInterfacesState,
         ptInterfacesMtu,

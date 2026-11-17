@@ -22,7 +22,7 @@ import (
 )
 
 // The portal's configuration is reached as a firewall's is: the CLI
-// (`portitor-web cli`, and over SSH on ssh_listen) and NETCONF (the SSH
+// (`portitor-manager cli`, and over SSH on ssh_listen) and NETCONF (the SSH
 // subsystem), on the candidate of PortalStore. Every portal user may read
 // and change all of it.
 

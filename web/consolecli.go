@@ -17,7 +17,7 @@ import (
 	"github.com/abundo/portitor/models"
 )
 
-// Configuration from the console: portitor-config (or portitor-web) run
+// Configuration from the console: portitor-config run
 // with an "api", "set" or "commit" command answers one API request
 // in-process, as consoleUser, a global admin. Whoever can run it can read
 // the data directory already (root, or its service user), so it asks for no

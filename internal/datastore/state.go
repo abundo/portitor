@@ -49,6 +49,10 @@ func fillObject(n *Node, obj map[string]json.RawMessage) {
 	for k, raw := range obj {
 		s := n.S.Child(strings.ReplaceAll(k, "_", "-"))
 		if s == nil {
+			// The agent's field keeps the node's old name (px:was: ha).
+			s = n.S.Renamed(strings.ReplaceAll(k, "_", "-"))
+		}
+		if s == nil {
 			continue
 		}
 		switch s.Kind {

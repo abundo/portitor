@@ -4,6 +4,7 @@
 submodule portitor-state {
   yang-version 1.1;
   belongs-to portitor { prefix pt; }
+  import portitor-extensions { prefix px; }
 
   description
     "Portitor state: what the firewalls run and see, read-only (config
@@ -48,15 +49,16 @@ submodule portitor-state {
           leaf used { type uint64; units bytes; }
         }
       }
-      container ha {
-        description "The host's place in its HA pair and its quorum (docs/ha.md).";
+      container cluster {
+        px:was "ha";
+        description "The firewall's place in its firewall cluster.";
         leaf node { type string; description "primary or secondary."; }
         leaf state { type string; description "active, standby, ..."; }
         leaf term { type int64; description "Raised at each activation."; }
         leaf peer-alive { type boolean; }
         leaf peer-seen { type string; }
         leaf vote-until { type string; description "The witness's vote held until then."; }
-        leaf promise-until { type string; description "A promise to the peer to stay closed until then."; }
+        leaf promise-until { type string; description "A promise to the peer to stay standby until then."; }
         leaf watchdog { type string; }
         leaf epoch { type int64; description "The pair's number of promotions."; }
         leaf health { type int32; description "Monitored traffic interfaces with a carrier, here."; }
@@ -70,17 +72,18 @@ submodule portitor-state {
           leaf received { type string; }
           leaf error { type string; }
         }
-        leaf link-seen { type string; description "The peer's last answer over the HA link."; }
+        leaf link-seen { type string; description "The peer's last answer over the cluster link."; }
         leaf mgmt-seen { type string; description "The peer's last answer over management."; }
         leaf witness-seen { type string; description "The witness's last vote."; }
         leaf peer-version { type string; description "The peer's release, as its heartbeats tell it."; }
       }
-      list ha-pair {
+      list clusters {
         key "name";
+        px:was "ha-pair";
         description
-          "Each HA pair as one: which host is active, whether the standby is
-           ready, the configuration on both, and whether it can fail over now
-           (docs/ha.md).";
+          "Each firewall cluster as one: which firewall is active, whether the
+           standby is ready, the configuration on both, and whether it can
+           fail over now.";
         leaf name { type string; description "The primary's name."; }
         leaf primary { type string; }
         leaf secondary { type string; }

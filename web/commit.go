@@ -828,7 +828,7 @@ type firewallStatus struct {
 	Generation int64  `json:"generation"`
 	Error      string `json:"error,omitempty"`
 	// VersionMismatch says how the agent's version differs from
-	// portitor-web's; empty when they match.
+	// portitor-config's; empty when they match.
 	VersionMismatch string                  `json:"version_mismatch,omitempty"`
 	Pending         *agentapi.PendingStatus `json:"pending,omitempty"`
 	HA              *agentapi.HAStatus      `json:"ha,omitempty"`

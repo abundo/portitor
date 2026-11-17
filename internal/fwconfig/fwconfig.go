@@ -23,7 +23,7 @@ const Version = 3
 
 type Document struct {
 	Version    int        `json:"version"`
-	Generation int64      `json:"generation"` // monotonic deploy id, set by portitor-web
+	Generation int64      `json:"generation"` // monotonic deploy id, set by portitor-config
 	Instances  []Instance `json:"instances"`
 	Links      []Link     `json:"links"`
 	// IPLists are address lists the agent downloads (CrowdSec, or a URL
@@ -514,7 +514,7 @@ const (
 // MaxRate bounds a rate limit's rate and burst.
 const MaxRate = 1000000
 
-// ServiceMatch is one protocol match of a rule. portitor-web expands the
+// ServiceMatch is one protocol match of a rule. portitor-config expands the
 // services a rule names into these.
 type ServiceMatch struct {
 	// Protocol is tcp, udp or sctp (with ports), icmp or icmpv6 (with a

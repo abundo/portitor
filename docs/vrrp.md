@@ -24,8 +24,8 @@ You set it up under *Network → Routing → VRRP*, in two tabs:
 FRR must be installed on the firewall (`apt install frr frr-pythontools`), as for
 BGP.
 
-VRRP is for firewalls that aren't an [HA pair](ha.md), or for sharing a gateway with
-other routers. An HA pair shares its addresses itself, and refuses VRRP.
+VRRP is for firewalls that aren't a [firewall cluster](cluster.md), or for sharing a gateway with
+other routers. A firewall cluster shares its addresses itself, and refuses VRRP.
 
 ## A gateway shared by two firewalls
 

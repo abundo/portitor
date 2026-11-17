@@ -16,12 +16,13 @@ import (
 	"strings"
 
 	"github.com/abundo/portitor/internal/fwconfig"
+	"github.com/abundo/portitor/models"
 )
 
 // Pairing an HA secondary without copying anything by hand: on the
 // secondary `portitor-config secondary-info` prints what the primary needs
 // (SecondaryInfo), and on the primary `portitor-config add-secondary` reads
-// it on standard input and makes the pair. portitor-web (the portal) runs
+// it on standard input and makes the pair. portitor-manager (the portal) runs
 // both over SSH and carries the JSON between them; the setup's
 // `portitor-setup --join` runs add-secondary with the same data from a
 // secondary string. The token travels on standard input only.
@@ -55,7 +56,7 @@ func ReadSecondaryInfo(s *Server, cfg *Config) (*SecondaryInfo, error) {
 		return nil, err
 	}
 	if len(fws) != 1 {
-		return nil, errors.New("this host is part of a pair or has other firewalls already: only a new host can be added as an HA secondary")
+		return nil, errors.New("this host is part of a cluster or has other firewalls already: only a new host can be added as a cluster secondary")
 	}
 	fw := fws[0]
 	if fw.AgentToken == "" || fw.AgentFingerprint == "" {
@@ -66,7 +67,7 @@ func ReadSecondaryInfo(s *Server, cfg *Config) (*SecondaryInfo, error) {
 		return nil, err
 	}
 	if !pi.TLS {
-		return nil, errors.New("portitor-config serves plain HTTP here: the pair needs its tls_cert")
+		return nil, errors.New("portitor-config serves plain HTTP here: the cluster needs its tls_cert")
 	}
 	agentPort := 0
 	if u, err := url.Parse(fw.AgentURL); err == nil {
@@ -146,7 +147,7 @@ func AddSecondary(ctx context.Context, s *Server, info SecondaryInfo, externalWi
 	}
 	for _, f := range fws {
 		if f.HAPrimaryID != nil && *f.HAPrimaryID == *own {
-			return fmt.Errorf("this host has an HA secondary already (%s; Admin -> Firewalls)", f.Name)
+			return fmt.Errorf("this host has a cluster secondary already (%s; Admin -> Firewalls)", f.Name)
 		}
 		if f.Name == info.Name {
 			return fmt.Errorf("there is a firewall %s already", info.Name)
@@ -162,8 +163,8 @@ func AddSecondary(ctx context.Context, s *Server, info SecondaryInfo, externalWi
 	var mgmtAddr netip.Prefix
 	haLink := false
 	for _, i := range ifs {
-		switch i["ha-role"] {
-		case "ha_link":
+		switch i["cluster-role"] {
+		case models.ClusterLink:
 			haLink = true
 		case "management":
 			mgmt, _ = i["name"].(string)
@@ -175,7 +176,7 @@ func AddSecondary(ctx context.Context, s *Server, info SecondaryInfo, externalWi
 		}
 	}
 	if !haLink {
-		return errors.New("this host has no HA link interface: run the primary's setup first")
+		return errors.New("this host has no cluster link interface: run the primary's setup first")
 	}
 	if mgmt == "" || !mgmtAddr.IsValid() {
 		return errors.New("this host has no management interface with an address: run the primary's setup first")

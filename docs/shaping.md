@@ -34,7 +34,7 @@ test); the latency should barely rise during the download and upload.
 - What it receives is redirected to an IFB device named `ifb-<interface>` (a hash
   for a long name), with a CAKE queue at the download rate. That device is the
   firewall's own: interface names starting with `ifb-` are reserved.
-- The agent owns the queues of its interfaces: turning shaping off removes the CAKE
+- The firewall owns the queues of its interfaces: turning shaping off removes the CAKE
   queue and the redirect. A disabled interface is not shaped.
 - It needs the kernel's `sch_cake` and `ifb` modules, which Debian's kernel has.
 

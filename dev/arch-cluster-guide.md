@@ -3,6 +3,12 @@
 
 # High availability (HA pairs)
 
+> **Developer reference.** This was a user guide until 1.1.0; the user guides are now
+> docs/cluster.md and docs/cluster-runbook.md. It is kept here for its implementation details (timings,
+> mechanisms, file names, commands). It still uses the names of before 1.1.0:
+> *portitor-web* is portitor-manager, an *HA pair* a firewall cluster, *open/closed*
+> active/standby (and fenced), the *HA link* the cluster link.
+
 Two firewalls can run as an **HA pair**: one **active** host forwards and answers for
 the pair's addresses, and a **standby** with the same configuration waits to take over.
 The two have the same addresses and the same MAC addresses on their traffic
@@ -23,6 +29,9 @@ DHCP leases and their open connections.
 
 **Primary and secondary** say who owns the configuration. **Active and standby** say who
 forwards. Either host can be active; a failover changes no configuration.
+
+For what to do when a host, the witness or a link fails, during maintenance, or when
+both hosts are closed, see the [HA operator runbook](ha-runbook.md).
 
 ## What you need
 

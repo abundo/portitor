@@ -85,8 +85,8 @@ func TestGoldenOpenVPNDirectory(t *testing.T) {
 func TestGoldenHAPair(t *testing.T) {
 	env, agents, _ := haPairConfigured(t)
 	env.post("instance=main/rule", map[string]any{"chain": "input", "action": "drop", "enabled": true})
-	env.setFirewall("fw1b", map[string]any{"ha-secret": strings.Repeat("P", 43)})
-	env.setFirewall("firewall", map[string]any{"ha-witness-secret": strings.Repeat("W", 43)})
+	env.setFirewall("fw1b", map[string]any{"cluster-secret": strings.Repeat("P", 43)})
+	env.setFirewall("firewall", map[string]any{"cluster-witness-secret": strings.Repeat("W", 43)})
 	if rec := env.do("POST", "/api/deploy/apply", map[string]any{}); rec.Code != http.StatusOK {
 		t.Fatalf("commit: %d %s", rec.Code, rec.Body)
 	}

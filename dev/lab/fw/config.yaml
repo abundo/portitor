@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 # Lab portitor-config: the firewall's configuration, its GUI on the LAN,
-# served by portitor-web on mgmt (192.168.1.2).
+# served by portitor-manager on mgmt (192.168.1.2).
 bind: 0.0.0.0:8444
 jwt_secret: lab-only-secret-change-me-0123456789abcdef
 db:

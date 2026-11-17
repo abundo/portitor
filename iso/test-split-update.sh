@@ -13,12 +13,12 @@
 #   build/vm-sup-web  role web    (iso/test-split-web.answers), 192.168.1.10
 #
 # Builds the old release's two test ISOs with that release's own iso/ files,
-# installs and boots both, joins the firewall to portitor-web, the portal to
+# installs and boots both, joins the firewall to portitor-manager, the portal to
 # the firewall's portitor-config (portitor-setup --join with its portal
-# string), and deploys through portitor-web. Then the web VM gets SSH as root
+# string), and deploys through portitor-manager. Then the web VM gets SSH as root
 # to the firewall and runs this tree's install.py --local there, as a
 # transient unit, with no host given: it must find the firewall in
-# portitor-web's configuration and update it first. Afterwards: the
+# portitor-manager's configuration and update it first. Afterwards: the
 # versions, the units, the interfaces kept, the data directory's layout.json,
 # the GUI login through the portal at
 # /fw/fw/, portitor-config reaching its agent and a deploy. Logs in
@@ -44,7 +44,7 @@ if [[ -z $from ]]; then
 fi
 [[ $from == v* ]] || from=v$from
 
-# vm NAME CMD...: iso/vm.sh for the firewall (fw) or portitor-web (web).
+# vm NAME CMD...: iso/vm.sh for the firewall (fw) or portitor-manager (web).
 vm() {
 	local name=$1; shift
 	local id=1 other=web
@@ -73,8 +73,9 @@ log "Building this tree's release archive"
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 make -s release
 to=$(build/portitor-agent --version | awk '{ print $NF }')
 stage=$(mktemp -d build/sup-stage.XXXXXX)
-cp build/portitor-web build/portitor-agent install.py LICENSE README.md "$stage/"
+cp build/portitor-manager build/portitor-agent install.py LICENSE README.md "$stage/"
 cp -r deploy "$stage/"
+mkdir -p "$stage/iso" && cp iso/portitor-setup.py iso/portitor-setup.bash "$stage/iso/"
 tar -czf build/vm-sup-web/to.tar.gz -C "$stage" .
 rm -rf "$stage" "$old"
 log "Updating $from -> $to"
@@ -136,7 +137,7 @@ def call(path, body=None):
     data = None if body is None else json.dumps(body).encode()
     return op.open(urllib.request.Request(base + path, data, {"Content-Type": "application/json"}), timeout=60).read().decode()
 def portal_login():
-    # Behind portitor-web (/fw/<name>) its own login comes first.
+    # Behind portitor-manager (/fw/<name>) its own login comes first.
     req = urllib.request.Request(base.split("/fw/")[0] + "/portal/v1/login",
                                  json.dumps({"user": "portitor", "password": password}).encode(), {"Content-Type": "application/json"})
     op.open(req, timeout=60).close()
@@ -203,7 +204,7 @@ else
 fi
 
 log "Checking $to"
-for bin in fw:portitor-agent web:portitor-web fw:portitor-web; do
+for bin in fw:portitor-agent web:portitor-manager fw:portitor-manager; do
 	got=$(guest "${bin%%:*}" "${bin#*:}" --version | awk '{ print $NF }') || got=?
 	if [[ ${got#v} == "${to#v}" ]]; then
 		echo "ok    ${bin%%:*}: ${bin#*:} $got"
@@ -218,11 +219,13 @@ check fw "portitor-agent running" systemctl is-active --quiet portitor-agent.ser
 check fw "boot-time policy enabled" systemctl is-enabled --quiet portitor-early.service
 check fw "portitor-config running" systemctl is-active --quiet portitor-config.service
 check fw "nftables firewall table loaded" nft list table inet firewall
-check web "portitor-web running" systemctl is-active --quiet portitor-web.service
-check web "the portal lists the firewall" sh -c "runuser -u portitor -- portitor-web -f /etc/portitor/web.yaml list-firewalls | grep -q 'https://192.168.1.1:443\$'"
+check web "portitor-manager running" systemctl is-active --quiet portitor-manager.service
+check web "the portal lists the firewall" sh -c "runuser -u portitor -- portitor-manager -f /etc/portitor/manager.yaml list-firewalls | grep -q 'https://192.168.1.1:443\$'"
 check fw "the data directory has its layout" test -s /var/lib/portitor-config/layout.json
 portal=https://127.0.0.1/fw/fw
-if ifaces_after=$(gui "$portal" get /api/config/candidate/instance | names) && [[ $ifaces_after == "$ifaces_before" ]]; then
+# Since 1.1.0 the host's interfaces are the top level's.
+names_after() { python3 -c 'import json, sys; s = sys.stdin.read(); d = json.JSONDecoder(); a, n = d.raw_decode(s.lstrip()); b = d.raw_decode(s.lstrip()[n:].lstrip())[0]; t = [a, b]; print(sorted([i["name"] for i in t[0]] + [i["name"] for x in t[1] for i in x.get("interface", [])]))'; }
+if ifaces_after=$({ gui "$portal" get /api/config/candidate/interface; echo; gui "$portal" get /api/config/candidate/instance || echo '[]'; } | names_after) && [[ $ifaces_after == "$ifaces_before" ]]; then
 	echo "ok    interfaces kept through the portal: $ifaces_after"
 else
 	fail "interfaces: $ifaces_before before, ${ifaces_after:-none} after"

@@ -24,7 +24,7 @@ import (
 )
 
 // An external witness (Firewall.HAWitness external) runs on a third host:
-// portitor-web, or portitor-web witness alone. It is given the pair's
+// portitor-manager, or portitor-manager witness alone. It is given the pair's
 // witness string, which portitor-config shows on the primary (Admin ->
 // Firewalls, or portitor-config witness-string): both hosts' agents, their
 // certificate pins, and the witness secret, which opens nothing but the
@@ -69,7 +69,7 @@ func ParseWitness(s string) (*WitnessPair, error) {
 		return nil, errors.New("the witness string is damaged (JSON); copy it again")
 	}
 	if len(w.Hosts) != 2 || len(w.Secret) < 32 || w.Pair == "" {
-		return nil, errors.New("the witness string lacks the pair's hosts or secret")
+		return nil, errors.New("the witness string lacks the cluster's hosts or secret")
 	}
 	for _, h := range w.Hosts {
 		if u, err := url.Parse(h.URL); err != nil || u.Scheme != "https" || u.Host == "" {
@@ -102,7 +102,7 @@ func NewWitness(strs []string) (*Witness, error) {
 			return nil, err
 		}
 		if seen[p.Pair] {
-			return nil, fmt.Errorf("witness: pair %s twice", p.Pair)
+			return nil, fmt.Errorf("witness: cluster %s twice", p.Pair)
 		}
 		seen[p.Pair] = true
 		t := witnessTarget{name: p.Pair}
@@ -121,7 +121,7 @@ func NewWitness(strs []string) (*Witness, error) {
 // Run keeps the pairs' votes until ctx is cancelled.
 func (w *Witness) Run(ctx context.Context) {
 	for _, p := range w.pairs {
-		slog.Info("witness of HA pair", "pair", p.name)
+		slog.Info("witness of firewall cluster", "pair", p.name)
 	}
 	t := time.NewTicker(witnessBeat)
 	defer t.Stop()
@@ -144,15 +144,15 @@ func (w *Witness) Run(ctx context.Context) {
 // for its external witness.
 func (s *Server) witnessString(fw *models.Firewall) (string, error) {
 	if fw.HAPrimaryID != nil {
-		return "", bad(fw.Name + " is a secondary: its primary has the pair's witness string")
+		return "", bad(fw.Name + " is a secondary: its primary has the cluster's witness string")
 	}
 	secp, _ := s.secondaryOf(fw.ID)
 	if secp == nil {
-		return "", bad(fw.Name + " is not the primary of an HA pair")
+		return "", bad(fw.Name + " is not the primary of a firewall cluster")
 	}
 	sec := *secp
 	if fw.HAWitness != models.HAWitnessExternal || fw.HAWitnessSecret == "" {
-		return "", bad("the pair's witness is its portitor-config: set HA witness to external first")
+		return "", bad("the cluster's witness is its portitor-config: set cluster witness to external first")
 	}
 	w := WitnessPair{Pair: fw.Name, Secret: fw.HAWitnessSecret}
 	for _, h := range []models.Firewall{*fw, sec} {
@@ -198,7 +198,7 @@ func WitnessString(s *Server) (string, error) {
 		}
 	}
 	if fw == nil {
-		return "", errors.New("no HA pair here")
+		return "", errors.New("no firewall cluster here")
 	}
 	str, err := s.witnessString(fw)
 	var br *badRequest

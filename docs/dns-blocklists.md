@@ -101,6 +101,6 @@ reaches BIND, so a list can't do anything but block names.
 ## Memory
 
 Every entry costs BIND memory, in each virtual firewall that uses the list, on both
-hosts of an HA pair: about 500 MB per million entries. Hagezi's TIF mini (some 425 000
+firewalls of a cluster: about 500 MB per million entries. Hagezi's TIF mini (some 425 000
 entries) takes about 230 MB, the full list over 2 GB. Watch the memory on the dashboard
 after adding a large list.

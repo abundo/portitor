@@ -45,8 +45,8 @@ input and forward).
 4. Loopback and the ICMP that IPv4 and IPv6 need to work are allowed.
 5. **Auto rules** (input only, locked): what the configured services need, such as
    DHCP and DNS on the interfaces that serve them, WireGuard's port and ACME's port 80.
-   In the default virtual firewall the agent's management port, SSH and the GUI
-   (portitor-config) stay open to the agent's `allow_from` addresses (anti-lockout). They come before your rules, so
+   In the default virtual firewall SSH and the GUI stay open to the firewall's
+   anti-lockout addresses. They come before your rules, so
    a rule that closes an interface to the firewall still keeps DHCP and DNS working on it.
 6. **Your rules**, in the order shown.
 7. **Port forwards** (forward only, locked): connections a NAT port forward redirected
@@ -95,7 +95,7 @@ A host in *Hosts & prefixes* with both an IPv4 and an IPv6 address covers both.
   the address once and every rule follows on the next deploy.
 - **Address lists** (*Hosts & prefixes*) name a group: addresses, prefixes, hosts by
   name and other address lists, IPv4 and IPv6 together. In a rule's source or
-  destination a list becomes an nftables set (`A_<name>_v4` and `_v6`), so a long
+  destination a list becomes one set, so a long
   list is one fast lookup and one rule; a rule with an IPv4-only list is not rendered
   for IPv6. Used anywhere else (NAT, routes, DNS) a list stands for its addresses,
   like a host.
@@ -225,8 +225,8 @@ Switch on *SYN proxy* in a forward rule that accepts:
   limit must be one for whole connections, or a shaper.
 - With a SYN proxy in a virtual firewall, its connection table no longer takes up a
   TCP connection it hasn't seen from the start. An established connection that
-  wasn't in the table, after a reboot say, has to reconnect. On an HA pair, the
-  connections synchronised to the other host carry on after a switch-over, but
+  wasn't in the table, after a reboot say, has to reconnect. In a firewall cluster, the
+  connections copied to the other firewall carry on after a switch-over, but
   handshakes in progress during it fail and are retried by the client.
 
 ## IP options
@@ -525,8 +525,8 @@ and keep their real source address.
 
 ## Deploying safely
 
-Changes take effect only when you deploy (see *Deploying* in
-[portitor-web](portitor-web.md)). With *auto-rollback*, the firewall restores
+Changes take effect only when you commit (see
+[Committing changes](gui.md#committing-changes)). With *auto-rollback*, the firewall restores
 the last confirmed configuration unless you click *Confirm* in time, so a rule that
 locks you out undoes itself. The *Deploy* page previews the generated nftables ruleset
 before you apply it.

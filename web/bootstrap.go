@@ -23,8 +23,8 @@ import (
 )
 
 // BootstrapOptions is the first configuration of a new firewall, where
-// portitor-web runs on the firewall itself (the installer ISO's first-boot
-// setup runs `portitor-web bootstrap`).
+// portitor-config runs on the firewall itself (the installer ISO's first-boot
+// setup runs `portitor-config bootstrap`).
 type BootstrapOptions struct {
 	AgentURL         string
 	AgentToken       string
@@ -44,8 +44,8 @@ type BootstrapOptions struct {
 	// DefaultRouteLAN gives the DHCP LAN's default route to the firewall
 	// instead of the DHCP WAN's; only when both use DHCP.
 	DefaultRouteLAN bool
-	// GUIPort is portitor-web's port, opened on the LAN; 0 opens none
-	// (portitor-web runs on another host).
+	// GUIPort is portitor-config's port, opened on the LAN; 0 opens none
+	// (portitor-config runs on another host).
 	GUIPort int
 	// DHCPStart and DHCPEnd, if valid, are a DHCP range on the static LAN:
 	// the LAN prefix serves DHCP, with the LAN address as gateway (and DNS
@@ -629,7 +629,7 @@ func atoiLeaf(n *datastore.Node, leaf string) int {
 }
 
 // mgmtService returns the name of the management service: SSH and the
-// GUI port (when portitor-web runs here), kept at the port on reconfigure.
+// GUI port (when portitor-config runs here), kept at the port on reconfigure.
 func (b *bootTree) mgmtService(o BootstrapOptions) (string, error) {
 	const name = "portitor-mgmt"
 	port := func(p int) map[string]any {

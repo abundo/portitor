@@ -144,7 +144,7 @@ func (s *Server) importBundle(work *datastore.Tree, b *Bundle, name string, fw *
 		return bad(fmt.Sprintf("name: a virtual firewall is named %s", name))
 	}
 	if fw.HAPrimaryID != nil {
-		return bad("firewall: " + fw.Name + " is an HA secondary; it runs its primary's virtual firewalls")
+		return bad("firewall: " + fw.Name + " is a cluster secondary; it runs its primary's virtual firewalls")
 	}
 	src := datastore.New(work.Root.S)
 	if err := src.UnmarshalJSON(b.Config); err != nil {

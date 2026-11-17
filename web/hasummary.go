@@ -95,7 +95,7 @@ func pairSummary(names [2]string, sts [2]*agentapi.HAStatus, witness string, cp 
 	case act < 0:
 		// Said above.
 	case st == nil:
-		add("standby", checkFail, "%s's agent does not answer: the pair cannot fail over", names[sb])
+		add("standby", checkFail, "%s's agent does not answer: the cluster cannot fail over", names[sb])
 	case st.State == agentapi.HAStale:
 		add("standby", checkFail, "%s is a primary taken over by a promotion: update it as the secondary", names[sb])
 	case st.State != agentapi.HAStandby:
@@ -111,11 +111,11 @@ func pairSummary(names [2]string, sts [2]*agentapi.HAStatus, witness string, cp 
 		link, mgmt := recent(st.LinkSeen, now, haPathQuiet), recent(st.MgmtSeen, now, haPathQuiet)
 		switch {
 		case link && mgmt:
-			add("paths", checkOK, "the hosts hear each other over the HA link and management")
+			add("paths", checkOK, "the hosts hear each other over the cluster link and management")
 		case link:
-			add("paths", checkWarn, "management is silent between the hosts: losing the HA link now closes the pair")
+			add("paths", checkWarn, "management is silent between the firewalls: losing the cluster link now leaves no firewall active")
 		case mgmt:
-			add("paths", checkWarn, "the HA link is silent: losing management now closes the pair")
+			add("paths", checkWarn, "the cluster link is silent: losing management now leaves no firewall active")
 		case st.LinkSeen == nil && st.MgmtSeen == nil && st.PeerAlive:
 			add("paths", checkOK, "the hosts hear each other (an agent before this release tells no path)")
 		default:
@@ -141,7 +141,7 @@ func pairSummary(names [2]string, sts [2]*agentapi.HAStatus, witness string, cp 
 		status, msg := checkOK, names[i]+" has a hardware watchdog"
 		switch st.Watchdog {
 		case agentapi.HAWatchdogNone:
-			status, msg = checkFail, names[i]+" has no watchdog: it will not open on the witness's vote"
+			status, msg = checkFail, names[i]+" has no watchdog: it will not become active on the witness's vote"
 		case agentapi.HAWatchdogSoft:
 			status, msg = checkWarn, names[i]+" has softdog: a hung kernel is not reset"
 		case agentapi.HAWatchdogHardware:

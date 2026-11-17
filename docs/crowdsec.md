@@ -20,7 +20,7 @@ There are two ways to get the decisions:
 
 ### 1. Install the engine
 
-Installing it on the firewall host is easiest: the agent downloads lists from the
+Installing it on the firewall host is easiest: the firewall downloads lists from the
 host's own network (the default virtual firewall), so it reaches the LAPI on `127.0.0.1`.
 On Debian or Ubuntu:
 
@@ -66,7 +66,7 @@ It prints an API key, and shows it only once. Copy it.
 | URL | `http://127.0.0.1:8080` |
 | Bouncer API key | the key from step 2 |
 
-The key is stored by portitor-web and never shown again. To change it, enter a new
+The key is stored by the firewall and never shown again. To change it, enter a new
 one; leaving the field empty keeps the stored key.
 
 ### 4. Add rules that drop it
@@ -81,7 +81,7 @@ decides:
 - a **forward** rule: the same, for port forwards and anything else reaching your
   network. Port forwards are accepted after your rules, so this rule drops them too.
 
-The anti-lockout rule (the agent's API, SSH and the GUI from `allow_from`) comes before your
+The anti-lockout rule (SSH and the GUI from the anti-lockout addresses) comes before your
 rules too, and is not blocked. A new ban drops new connections; a connection that was
 already established stays open until it ends.
 
@@ -106,7 +106,7 @@ community blocklist itself changes less often.
 
 ### 6. Deploy and check
 
-Deploy. The agent downloads the list right away; after that, the task downloads it
+Deploy. The firewall downloads the list right away; after that, the task downloads it
 again on its schedule.
 
 - *Network → Hosts & prefixes*, under *IP lists*, shows the state, the number of IPv4
@@ -141,7 +141,7 @@ Restart crowdsec, and allow only the firewall to reach that port. In Portitor, u
 and signed by a CA in the firewall's trust store (`/usr/local/share/ca-certificates`,
 then `update-ca-certificates`).
 
-portitor-web refuses an `http://` URL with a key or password unless it is a loopback
+Portitor refuses an `http://` URL with a key or password unless it is a loopback
 address (`127.0.0.1`, `::1`, `localhost`). For an engine without TLS, reach it
 through a tunnel (WireGuard, say) and still use https, or run the engine on the
 firewall. A download never follows a redirect from https to http, or to another

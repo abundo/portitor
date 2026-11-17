@@ -1,0 +1,18 @@
+# SPDX-FileCopyrightText: 2026 The Portitor contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# /etc/portitor/manager.yaml - portitor-manager: the manager of the firewalls (web.yaml before 1.1.0).
+# This is what it needs to start. Its configuration (the firewalls, the cluster
+# witness strings and the users) is a tree in data_dir/portal.json, changed in
+# the portal's GUI (Add firewall reads a firewall's certificate fingerprint
+# over SSH) or by portitor-manager createadmin, add-firewall and add-witness.
+# Put a TLS reverse proxy in front, or set tls_cert/tls_key.
+bind: 127.0.0.1:8080
+# tls_cert: /etc/portitor/web.crt
+# tls_key: /etc/portitor/web.key
+# data_dir: /var/lib/portitor-manager
+# ssh_listen: ":2222"   # the configuration's CLI and NETCONF over SSH
+
+# firewalls: and witness: of an older web.yaml are taken into the
+# configuration once, at the first start with an empty data_dir; after that
+# the file's lists are ignored.

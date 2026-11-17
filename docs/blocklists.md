@@ -33,7 +33,7 @@ block malware and phishing domains in the DNS server instead, see
    than one download an hour.
 4. Save. This also adds a task that downloads the list again, on each firewall, named
    after the list. It is listed under *Services → Scheduled tasks*.
-5. Add the rules (below) and deploy. The agent downloads the list right away; after
+5. Add the rules (below) and deploy. The firewall downloads the list right away; after
    that, the task downloads it again on its schedule.
 
 The *Blocklist* and *Refresh* fields appear only for a new list. To change the

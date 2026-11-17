@@ -311,7 +311,7 @@ async function reboot() {
         />
         <template v-else>
           <p v-if="sys.releases" class="mb-3 text-sm text-muted">
-            This updates the firewall: its agent and portitor-config. A portitor-web that serves
+            This updates the firewall: its agent and portitor-config. A portitor-manager that serves
             this GUI from another host is updated with
             <code class="font-mono">install.py</code> on its own host.
           </p>

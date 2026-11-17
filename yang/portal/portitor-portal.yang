@@ -12,7 +12,7 @@ module portitor-portal {
   contact "https://github.com/abundo/portitor";
   description
     "The configuration of portitor-web, the portal: the firewalls whose GUIs
-     it serves, the witness strings of the HA pairs it is the witness of,
+     it serves, the witness strings of the firewall clusters it is the witness of,
      and the users who may log in to the portal. What it needs to start
      (the listen address, TLS certificate and data directory) is in web.yaml.";
 
@@ -63,15 +63,16 @@ module portitor-portal {
     }
   }
 
-  list ha-firewall {
+  list cluster {
+    px:was "ha-firewall";
     key "name";
     ordered-by user;
     description
-      "An HA pair, one firewall in the portal, served at /fw/<name>/ by
+      "A firewall cluster, one firewall in portitor-manager, served at /fw/<name>/ by
        whichever of its hosts is primary now. Its hosts are added one at a
        time; once both are there the portal pairs them (the secondary's
        information carried over SSH to the primary, add-secondary), unless
-       they are a pair already. A name is a firewall's or an HA firewall's,
+       they are a cluster already. A name is a firewall's or a cluster's,
        never both.";
     leaf name {
       type string {
@@ -99,7 +100,7 @@ module portitor-portal {
 
   list witness {
     key "pair";
-    description "An HA pair this portal is the witness of.";
+    description "A firewall cluster this portitor-manager is the witness of.";
     leaf pair {
       type string { length "1..63"; }
     }

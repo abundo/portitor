@@ -163,7 +163,7 @@ func (h *haManager) boot(ctx context.Context, cfg *fwconfig.HA, devs, cover map[
 	}
 	for ns, d := range devs {
 		if err := h.gate.set(ctx, ns, d, cover[ns], nil); err != nil {
-			slog.Error("ha: closing the gate at start", "netns", ns, "err", err)
+			slog.Error("cluster: closing the gate at start", "netns", ns, "err", err)
 		}
 	}
 }
@@ -281,7 +281,7 @@ func (h *haManager) open(ctx context.Context, term int64, forced bool, why strin
 	if err == nil {
 		err = h.wd.arm()
 		if err != nil && forced {
-			slog.Warn("ha: opening without a watchdog, by the console's vote", "err", err)
+			slog.Warn("cluster: opening without a watchdog, by the console's vote", "err", err)
 			err = nil
 		}
 	}
@@ -289,12 +289,12 @@ func (h *haManager) open(ctx context.Context, term int64, forced bool, why strin
 		err = h.gate.setOpen(ctx, true)
 	}
 	if err != nil {
-		slog.Error("ha: can't open", "err", err)
+		slog.Error("cluster: can't open", "err", err)
 		h.closeGate(ctx, "opening failed")
 		return
 	}
 	h.wd.feed()
-	slog.Warn("ha: active", "term", term, "why", why)
+	slog.Warn("cluster: active", "term", term, "why", why)
 	go h.onActive()
 	go h.onTakeover()
 }
@@ -305,14 +305,14 @@ func (h *haManager) open(ctx context.Context, term int64, forced bool, why strin
 func (h *haManager) closeGate(ctx context.Context, why string) {
 	err := h.gate.setOpen(ctx, false)
 	if err != nil {
-		slog.Error("ha: closing the gate, the host resets unless its devices went down", "err", err)
+		slog.Error("cluster: closing the gate, the host resets unless its devices went down", "err", err)
 	} else {
 		h.wd.disarm()
 	}
 	h.mu.Lock()
 	h.active = false
 	h.mu.Unlock()
-	slog.Warn("ha: closed", "why", why)
+	slog.Warn("cluster: closed", "why", why)
 	go h.onActive()
 }
 
@@ -403,7 +403,7 @@ func (h *haManager) handOver(ctx context.Context, why string) {
 		}
 	}
 	if err != nil {
-		slog.Error("ha: the peer can't be told to take over", "err", err)
+		slog.Error("cluster: the peer can't be told to take over", "err", err)
 		return
 	}
 	h.mu.Lock()
@@ -419,7 +419,7 @@ func (h *haManager) takeHandover(req agentapi.HAHeartbeatRequest) error {
 	defer h.mu.Unlock()
 	switch {
 	case h.cfg == nil:
-		return errors.New("this host is not in an HA pair")
+		return errors.New("this host is not in a firewall cluster")
 	case h.active:
 		return errors.New("this host is active")
 	case req.Active:
@@ -450,7 +450,7 @@ func (h *haManager) switchover() error {
 	defer h.mu.Unlock()
 	switch {
 	case h.cfg == nil:
-		return errors.New("this host is not in an HA pair")
+		return errors.New("this host is not in a firewall cluster")
 	case !h.active:
 		return errors.New("this host is not active: run it on the active host")
 	case time.Since(h.peerSeen) >= haDeadAfter:
@@ -684,10 +684,10 @@ func (h *haManager) checkGate(ctx context.Context) {
 		loose, err := h.gate.check(cctx)
 		cancel()
 		if err != nil {
-			slog.Error("ha: checking the gate", "err", err)
+			slog.Error("cluster: checking the gate", "err", err)
 		}
 		if len(loose) > 0 {
-			slog.Error("ha: the closed gate had lost interfaces; closed them again", "interfaces", loose)
+			slog.Error("cluster: the closed gate had lost interfaces; closed them again", "interfaces", loose)
 			h.reapply()
 		}
 	}
@@ -820,7 +820,7 @@ func (a *Agent) onActiveChange() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	if err := a.ha.applyMgmt(ctx, a.bg); err != nil {
-		slog.Error("ha: management routing", "err", err)
+		slog.Error("cluster: management routing", "err", err)
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -896,13 +896,13 @@ func (a *Agent) handleHAVote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if a.ha.status().Node == "" {
-		writeError(w, http.StatusConflict, errors.New("this host is not in an HA pair"))
+		writeError(w, http.StatusConflict, errors.New("this host is not in a firewall cluster"))
 		return
 	}
 	console := r.RemoteAddr == "local socket"
 	a.ha.giveVote(time.Duration(req.Seconds)*time.Second, console)
 	if console {
-		slog.Warn("ha: vote from the console", "seconds", req.Seconds)
+		slog.Warn("cluster: vote from the console", "seconds", req.Seconds)
 	}
 	writeJSONResponse(w, http.StatusOK, a.ha.status())
 }

@@ -279,6 +279,15 @@ type parsed struct {
 // parsePath reads a path (absolute after "/", else from the context) and
 // what follows it: a leaf's value, a leaf-list's values, or {.
 func (s *Session) parsePath(toks []token) (parsed, error) {
+	return s.parse(toks, true)
+}
+
+// parseQuiet is parsePath without the warnings, for completion.
+func (s *Session) parseQuiet(toks []token) (parsed, error) {
+	return s.parse(toks, false)
+}
+
+func (s *Session) parse(toks []token, warn bool) (parsed, error) {
 	var p parsed
 	at := s.env.Schema
 	path := datastore.Path{}
@@ -304,6 +313,9 @@ func (s *Session) parsePath(toks []token) (parsed, error) {
 		c, err := childOf(at, t)
 		if err != nil {
 			return p, err
+		}
+		if warn && at.Renamed(t.text) == c {
+			s.printf("warning: %s is %s since 1.1.0 (the old name is accepted until 1.2.0)\n", t.text, c.Name)
 		}
 		e := datastore.Elem{Name: c.Name}
 		switch c.Kind {
@@ -376,6 +388,9 @@ func (s *Session) schemaPath(toks []token) (*schema.Node, error) {
 // name alone.
 func childOf(at *schema.Node, t token) (*schema.Node, error) {
 	if c := at.Child(t.text); c != nil {
+		return c, nil
+	}
+	if c := at.Renamed(t.text); c != nil {
 		return c, nil
 	}
 	var found []*schema.Node

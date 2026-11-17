@@ -269,10 +269,10 @@ func TestFirewallsHAPair(t *testing.T) {
 		t.Errorf("the secondary has %d instances of its own", n)
 	}
 	// A role is only for the host's own physical interface.
-	if rec := env.cfg("PUT", "instance=main/interface=v0", map[string]any{"kind": "bridge", "enabled": true, "ipv4-mode": "static", "ha-role": fwconfig.HARoleLink}); rec.Code != http.StatusBadRequest {
+	if rec := env.cfg("PUT", "instance=main/interface=v0", map[string]any{"kind": "bridge", "enabled": true, "ipv4-mode": "static", "cluster-role": models.ClusterLink}); rec.Code != http.StatusBadRequest {
 		t.Errorf("role on a bridge: %d %s", rec.Code, rec.Body)
 	}
-	if rec := env.cfg("PUT", "instance=main/interface=v0", map[string]any{"kind": "physical", "enabled": true, "ipv4-mode": "static", "ha-role": fwconfig.HARoleManagement}); rec.Code != http.StatusBadRequest {
+	if rec := env.cfg("PUT", "instance=main/interface=v0", map[string]any{"kind": "physical", "enabled": true, "ipv4-mode": "static", "cluster-role": fwconfig.HARoleManagement}); rec.Code != http.StatusBadRequest {
 		t.Errorf("management without a gateway: %d %s", rec.Code, rec.Body)
 	}
 	if rec := env.do("POST", "/api/firewalls", map[string]any{"name": "fw1c", "ha_primary_id": 1}); rec.Code != http.StatusBadRequest {
@@ -284,7 +284,7 @@ func TestFirewallsHAPair(t *testing.T) {
 
 	// Without the pair's two links there is nothing to commit.
 	rec := env.do("POST", "/api/deploy/apply", map[string]any{})
-	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "with the role ha_link") {
+	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "with the cluster role cluster link") {
 		t.Fatalf("commit without the links: %d %s", rec.Code, rec.Body)
 	}
 	addHALinks(t, env)
@@ -371,9 +371,9 @@ func haPair(t *testing.T) (*testEnv, map[uint]*fleetAgent, uint) {
 func addHALinks(t *testing.T, env *testEnv) {
 	t.Helper()
 	env.put("instance=main/interface=ha0", map[string]any{"kind": "physical", "enabled": true, "ipv4-mode": "static",
-		"ha-role": fwconfig.HARoleLink})
+		"cluster-role": models.ClusterLink})
 	env.put("instance=main/interface=mgmt0", map[string]any{"kind": "physical", "enabled": true, "ipv4-mode": "static",
-		"addresses": []string{"192.0.2.1/24"}, "peer-addresses": []string{"192.0.2.3/24"}, "ha-role": fwconfig.HARoleManagement, "ha-gateway": "192.0.2.254"})
+		"addresses": []string{"192.0.2.1/24"}, "peer-addresses": []string{"192.0.2.3/24"}, "cluster-role": fwconfig.HARoleManagement, "cluster-gateway": "192.0.2.254"})
 }
 
 func instanceID(t *testing.T, env *testEnv, name string) uint {
@@ -385,7 +385,7 @@ func instanceID(t *testing.T, env *testEnv, name string) uint {
 // host's the other's management address.
 func TestFirewallsHAPeerGateway(t *testing.T) {
 	env, agents, pair := haPair(t)
-	env.mustCfg("PATCH", "instance=main/interface=mgmt0", map[string]any{"ha-gateway": fwconfig.HAGatewayPeer})
+	env.mustCfg("PATCH", "instance=main/interface=mgmt0", map[string]any{"cluster-gateway": fwconfig.HAGatewayPeer})
 	if rec := env.do("POST", "/api/deploy/apply", map[string]any{}); rec.Code != http.StatusOK {
 		t.Fatalf("commit: %d %s", rec.Code, rec.Body)
 	}

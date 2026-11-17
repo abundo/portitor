@@ -141,7 +141,7 @@ if [[ -n $release ]]; then
 	# install.py (in target.sh) needs these; v0.1.0's archive lacked the configs.
 	# (Listed once: grep -q on tar's output would fail it with SIGPIPE.)
 	members=$(tar -tzf "$payload/portitor.tar.gz")
-	for f in install.py portitor-web portitor-agent deploy/agent.yaml deploy/web.yaml; do
+	for f in install.py portitor-manager portitor-agent deploy/agent.yaml deploy/manager.yaml; do
 		grep -qxE "(\./)?$f" <<<"$members" ||
 			{ echo "$archive does not contain $f" >&2; exit 1; }
 	done
@@ -152,8 +152,9 @@ else
 	version=$(build/portitor-agent --version | awk '{ print $NF }')
 	stage=$work/release
 	mkdir -p "$stage"
-	cp build/portitor-web build/portitor-agent install.py LICENSE README.md "$stage/"
+	cp build/portitor-manager build/portitor-agent install.py LICENSE README.md "$stage/"
 	cp -r deploy "$stage/"
+	mkdir -p "$stage/iso" && cp iso/portitor-setup.py iso/portitor-setup.bash "$stage/iso/"
 	tar -czf "$payload/portitor.tar.gz" -C "$stage" .
 fi
 cp iso/late.sh iso/target.sh iso/packages.txt iso/portitor-setup.py iso/portitor-setup.bash iso/portitor-firstboot.service \

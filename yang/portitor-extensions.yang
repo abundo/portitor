@@ -74,4 +74,11 @@ module portitor-extensions {
     argument column;
     description "The list's entries (name, value) are a JSON object in this column of the parent's row.";
   }
+
+  extension was {
+    argument name;
+    description
+      "The node's name before 1.1.0: paths with it are taken, with a warning,
+       until 1.2.0; datastore.Migrate renames it in a stored tree.";
+  }
 }

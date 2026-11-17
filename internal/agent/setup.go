@@ -24,7 +24,7 @@ import (
 
 // InitFiles creates the API token and a self-signed TLS certificate if they
 // don't exist, and returns the certificate's SHA-256 fingerprint, which
-// portitor-web pins instead of trusting a CA.
+// portitor-manager pins instead of trusting a CA.
 func InitFiles(tokenFile, certFile, keyFile string, hosts []string) (token, fingerprint string, err error) {
 	if data, err := os.ReadFile(tokenFile); err == nil {
 		token = strings.TrimSpace(string(data))
