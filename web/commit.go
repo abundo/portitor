@@ -50,6 +50,9 @@ type commitResult struct {
 	Deployments []models.Deployment `json:"deployments"`
 	// Results are the agents' answers, by firewall name.
 	Results map[string]*agentapi.ApplyResult `json:"results"`
+	// Replication: on an HA primary, whether the secondary has copied the
+	// commit (replication.go).
+	Replication *replicationStatus `json:"replication,omitempty"`
 }
 
 type commitTarget struct {
@@ -682,6 +685,10 @@ func (s *Server) handleDeployApply(c *echo.Context) error {
 		return c.JSON(http.StatusBadGateway, map[string]any{"error": err.Error(), "commit": res})
 	case err != nil:
 		return agentError(c, err)
+	}
+	res.Replication = s.awaitReplica(c.Request().Context(), replicaWait)
+	if w := res.Replication.warning(); w != "" {
+		warn(c, []error{errors.New(w)})
 	}
 	return c.JSON(http.StatusOK, res)
 }

@@ -47,6 +47,9 @@ type haStatus struct {
 	// PeerAlive: the agent hears its peer, so a promotion needs force.
 	PeerAlive bool `json:"peer_alive"`
 	Known     bool `json:"known"`
+	// Replication: on a primary with a secondary, whether the secondary
+	// holds its configuration (replication.go).
+	Replication *replicationStatus `json:"replication,omitempty"`
 }
 
 func (s *Server) haStatus(ctx context.Context) haStatus {
@@ -60,6 +63,7 @@ func (s *Server) haStatus(ctx context.Context) haStatus {
 	}
 	r.mu.Unlock()
 	if !st.Replica {
+		st.Replication = s.replication(ctx)
 		return st
 	}
 	if _, me, err := s.localHA(ctx); me != nil && err == nil {

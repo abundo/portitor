@@ -176,6 +176,7 @@ func (s *Server) Echo() *echo.Echo {
 	e.GET(replicaBundlePath, s.handleReplicaBundle, noStore)
 	e.GET(replicaCommitPath+":commit", s.handleReplicaCommit, noStore)
 	e.POST(replicaNotifyPath, s.handleReplicaNotify, noStore)
+	e.POST(replicaCopiedPath, s.handleReplicaCopied, noStore)
 
 	api := e.Group("/api", requireJSON, noStore, s.refuseOnReplica)
 	api.POST("/login", s.handleLogin)

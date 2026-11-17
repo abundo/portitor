@@ -224,6 +224,14 @@ primary's configuration every 15 seconds (when it changed), users included, and 
 changes. Its GUI shows an *HA secondary* badge with the last copy. Log in there with
 the primary's users.
 
+A commit runs on the firewalls at once, but it is safe against the loss of the primary
+only once the secondary has copied it: until then the primary alone holds it. The
+primary asks the secondary to copy at once, and the commit waits up to 5 seconds for
+the copy. When it doesn't come, the commit still succeeds, with a warning that the
+configuration runs but is not copied yet, and the primary's *HA primary* badge turns
+to *HA primary · not copied* (its tooltip says why) until the secondary has it. The
+CLI's `commit` prints the same warning.
+
 ## Who is active
 
 The hosts send each other heartbeats every half second, over the HA link and over
@@ -446,7 +454,8 @@ Lost with the primary: changes made there since the secondary's last copy, and t
   addresses when they renew.
 - **The watchdog is `softdog`.** A hung kernel isn't caught: add a hardware or emulated
   watchdog (`i6300esb` on Proxmox).
-- **The secondary's copy fails** (the *HA secondary* badge shows the error): check
+- **The secondary's copy fails** (the *HA secondary* badge shows the error, and the
+  primary's badge *HA primary · not copied*): check
   the *portitor-config URL* and *fingerprint* of the primary under *Firewalls*
   (commit after setting them), and that the secondary reaches port 8444 there (the
   auto rule *portitor peer* on the primary).

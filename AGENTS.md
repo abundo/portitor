@@ -130,7 +130,7 @@ docs and user-facing messages.
   `GET /v1/ha/peer-config`): the secondary's (unless its configuration has it as the
   primary of the pair: promoted there, `primaryHere`), or a primary's taken over
   (stale), is a replica, which copies the primary's files (`GET /ha/v2/bundle`, the pair's
-  secret, ETag its SHA-256; `takeSnapshot`) every 15 s and at once when the primary commits (`POST /ha/v2/notify`, `notifyReplica`), and
+  secret, ETag its SHA-256; `takeSnapshot`) every 15 s and at once when the primary commits (`POST /ha/v2/notify`, `notifyReplica`), reporting each copy back (`POST /ha/v2/copied`, `web/replication.go`: the primary's `replication` compares its ETag with its own, a commit waits `replicaWait` for it and warns, never fails, and the *HA primary* badge says *not copied*), and
   refuses writes but `readOnlyAllowed` (`refuseOnReplica`); a pair whose agent has
   not answered yet is read-only too (`isReplica`). `POST /api/ha/promote` (or
   `portitor-config promote`) on a replica whose agent no longer hears the primary

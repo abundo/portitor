@@ -72,6 +72,8 @@ type hostRole struct {
 	roleErr string
 	// fingerprint of the local agent's certificate, once read.
 	fingerprint string
+	// copy: on a primary, what its replica last reported (replication.go).
+	copy peerCopy
 	// wake: the primary said it committed (POST replicaNotifyPath); the
 	// replica copies at once instead of at the next replicaEvery.
 	wake chan struct{}
@@ -257,8 +259,12 @@ func (s *Server) runRole(ctx context.Context) {
 	for {
 		if s.isReplica() && time.Since(lastTry) >= replicaEvery {
 			lastTry = time.Now()
-			if err := s.copyPrimary(ctx); err != nil {
+			err := s.copyPrimary(ctx)
+			if err != nil {
 				slog.Warn("replica: copying the primary's configuration", "err", err)
+			}
+			if s.isReplica() {
+				s.reportCopy(ctx, err)
 			}
 		}
 		select {
@@ -381,7 +387,8 @@ func peerClient(what, fingerprint string, timeout time.Duration) (*http.Client, 
 // committed, so it copies the files at once rather than up to replicaEvery
 // later: that narrows, not closes, the window in which a lost primary takes
 // its last changes with it. It doesn't wait, and a failure is only logged:
-// the replica still copies at its interval.
+// the replica still copies at its interval; whether the copy came is the
+// replica's report (replication.go).
 func (s *Server) notifyReplica() {
 	r := &s.role
 	r.mu.Lock()
@@ -545,16 +552,10 @@ func (s *Server) handleReplicaBundle(c *echo.Context) error {
 	if ok, err := s.pairAuthorized(c); !ok {
 		return err
 	}
-	files, err := s.snapshotFiles(c.Request().Context(), true)
+	data, etag, err := s.replicaCopy(c.Request().Context())
 	if err != nil {
 		return err
 	}
-	data, err := encodeCopy(files, "replica")
-	if err != nil {
-		return err
-	}
-	sum := sha256.Sum256(data)
-	etag := `"` + hex.EncodeToString(sum[:]) + `"`
 	h := c.Response().Header()
 	h.Set("ETag", etag)
 	h.Set("Cache-Control", "no-store")

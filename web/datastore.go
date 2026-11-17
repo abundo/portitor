@@ -336,6 +336,9 @@ func (b treeBackend) Commit(ctx context.Context, tree *datastore.Tree, o datasto
 	if res.Status == "pending" {
 		msg += "\nConfirm it (confirm), or it is rolled back."
 	}
+	if w := s.awaitReplica(ctx, replicaWait).warning(); w != "" {
+		msg += "\nWarning: " + w + "."
+	}
 	return msg, nil
 }
 

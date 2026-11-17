@@ -5,8 +5,10 @@
 // ReplicaBanner: on an HA secondary's portitor-config, whose configuration
 // is a read-only copy of the primary's (web/replica.go). It names the
 // primary and the last copy, and lets a global admin promote this host
-// when the primary is lost (web/promote.go). On the primary's, it says so.
-import { computed, ref } from 'vue'
+// when the primary is lost (web/promote.go). On the primary's, it says so,
+// and warns while the secondary has not copied its configuration
+// (web/replication.go).
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useToast } from '@nuxt/ui/composables'
 import { api } from '@/api'
@@ -29,6 +31,49 @@ const busy = ref(false)
 const force = ref(false)
 
 const label = computed(() => (ha.value?.stale ? 'Taken over' : 'HA secondary'))
+
+// On the primary: whether the secondary holds its configuration, asked every
+// 15 s (the replica's interval).
+const replication = ref(null)
+const isPrimary = computed(() => auth.user?.ha_primary && !auth.user?.replica)
+const unprotected = computed(() => replication.value && !replication.value.replicated)
+const primaryTip = computed(() => {
+  const r = replication.value
+  if (!r || r.replicated)
+    return (
+      "This host is its HA pair's primary: the pair's configuration is changed here, and its secondary keeps a read-only copy" +
+      (r?.copied ? ` (copied ${clock(r.copied)})` : '')
+    )
+  let tip =
+    'The configuration runs, but the HA secondary has not copied it yet: losing this host now loses it.'
+  if (r.error) tip += ` The secondary's copy failed: ${r.error}`
+  else if (!r.reported)
+    tip += ' The secondary has not reported a copy: it may be unreachable or need an update.'
+  else tip += ` The secondary last reported ${clock(r.reported)}.`
+  return tip
+})
+let timer = null
+async function pollReplication() {
+  try {
+    replication.value = (await api.haStatus()).replication || null
+  } catch {
+    // The next poll tries again.
+  }
+}
+watch(
+  isPrimary,
+  (on) => {
+    clearInterval(timer)
+    timer = null
+    replication.value = null
+    if (on) {
+      pollReplication()
+      timer = setInterval(pollReplication, 15000)
+    }
+  },
+  { immediate: true },
+)
+onBeforeUnmount(() => clearInterval(timer))
 
 async function show() {
   try {
@@ -67,15 +112,13 @@ async function promote() {
 </script>
 
 <template>
-  <div v-if="auth.user?.ha_primary && !auth.user?.replica" class="flex items-center">
-    <UTooltip
-      text="This host is its HA pair's primary: the pair's configuration is changed here, and its secondary keeps a read-only copy"
-    >
+  <div v-if="isPrimary" class="flex items-center">
+    <UTooltip :text="primaryTip">
       <UBadge
-        color="primary"
+        :color="unprotected ? 'warning' : 'primary'"
         variant="subtle"
-        icon="i-lucide-crown"
-        label="HA primary"
+        :icon="unprotected ? 'i-lucide-triangle-alert' : 'i-lucide-crown'"
+        :label="unprotected ? 'HA primary · not copied' : 'HA primary'"
         :class="auth.isAdmin ? 'cursor-pointer' : ''"
         @click="auth.isAdmin && router.push('/firewalls')"
       />
